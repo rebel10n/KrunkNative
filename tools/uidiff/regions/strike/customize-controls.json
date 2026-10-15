@@ -1,0 +1,103 @@
+{
+  "scenario": "strike/customize-controls",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "back",
+      "rect": [
+        20,
+        25,
+        130,
+        80
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "back (kt)"
+    },
+    {
+      "name": "reset-home",
+      "rect": [
+        970,
+        25,
+        300,
+        85
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Reset (Ahe) and home (onHide + kt)"
+    },
+    {
+      "name": "move-joystick",
+      "rect": [
+        130,
+        430,
+        200,
+        200
+      ],
+      "kind": "image",
+      "fuzz": 10,
+      "max_pct": 4.0,
+      "note": "rhe: the movement nipple, 106 at clientHeight / 360"
+    },
+    {
+      "name": "aim-joystick",
+      "rect": [
+        950,
+        230,
+        180,
+        180
+      ],
+      "kind": "image",
+      "fuzz": 10,
+      "max_pct": 6.0,
+      "note": "rhe: the aim nipple (88)"
+    },
+    {
+      "name": "menu-button",
+      "rect": [
+        60,
+        150,
+        70,
+        70
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the capture's control icons did not load (broken-image glyphs); natively the svgs draw",
+      "skip": true
+    },
+    {
+      "name": "shoot-button",
+      "rect": [
+        870,
+        330,
+        100,
+        100
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "as menu-button",
+      "skip": true
+    },
+    {
+      "name": "knife-toggle",
+      "rect": [
+        990,
+        575,
+        130,
+        70
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "as menu-button",
+      "skip": true
+    }
+  ]
+}

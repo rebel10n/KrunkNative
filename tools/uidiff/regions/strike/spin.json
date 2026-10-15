@@ -1,0 +1,100 @@
+{
+  "scenario": "strike/spin",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        0,
+        0,
+        400,
+        75
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Ps: back, PRIZE WHEELS"
+    },
+    {
+      "name": "currency",
+      "rect": [
+        800,
+        5,
+        290,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "A1: spin tickets 1, KR 1250 (ticket wheel only)"
+    },
+    {
+      "name": "home",
+      "rect": [
+        1160,
+        0,
+        120,
+        70
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "home (onClose: kt() + the store's onHide kt())"
+    },
+    {
+      "name": "odds",
+      "rect": [
+        20,
+        130,
+        320,
+        280
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "spinner-title + oU: Common 50 % ... Legendary 2 %"
+    },
+    {
+      "name": "featured",
+      "rect": [
+        950,
+        130,
+        320,
+        50
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "FEATURED ITEMS title"
+    },
+    {
+      "name": "wheel-ring",
+      "rect": [
+        380,
+        150,
+        520,
+        540
+      ],
+      "kind": "image",
+      "fuzz": 10,
+      "max_pct": 6.0,
+      "note": "aue's canvas (spin_wheel.c into the page canvas): disc, slices by weight from angle 0, the pointer"
+    },
+    {
+      "name": "cost-buttons",
+      "rect": [
+        560,
+        320,
+        160,
+        180
+      ],
+      "kind": "text",
+      "fuzz": 10,
+      "max_pct": 8.0,
+      "note": "buttonTicketsSplit: 10 / 1 with qf's ticket-outline icon"
+    }
+  ]
+}

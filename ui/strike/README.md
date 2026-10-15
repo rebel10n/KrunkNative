@@ -104,14 +104,17 @@ GET only, about one request per second, exact paths, no cookies, no request body
 
 Vendored into this tree (`ui/strike/cdn/`): the class and weapon icons the HUD and class selection read (`./cdn/textures/...`). The other fetched files stay in the cache until a screen uses them.
 
-## Not yet ported
+## Wired screens
 
-Templates captured from FRVR's own DOM (tools/strike/strike_screens.py, doc/ref/krunker-strike-1.37.2/strike-<name>.*):
-STORE (Extras, `fg`), SPIN (`SA`), CUSTOMIZE_CONTROLS (`wb`, Settings > Customize Controls), LEADERBOARD_PLAYERS (`YB`)
-and POPUP (`In`, the empty popup frame). They are not wired: no C driver fills their live data yet, and
-`strike_menu_template()` (client/src/ui/strike_menu.c) still returns NULL for them, so Extras, Customize Controls
-and the other buttons that open them do nothing, as before. The captures use sample data (guest account,
-fake tournament rows), so they are not shown to players.
+STORE (Extras, `fg`), SPIN (`SA`), CUSTOMIZE_CONTROLS (`wb`), LEADERBOARD_PLAYERS (`YB`) and POPUP (`In`), captured from FRVR's own
+DOM (tools/strike/strike_screens.py, doc/ref/krunker-strike-1.37.2/strike-<name>.*), are driven by `client/src/ui/strike_menu.c`:
+Extras opens STORE, whose Spins section lists the shop's wheels (OC) and opens SPIN (the wheel drawn into the page's canvas by
+`client/src/ui/spin_wheel.c`); a currency's "+" opens STORE on that currency's section; Settings > Game > Customize Controls opens
+CUSTOMIZE_CONTROLS, where controls drag and the layout is saved (`mobile_layouts`, `client/src/ui/strike_touch.c`, which the in-game
+controls use) and Reset restores and saves the defaults. POPUP is the frame other views open in; LEADERBOARD_PLAYERS lives only in
+FRVR's tournament rewards popup, so (no hosted tournaments) only its scenario shows it. FRVR serves the shop's wheels from its
+gateway, so the wheels are the capture sandbox's (`capture-strike.js` SPIN_WHEELS). Not wired here: spinning a wheel and the Market /
+Currency sections' products (no Strike economy service yet). server/tests/strike_menu_screens_e2e.py opens each one and goes back.
 
 ## Transcribed screens (no capture: not pixel-verified)
 

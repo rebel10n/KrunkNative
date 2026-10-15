@@ -26,6 +26,10 @@ typedef struct SpinWheelDraw {
     int pointer_count;         // vA630.length
     float pointer_rotation[SPIN_WHEEL_MAX_POINTERS]; // vA630: each pointer's angle
     float pointer_scale;       // spinButtonOpacity (the pointer shrinks away once the item shows)
+    // Krunker Strike's SPIN (strike_menu.c): the page's own <canvas> (an HtmlElem) to draw into
+    // (html_dom_canvas_gl, canvas_w x canvas_h px, centre at the middle), so the wheel keeps its place
+    // in the page's paint order (over .frvr-dark-blur, under the cost buttons). 0: under the page.
+    uint32_t canvas_elem;
 } SpinWheelDraw;
 
 // store_ui.c: the wheel as it is this frame (visible == 0 while #spinUI is hidden)

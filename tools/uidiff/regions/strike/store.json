@@ -1,0 +1,89 @@
+{
+  "scenario": "strike/store",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "back-title",
+      "rect": [
+        0,
+        0,
+        300,
+        75
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Ps: the back button and EXTRAS"
+    },
+    {
+      "name": "currency-left",
+      "rect": [
+        390,
+        8,
+        400,
+        52
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the first .currency-header: trophies, spin tickets, KR (the capture's guest: 0 / 1 / 1250)"
+    },
+    {
+      "name": "currency-right",
+      "rect": [
+        850,
+        8,
+        380,
+        52
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the second .currency-header (FRVR's keepAlive STORE rendered twice in the capture)"
+    },
+    {
+      "name": "section-titles",
+      "rect": [
+        20,
+        75,
+        185,
+        265
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "bce: Spins (active) / Market / Currency"
+    },
+    {
+      "name": "spins-content",
+      "rect": [
+        210,
+        75,
+        1060,
+        420
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Sr(OC): the wheel blocks. The capture's /v2/spin-wheels/list never resolved, so FRVR drew the section empty; natively the three wheels show",
+      "skip": true
+    },
+    {
+      "name": "scene",
+      "rect": [
+        0,
+        500,
+        1280,
+        220
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the menu scene under the page (3D)",
+      "skip": true
+    }
+  ]
+}

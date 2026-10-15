@@ -52,6 +52,12 @@ int  strike_touch_take_look(float *dx, float *dy);
 int  strike_touch_sticks_active(void);
 void strike_touch_tick(Client *client);  // per frame: the controls' DOM follows the game state
 void strike_touch_reset(void);           // release everything held (menu opened, death, end)
+// Customize Controls (a5 in Customize mode): the screen's control layer takes the saved layout
+// (mobile_layouts), a finger / the left button drags a control there (phase 0 down, 1 move, 2 up;
+// CSS px; 1 = used, the page does not see it) and saves it on release; Reset = Ahe().
+void strike_touch_customize_apply(HtmlElem layer);
+int  strike_touch_customize_pointer(int phase, float x, float y);
+void strike_touch_layout_reset(void);
 
 // ---- strike_ui.c internals shared by the strike_*.c modules
 // The screen stack (FRVR's Pi[]): each screen is one template rendered into #frvrMenuMobileHolder.
@@ -79,6 +85,7 @@ typedef enum {
 
 const char *strike_screen_id(StrikeScreen s);     // FRVR's view id ("MAIN_MENU", ...)
 StrikeScreen strike_screen_top(void);
+int  strike_screen_depth(void);                   // Pi.length
 int  strike_screen_shown(StrikeScreen s);
 void strike_screen_push(StrikeScreen s);          // Pt(view): no-op when already on the stack
 void strike_screen_pop(void);                     // kt(): back
@@ -116,6 +123,9 @@ void strike_menu_render(StrikeScreen s, HtmlElem root); // after a screen's mark
 void strike_menu_tick(Client *client);
 void strike_menu_action(const char *name);         // strikeAction(name) (tests: pageActions / the e2e)
 const char *strike_menu_template(StrikeScreen s);  // template file of a menu screen, NULL none
+// SPIN's wheel this frame (visible 0 when SPIN is not up): spin_wheel.c draws it into the page's canvas
+struct SpinWheelDraw;
+const struct SpinWheelDraw *strike_menu_wheel_draw(void);
 // Game events (client/src/net/game_events.c, beside hud_ui.c's): no-ops unless strike_ui_active().
 void strike_hud_killfeed(Client *client, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
                          const Weapon *weapon, int headshot); // killer NULL: a suicide / world death
@@ -134,3 +144,4 @@ void strike_hud_reset(void);                       // a new page / session: in-g
 void strike_ui_scenario(Client *client, const cJSON *state);
 void strike_hud_scenario(Client *client, const cJSON *state); // killfeed / killcard / end
 void strike_menu_scenario(const cJSON *account, const char *name); // state.strike.account (the account box)
+void strike_menu_scenario_board(const cJSON *rows); // state.strike.leaderboard (LEADERBOARD_PLAYERS' rows)

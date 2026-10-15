@@ -13,7 +13,14 @@
     "classIndex": 0,
     "menu": true,
     "strike": {
-      "screen": "STORE"
+      "screen": "STORE",
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      }
     }
   },
   "frames": 3,

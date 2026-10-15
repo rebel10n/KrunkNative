@@ -25,6 +25,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <ui_mobile.h>
+#include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -425,11 +426,231 @@ static int control_visible(const Control c) {
 
 static int aim_stick_visible(void) { return control_visible(C_AIM_STICK); }
 
-static void append_pos(StrBuf *sb, const ControlDef *d) {
-    if (!isnan(d->right)) sb_appendf(sb, "right: calc(%g * var(--base-scale)); ", d->right);
-    if (!isnan(d->left)) sb_appendf(sb, "left: calc(%g * var(--base-scale)); ", d->left);
-    if (!isnan(d->top)) sb_appendf(sb, "top: calc(%g * var(--base-scale)); ", d->top);
-    if (!isnan(d->bottom)) sb_appendf(sb, "bottom: calc(%g * var(--base-scale)); ", d->bottom);
+// ---------------------------------------------------------------- the saved layout (Yp / WI)
+// FRVR: s5 = getSavedVal("mobile_layout") || "default", WI = JSON(getSavedVal("mobile_layouts") ||
+// '{"default": {}}'), Yp = WI[s5]; a control's entry {pos: {right|left, top|bottom}} (base units)
+// replaces Gw's pos ({...a, ...Yp[s]}). r5() saves WI; Ahe() empties Yp. Kept in the page storage
+// under FRVR's keys (html_storage: localStorage on the web, a file per key natively).
+typedef struct { float right, left, top, bottom; } Pos;
+static struct {
+    int loaded;
+    char name[64];       // s5
+    cJSON *all;          // WI
+    int has[C_COUNT];    // Yp[key] exists
+    Pos pos[C_COUNT];
+} L;
+
+static Pos default_pos(const Control c) {
+    const ControlDef *d = &CONTROLS[c];
+    return (Pos) {d->right, d->left, d->top, d->bottom};
+}
+
+static float json_num(const cJSON *o, const char *k) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsNumber(v) ? (float) v->valuedouble : NAN;
+}
+
+static void layout_load(void) {
+    if (L.loaded) return;
+    L.loaded = 1;
+    char name[64];
+    snprintf(L.name, sizeof(L.name), "%s", html_storage_get("mobile_layout", name, sizeof(name)) >= 0 && name[0] ? name : "default");
+    char small[2];
+    const int n = html_storage_get("mobile_layouts", small, sizeof(small));
+    char *text = n > 0 ? malloc((size_t) n + 1) : NULL;
+    if (text) html_storage_get("mobile_layouts", text, (size_t) n + 1);
+    L.all = text ? cJSON_Parse(text) : NULL;
+    free(text);
+    if (!cJSON_IsObject(L.all)) {
+        cJSON_Delete(L.all);
+        L.all = cJSON_Parse("{\"default\": {}}");
+    }
+    const cJSON *yp = cJSON_GetObjectItemCaseSensitive(L.all, L.name);
+    for (int c = 0; c < C_COUNT; c++) {
+        const cJSON *entry = cJSON_GetObjectItemCaseSensitive(yp, CONTROLS[c].key);
+        const cJSON *pos = cJSON_GetObjectItemCaseSensitive(entry, "pos");
+        L.has[c] = cJSON_IsObject(pos);
+        L.pos[c] = L.has[c] ? (Pos) {json_num(pos, "right"), json_num(pos, "left"), json_num(pos, "top"), json_num(pos, "bottom")} : default_pos((Control) c);
+    }
+}
+
+static Pos layout_pos(const Control c) {
+    layout_load();
+    return L.has[c] ? L.pos[c] : default_pos(c);
+}
+
+static void teardown(void);
+
+// r5(): WI back to the storage, Yp from the edited entries. The in-game layer picks the layout up
+// when it is built again.
+static void layout_save(void) {
+    layout_load();
+    cJSON *yp = cJSON_CreateObject();
+    for (int c = 0; c < C_COUNT; c++) {
+        if (!L.has[c]) continue;
+        cJSON *pos = cJSON_CreateObject();
+        const Pos *p = &L.pos[c];
+        if (!isnan(p->right)) cJSON_AddNumberToObject(pos, "right", p->right);
+        if (!isnan(p->left)) cJSON_AddNumberToObject(pos, "left", p->left);
+        if (!isnan(p->top)) cJSON_AddNumberToObject(pos, "top", p->top);
+        if (!isnan(p->bottom)) cJSON_AddNumberToObject(pos, "bottom", p->bottom);
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddItemToObject(entry, "pos", pos);
+        cJSON_AddItemToObject(yp, CONTROLS[c].key, entry);
+    }
+    if (cJSON_GetObjectItemCaseSensitive(L.all, L.name)) cJSON_ReplaceItemInObjectCaseSensitive(L.all, L.name, yp);
+    else cJSON_AddItemToObject(L.all, L.name, yp);
+    char *text = cJSON_PrintUnformatted(L.all);
+    if (text) html_storage_set("mobile_layouts", text);
+    free(text);
+    if (T.built) teardown();
+}
+
+static void append_pos(StrBuf *sb, const Control c) {
+    const Pos p = layout_pos(c);
+    if (!isnan(p.right)) sb_appendf(sb, "right: calc(%g * var(--base-scale)); ", p.right);
+    if (!isnan(p.left)) sb_appendf(sb, "left: calc(%g * var(--base-scale)); ", p.left);
+    if (!isnan(p.top)) sb_appendf(sb, "top: calc(%g * var(--base-scale)); ", p.top);
+    if (!isnan(p.bottom)) sb_appendf(sb, "bottom: calc(%g * var(--base-scale)); ", p.bottom);
+}
+
+static void apply_pos(const HtmlElem el, const Control c) {
+    const Pos p = layout_pos(c);
+    const float v[4] = {p.right, p.left, p.top, p.bottom};
+    static const char *const SIDES[4] = {"right", "left", "top", "bottom"};
+    for (int i = 0; i < 4; i++) {
+        char css[48] = "";
+        if (!isnan(v[i])) snprintf(css, sizeof(css), "calc(%g * var(--base-scale))", v[i]);
+        html_dom_set_style(el, SIDES[i], css);
+    }
+}
+
+// ---------------------------------------------------------------- Customize Controls (a5, mode Customize)
+
+static struct {
+    HtmlElem layer;            // .control-buttons--customize
+    HtmlElem el[C_COUNT];
+    int moving;                // controlMoving
+    Control control;           // controlMovingKey
+    float start_x, start_y;
+} K = {.control = C_COUNT};
+
+// The captured layer's controls by what they show (the template has no keys): jump / reload / menu
+// buttons by icon, the two shoot buttons by side (shoot right, shootWhenAim left), the toggle, the
+// two joysticks by class. Each gets the saved position.
+void strike_touch_customize_apply(const HtmlElem layer) {
+    memset(K.el, 0, sizeof(K.el));
+    K.layer = layer;
+    K.moving = 0;
+    if (!layer) return;
+    HtmlElem els[16];
+    const int n = html_dom_query_all(layer, ".control-button, .control-toggle, .joystick", els, 16);
+    for (int i = 0; i < n; i++) {
+        char cls[128] = "", style_text[256] = "", src[96] = "";
+        html_dom_get_attr(els[i], "class", cls, sizeof(cls));
+        html_dom_get_attr(els[i], "style", style_text, sizeof(style_text));
+        const HtmlElem img = html_dom_query(els[i], "img");
+        if (img) html_dom_get_attr(img, "src", src, sizeof(src));
+        Control c = C_COUNT;
+        if (strstr(cls, "joystick--aim")) c = C_AIM_STICK;
+        else if (strstr(cls, "joystick")) c = C_FAKE_MOVE;
+        else if (strstr(cls, "control-toggle")) c = C_MELEE;
+        else if (strstr(src, "jump.svg")) c = C_JUMP;
+        else if (strstr(src, "reload.svg")) c = C_RELOAD;
+        else if (strstr(src, "menu.svg")) c = C_MENU;
+        else if (strstr(src, "shoot.svg")) c = strstr(style_text, "left:") ? C_SHOOT_AIM : C_SHOOT;
+        if (c == C_COUNT || K.el[c]) continue;
+        K.el[c] = els[i];
+        apply_pos(els[i], c);
+    }
+}
+
+// Ahe(): Yp = WI[s5] = {}, r5()
+void strike_touch_layout_reset(void) {
+    layout_load();
+    memset(L.has, 0, sizeof(L.has));
+    layout_save();
+    for (int c = 0; c < C_COUNT; c++) {
+        if (K.el[c]) apply_pos(K.el[c], (Control) c);
+    }
+}
+
+// onCustomizeMove: finger travel in base units (s = layer height / 360) moves the control's sides,
+// clamped to the layer (a x 360 units, minus the control's size, at least .01), and a control past
+// the middle is anchored to the nearer side again
+static void customize_move(const float x, const float y) {
+    const Control c = K.control;
+    const float h = K.layer ? html_dom_offset_height(K.layer) : 0.0f;
+    const float w = K.layer ? html_dom_offset_width(K.layer) : 0.0f;
+    const float s = (h > 0.0f ? h : 360.0f) / 360.0f;
+    const float a = (w > 0.0f ? w : 640.0f) / s, o = 360.0f;
+    const float r = (x - K.start_x) / s, l = (y - K.start_y) / s;
+    const float size = (float) CONTROLS[c].size;
+    Pos *u = &L.pos[c];
+#define CLAMP_SIDE(v, d) do { if (!isnan(v) && (v) != 0.0f) { (v) += (d); if ((v) > lim - size) (v) = lim - size; else if ((v) < 0.01f) (v) = 0.01f; } } while (0)
+    float lim = a;
+    CLAMP_SIDE(u->right, -r);
+    CLAMP_SIDE(u->left, r);
+    lim = o;
+    CLAMP_SIDE(u->top, l);
+    CLAMP_SIDE(u->bottom, -l);
+#undef CLAMP_SIDE
+    if (!isnan(u->right) && u->right > a / 2.0f) {
+        u->left = a - u->right - size;
+        u->right = NAN;
+    } else if (!isnan(u->left) && u->left > a / 2.0f) {
+        u->right = a - u->left - size;
+        u->left = NAN;
+    }
+    if (!isnan(u->top) && u->top > o / 2.0f) {
+        u->bottom = o - u->top - size;
+        u->top = NAN;
+    } else if (!isnan(u->bottom) && u->bottom > o / 2.0f) {
+        u->top = o - u->bottom - size;
+        u->bottom = NAN;
+    }
+    K.start_x = x;
+    K.start_y = y;
+    if (K.el[c]) apply_pos(K.el[c], c);
+}
+
+// A finger (or the mouse) on the Customize Controls layer: phase 0 down, 1 move, 2 up. 1 = used.
+int strike_touch_customize_pointer(const int phase, const float x, const float y) {
+    if (!K.layer || strike_screen_top() != STRIKE_SCREEN_CUSTOMIZE_CONTROLS || !strike_screen_root(STRIKE_SCREEN_CUSTOMIZE_CONTROLS)) {
+        K.layer = 0;
+        K.moving = 0;
+        return 0;
+    }
+    if (phase == 0) {
+        const HtmlElem at = html_dom_element_at(x, y);
+        for (int c = 0; c < C_COUNT && at; c++) {
+            if (!K.el[c]) continue;
+            for (HtmlElem e = at; e; e = html_dom_parent(e)) {
+                if (e != K.el[c] && e != html_dom_parent(K.el[c])) continue;
+                layout_load();
+                if (!L.has[c]) { // ontouchstart: Yp[s] || (Yp[s] = {pos: {...a.pos}})
+                    L.has[c] = 1;
+                    L.pos[c] = default_pos((Control) c);
+                }
+                K.moving = 1;
+                K.control = (Control) c;
+                K.start_x = x;
+                K.start_y = y;
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (!K.moving) return 0;
+    if (phase == 1) {
+        customize_move(x, y);
+        return 1;
+    }
+    K.moving = 0; // ontouchend: controlMoving = null, r5()
+    K.control = C_COUNT;
+    layout_save();
+    printf("[strike] controls layout saved\n");
+    return 1;
 }
 
 // $U: the reload button's ammo ring and "cur / max" label (vx = 290)
@@ -478,7 +699,7 @@ static void build(void) {
         T.vis[c] = vis;
         if (d->type == 0) {
             sb_append(&sb, "<div class=\"control-button\" style=\"");
-            append_pos(&sb, d);
+            append_pos(&sb, (Control) c);
             sb_appendf(&sb, "--control-button-size: %d;%s\" data-kn-control=\"%s\"><img src=\"./img/controls/%s.svg\">", d->size, vis ? "" : " display: none;", d->key, d->icon);
             if (c == C_RELOAD) {
                 int off, show;
@@ -491,12 +712,12 @@ static void build(void) {
         } else if (d->type == 1) {
             T.melee_active = melee_selected();
             sb_appendf(&sb, "<div class=\"control-toggle%s\" style=\"", T.melee_active ? " control-toggle--active" : "");
-            append_pos(&sb, d);
+            append_pos(&sb, (Control) c);
             sb_appendf(&sb, "--control-toggle-size: %d;%s\" data-kn-control=\"%s\"><img src=\"./img/controls/%s.svg\"></div>", d->size, vis ? "" : " display: none;", d->key,
                        T.melee_active ? d->icon_active : d->icon);
         } else {
             sb_appendf(&sb, "<div class=\"joystick %s\" style=\"position: absolute; ", d->cls);
-            append_pos(&sb, d);
+            append_pos(&sb, (Control) c);
             sb_appendf(&sb, "--control-joystick-size: %d;%s%s\" data-kn-control=\"%s\"></div>", d->size, vis ? "" : " opacity: 0;",
                        c == C_FAKE_MOVE ? " pointer-events: none;" : "", d->key);
         }
@@ -737,6 +958,7 @@ static int touch_end(const long id) {
 
 int strike_touch_event(Client *client, const int phase, const long id, const float x, const float y) {
     T.client = client;
+    if (strike_touch_customize_pointer(phase > 2 ? 2 : phase, x, y)) return 1; // Customize Controls drags
     if (phase == 0) return touch_start(id, x, y);
     if (phase == 1) return touch_move(id, x, y);
     return touch_end(id);

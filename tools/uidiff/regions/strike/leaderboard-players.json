@@ -1,0 +1,75 @@
+{
+  "scenario": "strike/leaderboard-players",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        40,
+        0,
+        520,
+        35
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "f1e: # Name Score Kills"
+    },
+    {
+      "name": "row-you",
+      "rect": [
+        40,
+        38,
+        520,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 4.0,
+      "note": "K5 for the player (yellow --player cells)"
+    },
+    {
+      "name": "rows-ffa",
+      "rect": [
+        40,
+        78,
+        420,
+        80
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 4.0,
+      "note": "K5 rows 2 / 3 (empty stat cells, as the capture's)"
+    },
+    {
+      "name": "pfp",
+      "rect": [
+        85,
+        38,
+        65,
+        120
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "handleProfilePicture: the class icons"
+    },
+    {
+      "name": "empty",
+      "rect": [
+        0,
+        170,
+        1280,
+        550
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "nothing below the rows",
+      "expect": "background"
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 #include <gl.h>
 #include <client.h>
 #include <spin_wheel.h>
+#include <strike_ui.h>
 #include <html_dom.h>
 #include <math.h>
 #include <stdio.h>
@@ -33,6 +34,9 @@ static struct {
     double confetti_time; // glfwGetTime of the last confetti step
     float *verts;
     size_t verts_cap;
+    // Krunker Strike's SPIN canvas: the render target shown in the page's <canvas> (html_dom_canvas_gl)
+    unsigned canvas_fbo, canvas_tex;
+    int canvas_w, canvas_h;
 } g_sw;
 
 static float frand(void) { return (float) rand() / ((float) RAND_MAX + 1.0f); }
@@ -137,7 +141,88 @@ static void pass_end(void) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
+static void set_wheel_uniforms(const SpinWheelDraw *d) {
+    glUniform1i(g_sw.u_mode, 0);
+    glUniform2f(g_sw.u_center, d->canvas_w / 2.0f + 2.0f, d->canvas_h / 2.0f + 2.0f); // spinCanvasContext.translate(2, 2)
+    glUniform1f(g_sw.u_radius, d->radius);
+    glUniform1f(g_sw.u_slice_rotation, d->slice_rotation);
+    glUniform1i(g_sw.u_slice_count, d->slices);
+    glUniform1fv(g_sw.u_slice_from, SPIN_WHEEL_MAX_SLICES, d->slice_from);
+    glUniform1fv(g_sw.u_slice_to, SPIN_WHEEL_MAX_SLICES, d->slice_to);
+    glUniform3fv(g_sw.u_slice_rgb, SPIN_WHEEL_MAX_SLICES, &d->slice_rgb[0][0]);
+    glUniform1fv(g_sw.u_pointer_rotation, SPIN_WHEEL_MAX_POINTERS, d->pointer_rotation);
+    glUniform1i(g_sw.u_pointer_count, d->pointer_count);
+    glUniform1f(g_sw.u_pointer_scale, d->pointer_scale);
+    glUniform1f(g_sw.u_shadow_sigma, SHADOW_SIGMA);
+}
+
+// Krunker Strike's SPIN (aue.render, the same 2D-canvas wheel as v7's with the centre at the middle of
+// the canvas): drawn into a canvas_w x canvas_h render target that the page's own <canvas> shows
+// (html_dom_canvas_gl), so the page paints it in its place: over the screen's .frvr-dark-blur, under the
+// cost buttons. GL state: the framebuffer binding, viewport and clear colour are restored, the rest as
+// pass_begin / pass_end leave it.
+static void render_into_canvas(const SpinWheelDraw *d) {
+    const int w = (int) d->canvas_w, h = (int) d->canvas_h;
+    if (w <= 0 || h <= 0 || !ensure_program()) return;
+    if (!g_sw.canvas_tex || g_sw.canvas_w != w || g_sw.canvas_h != h) {
+        if (!g_sw.canvas_tex) {
+            glGenTextures(1, &g_sw.canvas_tex);
+            glGenFramebuffers(1, &g_sw.canvas_fbo);
+        }
+        glBindTexture(GL_TEXTURE_2D, g_sw.canvas_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // one level: the page's GL backend samples canvas images with a mipmap filter
+        // (gl_backend.c GLB_IMAGE_MIN_FILTER), complete only when the texture says it has no others
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        g_sw.canvas_w = w;
+        g_sw.canvas_h = h;
+    }
+    float *v = verts_reserve(6);
+    if (!v) return;
+    static const float white[4] = {1, 1, 1, 1};
+    // the whole target; canvas px + 2 so that the shader's translate(2, 2) centre is the middle
+    const float xs[6] = {0, 1, 1, 0, 1, 0}, ys[6] = {0, 0, 1, 0, 1, 1};
+    const CssToClip unit = {2.0f, 2.0f};
+    for (int i = 0; i < 6; i++) put_vertex(v + i * VERTEX_FLOATS, unit, xs[i], ys[i], xs[i] * d->canvas_w + 2.0f, ys[i] * d->canvas_h + 2.0f, white);
+    GLint prev_fbo = 0, vp[4] = {0, 0, 0, 0};
+    GLfloat clear[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glGetIntegerv(GL_VIEWPORT, vp);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_sw.canvas_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_sw.canvas_tex, 0);
+    glViewport(0, 0, w, h);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // premultiplied, as html_dom_canvas_gl wants it
+    glUseProgram(g_sw.program);
+    glBindVertexArray(g_sw.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g_sw.vbo);
+    set_wheel_uniforms(d);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (6 * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    pass_end();
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prev_fbo);
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    glClearColor(clear[0], clear[1], clear[2], clear[3]);
+    html_dom_canvas_gl((HtmlElem) d->canvas_elem, g_sw.canvas_tex, g_sw.canvas_fbo, w, h);
+}
+
 void spin_wheel_render(Client *client) {
+    if (strike_ui_active()) { // the Strike page has its own wheel (strike_menu.c SPIN), no store_ui.c
+        const SpinWheelDraw *s = strike_menu_wheel_draw();
+        if (s && s->visible && s->canvas_elem) render_into_canvas(s);
+        return;
+    }
     const SpinWheelDraw *d = store_ui_wheel_draw();
     if (!d || !d->visible || d->w <= 0 || d->h <= 0 || d->canvas_w <= 0 || d->canvas_h <= 0 || d->radius <= 0) return;
     if (!ensure_program()) return;
@@ -151,18 +236,7 @@ void spin_wheel_render(Client *client) {
         put_vertex(v + i * VERTEX_FLOATS, m, d->x + xs[i] * d->w, d->y + ys[i] * d->h, xs[i] * d->canvas_w, ys[i] * d->canvas_h, white);
     }
     pass_begin(client);
-    glUniform1i(g_sw.u_mode, 0);
-    glUniform2f(g_sw.u_center, d->canvas_w / 2.0f + 2.0f, d->canvas_h / 2.0f + 2.0f); // spinCanvasContext.translate(2, 2)
-    glUniform1f(g_sw.u_radius, d->radius);
-    glUniform1f(g_sw.u_slice_rotation, d->slice_rotation);
-    glUniform1i(g_sw.u_slice_count, d->slices);
-    glUniform1fv(g_sw.u_slice_from, SPIN_WHEEL_MAX_SLICES, d->slice_from);
-    glUniform1fv(g_sw.u_slice_to, SPIN_WHEEL_MAX_SLICES, d->slice_to);
-    glUniform3fv(g_sw.u_slice_rgb, SPIN_WHEEL_MAX_SLICES, &d->slice_rgb[0][0]);
-    glUniform1fv(g_sw.u_pointer_rotation, SPIN_WHEEL_MAX_POINTERS, d->pointer_rotation);
-    glUniform1i(g_sw.u_pointer_count, d->pointer_count);
-    glUniform1f(g_sw.u_pointer_scale, d->pointer_scale);
-    glUniform1f(g_sw.u_shadow_sigma, SHADOW_SIGMA);
+    set_wheel_uniforms(d);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (6 * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     pass_end();
@@ -288,6 +362,8 @@ void spin_wheel_render_confetti(Client *client) {
 }
 
 void spin_wheel_fini(void) {
+    if (g_sw.canvas_fbo) glDeleteFramebuffers(1, &g_sw.canvas_fbo);
+    if (g_sw.canvas_tex) glDeleteTextures(1, &g_sw.canvas_tex);
     if (g_sw.program) glDeleteProgram(g_sw.program);
     if (g_sw.vbo) glDeleteBuffers(1, &g_sw.vbo);
     if (g_sw.vao) glDeleteVertexArrays(1, &g_sw.vao);

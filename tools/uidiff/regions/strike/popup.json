@@ -1,0 +1,22 @@
+{
+  "scenario": "strike/popup",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "frame",
+      "rect": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "In with an empty builder: .frvr-dark-blur-75 over nothing, an empty .popup__holder"
+    }
+  ]
+}

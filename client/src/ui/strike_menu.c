@@ -11,12 +11,24 @@
 //                         the preset buttons (frvr-preset__button--active)
 //   Yw TAP_TO_PLAY        between lives when the player paused (Yh(false)): PLAY = Cg()
 //   YC PROFILE, m5 CREATE_MATCH, _C BATTLEPASS_SCREEN: shown as FRVR renders them for a guest
+//   fg STORE (Extras)     MAIN_MENU / TAP_TO_PLAY #mobMenuStoreH: Pt(cc()) (cc() is fg below level 5);
+//                         Spins / Market / Currency (bce sectioned scroll); Spins = Sr(OC): one _I
+//                         block (#wheelStoreBlock) per shop wheel, a click eb(id) = Pt(SA, {spinnerIndex})
+//   SA SPIN               the wheel (aue: canvas sized by its parent, --base-scale F / 280 px), its odds
+//                         (oU), the split 10x / 1x ticket button; back kt(), home kt() + the store's kt()
+//   wb CUSTOMIZE_CONTROLS Settings > Game "Customize Controls": Pt(ZC, {onHide: kt}); back kt(), home
+//                         onHide() + kt() (Settings goes too), Reset = Ahe() (the layout to Gw defaults)
+//   In POPUP              the popup frame (Pt(In, {builder})): .frvr-dark-blur-75 dismisses (kt)
+//   YB LEADERBOARD_PLAYERS FRVR hosts it only in its tournament rewards popup (qB, In); KrunkNative has no
+//                         hosted tournaments, so only a scenario (state.strike.leaderboard) shows it
 // The Strike classes are FRVR's six (tools/strike/strike_data.json "classes"): Krunker class ids
 // 0 Triggerman, 1 Hunter, 2 Run N Gun, 4 Shotgunner (Krunker's Vince), 5 Detective, 7 Rocketeer.
 #include <strike_ui.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <backend_ui.h>
+#include <spin_wheel.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,13 +58,55 @@ static const StrikeClass CLASSES[] = {
 
 static const char *const SETTINGS_TABS[] = {"presets", "display", "game", "sound", "other"};
 
+// The shop's prize wheels. FRVR serves them from its gateway (GET /v2/spin-wheels/list, the wheel
+// itself /v1/spin-wheels/<id>); the 1.37.2 bundle and tools/strike/strike_data.json carry none, so
+// these are the wheels of the sandbox that captured STORE / SPIN (tools/uidiff/capture-strike.js
+// SPIN_WHEELS), in OC's order (KR wheels by price, highest first, then the ticket wheel). Their odds
+// are the capture's too; the rarity names are FRVR's windows.spin.rarity.* strings.
+typedef struct { const char *name, *color; double weight; } StrikeOdd;
+static const StrikeOdd WHEEL_ODDS[] = {
+    {"Common", "#a7b1c2", 0.5}, {"Uncommon", "#79d94a", 0.28}, {"Rare", "#3aa0ff", 0.14}, {"Epic", "#b45cff", 0.06}, {"Legendary", "#ffb800", 0.02},
+};
+#define WHEEL_ODD_COUNT ((int) (sizeof(WHEEL_ODDS) / sizeof(WHEEL_ODDS[0])))
+typedef struct {
+    const char *id, *name;
+    int ticket; // price.currency spin_ticket (else kr)
+    int amount; // price.amount
+} StrikeWheel;
+static const StrikeWheel WHEELS[] = {
+    {"lucky-draw", "Lucky Draw", 0, 500},
+    {"wheel-kr", "KR Spin", 0, 250},
+    {"wheel-ticket", "Ticket Spin", 1, 1},
+};
+#define WHEEL_COUNT ((int) (sizeof(WHEELS) / sizeof(WHEELS[0])))
+#define WHEEL_DEFAULT 2 // the ticket wheel (the SPIN capture's spinnerIndex)
+// OC's grid spans per wheel count ("column/row")
+static const char *const WHEEL_GRID[][8] = {
+    {0}, {"12/2"}, {"6/2", "6/2"}, {"6/2", "6/1", "6/1"}, {"6/1", "6/1", "6/1", "6/1"},
+};
+
+#define BOARD_MAX 16
+typedef struct {
+    char name[32];
+    int class_id, you;
+    int has_stats, score, kills;
+} BoardRow;
+
 static struct {
     Client *client;
     int previewed;        // _r: the class bullet shown in CLASS_SELECTION
     int settings_tab;
     int preset;           // selectedPresetIndex (3 = Custom)
     char last_account[160];
-} M = {.preset = 3};
+    int spin;             // SA's spinnerIndex (a WHEELS index)
+    int store_section;    // bce: the active section title
+    SpinWheelDraw wheel;  // SPIN's canvas this frame (spin_wheel.c draws it into the page's canvas)
+    float wheel_f;        // aue's F (the canvas side, CSS px) last applied
+    // state.strike.leaderboard of a --render-scenario (the capture's rows), used when set
+    int board_fixture;
+    BoardRow board[BOARD_MAX];
+    int board_count;
+} M = {.preset = 3, .spin = WHEEL_DEFAULT};
 
 // ---------------------------------------------------------------- helpers
 
@@ -137,19 +191,329 @@ static void fill_account(const HtmlElem root) {
     }
 }
 
-// The currency header of STORE / SPIN (FRVR's .currency-header): spin tickets and KR as the account box
-// shows them (the tickets are 0 on a fresh account, as fill_account does)
+static int spin_tickets(void) { return FIXTURE.set ? FIXTURE.tickets : 0; } // Po(Se.account)
+
+// The currency header of STORE / SPIN (FRVR's .currency-header, A1): spin tickets and KR as the account
+// box shows them (the tickets are 0 on a fresh account, as fill_account does). Only the header's: SPIN's
+// wheel buttons are .spin-tickets too (their prices).
 static void fill_currency(const HtmlElem root) {
     char name[64], buf[32];
     int level = 1, kr = 0;
     account_values(name, sizeof(name), &level, &kr);
     HtmlElem spans[8];
-    snprintf(buf, sizeof(buf), "%d", FIXTURE.set ? FIXTURE.tickets : 0);
-    int n = html_dom_query_all(root, ".spin-tickets span", spans, 8);
+    snprintf(buf, sizeof(buf), "%d", spin_tickets());
+    int n = html_dom_query_all(root, ".currency-header .spin-tickets span", spans, 8);
     for (int i = 0; i < n; i++) html_dom_set_text(spans[i], buf);
     snprintf(buf, sizeof(buf), "%d", kr);
-    n = html_dom_query_all(root, ".krunkies span", spans, 8);
+    n = html_dom_query_all(root, ".currency-header .krunkies span", spans, 8);
     for (int i = 0; i < n; i++) html_dom_set_text(spans[i], buf);
+    // the "+" (nue / DI, showBuy {section}): spin tickets -> the Spin Wheel section (dm(Yn.SpinWheel):
+    // Spins), KR -> the Currency Grid section (dm(Yn.CurrencyGrid): Currency)
+    static const struct { const char *sel, *hook; } BUY[] = {
+        {".currency-header .spin-tickets .purchase-more-btn", "strikeAction('buy:0')"},
+        {".currency-header .krunkies .purchase-more-btn", "strikeAction('buy:2')"},
+    };
+    for (size_t b = 0; b < sizeof(BUY) / sizeof(BUY[0]); b++) {
+        n = html_dom_query_all(root, BUY[b].sel, spans, 8);
+        for (int i = 0; i < n; i++) html_dom_set_attr(spans[i], "onclick", BUY[b].hook);
+    }
+}
+
+// ---------------------------------------------------------------- STORE (fg): Spins = Sr(OC)
+
+// qf (sue): the spin ticket amount; outline unless outline:false, iconRight puts the image after
+static void sb_ticket_amount(StrBuf *sb, const int amount, const int small, const int icon_right) {
+    sb_appendf(sb, "<div class=\"spin-tickets %s spin-tickets--outline\">", small ? "spin-tickets--small" : "");
+    if (icon_right) sb_appendf(sb, "<span>%d</span><img>", amount);
+    else sb_appendf(sb, "<img><span>%d</span>", amount);
+    sb_append(sb, "</div>");
+}
+
+// OC.view: one _I block per wheel (renderBackgroundImage: the wheel's imageUrl, none here), title r(p)
+// (KR: the coin + amount, tickets: qf), subtitle the wheel's name, overlay l(p) (a ticket wheel: wce,
+// the tickets owned), the click eb(p._id) -> SPIN
+static char *store_wheels_html(void) {
+    StrBuf sb = {0};
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const StrikeWheel *w = &WHEELS[i];
+        char col[8] = "", row[8] = "";
+        const char *span = WHEEL_COUNT < (int) (sizeof(WHEEL_GRID) / sizeof(WHEEL_GRID[0])) ? WHEEL_GRID[WHEEL_COUNT][i] : "3/1";
+        sscanf(span ? span : "3/1", "%7[^/]/%7s", col, row);
+        sb_appendf(&sb, "<div id=\"wheelStoreBlock\" class=\"frvr-store-block-container store-wheel\" style=\"grid-column: span %s; grid-row: span %s;\""
+                        " onclick=\"strikeAction('spin:%d')\"><div class=\"frvr-store-block\"><div class=\"frvr-store-block-title\">",
+                   col, row, i);
+        if (w->ticket) sb_ticket_amount(&sb, w->amount, 0, 0);
+        else sb_appendf(&sb, "<img class=\"frvr-store-block-title__KRimg\" src=\"img/frvr-ui/icon-krunkie-coin.svg\"><span>%d</span>", w->amount);
+        sb_append(&sb, "</div><div class=\"frvr-store-block-subtitle\">");
+        sb_append_esc(&sb, w->name);
+        sb_append(&sb, "</div>");
+        if (w->ticket) {
+            sb_append(&sb, "<div class=\"frvr-store-block-overlay\"><div class=\"frvr-store-wheels-overlay-mini-top-right\">");
+            sb_ticket_amount(&sb, spin_tickets(), 1, 1);
+            sb_append(&sb, "</div></div>");
+        }
+        sb_append(&sb, "</div></div>");
+    }
+    return sb_finish(&sb);
+}
+
+// bce: the section titles select their section (sectioned-scroll__title--active)
+static void store_section(const HtmlElem root, const int section) {
+    M.store_section = section;
+    HtmlElem scrolls[4];
+    const int n = html_dom_query_all(root, ".sectioned-scroll", scrolls, 4);
+    for (int s = 0; s < n; s++) {
+        HtmlElem titles[8];
+        const int tn = html_dom_query_all(scrolls[s], ".sectioned-scroll__title", titles, 8);
+        for (int i = 0; i < tn; i++) html_dom_set_class(titles[i], "sectioned-scroll__title--active", i == section);
+    }
+}
+
+static void store_fill(const HtmlElem root) {
+    fill_currency(root);
+    HtmlElem titles[16];
+    const int tn = html_dom_query_all(root, ".sectioned-scroll__title", titles, 16);
+    for (int i = 0; i < tn; i++) {
+        char hook[48];
+        snprintf(hook, sizeof(hook), "strikeAction('store-section:%d')", i % 3);
+        html_dom_set_attr(titles[i], "onclick", hook);
+    }
+    store_section(root, M.store_section);
+    // the Spins section's Sr content: the wheels (OC)
+    char *wheels = store_wheels_html();
+    HtmlElem content[4];
+    const int cn = html_dom_query_all(root, ".sectioned-scroll__section[data-index=\"0\"] .frvr-store-section__content", content, 4);
+    for (int i = 0; i < cn && wheels; i++) html_dom_set_html(content[i], wheels);
+    free(wheels);
+}
+
+// ---------------------------------------------------------------- SPIN (SA / aue / oU)
+
+static void spin_fill(const HtmlElem root) {
+    const StrikeWheel *w = &WHEELS[M.spin >= 0 && M.spin < WHEEL_COUNT ? M.spin : WHEEL_DEFAULT];
+    char buf[64];
+    set_text(root, ".spinner-title", w->name);
+    // oU: one row per reward pool, weight * 100 %
+    const HtmlElem odds = html_dom_query(root, ".odds");
+    if (odds) {
+        StrBuf sb = {0};
+        for (int i = 0; i < WHEEL_ODD_COUNT; i++) {
+            sb_appendf(&sb, "<div class=\"odd\"><div class=\"odd-icon\" style=\"background: %s;\"></div><div class=\"odd-name\">", WHEEL_ODDS[i].color);
+            sb_append_esc(&sb, WHEEL_ODDS[i].name);
+            sb_appendf(&sb, "</div><div class=\"odd-chance\">%g%%</div></div>", WHEEL_ODDS[i].weight * 100.0);
+        }
+        char *html = sb_finish(&sb);
+        html_dom_set_html(odds, html);
+        free(html);
+    }
+    // buttonTicketsSplit: 10x the price on top, 1x below
+    snprintf(buf, sizeof(buf), "%d", w->amount * 10);
+    set_text(root, "#spinTopSection .spin-tickets span", buf);
+    snprintf(buf, sizeof(buf), "%d", w->amount);
+    set_text(root, "#oneTicketSpin .spin-tickets span", buf);
+    // the header's currencies (A1) only for a spin-ticket wheel
+    const HtmlElem header = html_dom_query(root, ".frvr-controls-right .currency-header");
+    if (header) {
+        if (w->ticket) fill_currency(root);
+        else html_dom_remove(header);
+    }
+    M.wheel_f = 0.0f;
+}
+
+// aue.resize + render: the canvas is F x F, F = the smaller side of its parent's content box (the
+// parent is .spin-wheel__container, padded 74 * --base-scale on top and --screen-margin = 16 *
+// --base-scale below, with the page's --base-scale when resize runs), the container's --base-scale
+// then F / 280 px; the wheel (disc H = F / 2 * 0.95, slices at 0.95 H by weight from angle 0, the
+// pointer, the centre disc 0.6 H) is spin_wheel.c's, drawn into this canvas.
+static void spin_tick(void) {
+    M.wheel.visible = 0;
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SPIN);
+    if (!root || strike_screen_top() != STRIKE_SCREEN_SPIN) return;
+    const HtmlElem container = html_dom_query(root, ".spin-wheel__container");
+    const HtmlElem canvas = container ? html_dom_query(container, "canvas") : 0;
+    HtmlRect pr;
+    if (!canvas || !html_dom_get_rect(container, &pr) || pr.w <= 0 || pr.h <= 0) return;
+    float vw = 0.0f, vh = 0.0f;
+    html_dom_viewport(&vw, &vh, NULL);
+    // :root --base-scale: .2777777778vh, .15625vw under (max-aspect-ratio: 16/9)
+    const float base = vh > 0.0f && vw / vh < 16.0f / 9.0f ? vw / 640.0f : vh / 360.0f;
+    const float f = floorf(fminf(pr.w, pr.h - 90.0f * base));
+    if (f <= 0.0f) return;
+    if (fabsf(f - M.wheel_f) >= 1.0f) {
+        M.wheel_f = f;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%dpx", (int) f);
+        html_dom_set_style(canvas, "width", buf);
+        html_dom_set_style(canvas, "height", buf);
+        snprintf(buf, sizeof(buf), "%gpx", f / 280.0f);
+        html_dom_set_style(container, "--base-scale", buf);
+    }
+    HtmlRect cr;
+    if (!html_dom_get_rect(canvas, &cr) || cr.w <= 0 || cr.h <= 0) return;
+    SpinWheelDraw *d = &M.wheel;
+    memset(d, 0, sizeof(*d));
+    d->visible = 1;
+    d->canvas_elem = canvas;
+    d->x = cr.x;
+    d->y = cr.y;
+    d->w = cr.w;
+    d->h = cr.h;
+    d->canvas_w = M.wheel_f;
+    d->canvas_h = M.wheel_f;
+    d->radius = M.wheel_f / 2.0f * 0.95f;
+    float from = 0.0f;
+    for (int i = 0; i < WHEEL_ODD_COUNT && i < SPIN_WHEEL_MAX_SLICES; i++) {
+        const float span = (float) (2.0 * M_PI * WHEEL_ODDS[i].weight);
+        d->slice_from[i] = from;
+        d->slice_to[i] = from + span;
+        unsigned r = 0, g = 0, b = 0;
+        sscanf(WHEEL_ODDS[i].color + 1, "%02x%02x%02x", &r, &g, &b);
+        d->slice_rgb[i][0] = (float) r / 255.0f;
+        d->slice_rgb[i][1] = (float) g / 255.0f;
+        d->slice_rgb[i][2] = (float) b / 255.0f;
+        from += span;
+        d->slices = i + 1;
+    }
+    d->pointer_count = 1; // p = [0]: one pointer, straight up
+    d->pointer_rotation[0] = 0.0f;
+    d->pointer_scale = 1.0f; // V = 1 before a spin
+}
+
+const SpinWheelDraw *strike_menu_wheel_draw(void) { return &M.wheel; }
+
+// ---------------------------------------------------------------- CUSTOMIZE_CONTROLS (wb)
+
+// a5.oncreate in Customize mode (and on resize): .control-buttons' --base-scale is
+// `calc(${clientHeight} / 360 * 1px` (FRVR's string has no closing paren; a browser closes it at the end
+// of the declaration, this engine does not, so the value here is the closed calc()). The capture's
+// inline value (282 at its size) is replaced as soon as the box has a height.
+static void customize_controls_tick(void) {
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZE_CONTROLS);
+    const HtmlElem box = root ? html_dom_query(root, ".control-buttons--customize") : 0;
+    if (!box) return;
+    const int h = (int) html_dom_offset_height(box);
+    char want[64], have[64] = "";
+    snprintf(want, sizeof(want), "calc(%d / 360 * 1px)", h);
+    html_dom_get_attr(box, "data-kn-scale", have, sizeof(have));
+    if (h <= 0 || !strcmp(want, have)) return;
+    html_dom_set_attr(box, "data-kn-scale", want);
+    html_dom_set_style(box, "--base-scale", want);
+    // the joysticks' nipplejs (static, rhe): size = --control-joystick-size at that scale (the capture's
+    // 83 px = 106 * 282 / 360), the front half of it, both centred by negative margins
+    HtmlElem sticks[4];
+    const int n = html_dom_query_all(box, ".joystick", sticks, 4);
+    for (int i = 0; i < n; i++) {
+        char style[256] = "";
+        html_dom_get_attr(sticks[i], "style", style, sizeof(style));
+        const char *k = strstr(style, "--control-joystick-size:");
+        if (!k) continue;
+        const float size = (float) atof(k + strlen("--control-joystick-size:")) * (float) h / 360.0f;
+        static const char *const PARTS[2] = {".back", ".front"};
+        for (int p = 0; p < 2; p++) {
+            const HtmlElem el = html_dom_query(sticks[i], PARTS[p]);
+            if (!el) continue;
+            const float px = p ? size / 2.0f : size;
+            char v[32];
+            snprintf(v, sizeof(v), "%gpx", px);
+            html_dom_set_style(el, "width", v);
+            html_dom_set_style(el, "height", v);
+            snprintf(v, sizeof(v), "%gpx", -px / 2.0f);
+            html_dom_set_style(el, "margin-left", v);
+            html_dom_set_style(el, "margin-top", v);
+        }
+    }
+}
+
+static void customize_controls_fill(const HtmlElem root) {
+    // the saved layout's positions, and the drag targets (strike_touch.c)
+    strike_touch_customize_apply(html_dom_query(root, ".control-buttons--customize"));
+    // rightContent: _t "Reset" (onclick Ahe()), then the home button
+    HtmlElem buttons[4];
+    const int n = html_dom_query_all(root, ".frvr-controls-right > .frvr-button", buttons, 4);
+    for (int i = 0; i < n; i++) {
+        char cls[160] = "";
+        html_dom_get_attr(buttons[i], "class", cls, sizeof(cls));
+        if (!strstr(cls, "frvr-button-home")) html_dom_set_attr(buttons[i], "onclick", "strikeAction('controls-reset')");
+    }
+}
+
+// ---------------------------------------------------------------- LEADERBOARD_PLAYERS (YB / K5)
+
+// YB's enemyPlayers: the tournament board's rows (A1e). Without hosted tournaments only a
+// --render-scenario fixture supplies them; none = no rows.
+static int board_rows(BoardRow *rows, const int max) {
+    if (!M.board_fixture) return 0;
+    const int n = M.board_count < max ? M.board_count : max;
+    memcpy(rows, M.board, sizeof(BoardRow) * (size_t) n);
+    return n;
+}
+
+// YB.view: the header row (f1e) stays, then one K5 row per player (stats: Score, Kills)
+static void leaderboard_fill(const HtmlElem root) {
+    const HtmlElem content = html_dom_query(root, ".frvr-lboard-end-screen__content");
+    if (!content) return;
+    HtmlElem old[BOARD_MAX + 8];
+    const int on = html_dom_query_all(content, ".frvr-lboard-end-screen__row-wrapper", old, BOARD_MAX + 8);
+    for (int i = 0; i < on; i++) {
+        char cls[160] = "";
+        html_dom_get_attr(old[i], "class", cls, sizeof(cls));
+        if (!strstr(cls, "frvr-lboard-end-screen__header")) html_dom_remove(old[i]);
+    }
+    BoardRow rows[BOARD_MAX];
+    const int n = board_rows(rows, BOARD_MAX);
+    StrBuf sb = {0};
+    for (int i = 0; i < n; i++) {
+        const BoardRow *r = &rows[i];
+        const char *P = "frvr-lboard-end-screen__";
+        sb_appendf(&sb, "<div class=\"%srow-wrapper\" style=\"--row-index: %d;\"><div class=\"%srow\">", P, i + 1, P);
+        sb_appendf(&sb, "<div class=\"%sposition %sposition--%s\"><span>%d</span></div>", P, P, r->you ? "player" : "ffa", i + 1);
+        sb_appendf(&sb, "<div class=\"%spfp\"><img src=\"./cdn/textures/classes/icon_%d.png\" style=\"image-rendering: pixelated;\"></div>", P, r->class_id);
+        sb_appendf(&sb, "<div class=\"%splayer-name%s\"><span><strong>", P, r->you ? " frvr-lboard-end-screen__player-name--player" : "");
+        sb_append_esc(&sb, r->name);
+        sb_appendf(&sb, "</strong></span></div><div class=\"%sstats\">", P);
+        for (int s = 0; s < 2; s++) {
+            const char *mod = r->you ? " frvr-lboard-end-screen__stat-col--player" : s % 2 == 0 ? "" : " frvr-lboard-end-screen__stat-col--odd";
+            sb_appendf(&sb, "<div class=\"%sstat-col%s\"><span>", P, mod);
+            if (r->has_stats) sb_appendf(&sb, "%d", s == 0 ? r->score : r->kills);
+            sb_append(&sb, "</span></div>");
+        }
+        sb_append(&sb, "</div></div></div>");
+    }
+    char *html = sb_finish(&sb);
+    if (html && *html) html_dom_insert_html(content, HTML_INSERT_BEFORE_END, html);
+    free(html);
+}
+
+void strike_menu_scenario_board(const cJSON *rows) {
+    if (!cJSON_IsArray(rows)) return;
+    M.board_fixture = 1;
+    M.board_count = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) {
+        if (M.board_count >= BOARD_MAX) break;
+        BoardRow *r = &M.board[M.board_count++];
+        memset(r, 0, sizeof(*r));
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+        snprintf(r->name, sizeof(r->name), "%s", cJSON_IsString(name) ? name->valuestring : "Guest");
+        r->class_id = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "classIndex"));
+        if (r->class_id < 0) r->class_id = 0;
+        r->you = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "you"));
+        const cJSON *score = cJSON_GetObjectItemCaseSensitive(row, "score");
+        const cJSON *kills = cJSON_GetObjectItemCaseSensitive(row, "kills");
+        r->has_stats = cJSON_IsNumber(score) || cJSON_IsNumber(kills);
+        r->score = cJSON_IsNumber(score) ? score->valueint : 0;
+        r->kills = cJSON_IsNumber(kills) ? kills->valueint : 0;
+    }
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_LEADERBOARD_PLAYERS);
+    if (root) leaderboard_fill(root);
+}
+
+// ---------------------------------------------------------------- POPUP (In)
+
+static void popup_fill(const HtmlElem root) {
+    // isDismissableOnBackground (default true): the dark blur's onclick kt()
+    const HtmlElem blur = html_dom_query(root, ".frvr-dark-blur-75");
+    if (blur) html_dom_set_attr(blur, "onclick", "strikeAction('back')");
 }
 
 // ---------------------------------------------------------------- CLASS_SELECTION (B5 / ode / lde)
@@ -328,6 +692,24 @@ static void action(const char *a) {
     else if (!strcmp(a, "back")) {
         strike_screen_pop(); // kt()
         if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
+    } else if (!strncmp(a, "pop:", 4)) {
+        // a close button that is onHide() + kt(): SPIN's home from the store (kt() twice), Customize
+        // Controls' home (its onHide kt() and its own: Settings goes too)
+        for (int i = atoi(a + 4); i > 0; i--) strike_screen_pop();
+        if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
+    } else if (!strncmp(a, "spin:", 5)) {
+        const int i = atoi(a + 5);
+        if (i >= 0 && i < WHEEL_COUNT) {
+            M.spin = i;
+            strike_screen_push(STRIKE_SCREEN_SPIN); // eb(id, {onHide: kt}) = Pt(SA, {spinnerIndex})
+        }
+    } else if (!strncmp(a, "store-section:", 14)) {
+        const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
+        if (root) store_section(root, atoi(a + 14));
+    } else if (!strcmp(a, "controls-reset")) {
+        // Ahe(): mobile_layouts[current] = {} saved -> every control back at its Gw position
+        printf("[strike] controls reset\n");
+        strike_touch_layout_reset();
     } else if (!strcmp(a, "home")) {
         if (!html_ui_is_menu_open() && M.client) client_set_menu_open(M.client, 1);
         strike_screen_replace(STRIKE_SCREEN_MAIN_MENU); // nu(yg)
@@ -335,7 +717,22 @@ static void action(const char *a) {
     else if (!strcmp(a, "customize")) strike_screen_push(STRIKE_SCREEN_CUSTOMIZATION);
     else if (!strcmp(a, "class-selection")) strike_screen_push(STRIKE_SCREEN_CLASS_SELECTION);
     else if (!strcmp(a, "profile")) strike_screen_push(STRIKE_SCREEN_PROFILE);
-    else if (!strcmp(a, "store")) strike_screen_push(STRIKE_SCREEN_STORE);
+    else if (!strcmp(a, "store")) {
+        M.store_section = 0; // Pt(cc()): the first section
+        strike_screen_push(STRIKE_SCREEN_STORE);
+    } else if (!strncmp(a, "buy:", 4)) {
+        // a currency's "+" (nue): ly() (every screen above the first goes) then Pt(cc(), {section}).
+        // FRVR's fg store (bce) ignores attrs.section and opens on Spins; its PI store (tce) selects
+        // the section, as here.
+        while (strike_screen_depth() > 1) strike_screen_pop();
+        M.store_section = atoi(a + 4);
+        if (strike_screen_shown(STRIKE_SCREEN_STORE)) {
+            const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
+            if (root) store_section(root, M.store_section);
+        } else {
+            strike_screen_push(STRIKE_SCREEN_STORE);
+        }
+    }
     else if (!strcmp(a, "customize-controls")) strike_screen_push(STRIKE_SCREEN_CUSTOMIZE_CONTROLS); // Pt(ZC, {onHide})
     else if (!strcmp(a, "match-details")) strike_screen_push(STRIKE_SCREEN_MATCH_DETAILS);
     else if (!strncmp(a, "class:", 6)) {
@@ -460,8 +857,25 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
         break;
     }
     case STRIKE_SCREEN_STORE:
-    case STRIKE_SCREEN_SPIN:
-        fill_currency(root);
+        store_fill(root);
+        break;
+    case STRIKE_SCREEN_SPIN: {
+        spin_fill(root);
+        const HtmlElem home = html_dom_query(root, ".frvr-button-home");
+        if (home) html_dom_set_attr(home, "onclick", "strikeAction('pop:2')"); // onClose: kt() + the store's onHide kt()
+        break;
+    }
+    case STRIKE_SCREEN_CUSTOMIZE_CONTROLS: {
+        customize_controls_fill(root);
+        const HtmlElem home = html_dom_query(root, ".frvr-button-home");
+        if (home) html_dom_set_attr(home, "onclick", "strikeAction('pop:2')"); // onClose: onHide() (kt) + kt()
+        break;
+    }
+    case STRIKE_SCREEN_LEADERBOARD_PLAYERS:
+        leaderboard_fill(root);
+        break;
+    case STRIKE_SCREEN_POPUP:
+        popup_fill(root);
         break;
     default:
         break;
@@ -479,6 +893,8 @@ int strike_menu_level(void) {
 void strike_menu_tick(Client *client) {
     M.client = client;
     strike_meta_tick(client);
+    spin_tick();
+    customize_controls_tick();
     // the account box follows the account / name (Mithril redraws on every change)
     char name[64], key[160];
     int level = 1, kr = 0;

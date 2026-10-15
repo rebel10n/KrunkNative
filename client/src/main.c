@@ -1578,6 +1578,18 @@ static void html_css_point(double *x, double *y) {
     }
 }
 
+// Krunker Strike's Customize Controls drag (strike_touch.c) takes the page's CSS px: framebuffer px over
+// the page's devicePixelRatio (1 unless the page is laid out on a smaller viewport).
+static int strike_customize_mouse(const int phase, double x, double y) {
+    float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+    html_dom_viewport(&vw, &vh, &dpr);
+    if (dpr > 0.0f) {
+        x /= dpr;
+        y /= dpr;
+    }
+    return strike_touch_customize_pointer(phase, (float) x, (float) y);
+}
+
 // The page takes pointer input while the menu is open or the end-screen results are up.
 static int html_pointer_input(void) {
     // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
@@ -1604,6 +1616,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
         return;
     }
     html_cursor_scale(window, &x, &y);
+    if (strike_ui_active() && strike_customize_mouse(1, x, y)) return; // a Customize Controls drag
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
     html_ui_mouse_move(x, y);
 }
@@ -1640,6 +1653,9 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
     double x, y;
     glfwGetCursorPos(window, &x, &y);
     html_cursor_scale(window, &x, &y);
+    // Customize Controls: the left button is a finger dragging a control (a5's touch handlers)
+    if (strike_ui_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT &&
+        strike_customize_mouse(action == GLFW_PRESS ? 0 : 2, x, y)) return;
     if (button == GLFW_MOUSE_BUTTON_LEFT && ui_console_mouse(action, x, y, 0)) return; // dev console modal + mod bind rows
     html_ui_mouse_move(x, y);
     html_ui_mouse_button(button, action, mods);

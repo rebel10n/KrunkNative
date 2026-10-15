@@ -317,6 +317,8 @@ static void sync_stack(void) {
     }
 }
 
+int strike_screen_depth(void) { return S.depth; }
+
 StrikeScreen strike_screen_top(void) {
     return S.depth > 0 ? S.stack[S.depth - 1].screen : STRIKE_SCREEN_NONE;
 }
@@ -660,6 +662,8 @@ int strike_ui_pointer_to_page(void) {
 // loading screen) unless "boot" keeps index.html's static one, then
 //   "screen": "<VIEW_ID>"   the stack becomes that one screen (the capture's Pi = [view])
 //   "settingsTab": n        SETTINGS' tab n (Presets 0 .. Other 4)
+//   "leaderboard": [{name, classIndex, you, score, kills}]  LEADERBOARD_PLAYERS' rows (no score / kills:
+//                           empty stat cells, as the capture's)
 //   "loading": "<info>"     FRVR's Mithril loading screen (Fm(Al, {info})) from the capture clock 0
 //   "killfeed": [{killer, victim, killerIsYou, victimIsYou, weapon: "icon_1", headshot}]
 //   "killcard": {killer, weapon, level, score, classIndex}
@@ -679,6 +683,9 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     S.booted = S.fm_done = 1;
     loading_cancel_timers();
     loading_removed(NULL);
+    // the fixtures first: the screen fills itself from them as it is rendered
+    strike_menu_scenario(cJSON_GetObjectItemCaseSensitive(st, "account"), client ? client->menu_name : NULL);
+    strike_menu_scenario_board(cJSON_GetObjectItemCaseSensitive(st, "leaderboard"));
     const cJSON *screen = cJSON_GetObjectItemCaseSensitive(st, "screen");
     if (cJSON_IsString(screen)) {
         strike_screen_clear();
@@ -688,7 +695,6 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     } else if (html_ui_is_menu_open() && S.depth == 0) {
         strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
     }
-    strike_menu_scenario(cJSON_GetObjectItemCaseSensitive(st, "account"), client ? client->menu_name : NULL);
     const cJSON *tab = cJSON_GetObjectItemCaseSensitive(st, "settingsTab");
     if (cJSON_IsNumber(tab)) {
         char a[32];
