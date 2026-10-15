@@ -9,7 +9,7 @@
  * Checks sniffing, intrinsic sizes, the viewBox -> viewport mapping that
  * Chrome applies to SVG images (preserveAspectRatio meet/slice/none, the
  * synthesised viewBox of a root without one), <style> class fills, strokes,
- * and the page's own icons (ui/img/ *.svg).  Pixel expectations were taken
+ * masks, clip paths, shadow filters and the page's own icons (ui/img/ *.svg).  Pixel expectations were taken
  * from headless Chromium screenshots of the same documents.
  */
 #include <math.h>
@@ -278,6 +278,78 @@ static void test_rgba(void) {
     }
 }
 
+/* Masks, clip paths and shadow filters (nanosvg has none: it drew a mask's own
+ * shapes as ordinary ones).  Pixels as headless Chromium draws the documents. */
+static void test_fx(const char *root) {
+    const char *ns = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\">";
+    char doc[1024];
+    /* luminance mask: the left half black (hidden), the right half white; the
+     * content inherits the <mask>'s fill="black", not the root's fill="none" */
+    snprintf(doc, sizeof doc, "%s<mask id=\"m\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"black\">"
+             "<rect width=\"10\" height=\"10\" fill=\"white\"/><rect width=\"5\" height=\"10\"/></mask>"
+             "<rect width=\"10\" height=\"10\" fill=\"#ff0000\" mask=\"url(#m)\"/></svg>", ns);
+    SvgImage *s = mk(doc);
+    unsigned char *px = s ? svg_image_rasterize(s, 10, 10) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+        CHECK(px_at(px, 10, 2, 5)[3] == 0);
+        CHECK(px_at(px, 10, 7, 5)[3] == 255 && px_at(px, 10, 7, 5)[0] == 255);
+    }
+    free(px);
+    svg_image_destroy(s);
+    /* clip path: only the circle's geometry shows */
+    snprintf(doc, sizeof doc, "%s<defs><clipPath id=\"c\"><circle cx=\"5\" cy=\"5\" r=\"3\"/></clipPath></defs>"
+             "<rect width=\"10\" height=\"10\" fill=\"#0000ff\" clip-path=\"url(#c)\"/></svg>", ns);
+    s = mk(doc);
+    px = s ? svg_image_rasterize(s, 10, 10) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+        CHECK(px_at(px, 10, 5, 5)[3] == 255 && px_at(px, 10, 5, 5)[2] == 255);
+        CHECK(px_at(px, 10, 0, 0)[3] == 0);
+    }
+    free(px);
+    svg_image_destroy(s);
+    /* Figma's drop shadow: hardAlpha, offset 2 px right, outside the source, black */
+    snprintf(doc, sizeof doc, "%s<g filter=\"url(#f)\"><rect width=\"5\" height=\"10\" fill=\"white\"/></g><defs>"
+             "<filter id=\"f\" x=\"0\" y=\"0\" width=\"10\" height=\"10\" filterUnits=\"userSpaceOnUse\"><feFlood flood-opacity=\"0\" result=\"B\"/>"
+             "<feColorMatrix in=\"SourceAlpha\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0\" result=\"hardAlpha\"/>"
+             "<feOffset dx=\"2\" dy=\"0\"/><feComposite in2=\"hardAlpha\" operator=\"out\"/>"
+             "<feColorMatrix type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0\"/>"
+             "<feBlend mode=\"normal\" in2=\"B\"/><feBlend mode=\"normal\" in=\"SourceGraphic\" result=\"shape\"/></filter></defs></svg>", ns);
+    s = mk(doc);
+    px = s ? svg_image_rasterize(s, 10, 10) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+        CHECK(px_at(px, 10, 2, 5)[3] == 255 && px_at(px, 10, 2, 5)[0] == 255); /* the source */
+        CHECK(px_at(px, 10, 6, 5)[3] == 255 && px_at(px, 10, 6, 5)[0] == 0);   /* the shadow */
+        CHECK(px_at(px, 10, 8, 5)[3] == 0);
+    }
+    free(px);
+    svg_image_destroy(s);
+    /* the Double XP button's ad icon (main.css #doubleXPButton img, height 60px):
+     * white film, a black outline outside it only (the perforations too),
+     * the hard shadow 1 unit left / down */
+    char path[1024];
+    size_t len = 0;
+    snprintf(path, sizeof path, "%s/ui/img/frvr-ui/ad-icon.svg", root);
+    unsigned char *bytes = read_file(path, &len);
+    if (!bytes) { fprintf(stderr, "missing %s\n", path); g_fail++; return; }
+    s = svg_image_create(bytes, len);
+    free(bytes);
+    px = s ? svg_image_rasterize(s, 72, 68) : NULL; /* 4 px per unit */
+    CHECK(px != NULL);
+    if (px) {
+        const unsigned char *body = px_at(px, 72, 4 * 12, 4 * 8), *hole = px_at(px, 72, 4 * 4 + 2, 4 * 3 + 3);
+        const unsigned char *outline = px_at(px, 72, 4 * 16 + 1, 4 * 8), *shadow = px_at(px, 72, 3, 4 * 14);
+        CHECK(body[3] == 255 && body[0] == 255);     /* white film */
+        CHECK(hole[3] == 255 && hole[0] == 0);       /* a perforation: outside the film, so the outline fills it */
+        CHECK(outline[3] == 255 && outline[0] == 0); /* the outline outside the film */
+        CHECK(shadow[3] > 200 && shadow[0] < 40);    /* the shadow, bottom left */
+    }
+    free(px);
+    svg_image_destroy(s);
+}
+
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : ".";
     test_sniff();
@@ -286,6 +358,7 @@ int main(int argc, char **argv) {
     test_paint();
     test_rgba();
     test_page_icons(root);
+    test_fx(root);
     printf("test_svg: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

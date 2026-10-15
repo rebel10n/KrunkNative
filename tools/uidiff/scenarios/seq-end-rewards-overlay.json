@@ -17,7 +17,7 @@
     3000,
     4000
   ],
-  "anim_origin": "end",
+  "anim_origin": "applied",
   "state": {
     "menu": false,
     "window": null,
@@ -33,10 +33,26 @@
       "timerText": "03:45"
     },
     "chat": [],
-    "console": [
-      "end"
-    ]
+    "endscreen": {
+      "place": 1,
+      "result": 1,
+      "text": "#1 VICTORY",
+      "nextRound": "00:17",
+      "results": 1,
+      "items": [
+        {
+          "skin": 1,
+          "r": "gift"
+        },
+        {
+          "skin": 2,
+          "r": "gift"
+        }
+      ],
+      "collect": "overlay",
+      "raid": 0,
+      "autoCollectElapsed": 500
+    }
   },
-  "pending": "S4: the rewards overlay (svelte-1sac6ik: card flip, fly to the backpack) is MISSING",
-  "note": "Collect clicked: the rewards overlay sequence (v10:195771+). Reference: capture-v10-seq.js end-rewards-overlay."
+  "note": "Collect clicked: the rewards overlay sequence (v10:195771+), origin at the click. Reference: capture-v10-seq.js end-rewards-overlay (store.skins in, skins 1 and 2 with the gift icon). State endscreen.collect \"overlay\" starts it when the card shows."
 }

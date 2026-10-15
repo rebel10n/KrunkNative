@@ -77,7 +77,8 @@
         }
       ],
       "collect": "none",
-      "raid": 1
+      "raid": 1,
+      "autoCollectElapsed": 3000
     },
     "scoreboard": [
       {
@@ -88,6 +89,5 @@
     ]
   },
   "frames": 3,
-  "note": "As ingame-endscreen-collect with the raid promo (#raidPromoContainer) showing. Reference: the offline v10 sandbox (capture-v10.js ingame-endscreen-collect-raid).",
-  "pending": "S4: no v10 capture yet (tools/uidiff/capture-v10.js ingame-endscreen-collect-raid) and no regions file; the end-to-end check is server/tests/v10_endscreen_e2e.py"
+  "note": "As ingame-endscreen-collect with the raid promo (#raidPromoContainer) showing. Reference: the offline v10 sandbox (capture-v10.js ingame-endscreen-collect-raid). autoCollectElapsed 3000: the capture shows \"7s to auto collect\"."
 }

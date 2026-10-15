@@ -30,6 +30,43 @@
 
 #define SVG_MAX_DIM 4096
 #define SVG_SNIFF_LIMIT 4096
+#define SVG_MAX_REFS 16    /* <mask> / <clipPath> definitions */
+#define SVG_MAX_FILTERS 8  /* <filter> definitions */
+#define SVG_MAX_FX 32      /* elements with filter= / clip-path= / mask= */
+#define SVG_MAX_SHADOWS 4  /* shadow passes of one filter */
+
+/* <mask> (luminance x alpha) or <clipPath> (alpha): its content as a document
+ * of its own, rasterised in the root's user space. */
+typedef struct {
+    char id[64];
+    int clip;
+    char *tail;        /* the root's attributes + the definition's content + "</svg>" */
+    size_t tail_len;
+    int has_rect;      /* maskUnits="userSpaceOnUse" x/y/width/height */
+    float rect[4];
+} SvgRef;
+
+/* A <filter> read as the shadows Figma / Inkscape export: per feOffset (or
+ * feDropShadow) an offset, an optional feGaussianBlur, an feComposite
+ * ("out": outside the source only; arithmetic k2=-1 k3=1: an inner shadow)
+ * and the colour of the last feColorMatrix / flood. Other primitives are
+ * ignored (the source is drawn as is). */
+typedef struct {
+    float dx, dy, sd;
+    float rgba[4];
+    int out, inner;
+} SvgShadow;
+typedef struct {
+    char id[64];
+    int count;
+    SvgShadow sh[SVG_MAX_SHADOWS];
+} SvgFilter;
+
+/* An element drawn through filter= / clip-path= / mask= (indices, -1 = none):
+ * its shapes sit between two sentinel shapes "__knfxb<i>" / "__knfxe<i>". */
+typedef struct {
+    int filter, clip, mask;
+} SvgFx;
 
 struct SvgImage {
     char *head;        /* document text before the root's attributes ("...<svg") */
@@ -40,6 +77,12 @@ struct SvgImage {
     int align_x, align_y; /* preserveAspectRatio: 0 min, 1 mid, 2 max; -1 = none */
     int slice;
     float w, h;        /* intrinsic size, CSS px */
+    SvgRef refs[SVG_MAX_REFS];
+    int nrefs;
+    SvgFilter filters[SVG_MAX_FILTERS];
+    int nfilters;
+    SvgFx fx[SVG_MAX_FX];
+    int nfx;
 };
 
 static int svg_space(const char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
@@ -64,10 +107,9 @@ int svg_sniff(const unsigned char *bytes, const size_t len) {
 
 /* One attribute of the root tag [tag, tag_end): returns the value span and,
  * through attr_start / attr_end, the whole `name="value"` span. */
-static const char *svg_root_attr(const char *tag, const char *tag_end, const char *name, size_t *len,
+static const char *svg_attr_from(const char *p, const char *tag_end, const char *name, size_t *len,
                                  const char **attr_start, const char **attr_end) {
     const size_t n = strlen(name);
-    const char *p = tag + 4;
     while (p < tag_end) {
         while (p < tag_end && svg_space(*p)) p++;
         const char *nm = p;
@@ -100,6 +142,11 @@ static const char *svg_root_attr(const char *tag, const char *tag_end, const cha
         }
     }
     return NULL;
+}
+
+static const char *svg_root_attr(const char *tag, const char *tag_end, const char *name, size_t *len,
+                                 const char **attr_start, const char **attr_end) {
+    return svg_attr_from(tag + 4, tag_end, name, len, attr_start, attr_end);
 }
 
 /* <length> in CSS px for width/height: number + px / absolute unit.  0 for
@@ -364,6 +411,382 @@ static char *svg_rewrite_rgba(const char *text, const size_t len, size_t *out_le
     return out.p;
 }
 
+/* ------------------------------------------------------------------ masks,
+ * clip paths and shadow filters.  nanosvg has none of them (it even draws the
+ * shapes inside <mask> / <clipPath> as ordinary ones), so at load time the
+ * definitions are cut out of the document and every element that uses one is
+ * wrapped in two sentinel shapes; a raster pass then draws the shapes between
+ * them into a layer of their own, applies the filter, the clip path and the
+ * mask (that order, as SVG does) and composites the layer.  Limits: the
+ * definitions are drawn in the root's user space (an ancestor transform of
+ * the element is not applied to them), mask/clip content units are
+ * userSpaceOnUse, and a filter is read as its shadows (SvgFilter). */
+
+typedef struct {
+    const char *start, *end; /* '<' .. past '>' */
+    const char *name;
+    size_t name_len;
+    int closing, self_closing;
+} SvgTag;
+
+static const char *svg_find(const char *p, const char *end, const char *what) {
+    const size_t n = strlen(what);
+    for (; p + n <= end; p++)
+        if (!memcmp(p, what, n)) return p;
+    return NULL;
+}
+
+/* The next element tag at or after p (comments, CDATA, <? ?> and <! >
+ * declarations skipped); 0 at the end. */
+static int svg_next_tag(const char *p, const char *end, SvgTag *t) {
+    while (p < end) {
+        const char *lt = memchr(p, '<', (size_t) (end - p));
+        if (!lt) return 0;
+        const char *skip = NULL;
+        if (end - lt >= 4 && !memcmp(lt, "<!--", 4)) skip = svg_find(lt + 4, end, "-->");
+        else if (end - lt >= 9 && !memcmp(lt, "<![CDATA[", 9)) skip = svg_find(lt + 9, end, "]]>");
+        else if (lt + 1 < end && (lt[1] == '?' || lt[1] == '!')) skip = memchr(lt, '>', (size_t) (end - lt));
+        if (skip || (lt + 1 < end && (lt[1] == '?' || lt[1] == '!'))) {
+            if (!skip) return 0;
+            p = skip + 1;
+            continue;
+        }
+        const char *q = lt + 1;
+        t->closing = q < end && *q == '/';
+        if (t->closing) q++;
+        t->name = q;
+        while (q < end && !svg_space(*q) && *q != '>' && *q != '/') q++;
+        t->name_len = (size_t) (q - t->name);
+        char quote = 0;
+        while (q < end && (quote || *q != '>')) {
+            if (quote) {
+                if (*q == quote) quote = 0;
+            } else if (*q == '"' || *q == '\'') quote = *q;
+            q++;
+        }
+        if (q >= end) return 0;
+        t->start = lt;
+        t->end = q + 1;
+        t->self_closing = !t->closing && q[-1] == '/';
+        return 1;
+    }
+    return 0;
+}
+
+static int svg_tag_is(const SvgTag *t, const char *name) {
+    const size_t n = strlen(name);
+    return t->name_len == n && !memcmp(t->name, name, n);
+}
+
+static const char *svg_tag_attr(const SvgTag *t, const char *name, size_t *len) {
+    return svg_attr_from(t->name + t->name_len, t->end - 1, name, len, NULL, NULL);
+}
+
+/* Up to max numbers of an attribute (separated by spaces / commas); the count read. */
+static int svg_tag_nums(const SvgTag *t, const char *name, float *out, const int max) {
+    size_t len = 0;
+    const char *v = svg_tag_attr(t, name, &len);
+    char buf[512];
+    if (!v || len >= sizeof buf) return 0;
+    memcpy(buf, v, len);
+    buf[len] = 0;
+    char *p = buf;
+    int n = 0;
+    while (n < max) {
+        while (svg_space(*p) || *p == ',') p++;
+        char *e = NULL;
+        const float f = strtof(p, &e);
+        if (e == p) break;
+        out[n++] = f;
+        p = e;
+    }
+    return n;
+}
+
+static float svg_tag_num(const SvgTag *t, const char *name, const float def) {
+    float v;
+    return svg_tag_nums(t, name, &v, 1) == 1 ? v : def;
+}
+
+static int svg_tag_val_is(const SvgTag *t, const char *name, const char *want) {
+    size_t len = 0;
+    const char *v = svg_tag_attr(t, name, &len);
+    return v && len == strlen(want) && !memcmp(v, want, len);
+}
+
+/* "url(#id)" -> id; 0 when the attribute is absent or not a local reference. */
+static int svg_tag_url(const SvgTag *t, const char *name, char *id, const size_t size) {
+    size_t len = 0;
+    const char *v = svg_tag_attr(t, name, &len);
+    if (!v) return 0;
+    const char *e = v + len;
+    while (v < e && svg_space(*v)) v++;
+    if (e - v < 6 || memcmp(v, "url(", 4)) return 0;
+    v += 4;
+    while (v < e && (svg_space(*v) || *v == '"' || *v == '\'')) v++;
+    if (v >= e || *v != '#') return 0;
+    v++;
+    size_t n = 0;
+    while (v + n < e && v[n] != ')' && v[n] != '"' && v[n] != '\'' && !svg_space(v[n])) n++;
+    if (!n || n >= size) return 0;
+    memcpy(id, v, n);
+    id[n] = 0;
+    return 1;
+}
+
+static void svg_tag_id(const SvgTag *t, char *id, const size_t size) {
+    size_t len = 0;
+    const char *v = svg_tag_attr(t, "id", &len);
+    id[0] = 0;
+    if (v && len < size) {
+        memcpy(id, v, len);
+        id[len] = 0;
+    }
+}
+
+/* flood-color / flood-opacity: #rgb, #rrggbb or black / white. */
+static int svg_tag_flood(const SvgTag *t, float rgba[4]) {
+    size_t len = 0;
+    const char *v = svg_tag_attr(t, "flood-color", &len);
+    float c[3] = {0, 0, 0};
+    if (v && len >= 4 && v[0] == '#') {
+        char hex[7] = {0};
+        if (len == 4) for (int i = 0; i < 3; i++) hex[2 * i] = hex[2 * i + 1] = v[1 + i];
+        else if (len == 7) memcpy(hex, v + 1, 6);
+        for (int i = 0; i < 3 && hex[0]; i++) {
+            char b[3] = {hex[2 * i], hex[2 * i + 1], 0};
+            c[i] = (float) strtol(b, NULL, 16) / 255.0f;
+        }
+    } else if (v && len == 5 && !memcmp(v, "white", 5)) c[0] = c[1] = c[2] = 1.0f;
+    rgba[0] = c[0];
+    rgba[1] = c[1];
+    rgba[2] = c[2];
+    rgba[3] = svg_tag_num(t, "flood-opacity", 1.0f);
+    return rgba[3] > 0.0f;
+}
+
+static int svg_find_ref(const SvgImage *svg, const char *id, const int clip) {
+    for (int i = 0; i < svg->nrefs; i++)
+        if (svg->refs[i].clip == clip && !strcmp(svg->refs[i].id, id)) return i;
+    return -1;
+}
+
+static int svg_find_filter(const SvgImage *svg, const char *id) {
+    for (int i = 0; i < svg->nfilters; i++)
+        if (!strcmp(svg->filters[i].id, id)) return i;
+    return -1;
+}
+
+typedef struct {
+    size_t pos;
+    int fx;
+    char kind; /* 'b' / 'e' */
+} SvgInsert;
+
+typedef struct {
+    size_t a, b;
+} SvgCut;
+
+/* Cuts the definitions out of svg->tail and wraps the elements using them in
+ * sentinels (see above).  Nothing changes when the document has none. */
+static void svg_fx_prepare(SvgImage *svg) {
+    const char *text = svg->tail, *end = text + svg->tail_len;
+    const char *root_end = memchr(text, '>', svg->tail_len);
+    if (!root_end) return;
+    const size_t attrs_len = (size_t) (root_end + 1 - text);
+
+    struct {
+        int def;           /* 1 mask, 2 clipPath, 3 filter, 4 defs, 0 other */
+        int index;         /* ref / filter index */
+        int fx;            /* fx index or -1 */
+        const char *start; /* '<' of the start tag */
+        const char *content;
+    } stack[64];
+    int depth = 0, in_def = 0, in_filter = -1;
+    SvgCut cuts[SVG_MAX_REFS + SVG_MAX_FILTERS];
+    int ncuts = 0;
+    SvgInsert ins[SVG_MAX_FX * 2];
+    int nins = 0;
+    struct {
+        const char *start;
+        char filter[64], clip[64], mask[64];
+    } pend[SVG_MAX_FX];
+    float flood[4] = {0, 0, 0, 0}, pend_blur = 0.0f;
+    int has_flood = 0;
+
+    SvgTag t;
+    const char *p = root_end + 1;
+    while (svg_next_tag(p, end, &t)) {
+        p = t.end;
+        if (t.closing) {
+            int k = depth - 1;
+            while (k >= 0 && !(stack[k].start && t.name_len && !memcmp(stack[k].start + 1, t.name, t.name_len)
+                               && (svg_space(stack[k].start[1 + t.name_len]) || stack[k].start[1 + t.name_len] == '>')))
+                k--;
+            if (k < 0) continue;
+            while (depth > k) {
+                depth--;
+                const int d = stack[depth].def, ix = stack[depth].index;
+                if (d) in_def--;
+                if (d == 3) in_filter = -1;
+                if ((d == 1 || d == 2) && ix >= 0) {
+                    /* the content inherits the definition's own presentation attributes (Figma's
+                     * <mask fill="black">): a <g> carries them; a clip path is its geometry, filled */
+                    SvgRef *r = &svg->refs[ix];
+                    const size_t cl = depth == k ? (size_t) (t.start - stack[depth].content) : 0;
+                    const char *ga = stack[depth].start + 1 + (d == 1 ? 4 : 8);
+                    const size_t gl = (size_t) (stack[depth].content - ga);
+                    const char *open = d == 2 ? "<g fill=\"black\"><g" : "<g", *close = d == 2 ? "</g></g></svg>" : "</g></svg>";
+                    r->tail_len = attrs_len + strlen(open) + gl + cl + strlen(close);
+                    r->tail = malloc(r->tail_len + 1);
+                    if (r->tail)
+                        snprintf(r->tail, r->tail_len + 1, "%.*s%s%.*s%.*s%s", (int) attrs_len, text, open, (int) gl, ga, (int) cl,
+                                 stack[depth].content, close);
+                }
+                if ((d == 1 || d == 2 || d == 3) && ncuts < (int) (sizeof cuts / sizeof cuts[0])) {
+                    cuts[ncuts].a = (size_t) (stack[depth].start - text);
+                    cuts[ncuts].b = (size_t) (t.end - text);
+                    ncuts++;
+                }
+                if (stack[depth].fx >= 0 && nins < SVG_MAX_FX * 2) {
+                    ins[nins].pos = (size_t) (t.end - text);
+                    ins[nins].fx = stack[depth].fx;
+                    ins[nins].kind = 'e';
+                    nins++;
+                }
+            }
+            continue;
+        }
+
+        int def = 0, index = -1, fx = -1;
+        if (svg_tag_is(&t, "mask") || svg_tag_is(&t, "clipPath")) {
+            def = svg_tag_is(&t, "mask") ? 1 : 2;
+            if (svg->nrefs < SVG_MAX_REFS && !t.self_closing) {
+                SvgRef *r = &svg->refs[svg->nrefs];
+                memset(r, 0, sizeof *r);
+                svg_tag_id(&t, r->id, sizeof r->id);
+                r->clip = def == 2;
+                float v[4];
+                if (def == 1 && svg_tag_val_is(&t, "maskUnits", "userSpaceOnUse") && (v[0] = svg_tag_num(&t, "x", NAN), v[1] = svg_tag_num(&t, "y", NAN),
+                    v[2] = svg_tag_num(&t, "width", NAN), v[3] = svg_tag_num(&t, "height", NAN), !isnan(v[0] + v[1] + v[2] + v[3]))) {
+                    r->has_rect = 1;
+                    memcpy(r->rect, v, sizeof v);
+                }
+                index = svg->nrefs++;
+            }
+        } else if (svg_tag_is(&t, "filter")) {
+            def = 3;
+            if (svg->nfilters < SVG_MAX_FILTERS && !t.self_closing) {
+                SvgFilter *f = &svg->filters[svg->nfilters];
+                memset(f, 0, sizeof *f);
+                svg_tag_id(&t, f->id, sizeof f->id);
+                index = svg->nfilters++;
+                in_filter = index;
+                has_flood = 0;
+                pend_blur = 0.0f;
+            }
+        } else if (svg_tag_is(&t, "defs")) {
+            def = 4;
+        } else if (in_filter >= 0) {
+            SvgFilter *f = &svg->filters[in_filter];
+            SvgShadow *last = f->count ? &f->sh[f->count - 1] : NULL;
+            if ((svg_tag_is(&t, "feOffset") || svg_tag_is(&t, "feDropShadow")) && f->count < SVG_MAX_SHADOWS) {
+                SvgShadow *s = &f->sh[f->count++];
+                memset(s, 0, sizeof *s);
+                s->dx = svg_tag_num(&t, "dx", svg_tag_is(&t, "feDropShadow") ? 2.0f : 0.0f);
+                s->dy = svg_tag_num(&t, "dy", svg_tag_is(&t, "feDropShadow") ? 2.0f : 0.0f);
+                s->sd = svg_tag_is(&t, "feDropShadow") ? svg_tag_num(&t, "stdDeviation", 2.0f) : pend_blur;
+                s->rgba[3] = 1.0f;
+                if (svg_tag_is(&t, "feDropShadow")) svg_tag_flood(&t, s->rgba);
+                else if (has_flood) memcpy(s->rgba, flood, sizeof flood);
+                pend_blur = 0.0f;
+            } else if (svg_tag_is(&t, "feGaussianBlur")) {
+                if (last) last->sd = svg_tag_num(&t, "stdDeviation", 0.0f);
+                else pend_blur = svg_tag_num(&t, "stdDeviation", 0.0f);
+            } else if (svg_tag_is(&t, "feComposite") && last) {
+                float k[4];
+                if (svg_tag_val_is(&t, "operator", "out")) last->out = 1;
+                else if (svg_tag_val_is(&t, "operator", "arithmetic") && (k[0] = svg_tag_num(&t, "k2", 0), k[1] = svg_tag_num(&t, "k3", 0), k[0] < 0 && k[1] > 0))
+                    last->inner = 1;
+            } else if (svg_tag_is(&t, "feColorMatrix") && last && !svg_tag_val_is(&t, "in", "SourceAlpha")) {
+                float m[20];
+                if (svg_tag_nums(&t, "values", m, 20) == 20) {
+                    last->rgba[0] = m[4];
+                    last->rgba[1] = m[9];
+                    last->rgba[2] = m[14];
+                    last->rgba[3] = m[18];
+                }
+            } else if (svg_tag_is(&t, "feFlood")) {
+                float c[4];
+                if (svg_tag_flood(&t, c)) {
+                    memcpy(flood, c, sizeof c);
+                    has_flood = 1;
+                    if (last) memcpy(last->rgba, c, sizeof c);
+                }
+            }
+        } else if (!in_def && svg->nfx < SVG_MAX_FX) {
+            char a[64] = "", b[64] = "", c[64] = "";
+            const int hf = svg_tag_url(&t, "filter", a, sizeof a);
+            const int hc = svg_tag_url(&t, "clip-path", b, sizeof b);
+            const int hm = svg_tag_url(&t, "mask", c, sizeof c);
+            if (hf || hc || hm) {
+                fx = svg->nfx++;
+                pend[fx].start = t.start;
+                memcpy(pend[fx].filter, a, sizeof a);
+                memcpy(pend[fx].clip, b, sizeof b);
+                memcpy(pend[fx].mask, c, sizeof c);
+                if (nins < SVG_MAX_FX * 2) ins[nins++] = (SvgInsert) {(size_t) (t.start - text), fx, 'b'};
+                if (t.self_closing && nins < SVG_MAX_FX * 2) ins[nins++] = (SvgInsert) {(size_t) (t.end - text), fx, 'e'};
+            }
+        }
+        if (t.self_closing) continue;
+        if (depth >= (int) (sizeof stack / sizeof stack[0])) break;
+        stack[depth].def = def;
+        stack[depth].index = index;
+        stack[depth].fx = fx;
+        stack[depth].start = t.start;
+        stack[depth].content = t.end;
+        depth++;
+        if (def) in_def++;
+    }
+
+    /* the references resolve once every definition is known (masks often follow their users) */
+    for (int i = 0; i < svg->nfx; i++) {
+        svg->fx[i].filter = pend[i].filter[0] ? svg_find_filter(svg, pend[i].filter) : -1;
+        svg->fx[i].clip = pend[i].clip[0] ? svg_find_ref(svg, pend[i].clip, 1) : -1;
+        svg->fx[i].mask = pend[i].mask[0] ? svg_find_ref(svg, pend[i].mask, 0) : -1;
+    }
+    if (!ncuts && !nins) return;
+
+    /* rewrite: definitions cut, sentinels inserted (inserts are in document order already) */
+    static const char sentinel[] = "<path id=\"__knfx%c%d\" d=\"M0 0L0 0\" fill=\"none\" stroke=\"none\"/>";
+    const size_t cap = svg->tail_len + (size_t) nins * (sizeof sentinel + 8) + 1;
+    char *out = malloc(cap);
+    if (!out) return;
+    size_t o = 0, i = 0;
+    int ii = 0;
+    while (i <= svg->tail_len) {
+        while (ii < nins && ins[ii].pos == i) {
+            o += (size_t) snprintf(out + o, cap - o, sentinel, ins[ii].kind, ins[ii].fx);
+            ii++;
+        }
+        if (i == svg->tail_len) break;
+        int cut = -1;
+        for (int c = 0; c < ncuts; c++)
+            if (cuts[c].a == i) cut = c;
+        if (cut >= 0) {
+            i = cuts[cut].b; /* a cut never holds an insert: users are outside definitions */
+            continue;
+        }
+        out[o++] = text[i++];
+    }
+    out[o] = 0;
+    free(svg->tail);
+    svg->tail = out;
+    svg->tail_len = o;
+}
+
+
 static SvgImage *svg_image_parse(const char *text, const size_t len) {
     const char *end = text + len;
     const char *root = svg_find_root(text, end);
@@ -416,6 +839,7 @@ static SvgImage *svg_image_parse(const char *text, const size_t len) {
     /* blank width/height in the tail copy: each raster pass sets its own */
     if (wv) memset(svg->tail + (ws - (root + 4)), ' ', (size_t) (we - ws));
     if (hv) memset(svg->tail + (hs - (root + 4)), ' ', (size_t) (he - hs));
+    svg_fx_prepare(svg);
     return svg;
 }
 
@@ -432,12 +856,229 @@ void svg_image_destroy(SvgImage *svg) {
     if (!svg) return;
     free(svg->head);
     free(svg->tail);
+    for (int i = 0; i < svg->nrefs; i++) free(svg->refs[i].tail);
     free(svg);
 }
 
 void svg_image_size(const SvgImage *svg, float *w, float *h) {
     *w = svg ? svg->w : 0.0f;
     *h = svg ? svg->h : 0.0f;
+}
+
+/* nsvgParse() tokenises in place: compose a fresh copy per pass */
+static NSVGimage *svg_parse_tail(const SvgImage *svg, const char *tail, const size_t tail_len, const char *attrs, const size_t al) {
+    const size_t n = svg->head_len + al + tail_len;
+    char *doc = malloc(n + 1);
+    if (!doc) return NULL;
+    memcpy(doc, svg->head, svg->head_len);
+    memcpy(doc + svg->head_len, attrs, al);
+    memcpy(doc + svg->head_len + al, tail, tail_len);
+    doc[n] = 0;
+    NSVGimage *image = nsvgParse(doc, "px", 96.0f);
+    free(doc);
+    return image;
+}
+
+typedef struct {
+    const SvgImage *svg;
+    NSVGrasterizer *rast;
+    NSVGimage *image;
+    int w, h;
+    float tx, ty, rs;     /* nsvgRasterize's offset and scale */
+    float sx, sy;         /* user space -> device px scale (rs, unless "none": nanosvg maps the viewBox) */
+    const char *attrs;
+    size_t al;
+    unsigned char *tmp;   /* straight RGBA of one nsvgRasterize pass */
+} SvgCtx;
+
+static unsigned char svg_mul8(const unsigned v, const unsigned a) { return (unsigned char) ((v * a + 127) / 255); }
+
+/* dst (premultiplied) = src over dst; src straight or premultiplied */
+static void svg_over(unsigned char *dst, const unsigned char *src, const size_t pixels, const int premul) {
+    for (size_t i = 0; i < pixels; i++, dst += 4, src += 4) {
+        const unsigned sa = src[3];
+        if (!sa) continue;
+        const unsigned inv = 255 - sa;
+        for (int c = 0; c < 3; c++) dst[c] = (unsigned char) ((premul ? src[c] : svg_mul8(src[c], sa)) + svg_mul8(dst[c], inv));
+        dst[3] = (unsigned char) (sa + svg_mul8(dst[3], inv));
+    }
+}
+
+static void svg_unpremultiply(unsigned char *px, const size_t pixels) {
+    for (size_t i = 0; i < pixels; i++, px += 4) {
+        const unsigned a = px[3];
+        if (!a || a == 255) continue;
+        for (int c = 0; c < 3; c++) {
+            const unsigned v = (px[c] * 255u + a / 2) / a;
+            px[c] = (unsigned char) (v > 255 ? 255 : v);
+        }
+    }
+}
+
+/* "__knfx<kind><i>" -> i, else -1 */
+static int svg_sentinel(const NSVGshape *s, const char kind) {
+    if (strncmp(s->id, "__knfx", 6) || s->id[6] != kind) return -1;
+    return atoi(s->id + 7);
+}
+
+/* One straight box blur pass of radius r along rows (stride 1) or columns (stride w). */
+static void svg_box(const float *in, float *out, const int w, const int h, const int r, const int vertical) {
+    const int len = vertical ? h : w, lines = vertical ? w : h;
+    const float k = 1.0f / (float) (2 * r + 1);
+    for (int l = 0; l < lines; l++) {
+        const size_t base = vertical ? (size_t) l : (size_t) l * (size_t) w;
+        const size_t step = vertical ? (size_t) w : 1;
+        float sum = 0.0f;
+        for (int i = -r; i <= r; i++)
+            if (i >= 0 && i < len) sum += in[base + (size_t) i * step];
+        for (int i = 0; i < len; i++) {
+            out[base + (size_t) i * step] = sum * k;
+            const int add = i + r + 1, sub = i - r;
+            if (add < len) sum += in[base + (size_t) add * step];
+            if (sub >= 0) sum -= in[base + (size_t) sub * step];
+        }
+    }
+}
+
+/* feGaussianBlur as three box blurs (the spec's approximation, d = sigma * 3 sqrt(2 pi) / 4) */
+static void svg_blur(float *a, float *tmp, const int w, const int h, const float sigma) {
+    const int d = (int) floorf(sigma * 3.0f * sqrtf(2.0f * 3.14159265f) / 4.0f + 0.5f);
+    const int r = d / 2;
+    if (r < 1) return;
+    for (int pass = 0; pass < 3; pass++) {
+        svg_box(a, tmp, w, h, r, 0);
+        svg_box(tmp, a, w, h, r, 1);
+    }
+}
+
+static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, unsigned char *layer) {
+    const size_t n = (size_t) c->w * (size_t) c->h;
+    float *alpha = malloc(n * sizeof *alpha), *sh = malloc(n * sizeof *sh), *tmp = malloc(n * sizeof *tmp);
+    unsigned char *out = calloc(1, n * 4), *spx = malloc(n * 4);
+    if (!alpha || !sh || !tmp || !out || !spx) goto done;
+    for (size_t i = 0; i < n; i++) alpha[i] = (float) layer[i * 4 + 3] / 255.0f;
+    for (int pass = 0; pass < 2; pass++) { /* drop shadows under the source, then inner ones over it */
+        if (pass == 1) svg_over(out, layer, n, 1);
+        for (int s = 0; s < f->count; s++) {
+            const SvgShadow *d = &f->sh[s];
+            if (d->inner != pass) continue;
+            const float ox = d->dx * c->sx, oy = d->dy * c->sy;
+            for (int y = 0; y < c->h; y++)
+                for (int x = 0; x < c->w; x++) { /* the source alpha moved by (ox, oy), bilinear */
+                    const float fx = (float) x - ox, fy = (float) y - oy;
+                    const int x0 = (int) floorf(fx), y0 = (int) floorf(fy);
+                    const float ax = fx - (float) x0, ay = fy - (float) y0;
+                    float v = 0.0f;
+                    for (int j = 0; j < 2; j++)
+                        for (int i = 0; i < 2; i++) {
+                            const int xx = x0 + i, yy = y0 + j;
+                            if (xx < 0 || yy < 0 || xx >= c->w || yy >= c->h) continue;
+                            v += alpha[(size_t) yy * (size_t) c->w + (size_t) xx] * (i ? ax : 1.0f - ax) * (j ? ay : 1.0f - ay);
+                        }
+                    sh[(size_t) y * (size_t) c->w + (size_t) x] = v;
+                }
+            if (d->sd > 0.0f) svg_blur(sh, tmp, c->w, c->h, d->sd * 0.5f * (c->sx + c->sy));
+            for (size_t i = 0; i < n; i++) {
+                const float hard = fminf(1.0f, alpha[i] * 127.0f); /* the exporters' hardAlpha */
+                float a = d->inner ? fmaxf(0.0f, hard - sh[i]) : sh[i] * (d->out ? 1.0f - hard : 1.0f);
+                a = fminf(1.0f, fmaxf(0.0f, a * d->rgba[3]));
+                for (int k = 0; k < 3; k++) spx[i * 4 + k] = (unsigned char) (fminf(1.0f, fmaxf(0.0f, d->rgba[k])) * a * 255.0f + 0.5f);
+                spx[i * 4 + 3] = (unsigned char) (a * 255.0f + 0.5f);
+            }
+            svg_over(out, spx, n, 1);
+        }
+    }
+    memcpy(layer, out, n * 4);
+done:
+    free(alpha);
+    free(sh);
+    free(tmp);
+    free(out);
+    free(spx);
+}
+
+/* layer *= the mask's luminance x alpha, or the clip path's alpha */
+static void svg_apply_ref(const SvgCtx *c, const SvgRef *r, unsigned char *layer) {
+    const size_t n = (size_t) c->w * (size_t) c->h;
+    NSVGimage *img = r->tail ? svg_parse_tail(c->svg, r->tail, r->tail_len, c->attrs, c->al) : NULL;
+    unsigned char *m = img ? malloc(n * 4) : NULL;
+    if (m) nsvgRasterize(c->rast, img, c->tx, c->ty, c->rs, m, c->w, c->h, c->w * 4);
+    for (int y = 0; y < c->h; y++)
+        for (int x = 0; x < c->w; x++) {
+            const size_t i = (size_t) y * (size_t) c->w + (size_t) x;
+            unsigned v = 0;
+            if (m) {
+                const unsigned char *q = m + i * 4;
+                v = r->clip ? q[3] : (unsigned) ((0.2125f * (float) q[0] + 0.7154f * (float) q[1] + 0.0721f * (float) q[2]) * (float) q[3] / 255.0f + 0.5f);
+            }
+            if (r->has_rect) {
+                const float px = ((float) x + 0.5f - c->tx) / c->sx, py = ((float) y + 0.5f - c->ty) / c->sy;
+                if (px < r->rect[0] || py < r->rect[1] || px > r->rect[0] + r->rect[2] || py > r->rect[1] + r->rect[3]) v = 0;
+            }
+            for (int k = 0; k < 4; k++) layer[i * 4 + k] = svg_mul8(layer[i * 4 + k], v);
+        }
+    free(m);
+    if (img) nsvgDelete(img);
+}
+
+/* A masked element nanosvg draws nothing of (a pattern or <image> fill, e.g.
+ * battlepass/unlocked_front.svg): the mask's own shapes stand in for it, as
+ * they did before masks were applied, rather than nothing at all. */
+static void svg_ref_stand_in(const SvgCtx *c, const SvgRef *r, unsigned char *layer) {
+    NSVGimage *img = r->tail ? svg_parse_tail(c->svg, r->tail, r->tail_len, c->attrs, c->al) : NULL;
+    if (!img) return;
+    nsvgRasterize(c->rast, img, c->tx, c->ty, c->rs, c->tmp, c->w, c->h, c->w * 4);
+    svg_over(layer, c->tmp, (size_t) c->w * (size_t) c->h, 0);
+    nsvgDelete(img);
+}
+
+/* Draws the shapes from s on into dst (premultiplied) until the end sentinel of
+ * fx `stop` (-1: the end); returns the shape after it. */
+static NSVGshape *svg_render_seq(SvgCtx *c, NSVGshape *s, const int stop, unsigned char *dst) {
+    const size_t pixels = (size_t) c->w * (size_t) c->h;
+    NSVGshape *run = NULL, *last = NULL;
+    for (;;) {
+        int k = -1;
+        const int is_end = s && (k = svg_sentinel(s, 'e')) >= 0;
+        const int is_begin = s && !is_end && (k = svg_sentinel(s, 'b')) >= 0 && k < c->svg->nfx;
+        if (!s || is_end || is_begin) {
+            if (run) { /* the plain shapes so far, in one pass */
+                NSVGshape *keep = last->next, *head = c->image->shapes;
+                last->next = NULL;
+                c->image->shapes = run;
+                nsvgRasterize(c->rast, c->image, c->tx, c->ty, c->rs, c->tmp, c->w, c->h, c->w * 4);
+                c->image->shapes = head;
+                last->next = keep;
+                svg_over(dst, c->tmp, pixels, 0);
+                run = last = NULL;
+            }
+            if (!s) return NULL;
+            if (is_end) {
+                if (k == stop) return s->next;
+                s = s->next; /* a stray end */
+                continue;
+            }
+            unsigned char *layer = calloc(1, pixels * 4);
+            if (!layer) return NULL;
+            NSVGshape *next = svg_render_seq(c, s->next, k, layer);
+            const SvgFx *fx = &c->svg->fx[k];
+            if (fx->filter >= 0) svg_apply_filter(c, &c->svg->filters[fx->filter], layer);
+            if (fx->clip >= 0) svg_apply_ref(c, &c->svg->refs[fx->clip], layer);
+            if (fx->mask >= 0) {
+                size_t i = 0;
+                while (i < pixels && !layer[i * 4 + 3]) i++;
+                if (i == pixels) svg_ref_stand_in(c, &c->svg->refs[fx->mask], layer);
+                else svg_apply_ref(c, &c->svg->refs[fx->mask], layer);
+            }
+            svg_over(dst, layer, pixels, 1);
+            free(layer);
+            s = next;
+            continue;
+        }
+        if (!run) run = s;
+        last = s;
+        s = s->next;
+    }
 }
 
 unsigned char *svg_image_rasterize(const SvgImage *svg, const int w, const int h) {
@@ -471,22 +1112,32 @@ unsigned char *svg_image_rasterize_placed(const SvgImage *svg, const int w, cons
     }
     if (al <= 0 || (size_t) al >= sizeof attrs) return NULL;
 
-    /* nsvgParse() tokenises in place: compose a fresh copy per pass */
-    const size_t n = svg->head_len + (size_t) al + svg->tail_len;
-    char *doc = malloc(n + 1);
-    if (!doc) return NULL;
-    memcpy(doc, svg->head, svg->head_len);
-    memcpy(doc + svg->head_len, attrs, (size_t) al);
-    memcpy(doc + svg->head_len + al, svg->tail, svg->tail_len);
-    doc[n] = 0;
-    NSVGimage *image = nsvgParse(doc, "px", 96.0f);
-    free(doc);
+    NSVGimage *image = svg_parse_tail(svg, svg->tail, svg->tail_len, attrs, (size_t) al);
     if (!image) return NULL;
 
     unsigned char *px = malloc((size_t) w * (size_t) h * 4);
     NSVGrasterizer *rast = px ? nsvgCreateRasterizer() : NULL;
-    if (rast) nsvgRasterize(rast, image, tx, ty, scale, px, w, h, w * 4);
-    else {
+    if (rast && svg->nfx) {
+        /* layers: the shapes between sentinels go through their filter / clip / mask */
+        const size_t n = (size_t) w * (size_t) h * 4;
+        unsigned char *acc = calloc(1, n), *tmp = malloc(n);
+        if (acc && tmp) {
+            SvgCtx ctx = {svg, rast, image, w, h, tx, ty, scale, scale, scale, attrs, (size_t) al, tmp};
+            if (svg->align_x < 0) { /* "none": nanosvg maps the viewBox itself */
+                ctx.sx = vpw / vw;
+                ctx.sy = vph / vh;
+            }
+            svg_render_seq(&ctx, image->shapes, -1, acc);
+            svg_unpremultiply(acc, (size_t) w * (size_t) h);
+            memcpy(px, acc, n);
+        } else {
+            nsvgRasterize(rast, image, tx, ty, scale, px, w, h, w * 4);
+        }
+        free(acc);
+        free(tmp);
+    } else if (rast) {
+        nsvgRasterize(rast, image, tx, ty, scale, px, w, h, w * 4);
+    } else {
         free(px);
         px = NULL;
     }

@@ -76,7 +76,8 @@
           "r": "gift"
         }
       ],
-      "collect": "none"
+      "collect": "none",
+      "autoCollectElapsed": 3000
     },
     "scoreboard": [
       {
@@ -87,6 +88,5 @@
     ]
   },
   "frames": 3,
-  "note": "Results of a guest match with two skins won: the Collect Rewards button under the results (collect \"none\": no overlay, no countdown tick). Reference: the offline v10 sandbox (capture-v10.js ingame-endscreen-collect).",
-  "pending": "S4: no v10 capture yet (tools/uidiff/capture-v10.js ingame-endscreen-collect) and no regions file; the end-to-end check is server/tests/v10_endscreen_e2e.py"
+  "note": "Results of a guest match with two skins won: the Collect Rewards button under the results (collect \"none\": no overlay, no countdown tick). Reference: the offline v10 sandbox (capture-v10.js ingame-endscreen-collect). autoCollectElapsed 3000: the capture shows \"7s to auto collect\"."
 }

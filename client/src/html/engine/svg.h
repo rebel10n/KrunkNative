@@ -10,7 +10,9 @@
  * one synthesised from its intrinsic size ("0 0 w h"), so it scales instead of
  * clipping.  Supported: what nanosvg parses (paths and basic shapes, fill and
  * stroke, <g>/transforms, linear/radial gradients, simple `.class` <style>
- * rules); no text, filters, masks or images.
+ * rules), plus mask= (luminance), clip-path= and filter= read as the drop /
+ * inner shadows design tools export (svg.c draws those elements in layers of
+ * their own); no text, patterns or images.
  *
  * Intrinsic size (CSS px): width/height attributes in px or absolute units;
  * a missing or percentage one is derived from the viewBox ratio, else the

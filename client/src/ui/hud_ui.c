@@ -60,7 +60,6 @@ void hud_ui_hit(Client*, int kill);
 #include <online_mode.h> // online_mode_server_rights: the player list's staff buttons
 #include <net_ext.h>     // NET_RIGHTS_*
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
-#include <menu_view.h>  // menu_view_time_scale: the round-end slow motion scales the title's dt
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include <cJSON.h>
@@ -3285,8 +3284,9 @@ static void hud_end_results(const Client *client) {
 
 // Per frame (overlay.render runs every frame): the results once config.endAnim ran out (f1912 ->
 // f1913: vicTitle.show = false), else one vicTitle step. Its dt is the frame's gameTimeDiff:
-// the frame time clamped to config.dltMx, then scaled by the round-end slow motion
-// (endAnimationTimer / endAnim, menu_view_time_scale), as v7's overlay.render gets it.
+// the frame time clamped to config.dltMx and NOT scaled by the round-end slow motion: v10's
+// game loop hands overlay.render the copy it takes before the endAnim scale (v10:219855
+// `_69430 = _69429` ahead of `_69429 *= endAnimationTimer / endAnim`), unlike v7.
 // toggleMenu(true) hides #endUI, so an open menu takes the reset branch.
 static void hud_end_step(const Client *client, const double now_ms) {
     HudUi *ui = &g_hud_ui;
@@ -3298,20 +3298,21 @@ static void hud_end_step(const Client *client, const double now_ms) {
     }
     dt = input_script_delta((float) (dt / 1000.0)) * 1000.0; // KRUNKNATIVE_FIXED_DELTA: the game's frame step
     dt = dt > 0.0 ? (dt < VIC_TITLE_DT_MAX_MS ? dt : VIC_TITLE_DT_MAX_MS) : 0.0;
-    if (ui->ended && ui->end_phase == 1 && now_ms - ui->end_start_ms >= END_ANIM_MS) {
+    // setTimeout(endAnim) runs from io_gameEnd, which v10 handles ahead of that frame's render; the
+    // 1e-3 ms only absorbs the rounding of a 60 Hz clock summed over 5 s (--render-scenario)
+    if (ui->ended && ui->end_phase == 1 && now_ms - ui->end_start_ms >= END_ANIM_MS - 1e-3) {
         ui->end_phase = 2;
         hud_end_results(client); // hides the title
     }
     const int show = ui->ended && ui->end_phase == 1 && !html_ui_is_menu_open();
-    const double world = client && client->game.ready ? menu_view_time_scale() : 1.0;
     if (g_hud_clock_s >= 0.0 && show) {
         // --render-scenario: the pinned clock jumps to the capture time; replay the jump as the
         // 60 Hz frames it stands for, so a capture `after_ms` past the END shows that frame.
         double left = ui->tick_jump_ms;
         ui->tick_jump_ms = 0.0;
-        for (; left > 0.0; left -= 1000.0 / 60.0) hud_end_title_frame(show, (left < 1000.0 / 60.0 ? left : 1000.0 / 60.0) * world);
+        for (; left > 0.0; left -= 1000.0 / 60.0) hud_end_title_frame(show, left < 1000.0 / 60.0 ? left : 1000.0 / 60.0);
     }
-    hud_end_title_frame(show, dt * world);
+    hud_end_title_frame(show, dt);
 }
 
 void hud_ui_show_end_screen(Client *client, const int result, const char *next_round) {

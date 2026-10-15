@@ -332,6 +332,7 @@ static void warn_unknown_keys(void) {
         "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
         "modeHud", // with modeName: pinned mode HUD state (hud_modes_scenario: scores, flags, gmsg)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
+        "raidPromo", // 0 / 1: the raid promo roll of a console `end` (hud_endscreen_v10.c)
         "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
@@ -680,6 +681,13 @@ static void scenario_frame(Client *client, const double clock_ms, const int pres
     g_sc.last_now_s = now_s;
     client->last_frame_time = now_s;
     hud_modes_scenario(client, st("modeHud")); // the pinned mode state, before the HUD tick reads it
+    // state.matchVotes []: no vote cards even when a console `end` makes the sandbox send some. The v10
+    // sandbox's map list is the capture's map alone, so its endData.mts has one entry: no #matchVoteHolder,
+    // #endMidHolder at top 205px (v10:219684); KrunkNative's offline server rotates every map.
+    const cJSON *raid = st("raidPromo");
+    if (cJSON_IsNumber(raid)) hud_endscreen_v10_scenario_raid(raid->valueint ? 1 : 0);
+    const cJSON *votes = st("matchVotes");
+    if (cJSON_IsArray(votes) && !cJSON_GetArraySize(votes) && lobby_vote_state()->count) lobby_vote_reset();
     client_tick(client, (float) now_s, (float) delta);
     if (present) headless_swap_buffers(client->window);
     glfwPollEvents();

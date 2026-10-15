@@ -88,8 +88,37 @@ function offlineFile(u, stubs) {
   if (isFile(f)) return f;
   if (p.startsWith('libs/')) { const l = path.join(V7_PUBLIC, p); if (isFile(l)) return l; }
   for (const d of ASSET_DIRS) { const a = path.join(d, p); if (isFile(a)) return a; }
+  const u2 = uiImport(u, p);
+  if (u2) return u2;
   return '';
 }
+// A page file the mirror lacks but tools/ui-import fetched from the same krunker.io URL into ui/
+// (tools/ui-import/live_assets_v10.lock: `ui <path> https://krunker.io/<path> <sha256> <size>`), served
+// only while ui/<path> still has the recorded sha256 (an untouched krunker.io file, e.g. img/gift.webp).
+let UI_LOCK = null;
+function uiImport(u, p) {
+  if (u.hostname !== 'krunker.io') return '';
+  if (!UI_LOCK) {
+    UI_LOCK = new Map();
+    try {
+      for (const line of fs.readFileSync(path.join(REPO, 'tools', 'ui-import', 'live_assets_v10.lock'), 'utf8').split('\n')) {
+        const f = line.split('\t');
+        if (f[0] === 'ui' && f[2] === 'https://krunker.io/' + f[1]) UI_LOCK.set(f[1], f[3]);
+      }
+    } catch (e) { }
+  }
+  const sha = UI_LOCK.get(p);
+  const f = path.join(REPO, 'ui', p);
+  if (!sha || !isFile(f)) return '';
+  return require('crypto').createHash('sha256').update(fs.readFileSync(f)).digest('hex') === sha ? f : '';
+}
+// v10's store.skins (the catalogue the API serves a signed-in or guest client; the offline sandbox has
+// none, so a skin reward's Collect button and overlay have no items): the dump of v10's own store.skins
+// array (index = the skin index of a reward's `i`), KN_V10_SKINS, default ~/.cache/kn-v10/v10_skins_raw.json.
+const V10_SKINS = process.env.KN_V10_SKINS || path.join(HOME, '.cache/kn-v10/v10_skins_raw.json');
+// The store object is frozen; its skins array is filled in place, as v10's own catalogue load does.
+const STORE_SKINS = () => `(() => { const a = window.__knScope().cg.store.skins; if (Object.isFrozen(a)) return 'frozen';
+  a.length = 0; const l = ${fs.readFileSync(V10_SKINS, 'utf8')}; for (const s of l) a.push(s); return a.length ? 1 : 0; })()`;
 const ALLOW_HOST = (h) => h === 'krunker.io' || h.endsWith('.krunker.io');
 const BLOCK_URLS = ['*googletagmanager*', '*google-analytics*', '*doubleclick*', '*googlesyndication*', '*adinplay*',
   '*platform.twitter.com*', '*apis.google.com*', '*unpkg.com*', '*facebook*', '*hotjar*', '*sentry*'];
@@ -438,6 +467,7 @@ const COLLECT_SKINS = (process.env.KN_COLLECT_SKINS || '1,2').split(',').map(Num
 const COLLECT_ITEMS = JSON.stringify(COLLECT_SKINS.map((i) => ({ t: 'skin', i, r: 'gift' })));
 scenario('ingame-endscreen-collect', async (c) => {
   await enterGame(c);
+  if (await c.eval(STORE_SKINS()) !== 1) throw new Error('store.skins: not filled');
   await c.eval(`(() => { ${SP}.itemRewards = ${COLLECT_ITEMS}; window.__knScope().sock.connected = true; ${SG}.endGame(); return 1; })()`);
   await settle(c, 7000);
 });
@@ -445,6 +475,7 @@ scenario('ingame-endscreen-collect', async (c) => {
 // (its Double XP box and the Collect button stack in the same column)
 scenario('ingame-endscreen-collect-raid', async (c) => {
   await enterGame(c);
+  if (await c.eval(STORE_SKINS()) !== 1) throw new Error('store.skins: not filled');
   await c.eval(`(() => { ${SP}.itemRewards = ${COLLECT_ITEMS}; window.__knScope().sock.connected = true;
     const rnd = Math.random; Math.random = () => 0; try { ${SG}.endGame(); } finally { Math.random = rnd; } return 1; })()`);
   await settle(c, 7000);
@@ -547,7 +578,7 @@ async function capture(sc, idx) {
 // the frame-sequence captures (capture-v10-seq.js) reuse the sandbox: openPage, enterGame, the
 // page helpers; the CLI below runs only when this file is the entry point
 module.exports = { REPO, openPage, enterGame, waitSandbox, lock, key, shoot, settle, flatPage, scenario, S, RECTS, PIN_TIMER, PIN_TEXT,
-  PIN_GMSG, HIDE_OVERLAY, PAUSE_ANIMS, GAME_CANVAS, SPAWN_BOT, SERVER_BOT, SG, SP, CG, CLOSERS, setOut: (o) => { OUT = o; } };
+  PIN_GMSG, HIDE_OVERLAY, PAUSE_ANIMS, GAME_CANVAS, SPAWN_BOT, SERVER_BOT, SG, SP, CG, CLOSERS, STORE_SKINS, COLLECT_ITEMS, setOut: (o) => { OUT = o; } };
 if (require.main === module) (async () => {
   const args = process.argv.slice(2);
   const names = [];

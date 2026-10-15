@@ -124,9 +124,13 @@ module.exports = function (seq, V) {
     note: 'The end animation, then the results (tabs, Combat Earnings) with the socket marked connected.',
   });
   // otherData.items with a rarity (v10:203226) -> the Collect Rewards button (_66678, svelte-3svau8)
-  const REWARD_ITEMS = `[{ t: 'skin', i: 7, r: 1 }, { t: 'skin', i: 12, r: 3 }]`;
+  // the items of capture-v10.js ingame-endscreen-collect (skins 1 and 2, the 'gift' icon) with v10's
+  // store.skins put in (V.STORE_SKINS): without the catalogue the button has no item, stays disabled
+  // (opacity 0.5, no countdown) and the click does nothing
+  const REWARD_ITEMS = V.COLLECT_ITEMS;
   const endWithRewards = async (c) => {
     await inGame(c);
+    if (await c.eval(V.STORE_SKINS()) !== 1) throw new Error('store.skins: not set');
     await evalOk(c, `window.__knScope().sock.connected = true; ${SG}.endGame()`, 'endGame');
     for (let i = 0; i < 40 && !await c.eval(`!!(window.GUI && GUI.endScreen && document.getElementById('endLayoutHolder'))`).catch(() => false); i++) await sleep(250);
   };

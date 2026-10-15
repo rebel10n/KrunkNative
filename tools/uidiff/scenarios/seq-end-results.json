@@ -32,7 +32,9 @@
     "chat": [],
     "console": [
       "end"
-    ]
+    ],
+    "matchVotes": [],
+    "raidPromo": 1
   },
-  "note": "The end animation, then the results (tabs, Combat Earnings)."
+  "note": "The end animation, then the results (tabs, Combat Earnings). matchVotes []: no vote cards, like the v10 sandbox (its one-map list gives endData.mts one entry) raidPromo 1: the sandbox's seeded Math.random shows the raid promo."
 }

@@ -1,0 +1,48 @@
+{
+  "scenario": "ingame-endscreen-collect-raid",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat",
+      "rect": [
+        10,
+        670,
+        243,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder"
+    },
+    {
+      "name": "end-card",
+      "rect": [
+        351,
+        128,
+        583,
+        232
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#endTabbedView's card with the raid promo (#raidPromoContainer: Battle Bosses in Raids!)"
+    },
+    {
+      "name": "end-buttons",
+      "rect": [
+        430,
+        355,
+        440,
+        70
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#endButtonsHolder"
+    }
+  ]
+}

@@ -48,9 +48,9 @@
         }
       ],
       "collect": "none",
-      "raid": 1
+      "raid": 0,
+      "autoCollectElapsed": 500
     }
   },
-  "note": "Results with two reward skins: the Collect Rewards button, 3 s pulse. Reference: capture-v10-seq.js end-collect-button. Scenario state.endscreen carries the held items (hud_endscreen_v10_scenario).",
-  "pending": "S4: the row renders where v10 has it (Double XP + COLLECT under the card); left: the v10 capture shows the item icon unloaded (alt text 'Icon') and COLLECT dimmed with no countdown label, the ad-icon.svg paint differs (double-xp 10.7%, collect 17-20% against 3%), and timing:pulse needs a region where the reference changes"
+  "note": "Results with two reward skins: the Collect Rewards button, 3 s pulse. Reference: capture-v10-seq.js end-collect-button. Scenario state.endscreen carries the held items (hud_endscreen_v10_scenario)."
 }

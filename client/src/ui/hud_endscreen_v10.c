@@ -35,9 +35,10 @@
 #define RAID_MODE_INDEX 23      // showRaidPromo: 0x17 !== modeIndex
 // #doubleXPButton (v10 g:203332, not a comp game): the ad icon and the Double XP label. The rewarded
 // ad is not served here, so the click does nothing (h_double_xp).
-#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">" \
-    "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">" \
-    "<div id=\"returnText\">Double XP</div></div>"
+// v10's whitespace kept: the newline + tabs between the inline icon and #returnText lay out as one space.
+#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
+    "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">\n\t\t\t\t\t\t" \
+    "<div id=\"returnText\">Double XP</div>\n\t\t\t\t\t</div>"
 
 typedef struct {
     int skin;
@@ -75,7 +76,9 @@ static struct {
     int css_added, handler_added;
     // --render-scenario: start the overlay / auto-collect when the card first shows
     int scn_collect; // 0 none, 1 overlay, 2 auto
-} E;
+    int force_raid;     // state.raidPromo (0 / 1) for a console `end` in a scenario, -1: roll
+    double scn_elapsed; // state.endscreen.autoCollectElapsed: ms from endScreen.init to the button's mount
+} E = {.force_raid = -1};
 
 /* ------------------------------------------------------------ helpers */
 
@@ -531,6 +534,7 @@ void hud_endscreen_v10_reset(void) {
     E.btn_mounted = 0;
     E.ev_count = 0;
     E.scn_collect = 0;
+    E.scn_elapsed = 0.0;
 }
 
 void hud_endscreen_v10_begin(const Client *client, const double now_ms) {
@@ -541,12 +545,14 @@ void hud_endscreen_v10_begin(const Client *client, const double now_ms) {
     const Game *game = client ? &client->game : NULL;
     // g:191404: 0x17 !== modeIndex && !isCustom && isPubType() && Math.random() < 0.5
     E.show_raid = game && game_mode_id(game) != RAID_MODE_INDEX && game_is_pub_type(game) && (rand() & 1);
+    if (E.force_raid >= 0) E.show_raid = E.force_raid; // --render-scenario state.raidPromo: the capture's roll
     E.double_raid = 0; // isDoubleRaidDrops: a weekend event KrunkNative has no calendar for
 }
 
 void hud_endscreen_v10_results(const double now_ms) {
     E.now = now_ms;
-    E.auto_at_ms = now_ms + AUTO_COLLECT_MS; // endScreen.init: autoCollectTime = now + 0x2710 (g:203310)
+    // endScreen.init: autoCollectTime = now + 0x2710 (g:203310); a scenario mounts the button some time after it
+    E.auto_at_ms = now_ms + AUTO_COLLECT_MS - E.scn_elapsed;
     E.results = 1;
 }
 
@@ -629,7 +635,12 @@ void hud_endscreen_v10_scenario(const cJSON *end) {
     const cJSON *dbl = cJSON_GetObjectItemCaseSensitive(end, "doubleRaid");
     E.double_raid = cJSON_IsTrue(dbl) || (cJSON_IsNumber(dbl) && dbl->valueint);
     const cJSON *collect_mode = cJSON_GetObjectItemCaseSensitive(end, "collect");
+    // the time v10's button mounted after endScreen.init in the capture (its first label: floor((10 s - this) / 1 s))
+    const cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(end, "autoCollectElapsed");
+    E.scn_elapsed = cJSON_IsNumber(elapsed) ? elapsed->valuedouble : 0.0;
     if (cJSON_IsString(collect_mode)) E.scn_collect = !strcmp(collect_mode->valuestring, "auto") ? 2 : !strcmp(collect_mode->valuestring, "overlay") ? 1 : 0;
 }
 
 int hud_endscreen_v10_overlay_active(void) { return E.ov_active; }
+
+void hud_endscreen_v10_scenario_raid(const int raid) { E.force_raid = raid; }

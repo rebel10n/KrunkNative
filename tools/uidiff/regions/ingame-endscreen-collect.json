@@ -1,0 +1,48 @@
+{
+  "scenario": "ingame-endscreen-collect",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat",
+      "rect": [
+        10,
+        670,
+        243,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder"
+    },
+    {
+      "name": "end-card",
+      "rect": [
+        351,
+        128,
+        583,
+        200
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#endTabbedView's card"
+    },
+    {
+      "name": "end-buttons",
+      "rect": [
+        430,
+        325,
+        440,
+        70
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#endButtonsHolder: Double XP (the ad icon: svg mask + shadow filter) and the Collect Rewards button (gift.webp, COLLECT, 7s to auto collect)"
+    }
+  ]
+}

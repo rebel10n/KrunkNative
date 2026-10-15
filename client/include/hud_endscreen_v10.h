@@ -52,6 +52,10 @@ void hud_endscreen_v10_tick(double now_ms);
 // doubleRaid, collect: "overlay"|"auto"}. Called before the end screen is shown.
 void hud_endscreen_v10_scenario(const cJSON *end);
 
+// --render-scenario state.raidPromo: 0 / 1 fixes the raid promo's roll of the next END (the v10
+// sandbox's seeded Math.random), -1 rolls again.
+void hud_endscreen_v10_scenario_raid(int raid);
+
 // 1 while the rewards overlay is up (tests).
 int hud_endscreen_v10_overlay_active(void);
 

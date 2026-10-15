@@ -16,7 +16,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "v10's #doubleXPButton in #endButtonsHolder (KrunkNative: not rendered yet)"
+      "note": "v10's #doubleXPButton in #endButtonsHolder: the ad icon (frvr-ui/ad-icon.svg: mask + drop-shadow filter, svg.c) and Double XP"
     },
     {
       "name": "collect",
@@ -28,20 +28,21 @@
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "the Collect Rewards button, beside Double XP in the same row (v10 flex, gap 10px)"
+      "max_pct": 6.0,
+      "note": "the Collect Rewards button beside Double XP (v10 flex, gap 10px): gift icon, COLLECT, the countdown. COLLECT is GameFont with synthetic bold: FreeType's embolden and Skia's differ at the glyph edges (3.8% of the region, 5.7% in the 500 ms pulse frame)"
     }
   ],
   "timing": [
     {
       "name": "pulse",
       "rect": [
-        440,
-        420,
-        400,
-        80
+        700,
+        325,
+        160,
+        62
       ],
-      "threshold": 0.5
+      "threshold": 0.5,
+      "note": "the 3 s pulse (scale 1.15 at 150 / 450 ms) and the countdown ticking on the Collect button"
     }
   ]
 }
