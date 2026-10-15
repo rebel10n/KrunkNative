@@ -581,6 +581,7 @@ static const SocialRoute k_routes[] = {
     {"rpt", sh_report},
     {"flg", sh_flag},
     {"ver", sh_verify},
+    {"sbdg", sh_staff_badge},          /* KrunkNative: Give Badge / Remove on a profile (profiles.c) */
     {"ps", sh_post},
     {"com", sh_comment},
     {"gps", sh_get_post},

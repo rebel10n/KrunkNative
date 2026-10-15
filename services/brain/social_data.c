@@ -8,6 +8,7 @@
  * functions of postgres/0104_social_functions.sql or their C versions.
  */
 #include "acct_internal.h"
+#include "game_presence.h" /* game_presence_get: "In game" (chat header) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -185,7 +186,28 @@ void sh_chat_blobs(SocialSession *s, const cJSON *f) {
                  KN_DB_ARGS(me_str(s, me)), rows_done, ctx_new("chtb", 0, 0));
 }
 
-/* ["ctd", peerId] -> ["chtl", [{fid, fna, txt, tim}]] newest first; marks them read */
+/* ["chs", {id, st, sm}]: the chat peer's presence for the header (v10: Online / Offline, or the
+ * "In game" status text), sent with the thread on "ctd" */
+typedef struct ChatStatus {
+    SocialSession *s; /* held */
+    int64_t id;
+} ChatStatus;
+
+static void chat_status_done(void *ud, const int *online, size_t n) {
+    ChatStatus *w = ud;
+    const int on = n > 0 && online[0];
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) w->id);
+    cJSON_AddBoolToObject(o, "st", on);
+    char game[96] = "";
+    int locked = 0;
+    if (on && game_presence_get(w->id, game, sizeof game, &locked) == 1 && game[0]) cJSON_AddStringToObject(o, "sm", "In game");
+    social_send_n(w->s, "chs", 1, o);
+    social_unhold(w->s);
+    free(w);
+}
+
+/* ["ctd", peerId] -> ["chtl", [{fid, fna, txt, tim}]] newest first; marks them read; ["chs", ...] */
 void sh_chat_thread(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     char me[24], peer[24];
@@ -196,6 +218,12 @@ void sh_chat_thread(SocialSession *s, const cJSON *f) {
     }
     social_call(s, &P_CHAT_THREAD,
                  KN_DB_ARGS(me_str(s, me), acct_itoa(peer, peer_id)), rows_done, ctx_new("chtl", 0, 0));
+    ChatStatus *w = calloc(1, sizeof *w);
+    if (w) {
+        w->s = social_hold(s);
+        w->id = peer_id;
+        social_online_lookup(&peer_id, 1, chat_status_done, w);
+    }
 }
 
 static void chat_sent(SocialSession *s, kn_db_result *res, void *extra) {

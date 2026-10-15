@@ -321,6 +321,48 @@ static kn_db_result *run_badge_select(kn_dbconn *c, int n, const char *const *p)
 }
 const kn_proc P_BADGE_SELECT = {"badge_select", NULL, run_badge_select};
 
+/* (actor, name, badge, on) -> one row when the badge was given (on = 1) or removed (on = 0) by a
+ * developer (v10's Give Badge / Remove on a profile). Removing the badge a player has equipped
+ * clears stats.bdg. The change is logged in moderation_log (action "badge" / "unbadge"). */
+static kn_db_result *run_staff_badge(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t badge = PI(2);
+    const int on = PI(3) ? 1 : 0;
+    const int allowed = dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0"),
+                                   KN_DB_ARGS(P(0)));
+    const int64_t target = allowed && P(1) && *P(1) ? db_account_id(&x, P(1)) : 0;
+    const char *names[1] = {"player_id"};
+    const kn_db_type types[1] = {KN_DB_T_INT};
+    kn_db_result *r = kn_db_result_new(1, names, types);
+    if (target > 0 && badge >= 0 && badge < BADGE_COUNT) {
+        if (on) {
+            add_badge(&x, target, (int) badge);
+        } else {
+            dbx_exec(&x, SQL(.any = "DELETE FROM player_badges WHERE account_id = $1 AND badge = $2"),
+                     KN_DB_ARGS(I64S(target), I64S(badge)));
+            char *text = dbx_text(&x, SQL(.any = "SELECT player_stats FROM players WHERE player_id = $1 {for_update}"),
+                                  KN_DB_ARGS(I64S(target)));
+            cJSON *stats = text ? cJSON_Parse(text) : NULL;
+            free(text);
+            if (cJSON_IsObject(stats) && kn_json_int(stats, "bdg", -1) == badge) {
+                cJSON_DeleteItemFromObjectCaseSensitive(stats, "bdg");
+                cJSON_AddNumberToObject(stats, "bdg", -1);
+                char *merged = cJSON_PrintUnformatted(stats);
+                dbx_exec(&x, SQL(.any = "UPDATE players SET player_stats = $2, updated_at = {now} WHERE player_id = $1"),
+                         KN_DB_ARGS(I64S(target), merged));
+                free(merged);
+            }
+            cJSON_Delete(stats);
+        }
+        dbx_exec(&x, SQL(.any = "INSERT INTO moderation_log (actor_id, target_id, action) VALUES ($1, $2, $3)"),
+                 KN_DB_ARGS(P(0), I64S(target), on ? "badge" : "unbadge"));
+        const char *row[1] = {I64S(target)};
+        if (r) kn_db_result_add_row(r, row);
+    }
+    return dbx_finish(&x, r);
+}
+const kn_proc P_STAFF_BADGE = {"staff_badge", NULL, run_staff_badge};
+
 /* (account id, badge, season, now_s) -> {badge}: claimBadge of a claimable badge whose rule holds */
 static kn_db_result *run_badge_claim(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};

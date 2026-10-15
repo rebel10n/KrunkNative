@@ -6,6 +6,7 @@
  * for the other drivers, returning the same shape.
  */
 #include "db_procs.h"
+#include "knsvc/json.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -511,6 +512,15 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
     cJSON_DeleteItemFromObjectCaseSensitive(row, "clan_role");
     cJSON_DeleteItemFromObjectCaseSensitive(row, "player_2fa");
     cJSON_AddNumberToObject(row, "player_follow", 0);
+    /* the earned badges (player_badges, as kn_account_json's "badges"): the profile's Badges tab */
+    cJSON *badge_rows = dbx_rows(&x, SQL(.any = "SELECT badge AS b__i FROM player_badges WHERE account_id = $1 ORDER BY badge"),
+                                 KN_DB_ARGS(id));
+    cJSON *badges = cJSON_CreateArray();
+    const cJSON *br;
+    cJSON_ArrayForEach(br, badge_rows) cJSON_AddItemToArray(badges, cJSON_CreateNumber((double) kn_json_int(br, "b", -1)));
+    cJSON_Delete(badge_rows);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "badges");
+    cJSON_AddItemToObject(row, "badges", badges);
     cJSON *games = dbx_rows(&x,
         SQL(.any = "SELECT m.map_id, {html:m.map_name} AS map_name, m.map_date, m.map_info AS map_info__t, m.map_votes,"
                    " $2 AS creatorname, m.map_image, m.map_plays AS map_player FROM published_maps m"

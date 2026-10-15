@@ -105,7 +105,7 @@ extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUI
 extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
 
 /* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
-extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS;
+extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS, P_STAFF_BADGE;
 
 /* ---- Krunker v10.0.2 ranked (db_ranked.c, 0205_ranked_v10) */
 extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MATCH_READY,

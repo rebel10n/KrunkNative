@@ -24,6 +24,8 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <social.h>
+#include <badges.h>    // badge_get: the earned badges of a profile (Badges tab)
+#include <v10_social.h> // v10_gapi: the giveaway post (gapi POST /social/post)
 #include <ui_logic.h>
 #include <ui_vgrid.h> // the market / inventory / item lists are virtual grids
 #include <ctype.h>
@@ -164,7 +166,9 @@ typedef struct {
     int logged_in;          // acc != null
     char profile_name[64];  // profile.player_name (follow / followers)
     int profile_id;
+    int profile_featured, profile_hack; // player_featured / player_hack of the profile (Verify, Flag)
     double profile_followed, profile_following;
+    int giveaway;           // the post box's KR giveaway switch (togglPos)
     int posting;            // Ve: a post is being submitted
 } Hub;
 
@@ -1328,6 +1332,8 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     const char *name = jstr(t, "player_name");
     snprintf(g_hub.profile_name, sizeof(g_hub.profile_name), "%s", name ? name : "");
     g_hub.profile_id = (int) jnum(t, "player_id");
+    g_hub.profile_featured = (int) jnum(t, "player_featured");
+    g_hub.profile_hack = (int) jnum(t, "player_hack");
     g_hub.profile_followed = jnum(t, "player_followed");
     g_hub.profile_following = jnum(t, "player_following");
     cJSON *stats = NULL;
@@ -1353,7 +1359,9 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     const char *alias = jstr(t, "player_alias");
     char num[64], num2[64];
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='onStatus onStatProf' style='background:%s'></div>", jnum(t, "st") ? "#27ab32" : "#7f7f7f");
+    // the presence dot (social_eb.c's st) with v10's status text as its tooltip: Online / In game / Offline
+    sb_appendf(&sb, "<div class='onStatus onStatProf' title='%s' style='background:%s'></div>",
+               jnum(t, "st") ? (jstr(t, "sm") ? jstr(t, "sm") : "Online") : "Offline", jnum(t, "st") ? "#27ab32" : "#7f7f7f");
     sb_append(&sb, "<div class='leftTopHolder'>");
     if (jnum(t, "partner_approved") >= 2) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-14px;'>verified</i>");
     if (premium) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#FBC02D;vertical-align:middle;margin-top:-14px;'>beenhere</i>");
@@ -1528,9 +1536,26 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     set_html("pTabContent_activity", "");
     set_html("pTabContent_listings", "");
     // badges (v7 data/badges.js): KrunkNative has no badge table yet: the none text
-    char badges_none[256];
-    snprintf(badges_none, sizeof(badges_none), "<div class='scrollItemNew'><div class='noneText'>%s</div></div>", I18N("social.profile.badges.none", "No Badges found for this user"));
-    set_html("pTabContent_badges", badges_none);
+    // the earned badges (the row's badges: player_badges) by v7's names; no icons are shipped for them
+    StrBuf bsb = {0};
+    int nbadges = 0;
+    const cJSON *earned = cJSON_GetObjectItemCaseSensitive(t, "badges"), *eb;
+    sb_append(&bsb, "<div class='scrollItemNew' style='text-align:left'>");
+    cJSON_ArrayForEach(eb, earned) {
+        const BadgeDef *def = badge_get(cJSON_IsNumber(eb) ? (int) eb->valuedouble : -1);
+        if (!def) continue;
+        nbadges++;
+        sb_append(&bsb, "<div title='");
+        sb_append_esc(&bsb, def->desc);
+        sb_append(&bsb, "' style='display:inline-block;margin:6px;padding:8px 12px;border-radius:4px;background:rgba(255,255,255,0.08);color:#fbc02d;font-size:16px'>");
+        sb_append_esc(&bsb, def->name);
+        sb_append(&bsb, "</div>");
+    }
+    if (!nbadges) sb_appendf(&bsb, "<div class='noneText'>%s</div>", I18N("social.profile.badges.none", "No Badges found for this user"));
+    sb_append(&bsb, "</div>");
+    char *badges_html = sb_finish(&bsb);
+    set_html("pTabContent_badges", badges_html);
+    free(badges_html);
     // creations: skins (store skins by this creator), games r, mods l, assets f
     const cJSON *games_rows = cJSON_GetArrayItem(extra, 4), *mods_rows = cJSON_GetArrayItem(extra, 5), *assets_rows = cJSON_GetArrayItem(extra, 7);
     int skins_n = 0;
@@ -3647,9 +3672,42 @@ static void hub_season_stats(const cJSON *v) {
     free(html);
 }
 
+// The staff and report results (the brain's flag: true | null): the success popup and the page
+// again, so the button shows the new state (v10's verifyUser / badgeUser / flagUser callbacks)
+static void hub_action_result(const int ok, const char *text) {
+    if (!ok) {
+        io_po(0, NULL);
+        return;
+    }
+    io_po(1, text);
+    request_page();
+}
+
+// chat header presence: ["chs", {id, st, sm}] for the open conversation
+static void chat_status_frame(const cJSON *s) {
+    if (!cJSON_IsObject(s) || (int) jnum(s, "id") != g_chat_peer) return;
+    if (!el("chatStatus")) return;
+    const int on = (int) jnum(s, "st");
+    const char *sm = jstr(s, "sm");
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='onStatus' style='background:%s;margin-top:-8px;vertical-align:middle;'></div>", on ? "#27ab32" : "#7f7f7f");
+    sb_append(&sb, on ? (sm ? sm : "Online") : "Offline");
+    char *html = sb_finish(&sb);
+    set_html("chatStatus", html);
+    free(html);
+}
+
 static void handle_reply_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
+    if (!strcmp(label, "verr") || !strcmp(label, "fgr") || !strcmp(label, "sbdgr") || !strcmp(label, "rptr")) {
+        hub_action_result(cJSON_IsTrue(cJSON_GetArrayItem(frame, 1)), "SUCCESS");
+        return;
+    }
+    if (!strcmp(label, "chs")) {
+        chat_status_frame(cJSON_GetArrayItem(frame, 1));
+        return;
+    }
     if (!strcmp(label, "sst")) {
         hub_season_stats(cJSON_GetArrayItem(frame, 1));
         return;
@@ -4039,6 +4097,8 @@ H(h_start_chat) {
     } else if (name) {
         sb_append_esc(&sb, name);
     }
+    // the peer's presence (v10: Online / Offline at the right of the header), from the brain's "chs"
+    sb_append(&sb, "<div id='chatStatus' style='position:absolute;vertical-align:top;color:rgba(255,255,255,0.6);margin-right:5px;right:5px;top:6px;'></div>");
     char *html = sb_finish(&sb);
     set_html("chatWithHead", html);
     free(html);
@@ -5696,12 +5756,51 @@ H(h_delete_follower) {
 }
 
 // makePost(): io.send("ps", {txt})
+// KR giveaway post (v10 makePost with the giveaway switch): POST /social/post {type: 9, text, funds}
+static void giveaway_posted(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user; (void) data;
+    g_hub.posting = 0;
+    set_html("postButton", "Post");
+    if (status >= 200 && status < 300) {
+        const HtmlElem input = el("postInput");
+        if (input) html_dom_set_value(input, "");
+        g_hub.giveaway = 0;
+        set_style("givaButton", "background-color", "rgba(0,0,0,0.3)");
+        set_display("krInptHol", "none");
+        request_page();
+        return;
+    }
+    io_po(0, v10_gapi_error_text(error, STR_MARKET_FAILED));
+}
+
+static void hub_post_giveaway(const char *text) {
+    char kr[32] = "";
+    const HtmlElem kin = el("postKR");
+    if (kin) html_dom_get_value(kin, kr, sizeof(kr));
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddNumberToObject(body, "type", 9);
+    cJSON_AddStringToObject(body, "text", text);
+    cJSON_AddNumberToObject(body, "funds", (double) strtoll(kr, NULL, 10));
+    g_hub.posting = 1;
+    set_html("postButton", "<div class='lds-rings'><div></div><div></div><div></div><div></div></div>");
+    if (!v10_gapi("POST", "/social/post", body, giveaway_posted, NULL)) {
+        g_hub.posting = 0;
+        set_html("postButton", "Post");
+        io_po(0, NULL);
+    }
+    cJSON_Delete(body);
+}
+
 H(h_make_post) {
     UNUSED;
     char text[1024] = "";
     const HtmlElem input = el("postInput");
     if (input) html_dom_get_value(input, text, sizeof(text));
     if (!text[0] || g_hub.posting || !g_hub.logged_in) return 1;
+    if (g_hub.giveaway) {
+        hub_post_giveaway(text);
+        return 1;
+    }
     g_hub.posting = 1;
     set_html("postButton", "<div class='lds-rings'><div></div><div></div><div></div><div></div></div>");
     cJSON *body = cJSON_CreateObject();
@@ -5803,6 +5902,227 @@ H(h_toggle_view) {
     const int collapsed = html_dom_has_class(parent, "collapsed");
     html_dom_set_class(parent, "collapsed", !collapsed);
     html_dom_set_html(e, collapsed ? "expand_less" : "expand_more");
+    return 1;
+}
+
+// ------------------------------------------------------------------ staff, report, creations, giveaway (v10 window.* popups)
+
+// The signed-in account is a developer (verify, badges, feature / delete creations) or a
+// developer / moderator (flag, the server checks the same rule).
+static int hub_is_dev(void) {
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    return acc && acc->is_dev;
+}
+
+static int hub_is_staff(void) {
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    return acc && (acc->is_dev || acc->is_mod);
+}
+
+// genericPopup("<question>" + YES, cls): the confirm popup of v10's verify / flag / delete
+static void confirm_popup(const char *question, const char *onyes, const char *cls) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>");
+    sb_append_esc(&sb, question);
+    sb_appendf(&sb, "</div><div id='confBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='%s'>YES</div>", onyes);
+    char *html = sb_finish(&sb);
+    generic_popup(html, cls, NULL);
+    free(html);
+}
+
+// ["ver" | "flg" | "sbdg", ...] over the social socket, then the waiting popup (io_wait)
+static void hub_staff_send(const char *label, const char *name, const int64_t value, const int on, const int with_value) {
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString(label));
+    cJSON_AddItemToArray(f, cJSON_CreateString(name));
+    if (with_value) cJSON_AddItemToArray(f, cJSON_CreateNumber((double) value));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(on));
+    io_wait("Please Wait...");
+    hub_send(f);
+}
+
+// verifyPopup(): "Are you sure you want to verify - NAME?" (dev only, the Verify button)
+H(h_verify_popup) {
+    UNUSED;
+    if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
+    char q[192];
+    snprintf(q, sizeof(q), "Are you sure you want to %s - %s?", g_hub.profile_featured ? "unverify" : "verify", g_hub.profile_name);
+    confirm_popup(q, "verifyUser()", "verifyPop");
+    return 1;
+}
+
+// verifyUser(): io.send("ver", name, !featured) -> "verr"
+H(h_verify_user) {
+    UNUSED;
+    if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
+    hub_staff_send("ver", g_hub.profile_name, 0, g_hub.profile_featured ? 0 : 1, 0);
+    return 1;
+}
+
+// flagPopup() / flagUser(): "... as a Hacker?" -> "flg" (name, !hack) -> "fgr"
+H(h_flag_popup) {
+    UNUSED;
+    if (!hub_is_staff() || !g_hub.profile_name[0]) return 1;
+    char q[192];
+    snprintf(q, sizeof(q), "Are you sure you want to %s - %s as a Hacker?", g_hub.profile_hack ? "unflag" : "flag", g_hub.profile_name);
+    confirm_popup(q, "flagUser()", "flagPop");
+    return 1;
+}
+
+H(h_flag_user) {
+    UNUSED;
+    if (!hub_is_staff() || !g_hub.profile_name[0]) return 1;
+    hub_staff_send("flg", g_hub.profile_name, 0, g_hub.profile_hack ? 0 : 1, 0);
+    return 1;
+}
+
+// badgePopup(): the badge list (v7 names) with Give / Remove (dev only)
+H(h_badge_popup) {
+    UNUSED;
+    if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='font-size:18px;color:#fff;margin-bottom:15px'>Badge:<select id='badgeList' class='inputGrey2' style='padding: 4px;'>");
+    for (int i = 0; i < BADGE_COUNT; i++) {
+        sb_appendf(&sb, "<option value='%d'>", i);
+        sb_append_esc(&sb, g_badges[i].name);
+        sb_append(&sb, "</option>");
+    }
+    sb_append(&sb, "</select></div><div id='confirmBtn' onclick='badgeUser(1)' onmouseover=\"SOUND.play('tick_0',0.1)\">Give</div>"
+                   "<div id='declineBtn' onclick='badgeUser(0)' onmouseover=\"SOUND.play('tick_0',0.1)\">Remove</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "badgePop", NULL);
+    free(html);
+    return 1;
+}
+
+// badgeUser(on): io.send("sbdg", name, badge, on) -> "sbdgr"
+H(h_badge_user) {
+    UNUSED;
+    const HtmlElem list = el("badgeList");
+    if (!hub_is_dev() || !list || !g_hub.profile_name[0]) return 1;
+    char value[16] = "";
+    html_dom_get_value(list, value, sizeof(value));
+    const int badge = atoi(value);
+    if (badge < 0 || badge >= BADGE_COUNT) return 1;
+    hub_staff_send("sbdg", g_hub.profile_name, badge, arg_n(args, argc, 0, 0) ? 1 : 0, 1);
+    return 1;
+}
+
+// reportPopup(): the reason list (v10's reportOptions) and the details (10 characters at least)
+static const char *const k_report_reasons[] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting", "Market Manipulation"};
+
+H(h_report_popup) {
+    UNUSED;
+    if (!g_hub.profile_name[0]) return 1;
+    if (!g_hub.logged_in) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return 1;
+    }
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Report: ");
+    sb_append_esc(&sb, g_hub.profile_name);
+    sb_append(&sb, "</div><div style='color:#fff;font-size: 16px;position:relative;'>Reason:<select id='reportSelect' class='inputGrey2' style='padding: 4px;margin-left:8px'>");
+    for (size_t i = 0; i < sizeof(k_report_reasons) / sizeof(k_report_reasons[0]); i++) {
+        sb_appendf(&sb, "<option value='%zu'>%s</option>", i, k_report_reasons[i]);
+    }
+    sb_append(&sb, "</select></div><textarea type='text' rows='8' id='reportTxt' placeholder='Provide more information (links to video clip)'></textarea>"
+                   "<div id='reportError' style='display:none;color:#ed4242'></div>"
+                   "<div id='reportBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='reportUser()'>Report</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "reportPop", NULL);
+    free(html);
+    return 1;
+}
+
+// reportUser(): io.send("rpt", name, reason, details) -> "rptr"
+H(h_report_user) {
+    UNUSED;
+    const HtmlElem sel = el("reportSelect"), txt = el("reportTxt"), err = el("reportError");
+    if (!sel || !txt || !g_hub.profile_name[0]) return 1;
+    char value[16] = "", text[2048] = "";
+    html_dom_get_value(sel, value, sizeof(value));
+    html_dom_get_value(txt, text, sizeof(text));
+    const int reason = atoi(value);
+    if (reason < 0 || reason >= (int) (sizeof(k_report_reasons) / sizeof(k_report_reasons[0]))) return 1;
+    if (strlen(text) < 10) {
+        if (err) {
+            html_dom_set_text(err, "More information required.");
+            set_display("reportError", "block");
+        }
+        return 1;
+    }
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("rpt"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
+    cJSON_AddItemToArray(f, cJSON_CreateString(k_report_reasons[reason]));
+    cJSON_AddItemToArray(f, cJSON_CreateString(text));
+    io_wait("Reporting User...");
+    hub_send(f);
+    return 1;
+}
+
+// shareProfile(): the profile link to the clipboard (v10 copies https://krunker.io/social.html?p=profile&q=NAME)
+H(h_share_profile) {
+    UNUSED;
+    if (!g_hub.profile_name[0]) return 1;
+    char origin[128], url[256];
+    html_page_origin(origin, sizeof(origin));
+    snprintf(url, sizeof(url), "%s/social.html?p=profile&q=%s", origin, g_hub.profile_name);
+    html_clipboard_write(url);
+    io_po(1, "Link copied");
+    return 1;
+}
+
+// featureCreation(this, id, kind): the star toggles and io.send("ftC", id, on, kind) (dev only)
+H(h_feature_creation) {
+    UNUSED;
+    if (!hub_is_dev() || !ev || !ev->target) return 1;
+    const int on = !html_dom_has_class(ev->target, "sel");
+    html_dom_set_class(ev->target, "sel", on);
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("ftC"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 1, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(on));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 2, 0)));
+    hub_send(f);
+    return 1;
+}
+
+// deleteCreationConf(id, kind): "Are you sure you want to delete this Map?" then deleteCreation(id, kind)
+H(h_delete_creation_conf) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, I18N("account.login.required", "Must be logged in"));
+        return 1;
+    }
+    const int id = (int) arg_n(args, argc, 0, 0); // deleteCreationConf(id, kind)
+    const int kind = (int) arg_n(args, argc, 1, 0);
+    char onyes[64];
+    snprintf(onyes, sizeof(onyes), "deleteCreation(%d,%d)", id, kind);
+    confirm_popup(kind == 0 ? "Are you sure you want to delete this Map?" : kind == 1 ? "Are you sure you want to delete this Mod?" : "Are you sure you want to delete this Asset?",
+                  onyes, "confSubmitPop");
+    return 1;
+}
+
+// deleteCreation(id, kind): io.send("delC", id, kind); the brain answers with its "po" popup
+H(h_delete_creation) {
+    UNUSED;
+    if (!g_hub.logged_in) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("delC"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 1, 0)));
+    io_wait("Please Wait...");
+    hub_send(f);
+    return 1;
+}
+
+// togglPos(): the KR giveaway switch of the post box (#givaButton, the KR field #krInptHol)
+H(h_toggle_pos) {
+    UNUSED;
+    g_hub.giveaway = !g_hub.giveaway;
+    set_style("givaButton", "background-color", g_hub.giveaway ? "#ebb734" : "rgba(0,0,0,0.3)");
+    set_display("krInptHol", g_hub.giveaway ? "block" : "none");
     return 1;
 }
 
@@ -5923,6 +6243,19 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"itemFilterSearch", h_item_filter_search},
     {"itemFilterChange", h_item_filter_change},
     {"itemListScroll", h_item_list_scroll},
+    {"verifyPopup", h_verify_popup},
+    {"verifyUser", h_verify_user},
+    {"flagPopup", h_flag_popup},
+    {"flagUser", h_flag_user},
+    {"badgePopup", h_badge_popup},
+    {"badgeUser", h_badge_user},
+    {"reportPopup", h_report_popup},
+    {"reportUser", h_report_user},
+    {"shareProfile", h_share_profile},
+    {"togglPos", h_toggle_pos},
+    {"featureCreation", h_feature_creation},
+    {"deleteCreationConf", h_delete_creation_conf},
+    {"deleteCreation", h_delete_creation},
     {"openOneTrust", h_noop},   // no ads / consent manager in KrunkNative
     {"closeOneTrust", h_noop},
     {"logBtnFRVR", h_noop},     // analytics

@@ -5,6 +5,7 @@
  * io_uf / io_psd / io_rps; matchmaker/socialWs.ts "r", "f", "gfs", "gfg").
  */
 #include "acct_internal.h"
+#include "game_presence.h" /* game_presence_get: "In game" (profile, chat header) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +74,33 @@ static void like_escape(const char *in, char *out, size_t cap) {
 
 /* profile query: P_PROFILE (db_social.c) */
 
+/* The profile reply waits for the presence lookup (social_eb.c): row.st = online (the header's
+ * dot), row.sm = "In game" while the player is in a game (v10's status text). */
+typedef struct ProfileWait {
+    SocialSession *s; /* held */
+    cJSON *frame;     /* ["0", "profile", sub, row, games, mods, follow, assets] */
+    int64_t id;
+} ProfileWait;
+
+static void profile_status_done(void *ud, const int *online, size_t n) {
+    ProfileWait *w = ud;
+    cJSON *row = cJSON_GetArrayItem(w->frame, 3);
+    const int on = n > 0 && online[0];
+    if (row) {
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "st");
+        cJSON_AddNumberToObject(row, "st", on);
+        char game[96] = "";
+        int locked = 0;
+        if (on && game_presence_get(w->id, game, sizeof game, &locked) == 1 && game[0]) {
+            cJSON_DeleteItemFromObjectCaseSensitive(row, "sm");
+            cJSON_AddStringToObject(row, "sm", "In game");
+        }
+    }
+    social_send(w->s, w->frame);
+    social_unhold(w->s);
+    free(w);
+}
+
 static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     PageCtx *c = extra;
     cJSON *obj = kn_db_ok(res) ? acct_db_json(res) : NULL;
@@ -86,7 +114,9 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
         return;
     }
     /* io_0(e, a, t=row, r=games, l=mods, c=followState, f=assets) */
-    cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "row"));
+    cJSON *row = cJSON_DetachItemFromObject(obj, "row");
+    const cJSON *pid = row ? cJSON_GetObjectItemCaseSensitive(row, "player_id") : NULL;
+    cJSON_AddItemToArray(f, row);
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "games"));
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "mods"));
     cJSON *follow = cJSON_CreateArray(), *st = cJSON_CreateObject();
@@ -95,7 +125,16 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddItemToArray(f, follow);
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "assets"));
     cJSON_Delete(obj);
-    social_send(s, f);
+    ProfileWait *w = calloc(1, sizeof *w);
+    if (!w) {
+        social_send(s, f);
+        return;
+    }
+    w->id = cJSON_IsNumber(pid) ? (int64_t) pid->valuedouble : 0;
+    w->frame = f;
+    w->s = social_hold(s);
+    const int64_t id = w->id;
+    social_online_lookup(&id, 1, profile_status_done, w);
 }
 
 static void profile_page(SocialSession *s, PageCtx *c, const char *name) {
@@ -364,15 +403,15 @@ static void report_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
     const int ok = kn_db_ok(res) && kn_db_affected(res) > 0;
     if (!kn_db_ok(res)) acct_db_error(res, "report");
-    social_send_n(s, "rpr", 1, ok ? cJSON_CreateTrue() : cJSON_CreateNull());
+    social_send_n(s, "rptr", 1, ok ? cJSON_CreateTrue() : cJSON_CreateNull());
 }
 
-/* ["rpt", name, reason, details] -> ["rpr", ok] */
+/* ["rpt", name, reason, details] -> ["rptr", ok] */
 void sh_report(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     const char *name = fa_str(f, 1), *reason = fa_str(f, 2), *details = fa_str(f, 3);
     if (!name || !reason || !details || strlen(details) > 2000 || strlen(reason) > 64) {
-        social_send_n(s, "rpr", 1, cJSON_CreateNull());
+        social_send_n(s, "rptr", 1, cJSON_CreateNull());
         return;
     }
     char me[24];
@@ -413,3 +452,16 @@ static void staff_set(SocialSession *s, const cJSON *f, int verify) {
 
 void sh_flag(SocialSession *s, const cJSON *f) { staff_set(s, f, 0); }
 void sh_verify(SocialSession *s, const cJSON *f) { staff_set(s, f, 1); }
+
+/* ["sbdg", name, badge, on] -> ["sbdgr", ok] (developers; see P_STAFF_BADGE) */
+void sh_staff_badge(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    FlagCtx *c = calloc(1, sizeof *c);
+    if (!c) return;
+    snprintf(c->label, sizeof c->label, "%s", "sbdgr");
+    char me[24], b[24], on[24];
+    social_call(s, &P_STAFF_BADGE,
+                KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(b, fa_int(f, 2, -1)),
+                           acct_itoa(on, fa_int(f, 3, 0) ? 1 : 0)),
+                flag_done, c);
+}
