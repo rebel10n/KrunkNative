@@ -10,6 +10,7 @@
 #include <ks_client.h> // KrunkScript client host: hooks and script packets
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
+#include <v10_notify.h> // NET_EXT_GAME_ANNOUNCEMENT: the game announcement banner
 #include <nettspend_audio.h> // NET_EXT_KN_LACED: the Purple Drank's laced spell, its ambience (nettspend_audio.c)
 #include <client.h>
 #include <hud_modes.h>
@@ -995,6 +996,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
             else if (subtype == NET_EXT_KN_INPUTS_DROPPED) client_recon_drop_pending(client); // official "f" (krunker_link.c)
+            else if (subtype == NET_EXT_GAME_ANNOUNCEMENT) v10_announce_on_packet(body, body_length); // the banner (v10_notify.c)
             else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect

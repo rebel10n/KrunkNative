@@ -119,6 +119,30 @@ void net_broadcast_chat(const char *from, const char *msg) {
     net_broadcast_chat_except(NULL, -1, NET_CHAT_SERVER, from, text);
 }
 
+static char g_game_announcement[NET_GAME_ANNOUNCEMENT_TEXT];
+
+const char *net_game_announcement(void) { return g_game_announcement; }
+
+void net_send_game_announcement(ClientConnection *client) {
+    if (!client || client->peer_minor < NET_PROTOCOL_MINOR_EXT) return; // EXT peers only
+    NetGameAnnouncementPacket body;
+    memset(&body, 0, sizeof(body));
+    snprintf(body.message, sizeof(body.message), "%s", g_game_announcement);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_GAME_ANNOUNCEMENT, &body, (uint16_t) (strlen(body.message) + 1));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
+void net_set_game_announcement(const char *msg) {
+    // control characters become spaces; cut at a UTF-8 boundary to fit the packet
+    size_t n = 0;
+    for (const char *p = msg ? msg : ""; *p && n + 1 < sizeof(g_game_announcement); p++)
+        g_game_announcement[n++] = (unsigned char) *p < 0x20 || *p == 0x7f ? ' ' : *p;
+    while (n > 0 && msg[n] && ((unsigned char) msg[n] & 0xC0) == 0x80) n--; // never half a character
+    g_game_announcement[n] = 0;
+    for (size_t i = 0; i < g_server->client_count; i++) net_send_game_announcement(&g_server->clients[i]);
+}
+
 // Game hooks (GameHooks.send): player uid == ClientConnection.id.
 // WP-D: the v7 mode packets (NET_PACKET_BLOCK_MODES, 140-149) only go to peers that announced
 // NET_PROTOCOL_MINOR_V7 in their HELLO; so do map-logic WP-H's zombies / airdrop packets. WP-E: the lobby packets (NET_PACKET_BLOCK_LOBBY, 180-189:
@@ -1626,6 +1650,9 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 net_send_social_caps(client);
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
+            // the game announcement: a gated join gets it when it settles (accounts.c acc_set_ready);
+            // an ungated one is settled from its connect, before this HELLO named its protocol
+            if (client->acct.join_state == SERVER_JOIN_READY) net_send_game_announcement(client);
             break;
         case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
             NetMatchVotePacket vote;

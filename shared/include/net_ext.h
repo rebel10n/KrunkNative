@@ -39,6 +39,7 @@ typedef enum {
     // 0x0300 store / live service, S -> C
     NET_EXT_SKIN_DEFINITION_CHANGED = 0x0300, // "sdc" {skinId, skin}
     NET_EXT_SPIN_WHEELS_UPDATED = 0x0301,     // "swu" spin data
+    NET_EXT_GAME_ANNOUNCEMENT = 0x0302,       // "gameAnnouncement" NetGameAnnouncementPacket
 
     // 0x0400 Discord link
     NET_EXT_DISCORD_LINK_WAIT = 0x0400,   // "dlnkW" C -> S
@@ -283,6 +284,14 @@ typedef struct {
 } NetKpdRatePacket;
 #pragma pack(pop)
 
+// NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,
+// trackId, bundleId, displayIds, actions}, g:210119) as KrunkNative sends it: the message only
+// (UTF-8, NUL-terminated; "" hides the banner). server_bin sends the current one to each player whose
+// join settles and to everyone when the console's `announce` changes it (server/src/net.c).
+#define NET_GAME_ANNOUNCEMENT_TEXT 256
+typedef struct {
+    char message[NET_GAME_ANNOUNCEMENT_TEXT];
+} NetGameAnnouncementPacket;
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

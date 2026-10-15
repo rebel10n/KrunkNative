@@ -44,6 +44,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <v10_notify.h> // S5: chat emoji (v10_emoji_append_chat)
 #include <third_person.h>
 #include <hud_map.h> // part 2a: minimap layout
 #include <render_settings.h>
@@ -444,7 +445,7 @@ static void hud_chat_row_html(const char *name, const char *msg, const char *col
     } else {
         hb_append(out, size, &len, "<span class='chatMsg'>");
     }
-    hb_append_fixed(out, size, &len, msg);
+    v10_emoji_append_chat(out, size, &len, msg); // fixStr(msg) with :name: -> the emoji's <img> (v10_notify.c)
     hb_append(out, size, &len, "</span></div><br>");
 }
 

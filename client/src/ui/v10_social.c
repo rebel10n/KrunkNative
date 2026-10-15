@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
+#include <v10_notify.h> // the notification center: friend requests, direct messages (v10_notify.c)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -552,6 +553,41 @@ static void eb_on_friends(const cJSON *o) {
     S.friends_next = offset + count;
 }
 
+// ------------------------------------------------------------------ notifications (KrunkNative)
+// v10's notification center (v10_notify.c) also carries the event bus's news: a direct message
+// that is not on screen, a friend request (a follow not followed back: kn_brain's friend:request)
+// and its acceptance. A click opens the conversation / the player's profile.
+#define NOTIFY_DM_MS 6000.0
+#define NOTIFY_FRIEND_MS 10000.0
+static void open_profile(const char *name);
+static void open_hub(int tab);
+static void conv_open(int64_t peer);
+static void render(void);
+
+static char g_notify_names[8][32]; // the profiles the friend notifications open (a ring)
+static int g_notify_name_next;
+
+static void notify_open_conv(void *user) {
+    const int64_t peer = (int64_t) (intptr_t) user;
+    open_hub(TAB_FRIENDS);
+    conv_open(peer);
+    render();
+}
+
+static void notify_open_profile(void *user) { open_profile((const char *) user); }
+
+static void notify_friend(const cJSON *o, const int accepted) {
+    const char *name = jstr(o, "name");
+    if (!name[0]) return;
+    char *slot = g_notify_names[g_notify_name_next++ % 8];
+    snprintf(slot, sizeof(g_notify_names[0]), "%s", name);
+    char text[192];
+    if (accepted) I18N_F(text, "kn.notify.friendAccepted", "{0} followed you back. You are now friends.", name);
+    else I18N_F(text, "kn.notify.friendRequest", "{0} followed you. Follow them back to become friends.", name);
+    v10_notify_push_ex(accepted ? I18N("kn.notify.friendAcceptedTitle", "Friend Added") : I18N("kn.notify.friendRequestTitle", "Friend Request"),
+                       text, NOTIFY_FRIEND_MS, notify_open_profile, slot);
+}
+
 static void dm_chat_line(const char *text) {
     // v10 _69625(-1, null, text, 2, "#5ce05a"): an in-game system chat line
     hud_ui_add_chat(NULL, text, "#5ce05a");
@@ -572,6 +608,11 @@ static void eb_on_recv(const cJSON *o) {
     const char *name = friend_name(from);
     snprintf(line, sizeof(line), "[DM from %s]: %s", name[0] ? name : "Unknown", jstr(o, "text"));
     if (!menu_ui()->menu_open) dm_chat_line(line); // the in-game chat (v10 _49706 listeners)
+    if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen
+        char title[96];
+        I18N_F(title, "kn.notify.dmTitle", "Message from {0}", name[0] ? name : "Unknown");
+        v10_notify_push_ex(title, jstr(o, "text"), NOTIFY_DM_MS, notify_open_conv, (void *) (intptr_t) from);
+    }
 }
 
 static void eb_on_sent(const cJSON *o) {
@@ -718,6 +759,8 @@ static void on_social(void *user, const cJSON *frame) {
     else if (!strcmp(type, "presence:offline")) eb_on_presence(o, 0);
     else if (!strcmp(type, "presence:game")) eb_on_game(o);
     else if (!strcmp(type, "error")) eb_on_error(o);
+    else if (!strcmp(type, "friend:request")) notify_friend(o, 0); // KrunkNative (kn_brain social_eb.c)
+    else if (!strcmp(type, "friend:accepted")) notify_friend(o, 1);
     else return; // presence:pong
     if (!strcmp(type, "friends:list") || !strncmp(type, "presence:", 9)) menu_rerender_if_open(5); // window 5's Friends tab
     // an open conversation reads what arrives (v10: msg:read whenever its length changes)

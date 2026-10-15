@@ -1715,6 +1715,7 @@ static void acc_set_ready(ClientConnection *client) {
     accounts_push_rights(client); // the settled identity: tells the client live sign-ins work here
     votekick_send_state(client);  // a vote kick in progress: the prompt (a 1.4 peer)
     votekick_officer_joined(client); // a K.P.D officer: the open case of this lobby (kpdData)
+    net_send_game_announcement(client); // v10's banner: the current game announcement ("" hides it)
 
     if (g_acc.brain && (client->acct.ticket_jti[0] || client->acct.account_id)) {
         cJSON *join = cJSON_CreateObject();

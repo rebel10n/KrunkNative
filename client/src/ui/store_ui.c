@@ -748,7 +748,7 @@ static void date_string(const double ms, char *out, const size_t n) {
     strftime(out, n, "%a %b %d %Y", &tmv);
 }
 
-// f1836: one history item (spray div or preview icon)
+// f1836: one history item (spray div or preview icon); v10 (g:217706) adds the Spin History tooltip
 static void history_item(StrBuf *sb, const cJSON *row) {
     const int ind = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(row, "ind"));
     const ViewerSkin *k = viewer_skin(ind);
@@ -757,9 +757,20 @@ static void history_item(StrBuf *sb, const cJSON *row) {
     store_skin_preview(ind, src, sizeof(src));
     const char *col = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? g_viewer_rarities[k->rarity].color : "#fff";
     if (k->type == 4)
-        sb_appendf(sb, "<div onclick='viewItem(%d)' class='spinSprayDiv' style='margin:5px;border-color:%s'><div class='spinSprayIcon' style='background: url(&quot;%s&quot;);'></div></div>", ind, col, src);
+        sb_appendf(sb, "<div onclick='viewItem(%d);cancelTip()' onmouseover='createSpinHistoryTip(this)' onmouseout='cancelTip()' class='spinSprayDiv' style='margin:5px;border-color:%s'><div class='spinSprayIcon' style='background: url(&quot;%s&quot;);'></div></div>", ind, col, src);
     else
-        sb_appendf(sb, "<img class='spinPrevIcon' style='margin:5px;border-color:%s' onclick='viewItem(%d)' src='%s' />", col, ind, src);
+        sb_appendf(sb, "<img class='spinPrevIcon' style='margin:5px;border-color:%s'  onmouseover='createSpinHistoryTip(this)' onmouseout='cancelTip()' onclick='viewItem(%d);cancelTip()' src='%s' />", col, ind, src);
+}
+
+// createSpinHistoryTip (ui_tooltip.c): row i of the loaded history (vA636[i]); 0 when out of range
+int store_ui_spin_history_row(const int i, int *ind, double *dte, int *fds) {
+    const cJSON *row = g_hist ? cJSON_GetArrayItem(g_hist, i) : NULL;
+    if (!row) return 0;
+    *ind = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(row, "ind"));
+    *dte = cJSON_GetNumberValue(cJSON_GetObjectItem(row, "dte"));
+    const double f = cJSON_GetNumberValue(cJSON_GetObjectItem(row, "fds"));
+    *fds = f == f ? (int) f : 0; // fds || 0
+    return 1;
 }
 
 static void history_request(void) {

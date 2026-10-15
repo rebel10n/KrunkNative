@@ -18,6 +18,7 @@
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
 #include <ui_logic.h>
 #include <render_settings.h> // showMessages (ui_controls_chat_text_allowed)
+#include <v10_notify.h> // the chat's emoji panel keys
 #include <html_ui.h>
 #include <spectate.h> // spectator keys (pressButton's window.Bf5 block, client/src/spectate.c)
 #include <gamepad.h>  // Gamepad.active (controller: client/src/gamepad.c)
@@ -1188,6 +1189,7 @@ static int chat_key(Client *client) {
     HtmlElem input = chat_input();
     if (!input) return 0;
     if (g_ctl.chat_focused) {
+        if (v10_emoji_chat_key()) return 1; // the emoji panel is open: selectEmoji (v10_notify.c)
         char text[CHAT_MAX] = "";
         if (html_dom_get_value(input, text, sizeof(text)) < 0) text[0] = 0;
         if (text[0]) {
@@ -1483,6 +1485,10 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
 
     if (g_ctl.chat_focused) {
         if (press && code >= 0 && bind_is(UI_CONTROL_CHAT, code)) return chat_key(client);
+        if (press && v10_emoji_arrow_key(code)) { // Up / Down move the emoji panel's selection (v10_notify.c)
+            g_ctl.game_key = 1; // web: preventDefault, the caret stays
+            return 1;
+        }
         if (menu) return 0; // the page edits the focused input
         if (action == GLFW_RELEASE) release_code(client, code); // keyups still reach N()
         if (press && key == GLFW_KEY_ESCAPE) {

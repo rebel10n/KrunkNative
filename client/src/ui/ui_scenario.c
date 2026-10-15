@@ -38,6 +38,7 @@
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
 #include <ui_mobile.h> // state.mobile (ui_mobile_force)
+#include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
 #include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
 #include <modes.h>
@@ -328,6 +329,7 @@ static void warn_unknown_keys(void) {
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
         "storage",    // {key: "value"}: localStorage entries seeded before the page reads them ("skins": the loadout's weapon skins)
+        "notify",     // S5: {notifications, announcement, emoji, tip}: the chat column's v10 widgets, item tooltips (v10_notify.c)
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
@@ -1158,6 +1160,7 @@ static int ui_scenario_apply(Client *client) {
     apply_chat_input();
     menu_boot_scenario(st("boot"));                 // S1: the page before its first INIT (menu_ui.c)
     menu_auto_respawn_scenario(st("autoRespawn"));  // S1: "Auto Respawning in N" (menu_ui.c)
+    v10_notify_scenario(st("notify"));              // S5: notifications, announcement, emoji panel, tooltips (v10_notify.c)
     apply_net_state();
     return 1;
 }

@@ -1,0 +1,29 @@
+{
+  "scenario": "kn-tip-spin",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "name-est",
+      "rect": [
+        575,
+        264,
+        150,
+        36
+      ],
+      "note": "createSpinHistoryTip over the first Spin History item: name in its rarity colour, Est KR (left 150 px: the tooltip's width follows the Date line)"
+    },
+    {
+      "name": "cost",
+      "rect": [
+        575,
+        316,
+        150,
+        23
+      ],
+      "note": "Cost: <fds> KR and the bottom edge; the Date line above counts from the wall clock and sets the tooltip's width, so it and the right edge are left out"
+    }
+  ]
+}

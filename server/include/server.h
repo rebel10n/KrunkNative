@@ -273,6 +273,14 @@ void net_change_map(int map_index, int mode_index);
 #define SERVER_HAVE_NET_CHAT 1
 void net_broadcast_chat(const char *from, const char *msg);
 
+// v10's game announcement banner (NET_EXT_GAME_ANNOUNCEMENT, shared/include/net_ext.h): the CLI's
+// `announce` sets the server's message ("" clears it) and sends it to every client; each client
+// whose join settles gets the current one (accounts.c). Caller holds g_server->lock.
+#define SERVER_HAVE_NET_ANNOUNCE 1
+void net_set_game_announcement(const char *msg);
+const char *net_game_announcement(void);
+void net_send_game_announcement(ClientConnection *client);
+
 // Krunker v3.1.1 chat "/" commands (shared/src/chat_commands.c) wired to the connections;
 // the CLI runs them as CHAT_CMD_CONSOLE. Caller holds g_server->lock.
 #define SERVER_HAVE_CHAT_COMMANDS 1

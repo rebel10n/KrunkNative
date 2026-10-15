@@ -1,0 +1,19 @@
+{
+  "scenario": "kn-notify-emoji",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "panel",
+      "rect": [
+        0,
+        380,
+        300,
+        240
+      ],
+      "note": "#emojiPanelHolder: the filtered emoji list above the chat, the second one selected"
+    }
+  ]
+}

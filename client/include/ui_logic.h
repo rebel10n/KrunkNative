@@ -719,8 +719,8 @@ void ui_bhop_toggle(void);                       // toggleBhopMode: next in BHOP
 const char *ui_bhop_bind(void);                  // window.bhopModeKey: KeyboardEvent.code ("KeyB"), "" = unbound
 void ui_bhop_set_bind(const char *code);         // setBhopModeBind: stores krk_bhop_mode_bind
 void ui_bhop_fill_input(Client*, Input*);        // patchInputs on this input frame (ui_controls_fill_input tail)
-void ui_notify(const char *html);                // notify.ts: top-right #0005 toast, `slide` 2 s
-void ui_notify_tick(double now_ms);              // hud_ui.c per frame: steps the notify animation
+void ui_notify(const char *html);                // a system message: v10 notification center (v10_notify.c), else the notify.ts toast
+void ui_notify_tick(double now_ms);              // hud_ui.c per frame: v10_notify_tick + the toast animation
 // client/src/ui/ui_mod_keys.c: the rest of mods.ts' keys. ui_mods.c calls the keydown
 // switch after its bind matching (`input` = a text field has focus); 0 = not consumed.
 int  ui_mod_keys_keydown(Client*, int glfw_key, int input); // F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP

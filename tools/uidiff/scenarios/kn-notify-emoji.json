@@ -1,0 +1,198 @@
+{
+  "ref": "doc/ref/krunknative/kn-notify-emoji.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
+    "hud": {
+      "health": 100,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 30,
+      "ammoMax": 30,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "03:45",
+      "kills": 0,
+      "deaths": 0,
+      "score": 0,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 0,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 0,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0
+    },
+    "chat": [],
+    "chatOpen": true,
+    "chatInput": "gg",
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
+    ],
+    "account": {
+      "name": "Local User",
+      "skins": [
+        {
+          "ind": 7447,
+          "cnt": 1
+        },
+        {
+          "ind": 7448,
+          "cnt": 1
+        },
+        {
+          "ind": 7449,
+          "cnt": 1
+        },
+        {
+          "ind": 7450,
+          "cnt": 1
+        },
+        {
+          "ind": 7451,
+          "cnt": 1
+        },
+        {
+          "ind": 7452,
+          "cnt": 1
+        },
+        {
+          "ind": 7453,
+          "cnt": 1
+        },
+        {
+          "ind": 7454,
+          "cnt": 1
+        },
+        {
+          "ind": 7455,
+          "cnt": 1
+        },
+        {
+          "ind": 7456,
+          "cnt": 1
+        },
+        {
+          "ind": 7457,
+          "cnt": 1
+        },
+        {
+          "ind": 7458,
+          "cnt": 1
+        },
+        {
+          "ind": 7459,
+          "cnt": 1
+        },
+        {
+          "ind": 7460,
+          "cnt": 1
+        },
+        {
+          "ind": 7461,
+          "cnt": 1
+        },
+        {
+          "ind": 7462,
+          "cnt": 1
+        },
+        {
+          "ind": 7463,
+          "cnt": 1
+        },
+        {
+          "ind": 7568,
+          "cnt": 1
+        },
+        {
+          "ind": 7569,
+          "cnt": 1
+        },
+        {
+          "ind": 7570,
+          "cnt": 1
+        },
+        {
+          "ind": 7571,
+          "cnt": 1
+        },
+        {
+          "ind": 7755,
+          "cnt": 1
+        },
+        {
+          "ind": 7756,
+          "cnt": 1
+        },
+        {
+          "ind": 7757,
+          "cnt": 1
+        },
+        {
+          "ind": 7758,
+          "cnt": 1
+        },
+        {
+          "ind": 7759,
+          "cnt": 1
+        },
+        {
+          "ind": 7760,
+          "cnt": 1
+        },
+        {
+          "ind": 7761,
+          "cnt": 1
+        }
+      ]
+    },
+    "notify": {
+      "emoji": {
+        "chat": "gg :ok",
+        "selected": 1
+      }
+    }
+  },
+  "frames": 3,
+  "note": "Chat open, ':ok' typed: v10's emoji panel filtered by the word, the second emoji selected. Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline."
+}

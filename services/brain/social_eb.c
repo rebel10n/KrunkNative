@@ -22,6 +22,7 @@
  *   (login)                              unread:summary {counts: {<id>: {count, name}}}
  *   (presence changes)                   presence:online / presence:offline {id} to online friends
  *   (a follow made / broke a friendship) friends:list {offset: 0} to both, when online
+ *   (a new follow, KrunkNative)          friend:request / friend:accepted {from, name} to the followee
  *   (errors)                             error {code, message}: EB_NOT_FRIEND, EB_TARGET_OFFLINE,
  *                                        EB_RATE_LIMITED, EB_TEXT_TOO_LONG, EB_MSG_INVALID
  * Friend rows: {id, name, premium, online, unread, lastId, lastText, lastFromMe, lastTs} plus,
@@ -571,15 +572,30 @@ void social_eb_presence(int64_t account_id, int online) {
 
 static void follow_checked(kn_db_result *res, void *ud) {
     int64_t *a = ud;
-    if (kn_db_ok(res) && kn_db_rows(res) > 0) { /* the other side follows back: a friendship was made or broken */
-        refresh_list_of(*a);
-        refresh_list_of(kn_db_get_int64(res, 0, 0, 0));
+    if (kn_db_ok(res) && kn_db_rows(res) > 0) {
+        const int64_t b = kn_db_get_int64(res, 0, 0, 0);
+        const int a_follows = kn_db_get_int64(res, 0, 1, 0) != 0, b_follows = kn_db_get_int64(res, 0, 2, 0) != 0;
+        const char *a_name = kn_db_get(res, 0, 3);
+        if (b_follows) { /* the other side follows back: a friendship was made or broken */
+            refresh_list_of(*a);
+            refresh_list_of(b);
+        }
+        if (a_follows && b > 0 && b != *a) {
+            /* KrunkNative (the v10 client's notification center, v10_notify.c): a follow that is
+             * not followed back is a friend request; one that is, its acceptance */
+            cJSON *o = eb_obj(b_follows ? "friend:accepted" : "friend:request");
+            cJSON_AddNumberToObject(o, "from", (double) *a);
+            cJSON_AddStringToObject(o, "name", a_name ? a_name : "");
+            eb_push(b, o);
+        }
     }
     free(a);
 }
 
 /* `a` followed / unfollowed the player `name` (profiles.c "f", social_gapi.c follow): when that
- * player follows `a`, the follow made or broke a friendship, so both sides get their list again */
+ * player follows `a`, the follow made or broke a friendship, so both sides get their list again.
+ * A new follow also tells that player: "friend:request" {from, name} (not followed back yet) or
+ * "friend:accepted" {from, name} (`a` followed back), when online. */
 void social_eb_follow_changed(int64_t a, const char *name) {
     if (a <= 0 || !name || !*name || !g_acct_brain || !g_acct_brain->db) return;
     int64_t *x = malloc(sizeof *x);
@@ -587,8 +603,11 @@ void social_eb_follow_changed(int64_t a, const char *name) {
     *x = a;
     char ids[24];
     if (kn_db_query_sql(g_acct_brain->db,
-                        SQL(.any = "SELECT b.id AS id__i FROM accounts b JOIN follows f ON f.follower_id = b.id AND f.followee_id = $1 "
-                                   "WHERE lower(b.username) = lower($2)"),
+                        SQL(.any = "SELECT b.id AS id__i, "
+                                   "CASE WHEN EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = b.id) THEN 1 ELSE 0 END AS ab__i, "
+                                   "CASE WHEN EXISTS (SELECT 1 FROM follows WHERE follower_id = b.id AND followee_id = $1) THEN 1 ELSE 0 END AS ba__i, "
+                                   "(SELECT username FROM accounts WHERE id = $1) AS an "
+                                   "FROM accounts b WHERE lower(b.username) = lower($2)"),
                         KN_DB_ARGS(acct_itoa(ids, a), name), follow_checked, x) != 0)
         free(x);
 }

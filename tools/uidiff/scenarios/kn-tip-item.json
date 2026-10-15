@@ -1,0 +1,59 @@
+{
+  "ref": "doc/ref/krunknative/kn-tip-item.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 16,
+    "account": {
+      "name": "Local User",
+      "skins": [
+        {
+          "ind": 111,
+          "cnt": 1
+        },
+        {
+          "ind": 113,
+          "cnt": 1
+        },
+        {
+          "ind": 115,
+          "cnt": 1
+        },
+        {
+          "ind": 117,
+          "cnt": 1
+        },
+        {
+          "ind": 120,
+          "cnt": 1
+        },
+        {
+          "ind": 121,
+          "cnt": 1
+        }
+      ]
+    },
+    "notify": {
+      "tip": {
+        "selector": ".skinCard[data-index]",
+        "kind": "item"
+      }
+    }
+  },
+  "frames": 3,
+  "note": "Hat picker with createTip on the first card: name in its rarity colour, lore, Est KR. Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline."
+}

@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-notify-announcement",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "banner",
+      "rect": [
+        8,
+        566,
+        240,
+        48
+      ],
+      "note": ".game-announcement.show with its .ga-message line, bottom left above the chat. max_pct 5.5: the label's synthetic bold (font-weight bold) rasterised uncentred (~2.8 %, see kn-notify-center) and its 0.58 px underline (1px under the 0.579 scale) that Chrome spreads over two rows (~1.6 %); a full-width underline (max-width: fit-content lost) is 6 %",
+      "max_pct": 5.5
+    }
+  ]
+}

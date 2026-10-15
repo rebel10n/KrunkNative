@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-notify-center",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "center",
+      "rect": [
+        8,
+        440,
+        240,
+        170
+      ],
+      "note": "#notificationCenter: three stacked notifications, newest on top, bars at 100 / 62.5 / 15 %. max_pct 5.5: the layout matches Chrome's to the sub-pixel (rects probed in the capture); what is left is rasterisation: the titles' synthetic bold (font-weight 600, GameFont has no bold face) is anchored bottom-left by FT_Outline_EmboldenXY where Chrome centres it (~3 %: centring it in text.c drops the title rows to 0.1 %), and the 1.74 px expiration bars at fractional y under the in-game 0.579 scale, which Chrome antialiases over three rows (~1.5 %)",
+      "max_pct": 5.5
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "scenario": "kn-tip-item",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "tooltip",
+      "rect": [
+        752,
+        118,
+        156,
+        56
+      ],
+      "note": "createTip over the first hat card (Medic Helmet): #knTip 9 px above the card, name in its rarity colour, Est KR"
+    }
+  ]
+}

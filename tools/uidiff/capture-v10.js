@@ -60,7 +60,7 @@ const FRVR_STUB = `(() => { const noop = () => Promise.resolve(); const deep = (
 let CURRENT_MAP = 'null'; // the capture's map JSON (openPage)
 const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch (e) { return false; } };
 // the file (or [content, ext]) an offline request is answered with ('' = 404)
-function offlineFile(u) {
+function offlineFile(u, stubs) {
   let p = decodeURIComponent(u.pathname).replace(/^\/+/, '');
   if (p === '' || p.endsWith('/')) p += 'index.html';
   if (p.split('/').includes('..')) return '';
@@ -71,6 +71,18 @@ function offlineFile(u) {
   // before it starts the sandbox, and the client generates map 0 of that list (custMap is the
   // sandbox server's). The list is the capture's map alone, so both sides play it.
   if (/^(gapi\.svc|api)\.krunker\.io$/.test(u.hostname) && p === 'maps') return ['{"data":[' + CURRENT_MAP + ']}', '.json'];
+  // the matchmaker's game list (fetchMatches / the Games window): an empty list, not a 404 the page
+  // reads as a missing .games (only the scenarios that name 'game-list' in their stubs)
+  if (stubs && stubs.includes('game-list') && u.hostname === 'matchmaker.krunker.io' && p === 'game-list') return ['{"games":[]}', '.json'];
+  // the store's skin list (v10's packed |-separated table, the mirror rewards/capture-v10-rewards.js uses):
+  // the boot reads it (the Loadout cards, the item tooltips)
+  if (stubs && stubs.includes('skins') && u.hostname === 'gapi.svc.krunker.io' && p === 'data/skins') {
+    const k = path.join(HOME, '.cache/kn-v10/live/api/skins.jspck');
+    if (isFile(k)) return k;
+  }
+  // the other API reads the boot makes: a 404 is not JSON, so the page logs an error; empty answers instead
+  if (stubs && stubs.includes('titles') && u.hostname === 'gapi.svc.krunker.io' && p === 'titles') return ['[]', '.json'];
+  if (stubs && stubs.includes('streams') && u.hostname === 'api.krunker.io' && p === 'streams/top') return ['{"streams":[]}', '.json'];
   if (/^(gapi\.svc|api|matchmaker)\.krunker\.io$/.test(u.hostname)) return '';
   const f = path.join(OFFLINE, p);
   if (isFile(f)) return f;
@@ -175,9 +187,12 @@ async function settle(c, ms = 600) {
 // client's own player (_69415) and the client socket (_33978).
 const SCOPE_ANCHOR = '  var _69422 = null;\n  var _69423 = null;\n';
 // setAcc(a) stands a signed-in account (_67362, v10's iîïììîí) in for the Player List capture: the
-// K.P.D and Votekick buttons are an account's.
+// K.P.D and Votekick buttons are an account's. S5: v10's notification store and push / dismiss
+// (v10:117204-117240, the notification center's $notifications) and its gameAnnouncement store and
+// setter (v10:97327, v10:209878)
 const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978, ui: _57154,'
-  + ' setAcc: function (a) { _67362 = a; } }; };\n';
+  + ' setAcc: function (a) { _67362 = a; },'
+  + ' notify: { store: _40196, push: _40197, dismiss: _40205 }, announce: { store: _33843, set: _70210 } }; };\n';
 let clientJs = null;
 function clientScript() {
   if (clientJs) return clientJs;
@@ -435,6 +450,33 @@ scenario('ingame-endscreen-collect-raid', async (c) => {
   await settle(c, 7000);
 });
 
+// ---------------------------------------------------------------- S5: notifications, announcement, emoji
+// Date is replaced by a clock the capture sets, so v10's countdown bars (nrigjp: (expiresAt - now) /
+// duration, recomputed every 100 ms from new Date()) stop at the fractions the scenario names
+const FAKE_CLOCK = `(() => { const Real = Date; let now = 1.8e12;
+  class FakeDate extends Real { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return now; } }
+  window.Date = FakeDate; window.__knSetClock = (t) => { now = t; }; return 1; })()`;
+const NOTIFY_NOW = 1.8e12;
+const NOTIFY_STUBS = ['game-list', 'skins', 'titles', 'streams'];
+// [title, text, duration ms, bar %] oldest first (the order v10's pushes come in: the list shows newest first)
+const NOTIFY_ITEMS = [['Friend Request', 'Wintercrystal followed you. Follow them back to become friends.', 10000, 100],
+  ['Message from Bot', 'gg, rematch?', 6000, 62.5], ['Notification', 'Settings Loaded', 4000, 15]];
+scenario('notify-center', async (c) => {
+  await enterGame(c);
+  await c.eval(FAKE_CLOCK);
+  for (const [title, text, dur, pct] of NOTIFY_ITEMS) { // shownAt puts the bar at pct when the clock reads NOTIFY_NOW
+    const shownAt = NOTIFY_NOW - dur * (1 - pct / 100);
+    await c.eval(`(() => { __knSetClock(${shownAt}); const n = window.__knScope().notify;
+      n.push({ title: ${JSON.stringify(title)}, content: ${JSON.stringify(text)} }, { duration: ${dur} }); return 1; })()`);
+  }
+  await c.eval(`__knSetClock(${NOTIFY_NOW})`);
+  await settle(c, 800);
+}, { dir: 'notify', stubs: NOTIFY_STUBS });
+scenario('notify-announcement', async (c) => {
+  await enterGame(c);
+  await c.eval(`(() => { window.__knScope().announce.set({ message: 'Double XP weekend is live! Play now.' }); return 1; })()`);
+  await settle(c, 800);
+}, { dir: 'notify', stubs: NOTIFY_STUBS });
 // ---------------------------------------------------------------- main
 
 const CLOSERS = new Set();
@@ -456,7 +498,7 @@ async function openPage(o) {
         const p = m.params; const u = new URL(p.request.url); const meth = p.request.method;
         const why = !['http:', 'https:'].includes(u.protocol) ? 'scheme' : !ALLOW_HOST(u.hostname) ? 'host' : !['GET', 'HEAD'].includes(meth) ? 'method' : '';
         if (why) { blocked.push([meth, p.request.url, why]); c.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}); return; }
-        const f = offlineFile(u);
+        const f = offlineFile(u, o.stubs);
         const stub = Array.isArray(f);
         const body = stub ? Buffer.from(f[0]) : f ? fs.readFileSync(f) : Buffer.from('');
         const ext = stub ? f[1] : f ? path.extname(f).toLowerCase() : '';
@@ -489,7 +531,7 @@ async function openPage(o) {
 
 async function capture(sc, idx) {
   const base = +process.env.KN_CAPTURE_PORT_BASE || 9540;
-  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, mobile: sc.mobile, settle: 10000 });
+  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, mobile: sc.mobile, stubs: sc.stubs, settle: 10000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

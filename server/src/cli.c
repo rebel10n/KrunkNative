@@ -297,6 +297,7 @@ static void cli_cmd_quit(const char *args);
 static void cli_cmd_ban(const char *args);
 static void cli_cmd_drain(const char *args);
 static void cli_cmd_send(const char *args);
+static void cli_cmd_announce(const char *args);
 static void cli_execute(const char *line);
 
 #define CLI_NAMES(...) ((const char *const[]) {__VA_ARGS__, NULL})
@@ -312,6 +313,7 @@ static const CliCommand g_cli_commands[] = {
 #ifdef SERVER_HAVE_NET_CHAT
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
+    {CLI_NAMES("announce", "announcement"), "announce [message | clear]", "Show the game announcement banner to every player (and to each player who joins), clear it, or print the current one", CLI_ARG_TEXT, cli_cmd_announce},
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
     {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
     {CLI_NAMES("op"), "op <id|name|selector>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
@@ -604,6 +606,19 @@ static void cli_cmd_map(const char *args) {
     server_log("Cannot switch to %s: this build has no net_change_map() (server/src/net.c).", cli_map_name((size_t) index));
 #endif
 
+    pthread_mutex_unlock(&g_server->lock);
+}
+
+static void cli_cmd_announce(const char *args) {
+    pthread_mutex_lock(&g_server->lock);
+    if (!*args) {
+        const char *now = net_game_announcement();
+        server_log(now[0] ? "Game announcement: %s" : "No game announcement (announce <message>)", now);
+    } else {
+        net_set_game_announcement(!strcmp(args, "clear") ? "" : args);
+        const char *now = net_game_announcement();
+        server_log(now[0] ? "Game announcement: %s" : "Game announcement cleared", now);
+    }
     pthread_mutex_unlock(&g_server->lock);
 }
 

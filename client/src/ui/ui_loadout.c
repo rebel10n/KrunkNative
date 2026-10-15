@@ -17,6 +17,7 @@
 // have no items in that table yet, so their pickers show Krunker's None / Random cards.
 #include <ui_logic.h>
 #include <ui_vgrid.h> // the pickers' card lists are virtual grids
+#include <ui_tooltip.h> // createTip / createStreakTip / createSpinHistoryTip / cancelTip
 #include <audio.h>
 #include <backend_ui.h>
 #include <online_mode.h> // offline mode: every skin unlocked
@@ -428,6 +429,8 @@ static const cJSON *skin_json(const int index) {
     }
     return index >= 0 && index < count ? items[index] : NULL;
 }
+
+const cJSON *ui_loadout_skin_json(const int index) { return skin_json(index); } // ui_tooltip.c / v10_notify.c: lore, emoji text
 
 // skin.creator || "Krunker.io"
 static const char *skin_creator(const int index) {
@@ -1939,8 +1942,9 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             return 1;
         }
     }
-    // item tooltips, favourites and the item view are store features KrunkNative leaves out
-    if (!strcmp(name, "createTip") || !strcmp(name, "cancelTip") || !strcmp(name, "createStreakTip") || !strcmp(name, "favItem")) return 1;
+    // item tooltips (ui_tooltip.c); favourites and the item view are store features KrunkNative leaves out
+    if (!strcmp(name, "createTip") || !strcmp(name, "cancelTip") || !strcmp(name, "createStreakTip") || !strcmp(name, "createSpinHistoryTip")) return ui_tooltip_handle(name, ev, args, argc); // ui_tooltip.c
+    if (!strcmp(name, "favItem")) return 1;
     return -1;
 }
 

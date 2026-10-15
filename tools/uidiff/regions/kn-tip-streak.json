@@ -1,0 +1,19 @@
+{
+  "scenario": "kn-tip-streak",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "tooltip",
+      "rect": [
+        552,
+        110,
+        348,
+        64
+      ],
+      "note": "createStreakTip over the first killstreak (Slimer): name and description above the card"
+    }
+  ]
+}

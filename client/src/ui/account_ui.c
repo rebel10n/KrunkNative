@@ -19,6 +19,7 @@
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <v10_notify.h> // econN: gifts, sales, trades in the notification center
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -672,9 +673,14 @@ static void on_social(void *user, const cJSON *frame) {
         if (text && text[0] && ui_settings_import_text(text)) popup_response(1, NULL, I18N("settings.loaded", "Settings Loaded"));
         else popup_response(0, I18N("settings.loaded.none", "No settings found"), NULL);
         menu_rerender_if_open(1);
-    } else if (!strcmp(label, "econN")) { // KrunkNative economy note (kn_brain economy.c): a toast outside the hub
-        const char *text = str_at(frame, 2);
-        if (text && app_mode() != APP_MODE_HUB) {
+    } else if (!strcmp(label, "econN")) { // KrunkNative economy note (kn_brain economy.c): a notification outside the hub
+        const char *kind = str_at(frame, 1), *text = str_at(frame, 2);
+        if (text && app_mode() != APP_MODE_HUB && v10_notify_visible()) { // the v10 notification center (v10_notify.c)
+            const char *title = kind && !strcmp(kind, "gift") ? I18N("kn.notify.giftTitle", "Gift Received")
+                              : kind && !strcmp(kind, "sale") ? I18N("kn.notify.saleTitle", "Market Sale")
+                                                              : I18N("kn.notify.tradeTitle", "Trade");
+            v10_notify_push(title, text, 6000.0);
+        } else if (text && app_mode() != APP_MODE_HUB) {
             StrBuf sb = {0};
             sb_append_esc(&sb, text);
             char *html = sb_finish(&sb);
