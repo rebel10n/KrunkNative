@@ -5,6 +5,7 @@
 #include <server.h>
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
+#include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
 #include <bot_banter.h>      // bot chat through kn_brain (GameHooks.bot_banter)
 #include <ai.h>
@@ -1205,6 +1206,7 @@ void net_remove_client(ClientConnection *client) {
     if (index == SIZE_MAX) return;
 
     accounts_on_disconnect(client); // partial stats commit, player-leave to the brain
+    votekick_on_leave(client); // a vote kick's target left (void), or a voter (recounted)
     comp_lobby_leave(&g_server->game, client->id); // syncLobbyP(player, id, 1)
     on_client_disconnect(client);
     net_set_spectating(client, 0);
@@ -1798,6 +1800,9 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             const uint8_t *body;
             if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, &body, &body_length)) break;
             if (subtype == NET_EXT_KN_ACCOUNT_AUTH) accounts_handle_live_auth(client, body, body_length); // live sign-in (accounts.c)
+            else if (subtype == NET_EXT_VOTE_KICK) votekick_handle(client, body, body_length);           // "v2k" (votekick.c)
+            else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)
+            else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
             break;
         }
         default:
@@ -1822,6 +1827,7 @@ void net_poll_clients(void) {
 void net_install_game_hooks(void) {
     // Match events leave the shared game through these hooks (see GameHooks).
     g_server->game.hooks.user = g_server;
+    votekick_init(&g_server->game); // hooks.vote_kick_expired, fresh ban / cooldown lists
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;

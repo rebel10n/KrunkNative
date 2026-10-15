@@ -1314,6 +1314,24 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
                     KN_DB_ARGS(acct_itoa(ids, id), kn_json_str(args, "ip", NULL)), op_json_done, o);
         return 0;
     }
+    /* the in-game player list's K.P.D call (db_kpd.c): the game server reports a suspect
+     * (kpd_call, args = the call), an officer rates it (kpd_rate, args {call, id, rating}), an
+     * officer's lists (kpd_calls / kpd_log, args.limit) */
+    if (!strcmp(op, "kpd_call") || !strcmp(op, "kpd_rate")) {
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        char *json = args ? cJSON_PrintUnformatted(args) : NULL;
+        kn_db_call(g_acct_brain->db, !strcmp(op, "kpd_rate") ? &P_KPD_RATE : &P_KPD_CALL, KN_DB_ARGS(json ? json : "{}"), op_json_done, o);
+        free(json);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_calls") || !strcmp(op, "kpd_log")) {
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, !strcmp(op, "kpd_log") ? &P_KPD_LOG : &P_KPD_CALLS,
+                   KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "limit", 50))), op_json_done, o);
+        return 0;
+    }
     cb(ud, "Unknown op.", NULL);
     return -1;
 }

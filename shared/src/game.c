@@ -796,10 +796,10 @@ void game_tick_world(Game *game, const float now, const float delta, const float
             game->vote_kick->timer = MAX(0.0f, game->vote_kick->timer - delta);
 
             if (!game->vote_kick->timer) {
+                // v7/v10 game.update: voteToKick timed out: everyone's "vk" null (votekick.c)
+                if (game->hooks.vote_kick_expired) game->hooks.vote_kick_expired(game);
                 free(game->vote_kick);
                 game->vote_kick = NULL;
-
-                // TODO: send vote kick fail
             }
         }
     }

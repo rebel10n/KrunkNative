@@ -1311,6 +1311,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             if (!client->game.ready || !net_packet_read_spawn(&spawn, packet)) break;
             client_apply_spawn(client, &spawn);
             spectate_on_player_spawn(client, spawn.uid); // WP-E: a focused player is followed again
+            menu_rerender_if_open(23);                   // a new player's row in the Player List
             break;
         }
         case NET_PACKET_SKINS: {
@@ -1342,6 +1343,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             memcpy(&leave, packet->payload, sizeof(leave));
             spectate_on_player_leave(leave.uid); // WP-E: the focused player left
             client_remove_player(client, leave.uid);
+            menu_rerender_if_open(23);           // the Player List drops the row (KN: v10 has no leave refresh)
             break;
         }
         default:

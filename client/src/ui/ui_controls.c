@@ -1296,7 +1296,15 @@ static void press_button(Client *client, const int code) {
     }
     // sBoardKey: g6(1) -> hud_ui polls ui_controls_scoreboard_held()
     // window.Bf5: F free cam, H/0 objective cams, 1-9 players, R first/third person (raw keyCodes).
+    // kpdVoteY / kpdVoteN (v10 :221340, spectating with a K.P.D case): the verdict steps (hud_votekick.c)
+    if (client && spectate_active() && (v7_is("kpdVoteY", code) || v7_is("kpdVoteN", code)) &&
+        hud_votekick_kpd_key(client, v7_is("kpdVoteY", code)))
+        return;
     if (client && spectate_press_key(client, code)) return;
+    // kickVoteY / kickVoteN (v10 :221373): a running vote kick takes [1] / [2] (the weapon keys
+    // still swap: v10 handles both); hud_votekick.c checks the vote, the account and that we live
+    if (client && v7_is("kickVoteY", code)) hud_votekick_key(client, 1);
+    else if (client && v7_is("kickVoteN", code)) hud_votekick_key(client, 0);
     Player *me = client ? client->me : NULL;
     if (!me || !me->active) return;
     // sprayWheelKey (premium / sandbox): opens the wheel; else sprayKey: "spry" (v7) / "int" 0 (v3)

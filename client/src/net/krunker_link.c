@@ -19,6 +19,7 @@
 #include <ruleset.h>
 #include <social_v7.h>
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
+#include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -363,6 +364,70 @@ static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     snprintf(c.name, sizeof(c.name), "%s", name ? name : "");
     snprintf(c.text, sizeof(c.text), "%s", text);
     emit(l, NET_PACKET_CHAT, &c, sizeof(c));
+}
+
+static void emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length); // below
+
+// "vk" VOTE_KICK [alias, votes, needed, isNew, voter] (iïiiìíí, game.deob.js:219974): a running
+// vote (isNew: opened by `voter`), or a null alias: the vote ended
+static void on_vote_kick(KrunkerLink *l, const KrunkerFrame *f) {
+    NetVoteKickStatePacket s;
+    memset(&s, 0, sizeof(s));
+    const char *alias = krunker_str(arg(f, 0));
+    if (alias && alias[0]) {
+        s.active = 1;
+        s.votes = (int32_t) num(arg(f, 1), 0);
+        s.needed = (int32_t) num(arg(f, 2), 0);
+        const KrunkerValue *is_new = arg(f, 3);
+        s.opened = (uint8_t) (!is_nil(is_new) && num(is_new, 0) != 0); // true / 1
+        snprintf(s.target, sizeof(s.target), "%s", alias);
+        const char *voter = krunker_str(arg(f, 4));
+        snprintf(s.voter, sizeof(s.voter), "%s", voter ? voter : "");
+    }
+    emit_ext(l, NET_EXT_VOTE_KICK_STATE, &s, sizeof(s));
+}
+
+// "kpd" KPD_RESPONSE [code, message, data] (policeRes, :216287): code 0 answers a call ("reported"
+// with data.n the suspect, else the message to show). The officers' lists (codes 1..5) need a
+// K.P.D officer account and are not shown by this client.
+static void on_kpd_response(KrunkerLink *l, const KrunkerFrame *f) {
+    const int code = (int) num(arg(f, 0), -1);
+    if (code != 0) {
+        note(l, KRUNKER_LINK_EV_NOTE, "kpd: officer list %d ignored", code);
+        return;
+    }
+    NetKpdResponsePacket r;
+    memset(&r, 0, sizeof(r));
+    const char *message = krunker_str(arg(f, 1));
+    const char *name = krunker_str(krunker_get(arg(f, 2), "n"));
+    snprintf(r.name, sizeof(r.name), "%s", name ? name : "");
+    if (message && !strcmp(message, "reported")) {
+        r.status = NET_KPD_REPORTED;
+        snprintf(r.message, sizeof(r.message), "Reported %s to the K.P.D", r.name);
+    } else {
+        r.status = NET_KPD_BUSY;
+        snprintf(r.message, sizeof(r.message), "%s", message ? message : "");
+    }
+    emit_ext(l, NET_EXT_KPD_RESPONSE, &r, sizeof(r));
+}
+
+// startGame's kpdData {sus, caller} (socket ids, :218939): the officer's case as our uids; none = no case
+static int sid_of_socket(const KrunkerLink *l, const char *socket_id) {
+    for (int i = 0; socket_id && socket_id[0] && i < l->player_count; i++) {
+        if (!strcmp(l->players[i].id, socket_id)) return l->players[i].sid;
+    }
+    return -1;
+}
+
+static void on_kpd_data(KrunkerLink *l, const KrunkerValue *kpd) {
+    NetKpdDataPacket d = {.sus = -1, .caller = -1};
+    if (kpd && !is_nil(kpd)) {
+        d.sus = sid_of_socket(l, krunker_str(krunker_get(kpd, "sus")));
+        d.caller = sid_of_socket(l, krunker_str(krunker_get(kpd, "caller")));
+        if (d.sus < 0) d.sus = INT32_MAX; // a case whose suspect is not added yet: the panel asks about "Suspect"
+    } else if (!l->kpd_case) return; // no case before, none now: nothing to say
+    l->kpd_case = d.sus >= 0;
+    emit_ext(l, NET_EXT_KPD_DATA, &d, sizeof(d));
 }
 
 // "cc" CHEAT_CHECK [nonce, unused, ciphertextB64] -> "ccr" [nonce, payloadB64, fnvHex]
@@ -757,6 +822,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
                 emit(l, NET_PACKET_TIMER, &t, sizeof(t));
             }
             on_start_locks(l, &f);
+            on_kpd_data(l, arg(&f, 6)); // iìIiîìí: kpdData {sus, caller} (socket ids) for a K.P.D officer
             break;
         }
         case KRUNKER_S2C_ADD_PLAYERS: on_add_players(l, &f); break;
@@ -804,6 +870,9 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_cpt: on_captcha(l, &f); break;
         case KRUNKER_S2C_cptR: note(l, KRUNKER_LINK_EV_NOTE, "security challenge accepted"); break; // _hideCaptcha
         case KRUNKER_S2C_ERROR: on_error(l, &f); break;
+        case KRUNKER_S2C_VOTE_KICK: on_vote_kick(l, &f); break;
+        case KRUNKER_S2C_KPD_RESPONSE: on_kpd_response(l, &f); break;
+        case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)
         case KRUNKER_S2C_DISCONNECT: note(l, KRUNKER_LINK_EV_ERROR, "the server disconnected us (dc)"); break;
         default: l->unknown_in++; break;
     }
@@ -1031,6 +1100,36 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             c.text[sizeof(c.text) - 1] = 0;
             const KrunkerValue args[] = {KRUNKER_V_NUM(c.channel == 1 ? 1 : 0), KRUNKER_V_STR(c.text)};
             return send_c2s(l, KRUNKER_C2S_CHAT_MESSAGE, args, 2);
+        }
+        case NET_PACKET_EXT: { // the player list's vote kick / K.P.D call; other subtypes are KrunkNative's
+            uint16_t subtype, body_length;
+            const uint8_t *body;
+            if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 0;
+            if (subtype == NET_EXT_VOTE_KICK && body_length >= sizeof(NetVoteKickPacket)) {
+                NetVoteKickPacket v; // kickVote / [1]: ["v2k", alias, 1]; [2]: ["v2k", alias]
+                memcpy(&v, body, sizeof(v));
+                v.target[sizeof(v.target) - 1] = 0;
+                const KrunkerValue args[] = {KRUNKER_V_STR(v.target), KRUNKER_V_NUM(1)};
+                return send_c2s(l, KRUNKER_C2S_VOTE_KICK, args, v.vote ? 2 : 1);
+            }
+            if (subtype == NET_EXT_KPD_CALL && body_length >= sizeof(NetKpdCallPacket)) {
+                NetKpdCallPacket c;
+                memcpy(&c, body, sizeof(c));
+                if (c.tab != 0) { // switchKPDTab: ["kpd", tab]
+                    const KrunkerValue args[] = {KRUNKER_V_NUM(c.tab)};
+                    return send_c2s(l, KRUNKER_C2S_KPD, args, 1);
+                }
+                const KrunkerLinkPlayer *p = player(l, c.uid, 0);
+                if (!p || !p->id[0]) return 0;
+                const KrunkerValue kv[] = {KRUNKER_V_STR("id"), KRUNKER_V_STR(p->id)}; // callPolice: ["kpd", 0, {id}]
+                const KrunkerValue args[] = {KRUNKER_V_NUM(0), KRUNKER_V_MAP(kv, 1)};
+                return send_c2s(l, KRUNKER_C2S_KPD, args, 2);
+            }
+            if (subtype == NET_EXT_KPD_RATE && body_length >= sizeof(NetKpdRatePacket)) { // the officer's verdict: ["rkpd", 0 | 1]
+                const KrunkerValue args[] = {KRUNKER_V_NUM(body[0] ? 1 : 0)};
+                return send_c2s(l, KRUNKER_C2S_RATE_KPD, args, 1);
+            }
+            return 0;
         }
         default:
             return 0; // HELLO, JOIN, PONG (we answer "pi" ourselves), the KrunkNative-only packets

@@ -560,6 +560,84 @@ int main(void) {
     clear();
 #undef PAYLOAD
 
+    // the player list: vote kick out ("v2k" [alias, 1] / [alias]) and the "vk" state in
+    {
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(NetVoteKickPacket)];
+        NetVoteKickPacket v;
+        memset(&v, 0, sizeof(v));
+        snprintf(v.target, sizeof(v.target), "Other");
+        v.vote = 1;
+        uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_VOTE_KICK, &v, sizeof(v));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "v2k") &&
+              g_out[0].argc == 2 && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "Other") && fnum(&g_out[0], 1) == 1,
+              "v2k [alias, 1]");
+        clear();
+        v.vote = 0;
+        n = net_ext_pack(buf, sizeof(buf), NET_EXT_VOTE_KICK, &v, sizeof(v));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && g_out[0].argc == 1, "v2k [alias] (the [2] key)");
+        clear();
+    }
+    {
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(NetKpdCallPacket)];
+        const NetKpdCallPacket c = {.tab = 0, .uid = 9}; // sid 9 = socket "sockA" (the "0" above; 7 left since)
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KPD_CALL, &c, sizeof(c));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "kpd") &&
+              fnum(&g_out[0], 0) == 0 && !strcmp(krunker_str(krunker_get(krunker_frame_arg(&g_out[0], 1), "id")), "sockA"),
+              "kpd [0, {id: socket id}]");
+        clear();
+    }
+    feed(&link, "vk", (KrunkerValue[]) {KRUNKER_V_STR("Other"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(4), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Me")}, 5);
+    {
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        NetVoteKickStatePacket st;
+        memset(&st, 0, sizeof(st));
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(st)) memcpy(&st, b, sizeof(st));
+        CHECK(sub == NET_EXT_VOTE_KICK_STATE && st.active && st.opened && st.votes == 1 && st.needed == 4 && !strcmp(st.target, "Other") &&
+              !strcmp(st.voter, "Me"), "vk -> VOTE_KICK_STATE opened");
+        clear();
+    }
+    feed(&link, "vk", (KrunkerValue[]) {KRUNKER_V_NIL}, 1);
+    {
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        NetVoteKickStatePacket st;
+        memset(&st, 0xff, sizeof(st));
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(st)) memcpy(&st, b, sizeof(st));
+        CHECK(sub == NET_EXT_VOTE_KICK_STATE && !st.active, "vk null -> the vote ended");
+        clear();
+    }
+    const KrunkerValue kpd_data[] = {KRUNKER_V_STR("n"), KRUNKER_V_STR("Other")};
+    feed(&link, "kpd", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_STR("reported"), KRUNKER_V_MAP(kpd_data, 1)}, 3);
+    {
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        NetKpdResponsePacket r;
+        memset(&r, 0, sizeof(r));
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(r)) memcpy(&r, b, sizeof(r));
+        CHECK(sub == NET_EXT_KPD_RESPONSE && r.code == 0 && r.status == NET_KPD_REPORTED && !strcmp(r.name, "Other") &&
+              !strcmp(r.message, "Reported Other to the K.P.D"), "kpd reported -> KPD_RESPONSE");
+        clear();
+    }
+    { // the officer's verdict out ("rkpd" [1]) and "kpdf" in
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(NetKpdRatePacket)];
+        const NetKpdRatePacket rate = {.tagged = 1};
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KPD_RATE, &rate, sizeof(rate));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "rkpd") &&
+                  g_out[0].argc == 1 && fnum(&g_out[0], 0) == 1,
+              "rkpd [1]");
+        clear();
+        feed(&link, "kpdf", NULL, 0);
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        CHECK(e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && sub == NET_EXT_KPD_RESET, "kpdf -> KPD_RESET");
+        clear();
+    }
+
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
 }

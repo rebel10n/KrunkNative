@@ -1724,13 +1724,24 @@ typedef struct {
 
 extern const GameConfig g_default_game_config;
 
+// game.voteToKick: the one vote kick a lobby runs at a time (Krunker v10.0.2 config voteKickReq 4,
+// voteKickTimer 35 s, voteKickBan 30 min, voteKickMaxLvl 20; server/src/votekick.c owns the
+// rules, shared/src/game.c runs the timer and calls hooks.vote_kick_expired when it runs out).
+#define VOTE_KICK_VOTERS_MAX 64
 typedef struct {
-    float timer;
+    float timer;     // seconds left
 
-    int votes_for;
-    int votes_req;
+    int votes_for;   // yes votes (the initiator's counts)
+    int votes_req;   // votes needed
+    int votes_no;    // no votes (the [2] key)
+    int eligible;    // how many connections may vote (accounts other than the target)
 
-    Player *player;
+    Player *player;  // the target
+    int target_uid;
+    char target[32];    // the target's alias as broadcast
+    char initiator[32]; // who opened it
+    int voters[VOTE_KICK_VOTERS_MAX]; // uids that voted (yes or no), once each
+    int voter_count;
 } VoteKick;
 
 // Server-side match events leave the shared game through these hooks; the native
@@ -1815,6 +1826,10 @@ typedef struct {
     // bot_chat_deliver. 1 = asked (an answer or a timeout follows), 0 = not available (offline,
     // no brain, a guests-only lobby): the bot's template line goes out instead. NULL = 0.
     int (*bot_banter)(struct Game_t*, const struct BotChatRequest_t*);
+    // Vote kick (shared.h VoteKick): game.update's timer ran out before the votes came in. The
+    // server (server/src/votekick.c) tells every client the vote failed; the game frees it right
+    // after. NULL = nothing.
+    void (*vote_kick_expired)(struct Game_t*);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2800,6 +2815,8 @@ enum {
     NET_PLAYER_INFO_VERIFIED = 1 << 1, // featured / verified account
     NET_PLAYER_INFO_DEV = 1 << 2,
     NET_PLAYER_INFO_MOD = 1 << 3,
+    NET_PLAYER_INFO_HACKER = 1 << 4, // v10 player.isHacker: a flagged account (accounts.player_hack): the red name
+    NET_PLAYER_INFO_HOST = 1 << 5,   // v10 game.host == this player's id: the custom lobby's host (the list's star)
 };
 
 typedef struct {

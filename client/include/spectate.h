@@ -21,6 +21,10 @@ int  spectate_target_uid(void);          // b4.spect.target sid, -1 free cam
 // player-viewer WP-E part 2a (v7.1.4)
 int  spectate_show_names(void);          // showSpectatorNameTags (specNames toggles it, default on)
 int  spectate_focused_uid(void);         // focusedPlayerId, -1 none
+// The Player List's focusPlayer(id, elm, auto) / clearFocus(): `quiet_auto` 1 = v10's auto focus
+// of the K.P.D suspect ("Auto Focusing Suspect", never a toggle off)
+void spectate_focus_player(Client*, int uid, int quiet_auto);
+void spectate_clear_focus_player(void);
 int  spectate_objective_cam(void);       // following an objective spectate camera
 int  spectate_has_objective_cams(const Client*); // mode.objective && Map.spectateCams has some
 void spectate_on_player_spawn(Client*, int uid); // io_spawn: a focused player is followed again

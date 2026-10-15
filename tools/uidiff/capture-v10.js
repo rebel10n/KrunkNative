@@ -151,7 +151,7 @@ const RECT_IDS = ['timerHolder', 'topLeftMatchData', 'matchInfo', 'topLeftData',
   'chatHolder', 'chatList', 'chatInputHolder', 'spectateUI', 'spectateHUD', 'specNames', 'specTimer', 'specGameInfo', 'specControlHolder',
   'teamScores', 'gameMessage', 'topMidHold', 'interactMsg', 'instructionHolder', 'instructions', 'menuHolder', 'windowHolder', 'uiBase',
   'topRight', 'leaderboardHolder', 'streakVal', 'perkHolder', 'bottomRight', 'killCount', 'deathCount', 'streakCount', 'kdCount', 'scoreCount',
-  'killsIcon', 'deathsIcon', 'streakIcon', 'kdIcon', 'menuWindow'];
+  'killsIcon', 'deathsIcon', 'streakIcon', 'kdIcon', 'menuWindow', 'windowHeader', 'playerSearchH', 'playerListH', 'voteToKick'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -174,7 +174,10 @@ async function settle(c, ms = 600) {
 // sandbox server game (_69422), its local player (_69423), the client game (_67298) and the
 // client's own player (_69415) and the client socket (_33978).
 const SCOPE_ANCHOR = '  var _69422 = null;\n  var _69423 = null;\n';
-const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978 }; };\n';
+// setAcc(a) stands a signed-in account (_67362, v10's iîïììîí) in for the Player List capture: the
+// K.P.D and Votekick buttons are an account's.
+const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978,'
+  + ' setAcc: function (a) { _67362 = a; } }; };\n';
 let clientJs = null;
 function clientScript() {
   if (clientJs) return clientJs;
@@ -245,6 +248,29 @@ scenario('ingame-chat-open', async (c) => {
 scenario('ingame-pause-esc', async (c) => {
   await enterGame(c);
   await c.eval('document.exitPointerLock(), 1');
+  await sleep(300);
+  await c.eval(flatPage('#000000'));
+  await settle(c, 800);
+});
+// the Player List (pListKey -> showWindow(23)) of a populated lobby: three sandbox bots made
+// players with accounts (level, accid, clan, ping), one flagged isHacker, a level-30 account (the
+// K.P.D button from level 5, Votekick for accounts; the sandbox is not custom for genList)
+scenario('ingame-playerlist', async (c) => {
+  await enterGame(c);
+  for (let i = 0; i < 3; i++) { await c.eval(SPAWN_BOT); await sleep(700); }
+  await sleep(1200);
+  const r = await c.eval(`(() => { try {
+    const s = window.__knScope(), cg = s.cg;
+    const rows = [['Kanzaki', 'VIP', 34, 12], ['Rook', '', 87, 7], ['Sable', 'CMD', 162, 3]];
+    const others = cg.players.list.filter(p => !p.isYou);
+    others.forEach((p, i) => { const d = rows[i % rows.length]; p.alias = p.name = d[0]; p.clan = d[1]; p.ping = d[2];
+      p.level = d[3]; p.accid = 9100 + i; p.isBot = false; p.isHacker = i == 2; });
+    cg.isCustom = false; cg.isRanked = false;
+    s.setAcc({ level: 30, isDev: false, canTeleport: false, name: 'Local User', stats: {}, skins: [], badges: [], getSkinCount: () => 0 });
+    document.exitPointerLock();
+    window.showWindow(23);
+    return others.length; } catch (e) { return String(e.stack); } })()`);
+  if (typeof r !== 'number') console.error('[capture-v10] playerlist: ' + r);
   await sleep(300);
   await c.eval(flatPage('#000000'));
   await settle(c, 800);

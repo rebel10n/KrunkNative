@@ -55,6 +55,8 @@ void hud_ui_hit(Client*, int kill);
 #include <badges.h>   // WP-E: v7 badges on the boards
 #include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
+#include <online_mode.h> // online_mode_server_rights: the player list's staff buttons
+#include <net_ext.h>     // NET_RIGHTS_*
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <menu_view.h>  // menu_view_time_scale: the round-end slow motion scales the title's dt
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
@@ -687,16 +689,33 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
     }
 }
 
-// windows[22] "Player List" (showWindow(23), opened by pListKey): the header with the
-// player count and the search box, then .pListTable rows: the local player first, then
-// every player in Game.players.list (config.isProd hides the local player there) with
-// the ping icon, the profile link and the chat / voice mute buttons v7 shows for players
-// with an account (level >= 1). Not ported, as KrunkNative has no backend for them: the
-// Votekick / K.P.D buttons (account-only, v2k / kpd packets), the staff punish buttons and
-// the trade button.
+// windows[22] "Player List" (showWindow(23), opened by pListKey; v10.0.2 genList, game.deob.js
+// :214284-214310): the header with the player count and the search box, then .pListTable rows:
+// the local player first, then every player in Game.players.list (config.isProd hides the local
+// player there). A row: the ping icon, the profile link (openPlayerProfile; right click copyUser),
+// the speaker icon, then the actions v10 shows: chat / voice mute (players with an account,
+// level >= 1), the K.P.D call (this account at level >= 5), Votekick (an account, not ranked, not a
+// custom lobby, one vote at a time: hud_votekick.c) and the staff buttons (Kill, TP2, TPME, the
+// punish popup) for DEV / the host, which run the server's own chat commands (/kill, /tp, /bring,
+// /kick, /ban). A K.P.D officer's case (hud_votekick.c kpdData) puts the suspect first in a red
+// row. Not ported: Trade (mode.canTrade: KrunkNative has no in-lobby trading), FREEZE, Kick Spec and
+// the bots popup (no server action behind them yet).
 static char g_plist_search[64]; // windows[22].playerSearch
 
-static int hud_plist_matches(const Player *p, const char *name) {
+typedef struct {
+    int uid;
+    char name[PLAYER_NAME_SIZE * 2];
+    char clan[16];
+    int ping;
+    int account_id;  // 0 guest (v10 level 0: no mute buttons)
+    int level;
+    int hacker;      // isHacker: the red name
+    int host;        // game.host == id: the star
+    int speaking;    // voiceChatQueues[alias]
+    int chat_muted, voice_muted; // scenario only (live rows ask hud_social)
+} PlistRow;
+
+static int hud_plist_matches(const char *name) {
     if (!g_plist_search[0]) return 1;
     char a[PLAYER_NAME_SIZE * 2], q[sizeof(g_plist_search)];
     size_t i;
@@ -704,7 +723,6 @@ static int hud_plist_matches(const Player *p, const char *name) {
     a[i] = 0;
     for (i = 0; g_plist_search[i] && i + 1 < sizeof(q); i++) q[i] = (char) tolower((unsigned char) g_plist_search[i]);
     q[i] = 0;
-    (void) p;
     return strstr(a, q) != NULL;
 }
 
@@ -717,6 +735,118 @@ static void hud_plist_clan(StrBuf *sb, const char *clan) {
     sb_append(sb, "]</span>");
 }
 
+// The staff rights v10 checks: account.isDev / canTeleport / canGlobalKick (the signed-in account:
+// KrunkNative's DEV / moderator flags) and isHost (the server says this socket hosts the lobby:
+// NET_EXT_KN_ACCOUNT_RIGHTS HOST). Running the offline sandbox is neither (v10's own sandbox shows
+// no staff buttons and no host star either); the server checks every command again anyway.
+static int hud_plist_staff(const Client *client, int *dev, int *host) {
+    const AccountInfo *acc = account_get();
+    *dev = acc && (acc->is_dev || acc->is_mod);
+    *host = client && !client->offline && (online_mode_server_rights() & NET_RIGHTS_HOST) != 0;
+    return *dev || *host;
+}
+
+static void hud_plist_focus(StrBuf *sb, const PlistRow *r) {
+    if (!spectate_active()) return;
+    sb_appendf(sb, "<span onmouseenter='playTick()' title='Focus Player' class='punishButton' onclick='focusPlayer(\"%d\", this)'>"
+                   "<span class='takeAction material-icons'>%s</span></span>", r->uid, spectate_focused_uid() == r->uid ? "visibility_off" : "visibility");
+}
+
+static const char *hud_plist_ping_color(const int ping) {
+    return ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : ping <= 0 ? "#fff" : PING_COLOR_LOW; // COLORS.ping
+}
+
+// v10 genList's first row for a K.P.D officer: the suspect (kpdData.sus) in a red frame, the name red
+static void hud_plist_suspect_row(StrBuf *sb, const Client *client, const PlistRow *r) {
+    int dev = 0, host = 0;
+    hud_plist_staff(client, &dev, &host);
+    sb_append(sb, "<tr style='border:solid 2px red'><td class='pListName'>");
+    hud_plist_focus(sb, r);
+    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
+                   "<a href='javascript:void(0)' class='red' onclick='openPlayerProfile(\"", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0);
+    sb_append_esc(sb, r->name);
+    sb_appendf(sb, "\")' oncontextmenu='copyUser(this, &quot;%d&quot;)'>", r->uid);
+    sb_append_esc(sb, r->name);
+    hud_plist_clan(sb, r->clan);
+    sb_append(sb, "</a></td></td><td class='pListActions'>"); // v10's own markup (the stray </td> included)
+    if (dev || host)
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
+                       "<span class='takeAction material-icons'>construction</span></span>", r->uid);
+    sb_append(sb, "</td></tr>");
+}
+
+static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, const int scenario) {
+    int dev = 0, host = 0;
+    hud_plist_staff(client, &dev, &host);
+    sb_append(sb, "<tr><td class='pListName'>");
+    hud_plist_focus(sb, r);
+    if (r->host) sb_append(sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // iíïïiìï == id: the lobby's host
+    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
+                   "<a href='javascript:void(0)' class='%s' onclick='openPlayerProfile(\"", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0,
+               r->hacker ? "red" : "");
+    sb_append_esc(sb, r->name);
+    sb_appendf(sb, "\")' oncontextmenu='copyUser(this, &quot;%d&quot;)'>", r->uid);
+    sb_append_esc(sb, r->name);
+    hud_plist_clan(sb, r->clan);
+    sb_append(sb, "</a>");
+    if (r->speaking) sb_append(sb, "<span class='pListVoice material-icons'>volume_up</span>");
+    sb_append(sb, "</td><td class='pListActions'>");
+    if (r->account_id > 0 || r->level >= 1) { // level >= 1: the buttons show mutedChat / VoiceAccountIds
+        const int chat_muted = scenario ? r->chat_muted : social_chat_muted(r->account_id);
+        const int voice_muted = scenario ? r->voice_muted : social_voice_muted(r->account_id);
+        sb_appendf(sb, "<span title='Chat mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 0)'>%s</span>",
+                   r->uid, chat_muted ? "speaker_notes_off" : "chat");
+        sb_appendf(sb, "<span title='Voice mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 1)'>%s</span>",
+                   r->uid, voice_muted ? "voice_over_off" : "record_voice_over");
+    }
+    if (hud_votekick_kpd_row_allowed(client)) {
+        sb_append(sb, "<span onmouseenter='playTick()' class='punishButton kdf' onclick='confirmPolice(`");
+        sb_append_esc(sb, r->name);
+        sb_appendf(sb, "`,`%d`)'><img src='./img/police.png' style='height:25px;vertical-align:middle;margin-top:-6px'></span>", r->uid);
+    }
+    if (hud_votekick_row_allowed(client, r->name, 1))
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton vote' onclick='kickVote(\"%d\")'>Votekick</span>", r->uid);
+    if (dev) sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", r->uid);
+    if (dev) { // account.canTeleport: staff (the host teleports with /tp and /bring)
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tp2' onclick='punishPlayer(\"%d\", 4)'>TP2</span>", r->uid);
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tpme' onclick='punishPlayer(\"%d\", 5)'>TPME</span>", r->uid);
+    }
+    if (dev || host) // isHost || account.canGlobalKick / canSilentKick / canGlobalBan / canGlobalFlag
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
+                       "<span class='takeAction material-icons'>construction</span></span>", r->uid);
+    sb_append(sb, "</td></tr>");
+}
+
+static void hud_plist_row_json(PlistRow *r, const cJSON *o) {
+    memset(r, 0, sizeof(*r));
+    const cJSON *v;
+    r->uid = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "uid")) ? v->valueint : 0;
+    snprintf(r->name, sizeof(r->name), "%s", cJSON_IsString(v = cJSON_GetObjectItem(o, "name")) ? v->valuestring : "");
+    snprintf(r->clan, sizeof(r->clan), "%s", cJSON_IsString(v = cJSON_GetObjectItem(o, "clan")) ? v->valuestring : "");
+    r->ping = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "ping")) ? v->valueint : 0;
+    r->account_id = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "account")) ? v->valueint : 0;
+    r->level = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "level")) ? v->valueint : r->account_id > 0;
+    r->hacker = cJSON_IsTrue(cJSON_GetObjectItem(o, "hacker"));
+    r->host = cJSON_IsTrue(cJSON_GetObjectItem(o, "host"));
+    r->speaking = cJSON_IsTrue(cJSON_GetObjectItem(o, "speaking"));
+    r->chat_muted = cJSON_IsTrue(cJSON_GetObjectItem(o, "chatMuted"));
+    r->voice_muted = cJSON_IsTrue(cJSON_GetObjectItem(o, "voiceMuted"));
+}
+
+static void hud_plist_row_of(const Client *client, const Player *p, PlistRow *row) {
+    const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
+    memset(row, 0, sizeof(*row));
+    row->uid = p->uid;
+    snprintf(row->name, sizeof(row->name), "%s", hud_player_name(client, p));
+    if (info && info->account_id > 0) snprintf(row->clan, sizeof(row->clan), "%s", info->clan);
+    row->ping = p->ping;
+    row->account_id = info ? info->account_id : 0;
+    row->level = info ? info->level : 0;
+    row->hacker = info && (info->flags & NET_PLAYER_INFO_HACKER);
+    row->host = info && (info->flags & NET_PLAYER_INFO_HOST);
+    row->speaking = voice_is_speaking(p->name);
+}
+
 static char *hud_plist_rows(void) {
     const Client *client = menu_ui()->client;
     const size_t count = client && client->game.players ? client->game.player_count : 0;
@@ -727,43 +857,73 @@ static char *hud_plist_rows(void) {
     const char *host = client ? client->net_address : "";
     const int prod = remote && host[0] && strcmp(host, "127.0.0.1") && strcmp(host, "localhost") && strncmp(host, "192.168.", 8);
     const Player *me = client ? client->me : NULL;
-    if (me) {
-        sb_append(&sb, "<tr><td class='pListName'>");
-        if (!remote) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>");
-        sb_append_esc(&sb, hud_player_name(client, me));
-        const NetPlayerInfoPacket *info = player_accounts_get(me->uid);
-        const AccountInfo *acc = account_get();
-        hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
-        sb_appendf(&sb, "</td><td class='pListActions'>%s</td></tr>",
-                   spectate_active() ? "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>" : "");
+    const cJSON *scenario = hud_votekick_override(); // --render-scenario state.playerList
+    int dev = 0, is_host = 0;
+    hud_plist_staff(client, &dev, &is_host);
+    PlistRow row;
+    // the K.P.D officer's suspect first (kpdData.sus; a scenario row with "sus": true)
+    int sus = hud_votekick_kpd_sus(client);
+    if (scenario) {
+        const cJSON *o;
+        sus = -1;
+        cJSON_ArrayForEach(o, scenario) {
+            if (!cJSON_IsTrue(cJSON_GetObjectItem(o, "sus"))) continue;
+            hud_plist_row_json(&row, o);
+            sus = row.uid;
+            hud_plist_suspect_row(&sb, client, &row);
+            break;
+        }
+    } else if (sus >= 0) {
+        const Player *p = NULL;
+        for (size_t i = 0; i < count && !p; i++) {
+            if (client->game.players[i] && client->game.players[i]->uid == sus) p = client->game.players[i];
+        }
+        if (p) {
+            hud_plist_row_of(client, p, &row);
+            hud_plist_suspect_row(&sb, client, &row);
+        } else sus = -1;
     }
-    for (size_t i = 0; i < count; i++) {
+    if (me || scenario) {
+        sb_append(&sb, "<tr><td class='pListName'>");
+        if (is_host) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // isHost
+        const NetPlayerInfoPacket *info = me ? player_accounts_get(me->uid) : NULL;
+        const AccountInfo *acc = account_get();
+        sb_append_esc(&sb, me ? hud_player_name(client, me) : acc ? acc->name : client ? client->menu_name : "");
+        hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
+        sb_append(&sb, "</td><td class='pListActions'>");
+        if (spectate_active()) sb_append(&sb, "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>");
+        if (dev && me) sb_appendf(&sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", me->uid);
+        if (dev) sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton tpall' onclick='punishPlayer(null, 9)'>TPAll</span>");
+        sb_append(&sb, "</td></tr>");
+    }
+    if (scenario) {
+        const cJSON *o;
+        cJSON_ArrayForEach(o, scenario) {
+            hud_plist_row_json(&row, o);
+            if (row.uid != sus && hud_plist_matches(row.name)) hud_plist_row(&sb, client, &row, 1);
+        }
+    }
+    const int bots_as_ai = client && client->game.mode && client->game.mode->config.bots_as_ai;
+    for (size_t i = 0; !scenario && i < count; i++) {
         const Player *p = client->game.players[i];
         if (!p || (prod && p == me)) continue; // Game.players.list.filter(ho => !config.isProd || !ho.isYou)
-        const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
-        const char *name = hud_player_name(client, p);
-        if (!hud_plist_matches(p, name)) continue;
-        const int ping = p->ping;
-        const char *pcol = ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : ping <= 0 ? "#fff" : PING_COLOR_LOW; // COLORS.ping
-        sb_appendf(&sb, "<tr><td class='pListName'><span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
-                        "<a target='_blank' class='' href='/social.html?p=profile&q=", pcol, ping > 0 ? ping : 0);
-        sb_append_esc(&sb, name);
-        sb_append(&sb, "'>");
-        sb_append_esc(&sb, name);
-        hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : NULL);
-        sb_append(&sb, "</a>");
-        if (voice_is_speaking(p->name)) sb_append(&sb, "<span class='pListVoice material-icons'>volume_up</span>"); // voiceChatQueues[alias]
-        sb_append(&sb, "</td><td class='pListActions'>");
-        if (info && info->account_id > 0) { // level >= 1: an account; the buttons show mutedChat/VoiceAccountIds
-            sb_appendf(&sb, "<span title='Chat mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 0)'>%s</span>",
-                       p->uid, social_chat_muted(info->account_id) ? "speaker_notes_off" : "chat");
-            sb_appendf(&sb, "<span title='Voice mute/unmute' onmouseenter='playTick()' class='muteUserBtn material-icons' onclick='muteUser(this, `%d`, 1)'>%s</span>",
-                       p->uid, social_voice_muted(info->account_id) ? "voice_over_off" : "record_voice_over");
-        }
-        sb_append(&sb, "</td></tr>");
+        if (p->uid == sus || (p->is_bot && bots_as_ai)) continue; // the suspect's row is above; botsAsAI: bots are AIs
+        hud_plist_row_of(client, p, &row);
+        if (!hud_plist_matches(row.name)) continue;
+        hud_plist_row(&sb, client, &row, 0);
     }
     sb_append(&sb, "</tbody></table>");
     return sb_finish(&sb);
+}
+
+// The alias of player `uid` (Game.players.findById(id).alias), NULL when not in the game
+static const char *hud_plist_alias(const int uid) {
+    const Client *client = menu_ui()->client;
+    for (size_t i = 0; client && client->game.players && i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && p->uid == uid) return hud_player_name(client, p);
+    }
+    return NULL;
 }
 
 char *hud_ui_player_list_html(void) {
@@ -3956,7 +4116,7 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     }
     if (!strcmp(name, "muteUser")) { // muteUser(this, id, 0 chat / 1 voice): player.accid in or out of the mute list
         const int voice = argc > 2 && args[2].kind == HTML_ARG_NUM && args[2].num != 0.0;
-        const HtmlElem btn = argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : ev ? ev->target : 0;
+        const HtmlElem btn = ev ? ev->target : 0; // this: the clicked button (events.c leaves HTML_ARG_THIS unresolved)
         int uid = -1;
         if (argc > 1 && args[1].kind == HTML_ARG_NUM) uid = (int) args[1].num;
         else if (argc > 1 && args[1].kind == HTML_ARG_STR && args[1].str) uid = atoi(args[1].str);
@@ -3966,6 +4126,65 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         if (btn) html_dom_set_text(btn, voice ? (muted ? "voice_over_off" : "record_voice_over") : (muted ? "speaker_notes_off" : "chat"));
         return 1;
     }
-    if (!strcmp(name, "clearFocus")) return 1; // spectator focus: not in KrunkNative's spectate.c yet
+    if (!strcmp(name, "focusPlayer")) { // focusPlayer(id, this): follow / unfollow them, the list redrawn (updateWindow(23))
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
+        if (uid >= 0 && menu_ui()->client) spectate_focus_player(menu_ui()->client, uid, 0);
+        if (menu_ui()->active_window == 23) menu_show_window(23, 1);
+        return 1;
+    }
+    if (!strcmp(name, "clearFocus")) { // clearFocus(): "Focus Cleared", updateWindow(23)
+        spectate_clear_focus_player();
+        if (menu_ui()->active_window == 23) menu_show_window(23, 1);
+        return 1;
+    }
+    if (!strcmp(name, "punishPopup")) { // punishPopup(id): v10 genericPopup(..., "confPop")
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 ? (int) args[0].num : -1;
+        const char *alias = hud_plist_alias(uid);
+        if (!alias) return 1;
+        int dev = 0, host = 0;
+        hud_plist_staff(menu_ui()->client, &dev, &host);
+        StrBuf sb = {0};
+        char q[96];
+        snprintf(q, sizeof(q), "Are you sure you want to take action on %s?", alias); // windows.playerlist.punish
+        sb_append(&sb, "<div style='color:#fff;font-size:15px;position:relative;margin-bottom:15px;'>");
+        sb_append_esc(&sb, q);
+        sb_append(&sb, "</div><div class='takeActionTable'>");
+        sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 0);clearPops();'>Kick</span>", uid);
+        if (dev) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
+        sb_append(&sb, "</div>");
+        char *html = sb_finish(&sb);
+        ui_loadout_clear_pops();
+        dom_display("popupHolder", "block");
+        const HtmlElem pop = html_dom_by_id("genericPop");
+        if (pop) {
+            html_dom_set_attr(pop, "class", "confPop");
+            html_dom_set_attr(pop, "style", "");
+            html_dom_set_html(pop, html);
+            html_dom_set_display(pop, "block");
+        }
+        free(html);
+        return 1;
+    }
+    if (!strcmp(name, "punishPlayer") || !strcmp(name, "banPlayer")) {
+        // punishPlayer(id, action): the server's chat commands, which check the rights themselves
+        // (0 kick, 3 kill, 4 TP2 = teleport to them, 5 TPME = bring them, 9 TPAll); banPlayer(id)
+        const int ban = !strcmp(name, "banPlayer");
+        const int action = ban ? 1 : argc > 1 ? (int) (args[1].kind == HTML_ARG_STR && args[1].str ? atoi(args[1].str) : args[1].num) : -1;
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
+        const char *alias = hud_plist_alias(uid);
+        char line[NET_CHAT_TEXT_SIZE] = "";
+        if (action == 9) snprintf(line, sizeof(line), "/bring all");
+        else if (alias) {
+            const char *cmd = action == 0 ? "kick" : action == 1 ? "ban" : action == 3 ? "kill" : action == 4 ? "tp" : action == 5 ? "bring" : NULL;
+            if (cmd) snprintf(line, sizeof(line), "/%s %s", cmd, alias);
+        }
+        if (line[0] && menu_ui()->client) client_chat_send(menu_ui()->client, line);
+        if (ban) ui_loadout_clear_pops();
+        return 1;
+    }
+    {
+        const int r = hud_votekick_handle(menu_ui()->client, name, ev, args, argc); // kickVote, confirmPolice, callPolice, copyUser
+        if (r >= 0) return r;
+    }
     return hud_v10_handle(name); // the v10 page's own HUD handlers (hud_v10.c), -1 when not one
 }

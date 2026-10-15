@@ -957,7 +957,10 @@ static void wrap_table(LayoutTree *t, Box *b)
     for (Box *c = first; c;) {
         Box *next = c->next;
         c->parent = NULL; c->next = c->prev = NULL;
-        if (!box_is_inflow(c)) { layout_append_child(b, c); c = next; continue; }
+        /* a float is blockified, so not a row / cell: it goes into the anonymous row and cell like any
+         * other non-table content (CSS 2.1 17.2.1, Chrome: v10's <td class='pListActions'> float:right).
+         * Absolutely positioned children stay out of the table structure. */
+        if (!box_is_inflow(c) && !(c->flags & BOXF_FLOAT)) { layout_append_child(b, c); c = next; continue; }
         if (c->type == BOX_TABLE_ROW) { layout_append_child(b, c); anon_row = NULL; }
         else {
             if (is_ws_text(c)) { drop_box(t, c); c = next; continue; }
@@ -978,7 +981,7 @@ static void wrap_table(LayoutTree *t, Box *b)
         for (Box *c = rf; c;) {
             Box *next = c->next;
             c->parent = NULL; c->next = c->prev = NULL;
-            if (!box_is_inflow(c)) { layout_append_child(r, c); c = next; continue; }
+            if (!box_is_inflow(c) && !(c->flags & BOXF_FLOAT)) { layout_append_child(r, c); c = next; continue; } /* floats: as above */
             if (c->type == BOX_TABLE_CELL) { layout_append_child(r, c); anon_cell = NULL; }
             else {
                 if (is_ws_text(c)) { drop_box(t, c); c = next; continue; }

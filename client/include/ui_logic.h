@@ -297,6 +297,33 @@ void hud_ui_relayout(void);
 void hud_ui_on_init(Client*);
 void hud_ui_on_config(Client*); // a GAME_CONFIG applied (it may follow the INIT): f1904 again with it
 char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" (pListKey, showWindow(23)); malloc'd
+// The player list's actions (client/src/ui/hud_votekick.c): the vote kick
+// prompt (#voteToKick, io "vk"), the kickVoteY / kickVoteN keys, the K.P.D call and its answer.
+struct NetVoteKickStatePacket;
+struct NetKpdResponsePacket;
+void hud_votekick_on_state(Client*, const struct NetVoteKickStatePacket*);           // NET_EXT_VOTE_KICK_STATE
+void hud_votekick_on_kpd(Client*, const struct NetKpdResponsePacket*, const char *json, size_t json_len); // NET_EXT_KPD_RESPONSE
+int  hud_votekick_key(Client*, int yes);          // kickVoteY (1) / kickVoteN (0) pressed: 1 when a vote took it
+void hud_votekick_reset(void);                    // INIT: no vote, nothing voted on, the phone down
+int  hud_votekick_active(void);                   // a vote runs (voteToKick shown)
+const char *hud_votekick_target(void);            // its target alias ("" none)
+int  hud_votekick_row_allowed(const Client*, const char *alias, int level_ok); // the row's Votekick button (v10 :214300)
+int  hud_votekick_kpd_row_allowed(const Client*); // the row's K.P.D button (account level >= 5)
+void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2: an officer's list for the K.P.D popup
+char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 table, malloc'd
+int  hud_votekick_handle(Client*, const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // kickVote, confirmPolice, callPolice, copyUser, policeJoin
+void hud_votekick_set_override(const struct cJSON *rows); // --render-scenario state.playerList (hud_ui.c rows from these)
+const struct cJSON *hud_votekick_override(void);
+// The K.P.D officer's case (NET_EXT_KPD_DATA, v10 startGame kpdData {sus, caller}): the list's red
+// suspect row, the spectator panel #specKPDContr ("Is <name> hacking?") and the kpdVoteY / N keys
+// that send "rkpd" (NET_EXT_KPD_RATE); "kpdf" (NET_EXT_KPD_RESET) opens the verdict again.
+struct NetKpdDataPacket;
+void hud_votekick_on_kpd_data(Client*, const struct NetKpdDataPacket*);
+void hud_votekick_on_kpd_reset(Client*);
+int  hud_votekick_kpd_key(Client*, int yes);      // 1 when the case took the key (spectating)
+int  hud_votekick_kpd_sus(const Client*);         // the suspect's uid, -1 no case on this connection
+int  hud_votekick_kpd_caller(const Client*);      // the reporter's uid, -1 none
+int  hud_votekick_kpd_panel_visible(const Client*);
 // "<victim> committed <random config.suicides entry>" kill-feed row (no killer/weapon).
 #define HUD_UI_HAVE_KILLFEED_SUICIDE 1
 void hud_ui_add_killfeed_suicide(Client*, const char *victim, int victim_is_you);

@@ -25,6 +25,7 @@
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
 #include <hud_modes.h>
+#include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
 #include <modes.h>
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
@@ -248,6 +249,8 @@ static void warn_unknown_keys(void) {
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
+        "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
@@ -868,6 +871,8 @@ static int ui_scenario_apply(Client *client) {
     if (cJSON_IsObject(hud)) hud_ui_set_override(hud);
     const cJSON *board = st("scoreboard");
     if (cJSON_IsArray(board)) hud_ui_set_override_scoreboard(board);
+    const cJSON *plist = st("playerList");
+    if (cJSON_IsArray(plist)) hud_votekick_set_override(plist);
 
     // v7's reference captures load Kanji as a custom map (customsData): no minimap unless the
     // scenario says otherwise (WP-E part 2a, client/src/ui/hud_map.c)
@@ -923,6 +928,19 @@ static int ui_scenario_apply(Client *client) {
             store_ui_frame(frame);
             cJSON_Delete(frame);
         }
+    }
+
+    const cJSON *vk = st("voteKick"); // io "vk" (target, votes, needed, true, voter): the prompt
+    if (cJSON_IsObject(vk)) {
+        NetVoteKickStatePacket state;
+        memset(&state, 0, sizeof(state));
+        state.active = state.opened = 1;
+        state.votes = (int32_t) cJSON_GetNumberValue(cJSON_GetObjectItem(vk, "votes"));
+        state.needed = (int32_t) cJSON_GetNumberValue(cJSON_GetObjectItem(vk, "needed"));
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(vk, "target")), *v = cJSON_GetStringValue(cJSON_GetObjectItem(vk, "voter"));
+        snprintf(state.target, sizeof(state.target), "%s", t ? t : "");
+        snprintf(state.voter, sizeof(state.voter), "%s", v ? v : "");
+        hud_votekick_on_state(client, &state);
     }
 
     run_frames(client, 2);

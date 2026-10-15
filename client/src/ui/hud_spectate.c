@@ -395,7 +395,7 @@ static void hs_update_info(const Client *client) {
             snprintf(score, sizeof(score), "%d", mode_team_score(&client->game, 2));
             if ((el = html_dom_by_id("specScoreTm1"))) html_dom_set_text(el, score);
         }
-        hs_set_display("specKPDContr", "none");
+        hs_set_display("specKPDContr", hud_votekick_kpd_panel_visible(client) ? "block" : "none"); // startGame: kpdData
     }
 
     // io_startGame: the Objective Cam row only with objective cams (mode.objective && spectateCams)

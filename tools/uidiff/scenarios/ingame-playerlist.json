@@ -1,0 +1,59 @@
+{
+  "ref": "doc/ref/krunker-v10/ingame/ingame-playerlist.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 23,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Local User",
+      "score": 200000,
+      "funds": 0,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "skins": []
+    },
+    "playerList": [
+      {
+        "uid": 2,
+        "name": "Kanzaki",
+        "clan": "VIP",
+        "ping": 34,
+        "account": 9100,
+        "level": 12
+      },
+      {
+        "uid": 3,
+        "name": "Rook",
+        "ping": 87,
+        "account": 9101,
+        "level": 7
+      },
+      {
+        "uid": 4,
+        "name": "Sable",
+        "clan": "CMD",
+        "ping": 162,
+        "account": 9102,
+        "level": 3,
+        "hacker": true
+      }
+    ]
+  },
+  "frames": 3,
+  "note": "The Player List of a lobby with three account players, signed in at level 30. Reference: the offline v10 sandbox (capture-v10.js)."
+}

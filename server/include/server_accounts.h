@@ -93,6 +93,12 @@ int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)
+// The player list's K.P.D call (server_votekick.h): records it in kn_brain (op kpd_call) and answers
+// the caller; tab 1..3 asks for an officer's list (kpd_calls / kpd_log). target NULL for the lists.
+void accounts_kpd_request(ClientConnection *client, int tab, const ClientConnection *target);
+// An officer's verdict on call `call_id` (op kpd_rate; 0 / no coordinator: logged only). A refusal
+// ("Case already closed") is told to the officer in chat.
+void accounts_kpd_rate(ClientConnection *officer, int64_t call_id, int tagged, const char *suspect);
 void net_resume_ent(ClientConnection*, int spectate);              // replay a deferred ENT
 void net_comp_lobby_sync(ClientConnection*);                        // v7 syncLobbyP(player, id, 0) once the identity is known
 int net_client_is_dev(const ClientConnection*);                    // DEV checks: op, the server's machine, a DEV account

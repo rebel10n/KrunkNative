@@ -295,6 +295,32 @@ static void spectate_clear_focus(void) {
     hud_ui_add_chat(NULL, "Focus Cleared", "#fc03ec");
 }
 
+void spectate_focus_player(Client *client, const int uid, const int quiet_auto) {
+    if (!client || uid < 0) return;
+    if (!quiet_auto) {
+        spectate_focus(client, uid); // focusPlayer(id, elm): the focused one again clears it
+        return;
+    }
+    // focusPlayer(sus, false, true): "Auto Focusing Suspect" when the suspect is not in the list yet
+    const Player *player = client_find_player(client, uid);
+    if (g_spect.focused_uid == uid) return;
+    if (player) {
+        char line[96];
+        snprintf(line, sizeof(line), "Focusing - %s", player->name);
+        hud_ui_add_chat(NULL, line, "#fc03ec");
+    } else hud_ui_add_chat(NULL, "Auto Focusing Suspect", "#fc03ec");
+    g_spect.focused_uid = uid;
+    if (g_spect.active && player && player->active) {
+        g_spect.obj_cam = 0;
+        g_spect.cam_object = -1;
+        g_spect.target_uid = uid;
+        spectate_send_target(client, uid);
+        hud_spectate_refresh();
+    }
+}
+
+void spectate_clear_focus_player(void) { spectate_clear_focus(); }
+
 void spectate_on_player_spawn(Client *client, const int uid) {
     // io_spawn: a focused player is followed again (focusPlayer without the chat line)
     if (!g_spect.active || uid < 0 || uid != g_spect.focused_uid) return;

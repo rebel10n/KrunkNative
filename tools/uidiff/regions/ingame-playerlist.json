@@ -1,0 +1,34 @@
+{
+  "scenario": "ingame-playerlist",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "player-list-header",
+      "rect": [331, 236, 617, 40],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#playerSearchH: Player List [4] and the search box"
+    },
+    {
+      "name": "player-list-rows",
+      "rect": [343, 283, 595, 138],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player"
+    },
+    {
+      "name": "player-list-sandbox-tools",
+      "rect": [333, 419, 614, 63],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list"
+    }
+  ]
+}

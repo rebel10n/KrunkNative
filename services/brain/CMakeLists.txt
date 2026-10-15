@@ -48,6 +48,7 @@ set(KN_BRAIN_SOURCES
     db_mm.c
     db_ranked.c
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
+    db_kpd.c                        # the player list's K.P.D distress calls (0209_kpd_calls)
     turf.c
     community.c                     # v10 Community & Events / news feed (/creators/events, /social/news)
     ../../shared/src/turf_wars.c
@@ -230,6 +231,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_storage PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # the in-game player list's K.P.D call: kpd_call / kpd_calls / kpd_log (db_kpd.c, 0209_kpd_calls)
+    add_test(NAME brain_kpd
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kpd_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_kpd PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c, 0107_progression)
     add_test(NAME brain_progress
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
@@ -319,6 +325,9 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_storage_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_kpd_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kpd_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         add_test(NAME brain_progress_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
@@ -331,7 +340,7 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_progress_${drv} brain_season_${drv}
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_progress_${drv} brain_season_${drv}
             brain_account_security_${drv} brain_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")

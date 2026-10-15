@@ -506,6 +506,7 @@ rtc: rtc-build ## Run the WebRTC <-> UDP gateway (signaling http $(RTC_HTTP), IC
 test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice channels + sprays (social_test), 2-client UDP end-to-end (headless)
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/social_test
+	./$(DEBUG_DIR)/votekick_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
 
@@ -528,6 +529,14 @@ command-auth-e2e: build ## Command authorisation (doc/v7/command-auth.md): forge
 .PHONY: live-signin-e2e
 live-signin-e2e: build ## Live sign-in: sign in / switch / sign out mid-session upgrades the live connection (DEV rights, Object Manager), forged / throttled / banned refused (local kn_brain on sqlite, headless client)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/live_signin_e2e.py $(DEBUG_DIR)
+
+.PHONY: votekick-e2e
+votekick-e2e: build ## The player list's vote kick + K.P.D call: vote / kick / voteKickBan, the call recorded in kpd_calls, an officer's verdict (kn_brain on the local PostgreSQL; KN_TEST_DB_DRIVER=sqlite)
+	timeout 300 $(PYTHON) -I server/tests/votekick_e2e.py $(DEBUG_DIR)
+
+.PHONY: playerlist-ui-e2e
+playerlist-ui-e2e: build ## The in-game Player List's controls on a headless client: mutes (saved, chat dropped), Votekick, Call K.P.D popup, the officer's suspect row (EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 400 $(PYTHON) -I client/tests/playerlist_e2e.py $(DEBUG_DIR)
 
 .PHONY: billboard-e2e
 billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none

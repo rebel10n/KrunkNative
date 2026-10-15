@@ -54,6 +54,15 @@ typedef enum {
     // 0x0700 protocol / ruleset (KrunkNative, the version toggle)
     NET_EXT_BLOCK_PROTOCOL = 0x0700,
 
+    // 0x0800 the player list's actions: vote kick and the K.P.D call
+    NET_EXT_VOTE_KICK = 0x0800,       // "v2k" C -> S NetVoteKickPacket
+    NET_EXT_VOTE_KICK_STATE = 0x0801, // "vk"  S -> C NetVoteKickStatePacket
+    NET_EXT_KPD_CALL = 0x0802,        // "kpd" C -> S NetKpdCallPacket
+    NET_EXT_KPD_RESPONSE = 0x0803,    // "kpd" S -> C NetKpdResponsePacket (+ JSON tail)
+    NET_EXT_KPD_RESET = 0x0804,       // "kpdf" S -> C, no body: the officer's verdict is open again (kpdData kept)
+    NET_EXT_KPD_DATA = 0x0805,        // startGame kpdData S -> C NetKpdDataPacket: the officer's case in this lobby
+    NET_EXT_KPD_RATE = 0x0806,        // "rkpd" C -> S NetKpdRatePacket: the officer's verdict on the case
+
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
 
@@ -179,6 +188,72 @@ typedef struct {
     NetBotPathPoint points[NET_BOT_PATH_POINTS_MAX];
 } NetBotPathPacket;
 #define NET_BOT_PATH_SIZE(n) (offsetof(NetBotPathPacket, points) + (size_t) (n) * sizeof(NetBotPathPoint))
+
+// ---- 0x0800 the player list's actions (client/src/ui/hud_votekick.c, server/src/votekick.c)
+#pragma pack(push, 1)
+//
+// NET_EXT_VOTE_KICK (C -> S, v10 "v2k" [alias, 1]): `vote` 1 opens a vote against `target` (an
+// alias as the player list shows it) or votes yes on the running one, 0 votes no (the [2] key).
+// The server's rules (v10 config: voteKickReq 4, voteKickTimer 35 s, voteKickBan 30 min,
+// voteKickMaxLvl 20) are server/src/votekick.c's.
+typedef struct {
+    char target[32];
+    uint8_t vote;
+} NetVoteKickPacket;
+
+// NET_EXT_VOTE_KICK_STATE (S -> C, v10 "vk" [alias, votes, needed, isNew, voter]): the running
+// vote (active 1; opened 1 on the broadcast that opened it, with the initiator in `voter`), or
+// active 0 = the vote ended (passed or failed: v10 "vk" null): the prompt hides.
+typedef struct NetVoteKickStatePacket {
+    uint8_t active;
+    uint8_t opened;
+    uint8_t passed;    // with active 0: 1 the target was kicked, 0 the vote failed / timed out
+    int32_t votes;
+    int32_t needed;
+    char target[32];
+    char voter[32];
+} NetVoteKickStatePacket;
+
+// NET_EXT_KPD_CALL (C -> S, v10 "kpd" [tab, {id}]): tab 0 calls the K.P.D on player `uid`
+// (a Game uid); tabs 1.. ask for the K.P.D window's lists (1 distress calls, 2 the moderation
+// log, 3 tag stats: moderators only).
+typedef struct {
+    uint8_t tab;
+    int32_t uid;
+} NetKpdCallPacket;
+
+// NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call
+// (status: NET_KPD_* with the message to show and the suspect's name); codes 1..3 carry a list
+// for the K.P.D window as a JSON array after the struct (the rest of the body, not 0-terminated).
+enum {
+    NET_KPD_REPORTED = 0,   // "Reported <name> to the K.P.D"
+    NET_KPD_BUSY = 1,       // already reported / cooling down / rate limited: `message` says why
+    NET_KPD_REFUSED = 2,    // not allowed (level, guest, the target)
+    NET_KPD_UNAVAILABLE = 3 // no moderation backend on this server
+};
+typedef struct NetKpdResponsePacket {
+    uint8_t code;
+    uint8_t status;
+    char message[64];
+    char name[32];
+} NetKpdResponsePacket;
+
+// NET_EXT_KPD_DATA (S -> C, v10 startGame's kpdData {sus, caller}): a K.P.D officer (a moderator or
+// DEV account) joined a lobby with an open call: `sus` is the suspect's uid (the player list's red
+// row, the spectator panel "Is <name> hacking?"), `caller` the reporter's (-1 left). sus -1: no case.
+typedef struct NetKpdDataPacket {
+    int32_t sus;
+    int32_t caller;
+} NetKpdDataPacket;
+
+// NET_EXT_KPD_RATE (C -> S, v10 "rkpd" [tagged]): the officer's verdict, 1 tagged (hacking: [Y] twice,
+// "Are you 100% sure?"), 0 not tagged ([N]). The server records it on the call (kn_brain kpd_rate:
+// kpd_calls.status handled, .rating) once the officer watched for kpdWatchTime (10 s).
+typedef struct {
+    uint8_t tagged;
+} NetKpdRatePacket;
+#pragma pack(pop)
+
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

@@ -50,8 +50,17 @@
 //   gsc     [gameState]                      KrunkerLink.game_state (:219143)
 //   00      [[id, name, alias]..., keepOpen] NET_EXT_PLAYER_NAME per rename; keepOpen falsy: the client
 //                                            closes the socket (KRUNKER_LINK_EV_CLOSE) (:220322)
+//   vk      [alias, votes, needed, isNew, voter] | [null]  NET_EXT_VOTE_KICK_STATE (io "vk", :219974)
+//   kpd     [code, message, data]            NET_EXT_KPD_RESPONSE (policeRes, :216287; code 0 only)
+//   kpdf    []                               NET_EXT_KPD_RESET (iiíìîìi: the officer's verdict open again)
+//   start   [.., kpdData {sus, caller}]      NET_EXT_KPD_DATA (socket ids as our uids) for a K.P.D officer
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
-// window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct"; the rest is dropped.
+// window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", the player list's EXT
+// NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
+// NET_EXT_KPD_CALL -> "kpd" [0, {id: socket id}] (callPolice :216272) / [tab], NET_EXT_KPD_RATE ->
+// "rkpd" [0 | 1] (the officer's verdict, iiïíïíì); the rest is dropped.
+// Muting is client-side in v10 too (muteUser :217141 only saves mute_chat / mute_voice), and
+// reportPlayer opens the profile: neither has a packet.
 #include <krunker_cheat.h>
 #include <krunker_proto.h>
 #include <shared.h>
@@ -103,6 +112,7 @@ typedef struct {
     int my_sid;                     // -1 until our "0"
     int joined;                     // "en" sent
     KrunkerLinkPlayer players[KRUNKER_LINK_MAX_PLAYERS];
+    int kpd_case;       // startGame gave a K.P.D case (kpdData): a later one without clears it
     int player_count;
     // "q" window compression (game.deob.js:221765-221830): the last value of every input field
     // (iîîíîîi, kept across windows), the previous window's angle list (iîiìîií) and the resync

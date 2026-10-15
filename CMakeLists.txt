@@ -148,6 +148,7 @@ set(SERVER_CORE_SOURCES
     server/src/ks_server_host.c
     server/src/ks_storage.c
     server/src/bot_banter.c       # bot chat via kn_brain (templates only without a brain link: the offline sandbox)
+    server/src/votekick.c
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -765,6 +766,11 @@ else ()
     target_link_libraries(social_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(social_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_executable(votekick_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/votekick_test.c)
+    target_link_libraries(votekick_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(votekick_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # object_manager_test: the KrunkNative Object Manager (F1 spawn menu) over the sandbox: extra

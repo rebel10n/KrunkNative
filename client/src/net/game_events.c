@@ -986,6 +986,20 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect
                 if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
+            } else if (subtype == NET_EXT_VOTE_KICK_STATE && body_length >= sizeof(NetVoteKickStatePacket)) { // "vk" (hud_votekick.c)
+                NetVoteKickStatePacket state;
+                memcpy(&state, body, sizeof(state));
+                hud_votekick_on_state(client, &state);
+            } else if (subtype == NET_EXT_KPD_DATA && body_length >= sizeof(NetKpdDataPacket)) { // startGame kpdData (officers)
+                NetKpdDataPacket data;
+                memcpy(&data, body, sizeof(data));
+                hud_votekick_on_kpd_data(client, &data);
+            } else if (subtype == NET_EXT_KPD_RESET) { // "kpdf": the verdict is open again
+                hud_votekick_on_kpd_reset(client);
+            } else if (subtype == NET_EXT_KPD_RESPONSE && body_length >= sizeof(NetKpdResponsePacket)) { // "kpd" policeRes
+                NetKpdResponsePacket res;
+                memcpy(&res, body, sizeof(res));
+                hud_votekick_on_kpd(client, &res, (const char *) body + sizeof(res), body_length - sizeof(res));
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
@@ -1002,6 +1016,7 @@ void client_game_events_reset(Client *client) {
     player_accounts_on_init();
     billboard_ad_on_init(); // the server's ad for this map, before client_load_map builds it
     hud_modes_reset(client);
+    hud_votekick_reset(); // a new round: no vote kick running, the K.P.D phone down
     hud_popups_on_init(); // "init": bN = 0
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
     hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)

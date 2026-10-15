@@ -205,6 +205,27 @@ def main():
                   "overflows it). The engine's synthetic oblique antialiases the slanted stems differently", max_pct=15.0))
     add("ingame-endscreen-late", st, regs, "The results after the end animation (Performance tab, a guest).")
 
+    # the Player List (pListKey -> showWindow(23)) of a populated lobby, signed in: per row the ping,
+    # the profile link (red: isHacker), the clan, chat / voice mute, the K.P.D call and Votekick
+    # (client/src/ui/hud_ui.c, hud_votekick.c). The reference is the v10
+    # sandbox with three bots made account players (capture-v10.js ingame-playerlist); its
+    # "Developer Tools" block below the table is the browser sandbox's own extension (isSandbox).
+    rc = rects("ingame-playerlist")
+    st = state_of("ingame-pause-esc") if "ingame-pause-esc" in g.scen else state_of("ingame-plain")
+    st.update(menu=True, window=23, name="Local User",
+              account={"name": "Local User", "score": 200000, "funds": 0, "premium": 0, "badges": [], "stats": {}, "skins": []},
+              playerList=[{"uid": 2, "name": "Kanzaki", "clan": "VIP", "ping": 34, "account": 9100, "level": 12},
+                          {"uid": 3, "name": "Rook", "ping": 87, "account": 9101, "level": 7},
+                          {"uid": 4, "name": "Sable", "clan": "CMD", "ping": 162, "account": 9102, "level": 3, "hacker": True}])
+    mw = rc["menuWindow"]
+    regs = [R("player-list-header", pad(rc["playerSearchH"], 2), "text", "#playerSearchH: Player List [4] and the search box"),
+            R("player-list-rows", pad(rc["playerListH"], 2), "text",
+              "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player"),
+            R("player-list-sandbox-tools", [mw[0], rc["playerListH"][1] + rc["playerListH"][3], mw[2],
+                                            mw[1] + mw[3] - rc["playerListH"][1] - rc["playerListH"][3]], "text",
+              "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list", skip=True)]
+    add("ingame-playerlist", st, regs, "The Player List of a lobby with three account players, signed in at level 30.")
+
     for name in sorted(scen):
         with open(os.path.join(HERE, "scenarios", name + ".json"), "w") as fh:
             json.dump(scen[name], fh, indent=2)

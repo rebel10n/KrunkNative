@@ -17,6 +17,7 @@
 #include <ranked.h>      // RANKED_TEAM_SIZE
 #include <turf_wars.h>   // v10 Turf Wars: which kills count
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
+#include <server_votekick.h> // vote-kick bans at join, the K.P.D call records (kpd_call / kpd_calls ops)
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
 #include <bots.h>         // game_bots_count (lobby meta "bots")
 #include <flavor_rules.h> // the flavor's lobby config (Krunker Strike)
@@ -463,6 +464,8 @@ static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *i
     info->account_id = client->acct.account_id;
     info->level = client->acct.level;
     info->flags = client->acct.flags;
+    if (client->acct.hack) info->flags |= NET_PLAYER_INFO_HACKER; // v10 isHacker: the player list's red name
+    if (accounts_is_custom_host(client)) info->flags |= NET_PLAYER_INFO_HOST; // v10 game.host: the list's star
     // WP-F: ENT showBadges (settings verifiedBadge / premiumBadge): the player may hide those badges
     // from others (players.js sync showBadges.verified / .premium)
     if (client->player && to != client) {
@@ -611,6 +614,152 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
     g_skin_pending[slot].rid = rid;
     g_skin_pending[slot].account_id = client->acct.account_id;
     g_skin_pending[slot].skin = skin;
+}
+
+// ------------------------------------------------------------------ the K.P.D call (server_votekick.h)
+//
+// v10's "kpd" packet reaches its backend through the game server: KrunkNative records the call in
+// kn_brain (op kpd_call: the kpd_calls table of migration 0209) with the lobby's identity, map and
+// mode, and answers the caller like v10's KPD_RESPONSE ("Reported <name> to the K.P.D", or why not).
+// Officers' lists (tabs 1..3) are the kpd_calls / kpd_log ops. Without a coordinator the call is
+// still applied (rate limits, log line) and acknowledged: there is nobody else to tell.
+#define ACC_KPD_PENDING 8
+static struct {
+    uint32_t rid;
+    int conn_id;
+    uint8_t tab;        // 0 a call, 1..3 an officer's list, ACC_KPD_RATE a verdict
+    int suspect_id;     // a call's suspect connection (votekick_kpd_recorded)
+    char name[SERVER_PLAYER_NAME_MAX];
+} g_kpd_pending[ACC_KPD_PENDING];
+#define ACC_KPD_RATE 0xff
+
+static int acc_kpd_slot(void) {
+    for (int i = 0; i < ACC_KPD_PENDING; i++) {
+        if (!g_kpd_pending[i].rid) return i;
+    }
+    return -1;
+}
+
+static const char *acc_map_name(void);
+
+void accounts_kpd_request(ClientConnection *client, const int tab, const ClientConnection *target) {
+    const char *name = target ? target->name : "";
+    if (!g_acc.brain || !brain_linked()) {
+        if (tab) votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "No moderation backend on this server", "", "[]");
+        else {
+            char text[64];
+            snprintf(text, sizeof(text), "Reported %s to the K.P.D", name);
+            votekick_kpd_reply(client, 0, NET_KPD_REPORTED, text, name, NULL); // logged by this server only
+        }
+        return;
+    }
+    const int slot = acc_kpd_slot();
+    if (slot < 0) {
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_BUSY, "K.P.D line busy, try again in a moment", name, tab ? "[]" : NULL);
+        return;
+    }
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", tab == 0 ? "kpd_call" : tab == 2 ? "kpd_log" : "kpd_calls");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddNumberToObject(args, "id", client->acct.account_id);
+    cJSON_AddStringToObject(args, "name", client->name);
+    if (tab == 0) {
+        char lobby[32];
+        snprintf(lobby, sizeof(lobby), "%s:%s", g_gs_config.node_id, g_acc.lobby_id);
+        cJSON_AddNumberToObject(args, "level", client->acct.level);
+        cJSON_AddNumberToObject(args, "suspect", target && target->acct.account_id > 0 ? target->acct.account_id : 0);
+        cJSON_AddStringToObject(args, "suspect_name", name);
+        cJSON_AddStringToObject(args, "lobby", lobby);
+        cJSON_AddStringToObject(args, "node", g_gs_config.node_id);
+        cJSON_AddStringToObject(args, "region", g_gs_config.region);
+        cJSON_AddStringToObject(args, "map", acc_map_name());
+        cJSON_AddNumberToObject(args, "mode", game_mode_id(&g_server->game));
+        // v10 call types: 1 ranked, 2 comp, 3 custom, else public
+        cJSON_AddNumberToObject(args, "typ", g_server->game.is_ranked || accounts_ranked_active() ? 1 : g_server->game.comp_lobby ? 2
+                                           : accounts_is_custom_host(client) || g_acc.hosted_map ? 3 : 0); // a hosted custom lobby
+    } else {
+        cJSON_AddNumberToObject(args, "limit", 50);
+    }
+    if (brain_post(frame, 0) != 0) {
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", name, tab ? "[]" : NULL);
+        return;
+    }
+    g_kpd_pending[slot].rid = rid;
+    g_kpd_pending[slot].conn_id = client->id;
+    g_kpd_pending[slot].tab = (uint8_t) tab;
+    g_kpd_pending[slot].suspect_id = target ? target->id : -1;
+    snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", name);
+}
+
+void accounts_kpd_rate(ClientConnection *officer, const int64_t call_id, const int tagged, const char *suspect) {
+    const int slot = g_acc.brain && brain_linked() && call_id > 0 ? acc_kpd_slot() : -1;
+    if (slot < 0) { // no coordinator / no record of the call: this server's log is the record
+        server_log("[kpd] the verdict on %s is not recorded (no coordinator or call id)", suspect ? suspect : "");
+        return;
+    }
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "kpd_rate");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddNumberToObject(args, "call", (double) call_id);
+    cJSON_AddNumberToObject(args, "id", officer->acct.account_id);
+    cJSON_AddNumberToObject(args, "rating", tagged ? 1 : 0);
+    if (brain_post(frame, 0) != 0) {
+        acc_chat_to(officer, "K.P.D is unreachable right now");
+        return;
+    }
+    g_kpd_pending[slot].rid = rid;
+    g_kpd_pending[slot].conn_id = officer->id;
+    g_kpd_pending[slot].tab = ACC_KPD_RATE;
+    g_kpd_pending[slot].suspect_id = -1;
+    snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", suspect ? suspect : "");
+}
+
+static int acc_handle_kpd_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_KPD_PENDING; i++) {
+        if (!g_kpd_pending[i].rid || g_kpd_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        const int tab = g_kpd_pending[i].tab, suspect_id = g_kpd_pending[i].suspect_id;
+        ClientConnection *client = acc_client_by_id(g_kpd_pending[i].conn_id);
+        char name[SERVER_PLAYER_NAME_MAX];
+        snprintf(name, sizeof(name), "%s", g_kpd_pending[i].name);
+        g_kpd_pending[i].rid = 0;
+        const cJSON *err = cJSON_GetObjectItem(frame, "err");
+        const cJSON *data = cJSON_GetObjectItem(frame, "data");
+        const int failed = cJSON_IsString(err) && err->valuestring[0];
+        if (tab == 0 && !failed) { // the record's id: an officer joining later gets the case with it
+            const cJSON *id = cJSON_GetObjectItem(data, "id");
+            if (cJSON_IsNumber(id)) votekick_kpd_recorded(suspect_id, (int64_t) id->valuedouble);
+        }
+        if (tab == ACC_KPD_RATE) {
+            server_log("[kpd] the verdict on %s: %s", name, failed ? err->valuestring : "recorded");
+            if (failed && client) acc_chat_to(client, err->valuestring);
+            return 1;
+        }
+        if (!client) return 1; // left meanwhile
+        if (cJSON_IsString(err) && err->valuestring[0]) {
+            const int already = strstr(err->valuestring, "lready") != NULL;
+            votekick_kpd_reply(client, (uint8_t) tab, already ? NET_KPD_BUSY : NET_KPD_REFUSED, err->valuestring, name, tab ? "[]" : NULL);
+            return 1;
+        }
+        if (tab == 0) {
+            char text[64];
+            snprintf(text, sizeof(text), "Reported %s to the K.P.D", name);
+            votekick_kpd_reply(client, 0, NET_KPD_REPORTED, text, name, NULL);
+        } else {
+            char *json = cJSON_IsArray(data) ? cJSON_PrintUnformatted(data) : NULL;
+            votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", "", json ? json : "[]");
+            free(json);
+        }
+        return 1;
+    }
+    return 0;
 }
 
 static int acc_handle_skin_reply(const cJSON *frame) {
@@ -1339,6 +1488,11 @@ static void acc_set_ready(ClientConnection *client) {
         acc_reject(client, ranked_refusal, "004001");
         return;
     }
+    char vk_message[96];
+    if (votekick_banned(client->acct.account_id, client->address, vk_message, sizeof(vk_message))) { // voteKickBan (30 min)
+        acc_reject(client, vk_message, "004003");
+        return;
+    }
     RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
     if (slot && !slot->joined) acc_chat_to(client, "Joined Ranked Match. Abandoning a match will result in a temporary ban"); // ranked.join
     if (slot && !slot->joined) slot->joined_at = g_server->now;
@@ -1355,6 +1509,8 @@ static void acc_set_ready(ClientConnection *client) {
         server_log("%s is an op (config gameserver.ops)", client->name);
     }
     accounts_push_rights(client); // the settled identity: tells the client live sign-ins work here
+    votekick_send_state(client);  // a vote kick in progress: the prompt (a 1.4 peer)
+    votekick_officer_joined(client); // a K.P.D officer: the open case of this lobby (kpdData)
 
     if (g_acc.brain && (client->acct.ticket_jti[0] || client->acct.account_id)) {
         cJSON *join = cJSON_CreateObject();
@@ -2075,6 +2231,7 @@ static void acc_live_settled(ClientConnection *client, const int seq, const unsi
     server_log("[rights] %s (id %d, %s): account %d -> %d (%s), rights %s -> %s%s", client->name, client->id, client->address, old_account,
                client->acct.account_id, via, was, now, off ? ", cheats off" : "");
     acc_send_rights(client, NET_ACCOUNT_RIGHTS_OK, seq, NULL);
+    votekick_officer_joined(client); // a K.P.D officer signed in here: the lobby's open case
 }
 
 static void acc_live_refuse(ClientConnection *client, const int status, const int seq, const char *log_reason, const char *message) {
@@ -2104,6 +2261,11 @@ static void acc_live_apply(ClientConnection *client, const cJSON *account, const
         char message[96];
         snprintf(message, sizeof(message), "Banned%s%s", reason && reason[0] ? ": " : "", reason ? reason : "");
         acc_live_banned(client, message);
+        return;
+    }
+    char vk_message[96];
+    if (votekick_banned(account_id, NULL, vk_message, sizeof(vk_message))) { // voteKickBan holds the account
+        acc_live_banned(client, vk_message);
         return;
     }
     const unsigned old_rights = acc_rights(client);
@@ -2631,6 +2793,8 @@ static void acc_handle_frame(cJSON *frame) {
         // season-system: give_skin replies (found skins)
     } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
         // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
+    } else if (!strcmp(type, "acct-r") && acc_handle_kpd_reply(frame)) {
+        // the player list's K.P.D call: the record's id / the officers' lists (votekick.c)
     } else if (!strcmp(type, "acct-r") || !strcmp(type, "host-request-reply")) {
         // no game-socket account ops / host requests on the native protocol yet
     }

@@ -178,6 +178,10 @@ void debug_capture_frame_end(Client *client) {
 //   shot <out.png>                      write this frame (world + page) to a PNG
 //   rect <id>                           print #id's rect to stderr
 //   at x y                              print the elementFromPoint chain at (x, y) to stderr
+//   key <glfw key>                      press and release a key through the key callback (342 = Alt: pListKey)
+//   clicksel <n> <selector>             click the centre of the n-th (0-based) match of a selector
+//   count <selector>                    print how many elements match
+//   textof <id|selector>                print the element's textContent (whitespace folded)
 //   quit                                close the window
 static struct {
     long offset;
@@ -274,6 +278,33 @@ static void ui_cmds_click(GLFWwindow *w, const double x, const double y) {
     }
 }
 
+// The element's on-screen rect for a click. Inline elements (a <span> button in a table cell) have
+// no box geometry of their own (html_dom_get_rect gives 0 x 0): their spot is found by hit-testing
+// along the centre line of the nearest ancestor with a box, the extent of the points that land on it.
+static int ui_cmds_hit_rect(const HtmlElem e, HtmlRect *out) {
+    if (!html_dom_get_rect(e, out)) return 0;
+    if (out->w > 0.5f && out->h > 0.5f) return 1;
+    HtmlRect pr = {0};
+    HtmlElem p = html_dom_parent(e);
+    while (p && (!html_dom_get_rect(p, &pr) || pr.w < 1.0f || pr.h < 1.0f)) p = html_dom_parent(p);
+    if (!p) return 0;
+    float lo = -1.0f, hi = -1.0f;
+    for (float x = pr.x + 0.5f; x < pr.x + pr.w; x += 1.0f) {
+        for (HtmlElem h = html_dom_element_at(x, pr.y + pr.h * 0.5f); h; h = html_dom_parent(h)) {
+            if (h != e) continue;
+            if (lo < 0.0f) lo = x;
+            hi = x;
+            break;
+        }
+    }
+    if (lo < 0.0f) return 0;
+    out->x = lo;
+    out->w = hi - lo + 1.0f;
+    out->y = pr.y;
+    out->h = pr.h;
+    return 1;
+}
+
 static void ui_cmds_run(Client *client, char *line) {
     GLFWwindow *w = client->window;
     char cmd[16] = {0};
@@ -298,6 +329,48 @@ static void ui_cmds_run(Client *client, char *line) {
         }
         fprintf(stderr, "[ui_cmds] #%s rect %.1f %.1f %.1f %.1f\n", rest, r.x, r.y, r.w, r.h);
         if (cmd[0] == 'c') ui_cmds_click(w, r.x + r.w * 0.5, r.y + r.h * 0.5);
+    } else if (!strcmp(cmd, "clicksel")) {
+        int nth = 0, at = 0;
+        HtmlElem all[256];
+        HtmlRect r;
+        if (sscanf(rest, "%d %n", &nth, &at) < 1) return;
+        const char *sel = rest + at;
+        const int n = html_dom_query_all(0, sel, all, 256);
+        if (nth < 0 || nth >= n || !ui_cmds_hit_rect(all[nth], &r)) {
+            fprintf(stderr, "[ui_cmds] sel %s[%d]: no box (%d matches)\n", sel, nth, n);
+            return;
+        }
+        fprintf(stderr, "[ui_cmds] sel %s[%d] rect %.1f %.1f %.1f %.1f\n", sel, nth, r.x, r.y, r.w, r.h);
+        ui_cmds_click(w, r.x + r.w * 0.5, r.y + r.h * 0.5);
+    } else if (!strcmp(cmd, "key")) {
+        int key = 0;
+        if (sscanf(rest, "%d", &key) != 1) return;
+        GLFWkeyfun kf = glfwSetKeyCallback(w, NULL);
+        glfwSetKeyCallback(w, kf);
+        if (kf) {
+            kf(w, key, glfwGetKeyScancode(key), GLFW_PRESS, 0);
+            kf(w, key, glfwGetKeyScancode(key), GLFW_RELEASE, 0);
+        }
+    } else if (!strcmp(cmd, "count")) {
+        HtmlElem all[256];
+        fprintf(stderr, "[ui_cmds] count %s = %d\n", rest, html_dom_query_all(0, rest, all, 256));
+    } else if (!strcmp(cmd, "textof")) {
+        const HtmlElem e = strchr("#.[", rest[0]) ? html_dom_query(0, rest) : html_dom_by_id(rest);
+        char *text = NULL;
+        const int need = e ? html_dom_get_text(e, NULL, 0) : 0;
+        if (need >= 0 && (text = malloc((size_t) need + 1))) {
+            text[0] = 0;
+            if (e) html_dom_get_text(e, text, (size_t) need + 1);
+            char *o = text;
+            for (const char *c = text; *c; c++) { // one line: whitespace runs folded to one space
+                if (isspace((unsigned char) *c)) {
+                    if (o > text && o[-1] != ' ') *o++ = ' ';
+                } else *o++ = *c;
+            }
+            *o = 0;
+        }
+        fprintf(stderr, "[ui_cmds] textof %s = '%s'%s\n", rest, text ? text : "", e ? "" : " (no element)");
+        free(text);
     } else if (!strcmp(cmd, "scroll") && sscanf(rest, "%lf", &y) == 1) {
         GLFWscrollfun sc = glfwSetScrollCallback(w, NULL);
         glfwSetScrollCallback(w, sc);
