@@ -322,6 +322,7 @@ static void warn_unknown_keys(void) {
         "windowScroll", // {id: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
+        "storage",    // {key: "value"}: localStorage entries seeded before the page reads them ("skins": the loadout's weapon skins)
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
@@ -489,6 +490,12 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
         return 0;
     }
     scenario_setenv("XDG_CONFIG_HOME", g_sc.storage_dir);
+    // state.storage {key: "value"}: localStorage entries seeded before the page first reads them
+    // (weapon_skin caches "skins" at the menu's first class box update, before the state applies)
+    const cJSON *storage = st("storage"), *entry;
+    cJSON_ArrayForEach(entry, storage) {
+        if (entry->string && cJSON_IsString(entry)) html_storage_set(entry->string, entry->valuestring);
+    }
 
     // The page's animations start at the first style flush: pin the clock before html_ui_init.
     engine_set_clock_override(0.0);

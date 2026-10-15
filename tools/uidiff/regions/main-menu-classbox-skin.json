@@ -1,0 +1,40 @@
+{
+  "scenario": "main-menu-classbox-skin",
+  "defaults": {
+    "fuzz": 20,
+    "max_pct": 12.0
+  },
+  "regions": [
+    {
+      "name": "class-box-text",
+      "rect": [
+        510,
+        566,
+        102,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 12.0,
+      "note": "#menuClassName + #menuClassSubtext: Triggerman, the weapon name in the skin's rarity colour. Text antialiasing differs between Chromium and the engine's FreeType (the class-card precedent in main-menu-nowplaying-long.json is 12%); the colour check below is strict"
+    },
+    {
+      "name": "class-box-skin-colour",
+      "rect": [
+        510,
+        566,
+        102,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 50.0,
+      "mask": "colors",
+      "mask_colors": [
+        "#fbc02d"
+      ],
+      "mask_color_fuzz": 12,
+      "note": "the skinned weapon name's pixels in v10's Legendary colour (#FBC02D, the store rarity). Glyph edges shift by a subpixel between Chromium and the engine, so ~37% of the ink differs when right; a wrong rarity colour (Epic, tested) gives 100%, hence the 50% line"
+    }
+  ]
+}

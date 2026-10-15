@@ -1137,29 +1137,46 @@ static void menu_update_info_holder(void) {
     set_display("infoHolder", "");
 }
 
-// The class box (v7 updateClassPreview): #menuClassName = the class, #menuClassSubtext =
-// its loadout weapons (" - " separated), #menuClassIcn = the last loadout weapon's preview,
-// #menuClassNameTag = the player tag (level box, name, [clan], badges) or "Guest". f1802: a weapon
-// wearing a store skin (skinsLoadout[weapon], as the Loadout tab shows it) is named after the skin
-// in its rarity colour (rainbowText for animated rarities) and pictured by the skin's thumbnail,
-// so the box shows what the Loadout tab, the class preview and the viewmodel show.
+// v10 getClanCol (game.deob.js iïïìíìi): these clans' tags are gold, the others take the default.
+static const char *menu_clan_colour(const char *clan) {
+    static const char *const gold[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    for (size_t i = 0; i < sizeof(gold) / sizeof(gold[0]); i++) {
+        if (!strcasecmp(clan, gold[i])) return "#FBC02D";
+    }
+    return "rgba(255,255,255,0.5)";
+}
+
+#define MENU_POLICE_CLASS 5 // dI.class: Detective (ui_loadout.c POLICE_CLASS)
+
+// The class box (v10 updateClassPreview, game.deob.js iììîîii): #menuClassName = the class (classN
+// for the K.P.D popup, else the class's name); #menuClassSubtext = each loadout weapon's name
+// (weaponConfig.name, never the skin's) in " - " order, coloured by the skin it wears: the store
+// rarity colour, rainbowText for an animated rarity (Unobtainable), a white text stroke for
+// Contraband, "inherit" without a skin; #menuClassIcn = the last weapon's skin thumbnail, or its
+// preview without one; #menuClassNameTag = the player tag or "Guest". The K.P.D popup shows
+// Detective's loadout (classConfig[5]) in the player's skins.
 void menu_update_class_box(void) {
-    const MenuClass *c = menu_class_at(g_ui.client->menu_class_index);
+    const int police = ui_police_active();
+    const MenuClass *c = menu_class_at(police ? MENU_POLICE_CLASS : g_ui.client->menu_class_index);
     HtmlElem name_el = by_id("menuClassName"), sub_el = by_id("menuClassSubtext"), tag_el = by_id("menuClassNameTag");
-    if (name_el) html_dom_set_text(name_el, ui_police_active() ? "Officer" : c ? c->name : ""); // vO349.classN (K.P.D)
+    if (name_el) html_dom_set_text(name_el, police ? "Officer" : c ? c->name : ""); // vO349.classN (K.P.D)
     char icon[256] = "";
-    if (c && c->preview[0]) html_dom_asset_url(c->preview, icon, sizeof(icon));
     StrBuf sb = {0};
     for (int i = 0; c && i < c->loadout_count; i++) {
         if (sb.len) sb_append(&sb, " - ");
-        const int skin_index = ui_police_active() ? -1 : ui_loadout_weapon_skin_shown(c->loadout_ids[i]);
+        const int skin_index = ui_loadout_weapon_skin_shown(c->loadout_ids[i]);
         const ViewerSkin *skin = viewer_skin(skin_index);
         const int rarity = skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : -1;
         const int animate = rarity == 6 && !client_render_settings()->disable_rarity_anim; // rarities[r].animate (ui_loadout.c rarity_anim)
-        sb_appendf(&sb, "<span %sstyle='color:%s'>", animate ? "class='rainbowText' " : "", rarity >= 0 && g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color : "inherit");
-        sb_append_esc(&sb, skin && skin->name ? skin->name : c->loadout_names[i]);
+        sb_appendf(&sb, "<span %sstyle='color:%s%s'>", animate ? "class='rainbowText' " : "",
+                   rarity >= 0 && g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color : "inherit",
+                   rarity == 5 ? ";-webkit-text-stroke:1px #fff" : ""); // iiÏiíìì: Contraband
+        sb_append_esc(&sb, c->loadout_names[i]);
         sb_append(&sb, "</span>");
-        if (skin) store_skin_preview(skin_index, icon, sizeof(icon)); // v10874 = skin.thumbnail
+        if (i == c->loadout_count - 1) { // the last weapon pictures the box
+            if (skin) store_skin_preview(skin_index, icon, sizeof(icon)); // v10874 = skin.thumbnail
+            else if (c->preview[0]) html_dom_asset_url(c->preview, icon, sizeof(icon));
+        }
     }
     char *html = sb_finish(&sb);
     if (sub_el) html_dom_set_html(sub_el, html);
@@ -1167,12 +1184,13 @@ void menu_update_class_box(void) {
     HtmlElem icn = by_id("menuClassIcn");
     if (icn && icon[0]) html_dom_set_attr(icn, "src", icon);
     set_style("menuClassContainer", "z-index", "99999");
-    if (tag_el && ui_police_active()) {
+    if (tag_el && police) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan
     } else if (tag_el && account_get()) {
-        // account: level box, name, [clan], partner / premium / featured badges and the custom
-        // badge, each behind its v7 privacy setting (partnerBadge / premiumBadge / verifiedBadge /
-        // customBadge); the clan colour is v7's getClanCol (DEV / VIP / CMD only, WP-E part 2c)
+        // account: level box, name, [clan], premium (beenhere), featured (check_circle) and the custom
+        // badge, each behind its privacy setting (premiumBadge / verifiedBadge / customBadge); v10
+        // also shows a creator badge (verified, creatorBadge), which the account model lacks. No
+        // partner mark: v10's box never had one.
         const AccountInfo *acc = account_get();
         const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
@@ -1180,12 +1198,10 @@ void menu_update_class_box(void) {
         sb_append_esc(&sb, premium && acc->alias[0] ? acc->alias : acc->name);
         sb_append(&sb, "</span>");
         if (acc->clan[0]) {
-            const char *ccol = !strcmp(acc->clan, "DEV") ? "#40C4FF" : !strcmp(acc->clan, "VIP") ? "#11D445" : !strcmp(acc->clan, "CMD") ? "#993299" : "rgba(255,255,255,0.5)";
-            sb_appendf(&sb, "<span class='menuClassPlayerClan' style='color:%s'>[", ccol);
+            sb_appendf(&sb, "<span class='menuClassPlayerClan' style='color:%s'>[", menu_clan_colour(acc->clan));
             sb_append_esc(&sb, acc->clan);
             sb_append(&sb, "]</span>");
         }
-        if (acc->data && cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 19)) && !ui_setting_is_false("partnerBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerPartner'>verified</i>");
         if (premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>beenhere</i>");
         if (acc->featured && !ui_setting_is_false("verifiedBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
         const int badge = account_custom_badge();
@@ -1199,9 +1215,8 @@ void menu_update_class_box(void) {
         free(html);
     } else if (tag_el) {
         StrBuf sb = {0};
-        sb_append(&sb, "<span class='menuClassPlayerName'>");
-        sb_append_esc(&sb, g_ui.client->menu_name[0] ? g_ui.client->menu_name : "Guest");
-        sb_append(&sb, "</span>");
+        // v10: a guest is "Guest" (Guest_<sid> only while a game's player object exists), not the name typed in the menu
+        sb_append(&sb, "<span class='menuClassPlayerName'>Guest</span>");
         char *html = sb_finish(&sb);
         html_dom_set_html(tag_el, html);
         free(html);

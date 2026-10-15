@@ -3,7 +3,7 @@
 Per-region pixel diff of the native HTML/CSS UI (the Krunker v10.0.2 page, `ui/`) against the
 Krunker v10.0.2 reference captures in `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/`
 (captured from the offline v10 sandbox: `capture-v10.js`, `capture-v10-static.js`,
-`capture-v10-rewards.js`, `capture-v10-nowplaying.js`, `gen_v10_ingame.py`, `v10_social_ref.py`). The v7.1.4 page and its
+`capture-v10-rewards.js`, `capture-v10-nowplaying.js`, `capture-v10-classbox.js` (the skinned class box), `gen_v10_ingame.py`, `v10_social_ref.py`). The v7.1.4 page and its
 scenarios are gone (Krunker v10.0.2 is the only version); the sections below that describe
 `capture-v7.js` and the v7 scenario names are history, and `doc/ref/krunker-v7.1.4/` /
 `doc/ref/krunker-v3.1.1/` stay as references. A scenario without a regions file is a render

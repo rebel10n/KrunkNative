@@ -1,0 +1,35 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/main-menu-classbox-skin.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "storage": {
+      "skins": "{\"1\": 4}"
+    },
+    "account": {
+      "name": "Player",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "skins": []
+    }
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2 main menu's class box with a skinned loadout: Triggerman's Assault Rifle wears Moon Dragon (rarity 3, Legendary). v10's updateClassPreview writes the weapon's name in the rarity colour (#FBC02D) and the skin's thumbnail (not in the offline capture: the icon is outside the regions). Reference: node tools/uidiff/capture-v10-classbox.js (v10 DOM from the offline capture, v10 CSS, scripts off). The signed-in stand-in account (has_inventory: skins are worn only by a signed-in or offline player) changes the header, which the regions leave out."
+}
