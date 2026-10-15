@@ -6,9 +6,9 @@ stub upstream and stub MCP of tests/ai_stub.py (never the live provider).
   ai_web_e2e.py <native build dir> <repo root> [<web dist dir>]
 
 A signed-in session (registered over the social socket, put into the page's localStorage) opens
-editor.html, the canvas "AI" button opens the panel (the provider's 31 models smartest first,
+editor.html, the canvas "AI" button opens the panel (its model dropdown lists the provider's 31 models smartest first,
 glm-5.3-flash selected, no account indicator, the header row on one centre line, Tools / Web / Ask /
-Stop one size, readable select and option colours), a prompt streams a reply, the stub then asks for
+Stop one size, a readable model dropdown), a prompt streams a reply, the stub then asks for
 objects_create, which runs in the web editor against the open map, and its result goes back. Then
 the checkpoints: Restore checkpoint (the object undone, Redo brings it back), Edit + resend (undo
 the later edits), Rewind (+ Redo). Frames in the work directory (KN_KEEP=1 keeps it).
@@ -155,13 +155,22 @@ async def scenario(http_port, cdp_port, brain_port, up, work):
     check(ok, "the web editor is up")
     await asyncio.sleep(2)
     await c.eval("document.getElementById('knAiOption').click()")
+    # the model picker is a dropdown (#knAiModel shows the pick in #knAiModelName; a click lists the
+    # models as #knAiMRow<i> rows in #knAiModelPop, each row's onclick naming its id: editor_ai.c
+    # render_model_pop)
     ok = await c.wait("(function(){ var p = document.getElementById('knAi'); return p && p.style.display !== 'none' && "
-                      "document.querySelectorAll('#knAiModel option').length >= 3; })()", 30)
-    check(ok, "the panel opens and lists the models")
-    ids = await c.wait("(function(){ var o = document.querySelectorAll('#knAiModel option'); if (o.length < 31) return null; "
-                       "return Array.prototype.map.call(o, function(x){ return x.value; }); })()", 30)
+                      "(document.getElementById('knAiModelName') || {}).textContent; })()", 30)
+    if ok:
+        await c.eval("document.getElementById('knAiModel').click()")
+    ok = ok and await c.wait("(function(){ var p = document.getElementById('knAiModelPop'); return p && p.style.display !== 'none' && "
+                             "p.querySelectorAll('.knAiModelRow').length >= 3; })()", 30)
+    check(ok, "the panel opens and its dropdown lists the models")
+    ids = await c.wait("(function(){ var o = document.querySelectorAll('#knAiModelPop .knAiModelRow'); if (o.length < 31) return null; "
+                       "return Array.prototype.map.call(o, function(x){ var m = /aiModel\\('([^']*)'\\)/.exec(x.getAttribute('onclick') || ''); "
+                       "return m ? m[1] : ''; }); })()", 30)
     check(ids == REAL_SMART_ORDER, "the models smartest first (%s)" % (ids or [])[:8])
-    sel = await c.wait("document.getElementById('knAiModel').value === 'glm-5.3-flash'", 15)
+    sel = await c.wait("(function(){ var r = document.querySelector('#knAiModelPop .knAiModelSel'); "
+                       "return !!r && (r.getAttribute('onclick') || '').indexOf(\"aiModel('glm-5.3-flash')\") >= 0; })()", 15)
     check(sel, "glm-5.3-flash selected by default")
     check(await c.eval("!document.getElementById('knAiAccount') && document.getElementById('knAi').textContent.indexOf(%s) < 0" % json.dumps(name)),
           "no account indicator in the panel")
@@ -177,9 +186,11 @@ async def scenario(http_port, cdp_port, brain_port, up, work):
     btn = [geo.get(i) for i in ("knAiTools", "knAiWeb", "knAiSend", "knAiStop")]
     check(all(btn) and all(abs(r[3] / k - 24) < 0.6 for r in btn) and max(r[1] + r[3] / 2 for r in btn) - min(r[1] + r[3] / 2 for r in btn) <= 0.5,
           "composer: Tools / Web / Ask / Stop one height (%s)" % [round(r[3] / k, 2) for r in btn if r])
-    cols = await c.eval("""(function(){ function rgb(s){ var m = s.match(/[\\d.]+/g); return [+m[0], +m[1], +m[2]]; }
-        var s = getComputedStyle(document.getElementById('knAiModel')), o = getComputedStyle(document.querySelector('#knAiModel option'));
-        return [rgb(s.color), rgb(s.backgroundColor), rgb(o.color), rgb(o.backgroundColor)]; })()""")
+    cols = await c.eval("""(function(){ function rgb(s){ var m = s.match(/[\\d.]+/g); return [+m[0], +m[1], +m[2], m.length > 3 ? +m[3] : 1]; }
+        function bg(e){ for (; e; e = e.parentElement) { var c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0.5) return c; } return [255, 255, 255, 1]; }
+        var b = document.getElementById('knAiModelName'), r = document.querySelector('#knAiModelPop .knAiModelRowName');
+        return [rgb(getComputedStyle(b).color), bg(b), rgb(getComputedStyle(r).color), bg(r)]; })()""")
+    await c.eval("document.getElementById('knAiModel').click()")  # closes the dropdown
 
     def lum(c):
         f = [v / 255.0 for v in c]
@@ -189,7 +200,7 @@ async def scenario(http_port, cdp_port, brain_port, up, work):
     def contrast(a, b):
         return (max(lum(a), lum(b)) + 0.05) / (min(lum(a), lum(b)) + 0.05)
     check(contrast(cols[0], cols[1]) >= 4.5 and contrast(cols[2], cols[3]) >= 4.5,
-          "model picker and its options readable (select %.1f, option %.1f)" % (contrast(cols[0], cols[1]), contrast(cols[2], cols[3])))
+          "model picker and its dropdown rows readable (button %.1f, row %.1f)" % (contrast(cols[0], cols[1]), contrast(cols[2], cols[3])))
     await ask(c, "hello")
     got = await c.wait("(document.getElementById('knAiList') || {}).textContent.indexOf('Hello from the stub: hello') >= 0", 30)
     check(got, "a streamed reply in the browser (fetch + ReadableStream through CORS)")
