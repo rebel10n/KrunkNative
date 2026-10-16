@@ -43,7 +43,7 @@ static void render_box(const int show, const int outdated, const char *latest, c
     esc(title, sizeof(title), title_text);
     char now_link[256] = "";
     if (update_now)
-        snprintf(now_link, sizeof(now_link), "<a id='knUpdateNow' onclick='knUpdateNow()' style='cursor:pointer;color:#fbc02d;text-decoration:underline;margin-right:12px'>%s</a>",
+        snprintf(now_link, sizeof(now_link), "<a id='knUpdateNow' onclick='window.knUpdateNow()' style='cursor:pointer;color:#fbc02d;text-decoration:underline;margin-right:12px'>%s</a>",
                  I18N("kn.update.now", "Update now"));
     // the automatic restart's state (game_reload.c): waiting for the match to end, or due
     char auto_line[256] = "";
@@ -59,7 +59,7 @@ static void render_box(const int show, const int outdated, const char *latest, c
              "<div id='knUpdateVersion' style='font-size:14px;color:rgba(255,255,255,0.7)'>%s</div>"
              "<div style='margin-top:4px;font-size:15px'>"
              "%s"
-             "<a id='knUpdateDownload' onclick='knUpdateDownload()' style='cursor:pointer;color:#fff;text-decoration:underline'>%s</a>"
+             "<a id='knUpdateDownload' onclick='window.knUpdateDownload()' style='cursor:pointer;color:#fff;text-decoration:underline'>%s</a>"
              "</div>%s</div></div>",
              title, outdated ? "#fb8c00" : "#fbc02d", outdated ? "#fb8c00" : "#fbc02d",
              outdated ? I18N("kn.update.outdated", "Outdated") : I18N("kn.update.available", "Update available"), latest_esc,

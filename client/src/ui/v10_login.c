@@ -124,20 +124,20 @@ static void render_login(StrBuf *sb, const char *ident, const char *pass) {
     sb_append(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">");
     if (L.email) { // _39202
         sb_appendf(sb, "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">%s</label> <button type=\"button\" "
-                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginToggle()\">%s</button></div> "
+                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"window.knV10LoginToggle()\">%s</button></div> "
                        "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"%s\" "
                        "onkeydown=\"knV10LoginKey()",
                    I18N("generic.email", "Email"), I18N("generic.auth.useUsername", "(use username instead)"), I18N("generic.auth.enterEmail", "Enter Email"));
         append_value(sb, ident);
     } else { // _39201 (+ _39200, the email suggestion)
         sb_appendf(sb, "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">%s</label> <button type=\"button\" "
-                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginToggle()\">%s</button></div> "
+                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"window.knV10LoginToggle()\">%s</button></div> "
                        "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"%s\" "
                        "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()",
                    I18N("generic.username", "Username"), I18N("generic.auth.useEmail", "(use email instead)"), I18N("generic.auth.enterUsername", "Enter Username"));
         append_value(sb, ident);
         sb_appendf(sb, " <div class=\"email-suggestion svelte-16z1lxi\" id=\"knV10EmailHint\" style=\"display:%s\">%s "
-                       "<button type=\"button\" class=\"suggestion-link svelte-16z1lxi\" onclick=\"knV10LoginToggle()\">%s</button> %s</div>",
+                       "<button type=\"button\" class=\"suggestion-link svelte-16z1lxi\" onclick=\"window.knV10LoginToggle()\">%s</button> %s</div>",
                    ident && strchr(ident, '@') ? "block" : "none", I18N("generic.auth.emailSuggestion", "Looks like you're using an email."),
                    I18N("generic.auth.switchToEmail", "Switch to email login"), I18N("generic.auth.emailSuggestionEnd", "instead"));
     }
@@ -157,7 +157,7 @@ static void render_login(StrBuf *sb, const char *ident, const char *pass) {
                        "</div></div></div></form></div>",
                    I18N("generic.auth.sendCode", "Send Email Code"), I18N("generic.auth.usePassword", "Use Password"));
     else
-        sb_appendf(sb, " <button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginGo()\">%s</button>"
+        sb_appendf(sb, " <button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"window.knV10LoginGo()\">%s</button>"
                        "</div></form></div>", I18N("generic.login", "Login"));
 }
 
@@ -181,7 +181,7 @@ static void render_register(StrBuf *sb, const char *mail, const char *name, cons
     }
     sb_appendf(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
                    "<span>%s</span></label> "
-                   "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginGo()\">%s</button> "
+                   "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"window.knV10LoginGo()\">%s</button> "
                    "<div class=\"terms-privacy-notice svelte-16z1lxi\">%s "
                    "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#TermsofService')\">%s</a> %s "
                    "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#PrivacyPolicy')\">%s</a></div>"
@@ -597,8 +597,8 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         render_with("", "", "");
         return 1;
     }
-    // (the handler names differ from the buttons' ids: in a browser an inline handler inside the
-    // <form> sees the form's named elements first, so onclick="knV10LoginMode()" on #knV10LoginMode
+    // (the buttons call window.<handler>(): in a browser an inline handler inside the
+    // <form> sees the form's named elements first, so a bare onclick="knV10LoginMode()" on #knV10LoginMode
     // would call the button itself, not the C handler: the web build's toggle and Login did nothing)
     if (!strcmp(name, "knV10LoginToggle")) { // _39146: Email <-> Username, the value and password kept
         char ident[256], pass[128];

@@ -87,3 +87,7 @@ for (const p of ["/", "/index.html", "/assets/textures/a.png", "/native", "/clie
   console.error(err);
   process.exit(1);
 });
+// the server list (the Servers window's finder, ?finder=/servers) is exact: its sub-paths are the brain's
+// heartbeats and stay off the page's origin
+for (const p of ["/servers", "/finder/servers"]) assert.strictEqual(isBrainPath(p), true, p);
+for (const p of ["/servers/heartbeat", "/servers/", "/finder/servers/submit", "/serversx"]) assert.strictEqual(isBrainPath(p), false, p);

@@ -1589,13 +1589,13 @@ static void reset_render(void) {
     if (g_reset.step == 1) {
         char line[384];
         I18N_F(line, "kn.account.reset.haveCode", "Got a code already? {0}Enter it{1}",
-               "<span id='knResetHave' onclick='knResetHave()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
+               "<span id='knResetHave' onclick='window.knResetHave()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
         sb_appendf(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>%s</div>", line);
     }
     if (g_reset.step == 2) {
         char line[384];
         I18N_F(line, "kn.account.reset.noEmail", "No email? {0}Send another code{1}",
-               "<span id='knResetResend' onclick='knResetResend()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
+               "<span id='knResetResend' onclick='window.knResetResend()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
         sb_appendf(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>%s</div>", line);
     }
     sb_append(&sb, "</div></div>");

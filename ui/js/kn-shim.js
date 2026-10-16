@@ -318,7 +318,12 @@
     }
     var last = parts[parts.length - 1];
     if (typeof obj[last] === 'function' && (obj[last].__kn || obj !== global)) return;
-    if (obj === global && obj[last] !== undefined) return; // never shadow browser globals
+    // An element whose id is the handler's name (<span id="knUpdateNow" onclick="window.knUpdateNow()">) is a
+    // named window property, not a browser global: the window.<name>() call still forwards to C. Browser
+    // globals are never elements, so they stay unshadowed.
+    var cur = obj[last];
+    var idNamed = !!cur && cur.nodeType === 1 && cur.id === last;
+    if (obj === global && cur !== undefined && !idNamed) return; // never shadow browser globals
     var fn = forward(parts.join('.'));
     try { Object.defineProperty(fn, '__kn', { value: true }); } catch (e) {}
     obj[last] = fn;

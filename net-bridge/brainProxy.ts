@@ -27,6 +27,10 @@ export type BrainTarget = { host: string; port: number; url: string };
 // email links), /streams (the menu's live streams, thumbnails), /creators (Community & Events),
 // /user-assets (the community-map texture mirror).
 const PROXIED_PREFIXES = ["/mm/", "/api/", "/social/", "/ai/", "/auth/", "/streams/", "/creators/", "/user-assets/"];
+// The server list (the brain's finder, GET /servers and its /finder/servers alias): the public finder
+// answers only krunk.io's own origin, so a web build hosted anywhere else points its Server Finder URL
+// (?finder=/servers, or the setting) at its bridge and lists the same servers through it.
+const PROXIED_PATHS = new Set(["/servers", "/finder/servers"]);
 const WS_PATHS = new Set(["/social/ws", "/api/ws"]);
 
 export function resolveBrain(cliUrl?: string | null): BrainTarget {
@@ -55,7 +59,7 @@ export function resolveBrain(cliUrl?: string | null): BrainTarget {
 }
 
 export function isBrainPath(pathname: string): boolean {
-  return PROXIED_PREFIXES.some((p) => pathname.startsWith(p));
+  return PROXIED_PATHS.has(pathname) || PROXIED_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 export function isBrainWsPath(pathname: string): boolean {

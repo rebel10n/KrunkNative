@@ -50,7 +50,7 @@ static void dialog_show(const char *title, const char *message, const int with_i
                              "<div id=\"knViewerDialogText\"></div>"
                              "<input type=\"text\" id=\"knViewerDialogInput\" spellcheck=\"false\" autocomplete=\"off\">"
                              "<div class=\"knDialogButtons\"><div class=\"knDialogButton\" onclick=\"knViewerDialogOk()\">OK</div>"
-                             "<div id=\"knViewerDialogCancel\" class=\"knDialogButton\" onclick=\"knViewerDialogCancel()\">Cancel</div></div>"
+                             "<div id=\"knViewerDialogCancel\" class=\"knDialogButton\" onclick=\"window.knViewerDialogCancel()\">Cancel</div></div>"
                              "</div></div>");
         dialog = html_dom_by_id("knViewerDialog");
     }
