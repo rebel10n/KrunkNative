@@ -321,6 +321,19 @@ static void set_window_mode(Client *client, const int mode) {
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+// The browser owns the window: Fullscreen and Borderless both fill the screen (the page's root
+// element), Windowed leaves it. A request the browser refuses (one made without a click, at
+// startup) is ignored.
+EM_JS(void, web_set_fullscreen, (int on), {
+    var root = document.documentElement;
+    try {
+        if (on && !document.fullscreenElement && root.requestFullscreen) root.requestFullscreen().catch(function () {});
+        else if (!on && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+    } catch (e) {}
+});
+#endif
+
 static void apply_window_mode(Client *client) {
 #ifndef __EMSCRIPTEN__
     if (g_rs.window_mode < RS_WINDOWED || g_rs.window_mode > RS_BORDERLESS) g_rs.window_mode = RS_WINDOWED;
@@ -330,7 +343,8 @@ static void apply_window_mode(Client *client) {
     const int mode = g_forced_window_mode >= 0 ? g_forced_window_mode : g_rs.window_mode;
     if (client && client->window && mode != g_window_mode_applied) set_window_mode(client, mode);
 #else
-    (void) client; // the browser owns fullscreen (F11 / requestFullscreen)
+    (void) client;
+    web_set_fullscreen(g_rs.window_mode != RS_WINDOWED); // the Client tab's Window Mode (F11 is the browser's own)
 #endif
 }
 

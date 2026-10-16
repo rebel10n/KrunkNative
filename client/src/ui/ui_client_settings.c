@@ -6,14 +6,17 @@
 // Rows here use the markup of v7.1.4's own settings generator (_html.settings.input:
 // .setHed / .setBodH setBod_ folders, .settName rows, label.switch with its grooves,
 // select.inputGrey2, sliderVal + sliderM, settingsBtn; "<span style='color: #eb5656'>*</span>"
-// = needsRestart), so the tab looks like Krunker's other tabs. Every row does something real in KrunkNative; rows that do
-// not apply to the platform are not generated (the web build shows only Account Mode, Server
-// Finder URL, Auto-restart, the game options and the storage buttons).
+// = needsRestart), so the tab looks like Krunker's other tabs. The native client and the web
+// build show the same rows (CS_NATIVE / CS_WEB below). A row the browser cannot do is shown
+// with the honest equivalent in its flags' comment; only the Resource Swapper (files from a
+// folder on the player's disk) and the Network folder (a page cannot route through a proxy:
+// the browser's own network settings apply) are native-only.
 //
 // Exit: Krunker v7.1.4's #clientExit menu item -> clientExitPopup() ("Are you sure you
 // want to close krunker?" YES/NO, the #confPop popup natively) -> closeClient(), which
 // natively ends the main loop (glfwSetWindowShouldClose) so main.c runs its normal
-// shutdown. The web build keeps the item hidden, like krunker.io in a browser.
+// shutdown. On the web the same item and confirmation close the tab (window.close(), or the
+// page leaves the game when the browser keeps a tab that a script did not open).
 #include <client_settings.h>
 #include <ui_logic.h>
 #include <backend.h>         // backend_social_reconnect (a proxy change)
@@ -59,6 +62,7 @@
 #define CS_BRAIN_KEY "knBrainUrl" // backend_native.c reads it at startup
 #define CS_MODE_KEY "knMode"       // online_mode.c: online / offline
 #define CS_FINDER_KEY "knFinderUrl" // online_mode.c: the server finder list
+#define CS_CSS_KEY "knCustomCSS"    // web: the Custom CSS text Edit saved (custom.css on the native client)
 static const char *cs_storage_key(const char *key) {
     return !strcmp(key, "accountMode") ? CS_MODE_KEY : !strcmp(key, "finderUrl") ? CS_FINDER_KEY : CS_BRAIN_KEY;
 }
@@ -119,38 +123,49 @@ static const CsOption PROXY_SCOPES[] = {{"krunker", "krunker.io only"}, {"all", 
 static const ClientSetting SETTINGS[] = {
     // ---- Display: KrunkNative-only window rows. v10's Frame Cap (Render tab) and UI Scale (Display tab)
     // are in the game's own settings windows, not here.
-    {"windowMode", "Window Mode", "Display", CS_SELECT, CS_NATIVE | CS_GAME, "0",
+    // Web: the browser owns the window; Fullscreen and Borderless both fill the screen (requestFullscreen).
+    {"windowMode", "Window Mode", "Display", CS_SELECT, CS_NATIVE | CS_WEB | CS_GAME, "0",
      "F11 switches between windowed and the last fullscreen mode", WINDOW_MODES, COUNT(WINDOW_MODES)},
-    {"resolution", "Resolution", "Display", CS_SELECT, CS_NATIVE, "",
+    // Web: the page fills the browser window, so only Default is offered.
+    {"resolution", "Resolution", "Display", CS_SELECT, CS_NATIVE | CS_WEB, "",
      "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)"},
-    {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_GAME, "true", "Wait for the display refresh (swap interval 1)"},
+    // Web: requestAnimationFrame is always paced by the display, so the switch is kept and has no further effect.
+    {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "true", "Wait for the display refresh (swap interval 1)"},
     // ---- System (glorp "Raw Input", "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND)
-    {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE, "true", "Unaccelerated mouse motion while the pointer is locked"},
-    {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "",
+    // Web: the pointer-lock look reads pointerrawupdate (the same raw path as v10's Raw Mouse Input).
+    {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Unaccelerated mouse motion while the pointer is locked"},
+    // Web: the browser's Web Audio is the only backend (Auto).
+    {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "",
      "Sound output (and voice chat input); Auto tries every backend of this build in order"},
     // ---- Sound tab: after Audio/Mic Input (audio_set_output_device; "" = the backend's default)
-    {"audioOutput", "Audio Output", "Sound", CS_SELECT, CS_NATIVE | CS_SOUND_TAB, "",
+    // Web: the page cannot list the playback devices without a permission, so only Default is offered.
+    {"audioOutput", "Audio Output", "Sound", CS_SELECT, CS_NATIVE | CS_WEB | CS_SOUND_TAB, "",
      "Select hardware device for audio output"},
-    {"priority", "Process Priority", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "Normal",
+    // Web: a tab cannot lower its process priority; only Normal is offered (option_shown).
+    {"priority", "Process Priority", "System", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "Normal",
      "CPU scheduling priority of the client process", PRIORITIES, COUNT(PRIORITIES)},
     // ---- Client (glorp "Exit Button", "Discord Rich Presence", "Resource Swapper"; custom CSS)
-    {"exitButton", "Exit Button", "Client", CS_SWITCH, CS_NATIVE, "true", "The Exit item in the menu"},
-    {"discordRPC", "Discord Rich Presence", "Client", CS_SWITCH, CS_NATIVE, "true", "Show the mode and map you play on your Discord profile"},
+    // Web: the Exit item and its confirmation close the tab (request_close).
+    {"exitButton", "Exit Button", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "The Exit item in the menu"},
+    // Web: no Discord IPC from a page; the switch is kept, as native shows it while Discord is not running (nothing).
+    {"discordRPC", "Discord Rich Presence", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Show the mode and map you play on your Discord profile"},
     {"swapper", "Resource Swapper", "Client", CS_SWITCH, CS_NATIVE | CS_RESTART, "true",
      "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)",
      NULL, 0, "Open folder", "openSwapper"},
     {"autoRestart", "Auto-restart for updates", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
      "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end"},
-    {"customCSS", "Custom CSS", "Client", CS_SWITCH, CS_NATIVE, "true", "Applies custom.css from the client folder over the menu and HUD",
+    // Web: the CSS is the text Edit saved in this browser (knCustomCSS, window.prompt), not a file.
+    {"customCSS", "Custom CSS", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Applies custom.css from the client folder over the menu and HUD",
      NULL, 0, "Edit", "editCSS"},
     // ---- Startup (--offline; auto join; the matchmaker)
-    {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_RESTART, "false",
+    // Web: starts the in-process local game, as ?offline=1 does.
+    {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB | CS_RESTART, "false",
      "Start in an offline game on the built-in server (like --offline)"},
-    {"autoJoin", "Auto Join", "Startup", CS_SWITCH, CS_NATIVE, "false", "Enter the match as soon as the game has loaded"},
+    {"autoJoin", "Auto Join", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Enter the match as soon as the game has loaded"},
     {"accountMode", "Account Mode", "Startup", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "online",
      "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved",
      ACCOUNT_MODES, COUNT(ACCOUNT_MODES)},
-    {"brainUrl", "Account Service URL", "Startup", CS_TEXT, CS_NATIVE | CS_RESTART, "",
+    {"brainUrl", "Account Service URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
      "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io"},
     {"finderUrl", "Server Finder URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
      "Public server list; empty = https://matchmaker.krunk.io/servers, off = none"},
@@ -173,7 +188,8 @@ static const ClientSetting SETTINGS[] = {
     {"autoSpec", "Auto Spectate", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads"},
     {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
     // ---- Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
-    {"openConfig", "Client Folder", "Storage", CS_BUTTON, CS_NATIVE, "", "Settings, swapper and custom.css",
+    // Web: a page cannot open a folder; Open tells where the client's files are (the browser's storage).
+    {"openConfig", "Client Folder", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "", "Settings, swapper and custom.css",
      NULL, 0, "Open", "openConfig"},
     {"clearCache", "Clear Cache & Storage", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "",
      "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept",
@@ -222,6 +238,8 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")
 //   I18N("kn.client.clearCache.name", "Clear Cache & Storage")  I18N("kn.client.clearCache.button", "Clear Now")
 //   I18N("kn.client.clearCache.info", "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept")
+//   I18N("kn.client.openConfig.web", "The client folder is this browser's local storage: client settings and custom CSS are kept there.")
+//   I18N("kn.client.customCSS.prompt", "Custom CSS over the menu and HUD (one line; empty removes it)")
 //   I18N("settings.client.resetSettings", "Reset Client Settings")  I18N("settings.reset", "Reset")
 //   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")  I18N("kn.client.cat.startup", "Startup")
 //   I18N("settings.network.header", "Network")  I18N("kn.client.cat.game", "Game")  I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.sound", "Sound")
@@ -279,6 +297,17 @@ static int setting_shown(const ClientSetting *s) {
     return (s->flags & CS_WEB) != 0;
 #else
     return (s->flags & CS_NATIVE) != 0;
+#endif
+}
+
+// A static option the platform has: a browser tab cannot lower its process priority.
+static int option_shown(const ClientSetting *s, const CsOption *o) {
+#ifdef __EMSCRIPTEN__
+    return strcmp(s->key, "priority") || !strcmp(o->value, "Normal");
+#else
+    (void) s;
+    (void) o;
+    return 1;
 #endif
 }
 
@@ -556,12 +585,8 @@ static int chrome_visible(void) {
 static void apply_exit_button(void) {
     HtmlElem el = html_dom_by_id("clientExit");
     if (!el) return;
-#ifdef __EMSCRIPTEN__
-    html_dom_set_display(el, "none"); // a browser tab cannot close itself: hidden, as on krunker.io
-#else
-    // v7.1.4 / glorp: document.querySelector("#clientExit").style.display = "flex"
+    // v7.1.4 / glorp: document.querySelector("#clientExit").style.display = "flex" (the web: request_close)
     html_dom_set_display(el, chrome_visible() && cs_bool("exitButton") ? "flex" : "none");
-#endif
 }
 
 // Raw (unaccelerated) motion while the pointer is locked: the Client tab's rawInput, or v10's rawMouse.
@@ -569,11 +594,14 @@ static void apply_exit_button(void) {
 // of mousemove; that is the web build's look listener (main.c web_take_look). Natively every motion
 // event already reaches the game, so the nearest counterpart is GLFW's raw motion, on with either row.
 static void apply_raw_input(void) {
+    const int raw = cs_bool("rawInput") || ui_controls_settings()->raw_mouse;
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client;
     if (!client || !client->window || !glfwRawMouseMotionSupported()) return;
-    const int raw = cs_bool("rawInput") || ui_controls_settings()->raw_mouse;
     glfwSetInputMode(client->window, GLFW_RAW_MOUSE_MOTION, raw ? GLFW_TRUE : GLFW_FALSE);
+#else
+    // main.c's web look (web_take_look) reads pointerrawupdate while Module.knMouse.raw is set
+    EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.raw = $0; }, raw ? 1 : 0);
 #endif
 }
 
@@ -582,11 +610,16 @@ void client_settings_apply_raw_mouse(void) {
 }
 
 static void apply_custom_css(void) {
-#ifndef __EMSCRIPTEN__
     if (!chrome_visible() || !cs_bool("customCSS")) {
         html_ui_set_custom_css(NULL);
         return;
     }
+#ifdef __EMSCRIPTEN__
+    char *css = malloc(CS_JSON_MAX);
+    if (css && html_storage_get(CS_CSS_KEY, css, CS_JSON_MAX) > 0) html_ui_set_custom_css(css);
+    else html_ui_set_custom_css(NULL);
+    free(css);
+#else
     char path[CS_PATH_MAX];
     client_path("custom.css", path, sizeof(path));
     FILE *f = fopen(path, "rb");
@@ -688,6 +721,13 @@ static void request_close(void) {
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client ? g_cs.client : menu_ui()->client;
     if (client && client->window) glfwSetWindowShouldClose(client->window, GLFW_TRUE);
+#else
+    // the Exit item's confirmed close: window.close() works for a tab a script opened; any other
+    // tab cannot close itself, so the page leaves Krunker (about:blank) instead
+    EM_ASM({
+        window.close();
+        setTimeout(function () { location.replace('about:blank'); }, 300);
+    });
 #endif
 }
 
@@ -864,16 +904,16 @@ void client_settings_startup(Client *client, int *offline) {
     // KRUNKNATIVE_WINDOW_SIZE and the window F4 / a relaunch restored keep their size
     const char *size = getenv("KRUNKNATIVE_WINDOW_SIZE");
     if (!(size && *size) && !client_render_window_restored()) apply_resolution();
-    if (offline && cs_bool("startOffline")) {
-        *offline = 1;
-        printf("[client] start offline (Client tab)\n");
-    }
     if (cs_bool("swapper")) swap_init();
     g_cs.rpc_allowed = rpc_allowed();
     apply_discord();
 #else
-    (void) offline;
+    apply_raw_input(); // the page's Module.knMouse (web_take_look) is there at startup
 #endif
+    if (offline && cs_bool("startOffline")) {
+        *offline = 1;
+        printf("[client] start offline (Client tab)\n");
+    }
 }
 
 // ---------------------------------------------------------------- per-frame (timer)
@@ -896,7 +936,6 @@ static void update_presence(void) {
 }
 
 static void auto_join(void) {
-#ifndef __EMSCRIPTEN__
     if (g_cs.auto_joined) return;
     const MenuUi *ui = menu_ui();
     if (!ui->dom_ready || !ui->connected || !ui->ready) return;
@@ -904,7 +943,6 @@ static void auto_join(void) {
     if (!cs_bool("autoJoin") || !ui->menu_open || menu_window_is_open()) return;
     menu_log("auto join (Client tab)");
     menu_play();
-#endif
 }
 
 static void tick(void *user) {
@@ -1075,6 +1113,7 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
                        row_handler(s), s->key);
             if (s->options) {
                 for (int i = 0; i < s->option_count; i++) {
+                    if (!option_shown(s, &s->options[i])) continue;
                     char field[64];
                     snprintf(field, sizeof(field), "opt.%s", s->options[i].value);
                     append_option(sb, s->options[i].value, cs_kn(s->key, field, s->options[i].label), value);
@@ -1333,6 +1372,7 @@ static void clear_answered(const int accepted, const char *text, void *user) {
             var save = function (k) { var v = localStorage.getItem(k); if (v !== null) keep[k] = v; };
             save(p + 'knClient');
             save(p + 'knBrainUrl');
+            save(p + 'knCustomCSS'); // the Custom CSS text (Edit) survives like custom.css does natively
             var mine = function (k) { return p ? k.indexOf(p) === 0 : k.indexOf(s) !== 0; };
             var all = Object.keys(localStorage);
             if (!p && all.every(mine)) localStorage.clear();
@@ -1352,6 +1392,14 @@ static void clear_answered(const int accepted, const char *text, void *user) {
 #endif
 }
 
+// Edit (web): the Custom CSS text in this browser's storage; an empty answer removes it.
+static void css_answered(const int accepted, const char *text, void *user) {
+    (void) user;
+    if (!accepted) return;
+    html_storage_set(CS_CSS_KEY, text && text[0] ? text : NULL);
+    apply_custom_css();
+}
+
 static void do_action(const char *action) {
     if (!action) return;
     if (!strcmp(action, "clearCache")) {
@@ -1359,7 +1407,14 @@ static void do_action(const char *action) {
     } else if (!strcmp(action, "resetClient")) {
         ui_confirm(I18N("kn.client.resetClient.confirm", "Are you sure you want to reset all your client settings?"), reset_answered, NULL);
     }
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+    else if (!strcmp(action, "openConfig")) {
+        // a page cannot open a folder: the client's files are this browser's storage
+        ui_notify(I18N("kn.client.openConfig.web", "The client folder is this browser's local storage: client settings and custom CSS are kept there."));
+    } else if (!strcmp(action, "editCSS")) {
+        ui_prompt(I18N("kn.client.customCSS.prompt", "Custom CSS over the menu and HUD (one line; empty removes it)"), css_answered, NULL);
+    }
+#else
     else if (!strcmp(action, "openConfig")) {
         char dir[CS_PATH_MAX];
         config_dir(dir, sizeof(dir));

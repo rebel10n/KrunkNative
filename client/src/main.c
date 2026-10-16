@@ -1690,12 +1690,11 @@ static void mouse_flick_event(const double x, const double y) {
 void client_mouse_settings_changed(void) {
     const UiInputSettings *in = ui_controls_settings();
 #ifdef __EMSCRIPTEN__
-    EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.flick = $0; m.clamp = $1; m.raw = $2; }, in->mouse_flick,
-           in->flick_clamp, in->raw_mouse);
+    EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.flick = $0; m.clamp = $1; }, in->mouse_flick, in->flick_clamp);
 #else
     (void) in;
-    client_settings_apply_raw_mouse();
 #endif
+    client_settings_apply_raw_mouse(); // m.raw on the web: the Client tab's Raw Input or the controls' Raw Mouse Input
 }
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
