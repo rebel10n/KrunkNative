@@ -55,6 +55,12 @@ static const char *const SCREEN_IDS[STRIKE_SCREEN_COUNT] = {
     [STRIKE_SCREEN_POPUP] = "POPUP",
     [STRIKE_SCREEN_PROFILE] = "PROFILE",
     [STRIKE_SCREEN_ITEM_SELECTION] = "ITEM_SELECTION_SCREEN",
+    [STRIKE_SCREEN_REPORT_PLAYER] = "REPORT_PLAYER",
+    [STRIKE_SCREEN_POPUP_SUCCESS] = "POPUP_SUCCESS",
+    [STRIKE_SCREEN_POPUP_ERROR] = "POPUP_ERROR",
+    [STRIKE_SCREEN_REWARD] = "REWARD",
+    [STRIKE_SCREEN_REWARD_CHOICE] = "REWARD_CHOICE",
+    [STRIKE_SCREEN_INPUT_BLOCKER] = "INPUT_BLOCKER",
 };
 
 // view.opts: translucent (the screens below stay rendered), keepAlive (rendered while buried)
@@ -67,6 +73,8 @@ static const struct { unsigned char translucent, keep_alive; } SCREEN_OPTS[STRIK
     // {keepAlive: true}), so MATCH_DETAILS_SCREEN pushed over it keeps it (and its fill) rendered
     [STRIKE_SCREEN_REWARD_TO_CLAIM] = {1, 0},
     [STRIKE_SCREEN_LEAN_END] = {0, 1},
+    [STRIKE_SCREEN_REPORT_PLAYER] = {1, 0}, // Hy opts {preventReplace, translucent}
+    [STRIKE_SCREEN_INPUT_BLOCKER] = {1, 0}, // ws opts {translucent}
 };
 
 // Dk: generic.tips.* in English (the 1.37.2 i18n table, tools/strike/strike_data.json)
@@ -706,4 +714,6 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     if (cJSON_IsString(loading)) strike_loading_show(loading->valuestring, 0);
     strike_hud_scenario(client, st);
     strike_meta_scenario(client, st); // progression / reward / battlepassTab / matchDetails (strike_meta.c)
+    strike_menu_scenario_state(st);   // itemSelection (T5 over Customize), product (U2) (strike_menu.c)
+    strike_reward_scenario(st);       // rewardScreen / rewardChoice (strike_reward.c)
 }

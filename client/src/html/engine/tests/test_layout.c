@@ -1634,6 +1634,29 @@ static void t_flex_text_content(void)
     fx_free(fx);
 }
 
+/* New markup holding a position: fixed box inserted under a layout boundary whose fixed
+ * containing block (a transformed ancestor) lies above it: Krunker Strike's report dropdown, whose
+ * options overlay is fixed under FRVR's @media (max-height: 400px). The rebuilt subtree's boundary
+ * is laid out, and so is the fixed box's container: the overlay gets its box. */
+static void t_inserted_fixed(void)
+{
+    Fx *fx = fx_html("<div style='position:absolute;left:0;top:0;width:800px;height:600px;transform:scale(1)'>"
+                     "<div style='position:absolute;left:0;top:0;width:800px;height:600px'>"
+                     "<div id=host style='width:200px'><span>label</span></div></div></div>", NULL);
+    HtmlElem host = dom_by_id(fx->dom, "host");
+    static const char html[] = "<span>label</span><div id=dd><div id=ov style='position:fixed;left:0;top:0;width:100%;height:100%'>"
+                               "<div id=opt style='height:20px'>Other</div></div></div>";
+    layout_nodes_removed(fx->tree, dom_elem_node(fx->dom, host), 0);
+    dom_set_html(fx->dom, host, html, strlen(html));
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_children_changed(fx->tree, dom_elem_node(fx->dom, host));
+    layout_run(fx->tree, fx->vw, fx->vh);
+    const HtmlRect ov = rc(fx, "ov"), opt = rc(fx, "opt");
+    CHECK(NEAR(ov.w, 800, 0.01) && NEAR(ov.h, 600, 0.01), "inserted fixed: the overlay fills its container (%.1f x %.1f)", ov.w, ov.h);
+    CHECK(NEAR(opt.h, 20, 0.01) && NEAR(opt.w, 800, 0.01), "inserted fixed: its content is laid out (%.1f x %.1f)", opt.w, opt.h);
+    fx_free(fx);
+}
+
 /* innerHTML replacement under a restyled ancestor, in the engine's order
  * (engine_before_remove -> dom_set_html -> restyle -> post_restyle walks the
  * tree: the ancestor's layout_restyled() before the host's
@@ -1854,6 +1877,74 @@ static void t_flex_pct_height_images(void)
     CHECK_NEAR(rc(fx, "s2i").w, 54, 0.01, "height:100%% of a max-height-clamped flex box: 54 x 54");
     CHECK_NEAR(rc(fx, "s2i").x, 18, 0.01, "and centred in the 90 px box");
     CHECK_NEAR(rc(fx, "s4i").h, 256, 0.01, "a column capped by max-height alone: the percentage stays auto");
+}
+
+/* A replaced flex item with a percentage width (Krunker Strike's .frvr-lboard-end-screen__pfp: a 43px
+ * display:flex box, align-items center, holding an 8x8 class icon at width: 100%). flex-basis auto
+ * is the width, 100% of the definite container: 43x43 centred on the 36px row (Chrome), not the
+ * 8px natural width with the 43px ratio height. A fixed width and a block parent are unchanged. */
+static void t_flex_replaced_pct(void)
+{
+    const char *img = "strike/cdn/textures/classes/icon_0.png"; /* 8x8 */
+    char html[1024];
+    snprintf(html, sizeof(html),
+        "<div style='display:flex;width:400px;height:36px;align-items:center'>"
+        "<div id=pfp style='display:flex;width:43px;min-width:43px;height:100%%;align-items:center;justify-content:center;overflow:hidden'>"
+        "<img id=pi style='width:100%%' src='%s'></div><div>name</div></div>"
+        "<div style='display:flex;width:43px;height:50px'><img id=fx style='width:20px' src='%s'></div>"
+        "<div style='width:43px'><img id=bk style='width:100%%' src='%s'></div>", img, img, img);
+    Fx *fx = fx_html(html, "");
+    HtmlRect p = rc(fx, "pfp"), i = rc(fx, "pi");
+    CHECK_NEAR(i.w, 43, 0.01, "flex row: <img width:100%%> fills the 43px box");
+    CHECK_NEAR(i.h, 43, 0.01, "flex row: its height follows the 1:1 ratio");
+    CHECK_NEAR(i.x - p.x, 0, 0.01, "flex row: no free space left to centre in");
+    CHECK_NEAR(i.y - p.y, -3.5, 0.01, "flex row: centred on the 36px cross size");
+    CHECK_NEAR(rc(fx, "fx").w, 20, 0.01, "flex row: a fixed width stays as it is");
+    CHECK_NEAR(rc(fx, "bk").w, 43, 0.01, "block parent: width 100%% (unchanged)");
+    fx_free(fx);
+}
+
+/* A replaced flex item with a percentage height and an auto width (Krunker Strike's .reward-screen-bg img:
+ * height 100% in a full-screen centred flex row). The height resolves against the definite container and
+ * the width follows through the natural ratio (Chrome): an 8x8 icon in a 60px tall row is 60x60, centred;
+ * in a container without a definite height the percentage is auto (the natural 8x8). */
+static void t_flex_replaced_pct_height(void)
+{
+    const char *img = "strike/cdn/textures/classes/icon_0.png"; /* 8x8 */
+    char html[1024];
+    snprintf(html, sizeof(html),
+        "<div id=row style='display:flex;width:400px;height:60px;justify-content:center;align-items:center'>"
+        "<img id=ph style='height:100%%' src='%s'></div>"
+        "<div style='display:flex;width:400px'><img id=pi style='height:100%%' src='%s'></div>", img, img);
+    Fx *fx = fx_html(html, "");
+    HtmlRect r = rc(fx, "row"), i = rc(fx, "ph");
+    CHECK_NEAR(i.h, 60, 0.01, "flex row: <img height:100%%> is the container's 60px");
+    CHECK_NEAR(i.w, 60, 0.01, "flex row: its width follows the 1:1 ratio");
+    CHECK_NEAR(i.x - r.x, 170, 0.01, "flex row: centred in the 400px row");
+    CHECK_NEAR(rc(fx, "pi").w, 8, 0.01, "indefinite container height: the natural width");
+    CHECK_NEAR(rc(fx, "pi").h, 8, 0.01, "indefinite container height: the natural height");
+    fx_free(fx);
+}
+
+/* A grid flex item with repeat(auto-fit, minmax(..)) columns and max-width: 100% (Krunker Strike's
+ * .item-selection__items-grid in its flex holder): the definite max size sets the repetitions, so the
+ * max-content width holds as many columns as fit (Chrome), not one. A 430px row with 100px minimum
+ * columns and 10px gaps: 4 columns for 6 items; auto-fit collapses the empty ones of a 2-item grid. */
+static void t_grid_autofit_max_width(void)
+{
+    const char *cell = "<div style='height:20px'></div>";
+    char html[2048];
+    snprintf(html, sizeof(html),
+        "<div style='display:flex;width:430px'><div id=g6 style='display:grid;max-width:100%%;"
+        "grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px'>%s%s%s%s%s%s</div></div>"
+        "<div style='display:flex;width:430px'><div id=g2 style='display:grid;max-width:100%%;"
+        "grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px'>%s%s</div></div>",
+        cell, cell, cell, cell, cell, cell, cell, cell);
+    Fx *fx = fx_html(html, "");
+    HtmlRect g6 = rc(fx, "g6"), g2 = rc(fx, "g2");
+    CHECK_NEAR(g6.w, 430, 0.01, "auto-fit + max-width 100%%: four 100px columns and gaps fill the row");
+    CHECK_NEAR(g6.h, 50, 0.01, "six items: two rows of 20px and a 10px gap");
+    CHECK_NEAR(g2.w, 210, 0.01, "two items: the empty repeated tracks collapse (auto-fit)");
     fx_free(fx);
 }
 
@@ -2135,6 +2226,10 @@ int main(int argc, char **argv)
     t_min_max_width_content();
     t_aspect_ratio();
     t_aspect_ratio_content();
+    t_flex_replaced_pct();
+    t_inserted_fixed();
+    t_flex_replaced_pct_height();
+    t_grid_autofit_max_width();
     t_line_clamp();
     t_flex_pct_height_images();
     t_video_intrinsic();

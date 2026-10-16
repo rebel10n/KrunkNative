@@ -19,15 +19,18 @@
  *   msg:send {to, text}                  msg:sent {id, to, ts} (sender) + msg:recv {id, from, text, ts} (peer)
  *   msg:history {peer, before, limit}    msg:history:result {peer, requestBefore, messages, hasMore}
  *   msg:read {peer}                      -
+ *   game:invite {to, gameId}             game:invite:sent {to, gameId} (sender) + game:invite {from, name,
+ *                                        gameId} (peer; KrunkNative, Krunker Strike's invites)
  *   (login)                              unread:summary {counts: {<id>: {count, name}}}
  *   (presence changes)                   presence:online / presence:offline {id} to online friends
  *   (a follow made / broke a friendship) friends:list {offset: 0} to both, when online
  *   (a new follow, KrunkNative)          friend:request / friend:accepted {from, name} to the followee
  *   (errors)                             error {code, message}: EB_NOT_FRIEND, EB_TARGET_OFFLINE,
- *                                        EB_RATE_LIMITED, EB_TEXT_TOO_LONG, EB_MSG_INVALID
+ *                                        EB_RATE_LIMITED, EB_TEXT_TOO_LONG, EB_MSG_INVALID, EB_INVITE_INVALID
  * Friend rows: {id, name, premium, online, unread, lastId, lastText, lastFromMe, lastTs} plus,
  * while the friend is in a game, gameInstanceId / gamePasswordProtected (game_presence_get() of
- * the v10-party module; its presence:game pushes are its own). Messages are online-only like
+ * the v10-party module; its presence:game pushes are its own) and the lobby's gameFlavor /
+ * gameMode / gameMap / gamePlayers / gameMaxPlayers (game_presence_describe: Krunker Strike). Messages are online-only like
  * v10 ("Messages are online-only in v1"): an offline friend answers EB_TARGET_OFFLINE.
  */
 #include "game_presence.h" /* game_presence_get: a friend's game (v10-party) */
@@ -169,6 +172,7 @@ static void add_game(cJSON *row, int64_t id) {
     if (game_presence_get(id, game, sizeof game, &locked) == 1 && game[0]) {
         cJSON_AddStringToObject(row, "gameInstanceId", game);
         cJSON_AddBoolToObject(row, "gamePasswordProtected", locked);
+        game_presence_describe(game, row); /* gameFlavor / gameMode / gameMap / gamePlayers / gameMaxPlayers */
     }
 }
 
@@ -415,6 +419,114 @@ static void msg_send(SocialSession *s, const cJSON *o) {
                  KN_DB_ARGS(social_viewer(s, me), acct_itoa(peer, to)), send_checked, x);
 }
 
+/* ------------------------------------------------------------------ game invites */
+
+/* KrunkNative: Krunker Strike's game invite (FRVR's social API, en.sendGameInvite(friendId, gameId):
+ * the menu friends panel's Invite and Private Match's friend list; Krunker v10 has no invite).
+ * A friend who is online gets ["eb", {"type":"game:invite","from":id,"name":username,"gameId":gid}]
+ * and the sender ["eb", {"type":"game:invite:sent","to":id,"gameId":gid}]. The game id is the
+ * sender's (a "<nodeId>:<lobby>" game or a private lobby code), joined the way a game link is. */
+#define EB_INVITES_PER_MIN 20
+#define EB_GAME_ID_MAX 96
+
+typedef struct InviteCtx {
+    int64_t to;
+    char game[EB_GAME_ID_MAX];
+} InviteCtx;
+
+/* invites per sender and minute, in memory (a ring of the last senders) */
+static struct { int64_t account; int64_t window_ms; int count; } g_invite_rate[64];
+
+static int invite_rate_ok(int64_t account) {
+    const int64_t now = kn_wall_ms();
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < 64; i++) {
+        if (g_invite_rate[i].account == account) { slot = i; break; }
+        if (g_invite_rate[i].window_ms < g_invite_rate[oldest].window_ms) oldest = i;
+    }
+    if (slot < 0 || now - g_invite_rate[slot].window_ms >= 60000) {
+        if (slot < 0) slot = oldest;
+        g_invite_rate[slot].account = account;
+        g_invite_rate[slot].window_ms = now;
+        g_invite_rate[slot].count = 0;
+    }
+    return ++g_invite_rate[slot].count <= EB_INVITES_PER_MIN;
+}
+
+typedef struct InviteWait {
+    SocialSession *s; /* held */
+    InviteCtx x;
+} InviteWait;
+
+static void invite_online(void *ud, const int *online, size_t n) {
+    InviteWait *w = ud;
+    SocialSession *s = w->s;
+    if (social_open(s)) {
+        if (n < 1 || !online[0]) {
+            eb_error(s, "EB_TARGET_OFFLINE", "That friend is offline right now.");
+        } else {
+            cJSON *r = eb_obj("game:invite");
+            cJSON_AddNumberToObject(r, "from", (double) s->account_id);
+            cJSON_AddStringToObject(r, "name", s->username);
+            cJSON_AddStringToObject(r, "gameId", w->x.game);
+            eb_push(w->x.to, r);
+            cJSON *o = eb_obj("game:invite:sent");
+            cJSON_AddNumberToObject(o, "to", (double) w->x.to);
+            cJSON_AddStringToObject(o, "gameId", w->x.game);
+            eb_send(s, o);
+        }
+    }
+    social_unhold(s);
+    free(w);
+}
+
+static void invite_checked(SocialSession *s, kn_db_result *res, void *extra) {
+    InviteCtx *x = extra;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        eb_error(s, "EB_INVITE_INVALID", kn_db_ok(res) ? "Invite not sent." : acct_db_error(res, "game:invite"));
+        return;
+    }
+    if (!kn_db_get_int64(res, 0, 0, 0)) {
+        eb_error(s, "EB_NOT_FRIEND", "You can only invite friends.");
+        return;
+    }
+    InviteWait *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->s = social_hold(s);
+    w->x = *x;
+    eb_online(&w->x.to, 1, invite_online, w);
+}
+
+static void game_invite(SocialSession *s, const cJSON *o) {
+    const int64_t to = obj_int(o, "to", 0);
+    const char *game = kn_json_str(o, "gameId", "");
+    size_t len = strlen(game);
+    int ok = to > 0 && to != s->account_id && len > 0 && len < EB_GAME_ID_MAX;
+    for (size_t i = 0; ok && i < len; i++) {
+        const char c = game[i];
+        ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ':' || c == '-' || c == '_' || c == '.';
+    }
+    if (!ok) {
+        eb_error(s, "EB_INVITE_INVALID", "Invalid invite.");
+        return;
+    }
+    if (!invite_rate_ok(s->account_id)) {
+        eb_error(s, "EB_RATE_LIMITED", "You are sending invites too quickly.");
+        return;
+    }
+    InviteCtx *x = calloc(1, sizeof *x);
+    if (!x) return;
+    x->to = to;
+    snprintf(x->game, sizeof x->game, "%s", game);
+    char me[24], peer[24];
+    social_query(s,
+                 SQL(.pg = "SELECT (EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2) "
+                           "AND EXISTS (SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1))::int AS friend__i",
+                     .any = "SELECT CASE WHEN EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2) "
+                            "AND EXISTS (SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1) THEN 1 ELSE 0 END AS friend__i"),
+                 KN_DB_ARGS(social_viewer(s, me), acct_itoa(peer, to)), invite_checked, x);
+}
+
 typedef struct HistCtx {
     int64_t peer, before, limit;
 } HistCtx;
@@ -631,5 +743,6 @@ void sh_eb(SocialSession *s, const cJSON *f) {
     else if (!strcmp(type, "msg:send")) msg_send(s, o);
     else if (!strcmp(type, "msg:history")) msg_history(s, o);
     else if (!strcmp(type, "msg:read")) msg_read(s, o);
+    else if (!strcmp(type, "game:invite")) game_invite(s, o);
     else KN_DEBUG(MOD, "%s: unknown event-bus type \"%s\"", s->socket_id, type);
 }

@@ -1,0 +1,102 @@
+{
+  "scenario": "strike/item-selection",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 2.0
+  },
+  "regions": [
+    {
+      "name": "title",
+      "rect": [
+        130,
+        8,
+        230,
+        52
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Ps title: the category's name (WEAPON)"
+    },
+    {
+      "name": "items-row",
+      "rect": [
+        462,
+        118,
+        800,
+        252
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 3.5,
+      "note": "rde squares by rarity (legendary .. uncommon): thumbnail, wc item power label, rarity banner; the epic one --selected; the labels' glyphs sit about 1 px from Chrome's (the known glyph offset gap, reported to strike-pixel): measured 2.9 %"
+    },
+    {
+      "name": "default-square",
+      "rect": [
+        462,
+        420,
+        210,
+        256
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the Default square (defaultThumbnail) on the second row"
+    },
+    {
+      "name": "grid-empty",
+      "rect": [
+        690,
+        430,
+        560,
+        280
+      ],
+      "kind": "flat",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "auto-fit: no third column on the second row (the background, blue blur)"
+    },
+    {
+      "name": "gradient",
+      "rect": [
+        0,
+        80,
+        450,
+        640
+      ],
+      "kind": "flat",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "JI {itemSelection}: the tap-to-play gradient on the left; the character canvas (yc, 300x150 by FRVR's CSS) is empty in both"
+    },
+    {
+      "name": "back",
+      "rect": [
+        0,
+        0,
+        112,
+        72
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Ps back button: FRVR's slanted clip-path frame is the known engine gap (reported to strike-pixel); measured, not failing",
+      "skip": true
+    },
+    {
+      "name": "home",
+      "rect": [
+        1166,
+        0,
+        114,
+        72
+      ],
+      "kind": "ui",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "Ps home button: the same slanted clip-path gap",
+      "skip": true
+    }
+  ]
+}

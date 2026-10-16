@@ -1805,6 +1805,12 @@ static void window_focus_callback(GLFWwindow *window, const int focused) {
 #endif
 }
 
+// Krunker Strike: a screen is up over the game (strike_ui_pointer_to_page) and a page text field
+// has the focus: keys and characters go to the page (the menu closed does not route them there)
+static int strike_page_typing(void) {
+    return strike_ui_active() && !html_ui_is_menu_open() && strike_ui_pointer_to_page() && ui_text_input_focused();
+}
+
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
 
@@ -1819,6 +1825,13 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
 #endif
 
     ks_client_key(client, key, scancode, action, mods); // KrunkScript onKeyPress / onKeyUp / onKeyHeld (observes only)
+
+    // Krunker Strike: a screen over the game with a focused text field (REPORT_PLAYER's comments)
+    // takes the keys, as a menu would; the game's binds wait
+    if (strike_page_typing()) {
+        html_ui_key(key, scancode, action, mods);
+        return;
+    }
 
     // Keybinds first (ui_controls.c): the "Press any Key" capture, typing in #chatInput
     // and the bound game keys / hotkeys (chat key, leaderboard, toggles, ...).
@@ -1850,7 +1863,7 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
 
 static void char_callback(GLFWwindow *window, const unsigned int codepoint) {
     (void) window;
-    if (html_ui_is_menu_open() || ui_controls_chat_focused() || krunker_captcha_needs_player()) html_ui_char(codepoint);
+    if (html_ui_is_menu_open() || ui_controls_chat_focused() || krunker_captcha_needs_player() || strike_page_typing()) html_ui_char(codepoint);
 }
 
 void client_animate_object_texture(Object *object, const float now) {

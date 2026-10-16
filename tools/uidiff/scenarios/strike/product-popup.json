@@ -1,0 +1,50 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_reward.c). NO REFERENCE: FRVR has no sandbox capture of this view; its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). the product popup (U2 in the POPUP frame, In) of a market deal: an epic Blaze AK at 400 KR (the default shop design's struck 534 and -25%), sample data.",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "STORE",
+      "product": {
+        "_id": "deal_20376_s14",
+        "category": "deals",
+        "title": "Blaze AK",
+        "price": [
+          {
+            "_id": "p0",
+            "type": "virtual_currency",
+            "currency": "kr",
+            "amount": 400,
+            "active": true
+          }
+        ],
+        "products": [
+          {
+            "type": "item",
+            "item": {
+              "itemId": "s14"
+            }
+          }
+        ],
+        "purchaseCount": 0
+      },
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_reward.c). NO REFERENCE: FRVR has no sandbox capture of this view; its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). REWARD (VC / Es) after buying 1 Spin Ticket: Ps with back and close, the ticket image, Use Now!, sample data.",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "MAIN_MENU",
+      "rewardScreen": {
+        "origin": "store",
+        "rewards": [
+          {
+            "type": "currency",
+            "currency": "spin_ticket",
+            "amount": 1
+          }
+        ]
+      },
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      }
+    }
+  }
+}

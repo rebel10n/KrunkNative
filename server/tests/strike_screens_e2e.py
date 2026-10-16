@@ -116,7 +116,6 @@ def scenario_case():
 # ---------------------------------------------------------------- 3. the live client
 
 LIVE_SCRIPT = """menu
-1500 nodes @page #frvrMenuMobile
 1600 call strikeAction "missions"
 2200 text @bpmiss .tabsContent .frvr-bp-loading span
 2250 nodes @bpsel .tabSelectorItem.selected
@@ -142,10 +141,29 @@ LIVE_SCRIPT = """menu
 11900 clicksel .match-details__legacy-board .frvr-lboard-end-screen__report
 12300 nodes @mdreport2 .match-details__legacy-board .frvr-lboard-end-screen__report
 12350 nodes @mdsym .frvr-lboard-end-screen__report-symbol
-12500 clicksel .lightbox__buttons .frvr-button
-13000 nodes @mdgone .match-details__title
-13050 text @leantitle .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text
-13100 quit
+12360 rects @pfp .match-details__legacy-board .frvr-lboard-end-screen__pfp img
+12400 clicksel .frvr-lboard-end-screen__report-symbol img
+12900 text @rpname .report-player .player-name strong
+12950 clicksel .report-player .buttons .frvr-button--red
+13300 nodes @rperr .report-player .input-error
+13350 nodes @rpdropErr .report-player .dropdown-container.is-error
+13400 clicksel .report-player .dropdown-header
+13700 nodes @rpopts .report-player .dropdown-option
+13750 clicksel .report-player .dropdown-option
+14100 text @rpreason .report-player .dropdown-header span
+14150 nodes @rperr2 .report-player .input-error
+14200 clickid reasonComments
+14250 type aimbot through walls all round
+14600 nodes @rperr3 .report-player .input-error
+14650 clicksel .report-player .buttons .frvr-button--red
+15100 text @alert .mobPopAlert .alert-text span
+15150 nodes @alertimg .mobPopAlert img[src="./img/frvr-ui/info-close.svg"]
+15200 clickid alertScreenBtn
+15600 nodes @mdback .match-details__title
+15650 clicksel .lightbox__buttons .frvr-button
+16100 nodes @mdgone .match-details__title
+16150 text @leantitle .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text
+16200 quit
 """
 
 
@@ -157,6 +175,11 @@ def nodes(text, label):
 def text_of(text, label):
     m = re.search(r"\[input_script\] text t=\d+ @%s n=(\d+) checked=\d value=.*? text=(.*)" % re.escape(label), text)
     return (int(m.group(1)), m.group(2).strip()) if m else (-1, "")
+
+
+def rects(text, label):
+    m = re.search(r"\[input_script\] rects t=\d+ %s n=\d+(.*)" % re.escape(label), text)
+    return [tuple(map(float, r.split("@")[1].split(","))) for r in m.group(1).split()] if m else []
 
 
 def live_case():
@@ -183,6 +206,20 @@ def live_case():
           nodes(text, "mdreport") == 1 and nodes(text, "mdreport2") == 0 and nodes(text, "mdsym") == 2,
           f"{nodes(text, 'mdreport')} {nodes(text, 'mdreport2')} {nodes(text, 'mdsym')}")
     check("3: the board's screenshot", png_size(os.path.join(WORK, "match-details_0000.png")) == (1280, 720))
+    pfp = rects(text, "@pfp")
+    check("3: the board's class icons fill their 43px cell (engine: <img width:100%> in a flex box)",
+          len(pfp) >= 3 and all(abs(w - h) < 0.6 and w > 30 for (_, _, w, h) in pfp), str(pfp))
+    check("3: a report symbol -> REPORT_PLAYER for that player", text_of(text, "rpname")[0] == 1 and text_of(text, "rpname")[1] != "",
+          str(text_of(text, "rpname")))
+    check("3: Report player with nothing filled in: both errors, the dropdown is-error",
+          nodes(text, "rperr") == 2 and nodes(text, "rpdropErr") == 1, f"{nodes(text, 'rperr')} {nodes(text, 'rpdropErr')}")
+    check("3: the dropdown opens with Select + the 5 reasons", nodes(text, "rpopts") == 6, str(nodes(text, "rpopts")))
+    check("3: picking a reason (the last: Other) clears its error", text_of(text, "rpreason")[1] == "Other" and nodes(text, "rperr2") == 1,
+          f"{text_of(text, 'rpreason')} {nodes(text, 'rperr2')}")
+    check("3: 10+ characters typed clear the comments error", nodes(text, "rperr3") == 0, str(nodes(text, "rperr3")))
+    check("3: a guest's report -> POPUP_ERROR \"Must be logged in\" (kn_brain takes reports from accounts)",
+          text_of(text, "alert") == (1, "Must be logged in") and nodes(text, "alertimg") == 1, f"{text_of(text, 'alert')} {nodes(text, 'alertimg')}")
+    check("3: Close -> back to the match details", nodes(text, "mdback") == 1, str(nodes(text, "mdback")))
     n, title = text_of(text, "leantitle")
     check("3: Close -> the round end again, its title still filled (keepAlive)", nodes(text, "mdgone") == 0 and n == 4 and title.startswith("#"),
           f"{nodes(text, 'mdgone')} {n} {title!r}")

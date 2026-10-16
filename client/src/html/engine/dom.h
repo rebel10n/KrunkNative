@@ -168,6 +168,7 @@ int dom_insert_html(Dom *dom, HtmlElem e, DomInsertWhere where, const char *html
 void dom_set_text(Dom *dom, HtmlElem e, const char *text, size_t len);
 /* textContent getter: malloc'd NUL-terminated copy, caller frees. */
 char *dom_get_text(Dom *dom, HtmlElem e);
+char *dom_outer_html(Dom *dom, HtmlElem e); /* outerHTML (0: the document), malloc'd; debug tooling */
 /* html_dom_map_text: every text node and the title / placeholder (/ button value) attributes under
  * `root` (0 = <html>), skipping script / style / textarea / noscript / template and elements
  * matching skip_selector with their subtrees.  fn gets the owner element and the slot (child

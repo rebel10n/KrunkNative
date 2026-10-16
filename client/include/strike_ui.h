@@ -81,6 +81,12 @@ typedef enum {
     STRIKE_SCREEN_POPUP,
     STRIKE_SCREEN_PROFILE,
     STRIKE_SCREEN_ITEM_SELECTION, // T5, a Customization category's items (transcribed, strike_menu.c)
+    STRIKE_SCREEN_REPORT_PLAYER,  // Hy (strike_social.c)
+    STRIKE_SCREEN_POPUP_SUCCESS,  // XA
+    STRIKE_SCREEN_POPUP_ERROR,    // p0
+    STRIKE_SCREEN_REWARD,         // VC (Es): a reward's reveal (strike_reward.c)
+    STRIKE_SCREEN_REWARD_CHOICE,  // NB (QC): pick one of a level's rewards (strike_reward.c)
+    STRIKE_SCREEN_INPUT_BLOCKER,  // ws: "Purchasing..." while a purchase is on its way (strike_reward.c)
     STRIKE_SCREEN_COUNT
 } StrikeScreen;
 
@@ -119,6 +125,43 @@ void strike_meta_econ_changed(void);                    // the Strike account ch
 void strike_meta_scenario(Client *client, const cJSON *state); // --render-scenario state.strike keys
 int  strike_menu_level(void);                           // the account box's level (strike_menu.c)
 
+// strike_social.c: FRVR's friends UI on kn_brain's social socket (friends event bus, presence filtered
+// to Strike games, game invites, reports): the menu friends strip / Friends List (S5) on MAIN_MENU and
+// TAP_TO_PLAY, Private Match's invite list (Vhe), INVITE_NOTIFICATION (N5), REPORT_PLAYER (Hy) and the
+// POPUP_SUCCESS / POPUP_ERROR alerts after a report.
+void strike_social_render(StrikeScreen s, HtmlElem root);
+int  strike_social_action(const char *name);
+void strike_social_tick(Client *client);
+void strike_social_report(int player_uid, const char *name); // Pt(Hy, {player}): the report popup
+
+// strike_reward.c: FRVR's reward flow, transcribed from the bundle's Mithril views (not pixel-verified):
+// REWARD (VC / Es: the reward's reveal, its rarity's lights and colour, the stars of an epic or better
+// item, one reward after another), REWARD_CHOICE (NB / QC: a pick-one level of the Rewards Track),
+// INPUT_BLOCKER (ws: "Purchasing...") and the store's product popup (U2 in the POPUP frame).
+// rewards: FRVR's reward objects ({type: "item" | "class", item: {itemId, ...}} | {type: "currency",
+// currency, amount} | {type: "feature", feature}); origin: er.* ("spinWheel", "store", "progressionTrack")
+typedef void (*StrikeRewardDone)(void *user);
+void strike_reward_show(const cJSON *rewards, const char *origin, int heroic, StrikeRewardDone done, void *user);
+// Pt(QC, {options, onChoice}): options are item ids; on_choice(user, index) when Submit is pressed
+typedef void (*StrikeChoiceFn)(void *user, int choice);
+void strike_reward_choice(const char *const *item_ids, int count, StrikeChoiceFn on_choice, void *user);
+void strike_reward_blocker(const char *text);          // Pt(ws, {loadingText})
+void strike_reward_blocker_hide(void);                 // Tn() == ws && kt()
+// U2: the product popup's markup for the POPUP frame's holder (malloc'd, NULL when the product shows none:
+// FRVR opens it only for a paid item product of the market); buy_action is its button's strikeAction
+char *strike_product_popup_html(const cJSON *product, const char *buy_action);
+void strike_reward_render(StrikeScreen s, HtmlElem root);
+int  strike_reward_action(const char *name);           // 1 = one of its strikeAction()s
+void strike_reward_tick(Client *client);
+void strike_reward_scenario(const cJSON *state);       // state.strike "rewardScreen" / "rewardChoice"
+// Oo(itemDef): an item's power label (+bonus % and its stat icon) by catalogue id; 0 = it has none
+int strike_item_power(const char *item_id, char *bonus, size_t n, const char **img);
+// strike_menu.c: Fne(weapon): the Strike class whose primary weapon it is (its name), NULL none
+const char *strike_menu_class_for_weapon(int weapon);
+// REWARD's stars (oO: epic and better items): spin_wheel.c draws them into the screen's own canvas
+struct SpinStarsDraw;
+const struct SpinStarsDraw *strike_reward_stars(void);
+
 // Module hooks called by strike_ui.c.
 void strike_menu_install(void);                   // inline handlers of the menu screens
 void strike_menu_render(StrikeScreen s, HtmlElem root); // after a screen's markup is inserted
@@ -147,3 +190,4 @@ void strike_ui_scenario(Client *client, const cJSON *state);
 void strike_hud_scenario(Client *client, const cJSON *state); // killfeed / killcard / end
 void strike_menu_scenario(const cJSON *account, const char *name); // state.strike.account (the account box)
 void strike_menu_scenario_board(const cJSON *rows); // state.strike.leaderboard (LEADERBOARD_PLAYERS' rows)
+void strike_menu_scenario_state(const cJSON *st);   // state.strike.itemSelection (T5 over Customize), .product (U2)

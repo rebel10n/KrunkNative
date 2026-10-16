@@ -47,6 +47,18 @@ static int lobby_protected(const char *game_id) {
     return l && node ? registry_lobby_protected(node, l) : 0;
 }
 
+void game_presence_describe(const char *game_id, cJSON *obj) {
+    Brain *b = brain_get();
+    MmNode *node = NULL;
+    MmLobby *l = obj && game_id && *game_id && b && b->registry ? registry_lobby(b->registry, game_id, &node) : NULL;
+    if (!l || !node) return;
+    cJSON_AddStringToObject(obj, "gameFlavor", l->flavor[0] ? l->flavor : "base"); /* registry flavor pool (strike-backend) */
+    cJSON_AddStringToObject(obj, "gameMode", l->mode);
+    cJSON_AddStringToObject(obj, "gameMap", l->map);
+    cJSON_AddNumberToObject(obj, "gamePlayers", l->players);
+    cJSON_AddNumberToObject(obj, "gameMaxPlayers", l->max_players);
+}
+
 int game_presence_get(int64_t account_id, char *game_id, size_t n, int *password_protected) {
     const GamePresence *p = account_id > 0 ? find(account_id) : NULL;
     if (game_id && n) snprintf(game_id, n, "%s", p ? p->game_id : "");
@@ -72,6 +84,7 @@ static cJSON *presence_frame(int64_t account_id) {
     if (in_game) cJSON_AddStringToObject(o, "gameInstanceId", gid);
     else cJSON_AddNullToObject(o, "gameInstanceId");
     cJSON_AddBoolToObject(o, "gamePasswordProtected", in_game && pw);
+    if (in_game) game_presence_describe(gid, o);
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("eb"));
     cJSON_AddItemToArray(f, o);

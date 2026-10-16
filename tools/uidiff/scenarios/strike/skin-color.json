@@ -1,0 +1,31 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_reward.c). NO REFERENCE: FRVR has no sandbox capture of this view; its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). ITEM_SELECTION_SCREEN (T5) of Customize's Skin Color box: xe.skinColors, Tan selected, sample data.",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "CUSTOMIZATION_SCREEN",
+      "itemSelection": {
+        "category": 8,
+        "skinColor": 3
+      },
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      }
+    }
+  }
+}

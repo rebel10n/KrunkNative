@@ -410,6 +410,17 @@ static DlRect box_rect(const Painter *p, const Box *b)
 {
     float x, y;
     pos_rel(p, b, &x, &y);
+    /* A box with a CSS filter, or inside one (a drop-shadow button and its :before / :after fills), paints its top
+     * edge rounded to whole CSS px and its bottom edge where layout puts it: FRVR's live customize Back button (layout
+     * 17.5..50.5 CSS px) paints device rows 36..100 at DPR 2, not 36..101 (measured on the live page, 2026-10-16). */
+    if ((b->style && b->style->filter_count > 0) || (b->container && b->container->style && b->container->style->filter_count > 0)) {
+        const DlRect snapped = snap_rect(p, dl_rect(x, y, b->w, b->h));
+        const float y0 = roundf(y + p->snap_oy) - p->snap_oy;
+        /* the bottom edge rounds to whole device px (at DPR 2 a half-CSS-px bottom is a whole device px: rows 36..100) */
+        const float sc = p->scale > 0 ? p->scale : 1.0f;
+        const float y1 = roundf((y + b->h + p->snap_oy) * sc) / sc - p->snap_oy;
+        return dl_rect(snapped.x, y0, snapped.w, y1 - y0);
+    }
     return snap_rect(p, dl_rect(x, y, b->w, b->h));
 }
 
@@ -2919,7 +2930,16 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
              * Chrome carries the sub-pixel remainder into the layer contents.
              * Measured on ingame-*: rounding the layer origin to device px costs
              * health-value 8.2 -> 17.3 %, timer 14.1 -> 16.0 % (ammo 16.2 -> 14.4). */
-            const float rdx = ref->dx, rdy = ref->dy;
+            float rdx = ref->dx, rdy = ref->dy;
+            /* A transformed box with a non-translation matrix (skew, rotate, scale) is placed at its origin rounded to
+             * whole CSS px, as Blink does (Krunker Strike's skewed purchase buttons: 9.5 -> 10). Pure translations keep
+             * their sub-pixel origin: rounding those moved 40 uidiff regions out of tolerance (om-tools, spin-item). */
+            if (box_has_transform(ref->box) && !box_composited(ref->box) && ref->box->style && ref->box->style->position == CSS_POSITION_RELATIVE) {
+                const Mat2D own = paint_box_transform(ref->box);
+                if (fabsf(own.a - 1.0f) > 1e-6f || fabsf(own.d - 1.0f) > 1e-6f || fabsf(own.b) > 1e-6f || fabsf(own.c) > 1e-6f) {
+                    rdx = roundf(rdx); rdy = roundf(rdy);
+                }
+            }
             const Mat2D child_dev = mat_mul(c->dev_in, mat_mul(ref->local, mat_translate(rdx, rdy)));
             const int tr = rdx != 0 || rdy != 0;
             if (tr && push_translate(out, rdx, rdy) != 0) return -1;

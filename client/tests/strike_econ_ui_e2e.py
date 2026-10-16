@@ -3,21 +3,28 @@
 client/src/ui/strike_econ.c, services/brain/strike_econ.c), end to end through the page:
 
   kn_brain (sqlite, temp dir) + a headless client_bin --flavor strike --offline signed in with a saved
-  session (the account seeded with 1000 KR, a Strike level past the missions unlock and one owned
+  session (the account seeded with 20000 KR, a Strike level past the missions unlock and one owned
   Assault Rifle skin):
-  1. the account box shows the Strike wallet (1000 KR)
+  1. the account box shows the Strike wallet (20000 KR)
   2. Extras: the Spins section lists the catalogue's wheels and the shop's products load (GET /shop)
   3. a KR wheel, 1x: POST /spin-wheels/:id/spin; the wheel turns onto the result ("spin landed"), the
-     wallet drops by the price and the won item is in strike_items; the header shows the new KR
-  4. Currency -> "1 Spin Ticket": POST /shop/purchase; 80 KR become a spin ticket
-  5. the ticket wheel, 1x: the ticket is spent
+     wallet drops by the price and the won item is in strike_items; the header shows the new KR; the
+     reward screen (REWARD, FRVR's Es) shows the won item with its rarity's lights; Okay closes it
+  4. Currency -> "1 Spin Ticket": POST /shop/purchase; 80 KR become a spin ticket; the reward screen
+     shows the ticket ("Spin Ticket"), its close button closes it
+  5. the ticket wheel, 1x: the ticket is spent, the reward screen follows
   6. Customize -> Weapon -> an owned skin: POST /players/me/equip (strike_loadout w<weapon>); the box
      label follows; Default: the slot is unequipped
+  6b. Customize -> Skin Color: T5's six colours, Sienna selected by default; Tan picked: saved, the box shows it
+  6c. Market -> a deal: the product popup (U2) opens; its price button buys it (POST /shop/purchase); the
+     reward screen shows the item; Equip now! equips it (strike_loadout) and turns into Equipped!
   7. a leaderboard (GET /leaderboards/xp) in the popup frame, our row --player
   8. the Missions tab lists today's missions (GET /missions/me); one completed in the database is
      claimed from its card (POST /missions/claim/:id): claimed, its KR paid
-  9. Profile's Rewards Track (GET /game-config): Claim Rewards claims every reached level
-     (POST /players/me/claim/progression)
+  9. Profile's Rewards Track (GET /game-config): Claim Rewards claims every reached level one after
+     another (POST /players/me/claim/progression): level 1 is a pick-one slot, so the choice popup
+     (REWARD_CHOICE, FRVR's QC) shows its 3 options first and the pick is the claim's choice; every
+     claim's rewards show on the reward screen, whose Okay leads to the next level
 
   python3 -I client/tests/strike_econ_ui_e2e.py BUILD_DIR      (repository root)
 Headless (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs), the brain's port from
@@ -51,9 +58,10 @@ STAMP = os.getpid() % 100000
 results = []
 procs = []
 
+START = 20000  # KR: a deal costs up to 5000 (rarity 4)
 SPIN0 = ".sectioned-scroll:first-child [onclick=\"strikeAction('spin:{}')\"]"
 SCRIPT = """0 menu
-3000 grep @kr0 1000 .account-currency
+3000 grep @kr0 {start} .account-currency
 3100 clickid mobMenuStoreH
 4000 nodes @wheels .sectioned-scroll:first-child .store-wheel
 4000 nodes @products .sectioned-scroll:first-child .store-product
@@ -61,41 +69,195 @@ SCRIPT = """0 menu
 4800 nodes @spin .frvr-spin-screen
 4900 clickid spinBottomSection
 24000 grep @kr-spun {kr_after_spin} .currency-header .krunkies
-24100 clicksel .frvr-spin-screen .frvr-button-back
-24800 clicksel .sectioned-scroll:first-child [onclick="strikeAction('store-section:2')"]
-25500 clicksel .sectioned-scroll:first-child [data-product="tickets_1"]
-26300 grep @kr-bought {kr_after_buy} .currency-header .krunkies
-26400 clicksel {ticket_wheel}
-27100 nodes @spin2 .frvr-spin-screen
-27200 clickid spinBottomSection
-46000 clicksel .frvr-spin-screen .frvr-button-home
-46700 clicksel [onclick="strikeAction('customize')"]
-47400 clicksel [onclick="strikeAction('item-slot:0')"]
-48100 nodes @squares .item-selection__item-square
-48100 nodes @selected-default .item-selection__item-square--selected:last-child
-48200 clicksel .item-selection__item-square[onclick="strikeAction('item-pick:0')"]
-49000 nodes @selected-first .item-selection__item-square--selected:first-child
-49100 clicksel .item-selection__item-square:last-child
-49900 nodes @selected-back .item-selection__item-square--selected:last-child
-50000 clicksel .frvr-button-back
-50700 grep @weapon-default Default .customization-screen__cat-box
-50800 call strikeAction "leaderboard:xp"
-51600 nodes @board .popup__holder .frvr-lboard-end-screen__row-wrapper
-51600 nodes @board-you .popup__holder .frvr-lboard-end-screen__player-name--player
-51700 click 1270 710
-52300 call strikeAction "home"
-52800 call strikeAction "missions"
-56000 call strikeAction "bp-tab:0"
-56300 call strikeAction "bp-tab:1"
-57500 nodes @cards .frvr-mission-card
-57500 nodes @claimable .frvr-mission-card[onclick]
-57500 rects @cardrects .frvr-mission-card
-57600 clicksel .frvr-bp-missions-tab__missions-list > .frvr-mission-card[onclick]:first-child
-58600 call strikeAction "home"
-59000 call strikeAction "profile"
-61500 nodes @track .frvr-progression-track-rewards__column
-61600 clickid claimrewards
-64000 quit
+24000 nodes @reward1 .frvr-reward-screen .reward-viewer-image img
+24000 nodes @reward1-lights .reward-screen-bg-lights img
+24000 text @reward1-title .frvr-reward-screen .reward-title
+24100 clicksel [onclick="strikeAction('reward-next')"]
+24700 nodes @reward1-gone .frvr-reward-screen
+24800 clicksel .frvr-spin-screen .frvr-button-back
+25500 clicksel .sectioned-scroll:first-child [onclick="strikeAction('store-section:2')"]
+26200 clicksel .sectioned-scroll:first-child [data-product="tickets_1"]
+27000 grep @kr-bought {kr_after_buy} .currency-header .krunkies
+27000 text @reward2-title .frvr-reward-screen .reward-title
+27100 clicksel [onclick="strikeAction('reward-next')"]
+27800 clicksel {ticket_wheel}
+28500 nodes @spin2 .frvr-spin-screen
+28600 clickid spinBottomSection
+47400 nodes @reward3 .frvr-reward-screen
+47500 clicksel [onclick="strikeAction('reward-next')"]
+48100 clicksel .frvr-spin-screen .frvr-button-home
+48800 clicksel [onclick="strikeAction('customize')"]
+49500 clicksel [onclick="strikeAction('item-slot:0')"]
+50200 nodes @squares .item-selection__item-square
+50200 nodes @selected-default .item-selection__item-square--selected:last-child
+50300 clicksel .item-selection__item-square[onclick="strikeAction('item-pick:0')"]
+51100 nodes @selected-first .item-selection__item-square--selected:first-child
+51200 clicksel .item-selection__item-square:last-child
+52000 nodes @selected-back .item-selection__item-square--selected:last-child
+52100 clicksel .frvr-button-back
+52800 grep @weapon-default Default .customization-screen__cat-box
+52900 clicksel [onclick="strikeAction('item-slot:8')"]
+53600 nodes @skin-squares .item-selection__skin-color
+53600 text @skin-selected .item-selection__item-square--selected
+53700 clicksel .item-selection__item-square[onclick="strikeAction('item-pick:3')"]
+54400 text @skin-picked .item-selection__item-square--selected
+54500 clicksel .frvr-button-back
+55200 grep @skin-box Tan .customization-screen__cat-box
+55300 call strikeAction "home"
+55800 clickid mobMenuStoreH
+56500 clicksel .sectioned-scroll:first-child [onclick="strikeAction('store-section:1')"]
+57200 call strikeAction "buy-product:{deal_index}"
+57900 nodes @product-popup .popup__holder .store-confirm-purchase
+57900 text @product-name .store-confirm-purchase__header-name
+58000 clicksel .store-confirm-purchase__button
+59000 nodes @reward4 .frvr-reward-screen .reward-viewer-image img
+59000 text @reward4-title .frvr-reward-screen .reward-title
+59100 clickid applyRewardNow
+59900 text @reward4-equipped [id=applyRewardNow]
+60000 clicksel [onclick="strikeAction('reward-next')"]
+60600 call strikeAction "leaderboard:xp"
+61400 nodes @board .popup__holder .frvr-lboard-end-screen__row-wrapper
+61400 nodes @board-you .popup__holder .frvr-lboard-end-screen__player-name--player
+61500 click 1270 710
+62100 call strikeAction "home"
+62600 call strikeAction "missions"
+65800 call strikeAction "bp-tab:0"
+66100 call strikeAction "bp-tab:1"
+67300 nodes @cards .frvr-mission-card
+67300 nodes @claimable .frvr-mission-card[onclick]
+67300 rects @cardrects .frvr-mission-card
+67400 clicksel .frvr-bp-missions-tab__missions-list > .frvr-mission-card[onclick]:first-child
+68400 call strikeAction "home"
+68800 call strikeAction "profile"
+71300 nodes @track .frvr-progression-track-rewards__column
+71400 clickid claimrewards
+72200 nodes @choice .reward-choice__item
+72200 nodes @choice-disabled [id=rewardChoiceSubmit].is-disabled
+72300 clicksel .reward-choice__item
+72500 nodes @choice-picked .reward-choice__item--selected
+72600 clickid rewardChoiceSubmit
+73100 clicksel [onclick="strikeAction('reward-next')"]
+73230 clicksel .reward-choice__item
+73360 clickid rewardChoiceSubmit
+73500 clicksel [onclick="strikeAction('reward-next')"]
+73630 clicksel .reward-choice__item
+73760 clickid rewardChoiceSubmit
+73900 clicksel [onclick="strikeAction('reward-next')"]
+74030 clicksel .reward-choice__item
+74160 clickid rewardChoiceSubmit
+74300 clicksel [onclick="strikeAction('reward-next')"]
+74430 clicksel .reward-choice__item
+74560 clickid rewardChoiceSubmit
+74700 clicksel [onclick="strikeAction('reward-next')"]
+74830 clicksel .reward-choice__item
+74960 clickid rewardChoiceSubmit
+75100 clicksel [onclick="strikeAction('reward-next')"]
+75230 clicksel .reward-choice__item
+75360 clickid rewardChoiceSubmit
+75500 clicksel [onclick="strikeAction('reward-next')"]
+75630 clicksel .reward-choice__item
+75760 clickid rewardChoiceSubmit
+75900 clicksel [onclick="strikeAction('reward-next')"]
+76030 clicksel .reward-choice__item
+76160 clickid rewardChoiceSubmit
+76300 clicksel [onclick="strikeAction('reward-next')"]
+76430 clicksel .reward-choice__item
+76560 clickid rewardChoiceSubmit
+76700 clicksel [onclick="strikeAction('reward-next')"]
+76830 clicksel .reward-choice__item
+76960 clickid rewardChoiceSubmit
+77100 clicksel [onclick="strikeAction('reward-next')"]
+77230 clicksel .reward-choice__item
+77360 clickid rewardChoiceSubmit
+77500 clicksel [onclick="strikeAction('reward-next')"]
+77630 clicksel .reward-choice__item
+77760 clickid rewardChoiceSubmit
+77900 clicksel [onclick="strikeAction('reward-next')"]
+78030 clicksel .reward-choice__item
+78160 clickid rewardChoiceSubmit
+78300 clicksel [onclick="strikeAction('reward-next')"]
+78430 clicksel .reward-choice__item
+78560 clickid rewardChoiceSubmit
+78700 clicksel [onclick="strikeAction('reward-next')"]
+78830 clicksel .reward-choice__item
+78960 clickid rewardChoiceSubmit
+79100 clicksel [onclick="strikeAction('reward-next')"]
+79230 clicksel .reward-choice__item
+79360 clickid rewardChoiceSubmit
+79500 clicksel [onclick="strikeAction('reward-next')"]
+79630 clicksel .reward-choice__item
+79760 clickid rewardChoiceSubmit
+79900 clicksel [onclick="strikeAction('reward-next')"]
+80030 clicksel .reward-choice__item
+80160 clickid rewardChoiceSubmit
+80300 clicksel [onclick="strikeAction('reward-next')"]
+80430 clicksel .reward-choice__item
+80560 clickid rewardChoiceSubmit
+80700 clicksel [onclick="strikeAction('reward-next')"]
+80830 clicksel .reward-choice__item
+80960 clickid rewardChoiceSubmit
+81100 clicksel [onclick="strikeAction('reward-next')"]
+81230 clicksel .reward-choice__item
+81360 clickid rewardChoiceSubmit
+81500 clicksel [onclick="strikeAction('reward-next')"]
+81630 clicksel .reward-choice__item
+81760 clickid rewardChoiceSubmit
+81900 clicksel [onclick="strikeAction('reward-next')"]
+82030 clicksel .reward-choice__item
+82160 clickid rewardChoiceSubmit
+82300 clicksel [onclick="strikeAction('reward-next')"]
+82430 clicksel .reward-choice__item
+82560 clickid rewardChoiceSubmit
+82700 clicksel [onclick="strikeAction('reward-next')"]
+82830 clicksel .reward-choice__item
+82960 clickid rewardChoiceSubmit
+83100 clicksel [onclick="strikeAction('reward-next')"]
+83230 clicksel .reward-choice__item
+83360 clickid rewardChoiceSubmit
+83500 clicksel [onclick="strikeAction('reward-next')"]
+83630 clicksel .reward-choice__item
+83760 clickid rewardChoiceSubmit
+83900 clicksel [onclick="strikeAction('reward-next')"]
+84030 clicksel .reward-choice__item
+84160 clickid rewardChoiceSubmit
+84300 clicksel [onclick="strikeAction('reward-next')"]
+84430 clicksel .reward-choice__item
+84560 clickid rewardChoiceSubmit
+84700 clicksel [onclick="strikeAction('reward-next')"]
+84830 clicksel .reward-choice__item
+84960 clickid rewardChoiceSubmit
+85100 clicksel [onclick="strikeAction('reward-next')"]
+85230 clicksel .reward-choice__item
+85360 clickid rewardChoiceSubmit
+85500 clicksel [onclick="strikeAction('reward-next')"]
+85630 clicksel .reward-choice__item
+85760 clickid rewardChoiceSubmit
+85900 clicksel [onclick="strikeAction('reward-next')"]
+86030 clicksel .reward-choice__item
+86160 clickid rewardChoiceSubmit
+86300 clicksel [onclick="strikeAction('reward-next')"]
+86430 clicksel .reward-choice__item
+86560 clickid rewardChoiceSubmit
+86700 clicksel [onclick="strikeAction('reward-next')"]
+86830 clicksel .reward-choice__item
+86960 clickid rewardChoiceSubmit
+87100 clicksel [onclick="strikeAction('reward-next')"]
+87230 clicksel .reward-choice__item
+87360 clickid rewardChoiceSubmit
+87500 clicksel [onclick="strikeAction('reward-next')"]
+87630 clicksel .reward-choice__item
+87760 clickid rewardChoiceSubmit
+87900 clicksel [onclick="strikeAction('reward-next')"]
+88030 clicksel .reward-choice__item
+88160 clickid rewardChoiceSubmit
+88300 clicksel [onclick="strikeAction('reward-next')"]
+88430 clicksel .reward-choice__item
+88560 clickid rewardChoiceSubmit
+88700 clicksel [onclick="strikeAction('reward-next')"]
+88830 clicksel .reward-choice__item
+88960 clickid rewardChoiceSubmit
+89600 nodes @reward-left .frvr-reward-screen, .reward-choice-content
+89900 quit
 """
 
 
@@ -164,12 +326,12 @@ def main_scenario(brain_port, dbpath):
     acc = {"name": "kse" + stamp, "token": reg.get("token", ""), "id": (reg.get("account") or {}).get("id")}
     check("an account registered", bool(acc["token"] and acc["id"]), str(reg))
     aid = acc["id"]
-    db(dbpath, "INSERT INTO strike_wallets (account_id, currency, amount) VALUES (?, 'kr', 1000)", (aid,))
+    db(dbpath, "INSERT INTO strike_wallets (account_id, currency, amount) VALUES (?, 'kr', ?)", (aid, START))
     db(dbpath, "INSERT INTO strike_progress (account_id, xp) VALUES (?, 6000)", (aid,))
     db(dbpath, "INSERT INTO strike_items (account_id, item_id, count) VALUES (?, ?, 1)", (aid, skin["id"]))
 
     script = SCRIPT.format(kr_wheel=SPIN0.format(kr_index), ticket_wheel=SPIN0.format(ticket_index),
-                           kr_after_spin=1000 - kr_price, kr_after_buy=1000 - kr_price - ticket_price)
+                           deal_index=len(cat["products"]), start=START, kr_after_spin=START - kr_price, kr_after_buy=START - kr_price - ticket_price)
     path = os.path.join(WORK, "client.script")
     with open(path, "w") as f:
         f.write(script)
@@ -190,6 +352,7 @@ def main_scenario(brain_port, dbpath):
     seen = {}
     marks = [("[strike] account %d:" % aid, "loaded"), ("[strike] spin landed", "landed1"), ("[strike] bought tickets_1", "bought"),
              ("[strike] spin landed", "landed2"), ("[strike] equipped", "equip1"), ("[strike] equipped", "equip2"),
+             ("[strike] skin color 3", "skin"), ("[strike] bought deal_", "deal"), ("[strike] reward equipped", "deal_equip"),
              ("[strike] missions:", "missions"), ("[strike] claimed a mission", "claimed"), ("[strike] Rewards Track: claiming", "track")]
     stop = threading.Event()
 
@@ -217,7 +380,7 @@ def main_scenario(brain_port, dbpath):
         p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(BUILD, "client_bin"), "--offline", "--map", "kanji"],
                              cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
-            p.wait(timeout=240)
+            p.wait(timeout=300)
         except subprocess.TimeoutExpired:
             os.killpg(p.pid, signal.SIGKILL)
             p.wait()
@@ -230,23 +393,35 @@ def main_scenario(brain_port, dbpath):
         nodes[m.group(1)] = int(m.group(2))
     for m in re.finditer(r"\[input_script\] grep t=\d+ @(\S+) needle=\S+ n=\d+ hits=(\d+)", text):
         greps[m.group(1)] = int(m.group(2))
+    texts = {m.group(1): m.group(2) for m in re.finditer(r"\[input_script\] text t=\d+ @(\S+) n=\d+ checked=\d+ value=\S* text=(.*)", text)}
 
     check("1. the Strike account loaded (players/me)", "loaded" in seen, text[-600:])
-    check("1. the account box shows the Strike wallet's 1000 KR", greps.get("kr0", 0) >= 1, str(greps.get("kr0")))
+    check("1. the account box shows the Strike wallet's %d KR" % START, greps.get("kr0", 0) >= 1, str(greps.get("kr0")))
     check("2. the Spins section lists the catalogue's shop wheels", nodes.get("wheels") == len(wheels), f"{nodes.get('wheels')} vs {len(wheels)}")
     check("2. the shop's products load into Market / Currency", (nodes.get("products") or 0) >= 4, str(nodes.get("products")))
     check("3. a wheel block opens SPIN", nodes.get("spin") == 1)
     s1 = seen.get("landed1", {})
     check("3. the 1x spin landed on the brain's result", "landed1" in seen and re.search(r"\[strike\] spin result 0: pool \S+ rand", text) is not None)
-    check("3. the spin cost the wheel's price", s1.get("kr") == 1000 - kr_price, f"{s1.get('kr')} (want {1000 - kr_price})")
+    check("3. the spin cost the wheel's price", s1.get("kr") == START - kr_price, f"{s1.get('kr')} (want {START - kr_price})")
     check("3. the won item is the account's", len(s1.get("items", [])) >= 2 or any(c > 1 for _, c in s1.get("items", [])), str(s1.get("items")))
     check("3. the Store header shows the new KR", greps.get("kr-spun", 0) >= 1, str(greps.get("kr-spun")))
+    won = re.search(r"\[strike\] spin result 0: pool \S+ rand \S+ item (\S+)", text)
+    won_item = next((i for i in cat["items"] if won and i["id"] == won.group(1)), None)
+    check("3. the reward screen shows the won item (REWARD after the spin)", nodes.get("reward1") == 1 and won_item is not None
+          and texts.get("reward1-title", "").lower() == (won_item or {}).get("name", "").lower(),
+          f"{nodes.get('reward1')} viewer, title {texts.get('reward1-title')!r}, won {won and won.group(1)}")
+    check("3. the reward screen has its rarity's lights", nodes.get("reward1-lights") == 1 and
+          re.search(r"\[strike\] REWARD item \S+ \((uncommon|rare|epic|legendary)-item, 0 left\)", text) is not None)
+    check("3. Okay closes the reward screen", nodes.get("reward1-gone") == 0, str(nodes.get("reward1-gone")))
     s2 = seen.get("bought", {})
-    check("4. \"1 Spin Ticket\": 80 KR became a spin ticket", s2.get("spin_ticket") == 1 and s2.get("kr") == 1000 - kr_price - ticket_price,
+    check("4. \"1 Spin Ticket\": 80 KR became a spin ticket", s2.get("spin_ticket") == 1 and s2.get("kr") == START - kr_price - ticket_price,
           f"{s2.get('kr')} KR, {s2.get('spin_ticket')} tickets")
     check("4. the Store header follows the purchase", greps.get("kr-bought", 0) >= 1, str(greps.get("kr-bought")))
+    check("4. the purchase shows its reward (Spin Ticket) after the input blocker", texts.get("reward2-title") == "Spin Ticket"
+          and "[strike] screen INPUT_BLOCKER" in text, repr(texts.get("reward2-title")))
     s3 = seen.get("landed2", {})
     check("5. the ticket wheel spent the ticket", nodes.get("spin2") == 1 and s3.get("spin_ticket") == 0, f"{s3.get('spin_ticket')}")
+    check("5. the ticket spin's reward screen", nodes.get("reward3") == 1, str(nodes.get("reward3")))
     check("6. Weapon's items: the owned skin(s) and Default", (nodes.get("squares") or 0) >= 2 and nodes.get("selected-default") == 1,
           f"{nodes.get('squares')} squares, default selected {nodes.get('selected-default')}")
     e1, e2 = seen.get("equip1", {}), seen.get("equip2", {})
@@ -255,13 +430,29 @@ def main_scenario(brain_port, dbpath):
     check("6. Default unequips the slot", not [r for r in e2.get("loadout", []) if r[0].startswith("w")] and nodes.get("selected-back") == 1,
           f"{e2.get('loadout')}")
     check("6. the Weapon box shows Default again", greps.get("weapon-default", 0) >= 1, str(greps.get("weapon-default")))
+    check("6b. Skin Color lists FRVR's six colours, Sienna selected", nodes.get("skin-squares") == 6 and texts.get("skin-selected") == "Sienna",
+          f"{nodes.get('skin-squares')} squares, selected {texts.get('skin-selected')!r}")
+    check("6b. picking Tan selects and saves it", texts.get("skin-picked") == "Tan" and "skin" in seen and greps.get("skin-box", 0) >= 1,
+          f"{texts.get('skin-picked')!r}, box {greps.get('skin-box')}")
+    deal = re.search(r"\[strike\] bought (deal_\S+)", text)
+    deal_item = deal.group(1).split("_", 2)[2] if deal else None
+    deal_def = next((i for i in cat["items"] if i["id"] == deal_item), {})
+    sd, se = seen.get("deal", {}), seen.get("deal_equip", {})
+    check("6c. a market deal opens the product popup (U2)", nodes.get("product-popup") == 1
+          and texts.get("product-name", "").lower() == deal_def.get("name", "?").lower(),
+          f"{nodes.get('product-popup')} popup, {texts.get('product-name')!r} vs {deal_def.get('name')!r}")
+    check("6c. its price button bought the item", deal is not None and any(r[0] == deal_item for r in sd.get("items", [])), str(deal and deal.group(1)))
+    check("6c. the reward screen shows the bought item", nodes.get("reward4") == 1 and texts.get("reward4-title", "").lower() == deal_def.get("name", "?").lower(),
+          repr(texts.get("reward4-title")))
+    check("6c. Equip now! equipped it (Equipped!)", any(r[1] == deal_item for r in se.get("loadout", [])) and texts.get("reward4-equipped") == "Equipped!",
+          f"{se.get('loadout')}, {texts.get('reward4-equipped')!r}")
     check("7. the xp leaderboard opens in the popup frame", (nodes.get("board") or 0) >= 2 and nodes.get("board-you") == 1,
           f"{nodes.get('board')} rows, you {nodes.get('board-you')}")
     check("8. the Missions tab lists today's missions", (nodes.get("cards") or 0) >= 1 and "missions" in seen, str(nodes.get("cards")))
     check("8. completed missions are claimable from their cards", (nodes.get("claimable") or 0) >= 1, str(nodes.get("claimable")))
     claimed = db(dbpath, "SELECT count(*) FROM strike_daily_missions WHERE account_id = ? AND claimed = 1", (aid,))[0][0]
     sc = seen.get("claimed", {})
-    check("8. a card's click claimed its mission and paid KR", claimed == 1 and sc.get("kr", 0) > s3.get("kr", 0), f"{claimed} claimed, {s3.get('kr')} -> {sc.get('kr')}")
+    check("8. a card's click claimed its mission and paid KR", claimed == 1 and sc.get("kr", 0) > se.get("kr", 0), f"{claimed} claimed, {se.get('kr')} -> {sc.get('kr')}")
     m = re.search(r"\[strike\] PROGRESSION_TRACK (\d+) levels, level (\d+), (\d+) claimable", text)
     check("9. Profile shows the Rewards Track from the game config", m is not None and int(m.group(1)) > 0 and (nodes.get("track") or 0) > 0,
           m.group(0) if m else "no track")
@@ -269,7 +460,20 @@ def main_scenario(brain_port, dbpath):
     time.sleep(0.5)
     rows = db(dbpath, "SELECT count(*) FROM strike_track_claims WHERE account_id = ?", (aid,))[0][0]
     check("9. Claim Rewards claimed every reached level", want > 0 and rows == want, f"{rows} claims, {want} claimable")
+    check("9. the pick-one level asks first: 3 options, Submit disabled until one is picked",
+          nodes.get("choice") == 3 and nodes.get("choice-disabled") == 1 and nodes.get("choice-picked") == 1,
+          f"{nodes.get('choice')} options, disabled {nodes.get('choice-disabled')}, picked {nodes.get('choice-picked')}")
+    picked = db(dbpath, "SELECT choice FROM strike_track_claims WHERE account_id = ? AND slot_id = '1_00'", (aid,))
+    check("9. the pick is the claim's choice (the last option: 2)", picked == [(2,)], str(picked))
+    shown = len(re.findall(r"\[strike\] REWARD (item|class|currency|feature) ", text.split("[strike] Rewards Track: claiming", 1)[-1]))
+    check("9. every claimed level showed its rewards, one after another", shown >= want and "[strike] Rewards Track: done" in text
+          and nodes.get("reward-left") == 0, f"{shown} reward screens for {want} levels, left {nodes.get('reward-left')}")
     check("no request was refused", "refused" not in text, "; ".join(l for l in text.splitlines() if "refused" in l)[:300])
+    # the art the screens above draw is shipped in ui/strike/img (the reward's coin and feature logos, the
+    # product popup's background, the back / home icons): the client logs every image it cannot find
+    missing = [l for l in text.splitlines() if "file not found" in l and "img/" in l]
+    check("the reward, product and navigation art is all shipped (no \"file not found\" for img/)", not missing,
+          "; ".join(missing)[:300])
 
 
 def main():

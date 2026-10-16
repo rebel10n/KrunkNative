@@ -439,6 +439,10 @@ if (Python3_FOUND)
     add_test(NAME brain_social_v10
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_v10_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_social_v10 PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # Krunker Strike's friends: game:invite, presence gameFlavor + lobby details (social_eb.c, game_presence.c)
+    add_test(NAME brain_strike_social
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_social_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_strike_social PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the same through the clients' hub: headless client_bin (KRUNKNATIVE_UI_CMDS) and the web build
     # in headless Chromium (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
     add_test(NAME brain_economy_hub_e2e

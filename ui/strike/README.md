@@ -116,11 +116,14 @@ controls use) and Reset restores and saves the defaults. POPUP is the frame othe
 The screens run on the signed-in account's Strike economy (`client/src/ui/strike_econ.c` over kn_brain's `/strike`
 gateway): the account box and the currency headers show its wallet; the Spins section lists the catalogue's shop wheels
 (`strike_economy()`, the KR and spin-ticket ones) and SPIN's 1x / 10x buttons spin on kn_brain, the wheel turning onto
-the result as `aue` does (the reward screen `Es` is not ported: the result holds, then the wheel is ready again); Market
-and Currency list the shop's products and buy them (KR only; FRVR's product popup `U2` is skipped); Customize's
-category boxes open ITEM_SELECTION_SCREEN (transcribed from `T5` / `rde`) to equip and unequip the account's items; the
+the result as `aue` does, then the reward screen (REWARD, `Es`) shows what it won; Market and Currency list the shop's
+products and buy them (KR only): a paid market item opens the product popup (`U2`) first, a purchase shows
+"Purchasing..." (`ws`) and then its rewards on the reward screen; Customize's category boxes open
+ITEM_SELECTION_SCREEN (transcribed from `T5` / `rde`) to equip and unequip the account's items, and its Skin Color box
+opens the same screen's colour list (FRVR's six `xe.skinColors`, saved as `skinColIndex`); the
 Battle Pass Missions tab lists the day's missions (a completed one is claimed from its card); Profile's Rewards Track
-comes from the game config and Claim Rewards claims every reached level; a leaderboard opens in the POPUP frame from
+comes from the game config and Claim Rewards claims every reached level one after another (`Fy` / `UU`): a pick-one
+level asks first (REWARD_CHOICE, `QC`), each claim's rewards show on the reward screen; a leaderboard opens in the POPUP frame from
 `strikeAction('leaderboard[:board]')` (FRVR shows player boards only in its tournament popup; no button reaches it).
 A scenario with `state.strike.account` keeps the capture sandbox's wheels (`capture-strike.js` SPIN_WHEELS) so its
 pixels compare with the references. client/tests/strike_econ_ui_e2e.py runs it against a local kn_brain;
@@ -142,9 +145,16 @@ Notes from the bundle:
   `state.strike.progression` (tools/uidiff/scenarios/strike/progression-track.json: capture-strike.js's PROGRESSION
   fixture, sample data). The single-track form is the one without a premium track.
 - `XB` appears in FRVR's tournament rewards popup; KrunkNative has no hosted tournaments, so only a scenario opens it.
-- The rooms are still not ported.
+- FRVR has no "rooms" view: its rooms are the Discord voice channel's members. Their UI is ported over
+  kn_brain's friends (client/src/ui/strike_social.c): the menu friends strip and Friends List (`S5`: `ede` / `sde`,
+  `screens/MENU_FRIENDS.html`), Private Match's invite list (`Vhe` / `zhe`) and its Private Match button (`Whe`),
+  INVITE_NOTIFICATION (`N5`), REPORT_PLAYER (`Hy`) and the POPUP_SUCCESS / POPUP_ERROR alerts (`XA` / `p0` over `Oue`,
+  `screens/POPUP_ALERT.html`); transcribed, not pixel-verified. Friends are kn_brain's mutual follows, a friend's game
+  counts only when it is a Strike game (presence gameFlavor), invites are the brain's game:invite, reports its "rpt".
+  Profile pictures are the default (class icon 0); the platform invite dialog ("Invite Friends", "+ More Friends") has
+  no KrunkNative counterpart and is not shown / does nothing.
 
-## Images fetched for the transcribed screens (2026-10-15)
+## Images fetched for the transcribed screens and the friends panel (2026-10-15)
 
 GET only, one request every 4 to 5 s, exact paths, no cookies, nothing executed. The bundle loads `./img/...` from the
 page's own origin, which for the web build is `https://krunkerstrike.frvr.com/` (the live site serves the current
@@ -166,6 +176,12 @@ build's `public/` tree, so these are the files it serves today, not a 1.37.2 sna
 | img/frvr-ui/spin-ticket-2.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-2.png | a250ac4e8353b254690045d9fcf3181f905af8df1f80703ac76d7a219f11889d |
 | img/frvr-ui/spin-ticket-3.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-3.png | dd4a79c14d726bda8a81834cdc78dee488b57808916e0b82472bcd87132780b1 |
 | img/frvr-ui/spin-ticket-many.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-many.png | 4669ea87aa2e19da228b6b72d112f798557c2cae56fd366293ba22b2cf6b7a8c |
+| img/right-arrow.svg | https://krunkerstrike.frvr.com/img/right-arrow.svg | 26d64434fe89fa056049e6b11e2328bcf9fdbc96ca8055b76180152c3c6ddd2f |
+| img/player-count-symbol.svg | https://krunkerstrike.frvr.com/img/player-count-symbol.svg | e09094f26e46b982f5967d5d60d0887d79faf662834b0a797819f662ea3b5754 |
+| img/gather-crew-promo.png | https://krunkerstrike.frvr.com/img/gather-crew-promo.png | 0803626d82890b3437e804de8b81485010b70decbdb97a93ef4e21bdc372e45b |
+| img/frvr-ui/close-symbol.svg | https://krunkerstrike.frvr.com/img/frvr-ui/close-symbol.svg | df5933b70e7541dcb4f56a3278063b6210d4ae2edd1351d97a57099b44fa9b1c |
+| img/frvr-ui/info-checkmark.svg | https://krunkerstrike.frvr.com/img/frvr-ui/info-checkmark.svg | 841e0e0b844e2c153ceef37b392b3131d0af8fe8c945f83f9f0c24a43adf99df |
+| img/frvr-ui/info-close.svg | https://krunkerstrike.frvr.com/img/frvr-ui/info-close.svg | 07b8ba53d4492c5a6652417d4ad93ed5969766a48d6379c8e932a42db1964375 |
 | cdn/img/chals/icon_0.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_0.png?build=1.37.2 | f02ed7e7b4bb01330b77520694797074370dce0617a7cef0353ff8d7dfa5995b |
 | cdn/img/chals/icon_1.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_1.png?build=1.37.2 | 9671f2d4184639b62362d2c24eeb7c8a76a2ea7e39116f0ad4aef1c7e248fa94 |
 | cdn/img/chals/icon_2.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_2.png?build=1.37.2 | f8cac409e07539f0ab73e62430d59b506fcff739c11d6c9be9379e2fce04af0d |
@@ -203,4 +219,63 @@ build's `public/` tree, so these are the files it serves today, not a 1.37.2 sna
 | cdn/img/chals/icon_35.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_35.png?build=1.37.2 | 7516820ddbcca9b46ff710f83c6cb015cfd1a62269f65f338eaa4783b75d1d31 |
 
 Not found: img/chals/icon_21.png (HTTP 404, https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_21.png?build=1.37.2) (Krunker's own set has no icon_21 either).
-Referenced by the transcribed code but not fetched (nothing here produces them): img/premium/premium-logo.png, img/features/no-ads-unsolicited-logo.svg, img/features/xp-boost-logo.svg (pa()'s feature rewards).
+Referenced by the transcribed code (pa()'s feature rewards and the premium reward) but missing from the snapshot: img/premium/premium-logo.png, img/features/no-ads-unsolicited-logo.svg, img/features/xp-boost-logo.svg; fetched in the reward-flow table below.
+
+## The reward flow (transcribed, 2026-10-15)
+
+REWARD (`VC`, exported as `Es`), REWARD_CHOICE (`NB` / `QC`), INPUT_BLOCKER (`ws`) and the product popup
+(`U2` in the POPUP frame, `screens/STORE_CONFIRM_PURCHASE.html`) are transcribed from the bundle's Mithril views
+(`client/src/ui/strike_reward.c`; no sandbox capture of them exists, so they are not pixel-verified against FRVR's
+runtime). `tools/strike/static_ref.py` renders a scenario's DOM in Chrome with FRVR's stylesheets only (no script runs:
+every `<script>` is stripped and the page carries `script-src 'none'`), which checks the native engine against a
+browser on the same markup. Differences, also listed at the top of `strike_reward.c`: the item viewer is `r1`'s 2D
+form (the store thumbnail); a class reward's character (`yc`) is not drawn; a Dye shows its thumbnail, not its shirt
+colour; KrunkNative's rarities past legendary take the legendary art and item power; the golden spin offered after a
+heroic spin (`cwe`) is not opened. The native engine has no SVG `feGaussianBlur` (nanosvg) and no
+`mix-blend-mode`, so the rarity art's glows and colour tint are approximated in `css/kn-strike-overrides.css` (GAP).
+
+Images fetched for it: GET only, one request every 4.5 s, exact paths, no cookies, nothing executed. They are
+`./img/...` paths of the page itself, so they come from the live site's origin (today's files, not a 1.37.2 snapshot);
+every request answered HTTP 200.
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| img/reward-bg/reward-bg-lights-non-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-lights-non-item.svg | 917932c683a449f39eb53d57a505032a10767dfb091d591b029bc29e51c6a105 |
+| img/reward-bg/reward-bg-color-non-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-color-non-item.svg | ad2755f2c98378fbb2274a4bf21138fe85bf53851c610c472e643856e263c0c2 |
+| img/reward-bg/reward-bg-lights-uncommon-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-lights-uncommon-item.svg | af6abfc56acb6f0405e8ef7184b6c6a0b9f5b90f8c22ea96a8cf27b81b5f76f2 |
+| img/reward-bg/reward-bg-color-uncommon-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-color-uncommon-item.svg | 32c07cbd353f449e073e52306171a1136747fbc8fc0571996bdc482077da42aa |
+| img/reward-bg/reward-bg-lights-rare-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-lights-rare-item.svg | 9387bf0d73a357e93377083c901ac1fd90dd636d3618902513aebd2e1c0ce883 |
+| img/reward-bg/reward-bg-color-rare-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-color-rare-item.svg | 00c16f97f92b1dae4ba1dc4a604d118a6820941761fef3a62efce93ba242ecbd |
+| img/reward-bg/reward-bg-lights-epic-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-lights-epic-item.svg | a81b5b27855685653f6d7f4b5b7abc8f4bbd52d1983e343f4937923a2c8637b8 |
+| img/reward-bg/reward-bg-color-epic-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-color-epic-item.svg | 031d07beafa6b08f23ae62c3dadd5236bf987e93330d23bb07749f13c8140a1a |
+| img/reward-bg/reward-bg-lights-legendary-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-lights-legendary-item.svg | 965d011fb4b840cfc166150736b813bea73c3dca69d28a04318ab4786cabc561 |
+| img/reward-bg/reward-bg-color-legendary-item.svg | https://krunkerstrike.frvr.com/img/reward-bg/reward-bg-color-legendary-item.svg | c92c317deecce9cd8072e3c84d8ca542fb60da149479fb6683619801554f6c91 |
+| img/store/store-lightbox-background.png | https://krunkerstrike.frvr.com/img/store/store-lightbox-background.png | 57ad731f757092f08a3f608bb55c5c02356125ce1746503d26a8fd06c5cd2f10 |
+| img/green-arrow-up.svg | https://krunkerstrike.frvr.com/img/green-arrow-up.svg | e4a8f73d8c351bf7c7d466163944bedb9bb62352f17d3b71ef4d16f08634b057 |
+| img/golden-banner-stars.svg | https://krunkerstrike.frvr.com/img/golden-banner-stars.svg | bcd05a0c756f8fb8f013f7fde45fb2a434c3e61ecac253b54632e747aa7f1ce2 |
+| img/golden-ticket.svg | https://krunkerstrike.frvr.com/img/golden-ticket.svg | 3b9ad0a818842f6331faf906fb7e2b021910c839e6baa83b3db6f6b830a20b46 |
+
+## Images fetched for the product popup, the reward art and the navigation icons (2026-10-15, round 2)
+
+The screens above reference these paths but the 1.37.2 `public/img/` snapshot does not contain them: the product popup's
+background (`.inspect-product__item-background:before`, FRVR's `U2` view), the reward coin (`img.reward-image`, a
+Krunkie coin), the feature rewards (`pa()`: XP boost, no ads), the premium reward, and the back / home buttons
+(`.frvr-icon-back` / `.frvr-icon-home`, the REWARD, SPIN, STORE and ITEM_SELECTION buttons). GET only, one request every
+4.6 s, exact paths, no cookies, nothing executed (the SVGs contain no script). Every request answered HTTP 200 with the
+listed size and sha256; the files are copied unchanged. client/tests/strike_econ_ui_e2e.py checks that the client logs no
+"file not found" for an img/ path during its run.
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| img/features/no-ads-unsolicited-logo.svg | https://krunkerstrike.frvr.com/img/features/no-ads-unsolicited-logo.svg | 094c14e154d281519ddb010ae1ce457793ed75e825ed3dfd05f3fb7eb05d255a |
+| img/features/xp-boost-logo.svg | https://krunkerstrike.frvr.com/img/features/xp-boost-logo.svg | 4c1290574dc094c9a7b5853b21f4ce1b9a8ce506e6cbc44878fd833892783ac2 |
+| img/frvr-ui/icon-krunkie-coin.svg | https://krunkerstrike.frvr.com/img/frvr-ui/icon-krunkie-coin.svg | 4d44f994233fdcddd989159074c095e8159839578139e88b523b4a9bff310870 |
+| img/premium/premium-logo.png | https://krunkerstrike.frvr.com/img/premium/premium-logo.png | d13e605248060367e84400e6fd020b2b2753bc64328f3e588e780da4097753c1 |
+| img/frvr-ui/inspect-product-background.png | https://krunkerstrike.frvr.com/img/frvr-ui/inspect-product-background.png | c396f9d447a153406bc288938ec6f965067a4dca41a5815d1ce13d1e51c514de |
+| img/frvr-ui/icon-home.svg | https://krunkerstrike.frvr.com/img/frvr-ui/icon-home.svg | 0af0fd26dbd034393d0bf5f830bc636d06e86b62d4799bd8a10ef3a10d295563 |
+| img/frvr-ui/back-icon.svg | https://krunkerstrike.frvr.com/img/frvr-ui/back-icon.svg | 39d8ba0766e2f280e995a12675cfe06a09039cf952061b0ad9250ede35d326a1 |
+
+Still missing from the snapshot, and not used by any markup this port has: the Market decorations (`market-bg.png`,
+`market-dealer.png`, `market-complexity.png`: STORE.html's Market products carry no `store-market__decoration` markup, so the
+decoration FRVR draws around them is not ported yet), the tournament, seasonal, MVP and end-screen premium art, the speech
+bubbles and the watch-ad icon. Their CSS references stay unresolved, as they were before.

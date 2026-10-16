@@ -1229,6 +1229,23 @@ int servers_ui_join_game(const char *id) {
     return 1;
 }
 
+int servers_ui_is_current_game(const char *game_id) { return game_id && game_id[0] && is_current_game(game_id); }
+
+int servers_ui_private_match(void) {
+    if (!strike_director_enabled() || g_seek_inflight) return 0;
+    printf("[strike] opening a private lobby\n");
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    g_pin = PIN_NONE;
+    if (!strike_seek(1, NULL)) seek_unreachable();
+    return 1;
+}
+
+int servers_ui_invite_game(char *out, const size_t n) {
+    if (!out || !n) return 0;
+    snprintf(out, n, "%s", g_strike_code[0] ? g_strike_code : g_game_id);
+    return out[0] != 0 && g_client && g_client->net_connected;
+}
+
 // v10 submitGameCode(): the server refused the join for its password (ERROR 004005,
 // v10_party_password_prompt); the same game again with the password in the JOIN packet. A
 // matchmade lobby is sought again (a fresh ticket, no page reload on the web), a direct server

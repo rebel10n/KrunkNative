@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "brain.h"
+#include "cJSON.h"
 
 /* internal_ws.c: a player of a node's lobby is in (READY) / left. lobby_id is the node's own
  * lobby id or a full "<nodeId>:<lobby>" game id. account_id <= 0 (guests) is ignored. */
@@ -32,5 +33,11 @@ void game_presence_node_gone(Brain *b, const char *node_id);
  * game needs a password (registry_lobby_protected) into *password_protected (may be NULL).
  * 0 = in no game (game_id ""). The social friends list calls it for each friend. */
 int game_presence_get(int64_t account_id, char *game_id, size_t n, int *password_protected);
+
+/* The game's lobby for the friends lists (KrunkNative, Krunker Strike's friends panel: FRVR's
+ * gameServer {mode, map, players, capacity}): adds gameFlavor ("strike" / "base": the lobby's
+ * registry flavor pool, MmLobby.flavor, so a Strike client shows a friend in a base game as not in a Strike game),
+ * gameMode, gameMap, gamePlayers and gameMaxPlayers to obj. Nothing when the lobby is not known. */
+void game_presence_describe(const char *game_id, cJSON *obj);
 
 #endif

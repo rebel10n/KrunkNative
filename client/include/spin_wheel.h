@@ -37,6 +37,17 @@ typedef struct SpinWheelDraw {
     float item_size, item_cam_x, item_bob;
 } SpinWheelDraw;
 
+// Krunker Strike's REWARD stars (FRVR oO / gI / aO, strike_reward.c): 4-point white stars in the
+// screen's own <canvas>, each bobbing by sin(now * 0.002 + timing) * animation px
+#define SPIN_STARS_MAX 64
+typedef struct SpinStarsDraw {
+    int visible;
+    uint32_t canvas_elem;  // the page's <canvas> (html_dom_canvas_gl)
+    float canvas_w, canvas_h;
+    int count;
+    struct { float x, y, outer, inner, opacity, timing, animation; } stars[SPIN_STARS_MAX];
+} SpinStarsDraw;
+
 // store_ui.c: the wheel as it is this frame (visible == 0 while #spinUI is hidden)
 const SpinWheelDraw *store_ui_wheel_draw(void);
 

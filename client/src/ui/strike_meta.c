@@ -13,7 +13,8 @@
 //                           pushes it; KrunkNative has no hosted tournaments, so only a scenario opens it.
 //   GB / Ny MATCH_DETAILS_SCREEN  Pt(Ny, {legacyData}) from the round end's podium button: La > gAe
 //                           lightbox, "Match Details", the legacy board (FFA: vAe + K5 rows; teams:
-//                           yF / bF per team), Close = kt(). TA (Report players) is never reset.
+//                           yF / bF per team), Close = kt(). TA (Report players) is never reset; a
+//                           row's report symbol opens REPORT_PLAYER (Hy, strike_social.c).
 //   KU PROGRESSION_TRACK    PROFILE's Rewards Track (Gue columns, level 1..max of the game config's
 //                           accountProgression; pa() labels), single track (no premium track) and
 //                           its button area. KU renders nothing until the config's item
@@ -710,6 +711,79 @@ static void on_claimed(void *user, const int status, const cJSON *data, const cJ
     }
 }
 
+// gn.claimSlots(l) = Fy: the claimable slots one after another (UU): a pick-one slot (isPlayerChoice) asks
+// first (Pt(QC, {options, onChoice})), the claim (claimProgression(slot, choice)) shows its rewards
+// (Pt(Es, {rewards, origin: progressionTrack}, {onPop})), and the next slot follows that screen.
+static struct {
+    char slots[64][24];
+    int n, i, busy;
+} TQ;
+
+static void track_claim_next(void);
+
+static void track_after_reward(void *user) {
+    (void) user;
+    track_claim_next(); // Fy: setTimeout(.., 100) then the rest
+}
+
+static void on_track_claimed(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    if (status != 200) { // UU: no rewards, no reward screen; Fy stops there
+        printf("[strike] claim refused (%d): %s\n", status, msg ? msg : "no answer");
+        TQ.busy = 0;
+        return;
+    }
+    printf("[strike] claimed a track level\n");
+    strike_reward_show(cJSON_GetObjectItemCaseSensitive(data, "rewards"), "progressionTrack", 0, track_after_reward, NULL);
+}
+
+static void on_track_choice(void *user, const int choice) {
+    (void) user;
+    if (TQ.i <= 0 || !strike_econ_claim_level(TQ.slots[TQ.i - 1], choice, on_track_claimed, NULL)) TQ.busy = 0;
+}
+
+// the slot's definition: the game config's (accountProgression), else the catalogue's
+static const cJSON *track_slot_config(const char *slot_id) {
+    const cJSON *s;
+    cJSON_ArrayForEach(s, T.progression) {
+        const char *id = jstr(s, "slotId");
+        if (id && !strcmp(id, slot_id)) return s;
+    }
+    return NULL;
+}
+
+static void track_claim_next(void) {
+    if (TQ.i >= TQ.n) {
+        TQ.busy = 0;
+        printf("[strike] Rewards Track: done\n");
+        return;
+    }
+    const char *slot = TQ.slots[TQ.i++];
+    const char *ids[8];
+    int n = 0, choice = 0;
+    const cJSON *cfg = track_slot_config(slot);
+    if (cfg) { // UU: i.isPlayerChoice -> the options are its items' itemDefIds
+        choice = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cfg, "isPlayerChoice"));
+        const cJSON *it;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(cfg, "items")) {
+            const char *id = jstr(it, "itemDefId") ? jstr(it, "itemDefId") : jstr(it, "item");
+            if (id && n < 8) ids[n++] = id;
+        }
+    } else {
+        const StrikeTrackSlot *ts = strike_track_slot(slot);
+        choice = ts && ts->player_choice;
+        for (int k = 0; ts && k < ts->reward_count && n < 8; k++) {
+            if (ts->rewards[k].item) ids[n++] = ts->rewards[k].item;
+        }
+    }
+    if (choice && n > 0) {
+        strike_reward_choice(ids, n, on_track_choice, NULL);
+        return;
+    }
+    if (!strike_econ_claim_level(slot, 0, on_track_claimed, NULL)) TQ.busy = 0;
+}
+
 static void track_render(const HtmlElem profile) {
     const HtmlElem host = html_dom_query(profile, ".frvr-account-progression");
     if (!host) return;
@@ -800,20 +874,27 @@ int strike_meta_action(const char *a) {
         strike_screen_rerender(STRIKE_SCREEN_MATCH_DETAILS);
         return 1;
     }
-    if (!strncmp(a, "match-details-report-player:", 28)) {
-        printf("[strike] report player %s: the report popup (Hy) is not ported\n", a + 28);
+    if (!strncmp(a, "match-details-report-player:", 28)) { // Pt(Hy, {player: t})
+        const Player *p = T.client ? client_find_player(T.client, atoi(a + 28)) : NULL;
+        if (p) strike_social_report(p->uid, p->name);
         return 1;
     }
     if (!strncmp(a, "track-slide:", 12)) {
         track_slide(atoi(a + 12) < 0 ? -1 : 1);
         return 1;
     }
-    if (!strcmp(a, "track-claim")) { // gn.claimSlots(l): every claimable slot (a pick-one slot: its first reward)
+    if (!strcmp(a, "track-claim")) { // gn.claimSlots(l): every claimable slot, one after another (Fy)
+        if (TQ.busy) return 1;
         const char *slots[64];
         const int n = econ_on() ? strike_econ_track_claimable(slots, 64) : 0;
-        for (int i = 0; i < n; i++) strike_econ_claim_level(slots[i], 0, on_claimed, NULL);
+        TQ.n = TQ.i = 0;
+        for (int i = 0; i < n; i++) snprintf(TQ.slots[TQ.n++], sizeof(TQ.slots[0]), "%s", slots[i]);
         if (!econ_on()) printf("[strike] Rewards Track: claiming needs a signed-in Strike account\n");
         else printf("[strike] Rewards Track: claiming %d level(s)\n", n);
+        if (TQ.n > 0) {
+            TQ.busy = 1;
+            track_claim_next();
+        }
         return 1;
     }
     if (!strncmp(a, "mission-claim:", 14)) {

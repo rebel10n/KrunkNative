@@ -32,6 +32,10 @@ struct LayoutTree {
     CssComputed anon_style;     /* fallback style for anonymous boxes without a parent */
     Box *free_list;             /* released boxes (incremental rebuilds), linked via next */
     int memo_off;               /* 1: no memo is served (full_layout); results are still stored */
+    /* while a flex row measures its items' content sizes (layout_flex.c): the container's width, which
+       a percentage max-width resolves against (a grid's auto-repeat count, layout_grid_intrinsic) */
+    int intrinsic_cb_set;
+    float intrinsic_cb_w;
 };
 
 /* Floats of one block formatting context, margin boxes in BFC-root border-box coords. */
@@ -102,6 +106,9 @@ float layout_content_width(LayoutTree *t, Box *b, int max_content);
  * fit-content fits avail_border (< 0: indefinite, max-content) */
 float layout_content_kw_width(LayoutTree *t, Box *b, int kind, float avail_border);
 int   layout_len_is_content_kw(const CssLength *l);
+/* a replaced box's border-box width with its height resolved against cb_h (a percentage height
+ * in a definite container transfers through the natural ratio) */
+float layout_replaced_width(LayoutTree *t, Box *b, float cb_h);
 /* aspect-ratio (CSS Sizing 4) of a non-replaced box (0: none; replaced boxes: replaced_size),
  * and the border-box size it transfers from the other one (< 0 without a ratio) */
 float layout_pref_ratio(const Box *b);

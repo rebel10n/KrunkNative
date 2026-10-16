@@ -30,6 +30,7 @@
 #include <spin_wheel.h>
 #include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
 #include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
+#include <audio.h>       // SOUND.play("reward") when the wheel stops
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,7 +97,7 @@ typedef struct {
     int score_rank;              // the board's rank (0: the row's place)
 } BoardRow;
 
-typedef enum { POPUP_NONE, POPUP_LEADERBOARD } PopupKind;
+typedef enum { POPUP_NONE, POPUP_LEADERBOARD, POPUP_PRODUCT } PopupKind;
 
 static struct {
     Client *client;
@@ -118,14 +119,17 @@ static struct {
     int live_board_count;
     char board_cols[2][16];
     char buying[64];      // a purchase on its way
+    int product;          // U2: the M.shop product index the product popup shows
     // aue's spin (onSpin / render): p[] pointers -> d[] targets at speeds A[], then the won pool grows
     struct {
-        int phase;        // 0 idle, 1 asked, 2 pointers turning, 3 the end (u -> f), 4 held
+        int phase;        // 0 idle, 1 asked, 2 pointers turning, 3 the end (u -> f), 4 the grown pool held
+        cJSON *rewards;   // b: the spin's rewards (results[].reward) for the reward screen (owned)
+        int heroic;       // x: heroicSpinsTriggered
         int n;
         double p[SPIN_WHEEL_MAX_POINTERS], d[SPIN_WHEEL_MAX_POINTERS], A[SPIN_WHEEL_MAX_POINTERS];
         char pool[24];    // C: the won pool (rewards[0].poolId)
         double c, u, f;   // c poolWeight, u -> f = 100 - c * 100
-        double step_ms, hold_ms, last_s;
+        double step_ms, last_s;
         int wheel;        // the wheels[] index spun
     } sp;
     int store_section;    // bce: the active section title
@@ -136,6 +140,8 @@ static struct {
     BoardRow board[BOARD_MAX];
     int board_count;
 } M = {.preset = 3, .wheels_fixture = -1, .spin = -1};
+
+static void popup_open(PopupKind kind);
 
 // ---------------------------------------------------------------- helpers
 
@@ -468,25 +474,45 @@ static void on_shop(void *user, const int status, const cJSON *data, const cJSON
     if (root) store_products_fill(root);
 }
 
+// $r's answer: ws goes (Tn() == ws && kt()), then Vw: Pt(Es, {rewards: products, origin: store})
 static void on_bought(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) user;
-    (void) data;
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    strike_reward_blocker_hide();
     if (status == 200) printf("[strike] bought %s\n", M.buying);
     else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
     M.buying[0] = 0;
     strike_econ_get_shop(on_shop, NULL); // purchaseCount moved
+    if (status == 200) strike_reward_show(cJSON_GetObjectItemCaseSensitive(data, "rewards"), "store", 0, NULL, NULL);
 }
 
-static void buy_product(const int index) {
+// $r(product, price, 1): Pt(ws, {loadingText: windows.store.purchasing}) while the shop answers
+static void purchase(const int index) {
     const cJSON *p = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(M.shop, "products"), index);
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id"));
     if (!id || M.buying[0]) return;
     snprintf(M.buying, sizeof(M.buying), "%s", id);
     if (!strike_econ_buy(id, 1, on_bought, NULL)) {
-        printf("[strike] purchase %s: no Strike account (sign in)\n", id);
+        printf("[strike] purchase %s: no Strike account (sign in)\n", id); // $r: Pt(Zu) (no Strike login screen here)
         M.buying[0] = 0;
+        return;
     }
+    strike_reward_blocker("Purchasing...");
+}
+
+// a product block's click: sU opens the product popup U2 for a paid item (Pt(In, {builder: U2})), a free
+// or currency product is bought at once
+static void buy_product(const int index) {
+    const cJSON *p = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(M.shop, "products"), index);
+    if (!p || M.buying[0]) return;
+    char *popup = strike_product_popup_html(p, NULL);
+    if (popup) {
+        free(popup);
+        M.product = index;
+        popup_open(POPUP_PRODUCT);
+        return;
+    }
+    purchase(index);
 }
 
 // bce: the section titles select their section (sectioned-scroll__title--active)
@@ -597,6 +623,15 @@ static void on_spun(void *user, const int status, const cJSON *data, const cJSON
                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) : "-");
     }
     for (int k = 0; k < M.sp.n; k++) M.sp.A[k] /= amax;
+    // b = the results' rewards, x = heroicSpinsTriggered: the reward screen's (showRewardScreen)
+    cJSON_Delete(M.sp.rewards);
+    M.sp.rewards = cJSON_CreateArray();
+    const cJSON *res;
+    cJSON_ArrayForEach(res, rewards) {
+        const cJSON *rw = cJSON_GetObjectItemCaseSensitive(res, "reward");
+        if (cJSON_IsObject(rw)) cJSON_AddItemToArray(M.sp.rewards, cJSON_Duplicate(rw, 1));
+    }
+    M.sp.heroic = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(data, "heroicSpinsTriggered"));
     const cJSON *first = cJSON_GetArrayItem(rewards, 0);
     snprintf(M.sp.pool, sizeof(M.sp.pool), "%s", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "poolId")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "poolId")) : "");
     M.sp.c = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(first, "poolWeight"));
@@ -607,7 +642,7 @@ static void on_spun(void *user, const int status, const cJSON *data, const cJSON
 
 static void spin_buy(const int count) {
     const WheelView *w = current_wheel();
-    if (!w || M.sp.phase != 0 || strike_screen_top() != STRIKE_SCREEN_SPIN) return; // isSpinning
+    if (!w || (M.sp.phase != 0 && M.sp.phase != 4) || strike_screen_top() != STRIKE_SCREEN_SPIN) return; // isSpinning
     if (FIXTURE.set) return; // a capture fixture's wheel is not kn_brain's
     M.sp.wheel = M.spin;
     M.sp.phase = 1;
@@ -630,25 +665,21 @@ static void spin_step(void) {
             if (fabs(M.sp.d[k] - M.sp.p[k]) <= 0.003 / M.sp.A[k]) M.sp.p[k] = M.sp.d[k]; // onPointerSpinFinished
             else done = 0;
         }
-        if (done) { // showRewardScreen: f = 100 - c * 100
+        if (done) { // showRewardScreen: f = 100 - c * 100, then Pt(Es, {rewards: b, origin: spinWheel, heroicSpinsTriggered: x})
             M.sp.f = 100.0 - M.sp.c * 100.0;
             M.sp.u = 0.0;
             M.sp.phase = M.sp.f > 0.0 ? 3 : 4;
             printf("[strike] spin landed on %s\n", M.sp.pool);
+            audio_play("reward", 0.3f, 0, 1.0f);
+            strike_reward_show(M.sp.rewards, "spinWheel", M.sp.heroic, NULL, NULL);
         }
     } else if (M.sp.phase == 3) {
+        // the won pool keeps growing under the reward screen (aue.render runs on); afterwards the wheel
+        // shows it grown until the next spin (onSpin)
         M.sp.u += 1000.0 / 60.0 * 0.4; // u += F * .4
         if (M.sp.u >= M.sp.f) {
             M.sp.u = M.sp.f;
             M.sp.phase = 4;
-        }
-    } else if (M.sp.phase == 4) {
-        // FRVR pushes the reward screen (Es) here; it has no capture yet, so the result holds for a
-        // moment and the wheel is ready again
-        M.sp.hold_ms += 1000.0 / 60.0;
-        if (M.sp.hold_ms >= 1500.0) {
-            M.sp.phase = 0;
-            M.sp.hold_ms = 0.0;
         }
     }
 }
@@ -666,6 +697,20 @@ static double now_s(void) {
 // pointer, the centre disc 0.6 H) is spin_wheel.c's, drawn into this canvas.
 static void spin_tick(void) {
     M.wheel.visible = 0;
+    // the spin's frames (fixed 1/60 s steps of the wall clock, at most a quarter second at a time); they
+    // run on under the reward screen
+    const double t = now_s();
+    if (M.sp.phase >= 2 && M.sp.phase < 4) {
+        double dt = M.sp.last_s > 0.0 ? (t - M.sp.last_s) * 1000.0 : 0.0;
+        if (dt > 250.0) dt = 250.0;
+        M.sp.step_ms += dt;
+        while (M.sp.step_ms >= 1000.0 / 60.0 && M.sp.phase >= 2 && M.sp.phase < 4) {
+            M.sp.step_ms -= 1000.0 / 60.0;
+            spin_step();
+        }
+    }
+    M.sp.last_s = t;
+    if (M.sp.phase >= 2 && !strike_screen_shown(STRIKE_SCREEN_SPIN)) M.sp.phase = 0; // SPIN went (home): the next one starts idle
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SPIN);
     if (!root || strike_screen_top() != STRIKE_SCREEN_SPIN) return;
     const HtmlElem container = html_dom_query(root, ".spin-wheel__container");
@@ -700,18 +745,6 @@ static void spin_tick(void) {
     d->canvas_w = M.wheel_f;
     d->canvas_h = M.wheel_f;
     d->radius = M.wheel_f / 2.0f * 0.95f;
-    // the spin's frames (fixed 1/60 s steps of the wall clock, at most a quarter second at a time)
-    const double t = now_s();
-    if (M.sp.phase >= 2) {
-        double dt = M.sp.last_s > 0.0 ? (t - M.sp.last_s) * 1000.0 : 0.0;
-        if (dt > 250.0) dt = 250.0;
-        M.sp.step_ms += dt;
-        while (M.sp.step_ms >= 1000.0 / 60.0 && M.sp.phase >= 2) {
-            M.sp.step_ms -= 1000.0 / 60.0;
-            spin_step();
-        }
-    }
-    M.sp.last_s = t;
     const WheelView *w = current_wheel();
     const int spinning = M.sp.phase >= 2 && M.sp.wheel == M.spin;
     const double uf = spinning && M.sp.f > 0.0 ? M.sp.u / M.sp.f : 0.0;
@@ -908,6 +941,12 @@ static void popup_fill(const HtmlElem root) {
             free(html);
         }
         leaderboard_fill(holder);
+    } else if (holder && M.popup == POPUP_PRODUCT) { // g(U2, {product, ...}): YA's click is onPurchase (kt) then $r
+        char action[40];
+        snprintf(action, sizeof(action), "buy-confirm:%d", M.product);
+        char *html = strike_product_popup_html(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(M.shop, "products"), M.product), action);
+        html_dom_set_html(holder, html ? html : "");
+        free(html);
     }
 }
 
@@ -920,12 +959,24 @@ static void popup_open(const PopupKind kind) {
 // ---------------------------------------------------------------- CUSTOMIZATION (Ly / hde) and T5
 
 // Ly.categories: the boxes by title (windows.loadout.*), their item type ($i) and FRVR's loadout key.
-// Skin Color (skinColIndex, no item) opens nothing here.
+// Skin Color (index skinColIndex, itemType undefined: CAT_SKIN_COLOR) opens T5's colour list.
+#define CAT_SKIN_COLOR (-1)
 static const struct { const char *title; int type; } CATS[] = {
     {"Weapon", STRIKE_ITEM_WEAPON}, {"Head", STRIKE_ITEM_HAT}, {"Back", STRIKE_ITEM_BACK}, {"Melee", STRIKE_ITEM_MELEE},
     {"Clothing", STRIKE_ITEM_DYE}, {"Waist", STRIKE_ITEM_WAIST}, {"Face", STRIKE_ITEM_FACE}, {"Body", STRIKE_ITEM_CHEST},
+    {"Skin Color", CAT_SKIN_COLOR},
 };
 #define CAT_COUNT ((int) (sizeof(CATS) / sizeof(CATS[0])))
+
+// xe.skinColors (Q8): FRVR's six, the first six of Krunker's (ui_loadout.c SKIN_COLORS, the same values)
+static const char *const SKIN_COLOR_NAMES[] = {"Bronze", "Sienna", "Rose", "Tan", "Pale", "Infected"};
+#define SKIN_COLOR_COUNT ((int) (sizeof(SKIN_COLOR_NAMES) / sizeof(SKIN_COLOR_NAMES[0])))
+
+// ade(): the selected skin colour, 1 (Sienna) while none is saved (loadout.skinColIndex -1)
+static int skin_color_index(void) {
+    const int i = ui_loadout_saved("skinColIndex");
+    return i >= 0 && i < SKIN_COLOR_COUNT ? i : 1;
+}
 
 // I5(): the selected class's primary weapon (its skin slot w<weapon>, strike_econ_apply_look)
 static int class_weapon(void) {
@@ -938,7 +989,7 @@ static int class_weapon(void) {
 static void cat_slot(const int cat, char *out, const size_t n) {
     out[0] = 0;
     if (CATS[cat].type == STRIKE_ITEM_WEAPON) snprintf(out, n, "w%d", class_weapon());
-    else if (CATS[cat].type != STRIKE_ITEM_CHEST) snprintf(out, n, "t%d", CATS[cat].type);
+    else if (CATS[cat].type != STRIKE_ITEM_CHEST && CATS[cat].type != CAT_SKIN_COLOR) snprintf(out, n, "t%d", CATS[cat].type);
 }
 
 // hde: the box's label / image follow the equipped item (Default without one)
@@ -957,6 +1008,21 @@ static void customization_fill(const HtmlElem root) {
         char hook[40], slot[16];
         snprintf(hook, sizeof(hook), "strikeAction('item-slot:%d')", cat); // Pt(T5, {itemDef, index, title, itemType})
         html_dom_set_attr(boxes[i], "onclick", hook);
+        if (CATS[cat].type == CAT_SKIN_COLOR) { // the colour square and its name (skinColors[skinColIndex])
+            const int sc = skin_color_index();
+            char bg[32];
+            snprintf(bg, sizeof(bg), "#%s", ui_loadout_skin_color_hex(sc));
+            const HtmlElem sq = html_dom_query(boxes[i], ".customization-screen__skin-color");
+            if (sq) html_dom_set_style(sq, "background", bg);
+            const HtmlElem label = html_dom_query(boxes[i], ".customization-screen__cat-box-label span");
+            if (label) {
+                html_dom_set_text(label, SKIN_COLOR_NAMES[sc]);
+                char id[48];
+                snprintf(id, sizeof(id), "%s-span", SKIN_COLOR_NAMES[sc]);
+                html_dom_set_attr(label, "id", id);
+            }
+            continue;
+        }
         cat_slot(cat, slot, sizeof(slot));
         const char *equipped = slot[0] ? strike_econ_equipped(slot) : NULL;
         const StrikeItem *it = equipped ? strike_item(equipped) : NULL;
@@ -978,6 +1044,21 @@ static void customization_fill(const HtmlElem root) {
     }
 }
 
+// state.strike.itemSelection of a --render-scenario (strike_menu_scenario_state): the owned items and the
+// equipped ones T5 shows instead of the account's (sample data)
+static struct {
+    int set;
+    cJSON *owned;    // [{itemId}] as /players/me/items rows
+    cJSON *equipped; // {slot: itemId}
+} ITEMS;
+
+static const cJSON *item_selection_items(void) { return ITEMS.set ? ITEMS.owned : strike_econ_items(); }
+
+static const char *item_selection_equipped(const char *slot) {
+    if (!ITEMS.set) return strike_econ_equipped(slot);
+    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ITEMS.equipped, slot));
+}
+
 static int item_rarity_cmp(const void *pa, const void *pb) {
     const StrikeItem *a = strike_item((const char *) pa), *b = strike_item((const char *) pb);
     return (b ? b->rarity : 0) - (a ? a->rarity : 0); // rarity, highest first
@@ -987,12 +1068,34 @@ static int item_rarity_cmp(const void *pa, const void *pb) {
 // "Default"; rde: the square of the equipped one (none: Default) is --selected, a click equips
 static void item_selection_fill(const HtmlElem root) {
     const int cat = M.item_cat;
+    const HtmlElem title = html_dom_query(root, ".frvr-window-title");
+    if (title) html_dom_set_text(title, CATS[cat].title);
+    const HtmlElem grid = html_dom_query(root, ".item-selection__items-grid");
+    if (CATS[cat].type == CAT_SKIN_COLOR) { // T5 without an itemType: xe.skinColors, the selected one ade()
+        StrBuf sb = {0};
+        const int sc = skin_color_index();
+        M.item_count = 0;
+        for (int i = 0; i < SKIN_COLOR_COUNT; i++) {
+            char index[16];
+            snprintf(index, sizeof(index), "%d", i);
+            snprintf(M.item_ids[M.item_count++], sizeof(M.item_ids[0]), "%d", i);
+            const StrikeVar v[] = {{"selected", i == sc ? " item-selection__item-square--selected" : ""}, {"index", index},
+                                   {"color", ui_loadout_skin_color_hex(i)}, {"name", SKIN_COLOR_NAMES[i]}};
+            char *html = strike_template_part("ITEM_SELECTION_SCREEN", "skin", v, 4);
+            if (html) sb_append(&sb, html);
+            free(html);
+        }
+        char *items = sb_finish(&sb);
+        if (grid) html_dom_set_html(grid, items ? items : "");
+        free(items);
+        return;
+    }
     char slot[16];
     cat_slot(cat, slot, sizeof(slot));
     const int weapon = class_weapon();
     M.item_count = 0;
     const cJSON *row;
-    cJSON_ArrayForEach(row, strike_econ_items()) {
+    cJSON_ArrayForEach(row, item_selection_items()) {
         if (M.item_count >= 63) break;
         const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "itemId"));
         const StrikeItem *it = id ? strike_item(id) : NULL;
@@ -1002,29 +1105,34 @@ static void item_selection_fill(const HtmlElem root) {
     }
     qsort(M.item_ids, (size_t) M.item_count, sizeof(M.item_ids[0]), item_rarity_cmp);
     M.item_ids[M.item_count++][0] = 0; // the Default square
-    const char *equipped = slot[0] ? strike_econ_equipped(slot) : NULL;
+    const char *equipped = slot[0] ? item_selection_equipped(slot) : NULL;
     StrBuf sb = {0};
     for (int i = 0; i < M.item_count; i++) {
         const StrikeItem *it = M.item_ids[i][0] ? strike_item(M.item_ids[i]) : NULL;
         const int selected = it ? equipped && !strcmp(equipped, M.item_ids[i]) : !equipped;
-        char image[512], index[16], rarity[48];
+        char image[512], index[16], rarity[48], bonus[16];
         if (it && it->skin >= 0) store_skin_preview(it->skin, image, sizeof(image));
         else snprintf(image, sizeof(image), "%s", M.item_default_img);
         snprintf(index, sizeof(index), "%d", i);
+        // the label's class: item-rarity-banner--<rarity>, "" for Default (Mithril keeps the joining space)
         if (it && it->rarity >= 0) snprintf(rarity, sizeof(rarity), " item-rarity-banner--%d", it->rarity);
-        else rarity[0] = 0;
+        else snprintf(rarity, sizeof(rarity), " ");
+        const char *img = NULL;
+        char *stat = NULL;
+        if (it && strike_item_power(it->id, bonus, sizeof(bonus), &img)) { // wc {labelItems, class: item-selection__item-stat}
+            const StrikeVar sv[] = {{"bonus", bonus}, {"img", img}};
+            stat = strike_template_part("ITEM_SELECTION_SCREEN", "stat", sv, 2);
+        }
         const StrikeVar v[] = {{"selected", selected ? " item-selection__item-square--selected" : ""}, {"index", index},
-                               {"image", image}, {"!rarity", rarity}, {"name", it ? it->name : "Default"}};
-        char *html = strike_template_part("ITEM_SELECTION_SCREEN", "item", v, 5);
+                               {"image", image}, {"stat", stat ? stat : ""}, {"rarity", rarity}, {"name", it ? it->name : "Default"}};
+        char *html = strike_template_part("ITEM_SELECTION_SCREEN", "item", v, 6);
         if (html) sb_append(&sb, html);
         free(html);
+        free(stat);
     }
     char *items = sb_finish(&sb);
-    const HtmlElem grid = html_dom_query(root, ".item-selection__items-grid");
     if (grid) html_dom_set_html(grid, items ? items : "");
     free(items);
-    const HtmlElem title = html_dom_query(root, ".frvr-window-title");
-    if (title) html_dom_set_text(title, CATS[cat].title);
 }
 
 static void on_equipped(void *user, const int status, const cJSON *data, const cJSON *error) {
@@ -1037,6 +1145,15 @@ static void on_equipped(void *user, const int status, const cJSON *data, const c
 
 static void item_pick(const int index) {
     if (index < 0 || index >= M.item_count) return;
+    if (CATS[M.item_cat].type == CAT_SKIN_COLOR) { // rde: loadout.skinColIndex = r, saved (ac("loadout.skinColIndex"))
+        if (index == skin_color_index()) return;
+        ui_loadout_select_skin_color(index);
+        printf("[strike] skin color %d (%s)\n", index, SKIN_COLOR_NAMES[index]);
+        HtmlElem root;
+        if ((root = strike_screen_root(STRIKE_SCREEN_ITEM_SELECTION))) item_selection_fill(root);
+        if ((root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION))) customization_fill(root);
+        return;
+    }
     char slot[16];
     cat_slot(M.item_cat, slot, sizeof(slot));
     if (!slot[0]) return;
@@ -1258,8 +1375,31 @@ static void play(void) {
 
 static void action(const char *a) {
     printf("[strike] action %s\n", a);
-    if (strike_meta_action(a)) return; // missions tab, match details report, rewards track (strike_meta.c)
+    if (strike_meta_action(a)) return;   // missions tab, match details report, rewards track (strike_meta.c)
+    if (strike_social_action(a)) return; // friends, invites, report (strike_social.c)
+    if (strike_reward_action(a)) return; // the reward screen, the choice popup (strike_reward.c)
     if (!strcmp(a, "play")) play();
+    else if (!strncmp(a, "buy-confirm:", 12)) {
+        // U2's YA: onPurchase (kt: the popup goes), then $r
+        if (strike_screen_top() == STRIKE_SCREEN_POPUP) strike_screen_pop();
+        purchase(atoi(a + 12));
+    } else if (!strcmp(a, "spin-ticket")) {
+        // the reward screen's Use Now!: kr(SA, {spinnerIndex: luckyDraw}): the spin-ticket wheel
+        wheels_build();
+        int i = -1;
+        for (int k = 0; k < M.wheel_count && i < 0; k++) {
+            if (M.wheels[k].ticket) i = k;
+        }
+        if (i >= 0) {
+            M.spin = i;
+            if (strike_screen_shown(STRIKE_SCREEN_SPIN)) {
+                while (strike_screen_top() != STRIKE_SCREEN_SPIN) strike_screen_pop();
+                strike_screen_rerender(STRIKE_SCREEN_SPIN);
+            } else {
+                strike_screen_push(STRIKE_SCREEN_SPIN);
+            }
+        }
+    }
     else if (!strcmp(a, "back")) {
         strike_screen_pop(); // kt()
         if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
@@ -1389,7 +1529,15 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_MATCH_DETAILS:   // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_ITEM_SELECTION:  // transcribed from the bundle (T5 / rde, above)
+    case STRIKE_SCREEN_REPORT_PLAYER:   // transcribed from the bundle (strike_social.c)
         return strike_screen_id(s);
+    case STRIKE_SCREEN_REWARD:          // transcribed from the bundle (strike_reward.c)
+    case STRIKE_SCREEN_REWARD_CHOICE:   // transcribed from the bundle (strike_reward.c)
+    case STRIKE_SCREEN_INPUT_BLOCKER:   // transcribed from the bundle (strike_reward.c)
+        return strike_screen_id(s);
+    case STRIKE_SCREEN_POPUP_SUCCESS:   // Oue, the alert both use (strike_social.c)
+    case STRIKE_SCREEN_POPUP_ERROR:
+        return "POPUP_ALERT";
     default:
         return NULL; // no template of it yet (README.md "Not ported yet"); MISSION_TAB_SCREEN is
                      // the Battle Pass screen's Missions tab (strikeAction('missions'))
@@ -1500,7 +1648,57 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     default:
         break;
     }
-    strike_meta_render(s, root); // the Battle Pass tabs, the Rewards Track, match details, reward card
+    strike_meta_render(s, root);   // the Battle Pass tabs, the Rewards Track, match details, reward card
+    strike_social_render(s, root); // the friends strip / list, Private Match's invites, report, alerts
+    strike_reward_render(s, root); // the reward screen, the choice popup, the input blocker
+}
+
+const char *strike_menu_class_for_weapon(const int weapon) {
+    const ClassConfig *c = rules_classes();
+    for (int i = 0; c && i < STRIKE_CLASS_COUNT; i++) {
+        const int id = CLASSES[i].id;
+        if (id >= 0 && id < (int) rules_class_count() && c[id].loadout && c[id].loadout[0] == weapon) return CLASSES[i].name;
+    }
+    return NULL;
+}
+
+// state.strike of a --render-scenario (sample data):
+//   itemSelection: {category: CATS index, owned: [item ids], equipped: {slot: id}, skinColor} over a
+//                  CUSTOMIZATION_SCREEN scenario: the box's click (T5) with these items
+//   product:       a /strike/v1/shop product: the market card's click (U2 in the POPUP frame)
+static void scenario_items(const cJSON *v);
+
+void strike_menu_scenario_state(const cJSON *st) {
+    scenario_items(cJSON_GetObjectItemCaseSensitive(st, "itemSelection"));
+    const cJSON *product = cJSON_GetObjectItemCaseSensitive(st, "product");
+    if (cJSON_IsObject(product)) {
+        cJSON_Delete(M.shop);
+        M.shop = cJSON_CreateObject();
+        cJSON_AddItemToArray(cJSON_AddArrayToObject(M.shop, "products"), cJSON_Duplicate(product, 1));
+        buy_product(0);
+    }
+}
+
+static void scenario_items(const cJSON *v) {
+    if (!cJSON_IsObject(v)) return;
+    cJSON_Delete(ITEMS.owned);
+    cJSON_Delete(ITEMS.equipped);
+    ITEMS.owned = cJSON_CreateArray();
+    const cJSON *o;
+    cJSON_ArrayForEach(o, cJSON_GetObjectItemCaseSensitive(v, "owned")) {
+        if (!cJSON_IsString(o)) continue;
+        cJSON *row = cJSON_CreateObject();
+        cJSON_AddStringToObject(row, "itemId", o->valuestring);
+        cJSON_AddItemToArray(ITEMS.owned, row);
+    }
+    const cJSON *eq = cJSON_GetObjectItemCaseSensitive(v, "equipped");
+    ITEMS.equipped = cJSON_IsObject(eq) ? cJSON_Duplicate(eq, 1) : cJSON_CreateObject();
+    ITEMS.set = 1;
+    const cJSON *sc = cJSON_GetObjectItemCaseSensitive(v, "skinColor");
+    if (cJSON_IsNumber(sc)) ui_loadout_select_skin_color(sc->valueint);
+    char a[32];
+    snprintf(a, sizeof(a), "item-slot:%d", (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(v, "category")));
+    action(a);
 }
 
 int strike_menu_level(void) {
@@ -1515,6 +1713,8 @@ void strike_menu_tick(Client *client) {
     strike_meta_tick(client);
     spin_tick();
     customize_controls_tick();
+    strike_social_tick(client);
+    strike_reward_tick(client);
     // the account box follows the account / name (Mithril redraws on every change)
     char name[64], key[160];
     int level = 1, kr = 0;

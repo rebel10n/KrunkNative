@@ -139,14 +139,18 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         /* content-based size (row: max-content width; column: laid-out height) */
         float content_main;
         float content_min;
-        if (row && box_is_replaced(c) && ch >= 0 && cs->height.kind == CSS_LEN_VALUE && (cs->height.pct != 0.0f || cs->height.pct_term)) {
-            /* a percentage height against the container's definite height: the width follows
-             * through the ratio (Strike's Customize box: an <img height:100%> in a flex box clamped
-             * to 54 base px by max-height is 54 x 54, not as wide as the box) */
-            float rw, rh;
-            layout_replaced_size(t, c, cw, ch, &rw, &rh);
-            content_main = content_min = rw;
+        if (row && box_is_replaced(c) && cs->width.kind == CSS_LEN_AUTO && c->attr_w < 0 && ch >= 0 &&
+            cs->height.kind == CSS_LEN_VALUE && (cs->height.pct != 0 || cs->height.pct_term)) {
+            /* a percentage height resolves against the definite container (cross size), and the width
+               follows through the natural ratio: Krunker Strike's reward lights, an <img height:100%>
+               (761x360 SVG) in a 1280x720 flex row, are 1522x720 as in Chrome, not 761 wide (letterboxed
+               to 360 px tall) */
+            content_main = content_min = layout_replaced_width(t, c, ch);
         } else if (row) {
+            const int prev_set = t->intrinsic_cb_set;
+            const float prev_w = t->intrinsic_cb_w;
+            t->intrinsic_cb_set = cw >= 0;
+            t->intrinsic_cb_w = cw;
             content_main = layout_intrinsic_width(t, c, 1);
             /* the content size suggestion of the automatic minimum size (CSS Flexbox 4.5) is the
              * min-content size of the item's contents: its own width (layout_intrinsic_width) would
@@ -154,6 +158,8 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
              * pushed off the card); a replaced item's is its natural size */
             content_min = box_is_replaced(c) ? layout_intrinsic_width(t, c, 0)
                                              : layout_content_kw_width(t, c, CSS_LEN_MIN_CONTENT, -1.0f);
+            t->intrinsic_cb_set = prev_set;
+            t->intrinsic_cb_w = prev_w;
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(0, cw - it->cm0 - it->cm1) : -1;
@@ -172,7 +178,12 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             float v = layout_resolve_len(basis, main_avail, 0);
             base = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
             have = 1;
-        } else if (msize->kind == CSS_LEN_VALUE && !(msize->pct != 0 && main_avail < 0) && !box_is_replaced(c)) {
+        } else if (msize->kind == CSS_LEN_VALUE && !(msize->pct != 0 && main_avail < 0) &&
+                   (!box_is_replaced(c) || ((msize->pct != 0 || msize->pct_term) && main_avail >= 0))) {
+            /* flex-basis auto = the main size property. A replaced item's fixed size is already its
+               content size (replaced_size), but a percentage one resolves against the definite
+               container, not to the natural size: an <img width:100%> (an 8x8 class icon) in a
+               43px flex row is 43 wide, as in Chrome, not an 8px strip with a 43px height */
             float v = layout_resolve_len(msize, main_avail, 0);
             base = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
             have = 1;

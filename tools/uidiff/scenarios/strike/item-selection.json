@@ -1,0 +1,40 @@
+{
+  "ref": "doc/ref/krunker-strike-1.37.2/strike-item-selection.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_menu.c). ITEM_SELECTION_SCREEN (T5 / rde) of Customize's Weapon box: four owned Assault Rifle skins (legendary, epic, rare, uncommon: sample data) by rarity, then Default; the epic one equipped. Reference: tools/strike/static_ref.py: this scenario's DOM (the transcribed markup) drawn by Chrome with FRVR's own stylesheets and no script; it checks the native engine against a browser on FRVR's markup and CSS, not against FRVR's runtime (no sandbox capture of T5 exists).",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "CUSTOMIZATION_SCREEN",
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      },
+      "itemSelection": {
+        "category": 0,
+        "owned": [
+          "s15",
+          "s12",
+          "s16",
+          "s14"
+        ],
+        "equipped": {
+          "w1": "s14"
+        }
+      }
+    }
+  }
+}

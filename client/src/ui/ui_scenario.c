@@ -1385,6 +1385,19 @@ int ui_scenario_run(Client *client) {
         if (e && engine_get()) engine_dump_boxes(engine_get(), e, dump_line, NULL);
         else fprintf(stderr, "[scenario] dump: no match for '%s'\n", dump);
     }
+    // Debug: KRUNKNATIVE_SCENARIO_HTML=<path> writes the captured frame's document (its serialized DOM),
+    // so a browser can render the same markup (tools/strike/static_ref.py)
+    const char *html_out = getenv("KRUNKNATIVE_SCENARIO_HTML");
+    if (html_out && html_out[0] && engine_get()) {
+        char *doc = dom_outer_html(engine_dom(engine_get()), 0);
+        FILE *f = doc ? fopen(html_out, "wb") : NULL;
+        if (f) {
+            fputs(doc, f);
+            fclose(f);
+            printf("[scenario] document -> %s\n", html_out);
+        }
+        free(doc);
+    }
     const int ok = read_back(g_sc.out);
     if (ok) printf("[scenario] %dx%d at %.3f s -> %s\n", g_sc.w, g_sc.h, capture_ms / 1000.0, g_sc.out);
     return ok ? 0 : 1;

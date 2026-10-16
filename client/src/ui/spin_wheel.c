@@ -42,6 +42,9 @@ static struct {
     // Krunker Strike's SPIN canvas: the render target shown in the page's <canvas> (html_dom_canvas_gl)
     unsigned canvas_fbo, canvas_tex;
     int canvas_w, canvas_h;
+    // Krunker Strike's REWARD stars canvas (the same, a second target)
+    unsigned stars_fbo, stars_tex;
+    int stars_w, stars_h;
 } g_sw;
 
 static float frand(void) { return (float) rand() / ((float) RAND_MAX + 1.0f); }
@@ -167,41 +170,39 @@ static void set_wheel_uniforms(const SpinWheelDraw *d) {
 // (html_dom_canvas_gl), so the page paints it in its place: over the screen's .frvr-dark-blur, under the
 // cost buttons. GL state: the framebuffer binding, viewport and clear colour are restored, the rest as
 // pass_begin / pass_end leave it.
-static void render_into_canvas(const SpinWheelDraw *d) {
-    const int w = (int) d->canvas_w, h = (int) d->canvas_h;
-    if (w <= 0 || h <= 0 || !ensure_program()) return;
-    if (!g_sw.canvas_tex || g_sw.canvas_w != w || g_sw.canvas_h != h) {
-        if (!g_sw.canvas_tex) {
-            glGenTextures(1, &g_sw.canvas_tex);
-            glGenFramebuffers(1, &g_sw.canvas_fbo);
-        }
-        glBindTexture(GL_TEXTURE_2D, g_sw.canvas_tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // one level: the page's GL backend samples canvas images with a mipmap filter
-        // (gl_backend.c GLB_IMAGE_MIN_FILTER), complete only when the texture says it has no others
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        g_sw.canvas_w = w;
-        g_sw.canvas_h = h;
+// A w x h render target (texture + framebuffer) for a page <canvas>, (re)allocated on a size change
+static void target_ensure(unsigned *fbo, unsigned *tex, int *cur_w, int *cur_h, const int w, const int h) {
+    if (*tex && *cur_w == w && *cur_h == h) return;
+    if (!*tex) {
+        glGenTextures(1, tex);
+        glGenFramebuffers(1, fbo);
     }
-    float *v = verts_reserve(6);
-    if (!v) return;
-    static const float white[4] = {1, 1, 1, 1};
-    // the whole target; canvas px + 2 so that the shader's translate(2, 2) centre is the middle
-    const float xs[6] = {0, 1, 1, 0, 1, 0}, ys[6] = {0, 0, 1, 0, 1, 1};
-    const CssToClip unit = {2.0f, 2.0f};
-    for (int i = 0; i < 6; i++) put_vertex(v + i * VERTEX_FLOATS, unit, xs[i], ys[i], xs[i] * d->canvas_w + 2.0f, ys[i] * d->canvas_h + 2.0f, white);
+    glBindTexture(GL_TEXTURE_2D, *tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // one level: the page's GL backend samples canvas images with a mipmap filter
+    // (gl_backend.c GLB_IMAGE_MIN_FILTER), complete only when the texture says it has no others
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    *cur_w = w;
+    *cur_h = h;
+}
+
+// Draw `n` vertices of g_sw.verts (mode: the shader's) into a cleared target, then hand it to the page's
+// canvas. GL state: the framebuffer binding, viewport and clear colour are restored, the rest as
+// pass_end leaves it.
+static void target_draw(const unsigned fbo, const unsigned tex, const int w, const int h, const SpinWheelDraw *wheel,
+                        const size_t n, const uint32_t canvas_elem) {
     GLint prev_fbo = 0, vp[4] = {0, 0, 0, 0};
     GLfloat clear[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
     glGetIntegerv(GL_VIEWPORT, vp);
     glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
-    glBindFramebuffer(GL_FRAMEBUFFER, g_sw.canvas_fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_sw.canvas_tex, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     glViewport(0, 0, w, h);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(0, 0, 0, 0);
@@ -213,20 +214,72 @@ static void render_into_canvas(const SpinWheelDraw *d) {
     glUseProgram(g_sw.program);
     glBindVertexArray(g_sw.vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_sw.vbo);
-    set_wheel_uniforms(d);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (6 * VERTEX_FLOATS * sizeof(float)), v, GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    if (wheel) set_wheel_uniforms(wheel);
+    else glUniform1i(g_sw.u_mode, 1); // flat vertex colours (the confetti's mode)
+    if (n) {
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (n * VERTEX_FLOATS * sizeof(float)), g_sw.verts, GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei) n);
+    }
     pass_end();
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prev_fbo);
     glViewport(vp[0], vp[1], vp[2], vp[3]);
     glClearColor(clear[0], clear[1], clear[2], clear[3]);
-    html_dom_canvas_gl((HtmlElem) d->canvas_elem, g_sw.canvas_tex, g_sw.canvas_fbo, w, h);
+    html_dom_canvas_gl((HtmlElem) canvas_elem, tex, fbo, w, h);
+}
+
+static void render_into_canvas(const SpinWheelDraw *d) {
+    const int w = (int) d->canvas_w, h = (int) d->canvas_h;
+    if (w <= 0 || h <= 0 || !ensure_program()) return;
+    target_ensure(&g_sw.canvas_fbo, &g_sw.canvas_tex, &g_sw.canvas_w, &g_sw.canvas_h, w, h);
+    float *v = verts_reserve(6);
+    if (!v) return;
+    static const float white[4] = {1, 1, 1, 1};
+    // the whole target; canvas px + 2 so that the shader's translate(2, 2) centre is the middle
+    const float xs[6] = {0, 1, 1, 0, 1, 0}, ys[6] = {0, 0, 1, 0, 1, 1};
+    const CssToClip unit = {2.0f, 2.0f};
+    for (int i = 0; i < 6; i++) put_vertex(v + i * VERTEX_FLOATS, unit, xs[i], ys[i], xs[i] * d->canvas_w + 2.0f, ys[i] * d->canvas_h + 2.0f, white);
+    target_draw(g_sw.canvas_fbo, g_sw.canvas_tex, w, h, d, 6, d->canvas_elem);
+}
+
+// Krunker Strike's REWARD stars (aO): per star moveTo(x, y - outer), then 4 x (outer at r, inner at
+// r + pi / 4) from r = 3 pi / 2, filled rgba(255, 255, 255, opacity): a fan of 8 triangles. y bobs by
+// sin(Date.now() * 0.002 + timing) * animation. Canvas px, y down.
+static void render_stars(const SpinStarsDraw *d) {
+    const int w = (int) d->canvas_w, h = (int) d->canvas_h;
+    if (w <= 0 || h <= 0 || !ensure_program()) return;
+    target_ensure(&g_sw.stars_fbo, &g_sw.stars_tex, &g_sw.stars_w, &g_sw.stars_h, w, h);
+    float *v = verts_reserve((size_t) d->count * 24);
+    if (!v) return;
+    const CssToClip m = {2.0f / (float) w, 2.0f / (float) h}; // canvas px -> clip, y = 0 at the top (as the wheel)
+    const double now_ms = glfwGetTime() * 1000.0;
+    size_t n = 0;
+    for (int i = 0; i < d->count && i < SPIN_STARS_MAX; i++) {
+        const float x = d->stars[i].x;
+        const float y = d->stars[i].y + (float) sin(now_ms * 0.002 + d->stars[i].timing) * d->stars[i].animation;
+        const float rgba[4] = {1.0f, 1.0f, 1.0f, d->stars[i].opacity}; // the shader premultiplies (mode 1)
+        float px[8], py[8];
+        double r = M_PI / 2.0 * 3.0;
+        for (int k = 0; k < 8; k++) {
+            const float rad = k % 2 ? d->stars[i].inner : d->stars[i].outer;
+            px[k] = x + (float) cos(r) * rad;
+            py[k] = y + (float) sin(r) * rad;
+            r += M_PI / 4.0;
+        }
+        for (int k = 0; k < 8; k++) {
+            put_vertex(v + n++ * VERTEX_FLOATS, m, x, y, 0, 0, rgba);
+            put_vertex(v + n++ * VERTEX_FLOATS, m, px[k], py[k], 0, 0, rgba);
+            put_vertex(v + n++ * VERTEX_FLOATS, m, px[(k + 1) % 8], py[(k + 1) % 8], 0, 0, rgba);
+        }
+    }
+    target_draw(g_sw.stars_fbo, g_sw.stars_tex, w, h, NULL, n, d->canvas_elem);
 }
 
 void spin_wheel_render(Client *client) {
     if (strike_ui_active()) { // the Strike page has its own wheel (strike_menu.c SPIN), no store_ui.c
         const SpinWheelDraw *s = strike_menu_wheel_draw();
         if (s && s->visible && s->canvas_elem) render_into_canvas(s);
+        const SpinStarsDraw *st = strike_reward_stars();
+        if (st && st->visible && st->canvas_elem) render_stars(st);
         return;
     }
     const SpinWheelDraw *d = store_ui_wheel_draw();
@@ -756,6 +809,8 @@ void spin_wheel_fini(void) {
     spin_item_fini();
     if (g_sw.canvas_fbo) glDeleteFramebuffers(1, &g_sw.canvas_fbo);
     if (g_sw.canvas_tex) glDeleteTextures(1, &g_sw.canvas_tex);
+    if (g_sw.stars_fbo) glDeleteFramebuffers(1, &g_sw.stars_fbo);
+    if (g_sw.stars_tex) glDeleteTextures(1, &g_sw.stars_tex);
     if (g_sw.program) glDeleteProgram(g_sw.program);
     if (g_sw.vbo) glDeleteBuffers(1, &g_sw.vbo);
     if (g_sw.vao) glDeleteVertexArrays(1, &g_sw.vao);

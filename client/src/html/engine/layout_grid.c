@@ -1153,8 +1153,18 @@ void layout_grid_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w)
 {
     const CssComputed *s = b->style;
     *min_w = *max_w = 0;
+    /* repeat(auto-fill | auto-fit): a definite max-width sets the repetitions (CSS Grid 7.2.3.2), a
+       percentage one against the flex row measuring this item (Krunker Strike's item selection grid:
+       repeat(auto-fit, minmax(calc(94 * var(--base-scale)), 1fr)), max-width 100% in its holder, is
+       four columns in Chrome, not one) */
+    float avail = -1;
+    const CssLength *mxw = &s->max_width;
+    if (mxw->kind == CSS_LEN_VALUE && (mxw->pct == 0 && !mxw->pct_term ? 1 : t->intrinsic_cb_set)) {
+        const float v = layout_resolve_len(mxw, t->intrinsic_cb_set ? t->intrinsic_cb_w : 0, -1);
+        if (v >= 0) avail = kn_maxf(0, layout_box_sizing_w(b, v) - box_border_padding_w(b));
+    }
     Grid g;
-    if (!grid_place(b, &g, -1, -1)) { grid_free(&g); return; }
+    if (!grid_place(b, &g, avail, -1)) { grid_free(&g); return; }
     if (!g.n) g.ntracks[AX_COL] = g.off[AX_COL] + g.lines[AX_COL].n_explicit;
     Axis cols;
     uint8_t *need = calloc((size_t)(g.n ? g.n : 1), 1);

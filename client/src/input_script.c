@@ -118,6 +118,8 @@
 //                                viewer); the clock stops until it is shown and ready (the game page: its
 //                                menu set up), then the script goes on there (game-only commands are skipped
 //                                on a page)
+//   100 spawn                    the clock stops until our player is active and the menu is closed (the loading after a
+//                                Play click), then the script goes on: a later event's time counts from the spawn
 //   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
 //                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
 //                                not a scroll container)
@@ -224,6 +226,7 @@ static struct {
     int play_pending; // boot mode's `play`: enter the game once the map is ready (retried per frame)
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
     int page_wait;    // `page`: 1 until that page is shown and ready, -1 one more frame (its UI ticks), 0 none
+    int spawn_wait;   // `spawn`: 1 until our player is active and the menu closed (spawn_waiting)
     AppMode page_mode;
     char shot[160];   // pending `shot` path (written at frame end)
     char frames[160]; // `frames` prefix: one PNG per frame while frames_left > 0
@@ -1092,6 +1095,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
             g_script.page_wait = 1; // the clock stops until the page is up (page_waiting)
             g_script.page_mode = (AppMode) m;
         }
+    } else if (!strcmp(e->cmd, "spawn")) {
+        fprintf(stderr, "[input_script] spawn t=%.0f\n", g_script.time);
+        g_script.spawn_wait = 1; // the clock stops until we spawn and the menu is closed (spawn_waiting)
     } else if (!strcmp(e->cmd, "con")) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "nethit")) {
@@ -1159,9 +1165,22 @@ static void script_run(Client *client, const ScriptEvent *e) {
     }
 }
 
+// `spawn`: the clock stands still until our player is active and the menu is closed (the loading after
+// a Play click can take seconds, so a fixed time would race it); then the script goes on.
+static int spawn_waiting(Client *client) {
+    if (!g_script.spawn_wait) return 0;
+    if (!client->me || !client->me->active || (html_ui_available() && html_ui_is_menu_open())) return 1;
+    g_script.spawn_wait = 0;
+    return 0;
+}
+
+// the clock stands still while `page` or `spawn` holds the script
+static int clock_held(void) { return g_script.page_wait || g_script.spawn_wait; }
+
 // `page`: 1 while the page it asked for is not shown and ready yet (the game page: its menu set up),
 // then one more frame so the page's UI ticked once; no events run and the clock stands still.
 static int page_waiting(Client *client) {
+    if (spawn_waiting(client)) return 1;
     if (!g_script.page_wait) return 0;
     if (g_script.page_wait < 0) {
         g_script.page_wait = 0;
@@ -1235,7 +1254,7 @@ void input_script_tick(Client *client) {
         script_run(client, e);
         g_script.next++;
         ran = 1;
-        if (g_script.page_wait) break; // `page`: the rest waits for that page
+        if (clock_held()) break; // `page` / `spawn`: the rest waits for that page or our spawn
     }
 
     if (g_script.play_pending) {
@@ -1359,7 +1378,7 @@ void input_script_frame_end(Client *client, const float delta, const float frame
 
     // The frame time, not the world's: the end-of-round slow motion scales the world delta
     // down to 0 for the whole results screen, which would hold every later event back.
-    if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
+    if (!clock_held()) g_script.time += frame_delta * 1000.0f;
 }
 
 void input_script_idle_frame(Client *client, const float frame_delta) {
@@ -1368,7 +1387,7 @@ void input_script_idle_frame(Client *client, const float frame_delta) {
     input_script_tick(client);
     if (g_script.playing) {
         write_pending_shot(client);
-        if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
+        if (!clock_held()) g_script.time += frame_delta * 1000.0f;
     }
 }
 
@@ -1400,14 +1419,14 @@ void input_script_page_tick(Client *client) {
         for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
         if (!skip) script_run(client, e);
         ran = 1;
-        if (g_script.page_wait) break; // `page`: the rest waits for that page
+        if (clock_held()) break; // `page` / `spawn`: the rest waits for that page or our spawn
     }
 }
 
 void input_script_page_frame_end(Client *client, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
     write_pending_shot(client);
-    if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
+    if (!clock_held()) g_script.time += frame_delta * 1000.0f;
 }
 
 void input_script_frame_presented(Client *client) {

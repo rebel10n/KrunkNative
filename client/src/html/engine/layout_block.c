@@ -667,6 +667,13 @@ static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *
     *out_w = bw; *out_h = bh;
 }
 
+float layout_replaced_width(LayoutTree *t, Box *b, float cb_h)
+{
+    float w, h;
+    replaced_size(t, b, -1.0f, cb_h, &w, &h);
+    return w;
+}
+
 /* ------------------------------------------------------------------------- */
 /* width of block-level boxes                                                 */
 /* ------------------------------------------------------------------------- */
@@ -1510,6 +1517,23 @@ static Box *boundary_at(Box *b)
     return (b->flags & BOXF_LAYOUT_BOUNDARY) || !b->parent ? b : layout_find_boundary(b);
 }
 
+static void push_boundary(BoxVec *out, Box *b)
+{
+    for (size_t i = 0; i < out->len; i++) if (out->data[i] == b) return;
+    KN_VEC_PUSH(out, b);
+}
+
+/* every absolute / fixed box under b whose containing block lies outside `enclosing`: its
+ * container's boundary is laid out again too (the box is placed by its container's abs list) */
+static void oof_container_boundaries(Box *b, Box *enclosing, BoxVec *out)
+{
+    for (Box *c = b->first_child; c; c = c->next) {
+        if ((c->flags & BOXF_OUT_OF_FLOW) && c->container && c->container != enclosing && !box_has_ancestor(c->container, enclosing))
+            push_boundary(out, boundary_at(c->container));
+        oof_container_boundaries(c, enclosing, out);
+    }
+}
+
 static void collect_boundaries(Box *b, Box *enclosing, BoxVec *out)
 {
     if (!(b->dirty & (BOX_DIRTY_SELF | BOX_DIRTY_CHILD))) return;
@@ -1522,8 +1546,12 @@ static void collect_boundaries(Box *b, Box *enclosing, BoxVec *out)
         && b->container != enclosing && !box_has_ancestor(b->container, enclosing))
         enclosing = boundary_at(b->container);
     if (b->dirty & BOX_DIRTY_SELF) {
-        for (size_t i = 0; i < out->len; i++) if (out->data[i] == enclosing) return;
-        KN_VEC_PUSH(out, enclosing);
+        push_boundary(out, enclosing);
+        /* the same for the absolute / fixed boxes inside a subtree laid out again as a whole (new
+         * markup inserted, the subtree rebuilt): Krunker Strike's dropdown inserted into the report
+         * popup holds a position: fixed options overlay (FRVR's @media (max-height: 400px)) whose
+         * containing block is above the boundary; without its container's boundary it got no box */
+        oof_container_boundaries(b, enclosing, out);
         return;
     }
     Box *enc = (b->flags & BOXF_LAYOUT_BOUNDARY) ? b : enclosing;

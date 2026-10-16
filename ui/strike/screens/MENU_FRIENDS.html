@@ -1,0 +1,41 @@
+<!-- FRVR Krunker Strike 1.37.2 menu friends (S5: ede, the four-bullet "Friends" strip; sde, the Friends List panel with its rF / nde sections, x5 rows and _5 Invite buttons) on MAIN_MENU and TAP_TO_PLAY, TRANSCRIBED from the Mithril views of assets/index-Cz2uYXJQ.js (TAP_TO_PLAY's capture has the empty strip; the rest is not pixel-verified). client/src/ui/strike_social.c fills it from kn_brain's friends event bus. -->
+<div class="menu-friends{{hide}}" onclick="strikeAction('friends-open')"><div class="menu-friends__arrow"><img src="./img/left-arrow.svg"></div><div class="menu-friends__friend-list"><div class="menu-friends__title">Friends</div>{{!bullets}}</div></div>
+<!-- part bullet -->
+<div class="menu-friends__friend-bullet"><img src="{{pfp}}" loading="lazy" class="friends-pfp-img" style="image-rendering: pixelated;">{{!dot}}</div>
+<!-- part bullet-empty -->
+<div class="menu-friends__friend-bullet"><img src="./img/plus-sign.svg" class="add-friend-img"></div>
+<!-- part online-dot -->
+<div class="menu-friends__online-dot"></div>
+<!-- part list -->
+<div class="menu-friends-list"><div class="menu-friends-list__dark-blur{{hideBlur}}" onclick="strikeAction('friends-close')"></div><div class="menu-friends-list__holder{{hideHolder}}"><div class="menu-friends-list__arrow" onclick="strikeAction('friends-close')"><img src="./img/right-arrow.svg"></div><div class="menu-friends-list__friend-list"><div class="menu-friends-list__title"><span>{{title}}</span></div>{{!body}}<div class="{{btnHolder}}">{{!promo}}</div></div></div></div>
+<!-- part list-body -->
+<div class="menu-friends-list__list">{{!sections}}</div>
+<!-- part no-friends -->
+<div class="menu-friends-list__no-friends-text"><span>Invite your friends to play and earn rewards. Get ready for intense battles and non-stop action.</span><span>
+</span><span>All you need is to send them an invite and let the fun begin!</span></div>
+<!-- part promo -->
+<div class="menu-friends-list__promo-img"><img src="./img/gather-crew-promo.png"></div>
+<!-- part section -->
+<div class="menu-friends-list__section"><div class="menu-friends-list__section-title"><span>{{title}}</span></div>{{!rows}}</div>
+<!-- part row -->
+<div class="menu-friends-list__section-bullet"><div class="{{status}}"></div><div class="menu-friends-list__section-pfp"><img src="{{pfp}}" loading="lazy" style="image-rendering: pixelated;"></div><div class="menu-friends-list__section-name"><span>{{name}}</span></div>{{!invite}}</div>
+<!-- part game -->
+<div class="menu-friends-list__section-bullet menu-friends-list__section-bullet--large">{{!members}}<div class="menu-friends-list__section-extra menu-friends-list__section-extra--bot"><div class="menu-friends-list__section-game-mode"><span>{{mode}}</span></div><div class="menu-friends-list__section-player-count"><span>{{count}}</span><img src="./img/player-count-symbol.svg"></div>{{!join}}</div></div>
+<!-- part member -->
+<div class="menu-friends-list__section-extra"><div class="{{status}}"></div><div class="menu-friends-list__section-pfp"><img src="{{pfp}}" loading="lazy" style="image-rendering: pixelated;"></div><div class="menu-friends-list__section-name"><span>{{name}}</span></div>{{!invite}}</div>
+<!-- part join -->
+<div trackingid="join_friends_menu_friends" class="frvr-button frvr-button--size-xxs frvr-button--width-50" onclick="strikeAction('friends-join:{{id}}')"><span class="frvr-button-text">Join</span></div>
+<!-- part invite -->
+<div trackingid="invite_friends_menu_friends" class="frvr-button menu-friends-list__section-invite frvr-button--size-xxs frvr-button--width-50 frvr-button--blue" onclick="strikeAction('friends-invite:{{id}}')"><span class="frvr-button-text">Invite</span></div>
+<!-- part invited -->
+<div trackingid="invite_friends_menu_friends" disabled="" class="frvr-button menu-friends-list__section-invite frvr-button--size-xxs frvr-button--width-50 frvr-button--blue is-disabled"><span class="frvr-button-text">Invited</span></div>
+<!-- part match-row -->
+<div class="frvr-create-match-invite-friends__invite-bullet"><div class="frvr-create-match-invite-friends__friend-bullet"><div class="{{state}}"></div><img src="{{pfp}}" class="frvr-create-match-invite-friends__friend-pic" style="image-rendering: pixelated;"><div class="frvr-create-match-invite-friends__friend-text">{{name}}</div></div>{{!button}}</div>
+<!-- part match-invite -->
+<div id="inviteFriendButton" class="frvr-button frvr-button--size-xxs frvr-button--width-50" onclick="strikeAction('match-invite:{{id}}')"><span class="frvr-button-text">Invite</span></div>
+<!-- part match-invite-done -->
+<div id="inviteFriendButton" disabled="" class="frvr-button frvr-button--size-xxs frvr-button--width-50 is-disabled"><span class="frvr-button-text">{{label}}</span></div>
+<!-- part match-empty -->
+<div class="frvr-create-match-invite-friends__empty">No active friends were found</div>
+<!-- part private-match -->
+<div id="createMatchBtn" trackingid="create_match_main_menu" class="frvr-button frvr-button--orange frvr-button--size-xs frvr-button--width-120" onclick="strikeAction('create-match')"><span class="frvr-button-text">Private Match</span></div>

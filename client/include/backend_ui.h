@@ -175,6 +175,13 @@ int  servers_ui_connect_game(const char *text, char *err, size_t n);
 // localhost or a dotted name and port 1..65535 (default 21015). 1 = valid (host, port written); 0 = err says why.
 int  servers_ui_parse_address(const char *text, char *host, size_t host_n, int *port, char *err, size_t err_n);
 int  servers_ui_join_game(const char *game_id); // v10 switchServer(id) (a friend's game): seek it; 1 = joining, 0 = no matchmaker
+// Krunker Strike's invites (strike_social.c; FRVR y5(gameServer.host, port)): what a friend joins to land in
+// this client's game (servers_ui_join_link takes it): the private lobby's code, else the game id. 0 = in none.
+int  servers_ui_invite_game(char *out, size_t n);
+int  servers_ui_is_current_game(const char *game_id); // 1 = this client is in that lobby (either id form)
+// Krunker Strike's Private Match "Join Match" (strike_social.c): a new private lobby through the director
+// (allocate/private {}). 0 = no director here.
+int  servers_ui_private_match(void);
 int  servers_ui_join_password(const char *password); // v10 submitGameCode: the same game again with the server password
 void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped, short (CH2:kz862)
 int  servers_ui_account_required(void);     // 1 = the last seek answered AccountRequired to a guest (error screen: Log in)

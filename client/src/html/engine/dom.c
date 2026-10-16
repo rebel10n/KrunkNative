@@ -1509,6 +1509,21 @@ void dom_append_text(Dom *dom, HtmlElem parent, const char *text, size_t len)
     mark_node(dom, n, DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT);
 }
 
+/* The element's outerHTML (lexbor's HTML serializer), malloc'd; e == 0: the whole document. Debug
+ * tooling only (ui_scenario.c KRUNKNATIVE_SCENARIO_HTML). */
+char *dom_outer_html(Dom *dom, HtmlElem e)
+{
+    lxb_dom_node_t *n = e ? elem_node(dom, e) : lxb_dom_interface_node(dom->doc);
+    lexbor_str_t str = {0};
+    char *out;
+    if (n == NULL || lxb_html_serialize_tree_str(n, &str) != LXB_STATUS_OK) {
+        return NULL;
+    }
+    out = dup_slice((const char *) str.data, str.length);
+    lexbor_str_destroy(&str, lxb_dom_interface_document(dom->doc)->text, false);
+    return out;
+}
+
 char *dom_get_text(Dom *dom, HtmlElem e)
 {
     lxb_dom_node_t *n = elem_node(dom, e);
