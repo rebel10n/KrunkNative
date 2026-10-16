@@ -40,6 +40,7 @@ typedef struct {
     // Host Game card (windows[7] genHost): "by", year and version labels, "" = none
     const char *host_by, *host_year, *host_version;
     const char *path;       // the JSON file, relative to the assets directory ("maps/kanji.json")
+    const char *thumb;      // the card's picture under ui/ ("img/maps/v311/map_10.png"), NULL none
 } MapCatalogEntry;
 
 #define MAP_CATALOG_OFFICIAL_COUNT 32
@@ -81,8 +82,9 @@ int map_catalog_resolve(const char *query, int *candidates, size_t max, size_t *
 // publicRoutes.ts map_id: fnv1a(name.toLowerCase()) of the display name (the 311_ / 152_ maps'
 // differ from v3.1.1's, where old_burg shared Burg's id)
 uint32_t map_catalog_map_id(const MapCatalogEntry *entry);
-// "img/maps/map_<index>.png" for official maps (public/img/maps), NULL for community maps
-// (their map_image is "": the card keeps img/noimg.png)
+// The card's picture under ui/: "img/maps/map_<index>.png" for the official maps (public/img/maps),
+// the entry's own `thumb` for the v3.1.1 and community maps that have one, NULL otherwise (the card
+// keeps img/noimg.png). ui/README.md "Map thumbnails" lists each one's source.
 const char *map_catalog_thumb(const MapCatalogEntry *entry, char *out, size_t size);
 
 // v3.1.1 server/game.ts sanitizeCustomMapJson, in place: an object without "s" but with

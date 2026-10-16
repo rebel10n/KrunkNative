@@ -8,8 +8,33 @@
 #include <shared.h>
 #include <map_catalog.h>
 #include <prefabs.h>
+#include <ranked.h>
 #include <stdio.h>
 #include <string.h>
+
+// A thumbnail file that loads: a PNG (signature and IHDR at their places, the way stb_image reads it).
+// Paths are relative to the repository root (the test's working directory), the ui/ tree.
+static int png_loads(const char *path) {
+    static const unsigned char sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    unsigned char head[16];
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    const size_t n = fread(head, 1, sizeof(head), f);
+    fclose(f);
+    return n == sizeof(head) && !memcmp(head, sig, sizeof(sig)) && !memcmp(head + 12, "IHDR", 4);
+}
+
+// Community maps with no picture (ui/README.md "Map thumbnails"): their Krunker map id has no
+// user-assets thumb, or none was found (152_* maps). Any other map must have one.
+static int thumb_missing_on_purpose(const MapCatalogEntry *e) {
+    static const char *const keys[] = {"ESP_Parkour", "FortniteTiltedT", "Test", "bot_ftue_v2", "eterno_jump"};
+    if (e->source == MAP_SOURCE_OFFICIAL) return 0;
+    if (!strncmp(e->key, "152_", 4)) return 1;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        if (!strcmp(e->key, keys[i])) return 1;
+    }
+    return 0;
+}
 
 static int g_failures;
 static int g_checks;
@@ -293,9 +318,29 @@ int main(const int argc, char **argv) {
     CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[32] == map_catalog_index_of_key("311_subzero"), "new");
     CHECK(map_catalog_games_tab(3, tab, 128) == 0, "favorites");
     CHECK(map_catalog_games_tab(4, tab, 128) == count, "mine");
-    char thumb[64];
-    CHECK(map_catalog_thumb(map_catalog_at(31), thumb, sizeof(thumb)) && !strcmp(thumb, "img/maps/map_31.png") &&
-          !map_catalog_thumb(map_catalog_at((size_t) map_catalog_index_of_key("311_kanji")), thumb, sizeof(thumb)), "thumbnails");
+    // every map the menu lists has a thumbnail file that loads (the Games / Host / Ranked / challenge
+    // cards and the server list show ui/<thumb>, img/noimg.png otherwise): the official maps, the
+    // v3.1.1 maps and the community maps with a picture; the others are listed in thumb_missing_on_purpose
+    char thumb[64], path[160];
+    CHECK(map_catalog_thumb(map_catalog_at(31), thumb, sizeof(thumb)) && !strcmp(thumb, "img/maps/map_31.png"), "official thumbnail name");
+    CHECK(map_catalog_thumb(map_catalog_at((size_t) map_catalog_index_of_key("311_kanji")), thumb, sizeof(thumb)) &&
+          !strcmp(thumb, "img/maps/v311/map_10.png"), "v3.1.1 thumbnail name");
+    for (size_t i = 0; i < count; i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        const char *t = map_catalog_thumb(e, thumb, sizeof(thumb));
+        if (!t) {
+            CHECK(thumb_missing_on_purpose(e), "%s: no thumbnail, and not listed as missing", e->key);
+            continue;
+        }
+        snprintf(path, sizeof(path), "ui/%s", t);
+        CHECK(png_loads(path), "%s: thumbnail %s does not load", e->key, path);
+    }
+    // the ranked season pool's maps (the Ranked carousel and match history show ui/img/maps/map_<id>.png)
+    for (int i = 0; i <= RANKED_POOL_COUNT; i++) {
+        const int id = i < RANKED_POOL_COUNT ? g_ranked_map_pool[i] : RANKED_ALWAYS_MAP;
+        snprintf(path, sizeof(path), "ui/img/maps/map_%d.png", id);
+        CHECK(png_loads(path), "ranked map %d: %s does not load", id, path);
+    }
 
     // map_catalog_slot: find-or-append
     const cJSON **list = NULL;

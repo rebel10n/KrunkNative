@@ -20,18 +20,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+// thumb: the card's picture (ui/img/maps/...), NULL none; an official map's is map_<index>.png
 #define OFFICIAL(key_, name_, idx, rot) \
-    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/" key_ ".json"}
-#define CUSTOM(key_, name_, creator_, mod) \
-    {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", "", "maps/custom/" key_ ".json"}
+    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/" key_ ".json", NULL}
+#define CUSTOM(key_, name_, creator_, mod, thumb_) \
+    {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", "", "maps/custom/" key_ ".json", thumb_}
 // a v3.1.1 official map, kept playable as a community map (v3.1.1 Host Game card labels kept:
 // "by", year, version). KrunkNative only: the display name gains " (3.1.1)" (the file keeps
 // its own "name"; map_catalog_json sets the display name on the loaded JSON)
-#define V311(key_, name_, by, year, version) \
-    {"311_" key_, name_ " (3.1.1)", -1, MAP_SOURCE_CUSTOM, 0, 0, "Krunker", "", by, year, version, "maps/311_" key_ ".json"}
+// its thumbnail is v3.1.1's public/img/maps/map_<idx>.png (idx: v3.1.1's MAPS index, main/maps.js)
+#define V311(key_, name_, by, year, version, idx) \
+    {"311_" key_, name_ " (3.1.1)", -1, MAP_SOURCE_CUSTOM, 0, 0, "Krunker", "", by, year, version, "maps/311_" key_ ".json", \
+     "img/maps/v311/map_" #idx ".png"}
 // a v3.1.1 custom_maps/old_<key>.json map (the v1.5.2 era official maps): "152_<key>", " (1.5.2)"
 #define V152(key_, name_) \
-    {"152_" key_, name_ " (1.5.2)", -1, MAP_SOURCE_CUSTOM, 0, 0, "Community", "", "", "", "", "maps/152_" key_ ".json"}
+    {"152_" key_, name_ " (1.5.2)", -1, MAP_SOURCE_CUSTOM, 0, 0, "Community", "", "", "", "", "maps/152_" key_ ".json", NULL}
 
 static const MapCatalogEntry k_catalog[] = {
     // v7.1.4 data/maps.js, in mapIndex order; rotation = map.js rotationMaps
@@ -69,37 +72,37 @@ static const MapCatalogEntry k_catalog[] = {
     OFFICIAL("shipyard", "Shipyard", 30, 0),
     OFFICIAL("sanctum", "Soul Sanctum", 31, 0),
     // assets/maps/custom/ (ASCII filename order); creator = body.creator, mod = body.modURL
-    CUSTOM("Bhop_VIP", "Bhop_VIP", "eskrr", ""),
-    CUSTOM("ClashRoyale", "ClashRoyale", "Community", ""),
-    CUSTOM("ESP_Parkour", "ESP_Parkour", "ImCriistian", ""),
-    CUSTOM("FortniteTiltedT", "FortniteTiltedT", "Community", ""),
-    CUSTOM("Krunk_Plaza", "Krunk_Plaza", "Community", ""),
-    CUSTOM("Slide_Neon_Stage", "Slide_Neon_Stage", "R75", ""),
-    CUSTOM("SniperRoyale2", "SniperRoyale2", "Community", "https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0"),
-    CUSTOM("Test", "Test", "Community", ""),
-    CUSTOM("Verb_Arena", "Verb_Arena", "Community", "https://www.dropbox.com/s/ejrn99ayvddiq45/Verb%20Mod%20Updated%207April2021.zip?dl=0"),
+    CUSTOM("Bhop_VIP", "Bhop_VIP", "eskrr", "", "img/maps/community/Bhop_VIP.png"),
+    CUSTOM("ClashRoyale", "ClashRoyale", "Community", "", "img/maps/community/ClashRoyale.png"),
+    CUSTOM("ESP_Parkour", "ESP_Parkour", "ImCriistian", "", NULL),
+    CUSTOM("FortniteTiltedT", "FortniteTiltedT", "Community", "", NULL),
+    CUSTOM("Krunk_Plaza", "Krunk_Plaza", "Community", "", "img/maps/community/Krunk_Plaza.png"),
+    CUSTOM("Slide_Neon_Stage", "Slide_Neon_Stage", "R75", "", "img/maps/community/Slide_Neon_Stage.png"),
+    CUSTOM("SniperRoyale2", "SniperRoyale2", "Community", "https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0", "img/maps/community/SniperRoyale2.png"),
+    CUSTOM("Test", "Test", "Community", "", NULL),
+    CUSTOM("Verb_Arena", "Verb_Arena", "Community", "https://www.dropbox.com/s/ejrn99ayvddiq45/Verb%20Mod%20Updated%207April2021.zip?dl=0", "img/maps/community/Verb_Arena.png"),
     // v10's FTUE (first-time user experience) bot tutorial map (game.deob.js config.maps bot_ftue_v2,
     // "Mini Industry"); fetched from krunker.io. Keyed in ASCII order: "Verb_Arena" < "bot_ftue_v2" < "eterno_jump".
-    CUSTOM("bot_ftue_v2", "Mini Industry", "Community", ""),
-    CUSTOM("eterno_jump", "eterno_jump", "Community", ""),
-    CUSTOM("slide_moonlight", "slide_moonlight", "Community", ""),
-    CUSTOM("zombie_high", "Zombie_High", "IamFiercer", "https://user-assets.krunker.io/md23677/mod.zip"),
+    CUSTOM("bot_ftue_v2", "Mini Industry", "Community", "", NULL),
+    CUSTOM("eterno_jump", "eterno_jump", "Community", "", NULL),
+    CUSTOM("slide_moonlight", "slide_moonlight", "Community", "", "img/maps/community/slide_moonlight.png"),
+    CUSTOM("zombie_high", "Zombie_High", "IamFiercer", "https://user-assets.krunker.io/md23677/mod.zip", "img/maps/community/zombie_high.png"),
     // the v3.1.1 official maps (v3.1.1 MAPS order) as "311_<key>"; Host Game card labels as v3.1.1 showed them
-    V311("burg", "Burg", "", "2018", "v3.2"),
-    V311("littletown", "Littletown", "", "2018", "v0.9"),
-    V311("sandstorm", "Sandstorm", "CrispyCrust", "2019", "v2.3"),
-    V311("subzero", "Subzero", "CrispyCrust", "2019", "v0.9"),
-    V311("undergrowth", "Undergrowth", "CrispyCrust", "2019", "v1.2"),
-    V311("shipyard", "Shipyard", "Chwoubaka", "2019", "v1.0"),
-    V311("freight", "Freight", "", "2019", "v2.1"),
-    V311("lostworld", "Lostworld", "DasIstWalter", "2020", "v1.2"),
-    V311("citadel", "Citadel", "", "2020", "v2.4"),
-    V311("oasis", "Oasis", "DasIstWalter", "2020", "v0.2"),
-    V311("kanji", "Kanji", "Arbiter", "2020", "v5.2"),
-    V311("newtown", "Newtown", "Arbiter", "2020", "v0.1"),
-    V311("industry", "Industry", "CrispyCrust", "2020", "v1.0"),
-    V311("soul_sanctum", "Soul Sanctum", "", "2020", ""),
-    V311("evacuation", "Evacuation", "Creationfier", "2020", "vTest"),
+    V311("burg", "Burg", "", "2018", "v3.2", 0),
+    V311("littletown", "Littletown", "", "2018", "v0.9", 1),
+    V311("sandstorm", "Sandstorm", "CrispyCrust", "2019", "v2.3", 2),
+    V311("subzero", "Subzero", "CrispyCrust", "2019", "v0.9", 3),
+    V311("undergrowth", "Undergrowth", "CrispyCrust", "2019", "v1.2", 4),
+    V311("shipyard", "Shipyard", "Chwoubaka", "2019", "v1.0", 5),
+    V311("freight", "Freight", "", "2019", "v2.1", 6),
+    V311("lostworld", "Lostworld", "DasIstWalter", "2020", "v1.2", 7),
+    V311("citadel", "Citadel", "", "2020", "v2.4", 8),
+    V311("oasis", "Oasis", "DasIstWalter", "2020", "v0.2", 9),
+    V311("kanji", "Kanji", "Arbiter", "2020", "v5.2", 10),
+    V311("newtown", "Newtown", "Arbiter", "2020", "v0.1", 11),
+    V311("industry", "Industry", "CrispyCrust", "2020", "v1.0", 12),
+    V311("soul_sanctum", "Soul Sanctum", "", "2020", "", 13),
+    V311("evacuation", "Evacuation", "Creationfier", "2020", "vTest", 14),
     // v3.1.1's custom_maps/old_*.json (its ASCII filename order) as "152_<key>"
     V152("burg", "Burg"),
     V152("freight", "Freight"),
@@ -383,7 +386,12 @@ uint32_t map_catalog_map_id(const MapCatalogEntry *entry) {
 }
 
 const char *map_catalog_thumb(const MapCatalogEntry *entry, char *out, const size_t size) {
-    if (!entry || entry->source != MAP_SOURCE_OFFICIAL || !out || !size) return NULL;
+    if (!entry || !out || !size) return NULL;
+    if (entry->thumb) {
+        snprintf(out, size, "%s", entry->thumb);
+        return out;
+    }
+    if (entry->source != MAP_SOURCE_OFFICIAL) return NULL;
     snprintf(out, size, "img/maps/map_%d.png", entry->index);
     return out;
 }

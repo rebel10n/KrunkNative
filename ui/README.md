@@ -156,6 +156,106 @@ the desktop client, the Settings rows of the client mods (bhop, dev console bind
 Audio Output row, the Lag Compensation slider, the map terminal and interact bar, and the
 "Play Offline" tab on the connection error screen.
 
+## Map thumbnails (`img/maps/`)
+
+Every map card the menu draws (Games window, Host Game, Ranked carousel and match history, challenges,
+the server list and the community list) takes its picture from the catalogue entry's `thumb`
+(`shared/src/map_catalog.c`, `map_catalog_thumb`) or, for the official maps, `img/maps/map_<mapIndex>.png`.
+A map with no file shows `img/noimg.png`. `shared/tests/map_catalog_test.c` checks that every file below
+loads (a PNG with its IHDR) and that the ranked pool's pictures exist; a catalogue map with no picture must be
+listed as missing in `thumb_missing_on_purpose()` (the "missing" rows). Community pictures are pinned in
+`tools/ui-import/live_assets.lock` (root `ui`) and fetched with `make assets-import-live` (through
+`KN_FETCH_PROXY` when the asset hosts need it).
+
+Source column: `v7` = Krunker v7.1.4 `public/img/maps/` (byte-identical copy), `v3.1.1` = Krunker v3.1.1
+`public/img/maps/map_<n>.png`, where `n` is v3.1.1's MAPS index (`main/maps.js`: the same order as the `311_`
+entries), `user-assets` = `https://user-assets.krunker.io/m<map id>/thumb.png`, the picture Krunker's own menu
+shows for a community map; its map id comes from `https://gapi.svc.krunker.io/maps/by-name/<name>` (fetched
+2026-10-15 through the proxy). The creators gapi reports: Bhop_VIP eskrr, ClashRoyale Trivm2002, Krunk_Plaza
+Sidney, Slide_Neon_Stage R75, SniperRoyale2 JavieBhop, Verb_Arena Iniquity_Games, zombie_high IamFiercer,
+slide_moonlight Corrade, FortniteTiltedT DjDankMeister, Test v e c t o r (2018).
+
+| key | name | file under `ui/` | source | status |
+|---|---|---|---|---|
+| `burg_new` (v7 0) | Burg | `img/maps/map_0.png` | v7 `public/img/maps/map_0.png` | present |
+| `littletown` (v7 1) | Littletown | `img/maps/map_1.png` | v7 `public/img/maps/map_1.png` | present |
+| `sandstorm_v3` (v7 2) | Sandstorm | `img/maps/map_2.png` | v7 `public/img/maps/map_2.png` | present |
+| `subzero_new` (v7 3) | Subzero | `img/maps/map_3.png` | v7 `public/img/maps/map_3.png` | present |
+| `undergrowth` (v7 4) | Undergrowth | `img/maps/map_4.png` | v7 `public/img/maps/map_4.png` | present |
+| `shipment` (v7 5) | Shipment | `img/maps/map_5.png` | v7 `public/img/maps/map_5.png` | present |
+| `freight` (v7 6) | Freight | `img/maps/map_6.png` | v7 `public/img/maps/map_6.png` | present |
+| `lostworld_s6` (v7 7) | Lostworld | `img/maps/map_7.png` | v7 `public/img/maps/map_7.png` | present |
+| `citadel` (v7 8) | Citadel | `img/maps/map_8.png` | v7 `public/img/maps/map_8.png` | present |
+| `oasis_v3` (v7 9) | Oasis | `img/maps/map_9.png` | v7 `public/img/maps/map_9.png` | present |
+| `kanji` (v7 10) | Kanji | `img/maps/map_10.png` | v7 `public/img/maps/map_10.png` | present |
+| `industry` (v7 11) | Industry | `img/maps/map_11.png` | v7 `public/img/maps/map_11.png` | present |
+| `lumber` (v7 12) | Lumber | `img/maps/map_12.png` | v7 `public/img/maps/map_12.png` | present |
+| `evacuation` (v7 13) | Evacuation | `img/maps/map_13.png` | v7 `public/img/maps/map_13.png` | present |
+| `site` (v7 14) | Site | `img/maps/map_14.png` | v7 `public/img/maps/map_14.png` | present |
+| `skytemple_v2` (v7 15) | SkyTemple | `img/maps/map_15.png` | v7 `public/img/maps/map_15.png` | present |
+| `lagoon` (v7 16) | Lagoon | `img/maps/map_16.png` | v7 `public/img/maps/map_16.png` | present |
+| `bureau` (v7 17) | Bureau | `img/maps/map_17.png` | v7 `public/img/maps/map_17.png` | present |
+| `shipwrecked` (v7 18) | Tortuga | `img/maps/map_18.png` | v7 `public/img/maps/map_18.png` | present |
+| `tropicano` (v7 19) | Tropicano | `img/maps/map_19.png` | v7 `public/img/maps/map_19.png` | present |
+| `krunk_plaza_v2` (v7 20) | Krunk_Plaza | `img/maps/map_20.png` | v7 `public/img/maps/map_20.png` | present |
+| `arena` (v7 21) | Arena | `img/maps/map_21.png` | v7 `public/img/maps/map_21.png` | present |
+| `habitat_v2` (v7 22) | Habitat | `img/maps/map_22.png` | v7 `public/img/maps/map_22.png` | present |
+| `atomic` (v7 23) | Atomic | `img/maps/map_23.png` | v7 `public/img/maps/map_23.png` | present |
+| `burg_2018` (v7 24) | Old_Burg | `img/maps/map_24.png` | v7 `public/img/maps/map_24.png` | present |
+| `throwback_2018` (v7 25) | Throwback | `img/maps/map_25.png` | v7 `public/img/maps/map_25.png` | present |
+| `stockade_2018` (v7 26) | Stockade | `img/maps/map_26.png` | v7 `public/img/maps/map_26.png` | present |
+| `facility` (v7 27) | Facility | `img/maps/map_27.png` | v7 `public/img/maps/map_27.png` | present |
+| `clockwork` (v7 28) | Clockwork | `img/maps/map_28.png` | v7 `public/img/maps/map_28.png` | present |
+| `laboratory` (v7 29) | Laboratory | `img/maps/map_29.png` | v7 `public/img/maps/map_29.png` | present |
+| `shipyard` (v7 30) | Shipyard | `img/maps/map_30.png` | v7 `public/img/maps/map_30.png` | present |
+| `sanctum` (v7 31) | Soul Sanctum | `img/maps/map_31.png` | v7 `public/img/maps/map_31.png` | present |
+| `311_burg` | Burg (3.1.1) | `img/maps/v311/map_0.png` | v3.1.1 `public/img/maps/map_0.png` | present |
+| `311_littletown` | Littletown (3.1.1) | `img/maps/v311/map_1.png` | v3.1.1 `public/img/maps/map_1.png` | present |
+| `311_sandstorm` | Sandstorm (3.1.1) | `img/maps/v311/map_2.png` | v3.1.1 `public/img/maps/map_2.png` | present |
+| `311_subzero` | Subzero (3.1.1) | `img/maps/v311/map_3.png` | v3.1.1 `public/img/maps/map_3.png` | present |
+| `311_undergrowth` | Undergrowth (3.1.1) | `img/maps/v311/map_4.png` | v3.1.1 `public/img/maps/map_4.png` | present |
+| `311_shipyard` | Shipyard (3.1.1) | `img/maps/v311/map_5.png` | v3.1.1 `public/img/maps/map_5.png` | present |
+| `311_freight` | Freight (3.1.1) | `img/maps/v311/map_6.png` | v3.1.1 `public/img/maps/map_6.png` | present |
+| `311_lostworld` | Lostworld (3.1.1) | `img/maps/v311/map_7.png` | v3.1.1 `public/img/maps/map_7.png` | present |
+| `311_citadel` | Citadel (3.1.1) | `img/maps/v311/map_8.png` | v3.1.1 `public/img/maps/map_8.png` | present |
+| `311_oasis` | Oasis (3.1.1) | `img/maps/v311/map_9.png` | v3.1.1 `public/img/maps/map_9.png` | present |
+| `311_kanji` | Kanji (3.1.1) | `img/maps/v311/map_10.png` | v3.1.1 `public/img/maps/map_10.png` | present |
+| `311_newtown` | Newtown (3.1.1) | `img/maps/v311/map_11.png` | v3.1.1 `public/img/maps/map_11.png` | present |
+| `311_industry` | Industry (3.1.1) | `img/maps/v311/map_12.png` | v3.1.1 `public/img/maps/map_12.png` | present |
+| `311_soul_sanctum` | Soul Sanctum (3.1.1) | `img/maps/v311/map_13.png` | v3.1.1 `public/img/maps/map_13.png` | present |
+| `311_evacuation` | Evacuation (3.1.1) | `img/maps/v311/map_14.png` | v3.1.1 `public/img/maps/map_14.png` | present |
+| `152_burg` | Burg (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_freight` | Freight (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_kanji` | Kanji (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_littletown` | Littletown (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_lostworld` | Lostworld (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_sandstorm` | Sandstorm (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_shipyard` | Shipyard (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_subzero` | Subzero (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `152_undergrowth` | Undergrowth (1.5.2) | none | none found: no v1.5.x map picture in the references, gapi has the current map only | missing |
+| `Bhop_VIP` | Bhop_VIP | `img/maps/community/Bhop_VIP.png` | user-assets `m127262/thumb.png` | present |
+| `ClashRoyale` | ClashRoyale | `img/maps/community/ClashRoyale.png` | user-assets `m4774/thumb.png` | present |
+| `ESP_Parkour` | ESP_Parkour | none | no gapi map by this name, no user-assets id | missing |
+| `FortniteTiltedT` | FortniteTiltedT | none | user-assets `m4955/thumb.png` is a 404 | missing |
+| `Krunk_Plaza` | Krunk_Plaza | `img/maps/community/Krunk_Plaza.png` | user-assets `m136558/thumb.png` | present |
+| `Slide_Neon_Stage` | Slide_Neon_Stage | `img/maps/community/Slide_Neon_Stage.png` | user-assets `m144394/thumb.png` | present |
+| `SniperRoyale2` | SniperRoyale2 | `img/maps/community/SniperRoyale2.png` | user-assets `m17737/thumb.png` | present |
+| `Test` | Test | none | user-assets `m51/thumb.png` is a 404 | missing |
+| `Verb_Arena` | Verb_Arena | `img/maps/community/Verb_Arena.png` | user-assets `m104011/thumb.png` | present |
+| `bot_ftue_v2` | Mini Industry | none | no gapi map by this name, no user-assets id | missing |
+| `eterno_jump` | eterno_jump | none | no gapi map by this name, no user-assets id | missing |
+| `slide_moonlight` | slide_moonlight | `img/maps/community/slide_moonlight.png` | user-assets `m17738/thumb.png` | present |
+| `zombie_high` | Zombie_High | `img/maps/community/zombie_high.png` | user-assets `m148853/thumb.png` | present |
+
+Ranked pool (`shared/src/ranked.c`): `map_2`, `map_4`, `map_11`, `map_14`, `map_17` are v7 (present); `map_39`
+(Eterno Simulator) is v7's file, `map_42` (Frontier) is the live asset host's `img/maps/map_42.png` (both present).
+
+Missing after this change: 14 of the 69 catalogue maps (the 9 `152_` maps and 5 community maps). Before, 37
+community maps showed `img/noimg.png`. The `152_` maps are v3.1.1's old_* copies of the v1.5.2 maps; the
+references hold no picture of them and only the current maps of those names. `Krunk_Plaza`'s picture is byte-identical to the v7
+official `Krunk_Plaza` (map 20). `Test` (creator v e c t o r on gapi) and `FortniteTiltedT` have no thumb on the host.
+
+
 ## Model viewer page (`viewer.html`)
 
 Krunker v7.1.4's `public/viewer.html` (the same markup as v3.1.1's), imported by
