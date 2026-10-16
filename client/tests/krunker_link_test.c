@@ -1508,6 +1508,19 @@ int main(void) {
     p = find_in(NET_PACKET_HIT, 0);
     CHECK(p && ((const NetHitPacket *) p->payload)->target_uid == 7 && ((const NetHitPacket *) p->payload)->damage == 25 &&
           ((const NetHitPacket *) p->payload)->crit, "HIT");
+    { // dmgType "Float": the exact 24.6 rides ahead of the HIT (NET_EXT_KN_HIT_DAMAGE)
+        const NetPacket *x = NULL;
+        uint16_t sub = 0, blen = 0;
+        const uint8_t *body = NULL;
+        NetHitDamagePacket exact = {0};
+        for (int i = 0; (x = find_in(NET_PACKET_EXT, i)); i++) {
+            if (net_ext_unpack(x->payload, x->length, &sub, &body, &blen) && sub == NET_EXT_KN_HIT_DAMAGE && blen == sizeof(exact)) {
+                memcpy(&exact, body, sizeof(exact));
+                break;
+            }
+        }
+        CHECK(x && exact.target_uid == 7 && exact.damage_tenths == 246, "HIT exact damage 24.6 (EXT)");
+    }
     const KrunkerValue info[] = {KRUNKER_V_STR("wId"), KRUNKER_V_NUM(3), KRUNKER_V_STR("fs"), KRUNKER_V_BOOL(0)};
     feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(2), KRUNKER_V_NUM(9), KRUNKER_V_NIL, KRUNKER_V_MAP(info, 2)}, 5);
     NetKillPacket kill;

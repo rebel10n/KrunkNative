@@ -549,18 +549,28 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_KILL, &k, sizeof(k));
 }
 
-// "4" DO_DAMAGE [targetSid, damage, crit, kill, isAI, silent] (game.deob.js:221254): the number is
-// Math.ceil(dmg) (settings dmgType 0, "Rounded", the default, :221259). Not carried: silent (no
-// hit sound) and the live build's crit_0 sound (10.0.3; v10.0.2 and our assets have hit_0 only).
+static void emit_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length);
+
+// "4" DO_DAMAGE [targetSid, damage, crit, kill, isAI, silent] (game.deob.js:221254): the whole number is
+// Math.ceil(dmg) (settings dmgType 0, :221259); a damage with a fraction goes first as
+// NET_EXT_KN_HIT_DAMAGE, so dmgType 1 "Float" (the setting's val) draws Krunker's exact value. Not
+// carried: silent (no hit sound) and the live build's crit_0 sound (10.0.3; v10.0.2 and our assets have
+// hit_0 only).
 static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerBuild *b = krunker_build();
     NetHitPacket h;
     memset(&h, 0, sizeof(h));
+    const double damage = num(role(f, b->damage, KRB_DAMAGE_DAMAGE), 0);
     h.target_uid = (int32_t) num(role(f, b->damage, KRB_DAMAGE_TARGET), -1);
-    h.damage = (int32_t) ceil(num(role(f, b->damage, KRB_DAMAGE_DAMAGE), 0));
+    h.damage = (int32_t) ceil(damage);
     h.crit = truthy(role(f, b->damage, KRB_DAMAGE_CRIT)) ? 1 : 0;
     h.kill = truthy(role(f, b->damage, KRB_DAMAGE_KILL)) ? 1 : 0;
     h.ai = truthy(role(f, b->damage, KRB_DAMAGE_AI)) ? 1 : 0;
+    const int32_t tenths = (int32_t) js_round(damage * 10.0);
+    if (h.damage && tenths % 10) {
+        const NetHitDamagePacket exact = {.target_uid = h.target_uid, .damage_tenths = tenths, .ai = h.ai};
+        emit_ext(l, NET_EXT_KN_HIT_DAMAGE, &exact, sizeof(exact));
+    }
     emit(l, NET_PACKET_HIT, &h, sizeof(h));
 }
 
