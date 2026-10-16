@@ -390,11 +390,14 @@ void ed_map_clear(void);
 cJSON *ed_save_doc(void);                          // Editor.save(true): {map, groups, selected, cam, history}
 void ed_map_store(void);                           // autosave to storage "knEditorMap"
 int ed_map_restore(void);
-void ed_file_export(void);
-void ed_file_import(void);
+void ed_file_export(int copy);                    // exportMap; copy: Shift+click also copies
+void ed_file_import(void);                         // loadFile("importMap"): a picked file
+void ed_file_import_path(const char *path);        // importMap(file text) for a path (drops, picks)
+void ed_file_drop(int count, const char **paths);  // drag and drop onto the window (editor.c drop_cb)
+int ed_file_script(const char *cmd, const char *arg); // KRUNKNATIVE_EDITOR_SCRIPT "file:..." (editor_io.c)
 void ed_file_save_as(void);
+void ed_file_copy_export(void);                    // Copy Export (copyToClipboard(getMapExport()))
 void ed_clipboard_copy(const char *text);
-char *ed_clipboard_paste(void);
 void ed_quick_start(void);                         // quickStart: loadQuick(0)
 const cJSON *ed_templates_get(void);               // assets/editor/templates.json {game, script, defaultMaps}; NULL if missing
 int ed_load_quick(int index, int script, int default_map); // window.loadQuick: import a template / default map

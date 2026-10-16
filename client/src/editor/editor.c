@@ -863,22 +863,9 @@ static void wire_canvas_buttons(void) {
 static GLFWdropfun g_prev_drop;
 
 static void drop_cb(GLFWwindow *window, const int count, const char **paths) {
+    // each dropped file is imported in turn, so the last one shown (the page's FileReader order)
     (void) window;
-    if (!g_ed.active || count < 1 || !paths[0]) return;
-    unsigned char *buf = NULL;
-    size_t len = 0;
-    if (read_file(paths[0], &buf, &len) || !buf) {
-        editor_message("Could not read the dropped file.");
-        return;
-    }
-    char *text = malloc(len + 1);
-    if (text) {
-        memcpy(text, buf, len);
-        text[len] = 0;
-        ed_map_import(text);
-        free(text);
-    }
-    free(buf);
+    if (g_ed.active) ed_file_drop(count, paths);
 }
 
 // window close with unsaved projects: ask first (the answer closes the window)
@@ -1337,6 +1324,8 @@ static int h_script(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n)
     return 1;
 }
 
+static int page_key(Client *client, int key, int scancode, int action, int mods);
+
 static void run_script_text(const char *text) {
     const char *script = text;
     const int resumed = text && text == g_script_rest; // the rest after a wait:S
@@ -1445,6 +1434,22 @@ static void run_script_text(const char *text) {
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "texlist")) editor_texture_list(); // the T-key picker (model variants / textures)
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
+        else if (ed_file_script(cmd, arg)) {} // file: (File menu actions, tools/editor/io_e2e.py)
+        else if (!strcmp(cmd, "key") && arg) {
+            // key:[ctrl+][shift+]<letter>: a key press through the page's key handler (Ctrl+S = Save)
+            int mods = 0;
+            const char *k = arg;
+            for (;;) {
+                if (!strncmp(k, "ctrl+", 5)) {
+                    mods |= GLFW_MOD_CONTROL;
+                    k += 5;
+                } else if (!strncmp(k, "shift+", 6)) {
+                    mods |= GLFW_MOD_SHIFT;
+                    k += 6;
+                } else break;
+            }
+            if (k[0] >= 'a' && k[0] <= 'z' && !k[1]) page_key(g_ed.client, 'A' + (k[0] - 'a'), 0, GLFW_PRESS, mods);
+        }
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
         else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)
         else if (ed_ai_script(cmd, arg)) {} // ai: (editor_ai.c, tools/editor/ai_e2e.py)

@@ -860,6 +860,12 @@ editor-objects-e2e: build ## Editor objects e2e: inspector v10 expectation, BOT_
 editor-mapsettings-e2e: build ## Map settings e2e: Essential v10 rows, config and Environment round trips (headless; tools/editor/mapsettings_e2e.py)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/mapsettings_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+# the File menu's round trips (Import / Export, Save Project, Ctrl+S, backups and Load Backup, drag and
+# drop, GLTF / MTL, every map under assets/maps): headless client_bin --editor (tools/editor/io_e2e.py)
+.PHONY: editor-io-e2e
+editor-io-e2e: build ## Editor file round trips: export/import, save format, Ctrl+S, backups, drop, File menu, GLTF/MTL, all maps (headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/io_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release
 editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)

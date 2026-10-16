@@ -136,9 +136,9 @@ static int import_doc(cJSON *e) {
     if (ecam) {
         const cJSON *p = cJSON_GetObjectItemCaseSensitive(ecam, "p"), *r = cJSON_GetObjectItemCaseSensitive(ecam, "r");
         if (cJSON_GetArraySize(p) >= 3) g_ed.proj->camera.position = (vec3) {(float) num_at(p, 0), (float) num_at(p, 1), (float) num_at(p, 2)};
-        if (cJSON_GetArraySize(r) >= 2) {
-            g_ed.proj->yaw = (float) num_at(r, 0);
-            g_ed.proj->pitch = (float) num_at(r, 1);
+        if (cJSON_GetArraySize(r) >= 2) { // controls.setRotation(r[0], r[1]): pitch, yaw
+            g_ed.proj->pitch = (float) num_at(r, 0);
+            g_ed.proj->yaw = (float) num_at(r, 1);
         }
     }
     const cJSON *selected = cJSON_GetObjectItemCaseSensitive(e, "selected");
@@ -203,10 +203,10 @@ static cJSON *save_doc(void) {
     cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.x));
     cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.y));
     cJSON_AddItemToArray(p, cJSON_CreateNumber(g_ed.proj->camera.position.z));
+    // controls.getRotation(): [pitch, yaw] (E10:4306, the same order in v7's save files)
     cJSON *r = cJSON_AddArrayToObject(cam, "r");
-    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.proj->yaw));
     cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.proj->pitch));
-    cJSON_AddItemToArray(r, cJSON_CreateNumber(0));
+    cJSON_AddItemToArray(r, cJSON_CreateNumber(g_ed.proj->yaw));
     cJSON_AddArrayToObject(n, "history");
     return n;
 }
@@ -314,6 +314,49 @@ void ed_quick_start(void) {
 }
 
 // ---------------------------------------------------------------------------
+// KRUNKNATIVE_EDITOR_SCRIPT test driver (editor.c run_script_text): the File menu's actions, so
+// tools/editor/io_e2e.py can run them without clicking. file:save (Save Project), file:export
+// (Export), file:exportcopy (Shift+Export), file:import:PATH (a picked / dropped file),
+// file:backup (a backup now), file:loadbackup:N (window 15's Nth entry, newest first),
+// file:clearbackups (Clear All), file:new (New Project after its confirm), file:copy (Copy Export),
+// file:drop:A|B (a drag and drop of several files), file:gltf / file:mtl (Export GLTF / MTL).
+int ed_file_script(const char *cmd, const char *arg) {
+    if (strcmp(cmd, "file") != 0) return 0;
+    if (!arg) return 1;
+    if (!strcmp(arg, "save")) ed_file_save_as();
+    else if (!strcmp(arg, "export")) ed_file_export(0);
+    else if (!strcmp(arg, "exportcopy")) ed_file_export(1);
+    else if (!strcmp(arg, "copy")) ed_file_copy_export();
+    else if (!strncmp(arg, "import:", 7)) ed_file_import_path(arg + 7);
+    else if (!strcmp(arg, "backup")) ed_backup_do();
+    else if (!strncmp(arg, "loadbackup:", 11)) {
+        cJSON *list = ed_backup_list();
+        const int i = atoi(arg + 11);
+        const int n = cJSON_GetArraySize(list);
+        // window 15 lists the newest first: entry i is the (n - 1 - i)th of the index
+        if (i >= 0 && i < n) ed_backup_load(ed_json_num(cJSON_GetArrayItem(list, n - 1 - i), "timestamp", 0));
+        cJSON_Delete(list);
+    } else if (!strcmp(arg, "clearbackups")) ed_backup_clear();
+    else if (!strncmp(arg, "drop:", 5)) {
+        // drop:A|B: the paths of a drag and drop (ed_file_drop)
+        char *list = strdup(arg + 5), *p = list;
+        const char *paths[16];
+        int n = 0;
+        while (p && *p && n < 16) {
+            paths[n++] = p;
+            char *bar = strchr(p, '|');
+            if (bar) *bar++ = 0;
+            p = bar;
+        }
+        ed_file_drop(n, paths);
+        free(list);
+    } else if (!strcmp(arg, "new")) ed_map_clear();
+    else if (!strcmp(arg, "gltf")) ed_file_export_gltf();     // Export GLTF (editor_export.c)
+    else if (!strcmp(arg, "mtl")) ed_file_export_mtl();       // Export MTL (editor_export.c)
+    return 1;
+}
+
+// ---------------------------------------------------------------------------
 // files and clipboard
 
 #ifdef __EMSCRIPTEN__
@@ -328,62 +371,12 @@ EM_JS(void, kn_editor_download, (const char *name, const char *text), {
     document.body.removeChild(a);
 });
 
-EM_JS(void, kn_editor_pick_file, (void), {
-    var input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".txt,.json,text/plain,application/json";
-    input.onchange = function () {
-        var f = input.files && input.files[0];
-        if (!f) return;
-        var r = new FileReader();
-        r.onload = function () { window.__knEditorFile = String(r.result || ""); };
-        r.readAsText(f);
-    };
-    input.click();
-});
-
-EM_JS(char *, kn_editor_take_file, (void), {
-    var t = window.__knEditorFile;
-    if (t === undefined || t === null) return 0;
-    window.__knEditorFile = null;
-    return stringToNewUTF8(t);
-});
-
 EM_JS(void, kn_editor_clipboard_write, (const char *text), {
     var t = UTF8ToString(text);
     window.__knEditorClip = t;
     try { navigator.clipboard.writeText(t); } catch (e) {}
 });
 
-EM_JS(void, kn_editor_clipboard_request, (void), {
-    try {
-        navigator.clipboard.readText().then(function (t) { window.__knEditorFile = t; }, function () {
-            var t = window.prompt("Copy Paste Map Text Here");
-            if (t) window.__knEditorFile = t;
-        });
-    } catch (e) {
-        var t = window.prompt("Copy Paste Map Text Here");
-        if (t) window.__knEditorFile = t;
-    }
-});
-
-static double g_file_poll_until;
-
-static void web_poll_file(void *user) {
-    (void) user;
-    char *text = kn_editor_take_file();
-    if (text) {
-        if (g_ed.active) ed_map_import(text);
-        free(text);
-        return;
-    }
-    if (g_ed.active && glfwGetTime() < g_file_poll_until) html_timer_add(200, web_poll_file, NULL);
-}
-
-static void web_wait_file(void) {
-    g_file_poll_until = glfwGetTime() + 120.0;
-    html_timer_add(200, web_poll_file, NULL);
-}
 #else
 static int user_maps_dir(char *out, const size_t n) {
     // $XDG_DATA_HOME/krunknative/maps (else ~/.local/share/..., Windows %USERPROFILE%)
@@ -446,32 +439,22 @@ void ed_clipboard_copy(const char *text) {
 #endif
 }
 
-char *ed_clipboard_paste(void) {
-#ifdef __EMSCRIPTEN__
-    return NULL; // async on the web: ed_file_import requests it
-#else
-    const char *s = g_ed.client && g_ed.client->window ? glfwGetClipboardString(g_ed.client->window) : NULL;
-    if (!s) return NULL;
-    char *copy = malloc(strlen(s) + 1);
-    if (copy) strcpy(copy, s);
-    return copy;
-#endif
-}
-
-void ed_file_export(void) {
-    // exportMap: download "<name>_export" (and, with shift, copy it); KrunkNative always copies
+void ed_file_export(const int copy) {
+    // exportMap (E10:16661): download "<name>_export" (natively <name>_export.json in the user
+    // maps directory, since a desktop file needs an extension); Shift+click (copy) also copies
+    // the text to the clipboard (IDX:14455-14459)
     char *text = ed_map_export_string();
     if (!text) return;
-    ed_clipboard_copy(text);
+    if (copy) ed_clipboard_copy(text);
 #ifdef __EMSCRIPTEN__
     char name[160];
     snprintf(name, sizeof(name), "%s_export", ed_json_str(g_ed.proj->map_config, "name", "map"));
     kn_editor_download(name, text);
-    editor_message("Map exported (download) and copied to the clipboard.");
+    editor_message(copy ? "Map exported (download) and copied to the clipboard." : "Map exported (download).");
 #else
     char path[800], msg[900];
-    if (write_user_file("_export.json", text, path, sizeof(path))) snprintf(msg, sizeof(msg), "Map exported to %s and copied to the clipboard.", path);
-    else snprintf(msg, sizeof(msg), "Map copied to the clipboard (could not write %s).", path);
+    if (write_user_file("_export.json", text, path, sizeof(path))) snprintf(msg, sizeof(msg), copy ? "Map exported to %s and copied to the clipboard." : "Map exported to %s.", path);
+    else snprintf(msg, sizeof(msg), "Could not write %s.", path);
     editor_message(msg);
 #endif
     free(text);
@@ -504,6 +487,15 @@ void ed_download(const char *text, const char *name) {
 #endif
 }
 
+void ed_file_copy_export(void) {
+    // Copy Export: copyToClipboard(getMapExport()) (E10:19802)
+    char *text = ed_map_export_string();
+    if (!text) return;
+    ed_clipboard_copy(text);
+    free(text);
+    editor_message("Map copied to the clipboard.");
+}
+
 void ed_file_save_as(void) {
     // save(): "<name>_save.txt" with groups, selection and camera
     cJSON *doc = save_doc();
@@ -523,43 +515,41 @@ void ed_file_save_as(void) {
     free(text);
 }
 
-void ed_file_import(void) {
-    // importMap(): prompt("Copy Paste Map Text Here") -> the clipboard (native) / a file
-    // picker or the clipboard (web); shift = loadFile in Krunker
-#ifdef __EMSCRIPTEN__
-    if (g_ed.mods & GLFW_MOD_SHIFT) kn_editor_clipboard_request();
-    else kn_editor_pick_file();
-    web_wait_file();
-#else
-    char *text = ed_clipboard_paste();
-    if (text && (text[0] == '{' || text[0] == ' ' || text[0] == '\n')) {
-        ed_map_import(text);
-        free(text);
-        return;
-    }
-    free(text);
-    // no map on the clipboard: load the last export of a map with this name from the user dir
-    char dir[600], name[128], path[800];
-    user_maps_dir(dir, sizeof(dir));
-    safe_name(ed_json_str(g_ed.proj->map_config, "name", "map"), name, sizeof(name));
-    snprintf(path, sizeof(path), "%s/%s_export.json", dir, name);
+void ed_file_import_path(const char *path) {
     unsigned char *buf = NULL;
     size_t len = 0;
-    if (!read_file(path, &buf, &len)) {
-        char *t = malloc(len + 1);
-        if (t) {
-            memcpy(t, buf, len);
-            t[len] = 0;
-            ed_map_import(t);
-            free(t);
-        }
-        free(buf);
+    if (!path || !*path) return;
+    if (read_file(path, &buf, &len) || !buf) {
+        char msg[1200];
+        snprintf(msg, sizeof(msg), "Cannot read map file %s", path);
+        editor_message(msg);
         return;
     }
-    char msg[900];
-    snprintf(msg, sizeof(msg), "Copy a map's JSON to the clipboard, then Import (exports are saved in %s).", dir);
-    editor_message(msg);
-#endif
+    char *t = malloc(len + 1);
+    if (t) {
+        memcpy(t, buf, len);
+        t[len] = 0;
+        ed_map_import(t);
+        free(t);
+    }
+    free(buf);
+}
+
+static void import_picked(void *user, const char *path) {
+    (void) user;
+    ed_file_import_path(path);
+}
+
+void ed_file_drop(const int count, const char **paths) {
+    // drag and drop onto the editor (E10:15825: one FileReader per file, each importMap'd in turn,
+    // so the last file shown is the last one dropped)
+    for (int i = 0; i < count; i++) ed_file_import_path(paths[i]);
+}
+
+void ed_file_import(void) {
+    // importMap with Shift (loadFile("importMap"), IDX:14435-14441): a picked file replaces the
+    // shown map. Without Shift the paste popup opens (ed_import_map_popup).
+    ed_pick_file(".txt,.json,text/plain,application/json", import_picked, NULL);
 }
 
 // download(blob, name): a binary file (the GLTF / MTL exports, editor_export.c). The web build

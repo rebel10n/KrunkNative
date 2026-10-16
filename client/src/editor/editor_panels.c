@@ -294,16 +294,8 @@ static void toolbar_action(EdCtl *c) {
         case TB_NEW: ed_confirm("Are you sure you want to reset the map?", new_project_confirmed, NULL); break;
         case TB_SAVE: ed_file_save_as(); break; // save(): "<name>_save.txt"
         case TB_LOAD_BACKUP: editor_show_window(15); break;
-        case TB_EXPORT: ed_file_export(); break; // exportMap (KrunkNative also copies it, shift or not)
-        case TB_COPY_EXPORT: {
-            char *text = ed_map_export_string();
-            if (text) {
-                ed_clipboard_copy(text);
-                free(text);
-                editor_message("Map copied to the clipboard.");
-            }
-            break;
-        }
+        case TB_EXPORT: ed_file_export(shift); break; // exportMap; Shift+click also copies it
+        case TB_COPY_EXPORT: ed_file_copy_export(); break; // copyToClipboard(getMapExport())
         case TB_EXPORT_GLTF: ed_file_export_gltf(); break; // exportScene (editor_export.c)
         case TB_EXPORT_MTL: ed_file_export_mtl(); break;   // exportScene2 (editor_export.c)
         case TB_UNDO: ed_history_execute(0); break;

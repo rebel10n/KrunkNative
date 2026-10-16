@@ -455,7 +455,7 @@ void ed_project_save_ui(EditorProject *p) {
 #ifdef __EMSCRIPTEN__
     EditorProject *prev;
     ed_project_enter(p, &prev);
-    ed_file_export();
+    ed_file_export(0);
     ed_project_leave(prev);
     mark_clean(p);
 #else
