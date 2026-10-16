@@ -112,7 +112,8 @@ DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
-        "--voice": "voice", "--popups": "popups", "--state": "state"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--voice": "voice", "--popups": "popups", "--state": "state",
+        "--webvoice": "webvoice"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -2190,6 +2191,70 @@ def run_native_voice():
     check(f"{label}: the bot's clips on channels -1 and 0 reach the player, the team-tab one does not",
           chans == [-1, 0] and all(int(s) == BOT_SID for s, _ in recv), recv)
     check(f"{label}: a received clip is decoded and played", re.search(r"\[voice\] t=[\d.]+ play StubBot ", text) is not None)
+    if vcs:  # what an official krunker.io player's browser makes of the clip we sent
+        check_clip_in_chromium(label, vcs[0][0], "our recorded clip")
+
+
+# What headless Chromium makes of one voice clip data URL (official-ingame-webvoice): v10 plays a received
+# "vc" clip with Howler (new Howl({src: [dataURL]})), which fetches a data URI and decodes it with WebAudio's
+# decodeAudioData, and keeps a non-final clip only when its duration() <= 0.78 s (game.deob.js :209642). The
+# <audio> element (Howler's html5 fallback) is probed too. Returns the page's findings, or None without Chromium.
+CLIP_PROBE_JS = """(async () => {
+  const url = %s, r = {};
+  try {
+    const buf = await (await fetch(url)).arrayBuffer();
+    r.bytes = buf.byteLength;
+    r.magic = Array.from(new Uint8Array(buf.slice(0, 4))).map(b => b.toString(16).padStart(2, '0')).join('');
+    const audio = await new OfflineAudioContext(1, 1, 48000).decodeAudioData(buf);
+    r.duration = audio.duration; r.rate = audio.sampleRate; r.channels = audio.numberOfChannels;
+    let peak = 0; const d = audio.getChannelData(0); for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+    r.peak = peak;
+  } catch (e) { r.decodeError = String(e); }
+  const el = document.createElement('audio');
+  r.canPlay = {ogg: el.canPlayType('audio/ogg; codecs=opus'), webm: el.canPlayType('audio/webm; codecs=opus')};
+  r.element = await new Promise(done => {
+    const a = new Audio(); let t = setTimeout(() => done({timeout: true}), 8000);
+    a.onloadedmetadata = () => { a.play().then(() => setTimeout(() => { clearTimeout(t); done({duration: a.duration, played: a.currentTime}); }, 300),
+                                               e => { clearTimeout(t); done({duration: a.duration, playError: String(e)}); }); };
+    a.onerror = () => { clearTimeout(t); done({error: a.error ? a.error.code : -1}); };
+    a.src = url;
+  });
+  return r;
+})()"""
+
+
+def chromium_clip_probe(label, url):
+    if not CHROME:
+        return None
+    (cdpp,) = kn_proto.free_ports(1)
+    log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
+    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--autoplay-policy=no-user-gesture-required",
+                               "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "about:blank"],
+                              stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        cdp = Cdp(cdpp)
+        r = cdp.send("Runtime.evaluate", {"expression": CLIP_PROBE_JS % json.dumps(url), "awaitPromise": True, "returnByValue": True}, timeout=30)
+        return r.get("result", {}).get("result", {}).get("value")
+    finally:
+        os.killpg(chrome.pid, signal.SIGKILL)
+        chrome.wait()
+        log.close()
+
+
+def check_clip_in_chromium(label, url, what, min_peak=0.05):
+    """A clip of ours as an official browser player gets it: decodeAudioData takes it (what Howler does with
+    a data URI), the clip is short enough for v10's non-final-clip rule (<= 0.78 s) and, with min_peak, not
+    silent (a known tone; Chromium's fake microphone beeps only now and then, so the web run checks decoding only)."""
+    got = chromium_clip_probe(label, url)
+    if got is None:
+        print(f"{label}: no Chromium: the browser decode check of {what} is SKIPPED")
+        return
+    print(f"{label}: Chromium on {what}: {json.dumps(got)}")
+    check(f"{label}: Chromium's decodeAudioData takes {what} (Howler's path for a data URI)",
+          got.get("duration") and 0 < got["duration"] <= 0.78 and got.get("peak", 0) >= min_peak, got)
+    el = got.get("element") or {}
+    check(f"{label}: an <audio> element plays {what} too (Howler's html5 fallback)", el.get("duration", 0) > 0 and "error" not in el and
+          "playError" not in el, el)
 
 
 def run_native_social():
@@ -3314,6 +3379,83 @@ def run_web(mode):
     check("web: the stub player's \"k\" updates arrived", len(k) >= 5, len(k))
 
 
+def run_web_voice():
+    """official-ingame-webvoice: the web build in an official lobby (?krunker=1, the stub's "voice" scenario). Chromium's
+    fake microphone (--use-fake-device-for-media-stream: a beep) is what the page's getUserMedia records; V held: the
+    clips go out as v10's "vc" [dataURL, channel, micVolume, micQuality] and decode in this same Chromium; the stub's
+    clips back ("vc" on channels -1, 0, 1) play on -1 and 0 (?voicelog=1: the [voice] lines in the console)."""
+    label = "web-voice"
+    mm, wsp, web, cdpp = kn_proto.free_ports(4)
+    stub = Stub(mm, wsp, "voice")
+    stub.start_http()
+    stub.start_ws()
+    httpd = ThreadingHTTPServer(("127.0.0.1", web), StaticHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    chrome_log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
+    chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                               "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required",
+                               "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
+                               "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    lines = []
+    try:
+        cdp = Cdp(cdpp)
+        cdp.send("Runtime.enable")
+        cdp.send("Page.enable")
+        cdp.intercept = (TURNSTILE_URL, turnstile_stub("ok"))
+        cdp.send("Fetch.enable", {"patterns": [{"urlPattern": TURNSTILE_URL + "*"}]})
+        url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1&voicelog=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
+        cdp.send("Page.navigate", {"url": url})
+        stub.captcha_ok.wait(120)
+        end = time.time() + 150
+        while time.time() < end and not stub.got_en.is_set():  # CLICK TO PLAY once the map is in, until the client's "en"
+            time.sleep(0.3)
+            box = cdp.eval("(() => { const e = document.getElementById('instructions'); if (!e || !/CLICK TO PLAY/.test(e.textContent)) return null;"
+                           " const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
+            if box:
+                cdp.click(box[0], box[1])
+        check(f"{label}: the page entered the game (\"en\" sent)", stub.got_en.is_set(), "\n".join(cdp.console[-25:]))
+        if stub.got_en.is_set():
+            time.sleep(2.0)
+            cdp.key("rawKeyDown", "v", "KeyV", 86)  # voiceKey (V): hold to talk
+            time.sleep(2.6)
+            cdp.key("keyUp", "v", "KeyV", 86)
+            end = time.time() + 40
+            while time.time() < end and "done" not in stub.sent and not stub.closed.is_set():
+                time.sleep(0.3)
+        lines = list(cdp.console)
+        cdp.ws.close()
+    finally:
+        if chrome.poll() is None:
+            os.killpg(chrome.pid, signal.SIGTERM)
+            try:
+                chrome.wait(10)
+            except subprocess.TimeoutExpired:
+                os.killpg(chrome.pid, signal.SIGKILL)
+                chrome.wait()
+        chrome_log.close()
+        httpd.shutdown()
+        httpd.server_close()
+    stub.closed.wait(5)
+    stub.stop()
+    with open(os.path.join(WORK, f"{label}-console.log"), "w") as f:
+        f.write("\n".join(lines))
+    text = "\n".join(lines)
+    for name in ("vc_out", "vc_in", "done"):
+        check(f"{label}: the stub got to its \"{name}\" step", name in stub.sent, sorted(stub.sent))
+    vcs = [f[1] for f in stub.frames if f[0] == "vc"]
+    ok = all(len(a) == 4 and isinstance(a[0], str) and a[0].startswith("data:audio/ogg; codecs=opus;base64,") and a[1] == 0 and
+             isinstance(a[2], (int, float)) and 0 < a[2] <= 1 and isinstance(a[3], int) for a in vcs)
+    check(f"{label}: the browser-recorded clips go out as v10's \"vc\" [dataURL, channel 0, micVolume, micQuality]", vcs and ok,
+          [(a[0][:40], a[1:]) for a in vcs[:2]])
+    recv = re.findall(r"\[voice\] t=[\d.]+ recv v7 StubBot sid=(\d+) ch=(-?\d+)", text)
+    check(f"{label}: the bot's clips on channels -1 and 0 reach the player, the team-tab one does not",
+          sorted({int(c) for _, c in recv}) == [-1, 0], recv)
+    check(f"{label}: a received clip is decoded and played on the web", re.search(r"\[voice\] t=[\d.]+ play StubBot ", text) is not None,
+          [l for l in lines if "[voice]" in l][-6:])
+    if vcs:
+        check_clip_in_chromium(label, vcs[0][0], "the web build's recorded clip", min_peak=0.0)
+
+
 def main():
     if websockets is None:
         print("krunker_official_e2e: needs the Python websockets package: skipped")
@@ -3393,6 +3535,10 @@ def main():
     if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
         run_web("ok")
         run_web("110200")
+        run_web_voice()
+        ran = True
+    if ONLY == "webvoice" and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):  # just the web voice run
+        run_web_voice()
         ran = True
     elif ONLY == "web":
         print("krunker_official_e2e: the web run needs Chromium and a web build (WEB_DIST_DIR): skipped")
