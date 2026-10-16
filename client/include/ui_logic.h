@@ -766,6 +766,8 @@ void hud_popups_medals(const NetMedalPacket *medals, int count); // gm(): "6" / 
 void hud_popups_medal_scored(const char *text, const char *score, int sound, int count); // "am" with its score as given ("12 KR")
 void hud_popups_assist(void);                    // gl(): "10" Assist medal
 void hud_popups_medal_text(const char *text);    // gm([text, null]): a trigger's Broadcast / Send Popup
+void hud_popups_text_popup(const char *title, const char *sub, int silent, int sub_size); // textPopup: infoText / infoSub (+ pop_3)
+void hud_popups_countdown(int n);               // gmsg countdown: cntd_<n> + timerText's big n
 void hud_popups_on_spawn(void);                  // "start": medal queue cleared, overlay.reset()
 void hud_popups_on_init(void);                   // "init": bN = 0
 void hud_popups_page_reset(void);                // fresh page: elements gone

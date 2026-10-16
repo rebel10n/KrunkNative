@@ -112,7 +112,7 @@ DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
-        "--voice": "voice"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--voice": "voice", "--popups": "popups"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -675,6 +675,9 @@ class Stub:
             elif rounds:  # Hardpoint (2), arg 14 isOfficial: the end table's "reward" column
                 await send("init", self.map_index, 2, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
+            elif self.scenario == "popups":  # TDM (1): "rds" names the leading team
+                await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
+                           None, False, True, False, None, None, 0)
             elif ingame:  # TDM (1); arg 5: the bot hosts this (custom) lobby; arg 14 isOfficial
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], "sockBOT", {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
@@ -723,6 +726,10 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 0.0, 20.0, team=1))
                 await self.rounds_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "popups":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
+                await self.popups_phases(send, stop)
             elif self.got_en.is_set() and ingame:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -970,6 +977,32 @@ class Stub:
                                            BOT_SID, ["StubBot", "StubBot"], 90, 1, 5, 0, 120, "NONE"],
                                     "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 2}, 1, 3, 12, None, {})
         await hold(10.0)
+        self.sent["done"] = time.monotonic()
+
+    async def popups_phases(self, send, stop):
+        """v10's textPopup / gmsg countdown (run_native_popups): "tx", "stlkpd", "gmsg" with a countdown
+        and a [title, sub], then "rds" (Switching Sides + the lead). An "l" every 0.4 s keeps us at 4, 0, 4."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["tx"] = time.monotonic()
+        await send("tx", "Overtime", "+60 Seconds")  # TEXT_POPUP
+        await hold(2.6)
+        self.sent["stlkpd"] = time.monotonic()
+        await send("stlkpd")  # STALKER_PICKED
+        await hold(2.6)
+        self.sent["gmsg"] = time.monotonic()
+        await send("gmsg", "infection in", "00:03", 3, ["Bomb", "Planted"])  # countdown 3 + a text popup
+        await hold(2.6)
+        self.sent["rds"] = time.monotonic()
+        await send("rds", 2, False, 1, {"1": 1, "2": 0})  # Switching Sides, Alpha leads (silent textPopup)
+        await hold(3.0)
         self.sent["done"] = time.monotonic()
 
     async def ingame_phases(self, send, stop):
@@ -1829,7 +1862,7 @@ def run_native_hud():
     # their own elements are sampled every 700 ms (#inGameUI's text is cut to 160 characters, and the popups
     # are appended at its end); the other values stay until the next write, one probe per 3 s is enough
     # icon medals (the medal's own badge) are #knMedal; text-only ones (the round popup) are #knChalName
-    dense = ["text @sc [id=knScoreText]", "text @medal [id=knMedal]", "text @chal [id=knChalName]"]
+    dense = ["text @sc [id=knScoreText]", "text @medal [id=knMedal]", "text @chal [id=knChalName]", "text @info [id=knInfoText]"]
     sparse = ["text @score [id=myScoreVal]", "text @kills [id=killsVal]", "text @ammo [id=ammoVal]",
               "text @teams [id=teamScores]", "text @gmsg [id=gameMessage]", "text @lead [id=leaderContainer]",
               "text @chat [id=chatList]", "vis @end endUI", "attr @vic src [id=victorySub]", "text @endtab [id=endTable]",
@@ -1879,7 +1912,8 @@ def run_native_hud():
     check(f"{label}: UPDATE_KR_TAGS: #krTagHolder shows x3", any("x3" in t for t in tags), tags[-1:])
     check(f"{label}: ADD_MEDAL: the Pickup popup (+20)", any("PICKUP+20" in t for t in pops), pops[-1:])
     check(f"{label}: GET_ASSIST: the Assist popup", any("ASSIST" in t for t in pops), pops[-1:])
-    check(f"{label}: UPDATE_ROUNDS_DIS: \"Switching Sides\" popup", any("SWITCHING SIDES" in t for t in pops), pops[-1:])
+    info = probe("info")  # v10's textPopup("Switching Sides", lead, true): infoText (hud_popups.c)
+    check(f"{label}: UPDATE_ROUNDS_DIS: \"Switching Sides\" popup", "Switching Sides" in info, sorted(set(info)))
     check(f"{label}: KILL_STREAK: #killStreakHolder is written", any(t.strip() for t in probe("streak")), probe("streak")[-1:])
     ends = re.findall(r"\[input_script\] vis t=(\d+) @end endUI=(\d)", text)
     shown = [int(t) for t, v in ends if v == "1"]
@@ -1932,6 +1966,43 @@ def run_native_rounds():
     endtab = probe("endtab")
     check(f"{label}: \"end\": the row of a player who left (Gone31) and Hardpoint's dmg (812 / 377)",
           any("Gone31" in t and "812" in t and "377" in t for t in endtab), endtab[-1:])
+
+
+def run_native_popups():
+    """v10's textPopup (infoText / infoSub) and the gmsg countdown (timerText): the stub (Stub.popups_phases)
+    sends "tx", "stlkpd", "gmsg" [.., 3, [title, sub]] and "rds"; the overlay elements (#knInfoText,
+    #knInfoSub, #knTimerText) and the null-audio log show them (pop_3 unless silent, cntd_3)."""
+    label = "native-popups"
+    probes = "".join("%d text @info [id=knInfoText]\n%d text @sub [id=knInfoSub]\n%d text @timer [id=knTimerText]\n"
+                     "%d vis @vis knInfoText knInfoSub knTimerText\n" % (t, t + 1, t + 2, t + 3) for t in range(5000, 20000, 250))
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s20500 quit\n" % (PASTE_TOKEN, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {"KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="popups")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("tx", "stlkpd", "gmsg", "rds", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+
+    def probe(name):
+        return [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @%s n=1 checked=\d+ value=\S* text=(.*)" % name, text)]
+
+    vis = re.findall(r"\[input_script\] vis t=\d+ @vis knInfoText=(\d) knInfoSub=(\d) knTimerText=(\d)", text)
+    shown = lambda k: [v for v in vis if v[k] == "1"]  # noqa: E731
+    info, sub, timer = probe("info"), probe("sub"), probe("timer")
+    check(f"{label}: tx: infoText Overtime / infoSub +60 Seconds", "Overtime" in info and "+60 Seconds" in sub, (sorted(set(info)), sorted(set(sub))))
+    check(f"{label}: stlkpd: the whole stalker lines", "You are the Living" in info and "Hunt the stalker and survive the round!" in sub,
+          (sorted(set(info)), sorted(set(sub))))
+    check(f"{label}: gmsg [title, sub]: Bomb / Planted", "Bomb" in info and "Planted" in sub, (sorted(set(info)), sorted(set(sub))))
+    check(f"{label}: gmsg countdown: timerText 3", "3" in timer, sorted(set(timer)))
+    check(f"{label}: rds: Switching Sides / the lead", "Switching Sides" in info and any("is in the Lead!" in t for t in sub),
+          (sorted(set(info)), sorted(set(sub))))
+    check(f"{label}: the popups were drawn (shown, then hidden again)", shown(0) and shown(1) and shown(2) and vis and vis[-1][0] == "0",
+          (len(shown(0)), len(shown(1)), len(shown(2)), vis[-1:] if vis else None))
+    audio = [l for l in lines if "[audio]" in l and " play" in l]
+    pops = sum(1 for l in audio if "play2d pop_3 " in l)
+    check(f"{label}: pop_3 for tx, stlkpd and the gmsg popup; none for the silent rds", pops == 3, [l for l in audio if "pop_3" in l])
+    check(f"{label}: cntd_3 at 0.2", any("play2d cntd_3 " in l for l in audio), [l for l in audio if "cntd" in l])
 
 
 def run_native_ingame():
@@ -2001,7 +2072,7 @@ def run_native_world():
     message, lockout, text-popup, loadout, AI and airdrop packets. The `world` probe (input_script.c) shows
     what the client made of them, #gameMessage / #chatList / the popups what the HUD shows."""
     label = "native-world"
-    dense = ["world", "text @gmsg [id=gameMessage]", "text @chal [id=knChalName]", "sync"]
+    dense = ["world", "text @gmsg [id=gameMessage]", "text @info [id=knInfoText]", "text @sub [id=knInfoSub]", "sync"]
     sparse = ["text @chat [id=chatList]"]
     probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 500) for k, kind in enumerate(dense))
     probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 2000) for k, kind in enumerate(sparse))
@@ -2047,8 +2118,10 @@ def run_native_world():
     check(f"{label}: gmsg \"wt\" + suffix", "waiting for players 01:00" in gm, sorted(set(gm)))
     check(f"{label}: lkt: #gameMessage warmup starts in 01:30", any(g.startswith("warmup starts in 01:") for g in gm), sorted(set(gm)))
     check(f"{label}: gmsg without args clears it", gm and gm[-1] == "", gm[-3:])
-    chal = [m.group(1).upper() for m in re.finditer(r"\[input_script\] text t=\d+ @chal n=\d+ checked=\d+ value=\S* text=(.*)", text)]
-    check(f"{label}: \"tx\": the Overtime +60 Seconds popup", any("OVERTIME" in c and "+60 SECONDS" in c for c in chal), sorted(set(chal))[-3:])
+    info = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @info n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    sub = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @sub n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: \"tx\": the Overtime / +60 Seconds text popup (infoText / infoSub)", "Overtime" in info and "+60 Seconds" in sub,
+          (sorted(set(info))[-3:], sorted(set(sub))[-3:]))
     chat = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @chat n=\d+ checked=\d+ value=\S* text=(.*)", text)]
     check(f"{label}: \"cct\": the \"Zone C Captured\" chat line", any("Zone C Captured" in c for c in chat), chat[-1:])
     loads = re.findall(r"\[input_script\] sync\+ t=\d+ .* loadout=(\S+)", text)
@@ -3127,6 +3200,7 @@ def main():
         run_native_actions()
         run_native_social()
         run_native_voice()
+        run_native_popups()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -3160,6 +3234,8 @@ def main():
         run_native_social()
     if ONLY == "voice" and os.path.isfile(f"{BUILD}/client_bin"):  # just the voice chat run
         run_native_voice()
+    if ONLY == "popups" and os.path.isfile(f"{BUILD}/client_bin"):  # just the text popups / countdown run
+        run_native_popups()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

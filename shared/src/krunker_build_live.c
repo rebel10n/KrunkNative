@@ -140,6 +140,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_VOTE_FORFEIT, KRUNKER_S2C_PLAYER_RECONNECTED, KRUNKER_S2C_SKIN_REWARD, KRUNKER_S2C_SKIN_FOUND_MESSAGE,
     // voice chat clips (official-ingame-voice)
     KRUNKER_S2C_VOICE_CHAT,
+    // the Stalker banner (official-ingame-popups)
+    KRUNKER_S2C_STALKER_PICKED,
     -1,
 };
 static const int REQUIRED_ADD[] = {

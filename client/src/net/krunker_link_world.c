@@ -5,15 +5,13 @@
 // show them. Line numbers: ~/.cache/kn-official/game.deob.js.
 //
 // Known gaps (documented, not translated):
-//   - "gmsg" arg 2 (the cntd_<n> countdown sound + the big #timerText number): no client element yet.
-//   - "stlkpd" STALKER_PICKED ("You are the Living" / "Hunt the stalker and survive the round!"):
-//     NetTextPopupPacket's 32-byte text would cut the sub line; left out rather than shown cut.
 //   - "inat" arg 11 (no auto knife): our LOADOUT always adds the knife unless the mode is noMelee.
 //   - "inat" / "inatA" pick_0 sound, "do" breakSnd: the consumers play neither.
 //   - init "dyno" with h = 0 keeps y (the build's default height is not known here).
 #include "krunker_link_internal.h"
 #include <ai.h>
 #include <modes.h>
+#include <net_ext.h>
 #include <ruleset.h>
 #include <zombies.h>
 #include <math.h>
@@ -303,12 +301,37 @@ static void game_message(KrunkerLink *l, const KrunkerValue *msg, const KrunkerV
     EMIT(NET_PACKET_GAME_MESSAGE, p);
 }
 
-static void text_popup(KrunkerLink *l, const KrunkerValue *title, const KrunkerValue *text) {
-    NetTextPopupPacket p;
-    memset(&p, 0, sizeof(p));
-    text_of(title, p.title, sizeof(p.title));
-    text_of(text, p.text, sizeof(p.text));
-    if (p.title[0] || p.text[0]) EMIT(NET_PACKET_TEXT_POPUP, p);
+// textPopup(title, sub, silent, subSize) (iìîíììì :220929) as NET_EXT_KN_OFFICIAL_TEXT_POPUP: the
+// strings whole (NetTextPopupPacket's 32 bytes would cut "Hunt the stalker and survive the round!")
+static void text_popup_strings(KrunkerLink *l, const char *title, const char *sub, const int silent, const int sub_size) {
+    if (!title[0] && !sub[0]) return;
+    uint8_t body[NET_EXT_BODY_MAX - 8];
+    const NetOfficialTextPopupHeader h = {.silent = (uint8_t) !!silent, .sub_size = (uint8_t) (sub_size > 0 && sub_size < 256 ? sub_size : 0)};
+    const size_t tl = strlen(title) + 1, sl = strlen(sub) + 1;
+    if (sizeof(h) + tl + sl > sizeof(body)) return;
+    memcpy(body, &h, sizeof(h));
+    memcpy(body + sizeof(h), title, tl);
+    memcpy(body + sizeof(h) + tl, sub, sl);
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_TEXT_POPUP, body, (uint16_t) (sizeof(h) + tl + sl));
+    if (n) krunker_link_emit(l, NET_PACKET_EXT, ext, n);
+}
+
+static void text_popup(KrunkerLink *l, const KrunkerValue *title, const KrunkerValue *text, const KrunkerValue *silent,
+                       const KrunkerValue *sub_size) {
+    char t[160], s[160];
+    text_of(title, t, sizeof(t));
+    text_of(text, s, sizeof(s));
+    text_popup_strings(l, t, s, truthy(silent), (int) num(sub_size, 0));
+}
+
+// gmsg's countdown n (truthy only): cntd_<n> + timerText (:220406)
+static void countdown(KrunkerLink *l, const KrunkerValue *n) {
+    if (!truthy(n)) return;
+    const NetOfficialCountdownPacket c = {.n = (int32_t) num(n, 0)};
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(c)];
+    const uint16_t len = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_COUNTDOWN, &c, sizeof(c));
+    if (len) krunker_link_emit(l, NET_PACKET_EXT, ext, len);
 }
 
 // MM:SS of a ms count (iîìiiiì :23893 without its flags)
@@ -403,10 +426,14 @@ int krunker_link_world_frame(KrunkerLink *l, const KrunkerS2C id, const KrunkerF
         }
         // messages
         case KRUNKER_S2C_UPDATE_GAME_MESSAGE:
+            countdown(l, arg(f, 2)); // the countdown first, then the popup, then the message (v10's order)
+            if (krunker_is(arg(f, 3), KRUNKER_ARRAY)) text_popup(l, krunker_at(arg(f, 3), 0), krunker_at(arg(f, 3), 1), NULL, NULL);
             game_message(l, arg(f, 0), arg(f, 1));
-            if (krunker_is(arg(f, 3), KRUNKER_ARRAY)) text_popup(l, krunker_at(arg(f, 3), 0), krunker_at(arg(f, 3), 1));
             return 1;
-        case KRUNKER_S2C_TEXT_POPUP: text_popup(l, arg(f, 0), arg(f, 1)); return 1; // "tx" [title, sub, silent, size] :220929
+        case KRUNKER_S2C_TEXT_POPUP: text_popup(l, arg(f, 0), arg(f, 1), arg(f, 2), arg(f, 3)); return 1; // "tx" [title, sub, silent, size] :220929
+        case KRUNKER_S2C_STALKER_PICKED: // "stlkpd" (iiîîíìî :218088): to everyone but the stalker
+            text_popup_strings(l, "You are the Living", "Hunt the stalker and survive the round!", 0, 0);
+            return 1;
         case KRUNKER_S2C_UPDATE_LOCKOUT_TIM: { // "lkt" [ms] (iïìîiîí :220401): gmsg("warmup starts in ", MM:SS)
             const NetLockoutPacket p = {.ms = (int32_t) num(arg(f, 0), 0)};
             EMIT(NET_PACKET_LOCKOUT, p);

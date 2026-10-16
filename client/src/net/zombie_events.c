@@ -42,9 +42,9 @@ int zombie_events_handle(Client *client, const int type, const void *payload, co
         NetZombieWavePacket wave;
         memcpy(&wave, payload, sizeof(wave));
         wave.special[sizeof(wave.special) - 1] = 0;
-        char text[64];
-        snprintf(text, sizeof(text), "%s %d", wave.special[0] ? wave.special : "Round", (int) wave.wave);
-        hud_popups_medal_text(text);
+        char text[16];
+        snprintf(text, sizeof(text), "%d", (int) wave.wave);
+        hud_popups_text_popup(wave.special[0] ? wave.special : "Round", text, 0, 35); // textPopup(special || "Round", wave, null, 35)
         audio_play("mystery_1", 0.2f, 0, 1.0f);
     } else if (type == NET_PACKET_POWERUP && length == sizeof(NetPowerupPacket)) {
         NetPowerupPacket powerup;

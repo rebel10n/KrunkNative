@@ -335,7 +335,7 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
             audio_play("woosh_0", 0.5f, 0, 1.0f); // SOUND.play("woosh_0", 0.5) (:219260)
             snprintf(g_modes.popup_text, sizeof(g_modes.popup_text), "%s", lead);
             g_modes.popup_seq++;
-            hud_popups_medal_text(I18N("modes.round.switch", "Switching Sides. Prepare for the next Round"));
+            hud_popups_text_popup(g_modes.popup_title, g_modes.popup_text, 1, 0); // textPopup("Switching Sides", lead, true) (:219261)
             return 1;
         }
         case NET_PACKET_LOCKOUT: {
@@ -344,16 +344,14 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
             if (mode) mode->lockout_timer = (float) lockout.ms / 1000.0f;
             return 1;
         }
-        case NET_PACKET_TEXT_POPUP: { // io_textPopup(title, text)
+        case NET_PACKET_TEXT_POPUP: { // io_textPopup(title, text): infoText / infoSub
             V7_READ(NetTextPopupPacket, popup);
             memcpy(g_modes.popup_title, popup.title, sizeof(g_modes.popup_title));
             memcpy(g_modes.popup_text, popup.text, sizeof(g_modes.popup_text));
             g_modes.popup_title[sizeof(g_modes.popup_title) - 1] = 0;
             g_modes.popup_text[sizeof(g_modes.popup_text) - 1] = 0;
             g_modes.popup_seq++;
-            char line[NET_MODE_TEXT_SIZE * 2 + 2];
-            snprintf(line, sizeof(line), "%s %s", g_modes.popup_title, g_modes.popup_text);
-            hud_popups_medal_text(line);
+            hud_popups_text_popup(g_modes.popup_title, g_modes.popup_text, 0, 0);
             return 1;
         }
         case NET_PACKET_MODE_COUNTER: {

@@ -98,6 +98,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_MEDAL = 0x8034,        // "am" NetOfficialMedalPacket (a text score, sound, count)
     NET_EXT_KN_OFFICIAL_END_ROW = 0x8035,      // "end" NetOfficialEndRowPacket per endData.ed row, ahead of the END
     NET_EXT_KN_OFFICIAL_ROUND_SWITCH = 0x8036, // "rds" Switching Sides, no body: every player inactive, the menu in 3 s
+    NET_EXT_KN_OFFICIAL_TEXT_POPUP = 0x8037,   // "tx" / "stlkpd" / "gmsg" [3]: NetOfficialTextPopupHeader + title + sub (NUL-terminated)
+    NET_EXT_KN_OFFICIAL_COUNTDOWN = 0x8038,    // "gmsg" [2]: NetOfficialCountdownPacket (cntd_<n> + the big #timerText number)
     // 0x8040 official combat effects (client-local, like 0x8030)
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
 
@@ -245,6 +247,18 @@ typedef struct {
     int32_t dmg;      // the "dmg" cell (Hardpoint / Raid endStats), -1 none
     int32_t reward;   // the reward cell's "+N" (0 = "NONE")
 } NetOfficialEndRowPacket;
+
+// NET_EXT_KN_OFFICIAL_TEXT_POPUP: v10's textPopup(title, sub, silent, subSize) (game.deob.js iìîíììì
+// :220929): infoText / infoSub on the overlay; followed by the title and the sub, NUL-terminated
+typedef struct {
+    uint8_t silent;   // no pop_3
+    uint8_t sub_size; // infoSub's font size, 0 = 28
+} NetOfficialTextPopupHeader;
+
+// NET_EXT_KN_OFFICIAL_COUNTDOWN: "gmsg" arg 2 (iíïììií :220406): cntd_<n> at 0.2 and timerText's big n
+typedef struct {
+    int32_t n;
+} NetOfficialCountdownPacket;
 #pragma pack(pop)
 // NET_EXT_KN_BOT_PATH (S -> C): the spectated bot's AI state for the show_navmeshes overlay
 // (client/src/nav_overlay.c) and the spectator HUD's state line (hud_spectate.c). The server

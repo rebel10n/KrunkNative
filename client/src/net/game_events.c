@@ -1185,6 +1185,18 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             else if (subtype == NET_EXT_KN_OFFICIAL_ENTER_FAILED) events_enter_failed(client, (const char *) body, body_length); // "fe"
             else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_END_ROW) events_official_hud(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_OFFICIAL_ROUND_SWITCH) events_round_switch(client);
+            else if (subtype == NET_EXT_KN_OFFICIAL_TEXT_POPUP && body_length > sizeof(NetOfficialTextPopupHeader)) { // textPopup
+                NetOfficialTextPopupHeader h;
+                memcpy(&h, body, sizeof(h));
+                const char *str[2] = {"", ""};
+                if (official_strings(body + sizeof(h), body_length - sizeof(h), str, 2) == 2)
+                    hud_popups_text_popup(str[0], str[1], h.silent, h.sub_size);
+            }
+            else if (subtype == NET_EXT_KN_OFFICIAL_COUNTDOWN && body_length == sizeof(NetOfficialCountdownPacket)) { // gmsg countdown
+                NetOfficialCountdownPacket c;
+                memcpy(&c, body, sizeof(c));
+                hud_popups_countdown(c.n);
+            }
             else if (subtype == NET_EXT_VOTE_FORFEIT_STATE && body_length >= sizeof(NetVoteForfeitStatePacket)) { // "vf" (hud_votekick.c)
                 NetVoteForfeitStatePacket state;
                 memcpy(&state, body, sizeof(state));

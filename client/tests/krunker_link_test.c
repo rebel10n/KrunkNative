@@ -990,10 +990,22 @@ static void test_world(void) {
             }
         }
         CHECK(ok, "gmsg: wt, wt + suffix, msg + suffix, cleared; lkt's warmup line");
-        READ_IN(NetTextPopupPacket, p0, TEXT_POPUP, 0);
-        READ_IN(NetTextPopupPacket, p1, TEXT_POPUP, 1);
-        CHECK(p0_p && !strcmp(p0.title, "Bomb") && !strcmp(p0.text, "Planted") && p1_p && !strcmp(p1.title, "Overtime") &&
-              !strcmp(p1.text, "+60 Seconds"), "gmsg arg 3 / tx text popups");
+        // the text popups and the countdown travel as NET_EXT_KN_OFFICIAL_TEXT_POPUP / _COUNTDOWN (test_popups)
+        const char *titles[2] = {0}, *subs[2] = {0};
+        int pops = 0, cd = 0;
+        for (int k = 0; find_in(NET_PACKET_EXT, k); k++) {
+            uint16_t len = 0;
+            const uint8_t *b = ext_body(k, NET_EXT_KN_OFFICIAL_TEXT_POPUP, &len);
+            if (b && pops < 2) {
+                titles[pops] = (const char *) b + sizeof(NetOfficialTextPopupHeader);
+                subs[pops] = titles[pops] + strlen(titles[pops]) + 1;
+                pops++;
+            }
+            b = ext_body(k, NET_EXT_KN_OFFICIAL_COUNTDOWN, &len);
+            if (b && len == sizeof(NetOfficialCountdownPacket)) memcpy(&cd, b, sizeof(cd));
+        }
+        CHECK(pops == 2 && !strcmp(titles[0], "Bomb") && !strcmp(subs[0], "Planted") && !strcmp(titles[1], "Overtime") &&
+              !strcmp(subs[1], "+60 Seconds") && cd == 3 && !find_in(NET_PACKET_TEXT_POPUP, 0), "gmsg arg 3 / tx text popups, gmsg countdown 3");
         READ_IN(NetLockoutPacket, lk, LOCKOUT, 0);
         READ_IN(NetCheckpointPacket, c0, CHECKPOINT, 0);
         READ_IN(NetCheckpointPacket, c1, CHECKPOINT, 1);
@@ -1556,6 +1568,44 @@ static void test_voice(void) {
     krunker_link_reset(&link);
     CHECK(!link.voice_out.buf && !g_out_count, "reset drops a half-sent clip");
     free(audio);
+}
+
+// v10's textPopup and the gmsg countdown (official-ingame-popups): "tx" [title, sub, silent, subSize],
+// "stlkpd", "gmsg" [.., n, [title, sub]] -> NET_EXT_KN_OFFICIAL_TEXT_POPUP / _COUNTDOWN
+static void test_popups(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    clear();
+    feed(&link, "tx", (KrunkerValue[]) {KRUNKER_V_STR("Souls"), KRUNKER_V_STR("3 escaped"), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(40)}, 4);
+    feed(&link, "stlkpd", NULL, 0);
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("infection in"), KRUNKER_V_STR("00:03"), KRUNKER_V_NUM(3)}, 3);
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("x"), KRUNKER_V_NIL, KRUNKER_V_NUM(0)}, 3); // 0: no countdown
+    feed(&link, "tx", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NIL}, 2);                       // nothing to show
+    NetOfficialTextPopupHeader h[3];
+    const char *t[3] = {0}, *sub[3] = {0};
+    int pops = 0, cds = 0, cd = 0;
+    for (int k = 0; find_in(NET_PACKET_EXT, k); k++) {
+        uint16_t len = 0;
+        const uint8_t *b = ext_body(k, NET_EXT_KN_OFFICIAL_TEXT_POPUP, &len);
+        if (b && pops < 3) {
+            memcpy(&h[pops], b, sizeof(h[pops]));
+            t[pops] = (const char *) b + sizeof(NetOfficialTextPopupHeader);
+            sub[pops] = t[pops] + strlen(t[pops]) + 1;
+            pops++;
+        }
+        b = ext_body(k, NET_EXT_KN_OFFICIAL_COUNTDOWN, &len);
+        if (b && len == sizeof(NetOfficialCountdownPacket)) {
+            memcpy(&cd, b, sizeof(cd));
+            cds++;
+        }
+    }
+    CHECK(pops == 2 && !strcmp(t[0], "Souls") && !strcmp(sub[0], "3 escaped") && h[0].silent && h[0].sub_size == 40,
+          "tx: title, sub, silent, subSize (%d popups)", pops);
+    CHECK(pops == 2 && !strcmp(t[1], "You are the Living") && !strcmp(sub[1], "Hunt the stalker and survive the round!") && !h[1].silent &&
+          !h[1].sub_size, "stlkpd: the whole sub line");
+    CHECK(cds == 1 && cd == 3, "gmsg countdown 3 only (%d)", cds);
+    CHECK(link.unknown_in == 0, "every popup packet was handled (%u unknown)", link.unknown_in);
     clear();
 }
 
@@ -2436,6 +2486,7 @@ int main(void) {
         }
         clear();
     }
+    test_popups();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

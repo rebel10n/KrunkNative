@@ -59,6 +59,7 @@ struct Popup {
     double line_height;      // chalName: text drawn at lineHeight / 2
     double rect_w, rect_h;   // chalName: the gradient rect (fillRect(-w / 2, 0, w, h))
     int shadow;              // strokeText lineWidth (0 = none)
+    const char *shadow_color; // its strokeStyle (NULL: #000; v10's animateText shadow: #363636)
     int disabled;
     // animateText / animateDiv state
     char text[192];          // a trigger popup ("am" [tct, null]) is up to 70 characters; translated texts are longer
@@ -78,7 +79,12 @@ static Popup g_score = {.id = "knScoreText", .color = "#ffea78", .left_pct = 50.
 static Popup g_check = {.id = "knCheckText", .color = "#40C4FF", .left_pct = 50.0, .top = 20.0};
 static Popup g_medal = {.id = "knChalName", .color = "#fff", .left_pct = 50.0, .top = 40.0, .top_px = 1,
                         .line_height = 150.0, .rect_w = 517.0, .rect_h = 167.0};
-static Popup *const POPUPS[] = {&g_score, &g_check, &g_medal};
+// v10 (game.deob.js :159400-159430, the same in v10.0.2): timerText (the gmsg countdown number),
+// infoText / infoSub (textPopup's title and sub; top in px)
+static Popup g_timer = {.id = "knTimerText", .color = "#fff", .left_pct = 50.0, .top = 26.0};
+static Popup g_info = {.id = "knInfoText", .color = "#fff", .left_pct = 50.0, .top = 215.0, .top_px = 1};
+static Popup g_info_sub = {.id = "knInfoSub", .color = "#fbc02d", .left_pct = 50.0, .top = 280.0, .top_px = 1};
+static Popup *const POPUPS[] = {&g_score, &g_check, &g_medal, &g_timer, &g_info, &g_info_sub};
 #define POPUP_COUNT ((int) (sizeof(POPUPS) / sizeof(POPUPS[0])))
 
 static int g_order_seq;
@@ -119,6 +125,16 @@ static void popup_animate_text(Popup *p, const char *text, const double size, co
     p->fade = fade;
     p->opacity = 1.0;
     p->callback = callback;
+}
+
+// v10's animateText adds two arguments (:159562): minScale = size * (ratio || 0.4) and shadow =
+// the strokeText lineWidth (#363636)
+static void popup_animate_text_v10(Popup *p, const char *text, const double size, const double scale_speed, const double life,
+                                   const double fade, const double delay, const double min_ratio, const int shadow) {
+    popup_animate_text(p, text, size, scale_speed, life, fade, delay, NULL);
+    p->min_scale = scale_speed ? size * (min_ratio > 0.0 ? min_ratio : 0.4) : size;
+    p->shadow = shadow;
+    p->shadow_color = "#363636";
 }
 
 static void upper(char *s) {
@@ -197,15 +213,15 @@ static HtmlElem popup_element(Popup *p) {
 }
 
 // strokeText(text, 1, y) with lineWidth = shadow, then fillText(text, 0, y)
-static void popup_shadow_css(const int shadow, char *out, const size_t size) {
+static void popup_shadow_css(const int shadow, const char *color, char *out, const size_t size) {
     if (shadow <= 0) {
         snprintf(out, size, "none");
         return;
     }
     const double r = shadow / 2.0;
-    snprintf(out, size, "%gpx 0 #000, %gpx 0 #000, 1px %gpx #000, 1px %gpx #000, %gpx %gpx #000, %gpx %gpx #000, "
-                        "%gpx %gpx #000, %gpx %gpx #000",
-             1.0 + r, 1.0 - r, r, -r, 1.0 + r, r, 1.0 - r, -r, 1.0 + r, -r, 1.0 - r, r);
+    const char *c = color ? color : "#000";
+    snprintf(out, size, "%gpx 0 %s, %gpx 0 %s, 1px %gpx %s, 1px %gpx %s, %gpx %gpx %s, %gpx %gpx %s, %gpx %gpx %s, %gpx %gpx %s",
+             1.0 + r, c, 1.0 - r, c, r, c, -r, c, 1.0 + r, r, c, 1.0 - r, -r, c, 1.0 + r, -r, c, 1.0 - r, r, c);
 }
 
 static void popup_render(Popup *p, const int visible) {
@@ -237,7 +253,7 @@ static void popup_render(Popup *p, const int visible) {
         snprintf(y, sizeof(y), "%gpx", p->line_height / 2.0); // fillText(text, 0, lineHeight / 2)
         html_dom_set_style(p->text_el, "top", y);
         char shadow[256];
-        popup_shadow_css(p->shadow, shadow, sizeof(shadow));
+        popup_shadow_css(p->shadow, p->shadow_color, shadow, sizeof(shadow));
         html_dom_set_style(p->text_el, "text-shadow", shadow);
         html_dom_set_text(p->text_el, p->text);
         if (p->text2_el) {
@@ -290,6 +306,26 @@ void hud_popups_score(const int delta) {
 void hud_popups_checkpoint(void) {
     if (!client_render_settings()->show_medals) return;
     popup_animate_text(&g_check, I18N("popup.checkpoint", "Checkpoint!"), 75.0, 0.38, 1100.0, 100.0, 0.0, NULL);
+}
+
+// textPopup (iìîíììì :220929, v10.0.2 the same): pop_3 at 0.3 unless silent; the title on infoText
+// (90, scaleSpeed 0.3, 2100 ms, minScale 0.6, shadow 10), the sub on infoSub (subSize || 28, 0.1,
+// 1500 ms, minScale 0.9, shadow 8). Official "tx" / "stlkpd" / "gmsg" [3] / "upz" / "rds"; our own
+// server's textPopup (NET_PACKET_TEXT_POPUP), round switch and zombie waves.
+void hud_popups_text_popup(const char *title, const char *sub, const int silent, const int sub_size) {
+    if (!silent) audio_play("pop_3", 0.3f, 0, 1.0f);
+    if (title && title[0]) popup_animate_text_v10(&g_info, title, 90.0, 0.3, 2100.0, 100.0, 0.0, 0.6, 10);
+    if (sub && sub[0]) popup_animate_text_v10(&g_info_sub, sub, sub_size > 0 ? sub_size : 28.0, 0.1, 1500.0, 100.0, 0.0, 0.9, 8);
+}
+
+// gmsg's countdown (iíïììií :220406): cntd_<n> at 0.2 and timerText's n (300, 1.2, 700 ms, shadow 15)
+void hud_popups_countdown(const int n) {
+    if (!n) return;
+    char name[24], text[16];
+    snprintf(name, sizeof(name), "cntd_%d", n);
+    audio_play(name, 0.2f, 0, 1.0f);
+    snprintf(text, sizeof(text), "%d", n);
+    popup_animate_text_v10(&g_timer, text, 300.0, 1.2, 700.0, 100.0, 0.0, 0.0, 15);
 }
 
 // overlay.medalsList (game-overlay.js:141): the icon medals, img/medals/medal_<index>.png
