@@ -424,6 +424,8 @@ def build_url(stub):
 # ---------------------------------------------------------------- the stubs
 
 class Stub:
+    captcha_free = False  # True: the first seek is let through (a run that never shows the captcha UI, e.g. Strike's page)
+
     def __init__(self, mm_port, ws_port, scenario="default", map_index=None, spawn=None):
         self.mm_port, self.ws_port = mm_port, ws_port
         self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases);
@@ -533,7 +535,7 @@ class Stub:
                         seek_v = json.loads(qd.get("dataQuery") or "{}").get("v")
                     except (ValueError, TypeError):
                         seek_v = None
-                    if not cap or cap in stub.used_captchas or val not in stub.issued:
+                    if not stub.captcha_free and (not cap or cap in stub.used_captchas or val not in stub.issued):
                         status, body = 400, json.dumps({"error": "CaptchaRequired"}).encode()  # the live answer
                         if cap:
                             stub.used_captchas.add(cap)

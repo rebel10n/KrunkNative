@@ -221,12 +221,12 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
                                   stk, feed_flags);
         strike_hud_killfeed(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
                             victim && victim == client->me, weapon, packet->headshot, packet->fists & NET_KILL_THROWN ? 1 : 0,
-                            packet->wallbang ? 1 : 0);
+                            packet->wallbang ? 1 : 0, packet->fists & NET_KILL_HIDE_FEED ? 1 : 0);
     } else {
 #ifdef HUD_UI_HAVE_KILLFEED_SUICIDE
         if (!(packet->fists & NET_KILL_HIDE_FEED)) hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
 #endif
-        strike_hud_killfeed(client, NULL, 0, victim_name, victim && victim == client->me, NULL, 0, 0, 0);
+        strike_hud_killfeed(client, NULL, 0, victim_name, victim && victim == client->me, NULL, 0, 0, 0, packet->fists & NET_KILL_HIDE_FEED ? 1 : 0);
     }
 
     if (victim != client->me) return;

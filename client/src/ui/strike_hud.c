@@ -846,8 +846,11 @@ static void killfeed_add(Client *client, const char *killer, const int killer_is
                          const char *icon, const int headshot, const int thrown, const int wallbang);
 
 void strike_hud_killfeed(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                         const Weapon *weapon, const int headshot, const int thrown, const int wallbang) {
+                         const Weapon *weapon, const int headshot, const int thrown, const int wallbang, const int hidden) {
     if (!strike_ui_active()) return;
+    // NET_KILL_HIDE_FEED ("3" hideFeed, game.deob.js:220629; hud_ui.c hud_killfeed_row): no row for this kill,
+    // the rows already up run out their 10 s as before
+    if (hidden) return;
     killfeed_add(client, killer, killer_is_you, victim, victim_is_you, weapon ? weapon->icon : NULL, headshot, thrown, wallbang);
 }
 

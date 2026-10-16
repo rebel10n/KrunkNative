@@ -213,7 +213,7 @@ struct SpinWheelDraw;
 const struct SpinWheelDraw *strike_menu_wheel_draw(void);
 // Game events (client/src/net/game_events.c, beside hud_ui.c's): no-ops unless strike_ui_active().
 void strike_hud_killfeed(Client *client, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
-                         const Weapon *weapon, int headshot, int thrown, int wallbang); // killer NULL: a suicide / world death
+                         const Weapon *weapon, int headshot, int thrown, int wallbang, int hidden); // killer NULL: a suicide / world death; hidden: NET_KILL_HIDE_FEED, no row
 void strike_hud_death(Client *client, const HudKillCard *card, const Player *killer); // io_killPlayer (us): the kill card
 void strike_hud_end(Client *client, int result);   // endGame: 1 victory, 0 defeat, -1 draw
 void strike_hud_end_hide(Client *client);          // the next round's INIT
