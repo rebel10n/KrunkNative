@@ -82,9 +82,10 @@ static struct {
     int last_card;              // card_key() when the kill card / its Spectate button was drawn
     int end_shown, end_result;  // the round end is up this round (and its result: strike_hud_end)
     int rendered_spec;          // spectate_active() when the HUD was drawn (the panel replaces the health and reload)
+    int banner_timer;           // the victory banner (endAnim) until it opens LEAN_END_SCREEN, 0 none
     char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
-    int scenario, scn_health, scn_max_health, scn_reward;
+    int scenario, scn_health, scn_max_health, scn_reward, scn_banner;
     int scn_board, scn_row_count;   // state.strike.scoreboard (held) and state.strike.board (rows)
     int scn_cross;                  // state.strike.crosshair: the Dynamic crosshair shown (cross_tick)
     BoardRow scn_rows[BOARD_ROWS_MAX];
@@ -904,13 +905,14 @@ static void update(Client *client) {
 #define LEAN_BAR_MIDDLE (4.0 / 193.0)
 #define LEAN_BAR_RIGHT (10.0 / 193.0)
 
-// tB's copies: the stroke copy of each text, then the copy with its class (classes: gold / silver / bronze / place)
-static void victory_copy(StrBuf *sb, const int stroke, const char *cls, const char *text) {
+// tB's copies: the stroke copy of each text, then the copy with its class (classes: gold / silver / bronze / place);
+// size "--small" (the lean screen, stroke 2) or "--large" (the banner, stroke 4)
+static void victory_copy(StrBuf *sb, const int stroke, const char *cls, const char *text, const char *size) {
     sb_append(sb, "<div class=\"frvr-in-game-ui__victory-text ");
     if (stroke) sb_append(sb, "frvr-in-game-ui__victory-text--stroke ");
     else if (cls) sb_appendf(sb, "%s ", cls);
-    sb_append(sb, "frvr-in-game-ui__victory-text--small\"");
-    if (stroke) sb_append(sb, " style=\"--stroke-size: 2;\"");
+    sb_appendf(sb, "frvr-in-game-ui__victory-text%s\"", size);
+    if (stroke) sb_appendf(sb, " style=\"--stroke-size: %d;\"", strcmp(size, "--small") ? 4 : 2);
     sb_appendf(sb, ">%s</div>", text);
 }
 
@@ -940,11 +942,11 @@ static void lean_title(StrBuf *sb, const int ffa, const int rank, const int resu
     // FRVR's img gets no victory state class here (_Ae returns no victoryState)
     sb_append(sb, "<div class=\"lean-end-screen__victory-defeat\"><img src=\"./img/victory-screen-bg.png\" class=\"lean-end-screen__victory-defeat--small \">");
     sb_append(sb, "<div class=\"frvr-in-game-ui__victory-text-holder\">");
-    if (first[0]) victory_copy(sb, 1, NULL, first);
-    victory_copy(sb, 1, NULL, second);
+    if (first[0]) victory_copy(sb, 1, NULL, first, "--small");
+    victory_copy(sb, 1, NULL, second, "--small");
     sb_append(sb, "</div><div class=\"frvr-in-game-ui__victory-text-holder\">");
-    if (first[0]) victory_copy(sb, 0, cls, first);
-    victory_copy(sb, 0, NULL, second);
+    if (first[0]) victory_copy(sb, 0, cls, first, "--small");
+    victory_copy(sb, 0, NULL, second, "--small");
     sb_append(sb, "</div></div>");
 }
 
@@ -1063,17 +1065,8 @@ static void lean_forget(void) {
     H.lean_head = H.lean_main = NULL;
 }
 
-void strike_hud_end(Client *client, const int result) {
-    if (!strike_ui_active()) return;
-    H.client = client;
-    // FRVR's endGame pushes LEAN_END_SCREEN once (nu(Ad, ...)); its end timer only updates the
-    // screen's values (endTimer). The end timer's packets repeat this every second, so once this round
-    // end was shown, a screen the player left (Home, Settings over the menu) stays left: only the
-    // values of a round end that is still on the stack follow (MATCH_DETAILS_SCREEN pushed over it).
-    if (H.end_shown) {
-        if (strike_screen_shown(STRIKE_SCREEN_LEAN_END)) end_fill(client, result);
-        return;
-    }
+// nu(Ad, ...): LEAN_END_SCREEN over the game, its values filled
+static void lean_show(Client *client, const int result) {
     H.kill_card = 0;
     strike_touch_reset();
     lean_forget();
@@ -1084,9 +1077,105 @@ void strike_hud_end(Client *client, const int result) {
     printf("[strike] end screen (%s)\n", result > 0 ? "victory" : result == 0 ? "defeat" : "draw");
 }
 
+// the victory banner (zde / Nde: .frvr-in-game-ui__victory-screen, a tB of the large size) for the
+// endAnim (xe.endAnim, 2500 ms): BSe sets Mt.showVictory and hides the in-game info (displayInfoUI),
+// then yR opens LEAN_END_SCREEN. Nde's words: FFA "#1 VICTORY" for the first place (gold), "MATCH
+// OVER" for the rest; a team mode VICTORY (gold) / DEFEAT (place) / DRAW.
+#define END_ANIM_MS 2500.0
+
+static void banner_remove(void) {
+    const HtmlElem h = holder();
+    const HtmlElem banner = h ? html_dom_query(h, ".frvr-in-game-ui__victory-screen") : 0;
+    if (banner) html_dom_remove(banner);
+}
+
+static void banner_cancel(void) {
+    if (H.banner_timer) html_timer_cancel(H.banner_timer);
+    H.banner_timer = 0;
+    banner_remove();
+}
+
+static void banner_done(void *user) {
+    (void) user;
+    H.banner_timer = 0;
+    banner_remove();
+    lean_show(H.client, H.end_result);
+}
+
+static void banner_show(Client *client, const int result) {
+    const HtmlElem h = holder();
+    if (!h) {
+        lean_show(client, result);
+        return;
+    }
+    const char *texts[2] = {NULL, NULL}, *cls = NULL;
+    int count = 1;
+    if (!team_mode(client)) {
+        if (client->net_end_rank == 1) {
+            texts[0] = "#1";
+            texts[1] = " VICTORY";
+            count = 2;
+            cls = "frvr-in-game-ui__victory-text--gold";
+        } else {
+            texts[0] = "MATCH OVER";
+        }
+    } else if (result > 0) {
+        texts[0] = "VICTORY";
+        cls = "frvr-in-game-ui__victory-text--gold";
+    } else if (result == 0) {
+        texts[0] = "DEFEAT";
+        cls = "frvr-in-game-ui__victory-text--place";
+    } else {
+        texts[0] = "DRAW";
+    }
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"frvr-in-game-ui__victory-screen\"><div class=\"frvr-in-game-ui__regular-victory\">"
+                   "<img src=\"./img/victory-screen-bg.png\" class=\"frvr-in-game-ui__regular-victory--large \">");
+    sb_append(&sb, "<div class=\"frvr-in-game-ui__victory-text-holder\">");
+    for (int i = 0; i < count; i++) victory_copy(&sb, 1, NULL, texts[i], "--large");
+    sb_append(&sb, "</div><div class=\"frvr-in-game-ui__victory-text-holder\">");
+    for (int i = 0; i < count; i++) victory_copy(&sb, 0, i == 0 ? cls : NULL, texts[i], "--large");
+    sb_append(&sb, "</div></div></div>");
+    char *html = sb_finish(&sb);
+
+    // the in-game HUD steps aside (displayInfoUI = false): only the banner is drawn over the game
+    H.kill_card = 0;
+    strike_touch_reset();
+    unrender();
+    const HtmlElem anchor = game_anchor(h);
+    if (anchor) html_dom_insert_html(anchor, HTML_INSERT_BEFORE_BEGIN, html);
+    else html_dom_insert_html(h, HTML_INSERT_BEFORE_END, html);
+    free(html);
+    printf("[strike] end banner \"%s%s\"\n", texts[0], count > 1 ? texts[1] : "");
+    H.banner_timer = html_timer_add(END_ANIM_MS, banner_done, NULL);
+}
+
+void strike_hud_end(Client *client, const int result) {
+    if (!strike_ui_active()) return;
+    H.client = client;
+    H.end_result = result;
+    // FRVR's endGame pushes LEAN_END_SCREEN once (nu(Ad, ...)); its end timer only updates the
+    // screen's values (endTimer). The end timer's packets repeat this every second, so once this round
+    // end was shown, a screen the player left (Home, Settings over the menu) stays left: only the
+    // values of a round end that is still on the stack follow (MATCH_DETAILS_SCREEN pushed over it).
+    if (H.end_shown) {
+        if (strike_screen_shown(STRIKE_SCREEN_LEAN_END)) end_fill(client, result);
+        return;
+    }
+    if (H.banner_timer) return; // the endAnim runs: its end opens the lean screen
+    // --render-scenario: the lean screen at once unless the fixture asks for the banner (endBanner)
+    if (H.scenario && !H.scn_banner) {
+        lean_show(client, result);
+        return;
+    }
+    banner_show(client, result);
+}
+
 void strike_hud_end_hide(Client *client) {
     (void) client;
-    if (!strike_ui_active() || !H.end_shown) return;
+    if (!strike_ui_active()) return;
+    banner_cancel();
+    if (!H.end_shown) return;
     H.end_shown = 0;
     lean_forget();
     if (strike_screen_top() == STRIKE_SCREEN_LEAN_END) strike_screen_clear();
@@ -1191,6 +1280,7 @@ void strike_hud_install(void) {}
 
 void strike_hud_reset(void) {
     unrender();
+    banner_cancel();
     for (int i = 0; i < H.log_count; i++) {
         if (H.log[i].timer) html_timer_cancel(H.log[i].timer);
     }
@@ -1243,8 +1333,8 @@ void strike_hud_tick(Client *client) {
     H.client = client;
     const int spec = spectate_active();
     // Mt.inGameUI.visible: in a game, the menu closed (Yh(true)), not the end screen; spectating has no
-    // player of ours, the spectate panel is the HUD
-    const int want = client && client->in_game && (client->me || spec) && !html_ui_is_menu_open() && !H.end_shown;
+    // player of ours, the spectate panel is the HUD. The victory banner (endAnim) holds the HUD back too.
+    const int want = client && client->in_game && (client->me || spec) && !html_ui_is_menu_open() && !H.end_shown && !H.banner_timer;
     // Mt.showMiniScoreBoard: the scoreboard key held (ui_controls.c: not while typing); a dead player
     // sees the kill card instead (Mt.displayInfoUI is false then)
     H.board = want && !H.kill_card && (H.scn_board || ui_controls_scoreboard_held());
@@ -1274,6 +1364,7 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
     // the round end's values (no players in a scenario): the place (1 = first), the KR of the match
     // (player.reward) and the end timer's seconds
     H.scn_reward = sjn(st, "endReward", 0);
+    H.scn_banner = sjn(st, "endBanner", 0);
     if (client) {
         client->net_end_rank = sjn(st, "endRank", 1);
         client->net_end_seconds = sjn(st, "endSeconds", 0);

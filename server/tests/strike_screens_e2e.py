@@ -15,7 +15,7 @@ data, not its pixels.
   3. a live offline Strike client (--flavor strike --offline, an input script clicking through
      strikeAction): Battle Pass > Missions for a guest is FRVR's I2 "Loading Missions" (no bpData),
      Rewards "Loading Rewards"; PROFILE has no Rewards Track (no game config: KU renders nothing);
-     the Missions tab selector click switches back; after `bot 2` + `end` a click on the round end's podium opens MATCH_DETAILS_SCREEN (title, header + 3
+     the Missions tab selector click switches back; after `bot 2` + `end` (the victory banner's 2.5 s, then the round end, checked at 25 s) a click on the round end's podium opens MATCH_DETAILS_SCREEN (title, header + 3
      rows, our row --player, Report players), a click on Report players swaps in the report symbols, a
      click on Close returns to the round end with its victory title still filled.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). KRUNKNATIVE_ASSETS_DIR is passed through
@@ -53,8 +53,10 @@ def env(cfg, extra=None):
 
 
 def seed_played(cfg):
-    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect."""
-    path = os.path.join(cfg, "krunknative", "knFtue.json")
+    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect.
+    The file is in the Strike flavor's own config directory (flavor_storage_subdir: "krunknative-strike", not Box
+    Office's "krunknative"), where a --flavor strike client reads its html storage keys."""
+    path = os.path.join(cfg, "krunknative-strike", "knFtue.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write('{"guest":{"played":true}}')
@@ -163,39 +165,39 @@ LIVE_SCRIPT = """menu
 3900 call strikeAction "home"
 4000 con bot 2
 4500 con end
-11000 nodes @lean .lean-end-screen__header
-11100 clicksel .lean-end-screen__bottom-buttons .frvr-button
-11600 text @mdtitle .match-details__title
-11650 nodes @mdrows .match-details__legacy-board .frvr-lboard-end-screen__row-wrapper
-11700 nodes @mdme .match-details__legacy-board .frvr-lboard-end-screen__position--player
-11750 nodes @mdreport .match-details__legacy-board .frvr-lboard-end-screen__report
-11800 frames {shots}/match-details 1
-11900 clicksel .match-details__legacy-board .frvr-lboard-end-screen__report
-12300 nodes @mdreport2 .match-details__legacy-board .frvr-lboard-end-screen__report
-12350 nodes @mdsym .frvr-lboard-end-screen__report-symbol
-12360 rects @pfp .match-details__legacy-board .frvr-lboard-end-screen__pfp img
-12400 clicksel .frvr-lboard-end-screen__report-symbol img
-12900 text @rpname .report-player .player-name strong
-12950 clicksel .report-player .buttons .frvr-button--red
-13300 nodes @rperr .report-player .input-error
-13350 nodes @rpdropErr .report-player .dropdown-container.is-error
-13400 clicksel .report-player .dropdown-header
-13700 nodes @rpopts .report-player .dropdown-option
-13750 clicksel .report-player .dropdown-option
-14100 text @rpreason .report-player .dropdown-header span
-14150 nodes @rperr2 .report-player .input-error
-14200 clickid reasonComments
-14250 type aimbot through walls all round
-14600 nodes @rperr3 .report-player .input-error
-14650 clicksel .report-player .buttons .frvr-button--red
-15100 text @alert .mobPopAlert .alert-text span
-15150 nodes @alertimg .mobPopAlert img[src="./img/frvr-ui/info-close.svg"]
-15200 clickid alertScreenBtn
-15600 nodes @mdback .match-details__title
-15650 clicksel .lightbox__buttons .frvr-button
-16100 nodes @mdgone .match-details__title
-16150 text @leantitle .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text
-16200 quit
+25000 nodes @lean .lean-end-screen__header
+25100 clicksel .lean-end-screen__bottom-buttons .frvr-button
+25600 text @mdtitle .match-details__title
+25650 nodes @mdrows .match-details__legacy-board .frvr-lboard-end-screen__row-wrapper
+25700 nodes @mdme .match-details__legacy-board .frvr-lboard-end-screen__position--player
+25750 nodes @mdreport .match-details__legacy-board .frvr-lboard-end-screen__report
+25800 frames {shots}/match-details 1
+25900 clicksel .match-details__legacy-board .frvr-lboard-end-screen__report
+26300 nodes @mdreport2 .match-details__legacy-board .frvr-lboard-end-screen__report
+26350 nodes @mdsym .frvr-lboard-end-screen__report-symbol
+26360 rects @pfp .match-details__legacy-board .frvr-lboard-end-screen__pfp img
+26400 clicksel .frvr-lboard-end-screen__report-symbol img
+26900 text @rpname .report-player .player-name strong
+26950 clicksel .report-player .buttons .frvr-button--red
+27300 nodes @rperr .report-player .input-error
+27350 nodes @rpdropErr .report-player .dropdown-container.is-error
+27400 clicksel .report-player .dropdown-header
+27700 nodes @rpopts .report-player .dropdown-option
+27750 clicksel .report-player .dropdown-option
+28100 text @rpreason .report-player .dropdown-header span
+28150 nodes @rperr2 .report-player .input-error
+28200 clickid reasonComments
+28250 type aimbot through walls all round
+28600 nodes @rperr3 .report-player .input-error
+28650 clicksel .report-player .buttons .frvr-button--red
+29100 text @alert .mobPopAlert .alert-text span
+29150 nodes @alertimg .mobPopAlert img[src="./img/frvr-ui/info-close.svg"]
+29200 clickid alertScreenBtn
+29600 nodes @mdback .match-details__title
+29650 clicksel .lightbox__buttons .frvr-button
+30100 nodes @mdgone .match-details__title
+30150 text @leantitle .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text
+30200 quit
 """
 
 
@@ -254,7 +256,9 @@ def live_case():
           text_of(text, "alert") == (1, "Must be logged in") and nodes(text, "alertimg") == 1, f"{text_of(text, 'alert')} {nodes(text, 'alertimg')}")
     check("3: Close -> back to the match details", nodes(text, "mdback") == 1, str(nodes(text, "mdback")))
     n, title = text_of(text, "leantitle")
-    check("3: Close -> the round end again, its title still filled (keepAlive)", nodes(text, "mdgone") == 0 and n == 4 and title.startswith("#"),
+    # the place depends on the bots' scores: "#1" (VICTORY) or "2nd" / "3rd" / "Nth" (PLACE), any of them
+    check("3: Close -> the round end again, its title still filled (keepAlive)",
+          nodes(text, "mdgone") == 0 and n == 4 and re.fullmatch(r"#1|\d+(nd|rd|th)", title) is not None,
           f"{nodes(text, 'mdgone')} {n} {title!r}")
 
 

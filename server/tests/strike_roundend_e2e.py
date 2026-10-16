@@ -85,6 +85,11 @@ def scenario_json(name, strike):
     return path
 
 
+def banner_line(text):
+    m = re.search(r'\[strike\] end banner "([^"]*)"', text)
+    return m.group(1) if m else None
+
+
 def end_line(text):
     m = re.search(r'\[strike\] end screen: title "([^"]*)" level (\d+) \((\d+) / (\d+)\), reward (\d+) KR', text)
     return m.groups() if m else None
@@ -100,6 +105,14 @@ def scenario_case():
     check("1: title #1 VICTORY, a guest's level 1 at 0 / 100, the 25 KR reward",
           end_line(text) == ("#1 VICTORY", "1", "0", "100", "25"), str(end_line(text)))
 
+    # the victory banner (Nde) before the lean screen: "#1 VICTORY" for the first place, "MATCH OVER" for the rest
+    for rank, words in ((1, "#1 VICTORY"), (2, "MATCH OVER")):
+        path = scenario_json(f"banner{rank}", {"end": 1, "endRank": rank, "endBanner": 1, "endSeconds": 30})
+        rc, text = run([f"{BUILD}/client_bin", "--render-scenario", path, os.path.join(WORK, f"banner{rank}.png")],
+                       os.path.join(WORK, f"cfg-banner{rank}"), os.path.join(WORK, f"banner{rank}.log"))
+        check(f"1: endRank {rank}: the victory banner says \"{words}\" (endAnim, then the lean screen)",
+              rc == 0 and banner_line(text) == words and end_line(text) is None, str(banner_line(text)))
+
     for rank, title in ((2, "2nd PLACE"), (3, "3rd PLACE"), (12, "12th PLACE")):
         path = scenario_json(f"rank{rank}", {"end": 1, "endRank": rank, "endReward": 0, "endSeconds": 12})
         rc, text = run([f"{BUILD}/client_bin", "--render-scenario", path, os.path.join(WORK, f"rank{rank}.png")],
@@ -114,16 +127,16 @@ LIVE_SCRIPT = """menu
 1500 nodes @page #frvrMenuMobile
 4000 con bot 2
 4500 con end
-11000 text @title .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text-holder
-11050 text @bar .progress-bar__left-text
-11100 text @xp .progress-bar__right-text
-11150 nodes @claim .lean-end-screen__reward .frvr-button
-11200 text @next .lean-end-screen__reward-text
-11250 text @timer1 .lean-end-screen__timer__time
-11300 text @sample .lean-end-screen__main-container
-13300 text @timer2 .lean-end-screen__timer__time
-13350 frames {shots}/round-end 1
-13400 quit
+30000 text @title .lean-end-screen__victory-defeat .frvr-in-game-ui__victory-text-holder
+30050 text @bar .progress-bar__left-text
+30100 text @xp .progress-bar__right-text
+30150 nodes @claim .lean-end-screen__reward .frvr-button
+30200 text @next .lean-end-screen__reward-text
+30250 text @timer1 .lean-end-screen__timer__time
+30300 text @sample .lean-end-screen__main-container
+32300 text @timer2 .lean-end-screen__timer__time
+32350 frames {shots}/round-end 1
+32400 quit
 """
 
 
@@ -157,6 +170,12 @@ def live_case():
     t1, t2 = text_of(text, "timer1")[1], text_of(text, "timer2")[1]
     check("3: the end timer reads MM:SS and counts down", re.match(r"^\d\d:\d\d$", t1) is not None and re.match(r"^\d\d:\d\d$", t2) is not None and t1 != t2,
           f"{t1} {t2}")
+    # the banner (2.5 s of endAnim) is up for a moment: its log line comes before the lean screen's
+    banner = text.find('[strike] end banner "')
+    lean = text.find("[strike] end screen: title")
+    check("3: the victory banner runs before the lean screen (endAnim)", 0 <= banner < lean, f"banner {banner} lean {lean}")
+    check("3: the banner's words (\"#N VICTORY\" or \"MATCH OVER\")",
+          re.match(r'^(#\d+ VICTORY|MATCH OVER)$', banner_line(text) or "") is not None, str(banner_line(text)))
     check("3: the round end's screenshot", png_size(os.path.join(WORK, "round-end_0000.png")) == (1280, 720))
 
 
