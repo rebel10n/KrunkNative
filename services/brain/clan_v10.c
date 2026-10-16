@@ -8,7 +8,8 @@
  *   POST   /clans/<id>/banner-color {paint_item_id}  {clan_banner_color, paint_item_id, count}
  *                                        owner, role >= 2; consumes one owned paint (v10 store
  *                                        skins of type 18, the table below)
- *   POST   /clans/<id>/logo              refused: no upload pipeline (no logo storage / review)
+ *   POST   /clans/<id>/logo {file}       {status, clan_logo_pending, clan_funds}  owner, Captain
+ *                                        (clan_logo.c: a 512 x 512 PNG, the review, 20,000 KR)
  *   DELETE /clans/<id>/logo              {}                                   owner, Captain
  *   POST   /clans/<id>/transfer {name}   ownership_transfer                   owner
  *   DELETE /clans/<id>/transfer          {}                                   owner
@@ -27,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "clan_logo.h"
 #include "hot.h"
 #include "knsvc/json.h"
 #include "knsvc/loop.h"
@@ -124,6 +126,7 @@ static kn_db_result *run_logo_delete(kn_dbconn *c, int n, const char *const *p) 
     const int64_t rank = member_rank(&x, P(0), PI(1), &owner);
     if (!owner && rank != 2) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
     dbx_exec(&x, SQL(.any = "UPDATE clans SET clan_logo = 0, clan_logo_pending = 0 WHERE clan_id = $1"), KN_DB_ARGS(I64S(PI(1))));
+    dbx_exec(&x, SQL(.any = "DELETE FROM clan_logos WHERE clan_id = $1"), KN_DB_ARGS(I64S(PI(1))));
     return dbx_json(&x, "logo", cJSON_CreateObject());
 }
 static const kn_proc P_LOGO_DELETE = {"clan_logo_delete", NULL, run_logo_delete};
@@ -284,7 +287,7 @@ int clan_v10_gapi(SocialSession *s, const GapiReq *r) {
     } else if (gapi_is(r, "DELETE", "/clans/:id/logo")) {
         social_call(s, &P_LOGO_DELETE, KN_DB_ARGS(me, cl), data_done, rid_of(r));
     } else if (gapi_is(r, "POST", "/clans/:id/logo")) {
-        gapi_error(s, r->rid, 501, "CLAN_LOGO_UNSUPPORTED", "Logo uploads are not supported on this server");
+        clan_logo_upload(s, r->rid, me, clan, r->body);
     } else if (gapi_is(r, "POST", "/clans/:id/transfer")) {
         const char *name = kn_json_str(r->body, "name", "");
         if (!name[0]) {

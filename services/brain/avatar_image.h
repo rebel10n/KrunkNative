@@ -18,6 +18,8 @@
 #define AVATAR_MIN_SRC_PX 32       /* smaller uploads are refused */
 #define AVATAR_MAX_SRC_PX 2048     /* larger dimensions are refused (decoding is done on the loop thread) */
 #define AVATAR_MAX_BYTES (512u * 1024u)  /* upload size cap, before decoding */
+#define CLAN_LOGO_PX 512                 /* clan logos are exactly CLAN_LOGO_PX x CLAN_LOGO_PX (v10: 512x512 PNG) */
+#define CLAN_LOGO_MAX_BYTES (256u * 1024u) /* clan logo upload size cap (v10: 256 KB), before decoding */
 
 typedef enum { AVATAR_FMT_NONE = 0, AVATAR_FMT_PNG, AVATAR_FMT_JPEG, AVATAR_FMT_WEBP } AvatarFormat;
 
@@ -39,5 +41,12 @@ typedef struct {
  * "ImageTooLarge" (dimensions), "BadImage" (does not decode), "AvatarsUnavailable". */
 const char *avatar_image_normalize(const unsigned char *src, size_t n, AvatarImage *out);
 void avatar_image_free(AvatarImage *img);
+
+/* Clan logo intake (clan_logo.c): PNG only, at most CLAN_LOGO_MAX_BYTES, exactly CLAN_LOGO_PX square.
+ * The same decoder and the same error names as avatar_image_normalize, except the picture is not
+ * resampled: it is re-encoded as a lossless WebP of the same size. Errors: "UnsupportedType" (not a
+ * PNG), "FileTooLarge", "ImageTooSmall" (a side below CLAN_LOGO_PX), "ImageTooLarge" (a side above),
+ * "BadImage", "AvatarsUnavailable". out.src_w / src_h are the upload's own size. */
+const char *avatar_logo_normalize(const unsigned char *src, size_t n, AvatarImage *out);
 
 #endif

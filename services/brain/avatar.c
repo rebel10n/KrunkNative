@@ -190,7 +190,6 @@ typedef struct {
     size_t bytes;
     int src_w, src_h;
     char sha256[65];
-    char nonce[32];
     char *b64;
 } Review;
 
@@ -213,22 +212,17 @@ static void on_verdict_saved(kn_db_result *res, void *ud) {
     review_free(r);
 }
 
-/* the model the review runs on: the moderation profile's own model when it names one, else
- * avatar.moderation_model (ai_moderate_image makes the same choice) */
-static const char *review_model(void) {
-    const AiProvider *p = ai_provider_get("moderation");
-    return p && p->model[0] ? p->model : A.model;
-}
+#define REVIEW_FAILED "Automatic review failed. Try uploading the picture again later."
 
 /* writes the verdict for this picture (status approved | rejected | error) and frees r */
-static void save_verdict(Review *r, const char *status, const char *reason, const char *categories) {
+static void save_verdict(Review *r, const char *status, const char *reason, const char *categories, const char *model) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "id", (double) r->id);
     cJSON_AddStringToObject(o, "sha256", r->sha256);
     cJSON_AddStringToObject(o, "status", status);
     cJSON_AddStringToObject(o, "reason", reason);
     cJSON_AddStringToObject(o, "categories", categories);
-    cJSON_AddStringToObject(o, "model", review_model());
+    cJSON_AddStringToObject(o, "model", model);
     if (!strcmp(status, "approved")) cJSON_AddStringToObject(o, "image", r->b64);
     char *json = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
@@ -240,39 +234,76 @@ static void save_verdict(Review *r, const char *status, const char *reason, cons
     free(json);
 }
 
-static void on_review(void *ud, const char *err, const char *text) {
-    Review *r = ud;
+/* ---- the review: one moderation call per picture, the strict verdict, fail closed (avatar_review_picture) */
+
+typedef struct {
+    char nonce[32];
+    PictureVerdictFn done;
+    void *ud;
+} PictureReview;
+
+/* the model the review runs on: the moderation profile's own model when it names one, else
+ * avatar.moderation_model (ai_moderate_image makes the same choice) */
+static const char *review_model(void) {
+    const AiProvider *p = ai_provider_get("moderation");
+    return p && p->model[0] ? p->model : A.model;
+}
+
+/* hands the verdict to the caller, then frees c (the callback must not keep c) */
+static void picture_done(PictureReview *c, const char *status, const char *reason, const char *categories) {
+    PictureVerdict v = {status, reason, categories, review_model()};
+    c->done(c->ud, &v);
+    free(c);
+}
+
+static void on_picture_answer(void *ud, const char *err, const char *text) {
+    PictureReview *c = ud;
     if (err) {
-        KN_WARN(MOD, "picture review for account %lld failed: %.200s", (long long) r->id, err);
-        save_verdict(r, "error", "Automatic review failed. Try uploading the picture again later.", "");
+        KN_WARN(MOD, "picture review failed: %.200s", err);
+        picture_done(c, "error", REVIEW_FAILED, "");
         return;
     }
     AvatarVerdict v;
-    const int verdict = avatar_verdict_parse(text, r->nonce, &v);
-    KN_INFO(MOD, "picture review for account %lld: %s", (long long) r->id,
-            verdict == AVATAR_VERDICT_APPROVED ? "approved" : verdict == AVATAR_VERDICT_REJECTED ? "rejected" : "inconclusive");
-    if (verdict == AVATAR_VERDICT_APPROVED) save_verdict(r, "approved", v.reason, "");
-    else if (verdict == AVATAR_VERDICT_REJECTED) save_verdict(r, "rejected", v.reason, v.categories);
-    else save_verdict(r, "error", v.reason, "");
+    const int verdict = avatar_verdict_parse(text, c->nonce, &v);
+    if (verdict == AVATAR_VERDICT_APPROVED) picture_done(c, "approved", v.reason, "");
+    else if (verdict == AVATAR_VERDICT_REJECTED) picture_done(c, "rejected", v.reason, v.categories);
+    else picture_done(c, "error", v.reason, "");
 }
 
-static void start_review(Review *r) {
-    char prompt[4096];
-    if (avatar_verdict_prompt(prompt, sizeof(prompt), r->nonce) != 0) {
-        KN_WARN(MOD, "moderation prompt does not fit");
-        save_verdict(r, "error", "Automatic review failed. Try uploading the picture again later.", "");
+void avatar_review_picture(const char *b64, PictureVerdictFn done, void *ud) {
+    PictureReview *c = calloc(1, sizeof(*c));
+    if (!c) {
+        PictureVerdict v = {"error", REVIEW_FAILED, "", review_model()};
+        done(ud, &v);
         return;
     }
-    const size_t n = strlen(r->b64) + 32;
+    c->done = done;
+    c->ud = ud;
+    char prompt[4096];
+    if (avatar_verdict_nonce(c->nonce, sizeof(c->nonce)) != 0 || avatar_verdict_prompt(prompt, sizeof(prompt), c->nonce) != 0) {
+        KN_WARN(MOD, "moderation prompt does not fit");
+        picture_done(c, "error", REVIEW_FAILED, "");
+        return;
+    }
+    const size_t n = strlen(b64) + 32;
     char *url = malloc(n);
     if (!url) {
-        save_verdict(r, "error", "Automatic review failed. Try uploading the picture again later.", "");
+        picture_done(c, "error", REVIEW_FAILED, "");
         return;
     }
-    snprintf(url, n, "data:image/webp;base64,%s", r->b64);
-    ai_moderate_image(A.model, prompt, avatar_verdict_question(), url, A.timeout_ms, on_review, r);
+    snprintf(url, n, "data:image/webp;base64,%s", b64);
+    ai_moderate_image(A.model, prompt, avatar_verdict_question(), url, A.timeout_ms, on_picture_answer, c);
     free(url);
 }
+
+/* the review of a profile picture: its verdict is written to the account's row */
+static void on_picture_verdict(void *ud, const PictureVerdict *v) {
+    Review *r = ud;
+    KN_INFO(MOD, "picture review for account %lld: %s", (long long) r->id, v->status);
+    save_verdict(r, v->status, v->reason, v->categories, v->model);
+}
+
+static void start_review(Review *r) { avatar_review_picture(r->b64, on_picture_verdict, r); }
 
 static void on_pending_stored(kn_db_result *res, void *ud) {
     Review *r = ud;
@@ -308,14 +339,12 @@ static void store_pending(kn_http_req *req, const int64_t id, Picture *p) {
         snprintf(r->sha256, sizeof(r->sha256), "%s", p->sha256);
         r->b64 = p->b64;
         p->b64 = NULL;
-        if (avatar_verdict_nonce(r->nonce, sizeof(r->nonce)) == 0) {
-            cJSON_AddNumberToObject(put, "id", (double) id);
-            cJSON_AddStringToObject(put, "sha256", r->sha256);
-            cJSON_AddNumberToObject(put, "bytes", (double) r->bytes);
-            cJSON_AddNumberToObject(put, "width", r->src_w);
-            cJSON_AddNumberToObject(put, "height", r->src_h);
-            json = cJSON_PrintUnformatted(put);
-        }
+        cJSON_AddNumberToObject(put, "id", (double) id);
+        cJSON_AddStringToObject(put, "sha256", r->sha256);
+        cJSON_AddNumberToObject(put, "bytes", (double) r->bytes);
+        cJSON_AddNumberToObject(put, "width", r->src_w);
+        cJSON_AddNumberToObject(put, "height", r->src_h);
+        json = cJSON_PrintUnformatted(put);
     }
     cJSON_Delete(put);
     picture_free(p);

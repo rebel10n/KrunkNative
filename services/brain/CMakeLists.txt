@@ -20,6 +20,7 @@ set(KN_BRAIN_SOURCES
     social_gapi.c
     db_social_v10.c
     clan_v10.c
+    clan_logo.c                     # clan logos (0332_clan_logos): the settings tab's upload, its review, GET /api/clans/<id>/logo
     studios.c                       # v10 Studios: the /studios gapi routes (db_studios.c, 0330_studios)
     game_presence.c                 # v10 presence:game (account -> its game, pushed to friends)
     profiles.c

@@ -26,16 +26,17 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 
-// An <input type=file> for pictures. The file is read as a data URL (base64) in the browser;
-// Module.knAvatarPick then holds the data URL, or "!size" / "!read" / "!cancel".
-EM_JS(void, kn_avatar_pick_open, (void), {
+// An <input type=file> for pictures (png_only: PNG only). The file is read as a data URL (base64) in
+// the browser; Module.knAvatarPick then holds the data URL, or "!size" / "!type" / "!read" / "!cancel".
+EM_JS(void, kn_avatar_pick_open, (int png_only, double max_bytes), {
     var input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/png,image/jpeg,image/webp";
+    input.accept = png_only ? "image/png" : "image/png,image/jpeg,image/webp";
     input.onchange = function () {
         var f = input.files && input.files[0];
         if (!f) { Module.knAvatarPick = "!cancel"; return; }
-        if (f.size > 524288) { Module.knAvatarPick = "!size"; return; }
+        if (f.size > max_bytes) { Module.knAvatarPick = "!size"; return; }
+        if (png_only && f.type !== "image/png") { Module.knAvatarPick = "!type"; return; }
         var r = new FileReader();
         r.onload = function () { Module.knAvatarPick = String(r.result || "!read"); };
         r.onerror = function () { Module.knAvatarPick = "!read"; };
@@ -54,9 +55,16 @@ EM_JS(char *, kn_avatar_pick_take, (void), {
 
 static double g_pick_until;
 static int g_rechecks;   // checks of the picture under review since the last upload
+static struct {          // the dialog in progress (one at a time)
+    int png_only;
+    size_t max_bytes;
+    AvatarPickFn fn;
+    void *user;
+} g_pick;
 
 // ---- base64 (the upload is JSON; no shared encoder in the client)
 
+#ifndef __EMSCRIPTEN__ // the native dialog's upload (the web build hands over the data URL)
 static char *b64_encode(const unsigned char *in, const size_t n) {
     static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     char *out = malloc(4 * ((n + 2) / 3) + 1);
@@ -73,6 +81,7 @@ static char *b64_encode(const unsigned char *in, const size_t n) {
     out[o] = 0;
     return out;
 }
+#endif
 
 // ---- messages
 
@@ -173,53 +182,53 @@ static void upload_base64(const char *b64) {
     free(json);
 }
 
-// the picture file as read by the native dialog: type and size are checked here (early answer)
-static void upload_bytes(const unsigned char *data, const size_t n) {
-    if (n > AVATAR_MAX_BYTES) {
-        set_status(error_message(413, "FileTooLarge"));
-        return;
-    }
-    const int png = n >= 8 && !memcmp(data, "\x89PNG\r\n\x1a\n", 8);
-    const int jpeg = n >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff;
-    const int webp = n >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4);
-    if (!png && !jpeg && !webp) {
-        set_status(error_message(415, "UnsupportedType"));
-        return;
-    }
-    char *b64 = b64_encode(data, n);
-    if (!b64) {
-        set_status("The picture could not be uploaded. Try again later.");
-        return;
-    }
-    upload_base64(b64);
-    free(b64);
+// ---- the dialog: the picked file's checks (type, size), then its base64 to the caller
+
+// the answer of a picked file: the caller's callback, once (the error name, or NULL = ok)
+static void picked(const char *b64, const size_t bytes, const char *error) {
+    AvatarPickFn fn = g_pick.fn;
+    void *user = g_pick.user;
+    g_pick.fn = NULL;
+    if (fn) fn(user, b64, bytes, error);
 }
 
-// ---- the dialog
-
 #ifndef __EMSCRIPTEN__
-static int read_picture(const char *path, unsigned char **out, size_t *n) {
+// the picture's type by its first bytes: PNG only, or PNG / JPEG / WebP
+static int picture_type_ok(const unsigned char *data, const size_t n, const int png_only) {
+    const int png = n >= 8 && !memcmp(data, "\x89PNG\r\n\x1a\n", 8);
+    if (png_only) return png;
+    const int jpeg = n >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff;
+    const int webp = n >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4);
+    return png || jpeg || webp;
+}
+
+static int read_picture(const char *path, const size_t max_bytes, unsigned char **out, size_t *n) {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
-    unsigned char *buf = malloc(AVATAR_MAX_BYTES + 1);
+    unsigned char *buf = malloc(max_bytes + 1);
     if (!buf) {
         fclose(f);
         return 0;
     }
-    *n = fread(buf, 1, AVATAR_MAX_BYTES + 1, f);
+    *n = fread(buf, 1, max_bytes + 1, f);
     fclose(f);
     *out = buf;
     return 1;
 }
 
 // zenity, then kdialog (the editor's dialogs); the chosen path, or NULL when cancelled / none
-static int native_pick(char *out, const size_t cap) {
+static int native_pick(const int png_only, char *out, const size_t cap) {
     static const char *commands[] = {
-        "zenity --file-selection --title='Choose a profile picture' --file-filter='Pictures | *.png *.jpg *.jpeg *.webp' 2>/dev/null",
+        "zenity --file-selection --title='Choose a picture' --file-filter='Pictures | *.png *.jpg *.jpeg *.webp' 2>/dev/null",
         "kdialog --getopenfilename . 'Pictures (*.png *.jpg *.jpeg *.webp)' 2>/dev/null",
     };
+    static const char *png_commands[] = {
+        "zenity --file-selection --title='Choose a PNG picture' --file-filter='PNG pictures | *.png' 2>/dev/null",
+        "kdialog --getopenfilename . 'PNG pictures (*.png)' 2>/dev/null",
+    };
+    const char *const *list = png_only ? png_commands : commands;
     for (size_t c = 0; c < sizeof(commands) / sizeof(commands[0]); c++) {
-        FILE *pipe = popen(commands[c], "r");
+        FILE *pipe = popen(list[c], "r");
         if (!pipe) continue;
         char line[1024] = "";
         const int got = fgets(line, sizeof(line), pipe) != NULL;
@@ -236,14 +245,24 @@ static int native_pick(char *out, const size_t cap) {
 
 static void pick_native(void) {
     char path[1024];
-    if (!native_pick(path, sizeof(path))) return;
-    unsigned char *data = NULL;
-    size_t n = 0;
-    if (!read_picture(path, &data, &n)) {
-        set_status("That file could not be read.");
+    if (!native_pick(g_pick.png_only, path, sizeof(path))) {
+        g_pick.fn = NULL; // cancelled: the callback is not called
         return;
     }
-    upload_bytes(data, n);
+    unsigned char *data = NULL;
+    size_t n = 0;
+    if (!read_picture(path, g_pick.max_bytes, &data, &n)) {
+        picked(NULL, 0, "BadImage");
+        return;
+    }
+    if (n > g_pick.max_bytes) picked(NULL, 0, "FileTooLarge");
+    else if (!picture_type_ok(data, n, g_pick.png_only)) picked(NULL, 0, "UnsupportedType");
+    else {
+        char *b64 = b64_encode(data, n);
+        if (b64) picked(b64, n, NULL);
+        else picked(NULL, 0, "BadImage");
+        free(b64);
+    }
     free(data);
 }
 #else
@@ -251,13 +270,20 @@ static void pick_poll(void *user) {
     (void) user;
     char *p = kn_avatar_pick_take();
     if (p) {
-        if (!strcmp(p, "!size")) set_status(error_message(413, "FileTooLarge"));
-        else if (!strcmp(p, "!read")) set_status("That file could not be read.");
+        if (!strcmp(p, "!size")) picked(NULL, 0, "FileTooLarge");
+        else if (!strcmp(p, "!type")) picked(NULL, 0, "UnsupportedType");
+        else if (!strcmp(p, "!read")) picked(NULL, 0, "BadImage");
         else if (strcmp(p, "!cancel") != 0) {
             // "data:<type>;base64,<...>": the browser's data URL, the base64 part goes up as is
             const char *comma = strchr(p, ',');
-            if (comma && strstr(p, ";base64,")) upload_base64(comma + 1);
-            else set_status("That file could not be read.");
+            if (comma && strstr(p, ";base64,")) {
+                const char *b = comma + 1;
+                const size_t len = strlen(b);
+                size_t pad = 0;
+                if (len >= 1 && b[len - 1] == '=') pad++;
+                if (len >= 2 && b[len - 2] == '=') pad++;
+                picked(b, len / 4 * 3 - pad, NULL);
+            } else picked(NULL, 0, "BadImage");
         }
         free(p);
         return;
@@ -266,12 +292,30 @@ static void pick_poll(void *user) {
 }
 #endif
 
-void avatar_ui_pick(void) {
+void avatar_ui_pick_file(const int png_only, const size_t max_bytes, const AvatarPickFn fn, void *user) {
+    g_pick.png_only = png_only;
+    g_pick.max_bytes = max_bytes;
+    g_pick.fn = fn;
+    g_pick.user = user;
 #ifdef __EMSCRIPTEN__
-    kn_avatar_pick_open();
+    kn_avatar_pick_open(png_only, (double) max_bytes);
     g_pick_until = glfwGetTime() + AVATAR_PICK_WAIT_S;
     html_timer_add(AVATAR_POLL_MS, pick_poll, NULL);
 #else
     pick_native();
 #endif
 }
+
+// "Change Picture": the profile picture (PNG, JPEG or WebP, up to 512 KB), uploaded when chosen
+static void on_profile_picked(void *user, const char *b64, const size_t bytes, const char *error) {
+    (void) user;
+    (void) bytes;
+    if (error) {
+        const int status = !strcmp(error, "FileTooLarge") ? 413 : !strcmp(error, "UnsupportedType") ? 415 : 422;
+        set_status(error_message(status, error));
+        return;
+    }
+    upload_base64(b64);
+}
+
+void avatar_ui_pick(void) { avatar_ui_pick_file(0, AVATAR_MAX_BYTES, on_profile_picked, NULL); }

@@ -28,6 +28,7 @@
 #include "streams.h"
 #include "user_assets.h"
 #include "avatar.h"
+#include "clan_logo.h"
 #include "strike_econ.h"
 #include "build_info.h"
 #include "knsvc/config.h"
@@ -73,6 +74,7 @@ static const BrainModule k_brain_modules[] = {
     {"ai-search", ai_search_init, ai_search_shutdown}, /* the AI's web search (ai_search.c) */
     {"streams", streams_init, streams_shutdown}, /* v10 Live Streams: /streams/top (streams.c) */
     {"avatar", avatar_init, avatar_shutdown}, /* profile pictures: upload, AI review, serving (avatar.c) */
+    {"clan-logo", clan_logo_init, clan_logo_shutdown}, /* clan logos: upload, AI review, serving (clan_logo.c) */
     {"stream-thumbs", stream_thumbs_init, stream_thumbs_shutdown}, /* the cards' previews: /streams/thumb */
     {"strike-econ", strike_econ_init, strike_econ_shutdown}, /* Krunker Strike's economy (strike_econ.h) */
     {"user-assets", user_assets_init, user_assets_shutdown}, /* community maps' Krunker user assets (user_assets.c) */

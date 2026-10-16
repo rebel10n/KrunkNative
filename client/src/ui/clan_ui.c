@@ -9,6 +9,9 @@
 // transfer. Deviation: v10's ownership-transfer socket RPCs (clan-transfer-initiate / -cancel /
 // -respond) are POST / DELETE /clans/<id>/transfer and POST /clans/<id>/transfer/respond. The
 // Turf Wars loot config and the recruitment board are kn_brain HTTP routes (turf.c, ?token=).
+// The logo: the file dialog is the profile picture's (avatar_ui_pick_file, PNG only) and the upload
+// is POST /clans/<id>/logo {file: base64} over the gapi tunnel (v10 sends the multipart `file`);
+// the approved logo is GET /api/clans/<id>/logo (clan_logo.c), not v10's user-assets CDN.
 //
 // Permissions as v10: owner = clanData.clan_playerid; clanRole = the account's clan_members rank
 // (v10 account slot player_clanrole), read from clanData.members. mgr = owner or Captain (2):
@@ -24,6 +27,7 @@
 // /recruitment). Every write (create, join, leave / delete, kick, roles, funds, requests, Discord,
 // banner, logo, MOTD, recruitment, loot config, ownership transfer) is not ported for that account:
 // its handler does nothing (clan_kio_write), so nothing is sent anywhere.
+#include <avatar_ui.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -39,6 +43,9 @@
 #define COL_PREMIUM "#FBC02D"         // COLORS.premium
 #define COL_VERIFIED_PLAYER "#40C4FF" // COLORS.verified.player
 #define LOGO_COST 20000               // clan logo: 20,000 KR from the clan bank
+#define LOGO_MAX_BYTES 262144         // v10: "max 256KB" (the brain's CLAN_LOGO_MAX_BYTES)
+#define LOGO_WATCH_MS 5000.0          // a pending logo is looked at again this often ...
+#define LOGO_WATCH_MAX 36             // ... for this many times (about three minutes)
 
 // _7497: home / Members / Stats / Requests / settings
 static const char *const k_clan_tabs[] = {
@@ -612,30 +619,41 @@ static void gen_requests(StrBuf *sb) {
 
 static void gen_logo(StrBuf *sb) {
     const int logo = (int) jnum(g_clan, "clan_logo"), pending = (int) jnum(g_clan, "clan_logo_pending");
+    const double kr = jnum(g_clan, "clan_funds");
     char funds[32];
-    comma(funds, sizeof(funds), jnum(g_clan, "clan_funds"));
+    comma(funds, sizeof(funds), kr);
+    const char *base = backend_url();
     sb_appendf(sb, "<div class=\"setHed\" style=\"margin-top:20px\">%s</div> <div class=\"logo-upload-container svelte-1w0uz1r\"><div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\">",
                I18N("windows.clans.settings.logo.title", "Clan Logo"));
     if (logo || pending) {
         sb_appendf(sb, "<div class=\"logo-preview-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-preview-container svelte-1w0uz1r\">",
                    I18N("windows.clans.settings.logo.current", "Current Logo"));
-        if (logo)
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d.png?v=%d\"> <div class=\"logo-status approved svelte-1w0uz1r\">%s</div></div>", clan_id(), logo,
+        if (logo) { // the approved logo (clan_logo.c serves it; without a brain there is no picture, only the status)
+            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\">");
+            if (base[0])
+                sb_appendf(sb, "<img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"%s/api/clans/%d/logo?v=%d\">", base, clan_id(), logo);
+            sb_appendf(sb, " <div class=\"logo-status approved svelte-1w0uz1r\">%s</div></div>",
                        I18N("windows.clans.settings.logo.status.approved", "Approved"));
-        if (pending)
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Pending logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d_pending.png?v=%d\"> <div class=\"logo-status pending svelte-1w0uz1r\">%s</div></div>", clan_id(), pending,
+        }
+        if (pending) // the picture under review is not served (clan_logo.c): the status alone
+            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><div class=\"logo-status pending svelte-1w0uz1r\">%s</div></div>",
                        I18N("windows.clans.settings.logo.status.pending", "Pending Approval"));
         sb_append(sb, "</div></div> ");
     }
     if (!pending) {
-        // KrunkNative: no file picker and no logo upload pipeline (clan_v10.c refuses POST /logo),
-        // so the drop target is v10's disabled state
-        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">%s</p> <p class=\"clan-funds svelte-1w0uz1r\">%s: %s KR</p></div> "
-                       "<div class=\"file-drop-target svelte-145grbc disabled\" role=\"button\" tabindex=\"-1\" aria-label=\"%s\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\"><div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">%s</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div></div></div></div> ",
+        // the drop target is live with the funds and no busy request (v10's disabled rules)
+        const int ready = !S.logo_busy && kr >= LOGO_COST;
+        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">%s</p> <p class=\"clan-funds svelte-1w0uz1r\">%s: %s KR</p></div> ",
                    I18N("windows.clans.settings.logo.upload.label", "Upload Logo"),
                    I18N("windows.clans.settings.logo.upload.requirements", "Requirements: 512x512 PNG, max 256KB. Cost: 20,000 krunkies"),
-                   I18N("windows.clans.settings.logo.clan.funds", "Clan Funds"), funds,
-                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"), I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"));
+                   I18N("windows.clans.settings.logo.clan.funds", "Clan Funds"), funds);
+        if (kr < LOGO_COST)
+            sb_appendf(sb, "<p class=\"insufficient-funds-warning svelte-1w0uz1r\">%s</p> ",
+                       I18N("kn.clans.logo.insufficient.funds", "Insufficient clan funds. Need 20,000 krunkies."));
+        sb_appendf(sb, "<div class=\"file-drop-target svelte-145grbc%s\" role=\"button\" tabindex=\"%d\"%s aria-label=\"%s\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\"><div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">%s</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div></div></div></div> ",
+                   ready ? "" : " disabled", ready ? 0 : -1, ready ? " onclick=\"windows[12].logoPick()\"" : "",
+                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"),
+                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"));
     } else {
         sb_appendf(sb, "<div class=\"pending-notice svelte-1w0uz1r\"><p class=\"svelte-1w0uz1r\">%s</p></div> ",
                    I18N("windows.clans.settings.logo.pending.notice", "A logo is pending approval. Please wait for admin review before uploading a new one."));
@@ -1275,6 +1293,72 @@ static void recruit_remove(void) {
     clan_rerender();
 }
 
+// the logo's file: the profile picture's dialog, PNG only, up to 256 KB; the brain checks the
+// 512 x 512 size and the moderation (clan_logo.c). The upload starts when a file is chosen.
+static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error);
+static void logo_pick(void) {
+    S.logo_err[0] = 0;
+    if (S.logo_busy || !g_clan) return;
+    if (jnum(g_clan, "clan_logo_pending") > 0) {
+        snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending review. Please wait before uploading a new one.");
+    } else if (jnum(g_clan, "clan_funds") < LOGO_COST) {
+        snprintf(S.logo_err, sizeof(S.logo_err), "Insufficient clan funds. Need 20,000 krunkies.");
+    } else {
+        avatar_ui_pick_file(1, LOGO_MAX_BYTES, on_logo_picked, NULL);
+        return;
+    }
+    rerender_kept();
+}
+
+static void on_logo_uploaded(void *user, const int status, const cJSON *data, const cJSON *error);
+static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error) {
+    (void) user;
+    (void) bytes;
+    if (error) {
+        snprintf(S.logo_err, sizeof(S.logo_err), "%s",
+                 !strcmp(error, "UnsupportedType") ? "File must be a PNG image"
+                 : !strcmp(error, "FileTooLarge")  ? "File size must be 256KB or less"
+                                                   : "Invalid image file");
+        rerender_kept();
+        return;
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "file", b64);
+    char path[64];
+    snprintf(path, sizeof(path), "/clans/%d/logo", clan_id());
+    S.logo_busy = v10_gapi("POST", path, body, on_logo_uploaded, NULL);
+    cJSON_Delete(body);
+    if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to upload logo");
+    rerender_kept();
+}
+
+// while the upload is under review the clan's data is looked at again (the verdict lands in the row)
+static int g_logo_watch;
+static void logo_watch(void *user) {
+    (void) user;
+    if (!g_clan || jnum(g_clan, "clan_logo_pending") <= 0 || g_logo_watch++ >= LOGO_WATCH_MAX) {
+        g_logo_watch = 0;
+        return;
+    }
+    send_cln(3, NULL, NULL);
+    html_timer_add(LOGO_WATCH_MS, logo_watch, NULL);
+}
+
+static void on_logo_uploaded(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) data;
+    S.logo_busy = 0;
+    if (status == 200 && !error) {
+        S.logo_err[0] = 0;
+        send_cln(3, NULL, NULL); // the clan's data: the logo is pending now
+        g_logo_watch = 0;
+        html_timer_add(LOGO_WATCH_MS, logo_watch, NULL);
+    } else {
+        snprintf(S.logo_err, sizeof(S.logo_err), "%s", v10_gapi_error_text(error, "Failed to upload logo"));
+    }
+    rerender_kept();
+}
+
 static void on_logo(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) user;
     (void) data;
@@ -1333,7 +1417,7 @@ static void transfer_send(const int kind, const int accept) {
 // the window's writes and the popups that only lead to one (krunker.io account: not ported)
 static int clan_kio_write(const char *name, const char *m) {
     static const char *const writes[] = {"sendReq", "updReq", "updRol", "chngFunds", "decAll", "updateDis", "bannerApply",
-                                         "logoRemove", "logoRemoveConfirmed", "motdSave", "motdRemove", "recruitSave",
+                                         "logoPick", "logoRemove", "logoRemoveConfirmed", "motdSave", "motdRemove", "recruitSave",
                                          "recruitRemove", "recruitRemoveConfirmed", "saveLoot", "transferStart",
                                          "transferCancel", "transferRespond", "delReq", "kickReq", "mangFunds", "declinePop"};
     if (!strcmp(name, "delClanConfirmed") || !strcmp(name, "kickClanConfirmed")) return 1;
@@ -1511,6 +1595,8 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
                   NULL, "Remove Post", "windows[12].recruitRemoveConfirmed()");
     } else if (!strcmp(m, "recruitRemoveConfirmed")) {
         recruit_remove();
+    } else if (!strcmp(m, "logoPick")) {
+        logo_pick();
     } else if (!strcmp(m, "logoRemove")) {
         io_prompt(I18N("windows.clans.settings.logo.remove.title", "Remove Clan Logo"),
                   I18N("windows.clans.settings.logo.remove.description", "Are you sure you want to remove the clan logo? This action cannot be undone."),

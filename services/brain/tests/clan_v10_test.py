@@ -10,10 +10,17 @@ the settings tab's gapi routes (services/brain/clan_v10.c, social_data.c, db_soc
 Covers: create clan, join request + accept, the owner making a Captain, a Captain's rights (role
 change but no Captains, Decline All, no Discord), the Discord link (cln 9), s7, MOTD set / get /
 delete (members read, only role >= 2 writes), banner colour from a seeded paint (consumed; none
-left = refused), ownership transfer initiate / cancel / respond, and the loot config read; the Captain (5) and Soldier (25) role limits.
+left = refused), ownership transfer initiate / cancel / respond, the loot config read, the Captain (5)
+and Soldier (25) role limits, and the clan logo (clan_logo.c): the owner or a Captain only, the profile
+picture's refusals (UnsupportedType, ImageTooSmall / ImageTooLarge, FileTooLarge) with no charge, one
+pending logo at a time, 20,000 KR taken from the clan bank exactly once and only by an approval (ledger
+row), a rejection and a failed review leave the funds and the ledger unchanged, an approval the clan
+cannot pay for is not set, approval sets clan_logo and serves the WebP, DELETE removes the logo.
+The moderation review goes to a STUBBED gateway (KN_AI_UPSTREAM_URL), never the live one.
 77 = skip (no kn_brain / websockets).
 """
 import asyncio
+import base64
 import itertools
 import json
 import os
@@ -23,8 +30,12 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.error
 import urllib.request
+import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     import websockets
@@ -81,6 +92,95 @@ def q(sql, *args):
 
 
 NOW_PLUS_1S = "now() + interval '1 second'" if DRIVER == "postgres" else "strftime('%Y-%m-%d %H:%M:%f', 'now', '+1 second')"
+
+# ---- the moderation gateway (STUB): OpenAI-compatible /cpa/v1/chat/completions; mode per test step
+MOD_KEY = "sk-clan-logo-test-%d" % os.getpid()
+
+
+class Gateway:
+    def __init__(self):
+        self.mode = "approve"  # approve | reject | fail | slow
+        self.calls = 0
+        gw = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, obj):
+                data = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                if self.path != "/cpa/v1/chat/completions":
+                    return self._send(404, {"error": {"message": "no route"}})
+                if self.headers.get("Authorization") != "Bearer " + MOD_KEY:
+                    return self._send(401, {"error": {"message": "bad key"}})
+                msgs = body.get("messages", [])
+                parts = msgs[-1].get("content") if msgs else None
+                if not (isinstance(parts, list) and any(p.get("type") == "image_url" for p in parts)):
+                    return self._send(200, {"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]})
+                gw.calls += 1
+                nonce = re.search(r'"nonce":"([^"]+)"', msgs[0].get("content", ""))
+                nonce = nonce.group(1) if nonce else ""
+                mode = gw.mode
+                if mode == "fail":
+                    return self._send(500, {"error": {"message": "stub failure"}})
+                if mode == "slow":
+                    time.sleep(3)
+                    mode = "approve"
+                if mode == "reject":
+                    answer = {"nonce": nonce, "allowed": False, "categories": ["gore"], "reason": "Shows blood."}
+                else:
+                    answer = {"nonce": nonce, "allowed": True, "categories": [], "reason": "Looks fine."}
+                self._send(200, {"choices": [{"index": 0, "finish_reason": "stop",
+                                              "message": {"role": "assistant", "content": json.dumps(answer)}}],
+                                 "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}})
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.server.daemon_threads = True
+        self.url = "http://127.0.0.1:%d/cpa/v1" % self.server.server_address[1]
+
+    def start(self):
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def stop(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+GW = None
+
+
+def png_rgba(w, h, raw=None):
+    """A w x h RGBA PNG: left half red, right half blue unless raw (w*h*4 bytes of pixels) is given."""
+    rows = []
+    for y in range(h):
+        if raw is None:
+            row = bytearray(b"\x00")
+            for x in range(w):
+                row += bytes((255, 0, 0, 255)) if x < w // 2 else bytes((0, 0, 255, 255))
+        else:
+            row = b"\x00" + raw[y * w * 4:(y + 1) * w * 4]
+        rows.append(bytes(row))
+
+    def chunk(kind, data):
+        return len(data).to_bytes(4, "big") + kind + data + (zlib.crc32(kind + data) & 0xFFFFFFFF).to_bytes(4, "big")
+
+    ihdr = w.to_bytes(4, "big") + h.to_bytes(4, "big") + bytes((8, 6, 0, 0, 0))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(b"".join(rows))) +
+            chunk(b"IEND", b""))
+
+
+def b64(data):
+    return base64.b64encode(data).decode()
 
 
 class Sock:
@@ -228,10 +328,7 @@ async def scenario(port):
     ranks = dict(q("SELECT account_id, rank FROM clan_members WHERE clan_id = ?", clan))
     check(ranks.get(c.id) == 3 and ranks.get(a.id) == 2, "new owner Commander, old owner Captain", ranks)
 
-    st, data, err = await a.gapi("POST", "/clans/%d/logo" % clan, {})
-    check(st != 200 and err, "logo upload refused (no upload pipeline)", (st, data, err))
-    st, data, err = await a.gapi("DELETE", "/clans/%d/logo" % clan)
-    check(st == 200, "a Captain removes the logo", (st, data, err))
+    await logo_checks(a, c, d, clan)
 
     with urllib.request.urlopen("http://127.0.0.1:%d/api/clans/%d/loot-config" % (port, clan), timeout=10) as r:
         body = json.loads(r.read())
@@ -285,8 +382,152 @@ async def role_caps(port):
         await s.close()
 
 
+def wait_db(fn, timeout=20.0):
+    """Polls a query (sync) until fn(rows) is true; the verdict is written asynchronously."""
+    end = time.time() + timeout
+    while time.time() < end:
+        rows = fn()
+        if rows:
+            return rows
+        time.sleep(0.2)
+    return None
+
+
+def fund(clan, kr):
+    q("UPDATE clans SET clan_funds = ? WHERE clan_id = ?", kr, clan)
+
+
+def clan_row(clan):
+    return q("SELECT clan_funds, clan_logo, clan_logo_pending FROM clans WHERE clan_id = ?", clan)[0]
+
+
+def ledger_rows(clan):
+    return q("SELECT amount, source FROM clan_funds_ledger WHERE clan_id = ? ORDER BY id", clan)
+
+
+def settled(clan):
+    """The review's row once it is no longer pending (the verdict is written asynchronously)."""
+    rows = wait_db(lambda: [r for r in q("SELECT status FROM clan_logos WHERE clan_id = ? AND status <> 'pending'", clan)])
+    return rows[0][0] if rows else None
+
+
+async def logo_checks(a, c, d, clan):
+    """a is a Captain, c the owner (after the transfer), d is not in the clan. The charge is taken only
+    when an approval sets the logo: a rejected or failed review leaves the funds and the ledger alone."""
+    logo_path = "/clans/%d/logo" % clan
+    png = png_rgba(512, 512)
+    fund(clan, 0)
+    st, data, err = await d.gapi("POST", logo_path, {"file": b64(png)})
+    check(st != 200 and "Only the clan owner" in (err or {}).get("message", ""), "an outsider cannot upload a logo", (st, data, err))
+
+    # the profile path's refusals, each before any review: nothing charged, nothing pending
+    fund(clan, 30000)
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")})
+    check(st == 415 and err and err.get("code") == "UnsupportedType", "a GIF is refused (UnsupportedType)", (st, data, err))
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png_rgba(500, 500))})
+    check(st == 422 and err and err.get("code") == "ImageTooSmall", "a 500 x 500 PNG is refused (ImageTooSmall)", (st, data, err))
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png_rgba(600, 600))})
+    check(st == 413 and err and err.get("code") == "ImageTooLarge", "a 600 x 600 PNG is refused (ImageTooLarge)", (st, data, err))
+    noise = os.urandom(512 * 512 * 4)
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png_rgba(512, 512, noise))})
+    check(st == 413 and err and err.get("code") == "FileTooLarge", "a 512 x 512 PNG over 256 KB is refused (FileTooLarge)", (st, data, err))
+    st, data, err = await a.gapi("POST", logo_path, {})
+    check(st == 400 and err, "an upload without a file is refused", (st, data, err))
+    check(clan_row(clan) == (30000, 0, 0) and ledger_rows(clan) == [], "refused uploads take nothing and pend nothing", clan_row(clan))
+
+    # the upload itself needs the price in the bank (v10's check), but charges nothing
+    fund(clan, 10000)
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st != 200 and err and "Insufficient clan funds" in err.get("message", ""), "an upload without 20,000 KR in the bank is refused", (st, data, err))
+    check(clan_row(clan) == (10000, 0, 0), "that refusal changes nothing", clan_row(clan))
+
+    # a valid upload: pending, nothing charged yet; a second one is refused while it is pending
+    fund(clan, 30000)
+    GW.mode = "slow"  # the review takes 3 s: the pending window is open for the second upload
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st == 200 and data and data.get("status") == "pending" and data.get("clan_logo_pending") == 1,
+          "a 512 x 512 PNG is accepted as pending (version 1)", (st, data, err))
+    check(clan_row(clan) == (30000, 0, 1) and ledger_rows(clan) == [], "the upload charges nothing (funds and ledger unchanged)", clan_row(clan))
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st != 200 and err and "pending" in err.get("message", ""), "a second upload while one is pending is refused", (st, data, err))
+    check(clan_row(clan) == (30000, 0, 1) and ledger_rows(clan) == [], "the refused second upload takes nothing", clan_row(clan))
+    check(settled(clan) == "approved", "the review approves the logo")
+    check(clan_row(clan) == (10000, 1, 0), "an approval charges 20,000 KR once and sets clan_logo = 1", clan_row(clan))
+    check(ledger_rows(clan) == [(-20000, "clan-logo")], "the approval writes one clan-logo ledger row", ledger_rows(clan))
+    f = await a.cln(3)
+    check(f and f[2] and f[2].get("clan_logo") == 1 and f[2].get("clan_logo_pending") == 0, "clanData carries the approved logo", f and f[2])
+    with urllib.request.urlopen("http://127.0.0.1:%d/api/clans/%d/logo" % (PORT, clan), timeout=10) as r:
+        body = r.read()
+        ctype = r.headers.get("Content-Type")
+    check(ctype == "image/webp" and body[:4] == b"RIFF" and body[8:12] == b"WEBP", "the approved logo is served as WebP")
+
+    # a rejection: funds and ledger unchanged, the pending version cleared, the approved logo stays
+    fund(clan, 30000)
+    before_funds, before_ledger = clan_row(clan)[0], ledger_rows(clan)
+    GW.mode = "reject"
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st == 200 and data and data.get("clan_logo_pending") == 2, "a second logo is accepted as pending (version 2)", (st, data, err))
+    check(settled(clan) == "rejected", "the review rejects the second logo")
+    check(clan_row(clan) == (before_funds, 1, 0), "a rejection clears the pending logo and keeps clan_logo 1", clan_row(clan))
+    check(clan_row(clan)[0] == before_funds and ledger_rows(clan) == before_ledger,
+          "a rejection charges nothing and refunds nothing (funds and ledger unchanged)", (clan_row(clan), ledger_rows(clan)))
+    with urllib.request.urlopen("http://127.0.0.1:%d/api/clans/%d/logo" % (PORT, clan), timeout=10) as r:
+        still = r.status
+    check(still == 200, "the approved logo is still served after a rejection")
+
+    # a failed review: also cleared, funds and ledger unchanged
+    before_funds, before_ledger = clan_row(clan)[0], ledger_rows(clan)
+    GW.mode = "fail"
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st == 200, "a third logo is accepted as pending", (st, data, err))
+    check(settled(clan) == "error", "the failed review ends in error")
+    check(clan_row(clan) == (before_funds, 1, 0), "a failed review clears the pending logo", clan_row(clan))
+    check(clan_row(clan)[0] == before_funds and ledger_rows(clan) == before_ledger,
+          "a failed review charges nothing (funds and ledger unchanged)", (clan_row(clan), ledger_rows(clan)))
+    GW.mode = "approve"
+
+    # the bank runs short while the review is running: the approval cannot pay, so the logo is not set
+    fund(clan, 25000)
+    before_ledger = ledger_rows(clan)
+    GW.mode = "slow"
+    st, data, err = await a.gapi("POST", logo_path, {"file": b64(png)})
+    check(st == 200, "a fourth logo is accepted as pending while the clan has 25,000 KR", (st, data, err))
+    fund(clan, 5000)
+    check(settled(clan) == "error", "an approval the clan cannot pay for is not set (error)")
+    check(clan_row(clan) == (5000, 1, 0) and ledger_rows(clan) == before_ledger,
+          "that approval charges nothing and leaves clan_logo 1 (funds and ledger unchanged)", (clan_row(clan), ledger_rows(clan)))
+    GW.mode = "approve"
+
+    # the owner may upload too; DELETE removes the logo and its picture
+    fund(clan, 30000)
+    st, data, err = await c.gapi("POST", logo_path, {"file": b64(png)})
+    check(st == 200, "the owner uploads a logo (Captains and the owner)", (st, data, err))
+    check(settled(clan) == "approved", "the owner's logo is approved")
+    check(clan_row(clan)[0] == 10000 and len(ledger_rows(clan)) == 2, "the owner's approval charges 20,000 KR once more", clan_row(clan))
+    st, data, err = await d.gapi("DELETE", logo_path)
+    check(st != 200, "an outsider cannot remove the logo", (st, data, err))
+    st, data, err = await a.gapi("DELETE", logo_path)
+    check(st == 200, "a Captain removes the logo", (st, data, err))
+    check(clan_row(clan)[1:] == (0, 0), "after the delete clan_logo and clan_logo_pending are 0", clan_row(clan))
+    check(q("SELECT count(*) FROM clan_logos WHERE clan_id = ?", clan)[0][0] == 0, "the delete removes the picture row")
+    try:
+        urllib.request.urlopen("http://127.0.0.1:%d/api/clans/%d/logo" % (PORT, clan), timeout=10)
+        gone = False
+    except urllib.error.HTTPError as e:
+        gone = e.code == 404
+    check(gone, "after the delete the logo is not served (404)")
+
+
+PORT = 0
+
+
+
+
 def main():
+    global GW, PORT
     (port,) = free_ports(1)
+    PORT = port
+    GW = Gateway().start()
     log = open(os.path.join(WORK, "brain.log"), "w")
     cfg = os.path.join(WORK, "brain.json")
     dbcfg = {"driver": "sqlite", "path": DB}
@@ -309,7 +550,11 @@ def main():
                    "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "clan-v10-%d" % os.getpid()},
                    "accounts": {"free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
                                 "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
-    brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    # the moderation profile is the stub gateway above; no KN_AI_* from the caller's environment
+    env = dict({k: v for k, v in os.environ.items() if not k.startswith("KN_AI_")},
+               KN_AI_UPSTREAM_URL=GW.url, KN_AI_UPSTREAM_KEY=MOD_KEY)
+    brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate", "--ai.health_interval_s=0"], cwd=ROOT, env=env, stdout=log,
+                             stderr=subprocess.STDOUT, start_new_session=True)
     try:
         for _ in range(200):
             try:
@@ -334,6 +579,7 @@ def main():
         except subprocess.TimeoutExpired:
             brain.kill()
         log.close()
+        GW.stop()
         if PG:
             subprocess.run(PG["psql"] + ["-c", "DROP SCHEMA IF EXISTS %s CASCADE" % PG["schema"]], env=PG["env"], capture_output=True)
     print("clan v10 test: " + ("OK" if not FAILS else "%d failure(s), files in %s" % (len(FAILS), WORK)))

@@ -94,6 +94,7 @@
  "kn.chat.globalChannel": "Global Text & Voice Chat",
  "kn.chat.teamChannel": "Team Text & Voice Chat",
  "kn.chat.youFound": "{0}You{1} found",
+ "kn.clans.logo.insufficient.funds": "Insufficient clan funds. Need 20,000 krunkies.",
  "kn.client.accountMode.info": "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved",
  "kn.client.accountMode.name": "Account Mode",
  "kn.client.accountMode.opt.offline": "Offline",

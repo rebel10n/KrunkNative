@@ -148,3 +148,34 @@ const char *avatar_image_normalize(const unsigned char *src, const size_t n, Ava
     free(square);
     return err;
 }
+
+const char *avatar_logo_normalize(const unsigned char *src, const size_t n, AvatarImage *out) {
+    memset(out, 0, sizeof(*out));
+    if (n > CLAN_LOGO_MAX_BYTES) return "FileTooLarge";
+    const AvatarFormat fmt = avatar_sniff(src, n);
+    if (fmt != AVATAR_FMT_PNG) return "UnsupportedType";
+    if (!avatar_image_available()) return "AvatarsUnavailable";
+    int w = 0, h = 0;
+    if (!probe(fmt, src, n, &w, &h) || w <= 0 || h <= 0) return "BadImage";
+    if (w < CLAN_LOGO_PX || h < CLAN_LOGO_PX) return "ImageTooSmall";
+    if (w > CLAN_LOGO_PX || h > CLAN_LOGO_PX) return "ImageTooLarge";
+    unsigned char *px = decode(fmt, src, n, w, h);
+    if (!px) return "BadImage";
+    const char *err = "BadImage";
+#ifdef KN_HAVE_WEBP
+    uint8_t *webp = NULL;
+    const size_t len = WebPEncodeLosslessRGBA(px, w, h, w * 4, &webp);
+    stbi_image_free(px);
+    if (len && webp) {
+        out->webp = webp;
+        out->webp_len = len;
+        out->src_w = w;
+        out->src_h = h;
+        out->fmt = fmt;
+        err = NULL;
+    }
+#else
+    stbi_image_free(px);
+#endif
+    return err;
+}

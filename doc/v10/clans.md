@@ -138,8 +138,20 @@ Player drill-down: GET `/territorial-wars/player/<id>`, `/player/<id>/contributi
 ## Port notes
 
 - Keep the v7 clan socket protocol; add the settings tab and the gapi `/clans/*` routes to
-  kn_brain (logo moderation queue, banner from paint inventory, MOTD, recruitment with 1,000 KR
+  kn_brain (logo review, banner from paint inventory, MOTD, recruitment with 1,000 KR
   charge, loot config).
+- Clan logo (KrunkNative, `services/brain/clan_logo.c`, migration 0332_clan_logos): the upload is
+  POST `/clans/<id>/logo` with `{file: <base64 PNG>}` over the gapi tunnel (v10 sends the multipart
+  `file`; the tunnel carries JSON). It runs the profile picture's pipeline (`avatar_image.c`
+  decoder, `avatar_review_picture` in `avatar.c`, the same moderation profile and verdict rules).
+  There is no separate admin queue: the AI verdict approves or rejects the logo, the same as for
+  profile pictures. Approval moves `clan_logo_pending` into `clan_logo`. The approved image is GET
+  `/api/clans/<id>/logo` (not v10's user-assets CDN). Deviations: the settings tab uploads as soon
+  as a PNG is chosen (no preview step); a pending logo is shown as a status, not a picture;
+  20,000 KR is taken from the clan bank only when an approval sets the logo (no fee,
+  `clan_funds_ledger` source `clan-logo`), the same as the profile picture, which costs nothing: a
+  rejected or failed review charges nothing and refunds nothing. An approval the clan can no longer
+  pay for is not set (status error).
 - Turf Wars needs: shared `territorialWars` tracker in the game (eligibility, per-player kill
   records, game-end flush to the brain), a daily brain job (winner per map, KR pool split
   60/30/10 then loot-config distribution), the `warsClan` packet and init field, `wars_banner*`
