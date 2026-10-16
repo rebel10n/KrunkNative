@@ -42,16 +42,21 @@ async function openPage(url, { viewport = [1280, 720] } = {}) {
     else if (kind === 'http') log.http.push(text);
     if (/GL_INVALID_|GL_OUT_OF_MEMORY|WebGL: too many errors|CONTEXT_LOST|WebGL: INVALID/.test(text)) log.gl.push(text);
   };
+  // Runtime.enable and Log.enable replay the console history the tab buffered before this session
+  // attached (an earlier session's errors): only entries stamped after t0 belong to this session.
+  const t0 = Date.now() - 500;
+  const fresh = (ts) => typeof ts !== 'number' || ts >= t0;
   cdp.on((m) => {
     const p = m.params;
-    if (m.method === 'Runtime.consoleAPICalled') {
+    if (m.method === 'Runtime.consoleAPICalled' && fresh(p.timestamp)) {
       const text = p.args.map((a) => (a.value !== undefined ? a.value : a.description)).join(' ');
       if (p.type === 'error' || p.type === 'assert') note('error', text);
       else if (p.type === 'warning') note('warn', text);
-    } else if (m.method === 'Runtime.exceptionThrown') {
+      else note('log', text); // console.log / info / debug: kept in log.all only
+    } else if (m.method === 'Runtime.exceptionThrown' && fresh(p.timestamp)) {
       const d = p.exceptionDetails;
       note('exception', (d.exception && d.exception.description) || d.text);
-    } else if (m.method === 'Log.entryAdded') {
+    } else if (m.method === 'Log.entryAdded' && fresh(p.entry.timestamp)) {
       const e = p.entry;
       if (e.source === 'network') return; // the failed/HTTP lines come from Network.* below
       note(e.level === 'error' ? 'error' : 'warn', '[' + e.source + '] ' + e.text + (e.url ? ' ' + e.url : ''));
