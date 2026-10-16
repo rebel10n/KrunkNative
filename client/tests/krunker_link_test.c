@@ -1309,6 +1309,72 @@ static KrunkerBuild *next_build(void) {
     return b;
 }
 
+// Social / account lines of a match (official-ingame-social): "vf", "prc", "fe", "skin", "skinF"
+static void test_social(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
+                                          KRUNKER_V_STR("sockB")}, 6);
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    clear();
+
+    // "vf": nothing for a guest (v10 gates on the account)
+    feed(&link, "vf", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(1), KRUNKER_V_NUM(3), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Ann")}, 5);
+    CHECK(!find_in(NET_PACKET_EXT, 0), "vf: a guest sees no forfeit vote");
+    snprintf(link.account_name, sizeof(link.account_name), "me");
+    feed(&link, "vf", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(1), KRUNKER_V_NUM(3), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Ann")}, 5);
+    feed(&link, "vf", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_BOOL(0), KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 6);
+    feed(&link, "vf", (KrunkerValue[]) {KRUNKER_V_STR("Bob"), KRUNKER_V_NUM(3), KRUNKER_V_NUM(3)}, 3);
+    feed(&link, "vf", (KrunkerValue[]) {KRUNKER_V_NIL}, 1);
+    {
+        NetVoteForfeitStatePacket v[4];
+        int ok = 1;
+        for (int i = 0; i < 4; i++) {
+            uint16_t len = 0;
+            const uint8_t *b = ext_body(i, NET_EXT_VOTE_FORFEIT_STATE, &len);
+            if (!b || len != sizeof(v[i])) ok = 0;
+            else memcpy(&v[i], b, sizeof(v[i]));
+        }
+        CHECK(ok && v[0].active && v[0].opened && !strcmp(v[0].initiator, "Ann") && v[0].votes == 1 && v[0].needed == 3 && v[1].active &&
+              v[1].update_only && v[1].votes == 2 && v[2].active && !v[2].opened && !strcmp(v[2].voter, "Bob") && v[2].votes == 3 && !v[3].active,
+              "vf: opened by Ann, a count, Bob voted, ended");
+    }
+    clear();
+
+    // "prc": sockB is now sockB2; "chgp" / "skinF" find it by the new id, the host follows
+    feed(&link, "prc", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_STR("sockB2")}, 2);
+    int found = 0;
+    for (int i = 0; i < link.player_count; i++) found |= link.players[i].sid == 7 && !strcmp(link.players[i].id, "sockB2");
+    CHECK(found && !strcmp(link.host_id, "sockB2"), "prc: the socket id (and the host) remapped");
+    feed(&link, "skinF", (KrunkerValue[]) {KRUNKER_V_STR("sockB2"), KRUNKER_V_NUM(1234)}, 2);
+    feed(&link, "skinF", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(55)}, 2);   // the old id: nobody
+    feed(&link, "skinF", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_NUM(66)}, 2);   // us: the "skin" shows it
+    feed(&link, "skin", (KrunkerValue[]) {KRUNKER_V_NUM(77)}, 1);
+    {
+        READ_IN(NetSkinFoundPacket, a, SKIN_FOUND, 0);
+        READ_IN(NetSkinFoundPacket, b, SKIN_FOUND, 1);
+        CHECK(a_p && a.uid == 7 && a.skin == 1234 && b_p && b.uid == 9 && b.skin == 77 && !find_in(NET_PACKET_SKIN_FOUND, 2),
+              "skinF by the new socket id; skin is ours; the old id and our own skinF show nothing");
+    }
+    clear();
+
+    // "fe": the message for the red line
+    feed(&link, "fe", (KrunkerValue[]) {KRUNKER_V_STR("Server Full")}, 1);
+    {
+        uint16_t len = 0;
+        const uint8_t *b = ext_body(0, NET_EXT_KN_OFFICIAL_ENTER_FAILED, &len);
+        CHECK(b && len == 12 && !strcmp((const char *) b, "Server Full"), "fe: ENTER_FAILED with the message");
+    }
+    clear();
+    CHECK(link.unknown_in == 0, "every social packet was handled (%u unknown)", link.unknown_in);
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2115,6 +2181,7 @@ int main(void) {
     test_fx();
     test_world();
     test_actions();
+    test_social();
 
     { // a live build (krunker_build_live.h): its packet names, AHKEY, strides, offsets and argument positions
         KrunkerBuild *nb = next_build();

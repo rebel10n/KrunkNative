@@ -707,6 +707,25 @@ static int official_strings(const uint8_t *p, size_t left, const char **out, con
 
 // An official krunker.io server's HUD packets that our own NetPackets cannot carry (krunker_link.c
 // makes them, net_ext.h NET_EXT_KN_OFFICIAL_*).
+// An official server refused our "en" ("fe" FAILED_TO_ENDER, v10 iíìiîîì :208203): loading ends, the
+// menu comes back (showMenu: the player may click to play again) and the message is a red server
+// line (addChat(-1, null, msg, 2, "#ed4242")).
+static void events_enter_failed(Client *client, const char *text, const uint16_t length) {
+    const int alive = client->me && client->me->active;
+    if (!alive) { // the enter never happened: nothing of ours is in the game
+        client->in_game = 0;
+        client->spawn_requested = 0;
+        client->menu_play_pending = 0;
+    }
+    if (html_ui_available() && !html_ui_is_menu_open()) client_set_menu_open(client, 1);
+    char line[NET_CHAT_TEXT_SIZE];
+    snprintf(line, sizeof(line), "%.*s", length ? (int) strnlen(text, length) : 0, text);
+    if (line[0]) {
+        ui_console_on_chat(NULL, line, NET_CHAT_SERVER);
+        hud_ui_add_chat(NULL, line, "#ed4242");
+    }
+}
+
 static void events_official_hud(Client *client, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
     if (subtype == NET_EXT_KN_OFFICIAL_AMMO && length == sizeof(NetOfficialAmmoPacket)) {
         // "uamo" -> you.ammos / reserveAmmos per loadout slot, players.updatePlayerAmmo (the HUD reads them)
@@ -1132,6 +1151,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 hud_ping_marker_add(ping.key, (vec3) {ping.x, ping.y, ping.z});
             }
             else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_LEADER_BOARD) events_official_hud(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_KN_OFFICIAL_ENTER_FAILED) events_enter_failed(client, (const char *) body, body_length); // "fe"
+            else if (subtype == NET_EXT_VOTE_FORFEIT_STATE && body_length >= sizeof(NetVoteForfeitStatePacket)) { // "vf" (hud_votekick.c)
+                NetVoteForfeitStatePacket state;
+                memcpy(&state, body, sizeof(state));
+                hud_votekick_on_forfeit(client, &state);
+            }
             else if (subtype == NET_EXT_KN_OFFICIAL_SHAKE && body_length == sizeof(NetOfficialShakePacket)) { // "shk"
                 NetOfficialShakePacket shake;
                 memcpy(&shake, body, sizeof(shake));

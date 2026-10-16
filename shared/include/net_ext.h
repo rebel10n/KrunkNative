@@ -65,6 +65,7 @@ typedef enum {
     NET_EXT_KPD_RATE = 0x0806,        // "rkpd" C -> S NetKpdRatePacket: the officer's verdict on the case
     NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
     NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
+    NET_EXT_VOTE_FORFEIT_STATE = 0x0809, // "vf" S -> C NetVoteForfeitStatePacket: the ranked forfeit vote (#voteToForfeit)
 
     // 0x0900 in-game actions of v10 without a NetPacket id
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
@@ -93,6 +94,7 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_AMMO = 0x8030,         // "uamo" NetOfficialAmmoPacket
     NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
+    NET_EXT_KN_OFFICIAL_ENTER_FAILED = 0x8033, // "fe" FAILED_TO_ENDER: the server's message, NUL-terminated ("" none)
     // 0x8040 official combat effects (client-local, like 0x8030)
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
 
@@ -274,6 +276,20 @@ typedef struct {
 // NET_EXT_VOTE_KICK_STATE (S -> C, v10 "vk" [alias, votes, needed, isNew, voter]): the running
 // vote (active 1; opened 1 on the broadcast that opened it, with the initiator in `voter`), or
 // active 0 = the vote ended (passed or failed: v10 "vk" null): the prompt hides.
+// NET_EXT_VOTE_FORFEIT_STATE (S -> C, v10 "vf" [voter, votes, needed, isNew, initiator, updateOnly],
+// game.deob.js iíìiíìí :220002; ranked, signed-in players only): active 0 = the vote ended ("vf" null:
+// #voteToForfeit hides). opened: "<initiator> initiated vote"; update_only: the count only; otherwise
+// `voter` voted (us: the "Vote Submitted - a/b" line instead of the box).
+typedef struct NetVoteForfeitStatePacket {
+    uint8_t active;
+    uint8_t opened;
+    uint8_t update_only;
+    int32_t votes;
+    int32_t needed;
+    char voter[32];
+    char initiator[32];
+} NetVoteForfeitStatePacket;
+
 typedef struct NetVoteKickStatePacket {
     uint8_t active;
     uint8_t opened;

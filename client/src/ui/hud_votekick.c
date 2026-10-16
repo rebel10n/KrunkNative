@@ -205,6 +205,40 @@ void hud_votekick_on_state(Client *client, const NetVoteKickStatePacket *state) 
     refresh_player_list();
 }
 
+// ---------------------------------------------------------------- forfeit vote
+
+// io "vf" (v10 iíìiíìí, game.deob.js:220002; ranked): isNew -> "<initiator> initiated vote" + the count,
+// updateOnly -> the count, a voter -> us: chat "Vote Submitted - a/b" (kind 2), anyone else: the box
+// with the count; null -> hidden. The keys row stays "Enter /ff to vote" (the vote is a chat command).
+void hud_votekick_on_forfeit(Client *client, const NetVoteForfeitStatePacket *state) {
+    if (!state) return;
+    if (!state->active) {
+        dom_display("voteToForfeit", "none");
+        return;
+    }
+    char voter[32], initiator[32], html[160];
+    memcpy(voter, state->voter, sizeof(voter));
+    memcpy(initiator, state->initiator, sizeof(initiator));
+    voter[sizeof(voter) - 1] = initiator[sizeof(initiator) - 1] = 0;
+    snprintf(html, sizeof(html), "Votes: %d/%d", state->votes, state->needed);
+    if (!state->opened && !state->update_only && !strcmp(voter, my_alias(client))) {
+        char line[64];
+        snprintf(line, sizeof(line), "Vote Submitted - %d/%d", state->votes, state->needed);
+        hud_ui_add_chat(NULL, line, "#fc03ec"); // addChat(-1, null, .., 2): a server line's default colour
+        return;
+    }
+    if (state->opened) {
+        char info[160];
+        size_t len = 0;
+        info[0] = 0;
+        append_esc(info, sizeof(info), &len, initiator);
+        append_esc(info, sizeof(info), &len, " initiated vote");
+        dom_html("voteForfeitInfo", info);
+    }
+    dom_html("voteForfeitNum", html);
+    dom_display("voteToForfeit", "block");
+}
+
 // kickVoteY / kickVoteN (v10 :221373): only while a vote runs, the player is alive, and they have
 // not voted on this target yet. [1] sends v2k(target, 1), [2] v2k(target) and hides the prompt.
 int hud_votekick_key(Client *client, const int yes) {
@@ -715,6 +749,7 @@ void hud_votekick_reset(void) {
     g_vk.voted_count = 0;
     call_end(); // a call in flight does not survive the round: its answer would come too late to mean anything
     dom_display("voteToKick", "none");
+    dom_display("voteToForfeit", "none"); // a new round: no forfeit vote either
 }
 
 // The session ended under a call (a disconnect, a failed reconnect, a server switch): no answer can

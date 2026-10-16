@@ -313,8 +313,10 @@ char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" 
 // The player list's actions (client/src/ui/hud_votekick.c): the vote kick
 // prompt (#voteToKick, io "vk"), the kickVoteY / kickVoteN keys, the K.P.D call and its answer.
 struct NetVoteKickStatePacket;
+struct NetVoteForfeitStatePacket;
 struct NetKpdResponsePacket;
 void hud_votekick_on_state(Client*, const struct NetVoteKickStatePacket*);           // NET_EXT_VOTE_KICK_STATE
+void hud_votekick_on_forfeit(Client*, const struct NetVoteForfeitStatePacket*);      // NET_EXT_VOTE_FORFEIT_STATE (#voteToForfeit)
 void hud_votekick_on_kpd(Client*, const struct NetKpdResponsePacket*, const char *json, size_t json_len); // NET_EXT_KPD_RESPONSE
 int  hud_votekick_key(Client*, int yes);          // kickVoteY (1) / kickVoteN (0) pressed: 1 when a vote took it
 void hud_votekick_reset(void);                    // INIT: no vote, nothing voted on, the phone down

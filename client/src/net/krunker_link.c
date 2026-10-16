@@ -2231,6 +2231,71 @@ static void on_mark_position(KrunkerLink *l, const KrunkerFrame *f) {
     emit_ext(l, NET_EXT_MARK_POSITION, &m, sizeof(m));
 }
 
+// ---------------------------------------------------------------- social / account lines
+
+// "vf" VOTE_FORFEIT [voterAlias | null, votes, needed, isNew, initiatorAlias, updateOnly] (iíìiíìí
+// :220002): v10 handles it only with an account signed in (iîïììîí, set by "a": our account_name)
+static void on_vote_forfeit(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!l->account_name[0]) return;
+    NetVoteForfeitStatePacket v;
+    memset(&v, 0, sizeof(v));
+    const char *voter = krunker_str(arg(f, 0));
+    v.opened = truthy(arg(f, 3)) ? 1 : 0;
+    v.update_only = truthy(arg(f, 5)) ? 1 : 0;
+    v.active = (uint8_t) (v.opened || v.update_only || (voter && voter[0]));
+    v.votes = (int32_t) num(arg(f, 1), 0);
+    v.needed = (int32_t) num(arg(f, 2), 0);
+    if (voter) snprintf(v.voter, sizeof(v.voter), "%s", voter);
+    const char *initiator = krunker_str(arg(f, 4));
+    if (initiator) snprintf(v.initiator, sizeof(v.initiator), "%s", initiator);
+    emit_ext(l, NET_EXT_VOTE_FORFEIT_STATE, &v, sizeof(v));
+}
+
+// "prc" PLAYER_RECONNECTED [oldSocketId, newSocketId] (iììïïïì :220316): findById(old).id = new. Every
+// later socket-id lookup ("chgp", "skinF", "uh", the vote's "vo") needs the new one.
+static void on_player_reconnected(KrunkerLink *l, const KrunkerFrame *f) {
+    char old_id[64], new_id[64];
+    id_string(arg(f, 0), old_id, sizeof(old_id));
+    id_string(arg(f, 1), new_id, sizeof(new_id));
+    if (!old_id[0] || !new_id[0]) return;
+    for (int i = 0; i < l->player_count; i++) {
+        if (!strcmp(l->players[i].id, old_id)) {
+            snprintf(l->players[i].id, sizeof(l->players[i].id), "%s", new_id);
+            break;
+        }
+    }
+    if (!strcmp(l->host_id, old_id)) snprintf(l->host_id, sizeof(l->host_id), "%s", new_id);
+}
+
+// "fe" FAILED_TO_ENDER [message] (iíìiîîì :208203): the server refused our "en": the menu comes back
+// (showMenu, the "click to play" instructions) and the message is a red server line (kind 2, #ed4242)
+static void on_failed_to_enter(KrunkerLink *l, const KrunkerFrame *f) {
+    char body[NET_CHAT_TEXT_SIZE];
+    const char *msg = krunker_str(arg(f, 0));
+    snprintf(body, sizeof(body), "%s", msg ? msg : "");
+    emit_ext(l, NET_EXT_KN_OFFICIAL_ENTER_FAILED, body, (uint16_t) (strlen(body) + 1));
+}
+
+// "skin" SKIN_REWARD [skinIndex, silent] (iíîìîîì :218208): we found an item (account.addSkin, the
+// "Items Found" card, "You found [x]"); "skinF" SKIN_FOUND_MESSAGE [socketId, skinIndex] (iîïîîìï
+// :217992): another player found one ("<alias> found [x]" with Show Findings on). Both are our
+// season-system's NET_PACKET_SKIN_FOUND. Indexes are store.skins positions: the live 10.0.3 store
+// table is the one v10.0.2's viewer_skin() table was built from; a newer item past it shows nothing.
+static void on_skin_found(KrunkerLink *l, const int sid, const KrunkerValue *index) {
+    if (sid < 0 || !krunker_is(index, KRUNKER_NUM) || index->u.num < 0) return;
+    const NetSkinFoundPacket s = {.uid = sid, .skin = (int32_t) index->u.num};
+    emit(l, NET_PACKET_SKIN_FOUND, &s, sizeof(s));
+}
+
+static void on_skin_found_message(KrunkerLink *l, const KrunkerFrame *f) {
+    char id[64];
+    id_string(arg(f, 0), id, sizeof(id));
+    const int sid = sid_of_socket(l, id);
+    // the finder's own line comes with its "skin" (our SKIN_FOUND for us shows the card + "You found")
+    if (sid < 0 || sid == l->my_sid) return;
+    on_skin_found(l, sid, arg(f, 1));
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -2354,6 +2419,12 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_ADD_SPRAY: on_add_spray(l, &f); break;
         case KRUNKER_S2C_MARK_POSITION: on_mark_position(l, &f); break;
         case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
+        // social / account lines of a match (official-ingame-social)
+        case KRUNKER_S2C_VOTE_FORFEIT: on_vote_forfeit(l, &f); break;
+        case KRUNKER_S2C_PLAYER_RECONNECTED: on_player_reconnected(l, &f); break;
+        case KRUNKER_S2C_FAILED_TO_ENDER: on_failed_to_enter(l, &f); break;
+        case KRUNKER_S2C_SKIN_REWARD: on_skin_found(l, l->my_sid, arg(&f, 0)); break;
+        case KRUNKER_S2C_SKIN_FOUND_MESSAGE: on_skin_found_message(l, &f); break;
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
             if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f)) l->unknown_in++;

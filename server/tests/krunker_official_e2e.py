@@ -110,7 +110,8 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
-        "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
+        "--social": "social"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -719,6 +720,8 @@ class Stub:
                 x, y, z = self.spawn
                 await send("0", player("sockME", MY_SID, "Guest_9", x, z, y, team=1))
                 await self.world_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "social":
+                await self.social_phases(send, stop, player)
             elif self.got_en.is_set() and actions:
                 await send("frs")
                 sx, sy, sz = self.spawn
@@ -1056,6 +1059,44 @@ class Stub:
             self.sent["mv"] = time.monotonic()
             await send("mv", vo, self.ACTION_MTS)
         await hold(6.0)
+        self.sent["done"] = time.monotonic()
+
+    async def social_phases(self, send, stop, player):
+        """official-ingame-social (run_native_social): the first "en" is refused ("fe": the menu and a red
+        line), the second spawns us; then the account signs in ("a"), a forfeit vote opens / takes our vote /
+        ends ("vf"), the bot reconnects under a new socket id ("prc") and finds an item ("skinF"), we find
+        one ("skin")."""
+        self.sent["fe"] = time.monotonic()
+        await send("fe", "Server Full")  # FAILED_TO_ENDER
+        for _ in range(300):  # the player plays again (the script's boot `play` retries until spawned)
+            if stop.is_set() or sum(1 for f in self.frames if f[0] == "en") >= 2:
+                break
+            await asyncio.sleep(0.1)
+        self.sent["en2"] = time.monotonic()
+        await send("frs")
+        await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+        await send("a", None, 4242, "StubAcct", {"player_score": 100})  # ACCOUNT_RESPONSE: signed in (vf needs it)
+
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(2.0)
+        self.sent["vf"] = time.monotonic()
+        await send("vf", None, 1, 3, True, "StubBot")  # opened by the bot
+        await hold(3.0)
+        await send("vf", "Guest_9", 2, 3)              # our vote: "Vote Submitted - 2/3"
+        await hold(2.0)
+        self.sent["vfend"] = time.monotonic()
+        await send("vf", None)                          # ended
+        await send("prc", "sockBOT", "sockBOT2")       # PLAYER_RECONNECTED
+        await send("skinF", "sockBOT2", 1)              # the bot found store item 1
+        await send("skin", 2)                           # we found store item 2
+        await hold(4.0)
         self.sent["done"] = time.monotonic()
 
     def start_ws(self):
@@ -1875,6 +1916,48 @@ def run_native_world():
     check(f"{label}: \"cct\": the \"Zone C Captured\" chat line", any("Zone C Captured" in c for c in chat), chat[-1:])
     loads = re.findall(r"\[input_script\] sync\+ t=\d+ .* loadout=(\S+)", text)
     check(f"{label}: \"inat\": our loadout 3 / 1 (+ the knife)", any(l.startswith("3/1") for l in loads), sorted(set(loads)))
+
+
+def run_native_social():
+    """official-ingame-social: "fe" (a refused enter: the menu again with the red line, a second Play joins),
+    "vf" (the ranked forfeit vote box and our "Vote Submitted" line), "prc" + "skinF" (a finding by the
+    reconnected bot), "skin" (our "Items Found" card in #skinRewardHolder > #skinRewList)."""
+    label = "native-social"
+    probes = ["text @vfinfo [id=voteForfeitInfo]", "text @vfnum [id=voteForfeitNum]", "vis @vf voteToForfeit",
+              "grep @fe Full [id=chatList]", "grep @sub Submitted [id=chatList]", "grep @found found [id=chatList]",
+              "nodes @card .skinRewCard", "vis @rew skinRewardHolder"]
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n" % PASTE_TOKEN
+    script += "".join("%d %s\n" % (t + k, kind) for t in range(4500, 26000, 700) for k, kind in enumerate(probes))
+    script += "26500 quit\n"
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="social")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    for name in ("fe", "en2", "vf", "vfend", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+
+    def at(kind, pattern):  # (client ms, value) of every matching probe line
+        return [(int(m.group(1)), m.group(2)) for m in re.finditer(r"\[input_script\] %s t=(\d+) %s" % (kind, pattern), text)]
+
+    # the refused enter ends the client's own enter (in_game / spawn_requested): it can enter again (the
+    # boot `play` retries at once; without the reset the client would never send a second "en")
+    ens = [i for i, f in enumerate(stub.frames) if f[0] == "en"]
+    check(f"{label}: \"fe\": the client may enter again (a second \"en\")", len(ens) >= 2, len(ens))
+    check(f"{label}: \"fe\": the red line", any(int(v) >= 1 for _, v in at("grep", r"@fe needle=\S+ n=\d+ hits=(\d+)")))
+    check(f"{label}: a second Play joins", f"joined as sid {MY_SID}" in text)
+    vis = [v for _, v in at("vis", r"@vf voteToForfeit=(\d)")]
+    info = [v.strip() for _, v in at("text", r"@vfinfo n=\d+ checked=\d+ value=\S* text=(.*)")]
+    num = [v.strip() for _, v in at("text", r"@vfnum n=\d+ checked=\d+ value=\S* text=(.*)")]
+    check(f"{label}: \"vf\": the forfeit box opens with the initiator and the count",
+          "1" in vis and "StubBot initiated vote" in info and "Votes: 1/3" in num, (sorted(set(vis)), info[-1:], num[-1:]))
+    check(f"{label}: \"vf\" null hides it again", vis and vis[-1] == "0", vis[-3:])
+    check(f"{label}: \"vf\" with our alias: \"Vote Submitted - 2/3\"", any(int(v) >= 1 for _, v in at("grep", r"@sub needle=\S+ n=\d+ hits=(\d+)")))
+    check(f"{label}: \"prc\" + \"skinF\": the bot's finding by its new socket id",
+          any(int(v) >= 1 for _, v in at("grep", r"@found needle=\S+ n=\d+ hits=(\d+)")))
+    cards = [int(v) for _, v in at("nodes", r"@card elements=\d+ match=(\d+)")]
+    rew = [v for _, v in at("vis", r"@rew skinRewardHolder=(\d)")]
+    check(f"{label}: \"skin\": our card in #skinRewardHolder > #skinRewList", max(cards or [0]) >= 1 and "1" in rew, (cards[-3:], rew[-3:]))
 
 
 def run_native_lobby():
@@ -2876,6 +2959,7 @@ def main():
         run_native_ingame()
         run_native_world()
         run_native_actions()
+        run_native_social()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -2901,6 +2985,8 @@ def main():
         run_native_live_refused()
         run_native_live_stale()
         run_native_live_fallback()
+    if ONLY == "social" and os.path.isfile(f"{BUILD}/client_bin"):  # just the social / account lines' run
+        run_native_social()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

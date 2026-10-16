@@ -67,6 +67,7 @@ void hud_ui_hit(Client*, int kill);
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2386,19 +2387,63 @@ static void hud_add_chat_markup(const char *markup) {
     html_dom_scroll_to_bottom(list);
 }
 
-static int g_skin_reward_timer;
-static void hud_skin_reward_hide(void *user) {
-    (void) user;
-    g_skin_reward_timer = 0;
-    const HtmlElem el = html_dom_by_id("skinRewards");
-    if (!el) return;
-    html_dom_set_display(el, "none");
-    html_dom_set_html(el, "");
+// v10's "Items Found" cards (skinReward's card list, v10.js _72338): each .skinRewCard goes to the top
+// of #skinRewList for 10 s (life 10000); #skinRewardHolder shows while any card lives.
+#define SKIN_REWARD_CARDS 8
+#define SKIN_REWARD_LIFE_MS 10000.0
+static struct {
+    int timer; // html timer of the live card, 0 = a free slot
+    int serial;
+} g_skin_cards[SKIN_REWARD_CARDS];
+static int g_skin_card_serial;
+
+static void hud_skin_card_id(const int slot, char *out, const size_t n) { snprintf(out, n, "knSkinRew%d_%d", slot, g_skin_cards[slot].serial); }
+
+static void hud_skin_reward_expire(void *user) {
+    const int slot = (int) (intptr_t) user;
+    if (slot < 0 || slot >= SKIN_REWARD_CARDS) return;
+    char id[32];
+    hud_skin_card_id(slot, id, sizeof(id));
+    g_skin_cards[slot].timer = 0;
+    const HtmlElem card = html_dom_by_id(id);
+    if (card) html_dom_remove(card);
+    int live = 0;
+    for (int i = 0; i < SKIN_REWARD_CARDS; i++) live += g_skin_cards[i].timer != 0;
+    const HtmlElem holder = html_dom_by_id("skinRewardHolder");
+    if (!live && holder) html_dom_set_display(holder, "none");
 }
 
-// season-system: NET_PACKET_SKIN_FOUND. The finder: v7 io_skinReward (account.addSkin, the
-// #skinRewards card for 5 s, "You found [name]", matchRewardSummary.skins); the others:
-// io_skinFoundMessage ("<name> found [skin]" with Show Findings on).
+static void hud_skin_reward_card(const int skin_index, const int rainbow, const char *color, const char *name) {
+    const HtmlElem holder = html_dom_by_id("skinRewardHolder"), list = html_dom_by_id("skinRewList");
+    if (!holder || !list) return;
+    int slot = 0; // a free slot, else the oldest card makes room (its element goes)
+    for (int i = 0; i < SKIN_REWARD_CARDS; i++) {
+        if (!g_skin_cards[i].timer) { slot = i; break; }
+        if (g_skin_cards[i].serial < g_skin_cards[slot].serial) slot = i;
+    }
+    if (g_skin_cards[slot].timer) {
+        html_timer_cancel(g_skin_cards[slot].timer);
+        char old[32];
+        hud_skin_card_id(slot, old, sizeof(old));
+        const HtmlElem el = html_dom_by_id(old);
+        if (el) html_dom_remove(el);
+    }
+    g_skin_cards[slot].serial = ++g_skin_card_serial;
+    char id[32], thumb[256], card[1024];
+    hud_skin_card_id(slot, id, sizeof(id));
+    store_skin_preview(skin_index, thumb, sizeof(thumb));
+    snprintf(card, sizeof(card), "<div id='%s' class='skinRewCard' onmouseenter='playTick()' onclick='openSales(%d)'><img class='skinRewImg%s' src='%s' "
+                                 "style='border: 2px solid %s' /><div class='skinRewRight'>%s</div></div>",
+             id, skin_index, rainbow ? " rainbowBorder" : "", thumb, color, name);
+    html_dom_set_display(holder, "block");
+    html_dom_insert_html(list, HTML_INSERT_AFTER_BEGIN, card);
+    g_skin_cards[slot].timer = html_timer_add(SKIN_REWARD_LIFE_MS, hud_skin_reward_expire, (void *) (intptr_t) slot);
+}
+
+// season-system: NET_PACKET_SKIN_FOUND. The finder: v10 skinReward ("skin": account.addSkin, an
+// "Items Found" card in #skinRewardHolder > #skinRewList for 10 s, "You found [name]",
+// matchRewardSummary.skins); the others: skinFound ("skinF": "<name> found [skin]" with Show
+// Findings on).
 void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     const ViewerSkin *skin = viewer_skin(skin_index);
@@ -2412,17 +2457,7 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
         account_add_skin(skin_index);
         if (!hud_endscreen_v10_offer_skin(skin_index)) hud_ui_add_reward_skin(skin_index); // held for Collect Rewards
         if (!skin) return;
-        char thumb[256], card[1024];
-        store_skin_preview(skin_index, thumb, sizeof(thumb));
-        snprintf(card, sizeof(card), "<div class='skinRewCard' onclick='openSales(%d)' onmouseenter='playTick()'><img class='skinRewImg%s' src='%s' style='border: 3px solid %s' /><div class='skinRewRight'>%s<div class='skinRewDesc'>%s</div></div></div>",
-                 skin_index, rainbow ? " rainbowBorder" : "", thumb, g_viewer_rarities[rarity].color, name, I18N("kn.store.itemFound", "Item Found!"));
-        const HtmlElem el = html_dom_by_id("skinRewards");
-        if (el) {
-            html_dom_set_display(el, "block");
-            html_dom_set_html(el, card);
-            if (g_skin_reward_timer) html_timer_cancel(g_skin_reward_timer);
-            g_skin_reward_timer = html_timer_add(5000.0, hud_skin_reward_hide, NULL);
-        }
+        hud_skin_reward_card(skin_index, rainbow, g_viewer_rarities[rarity].color, name);
         char found[160];
         I18N_F(found, "kn.chat.youFound", "{0}You{1} found", "<span style='color:#fff'>", "</span>");
         snprintf(markup, sizeof(markup), "%s <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
