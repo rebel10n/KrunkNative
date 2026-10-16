@@ -25,8 +25,11 @@
  *   (presence changes)                   presence:online / presence:offline {id} to online friends
  *   (a follow made / broke a friendship) friends:list {offset: 0} to both, when online
  *   (a follow not followed back, KrunkNative) a Followers mail row (kind 0, social_data.c kml) + "gmc"
- *   (errors)                             error {code, message}: EB_NOT_FRIEND, EB_TARGET_OFFLINE,
- *                                        EB_RATE_LIMITED, EB_TEXT_TOO_LONG, EB_MSG_INVALID, EB_INVITE_INVALID
+ *   (errors)                             error {code, message}, v10's EB_* table (103791). The banner codes
+ *                                        EB_AUTH_REQUIRED, EB_UNKNOWN_TYPE, EB_INTERNAL; the message codes
+ *                                        EB_NOT_FRIEND, EB_TARGET_OFFLINE, EB_RATE_LIMITED, EB_TEXT_TOO_LONG,
+ *                                        EB_MSG_INVALID, which mark the oldest pending bubble failed, and
+ *                                        EB_INVITE_INVALID
  * Friend rows: {id, name, premium, online, unread, lastId, lastText, lastFromMe, lastTs} plus,
  * while the friend is in a game, gameInstanceId / gamePasswordProtected (game_presence_get() of
  * the v10-party module; its presence:game pushes are its own) and the lobby's gameFlavor /
@@ -48,7 +51,7 @@
 #define MOD "eventbus"
 
 #define EB_PAGE 50          /* friends:list page */
-#define EB_TEXT_MAX 512     /* v10 conversation textarea maxlength (canSend: length <= 512) */
+#define EB_TEXT_MAX 512     /* v10 canSend: the message is at most 512 JS string units (UTF-16) */
 #define EB_HISTORY_MAX 50   /* msg:history limit cap (v10 asks 15) */
 #define EB_RATE_PER_MIN 30  /* messages per sender and minute (the hub chat's limit) */
 
@@ -101,6 +104,16 @@ static void eb_error(SocialSession *s, const char *code, const char *message) {
     cJSON_AddStringToObject(o, "code", code);
     cJSON_AddStringToObject(o, "message", message);
     eb_send(s, o);
+}
+
+/* the JS string length of UTF-8 text (what v10's canSend measures): a 4-byte sequence is 2 units */
+static size_t utf16_units(const char *text, size_t len) {
+    size_t n = 0;
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = (unsigned char) text[i];
+        if ((c & 0xC0) != 0x80) n += c >= 0xF0 ? 2 : 1;
+    }
+    return n;
 }
 
 static int64_t obj_int(const cJSON *o, const char *k, int64_t def) {
@@ -304,7 +317,7 @@ static void sent_done(SocialSession *s, kn_db_result *res, void *extra) {
     SendCtx *x = extra;
     const int returned = kn_db_ok(res) && kn_db_rows(res) > 0; /* RETURNING; mysql: the insert id */
     if (!kn_db_ok(res) || (!returned && kn_db_affected(res) < 1)) {
-        eb_error(s, "EB_MSG_INVALID", kn_db_ok(res) ? "Message not sent." : acct_db_error(res, "msg:send"));
+        eb_error(s, "EB_MSG_INVALID", "The message could not be sent.");
         free(x->text);
         x->text = NULL;
         return;
@@ -355,11 +368,11 @@ static void send_online(void *ud, const int *online, size_t n) {
 static void send_checked(SocialSession *s, kn_db_result *res, void *extra) {
     SendCtx *x = extra;
     if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
-        eb_error(s, "EB_MSG_INVALID", kn_db_ok(res) ? "Message not sent." : acct_db_error(res, "msg:send"));
+        eb_error(s, "EB_MSG_INVALID", kn_db_ok(res) ? "The message could not be sent." : acct_db_error(res, "msg:send"));
     } else if (!kn_db_get_int64(res, 0, 0, 0)) {
         eb_error(s, "EB_NOT_FRIEND", "You can only message friends.");
     } else if (kn_db_get_int64(res, 0, 1, 0) >= EB_RATE_PER_MIN) {
-        eb_error(s, "EB_RATE_LIMITED", "You are sending messages too quickly.");
+        eb_error(s, "EB_RATE_LIMITED", "You're sending messages too fast. Slow down.");
     } else {
         CheckWait *w = calloc(1, sizeof *w);
         SendCtx *y = calloc(1, sizeof *y);
@@ -382,20 +395,18 @@ static void msg_send(SocialSession *s, const cJSON *o) {
     const int64_t to = obj_int(o, "to", 0);
     const char *text = kn_json_str(o, "text", NULL);
     if (!text || to <= 0 || to == s->account_id) {
-        eb_error(s, "EB_MSG_INVALID", "Invalid message.");
+        eb_error(s, "EB_MSG_INVALID", "The message could not be sent.");
         return;
     }
     while (*text == ' ' || *text == '\n' || *text == '\t' || *text == '\r') text++;
     size_t len = strlen(text);
     while (len && (text[len - 1] == ' ' || text[len - 1] == '\n' || text[len - 1] == '\t' || text[len - 1] == '\r')) len--;
     if (!len) {
-        eb_error(s, "EB_MSG_INVALID", "Invalid message.");
+        eb_error(s, "EB_MSG_INVALID", "The message could not be sent.");
         return;
     }
-    size_t chars = 0; /* ~ the JS string length (code points) */
-    for (size_t i = 0; i < len; i++) chars += ((unsigned char) text[i] & 0xC0) != 0x80;
-    if (chars > EB_TEXT_MAX) {
-        eb_error(s, "EB_TEXT_TOO_LONG", "Message is too long.");
+    if (utf16_units(text, len) > EB_TEXT_MAX) {
+        eb_error(s, "EB_TEXT_TOO_LONG", "That message is too long.");
         return;
     }
     SendCtx *x = calloc(1, sizeof *x);
@@ -748,7 +759,7 @@ void sh_eb(SocialSession *s, const cJSON *f) {
         return;
     }
     if (s->account_id <= 0) {
-        eb_error(s, "EB_UNAUTHORIZED", "Not signed in.");
+        eb_error(s, "EB_AUTH_REQUIRED", "You must be signed in to use chat.");
         return;
     }
     if (!strcmp(type, "friends:list")) friends_list(s, obj_int(o, "offset", 0));
@@ -756,5 +767,8 @@ void sh_eb(SocialSession *s, const cJSON *f) {
     else if (!strcmp(type, "msg:history")) msg_history(s, o);
     else if (!strcmp(type, "msg:read")) msg_read(s, o);
     else if (!strcmp(type, "game:invite")) game_invite(s, o);
-    else KN_DEBUG(MOD, "%s: unknown event-bus type \"%s\"", s->socket_id, type);
+    else { /* v10's EB_UNKNOWN_TYPE: "Chat client is out of date. Please refresh." */
+        KN_DEBUG(MOD, "%s: unknown event-bus type \"%s\"", s->socket_id, type);
+        eb_error(s, "EB_UNKNOWN_TYPE", "Chat client is out of date. Please refresh.");
+    }
 }

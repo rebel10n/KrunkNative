@@ -346,6 +346,68 @@ async def scenario(names):
         await s.close()
 
 
+async def friends_extras(stamp):
+    """friends:list paging (50 a page, offset, hasMore), presence:ping -> presence:pong (also signed out),
+    a signed-out socket's friends:list -> EB_AUTH_REQUIRED, an unknown type -> EB_UNKNOWN_TYPE, the
+    message length in UTF-16 units (a 4-byte emoji is 2: 256 of them fit, 257 do not), and Remove
+    Friend (unfollow) empties the friends list on both sides."""
+    X = await Sock().open()
+    xid, _ = await X.register("pgx" + stamp)
+    peers = []  # (id, name, socket): 52 friends, followed both ways
+    for i in range(52):
+        s = await Sock().open()
+        name = "pg%s%02d" % (stamp, i)
+        pid, _ = await s.register(name)
+        peers.append((pid, name, s))
+    rows = []
+    for pid, _, _ in peers:
+        rows += [(xid, pid), (pid, xid)]
+    q("INSERT INTO follows (follower_id, followee_id) VALUES " + ", ".join(["(?, ?)"] * len(rows)), *[v for r in rows for v in r])
+
+    await X.send(["eb", {"type": "friends:list", "offset": 0}])
+    p1 = await X.eb("friends:list", pred=lambda o: o["offset"] == 0)
+    await X.send(["eb", {"type": "friends:list", "offset": 50}])
+    p2 = await X.eb("friends:list", pred=lambda o: o["offset"] == 50)
+    got = [f["id"] for f in (p1 or {}).get("friends", [])] + [f["id"] for f in (p2 or {}).get("friends", [])]
+    check(p1 and len(p1["friends"]) == 50 and p1["hasMore"] is True, "friends:list page 1: 50 friends, hasMore")
+    check(p2 and len(p2["friends"]) == 2 and p2["hasMore"] is False, "friends:list offset 50: the last 2, no more")
+    check(sorted(got) == sorted(pid for pid, _, _ in peers), "the two pages hold every friend once")
+
+    await X.send(["eb", {"type": "presence:ping"}])
+    check(await X.eb("presence:pong") is not None, "presence:ping: presence:pong")
+    D = await Sock().open()
+    await D.send(["eb", {"type": "presence:ping"}])
+    check(await D.eb("presence:pong") is not None, "a signed-out socket still gets presence:pong")
+    await D.send(["eb", {"type": "friends:list", "offset": 0}])
+    e = await D.eb("error")
+    check(e and e["code"] == "EB_AUTH_REQUIRED" and e["message"] == "You must be signed in to use chat.",
+          "signed out: friends:list -> EB_AUTH_REQUIRED")
+    await D.close()
+    await X.send(["eb", {"type": "msg:shout", "to": xid, "text": "x"}])
+    e = await X.eb("error")
+    check(e and e["code"] == "EB_UNKNOWN_TYPE", "an unknown event-bus type: EB_UNKNOWN_TYPE")
+
+    first_id, _, first = peers[0]
+    await X.send(["eb", {"type": "msg:send", "to": first_id, "text": "\U0001F600" * 257}])  # 514 UTF-16 units
+    e = await X.eb("error")
+    check(e and e["code"] == "EB_TEXT_TOO_LONG", "257 emoji (514 UTF-16 units): EB_TEXT_TOO_LONG")
+    await X.send(["eb", {"type": "msg:send", "to": first_id, "text": "\U0001F600" * 256}])  # 512 units
+    sent = await X.eb("msg:sent")
+    check(sent and sent["to"] == first_id, "256 emoji (512 UTF-16 units): sent")
+
+    # Remove Friend (window 5: deleteFollower -> unfollow): both friends lists drop the pair
+    gone_id, gone_name, gone = peers[1]
+    st, r = await X.gapi("POST", "/players/%s/follow" % gone_name, {"follow": False})
+    check(st == 200 and r["data"]["following"] is False, "Remove Friend: unfollow")
+    fx = await X.eb("friends:list", pred=lambda o: o["offset"] == 0 and all(f["id"] != gone_id for f in o["friends"]))
+    check(fx and len(fx["friends"]) == 50 and fx["hasMore"] is True, "unfollow: X's friends list (51 left, page 1) drops the peer")
+    fg = await gone.eb("friends:list", pred=lambda o: o["offset"] == 0 and all(f["id"] != xid for f in o["friends"]))
+    check(fg is not None and fg["friends"] == [], "unfollow: the peer's friends list drops X (none left)")
+    for _, _, s in peers:
+        await s.close()
+    await X.close()
+
+
 def main():
     log = open(os.path.join(WORK, "brain.log"), "w")
     cfg = os.path.join(WORK, "brain.json")
@@ -382,6 +444,7 @@ def main():
             time.sleep(0.1)
         stamp = str(int(time.time()) % 100000)
         asyncio.run(scenario(["sva%s" % stamp, "svb%s" % stamp, "svc%s" % stamp]))
+        asyncio.run(friends_extras(stamp))
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()

@@ -224,7 +224,6 @@ static const struct {
     {"PLAYERS_PROXY_FAILED", "errors.profiles.proxyFailed", "Some profile data is temporarily unavailable."},
     {"EB_AUTH_REQUIRED", "errors.eventBus.authRequired", "You must be signed in to use chat."},
     {"EB_AUTH_INVALID", "errors.eventBus.authInvalid", "Your session expired. Please sign in again."},
-    {"EB_UNAUTHORIZED", "errors.eventBus.authRequired", "You must be signed in to use chat."},
     {"EB_TARGET_OFFLINE", "errors.eventBus.targetOffline", "That friend is offline right now."},
     {"EB_NOT_FRIEND", "errors.eventBus.notFriend", "You can only message friends."},
     {"EB_RATE_LIMITED", "errors.eventBus.rateLimited", "You're sending messages too fast. Slow down."},

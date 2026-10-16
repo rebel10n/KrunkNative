@@ -12,7 +12,7 @@ config, three accounts on social sockets (JSON frames) and two fake game-server 
     node: gameFlavor "base"; A leaves: gameInstanceId null.
   - game:invite {to: B, gameId}: B gets game:invite {from: A, name, gameId}, A game:invite:sent;
     to C (not a friend): EB_NOT_FRIEND; to an offline friend: EB_TARGET_OFFLINE; a bad game id or
-    oneself: EB_INVITE_INVALID; past 20 a minute: EB_RATE_LIMITED; a guest socket: EB_UNAUTHORIZED.
+    oneself: EB_INVITE_INVALID; past 20 a minute: EB_RATE_LIMITED; a guest socket: EB_AUTH_REQUIRED (v10's code).
 77 = skip (no kn_brain / websockets).
 """
 import asyncio
@@ -226,7 +226,7 @@ async def scenario(names):
     G = await Sock().open()
     await G.send(["eb", {"type": "game:invite", "to": a_id, "gameId": "STK:l1"}])
     e = await G.eb("error")
-    check(e and e["code"] == "EB_UNAUTHORIZED", "a guest socket: EB_UNAUTHORIZED")
+    check(e and e["code"] == "EB_AUTH_REQUIRED", "a guest socket: EB_AUTH_REQUIRED")
     for s in (A, C, G):
         await s.close()
     await strike.close()
