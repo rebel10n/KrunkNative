@@ -120,6 +120,10 @@ def run_flavor(name, flavor_args, vp):
         ok = all(p.get(k) == "1" for k in keys) and p.get("top") == "5" and p.get("vp") == vp
         check(f"{name}: ` opens the console on the page, styled and on top", ok,
               " ".join(f"{k}={v}" for k, v in p.items()))
+        if name == "strike":  # the box's outer size (rect=x,y,w,h): the Strike size, not the 744x280 of the desktop page
+            rw, rh = (float(v) for v in p.get("rect", "0,0,0,0").split(",")[2:])
+            check(f"{name}: the console box is the Strike size (414x214 outer), not the desktop one (624x294 on this page)",
+                  rw <= 420 and rh <= 220, f"rect w={rw} h={rh}")
     inputs = {m.group(1): m.group(2) for m in CONIN.finditer(text)}
     check(f"{name}: the typed line reaches the input", inputs.get("typed") == "help", repr(inputs.get("typed")))
     check(f"{name}: Enter runs it and clears the input", inputs.get("sent") == "", repr(inputs.get("sent")))
