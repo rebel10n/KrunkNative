@@ -25,6 +25,7 @@
  *   POST /strike/v1/players/me/claim/progression {slotId, choice}
  *   GET  /strike/v1/game-config                            accountProgression, spinWheels, missions, xp
  *   GET  /strike/v1/leaderboards/:board?limit&offset        xp | kills | wins | score | games
+ *   POST /strike/v1/feedback {text, email}                 -> {id}   (signed in; the form, strike_feedback)
  *
  * The catalogue (items, pools, wheels, products, missions, track, config) is migration 0320's
  * tables, read at start and every accounts.store_reload_ms (rotate wheels / products / missions
@@ -1306,8 +1307,77 @@ static int r_misc(SocialSession *s, const GapiReq *r) {
     return 1;
 }
 
+/* ------------------------------------------------------------------ feedback */
+
+/* FRVR's POST /v1/feedback {text, email, frvrId, channelId} (the main menu's feedback form): the
+ * text is 5 to 1000 bytes; the e-mail is optional, trimmed, and a plausible address when given.
+ * The account is the session's (sign-in required, as the other Strike writes); frvrId / channelId
+ * are FRVR's and ignored. Stored in strike_feedback; the answer is {id}. */
+#define FEEDBACK_MIN 5
+#define FEEDBACK_MAX 1000
+#define FEEDBACK_EMAIL_MAX 160
+
+static int email_plausible(const char *e) {
+    const char *at = strchr(e, '@');
+    if (!at || at == e || strchr(e, ' ')) return 0;
+    const char *dot = strrchr(at, '.');
+    return dot && dot > at + 1 && dot[1] != 0;
+}
+
+static void feedback_done(SocialSession *s, kn_db_result *res, void *extra) {
+    SCtx *c = extra;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v) {
+        fail_db(s, c, res, "FEEDBACK_FAILED");
+        return;
+    }
+    gapi_reply(s, c->rid, v);
+}
+
+static void r_feedback(SocialSession *s, const GapiReq *r) {
+    if (!need_login(s, r)) return;
+    const char *text = body_str(r, "text");
+    size_t tl = text ? strlen(text) : 0;
+    if (tl < FEEDBACK_MIN) {
+        gapi_error(s, r->rid, 400, "FEEDBACK_TEXT", "More information required (5 or more characters).");
+        return;
+    }
+    if (tl > FEEDBACK_MAX) {
+        gapi_error(s, r->rid, 400, "FEEDBACK_TEXT", "Your feedback is too long (1000 characters at most).");
+        return;
+    }
+    char email[FEEDBACK_EMAIL_MAX + 1] = "";
+    const char *raw = body_str(r, "email");
+    if (raw) {
+        while (*raw == ' ') raw++;
+        size_t el = strlen(raw);
+        while (el && raw[el - 1] == ' ') el--;
+        if (el > FEEDBACK_EMAIL_MAX) {
+            gapi_error(s, r->rid, 400, "FEEDBACK_EMAIL", "Must be a valid e-mail.");
+            return;
+        }
+        memcpy(email, raw, el);
+        email[el] = 0;
+        if (el && !email_plausible(email)) {
+            gapi_error(s, r->rid, 400, "FEEDBACK_EMAIL", "Must be a valid e-mail.");
+            return;
+        }
+    }
+    SCtx *c = sctx(r);
+    if (!c) {
+        gapi_error(s, r->rid, 500, "FEEDBACK_FAILED", "Server error.");
+        return;
+    }
+    char id[24];
+    social_call(s, &P_STRIKE_FEEDBACK, KN_DB_ARGS(acct_itoa(id, s->account_id), text, email), feedback_done, c);
+}
+
 int strike_econ_gapi(SocialSession *s, const GapiReq *r) {
     if (r->nseg < 2 || strcmp(r->seg[0], "strike")) return 0;
+    if (gapi_is(r, "POST", "/strike/v1/feedback")) {
+        r_feedback(s, r);
+        return 1;
+    }
     if (r->nseg >= 3 && !strcmp(r->seg[2], "item-definitions")) return r_items(s, r);
     if (r->nseg >= 3 && !strcmp(r->seg[2], "spin-wheels")) return r_wheels(s, r);
     if (r->nseg >= 3 && !strcmp(r->seg[2], "shop")) return r_shop(s, r);

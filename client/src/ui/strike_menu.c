@@ -40,6 +40,7 @@
 #include <net_ext.h> // NET_EXT_KN_SWAP_TEAM (Switch Teams)
 #include <gltf.h>    // gltf_clock(): the menu's clock for the Switch Teams count
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1935,9 +1936,11 @@ static void server_password_leave(void) {
 // ---------------------------------------------------------------- FEEDBACK (v5 / g5)
 
 // The main menu's feedback banner opens FRVR's form: the text (at least 5 characters, else the error line
-// under it) and an optional e-mail (a valid address when one is typed). Submit posts /v1/feedback in FRVR
-// (Khe); kn_brain has no feedback route, so nothing is sent. The form still goes to FRVR's thanks screen.
-static struct { char text[512], email[160]; int validate, validate_email, sent; } FB;
+// under it) and an optional e-mail (a valid address when one is typed). Submit posts /v1/feedback through the
+// Strike gateway (strike_econ_request -> kn_brain's /strike/v1/feedback, services/brain/strike_econ.c); the
+// thanks screen shows only on a 2xx answer, else the form stays with an error line under its buttons.
+static struct { char text[512], email[160]; int validate, validate_email, sent, pending; } FB;
+static unsigned g_form_serial; // one per opened form: an answer that comes back for an older form is dropped
 
 static int email_valid(const char *e) {
     const char *at = strchr(e, '@');
@@ -1984,11 +1987,43 @@ static int h_strike_feedback(void *user, const HtmlEvent *ev, const HtmlArg *arg
     return 0;
 }
 
-// Submit (the form's onclick, strikeAction('feedback-submit')): validate, then the thanks screen replaces the
-// form (kr(g5): pop, push)
+// the error line under the buttons (msg NULL: none); a new one replaces the old
+static void feedback_submit_error(const HtmlElem root, const char *msg) {
+    const HtmlElem old = html_dom_query(root, ".feedback-submit-error");
+    if (old) html_dom_remove(old);
+    const HtmlElem buttons = html_dom_query(root, ".feedback-form__buttons");
+    if (!buttons || !msg) return;
+    char html[256];
+    snprintf(html, sizeof(html), "<div class=\"input-error feedback-submit-error\">%s</div>", msg);
+    html_dom_insert_html(buttons, HTML_INSERT_BEFORE_BEGIN, html);
+}
+
+// the gateway's answer to the form's POST: 2xx = the feedback is stored, the thanks screen replaces the form
+// (kr(g5): pop, push); anything else keeps the form open with the error line
+static void feedback_answer(void *user, int status, const cJSON *data, const cJSON *error) {
+    (void) data;
+    if ((unsigned) (uintptr_t) user != g_form_serial) return; // that form was closed (or another one opened)
+    FB.pending = 0;
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_FEEDBACK_FORM);
+    if (!root) return;
+    if (status >= 200 && status < 300) {
+        FB.sent = 1;
+        printf("[strike] feedback sent (%d)\n", status);
+        strike_screen_pop();
+        strike_screen_push(STRIKE_SCREEN_FEEDBACK_THANKS);
+        return;
+    }
+    const char *server = cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+    feedback_submit_error(root, status == 401 ? "You must be signed in to send feedback."
+                                : server && status == 400 ? server
+                                : "Your feedback could not be sent. Please try again.");
+}
+
+// Submit (the form's onclick, strikeAction('feedback-submit')): validate, then POST /v1/feedback {text, email}
+// (FRVR's body; the e-mail only when typed). Nothing is sent while the text or the e-mail is invalid.
 static void feedback_submit(void) {
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_FEEDBACK_FORM);
-    if (!root || FB.sent) return;
+    if (!root || FB.sent || FB.pending) return;
     FB.validate = 1;
     FB.validate_email = FB.email[0] != 0; // shouldValidateEmail = !!this.email
     char *e = FB.email;
@@ -1996,10 +2031,18 @@ static void feedback_submit(void) {
     while (strlen(e) && e[strlen(e) - 1] == ' ') e[strlen(e) - 1] = 0;
     feedback_check(root);
     if (strlen(FB.text) < 5 || (FB.email[0] && !email_valid(FB.email))) return;
-    FB.sent = 1;
-    printf("[strike] feedback taken: kn_brain has no feedback route, so nothing is sent\n");
-    strike_screen_pop();
-    strike_screen_push(STRIKE_SCREEN_FEEDBACK_THANKS);
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "text", FB.text);
+    if (FB.email[0]) cJSON_AddStringToObject(body, "email", FB.email);
+    feedback_submit_error(root, NULL);
+    FB.pending = 1;
+    const int sent = strike_econ_request("POST", "/v1/feedback", body, feedback_answer, (void *) (uintptr_t) g_form_serial);
+    cJSON_Delete(body);
+    if (!sent) { // no Strike brain (offline, or not signed in to one): the form stays
+        FB.pending = 0;
+        printf("[strike] feedback not sent: no brain answers\n");
+        feedback_submit_error(root, "Your feedback could not be sent. Please try again.");
+    }
 }
 
 // ---------------------------------------------------------------- actions
@@ -2447,6 +2490,8 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     }
     case STRIKE_SCREEN_FEEDBACK_FORM:
         memset(&FB, 0, sizeof(FB)); // a new form: empty, nothing validated
+        g_form_serial++;
+        break;
     default:
         break;
     }

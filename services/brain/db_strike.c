@@ -22,6 +22,7 @@
  *   P_STRIKE_COMMIT (id, match_key, player json, day, spec, max_kr) -> {duplicate, xp, xp_before, kr}
  *   P_STRIKE_OVERLAY (id)                           -> {items: [{item, count}], kr, xp, loadout}
  *   P_STRIKE_LEADERBOARD (board, limit, offset, id) -> {rows: [{rank, id, name, value, xp}], me}
+ *   P_STRIKE_FEEDBACK (id, message, email | "") -> {id}   one strike_feedback row (created_at now)
  */
 #include "db_procs.h"
 
@@ -565,3 +566,22 @@ static kn_db_result *run_leaderboard(kn_dbconn *c, int n, const char *const *p) 
     return dbx_json(&x, "leaderboard", o);
 }
 const kn_proc P_STRIKE_LEADERBOARD = {"strike_leaderboard", NULL, run_leaderboard};
+
+/* ------------------------------------------------------------------ feedback */
+
+/* (account id, message, email): one row of strike_feedback; the caller checked the text (route in
+ * strike_econ.c). The timestamp is the table's created_at default. */
+static kn_db_result *run_feedback(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t fid = dbx_insert_id(
+        &x,
+        /* RETURNING id on postgres (verbatim text: plain casts) / sqlite, mysql's auto-increment id (dbx_insert_id) */
+        SQL(.pg = "INSERT INTO strike_feedback (account_id, message, email) VALUES ($1::int, $2, $3) RETURNING id",
+            .sqlite = "INSERT INTO strike_feedback (account_id, message, email) VALUES ({int:$1}, $2, $3) RETURNING id",
+            .any = "INSERT INTO strike_feedback (account_id, message, email) VALUES ({int:$1}, $2, $3)"),
+        KN_DB_ARGS(PS(0), PS(1), PS(2)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) fid);
+    return dbx_json(&x, "feedback", o);
+}
+const kn_proc P_STRIKE_FEEDBACK = {"strike_feedback", NULL, run_feedback};

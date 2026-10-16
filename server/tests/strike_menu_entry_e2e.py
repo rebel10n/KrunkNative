@@ -85,8 +85,8 @@ def script():
          "23400 call strikeFeedback \"email\" \"player@example.com\"",
          "23500 clicksel [onclick=\"strikeAction('feedback-submit')\"]",
          "24100 nodes @thanks .feedback-thanks",
-         "24100 text @thanks-text .feedback-thanks__title",
-         "24200 clicksel .feedback-thanks .frvr-button",
+         "24100 text @send-err .feedback-submit-error",
+         "24200 clicksel .feedback-form .frvr-button--gray",
          "24800 nodes @main-again .frvr-kr-limit",
          "24900 quit",
          ]
@@ -175,10 +175,10 @@ def main():
     check("the feedback banner opens FEEDBACK_FORM", nodes.get("form") == 1, str(nodes.get("form")))
     check("an empty Submit asks for more text", "More information required" in texts.get("err-text", ""), texts.get("err-text", ""))
     check("a bad e-mail is named by the next Submit (FRVR checks it from the first Submit on)", "valid e-mail" in texts.get("err-email", ""), texts.get("err-email", ""))
-    check("a valid form goes to FRVR's thanks screen", nodes.get("thanks") == 1 and "Thank you for your feedback" in texts.get("thanks-text", ""),
-          texts.get("thanks-text", ""))
-    check("the feedback is not sent anywhere yet (no kn_brain route)", "no feedback route, so nothing is sent" in text)
-    check("the thanks screen's Return goes back to the main menu", nodes.get("main-again") == 1, str(nodes.get("main-again")))
+    check("offline (no brain) a valid form is not thanked: the thanks screen waits for a 2xx answer", nodes.get("thanks") == 0, str(nodes.get("thanks")))
+    check("offline the form keeps its error line (could not be sent)", "could not be sent" in texts.get("send-err", ""), texts.get("send-err", ""))
+    check("the log says nothing was sent (no brain answers)", "feedback not sent: no brain answers" in text)
+    check("Cancel returns to the main menu", nodes.get("main-again") == 1, str(nodes.get("main-again")))
     return all(results)
 
 
