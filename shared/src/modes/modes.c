@@ -12,6 +12,7 @@
 #include <ctype.h>
 
 #include "mode_internal.h"
+#include <prop_hunt.h>
 #include <ruleset.h>
 #include <flavor_rules.h> // flavor_mode_allowed: the modes a flavor offers (Krunker Strike)
 
@@ -94,10 +95,10 @@ static const ModeWaitTimer k_wait_race[] = {
 static const ModeWaitTimer k_wait_simon[] = {
     {.time = 10.0f, .msg = "starts in ", .trigger = mode_trigger_pick_simon},
 };
-// prop.js: the 2nd trigger also starts the taunt timer (nextTaunt: not ported, KN has no prop taunts)
+// prop.js: the 2nd trigger also starts the taunt timer (nextTaunt, shared/src/modes/mode_prop.c)
 static const ModeWaitTimer k_wait_prop[] = {
     {.time = 10.0f, .msg = "locking seekers in ", .trigger = mode_trigger_lock_seekers},
-    {.time = 30.0f, .msg = "releasing seekers in ", .trigger = mode_trigger_release_seeker, .no_join = 1},
+    {.time = 30.0f, .msg = "releasing seekers in ", .trigger = mode_trigger_release_seekers_prop, .no_join = 1},
 };
 static const ModeWaitTimer k_wait_boss[] = {
     {.time = 15.0f, .msg = "picking boss in ", .trigger = mode_trigger_pick_boss},

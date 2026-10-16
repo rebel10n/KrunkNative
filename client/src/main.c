@@ -9,6 +9,7 @@
 #include <ai_render.h>
 #include <nametags.h>
 #include <sprays.h> // WP-E: the v7 spray wheel overlay
+#include <prop_hunt_client.h> // Prop Hunt
 #include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
 #include <third_person.h>
@@ -1080,6 +1081,7 @@ int main(int argc, char **argv) {
     html_ui_fini();
     voice_fini();
     sprays_wheel_fini(); // its canvas (GL)
+    prop_hunt_fini();    // the prop wheel's canvas
     hud_objectives_fini(); // the objective markers canvas (GL)
     build_ui_fini();     // the charge bar / build wheel canvas (GL)
     audio_fini();
@@ -2390,6 +2392,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (!scenario) hud_objectives_render(client);     // v7 flag pings, Hardpoint / Domination markers (game-overlay canvas)
     if (!scenario || build_ui_scenario_active()) build_ui_render(client); // v7 charge bar (interactMProg) and build wheel (game-overlay canvas)
     if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
+    if (!scenario) {
+        prop_hunt_frame(client, delta);        // Prop Hunt: the wheel's hold, #propControlHolder
+        prop_hunt_wheel_render(client, delta); // ... and its wheel (game-overlay canvas)
+    }
     if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page
     gpu_timer_mark(GPU_PASS_HUD);
     input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row

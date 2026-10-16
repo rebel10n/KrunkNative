@@ -63,7 +63,8 @@ const GameModeConfig *mode_config(const int id) {
     static const GameModeConfig ctf = {.leader_stats = k_ctf_lead, .end_stats = k_ctf_end};
     static const GameModeConfig shrp = {.obj_weapon = 1}, parkour = {.show_ms = 1}; // test_world: 22, 5
     static const GameModeConfig point = {.end_stats = k_point_end};                  // test_rounds: Hardpoint (2)
-    return id == 3 ? &ctf : id == 22 ? &shrp : id == 5 ? &parkour : id == 2 ? &point : NULL;
+    static const GameModeConfig prop = {.prop = 1, .team_options = {"Prop", "Seekers"}}; // test_prophunt: Prop Hunt (11)
+    return id == 3 ? &ctf : id == 22 ? &shrp : id == 5 ? &parkour : id == 2 ? &point : id == 11 ? &prop : NULL;
 }
 
 static int fake_cheat(void *user, const char *nonce, const char *ct, KrunkerCcr *out) {
@@ -1896,6 +1897,100 @@ static void test_lobby(void) {
     clear();
 }
 
+// Prop Hunt (official-ingame-prophunt): "0"[21] (propID of a Prop-team player), "up" [sid, propID, skip,
+// propSwitches] and "prpR" [sid, propRot, propRotSaved, reset] -> NET_EXT_PROP_UPDATE / _ROTATION; our
+// NET_EXT_PROP_PICK / _ROTATE out as "prp" / "prpR" (["prpR", true] for a reset).
+static void test_prophunt(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+
+    // init: Prop Hunt (mode 11, MODE_ID_PROP)
+    KrunkerValue init[17];
+    for (int i = 0; i < 17; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(MODE_ID_PROP);
+    init[16] = KRUNKER_V_BOOL(0);
+    feed(&link, "init", init, 17);
+    clear();
+
+    // us (9) on team 1, the Prop team; a Seeker (7, team 2)
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100); add[9] = KRUNKER_V_NUM(1);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100); add[62] = KRUNKER_V_NUM(2);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    CHECK(link.my_sid == 9, "prop: joined as 9");
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_PROP_UPDATE, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_PROP_UPDATE, &len) : NULL;
+        NetPropUpdatePacket u = {0};
+        if (b && len == sizeof(u)) memcpy(&u, b, sizeof(u));
+        CHECK(b && u.uid == 9 && u.prop_id == 1 && u.skip == 0 && u.switches == -1, "spawn: the Prop-team player wears the default prop");
+        CHECK(find_ext(NET_EXT_PROP_UPDATE, 1, &len) < 0, "spawn: a Seeker gets no prop");
+    }
+    clear();
+
+    // "up" for a Seeker-free game: prop 12 with 2 switches left; then a skip (no prop applied, switches -1)
+    feed(&link, "up", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(12), KRUNKER_V_NIL, KRUNKER_V_NUM(2)}, 4);
+    feed(&link, "up", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(3), KRUNKER_V_BOOL(1), KRUNKER_V_NIL}, 4);
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_PROP_UPDATE, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_PROP_UPDATE, &len) : NULL;
+        NetPropUpdatePacket u = {0};
+        if (b && len == sizeof(u)) memcpy(&u, b, sizeof(u));
+        CHECK(b && u.uid == 7 && u.prop_id == 12 && u.skip == 0 && u.switches == 2, "up: 7 wears prop 12 with 2 switches");
+        const int k2 = find_ext(NET_EXT_PROP_UPDATE, 1, &len);
+        const uint8_t *b2 = k2 >= 0 ? ext_body(k2, NET_EXT_PROP_UPDATE, &len) : NULL;
+        NetPropUpdatePacket u2 = {0};
+        if (b2 && len == sizeof(u2)) memcpy(&u2, b2, sizeof(u2));
+        CHECK(b2 && u2.uid == 9 && u2.prop_id == 3 && u2.skip == 1 && u2.switches == -1, "up: a skip applies nothing but the switches");
+    }
+    clear();
+
+    // "prpR" [sid, propRot, propRotSaved, reset]: rotation on with a saved yaw 0.5, then a reset
+    feed(&link, "prpR", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(0.5), KRUNKER_V_BOOL(0)}, 4);
+    feed(&link, "prpR", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(0), KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 4);
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_PROP_ROTATION, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_PROP_ROTATION, &len) : NULL;
+        NetPropRotationPacket r = {0};
+        if (b && len == sizeof(r)) memcpy(&r, b, sizeof(r));
+        CHECK(b && r.uid == 7 && r.rot == 1 && r.saved_set == 1 && r.saved == 0.5f && r.reset == 0, "prpR: rotation on, saved yaw 0.5");
+        const int k2 = find_ext(NET_EXT_PROP_ROTATION, 1, &len);
+        const uint8_t *b2 = k2 >= 0 ? ext_body(k2, NET_EXT_PROP_ROTATION, &len) : NULL;
+        NetPropRotationPacket r2 = {0};
+        if (b2 && len == sizeof(r2)) memcpy(&r2, b2, sizeof(r2));
+        CHECK(b2 && r2.rot == 0 && r2.saved_set == 0 && r2.reset == 1, "prpR: the reset with no saved yaw");
+    }
+    clear();
+
+    // outbound: the wheel's pick -> "prp" [propID]; the rotation toggle -> "prpR" []; the reset -> "prpR" [true]
+    {
+        uint8_t ext[64];
+        const NetPropPickPacket pick = {.prop_id = 12};
+        uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_PROP_PICK, &pick, sizeof(pick));
+        krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n);
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "prp") && krunker_num(krunker_frame_arg(&g_out[0], 0), 0) == 12, "prp out: prop 12");
+        clear();
+        const NetPropRotatePacket toggle = {.reset = 0};
+        n = net_ext_pack(ext, sizeof(ext), NET_EXT_PROP_ROTATE, &toggle, sizeof(toggle));
+        krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n);
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "prpR") && g_out[0].argc == 0, "prpR out: a toggle sends no argument");
+        clear();
+        const NetPropRotatePacket reset = {.reset = 1};
+        n = net_ext_pack(ext, sizeof(ext), NET_EXT_PROP_ROTATE, &reset, sizeof(reset));
+        krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n);
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "prpR") && g_out[0].argc == 1, "prpR out: a reset sends true");
+        clear();
+    }
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2840,6 +2935,7 @@ int main(void) {
     }
     test_popups();
     test_lobby();
+    test_prophunt();
     test_script();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);

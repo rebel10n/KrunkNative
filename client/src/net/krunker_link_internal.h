@@ -22,3 +22,9 @@ int krunker_link_lobby_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *
 int krunker_link_script_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
 // init's syncData lo / ent / entAtt / chg (:219478-219496); called by on_init_hud.
 void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f);
+
+// krunker_link_prophunt.c: Prop Hunt's "up" / "prpR" (1 = handled), the prop a Prop-team player wears
+// from its "0" entry, and our NET_EXT_PROP_PICK / _ROTATE out as "prp" / "prpR" (-1: another subtype).
+int krunker_link_prophunt_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
+void krunker_link_prophunt_spawned(KrunkerLink *l, int sid, int team, const KrunkerValue *prop_id);
+int krunker_link_prophunt_send(KrunkerLink *l, uint16_t subtype, const uint8_t *body, uint16_t length);

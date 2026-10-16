@@ -6,6 +6,8 @@
 #include <ui_logic.h> // ui_setting_weapon_float: vmSetts Per Weapon
 #include <skin_fx.h>
 #include <third_person.h> // the local third-person model
+#include <prop_hunt.h> // Prop Hunt: the prop model
+#include <social_v7.h> // game_player_is_prop
 #include <pets.h>
 #include <ruleset.h> // game_constants_of: the flavor's constants (Krunker Strike crouch lean)
 #include <vfx.h>
@@ -442,6 +444,39 @@ static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachme
     mesh->transform.scale.x = mesh->transform.scale.y = mesh->transform.scale.z = attachment->scale ? attachment->scale : 1.0f;
     mesh->transform.parent = parent;
 
+    return mesh;
+}
+
+// ---------------------------------------------------------------- Prop Hunt
+
+int prop_hunt_player(const Player *player) {
+    const Game *game = player ? player->game : NULL;
+    return game && game->mode && game->mode->config.prop && game_player_is_prop(game, player) && prop_is_valid(player->prop_id);
+}
+
+// loadMesh({isMdl, src: name.toLowerCase() + "_0", emissive: ACIDBARREL}, 0, scale + CPY, 0, 0, scale, objInstances)
+static Mesh *player_prop_mesh(const int prop_id) {
+    char src[64], rel[96];
+    prop_model_src(prop_id, src, sizeof(src));
+    snprintf(rel, sizeof(rel), "models/%s.obj", src);
+    char *path = concat(assets_path(), rel);
+    if (path) ensure_asset_file(path); // fetched on demand (web / a fresh asset tree)
+    Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
+    free(path);
+    if (!geometry) return NULL;
+    BasicMaterial *material = basic_material_init();
+    if (!material) return NULL;
+    snprintf(rel, sizeof(rel), "textures/%s.png", src);
+    path = concat(assets_path(), rel);
+    if (path) ensure_asset_file(path);
+    material->texture = path ? load_texture(path) : 0;
+    free(path);
+    if (!strcmp(src, "acidbarrel_0")) material->emissive = (vec4) {1.0f, 1.0f, 1.0f, 1.0f}; // emissive #ffffff
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    if (!mesh) return NULL;
+    const float scale = prop_model_scale(prop_id);
+    mesh->transform.position = (vec3) {0.0f, prop_model_y(prop_id), 0.0f};
+    mesh->transform.scale = (vec3) {scale, scale, scale};
     return mesh;
 }
 
@@ -1067,7 +1102,7 @@ void player_generate_meshes(Player *player, const int render_you) {
 
     // KrunkNative: the local player's model for the third-person camera (third_person.h) is the
     // same third-person model as v7's game.config.thirdPerson builds for renderYou
-    const int kn_third_person = render_you && third_person_model();
+    const int kn_third_person = render_you && (third_person_model() || prop_hunt_player(player)); // a prop: its own model (Prop Hunt)
     const int third_person = !render_you || kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
 
     PlayerMesh *player_mesh = calloc(1, sizeof(PlayerMesh));
@@ -1108,9 +1143,13 @@ void player_generate_meshes(Player *player, const int render_you) {
 
     if (player->game->map->config.model == MODEL_TYPE_SPRITE) {
 
-    } else if (0 /* TODO: prop hunt */) {
-
     } else {
+        // Prop Hunt (players.js :171319): the prop model stands in for the body. The body and arms are still built
+        // (the loadout and the arm anchors read them) but scene_add_player_mesh keeps them out of the scene.
+        if (prop_hunt_player(player) && third_person) {
+            player_mesh->prop = player_prop_mesh(player->prop_id);
+            if (player_mesh->prop) player_mesh->prop->transform.parent = player_mesh->anchor;
+        }
         // Cosmetic items only exist on third-person models (v12992); a hat / head noHead, noHair, a body
         // noBody and a waist noLegs change the body parts.
         const int no_head = third_person && ((look.hat && (look.hat->flags & VS_NO_HEAD)) || (look.head && (look.head->flags & VS_NO_HEAD)));
@@ -1565,7 +1604,12 @@ void player_update_meshes(Player *player, const int is_preview) {
     player_mesh->anchor->position = player->position;
     player_mesh->anchor->position.y += step_y;
 
-    if (player->game->map->config.model != MODEL_TYPE_SPRITE) { // TODO: check that is not prop
+    if (player_mesh->prop) {
+        // Prop Hunt: no step bob (players.js :170101), the model turns with the look only while propRot
+        // is on, else it keeps propRotSaved (:170946)
+        player_mesh->anchor->position = player->position;
+        player_mesh->anchor->rotation.y = prop_model_yaw(player);
+    } else if (player->game->map->config.model != MODEL_TYPE_SPRITE) {
         player_mesh->anchor->rotation.y = player->direction.y + step_yaw;
     }
 
@@ -1843,6 +1887,7 @@ void player_meshes_fini(Player *player) {
         fx_gltf_fini(player_mesh->cosmetic_models[i]);
     }
 
+    if (player_mesh->prop) fx_mesh_fini(player_mesh->prop);
     pet_free(player_mesh->pet);
     free(player_mesh->upper_body_anchor);
     free(player_mesh->body_anchor);

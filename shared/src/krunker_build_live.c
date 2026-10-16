@@ -128,6 +128,8 @@ static const int REQUIRED_S2C[] = {
 static const int OPTIONAL_C2S[] = {
     // social / cosmetic actions (official-ingame-actions): pings, sprays, taunts, the next-map vote, the spectate target
     KRUNKER_C2S_MARK_POSITION, KRUNKER_C2S_SPRAY, KRUNKER_C2S_PROP_HUNT_TAUNT, KRUNKER_C2S_MATCH_VOTE, KRUNKER_C2S_fpSp,
+    // Prop Hunt picks and rotation (official-ingame-prophunt)
+    KRUNKER_C2S_PICK_PROP, KRUNKER_C2S_PROP_ROTATION,
     // voice chat clips (official-ingame-voice)
     KRUNKER_C2S_VOICE_CHAT,
     // the krunker.io account in the game (account-unify): the socket login after a sign-in, the ranked
@@ -164,6 +166,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_UPDATE_CODE_TIMER,
     // entity events: only the map's client script reads them (official-ingame-script)
     KRUNKER_S2C_ENTITY_EVENT,
+    // Prop Hunt (official-ingame-prophunt): a prop's size and the prop model's rotation; only the Prop Hunt mode sends them
+    KRUNKER_S2C_UPDATE_PROP, KRUNKER_S2C_UPDATE_PROP_ROT,
     -1,
 };
 static const int REQUIRED_ADD[] = {

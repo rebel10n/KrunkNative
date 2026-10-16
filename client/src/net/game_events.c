@@ -47,6 +47,7 @@
 #include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <strike_ui.h>       // Krunker Strike: its own in-game UI gets the same events (strike_hud.c)
+#include <prop_hunt_client.h> // Prop Hunt: "up" / "prpR"
 #include <i18n.h>     // NET_EXT_KN_OFFICIAL_CHAT_I18N: an official server's "chi" key, translated here
 #include <map_post.h> // NET_EXT_KN_OFFICIAL_LEADER_BOARD: a map LEADERBOARD's rows
 #include <math.h>
@@ -1231,6 +1232,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 hud_votekick_on_kpd(client, &res, (const char *) body + sizeof(res), body_length - sizeof(res));
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;

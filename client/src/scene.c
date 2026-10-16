@@ -14,6 +14,10 @@ Scene *scene_init() {
 
 void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     scene_add_pet(scene, player_mesh->pet, player_mesh->render_you);
+    if (player_mesh->prop) { // Prop Hunt: the prop is the whole body; the body, arms and cosmetics stay out of the scene
+        scene_add_mesh(scene, player_mesh->prop);
+        return;
+    }
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_add_mesh(scene, player_mesh->cosmetics[i]);
         scene_add_gltf(scene, player_mesh->cosmetic_models[i]);
@@ -86,6 +90,7 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
 void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const size_t loadout_size) {
     if (!player_mesh) return;
     scene_remove_pet(player_mesh->pet);
+    if (player_mesh->prop) scene_remove_mesh(scene, player_mesh->prop);
 
     for (int i = 0; i < PLAYER_COSMETIC_SLOTS; i++) {
         if (player_mesh->cosmetics[i]) scene_remove_mesh(scene, player_mesh->cosmetics[i]);

@@ -1,6 +1,7 @@
 // KrunkNative third-person camera (client/include/third_person.h): the console / bind state, the
 // server grant, the local model swap and the camera pose.
 #include <third_person.h>
+#include <prop_hunt_client.h> // Prop Hunt: the Prop team's camera
 #include <console.h>
 #include <spectate.h>
 #include <ui_logic.h>
@@ -67,6 +68,7 @@ void third_person_on_init(Client *client) {
     (void) client;
     g_tp.reask = g_tp.wanted;
     g_tp.granted = 0;
+    prop_hunt_reset(); // startGame: the Prop team's camera distance back to 30
 }
 
 // The mode the local player's meshes are built for: granted. Aiming down sights keeps it (v10
@@ -83,9 +85,15 @@ static int tp_game_offset(const Client *client) {
     return client->game.config.third_person || (map && (map->config.cam_offset.x || map->config.cam_offset.y || map->config.cam_offset.z));
 }
 
+// Prop Hunt: the Prop team's camera is always behind the eye (gameLoop :221701), at the distance the
+// mouse wheel sets (prop_hunt_client.h), whatever the grant
+static int tp_wanted(const Client *client) {
+    return third_person_model() || prop_hunt_me(client);
+}
+
 int third_person_view(const Client *client) {
     const Player *me = client ? client->me : NULL;
-    return third_person_model() && me && me->active && me->mesh && !tp_game_offset(client) && !spectate_active();
+    return tp_wanted(client) && me && me->active && me->mesh && !tp_game_offset(client) && !spectate_active();
 }
 
 void third_person_frame(Client *client) {
@@ -99,7 +107,7 @@ void third_person_frame(Client *client) {
         g_tp.built_for = NULL;
         return;
     }
-    const int mode = third_person_model();
+    const int mode = tp_wanted(client);
     if (g_tp.built_for == me && g_tp.built == mode) return;
     if (g_tp.built_for == me && g_tp.built != -1) {
         // the model changes: rebuild the local player's meshes (the same path as a loadout change)
@@ -119,7 +127,9 @@ static vec3 tp_eye(const Player *me) {
     return (vec3) {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
 }
 
-static vec3 tp_offset(void) {
+static vec3 tp_offset(const Client *client) {
+    // a prop: camera.position.set(0, 0, iîiïìïi) in the look frame (:221701)
+    if (prop_hunt_me(client)) return (vec3) {0.0f, 0.0f, prop_hunt_camera_distance()};
     return (vec3) {TP_OFFSET_X, TP_OFFSET_Y, TP_OFFSET_Z};
 }
 
@@ -135,7 +145,7 @@ void third_person_apply_camera(Client *client, const vec2 view, const float delt
     const float yaw = view.y + (client->camera.rotation.y - me->direction.y);
 
     vec3 spot;
-    const float keep = third_person_camera_spot(&client->game, eye, pitch, yaw, tp_offset(), &spot);
+    const float keep = third_person_camera_spot(&client->game, eye, pitch, yaw, tp_offset(client), &spot);
     // pulled in at once (never inside a wall), eased back out once the wall is gone
     if (keep < g_tp.keep || g_tp.keep <= 0.0f) g_tp.keep = keep;
     else g_tp.keep += (keep - g_tp.keep) * fminf(1.0f, TP_EASE_OUT * fminf(delta, 0.1f) * 1000.0f);

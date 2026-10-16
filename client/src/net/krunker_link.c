@@ -379,6 +379,10 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         }
         emit(l, NET_PACKET_SPAWN, &s, sizeof(s));
         if (p) emit_player_info(l, p); // after SPAWN, as our own server sends it
+        // Prop Hunt: players.add's updateProp(player, propID || 1) for a Prop-team player (krunker_link_prophunt.c)
+        // players.add's propID ("0" [21], :171902) has no position in the layout yet (tools/krunker/extract_build.py):
+        // a Prop-team spawn gets the default prop (1) as updateProp(player, propID || 1) does without one
+        krunker_link_prophunt_spawned(l, s.uid, s.team, NULL);
     }
 }
 
@@ -2631,7 +2635,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
             if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f) &&
-                !krunker_link_script_frame(l, id, &f))
+                !krunker_link_script_frame(l, id, &f) && !krunker_link_prophunt_frame(l, id, &f))
                 l->unknown_in++;
             break;
         }
@@ -3044,6 +3048,8 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             uint16_t subtype, body_length;
             const uint8_t *body;
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 0;
+            const int prop = krunker_link_prophunt_send(l, subtype, body, body_length); // "prp" / "prpR"
+            if (prop >= 0) return prop;
             if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionSendPacket)) {
                 // markPosition (:170208, sent :221369 only `isRanked || isComp`): ["mpos", {x, y, z}]
                 if (!l->is_ranked && !l->is_comp) return 0;

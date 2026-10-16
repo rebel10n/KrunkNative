@@ -9,6 +9,8 @@
 #include <spawnables.h>
 #include <player_card.h>
 #include <progression.h>
+#include <prop_hunt.h>
+#include <social_v7.h> // game_player_is_prop
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -788,6 +790,42 @@ static void test_misc(Game *game) {
     kill(prop, seeker, 1);
     tick(game, 0.1f, 0.1f);
     CHECK(ended(game) && end_result_for(seeker->uid) == 1, "props found: seekers win");
+
+    // Prop Hunt's mechanics (prop_hunt.h): a Prop-team spawn wears a random prop with no switches made; a pick applies
+    // a valid prop other than the one worn and costs a switch (3 per life); the rotation toggles (off keeps the look)
+    // and a reset clears the saved yaw; a Seeker's shot on a prop object costs it 10 health
+    start_mode(game, MODE_ID_PROP);
+    add_player(game, 1, 0);
+    add_player(game, 2, 0);
+    Player *pp = first_on_team(game, 1); // the Prop team (team_options[0])
+    Player *sk = first_on_team(game, 2); // the Seekers
+    CHECK(pp && sk && game_player_is_prop(game, pp) && !game_player_is_prop(game, sk), "Prop: team 1 is the Prop team, team 2 the Seekers");
+    CHECK(prop_is_valid(pp->prop_id) && pp->prop_switches == 0, "Prop: a Prop-team spawn wears a valid prop with no switches");
+    CHECK(sk->prop_id == PROP_DEFAULT_ID, "Prop: a Seeker wears the default prop");
+    const int want = pp->prop_id == 16 ? 20 : 16;
+    CHECK(game_prop_pick(game, pp, want) == 1 && pp->prop_id == want && pp->prop_switches == 1, "Prop: a pick applies and costs a switch");
+    CHECK(!game_prop_pick(game, pp, want) && pp->prop_switches == 1, "Prop: the prop worn is no pick");
+    CHECK(!game_prop_pick(game, sk, 16) && sk->prop_id == PROP_DEFAULT_ID, "Prop: a Seeker picks nothing");
+    const int ids[] = {2, 8, 28, 36}; // none is 16 or 20: the first two picks succeed, the third hits the 3-switch limit
+    int taken = 0;
+    for (int i = 0; i < 4; i++) taken += game_prop_pick(game, pp, ids[i]);
+    CHECK(taken == 2 && pp->prop_switches == 3 && pp->prop_id == 8, "Prop: picks stop at the switch limit (%d taken, %d switches)", taken, pp->prop_switches);
+    pp->direction.y = 0.5f;
+    CHECK(game_prop_rotate(game, pp, 0) == 1 && pp->prop_rot == 1, "Prop: the rotation turns on");
+    pp->direction.y = 1.25f;
+    game_prop_rotate(game, pp, 0);
+    CHECK(!pp->prop_rot && pp->prop_rot_saved_set && pp->prop_rot_saved == 1.25f, "Prop: the rotation off keeps the look");
+    game_prop_rotate(game, pp, 1);
+    CHECK(!pp->prop_rot && !pp->prop_rot_saved_set && pp->prop_rot_saved == 0.0f, "Prop: the reset clears the saved yaw");
+    Object shot;
+    memset(&shot, 0, sizeof(shot));
+    shot.prefab = 16; // a CONE: a prop object of the map
+    const float seeker_health = sk->health;
+    game_prop_seeker_hit(game, sk, &shot);
+    CHECK(sk->health == seeker_health - 10.0f, "Prop: a Seeker's shot on a prop costs it 10 health");
+    const float prop_health = pp->health;
+    game_prop_seeker_hit(game, pp, &shot);
+    CHECK(pp->health == prop_health, "Prop: a prop's hit on a prop object costs nothing");
 
     start_mode(game, MODE_ID_DEF);
     a = add_player(game, 1, 0);

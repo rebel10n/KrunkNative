@@ -491,6 +491,9 @@ typedef struct {
     // (3, player.height, 0) on the anchor); NULL when none
     struct PlayerPet *pet;
     MeshTransform pet_holder;
+    // Prop Hunt: the prop model a Prop-team player wears instead of its body (players.js :171319:
+    // "<prefab name>_0" at y scale + CPY, scaled by the prefab's scale), NULL otherwise
+    Mesh *prop;
     double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
     float effect_timer;           // players.js itemEffects effectTimer (ms)
 } PlayerMesh;
@@ -501,6 +504,8 @@ enum {
 };
 
 void player_generate_meshes(Player*, int);
+// Prop Hunt (player_mesh.c): the player wears a prop (a prop mode, the Prop team, a valid propID).
+int prop_hunt_player(const Player*);
 void player_update_meshes(Player*, int);
 void player_meshes_fini(Player*);
 void player_mesh_debug_log(Player*, double now); // KRUNKNATIVE_PLAYER_LOG (player_mesh.c)

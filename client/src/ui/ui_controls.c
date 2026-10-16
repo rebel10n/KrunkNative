@@ -16,6 +16,7 @@
 //     engine applies (sensitivity, invert, fpsFOV, scrollDir, weapon visibility).
 // All of it is shared by the native and web clients: main.c feeds GLFW events (the
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
+#include <prop_hunt_client.h> // Prop Hunt keys
 #include <ui_logic.h>
 #include <render_settings.h> // showMessages (ui_controls_chat_text_allowed)
 #include <v10_notify.h> // the chat's emoji panel keys
@@ -1375,6 +1376,11 @@ static void press_button(Client *client, const int code) {
     // sprayWheelKey (premium / sandbox): opens the wheel; else sprayKey: "spry" (v7) / "int" 0 (v3)
     social_spray_press(client, bind_is(UI_CONTROL_SPRAY, code), v7_is("sprayWheel", code));
     if (v7_is("markPosition", code)) social_mark_position(client); // v10 ping (official ranked / comp: krunker_link.c)
+    // Prop Hunt, the Prop team (:221435-221442): the wheel while held, a random prop, rotation toggle / reset
+    if (v7_is("prop", code)) prop_hunt_wheel_press(client);
+    if (v7_is("propRand", code)) prop_hunt_random(client);
+    if (v7_is("propRot", code)) prop_hunt_rotate(client, 0);
+    if (v7_is("propRotR", code)) prop_hunt_rotate(client, 1);
     for (int i = 0; i < TAUNT_COUNT; i++) { // Prop team: "prpt", i
         if (v7_is_at("taunt", i, code)) social_taunt(client, i);
     }
@@ -1455,6 +1461,7 @@ static void press_code(Client *client, const int code) {
 // CONTROLS N(code, 0) (+ releaseButton: the leaderboard is polled; the spray wheel's key sprays)
 static void release_code(Client *client, const int code) {
     if (v7_is("sprayWheel", code)) social_spray_release(client ? client : menu_ui()->client, 1);
+    if (v7_is("prop", code)) prop_hunt_wheel_release(client ? client : menu_ui()->client); // releaseButton: pick the wheel's prop
     const int slot = key_slot(code);
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 0;
     if (slot >= 0) g_ctl.keys[slot] = 0;
@@ -1634,6 +1641,8 @@ int ui_controls_scroll_event(Client *client, const double dy, const int in_game)
     }
     // v7 controls.js wheel: an open spray wheel takes the scroll (sprayWheelChange), no key 20000
     if (social_spray_scroll(dy)) return 1;
+    // Prop Hunt: an open prop wheel takes the scroll; a prop's camera distance follows it
+    if (client && prop_hunt_scroll(client, dy)) return 1;
     // window.Bf5: the wheel sets the free-cam speed / follow distance (then Q() as usual).
     if (client) spectate_scroll(client, dy > 0.0);
     // KrunkNative console binds mwheelup / mwheeldown (ui_console.c): the bound direction runs its

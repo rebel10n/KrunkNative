@@ -128,3 +128,5 @@ extern const TauntConfig g_taunts[TAUNT_COUNT];
 int game_player_is_prop(const Game*, const Player*);
 // "prpt" i: players.taunt(player, i) on the authority. Returns 1 when the taunt played.
 int game_player_taunt(Game*, Player*, int index);
+// force (nextTaunt's taunts): no cooldown check (players.taunt's third argument).
+int game_player_taunt_ex(Game*, Player*, int index, int force);

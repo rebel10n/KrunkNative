@@ -2,6 +2,7 @@
 // commands and the per-tick broadcast. The bytes move through each connection's transport
 // (ClientConnection.transport): TCP sockets (net_tcp.c), UDP peers (net_udp.c) or the
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
+#include <prop_hunt.h> // Prop Hunt: "prp" / "prpR", the prop after a SPAWN
 #include <server.h>
 #include <server_log.h>
 #include <server_sandbox.h>  // sandbox_running(): `class` is offline only (net_chat_host)
@@ -679,6 +680,16 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
     // WP-C: 1.3.0 and older peers only take the V2 SPAWN; 1.3.1 peers prefix-read the WP-F V4
     const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V4_SIZE : NET_SPAWN_PACKET_V2_SIZE;
     net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, size);
+
+    // Prop Hunt: the prop it wears (and its rotation) after its SPAWN, which reset them (prop_hunt.h)
+    const Game *game = &g_server->game;
+    if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && game->mode && game->mode->config.prop && game_player_is_prop(game, player)) {
+        uint8_t prop[NET_EXT_HEADER_SIZE + sizeof(NetPropRotationPacket) + sizeof(NetPropUpdatePacket)];
+        uint16_t n = prop_pack_update(player, 0, prop, sizeof(prop));
+        if (n) net_send_packet(client->fd, NET_PACKET_EXT, prop, n);
+        n = player->prop_rot || player->prop_rot_saved_set ? prop_pack_rotation(player, 0, prop, sizeof(prop)) : 0;
+        if (n) net_send_packet(client->fd, NET_PACKET_EXT, prop, n);
+    }
 
     // KrunkNative Object Manager: the SPAWN rebuilt the class loadout; the extra weapons follow it
     if (player->extra_weapon_count > 0 && ks_server_peer_v7(client)) {
@@ -1924,6 +1935,12 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
             else if (subtype == NET_EXT_MARK_POSITION) net_handle_mark_position(client, body, body_length); // "mpos": a ranked / comp ping
+            else if (subtype == NET_EXT_PROP_PICK && body_length >= sizeof(NetPropPickPacket) && client->player) { // "prp" (prop_hunt.h)
+                NetPropPickPacket pick;
+                memcpy(&pick, body, sizeof(pick));
+                game_prop_pick(&g_server->game, client->player, pick.prop_id);
+            } else if (subtype == NET_EXT_PROP_ROTATE && body_length >= sizeof(NetPropRotatePacket) && client->player) // "prpR" [reset]
+                game_prop_rotate(&g_server->game, client->player, body[0] != 0);
             break;
         }
         default:

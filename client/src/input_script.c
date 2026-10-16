@@ -867,6 +867,14 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] script t=%.0f %s me=%.2f,%.2f,%.2f ground=%d obj=%.2f,%.2f,%.2f lockshoot=%d\n", g_script.time, info,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f, me ? me->on_ground : 0,
                 o ? o->position.x : 0.0f, o ? o->position.y : 0.0f, o ? o->position.z : 0.0f, me ? me->lock_shooting : -1);
+    } else if (!strcmp(e->cmd, "prop")) {
+        // prop <sid>: a player's Prop Hunt state (shared/include/prop_hunt.h, the official "0"[21] / "up" / "prpR"
+        // packets): the prop it wears, its switches, the rotation and the saved yaw, its team
+        const int sid = (int) e->v[0];
+        const Player *p = client->game.ready ? game_find_player(&client->game, sid) : NULL;
+        fprintf(stderr, "[input_script] prop t=%.0f sid=%d id=%d switches=%d rot=%d saved=%.2f set=%d team=%d\n", g_script.time, sid,
+                p ? p->prop_id : -1, p ? p->prop_switches : -1, p ? p->prop_rot : -1, p ? p->prop_rot_saved : 0.0f,
+                p ? p->prop_rot_saved_set : -1, p ? p->team : -1);
     } else if (!strcmp(e->cmd, "world")) {
         // world: the mode objectives / world objects the official world packets drive (krunker_link_world.c):
         // #gameMessage, Domination zones (capturedBy/captureT ms), spawnables (type:sid), destroyed map

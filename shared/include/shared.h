@@ -1274,6 +1274,13 @@ typedef struct Player_t {
     float last_spray;             // players.spray: game.now of the last spray (config.sprayTimer)
     int sprays_placed;            // WP-E: spraysPlaced, the next "<sid>_<n>" slot (cycles at game_spray_limit)
     float taunt_ready_at;         // WP-E: lastTaunt (game.now + taunt tm), 0 = never taunted (players.taunt)
+    // Prop Hunt (shared/include/prop_hunt.h, v10 player.init :169177 / :169266): the disguise of a
+    // Prop-team player, its switches this life and its rotation (players.updateProp also sets scale)
+    int prop_id;                  // propID: a PF_ISPROP prefab id (1 CRATE by default)
+    int prop_switches;            // propSwitches: picks made this life (mode.propSwitches allows 3)
+    unsigned char prop_rot;       // propRot: the model turns with the look
+    unsigned char prop_rot_saved_set; // propRotSaved != null
+    float prop_rot_saved;         // propRotSaved: the yaw the model keeps while propRot is off
 
     float *ramp_fix;
 

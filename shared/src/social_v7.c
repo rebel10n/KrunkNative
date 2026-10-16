@@ -126,12 +126,16 @@ int game_player_is_prop(const Game *game, const Player *player) {
 }
 
 int game_player_taunt(Game *game, Player *player, const int index) {
+    return game_player_taunt_ex(game, player, index, 0);
+}
+
+int game_player_taunt_ex(Game *game, Player *player, const int index, const int force) {
     if (!game || !player || !player->active || index < 0 || index >= TAUNT_COUNT || !game_is_authority(game)) return 0;
     // KrunkNative: the server takes taunts from the prop team only (v7's client sends them only
     // then; its server plays any player's "prpt").
     if (!game_player_is_prop(game, player)) return 0;
-    // `!lastTaunt || game.now - lastTaunt >= 0` with lastTaunt = now + tm
-    if (player->taunt_ready_at > 0.0f && game->now < player->taunt_ready_at) return 0;
+    // `(force || !lastTaunt || game.now - lastTaunt >= 0)` with lastTaunt = now + tm (players.taunt :173947)
+    if (!force && player->taunt_ready_at > 0.0f && game->now < player->taunt_ready_at) return 0;
     player->taunt_ready_at = game->now + g_taunts[index].time;
     const float pitch = 0.9f + 0.1f * (float) ldexp((double) pcg32_random(), -32); // UTILS.randFloat(0.9, 1)
     game_play_sound(game, g_taunts[index].sound, player->uid, player->position, TAUNT_VOLUME, pitch);

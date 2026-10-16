@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <prop_hunt.h> // Prop Hunt: the disguise a spawn resets / gives
 #include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
 #include <bot_chat.h>
@@ -251,6 +252,7 @@ void player_spawn(Player *player) {
     player->laced_timer = player->laced_duration = 0.0f; // KrunkNative Drank: a new life is sober
 
     player_update_height(player);
+    game_prop_spawned(player->game, player); // Prop Hunt: player.init's prop reset; a Prop-team spawn wears a random prop
     player_movement_spawn(player); // WP-A: wall-jump limits and v7 movement state
     player_swap_weapon(player, 0, 1, 0, 0);
 

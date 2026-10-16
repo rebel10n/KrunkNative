@@ -116,7 +116,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui",
-        "--script": "script"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--script": "script", "--prophunt": "prophunt"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -582,6 +582,7 @@ class Stub:
         ingame = self.scenario == "ingame"
         rounds = self.scenario == "rounds"
         actions = self.scenario == "actions"
+        prophunt = self.scenario == "prophunt"
 
         stop = asyncio.Event()
 
@@ -700,6 +701,9 @@ class Stub:
             elif self.scenario == "script":  # an inline custom map (arg 9) with a dyn cube and an archetype; syncData lo: a block
                 await send("init", 0, 0, 0, None, None, None, {}, None, 0, {"data": json.dumps(SCRIPT_MAP), "id": "kn-script-e2e"}, None,
                            {"gor": True, "lo": [[0, SCRIPT_BLOCK]]}, None, False, True, False, None, None, 0)
+            elif prophunt:  # Prop Hunt (11): the Prop team (1) and the Seekers (2)
+                await send("init", self.map_index, 11, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
+                           None, False, True, False, None, None, 0)
             elif ingame:  # TDM (1); arg 5: the bot hosts this (custom) lobby; arg 14 isOfficial
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], "sockBOT", {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
@@ -710,7 +714,7 @@ class Stub:
                 bot[6], bot[10], bot[11], bot[25], bot[28], bot[31] = 1, 33, "CLN", True, "AceBot", 777
                 await send("0", bot)
             else:
-                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions or rounds else 0))
+                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions or rounds or prophunt else 0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -777,6 +781,11 @@ class Stub:
                 x, y, z = self.spawn
                 await send("0", player("sockME", MY_SID, "Guest_9", x, z, y, team=1))
                 await self.world_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "prophunt":
+                await send("frs")
+                x, y, z = self.spawn
+                await send("0", player("sockME", MY_SID, "Guest_9", x, z, y, team=1))
+                await self.prophunt_phases(send, stop)
             elif self.got_en.is_set() and self.scenario == "social":
                 await self.social_phases(send, stop, player)
             elif self.got_en.is_set() and self.scenario == "voice":
@@ -1149,6 +1158,35 @@ class Stub:
         await hold(3.0)
         self.sent["done"] = time.monotonic()
         await hold(2.0)
+
+    async def prophunt_phases(self, send, stop):
+        """krunker_link_prophunt.c against a live client (run_native_prophunt): "up" changes our prop (CONE, 2 switches
+        left), a skipped "up" changes the bot's switches only, "prpR" turns the rotation on with a saved yaw, then resets it.
+        An "l" every 0.4 s keeps us at the spawn and acks the last isn."""
+        x, y, z = self.spawn
+
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, x, y, z, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["up"] = time.monotonic()
+        await send("up", MY_SID, 16, 0, 2)                  # CONE, 2 switches left
+        await hold(1.5)
+        await send("up", BOT_SID, 20, True, None)           # a skip: nothing applied to the Seeker bot
+        await hold(1.5)
+        self.sent["prpR"] = time.monotonic()
+        await send("prpR", MY_SID, True, 0.5, False)        # rotation on, saved yaw 0.5
+        await hold(1.5)
+        await send("prpR", MY_SID, False, None, True)       # the reset
+        await hold(2.0)
+        self.sent["done"] = time.monotonic()
+        while not stop.is_set():
+            await asyncio.sleep(0.2)
 
     async def world_phases(self, send, stop):
         """krunker_link_world.c against a live client (run_native_world): Domination zones, spawnables, a
@@ -2505,6 +2543,34 @@ SCRIPT_RE = re.compile(r"\[input_script\] script t=(\d+) entities=(\d+) parts=(\
                        r"me=([-\d.]+),([-\d.]+),([-\d.]+) ground=(\d) obj=([-\d.]+),([-\d.]+),([-\d.]+) lockshoot=(-?\d+)")
 
 
+def run_native_prophunt():
+    """krunker_link_prophunt.c: our spawn wears the default prop, "up" changes it to CONE with the switches, a
+    skipped "up" applies nothing to the Seeker bot, "prpR" turns the rotation on with a saved yaw, then resets it.
+    The `prop` probe (input_script.c) shows each player's state."""
+    label = "native-prophunt"
+    probes = "".join("%d prop %d\n" % (t + k, sid) for t in range(5000, 22000, 500) for k, sid in enumerate((MY_SID, BOT_SID)))
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="prophunt", map_index=KANJI_INDEX, spawn=KANJI_SPAWN)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("up", "prpR", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packet", name in stub.sent, sorted(stub.sent))
+    probes = [dict(re.findall(r"(\w+)=(\S+)", m.group(1))) for m in re.finditer(r"\[input_script\] prop (.*)", text)]
+    mine = [w for w in probes if w.get("sid") == str(MY_SID)]
+    bot = [w for w in probes if w.get("sid") == str(BOT_SID)]
+    check(f"{label}: the prop probe ran", len(probes) > 10, len(probes))
+    check(f"{label}: the spawn wears the default prop (1) until a pick", any(w["id"] == "1" for w in mine), sorted({w["id"] for w in mine}))
+    check(f"{label}: \"up\": CONE (16) with 2 switches", any(w["id"] == "16" and w["switches"] == "2" for w in mine),
+          sorted({(w["id"], w["switches"]) for w in mine}))
+    check(f"{label}: \"up\" with skip: the bot keeps its prop (1)", bool(bot) and all(w["id"] == "1" for w in bot[-3:]),
+          sorted({w["id"] for w in bot}))
+    check(f"{label}: \"prpR\": rotation on, saved yaw 0.50", any(w["rot"] == "1" and w["set"] == "1" and w["saved"] == "0.50" for w in mine),
+          sorted({(w["rot"], w["saved"], w["set"]) for w in mine}))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+
+
 def run_native_script():
     """official-ingame-script (krunker_link_script.c -> entities.c): a runtime block (init syncData lo) we land on by
     the client's own collision, its removal ("slo"), an entity's spawn / baseline / removal, a dyn cube moved
@@ -3853,6 +3919,8 @@ def main():
         run_native_popups()
     if ONLY == "lobbyui" and os.path.isfile(f"{BUILD}/client_bin"):  # just the official lobby UI's run (clock, password, chat colours)
         run_native_lobbyui()
+    if ONLY == "prophunt" and os.path.isfile(f"{BUILD}/client_bin"):  # just the Prop Hunt run
+        run_native_prophunt()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

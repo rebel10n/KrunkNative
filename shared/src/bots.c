@@ -35,6 +35,7 @@
 // - Parsed but without effect natively: voiceChat (no clip), noRecoil, spreadMlt, rangeMlt
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
+#include <prop_hunt.h> // Prop Hunt: a bot prop's disguise after its SPAWN
 #include <bot_objective.h>
 #include <bot_path.h>
 #include <ai.h>
@@ -822,6 +823,7 @@ static void bot_broadcast_spawn(Game *game, const Player *p) {
     packet.direction[1] = p->direction.y;
     snprintf(packet.name, sizeof(packet.name), "%s", p->name);
     game_send(game, NET_TARGET_ALL, NET_PACKET_SPAWN, &packet, sizeof(packet));
+    game_prop_send(game, p, NET_TARGET_ALL); // Prop Hunt: a Prop-team bot's disguise
 }
 
 // config.serverMessages[0 / 1] ("$ joined the game" / "$ left the game")

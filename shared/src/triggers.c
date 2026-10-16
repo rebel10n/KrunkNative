@@ -11,6 +11,7 @@
 // is destroyed), map.manager.interfaces are the objects with an interface id and collision.
 // Everything that changes game state runs on the authority only (Krunker `io`).
 #include <shared.h>
+#include <prop_hunt.h> // Prop Hunt: the Seeker penalty
 #include <ai.h>
 #include "modes/mode_internal.h"
 #include "triggers_internal.h"
@@ -204,6 +205,8 @@ void game_set_gate(Game *game, Object *object, const int active) {
 // damage needs a positive amount and no blocking waitTimer; a projectile also needs its owner).
 void game_object_hit(Game *game, Object *object, Player *dealer, const float damage, const int thrown_melee, const int kind) {
     if (!game_is_authority(game) || !object) return;
+    // Prop Hunt: a Seeker's shot or swing on a prop object of the map costs it 10 health (:172554, :173031)
+    if (dealer && (kind == GAME_HIT_SHOT || kind == GAME_HIT_MELEE)) game_prop_seeker_hit(game, dealer, object);
     const int can_damage = damage > 0.0f && (kind != GAME_HIT_PROJECTILE || dealer); // projectile: owner.isPlayer && I > 0
     if (can_damage && !trigger_wait_blocks(game) && object->health) {
         object->health -= damage;

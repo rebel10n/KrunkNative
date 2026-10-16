@@ -73,6 +73,13 @@ typedef enum {
     NET_EXT_GAME_STATE = 0x0901,    // "gsc" S -> C NetGameStatePacket: v10 gameState (INITIALIZING .. ENDED), every change
     NET_EXT_VOTE_FORFEIT = 0x0902,  // "vf" S -> C NetVoteForfeitPacket: the team's forfeit vote (team only; null when it ends)
 
+    // 0x0a00 Prop Hunt (shared/include/prop_hunt.h): Krunker's "up" / "prpR" / "prp" / "prpR" (v10 game.deob.js
+    // players.updateProp :171837, the client's iìiiìïí / iîîììîi :221007 / :221019, the keys :221435)
+    NET_EXT_PROP_UPDATE = 0x0a00,   // S -> C NetPropUpdatePacket ("up" sid, propID, skip, propSwitches)
+    NET_EXT_PROP_ROTATION = 0x0a01, // S -> C NetPropRotationPacket ("prpR" sid, propRot, propRotSaved, reset)
+    NET_EXT_PROP_PICK = 0x0a02,     // C -> S NetPropPickPacket ("prp" propID: the wheel / a random prop)
+    NET_EXT_PROP_ROTATE = 0x0a03,   // C -> S NetPropRotatePacket ("prpR" [reset]: toggle / reset the rotation)
+
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
 
@@ -458,6 +465,35 @@ typedef struct {
     char key[48];
     float x, y, z;
 } NetMarkPositionPacket;
+
+// NET_EXT_PROP_UPDATE: a player's prop. skip (Krunker's "up" arg 2): the prop is not applied (only the
+// switches); switches -1 = none sent (Krunker null); limit: the server refused a pick (no switches left),
+// "[Prop Hunt] You are out of prop switches" for that player
+typedef struct {
+    int32_t uid;
+    int16_t prop_id;  // prefab id of a PF_ISPROP prefab
+    uint8_t skip;
+    int8_t switches;  // player.propSwitches, -1 = not sent
+    uint8_t limit;
+} NetPropUpdatePacket;
+
+// NET_EXT_PROP_ROTATION: propRot (the model follows the look), propRotSaved (the yaw it keeps while
+// rotation is off; saved_set 0 = null: yaw 0), reset (the "Rotation reset." line)
+typedef struct {
+    int32_t uid;
+    uint8_t rot;
+    uint8_t saved_set;
+    uint8_t reset;
+    float saved;
+} NetPropRotationPacket;
+
+typedef struct {
+    int16_t prop_id;
+} NetPropPickPacket;
+
+typedef struct {
+    uint8_t reset; // 1: reset ("prpR", true), 0: toggle
+} NetPropRotatePacket;
 #pragma pack(pop)
 
 // NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,
