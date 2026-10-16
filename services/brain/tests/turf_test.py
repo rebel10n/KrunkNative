@@ -464,6 +464,26 @@ def main():
         sub = [m for m in st.get("data", []) if m["map_id"] == 3][0] if code == 200 else {}
         check(sub.get("total_kills_today") == 237 and [e["clan_name"] for e in sub["leaderboard"]][:2] == ["EEE", "AAA"]
               and sub["leaderboard"][1]["kills"] == 7, "Subzero today: 230 + AAA's 7 (not 14) (%s)" % sub.get("total_kills_today"))
+
+        # a brain that was down for days settles the missed days when it comes back: the brain at
+        # DAY + 3 settles DAY + 2 (no kills) and DAY + 1 (Subzero: EEE's 230 and AAA's 7 kills at
+        # 10 KR each, 60 / 30 % of 2370 KR)
+        for p in procs:
+            p.terminate()
+            p.wait(5)
+        p, path, port = start(work, env, "turf-d-%d" % os.getpid(), ["--brain.turf.day=%d" % (DAY + 3)])
+        procs = [p]
+        logs.append(path)
+        earn = {}
+        for _ in range(60):
+            code, earn = http(port, "/api/territorial-wars/clan/EEE/earnings")
+            if code == 200 and earn.get("data"):
+                break
+            time.sleep(0.2)
+        check(code == 200 and total(earn) == 1422 and earn["data"][0]["day"] == DAY + 1 and earn["data"][0]["map_name"] == "Subzero",
+              "a brain back after two days pays the missed day: EEE 60%% of 2370 = 1422 (%s)" % earn.get("data"))
+        code, earn = http(port, "/api/territorial-wars/clan/AAA/earnings")
+        check(code == 200 and total(earn) == 390 + 711, "AAA: its Subzero share 30%% (711) too (%s)" % total(earn))
     finally:
         for p in procs:
             if p.poll() is None:

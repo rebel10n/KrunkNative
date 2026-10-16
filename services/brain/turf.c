@@ -47,6 +47,7 @@
 #include "knsvc/loop.h"
 
 #define MOD "turf"
+#define TURF_CATCHUP_DAYS 14 /* finished days a brain settles when it comes back (oldest first) */
 
 static struct {
     Brain *b;
@@ -497,6 +498,8 @@ void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
     free(recs);
 }
 
+static void settle_next(void);
+
 static void on_settled(kn_db_result *res, void *ud) {
     const int day = (int) (intptr_t) ud;
     T.settling = 0;
@@ -507,16 +510,32 @@ static void on_settled(kn_db_result *res, void *ud) {
     if (maps > 0) KN_INFO(MOD, "day %d settled (%lld map(s))", day, (long long) maps);
     T.settled_day = day;
     cJSON_Delete(o);
+    settle_next(); /* the next unsettled day, if any, at once */
+}
+
+/* the first day to settle: the day after the last one this brain settled, or the last
+ * TURF_CATCHUP_DAYS finished days when it is older (a brain down for days pays them all, one
+ * day per call; -1: nothing left) */
+static int next_unsettled(void) {
+    const int yesterday = current_day() - 1;
+    int from = yesterday - (TURF_CATCHUP_DAYS - 1);
+    if (T.settled_day + 1 > from) from = T.settled_day + 1;
+    if (from < 0) from = 0;
+    return yesterday >= 0 && from <= yesterday ? from : -1;
+}
+
+static void settle_next(void) {
+    if (!db_ready() || T.b->draining || T.settling) return;
+    const int day = next_unsettled();
+    if (day < 0) return;
+    T.settling = 1;
+    kn_db_call(T.b->db, &P_TURF_SETTLE, KN_DB_ARGS(S(day), S(T.kr_per_kill)), on_settled, (void *) (intptr_t) day);
 }
 
 static void tick(kn_loop *loop, void *ud) {
     (void) loop;
     (void) ud;
-    if (!db_ready() || T.b->draining || T.settling) return;
-    const int yesterday = current_day() - 1;
-    if (yesterday < 0 || yesterday <= T.settled_day) return;
-    T.settling = 1;
-    kn_db_call(T.b->db, &P_TURF_SETTLE, KN_DB_ARGS(S(yesterday), S(T.kr_per_kill)), on_settled, (void *) (intptr_t) yesterday);
+    settle_next();
 }
 
 static void route(Brain *b, const char *path, kn_http_handler h) {
