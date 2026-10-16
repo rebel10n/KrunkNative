@@ -2561,6 +2561,99 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
     }
 }
 
+// The face of an axis-aligned box (lo / hi corners) nearest to `p`, as its outward normal.
+static vec3 ray_box_normal(const vec3 p, const vec3 lo, const vec3 hi) {
+    const float dist[6] = {fabsf(p.x - lo.x), fabsf(p.x - hi.x), fabsf(p.y - lo.y), fabsf(p.y - hi.y), fabsf(p.z - lo.z), fabsf(p.z - hi.z)};
+    int face = 0;
+    for (int i = 1; i < 6; i++)
+        if (dist[i] < dist[face]) face = i;
+    vec3 n = {0.0f, 0.0f, 0.0f};
+    const float sign = face & 1 ? 1.0f : -1.0f;
+    if (face < 2) n.x = sign;
+    else if (face < 4) n.y = sign;
+    else n.z = sign;
+    return n;
+}
+
+int game_raycast(Game *game, const vec3 origin, vec3 dir, const float range, const Player *exclude, const int flags, GameRayHit *out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    out->object_index = -1;
+    if (!game || !game->map || !(range > 0.0f)) return 0;
+    const float len = sqrtf(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+    if (!(len > 0.0f)) return 0;
+    dir = (vec3) {dir.x / len, dir.y / len, dir.z / len};
+    const vec3 seg = {dir.x * range, dir.y * range, dir.z * range}; // line_in_rect fractions along the whole ray
+
+    float best = 2.0f; // fraction of the ray; > 1 = none
+    GameRayKind kind = GAME_RAY_NONE;
+    int object_index = -1;
+    const Object *object_hit = NULL;
+    const Player *player_hit = NULL;
+
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        if (!game_object_shootable(object)) continue;
+        if (object->dyn && !(flags & GAME_RAY_DYNAMIC)) continue;
+        const float t = line_in_rect(origin, seg, object->position, object_box_size(object));
+        if (t <= 0.0f || t > 1.0f || t >= best) continue;
+        best = t;
+        kind = GAME_RAY_OBJECT;
+        object_index = (int) i;
+        object_hit = object;
+        player_hit = NULL;
+    }
+
+    if (flags & GAME_RAY_PLAYERS) {
+        for (size_t i = 0; i < game->player_count; i++) {
+            const Player *other = game->players[i];
+            if (!other || other == exclude || !other->active || !(other->health > 0.0f)) continue;
+            const float half = other->scale > 0.0f ? other->scale : 2.45f; // v10 player.scale || 2.45
+            const float height = other->height > 0.0f ? other->height : 11.0f; // v10 player.height || 11
+            const vec3 size = {half * 2.0f, height, half * 2.0f};
+            const float t = line_in_rect(origin, seg, other->position, size);
+            if (t <= 0.0f || t > 1.0f || t >= best) continue;
+            best = t;
+            kind = GAME_RAY_PLAYER;
+            object_index = -1;
+            object_hit = NULL;
+            player_hit = other;
+        }
+    }
+
+    float terrain_dist = 0.0f;
+    if ((flags & GAME_RAY_TERRAIN) && terrain_raycast(game, origin, dir, range, &terrain_dist) && terrain_dist < best * range) {
+        best = terrain_dist / range;
+        kind = GAME_RAY_TERRAIN_HIT;
+        object_index = -1;
+        object_hit = NULL;
+        player_hit = NULL;
+    }
+
+    if (kind == GAME_RAY_NONE) return 0;
+    out->kind = kind;
+    out->dist = best * range;
+    out->point = (vec3) {origin.x + dir.x * out->dist, origin.y + dir.y * out->dist, origin.z + dir.z * out->dist};
+    out->object_index = object_index;
+    out->object = object_hit;
+    out->player = player_hit;
+    if (kind == GAME_RAY_TERRAIN_HIT) {
+        out->normal = (vec3) {0.0f, 1.0f, 0.0f};
+    } else if (kind == GAME_RAY_OBJECT) {
+        const vec3 size = object_box_size(object_hit);
+        const vec3 lo = {object_hit->position.x - size.x * 0.5f, object_hit->position.y, object_hit->position.z - size.z * 0.5f};
+        const vec3 hi = {object_hit->position.x + size.x * 0.5f, object_hit->position.y + size.y, object_hit->position.z + size.z * 0.5f};
+        out->normal = ray_box_normal(out->point, lo, hi);
+    } else {
+        const float half = player_hit->scale > 0.0f ? player_hit->scale : 2.45f;
+        const float height = player_hit->height > 0.0f ? player_hit->height : 11.0f;
+        const vec3 p = player_hit->position;
+        const vec3 lo = {p.x - half, p.y, p.z - half}, hi = {p.x + half, p.y + height, p.z + half};
+        out->normal = ray_box_normal(out->point, lo, hi);
+    }
+    return 1;
+}
+
 static vec3 combat_shot_vector(const float range, const float pitch, const float yaw) {
     return (vec3) {
         range * sinf(yaw + (float) M_PI) * cosf(pitch),

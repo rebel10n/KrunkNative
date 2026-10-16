@@ -1449,6 +1449,8 @@ static int client_refuse_wrong_flavor(Client *client, const NetInitPacket *init)
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
+    // the custom game's id of the map this INIT names ("" for every map but an official custom game's)
+    snprintf(client->custom_game_id, sizeof(client->custom_game_id), "%s", client_custom_game_id_of(client, init->map_index));
     client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     client->net_client_id = init->client_id;

@@ -1022,12 +1022,71 @@ static KsValue api_undefined(KsScript *s, void *u, const KsValue *args, int argc
     return ks_undef();
 }
 
-// ENTITIES (v10 L183661): no entity manager runs on this build yet (KrunkScript entities are the
-// next package), so the lookups see none and spawn / clone answer undefined.
-static KsValue api_entities_none_list(KsScript *s, void *u, const KsValue *args, int argc)
+// RAYCAST (v10 L182259, _62141; L180735): the nearest hit of a ray from a point, or from a player's
+// eye. Players (not the caster), static and dynamic objects, the terrain. dist is clamped to [0, 5000].
+static double ray_dist_arg(const KsValue v)
 {
-    (void) u; (void) args; (void) argc;
-    return ks_arr_new(s);
+    const double d = ks_to_float(v);
+    return d < 0.0 ? 0.0 : d > 5000.0 ? 5000.0 : d;
+}
+
+static KsValue ray_value(KsScript *s, const GameRayHit *hit, const int found)
+{
+    KsValue out = ks_obj_new(s);
+    const char *type = "";
+    if (found && hit->kind == GAME_RAY_OBJECT) type = "object";
+    else if (found && hit->kind == GAME_RAY_PLAYER) type = "player";
+    else if (found && hit->kind == GAME_RAY_TERRAIN_HIT) type = "terrain";
+    ks_obj_set(s, out, "hit", ks_bool(found));
+    ks_obj_set(s, out, "dist", ks_num(found ? hit->dist : 0));
+    ks_obj_set(s, out, "x", ks_num(found ? hit->point.x : 0));
+    ks_obj_set(s, out, "y", ks_num(found ? hit->point.y : 0));
+    ks_obj_set(s, out, "z", ks_num(found ? hit->point.z : 0));
+    ks_obj_set(s, out, "nx", ks_num(found ? hit->normal.x : 0));
+    ks_obj_set(s, out, "ny", ks_num(found ? hit->normal.y : 0));
+    ks_obj_set(s, out, "nz", ks_num(found ? hit->normal.z : 0));
+    ks_obj_set(s, out, "type", str_value(s, type));
+    ks_obj_set(s, out, "sid", ks_num(found && hit->kind == GAME_RAY_OBJECT ? hit->object_index : -1));
+    ks_obj_set(s, out, "interface", ks_num(found && hit->kind == GAME_RAY_OBJECT ? hit->object->interface_id : 0));
+    ks_obj_set(s, out, "entity", str_value(s, "")); // entity bodies are not built (entities.c, krunkscript-gaps.md)
+    char player_id[24] = "";
+    if (found && hit->kind == GAME_RAY_PLAYER) ks_player_id(hit->player, player_id, sizeof(player_id));
+    ks_obj_set(s, out, "player", str_value(s, player_id));
+    return out;
+}
+
+static KsValue api_raycast_from(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    Game *game = api_game(u);
+    GameRayHit hit;
+    if (!game || argc < 7) return ray_value(s, &hit, 0);
+    const vec3 origin = {ks_to_float(args[0]), ks_to_float(args[1]), ks_to_float(args[2])};
+    const vec3 dir = {ks_to_float(args[3]), ks_to_float(args[4]), ks_to_float(args[5])};
+    const int found = game_raycast(game, origin, dir, (float) ray_dist_arg(args[6]), NULL,
+                                   GAME_RAY_PLAYERS | GAME_RAY_TERRAIN | GAME_RAY_DYNAMIC, &hit);
+    return ray_value(s, &hit, found);
+}
+
+// The player a script value names: a player wrapper (its id) or the id itself.
+static Player *player_arg(KsScript *s, Game *game, const KsValue v)
+{
+    const KsValue id = v.tag == KS_HOST || v.tag == KS_OBJ ? ks_obj_get(s, v, "id") : v;
+    return ks_game_player_by_id(game, id);
+}
+
+static KsValue api_raycast_from_player(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    Game *game = api_game(u);
+    GameRayHit hit;
+    Player *player = game && argc >= 1 ? player_arg(s, game, args[0]) : NULL;
+    if (!player) return ray_value(s, &hit, 0);
+    // from the eye: the feet + height - 1.5 (v10 L182262), along the player's look (xDire, yDire)
+    const float yaw = player->direction.x, pitch = player->direction.y;
+    const vec3 origin = {player->position.x, player->position.y + player->height - 1.5f, player->position.z};
+    const vec3 dir = {-sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch)};
+    const int found = game_raycast(game, origin, dir, (float) ray_dist_arg(argc > 1 ? args[1] : ks_undef()), player,
+                                   GAME_RAY_PLAYERS | GAME_RAY_TERRAIN | GAME_RAY_DYNAMIC, &hit);
+    return ray_value(s, &hit, found);
 }
 
 void ks_hostobj_api_fill(KsApiImpl *api, const KsSide side)
@@ -1045,9 +1104,8 @@ void ks_hostobj_api_fill(KsApiImpl *api, const KsSide side)
     api[KS_API_CONFIG_GETSETTINGS].fn = api_undefined;
     api[KS_API_CONFIG_GETWEAPONS].fn = api_undefined;
     api[KS_API_CONFIG_GETCLASSES].fn = api_undefined;
-    api[KS_API_ENTITIES_LIST].fn = api_entities_none_list;
-    api[KS_API_ENTITIES_FINDBYTAG].fn = api_entities_none_list;
-    api[KS_API_ENTITIES_FINDBYID].fn = api_undefined;
+    api[KS_API_RAYCAST_FROM].fn = api_raycast_from;
+    api[KS_API_RAYCAST_FROMPLAYER].fn = api_raycast_from_player;
     api[KS_API_PLAYERS_LIST].fn = api_players_list;
     api[KS_API_PLAYERS_FINDBYID].fn = api_players_find;
     api[KS_API_OBJECTS_LIST].fn = api_objects_list;
@@ -1055,10 +1113,7 @@ void ks_hostobj_api_fill(KsApiImpl *api, const KsSide side)
     api[KS_API_NFT_HASWALLET].fn = api_false;
     if (side == KS_SIDE_SERVER) {
         api[KS_API_TRIGGERS_EXECUTE].fn = api_trigger_execute;
-        api[KS_API_ENTITIES_SPAWN].fn = api_undefined;
-        api[KS_API_ENTITIES_CLONE].fn = api_undefined;
-        api[KS_API_ENTITIES_DESPAWN].fn = api_undefined;
-        api[KS_API_LIVE_OBJECTS_ADDCUBE].fn = api_undefined; // runtime blocks: the official-lobby package (entities.c "lo")
+        api[KS_API_LIVE_OBJECTS_ADDCUBE].fn = api_undefined; // runtime blocks: the official-lobby "lo" packets (not in this tree; krunkscript-gaps.md)
         api[KS_API_PLATFORM_ISCLIENT].fn = api_false;
         api[KS_API_PLATFORM_ISBROWSER].fn = api_false;
         api[KS_API_PLATFORM_ISMOBILE].fn = api_false;
@@ -1067,4 +1122,5 @@ void ks_hostobj_api_fill(KsApiImpl *api, const KsSide side)
         api[KS_API_AI_REMOVEBYSID].fn = api_ai_remove_by_sid;
         api[KS_API_AI_LIST].fn = api_ai_list;
     }
+    ks_entities_api_fill(api, side); // ENTITIES.* (ks_entities.c)
 }

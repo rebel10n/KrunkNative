@@ -455,6 +455,7 @@ static void kmap_tick(Client *client) {
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "name"));
             printf("[krunker] map %d%s%s: %s (map slot %d)\n", index, K.map_req.custom_id[0] ? ", custom " : "", K.map_req.custom_id,
                    name ? name : "?", slot);
+            client_set_custom_game_id(client, json, K.map_req.custom_id); // GAME.COOKIES' key for this custom game
             pthread_mutex_lock(&K.lock);
             if (!K.map_next_set) { // (a newer init that came meanwhile keeps the gate: its own map is next)
                 K.map_init.map_index = slot;

@@ -28,6 +28,13 @@ typedef struct KsGame KsGame;
 // malloc'd, NUL-terminated (caller frees), NULL when that side has no script.
 char *ks_game_map_source(const Game*, KsSide, size_t *len);
 
+// scripts.shared (v10 entity simulation, KS_SIDE_SHARED): compiles and runs `src` beside the main
+// script of the Game (the authority's entity manager calls its onEntityInit / simulateEntity). It
+// replaces only the shared script and the entities; the main script is kept. A NULL / empty src
+// just unloads. Returns 0 when loaded or when there is nothing to load, -1 on a compile error.
+int ks_game_load_shared(Game*, KsSide, const char *src, size_t len, const KsHost *host, void *host_user);
+uint32_t ks_game_shared_source_hash(const Game*); // FNV-1a of the loaded scripts.shared text (0 none)
+
 // Compiles and loads `src` for `side` (replacing any loaded script: ks_game_unload first),
 // seeds UTILS.rand* and runs the global initialisers. A NULL / empty src just unloads.
 // Returns 0 when loaded or when there is nothing to load, -1 on a compile or load error
@@ -35,7 +42,8 @@ char *ks_game_map_source(const Game*, KsSide, size_t *len);
 // host_user must outlive the script.
 int ks_game_load(Game*, KsSide, const char *src, size_t len, const KsHost *host, void *host_user);
 // Server: onServerClosed() first. Resets the GAME.DEFAULT flags, the per-player script state,
-// the rate limiters and the trigger hooks; frees the instance. No-op without a script.
+// the rate limiters and the trigger hooks; frees the instance. Also drops scripts.shared and the
+// entities (no hooks run for them). No-op without a script.
 void ks_game_unload(Game*);
 // Unload plus the per-Game state (player class, refs): call when the Game is torn down.
 void ks_game_free(Game*);
@@ -61,6 +69,11 @@ int ks_game_has_hook(const Game*, const char *hook);
 void ks_game_start(Game*);                                   // start()
 // update(delta_ms * delta_mlt); TIME.fixedDelta() returns delta_ms (2.4). delta_mlt <= 0 = 1.
 void ks_game_update(Game*, double delta_ms, double delta_mlt);
+
+// GAME.COOKIES storage key (v10 L182675-182685): "krkcst_<customMapData.id>_<key>", for a custom
+// game only. 0 when the game has no custom id (the catalogue maps keep no cookies), the key is
+// empty, or the key does not fit in n. The client's storage uses it (client/src/ks/ks_misc.c).
+int ks_cookie_storage_key(const char *custom_id, const char *key, char *out, size_t n);
 
 // ---------------------------------------------------------------------------
 // GAME.DEFAULT flags (3.1.2): one-way until the script unloads.

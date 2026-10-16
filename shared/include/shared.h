@@ -509,9 +509,9 @@ typedef struct {
     unsigned char reversible:1;
 } MapBotPath;
 
-// ---- v10.0.2 Entities (doc/v10/map-format.md §4): the map data only. TODO(entities package): the
-// manager (spawnPending, onEntityInit / simulateEntity, bodies, packets e+ e- es ee ea+ ea-) reads
-// Map.archetypes / Map.entity_instances and Map.shared_script; nothing runs them yet.
+// ---- v10.0.2 Entities (doc/v10/map-format.md §4): the map data. The manager (the authority's
+// spawnPending, onEntityInit / simulateEntity, the hooks) reads these (shared/src/ks_game/ks_entities.c);
+// bodies, attachments, replication (packets e+ e- es ee ea+ ea-) are not built yet.
 #define MAP_ARCHETYPE_LIMIT 32          // config.archetypeLimit
 #define MAP_ARCHETYPE_OBJECT_LIMIT 40   // config.archetypeObjectLimit
 #define MAP_ENTITY_LIMIT 64             // config.entityLimit (map.js keeps the first 64 instances)
@@ -1627,6 +1627,7 @@ void player_hit_zone_base(const Player *target, const PlayerStoredState *state, 
 // multiplier on a headshot) and headshotOnly; `damage` is after falloff.
 float player_hit_damage(const struct Game_t*, const Weapon*, float damage, int head, int leg);
 int player_can_damage(const Player *dealer, const Player *victim); // teams, friendly fire, noPVP / forcePVP (KrunkNative Piss puddles)
+
 // ---- end WP-B ----
 
 // WP-E: GameConfig carries every v7.1.4 serverConfig key (GAME_CONFIG_V7, shared/include/game_config.h).
@@ -2122,6 +2123,25 @@ int game_get_spawn_point(Game*, const Player*, vec3 *position, int *direction);
 int game_spawn_point_free(const Game*);
 void game_broadcast();
 int game_is_authority(const Game*);      // server or local game: runs damage/kills/score
+// RAYCAST (KrunkScript, v10 L180735; the entities' ctx.raycast): the nearest hit of a ray from `origin`
+// along `dir` (normalised here) up to `range`. Flags: GAME_RAY_PLAYERS (living players other than
+// `exclude`, their box x / z +- scale, feet to height), GAME_RAY_TERRAIN, GAME_RAY_DYNAMIC (dyn objects;
+// without it they are skipped). Map objects use the shootable filter (game_object_shootable). Returns
+// 1 on a hit; range <= 0 or a zero dir is no hit.
+#define GAME_RAY_PLAYERS 1
+#define GAME_RAY_TERRAIN 2
+#define GAME_RAY_DYNAMIC 4
+typedef enum { GAME_RAY_NONE, GAME_RAY_OBJECT, GAME_RAY_PLAYER, GAME_RAY_TERRAIN_HIT } GameRayKind;
+typedef struct {
+    GameRayKind kind;
+    float dist;               // world units from origin
+    vec3 point;               // where the ray stops
+    vec3 normal;              // the face it hit (axis aligned), terrain +y
+    int object_index;         // GAME_RAY_OBJECT: map.objects index, else -1
+    const Object *object;
+    const Player *player;
+} GameRayHit;
+int game_raycast(Game *game, vec3 origin, vec3 dir, float range, const Player *exclude, int flags, GameRayHit *out);
 // io_ent spawn rules: a ready round, not the end screen, not alive, config.deathDelay since
 // the last death, lives left (`player` NULL: first spawn). Server and offline client alike.
 int game_can_spawn(const Game*, const Player*);

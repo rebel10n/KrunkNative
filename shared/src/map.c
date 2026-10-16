@@ -1242,7 +1242,7 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
         } else if (prefab_id == PREFAB_BOT_SPAWNER) {
             map_push((void **) &map->bot_spawners, &map->bot_spawner_count, &raw_obj, sizeof(raw_obj));
         } else if (prefab_id == PREFAB_ENTITY) {
-            map_add_entity_instance(map, raw_obj); // v10: an instance for the entities package, no map object
+            map_add_entity_instance(map, raw_obj); // v10: an instance for the entity manager (ks_entities.c), no map object
         }
         if (!map_raw_object_kept(raw_obj)) continue;
 

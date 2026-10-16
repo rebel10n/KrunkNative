@@ -4,7 +4,62 @@
 
 #include <ks_game.h>
 
-enum { KS_REF_PLAYER = 1, KS_REF_AI, KS_REF_OBJECT };
+enum { KS_REF_PLAYER = 1, KS_REF_AI, KS_REF_OBJECT, KS_REF_ENTITY };
+
+// ---------------------------------------------------------------------------
+// Entities (v10.0.2 entity manager, L184033-185900; doc/v10/map-format.md section 4): the
+// authority's simulation of the map's archetypes. ks_entities.c owns the lifecycle.
+
+#define KS_ENT_STEP_MS 33.333333333333336 // v10 _63176: one simulation tick (ms)
+#define KS_ENT_CATCHUP 64                 // a stalled entity is caught up by at most this many ticks
+#define KS_ENT_EVENTS 8                   // ctx.emit per step
+#define KS_ENT_NAME_MAX 32                // ctx.emit name (sliced)
+#define KS_ENT_ERRORS 10                  // consecutive bad results before the entity freezes
+#define KS_ENT_FIRST_EID 10000            // script spawns number from here (v10 nextEid)
+
+typedef struct {
+    char name[KS_ENT_NAME_MAX + 1];
+    double a, b;
+} KsEntEvent;
+
+typedef struct KsEntity {
+    int eid;
+    const MapArchetype *arch;           // the map's archetype (outlives the round)
+    char tag[MAP_ENTITY_TAG_MAX + 1];
+    double hp;
+    int active, frozen;
+    int tick;                           // last simulated tick (v10 entity.tick)
+    int step_tick;                      // the tick of the step in progress (ctx.tick)
+    int errors;                         // v10 errorStreak
+    double x, y, z, yaw, pitch, roll;   // pose: the state's x y z yaw pitch roll
+    cJSON *state;                       // validated state (num / bool / str values)
+    cJSON *params;                      // spawn params (num / bool / str values)
+    uint32_t rng;                       // ctx.rand stream of the step in progress
+    KsEntEvent events[KS_ENT_EVENTS];   // ctx.emit calls of the step in progress
+    int event_count;
+} KsEntity;
+
+// Server hooks queued by the manager and drained into the main script after each advance (v10
+// queueServerHook / drainServerHooks): onEntitySpawn, onEntityEvent, onEntityDamage, onEntityDestroyed.
+enum { KS_ENT_HOOK_SPAWN = 1, KS_ENT_HOOK_EVENT, KS_ENT_HOOK_DAMAGE, KS_ENT_HOOK_DESTROYED };
+typedef struct {
+    int kind;
+    int eid;
+    char text[KS_ENT_NAME_MAX + 1];     // archetype name (spawn) or event name
+    char doer[24];                      // damage / destroyed: the doer's player id ("" none)
+    double a, b;                        // event numbers, or the damage amount in a
+} KsEntHook;
+
+typedef struct {
+    KsEntity **items;                   // creation order (v10 entities Map); active entities only
+    size_t count, cap;
+    KsEntHook *queue;
+    size_t queue_count, queue_cap, queue_head;
+    int next_eid;
+    double clock_ms;                    // the round's clock (v10 startTime based), ms
+    long tick;                          // floor(clock / KS_ENT_STEP_MS)
+    uint32_t seed;                      // v10 matchSeed (ctx.rand streams)
+} KsEntities;
 
 // The stable `native` of a host wrapper: one per (kind, engine id) for the life of the
 // KsGame (the engine object itself is looked up by id on every access). Players also keep
@@ -60,6 +115,13 @@ struct KsGame {
 
     // TIME.freeze: game.oldGameTimer
     int frozen;
+
+    // scripts.shared (KS_SIDE_SHARED): its own program and instance over the same host, run by the
+    // entity manager (onEntityInit, simulateEntity); the manager state (ks_entities.c)
+    KsProgram *shared_prog;
+    KsScript *shared_script;
+    uint32_t shared_hash;
+    KsEntities ents;
 };
 
 // F(x) = parseFloat(ToString(x)) || 0 (shared/src/ks/ks_value.c; declared here too for trees whose
@@ -75,5 +137,18 @@ void ks_ref_reset_player(KsRef*);
 
 // ks_hostobj.c: the shared GAME.* entries filled by ks_game_api_fill
 void ks_hostobj_api_fill(KsApiImpl *api, KsSide side);
+
+// ks_entities.c: the entity manager. ks_entities_round_start (game start: despawns the last round's
+// entities, spawns the map's ENTITY instances on the authority), ks_entities_update (the authority's
+// clock steps, then the queued hooks), ks_entities_reset / free (no hooks), and the GAME.ENTITIES entries.
+void ks_entities_round_start(KsGame*);
+void ks_entities_update(KsGame*, double delta_ms);
+void ks_entities_reset(KsGame*);
+void ks_entities_free(KsGame*);
+void ks_entities_api_fill(KsApiImpl *api, KsSide side);
+// Logs an error line through the host (the script console of the side).
+void ks_game_log_error(KsGame*, const char *line);
+// The authority's KrunkScript game (server, offline sandbox): the entity manager runs only here.
+int ks_game_is_authority_side(const KsGame*);
 
 #endif

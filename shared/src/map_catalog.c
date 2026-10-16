@@ -448,7 +448,9 @@ int map_sanitize_json(cJSON *map) {
     for (cJSON *object = objects->child, *next; object; object = next) {
         next = object->next;
         int keep = cJSON_IsObject(object) && array_of_three(cJSON_GetObjectItemCaseSensitive(object, "p"));
-        if (keep && !array_of_three(cJSON_GetObjectItemCaseSensitive(object, "s"))) {
+        // an ENTITY instance (v10 prefab 98, doc/v10/map-format.md section 4.1) has no size: its entry is kept
+        const int entity = keep && map_raw_object_prefab(object) == PREFAB_ENTITY;
+        if (keep && !entity && !array_of_three(cJSON_GetObjectItemCaseSensitive(object, "s"))) {
             if (!pool_read) { // only maps with pooled sizes pay for the pool
                 pool = size_pool_read(cJSON_GetObjectItemCaseSensitive(map, "xyz"));
                 pool_read = 1;

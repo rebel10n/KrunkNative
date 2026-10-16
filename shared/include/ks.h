@@ -17,7 +17,8 @@ extern "C" {
 
 typedef struct KsProgram KsProgram;   // immutable compiled script
 typedef struct KsScript  KsScript;    // one running instance (globals + heap)
-typedef enum { KS_SIDE_CLIENT, KS_SIDE_SERVER } KsSide;
+// KS_SIDE_SHARED: the map's scripts.shared (v10 entity simulation: onEntityInit, simulateEntity).
+typedef enum { KS_SIDE_CLIENT, KS_SIDE_SERVER, KS_SIDE_SHARED } KsSide;
 
 // A compile diagnostic (error or warning). `message` is the bare catalogue text
 // of spec 1.15 ("Variable \"x\" is not defined."); display form is

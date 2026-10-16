@@ -631,6 +631,139 @@ static void test_corpus(void)
 // A server script shipped as the v7 compiler's JavaScript (1.16 lowering; the corpus maps only
 // ship client scripts like this, the server host takes the same path): the importer runs it,
 // a new round keeps its instance (the map text's hash is stable), its hooks work.
+// ------------------------------------------------------------------ entities (v10 entity manager)
+
+// The shared script (scripts.shared): onEntityInit copies the spawn params into the state, and
+// simulateEntity emits one event on the first step after the spawn.
+static const char *k_entity_shared =
+    "public obj action onEntityInit(str id, str archetype, obj spawn) {\n"
+    "    obj state = {};\n"
+    "    state.speed = spawn.speed;\n"
+    "    state.hops = 0;\n"
+    "    return state;\n"
+    "}\n"
+    "public obj action simulateEntity(str id, str archetype, obj state, obj ctx, num delta) {\n"
+    "    if (state.hops == 0 && ctx.tick > 0) {\n"
+    "        state.hops = 1;\n"
+    "        ctx.emit(\"hop\", 1.5, 2);\n"
+    "    }\n"
+    "    return state;\n"
+    "}\n";
+
+// The server script runs its scenario once the first player spawns (the clients are connected by
+// then): the entity API, the damage path and the ray, with the hooks logged as they arrive.
+static const char *k_entity_server =
+    "num scenario = 0;\n"
+    "public action onPlayerSpawn(str id) {\n"
+    "    if (scenario != 0) { return; }\n"
+    "    scenario = 1;\n"
+    "    GAME.log(\"count\", toStr lengthOf GAME.ENTITIES.list());\n"
+    "    obj e = GAME.ENTITIES.findById(\"7\");\n"
+    "    GAME.log(\"found\", e.archetype, e.tag, toStr e.hp);\n"
+    "    GAME.log(\"pos\", toStr e.position.x, toStr e.position.y);\n"
+    "    GAME.log(\"speed\", toStr (num) e.getVar(\"speed\"));\n"
+    "    obj b = GAME.ENTITIES.spawn(\"Crate\", 1, 2, 3, {tag: \"t2\", speed: 9});\n"
+    "    GAME.log(\"spawned\", b.id, b.tag);\n"
+    "    GAME.log(\"tagged\", toStr lengthOf GAME.ENTITIES.findByTag(\"t2\"));\n"
+    "    GAME.log(\"damaged\", toStr e.damage(20, id), toStr e.hp);\n"
+    "    e.position.x = 40;\n"
+    "    GAME.log(\"moved\", toStr e.position.x);\n"
+    "    GAME.log(\"destroyed\", toStr b.damage(100, id));\n"
+    "    GAME.log(\"gone\", toStr notEmpty GAME.ENTITIES.findById(\"10000\"));\n"
+    "    obj r = GAME.RAYCAST.from(-500, 2, -500, 1, 0, 0, 100);\n"
+    "    GAME.log(\"ray\", toStr r.hit, r.type, toStr GAME.UTILS.math.round(r.dist));\n"
+    "    GAME.log(\"fromPlayer\", toStr GAME.RAYCAST.fromPlayer(\"999\", 50).hit);\n"
+    "}\n"
+    "public action onEntitySpawn(str id, str archetype) { GAME.log(\"hook spawn\", id, archetype); }\n"
+    "public action onEntityEvent(str id, str name, num a, num b) { GAME.log(\"hook event\", id, name, toStr a, toStr b); }\n"
+    "public action onEntityDamage(str id, str doerID, num amount) { GAME.log(\"hook damage\", id, toStr notEmpty doerID, toStr amount); }\n"
+    "public action onEntityDestroyed(str id, str doerID) { GAME.log(\"hook destroyed\", id); }\n";
+
+// Catalogue map + an archetype "Crate" (hp 50, data {speed: 2}), an ENTITY instance 7 at (4, 2, 4)
+// with spawn params {speed: 3}, and a static cube at (-480, 0, -500) for the ray.
+static cJSON *with_entities(void)
+{
+    cJSON *map = with_scripts("311_burg", k_entity_server, NULL);
+    cJSON *scripts = cJSON_GetObjectItem(map, "scripts");
+    cJSON_AddStringToObject(scripts, "shared", k_entity_shared);
+    cJSON *archetypes = cJSON_AddArrayToObject(map, "archetypes");
+    cJSON *crate = cJSON_CreateObject();
+    cJSON_AddNumberToObject(crate, "id", 1);
+    cJSON_AddStringToObject(crate, "name", "Crate");
+    cJSON_AddNumberToObject(crate, "coll", 1);
+    cJSON_AddNumberToObject(crate, "hp", 50);
+    cJSON *data = cJSON_AddObjectToObject(crate, "data");
+    cJSON_AddNumberToObject(data, "speed", 2);
+    cJSON *parts = cJSON_AddArrayToObject(crate, "objects");
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddNumberToObject(part, "i", 1);
+    cJSON_AddItemToObject(part, "p", cJSON_CreateFloatArray((const float[]) {0, 0, 0}, 3));
+    cJSON_AddItemToObject(part, "s", cJSON_CreateFloatArray((const float[]) {2, 2, 2}, 3));
+    cJSON_AddItemToArray(parts, part);
+    cJSON_AddItemToArray(archetypes, crate);
+
+    cJSON *objects = cJSON_GetObjectItem(map, "objects");
+    cJSON *entity = cJSON_CreateObject();
+    cJSON_AddNumberToObject(entity, "i", 98);
+    cJSON_AddItemToObject(entity, "p", cJSON_CreateFloatArray((const float[]) {4, 2, 4}, 3));
+    cJSON_AddItemToObject(entity, "r", cJSON_CreateFloatArray((const float[]) {0, 0, 0}, 3));
+    cJSON_AddNumberToObject(entity, "eid", 7);
+    cJSON_AddNumberToObject(entity, "ar", 1);
+    cJSON_AddStringToObject(entity, "tag", "crate-a");
+    cJSON *sp = cJSON_AddObjectToObject(entity, "sp");
+    cJSON_AddNumberToObject(sp, "speed", 3);
+    cJSON_AddItemToArray(objects, entity);
+    cJSON *cube = cJSON_CreateObject();
+    cJSON_AddNumberToObject(cube, "i", 0);
+    cJSON_AddItemToObject(cube, "p", cJSON_CreateFloatArray((const float[]) {-480, 0, -500}, 3));
+    cJSON_AddItemToObject(cube, "s", cJSON_CreateFloatArray((const float[]) {4, 4, 4}, 3));
+    cJSON_AddItemToArray(objects, cube);
+    return map;
+}
+
+static void test_entities(void)
+{
+    cJSON *map = with_entities();
+    const cJSON *maps[1] = {map};
+    const SandboxConfig cfg = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "entities: start");
+    CHECK(ks_game_script(&g_server->game) != NULL, "entities: server script loaded");
+    CHECK(ks_game_shared_source_hash(&g_server->game) != 0, "entities: scripts.shared compiled and loaded");
+    CHECK(g_server->game.map->archetype_count == 1, "entities: the archetype is in the map (%zu)", g_server->game.map->archetype_count);
+    CHECK(g_server->game.map->entity_instance_count == 1, "entities: the ENTITY instance is in the map (%zu)", g_server->game.map->entity_instance_count);
+
+    Client *a = connect_client(NET_PROTOCOL_MINOR_V7);
+    pump(40);
+    CHECK(a->uid >= 0, "entities: spawned");
+    // the scenario's lines (script console), then the hooks as the entity manager queues them
+    static const char *const want[] = {
+        "count 1", "found Crate crate-a 50", "pos 4 2", "speed 3", "spawned 10000 t2", "tagged 1",
+        "damaged false 30", "moved 40", "destroyed true", "gone false", "ray true object 18", "fromPlayer false",
+        "hook spawn 7 Crate", "hook spawn 10000 Crate", "hook event 7 hop 1.5 2",
+        "hook damage 10000 true 100", "hook destroyed 10000",
+    };
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        CHECK(has_log(a, want[i]), "entities: log \"%s\" (script console)", want[i]);
+    }
+    // entity 10000 is destroyed before its first step: only entity 7 emits its hop
+    CHECK(count_log_prefix(a, "hook event ") == 1, "entities: one hop (the entity that stepped): %d", count_log_prefix(a, "hook event "));
+    sandbox_stop();
+    free_clients();
+}
+
+// GAME.COOKIES keys (v10 customMapData.id): a custom game's id only; no id, no cookies.
+static void test_cookie_keys(void)
+{
+    char key[128];
+    CHECK(!ks_cookie_storage_key("", "score", key, sizeof(key)), "cookies: a catalogue map (no custom id) keeps none");
+    CHECK(!ks_cookie_storage_key(NULL, "score", key, sizeof(key)), "cookies: NULL custom id keeps none");
+    CHECK(ks_cookie_storage_key("4711", "score", key, sizeof(key)) && !strcmp(key, "krkcst_4711_score"), "cookies: keyed by the custom id: %s", key);
+    CHECK(!ks_cookie_storage_key("4711", "", key, sizeof(key)), "cookies: an empty key is refused");
+    CHECK(!ks_cookie_storage_key("4711", "score", key, 8), "cookies: a key that does not fit is refused");
+    // no migration: the old map-name key is never produced, so stored values under it stay unread
+    CHECK(ks_cookie_storage_key("4711", "score", key, sizeof(key)) && !strstr(key, "311_burg"), "cookies: the map name is not part of the key");
+}
+
 static void test_compiled_js(void)
 {
     char *prelude = read_text("shared/tests/ks/js/SniperRoyale2_client.js");
@@ -687,6 +820,8 @@ int main(void)
     test_host();
     test_corpus();
     test_compiled_js();
+    test_entities();
+    test_cookie_keys();
     ks_script_free(g_cs);
     ks_program_free(prog);
     if (g_failures) {

@@ -898,8 +898,12 @@ void ks_server_round_init(void)
     size_t len = 0;
     char *src = ks_game_map_source(game, KS_SIDE_SERVER, &len);
     const uint32_t hash = src ? ks_source_hash(src, len) : 0;
+    // scripts.shared (v10 entity simulation) reloads on its own text: the server script keeps its globals
+    size_t shared_len = 0;
+    char *shared = ks_game_map_source(game, KS_SIDE_SHARED, &shared_len);
+    const uint32_t shared_hash = shared ? ks_source_hash(shared, shared_len) : 0;
     if (hash != ks_game_source_hash(game)) {
-        ks_game_unload(game); // onServerClosed of the previous map's script
+        ks_game_unload(game); // onServerClosed of the previous map's script (and the shared script)
         storage_reset(); // pending STORAGE callbacks (onServerClosed's too) belong to the old instance
         if (src) {
             const cJSON *name = game->maps && game->current_map_index >= 0 ? cJSON_GetObjectItem(game->maps[game->current_map_index], "name") : NULL;
@@ -910,7 +914,12 @@ void ks_server_round_init(void)
                 ks_game_set_account_fn(game, account_of);
             }
         }
+        if (shared) ks_game_load_shared(game, KS_SIDE_SERVER, shared, shared_len, server_host(), NULL);
+    } else if (shared_hash != ks_game_shared_source_hash(game)) {
+        if (shared) server_log("Loading the shared script of %s (%zu bytes)", game->map && game->map->name ? game->map->name : "the map", shared_len);
+        ks_game_load_shared(game, KS_SIDE_SERVER, shared, shared_len, server_host(), NULL);
     }
+    free(shared);
     free(src);
     ks_game_start(game);
 }
@@ -926,8 +935,8 @@ void ks_server_tick(const float delta)
         KsConn *c = conn_get(g_server->clients[i].id);
         if (c) c->in_match = 1;
     }
-    if (!ks_game_script(game) || !game->ready) return;
-    // update(delta * deltaMlt); TIME.fixedDelta = the raw tick delta (ms)
+    if (!game->ready) return;
+    // the entity clock (no main script needed), then update(delta * deltaMlt); TIME.fixedDelta = the raw tick delta (ms)
     ks_game_update(game, (double) delta * 1000.0, game->config.delta_mlt > 0.0f ? game->config.delta_mlt : 1.0);
 
     // custom sync values at the state rate (2.6), to their own player only

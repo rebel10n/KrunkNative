@@ -110,7 +110,8 @@ char *ks_game_map_source(const Game *game, const KsSide side, size_t *len)
 {
     if (len) *len = 0;
     if (!game || !game->map || !game->map->scripts) return NULL;
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(game->map->scripts, side == KS_SIDE_SERVER ? "server" : "client");
+    const char *key = side == KS_SIDE_SERVER ? "server" : side == KS_SIDE_SHARED ? "shared" : "client";
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(game->map->scripts, key);
     if (!cJSON_IsString(item) || !item->valuestring || !item->valuestring[0]) return NULL;
     size_t n = 0;
     char *src = ks_decode_script(item->valuestring, strlen(item->valuestring), &n);
@@ -124,6 +125,14 @@ char *ks_game_map_source(const Game *game, const KsSide side, size_t *len)
     }
     if (len) *len = n;
     return src;
+}
+
+int ks_cookie_storage_key(const char *custom_id, const char *key, char *out, const size_t n)
+{
+    if (out && n) out[0] = 0;
+    if (!out || !n || !custom_id || !custom_id[0] || !key || !key[0]) return 0;
+    const int needed = snprintf(out, n, "krkcst_%s_%s", custom_id, key);
+    return needed >= 0 && (size_t) needed < n;
 }
 
 uint32_t ks_source_hash(const char *src, const size_t len)
@@ -158,6 +167,18 @@ static void host_log(KsGame *kg, const KsHost *host, void *host_user, const int 
 
 static const TriggerScriptHooks g_trigger_hooks; // .on_custom_trigger, set below
 
+// The scripts.shared side: its program, its instance (the same host as the main script) and the
+// entity manager's state. Leaves the main script alone.
+static void unload_shared(KsGame *kg)
+{
+    ks_entities_reset(kg);
+    ks_script_free(kg->shared_script);
+    ks_program_free(kg->shared_prog);
+    kg->shared_script = NULL;
+    kg->shared_prog = NULL;
+    kg->shared_hash = 0;
+}
+
 static void reset_runtime_state(KsGame *kg)
 {
     kg->flags = 0;
@@ -171,9 +192,10 @@ static void reset_runtime_state(KsGame *kg)
 void ks_game_unload(Game *game)
 {
     KsGame *kg = game ? game->ks : NULL;
-    if (!kg || (!kg->script && !kg->prog)) return;
+    if (!kg || (!kg->script && !kg->prog && !kg->shared_script && !kg->shared_prog)) return;
     if (kg->script && kg->side == KS_SIDE_SERVER && !ks_script_failed(kg->script)) ks_script_call_hook(kg->script, "onServerClosed", NULL, 0);
     if (kg->side == KS_SIDE_SERVER && game->script_hooks == &g_trigger_hooks) triggers_set_script_hooks(game, NULL);
+    unload_shared(kg);
     ks_script_free(kg->script);
     ks_program_free(kg->prog);
     kg->script = NULL;
@@ -184,10 +206,65 @@ void ks_game_unload(Game *game)
     free_refs(kg);
 }
 
+uint32_t ks_game_shared_source_hash(const Game *game)
+{
+    return game && game->ks ? game->ks->shared_hash : 0;
+}
+
+// Attaches the host of a load to the Game's state (the wrap the scripts see, the side).
+static void kg_attach(KsGame *kg, const KsSide side, const KsHost *host, void *host_user)
+{
+    kg->side = side;
+    kg->host = host;
+    kg->host_user = host_user;
+    kg->wrap = (KsHost) {.side = side, .log = kg_log, .now_ms = kg_now, .api = host ? host->api : NULL};
+}
+
+int ks_game_is_authority_side(const KsGame *kg)
+{
+    return kg && kg->side == KS_SIDE_SERVER && kg->game && game_is_authority(kg->game);
+}
+
+int ks_game_load_shared(Game *game, const KsSide side, const char *src, const size_t len, const KsHost *host, void *host_user)
+{
+    if (!game) return -1;
+    KsGame *kg = ks_game_state(game, 1);
+    if (!kg) return -1;
+    unload_shared(kg);
+    if (!src || !len) return 0;
+    if (ks_is_compiled_js(src, len)) {
+        host_log(NULL, host, host_user, 1, "Shared script: " KS_COMPILED_JS_MESSAGE);
+        return -1;
+    }
+    KsDiag err = {0};
+    KsProgram *prog = ks_compile(src, len, KS_SIDE_SHARED, &err, NULL, 0, NULL);
+    if (!prog) {
+        char line[320];
+        ks_diag_format(&err, line, sizeof(line));
+        char msg[400];
+        snprintf(msg, sizeof(msg), "Shared script: %s", line);
+        host_log(NULL, host, host_user, 1, msg);
+        return -1;
+    }
+    kg_attach(kg, side, host, host_user);
+    kg->shared_prog = prog;
+    kg->shared_hash = ks_source_hash(src, len);
+    kg->shared_script = ks_script_new(prog, &kg->wrap, kg);
+    if (!kg->shared_script || ks_script_failed(kg->shared_script)) {
+        unload_shared(kg); // a failing initialiser leaves the entities without a script (as v10 without hooks)
+        return -1;
+    }
+    // the entity streams (ctx.rand) follow the shared text and the map, so a round replays the same way
+    kg->ents.seed = kg->shared_hash ^ (uint32_t) (game->current_map_index + 1) * 2654435761u;
+    ks_script_seed(kg->shared_script, ((uint64_t) kg->shared_hash << 32) ^ 0x51ED270B3B5A9C7Full);
+    return 0;
+}
+
 void ks_game_free(Game *game)
 {
     if (!game || !game->ks) return;
     ks_game_unload(game);
+    ks_entities_free(game->ks);
     free_refs(game->ks);
     free(game->ks);
     game->ks = NULL;
@@ -234,10 +311,7 @@ int ks_game_load(Game *game, const KsSide side, const char *src, const size_t le
         ks_program_free(prog);
         return -1;
     }
-    kg->side = side;
-    kg->host = host;
-    kg->host_user = host_user;
-    kg->wrap = (KsHost) {.side = side, .log = kg_log, .now_ms = kg_now, .api = host ? host->api : NULL};
+    kg_attach(kg, side, host, host_user);
     kg->prog = prog;
     kg->source_hash = source_hash;
     reset_runtime_state(kg);
@@ -329,11 +403,16 @@ void ks_game_start(Game *game)
 {
     KsGame *kg = game ? game->ks : NULL;
     if (kg) kg->frozen = 0; // game.init resets gameTimer: a freeze ends with the round
+    if (kg) ks_entities_round_start(kg); // the map's ENTITY instances (spawnPending, L189967), before start()
     ks_game_call(game, "start", NULL, 0);
 }
 
 void ks_game_update(Game *game, const double delta_ms, const double delta_mlt)
 {
+    KsGame *kg = game ? game->ks : NULL;
+    if (!kg) return;
+    // the entity clock and its steps, then the queued entity hooks (v10 advance / drainServerHooks)
+    ks_entities_update(kg, delta_ms);
     KsScript *s = ks_game_script(game);
     if (!s) return;
     game->ks->fixed_delta = delta_ms;

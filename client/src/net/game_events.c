@@ -584,6 +584,33 @@ int client_map_list_add(Client *client, const cJSON *map) {
     return (int) client->game.map_count++;
 }
 
+void client_set_custom_game_id(Client *client, const cJSON *map, const char *id) {
+    if (!map || !id || !id[0]) return;
+    for (size_t i = 0; i < client->custom_game_count; i++) {
+        if (client->custom_games[i].map != map) continue;
+        snprintf(client->custom_games[i].id, sizeof(client->custom_games[i].id), "%s", id);
+        return;
+    }
+    if (client->custom_game_count == client->custom_game_cap) {
+        const size_t cap = client->custom_game_cap ? client->custom_game_cap * 2 : 8;
+        void *grown = realloc(client->custom_games, cap * sizeof(*client->custom_games));
+        if (!grown) return;
+        client->custom_games = grown;
+        client->custom_game_cap = cap;
+    }
+    client->custom_games[client->custom_game_count].map = map;
+    snprintf(client->custom_games[client->custom_game_count].id, sizeof(client->custom_games[client->custom_game_count].id), "%s", id);
+    client->custom_game_count++;
+}
+
+const char *client_custom_game_id_of(const Client *client, const int map_index) {
+    if (map_index < 0 || (size_t) map_index >= client->game.map_count || !client->game.maps) return "";
+    const cJSON *map = client->game.maps[map_index];
+    for (size_t i = 0; i < client->custom_game_count; i++)
+        if (client->custom_games[i].map == map) return client->custom_games[i].id;
+    return "";
+}
+
 static void map_download_finish(Client *client, const int map_index) {
     free(client->net_map_data);
     client->net_map_data = NULL;

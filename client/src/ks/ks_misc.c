@@ -15,17 +15,18 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// GAME.COOKIES: localStorage "krkcst_<mapId>_<key>"; map id = the map's name (KN has no
-// custom-map ids for catalogue maps; v7 used customMapData.id).
+// GAME.COOKIES (v10 L182675-182685): "krkcst_<customMapData.id>_<key>" in custom games only. The id is
+// the custom game's (Client.custom_game_id, from the official INIT); catalogue maps and native custom
+// games carry none, so their cookies are refused (no-op / "" / false), as v10 does without a
+// customMapData. Entries stored under the old map-name keys are not read or moved (no migration):
+// they stay in storage unused.
 
 static int cookie_key(KsScript *s, const KsValue key_v, char *out, const size_t n) {
-    if (!ksc_is_str(key_v)) return 0;
-    const Map *map = g_ksc.client && g_ksc.client->game.map ? g_ksc.client->game.map : NULL;
-    const char *map_id = map && map->name && map->name[0] ? map->name : "map";
+    if (!ksc_is_str(key_v) || !g_ksc.client) return 0;
     char key[256];
     ksc_str(s, key_v, key, sizeof(key));
     char full[512];
-    snprintf(full, sizeof(full), "krkcst_%s_%s", map_id, key);
+    if (!ks_cookie_storage_key(g_ksc.client->custom_game_id, key, full, sizeof(full))) return 0;
 #ifdef __EMSCRIPTEN__
     snprintf(out, n, "%s", full); // localStorage takes any key
 #else

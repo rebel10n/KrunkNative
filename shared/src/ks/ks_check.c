@@ -61,9 +61,15 @@ static const Hook server_hooks[] = {
     {"onEntityDetach", 2}, {"onEntityEvent", 4}, {"onEntityRemoved", 1},
 };
 
+// v10.0.2 editor template (shared): the entity manager calls both on the authority (ks_entities.c)
+static const Hook shared_hooks[] = {
+    {"onEntityInit", 3}, // (id, archetype, spawn) -> obj state
+    {"simulateEntity", 5}, // (id, archetype, state, ctx, delta) -> obj state
+};
+
 int ks_hook_param_count(KsSide side, const char *name) {
-    const Hook *h = side == KS_SIDE_SERVER ? server_hooks : client_hooks;
-    size_t n = side == KS_SIDE_SERVER ? sizeof server_hooks / sizeof *h : sizeof client_hooks / sizeof *h;
+    const Hook *h = side == KS_SIDE_SHARED ? shared_hooks : side == KS_SIDE_SERVER ? server_hooks : client_hooks;
+    size_t n = side == KS_SIDE_SHARED ? sizeof shared_hooks / sizeof *h : side == KS_SIDE_SERVER ? sizeof server_hooks / sizeof *h : sizeof client_hooks / sizeof *h;
     for (size_t i = 0; i < n; i++)
         if (strcmp(h[i].name, name) == 0) return h[i].params;
     return -1;

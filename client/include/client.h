@@ -747,6 +747,11 @@ typedef struct {
     size_t net_map_held_count;
     cJSON **net_map_cache;         // maps received from servers (owned, kept for later rounds)
     size_t net_map_cache_count;
+    // the custom game's id (Krunker INIT arg 9 .id, v10 customMapData.id): GAME.COOKIES' key; "" none.
+    // Set per round by client_apply_init from the map the INIT names (client_custom_game_id_of).
+    char custom_game_id[48];
+    struct { const cJSON *map; char id[48]; } *custom_games; // the official custom maps and their ids
+    size_t custom_game_count, custom_game_cap;
     double last_frame_time;        // glfwGetTime() of the previous client_frame()
 
     size_t net_packet_count;
@@ -979,6 +984,10 @@ int client_map_prepare_init(Client*, NetInitPacket*);   // 1: apply now (map_ind
 int client_map_hold(Client*, const NetPacket*);         // 1: packet queued until the streamed map is in
 int client_map_take_ready(Client*, NetInitPacket*, NetPacket**, size_t*); // 1: download done (INIT + held packets, caller frees)
 int client_map_list_add(Client*, const cJSON*); // index of the map in game.maps, appending it (official games, streamed maps); -1 OOM
+// The custom game id of a map the official link streamed (Krunker INIT arg 9 .id) and the id of a game.maps
+// slot ("" none). Kept per map object, so two queued INITs never swap ids.
+void client_set_custom_game_id(Client*, const cJSON *map, const char *id);
+const char *client_custom_game_id_of(const Client*, int map_index);
 
 void client_animate_object_texture(Object*, float);
 
