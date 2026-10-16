@@ -54,6 +54,7 @@ static const Row ROWS[] = {
     {"NoAvailableServers", "Servers are at Max Capacity", 1},
     {"no_lobbies", "Servers are at Max Capacity", 1},
     {"NoMatchingServers", "No Games Found. Try changing Quickplay options", 1},
+    {"ServerUnreachable", "DISCONNECTED", 1}, // KN's rejoin give-up: v10's player.disconnect (Lost Connection)
     {"CaptchaRequired", "Security check failed. Complete the security check and try again", 1},
     {"RecaptchaFailed", "Security check failed. Refresh the page and try again", 1},
     {"TooManyAccountSessions", "Too many active sessions. Your account has too many games in progress. Close them and try again", 1},

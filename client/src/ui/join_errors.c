@@ -41,6 +41,12 @@ void join_error_text(const char *code, char *out, const size_t n) {
         snprintf(out, n, "%s", I18N("matchmaker.NoAvailableServers", "Servers are at Max Capacity"));
     else if (!strcmp(code, "NoMatchingServers"))
         plain(I18N("matchmaker.NoMatchingServers", "No Games Found<br><small>Try changing Quickplay options</small>"), out, n);
+    // KrunkNative (not a matchmaker word): a rejoin gave up because the lobby's server did not come back
+    // within its window and nothing else has room (servers_ui.c on_seek). "Servers are at Max Capacity"
+    // would say the servers are full; the server is gone. v10's Lost Connection text for a server that
+    // cannot be reached is player.disconnect, the same one its failed connect shows (v10.js _72689(null,
+    // "000001", err): the error screen with ID 0x000001, the ID KN already shows for it).
+    else if (!strcmp(code, "ServerUnreachable")) snprintf(out, n, "%s", I18N("player.disconnect", "DISCONNECTED"));
     // KrunkNative: the only lobby with room is the one a seek leaves (excludeGame): never sent back to
     // it; Find New Game / Quick Match keeps the player in that lobby (servers_ui.c on_seek)
     else if (!strcmp(code, "NoOtherLobby")) snprintf(out, n, "%s", I18N("kn.mm.noOtherLobby", "No other lobby has room: you stay in this one"));

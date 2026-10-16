@@ -742,6 +742,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             cJSON_Delete(res);
             return;
         }
+        // gave up with no server listed at all (the restart's server never came back): the lobby is gone,
+        // not full, so the text is the unreachable one (join_errors.c), not "Servers are at Max Capacity"
+        const int gone = rejoin && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && cJSON_IsString(err) &&
+                         !strcmp(err->valuestring, "NoAvailableServers");
         if (rejoin) rejoin_cancel(); // gave up: the seek's error below
         if (reload && cJSON_IsString(err) && (!strcmp(err->valuestring, "InvalidGameId") || !strcmp(err->valuestring, "GameFull"))) {
             reload_fallback(g_seek_game, !strcmp(err->valuestring, "GameFull"));
@@ -779,7 +783,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
             snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
         }
-        fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
+        fatal_error(seek_error_text(gone ? "ServerUnreachable" : cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
     }
     cJSON_Delete(res);
 }
