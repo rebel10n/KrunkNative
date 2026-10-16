@@ -685,6 +685,10 @@ console-reload-test: build ## Dev console kept in the window (off-screen save, r
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
 
+.PHONY: console-strike-test
+console-strike-test: build ## Dev console on Krunker Strike's page: opens styled, runs a typed command and reads its output (also the default page) (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I client/tests/console_strike_e2e.py $(DEBUG_DIR)
+
 .PHONY: hitmarker-test
 hitmarker-test: build ## The hit marker never stays on the death screen: hit -> die, a hit while dead, respawn (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/hitmarker_death_e2e.py $(DEBUG_DIR)

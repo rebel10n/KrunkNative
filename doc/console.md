@@ -638,7 +638,9 @@ the console is shut with `display:none` and starts closed on every load. In the 
 There is no indicator while it is closed: neither devConsole.ts (v7.1.4) nor Krunker v10 shows
 one (v10.0.2 has no developer console at all), so the toggle key (Settings > Controls >
 Developer Tools, default `) is the way back, and it now always works. The checks are
-`client/tests/console_visible_e2e.py` (input script probe `console @label`).
+`client/tests/console_visible_e2e.py` (input script probe `console @label`) and, on Krunker Strike's page
+(ui/strike/) and the default page, `client/tests/console_strike_e2e.py` (`make console-strike-test`): it opens,
+takes a typed command and reads its output back.
 
 ## F5: full reload
 

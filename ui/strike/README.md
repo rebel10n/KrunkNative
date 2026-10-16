@@ -5,6 +5,13 @@ The page is FRVR Krunker Strike 1.37.2's own `public/` tree (index.html, `assets
 - `screens/*.html`: transcribed from FRVR's own rendered DOM in the offline sandbox (`tools/uidiff/capture-strike.js`) by `tools/strike/strike_screens.py`. `tools/strike/strike_overrides.py` writes the generated block of `css/kn-strike-overrides.css`; the rest of that file is hand-written engine gaps (`GAP` comments).
 - Reference captures: `doc/ref/krunker-strike-1.37.2/`.
 
+## Files from the base page tree
+
+The developer console (client/src/ui/ui_console.c) asks for `css/devconsole.css` and its fonts relative to the page, and
+the native text engine draws its close button from `css/fonts/kn-symbols.ttf`. Strike's page has no such files of its own, so
+`css/devconsole.css`, `css/fonts/lucon.ttf` and `css/fonts/kn-symbols.ttf` are copies of ui/css/ (byte-identical; the
+`client/tests/console_strike_e2e.py` check compares them). Change the base copies and copy again.
+
 ## Fetches from FRVR's CDN
 
 GET only, about one request per second, exact paths, no cookies, no request body, nothing executed. Origin: `https://cdn.frvr.com/games/krunkerfrvr/<path>?build=1.37.2`. FRVR's gateway, director and API were never contacted. The per-file log is `~/.cache/kn-strike/live/_manifest.jsonl` (path, URL, status, sha256, size, time).

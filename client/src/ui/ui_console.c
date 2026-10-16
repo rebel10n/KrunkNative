@@ -63,8 +63,8 @@
 #define CON_PAD 14.0f
 #define CON_MIN_W (280.0f + CON_PAD) // .modal min-width: 280px / min-height: 160px, outer
 #define CON_MIN_H (160.0f + CON_PAD)
-#define CON_DEF_W 744.0f             // .modal width: min(744px, calc(100vw - 16px))
-#define CON_DEF_H 280.0f             // .modal height: min(280px, calc(100vh - 16px))
+#define CON_DEF_W 744.0f             // .modal width: min(744px, calc(100vw - 30px)): the outer box is at most vw - 16
+#define CON_DEF_H 280.0f             // .modal height: min(280px, calc(100vh - 30px))
 #define CON_DEF_MARGIN 8.0f          // .modal right: 8px; top: 8px
 #define CON_AHK_BASE 29819          // antihackkey.json
 #define CON_VERSION "jhiLQ"         // version.json
@@ -2405,10 +2405,10 @@ static void con_geom_read(WinGeom *g, const float vw, const float vh) {
     g->y = (float) style_px(g_con.modal, "top");
     if (ow > 0.0f) g->w = ow;
     else if (html_dom_get_style(g_con.modal, "width", buf, sizeof(buf)) >= 0) g->w = (float) atoi(buf) + CON_PAD;
-    else g->w = fminf(CON_DEF_W, vw - 2.0f * CON_DEF_MARGIN) + CON_PAD;
+    else g->w = fminf(CON_DEF_W + CON_PAD, vw - 2.0f * CON_DEF_MARGIN);
     if (oh > 0.0f) g->h = oh;
     else if (html_dom_get_style(g_con.modal, "height", buf, sizeof(buf)) >= 0) g->h = (float) atoi(buf) + CON_PAD;
-    else g->h = fminf(CON_DEF_H, vh - 2.0f * CON_DEF_MARGIN) + CON_PAD;
+    else g->h = fminf(CON_DEF_H + CON_PAD, vh - 2.0f * CON_DEF_MARGIN);
 }
 
 // Writes the box back; the size only when it differs from `was` (NULL: always).
@@ -2477,7 +2477,7 @@ static void restore_geom(void) {
     html_dom_viewport(&vw, &vh, &dpr);
     const cJSON *w = cJSON_GetObjectItem(g, "width"), *h = cJSON_GetObjectItem(g, "height");
     const cJSON *l = cJSON_GetObjectItem(g, "left"), *t = cJSON_GetObjectItem(g, "top");
-    WinGeom box = {0.0f, 0.0f, fminf(CON_DEF_W, vw - 2.0f * CON_DEF_MARGIN) + CON_PAD, fminf(CON_DEF_H, vh - 2.0f * CON_DEF_MARGIN) + CON_PAD};
+    WinGeom box = {0.0f, 0.0f, fminf(CON_DEF_W + CON_PAD, vw - 2.0f * CON_DEF_MARGIN), fminf(CON_DEF_H + CON_PAD, vh - 2.0f * CON_DEF_MARGIN)};
     const int sized_w = cJSON_IsNumber(w) && isfinite(w->valuedouble) && w->valuedouble >= 280;
     const int sized_h = cJSON_IsNumber(h) && isfinite(h->valuedouble) && h->valuedouble >= 160;
     const int placed = cJSON_IsNumber(l) && cJSON_IsNumber(t) && isfinite(l->valuedouble) && isfinite(t->valuedouble);

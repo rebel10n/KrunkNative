@@ -33,8 +33,11 @@
   top: 8px;
   padding: 7px;
   border-radius: 5px;
-  width: min(744px, calc(100vw - 16px));
-  height: min(280px, calc(100vh - 16px));
+  /* KrunkNative: 30px, not 16px: the content box is 14px wider than its width (padding 7px), so the
+   * outer box, with right / top 8px, fits the viewport at every size (a 640px phone viewport
+   * cut 6px off the left edge). */
+  width: min(744px, calc(100vw - 30px));
+  height: min(280px, calc(100vh - 30px));
   background: #7a7a7a;
   display: flex;
   flex-direction: column;

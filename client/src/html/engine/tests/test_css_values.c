@@ -240,11 +240,11 @@ static void test_lengths(void)
     CHECK(apply(&c, NULL, "width", "50vw") && len_is(c.width, 640, 0));
     CHECK(apply(&c, NULL, "height", "calc(100vh - 16px)") && len_is(c.height, 704, 0));
     CHECK(apply(&c, NULL, "width", "10vmin") && len_is(c.width, 72, 0) && css_values_viewport_units_used());
-    CHECK(apply(&c, NULL, "width", "min(744px, calc(100vw - 16px))") && len_is(c.width, 744, 0));   /* devconsole.css */
-    CHECK(apply(&c, NULL, "height", "min(280px, calc(100vh - 16px))") && len_is(c.height, 280, 0));
+    CHECK(apply(&c, NULL, "width", "min(744px, calc(100vw - 30px))") && len_is(c.width, 744, 0));   /* devconsole.css */
+    CHECK(apply(&c, NULL, "height", "min(280px, calc(100vh - 30px))") && len_is(c.height, 280, 0));
     css_values_set_viewport(600, 200);
-    CHECK(apply(&c, NULL, "width", "min(744px, calc(100vw - 16px))") && len_is(c.width, 584, 0));
-    CHECK(apply(&c, NULL, "height", "min(280px, calc(100vh - 16px))") && len_is(c.height, 184, 0));
+    CHECK(apply(&c, NULL, "width", "min(744px, calc(100vw - 30px))") && len_is(c.width, 570, 0));
+    CHECK(apply(&c, NULL, "height", "min(280px, calc(100vh - 30px))") && len_is(c.height, 170, 0));
     css_values_set_viewport(1280, 720);
     CHECK(apply(&c, NULL, "width", "max(10px, 2em, 30px)") == 0);              /* px vs em: not comparable */
     CHECK(apply(&c, NULL, "width", "max(10px, 20px, 5px)") && len_is(c.width, 20, 0));
