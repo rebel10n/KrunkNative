@@ -540,9 +540,13 @@ static void mail_list_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "kml", 2, cJSON_CreateNumber((double) c->a), rows ? rows : cJSON_CreateArray());
 }
 
+/* v10's notification window (windows[29], v10.js _71355): a row shows in the tab of its km_notificationtype
+ * (0 Followers, 1 Clan, 2 Hub, 3 Inbox; 4 and 5 count as Inbox) and in Archive once read (km_archive).
+ * KrunkNative's mail (gifts, sales, giveaways, trades) is all Inbox mail; a row without a type shows in no tab. */
 #define MAIL_COLS(html_l, html_r) \
     "SELECT id AS km_id, created_at AS km_datesent, " html_l "sender" html_r " AS km_playerfrom, " html_l "subject" html_r " AS km_subject, " \
-    html_l "body" html_r " AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr FROM mail "
+    html_l "body" html_r " AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr, " \
+    "3 AS km_notificationtype__i, '' AS km_link FROM mail "
 
 /* ["kml", tab] -> ["kml", tab, rows] (windows[29].onData; tab 0 unread, 1 read) */
 void sh_mail_list(SocialSession *s, const cJSON *f) {

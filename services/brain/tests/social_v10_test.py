@@ -274,6 +274,13 @@ async def scenario(names):
     check(won and won[0][0] == b_id and q("SELECT player_funds FROM players WHERE player_id = ?", b_id)[0][0] == 1100,
           "giveaway ends: B (liked + follows) wins 100 KR")
 
+    # --- mail: the giveaway's mail is Inbox mail in v10's notification window (km_notificationtype 3)
+    await B.send(["kml", 0])
+    m = await B.recv_until(lambda f: f[0] == "kml")
+    rows = m[2] if m else []
+    check(any(r.get("km_subject") == "Giveaway Won" and r.get("km_notificationtype") == 3 and r.get("km_link") == ""
+              for r in rows), "mail: the giveaway win is Inbox mail (km_notificationtype 3)")
+
     # --- clans: the clan view and Request to Join
     cid = q("INSERT INTO clans (clan_name, clan_playerid, clan_score, clan_discord) VALUES ('TST', ?, 4321, 'abc') RETURNING clan_id", a_id)[0][0]
     q("INSERT INTO clan_members (account_id, clan_id, rank, score) VALUES (?, ?, 3, 99)", a_id, cid)
