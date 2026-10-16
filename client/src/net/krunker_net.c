@@ -878,7 +878,7 @@ static void link_send(void *user, const uint8_t *frame, const size_t len) {
     (void) len;
 }
 static void ws_open(void) {
-    fail("%s", I18N("kn.kio.noWindowsSocket", "This Windows build has no WebSocket client for krunker.io's game servers yet: pick a KrunkNative server."));
+    fail("%s", I18N("kn.kio.noWindowsSocket", "This Windows build has no WebSocket client for krunker.io's game servers yet: pick a Box Office server."));
 }
 static void ws_close(void) {}
 #endif

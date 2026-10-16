@@ -53,7 +53,7 @@ void krunker_account_ui_accounts_html(StrBuf *sb) {
     const AccountInfo *kn = account_get();
     sb_append(sb, "<div id='knAccounts' class='kn-accounts'>");
     sb_append(sb, "<span class='kn-accounts-row' id='knAccountsKn'><span class='kn-accounts-kind'>");
-    sb_append_esc(sb, I18N("kn.accounts.knServers", "KrunkNative servers:"));
+    sb_append_esc(sb, I18N("kn.accounts.knServers", "Box Office servers:"));
     sb_append(sb, "</span> ");
     if (kn && kn->name[0]) {
         sb_append(sb, "<span class='kn-accounts-name'>");

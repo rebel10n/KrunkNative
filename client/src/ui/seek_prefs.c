@@ -120,14 +120,14 @@ static void server_type_html(StrBuf *sb) {
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
     sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "kn", "KrunkNative", servers == SEEK_SERVERS_KN);
+    option(sb, "kn", "Box Office", servers == SEEK_SERVERS_KN);
     option(sb, "official", I18N("kn.quickplay.serverType.official", "krunker.io servers"), servers == SEEK_SERVERS_OFFICIAL);
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
     sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. krunker.io servers are joined in this client with your "
-                                                                       "krunker.io account (krunker.io may ask for a security check first). Both prefers a KrunkNative server when one matches.")
+                                                                       "krunker.io account (krunker.io may ask for a security check first). Both prefers a Box Office server when one matches.")
                            : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. krunker.io servers open in your browser. "
-                                                                          "Both prefers a KrunkNative server when one matches."));
+                                                                          "Both prefers a Box Office server when one matches."));
     sb_append(sb, "</div>");
 }
 #endif

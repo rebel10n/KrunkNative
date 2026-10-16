@@ -433,7 +433,7 @@ def run():
 
     # 2. the Accounts line + Quick Join
     kn, kio = probe(text, "kn"), probe(text, "kio")
-    check("the Accounts line: KrunkNative servers see the KrunkNative account (a guest here)", "KrunkNative servers:" in kn and "Guest" in kn, kn)
+    check("the Accounts line: Box Office servers see the Box Office account (a guest here)", "Box Office servers:" in kn and "Guest" in kn, kn)
     check("the Accounts line: krunker.io servers see the krunker.io account", "krunker.io servers:" in kio and ACCOUNT_NAME in kio and "Logout" in kio, kio)
     window = probe(text, "window")
     check("the Servers window has no \"as a guest\" / \"guest only\" wording", window and not re.search(r"as a guest|guest only", window, re.I),

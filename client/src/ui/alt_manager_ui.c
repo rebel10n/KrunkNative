@@ -101,7 +101,7 @@ static void save_current(void) {
     const AccountInfo *acc = account_get();
     const char *token = account_session_token();
     if (!acc || !token[0]) {
-        set_msg(I18N("kn.alt.signInFirst", "Sign in to KrunkNative first, then save the account."));
+        set_msg(I18N("kn.alt.signInFirst", "Sign in to Krunker Box Office first, then save the account."));
         return;
     }
     if (alt_store_kn_save(acc->name, token) != 0) {
@@ -153,7 +153,7 @@ static void append_profile(StrBuf *sb, const AltVault *v, const AltProfile *p) {
     sb_append(sb, "<div class='knAltWho'><div class='knAltName'>");
     sb_append_esc(sb, p->label);
     sb_append(sb, "</div><div class='knAltKind'>");
-    sb_append(sb, p->kind == ALT_KIND_KN ? "KrunkNative" : "krunker.io");
+    sb_append(sb, p->kind == ALT_KIND_KN ? "Box Office" : "krunker.io");
     if (active) sb_append(sb, " &middot; ");
     if (active) sb_append(sb, I18N("kn.alt.active", "active"));
     sb_append(sb, "</div></div><div class='knAltBtns'>");
@@ -212,7 +212,7 @@ char *alt_manager_window_gen(const int id, const char **header) {
         sb_append(&sb, "</div>");
         if (account_get() && account_session_token()[0]) {
             sb_append(&sb, "<div class='joinBtn knAltWide' onclick='knAltSaveKn()'>");
-            sb_append_esc(&sb, I18N("kn.alt.saveCurrent", "Save the KrunkNative account I am signed in to"));
+            sb_append_esc(&sb, I18N("kn.alt.saveCurrent", "Save the Box Office account I am signed in to"));
             sb_append(&sb, "</div>");
         }
         sb_append(&sb, "<div class='knAltAdd'><div class='knAltAddTitle'>");

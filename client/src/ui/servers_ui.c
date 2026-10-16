@@ -1123,7 +1123,7 @@ static int strike_join_code(const char *text) {
 static int join_official(const char *id, char *err, const size_t n) {
     for (const char *p = id; *p; p++) {
         if (!isalnum((unsigned char) *p) && *p != ':' && *p != '-' && *p != '_') {
-            snprintf(err, n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or KrunkNative game link, or enter host:port"));
+            snprintf(err, n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or Box Office game link, or enter host:port"));
             return -1;
         }
     }
@@ -1147,7 +1147,7 @@ int servers_ui_connect_game(const char *text, char *err, const size_t n) {
     if (!kn_game_link_parse(text, id, sizeof(id))) return 0;
     if (kn_game_link_is_krunker(text)) return join_official(id, err, n);
     if (!g_brain_mode || backend_available() != 1) {
-        snprintf(err, n, "%s", I18N("kn.connect.noMatchmaker", "This game link needs the KrunkNative matchmaker, which is not reachable: enter host:port instead"));
+        snprintf(err, n, "%s", I18N("kn.connect.noMatchmaker", "This game link needs the Box Office matchmaker, which is not reachable: enter host:port instead"));
         return -1;
     }
     printf("[mm] connect: game %s\n", id);
@@ -1164,7 +1164,7 @@ int servers_ui_join_link(const char *text) {
     char err[200] = "";
     const int game = servers_ui_connect_game(text, err, sizeof(err));
     if (game > 0) return 1;
-    if (!game) snprintf(err, sizeof(err), "%s", I18N("kn.join.notLink", "Not a game link: paste a krunker.io or KrunkNative game link, or a lobby code such as CH2:kz862"));
+    if (!game) snprintf(err, sizeof(err), "%s", I18N("kn.join.notLink", "Not a game link: paste a krunker.io or Box Office game link, or a lobby code such as CH2:kz862"));
     printf("[mm] join refused: %s\n", err);
     ui_notify(err);
     return 0;
@@ -2343,7 +2343,7 @@ int servers_ui_parse_address(const char *text, char *host, const size_t host_n, 
     if (!strcmp(host, "localhost") || !strcmp(host, "0.0.0.0")) snprintf(host, host_n, "127.0.0.1");
     ok = ok && *port > 0 && *port <= 65535 && (!strcmp(host, "127.0.0.1") || ipv4_ok(host) || name_ok(host));
     if (!ok) {
-        snprintf(err, err_n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or KrunkNative game link, or enter host:port"));
+        snprintf(err, err_n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or Box Office game link, or enter host:port"));
         return 0;
     }
     return 1;
