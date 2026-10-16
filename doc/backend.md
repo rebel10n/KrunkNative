@@ -2544,6 +2544,10 @@ Before the game it:
    running launcher is renamed aside like any file (also on Windows), so the new launcher runs from
    the next start. deb/rpm installs (and read-only roots) are left to the package manager: the window
    names the download;
+   the client's own box (update_ui.c) follows the same rule, except for a local build: a dirty tree, no
+   commit, or a commit origin/main does not have (`KN_VERSION_LOCAL`, cmake/kn_version.cmake). A local
+   build never shows the update box, Outdated or the automatic restart, and the console says it is local
+   (`KRUNKNATIVE_LOCAL_BUILD=1|0` pins the flag: the e2e tests use it);
 3. syncs the game content when the manifest's content version differs from
    `<assets>/.kn-assets.json`: downloads the list (gzip on the wire), diffs it (a file the last list
    vouches for with the right size is kept; a file of the right size the list does not vouch for is

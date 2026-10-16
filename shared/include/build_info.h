@@ -18,6 +18,7 @@ typedef struct {
     const char *commit;       // 12 hex digits, "" unknown
     int64_t commit_time;      // committer date of commit, unix seconds (0 unknown)
     int dirty;                // built from a tree with local changes
+    int local;                // a local build: not one the updates server publishes (cmake/kn_version.cmake)
     const char *build_time;   // ISO-8601 UTC, "2026-10-12T05:00:00Z"
     int protocol_major;       // NET_PROTOCOL_MAJOR.MINOR (shared.h)
     int protocol_minor;

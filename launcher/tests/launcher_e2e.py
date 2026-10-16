@@ -253,6 +253,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
                      "KRUNKNATIVE_INPUT_SCRIPT": os.path.join(tmp, name + ".script"),
                      "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": os.path.join(tmp, name + "-relaunch.script"),
                      "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_WINDOW_SIZE": "640x360",
+                     "KRUNKNATIVE_LOCAL_BUILD": "0",
                      "XDG_CONFIG_HOME": os.path.join(tmp, name + "-cfg"), "XDG_STATE_HOME": os.path.join(tmp, name + "-state")})
         log = os.path.join(tmp, name + ".log")
         if gate_on:
@@ -568,7 +569,8 @@ def main():
             cenv = dict(env)
             cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": os.path.join(REPO, "assets"),
                          "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"), "KRUNKNATIVE_LAUNCHER": fake,
-                         "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_NO_BROWSER": "1"})
+                         "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_NO_BROWSER": "1",
+                         "KRUNKNATIVE_LOCAL_BUILD": "0"})  # a published build: a dev build's flag would hide the box
             t0 = time.time()
             code, out = run(["timeout", "120", os.path.join(cl, "client_bin"), "--offline"], env=cenv, cwd=cl, timeout=150)
             took = time.time() - t0

@@ -9,6 +9,7 @@ static const KnBuildInfo k_info = {
     .commit = KN_VERSION_COMMIT,
     .commit_time = (int64_t) KN_VERSION_COMMIT_TIME,
     .dirty = KN_VERSION_DIRTY,
+    .local = KN_VERSION_LOCAL,
     .build_time = KN_VERSION_BUILD_TIME,
     .protocol_major = NET_PROTOCOL_MAJOR,
     .protocol_minor = NET_PROTOCOL_MINOR,

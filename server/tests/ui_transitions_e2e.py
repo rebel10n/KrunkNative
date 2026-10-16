@@ -1278,8 +1278,8 @@ class Manifest(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def sc_outdated():
-    """The Outdated box (update_ui.c): a manifest with a newer protocol; it follows the menu."""
+def serve_newer_manifest():
+    """A manifest whose build is newer and speaks a newer protocol (outdated for any build here)."""
     (port,) = free_ports(1)
     Manifest.body = json.dumps({"format": 1, "channel": "latest", "outdated_grace_h": 24,
                                 "build": {"describe": "v9.9.9-1-gfeedbee", "commit": "feedbeefeedbeefeedbeefeedbeefeedbeefeed",
@@ -1287,6 +1287,13 @@ def sc_outdated():
                                 "platforms": {}}).encode()
     httpd = http.server.HTTPServer(("127.0.0.1", port), Manifest)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, port
+
+
+def sc_outdated():
+    """The Outdated box (update_ui.c): a manifest with a newer protocol; it follows the menu. The build
+    is pinned published (KRUNKNATIVE_LOCAL_BUILD=0): a dev build's own flag would hide the box."""
+    httpd, port = serve_newer_manifest()
     try:
         run_client("outdated", ["--offline", "--map", "kanji"], f"""
             0 menu
@@ -1300,7 +1307,28 @@ def sc_outdated():
             8100 esc
             8600 check @window-closed knUpdateAd=1 windowHolder=0
             9000 quit
-        """, env_extra={"KRUNKNATIVE_UPDATES_URL": f"http://127.0.0.1:{port}/latest.json"})
+        """, env_extra={"KRUNKNATIVE_UPDATES_URL": f"http://127.0.0.1:{port}/latest.json", "KRUNKNATIVE_LOCAL_BUILD": "0"})
+    finally:
+        httpd.shutdown()
+
+
+def sc_local_build():
+    """A local build (a dirty tree, or a commit origin/main does not have: cmake/kn_version.cmake) is
+    never the published one: the server's newer manifest raises no update box and no Outdated, and the
+    log says why (KRUNKNATIVE_LOCAL_BUILD=1 pins the build's flag for the run). knUpdateAd=- : no such
+    element at all (the box is never made), unlike the hidden box of a published build (0)."""
+    httpd, port = serve_newer_manifest()
+    try:
+        lines = run_client("local-build", ["--offline", "--map", "kanji"], f"""
+            0 menu
+            6000 check @menu knUpdateAd=- menuHolder=1
+            6500 con update check
+            7500 quit
+        """, env_extra={"KRUNKNATIVE_UPDATES_URL": f"http://127.0.0.1:{port}/latest.json", "KRUNKNATIVE_LOCAL_BUILD": "1"})
+        checked = any(line.startswith("[update] latest v9.9.9") for line in lines)
+        record("local-build", "menu", "update check ran", "yes", "yes" if checked else "no", checked)
+        local = any("[update] this build is local" in line for line in lines)
+        record("local-build", "menu", "log says local", "yes", "yes" if local else "no", local)
     finally:
         httpd.shutdown()
 
@@ -1833,7 +1861,7 @@ def sc_loadout_preview():
 SCENARIOS = {
     "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "forced-spawn": sc_forced_spawn, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
-    "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
+    "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated, "local-build": sc_local_build,
     "comp": sc_comp, "om-scroll": sc_om_scroll, "om-tools": sc_om_tools, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
     "loadout-images": sc_loadout_images, "loadout-preview": sc_loadout_preview,
     "loadout-images-web": sc_loadout_images_web,

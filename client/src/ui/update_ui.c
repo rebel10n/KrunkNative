@@ -111,6 +111,7 @@ EM_JS(char *, kn_js_page_build_error, (void), { var b = Module.knPageBuild; retu
 
 static struct {
     int enabled;       // the page has a build stamp
+    int local;         // a local build (kn_build_info()->local): no box for a newer page
     int init;
     double next_check; // glfwGetTime of the next check
     int running;
@@ -128,6 +129,7 @@ void update_ui_tick(Client *client) {
         // (the browser fetched the page a moment ago), so it is not compared
         g_web.enabled = kn_js_page_build_check();
         g_web.running = g_web.enabled;
+        g_web.local = kn_build_info()->local;
         g_web.next_check = glfwGetTime() + CHECK_INTERVAL_S;
         if (!g_web.enabled) printf("[update] the web client is served by the site: no build stamp on this page, no checks\n");
         return;
@@ -151,7 +153,7 @@ void update_ui_tick(Client *client) {
         free(live);
         free(cur);
         g_web.checked = 1;
-        if (newer && !g_web.newer) {
+        if (newer && !g_web.newer && !g_web.local) {
             g_web.newer = 1;
             render_box(1, 0, g_web.live, kn_build_info()->describe, 1);
             game_reload_update_available(g_web.live); // the automatic restart (Settings > Client)
@@ -259,6 +261,10 @@ typedef struct {
     int scenario;      // --render-scenario stand-in
     int console_report; // print the next result to the console
     int announced;     // game_reload_update_available told once for this build
+    // a local build (a dirty tree, a commit origin/main does not have: kn_build_info()->local) is
+    // never the published one: its state stays CURRENT, so no box, no Outdated, no automatic restart.
+    // KRUNKNATIVE_LOCAL_BUILD=1 / =0 overrides the build's flag (the e2e tests pin it).
+    int local;
     // install facts (kn-install.json in the cwd, the launcher's env)
     KnInstallMarker marker;
     int has_marker;
@@ -287,6 +293,9 @@ static void init_once(void) {
     g_up.init = 1;
     const char *env = getenv("KRUNKNATIVE_UPDATES_URL");
     snprintf(g_up.url, sizeof(g_up.url), "%s", env && *env ? env : KN_UPDATE_DEFAULT_URL);
+    const char *local_env = getenv("KRUNKNATIVE_LOCAL_BUILD");
+    g_up.local = local_env && *local_env ? *local_env == '1' : kn_build_info()->local;
+    if (g_up.local) printf("[update] this build is local (not published): no update box, no Outdated\n");
     // headless runs (tests, captures, smoke) never reach the production server unless asked
     g_up.enabled = strcmp(g_up.url, "off") != 0 && !ui_scenario_active() && (!headless_enabled() || (env && *env));
     char *json = NULL;
@@ -320,7 +329,7 @@ static void *check_thread(void *arg) {
     if (ok) {
         KnUpdateBuild mine;
         self_build(&mine);
-        g_up.state = kn_update_compare(&mine, &m.build, m.grace_s);
+        g_up.state = g_up.local ? KN_UPDATE_CURRENT : kn_update_compare(&mine, &m.build, m.grace_s);
         snprintf(g_up.latest, sizeof(g_up.latest), "%s", m.build.describe);
         snprintf(g_up.latest_commit, sizeof(g_up.latest_commit), "%s", m.build.commit);
         const char *platform = g_up.has_marker && g_up.marker.platform[0] ? g_up.marker.platform : kn_update_platform_default();
@@ -377,6 +386,11 @@ static void report_console(void) {
         ui_console_printf("#ff6b6b", "update check failed: %s", g_up.error[0] ? g_up.error : "unknown error");
         return;
     }
+    if (g_up.local) {
+        ui_console_printf(NULL, "this client: %s | latest: %s (%.12s) | a local build (not published): no update", kn_build_string(),
+                          g_up.latest, g_up.latest_commit);
+        return;
+    }
     ui_console_printf(NULL, "this client: %s | latest: %s (%.12s) | %s", kn_build_string(), g_up.latest, g_up.latest_commit,
                       g_up.state == KN_UPDATE_OUTDATED ? "OUTDATED" : g_up.state == KN_UPDATE_AVAILABLE ? "update available" : "up to date");
     if (g_up.state != KN_UPDATE_CURRENT)
@@ -401,7 +415,8 @@ void update_ui_tick(Client *client) {
     g_up.fresh = 0;
     pthread_mutex_unlock(&g_up.lock);
     if (fresh) {
-        if (g_up.ok) printf("[update] latest %s (%.12s): %s%s\n", g_up.latest, g_up.latest_commit, kn_update_state_name(g_up.state),
+        if (g_up.ok) printf("[update] latest %s (%.12s): %s%s\n", g_up.latest, g_up.latest_commit,
+                            g_up.local ? "local build, no update" : kn_update_state_name(g_up.state),
                             g_up.state != KN_UPDATE_CURRENT && can_update_now() ? " (Update now: via the launcher)" : "");
         else printf("[update] check failed: %s\n", g_up.error);
         fflush(stdout);
@@ -549,6 +564,10 @@ void update_ui_console(const int argc, char **argv) {
         return;
     }
     if (!strcmp(sub, "now")) {
+        if (g_up.local) {
+            ui_console_printf(NULL, "a local build is not published: there is no update to install");
+            return;
+        }
         if (!g_up.ok || g_up.state == KN_UPDATE_CURRENT) {
             ui_console_printf(NULL, g_up.ok ? "already up to date" : "no update known yet: run `update check` first");
             return;
