@@ -1157,6 +1157,32 @@ static int h_action(void *user, const HtmlEvent *ev, const HtmlArg *args, const 
 // the nth .inlineItem under root whose .section reads `label` gets the value (a checkbox: "1" /
 // "true" checks it) and its control's GUI.action handler runs, as the page's own
 // oninput / onchange / onclick would. 0 = no such control.
+// a click on the nth button labelled so (the harness's press:<label>[#n]): its GUI.action(id, this),
+// as the page would run it. 0 when there is no such button.
+int ed_gui_press_by_label(const HtmlElem root, const char *label, const int nth) {
+    enum { MAX_BUTTONS = 512 };
+    HtmlElem *items = malloc(MAX_BUTTONS * sizeof(*items));
+    if (!items) return 0;
+    const int n = html_dom_query_all(root, ".eButton", items, MAX_BUTTONS);
+    HtmlElem button = 0;
+    for (int i = 0, seen = 0; i < n && i < MAX_BUTTONS && !button; i++) {
+        char text[256] = "";
+        html_dom_get_text(items[i], text, sizeof(text));
+        if (strcmp(text, label) || seen++ != nth) continue;
+        button = items[i];
+    }
+    free(items);
+    if (!button) return 0;
+    char h[512] = "";
+    if (html_dom_get_attr(button, "onclick", h, sizeof(h)) <= 0) return 0;
+    const char *p = strstr(h, "GUI.action(");
+    if (!p) return 0;
+    HtmlEvent e = {.type = "click", .target = button};
+    HtmlArg a[2] = {{HTML_ARG_NUM, atoi(p + 11), NULL}, {HTML_ARG_THIS, 0, NULL}};
+    html_ui_dispatch("GUI.action", &e, a, 2);
+    return 1;
+}
+
 int ed_gui_set_by_label(const HtmlElem root, const char *label, const int nth, const char *value) {
     enum { MAX_ITEMS = 4096 };
     HtmlElem *items = malloc(MAX_ITEMS * sizeof(*items));

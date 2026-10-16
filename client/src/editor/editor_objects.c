@@ -167,6 +167,62 @@ static cJSON *faces_json(const EditorObject *o) {
     return a;
 }
 
+// v10 map-slot properties (E10:6740-6890, IDX:16449-16501): "mp:<slot>:<field>" reads and writes
+// mapProps[slot][field] ("ch" channel, "i" intensity / scale, "fy" flip Y) of the object's "mp". A
+// value at its default is dropped (_setMapProp) and an empty slot / "mp" is removed.
+static int mapprop_name(const char *prop, char *slot, char *field, const size_t n) {
+    if (strncmp(prop, "mp:", 3) || !prop[3] || prop[4] != ':' || !prop[5]) return 0;
+    slot[0] = prop[3];
+    slot[1] = 0;
+    snprintf(field, n, "%s", prop + 5);
+    return 1;
+}
+
+static double mapprop_default(const char *slot, const char *field) {
+    if (!strcmp(field, "i")) return !strcmp(slot, "l") ? 1.5 : 1.0; // lightMapIntensity 1.5, the others 1
+    return 0.0;
+}
+
+static cJSON *mapprop_get(const EditorObject *o, const char *prop) {
+    char slot[2], field[8];
+    if (!mapprop_name(prop, slot, field, sizeof(field))) return NULL;
+    const cJSON *sv = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(o->data, "mp"), slot);
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(sv, field);
+    if (!strcmp(field, "fy")) return cJSON_CreateBool(ed_json_truthy(v));
+    return cJSON_CreateNumber(cJSON_IsNumber(v) ? v->valuedouble : mapprop_default(slot, field));
+}
+
+static void mapprop_set(EditorObject *o, const char *prop, const cJSON *value) {
+    char slot[2], field[8];
+    if (!mapprop_name(prop, slot, field, sizeof(field))) return;
+    double v = !strcmp(field, "fy") ? (ed_json_truthy(value) ? 1.0 : 0.0) : value_num(value);
+    if (!strcmp(field, "ch")) v = (double) (int) v;
+    const double def = !strcmp(field, "fy") ? 0.0 : mapprop_default(slot, field);
+    cJSON *mp = cJSON_GetObjectItemCaseSensitive(o->data, "mp");
+    if (isnan(v) || v == def) {
+        if (mp) {
+            cJSON *sv = cJSON_GetObjectItemCaseSensitive(mp, slot);
+            if (sv) {
+                cJSON_DeleteItemFromObjectCaseSensitive(sv, field);
+                if (!cJSON_GetArraySize(sv)) cJSON_DeleteItemFromObjectCaseSensitive(mp, slot);
+            }
+            if (!cJSON_GetArraySize(mp)) cJSON_DeleteItemFromObjectCaseSensitive(o->data, "mp");
+        }
+        return;
+    }
+    if (!mp) {
+        mp = cJSON_CreateObject();
+        cJSON_AddItemToObject(o->data, "mp", mp);
+    }
+    cJSON *sv = cJSON_GetObjectItemCaseSensitive(mp, slot);
+    if (!sv) {
+        sv = cJSON_CreateObject();
+        cJSON_AddItemToObject(mp, slot, sv);
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(sv, field);
+    cJSON_AddNumberToObject(sv, field, v);
+}
+
 cJSON *ed_prop_get(const EditorObject *o, const char *prop) {
     const cJSON *d = o->data;
     if (!strcmp(prop, "pos")) return vec_json(ed_obj_vec(o, "p", (vec3) {0}), 2);
@@ -195,6 +251,10 @@ cJSON *ed_prop_get(const EditorObject *o, const char *prop) {
     if (!strcmp(prop, "mSize")) return cJSON_CreateNumber(ed_json_num(d, "ms", editor_prefabs[o->prefab].scale));
     if (!strcmp(prop, "faces")) return faces_json(o);
     if (!strcmp(prop, "lightTarget")) return vec_json(ed_obj_vec(o, "lt", (vec3) {0}), 2);
+    if (!strncmp(prop, "mp:", 3)) {
+        cJSON *m = mapprop_get(o, prop);
+        if (m) return m;
+    }
     cJSON *v = ed_model_prop_get(d, o->prefab, prop);
     if (v) return v;
     // KrunkNative: inspector values ObjectInstance has no field for (EditorObject.scratch)
@@ -217,6 +277,10 @@ int ed_prop_needs_rebuild(const char *prop) {
 void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value) {
     cJSON *d = o->data;
     const int prefab = o->prefab;
+    if (!strncmp(prop, "mp:", 3)) {
+        mapprop_set(o, prop, value);
+        return;
+    }
 
     if (!strcmp(prop, "pos") || !strcmp(prop, "size") || !strcmp(prop, "rot") || !strcmp(prop, "lightTarget")) {
         if (!cJSON_IsArray(value) || cJSON_GetArraySize(value) < 3) return;

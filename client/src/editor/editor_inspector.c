@@ -418,6 +418,96 @@ static EdOption g_axes[2] = {{"X", 0, NULL}, {"Y", 1, NULL}};
 // ---------------------------------------------------------------------------
 // header (UI:1288-1972)
 
+// ---------------------------------------------------------------------------
+// BOT_PATH_NODE (v10 IDX:15704-15785; E10:17833-17885). The node buttons number the path's nodes
+// from the selected one: Fix Node renumbers it after the highest node of its group, Create Next
+// Node adds the node after it in the group, Create Next Group starts a new group at its position.
+
+static int bot_node_prefab(void) {
+    for (int i = 0; i < EDITOR_PREFAB_COUNT; i++) if (!strcmp(editor_prefabs[i].name, "BOT_PATH_NODE")) return i;
+    return -1;
+}
+
+static int bot_int(const cJSON *d, const char *key) { return (int) ed_json_num(d, key, 0); }
+
+static void act_bot_fix(EdCtl *c) {
+    // botNodeCorrection: the node takes max(other nodes of its group) + 1; Next NodeId is one more
+    (void) c;
+    EditorObject *o = g_ed.proj->selected;
+    if (!o || o->prefab != bot_node_prefab()) return;
+    const int group = bot_int(o->data, "bng");
+    int top = 0;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *x = g_ed.proj->objects[i];
+        if (x == o || x->prefab != o->prefab || bot_int(x->data, "bng") != group) continue;
+        if (bot_int(x->data, "bn") > top) top = bot_int(x->data, "bn");
+    }
+    top++;
+    cJSON *node = cJSON_CreateNumber(top), *next = cJSON_CreateNumber(top + 1);
+    ed_prop_set(o, "botNode", node);
+    ed_prop_set(o, "botNodeNext", next);
+    cJSON_Delete(node);
+    cJSON_Delete(next);
+    g_ed.dirty_panel = 1;
+    ed_mark_changed();
+}
+
+// addObject of a BOT_PATH_NODE at the owner's position (bn, bnn, bng, bnr as given)
+static void bot_add(const EditorObject *owner, const int group, const int reversible, const int node, const int next) {
+    const int pf = bot_node_prefab();
+    if (pf < 0) return;
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddNumberToObject(d, "i", pf);
+    cJSON_AddItemToObject(d, "p", cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(owner->data, "p"), 1));
+    cJSON_AddNumberToObject(d, "bnr", reversible);
+    cJSON_AddNumberToObject(d, "bn", node);
+    cJSON_AddNumberToObject(d, "bnn", next);
+    cJSON_AddNumberToObject(d, "bng", group);
+    EditorObject *n = ed_obj_new(d, 0);
+    cJSON_Delete(d);
+    ed_obj_add(n, 0, 1);
+}
+
+static void act_bot_next_node(EdCtl *c) {
+    // createNextNode: bn = max(node of the group) + 1 (the owner included), bnr = the owner's
+    (void) c;
+    EditorObject *o = g_ed.proj->selected;
+    if (!o || o->prefab != bot_node_prefab()) return;
+    const int group = bot_int(o->data, "bng");
+    int top = 0;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *x = g_ed.proj->objects[i];
+        if (x->prefab != o->prefab || bot_int(x->data, "bng") != group) continue;
+        if (bot_int(x->data, "bn") > top) top = bot_int(x->data, "bn");
+    }
+    top++;
+    bot_add(o, group, bot_int(o->data, "bnr") == 1 ? 1 : 0, top, top + 1);
+}
+
+static void act_bot_next_group(EdCtl *c) {
+    // createNextGroup: a new group (max group + 1) with its node 0 at the owner's position, reversible
+    (void) c;
+    EditorObject *o = g_ed.proj->selected;
+    if (!o || o->prefab != bot_node_prefab()) return;
+    int top = 0;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *x = g_ed.proj->objects[i];
+        if (x->prefab != o->prefab) continue;
+        if (bot_int(x->data, "bng") > top) top = bot_int(x->data, "bng");
+    }
+    bot_add(o, top + 1, 1, 0, 1);
+}
+
+static void build_bot_node(void) {
+    sl("GroupId", "botNodeGroup", 0, 1000, 1, 0, NULL);
+    sl("NodeId", "botNode", 0, 1000, 1, 0, NULL);
+    sl("Next NodeId", "botNodeNext", 0, 1000, 1, 0, NULL);
+    if (prop_num(O, "botNode") == 0) sw("Reversible", "botNodeRev", 0, NULL);
+    ed_gui_button(B, "Fix Node", act_bot_fix);
+    ed_gui_button(B, "Create Next Node", act_bot_next_node);
+    ed_gui_button(B, "Create Next Group", act_bot_next_group);
+}
+
 static void build_header(const EditorPrefab *pf) {
 #define HAS(f) ((pf->flags & (f)) != 0)
 #define IS(n) (!strcmp(pf->name, n))
@@ -485,6 +575,7 @@ static void build_header(const EditorPrefab *pf) {
     if (IS("RAMP")) sw("Enclose", "enclose", 0, NULL);
     if (IS("CAMERA_POSITION")) sw("Static Cam", "static", 0, NULL);
     if (IS("PATH_NODE")) sl("Node Id", "nodeId", 0, 1000, 1, 0, NULL);
+    if (IS("BOT_PATH_NODE")) build_bot_node();
     if (IS("PRIZE_WHEEL")) {
         static const EdOption s[] = {{"Starter", 0, NULL}, {"Elite", 1, NULL}, {"Heroic", 2, NULL}};
         sel("Spin Type", "stype", s, 3, 0, NULL);
@@ -545,6 +636,35 @@ static void build_transform(const EditorPrefab *pf, const int group) {
         fend(1);
     }
     fend(0);
+}
+
+// v10 map-slot folders (IDX:16449-16501): one per map slot the asset has, when its assetID letters
+// name it (l Lightmap, n Normal, b Bump, p Displacement, e Emissive, s Specular, a Alpha, m
+// Metalness, r Roughness); a scale (where v10 has one), the UV channel and Flip Y (mp:<slot>:...)
+static void build_map_slots(void) {
+    static const struct {char slot; const char *name, *scale;} slots[] = {
+        {'l', "Lightmap", "Intensity"}, {'n', "Normal", "Scale"}, {'b', "Bump", "Scale"}, {'p', "Displacement", "Scale"},
+        {'e', "Emissive", NULL}, {'s', "Specular", NULL}, {'a', "Alpha", NULL}, {'m', "Metalness", NULL}, {'r', "Roughness", NULL},
+    };
+    static const EdOption uv[] = {{"UV 0", 0, NULL}, {"UV 1", 1, NULL}, {"UV 2", 2, NULL}, {"UV 3", 3, NULL}};
+    cJSON *aid = ed_prop_get(O, "assetID");
+    const char *letters = cJSON_IsString(aid) ? aid->valuestring : "";
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        if (!strchr(letters, slots[i].slot)) continue;
+        char key[24], prop[16];
+        snprintf(key, sizeof(key), "style.mapSlot_%c", slots[i].slot);
+        fold(slots[i].name, 1, 1, 0, key);
+        if (slots[i].scale) {
+            snprintf(prop, sizeof(prop), "mp:%c:i", slots[i].slot);
+            sl(slots[i].scale, prop, 0, 50, 0.01, 1, NULL);
+        }
+        snprintf(prop, sizeof(prop), "mp:%c:ch", slots[i].slot);
+        sel("Channel", prop, uv, 4, 1, NULL);
+        snprintf(prop, sizeof(prop), "mp:%c:fy", slots[i].slot);
+        sw("Flip Y", prop, 1, NULL);
+        fend(1);
+    }
+    cJSON_Delete(aid);
 }
 
 static void build_style(const EditorPrefab *pf, const int group) {
@@ -641,6 +761,7 @@ static void build_style(const EditorPrefab *pf, const int group) {
         sw("Cast Shadows", "cast", 0, NULL);
         sw("Receive Shadows", "receive", 0, NULL);
         sw("Force Render", "forceRender", 0, NULL);
+        build_map_slots();
     }
     if (HAS(EP_EDITALPHATEST)) sl("AlphaTest", "alphaTest", 0, 1, 0.01, 0, NULL);
     if (HAS(EP_EDITRENDERSIDE)) {

@@ -212,7 +212,7 @@ static char *text_filter(const char *s, const char *extra) {
 // p.k && !/[^<set>]+/i.test(p.k) ? p.k : "": an id value (asset ids, path lists). A number passes
 // as its digits (String(n)); returns the value or NULL. Values serialize() checks with `.length`
 // survive only as strings (id_string).
-static const char *const K_ASSET_ID = "0123456789tlnesacdgxufq";    // models, sky textures, minimap
+static const char *const K_ASSET_ID = "0123456789tlnesacdgxufqmrpbhv"; // models, sky textures, minimap (v10 E10:7130: /[^\dtlnesacdgxufqmrpbhv]+/i)
 static const char *const K_ASSET_ID_V = "0123456789tlnesacvdgxufq"; // + video (projectile asset)
 
 static const cJSON *id_value(const cJSON *v, const char *set) {
@@ -303,7 +303,7 @@ static const char *const K_OBJECT_KEYS[] = {
     "ldc", "ldo", "ldr", "sci", "fcr", "cstc", "inm", "fp", "camt", "frc", "msp", "sat", "cpx", "bbS", "bbD", "pmv", "nt",
     "ntx", "tas",
     // Krunker v10
-    "dyn", "boss", "cnch", "ambFadeTime", "crt", "eid", "ar", "tag", "pn", "sfz",
+    "dyn", "boss", "cnch", "ambFadeTime", "crt", "eid", "ar", "tag", "pn", "sfz", "mp",
     // ENVIRONMENT_ZONE
     "ambInd", "ambIndC", "skyDome", "skyDomeCol0", "skyDomeCol1", "skyDomeCol2", "skyDomeEmis", "skyDomeEmisTex",
     "skyDomeTex", "skyDomeTexA", "skyDomeMovD", "skyDomeMovT", "shadowR", "shadowD", "ambientC", "ambientI", "light",
@@ -806,7 +806,12 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         if ((HAS(EP_GEN) || HAS(EP_HASSPINDIR)) && num_truthy(pi_or(p, "spa", 0))) put_one(out, "spa");
     }
     const int custom_asset = IS("CUSTOM_ASSET");
-    if ((custom_asset || trigger || ai) && aid) put_dup(out, "aid", aid);
+    if ((custom_asset || trigger || ai) && aid) {
+        put_dup(out, "aid", aid);
+        // v10 mapProps (E10:8258-8262): the map-slot channels, kept while the asset is set
+        const cJSON *mp = G(p, "mp");
+        if (cJSON_IsObject(mp) && cJSON_GetArraySize(mp) > 0) put_dup(out, "mp", mp);
+    }
     if (custom_asset || trigger) {
         if (!js_null(p, "cst")) put_one(out, "cst");
         if (!js_null(p, "rcv")) put_one(out, "rcv");
@@ -2462,6 +2467,9 @@ static const PropDef K_PROPS[] = {
     // Krunker v10 (E10:7236, 7320, 7350, 7443)
     P("dyn", "dyn", PK_TRUTHY, 0), P("isBoss", "boss", PK_TRUTHY, 0), P("canContactHit", "cnch", PK_PRESENT, 0),
     P("crateType", "crt", PK_INT, 0),
+    // BOT_PATH_NODE (E10:7409-7412; the inspector's GroupId / NodeId / Next NodeId / Reversible)
+    P("botNodeGroup", "bng", PK_INT, 0), P("botNode", "bn", PK_INT, 0), P("botNodeNext", "bnn", PK_INTN, 1),
+    P("botNodeRev", "bnr", PK_TRUTHY, 0),
     P("explode", "exp", PK_PRESENT, 0), P("speed", "spd", PK_NUMN, 1), P("frate", "fr", PK_INT, 2000), P("aicur", "aac", PK_NUM, 0),
     P("hrate", "hr", PK_INT, 800), P("shoBrk", "shb", PK_INT, 400), P("shoArY", "sha", PK_INT, 0), P("shoOffH", "shof", PK_ABSENT, 0),
     P("shoDel", "shdy", PK_INT, 0), P("melDel", "mldy", PK_INT, 400), P("melShake", "mls", PK_NUM, 0), P("shoShake", "ss", PK_NUM, 0),

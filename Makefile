@@ -847,6 +847,14 @@ editor-script-test: build ## KrunkScript window e2e (v7 parity dumps, ksc diagno
 editor-script-e2e: build ## KrunkScript window v10.0.2 parity e2e (v10 autocomplete, v10 API members validate)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/script_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+# the editor's objects (doc/v10/editor-social.md 1.3, 1.5): the object inspector's v10 rows against
+# v7.1.4's goldens plus the documented v10 deltas (inspector_check.py), and the BOT_PATH_NODE buttons,
+# asset map slots, group copy / paste and Quick Add search (objects_e2e.py), headless.
+.PHONY: editor-objects-e2e
+editor-objects-e2e: build ## Editor objects e2e: inspector v10 expectation, BOT_PATH_NODE, map slots, group paste, Quick Add (headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/objects_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/inspector_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release
 editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)

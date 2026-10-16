@@ -477,6 +477,7 @@ void ed_gui_emit_value(EdBuild *b, EdCtl *c);
 
 void ed_gui_install(HtmlHandlerEntry *table, size_t *count, size_t max); // GUI.* handler names
 int ed_gui_set_by_label(HtmlElem root, const char *label, int nth, const char *value); // a user edit of the nth control labelled so
+int ed_gui_press_by_label(HtmlElem root, const char *label, int nth); // a click on the nth button labelled so (press:<label>)
 void ed_gui_tick(void);
 void ed_gui_color_hide(void);
 int ed_gui_key_capture(int key, int action);      // GUI.update.key.keydown
@@ -523,6 +524,7 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 void ed_render_init(void);
 void ed_render_fini(void);
 void ed_render_grid(void);                         // before scene_render (GridHelper)
+int ed_render_bot_chain_count(void);               // BOT_PATH_NODE chain lines drawn by the last frame (editor tests)
 void ed_render_overlays(void);                     // after scene_render, inside the view viewport
 void ed_render_apply_wireframe(EditorProject *p, int on); // ObjectInstance.forceWire on p's object materials
 int  ed_pick(double fb_x, double fb_y, int skip_invisible, EditorObject **out, vec3 *hit, int *face);

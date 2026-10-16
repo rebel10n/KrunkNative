@@ -1405,6 +1405,41 @@ static void run_script_text(const char *text) {
                 if (!ed_gui_set_by_label(g_ed.el_right_list, arg, nth, eq + 1)) fprintf(stderr, "[editor] set: no control \"%s\" #%d\n", arg, nth);
             }
         }
+        else if (!strcmp(cmd, "group") && arg) {
+            // group:<create|stop|stopall|copy|cut|paste>: the Object > Group submenu (editor_panels.c toolbar_action)
+            if (!strcmp(arg, "create")) ed_group_create();
+            else if (!strcmp(arg, "stop")) ed_group_stop(0);
+            else if (!strcmp(arg, "stopall")) ed_group_stop(1);
+            else if (!strcmp(arg, "copy")) ed_obj_copy(0, 0);
+            else if (!strcmp(arg, "cut")) ed_obj_copy(1, 0);
+            else if (!strcmp(arg, "paste")) ed_obj_paste();
+        } else if (!strcmp(cmd, "quick") && arg) {
+            // quick:<text>: type into the Quick Add search (windows[3].search on keyup; quickenter: Enter)
+            const HtmlElem input = html_dom_by_id("quickSearch");
+            if (input) html_dom_set_value(input, arg);
+            HtmlEvent ev = {.type = "keyup"};
+            html_ui_dispatch("windows.3.search", &ev, NULL, 0);
+        } else if (!strcmp(cmd, "chains") && arg) {
+            // chains:<file>: the BOT_PATH_NODE chain lines of the last drawn frame (CHAINS n)
+            FILE *f = fopen(arg, "w");
+            if (f) {
+                fprintf(f, "CHAINS %d\n", ed_render_bot_chain_count());
+                fclose(f);
+            }
+        }
+        else if (!strcmp(cmd, "quickenter")) {
+            HtmlEvent ev = {.type = "keyup", .key = 13};
+            html_ui_dispatch("windows.3.search", &ev, NULL, 0);
+        } else if (!strcmp(cmd, "press") && arg) {
+            // press:<label>[#n]: a click on the nth right-panel button labelled so (Fix Node, Create Next Node, ...)
+            int nth = 0;
+            char *hash = strrchr(arg, '#');
+            if (hash && hash[1] && strspn(hash + 1, "0123456789") == strlen(hash + 1)) {
+                *hash = 0;
+                nth = atoi(hash + 1);
+            }
+            if (!ed_gui_press_by_label(g_ed.el_right_list, arg, nth)) fprintf(stderr, "[editor] press: no button \"%s\" #%d\n", arg, nth);
+        }
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();

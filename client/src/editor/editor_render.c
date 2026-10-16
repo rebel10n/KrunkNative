@@ -411,13 +411,24 @@ static int hex_from_hue(const double hue) {
     return ((int) r << 16 | (int) g << 8 | (int) b) & 0xffffff;
 }
 
-static void connection_line(const EditorObject *from, const EditorObject *to, const double hue) {
+static int g_bot_chain_lines; // the bot path chains drawn by the last frame (ed_render_bot_chain_count)
+
+static void connection_line_y(const EditorObject *from, const EditorObject *to, const double hue, const float y_off) {
     // new C282(from, to, hue): a THREE.Line between the bounding meshes' positions (the objects'
-    // "p"), LineBasicMaterial(hexFromHue(hue)), renderOrder Infinity (depth tested, drawn last)
-    vb_push(&g_lines, ed_obj_vec(to, "p", v3(0, 0, 0)));
-    vb_push(&g_lines, ed_obj_vec(from, "p", v3(0, 0, 0)));
+    // "p", lifted by yOff), LineBasicMaterial(hexFromHue(hue)), renderOrder Infinity (depth tested, drawn last)
+    vec3 a = ed_obj_vec(to, "p", v3(0, 0, 0)), b = ed_obj_vec(from, "p", v3(0, 0, 0));
+    a.y += y_off;
+    b.y += y_off;
+    vb_push(&g_lines, a);
+    vb_push(&g_lines, b);
     flush(&g_lines, GL_LINES, hex_rgba(hex_from_hue(hue), 1.0f), 0);
 }
+
+static void connection_line(const EditorObject *from, const EditorObject *to, const double hue) {
+    connection_line_y(from, to, hue, 0.0f);
+}
+
+int ed_render_bot_chain_count(void) { return g_bot_chain_lines; }
 
 static void draw_trigger_connections(void) {
     // Editor.checkConnections (E:2576-2640, settings.triggerCons): every object with an interface
@@ -446,6 +457,26 @@ static void draw_trigger_connections(void) {
             if (b == a || strcmp(editor_prefabs[b->prefab].name, "TELEPORTER") || (int) ed_json_num(b->data, "n", 0) != 0 ||
                 (int) ed_json_num(b->data, "ch", 0) != channel) continue;
             connection_line(a, b, channel * 3.6);
+        }
+    }
+}
+
+static void draw_bot_chains(void) {
+    // Editor.checkConnections (E10:15577-15584, triggerCons): a BOT_PATH_NODE line from every node
+    // to the node of its group whose NodeId is its Next NodeId (from.botNodeNext == to.botNode),
+    // hue botNodeGroup * 18, both ends lifted 2.5 (C282 yOff)
+    g_bot_chain_lines = 0;
+    if (!editor_setting_bool("triggerCons")) return;
+    for (size_t i = 0; i < g_ed.proj->count; i++) {
+        const EditorObject *to = g_ed.proj->objects[i];
+        if (strcmp(editor_prefabs[to->prefab].name, "BOT_PATH_NODE")) continue;
+        const int group = (int) ed_json_num(to->data, "bng", 0), node = (int) ed_json_num(to->data, "bn", 0);
+        for (size_t j = 0; j < g_ed.proj->count; j++) {
+            const EditorObject *from = g_ed.proj->objects[j];
+            if (from == to || from->prefab != to->prefab || (int) ed_json_num(from->data, "bng", 0) != group) continue;
+            if ((int) ed_json_num(from->data, "bnn", 1) != node) continue;
+            connection_line_y(from, to, group * 18.0, 2.5f);
+            g_bot_chain_lines++;
         }
     }
 }
@@ -847,6 +878,7 @@ void ed_render_overlays(void) {
     draw_real_hitboxes();
     draw_object_boxes();
     draw_trigger_connections();
+    draw_bot_chains();
     draw_arrows();
     draw_death_barrier();
     draw_sun();
