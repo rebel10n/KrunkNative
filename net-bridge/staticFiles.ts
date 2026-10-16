@@ -1,5 +1,6 @@
 "use strict";
 
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import type { IncomingMessage, ServerResponse } from "http";
@@ -104,6 +105,49 @@ function cacheHeadersFor(
   return { ...NO_CACHE_HEADERS };
 }
 
+// assets/version.txt is the content version of the game assets: the deploy (deploy/ansible kn_web)
+// writes it as a hash of the tree, and the web client appends it to every asset URL (?v=). A dev
+// stack has no such file, so the bridge answers the URL with the same kind of hash, computed once per
+// process from the tree's relative names, sizes and mtimes (the bytes: the tree is gigabytes). The
+// real file wins whenever it exists. Symlinks inside the tree are skipped (css/css loops back).
+const ASSETS_VERSION_PATH = "/assets/version.txt";
+const generatedVersions = new Map<string, Promise<string>>();
+
+export function generatedAssetsVersion(assetsDir: string): Promise<string> {
+  let version = generatedVersions.get(assetsDir);
+  if (!version) {
+    version = computeAssetsVersion(assetsDir);
+    generatedVersions.set(assetsDir, version);
+  }
+  return version;
+}
+
+async function computeAssetsVersion(assetsDir: string): Promise<string> {
+  const lines: string[] = [];
+  const walk = async (dir: string, rel: string, top: boolean): Promise<void> => {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if (top) throw err; // no asset tree: no version (the request answers 404)
+      return;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      const full = path.join(dir, entry.name);
+      const name = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(full, name, false);
+      else if (entry.isFile()) {
+        const st = await fs.promises.stat(full);
+        lines.push(`${name}\t${st.size}\t${Math.floor(st.mtimeMs)}`);
+      }
+    }
+  };
+  await walk(assetsDir, "", true);
+  return crypto.createHash("sha1").update(lines.join("\n")).digest("hex").slice(0, 16);
+}
+
 export async function serve(
   req: IncomingMessage,
   res: ServerResponse,
@@ -184,6 +228,20 @@ export async function serve(
   } catch (err) {
     const fsErr = err as FsErr;
     if (fsErr && (fsErr.code === "ENOENT" || fsErr.code === "ENOTDIR")) {
+      if (normalized === ASSETS_VERSION_PATH) {
+        try {
+          const body = `${await generatedAssetsVersion(path.join(root, "assets"))}\n`;
+          res.writeHead(200, {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Length": Buffer.byteLength(body),
+            ...NO_CACHE_HEADERS,
+          });
+          res.end(req.method === "HEAD" ? undefined : body);
+          return true;
+        } catch (_err) {
+          /* no asset tree: fall through to 404 */
+        }
+      }
       res.writeHead(404);
       res.end("Not Found");
       return true;

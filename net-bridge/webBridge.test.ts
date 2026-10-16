@@ -8,6 +8,7 @@ import os from "os";
 import path from "path";
 import type { IncomingMessage } from "http";
 import { isBrainPath } from "./brainProxy";
+import { generatedAssetsVersion } from "./staticFiles";
 import { admit, CLOSE_POLICY, errorFrame, scanFrames, stopMessage, type FrameCursor } from "./webBridge";
 
 // admission (no KRUNK_NATIVE_TARGETS here: the default 127.0.0.1:21015-21078 plus any loopback)
@@ -66,3 +67,23 @@ for (const p of ["/mm/status", "/api/profile", "/social/ws", "/ai/chat", "/auth/
                  "/creators/events", "/user-assets/123/tex.png"]) assert.strictEqual(isBrainPath(p), true, p);
 for (const p of ["/", "/index.html", "/assets/textures/a.png", "/native", "/client.wasm", "/streamsx", "/js/loader.js"])
   assert.strictEqual(isBrainPath(p), false, p);
+
+// assets/version.txt without a deploy file: a 16-hex hash of the tree's names, sizes and mtimes (staticFiles.ts)
+(async () => {
+  const tree = fs.mkdtempSync(path.join(os.tmpdir(), "kn-version-test-"));
+  fs.mkdirSync(path.join(tree, "textures"));
+  fs.writeFileSync(path.join(tree, "textures", "a.png"), "one");
+  const first = await generatedAssetsVersion(tree);
+  assert.match(first, /^[0-9a-f]{16}$/);
+  assert.strictEqual(await generatedAssetsVersion(tree), first); // once per process
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "kn-version-test-"));
+  fs.mkdirSync(path.join(other, "textures"));
+  fs.writeFileSync(path.join(other, "textures", "a.png"), "three");
+  assert.notStrictEqual(await generatedAssetsVersion(other), first); // a changed size changes it
+  await assert.rejects(generatedAssetsVersion(path.join(tree, "missing")));
+  fs.rmSync(tree, { recursive: true, force: true });
+  fs.rmSync(other, { recursive: true, force: true });
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
