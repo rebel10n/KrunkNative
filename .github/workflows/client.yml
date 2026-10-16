@@ -14,6 +14,9 @@ name: Client
 #   krunknative-android.apk        release-signed with the repository key (secrets ANDROID_*,
 #                                  tools/release/android-keystore.sh); skipped without the key
 #   krunknative-ios-unsigned.ipa   unsigned: AltStore / Sideloadly sign it with the player's Apple ID
+#   krunknative-strike-android.apk, krunknative-strike-ios-unsigned.ipa
+#                                  the Krunker Strike apps over https://krunk.io/strike/: their own app
+#                                  id (io.krunknative.strike), name and icon, installed next to Box Office
 # The menu's Download window links all of them (client/src/ui/download_ui.c).
 # The packages hold the launcher (krunknative / KrunkNative.exe, the entry point), client_bin,
 # server_bin, ui/ and the git-tracked part of assets/ (shaders, maps, ...); the launcher downloads
@@ -387,19 +390,28 @@ jobs:
           KN_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KN_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          # each build empties outputs/apk/release: keep every APK as it is built
+          mkdir -p "$RUNNER_TEMP/apk"
           ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=https://krunk.io/ \
             -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apk/krunknative-android.apk"
+          # Krunker Strike (io.krunknative.strike) over its own page
+          ./gradlew --no-daemon assembleRelease -Pkrunknative.app=strike -Pkrunknative.serverUrl=https://krunk.io/strike/ \
+            -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
+          cp app/build/outputs/apk/release/app-strike-release.apk "$RUNNER_TEMP/apk/krunknative-strike-android.apk"
 
       - name: Check the signature
         if: steps.key.outputs.signed == 'true'
         run: |
           set -euo pipefail
-          apk=platform/android/app/build/outputs/apk/release/app-release.apk
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
-          "$apksigner" verify --print-certs "$apk"
           mkdir -p out
-          cp "$apk" out/krunknative-android.apk
-          (cd out && sha256sum krunknative-android.apk > krunknative-android.apk.sha256)
+          for name in krunknative-android krunknative-strike-android; do
+            "$apksigner" verify --print-certs "$RUNNER_TEMP/apk/$name.apk"
+            cp "$RUNNER_TEMP/apk/$name.apk" out/
+            (cd out && sha256sum "$name.apk" > "$name.apk.sha256")
+          done
 
       - uses: actions/upload-artifact@v7
         if: steps.key.outputs.signed == 'true'
@@ -447,15 +459,25 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             KN_SERVER_URL=https://krunk.io/ CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
+          # Krunker Strike (io.krunknative.strike) over its own page
+          xcodebuild -project KrunkNative.xcodeproj -scheme KrunkStrike -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            KN_SERVER_URL=https://krunk.io/strike/ CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
 
       - name: Package (.ipa)
         run: |
           set -euo pipefail
-          mkdir -p ipa/Payload out
-          cp -R platform/ios/build/Build/Products/Release-iphoneos/KrunkNative.app ipa/Payload/
-          /usr/libexec/PlistBuddy -c 'Print :KNServerURL' ipa/Payload/KrunkNative.app/Info.plist | grep -qx 'https://krunk.io/'
-          (cd ipa && zip -qr9y ../out/krunknative-ios-unsigned.ipa Payload)
-          (cd out && shasum -a 256 krunknative-ios-unsigned.ipa > krunknative-ios-unsigned.ipa.sha256)
+          mkdir -p out
+          # <app>:<ipa name>:<KNServerURL>
+          for t in KrunkNative:krunknative-ios-unsigned:https://krunk.io/ KrunkStrike:krunknative-strike-ios-unsigned:https://krunk.io/strike/; do
+            app=${t%%:*}; rest=${t#*:}; ipa=${rest%%:*}; url=${rest#*:}
+            rm -rf ipa && mkdir -p ipa/Payload
+            cp -R "platform/ios/build/Build/Products/Release-iphoneos/$app.app" ipa/Payload/
+            /usr/libexec/PlistBuddy -c 'Print :KNServerURL' "ipa/Payload/$app.app/Info.plist" | grep -qx "$url"
+            (cd ipa && zip -qr9y "../out/$ipa.ipa" Payload)
+            (cd out && shasum -a 256 "$ipa.ipa" > "$ipa.ipa.sha256")
+          done
           ls -la out
 
       - uses: actions/upload-artifact@v7
@@ -551,10 +573,12 @@ jobs:
             row "macOS 11+ Intel" macos-amd64 tar.gz zip
             app_row "Android 7.0+" krunknative-android.apk "the app plays krunk.io fullscreen"
             app_row "iPhone / iPad (sideload)" krunknative-ios-unsigned.ipa "unsigned: AltStore / Sideloadly sign it; or open krunk.io in Safari, Share > Add to Home Screen"
+            app_row "Krunker Strike, Android 7.0+" krunknative-strike-android.apk "its own app (io.krunknative.strike), next to Box Office: plays krunk.io/strike fullscreen"
+            app_row "Krunker Strike, iPhone / iPad (sideload)" krunknative-strike-ios-unsigned.ipa "unsigned; or open krunk.io/strike in Safari, Share > Add to Home Screen"
             echo
             echo "Unpack and run \`krunknative\` (Windows: \`KrunkNative.exe\`; macOS: open \`KrunkNative.app\`, unsigned: right-click > Open the first time), or install the .deb/.rpm and start Krunker Box Office from the applications menu. The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Not sure which Linux package? Take the polyfilled one. Check a download with \`sha256sum -c <file>.sha256\`."
             echo
-            echo "Phones and tablets play the web client: Android, install the APK (allow your browser to install apps when asked); iPhone / iPad, open https://krunk.io in Safari and tap Share > Add to Home Screen (the .ipa is for sideloading tools only)."
+            echo "Phones and tablets play the web client: Android, install the APK (allow your browser to install apps when asked); iPhone / iPad, open https://krunk.io in Safari and tap Share > Add to Home Screen (the .ipa is for sideloading tools only). Krunker Strike is its own app the same way (the strike APK, or https://krunk.io/strike/ > Add to Home Screen) and installs next to Krunker Box Office."
             echo
             echo "<!-- kn-build $KN_BUILD -->"
           } > notes.md

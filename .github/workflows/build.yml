@@ -428,9 +428,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
+      # each build empties its outputs/apk/<type> directory: the debug APKs are kept in apk/
       - name: Build debug APK
         working-directory: platform/android
-        run: ./gradlew --no-daemon assembleDebug
+        run: |
+          ./gradlew --no-daemon assembleDebug
+          mkdir -p apk && cp app/build/outputs/apk/debug/app-debug.apk apk/
 
       # client.yml's published APK: the release build over https://krunk.io/ (signed there with the
       # repository key; unsigned here, it only has to build)
@@ -438,11 +441,22 @@ jobs:
         working-directory: platform/android
         run: ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=https://krunk.io/
 
+      # the Krunker Strike app (io.krunknative.strike, the web build's strike/ page): debug and
+      # client.yml's release over https://krunk.io/strike/
+      - name: Build Krunker Strike APKs
+        working-directory: platform/android
+        run: |
+          ./gradlew --no-daemon assembleDebug -Pkrunknative.app=strike
+          cp app/build/outputs/apk/debug/app-strike-debug.apk apk/
+          ./gradlew --no-daemon assembleRelease -Pkrunknative.app=strike -Pkrunknative.serverUrl=https://krunk.io/strike/
+
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-android-debug
-          path: platform/android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            platform/android/apk/app-debug.apk
+            platform/android/apk/app-strike-debug.apk
           if-no-files-found: error
 
   # platform/ios (WKWebView, XcodeGen spec): unsigned simulator build.
@@ -475,12 +489,18 @@ jobs:
           xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          # the Krunker Strike app (io.krunknative.strike), the same sources
+          xcodebuild -project KrunkNative.xcodeproj -scheme KrunkStrike -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 
       - name: Upload simulator app
         uses: actions/upload-artifact@v7
         with:
           name: KrunkNative-ios-simulator
-          path: platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
+          path: |
+            platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
+            platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkStrike.app
           if-no-files-found: error
 
   # `make check`: the debug build, every test of `make test`, `make lint` (actionlint +
