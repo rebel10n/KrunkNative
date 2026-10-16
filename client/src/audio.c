@@ -284,8 +284,23 @@ static int clip_find(const char *name, const int create) {
     return g_audio.clip_count++;
 }
 
+// Names Krunker's tables use for which Krunker never shipped a file: weapon_18 is the Bomb's `sound`
+// (v10:100777, v7.1.4 data/weapons.js) and weapon_13 a network / trigger sound (v10:18256); neither is in
+// the v1.5.6, v3.1.1 or v7.1.4 public/sound trees, and assets.krunker.io/sound/<name>.mp3 answers 404
+// (checked 2026-10-15). Krunker's Howl fails to load them and plays nothing; here they are silent clips:
+// no read, no download, no "missing sound" line on every map load (sound_events.c preloads the Bomb's).
+static const char *const KRUNKER_ABSENT_SOUNDS[] = {"weapon_13", "weapon_18"};
+
+static int sound_never_shipped(const char *name) {
+    for (size_t i = 0; i < sizeof(KRUNKER_ABSENT_SOUNDS) / sizeof(KRUNKER_ABSENT_SOUNDS[0]); i++) {
+        if (!strcmp(KRUNKER_ABSENT_SOUNDS[i], name)) return 1;
+    }
+    return 0;
+}
+
 // 0 while assets/sound/<name>.mp3 is still downloading in the background (web).
 static int clip_prefetched(const AudioClip *clip) {
+    if (sound_never_shipped(clip->name)) return 1; // clip_load fails it silently
     char relative[AUDIO_NAME_MAX + 32];
     clip_relative_path(clip->name, relative, sizeof(relative));
     char *path = concat(assets_path(), relative);
@@ -299,6 +314,10 @@ static int clip_prefetched(const AudioClip *clip) {
 static int clip_load(AudioClip *clip) {
     if (clip->state == CLIP_READY) return 1;
     if (clip->state == CLIP_FAILED) return 0;
+    if (sound_never_shipped(clip->name)) {
+        clip->state = CLIP_FAILED; // silent, as in Krunker
+        return 0;
+    }
 
     char relative[AUDIO_NAME_MAX + 32];
     clip_relative_path(clip->name, relative, sizeof(relative));
