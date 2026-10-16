@@ -58,6 +58,12 @@ void strike_touch_reset(void);           // release everything held (menu opened
 void strike_touch_customize_apply(HtmlElem layer);
 int  strike_touch_customize_pointer(int phase, float x, float y);
 void strike_touch_layout_reset(void);
+// The input gate (FRVR's controls.isMobile): 1 once a real touch has played on the Strike page, so the
+// touch controls are the input. 0 = keyboard and mouse: the desktop reload overlay and the keyboard
+// reload hint (strike_hud.c) show, and the touch reload ring stays hidden.
+int  strike_touch_input(void);
+// $U: the ammo ring's dash offset (percent), its visibility and the "cur / max" label of the held weapon
+void strike_touch_ammo_text(char *out, size_t n, int *offset_pct, int *visible);
 
 // ---- strike_ui.c internals shared by the strike_*.c modules
 // The screen stack (FRVR's Pi[]): each screen is one template rendered into #frvrMenuMobileHolder.

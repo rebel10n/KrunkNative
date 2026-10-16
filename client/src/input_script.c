@@ -192,6 +192,7 @@
 #include <bots.h>         // `tpstate`: bot_object_blocks_player
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
 #include <spectate.h>     // `cam`: spectate_active
+#include <strike_ui.h>    // `touch`: a finger on the Krunker Strike touch layer (strike_touch.c)
 #include <hud_map.h>     // `pings`: the ping markers on screen
 #include <nettspend.h>    // `pour`, `laced`
 #include <ruleset.h>      // `class`: the class names
@@ -344,6 +345,7 @@ static int script_key(const char *name) {
         {"SPACE", GLFW_KEY_SPACE}, {"SHIFT", GLFW_KEY_LEFT_SHIFT}, {"R", GLFW_KEY_R}, {"E", GLFW_KEY_E},
         {"Q", GLFW_KEY_Q}, {"C", GLFW_KEY_C}, {"X", GLFW_KEY_X}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3}, {"N", GLFW_KEY_N},
         {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T}, {"TAB", GLFW_KEY_TAB}, {"DELETE", GLFW_KEY_DELETE},
+        {"BACKSLASH", GLFW_KEY_BACKSLASH}, // Krunker Strike's alt shoot bind (220)
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;
@@ -874,6 +876,13 @@ static void script_run(Client *client, const ScriptEvent *e) {
             const PlayerArms *arms = mesh && mesh->arms && slot >= 0 && slot < who[k]->loadout_size ? mesh->arms[slot] : NULL;
             fprintf(stderr, "[input_script] wsel t=%.0f %s who=%s slot=%d tp=%d %s\n", g_script.time, e->arg, names[k], slot,
                     mesh ? !mesh->render_you || mesh->kn_third_person : -1, arms && arms->selection[0] ? arms->selection : "-");
+        }
+    } else if (!strcmp(e->cmd, "touch") && client) {
+        // touch X Y: a finger tapped at that CSS point of the Strike page (id 1): the first touch makes the
+        // touch controls the input (strike_touch_input), as a phone's first touch on the page does
+        if (strike_ui_active()) {
+            strike_touch_event(client, 0, 1, e->v[0], e->v[1]);
+            strike_touch_event(client, 2, 1, e->v[0], e->v[1]);
         }
     } else if (!strcmp(e->cmd, "tpstate")) {
         const Player *me = client->me;

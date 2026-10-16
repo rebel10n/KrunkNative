@@ -110,6 +110,7 @@ static struct {
     int melee_active;
     char ammo[32];
     int shown;
+    int touch_input;       // a real touch has played (strike_touch_event): the touch layer is the input
 } T = {.io = 0};
 
 // ---------------------------------------------------------------- FRVR's data
@@ -413,7 +414,8 @@ static int control_visible(const Control c) {
     const Player *me = T.client ? T.client->me : NULL;
     switch (c) {
         case C_JUMP: return !spectating() && setting_true("mob_ctrl_disable_tap_jump");
-        case C_RELOAD: return !spectating() && me && me->weapon && me->weapon->reload_time > 0.0f && !me->weapon->no_reload; // weapon.reload
+        // the touch reload ring is the phone's reload button: a keyboard player gets the desktop overlay (strike_hud.c)
+        case C_RELOAD: return strike_touch_input() && !spectating() && me && me->weapon && me->weapon->reload_time > 0.0f && !me->weapon->no_reload; // weapon.reload
         case C_MELEE: return !spectating();
         case C_SHOOT: return !spectating() && !T.keys_down[UI_CONTROL_AIM] && !auto_fire_on();
         case C_SHOOT_AIM: return 0;
@@ -653,8 +655,11 @@ int strike_touch_customize_pointer(const int phase, const float x, const float y
     return 1;
 }
 
-// $U: the reload button's ammo ring and "cur / max" label (vx = 290)
-static void ammo_text(char *out, const size_t n, int *offset_pct, int *visible) {
+int strike_touch_input(void) { return T.touch_input; }
+
+// $U: the reload button's ammo ring and "cur / max" label (vx = 290). The desktop overlay (strike_hud.c)
+// draws the same ring and label.
+void strike_touch_ammo_text(char *out, const size_t n, int *offset_pct, int *visible) {
     const Player *me = T.client ? T.client->me : NULL;
     const Weapon *w = me ? me->weapon : NULL;
     int cur = -1, max = -1;
@@ -703,7 +708,7 @@ static void build(void) {
             sb_appendf(&sb, "--control-button-size: %d;%s\" data-kn-control=\"%s\"><img src=\"./img/controls/%s.svg\">", d->size, vis ? "" : " display: none;", d->key, d->icon);
             if (c == C_RELOAD) {
                 int off, show;
-                ammo_text(T.ammo, sizeof(T.ammo), &off, &show);
+                strike_touch_ammo_text(T.ammo, sizeof(T.ammo), &off, &show);
                 sb_appendf(&sb, "<svg><circle style=\"stroke-dashoffset: %d%%; transition: stroke-dashoffset 0s ease-out; visibility: %s;\"></circle></svg>"
                                 "<div class=\"control-button__label\"><div class=\"control-button__label-text\"><span>%s</span></div></div>",
                            off, show ? "visible" : "hidden", T.ammo);
@@ -786,7 +791,7 @@ static void redraw(void) {
     if (T.el[C_RELOAD]) {
         char text[32];
         int off, show;
-        ammo_text(text, sizeof(text), &off, &show);
+        strike_touch_ammo_text(text, sizeof(text), &off, &show);
         if (strcmp(text, T.ammo) != 0) {
             snprintf(T.ammo, sizeof(T.ammo), "%s", text);
             const HtmlElem span = html_dom_query(T.el[C_RELOAD], ".control-button__label-text span");
@@ -958,6 +963,7 @@ static int touch_end(const long id) {
 
 int strike_touch_event(Client *client, const int phase, const long id, const float x, const float y) {
     T.client = client;
+    if (phase == 0) T.touch_input = 1;
     if (strike_touch_customize_pointer(phase > 2 ? 2 : phase, x, y)) return 1; // Customize Controls drags
     if (phase == 0) return touch_start(id, x, y);
     if (phase == 1) return touch_move(id, x, y);

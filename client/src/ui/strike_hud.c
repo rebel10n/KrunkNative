@@ -8,6 +8,10 @@
 //   Ude / Ode     .frvr-in-game-ui__health-holder: the class face, Sx = 6 bars (each filled
 //                 clamp(6 * hp / max - i) * 100 %), "hp / max"
 //   efe           .frvr-in-game-ui__ammo-overlay: "Reloading" + the reload bar (visibility)
+//   tfe           .frvr-in-game-ui__ammo-overlay--desktop: the reload key's ring and "cur / max", only while
+//                 no touch controls are the input (ae().useMobileControls false; strike_touch_input())
+//   qde / Xde     .frvr-in-game-ui__msg-holder: "[R] Reload" (game.reload.keyboard) while the magazine is
+//                 empty on keyboard input and the mode allows reloads (the bind's key name, not a fixed R)
 //   jde / Kde     .frvr-in-game-ui__kill-log-container: Ybe = 3 rows, each dropped 10 s after it came;
 //                 killer / victim coloured by AF (friend-colors--you / --enemy / --teammate)
 //   Yde           .frvr-in-game-ui__kill-card-container: "Killed By" + the killer's card, or "You Died"
@@ -20,6 +24,7 @@
 #include <shared.h>
 #include <modes.h>
 #include <weapons.h>
+#include <zombies.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +56,7 @@ static struct {
     char kc_name[KILL_NAME_MAX], kc_weapon[96], kc_pfp[96];
     int kc_level, kc_score;
     // last rendered values (Mithril's diff)
-    char last_score[160], last_health[64], last_timer[64], last_reload[32];
+    char last_score[160], last_health[64], last_timer[64], last_reload[32], last_desk[128], last_hint[96];
     int last_card;
     int end_shown;
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
@@ -200,6 +205,57 @@ static void view_reload(const Client *client, StrBuf *sb) {
                ms > 0 ? 100 : 0, ((ms > 0 ? ms : 0) - 100) / 1000.0);
 }
 
+// tfe: the desktop reload overlay shows while the weapon can reload and the keyboard is the input
+static int desktop_reload_shown(const Client *client) {
+    const Player *me = me_player(client);
+    if (!me || !me->active || !me->weapon || strike_touch_input()) return 0;
+    return me->weapon->reload_time > 0.0f && !me->weapon->no_reload; // weapon.reload
+}
+
+static void view_reload_desktop(const Client *client, StrBuf *sb) {
+    if (!desktop_reload_shown(client)) return;
+    char text[32];
+    int off = 0, show = 0;
+    strike_touch_ammo_text(text, sizeof(text), &off, &show);
+    sb_appendf(sb, "<div class=\"frvr-in-game-ui__ammo-overlay frvr-in-game-ui__ammo-overlay--desktop\"><img src=\"./img/controls/reload.svg\">"
+                   "<svg><circle style=\"stroke-dashoffset: %d%%; transition: stroke-dashoffset %gs ease-out; visibility: %s;\"></circle></svg>"
+                   "<div class=\"frvr-in-game-ui__ammo-label\"><div class=\"frvr-in-game-ui__ammo-label-text\"><span>%s</span></div></div></div>",
+               off, reload_ms(client) / 1000.0, show ? "visible" : "hidden", text);
+}
+
+// Xde: the keyboard hint shows while the magazine is empty and the mode lets the player reload: no
+// ammo limit, a finite mode's reserve is not spent (bots excepted), a melee / magazine-less weapon never
+static int reload_hint_shown(const Client *client) {
+    Player *me = client ? client->me : NULL;
+    const GameMode *mode = client ? client->game.mode : NULL;
+    if (!me || !me->active || !me->weapon || !mode || strike_touch_input()) return 0;
+    if (mode->config.no_reloads || mode->config.has_ammo_limit || me->weapon->ammo == 0) return 0;
+    const int idx = me->loadout_index;
+    if (!me->ammo || idx < 0 || idx >= me->loadout_size || me->ammo[idx] > 0) return 0;
+    return zombies_reload_allowed(me); // finiteAmmo: the reserve is not spent (bots excepted)
+}
+
+// "[R] Reload" with the Reload bind's key name ("Reload" alone while the bind is unbound)
+static void reload_hint_label(char *out, const size_t n) {
+    char key[32];
+    const int code = ui_controls_bind(UI_CONTROL_RELOAD);
+    if (code < 0) {
+        snprintf(out, n, "Reload");
+        return;
+    }
+    ui_controls_key_name(code, key, sizeof(key));
+    snprintf(out, n, "[%s] Reload", key);
+}
+
+static void view_reload_hint(const Client *client, StrBuf *sb) {
+    if (!reload_hint_shown(client)) return;
+    char label[64];
+    reload_hint_label(label, sizeof(label));
+    sb_append(sb, "<div class=\"frvr-in-game-ui__msg-holder\"><div class=\"frvr-in-game-ui__message\"><span>");
+    sb_append_esc(sb, label);
+    sb_append(sb, "</span></div></div>");
+}
+
 // AF(): the colour class of a kill-log name
 static const char *af_class(const int is_you, const int team, const int my_team) {
     if (is_you) return "friend-colors--you";
@@ -274,6 +330,8 @@ static void render(Client *client) {
     view_scorebar(client, &sb);
     view_health(client, &sb);
     view_reload(client, &sb);
+    view_reload_desktop(client, &sb);
+    view_reload_hint(client, &sb);
     view_kill_log(client, &sb);
     if (H.kill_card) view_kill_card(&sb);
     sb_append(&sb, "</div>");
@@ -290,7 +348,7 @@ static void render(Client *client) {
 static void unrender(void) {
     if (H.root) html_dom_remove(H.root);
     H.root = 0;
-    H.last_score[0] = H.last_health[0] = H.last_timer[0] = H.last_reload[0] = 0;
+    H.last_score[0] = H.last_health[0] = H.last_timer[0] = H.last_reload[0] = H.last_desk[0] = H.last_hint[0] = 0;
 }
 
 // Mithril redraw: only the parts whose inputs changed are rebuilt (keeps CSS transitions /
@@ -334,6 +392,38 @@ static void update(Client *client) {
         html = sb_finish(&sb);
         replace_part(".frvr-in-game-ui__ammo-overlay", html);
         free(html);
+    }
+    // the desktop overlay and the keyboard hint come and go with their gates: rebuilt when their state changes
+    char desk[128] = "";
+    if (desktop_reload_shown(client)) {
+        char text[32];
+        int off = 0, show = 0;
+        strike_touch_ammo_text(text, sizeof(text), &off, &show);
+        snprintf(desk, sizeof(desk), "%s|%d|%d|%d", text, off, show, reload_ms(client) > 0);
+    }
+    if (strcmp(desk, H.last_desk)) {
+        snprintf(H.last_desk, sizeof(H.last_desk), "%s", desk);
+        const HtmlElem old = part(".frvr-in-game-ui__ammo-overlay--desktop");
+        if (old) html_dom_remove(old);
+        if (desk[0]) {
+            view_reload_desktop(client, &sb);
+            html = sb_finish(&sb);
+            html_dom_insert_html(H.root, HTML_INSERT_BEFORE_END, html);
+            free(html);
+        }
+    }
+    char hint[96] = "";
+    if (reload_hint_shown(client)) reload_hint_label(hint, sizeof(hint));
+    if (strcmp(hint, H.last_hint)) {
+        snprintf(H.last_hint, sizeof(H.last_hint), "%s", hint);
+        const HtmlElem old = part(".frvr-in-game-ui__msg-holder");
+        if (old) html_dom_remove(old);
+        if (hint[0]) {
+            view_reload_hint(client, &sb);
+            html = sb_finish(&sb);
+            html_dom_insert_html(H.root, HTML_INSERT_BEFORE_END, html);
+            free(html);
+        }
     }
     if (H.log_dirty) {
         H.log_dirty = 0;
