@@ -787,6 +787,9 @@ seek-game details:
 * `changeReason` = `"game_changed"` when `game` was requested but another lobby was
   picked (`autoChangeGame`), else `null`. With `autoChangeGame=false` and a full or
   unknown requested game the error is `GameFull` / `InvalidGameId`.
+* `players` / `maxPlayers` = the lobby's seats when the answer was made (the count the
+  pick used). A client never joins a lobby whose `players` has reached `maxPlayers`: it
+  seeks another one (`excludeGame`), or shows `GameFull` (client/src/ui/seek_choice.c).
 * `token` (optional) = a svc-accounts session token; when valid the ticket carries
   the account id + name so the game server can attach the account (its progress is
   saved); without it the player is a guest (unsaved). Every lobby takes both, as in

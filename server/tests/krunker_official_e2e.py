@@ -2888,6 +2888,23 @@ def run_native_exclude_mm():
           "[krunker] seek: no lobby list" in text and "[krunker] game-list: FRA:bbbbb" in text, [l for l in lines if "[krunker]" in l][-12:])
 
 
+def run_native_f4_stays_official():
+    """Find New Game (F4) in an official krunker.io game with Settings > Quickplay on KrunkNative: the
+    player stays on krunker.io (krunker_net_seek_new: a seek-game on the krunker.io matchmaker, excluding
+    the lobby list picks a game the player was not in lately), never a KrunkNative seek (no [mm] line)."""
+    label = "native-f4-kn-setting"
+    script = '0 boot\n100 call setSetting "knSeekServers" "kn"\n3000 call backToOrigin\n9000 quit\n'
+    stub, p, out, log = launch_native(label, script, {}, args=("--krunker",), stub_setup=lambda st: setattr(st, "lobbies", EXCLUDE_LOBBIES))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: F4 asks krunker.io's matchmaker for another game (two seek-game requests)", len(seeks) >= 2, len(seeks))
+    joins = re.findall(r"\[krunker\] seek-game: game (\S+) on", text)
+    check(f"{label}: F4 joins another official game than the one it is in", len(joins) >= 2 and joins[1] != joins[0], joins)
+    check(f"{label}: no KrunkNative seek for F4 (the brain is not asked)", "[mm] quick match" not in text and "[mm] seek" not in text,
+          [l for l in lines if "[mm]" in l][:4])
+
+
 def run_native_reload(gone):
     """Reload (F5) in an official game: the client relaunches with the same command line (--krunker, which
     alone joins whatever game the matchmaker picks) and comes back into the official game it was in, by
@@ -3671,6 +3688,7 @@ def main():
         run_native_optout()
         run_native_exclude()
         run_native_exclude_mm()
+        run_native_f4_stays_official()
         run_native_reload(False)
         run_native_reload(True)
         run_native_live()
@@ -3706,6 +3724,7 @@ def main():
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
+        run_native_f4_stays_official()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
         run_native_fx()
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs

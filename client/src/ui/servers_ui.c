@@ -28,6 +28,7 @@
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <join_errors.h>   // a failed join's text and place (join_errors.c)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
+#include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
@@ -87,6 +88,9 @@ static char g_account_game[160]; // AccountRequired: the lobby a guest was refus
 // and with server type Both an official krunker.io lobby is the fallback
 static int g_find_seek, g_find_both;
 static char g_find_prev_game[160];
+// full lobbies the seek answers named in a row (never joined): at most SEEK_FULL_SKIPS_MAX, then GameFull
+#define SEEK_FULL_SKIPS_MAX 3
+static int g_full_skips;
 // Reload (F5's relaunch, the console's `reload`; game_reload.c): the lobby the player was in, sought
 // by its id (no Quickplay launch seek, no excludeGame). Gone or full: one plain seek, and a notice
 // says why (reload_fallback). g_reload_game: the new process's lobby, taken by the startup seek;
@@ -612,6 +616,7 @@ static void seek_req_free(SeekReq *r) {
 static void seek_unreachable(void);
 static void on_token(void *user, int status, const char *body, size_t length);
 static void seek(const char *game_id, int auto_change, void *quiet);
+void servers_quick_join_next(void);
 
 // A reload's lobby is gone (InvalidGameId: its server stopped) or full (GameFull): one plain seek in
 // the region finds another (never excludeGame: nothing to leave). The loading state stays up through
@@ -677,11 +682,37 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         // says nothing (backToOrigin + seek, v10.js:222040-222066): no notice here either, the log says it
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
         printf("[mm] find new game: no other lobby has room, staying in %s\n", g_find_prev_game);
+    } else if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port) && seek_answer_full(res)) {
+        // the lobby the answer names has no seat left (the brain's count may be stale): never joined.
+        // A quick join goes on to its next candidate; a seek asks for another lobby, excluding this one,
+        // SEEK_FULL_SKIPS_MAX times at most, then the game is full.
+        const cJSON *game = cJSON_GetObjectItem(res, "gameId");
+        const char *id = cJSON_IsString(game) ? game->valuestring : "";
+        printf("[mm] seek answer %s is full (%d/%d): not joining it\n", id,
+               (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "players")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "maxPlayers")));
+        if (quiet && g_quick_join_left > 0) {
+            cJSON_Delete(res);
+            servers_quick_join_next();
+            return;
+        }
+        if (!quiet && id[0] && g_full_skips < SEEK_FULL_SKIPS_MAX) {
+            g_full_skips++;
+            snprintf(g_exclude_game, sizeof(g_exclude_game), "%s", id);
+            g_find_seek = find; // Find New Game keeps its fallback: the player stays in its lobby when none is left
+            g_find_both = find_both;
+            cJSON_Delete(res);
+            seek(NULL, 1, NULL);
+            return;
+        }
+        cJSON_Delete(res);
+        fatal_error(seek_error_text("GameFull"));
+        return;
     } else if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port)) {
         const cJSON *game = cJSON_GetObjectItem(res, "gameId");
         const cJSON *key = cJSON_GetObjectItem(res, "clientId");
         const cJSON *web = cJSON_GetObjectItem(res, "webUrl");
         const cJSON *region = cJSON_GetObjectItem(res, "region");
+        g_full_skips = 0;
         if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
         g_quick_join_left = 0;
         g_account_game[0] = 0;
@@ -690,7 +721,6 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
                     cJSON_IsString(region) ? region->valuestring : NULL);
     } else if (quiet && g_quick_join_left > 0) {
-        void servers_quick_join_next(void);
         servers_quick_join_next();
     } else {
         const cJSON *err = cJSON_GetObjectItem(res, "error");
@@ -986,25 +1016,32 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     (void) length;
     const char *requested_game = user;
     cJSON *list = status == 200 ? cJSON_Parse(body) : NULL;
-    char cached[32] = "";
+    char cached[32] = "", saved[32] = "";
     if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0) cached[0] = 0;
     const cJSON *setting = ui_setting_saved("defaultRegion");
-    if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(cached, sizeof(cached), "%s", setting->valuestring);
-    if (cJSON_IsObject(list)) {
-        if (cached[0] && cJSON_GetObjectItem(list, cached)) {
-            snprintf(g_region, sizeof(g_region), "%s", cached);
-        } else if (list->child && list->child->string) {
-            snprintf(g_region, sizeof(g_region), "%s", list->child->string);
-        }
-    }
-    if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", cached[0] ? cached : "local");
-    html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
+    if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(saved, sizeof(saved), "%s", setting->valuestring);
+    // a saved Default Region the ping list does not name is an error (seek_region_choose returns
+    // SEEK_REGION_UNLISTED): no seek, never another region in its place (the error is shown below)
+    const SeekRegionChoice how = seek_region_choose(cJSON_IsObject(list) ? list : NULL, saved, cached, g_region, sizeof(g_region));
+    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
     if (cJSON_IsObject(list)) {
         cJSON_Delete(g_ping_regions);
         g_ping_regions = list; // the region pickers' options
         list = NULL;
     }
     cJSON_Delete(list);
+    if (how == SEEK_REGION_UNLISTED && g_pin == PIN_NONE) {
+        printf("[mm] default region %s is not in the matchmaker's list: no seek\n", g_region);
+        g_find_seek = g_find_both = 0; // (start_seek's failure path)
+        g_exclude_game[0] = 0;
+        g_reload_next = 0;
+        char text[320];
+        I18N_F(text, "kn.mm.regionUnavailable", "Your default region {0} is not available: pick another one in Settings > Default Region",
+               region_long_name(g_region));
+        fatal_error(text);
+        free((void *) requested_game);
+        return;
+    }
     if (g_pin != PIN_NONE) {
         printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
@@ -1063,6 +1100,7 @@ static void official_label_tick(void) {
 
 static void start_seek(const char *game_id) {
     if (g_seek_inflight) return;
+    g_full_skips = 0;
     if (strike_director_enabled() && !g_brain_mode) { // Krunker Strike without a brain: the director only
         seek(game_id, !game_id, NULL);
         return;
@@ -3778,6 +3816,9 @@ void servers_ui_init(Client *client, const int brain_mode) {
 void servers_ui_set_director_mode(const int on) { g_director_mode = on != 0; }
 
 int servers_ui_retry(void) {
+    // an official krunker.io session (its failure's error screen included): its own seek, the player
+    // stays on krunker.io (krunker_net_seek_new); never a KrunkNative lobby
+    if (krunker_net_active()) return krunker_net_seek_new(g_client, NULL, 1);
     // pinned: the link retries that server (menu_retry_connect -> client_net_request_reconnect)
     if (g_pin == PIN_DIRECT) return 0;
     if (g_pin == PIN_IDLE && !g_brain_mode && !g_director_mode) return servers_ui_reconnect(); // the transport is stopped
@@ -3816,9 +3857,10 @@ int servers_ui_quick_match(void) {
 // toast. 0 = nothing to do (offline / direct server with KrunkNative only).
 int servers_ui_find_new_game(void) {
     const SeekServers type = seek_prefs_servers();
-    // in an official game with no lobby list to pick from (the web build: no Server Type row, no
-    // list): krunker.io's own Find New Game, a matchmaker seek excluding this game
-    if (krunker_net_active() && !krunker_lobbies_enabled()) return krunker_net_seek_new(g_client, NULL, 1);
+    // in an official game (krunker.io's Find New Game, a matchmaker seek excluding this game) the
+    // player stays on krunker.io whatever the Quickplay server type: only the official list, with the
+    // native lobby list, stays the krunker.io lobby browser's own seek (krunker_lobbies_seek)
+    if (krunker_net_active() && !(type == SEEK_SERVERS_OFFICIAL && krunker_lobbies_enabled())) return krunker_net_seek_new(g_client, NULL, 1);
     if (type == SEEK_SERVERS_OFFICIAL) return krunker_lobbies_seek();
     if ((!g_brain_mode && !g_director_mode) || g_pin == PIN_DIRECT || g_seek_inflight) {
         return type == SEEK_SERVERS_BOTH && !g_seek_inflight ? krunker_lobbies_seek() : g_seek_inflight;

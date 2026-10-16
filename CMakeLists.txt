@@ -1025,6 +1025,13 @@ else ()
     target_include_directories(join_errors_test PRIVATE client/include shared/include)
     add_test(NAME join_errors_test COMMAND join_errors_test)
 
+    # seek_choice_test (client/src/ui/seek_choice.c): the region a seek is made in (a saved Default Region
+    # is never swapped for another region) and a seek answer whose lobby is full (never joined)
+    add_executable(seek_choice_test client/tests/seek_choice_test.c client/src/ui/seek_choice.c)
+    target_include_directories(seek_choice_test PRIVATE client/include client/lib shared/include)
+    target_link_libraries(seek_choice_test PRIVATE cJSON)
+    add_test(NAME seek_choice_test COMMAND seek_choice_test)
+
     # kpd_phone_test: the K.P.D phone (client/src/ui/hud_votekick.c) under a call with no answer: it comes
     # down at KPD_NO_ANSWER_MS, and so does every other way out of a call (an answer, a refusal, a new
     # round, a lost session, no socket). The page, audio, chat and socket are stubs; the timers run on a

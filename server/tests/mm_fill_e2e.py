@@ -155,6 +155,10 @@ def main():
         code, rep = seek(port, last)
         c, ok = join(rep) if code == 200 else (None, False)
         check("a player joins %s by id" % last, ok and rep.get("gameId") == last, "%s %s" % (code, rep))
+        # the answer names the lobby's seats: a client never joins one the answer says is full (seek_choice.c)
+        check("the seek answer counts the lobby's seats (players < maxPlayers)",
+              isinstance(rep.get("players"), int) and isinstance(rep.get("maxPlayers"), int) and 0 <= rep["players"] < rep["maxPlayers"],
+              str({k: rep.get(k) for k in ("gameId", "players", "maxPlayers")}))
         if c:
             conns.append(c)
         landed = []

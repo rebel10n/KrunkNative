@@ -389,6 +389,9 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         reply_error(req, 500, "internal");
         return;
     }
+    /* the lobby's seats (the count the pick used): a client never joins a lobby the answer says is full */
+    cJSON_AddNumberToObject(reply, "players", pick.lobby->players);
+    cJSON_AddNumberToObject(reply, "maxPlayers", registry_lobby_cap(pick.lobby, &mm_settings()->policy));
     KN_DEBUG("routes", "seek region=%s game=%s flavor=%s %s -> %s (%s:%d%s)", region, game, flavor[0] ? flavor : "base",
              account_id > 0 ? "account" : "guest", pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
              registry_lobby_needs_account(pick.node, pick.lobby) ? ", online_mode" : "");
