@@ -412,6 +412,37 @@ def main():
         time.sleep(1.0)
         code, earn = http(port, "/api/territorial-wars/clan/%d/earnings" % clan_a)
         check(code == 200 and total(earn) == 390, "two brains settled the day once")
+
+        # the live views count only the top 20 contributors per clan and map, as the settlement
+        # does: EEE's 21 players (1..21 kills) on Subzero count 230 today, not 231
+        async def subzero_cap():
+            owner = await register(port, "cap" + stamp)
+            await make_clan(port, owner, "EEE", [])
+            players = [await register(port, "c%02d%s" % (i, stamp)) for i in range(21)]
+            node = FakeNode(port)
+            await node.start()
+            await asyncio.sleep(0.5)
+            r = await node.kills(3, [{"clan_name": "EEE", "player_id": p["id"], "map_id": 3, "kills": i + 1, "deaths": 0}
+                                     for i, p in enumerate(players)])
+            node.task.cancel()
+            await node.ws.close()
+            return r
+        r = asyncio.run(subzero_cap())
+        check(r and r.get("recorded") == 21, "21 Subzero contributors recorded (%s)" % r)
+        code, st = http(port, "/api/territorial-wars/status")
+        sub = [m for m in st.get("data", []) if m["map_id"] == 3][0] if code == 200 else {}
+        check(sub.get("total_kills_today") == 230 and sub.get("guaranteed_reward") == 2300 and sub.get("kills") == 0
+              and sub["leaderboard"][0]["clan_name"] == "EEE" and sub["leaderboard"][0]["kills"] == 230,
+              "status: Subzero counts the top 20 contributors (230 kills, 2300 KR) (%s)" % {k: sub.get(k) for k in ("total_kills_today", "guaranteed_reward")})
+        code, cl = http(port, "/api/territorial-wars/clan/EEE")
+        maps = {m["map_name"]: m for m in (cl.get("data") or {}).get("maps", [])} if code == 200 else {}
+        check(maps.get("Subzero", {}).get("kills") == 230, "clan view: 230 kills on Subzero (%s)" % maps.get("Subzero"))
+        code, lb = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY + 1, map_id=3)
+        check(code == 200 and [r["clan_name"] for r in lb["data"]] == ["EEE"] and lb["data"][0]["kills"] == 230 and lb["data"][0]["position"] == 1,
+              "top performing clans on Subzero: EEE 230 (%s)" % lb.get("data"))
+        code, lb = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY + 1)
+        check(code == 200 and lb["data"][0]["clan_name"] == "EEE" and lb["data"][0]["kills"] == 230 and lb["data"][0]["games"] == 20,
+              "top performing clans, every map: EEE still 230 kills")
     finally:
         for p in procs:
             if p.poll() is None:

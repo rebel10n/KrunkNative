@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "knsvc/json.h"
 #include "turf_wars.h"
@@ -259,13 +260,65 @@ static const char *map_label(int64_t map) {
 
 static double kd_of(double kills, double deaths) { return deaths > 0 ? kills / deaths : kills; }
 
-/* per (day, map, clan) totals of [from, to] ordered day, map, kills desc: the rankings */
+/* a clan's counted line of (day, map): the top TURF_TOP_CONTRIBUTORS contributors by kills only,
+ * as the settlement counts them (run_turf_settle) */
+typedef struct {
+    int64_t day, map, clan, kills, deaths, games;
+    const char *name; /* points into the rows it was read from */
+} ClanDay;
+
+static int by_clan_day(const void *pa, const void *pb) {
+    const ClanDay *a = pa, *b = pb;
+    if (a->day != b->day) return a->day < b->day ? -1 : 1;
+    if (a->map != b->map) return a->map < b->map ? -1 : 1;
+    if (a->kills != b->kills) return a->kills > b->kills ? -1 : 1;
+    return a->clan < b->clan ? -1 : a->clan > b->clan;
+}
+
+/* the counted rows of [from, to] ordered day, map, kills desc, clan: {day, map_id, clan_id,
+ * clan_name, kills, deaths, games} (NULL on a database error) */
 static cJSON *clan_day_rows(Dbx *x, int64_t from, int64_t to) {
-    return dbx_rows(x, SQL(.any = "SELECT tk.day AS day__i, tk.map_id AS map_id__i, tk.clan_id AS clan_id__i, c.clan_name, sum(tk.kills) AS kills__i,"
-                                  " sum(tk.deaths) AS deaths__i, sum(tk.games) AS games__i FROM turf_kills tk JOIN clans c ON c.clan_id = tk.clan_id"
-                                  " WHERE tk.day >= {int:$1} AND tk.day <= {int:$2} GROUP BY tk.day, tk.map_id, tk.clan_id, c.clan_name"
-                                  " ORDER BY tk.day, tk.map_id, sum(tk.kills) DESC, tk.clan_id"),
-                    KN_DB_ARGS(I64S(from), I64S(to)));
+    cJSON *raw = dbx_rows(x, SQL(.any = "SELECT tk.day AS day__i, tk.map_id AS map_id__i, tk.clan_id AS clan_id__i, c.clan_name,"
+                                        " tk.kills AS kills__i, tk.deaths AS deaths__i, tk.games AS games__i FROM turf_kills tk"
+                                        " JOIN clans c ON c.clan_id = tk.clan_id WHERE tk.day >= {int:$1} AND tk.day <= {int:$2}"
+                                        " ORDER BY tk.day, tk.map_id, tk.clan_id, tk.kills DESC, tk.account_id"),
+                          KN_DB_ARGS(I64S(from), I64S(to)));
+    if (!raw) return NULL;
+    ClanDay *g = calloc((size_t) cJSON_GetArraySize(raw) + 1, sizeof *g);
+    cJSON *out = cJSON_CreateArray();
+    if (!g) {
+        cJSON_Delete(raw);
+        cJSON_Delete(out);
+        return NULL;
+    }
+    int n = 0, counted = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, raw) {
+        const int64_t day = (int64_t) jnum(r, "day"), map = (int64_t) jnum(r, "map_id"), clan = (int64_t) jnum(r, "clan_id");
+        if (n == 0 || g[n - 1].day != day || g[n - 1].map != map || g[n - 1].clan != clan) {
+            g[n++] = (ClanDay) {day, map, clan, 0, 0, 0, jstr(r, "clan_name")};
+            counted = 0;
+        }
+        if (counted++ >= TURF_TOP_CONTRIBUTORS) continue;
+        g[n - 1].kills += (int64_t) jnum(r, "kills");
+        g[n - 1].deaths += (int64_t) jnum(r, "deaths");
+        g[n - 1].games += (int64_t) jnum(r, "games");
+    }
+    qsort(g, (size_t) n, sizeof *g, by_clan_day);
+    for (int i = 0; i < n; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "day", (double) g[i].day);
+        cJSON_AddNumberToObject(o, "map_id", (double) g[i].map);
+        cJSON_AddNumberToObject(o, "clan_id", (double) g[i].clan);
+        cJSON_AddStringToObject(o, "clan_name", g[i].name);
+        cJSON_AddNumberToObject(o, "kills", (double) g[i].kills);
+        cJSON_AddNumberToObject(o, "deaths", (double) g[i].deaths);
+        cJSON_AddNumberToObject(o, "games", (double) g[i].games);
+        cJSON_AddItemToArray(out, o);
+    }
+    free(g);
+    cJSON_Delete(raw);
+    return out;
 }
 
 /* the clan's row of (day, map) in rows, its position, and the comparison clan (the leader, or the
@@ -426,6 +479,51 @@ static cJSON *with_kd_positions(cJSON *rows, int positions) {
     return rows;
 }
 
+static int by_clan_total(const void *pa, const void *pb) {
+    const ClanDay *a = pa, *b = pb;
+    if (a->kills != b->kills) return a->kills > b->kills ? -1 : 1;
+    return a->clan < b->clan ? -1 : a->clan > b->clan;
+}
+
+/* the day's clans over the maps (map < 0: all) by counted kills, ties by clan id; name: a clan
+ * name filter ("" = all). At most 100 rows. */
+static cJSON *top_clans_view(Dbx *x, int64_t day, int64_t map, const char *name) {
+    cJSON *rows = clan_day_rows(x, day, day);
+    if (!rows) return NULL;
+    ClanDay *t = calloc((size_t) cJSON_GetArraySize(rows) + 1, sizeof *t);
+    if (!t) {
+        cJSON_Delete(rows);
+        return NULL;
+    }
+    int n = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        if (map >= 0 && (int64_t) jnum(r, "map_id") != map) continue;
+        if (name && name[0] && strcasecmp(jstr(r, "clan_name"), name)) continue;
+        const int64_t clan = (int64_t) jnum(r, "clan_id");
+        int i = 0;
+        while (i < n && t[i].clan != clan) i++;
+        if (i == n) t[n++] = (ClanDay) {day, map, clan, 0, 0, 0, jstr(r, "clan_name")};
+        t[i].kills += (int64_t) jnum(r, "kills");
+        t[i].deaths += (int64_t) jnum(r, "deaths");
+        t[i].games += (int64_t) jnum(r, "games");
+    }
+    qsort(t, (size_t) n, sizeof *t, by_clan_total);
+    cJSON *out = cJSON_CreateArray();
+    for (int i = 0; i < n && i < 100; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "clan_id", (double) t[i].clan);
+        cJSON_AddStringToObject(o, "clan_name", t[i].name);
+        cJSON_AddNumberToObject(o, "kills", (double) t[i].kills);
+        cJSON_AddNumberToObject(o, "deaths", (double) t[i].deaths);
+        cJSON_AddNumberToObject(o, "games", (double) t[i].games);
+        cJSON_AddItemToArray(out, o);
+    }
+    free(t);
+    cJSON_Delete(rows);
+    return out;
+}
+
 static cJSON *view_payouts(Dbx *x, const char *id, int64_t day) {
     cJSON *o = cJSON_CreateObject();
     cJSON *rows;
@@ -531,11 +629,7 @@ static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
     } else if (!strcmp(view, "payouts")) { /* (id, day | "") */
         out = view_payouts(&x, a, b[0] ? pint(b) : -1);
     } else if (!strcmp(view, "top_clans")) { /* (day, map, name) */
-        out = dbx_rows(&x, SQL(.any = "SELECT tk.clan_id AS clan_id__i, c.clan_name, sum(tk.kills) AS kills__i, sum(tk.deaths) AS deaths__i, sum(tk.games) AS games__i"
-                                      " FROM turf_kills tk JOIN clans c ON c.clan_id = tk.clan_id"
-                                      " WHERE tk.day = {int:$1} AND ({int:$2} < 0 OR tk.map_id = {int:$2}) AND ($3 = '' OR lower(c.clan_name) = lower($3))"
-                                      " GROUP BY tk.clan_id, c.clan_name ORDER BY sum(tk.kills) DESC, tk.clan_id LIMIT 100"),
-                       KN_DB_ARGS(I64S(a[0] ? pint(a) : cur), I64S(b[0] ? pint(b) : -1), cc));
+        out = top_clans_view(&x, a[0] ? pint(a) : cur, b[0] ? pint(b) : -1, cc);
         if (out) with_kd_positions(out, 1);
     } else if (!strcmp(view, "top_grossing")) { /* (name) */
         out = dbx_rows(&x, SQL(.any = "SELECT cd.clan_id AS clan_id__i, c.clan_name, sum(cd.kr) AS total_kr__i,"
