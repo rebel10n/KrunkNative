@@ -258,6 +258,7 @@ MAP_KEYS = [
     K("welMsg", "string", "", "welcome message (<= 70 chars)"),
     K("ambInd", "number", 1, "ambient sound index", group="sound"),
     K("ambIndC", "number", None, since="v7", group="sound"),
+    K("ambFadeTime", "number", 0, "ambient fade time in seconds (0..10; v10 IDX:20052)", since="v10", lo=0, hi=10, group="sound"),
     K("sky", "hex_or_int", "#dce8ed", "sky colour", group="sky"),
     K("skyDome", "bool", False, group="sky"),
     K("skyDomeCol0", "hex_or_int", "#74a4b9", group="sky"),
@@ -459,7 +460,8 @@ def main():
         "triggers": {"events": events, "actions": actions, "conditions": conditions,
                      "emitter_sounds": dump.get("emitterSounds") or edata.get("emitterSounds", [])},
         "game_config": edata.get("gameConfig", []),
-        "server_config": dump.get("serverConfig") or edata.get("serverConfig", []),
+        # editor_data's list is v7's plus the v10 entries (tools/editor/gen_editor_data.py V10_SERVER_ADDS)
+        "server_config": edata.get("serverConfig") or dump.get("serverConfig", []),
         "modes": edata.get("modes", []),
         "classes": edata.get("classes", []),
         "limits": limits,

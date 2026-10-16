@@ -209,7 +209,7 @@ static void test_tables(void) {
     printf("option tables...\n");
     size_t n = 0;
     game_config_options(GAME_CONFIG_SERVER, &n);
-    CHECK(n == 91, "serverConfig has %zu entries, v7 85 + v10 hurtboxScale + KrunkNative knOmWeps (Object Manager) + knTPCam (third person) + knClanWar / knClanA / knClanB", n);
+    CHECK(n == 94, "serverConfig has %zu entries, v7 85 + v10 hurtboxScale / noPvp / transferHostOnLeave / webhook + KrunkNative knOmWeps (Object Manager) + knTPCam (third person) + knClanWar / knClanA / knClanB", n);
     game_config_options(GAME_CONFIG_CLASS, &n);
     CHECK(n == 80, "classConfig has %zu entries, v7 79 + v10 hurtboxScale", n);
     game_config_options(GAME_CONFIG_WEAPON, &n);

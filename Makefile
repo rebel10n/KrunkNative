@@ -855,6 +855,11 @@ editor-objects-e2e: build ## Editor objects e2e: inspector v10 expectation, BOT_
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/objects_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/inspector_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+# the Essential panel's v10 game configuration, the config / Environment round trips (tools/editor/mapsettings_e2e.py)
+.PHONY: editor-mapsettings-e2e
+editor-mapsettings-e2e: build ## Map settings e2e: Essential v10 rows, config and Environment round trips (headless; tools/editor/mapsettings_e2e.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/mapsettings_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release
 editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)

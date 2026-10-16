@@ -118,8 +118,25 @@ def v10_normalize(lines):
     return out
 
 
+# The Essential panel's v10 additions (doc/v10/editor-social.md "Essential"; v10 CFG:7641, 7719, 7796,
+# 8334 and classes/renamed.js:2969-3102): the serverConfig and classConfig entries v7 lacks, and the two
+# weapons v10 added (29 Boulder, 30 Compressor), each a closed folder.
+V10_ESSENTIAL_BLOCKS = [
+    # Hitboxes folder (serverConfig hurtboxScale): header, rule, field, rule
+    ['Fs Hitboxes closed', '-', 'L[subsection] Hurtbox Scale : sval=1 range[1,2,0.1]=1', '-'],
+    # Hosting folder (serverConfig transferHostOnLeave) after the Teams folder's rule
+    ['-', 'Fs Hosting closed', '-', 'L[subsection] Transfer Host on Leave : switch=1'],
+]
+V10_ESSENTIAL_LINES = [
+    'L[subsection] Webhook : text()=',                              # Other (serverConfig webhook)
+    'L[subsection] Player Damage Off : switch=0',                   # Teams (serverConfig noPvp)
+    'L[subsection] Hurtbox Scale : sval=1 range[1,2,0.1]=1',        # every class's Hitbox folder
+]
+
+
 def drop_v10_only(lines):
-    """The lines v10 added to a v7.1.4 panel dump: the Essential panel's "History" folder."""
+    """The lines v10 added to a v7.1.4 panel dump: the Essential panel's "History" folder, the
+    v10 server / class settings and weapons 29 / 30 (V10_ESSENTIAL_*)."""
     out, skip = [], 0
     for ln in lines:
         if ln == 'F History closed':
@@ -129,7 +146,20 @@ def drop_v10_only(lines):
             skip -= 1
             continue
         out.append(ln)
-    return out
+    # the weapon folders 29 and 30 (v10's weapons after Charge Rifle): through the second
+    # "RollOff Factor" line that follows the Boulder header
+    for start in range(len(out)):
+        if out[start] == 'Fs Boulder [ID: 29] closed':
+            ends = [i for i in range(start, len(out)) if out[i] == 'L[subsection] RollOff Factor (Sound) : sval=1 range[0,1,0.01]=1']
+            if len(ends) >= 2:
+                del out[start:ends[1] + 1]
+            break
+    for block in V10_ESSENTIAL_BLOCKS:
+        for i in range(len(out) - len(block) + 1):
+            if out[i:i + len(block)] == block:
+                del out[i:i + len(block)]
+                break
+    return [ln for ln in out if ln not in V10_ESSENTIAL_LINES]
 
 
 def trigger_block(lines):

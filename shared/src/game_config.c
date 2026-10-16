@@ -60,7 +60,8 @@ enum { // ClassConfig.movement keys (WP-A ClassMovement)
 
 static const char *const k_team_size_options[] = {"1v1", "2v2", "3v3", "4v4"};
 
-// config.serverConfig (85 entries, v7 order; nameTeam3..5 / t3Dmg..t5Dmg spliced in as config.js does).
+// config.serverConfig (v7 order; nameTeam3..5 / t3Dmg..t5Dmg spliced in as config.js does; v10.0.2's
+// hurtboxScale, noPvp, transferHostOnLeave and webhook are in their v10 places, GC_STORE_NONE where KN has no effect).
 static const GameConfigOption k_server_options[] = {
     {"maxPlayers", "Players", "Server Size", NULL, GC_NUM, GC_STORE_INT, GC_BASIC, 0, .def = 2.0f, .min = 1.0f, .max = 10.0f, .max_p = 16.0f, .max_f = 20.0f, .max_d = 50.0f, .max_g = 6.0f, .step = 1.0f, .offset = offsetof(GameConfig, max_players)},
     {"minPlayers", "Min Players", "Server Size", NULL, GC_NUM, GC_STORE_INT, GC_BASIC, 0, .def = 0.0f, .min = 0.0f, .max = 10.0f, .max_p = 16.0f, .max_f = 20.0f, .max_d = 50.0f, .max_g = 6.0f, .step = 1.0f, .offset = offsetof(GameConfig, min_players)},
@@ -108,6 +109,9 @@ static const GameConfigOption k_server_options[] = {
     {"chrgWeps", "Chargable Weapons", "Gameplay Logic", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 1.0f, .offset = 0, .bit = GC_BIT_NO_CHARGE_WEAPONS},
     {"selTeam", "Select Team", "Teams", "Teams", GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_SELECT_TEAM},
     {"frFire", "Friendly Fire", "Teams", NULL, GC_BOOL, GC_STORE_U8, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = offsetof(GameConfig, friendly_fire)},
+    // v10.0.2 (CFG:7641) "Player Damage Off": v10 only draws the enemy health colour of nametags
+    // from it (v10:159971); KN validates and keeps the setting, it does not draw nametags by it
+    {"noPvp", "Player Damage Off", "Teams", NULL, GC_BOOL, GC_STORE_NONE, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0},
     {"nameTeam1", "Alpha Team Name", "Teams", NULL, GC_INPUT, GC_STORE_STR, 0, GC_HT(0) | GC_HT(1), .def_str = "Alpha", .len = 16, .offset = offsetof(GameConfig, team_names[1])},
     {"nameTeam2", "Bravo Team Name", "Teams", NULL, GC_INPUT, GC_STORE_STR, 0, GC_HT(0) | GC_HT(1), .def_str = "Bravo", .len = 16, .offset = offsetof(GameConfig, team_names[2])},
     {"nameTeam3", "Charlie Team Name", "Teams", NULL, GC_INPUT, GC_STORE_STR, GC_HIDE, 0, .def_str = "Charlie", .len = 16, .offset = offsetof(GameConfig, team_names[3])},
@@ -124,6 +128,9 @@ static const GameConfigOption k_server_options[] = {
     {"nameTagsFR", "Hide Nametags (Allies)", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, hide_nametags_allies)},
     {"kCams", "Kill Cams", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, kill_cams)},
     {"aAnon", "Allow Anonymous", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, allow_anonymous)},
+    // v10.0.2 (CFG:7719) hosted games: the host passes on to another player when it leaves. Validated and
+    // kept in the map; the KN host does not transfer (doc/v10/editor-social.md §1.3 "Essential")
+    {"transferHostOnLeave", "Transfer Host on Leave", "Hosting", "Hosting", GC_BOOL, GC_STORE_NONE, 0, GC_HT(0) | GC_HT(1), .def = 1.0f, .offset = 0},
     {"specSlots", "Designated Spectators", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E, GC_HT(1), .def = 2.0f, .min = 0.0f, .max = 4.0f, .step = 1.0f, .offset = offsetof(GameConfig, spec_slots)},
     {"tmSize", "Team Size", "Other", NULL, GC_SELECT, GC_STORE_INT, GC_BASIC | GC_HIDE_E, GC_HT(1), .def = 3.0f, .options = k_team_size_options, .option_count = 4, .offset = offsetof(GameConfig, team_size)},
     {"noCosm", "Hide Cosmetics", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, no_cosmetics)},
@@ -131,6 +138,8 @@ static const GameConfigOption k_server_options[] = {
     {"noDraws", "No Draws", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, no_draws)},
     {"bstOfR", "Best of", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, best_of)},
     {"headClipFix", "Stop Head Clipping", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, head_clip_fix)},
+    // v10.0.2 (CFG:7796): a comp host's webhook URL. Validated as an input and kept in the map; KN posts no webhooks
+    {"webhook", "Webhook", "Other", NULL, GC_INPUT, GC_STORE_NONE, 0, GC_HT(1), .def_str = "", .len = 200, .offset = 0},
     {"minimaps", "Minimaps", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, minimaps)},
     // KrunkNative addition (not a v7.1.4 serverConfig key): the Object Manager's extra loadout weapons and
     // weapon pickups for every player of a custom game (shared/src/object_manager.c)

@@ -83,6 +83,61 @@ V10_BOT_PATH_NODE = {"id": 41, "name": "BOT_PATH_NODE", "src": "cube_0", "noCol"
 V10_LIMITS = {"triggerActionLimit": 8, "entityLimit": 64, "archetypeLimit": 32, "archetypeObjectLimit": 40}
 
 
+# v10 configuration lists (webcrack shared/config/renamed.js and shared/classes/renamed.js; read, never
+# run). Each entry is inserted after the v7 key it follows in v10's list (v10 keeps v7's order).
+# serverConfig: hurtboxScale (CFG:8370s, "Hitboxes"), noPvp (CFG:7641, "Teams"), transferHostOnLeave
+# (CFG:7719, "Hosting"), webhook (CFG:7796, comp hosts; an input). classConfig: hurtboxScale under
+# "Hitbox" (CFG:8334). Weapons 29 Boulder and 30 Compressor (classes/renamed.js:2969-3102): the
+# weaponConfig fields their records set, then the defaults v10 fills in for every weapon
+# (classes/renamed.js:3109-3120: adSpread 0, reloY 1, movSpread 1, lsMlt 0.5, burst false / burstC 0 /
+# burstR 50). The editor shows only the fields a record has, as v10's Weapon Config does.
+V10_SERVER_ADDS = [
+    ("hitBoxPad", {"name": "Hurtbox Scale", "varN": "hurtboxScale", "sub": "Hitboxes", "dontChange": True,
+                   "def": 1, "min": 1, "max": 2, "step": 0.1}),
+    ("frFire", {"name": "Player Damage Off", "varN": "noPvp", "sub": "Teams", "dontChange": True,
+                "def": False, "bool": True}),
+    ("aAnon", {"name": "Transfer Host on Leave", "varN": "transferHostOnLeave", "sub": "Hosting",
+               "def": True, "bool": True}),
+    ("headClipFix", {"name": "Webhook", "varN": "webhook", "sub": "Other", "def": "", "input": True}),
+]
+V10_CLASS_ADDS = [
+    ("hbH", {"name": "Hurtbox Scale", "varN": "hurtboxScale", "sub": "Hitbox", "cat": 1, "def": 1, "min": 1,
+             "max": 2, "step": 0.1}),
+]
+V10_WEAPON_DEFAULTS = {"adSpread": 0, "reloY": 1, "movSpread": 1, "lsMlt": 0.5, "burst": False, "burstC": 0, "burstR": 50}
+V10_WEAPONS = [
+    {"name": "Boulder", "src": "weapon_30", "assetIcon": "", "refDist": 25, "rollOff": 1, "secondary": True,
+     "equipment": False, "noAim": True, "aimSpd": 140, "chrgTime": 0, "ovrChrg": False, "swapTime": 200,
+     "spdMlt": 0.85, "spread": 120, "zoom": 1},
+    {"name": "Compressor", "src": "weapon_31", "assetIcon": "", "refDist": 25, "rollOff": 1, "secondary": True,
+     "equipment": False, "noSpread": False, "noAim": True, "akimbo": False, "nAuto": True, "ovrChrg": False,
+     "swapTime": 350, "aimSpd": 100, "chrgTime": 0, "spdMlt": 1.05, "ammo": 1, "reload": 2000, "dmg": 1,
+     "hsMlt": 1.25, "dmgDrop": 10, "range": 40, "rate": 450, "spread": 180, "minSpread": 20, "zoom": 0,
+     "recoil": 0.02, "recoilYM": 0.65, "recoilZ": 2.1, "recoilZM": 0.2, "jumpYM": 0.5, "physRang": 50,
+     "physPow": 0.1},
+]
+
+
+def add_v10_config(data):
+    """The v10 serverConfig / classConfig / weapon entries the v7 lists lack (see V10_*)."""
+    config = data["config"]
+    for lst, adds in (("serverConfig", V10_SERVER_ADDS), ("classConfig", V10_CLASS_ADDS)):
+        entries = config[lst]
+        for after, entry in adds:
+            if any(e.get("varN") == entry["varN"] for e in entries):
+                continue
+            idx = next(i for i, e in enumerate(entries) if e.get("varN") == after)
+            entries.insert(idx + 1, dict(entry))
+    if len(data["weapons"]) != 29:
+        raise SystemExit("v7 weapon list is not 29 entries: re-check V10_WEAPONS")
+    for w in V10_WEAPONS:
+        rec = dict(w)
+        for k, v in V10_WEAPON_DEFAULTS.items():
+            rec.setdefault(k, v)
+        data["weapons"].append(rec)
+    # the weaponConfig fields: v7's list has every v10 field (checked against classes/renamed.js)
+
+
 def dump_v7():
     data = run_node(os.path.join(REPO, "tools", "maps", "dump_v7.js"))
     sys.path.insert(0, os.path.join(REPO, "tools", "maps"))
@@ -92,6 +147,7 @@ def dump_v7():
         raise SystemExit("v7 prefab 41 is not TERMINAL: re-check V10_BOT_PATH_NODE")
     data["prefabs"][41] = dict(V10_BOT_PATH_NODE)
     data["config"].update(V10_LIMITS)
+    add_v10_config(data)
     return data
 
 
@@ -151,6 +207,11 @@ def main():
     kss["sharedAutoComplete"] = kss_v10["sharedAutoComplete"]
     kss["templates"] = dict(ed["kss"]["templates"], **kss_v10["templates"])
     prefabs, textures, config = data["prefabs"], data["textures"], data["config"]
+    # v10 fills every classConfig default into each class record (classes/renamed.js:4632-4636), so the
+    # Class Config panel shows the v10 keys on every class
+    for c in ed["classes"]:
+        for _, entry in V10_CLASS_ADDS:
+            c.setdefault(entry["varN"], entry["def"])
 
     v7_flags = set()
     for p in prefabs:

@@ -483,6 +483,20 @@ def settings(c):
     check("cls" not in cfg and "prks" not in cfg and "weps" in cfg, "null resets overrides")
     m.call("map_settings_set", {"project": pid, "config": {"cls": {"0": {"speed": 99}}}}, ok=False)
     m.call("map_settings_set", {"project": pid, "config": {"cls": {"0": {"nope": 1}}}}, ok=False)
+    # v10.0.2 additions (CFG:7641-8334, classes/renamed.js:2969-3102): serverConfig hurtboxScale / noPvp /
+    # transferHostOnLeave / webhook, classConfig hurtboxScale, weapons 29 Boulder and 30 Compressor
+    m.sc("map_settings_set", {"project": pid, "set": {"ambFadeTime": 2.5},
+                              "config": {"settings": {"hurtboxScale": 1.5, "noPvp": True, "transferHostOnLeave": False,
+                                                      "webhook": "https://hooks.example.test/krunk"},
+                                         "cls": {"1": {"hurtboxScale": 1.25}}, "weps": {"Boulder": {"spread": 150}}}})
+    v = m.sc("map_settings_get", {"project": pid})["values"]
+    check(v["ambFadeTime"] == 2.5, "ambFadeTime (v10 Fade Time) is a map key")
+    cfg = v["config"]
+    check(cfg["settings"]["hurtboxScale"] == 1.5 and cfg["settings"]["noPvp"] == 1 and cfg["settings"]["transferHostOnLeave"] == 0
+          and cfg["settings"]["webhook"] == "https://hooks.example.test/krunk", "v10 server settings are accepted and stored")
+    check(cfg.get("cls", {}).get("1") == {"hurtboxScale": 1.25} and cfg.get("weps", {}).get("29") == {"spread": 150},
+          "v10 class hurtboxScale and Boulder (weapon 29) overrides: cls %s weps %s" % (json.dumps(cfg.get("cls")), json.dumps(cfg.get("weps"))))
+    m.call("map_settings_set", {"project": pid, "config": {"settings": {"hurtboxScale": 3}}}, ok=False)
 
 
 # ---------------------------------------------------------------- build

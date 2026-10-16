@@ -60,6 +60,10 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | Feature | v10 | Before | After |
 |---|---|---|---|
 | Essential: closed "History" folder, Recent Actions (redo items, then undos newest first) | IDX:15111-15122, 14362; E10:15451-15503 | missing | **done** (`editor_gameconfig.c`, `ed_history_html`) |
+| Essential Server Preset v10 keys: Hurtbox Scale (Hitboxes), Player Damage Off (Teams), Transfer Host on Leave (Hosting), Webhook (Other) | CFG:7641, 7719, 7796, 8370s | missing | **done** (`gen_editor_data.py` V10_SERVER_ADDS, `shared/src/game_config.c` validates them: noPvp / transferHostOnLeave / webhook are GC_STORE_NONE, no KN effect; `logic_parity.py` V10_ESSENTIAL_*) |
+| Class Config Hurtbox Scale (Hitbox), every class gets the default | CFG:8334; classes/renamed.js:4632-4636 | missing | **done** (`gen_editor_data.py` V10_CLASS_ADDS) |
+| Weapon Config 29 Boulder, 30 Compressor (fields their records set + the post-load defaults) | classes/renamed.js:2969-3120 | missing (29 weapons) | **done** (`gen_editor_data.py` V10_WEAPONS) |
+| Minimap AssetId (`mmId`), text with the asset-id charset; v10 has no picker (`selectMinimapAsset` is never wired) | IDX:15130; E10:14461-14464, 17229 | done | **done** (no change) |
 | Undo: new action clears redo; redo goes back on the undo list | E10:15319-15338, 15344-15450 | v7: redo kept, redo not undoable | **done** (`editor_objects.c`) |
 | Bounce -10..10 | IDX:15348 | -3..3 | **done** |
 | Spin Axis Y / X / Z | IDX:15442 | Y / X | **done** |
