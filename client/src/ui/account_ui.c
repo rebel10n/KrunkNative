@@ -320,7 +320,8 @@ static void kio_set_data(const cJSON *d) {
                {11, "player_lastreward"}, {12, "player_developer"}, {13, "player_following"}, {14, "player_followed"},
                {15, "player_stats"}, {16, "player_hack"}, {17, "player_region"}, {18, "player_role"}, {19, "player_premium"},
                {20, "player_2FA"}, {21, "player_alias"}, {27, "jobrating"}, {28, "jobratingpositive"}, {30, "player_clanrole"},
-               {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"}};
+               {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"},
+               {47, "ranked_points"}}; // (rankedPoints: setData's [47], v10:112873)
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         const cJSON *v = cJSON_GetArrayItem(d, map[i].slot);
         if (v) obj_set(map[i].key, v);
@@ -332,9 +333,14 @@ static void kio_frame(const char *label, const cJSON *frame) {
     if (!strcmp(label, "a")) {
         const cJSON *err = cJSON_GetArrayItem(frame, 1), *data = cJSON_GetArrayItem(frame, 4);
         const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 3));
-        if ((cJSON_IsString(err) && err->valuestring[0]) || !name || !cJSON_IsObject(data)) return;
+        if ((cJSON_IsString(err) && err->valuestring[0]) || !name || !(cJSON_IsObject(data) || cJSON_IsArray(data))) return;
         cJSON_Delete(g_kio.obj);
-        g_kio.obj = cJSON_Duplicate(data, 1);
+        if (cJSON_IsArray(data)) { // v10: new Account(id, name, null), then setData(row) (v10:70182, v10:70129): the slot order
+            g_kio.obj = cJSON_CreateObject();
+            kio_set_data(data);
+        } else {
+            g_kio.obj = cJSON_Duplicate(data, 1);
+        }
         const cJSON *id = cJSON_GetArrayItem(frame, 2);
         g_kio.id = cJSON_IsNumber(id) ? id->valueint : 0;
         copy_str(g_kio.name, sizeof(g_kio.name), name);
@@ -350,6 +356,15 @@ static void kio_frame(const char *label, const cJSON *frame) {
         const cJSON *kr = cJSON_GetArrayItem(frame, 1), *jnk = cJSON_GetArrayItem(frame, 2);
         if (cJSON_IsNumber(kr)) obj_set("player_funds", kr);
         if (cJSON_IsNumber(jnk)) obj_set("player_jnk", jnk);
+        g_kio.gen++;
+    } else if (!strcmp(label, "ub")) { // UPDATE_BALANCES [balances]: rankedPoints is balances[3].amount (v10:208200)
+        const cJSON *rp = cJSON_GetArrayItem(cJSON_GetArrayItem(frame, 1), 3);
+        const cJSON *amount = cJSON_GetObjectItemCaseSensitive(rp, "amount");
+        if (cJSON_IsNumber(amount)) obj_set("ranked_points", amount);
+        g_kio.gen++;
+    } else if (!strcmp(label, "chlR")) { // UPDATE_CHALLENGE_REWARDS: arg 6 = the points won, arg 7 the balance (v10:208212-208248)
+        const cJSON *won = cJSON_GetArrayItem(frame, 7), *balance = cJSON_GetArrayItem(frame, 8);
+        if (won && cJSON_IsNumber(won) && won->valuedouble != 0 && cJSON_IsNumber(balance)) obj_set("ranked_points", balance);
         g_kio.gen++;
     } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
         return; // (the battle pass / clan / challenge answers belong to the krunker.io account's windows)

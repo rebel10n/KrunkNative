@@ -483,7 +483,8 @@ SCRIPTS = {
 33500 call knViewPop 1
 34000 call knRkTab 4
 34500 text @rpmoved .rp-balance .currency-amount
-35000 text @kiolevel [id=knKioHeaderText]
+28000 text @kiolevel [id=knV10Level]
+28100 text @menurpsess [id=menuRPCount]
 36000 call knRkBuy 7
 36500 call knViewPop 1
 37000 text @neterr .text-error
@@ -535,8 +536,6 @@ SCRIPTS = {
 1000 call openRankedMenu
 3000 nodes @ranked .rankedMenuModal .start-button
 4000 call knRkStart
-4500 text @menurp [id=menuRPCount]
-15000 text @menurpafter [id=menuRPCount]
 16000 quit
 """,
 }
@@ -716,8 +715,10 @@ def check_kio_match(text, entries, token):
     moved = WALLET_TEST + MILESTONE_REWARD - SKIN_PRICE
     check("kio_match: a claim adds the milestone's reward and a purchase takes the price off the balance (v10:98744, 111042): %d"
           % moved, text_of(text, "rpmoved").endswith("text=" + "{:,}".format(moved)), text_of(text, "rpmoved")[:60])
-    check("kio_match: the account row's level is row[6]'s score (level 20): the header's krunker.io bar says Lv 20",
+    check("kio_match: the account row's level is row[6]'s score (level 20): the krunker.io account's header says Lv 20",
           text_of(text, "kiolevel").endswith("Lv 20"), text_of(text, "kiolevel")[:120])
+    check("kio_match: during its game the header's RP count is the wallet packet's balance (%s)" % "{:,}".format(WALLET_TEST),
+          text_of(text, "menurpsess").endswith("text=" + "{:,}".format(WALLET_TEST)), text_of(text, "menurpsess")[:80])
     check("kio_match: no request to /player/me (the balance is the account row, not gapi)",
           not any(e.get("p", "").startswith("/gapi/player/me") for e in entries))
     check("kio_match: the profile shows the krunker.io account's name", "kio_match" in text_of(text, "profilename"),
@@ -791,12 +792,6 @@ def check_both(text, entries):
     game = [e for e in entries if e.get("ws") == "game"]
     check("both: the match joins the krunker.io account's game socket (at= its token)", len(game) == 1 and game[0]["account"] == "kio_both",
           str(game)[:200])
-    before = [text_of(text, "menurp")]
-    check("both: the header's RP count is -- (unknown) before the krunker.io game sends the balance",
-          before and before[0].endswith("text=--"), str(before)[:80])
-    check("both: the header's RP count is the account row's rankedPoints (%s), then the wallet packet's (%s)" % (
-              "{:,}".format(RP_TEST), "{:,}".format(WALLET_TEST)),
-          text_of(text, "menurpafter").endswith("text=" + "{:,}".format(WALLET_TEST)), text_of(text, "menurpafter")[:80])
     api = [e for e in entries if e.get("p", "").startswith(("/api/", "/gapi/"))]
     check("both: the krunker.io requests carry the krunker.io account's Bearer", bool(api) and all(e["account"] == "kio_both" for e in api),
           str([(e["p"], e["account"]) for e in api])[:200])

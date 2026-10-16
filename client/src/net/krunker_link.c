@@ -2477,7 +2477,7 @@ static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length
 // The account-scoped frames io.account_frame takes (KrunkerLinkIO), and how many arguments of each it
 // passes on ("a": [error, id, username, data], never arg 4, the account's session token)
 static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
-    static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln"};
+    static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "ub", "chlR"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
         *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;
