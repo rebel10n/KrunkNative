@@ -383,8 +383,20 @@ static void web_sync_canvas_size(Client *client) {
     glfwSetWindowSize(client->window, width, height); // emscripten GLFW resizes the canvas and fires resize_viewport()
 }
 
+// aimFreezeFix (v10.js:221778, "Possible fix for jittery/freezing aiming"): while shoot is held, v10's
+// loop alternates a requestAnimationFrame frame with a setTimeout one paced to 16 ms
+// (requestAnimFrameF); otherwise every frame is rAF. Browser frame scheduling only: natively the
+// client paces its own frames (vsync / updateRate), there is nothing to alternate.
 static void web_main_loop(void *user_data) {
+    static int raf = 1, timing = EM_TIMING_RAF;
     client_frame(user_data);
+    const int fix = ui_controls_settings()->aim_freeze_fix && ui_controls_down(UI_CONTROL_SHOOT);
+    raf = fix ? !raf : 1;
+    const int want = raf ? EM_TIMING_RAF : EM_TIMING_SETTIMEOUT;
+    if (want != timing || want == EM_TIMING_SETTIMEOUT) {
+        emscripten_set_main_loop_timing(want, want == EM_TIMING_RAF ? 1 : 16);
+        timing = want;
+    }
 }
 
 // Mouse look on the web, as v3.1.1 CONTROLS reads it: the canvas mousemove handler sums
@@ -394,15 +406,33 @@ static void web_main_loop(void *user_data) {
 // (Escape, alt-tab) snaps it back to the absolute page position, and the game applied
 // that jump as one huge look delta before the menu came up. Returns the movement since
 // the last call (0 while unlocked).
+//
+// v10 (CONTROLS, v10.js:202299..202402) on top: with rawMouse the sums come from pointerrawupdate's
+// coalesced events instead of mousemove (when the browser has them), and with mouseFlick an event's
+// axis delta at or beyond flickClamp is replaced by that axis' last accepted delta (Module.knMouse,
+// client_mouse_settings_changed).
 EM_JS(void, web_take_look, (double *dx, double *dy), {
     var look = Module.knLook;
     if (!look) {
-        look = Module.knLook = {x: 0, y: 0};
+        look = Module.knLook = {x: 0, y: 0, lx: 0, ly: 0};
         var canvas = document.getElementById('canvas');
+        var rawOk = canvas && canvas.onpointerrawupdate !== undefined && PointerEvent.prototype.getCoalescedEvents != null;
+        var add = function (e) {
+            var m = Module.knMouse || {flick: 0, clamp: 200, raw: 0};
+            var x = e.movementX || 0, y = e.movementY || 0;
+            if (!m.flick || (x < m.clamp && x > -m.clamp)) look.lx = x;
+            look.x += look.lx || 0;
+            if (!m.flick || (y < m.clamp && y > -m.clamp)) look.ly = y;
+            look.y += look.ly || 0;
+        };
         if (canvas) canvas.addEventListener('mousemove', function (e) {
-            if (document.pointerLockElement !== canvas) return;
-            look.x += e.movementX || 0;
-            look.y += e.movementY || 0;
+            if (document.pointerLockElement !== canvas || (rawOk && Module.knMouse && Module.knMouse.raw)) return;
+            add(e);
+        });
+        if (canvas && rawOk) canvas.addEventListener('pointerrawupdate', function (e) {
+            if (document.pointerLockElement !== canvas || !(Module.knMouse && Module.knMouse.raw)) return;
+            var list = e.getCoalescedEvents();
+            for (var i = 0; i < list.length; i++) if (list[i].isTrusted) add(list[i]);
         });
     }
     HEAPF64[dx >> 3] = look.x;
@@ -1606,8 +1636,41 @@ static int html_pointer_input(void) {
     return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free();
 }
 
+// mouseFlick / flickClamp natively (v10.js:202374 CONTROLS: per mouse event, `if (!mouseSkipFix ||
+// (dx < flickClamp && dx > -flickClamp)) lastDX = dx; sumX += lastDX`, the same for y): the frame's look
+// is the cursor's travel, plus `fix`, the replaced events' (last accepted - own) deltas.
+static struct {
+    int primed;
+    double prev_x, prev_y, last_dx, last_dy, fix_x, fix_y;
+} g_flick;
+
+static void mouse_flick_event(const double x, const double y) {
+    const double dx = x - g_flick.prev_x, dy = y - g_flick.prev_y;
+    const int primed = g_flick.primed;
+    g_flick.prev_x = x, g_flick.prev_y = y, g_flick.primed = 1;
+    if (!primed || html_pointer_input()) return; // the page has the mouse: no look to correct
+    const UiInputSettings *in = ui_controls_settings();
+    const double clamp = in->flick_clamp;
+    if (!in->mouse_flick || (dx < clamp && dx > -clamp)) g_flick.last_dx = dx;
+    else g_flick.fix_x += g_flick.last_dx - dx;
+    if (!in->mouse_flick || (dy < clamp && dy > -clamp)) g_flick.last_dy = dy;
+    else g_flick.fix_y += g_flick.last_dy - dy;
+}
+
+void client_mouse_settings_changed(void) {
+    const UiInputSettings *in = ui_controls_settings();
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.flick = $0; m.clamp = $1; m.raw = $2; }, in->mouse_flick,
+           in->flick_clamp, in->raw_mouse);
+#else
+    (void) in;
+    client_settings_apply_raw_mouse();
+#endif
+}
+
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
+    mouse_flick_event(x, y);
     // KRUNKNATIVE_MOBILE: a drag of the mouse touch (ui_mobile.c). Krunker Strike has its own
     // touch controls (strike_touch.c, below) and no #mobileUI, so the mouse stays theirs.
     if (ui_mobile_active() && !strike_ui_active()) {
@@ -1981,6 +2044,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
             client->mouse_state.locked = 1;
             client->mouse_state.last_pos.x = (float) x;
             client->mouse_state.last_pos.y = (float) y;
+            g_flick.fix_x = g_flick.fix_y = 0.0; // the travel before the lock never turns the camera
         }
     }
 
@@ -1992,9 +2056,12 @@ static void client_tick_game(Client *client, const float now, const float frame_
     }
 
 
-    // This frame's look movement: the cursor travel natively, the locked movement sums on the web.
+    // This frame's look movement: the cursor travel natively (mouseFlick's replaced events corrected),
+    // the locked movement sums on the web.
     float look_x = (float) x - client->mouse_state.last_pos.x;
     float look_y = (float) y - client->mouse_state.last_pos.y;
+    if (!menu_open) look_x += (float) g_flick.fix_x, look_y += (float) g_flick.fix_y;
+    g_flick.fix_x = g_flick.fix_y = 0.0;
 #ifdef __EMSCRIPTEN__
     double web_x, web_y;
     web_take_look(&web_x, &web_y);

@@ -458,6 +458,11 @@ typedef struct {
     float master_volume, voice_volume, asset_volume; // sound, voiceVolume, assetVolume (stored)
     int slid_cont;          // slidCont ("Non FPS Sliding", default on): sent in ENT (ent[15]), applies on the next spawn
     int chall_mode;         // challMode ("Challenge Mode", default off): sent in ENT V8 (ent[7]), applies on the next spawn
+    // General > Experimental (v10.js:203387..203426; CONTROLS v10.js:202299..202402): main.c mouse look
+    int mouse_flick;        // mouseFlick ("Mouse Flick Fix" switch, off on desktop): CONTROLS.mouseSkipFix
+    float flick_clamp;      // flickClamp (200): a mouse event's axis delta >= this repeats the last accepted one
+    int raw_mouse;          // rawMouse (off): web pointerrawupdate events; natively GLFW raw motion with rawInput
+    int aim_freeze_fix;     // aimFreezeFix (off): web only, alternate rAF / 16 ms timeout frames while shooting
 } UiInputSettings;
 
 void ui_controls_load(void);                     // binds + toggle sets + quick chat messages from storage

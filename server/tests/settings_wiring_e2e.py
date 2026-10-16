@@ -150,6 +150,28 @@ check(re.search(r"\[vfx\] customDamage \S+ -> loaded", log) is not None, "custom
 check(grep_hits(log, "endmsg") == 1 and log.count("ggwp_kn_end") >= 1,
       "endMessage: sent to the chat once when the match ends", f"hits={grep_hits(log, 'endmsg')}")
 
+# ---------------------------------------------------------------- input
+def cam_yaw(log, label):
+    m = re.search(r"\[input_script\] cam t=\d+ @" + re.escape(label) + r" .*? dir=([-\d.]+),([-\d.]+)", log)
+    return float(m.group(2)) if m else None
+
+
+# mouseFlick / flickClamp: three 10 px moves then one 500 px flick, with the fix off (530 px of look) and
+# on (flickClamp 200: the flick repeats the last 10 px, so 40 px)
+mouse = ["0 menu", "600 play", "2000 cursor 640 360", "2100 cam @m0"]
+mouse += ["2120 cursor 650 360", "2140 cursor 660 360", "2160 cursor 670 360", "2180 cursor 1170 360", "2300 cam @m1"]
+mouse += ['2400 call setSetting "mouseFlick" "true"', '2400 call setSetting "flickClamp" "200"', "2500 cam @m2"]
+mouse += ["2520 cursor 1180 360", "2540 cursor 1190 360", "2560 cursor 1200 360", "2580 cursor 1700 360", "2700 cam @m3"]
+mouse += ["2800 quit"]
+log = run("mouse", "\n".join(mouse))
+y0, y1, y2, y3 = (cam_yaw(log, f"m{i}") for i in range(4))
+if None in (y0, y1, y2, y3):
+    check(False, "mouseFlick: the camera probes logged", f"{y0} {y1} {y2} {y3}")
+else:
+    off, on = abs(y1 - y0), abs(y3 - y2)
+    check(off > 0 and abs(on / off - 40 / 530) < 0.01, "mouseFlick + flickClamp 200: a 500 px flick turns like the last 10 px move",
+          f"off={off:.4f} on={on:.4f} ratio={on / off if off else 0:.4f}")
+
 if failures:
     print(f"FAILED {len(failures)}: logs in {WORK}")
     sys.exit(1)

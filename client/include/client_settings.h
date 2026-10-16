@@ -41,6 +41,8 @@ int  client_settings_hs_sound_always(void);              // "Always Play HS Soun
 // page reloads) when the server stops for an update or a newer client is ready to run.
 int  client_settings_auto_restart(void);
 void client_settings_fullscreen_size(int *w, int *h);    // "Resolution" for exclusive fullscreen (unchanged when unset)
+// GLFW raw mouse motion again: the Client tab's rawInput, or v10's rawMouse (General > Experimental)
+void client_settings_apply_raw_mouse(void);
 
 // ---- UI (client/src/ui)
 void  ui_client_settings_dom_init(void);                  // menu_dom_init: Exit button, custom CSS, auto spectate, timers

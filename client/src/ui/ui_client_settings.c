@@ -563,12 +563,21 @@ static void apply_exit_button(void) {
 #endif
 }
 
+// Raw (unaccelerated) motion while the pointer is locked: the Client tab's rawInput, or v10's rawMouse.
+// v10's rawMouse (v10.js:203387, toggleMouseInputs) reads pointerrawupdate's coalesced events instead
+// of mousemove; that is the web build's look listener (main.c web_take_look). Natively every motion
+// event already reaches the game, so the nearest counterpart is GLFW's raw motion, on with either row.
 static void apply_raw_input(void) {
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client;
     if (!client || !client->window || !glfwRawMouseMotionSupported()) return;
-    glfwSetInputMode(client->window, GLFW_RAW_MOUSE_MOTION, cs_bool("rawInput") ? GLFW_TRUE : GLFW_FALSE);
+    const int raw = cs_bool("rawInput") || ui_controls_settings()->raw_mouse;
+    glfwSetInputMode(client->window, GLFW_RAW_MOUSE_MOTION, raw ? GLFW_TRUE : GLFW_FALSE);
 #endif
+}
+
+void client_settings_apply_raw_mouse(void) {
+    apply_raw_input();
 }
 
 static void apply_custom_css(void) {

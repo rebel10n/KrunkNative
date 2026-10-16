@@ -785,6 +785,8 @@ void client_set_menu_open(Client*, int);
 // any of them changes (client_set_menu_open does); main.c runs it once a frame too.
 void client_pointer_update(Client*);
 int  client_pointer_look_allowed(const Client*); // the mouse may turn the camera: controls on and really locked
+// main.c: mouseFlick / flickClamp / rawMouse changed (ui_settings.c): the look filter and raw input follow
+void client_mouse_settings_changed(void);
 int  client_pointer_click(Client*);              // a press on the game view with the lock off: lock again (1 = taken)
 void client_pointer_focus(Client*, int focused); // native window focus changes
 void client_pointer_end_free(Client*);           // the lock went during the end title: free until a click
