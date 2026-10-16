@@ -58,6 +58,13 @@ int backend_http_request(const char *method, const char *url, const char *json_b
 // worker, with its own connect / receive timeout, so it never queues behind (or delays) the
 // brain's requests. Same callback rules as backend_http_get.
 int backend_http_get_external(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
+// Native: GET of page media (remote images, remote_images.h) on a third worker of its own, so a
+// page's thumbnails never queue in front of the game list. Bodies are binary (length counts).
+int backend_http_get_media(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
+// Native: a GET on a thread of its own, at once and alongside any other (a region ping race,
+// region_ping.h: every region's /ping in flight together, the answers delivered in the order they
+// came). Same callback rules as backend_http_get. The web's backend_http_request is concurrent already.
+int backend_http_get_parallel(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
 // Native: the social socket reconnects (same brain), e.g. through a changed proxy (http_proxy.h).
 void backend_social_reconnect(void);
 #endif

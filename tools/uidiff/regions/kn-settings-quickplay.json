@@ -1,0 +1,64 @@
+{
+  "scenario": "kn-settings-quickplay",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "quickplay-header",
+      "rect": [
+        293,
+        172,
+        694,
+        38
+      ],
+      "kind": "text",
+      "note": "the Quickplay folder header (v10's setHed) with its open chevron"
+    },
+    {
+      "name": "server-and-launch-rows",
+      "rect": [
+        306,
+        226,
+        664,
+        130
+      ],
+      "kind": "text",
+      "note": "Server Type select, krunker.io Region select, Auto Seek on Launch switch (native rows)"
+    },
+    {
+      "name": "seek-modes-header",
+      "rect": [
+        307,
+        379,
+        662,
+        38
+      ],
+      "kind": "text",
+      "note": "the Seek Modes folder header, open"
+    },
+    {
+      "name": "seek-modes-note",
+      "rect": [
+        320,
+        440,
+        634,
+        30
+      ],
+      "kind": "text",
+      "note": "the rotation note (the default names)"
+    },
+    {
+      "name": "mode-switches",
+      "rect": [
+        315,
+        466,
+        642,
+        190
+      ],
+      "kind": "image",
+      "note": "the first mode switches: Free for All, Hardpoint and Capture the Flag on (rotation), Team Deathmatch and Parkour off"
+    }
+  ]
+}

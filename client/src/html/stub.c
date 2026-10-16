@@ -72,6 +72,8 @@ int html_ui_backend_add_stylesheet(const char *href) {
     return 0;
 }
 
+void html_ui_backend_set_remote_image_fetcher(const HtmlRemoteImageFetch fetch) { (void) fetch; }
+
 int html_ui_backend_set_custom_css(const char *css) {
     (void) css;
     return 0;

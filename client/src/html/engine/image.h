@@ -19,8 +19,9 @@
  * "windows/host.html"; NULL or "" == root).  `url` is resolved against it
  * like a browser does: query (`?build=...`) and fragment are stripped, "."
  * and ".." segments are collapsed (a ".." at the root stays there, as in a
- * browser), a leading "/" means the ui/ root.  A URL that has a scheme (http:, ...; data: URLs are
- * decoded in place, see image_decode_data_url), or is
+ * browser), a leading "/" means the ui/ root.  A URL that has another scheme
+ * (data: URLs are decoded in place, see image_decode_data_url; http(s) ones
+ * go to the embedder's fetcher, see "remote images" below), or is
  * empty resolves to a failed entry.  The normalised root-relative path
  * ("img/logo_4.png") is both the cache key and the request URL on the web.
  * Keys under "assets/" are read from the game asset tree (assets_path(),
@@ -166,6 +167,23 @@ void image_cache_set_clock(ImageCache *cache, double now_ms);
  * failed with "file not found" and whose asset file exists now are probed again. Returns how many
  * load now (the caller relayouts / repaints). */
 int  image_cache_retry_missing(ImageCache *cache);
+
+/* ---- remote images -------------------------------------------------------- */
+
+/* http:, https: and protocol-relative ("//host/x.png", taken as https:) URLs in <img src> and CSS
+ * url() are fetched by the embedder, never by the engine: image_get() asks the fetcher for the
+ * file that holds (or will hold) the URL's body.  READY: it is there, the entry probes it like a
+ * page file (lazy decode on first draw).  PENDING: a download runs; the entry draws nothing (a
+ * browser's image still loading) until the fetcher has written the file and bumped
+ * asset_arrival_generation(), then image_cache_retry_missing() loads it and the page relayouts.
+ * REFUSED (or no fetcher set): a failed entry.  The absolute URL (fragment dropped, query kept) is the
+ * cache key.  The fetcher runs on the GL thread and must not block (client/src/html/remote_image.c). */
+enum { IMAGE_REMOTE_REFUSED = -1, IMAGE_REMOTE_PENDING = 0, IMAGE_REMOTE_READY = 1 };
+typedef int (*ImageRemoteFetch)(const char *url, char *path, size_t cap);
+void image_set_remote_fetcher(ImageRemoteFetch fetch);
+/* `url` as a remote image URL (absolute, scheme lower-cased, "//" -> "https://", fragment dropped):
+ * 1 and the URL in `out`, 0 when it is not an http(s) URL or has spaces / control characters. */
+int  image_remote_url(const char *url, char *out, size_t cap);
 void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, int *decodes);
 
 /* ---- geometry helpers ---------------------------------------------------- */

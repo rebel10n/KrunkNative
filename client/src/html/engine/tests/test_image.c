@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> // getpid
+#include <shared.h> // asset_arrival_bump
 
 #include <gl.h>
 #include <GLFW/glfw3.h>
@@ -514,6 +516,79 @@ static void test_failures(ImageCache *cache) {
     CHECK(a == b && b == c, "cache key not normalised");
 }
 
+/* image_remote_url: which URLs are remote images, and their cache key */
+static void test_remote_urls(void) {
+    char out[256];
+    CHECK(image_remote_url("https://user-assets.krunker.io/m123/thumb.png", out, sizeof(out)) &&
+              !strcmp(out, "https://user-assets.krunker.io/m123/thumb.png"), "https URL: %s", out);
+    CHECK(image_remote_url("  HTTP://Example.com/a.png?v=2#frag ", out, sizeof(out)) && !strcmp(out, "http://Example.com/a.png?v=2"),
+          "scheme lower-cased, query kept, fragment dropped: %s", out);
+    CHECK(image_remote_url("//cdn.example.com/x.png", out, sizeof(out)) && !strcmp(out, "https://cdn.example.com/x.png"),
+          "protocol-relative is https: %s", out);
+    CHECK(!image_remote_url("ftp://example.com/x.png", out, sizeof(out)), "ftp is not remote");
+    CHECK(!image_remote_url("file:///etc/passwd", out, sizeof(out)), "file: is not remote");
+    CHECK(!image_remote_url("img/timer.png", out, sizeof(out)), "a page file is not remote");
+    CHECK(!image_remote_url("https://exa mple.com/x.png", out, sizeof(out)), "a space is refused");
+    CHECK(!image_remote_url("https:///x.png", out, sizeof(out)), "no host");
+    CHECK(!image_remote_url("https://example.com/x.png", out, 20), "too long for the buffer");
+}
+
+/* the embedder's fetcher (client/src/html/remote_image.c): a stand-in that answers from a map */
+static char g_remote_ready_path[512], g_remote_pending_path[512];
+static int g_remote_calls;
+static int test_fetcher(const char *url, char *path, const size_t cap) {
+    g_remote_calls++;
+    if (strstr(url, "/refused")) return IMAGE_REMOTE_REFUSED;
+    if (strstr(url, "/ready")) {
+        snprintf(path, cap, "%s", g_remote_ready_path);
+        return IMAGE_REMOTE_READY;
+    }
+    snprintf(path, cap, "%s", g_remote_pending_path);
+    return IMAGE_REMOTE_PENDING;
+}
+
+static int copy_file(const char *from, const char *to) {
+    FILE *in = fopen(from, "rb"), *out = in ? fopen(to, "wb") : NULL;
+    char buf[4096];
+    size_t n;
+    int ok = in && out;
+    while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0) ok = fwrite(buf, 1, n, out) == n;
+    if (in) fclose(in);
+    if (out) fclose(out);
+    return ok;
+}
+
+static void test_remote(ImageCache *cache, const char *ui_dir) {
+    char timer[512];
+    snprintf(timer, sizeof(timer), "%s/img/timer.png", ui_dir);
+    snprintf(g_remote_ready_path, sizeof(g_remote_ready_path), "%s", timer);
+    snprintf(g_remote_pending_path, sizeof(g_remote_pending_path), "/tmp/kn_test_image_remote_%d.png", (int) getpid());
+    remove(g_remote_pending_path);
+    image_set_remote_fetcher(test_fetcher);
+
+    const ImageEntry *ready = image_get(cache, "https://example.com/ready.png", "index.html");
+    CHECK(!ready->failed && ready->w == 32, "a cached remote image loads at once (failed %d, w %d)", ready->failed, ready->w);
+    CHECK(image_entry_load(cache, ready) && ready->tex, "the cached remote image decodes on draw");
+
+    const ImageEntry *refused = image_get(cache, "https://example.com/refused.png", "index.html");
+    CHECK(refused->failed, "a refused remote image is a failed entry");
+
+    const int calls = g_remote_calls;
+    const ImageEntry *pending = image_get(cache, "https://example.com/pending.png", "index.html");
+    CHECK(pending->failed && pending->w == 0, "a remote image still downloading draws nothing");
+    CHECK(image_get(cache, "https://example.com/pending.png#x", "css/main.css") == pending && g_remote_calls == calls + 1,
+          "one entry, one fetch per URL (calls %d)", g_remote_calls - calls);
+    CHECK(image_cache_retry_missing(cache) == 0 || pending->failed, "nothing arrives before the file does");
+    /* the download lands: the fetcher writes the file and bumps the arrival generation */
+    CHECK(copy_file(timer, g_remote_pending_path), "copy %s", timer);
+    asset_arrival_bump();
+    CHECK(image_cache_retry_missing(cache) >= 1, "the arrived remote image is loaded");
+    CHECK(!pending->failed && pending->w == 32, "after arrival: failed %d, w %d", pending->failed, pending->w);
+    remove(g_remote_pending_path);
+    image_set_remote_fetcher(NULL);
+    CHECK(image_get(cache, "https://example.com/other.png", "index.html")->failed, "no fetcher: remote URLs fail");
+}
+
 static void test_geometry(void) {
     float x, y, w, h;
 
@@ -635,7 +710,7 @@ static void test_animated_gif(ImageCache *cache) {
     CHECK(glGetError() == GL_NO_ERROR, "guide gif: GL error");
 }
 
-static unsigned char *read_file(const char *path, size_t *len) {
+static unsigned char *load_image_file(const char *path, size_t *len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
@@ -660,7 +735,7 @@ static void test_webp(const char *ui_dir) {
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", ui_dir, files[i].name);
         size_t len = 0;
-        unsigned char *bytes = read_file(path, &len);
+        unsigned char *bytes = load_image_file(path, &len);
         CHECK(bytes != NULL, "webp: read %s", path);
         if (!bytes) continue;
         int w = 0, h = 0;
@@ -698,6 +773,7 @@ int main(int argc, char **argv) {
     const char *ui_dir = argc > 1 ? argv[1] : "../ui/";
 
     test_url_resolution();
+    test_remote_urls();
     test_geometry();
     test_webp(ui_dir);
 
@@ -748,6 +824,7 @@ int main(int argc, char **argv) {
     test_roots(cache);
     test_failures(cache);
     test_animated_gif(cache);
+    test_remote(cache, ui_dir);
 
     const int count = image_cache_count(cache);
     image_cache_destroy(cache);

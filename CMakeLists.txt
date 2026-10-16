@@ -1063,6 +1063,16 @@ else ()
         target_link_libraries(krunker_maps_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
     add_test(NAME krunker_maps_test COMMAND krunker_maps_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # seek_filter_test (client/src/ui/seek_filter.c, seek_prefs.h): with no mode picked a seek takes only the
+    # public rotation (v10 rotationModes, the shared mode table), never Trade / Parkour / custom / password /
+    # hosted lobbies; a picked mode is sought; v10's saved-list parsing and dataQuery dsma / dsmo
+    add_executable(seek_filter_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/seek_filter_test.c client/src/ui/seek_filter.c)
+    target_include_directories(seek_filter_test PRIVATE client/include shared/include)
+    target_link_libraries(seek_filter_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(seek_filter_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME seek_filter_test COMMAND seek_filter_test)
 
     # update_test (launcher/, doc/backend.md "Client updates"): manifest parsing, version
     # comparison, asset diffing, URL resolution, package extraction and the journaled swap

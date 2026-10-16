@@ -1,0 +1,178 @@
+{
+  "ref": "doc/ref/krunknative/kn-servers-official-mixed.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 2,
+    "servers": {
+      "totalPlayerCount": 14,
+      "games": [
+        [
+          "CHITOWN1:ab12c",
+          "CH",
+          6,
+          8,
+          {
+            "i": "kanji",
+            "g": 0,
+            "host": "chi1.example",
+            "port": 7777
+          },
+          300
+        ],
+        [
+          "CHITOWN2:cd34e",
+          "CH",
+          3,
+          8,
+          {
+            "i": "sandstorm",
+            "g": 1,
+            "host": "chi2.example",
+            "port": 7777
+          },
+          200
+        ],
+        [
+          "SV1:ef56g",
+          "SV",
+          5,
+          8,
+          {
+            "i": "burg",
+            "g": 0,
+            "host": "sv1.example",
+            "port": 7777
+          },
+          120
+        ]
+      ]
+    },
+    "krunkerLobbies": {
+      "totalPlayerCount": 61,
+      "games": [
+        [
+          "NY:b760t",
+          "us-nj",
+          7,
+          8,
+          {
+            "i": "Kanji",
+            "g": 0
+          },
+          240
+        ],
+        [
+          "NY:qa21k",
+          "us-nj",
+          5,
+          8,
+          {
+            "i": "Sandstorm",
+            "g": 1
+          },
+          180
+        ],
+        [
+          "NY:zz9x1",
+          "us-nj",
+          2,
+          8,
+          {
+            "i": "Burg",
+            "g": 0,
+            "kr": true
+          },
+          90
+        ],
+        [
+          "FRA:k8m2p",
+          "de-fra",
+          8,
+          8,
+          {
+            "i": "Subzero",
+            "g": 0
+          },
+          60
+        ],
+        [
+          "FRA:r4t6y",
+          "de-fra",
+          6,
+          8,
+          {
+            "i": "Littletown",
+            "g": 0
+          },
+          300
+        ],
+        [
+          "SYD:qvxbm",
+          "au-syd",
+          4,
+          8,
+          {
+            "i": "Undergrowth",
+            "g": 0
+          },
+          200
+        ],
+        [
+          "NY:cust1",
+          "us-nj",
+          9,
+          20,
+          {
+            "i": "Kanji",
+            "g": 0,
+            "c": 1,
+            "h": "1v1 Kanji Lowgrav"
+          },
+          0
+        ],
+        [
+          "FRA:oc777",
+          "de-fra",
+          12,
+          30,
+          {
+            "i": "Shipyard",
+            "g": 2,
+            "oc": 1,
+            "ds": 1,
+            "h": "Official Shipyard 24/7"
+          },
+          0
+        ]
+      ]
+    },
+    "windowActions": [
+      [
+        "setExpandedRegion",
+        4
+      ]
+    ],
+    "storage": {
+      "kio_access_token": "scenario",
+      "kio_username": "Sidney",
+      "kio_level": "30"
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: the Servers window with our lobbies (Chicago, Santa Clara) and krunker.io's (state.krunkerLobbies). The official region groups read like v10's own: the region's place name, then Quick Join and 'N online' (Frankfurt open: its rows have no tag). One line before them, 'krunker.io servers' with the krunker.io account it uses (signed in: Sidney, Level 30, Logout), is the only cue (servers_ui.c append_krunker_status). The footer's In Game adds krunker.io's totalPlayerCount. Compare the official groups with doc/ref/krunker-v10.0.2/servers/servers-official-open.png"
+}

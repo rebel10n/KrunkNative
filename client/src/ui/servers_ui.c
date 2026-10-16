@@ -27,9 +27,11 @@
 #include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <join_errors.h>   // a failed join's text and place (join_errors.c)
+#include <region_ping.h>   // the seek region's ping race (v10 getRegion)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
+#include <krunker_map_source.h> // the official map list: v10 playMap / dsma indices
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
@@ -252,6 +254,7 @@ static void server_display_name(const char *id, const char *region, char *out, c
 // <option>s of the region pickers (Settings > Default Region, the ranked queue): every known
 // region plus the ones the matchmaker lists, `selected` marked.
 static cJSON *g_ping_regions;    // the last /mm/ping-list answer (owned)
+static cJSON *g_row_pings;       // {region: ms} measured with the last list load (v10 pingData; -1 failed; owned)
 char *servers_ui_region_options(const char *selected) {
     StrBuf sb = {0};
     const char *seen[64];
@@ -399,7 +402,7 @@ static const char *seek_error_text(const char *error) {
 // screen (join_error_place).
 void servers_ui_seek_failed(const char *text) {
     if (join_error_place(g_client && g_client->net_connected) == JOIN_ERROR_POPUP) ui_error_popup(text);
-    else fatal_error(text);
+    else fatal_error(text); // v10's error screen (join_error_place: the screen in a game too)
 }
 
 static int token_refusal(const char *error) {
@@ -605,6 +608,7 @@ typedef struct SeekReq {
     char *path;   // /mm/seek-game?... without the token
     void *quiet;  // quick join: try the next candidate instead of failing
     int retried;  // a refused token was replaced once
+    int play;     // v10's autoPlaySearch seek (?play=<map>): no match -> the plain seek again (on_seek)
 } SeekReq;
 
 static void seek_req_free(SeekReq *r) {
@@ -635,10 +639,13 @@ static int seek_request_token(SeekReq *r) {
     return backend_http_get("/mm/generate-token", on_token, r);
 }
 
+static void start_seek(const char *game_id);
+
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     SeekReq *req = user;
     const int quiet = req && req->quiet != NULL;
+    const int play = req && req->play;
     const int rejoin = g_rejoin_seek;
     const int find = g_find_seek, find_both = g_find_both;
     const int reload = g_reload_seek;
@@ -742,6 +749,13 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                                                     !strcmp(err->valuestring, "NoAvailableServers") ||
                                                     !strcmp(err->valuestring, "NoServersMatchQuery") ||
                                                     !strcmp(err->valuestring, "NoOtherLobby"));
+        if (play && cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") || !strcmp(err->valuestring, "NoServersMatchQuery"))) {
+            // v10 (v10.js:222085): no lobby plays the map: the plain seek again, in place
+            printf("[mm] play: no lobby plays the map: a plain seek\n");
+            cJSON_Delete(res);
+            start_seek(NULL);
+            return;
+        }
         if (find && (nothing || g_client->net_connected)) {
             // Find New Game / Quick Match found nothing here: the player stays in this lobby
             snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
@@ -753,8 +767,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                 printf("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
-                // (the launch's Both seek has no lobby to stay in: not connected, so the error screen)
-                servers_ui_seek_failed(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
+                // v10's error screen, in the game too (v10.js:222076-222090: the menu with its message)
+                fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
             }
             cJSON_Delete(res);
             return;
@@ -897,8 +911,14 @@ static int strike_seek(const int priv, const char *code) {
 // ClientManager.matchmakerSeek(region, gameId, dataQuery, autoChangeGame)
 // Every caller is an explicit matchmaking action (the automatic ones check g_pin first):
 // it unpins.
-static void seek(const char *game_id, const int auto_change, void *quiet) {
-    char path[3072], enc[512];
+static int g_play_seek;          // the next seek is v10's autoPlaySearch (servers_ui_play_map), taken by seek()
+static char g_play_query[160];   // its dataQuery: {"i":"<map>","dsma":[<index>]}
+
+static void seek(const char *game_id, const int auto_change_in, void *quiet) {
+    char path[6144], enc[3400]; // enc: also the dataQuery with every mode and map picked, URL-encoded
+    const int play = g_play_seek; // v10's play seek: region "any", the map only, autoChangeGame false
+    g_play_seek = 0;
+    const int auto_change = play ? 0 : auto_change_in;
     g_pin = PIN_NONE;
     if (g_client && !g_client->net_connected && !menu_connecting()) menu_show_connecting_map(NULL); // looking for the server: the spinner
     g_rejoin_seek = g_rejoin_next;
@@ -919,7 +939,7 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
         if (!strike_seek(same_private, same_private ? g_strike_code : NULL)) seek_unreachable();
         return;
     }
-    backend_url_encode(enc, sizeof(enc), g_region);
+    backend_url_encode(enc, sizeof(enc), play ? "" : g_region); // regionId 'any' (v10 playMap): no region
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     // the protocol this client speaks: the brain never matches it to a node of another major
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
@@ -927,6 +947,7 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&ruleset=%s", ruleset_current()->key);
     // the app's flavor pool: a Strike client is only ever matched into a Strike lobby
     n += snprintf(path + n, sizeof(path) - (size_t) n, "%s", mm_flavor_param(path));
+    if (play) g_exclude_game[0] = 0;
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
@@ -944,10 +965,12 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
         }
     }
     g_exclude_game[0] = 0;
-    // v10 dataQuery: the saved seek_modes / seek_maps (Settings > Quickplay) as dsmo / dsma; a
-    // requested game is never filtered (the brain ignores them for it anyway)
-    char data_query[128];
-    seek_prefs_data_query(data_query, sizeof(data_query));
+    // v10 dataQuery: the seek_modes / seek_maps switches (Settings > Quickplay) as dsmo / dsma, the public
+    // rotation while none is switched on (seek_prefs.h: never Trade or Parkour by default); a requested
+    // game is never filtered (the brain ignores them for it anyway)
+    char data_query[1100];
+    if (play) snprintf(data_query, sizeof(data_query), "%s", g_play_query); // v10's dataQuery of playMap: the map only
+    else seek_prefs_data_query(data_query, sizeof(data_query));
     if (data_query[0] && !(game_id && game_id[0])) {
         backend_url_encode(enc, sizeof(enc), data_query);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&dataQuery=%s", enc);
@@ -960,6 +983,7 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     SeekReq *req = calloc(1, sizeof(*req));
     if (req) req->path = strdup(path);
     if (req) req->quiet = quiet;
+    if (req) req->play = play;
     if (!req || !req->path || !seek_request_token(req)) {
         seek_req_free(req);
         seek_unreachable();
@@ -1010,21 +1034,74 @@ static void on_token(void *user, const int status, const char *body, const size_
     free(full);
 }
 
-// ClientManager.getRegion(): the cached region when the brain still lists it, else
-// the first region of the ping list (KrunkNative does not ping each region).
+// ClientManager.getRegion() (v10.js:147469-147507) over the brain's /mm/ping-list: Settings > Default
+// Region when the brain lists it, else the region cached by an earlier ping race (pingRegion7, v10's
+// PING_REGION_CACHE_KEY) when still listed, else the race (region_ping.h: every listed region's /ping
+// at once, the first to answer wins and is cached, setDefaultRegion). Every ping failing: the list's
+// first region (v10's seek would stop at "All pings failed."), cached in pingRegion7 for the region
+// pickers but not as a ping result, so the next seek races again. KrunkNative builds before the race
+// wrote the list's first region to pingRegion7 unpinged: only a value knPingRegionPinged confirms counts.
+#define PINGED_KEY "knPingRegionPinged"
+static int g_region_racing;      // the ping race runs: a second seek waits for it (start_seek)
+
+static int region_listed(const char *region) {
+    return region && region[0] && cJSON_GetObjectItemCaseSensitive(g_ping_regions, region) != NULL;
+}
+
+const char *servers_ui_auto_region(void) {
+    static char cached[32];
+    char pinged[32];
+    if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0 || html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0 ||
+        strcmp(cached, pinged))
+        cached[0] = 0;
+    return cached;
+}
+
+static void seek_in_region(const char *requested_game) {
+    if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", "local");
+    if (g_pin != PIN_NONE) {
+        printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
+        g_reload_next = 0;     // nor the reload's mark
+    }
+    // v3.1.1's startup seek sends autoChangeGame: false - a ?game= that is gone, full or needs
+    // an account shows its error (Game not found. / ...) with the "seek a new game" link
+    // instead of quietly landing somewhere else
+    else seek(requested_game, !requested_game, NULL);
+}
+
+static void on_region_race(void *user, const char *region) {
+    char *requested_game = user;
+    g_region_racing = 0;
+    if (region && region_listed(region)) {
+        snprintf(g_region, sizeof(g_region), "%s", region);
+        html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
+        html_storage_set(PINGED_KEY, g_region);
+        printf("[mm] seek region: %s, the first to answer the ping race\n", g_region);
+    } else if (g_ping_regions && g_ping_regions->child && g_ping_regions->child->string) {
+        snprintf(g_region, sizeof(g_region), "%s", g_ping_regions->child->string);
+        html_storage_set("pingRegion7", g_region);
+        printf("[mm] seek region: every ping failed: %s, the list's first\n", g_region);
+    }
+    seek_in_region(requested_game);
+    free(requested_game);
+}
+
 static void on_ping_list(void *user, const int status, const char *body, const size_t length) {
     (void) length;
-    const char *requested_game = user;
+    char *requested_game = user;
     cJSON *list = status == 200 ? cJSON_Parse(body) : NULL;
     char cached[32] = "", saved[32] = "";
     if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0) cached[0] = 0;
+    char pinged[32] = "";
+    if (html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0 || strcmp(cached, pinged)) cached[0] = 0; // a race confirmed it
     const cJSON *setting = ui_setting_saved("defaultRegion");
     if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(saved, sizeof(saved), "%s", setting->valuestring);
     // a saved Default Region the ping list does not name is an error (seek_region_choose returns
     // SEEK_REGION_UNLISTED): no seek, never another region in its place (the error is shown below)
-    const SeekRegionChoice how = seek_region_choose(cJSON_IsObject(list) ? list : NULL, saved, cached, g_region, sizeof(g_region));
-    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
-    if (cJSON_IsObject(list)) {
+    const int have_list = cJSON_IsObject(list);
+    const SeekRegionChoice how = seek_region_choose(have_list ? list : NULL, saved, cached, g_region, sizeof(g_region));
+    if (have_list) {
         cJSON_Delete(g_ping_regions);
         g_ping_regions = list; // the region pickers' options
         list = NULL;
@@ -1042,16 +1119,15 @@ static void on_ping_list(void *user, const int status, const char *body, const s
         free((void *) requested_game);
         return;
     }
-    if (g_pin != PIN_NONE) {
-        printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
-        g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
-        g_reload_next = 0;     // nor the reload's mark
+    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
+    // v10 getRegion: no Default Region and no confirmed cache (the list's first region, or none): the ping
+    // race decides, and seeks in its winner (on_region_race)
+    if ((how == SEEK_REGION_FIRST || how == SEEK_REGION_NONE) && have_list && region_ping_race(g_ping_regions, NULL, on_region_race, requested_game)) {
+        g_region_racing = 1;
+        return;
     }
-    // v3.1.1's startup seek sends autoChangeGame: false - a ?game= that is gone, full or needs
-    // an account shows its error (Game not found. / ...) with the "seek a new game" link
-    // instead of quietly landing somewhere else
-    else seek(requested_game, !requested_game, NULL);
-    free((void *) requested_game);
+    seek_in_region(requested_game);
+    free(requested_game);
 }
 
 static void start_seek(const char *game_id);
@@ -1099,7 +1175,7 @@ static void official_label_tick(void) {
 }
 
 static void start_seek(const char *game_id) {
-    if (g_seek_inflight) return;
+    if (g_seek_inflight || g_region_racing) return;
     g_full_skips = 0;
     if (strike_director_enabled() && !g_brain_mode) { // Krunker Strike without a brain: the director only
         seek(game_id, !game_id, NULL);
@@ -1421,7 +1497,7 @@ static int row_prefs_match(const cJSON *t) {
     const char *map = meta_str(t, "map")[0] ? meta_str(t, "map") : row_i(t);
     return seek_prefs_match(id, map);
 }
-static int prefs_filtering(void) { return seek_prefs_mode() >= 0 || seek_prefs_map() >= 0; }
+static int prefs_filtering(void) { return seek_prefs_filtering(); } // a chosen mode / map (none = every row)
 
 typedef struct {
     char key[32];       // "official", "custom", a region id or a mode alias
@@ -1471,12 +1547,14 @@ static int brain_lists(const char *host, const int port) {
 }
 
 // g_finder_servers minus the brain's own servers, as tuples (g_finder_rows).
+static int finder_off(void); // a scenario render lists only its own servers (defined with the finder)
+
 static void rebuild_finder_rows(void) {
     cJSON_Delete(g_finder_rows);
     g_finder_rows = cJSON_CreateArray();
     g_finder_players = 0;
-    const cJSON *e;
-    cJSON_ArrayForEach(e, g_finder_servers) {
+    const cJSON *e, *servers = finder_off() ? NULL : g_finder_servers;
+    cJSON_ArrayForEach(e, servers) {
         const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
         const cJSON *port = cJSON_GetObjectItem(e, "port");
         if (!host || !host[0] || !cJSON_IsNumber(port)) continue;
@@ -1623,7 +1701,9 @@ static int build_groups(ServerGroup *groups, const int max) {
                     if (gi < 0 && count < max) {
                         ServerGroup *g = &groups[count];
                         snprintf(g->key, sizeof(g->key), "%s", key);
-                        snprintf(g->name, sizeof(g->name), "krunker.io - %s", krunker_region_name(region));
+                        // v10's group name: the region's place name (_7517), nothing else; the section's one
+                        // separator line (append_krunker_status) tells them apart from ours
+                        snprintf(g->name, sizeof(g->name), "%s", krunker_region_name(region));
                         g->region_rank = 1000 + count;
                         gi = count++;
                     }
@@ -1688,18 +1768,9 @@ static int build_groups(ServerGroup *groups, const int max) {
                 gi = find_group(groups, count, "official");
             } else if (custom) { // custom games, ours and krunker.io's: the top group
                 gi = find_group(groups, count, "custom");
-            } else if (row_krunker(t)) { // official lobbies: their own mode groups
-                char key[32];
-                snprintf(key, sizeof(key), "kio:%s", row_alias(t));
-                gi = find_group(groups, count, key);
-                if (gi < 0 && count < max && row_mode(t)) {
-                    ServerGroup *g = &groups[count];
-                    snprintf(g->key, sizeof(g->key), "%s", key);
-                    snprintf(g->name, sizeof(g->name), "krunker.io - %s", row_mode(t)->name ? row_mode(t)->name : row_alias(t));
-                    g->region_rank = 1000 + count;
-                    gi = count++;
-                }
             } else {
+                // ours and the official lobbies alike: the mode's group (v10 lists every lobby of a mode
+                // in one group; an official row's region cell reads its id prefix, "NY")
                 gi = find_group(groups, count, row_alias(t));
             }
             if (gi >= 0) group_push(&groups[gi], t);
@@ -1742,10 +1813,15 @@ static void time_left_text(char *out, const size_t n, const double seconds) {
     else snprintf(out, n, "%s", I18N("windows.servers.starting", "Starting"));
 }
 
-// COLORS.ping by the region's ping (/mm/ping-list values; none known -> low)
-static const char *region_ping_color(const char *region) {
-    const cJSON *p = cJSON_GetObjectItem(g_ping_regions, region);
-    const double ping = cJSON_IsNumber(p) ? p->valuedouble : 0.0;
+// COLORS.ping by the region's measured ping (v10's pingData, measured with each list load: on_row_pings;
+// krunker.io's regions from krunker_lobbies.c). Not measured, or a failed ping (-1): low, as v10 has it.
+static const char *region_ping_color(const char *region, const int krunker) {
+    double ping = 0;
+    if (krunker) krunker_lobbies_region_ping_ms(region, &ping);
+    else {
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(g_row_pings, region);
+        if (cJSON_IsNumber(p)) ping = p->valuedouble;
+    }
     return ping / 2 >= 150 ? "rgb(255, 75, 66)" : ping / 2 >= 50 ? "rgb(255, 213, 66)" : "rgb(158, 235, 86)";
 }
 
@@ -1774,6 +1850,18 @@ static void row_title(StrBuf *sb, const cJSON *t) {
     sb_append(sb, map);
 }
 
+// An official krunker.io row's title exactly as v10's getServers writes it (v10.js:211428-211433):
+// h || i (Krunker's own map name, as sent), "<alias>_" before it on a public lobby ("ffa_Kanji"); in
+// the region browser a custom game without its own name gets the alias as a prefix before the badges.
+// Our own rows keep KrunkNative's "<mode> - <map>" (row_title).
+static void krunker_row_title(StrBuf *prefix, StrBuf *name, const cJSON *t, const int old) {
+    const int custom = row_custom(t), official = row_official(t), dedicated = row_dedicated(t);
+    const char *alias = row_alias(t), *h = row_h(t);
+    if ((custom || old) && !(dedicated || h[0]) && alias[0]) sb_appendf(prefix, "%s_", alias);
+    if (!old && !(official || dedicated || custom || h[0]) && alias[0]) sb_appendf(name, "%s_", alias);
+    sb_append(name, h[0] ? h : row_i(t));
+}
+
 // One server row (getServers' settName settNameIn). The row's label markup is v10981.
 static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     const int old = old_browser();
@@ -1784,9 +1872,11 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     const int current = !finder && !krunker && g_game_id[0] && !strcmp(g_game_id, id);
     char def[32] = "";
     default_region(def, sizeof(def));
-    StrBuf name = {0};
-    row_title(&name, t);
-    sb_append(sb, "<div class='settName settNameIn' onmouseenter='playTick()'style='");
+    StrBuf name = {0}, prefix = {0};
+    if (krunker) krunker_row_title(&prefix, &name, t, old);
+    else row_title(&name, t);
+    // an official krunker.io row looks like v10's own (no tag); kioRow only marks it for tests
+    sb_append(sb, krunker ? "<div class='settName settNameIn kioRow' onmouseenter='playTick()'style='" : "<div class='settName settNameIn' onmouseenter='playTick()'style='");
     if (current) sb_append(sb, "color:#fff !important;");
     sb_append(sb, "padding-top:10px;margin-top:0px;' onclick='playSelect(0.1);");
     if (krunker) {
@@ -1807,9 +1897,9 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append_esc(sb, id);
         sb_append(sb, "\", this)'>");
     }
-    // label: the krunker.io tag leads the title ("KRUNKER.IO Team Deathmatch - Kanji")
-    if (krunker) sb_append(sb, " <div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
-    if (!custom && !old) sb_append(sb, "[YEND] ");
+    if (krunker) sb_append_esc(sb, prefix.data ? prefix.data : ""); // v10: "ffa_" before the badges
+    else if (!custom && !old) sb_append(sb, "[YEND] ");
+    sb_free(&prefix);
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
     sb_append_esc(sb, name.data ? name.data : "");
@@ -1823,7 +1913,9 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     // v7 shows tuple[0].split(":")[0] on custom / official rows and in the mode-grouped browser.
     // KrunkNative: on every brain lobby, as the server's proper name ("Chicago 2", the node id
     // CHITOWN2 as tooltip): a region group holds several servers (finder rows: their host).
-    if (custom || !old || official || !finder) {
+    // an official row as v10 draws it: the cell only on custom / official-custom rows and in the mode
+    // browser, reading the id's prefix ("NY")
+    if (krunker ? custom || !old || official : custom || !old || official || !finder) {
         sb_append(sb, "<div class='serverRegion'");
         if (!show_region()) {
             sb_append(sb, ">");
@@ -1834,7 +1926,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
             char *colon = strchr(node, ':');
             if (colon) *colon = 0;
             if (finder) snprintf(proper, sizeof(proper), "%s", node);
-            else if (krunker) snprintf(proper, sizeof(proper), "%s", krunker_region_name(tuple_str(t, 1)));
+            else if (krunker) snprintf(proper, sizeof(proper), "%s", node);
             else server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
             sb_append(sb, " title='");
             sb_append_esc(sb, node);
@@ -1843,7 +1935,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         }
         sb_append(sb, " -&nbsp;</div>");
     }
-    sb_appendf(sb, "<div class='serverPing material-icons' style='color:%s!important;'>signal_cellular_alt</div>", region_ping_color(tuple_str(t, 1)));
+    sb_appendf(sb, "<div class='serverPing material-icons' style='color:%s!important;'>signal_cellular_alt</div>", region_ping_color(tuple_str(t, 1), krunker));
     if (!official && !custom && !dedicated && show_timer()) {
         const cJSON *tl = cJSON_GetArrayItem(t, 5);
         if (!cJSON_IsNumber(tl)) tl = cJSON_GetObjectItem(meta_of(t), "timeLeft");
@@ -1884,7 +1976,10 @@ static char *get_servers(void) {
             append_krunker_status(&sb, kio_groups);
             kio_status = 1;
         }
-        sb_appendf(&sb, "<div class='setHed' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'", open ? -1 : h);
+        // v10's header (name, then Quick Join and "N online" floated right); an official region's own
+        // group also carries kioHed, a class no sheet styles (tests find the krunker.io groups by it)
+        sb_appendf(&sb, "<div class='setHed%s' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'",
+                   !strncmp(g->key, "kio:", 4) ? " kioHed" : "", open ? -1 : h);
         if (old && show_region() && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
             sb_append(&sb, " title='"); // KrunkNative: the place name's region code (the links' prefix)
             sb_append_esc(&sb, region_name(g->key));
@@ -1911,7 +2006,7 @@ static char *get_servers(void) {
             sb_appendf(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>%s</div>", I18N("windows.servers.none", "No Joinable Games Found..."));
         sb_append(&sb, "</div>");
     }
-    if (!kio_status) append_krunker_status(&sb, 0); // none listed: why, in its place
+    if (!kio_status) append_krunker_status(&sb, kio_groups); // no group of their own (mode browser, customs only, none): after ours
     return sb_finish(&sb);
 }
 
@@ -1945,8 +2040,18 @@ static void on_finder(void *user, const int status, const char *body, const size
     menu_rerender_if_open(2);
 }
 
+// --render-scenario: the scenario's lists (state.servers / krunkerLobbies) are the whole list; the live
+// server finder would add whatever runs at the moment to a reference render.
+static int finder_off(void) {
+#ifdef UI_SCENARIO_SUPPORTED
+    return ui_scenario_active();
+#else
+    return 0;
+#endif
+}
+
 static void finder_refresh(void) {
-    if (!online_finder_url()[0] || g_finder_loading || now_ms() - g_finder_loaded_ms < SERVER_BROWSER_RATE_MS) return;
+    if (finder_off() || !online_finder_url()[0] || g_finder_loading || now_ms() - g_finder_loaded_ms < SERVER_BROWSER_RATE_MS) return;
     char url[320];
     snprintf(url, sizeof(url), "%s", online_finder_url()); // every server takes guests: no online_mode filter
     // the product flavor's pool (finder_table.c): a Strike client lists only Strike lobbies
@@ -1987,26 +2092,28 @@ static void append_seek_status(StrBuf *sb) {
     }
 }
 
-// The KRUNKER.IO section's head (native): what its groups are, or why there are none (loading,
-// krunker.io refusing this network, unreachable). Before its first group, or after ours.
+// The official krunker.io lobbies' one separator line (native), before their first group, or after
+// ours: v10 lists krunker.io's lobbies with no tag, so this line is the only cue that the groups below
+// are krunker.io's (the header's "online" grey, .kioSep in krunknative.css). It names them, says why
+// there are none (loading, krunker.io refusing this network, unreachable, nothing matching), and on the
+// right which krunker.io account they see, with Login / Logout (krunker_account.h).
 static void append_krunker_status(StrBuf *sb, const int groups) {
     if (!krunker_lobbies_enabled()) return;
-    // which account each server type sees (krunker_account.h: krunker.io servers have their own)
-    krunker_account_ui_accounts_html(sb);
-    sb_append(sb, "<div id='kioStatus' " STATUS_BOX "margin-top:10px;");
-    if (!krunker_lobbies_list() && krunker_lobbies_loading()) {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, I18N("kn.servers.kioLoading", "Loading the krunker.io servers..."));
-    } else if (krunker_lobbies_error()[0] && !groups) {
-        sb_append(sb, "color:#ff6b6b'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, krunker_lobbies_error());
-    } else if (!groups) {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No krunker.io server matches the search or filter."));
-    } else {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "OFFICIAL LOBBIES")
-                                                  : I18N("kn.servers.kioOpensInBrowser", "krunker.io servers open in your browser."));
+    sb_append(sb, "<div id='kioStatus' class='kioSep'><span class='kioSepAcc' id='knAccountsKio'>");
+    krunker_account_ui_state_html(sb);
+    sb_append(sb, "</span><span class='kioSepLabel'>");
+    sb_append_esc(sb, I18N("kn.servers.kioSection", "krunker.io servers"));
+    sb_append(sb, "</span>");
+    const char *why = NULL;
+    int error = 0;
+    if (!krunker_lobbies_list() && krunker_lobbies_loading()) why = I18N("kn.servers.kioLoading", "Loading the krunker.io servers...");
+    else if (krunker_lobbies_error()[0] && !groups) why = krunker_lobbies_error(), error = 1;
+    else if (!groups) why = I18N("kn.servers.kioNoMatch", "No krunker.io server matches the search or filter.");
+    else if (!krunker_net_in_client()) why = I18N("kn.servers.kioOpensInBrowser", "krunker.io servers open in your browser.");
+    if (why) {
+        sb_append(sb, error ? "<div class='kioSepWhy kioSepErr'>" : "<div class='kioSepWhy'>"); // its own line, under the label
+        sb_append_esc(sb, why);
+        sb_append(sb, "</div>");
     }
     sb_append(sb, "</div>");
 }
@@ -2490,6 +2597,153 @@ static void append_header_left(StrBuf *sb) {
     sb_append(sb, "<div style='display:none'><a onclick='showWindow(42)'>+ Host Game</a></div>");
 }
 
+// ---- the custom games' carousel (v10 windows[1].customsInfo + genList + post: PureJSCarousel)
+// loadData() gathers the custom games that run a published map (meta c and cm), one entry per name
+// (h, else the map i) with their players summed, most players first; genList() shows them as slides
+// when there are at least 3 (at most 31), each the map's thumbnail from user-assets
+// (_9259("/m" + cm + "/thumb.png"): https://user-assets.krunker.io/m<cm>/thumb.png), its name, the
+// players and a 24/7 tag (oc or ds); a click searches the list for it (windows[1].searchList(name)).
+// post() then builds v10's PureJSCarousel (v7.1.4 public/libs/purejscarousel.js) over it: the slides
+// three times in a container (clones, the slides, clones) shifted left by one set, and the prev / next
+// buttons, which slide three slides in 400 ms and rotate the set. The thumbnails come through the
+// engine's remote images (remote_images.h); KRUNKNATIVE_KRUNKER_USER_ASSETS points them elsewhere (tests).
+#define CAROUSEL_MAX 31
+#define CAROUSEL_SLIDE_W 295 // .slide: 265px + 2 x 15px border (content-box): its offsetWidth
+#define CAROUSEL_STEP 3      // goToNextSlide: blockWidth = slides[0].offsetWidth * 3
+#define CAROUSEL_SPEED_MS 400.0
+
+static struct {
+    int n, rot, busy;
+    struct {
+        char name[96];
+        char cm[48];
+        int players;
+        int tag; // oc || ds: 24/7
+    } e[CAROUSEL_MAX + 32];
+} C;
+
+static const char *user_assets_url(void) {
+    const char *over = getenv("KRUNKNATIVE_KRUNKER_USER_ASSETS");
+    return over && over[0] ? over : "https://user-assets.krunker.io";
+}
+
+// customsInfo from every list the browser shows (krunker.io's custom games carry cm)
+static void carousel_collect(void) {
+    const cJSON *lists[3] = {brain_games(), g_finder_rows, krunker_lobbies_list()};
+    C.n = 0;
+    for (int l = 0; l < 3; l++) {
+        const cJSON *t;
+        cJSON_ArrayForEach(t, lists[l]) {
+            const cJSON *cm = cJSON_GetObjectItem(meta_of(t), "cm");
+            char id[48] = "";
+            if (cJSON_IsString(cm)) snprintf(id, sizeof(id), "%s", cm->valuestring);
+            else if (cJSON_IsNumber(cm)) snprintf(id, sizeof(id), "%.0f", cm->valuedouble);
+            if (!row_custom(t) || !id[0]) continue;
+            for (const char *p = id; *p; p++) {
+                if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || *p == '_' || *p == '-')) id[0] = 0;
+            }
+            if (!id[0]) continue;
+            const char *name = row_h(t)[0] ? row_h(t) : row_i(t);
+            int k = 0;
+            while (k < C.n && strcmp(C.e[k].name, name)) k++;
+            if (k == C.n) {
+                if (C.n >= (int) (sizeof(C.e) / sizeof(C.e[0]))) continue;
+                memset(&C.e[k], 0, sizeof(C.e[k]));
+                snprintf(C.e[k].name, sizeof(C.e[k].name), "%s", name);
+                snprintf(C.e[k].cm, sizeof(C.e[k].cm), "%s", id);
+                C.e[k].tag = row_official(t) || meta_flag(t, "ds");
+                C.n++;
+            }
+            C.e[k].players += tuple_int(t, 2);
+        }
+    }
+    // customsInfo.sort((a, b) => (b.c || -1) - (a.c || -1)): most players first, stable like v8's sort
+    for (int i = 1; i < C.n; i++) {
+        __typeof__(C.e[0]) v = C.e[i];
+        const int pv = v.players ? v.players : -1;
+        int j = i - 1;
+        while (j >= 0 && (C.e[j].players ? C.e[j].players : -1) < pv) {
+            C.e[j + 1] = C.e[j];
+            j--;
+        }
+        C.e[j + 1] = v;
+    }
+    if (C.n > CAROUSEL_MAX) C.n = CAROUSEL_MAX;
+    if (C.n < 3) C.rot = 0;
+    else C.rot %= C.n;
+}
+
+static void carousel_slide(StrBuf *sb, const int i, const int clone) {
+    char name[96];
+    size_t k = 0;
+    for (const char *p = C.e[i].name; *p && k + 1 < sizeof(name); p++) {
+        if (*p != '"' && *p != '\\') name[k++] = *p; // (searchList's argument stays one string)
+    }
+    name[k] = 0;
+    sb_append(sb, clone ? "<div class='slide purejscarousel-slide purejscarousel-slide-clone'" : "<div class='slide purejscarousel-slide'");
+    sb_append(sb, " onclick='windows[1].searchList(&quot;");
+    sb_append_esc(sb, name);
+    sb_appendf(sb, "&quot;)'><img class='slideImg' loading='lazy' src='%s/m%s/thumb.png' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'><div class='slideName'>",
+               user_assets_url(), C.e[i].cm);
+    sb_append_esc(sb, C.e[i].name);
+    sb_appendf(sb, "</div><div class='slidePlayers'><span class='material-icons'>person</span>%d</div>", C.e[i].players);
+    if (C.e[i].tag) sb_append(sb, "<div class='slideTag'>24/7</div>");
+    sb_append(sb, "</div>");
+}
+
+// the container's slides: clones, the slides, clones, each set starting at the rotation
+static void carousel_slides_html(StrBuf *sb) {
+    for (int set = 0; set < 3; set++) {
+        for (int j = 0; j < C.n; j++) carousel_slide(sb, (j + C.rot) % C.n, set != 1);
+    }
+}
+
+static void carousel_html(StrBuf *sb) {
+    carousel_collect();
+    C.busy = 0;
+    if (C.n < 3) return;
+    sb_appendf(sb, "<div class='carousel purejscarousel' id='carousel-infinite' style='margin-bottom:25px;'>"
+                   "<div class=' purejscarousel-slides-container' style='margin-left: %dpx; width: %dpx;'>",
+               -CAROUSEL_SLIDE_W * C.n, CAROUSEL_SLIDE_W * C.n * 3);
+    carousel_slides_html(sb);
+    sb_append(sb, "</div><div class=' purejscarousel-btn purejscarousel-btn-prev' data-is-native='0' onclick='knCarousel(-1)'>"
+                  "<span class=\"material-icons plusOrMinus2\">navigate_before</span></div>"
+                  "<div class=' purejscarousel-btn purejscarousel-btn-next' data-is-native='0' onclick='knCarousel(1)'>"
+                  "<span class=\"material-icons plusOrMinus2\">navigate_next</span></div></div>");
+}
+
+// goToSlide's scrollEnd: the set rotated by the slides that went by, back at its rest position
+static int g_carousel_dir;
+static void carousel_scroll_end(void *user) {
+    (void) user;
+    HtmlElem box = html_dom_query(0, "#carousel-infinite .purejscarousel-slides-container");
+    C.busy = 0;
+    if (!box || C.n < 3) return;
+    C.rot = ((C.rot + g_carousel_dir * CAROUSEL_STEP) % C.n + C.n) % C.n;
+    StrBuf sb = {0};
+    carousel_slides_html(&sb);
+    char *html = sb_finish(&sb);
+    html_dom_set_html(box, html);
+    free(html);
+    char margin[32];
+    snprintf(margin, sizeof(margin), "%dpx", -CAROUSEL_SLIDE_W * C.n);
+    html_dom_set_style(box, "transition", "");
+    html_dom_set_style(box, "margin-left", margin);
+}
+
+// knCarousel(dir): goToNextSlide (1) / goToPrevSlide (-1); a click while one runs is ignored (setControl(false))
+static void carousel_go(const int dir) {
+    HtmlElem box = html_dom_query(0, "#carousel-infinite .purejscarousel-slides-container");
+    if (!box || C.busy || C.n < 3) return;
+    C.busy = 1;
+    g_carousel_dir = dir < 0 ? -1 : 1;
+    char margin[32];
+    snprintf(margin, sizeof(margin), "%dpx", -CAROUSEL_SLIDE_W * C.n - g_carousel_dir * CAROUSEL_SLIDE_W * CAROUSEL_STEP);
+    html_dom_set_style(box, "transition", "margin-left 400ms linear 0ms");
+    html_dom_set_style(box, "margin-left", margin);
+    if (!html_timer_add(CAROUSEL_SPEED_MS, carousel_scroll_end, NULL)) carousel_scroll_end(NULL);
+}
+
 // windows[1].genList()
 static char *gen_list(void) {
     const int old = old_browser();
@@ -2515,7 +2769,7 @@ static char *gen_list(void) {
     append_seek_status(&sb);
     char *servers = get_servers();
     if (old) {
-        // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown
+        carousel_html(&sb); // the custom games' carousel (customsInfo.length >= 3)
         sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
         sb_append(&sb, servers);
         sb_append(&sb, "</div>");
@@ -2532,7 +2786,9 @@ static char *gen_list(void) {
     }
     free(servers);
     char total[32], social[32];
-    const double players = (brain_games() ? g_total_players : 0) + g_finder_players; // after get_servers: + finder-only
+    // after get_servers: + finder-only; + the official krunker.io lobbies' players when they are listed
+    // (v10's "In Game" is krunker.io's totalPlayerCount)
+    const double players = (brain_games() ? g_total_players : 0) + g_finder_players + (krunker_lobbies_list() ? krunker_lobbies_players() : 0);
     comma_number(total, sizeof(total), players);
     comma_number(social, sizeof(social), g_social_players);
     char in_game[64], in_editor[64], on_social[64];
@@ -2550,6 +2806,11 @@ static void on_game_list(void *user, const int status, const char *body, const s
     (void) length;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *games = cJSON_GetObjectItem(res, "games");
+    if (!cJSON_IsArray(games)) { // v10's loadData: the failed fetch never sets loadedServers; the window keeps its LOADING text
+        printf("[mm] game list failed (HTTP %d): the server list stays loading until the next opening\n", status);
+        cJSON_Delete(res);
+        return;
+    }
     if (cJSON_IsArray(games)) {
         servers_ui_note_list_response(res); // download_url / downloads (build versions)
         cJSON_Delete(g_games);
@@ -2574,6 +2835,24 @@ static void on_game_list(void *user, const int status, const char *body, const s
     if (ui_window_key(2)) menu_rerender_if_open(2); // window.showWindow(2, true)
 }
 
+// v10 getRegionPing (loadData): every region of the ping list pinged at once, each round trip timed; the
+// Servers window shows the new icons (windows[1].pingData, then showWindow(2, true) when it is open)
+static void on_row_pings(void *user, cJSON *pings) {
+    (void) user;
+    cJSON_Delete(g_row_pings);
+    g_row_pings = pings;
+    printf("[mm] row pings measured: %d regions\n", cJSON_GetArraySize(pings));
+    if (g_loaded) menu_rerender_if_open(2); // v10: only once the list has loaded (loadedServers)
+}
+
+static void on_row_ping_list(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    (void) length;
+    cJSON *list = status == 200 ? cJSON_Parse(body) : NULL;
+    if (cJSON_IsObject(list)) region_ping_measure(list, on_row_pings, NULL); // no regions: the icons stay low
+    cJSON_Delete(list);
+}
+
 static void on_player_count(void *user, const int status, const char *body, const size_t length) {
     (void) user;
     (void) length;
@@ -2588,6 +2867,14 @@ static void on_player_count(void *user, const int status, const char *body, cons
 
 static char *games_window_gen(void);
 static char *host_window_gen(void);
+
+// loadData()'s loading text: "<div style='padding-top:19px;>" lacks its closing quote in v7.1.4, which
+// swallows the text (a blank window while loading): fixed
+static char *loading_html(void) {
+    char loading[128];
+    snprintf(loading, sizeof(loading), "<div style='padding-top:19px;'>%s</div>", I18N("generic.loading", "LOADING..."));
+    return strdup(loading);
+}
 
 char *servers_window_gen(const int id, const char **header) {
     (void) header;
@@ -2606,17 +2893,15 @@ char *servers_window_gen(const int id, const char **header) {
         g_loaded = 1;
         return gen_list();
     }
-    // gen(): the cached list within serverBrowserRate, else loadData()
-    if (now_ms() - g_last_load_ms < SERVER_BROWSER_RATE_MS && g_loaded) return gen_list();
+    // gen() (v10 windows[1]): within serverBrowserRate the list is not asked again, the re-renders the
+    // other answers cause included; while the first answer is in flight, the loading text
+    if (now_ms() - g_last_load_ms < SERVER_BROWSER_RATE_MS) return g_loaded ? gen_list() : loading_html();
     g_last_load_ms = now_ms();
     g_loaded = 0;
     mm_get("/mm/game-list?hostname=krunknative", on_game_list, NULL);
+    mm_get("/mm/ping-list", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
     backend_http_get("/api/player-count", on_player_count, NULL);
-    // loadData()'s "<div style='padding-top:19px;>" lacks its closing quote, which swallows
-    // the text in v7.1.4 (a blank window while loading): fixed
-    char loading[128];
-    snprintf(loading, sizeof(loading), "<div style='padding-top:19px;'>%s</div>", I18N("generic.loading", "LOADING..."));
-    return strdup(loading);
+    return loading_html();
 }
 
 // setExpandedRegion / searchList: #serverHolder = getServers()
@@ -2823,8 +3108,8 @@ static void on_checked_info(void *user, const int status, const char *body, cons
 
 // openServerWindow(n) (Server Finder, showWindow(48)): 0 Public / 1 Customs open the Servers
 // window (Customs: oldBrowser collapses the regions, else the Custom Servers tab); 2 Raids /
-// 3 Zombies / 4 Trade Plaza search the official customs of that mode, which KrunkNative has
-// none of: v7's "Couldnt find any" popup.
+// 3 Zombies / 4 Trade Plaza join the official krunker.io custom game of that mode with room
+// (krunker_lobbies_find_custom, v10.js:218379-218415), "Couldnt find any" when there is none.
 static void open_server_window(const int which) {
     if (which == 0 || which == 1) {
         menu_show_window(2, 0);
@@ -2840,7 +3125,10 @@ static void open_server_window(const int which) {
         }
         return;
     }
-    ui_alert("Couldnt find any");
+    const int mode = which == 2 ? MODE_ID_RAID : which == 3 ? MODE_ID_ZOM : which == 4 ? MODE_ID_TRADE : -1;
+    if (mode < 0) return;
+    ui_loading_popup(I18N("kn.finder.searching", "Searching...")); // v10: iîíïíîî('Searching...'), closed by the outcome
+    krunker_lobbies_find_custom(mode);
 }
 
 static void games_load_more(const HtmlEvent *ev);
@@ -2894,13 +3182,17 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         menu_rerender_if_open(2); // updateWindow(2)
         return 1;
     }
+    if (!strcmp(name, "knCarousel")) { // the carousel's prev / next (PureJSCarousel's buttons)
+        carousel_go(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 1);
+        return 1;
+    }
     if (!strcmp(name, "windows.1.searchList")) {
         HtmlElem input = html_dom_by_id("serverSearch");
         g_search[0] = 0;
         if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) {
             snprintf(g_search, sizeof(g_search), "%s", args[0].str);
             if (input) html_dom_set_value(input, g_search);
-            g_expanded = 1; // searchList(text): expandedRegion = text == "Krunk_Plaza" ? 0 : 1
+            g_expanded = strcmp(g_search, "Krunk_Plaza") ? 1 : 0; // searchList(text): expandedRegion = text == "Krunk_Plaza" ? 0 : 1
         } else if (input) {
             html_dom_get_value(input, g_search, sizeof(g_search));
         }
@@ -3087,8 +3379,7 @@ typedef struct {
     void *user;
 } MatchesReq;
 
-static cJSON *matches_of(const cJSON *games) {
-    cJSON *out = cJSON_CreateObject();
+static void matches_add(cJSON *out, const cJSON *games) {
     const cJSON *t;
     cJSON_ArrayForEach(t, games) {
         if (!row_custom(t)) continue;
@@ -3097,6 +3388,15 @@ static cJSON *matches_of(const cJSON *games) {
         if (have) cJSON_SetNumberValue(have, have->valuedouble + row_players(t));
         else cJSON_AddNumberToObject(out, map, row_players(t));
     }
+}
+
+// v10 fetchMatches (v10:215632): the custom games of the game list by map (i), their players summed
+// (min(players, max)). KrunkNative: ours, then krunker.io's official custom games (krunker_lobbies.h,
+// native), the list v10 itself reads; a name on both sums both.
+static cJSON *matches_of(const cJSON *games) {
+    cJSON *out = cJSON_CreateObject();
+    matches_add(out, games);
+    matches_add(out, krunker_lobbies_list());
     return out;
 }
 
@@ -3649,6 +3949,21 @@ const char *ui_host_checked_map(void) {
     return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
 }
 
+// A Popular Now card (v10: openURL("/?play=" + name)): one of our custom games on that map is playMap's;
+// a map only krunker.io's custom games run joins the busiest of them that has room (an official lobby,
+// krunker_lobbies_open), what krunker.io's own /?play= finds. 1 = an official lobby was opened.
+int servers_ui_popular_official(const char *map) {
+    const cJSON *t;
+    cJSON_ArrayForEach(t, brain_games()) {
+        if (row_custom(t) && !strcmp(row_i(t), map ? map : "")) return 0;
+    }
+    char id[80];
+    if (!krunker_lobbies_pick_custom(map, id, sizeof(id))) return 0;
+    printf("[mm] Popular Now %s: krunker.io's custom game %s\n", map, id);
+    krunker_lobbies_open(id);
+    return 1;
+}
+
 // ------------------------------------------------------------------ playMap / ?play= / ?game=
 
 // v3.1.1 playMap(name) -> "/?play=<name>" -> autoHostMap: join a lobby on that map, else host
@@ -3673,6 +3988,15 @@ static void on_play_fetched(void *user, const cJSON *map, const char *error) {
 
 static void fetch_map_data(const char *name) {
     community_fetch(name, on_play_fetched, NULL);
+}
+
+// The official map's index (v10's mapIndex: the dsma number of the lobby's map), -1 when v10 has no such map
+static int official_map_index(const char *name) {
+    for (int i = 0; i < krunker_official_map_count(); i++) {
+        const char *m = krunker_official_map_name(i);
+        if (m && !strcasecmp(m, name)) return i;
+    }
+    return -1;
 }
 
 static void on_play_list(void *user, const int status, const char *body, const size_t length) {
@@ -3715,6 +4039,18 @@ int servers_ui_play_map(const char *name, const int catalogue) {
     if (!name || !name[0] || backend_available() != 1) return 0;
     snprintf(g_play_name, sizeof(g_play_name), "%s", name);
     g_play_catalogue = catalogue;
+    // v10 ?play=<map> (playMap, v10.js:222040-222051): a matchmaker seek for that map in any region, the
+    // map as its dataQuery (`i`; the brain matches the map's index, dsma), autoChangeGame false. No lobby
+    // plays it: the plain seek (on_seek). Community maps (not one of v10's) keep the list search below.
+    const int index = official_map_index(name);
+    if (index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
+        snprintf(g_play_query, sizeof(g_play_query), "{\"i\":\"%s\",\"dsma\":[%d]}", name, index);
+        g_exclude_game[0] = 0;
+        g_play_seek = 1;
+        printf("[mm] play %s: a seek for that map (v10 playMap)\n", name);
+        seek(NULL, 0, NULL);
+        return 1;
+    }
     if (g_brain_mode && !g_client->offline) {
         mm_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
         return 1;
@@ -3859,6 +4195,14 @@ static int quick_match_seek(void) {
     g_game_id[0] = 0;
     start_seek(NULL); // /mm/ping-list, then the seek with excludeGame
     return 1;
+}
+
+// The Lost Connection screen's Find Game after an official krunker.io failure (v10: a fresh page, a new
+// game): the busiest other lobby of the list (krunker_lobbies_seek: the krunker.io Region first, the
+// recent ones last), or without a list krunker.io's own Find New Game. 0 = neither could start.
+int servers_ui_official_find_game(void) {
+    if (krunker_lobbies_enabled()) return krunker_lobbies_seek();
+    return g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0;
 }
 
 int servers_ui_quick_match(void) {

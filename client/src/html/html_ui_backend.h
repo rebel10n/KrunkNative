@@ -26,6 +26,8 @@ int  html_ui_backend_load_page(const char *page);
 int  html_ui_backend_add_stylesheet(const char *href);
 // html_ui_set_custom_css on the game page (NULL/"" removes the sheet).
 int  html_ui_backend_set_custom_css(const char *css);
+// html_ui_set_remote_image_fetcher (callable before init; the web and stub backends ignore it).
+void html_ui_backend_set_remote_image_fetcher(HtmlRemoteImageFetch fetch);
 
 // Implemented by the dispatcher, called by the backend (main thread only) once the
 // page's DOM exists and the UI logic may query it: html_ui_is_ready() returns 1 from

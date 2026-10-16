@@ -1,0 +1,30 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunknative/kn-settings-quickplay.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 0,
+    "settingsTab": 0,
+    "settingsView": "advanced",
+    "settings": {},
+    "windowScroll": {
+      "menuWindow": 1470
+    }
+  },
+  "frames": 3,
+  "note": "Settings > General (advanced) > Quickplay with nothing saved: the Seek Modes folder open, one switch per mode, the public rotation (Free for All, Hardpoint, Capture the Flag, Kill Confirmed, Domination) on and the rest off (seek_prefs.c). v10.0.2 has no switch list for seek_modes, so the baseline is KrunkNative's own render (doc/ref/krunknative/), a regression reference for the switches and the folder markup."
+}

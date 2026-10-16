@@ -116,6 +116,8 @@ int html_ui_set_custom_css(const char *css) {
     return html_ui_backend_set_custom_css(css);
 }
 
+void html_ui_set_remote_image_fetcher(const HtmlRemoteImageFetch fetch) { html_ui_backend_set_remote_image_fetcher(fetch); }
+
 int html_ui_load_page(const char *page) {
     if (!g_initialized || !page || !*page) return 0;
     const int base = !strcmp(page, "index.html");

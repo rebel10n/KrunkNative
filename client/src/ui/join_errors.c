@@ -71,5 +71,8 @@ void join_error_text(const char *code, char *out, const size_t n) {
 }
 
 JoinErrorPlace join_error_place(const int in_game) {
-    return in_game ? JOIN_ERROR_POPUP : JOIN_ERROR_SCREEN;
+    // v10's failed seek (v10.js:222076-222090: iîiìiïí) shows its error screen whether the player is in a
+    // game or not: the game is left behind it. The popup is kept for the join's own notices only.
+    (void) in_game;
+    return JOIN_ERROR_SCREEN;
 }

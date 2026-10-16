@@ -1,0 +1,71 @@
+{
+  "ref": "doc/ref/krunknative/kn-servers-official-error.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 2,
+    "servers": {
+      "totalPlayerCount": 14,
+      "games": [
+        [
+          "CHITOWN1:ab12c",
+          "CH",
+          6,
+          8,
+          {
+            "i": "kanji",
+            "g": 0,
+            "host": "chi1.example",
+            "port": 7777
+          },
+          300
+        ],
+        [
+          "CHITOWN2:cd34e",
+          "CH",
+          3,
+          8,
+          {
+            "i": "sandstorm",
+            "g": 1,
+            "host": "chi2.example",
+            "port": 7777
+          },
+          200
+        ],
+        [
+          "SV1:ef56g",
+          "SV",
+          5,
+          8,
+          {
+            "i": "burg",
+            "g": 0,
+            "host": "sv1.example",
+            "port": 7777
+          },
+          120
+        ]
+      ]
+    },
+    "krunkerLobbies": {
+      "error": "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: krunker.io refused the official list: the krunker.io servers line says why in red where the official groups would be; our groups are unchanged"
+}

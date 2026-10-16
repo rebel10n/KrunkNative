@@ -97,7 +97,7 @@ int main(void) {
 
     // where it shows: the Lost Connection screen when the join never started, v10's error popup in a game
     CHECK(join_error_place(0) == JOIN_ERROR_SCREEN, "not in a game: the Lost Connection screen");
-    CHECK(join_error_place(1) == JOIN_ERROR_POPUP, "in a game: the error popup");
+    CHECK(join_error_place(1) == JOIN_ERROR_SCREEN, "in a game: v10's error screen too (a failed seek leaves the game behind it)");
 
     printf("join_errors_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

@@ -1,0 +1,100 @@
+{
+  "scenario": "kn-servers-official-open",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "window-header",
+      "rect": [
+        307,
+        118,
+        480,
+        30
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
+    },
+    {
+      "name": "top-groups",
+      "rect": [
+        307,
+        170,
+        665,
+        90
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "Official Customs and Custom Games"
+    },
+    {
+      "name": "new-york-header",
+      "rect": [
+        307,
+        293,
+        665,
+        38
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "note": "the open official region group: New York, Quick Join, 14 online (after KrunkNative's krunker.io servers line, hence the offset)"
+    },
+    {
+      "name": "new-york-rows",
+      "rect": [
+        307,
+        342,
+        665,
+        105
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "max_pct": 5.0,
+      "note": "v10's rows: ffa_Kanji, tdm_Sandstorm, ffa_Burg + KR, the ping, Ends in, players; no tag and no region cell. Ends in counts from the list's arrival, so its seconds digit may differ by one between the capture and the render"
+    },
+    {
+      "name": "other-groups",
+      "rect": [
+        307,
+        457,
+        665,
+        90
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "note": "Frankfurt and Sydney"
+    },
+    {
+      "name": "footer",
+      "rect": [
+        307,
+        560,
+        665,
+        36
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "note": "61 In Game"
+    }
+  ]
+}

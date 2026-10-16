@@ -313,7 +313,13 @@ def in_game(st):
 
 
 def client_f4(port, game_a, game_b):
-    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n9000 respawn\n12000 call copyInviteLink\n15000 state\n16000 quit\n")
+    # both nodes' modes picked (Settings > Quickplay): with none picked a seek takes only the public rotation
+    # (seek_prefs.h), which the tdm node is not in, so F4 would have no other lobby
+    cfg = os.path.join(WORK, "f4-cfg")
+    os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
+    with open(os.path.join(cfg, "krunknative", "knSettings.json"), "w") as f:
+        json.dump({"seek_modes": "%d,%d" % (game_a[4]["mode"], game_b[4]["mode"])}, f)
+    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n9000 respawn\n12000 call copyInviteLink\n15000 state\n16000 quit\n", cfg=cfg)
     done = finish(p, 90)
     text = read_log(log)
     js = joined(text)
@@ -341,6 +347,8 @@ def client_launch(port, game_b):
     check("L1: the launch seeks once (the option is on by default)", text.count("[mm] launch seek: Quickplay KrunkNative") == 1 and len(js) == 1,
           "%s %s" % (text.count("[mm] launch seek"), str(js)))
     check("L1: and plays the lobby it found", in_game(states(text)) and js and "[mm] joining %s at" % js[0] in text, str(states(text)))
+    check("L1: nothing picked: the launch seek takes the public rotation's lobby (ffa), never the tdm node (v10 rotationModes)",
+          js and js[0] != game_b[0], str(js))
     p, log = client("launch_link", port, "0 play\n6000 state\n9000 quit\n", extra_env={"KRUNKNATIVE_GAME": game_b[0]})
     finish(p, 60)
     text = read_log(log)
@@ -378,13 +386,16 @@ def client_settings(port, game_b):
     with open(os.path.join(cfg, "krunknative", "krk_advanced.json"), "w") as f:
         f.write("1")  # Settings' advanced view (Quickplay is not in the basic one)
     mode_b = game_b[4]["mode"]
-    p, log = client("prefs1", port, '0 play\n500 call setSetting "seek_modes" "%d"\n800 call showWindow 1\n2500 text @mode [id=knSeekMode]\n'
-                    '2600 text @type [id=knSeekServers]\n2700 nodes @hed [id=setHed_quickplay]\n3000 quit\n' % mode_b, cfg=cfg)
+    p, log = client("prefs1", port, '0 play\n500 call setSetting "seek_modes" "%d"\n800 call showWindow 1\n2500 text @mode [id=knSeekMode%d]\n'
+                    '2550 text @ffa [id=knSeekMode0]\n2600 text @type [id=knSeekServers]\n2700 nodes @hed [id=setHed_quickplay]\n3000 quit\n'
+                    % (mode_b, mode_b), cfg=cfg)
     finish(p, 60)
     text = read_log(log)
-    m = re.search(r"\[input_script\] text t=\d+ @mode n=(\d+) checked=\d value=(\S*)", text)
+    m = re.search(r"\[input_script\] text t=\d+ @mode n=(\d+) checked=(\d)", text)
+    f = re.search(r"\[input_script\] text t=\d+ @ffa n=(\d+) checked=(\d)", text)
     check("C3: Settings > General shows the Quickplay section", re.search(r"nodes t=\d+ @hed elements=\d+ match=1", text), text[-400:])
-    check("C3: its Seek Mode row holds the saved mode", m and m.group(1) == "1" and m.group(2) == str(mode_b), m.group(0) if m else "")
+    check("C3: its Select Modes picker shows the saved mode picked (its tile checked, Free for All not)",
+          m and m.group(1) == "1" and m.group(2) == "1" and f and f.group(2) == "0", "%s / %s" % (m.group(0) if m else "", f.group(0) if f else ""))
     check("C3: the Server Type row (native)", re.search(r"text t=\d+ @type n=1 checked=\d value=kn", text), "")
     stored = read_log(os.path.join(cfg, "krunknative", "knSettings.json"))
     check("C3: seek_modes persisted in knSettings", '"seek_modes":"%d"' % mode_b in stored, stored[:200])
@@ -402,7 +413,7 @@ def client_official(port):
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "1000 down F4\n1050 up F4\n4000 call showWindow 2\n6000 text @status [id=kioStatus]\n"
                     "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(1,\"]\n6200 call setExpandedRegion 1\n"
-                    "6500 nodes @rows .kioTag\n"
+                    "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
                     "6700 call quickJoinRegion 1\n7500 quit\n" % (MODES["b"], SANDSTORM),
                     extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
@@ -412,7 +423,8 @@ def client_official(port):
           "[krunker] official lobby NY:bbbbb: opening https://krunker.io/?game=NY:bbbbb" in text
           and "open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb" in text, text[-600:])
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
-    check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO krunker\.io servers open in your browser", text),
+    check("C4: the Servers window's krunker.io servers line says they open in the browser",
+          re.search(r"@status n=1 .*text=.*krunker\.io servers\s*krunker\.io servers open in your browser", text),
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
     check("C4: the server type only steers the seek: our (tdm) group is still listed, first",
@@ -426,7 +438,9 @@ def client_official(port):
     # F4, the row and Quick Join each open the first lobby in the browser (3); none of them seeks
     check("C4: krunkerJoin and Quick Join open their lobby in the browser (F4 too: 3 opens)",
           text.count("open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb") == 3, "")
-    check("C4: the official list was fetched once (cached >= 15 s)", len(stub_hits) - hits == 1, str(stub_hits[hits:]))
+    # (the seek's region first: /ping-list, the ping race of region_ping.h; this stub lists none)
+    lists = [h for h in stub_hits[hits:] if h.startswith("/game-list")]
+    check("C4: the official list was fetched once (cached >= 15 s)", len(lists) == 1, str(stub_hits[hits:]))
 
 
 def client_quick_join(port):
@@ -435,7 +449,7 @@ def client_quick_join(port):
     p, log = client("quickjoin", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "4000 call showWindow 2\n6000 text @head .setHed\n6100 call setExpandedRegion 1\n"
-                    "6300 nodes @rows .kioTag\n6400 call quickJoinRegion 1\n7500 quit\n" % (MODES["b"], SANDSTORM))
+                    "6300 nodes @rows .kioRow\n6400 call quickJoinRegion 1\n7500 quit\n" % (MODES["b"], SANDSTORM))
     finish(p, 60)
     text = read_log(log)
     check("C6: Quick Join on the krunker.io group joins its first lobby in-client",
@@ -448,7 +462,7 @@ def client_hoist(port):
     mode / region): SV:cust1, a krunker.io custom game, is in 'Custom Games'. Old browser: the first group;
     mode browser: its Custom Servers tab (1)."""
     p, log = client("hoist-old", port, "0 play\n4000 call showWindow 2\n6000 text @head .setHed\n"
-                    "6100 call setExpandedRegion 0\n6300 nodes @rows .kioTag\n7500 quit\n")
+                    "6100 call setExpandedRegion 0\n6300 nodes @rows .kioRow\n7500 quit\n")
     finish(p, 60)
     text = read_log(log)
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
@@ -457,7 +471,7 @@ def client_hoist(port):
     check("C7: old browser: that group holds the krunker.io custom game", m and m.group(1) == "1", m.group(0) if m else "")
     p, log = client("hoist-modes", port, '0 play\n300 call setSetting "oldBrowser" "false"\n4000 call showWindow 2\n'
                     "6000 call windows.1.switchTab 1\n6100 text @head .setHed\n6200 call setExpandedRegion 0\n"
-                    "6300 nodes @rows .kioTag\n7500 quit\n")
+                    "6300 nodes @rows .kioRow\n7500 quit\n")
     finish(p, 60)
     text = read_log(log)
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)

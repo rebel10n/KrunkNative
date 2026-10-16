@@ -43,6 +43,8 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
+#include <krunker_lobbies.h> // state.krunkerLobbies
+#include <remote_images.h> // state.remoteImages
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
 #include <ui_mobile.h> // state.mobile (ui_mobile_force)
@@ -60,6 +62,7 @@
 #include <html_ui.h>
 #include <html_dom.h>
 #include <v10_social.h> // state.social
+#include <v10_menu.h> // state.officialSession
 #include <png_write.h>
 #include <pcg_basic.h>
 #include <stb_image.h>
@@ -346,6 +349,10 @@ static void warn_unknown_keys(void) {
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
         "storage",    // {key: "value"}: localStorage entries seeded before the page reads them ("skins": the loadout's weapon skins)
         "notify",     // S5: {notifications, announcement, emoji, tip}: the chat column's v10 widgets, item tooltips (v10_notify.c)
+        "servers",    // the brain's /mm/game-list answer {games, totalPlayerCount} (servers_ui_set_games)
+        "officialSession", // true: the menu as in a krunker.io server (the header shows the krunker.io account, v10_menu.c)
+        "remoteImages", // {url: local file}: the http(s) images the page shows, no network (remote_images.h)
+        "krunkerLobbies", // krunker.io's /game-list answer {games, totalPlayerCount} or {error} (krunker_lobbies_set_fixed)
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
@@ -1143,6 +1150,11 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open != html_ui_is_menu_open()) client_set_menu_open(client, menu_open);
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
+    // the Servers window's lists: ours and the official krunker.io lobbies, without a brain or krunker.io
+    remote_images_scenario(st("remoteImages")); // http(s) images from local files only (thumbnails)
+    if (st_has("servers")) servers_ui_set_games(st("servers"));
+    if (st_has("krunkerLobbies")) krunker_lobbies_set_fixed(st("krunkerLobbies"));
+    if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)

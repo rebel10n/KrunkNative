@@ -1,0 +1,25 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/servers/lost-connection-official.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "New York",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "connectError": "Game not found.",
+    "officialSession": true
+  },
+  "frames": 3,
+  "note": "An official krunker.io lobby link that is gone (the matchmaker's InvalidGameId): v10's Lost Connection screen with v10's text 'Game not found.' and v10's Find Game first (a new official game; servers_ui_official_find_game), the header on the krunker.io account. Reference: v10 itself (capture-v10-servers.js lost-connection-official: ?game=NY:zq9x7, /seek-game 400 InvalidGameId). KrunkNative's differences: Region names the lobby's region (New York, from the NY: prefix; v10 prints 'Region: 0' because its region is unset after a failed seek) and the Play Offline tab"
+}

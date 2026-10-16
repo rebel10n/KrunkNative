@@ -5,10 +5,15 @@
 #include <krunker_lobbies.h>
 #include <krunker_net.h>
 #include <seek_prefs.h>
+#include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
 #include <server_names.h>
 #include <ui_logic.h>
+#include <html_dom.h> // html_timer_add (the finder's "Took to long" timer)
+#include <v10_menu.h> // v10_menu_popular_changed
 #include <backend.h>
 #include <flavor.h> // Krunker Strike lists and joins no official krunker.io lobby
+#include <krunker_build.h> // KRUNKER_REGIONS / KRUNKER_DEDICATED_ONLY_REGIONS: v10's availableRegions / dedicatedOnlyRegions
+#include <region_ping.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,13 +51,17 @@ const char *krunker_region_name(const char *code) {
 #define KRUNKER_LIST_MAX 4000           // lobbies kept (the busiest)
 
 static struct {
-    cJSON *list;            // tuples (owned), most players first
+    cJSON *list;            // tuples (owned), krunker.io's order
     double players;         // totalPlayerCount
     double fetched_ms;      // the last request's start (glfwGetTime ms), -inf = never
     double answered_ms;     // the last good answer
     int loading;
     int seek_pending;       // krunker_lobbies_seek waits for the answer
+    int finder_mode;        // krunker_lobbies_find_custom waits for the answer (its mode id; 0 = none)
     int refetch;            // the network changed while a request ran: ask again after it
+    int fixed;              // krunker_lobbies_set_fixed: a scenario's list, never fetched
+    cJSON *pings;           // {region: ms} of krunker.io's regions, measured with the last list (v10 pingData; -1 failed)
+    int pinging;            // the ping list / pings of a refresh are in flight
     char error[200];
 } K = {.fetched_ms = -1e18, .answered_ms = -1e18};
 
@@ -71,6 +80,7 @@ int krunker_lobbies_enabled(void) {
     // official krunker.io lobbies are Krunker Box Office's: the Krunker Strike app's server list,
     // seek and Quick Match show Strike lobbies only (its coordinator pool, servers_ui.c)
     if (flavor_get() != FLAVOR_BASE) return 0;
+    if (K.fixed) return 1; // a scenario's / test's list (krunker_lobbies_set_fixed)
     const char *env = getenv("KRUNKNATIVE_KRUNKER_MATCHMAKER");
     if (env && (!strcmp(env, "off") || !strcmp(env, "0"))) return 0;
     if (env && env[0]) return 1;
@@ -151,10 +161,47 @@ static cJSON *to_tuple(const cJSON *g) {
     copy_key(meta, data, "ds", "ds"); // dedicated 24/7
     copy_key(meta, data, "pw", "pw"); // password
     copy_key(meta, data, "kr", "kr"); // KR badge
+    copy_key(meta, data, "cm", "cm"); // a custom game's map id (the browser's carousel: user-assets m<cm>/thumb.png)
     if (cJSON_IsNumber(left)) cJSON_AddNumberToObject(meta, "timeLeft", left->valuedouble);
     cJSON_AddItemToArray(t, meta);
     return t;
 }
+
+static void on_pings(void *user, cJSON *pings) {
+    (void) user;
+    cJSON_Delete(K.pings);
+    K.pings = pings;
+    K.pinging = 0;
+    printf("[krunker] lobby row pings measured: %d regions\n", cJSON_GetArraySize(pings));
+    menu_rerender_if_open(2); // the rows' ping icons (windows[1].pingData)
+}
+
+static void on_kio_ping_list(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    (void) length;
+    cJSON *list = status == 200 && body ? cJSON_Parse(body) : NULL;
+    if (!cJSON_IsObject(list) || !region_ping_measure(list, on_pings, NULL)) K.pinging = 0; // nothing pingable: no icons
+    cJSON_Delete(list);
+}
+
+// v10's loadData (getRegionPing): the ping list, then every region's /ping timed. A list load asks again;
+// a ping round still in flight is not repeated.
+static void krunker_lobbies_measure_pings(void) {
+    char url[512];
+    if (K.pinging) return;
+    snprintf(url, sizeof(url), "%s/ping-list?hostname=krunker.io", matchmaker_url()); // fetchPingList (v10.js:147583-147588)
+    K.pinging = backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_kio_ping_list, NULL) != 0;
+}
+
+int krunker_lobbies_region_ping_ms(const char *region, double *ms) {
+    const cJSON *p = region && K.pings ? cJSON_GetObjectItemCaseSensitive(K.pings, region) : NULL;
+    if (!cJSON_IsNumber(p)) return 0;
+    if (ms) *ms = p->valuedouble;
+    return 1;
+}
+
+static int finder_open(int mode); // Find Game's official customs of a mode (below)
+static void finder_none(void);
 
 static void on_list(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -185,10 +232,15 @@ static void on_list(void *user, const int status, const char *body, const size_t
                 cJSON_Delete(t);
             }
         }
+        // krunker.io's own order, as v10 keeps it (serverListData: the browser's region groups come in
+        // the order their first lobby does); only an oversized list is cut to its busiest lobbies
         cJSON *list = cJSON_CreateArray();
         if (rows) {
-            qsort(rows, (size_t) count, sizeof(*rows), cmp_players);
-            for (int i = 0; i < count && i < KRUNKER_LIST_MAX; i++) cJSON_AddItemToArray(list, cJSON_Duplicate(rows[i], 1));
+            if (count > KRUNKER_LIST_MAX) {
+                qsort(rows, (size_t) count, sizeof(*rows), cmp_players);
+                count = KRUNKER_LIST_MAX;
+            }
+            for (int i = 0; i < count; i++) cJSON_AddItemToArray(list, cJSON_Duplicate(rows[i], 1));
         }
         free(rows);
         cJSON_Delete(built);
@@ -198,6 +250,7 @@ static void on_list(void *user, const int status, const char *body, const size_t
         K.players = cJSON_IsNumber(total) ? total->valuedouble : 0;
         K.answered_ms = now_ms();
         K.error[0] = 0;
+        krunker_lobbies_measure_pings();
         char proxy[160];
         const int proxied = via_proxy(proxy, sizeof(proxy));
         printf("[krunker] %d official lobbies (%.0f players) from %s%s%s\n", cJSON_GetArraySize(K.list), K.players, matchmaker_url(),
@@ -232,11 +285,17 @@ static void on_list(void *user, const int status, const char *body, const size_t
         K.seek_pending = 0;
         krunker_lobbies_seek();
     }
+    if (K.finder_mode) {
+        const int mode = K.finder_mode;
+        K.finder_mode = 0;
+        if (!finder_open(mode)) finder_none();
+    }
     menu_rerender_if_open(2); // the Servers window shows the section
+    v10_menu_popular_changed(); // Popular Now counts krunker.io's custom games (v10 fetchMatches)
 }
 
 void krunker_lobbies_refresh(const int force) {
-    if (!krunker_lobbies_enabled() || K.loading) return;
+    if (!krunker_lobbies_enabled() || K.loading || K.fixed) return;
     const double now = now_ms(), age = now - K.fetched_ms;
     const double wait = K.error[0] ? KRUNKER_RETRY_MS : force ? KRUNKER_MIN_INTERVAL_MS : KRUNKER_LOBBIES_CACHE_MS;
     if (age < wait) return;
@@ -245,6 +304,22 @@ void krunker_lobbies_refresh(const int force) {
     K.fetched_ms = now;
     K.loading = backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_list, NULL) != 0;
     if (!K.loading) snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.unreachable", "krunker.io servers unavailable: krunker.io is not reachable."));
+}
+
+void krunker_lobbies_set_fixed(const cJSON *answer) {
+    cJSON_Delete(K.list);
+    K.list = NULL;
+    K.error[0] = 0;
+    K.fixed = answer != NULL;
+    if (!answer) return;
+    const cJSON *err = cJSON_GetObjectItem(answer, "error"); // the section's failure sentence instead
+    if (cJSON_IsString(err)) {
+        snprintf(K.error, sizeof(K.error), "%s", err->valuestring);
+        return;
+    }
+    char *body = cJSON_PrintUnformatted(answer);
+    on_list(NULL, 200, body, body ? strlen(body) : 0);
+    free(body);
 }
 
 void krunker_lobbies_network_changed(void) {
@@ -274,32 +349,247 @@ int krunker_lobbies_loading(void) { return K.loading; }
 const char *krunker_lobbies_error(void) { return K.error; }
 double krunker_lobbies_players(void) { return K.players; }
 
+// a meta flag Krunker sends as true or 1
+static int meta_on(const cJSON *meta, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(meta, key);
+    return cJSON_IsTrue(v) || (cJSON_IsNumber(v) && v->valuedouble != 0);
+}
+
+// ---------------------------------------------------------------- the seek's region (v10 getRegion)
+
+static const char *const k_available[] = {KRUNKER_REGIONS};
+static const char *const k_dedicated_only[] = {KRUNKER_DEDICATED_ONLY_REGIONS};
+#define KRUNKER_PING_CACHE_KEY "knKrunkerPingRegion" // v10's PING_REGION_CACHE_KEY ("pingRegion7") for krunker.io's
+                                                     // regions: KrunkNative's pingRegion7 holds the brain's (servers_ui.c)
+#define KRUNKER_PING_RETRY_MS 60000.0                // after every ping failed: the fallback region until then
+#define KRUNKER_REGION_WAITERS 8
+
+static struct {
+    int racing;          // /ping-list or the race in flight
+    double failed_ms;    // every ping failed at (now_ms), -inf = never
+    struct {
+        KrunkerRegionFn fn;
+        void *user;
+    } waiters[KRUNKER_REGION_WAITERS];
+    int waiter_count;
+} R = {.failed_ms = -1e18};
+
+static int available_region(const char *region) {
+    int ok = 0;
+    for (size_t i = 0; region && i < sizeof(k_available) / sizeof(k_available[0]); i++) ok |= !strcmp(region, k_available[i]);
+    for (size_t i = 0; ok && i < sizeof(k_dedicated_only) / sizeof(k_dedicated_only[0]); i++) ok &= strcmp(region, k_dedicated_only[i]) != 0;
+    return ok;
+}
+
+const char *krunker_seek_region_auto(void) {
+    static char cached[64];
+    if (html_storage_get(KRUNKER_PING_CACHE_KEY, cached, sizeof(cached)) < 0 || !available_region(cached)) cached[0] = 0;
+    return cached;
+}
+
+const char *krunker_seek_region(void) {
+    const char *env = getenv("KRUNKNATIVE_KRUNKER_REGION"); // v10's __REGION__
+    if (env && env[0]) return env;
+    if (seek_prefs_krunker_region()[0]) return seek_prefs_krunker_region(); // Settings > Quickplay > krunker.io Region
+    if (krunker_seek_region_auto()[0]) return krunker_seek_region_auto();
+    // every ping failed lately: v10's seek errors out ("All pings failed."); KrunkNative seeks in the
+    // list's first region (the matchmaker's own default) until the race may run again
+    if (now_ms() - R.failed_ms < KRUNKER_PING_RETRY_MS) return k_available[0];
+    return "";
+}
+
+static void region_resolved(const char *region) {
+    R.racing = 0;
+    const int count = R.waiter_count;
+    R.waiter_count = 0;
+    for (int i = 0; i < count; i++) R.waiters[i].fn(R.waiters[i].user, region);
+}
+
+static void on_race(void *user, const char *region) {
+    (void) user;
+    if (region) {
+        html_storage_set(KRUNKER_PING_CACHE_KEY, region); // ClientManager.setDefaultRegion
+        printf("[krunker] seek region: %s (%s), the first to answer the ping race\n", region, krunker_region_name(region));
+    } else {
+        R.failed_ms = now_ms();
+        printf("[krunker] seek region: every ping failed: %s for now\n", k_available[0]);
+    }
+    region_resolved(krunker_seek_region());
+}
+
+static void on_ping_list(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    (void) length;
+    cJSON *list = status == 200 && body ? cJSON_Parse(body) : NULL;
+    if (!cJSON_IsObject(list) || !region_ping_race(list, available_region, on_race, NULL)) {
+        printf("[krunker] seek region: no pingable region (ping-list HTTP %d)\n", status);
+        on_race(NULL, NULL); // v10 "No pingable regions."
+    }
+    cJSON_Delete(list);
+}
+
+void krunker_seek_region_resolve(const KrunkerRegionFn fn, void *user) {
+    if (!fn) return;
+    if (krunker_seek_region()[0]) {
+        fn(user, krunker_seek_region());
+        return;
+    }
+    if (R.waiter_count < KRUNKER_REGION_WAITERS) {
+        R.waiters[R.waiter_count].fn = fn;
+        R.waiters[R.waiter_count++].user = user;
+    }
+    if (R.racing) return;
+    R.racing = 1;
+    char url[512];
+    snprintf(url, sizeof(url), "%s/ping-list?hostname=krunker.io", matchmaker_url()); // fetchPingList (v10.js:147583-147588)
+    printf("[krunker] seek region: none chosen or cached: racing the regions' pings\n");
+    if (!backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_ping_list, NULL)) on_race(NULL, NULL);
+}
+
 int krunker_lobbies_pick(char *id, const size_t n) {
     // the busiest match this client was not in lately; else the least recent of those it was in, the
     // game it is in last (recent_lobbies.h, krunker_net_recent_rank): Find New Game never lands back
     // in the game it leaves, nor bounces between the last two, while anything else has room
+    // the seek's region first (krunker_seek_region: Settings > Quickplay > krunker.io Region, else the
+    // ping race's, like v10's seek in its getRegion), never the busiest region the world over; any
+    // region only when that one has nothing with room
+    const char *want_region = krunker_seek_region();
     const cJSON *t, *best = NULL;
     int best_rank = 0;
-    cJSON_ArrayForEach(t, krunker_lobbies_list()) { // most players first
+    int best_players = -1;
+    for (int pass = want_region[0] ? 0 : 1; pass < 2 && !best; pass++) cJSON_ArrayForEach(t, krunker_lobbies_list()) { // krunker.io's order
         const cJSON *meta = cJSON_GetArrayItem(t, 4);
+        const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
+        if (!pass && (!region || strcmp(want_region, region))) continue;
         const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
         const int max = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3));
-        if (players >= max || cJSON_IsTrue(cJSON_GetObjectItem(meta, "cs")) || cJSON_IsTrue(cJSON_GetObjectItem(meta, "pw"))) continue;
+        // krunker.io sends its flags as 1 (c: 403 of 403 custom games in a live list): a custom game or a
+        // password lobby is never a seek's pick; the mode and map must be switched on in Settings > Quickplay
+        // (the public rotation by default: seek_prefs_lobby_ok, no official custom or dedicated lobby)
+        if (players >= max) continue;
+        const unsigned flags = (meta_on(meta, "cs") ? SEEK_LOBBY_CUSTOM : 0u) | (meta_on(meta, "pw") ? SEEK_LOBBY_PASSWORD : 0u) |
+                               (meta_on(meta, "oc") || meta_on(meta, "ds") ? SEEK_LOBBY_HOSTED : 0u);
         const cJSON *mode = cJSON_GetObjectItem(meta, "mode");
-        if (!seek_prefs_match(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i")))) continue;
+        if (!seek_prefs_lobby_ok(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i")), flags)) continue;
         const int rank = krunker_net_recent_rank(cJSON_GetStringValue(cJSON_GetArrayItem(t, 0)));
-        if (best && (!best_rank || (rank && rank <= best_rank))) continue;
+        // not recent (0) beats any recent one, the most players among those; among recent ones the
+        // older (higher rank) wins
+        if (best && (rank ? !best_rank || rank <= best_rank : !best_rank && players <= best_players)) continue;
         best = t;
         best_rank = rank;
-        if (!rank) break;
+        best_players = players;
     }
     if (!best) return 0;
     snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
     return 1;
 }
 
+int krunker_lobbies_pick_custom(const char *map, char *id, const size_t n) {
+    const cJSON *t, *best = NULL;
+    int best_players = -1;
+    cJSON_ArrayForEach(t, krunker_lobbies_list()) {
+        const cJSON *meta = cJSON_GetArrayItem(t, 4);
+        const char *i = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i"));
+        const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
+        const int max = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3));
+        if (!map || !i || strcmp(i, map) || !meta_on(meta, "cs")) continue; // a custom game on that map
+        if (players >= max || meta_on(meta, "pw")) continue;
+        if (players > best_players) {
+            best = t;
+            best_players = players;
+        }
+    }
+    if (!best) return 0;
+    snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
+    return 1;
+}
+
+// Find Game's Raids / Zombies / Trade Plaza (openServerWindow 2-4, v10.js:218379-218415): the official
+// customs of that mode with room, the krunker.io Region first, then the busiest (v10 sorts its
+// fetchMatches answer by clients, the default region first); the first one is joined. 1 = found (joined),
+// 0 = no official custom of that mode is listed.
+#define FINDER_TOOK_LONG_MS 2000.0 // v10: setTimeout(..., 0x7d0) "Took to long to find" after the join
+
+// v10's 2 s popup: the join did not take the player into the game (on the site the page would have
+// navigated away by now, so the timer never showed there): krunker_net_active is the join under way')
+static void finder_took_long(void *user) {
+    (void) user;
+    if (krunker_net_active()) return; // the join is under way or in the game (the navigation of v10's page)
+    printf("[krunker] find game: took too long to find (the join did not start)\n");
+    ui_error_popup(I18N("kn.finder.tookLong", "Took to long to find"));
+}
+
+static void finder_none(void) {
+    printf("[krunker] find game: no official custom of that mode is listed: Couldnt find any\n");
+    ui_loadout_clear_pops();
+    ui_error_popup(I18N("kn.finder.none", "Couldnt find any")); // v10: iïîïiïì(null, "Couldnt find any")
+}
+
+static int finder_open(const int mode) {
+    char id[80];
+    const char *want_region = krunker_seek_region();
+    const cJSON *t, *best = NULL;
+    int best_players = -1, best_in_region = 0;
+    cJSON_ArrayForEach(t, K.list) {
+        const cJSON *meta = cJSON_GetArrayItem(t, 4);
+        const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
+        const int max = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3));
+        const cJSON *g = cJSON_GetObjectItem(meta, "mode");
+        if (!meta_on(meta, "oc") || !cJSON_IsNumber(g) || g->valueint != mode) continue; // an official custom of that mode
+        if (players >= max || meta_on(meta, "pw")) continue;                          // with room, no password
+        const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
+        const int in_region = want_region[0] && region && !strcmp(region, want_region);
+        if (best && in_region != best_in_region) {
+            if (!in_region) continue; // the region's lobby beats any other one
+        } else if (best && players <= best_players) {
+            continue;
+        }
+        best = t;
+        best_players = players;
+        best_in_region = in_region;
+    }
+    if (!best) return 0;
+    snprintf(id, sizeof(id), "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
+    printf("[krunker] find game: official custom %s (mode %d)\n", id, mode);
+    ui_loadout_clear_pops(); // the Searching popup gives way to the join
+    krunker_lobbies_open(id);
+    html_timer_add(FINDER_TOOK_LONG_MS, finder_took_long, NULL);
+    return 1;
+}
+
+void krunker_lobbies_find_custom(const int mode) {
+    if (!krunker_lobbies_enabled()) {
+        finder_none();
+        return;
+    }
+    if (now_ms() - K.answered_ms >= KRUNKER_LOBBIES_CACHE_MS || !K.list) {
+        // v10 asks the list again for the finder (fetchGameList): the fresh answer decides (on_list)
+        K.finder_mode = mode;
+        krunker_lobbies_refresh(1);
+        if (K.loading) return; // the Searching popup stays until the answer
+        K.finder_mode = 0;
+        if (!K.list) {
+            finder_none();
+            return;
+        }
+    }
+    if (!finder_open(mode)) finder_none();
+}
+
+static void on_seek_region(void *user, const char *region) {
+    (void) user;
+    (void) region;
+    krunker_lobbies_seek(); // the region is known (or the fallback) now
+}
+
 int krunker_lobbies_seek(void) {
     if (!krunker_lobbies_enabled()) return 0;
+    if (!krunker_seek_region()[0]) {
+        // v10's seek asks getRegion first: the ping race, then this seek again (on_seek_region)
+        if (!R.racing) ui_notify(I18N("kn.kio.looking", "Looking for a krunker.io server..."));
+        krunker_seek_region_resolve(on_seek_region, NULL);
+        return 1;
+    }
     if (now_ms() - K.answered_ms >= KRUNKER_LOBBIES_CACHE_MS || !K.list) {
         // a stale list: the fresh one decides (on_list runs this again)
         K.seek_pending = 1;
@@ -370,6 +660,11 @@ void krunker_lobbies_open(const char *id) {
     if (krunker_net_in_client() && g_lobbies_client) {
         printf("[krunker] official lobby %s: joining in-client\n", id);
         menu_show_window(MENU_WINDOW_NONE, 0); // like a KrunkNative row: the Servers window makes way for the game
+        // v10's loading screen, as for one of ours (servers_ui.c): the ring with "Loading <map> ..." for a
+        // listed lobby (Krunker's own map name), the ring alone for a link, until its INIT or the error
+        // screen. From the offline game no transport reports a switch, so nothing else raises it.
+        const cJSON *listed = krunker_lobbies_find(id);
+        menu_show_connecting_map(listed ? cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(listed, 4), "i")) : NULL);
         krunker_net_join(g_lobbies_client, id, lobby_region(id));
         return;
     }
@@ -391,6 +686,14 @@ void krunker_lobbies_open(const char *id) {
 #else // ---------------------------------------------------------------- web: none of it
 
 int krunker_lobbies_enabled(void) { return 0; }
+void krunker_lobbies_find_custom(const int mode) {
+    (void) mode;
+}
+int krunker_lobbies_region_ping_ms(const char *region, double *ms) {
+    (void) region;
+    (void) ms;
+    return 0;
+}
 void krunker_lobbies_refresh(const int force) { (void) force; }
 const cJSON *krunker_lobbies_list(void) { return NULL; }
 const cJSON *krunker_lobbies_find(const char *id) {
@@ -400,13 +703,25 @@ const cJSON *krunker_lobbies_find(const char *id) {
 int krunker_lobbies_loading(void) { return 0; }
 const char *krunker_lobbies_error(void) { return ""; }
 void krunker_lobbies_network_changed(void) {}
+void krunker_lobbies_set_fixed(const cJSON *answer) { (void) answer; }
 double krunker_lobbies_players(void) { return 0; }
+int krunker_lobbies_pick_custom(const char *map, char *id, const size_t n) {
+    (void) map;
+    (void) id;
+    (void) n;
+    return 0;
+}
 int krunker_lobbies_pick(char *id, const size_t n) {
     (void) id;
     (void) n;
     return 0;
 }
 int krunker_lobbies_seek(void) { return 0; }
+const char *krunker_seek_region(void) { return ""; }
+const char *krunker_seek_region_auto(void) { return ""; }
+void krunker_seek_region_resolve(const KrunkerRegionFn fn, void *user) {
+    if (fn) fn(user, "");
+}
 void krunker_lobbies_open(const char *id) { (void) id; }
 void krunker_lobbies_attach(Client *client) { (void) client; }
 

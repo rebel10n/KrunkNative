@@ -1,0 +1,129 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/servers/servers-official-open.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 2,
+    "krunkerLobbies": {
+      "totalPlayerCount": 61,
+      "games": [
+        [
+          "NY:b760t",
+          "us-nj",
+          7,
+          8,
+          {
+            "i": "Kanji",
+            "g": 0
+          },
+          240
+        ],
+        [
+          "NY:qa21k",
+          "us-nj",
+          5,
+          8,
+          {
+            "i": "Sandstorm",
+            "g": 1
+          },
+          180
+        ],
+        [
+          "NY:zz9x1",
+          "us-nj",
+          2,
+          8,
+          {
+            "i": "Burg",
+            "g": 0,
+            "kr": true
+          },
+          90
+        ],
+        [
+          "FRA:k8m2p",
+          "de-fra",
+          8,
+          8,
+          {
+            "i": "Subzero",
+            "g": 0
+          },
+          60
+        ],
+        [
+          "FRA:r4t6y",
+          "de-fra",
+          6,
+          8,
+          {
+            "i": "Littletown",
+            "g": 0
+          },
+          300
+        ],
+        [
+          "SYD:qvxbm",
+          "au-syd",
+          4,
+          8,
+          {
+            "i": "Undergrowth",
+            "g": 0
+          },
+          200
+        ],
+        [
+          "NY:cust1",
+          "us-nj",
+          9,
+          20,
+          {
+            "i": "Kanji",
+            "g": 0,
+            "c": 1,
+            "h": "1v1 Kanji Lowgrav"
+          },
+          0
+        ],
+        [
+          "FRA:oc777",
+          "de-fra",
+          12,
+          30,
+          {
+            "i": "Shipyard",
+            "g": 2,
+            "oc": 1,
+            "ds": 1,
+            "h": "Official Shipyard 24/7"
+          },
+          0
+        ]
+      ]
+    },
+    "windowActions": [
+      [
+        "setExpandedRegion",
+        2
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "As kn-servers-official with New York open: v10's rows (ffa_Kanji, tdm_Sandstorm, ffa_Burg + KR; no region cell, the ping, Ends in, players), no tag"
+}

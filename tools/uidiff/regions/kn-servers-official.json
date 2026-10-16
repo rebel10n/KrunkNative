@@ -1,0 +1,69 @@
+{
+  "scenario": "kn-servers-official",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "window-header",
+      "rect": [
+        307,
+        150,
+        480,
+        30
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button, which v10 lacks)"
+    },
+    {
+      "name": "top-groups",
+      "rect": [
+        307,
+        200,
+        665,
+        90
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "Official Customs and Custom Games: v10's headers (name, Quick Join, N online)"
+    },
+    {
+      "name": "region-groups",
+      "rect": [
+        307,
+        344,
+        665,
+        140
+      ],
+      "ref_offset": [
+        0,
+        -11
+      ],
+      "kind": "text",
+      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 11 px lower here: KrunkNative's krunker.io servers line comes before them"
+    },
+    {
+      "name": "footer",
+      "rect": [
+        307,
+        483,
+        665,
+        36
+      ],
+      "ref_offset": [
+        0,
+        -11
+      ],
+      "kind": "text",
+      "note": "61 In Game (krunker.io's totalPlayerCount), 0 in Editor, 0 on Social"
+    }
+  ]
+}

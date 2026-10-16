@@ -96,10 +96,11 @@ typedef struct WsMsg {
 } WsMsg;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-// Two lanes, one worker each: the brain's requests, and other hosts' (backend_http_get_external:
-// krunker.io's game list) so a slow or unreachable outside host never delays a seek.
-enum { HTTP_LANE_BRAIN, HTTP_LANE_EXTERNAL, HTTP_LANES };
-static pthread_cond_t g_http_cond[HTTP_LANES] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+// Three lanes, one worker each: the brain's requests, other hosts' (backend_http_get_external:
+// krunker.io's game list) so a slow or unreachable outside host never delays a seek, and page media
+// (backend_http_get_media: remote images) so a page's thumbnails never delay the game list.
+enum { HTTP_LANE_BRAIN, HTTP_LANE_EXTERNAL, HTTP_LANE_MEDIA, HTTP_LANES };
+static pthread_cond_t g_http_cond[HTTP_LANES] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
 static HttpJob *g_http_pending[HTTP_LANES], *g_http_done;
 static int g_http_thread_up[HTTP_LANES];
 static WsMsg *g_ws_out, *g_ws_in;
@@ -345,6 +346,40 @@ static int http_queue(const char *method, const char *url, const char *body, con
 
 int backend_http_get_external(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
     return http_queue_lane(HTTP_LANE_EXTERNAL, timeout_ms, "GET", url, NULL, fn, user);
+}
+
+int backend_http_get_media(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
+    return http_queue_lane(HTTP_LANE_MEDIA, timeout_ms, "GET", url, NULL, fn, user);
+}
+
+// One job on a thread of its own (backend_http_get_parallel): its completion joins the same done
+// queue, so backend_poll hands the answers over in the order they arrived.
+static void *http_job_thread(void *arg) {
+    HttpJob *job = arg;
+    http_run(job);
+    pthread_mutex_lock(&g_lock);
+    QUEUE_PUSH(g_http_done, job);
+    pthread_mutex_unlock(&g_lock);
+    return NULL;
+}
+
+int backend_http_get_parallel(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
+    if (!url || !url[0]) return 0;
+    HttpJob *job = calloc(1, sizeof(*job));
+    if (!job) return 0;
+    job->timeout_ms = timeout_ms > 0 ? timeout_ms : HTTP_TIMEOUT_MS;
+    snprintf(job->method, sizeof(job->method), "GET");
+    job->url = strdup(url);
+    job->fn = fn;
+    job->user = user;
+    pthread_t t;
+    if (!job->url || pthread_create(&t, NULL, http_job_thread, job) != 0) {
+        free(job->url);
+        free(job);
+        return 0;
+    }
+    pthread_detach(t);
+    return 1;
 }
 
 int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {

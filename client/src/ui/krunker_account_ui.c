@@ -47,6 +47,27 @@ static void ensure_handlers(void) {
 
 // ---------------------------------------------------------------- the Accounts line
 
+// The krunker.io account's name (and level) with Logout, or Guest with Login (the Accounts line, the
+// Servers window's krunker.io line).
+void krunker_account_ui_state_html(StrBuf *sb) {
+    ensure_handlers();
+    if (krunker_account_signed_in()) {
+        sb_append(sb, "<span class='kn-accounts-name' id='knAccountsKioName'>");
+        sb_append_esc(sb, krunker_account_name()[0] ? krunker_account_name() : I18N("kn.accounts.signedIn", "signed in"));
+        sb_append(sb, "</span>");
+        if (krunker_account_level() > 0) sb_appendf(sb, " <span class='kn-accounts-level'>%s %d</span>", I18N("generic.level", "Level"), krunker_account_level());
+        sb_append(sb, " <a class='kn-accounts-btn' id='knAccountsKioOut' onclick='playSelect(0.1);" HANDLER "(5)'>");
+        sb_append_esc(sb, I18N("generic.logout", "Logout"));
+        sb_append(sb, "</a>");
+    } else {
+        sb_append(sb, "<span class='kn-accounts-guest' id='knAccountsKioName'>");
+        sb_append_esc(sb, I18N("kn.accounts.guest", "Guest"));
+        sb_append(sb, "</span> <a class='kn-accounts-btn' id='knAccountsKioIn' onclick='playSelect(0.1);kioAccount()'>");
+        sb_append_esc(sb, I18N("generic.login", "Login"));
+        sb_append(sb, "</a>");
+    }
+}
+
 // "KrunkNative servers: <name> | krunker.io servers: <name>" with a sign-in / sign-out button each.
 void krunker_account_ui_accounts_html(StrBuf *sb) {
     ensure_handlers();
@@ -69,21 +90,7 @@ void krunker_account_ui_accounts_html(StrBuf *sb) {
     sb_append(sb, "</span><span class='kn-accounts-row' id='knAccountsKio'><span class='kn-accounts-kind'>");
     sb_append_esc(sb, I18N("kn.accounts.kioServers", "krunker.io servers:"));
     sb_append(sb, "</span> ");
-    if (krunker_account_signed_in()) {
-        sb_append(sb, "<span class='kn-accounts-name' id='knAccountsKioName'>");
-        sb_append_esc(sb, krunker_account_name()[0] ? krunker_account_name() : I18N("kn.accounts.signedIn", "signed in"));
-        sb_append(sb, "</span>");
-        if (krunker_account_level() > 0) sb_appendf(sb, " <span class='kn-accounts-level'>%s %d</span>", I18N("generic.level", "Level"), krunker_account_level());
-        sb_append(sb, " <a class='kn-accounts-btn' id='knAccountsKioOut' onclick='playSelect(0.1);" HANDLER "(5)'>");
-        sb_append_esc(sb, I18N("generic.logout", "Logout"));
-        sb_append(sb, "</a>");
-    } else {
-        sb_append(sb, "<span class='kn-accounts-guest' id='knAccountsKioName'>");
-        sb_append_esc(sb, I18N("kn.accounts.guest", "Guest"));
-        sb_append(sb, "</span> <a class='kn-accounts-btn' id='knAccountsKioIn' onclick='playSelect(0.1);kioAccount()'>");
-        sb_append_esc(sb, I18N("generic.login", "Login"));
-        sb_append(sb, "</a>");
-    }
+    krunker_account_ui_state_html(sb);
     sb_append(sb, "</span></div>");
 }
 

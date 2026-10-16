@@ -14,6 +14,8 @@
 #include <krunker_captcha.h>
 #include <recent_lobbies.h>
 #include <seek_prefs.h>
+#include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
+#include <krunker_lobbies.h> // krunker_seek_region: the region a seek looks in (the ping race)
 #include <krunker_account.h>
 #include <krunker_map_source.h>
 #include <backend.h>
@@ -62,6 +64,7 @@
 
 typedef enum {
     KS_OFF = 0,    // not in an official game
+    KS_REGION,     // no region chosen or cached: the ping race picks it (krunker_seek_region_resolve, v10 getRegion)
     KS_ACCOUNT,    // the krunker.io account's fresh access token (krunker_account.h; a refresh may run)
     KS_BUILD,      // the current Krunker build (krunker_build_fetch.h: the published one, cached, or compiled)
     KS_LIST,       // Find New Game: GET /game-list, to pick a game this client was not in lately
@@ -139,6 +142,7 @@ static struct {
     char map_label[64], map_why[200]; // the map nothing could show, and why (krunker_net_tick's message)
     volatile int leave_error;       // the server's "error" / "dc" ended the session: krunker_net_tick leaves the game
     char leave_text[300];           // leave_error's reason for the error screen (K.lock)
+    char failure[300];              // the last error screen an official game ended on ("" = none since a join)
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -255,8 +259,9 @@ static void set_popup_notice(const int captcha, const char *fmt, ...) {
 // or, when the player is in a game and stays in it, v10's error popup over that game (join_errors.h).
 static void present_failure(const char *text) {
     Client *client = K.client;
+    snprintf(K.failure, sizeof(K.failure), "%s", text ? text : "");
     if (join_error_place(client && client->net_connected) == JOIN_ERROR_POPUP) {
-        set_popup_notice(0, "%s", text);
+        set_popup_notice(0, "%s", text); // not reached: join_error_place is the error screen (v10)
     } else if (client) {
         // final, like servers_ui.c fatal_error: no transport retries it (menu_poll_connection would
         // keep the spinner up), the error screen's Retry seeks again (krunker_net_reconnect)
@@ -1065,12 +1070,11 @@ static void seek(void) {
     if (K.game_id[0]) append_param(url, sizeof(url), "game", K.game_id);
     else if (K.exclude[0]) append_param(url, sizeof(url), "excludeGame", K.exclude); // backToOrigin's ?exclude= (:141624, :222302)
     if (K.seek_new && !K.game_id[0]) {
-        // iïîìîíì: {v: buildVersion} plus the saved seek_maps / seek_modes as dsma / dsmo (:222271-222275)
-        char dq[160];
-        int n = snprintf(dq, sizeof(dq), "{\"v\":\"%s\"", krunker_build()->build_version);
-        if (seek_prefs_map() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsma\":[%d]", seek_prefs_map());
-        if (seek_prefs_mode() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsmo\":[%d]", seek_prefs_mode());
-        snprintf(dq + n, sizeof(dq) - (size_t) n, "}");
+        // iïîìîíì: {v: buildVersion} plus the seek_maps / seek_modes switches as dsma / dsmo (:222271-222275);
+        // the switches' lists, the public rotation while none is switched on (seek_prefs.h), never empty
+        char dq[1200], fields[1024];
+        seek_prefs_dq_fields(fields, sizeof(fields));
+        snprintf(dq, sizeof(dq), "{\"v\":\"%s\"%s}", KRUNKER_BUILD_VERSION, fields);
         append_param(url, sizeof(url), "dataQuery", dq);
     } else {
         char dq[96];
@@ -1109,11 +1113,15 @@ static void on_game_list(void *user, const int status, const char *body, const s
         const cJSON *players = cJSON_GetArrayItem(g, 2), *max = cJSON_GetArrayItem(g, 3), *data = cJSON_GetArrayItem(g, 4);
         if (!id || !id[0] || strlen(id) >= sizeof(K.game_id) || !cJSON_IsNumber(players) || !cJSON_IsNumber(max)) continue;
         listed++;
-        if (players->valuedouble >= max->valuedouble || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "c")) ||
-            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "pw")) || !region || strcmp(region, K.region))
-            continue;
+        if (players->valuedouble >= max->valuedouble || !region || strcmp(region, K.region)) continue;
+        // krunker.io's flags are 1 (or true): never a custom or password game; the lobby's mode and map must be
+        // switched on in Settings > Quickplay, the public rotation by default (seek_prefs_lobby_ok)
+        const unsigned flags = (seek_prefs_flag(cJSON_GetObjectItemCaseSensitive(data, "c")) ? SEEK_LOBBY_CUSTOM : 0u) |
+                               (seek_prefs_flag(cJSON_GetObjectItemCaseSensitive(data, "pw")) ? SEEK_LOBBY_PASSWORD : 0u) |
+                               (seek_prefs_flag(cJSON_GetObjectItemCaseSensitive(data, "oc")) || seek_prefs_flag(cJSON_GetObjectItemCaseSensitive(data, "ds"))
+                                    ? SEEK_LOBBY_HOSTED : 0u);
         const cJSON *mode = cJSON_GetObjectItemCaseSensitive(data, "g");
-        if (!seek_prefs_match(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "i"))))
+        if (!seek_prefs_lobby_ok(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "i")), flags))
             continue;
         if (recent_lobbies_rank(&K.recent, id) || players->valuedouble <= best_players) continue;
         best = g;
@@ -1415,6 +1423,23 @@ static void on_build_retry(void *user, const KrunkerBuildSource src, const char 
     start_seek();
 }
 
+// The region is known: the account's token, then the list or the seek.
+static void join_seek(void) {
+    if (K.exclude[0]) printf("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
+    else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
+    // the live client's order (seek, :147412): the account's fresh access token first (a refresh when it
+    // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
+    // generate-token only before a captcha retry (captcha_done)
+    K.state = KS_ACCOUNT;
+    krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
+}
+
+static void on_region(void *user, const char *region) {
+    if (stale(user) || K.state != KS_REGION) return;
+    snprintf(K.region, sizeof(K.region), "%s", region && region[0] ? region : KRUNKER_DEFAULT_REGION);
+    join_seek();
+}
+
 // krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
 // the lobby list first (on_game_list).
 static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude, const int reload) {
@@ -1444,7 +1469,8 @@ static int join(Client *client, const char *game_id, const char *region, const i
     char r[48];
     if (region && region[0]) snprintf(K.region, sizeof(K.region), "%s", region);
     else if (option("KRUNKNATIVE_KRUNKER_REGION", "krunkerRegion", r, sizeof(r))) snprintf(K.region, sizeof(K.region), "%s", r);
-    else snprintf(K.region, sizeof(K.region), "%s", KRUNKER_DEFAULT_REGION);
+    else if (seek_prefs_krunker_region()[0]) snprintf(K.region, sizeof(K.region), "%s", seek_prefs_krunker_region()); // Settings > Quickplay
+    else snprintf(K.region, sizeof(K.region), "%s", krunker_seek_region()); // the ping race's ("" = it runs first)
     K.token[0] = 0;
     K.connected = 0;
     K.altcha_pending = 0;
@@ -1455,17 +1481,19 @@ static int join(Client *client, const char *game_id, const char *region, const i
     K.leave_closed = 0;
     kmap_reset();
     K.leave_error = 0;
+    K.failure[0] = 0;
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
     wipe(K.access, sizeof(K.access));
-    if (K.exclude[0]) printf("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
-    else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
-    // the live client's order (seek, :147412): the account's fresh access token first (a refresh when it
-    // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
-    // generate-token only before a captcha retry (captcha_done)
-    K.state = KS_ACCOUNT;
-    krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
+    if (!K.region[0]) {
+        // v10's seek: __REGION__ || regionId || await getRegion() (v10.js:147397): no region given,
+        // chosen or cached, so the ping race picks it first (on_region)
+        K.state = KS_REGION;
+        krunker_seek_region_resolve(on_region, (void *) (uintptr_t) K.generation);
+        return K.state != KS_CLOSED;
+    }
+    join_seek();
     return K.state != KS_CLOSED;
 }
 
@@ -1524,6 +1552,7 @@ void krunker_net_leave(Client *client, const char *reason) {
         pthread_mutex_unlock(&client->net_lock);
     }
     printf("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
+    if (reason) snprintf(K.failure, sizeof(K.failure), "%s", reason); // the error screen it ends on
     K.state = KS_OFF;
     Client *owner = client ? client : K.client;
     if (owner) owner->game.is_official = 0; // back in KrunkNative's lobbies (the KN-only classes are playable again)
@@ -1534,6 +1563,12 @@ void krunker_net_leave(Client *client, const char *reason) {
     wipe(K.captcha, sizeof(K.captcha));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
     wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
+}
+
+void krunker_net_clear_failure(void) { K.failure[0] = 0; }
+
+int krunker_net_failure_shown(const char *error) {
+    return K.failure[0] && error && error[0] && (strstr(error, K.failure) || strstr(K.failure, error));
 }
 
 void krunker_net_reconnect(Client *client) {

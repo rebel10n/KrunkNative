@@ -10,11 +10,11 @@ matchmaker stub, one the block page, whatever host the client asks for). The cli
 http://matchmaker.krunker.io:<port>, so only a proxy can reach the stub: nothing leaves the machine.
 
   1 proxy set in Settings > Client (knClientSet): the official list loads through it (the proxy saw
-    CONNECT matchmaker.krunker.io:<port>), the Servers window lists the KRUNKER.IO groups although the
+    CONNECT matchmaker.krunker.io:<port>), the Servers window lists the krunker.io groups although the
     Server Type is KrunkNative (the default), the basic Settings view shows the Server Type row
   2 restart with the same config: the proxy persisted (knClient storage, the Client tab's row) and the
     list loads through it again
-  3 no proxy, krunker.io blocks this network: the KRUNKER.IO section says so instead of an empty list
+  3 no proxy, krunker.io blocks this network: the krunker.io servers line says so instead of an empty list
   4 live: a proxy whose exit is blocked too, then another one set without a restart: the message, then
     the lobbies; socks5h:// (the proxy resolves the name)
   5 the environment when the setting is empty: HTTP_PROXY carries the request (Proxy Scope "all" is
@@ -229,7 +229,12 @@ def storage(cfg, key):
 
 
 DENIED = "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."
-OPEN_TEXT = "KRUNKER.IO OFFICIAL LOBBIES"  # the in-client default's separator (servers_ui.c append_krunker_status)
+OPEN_TEXT = "krunker.io servers"  # the separator line before the official groups (servers_ui.c append_krunker_status)
+
+
+def listed(text):
+    """The separator says nothing after its label (the account comes first): the lobbies are listed."""
+    return text.rstrip().endswith(OPEN_TEXT)
 
 
 def main():
@@ -251,8 +256,8 @@ def main():
 700 call knClientSet "proxy" " http://127.0.0.1:%d "
 800 call showWindow 2
 5000 text @status [id=kioStatus]
-5100 nodes @kgroups .quickJoin[title*=krunker]
-5150 text @head .setHed
+5100 nodes @kgroups .setHed.kioHed .quickJoin
+5150 text @head .setHed.kioHed
 5200 quit
 """ % PX_GOOD, cfg)
         typ = probe(log, "type")
@@ -264,10 +269,10 @@ def main():
         check("1: the client logs the lobbies via the proxy",
               re.search(r"\[krunker\] 3 official lobbies .* via proxy http://127\.0\.0\.1:%d" % PX_GOOD, log), log[-400:])
         st = probe(log, "status")
-        check("1: the KRUNKER.IO section with Server Type KrunkNative", st["n"] == 1 and OPEN_TEXT in st["text"], str(st))
+        check("1: the krunker.io servers line with Server Type KrunkNative", st["n"] == 1 and listed(st["text"]), str(st))
         check("1: its groups are listed (one per Krunker region)", nodes(log, "kgroups") == 3, str(nodes(log, "kgroups")))
         head = probe(log, "head")["text"]
-        check("1: the first one is krunker.io - Frankfurt (the most players)", "krunker.io - Frankfurt" in head, head)
+        check("1: the first one is Frankfurt (krunker.io's order, as v10), named like v10 (no krunker.io prefix)", "Frankfurt" in head and "krunker.io" not in head, head)
         stored = storage(cfg, "knClient")
         check("1: the proxy persisted trimmed in knClient", '"proxy":"http://127.0.0.1:%d"' % PX_GOOD in stored, stored[:300])
 
@@ -286,7 +291,7 @@ def main():
         row = probe(log, "proxy")
         check("2: the Client tab's Proxy row shows it", row["n"] == 1 and row["value"] == "http://127.0.0.1:%d" % PX_GOOD, str(row))
         check("2: the list went through the proxy again", len(seen(PX_GOOD, "connect", since)) >= 1, str(tunnels[since:]))
-        check("2: the lobbies are listed", OPEN_TEXT in probe(log, "status")["text"], probe(log, "status")["text"])
+        check("2: the lobbies are listed", listed(probe(log, "status")["text"]), probe(log, "status")["text"])
 
         # ---- 3: no proxy, krunker.io blocks this network
         log = run("blocked", """
@@ -296,7 +301,7 @@ def main():
 4100 quit
 """, os.path.join(WORK, "cfg-blocked"), {"KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % BLOCK_PORT})
         st = probe(log, "status")
-        check("3: the KRUNKER.IO section says krunker.io refused this network", st["n"] == 1 and DENIED in st["text"], str(st))
+        check("3: the krunker.io servers line says krunker.io refused this network", st["n"] == 1 and DENIED in st["text"], str(st))
         check("3: logged", "[krunker] game list failed (HTTP 403)" in log, log[-400:])
 
         # ---- 4: live: a blocked proxy, then socks5h:// to a working one, no restart
@@ -316,7 +321,7 @@ def main():
         check("4: a proxy whose exit is blocked too: said so", "ACCESS DENIED), also through the proxy http://127.0.0.1:%d" % PX_BLOCKED in first, first)
         check("4: socks5h:// handed the proxy the name", len(seen(PX_GOOD, "socks5h", since)) >= 1, str(tunnels[since:]))
         second = probe(log, "second")["text"]
-        check("4: the lobbies after the change, without a restart", OPEN_TEXT in second, second)
+        check("4: the lobbies after the change, without a restart", listed(second), second)
         check("4: an invalid proxy URL is refused (the setting stays)", "client setting proxy: not a proxy URL: ftp://nope" in log
               and '"proxy":"socks5h://127.0.0.1:%d"' % PX_GOOD in storage(cfg4, "knClient"), storage(cfg4, "knClient")[:200])
 
@@ -329,7 +334,7 @@ def main():
 4100 quit
 """, os.path.join(WORK, "cfg-env"), {"HTTP_PROXY": "http://127.0.0.1:%d" % PX_GOOD, "NO_PROXY": "example.com"})
         check("5: HTTP_PROXY carried the request (setting empty)", len(seen(PX_GOOD, "connect", since)) >= 1, str(tunnels[since:]))
-        check("5: the lobbies are listed", OPEN_TEXT in probe(log, "status")["text"], probe(log, "status")["text"])
+        check("5: the lobbies are listed", listed(probe(log, "status")["text"]), probe(log, "status")["text"])
     finally:
         for s in servers:
             s.shutdown()

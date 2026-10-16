@@ -95,3 +95,11 @@ int  html_ui_add_stylesheet(const char *href);
 // ties; its url()s resolve like css/main.css's. Calling it again replaces the sheet,
 // NULL or "" removes it. Returns 1 when the page now has the given sheet (or none).
 int  html_ui_set_custom_css(const char *css);
+
+// Remote images: <img src="https://..."> and url(https://...) on the native engine come from this
+// fetcher (client/src/ui/remote_images.c; the contract is engine/image.h's ImageRemoteFetch): it answers
+// with the file that holds, or will hold, the URL's body (1 there, 0 downloading, -1 refused). The web
+// build's browser loads them itself, and a build without the engine has none: a no-op there. May be
+// set before html_ui_init.
+typedef int (*HtmlRemoteImageFetch)(const char *url, char *path, size_t cap);
+void html_ui_set_remote_image_fetcher(HtmlRemoteImageFetch fetch);

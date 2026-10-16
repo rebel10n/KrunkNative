@@ -1517,6 +1517,9 @@ EM_JS(int, kn_js_set_custom_css, (const char *css_ptr), {
     return 1;
 });
 
+// the browser loads http(s) images itself
+void html_ui_backend_set_remote_image_fetcher(const HtmlRemoteImageFetch fetch) { (void) fetch; }
+
 int html_ui_backend_set_custom_css(const char *css) {
     return kn_js_set_custom_css(css);
 }

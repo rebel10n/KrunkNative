@@ -1,6 +1,7 @@
 // Startup glue between main.c and the brain client (client/include/backend_ui.h):
 // command line (--brain, --connect), the brain-or-direct decision and the per-frame
 // pump. Kept out of main.c so the backend stays one include + three calls there.
+#include <remote_images.h>
 #include <v10_social.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -48,6 +49,7 @@ void backend_parse_args(int *argc, char **argv) {
 int backend_startup(Client *client, const int offline, const int scenario) {
     krunker_net_attach(client); // KN_KRUNKER_OFFICIAL (official krunker.io games, krunker_net.h)
     krunker_lobbies_attach(client);
+    remote_images_init(); // the HTML engine's http(s) images (remote_images.h)
     // --connect host[:port]: a direct server, no matchmaking (the brain still serves
     // the account and the hub when configured)
     int direct = 0;

@@ -127,6 +127,11 @@ int krunker_net_open(void);        // the WebSocket is open
 // client_net_send_packet while active: our packet translated and sent (or dropped). 1 = sent.
 int krunker_net_send_packet(NetPacketType type, const void *payload, uint16_t length);
 void krunker_net_reconnect(Client *client); // the page's reconnect: seek the same game again
+// The error screen's text `error` is the one an official game ended on (a join that failed, the session
+// closed with a reason) and no official join started since: the screen is krunker.io's (menu_ui.c: v10's
+// Find Game, a new official game).
+int krunker_net_failure_shown(const char *error);
+void krunker_net_clear_failure(void); // main thread: a session is in (menu_ui.c), any later error screen is its own
 void krunker_net_tick(Client *client);      // main thread, once per frame: notices, captcha
 // Whether the official session wants no input frame built now (net/recon.c samples none): v10's gameLoop
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an

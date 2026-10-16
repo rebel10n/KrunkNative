@@ -1,0 +1,66 @@
+{
+  "scenario": "kn-lost-connection-official",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "title",
+      "rect": [
+        462,
+        278,
+        356,
+        36
+      ],
+      "kind": "text",
+      "note": "Lost Connection"
+    },
+    {
+      "name": "message",
+      "rect": [
+        462,
+        316,
+        356,
+        26
+      ],
+      "ref_offset": [
+        0,
+        0
+      ],
+      "kind": "text",
+      "note": "Game not found., as v10 (the glyphs' antialiasing differs by a few pixels)",
+      "max_pct": 6.0
+    },
+    {
+      "name": "id-line",
+      "rect": [
+        462,
+        342,
+        356,
+        22
+      ],
+      "ref_offset": [
+        0,
+        1
+      ],
+      "kind": "text",
+      "note": "ID: 0x000000 | Code: 0 | Reason: 0"
+    },
+    {
+      "name": "extensions-hint",
+      "rect": [
+        462,
+        382,
+        356,
+        18
+      ],
+      "ref_offset": [
+        0,
+        1
+      ],
+      "kind": "text",
+      "note": "v10's extensions hint. Not compared: the Region line (v10 prints Region: 0 after a failed seek, KrunkNative the lobby's region) and the tabs (KrunkNative adds Play Offline between Find Game and Servers)"
+    }
+  ]
+}

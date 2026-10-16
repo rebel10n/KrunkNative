@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-menu-official-guest",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        0,
+        0,
+        640,
+        60
+      ],
+      "kind": "text",
+      "note": "KrunkNative's own baseline: the header's krunker.io guest (v10's Login or Register item and tooltip)"
+    }
+  ]
+}

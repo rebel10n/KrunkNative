@@ -45,6 +45,7 @@
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
+#include <krunker_lobbies.h> // Popular Now: krunker.io's custom games
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <store_spins.h>
@@ -180,8 +181,12 @@ static void comma(char *out, const size_t n, const double value) { // _8986: 123
     out[o] = 0;
 }
 
-// The krunker.io account's bar (#knKioHeaderBar), shown in a krunker.io server only: its name and level,
-// or Guest. A click opens the krunker.io account modal (kioAccount: Login / Logout there).
+// The krunker.io account's bar (#knKioHeaderBar), shown in a krunker.io server only. In there the
+// krunker.io account is the one v10 would show, so the bar is v10's own: signed in, the profile item
+// of #signedInHeaderBar (avatar, name, "Lv N" badge; no XP or currencies: krunker.io does not send
+// them), as a guest the "Login or Register" item of #signedOutHeaderBar. The only cue that it is the
+// krunker.io account is v10's hover tooltip (.ph-tooltip); a click opens the krunker.io account modal
+// (kioAccount: Login / Logout there). #knKioHeaderText holds what the bar says (tests).
 static void kio_bar_update(const int shown) {
     HtmlElem bar = by_id("knKioHeaderBar");
     if (shown && !bar) {
@@ -189,27 +194,38 @@ static void kio_bar_update(const int shown) {
         if (out) {
             html_dom_insert_html(out, HTML_INSERT_AFTER_END,
                 "<div id=\"knKioHeaderBar\" class=\"svelte-da3zva\" style=\"display:none\">"
-                "<div class=\"ph-item svelte-da3zva\" id=\"knKioHeaderItem\" onclick=\"playSelect(0.1),kioAccount()\" onmouseenter=\"playTick()\">"
-                "<span class=\"ph-label svelte-da3zva\" id=\"knKioHeaderText\"> </span></div></div>");
+                "<div class=\"ph-item svelte-da3zva\" id=\"knKioHeaderItem\" onclick=\"playSelect(0.1),kioAccount()\" onmouseenter=\"playTick()\"></div></div>");
             bar = by_id("knKioHeaderBar");
         }
     }
     if (!bar) return;
-    if (shown) {
-        char text[200];
-        const char *name = krunker_account_name();
-        const int level = krunker_account_level();
-        if (!krunker_account_signed_in()) {
-            snprintf(text, sizeof(text), "%s", I18N("kn.accounts.kioHeaderGuest", "krunker.io: Guest (Login)"));
-        } else if (level > 0) {
-            char lv[16];
-            snprintf(lv, sizeof(lv), "%d", level);
-            I18N_F(text, "kn.accounts.kioHeaderLevel", "krunker.io: {0}, Lv {1}", name, lv);
+    HtmlElem item = by_id("knKioHeaderItem");
+    if (shown && item) {
+        StrBuf sb = {0};
+        if (krunker_account_signed_in()) {
+            const int level = krunker_account_level();
+            char lv[24];
+            snprintf(lv, sizeof(lv), "Lv %d", level > 0 ? level : 1);
+            html_dom_set_attr(item, "class", "ph-item svelte-da3zva");
+            sb_append(&sb, "<img class=\"ph-avatar svelte-da3zva\" src=\"./img/player_pfp.png\"> <div class=\"ph-info svelte-da3zva\" id=\"knKioHeaderText\">"
+                           "<div class=\"ph-name-row svelte-da3zva\"><span class=\"ph-name svelte-da3zva\">");
+            sb_append_esc(&sb, krunker_account_name()[0] ? krunker_account_name() : I18N("kn.accounts.signedIn", "signed in"));
+            sb_append(&sb, "</span></div> <div class=\"ph-level-row svelte-da3zva\"><span class=\"ph-level-badge svelte-da3zva\">");
+            sb_append_esc(&sb, lv);
+            sb_append(&sb, "</span></div></div> <div class=\"ph-tooltip svelte-da3zva\">");
+            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderTip", "Your krunker.io account: krunker.io servers see it"));
+            sb_append(&sb, "</div>");
         } else {
-            I18N_F(text, "kn.accounts.kioHeader", "krunker.io: {0}", name);
+            html_dom_set_attr(item, "class", "ph-item ph-login-wrap svelte-da3zva");
+            sb_append(&sb, "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">person</span> <span class=\"ph-label svelte-da3zva\" id=\"knKioHeaderText\">");
+            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderGuest", "Login or Register"));
+            sb_append(&sb, "</span> <div class=\"ph-tooltip svelte-da3zva\">");
+            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderGuestTip", "Log in with your krunker.io account: krunker.io servers see it"));
+            sb_append(&sb, "</div>");
         }
-        HtmlElem el = by_id("knKioHeaderText");
-        if (el) html_dom_set_text(el, text);
+        char *html = sb_finish(&sb);
+        if (html) html_dom_set_html(item, html);
+        free(html);
     }
     set_display(bar, shown ? "" : "none");
 }
@@ -301,11 +317,20 @@ static void nav_update(const AccountInfo *acc) {
     set_display(nav_item("menuBtnLeaderboards"), guest ? "none" : "");
 }
 
+// --render-scenario state.officialSession: the menu as in a krunker.io server (its header) without one
+static int g_scenario_official;
+void v10_menu_scenario_official(const int on) {
+    g_scenario_official = on;
+    v10_menu_account_changed();
+}
+int v10_menu_official_session(void) { return krunker_net_active() || g_scenario_official; }
+static int official_session(void) { return v10_menu_official_session(); }
+
 void v10_menu_account_changed(void) {
     if (!v10_menu_page()) return;
     // a krunker.io server: the KrunkNative account is not what the menu shows (its nav, Spectate and
     // header bars follow a guest; the krunker.io bar shows the krunker.io account)
-    const int official = krunker_net_active();
+    const int official = official_session();
     const AccountInfo *acc = official ? NULL : account_get();
     header_update(acc, official);
     nav_update(acc);
@@ -410,11 +435,26 @@ static void popular_matches(void *user, const cJSON *matches) {
 
 static void popular_fetch(void) { servers_ui_fetch_matches(popular_matches, NULL); }
 
+// krunker.io's lobby list for Popular Now (its custom games, v10 fetchMatches): asked a few seconds after the
+// menu's first draw rather than with it, so a proxy the player sets right after the start (Settings >
+// Client) carries it; then with every 60 s refresh. Its answer asks Popular Now again
+// (v10_menu_popular_changed); cached, never more often than krunker_lobbies.h allows.
+#define POPULAR_KIO_DELAY_MS 3000.0
+static void popular_kio_refresh(void *user) {
+    (void) user;
+    krunker_lobbies_refresh(0);
+}
+
+void v10_menu_popular_changed(void) {
+    if (P.first_done && v10_menu_page()) popular_fetch();
+}
+
 static void popular_interval(void *user) {
     (void) user;
     P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
     HtmlElem rail = popular_rail();
     if (rail && !html_dom_is_shown(rail)) return; // offsetParent === null
+    krunker_lobbies_refresh(0);
     popular_fetch();
 }
 
@@ -774,6 +814,7 @@ void v10_menu_tick(void) {
         P.first_done = 1;
         popular_fetch();
         P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
+        html_timer_add(POPULAR_KIO_DELAY_MS, popular_kio_refresh, NULL);
         streams_fetch(); // fetchTopStreams on mount (_52138, v10:146178), then every 30 s
         L.timer = html_timer_add(STREAMS_REFRESH_MS, streams_interval, NULL);
         store_item_interval(NULL);
@@ -785,7 +826,7 @@ void v10_menu_tick(void) {
 // sign-in / out, changes the header at once (no need for the menu's own account change).
 void v10_menu_account_tick(void) {
     if (!V.wired || !v10_menu_page()) return;
-    if (krunker_net_active() == V.official && krunker_account_generation() == V.kio_gen) return;
+    if (official_session() == V.official && krunker_account_generation() == V.kio_gen) return;
     v10_menu_account_changed();
 }
 
@@ -1018,6 +1059,8 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         if (i < 0 || i >= P.count) return 1;
         const HtmlArg map = {.kind = HTML_ARG_STR, .str = P.name[i]};
         html_ui_dispatch("playSelect", ev, NULL, 0);
+        // a map only krunker.io's custom games run: the busiest of them (krunker.io's own /?play=)
+        if (servers_ui_popular_official(P.name[i])) return 1;
         html_ui_dispatch("playMap", ev, &map, 1); // KrunkNative: ?play= in place (servers_ui.c)
         return 1;
     }

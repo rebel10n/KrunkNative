@@ -13,6 +13,7 @@
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
+#include <krunker_net.h> // the official error screen's Find Game
 #include <game_reload.h> // F5: game_reload_tick
 #include <badges.h> // WP-E part 2c: the custom badge in the class box
 #include <ks_client.h> // ks_client_pointer_free
@@ -953,6 +954,7 @@ void menu_auto_respawn_scenario(const cJSON *seconds) {
 #define MENU_LOAD_SPINNER "<div style='width:100%;text-align:center;transform:scale(1.3);'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div>"
 // index.html's #instructions as the page boots (the ring at scale 1.4 and #loadGamNm)
 #define MENU_BOOT_RING "<div style=\"width:100%;text-align:center;transform:scale(1.4)\"><div class=\"lds-ring\"><div></div><div></div><div></div><div></div></div></div><div style=\"color:#fff;width:50vw\" id=\"loadGamNm\">"
+
 #define MENU_ERROR_TAB(handler, label) "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);" handler "\">" label "</div>"
 // The Gamepad.active the text was last written with (-1: never). KrunkNative: the text follows the
 // flag (client_menu_tick), where v10 only rewrites it at menu toggles; a "PRESS START" written while a
@@ -1049,6 +1051,8 @@ void menu_update_instructions(void) {
         // v10's first tab is Find Game on every Lost Connection screen (g:222118: playMap / backToOrigin,
         // a new game); KrunkNative's knRetry is that fresh seek (menu_retry_connect), and with a pinned
         // server it tries that server again, so it says Reconnect. An inactivity kick keeps it alone.
+        // An official krunker.io failure (a lobby gone, the matchmaker refusing) has it too: a new official
+        // game, not the same one again (menu_retry_connect -> servers_ui_official_find_game)
         sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"), find ? find : "Find Game");
         if (!inactive)
             sb_appendf(&eb, MENU_ERROR_TAB("knHostOffline()", "%s") MENU_ERROR_TAB("showWindow(2)", "Servers") MENU_ERROR_TAB("showWindow(1)", "Settings"),
@@ -1454,6 +1458,7 @@ static void menu_set_connect(const int connected, const char *error, const char 
     else snprintf(g_ui.connect_error, sizeof(g_ui.connect_error), "%s", error && error[0] ? error : CONNECT_ERROR_DEFAULT);
     snprintf(g_connect_code, sizeof(g_connect_code), "%s", !connected && code && code[0] ? code : "000000");
     if (connected) menu_idle_reset(); // Krunker's retry link reloads the page: a fresh idle timer
+    if (connected) krunker_net_clear_failure(); // a later error screen is this session's, not the official game's before it
     if (!connected) g_ui.ready = 0; // the next INIT (reconnect) makes the client ready again
     client->menu_connect_sent = connected ? 1 : 0;
     menu_update_top_bar();
@@ -1551,6 +1556,10 @@ void menu_show_connecting(void) {
 void menu_retry_connect(void) {
     if (client_is_connected(g_ui.client)) {
         g_boot_any = 1; // nothing is left: the game still loaded lifts the curtain again
+        return;
+    }
+    if (krunker_net_active() || krunker_net_failure_shown(g_ui.connect_error)) { // the official error screen's Find Game: a new official game (v10)
+        if (!servers_ui_official_find_game()) client_net_request_reconnect(g_ui.client);
         return;
     }
     menu_show_connecting();

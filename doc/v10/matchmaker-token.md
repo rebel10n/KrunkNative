@@ -59,7 +59,14 @@ only header is `accept-language: en-US,en;q=0.6;`. A non-OK answer throws
 `{message, response: {data}}`. Parameters (V:147601-147611):
 
 * `hostname`: `__HOSTNAME__`, else `location.hostname` (V:147387-147390)
-* `region`
+* `region`: `__REGION__`, else the caller's `regionId`, else `getRegion()` (V:147469-147507): the
+  cached `PING_REGION_CACHE_KEY` (`pingRegion7`) when still available, else GET `/ping-list`
+  (`{region: "host[:port]"}`) and every available, non-dedicated-only region's `/ping` fetched at the
+  same time (`pingFetch`, 5 s abort); the FIRST to answer is the region and is cached
+  (`setDefaultRegion`). No answer at all rejects the seek ("All pings failed."). KrunkNative
+  (`region_ping.h`): the same race for krunker.io (cached as `knKrunkerPingRegion`; all pings failing
+  seeks in `de-fra`, the list's first, for a minute) and for the brain's `/mm/ping-list` (cached in
+  `pingRegion7`, marked by `knPingRegionPinged`; all failing = the list's first)
 * `autoChangeGame`: the callers pass `false`
 * `validationToken`
 * `game`: when a game id is known (`?game=`)
@@ -196,24 +203,39 @@ Tests:
 
 ## 3. Seek preferences (Settings > General > Quickplay)
 
-The settings rows are KrunkNative's, since v10 has none. They sit at the end of the General tab in
-the advanced view (the switch next to Search). The basic view stays v10's curated General tab and
-only gains the native Server Type row, last in v10's own "Server Browser & Matchmaking" folder
-(Seek Mode / Seek Map need the advanced view; `--render-scenario` leaves the row out, so uidiff
-still compares v10's tab):
+v10.0.2 reads `seek_modes` / `seek_maps` (getSavedVal, a "1,3" string or an array, V:222011-222016)
+and has no page that writes them. The rows here are KrunkNative's, a Quickplay folder at the end of
+the General tab in both views (the basic view also gets Server Type / krunker.io Region, last in
+v10's own "Server Browser & Matchmaking" folder; `--render-scenario` leaves the basic view's rows out,
+so uidiff still compares v10's tab):
 
-* **Seek Mode**: Any or one mode, stored as the setting `seek_modes` (mode id; our mode ids are
-  v10's `gameModes` indices).
-* **Seek Map**: Any or one official map, stored as `seek_maps` (map catalogue index;
-  0..31 = Krunker's `mapIndex`).
-* **Server Type**, native only: KrunkNative (the default), Official (krunker.io) or Both, stored as
+* **One switch per mode and per map**: Seek Modes (a folder, open at first) and Seek Maps (closed), each
+  row a `label.switch` like Settings > General's own switches, under a `setHed` folder (collapseFolder).
+  A switch click saves the switches that are on, in order, as v10 reads them (`"0,2,3,18,19,25"`;
+  `knSeekSwitch(key, index, checked)`, `seek_filter_toggle`). Mode ids are v10's `gameModes` indices, map
+  ids Krunker's `mapIndex`. v10 has no switch list for `seek_modes`, so uidiff `kn-settings-quickplay`
+  compares the folder with KrunkNative's own render in `doc/ref/krunknative/`.
+* **On at first = Krunker's public rotation**, every other switch off: the modes of v10's public rotation
+  (`rotationModes` [0, 2, 3, 19, 25], V:167202: FFA, Hardpoint, CTF, Kill Confirmed, Domination;
+  `g_rotation_modes` / `flavor_rotation_modes`, Krunker Strike its own) and the maps of v10's
+  `rotationMaps` (34 maps, V:167210; `seek_filter_rotation_maps`). A saved list replaces that default
+  switch by switch. With every switch off the saved list is empty, and the seek uses the rotation again:
+  an empty choice never sends an empty pool. Quick Play, the launch seek and Find New Game never land in
+  Trade, Parkour, TDM, or a map outside the rotation unless the player switched it on. Lobby picks also
+  never take a custom game or a password lobby, and an official custom (`oc`) or dedicated (`ds`) lobby
+  only for a mode switched on; krunker.io sends those flags as `1` (or `true`): both count
+  (`seek_filter.c`, unit test `seek_filter_test`).
+* **Server Type**, native only: Box Office servers (the default), krunker.io servers or Both, stored as
   `knSeekServers`. It only picks what Quick Match / F4 seek into: the server browser lists both.
-  The web build has no row and always seeks KrunkNative servers.
+  The web build has no row and always seeks our servers.
 
-Seeks send `dataQuery={"dsmo":[mode],"dsma":[map]}`, as v10 does, except when the seek names a
-game. Lobbies announce `meta.mode` and the new `meta.mapIndex` (server_bin). The brain's quick
-join only takes lobbies matching both; requested games are never filtered. When lobbies have room
-but none matches, it answers 503 `NoMatchingServers`.
+Seeks send `dataQuery` `dsma` / `dsmo` arrays in v10's order, except when the seek names a game: always
+both lists, the switched-on ones or the rotation (never empty), to krunker.io and to our brain. v10 sends
+none when nothing is picked, and its matchmaker's public pool is the same rotation; the brain has no
+pool of its own.
+Lobbies announce `meta.mode` and `meta.mapIndex` (server_bin). The brain's quick join only takes
+lobbies matching both; requested games are never filtered. When lobbies have room but none matches,
+it answers 503 `NoMatchingServers`. The server browser's rows are filtered only once a switch was changed (every row before that).
 
 Find New Game (F4) and Quick Match (`servers_ui_find_new_game`):
 
@@ -222,13 +244,36 @@ Find New Game (F4) and Quick Match (`servers_ui_find_new_game`):
 * **Both**: our seek first. If it answers `NoMatchingServers` / `NoAvailableServers`, an official
   lobby instead.
 
-A find that comes back empty leaves the player in the current game and shows a toast ("No Games
-Found. Try changing Quickplay options"). The startup seek also sends the preferences (v10
+A find that comes back empty shows v10's error screen, in the game too (v10.js:222076-222090: the menu
+with its message, the game left behind it); a find whose only lobby is the one the player is in lands
+back in it without a word, as v10's matchmaker does. The startup seek also sends the preferences (v10
 parity) but never opens krunker.io.
 
-The server browser (Find Game, window 2) shows ours and (native) the official krunker.io lobbies
+The server browser (Servers, window 2) shows ours and (native) the official krunker.io lobbies
 whatever the server type, filtered to the seek mode and map, with a "Showing <mode> on <map>" line
 when a filter is set.
+
+Refresh (v10 windows[1], v10.js:211155-211240, 211452-211460): the list is asked again only when the
+window opens (or switches tab) and the last request is older than 10 s (v10's `serverBrowserRate`); the
+re-renders inside that time (a region click, a tab switch, an answer of another list) ask nothing. A
+hosted game forces the next opening to ask. Each list load also measures every region's `/ping` (v10
+`getRegionPing`): the rows' ping icons are those round trips (`pingData`: under 100 ms low, 100-299 ms
+medium, 300 ms and more high; no answer = low). Krunker.io's regions come from its own `/ping-list`.
+Find Game (window 48, `openServerWindow`): Public and Customs open the list; Raids (2), Zombies (3) and
+Trade Plaza (4) join the official krunker.io custom game of that mode with room (the krunker.io Region
+first, then the busiest), or say "Couldnt find any". v10's "Searching..." waiting popup shows while the list
+is fetched; a join that has not taken the player into the game 2 s later shows "Took to long to find" (v10's
+timer; the page would have navigated away on the site). "Couldnt find any" is v10's responsePop popup.
+
+`?play=<map>` (hub links, v10 playMap, v10.js:222040-222051) for one of v10's maps: a matchmaker seek in any
+region (an empty `region`), with v10's dataQuery `{"i": "<map>", "dsma": [<index>]}` (`i` is v10's; `dsma` is the
+brain's map index, the lobby's mapIndex), autoChangeGame false and no lobby named. When no lobby plays the map
+(`NoMatchingServers`, the brain's answer; v10 says NoServersMatchQuery) the plain seek runs in place (v10's
+retry), with the Quickplay lists. Any other failure is v10's error screen. Community maps keep the list search
+(a lobby named after the map) and the offline practice of the published map.
+
+Server list (windows[1] loadData): a failed game list keeps the window on LOADING until the next opening
+(v10's Promise.all rejects, loadedServers stays false, nothing re-renders).
 
 ## 4. Official krunker.io lobbies (native only, `client/src/ui/krunker_lobbies.c`)
 
@@ -238,8 +283,8 @@ when a filter is set.
   * It runs on its own HTTP worker (`backend_http_get_external`), so it never delays a brain
     request.
   * Timeout: 6 s.
-  * Caching: an answer is reused for 20 s, a forced refresh (a seek) never comes sooner than
-    15 s, and a failure is retried after 30 s.
+  * Caching: an answer is reused for 10 s (v10's `serverBrowserRate`, the same as the brain's list), a
+    forced refresh (a seek) never comes sooner than 15 s, and a failure is retried after 30 s.
 * Compiled under `#ifndef __EMSCRIPTEN__`. The web build has stubs and never lists or requests
   them.
 * `KRUNKNATIVE_KRUNKER_MATCHMAKER` overrides the URL (tests: a local stub; development: a mirror);
@@ -268,16 +313,27 @@ when a filter is set.
   * Tests: `client/tests/http_proxy_test.c` (parsing, scope, environment, NO_PROXY) and
     `server/tests/client_proxy_e2e.py` (`make client-proxy-e2e`: a stub CONNECT / SOCKS5 proxy, the
     block page, persistence, a live change, `HTTP_PROXY`).
-* Display: each lobby becomes a server-browser row with a purple KRUNKER.IO tag and the same
-  columns as ours:
-  * name (`h`, else the map `i`)
+* Display: each lobby is a server-browser row drawn like v10's own (no tag), with the same columns
+  as ours:
+  * name (`h`, else "<mode> - <map>" with Krunker's map name `i` as sent)
   * players/max
-  * Krunker's region name (`_7517`)
+  * the region cell as v10 has it: only on custom / official-custom rows and in the mode-grouped
+    browser, reading the id's prefix ("NY")
   * ping icon
   * "Ends in" (the tuple's seconds left)
 
-  The rows sit in their own groups after ours, "krunker.io - <region>" (or
-  "krunker.io - <mode>" in the mode-grouped browser). Those groups have no Quick Join.
+  In the region browser (the default) they sit in their own groups after ours, one per Krunker
+  region, with v10's header: the place name (`_7517`, "New York"), then Quick Join and
+  "N online". Official customs and custom games join the top groups. In the mode-grouped browser
+  they join the mode's own group, as in v10. One line before the official groups is the only cue
+  that they are krunker.io's (`#kioStatus`, `.kioSep`): "krunker.io servers", why there are none
+  when there are none (loading, refused, unreachable, nothing matching) and, on the right, the
+  krunker.io account they see with Login / Logout. The footer's "In Game" adds krunker.io's
+  `totalPlayerCount`.
+* Region: Settings > Quickplay > krunker.io Region (`knKrunkerRegion`, the matchmaker's regions by
+  Krunker's place names) is the region official seeks ask for (after `KRUNKNATIVE_KRUNKER_REGION`)
+  and the one Quick Match / F4 prefer in the list; Default is the ping race's region (1.2
+  `region`), which the row then shows, like v10's Region row.
 * Joining: a click (`krunkerJoin(id)`) joins the lobby in this client through Krunker's own
   protocol (`krunker_net.h`, KN_KRUNKER_OFFICIAL): the Servers window closes, seek-game asks for
   that game (its region from the list), the Security Challenge modal shows when the matchmaker
@@ -290,7 +346,10 @@ when a filter is set.
     this client's own page.
   * Ids are checked against `[A-Za-z0-9:_-]{1,64}`.
 * A seek for an official lobby picks a public one (not custom, no password), not full, in the
-  wanted mode and map, with the most players.
+  wanted mode and map, with the most players, in the seek's region first (the krunker.io Region, else
+  the ping race's): never the busiest region the world over while the near one has a lobby with room.
+* Loading: a join from the list or a link raises v10's loading screen (the ring, "Loading <map>
+  ..." for a listed lobby) until the game's INIT or the error screen.
 
 ## 5. Keys
 

@@ -646,6 +646,10 @@ reconnect-test: build ## Console reload + rejoin online + offline, F5 relaunch, 
 mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join ticket), Quickplay seek prefs, official krunker.io lobbies (stub), F4 / F5 (kn_brain + 2 server_bin + headless client; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/mm_token_e2e.py $(DEBUG_DIR)
 
+.PHONY: seek-region-e2e
+seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_region_e2e.py $(DEBUG_DIR)
+
 .PHONY: client-proxy-e2e
 client-proxy-e2e: build ## Settings > Client > Proxy: krunker.io's lobby list through a stub HTTP CONNECT / SOCKS5 proxy, persisted, live change, HTTP_PROXY, the ACCESS DENIED message (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/client_proxy_e2e.py $(DEBUG_DIR)

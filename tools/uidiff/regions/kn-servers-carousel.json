@@ -1,0 +1,103 @@
+{
+  "scenario": "kn-servers-carousel",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "window-header",
+      "rect": [
+        307,
+        125,
+        480,
+        30
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
+    },
+    {
+      "name": "carousel-names",
+      "rect": [
+        307,
+        180,
+        665,
+        26
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 22.0,
+      "note": "the slides' names: .slideName's six stacked 3px text-shadows; the engine's blur sums them a little lighter than Skia's, so the halo differs while the glyphs and their places match"
+    },
+    {
+      "name": "carousel",
+      "rect": [
+        307,
+        206,
+        665,
+        60
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 8.0,
+      "note": "v10's carousel: PureJSCarousel's prev / next and the slides shifted left by one set (margin-left -1475px: 5 x 295), most players first (Trench_War_H1's two lobbies summed to 13), each the map's thumbnail through the engine's remote images (downscaled 265x140 copies of the real ones in tools/uidiff/remote/), and the players. The slides draw them at about 152 px wide, smaller than the files: the downscale's filtering (mip level and bilinear) differs from Skia's by a few levels on the thumbnails' fine detail"
+    },
+    {
+      "name": "top-groups",
+      "rect": [
+        307,
+        280,
+        665,
+        90
+      ],
+      "ref_offset": [
+        0,
+        12
+      ],
+      "kind": "text",
+      "note": "Official Customs, Custom Games (85 online: the custom games)"
+    },
+    {
+      "name": "region-groups",
+      "rect": [
+        307,
+        401,
+        665,
+        140
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "note": "New York, Frankfurt, Sydney after KrunkNative's krunker.io servers line"
+    },
+    {
+      "name": "footer",
+      "rect": [
+        307,
+        555,
+        665,
+        36
+      ],
+      "ref_offset": [
+        0,
+        -12
+      ],
+      "kind": "text",
+      "note": "137 In Game"
+    }
+  ]
+}

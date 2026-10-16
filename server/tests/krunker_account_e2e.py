@@ -431,10 +431,10 @@ def run():
     sv = probe(text, "signedvis")
     check("signed in: Logout instead of the form", "knKioSignOut=1" in sv and "knKioAccountForm=0" in sv, sv)
 
-    # 2. the Accounts line + Quick Join
+    # 2. the Servers window's krunker.io servers line (the account they see) + Quick Join
     kn, kio = probe(text, "kn"), probe(text, "kio")
-    check("the Accounts line: Box Office servers see the Box Office account (a guest here)", "Box Office servers:" in kn and "Guest" in kn, kn)
-    check("the Accounts line: krunker.io servers see the krunker.io account", "krunker.io servers:" in kio and ACCOUNT_NAME in kio and "Logout" in kio, kio)
+    check("the Servers window has no KrunkNative accounts row (the menu header shows that account, as v10's does)", kn.startswith("n=0 "), kn)
+    check("the krunker.io servers line shows the krunker.io account with Logout", ACCOUNT_NAME in kio and "Logout" in kio, kio)
     window = probe(text, "window")
     check("the Servers window has no \"as a guest\" / \"guest only\" wording", window and not re.search(r"as a guest|guest only", window, re.I),
           re.findall(r".{40}as a guest.{20}", window)[:2])

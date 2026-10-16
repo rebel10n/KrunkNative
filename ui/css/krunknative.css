@@ -945,6 +945,31 @@ html.kn-bare-window #instructions {
   color: #42a5f5;
 }
 
+/* The Servers window's one separator before the official krunker.io groups (servers_ui.c
+ * append_krunker_status). v10 lists krunker.io's lobbies with no tag, so this line is the only cue:
+ * the group header's "online" grey at the window's 20px, the account (Login / Logout) on the right
+ * where the group headers keep their player count. #menuWindow.dark div sets every div white
+ * (main.css), hence the selectors' weight. */
+#menuWindow.dark div.kioSep {
+  margin: 24px 15px -8px 6px;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.kioSep .kioSepAcc {
+  float: right;
+}
+.kioSep .kioSepLabel,
+#menuWindow.dark div.kioSepWhy {
+  color: rgba(255, 255, 255, 0.6);
+}
+#menuWindow.dark div.kioSepWhy {
+  margin-top: 4px;
+  font-size: 16px;
+}
+#menuWindow.dark div.kioSepErr {
+  color: #ff6b6b;
+}
+
 /* KrunkNative's password-reset steps (client/src/ui/account_ui.c reset_render) fill the Account
  * window with v7.1.4's guest-form markup: its Back / Send Code buttons are .accBtn, a rule of
  * v7's css/main.css (line 2658) the v10 page lacks. Without it they shrank to their text. */

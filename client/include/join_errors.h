@@ -13,8 +13,8 @@ void join_error_text(const char *code, char *out, size_t n);
 // Where a failed join shows (the decision only, the UI is in servers_ui.c / krunker_net.c):
 //   JOIN_ERROR_SCREEN  the Lost Connection screen (v10's error screen, #instructionsUpdate): the
 //                      join never started, so the menu is the place to say why;
-//   JOIN_ERROR_POPUP   v10's error popup (genericPopup "responsePop", the red clear icon): the
-//                      player is in a game and stays in it (Find New Game found nothing).
+//   JOIN_ERROR_POPUP   v10's error popup (genericPopup "responsePop", the red clear icon). Not used for a
+//                      failed seek (v10 shows its error screen for those, join_error_place).
 typedef enum {
     JOIN_ERROR_SCREEN = 0,
     JOIN_ERROR_POPUP = 1,

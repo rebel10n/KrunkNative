@@ -253,6 +253,27 @@ void ui_error_popup(const char *text) {
     free(html);
 }
 
+// v10's waiting popup (io_wait / iîíïíîî: genericPopup with the lds-ring, class loadingPop)
+void ui_loading_popup(const char *text) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='width:100%;text-align:center'><div class='lds-ring'><div></div><div></div><div></div><div></div></div>"
+                   "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
+    sb_append_esc(&sb, text && text[0] ? text : "");
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    ui_loadout_clear_pops();
+    HtmlElem holder = html_dom_by_id("popupHolder");
+    if (holder) html_dom_set_display(holder, "block");
+    HtmlElem pop = html_dom_by_id("genericPop");
+    if (pop) {
+        html_dom_set_attr(pop, "class", "loadingPop");
+        html_dom_set_attr(pop, "style", "");
+        html_dom_set_html(pop, html);
+        html_dom_set_display(pop, "block");
+    }
+    free(html);
+}
+
 void ui_alert(const char *text) {
     menu_log("alert: %s", text ? text : "");
 #ifdef __EMSCRIPTEN__

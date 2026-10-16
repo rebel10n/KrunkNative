@@ -1,0 +1,22 @@
+{
+  "scenario": "kn-menu-popular-official",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "popular-rail",
+      "rect": [
+        955,
+        395,
+        320,
+        58
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "Popular Now with krunker.io's custom games: the header and three cards (name, 'N playing', play_arrow), top 3 by players (v10_menu.c popular_render over servers_ui_fetch_matches)"
+    }
+  ]
+}

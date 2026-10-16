@@ -1,15 +1,20 @@
 // Seek preferences: Settings > General > Quickplay (client/include/seek_prefs.h,
 // doc/v10/matchmaker-token.md "Seek preferences"). v10.0.2 reads `seek_modes` / `seek_maps`
 // (getSavedVal, comma lists of indices; v10.js:222011-222016) into the seek's dataQuery
-// dsmo / dsma (v10.js:222051-222055) and has no settings row for them; the rows here are
-// KrunkNative's, in v10's settings markup (setHed / setBodH / settName + inputGrey2 select).
+// dsmo / dsma (v10.js:222051-222055) and has no page writing them. The rows here are KrunkNative's,
+// in v10's settings markup (setHed / setBodH folders, settName rows with the label.switch of
+// Settings > General), one switch per mode and one per map. The pure rules are in seek_filter.c.
 #include <seek_prefs.h>
+#include <seek_filter.h> // the pure core (unit-tested)
 #include <krunker_net.h> // krunker_net_in_client (the Server Type texts)
 #include <ui_logic.h>
 #include <krunker_maps.h>
+#include <krunker_build.h> // KRUNKER_REGIONS: the matchmaker's regions
+#include <krunker_lobbies.h> // krunker_region_name
 #include <krunker_map_source.h> // the official list: names (krunker_maps.h)
 #include <modes.h>
-#include <flavor.h> // Krunker Strike: its own servers only
+#include <flavor.h> // Krunker Strike: its own servers only; flavor_get (the flavor's rotation)
+#include <flavor_rules.h> // flavor_rotation_modes, flavor_mode_allowed
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,30 +25,62 @@
 #define SEEK_MAPS_KEY "seek_maps"
 #define SEEK_SERVERS_KEY "knSeekServers"
 #define SEEK_ON_LAUNCH_KEY "knSeekOnLaunch"
+#define KRUNKER_REGION_KEY "knKrunkerRegion"
 
-// The first index of a saved list ("3", "3,5", 3, [3]); -1 = none / Any.
-static int saved_first_index(const char *key) {
-    const cJSON *v = ui_setting_saved(key);
-    if (cJSON_IsArray(v)) v = cJSON_GetArrayItem(v, 0);
-    if (cJSON_IsNumber(v)) return v->valuedouble >= 0 ? (int) v->valuedouble : -1;
-    const char *s = cJSON_GetStringValue(v);
-    if (!s || !(s[0] >= '0' && s[0] <= '9')) return -1;
-    return atoi(s);
+static int list_contains(const int *list, const int count, const int v) {
+    for (int i = 0; i < count; i++) {
+        if (list[i] == v) return 1;
+    }
+    return 0;
 }
 
-int seek_prefs_mode(void) {
-    const int id = saved_first_index(SEEK_MODES_KEY);
-    return id >= 0 && mode_config(id) ? id : -1;
+// a mode the switches offer: named, and played by this flavor (Krunker Strike: FRVR's modes)
+static int mode_valid(const int id) {
+    const GameModeConfig *m = id >= 0 ? mode_config(id) : NULL;
+    return m && m->name && m->alias && flavor_mode_allowed(id);
+}
+static int map_valid(const int index) { return index >= 0 && index < KRUNKER_OFFICIAL_MAP_COUNT && krunker_official_map_name(index); }
+
+// the switched-on entries of a saved list, as v10's _69484 reads it (seek_filter_parse); 0 = none
+static int saved_list(const char *key, int *out, const int max, int (*valid)(int)) {
+    return seek_filter_parse(ui_setting_saved(key), out, max < SEEK_FILTER_MAX ? max : SEEK_FILTER_MAX, valid);
 }
 
-int seek_prefs_map(void) {
-    const int index = saved_first_index(SEEK_MAPS_KEY);
-    return index >= 0 && index < KRUNKER_OFFICIAL_MAP_COUNT ? index : -1;
+// Krunker's public rotation, the default of each list: v10's rotationModes of this flavor, and v10's
+// rotationMaps (seek_filter_rotation_maps)
+static int rotation_modes(int *out, const int max) {
+    const int *pool = NULL;
+    const size_t count = flavor_rotation_modes(flavor_get(), &pool);
+    int n = 0;
+    for (size_t i = 0; pool && i < count && n < max; i++) out[n++] = pool[i];
+    return n;
 }
 
-const char *seek_prefs_map_name(void) {
-    const int index = seek_prefs_map();
-    return index >= 0 ? krunker_official_map_name(index) : NULL;
+static int rotation_maps(int *out, const int max) {
+    const int *pool = NULL;
+    const size_t count = seek_filter_rotation_maps(&pool);
+    int n = 0;
+    for (size_t i = 0; pool && i < count && n < max; i++) out[n++] = pool[i];
+    return n;
+}
+
+// The lists a seek uses: the switched-on entries, or the rotation when none is on
+static void current_filter(SeekFilter *f) {
+    int on_modes[SEEK_FILTER_MAX], def_modes[SEEK_FILTER_MAX], on_maps[SEEK_FILTER_MAX], def_maps[SEEK_FILTER_MAX];
+    const int on_mode_count = saved_list(SEEK_MODES_KEY, on_modes, SEEK_FILTER_MAX, mode_valid);
+    const int on_map_count = saved_list(SEEK_MAPS_KEY, on_maps, SEEK_FILTER_MAX, map_valid);
+    const int def_mode_count = rotation_modes(def_modes, SEEK_FILTER_MAX);
+    const int def_map_count = rotation_maps(def_maps, SEEK_FILTER_MAX);
+    memset(f, 0, sizeof(*f));
+    f->mode_count = seek_filter_effective(on_modes, on_mode_count, def_modes, def_mode_count, f->modes, SEEK_FILTER_MAX);
+    f->modes_chosen = on_mode_count > 0;
+    f->map_count = seek_filter_effective(on_maps, on_map_count, def_maps, def_map_count, f->maps, SEEK_FILTER_MAX);
+    for (int i = 0; i < f->map_count; i++) f->map_names[i] = krunker_official_map_name(f->maps[i]);
+}
+
+int seek_prefs_filtering(void) {
+    int tmp[SEEK_FILTER_MAX];
+    return saved_list(SEEK_MODES_KEY, tmp, SEEK_FILTER_MAX, mode_valid) > 0 || saved_list(SEEK_MAPS_KEY, tmp, SEEK_FILTER_MAX, map_valid) > 0;
 }
 
 SeekServers seek_prefs_servers(void) {
@@ -60,6 +97,20 @@ SeekServers seek_prefs_servers(void) {
 #endif
 }
 
+
+const char *seek_prefs_krunker_region(void) {
+#ifdef __EMSCRIPTEN__
+    return ""; // the web client never seeks krunker.io
+#else
+    static const char *const regions[] = {KRUNKER_REGIONS};
+    const char *s = cJSON_GetStringValue(ui_setting_saved(KRUNKER_REGION_KEY));
+    for (size_t i = 0; s && i < sizeof(regions) / sizeof(regions[0]); i++) {
+        if (!strcmp(s, regions[i])) return regions[i];
+    }
+    return "";
+#endif
+}
+
 // The switch stores a boolean (checkbox onclick, setSetting); a script's 0 / "0" / "false" counts as
 // off too. Unset (no default in the tables) is on.
 int seek_prefs_on_launch(void) {
@@ -70,33 +121,62 @@ int seek_prefs_on_launch(void) {
     return !(s && (!strcmp(s, "false") || !strcmp(s, "0")));
 }
 
-void seek_prefs_data_query(char *out, const size_t n) {
-    if (!out || !n) return;
-    out[0] = 0;
-    const int mode = seek_prefs_mode(), map = seek_prefs_map();
-    if (mode < 0 && map < 0) return;
-    int len = snprintf(out, n, "{");
-    if (mode >= 0) len += snprintf(out + len, n - (size_t) len, "\"dsmo\":[%d]", mode);
-    if (map >= 0 && (size_t) len < n) len += snprintf(out + len, n - (size_t) len, "%s\"dsma\":[%d]", mode >= 0 ? "," : "", map);
-    if ((size_t) len < n) snprintf(out + len, n - (size_t) len, "}");
+
+void seek_prefs_dq_fields(char *out, const size_t n) {
+    SeekFilter f;
+    current_filter(&f);
+    seek_filter_dq_fields(&f, out, n);
 }
 
-int seek_prefs_match(const int mode, const char *map_name) {
-    const int want_mode = seek_prefs_mode();
-    const char *want_map = seek_prefs_map_name();
-    if (want_mode >= 0 && mode != want_mode) return 0;
-    if (want_map && (!map_name || strcasecmp(map_name, want_map) != 0)) return 0;
-    return 1;
+void seek_prefs_data_query(char *out, const size_t n) {
+    if (!out || !n) return;
+    char fields[1024];
+    seek_prefs_dq_fields(fields, sizeof(fields));
+    if (fields[0]) snprintf(out, n, "{%s}", fields + 1);
+    else out[0] = 0;
+}
+
+int seek_prefs_match(const int mode, const char *map_name) { return seek_prefs_lobby_ok(mode, map_name, 0); }
+
+int seek_prefs_flag(const void *value) { return seek_filter_flag(value); }
+
+int seek_prefs_lobby_ok(const int mode, const char *map_name, const unsigned flags) {
+    SeekFilter f;
+    current_filter(&f);
+    return seek_filter_lobby_ok(&f, mode, map_name, flags);
+}
+
+// "a, b, c" (the first three, then "+N more"), or `none` for an empty list
+static void names_list(char *out, const size_t n, const int *ids, const int count, const int maps) {
+    int len = 0;
+    for (int i = 0; i < count && i < 3 && (size_t) len < n; i++) {
+        const GameModeConfig *m = maps ? NULL : mode_config(ids[i]);
+        const char *name = maps ? krunker_official_map_name(ids[i]) : m ? m->name : NULL;
+        len += snprintf(out + len, n - (size_t) len, "%s%s", i ? ", " : "", name ? name : "?");
+    }
+    if (count > 3 && (size_t) len < n) {
+        char more[16], text[48];
+        snprintf(more, sizeof(more), "%d", count - 3);
+        i18n_trf(text, sizeof(text), "kn.quickplay.more", "+{0} more", 1, I18N_ARGV(more));
+        snprintf(out + len, n - (size_t) len, " %s", text);
+    }
 }
 
 void seek_prefs_describe(char *out, const size_t n) {
-    const int mode = seek_prefs_mode();
-    const GameModeConfig *m = mode >= 0 ? mode_config(mode) : NULL;
-    const char *map = seek_prefs_map_name();
-    i18n_trf(out, n, "kn.quickplay.describe", "{0} on {1}", 2,
-             I18N_ARGV(m && m->name ? m->name : I18N("kn.quickplay.anyMode", "any mode"), map ? map : I18N("kn.quickplay.anyMap", "any map")));
+    SeekFilter f;
+    current_filter(&f);
+    int on_modes[SEEK_FILTER_MAX], on_maps[SEEK_FILTER_MAX];
+    const int mode_on = saved_list(SEEK_MODES_KEY, on_modes, SEEK_FILTER_MAX, mode_valid) > 0;
+    const int map_on = saved_list(SEEK_MAPS_KEY, on_maps, SEEK_FILTER_MAX, map_valid) > 0;
+    char mode_text[160], map_text[160];
+    if (mode_on) names_list(mode_text, sizeof(mode_text), f.modes, f.mode_count, 0);
+    else snprintf(mode_text, sizeof(mode_text), "%s", I18N("kn.quickplay.publicModes", "public modes"));
+    if (map_on) names_list(map_text, sizeof(map_text), f.maps, f.map_count, 1);
+    else snprintf(map_text, sizeof(map_text), "%s", I18N("kn.quickplay.publicMaps", "public maps"));
+    i18n_trf(out, n, "kn.quickplay.describe", "{0} on {1}", 2, I18N_ARGV(mode_text, map_text));
 }
 
+#ifndef __EMSCRIPTEN__
 static void option(StrBuf *sb, const char *value, const char *label, const int selected) {
     sb_append(sb, "<option value=\"");
     sb_append_esc(sb, value);
@@ -105,7 +185,6 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
     sb_append(sb, "</option>");
 }
 
-#ifndef __EMSCRIPTEN__
 // Server Type (native only: the web client never lists krunker.io lobbies): what Quick Match and
 // Find New Game (F4) seek into; the server browser lists both kinds whatever it says. Official
 // lobbies are joined in this client (krunker_net.h) unless the browser opt-out is set.
@@ -120,7 +199,7 @@ static void server_type_html(StrBuf *sb) {
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
     sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "kn", "Box Office", servers == SEEK_SERVERS_KN);
+    option(sb, "kn", I18N("kn.quickplay.serverType.boxOffice", "Box Office servers"), servers == SEEK_SERVERS_KN);
     option(sb, "official", I18N("kn.quickplay.serverType.official", "krunker.io servers"), servers == SEEK_SERVERS_OFFICIAL);
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
@@ -130,12 +209,28 @@ static void server_type_html(StrBuf *sb) {
                                                                           "Both prefers a Box Office server when one matches."));
     sb_append(sb, "</div>");
 }
+
+// krunker.io Region: v10's Default Region for the official lobbies (the matchmaker's regions by
+// Krunker's own place names, v10 _7517), in the same select markup as Server Type
+static void krunker_region_html(StrBuf *sb) {
+    static const char *const regions[] = {KRUNKER_REGIONS};
+    // the player's choice, else the region the ping race picked (v10's Region row shows the ping cache)
+    const char *current = seek_prefs_krunker_region()[0] ? seek_prefs_krunker_region() : krunker_seek_region_auto();
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.kioRegion.info", "The region Quick Match, Find New Game (F4) and krunker.io's matchmaker look in for krunker.io servers"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.kioRegion", "krunker.io Region"));
+    sb_append(sb, " <select id=\"knKrunkerRegion\" onchange=\"window.setSetting(&quot;" KRUNKER_REGION_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    option(sb, "", I18N("kn.quickplay.kioRegion.default", "Default"), !current[0]);
+    for (size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); i++) option(sb, regions[i], krunker_region_name(regions[i]), !strcmp(current, regions[i]));
+    sb_append(sb, "</select></div>");
+}
 #endif
 
 // Auto Seek on Launch: a switch row like v10's settings switches (onclick setSetting, checked when on)
 static void launch_seek_html(StrBuf *sb) {
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.autoSeek.info", "When the game starts, seek a game with the Server Type, Seek Mode and Seek Map above, as Find New Game (F4) does"));
+    sb_append_esc(sb, I18N("kn.quickplay.autoSeek.info", "When the game starts, seek a game with the Server Type, Seek Modes and Seek Maps, as Find New Game (F4) does"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.autoSeek", "Auto Seek on Launch"));
     sb_append(sb, " <label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" onclick=\"window.setSetting(&quot;" SEEK_ON_LAUNCH_KEY
@@ -144,48 +239,113 @@ static void launch_seek_html(StrBuf *sb) {
     sb_append(sb, "><span class=\"slider\"><span class=\"grooves\"></span></span></label></div>");
 }
 
-static void section_html(StrBuf *sb) {
-    char value[16];
+// One switch row (v10's settName with the label.switch of Settings > General): on when the index is
+// in the effective list. maps: the map list's rows, else the mode list's.
+static void switch_row(StrBuf *sb, const int maps, const int index, const char *label, const int on) {
+    char buf[256];
+    const char *key = maps ? SEEK_MAPS_KEY : SEEK_MODES_KEY;
+    const char *prefix = maps ? "knSeekMap" : "knSeekMode";
+    sb_append(sb, "<div class=\"settName\">");
+    sb_append_esc(sb, label);
+    snprintf(buf, sizeof(buf),
+             " <label class=\"switch\" style=\"margin-left:10px\"><input id=\"%s%d\" type=\"checkbox\" "
+             "onclick=\"knSeekSwitch(&quot;%s&quot;, %d, this.checked)\"%s><span class=\"slider\"><span class=\"grooves\"></span></span></label></div>",
+             prefix, index, key, index, on ? " checked=\"\"" : "");
+    sb_append(sb, buf);
+}
+
+// One folder of switches: a collapsible setHed like v10's settings folders (collapseFolder needs the
+// setHed_ / setBod_ id pair). The modes are open at first (the short list the player picks from), the
+// maps closed (46 rows).
+static void folder_html(StrBuf *sb, const int maps, const char *title, const char *note) {
+    const char *id = maps ? "quickplay_maps" : "quickplay_modes";
+    const int open = !maps;
+    char buf[160];
+    snprintf(buf, sizeof(buf), "<div class=\"setHed\" id=\"setHed_%s\" onclick=\"window.windows[0].collapseFolder(this)\">", id);
+    sb_append(sb, buf);
+    sb_append(sb, open ? "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> " : "<span class=\"material-icons plusOrMinus\">keyboard_arrow_right</span> ");
+    sb_append_esc(sb, title);
+    sb_append(sb, "</div>");
+    snprintf(buf, sizeof(buf), "<div class=\"setBodH\" id=\"setBod_%s\"%s>", id, open ? "" : " style=\"display:none\"");
+    sb_append(sb, buf);
+    snprintf(buf, sizeof(buf), "<div class=\"settName\" id=\"knSeek%sNote\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">", maps ? "Map" : "Mode");
+    sb_append(sb, buf);
+    sb_append_esc(sb, note);
+    sb_append(sb, "</div>");
+
+    SeekFilter f;
+    current_filter(&f);
+    const int n = maps ? KRUNKER_OFFICIAL_MAP_COUNT : MODE_COUNT;
+    for (int i = 0; i < n; i++) {
+        const char *name = maps ? (map_valid(i) ? krunker_official_map_name(i) : NULL) : (mode_valid(i) ? mode_config(i)->name : NULL);
+        if (!name) continue;
+        char shown[96]; // v10's _8933: the first letter upper-cased (v10.js:23847)
+        snprintf(shown, sizeof(shown), "%s", name);
+        if (!maps && shown[0] >= 'a' && shown[0] <= 'z') shown[0] = (char) (shown[0] - 'a' + 'A');
+        const int on = maps ? list_contains(f.maps, f.map_count, i) : list_contains(f.modes, f.mode_count, i);
+        switch_row(sb, maps, i, shown, on);
+    }
+    sb_append(sb, "</div>");
+}
+
+// "Nothing switched on: the public rotation" notes name what a seek then looks for
+static void pool_note(char *out, const size_t n) {
+    int pool[SEEK_FILTER_MAX];
+    const int count = rotation_modes(pool, SEEK_FILTER_MAX);
+    char names[400] = "";
+    names_list(names, sizeof(names), pool, count, 0);
+    i18n_trf(out, n, "kn.quickplay.seekModes.note",
+             "Krunker's public rotation is on by default: {0}. Switch on Trade, Parkour or any other mode to seek it. With every switch off, the rotation is sought.",
+             1, I18N_ARGV(names));
+}
+
+static void section_html(StrBuf *sb, const int server_rows) {
     sb_append(sb, "<div class=\"setHed\" id=\"setHed_quickplay\" onclick=\"window.windows[0].collapseFolder(this)\">"
                   "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ");
     sb_append_esc(sb, I18N("kn.quickplay.header", "Quickplay"));
     sb_append(sb, "</div><div class=\"setBodH\" id=\"setBod_quickplay\">");
-    // Seek Mode
-    const int mode = seek_prefs_mode();
-    sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.seekMode.info", "Quick Match, Find New Game (F4) and the server browser look for this mode"));
-    sb_append(sb, "\">");
-    sb_append_esc(sb, I18N("kn.quickplay.seekMode", "Seek Mode"));
-    sb_append(sb, " <select id=\"knSeekMode\" onchange=\"window.setSetting(&quot;" SEEK_MODES_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "", I18N("kn.quickplay.any", "Any"), mode < 0);
-    int count = 0;
-    const GameModeConfig *modes = mode_list(&count);
-    for (int i = 0; modes && i < count; i++) {
-        if (!modes[i].name || !modes[i].alias) continue;
-        snprintf(value, sizeof(value), "%d", i);
-        option(sb, value, modes[i].name, i == mode);
-    }
-    sb_append(sb, "</select></div>");
-    // Seek Map: Krunker's official maps, all of the list (krunker_maps.h): the index is the mapIndex dsma sends
-    const int map = seek_prefs_map();
-    sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.seekMap.info", "Quick Match, Find New Game (F4) and the server browser look for this map"));
-    sb_append(sb, "\">");
-    sb_append_esc(sb, I18N("kn.quickplay.seekMap", "Seek Map"));
-    sb_append(sb, " <select id=\"knSeekMap\" onchange=\"window.setSetting(&quot;" SEEK_MAPS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "", I18N("kn.quickplay.any", "Any"), map < 0);
-    for (int i = 0; i < KRUNKER_OFFICIAL_MAP_COUNT; i++) {
-        const char *name = krunker_official_map_name(i);
-        if (!name) continue;
-        snprintf(value, sizeof(value), "%d", i);
-        option(sb, value, name, i == map);
-    }
-    sb_append(sb, "</select></div>");
 #ifndef __EMSCRIPTEN__
-    server_type_html(sb);
+    if (server_rows) {
+        server_type_html(sb);
+        krunker_region_html(sb);
+    }
+#else
+    (void) server_rows;
 #endif
     launch_seek_html(sb);
+    char note[600];
+    pool_note(note, sizeof(note));
+    folder_html(sb, 0, I18N("kn.quickplay.seekModes", "Seek Modes"), note);
+    folder_html(sb, 1, I18N("kn.quickplay.seekMaps", "Seek Maps"),
+                I18N("kn.quickplay.seekMaps.note", "Krunker's public rotation of maps is on by default. With every switch off, the rotation is sought."));
     sb_append(sb, "</div>");
+}
+
+// knSeekSwitch(key, index, checked): the saved list with that switch flipped (the rotation when none
+// was switched on), ascending, saved as a comma list ("" when every switch is off: the rotation is sought)
+static void save_switch(const char *key, const int maps, const int index, const int checked) {
+    int on[SEEK_FILTER_MAX], def[SEEK_FILTER_MAX], out[SEEK_FILTER_MAX];
+    const int on_count = saved_list(key, on, SEEK_FILTER_MAX, maps ? map_valid : mode_valid);
+    const int def_count = maps ? rotation_maps(def, SEEK_FILTER_MAX) : rotation_modes(def, SEEK_FILTER_MAX);
+    const int n = seek_filter_toggle(on, on_count, def, def_count, index, checked, out, SEEK_FILTER_MAX);
+    char list[1024] = "";
+    int len = 0;
+    for (int i = 0; i < n && (size_t) len < sizeof(list); i++) len += snprintf(list + len, sizeof(list) - (size_t) len, "%s%d", i ? "," : "", out[i]);
+    printf("[ui] Quickplay %s=%s\n", key, list[0] ? list : "(none: the public rotation)");
+    ui_settings_set_string(key, list);
+}
+
+int seek_prefs_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    if (!name || strcmp(name, "knSeekSwitch")) return -1;
+    if (argc < 3 || args[0].kind != HTML_ARG_STR || !args[0].str) return 1;
+    const char *key = args[0].str;
+    const int maps = !strcmp(key, SEEK_MAPS_KEY);
+    if (!maps && strcmp(key, SEEK_MODES_KEY)) return 1;
+    const int index = (int) args[1].num;
+    if ((double) index != args[1].num || !(maps ? map_valid(index) : mode_valid(index))) return 1;
+    const int checked = args[2].kind == HTML_ARG_THIS_CHECKED ? (ev && ev->checked) : args[2].num != 0.0;
+    save_switch(key, maps, index, checked);
+    return 1;
 }
 
 char *seek_prefs_extend_tab(const char *tab) {
@@ -194,27 +354,30 @@ char *seek_prefs_extend_tab(const char *tab) {
     if (!tab || !strstr(tab, "id=\"setBod_local\"") || strstr(tab, "id=\"setHed_quickplay\"")) return NULL;
     StrBuf sb = {0};
     sb_append(&sb, tab);
-    section_html(&sb);
+    section_html(&sb, 1);
     return sb_finish(&sb);
 }
 
 char *seek_prefs_extend_basic_tab(const char *tab) {
-#ifdef __EMSCRIPTEN__
-    (void) tab;
-    return NULL;
-#else
 #ifdef UI_SCENARIO_SUPPORTED
     if (ui_scenario_active()) return NULL; // uidiff compares the tab with v10's (v10/settings-general)
 #endif
+    if (!tab || !strstr(tab, "id=\"setBod_local\"") || strstr(tab, "id=\"setHed_quickplay\"")) return NULL;
+    StrBuf sb = {0};
+#ifdef __EMSCRIPTEN__
+    sb_append(&sb, tab);
+#else
     // v10's basic General tab: Localization, then Server Browser & Matchmaking (Legacy Browser,
-    // Default Region Only): the row goes last in that folder
-    const char *bod = tab ? strstr(tab, "id=\"setBod_serverb\"") : NULL;
-    if (!bod || strstr(tab, "id=\"knSeekServers\"")) return NULL;
-    const char *p = strchr(bod, '>');
+    // Default Region Only): the Server Type / krunker.io Region rows go last in that folder
+    const char *bod = strstr(tab, "id=\"setBod_serverb\"");
+    const char *p = bod ? strchr(bod, '>') : NULL;
     int depth = 1; // inside the folder's <div>
     while (p && depth > 0) {
         const char *open = strstr(p + 1, "<div"), *close = strstr(p + 1, "</div>");
-        if (!close) return NULL;
+        if (!close) {
+            p = NULL;
+            break;
+        }
         if (open && open < close) {
             depth++;
             p = open;
@@ -223,11 +386,15 @@ char *seek_prefs_extend_basic_tab(const char *tab) {
             p = close;
         }
     }
-    if (!p) return NULL;
-    StrBuf sb = {0};
-    sb_append_n(&sb, tab, (size_t) (p - tab));
-    server_type_html(&sb);
-    sb_append(&sb, p); // the folder's own </div> onwards
-    return sb_finish(&sb);
+    if (p && !strstr(tab, "id=\"knSeekServers\"")) {
+        sb_append_n(&sb, tab, (size_t) (p - tab));
+        server_type_html(&sb);
+        krunker_region_html(&sb);
+        sb_append(&sb, p); // the folder's own </div> onwards
+    } else {
+        sb_append(&sb, tab);
+    }
 #endif
+    section_html(&sb, 0); // the switches: the basic view has them too (they are what Quick Play seeks)
+    return sb_finish(&sb);
 }

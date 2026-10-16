@@ -2374,6 +2374,8 @@ int html_ui_backend_add_stylesheet(const char *href)
  * KN_CUSTOM_SHEET on the game page, kept last among its author sheets; replaced in
  * place, removed for NULL/"". Named under css/ so its url()s resolve like main.css's. */
 #define KN_CUSTOM_SHEET "css/kn-custom.css"
+void html_ui_backend_set_remote_image_fetcher(const HtmlRemoteImageFetch fetch) { image_set_remote_fetcher(fetch); }
+
 int html_ui_backend_set_custom_css(const char *css)
 {
     Engine *g = g_base ? g_base : g_engine;

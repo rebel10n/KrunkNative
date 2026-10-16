@@ -1,0 +1,209 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/servers/servers-carousel.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 2,
+    "krunkerLobbies": {
+      "totalPlayerCount": 137,
+      "games": [
+        [
+          "NY:b760t",
+          "us-nj",
+          7,
+          8,
+          {
+            "i": "Kanji",
+            "g": 0
+          },
+          240
+        ],
+        [
+          "NY:qa21k",
+          "us-nj",
+          5,
+          8,
+          {
+            "i": "Sandstorm",
+            "g": 1
+          },
+          180
+        ],
+        [
+          "NY:zz9x1",
+          "us-nj",
+          2,
+          8,
+          {
+            "i": "Burg",
+            "g": 0,
+            "kr": true
+          },
+          90
+        ],
+        [
+          "FRA:k8m2p",
+          "de-fra",
+          8,
+          8,
+          {
+            "i": "Subzero",
+            "g": 0
+          },
+          60
+        ],
+        [
+          "FRA:r4t6y",
+          "de-fra",
+          6,
+          8,
+          {
+            "i": "Littletown",
+            "g": 0
+          },
+          300
+        ],
+        [
+          "SYD:qvxbm",
+          "au-syd",
+          4,
+          8,
+          {
+            "i": "Undergrowth",
+            "g": 0
+          },
+          200
+        ],
+        [
+          "NY:cust1",
+          "us-nj",
+          9,
+          20,
+          {
+            "i": "Kanji",
+            "g": 0,
+            "c": 1,
+            "h": "1v1 Kanji Lowgrav"
+          },
+          0
+        ],
+        [
+          "FRA:oc777",
+          "de-fra",
+          12,
+          30,
+          {
+            "i": "Shipyard",
+            "g": 2,
+            "oc": 1,
+            "ds": 1,
+            "h": "Official Shipyard 24/7"
+          },
+          0
+        ],
+        [
+          "FRA:uezfe",
+          "de-fra",
+          24,
+          40,
+          {
+            "i": "Zombie_Bulwark",
+            "g": 6,
+            "c": 1,
+            "cm": 114845
+          },
+          0
+        ],
+        [
+          "SIN:gf196",
+          "sgp",
+          23,
+          40,
+          {
+            "i": "TowerWar_3",
+            "g": 1,
+            "c": 1,
+            "cm": 148572
+          },
+          0
+        ],
+        [
+          "FRA:3aeqz",
+          "de-fra",
+          10,
+          10,
+          {
+            "i": "ParkourIceBlocks",
+            "g": 4,
+            "c": 1,
+            "cm": 115530
+          },
+          0
+        ],
+        [
+          "FRA:f9qel",
+          "de-fra",
+          9,
+          10,
+          {
+            "i": "Trench_War_H1",
+            "g": 25,
+            "c": 1,
+            "cm": 158288
+          },
+          0
+        ],
+        [
+          "SV:wyjwr",
+          "us-ca-sv",
+          4,
+          10,
+          {
+            "i": "Trench_War_H1",
+            "g": 19,
+            "c": 1,
+            "cm": 158288
+          },
+          0
+        ],
+        [
+          "BRZ:dnaj7",
+          "brz",
+          6,
+          10,
+          {
+            "i": "VIETNAM_WAR",
+            "g": 0,
+            "c": 1,
+            "cm": 101668,
+            "ds": 1
+          },
+          0
+        ]
+      ]
+    },
+    "remoteImages": {
+      "https://user-assets.krunker.io/m114845/thumb.png": "tools/uidiff/remote/m114845-thumb.png",
+      "https://user-assets.krunker.io/m148572/thumb.png": "tools/uidiff/remote/m148572-thumb.png",
+      "https://user-assets.krunker.io/m115530/thumb.png": "tools/uidiff/remote/m115530-thumb.png",
+      "https://user-assets.krunker.io/m158288/thumb.png": "tools/uidiff/remote/m158288-thumb.png",
+      "https://user-assets.krunker.io/m101668/thumb.png": "tools/uidiff/remote/m101668-thumb.png"
+    }
+  },
+  "frames": 3,
+  "note": "The Servers window with krunker.io's custom games that run published maps (c + cm): v10's carousel of them (customsInfo, PureJSCarousel) above the groups, most players first (Trench_War_H1's two lobbies summed), each slide the map's user-assets thumbnail (state.remoteImages: real thumbnails of these maps, downscaled to the slide's 265x140 in tools/uidiff/remote/), its name, players and VIETNAM_WAR's 24/7 tag. Reference: v10 with the same list and thumbnails (tools/uidiff/capture-v10-servers.js servers-carousel)"
+}

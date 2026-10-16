@@ -175,6 +175,7 @@ void  sb_append_esc(StrBuf*, const char*);        // esc(): & < > " '
 // The "Accounts" line (client/src/ui/krunker_account_ui.c): which account KrunkNative servers and
 // krunker.io servers each see (krunker_account.h), with a Login / Logout button per backend.
 void krunker_account_ui_accounts_html(StrBuf *sb);
+void krunker_account_ui_state_html(StrBuf *sb); // its krunker.io half: the name (level) + Logout, or Guest + Login
 void  sb_appendf(StrBuf*, const char *fmt, ...);
 char *sb_finish(StrBuf*);                          // returns the (always non-NULL) buffer; StrBuf is reset
 void  sb_free(StrBuf*);
@@ -698,6 +699,7 @@ typedef void (*UiDialogFn)(int accepted, const char *text, void *user);
 void ui_confirm(const char *text, UiDialogFn fn, void *user);
 void ui_prompt(const char *text, UiDialogFn fn, void *user);
 void ui_alert(const char *text);
+void ui_loading_popup(const char *text);        // v10's waiting popup (genericPopup, "loadingPop": the ring over the text), closed by ui_loadout_clear_pops
 void ui_error_popup(const char *text);          // v10's error popup (responsePop, red clear icon): a failure the player stays in a game past (join_errors.h)
 void servers_ui_seek_failed(const char *text);   // a failed join / lobby search: the error popup in a game, else the Lost Connection screen
 void ui_dialog_answer(int accepted);             // knDialog(1|0)

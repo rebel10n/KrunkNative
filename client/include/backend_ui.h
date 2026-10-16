@@ -142,6 +142,7 @@ void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
 int  servers_ui_quick_match(void);           // v10 Quick Match: = servers_ui_find_new_game
 int  servers_ui_find_new_game(void);         // F4 / Quick Match per Settings > Quickplay (seek_prefs.h); 0 = nothing to seek
+int  servers_ui_official_find_game(void);    // the official error screen's Find Game: a new krunker.io game (0 = none could start)
 // A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006),
 // a refused join key (004001) or a session the transport lost without a server ERROR (dropped: not
 // a kick / ban) starts a rejoin through the matchmaker with a fresh ticket (direct servers: the
@@ -186,6 +187,9 @@ int  servers_ui_join_password(const char *password); // v10 submitGameCode: the 
 void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped, short (CH2:kz862)
 int  servers_ui_account_required(void);     // 1 = the last seek answered AccountRequired to a guest (error screen: Log in)
 char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd
+// The region the ping race picked for our own seeks (pingRegion7, confirmed by a race), "" = none yet:
+// Settings > Default Region shows it while the player chose none (v10's row reads the same cache).
+const char *servers_ui_auto_region(void);
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
 void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
@@ -193,6 +197,9 @@ void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (
 // fn runs once (at once for a fixed list or without a brain), the object is only valid during the call
 typedef void (*ServersMatchesFn)(void *user, const cJSON *matches);
 void servers_ui_fetch_matches(ServersMatchesFn fn, void *user);
+// A Popular Now card's map run only by krunker.io's custom games: the busiest one with room is joined
+// (krunker_lobbies_open); 0 = ours or none (the caller's playMap).
+int  servers_ui_popular_official(const char *map);
 // KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
 // showWindow id of KrunkNative's Connect window: above every Krunker page's windows[] (it was 53,
 // past v7's 52, which is v10's second Change Loadout entry; ui_logic.h KN_WINDOW_BASE)

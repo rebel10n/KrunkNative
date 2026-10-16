@@ -497,7 +497,7 @@ class Stub:
                         status, body, ctype = 503, b"unavailable", "text/plain"
                     else:
                         body, ctype = json.dumps({"success": True, "totalPlayerCount": 9, "games": [
-                            [g, "de-fra", n, 8, {"i": "Kanji", "g": 0}, 240] for g, n in stub.lobbies]}).encode(), "application/json"
+                            [g[0], "de-fra", g[1], 8, g[2] if len(g) > 2 else {"i": "Kanji", "g": 0}, 240] for g in stub.lobbies]}).encode(), "application/json"
                 elif u.path == "/game-list":  # the server browser's official lobbies (krunker_lobbies.c)
                     body, ctype = json.dumps({"success": True, "totalPlayerCount": 5, "games": [
                         [GAME_ID, "de-fra", 3, 8, {"i": MAP_NAME, "g": 0}, 240],
@@ -1383,7 +1383,14 @@ def check_matchmaker(label, stub, tokens, client_text):
     """The live client's order (game.deob.js seek, :147445): seek-game without a validation token,
     CaptchaRequired, the player's Turnstile token, generate-token, seek-game with both; once more for
     each token the matchmaker refused (tokens: the player's, in order; the last one is let through)."""
-    paths = [p for p, _, _ in stub.http_log]
+    # (the menu's Popular Now reads krunker.io's lobby list at its first draw, like v10's fetchMatches: the
+    # list is not part of the seek's order)
+    raw = [p for p, _, _ in stub.http_log if p != "/game-list"]
+    paths = [p for p in raw if p != "/ping-list"]
+    if not label.startswith("web"):
+        # no region given or cached: v10's seek asks getRegion first (the ping race, region_ping.h; this
+        # stub lists no regions, so the seek goes to the list's first, de-fra); the web build has no race
+        check(f"{label}: the region's ping race comes first (v10 getRegion: /ping-list before seek-game)", raw[:1] == ["/ping-list"], raw[:2])
     want = ["/seek-game"] + ["/generate-token", "/seek-game"] * len(tokens)
     check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game (the live order)", paths == want, paths)
     seeks = [q for p, q, _ in stub.http_log if p == "/seek-game"]
@@ -2496,10 +2503,12 @@ def run_native_lobby():
               # the KRUNKER.IO group (the last one) opened: its rows' titles
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
-              "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
+              "3200 call krunkerJoin \"%s\"\n3300 text @loading [id=loadGamNm]\n3350 vis @curtain loadingBg\n"
+              "4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
               "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n6200 text @toast1 [id=knNotify]\n"
               "7000 vis @ask2 knCaptchaHolder\n"
-              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n12800 text @toast2 [id=knNotify]\n13000 players\n"
+              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n12800 text @toast2 [id=knNotify]\n"
+              "12900 vis @curtain2 loadingBg\n13000 players\n"
               # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
               # label name the official lobby (its list row: region, map, mode, players)
               "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
@@ -2508,8 +2517,13 @@ def run_native_lobby():
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
     st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
-    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "KRUNKER.IO OFFICIAL LOBBIES" in st.group(1),
+    # the one separator before the official groups: its label, nothing after it (they join here)
+    check(f"{label}: the krunker.io servers line says its lobbies are listed and join here", st and st.group(1).rstrip().endswith("krunker.io servers"),
           st.group(1) if st else None)
+    loading = re.search(r"\[input_script\] text t=\d+ @loading n=1 .*?text=(.*)", text)
+    check(f"{label}: the click raises v10's loading screen with the lobby's map (Loading {MAP_NAME} ...)",
+          loading and loading.group(1).strip() == f"Loading {MAP_NAME} ..." and "@curtain loadingBg=1" in text, loading.group(1) if loading else None)
+    check(f"{label}: the official game's INIT lifts it", "@curtain2 loadingBg=0" in text, re.findall(r"@curtain2 \S+", text))
     check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
     rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
     check(f"{label}: the krunker.io group is listed with its Quick Join (main's group header)", rows and int(rows.group(1)) >= 1, rows.group(0) if rows else None)
@@ -2523,7 +2537,8 @@ def run_native_lobby():
           "@cancelled knCaptchaHolder=0" in text and "You closed krunker.io's security challenge, so no game was joined" in text)
     check(f"{label}: the second click asks again", "@ask2 knCaptchaHolder=1" in text)
     seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
-    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]
+    # /ping-list: the krunker.io list's own ping round (krunker_lobbies.c: the row pings), not a seek's step
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]
     check(f"{label}: seek, (cancel), seek, generate-token, seek with the token", paths == ["/seek-game", "/seek-game", "/generate-token", "/seek-game"],
           paths)
     check(f"{label}: every seek asks for the clicked lobby (game=, its region)", seeks and all(dict(q).get("game") == GAME_ID and
@@ -2559,7 +2574,9 @@ def run_native_badmap():
     script = ("0 menu\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n4500 clickid knCaptchaToken\n4600 type %s\n"
               "4700 clickid knCaptchaUse\n"
               "9000 text @toast [id=knNotify]\n9100 nodes @box .instructionsHeader\n9200 text @screen [id=instructionsUpdate]\n"
-              "9300 state\n12000 state\n12100 text @toast2 [id=knNotify]\n12300 quit\n" % (GAME_ID, PASTE_TOKEN))
+              "9250 text @tab .instructionsTab\n9300 state\n12000 state\n12100 text @toast2 [id=knNotify]\n"
+              # v10's Find Game (the first tab): a new official game, not the same one again
+              "12200 call knRetry\n13500 quit\n" % (GAME_ID, PASTE_TOKEN))
     dead_api = kn_proto.free_ports(1)[0]  # nothing listens: GET /maps/<index> gets no response
     env = {"KRUNKNATIVE_KRUNKER_MAPS_API": "http://127.0.0.1:%d" % dead_api,
            "KRUNKNATIVE_KRUNKER_MAP_CACHE": os.path.join(WORK, label + "-maps")}
@@ -2580,7 +2597,13 @@ def run_native_badmap():
     check(f"{label}: no toast", len(toasts) == 2 and not any(t.strip() for t in toasts), toasts)
     st = re.findall(r"\[input_script\] state t=(\d+) .*", text)
     check(f"{label}: the client stays on the error screen (it does not reconnect by itself)",
-          len(stub.ws_paths) == 1, stub.ws_paths)
+          len(stub.ws_paths) >= 1 and GAME_ID in stub.ws_paths[0] and all(GAME_ID not in w for w in stub.ws_paths[1:]), stub.ws_paths)
+    tab = re.search(r"\[input_script\] text t=\d+ @tab n=\d+ .*?text=(.*)", text)
+    check(f"{label}: the box's first tab is v10's Find Game (not Retry: the official lobby is not tried again)",
+          tab and tab.group(1).strip() == "Find Game", tab.group(1) if tab else None)
+    check(f"{label}: Find Game seeks another official lobby (the list's other one), not the failed one",
+          f"[krunker] official lobby {OLD_BURG_GAME}: joining in-client" in text and
+          text.count(f"[krunker] official lobby {GAME_ID}: joining in-client") == 1, re.findall(r"\[krunker\] (?:seek|official lobby).*", text)[-3:])
     check(f"{label}: the menu is back with the box over it, the pointer free (no game left running)",
           len(st) == 2 and all(" menu=1 locked=0 " in l for l in re.findall(r"\[input_script\] state t=\d+ .*", text)), st)
 
@@ -2851,6 +2874,38 @@ def run_native_exclude():
           ["/ws?gameId=" + g for g in games], stub.ws_paths)
 
 
+# Settings > Quickplay's seek modes (seek_prefs.h): krunker.io flags its custom / password / official-custom
+# lobbies with 1; the busiest lobbies here are the ones a default seek must never take
+SEEK_MODE_LOBBIES = [("FRA:custm", 7, {"i": "Kanji", "g": 0, "c": 1}),   # a custom FFA game (c: 1, as krunker.io sends it)
+                     ("FRA:trade", 6, {"i": "Kanji", "g": 18}),          # Trade
+                     ("FRA:parkr", 6, {"i": "Kanji", "g": 4}),           # Parkour
+                     ("FRA:pwffa", 6, {"i": "Kanji", "g": 0, "pw": 1}),  # a password FFA lobby
+                     ("FRA:ocffa", 6, {"i": "Kanji", "g": 0, "oc": 1}),  # an official custom FFA lobby
+                     ("FRA:tdmmm", 5, {"i": "Kanji", "g": 1}),           # TDM: out of v10's rotation
+                     ("FRA:ffaaa", 3, {"i": "Kanji", "g": 0})]           # the one public rotation lobby
+
+
+def run_native_seek_modes():
+    """Quick Play / Find New Game with Server Type krunker.io: nothing picked = Krunker's public rotation
+    (v10 rotationModes), so the seek takes the FFA lobby, never the busier Trade, Parkour, TDM, custom,
+    password or official custom ones; Trade picked (seek_modes "18") = the Trade lobby. Also through
+    krunker_net's own list (krunker_lobbies' list refused: Find New Game asks the matchmaker's list)."""
+    for label, pick, list_fail, want in (("native-seek-default", None, 0, "FRA:ffaaa"), ("native-seek-trade", "18", 0, "FRA:trade"),
+                                         ("native-seek-default-mm", None, 1, "FRA:ffaaa")):
+        def setup(st, list_fail=list_fail):
+            st.lobbies = SEEK_MODE_LOBBIES
+            st.list_fail = list_fail
+        script = find_new_game_script([600], quit_at=5000)
+        if pick:
+            script = script.replace('100 call setSetting "knSeekServers" "official"\n',
+                                    '100 call setSetting "knSeekServers" "official"\n150 call setSetting "seek_modes" "%s"\n' % pick)
+        stub, p, out, log = launch_native(label, script, {}, args=("--offline",), stub_setup=setup)
+        lines = finish_native(label, stub, p, out, log, timeout=120)
+        games = [dict(q).get("game") for pth, q, _ in stub.http_log if pth == "/seek-game"]
+        what = "Trade picked: the Trade lobby" if pick else "nothing picked: the public rotation's FFA lobby, not the busier Trade / Parkour / TDM / custom (c: 1) / password / official custom ones"
+        check(f"{label}: {what}", games[:1] == [want], (games, [l for l in lines if "[krunker] seek" in l or "game-list" in l][-6:]))
+
+
 def run_native_exclude_mm():
     """Find New Game with no lobby list from krunker_lobbies (its /game-list refused): krunker_net_seek_new
     asks for the list itself and picks a game it was not in lately; once every listed game is recent, the
@@ -2967,7 +3022,7 @@ def run_native_live():
     stub, p, out, log = launch_native(label, LIVE_SCRIPT, {}, stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
-    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]  # (the server browser's list may come first; the ping race of a seek with no region: /ping-list)
     doc_path = "/updates/" + published.get("path", "?")
     check(f"{label}: the manifest, then the document it names, then seek-game",
           paths[:3] == ["/updates/client/krunker-build.json", doc_path, "/seek-game"], paths[:4])
@@ -3005,7 +3060,7 @@ def run_native_live_refused():
     stub, p, out, log = launch_native(label, "0 boot\n4000 text @inst [id=instructionsUpdate]\n4300 quit\n", {}, stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
-    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]  # (the server browser's list may come first; the ping race of a seek with no region: /ping-list)
     check(f"{label}: the manifest and the document, no seek-game", paths[:2] and paths[0] == "/updates/client/krunker-build.json" and
           "/seek-game" not in paths and not stub.ws_paths, paths)
     check(f"{label}: the log says which build was refused and why",
@@ -3029,7 +3084,7 @@ def run_native_live_stale():
     stub, p, out, log = launch_native(label, "0 boot\n5000 play\n7000 players\n7300 quit\n", {}, stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
-    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list",) and not pth.startswith("/updates/krunker/")]
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list") and not pth.startswith("/updates/krunker/")]
     check(f"{label}: manifest, seek-game (refused), the manifest again (forced), seek-game",
           paths[:4] == ["/updates/client/krunker-build.json", "/seek-game", "/updates/client/krunker-build.json", "/seek-game"], paths[:5])
     vs = [json.loads(dict(q).get("dataQuery", "{}")).get("v") for pth, q, _ in stub.http_log if pth == "/seek-game"]
@@ -3050,7 +3105,7 @@ def run_native_live_fallback():
     stub, p, out, log = launch_native(label, "0 boot\n4000 play\n6000 players\n6300 quit\n", {}, stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
-    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]  # (the server browser's list may come first; the ping race of a seek with no region: /ping-list)
     check(f"{label}: the manifest (503), then seek-game", paths[:2] == ["/updates/client/krunker-build.json", "/seek-game"], paths[:3])
     check(f"{label}: the compiled build, saying why", re.search(r"\[krunker\] Krunker build: compiled \S+ \(buildVersion %s, AHKEY 0x%x\): .*HTTP 503"
                                                                % (re.escape(BUILD_VERSION), AHKEY), text) is not None,
@@ -3689,6 +3744,7 @@ def main():
         run_native_exclude()
         run_native_exclude_mm()
         run_native_f4_stays_official()
+        run_native_seek_modes()
         run_native_reload(False)
         run_native_reload(True)
         run_native_live()
@@ -3725,6 +3781,7 @@ def main():
         run_native_exclude()
         run_native_exclude_mm()
         run_native_f4_stays_official()
+        run_native_seek_modes()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
         run_native_fx()
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs

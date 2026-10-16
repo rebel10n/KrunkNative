@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include <gl.h>
 #include <shared.h>
@@ -76,6 +77,8 @@ typedef struct ImageSlot {
     ImageAnim *anim;       /* animated GIF, else NULL (freed with the texture)  */
     uint8_t anim_started;  /* the timeline began at anim_start_ms (its first decode); */
     double anim_start_ms;  /* kept across evictions, so a re-decode keeps the phase */
+    uint8_t remote;        /* an http(s) URL: read from `path`, the fetcher's disk cache file */
+    char *path;            /* remote: where the fetcher keeps (or will keep) the body */
 } ImageSlot;
 
 struct ImageCache {
@@ -143,6 +146,7 @@ static void image_slot_free(ImageSlot *slot) {
     image_anim_free(slot);
 
     free(slot->key);
+    free(slot->path);
     free(slot);
 }
 
@@ -301,6 +305,40 @@ int image_resolve_url(const char *url, const char *base_url, char *out, size_t c
     if (!image_url_push(url, len, out, cap, &out_len)) return 0;
 
     return out_len > 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Remote images (http:, https:, protocol-relative //)                        */
+/* ------------------------------------------------------------------------- */
+
+static ImageRemoteFetch image_remote_fetch;
+
+void image_set_remote_fetcher(const ImageRemoteFetch fetch) { image_remote_fetch = fetch; }
+
+int image_remote_url(const char *url, char *out, const size_t cap) {
+    if (!url || !out || cap < 16) return 0;
+    while (*url == ' ' || *url == '\t' || *url == '\n' || *url == '\r') url++;
+    size_t len = strcspn(url, "#");
+    while (len && (url[len - 1] == ' ' || url[len - 1] == '\t' || url[len - 1] == '\n' || url[len - 1] == '\r')) len--;
+    const char *scheme = "";
+    if (len > 2 && url[0] == '/' && url[1] == '/') scheme = "https:"; /* protocol-relative: the page's own is https */
+    else if (len > 7 && !strncasecmp(url, "http://", 7)) scheme = "";
+    else if (len > 8 && !strncasecmp(url, "https://", 8)) scheme = "";
+    else return 0;
+    const size_t scheme_len = strlen(scheme);
+    if (scheme_len + len + 1 > cap) return 0;
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = (unsigned char) url[i];
+        if (c <= ' ' || c == 0x7f || c == '"' || c == '<' || c == '>' || c == '\\') return 0; /* no spaces or controls */
+    }
+    memcpy(out, scheme, scheme_len);
+    memcpy(out + scheme_len, url, len);
+    out[scheme_len + len] = 0;
+    /* the scheme in lower case ("HTTPS://" -> "https://"), so one URL is one key */
+    for (char *p = out; *p && *p != ':'; p++) *p = (char) (*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);
+    /* a host must follow */
+    const char *host = strstr(out, "://");
+    return host && host[3] && host[3] != '/';
 }
 
 /* ------------------------------------------------------------------------- */
@@ -740,8 +778,8 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
             image_fail(slot, "malformed data: URL");
             return;
         }
-    } else if (!image_read(cache, slot->key, &bytes, &len)) {
-        image_fail(slot, "file not found");
+    } else if (slot->remote ? read_file(slot->path, &bytes, &len) != 0 : !image_read(cache, slot->key, &bytes, &len)) {
+        image_fail(slot, slot->remote ? "remote image gone from the disk cache" : "file not found");
         return;
     }
 
@@ -796,7 +834,7 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     }
     free(bytes);
 
-    const int webp = !px && !svg && !data_url && image_is_webp_key(slot->key);
+    const int webp = !px && !svg && !data_url && !slot->remote && image_is_webp_key(slot->key);
     if (webp) px = image_load_webp_sidecar(cache, slot->key, &w, &h);
 
     if (!px || w <= 0 || h <= 0) {
@@ -836,14 +874,14 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
 static void image_probe(const ImageCache *cache, ImageSlot *slot) {
     unsigned char *bytes = NULL;
     size_t len = 0;
-    if (!image_read(cache, slot->key, &bytes, &len)) {
-        image_fail(slot, "file not found");
+    if (slot->remote ? read_file(slot->path, &bytes, &len) != 0 : !image_read(cache, slot->key, &bytes, &len)) {
+        image_fail(slot, slot->remote ? "remote image not downloaded" : "file not found");
         slot->missing = 1;
         return;
     }
     slot->missing = 0;
     int w = 0, h = 0, comp = 0;
-    const int raster = len <= (size_t) INT32_MAX && !svg_sniff(bytes, len) && !image_is_webp_key(slot->key) &&
+    const int raster = len <= (size_t) INT32_MAX && !svg_sniff(bytes, len) && (slot->remote || !image_is_webp_key(slot->key)) &&
                        stbi_info_from_memory(bytes, (int) len, &w, &h, &comp) && w > 0 && h > 0;
     free(bytes);
     if (!raster) {
@@ -922,9 +960,21 @@ int image_cache_retry_missing(ImageCache *cache) {
     cache->arrivals = generation;
     const char *assets = assets_path();
     int loaded = 0;
-    for (int i = 0; assets && i < cache->count; i++) {
+    for (int i = 0; i < cache->count; i++) {
         ImageSlot *slot = cache->slots[i];
         if (!slot->entry.failed || !slot->missing) continue;
+        if (slot->remote) { /* a download the fetcher finished: its file is there now */
+            FILE *f = slot->path ? fopen(slot->path, "rb") : NULL;
+            if (!f) continue;
+            fclose(f);
+            image_probe(cache, slot);
+            if (!slot->entry.failed) {
+                fprintf(stderr, "[image] %s: arrived\n", slot->key);
+                loaded++;
+            }
+            continue;
+        }
+        if (!assets) continue;
         const char *rel = slot->key;
         if (!strncmp(rel, IMAGE_ASSETS_PREFIX, sizeof(IMAGE_ASSETS_PREFIX) - 1)) rel += sizeof(IMAGE_ASSETS_PREFIX) - 1;
         char *path = concat(assets, rel);
@@ -949,6 +999,36 @@ void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, in
     if (decodes) *decodes = cache ? cache->decodes : 0;
 }
 
+/* An http(s) image: the fetcher has it on disk (probe it now), is downloading it (nothing is drawn
+ * until image_cache_retry_missing finds the file), or refuses it. */
+static void image_remote_start(ImageCache *cache, ImageSlot *slot) {
+    slot->remote = 1;
+    if (!image_remote_fetch) {
+        image_fail(slot, "remote URL (no fetcher: this build loads no remote images)");
+        return;
+    }
+    char path[1024] = "";
+    const int state = image_remote_fetch(slot->key, path, sizeof(path));
+    if (state == IMAGE_REMOTE_REFUSED || !path[0]) {
+        image_fail(slot, "remote URL refused (only http(s), see the fetcher's log)");
+        return;
+    }
+    slot->path = strdup(path);
+    if (!slot->path) {
+        image_fail(slot, "out of memory");
+        return;
+    }
+    if (state == IMAGE_REMOTE_READY) {
+        image_probe(cache, slot);
+        return;
+    }
+    /* pending: an empty box like a browser's image still loading; not a miss to log */
+    slot->entry.failed = 1;
+    slot->entry.tex = 0;
+    slot->entry.w = slot->entry.h = 0;
+    slot->missing = 1;
+}
+
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) {
     static const ImageEntry failed_entry = {0, 0, 0, 1, 0};
     if (!cache) return &failed_entry;
@@ -958,7 +1038,8 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
 
     char key[IMAGE_KEY_MAX];
     const int data_url = image_is_data_url(url);
-    const int resolved = data_url || image_resolve_url(url, base_url, key, sizeof(key));
+    const int remote = !data_url && image_remote_url(url, key, sizeof(key)); /* the absolute URL is its key */
+    const int resolved = data_url || remote || image_resolve_url(url, base_url, key, sizeof(key));
 
     if (data_url) {
         image_data_url_key(url, key, sizeof(key));
@@ -976,9 +1057,10 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
 
     if (!resolved) image_fail(slot, "rejected URL (scheme, empty, or too long)");
     else if (data_url) image_load(cache, slot, url);
+    else if (remote) image_remote_start(cache, slot);
     else image_probe(cache, slot);
 
-    if (slot->entry.failed) image_log_miss(cache, key, url, base_url);
+    if (slot->entry.failed && !(slot->remote && slot->missing)) image_log_miss(cache, key, url, base_url);
 
     return &slot->entry;
 }

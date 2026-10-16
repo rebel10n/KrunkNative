@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-servers-official-mixed",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [
+        295,
+        60,
+        690,
+        600
+      ],
+      "kind": "text",
+      "note": "KrunkNative's own baseline: our groups, then the krunker.io servers line (signed in) and the official groups, New York open"
+    }
+  ]
+}

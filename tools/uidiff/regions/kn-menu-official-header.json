@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-menu-official-header",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        0,
+        0,
+        640,
+        60
+      ],
+      "kind": "text",
+      "note": "KrunkNative's own baseline: the header's krunker.io account (v10's profile item and tooltip)"
+    }
+  ]
+}

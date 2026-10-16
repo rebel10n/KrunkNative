@@ -1161,7 +1161,11 @@ static char *ui_client_settings_extend_tab_rest(const char *tab) {
     const char *close = open ? strstr(open, "</select>") : NULL;
     if (close) {
         const cJSON *saved = ui_setting_saved("defaultRegion");
-        char *options = servers_ui_region_options(cJSON_IsString(saved) ? saved->valuestring : "local");
+        // the player's choice, else the ping race's region (v10: the row's val is the ping cache)
+        const char *auto_region = servers_ui_auto_region();
+        char *options = servers_ui_region_options(cJSON_IsString(saved) && saved->valuestring[0] ? saved->valuestring
+                                                  : auto_region[0]                                ? auto_region
+                                                                                                  : "local");
         StrBuf sb = {0};
         sb_append_n(&sb, tab, (size_t) (open + 1 - tab));
         if (options) sb_append(&sb, options);

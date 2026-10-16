@@ -102,6 +102,9 @@ script1 = """
 900 nodes @gvsel [id=knGameVersion]
 900 nodes @ads [onclick="openOneTrust()"]
 900 nodes @presets .setSugBox2
+900 nodes @qp [id=setHed_quickplay]
+900 nodes @qpmodes [id^=knSeekMode]
+900 text @qpnote [id=knSeekModeNote]
 1000 clicksel input[onclick*="defaultRegionOnly"]
 1200 text @b0 input[onclick*="defaultRegionOnly"]
 1300 call windows.0.changeTab 1
@@ -174,6 +177,9 @@ check(tabs.startswith("General Display Game Sound"), f"basic view tabs General /
 check(nodes(log1, "gv") == 0 and nodes(log1, "gvsel") == 0, "no Game version row (v10 is the only version)")
 check(nodes(log1, "ads") == 0, "no Manage Ads button (KrunkNative shows no ads)")
 check(nodes(log1, "presets") >= 4, f"General's preset boxes ({nodes(log1, 'presets')})")
+check(nodes(log1, "qp") == 1 and nodes(log1, "qpmodes") >= 30, f"basic General: the Quickplay section with its Seek Modes switches ({nodes(log1, 'qpmodes')})")
+check("Krunker's public rotation is on by default: Free for All, Hardpoint, Capture the Flag" in (probe(log1, "qpnote")["text"] or ""),
+      "Seek Modes says what the switches start on: Krunker's public rotation")
 check(probe(log1, "b0")["checked"] == 1 and "handler setSetting defaultRegionOnly=true" in log1,
       "basic General: Default Region Only switched on")
 check(probe(log1, "b1")["checked"] == 1 and "[ui] setting showFPS=true" in log1, "basic Display: Show FPS on, applied")
@@ -275,6 +281,36 @@ if len(pos) >= 8:
     check(k - rest > 1.0, f"K jumps (y {rest:.2f} -> {k:.2f})")
 else:
     check(False, f"in-game state probes ({len(pos)} of 8)")
+
+# ---------------------------------------------------------------- run 2c: Settings > Quickplay's switches
+# (seek_prefs.c: one switch per mode, in a folder; seek_modes stored as v10 reads it, a comma list.
+# The rotation (0, 2, 3, 19, 25) is on at first; a switch saves the list of the switches on, in order.)
+script2c = """
+0 menu
+300 call showWindow 1
+800 call windows.0.changeTab 0
+1000 setscroll menuWindow 1470
+1300 clicksel [id=setHed_quickplay_modes]
+1500 text @trade0 [id=knSeekMode18]
+1550 text @ffa0 [id=knSeekMode0]
+1600 call knSeekSwitch "seek_modes" 18 1
+1800 text @trade [id=knSeekMode18]
+1850 call knSeekSwitch "seek_modes" 4 1
+2000 text @parkour [id=knSeekMode4]
+2100 clicksel [id=knSeekMode0] + .slider
+2300 text @ffa [id=knSeekMode0]
+2500 quit
+"""
+log2c = run("run2c", script2c)
+check(probe(log2c, "trade0")["checked"] == 0 and probe(log2c, "ffa0")["checked"] == 1, "Quickplay: Free for All starts on (the rotation), Trade off")
+# (Trade and Parkour go through the handler: a `call` saves the list but does not flip the checkbox,
+# a click does; the saved lists below are what the switches send)
+check(probe(log2c, "ffa")["checked"] == 0, "Quickplay: switching Free for All off turns it off")
+check("[ui] Quickplay seek_modes=0,2,3,18,19,25\n" in log2c and "[ui] Quickplay seek_modes=0,2,3,4,18,19,25\n" in log2c
+      and "[ui] Quickplay seek_modes=2,3,4,18,19,25\n" in log2c,
+      "Quickplay: each switch saves the list of the switches on (the rotation plus Trade, then Parkour, then no Free for All)")
+saved_modes = json.loads(storage("knSettings") or "{}").get("seek_modes")
+check(saved_modes == "2,3,4,18,19,25", f"Quickplay: seek_modes persisted as v10's comma list ({saved_modes!r})")
 
 # ---------------------------------------------------------------- run 3: Reset
 script3 = """

@@ -10,6 +10,7 @@
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
+#include <seek_prefs.h> // seek_prefs_handle
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
 #include <host_flow_ui.h>   // the Host Game flow: openHostWindow, selectHostMap, showGames(true)
@@ -525,6 +526,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"window.open", h_open_url},
     // play / host / join
     {"quickJoinRegion", h_servers},
+    {"knCarousel", h_servers}, // the server browser carousel's prev / next (servers_ui.c)
     {"joinGame", h_join_game},
     {"createPrivateRoom", h_create_private_room},
     {"playMap", h_play_map},
@@ -629,6 +631,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
+    seek_prefs_handle,         // seek_prefs.c: Settings > Quickplay's Seek Modes / Seek Maps switches (knSeekSwitch)
     update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)
     object_manager_ui_handle,  // object_manager_ui.c: the KrunkNative Object Manager (knOm*)
     alt_manager_ui_handle,     // alt_manager_ui.c: the KrunkNative saved accounts (knAlt*)
