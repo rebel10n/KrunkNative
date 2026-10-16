@@ -34,6 +34,7 @@ typedef struct {
     const char *usage;       // "<name|id>"
     const char *desc;        // the v3.1.1 dev console description
     ChatCommandPerm perm;
+    const char *denied;      // the refusal's notify text when it differs from the perm's (NULL = the perm's own)
 } ChatCommandInfo;
 
 // One connection as the command layer sees it.

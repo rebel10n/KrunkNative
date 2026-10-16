@@ -130,7 +130,8 @@ static int peer_by_id(const ChatCommandHost *host, const int id, ChatPeer *out) 
 // the owner opened every command (perms off + gameserver.cheats "all" / --open-cheats: v3.1.1's
 // perms-off server; the offline sandbox does). The identity is the server's ChatPeer for the
 // connection id, never anything in the packet.
-static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
+// denied (optional): the notify text for this command's refusal (NULL = the perm's own text).
+static int allowed_says(ChatCtx *c, const ChatCommandPerm perm, const char *denied) {
     if (perm == CHAT_PERM_ANY || c->sender == CHAT_CMD_CONSOLE) return 1;
     if (perm != CHAT_PERM_HOST_DEV && !c->host->perms && c->host->cheats_open) return 1;
     if (c->has_self && c->self.dev) return 1;
@@ -145,10 +146,14 @@ static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
     // ctx.send("notify", text): the client's mod shows it as a toast (ui_notify)
     NetNotifyPacket notify;
     memset(&notify, 0, sizeof(notify));
-    snprintf(notify.text, sizeof(notify.text), "%s", perm == CHAT_PERM_CHEAT ? "DEV or premium custom host only"
+    snprintf(notify.text, sizeof(notify.text), "%s", denied ? denied : perm == CHAT_PERM_CHEAT ? "DEV or premium custom host only"
                                                      : perm == CHAT_PERM_HOST_DEV ? "Host or developer required" : "DEV only");
     game_send(c->host->game, c->sender, NET_PACKET_NOTIFY, &notify, sizeof(notify));
     return 0;
+}
+
+static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
+    return allowed_says(c, perm, NULL);
 }
 
 // isDev(ctx) (the account check itself, independent of PERMS)
@@ -2446,7 +2451,8 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
-    {{"autofill", NULL, "[on|off|<players>]", "bots fill the lobby (server.cfg bot_quota) on / off for this server", CHAT_PERM_HOST_DEV}, cmd_autofill},
+    {{"autofill", NULL, "[on|off|<players>]", "bots fill the lobby (server.cfg bot_quota) on / off for this server", CHAT_PERM_HOST_DEV,
+      "Only the host or a developer can turn autofill on or off."}, cmd_autofill},
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
     {{"bring", NULL, "<player|all|selector> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
@@ -2517,7 +2523,7 @@ int chat_command_handle(ChatCommandHost *host, const int sender_id, const char *
     // before the arguments are parsed or any target / selector (kick *, god @bots) is resolved,
     // so a command whose own gate were missing still cannot run for the wrong peer. Each cmd_*
     // keeps its own check (an allowed peer passes both; a denial notifies and logs once).
-    if (!allowed(&c, command->info.perm)) return 1;
+    if (!allowed_says(&c, command->info.perm, command->info.denied)) return 1;
 
     // split(" ") keeps empty parts ("a  b" -> ["a", "", "b"])
     if (space) {

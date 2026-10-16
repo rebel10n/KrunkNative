@@ -7,8 +7,9 @@ One standalone server_bin (max_players 4, bot_quota 4, bot_quota_grace 3), real 
   1. an empty lobby stays empty (bots 0 for 3 s)
   2. one human: 3 bots come in (quota - humans)
   2b. `autofill off` (the human is the server's own machine: a DEV peer): the bots leave and stay
-     away, the query drops its "autofill" tag; `autofill on` brings the 3 back; `autofill 2` fills to
-     2 players; `autofill 4` back to the server's quota
+     away, the query drops its "autofill" tag; a bot_add bot stays and a bot_kick with the fill off
+     refills nothing; `autofill on` brings the 3 back (bot_kick alone is refilled then); `autofill 2`
+     fills to 2 players; `autofill 4` back to the server's quota
   3. three more humans join the bot-filled lobby: every one spawns (no "server full"), a bot
      leaves per join, the query shows players 4 / bots 0
   4. humans leave: the bots come back
@@ -129,9 +130,23 @@ def main():
     check("autofill off: the bots leave", ok, str(last))
     time.sleep(1.5)
     check("  and stay away", counts() == (1, 0) and "autofill" not in tags(), f"{counts()} {tags()}")
+    # the bots of bot_add are not the fill's: they stay, and a bot_kick with the fill off does not refill
+    say(a, "/bot_add 1")
+    ok, last = wait_counts(1, 1, 3.0)
+    check("autofill off: bot_add's bot joins", ok, str(last))
+    time.sleep(1.5)
+    check("  bot_add's bot stays (the fill does not take it)", counts() == (1, 1), str(counts()))
+    say(a, "/bot_kick all")
+    ok, last = wait_counts(1, 0, 3.0)
+    check("autofill off: bot_kick all leaves no bots", ok, str(last))
+    time.sleep(1.5)
+    check("  and nothing comes back", counts() == (1, 0), str(counts()))
     say(a, "/autofill on")
     ok, last = wait_counts(1, 3, 4.0)
     check("autofill on: the server's quota fills the lobby again", ok and "autofill" in tags(), f"{last} {tags()}")
+    say(a, "/bot_kick all")
+    ok, last = wait_counts(1, 3, 4.0)
+    check("autofill on: bot_kick alone is refilled at once (the fill, not the bots, must go)", ok, str(last))
     say(a, "/autofill 2")
     ok, last = wait_counts(1, 1, 4.0)
     check("autofill 2: fill to 2 players (1 bot)", ok, str(last))

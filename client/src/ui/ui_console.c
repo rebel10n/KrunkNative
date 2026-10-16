@@ -396,6 +396,7 @@ static const ConArg A_BOT_PLACE[] = {{"tfue|autoRespawn|key=value", ARG_STRING, 
 static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
 static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
 static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
+static const ConArg A_AUTOFILL[] = {{"on|off|players", ARG_STRING, 1}};
 static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [arg("off", "string", true)]
 // KrunkNative teleports (shared/src/chat_commands.c cmd_tp / cmd_bring)
 static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
@@ -1397,6 +1398,21 @@ static void cmd_update(const int argc, char **argv, const char *rest) {
     update_ui_console(argc, argv);
 }
 
+// autofill [on|off|<players>] (Krunker Box Office): the server's bot fill (chat's /autofill, shared/src/chat_commands.c).
+// Sent like the other bot_* commands; the server answers the host and developers and refuses everyone else with a toast.
+// Official krunker.io games have no bot fill, so the console says so here and sends nothing.
+static void cmd_autofill(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv;
+    const Client *client = con_client();
+    if (client && !client->offline && client->game.is_official) {
+        append("Autofill is not available on official krunker.io games.", COL_ERROR);
+        return;
+    }
+    char line[CON_LINE_MAX + 16];
+    snprintf(line, sizeof(line), "/autofill%s%s", rest[0] ? " " : "", rest);
+    send_server(line);
+}
+
 static void register_commands(void) {
     if (g_con.cmd_count) return;
     register_local("help", ARGS(A_CMD), "list commands", cmd_help);
@@ -1492,6 +1508,7 @@ static void register_commands(void) {
     register_server("bot_start", NO_ARGS, "resume bots after bot_stop");
     register_server("bot_resume", NO_ARGS, "alias for bot_start");
     register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
+    register_local("autofill", ARGS(A_AUTOFILL), "bots fill the lobby on / off, or to <players>, for this server (the host and developers)", cmd_autofill);
     register_server("tp", ARGS(A_TP), "teleport yourself to x y z (feet, as pos prints) or to a player");
     register_server("bring", ARGS(A_BRING), "bring a player (or all) to you, or to x y z");
     register_server("build_fill", ARGS(A_BUILD_FILL), "place count player builds in a stack beside you (a placement load test)");

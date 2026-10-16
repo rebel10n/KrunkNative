@@ -208,8 +208,9 @@ def refused(peer, mark, server_log, command, before):
     """The guest got the notify and nothing else, and the server logged the denial."""
     # broadcasts, and the server's welcome line (the default motd) on a first spawn
     texts = [p for p in peer.texts(mark) if b" joined the game" not in p and b" left the game" not in p and b"Welcome to " not in p]
-    notified = any(b"DEV only" in p or b"Host or developer required" in p or b"premium custom host" in p for p in texts)
-    leaked = [p for p in texts if not (b"DEV only" in p or b"Host or developer required" in p or b"premium custom host" in p)]
+    refusals = (b"DEV only", b"Host or developer required", b"premium custom host", b"Only the host or a developer")
+    notified = any(any(r in p for r in refusals) for p in texts)
+    leaked = [p for p in texts if not any(r in p for r in refusals)]
     logged = f"perms denied: {command} from" in log(server_log)[before:]
     return notified and not leaked and logged, f"notify={notified} other={leaked[:2]} logged={logged}"
 
@@ -237,6 +238,8 @@ def server_a():
         time.sleep(0.15)
         ok, detail = refused(guest, mark, "a.log", command, before)
         check(f"A1: guest {'CHAT_V7' if v7 else 'CHAT_SEND'} {text!r} refused + logged", ok, detail)
+        if command == "autofill":
+            check("A1: the autofill refusal says who may turn it on or off", guest.got_text("Only the host or a developer can turn autofill on or off", mark))
     check("A1: the denial log names the guest's account (0 = guest)", "account 0)" in log("a.log"))
     check("A1: /ip leaked no address to the guest", not any(b"127.0.0.1" in p or b"203.0.113" in p for p in guest.texts()))
     check("A1: kick * resolved nothing for the guest (no count / no-match reply)",

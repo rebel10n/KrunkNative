@@ -228,12 +228,27 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
 - `autofill [on|off|<players>]` (Krunker Box Office, DEV peers and the custom host:
   `CHAT_PERM_HOST_DEV`) turns the fill on and off at run time, for the server's lifetime (no file is
   written; a restart reads server.cfg again). Off: every quota bot leaves at once and none come
-  (`bot_add` bots stay); on: the fill runs again with the server's quota, else the lobby size;
-  `autofill 6` fills to 6 players. Turned on by a command it also fills a hosted custom game, never
-  ranked ("No autofill in ranked."). No argument: "Autofill ON (fill to 4 players, 3 bots now)". The
-  info query's tags carry `autofill` while it runs, the lobby meta `autofill`, `/server` and the
+  (`bot_add` bots stay; a `bot_kick` with the fill off refills nothing); on: the fill runs again with
+  the server's quota, else the lobby size; `autofill 6` fills to 6 players. A command that turns it on
+  also fills a hosted custom game, never ranked ("No autofill in ranked."). No argument:
+  "Autofill ON (fill to 4 players, 3 bots now)". The developer console lists it (`help autofill`) and
+  sends it like the other bot commands. A refusal toasts "Only the host or a developer can turn
+  autofill on or off." (the table entry's `denied` text). On official krunker.io games the console
+  says "Autofill is not available on official krunker.io games." and sends nothing: they have no
+  bot fill. Who may run it:
+  - offline: the local player, always (the sandbox connects over 127.0.0.1, a DEV peer);
+  - a hosted custom game: its host (`premium_host`: the connection's account is the lobby's
+    `hostAccountId`);
+  - a guest (no account, not an op) on a public or self-hosted server: refused. An owner who runs
+    a server on another machine can use rcon or the server console instead, or set `bot_quota 0`
+    in server.cfg.
+  bot_kick alone does not stop the fill (it refills at once while the fill is on), which is why
+  `autofill off` exists.
+  The info query's tags carry `autofill` while it runs, the lobby meta `autofill`, `/server` and the
   server console's `status` a bots line. Tests: `server/tests/bot_fill_e2e.py` 2b,
-  `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged). The fill's pace:
+  `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged),
+  `client/tests/console_autofill_e2e.py` (the console's `help autofill`, `autofill off` / `on` reach the
+  sandbox). The fill's pace:
   `server/tests/bot_fill_time_e2e.py` (each bot's join time from the human's spawn, under 2 s for
   bot_quota and `autofill`) and bot_test's quota pace test.
 - Bots earn nothing: stats, challenges, medals, KR and BP go to accounts only.
