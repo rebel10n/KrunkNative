@@ -2,7 +2,8 @@
 
 /**
  * Same-origin brain for the web build (KrunkNative backend): `net-bridge --web`
- * reverse-proxies the brain's public routes (`/mm/*`, `/api/*`, `/social/*`, `/ai/*`) and its
+ * reverse-proxies the brain's public routes (`/mm/*`, `/api/*`, `/social/*`, `/ai/*`, `/auth/*`,
+ * `/streams/*`, `/creators/*`, `/user-assets/*`: everything the client asks its brain for) and its
  * social WebSocket (`/social/ws`, `/api/ws`) to kn_brain, like the nginx deployment
  * does, so the page's same-origin brain URL works. When no brain answers, HTTP
  * requests fall back to the bridge's own routes (publicRoutes.ts) and WebSocket
@@ -21,7 +22,11 @@ import type { Duplex } from "stream";
 
 export type BrainTarget = { host: string; port: number; url: string };
 
-const PROXIED_PREFIXES = ["/mm/", "/api/", "/social/", "/ai/"];
+// Every public route prefix the client (backend_http_get / the account and asset fetches) uses on its
+// brain, so a page hosted by the bridge works like one pointed at the brain itself: /auth (login,
+// email links), /streams (the menu's live streams, thumbnails), /creators (Community & Events),
+// /user-assets (the community-map texture mirror).
+const PROXIED_PREFIXES = ["/mm/", "/api/", "/social/", "/ai/", "/auth/", "/streams/", "/creators/", "/user-assets/"];
 const WS_PATHS = new Set(["/social/ws", "/api/ws"]);
 
 export function resolveBrain(cliUrl?: string | null): BrainTarget {

@@ -843,7 +843,8 @@ Matchmaking is HTTP to the brain only. No game server answers it:
   the hub's `NET_PACKET_SOCIAL_REQUEST` frames, which are the brain's social socket's
   job (v3.1.1 `MM_NODE_MODE=node`). The standalone server and the client's offline
   game (`local_game.c`) still answer them as the guest hub.
-* `net-bridge --web` reverse-proxies `/mm/*`, `/api/*` and `/social/*` to the brain
+* `net-bridge --web` reverse-proxies `/mm/*`, `/api/*`, `/social/*`, `/ai/*`, `/auth/*`, `/streams/*`,
+  `/creators/*` and `/user-assets/*` to the brain
   (`brainProxy.ts`). When no brain answers, its fallback returns 404
   `{"error":"mm_routes_disabled_on_node"}` for `/mm/*` and the player counts (never
   `/mm/status`). Only `--browser-to-native`, where the stock v3.1.1 JS client plays

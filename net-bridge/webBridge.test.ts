@@ -7,6 +7,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { IncomingMessage } from "http";
+import { isBrainPath } from "./brainProxy";
 import { admit, CLOSE_POLICY, errorFrame, scanFrames, stopMessage, type FrameCursor } from "./webBridge";
 
 // admission (no KRUNK_NATIVE_TARGETS here: the default 127.0.0.1:21015-21078 plus any loopback)
@@ -58,3 +59,10 @@ scanFrames(inside, Buffer.from([1, 0, 9, 1]), false);
 assert.strictEqual(scanFrames(inside, Buffer.from([2, 3]), true), -1);
 assert.strictEqual(inside.left, 6);
 console.log("webBridge tests OK");
+
+// net-bridge --web proxies every brain route the client uses (the menu's streams, Community &
+// Events, login, the user-asset mirror), and never the page's own files
+for (const p of ["/mm/status", "/api/profile", "/social/ws", "/ai/chat", "/auth/login", "/streams/top", "/streams/thumb",
+                 "/creators/events", "/user-assets/123/tex.png"]) assert.strictEqual(isBrainPath(p), true, p);
+for (const p of ["/", "/index.html", "/assets/textures/a.png", "/native", "/client.wasm", "/streamsx", "/js/loader.js"])
+  assert.strictEqual(isBrainPath(p), false, p);
