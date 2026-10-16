@@ -479,6 +479,11 @@ else ()
         target_compile_definitions(kn_webview PRIVATE KN_WEBVIEW=1)
         target_link_libraries(kn_webview PRIVATE PkgConfig::KN_WEBKITGTK)
         target_link_libraries(${CLIENT_BINARY} PRIVATE kn_webview)
+        # kn_webview_live_test (client/tests/kn_webview_live_test.c): the challenge in the game UI and in its window,
+        # run against a stub page under a private display (xvfb-run -a); not a ctest (it needs a display)
+        add_executable(kn_webview_live_test client/tests/kn_webview_live_test.c)
+        target_include_directories(kn_webview_live_test PRIVATE client/include)
+        target_link_libraries(kn_webview_live_test PRIVATE kn_webview PkgConfig::KN_WEBKITGTK Threads::Threads)
     endif ()
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
@@ -1014,6 +1019,11 @@ else ()
     add_executable(ranked_route_test client/tests/ranked_route_test.c client/src/net/ranked_route.c)
     target_include_directories(ranked_route_test PRIVATE client/include shared/include)
     add_test(NAME ranked_route_test COMMAND ranked_route_test)
+    # kn_webview_test (client/src/ui/kn_webview.c built without GTK): the captcha's game UI / window choice, the
+    # game UI's stall watchdog and the frame conversion. The live run is kn_webview_live_test (a display: not ctest)
+    add_executable(kn_webview_test client/tests/kn_webview_test.c client/src/ui/kn_webview.c)
+    target_include_directories(kn_webview_test PRIVATE client/include)
+    add_test(NAME kn_webview_test COMMAND kn_webview_test)
     # krunker_host_custom_test (client/src/net/krunker_net.c, krunker_net_host_custom): a custom game hosted on
     # krunker.io's official servers (CUSTOM_SERVER, the "cust" reply, the timeout). krunker_net.c is included
     # whole, with doubles for its client, account and map callers; no socket is opened

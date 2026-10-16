@@ -871,6 +871,12 @@ html.kn-bare-window #instructions {
 .kn-captcha-widget {
   margin-bottom: 6px;
 }
+/* The challenge drawn in the game UI (native webview, krunker_captcha_ui.c webview_frame): the page's
+ * widget on its transparent background, centred where the widget sits (the bitmap is its own size). */
+.kn-captcha-webview {
+  display: block;
+  margin: 4px auto 6px;
+}
 .kn-captcha-manual,
 .kn-captcha-block {
   display: flex;

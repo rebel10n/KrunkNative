@@ -64,6 +64,7 @@
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
 #include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
 #include <krunker_captcha.h> // krunker_captcha_needs_player: the challenge modal takes the pointer
+#include <kn_webview.h>       // the challenge drawn in the game UI: its pointer / key codes
 #include <krunker_net.h> // KN_KRUNKER_OFFICIAL: --krunker / ?krunker= joins an official krunker.io game (net/krunker_net.c)
 #include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
 #include <map_catalog.h> // startup map lookup (--map, --sandbox, ?map=, ?sandbox)
@@ -1704,6 +1705,30 @@ void client_mouse_settings_changed(void) {
     client_settings_apply_raw_mouse(); // m.raw on the web: the Client tab's Raw Input or the controls' Raw Mouse Input
 }
 
+// The challenge drawn in the game UI (kn_webview.h) takes the widget's keys and clicks first: the GLFW keys
+// it forwards (0 = none; Escape stays the menu's) and GTK's button numbers (1 left, 2 middle, 3 right).
+static int captcha_inline_key(const int key) {
+    switch (key) {
+        case GLFW_KEY_TAB: return KN_WEBVIEW_KEY_TAB;
+        case GLFW_KEY_ENTER:
+        case GLFW_KEY_KP_ENTER: return KN_WEBVIEW_KEY_ENTER;
+        case GLFW_KEY_SPACE: return KN_WEBVIEW_KEY_SPACE;
+        case GLFW_KEY_BACKSPACE: return KN_WEBVIEW_KEY_BACKSPACE;
+        case GLFW_KEY_DELETE: return KN_WEBVIEW_KEY_DELETE;
+        case GLFW_KEY_LEFT: return KN_WEBVIEW_KEY_LEFT;
+        case GLFW_KEY_RIGHT: return KN_WEBVIEW_KEY_RIGHT;
+        case GLFW_KEY_UP: return KN_WEBVIEW_KEY_UP;
+        case GLFW_KEY_DOWN: return KN_WEBVIEW_KEY_DOWN;
+        case GLFW_KEY_HOME: return KN_WEBVIEW_KEY_HOME;
+        case GLFW_KEY_END: return KN_WEBVIEW_KEY_END;
+        default: return KN_WEBVIEW_KEY_NONE;
+    }
+}
+
+static int captcha_inline_button(const int glfw_button) {
+    return glfw_button == GLFW_MOUSE_BUTTON_LEFT ? 1 : glfw_button == GLFW_MOUSE_BUTTON_RIGHT ? 3 : glfw_button == GLFW_MOUSE_BUTTON_MIDDLE ? 2 : 0;
+}
+
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
     mouse_flick_event(x, y);
@@ -1725,6 +1750,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     html_cursor_scale(window, &x, &y);
     if (strike_ui_active() && strike_customize_mouse(1, x, y)) return; // a Customize Controls drag
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
+    if (krunker_captcha_inline_pointer(KN_WEBVIEW_POINTER_MOVE, x, y, 0)) return; // the challenge in the game UI
     html_ui_mouse_move(x, y);
 }
 
@@ -1764,6 +1790,10 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
     if (strike_ui_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT &&
         strike_customize_mouse(action == GLFW_PRESS ? 0 : 2, x, y)) return;
     if (button == GLFW_MOUSE_BUTTON_LEFT && ui_console_mouse(action, x, y, 0)) return; // dev console modal + mod bind rows
+    if (action == GLFW_PRESS || action == GLFW_RELEASE) { // the challenge in the game UI (krunker_captcha.h)
+        const int kind = action == GLFW_PRESS ? KN_WEBVIEW_POINTER_PRESS : KN_WEBVIEW_POINTER_RELEASE;
+        if (krunker_captcha_inline_pointer(kind, x, y, captcha_inline_button(button))) return;
+    }
     html_ui_mouse_move(x, y);
     html_ui_mouse_button(button, action, mods);
 }
@@ -1841,6 +1871,10 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
 
     ks_client_key(client, key, scancode, action, mods); // KrunkScript onKeyPress / onKeyUp / onKeyHeld (observes only)
 
+    // the challenge drawn in the game UI takes its widget's keys (Escape is not forwarded: the menu's)
+    const int captcha_key = captcha_inline_key(key);
+    if (captcha_key && krunker_captcha_inline_key(captcha_key, action)) return;
+
     // Krunker Strike: a screen over the game with a focused text field (REPORT_PLAYER's comments)
     // takes the keys, as a menu would; the game's binds wait
     if (strike_page_typing()) {
@@ -1884,6 +1918,7 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
 
 static void char_callback(GLFWwindow *window, const unsigned int codepoint) {
     (void) window;
+    if (krunker_captcha_inline_char(codepoint)) return; // the challenge drawn in the game UI: its widget's text
     if (html_ui_is_menu_open() || ui_controls_chat_focused() || krunker_captcha_needs_player() || strike_page_typing()) html_ui_char(codepoint);
 }
 

@@ -39,6 +39,13 @@ int krunker_captcha_asking(void);
 int krunker_captcha_needs_player(void);
 // Main thread, once per frame (krunker_net_tick): the callback listener, the challenge window, timeouts.
 void krunker_captcha_tick(void);
+// Native, the challenge drawn in the game UI (kn_webview.h; the window is its fallback): the pointer and
+// the keys go to it while it is shown there, before the page or the game gets them. Each returns 1 when
+// the webview took the input. kind: KN_WEBVIEW_POINTER_* (button: GTK's 1 / 2 / 3); pressed: 1 press,
+// 0 release, 2 repeat (GLFW's actions); kn_key: KN_WEBVIEW_KEY_*. Web: always 0.
+int krunker_captcha_inline_pointer(int kind, double x, double y, int button);
+int krunker_captcha_inline_key(int kn_key, int pressed);
+int krunker_captcha_inline_char(unsigned codepoint);
 
 // The socket "cpt", solved by this client: begin / end(solved) show nothing (logged only); end(0) shows
 // the modal's passive card saying it failed (a moment, then hidden). Never blocks the game's pointer.

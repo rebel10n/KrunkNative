@@ -92,12 +92,28 @@ challenge". Cloudflare's interstitial alone is not a reason (it may pass by itse
   the same proxy as the matchmaker requests (`http_proxy_for("matchmaker.krunker.io")`: the client
   setting or the environment; `http://` and `socks5://` proxies; loopback direct), so the challenge is
   solved from the network the seek comes from.
-- **The modal, once the window is shown, has only "Solve the challenge"** (raises the window)
-  **and Cancel.** The paste box, the userscript callback and the "open krunker.io in the browser" path
+- **The challenge is drawn in the game UI (Linux, the default).** When the player is needed, the
+  modal shows the challenge where the live client shows its Turnstile holder: the dim backdrop, the
+  white box, "Security Challenge", the text and Cancel, with the widget centred in it. No OS window
+  opens. The view stays in its hidden GTK offscreen host; the page is only the widget on a transparent
+  background (the robots.txt text is hidden, no card). Each paint of the host is converted
+  (cairo ARGB32, premultiplied, to straight RGBA8) and put into a `<canvas>` of the modal
+  (`kn-captcha-webview`, 340 x 170 px, `html_dom_canvas_put`). While it is shown, the pointer over the
+  canvas and the widget's keys (Tab, Enter, Space, Backspace, Delete, arrows, Home, End and typed text)
+  go to the view (`krunker_captcha_inline_pointer` / `_key` / `_char`, routed first in `main.c`; a
+  press that starts on the widget keeps its release). Escape is not forwarded: it stays the menu's.
+  The view's own window is the fallback: when the game UI draws no frame within 5 s of showing it
+  (`INLINE_STALL_MS`), the challenge moves into a window (dark background, the widget centred), and
+  `KRUNKNATIVE_CAPTCHA_WINDOW=1` keeps the window path only. macOS and Windows have no webview backend
+  (their paths are unchanged).
+- **The window path, for the fallback and the env override:** the view moves into a real window,
+  centred on the work area of the monitor under the pointer and kept above the game. There the modal has
+  only "Solve the challenge" (raises the window) **and Cancel**; closing the window says so ("Solve the
+  challenge" opens it again).
+- **In both,** the paste box, the userscript callback and the "open krunker.io in the browser" path
   stay hidden: the webview is the one path the player sees (the user asked not to be shown the
-  paste / userscript route when the window works). Closing the window says so ("Solve the challenge"
-  opens it again); Cancel ends the join. A refused token (used or expired) starts a fresh silent run,
-  at most twice like the live client.
+  paste / userscript route when the webview works). Cancel ends the join. A refused token (used or
+  expired) starts a fresh silent run, at most twice like the live client.
 - **Fallbacks only when the window can't be the path:** no webview in the build (macOS, Windows,
   `KN_WEBVIEW=OFF`, the release packages), `KRUNKNATIVE_WEBVIEW=0`, no display for GTK, or the window
   failing to start / load / returning a non-token — then the modal shows the manual path below (open
