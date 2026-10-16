@@ -523,19 +523,20 @@ static void hb_append_clan(char *out, const size_t size, size_t *len, const char
 
 // creatorBadge "verified" (#993299, v10:219640 / 220512), premiumT "beenhere" / featured
 // "check_circle" icons and the custom badge image of a board row (acc: the player's account from
-// NET_PACKET_PLAYER_INFO, NULL for guests; badge: badgeIndex, -1 none); `top` is the icons'
-// margin-top (f1984 5 px, f1985 3 px).
-static void hb_append_badges(char *out, const size_t size, size_t *len, const NetPlayerInfoPacket *acc, const int badge, const int top) {
+// NET_PACKET_PLAYER_INFO, NULL for guests; badge: badgeIndex, -1 none). They are flex items of
+// .leaderItem (f1984) / .newLeaderItem (f1985), so each one is centred with align-self:center
+// (a margin-top would push it down rather than centre it).
+static void hb_append_badges(char *out, const size_t size, size_t *len, const NetPlayerInfoPacket *acc, const int badge) {
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_CREATOR))
-        hb_append(out, size, len, " <i class='material-icons' style='color:#993299;margin-top:%dpx;font-size:23px;vertical-align:middle;'>verified</i>", top);
+        hb_append(out, size, len, " <i class='material-icons' style='color:#993299;align-self:center;font-size:23px;'>verified</i>");
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_PREMIUM))
-        hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;margin-top:%dpx;font-size:23px;vertical-align:middle;'>beenhere</i>", top);
+        hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;align-self:center;font-size:23px;'>beenhere</i>");
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_VERIFIED))
-        hb_append(out, size, len, " <i class='material-icons' style='color:#40C4FF;margin-top:%dpx;font-size:23px;vertical-align:middle;'>check_circle</i>", top);
+        hb_append(out, size, len, " <i class='material-icons' style='color:#40C4FF;align-self:center;font-size:23px;'>check_circle</i>");
     char tex[64], url[160];
     if (!badge_get(badge)) return;
     html_dom_asset_url(badge_texture(badge, tex, sizeof(tex)), url, sizeof(url)); // Game.badges[i].url (asset host)
-    hb_append(out, size, len, "<img src='%s' style='margin-top:%dpx;font-size:28px;vertical-align:middle;height:21px;margin-left:2px;'>", url, top);
+    hb_append(out, size, len, "<img src='%s' style='align-self:center;font-size:28px;height:21px;margin-left:2px;'>", url);
 }
 
 // One board entry, sampled from the game or a scenario row.
@@ -552,7 +553,7 @@ static void hud_old_board_row_html(char *out, const size_t size, size_t *len, co
     char num[32], shown[PLAYER_NAME_SIZE];
     hud_format_num(r->stats[0], num, sizeof(num));
     hb_append(out, size, len, "<div class='leaderItem'><div class='leaderCounter'>%d.</div>", rank);
-    hb_append_badges(out, size, len, r->acc, r->badge, 5);
+    hb_append_badges(out, size, len, r->acc, r->badge);
     hb_append(out, size, len, "<div class='leaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
     hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown))); // streamMode ? scrambleS(alias)
     hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
@@ -563,7 +564,7 @@ static void hud_old_board_row_html(char *out, const size_t size, size_t *len, co
 static void hud_center_board_row_html(char *out, const size_t size, size_t *len, const int rank, const BoardRow *r, const int columns) {
     char shown[PLAYER_NAME_SIZE];
     hb_append(out, size, len, "<tr><td><div class='newLeaderItem'><div class='newLeaderCounter'>%d.</div>", rank);
-    hb_append_badges(out, size, len, r->acc, r->badge, 3);
+    hb_append_badges(out, size, len, r->acc, r->badge);
     hb_append(out, size, len, "<div class='newLeaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
     hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown)));
     hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
