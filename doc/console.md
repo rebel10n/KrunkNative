@@ -68,7 +68,6 @@ silent (only the `] line` echo), as in the mod.
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
 | tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
 | thirdperson / firstperson | – (Source engine commands) | Krunker Box Office: the over-the-shoulder camera (doc/v7/decisions.md "Third person"). `thirdperson` asks the server (`/thirdperson on`); it switches when the grant arrives ("Third Person - Enabled") or prints the refusal (public / ranked servers, custom games whose host has `knTPCam` off). `firstperson` goes back at once. Also the Controls bind "Third Person" (unbound by default) |
-| official_sync [reset] | – | Krunker Box Office: an official krunker.io session's prediction counters (reconciliations, corrections and their distance). A dev-console command: hidden from help and completion and not run with the dev console off |
 
 ## Server commands (`/cmd` in chat, or the console without the slash)
 

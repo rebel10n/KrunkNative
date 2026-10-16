@@ -121,15 +121,6 @@ void client_recon_drain_delayed(Client *client, void (*handle)(Client*, const Ne
 // The server dropped them, so no "l" will ack them and none may be replayed.
 void client_recon_drop_pending(Client *client) {
     client->net_pending_count = 0;
-    client->net_inputs_dropped++;
-}
-
-// official_sync reset: the counters above (net_recon_count keeps counting)
-void client_recon_stats_reset(Client *client) {
-    client->net_recon_corrections = 0;
-    client->net_recon_error_last = client->net_recon_error_max = 0.0f;
-    client->net_recon_error_sum = 0.0;
-    client->net_inputs_dropped = 0;
 }
 
 // CONTROLS.reset() on our (re)spawn and on a new session: no pending inputs, a fresh batch.
@@ -259,13 +250,10 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     client->net_pending_count = net_reconcile(me, packet, client->net_pending_inputs, client->net_pending_count, move_lock);
     client->net_recon_count++;
 
-    // official_sync: what the snap + replay moved us (0 when the prediction ran the server's physics)
+    // what the snap + replay moved us (0 when the prediction ran the server's physics): the sync trace's corrections
     const float error = predicted_active && me->active ? sqrtf(powf(me->position.x - predicted.x, 2.0f) + powf(me->position.y - predicted.y, 2.0f) +
                                                                powf(me->position.z - predicted.z, 2.0f))
                                                        : 0.0f;
-    client->net_recon_error_last = error;
-    client->net_recon_error_sum += error;
-    if (error > client->net_recon_error_max) client->net_recon_error_max = error;
     if (error > client->net_recon_error_peak) client->net_recon_error_peak = error;
     if (error > NET_RECON_CORRECTION_EPS) client->net_recon_corrections++;
 

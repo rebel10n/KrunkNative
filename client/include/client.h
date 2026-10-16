@@ -706,13 +706,10 @@ typedef struct {
     int net_batch_count;
     float net_batch_time;          // frame time (s) summed into the current "q" window (iiïïiïï)
     unsigned int net_recon_count;  // RECON packets applied (tests, KRUNKNATIVE_RECON_LOG)
-    // How far reconciliation moved our predicted player (recon.c, the console's official_sync): every
-    // RECON snaps and replays; a correction is one that moved it more than NET_RECON_CORRECTION_EPS
+    // How far reconciliation moved our predicted player (recon.c): every RECON snaps and replays; a
+    // correction is one that moved it more than NET_RECON_CORRECTION_EPS (the "[krunker] sync" trace, krunker_net.c)
     unsigned int net_recon_corrections;
-    float net_recon_error_last, net_recon_error_max;
     float net_recon_error_peak;      // the largest since the last "[krunker] sync" trace line took it (krunker_net.c)
-    double net_recon_error_sum;
-    unsigned int net_inputs_dropped; // NET_EXT_KN_INPUTS_DROPPED: an official server's "f" (SYNC_FAILED)
 
     // Live match state from the server (client/src/net/game_events.c). Read by the HUD.
     int net_ping_ms;               // smoothed RTT from PING_RESULT, -1 = unknown (Krunker "-")
@@ -958,8 +955,7 @@ int  client_recon_sending(const Client*);                         // inputs may 
 int  client_round_ended(const Client*);                           // END seen while playing, until the next INIT (net/recon.c)
 void client_recon_on_death(Client*);                              // our KILL: the unsent "q" window is dropped
 void client_recon_drop_pending(Client*);                          // Krunker "f": the pending inputs are dropped (never acked)
-void client_recon_stats_reset(Client*);                           // official_sync reset: corrections / distances back to 0
-#define NET_RECON_CORRECTION_EPS 0.01f // official_sync: a RECON that moved our player further is a correction (units)
+#define NET_RECON_CORRECTION_EPS 0.01f // a RECON that moved our player further is a correction (units)
 void client_recon_after_tick(Client*);                            // the frame's shot knockback -> input.velObj
 void client_recon_apply(Client*, const NetReconPacket*);          // "l": snap + replay
 int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE_NET_DELAY_MS: 1 = held

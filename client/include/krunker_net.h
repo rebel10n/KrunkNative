@@ -128,9 +128,6 @@ int krunker_net_open(void);        // the WebSocket is open
 int krunker_net_send_packet(NetPacketType type, const void *payload, uint16_t length);
 void krunker_net_reconnect(Client *client); // the page's reconnect: seek the same game again
 void krunker_net_tick(Client *client);      // main thread, once per frame: notices, captcha
-// The console's official_sync: the link's sync counters and the lobby's rates as one line. 0 = no
-// official session (out is "").
-int krunker_net_sync_info(char *out, size_t n);
 // Whether the official session wants no input frame built now (net/recon.c samples none): v10's gameLoop
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
 // init's map still loading (the packets after it held) is the latter. 0 when no official game is open.

@@ -1602,17 +1602,6 @@ static void trace_sync_tick(Client *client) {
     primed = 1;
 }
 
-int krunker_net_sync_info(char *out, const size_t n) {
-    if (!out || !n) return 0;
-    out[0] = 0;
-    if (K.state == KS_OFF) return 0;
-    pthread_mutex_lock(&K.lock);
-    snprintf(out, n, "official: %u syncs (\"l\"), %u sync failures (\"f\"), rates snf %d tf %d sf %d, %d lobby config keys", K.link.syncs,
-             K.link.sync_failed, K.link.send_hz, K.link.tick_hz, K.link.sync_hz, K.link.config_keys);
-    pthread_mutex_unlock(&K.lock);
-    return 1;
-}
-
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
     if (K.account_event) { // the game server's "a": the account's name and level for the account UI

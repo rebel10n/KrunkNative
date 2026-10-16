@@ -277,7 +277,7 @@ typedef struct {
     char vote_mts[NET_MATCH_PICKS][96];
     int vote_mode[NET_MATCH_PICKS], vote_map[NET_MATCH_PICKS];
     int vote_count;
-    // counters (tests, logs, the console's official_sync)
+    // counters (tests, logs, the "[krunker] sync" trace)
     // our NET_PACKET_VOICE_V7 chunks of the clip being sent (one clip at a time, in order): a whole
     // clip goes out as one "vc"; krunker_link_reset frees it
     SocialAssembly voice_out;
