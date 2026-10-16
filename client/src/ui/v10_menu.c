@@ -17,8 +17,10 @@
 //     Social and Exit (the desktop client's, v10 showExit). The Guide card, What's New and
 //     Community & Events are v10_news.c's, Turf Wars / Leaderboards / Ranked v10_competitive.c's
 //   - the header bar (_52526 / _52519, v10:145938-146560): guest "Login or Register" / "Get
-//     Signup Rewards", signed in avatar + name + level bar, KR, Junk, RP, Wallet; Notifications,
-//     Settings (showWindow(1)), More Krunker (showMoreKrunker(): the moreKrunkerPopup, v10:196675)
+//     Signup Rewards" (KrunkNative's "Account Manager" between them, showWindow(ALT_MANAGER_WINDOW)),
+//     signed in avatar + name + level bar (KrunkNative's Account Manager after it), KR, Junk, RP,
+//     Wallet; Notifications, Settings (showWindow(1)),
+//     More Krunker (showMoreKrunker(): the moreKrunkerPopup, v10:196675)
 //   - the class preview container shown at boot (menuClassContainer.style.display = '', v10:222888)
 //   - the Live Streams overlay (.streams-overlay in #tlInfHold, v10:145187 / 146035): the brain's
 //     /streams/top (Twitch's live Krunker streams, streams.c), the small view's three cards, a click
@@ -183,6 +185,19 @@ static void comma(char *out, const size_t n, const double value) { // _8986: 123
     out[o] = 0;
 }
 
+// KrunkNative's Account Manager (ALT_MANAGER_WINDOW, alt_manager_ui.c): a separator and the item,
+// with its neighbours' markup (v10 has no such button). The guest bar has it after Login or
+// Register, the signed-in bar after the profile item.
+static void account_manager_markup(char *out, const size_t n, const char *id) {
+    char action[64];
+    snprintf(action, sizeof(action), "playSelect(0.1),showWindow(%d)", ALT_MANAGER_WINDOW);
+    snprintf(out, n,
+        "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
+        "<div class=\"ph-item svelte-da3zva\" id=\"%s\" onclick=\"%s\" onmouseenter=\"playTick()\">"
+        "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">switch_account</span> "
+        "<span class=\"ph-label svelte-da3zva\">Account Manager</span></div>", id, action);
+}
+
 // #signedInHeaderBar (_52526) for an account, #signedOutHeaderBar (_52519) for a guest. Both live
 // in #playerHeaderEl; v10 swaps the component, here the guest bar stays in the page and the
 // signed-in one is built next to it once.
@@ -212,6 +227,12 @@ static void header_update(const AccountInfo *acc) {
             "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span> <span class=\"ph-label svelte-da3zva\">Wallet</span></div></div>");
         in = by_id("signedInHeaderBar");
+        HtmlElem profile = by_id("knV10Profile");
+        if (profile && !by_id("knV10AccountsSignedIn")) {
+            char markup[512];
+            account_manager_markup(markup, sizeof(markup), "knV10AccountsSignedIn");
+            html_dom_insert_html(profile, HTML_INSERT_AFTER_END, markup);
+        }
     }
     set_display(out, acc ? "none" : "");
     set_display(in, acc ? "" : "none");
@@ -842,6 +863,13 @@ static void header_setup(void) {
     HtmlElem login = html_dom_query(0, "#signedOutHeaderBar .ph-login-wrap");
     if (login) html_dom_set_attr(login, "id", "knV10LoginBtn");
     wire(login, "playSelect(0.1),loginOrRegister()");
+    // KrunkNative's Account Manager (alt_manager_ui.c) sits between the guest's Login or Register and
+    // Get Signup Rewards, with its neighbours' markup (v10 has no such button): a separator, then the item
+    if (login && !by_id("knV10AccountsBtn")) {
+        char markup[512];
+        account_manager_markup(markup, sizeof(markup), "knV10AccountsBtn");
+        html_dom_insert_html(login, HTML_INSERT_AFTER_END, markup);
+    }
     wire(by_id("signupRewardsButton"), "playSelect(0.1),showSignupRewards()");
     HtmlElem items[4];
     const int n = html_dom_query_all(0, "#playerHeaderEl .headerBarRight > .nav-item", items, 4);
@@ -917,17 +945,14 @@ static void generic_popup(const char *html, const char *cls) {
 // showMoreKrunker(): the moreKrunkerPopup (_66797). Mods: window.canShowMods (the Mod Manager
 // exists natively); Sandbox: openURL("/?sandbox") = KrunkNative's embedded offline game; Editor:
 // openURL("/editor.html") (app_mode); KPD: showPolicePop(); "Download our client": the Client
-// window (showWindow(25), download_ui.c). Accounts: KrunkNative's saved accounts (alt_manager_ui.c),
-// not a Krunker option.
+// window (showWindow(25), download_ui.c). The Account Manager (KrunkNative's saved accounts) is
+// the guest header's button, not an item here.
 static void more_krunker(void) {
-    char accounts_action[48];
-    snprintf(accounts_action, sizeof(accounts_action), "clearPops(),showWindow(%d)", ALT_MANAGER_WINDOW);
     const struct { const char *title, *symbol, *img, *desc, *action; } k_options[] = {
         {"Mods", "color_lens", NULL, "Customize your experience", "clearPops(),showWindow(4)"},
         {"Sandbox", "castle", NULL, "Try every skin", "clearPops(),knHostOffline()"},
         {"Editor", "construction", NULL, "Create your own maps and game modes", "clearPops(),openURL('/editor.html')"},
         {"KPD", NULL, "./img/police.png", "Stop criminals", "clearPops(),shoPolicePop()"},
-        {"Accounts", "switch_account", NULL, "Switch between your own accounts", accounts_action},
     };
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"moreKrunkerHolder svelte-19783yx\"><div class=\"moreKrunkerTitle svelte-19783yx\"><span class=\"svelte-19783yx\">"

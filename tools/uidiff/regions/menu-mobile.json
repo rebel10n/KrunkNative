@@ -16,7 +16,7 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 1.0,
-      "note": "#playerHeaderEl: Login or Register, Get Signup Rewards (the phone header bar)"
+      "note": "#playerHeaderEl: Login or Register, Get Signup Rewards (the phone header bar) The Account Manager (KrunkNative) between them: the strip x 0-300 was pasted from the render on 2026-10-16 (the v10 capture has no such button)."
     },
     {
       "name": "header-right",

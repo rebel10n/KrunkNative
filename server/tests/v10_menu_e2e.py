@@ -18,7 +18,9 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      map cards; Host Game opens v10's host chooser; More Krunker opens its popup;
      Quick Match seeks again with excludeGame and joins the OTHER lobby; a second one sends the first
      lobby as excludeRecent too and, the two being the only ones, goes back to it (never the current)
-  2. a guest: "Login or Register" opens v10's modal; Register here -> username, password, email
+  2. a guest: the header has Login or Register, KrunkNative's Account Manager, then Get Signup
+     Rewards (in that order), and the Account Manager opens the saved accounts window (knAltTitle);
+     "Login or Register" opens v10's modal; Register here -> username, password, email
      -> Register: the account exists in the brain, the modal closes and the header is the
      signed-in bar without a restart; Logout -> the guest bar again; the modal again -> "(use
      username instead)" -> Login with that account's username -> signed in again
@@ -166,7 +168,7 @@ def nodes(text, label):
 FIND_GAME_MAX_FRAME_MS = 500
 
 SIGNED_IN_SCRIPT = """0 menu
-500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview spectButtonHolder chatUIHolder
+500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview spectButtonHolder chatUIHolder knV10AccountsBtn knV10AccountsSignedIn
 500 vis @nav menuBtnGuide knV10GuideItem menuBtnTurfWars menuBtnMarket menuBtnLeaderboards menuBtnShop menuBtnChall menuBtnSocial menuBtnSideCommunity
 600 clickid knV10Settings
 1500 vis @settings windowHolder settHolder
@@ -194,6 +196,7 @@ SIGNED_IN_SCRIPT = """0 menu
 13120 up ESC
 13500 clickid knV10MoreKrunker
 14500 nodes @more .moreKrunkerOption
+14550 grep @more Accounts .moreKrunkerOption
 14600 call clearPops
 15000 clickid menuBtnQuickMatch
 21000 vis @after menuBtnQuickMatch :preview
@@ -232,12 +235,73 @@ GUEST_SCRIPT = """0 menu
 """
 
 
+# The guest header's Account Manager (v10_menu.c header_setup): between Login or Register and Get
+# Signup Rewards, and its click opens the saved accounts window (ALT_MANAGER_WINDOW, alt_manager_ui.c)
+ACCOUNTS_SCRIPT = """0 menu
+500 rect @hdr knV10LoginBtn knV10AccountsBtn signupRewardsButton
+600 clickid knV10AccountsBtn
+1200 nodes @window .knAltTitle
+1250 text @title .knAltTitle
+1300 quit
+"""
+
+
+def rects_of(text, label):
+    """The `rect @label id ...` line of an input script log as {id: (x, y, w, h)} (None = absent)"""
+    m = re.search(r"\[input_script\] rect t=\d+ @%s (.*)" % re.escape(label), text)
+    out = {}
+    for kv in (m.group(1).split() if m else []):
+        k, _, v = kv.partition("=")
+        parts = v.split(",")
+        out[k] = tuple(float(x) for x in parts[:4]) if len(parts) >= 4 else None
+    return out
+
+
+# The signed-in bar's Account Manager (the same item, after the profile): before KR, and it opens the window
+SIGNED_ACCOUNTS_SCRIPT = """0 menu
+500 rect @hdr knV10Profile knV10AccountsSignedIn menuKRCount
+600 clickid knV10AccountsSignedIn
+1200 nodes @window .knAltTitle
+1250 text @title .knAltTitle
+1300 quit
+"""
+
+
+def accounts_window_checks(text, prefix):
+    check(prefix + ": the Account Manager opens the saved accounts window", nodes(text, "window") == 1, str(nodes(text, "window")))
+    t = re.search(r"\[input_script\] text t=\d+ @title n=\d+ .* text=(.*)", text)
+    check(prefix + ": ... titled Accounts", t and t.group(1).strip() == "Accounts", t.group(0) if t else "no text line")
+
+
+def accounts_case(brain_port):
+    text = client("accounts", brain_port, ACCOUNTS_SCRIPT)
+    r = rects_of(text, "hdr")
+    login, acc, rewards = (r.get(i) for i in ("knV10LoginBtn", "knV10AccountsBtn", "signupRewardsButton"))
+    check("2: the guest header has the Account Manager button", acc is not None, str(r))
+    check("2: Account Manager sits between Login or Register and Get Signup Rewards",
+          login and acc and rewards and login[0] + login[2] <= acc[0] and acc[0] + acc[2] <= rewards[0],
+          "login %s account %s rewards %s" % (login, acc, rewards))
+    accounts_window_checks(text, "2")
+
+
+def signed_accounts_case(brain_port, user, token):
+    text = client("accounts-in", brain_port, SIGNED_ACCOUNTS_SCRIPT, {"krunker_username": user, "krunker_token": token})
+    r = rects_of(text, "hdr")
+    prof, acc, kr = (r.get(i) for i in ("knV10Profile", "knV10AccountsSignedIn", "menuKRCount"))
+    check("1: the signed-in header has the Account Manager button", acc is not None, str(r))
+    check("1: Account Manager sits after the profile and before KR",
+          prof and acc and kr and prof[0] + prof[2] <= acc[0] and acc[0] + acc[2] <= kr[0],
+          "profile %s account %s KR %s" % (prof, acc, kr))
+    accounts_window_checks(text, "1")
+
+
 def signed_in_case(brain_port, games):
     user = "v10m%d" % (os.getpid() % 100000)
     st, reg = http(brain_port, "/auth/register", {"username": user, "password": "pw-v10menu-%d" % os.getpid()})
     token = reg.get("token", "") if isinstance(reg, dict) else ""
     check("1: account registered", st == 200 and token, str(reg)[:200])
     text = client("signedin", brain_port, SIGNED_IN_SCRIPT.format(shots=WORK), {"krunker_username": user, "krunker_token": token})
+    signed_accounts_case(brain_port, user, token)
     joins = re.findall(r"\[mm\] joining (\S+) at", text)
     h = vis(text, "header")
     check("1: signed-in header bar (no guest bar)", h.get("signedInHeaderBar") == "1" and h.get("signedOutHeaderBar") == "0", str(h))
@@ -263,8 +327,10 @@ def signed_in_case(brain_port, games):
     cards = nodes(text, "games")
     check("1: Custom Games lists games", cards > 0, "%d cards" % cards)
     check("1: Host Game opens the host chooser", nodes(text, "host") == 5, str(nodes(text, "host")))
-    # v10's popup has Mods, Sandbox, Editor and KPD; KrunkNative adds Accounts (the alt manager, alt_manager_ui.c)
-    check("1: More Krunker opens its popup", nodes(text, "more") == 5, str(nodes(text, "more")))
+    # v10's popup has Mods, Sandbox, Editor and KPD; the Account Manager is the guest header's button
+    check("1: More Krunker opens its popup with v10's four options", nodes(text, "more") == 4, str(nodes(text, "more")))
+    check("1: the signed-in header has the Account Manager button, the guest one hidden",
+          h.get("knV10AccountsSignedIn") == "1" and h.get("knV10AccountsBtn") in ("0", "-"), str(h))
     qm = re.search(r"\[mm\] quick match: seeking a lobby other than (\S+)", text)
     check("1: Quick Match seeks with the current lobby excluded", qm and joins and qm.group(1) == joins[0],
           "%s %s" % (qm.group(1) if qm else None, joins))
@@ -358,6 +424,7 @@ def main():
         brain_case(port, games)
         signed_in_case(port, games)
         guest_case(port)
+        accounts_case(port)
     finally:
         for p in procs:
             if p.poll() is None:
