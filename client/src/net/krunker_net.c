@@ -553,9 +553,15 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     return sent;
 }
 
+// The "q" syncTimes' clock (krunker_link.h now_ms): the same one for the "k" arrivals and the frames
+static double link_now_ms(void *user) {
+    (void) user;
+    return glfwGetTime() * 1000.0;
+}
+
 static void link_setup(void) {
     const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha,
-                              .map = link_map, .account_frame = link_account_frame, .user = NULL};
+                              .map = link_map, .account_frame = link_account_frame, .now_ms = link_now_ms, .user = NULL};
     krunker_map_source_set_fetch(kmap_fetch);
     krunker_link_init(&K.link, &io, krunker_build()->ahkey);
 }
@@ -1736,6 +1742,13 @@ int krunker_net_send_packet(const NetPacketType type, const void *payload, const
     const int sent = krunker_link_send_ours(&K.link, type, payload, length);
     pthread_mutex_unlock(&K.lock);
     return sent;
+}
+
+void krunker_net_mark_input_sync(const int index) {
+    if (K.state != KS_OPEN) return;
+    pthread_mutex_lock(&K.lock);
+    krunker_link_mark_sync(&K.link, index);
+    pthread_mutex_unlock(&K.lock);
 }
 
 int krunker_net_inputs_paused(void) {

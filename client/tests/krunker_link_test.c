@@ -1991,6 +1991,112 @@ static void test_prophunt(void) {
     }
 }
 
+// ---- hit registration (the official lobby's shots): the "q" syncTimes and the hit reply.
+// v7.1.4 index.js queueInputFrame / io_updatePlayers and v10 game.deob.js:221512-221530: a frame that fired
+// (players.js shoot sets input.syncTime) carries {"<frame>": servTim of the last "k", "<frame>p": fraction of
+// the send interval between the last two "k"s}. The official server reads it as the shooter's inputSTime /
+// inputSTPrg for its lag compensation (v7 players.js fetchState); without it the shot is judged against the
+// oldest state the server keeps (~500 ms old), so a moving target is missed where the shooter sees it.
+static double g_clock_ms;
+static double fake_now_ms(void *user) {
+    (void) user;
+    return g_clock_ms;
+}
+
+// One "q" window of three input frames: `fire` is the frame that shot (-1 none); the frames named in
+// marks[] are marked as fired before the window leaves, as the client does after their tick (recon.c).
+static void hitreg_window(KrunkerLink *link, uint32_t *seq, const int fire, const int *marks, const int nmarks) {
+    NetInputPacket in[3];
+    uint8_t batch[1 + sizeof(in)];
+    memset(in, 0, sizeof(in));
+    for (int i = 0; i < 3; i++) {
+        in[i].seq = (int32_t) (*seq)++;
+        in[i].delta = 0.016f;
+        in[i].move_dir = 2;
+        in[i].y_dir = 1.0f + 0.01f * (float) i;
+    }
+    if (fire >= 0) in[fire].flags = NET_INPUT_SHOOT;
+    for (int i = 0; i < nmarks; i++) krunker_link_mark_sync(link, marks[i]);
+    batch[0] = 3;
+    memcpy(batch + 1, in, sizeof(in));
+    krunker_link_send_ours(link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
+}
+
+static void test_hitreg(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat, .now_ms = fake_now_ms};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockH")}, 1);
+    clear();
+    KrunkerValue nobody[1] = {KRUNKER_V_NIL};
+    uint32_t seq = 700;
+    const KrunkerFrame *q;
+    const KrunkerValue *sync;
+
+    // a shot before any "k": there is no server time to send, so the window is as it was
+    g_clock_ms = 990;
+    { const int m[] = {1}; hitreg_window(&link, &seq, 1, m, 1); }
+    q = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    CHECK(q && q->argc == 6 && !krunker_frame_arg(q, 6), "q without a \"k\": no syncTimes (argc %u)", q ? q->argc : 0);
+    clear();
+
+    // "k" at 1000 ms with servTim 5000: the first sample (lastSync 0, so the fraction is 0 and not sent)
+    g_clock_ms = 1000;
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(nobody, 0), KRUNKER_V_NUM(10), KRUNKER_V_NUM(5000)}, 3);
+    clear();
+    g_clock_ms = 1040;
+    { const int m[] = {2}; hitreg_window(&link, &seq, 2, m, 1); }
+    q = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    sync = q && q->argc == 7 ? krunker_frame_arg(q, 6) : NULL;
+    CHECK(sync && krunker_is(sync, KRUNKER_MAP) && sync->len == 1 && krunker_num(krunker_get(sync, "2"), -1) == 5000 && !krunker_get(sync, "2p"),
+          "q with the shot's servTim 5000 (argc %u, pairs %u)", q ? q->argc : 0, sync ? sync->len : 0);
+    CHECK(q && krunker_num(krunker_get(krunker_frame_arg(q, 5), "2-5"), 0) == 1, "q: the shot frame carries its shoot change (2-5)");
+    clear();
+
+    // "k" at 1100 ms (servTim 5100). A shot at 1150 ms: now - 100 = 1050 lies halfway between the last two
+    // "k"s (1000 and 1100): (1050 - 1100) / (1000 - 1100) = 0.5
+    g_clock_ms = 1100;
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(nobody, 0), KRUNKER_V_NUM(10), KRUNKER_V_NUM(5100)}, 3);
+    clear();
+    g_clock_ms = 1150;
+    { const int m[] = {0}; hitreg_window(&link, &seq, 0, m, 1); }
+    q = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    sync = q && q->argc == 7 ? krunker_frame_arg(q, 6) : NULL;
+    CHECK(sync && krunker_is(sync, KRUNKER_MAP) && sync->len == 2 && krunker_num(krunker_get(sync, "0"), -1) == 5100 &&
+              krunker_num(krunker_get(sync, "0p"), -1) == 0.5,
+          "q: servTim 5100 with the fraction 0.5 (pairs %u)", sync ? sync->len : 0);
+    clear();
+
+    // the syncs left with their window: a window without a shot carries none
+    g_clock_ms = 1200;
+    hitreg_window(&link, &seq, -1, NULL, 0);
+    q = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    CHECK(q && q->argc <= 6 && !krunker_frame_arg(q, 6), "q after a synced window: no syncTimes left over");
+    clear();
+
+    // two frames of one window carry theirs (the fraction is negative here: the clock runs past the last
+    // "k"), and a mark outside the window is ignored
+    g_clock_ms = 1240;
+    { const int m[] = {1, 2, 9}; hitreg_window(&link, &seq, 1, m, 3); }
+    q = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    sync = q && q->argc == 7 ? krunker_frame_arg(q, 6) : NULL;
+    CHECK(sync && krunker_is(sync, KRUNKER_MAP) && sync->len == 4 && krunker_get(sync, "1") && krunker_get(sync, "1p") && krunker_get(sync, "2") &&
+              !krunker_get(sync, "9"),
+          "q: two frames of one window (pairs %u)", sync ? sync->len : 0);
+    clear();
+
+    // a server hit reply (DO_DAMAGE "4": target 7, 24.6, crit 0, kill 1) is the hit the marker shows, with the kill
+    feed(&link, "4", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(24.6), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(1)}, 4);
+    const NetPacket *hit = NULL;
+    for (int i = 0; i < g_in_count && !hit; i++) if (g_in[i].type == NET_PACKET_HIT) hit = &g_in[i];
+    CHECK(hit && ((const NetHitPacket *) hit->payload)->target_uid == 7 && ((const NetHitPacket *) hit->payload)->kill &&
+              ((const NetHitPacket *) hit->payload)->damage == 25,
+          "a kill reply shows the hit marker red (kill set, whole damage 25)");
+    clear();
+    krunker_link_reset(&link);
+    CHECK(link.sync_frames == 0 && !link.sync_known, "reset clears the syncTimes");
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2863,6 +2969,7 @@ int main(void) {
     test_world();
     test_rounds();
     test_actions();
+    test_hitreg();
     test_social();
     test_voice();
 

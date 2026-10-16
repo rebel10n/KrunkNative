@@ -158,3 +158,7 @@ void krunker_net_tick(Client *client);      // main thread, once per frame: noti
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
 // init's map still loading (the packets after it held) is the latter. 0 when no official game is open.
 int krunker_net_inputs_paused(void);
+// The frame at `index` of the open "q" window fired (a shot or melee: v10's syncTime): its server time goes
+// out with the window (krunker_link_mark_sync). Called on the main thread after that frame's tick, before the
+// window is sent; nothing when no official game is open.
+void krunker_net_mark_input_sync(int index);

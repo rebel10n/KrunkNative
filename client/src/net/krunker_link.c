@@ -392,8 +392,16 @@ static void fx_grapple(KrunkerLink *l, int sid, const KrunkerValue *g); // comba
 // [0] sid [1..3] x y z [4] xDire (deg) [5] yDire (deg) [6] stepVal [7] onGround [8] crouchVal
 // [9] weapon (loadout index) [10] aimVal [11] grapple [12] ping. Our own sid is skipped (as in JS).
 // Stride and offsets: the current build's (krunker_build_live.h; compiled: KRUNKER_K_*).
+static double link_now_ms(const KrunkerLink *l) { return l->io.now_ms ? l->io.now_ms(l->io.user) : 0.0; }
+
 static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerBuild *b = krunker_build();
+    // io_updatePlayers (index.js:17111): Game.servTim = servTim; lastSync = newSync || 0; newSync = now.
+    // Before the list: an empty "k" counts too, the "q" syncTimes read these.
+    l->serv_tim = num(arg(f, 2), 0);
+    l->sync_known = 1;
+    l->last_sync = l->new_sync;
+    l->new_sync = link_now_ms(l);
     const KrunkerValue *list = arg(f, 0);
     if (!krunker_is(list, KRUNKER_ARRAY)) return;
     const uint32_t stride = (uint32_t) b->k_stride;
@@ -2828,6 +2836,24 @@ void krunker_link_input_fields(const NetInputPacket *in, double v[15]) {
     v[14] = in->flags & NET_INPUT_INTERACT ? 1 : 0;
 }
 
+// queueInputFrame's syncTime (index.js:17085; v10.js:221512): the frame fired. Its servTim is the
+// last "k"'s; its fraction (round 2) is where now - 1000 / sendFrequency lies between the last two "k"s,
+// 0 without a previous one. No "k" yet: nothing to send (JS would send undefined).
+void krunker_link_mark_sync(KrunkerLink *l, const int index) {
+    if (index < 0 || index >= NET_INPUT_BATCH_MAX || !l->sync_known) return;
+    const double now = link_now_ms(l);
+    const double send_ms = 1000.0 / (l->send_hz > 0 ? l->send_hz : 10);
+    double prg = 0.0;
+    if (l->last_sync) {
+        const double span = l->last_sync - l->new_sync;
+        if (span != 0.0) prg = js_round(((now - send_ms) - l->new_sync) / span * 100.0) / 100.0;
+    }
+    l->sync_tim[index] = l->serv_tim;
+    l->sync_prg[index] = prg;
+    if (!l->sync_set[index]) l->sync_frames++;
+    l->sync_set[index] = 1;
+}
+
 // The "q" of one send window (game.deob.js:221755-221830):
 //   ["q", resync, firstIsn, dts, dtLen, angles?, changes?, syncTimes?]
 //   dts      every frame's dt as one string of equal-width numbers (dtLen = the width), or the
@@ -2910,15 +2936,41 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
     KrunkerValue angle_items[2 + 2 * NET_INPUT_BATCH_MAX];
     for (int i = 0; i < angle_count; i++) angle_items[i] = KRUNKER_V_NUM(angles[i]);
 
+    // syncTimes (v10.js:221512-221521, sent at 221573-221577): {"<frame>": servTim, "<frame>p": fraction} for the
+    // frames that fired
+    // (krunker_link_mark_sync); the fraction only when nonzero. Only the frames of this window.
+    char sync_keys[2 * NET_INPUT_BATCH_MAX][12];
+    KrunkerValue sync_kv[4 * NET_INPUT_BATCH_MAX];
+    int sync_pairs = 0;
+    for (int j = 0; j < n && l->sync_frames; j++) {
+        if (!l->sync_set[j]) continue;
+        const int key = 2 * sync_pairs; // KRUNKER_V_STR evaluates its argument twice: no side effects in it
+        snprintf(sync_keys[sync_pairs], sizeof(sync_keys[sync_pairs]), "%d", j);
+        sync_kv[key] = KRUNKER_V_STR(sync_keys[sync_pairs]);
+        sync_kv[key + 1] = KRUNKER_V_NUM(l->sync_tim[j]);
+        sync_pairs++;
+        if (l->sync_prg[j]) {
+            snprintf(sync_keys[sync_pairs], sizeof(sync_keys[sync_pairs]), "%dp", j);
+            sync_kv[2 * sync_pairs] = KRUNKER_V_STR(sync_keys[sync_pairs]);
+            sync_kv[2 * sync_pairs + 1] = KRUNKER_V_NUM(l->sync_prg[j]);
+            sync_pairs++;
+        }
+    }
+    // the window's optional tail: the angle and change slots are filled whenever a later one is (v10.js:221567-221576:
+    // (syncTimes || changes || angles) pushes angles or 0, then changes or 0, then the syncTimes)
     KrunkerValue args[7];
     size_t argc = 0;
     args[argc++] = KRUNKER_V_NUM(l->resync ? 1 : 0);
     args[argc++] = KRUNKER_V_NUM(first_isn);
     args[argc++] = same_width ? KRUNKER_V_STRN(dt_str, used) : KRUNKER_V_ARRAY(dt_items, n);
     args[argc++] = KRUNKER_V_NUM(same_width ? (double) dt_len : 0);
-    if (changes || (angle_count && !same_angles)) args[argc++] = same_angles ? KRUNKER_V_NUM(0) : KRUNKER_V_ARRAY(angle_items, angle_count);
-    if (changes) args[argc++] = KRUNKER_V_MAP(change_kv, changes);
+    if (changes || sync_pairs || (angle_count && !same_angles)) args[argc++] = same_angles ? KRUNKER_V_NUM(0) : KRUNKER_V_ARRAY(angle_items, angle_count);
+    if (changes || sync_pairs) args[argc++] = changes ? KRUNKER_V_MAP(change_kv, changes) : KRUNKER_V_NUM(0);
+    if (sync_pairs) args[argc++] = KRUNKER_V_MAP(sync_kv, sync_pairs);
     const int sent = send_c2s(l, KRUNKER_C2S_INPUT, args, argc);
+    // the window is spent whether or not it left: its frames' syncTimes go with it
+    memset(l->sync_set, 0, sizeof(l->sync_set));
+    l->sync_frames = 0;
     if (sent) {
         l->q_sent++;
         l->q_frames += (unsigned) n;

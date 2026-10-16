@@ -215,6 +215,14 @@ void client_recon_record(Client *client, const Input *input) {
     if (client->net_batch_count >= NET_INPUT_BATCH_MAX) batch_flush(client);
     net_packet_from_input(&client->net_batch[client->net_batch_count++], input);
 
+    // Official lobbies: the window closes in client_recon_after_tick, once this frame's tick has run
+    // and said whether it fired (v10 procInputs sets the input's syncTime before queueInputFrame)
+    if (krunker_net_active()) {
+        client->net_frame_open = 1;
+        client->net_frame_fires = client->me ? client->me->fire_count : 0;
+        return;
+    }
+
     // iiïïiïï >= tickRate && (iiïïiïï = 0, send "q") (client_recon_sample sums the frame time)
     if (client->net_batch_time >= recon_window_seconds(client)) {
         client->net_batch_time = 0.0f;
@@ -234,6 +242,17 @@ void client_recon_on_death(Client *client) {
 // input's velObj (players.js shoot: if (!IO) a1.velObj), for later replays.
 void client_recon_after_tick(Client *client) {
     if (client->me) net_recon_take_vel_obj(client->me, client->net_pending_inputs, client->net_pending_count);
+    if (!client->net_frame_open) return;
+    client->net_frame_open = 0;
+    // the frame just recorded is the window's last one: a shot or melee it started gets its syncTime
+    if (client->me && client->me->fire_count != client->net_frame_fires && client->net_batch_count > 0) {
+        krunker_net_mark_input_sync(client->net_batch_count - 1);
+    }
+    // iiïïiïï >= tickRate && (iiïïiïï = 0, send "q") (client_recon_sample sums the frame time)
+    if (client->net_batch_time >= recon_window_seconds(client)) {
+        client->net_batch_time = 0.0f;
+        batch_flush(client);
+    }
 }
 
 // "l": reconcilePlayer(l, true).

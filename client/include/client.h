@@ -710,6 +710,10 @@ typedef struct {
     NetInputPacket net_batch[NET_INPUT_BATCH_MAX];
     int net_batch_count;
     float net_batch_time;          // frame time (s) summed into the current "q" window (iiïïiïï)
+    // official lobbies: this frame's input is in the window but its tick has not run yet, so the window
+    // closes after it (recon.c client_recon_after_tick): its fire count before the tick
+    int net_frame_open;
+    unsigned int net_frame_fires;
     unsigned int net_recon_count;  // RECON packets applied (tests, KRUNKNATIVE_RECON_LOG)
     // How far reconciliation moved our predicted player (recon.c): every RECON snaps and replays; a
     // correction is one that moved it more than NET_RECON_CORRECTION_EPS (the "[krunker] sync" trace, krunker_net.c)

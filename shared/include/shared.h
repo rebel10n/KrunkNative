@@ -1220,6 +1220,7 @@ typedef struct Player_t {
     int last_killer_uid;          // Krunker lastKiller (Revenge), -1 none
     PlayerDamage damage_received[PLAYER_DAMAGE_SLOTS]; // Krunker dmgReceived (assists)
     unsigned int shot_count;      // Krunker shotCntP: picks config.projSpreads for projectiles
+    unsigned int fire_count;      // shoot / melee started (players.js: input.syncTime): the official "q" syncTimes
 
     int input_seq;                // inputSN: the last input procInputs ran (-1 after a spawn: none this life)
     // Reconciliation (net-recon): recon_snap asks the server for a NET_RECON_SEQ_ALL "l" this

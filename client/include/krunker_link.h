@@ -192,6 +192,9 @@ typedef struct {
     // CLAN_RESPONSE (the Clans window's clanData):
     // v10 keeps the signed-in account (its KR, skins, stats, battle pass) from these (v10:222148)
     void (*account_frame)(void *user, const char *json, size_t len);
+    // optional: the clock in ms the "q" syncTimes read (v7.1.4 Date.now(): io_updatePlayers' newSync and
+    // queueInputFrame's Game.now share it). NULL: 0, so no frame carries a syncTime
+    double (*now_ms)(void *user);
     void *user;
 } KrunkerLinkIO;
 
@@ -297,6 +300,14 @@ typedef struct {
     unsigned voice_in, voice_sent; // "vc" clips received / sent
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
+    // the "q" syncTimes (v7.1.4 index.js io_updatePlayers / queueInputFrame, v10.js:221512-221521):
+    // the last "k"'s servTim (its arg 2, ms since the round started on the server) and the local clock
+    // (ms) of the last two "k"s, and per window frame the servTim + fraction of the frames that fired
+    double serv_tim, new_sync, last_sync;
+    int sync_known;                        // a "k" arrived (serv_tim is its servTim)
+    double sync_tim[NET_INPUT_BATCH_MAX], sync_prg[NET_INPUT_BATCH_MAX];
+    uint8_t sync_set[NET_INPUT_BATCH_MAX]; // a frame of the open window that fired (krunker_link_mark_sync)
+    int sync_frames;
     // the input stream (KRUNKNATIVE_KRUNKER_TRACE=sync, krunker_net.c): "q" windows and the input frames
     // in them, the last isn sent, the server's last ack ("l" inputSN, -1 none yet) and where it had us
     unsigned q_sent, q_frames;
@@ -316,6 +327,10 @@ void krunker_link_reset(KrunkerLink *link);
 int krunker_link_on_frame(KrunkerLink *link, const uint8_t *data, size_t len);
 // One of our outbound packets: translated and sent, or dropped. 1 = something was sent.
 int krunker_link_send_ours(KrunkerLink *link, NetPacketType type, const void *payload, uint16_t length);
+// The frame at `index` of the open "q" window fired (a shot or a melee: v10 sets the input's syncTime):
+// it carries the last "k"'s servTim and the fraction of the send interval between the last two "k"s, as
+// queueInputFrame does (the frame's clock is io.now_ms). Only meaningful before that window goes out.
+void krunker_link_mark_sync(KrunkerLink *link, int index);
 // One of our input frames as the official client's 15 input fields (game.deob.js:221748):
 // [isn, dt ms, pitch*1000, yaw*1000, movDirs index, shoot, ads, jump, reload, crouch, scroll,
 //  wSwap, 1 - speedLmt, reset, interact]. What the "q" carries and the server's procInputs reads.

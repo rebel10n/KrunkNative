@@ -3040,6 +3040,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
 void player_melee(Player *player) {
     // v7.1.4 melee: `!player.disableMelee && config.canMelee` (KrunkScript; 1 without a script)
     if (!ks_player_allows(player, KS_PLAYER_CAN_MELEE)) return;
+    player->fire_count++; // players.js melee: input.syncTime = true
     // 95.js: weapon.canThrow && jKFi4 == 0 && canThrow (fully aimed); the readable jail src/data/players.js has aimVal <= 0.1.
     const int is_throw = player->can_throw && player->weapon->can_throw && player->aim_val == 1.0f;
     const ClassConfig *class_config = player->game->classes && player->class_index >= 0 && (size_t) player->class_index < player->game->class_count
@@ -3571,6 +3572,7 @@ static void combat_fire_stream(Player *player, const int weapon_id, const float 
 void player_shoot(Player *player) {
     // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
     if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
+    player->fire_count++; // players.js shoot: input.syncTime = true (the official "q" syncTimes)
     // TODO: increase shots stat
     Game *game = player->game;
     const Weapon *weapon = player->weapon;
