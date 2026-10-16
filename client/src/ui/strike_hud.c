@@ -25,6 +25,7 @@
 #include <strike_double_xp.h>
 #include <strike_hud_fx.h>
 #include <render_settings.h>
+#include <strike_banner_ad.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <shared.h>
@@ -1167,6 +1168,7 @@ static void end_fill(Client *client, const int result) {
     time_text(client->net_end_seconds, t, sizeof(t));
     if (timer) html_dom_set_text(timer, t);
     strike_double_xp_end_fill(root); // the reward row's Double XP button (strike_double_xp.c)
+    strike_banner_ad_show(root); // the bottom banner slot (strike_banner_ad.c): always supported
 }
 
 // the group's claim state and the account's track changed (strike_econ): the group card follows

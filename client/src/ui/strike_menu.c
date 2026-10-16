@@ -40,6 +40,7 @@
 #include <client.h>
 #include <net_ext.h> // NET_EXT_KN_SWAP_TEAM (Switch Teams)
 #include <gltf.h>    // gltf_clock(): the menu's clock for the Switch Teams count
+#include <strike_banner_ad.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2283,6 +2284,7 @@ static void action(const char *a) {
     }
     else if (!strcmp(a, "customize-controls")) strike_screen_push(STRIKE_SCREEN_CUSTOMIZE_CONTROLS); // Pt(ZC, {onHide})
     else if (!strcmp(a, "match-details")) strike_screen_push(STRIKE_SCREEN_MATCH_DETAILS);
+    else if (!strcmp(a, "banner-ad")) strike_banner_ad_claim(); // the round end's banner slot (strike_banner_ad.c)
     else if (!strncmp(a, "class:", 6)) {
         const int i = atoi(a + 6);
         if (i >= 0 && i < STRIKE_CLASS_COUNT) {

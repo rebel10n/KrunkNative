@@ -86,6 +86,14 @@
  * and 82% of its height. The Strike page gets 400 x 200 (outer box 414 x 214 with the 7px padding). The
  * selector is more specific than devconsole.css's, which is added after this sheet. */
 html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(200px,calc(100vh - 30px))}
+/* Krunker Box Office's banner ad slot on the round end (client/src/ui/strike_banner_ad.c): an element
+ * the client adds, not one of FRVR's. It sits in the 25-unit strip under the round end's bottom row,
+ * the space FRVR's .lean-end-screen__bottom-banner (bottom: 25 units) leaves for the ad. */
+.strike-banner-ad{position:absolute;left:0;right:0;top:100%;height:calc(25 * var(--base-scale));box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:calc(8 * var(--base-scale));padding:0 calc(10 * var(--base-scale));background:#2b2b2b;border-top:calc(1 * var(--base-scale)) solid #ffe540;color:#fff;cursor:pointer;overflow:hidden;white-space:nowrap}
+.strike-banner-ad__label{font-family:GameFont,sans-serif;font-size:calc(11 * var(--base-scale))}
+.strike-banner-ad__status{font-family:GameFont,sans-serif;font-size:calc(11 * var(--base-scale));color:#ffe540;overflow:hidden;text-overflow:ellipsis}
+.strike-banner-ad__button{flex:none;padding:calc(2 * var(--base-scale)) calc(10 * var(--base-scale));border-radius:calc(4 * var(--base-scale));background:#ffe540;color:#222;font-family:GameFont,sans-serif;font-size:calc(11 * var(--base-scale))}
+.strike-banner-ad__button--off{opacity:.45}
 
 /* FTUE (controls tutorial): the bubble's art (img/frvr-ui/bubble/baloon*.png) and the tutor, hand and checkmark
  * art (img/ftue/controls/*) are vendored from the page origin (ui/strike/README.md), so the bubble is FRVR's own
