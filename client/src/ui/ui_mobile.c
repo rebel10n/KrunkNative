@@ -53,6 +53,7 @@ typedef enum {
     MB_JUMP, MB_CROUCH, MB_ESC, MB_SHOOT, MB_AIMSHOOT, MB_SCOPE, MB_RELOAD, MB_SWAP, MB_KSWAP,
     MB_COUNT,
     MB_JOYSTICK = 100,
+    MB_PROMPT = 101,     // #interactMsg (the gate prompt): v10's ontouchstart = pressButton(interact)
 } MobileTarget;
 
 static const char *const BUTTON_IDS[MB_COUNT] = {
@@ -95,6 +96,7 @@ static struct {
 
     HtmlElem ui, zone, nipple, back, front;
     HtmlElem buttons[MB_COUNT];
+    HtmlElem prompt;         // #interactMsg
 
     TrackedTouch touches[MOBILE_TOUCH_MAX]; // `ad`
     int touch_count;
@@ -195,7 +197,7 @@ static void key(const int id, const int down) { // Q(null, binds[id]) / U(null, 
 }
 
 static void set_transform(const int b, const char *value) {
-    if (g_mb.buttons[b]) html_dom_set_style(g_mb.buttons[b], "transform", value);
+    if (b >= 0 && b < MB_COUNT && g_mb.buttons[b]) html_dom_set_style(g_mb.buttons[b], "transform", value);
 }
 
 static void look(const float dx, const float dy) { // fakeMouse(2, dx, dy, 0, "mblInput") -> a8
@@ -289,6 +291,7 @@ static void button_down(const int b) {
         case MB_RELOAD: set_transform(b, "scale(1.1)"); key(UI_CONTROL_RELOAD, 1); break;
         case MB_SWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_SWAP, 1); break;
         case MB_KSWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_MELEE, 1); break; // binds.melee
+        case MB_PROMPT: key(UI_CONTROL_INTERACT, 1); break;
         default: break;
     }
 }
@@ -320,6 +323,7 @@ static void button_up(const int b) {
         case MB_RELOAD: set_transform(b, "scale(1)"); key(UI_CONTROL_RELOAD, 0); break;
         case MB_SWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_SWAP, 0); break;
         case MB_KSWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_MELEE, 0); break;
+        case MB_PROMPT: key(UI_CONTROL_INTERACT, 0); break;
         default: break;
     }
 }
@@ -445,6 +449,10 @@ static int point_in_circle(const HtmlElem el, const float x, const float y) { //
 
 // Touch.target: the topmost child of #mobileUI under the point. The buttons share one
 // z-index, so later siblings paint on top; the joystick zone comes first in the DOM.
+static int prompt_hit(const float x, const float y) {
+    return point_in_rect(g_mb.prompt, x, y); // display:none (no prompt) has no box
+}
+
 static int hit_target(const float x, const float y) {
     for (int b = MB_COUNT - 1; b >= 0; b--) {
         if (point_in_rect(g_mb.buttons[b], x, y)) return b;
@@ -474,6 +482,11 @@ int ui_mobile_touch(const UiTouchPhase phase, const UiTouch *changed, const int 
         switch (phase) {
             case UI_TOUCH_START: {
                 if (!game_enabled()) break; // the UI is only up while the game has the input
+                if (prompt_hit(t->client_x, t->client_y)) { // the gate prompt is a tap on interact
+                    button_down(MB_PROMPT);
+                    if (g_mb.touch_count < MOBILE_TOUCH_MAX) g_mb.touches[g_mb.touch_count++] = (TrackedTouch) {t->identifier, t->screen_x, t->screen_y, MB_PROMPT};
+                    break;
+                }
                 const int target = hit_target(t->client_x, t->client_y);
                 if (target == MB_JOYSTICK) {
                     if (!g_mb.stick_active) stick_start(t->identifier, t->client_x, t->client_y); // maxNumberOfNipples 1
@@ -508,6 +521,13 @@ int ui_mobile_touch(const UiTouchPhase phase, const UiTouch *changed, const int 
         }
     }
     return 1; // aj.preventDefault() (touchend only skips it in Krunker; no default there either)
+}
+
+// One touch by identifier and CSS-px position (native scripted multi-touch: input_script.c `touch`);
+// the same routing as a finger on the web build's #mobileUI listeners.
+int ui_mobile_touch_point(const UiTouchPhase phase, const long identifier, const float x, const float y) {
+    const UiTouch t = {identifier, x, y, x, y};
+    return ui_mobile_touch(phase, &t, 1);
 }
 
 // ---------------------------------------------------------------- native mouse as the touch
@@ -552,35 +572,15 @@ static void register_touch_listeners(void) {
     emscripten_set_touchmove_callback("#mobileUI", NULL, EM_FALSE, on_touch);
     emscripten_set_touchend_callback("#mobileUI", NULL, EM_FALSE, on_touch);
     emscripten_set_touchcancel_callback("#mobileUI", NULL, EM_FALSE, on_touch);
+    // #interactMsg is a sibling of #mobileUI: its taps (the gate prompt) start there
+    emscripten_set_touchstart_callback("#interactMsg", NULL, EM_FALSE, on_touch);
+    emscripten_set_touchmove_callback("#interactMsg", NULL, EM_FALSE, on_touch);
+    emscripten_set_touchend_callback("#interactMsg", NULL, EM_FALSE, on_touch);
+    emscripten_set_touchcancel_callback("#interactMsg", NULL, EM_FALSE, on_touch);
 }
 #else
 static void register_touch_listeners(void) {}
 #endif
-
-void ui_mobile_play_gesture(void) {
-    if (!ui_mobile_active()) return;
-#ifdef __EMSCRIPTEN__
-    // Inside the TAP TO PLAY gesture: fullscreen, then lock to landscape (both refused
-    // silently where unsupported, e.g. iPhone Safari). The KrunkNative apps already run
-    // fullscreen landscape (their user agent carries "KrunkNativeApp").
-    EM_ASM({
-        try {
-            var lock = function () {
-                try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function () {}); } catch (e) {}
-            };
-            if (/KrunkNativeApp/.test(navigator.userAgent)) return;
-            var d = document.documentElement;
-            var fs = d.requestFullscreen || d.webkitRequestFullscreen;
-            if (fs && !(document.fullscreenElement || document.webkitFullscreenElement)) {
-                var p = fs.call(d, { navigationUI: 'hide' });
-                if (p && p.then) p.then(lock, function () {}); else lock();
-            } else {
-                lock();
-            }
-        } catch (e) {}
-    });
-#endif
-}
 
 // ---------------------------------------------------------------- DOM setup
 
@@ -630,6 +630,7 @@ static void dom_init(void) {
     g_mb.ui = html_dom_by_id("mobileUI");
     if (!g_mb.ui) return;
     for (int b = 0; b < MB_COUNT; b++) g_mb.buttons[b] = html_dom_by_id(BUTTON_IDS[b]);
+    g_mb.prompt = html_dom_by_id("interactMsg");
     build_joystick();
     apply_positions();
     register_touch_listeners();
@@ -644,7 +645,8 @@ static void dom_init(void) {
 static void release_all(void) {
     for (int i = g_mb.touch_count - 1; i >= 0; i--) {
         const int b = g_mb.touches[i].cb;
-        if (b == MB_UI || b == MB_ESC) continue;
+        if (b == MB_PROMPT) key(UI_CONTROL_INTERACT, 0);
+        if (b == MB_UI || b == MB_ESC || b == MB_PROMPT) continue;
         set_transform(b, b == MB_SHOOT ? "rotate(90deg) scale(1.1)" : "scale(1)");
     }
     g_mb.touch_count = 0;
@@ -675,8 +677,8 @@ void ui_mobile_tick(Client *client) {
 
 void ui_mobile_look_sens(const int aiming, float *sx, float *sy, int *invert) {
     // mblInput: sensX = sensitivityXMbl * 4 (aimX with the right button), invert = invertYMbl
-    *sx = 4.0f * setting_number(aiming ? "aimSensitivityXMbl" : "sensitivityXMbl", 1.0f);
-    *sy = 4.0f * setting_number(aiming ? "aimSensitivityYMbl" : "sensitivityYMbl", 1.0f);
+    *sx = 4.0f * setting_number(aiming ? "aimSensitivityXMbl" : "sensitivityXMbl", 1.4f);
+    *sy = 4.0f * setting_number(aiming ? "aimSensitivityYMbl" : "sensitivityYMbl", 1.4f);
     *invert = setting_truthy("invertYMbl", 0);
 }
 

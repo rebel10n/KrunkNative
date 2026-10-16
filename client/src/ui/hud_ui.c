@@ -107,7 +107,7 @@ void hud_ui_hit(Client*, int kill);
 #define UI_DESIGN_HEIGHT 693.0     // scaleBase: crosshairScale = viewportHeight / scale / 693
 #define UI_DEFAULT_HEIGHT 1147.5   // #uiBase height before scaleBase ran
 #define CROSS_MIN 58.0             // game-overlay crosshair type 1
-#define CROSS_MLT 1.1
+#define CROSS_MLT 0.85 // UI.updateCrosshair(max(58, 0.85 * spread * crosshairScale)) (v10.0.2 render loop)
 #define HIT_THICK 7.0              // settings.hitmarker defaults
 #define HIT_LEN 25.0
 #define HIT_SPACING 37.0

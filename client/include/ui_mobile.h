@@ -10,7 +10,10 @@
 //     black), re-implemented here: same markup/styles, same direction -> move-key rules;
 //   - touch look (fakeMouse(2, dx, dy, 0, "mblInput")) with the mobile sensitivities,
 //     the gradual joystick speed (gradSpeedMbl -> CONTROLS.speedLmt, ui_controls.c);
-//   - pointer-lock-free play ("TAP TO PLAY", locklessChange).
+//   - the gate prompt (#interactMsg): a tap on it presses interact (v10's ontouchstart; the prompt
+//     reads "Tap to ..." and sits at 77px on a phone, ui_interact.c);
+//   - pointer-lock-free play ("TAP TO PLAY", locklessChange): no pointer lock, no fullscreen and
+//     no orientation lock (v10 requests none of them, so a phone plays in either orientation).
 // Natively ui_mobile_active() is 0 unless KRUNKNATIVE_MOBILE=1: GLFW delivers touchscreen input
 // as mouse events, and ui_mobile_mouse() feeds the left button to the same touch targets. The
 // Krunker Strike flavor is the mobile version on every platform, so it is 1 there too (strike_ui.h).
@@ -45,9 +48,9 @@ void  ui_mobile_force(int on);
 // Krunker Strike's controls (strike_touch.c) look through the same mblInput path: finger travel
 // in CSS px, scaled by the mobile sensitivities when ui_mobile_take_look() hands it on.
 void  ui_mobile_add_look(Client *client, float dx, float dy);
-// The play gesture on a phone (TAP TO PLAY): fullscreen + landscape lock (the Krunker
-// apps' behaviour; the v3.1.1 page itself stayed windowed). No-op unless mobile.
-void  ui_mobile_play_gesture(void);
+// One touch by identifier at CSS px (the input script's `touch` command: multi-touch without
+// GLFW). Returns ui_mobile_touch's answer (1 = consumed).
+int   ui_mobile_touch_point(UiTouchPhase phase, long identifier, float x, float y);
 // Settings window tab markup: v3.1.1 generates the "mobile" category rows with
 // display:block and the "Mobile" header visible when isMobile (hide: !isMobile).
 // Returns a malloc'd copy with those rows shown, or NULL when nothing changes.

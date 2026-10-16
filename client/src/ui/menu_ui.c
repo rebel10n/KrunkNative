@@ -228,10 +228,7 @@ static struct {
 #endif
 
 static void request_pointer_lock_if_web(void) {
-    if (ui_mobile_active()) { // no pointer lock on phones: fullscreen + landscape instead
-        ui_mobile_play_gesture();
-        return;
-    }
+    if (ui_mobile_active()) return; // no pointer lock on phones (v10's locklessChange): no fullscreen or orientation lock
 #ifdef __EMSCRIPTEN__
     if (!g_lock.waiting) g_lock.errors = web_pointer_lock_errors();
     g_lock.since = glfwGetTime();

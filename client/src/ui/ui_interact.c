@@ -14,11 +14,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
+#include <ui_mobile.h> // the phone prompt: "Tap to ..." and its bottom (v10 updateInteract)
 
 #define INTERACT_KEY_COLOR "#FBC02D"        // COLORS.interactPopup.key
 #define INTERACT_ENOUGH_COLOR "#9eeb56"     // COLORS.interactPopup.enough
 #define INTERACT_NOT_ENOUGH_COLOR "#eb5656" // COLORS.interactPopup.notEnough
 #define INTERACT_BOTTOM "220px"             // updateInteract: interactMsg.style.bottom (desktop)
+#define INTERACT_BOTTOM_MOBILE "77px"       // ... on a phone (controls.isMobile: the #mobileUI buttons sit below it)
 
 static struct {
     int prompt_shown;
@@ -102,8 +104,12 @@ static void build_prompt(const Client *client, char *html, const size_t size) {
         case GAME_INTERACT_GATE: {
             const int method = object->gate_method, price = (int) object->score_points;
             method_tag(tag, sizeof(tag), method, price, method_enough(me, method, price, price));
-            if (object->interact_msg) snprintf(html, size, "Press %s to %s%s", key, object->interact_msg, tag);
-            else snprintf(html, size, "Press %s to %s gate%s", key, !object->active && object->closeable ? "Close" : "Open", tag);
+            // v10 updateInteract (type 0): a phone reads "Tap" (the prompt is the touch, see ui_mobile.c)
+            char lead[80];
+            if (ui_mobile_active()) snprintf(lead, sizeof(lead), "Tap");
+            else snprintf(lead, sizeof(lead), "Press %s", key);
+            if (object->interact_msg) snprintf(html, size, "%s to %s%s", lead, object->interact_msg, tag);
+            else snprintf(html, size, "%s to %s gate%s", lead, !object->active && object->closeable ? "Close" : "Open", tag);
             break;
         }
         case GAME_INTERACT_BANK: {
@@ -215,8 +221,9 @@ static void update_prompt(Client *client) {
         // without it the box sits at its static position, the top of the zero-height
         // #midGameUIHider (the top edge of the screen). 220px on desktop (77px is mobile,
         // "50%" the Opensea prompt, type 11: neither is ported).
+        const char *bottom_px = ui_mobile_active() ? INTERACT_BOTTOM_MOBILE : INTERACT_BOTTOM;
         char bottom[16];
-        if (html_dom_get_style(msg, "bottom", bottom, sizeof(bottom)) < 0 || strcmp(bottom, INTERACT_BOTTOM) != 0) html_dom_set_style(msg, "bottom", INTERACT_BOTTOM);
+        if (html_dom_get_style(msg, "bottom", bottom, sizeof(bottom)) < 0 || strcmp(bottom, bottom_px) != 0) html_dom_set_style(msg, "bottom", bottom_px);
         g_interact.prompt_shown = 1;
     } else if (g_interact.prompt_shown) {
         html_dom_set_html(msg, "");

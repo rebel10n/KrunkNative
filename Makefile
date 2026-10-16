@@ -294,6 +294,9 @@ frame-yield-test: build ## Mid-frame asset loads (spray texture, joining players
 offline-dead-test: build ## Offline play: a dead local player gets no tracers / projectiles / player sync until it respawns, like online (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/offline_dead_filter_e2e.py $(DEBUG_DIR)
 
+mobile-touch-test: build ## Phone controls with fingers only (TAP TO PLAY, joystick, look, fire, jump, reload; touch script events; headless, offline)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/mobile_touch_e2e.py $(DEBUG_DIR)
+
 nametag-test: build ## Offline FFA bots: each bot's nametag shows when in view with line of sight, no random flips, the killer's tag clears on respawn (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/nametag_visibility_e2e.py $(DEBUG_DIR)
 

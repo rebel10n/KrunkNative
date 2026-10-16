@@ -199,6 +199,19 @@
       "fuzz": 8,
       "max_pct": 12.0,
       "note": "#mobileKSwap (melee knife, 65% / margin auto). Layout top 253.5px: Chrome snaps it to 254 (the ring and knife sit 1px lower in the reference), the engine does not; with an integer top this region is 0.000% (checked), so the gap is pixel snapping in the engine's paint, not the CSS"
+    },
+    {
+      "name": "crosshair",
+      "rect": [
+        372,
+        145,
+        100,
+        100
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.5,
+      "note": "the crosshair bars (the game-overlay / #knCrosshair spread, v10 0.85 * spread * crosshairScale)"
     }
   ]
 }

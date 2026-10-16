@@ -1,0 +1,217 @@
+{
+  "scenario": "ingame-mobile-portrait",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "timer",
+      "rect": [
+        3,
+        2,
+        46,
+        19
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#timerHolder (timer icon + 03:45). Chrome pixel-snaps the box: 5.9px -> 6px (uiBase scale 0.394); the engine does not snap, so the glyph edges differ by a sub-pixel (~5%) (portrait 390x844)"
+    },
+    {
+      "name": "match-info",
+      "rect": [
+        3,
+        21,
+        28,
+        11
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#matchInfo (portrait 390x844)"
+    },
+    {
+      "name": "player-card",
+      "rect": [
+        3,
+        818,
+        132,
+        26
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#bottomLeftPlayer: class image, FFA, health bar, 100 (portrait 390x844)"
+    },
+    {
+      "name": "ammo",
+      "rect": [
+        341,
+        826,
+        48,
+        18
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#ammoHolder: 30 | 30 (portrait 390x844)"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [
+        311,
+        2,
+        78,
+        14
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder (portrait 390x844)"
+    },
+    {
+      "name": "joystick",
+      "rect": [
+        12,
+        517,
+        132,
+        132
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileJoystick nipplejs ring (120px) + front knob at rest (portrait 390x844)"
+    },
+    {
+      "name": "btn-esc",
+      "rect": [
+        68,
+        5,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileEsc (home icon, 18% 1%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-shoot",
+      "rect": [
+        6,
+        231,
+        72,
+        72
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 6.5,
+      "note": "#mobileShoot (rocket, rotate 90deg). Chrome snaps the box to 25,109 (layout 25.3,109.2); the engine draws it at the fractional origin: edge AA only (~6%). Experiment: an integer top gives 0% for btn-kswap, the same cause (portrait 390x844)"
+    },
+    {
+      "name": "btn-aimshoot",
+      "rect": [
+        261,
+        468,
+        82,
+        82
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileAimShoot (70px, 56% / right 13%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-scope",
+      "rect": [
+        299,
+        291,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileScope (crosshair, 35% / right 11%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-jump",
+      "rect": [
+        328,
+        418,
+        56,
+        56
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileJump (up arrow, 50% / right 2%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-crouch",
+      "rect": [
+        277,
+        688,
+        56,
+        56
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileCrouch (down arrow, 82% / right 15%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-reload",
+      "rect": [
+        236,
+        612,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileReload (73% / right 27%) (portrait 390x844)"
+    },
+    {
+      "name": "btn-swap",
+      "rect": [
+        169,
+        713,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileSwap (85%, margin auto) (portrait 390x844)"
+    },
+    {
+      "name": "btn-kswap",
+      "rect": [
+        169,
+        544,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 12.0,
+      "note": "#mobileKSwap (melee knife, 65% / margin auto). Layout top 253.5px: Chrome snaps it to 254 (the ring and knife sit 1px lower in the reference), the engine does not; with an integer top this region is 0.000% (checked), so the gap is pixel snapping in the engine's paint, not the CSS (portrait 390x844)"
+    },
+    {
+      "name": "crosshair",
+      "rect": [
+        145,
+        371,
+        100,
+        100
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.5,
+      "note": "the crosshair bars (the game-overlay / #knCrosshair spread, v10 0.85 * spread * crosshairScale)"
+    }
+  ]
+}

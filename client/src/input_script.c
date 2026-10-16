@@ -27,6 +27,13 @@
 //                                button_1, ...) through the gamepad event machine, as a pad would
 //                                (Gamepad.active, then CONTROLS' listeners); no pad is needed
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
+//   100 touch start 1 640 360    a finger (id 1) down / moved / lifted on the phone controls (ui_mobile.c, the
+//   100 touch move 1 700 360     web build's #mobileUI touch listeners): several ids at once are several fingers
+//   100 touch end 1             (joystick + look + fire); window px like click. Needs KRUNKNATIVE_MOBILE=1
+//   100 touch tap 640 360        a finger down and up at a point through the mouse callbacks (a page tap: the
+//                                menu's TAP TO PLAY, or a #mobileUI button, as the mouse touch routes it)
+//   100 touch 320 180           the Krunker Strike form: a finger (id 1) tapped at that CSS point of the Strike
+//                                page (strike_touch.c); the first touch makes the touch controls the input
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
 //   100 clickid specBtn          the same at the centre of a page element's box (a display:none one: its
@@ -199,6 +206,7 @@
 #include <map_post.h>     // `builds`, `placewatch`
 #include <gamepad.h>      // `gpad`
 #include <entities.h>       // `script`: entities / runtime blocks
+#include <ui_mobile.h>  // `touch`: the phone touch controls
 #include <ai.h>           // `world`: the AI list
 #include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE
 #include <GLFW/glfw3.h>
@@ -300,7 +308,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
-            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -412,6 +420,62 @@ static void script_log_cam(const Client *client, const char *label) {
             third_person_last_frame(client).keep);
 }
 
+// touch start|move|end <id> [x y] / touch tap x y (see the header): the phone touch routing with an
+// explicit finger id (ui_mobile_touch_point), window px scaled to the framebuffer as the mouse path does.
+static void script_touch(Client *client, const char *arg) {
+    char verb[16] = {0};
+    if (sscanf(arg, "%15s", verb) != 1) return;
+    if (verb[0] >= '0' && verb[0] <= '9') {
+        // touch X Y: the Krunker Strike form (see the header): a finger tapped at that CSS point of the Strike
+        // page (id 1); the first touch makes the touch controls the input (strike_touch_input)
+        float sx = 0.0f, sy = 0.0f;
+        if (client && sscanf(arg, "%f %f", &sx, &sy) == 2 && strike_ui_active()) {
+            strike_touch_event(client, 0, 1, sx, sy);
+            strike_touch_event(client, 2, 1, sx, sy);
+        }
+        return;
+    }
+    const char *rest = arg + strlen(verb);
+    float x = 0.0f, y = 0.0f;
+    if (!strcmp(verb, "tap")) {
+        if (sscanf(rest, "%f %f", &x, &y) != 2) return;
+        glfwSetCursorPos(client->window, x, y);
+        // the page reads the pointer's position on a tap only while its menu is up; in game a cursor
+        // move would be a mouse look (a phone's finger has none), so the move is not delivered there
+        if (!html_ui_available() || html_ui_is_menu_open()) {
+            GLFWcursorposfun pos = glfwSetCursorPosCallback(client->window, NULL);
+            glfwSetCursorPosCallback(client->window, pos);
+            if (pos) pos(client->window, x, y);
+        }
+        GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
+        glfwSetMouseButtonCallback(client->window, cb);
+        if (cb) {
+            cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
+            cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
+        }
+        return;
+    }
+    UiTouchPhase phase;
+    if (!strcmp(verb, "start")) phase = UI_TOUCH_START;
+    else if (!strcmp(verb, "move")) phase = UI_TOUCH_MOVE;
+    else if (!strcmp(verb, "end")) phase = UI_TOUCH_END;
+    else {
+        fprintf(stderr, "[input_script] touch %s: unknown verb\n", verb);
+        return;
+    }
+    long id = 0;
+    if (sscanf(rest, "%ld %f %f", &id, &x, &y) < 1) return;
+    int ww = 0, wh = 0, fw = 0, fh = 0;
+    glfwGetWindowSize(client->window, &ww, &wh);
+    glfwGetFramebufferSize(client->window, &fw, &fh);
+    if (ww > 0 && wh > 0) {
+        x *= (float) fw / (float) ww;
+        y *= (float) fh / (float) wh;
+    }
+    const int used = ui_mobile_touch_point(phase, id, x, y);
+    fprintf(stderr, "[input_script] touch %s id=%ld at=%.0f,%.0f used=%d\n", verb, id, x, y, used);
+}
+
 static void script_run(Client *client, const ScriptEvent *e) {
     if (!strcmp(e->cmd, "down") || !strcmp(e->cmd, "up")) {
         // through the window's key callback (main.c: KrunkScript key hooks, then the binds)
@@ -493,6 +557,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 cb(client->window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
             }
         }
+    } else if (!strcmp(e->cmd, "touch")) {
+        script_touch(client, e->arg);
     } else if (!strcmp(e->cmd, "look")) {
         g_script.look_yaw += e->v[0];
         g_script.look_pitch += e->v[1];
@@ -876,13 +942,6 @@ static void script_run(Client *client, const ScriptEvent *e) {
             const PlayerArms *arms = mesh && mesh->arms && slot >= 0 && slot < who[k]->loadout_size ? mesh->arms[slot] : NULL;
             fprintf(stderr, "[input_script] wsel t=%.0f %s who=%s slot=%d tp=%d %s\n", g_script.time, e->arg, names[k], slot,
                     mesh ? !mesh->render_you || mesh->kn_third_person : -1, arms && arms->selection[0] ? arms->selection : "-");
-        }
-    } else if (!strcmp(e->cmd, "touch") && client) {
-        // touch X Y: a finger tapped at that CSS point of the Strike page (id 1): the first touch makes the
-        // touch controls the input (strike_touch_input), as a phone's first touch on the page does
-        if (strike_ui_active()) {
-            strike_touch_event(client, 0, 1, e->v[0], e->v[1]);
-            strike_touch_event(client, 2, 1, e->v[0], e->v[1]);
         }
     } else if (!strcmp(e->cmd, "tpstate")) {
         const Player *me = client->me;

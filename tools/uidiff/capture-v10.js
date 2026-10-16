@@ -286,6 +286,11 @@ scenario('ingame-mobile', async (c) => {
   await enterGame(c);
   await settle(c, 800);
 }, { size: [844, 390], mobile: true });
+// the same phone in portrait (390x844): v10's uiBase scale fits the page to the width (the rotate-free layout)
+scenario('ingame-mobile-portrait', async (c) => {
+  await enterGame(c);
+  await settle(c, 800);
+}, { size: [390, 844], mobile: true });
 // the phone menu (dir mobile/): v10's live main menu on a phone, a guest (no krunker_haslogin, no custMap, so
 // the boot does not start the sandbox: the sandbox hides the play column, subLogoButtons, v10:11105776) at
 // 844x390 landscape and 390x844 portrait. window._isMobile sets uiBase.isMobile and the mobile menu rules.
