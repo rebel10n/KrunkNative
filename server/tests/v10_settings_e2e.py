@@ -284,13 +284,13 @@ else:
 
 # ---------------------------------------------------------------- run 2c: Settings > Quickplay's switches
 # (seek_prefs.c: one switch per mode, in a folder; seek_modes stored as v10 reads it, a comma list.
-# The rotation (0, 2, 3, 19, 25) is on at first; a switch saves the list of the switches on, in order.)
+# The rotation (0, 2, 3, 19, 25) is on at first; a switch saves the list of the switches on, in order.
+# The Seek Modes folder starts open: no click on its header here (that would collapse it).)
 script2c = """
 0 menu
 300 call showWindow 1
 800 call windows.0.changeTab 0
 1000 setscroll menuWindow 1470
-1300 clicksel [id=setHed_quickplay_modes]
 1500 text @trade0 [id=knSeekMode18]
 1550 text @ffa0 [id=knSeekMode0]
 1600 call knSeekSwitch "seek_modes" 18 1

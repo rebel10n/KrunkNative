@@ -349,12 +349,23 @@ int seek_prefs_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
 }
 
 char *seek_prefs_extend_tab(const char *tab) {
-    // the General tab (it holds Localization): the section goes last, so v10's own rows keep their
-    // places (a KrunkNative addition, like the account's Backup Settings row)
+    // the General tab (it holds Localization): the section goes before the Experimental folder, so the
+    // tab still ends with v10's own rows (the developer console switch is the last one: its test scrolls to
+    // the bottom); a KrunkNative addition, like the account's Backup Settings row
     if (!tab || !strstr(tab, "id=\"setBod_local\"") || strstr(tab, "id=\"setHed_quickplay\"")) return NULL;
     StrBuf sb = {0};
-    sb_append(&sb, tab);
-    section_html(&sb, 1);
+    const char *exp = strstr(tab, "<div class=\"setHed\" id=\"setHed_experimental\"");
+    if (!exp) exp = strstr(tab, "id=\"setHed_experimental\"");
+    if (exp) {
+        const char *open = exp;
+        while (open > tab && *open != '<') open--; // the folder's own <div
+        sb_append_n(&sb, tab, (size_t) (open - tab));
+        section_html(&sb, 1);
+        sb_append(&sb, open);
+    } else {
+        sb_append(&sb, tab);
+        section_html(&sb, 1);
+    }
     return sb_finish(&sb);
 }
 
