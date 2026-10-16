@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""The chat (#chatUIHolder, #chatUI) and the in-game HUD show only once the player is in a game
-(client/src/ui/hud_v10.c hud_v10_tick, client/src/ui/hud_ui.c hud_apply_visibility).
+"""The chat (#chatUIHolder, #chatUI) is up whenever the game is not loading, and the in-game HUD only
+in a game (client/src/ui/hud_ui.c hud_chat_wanted, hud_v10.c hud_v10_tick, hud_apply_visibility).
 
   python3 -I server/tests/chat_ingame_gate_e2e.py BUILD_DIR      (run from the repository root)
 
 A scratch kn_brain (sqlite) registers an account and finds one brain-linked server_bin (a lobby);
 headless client_bin runs on the v10 page. The Quick Match at launch joins the lobby, and the menu
 stays up with no game entered (Play is not pressed):
-  1. a signed-in account in the lobby's menu (first launch): the chat and the in-game HUD are hidden
-     on every frame; v10 showed the chat to an account on the menu, KrunkNative no longer does
-  2. a guest in the lobby's menu: the same
-  3. F5 from that menu: the relaunched client rejoins the lobby (the account signed in again); until
-     it plays, every frame of the rejoin has no chat and no in-game HUD; after Play they show
-  4. F5 from an offline game: every frame before the game is back has no chat; then they show
+  1. a signed-in account: the chat is hidden while the launch's join loads (the first frame) and up
+     on the lobby's idle menu from the join on, every frame after; the in-game HUD stays hidden
+  2. a guest: the same
+  3. F5 from that menu: the relaunched client rejoins the lobby; its first frames (loading) have no
+     chat, then the chat is up on the menu, through Play, and the game shows the chat and the HUD
+  4. F5 from an offline game: the game is back, with the chat and the HUD up
   5. a signed-in account in the offline game (no reload): the chat and the HUD show from the spawn on
 Each probe is `vis` (html_dom_is_shown: rendered, not just display:block) on each frame.
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device
@@ -232,30 +232,36 @@ def main():
     return 0 if results and all(results) else 1
 
 
+def check_idle_menu(case, text, frames):
+    """the chat is hidden while the join loads (the first frame) and up on the idle menu from the join on"""
+    up = next((i for i, (_, f) in enumerate(frames) if shown(f)), None)
+    check(f"{case}: the chat is hidden while the join loads, up on the lobby's idle menu after it (every frame)",
+          frames and hidden(frames[0][1]) and up is not None and all(shown(f) for _, f in frames[up:]) and not in_game(text, "m"),
+          f"first frame hidden {bool(frames) and hidden(frames[0][1])}, up from frame {up} of {len(frames)}, "
+          f"{sum(shown(f) for _, f in frames)} shown, in game {in_game(text, 'm')[:1]}")
+
+
 def scenarios(account):
     joined = f"connected to server 127.0.0.1:{PORT_NODE}"
     # 1: a signed-in account: the launch's Quick Match joins the lobby, the menu stays up (no Play)
-    menu = ["0 boot"] + vis_lines("m", 4000, 250) + ["4100 quit"]
+    menu = ["0 boot"] + vis_lines("m", 12000, 250) + ["12100 quit"]
     t = client("account-menu", menu, account=account, args=())
     m = fields(t, "m")
     check("1: the account is signed in and the client joined the lobby", "[account] logged in as" in t and joined in t,
           f"{len(m)} frames")
-    check("1: the lobby's menu, not playing: the chat and the in-game HUD are hidden on every frame (account)",
-          m and not in_game(t, "m") and all(hidden(f) and f.get("inGameUI") == "0" for _, f in m),
-          f"{sum(hidden(f) for _, f in m)} of {len(m)} frames hidden, in game {in_game(t, 'm')[:1]}")
+    check_idle_menu("1", t, m)
 
     # 2: a guest: the same lobby and menu
     t = client("guest-menu", menu, account=None, args=())
     m = fields(t, "m")
     check("2: the guest joined the lobby (no sign-in)", joined in t and "[account] logged in" not in t, "")
-    check("2: the lobby's menu, not playing: the chat and the in-game HUD are hidden on every frame (guest)",
-          m and not in_game(t, "m") and all(hidden(f) and f.get("inGameUI") == "0" for _, f in m),
-          f"{sum(hidden(f) for _, f in m)} of {len(m)} frames hidden, in game {in_game(t, 'm')[:1]}")
+    check_idle_menu("2", t, m)
 
     # 3: F5 from the lobby's menu: the relaunch rejoins the lobby; until Play, its frames have no chat
-    first = ["0 boot"] + vis_lines("f", 2500, 500) + ["2700 down F5", "2750 up F5"]
-    relaunch = ["0 boot"] + vis_lines("r", 6000, 250) + ["3200 play", "6100 quit"]
-    t = client("reload-lobby", first + ["9000 quit"], relaunch=relaunch, account=account, args=())
+    # the join takes 2 to 8 s of game time: F5 comes after it, Play after the rejoin's join
+    first = ["0 boot"] + vis_lines("f", 12000, 500) + ["12000 down F5", "12050 up F5"]
+    relaunch = ["0 boot"] + vis_lines("r", 14000, 250) + ["10000 play", "14100 quit"]
+    t = client("reload-lobby", first + ["15000 quit"], relaunch=relaunch, account=account, args=())
     r = fields(t, "r")
     check("3: F5 relaunched the client and it rejoined the lobby (the same game id)",
           "[reload] restart: F5: relaunch" in t and "resume after the restart: game " in t and t.count(joined) >= 2,
@@ -264,10 +270,11 @@ def scenarios(account):
     check("3: the rejoined client is in the game after Play", back and back[-1] >= 3500, f"in-game frames from {back[:1]}")
     if back:
         pre = [(tt, f) for tt, f in r if tt < back[0]]
+        up = next((i for i, (_, f) in enumerate(pre) if shown(f)), None)
+        check("3: the rejoin's loading frames have no chat, the idle menu after the join has it (every frame to Play)",
+              pre and hidden(pre[0][1]) and up is not None and all(shown(f) for _, f in pre[up:]),
+              f"first frame hidden {bool(pre) and hidden(pre[0][1])}, up from frame {up} of {len(pre)}")
         post = [(tt, f) for tt, f in r if tt >= back[0] and f.get("inGameUI") == "1"]
-        bad = [(tt, f) for tt, f in pre if not hidden(f)]
-        check("3: no chat before Play, while the menu is up after the rejoin (every frame)", pre and not bad,
-              f"{len(bad)} of {len(pre)} frames show {bad[:1]}")
         check("3: the chat and the in-game HUD show once the game is back", post and all(shown(f) for _, f in post),
               f"{sum(shown(f) for _, f in post)} of {len(post)} frames")
 
@@ -280,12 +287,9 @@ def scenarios(account):
     check("4: F5 relaunched the offline game and the game is back", "[reload] restart: F5: relaunch" in t and back,
           f"in-game frames {len(back)}")
     if back:
-        first_in = back[0]
-        pre = [(tt, f) for tt, f in r if tt < first_in]
-        post = [(tt, f) for tt, f in r if tt >= first_in and f.get("inGameUI") == "1"]
-        bad = [(tt, f) for tt, f in pre if not hidden(f)]
-        check("4: no chat while the reloaded game loads (every frame before the game is back)", not bad,
-              f"{len(bad)} of {len(pre)} frames show {bad[:1]}")
+        # the offline relaunch shows no loading screen (the menu is up for ~0.1 s before the game is back):
+        # the chat stays up there, so only the game's frames are checked
+        post = [(tt, f) for tt, f in r if tt >= back[0] and f.get("inGameUI") == "1"]
         check("4: the chat and the in-game HUD show once the game is back", post and all(shown(f) for _, f in post),
               f"{sum(shown(f) for _, f in post)} of {len(post)} frames")
 

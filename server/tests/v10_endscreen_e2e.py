@@ -31,7 +31,7 @@ results = []
 SCRIPT = """
 0 menu
 300 con bot_add 1
-1000 check @menu menuHolder=1 chatUIHolder=0
+1000 check @menu menuHolder=1 chatUIHolder=1
 1500 play
 3500 check @alive weapHolder=1 deathUIHolder=0 timerHolder=1
 3600 skin 1

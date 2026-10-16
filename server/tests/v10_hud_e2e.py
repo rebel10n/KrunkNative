@@ -8,8 +8,9 @@ plays a match through the menu, spectating (setSpect: v10 shows the Spectate swi
 only, hideSpectateIfGuestUser), spawn, the scoreboard (Tab), a death, respawn, ESC,
 playing again and the end of the match, and checks what the player sees at each step against what
 v10.0.2 shows there (doc/ref/krunker-v10/ingame/, the offline v10 sandbox):
-  - the chat (#chatUIHolder): hidden on the menu for a guest, up in game, dead, spectating and on
-    the end screen (hideChatIfGuestUser);
+  - the chat (#chatUIHolder): up on the menu too, in game, dead, spectating and on the end screen.
+    v10 hides a guest's chat on the menu (hideChatIfGuestUser); KrunkNative keeps it up, so Esc does
+    not take it away, and hides it only while the game loads (hud_ui.c hud_chat_wanted);
   - #leaderboardHolder always up in game and while spectating (v10's switchLeaderboard);
   - the player HUD (health bar, weapon slots, ammo, timer) alive, gone on the death screen;
   - the Tab scoreboard in v10's <thead>/<tbody> table;
@@ -41,14 +42,14 @@ results = []
 SCRIPT = """
 0 menu
 300 con bot_add 1
-1000 check @menu chatUIHolder=0 instructionHolder=1 menuHolder=1
+1000 check @menu chatUIHolder=1 instructionHolder=1 menuHolder=1
 1000 frame @menu ingame-pause-esc
 1100 call setSpect 1
 1500 play
 3500 check @spect spectateUI=1 chatUIHolder=1 leaderboardHolder=1 weapHolder=0 bottomLeftHolder=0
 3500 frame @spect ingame-spectate
 4000 esc
-4800 check @spect-esc menuHolder=1 spectateUI=0 chatUIHolder=0
+4800 check @spect-esc menuHolder=1 spectateUI=0 chatUIHolder=1
 5000 call setSpect 0
 5400 play
 7500 check @alive chatUIHolder=1 chatHolder=1 leaderboardHolder=1 bottomLeftHealthBar=1 weapHolder=1 ammoHolder=1 timerHolder=1 deathUIHolder=0 spectateUI=0
@@ -72,7 +73,7 @@ SCRIPT = """
 16200 frame @kills ingame-killfeed
 16300 con bot_stop on
 17000 esc
-17800 check @esc menuHolder=1 chatUIHolder=0 instructionHolder=1 inGameUI=0
+17800 check @esc menuHolder=1 chatUIHolder=1 instructionHolder=1 inGameUI=0
 18000 play
 20000 check @back weapHolder=1 menuHolder=0 chatUIHolder=1
 20500 con end

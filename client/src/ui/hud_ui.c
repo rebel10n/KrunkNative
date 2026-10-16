@@ -3805,6 +3805,14 @@ static void hud_gametime_step(const Client *client, const int shown, const doubl
     }
 }
 
+// The chat (#chatUI, and v10's #chatUIHolder through hud_v10_tick) is up whenever the game is not
+// loading: the menu (a guest's too), a game, the death and end screens. It is hidden while the game
+// loads: the boot curtain, a connect or join spinner (menu_loading) and a map download. showUI still
+// turns it off. KrunkNative differs from v10 here: v10 hides a guest's chat on the menu, so Esc took it away.
+static int hud_chat_wanted(const Client *client) {
+    return client_render_settings()->show_ui && !menu_loading() && !client->net_map_wait;
+}
+
 // Mirrors UI.toggleGameUI(true) + toggleControlUI(true) with v7's default settings (DOM of
 // its sandbox game, FFA/TDM, guest).
 static void hud_apply_visibility(Client *client, const int in_game, const int visible) {
@@ -3826,14 +3834,15 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
             else html_dom_set_class(el, "onGameM", 0);
         }
     }
-    // #chatUI: v7 wrote it from the showUI setting alone (settings.js showUI.set). KrunkNative: also only
-    // once the player is in a game (client->in_game: entered, dead, spectating, the end screen), so
-    // a menu, a join or a reload with no game shows no chat; showUI still turns it off. The v10
-    // holder (hud_v10_tick) follows the same test.
-    const int chat = client_render_settings()->show_ui && client->in_game;
+    // #chatUI: v7 wrote it from the showUI setting alone (settings.js showUI.set). KrunkNative: also off
+    // while the game loads (hud_chat_wanted); the v10 holder (hud_v10_tick) follows the same test.
+    const int chat = hud_chat_wanted(client);
     if (chat != ui->chat_shown) {
         ui->chat_shown = chat;
         dom_display("chatUI", chat ? "block" : "none");
+        // Rows that came in while the list was not laid out (a load, a join) never reached the bottom:
+        // a scroll to the bottom needs a box, so the list goes there once it is shown.
+        if (chat && (el = html_dom_by_id("chatList"))) html_dom_scroll_to_bottom(el);
     }
     // showUI off (UI.hideGameUI): toggleControlUI keeps #inGameUI, #customGUIHolder, #overlay
     // and #vignette hidden; #aimRecticle still follows the game. A live change re-applies.
@@ -4327,7 +4336,7 @@ void hud_ui_leave_game(Client *client) {
 // groups that changed since the last write.
 void client_hud_html_tick(Client *client, const float now_f) {
     if (!html_ui_available()) return;
-    hud_v10_tick(client->in_game); // every frame, also on the menu / while spectating (#chatUIHolder)
+    hud_v10_tick(hud_chat_wanted(client)); // every frame, also on the menu / while spectating (#chatUIHolder)
 
     HudUi *ui = &g_hud_ui;
     HtmlHudState *hud = &client->hud_html;

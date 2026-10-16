@@ -6,9 +6,9 @@
 // offline v10 sandbox captures (doc/ref/krunker-v10/ingame/, tools/uidiff/capture-v10.js):
 //   - #chatUIHolder (new in v10, markup display:none) wraps the chat: toggleMenuHider(on) runs
 //     hideChatIfGuestUser(on) (v10:161017, 208576): on the menu a guest has no chat, an account
-//     has it; out of the menu (the game, the death and end screens) it is always up. KrunkNative
-//     adds that it is up only in a game (client->in_game): no chat on the menu for an account either,
-//     nor while a join or a reload still loads;
+//     has it. KrunkNative keeps the chat up on the menu for a guest too (it went away on Esc), and
+//     hides it only while the game loads (hud_ui.c hud_chat_wanted: the boot curtain, a join's
+//     spinner, a map download);
 //   - the Old Scoreboard holder #leaderboardHolder is always shown (switchLeaderboard writes
 //     style.display = true, v10:207925, which CSS ignores; hud_ui.c shows it);
 //   - the end screen's Performance tab is Combat Earnings + Combat Record (v10:203117) and a
@@ -38,13 +38,11 @@ int hud_v10_page(void) {
     return g_is_v10;
 }
 
-void hud_v10_tick(const int in_game) {
+void hud_v10_tick(const int chat_wanted) {
     if (!hud_v10_page()) return;
     // UI.toggleMenuHider(on) -> hideChatIfGuestUser(on): on ? (account ? block : none) : block.
-    // KrunkNative: none before the player is in a game (client->in_game), so an account on the menu
-    // and a join or a reload still loading have no chat either.
-    const MenuUi *menu = menu_ui();
-    const char *want = !in_game || (menu && menu->menu_open && !active_account()) ? "none" : "block";
+    // KrunkNative: block whenever the chat is wanted (not loading), on the menu for a guest too.
+    const char *want = chat_wanted ? "block" : "none";
     if (!strcmp(want, g_chat_shown)) return;
     const HtmlElem el = html_dom_by_id("chatUIHolder");
     if (!el) return;

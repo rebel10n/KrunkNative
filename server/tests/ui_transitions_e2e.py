@@ -56,8 +56,10 @@ ESC = "down ESC\n{t2} up ESC"  # one press (the release 50 ms later)
 # onEndScrn < onDeathScrn) that UI.toggleMenuHider / toggleControlUI / showEndScreen /
 # toggleEndScreen / f1975 toggle. "death" is where the chat-moveup animation (1.5 s) ends. "none":
 # the chat is hidden (a guest on the menu: v10 hideChatIfGuestUser, v10:208576).
+# gamemenu: the chat under the menu opened over a game (Esc, a death or spectate menu): the CSS place
+# of the in-game chat with the menu up, not checked against a v10 capture
 CHAT_PLACES = {"menu": (150, 20), "comp": (20, 150), "game": (15, 130), "spect": (20, 20), "end": (20, 20),
-               "death": (64, 75)}
+               "death": (64, 75), "gamemenu": (20, 20)}
 CHAT_TOLERANCE = 2.0  # CSS px
 
 
@@ -219,7 +221,7 @@ def stop(p):
 # The page parts a playing (alive, menu closed) FFA player sees, and the menu (a guest's: no chat,
 # v10:208576 hideChatIfGuestUser(true) from toggleMenuHider, v10:161017).
 HUD = "inGameUI=1 topLeftMain=1 weapHolder=1 bottomRight=1 chatUI=1 chatList=1 menuHolder=0"
-MENU = "menuHolder=1 instructionHolder=1 inGameUI=0 chatUI=0 :preview=1 endUI=0 deathUIHolder=0"
+MENU = "menuHolder=1 instructionHolder=1 inGameUI=0 chatUI=1 :preview=1 endUI=0 deathUIHolder=0"
 # The minimap is on in these runs: v10's showMinimap defaults to off (v10:204651-204656 'val': !1),
 # so the scenarios that follow the overlay (#miniMapOverlay) through the transitions turn it on.
 MINIMAP_ON = {"knSettings": '{"showMinimap":true}'}
@@ -240,7 +242,7 @@ def sc_endscreen():
         12000 chat @end end
         12500 esc
         13500 check @end-esc {MENU} :cursor=1
-        13500 chat @end-esc none
+        13500 chat @end-esc end
         14000 esc
         15000 check @end-esc-esc {RESULTS} :cursor=1
         15000 chat @end-esc-esc end
@@ -658,8 +660,8 @@ def sc_death():
         2500 up TAB
         2700 check @dead deathUIHolder=1 inGameUI=1 topLeftMain=0 weapHolder=0 bottomRight=0 chatUI=1 centerLeaderDisplay=0 menuHolder=0 miniMapOverlay=0
         2800 esc
-        3300 check @dead-esc menuHolder=1 deathUIHolder=0 inGameUI=0 chatUI=0 :preview=1
-        3300 chat @dead-esc none
+        3300 check @dead-esc menuHolder=1 deathUIHolder=0 inGameUI=0 chatUI=1 :preview=1
+        3300 chat @dead-esc gamemenu
         3400 esc
         3600 check @dead-esc-esc inGameUI=1 chatUI=1 menuHolder=0 deathUIHolder=? topLeftMain=?
         3600 chat @dead-esc-esc game
@@ -668,7 +670,7 @@ def sc_death():
         12000 chat @respawned game
         12500 esc
         13000 check @alive-esc {MENU} miniMapOverlay=0
-        13000 chat @alive-esc none
+        13000 chat @alive-esc gamemenu
         13500 esc
         14000 check @alive-esc-esc {HUD} miniMapOverlay=1
         14000 chat @alive-esc-esc game
@@ -689,18 +691,18 @@ def sc_death_menu():
         3300 check @dead deathUIHolder=1 menuHolder=0 chatUI=1
         3300 chat @dead death
         7000 check @click-to-play {MENU} instructions=1
-        7000 chat @click-to-play none
+        7000 chat @click-to-play gamemenu
         7500 clickid instructionHolder
         9500 check @played {HUD} deathUIHolder=0
         9500 chat @played game
         10000 esc
         10500 check @menu-before-death {MENU}
-        10500 chat @menu-before-death none
+        10500 chat @menu-before-death gamemenu
         11000 con kill
-        12800 check @menu-dead menuHolder=1 instructionHolder=1 chatUI=0
-        12800 chat @menu-dead none
+        12800 check @menu-dead menuHolder=1 instructionHolder=1 chatUI=1
+        12800 chat @menu-dead death
         16000 check @menu-dead-click-to-play {MENU} instructions=1
-        16000 chat @menu-dead-click-to-play none
+        16000 chat @menu-dead-click-to-play gamemenu
         16500 clickid instructionHolder
         18500 check @played-again {HUD} deathUIHolder=0
         18500 chat @played-again game
@@ -725,12 +727,12 @@ def sc_forced_spawn():
         7300 check @dead deathUIHolder=1 menuHolder=0
         7300 chat @dead death
         9300 check @click-to-play menuHolder=1 instructionHolder=1 inGameUI=0
-        9300 chat @click-to-play none
+        9300 chat @click-to-play gamemenu
         14000 check @forced-spawn inGameUI=1 menuHolder=0 deathUIHolder=0 chatUI=1
         14000 chat @forced-spawn game
         14500 con kill
         18300 check @click-to-play-2 menuHolder=1 instructionHolder=1
-        18300 chat @click-to-play-2 none
+        18300 chat @click-to-play-2 gamemenu
         23000 check @forced-spawn-2 inGameUI=1 menuHolder=0 deathUIHolder=0
         23000 chat @forced-spawn-2 game
         23500 quit
@@ -745,14 +747,14 @@ def sc_spectate():
         0 menu
         300 con bot_add 2
         1000 check @menu menuHolder=1 spectButton=0 spectButtonHolder=0 :preview=1
-        1000 chat @menu none
+        1000 chat @menu spect
         1100 call setSpect 1
         1500 play
         3000 check @spect spectateUI=1 inGameUI=1 chatUI=1 menuHolder=0 weapHolder=0 deathUIHolder=0
         3000 chat @spect spect
         3500 esc
-        4500 check @spect-esc spectateUI=0 menuHolder=1 chatUI=0 inGameUI=0
-        4500 chat @spect-esc none
+        4500 check @spect-esc spectateUI=0 menuHolder=1 chatUI=1 inGameUI=0
+        4500 chat @spect-esc gamemenu
         5000 esc
         6000 check @spect-esc-esc spectateUI=1 inGameUI=1 chatUI=1 menuHolder=0
         6000 chat @spect-esc-esc spect
@@ -762,8 +764,8 @@ def sc_spectate():
         10000 con disconnect
         11000 check @spect-disconnect instructionsUpdate=1 spectateUI=0 inGameUI=0 overlay=0 aimRecticle=0
         11500 con reconnect
-        14000 check @spect-reconnect instructionsUpdate=0 menuHolder=1 spectateUI=0 inGameUI=0 chatUI=0
-        14000 chat @spect-reconnect none
+        14000 check @spect-reconnect instructionsUpdate=0 menuHolder=1 spectateUI=0 inGameUI=0 chatUI=1
+        14000 chat @spect-reconnect gamemenu
         15100 call setSpect 0
         15500 play
         17500 check @unspect-play inGameUI=1 weapHolder=1 bottomRight=1 chatUI=1 spectateUI=0 menuHolder=0
@@ -1557,7 +1559,7 @@ def sc_comp():
         run_client("comp", ["--connect", f"127.0.0.1:{port}"], """
             0 menu
             3000 check @comp-menu mMenuHolComp=1 mMenuHolDef=0 menuHolder=1
-            3000 chat @comp-menu none
+            3000 chat @comp-menu comp
             3500 con offline
             7000 check @offline mMenuHolComp=0 menuHolder=0 inGameUI=1
             7200 esc

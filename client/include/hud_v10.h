@@ -9,9 +9,9 @@
 // 1 when the loaded page is the v10 one (v10_menu_page()), cached per page load.
 int hud_v10_page(void);
 
-// Per frame (client_hud_html_tick): v10's #chatUIHolder (hideChatIfGuestUser), and nothing of it
-// until the player is in a game (in_game = client->in_game: entered, dead, spectating, the end screen).
-void hud_v10_tick(int in_game);
+// Per frame (client_hud_html_tick): v10's #chatUIHolder (hideChatIfGuestUser) follows chat_wanted, the
+// chat's test of hud_ui.c (hud_chat_wanted: up on every page but while the game loads).
+void hud_v10_tick(int chat_wanted);
 
 // GUI.endScreen.tabs.performance.gen() of v10 (Combat Earnings + Combat Record) for the current
 // match: kr_html is the earned-KR cell ("NONE" = nothing earned), the rest the local player's
