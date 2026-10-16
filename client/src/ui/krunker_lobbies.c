@@ -330,11 +330,11 @@ int krunker_lobbies_seek(void) {
     char id[80], want[128], text[256];
     if (krunker_lobbies_pick(id, sizeof(id))) {
         if (!strcmp(id, krunker_net_game())) {
-            // the only official lobby with room is the one the player is in: stay, no rejoin
+            // the only official lobby with room is the one the player is in: stay, no rejoin. v10's Find New
+            // Game reloads the page into whatever the matchmaker answers (its excludeGame fallback: this
+            // same game) and says nothing: the player stays in it here, the log alone says why
             seek_prefs_describe(want, sizeof(want));
-            I18N_F(text, "kn.kio.noOtherLobby", "No other krunker.io server has room for {0}: you stay in this one", want);
-            printf("[krunker] seek: no other official lobby has room, staying in %s\n", id);
-            ui_notify(text);
+            printf("[krunker] seek: no other official lobby has room for %s, staying in %s\n", want, id);
             return 1;
         }
         printf("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");

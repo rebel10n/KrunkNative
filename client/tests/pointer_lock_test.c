@@ -161,8 +161,21 @@ static void test_script(void) {
     EXPECT(pointer_lock_step(&t, &in), 0, 0, "freeMouse + menu");
 }
 
+// krunker.io's security challenge comes up over a game (an official join started with the menu
+// closed): v10 exits the pointer lock for its modals; the lock is back once it closes.
+static void test_modal(void) {
+    PointerLockTracker t = {0};
+    PointerLockInputs in = playing();
+    EXPECT(pointer_lock_step(&t, &in), 1, 1, "playing");
+    in.modal = 1;
+    EXPECT(pointer_lock_step(&t, &in), 0, 0, "the challenge modal: the pointer is free, no controls");
+    in.modal = 0;
+    EXPECT(pointer_lock_step(&t, &in), 1, 1, "the modal closed: locked again");
+}
+
 int main(void) {
     test_menu_round_trip();
+    test_modal();
     test_end_locked();
     test_end_with_menu_open();
     test_end_click_relocks();

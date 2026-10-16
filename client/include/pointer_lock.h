@@ -29,6 +29,9 @@ typedef struct {
     unsigned char end_results;   // its clickable results (hud_ui_end_screen_interactive)
     unsigned char script_unlock; // KrunkScript INPUTS.unlockMouse (tmpUnlock: controls off too)
     unsigned char script_free;   // KrunkScript INPUTS.freeMouse (forceFreeCam: controls on, no lock)
+    unsigned char modal;         // a page modal waits for the player (krunker.io's security challenge): v10
+                                 // exits the pointer lock for its modals (CONTROLS.toggle(false)); the lock
+                                 // comes back once it closes
 } PointerLockInputs;
 
 typedef struct {

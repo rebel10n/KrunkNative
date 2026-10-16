@@ -2489,7 +2489,9 @@ def run_native_join_end():
 def run_native_leave_state():
     """Official -> KrunkNative -> official: leaving a game clears its state (client_leave_game; v10 leaves a
     game by loading a new page): the official lobby's chat line is gone on the KrunkNative server, the
-    KrunkNative server's chat line is gone in the next official lobby."""
+    KrunkNative server's chat line is gone in the next official lobby. That second join starts from inside
+    the KrunkNative game with the menu closed: the security challenge must free the pointer and take the
+    clicks (it used to show while every click went to the game)."""
     label = "native-leave-state"
     (port,) = kn_proto.free_ports(1)
     slog = open(os.path.join(WORK, label + "-server.log"), "w")
@@ -2505,9 +2507,10 @@ def run_native_leave_state():
               "8100 con connect 127.0.0.1:%d\n8300 grep @left-official hello [id=chatList]\n"
               "12000 play\n15000 grep @kn hello [id=chatList]\n15000 nodes @kn [id=chatList] .chatItem\n15100 con say zzknmark\n"
               "16500 grep @kn-said zzknmark [id=chatList]\n"
-              "16800 down ESC\n16850 up ESC\n17000 call krunkerJoin \"%s\"\n17300 grep @left-kn zzknmark [id=chatList]\n17300 nodes @left-kn [id=chatList] .chatItem\n"
+              "16500 state\n17000 call krunkerJoin \"%s\"\n17300 grep @left-kn zzknmark [id=chatList]\n17300 nodes @left-kn [id=chatList] .chatItem\n"
+              "18300 vis @challenge knCaptchaHolder menuHolder :cursor\n18400 state\n"
               "18500 clickid knCaptchaToken\n18600 type %s\n18700 clickid knCaptchaUse\n21000 play\n"
-              "25000 grep @official2 zzknmark [id=chatList]\n25100 grep @official2-stub hello [id=chatList]\n25500 quit\n"
+              "25000 grep @official2 zzknmark [id=chatList]\n25100 grep @official2-stub hello [id=chatList]\n25200 state\n25500 quit\n"
               % (PASTE_TOKEN, port, GAME_ID, token2))
     try:
         stub, p, out, log = launch_native(label, script, {})
@@ -2529,6 +2532,22 @@ def run_native_leave_state():
     check(f"{label}: the KrunkNative server's chat line showed", hits.get("kn-said") == 1, hits)
     check(f"{label}: KrunkNative -> official: it is gone as the game is left", hits.get("left-kn") == 0 and rows.get("left-kn") == 0, (hits, rows))
     check(f"{label}: and in the next official lobby, which shows its own", hits.get("official2") == 0 and hits.get("official2-stub") == 1, hits)
+    # the second join starts in a game with the menu closed (pointer locked): the security challenge
+    # frees the pointer and takes the clicks and the typing (v10 exits the lock for its modals), the
+    # game locks it again once the join is through
+    states = {m.group(1): m.group(0) for m in re.finditer(r"\[input_script\] state t=(\d+) .*", text)}
+    ordered = [states[k] for k in sorted(states, key=int)]
+    check(f"{label}: the second join starts in the game (menu closed, pointer locked)",
+          len(ordered) == 3 and " menu=0 locked=1 " in ordered[0], ordered[:1])
+    chal = re.search(r"\[input_script\] vis t=\d+ @challenge (.*)", text)
+    check(f"{label}: the challenge over the game: shown, no menu, the cursor free",
+          chal and chal.group(1).split() == ["knCaptchaHolder=1", "menuHolder=0", ":cursor=1"], chal.group(1) if chal else None)
+    check(f"{label}: and the pointer released (no controls, cursor normal)", len(ordered) == 3 and " locked=0 " in ordered[1] and
+          "cursor=normal" in ordered[1], ordered[1:2])
+    check(f"{label}: the pasted token went through (clicks and typing reached the modal)",
+          text.count("[krunker] captcha: a pasted token") == 2, text.count("[krunker] captcha: a pasted token"))
+    check(f"{label}: back in the game afterwards: pointer locked, no menu", len(ordered) == 3 and " menu=0 locked=1 " in ordered[2]
+          and "cursor=disabled" in ordered[2], ordered[2:])
 
 
 def run_native_optout():

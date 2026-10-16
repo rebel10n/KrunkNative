@@ -34,6 +34,9 @@ void krunker_captcha_ask(int attempt, int rejected, KrunkerCaptchaDone done, voi
 // The request is over (left the game / switched): close the modal and the callback, done not called.
 void krunker_captcha_close(void);
 int krunker_captcha_asking(void);
+// The modal waits for the player (a paste box, Solve / Cancel): the pointer is free and the page takes
+// the mouse and keys, from the menu or from inside a game (v10 frees the pointer for its modals).
+int krunker_captcha_needs_player(void);
 // Main thread, once per frame (krunker_net_tick): the callback listener, the challenge window, timeouts.
 void krunker_captcha_tick(void);
 

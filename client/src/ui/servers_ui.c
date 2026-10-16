@@ -669,10 +669,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     if (status == 200 && find && g_client->net_connected && g_find_prev_game[0] && cJSON_IsString(answer_game) &&
         !strcmp(answer_game->valuestring, g_find_prev_game)) {
         // Find New Game / Quick Match: the matchmaker had nothing but the lobby the player is in (its
-        // excludeGame fallback): stay in it, no reconnect
+        // excludeGame fallback): stay in it, no reconnect. v10 reloads the page into that same game and
+        // says nothing (backToOrigin + seek, v10.js:222040-222066): no notice here either, the log says it
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
         printf("[mm] find new game: no other lobby has room, staying in %s\n", g_find_prev_game);
-        ui_notify(I18N("kn.mm.noOtherLobby", "No other lobby has room: you stay in this one"));
     } else if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port)) {
         const cJSON *game = cJSON_GetObjectItem(res, "gameId");
         const cJSON *key = cJSON_GetObjectItem(res, "clientId");
@@ -713,6 +713,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
             if (find_both && nothing && krunker_lobbies_seek()) { // Both: an official lobby instead
                 printf("[mm] find new game: no KrunkNative server matches, trying krunker.io\n");
+            } else if (cJSON_IsString(err) && !strcmp(err->valuestring, "NoOtherLobby") && g_client->net_connected) {
+                // KrunkNative's code for "only the lobby you leave has room": v10's matchmaker answers
+                // that same game instead and v10 lands back in it without a word, so: nothing shown
+                printf("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
                 // (the launch's Both seek has no lobby to stay in: not connected, so the error screen)
@@ -735,7 +739,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 static void strike_seek_failed(const char *error) {
     if (g_find_seek && g_client->net_connected) { // Find New Game found nothing: stay in this lobby
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
-        ui_error_popup(seek_error_text(error));
+        // only this lobby has room: v10 lands back in the same game silently (no notice, the log says it);
+        // a real failure keeps v10's error popup with v10's text
+        if (error && !strcmp(error, "NoOtherLobby")) printf("[mm] find new game: NoOtherLobby, staying in %s\n", g_find_prev_game);
+        else ui_error_popup(seek_error_text(error));
     } else {
         fatal_error(seek_error_text(error));
     }

@@ -61,6 +61,7 @@
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
 #include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
+#include <krunker_captcha.h> // krunker_captcha_needs_player: the challenge modal takes the pointer
 #include <krunker_net.h> // KN_KRUNKER_OFFICIAL: --krunker / ?krunker= joins an official krunker.io game (net/krunker_net.c)
 #include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
 #include <map_catalog.h> // startup map lookup (--map, --sandbox, ?map=, ?sandbox)
@@ -1633,7 +1634,8 @@ static int html_pointer_input(void) {
     // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
     if (strike_ui_active()) return strike_ui_pointer_to_page();
     // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
-    return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free();
+    // krunker_captcha_needs_player: the security challenge's modal, also over a game with the menu closed
+    return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free() || krunker_captcha_needs_player();
 }
 
 // mouseFlick / flickClamp natively (v10.js:202374 CONTROLS: per mouse event, `if (!mouseSkipFix ||
@@ -1818,12 +1820,13 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
     (void) client;
 #endif
 
-    if (html_ui_is_menu_open()) html_ui_key(key, scancode, action, mods);
+    // the security challenge's modal over a game takes the keys too (its token box: paste, erase)
+    if (html_ui_is_menu_open() || krunker_captcha_needs_player()) html_ui_key(key, scancode, action, mods);
 }
 
 static void char_callback(GLFWwindow *window, const unsigned int codepoint) {
     (void) window;
-    if (html_ui_is_menu_open() || ui_controls_chat_focused()) html_ui_char(codepoint);
+    if (html_ui_is_menu_open() || ui_controls_chat_focused() || krunker_captcha_needs_player()) html_ui_char(codepoint);
 }
 
 void client_animate_object_texture(Object *object, const float now) {
@@ -2012,7 +2015,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // world, other players, effects and our own player (procInputs with the keys reset)
     // keep updating; only local input is cut off. Cameras per state: menu_view.c.
     // The end screen's results disable the controls too (endGame -> CONTROLS.disable()).
-    const int menu_open = html_menu && (html_ui_is_menu_open() || hud_ui_end_screen_interactive());
+    const int menu_open = html_menu && (html_ui_is_menu_open() || hud_ui_end_screen_interactive() || krunker_captcha_needs_player());
     if (menu_open) {
         // Menu owns the input: no hotkeys, no look/move sampling.
         ui_controls_reset_keys(); // CONTROLS.resetKeys() when the pointer lock is lost

@@ -45,6 +45,7 @@
 #include <online_mode.h> // live sign-in: the session's rights end with it
 #include <audio.h> // the auto-respawn countdown's tick_0
 #include <nettspend.h>   // the Nettspend's weapon previews
+#include <krunker_captcha.h> // krunker_captcha_needs_player: the security challenge frees the pointer
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -290,6 +291,7 @@ void client_pointer_update(Client *client) {
     in.end_results = (unsigned char) hud_ui_end_screen_interactive();
     in.script_unlock = (unsigned char) ks_client_input_unlocked();
     in.script_free = (unsigned char) (ks_client_pointer_free() && !ks_client_input_unlocked());
+    in.modal = (unsigned char) krunker_captcha_needs_player(); // the security challenge: clicks and typing go to it
     const int had_controls = g_ptr.want.controls;
     g_ptr.want = pointer_lock_step(&g_ptr.tracker, &in);
     if (!in.game) {

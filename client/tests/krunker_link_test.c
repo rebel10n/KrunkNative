@@ -169,6 +169,8 @@ static const uint8_t *ext_body(const int nth, const uint16_t subtype, uint16_t *
     if (var##_p && var##_p->length == sizeof(type)) memcpy(&var, var##_p->payload, sizeof(type)); \
     else var##_p = NULL
 
+static int find_ext(uint16_t subtype, int nth, uint16_t *len); // the nth EXT of a subtype (below)
+
 // Clusters C / D of the packet audit: score / kills / ammo HUD, objectives / flags / rounds / end
 static void test_hud(void) {
     KrunkerLink link;
@@ -445,7 +447,8 @@ static void test_hud(void) {
         READ_IN(NetEndPacket, e, END, 0);
         CHECK(e_p && e.result == -1 && e.winner_uid == -1, "end: didWin -1 is a draw");
         uint16_t len = 0;
-        const uint8_t *type = ext_body(0, NET_EXT_KN_END_TYPE, &len);
+        const int k = find_ext(NET_EXT_KN_END_TYPE, 0, &len); // after the END_ROW per endData row (official-ingame-rounds)
+        const uint8_t *type = k >= 0 ? ext_body(k, NET_EXT_KN_END_TYPE, &len) : NULL;
         CHECK(type && len == 1 && type[0] == 0, "end type 0: END_TYPE 0 (the title for a player in the game only)");
     }
     clear();
@@ -454,8 +457,9 @@ static void test_hud(void) {
     feed(&link, "end", end_args, 8);
     {
         uint16_t len = 0;
-        const uint8_t *type = ext_body(0, NET_EXT_KN_END_TYPE, &len);
-        const NetPacket *xp = find_in(NET_PACKET_EXT, 0), *ep = find_in(NET_PACKET_END, 0);
+        const int k = find_ext(NET_EXT_KN_END_TYPE, 0, &len);
+        const uint8_t *type = k >= 0 ? ext_body(k, NET_EXT_KN_END_TYPE, &len) : NULL;
+        const NetPacket *xp = k >= 0 ? find_in(NET_PACKET_EXT, k) : NULL, *ep = find_in(NET_PACKET_END, 0);
         CHECK(type && len == 1 && type[0] == 1 && ep && xp < ep, "end type 1: END_TYPE 1, then the END (the results at once)");
     }
     end_args[0] = KRUNKER_V_NUM(0);

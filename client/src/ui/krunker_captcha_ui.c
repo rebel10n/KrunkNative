@@ -67,6 +67,7 @@ static struct {
     int handler_set;
     int present_pending; // asked before the page was up: shown once it is (krunker_captcha_tick)
     int pow_shown, pow_timer;
+    int needs_player;  // the modal is up with something to click or type (not the passive notice)
     char cb_url[96];   // the callback (has the secret: shown in the box, never logged)
 } C;
 
@@ -167,7 +168,14 @@ static void hide_modal(void) {
     if (cb) html_dom_set_value(cb, "");
     html_dom_set_display(h, "none");
     html_dom_set_class(h, "kn-captcha-passive", 0);
+    C.needs_player = 0;
 }
+
+// The modal is up and waits for the player (krunker_captcha_needs_player). v10 frees the pointer for
+// its modals (the charge-consent one: `CONTROLS.hasPointerlock && CONTROLS.toggle(false)`, v10.js:
+// 219744) and they take the clicks: menu_ui.c client_pointer_update / main.c html_pointer_input do so
+// while this is set, also from inside a game with the menu closed.
+int krunker_captcha_needs_player(void) { return C.asking && C.needs_player; }
 
 // ---------------------------------------------------------------- web: the Turnstile widget
 
@@ -265,6 +273,7 @@ static void show_manual(const char *why) {
     widget_remove();
     const HtmlElem h = holder(); // the player is needed now: the modal comes up (native: silent first, see present)
     if (h) html_dom_set_display(h, "");
+    C.needs_player = h != 0;
     show("knTurnstileHolder", 0);
     show("knCaptchaManual", 1);
     show("knCaptchaOpen", 1);
@@ -319,6 +328,7 @@ static void show_window_prompt(const char *status) {
     if (!h) return;
     html_dom_set_class(h, "kn-captcha-passive", 0);
     html_dom_set_display(h, "");
+    C.needs_player = 1;
     const HtmlElem m = html_dom_by_id("knCaptchaModal");
     if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
     show("knTurnstileHolder", 0);
@@ -516,6 +526,7 @@ static void present(void) {
     set_text("knCaptchaStatus", rejected ? I18N("kn.captcha.refused", "krunker.io refused that token (they work once, for 5 minutes): one more, please.") : "");
 #ifdef __EMSCRIPTEN__
     html_dom_set_display(h, "");
+    C.needs_player = 1;
     show("knCaptchaManual", 0);
     show("knCaptchaOpen", 0);
     set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
@@ -525,6 +536,7 @@ static void present(void) {
     // by itself). It appears when the window is shown (KN_WEBVIEW_SHOWN) or closed (show_window_prompt), or
     // at once when there is no window to try (show_manual): then the player is needed.
     html_dom_set_display(h, "none");
+    C.needs_player = 0;
     if (!webview_start(0)) {
         show_manual(I18N("kn.captcha.needsBrowser", "krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io."));
     }
@@ -697,6 +709,7 @@ void krunker_captcha_pow_end(const int solved) {
     if (!h) return;
     if (C.pow_timer) html_timer_cancel(C.pow_timer);
     C.pow_shown = 1;
+    C.needs_player = 0; // the passive notice: nothing to click
     html_dom_set_class(h, "kn-captcha-passive", 1);
     const HtmlElem m = html_dom_by_id("knCaptchaModal");
     if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
