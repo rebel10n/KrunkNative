@@ -25,6 +25,12 @@ static const StrikeMap k_pool[] = {
 
 #define POOL_COUNT (sizeof(k_pool) / sizeof(k_pool[0]))
 
+// FRVR's own copy of the controls tutorial's sandbox (build 1.37.2 maps/bot_ftue_v2.json, the same file the
+// build manifest pins): outside the pool, so no rotation (weight 0) and no catalogue index.
+static const StrikeMap k_ftue_map = {"bot_ftue_v2", "Mini Industry Tutorial", "bot_ftue_v2", "maps/strike/bot_ftue_v2.json", -1, 0};
+
+const StrikeMap *strike_ftue_map(void) { return &k_ftue_map; }
+
 size_t strike_map_pool(const StrikeMap **out) {
     if (out) *out = k_pool;
     return POOL_COUNT;

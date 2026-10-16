@@ -27,6 +27,7 @@
 #include <console.h>   // the developer console takes the keyboard while open (ui_console.c)
 #include <ui_interact.h> // v7 interaction: "int" / "intSec" type, uid, "drpw", "cnfm" (ui_interact.c)
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
+#include <strike_ftue.h> // the controls tutorial's jump and reload steps (strike_ftue_controls.c)
 #include <ctype.h>
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
@@ -1445,6 +1446,8 @@ static void press_code(Client *client, const int code) {
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 1;
     g_ctl.keys[slot] = 1;
     g_ctl.did_pressed[slot] = 1;
+    if (bind_is(UI_CONTROL_JUMP, code)) strike_ftue_controls_control_down(UI_CONTROL_JUMP);
+    else if (bind_is(UI_CONTROL_RELOAD, code)) strike_ftue_controls_control_down(UI_CONTROL_RELOAD);
     // KrunkNative Object Manager: with extra loadout weapons the number row (1-9) picks slots and
     // keeps nothing else bound to those keys (streak call-ins, taunts) from acting on them
     if (code >= 49 && code <= 57 && client && client->me && player_loadout_base(client->me) < client->me->loadout_size) {

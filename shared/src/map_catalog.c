@@ -475,8 +475,13 @@ int map_sanitize_json(cJSON *map) {
 }
 
 static char *catalog_path(const size_t index) {
-    // Krunker Strike plays FRVR's own copies of its pool maps (strike_maps.h); base is unchanged
-    const StrikeMap *strike = flavor_get() == FLAVOR_STRIKE ? strike_map_for_catalog(index) : NULL;
+    // Krunker Strike plays FRVR's own copies of its pool maps and of the controls tutorial's sandbox (strike_maps.h);
+    // base is unchanged
+    const StrikeMap *strike = NULL;
+    if (flavor_get() == FLAVOR_STRIKE) {
+        strike = strike_map_for_catalog(index);
+        if (!strike && !strcmp(k_catalog[index].key, "bot_ftue_v2")) strike = strike_ftue_map();
+    }
     return concat(assets_path(), strike ? strike->path : k_catalog[index].path);
 }
 

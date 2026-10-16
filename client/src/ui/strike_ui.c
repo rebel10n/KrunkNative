@@ -675,8 +675,10 @@ void strike_ui_tick(Client *client) {
             // a server password prompt pushed by a refused startup connect (before the mount) stays on top
             const int password = strike_screen_shown(STRIKE_SCREEN_SERVER_PASSWORD);
             // FRVR's boot gate (c_e): a first run goes to quickConnect, the FTUE runs in that game
-            if (!password && strike_ftue_first_run()) strike_menu_quick_connect();
-            else {
+            if (!password && strike_ftue_first_run()) {
+                strike_ftue_controls_first_run(client); // the sandbox map, then the flow starts in that game
+                strike_menu_quick_connect();
+            } else {
                 strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
                 if (password) strike_screen_push(STRIKE_SCREEN_SERVER_PASSWORD);
             }
@@ -685,6 +687,7 @@ void strike_ui_tick(Client *client) {
     if (!S.booted) return;
     strike_connect_tick(); // the connection popups (strike_connect.c) follow the transport
     strike_ftue_tick();
+    strike_ftue_controls_tick(client);
     strike_menu_tick(client);
     strike_hud_tick(client);
     strike_notify_tick(); // the holder: the timers, then the redraw (strike_notify.c)
@@ -708,7 +711,8 @@ void strike_ui_menu_open(Client *client, const int open) {
 }
 
 int strike_ui_pointer_to_page(void) {
-    return !S.booted || S.depth > 0 || S.ld.shown || html_ui_is_menu_open();
+    // the controls tutorial's tap blur and "Let's Go!" are page elements: the press is a click on them, not a touch
+    return !S.booted || S.depth > 0 || S.ld.shown || html_ui_is_menu_open() || strike_ftue_controls_pointer_to_page();
 }
 
 // ---------------------------------------------------------------- --render-scenario

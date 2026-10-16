@@ -41,5 +41,8 @@ size_t strike_map_pool_expand(const StrikeMap *pool, size_t count, int *out, siz
 const StrikeMap *strike_map_for_catalog(size_t index);
 // A pool map by key ("skytemple") or FRVR name ("SkyTemple"), case-insensitive; NULL none.
 const StrikeMap *strike_map_by_key(const char *key);
+// The controls tutorial's sandbox (FRVR's ftue fileName "bot_ftue_v2", "Mini Industry Tutorial"): not in the pool
+// (catalog_index -1, no rotation). Strike's first run plays it (client/src/ui/strike_ftue_controls.c).
+const StrikeMap *strike_ftue_map(void);
 
 #endif

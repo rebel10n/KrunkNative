@@ -27,5 +27,5 @@
     }
   },
   "frames": 3,
-  "note": "Krunker Strike FTUE overlay shell (client/src/ui/strike_ftue.c, FRVR CAe .ftue-overlay): the blocker around the PLAY button, its hand, the dark blur, the bottom text and the tutor bubble. The tutor and hand art (img/ftue/controls/*) is not in the 1.37.2 copy, so those image slots stay empty."
+  "note": "Krunker Strike FTUE overlay (client/src/ui/strike_ftue.c, FRVR CAe .ftue-overlay): the blocker around the PLAY button, its hand, the dark blur, the bottom text and the tutor bubble. The tutor, hand and bubble art (img/ftue/controls/*, img/frvr-ui/bubble/*) is vendored from the FRVR page origin (ui/strike/README.md)."
 }

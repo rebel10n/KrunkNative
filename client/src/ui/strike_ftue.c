@@ -10,7 +10,8 @@
 //                               corner the element's centre is nearest to), buildImageElement,
 //                               buildBlur, buildBottomText, buildBlockInputElement, the tutor (Q5 and
 //                               the speech bubble eM)
-// The controls tutorial's steps and its sandbox match are strike_ftue_controls.c's (not here yet).
+// The controls tutorial (FRVR nB, the view below: its tap blur, hands, ripple, arrows, reload highlight and
+// "Let's Go!") runs its steps in strike_ftue_controls.c.
 #include <strike_ui.h>
 #include <strike_ftue.h>
 #include <krunker_account.h>
@@ -178,9 +179,128 @@ static void append_box(StrBuf *sb, const char *cls, float top, float left, float
     sb_append(sb, b);
 }
 
+// ---------------------------------------------------------------- controls view (nB)
+
+// The controls tutorial's view (FRVR CONTROLS_FTUE nB, bundle ~110515-110550): the tap blur, the tutor
+// (Q5 with the bubble eM), the touch hands (wF), the middle image, the ripple, the look arrows, the reload
+// highlight, "Let's Go!" and the bottom text. It replaces CAe's overlay while on (strike_ftue_controls.c).
+static struct {
+    int on, blur, ignore, tutor_left, tutor_check, middle_flipped, ripple, arrows, reload_hl, complete;
+    char bottom[512], tutor[512], middle[256], hand_side[8], hand_anim[12];
+} CV;
+
+static void render(void);
+
+static void append_tutor(StrBuf *sb, const char *html, const int left, const int check) {
+    char t[1100];
+    const char *side = left ? "left" : "right";
+    if (left) {
+        snprintf(t, sizeof(t),
+                 "<div class=\"ftue-controls__tutor-container ftue-controls__tutor-container-%s\">"
+                 "<img class=\"ftue-controls__tutor ftue-controls__flipped\" src=\"./img/ftue/controls/tutor.png\">"
+                 "<div id=\"mobSpeechBubble\" class=\"speech-bubble-container\"><div class=\"speech-bubble speech-bubble-ftue-controls speech-bubble-default\">%s</div></div>",
+                 side, html);
+    } else {
+        snprintf(t, sizeof(t),
+                 "<div class=\"ftue-controls__tutor-container ftue-controls__tutor-container-%s\">"
+                 "<div id=\"mobSpeechBubble\" class=\"speech-bubble-container\"><div class=\"speech-bubble speech-bubble-ftue-controls speech-bubble-flipped\">%s</div></div>"
+                 "<img class=\"ftue-controls__tutor\" src=\"./img/ftue/controls/tutor.png\">",
+                 side, html);
+    }
+    sb_append(sb, t);
+    if (check) {
+        snprintf(t, sizeof(t), "<img class=\"ftue-controls__tutor--checkmark-%s\" src=\"./img/ftue/controls/checkmark.svg\">", side);
+        sb_append(sb, t);
+    }
+    sb_append(sb, "</div>");
+}
+
+// wF: the hand's class follows its animation and side (vertical, horizontal or tap; the right side flips)
+static void append_hand(StrBuf *sb, const char *anim) {
+    const char *cls = "";
+    if (!strcmp(anim, "vertical")) cls = " class=\"ftue-controls__touch-hand-vertical\"";
+    else if (!strcmp(anim, "horizontal")) cls = " class=\"ftue-controls__touch-hand-horizontal-flipped\"";
+    else if (!strcmp(anim, "tap")) cls = " class=\"ftue-controls__touch-hand-tap-flipped\"";
+    char h[220];
+    snprintf(h, sizeof(h), "<img%s src=\"./img/ftue/controls/hands_touch.svg\">", cls);
+    sb_append(sb, h);
+}
+
+static void render_controls(void) {
+    StrBuf sb = {NULL, 0, 0};
+    char t[1100];
+    sb_append(&sb, CV.ignore ? "<div class=\"ftue-controls__root ftue-controls__ignore-events\">" : "<div class=\"ftue-controls__root\">");
+    if (CV.blur) sb_append(&sb, "<div class=\"frvrMenuBlur\" onclick=\"strikeAction('ftue-tap')\"></div>");
+    if (CV.tutor[0]) append_tutor(&sb, CV.tutor, CV.tutor_left, CV.tutor_check);
+    sb_append(&sb, "<div class=\"ftue-controls__top-left\"></div>");
+    sb_append(&sb, "<div class=\"ftue-controls__left\">");
+    if (CV.hand_anim[0] && !strcmp(CV.hand_side, "left")) append_hand(&sb, CV.hand_anim);
+    sb_append(&sb, "</div>");
+    sb_append(&sb, "<div class=\"ftue-controls__center\">");
+    if (CV.middle[0]) {
+        snprintf(t, sizeof(t), "<img class=\"ftue-controls__middle-image%s\" src=\"%s\">",
+                 CV.middle_flipped ? " ftue-controls__flipped" : "", CV.middle);
+        sb_append(&sb, t);
+    }
+    sb_append(&sb, "</div>");
+    sb_append(&sb, "<div class=\"ftue-controls__right\">");
+    if (CV.ripple) sb_append(&sb, "<div class=\"ripples\"><div class=\"ripple1\"></div><div class=\"ripple2\"></div><div class=\"ripple3\"></div></div>");
+    if (CV.reload_hl) {
+        sb_append(&sb, "<img class=\"ftue-controls__highlight-reload-animation\" src=\"./img/ftue/controls/highlight.png\">"
+                       "<img class=\"ftue-controls__hand-pointer-reload-animation\" src=\"./img/ftue/controls/hands_pointer.svg\">");
+    }
+    if (CV.arrows) sb_append(&sb, "<img class=\"ftue-controls__arrows-horizontal\" src=\"./img/ftue/controls/arrows_horizontal.svg\">");
+    if (CV.hand_anim[0] && !strcmp(CV.hand_side, "right")) append_hand(&sb, CV.hand_anim);
+    if (CV.complete) {
+        sb_append(&sb, "<div class=\"frvr-button frvr-button--yellow frvr-button--size-md frvr-button--width-150 frvr-animation-pulse ftue-controls__button\""
+                       " onclick=\"strikeAction('ftue-go')\"><span>Let's Go!</span></div>"
+                       "<img class=\"ftue-controls__hand-pointer-complete-animation\" src=\"./img/ftue/controls/hands_pointer.svg\">");
+    }
+    sb_append(&sb, "</div>");
+    sb_append(&sb, "<div class=\"frvr-main-menu__bottom\"><div class=\"frvr-main-menu--bottom-center frvr-main-menu--bottom-center--tap-to-play\">");
+    if (CV.bottom[0]) {
+        snprintf(t, sizeof(t), "<span class=\"ftue-controls__tap-text\">%s</span>", CV.bottom);
+        sb_append(&sb, t);
+    }
+    sb_append(&sb, "</div></div></div>");
+    char *html = sb_finish(&sb);
+    html_dom_set_html(F.root, html);
+    free(html);
+}
+
+void strike_ftue_controls_view(const StrikeFtueControlsView *v) {
+    if (!v) return;
+    memset(&CV, 0, sizeof(CV));
+    CV.on = 1;
+    snprintf(CV.bottom, sizeof(CV.bottom), "%s", v->bottom ? v->bottom : "");
+    snprintf(CV.tutor, sizeof(CV.tutor), "%s", v->tutor ? v->tutor : "");
+    snprintf(CV.middle, sizeof(CV.middle), "%s", v->middle ? v->middle : "");
+    snprintf(CV.hand_side, sizeof(CV.hand_side), "%s", v->hand_side ? v->hand_side : "");
+    snprintf(CV.hand_anim, sizeof(CV.hand_anim), "%s", v->hand_anim ? v->hand_anim : "");
+    CV.tutor_left = v->tutor_left;
+    CV.tutor_check = v->tutor_check;
+    CV.middle_flipped = v->middle_flipped;
+    CV.blur = v->blur;
+    CV.ignore = v->ignore_events;
+    CV.ripple = v->ripple;
+    CV.arrows = v->arrows;
+    CV.reload_hl = v->reload_highlight;
+    CV.complete = v->complete_button;
+    render();
+}
+
+void strike_ftue_controls_view_clear(void) {
+    memset(&CV, 0, sizeof(CV));
+    render();
+}
+
 // CAe.view(): the elements in FRVR's order (blocker, middle image, blur, highlight, bottom text, tutor)
 static void render(void) {
     if (!F.root) return;
+    if (CV.on) {
+        render_controls();
+        return;
+    }
     HtmlRect vp = {0, 0, FTUE_BASE_W, FTUE_BASE_H};
     html_dom_get_rect(F.root, &vp);
     if (vp.w <= 0) vp.w = FTUE_BASE_W;

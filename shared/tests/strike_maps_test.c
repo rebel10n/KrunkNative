@@ -172,6 +172,33 @@ static void test_strike(void) {
 // The rotation a game plays without a map list (game_configure / map_list_with_custom): under Strike
 // FRVR's pool, each map listed StrikeMap.weight times (mapPool's mapWeight); base keeps v7's
 // rotationMaps. Runs after test_strike (the pool files are cached by then).
+// The controls tutorial's sandbox (strike_ftue_map): FRVR's bot_ftue_v2 file, outside the pool and the rotation,
+// and the Strike catalogue loads that copy for it (the base catalogue keeps Krunker v10's custom file).
+static void test_ftue(void) {
+    const StrikeMap *m = strike_ftue_map();
+    CHECK(m && !strcmp(m->key, "bot_ftue_v2") && !strcmp(m->path, "maps/strike/bot_ftue_v2.json") && m->catalog_index < 0 && m->weight == 0,
+          "the FTUE sandbox entry");
+    CHECK(strike_map_by_key("bot_ftue_v2") == NULL && strike_map_for_catalog(0) != m, "the FTUE sandbox is not a pool map");
+    char path[96];
+    snprintf(path, sizeof(path), "assets/%s", m->path);
+    cJSON *json = NULL;
+    CHECK(!load_json_file(path, &json) && cJSON_IsObject(json), "%s does not load", path);
+    if (json) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "name"));
+        CHECK(name && !strcmp(name, "Mini Industry Tutorial"), "%s: file name '%s'", path, name ? name : "?");
+        CHECK(raw_count(json, "objects") == 647, "%s: %d objects", path, raw_count(json, "objects"));
+        // v7's validateMap refuses FRVR's own name (a sandbox map, never in the public list): documented, not a failure
+        const char *error = map_validate_error(json, 0);
+        CHECK(error && strstr(error, "name too long"), "%s: v7 validateMap: %s", path, error ? error : "passes");
+        cJSON_Delete(json);
+    }
+    const int index = map_catalog_index_of_key("bot_ftue_v2");
+    CHECK(index >= 0, "bot_ftue_v2 is in the catalogue");
+    const cJSON *loaded = map_catalog_json((size_t) index); // the catalogue shows its own display name
+    CHECK(loaded && raw_count(loaded, "objects") == 647, "Strike loads FRVR's bot_ftue_v2 (%d objects)",
+          loaded ? raw_count(loaded, "objects") : -1);
+}
+
 static void test_rotation(void) {
     // the weighting rule on a pool of our own: weights 2, 0, 3
     const StrikeMap pool[] = {{"a", "A", "a", "a.json", 4, 2}, {"b", "B", "b", "b.json", 5, 0}, {"c", "C", "c", "c.json", 6, 3}};
@@ -229,6 +256,7 @@ int main(const int argc, char **argv) {
     test_files(verbose);
     test_base();
     test_strike();
+    test_ftue(); // Strike's flavor (test_strike set it; test_rotation ends on the base flavor)
     test_rotation();
     printf("strike_maps_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

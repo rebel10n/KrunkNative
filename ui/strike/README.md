@@ -335,3 +335,58 @@ The HTML engine cannot read SVG or EOT: `font_src_is_loadable()` (client/src/htm
 TTF is used. Glyph codes in `icons.css` are CSS escapes (`content: "\f126"`); `css_parse_content()` decodes them.
 
 Krunker Box Office's `ui/img/frvr-ui/ad-icon.svg` (the same FRVR icon) is copied to `img/frvr-ui/ad-icon.svg`: the Double XP button's icon (client/src/ui/strike_double_xp.c). It is not in the 1.37.2 mirror above.
+
+## FTUE art and sandbox (controls tutorial, strike-ftue-part2)
+
+The controls tutorial (FRVR `controls_ftue`) uses the tutor, hand and bubble art and the sandbox map `bot_ftue_v2`.
+Fetched 2026-10-15 with GET only, one request every 1.3 s, exact paths, no cookies, no body, nothing executed. The
+first origin tried was FRVR's page origin `https://krunkerstrike.frvr.com/` (the bundle loads `./img/...` from there).
+All 11 files returned HTTP 200, so the local proxy (127.0.0.1:8888) was not needed and was not used. The CDN
+(`cdn.frvr.com/games/krunkerfrvr/img/ftue/...`) was not tried for these: the page origin already served every file.
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| img/ftue/controls/tutor.png | https://krunkerstrike.frvr.com/img/ftue/controls/tutor.png | 25c2a65d5f0daead8c6231a4132c15e9265f2e0f566f7ce73f28e95243a5e2fd |
+| img/ftue/controls/hands_pointer.svg | https://krunkerstrike.frvr.com/img/ftue/controls/hands_pointer.svg | 857c7d7be3110b7aa09f31a7ebfbbecc61fb58b6cbc23785cec6a35e28ea05da |
+| img/ftue/controls/checkmark.svg | https://krunkerstrike.frvr.com/img/ftue/controls/checkmark.svg | 9a0c77f8ab634c0acab4bb1096dac6256ee6f8eb539962e84c8d2dace3101962 |
+| img/ftue/controls/highlight.png | https://krunkerstrike.frvr.com/img/ftue/controls/highlight.png | cdc987501364c20508b921377b0a29541a5476d6d289ad47b87431e5ca90e8c1 |
+| img/ftue/controls/hands_hold.svg | https://krunkerstrike.frvr.com/img/ftue/controls/hands_hold.svg | f617c451905cf716e0dfd01c43f132002ce2008ea6d4b9877a62e45e3b65de4d |
+| img/ftue/controls/hands_walk.svg | https://krunkerstrike.frvr.com/img/ftue/controls/hands_walk.svg | 9dd032931595a101ec1cb02c32c5c6a71b859b28f96da1a672f33827e693a668 |
+| img/ftue/controls/hands_shoot.svg | https://krunkerstrike.frvr.com/img/ftue/controls/hands_shoot.svg | 1ab20529005163a66a29902eb6d68c61ce4a91218bbe2483776465863ba89dfc |
+| img/ftue/controls/hands_touch.svg | https://krunkerstrike.frvr.com/img/ftue/controls/hands_touch.svg | 0fa4c9a0edfb5b0d364822c44f5afca7cd3b8e1079c0b218e769924cdebb8d1a |
+| img/ftue/controls/arrows_horizontal.svg | https://krunkerstrike.frvr.com/img/ftue/controls/arrows_horizontal.svg | 42cc7cdfc88e55a29b8c81a3a8d13c963a8a71eccfbab4f186a5189c5f36aa95 |
+| img/frvr-ui/bubble/baloon.png | https://krunkerstrike.frvr.com/img/frvr-ui/bubble/baloon.png | 5c269d5102fd9fa59cdbf752eabdca19e43614d19871efa894c1423b2a86b208 |
+| img/frvr-ui/bubble/baloon-flipped.png | https://krunkerstrike.frvr.com/img/frvr-ui/bubble/baloon-flipped.png | 7c5df9c60d3d57c20d83c098f65ff9528eb0b2c35788084d78aefa5adcc359cf |
+
+Missing: none. Every path the controls markup references (tutor, hands, checkmark, highlight, arrows, bubble) returned 200;
+no 404 was seen for these, so no step falls back to the CSS-only bubble. The sandbox map is FRVR's own `maps/bot_ftue_v2.json` (1.37.2 `public/maps/`,
+sha256 4a8f6ed85d420f27686cf300c3ae3b026e169fc13cabe5acb9dd4d2a4e55740a, 40166 bytes, name "Mini Industry Tutorial",
+647 objects, 1 spawn), copied unmodified to `assets/maps/strike/bot_ftue_v2.json`. It is a Strike-only copy: the base
+catalogue keeps Krunker v10's own `assets/maps/custom/bot_ftue_v2.json` ("Mini Industry", 653 objects, 18 spawns).
+
+### FTUE steps (controls_ftue)
+
+Verified in a headless sandbox run (client/src/ui/strike_ftue_controls.c, server/tests/strike_ftue_e2e.py run 4): the
+first run's quick connect loads the sandbox and starts the flow; welcome, basics, hold and move advance in order on
+their tap (strikeAction 'ftue-tap'), move_controls is entered and stored in knFtue.json.
+
+Implemented but NOT verified in the sandbox (the flow stops at move_controls, see below): move_controls (the move
+stick), move_interaction, move_end (timed, 3000 ms), camera, camera_controls, camera_interaction (the look stick),
+camera_end, jump (Space / the jump control), jump_end, reload (the reload control), complete, complete_go ("Let's Go!"
+leaves the game for the menu). Their advance events come from strike_touch.c's move / look / key paths and
+ui_controls.c's press_code, the same paths the game uses; the timed steps use html_timer_add.
+
+Why the flow stops: in the sandbox the move stick's zone (`.joystick-zone`) has a zero-size box under the page's mobile
+holder (input-script `rects`: zone 0x0, the drawn `.joystick` at 138,410 in 1280x720), so a press on the stick does not
+reach T_MOVE_ZONE, and the keyboard keys (W, D) do not advance move_controls either (move_controls ends on the stick).
+The look drag does reach the touch layer. This is a layout issue of the Strike touch layer on the page, outside the
+tutorial, and it is not fixed here.
+
+Scope: only a first run starts the flow (strike_ftue_first_run); a returning account whose flow has not ended does not
+resume it. FRVR starts controls_ftue whenever it has not completed, so this is a known difference.
+
+Skipped (need FRVR's FTUE bots: `FTUE_BOTS` / `FTUE_RESPAWN` packets, which the engine does not have): enemies_near,
+enemies_near_controls, enemies_near_interaction, enemies_near_end, enemies_far, enemies_far_controls,
+enemies_far_interaction, enemies_far_end. The flow advances past them only by the bot steps; they are not run here.
+
+Not part of this patch: the bots second FTUE, the customize / name-change / hall-of-fame flows and the round-end FTUE steps.

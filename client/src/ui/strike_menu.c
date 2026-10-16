@@ -27,6 +27,7 @@
 // 0 Triggerman, 1 Hunter, 2 Run N Gun, 4 Shotgunner (Krunker's Vince), 5 Detective, 7 Rocketeer.
 #include <strike_ui.h>
 #include <strike_notify.h>
+#include <strike_ftue.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <backend_ui.h>
@@ -2163,7 +2164,15 @@ static void action(const char *a) {
         server_password_leave();
         return;
     }
-    if (!strcmp(a, "play")) play();
+    if (!strcmp(a, "ftue-tap")) strike_ftue_controls_tap(); // the controls tutorial's tap blur (strike_ftue_controls.c)
+    else if (!strcmp(a, "ftue-go")) {
+        // "Let's Go!" (FRVR: Tx, then backToOrigin): the tutorial ends and the game is left for the menu
+        if (strike_ftue_controls_running()) {
+            strike_ftue_controls_go();
+            if (!html_ui_is_menu_open() && M.client) client_set_menu_open(M.client, 1);
+            strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
+        }
+    } else if (!strcmp(a, "play")) play();
     else if (!strcmp(a, "switch_teams")) switch_teams_start();
     else if (!strncmp(a, "buy-confirm:", 12)) {
         // U2's YA: onPurchase (kt: the popup goes), then $r

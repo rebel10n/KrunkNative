@@ -87,10 +87,11 @@
  * selector is more specific than devconsole.css's, which is added after this sheet. */
 html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(200px,calc(100vh - 30px))}
 
-/* GAP (ftue): the tutor bubble's border art (img/frvr-ui/bubble/baloon*.png) and the tutor and hand art
- * (img/ftue/controls/*) are not in the 1.37.2 copy and the CDN answers 404. A plain panel keeps the text
- * readable over the game until the art is vendored (then this rule goes). */
-.speech-bubble-ftue-controls{background:rgba(8,12,18,.85);color:#fff;border-radius:calc(8 * var(--base-scale))}
+/* FTUE (controls tutorial): the bubble's art (img/frvr-ui/bubble/baloon*.png) and the tutor, hand and checkmark
+ * art (img/ftue/controls/*) are vendored from the page origin (ui/strike/README.md), so the bubble is FRVR's own
+ * (white balloon, black text: .speech-bubble). The controls view's root is FRVR's full-page layer; touches reach
+ * the game only with .ftue-controls__ignore-events (the page's own rule). */
+.ftue-controls__root{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
 /* GAP (native engine): the killer's picture in the kill card ("Killed By") is a replaced element that is a flex
  * item of a 50 x 50 box. FRVR sizes it with max-height:100% and width:auto, and the browser takes the stretched
  * height through the image's aspect ratio (the 8 x 8 class icon is 50 x 50). The engine keeps the image's

@@ -21,6 +21,7 @@
 // tools/strike/strike_data.json "input.touch"); the table below keeps what is code (binds, kinds).
 #include <strike_ui.h>
 #include <strike_rules.h>
+#include <strike_ftue.h>
 #include <flavor.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -157,6 +158,7 @@ static void key(const int id, const int down) {
     if (id < 0 || id >= UI_CONTROL_COUNT) return;
     T.keys_down[id] = down;
     ui_controls_controller_key(T.client, id, down);
+    if (down) strike_ftue_controls_control_down(id); // the controls tutorial's jump and reload steps
 }
 
 static int game_enabled(void) {
@@ -324,8 +326,14 @@ static void move_end(void) { // V
     key(UI_CONTROL_RIGHT, 0);
 }
 
-static void look_start(void) { T.look_active = 0; } // H
-static void look_end(void) { T.look_active = 0; }   // j
+static void look_start(void) { // H
+    T.look_active = 0;
+    strike_ftue_controls_event(STRIKE_FTUE_EV_LOOK_START);
+}
+static void look_end(void) { // j
+    T.look_active = 0;
+    strike_ftue_controls_event(STRIKE_FTUE_EV_LOOK_END);
+}
 
 static void look_move(const float x, const float y, float *dx, float *dy) { // Y
     const float nx = x - T.look_x, ny = y - T.look_y;
@@ -894,6 +902,7 @@ static int touch_start(const long id, const float x, const float y) {
             T.move_nipple.px = x;
             T.move_nipple.py = y;
             T.moving = 1; // R (Ry = true)
+            strike_ftue_controls_event(STRIKE_FTUE_EV_MOVE_START);
             nipple_show(&T.move_nipple);
             const StickMove m = nipple_move(&T.move_nipple, x, y);
             if (m.dir_x || m.dir_y) move_keys(&m);
@@ -949,6 +958,7 @@ static int touch_end(const long id) {
             nipple_hide(&T.move_nipple, 1);
             T.moving = 0; // V (Ry = false)
             move_end();
+            strike_ftue_controls_event(STRIKE_FTUE_EV_MOVE_END);
             break;
         case T_AIM_ZONE: aim_zone_end(); break;
         case T_AIM_STICK:
