@@ -115,7 +115,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
-        "--lobbyui": "lobbyui",
+        "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
@@ -165,6 +165,7 @@ BUILD_VERSION = header_value("KRUNKER_BUILD_VERSION")
 SALT = b"KRUNK3R_AC"
 GAME_ID, CLIENT_ID, MY_SID, BOT_SID = "TEST:abc12", "cid-42", 9, 5
 OLD_BURG_GAME = "TEST:oldbg"  # a second official lobby in the browser's list, on Old_Burg (never joined)
+KIO_CUSTOM_GAME, KIO_OFFICIAL_GAME = "TEST:kcust", "TEST:ocust"  # krunker.io's custom game and official custom (never joined)
 MAP_INDEX, MAP_NAME = 43, "Bastion"  # past v7.1.4's 32 maps: the map the client used to refuse
 # killfeed-name regression: DEAD_SID is a player the stub adds ("0") then void-kills ("3", killer
 # -1) so its name must appear in #killFeed; UNKNOWN_SID is a sid the stub never adds, whose "3"
@@ -505,7 +506,10 @@ class Stub:
                     body, ctype = json.dumps({"success": True, "totalPlayerCount": 5, "games": [
                         [GAME_ID, "de-fra", 3, 8, {"i": MAP_NAME, "g": 0}, 240],
                         # its row must read Krunker's own name: the catalogue's alias would retitle it Burg (1.5.2)
-                        [OLD_BURG_GAME, "de-fra", 2, 8, {"i": "Old_Burg", "g": 0}, 240]]}).encode(), "application/json"
+                        [OLD_BURG_GAME, "de-fra", 2, 8, {"i": "Old_Burg", "g": 0}, 240],
+                        # krunker.io's customs (never joined): their rows stay in the KRUNKER.IO groups (run_native_kio_groups)
+                        [KIO_CUSTOM_GAME, "de-fra", 4, 8, {"i": "Kanji", "g": 0, "c": True, "h": "KioCustomRoom"}, 240],
+                        [KIO_OFFICIAL_GAME, "de-fra", 3, 8, {"i": "Kanji", "g": 0, "c": True, "oc": True, "h": "KioOfficialRoom"}, 240]]}).encode(), "application/json"
                 elif u.path == "/seek-game" and stub.lobbies is not None:
                     qd = dict(q)
                     game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
@@ -2681,6 +2685,52 @@ def run_native_lobby():
     check(f"{label}: no Turnstile token reaches the log", PASTE_TOKEN not in "\n".join(l for l in lines if "[input_script]" not in l))
 
 
+def run_native_kio_groups():
+    """The Servers window's groups (servers_ui.c build_groups): krunker.io's official customs and custom games sit
+    in their own KRUNKER.IO groups (kio:official, kio:custom), its other lobbies in its region groups, all after ours.
+    Box Office's Custom Games and its region groups hold Box Office games only. Box Office's games come from
+    KRUNKNATIVE_SERVER_LIST (a custom game and a Frankfurt lobby, offline: no brain), krunker.io's from the stub's
+    list. Each group is opened in turn (call setExpandedRegion i) and its rows are counted by title."""
+    label = "native-kio-groups"
+    servers = os.path.join(WORK, label + "-servers.json")
+    with open(servers, "w") as f:
+        json.dump({"games": [
+            ["BOHOST:1", "de-fra", 2, 8, {"i": "Kanji", "h": "BoCustomRoom", "cs": True, "host": "127.0.0.1", "port": 7101}, 240],
+            ["BOHOST:2", "de-fra", 3, 8, {"i": "Kanji", "g": 0, "host": "127.0.0.1", "port": 7102}, 240]],
+            "totalPlayerCount": 5}, f)
+    steps = ["0 menu", "300 call showWindow 2", "3000 nodes @hdrs [id=serverHolder] .setHed", "3010 nodes @kiohdr [id=serverHolder] .kioHed"]
+    for i in range(6):  # the groups in list order (a group index past the last one opens nothing)
+        t = 3100 + 150 * i
+        steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @bo{i} BoCustomRoom [id=serverHolder] .settNameIn",
+                  f"{t + 60} grep @kc{i} KioCustomRoom [id=serverHolder] .settNameIn", f"{t + 80} grep @ko{i} KioOfficialRoom [id=serverHolder] .settNameIn"]
+    end = 3100 + 150 * 6 + 100
+    steps.append(f"{end} quit")
+    # no server finder (its 20 servers would join the Box Office groups)
+    stub, p, out, log = launch_native(label, "\n".join(steps) + "\n",
+                                      {"KRUNKNATIVE_SERVER_LIST": servers, "KRUNKNATIVE_FINDER_URL": "off"}, args=("--offline",))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    nodes = re.search(r"nodes t=\d+ @hdrs elements=\d+ match=(\d+)", text)
+    kio_hdr = re.search(r"nodes t=\d+ @kiohdr elements=\d+ match=(\d+)", text)
+    total = int(nodes.group(1)) if nodes else -1
+    krunker_headers = int(kio_hdr.group(1)) if kio_hdr else -1  # the krunker.io groups' headers (class kioHed)
+    hits = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\w+) needle=\S+ n=\d+ hits=(\d+)", text)}
+    bo = [hits.get(f"bo{i}", 0) for i in range(6)]
+    kc = [hits.get(f"kc{i}", 0) for i in range(6)]
+    ko = [hits.get(f"ko{i}", 0) for i in range(6)]
+    check(f"{label}: the groups are five: Box Office's Custom Games and Frankfurt, krunker.io's Official Customs, Custom Games and Frankfurt",
+          total == 5 and krunker_headers == 3, (total, krunker_headers, text[-400:]))
+    bo_group = [i for i in range(6) if bo[i]]
+    kc_group = [i for i in range(6) if kc[i]]
+    ko_group = [i for i in range(6) if ko[i]]
+    check(f"{label}: the Box Office custom game is in one group", len(bo_group) == 1, (bo, kc, ko))
+    check(f"{label}: no krunker.io row sits in a Box Office group (its custom game, its official custom)",
+          bo_group and not any(kc[i] or ko[i] for i in bo_group), (bo, kc, ko))
+    check(f"{label}: krunker.io's custom game is in one krunker.io group, not Box Office's", len(kc_group) == 1 and not bo[kc_group[0]], (bo, kc, ko))
+    check(f"{label}: krunker.io's official custom is in one krunker.io group, not Box Office's", len(ko_group) == 1 and not bo[ko_group[0]], (bo, kc, ko))
+    check(f"{label}: the krunker.io custom and official custom are in different groups", kc_group and ko_group and kc_group != ko_group, (kc_group, ko_group))
+
+
 BAD_MAP_INDEX = 999  # past krunker_maps.h's table, not in the (private) cache, and the maps API does not answer
 
 
@@ -3881,6 +3931,7 @@ def main():
         run_native_popups()
         run_native_lobbyui()
         run_native_lobby()
+        run_native_kio_groups()
         run_native_badmap()
         run_native_kick()
         run_native_fx()
@@ -3923,6 +3974,8 @@ def main():
         run_native_lobbyui()
     if ONLY == "prophunt" and os.path.isfile(f"{BUILD}/client_bin"):  # just the Prop Hunt run
         run_native_prophunt()
+    if ONLY == "groups" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server browser's krunker.io groups run
+        run_native_kio_groups()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

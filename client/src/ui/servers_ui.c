@@ -1376,8 +1376,8 @@ static char g_finder_error[256];  // the last finder request's failure ("" = ok)
 // account-only: every server admits guests and accounts alike.
 // The v7 fields they stand for: c = cs, pw = pr (lock icon), kr = earnKR, g = mode,
 // ds (24/7 dedicated) = a finder-listed server, h (the row's name) = its server name,
-// tuple[5] (seconds left) = meta.timeLeft. KrunkNative has no official customs (oc) and no
-// priority servers (pr star).
+// tuple[5] (seconds left) = meta.timeLeft. KrunkNative's own lobbies have no official customs (oc)
+// and no priority servers (pr star); krunker.io's official customs go to their own kio:official group.
 
 static int str_has_ci(const char *hay, const char *needle) {
     if (!needle || !needle[0]) return 1;
@@ -1633,12 +1633,18 @@ static int cmp_groups_order(const void *a, const void *b) {
 static int group_top(const ServerGroup *g) {
     return !strcmp(g->key, "official") ? 1 : !strcmp(g->key, "custom") ? 2 : 0;
 }
+// krunker.io's own groups, in their section after ours: its Official Customs and Custom Games
+// (v10's top two, never merged with ours), then its regions or modes
+static int kio_rank(const char *key) {
+    return !strcmp(key, "kio:official") ? 0 : !strcmp(key, "kio:custom") ? 1 : 2;
+}
 static int cmp_groups_players(const void *a, const void *b) {
     const ServerGroup *x = a, *y = b;
     const int tx = group_top(x), ty = group_top(y);
     if (tx || ty) return tx && ty ? tx - ty : ty ? 1 : -1; // official and custom first
     const int kx = !strncmp(x->key, "kio:", 4), ky = !strncmp(y->key, "kio:", 4);
     if (kx != ky) return kx - ky; // krunker.io's groups after ours (mm-token)
+    if (kx && kio_rank(x->key) != kio_rank(y->key)) return kio_rank(x->key) - kio_rank(y->key);
     if (y->players != x->players) return y->players > x->players ? 1 : -1;
     return x->region_rank - y->region_rank;
 }
@@ -1659,6 +1665,30 @@ static void stable_sort(const cJSON **games, const int n, int (*cmp)(const void 
 static void group_push(ServerGroup *g, const cJSON *t) {
     if (!g_search[0] || search_matches(t)) g->players += row_players(t);
     if (g->game_count < 256) g->games[g->game_count++] = t;
+}
+
+// The group of a krunker.io row (mm-token): kio:official / kio:custom for its official customs and
+// custom games (their own groups, never Box Office's Custom Games or Official Customs), else
+// kio:<region> (one group per Krunker region, v10's place name). Both are added after ours. Ours
+// never take a krunker.io row. Returns the group index, -1 = none.
+static int kio_group(ServerGroup *groups, int *count, const int max, const cJSON *t) {
+    char key[32], name[64];
+    if (row_official(t) || row_custom(t)) {
+        snprintf(key, sizeof(key), "%s", row_official(t) ? "kio:official" : "kio:custom");
+        snprintf(name, sizeof(name), "krunker.io - %s", row_official(t) ? "Official Customs" : "Custom Games");
+    } else {
+        snprintf(key, sizeof(key), "kio:%s", tuple_str(t, 1));
+        snprintf(name, sizeof(name), "%s", krunker_region_name(tuple_str(t, 1)));
+    }
+    int gi = find_group(groups, *count, key);
+    if (gi < 0 && *count < max) {
+        ServerGroup *g = &groups[*count];
+        snprintf(g->key, sizeof(g->key), "%s", key);
+        snprintf(g->name, sizeof(g->name), "%s", name);
+        g->region_rank = 1000 + (kio_rank(key) < 2 ? kio_rank(key) : 2 + *count);
+        gi = (*count)++;
+    }
+    return gi;
 }
 
 // getServers(): the region groups (oldBrowser, the default) or the mode groups of the
@@ -1690,20 +1720,8 @@ static int build_groups(ServerGroup *groups, const int max) {
             cJSON_ArrayForEach(t, lists[l]) {
                 const char *region = tuple_str(t, 1);
                 if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
-                if (row_krunker(t)) { // official customs and custom games: the top groups; the other official lobbies: one group per Krunker region, after ours
-                    char key[32];
-                    if (row_official(t) || row_custom(t)) snprintf(key, sizeof(key), "%s", row_official(t) ? "official" : "custom");
-                    else snprintf(key, sizeof(key), "kio:%s", region);
-                    int gi = find_group(groups, count, key);
-                    if (gi < 0 && count < max) {
-                        ServerGroup *g = &groups[count];
-                        snprintf(g->key, sizeof(g->key), "%s", key);
-                        // v10's group name: the region's place name (_7517), nothing else; the section's one
-                        // separator line (append_krunker_status) tells them apart from ours
-                        snprintf(g->name, sizeof(g->name), "%s", krunker_region_name(region));
-                        g->region_rank = 1000 + count;
-                        gi = count++;
-                    }
+                if (row_krunker(t)) { // krunker.io's customs and its regions, after ours (kio_group)
+                    const int gi = kio_group(groups, &count, max, t);
                     if (gi >= 0) group_push(&groups[gi], t);
                     continue;
                 }
@@ -1732,7 +1750,10 @@ static int build_groups(ServerGroup *groups, const int max) {
         qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_order);
         for (int i = 0; i < count; i++) {
             stable_sort(groups[i].games, groups[i].game_count, cmp_games_old);
-            if (!strcmp(groups[i].key, "custom") || !strcmp(groups[i].key, "official")) stable_sort(groups[i].games, groups[i].game_count, cmp_games_region);
+            const char *key = groups[i].key;
+            if (!strcmp(key, "custom") || !strcmp(key, "official") || !strcmp(key, "kio:custom") || !strcmp(key, "kio:official")) {
+                stable_sort(groups[i].games, groups[i].game_count, cmp_games_region);
+            }
         }
         return count;
     }
@@ -1761,9 +1782,11 @@ static int build_groups(ServerGroup *groups, const int max) {
             if (!row_krunker(t) && only_default && strcmp(def, tuple_str(t, 1))) continue;
             if ((g_server_tab == 0 && custom) || (g_server_tab == 1 && !custom)) continue;
             int gi;
-            if (row_official(t)) { // official customs: the top group
+            if (row_krunker(t) && (row_official(t) || row_custom(t))) { // krunker.io's customs: their own groups, after ours
+                gi = kio_group(groups, &count, max, t);
+            } else if (row_official(t)) { // official customs: the top group
                 gi = find_group(groups, count, "official");
-            } else if (custom) { // custom games, ours and krunker.io's: the top group
+            } else if (custom) { // custom games: the top group
                 gi = find_group(groups, count, "custom");
             } else {
                 // ours and the official lobbies alike: the mode's group (v10 lists every lobby of a mode
