@@ -357,7 +357,8 @@ void social_push_all_json(cJSON *frame) {
 cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
     const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",
-                          "creator_badge"}; /* v10's creatorBadge (0210_creator_badge) */
+                          "creator_badge", /* v10's creatorBadge (0210_creator_badge) */
+                          "dxp"};          /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));
@@ -734,6 +735,7 @@ static const SocialRoute k_routes[] = {
     {"wo", sh_wild_offer},              /* v10 shop.getWildOffer (wild_offer.c) */
     {"wob", sh_wild_offer_buy},         /* v10 shop.purchaseWildOffer */
     {"wor", sh_wild_offer_refresh},     /* v10 shop.refreshWildOffer */
+    {"rqdxp", sh_double_xp_claim},      /* v10 2x XP claim after the end-screen offer -> "rrqdxp" (double_xp_social.c) */
     {"clnRA", sh_clan_decline_all},     /* v10 clan window: Decline All */
     {"vcln", sh_clan_viewed},           /* v10 OPEN_CLAN_TAB */
     {"uploadS", sh_settings_up},
@@ -864,6 +866,8 @@ static const LabelClass k_label_class[] = {
     {"bpclm", RC_WRITE, ANS_REPLY}, {"bpclmAll", RC_WRITE, ANS_REPLY}, {"xstbp", RC_WRITE, ANS_REPLY},
     {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
     {"raml", RC_WRITE, ANS_REPLY},
+    {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
+    {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
     /* fire-and-forget: no reply, one notice per refusal window */
     {"sfkr", RC_NOTICE, ANS_NOTICE}, {"lfkr", RC_NOTICE, ANS_NOTICE}, {"fkrf", RC_NOTICE, ANS_NOTICE},
     {"unbx", RC_NOTICE, ANS_NOTICE}, {"vcln", RC_NOTICE, ANS_NOTICE},

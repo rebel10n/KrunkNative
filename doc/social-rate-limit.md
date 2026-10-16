@@ -22,8 +22,8 @@ Limits (per connection, per class):
 | class | per s | burst | frames |
 | --- | --- | --- | --- |
 | `auth` | 0.5 | 10 | `a` (login, register, logout), `2fa`, `a2FA`, `a2FAc`, `d2FA`, `d2FAc`, `cemail`, `emailv`, `emailS`, `rpr`, `rpc`, `rps`, `upp`, `las` |
-| `read` | 50 | 200 | gapi GET (any path), `eb` `friends:list` and `msg:history`, and the socket reads `r`, `sp`, `gfs`, `gfg`, `pst`, `guf`, `grp`, `gps`, `chtb`, `ctd`, `getS`, `ttl`, `dsp`, `krh`, `spinH`, `sst`, `chg`, `mdl`, `bpdl`, `ri`, `ecfg`, `st`, `kml`, `fil`, `uml` |
-| `write` | 20 | 100 | gapi POST, PUT, DELETE, `eb` `msg:send` and `msg:read`, and the socket writes `f`, `ps`, `com`, `lps`, `dps`, `ict`, `kr`, `cln`, `clnR`, `clnRA`, `rpt`, `flg`, `ver`, `crt`, `sbdg`, `nme`, `uploadS`, `uploadM`, `uploadMo`, `uploadA`, `edMp`, `fvM`, `ftC`, `delC`, `li`, `uli`, `pi`, `qsi`, `ctr`, `trA`, `trC`, `trCA`, `srt`, `pbm`, `spin`, `fkr`, `clm`, `bdg`, `cbdg`, `bpclm`, `bpclmAll`, `xstbp`, `xstbpl`, `dsl`, `rml`, `raml`; a route the table does not name is a write |
+| `read` | 50 | 200 | gapi GET (any path), `eb` `friends:list` and `msg:history`, and the socket reads `r`, `sp`, `gfs`, `gfg`, `pst`, `guf`, `grp`, `gps`, `chtb`, `ctd`, `getS`, `ttl`, `dsp`, `krh`, `spinH`, `sst`, `chg`, `mdl`, `bpdl`, `ri`, `ecfg`, `st`, `kml`, `fil`, `uml`, `wo` |
+| `write` | 20 | 100 | gapi POST, PUT, DELETE, `eb` `msg:send` and `msg:read`, and the socket writes `f`, `ps`, `com`, `lps`, `dps`, `ict`, `kr`, `cln`, `clnR`, `clnRA`, `rpt`, `flg`, `ver`, `crt`, `sbdg`, `nme`, `uploadS`, `uploadM`, `uploadMo`, `uploadA`, `edMp`, `fvM`, `ftC`, `delC`, `li`, `uli`, `pi`, `qsi`, `ctr`, `trA`, `trC`, `trCA`, `srt`, `pbm`, `spin`, `fkr`, `clm`, `bdg`, `cbdg`, `bpclm`, `bpclmAll`, `xstbp`, `xstbpl`, `dsl`, `rml`, `raml`, `rqdxp` (the v10 2x XP claim), `wob`, `wor` (the wild offer purchase and refresh); a route the table does not name is a write |
 | `live` | 2 | 20 | `eb` `presence:ping` |
 | `notice` | 5 | 20 | `sfkr`, `lfkr`, `fkrf`, `unbx`, `vcln`; any label that is no route; an `eb` type the table does not name; a frame without a label |
 

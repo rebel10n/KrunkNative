@@ -32,6 +32,9 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/store_spins_table.c  # generated: gapi /data/spins (tools/ui-import/gen_viewer_store.js)
     daily_spin.c                    # v10 Daily Spin ("dsp" / "dsl")
     wild_offer.c                    # v10 Wild Offers ("wo" / "wob" / "wor")
+    # v10 double XP: the end-screen 2x XP claim ("rqdxp"), the weekend schedules and the offer (0341_double_xp)
+    db_double_xp.c                  # the pure rules: ../../shared/src/double_xp.c (every shared/src/*.c is in the brain)
+    double_xp_social.c
     shared_shim.c
     # coord-auth: roles, central auth, server finder
     roles.c
@@ -176,6 +179,12 @@ if (KN_WEBP_FOUND)
 endif ()
 add_test(NAME brain_avatar COMMAND kn_brain_avatar_test ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(brain_avatar PROPERTIES LABELS "knsvc;brain;avatar")
+
+# v10 double XP: the weekend schedules, the ISO week, the per-match offer gate and the placeholder (pure)
+add_executable(kn_brain_double_xp_test tests/test_double_xp.c ${CMAKE_SOURCE_DIR}/shared/src/double_xp.c)
+target_include_directories(kn_brain_double_xp_test PRIVATE ${CMAKE_SOURCE_DIR}/shared/include)
+add_test(NAME brain_double_xp COMMAND kn_brain_double_xp_test)
+set_tests_properties(brain_double_xp PROPERTIES LABELS "knsvc;brain;economy")
 
 # Registry unit test (pure, no DB).
 add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
@@ -423,6 +432,17 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/studios_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_studios PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10 double XP (0341_double_xp): the end-screen 2x XP offer, the claim, the weekend schedules (Box Office commits)
+    foreach (drv IN ITEMS postgres sqlite)
+        string(TOUPPER ${drv} DRV)
+        if (Python3_FOUND AND KNSVC_STORE_${DRV})
+            add_test(NAME brain_double_xp_${drv}
+                COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/double_xp_test.py
+                        $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+            set_tests_properties(brain_double_xp_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+                ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;economy;${drv}")
+        endif ()
+    endforeach ()
     # the same through the v10 page: headless client_bin (client/src/ui/v10_studios.c)
     add_test(NAME brain_v10_studios_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_studios_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

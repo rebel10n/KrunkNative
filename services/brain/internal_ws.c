@@ -455,8 +455,9 @@ static void handle_commit(NodeConn *c, const cJSON *frame) {
         cJSON_AddNumberToObject(args, "id", (double) acc);
         if (!cJSON_GetObjectItemCaseSensitive(args, "match"))
             cJSON_AddStringToObject(args, "match", match_key);
-        const char *copy[] = {"mode", "map"};
-        for (size_t i = 0; i < 2; i++) {
+        /* comp: v10 isComp, no end-screen 2x XP; classDouble: the round's class XP flag (double_xp.h) */
+        const char *copy[] = {"mode", "map", "comp", "classDouble"};
+        for (size_t i = 0; i < sizeof copy / sizeof *copy; i++) {
             const cJSON *v = cJSON_GetObjectItemCaseSensitive(frame, copy[i]);
             if (v && !cJSON_GetObjectItemCaseSensitive(args, copy[i]))
                 cJSON_AddItemToObject(args, copy[i], cJSON_Duplicate(v, 1));

@@ -140,4 +140,11 @@ extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK,
     P_RQ_MATCH_READY, P_RQ_MATCH_FAILED, P_RQ_MATCH_FINISH, P_RQ_RATINGS, P_MM_NODE_TAKEOVER, P_MM_NODE_UPDATE,
     P_MM_HOST_CLAIM, P_MM_HOST_REQUEST, P_MM_NODE_HEARTBEAT, P_MM_REFRESH_NODES;
 
+/* ---- v10 double XP: the end-screen 2x XP of the last match (db_double_xp.c, 0341_double_xp) */
+extern const kn_proc P_DXP_CLAIM;
+/* The account's "dxp" object at now: {offer: {games, xp, claimable} | null, doubleClassXP, doubleRaidDrops}. */
+cJSON *db_dxp_state(Dbx *x, int64_t id, int64_t now);
+/* The commit's offer for the match just committed: offered (the match counted and was not competitive). */
+void db_dxp_record_match(Dbx *x, int64_t id, int offered, int64_t xp);
+
 #endif

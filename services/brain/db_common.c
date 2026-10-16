@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "knsvc/loop.h"
+
 /* ------------------------------------------------------------------ Dbx */
 
 const char *dbx_i64s(char buf[24], int64_t v) {
@@ -346,5 +348,7 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     cJSON_ArrayForEach(row, rows) cJSON_AddItemToArray(badges, cJSON_CreateNumber(num(row, "b")));
     cJSON_Delete(rows);
     cJSON_AddItemToObject(o, "badges", badges);
+    /* v10 double XP: the end-screen 2x XP offer and the weekend schedules (kn_account_json's "dxp", 0341_double_xp) */
+    cJSON_AddItemToObject(o, "dxp", db_dxp_state(x, id, kn_wall_ms()));
     return o;
 }

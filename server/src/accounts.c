@@ -11,6 +11,7 @@
 #include <rcon.h>
 #include <auth_join.h>
 #include <net_ext.h>  // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in
+#include <double_xp.h> // v10 double XP: the round's class XP flag (isDoubleClassXP at the round start)
 #include <map_catalog.h>
 #include <published_maps.h> // a hosted published map: the check and the cache
 #include <map_validate.h>
@@ -84,6 +85,7 @@ static struct {
     // dedicated server (doc/backend.md 8.7-8.9)
     char server_nonce[AUTH_JOIN_NONCE_LEN + 1]; // per boot, AUTH_CHALLENGE / serverHash
     uint32_t next_central_rid;
+    int class_double;          // v10 isDoubleClassXP of this round (double_xp.h), set at the round start
 } g_acc;
 
 // v10 Turf Wars (territorialWars): this round's counted clan kills per account, flushed to the brain
@@ -1109,6 +1111,8 @@ static void acc_commit(ClientConnection **clients, const int count, const int fi
     cJSON_AddStringToObject(frame, "map", acc_map_name());
     cJSON_AddNumberToObject(frame, "mode", game_mode_id(&g_server->game));
     cJSON_AddBoolToObject(frame, "custom", g_acc.custom);
+    cJSON_AddBoolToObject(frame, "comp", g_server->game.config.comp); // v10 isComp: a competitive game gets no end-screen 2x XP
+    cJSON_AddBoolToObject(frame, "classDouble", g_acc.class_double);  // v10 isDoubleClassXP, set when the round started
     cJSON *players = cJSON_AddArrayToObject(frame, "players");
     for (int i = 0; i < count; i++) {
         cJSON_AddItemToArray(players, acc_player_stats(clients[i], final));
@@ -1235,6 +1239,8 @@ void accounts_round_ending(void) {
 
 void accounts_round_changed(void) {
     Game *game = &g_server->game;
+    // v10 updateEventFlags: the class XP flag of this round, fixed at its start (double_xp.h)
+    g_acc.class_double = dxp_schedule((int64_t) time(NULL) * 1000).double_class_xp;
     const int mode_id = game_mode_id(game);
     game_network_apply(game, g_server->config.tick_rate); // WP-E: the round's networkData (applyNetworking, mode.sendR)
 

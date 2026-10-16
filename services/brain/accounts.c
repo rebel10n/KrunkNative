@@ -978,6 +978,9 @@ static cJSON *stats_args(const cJSON *a) {
     cJSON_AddNumberToObject(p, "games", (double) kn_json_int(a, "games", 0));
     cJSON_AddNumberToObject(p, "time_ms", (double) kn_json_int(a, "time_ms", kn_json_int(a, "timePlayed", 0)));
     cJSON_AddNumberToObject(p, "kr", (double) kn_json_int(a, "kr", 0));
+    cJSON_AddNumberToObject(p, "comp", (double) kn_json_bool(a, "comp", 0)); /* v10 isComp: no end-screen 2x XP (double_xp.h) */
+    if (cJSON_GetObjectItemCaseSensitive(a, "classDouble")) /* the round's class XP flag (double_xp.h), when the server sent it */
+        cJSON_AddNumberToObject(p, "classDouble", (double) kn_json_bool(a, "classDouble", 0));
     const int64_t cls = kn_json_int(a, "class", kn_json_int(a, "classIndex", -1));
     if (cls >= 0) cJSON_AddNumberToObject(p, "class", (double) cls);
     const char *keys[] = {"mode", "map", "region", "server"};

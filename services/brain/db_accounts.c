@@ -5,6 +5,8 @@
  * the other drivers (sqlite/0100.., mysql/0100..), returning the same shape.
  */
 #include "db_procs.h"
+#include "double_xp.h"
+#include "knsvc/loop.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -266,6 +268,7 @@ static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p)
     const cJSON *wv = cJSON_GetObjectItemCaseSensitive(in, "won");
     int won = cJSON_IsNumber(wv) ? wv->valuedouble != 0 : cJSON_IsTrue(wv);
     int64_t games = clamp0(jint(in, "games", 0)), time_ms = clamp0(jint(in, "time_ms", 0));
+    const int comp = jint(in, "comp", 0) != 0; /* a competitive game: no end-screen 2x XP (isComp) */
     int64_t kr = clamp0(jint(in, "kr", 0));
     if (kr > clamp0(PI(1))) kr = clamp0(PI(1));
     const cJSON *cls = cJSON_GetObjectItemCaseSensitive(in, "class");
@@ -304,7 +307,12 @@ static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p)
         char key[32];
         snprintf(key, sizeof key, "c%lld", (long long)cls->valuedouble);
         cJSON_DeleteItemFromObjectCaseSensitive(stats, key);
-        cJSON_AddNumberToObject(stats, key, (double)xp); /* jsonb || : the class xp replaces a stats member */
+        /* v10 isDoubleClassXP, fixed when the match started: the game server sends it per round
+         * ("classDouble"); a frame without it (an older server) takes the schedule at the commit */
+        const int dcl = cJSON_GetObjectItemCaseSensitive(in, "classDouble")
+                            ? jint(in, "classDouble", 0) != 0
+                            : dxp_schedule(kn_wall_ms()).double_class_xp;
+        cJSON_AddNumberToObject(stats, key, (double)dxp_class_xp(xp, dcl)); /* jsonb || : the class xp replaces a stats member */
     }
     char *old = dbx_text(&x, SQL(.any = "SELECT player_stats FROM players WHERE player_id = $1 {for_update}"),
                          KN_DB_ARGS(I64S(id)));
@@ -342,6 +350,8 @@ static kn_db_result *run_commit_stats(kn_dbconn *c, int n, const char *const *p)
                                 " player_clandeaths = player_clandeaths + {int:$3} WHERE player_id = $1"),
                  KN_DB_ARGS(I64S(id), I64S(kills), I64S(deaths)));
     }
+    /* v10's end-screen 2x XP offer: the match just played, when it counted and was not competitive */
+    db_dxp_record_match(&x, id, games > 0 && !comp, xp);
     cJSON_Delete(in);
     cJSON *a = db_account_json(&x, id);
     if (a) {
