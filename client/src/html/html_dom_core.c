@@ -10,6 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+// The [ui] handler / [ui] listener traces are a log, not errors: stderr natively; on the web stdout
+// (console.log), because Emscripten sends stderr to console.error and every click would read as one.
+#ifdef __EMSCRIPTEN__
+#define KN_UI_TRACE stdout
+#else
+#define KN_UI_TRACE stderr
+#endif
+
 #ifndef __EMSCRIPTEN__
 #include <GLFW/glfw3.h>
 #include <headless.h> // headless_current_window: the clipboard's window
@@ -159,21 +167,21 @@ static int quiet_event_type(const char *type) {
 
 static void log_dispatch(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc, const int handled) {
     if (ev && quiet_event_type(ev->type)) return;
-    fprintf(stderr, "[ui] handler %s(", name);
+    fprintf(KN_UI_TRACE, "[ui] handler %s(", name);
     for (int i = 0; i < argc; i++) {
         const HtmlArg *a = &args[i];
-        if (i) fputs(", ", stderr);
+        if (i) fputs(", ", KN_UI_TRACE);
         switch (a->kind) {
-            case HTML_ARG_NUM: fprintf(stderr, "%g", a->num); break;
-            case HTML_ARG_STR: fprintf(stderr, "'%s'", a->str ? a->str : ""); break;
-            case HTML_ARG_BOOL: fputs(a->num != 0 ? "true" : "false", stderr); break;
-            case HTML_ARG_THIS: fputs("this", stderr); break;
-            case HTML_ARG_THIS_VALUE: fputs("this.value", stderr); break;
-            case HTML_ARG_THIS_CHECKED: fputs("this.checked", stderr); break;
-            case HTML_ARG_EVENT: fputs("event", stderr); break;
+            case HTML_ARG_NUM: fprintf(KN_UI_TRACE, "%g", a->num); break;
+            case HTML_ARG_STR: fprintf(KN_UI_TRACE, "'%s'", a->str ? a->str : ""); break;
+            case HTML_ARG_BOOL: fputs(a->num != 0 ? "true" : "false", KN_UI_TRACE); break;
+            case HTML_ARG_THIS: fputs("this", KN_UI_TRACE); break;
+            case HTML_ARG_THIS_VALUE: fputs("this.value", KN_UI_TRACE); break;
+            case HTML_ARG_THIS_CHECKED: fputs("this.checked", KN_UI_TRACE); break;
+            case HTML_ARG_EVENT: fputs("event", KN_UI_TRACE); break;
         }
     }
-    fprintf(stderr, ") %s target=%u%s\n", ev && ev->type ? ev->type : "?", ev ? ev->target : 0u,
+    fprintf(KN_UI_TRACE, ") %s target=%u%s\n", ev && ev->type ? ev->type : "?", ev ? ev->target : 0u,
             handled ? "" : " [unhandled]");
 }
 
@@ -259,7 +267,7 @@ int html_ui_dispatch_listener(const char *elem_id, const HtmlEvent *ev) {
     const HtmlListener *l = find_listener(elem_id, local.type);
     const int handled = l && l->fn;
     if (!quiet_event_type(local.type) && strcmp(local.type, "resize") != 0) {
-        fprintf(stderr, "[ui] listener %s %s target=%u key=%d button=%d%s\n",
+        fprintf(KN_UI_TRACE, "[ui] listener %s %s target=%u key=%d button=%d%s\n",
                 elem_id && *elem_id ? elem_id : "window", local.type, local.target, local.key, local.button,
                 handled ? "" : " [unhandled]");
     }
