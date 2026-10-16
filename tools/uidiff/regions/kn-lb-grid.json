@@ -1,0 +1,61 @@
+{
+  "scenario": "kn-lb-grid",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "lb-icons-top",
+      "rect": [
+        380,
+        222,
+        520,
+        52
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "★ (Adwaita Sans), ⚔ and ☠ (monochrome Noto Emoji): text glyphs, as Chrome draws them"
+    },
+    {
+      "name": "lb-icon-ranked",
+      "rect": [
+        495,
+        384,
+        56,
+        52
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "⚜ (monochrome Noto Emoji)"
+    },
+    {
+      "name": "lb-icon-krunkcup",
+      "rect": [
+        727,
+        384,
+        56,
+        52
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "🏆 as the Noto Color Emoji image (img/kn/emoji/1f3c6.png)"
+    },
+    {
+      "name": "lb-cards",
+      "rect": [
+        296,
+        202,
+        688,
+        316
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the five category cards"
+    }
+  ]
+}

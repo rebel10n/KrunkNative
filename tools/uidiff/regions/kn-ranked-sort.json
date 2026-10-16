@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ranked-sort",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "rs-arrow",
+      "rect": [
+        466,
+        244,
+        20,
+        22
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "the sort arrow after Score (U+2191, Liberation Serif in Chrome: kn-symbols-serif.ttf)"
+    },
+    {
+      "name": "rs-header",
+      "rect": [
+        335,
+        242,
+        606,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the expanded match's sortable header row"
+    }
+  ]
+}

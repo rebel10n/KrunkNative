@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ranked-found",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "rf-emoji",
+      "rect": [
+        324,
+        558,
+        30,
+        30
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "✨ (img/kn/emoji/2728.png) in the 26 px status icon"
+    },
+    {
+      "name": "rf-footer",
+      "rect": [
+        321,
+        549,
+        637,
+        54
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the footer: Match found!, the disabled MATCH FOUND button"
+    }
+  ]
+}

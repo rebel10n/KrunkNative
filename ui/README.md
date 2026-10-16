@@ -23,7 +23,7 @@ options: `tools/ui-import/README.md`) and edited since. Which source each file c
 | `i18n/en.json` | **Reconstructed**: the bundle's inline `translations.en` (2170 keys; `i18n-en.json` until 2026-10-14). |
 | `i18n/<code>.json` (es de nl kr pr jp fr fi zh zhtr pl hi ru it tg tr) | Byte-for-byte content of the **served** `https://krunker.io/i18n/<code>.js?v=i41Nu` (what v10's `getTranslations` loads), fetched 2026-10-14 and converted from v10's "key value" line format to JSON by `tools/i18n-import/i18n_import.py`. Details, `i18n/kn/` (Krunker Box Office's own strings) and the gaps: `i18n/README.md`. |
 | `css/fonts/kn-noto-*` | Ours: Noto Sans CJK JP / SC / TC / KR and Noto Sans Devanagari subsets (OFL 1.1, `css/fonts/kn-noto-OFL.txt`) the native engine falls back to for the shipped languages (`i18n/README.md`, "Fonts"). |
-| `css/fonts/kn-symbols-emoji.ttf` | Ours: a subset of Noto Emoji (monochrome `NotoEmoji-Regular.ttf`, OFL 1.1, `css/fonts/kn-symbols-emoji-OFL.txt`) with U+2620 U+2694 U+269C U+1F3C6 only, the second bundled symbol fallback of the native engine (`client/src/html/engine/text.c` text_add_bundled_symbols, after `kn-symbols.ttf`): the Leaderboards category cards (Raids, Clans, Ranked, KrunkCup) and the Turf Wars trophies. |
+| `css/fonts/kn-symbols-serif.ttf`, `kn-symbols-sans.ttf`, `kn-symbols-emoji.ttf` (with `kn-symbols.ttf`) | Ours: the native engine's bundled symbol fallbacks, in this order (`client/src/html/engine/text.c` text_add_bundled_symbols). v10's page sets GameFont on every element (main.css `*`), and for a code point GameFont lacks Chrome tries its default standard font (Times New Roman, Liberation Serif on the reference machine) and then fontconfig's per-character fallback; each subset holds only the UI's code points that Chrome 152 draws from its source font there (read with CDP `CSS.getPlatformFontsForNode`, 2026-10-15). `kn-symbols-serif.ttf`: Liberation Serif Regular 2.1.5, U+00B7 U+00D7 U+2013 U+2014 U+2026 U+2190-2193 U+221E U+25BC (the ranked sort arrows, the Turf Wars KD ∞, the back arrow, dashes, ellipsis), renamed "KN Symbols Serif" for the license's Reserved Font Name (OFL 1.1, `css/fonts/kn-symbols-serif-OFL.txt`; sha256 28ed602485863bbbea12273f8e479cdad5fcd8108bb42b11494db67df6561aec). `kn-symbols-sans.ttf`: Adwaita Sans 50.0, its static opsz 14 / wght 400 instance, U+25B6 U+25C0 U+2605 U+2713 (the Players card ★, the Turf Wars rule ✓ and day arrows; OFL 1.1, `css/fonts/kn-symbols-sans-OFL.txt`; sha256 b8f7fa1ab1ce14935cc89a65a69b65981e8aadc552db380f43f610b7e99b4aef). Both made with fontTools (`fontTools.subset`, `varLib.instancer`) from Fedora 44's font packages. `kn-symbols-emoji.ttf`: monochrome Noto Emoji (`NotoEmoji-Regular.ttf`, OFL 1.1, `css/fonts/kn-symbols-emoji-OFL.txt`), U+2620 U+2694 U+269C U+1F3C6: the Raids, Clans and Ranked cards, which Chrome draws as these single-colour text glyphs (U+2694 U+2620 U+269C have text presentation); U+1F3C6 has emoji presentation, so where the UI writes 🏆 it is the colour image `img/kn/emoji/1f3c6.png` (below). |
 | `css/*.css` (Krunker's), `css/fonts/*`, `img/`, `textures/`, the other images | Byte copies of the served files (URL rewriting only). Each `.woff2` also gets a `.ttf`, and each `.webp` a `.webp.png` sidecar (the engine decodes neither). Files the live hosts 404 on (the Play subsets, `favicon.png`, `pro_scope.png`, ...) are v7.1.4's copies (the retired page's). |
 | `<video>` frame sidecars (`assets/videos/limited_shop_banner.webm.knv`, `assets/videos/tutorial/basics.mp4.knv`, `assets/scares/1.mp4.knv`; gitignored like the rest of `assets/`, shipped with the game content) | **Transcoded** from the v10 page's three videos (the Eterno Shop header, the Guide's Basics clip, `jumpScare(1)`; sha256-pinned in `tools/ui-import/live_assets_v10.lock`, fetched by `make assets-import-live`) by `make video-frames` (`python3 -I tools/ui-import/video_frames.py`: ffmpeg/ffprobe, baseline JPEG frames + a frame table, format in its docstring). The native engine has no video decoder: `client/src/html/engine/video.c` plays a `<video>` from `<file>.knv` next to its source, decoding each frame with the in-tree stb_image as playback reaches it; the web build plays the real file. Re-run after a source video changes (`--check` reports stale sidecars). |
 | `windows/versions.txt` | The served `docs/versions.txt` (changelog). |
@@ -107,9 +107,21 @@ editor's `img/templates/` and `img/editor-models/` thumbnails (assets.krunker.io
   d265fd094633c5b7f9b90c5c91aca76089b95e573f8669e08c07d8f56e82bafd, 1f949
   d65ece522506ee9dc1731bb83dbf2c1fc8351ed09a707e803e53ded4b4db76c2, 26a0-fe0f
   9ea8993b0702ddc5611a0bb2aa4bc14d4510f43682d729955ec3c8b5e0379816.
-  The 2694 sword of the Turf Wars tips is `2694-fe0f.png` above. The Clans / Raids / Ranked /
-  KrunkCup category cards (U+2694, U+2620, U+269C, U+1F3C6) and the Turf Wars 🏆 (U+1F3C6) are text
-  glyphs instead, from `css/fonts/kn-symbols-emoji.ttf` (table above).
+  The 2694 sword of the Turf Wars tips is `2694-fe0f.png` above.
+  `img/kn/emoji/{1f3c6,2b50}.png` (2026-10-15): the 🏆 of the Leaderboards KrunkCup card and the Turf
+  Wars Top Performing Clans / Control Territories cards, and the ⭐ of the Turf Wars Top Performing
+  Players card, which Chrome draws with Noto Color Emoji (`CSS.getPlatformFontsForNode`); the same
+  raster (the glyph at 160 px, line-height 1, in a 512x640 transparent `--screenshot` window, its ink
+  box centred on a 256 px square, the whole glyph: ink 178x174 and 177x169 px). PNG sha256: 1f3c6
+  743e7ff82707a2aa4991de96f38be87a00596b4421725334517165ea1e2b0580, 2b50
+  e746c5c47fdb2f3ecae480c8b8442955f6a6f89ed923ea8c255993b243b439bc. The Clans / Raids / Ranked cards' U+2694 U+2620 U+269C and the Players card's U+2605
+  are text glyphs in Chrome, not colour emoji: the bundled `kn-symbols-emoji.ttf` and
+  `kn-symbols-sans.ttf` (table above).
+  Placement (`css/kn-v10-menu.css` .kn-emoji): the image takes the glyph's own box, Noto Color Emoji's
+  1.245em advance and 1em of line, with the ink centre 0.35em above the baseline as in Chrome (the
+  ink centres of all 19 rasters sit within 0.03em of each other, except 👥 0.1em lower); the ranked
+  overlay's block emoji sits on GameFont's line instead. Checked against headless Chrome drawing v10's
+  markup at the same boxes: the cards' icons within 1 px, the overlay ❌ and the footer ✨ within 1 px.
 - `img/ranked/ranks/rank_*.svg` — v10.0.2's eight rank icons, unchanged from
   `assets.krunker.io/img/ranked/ranks/` (the ranked window, `shared/src/ranked.c` ranked_rank_icon).
 - `css/devconsole.css` + `css/fonts/lucon.ttf` — the offline build's developer console

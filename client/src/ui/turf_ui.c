@@ -986,13 +986,17 @@ static void gen_boards(StrBuf *sb) {
     sb_append(sb, "<div class=\"leaderboards-tab svelte-raovk7\">");
     if (T.board < 0) {
         sb_append(sb, "<div class=\"leaderboard-grid svelte-raovk7\"><button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(0)\">"
-                      "<div class=\"card-icon svelte-raovk7\">\xf0\x9f\x8f\x86</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Clans</h3> <p class=\"card-description svelte-raovk7\">"
+                      "<div class=\"card-icon svelte-raovk7\">");
+        v10_emoji(sb, "\xf0\x9f\x8f\x86", "");
+        sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Clans</h3> <p class=\"card-description svelte-raovk7\">"
                       "View clans ranked by performance.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(1)\">"
                       "<div class=\"card-icon svelte-raovk7\">");
         v10_emoji(sb, "\xf0\x9f\x92\xb0", "");
         sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Grossing Clans</h3> <p class=\"card-description svelte-raovk7\">"
                       "See which clans have earned the most KR from Turf Wars.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(2)\">"
-                      "<div class=\"card-icon svelte-raovk7\">\xe2\xad\x90</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Players</h3> <p class=\"card-description svelte-raovk7\">"
+                      "<div class=\"card-icon svelte-raovk7\">");
+        v10_emoji(sb, "\xe2\xad\x90", "");
+        sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Players</h3> <p class=\"card-description svelte-raovk7\">"
                       "All-time leaderboard of top performing players.</p></button></div></div>");
         return;
     }
@@ -1238,7 +1242,9 @@ static void gen_howto(StrBuf *sb) {
     v10_emoji(sb, "\xe2\x9a\xa0\xef\xb8\x8f", "");
     sb_append(sb, "</span> <span class=\"svelte-1sr7h97\">"
                   "Kills only count if you're playing against players from different clans!</span></div></div></div> <div class=\"info-card svelte-1sr7h97\">"
-                  "<div class=\"card-icon svelte-1sr7h97\">\xf0\x9f\x8f\x86</div> <h2 class=\"card-title svelte-1sr7h97\">Control Territories</h2> <p class=\"card-description svelte-1sr7h97\">"
+                  "<div class=\"card-icon svelte-1sr7h97\">");
+    v10_emoji(sb, "\xf0\x9f\x8f\x86", "");
+    sb_append(sb, "</div> <h2 class=\"card-title svelte-1sr7h97\">Control Territories</h2> <p class=\"card-description svelte-1sr7h97\">"
                   "At the end of each day, the clan with the most kills on each map wins control of that territory for the next\n          day.</p> <div class=\"card-details svelte-1sr7h97\">"
                   "<div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Daily Reset:</span> <span class=\"detail-value svelte-1sr7h97\">Leaderboards reset every "
                   "day at midnight UTC</span></div> <div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Victory Condition:</span> "

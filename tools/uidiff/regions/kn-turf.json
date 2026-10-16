@@ -8,28 +8,28 @@
     {
       "name": "tw-tabs",
       "rect": [
-        300,
-        170,
-        680,
-        40
+        272,
+        124,
+        735,
+        46
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the four tabs"
+      "note": "the five tabs (Overview active)"
     },
     {
       "name": "tw-map",
       "rect": [
-        300,
-        210,
-        680,
-        390
+        274,
+        172,
+        731,
+        420
       ],
-      "kind": "text",
+      "kind": "image",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "territory map and its labels"
+      "note": "the Overview map: the three territories and their clan tags"
     }
   ]
 }

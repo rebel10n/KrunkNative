@@ -12,7 +12,13 @@ UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window 
 the populated top-right HUD stack `kn-ingame-topright[-old]`: leaderboard, every stat counter and
 the kill feed stacked)
 diffs against KN's own renders in `doc/ref/krunknative/` (llvmpipe, made with `--render-scenario`
-from the same scenario): a regression baseline, not a parity reference. The counters' parity
+from the same scenario): a regression baseline, not a parity reference. The v10 popups that the offline sandbox
+cannot open without running Krunker's JS keep KN baselines too, checked by hand against Chrome: the
+emoji and symbol scenarios `kn-lb-grid` (the Leaderboards category cards), `kn-turf` (Overview),
+`kn-turf-boards`, `kn-turf-howto`, `kn-turf-history` (the KD ∞), `kn-ranked-sort` (the sort arrow),
+`kn-ranked-error` (❌) and `kn-ranked-found` (✨). Each icon was compared with headless Chrome 152 drawing
+v10's own markup and svelte.css at the box KN's layout gives it (`KRUNKNATIVE_SCENARIO_DUMP`), and the
+font Chrome uses per glyph read with CDP `CSS.getPlatformFontsForNode` (ui/README.md, the emoji row). The counters' parity
 references are `ingame-counters[-ds][-wide]` (capture-v10.js turns them on through v10's settings
 boot: all five, or Deaths + Streak; `-wide` with a kill feed row wider than the leaderboard, so the
 counters flow beside the float), and `menu-host-type` (`doc/ref/krunker-v10/menu/`) is the Host
@@ -189,7 +195,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `settingsTab` | int | `windows[0].changeTab(N)` when `window` is 0 |
 | `settingsView` | `"basic"` / `"advanced"` | `windows[0].settingType` (v7's default is basic) |
 | `windowActions` | array of `[name, args...]` | inline-handler calls dispatched once the window is open, by the names v7's markup uses: `["windows.2.switchTab", 0]` (Change Loadout's Class tab), `["windows.6.switchTab", 2]` (a controls tab) |
-| `windowScroll` | object `{id: top}` | scrollTop of the window's scroll containers once `windowActions` ran (clamped, so `1000000` is the end): `{"knOmToolsList": 1000000}` (kn-om-tools-short) |
+| `windowScroll` | object `{id: top}` | scrollTop of the window's scroll containers once `windowActions` ran (clamped, so `1000000` is the end): `{"knOmToolsList": 1000000}` (kn-om-tools-short). A key starting with `.` is a selector (its first match), for the v10 Svelte popups that have no ids: `{".my-clan-tab.svelte-51j5cz": 800}` (kn-turf-history) |
 | `connected`, `ready` | bool | net state for `#instructions` (CLICK TO PLAY when both true) |
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
 | `mapName`, `modeName`, `region`, `name`, `gameName`, `classIndex` | string / int | state glue (`#curGameInfo`, `#menuRegionLabel`, `#menuClassNameTag`, `#gameNameHolder`, class box) |

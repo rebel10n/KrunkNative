@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-turf-boards",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "tb-icons",
+      "rect": [
+        360,
+        200,
+        565,
+        52
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "🏆 💰 ⭐ as Noto Color Emoji images"
+    },
+    {
+      "name": "tb-cards",
+      "rect": [
+        280,
+        188,
+        720,
+        152
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the three leaderboard cards"
+    }
+  ]
+}

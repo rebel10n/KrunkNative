@@ -337,7 +337,7 @@ static void warn_unknown_keys(void) {
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
         "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
-        "windowScroll", // {id: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
+        "windowScroll", // {id or .selector: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
         "storage",    // {key: "value"}: localStorage entries seeded before the page reads them ("skins": the loadout's weapon skins)
@@ -871,11 +871,12 @@ static void apply_window_actions(Client *client) {
 }
 
 // state.windowScroll {id: top}: scrollTop of the window's scroll containers once its actions ran
-// (html_dom_set_scroll clamps it: a big value is the end, the Object Manager's #knOmToolsList)
+// (html_dom_set_scroll clamps it: a big value is the end, the Object Manager's #knOmToolsList).
+// A key starting with '.' is a selector instead (the first match: v10's Svelte popups have no ids).
 static void apply_window_scroll(void) {
     const cJSON *item;
     cJSON_ArrayForEach(item, st("windowScroll")) {
-        const HtmlElem e = item->string ? html_dom_by_id(item->string) : 0;
+        const HtmlElem e = !item->string ? 0 : item->string[0] == '.' ? html_dom_query(0, item->string) : html_dom_by_id(item->string);
         if (e && cJSON_IsNumber(item)) html_dom_set_scroll(e, 0.0f, (float) item->valuedouble);
         else fprintf(stderr, "[scenario] windowScroll: no #%s\n", item->string ? item->string : "?");
     }

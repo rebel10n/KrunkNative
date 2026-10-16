@@ -24,7 +24,9 @@
 //       missing from the requested family (default: DejaVu Sans / Liberation
 //       Sans / Noto Sans, then the bundled ui/css/fonts/kn-noto-* script faces
 //       (text_set_lang), then Noto Sans CJK, whichever exist).  Always first:
-//       the bundled ui/css/fonts/kn-symbols.ttf (arrows, shapes, dingbats...),
+//       the bundled ui/css/fonts/kn-symbols-serif.ttf, kn-symbols-sans.ttf,
+//       kn-symbols.ttf (arrows, shapes, dingbats...) and kn-symbols-emoji.ttf,
+//       each with the code points Chrome draws from its source font (text.c),
 //       per-glyph only.  Generic `monospace` uses Noto Sans Mono / DejaVu Sans
 //       Mono / Liberation Mono when present (Chrome's fontconfig monospace).
 //   KRUNKNATIVE_HTML_OBLIQUE_SKEW=0.2      synthetic oblique shear (x += k*y).

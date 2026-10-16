@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ranked-error",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "re-emoji",
+      "rect": [
+        600,
+        268,
+        80,
+        60
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "❌ (img/kn/emoji/274c.png) where Chrome draws the 64 px glyph (GameFont's line: css/kn-v10-menu.css .overlay-emoji)"
+    },
+    {
+      "name": "re-overlay",
+      "rect": [
+        477,
+        266,
+        326,
+        188
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Internal Error overlay"
+    }
+  ]
+}

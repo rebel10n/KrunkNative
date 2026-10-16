@@ -242,6 +242,23 @@ static void test_shaping(TextSystem *ts) {
     n = text_shape(game, "\xE2\x9C\x95", 3, 0, g, 64, &total);
     CHECK(n == 1 && g[0].glyph_index && !strcmp(text_face_family(g[0].face), "fallback-symbols"),
           "U+2715 from the bundled kn-symbols face (%s)", n == 1 ? text_face_family(g[0].face) : "-");
+    // Chrome's face per symbol (text_add_bundled_symbols): U+2191 / U+221E / U+2014 from the Liberation
+    // Serif subset, U+2605 / U+2713 from the Adwaita Sans one, U+2694 Noto Emoji, U+2715 Adwaita Mono
+    {
+        static const char *const sym[] = {"\xE2\x86\x91", "\xE2\x88\x9E", "\xE2\x98\x85", "\xE2\x9A\x94", "\xE2\x9C\x95", "\xE2\x80\x94", "\xE2\x9C\x93"};
+        const TextFace *face[7] = {0};
+        for (int i = 0; i < 7; i++) {
+            n = text_shape(game, sym[i], 3, 0, g, 64, &total);
+            CHECK(n == 1 && g[0].glyph_index && !strcmp(text_face_family(g[0].face), "fallback-symbols"),
+                  "symbol %d from a bundled face (%s)", i, n == 1 ? text_face_family(g[0].face) : "-");
+            face[i] = n == 1 ? g[0].face : NULL;
+        }
+        CHECK(face[0] && face[0] == face[1], "U+2191 and U+221E share the serif subset");
+        CHECK(face[2] && face[2] != face[0] && face[2] != face[4], "U+2605 from the sans subset, not the serif / mono ones");
+        CHECK(face[3] && face[3] != face[0] && face[3] != face[2] && face[3] != face[4], "U+2694 from the emoji subset");
+        CHECK(face[4] && face[4] != face[0], "U+2715 still from kn-symbols");
+        CHECK(face[5] == face[0] && face[6] == face[2], "U+2014 from the serif subset, U+2713 from the sans one");
+    }
     // x-height without an OS/2 v2 value comes from the hinted 'x' outline (Skia's
     // fXHeight under slight hinting): whole px, as vertical-align: middle sees it
     // in Chrome (server list headers, win-servers)

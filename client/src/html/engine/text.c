@@ -256,9 +256,19 @@ static TextFace *text_add_face(TextSystem *ts, const char *family, const char *p
  * (synthetic bold when bold).  Listed first so the glyph does not depend on
  * which system fonts a machine has. */
 static void text_add_bundled_symbols(TextSystem *ts) {
-    /* kn-symbols-emoji.ttf (OFL subset of Noto Emoji, monochrome): U+2620 U+2694 U+269C U+1F3C6, the
-     * v10 category-card icons (Raids, Clans, Ranked, KrunkCup) that the Adwaita Mono subset lacks. */
-    static const char *const files[] = {"kn-symbols.ttf", "kn-symbols-emoji.ttf"};
+    /* v10's page sets GameFont on every element (main.css `*`); for a code point GameFont lacks, Blink
+     * tries the default standard font (Times New Roman -> Liberation Serif on the reference machine),
+     * then fontconfig's per-character fallback. Each subset holds only the UI's code points that Chrome
+     * draws from its source font there (CSS.getPlatformFontsForNode), so the order only matters where
+     * they overlap (ui/README.md, "Our files"):
+     *   kn-symbols-serif.ttf (Liberation Serif, renamed for its Reserved Font Name): U+00B7 U+00D7 U+2013
+     *     U+2014 U+2026 U+2190-2193 U+221E U+25BC (the ranked sort arrows, the Turf Wars KD infinity,
+     *     the back arrow, dashes, ellipsis);
+     *   kn-symbols-sans.ttf (Adwaita Sans, opsz 14 / wght 400): U+25B6 U+25C0 U+2605 U+2713;
+     *   kn-symbols.ttf (Adwaita Mono): the rest of its symbols, e.g. U+2715 U+2716;
+     *   kn-symbols-emoji.ttf (Noto Emoji, monochrome): U+2620 U+2694 U+269C (the Raids, Clans and Ranked
+     *     cards, text glyphs in Chrome) and U+1F3C6, which the UI writes as a colour image instead. */
+    static const char *const files[] = {"kn-symbols-serif.ttf", "kn-symbols-sans.ttf", "kn-symbols.ttf", "kn-symbols-emoji.ttf"};
     const size_t n = strlen(ts->ui_dir);
     for (size_t i = 0; i < sizeof files / sizeof *files; i++) {
         char path[1024];

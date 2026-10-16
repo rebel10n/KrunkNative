@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-turf-howto",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "th-icons",
+      "rect": [
+        370,
+        283,
+        545,
+        52
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "🎯 🏆 💰 as Noto Color Emoji images"
+    },
+    {
+      "name": "th-cards",
+      "rect": [
+        288,
+        172,
+        705,
+        420
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the header and the three info cards"
+    }
+  ]
+}

@@ -413,6 +413,8 @@ void v10_emoji(StrBuf *sb, const char *utf8, const char *cls) {
         {"\xf0\x9f\xa5\x87", "1f947"},             // 🥇 Turf Wars medal
         {"\xf0\x9f\xa5\x88", "1f948"},             // 🥈 Turf Wars medal
         {"\xf0\x9f\xa5\x89", "1f949"},             // 🥉 Turf Wars medal
+        {"\xf0\x9f\x8f\x86", "1f3c6"},             // 🏆 KrunkCup card, Turf Wars trophies
+        {"\xe2\xad\x90", "2b50"},                  // ⭐ Turf Wars: Top Performing Players
     };
     for (size_t i = 0; utf8 && i < sizeof(k_emoji) / sizeof(k_emoji[0]); i++)
         if (!strcmp(utf8, k_emoji[i].utf8)) {
@@ -1167,7 +1169,9 @@ static char *lb_gen(void) {
                            "<h3 class=\"card-title svelte-1k16b2z\">Raids</h3> <p class=\"card-description svelte-1k16b2z\">Best completion times per raid map.</p></button> "
                            "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(3)\"><div class=\"card-icon svelte-1k16b2z\">&#9884;</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">Ranked</h3> <p class=\"card-description svelte-1k16b2z\">Top players by rating and matches across seasons.</p></button> "
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(4)\"><div class=\"card-icon svelte-1k16b2z\">&#127942;</div> "
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(4)\"><div class=\"card-icon svelte-1k16b2z\">");
+            v10_emoji(&sb, "\xf0\x9f\x8f\x86", ""); // Chrome draws 🏆 in colour (Noto Color Emoji); ⚔ ☠ ⚜ ★ stay text (README)
+            sb_append(&sb, "</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">KrunkCup</h3> <p class=\"card-description svelte-1k16b2z\">Team standings and top contributors for the KrunkCup.</p></button></div>"
                            "<!----></div><!----></div>");
             return sb_finish(&sb);

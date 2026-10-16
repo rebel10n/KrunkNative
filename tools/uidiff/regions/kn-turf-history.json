@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-turf-history",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "th-kd-ours",
+      "rect": [
+        560,
+        372,
+        50,
+        24
+      ],
+      "kind": "image",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "day 209: AAA had no deaths, KD ∞ (Liberation Serif in Chrome: kn-symbols-serif.ttf)"
+    },
+    {
+      "name": "th-days",
+      "rect": [
+        294,
+        182,
+        692,
+        410
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Previous 3 Days: day 209 and 208"
+    }
+  ]
+}

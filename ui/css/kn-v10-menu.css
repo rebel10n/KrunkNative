@@ -34,37 +34,28 @@
 	padding-bottom: 12.9px;
 }
 
-/* KrunkNative: the emoji of v10's ranked texts (the Level Required lock, the matchmaking status
- * icons) are drawn as images (client/src/ui/ranked_ui.c emoji(), ui/img/kn/emoji/). The image holds
- * the glyph on a 256 px square, so it is sized up to put the glyph at the text's own size: the
- * overlay's 64 px emoji-icon (svelte-jxc66d, font-size 64px) and the footer's 26 px status-icon. */
+/* KrunkNative: v10's text emoji that Chrome draws in colour (Noto Color Emoji: the ranked texts, the
+ * Turf Wars icons, the KrunkCup card) are images here (v10_emoji in client/src/ui/v10_competitive.c,
+ * ui/img/kn/emoji/, ui/README.md). The image holds the glyph's ink centred on a 256 px square drawn
+ * from a 160 px glyph, so 1.6em draws it at the text's own size. Its box is the glyph's: Noto Color
+ * Emoji's advance (1.245em, so -0.1775em each side) and 1em of line (-0.3em top and bottom), with the
+ * ink centre where Chrome puts it, 0.35em above the baseline (the border box ends 0.45em below it:
+ * vertical-align -0.15em on the margin box). Measured against Chrome renders of v10's markup. */
 .kn-emoji {
 	display: inline-block;
 	width: 1.6em;
 	height: 1.6em;
-	vertical-align: -0.45em;
+	margin: -0.3em -0.1775em;
+	vertical-align: -0.15em;
 }
 
+/* The ranked message overlay's 64 px emoji-icon (svelte-jxc66d: a block with line-height 1). Its line
+ * puts GameFont's baseline 0.9375em down (ascent 1.125em, descent 0.25em, half-leading -0.1875em), so the
+ * ink centre sits at 0.5875em and the image starts 0.2125em above the block; the block stays 1em tall. */
 .emoji-icon .kn-emoji.overlay-emoji {
 	display: block;
-	margin: -0.3em auto;
-	width: 1.6em;
-	height: 1.6em;
+	margin: -0.2125em auto -0.3875em;
 	font-size: 64px;
-}
-
-.status-icon .kn-emoji.status-emoji {
-	margin: -0.3em -0.3em;
-	vertical-align: middle;
-}
-
-/* The Turf Wars how-to's card / tip icons (svelte-1sr7h97, v10_emoji in turf_ui.c): the 1.6em image
- * keeps its place but takes a 1em line, as the emoji glyph does in Chrome, so the titles under the
- * image icons line up with the one under the 🏆 text glyph. */
-.card-icon .kn-emoji,
-.tip-icon .kn-emoji {
-	margin: -0.3em 0;
-	vertical-align: -0.15em;
 }
 
 /* KrunkNative: the ranked message overlay's Svelte transitions (svelte-jxc66d: scale 0.9 to 1 with

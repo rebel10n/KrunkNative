@@ -1291,7 +1291,7 @@ static void open_popup(void) {
 // windows[26].gen() returns '' in v10 (the Ranked UI is the popup)
 char *ranked_ui_window_gen(void) { return strdup(""); }
 
-// --render-scenario: state.ranked {open, tab, profile, info, board, history, shop, status,
+// --render-scenario: state.ranked {open, tab, profile, info, board, history, shop, found,
 // searching, expanded, overlay}: the brain's answers for this popup
 void ranked_ui_scenario(const cJSON *state) {
     if (!cJSON_IsObject(state)) return;
@@ -1310,6 +1310,10 @@ void ranked_ui_scenario(const cJSON *state) {
         fmt_time(t, sizeof(t), (int) v10_num(state, "searchingFor", 0));
         snprintf(text, sizeof(text), "Looking for match... (%s)", t);
         set_status(text, "\xf0\x9f\x94\x8d", "#5ce05a");
+    }
+    if (cJSON_IsTrue(cJSON_GetObjectItem(state, "found"))) { // MATCHED (on_status) without its assignment / accept timer
+        R.state = MM_FOUND;
+        set_status("Match found!", "\xe2\x9c\xa8", "#5ce05a");
     }
     R.expanded = cJSON_IsTrue(cJSON_GetObjectItem(state, "expanded"));
     if (cJSON_IsFalse(cJSON_GetObjectItem(state, "open"))) return;
