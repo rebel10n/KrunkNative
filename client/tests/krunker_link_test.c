@@ -9,6 +9,8 @@
 #include <net_ext.h>
 #include <ruleset.h>
 #include <zombies.h>
+#include <social.h>
+#include <voice.h>
 #include <social_v7.h>
 #include <ai.h> // test_fx / test_world: the AI packets
 #include <krunker_sounds.h>
@@ -21,6 +23,9 @@
 
 static int g_fail, g_pass;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+// ---- test double: the official map table social.c's service reads (linked for the voice chunking only)
+const cJSON *g_maps[32];
 
 // ---- test doubles: the cheat evaluator (the link takes io.cheat; this satisfies its fallback symbol)
 int krunker_cheat_answer(const char *nonce, const char *ciphertext_b64, KrunkerCcr *out) {
@@ -1478,6 +1483,82 @@ static void test_rounds(void) {
     clear();
 }
 
+
+// Voice chat (official-ingame-voice): "vc" in -> NET_PACKET_VOICE_V7 relay chunks; our VOICE_V7 clip
+// chunks -> one "vc" out
+static KrunkerLink *g_voice_link;
+static int g_voice_sends;
+static int voice_to_link(void *user, const NetPacketType type, const void *payload, const uint16_t length) {
+    (void) user;
+    g_voice_sends += krunker_link_send_ours(g_voice_link, type, payload, length);
+    return 1;
+}
+
+static void test_voice(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+    // a clip longer than one chunk (3 x NET_SOCIAL_CHUNK_DATA)
+    const size_t audio_len = 3 * NET_SOCIAL_CHUNK_DATA;
+    char *audio = malloc(audio_len + 1);
+    const size_t prefix = strlen(VOICE_DATA_URL_PREFIX);
+    memcpy(audio, VOICE_DATA_URL_PREFIX, prefix);
+    for (size_t i = prefix; i < audio_len; i++) audio[i] = "ABCDEFGHabcdefgh0123456789+/"[i % 28];
+    audio[audio_len] = 0;
+    feed(&link, "vc", (KrunkerValue[]) {KRUNKER_V_STR(audio), KRUNKER_V_STR("Talker"), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0.5),
+                                        KRUNKER_V_BOOL(0), KRUNKER_V_NUM(321)}, 7);
+    {
+        SocialAssembly a = {0};
+        char *msg = NULL;
+        uint32_t id = 0;
+        int chunks = 0, done = 0;
+        for (int k = 0; find_in(NET_PACKET_VOICE_V7, k); k++, chunks++) {
+            const NetPacket *pk = find_in(NET_PACKET_VOICE_V7, k);
+            if (social_assembly_push(&a, pk->payload, pk->length, &msg, &id) == 1) done = 1;
+        }
+        VoiceV7Meta meta = {0};
+        char alias[64] = "";
+        const char *got = NULL;
+        CHECK(done && chunks >= 3 && id == 7 && voice_parse_relay_v7(msg, &meta, alias, sizeof(alias), &got) && meta.channel == 1 &&
+              fabsf(meta.volume - 0.5f) < 1e-3f && !meta.is_final && meta.account_id == 321 && !strcmp(alias, "Talker") && got &&
+              !strcmp(got, audio) && link.voice_in == 1, "vc in: %d chunks, the v7 relay of sid 7 on channel 1", chunks);
+        free(msg);
+        social_assembly_free(&a);
+    }
+    clear();
+    // not a data:audio URL: dropped
+    feed(&link, "vc", (KrunkerValue[]) {KRUNKER_V_STR("javascript:alert(1)"), KRUNKER_V_STR("x"), KRUNKER_V_NUM(7)}, 3);
+    CHECK(!find_in(NET_PACKET_VOICE_V7, 0) && link.voice_in == 1, "vc in: a non-audio URL is dropped");
+    clear();
+
+    // out: our clip chunks (team channel, volume 0.75, quality 6000) -> one "vc" when the last chunk is in
+    g_voice_link = &link;
+    g_voice_sends = 0;
+    const VoiceV7Send send = {.channel = 1, .volume = 0.75f, .quality = 6000};
+    CHECK(voice_send_clip_v7(audio, audio_len, 3, &send, voice_to_link, NULL), "voice_send_clip_v7");
+    const KrunkerFrame *f = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    CHECK(g_voice_sends == 1 && g_out_count == 1 && f && !strcmp(f->name, "vc") && f->argc == 4 &&
+          krunker_str(krunker_frame_arg(f, 0)) && !strcmp(krunker_str(krunker_frame_arg(f, 0)), audio) && fnum(f, 1) == 1 &&
+          fabs(fnum(f, 2) - 0.75) < 1e-6 && fnum(f, 3) == 6000 && link.voice_sent == 1,
+          "vc out: one frame [dataURL, 1, 0.75, 6000] for a %d-chunk clip", (int) ((audio_len + 40) / NET_SOCIAL_CHUNK_DATA + 1));
+    clear();
+    // a global-channel clip: channel 0
+    const VoiceV7Send glob = {.channel = 0, .volume = 1.0f, .quality = 6000};
+    voice_send_clip_v7(VOICE_DATA_URL_PREFIX "AAAA", strlen(VOICE_DATA_URL_PREFIX "AAAA"), 4, &glob, voice_to_link, NULL);
+    CHECK(g_out_count == 1 && fnum(&g_out[0], 1) == 0 && fnum(&g_out[0], 2) == 1, "vc out: global channel 0, volume 1");
+    clear();
+    // reset mid-clip frees the half assembly (no leak under ASan / no stale join)
+    NetSocialChunk c = {.id = 9, .index = 0, .count = 2};
+    memcpy(c.data, "0 1 6000\ndata:audio/", 20);
+    krunker_link_send_ours(&link, NET_PACKET_VOICE_V7, &c, NET_SOCIAL_CHUNK_HEADER + 20);
+    krunker_link_reset(&link);
+    CHECK(!link.voice_out.buf && !g_out_count, "reset drops a half-sent clip");
+    free(audio);
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2286,6 +2367,7 @@ int main(void) {
     test_rounds();
     test_actions();
     test_social();
+    test_voice();
 
     { // a live build (krunker_build_live.h): its packet names, AHKEY, strides, offsets and argument positions
         KrunkerBuild *nb = next_build();

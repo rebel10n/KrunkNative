@@ -97,6 +97,8 @@
 //   end     [type, didWin, endData, winTeam, endIndex, kr, bp, items]  NET_PACKET_END + NET_PACKET_MODE_END (:219712)
 //   ac      [sid, sid2, text]                NET_PACKET_ACTION (:220711)
 //   chi     [team, name, key|[key, args], kind, color]  NET_EXT_KN_OFFICIAL_CHAT_I18N (:221142)
+//   vc      [dataURL, alias, sid, channel, volume, isFinal, senderAccountId]  a voice clip (iîiïììî :209668)
+//                                            -> NET_PACKET_VOICE_V7 chunks (voice.h v7 relay framing, chunk id = sid)
 //   init's team scores and syncData (flg, obj, zone) seed the same packets for a joiner.
 // Player actions (official-ingame-actions):
 //   init    after INIT: NET_PACKET_SOCIAL_V7 (the server takes "ct" channels, "spry", "prpt"), so the
@@ -112,7 +114,8 @@
 // CONFIRM_INTERACT -> "cnfm" [, 2]; COMP_SET -> "cd" "t" team / "c" {c, s}; MATCH_VOTE -> "maVote"
 // [the option's own mts string]; NET_EXT_MARK_POSITION -> "mpos" [{x, y, z}] (ranked / comp only).
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
-// window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", the player list's EXT
+// window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", our NET_PACKET_VOICE_V7 chunks
+// (one clip) -> "vc" [dataURL, channel, micVolume, micQuality] (the reader's "load", :209711), the player list's EXT
 // NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
 // NET_EXT_KPD_CALL -> "kpd" [0, {id: socket id}] (callPolice :216272) / [tab], NET_EXT_KPD_RATE ->
 // "rkpd" [0 | 1] (the officer's verdict, iiïíïíì); the rest is dropped.
@@ -132,6 +135,7 @@
 // reportPlayer opens the profile: neither has a packet.
 #include <krunker_cheat.h>
 #include <krunker_proto.h>
+#include <social.h> // SocialAssembly: our outbound voice clip ("vc")
 #include <cJSON.h>
 #include <shared.h>
 #include <stddef.h>
@@ -274,6 +278,10 @@ typedef struct {
     int vote_mode[NET_MATCH_PICKS], vote_map[NET_MATCH_PICKS];
     int vote_count;
     // counters (tests, logs, the console's official_sync)
+    // our NET_PACKET_VOICE_V7 chunks of the clip being sent (one clip at a time, in order): a whole
+    // clip goes out as one "vc"; krunker_link_reset frees it
+    SocialAssembly voice_out;
+    unsigned voice_in, voice_sent; // "vc" clips received / sent
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
     // the input stream (KRUNKNATIVE_KRUNKER_TRACE=sync, krunker_net.c): "q" windows and the input frames

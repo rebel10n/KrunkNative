@@ -31,6 +31,7 @@
 #include <ai.h>             // "ana": NetAIAnimPacket
 #include <progression.h> // overlay.medalsList: the medals "6" / "am" give by index
 #include <social_v7.h>
+#include <voice.h> // the v7 voice framing ("vc" <-> NET_PACKET_VOICE_V7)
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
 #include <math.h>
@@ -139,6 +140,7 @@ void krunker_link_init(KrunkerLink *l, const KrunkerLinkIO *io, const int64_t ah
 void krunker_link_reset(KrunkerLink *l) {
     const KrunkerLinkIO io = l->io;
     const int64_t ahkey = l->codec.ahkey;
+    social_assembly_free(&l->voice_out); // a clip half sent on the old socket
     memset(l, 0, sizeof(*l));
     l->io = io;
     krunker_session_init(&l->codec, ahkey);
@@ -2347,6 +2349,49 @@ static void on_skin_found_message(KrunkerLink *l, const KrunkerFrame *f) {
     on_skin_found(l, sid, arg(f, 1));
 }
 
+// ---------------------------------------------------------------- voice chat
+
+static int voice_chunk_emit(void *user, const NetPacketType type, const void *payload, const uint16_t length) {
+    emit(user, (uint8_t) type, payload, length);
+    return 1;
+}
+
+// "vc" VOICE_CHAT [dataURL, alias, sid, channel, volume, isFinal, senderAccountId] (iîiïììî :209668):
+// the clip goes to our client as the v7 relay our own servers send (voice.h: chunk id = the speaker's
+// sid, "<channel> <volume> <isFinal> <accountId> <alias length>\n" + alias + data URL). The client
+// plays it like v10: only on channel -1 or its own chat channel, volume > 0, not muted / blocked.
+static void on_voice_chat(KrunkerLink *l, const KrunkerFrame *f) {
+    const char *audio = krunker_str(arg(f, 0));
+    if (!audio || strncmp(audio, VOICE_V7_DATA_PREFIX, strlen(VOICE_V7_DATA_PREFIX)) != 0) return;
+    const double volume = num(arg(f, 4), 1);
+    const VoiceV7Meta meta = {.channel = (int) num(arg(f, 3), -1), .volume = (float) (volume > 1 ? 1 : volume < 0 ? 0 : volume),
+                              .is_final = truthy(arg(f, 5)), .account_id = (int) num(arg(f, 6), 0)};
+    size_t len = 0;
+    char *msg = voice_relay_v7_message(&meta, krunker_str(arg(f, 1)), audio, &len);
+    if (msg && social_send_message(NET_PACKET_VOICE_V7, (uint32_t) (int32_t) num(arg(f, 2), -1), msg, len, voice_chunk_emit, l)) l->voice_in++;
+    free(msg);
+}
+
+// Our NET_PACKET_VOICE_V7 chunks ("<channel> <volume> <quality>\n" + the data URL, voice.c send_clip):
+// a whole clip is v10's reader "load": ["vc", dataURL, chatChannel, micVolume, parseInt(micQuality)]
+// (:209711). Our recorder's data URL already carries v10's "data:audio/ogg; codecs=opus;base64," label.
+static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length) {
+    char *msg = NULL;
+    uint32_t id = 0;
+    if (social_assembly_push(&l->voice_out, payload, length, &msg, &id) != 1) return 0;
+    VoiceV7Send meta;
+    const char *audio = NULL;
+    int sent = 0;
+    if (voice_parse_send_v7(msg, &meta, &audio)) {
+        const KrunkerValue args[] = {KRUNKER_V_STR(audio), KRUNKER_V_NUM(meta.channel == CHAT_CHANNEL_TEAM ? 1 : 0),
+                                     KRUNKER_V_NUM(meta.volume), KRUNKER_V_NUM(meta.quality)};
+        sent = send_c2s(l, KRUNKER_C2S_VOICE_CHAT, args, 4);
+        if (sent) l->voice_sent++;
+    }
+    free(msg);
+    return sent;
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -2469,6 +2514,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_UPD_MATCH_VOTE: on_match_vote(l, arg(&f, 0), arg(&f, 1)); break; // updMatchVote(vo, mts)
         case KRUNKER_S2C_ADD_SPRAY: on_add_spray(l, &f); break;
         case KRUNKER_S2C_MARK_POSITION: on_mark_position(l, &f); break;
+        case KRUNKER_S2C_VOICE_CHAT: on_voice_chat(l, &f); break;
         case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
         // social / account lines of a match (official-ingame-social)
         case KRUNKER_S2C_VOTE_FORFEIT: on_vote_forfeit(l, &f); break;
@@ -2743,6 +2789,7 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             const KrunkerValue args[] = {KRUNKER_V_NUM(0), KRUNKER_V_STR(c.text)};
             return send_c2s(l, KRUNKER_C2S_CHAT_MESSAGE, args, 2);
         }
+        case NET_PACKET_VOICE_V7: return send_voice(l, payload, length);
         case NET_PACKET_CHAT_V7: {
             NetChatV7SendPacket c;
             memset(&c, 0, sizeof(c));

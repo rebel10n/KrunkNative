@@ -990,7 +990,8 @@ else ()
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
     add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c
                    client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
-                   shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c shared/src/season.c)
+                   shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
+                   shared/src/season.c shared/src/voice.c shared/src/social.c)
     target_include_directories(krunker_link_test PRIVATE client/include shared/include)
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)

@@ -111,7 +111,8 @@ BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
-        "--social": "social", "--rounds": "rounds", "--hud": "hud"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--social": "social", "--rounds": "rounds", "--hud": "hud",
+        "--voice": "voice"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -737,6 +738,10 @@ class Stub:
                 await self.world_phases(send, stop)
             elif self.got_en.is_set() and self.scenario == "social":
                 await self.social_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "voice":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await self.voice_phases(send, stop)
             elif self.got_en.is_set() and actions:
                 await send("frs")
                 sx, sy, sz = self.spawn
@@ -1115,6 +1120,39 @@ class Stub:
             self.sent["mv"] = time.monotonic()
             await send("mv", vo, self.ACTION_MTS)
         await hold(6.0)
+        self.sent["done"] = time.monotonic()
+
+    async def voice_phases(self, send, stop):
+        """official-ingame-voice (run_native_voice): the client speaks (a tone as its microphone, V held):
+        its clips arrive as "vc" [dataURL, channel, micVolume, micQuality]; the first one goes back to it
+        as the bot's clip ("vc" [dataURL, alias, sid, channel, volume, isFinal, accountId]) on channel -1
+        (every tab), 0 (ours: global) and 1 (the team tab: not ours, dropped). An "l" every 0.4 s keeps
+        us at 4, 0, 4 and acks the last isn."""
+        async def hold(seconds, until=None):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set() and not (until and until()):
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        def clips():
+            return [f[1] for f in list(self.frames) if f[0] == "vc"]
+
+        await hold(20.0, until=lambda: clips())
+        got = clips()
+        if not got:
+            return
+        self.sent["vc_out"] = time.monotonic()
+        url = got[0][0]
+        await hold(1.0)
+        self.sent["vc_in"] = time.monotonic()
+        await send("vc", url, "StubBot", BOT_SID, -1, 0.8, False, 0)
+        await hold(1.5)
+        await send("vc", url, "StubBot", BOT_SID, 0, 0.8, False, 0)
+        await hold(1.5)
+        await send("vc", url, "StubBot", BOT_SID, 1, 0.8, False, 0)
+        await hold(3.0)
         self.sent["done"] = time.monotonic()
 
     async def social_phases(self, send, stop, player):
@@ -2015,6 +2053,34 @@ def run_native_world():
     check(f"{label}: \"cct\": the \"Zone C Captured\" chat line", any("Zone C Captured" in c for c in chat), chat[-1:])
     loads = re.findall(r"\[input_script\] sync\+ t=\d+ .* loadout=(\S+)", text)
     check(f"{label}: \"inat\": our loadout 3 / 1 (+ the knife)", any(l.startswith("3/1") for l in loads), sorted(set(loads)))
+
+
+def run_native_voice():
+    """official-ingame-voice (krunker_link.c "vc" both ways): our clips (KRUNKNATIVE_VOICE_INPUT tone, V held)
+    reach the stub as v10's "vc" frames; the stub's "vc" clips play on channels -1 and 0, not on 1."""
+    label = "native-voice"
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "7000 down V\n9500 up V\n24000 quit\n") % PASTE_TOKEN
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VOICE_INPUT": "tone:440", "KRUNKNATIVE_VOICE_LOG": "1"},
+                                      scenario="voice")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("vc_out", "vc_in", "done"):
+        check(f"{label}: the stub got to its \"{name}\" step", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    vcs = [f[1] for f in stub.frames if f[0] == "vc"]
+    sent = sum(1 for l in lines if "[voice]" in l and " send clip " in l)
+    check(f"{label}: every clip the client recorded went out as one \"vc\"", vcs and len(vcs) == sent, (len(vcs), sent))
+    ok = all(len(a) == 4 and isinstance(a[0], str) and a[0].startswith("data:audio/ogg; codecs=opus;base64,") and
+             a[1] == 0 and isinstance(a[2], (int, float)) and 0 < a[2] <= 1 and a[3] == 6000 for a in vcs)
+    check(f"{label}: \"vc\" is [dataURL (v10's ogg/opus label), channel 0, micVolume, micQuality 6000]", ok,
+          [(a[0][:40], a[1:]) for a in vcs[:2]])
+    recv = re.findall(r"\[voice\] t=[\d.]+ recv v7 StubBot sid=(\d+) ch=(-?\d+)", text)
+    chans = sorted({int(c) for _, c in recv})
+    check(f"{label}: the bot's clips on channels -1 and 0 reach the player, the team-tab one does not",
+          chans == [-1, 0] and all(int(s) == BOT_SID for s, _ in recv), recv)
+    check(f"{label}: a received clip is decoded and played", re.search(r"\[voice\] t=[\d.]+ play StubBot ", text) is not None)
 
 
 def run_native_social():
@@ -3060,6 +3126,7 @@ def main():
         run_native_world()
         run_native_actions()
         run_native_social()
+        run_native_voice()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -3091,6 +3158,8 @@ def main():
         run_native_live_fallback()
     if ONLY == "social" and os.path.isfile(f"{BUILD}/client_bin"):  # just the social / account lines' run
         run_native_social()
+    if ONLY == "voice" and os.path.isfile(f"{BUILD}/client_bin"):  # just the voice chat run
+        run_native_voice()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

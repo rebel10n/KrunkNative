@@ -117,6 +117,8 @@ static const int REQUIRED_S2C[] = {
 static const int OPTIONAL_C2S[] = {
     // social / cosmetic actions (official-ingame-actions): pings, sprays, taunts, the next-map vote, the spectate target
     KRUNKER_C2S_MARK_POSITION, KRUNKER_C2S_SPRAY, KRUNKER_C2S_PROP_HUNT_TAUNT, KRUNKER_C2S_MATCH_VOTE, KRUNKER_C2S_fpSp,
+    // voice chat clips (official-ingame-voice)
+    KRUNKER_C2S_VOICE_CHAT,
     -1,
 };
 static const int OPTIONAL_S2C[] = {
@@ -136,6 +138,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_CHANGE_AMBIENT, KRUNKER_S2C_UPDATE_HOST, KRUNKER_S2C_UPD_MATCH_VOTE,
     // match social lines (official-ingame-social): the forfeit vote, reconnects, skins found
     KRUNKER_S2C_VOTE_FORFEIT, KRUNKER_S2C_PLAYER_RECONNECTED, KRUNKER_S2C_SKIN_REWARD, KRUNKER_S2C_SKIN_FOUND_MESSAGE,
+    // voice chat clips (official-ingame-voice)
+    KRUNKER_S2C_VOICE_CHAT,
     -1,
 };
 static const int REQUIRED_ADD[] = {
