@@ -1802,6 +1802,14 @@ int krunker_net_inputs_paused(void) {
     return paused;
 }
 
+int krunker_net_is_host(void) {
+    if (K.state != KS_OPEN) return 0;
+    pthread_mutex_lock(&K.lock);
+    const int host = krunker_link_is_host(&K.link);
+    pthread_mutex_unlock(&K.lock);
+    return host;
+}
+
 // v10's request object (createPrivateRoom's _67377) as the codec's values: a KrunkerValue tree whose strings
 // and keys point into the cJSON tree (alive for the call); the arrays and maps take their item slots from
 // one block of config_slots() values, which the caller frees after the send.

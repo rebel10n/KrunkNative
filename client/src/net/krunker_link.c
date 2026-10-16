@@ -157,6 +157,8 @@ void krunker_link_reset(KrunkerLink *l) {
 
 int krunker_link_inputs_paused(const KrunkerLink *l) { return l->locked || l->you_gone; }
 
+int krunker_link_is_host(const KrunkerLink *l) { return l->host_id[0] && l->socket_id[0] && !strcmp(l->host_id, l->socket_id); }
+
 // ---------------------------------------------------------------- inbound
 
 // A Krunker value as cJSON (NULL: nil / not representable).
@@ -3160,6 +3162,17 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (subtype == NET_EXT_KPD_RATE && body_length >= sizeof(NetKpdRatePacket)) { // the officer's verdict: ["rkpd", 0 | 1]
                 const KrunkerValue args[] = {KRUNKER_V_NUM(body[0] ? 1 : 0)};
                 return send_c2s(l, KRUNKER_C2S_RATE_KPD, args, 1);
+            }
+            if (subtype == NET_EXT_ADMIN_ACTION && body_length >= sizeof(NetAdminActionPacket)) {
+                // the player list's Kick (0) / Ban (1) on an official game: punishPlayer(id, action) sends
+                // ADMIN_ACTIONS [action, id, extraBan] with the target's Game.players id; extraBan is the
+                // developer-only switch (off for everyone else). The server checks the sender's right.
+                NetAdminActionPacket a;
+                memcpy(&a, body, sizeof(a));
+                const KrunkerLinkPlayer *p = a.action <= 1 ? player(l, a.uid, 0) : NULL;
+                if (!p || !p->id[0]) return 0;
+                const KrunkerValue args[] = {KRUNKER_V_NUM(a.action), KRUNKER_V_STR(p->id), KRUNKER_V_BOOL(0)};
+                return send_c2s(l, KRUNKER_C2S_ADMIN_ACTIONS, args, 3);
             }
             return 0;
         }

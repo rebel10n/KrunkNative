@@ -2097,6 +2097,33 @@ static void test_hitreg(void) {
     CHECK(link.sync_frames == 0 && !link.sync_known, "reset clears the syncTimes");
 }
 
+// krunker_link_is_host (the official isHost: init arg 5 / "uh" names our socket id, the player list's host right)
+static void test_host_flag(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    CHECK(!krunker_link_is_host(&link), "no socket, no host");
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
+                                          KRUNKER_V_STR("sockA")}, 6); // arg 5 = our socket id: we host
+    CHECK(krunker_link_is_host(&link), "init arg 5 = our socket id: host");
+    clear();
+
+    KrunkerLink other;
+    krunker_link_init(&other, &io, KRUNKER_AHKEY);
+    feed(&other, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    feed(&other, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
+                                           KRUNKER_V_STR("sockB")}, 6); // arg 5 = another socket: not us
+    CHECK(!krunker_link_is_host(&other), "init arg 5 = another socket id: not the host");
+    feed(&other, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(1)}, 2);
+    CHECK(krunker_link_is_host(&other), "uh names our socket id: host");
+    feed(&other, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_BOOL(1)}, 2);
+    CHECK(!krunker_link_is_host(&other), "uh hands the host to sockB: not the host");
+    feed(&other, "uh", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 2);
+    CHECK(!krunker_link_is_host(&other), "uh null: no host");
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2881,7 +2908,26 @@ int main(void) {
               "kpd [0, {id: socket id}]");
         clear();
     }
-    feed(&link, "vk", (KrunkerValue[]) {KRUNKER_V_STR("Other"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(4), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Me")}, 5);
+    {
+        // the player list's Kick / Ban on an official game: ADMIN_ACTIONS [action, id, extraBan (off)] to the
+        // target's socket id (sid 9 = sockA); Kill / TP2 and an unknown sid are not sent
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(NetAdminActionPacket)];
+        for (int action = 0; action <= 1; action++) {
+            const NetAdminActionPacket a = {.uid = 9, .action = (uint8_t) action};
+            const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_ADMIN_ACTION, &a, sizeof(a));
+            CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "pnh") &&
+                      g_out[0].argc == 3 && fnum(&g_out[0], 0) == action && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 1)), "sockA") &&
+                      krunker_is(krunker_frame_arg(&g_out[0], 2), KRUNKER_BOOL) && !krunker_frame_arg(&g_out[0], 2)->u.boolean,
+                  "pnh [%d, id, false] for kick / ban", action);
+            clear();
+        }
+        const NetAdminActionPacket kill = {.uid = 9, .action = 3}, gone = {.uid = 99, .action = 0};
+        const uint16_t kn = net_ext_pack(buf, sizeof(buf), NET_EXT_ADMIN_ACTION, &kill, sizeof(kill));
+        CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, buf, kn) && g_out_count == 0, "no pnh for an action other than kick / ban");
+        const uint16_t gn = net_ext_pack(buf, sizeof(buf), NET_EXT_ADMIN_ACTION, &gone, sizeof(gone));
+        CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, buf, gn) && g_out_count == 0, "no pnh for a player we do not know");
+    }
+    feed(&link, "vk",(KrunkerValue[]) {KRUNKER_V_STR("Other"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(4), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Me")}, 5);
     {
         const NetPacket *e = find_in(NET_PACKET_EXT, 0);
         uint16_t sub = 0, bl = 0;
@@ -3068,6 +3114,7 @@ int main(void) {
     test_lobby();
     test_prophunt();
     test_script();
+    test_host_flag();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

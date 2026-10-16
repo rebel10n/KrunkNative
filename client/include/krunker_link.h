@@ -324,6 +324,9 @@ typedef struct {
 // window.locked ("lock") or while it has no player of its own (`you && you.active && !locked`,
 // game.deob.js:223145): no isn is used up, the "q" window does not fill, nothing is predicted.
 int krunker_link_inputs_paused(const KrunkerLink *link);
+// Whether our socket hosts this custom lobby: host_id (init arg 5, "uh") names our socket id. The official
+// client's isHost (its "uh" handler: host && host == socketId), the player list's staff buttons' host right.
+int krunker_link_is_host(const KrunkerLink *link);
 
 void krunker_link_init(KrunkerLink *link, const KrunkerLinkIO *io, int64_t ahkey);
 // A new WebSocket: ahNum 0, every per-connection state cleared (the io stays).

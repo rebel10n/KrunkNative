@@ -170,6 +170,8 @@ int krunker_net_host_custom(const cJSON *config, KrunkerHostDoneFn done, void *u
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
 // init's map still loading (the packets after it held) is the latter. 0 when no official game is open.
 int krunker_net_inputs_paused(void);
+// Whether our socket hosts the open official custom lobby (krunker_link_is_host). 0 when no official game is open.
+int krunker_net_is_host(void);
 // The frame at `index` of the open "q" window fired (a shot or melee: v10's syncTime): its server time goes
 // out with the window (krunker_link_mark_sync). Called on the main thread after that frame's tick, before the
 // window is sent; nothing when no official game is open.

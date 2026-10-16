@@ -61,6 +61,7 @@ void hud_ui_hit(Client*, int kill);
 #include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
 #include <online_mode.h> // online_mode_server_rights: the player list's staff buttons
+#include <krunker_net.h> // krunker_net_is_host: the host of an official custom lobby (its staff buttons)
 #include <net_ext.h>     // NET_RIGHTS_*
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
@@ -787,14 +788,16 @@ static void hud_plist_clan(StrBuf *sb, const char *clan) {
 // Kill, TPAll and (canTeleport = isDev) TP2 / TPME; `kick` = canGlobalKick / canGlobalBan /
 // canGlobalFlag = isDev || isMod, the punish popup (v10 Account.updatePerms, game.deob.js:114461-114474;
 // genList :214291-214305). A moderator is not a DEV: no Kill / teleport buttons (the server refuses
-// them to it too). isHost (the server says this socket hosts the lobby: NET_EXT_KN_ACCOUNT_RIGHTS HOST)
-// also gets the punish popup. Running the offline sandbox is neither (v10's own sandbox shows no staff
-// buttons and no host star either); the server checks every command again anyway.
+// them to it too). isHost also gets the punish popup: on a KrunkerNative server the server says so
+// (NET_EXT_KN_ACCOUNT_RIGHTS HOST), on an official custom lobby our socket is the host (krunker_link_is_host:
+// init arg 5 / "uh" names it, the official isHost = host == socketId). Running the offline sandbox is
+// neither (v10's own sandbox shows no staff buttons and no host star either); the server checks every
+// command again anyway.
 static int hud_plist_staff(const Client *client, int *dev, int *kick, int *host) {
     const AccountInfo *acc = active_account();
     *dev = acc && acc->is_dev;
     *kick = acc && (acc->is_dev || acc->is_mod);
-    *host = client && !client->offline && (online_mode_server_rights() & NET_RIGHTS_HOST) != 0;
+    *host = (client && !client->offline && (online_mode_server_rights() & NET_RIGHTS_HOST) != 0) || krunker_net_is_host();
     return *kick || *host;
 }
 
@@ -4650,9 +4653,9 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         sb_append_esc(&sb, q);
         sb_append(&sb, "</div><div class='takeActionTable'>");
         sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 0);clearPops();'>Kick</span>", uid);
-        // Ban: canGlobalBan = isDev || isMod (v10 punishPopup, game.deob.js:217250; a host's ban is
-        // not offered: the server's admin ban checks DEV / moderator)
-        if (kick) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
+        // Ban: canGlobalBan = isDev || isMod (v10 punishPopup, game.deob.js:217250), and the official host too
+        // (isHost || canGlobalBan). A KrunkerNative host's ban is not offered: its server's admin ban checks DEV / moderator
+        if (kick || krunker_net_is_host()) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
         sb_append(&sb, "</div>");
         char *html = sb_finish(&sb);
         ui_loadout_clear_pops();
