@@ -21,7 +21,8 @@
     "mapName": "Kanji",
     "mapFile": "maps/311_kanji.json",
     "gameName": "",
-    "connectError": "GAME UPDATING"
+    "connectError": "GAME UPDATING",
+    "updateArt": 4
   },
-  "note": "The Game Updating screen (v10:221859). Reference: capture-v10-seq.js game-updating."
+  "note": "The Game Updating screen (v10:221859) over img/menu-bg/4.png, the art v10's seeded Math.random picked in the capture (state.updateArt), with its credit. Reference: capture-v10-seq.js game-updating."
 }

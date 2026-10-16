@@ -7,11 +7,30 @@
   "regions": [
     {
       "name": "box",
-      "rect": [450, 270, 380, 180],
+      "rect": [
+        450,
+        270,
+        380,
+        136
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the Lost Connection box (DISCONNECTED, Find Game / Servers / Settings)"
+      "note": "the Lost Connection box down to its tab row: header, DISCONNECTED, ID / Code / Reason, Region, the extensions hint"
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        450,
+        406,
+        380,
+        44
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "measured, never fails: KrunkNative adds Play Offline (knHostOffline, menu_ui.c) after Find Game, so the row has four tabs where v10 has Find Game / Servers / Settings; the labels are checked by lost-connection and connect_ux_e2e"
     }
   ]
 }

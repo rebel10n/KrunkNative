@@ -25,7 +25,9 @@
 // durations, delays, easing and setTimeout chains are tested (tools/uidiff/README.md "Frame
 // sequences"). The origin is the first frame showing the applied state (`applied`, default);
 // the first k * 1.6 s after it (`cycle`: every infinite menu animation at its start, as
-// capture-v10-seq.js' restartAnims puts them); clock 0 (`boot`); the first frame after a state
+// capture-v10-seq.js' restartAnims puts them); the page's boot (`boot`: state.boot raises it again
+// as a fresh page, so like `applied` it is the first frame after the state; clock 0 itself comes
+// before the page, its map and the local server are up); the first frame after a state
 // change of the running game: the first INIT (`init`), the local player's spawn (`spawn`), its
 // death (`death`), its next kill (`kill`), the match end (`end`); or the first frame laying out
 // an element matching a CSS selector (`selector:<css>`, a box with a size: the page's own timers
@@ -339,6 +341,7 @@ static void warn_unknown_keys(void) {
         "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
         "windowScroll", // {id or .selector: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
+        "updateArt",  // the img/menu-bg/<id>.png the Game Updating screen shows (default its first, id 0)
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
         "storage",    // {key: "value"}: localStorage entries seeded before the page reads them ("skins": the loadout's weapon skins)
         "notify",     // S5: {notifications, announcement, emoji, tip}: the chat column's v10 widgets, item tooltips (v10_notify.c)
@@ -444,7 +447,6 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
             return 0;
         }
     }
-    if (g_sc.seq_count && g_sc.seq_origin == ORIGIN_BOOT) g_sc.seq_origin_ms = 0.0;
 
     // background: "#rrggbb", "checker[:cell[:#light:#dark]]" or an image path; default opaque black
     const char *bg = obj_str(g_sc.root, "background");
@@ -1189,6 +1191,7 @@ static int ui_scenario_apply(Client *client) {
     apply_endscreen(client);
     apply_chat_input();
     menu_boot_scenario(st("boot"));                 // S1: the page before its first INIT (menu_ui.c)
+    menu_update_art_scenario(st("updateArt"));      // before apply_net_state shows Game Updating
     menu_auto_respawn_scenario(st("autoRespawn"));  // S1: "Auto Respawning in N" (menu_ui.c)
     v10_notify_scenario(st("notify"));              // S5: notifications, announcement, emoji panel, tooltips (v10_notify.c)
     apply_net_state();
@@ -1308,9 +1311,12 @@ static int seq_finished(const Client *c) {
 
 // anim_times: frames until every capture is written (the origin may still be ahead: a round end)
 static int run_sequence(Client *client) {
-    if (g_sc.seq_origin == ORIGIN_APPLIED || g_sc.seq_origin == ORIGIN_CYCLE) {
+    if (g_sc.seq_origin == ORIGIN_APPLIED || g_sc.seq_origin == ORIGIN_CYCLE || g_sc.seq_origin == ORIGIN_BOOT) {
         // the first frame after the state is the origin; timed state (kill feed age, hit marker)
-        // is what it is at that frame. cycle: the first animation cycle start from there on
+        // is what it is at that frame. cycle: the first animation cycle start from there on.
+        // boot: state.boot (menu_boot_scenario) re-arms the page's boot curtain and ring there, as
+        // a fresh page; at clock 0 the client was still booting (seq-loading-map-name showed the
+        // CLICK TO PLAY its own boot ended in, not v10's "Loading Kanji ...")
         g_sc.seq_origin_ms = g_sc.clock_ms + SCENARIO_FRAME_MS;
         if (g_sc.seq_origin == ORIGIN_CYCLE) g_sc.seq_origin_ms = ceil(g_sc.seq_origin_ms / SCENARIO_ANIM_CYCLE_MS) * SCENARIO_ANIM_CYCLE_MS;
         apply_timed(client, g_sc.seq_origin_ms);
@@ -1333,7 +1339,7 @@ int ui_scenario_run(Client *client) {
 
     // boot: first frame at clock 0 (the page's animation origin), then 60 Hz
     g_sc.last_now_s = -1.0;
-    g_sc.clock_ms = -SCENARIO_FRAME_MS; // the step lands on 0 (anim_origin boot: t = 0 is this frame)
+    g_sc.clock_ms = -SCENARIO_FRAME_MS; // the step lands on 0, the page animations' origin
     scenario_step(client);
     if (!run_until(client, boot_done, SCENARIO_BOOT_MAX_FRAMES, "the page, map and local server")) return 1;
     if (g_sc.seq_count && g_sc.seq_origin != ORIGIN_BOOT && g_sc.seq_origin != ORIGIN_INIT) {

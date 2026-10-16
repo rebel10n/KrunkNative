@@ -13,8 +13,9 @@ free_ports. Two headless client_bin runs against server_bin:
      and the switch never showed the error screen ("[ui log] error screen" absent).
   2. give up: the client plays on server A, which is then killed (no ERROR: a dropped session). The
      spinner stays up through the transport's backoff; after NET_RETRY_BUDGET failures the transport
-     gives up: the Lost Connection box shows with a Retry button (the first tab) and the give-up text
-     in the log. Server A is started again and Retry (call knRetry) brings the client back in the game.
+     gives up: the Lost Connection box shows with v10's Find Game as its first tab (a server joined
+     directly, from the server list or the console's connect, says Reconnect) and the give-up text in
+     the log. Server A is started again and that tab (call knRetry) brings the client back in the game.
 
 Samples are read with the input script's `nodes` / `text` lines (class selectors: the id selectors do
 not see the page's boot markup). Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL;
@@ -178,11 +179,11 @@ def giveup_scenario():
     a.wait()
     gave_up = wait_for(lambda: "gave up after" in read(log), 90)
     check("giveup: the transport gives up after the retry budget", gave_up, read(log)[-500:])
-    # the server comes back; the client stays on the disconnected screen until Retry
+    # the server comes back; the client stays on the disconnected screen until Find Game
     connects_before = read(log).count("connected to server 127.0.0.1:%d" % port_a)
     a2 = start_server(port_a, "a2b")
     time.sleep(4)
-    check("giveup: no reconnect without Retry (the server is up again, the client holds)",
+    check("giveup: no reconnect without Find Game (the server is up again, the client holds)",
           read(log).count("connected to server 127.0.0.1:%d" % port_a) == connects_before, str(connects_before))
     finish(p, 90)
     text = read(log)
@@ -194,12 +195,13 @@ def giveup_scenario():
     final_box = nodes_at(text, "@box", 50000, 50100)
     check("giveup: the disconnected screen (Lost Connection box) shows when it gives up", final_box and final_box[0] >= 1, str(final_box))
     tab = text_at(text, "@tab", 50100, 50200)
-    check("giveup: the disconnected screen has a Retry button (its first tab)", tab and tab[0][2].strip() == "Retry", str(tab))
+    # v10's first tab is Find Game (g:222118); only a server joined directly (servers_ui.c direct_join) says Reconnect
+    check("giveup: the disconnected screen's first tab is Find Game", tab and tab[0][2].strip() == "Find Game", str(tab))
     gave_log = [l for l in text.splitlines() if "[ui log] error screen" in l]
     check("giveup: the error screen says the client gave up", any("gave up after" in l for l in gave_log), str(gave_log[:2]))
-    check("giveup: Retry reconnects to the server", text.count("connected to server 127.0.0.1:%d" % port_a) > connects_before,
+    check("giveup: Find Game reconnects to the server", text.count("connected to server 127.0.0.1:%d" % port_a) > connects_before,
           str(text.count("connected to server")))
-    check("giveup: back in the game after Retry", len(st) >= 2 and in_game(st[-1]), str(st[-2:]))
+    check("giveup: back in the game after Find Game", len(st) >= 2 and in_game(st[-1]), str(st[-2:]))
     os.killpg(a2.pid, signal.SIGTERM)
 
 

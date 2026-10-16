@@ -1,0 +1,61 @@
+{
+  "scenario": "kn-om-tools-short",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "om-header",
+      "rect": [
+        396,
+        112,
+        1128,
+        164
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "title, tabs (Objects active), search box, status line at UI Scaling off"
+    },
+    {
+      "name": "om-grid",
+      "rect": [
+        400,
+        281,
+        892,
+        120
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#knOmGrid0 shrunk to what #menuWindow's max-height leaves (one row and a bit, the grid scrolls)"
+    },
+    {
+      "name": "om-tools",
+      "rect": [
+        1306,
+        251,
+        212,
+        148
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmTools: the fixed TOOLS title over #knOmToolsList scrolled to its end, the hint and 'Pick a tool to equip the Tool Gun' whole above the bar's thumb"
+    },
+    {
+      "name": "om-footer",
+      "rect": [
+        396,
+        410,
+        1128,
+        78
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "hint + Remove + Undo"
+    }
+  ]
+}

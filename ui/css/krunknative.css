@@ -447,9 +447,13 @@ img.knOmProp {
 }
 
 /* Object Manager: the Tools pane right of the grid (the Tool Gun's tools, object_manager_ui.c) */
+/* The row is as tall as the taller of the grid column and the whole Tools pane, so a tab or a search
+ * with few tiles (kn-om-search: 3) still shows every tool and its hint instead of a one-tool slot.
+ * When #menuWindow's max-height (main.css: 100% - 230px of #uiBase) leaves less, the row shrinks
+ * (min-height: 0) and the stretched pane's list scrolls (kn-om-tools-short, ui_transitions om-tools). */
 #menuWindow.dark div.knOmMain {
   display: flex;
-  align-items: stretch; /* the Tools pane is as tall as the status line + the grid */
+  align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -461,7 +465,8 @@ img.knOmProp {
   min-height: 0;
 }
 #menuWindow.dark div.knOmTools {
-  position: relative; /* .knOmToolsIn fills it: the pane adds no height of its own to the row */
+  display: flex; /* .knOmToolsIn takes the stretched height, its list the rest */
+  flex-direction: column;
   width: 216px; /* 192px of rows beside the list's scrollbar: Release, Freeze and Drop on one line */
   flex-shrink: 0;
   margin-left: 12px;
@@ -469,11 +474,8 @@ img.knOmProp {
   background-color: rgba(0, 0, 0, 0.35);
 }
 #menuWindow.dark div.knOmToolsIn {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 6px 4px 6px 8px;

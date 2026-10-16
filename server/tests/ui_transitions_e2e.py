@@ -946,9 +946,10 @@ def sc_om_scroll():
 
 
 def sc_om_tools():
-    """The Object Manager's Tools pane at a short window (1280x600): its list (#knOmToolsList, a scroll
-    container under the fixed TOOLS title) does not cut the lines under "Pick a tool to equip the Tool
-    Gun" off any more, it scrolls: the wheel over it, and a drag of its scrollbar's thumb (mdown on the
+    """The Object Manager's Tools pane on a short window (1920x700, UI Scaling off: with scaling on,
+    #uiBase is at least 900 px tall and the whole pane fits, krunknative.css .knOmMain): its list
+    (#knOmToolsList, a scroll container under the fixed TOOLS title) does not cut the lines under "Pick
+    a tool to equip the Tool Gun" off any more, it scrolls: the wheel over it, and a drag of its scrollbar's thumb (mdown on the
     thumb, the cursor down the bar, mup) to the bottom, where the last line (#knOmToolGun) shows whole;
     then the last tool (Properties) and the last control (Release: Drop) are clicked there, and the
     list keeps its scroll position through the picks and a tab switch (object_manager_ui.c om_rerender).
@@ -975,13 +976,15 @@ def sc_om_tools():
         4100 scroll @t-drag knOmToolsList
         4100 rect @t-drag knOmToolsList knOmToolGun
         4200 clickid knOmTool6
+        4210 scroll @t-picked knOmToolsList
+        4210 rect @t-picked knOmToolsList knOmToolGun
         5200 scroll @t-pick knOmToolsList
         5300 clickid knOmDrop1
         6300 scroll @t-drop knOmToolsList
         6400 clickid knOmTab1
         7100 scroll @t-tab knOmToolsList
         7200 quit
-    """, env_extra={"KRUNKNATIVE_WINDOW_SIZE": "1280x600"})
+    """, env_extra={"KRUNKNATIVE_WINDOW_SIZE": "1920x700"}, storage={"knSettings": '{"uiScaling":false}'})
     if lines is None:
         return
     tops, rects = {}, {}
@@ -1021,9 +1024,17 @@ def sc_om_tools():
     # the wheel reached the end too when one step was enough: never further than the drag
     record("om-tools", "t-wheel", "knOmToolsList.scrollTop", "<= the dragged end", tops.get("t-wheel", "no probe"),
            top("t-wheel") is not None and top("t-drag") is not None and top("t-wheel") <= top("t-drag") + 0.01)
+    # Right after the pick the Tool Gun line is one line until the server hands the gun over (two
+    # lines): at the end, the list's end comes up with it, so the scrollTop clamps (as in a browser)
+    # with the last line on the list's bottom. From there on the position holds.
+    picked = bottoms("t-picked")
+    clamped = (top("t-picked") is not None and top("t-drag") is not None and 0.0 < top("t-picked") < top("t-drag")
+               and picked is not None and abs(picked[1] - picked[0]) <= 1.0)
+    record("om-tools", "t-picked", "knOmToolsList.scrollTop", "=t-drag, or clamped at the shorter end",
+           (tops.get("t-picked", "no probe"), picked), top("t-picked") == top("t-drag") or clamped)
     for label in ("t-pick", "t-drop", "t-tab"):
-        record("om-tools", label, "knOmToolsList.scrollTop", "=t-drag", tops.get(label, "no probe"),
-               top(label) is not None and top(label) == top("t-drag"))
+        record("om-tools", label, "knOmToolsList.scrollTop", "=t-picked", tops.get(label, "no probe"),
+               top(label) is not None and top(label) == top("t-picked"))
     handlers = [m.group(1) for m in (re.search(r"\[ui\] handler (knOm(?:Tool|PhysDrop|Tab)\(\d+\)) click", line) for line in lines) if m]
     want = ["knOmTool(6)", "knOmPhysDrop(1)", "knOmTab(1)"]
     record("om-tools", "clicks", "handlers", " ".join(want), " ".join(handlers), handlers == want)

@@ -1,6 +1,6 @@
 {
   "size": [
-    1280,
+    1920,
     600
   ],
   "background": "#000000",
@@ -30,9 +30,12 @@
     "scrollbars": true,
     "windowScroll": {
       "knOmToolsList": 1000000
+    },
+    "settings": {
+      "uiScaling": false
     }
   },
   "frames": 10,
   "ref": "doc/ref/krunknative/kn-om-tools-short.png",
-  "note": "KrunkNative Object Manager at a short window (1280x600) with scrollbars on: the Objects tab, no tool picked yet, the Tools pane's list (#knOmToolsList) scrolled to its end under the fixed TOOLS title, so the hint and the 'Pick a tool to equip the Tool Gun' line show whole above the bar's thumb (they were cut off before the pane scrolled; a KN baseline)."
+  "note": "KrunkNative Object Manager on a short window (1920x600) with UI Scaling off, so #menuWindow's max-height (100% - 230px) leaves the Tools pane less than its height (with scaling on, #uiBase is at least 900 px tall and the pane always fits), scrollbars on: the Objects tab, no tool picked yet, the Tools pane's list (#knOmToolsList) scrolled to its end under the fixed TOOLS title, so the hint and the 'Pick a tool to equip the Tool Gun' line show whole above the bar's thumb (they were cut off before the pane scrolled; a KN baseline)."
 }

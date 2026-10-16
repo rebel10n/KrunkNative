@@ -7,11 +7,43 @@
   "regions": [
     {
       "name": "box",
-      "rect": [450, 300, 380, 120],
+      "rect": [
+        450,
+        300,
+        380,
+        74
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the Game Updating box (the art behind it is not painted offline)"
+      "note": "the Game Updating box down to its tab row (header, the Twitch line) over img/menu-bg/4.png (state.updateArt)"
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        450,
+        374,
+        380,
+        46
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "measured, never fails: KrunkNative adds Play Offline (knHostOffline, menu_ui.c) after Find a Game, so the row has four tabs where v10 has Find a Game / Settings / Changelog"
+    },
+    {
+      "name": "credit",
+      "rect": [
+        0,
+        688,
+        220,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#instructionsUpdateCredit: Art By @14julink"
     }
   ]
 }

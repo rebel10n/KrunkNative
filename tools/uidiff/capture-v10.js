@@ -37,8 +37,10 @@ const HOME = os.homedir();
 const OFFLINE = path.resolve(process.env.KN_V10_PUBLIC || path.join(HOME, '.cache/kn-v10/live/site/public'));
 const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(HOME, '.cache/kn-v10/v10.js');
 const V7_PUBLIC = process.env.KN_V7_PUBLIC || '/home/user/jails/kru/src/Krunker_v7.1.4/public';
+// ui/ last: the live v10 files tools/ui-import pinned there (live_assets_v10.lock: the menu-bg art the
+// Game Updating screen picks, of which the mirror has one)
 const ASSET_DIRS = [path.join(HOME, '.cache/kn-v10/live/stage/assets'), path.join(HOME, '.cache/kn-v10/live/web/assets.krunker.io'),
-  path.join(REPO, 'assets', 'v10'), path.join(REPO, 'assets'), V7_PUBLIC];
+  path.join(REPO, 'assets', 'v10'), path.join(REPO, 'assets'), V7_PUBLIC, path.join(REPO, 'ui')];
 const PROXY = 'http://127.0.0.1:9'; // closed: nothing unanswered leaves the machine
 const ANIM_MS = 800;
 let OUT = path.join(REPO, 'doc', 'ref', 'krunker-v10');
@@ -155,7 +157,10 @@ function preScript(storage) {
       t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
     Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => window.__knLock || null });
     HTMLCanvasElement.prototype.requestPointerLock = function () { window.__knLock = this; setTimeout(() => document.dispatchEvent(new Event('pointerlockchange')), 0); };
-    document.exitPointerLock = function () { window.__knLock = null; setTimeout(() => document.dispatchEvent(new Event('pointerlockchange')), 0); };
+    // as in Chrome, an exit without a lock changes nothing and fires no pointerlockchange (v10's
+    // handler would run toggleControlUI(false) and hide an error box just shown: the "error" packet's
+    // _67308.disable() exits the lock from the menu)
+    document.exitPointerLock = function () { if (!window.__knLock) return; window.__knLock = null; setTimeout(() => document.dispatchEvent(new Event('pointerlockchange')), 0); };
   })()`;
 }
 

@@ -136,6 +136,7 @@ int  menu_connecting(void);                     // the spinner is up (a connect 
 void menu_auto_respawn_begin(const Client *client); // the death delay ended: autoRespawn(forceSpawn + 1)
 void menu_boot_scenario(const cJSON *boot);      // --render-scenario state.boot
 void menu_auto_respawn_scenario(const cJSON *seconds); // --render-scenario state.autoRespawn
+void menu_update_art_scenario(const cJSON *id);   // --render-scenario state.updateArt
 void menu_show_connect_error(const char *error, const char *code); // the error screen with this message / Krunker code (a restart's resume)
 void menu_set_class_index(int index, int silent);// setClassIndex
 void menu_select_class(int index);               // selectClass

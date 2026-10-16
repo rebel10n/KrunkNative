@@ -846,12 +846,13 @@ static const struct {
 };
 #define MENU_BG_ART_COUNT ((int) (sizeof(k_menu_bg_art) / sizeof(k_menu_bg_art[0])))
 static int g_update_art = -1; // the shown entry while Game Updating is up
+static int g_update_art_pin;  // the entry a render shows (state.updateArt: menu_update_art_scenario)
 
 static void menu_apply_update_art(const int updating) {
     if (updating == (g_update_art >= 0)) return;
     HtmlElem credit = by_id("instructionsUpdateCredit");
     if (updating) {
-        g_update_art = scenario_on() ? 0 : rand() % MENU_BG_ART_COUNT; // randInt(0, length - 1); pinned in renders
+        g_update_art = scenario_on() ? g_update_art_pin : rand() % MENU_BG_ART_COUNT; // randInt(0, length - 1); pinned in renders
         char buf[160];
         snprintf(buf, sizeof(buf), "url(\"img/menu-bg/%d.png\")", k_menu_bg_art[g_update_art].id);
         set_style("instructionsUpdateBG", "background-image", buf);
@@ -868,6 +869,14 @@ static void menu_apply_update_art(const int updating) {
         set_display("instructionsUpdateBG", "none");
         if (credit) html_dom_set_display(credit, "none");
     }
+}
+
+// ui_scenario.c state.updateArt: the menu-bg id a render's Game Updating screen shows (default the
+// first entry), so a scenario can show the art a v10 capture's seeded Math.random picked
+void menu_update_art_scenario(const cJSON *id) {
+    if (!cJSON_IsNumber(id)) return;
+    for (int i = 0; i < MENU_BG_ART_COUNT; i++)
+        if (k_menu_bg_art[i].id == id->valueint) g_update_art_pin = i;
 }
 
 // ---- the auto-respawn countdown (v10 g:197900-197906, g:209976)
@@ -1034,10 +1043,10 @@ void menu_update_instructions(void) {
             else
                 sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>", I18N("error.extentions", "If you have any extensions, disable them"));
         }
-        // Retry: the give-up's button (menu_retry_connect: the pinned server again, else a fresh seek);
-        // an inactivity kick keeps v10's Find Game alone
-        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"),
-                   inactive ? (find ? find : "Find Game") : I18N("kn.error.retry", "Retry"));
+        // v10's first tab is Find Game on every Lost Connection screen (g:222118: playMap / backToOrigin,
+        // a new game); KrunkNative's knRetry is that fresh seek (menu_retry_connect), and with a pinned
+        // server it tries that server again, so it says Reconnect. An inactivity kick keeps it alone.
+        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"), find ? find : "Find Game");
         if (!inactive)
             sb_appendf(&eb, MENU_ERROR_TAB("knHostOffline()", "%s") MENU_ERROR_TAB("showWindow(2)", "Servers") MENU_ERROR_TAB("showWindow(1)", "Settings"),
                        I18N("kn.error.playOffline", "Play Offline"));
@@ -1405,7 +1414,7 @@ void menu_commit_account_name(void) {
 // A server change looks like a game load, not like a lost connection (v10 loads every game on a
 // fresh page: the boot curtain and the ring, with "Loading <map> ..." as loadGamNm). The spinner
 // stays up until the connection is in (its INIT lifts the curtain) or the transport gives up (the
-// Lost Connection screen with Retry). g_connect_map is the target's map ("" = the ring alone, the
+// Lost Connection screen with Find Game / Reconnect). g_connect_map is the target's map ("" = the ring alone, the
 // map is not known yet).
 static int g_connecting;          // the spinner is up for a connect under way
 static char g_connect_map[96];    // its target's map, for "Loading <map> ..."
@@ -1534,8 +1543,8 @@ void menu_show_connecting(void) {
     menu_show_connecting_map(g_ui.map_name);
 }
 
-// The error screen's Retry (and "Find Game" on a screen that has no server of its own): a new try at
-// the same server (pinned: the transport) or a fresh seek for a brain session (servers_ui.c).
+// The error screen's first tab (Find Game, or Reconnect for a pinned server): a new try at the same
+// server (pinned: the transport) or a fresh seek for a brain session (servers_ui.c).
 void menu_retry_connect(void) {
     if (client_is_connected(g_ui.client)) {
         g_boot_any = 1; // nothing is left: the game still loaded lifts the curtain again
@@ -1563,7 +1572,7 @@ static void connecting_spinner(void) {
 //   FAILED, a rejoin is under way           the spinner ("Rejoining a game..." is not shown)
 //   FAILED, a server update (004004)        the Game Updating screen with its rejoin line (v10's notice)
 //   FAILED, held (a server ERROR, a
-//     disconnect, a give-up)                the Lost Connection screen with Retry (the give-up's text)
+//     disconnect, a give-up)                the Lost Connection screen with Find Game (the give-up's text)
 static void menu_poll_connection(Client *client) {
     char error[sizeof(client->net_status_error)];
     char code[sizeof(client->net_status_code)];

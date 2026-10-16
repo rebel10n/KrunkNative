@@ -197,6 +197,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `windowActions` | array of `[name, args...]` | inline-handler calls dispatched once the window is open, by the names v7's markup uses: `["windows.2.switchTab", 0]` (Change Loadout's Class tab), `["windows.6.switchTab", 2]` (a controls tab) |
 | `windowScroll` | object `{id: top}` | scrollTop of the window's scroll containers once `windowActions` ran (clamped, so `1000000` is the end): `{"knOmToolsList": 1000000}` (kn-om-tools-short). A key starting with `.` is a selector (its first match), for the v10 Svelte popups that have no ids: `{".my-clan-tab.svelte-51j5cz": 800}` (kn-turf-history) |
 | `connected`, `ready` | bool | net state for `#instructions` (CLICK TO PLAY when both true) |
+| `updateArt` | int | the `img/menu-bg/<id>.png` (and its credit) the Game Updating screen shows; default id 0. `seq-game-updating` pins what v10's seeded `Math.random` picked in the capture (4) |
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
 | `mapName`, `modeName`, `region`, `name`, `gameName`, `classIndex` | string / int | state glue (`#curGameInfo`, `#menuRegionLabel`, `#menuClassNameTag`, `#gameNameHolder`, class box) |
 | `anim_time` | number | animation clock (s) of the captured frame (see [anim_time](#anim_time)) |
@@ -276,7 +277,8 @@ diffs it against the reference frame captured at the same time after the same ev
 - `anim_origin` (`client/src/ui/ui_scenario.c`): `applied` (default: the first frame after the
   state is applied; timed state such as `killfeed` ages and `hit` is set for that frame), `cycle`
   (the first multiple of 1.6 s after that: every infinite menu animation at its start), `boot`
-  (clock 0), `init` (the first INIT), `spawn`, `death` (the local player's), `kill` (its next
+  (the page's boot as `state.boot` raises it again: the first frame after the state, like `applied`;
+  clock 0 itself comes before the page, its map and the local server are up), `init` (the first INIT), `spawn`, `death` (the local player's), `kill` (its next
   kill), `end` (the match end), `selector:<css>` (the first frame laying out a match: a page
   timer or packet). Frames land exactly on origin + t on the 60 Hz virtual clock. Every native
   origin is the frame that processes the event and draws it; on the v10 side a sequence with a
@@ -391,6 +393,16 @@ v7's `public/` read-only and never runs v7's npm server; how each state is reach
 shim, sandbox bots and kills, the stubbed social socket, the mocked server list) is in
 `doc/ref/krunker-v7.1.4/README.md`. Needs `chromium-browser` (`KN_CHROME=...`) and
 `net-bridge/node_modules` (ws).
+
+### KrunkNative baselines re-rendered
+
+A `doc/ref/krunknative/` baseline is re-rendered only after a side-by-side check that every changed
+pixel follows an intended change; pixels that differed for any other reason keep the old reference.
+
+| Baselines | When | Why |
+|---|---|---|
+| `kn-om-*` (10), `kn-om-tools-short` | 2026-10-15 (uidiff-red) | 1f32a8bc made the window a flex column and 422e6a02 wraps tile, tool and gun names; krunknative.css `.knOmMain` then lets the whole Tools pane set the row's height (a 3-tile search showed one tool). Only the window's box (x 290-990, y 140-580) is new; the chat behind it keeps the old pixels. Region rects follow the new boxes (`KRUNKNATIVE_SCENARIO_DUMP='#menuWindow'`). `kn-om-weapons` / `kn-om-search` are rendered with engine-replaced-pct (a percentage-width `<img>` adds only its border and padding to min-content, as in Chrome), which narrows the weapon icons. `kn-om-tools-short` is now 1920x600 with UI Scaling off (with scaling on the pane always fits) and has regions. |
+| `v10-market/browse`, `v10-market/inventory` | 2026-10-15 (uidiff-red) | the `.market-grid` box only: 4260815e (`all: unset` drops the Buy button's UA border) and 1657aa83 (`aspect-ratio: 1` on `.market-card-shell`), bisected. The left strip (the v10 menu column behind the popup, ~0.37 %) stays as it was in all eleven market baselines. |
 
 ### Paint pages (`make uidiff-paint`)
 

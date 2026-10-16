@@ -17,11 +17,11 @@
     "inGame": false,
     "name": "Guest",
     "classIndex": 0,
-    "region": "...",
+    "region": "0",
     "mapName": "Kanji",
     "mapFile": "maps/311_kanji.json",
     "gameName": "",
     "connectError": "DISCONNECTED"
   },
-  "note": "The Lost Connection box (the \"error\" packet, player.disconnect \"DISCONNECTED\"); no open transition: the 500 ms frame equals the first. Reference: capture-v10-seq.js lost-connection."
+  "note": "The Lost Connection box (the \"error\" packet, player.disconnect \"DISCONNECTED\"); no open transition: the 500 ms frame equals the first. region \"0\": the v10 sandbox has no region, so its box says Region: 0 (g:222118 `|| '0'`). Reference: capture-v10-seq.js lost-connection."
 }
