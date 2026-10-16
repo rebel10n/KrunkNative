@@ -219,5 +219,12 @@ void  html_channel_post(const char *name, const char *text); // to every other t
 char *html_channel_take(const char *name);                  // next received message (malloc'd) or NULL
 
 // ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
+// On the web the Krunker Strike app (/strike/, flavor.h) is its own installed app on the same
+// origin as Krunker Box Office: its keys live under HTML_STORAGE_STRIKE_PREFIX, so the two apps never
+// read each other's settings, loadouts or sign-in (Android shares an origin's storage between PWAs).
 int  html_storage_get(const char *key, char *buf, size_t n);          // -1 if absent
 void html_storage_set(const char *key, const char *value);
+#define HTML_STORAGE_STRIKE_PREFIX "strike."
+#ifdef __EMSCRIPTEN__
+const char *html_storage_prefix(void); // this process's key prefix: "" (Box Office) or the Strike one
+#endif

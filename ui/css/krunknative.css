@@ -264,6 +264,28 @@ a.knDlLink:hover {
   text-align: center;
   margin-top: 12px;
 }
+/* Krunker Strike, its own app (download_ui.c strike_section): the Strike logo and gold on the
+ * Strike purple (#5736b0, the app icon's background: tools/branding/strike_icons.py). */
+.knDlStrike {
+  margin: 15px 5px;
+  padding: 10px 14px 8px 14px;
+  border-radius: 6px;
+  border: 3px solid #f9c80e;
+  background-color: rgba(87, 54, 176, 0.35);
+}
+.knDlStrikeHead {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.knDlStrikeLogo {
+  height: 52px;
+  margin-right: 14px;
+  flex-shrink: 0;
+}
+.knDlStrike div.knDlHow {
+  margin-bottom: 6px;
+}
 
 /* KrunkNative Object Manager (F1, client/src/ui/object_manager_ui.c): tabs + search over a grid
  * of icons. Not a v7 window (id 54); #menuWindow gets its width inline (ui_window_meta).

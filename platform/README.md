@@ -128,6 +128,40 @@ first: the web build is an installable web app (`platform/web`: `manifest.webman
 the `<head>` links `pwa.py` adds to `dist/web/index.html`; `display: standalone`, landscape), so
 Safari opens krunk.io from the Home Screen fullscreen, with no signing at all.
 
+## Krunker Strike app
+
+Krunker Strike (the Strike flavor, `shared/include/flavor.h`) installs as its own app next to
+Krunker Box Office, on every route a phone has:
+
+| | Krunker Box Office | Krunker Strike |
+| --- | --- | --- |
+| web app (PWA) | `/`: `manifest.webmanifest` (id / scope `/`), `img/pwa/` | `/strike/`: `strike/manifest.webmanifest` (id / scope `/strike/`), `strike/img/pwa/`, gold theme colour |
+| Android | `io.krunknative.app`, `krunknative-android.apk` | `io.krunknative.strike` (`-Pkrunknative.app=strike`, `make android-only ANDROID_APP=strike`), `krunknative-strike-android.apk` over `https://krunk.io/strike/` |
+| iOS | target `KrunkNative`, `io.krunknative.app` | target / scheme `KrunkStrike`, `io.krunknative.strike`, icon `AppIconStrike`, `KNStartPage` `strike/index.html`; `krunknative-strike-ios-unsigned.ipa` |
+
+One web build and one `client.wasm` serve both. `platform/web/pwa.py` assembles `dist/web/strike/`:
+the Strike manifest and icons (`platform/web/strike/`, made from the Strike logo by
+`tools/branding/strike_icons.py`) and the Strike page, which carries `<meta name="kn-flavor"
+content="strike">`; the client reads it (`client/src/main.c` `web_resolve_flavor`, before anything
+else) and starts as Krunker Strike with no flag, on the site, in the Android APK and in the iOS app.
+Until `ui/strike/index.html` exists (FRVR's Strike page, other work) the Strike page is the game page
+with `<base href="../">`, so its relative URLs resolve at the root while the address stays
+`/strike/`. The client keeps the address in the app it started as (`servers_ui.c` writes
+`./?game=...`), and Strike invites link `/strike/?game=`.
+
+Storage: Android Chrome shares an origin's localStorage between installed web apps, so the Strike
+app keeps its keys under `strike.` (`html_storage_*` in `web_dom.c`): settings, loadouts and sign-in
+are its own, and its Clear Storage leaves Box Office's keys alone. iOS gives every home screen app
+its own storage anyway. `make strike-app-test` checks both apps in headless Chromium.
+
+Installing on a phone:
+- Android: the Download window's Krunker Strike APK (allow installs from the browser), or open
+  `https://krunk.io/strike/` in Chrome and tap Install app. Box Office's APK / `https://krunk.io/`
+  install separately; both icons sit side by side.
+- iPhone / iPad: open `https://krunk.io/strike/` in Safari, Share > Add to Home Screen ("Krunker
+  Strike"); `https://krunk.io/` > Add to Home Screen for Box Office. The unsigned .ipa files are for
+  sideloading tools.
+
 ## CI
 
 `.github/workflows/client.yml` publishes the mobile apps with the native packages on

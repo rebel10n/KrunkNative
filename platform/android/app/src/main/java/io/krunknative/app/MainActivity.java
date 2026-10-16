@@ -53,7 +53,8 @@ import java.util.Map;
 public class MainActivity extends Activity {
     private static final String TAG = "KrunkNative";
     private static final String APP_HOST = "appassets.androidplatform.net";
-    private static final String BUNDLED_INDEX = "https://" + APP_HOST + "/web/index.html";
+    // index.html, or strike/index.html in the Krunker Strike app (-Pkrunknative.app=strike)
+    private static final String BUNDLED_INDEX = "https://" + APP_HOST + "/web/" + BuildConfig.START_PAGE;
 
     private WebView webView;
 

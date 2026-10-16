@@ -21,9 +21,11 @@ platform/android/local.properties
 platform/android/.gradle/
 platform/android/app/build/
 platform/android/build/
+platform/android/apk/
 platform/ios/web/
 platform/ios/KrunkNative.xcodeproj/
 platform/ios/build/
+platform/ios/KrunkStrike/
 
 # Local service credentials (see config/config.example.json)
 /config/config.json

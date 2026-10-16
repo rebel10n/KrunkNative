@@ -46,7 +46,10 @@ missing image "loads" HTML; GitHub Pages serves it with status 404), and fills i
 tags that `ui/js/loader.js` reads (empty in a plain build, which keeps working as before from one
 origin, e.g. `make web-serve`, net-bridge, kru's OpenResty): `kn-build` (hashed client file
 names), `kn-asset-base`, `kn-config`, `kn-brain`, `kn-bridge`, `kn-rtc` and `kn-wt` (WebTransport
-relay; `off` until one is deployed: `KN_WT_URL`).
+relay; `off` until one is deployed: `KN_WT_URL`). Pages in subdirectories get them too: the site
+carries Krunker Strike as its own installable app at `krunk.io/strike/` (platform/README.md
+"Krunker Strike app"), whose relative `kn-config` / empty `kn-asset-base` become `../...` unless the
+page's `<base href>` already points at the root.
 
 ## GitHub Pages
 

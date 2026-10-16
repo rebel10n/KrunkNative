@@ -58,6 +58,10 @@ Selection:
 - Client: `client_bin --flavor strike`, `KN_FLAVOR=strike`, or a Strike-defaulted build
   (`-DKRUNKNATIVE_FLAVOR=strike` / `make strike`). The runtime flag always overrides the build
   default.
+- Web: the page. The web build carries Krunker Strike as its own installable app at `/strike/`
+  (its own manifest, icons and `<meta name="kn-flavor" content="strike">`; platform/README.md
+  "Krunker Strike app"), so the same `client.wasm` starts as Krunker Strike there with no flag;
+  the Android / iOS Strike apps (`io.krunknative.strike`) open that page.
 
 ## What landed in the scaffold (this patch)
 

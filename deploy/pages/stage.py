@@ -4,7 +4,8 @@
 Copies the web build without assets/ (game content stays on the asset origins: see
 README "Asset origins"), renames client.{js,wasm,data} to client.<hash>.* (one content
 hash over the three, so a page can never pair a stale client.js with a new wasm), fills in
-the loader.js <meta> knobs of every page and writes 404.html (unknown paths are 404s, not
+the loader.js <meta> knobs of every page (the apps in subdirectories too: strike/, the Krunker
+Strike app, gets its root-relative values through "../") and writes 404.html (unknown paths are 404s, not
 an SPA fallback). --ga-id puts Google Analytics into every page (ga.py).
 
 --asset-origins name=URL,... with --asset-origin NAME (and --asset-fallback NAME) writes
@@ -46,6 +47,7 @@ KNOBS = ("kn-build", "kn-asset-base", "kn-config", "kn-brain", "kn-bridge", "kn-
 CONFIG_FILE = "kn-config.json"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 URL_RE = re.compile(r"^https?://[^\s\"'<>]+/$")
+BASE_RE = re.compile(r"<base\s[^>]*href=", re.I)
 LIMITS = {"cloudflare": (20000, 25 * 1024 * 1024, None), "github": (None, 100 * 1000 * 1000, 1000 * 1000 * 1000)}
 
 # Pages' default for everything else (pages, js/, css/, img/, windows/) is
@@ -69,6 +71,36 @@ def set_meta(page, name, value):
     if not anchor:
         sys.exit("stage.py: page without <head>")
     return page[:anchor.end()] + "\n" + tag + page[anchor.end():]
+
+
+def game_pages(out):
+    """Every page that boots the client (loads js/loader.js): the top-level ones and the apps in
+    subdirectories (strike/index.html, the Krunker Strike app: platform/web/pwa.py)."""
+    found = []
+    for d, dirs, files in os.walk(out):
+        dirs[:] = sorted(n for n in dirs if not os.path.islink(os.path.join(d, n)))
+        for name in sorted(files):
+            path = os.path.join(d, name)
+            if name.endswith(".html") and not os.path.islink(path):
+                with open(path, encoding="utf-8") as f:
+                    if "js/loader.js" in f.read():
+                        found.append(path)
+    return found
+
+
+def page_value(page, path, out, knob, value):
+    """A knob's value for this page. The client files, kn-config.json and (with no asset host) the
+    game content sit at the site root: a page in a subdirectory reaches them through "../" unless
+    its <base href> already points at the root (pwa.py's generated Strike page)."""
+    depth = os.path.relpath(path, out).count(os.sep)
+    if not depth or BASE_RE.search(page):
+        return value
+    up = "../" * depth
+    if knob == "kn-config" and value:
+        return up + value
+    if knob == "kn-asset-base" and not value:
+        return up
+    return value
 
 
 def asset_config(args):
@@ -183,16 +215,11 @@ def main():
     values = {"kn-build": build, "kn-asset-base": asset_base, "kn-config": CONFIG_FILE if config else "",
               "kn-brain": args.brain, "kn-bridge": args.bridge, "kn-rtc": args.rtc, "kn-wt": args.wt}
     pages = 0
-    for name in sorted(os.listdir(args.out)):
-        if not name.endswith(".html"):
-            continue
-        path = os.path.join(args.out, name)
+    for path in game_pages(args.out):
         with open(path, encoding="utf-8") as f:
             page = f.read()
-        if "js/loader.js" not in page:
-            continue
         for knob in KNOBS:
-            page = set_meta(page, knob, values[knob])
+            page = set_meta(page, knob, page_value(page, path, args.out, knob, values[knob]))
         with open(path, "w", encoding="utf-8") as f:
             f.write(page)
         pages += 1

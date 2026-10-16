@@ -70,8 +70,10 @@
         if (rel.lastIndexOf(routes[i][0], 0) === 0) return routes[i][1];
       return window.Module.krunkNativeAssetBase;
     },
+    // prefix: client.js's directory for the wasm, but "" for the preloaded client.data (Emscripten's
+    // file packager), which kn-root then places (a page in strike/ would otherwise ask strike/client.data)
     locateFile: function (path, prefix) {
-      return prefix + (build ? path.replace(/^client\./, 'client.' + build + '.') : path);
+      return (prefix || root) + (build ? path.replace(/^client\./, 'client.' + build + '.') : path);
     },
     onRuntimeInitialized: function () {
       window.__krunknative_wasm_ready = true; // kn-shim.js checks this before ccall()
@@ -79,6 +81,13 @@
   }, window.Module || {});
 
   function start() {
+    // a page that loads this script in <head> (FRVR's strike/index.html) has no #canvas or <body>
+    // yet: boot once the document is parsed, with the canvas looked up then
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start);
+      return;
+    }
+    if (!window.Module.canvas) window.Module.canvas = document.getElementById('canvas');
     var script = document.createElement('script');
     script.src = root + (build ? 'client.' + build + '.js' : 'client.js');
     script.async = true;

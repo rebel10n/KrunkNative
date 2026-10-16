@@ -184,6 +184,13 @@ strike-release: ## Build the Krunker Strike-defaulted Release client + server in
 strike-dist: strike-release ## Krunker Strike dedicated-server + client packages in dist/strike/ (compile-time flavor)
 	tools/release/strike-dist.sh $(STRIKE_RELEASE_DIR) $(STRIKE_DIST)
 
+# The web build carries Krunker Strike as its own installable app at strike/ (platform/web/pwa.py):
+# its own manifest, icons and page, which starts the client as Krunker Strike with no flag.
+.PHONY: strike-app-test
+strike-app-test: ## Both web apps in headless Chromium: manifests, ids / scopes, /strike/ boots Krunker Strike, separate storage (run `make web` first)
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	timeout 1200 $(PYTHON) -I client/tests/strike_app_e2e.py $(DIST_WEB)
+
 SERVER_DIST ?= dist/server
 PREFIX      ?= /opt/krunknative
 server-dist: release ## Dedicated server bundle in dist/server/ (server_bin + maps + server.cfg): copy it anywhere and run ./server_bin
@@ -485,18 +492,22 @@ web-serve: ## Serve dist/web/ for local testing (PORT=8080); use ?offline=1 with
 # The web client itself detects phones and shows the touch UI (client/src/ui/ui_mobile.c).
 # ANDROID_ARGS passes Gradle properties, e.g. ANDROID_ARGS="-Pkrunknative.wsUrl=ws://192.168.1.10:8080/native".
 
+# ANDROID_APP=strike builds the Krunker Strike app instead (io.krunknative.strike: its own name, icon
+# and page, platform/web/pwa.py's strike/), which installs next to Krunker Box Office (io.krunknative.app).
 ANDROID_DIR  := platform/android
-ANDROID_APK  := $(ANDROID_DIR)/app/build/outputs/apk/debug/app-debug.apk
+ANDROID_APP  ?= boxoffice
+ANDROID_APK_NAME := $(if $(filter strike,$(ANDROID_APP)),app-strike,app)
+ANDROID_APK  := $(ANDROID_DIR)/app/build/outputs/apk/debug/$(ANDROID_APK_NAME)-debug.apk
 ANDROID_ARGS ?=
 
 .PHONY: android android-only android-install android-release ios-prepare
-android: web android-only ## Build the web client, then the Android debug APK (needs JDK 17+ and the Android SDK)
+android: web android-only ## Build the web client, then the Android debug APK (needs JDK 17+ and the Android SDK; ANDROID_APP=strike: Krunker Strike)
 
 android-only: ## Android debug APK from the existing dist/web (no web rebuild)
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
 	@[ -n "$${ANDROID_HOME:-$${ANDROID_SDK_ROOT:-}}" ] || [ -f $(ANDROID_DIR)/local.properties ] || \
 	  { echo "Android SDK not found: set ANDROID_HOME (or write sdk.dir=... to $(ANDROID_DIR)/local.properties)"; exit 1; }
-	cd $(ANDROID_DIR) && ./gradlew --no-daemon assembleDebug $(ANDROID_ARGS)
+	cd $(ANDROID_DIR) && ./gradlew --no-daemon assembleDebug -Pkrunknative.app=$(ANDROID_APP) $(ANDROID_ARGS)
 	@ls -l $(ANDROID_APK)
 
 android-install: ## Install the debug APK on a connected device (adb)
@@ -505,12 +516,12 @@ android-install: ## Install the debug APK on a connected device (adb)
 # The published APK (client.yml job android): a thin app over ANDROID_SERVER_URL, release-signed
 # with the key of tools/release/android-keystore.sh (ANDROID_KEYS = its keystore.env).
 ANDROID_KEYS       ?= $(HOME)/.config/kn-secrets/android/keystore.env
-ANDROID_SERVER_URL ?= https://krunk.io/
-android-release: ## Signed release APK over https://krunk.io/ (key: tools/release/android-keystore.sh)
+ANDROID_SERVER_URL ?= https://krunk.io/$(if $(filter strike,$(ANDROID_APP)),strike/,)
+android-release: ## Signed release APK over https://krunk.io/ (ANDROID_APP=strike: Krunker Strike over https://krunk.io/strike/; key: tools/release/android-keystore.sh)
 	@[ -f "$(ANDROID_KEYS)" ] || { echo "no $(ANDROID_KEYS): run tools/release/android-keystore.sh"; exit 1; }
 	set -a; . "$(ANDROID_KEYS)"; set +a; cd $(ANDROID_DIR) && \
-	  ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=$(ANDROID_SERVER_URL) $(ANDROID_ARGS)
-	@ls -l $(ANDROID_DIR)/app/build/outputs/apk/release/app-release.apk
+	  ./gradlew --no-daemon assembleRelease -Pkrunknative.app=$(ANDROID_APP) -Pkrunknative.serverUrl=$(ANDROID_SERVER_URL) $(ANDROID_ARGS)
+	@ls -l $(ANDROID_DIR)/app/build/outputs/apk/release/$(ANDROID_APK_NAME)-release.apk
 
 ios-prepare: ## Copy dist/web into platform/ios/web (then: cd platform/ios && xcodegen generate, on macOS)
 	platform/ios/prepare.sh $(DIST_WEB)

@@ -8,6 +8,14 @@ plugins {
 fun prop(name: String, def: String = ""): String = (project.findProperty(name) as String?)?.trim() ?: def
 fun quoted(s: String): String = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+// Which app (platform/README.md "Krunker Strike app"): boxoffice (default) = Krunker Box Office,
+// io.krunknative.app; strike = Krunker Strike, io.krunknative.strike, its own name and launcher icon,
+// opening the Strike page (strike/ of the web build: platform/web/pwa.py). Different application
+// ids, so both install side by side.
+val app = prop("krunknative.app", "boxoffice")
+if (app != "boxoffice" && app != "strike") throw GradleException("krunknative.app must be boxoffice or strike, got '$app'")
+val strike = app == "strike"
+
 val repoRoot = rootProject.projectDir.resolve("../..").canonicalFile
 val webDir = rootProject.projectDir.resolve(prop("krunknative.webDir", "../../dist/web")).canonicalFile
 val bundleAssets = prop("krunknative.bundleAssets", "tracked")
@@ -27,7 +35,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.krunknative.app"
+        applicationId = if (strike) "io.krunknative.strike" else "io.krunknative.app"
         minSdk = 24
         targetSdk = 35
         // CI: versionCode = commit time in minutes (monotonic, so every build installs over the
@@ -37,6 +45,10 @@ android {
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
         buildConfigField("String", "WS_URL", quoted(prop("krunknative.wsUrl")))
         buildConfigField("String", "ASSET_BASE_URL", quoted(prop("krunknative.assetBaseUrl")))
+        // the bundled client's page: the Strike app starts in the Strike flavor from its own page
+        buildConfigField("String", "START_PAGE", quoted(if (strike) "strike/index.html" else "index.html"))
+        manifestPlaceholders["appLabel"] = if (strike) "Krunker Strike" else "@string/app_name"
+        manifestPlaceholders["appIcon"] = if (strike) "@mipmap/ic_launcher_strike" else "@mipmap/ic_launcher"
     }
 
     buildFeatures {
@@ -77,6 +89,9 @@ android {
         }
     }
 }
+
+// app-strike-debug.apk / app-strike-release.apk: the Strike APK never overwrites Box Office's
+if (strike) base.archivesName.set("app-strike")
 
 dependencies {
     implementation("androidx.webkit:webkit:1.12.1")

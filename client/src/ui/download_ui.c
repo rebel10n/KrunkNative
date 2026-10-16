@@ -10,6 +10,13 @@
 // iPhone / iPad players are pointed at Add to Home Screen first: the web build's PWA manifest
 // (platform/web) makes krunk.io a fullscreen home screen app with no signing involved.
 //
+// Krunker Strike is its own app next to Krunker Box Office (its own app id, name, icon and page,
+// /strike/: platform/web/pwa.py, platform/README.md): the window lists it in its own section
+// (strike_section), its Android APK / unsigned .ipa from the same release
+//   krunknative-strike-android.apk        io.krunknative.strike over https://krunk.io/strike/
+//   krunknative-strike-ios-unsigned.ipa   the same for sideloading
+// and its home screen web app. In the Strike app itself that section comes first.
+//
 // Layout: "Recommended for your device" (the detected platform's package, its download
 // buttons and how to start it), then "Other platforms" (every other package, one row each)
 // and the release page (checksums, notes). Detection: the web build reads the browser's
@@ -17,6 +24,8 @@
 // is the install's kn-install.json (platform + package kind), else the build's platform.
 #include <download_ui.h>
 #include <ui_logic.h>
+#include <flavor.h>   // the Krunker Strike section first in the Strike app
+#include <html_dom.h> // html_page_origin: the apps' pages on this site
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -369,8 +378,72 @@ static void other_row(StrBuf *sb, const DlPkg *p, const int odd) {
     sb_append(sb, "</div></div>");
 }
 
+// ---------------------------------------------------------------- Krunker Strike
+
+// "<this site>/strike/" (natively the public web client's): the Strike app's page
+static void strike_page_url(char *out, const size_t n) {
+    char origin[256];
+    html_page_origin(origin, sizeof(origin));
+    snprintf(out, n, "%s/strike/", origin);
+}
+
+// One row of the Strike section: Android (the APK), iPhone / iPad (Add to Home Screen, the .ipa)
+// or a browser (the page).
+static void strike_row(StrBuf *sb, const DlOs os, const int odd) {
+    char url[256];
+    sb_appendf(sb, "<div class=\"knDlRow%s\">%s<div class=\"knDlRowName\">%s</div><div class=\"knDlRowLinks\">", odd ? " knDlOdd" : "",
+               os == DL_OS_UNKNOWN ? "<span class=\"material-icons knDlIcon knDlMi\" style=\"color:#f9c80e\">public</span>" : os_icon(os),
+               os == DL_OS_UNKNOWN ? I18N("kn.download.strike.browser", "Any browser") : os_name(os));
+    if (os == DL_OS_ANDROID) {
+        sb_appendf(sb, "<span class=\"knDlHint\">%s</span>", I18N("kn.download.strike.androidHint", "or Chrome: Install app"));
+        dl_link(sb, "knDlLink", DL_BASE "krunknative-strike-android.apk", ".apk");
+    } else if (os == DL_OS_IOS) {
+        sb_appendf(sb, "<span class=\"knDlHint\">%s</span>", I18N("kn.download.iosHint", "Safari: Add to Home Screen"));
+        dl_link(sb, "knDlLink", DL_BASE "krunknative-strike-ios-unsigned.ipa", ".ipa");
+    } else {
+        strike_page_url(url, sizeof(url));
+        dl_link(sb, "knDlLink", url, I18N("kn.download.strike.play", "Play Krunker Strike"));
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// The Krunker Strike app: what installs it on this device first (a phone: how), then the rest.
+static void strike_section(StrBuf *sb, const DlDevice *d) {
+    const int in_strike = flavor_get() == FLAVOR_STRIKE;
+    sb_append(sb, "<div class=\"knDlStrike\"><div class=\"knDlStrikeHead\">");
+    // FRVR's Krunker Strike logo, as the Strike page ships it (ui/strike/img/krunker_logo.png)
+    sb_appendf(sb, "<img class=\"knDlStrikeLogo\" src=\"strike/img/krunker_logo.png\" alt=\"%s\">", flavor_display_name(FLAVOR_STRIKE));
+    sb_appendf(sb, "<div class=\"knDlRecSub\">%s</div></div>",
+               I18N("kn.download.strike.desc", "Krunker Strike is its own app: install it next to Krunker Box Office, each with its own icon, settings and sign-in."));
+    const DlOs mine = d->native ? DL_OS_UNKNOWN : d->os; // natively: the browser row
+    if (mine == DL_OS_ANDROID || mine == DL_OS_IOS) {
+        sb_append(sb, "<div class=\"knDlHow\">");
+        if (mine == DL_OS_ANDROID) {
+            how(sb, in_strike && d->app ? I18N("kn.download.strike.howAndroidApp", "You are playing in the Krunker Strike app: it always runs the latest game from krunk.io/strike.")
+                                        : I18N("kn.download.strike.howAndroid", "Install the Krunker Strike APK, or open krunk.io/strike in Chrome and tap {0}Install app{1}. "
+                                                                                "It gets its own icon next to Krunker Box Office."));
+        } else if (in_strike && d->standalone) {
+            how(sb, I18N("kn.download.strike.howIosInstalled", "Krunker Strike is on your Home Screen already: it always runs the latest version."));
+        } else {
+            how(sb, I18N("kn.download.strike.howIos", "In Safari, open krunk.io/strike, tap Share (the square with an arrow), then {0}Add to Home Screen{1}. "
+                                                      "Krunker Strike gets its own icon next to Krunker Box Office."));
+        }
+        sb_append(sb, "</div>");
+    }
+    const DlOs order[] = {DL_OS_ANDROID, DL_OS_IOS, DL_OS_UNKNOWN};
+    int row = 0;
+    for (int pass = 0; pass < 2; pass++) { // the device's own row first
+        for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+            if ((order[i] == mine) != (pass == 0)) continue;
+            strike_row(sb, order[i], row++ & 1);
+        }
+    }
+    sb_append(sb, "</div>");
+}
+
 static char *gen_list(const DlDevice *d) {
     StrBuf sb = {0};
+    if (flavor_get() == FLAVOR_STRIKE) strike_section(&sb, d); // the Strike app: its own first
     const DlPkg *rec[DL_REC_MAX] = {0};
     const int nrec = recommend(d, rec);
     if (nrec > 0) {
@@ -393,7 +466,9 @@ static char *gen_list(const DlDevice *d) {
         for (int r = 0; r < nrec; r++) skip |= rec[r] == &PKGS[i];
         if (!skip) other_row(&sb, &PKGS[i], row++ & 1);
     }
-    sb_append(&sb, "</div><div class=\"knDlFoot\">");
+    sb_append(&sb, "</div>");
+    if (flavor_get() != FLAVOR_STRIKE) strike_section(&sb, d); // next to Krunker Box Office's
+    sb_append(&sb, "<div class=\"knDlFoot\">");
     dl_link(&sb, "knDlLink", DL_PAGE, I18N("kn.download.releaseNotes", "Release notes and SHA-256 checksums"));
     sb_append(&sb, "</div>");
     return sb_finish(&sb);

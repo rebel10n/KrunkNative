@@ -14,6 +14,7 @@
 #include "html_ui_backend.h"
 #include <html_dom.h>
 #include <alt_web.h> // the web vault self-test (client/src/alt/alt_web_test.c)
+#include <flavor.h> // html_storage_prefix: the Krunker Strike app's own storage keys
 #include <cJSON.h>
 #include <emscripten.h>
 #include <gl.h>
@@ -1200,9 +1201,12 @@ EM_JS(char *, kn_js_page_query, (void), {
 });
 
 // v3.1.1 ClientManager.seek / toggleStrm: history.replaceState|pushState(document.title, document.title, href)
+// A relative href ("./?game=...") resolves against the page's own address, not its <base> (the
+// Krunker Strike page /strike/ has <base href="../">: platform/web/pwa.py), so it keeps the page.
 EM_JS(void, kn_js_page_set_url, (const char *href, int push), {
     try {
-        var h = UTF8ToString(href);
+        var u = new URL(UTF8ToString(href), location.href);
+        var h = u.pathname + u.search + u.hash;
         var cur = location.pathname + location.search + location.hash;
         if (h === cur) return;
         if (push) history.pushState(document.title, document.title, h);
@@ -1291,13 +1295,25 @@ char *html_channel_take(const char *name) { return name ? kn_js_channel_take(nam
 
 // ---- storage
 
+const char *html_storage_prefix(void) {
+    return flavor_get() == FLAVOR_STRIKE ? HTML_STORAGE_STRIKE_PREFIX : "";
+}
+
+// "<prefix><key>" in buf (html_storage_prefix: the Strike app's own namespace); NULL when too long
+static const char *storage_key(const char *key, char *buf, const size_t n) {
+    const int len = snprintf(buf, n, "%s%s", html_storage_prefix(), key);
+    return len > 0 && (size_t) len < n ? buf : NULL;
+}
+
 int html_storage_get(const char *key, char *buf, const size_t n) {
-    if (!key || !*key) return take_string(NULL, buf, n);
-    return take_string(kn_js_storage_get(key), buf, n);
+    char full[1024];
+    if (!key || !*key || !storage_key(key, full, sizeof(full))) return take_string(NULL, buf, n);
+    return take_string(kn_js_storage_get(full), buf, n);
 }
 
 void html_storage_set(const char *key, const char *value) {
-    if (key && *key) kn_js_storage_set(key, value);
+    char full[1024];
+    if (key && *key && storage_key(key, full, sizeof(full))) kn_js_storage_set(full, value);
 }
 
 // ---- page -> C

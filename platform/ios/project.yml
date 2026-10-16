@@ -1,5 +1,8 @@
 # XcodeGen spec for the Krunker Box Office iOS app (https://github.com/yonaskolb/XcodeGen);
-# the project, target and bundle keep the old name KrunkNative (CI and build paths use it):
+# the project, target and bundle keep the old name KrunkNative (CI and build paths use it).
+# Target KrunkStrike is the Krunker Strike app: the same code with its own bundle id
+# (io.krunknative.strike), name, icon (AppIconStrike) and page (KNStartPage strike/index.html,
+# platform/web/pwa.py), so both install side by side (scheme KrunkStrike, KN_SERVER_URL=https://krunk.io/strike/):
 #   ./prepare.sh [dist/web dir]   # bundle the web client into web/
 #   xcodegen generate             # -> KrunkNative.xcodeproj
 #   xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -sdk iphonesimulator \
@@ -57,11 +60,55 @@ targets:
         KNServerURL: "$(KN_SERVER_URL)"
         KNWebSocketURL: ""     # bundled client: game server WebSocket (?ws=)
         KNAssetBaseURL: ""     # bundled client: where /assets/* comes from when not bundled
+        KNStartPage: index.html # bundled client: the page that opens
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.krunknative.app
         KN_SERVER_URL: ""
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: NO
+  # Krunker Strike: the KrunkNative target with the Strike identity (keep the two in step)
+  KrunkStrike:
+    type: application
+    platform: iOS
+    sources:
+      - path: KrunkNative
+      - path: web
+        type: folder
+        buildPhase: resources
+    info:
+      path: KrunkStrike/Info.plist
+      properties:
+        CFBundleDisplayName: Krunker Strike
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        GCSupportsControllerUserInteraction: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Krunker Strike connects to game servers on your local network.
+        KNServerURL: "$(KN_SERVER_URL)"
+        KNWebSocketURL: ""
+        KNAssetBaseURL: ""
+        KNStartPage: strike/index.html # the Strike page starts the client as Krunker Strike
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.krunknative.strike
+        KN_SERVER_URL: ""
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIconStrike
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_PREVIEWS: NO

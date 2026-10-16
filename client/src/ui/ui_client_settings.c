@@ -22,6 +22,7 @@
 #include <discord_rpc.h>
 #include <render_settings.h>
 #include <html_ui.h>
+#include <html_dom.h> // html_storage_prefix (the web clear-storage keeps the other app's keys)
 #include <audio.h>
 #include <spectate.h>
 #include <shared.h>
@@ -1316,15 +1317,22 @@ static void clear_answered(const int accepted, const char *text, void *user) {
     if (!accepted) return;
 #ifdef __EMSCRIPTEN__
     // glorp: localStorage.clear(); sessionStorage.clear(); clear-cache (+ reload) -- the
-    // client's own entries survive like its settings.json does
+    // client's own entries survive like its settings.json does. Only this app's keys go: the
+    // Krunker Strike app (html_storage_prefix) shares the origin's localStorage with Krunker Box
+    // Office, and clearing one app never wipes the other's.
     EM_ASM({
         try {
+            var p = UTF8ToString($0);
+            var s = UTF8ToString($1);
             var keep = {};
             // (no array literal: a bare comma inside [] splits the EM_ASM macro arguments)
             var save = function (k) { var v = localStorage.getItem(k); if (v !== null) keep[k] = v; };
-            save('knClient');
-            save('knBrainUrl');
-            localStorage.clear();
+            save(p + 'knClient');
+            save(p + 'knBrainUrl');
+            var mine = function (k) { return p ? k.indexOf(p) === 0 : k.indexOf(s) !== 0; };
+            var all = Object.keys(localStorage);
+            if (!p && all.every(mine)) localStorage.clear();
+            else all.forEach(function (k) { if (mine(k)) localStorage.removeItem(k); });
             sessionStorage.clear();
             Object.keys(keep).forEach(function (k) { localStorage.setItem(k, keep[k]); });
         } catch (e) {}
@@ -1333,7 +1341,7 @@ static void clear_answered(const int accepted, const char *text, void *user) {
             if (window.caches) caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }).then(reload, reload);
             else reload();
         } catch (e) { reload(); }
-    });
+    }, html_storage_prefix(), HTML_STORAGE_STRIKE_PREFIX);
 #else
     clear_storage();
     restart_client();

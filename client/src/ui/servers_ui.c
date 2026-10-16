@@ -465,16 +465,18 @@ static int page_game_param(const char *tok) {
 
 static char g_link_offline[200]; // the offline game's query written last ("" = none)
 
-// "/?<first>&<the page's other parameters>": the game parameters replaced by `first` ("" = none)
+// "./?<first>&<the page's other parameters>": the game parameters replaced by `first` ("" = none).
+// "./" is the page's own directory: "/" for Krunker Box Office, "/strike/" for the Krunker Strike
+// app, so a reload (F5) stays in the app it was started as.
 static void page_write_query(const char *first) {
     char query[512];
     if (html_page_query(query, sizeof(query)) < 0) return; // native: no address bar
-    char href[768] = "/";
-    size_t len = 1;
+    char href[768] = "./";
+    size_t len = 2;
     if (first && first[0]) len += (size_t) snprintf(href + len, sizeof(href) - len, "?%s", first);
     for (char *tok = strtok(query, "&"); tok && len < sizeof(href); tok = strtok(NULL, "&")) {
         if (!tok[0] || page_game_param(tok)) continue;
-        len += (size_t) snprintf(href + len, sizeof(href) - len, "%c%s", len == 1 ? '?' : '&', tok);
+        len += (size_t) snprintf(href + len, sizeof(href) - len, "%c%s", len == 2 ? '?' : '&', tok);
     }
     html_page_set_url(href, 0);
 }
@@ -577,12 +579,14 @@ static void link_tick(Client *client) {
 // copyInviteLink: location.protocol + "//" + location.host + "/?game=" + gameId (native: the
 // public web client's origin), the id in its short link form (page_write_game). In an official
 // krunker.io game the link is krunker.io's own (krunker_net_invite_link: <site>/?game=NY:bbbbb).
+// Krunker Strike invites open the Strike app (/strike/?game=: platform/web/pwa.py), whose servers
+// a Krunker Box Office client refuses (flavor mismatch).
 void servers_ui_invite_link(char *out, const size_t n) {
     if (krunker_net_invite_link(out, n)) return;
     char origin[256], esc[480];
     html_page_origin(origin, sizeof(origin));
     link_escape(esc, sizeof(esc), g_link_game);
-    snprintf(out, n, "%s/?game=%s", origin, esc);
+    snprintf(out, n, "%s%s?game=%s", origin, flavor_get() == FLAVOR_STRIKE ? "/strike/" : "/", esc);
 }
 
 // fatalError(message): the connection error screen (retry link = seek again)

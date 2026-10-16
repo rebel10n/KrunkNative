@@ -49,7 +49,9 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKUIDele
         let assetBase = config("KNAssetBaseURL")
         server.start(root: root, assetBase: assetBase.isEmpty ? nil : assetBase) { port in
             guard let port = port else { done(nil); return }
-            var components = URLComponents(string: "http://127.0.0.1:\(port)/index.html")!
+            // KNStartPage: index.html, or strike/index.html in the Krunker Strike app
+            let page = self.config("KNStartPage").isEmpty ? "index.html" : self.config("KNStartPage")
+            var components = URLComponents(string: "http://127.0.0.1:\(port)/\(page)")!
             let ws = self.config("KNWebSocketURL")
             components.queryItems = [ws.isEmpty ? URLQueryItem(name: "offline", value: "1") : URLQueryItem(name: "ws", value: ws)]
             done(components.url)

@@ -52,7 +52,8 @@ for ext in js wasm data; do
     ok "client.$build.$ext $(grep -i '^content-type' <<< "$h" | tr -d '\r' | cut -d' ' -f2-), $(grep -i '^cache-control' <<< "$h" | tr -d '\r' | cut -d' ' -f2-)"
     [ $ext = wasm ] && { grep -qi '^content-type: application/wasm' <<< "$h" || bad "wasm is not application/wasm (no streaming compile)"; }
 done
-for f in js/loader.js manifest.webmanifest img/pwa/icon-192.png; do
+# the two installable apps: Krunker Box Office (/) and Krunker Strike (/strike/, platform/web/pwa.py)
+for f in js/loader.js manifest.webmanifest img/pwa/icon-192.png strike/ strike/manifest.webmanifest strike/img/pwa/icon-192.png; do
     code=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$site$f")
     [ "$code" = 200 ] && ok "$f" || bad "$f: $code"
 done

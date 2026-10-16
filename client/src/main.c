@@ -334,6 +334,25 @@ static char *web_query_string(const char *name) {
     }, name);
 }
 
+// The product flavor of this page (flavor.h): the Krunker Strike app is its own page, /strike/
+// (platform/web/pwa.py), installed as its own home-screen app, so it starts as Krunker Strike with
+// no flag: its <meta name="kn-flavor" content="strike">, else a page under a strike/ directory.
+// None of these: the build's default (Krunker Box Office). Runs first in main(), before
+// client_resolve_flavor (KN_FLAVOR / --flavor, which a page never has).
+static void web_resolve_flavor(void) {
+    char *f = (char *) EM_ASM_PTR({
+        var f = "";
+        try {
+            var tag = document.querySelector('meta[name="kn-flavor"]');
+            if (tag) f = String(tag.getAttribute("content") || "");
+            else if (/[/]strike([/]|[/]index[.]html)?$/.test(location.pathname)) f = "strike";
+        } catch (e) {}
+        return stringToNewUTF8(f);
+    });
+    if (f && f[0]) flavor_set_key(f);
+    free(f);
+}
+
 // The GL framebuffer follows the CSS size of the #canvas element as the stylesheet lays
 // it out (ui/css/krunknative.css: fixed, 100% x 100%). The HiDPI GLFW canvas pins inline
 // style.width/height to the last window size, so those are dropped while measuring;
@@ -603,6 +622,9 @@ static void client_resolve_flavor(int *argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+#ifdef __EMSCRIPTEN__
+    web_resolve_flavor(); // the web build has no command line: the page picks the flavor
+#endif
     client_resolve_flavor(&argc, argv); // branding for --version, the banner and the window title; strips --flavor
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {
