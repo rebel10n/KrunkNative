@@ -103,6 +103,8 @@ void ranked_shutdown(Brain *b);
 /* internal WS "ranked-result": cb(ud, reply fields) once (reply borrowed) */
 typedef void (*RankedResultCb)(void *ud, const char *err, const cJSON *reply);
 void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
+/* internal WS "ranked-cancel" {matchId}: a lobby that never filled (no rating, no RP, players unqueued) */
+void ranked_cancel(Brain *b, const cJSON *frame);
 
 /* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
 int turf_init(Brain *b);

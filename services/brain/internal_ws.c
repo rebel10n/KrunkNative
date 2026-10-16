@@ -653,6 +653,10 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
         if (r) ranked_result(b, frame, on_ranked_result_done, r);
         return;
     }
+    if (!strcmp(type, "ranked-cancel")) { /* a ranked lobby that never filled (v10 endGame(3), no rating) */
+        ranked_cancel(b, frame);
+        return;
+    }
     if (!strcmp(type, "turf-kills")) { /* v10 Turf Wars: onRecordTerritorialWarsKills (turf.c) */
         ReplyCtx *r = reply_ctx(c, frame, "turf-kills-reply");
         if (r) turf_record(b, frame, on_ranked_result_done, r);

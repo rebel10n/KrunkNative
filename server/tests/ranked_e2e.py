@@ -7,6 +7,8 @@
 Creates its own PostgreSQL database (sudo -n -u postgres createdb; KN_TEST_DB to reuse one),
 migrates it, starts one coordinator (kn_brain, ranked min level 0) and one server_bin (ports from
 kn_proto.free_ports()), registers 8 accounts, then:
+  0. first connect (v10 needAllTimer, 60 s): seven of eight join, the cancel reaches every connection with
+     no rating (the ERROR texts, the cancel logged), and the queue works again
   1. all 8 queue /mm/ranked/queue (solo, region na) and long-poll until MATCHED
   2. 8 protocol test clients (kn_proto, v7 HELLO) JOIN the match with their tickets:
      "Joined Ranked Match..." (ranked.join); INIT plays Hardpoint (the comp host's overDat
@@ -267,6 +269,46 @@ async def social_queue_notice(name, password, trigger):
     return logged_in, frames
 
 
+def first_connect_cancel(tokens):
+    keys = [http("/mm/ranked/queue", token=t, regions="na")[1] for t in tokens]
+    keys = [k["payload"]["clientKey"] for k in keys if k.get("payload", {}).get("clientKey")]
+
+    def all_matched():
+        states = [http("/mm/ranked/poll", clientKey=k)[1] for k in keys]
+        return states if len(states) == 8 and all(s and s["payload"]["status"] == "MATCHED" for s in states) else None
+
+    states = wait_for(all_matched, timeout=30)
+    check("first connect: 8 matched for the cancel case", bool(states))
+    if not states:
+        return
+    conns = []
+    for i in range(7):  # the eighth account never connects
+        a = states[i]["payload"]["assignment"]
+        c = kn_proto.Conn("127.0.0.1", int(a["connection"].rsplit(":", 1)[1]))
+        c.send(1, bytes([1, MINOR_EXT, 0]))
+        c.join(client_key=a["clientId"], session=tokens[i])
+        conns.append(c)
+    for c in conns:
+        c.read(until=kn_proto.INIT, timeout=10)
+    for i in range(4):  # four pick a class in the comp lobby, three do not
+        comp_set(conns[i], "c", i + 1)
+    errors = []
+    for c in conns:
+        p = c.read(until=kn_proto.ERROR, timeout=90)  # v10's first-connect time is 60 s
+        errors.append(kn_proto.error_info(p)[0] if p else "")
+    cancelled = "Ranked Game: The required number of players did not join the match. The game has been cancelled."
+    no_class = "Ranked Game: You failed to select a class. The game has been cancelled."
+    full = [cancelled] * 4 + [no_class] * 3  # the four with a class, then the three without one
+    check("the cancel reaches every connection: the full text in chat, the ERROR (96 bytes) its start",
+          all(full[i] in chats(conns[i]) and errors[i].startswith("Ranked Game: ") and full[i].startswith(errors[i]) for i in range(7)),
+          str(errors)[:300])
+    check("the cancel is logged (7 of 8 joined)", "cancelled: 7 of 8 player(s) joined in time" in log("game.log"), log("game.log")[-200:])
+    prof = lambda t: http("/mm/ranked/profile", token=t, region="na")[1].get("profile", {})
+    check("no rating change for the cancelled match", all((prof(t).get("total_matches") or 0) == 0 for t in tokens))
+    for c in conns:
+        c.close()
+
+
 def main():
     with open(os.path.join(WORK, "none.json"), "w") as f:
         json.dump({"database": cfgdb()}, f)
@@ -300,8 +342,7 @@ def run():
     subprocess.run([f"{BUILD}/services/common/kn_migrate", "--set", f"database.name={DB}"], check=True,
                    stdout=open(os.path.join(WORK, "migrate.log"), "w"), stderr=subprocess.STDOUT)
     procs.append(subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--set", f"database.name={DB}", "--set", f"brain.port={BRAIN_PORT}",
-                                   "--set", "brain.region=local", "--set", "brain.ranked.min_level=0",
-                                   "--set", "brain.ranked.start_grace_s=60"],
+                                   "--set", "brain.region=local", "--set", "brain.ranked.min_level=0"],
                                   stdout=open(os.path.join(WORK, "brain.log"), "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
     up = bool(wait_for(lambda: http("/mm/status")[0] == 200)) and procs[-1].poll() is None
     check("coordinator up", up, "" if up else log("brain.log")[-300:])
@@ -320,6 +361,13 @@ def run():
     for name, tok in zip(names, tokens):
         psql(f"SELECT kn_register('{name}', 'x', '127.0.0.1', '', 0, 0, '{tok}', 3600, 'e2e')")
     ids = {n: int(psql(f"SELECT id FROM accounts WHERE username = '{n}'")) for n in names}
+
+    # 0. first connect (v10 needAllTimer, G5): seven of the eight join and the eighth never does. At the
+    # first-connect time (15 s here, 60 s in v10) the lobby is cancelled: every connection gets the ERROR (a
+    # player with no class: "You failed to select a class", the others: "...did not join"), and nobody is rated
+    first_connect_cancel(tokens)
+
+    # 1. eight accounts queue (solo, v10) until MATCHED
     keys = [http("/mm/ranked/queue", token=t, regions="na")[1] for t in tokens]
     check("8 queue entries", all(k.get("payload", {}).get("clientKey") for k in keys), json.dumps([k.get("payload", {}).get("status") for k in keys]))
     keys = [k["payload"]["clientKey"] for k in keys if k.get("payload", {}).get("clientKey")]
@@ -393,12 +441,27 @@ def run():
     for i, c in enumerate(conns):
         if i != 2:
             comp_set(c, "c", [0, 1, 2, 3, 4, 5, 6, 8][i])
-            c.ent(class_index=0)
+            if i != 7:  # the eighth picks its class and waits for the first-connect time (the late join, below)
+                c.ent(class_index=0)
     for c in conns:
         c.read(timeout=1.0)
     no_team_refusal = not any("Please join a Team" in t for c in conns for t in chats(c))
     check("every roster player has a lobby team: no 'Please join a Team to Spawn'", no_team_refusal and len(table) == 8,
           json.dumps([t for c in conns for t in chats(c) if "Please join a Team" in t])[:200])
+
+    # 3a. v10 late join (needAllTimer, v10:191377-191395): seven are in and the eighth has a class but has not
+    # pressed play when the 60 s first-connect time runs out. Enough players have a class, so the eighth is pushed
+    # in (the forced ENT) and the match starts once all eight are in
+    late_spawn = None
+    end = time.time() + 90
+    while time.time() < end and late_spawn is None:
+        conns[7].read(timeout=0.5)
+        late_spawn = spawned(conns[7], uids[7])
+    check("late join: the classed player not in at the first-connect time is pushed in and spawns",
+          late_spawn is not None, str(chats(conns[7])[-2:]))
+    check("late join: the window is logged (7 of 8 in, 1 pushed in) and the match starts with all eight",
+          "first connect over with 7 of 8 in: 1 pushed in" in log("game.log") and "all 8 player(s) in: starting" in log("game.log"),
+          log("game.log")[-300:])
 
     # 3b. a ping (v10 markPosition, NET_EXT_MARK_POSITION): every other roster connection gets addPingIcon
     # (key = the pinging connection's id, the hit position); the pinger gets none
@@ -546,6 +609,12 @@ def run():
     check("players.player_elo mirrors the MMR (scorer)", elo == str(prof(tokens[0]).get("mmr")), f"{elo} vs {prof(tokens[0]).get('mmr')}")
     scored = int(psql(f"SELECT coalesce(max(score), -1) FROM match_results WHERE account_id = {ids[names[0]]}") or -1)
     check("the score reaches the account's match result (ranked: score, no games or kills)", scored >= 5000, f"score {scored}")
+    # G1: the scorer's reward (/score 5000, capped, x2 in ranked) pays Ranked Points: half of it, at most 60
+    _, sh = http("/mm/ranked/history", token=tokens[0], region="na")
+    sm = (sh.get("matchHistory") or {}).get("matches", [{}])[0]
+    _, sp = http("/mm/ranked/profile", token=tokens[0], region="na")
+    check("a ranked player who scores gets Ranked Points (match rp and the profile's rankedPoints)",
+          sm.get("rp", 0) > 0 and sp.get("rankedPoints", 0) >= sm.get("rp", 0) > 0, f"rp {sm.get('rp')} profile {sp.get('rankedPoints')}")
     conns[0].read(timeout=1.5)
     chat = [t for t in chats(conns[0]) if t.startswith("Ranked: ")]
     check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))

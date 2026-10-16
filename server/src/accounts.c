@@ -131,8 +131,8 @@ static struct {
     int count;
     float created_at;
     float grace;
-    int started;               // everyone in (or the grace ran out with both teams present)
-    int end_now;               // needAll: end the round on the next tick
+    int started;               // every roster player in the match (acc_ranked_in_match)
+    float late_until;          // v10 needAllTimer 3000 after the first-connect time: the window to join (0 none)
     int ended;                 // END went out: result sent
     float ended_at;
     uint32_t result_rid;
@@ -1596,41 +1596,84 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
 
 static void acc_revert_custom(const char *why);
 
+// The roster player is in the match once it has spawned (v10 players.list / activeCount, v10:189820-191413):
+// a connected player that has not pressed play is not in yet. The start waits for the whole roster to be in.
+static int acc_ranked_in_match(const RankedSlot *slot) {
+    if (!slot->joined || slot->left) return 0;
+    const ClientConnection *client = acc_client_by_account(slot->account_id);
+    return client && client->player && client->player->active;
+}
+
+// v10 needAllTimer for ranked (v10:189820 60 s, v10:191376-191413): the roster must be in before the
+// first-connect time runs out. When it is not, every connection gets the ERROR (a player with no class: "You
+// failed to select a class", the others "...did not join"), the connections close, and the match ends with
+// no rating (endGame(3)): the brain aborts it, the players are not unqueued by a hold. KrunkNative has no
+// partial start (it used to start with the players in): doc/v10/ranked-impl.md. by_class: the per-player
+// class texts (v10's first-connect rule); 0 is v10's late timeout, the "did not join" text to everyone.
+static void acc_ranked_cancel(const int by_class) {
+    int joined = 0;
+    for (int i = 0; i < g_rk.count; i++) joined += g_rk.slots[i].joined && !g_rk.slots[i].left;
+    server_log("[ranked] match %s cancelled: %d of %d player(s) joined in time", g_rk.match_id, joined, g_rk.count);
+    // the ERROR's message holds 96 bytes (NetErrorPacket, the wire size stays): the full text also goes to chat
+    static const char *const k_joined_text = "Ranked Game: The required number of players did not join the match. The game has been cancelled.";
+    static const char *const k_class_text = "Ranked Game: You failed to select a class. The game has been cancelled.";
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        const CompLobbyEntry *entry = comp_lobby_get(&g_server->game, client->id);
+        const char *text = !by_class || (entry && entry->class_index >= 0) ? k_joined_text : k_class_text;
+        accounts_notice(client, text);
+        net_kick_client(client->id, text, "004007");
+    }
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "ranked-cancel");
+    cJSON_AddStringToObject(frame, "matchId", g_rk.match_id);
+    brain_post(frame, 1); // reliable: the brain aborts the match once, with no rating
+    g_rk.ended = 1;        // no result: acc_revert_custom must not send one
+    g_rk.ended_at = g_server->now;
+    acc_revert_custom("ranked match cancelled");
+}
+
 static void acc_tick_ranked(void) {
     if (!g_rk.active) return;
     Game *game = &g_server->game;
 
     if (!g_rk.started && !g_rk.ended) {
-        int joined = 0, teams[2] = {0, 0};
+        int in_match = 0, classed = 0;
         for (int i = 0; i < g_rk.count; i++) {
             const RankedSlot *slot = &g_rk.slots[i];
-            if (slot->joined && !slot->left) {
-                joined++;
-                teams[slot->team]++;
-            }
+            if (acc_ranked_in_match(slot)) in_match++;
+            // v10 lobbyPlayers with a class (c): a connected roster player that picked one
+            const ClientConnection *client = acc_client_by_account(slot->account_id);
+            const CompLobbyEntry *entry = client ? comp_lobby_get(game, client->id) : NULL;
+            if (entry && entry->class_index >= 0) classed++;
         }
-        if (joined == g_rk.count) {
+        if (in_match == g_rk.count) {
             g_rk.started = 1;
-            server_log("[ranked] all %d player(s) in: starting", joined);
-        } else if (g_server->now - g_rk.created_at >= g_rk.grace) {
-            for (int i = 0; i < g_rk.count; i++) {
-                if (!g_rk.slots[i].joined) g_rk.slots[i].left = 1; // never came: abandoned
+            server_log("[ranked] all %d player(s) in: starting", in_match);
+        } else if (g_rk.late_until > 0.0f) { // the window after the forced entries (v10 needAllTimer 3000)
+            if (g_server->now >= g_rk.late_until) {
+                acc_ranked_cancel(0);
+                return;
             }
-            if (teams[0] && teams[1]) { // start with whoever is there
-                if (game->mode) game->mode->min_players = joined;
-                g_rk.started = 1;
-                server_log("[ranked] grace over: starting with %d of %d player(s)", joined, g_rk.count);
+        } else if (g_server->now - g_rk.created_at >= g_rk.grace) {
+            if (classed >= g_rk.count) {
+                // v10:191377-191395: enough players with a class, so every roster player not in yet is pushed in
+                // (ENTER_GAME to the socket: the forced ENT) and gets 3 s; the match goes on if all are in then
+                int pushed = 0;
+                for (int i = 0; i < g_rk.count; i++) {
+                    if (acc_ranked_in_match(&g_rk.slots[i])) continue;
+                    ClientConnection *client = acc_client_by_account(g_rk.slots[i].account_id);
+                    if (!client) continue;
+                    net_resume_ent(client, 0);
+                    pushed++;
+                }
+                g_rk.late_until = g_server->now + 3.0f;
+                server_log("[ranked] first connect over with %d of %d in: %d pushed in, 3 s to join", in_match, g_rk.count, pushed);
             } else {
-                g_rk.end_now = 1; // needAllTimer ran out: endGame(3)
-                server_log("[ranked] grace over with a team missing: ending the match");
+                acc_ranked_cancel(1); // a player with no class, or one that never came
+                return;
             }
         }
-    }
-
-    if (g_rk.end_now && !g_rk.ended && game->end_timer <= 0.0f && game->ready) {
-        g_rk.end_now = 0;
-        game_end_round(game); // END to whoever is left (their didWin), then the result
-        if (!g_rk.ended) acc_ranked_send_result();
     }
 
     if (!g_rk.ended && g_acc.round_end_seen) acc_ranked_send_result();

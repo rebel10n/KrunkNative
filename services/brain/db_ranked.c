@@ -12,6 +12,7 @@
  *                 (one transaction holding the matcher lock: C procs cannot join an async tx)
  *   P_RK_MATCH_READY  (match, game id, {"<account>": assignment}) -> live, queue rows MATCHED
  *   P_RK_MATCH_FAILED (match, reason) -> aborted, the players queue again after 10 s
+ *   P_RK_MATCH_CANCEL (match) -> aborted with no rating, the queue rows removed (v10 endGame(3) before the roster filled)
  *   P_RK_MATCH_FINISH (match, result) -> [{accountId, name, team, old, new, delta, rank, mmr, rp,
  *                 abandoned}] once ([] when the match is unknown / closed): TrueSkill, profiles,
  *                 Ranked Points, the abandoners' bans, players.player_elo = the new MMR
@@ -371,6 +372,23 @@ static kn_db_result *run_rk_match_failed(kn_dbconn *c, int n, const char *const 
     return dbx_finish(&x, kn_db_result_command(0));
 }
 const kn_proc P_RK_MATCH_FAILED = {"rk_match_failed", NULL, run_rk_match_failed};
+
+/* v10 endGame(3) before the roster filled (needAllTimer, v10:191376-191413): the match is aborted with no
+ * rating, and its queue rows go, so the players queue again by hand (the v10 menu), not after a hold */
+static kn_db_result *run_rk_match_cancel(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *ro = cJSON_CreateObject();
+    cJSON_AddStringToObject(ro, "reason", "cancelled: the roster did not join");
+    char *reason = cJSON_PrintUnformatted(ro);
+    cJSON_Delete(ro);
+    dbx_exec(&x, SQL(.any = "UPDATE mm_ranked_matches SET status = 'aborted', finished_at = {now}, result = $2"
+                            " WHERE match_id = $1 AND status IN ('creating', 'live')"),
+             KN_DB_ARGS(P(0), nz(reason)));
+    free(reason);
+    dbx_exec(&x, SQL(.any = "DELETE FROM ranked_queue WHERE match_id = $1"), KN_DB_ARGS(P(0)));
+    return dbx_finish(&x, kn_db_result_command(0));
+}
+const kn_proc P_RK_MATCH_CANCEL = {"rk_match_cancel", NULL, run_rk_match_cancel};
 /* ------------------------------------------------------------------ results */
 
 static const cJSON *result_player(const cJSON *result, const int64_t acc) {

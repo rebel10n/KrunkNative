@@ -55,6 +55,35 @@ v10 has no scheduled clan-vs-clan matches. Its clan war is **Turf Wars** (`terri
 | brain procs | `services/brain/db_ranked.c`, `db_turf.c` | C on every driver (`.pg` NULL); the matcher and the season close take their own advisory lock in one transaction |
 | brain routes | `services/brain/ranked.c`, `turf.c` | below |
 | game server | `server/src/accounts.c` | ranked-result with v10 stats, the rating chat (v10's lrmr text), 60 s first connect; the Turf Wars tally (`GameHooks.kill`) and the `turf-kills` frame; the clan war host options |
+
+### Match rules in the game server (in-match and first connect)
+
+- A leave does not end the match (v10 `checkLeave`, v10:188210 only logs it). The roster player's
+  slot is marked left, the team plays short, and the leave counts as an abandon at the result
+  (the rating loss stays a KrunkNative rule).
+- A roster player may come back into its slot while the lobby is open (v10 `allowsReconnection`,
+  v10:191796; the kept lobby player with its team and class, v10:187185). It keeps its team and class
+  and is not an abandon. Accounts outside the roster are refused ("Game in Progress").
+- A ranked match is one round: the round clock's end ends the match (v10's round logic is for pub
+  types, v10:191041, and a ranked match is hosted). The end screen lasts the ruleset's 120 s shutdown
+  (v10 shutdownTimer 120000, v10:191216-191217), then the lobby returns to the public rotation.
+- "In the match" is v10's players.list / activeCount: a roster player has spawned (pressed play, `ENT`), not
+  only connected. The match starts when the whole roster is in (v10 waitTimers need activeCount >= minPlayers,
+  and ranked minPlayers is the roster).
+- The first connect (60 s, v10:189820): while the roster is not all in, the 60 s run. At the end, if at least
+  as many roster players have a class as the roster has (v10:191377-191395, lobbyPlayers with `c`), every roster
+  player not in yet is pushed in (v10 sends ENTER_GAME; KrunkNative runs the forced ENT, `net_resume_ent`) and has
+  3 s (v10 needAllTimer 3000); the match starts if all are in then, else it is cancelled. Otherwise (fewer classed
+  players) it is cancelled at once.
+- A cancel (v10 endGame(3), v10:191376-191413) sends every connection the ERROR "Ranked Game: The required number
+  of players did not join the match. The game has been cancelled."; at the first-connect check a connection with
+  no class gets "Ranked Game: You failed to select a class. The game has been cancelled." instead, and the 3 s
+  timeout sends the "did not join" text to everyone. The connections close, the match ends with no rating, and the
+  brain aborts it and removes its queue rows (`ranked-cancel`).
+- KrunkNative choice: no partial start. v10 cancels the match whenever the roster is not complete (after the
+  push-in window); KrunkNative used to start with the players who were in.
+- KrunkNative choice: the ping (`mpos`, NET_EXT_MARK_POSITION) is relayed to every other connection
+  of a ranked or comp game, never echoed to the pinger (v10 draws no local marker either).
 | client | `client/src/ui/ranked_ui.c`, `turf_ui.c`, `clan_ui.c` | window 27 in v10's modal layout; the Turf Wars window (`TURF_WINDOW` = KN 101, a menu button after Ranked); the clan window's Settings tab with Turf Wars Loot Distribution |
 
 ### Routes

@@ -1157,6 +1157,11 @@ void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
     free(s);
 }
 
+void ranked_cancel(Brain *b, const cJSON *frame) {
+    if (!b->db) return;
+    kn_db_call(b->db, &P_RK_MATCH_CANCEL, KN_DB_ARGS(kn_json_str(frame, "matchId", "")), on_ignore, "match cancelled");
+}
+
 /* ================================================================ module */
 
 static void route(Brain *b, const char *method, const char *name, kn_http_handler h) {
