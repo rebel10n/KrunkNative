@@ -1,0 +1,126 @@
+{
+  "scenario": "menu-mobile",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "header-left",
+      "rect": [
+        0,
+        0,
+        210,
+        27
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 1.0,
+      "note": "#playerHeaderEl: Login or Register, Get Signup Rewards (the phone header bar)"
+    },
+    {
+      "name": "header-right",
+      "rect": [
+        610,
+        0,
+        234,
+        27
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 1.0,
+      "note": "Notifications / Settings / More Krunker (v10's .headerBarRight)"
+    },
+    {
+      "name": "logo",
+      "rect": [
+        340,
+        0,
+        165,
+        76
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 3.5,
+      "note": "#mainLogo (logo_10.webp, graffiti 'Krunker' logo) in the top centre"
+    },
+    {
+      "name": "guide-links",
+      "rect": [
+        0,
+        27,
+        210,
+        125
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "Register hint, GUIDE, STORE, CHALLENGES, SOCIAL, COMMUNITY & EVENTS (#menuItemContainer, #baseLinks)"
+    },
+    {
+      "name": "play-column",
+      "rect": [
+        712,
+        210,
+        132,
+        150
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "#subLogoButtons: Quick Match, Ranked (2x KR tag), Host Game, Find Game, Custom Games"
+    },
+    {
+      "name": "loadout",
+      "rect": [
+        335,
+        282,
+        175,
+        28
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 5.0,
+      "note": "Class card (Triggerman, Assault Rifle) and Customize button (#bottomLeftHolder / #customizeButton)"
+    },
+    {
+      "name": "now-playing",
+      "rect": [
+        335,
+        311,
+        176,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "Now Playing row: ..., INVITE - JOIN, player count (#matchInfoHolder / #menuServerInfoContainer)"
+    },
+    {
+      "name": "bottom-box",
+      "rect": [
+        275,
+        338,
+        295,
+        44
+      ],
+      "kind": "image",
+      "fuzz": 2,
+      "max_pct": 0.5,
+      "note": "#aContainer: the empty 728x90 ad strip (rgba(0,0,0,.6), padding 10px); v10's phone menu keeps #aHider (fuzz 2: the strip is #070707 over the #111 backdrop, inside the default fuzz)"
+    },
+    {
+      "name": "background",
+      "rect": [
+        0,
+        140,
+        270,
+        240
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 0.5,
+      "note": "Empty menu background left of the spinner (the centre glow and the spinner are outside)"
+    }
+  ]
+}

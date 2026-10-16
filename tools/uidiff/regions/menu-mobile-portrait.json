@@ -1,0 +1,113 @@
+{
+  "scenario": "menu-mobile-portrait",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "header-left",
+      "rect": [
+        0,
+        0,
+        160,
+        27
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 1.0,
+      "note": "Login or Register, Get Signup Rewards (phone header bar)"
+    },
+    {
+      "name": "header-right",
+      "rect": [
+        200,
+        0,
+        190,
+        27
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 1.0,
+      "note": "Notifications / Settings / More Krunker"
+    },
+    {
+      "name": "logo",
+      "rect": [
+        150,
+        0,
+        90,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 3.5,
+      "note": "#mainLogo in the top centre"
+    },
+    {
+      "name": "guide-links",
+      "rect": [
+        0,
+        14,
+        160,
+        72
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "Register hint, GUIDE, STORE, CHALLENGES, SOCIAL, COMMUNITY & EVENTS"
+    },
+    {
+      "name": "play-column",
+      "rect": [
+        320,
+        750,
+        70,
+        80
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "#subLogoButtons: Quick Match, Ranked, Host Game, Find Game, Custom Games (compact)"
+    },
+    {
+      "name": "loadout",
+      "rect": [
+        148,
+        786,
+        96,
+        46
+      ],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "Class card, Customize button and the Now Playing row (#bottomLeftHolder)"
+    },
+    {
+      "name": "bottom-box",
+      "rect": [
+        117,
+        818,
+        156,
+        24
+      ],
+      "kind": "image",
+      "fuzz": 2,
+      "max_pct": 0.5,
+      "note": "#aContainer: the empty ad strip at the bottom centre (v10's phone menu keeps #aHider) (fuzz 2: the strip is #070707 over the #111 backdrop, inside the default fuzz)"
+    },
+    {
+      "name": "background",
+      "rect": [
+        0,
+        100,
+        390,
+        190
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 0.5,
+      "note": "Empty menu background above the spinner (spinner excluded: its rotation phase is time based)"
+    }
+  ]
+}

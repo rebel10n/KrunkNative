@@ -1789,8 +1789,10 @@ static void setup_dom(void) {
     set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
     // ads: none in KrunkNative, as v10 with !window.canShowAds or premium (v10.js:219405): so no
-    // #aContainer, the dark rgba(0,0,0,.6) box v10's browser capture shows under Now Playing
-    set_display("aHider", "none");
+    // #aContainer, the dark rgba(0,0,0,.6) box v10's browser capture shows under Now Playing.
+    // The phone menu keeps #aHider (v10's phone capture never sets its inline display, so the
+    // strip shows at the bottom centre: doc/ref/krunker-v10/mobile/menu-mobile.html.gz).
+    if (!ui_mobile_active()) set_display("aHider", "none");
     set_display("topRightAdHolder", "none");
     set_display("topLeftAdHolder", "none");
     set_display("menuFPSDisplay", "none");
