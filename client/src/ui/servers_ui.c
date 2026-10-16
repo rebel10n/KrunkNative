@@ -3971,6 +3971,14 @@ int servers_ui_popular_official(const char *map) {
 // (GET /api/map-data) and played in the offline game when no brain lobby can host them.
 static char g_play_name[96];
 static int g_play_catalogue;
+static int g_play_mode = -1; // the Krunker mode a play asks for (the raid promo: Raid, 23); -1 any
+
+// a lobby row's Krunker mode id (meta "mode", else "g", as row_mode); -1 none
+static int row_mode_id(const cJSON *t) {
+    const cJSON *m = cJSON_GetObjectItem(meta_of(t), "mode");
+    if (!cJSON_IsNumber(m)) m = cJSON_GetObjectItem(meta_of(t), "g");
+    return cJSON_IsNumber(m) ? m->valueint : -1;
+}
 
 // a published map from kn_brain (community_fetch: downloaded once, checked like v10's
 // prepareGame + validateMap): the offline game hosts it, like the editor's Test Map
@@ -4010,6 +4018,7 @@ static void on_play_list(void *user, const int status, const char *body, const s
         const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "map"));
         const char *custom = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "m"));
         if (meta_flag(t, "pr") || tuple_int(t, 2) >= tuple_int(t, 3)) continue;
+        if (g_play_mode >= 0 && row_mode_id(t) != g_play_mode) continue; // a Raid play joins a Raid lobby
         if ((map && !strcmp(map, g_play_name)) || (custom && !strcmp(custom, g_play_name))) {
             found = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
             break;
@@ -4024,6 +4033,7 @@ static void on_play_list(void *user, const int status, const char *body, const s
         const int slot = index >= 0 ? map_catalog_slot(&g_client->game.maps, &g_client->game.map_count, (size_t) index) : -1;
         if (slot >= 0) {
             menu_select_map(slot);
+            if (g_play_mode >= 0) g_client->net_mode_index = g_play_mode; // local_game_start reads it (Krunker mode id)
             if (g_client->offline) local_game_host(g_client, slot, g_client->net_mode_index);
             else g_client->offline_start_map = g_client->game.maps[slot];
             menu_host_offline();
@@ -4035,15 +4045,19 @@ static void on_play_list(void *user, const int status, const char *body, const s
     cJSON_Delete(res);
 }
 
-int servers_ui_play_map(const char *name, const int catalogue) {
+int servers_ui_play_map(const char *name, const int catalogue) { return servers_ui_play_map_mode(name, catalogue, -1); }
+
+int servers_ui_play_map_mode(const char *name, const int catalogue, const int mode) {
     if (!name || !name[0] || backend_available() != 1) return 0;
     snprintf(g_play_name, sizeof(g_play_name), "%s", name);
     g_play_catalogue = catalogue;
+    g_play_mode = mode;
     // v10 ?play=<map> (playMap, v10.js:222040-222051): a matchmaker seek for that map in any region, the
     // map as its dataQuery (`i`; the brain matches the map's index, dsma), autoChangeGame false. No lobby
     // plays it: the plain seek (on_seek). Community maps (not one of v10's) keep the list search below.
+    // (a mode-specific play, the raid promo's Raid, keeps the list search below: the seek has no mode)
     const int index = official_map_index(name);
-    if (index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
+    if (mode < 0 && index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
         snprintf(g_play_query, sizeof(g_play_query), "{\"i\":\"%s\",\"dsma\":[%d]}", name, index);
         g_exclude_game[0] = 0;
         g_play_seek = 1;
