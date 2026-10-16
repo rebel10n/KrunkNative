@@ -1,0 +1,29 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "anim_seek": 800,
+    "strike": {
+      "screen": "SPIN",
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 0,
+        "kr": 1000
+      },
+      "popup": "buy-tickets"
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the buy-tickets popup (Jce: yU, the ticket exchange in the popup frame) opened by a ticket wheel with no tickets and 1000 KR (the spin's shortfall). No capture of this popup exists: ui/strike/screens/BUY_TICKETS.html is transcribed from the bundle. The stepper is at 1 (the max is 12 tickets: 1000 KR / 80)."
+}

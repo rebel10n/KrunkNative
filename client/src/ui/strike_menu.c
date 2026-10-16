@@ -105,7 +105,7 @@ typedef struct {
     int score_rank;              // the board's rank (0: the row's place)
 } BoardRow;
 
-typedef enum { POPUP_NONE, POPUP_LEADERBOARD, POPUP_PRODUCT } PopupKind;
+typedef enum { POPUP_NONE, POPUP_LEADERBOARD, POPUP_PRODUCT, POPUP_BUY_TICKETS } PopupKind;
 
 static struct {
     Client *client;
@@ -124,6 +124,8 @@ static struct {
     char item_ids[64][24]; // the shown squares' item ids ("" = Default)
     int item_count;
     PopupKind popup;      // what POPUP's builder shows
+    int ticket_n;         // Mf: the buy-tickets stepper (yU), kept across opens (0: 1)
+    int ticket_busy;      // a buy-tickets purchase is on its way
     BoardRow live_board[BOARD_MAX];
     int live_board_count;
     char board_cols[2][16];
@@ -673,6 +675,78 @@ static void store_fill(const HtmlElem root) {
     strike_econ_get_shop(on_shop, NULL); // Qo(): the shop, again on every visit
 }
 
+// yU's exchange (Jce, the spin's shortfall): the spin tickets Mf the stepper buys with KR, one ticket
+// at tickets_1's price (the shop's, else the catalogue's). Real-money packs are not sold here (no IAP).
+#define TICKET_PRODUCT "tickets_1"
+
+static int krunkies(void) {
+    if (FIXTURE.set) return FIXTURE.kr;
+    const StrikeAccount *e = econ();
+    return e ? (int) e->wallet[STRIKE_CUR_KR] : 0;
+}
+
+static int ticket_price(void) {
+    const cJSON *p;
+    cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(M.shop, "products")) {
+        const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id"));
+        if (!id || strcmp(id, TICKET_PRODUCT)) continue;
+        const cJSON *price = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(p, "price"), 0);
+        const int amount = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(price, "amount"));
+        if (amount > 0) return amount;
+    }
+    const StrikeProduct *sp = strike_product(TICKET_PRODUCT);
+    return sp ? sp->price_amount : 80;
+}
+
+// yU / pU: the stepper's max is the tickets the KR pays for (at least 1, pU's min); the KR button shows
+// price * Mf and is enabled when the account can pay Mf tickets.
+static int ticket_afford(void) {
+    const int price = ticket_price();
+    return price > 0 ? krunkies() / price : 0;
+}
+
+static void tickets_fill(const HtmlElem root) {
+    const int afford = ticket_afford();
+    const int max = afford < 1 ? 1 : afford;
+    if (M.ticket_n < 1) M.ticket_n = 1;
+    if (M.ticket_n > max) M.ticket_n = max;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", M.ticket_n);
+    set_text(root, "#ticketAmount", buf);
+    snprintf(buf, sizeof(buf), "%d", ticket_price() * M.ticket_n);
+    set_text(root, "#ticketPrice", buf);
+    const HtmlElem minus = html_dom_query(root, "#ticketMinus"), plus = html_dom_query(root, "#ticketPlus");
+    const HtmlElem buy = html_dom_query(root, "#ticketBuy");
+    if (minus) html_dom_set_class(minus, "is-disabled", M.ticket_n <= 1);
+    if (plus) html_dom_set_class(plus, "is-disabled", M.ticket_n >= max);
+    if (buy) html_dom_set_class(buy, "is-disabled", !(afford >= 1 && afford >= M.ticket_n));
+}
+
+// onPurchase of Jce: the popup closes whatever the answer (FRVR's yU calls it after its try / catch)
+static void tickets_done(void) {
+    M.ticket_busy = 0;
+    if (strike_screen_top() == STRIKE_SCREEN_POPUP && M.popup == POPUP_BUY_TICKETS) strike_screen_pop(); // kt()
+}
+
+static void on_tickets_bought(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) data;
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    if (status == 200) printf("[strike] bought %s x%d\n", TICKET_PRODUCT, M.ticket_n);
+    else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
+    tickets_done();
+}
+
+static void buy_tickets(void) {
+    const int afford = ticket_afford();
+    if (M.ticket_busy || afford < 1 || afford < M.ticket_n) return; // the KR button is disabled
+    M.ticket_busy = 1;
+    if (!strike_econ_buy(TICKET_PRODUCT, M.ticket_n, on_tickets_bought, NULL)) {
+        printf("[strike] purchase %s: no Strike account (sign in)\n", TICKET_PRODUCT);
+        tickets_done();
+    }
+}
+
 // ---------------------------------------------------------------- SPIN (SA / aue / oU)
 
 static void spin_fill(const HtmlElem root) {
@@ -766,10 +840,19 @@ static void on_spun(void *user, const int status, const cJSON *data, const cJSON
     M.sp.phase = 2;
 }
 
+static void tickets_open(void);
+
 static void spin_buy(const int count) {
     const WheelView *w = current_wheel();
     if (!w || (M.sp.phase != 0 && M.sp.phase != 4) || strike_screen_top() != STRIKE_SCREEN_SPIN) return; // isSpinning
     if (FIXTURE.set) return; // a capture fixture's wheel is not kn_brain's
+    // onSpin: a ticket wheel with fewer tickets than spins, and KR for one ticket, opens the exchange (Jce)
+    // instead of spinning. FRVR tests the ticket count for every wheel; a KR wheel is paid in KR, so here
+    // only the ticket wheel is gated. Real-money packs (RU / eue) are not sold.
+    if (w->ticket && count > spin_tickets() && krunkies() >= ticket_price()) {
+        tickets_open();
+        return;
+    }
     M.sp.wheel = M.spin;
     M.sp.phase = 1;
     if (!strike_econ_spin(w->id, count, 0, on_spun, NULL)) {
@@ -1073,6 +1156,13 @@ static void popup_fill(const HtmlElem root) {
         char *html = strike_product_popup_html(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(M.shop, "products"), M.product), action);
         html_dom_set_html(holder, html ? html : "");
         free(html);
+    } else if (holder && M.popup == POPUP_BUY_TICKETS) { // Jce: yU, the ticket exchange in Sr
+        char *html = strike_template("BUY_TICKETS", NULL, 0);
+        if (html) {
+            html_dom_set_html(holder, html);
+            free(html);
+        }
+        tickets_fill(root);
     }
 }
 
@@ -1080,6 +1170,12 @@ static void popup_open(const PopupKind kind) {
     M.popup = kind;
     if (strike_screen_shown(STRIKE_SCREEN_POPUP)) strike_screen_rerender(STRIKE_SCREEN_POPUP);
     else strike_screen_push(STRIKE_SCREEN_POPUP); // Pt(In, {builder}, {preventReplace: true})
+}
+
+// Jce(): Pt(In, {builder: yU}, {preventReplace, trackingId: "popup_spin_purchase"})
+static void tickets_open(void) {
+    M.ticket_busy = 0;
+    popup_open(POPUP_BUY_TICKETS);
 }
 
 // ---------------------------------------------------------------- CUSTOMIZATION (Ly / hde) and T5
@@ -1756,6 +1852,13 @@ static void action(const char *a) {
         // Controls' home (its onHide kt() and its own: Settings goes too)
         for (int i = atoi(a + 4); i > 0; i--) strike_screen_pop();
         if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
+    } else if (!strcmp(a, "popup:buy-tickets")) {
+        tickets_open(); // Jce (a capture / scenario opens the exchange directly)
+    } else if (!strncmp(a, "ticket-step:", 12)) {
+        M.ticket_n += atoi(a + 12); // Sce(Mf + step): tickets_fill keeps it within [1, max]
+        strike_screen_rerender(STRIKE_SCREEN_POPUP);
+    } else if (!strcmp(a, "ticket-buy")) {
+        buy_tickets();
     } else if (!strncmp(a, "spin:", 5)) {
         const int i = atoi(a + 5);
         wheels_build();
@@ -1920,6 +2023,7 @@ static void on_econ(void *user, const StrikeEconEvent event) {
         store_spins_fill(root); // the golden block's meter and its ticket / purchase button
     }
     if ((root = strike_screen_root(STRIKE_SCREEN_SPIN))) fill_currency(root);
+    if (M.popup == POPUP_BUY_TICKETS && strike_screen_shown(STRIKE_SCREEN_POPUP)) strike_screen_rerender(STRIKE_SCREEN_POPUP);
     if ((root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION))) customization_fill(root);
     if ((root = strike_screen_root(STRIKE_SCREEN_ITEM_SELECTION))) item_selection_fill(root);
     strike_meta_econ_changed(); // missions, the rewards track (strike_meta.c)

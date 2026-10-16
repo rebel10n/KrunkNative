@@ -690,6 +690,7 @@ int strike_ui_pointer_to_page(void) {
 // loading screen) unless "boot" keeps index.html's static one, then
 //   "screen": "<VIEW_ID>"   the stack becomes that one screen (the capture's Pi = [view])
 //   "settingsTab": n        SETTINGS' tab n (Presets 0 .. Other 4)
+//   "popup": "buy-tickets"  the popup frame shows that builder (the spin shortfall's ticket exchange)
 //   "leaderboard": [{name, classIndex, you, score, kills}]  LEADERBOARD_PLAYERS' rows (no score / kills:
 //                           empty stat cells, as the capture's)
 //   "loading": "<info>"     FRVR's Mithril loading screen (Fm(Al, {info})) from the capture clock 0
@@ -728,6 +729,12 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     if (cJSON_IsNumber(tab)) {
         char a[32];
         snprintf(a, sizeof(a), "settings-tab:%d", tab->valueint);
+        strike_menu_action(a);
+    }
+    const cJSON *popup = cJSON_GetObjectItemCaseSensitive(st, "popup");
+    if (cJSON_IsString(popup)) { // POPUP's builder: "buy-tickets" (Jce's exchange over the screen below)
+        char a[64];
+        snprintf(a, sizeof(a), "popup:%s", popup->valuestring);
         strike_menu_action(a);
     }
     const cJSON *loading = cJSON_GetObjectItemCaseSensitive(st, "loading");
