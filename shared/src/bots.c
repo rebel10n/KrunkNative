@@ -604,7 +604,7 @@ void bot_config_defaults(const BotType type, BotConfig *c) {
         c->difficulty = BOT_DIFFICULTY_MAX;
         c->accuracy = 100.0f;
         c->target_distance = NB_MAX_AWARENESS_DISTANCE;
-        c->slide_hop = 1; // KrunkNative: NextBots slide hop like players (bot_move.c; v7 tfue default off)
+        c->slide_hop = 0; // KrunkNative: off by default, slideHop=on turns it on (bot_move.c)
     }
 }
 

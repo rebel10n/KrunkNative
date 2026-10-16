@@ -84,7 +84,7 @@ int bot_move_plan(const Game *game, const Player *self, float look_yaw, float ke
 // first one releases the key after a landing).
 void bot_move_apply(Game *game, GameBot *bot, Player *self, float dt, float look_yaw, int *move, unsigned char *jump, unsigned char *crouch, unsigned char *jump_late);
 
-// 1 when `bot` slide hops at all: config slideHop (NextBots by default) and a skill above none
+// 1 when `bot` slide hops at all: config slideHop (off by default, every bot) and a skill above none
 int bot_move_hops(const GameBot *bot);
 
 // The personality seed of a bot (FNV-1a over the name, then the uid; bot_chat_personality_of)

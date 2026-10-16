@@ -330,9 +330,10 @@ given (v7 bot_add bots are level 0); cosmetics per slot with a chance; a bot kee
 scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear Bots keys
 (numpad + / -) are not bound.
 
-Slide hopping (`slideHop` / `bhop`, `shared/src/bot_move.c`) is on by default for nextbot bots
-(v7 tfue default off): instead of v10's "jump on every grounded frame once the slide has 50 ms
-left" a bot hops on the first frame that can jump after a landing, lets the crouch go while
+Slide hopping (`slideHop` / `bhop`, `shared/src/bot_move.c`) is off by default for every bot
+(NextBots included); `slideHop=on` in bot_add or bot_config turns it on. Off, a bot never hops,
+bhops or air strafes; the single jumps its AI and route ask for are still made. On, instead of
+v10's "jump on every grounded frame once the slide has 50 ms left" a bot hops on the first frame that can jump after a landing, lets the crouch go while
 rising and holds it while falling (every landing slides), and simulates the jump first,
 sweeping its box along the arc against the map: no hop into a ceiling or wall, off a ledge,
 onto a jump pad / kill volume or past a corner of its route, and no AI jump (ledge, dodge,

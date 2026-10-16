@@ -72,6 +72,8 @@ static void tick(Game *game, const float seconds, const float hz) {
 }
 
 // A fresh round of `mode_index` with `per_team` normal bots on each team (team 0: `per_team` bots).
+// slideHop is off by default (bot_move.c), so these bots turn it on: the objective checks measure
+// the play, and the flag run they were tuned on needs the hop's speed to reach the flag in 45 s.
 static void start(Game *game, const int mode_index, const int per_team, const int teams) {
     game_bots_remove_all(game);
     free_players(game);
@@ -81,9 +83,9 @@ static void start(Game *game, const int mode_index, const int per_team, const in
         for (int i = 0; i < per_team; i++) {
             char team_arg[16];
             snprintf(team_arg, sizeof(team_arg), "team=%d", team);
-            char *argv[] = {team_arg, "difficulty=normal"};
+            char *argv[] = {team_arg, "difficulty=normal", "slideHop=on"};
             BotAssignments a;
-            bot_parse_assignments(teams ? 2 : 1, teams ? argv : argv + 1, &a);
+            bot_parse_assignments(teams ? 3 : 2, teams ? argv : argv + 1, &a);
             CHECK(!a.error[0], "bot options: %s", a.error);
             CHECK(game_bots_add(game, &a, NULL, 0.0f) != NULL, "bot added");
         }

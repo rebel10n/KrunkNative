@@ -25,8 +25,12 @@
 // - Skill gaps (BotHopSkill, per bot from its personality seed, correlated with difficulty):
 //   some bots never hop, "learning" ones mistime it (wait on the ground and lose speed, forget the
 //   crouch so the landing does not slide, hesitate, skip landings), clean ones hop on the next
-//   frame after every clear landing. Every check above applies to all three. slideHop is on for
-//   NextBots by default (bot_config_defaults) and off for tfue bots (v7's default).
+//   frame after every clear landing. Every check above applies to all three.
+// - slideHop is off by default for every bot (bot_config_defaults, NextBots included; the
+//   bot_config / bot_add key turns it on). Off, a bot never hops, bhops or air strafes: no
+//   grounded hop, no air strafe, no hop-flight key steering, no slide crouch. The single jumps the
+//   AI asks for (ledges, low obstacles, dodges, randomJump) and the route needs are still made,
+//   under the same ceiling and ladder checks.
 #include <bot_move.h>
 #include <bots.h>
 #include <bot_path.h>
@@ -435,6 +439,9 @@ void bot_move_apply(Game *game, GameBot *bot, Player *self, const float dt, cons
     const float vx = self->velocity.x, vz = self->velocity.z;
     const float speed = hypotf(vx, vz);
     const float key_yaw = travelling ? move_yaw : NAN;
+    // slideHop (config, off by default): no grounded hop, bhop, air strafe or slide crouch below.
+    // Only the single jumps of section 1 are made.
+    const int slide = bot->config.slide_hop != 0;
 
     // 1. a jump the AI asked for: never into a ceiling, never off a ladder
     if (*jump) {
@@ -451,13 +458,13 @@ void bot_move_apply(Game *game, GameBot *bot, Player *self, const float dt, cons
                 m->guard = 0; // it may aim at a ledge above the floor: the AI steers the flight
                 m->hop_travel = h.travel;
                 m->hop_apex = h.apex;
-                m->slide_land = (unsigned char) (h.reason == BOT_MOVE_OK && h.slide_clear);
+                m->slide_land = (unsigned char) (slide && h.reason == BOT_MOVE_OK && h.slide_clear);
             }
         }
         if (*jump) return;
     }
 
-    const int hops = bot->config.slide_hop && m->skill != BOT_HOP_NONE && travelling && !*crouch && !self->on_ladder;
+    const int hops = slide && m->skill != BOT_HOP_NONE && travelling && !*crouch && !self->on_ladder;
 
     if (!grounded) {
         // air strafe (config.airStrf): a right / left key while the look turns the same way swings
@@ -468,7 +475,7 @@ void bot_move_apply(Game *game, GameBot *bot, Player *self, const float dt, cons
             const float need = bm_wrap(wdir - vdir);
             if (fabsf(need) > 0.05f && yaw_delta * need > 0.0f && fabsf(yaw_delta) <= fabsf(need) * 1.5f) strafe = need > 0.0f ? 2 : 6; // MOVE_RIGHT / MOVE_LEFT
         }
-        if (m->hopping && m->guard) {
+        if (slide && m->hopping && m->guard) {
             // our hop: the look (aim) and the AI's key change in the air, and air acceleration /
             // the strafe bend the flight. Keep the first of strafe, the AI's key, no key whose
             // rest of the flight (from here, held to the landing) is clear; the strafe is judged

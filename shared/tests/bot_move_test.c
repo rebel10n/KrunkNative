@@ -6,6 +6,9 @@
 // plateau over the void (no hop off the edge). Hop skills: the none / learning / clean mix per
 // difficulty over seeded bots, a non-hopper never hops, a learning hopper is slower than a clean
 // one and faster than a walker, and no skill bumps its head or hops into a wall or off a ledge.
+// slideHop is off by default (NextBots too), so the hop checks run with it on (the walker's stub
+// and the bot_add lines below); the slideHop-off checks: the walker and the AI never hop, bhop,
+// strafe or crouch for a slide, and a jump the AI asks for is still made.
 // Run from the repository root: ./<build>/bot_move_test
 #include <shared.h>
 #include <bots.h>
@@ -110,6 +113,7 @@ static const char *k_plateau =
 
 typedef struct {
     int hops, bumps, frames_grounded_before_hop_max, hop_wait_frames_total;
+    int jumps, crouches, move_changes; // frames bot_move_apply asked for a jump / crouch / another move key
     float distance, max_y, speed_peak;
     float first_hop_x, last_land_x;
     int landings;
@@ -146,6 +150,7 @@ static int wall_stop(const Game *game, const Player *p, const vec3 before) {
 // The walker's hop skill: -1 = the default stub (max difficulty: clean), else a BotHopSkill at
 // normal difficulty through a uid whose personality seed rolls it.
 static int g_walk_skill = -1;
+static int g_walk_slide_hop = 1; // the stub's slideHop (off by default; the hop checks turn it on)
 #define PLAIN_WALKER (-2) // average_walk: no bot_move_apply at all
 
 static int uid_for_skill(const int skill, const float difficulty) {
@@ -162,6 +167,7 @@ static void walk_at(Game *game, Player *player, const float start_x, const float
     memset(&stub, 0, sizeof(stub));
     stub.type = BOT_TYPE_NEXTBOT;
     bot_config_defaults(BOT_TYPE_NEXTBOT, &stub.config);
+    stub.config.slide_hop = (unsigned char) g_walk_slide_hop;
     stub.player = player;
     stub.target_uid = -1;
     if (g_walk_skill >= 0) {
@@ -178,7 +184,11 @@ static void walk_at(Game *game, Player *player, const float start_x, const float
     for (int i = 0; i < ticks; i++) {
         int move = 0;
         unsigned char jump = 0, crouch = 0, late = 0;
+        const int move_in = move;
         if (hop) bot_move_apply(game, &stub, player, dt * 1000.0f, YAW_PLUS_X, &move, &jump, &crouch, &late);
+        if (jump) st->jumps++;
+        if (crouch) st->crouches++;
+        if (move != move_in) st->move_changes++;
         const vec3 before = player->position, vbefore = player->velocity;
         const int on_ground_before = player->on_ground;
         if (on_ground_before) grounded_frames++;
@@ -316,6 +326,7 @@ typedef struct {
 
 typedef struct {
     int hops, bumps, contacts, hop_contacts, falls, hop_falls, ai_refused, vetoes;
+    int strafes; // bot-frames with an air strafe key
     int refused[BOT_MOVE_NO_CHANCE + 1];
     float travelled;
     SkillStats skill[BOT_HOP_SKILLS];
@@ -383,6 +394,7 @@ static void ai_run(Game *game, const float seconds, const float floor_y, AiStats
             prev_pos[b] = p->position;
             prev_vel[b] = p->velocity;
             prev_hop[b] = bot->move.hopping;
+            if (bot->move.strafing) st->strafes++;
         }
     }
     for (int b = 0; b < game->bots->count; b++) {
@@ -409,7 +421,7 @@ static void test_ai_corridor(Game *game, const int corridor) {
         pcg32_srandom((uint64_t) seed, 54u);
         // no fights: a NextBot targets bots whatever targetBots says (bots.c bot_perceive), and the
         // hops of two bots that meet and fight in the corridor measured the fight, not the walk
-        run("/bot_add 2 difficulty=hard targetBots=false attackTarget=false watchTarget=false followTarget=false");
+        run("/bot_add 2 difficulty=hard targetBots=false attackTarget=false watchTarget=false followTarget=false slideHop=on");
         AiStats st;
         ai_run(game, 40.0f, 0.0f, &st);
         printf("  seed %d, 40 s, 2 bots: %d hops, %d head bumps, %d wall contacts (%d in a hop / slide), %d jumps refused, %d hops refused, travelled %.0f\n",
@@ -463,7 +475,7 @@ static void test_skill_console(Game *game, const int runway_index) {
     free_players(game);
     game_init(game, runway_index, 0, 1);
     pcg32_srandom(7u, 54u);
-    run("/bot_add 4 difficulty=normal targetBots=false"); // one console line holds 4
+    run("/bot_add 4 difficulty=normal targetBots=false slideHop=on"); // one console line holds 4
     tick(game);
     char list[1024];
     run("/bot_list");
@@ -488,7 +500,6 @@ static void test_skill_console(Game *game, const int runway_index) {
     run("/bot_config slideHop=false");
     run("/bot_list");
     CHECK(strstr(g_reply, "bhop:off") != NULL, "slideHop off shows as off (%s)", g_reply);
-    run("/bot_config slideHop=true"); // the manager default again (later tests)
     run("/bot_kick all");
 }
 
@@ -570,7 +581,7 @@ static void test_ai_skills(Game *game, const int corridor) {
         free_players(game);
         game_init(game, corridor, 0, 1);
         pcg32_srandom((uint64_t) (40 + seed), 54u);
-        run("/bot_add 6 difficulty=normal targetBots=false");
+        run("/bot_add 6 difficulty=normal targetBots=false slideHop=on");
         AiStats st;
         ai_run(game, 30.0f, 0.0f, &st);
         for (int k = 0; k < BOT_HOP_SKILLS; k++) {
@@ -606,7 +617,7 @@ static void test_ai_plateau(Game *game, const int plateau) {
         game_init(game, plateau, 0, 1);
         CHECK(game->ready, "plateau loaded");
         pcg32_srandom((uint64_t) seed, 54u);
-        run("/bot_add 3 difficulty=max targetBots=false");
+        run("/bot_add 3 difficulty=max targetBots=false slideHop=on");
         AiStats st;
         ai_run(game, 30.0f, 30.0f, &st);
         printf("  seed %d, 30 s, 3 bots: %d hops, %d falls (%d from a hop), %d head bumps, %d hops refused, travelled %.0f\n",
@@ -618,6 +629,85 @@ static void test_ai_plateau(Game *game, const int plateau) {
         run("/bot_kick all");
     }
     CHECK(hops >= 15, "the bots hop on the plateau (%d in 3 x 30 s)", hops);
+}
+
+// slideHop off (the NextBot default): the walker and the AI never hop, bhop, strafe or crouch for
+// a slide; a jump the AI asks for is still made.
+static void test_slide_hop_off(Game *game, const int corridor) {
+    printf("Running slideHop off test...\n");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+    Player *p = add_human(game, 900, "Walker");
+    WalkStats off, plain;
+    g_walk_slide_hop = 0;
+    walk(game, p, -900.0f, 8.0f, 1, -1e9f, &off); // a clean hopper's stub: it would hop with slideHop on
+    g_walk_slide_hop = 1;
+    walk(game, p, -900.0f, 8.0f, 0, -1e9f, &plain);
+    printf("  walker, slideHop off, 8 s: walked %.0f (walker %.0f), %d hops, %d jumps, %d crouches, %d key changes, %d landings\n",
+           off.distance, plain.distance, off.hops, off.jumps, off.crouches, off.move_changes, off.landings);
+    CHECK(off.hops == 0, "no hop with slideHop off (%d)", off.hops);
+    CHECK(off.jumps == 0, "no jump at all on open ground with slideHop off (%d)", off.jumps);
+    CHECK(off.crouches == 0, "no slide crouch with slideHop off (%d)", off.crouches);
+    CHECK(off.move_changes == 0, "no air strafe / key change with slideHop off (%d)", off.move_changes);
+    CHECK(off.landings == 0 && off.max_y < 0.01f, "never airborne with slideHop off (%d landings, rise %.2f)", off.landings, off.max_y);
+    CHECK(off.bumps == 0, "no head bumps (%d)", off.bumps);
+    CHECK(fabsf(off.distance - plain.distance) < plain.distance * 0.05f, "walks like a walker with slideHop off (%.0f vs %.0f)", off.distance, plain.distance);
+
+    free_players(game);
+    game_init(game, corridor, 0, 1);
+    pcg32_srandom(9u, 54u);
+    run("/bot_add 3 difficulty=max targetBots=false"); // the default config: slideHop off
+    CHECK(game->bots->count == 3 && game->bots->list[0].config.slide_hop == 0, "bots added with slideHop off");
+    AiStats st;
+    ai_run(game, 30.0f, 0.0f, &st);
+    printf("  AI, slideHop off, 3 max bots, 30 s: %d hops, %d air strafes, %d head bumps, travelled %.0f\n", st.hops, st.strafes, st.bumps, st.travelled);
+    CHECK(st.hops == 0, "the AI never hops with slideHop off (%d)", st.hops);
+    CHECK(st.strafes == 0, "the AI never air strafes with slideHop off (%d)", st.strafes);
+    CHECK(st.bumps == 0, "no head bumps (%d)", st.bumps);
+    CHECK(st.travelled > 300.0f, "the bots still walk with slideHop off (%.0f)", st.travelled);
+    run("/bot_kick all");
+}
+
+// A jump the AI asks for is still a single jump with slideHop off (ledges, low obstacles and the
+// route need them); it is no hop, so the bot is never hopping after it lands.
+static void test_jump_kept(Game *game) {
+    printf("Running slideHop off jump test...\n");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+    Player *p = add_human(game, 900, "Walker");
+    p->position = (vec3) {-900.0f, 0.0f, 0.0f};
+    p->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+    p->direction.y = YAW_PLUS_X;
+    GameBot stub;
+    memset(&stub, 0, sizeof(stub));
+    stub.type = BOT_TYPE_NEXTBOT;
+    bot_config_defaults(BOT_TYPE_NEXTBOT, &stub.config);
+    stub.player = p;
+    stub.target_uid = -1;
+    for (int i = 0; i < 10; i++) tick(game); // settle on the floor
+    CHECK(p->on_ground, "standing on the runway");
+    int move = -1; // no key: the jump alone
+    unsigned char jump = 1, crouch = 0, late = 0;
+    bot_move_apply(game, &stub, p, FRAME * 1000.0f, YAW_PLUS_X, &move, &jump, &crouch, &late);
+    CHECK(jump, "the AI's jump is kept with slideHop off");
+    float peak = 0.0f;
+    int airborne = 0;
+    for (int i = 0; i < 60; i++) {
+        Input in;
+        memset(&in, 0, sizeof(in));
+        in.seq = i + 1;
+        in.delta = FRAME;
+        in.move_dir = -1;
+        in.y_dir = YAW_PLUS_X;
+        in.jump = i == 0;
+        player_queue_input(p, &in);
+        tick(game);
+        if (!p->on_ground) airborne = 1;
+        if (p->position.y > peak) peak = p->position.y;
+    }
+    printf("  single jump, slideHop off: peak %.2f, hops %d\n", peak, stub.move.hops);
+    CHECK(airborne && peak > 5.0f, "the single jump leaves the ground (peak %.2f)", peak);
+    CHECK(stub.move.hops == 0, "a jump is not a hop (%d)", stub.move.hops);
 }
 
 int main(void) {
@@ -659,6 +749,8 @@ int main(void) {
     test_ai_corridor(&game, 5);
     test_ai_skills(&game, 5);
     test_ai_plateau(&game, 6);
+    test_slide_hop_off(&game, 5);
+    test_jump_kept(&game);
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);
