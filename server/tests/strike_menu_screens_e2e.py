@@ -153,9 +153,14 @@ def run(name, script_lines):
         f.write("\n".join(script_lines) + "\n")
     log = os.path.join(WORK, f"{name}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
+    # KRUNKNATIVE_FIXED_DELTA: the script clock advances one 60 fps frame per frame. Without it a page
+    # hitch (the user-asset fetches stall a frame for seconds) moves the clock past several lines at once,
+    # and they all run in one frame: the SPIN canvas check and the Customize Controls rect reads then
+    # see the screen before its first layout and canvas draw (the canvas gets its width attribute and the
+    # shoot button its saved place only in a frame that renders them). strike_screens_e2e.py pins it too.
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
-                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FIXED_DELTA": "16.667"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--flavor", "strike", "--offline", "--map", "kanji"],
                              stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
