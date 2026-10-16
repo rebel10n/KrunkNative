@@ -58,6 +58,7 @@
 #include <backend_ui.h> // brain backend: account, matchmaker, --brain / --connect (net/backend_startup.c)
 #include <startup_banner.h> // startup log: build, platform, GL (startup_banner.c)
 #include <headless.h> // KRUNKNATIVE_HEADLESS / --headless: EGL device context, no window (headless.c)
+#include <gl_driver_env.h> // NVIDIA + V-Sync off: relaunch once with __GL_SYNC_TO_VBLANK=0 (gl_driver_relaunch.c)
 #include <client_settings.h> // Settings > Client startup options + Exit (ui/ui_client_settings.c)
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
@@ -626,6 +627,10 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
 #endif
+    // NVIDIA's GL driver reads __GL_SYNC_TO_VBLANK when it loads, so V-Sync off on NVIDIA re-executes the client
+    // once with it set (gl_driver_env.h). It runs first: the relaunch gets argv as typed (before --flavor is
+    // stripped) and the banner prints once.
+    gl_driver_vsync_relaunch(argc, argv);
     client_resolve_flavor(&argc, argv); // branding for --version, the banner and the window title; strips --flavor
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {

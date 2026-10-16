@@ -29,6 +29,9 @@
 // headless mode is on. Call before headless_glfw_init().
 int headless_parse_args(int *argc, char **argv);
 int headless_enabled(void);
+// The KRUNKNATIVE_HEADLESS rule for one value (empty, 0, false, no, off = off; any case). Usable before
+// headless_parse_args: gl_driver_relaunch.c checks the variable at the top of main.
+int headless_env_flag_on(const char *value);
 
 // glfwInit(), on GLFW's null platform when headless.
 int headless_glfw_init(void);

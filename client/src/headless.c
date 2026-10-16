@@ -11,7 +11,7 @@ static int g_headless;
 // KRUNKNATIVE_HEADLESS turns headless on for any value except empty, 0, false, no or off (any case).
 // Before, only "0" was off, so KRUNKNATIVE_HEADLESS=false gave a windowless run that ui_render_settings.c
 // then capped at 120 fps.
-static int env_flag_on(const char *value) {
+int headless_env_flag_on(const char *value) {
     static const char *const off[] = {"0", "false", "no", "off"};
     if (!value || !*value) return 0;
     for (size_t i = 0; i < sizeof(off) / sizeof(off[0]); i++) {
@@ -23,7 +23,7 @@ static int env_flag_on(const char *value) {
 }
 
 int headless_parse_args(int *argc, char **argv) {
-    if (env_flag_on(getenv("KRUNKNATIVE_HEADLESS"))) g_headless = 1;
+    if (headless_env_flag_on(getenv("KRUNKNATIVE_HEADLESS"))) g_headless = 1;
 
     if (*argc < 1) return g_headless;
     int out = 1;

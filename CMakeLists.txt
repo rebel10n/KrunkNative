@@ -1195,6 +1195,12 @@ else ()
     target_include_directories(window_state_test PRIVATE client/include)
     add_test(NAME window_state_test COMMAND window_state_test)
 
+    # gl_driver_env_test: the NVIDIA V-Sync relaunch decision (client/src/gl_driver_env.c): NVIDIA, V-Sync off,
+    # no user __GL_SYNC_TO_VBLANK, never twice, never in a tool run (client/src/gl_driver_relaunch.c is the glue)
+    add_executable(gl_driver_env_test client/tests/gl_driver_env_test.c client/src/gl_driver_env.c)
+    target_include_directories(gl_driver_env_test PRIVATE client/include)
+    add_test(NAME gl_driver_env_test COMMAND gl_driver_env_test)
+
     # settings_defaults_test: v10.0.2's phone and desktop settings defaults (the isMobile values of
     # the Display / Game / Mobile rows, client/src/ui/ui_settings_defaults.c)
     add_executable(settings_defaults_test client/tests/settings_defaults_test.c client/src/ui/ui_settings_defaults.c)
