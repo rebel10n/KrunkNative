@@ -78,7 +78,6 @@ void hud_ui_hit(Client*, int kill);
 #endif
 
 #define HUD_UI_MIN_INTERVAL 0.0    // HUD sampled every frame like index.js gameLoop; writes stay change-gated
-#define HUD_UI_FPS_INTERVAL 0.1    // seconds between #ingameFPS updates (lastFpsDisplayUpdate >= 100)
 #define HUD_UI_LOADOUT_MAX 3       // Player.loadout slots mirrored into #weapDisplay
 // KrunkNative Object Manager: with extra loadout weapons every slot shows (a compact rack)
 #define HUD_UI_LOADOUT_ALL (NET_LOADOUT_MAX + 1 + PLAYER_EXTRA_WEAPONS_MAX)
@@ -163,7 +162,8 @@ typedef struct {
     HtmlElem el;
     double life_ms;          // > 0 while alive
     float x, y, z, dir;      // world position (drifts up and sideways), drift direction
-    int value, crit;
+    double value;            // Math.abs(dmg), after dmgType's ceil
+    int crit;
     int shown;
 } DamageNum;
 
@@ -199,6 +199,8 @@ typedef struct {
     double hit_start_ms;
     double hit_frame_ms, hit_frame_dt; // clock of the last hud_hit_step and the frame interval before it
     double hit_opacity, hit_spacing, hit_inc, hit_fade; // hitSet values captured by hud_ui_hit
+    int hit_custom;          // customHitmarker: the marker is the #hitmarker image (animateDiv), not knHitmarker
+    char hit_custom_src[RS_URL_MAX]; // the src last written to #hitmarker
     FeedRow feed[FEED_MAX];
     int feed_count;
     double feed_last_ms;     // previous hud_feed_step clock (< 0: none yet)
@@ -1233,10 +1235,11 @@ static int hud_health_segments(const Client *client, const Player *me) {
     return class && class->health_segments > 0 ? class->health_segments : 1;
 }
 
-// index.js gameLoop: currentFps = frames in the last 1000 ms (sliding window, counted by
-// client_render_fps), and ingameFPS is rewritten at most every 100 ms.
+// v10.js:221350 gameLoop: currentFps = frames in the last 1000 ms (sliding window, counted by
+// client_render_fps), and ingameFPS is rewritten once `now - last >= tmp.fpsRate` (ms, default 100).
 static void hud_sample_fps(HtmlHudState *hud, const double now, int *changed) {
-    if (hud->fps_window_start > 0.0 && now - hud->fps_window_start < HUD_UI_FPS_INTERVAL) return;
+    const double interval = client_render_settings()->fps_rate / 1000.0;
+    if (hud->fps_window_start > 0.0 && now - hud->fps_window_start < interval) return;
     const int fps = client_render_fps();
     if (!fps) return; // `currentFps &&`
     hud->fps_window_start = now;
@@ -1513,7 +1516,9 @@ static double hud_hit_now_ms(const Client *client) {
 
 static void hud_hide_hit(void) {
     if (g_hud_ui.hitmarker) html_dom_set_display(g_hud_ui.hitmarker, "none");
+    if (g_hud_ui.hit_custom) dom_display("hitmarker", "none");
     g_hud_ui.hit_active = 0;
+    g_hud_ui.hit_custom = 0;
 }
 
 // The overlay's frame clock (client_hud_html_tick, every frame): the last frame interval.
@@ -1524,10 +1529,30 @@ static void hud_hit_frame(const double now_ms) {
     ui->hit_frame_ms = now_ms;
 }
 
+// A custom hitmarker image (customHitmarker, v10.js:221015 / 205594): animateDiv(hitmarker, 350, 100,
+// 105), a 105 x 105 image centred on the screen for 350 ms whose opacity is life / 100 over its last
+// 100 ms (the overlay's divs loop, v10.js:160794; the DOM UI.animateDiv for non-PNG images is the same).
+#define HIT_CUSTOM_LIFE_MS 350.0
+#define HIT_CUSTOM_FADE_MS 100.0
+#define HIT_CUSTOM_SIZE "105px"
+
 // game-overlay showHit() per frame: spacing grows hitSet.inc per ms while the opacity
-// drops hitSet.fadeOut per ms.
+// drops hitSet.fadeOut per ms. hitSet.speed (hitmAnimS) only lowers the marker's own copy of
+// `inc`, which the spacing never reads (v10.js:160624: spacing += hitSet.inc * dt): no effect
+// in v10 either, so nothing reads hitmarker_anim_speed.
 static void hud_hit_step(const double now_ms) {
     HudUi *ui = &g_hud_ui;
+    if (ui->hit_active && ui->hit_custom) {
+        const double life = HIT_CUSTOM_LIFE_MS - (now_ms - ui->hit_start_ms);
+        if (life <= 0.0) {
+            hud_hide_hit();
+            return;
+        }
+        char text[24];
+        fmt_opacity(life <= HIT_CUSTOM_FADE_MS ? life / HIT_CUSTOM_FADE_MS : 1.0, text, sizeof(text));
+        dom_style("hitmarker", "opacity", text);
+        return;
+    }
     if (!ui->hit_active || !ui->hitmarker) return;
 
     const double t = now_ms - ui->hit_start_ms;
@@ -1554,6 +1579,25 @@ void hud_ui_hit(Client *client, const int kill) {
 
     // showHit(): hitSet (Display tab hitmarker settings, 134.js hitm*)
     const ClientRenderSettings *rs = client_render_settings();
+    const double now_ms = hud_hit_now_ms(client);
+    if (rs->custom_hitmarker[0]) { // v10.js:221015: hitmarker.custom / .image -> animateDiv, not showHit
+        if (ui->hitmarker) html_dom_set_display(ui->hitmarker, "none");
+        if (strcmp(ui->hit_custom_src, rs->custom_hitmarker)) {
+            snprintf(ui->hit_custom_src, sizeof(ui->hit_custom_src), "%s", rs->custom_hitmarker);
+            const HtmlElem img = html_dom_by_id("hitmarker");
+            if (img) html_dom_set_attr(img, "src", ui->hit_custom_src);
+        }
+        dom_style("hitmarker", "width", HIT_CUSTOM_SIZE);
+        dom_style("hitmarker", "height", HIT_CUSTOM_SIZE);
+        dom_style("hitmarker", "opacity", "1");
+        dom_display("hitmarker", "block");
+        ui->hit_active = 1;
+        ui->hit_custom = 1;
+        ui->hit_start_ms = now_ms - fmin(ui->hit_frame_dt, HIT_DELTA_MAX_MS); // advanced once before drawn
+        hud_hit_step(now_ms);
+        return;
+    }
+    if (ui->hit_custom) hud_hide_hit(); // the setting was cleared while one showed
     if (!rs->hitmarker) return;
 
     const HtmlElem hm = hud_ensure_hitmarker();
@@ -1579,7 +1623,6 @@ void hud_ui_hit(Client *client, const int kill) {
     // v10's overlay advances the marker before drawing it (spacing += inc * delta, opacity -=
     // fadeOut * delta, v10.js:160624, delta = the loop's clamped frame time, dltMx 33 ms), so the
     // first frame that shows a hit already has one frame of fade and spread: start one frame back.
-    const double now_ms = hud_hit_now_ms(client);
     ui->hit_active = 1;
     ui->hit_start_ms = now_ms - fmin(ui->hit_frame_dt, HIT_DELTA_MAX_MS);
     hud_hit_step(now_ms);
@@ -1745,7 +1788,7 @@ static void hud_nums_hide_all(void) {
 // game-overlay NJ2(x, y, z, value, crit): a damage number at the hit point that drifts
 // up 0.022 / ms and sideways 0.013 / ms for 1 s, drawn in dmgScale * 30 px GameFont,
 // critColor or dmgColor, with a 5px #2e2e2e stroke (text-shadow ring here).
-void hud_ui_damage_number(Client *client, const float x, const float y, const float z, const int value, const int crit) {
+void hud_ui_damage_number(Client *client, const float x, const float y, const float z, const double value, const int crit) {
     (void) client;
     HudUi *ui = &g_hud_ui;
     if (!client_render_settings()->show_dmg) return; // showDMG
@@ -1763,7 +1806,9 @@ void hud_ui_damage_number(Client *client, const float x, const float y, const fl
     num->y = y + 7.0f;
     num->z = z;
     num->dir = (float) (((double) rand() / RAND_MAX) * 2.0 * M_PI - M_PI); // randFloat(-PI, PI)
-    num->value = value;
+    // dmgType (v10.js:221015): 0 "Default" draws Math.ceil(dmg), 1 "Float" the exact dmg.round(1)
+    // (the server's NET_EXT_KN_HIT_DAMAGE; without it the HIT's whole number); dmgVal keeps Math.abs
+    num->value = fabs(client_render_settings()->dmg_type == 0 ? ceil(value) : value);
     num->crit = crit;
     if (num->el && num->shown) html_dom_set_display(num->el, "none");
     num->shown = 0;
@@ -1832,7 +1877,7 @@ static void hud_nums_step(const Client *client, const double now_ms) {
             // dmgColor is a switch+colour row (val COLORS.damage #DE292F); ClientRenderSettings
             // keeps only the switch, so on = #DE292F, off = white. Crits use critColor.
             html_dom_set_style(el, "color", num->crit ? rs->crit_color : rs->dmg_color ? "#DE292F" : "#ffffff");
-            snprintf(text, sizeof(text), "%d", num->value);
+            fmt_number(num->value, text, sizeof(text)); // String(val): "24", "23.4"
             html_dom_set_text(el, text);
             html_dom_set_display(el, "block");
             num->shown = 1;

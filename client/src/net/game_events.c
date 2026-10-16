@@ -39,6 +39,7 @@
 #include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
 #include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <net_ext.h> // NET_PACKET_EXT (254)
+#include <render_settings.h> // endMessage, dmgType
 #include <nettspend.h> // Nettspend: the laced post-effect, the Money Spread's bills
 #include <drank.h>     // KrunkNative Drank: drank_apply_laced (the shared laced timer)
 #include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
@@ -87,6 +88,19 @@ void client_chat_send(Client *client, const char *text) {
         return;
     }
     client_net_send(client, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
+}
+
+// NET_EXT_KN_HIT_DAMAGE: the exact damage of the NET_PACKET_HIT right behind it (net_ext.h)
+static NetHitDamagePacket g_hit_damage;
+static int g_hit_damage_valid;
+
+// The damage number's value: the exact one when the server sent it for this hit, else the HIT's.
+static double events_hit_damage(const NetHitPacket *hit) {
+    // the HIT's whole number is Math.round (our servers) or Math.ceil (official lobbies) of the exact one
+    const int match = g_hit_damage_valid && g_hit_damage.target_uid == hit->target_uid && g_hit_damage.ai == hit->ai &&
+                      fabs(g_hit_damage.damage_tenths / 10.0 - hit->damage) < 1.0;
+    g_hit_damage_valid = 0;
+    return match ? g_hit_damage.damage_tenths / 10.0 : (double) hit->damage;
 }
 
 static Player *events_find_player(Client *client, const int uid) {
@@ -322,7 +336,20 @@ static void events_show_end(Client *client) {
 // menu / death card ("CLICK TO PLAY" still enters: the server spawns it and sends a late
 // "end", which then shows the title, the slow motion and the results). Until then only the
 // "Next Round in" countdown is known (net_end_seconds; net_end_result stays INT32_MIN).
+// endMessage (v10.js:219680, the end-game handler): the chat line is sent once per match (the flag
+// clears on startGame) unless this client is a K.P.D officer on a case (kpdData), whoever won and
+// whether or not we were playing.
+static int g_end_message_sent, g_kpd_case;
+
+static void events_end_message(Client *client) {
+    const char *message = client_render_settings()->end_message;
+    if (!message[0] || g_kpd_case || g_end_message_sent) return;
+    g_end_message_sent = 1;
+    client_chat_send(client, message);
+}
+
 static void events_end(Client *client, const NetEndPacket *packet) {
+    events_end_message(client);
     client->net_end_seconds = packet->next_round;
     client->net_round_seconds = 0;
     client->spawn_requested = 0;
@@ -766,14 +793,17 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             EVENTS_READ(NetHitPacket, hit);
             sound_events_hitmarker();     // gF: hit_0
             hud_ui_hit(client, hit.kill); // gF -> aV.showHit(isKill)
+            const double damage = events_hit_damage(&hit);
 #ifdef HUD_UI_HAVE_DAMAGE_NUMBERS
             if (hit.ai) { // doDamage(.., isAI): Game.AI.findBySid -> dmgVal(ai.x, ai.y, ai.z)
                 const GameAI *ai = game_ai_find(&client->game, hit.target_uid);
-                if (ai && hit.damage) hud_ui_damage_number(client, ai->position.x, ai->position.y, ai->position.z, hit.damage, hit.crit);
+                if (ai && hit.damage) hud_ui_damage_number(client, ai->position.x, ai->position.y, ai->position.z, damage, hit.crit);
                 return 1;
             }
             const Player *target = events_find_player(client, hit.target_uid);
-            if (target && hit.damage) hud_ui_damage_number(client, target->position.x, target->position.y, target->position.z, hit.damage, hit.crit); // aV.NJ2
+            if (target && hit.damage) hud_ui_damage_number(client, target->position.x, target->position.y, target->position.z, damage, hit.crit); // aV.NJ2
+#else
+            (void) damage;
 #endif
             return 1;
         }
@@ -1070,7 +1100,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
             else if (subtype == NET_EXT_KN_INPUTS_DROPPED) client_recon_drop_pending(client); // official "f" (krunker_link.c)
             else if (subtype == NET_EXT_GAME_ANNOUNCEMENT) v10_announce_on_packet(body, body_length); // the banner (v10_notify.c)
-            else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
+            else if (subtype == NET_EXT_KN_HIT_DAMAGE && body_length >= sizeof(NetHitDamagePacket)) { // dmgType "Float"
+                memcpy(&g_hit_damage, body, sizeof(g_hit_damage));
+                g_hit_damage_valid = 1;
+            } else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect
                 if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
@@ -1081,6 +1114,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             } else if (subtype == NET_EXT_KPD_DATA && body_length >= sizeof(NetKpdDataPacket)) { // startGame kpdData (officers)
                 NetKpdDataPacket data;
                 memcpy(&data, body, sizeof(data));
+                g_kpd_case = data.sus >= 0; // sus -1: no case
                 hud_votekick_on_kpd_data(client, &data);
             } else if (subtype == NET_EXT_KPD_RESET) { // "kpdf": the verdict is open again
                 hud_votekick_on_kpd_reset(client);
@@ -1131,6 +1165,8 @@ void client_game_events_reset(Client *client) {
     client->net_round_seconds = -1;
     client->net_end_seconds = -1;
     client->net_end_result = INT32_MIN;
+    g_end_message_sent = 0; // startGame: the next match end sends endMessage again
+    g_kpd_case = 0;
     // "init" -> CONTROLS.reset(): keys = {}, didPressed = {}. A key held through the end
     // screen does not move or jump the next round's first frames; it needs a new press
     // (GLFW_REPEAT never re-presses, ui_controls.c).

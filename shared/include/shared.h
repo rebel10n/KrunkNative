@@ -2684,6 +2684,8 @@ typedef struct {
     uint8_t kill;
     uint8_t ai;            // target_uid is an AI sid (Krunker "4" fifth value isAI)
 } NetHitPacket;
+// NET_PACKET_HIT to uid, preceded by NET_EXT_KN_HIT_DAMAGE when `damage` (the exact value) has a fraction
+void game_send_hit(Game*, int uid, const NetHitPacket *hit, float damage);
 
 typedef struct {
     int32_t uid;

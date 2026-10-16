@@ -44,6 +44,10 @@
 //   100 nethit 0 | nethit 1      a NET_PACKET_HIT from the server (no target, no damage; 1 = the kill
 //                                variant) through the client's event handler: the hit sound and
 //                                marker, as when your shot lands (hitmarker tests, alive or dead)
+//   100 damage 23.4 0            the server's hit on the first other active player for 23.4 (crit 0 / 1):
+//                                NET_EXT_KN_HIT_DAMAGE (when it has a fraction) + NET_PACKET_HIT through the
+//                                client's event handler, with that player put 20 units ahead of the camera
+//                                first (client copy only) so the damage number shows (dmgType tests)
 //   100 resize 800 600           the window's size (glfwSetWindowSize; headless: the framebuffer-size
 //                                event follows at the frame's end, like a window manager's resize)
 //   100 om add 28 | om drop 20   an Object Manager Weapons-tab click without the window: left (add the
@@ -190,6 +194,7 @@
 #include <map_post.h>     // `builds`, `placewatch`
 #include <gamepad.h>      // `gpad`
 #include <ai.h>           // `world`: the AI list
+#include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -1070,6 +1075,27 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "nethit")) {
         const NetHitPacket hit = {.target_uid = -1, .kill = (uint8_t) (e->v[0] != 0.0f)};
         client_handle_game_event(client, NET_PACKET_HIT, &hit, (uint16_t) sizeof(hit));
+    } else if (!strcmp(e->cmd, "damage")) {
+        Player *target = NULL;
+        for (size_t i = 0; client->me && !target && i < client->game.player_count; i++) {
+            Player *p = client->game.players[i];
+            if (p && p != client->me && p->active) target = p;
+        }
+        if (target) {
+            const float *m = client->camera.world_inverse_matrix; // row 2: the camera's back axis
+            target->position = (vec3) {client->camera.position.x - m[8] * 20.0f, client->camera.position.y - 7.0f - m[9] * 20.0f,
+                                       client->camera.position.z - m[10] * 20.0f};
+            const NetHitPacket hit = {.target_uid = target->uid, .damage = (int32_t) lroundf(e->v[0]), .crit = (uint8_t) (e->v[1] != 0.0f)};
+            const int32_t tenths = (int32_t) lroundf(e->v[0] * 10.0f);
+            if (tenths % 10) {
+                const NetHitDamagePacket exact = {.target_uid = hit.target_uid, .damage_tenths = tenths};
+                uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(exact)];
+                const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_HIT_DAMAGE, &exact, sizeof(exact));
+                if (n) client_handle_game_event(client, NET_PACKET_EXT, ext, n);
+            }
+            client_handle_game_event(client, NET_PACKET_HIT, &hit, (uint16_t) sizeof(hit));
+        }
+        fprintf(stderr, "[input_script] damage t=%.0f value=%.1f target=%d\n", g_script.time, e->v[0], target ? target->uid : -1);
     } else if (!strcmp(e->cmd, "killed")) {
         // the KILL packet of a death by the first other active player (a rifle kill, no weapon): the
         // death cam with its killer (client/tests/death_cam_e2e.py); the kill feed and the card follow

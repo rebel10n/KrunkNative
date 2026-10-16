@@ -51,10 +51,10 @@ static ClientRenderSettings g_rs = {
     .dynamic_hp = 1, .show_hit_ind = 1, .hit_color = "#FF3F3F", .show_dmg = 1, .dmg_color = 1,
     .crit_color = "#FFD542", .dmg_scale = 1.0f,
     .show_kills = 1, .show_kill_c = 0, .show_deaths = 0, .show_score = 0, .show_streak = 0,
-    .show_ping = 1, .show_net_stat = 0, .show_fps = 0,
+    .show_ping = 1, .show_net_stat = 0, .show_fps = 0, .fps_rate = 100.0f, .dmg_type = 1,
     .show_speed = 0, .speed_off_x = 5.0f, .speed_off_y = 5.4f, .speed_scale = 2.4f, .speed_opacity = 1.0f,
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
-    .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
+    .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_scale = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
     .kpd_vision = 1, .kpd_vision_col = "#00ffff", // v10 settings kpdVision (val true) / kpdVisionCol
     // KrunkNative: player chat is off by default (v10's showMessages defaults on); see apply_show_messages
@@ -173,6 +173,18 @@ static int ui_file_exists(const char *relative) {
     return f != NULL;
 }
 #endif
+
+int client_render_ui_file(const char *relative, char *full, const size_t n) {
+    if (!relative || !relative[0] || strstr(relative, "://")) return 0; // remote (web only): not a GL texture
+#ifndef __EMSCRIPTEN__
+    const char *override = getenv("KRUNKNATIVE_UI_DIR");
+    if (override && *override) snprintf(full, n, "%s/%s", override, relative);
+    else snprintf(full, n, "%s%s", ui_default_path(), relative);
+#else
+    snprintf(full, n, "%s", relative); // dist/web is the ui/ tree: page-relative
+#endif
+    return 1;
+}
 
 // Value of an image setting as the DOM / HUD should use it ("" = default image).
 static void localize_image_url(const char *value, char *out, const size_t n) {
@@ -394,6 +406,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showHitInd", show_hit_ind, NULL),
     RS_S("hitColor", hit_color, NULL),
     RS_B("showDMG", show_dmg, NULL),
+    RS_I("dmgType", dmg_type, NULL),                    // hud_ui_damage_number: 0 ceil, 1 the exact value
     RS_B("dmgColor", dmg_color, NULL),
     RS_S("critColor", crit_color, NULL),
     RS_SHARED_F("dmgScale", dmg_scale, NULL),
@@ -406,6 +419,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showPing", show_ping, mark_dom),              // #pingDisplay
     RS_B("showNetStat", show_net_stat, mark_dom),       // #ingressDisplay/#egressDisplay
     RS_SHARED_B("showFPS", show_fps, mark_dom),         // #fpsDisplay (ui_settings.c) + #menuFPSDisplay
+    RS_F("fpsRate", fps_rate, NULL),                    // the readouts' refresh (hud_ui.c, below; v10.js:221350)
     RS_B("showSpeed", show_speed, NULL),
     RS_F("speedOffX", speed_off_x, NULL),
     RS_F("speedOffY", speed_off_y, NULL),
@@ -416,6 +430,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showMedals", show_medals, NULL),
     RS_I("hideNames", hide_names, NULL),
     RS_F("nametagOpac", nametag_opacity, NULL),
+    RS_F("nametagScale", nametag_scale, NULL),          // nametags.c: player tags' scale
     RS_I("nametagStyle", nametag_style, NULL),
     RS_B("healthNum", health_num, NULL),
     RS_S("healthColT", health_col_team, NULL),
@@ -453,7 +468,7 @@ static const RsEntry RS_TABLE[] = {
     RS_F("hitmAnimD", hitmarker_anim_size, NULL),
     RS_F("hitmAnimS", hitmarker_anim_speed, NULL),
     RS_F("hitmFad", hitmarker_fade, NULL),
-    RS_U("customHitmarker", custom_hitmarker, NULL),
+    RS_U("customHitmarker", custom_hitmarker, NULL),    // hud_ui_hit: #hitmarker img (animateDiv 350, 100, 105)
     // ---- Game tab
     RS_B("streamMode", stream_mode, NULL),
     RS_B("anonMode", anon_mode, NULL),
@@ -477,7 +492,7 @@ static const RsEntry RS_TABLE[] = {
     RS_U("customADSDot", custom_ads_dot, mark_dom),     // updateAimDot(-2, v): #aimDot src
     RS_F("reticleWidth", reticle_width, mark_dom),      // #aimDot width v * 10 px
     RS_F("reticleHeight", reticle_height, mark_dom),    // #aimDot height v * 10 px
-    RS_S("endMessage", end_message, NULL),              // set(){}
+    RS_S("endMessage", end_message, NULL),              // game_events.c: chat line once per match end
     RS_U("customAmmo", custom_ammo, mark_dom),          // #ammoIcon src
     RS_U("customKills", custom_kills, mark_dom),        // #killsIcon src
     RS_U("customDeaths", custom_deaths, mark_dom),      // #deathsIcon src
@@ -485,7 +500,7 @@ static const RsEntry RS_TABLE[] = {
     RS_U("customTimer", custom_timer, mark_dom),        // #timerIcon src
     RS_U("customGameOverlay", custom_game_overlay, mark_dom), // #overlay background-image
     RS_B("useDamageOverlay", use_damage_overlay, NULL),
-    RS_U("customDamage", custom_damage, NULL),
+    RS_U("customDamage", custom_damage, NULL),          // vfx.c: the blood overlay image
     // ---- General tab
     RS_F("lagComp", lag_comp, NULL),
     RS_B("netRerouting", net_rerouting, NULL),
@@ -1124,8 +1139,8 @@ void client_render_settings_tick(Client *client) {
         g_dom_dirty = 0;
     }
 
-    // showFPS: the menu readout (index.js gP: menuFPS while #menuHolder shows, every 100 ms)
-    if (g_rs.show_fps && now - g_last_fps_text_ms >= 100.0 && html_ui_is_menu_open()) {
+    // showFPS: the menu readout (v10.js:221350: menuFPS while #menuHolder shows, every fpsRate ms)
+    if (g_rs.show_fps && now - g_last_fps_text_ms >= g_rs.fps_rate && html_ui_is_menu_open()) {
         g_last_fps_text_ms = now;
         const HtmlElem fps = html_dom_by_id("menuFPS");
         if (fps) {

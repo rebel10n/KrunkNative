@@ -615,6 +615,10 @@ ruleset-e2e: build ## Krunker v10.0.2 is the only version: server_bin and the of
 v10-settings-e2e: build ## v10 Settings: one setting per tab applied + persisted, search, presets, export, keybind rebinding, sandbox bind, reset (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/v10_settings_e2e.py $(DEBUG_DIR)
 
+.PHONY: settings-wiring-e2e
+settings-wiring-e2e: build ## v10 settings that used to do nothing: set each one, observe its effect in game (fpsRate, nametagScale, dmgType, custom hitmarker / damage, endMessage, ...; headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/settings_wiring_e2e.py $(DEBUG_DIR)
+
 .PHONY: pickup-chat-e2e
 pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G prints "You found [0.01] Junk" to the finder only, a weapon pickup plays pick_0
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)

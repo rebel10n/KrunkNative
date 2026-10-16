@@ -75,6 +75,8 @@ typedef struct {
     char crit_color[RS_COLOR_MAX];           // critColor
     float dmg_scale;         // dmgScale (HUD: font = v * 30)
     int show_kills, show_kill_c, show_deaths, show_score, show_streak, show_ping, show_net_stat, show_fps; // DOM toggles
+    float fps_rate;          // fpsRate: ms between #ingameFPS / #menuFPS rewrites (v10.js:221350, default 100)
+    int dmg_type;            // dmgType: 0 "Default" Math.ceil(dmg), 1 "Float" the exact dmg.round(1) (v10.js:221015)
     int show_kd;             // showKD (v7.1.4): #kdCount
     int show_speed;          // showSpeed: speedometer (HUD)
     float speed_off_x, speed_off_y, speed_scale, speed_opacity; // speedOffX/Y, speedScale, speedOpacity
@@ -82,6 +84,7 @@ typedef struct {
     int show_medals;         // showMedals
     int hide_names;          // hideNames: 0 everyone, 1 team, 2 enemy, 3 off (nametags)
     float nametag_opacity;   // nametagOpac
+    float nametag_scale;     // nametagScale: player tags' ctx.scale *= v (v10.js:159962)
     int nametag_style;       // nametagStyle 0..3
     int health_num;          // healthNum
     char health_col_team[RS_COLOR_MAX], health_col_enemy[RS_COLOR_MAX]; // healthColT/E
@@ -101,7 +104,7 @@ typedef struct {
     char hitmarker_color[RS_COLOR_MAX], hitmarker_kill_color[RS_COLOR_MAX]; // hitmCol, hitmKCol
     float hitmarker_opacity, hitmarker_length, hitmarker_thickness, hitmarker_spacing; // hitOpac, hitmLen, hitmThick, hitmSpac
     float hitmarker_anim_size, hitmarker_anim_speed, hitmarker_fade; // hitmAnimD, hitmAnimS, hitmFad
-    char custom_hitmarker[RS_URL_MAX];       // customHitmarker
+    char custom_hitmarker[RS_URL_MAX];       // customHitmarker: #hitmarker img instead of the drawn marker (hud_ui.c)
 
     // ---- Game tab (cat "gameprivacy"/"viewmodel"/"mods")
     int stream_mode, anon_mode;
@@ -113,11 +116,11 @@ typedef struct {
     int scope_borders;       // scopeBorders: .black scope bars
     char custom_scope[RS_URL_MAX], custom_ads_dot[RS_URL_MAX];
     float reticle_width, reticle_height; // reticleWidth/Height: #aimDot size (x10 px)
-    char end_message[RS_URL_MAX];
+    char end_message[RS_URL_MAX];            // endMessage: sent to the chat once when the match ends (game_events.c)
     char custom_ammo[RS_URL_MAX], custom_kills[RS_URL_MAX], custom_deaths[RS_URL_MAX];
     char custom_streak[RS_URL_MAX], custom_timer[RS_URL_MAX], custom_game_overlay[RS_URL_MAX];
     int use_damage_overlay;  // useDamageOverlay (VFX)
-    char custom_damage[RS_URL_MAX];
+    char custom_damage[RS_URL_MAX];          // customDamage: the blood overlay's image (vfx.c)
 
     // ---- General tab (cat "local"/"network"/"experimental")
     float lag_comp;          // lagComp slider (settings.tmp.lagCompensation, 0..1): ENT ent[11], the server's player.lagComp
@@ -129,6 +132,10 @@ typedef struct {
 } ClientRenderSettings;
 
 const ClientRenderSettings *client_render_settings(void);
+
+// A localized image setting's path (custom_damage, ...: ui/-relative) as a file the GL loaders can open
+// (the ui/ directory or KRUNKNATIVE_UI_DIR). 0 for "" or a remote URL (the web keeps those for the DOM).
+int client_render_ui_file(const char *relative, char *full, size_t n);
 
 // Apply one store value (string form, as client_apply_setting gets it). Returns 1 when
 // the key is owned here, 0 to let the caller handle it (unknown or shared keys).

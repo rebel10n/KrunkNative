@@ -346,7 +346,7 @@ void hud_ui_damage_from(Client*, float x, float z);
 // Damage number (game-overlay NJ2 / dmgNums) at the world hit point: `value` damage dealt,
 // `crit` = headshot (critColor). Drifts up for 1 s; showDMG/dmgColor/critColor/dmgScale apply.
 #define HUD_UI_HAVE_DAMAGE_NUMBERS 1
-void hud_ui_damage_number(Client*, float x, float y, float z, int value, int crit);
+void hud_ui_damage_number(Client*, float x, float y, float z, double value, int crit); // value: the exact damage (dmgType)
 // client_hud_html_tick reads the live match values itself: timer = Client.net_round_seconds
 // (>= 0, else the configured match length), score = Player.score, ping = Client.net_ping_ms,
 // scoreboard = Game.players sorted by score (Player.name). Scenario overrides still win.

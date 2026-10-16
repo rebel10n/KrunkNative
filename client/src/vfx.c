@@ -475,6 +475,21 @@ static unsigned int vfx_texture(const int index) {
     return vfx.textures[index];
 }
 
+// customDamage (v10.js:207420): the image replaces img/blood.png on the blood overlay (bloodImage for
+// a PNG / JPG, #bloodDisplay's src otherwise: one full-screen image either way). 0 = the default.
+static unsigned int vfx_custom_damage_texture(void) {
+    static char loaded[RS_URL_MAX];
+    static unsigned int texture;
+    const char *setting = client_render_settings()->custom_damage;
+    if (strcmp(loaded, setting)) {
+        snprintf(loaded, sizeof(loaded), "%s", setting);
+        char full[1024];
+        texture = client_render_ui_file(setting, full, sizeof(full)) ? load_texture(full) : 0;
+        if (setting[0]) printf("[vfx] customDamage %s -> %s\n", setting, texture ? "loaded" : "failed");
+    }
+    return texture;
+}
+
 static int setting_flag(const char *key) {
     return !ui_setting_is_false(key);
 }
@@ -2129,7 +2144,10 @@ void vfx_render_screen(Client *client) {
     if (vfx.settings.damage_overlay && me->max_health > 0 && !html_ui_is_menu_open()) {
         const float opacity = 1.0f - (me->health / (float) me->max_health) / 0.8f;
 
-        if (opacity > 0.0f && batch_state(sprite_state(VFX_BLEND_NORMAL, VFX_TEX_BLOOD, 0))) {
+        VfxDrawState blood = sprite_state(VFX_BLEND_NORMAL, VFX_TEX_BLOOD, 0);
+        const unsigned int custom = vfx_custom_damage_texture();
+        if (custom) blood.texture = custom, blood.use_texture = 1;
+        if (opacity > 0.0f && batch_state(blood)) {
             batch_screen_rect(-1.0f, -1.0f, 1.0f, 1.0f, (vec4) {1.0f, 1.0f, 1.0f, fminf(opacity, 1.0f)});
         }
     }

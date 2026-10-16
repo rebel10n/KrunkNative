@@ -1,6 +1,7 @@
 #include <object_manager.h>
 #include <piss.h> // KrunkNative Piss puddles
 #include <drank.h> // KrunkNative Drank: laced timers
+#include <net_ext.h> // game_send_hit: NET_EXT_KN_HIT_DAMAGE
 #include <shared.h>
 #include <ruleset.h>
 #include <ai.h>
@@ -297,6 +298,17 @@ void game_player_changing(const Game *game, Player *player, const int done) {
 
 void game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     if (game->hooks.send) game->hooks.send(game, uid, type, payload, length);
+}
+
+void game_send_hit(Game *game, const int uid, const NetHitPacket *hit, const float damage) {
+    const int32_t tenths = (int32_t) lroundf(damage * 10.0f);
+    if (hit->damage && tenths % 10) { // the fraction the whole-number HIT loses (dmgType "Float", net_ext.h)
+        const NetHitDamagePacket body = {.target_uid = hit->target_uid, .damage_tenths = tenths, .ai = hit->ai};
+        uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(body)];
+        const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_HIT_DAMAGE, &body, sizeof(body));
+        if (n) game_send(game, uid, NET_PACKET_EXT, buffer, n);
+    }
+    game_send(game, uid, NET_PACKET_HIT, hit, sizeof(*hit));
 }
 
 // ------------------------------------------------------------------ WP-E part 2c: progression

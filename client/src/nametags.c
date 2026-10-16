@@ -514,7 +514,8 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
     nt_style(tag->root, "left", v, &tag->left);
     snprintf(v, sizeof(v), "%.4f%%", fy * 100.0);
     nt_style(tag->root, "top", v, &tag->top);
-    snprintf(v, sizeof(v), "scale(%.4f)", scale);
+    // overlay.render: `scale *= nametagScale` before ctx.scale (v10.js:159962; player tags only)
+    snprintf(v, sizeof(v), "scale(%.4f)", scale * rs->nametag_scale);
     nt_style(tag->root, "transform", v, &tag->transform);
     snprintf(v, sizeof(v), "%.3f", opacity);
     if (strcmp(tag->opacity.value, v)) {

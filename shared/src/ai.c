@@ -1022,7 +1022,7 @@ static void ai_send_hit(Game *game, const GameAI *ai, const Player *dealer, cons
         .kill = (uint8_t) !ai->active,
         .ai = 1,
     };
-    game_send(game, dealer->uid, NET_PACKET_HIT, &hit, sizeof(hit)); // game.showHit(player, ai, dmg, crit, true)
+    game_send_hit(game, dealer->uid, &hit, damage); // game.showHit(player, ai, dmg, crit, true)
 }
 
 void game_ai_remove(Game *game, GameAI *ai) { // AI.removeFully

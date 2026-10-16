@@ -11,6 +11,7 @@
 #include <ruleset.h>
 #include <hitboxes.h>
 #include <prefabs.h>
+#include <net_ext.h>
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
@@ -38,8 +39,20 @@ static int g_nuke_kills;      // KILL packets flagged as Nuke kills (stk 0)
 static int g_nuke_hit_uid = -1; // the uid that got the target-less "4"
 static int g_nuke_medal;      // the "Nuke" medal's score
 
+// test_hit_damage: the packets game_send_hit sends, in order (EXT subtypes as 1000 + subtype)
+static int g_hit_seq[4], g_hit_seq_n, g_hit_tenths;
+
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
+    if (g_hit_seq_n >= 0 && g_hit_seq_n < 4 && (type == NET_PACKET_HIT || type == NET_PACKET_EXT)) {
+        uint16_t subtype = 0, body_length = 0;
+        const uint8_t *body = NULL;
+        if (type == NET_PACKET_EXT && net_ext_unpack(payload, length, &subtype, &body, &body_length) &&
+            subtype == NET_EXT_KN_HIT_DAMAGE && body_length == sizeof(NetHitDamagePacket)) {
+            g_hit_tenths = ((const NetHitDamagePacket *) body)->damage_tenths;
+        }
+        g_hit_seq[g_hit_seq_n++] = type == NET_PACKET_EXT ? 1000 + subtype : type;
+    }
     if (type == NET_PACKET_NUKE && length == sizeof(NetNukePacket)) {
         const int state = ((const NetNukePacket *) payload)->state;
         if (state == 0 || state == 1) g_nuke_states[state]++;
@@ -58,6 +71,21 @@ static void test_send(Game *game, const int uid, const int type, const void *pay
     if (type == NET_PACKET_HIT && length == sizeof(NetHitPacket) && ((const NetHitPacket *) payload)->target_uid == g_watch_uid) {
         g_last_hit_damage = ((const NetHitPacket *) payload)->damage;
     }
+}
+
+// dmgType "Float": a hit with a fraction sends its exact damage (NET_EXT_KN_HIT_DAMAGE) right before the
+// whole-number HIT; a whole one sends the HIT alone.
+static void test_hit_damage(Game *game) {
+    const NetHitPacket hit = {.target_uid = 7, .damage = 23};
+    g_hit_seq_n = 0;
+    game_send_hit(game, 3, &hit, 23.4f);
+    CHECK(g_hit_seq_n == 2 && g_hit_seq[0] == 1000 + NET_EXT_KN_HIT_DAMAGE && g_hit_seq[1] == NET_PACKET_HIT && g_hit_tenths == 234,
+          "23.4 damage: EXT 234 tenths then the HIT (%d packets, tenths %d)", g_hit_seq_n, g_hit_tenths);
+    const NetHitPacket whole = {.target_uid = 7, .damage = 25};
+    g_hit_seq_n = 0;
+    game_send_hit(game, 3, &whole, 25.0f);
+    CHECK(g_hit_seq_n == 1 && g_hit_seq[0] == NET_PACKET_HIT, "25 damage: the HIT alone (%d packets)", g_hit_seq_n);
+    g_hit_seq_n = -1;
 }
 
 static Player *add_player(Game *game, const int uid, const int class_index) {
@@ -851,6 +879,7 @@ int main(void) {
     // the padded AABB (hitBoxPad, head band, leg line): v10 traces it in Prop Hunt only
     game.mode->config.prop = 1;
     CHECK(!hitboxes_active(&game), "Prop Hunt keeps the padded AABB");
+    test_hit_damage(&game);
     test_hitbox(&game, shooter, target);
     test_zones(&game, shooter, target);
     game.mode->config.prop = 0;

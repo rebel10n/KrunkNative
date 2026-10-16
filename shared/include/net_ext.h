@@ -95,6 +95,9 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
     // 0x8040 official combat effects (client-local, like 0x8030)
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
+
+    // 0x8100..0x810F reserved for settings-wiring (the v10 settings package; coordinator, 2026-10-15)
+    NET_EXT_KN_HIT_DAMAGE = 0x8100, // S -> C NetHitDamagePacket, right before a NET_PACKET_HIT whose damage has a fraction
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -151,6 +154,19 @@ typedef struct {
     int32_t uid;          // the laced player (Player.uid / NetInitPacket client id)
     uint32_t duration_ms; // the spell from now (DRANK: WeaponStream.laced_ms, 8000)
 } NetLacedPacket;
+#pragma pack(pop)
+
+// NET_EXT_KN_HIT_DAMAGE (S -> C, to the dealer): the exact damage of the NET_PACKET_HIT that follows
+// (NetHitPacket.damage is whole: Math.round of changeHealth's dmg.round(1)). v10's DO_DAMAGE "4" carries
+// the float, and its dmgType setting draws it as is ("Float", the default) or Math.ceil'd ("Default",
+// v10.js:221015). Sent only when the damage has a fraction, so a peer without it shows the whole number.
+// game_send_hit (shared/src/game.c) sends the pair; krunker_link.c makes it from "4" for official lobbies.
+#pragma pack(push, 1)
+typedef struct {
+    int32_t target_uid;    // NetHitPacket.target_uid of the HIT it belongs to
+    int32_t damage_tenths; // the damage x 10 (dmg.round(1) * 10)
+    uint8_t ai;            // NetHitPacket.ai
+} NetHitDamagePacket;
 #pragma pack(pop)
 
 // NET_EXT_PLAYER_SPEED_BOOST (S -> C, to the player): Krunker "spb" [speedBoost, silent]

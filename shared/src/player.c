@@ -2733,7 +2733,7 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
             .crit = (uint8_t) !!crit,
             .kill = (uint8_t) (victim->health - damage <= 0.0f),
         };
-        game_send(game, dealer->uid, NET_PACKET_HIT, &hit, sizeof(hit));
+        game_send_hit(game, dealer->uid, &hit, damage);
     }
 
     if (damage > 0.0f) victim->hit_timer = GAME_REGEN_DELAY;
