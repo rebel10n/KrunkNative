@@ -40,6 +40,10 @@ int  client_settings_hs_sound_always(void);              // "Always Play HS Soun
 // "Show Game Time" (Client > Game, default off): the top-right tile of the time played on this device (hud_ui.c).
 // KrunkNative only: v10 has no such setting (doc/v10/ notes the difference).
 int  client_settings_game_time(void);
+// The Notifications switch (v10_menu.c): desktop notifications for the notification centre's items
+// (desktop_notify.c). knClient "desktopNotify", default on; the setter also updates the notifier.
+int  client_settings_desktop_notify(void);
+void client_settings_set_desktop_notify(int on);
 // "Auto-restart for updates" (default on, game_reload.h): the client restarts itself (the web
 // page reloads) when the server stops for an update or a newer client is ready to run.
 int  client_settings_auto_restart(void);

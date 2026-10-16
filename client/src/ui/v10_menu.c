@@ -43,6 +43,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <client_settings.h>
+#include <desktop_notify.h>
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
@@ -941,8 +942,42 @@ static void more_krunker(void) {
     free(html);
 }
 
-// The Notifications toggle (webpush-container, _52289): expanded it says what v10 says where the
-// Push API is missing ("Push notifications are not supported in your browser.").
+// The Notifications toggle (webpush-container, _52289). Expanded, it shows the desktop notifications
+// switch (client settings desktopNotify, default on; desktop_notify.c posts the centre's friend
+// requests, messages, Wild Offers and surveys) and what the switch can do on this system. Each
+// expand writes the content again, so it always shows the stored state. The web build keeps v10's
+// "not supported" line: its Web Push subscribe is the next step (ui/sw.js).
+static void notifications_render(const HtmlElem content) {
+#ifdef __EMSCRIPTEN__
+    (void) content;
+    html_dom_set_html(content, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
+                               "Push notifications are not supported in your browser.</p></div>");
+#else
+    const int on = client_settings_desktop_notify();
+    char caption[256];
+    desktop_notify_caption(on, desktop_notify_available(), caption, sizeof(caption));
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"webpush-message svelte-5kyah8\"><label class=\"switch\" style=\"margin-right:10px\">"
+                   "<input type=\"checkbox\" id=\"knDesktopNotify\" onclick=\"knV10DesktopNotify()\"");
+    if (on) sb_append(&sb, " checked=\"\"");
+    sb_append(&sb, "><span class=\"slider\"><span class=\"grooves\"></span></span></label><p class=\"svelte-5kyah8\">");
+    sb_append_esc(&sb, caption);
+    sb_append(&sb, "</p></div>");
+    char *html = sb_finish(&sb);
+    html_dom_set_html(content, html);
+    free(html);
+#endif
+}
+
+static HtmlElem notifications_content(const HtmlElem box) {
+    HtmlElem content = html_dom_query(box, ".webpush-content");
+    if (!content) {
+        html_dom_insert_html(box, HTML_INSERT_BEFORE_END, "<div class=\"webpush-content svelte-5kyah8\"></div>");
+        content = html_dom_query(box, ".webpush-content");
+    }
+    return content;
+}
+
 static void notifications_toggle(void) {
     HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
     if (!box) return;
@@ -950,14 +985,17 @@ static void notifications_toggle(void) {
     html_dom_set_class(box, "not-expanded", !V.notif_open);
     HtmlElem toggle = html_dom_query(box, ".webpush-details-toggle");
     if (toggle) html_dom_set_text(toggle, V.notif_open ? "\xE2\x96\xBC" : "\xE2\x96\xB6"); // ▼ / ▶
-    HtmlElem content = html_dom_query(box, ".webpush-content");
-    if (!content) {
-        html_dom_insert_html(box, HTML_INSERT_BEFORE_END,
-            "<div class=\"webpush-content svelte-5kyah8\"><div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
-            "Push notifications are not supported in your browser.</p></div></div>");
-        content = html_dom_query(box, ".webpush-content");
-    }
+    HtmlElem content = notifications_content(box);
+    if (V.notif_open) notifications_render(content);
     set_display(content, V.notif_open ? "" : "none");
+}
+
+// The switch (knV10DesktopNotify): flips the stored desktopNotify and writes the caption again.
+static void notifications_switch(void) {
+    client_settings_set_desktop_notify(!client_settings_desktop_notify());
+    HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
+    HtmlElem content = box ? notifications_content(box) : 0;
+    if (content) notifications_render(content);
 }
 
 // backToOrigin(false, {exclude: ?game}): Quick Match. A new matchmaker seek that leaves this lobby
@@ -985,6 +1023,10 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     }
     if (!strcmp(name, "knV10Notifications")) {
         notifications_toggle();
+        return 1;
+    }
+    if (!strcmp(name, "knV10DesktopNotify")) {
+        notifications_switch();
         return 1;
     }
     if (!strcmp(name, "knV10StreamsToggle")) { // the overlay's Hide / Show (v10's closed view: the header stays)

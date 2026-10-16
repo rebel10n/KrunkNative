@@ -1064,6 +1064,11 @@ else ()
     target_include_directories(game_time_test PRIVATE client/include shared/include)
     target_link_libraries(game_time_test PRIVATE m)
     add_test(NAME game_time_test COMMAND game_time_test)
+    # desktop_notify_test (client/src/ui/desktop_notify.c): the Notifications switch (default on), that each centre
+    # item reaches the desktop once while it is on, and the toggle's caption; the sink stands in for the OS notifier
+    add_executable(desktop_notify_test client/tests/desktop_notify_test.c client/src/ui/desktop_notify.c)
+    target_include_directories(desktop_notify_test PRIVATE client/include shared/include)
+    add_test(NAME desktop_notify_test COMMAND desktop_notify_test)
 
     # kpd_phone_test: the K.P.D phone (client/src/ui/hud_votekick.c) under a call with no answer: it comes
     # down at KPD_NO_ANSWER_MS, and so does every other way out of a call (an answer, a refusal, a new

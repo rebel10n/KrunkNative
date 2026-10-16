@@ -20,6 +20,7 @@
 // API: KrunkNative has none), on the Eterno Shop tab above its empty state.
 #include <v10_wild_offer.h>
 #include <v10_notify.h>
+#include <desktop_notify.h> // the Wild Offer on the desktop, when the Notifications switch is on
 #include <v10_ui.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -317,6 +318,7 @@ static void show_notification(void) {
     dismiss_notification();
     char *html = notification_html(W.offer);
     W.notif_id = v10_notify_push_html("Wild Offer", html, WO_NOTIFY_MS);
+    desktop_notify_item(I18N("generic.wildOffer.title", "Wild Offer!"), I18N("generic.wildOffer.message0", "LUCKY YOU! Nice offer - grab it!"));
     free(html);
     char v[24];
     snprintf(v, sizeof(v), "%d", id);

@@ -18,6 +18,7 @@
 // shutdown. On the web the same item and confirmation close the tab (window.close(), or the
 // page leaves the game when the browser keeps a tab that a script did not open).
 #include <client_settings.h>
+#include <desktop_notify.h> // the Notifications switch (desktopNotify) drives the desktop notifier
 #include <ui_logic.h>
 #include <backend.h>         // backend_social_reconnect (a proxy change)
 #include <krunker_lobbies.h> // krunker_lobbies_network_changed (a proxy change)
@@ -710,6 +711,22 @@ int client_settings_auto_restart(void) {
     return cs_bool("autoRestart");
 }
 
+// The Notifications switch (v10_menu.c) and the desktop notifications (desktop_notify.c): knClient
+// desktopNotify, on unless stored false (the default).
+int client_settings_desktop_notify(void) {
+    store_load();
+    const cJSON *v = cJSON_GetObjectItem(g_cs.store, "desktopNotify");
+    return !cJSON_IsBool(v) || cJSON_IsTrue(v);
+}
+
+void client_settings_set_desktop_notify(const int on) {
+    store_load();
+    cJSON_DeleteItemFromObject(g_cs.store, "desktopNotify");
+    cJSON_AddBoolToObject(g_cs.store, "desktopNotify", on != 0);
+    store_save();
+    desktop_notify_set_enabled(on);
+}
+
 static void apply_auto_spectate(void) {
     if (!cs_bool("autoSpec")) return;
     spectate_set_requested(1);
@@ -894,6 +911,7 @@ void client_settings_startup(Client *client, int *offline) {
     g_cs.launch_time = (long long) time(NULL);
     store_load();
     g_cs.hs_sound = cs_bool("hsSound");
+    desktop_notify_set_enabled(client_settings_desktop_notify());
 #ifndef __EMSCRIPTEN__
     const char *brain = getenv("KRUNKNATIVE_BRAIN_URL");
     g_cs.brain_env_was_set = brain && *brain;
@@ -1266,6 +1284,7 @@ const char *ui_client_settings_reload(void) {
     cJSON_Delete(g_cs.store);
     g_cs.store = NULL;
     store_load();
+    desktop_notify_set_enabled(client_settings_desktop_notify());
     const char *restart = NULL;
     for (int i = 0; i < N; i++) {
         const ClientSetting *s = &SETTINGS[i];
@@ -1332,6 +1351,7 @@ static void reset_answered(const int accepted, const char *text, void *user) {
     cJSON_Delete(g_cs.store);
     g_cs.store = cJSON_CreateObject();
     store_save();
+    desktop_notify_set_enabled(1); // the default: desktopNotify is gone with the store
     html_storage_set(CS_BRAIN_KEY, NULL);
     html_storage_set(CS_MODE_KEY, NULL);
     html_storage_set(CS_FINDER_KEY, NULL);

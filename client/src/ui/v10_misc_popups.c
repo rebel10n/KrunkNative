@@ -31,6 +31,7 @@
 // state.community.popups (v10_misc_popups_scenario).
 #include <v10_misc_popups.h>
 #include <v10_ui.h>
+#include <desktop_notify.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -223,6 +224,7 @@ void v10_misc_survey_show(const cJSON *s) {
     }
     SV.last_ms = mono_ms();
     survey_render();
+    desktop_notify_item(tr("generic.survey.title", "Survey"), SV.question); // once per survey, as the centre's item
 }
 
 static void survey_tick(void) {

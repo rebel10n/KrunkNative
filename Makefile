@@ -240,6 +240,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/ruleset_test
 	./$(DEBUG_DIR)/hitboxes_test
 	./$(DEBUG_DIR)/v10_gameplay_test
+	./$(DEBUG_DIR)/desktop_notify_test
 	$(PYTHON) -I tools/strike/gen_rules.py --check
 	./$(DEBUG_DIR)/strike_rules_test
 	./$(DEBUG_DIR)/strike_assist_test

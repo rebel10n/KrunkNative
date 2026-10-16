@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
 #include <v10_notify.h> // the notification center: friend requests, direct messages (v10_notify.c)
+#include <desktop_notify.h> // the same items on the desktop, when the Notifications switch is on
 #include <krunker_account.h> // the krunker.io account: the event bus's fresh token, its URL
 #include <krunker_eb.h>      // krunker.io's friends event bus socket
 #include <stdio.h>
@@ -644,8 +645,9 @@ static void notify_friend(const cJSON *o, const int accepted) {
     char text[192];
     if (accepted) I18N_F(text, "kn.notify.friendAccepted", "{0} followed you back. You are now friends.", name);
     else I18N_F(text, "kn.notify.friendRequest", "{0} followed you. Follow them back to become friends.", name);
-    v10_notify_push_ex(accepted ? I18N("kn.notify.friendAcceptedTitle", "Friend Added") : I18N("kn.notify.friendRequestTitle", "Friend Request"),
-                       text, NOTIFY_FRIEND_MS, notify_open_profile, slot);
+    const char *title = accepted ? I18N("kn.notify.friendAcceptedTitle", "Friend Added") : I18N("kn.notify.friendRequestTitle", "Friend Request");
+    v10_notify_push_ex(title, text, NOTIFY_FRIEND_MS, notify_open_profile, slot);
+    desktop_notify_item(title, text);
 }
 
 static void dm_chat_line(const char *text) {
@@ -672,6 +674,7 @@ static void eb_on_recv(const cJSON *o) {
         char title[96];
         I18N_F(title, "kn.notify.dmTitle", "Message from {0}", name[0] ? name : "Unknown");
         v10_notify_push_ex(title, jstr(o, "text"), NOTIFY_DM_MS, notify_open_conv, (void *) (intptr_t) from);
+        desktop_notify_item(title, jstr(o, "text"));
     }
 }
 
