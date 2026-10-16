@@ -869,6 +869,11 @@ web-gl-errors: ## Play the web build offline for a minute in headless Chromium; 
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
 	tools/kref/gl-errors-e2e.sh $(DIST_WEB) "offline=1&map=$(or $(MAP),kanji)" $(or $(PLAY_SECONDS),60)
 
+web-session-e2e: ## Web e2e: a stack (kn_brain, server_bin, net-bridge --web, headless Chromium) and the session tests in tools/kref/web-session/ (needs make web, make build)
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	@[ -d $(BRIDGE_DIR)/node_modules ] || $(MAKE) bridge-install
+	KN_WEB_BUILD=$(or $(KN_WEB_BUILD),$(DEBUG_DIR)) KN_WEB_DIST=$(DIST_WEB) tools/kref/web-session/web-session-e2e.sh $(TESTS)
+
 # --------------------------------------------------------------------------- housekeeping
 
 .PHONY: clean distclean help
