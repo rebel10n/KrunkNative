@@ -2,7 +2,8 @@
  * services/brain/db_turf.c - Krunker v10.0.2 Turf Wars on the tables of migration 0206_turf_wars
  * (doc/v10/ranked-impl.md). C on every driver; the rules are shared/src/turf_wars.c.
  *
- *   P_TURF_RECORD (day, map, records json [{player_id, clan_name, kills, deaths}]) -> {recorded}
+ *   P_TURF_RECORD (day, map, records json [{player_id, clan_name, kills, deaths}], match id) -> {recorded}
+ *                 a match id counted before records nothing (turf_rounds, 0212)
  *                 the clan is resolved by name now (a player who left the clan meanwhile still
  *                 counts for the clan the server saw; unknown clans are dropped)
  *   P_TURF_SETTLE (day, kr per kill) -> {day, maps}: settles a finished day once (lock + turf_days),
@@ -46,6 +47,23 @@ static kn_db_result *run_turf_record(kn_dbconn *c, int n, const char *const *p) 
         cJSON_Delete(recs);
         dbx_refuse(&x, "not a turf map");
         return dbx_finish(&x, NULL);
+    }
+    /* a round counts once: a game server resends its reliable frame when the reply was lost */
+    if (P(3) && P(3)[0]) {
+        const int64_t fresh = dbx_exec(&x, SQL(.any = "{insert_ignore} INTO turf_rounds (match_id, day, map_id) VALUES ($1, {int:$2}, {int:$3})"
+                                                      " {ignore_conflicts}"),
+                                       KN_DB_ARGS(P(3), I64S(day), I64S(map)));
+        if (dbx_failed(&x)) {
+            cJSON_Delete(recs);
+            return dbx_finish(&x, NULL);
+        }
+        if (fresh == 0) {
+            cJSON_Delete(recs);
+            cJSON *dup = cJSON_CreateObject();
+            cJSON_AddNumberToObject(dup, "recorded", 0);
+            cJSON_AddBoolToObject(dup, "duplicate", 1);
+            return dbx_json(&x, "record", dup);
+        }
     }
     cJSON_ArrayForEach(r, recs) {
         const int64_t acc = (int64_t) jnum(r, "player_id");

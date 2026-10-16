@@ -24,6 +24,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+import uuid
 
 try:
     import websockets
@@ -137,6 +138,7 @@ class FakeNode:
         self.url = "ws://127.0.0.1:%d/mm/internal/ws" % port
         self.replies = {}
         self.rid = 500
+        self.run = uuid.uuid4().hex[:8]  # match ids are unique per round, across fake nodes too
 
     async def start(self):
         self.ws = await websockets.connect(self.url, additional_headers={"Authorization": "Bearer " + SECRET})
@@ -152,10 +154,10 @@ class FakeNode:
             elif str(f.get("type", "")).endswith("-reply") and "rid" in f:
                 self.replies[f["rid"]] = f
 
-    async def kills(self, map_id, records):
+    async def kills(self, map_id, records, match=None):
         self.rid += 1
-        await self.ws.send(json.dumps({"type": "turf-kills", "rid": self.rid, "matchId": "m%d" % self.rid, "mapId": map_id, "mode": 0,
-                                       "records": records}))
+        await self.ws.send(json.dumps({"type": "turf-kills", "rid": self.rid, "matchId": match or "m%s-%d" % (self.run, self.rid), "mapId": map_id,
+                                       "mode": 0, "records": records}))
         for _ in range(100):
             if self.rid in self.replies:
                 return self.replies.pop(self.rid)
@@ -443,6 +445,25 @@ def main():
         code, lb = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY + 1)
         check(code == 200 and lb["data"][0]["clan_name"] == "EEE" and lb["data"][0]["kills"] == 230 and lb["data"][0]["games"] == 20,
               "top performing clans, every map: EEE still 230 kills")
+
+        # a resent round (the game server's reliable retry after a lost reply) counts once
+        async def resent():
+            node = FakeNode(port)
+            await node.start()
+            await asyncio.sleep(0.5)
+            rec = [{"clan_name": "AAA", "player_id": accs[0]["id"], "map_id": 3, "kills": 7, "deaths": 1}]
+            first = await node.kills(3, rec, match="resend-1")
+            again = await node.kills(3, rec, match="resend-1")
+            node.task.cancel()
+            await node.ws.close()
+            return first, again
+        first, again = asyncio.run(resent())
+        check(first and first.get("recorded") == 1 and again and again.get("ok") and again.get("recorded") == 0,
+              "a resent round is acknowledged and counted once (%s, %s)" % (first, again))
+        code, st = http(port, "/api/territorial-wars/status")
+        sub = [m for m in st.get("data", []) if m["map_id"] == 3][0] if code == 200 else {}
+        check(sub.get("total_kills_today") == 237 and [e["clan_name"] for e in sub["leaderboard"]][:2] == ["EEE", "AAA"]
+              and sub["leaderboard"][1]["kills"] == 7, "Subzero today: 230 + AAA's 7 (not 14) (%s)" % sub.get("total_kills_today"))
     finally:
         for p in procs:
             if p.poll() is None:

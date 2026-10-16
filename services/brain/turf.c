@@ -491,7 +491,9 @@ void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
     r->cb = cb;
     r->ud = ud;
     char *recs = kn_json_print(cJSON_GetObjectItemCaseSensitive(frame, "records"));
-    kn_db_call(b->db, &P_TURF_RECORD, KN_DB_ARGS(S(current_day()), S(kn_json_int(frame, "mapId", -1)), recs ? recs : "[]"), on_recorded, r);
+    kn_db_call(b->db, &P_TURF_RECORD,
+               KN_DB_ARGS(S(current_day()), S(kn_json_int(frame, "mapId", -1)), recs ? recs : "[]", kn_json_str(frame, "matchId", "")),
+               on_recorded, r);
     free(recs);
 }
 
