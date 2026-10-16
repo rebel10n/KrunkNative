@@ -101,9 +101,12 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
   by the client every frame before `html_ui_render()` (the class preview, `class_preview.c`). The
   canvas keeps its place in the page's paint order, so shades below it show through its
   transparent pixels and what lies above covers it (no holes). Natively the engine samples `tex`
-  when it paints the box (no copy); on the web `web_dom.c` reads `fbo` back without stalling
-  (pixel-pack buffer + fence, one frame late) and `putImageData`s it into the page's canvas
-  (`window.__knCanvasGl` holds the copy's cost). `tex` 0: transparent again.
+  when it paints the box (no copy). On the web `web_dom.c` makes the page's canvas a WebGL canvas
+  of its own (a second context, alpha on, premultiplied) and composes the frame there with no
+  readback: the main canvas (opaque, main.c) carries the colour and the alpha in two passes over
+  the box, the page canvas uploads each pass from the main canvas (a GPU copy) and combines them,
+  and the scene under the box is copied first and drawn back after. `window.__knCanvasGl` holds
+  the frame count and cost. `tex` 0: transparent again. The page canvas must not get a 2D context.
 - **Geometry** (valid after layout; 0 while `display:none`): `get_rect`
   (getBoundingClientRect), `offset_width/height`, `viewport(w, h, dpr)`,
   `observe_resize(el, fn, user)` (ResizeObserver equivalent, coalesced per frame),

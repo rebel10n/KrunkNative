@@ -376,12 +376,13 @@ def web_main():
                  " s.textContent = 'body *:not(#canvas) { visibility: hidden !important; transition: none !important; }';"
                  " document.head.appendChild(s); return 1; })()")
     show_page = "(() => { const s = document.getElementById('knTestHide'); if (s) s.remove(); return 1; })()"
+    # The bitmap is the page canvas's own size. Its pixels are not read here: web builds draw the preview
+    # into a WebGL canvas of its own (web_dom.c), and getContext('2d') on it would break that; the model is
+    # checked on the screenshots (model_check).
     geometry = ("(() => { const c = document.getElementById('classPreviewCanvas'); if (!c) return null;"
                 " const b = c.getBoundingClientRect(); const cc = document.getElementById('menuClassContainer');"
-                " let opaque = 0; try { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;"
-                " for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++; } catch (e) { opaque = -1; }"
                 " return {dpr: devicePixelRatio, box: [b.left, b.top, b.width, b.height], bitmap: [c.width, c.height],"
-                " opaque: opaque, shown: !!(c.offsetParent || c.getClientRects().length) &&"
+                " opaque: -1, shown: !!(c.offsetParent || c.getClientRects().length) &&"
                 " getComputedStyle(cc).visibility !== 'hidden' && document.documentElement.classList.contains('kn-menu-open')}; })()")
 
     async def session():
@@ -505,10 +506,11 @@ def web_main():
                     check(f"web {tag}: the model is under the popup's backdrop", peak <= 255 * 0.25 + 4,
                           f"brightest {peak:.0f}")
                     return
-                bitmap_ok = tuple(geo["bitmap"]) == box[2:] and geo["opaque"] > 0.01 * box[2] * box[3]
+                # the bitmap is the box, within a device px (the box and the bitmap round the same CSS size apart)
+                bitmap_ok = abs(geo["bitmap"][0] - box[2]) <= 1 and abs(geo["bitmap"][1] - box[3]) <= 1
                 ok, detail = model_check(ratio, box, SHADE)
                 check(f"web {tag}: the preview is the canvas's bitmap, drawn inside its box {box}", bitmap_ok and ok,
-                      f"bitmap {geo['bitmap']}, {geo['opaque']} opaque px; {detail}")
+                      f"bitmap {geo['bitmap']}; {detail}")
                 ok, detail = seam_check(ratio, box, SHADE)
                 check(f"web {tag}: the shade is uniform up to the canvas edges", ok, detail)
 

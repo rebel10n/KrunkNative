@@ -17,6 +17,7 @@
 #include <flavor.h> // html_storage_prefix: the Krunker Strike app's own storage keys
 #include <cJSON.h>
 #include <emscripten.h>
+#include <emscripten/html5.h> // WebGL contexts of the page canvases (html_dom_canvas_gl)
 #include <gl.h>
 #include <GLFW/glfw3.h>
 #include <ui_logic.h>
@@ -217,30 +218,7 @@ EM_JS(void, kn_js_canvas_put, (int id, const unsigned char *rgba, int w, int h),
     ctx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4).slice(), w, h), 0, 0);
 });
 
-// html_dom_canvas_gl, tex 0: a transparent bitmap again.
-EM_JS(void, kn_js_canvas_clear, (int id), {
-    var el = knEl(id);
-    var ctx = el && el.getContext ? el.getContext('2d') : null;
-    if (ctx) ctx.clearRect(0, 0, el.width, el.height);
-});
 
-// html_dom_canvas_gl's frame: like kn_js_canvas_put, without the copy (the ImageData is used at once).
-EM_JS(void, kn_js_canvas_put_now, (int id, const unsigned char *rgba, int w, int h), {
-    var el = knEl(id);
-    if (!el || !el.getContext) return;
-    if (el.width !== w) el.width = w;
-    if (el.height !== h) el.height = h;
-    var ctx = el.getContext('2d');
-    if (ctx) ctx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4), w, h), 0, 0);
-});
-
-// html_dom_canvas_gl's cost (tests read it): calls that delivered a frame, mean / max ms of the
-// whole call and the mean of its stages (read the buffer, convert, putImageData, start the next read).
-EM_JS(void, kn_js_canvas_gl_stats, (int frames, double mean_ms, double max_ms, double get_ms, double convert_ms,
-                                    double put_ms, double read_ms, int w, int h), {
-    window.__knCanvasGl = {frames: frames, meanMs: mean_ms, maxMs: max_ms, getMs: get_ms, convertMs: convert_ms,
-                           putMs: put_ms, readMs: read_ms, width: w, height: h};
-});
 
 EM_JS(void, kn_js_set_attr, (int id, const char *name, const char *value), {
     var el = knEl(id);
@@ -825,30 +803,316 @@ void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int 
 
 // ---- html_dom_canvas_gl: a GL render target shown in the page's own <canvas>
 //
-// The page is the browser's DOM above the WebGL canvas, so the render target's pixels must reach
-// the page's canvas element (a 2D canvas, at its place in the page's paint order). The copy never
-// stalls on the GPU: readPixels goes into a pixel-pack buffer with a fence (WebGL2), and the pixels
-// are put into the canvas once the fence has signalled, normally the next frame (WebGL updates a
-// fence's status only between tasks). Two buffers, so a read is in flight every frame; while both
-// are busy a frame is skipped. The canvas shows the render one frame late.
+// The page is the browser's DOM above the WebGL canvas, and a 2D canvas cannot sample a GL texture.
+// Reading the target back into the page (pixel-pack buffers, glReadPixels) cost a GPU readback every
+// frame and made Chromium warn "READ-usage buffer was written, then fenced, but written again before
+// being read back". So the page canvas is a WebGL canvas of its own: a second context, with alpha and
+// premultiplied output like a 2D canvas, that the browser composites in place, and no pixels come back
+// to the CPU. The main context's canvas has no alpha (main.c), so it cannot carry the target's alpha
+// itself: the frame crosses it in two passes. Pass 1 draws the target's premultiplied colour into the
+// canvas's box of the main canvas, pass 2 its alpha as grey. The own context uploads each pass straight
+// from the main canvas (a GPU copy) and composes premultiplied RGBA from the two. The main canvas's
+// pixels under the box are copied first and drawn back after, so the scene below the page keeps its
+// look. Costs per frame: two canvas uploads, a few quads, one box copy; the element's bitmap is w x h.
 #define WEB_GL_CANVASES 4
-// WebGL2's getBufferSubData (Emscripten's GL library); the GLES 3.0 headers don't declare it.
-void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void *data);
 #define WEB_GL_CANVAS_STATS_EVERY 30
 
+// GLSL ES 3.00 (the shader sources are authored as ES: web builds use them as they are).
+static const char *const WEB_GL_QUAD_VS =
+    "#version 300 es\n"
+    "layout(location = 0) in vec2 p;\n"
+    "void main() { gl_Position = vec4(p, 0.0, 1.0); }\n";
+
+// Main context: the box (viewport) takes `src` (premultiplied RGBA, row 0 at the bottom, `size` px):
+// mode 0 its colour (rgb), mode 1 its alpha as grey. Also restores a box from a copy of it.
+static const char *const WEB_GL_PASS_FS =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "uniform highp sampler2D src;\n"
+    "uniform vec2 size;\n"
+    "uniform vec2 origin;\n" // the box's bottom-left, in the drawing buffer's px
+    "uniform int mode;\n"
+    "out vec4 o;\n"
+    "void main() {\n"
+    "    vec4 t = texture(src, (floor(gl_FragCoord.xy - origin) + 0.5) / size);\n"
+    "    o = vec4(mode == 1 ? vec3(t.a) : t.rgb, 1.0);\n"
+    "}\n";
+
+// Own context: the page canvas's pixel (x, y) from its bottom-left takes the main canvas's pixel
+// (origin.x + x, origin.y + rows - 1 - y) (the main canvas's rows run from its top): colour from one
+// upload, alpha (red) from the other.
+static const char *const WEB_GL_COMPOSE_FS =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "uniform highp sampler2D colour;\n"
+    "uniform highp sampler2D alpha;\n"
+    "uniform ivec2 origin;\n"
+    "uniform int rows;\n"
+    "out vec4 o;\n"
+    "void main() {\n"
+    "    ivec2 px = ivec2(gl_FragCoord.xy);\n"
+    "    ivec2 at = ivec2(origin.x + px.x, origin.y + rows - 1 - px.y);\n"
+    "    o = vec4(texelFetch(colour, at, 0).rgb, texelFetch(alpha, at, 0).r);\n"
+    "}\n";
+
+// The page's canvas: its own context (created on first use) and the composing resources in it.
 typedef struct {
     HtmlElem e;
-    GLuint pbo[2];
-    GLsync fence[2];
-    int w[2], h[2];         // size of the read in each buffer
-    size_t pbo_size[2];
-    int next;               // buffer the next read goes into
-    unsigned char *pixels;  // straight RGBA, row 0 on top (putImageData)
-    size_t pixels_size;
+    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx;
+    GLuint prog, vao, vbo, tex_colour, tex_alpha;
+    GLint loc_colour, loc_alpha, loc_origin, loc_rows;
+    int w, h;   // the bitmap's size
+    int ok;     // context and resources exist
 } WebGlCanvas;
 
+// The main context: the box passes and the copy of the box that is drawn back after the frame.
+typedef struct {
+    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE main;
+    GLuint prog, vao, vbo, save_tex;
+    GLint loc_src, loc_size, loc_origin, loc_mode;
+    int save_w, save_h;
+    int ok;
+} WebGlMain;
+
 static WebGlCanvas g_gl_canvases[WEB_GL_CANVASES];
-static struct { int frames; double total_ms, max_ms, get_ms, convert_ms, put_ms, read_ms; } g_gl_canvas_stats;
+static WebGlMain g_gl_main;
+static struct { int frames; double total_ms, max_ms; } g_gl_canvas_stats;
+
+// Marks the page's canvas with data-kn-gl=<slot>: emscripten_webgl_create_context looks it up by that selector.
+EM_JS(void, kn_js_gl_mark, (int id, int slot), {
+    var el = knEl(id);
+    if (el && el.setAttribute) el.setAttribute('data-kn-gl', String(slot));
+});
+// The element's box in the main canvas's drawing buffer, top-left origin (-1 when unknown).
+EM_JS(int, kn_js_gl_box_left, (int id), {
+    var el = knEl(id), mc = Module['canvas'];
+    if (!el || !mc || !el.getBoundingClientRect) return -1;
+    var r = el.getBoundingClientRect(), m = mc.getBoundingClientRect();
+    return Math.round((r.left - m.left) * (mc.width / (m.width || 1)));
+});
+EM_JS(int, kn_js_gl_box_top, (int id), {
+    var el = knEl(id), mc = Module['canvas'];
+    if (!el || !mc || !el.getBoundingClientRect) return -1;
+    var r = el.getBoundingClientRect(), m = mc.getBoundingClientRect();
+    return Math.round((r.top - m.top) * (mc.height / (m.height || 1)));
+});
+EM_JS(int, kn_js_gl_main_w, (void), { return Module['canvas'] ? Module['canvas'].width : 0; });
+EM_JS(int, kn_js_gl_main_h, (void), { return Module['canvas'] ? Module['canvas'].height : 0; });
+// The current context's bound texture (unit 0) <- the main canvas, as the browser composes it.
+EM_JS(void, kn_js_gl_upload_main, (void), {
+    var gl = GL.currentContext.GLctx;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, Module['canvas']);
+});
+// The page canvas's bitmap size (assigning it clears the bitmap, so only when it changes).
+EM_JS(void, kn_js_canvas_gl_size, (int id, int w, int h), {
+    var el = knEl(id);
+    if (!el) return;
+    if (el.width !== w) el.width = w;
+    if (el.height !== h) el.height = h;
+});
+// html_dom_canvas_gl's cost (tests read it): frames delivered, mean / max ms per frame.
+EM_JS(void, kn_js_canvas_gl_stats, (int frames, double mean_ms, double max_ms, int w, int h), {
+    window.__knCanvasGl = {frames: frames, meanMs: mean_ms, maxMs: max_ms, width: w, height: h};
+});
+
+// Current context switches; false when the handle is not a live context.
+static int web_gl_use(const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx) {
+    return ctx > 0 && emscripten_webgl_make_context_current(ctx) == EMSCRIPTEN_RESULT_SUCCESS;
+}
+
+// A linked program from the two sources; 0 on failure (logged).
+static GLuint web_gl_program(const char *vs_src, const char *fs_src) {
+    GLint ok = 0;
+    char log[512];
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER), fs = glCreateShader(GL_FRAGMENT_SHADER), prog = glCreateProgram();
+    glShaderSource(vs, 1, &vs_src, NULL);
+    glCompileShader(vs);
+    glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
+    if (!ok) { glGetShaderInfoLog(vs, sizeof(log), NULL, log); fprintf(stderr, "[web_dom] canvas GL vertex shader: %s\n", log); }
+    glShaderSource(fs, 1, &fs_src, NULL);
+    glCompileShader(fs);
+    glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
+    if (!ok) { glGetShaderInfoLog(fs, sizeof(log), NULL, log); fprintf(stderr, "[web_dom] canvas GL fragment shader: %s\n", log); }
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glBindAttribLocation(prog, 0, "p");
+    glLinkProgram(prog);
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok) { glGetProgramInfoLog(prog, sizeof(log), NULL, log); fprintf(stderr, "[web_dom] canvas GL link: %s\n", log); }
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    if (ok) return prog;
+    glDeleteProgram(prog);
+    return 0;
+}
+
+// A VAO with the full-screen quad at attribute 0 (the caller's bindings are restored by the caller).
+static void web_gl_quad(GLuint *vao, GLuint *vbo) {
+    static const GLfloat quad[8] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
+    glGenVertexArrays(1, vao);
+    glBindVertexArray(*vao);
+    glGenBuffers(1, vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, *vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+}
+
+static void web_gl_texture(GLuint *tex) {
+    glGenTextures(1, tex);
+    glBindTexture(GL_TEXTURE_2D, *tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+// The main context's state a frame touches; put back after it (the page's render is next).
+typedef struct {
+    GLint draw_fbo, read_fbo, viewport[4], program, vao, vbo, active_tex, tex0;
+    GLboolean scissor, blend, depth, cull, depth_mask, mask[4];
+} WebGlSaved;
+
+static void web_gl_save(WebGlSaved *s) {
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &s->draw_fbo);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &s->read_fbo);
+    glGetIntegerv(GL_VIEWPORT, s->viewport);
+    s->scissor = glIsEnabled(GL_SCISSOR_TEST);
+    s->blend = glIsEnabled(GL_BLEND);
+    s->depth = glIsEnabled(GL_DEPTH_TEST);
+    s->cull = glIsEnabled(GL_CULL_FACE);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &s->depth_mask);
+    glGetBooleanv(GL_COLOR_WRITEMASK, s->mask);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &s->program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &s->vao);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &s->vbo);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &s->active_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &s->tex0);
+    glActiveTexture((GLenum) s->active_tex);
+}
+
+static void web_gl_restore(const WebGlSaved *s) {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint) s->read_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint) s->draw_fbo);
+    glViewport(s->viewport[0], s->viewport[1], s->viewport[2], s->viewport[3]);
+    if (s->scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+    if (s->blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+    if (s->depth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    if (s->cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    glDepthMask(s->depth_mask);
+    glColorMask(s->mask[0], s->mask[1], s->mask[2], s->mask[3]);
+    glUseProgram((GLuint) s->program);
+    glBindVertexArray((GLuint) s->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, (GLuint) s->vbo);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, (GLuint) s->tex0);
+    glActiveTexture((GLenum) s->active_tex);
+}
+
+// The main context's passes, made once (the page's GL canvas is the current context on first use).
+static int web_gl_main_init(void) {
+    if (g_gl_main.ok) return 1;
+    g_gl_main.main = emscripten_webgl_get_current_context();
+    if (g_gl_main.main <= 0) return 0;
+    g_gl_main.prog = web_gl_program(WEB_GL_QUAD_VS, WEB_GL_PASS_FS);
+    if (!g_gl_main.prog) return 0;
+    g_gl_main.loc_src = glGetUniformLocation(g_gl_main.prog, "src");
+    g_gl_main.loc_size = glGetUniformLocation(g_gl_main.prog, "size");
+    g_gl_main.loc_origin = glGetUniformLocation(g_gl_main.prog, "origin");
+    g_gl_main.loc_mode = glGetUniformLocation(g_gl_main.prog, "mode");
+    web_gl_quad(&g_gl_main.vao, &g_gl_main.vbo);
+    glGenTextures(1, &g_gl_main.save_tex);
+    g_gl_main.ok = 1;
+    return 1;
+}
+
+// One page canvas's own context: created on first use, with its composing program and textures.
+static int web_gl_canvas_init(WebGlCanvas *c) {
+    if (c->ok) return 1;
+    if (!c->ctx) {
+        EmscriptenWebGLContextAttributes attrs;
+        char selector[48];
+        const int slot = (int) (c - g_gl_canvases);
+        emscripten_webgl_init_context_attributes(&attrs);
+        attrs.alpha = EM_TRUE;
+        attrs.premultipliedAlpha = EM_TRUE;
+        attrs.depth = EM_FALSE;
+        attrs.stencil = EM_FALSE;
+        attrs.antialias = EM_FALSE;
+        attrs.preserveDrawingBuffer = EM_FALSE;
+        attrs.majorVersion = 2;
+        attrs.minorVersion = 0;
+        kn_js_gl_mark((int) c->e, slot);
+        snprintf(selector, sizeof(selector), "[data-kn-gl=\"%d\"]", slot);
+        c->ctx = emscripten_webgl_create_context(selector, &attrs);
+        if (c->ctx <= 0) { c->ctx = 0; return 0; }
+    }
+    if (!web_gl_use(c->ctx)) return 0;
+    c->prog = web_gl_program(WEB_GL_QUAD_VS, WEB_GL_COMPOSE_FS);
+    if (c->prog) {
+        glUseProgram(c->prog);
+        c->loc_colour = glGetUniformLocation(c->prog, "colour");
+        c->loc_alpha = glGetUniformLocation(c->prog, "alpha");
+        c->loc_origin = glGetUniformLocation(c->prog, "origin");
+        c->loc_rows = glGetUniformLocation(c->prog, "rows");
+        glUniform1i(c->loc_colour, 0);
+        glUniform1i(c->loc_alpha, 1);
+        web_gl_quad(&c->vao, &c->vbo);
+        web_gl_texture(&c->tex_colour);
+        web_gl_texture(&c->tex_alpha);
+    }
+    c->ok = c->prog != 0;
+    web_gl_use(g_gl_main.main);
+    return c->ok;
+}
+
+// The main canvas's copy of the box (w x h px at the bottom-left `gl_x, gl_y`, GL rows): a texture the
+// frame draws back over the box once the page's pixels have been taken from it.
+static void web_gl_save_box(const int gl_x, const int gl_y, const int w, const int h) {
+    glActiveTexture(GL_TEXTURE0);
+    if (g_gl_main.save_w != w || g_gl_main.save_h != h) {
+        glBindTexture(GL_TEXTURE_2D, g_gl_main.save_tex);
+        // RGB8: the default framebuffer has no alpha (main.c), and a copy needs the same format
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        g_gl_main.save_w = w;
+        g_gl_main.save_h = h;
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, g_gl_main.save_tex); // unit 0, as web_gl_restore puts it back
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, gl_x, gl_y, w, h);
+}
+
+// Draws the main context's box (viewport) from `src` (mode 0 colour, 1 alpha, see WEB_GL_PASS_FS).
+static void web_gl_pass(const GLuint src, const int gl_x, const int gl_y, const int w, const int h, const int mode) {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glViewport(gl_x, gl_y, w, h);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUseProgram(g_gl_main.prog);
+    glBindVertexArray(g_gl_main.vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, src);
+    glUniform1i(g_gl_main.loc_src, 0);
+    glUniform2f(g_gl_main.loc_size, (GLfloat) w, (GLfloat) h);
+    glUniform2f(g_gl_main.loc_origin, (GLfloat) gl_x, (GLfloat) gl_y);
+    glUniform1i(g_gl_main.loc_mode, mode);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+// tex 0: the page canvas's bitmap is transparent again.
+static void web_gl_canvas_clear(WebGlCanvas *c) {
+    if (!c->ok || !web_gl_use(c->ctx)) return;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, c->w, c->h);
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    web_gl_use(g_gl_main.main);
+}
 
 static WebGlCanvas *web_gl_canvas(const HtmlElem e, const int create) {
     WebGlCanvas *free_slot = NULL;
@@ -862,112 +1126,79 @@ static WebGlCanvas *web_gl_canvas(const HtmlElem e, const int create) {
     return free_slot;
 }
 
-static void web_gl_canvas_forget(WebGlCanvas *c) {
-    for (int i = 0; i < 2; i++) {
-        if (c->fence[i]) glDeleteSync(c->fence[i]);
-        if (c->pbo[i]) glDeleteBuffers(1, &c->pbo[i]);
-    }
-    free(c->pixels);
-    memset(c, 0, sizeof(*c));
-}
-
-// The GL rows are bottom-up and premultiplied; putImageData takes straight alpha, top-down.
-static void web_gl_canvas_deliver(WebGlCanvas *c, const int i) {
-    const int w = c->w[i], h = c->h[i];
-    const size_t size = (size_t) w * (size_t) h * 4;
-    if (c->pixels_size < size * 2) {
-        unsigned char *grown = realloc(c->pixels, size * 2);
-        if (!grown) return;
-        c->pixels = grown;
-        c->pixels_size = size * 2;
-    }
-    unsigned char *raw = c->pixels + size, *out = c->pixels;
-    const double t0 = emscripten_get_now();
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, c->pbo[i]);
-    glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr) size, raw);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-    const double t1 = emscripten_get_now();
-    for (int y = 0; y < h; y++) {
-        const unsigned char *src = raw + (size_t) (h - 1 - y) * (size_t) w * 4;
-        unsigned char *dst = out + (size_t) y * (size_t) w * 4;
-        for (int x = 0; x < w * 4; x += 4) {
-            const unsigned a = src[x + 3];
-            if (a == 255 || a == 0) {
-                memcpy(dst + x, src + x, 4);
-                continue;
-            }
-            for (int k = 0; k < 3; k++) {
-                const unsigned v = (src[x + k] * 255u + a / 2) / a;
-                dst[x + k] = (unsigned char) (v > 255 ? 255 : v);
-            }
-            dst[x + 3] = (unsigned char) a;
-        }
-    }
-    const double t2 = emscripten_get_now();
-    kn_js_canvas_put_now((int) c->e, out, w, h);
-    g_gl_canvas_stats.get_ms += t1 - t0;
-    g_gl_canvas_stats.convert_ms += t2 - t1;
-    g_gl_canvas_stats.put_ms += emscripten_get_now() - t2;
-}
-
 void html_dom_canvas_gl(const HtmlElem e, const unsigned tex, const unsigned fbo, const int w, const int h) {
+    (void) fbo; // the target is sampled by its texture (the main context is always current here)
     if (!e) return;
     if (!tex || w <= 0 || h <= 0) {
         WebGlCanvas *c = web_gl_canvas(e, 0);
-        if (c) web_gl_canvas_forget(c);
-        kn_js_canvas_clear((int) e);
+        if (c) web_gl_canvas_clear(c);
         return;
     }
+    if (!web_gl_main_init()) return;
     WebGlCanvas *c = web_gl_canvas(e, 1);
-    if (!c) return;
+    if (!c || !web_gl_canvas_init(c)) return;
+
+    const int left = kn_js_gl_box_left((int) e), top = kn_js_gl_box_top((int) e);
+    const int page_w = kn_js_gl_main_w(), page_h = kn_js_gl_main_h();
+    if (left < 0 || top < 0 || left + w > page_w || top + h > page_h) return; // the box is off the page canvas
+    const int gl_x = left, gl_y = page_h - top - h; // the box's bottom-left, GL rows
     const double start = emscripten_get_now();
-    int delivered = 0;
-    for (int k = 0; k < 2; k++) { // the older read first
-        const int i = (c->next + k) & 1;
-        if (!c->fence[i]) continue;
-        const GLenum status = glClientWaitSync(c->fence[i], 0, 0);
-        if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) continue;
-        glDeleteSync(c->fence[i]);
-        c->fence[i] = 0;
-        web_gl_canvas_deliver(c, i);
-        delivered = 1;
+    if (c->w != w || c->h != h) {
+        kn_js_canvas_gl_size((int) e, w, h);
+        c->w = w;
+        c->h = h;
     }
-    const int i = c->next;
-    const double read_start = emscripten_get_now();
-    if (!c->fence[i]) {
-        GLint prev_read = 0, prev_align = 4;
-        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
-        glGetIntegerv(GL_PACK_ALIGNMENT, &prev_align);
-        const size_t size = (size_t) w * (size_t) h * 4;
-        if (!c->pbo[i]) glGenBuffers(1, &c->pbo[i]);
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, c->pbo[i]);
-        if (c->pbo_size[i] != size) {
-            glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr) size, NULL, GL_STREAM_READ);
-            c->pbo_size[i] = size;
-        }
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-        glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-        glPixelStorei(GL_PACK_ALIGNMENT, prev_align);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint) prev_read);
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        c->fence[i] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-        c->w[i] = w;
-        c->h[i] = h;
-        c->next = i ^ 1;
-    }
-    if (delivered) g_gl_canvas_stats.read_ms += emscripten_get_now() - read_start;
-    if (delivered) {
-        const double ms = emscripten_get_now() - start;
-        g_gl_canvas_stats.frames++;
-        g_gl_canvas_stats.total_ms += ms;
-        if (ms > g_gl_canvas_stats.max_ms) g_gl_canvas_stats.max_ms = ms;
-        if (g_gl_canvas_stats.frames % WEB_GL_CANVAS_STATS_EVERY == 0) {
-            const double n = g_gl_canvas_stats.frames;
-            kn_js_canvas_gl_stats(g_gl_canvas_stats.frames, g_gl_canvas_stats.total_ms / n, g_gl_canvas_stats.max_ms,
-                                  g_gl_canvas_stats.get_ms / n, g_gl_canvas_stats.convert_ms / n, g_gl_canvas_stats.put_ms / n,
-                                  g_gl_canvas_stats.read_ms / n, w, h);
-        }
+
+    WebGlSaved saved;
+    web_gl_save(&saved);
+    web_gl_save_box(gl_x, gl_y, w, h);
+    // 1. the colour: premultiplied, over whatever the box holds (the copy is drawn back below)
+    web_gl_pass(tex, gl_x, gl_y, w, h, 0);
+    web_gl_use(c->ctx);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, c->tex_colour);
+    kn_js_gl_upload_main();
+    web_gl_use(g_gl_main.main);
+    // 2. the alpha, as grey over the box
+    web_gl_pass(tex, gl_x, gl_y, w, h, 1);
+    web_gl_use(c->ctx);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, c->tex_alpha);
+    kn_js_gl_upload_main();
+    web_gl_use(g_gl_main.main);
+    // 3. the scene under the box comes back
+    web_gl_pass(g_gl_main.save_tex, gl_x, gl_y, w, h, 0);
+    web_gl_restore(&saved);
+    // 4. the page canvas composes colour and alpha into premultiplied RGBA
+    web_gl_use(c->ctx);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, w, h);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(c->prog);
+    glBindVertexArray(c->vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, c->tex_colour);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, c->tex_alpha);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform2i(c->loc_origin, left, top);
+    glUniform1i(c->loc_rows, h);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    web_gl_use(g_gl_main.main);
+
+    const double ms = emscripten_get_now() - start;
+    g_gl_canvas_stats.frames++;
+    g_gl_canvas_stats.total_ms += ms;
+    if (ms > g_gl_canvas_stats.max_ms) g_gl_canvas_stats.max_ms = ms;
+    if (g_gl_canvas_stats.frames % WEB_GL_CANVAS_STATS_EVERY == 0) {
+        kn_js_canvas_gl_stats(g_gl_canvas_stats.frames, g_gl_canvas_stats.total_ms / g_gl_canvas_stats.frames,
+                              g_gl_canvas_stats.max_ms, w, h);
     }
 }
 
