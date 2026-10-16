@@ -3,6 +3,7 @@
 #include <gltf.h>
 #include <nettspend.h> // the Drank's cup / pour-up and the Money Spread's cash stack
 #include <render_settings.h>
+#include <ui_logic.h> // ui_setting_weapon_float: vmSetts Per Weapon
 #include <skin_fx.h>
 #include <third_person.h> // the local third-person model
 #include <pets.h>
@@ -1468,12 +1469,22 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     // Viewmodel settings (v3.1.1 settings.js -> RENDER.aimAnim/weaponBob/weaponLean/
     // weaponRot/weaponOffX..Z/weaponADSOffY; weaponBob defaults to 0.9).
+    // vmSetts "Per Weapon": the local player's held weapon reads its own clones (RENDER.getPlayerWeaponId,
+    // v10.js:199009: p.currentWeaponId + 1 for the local renderer's settings, 0 = All)
     const ClientRenderSettings *settings = client_render_settings();
-    const int animate_aim = settings->aim_anim;
-    const float weapon_bobbing_mlt = settings->weapon_bob;
-    const float weapon_lean_mlt = settings->weapon_lean;
-    const float weapon_rotation = settings->weapon_rot;
-    const vec3 weapon_offset_mlt = {settings->weapon_off_x, settings->weapon_off_y, settings->weapon_off_z};
+    const int vm_weapon = player->render_you && player->loadout && player->loadout_index >= 0 && player->loadout_index < player->loadout_size
+                              ? player->loadout[player->loadout_index] : -1;
+#define VM_SETTING(key, value) ui_setting_weapon_float(key, vm_weapon, (float) (value))
+    const int animate_aim = VM_SETTING("aimAnim", settings->aim_anim) != 0.0f;
+    const float weapon_bobbing_mlt = VM_SETTING("weaponBob", settings->weapon_bob);
+    const float weapon_lean_mlt = VM_SETTING("weaponLean", settings->weapon_lean);
+    const float weapon_rotation = VM_SETTING("weaponRot", settings->weapon_rot);
+    const vec3 weapon_offset_mlt = {VM_SETTING("weaponOffX", settings->weapon_off_x), VM_SETTING("weaponOffY", settings->weapon_off_y),
+                                    VM_SETTING("weaponOffZ", settings->weapon_off_z)};
+    const float weap_swap_y = VM_SETTING("weapSwapY", settings->weap_swap_y);
+    const float weap_reload_y = VM_SETTING("weapReloadY", settings->weap_reload_y);
+    const float weapon_ads_off_y = VM_SETTING("weaponADSOffY", settings->weapon_ads_off_y);
+#undef VM_SETTING
 
     const int third_person = player_mesh->kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
     const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
@@ -1520,7 +1531,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     // rendering client, so other players never show the swap dip (their swap_timer is set by
     // player_spawn but only ticks down in procInputs, which they never run here).
     // * RENDER.weapSwapY (v10.js:170917): a negative weapSwapY swaps the weapon in from above
-    const float swap_anim = player->is_you && player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time * settings->weap_swap_y : 0.0f;
+    const float swap_anim = player->is_you && player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time * weap_swap_y : 0.0f;
     const float left_hand_mlt = player->left_handed ? -1.0f : 1.0f;
 
     const vec3 weapon_offset = {
@@ -1532,7 +1543,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float reload_speed = player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f; // (reSpd || 1)
     float reload_anim = player->reload_timer > 0.0f && player->weapon->reload_time > 0.0f ? 1.0f - player->reload_timer / (player->weapon->reload_time * reload_speed) : 0.0f;
     if (reload_anim > 0.5f) reload_anim = 1.0f - reload_anim;
-    reload_anim *= settings->weap_reload_y; // * RENDER.weapReloadY * weapon.reloY (v10.js:170919; every stock reloY is 1)
+    reload_anim *= weap_reload_y; // * RENDER.weapReloadY * weapon.reloY (v10.js:170919; every stock reloY is 1)
 
     reload_anim *= player->render_you ? 1.0f : 0.3f;
     // Nettspend Purple Drank (nettspend.h): the pour-up is the first-person reload animation, so the
@@ -1600,7 +1611,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const WeaponAttachment *attachment = weapon_attachment(player->weapon, player_attach_index(player));
     float aim_offset_y = attachment ? attachment->aim_offset_y + player->weapon->aim_offset_y : 0.0f;
     // weaponADSOffY: if (renderYou && weaponADSOffY != 1) aA = (aA || 0.1) * weaponADSOffY
-    if (player->render_you && settings->weapon_ads_off_y != 1.0f) aim_offset_y = (aim_offset_y ? aim_offset_y : 0.1f) * settings->weapon_ads_off_y;
+    if (player->render_you && weapon_ads_off_y != 1.0f) aim_offset_y = (aim_offset_y ? aim_offset_y : 0.1f) * weapon_ads_off_y;
 
     // toggleAim: a `scope` weapon (Sniper Rifle) hides its viewmodel once fully aimed so the scope reticle is clear.
     // v10 toggleAim hides weaponMeshes[loadoutIndex] whatever the camera (v10.js 172054): KrunkNative's third

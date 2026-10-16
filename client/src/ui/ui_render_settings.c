@@ -1206,5 +1206,7 @@ int client_render_hide_weapon_ads(const Client *client) {
     // 95.js: with hideADS the in-hand weapon is hidden once fully aimed (hvJK5(P, 1))
     // and shown again as soon as the aim starts going out.
     const Player *me = client ? client->me : NULL;
-    return g_rs.hide_ads && me && me->weapon && me->weapon->zoom && me->aim_val >= 1.0f;
+    const int weapon = me && me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout[me->loadout_index] : -1;
+    const int hide_ads = ui_setting_weapon_float("hideADS", weapon, (float) g_rs.hide_ads) != 0.0f; // vmSetts Per Weapon
+    return hide_ads && me && me->weapon && me->weapon->zoom && me->aim_val >= 1.0f;
 }

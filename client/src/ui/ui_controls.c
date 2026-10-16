@@ -1094,13 +1094,19 @@ UiInputSettings *ui_controls_settings(void) {
     return &g_ctl.settings;
 }
 
+// The local player's held weapon id (vmSetts / gpSetts Per Weapon), -1 none
+static int held_weapon(const Client *client) {
+    const Player *me = client ? client->me : menu_ui()->client ? menu_ui()->client->me : NULL;
+    return me && me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout[me->loadout_index] : -1;
+}
+
 float ui_controls_fps_fov(void) {
-    const float deg = g_ctl.settings.fps_fov;
+    const float deg = ui_setting_weapon_float("fpsFOV", held_weapon(NULL), g_ctl.settings.fps_fov);
     return (deg >= 10.0f && deg <= 179.0f ? deg : 90.0f) * (float) M_PI / 180.0f;
 }
 
 int ui_controls_scroll_dir(void) {
-    return g_ctl.settings.scroll_dir ? 1 : -1;
+    return ui_setting_weapon_float("scrollDir", held_weapon(NULL), (float) g_ctl.settings.scroll_dir) != 0.0f ? 1 : -1;
 }
 
 // showWeapon / showWeaponSec / showWeaponMel for the weapon in hand.
@@ -1759,9 +1765,15 @@ void ui_controls_fill_look(Client *client, Input *input, const float dx, const f
     g_ctl.look_x = g_ctl.look_y = 0.0f;
     const UiControllerInput *c = &g_ctl.cntrl;
     const int aiming = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
-    const float sens_x = g_ctl.input_cntrl ? (aiming ? c->aim_x : c->sens_x) : (aiming ? s->aim_sensitivity_x : s->sensitivity_x);
-    const float sens_y = g_ctl.input_cntrl ? (aiming ? c->aim_y : c->sens_y) : (aiming ? s->aim_sensitivity_y : s->sensitivity_y);
-    const int invert = g_ctl.input_cntrl ? c->invert : s->invert_y;
+    // gpSetts "Per Weapon": the mouse reads the held weapon's clones (CONTROLS.getSetByWep, v10.js:202383)
+    const int weapon = held_weapon(client);
+    const float sens_x = g_ctl.input_cntrl ? (aiming ? c->aim_x : c->sens_x)
+                                           : aiming ? ui_setting_weapon_float("aimSensitivityX", weapon, s->aim_sensitivity_x)
+                                                    : ui_setting_weapon_float("sensitivityX", weapon, s->sensitivity_x);
+    const float sens_y = g_ctl.input_cntrl ? (aiming ? c->aim_y : c->sens_y)
+                                           : aiming ? ui_setting_weapon_float("aimSensitivityY", weapon, s->aim_sensitivity_y)
+                                                    : ui_setting_weapon_float("sensitivityY", weapon, s->sensitivity_y);
+    const int invert = g_ctl.input_cntrl ? c->invert : ui_setting_weapon_float("invertY", weapon, (float) s->invert_y) != 0.0f;
     // Krunker Strike on a phone (strike_assist_client.c): the aim assist's pull joins the touch look and
     // fw() (0.75 while locked on) scales every look input; zeros and 1 otherwise
     float pull_x, pull_y, assist_mlt;

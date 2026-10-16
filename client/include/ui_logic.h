@@ -225,6 +225,11 @@ const cJSON *ui_setting_value(const char *key);  // settingValue: saved else def
 const cJSON *ui_setting_saved(const char *key);  // settings[key] only
 int  ui_setting_number(const char *key, double *out); // 1 when settingValue(key) is a number
 int  ui_setting_is_false(const char *key);       // settingValue(key) === false
+// v10 per-weapon settings (vmSetts / gpSetts "Per Weapon", ui_settings.c): the held weapon's clone
+// "<key>_<weapon id>" of a perWep / perWepG setting. 0 when the mode is off, weapon < 0 or key is not one.
+int  ui_setting_weapon_mode(int gameplay);       // vmSetts (0) / gpSetts (1) is Per Weapon
+int  ui_setting_weapon_value(const char *key, int weapon, double *out);
+float ui_setting_weapon_float(const char *key, int weapon, float fallback); // the clone, else fallback
 void ui_setting_to_string(const cJSON *value, char *buf, size_t n); // String(value)
 void ui_settings_set(const char *key, const HtmlArg *value); // setSetting(key, value)
 void ui_settings_set_string(const char *key, const char *value);

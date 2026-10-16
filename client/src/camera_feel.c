@@ -70,7 +70,8 @@ static float camera_feel_zoom(const Player *me) {
     const Weapon *weapon = me->weapon;
     if (!weapon || !weapon->zoom) return 1.0f;
 
-    const float ads_fov_mlt = menu_ui()->settings.ads_fov_mlt;
+    const int held = me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout[me->loadout_index] : -1;
+    const float ads_fov_mlt = ui_setting_weapon_float("adsFovMlt", held, menu_ui()->settings.ads_fov_mlt); // vmSetts Per Weapon
     // v7.1.4: weapon.zoom * attach.zoomMlt (the Acog Scope x1.35; FOV only)
     const float zoom = weapon_aim_zoom(weapon, weapon_attachment(weapon, player_attach_index(me)));
     // toggleAim: scopes jump straight to the full zoom once aimed (and back at the
@@ -121,4 +122,18 @@ void camera_feel_apply(Client *client) {
     client->camera.rotation.y = me->direction.y + g_shake.yaw;
 
     client->camera.zoom = camera_feel_zoom(me);
+
+    // fov with vmSetts "Per Weapon": the held weapon's clone (RENDER.fov[getPlayerWeaponId]); back to the
+    // setting once the mode goes off. (client_apply_setting sets the camera fov for the setting itself.)
+    static int per_weapon_fov;
+    const int held = me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout[me->loadout_index] : -1;
+    double fov;
+    if (ui_setting_weapon_value("fov", held, &fov)) {
+        if (fov >= 10.0 && fov <= 179.0) client->camera.fov = (float) (fov * M_PI / 180.0);
+        per_weapon_fov = 1;
+    } else if (per_weapon_fov) {
+        const float deg = menu_ui()->settings.fov;
+        if (deg >= 10.0f && deg <= 179.0f) client->camera.fov = deg * (float) M_PI / 180.0f;
+        per_weapon_fov = 0;
+    }
 }

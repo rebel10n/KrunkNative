@@ -17,6 +17,7 @@
 #if defined(__has_include)
 #if __has_include(<render_settings.h>)
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
+#include <ruleset.h>         // per-weapon settings: the weapon list (rules_weapon)
 #include <gamepad.h>         // disableCons: gamepad_set_disabled
 #define UI_HAVE_RENDER_SETTINGS 1
 #endif
@@ -370,7 +371,60 @@ static int color_setting(const char *key) {
     return 0;
 }
 
+// ---------------------------------------------------------------- per-weapon settings
+// v10 SETTINGS.init (v10.js:207505) clones every `perWep` (viewmodel) and `perWepG` (gameplay) setting
+// once per weapon as "<key>_<weapon id>", with the setting's own default and range. With vmSetts /
+// gpSetts on "Per Weapon" (1), the held weapon reads its clone (RENDER.getPlayerWeaponId, v10.js:199009;
+// CONTROLS.getSetByWep, v10.js:202383), every other time the setting itself. toggleADS is perWep in v10
+// too; KrunkNative has no toggle ADS yet, so it has no clone.
+static const char *const PER_WEP[] = {"fov", "fpsFOV", "weaponBob", "weaponLean", "weaponRot", "weaponOffX", "weaponOffY",
+                                      "weaponOffZ", "weaponADSOffY", "weapSwapY", "weapReloadY", "adsFovMlt", "aimAnim", "hideADS"};
+static const char *const PER_WEP_G[] = {"sensitivityX", "sensitivityY", "aimSensitivityX", "aimSensitivityY", "scrollDir", "invertY"};
+static int g_curr_wep; // windows[0].currWep: the weapon the window's Per Weapon rows edit
+
+// 1 = viewmodel (vmSetts), 2 = gameplay (gpSetts), 0 = not a per-weapon setting
+static int per_weapon_group(const char *key) {
+    for (size_t i = 0; i < sizeof(PER_WEP) / sizeof(PER_WEP[0]); i++) if (!strcmp(PER_WEP[i], key)) return 1;
+    for (size_t i = 0; i < sizeof(PER_WEP_G) / sizeof(PER_WEP_G[0]); i++) if (!strcmp(PER_WEP_G[i], key)) return 2;
+    return 0;
+}
+
+// "<key>_<id>" of a per-weapon setting: the setting's own key (defaults, range, colour rule); else `key`.
+static const char *base_key(const char *key, char *buf, const size_t n) {
+    const char *us = key ? strrchr(key, '_') : NULL;
+    if (!us || !us[1] || (size_t) (us - key) >= n) return key;
+    for (const char *c = us + 1; *c; c++) if (!isdigit((unsigned char) *c)) return key;
+    memcpy(buf, key, (size_t) (us - key));
+    buf[us - key] = 0;
+    return per_weapon_group(buf) ? buf : key;
+}
+
+int ui_setting_weapon_mode(const int gameplay) {
+    double v = 0.0;
+    return ui_setting_number(gameplay ? "gpSetts" : "vmSetts", &v) && (int) v == 1;
+}
+
+int ui_setting_weapon_value(const char *key, const int weapon, double *out) {
+    const int group = key ? per_weapon_group(key) : 0;
+    if (!group || weapon < 0 || !ui_setting_weapon_mode(group == 2)) return 0;
+    char clone[96];
+    snprintf(clone, sizeof(clone), "%s_%d", key, weapon);
+    const cJSON *v = ui_setting_saved(clone);
+    if (!v && g_defaults) v = cJSON_GetObjectItem(g_defaults, key); // the clone's val: the setting's default
+    if (cJSON_IsBool(v)) *out = cJSON_IsTrue(v) ? 1.0 : 0.0;
+    else if (cJSON_IsNumber(v)) *out = cJSON_GetNumberValue(v);
+    else if (!(cJSON_IsString(v) && string_is_number(cJSON_GetStringValue(v), out))) return 0;
+    return 1;
+}
+
+float ui_setting_weapon_float(const char *key, const int weapon, const float fallback) {
+    double v;
+    return ui_setting_weapon_value(key, weapon, &v) ? (float) v : fallback;
+}
+
 static cJSON *default_copy(const char *key) {
+    char buf[96];
+    key = base_key(key, buf, sizeof(buf));
     const cJSON *def = g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
     return def ? cJSON_Duplicate(def, 1) : NULL;
 }
@@ -399,7 +453,8 @@ static cJSON *normalize_setting(const char *key, cJSON *v) {
             v = def;
         }
     }
-    const cJSON *range = g_ranges ? cJSON_GetObjectItem(g_ranges, key) : NULL;
+    char base[96];
+    const cJSON *range = g_ranges ? cJSON_GetObjectItem(g_ranges, base_key(key, base, sizeof(base))) : NULL;
     if (cJSON_IsArray(range) && cJSON_GetArraySize(range) == 2) {
         double d = NAN;
         if (cJSON_IsNumber(v)) d = cJSON_GetNumberValue(v);
@@ -440,12 +495,14 @@ static void store_setting(const char *key, cJSON *value) {
     client_apply_setting(menu_ui()->client, key, text);
     sync_controls(key, text);
     if (!strcmp(key, "scaleUI") || !strcmp(key, "uiScaling")) menu_scale_base();
+    if (!strcmp(key, "vmSetts") || !strcmp(key, "gpSetts")) menu_rerender_if_open(1); // set(): updateWindow(1)
 }
 
 // coerce(): numeric strings become numbers when the default is a number.
 static cJSON *coerce_string(const char *key, const char *value) {
     double d;
-    const cJSON *def = g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
+    char base[96];
+    const cJSON *def = g_defaults ? cJSON_GetObjectItem(g_defaults, base_key(key, base, sizeof(base))) : NULL;
     if (cJSON_IsNumber(def) && string_is_number(value, &d)) return cJSON_CreateNumber(d);
     return cJSON_CreateString(value ? value : "");
 }
@@ -845,6 +902,105 @@ static void sync_preset_boxes(const HtmlElem root) {
     html_dom_insert_html(perf, HTML_INSERT_AFTER_END, box);
 }
 
+// One control of a per-weapon row rewritten to edit "<key>_<weapon>": its id (slid_<key>,
+// slid_input_<key>) and the "<key>" literal of its inline handlers.
+static void per_weapon_retarget(const HtmlElem el, const char *key, const int weapon) {
+    static const char *const ATTRS[] = {"oninput", "onchange", "onclick", "onkeypress"};
+    char from[100], to[112], text[512], out[600];
+    snprintf(from, sizeof(from), "\"%s\"", key);
+    snprintf(to, sizeof(to), "\"%s_%d\"", key, weapon);
+    for (size_t a = 0; a < sizeof(ATTRS) / sizeof(ATTRS[0]); a++) {
+        if (html_dom_get_attr(el, ATTRS[a], text, sizeof(text)) < 0) continue;
+        const char *hit = strstr(text, from);
+        if (!hit) continue;
+        snprintf(out, sizeof(out), "%.*s%s%s", (int) (hit - text), text, to, hit + strlen(from));
+        html_dom_set_attr(el, ATTRS[a], out);
+    }
+    if (html_dom_get_attr(el, "id", text, sizeof(text)) >= 0 && !strncmp(text, "slid_", 5)) {
+        const char *rest = !strncmp(text + 5, "input_", 6) ? text + 11 : text + 5;
+        if (!strcmp(rest, key)) {
+            snprintf(out, sizeof(out), "%s_%d", text, weapon);
+            html_dom_set_attr(el, "id", out);
+        }
+    }
+}
+
+// windows[0].getSettings with vmSetts / gpSetts on Per Weapon (v10.js:211100): the group's rows edit the
+// clones of windows[0].currWep, and the mode row is followed by "Select Weapon" (changeWep) with Apply To
+// All / Reset All (v10.js:211014 applyAllWeps / resetAllWeps).
+static void per_weapon_rows(const HtmlElem root) {
+    HtmlElem *found = malloc(sizeof(HtmlElem) * UI_QUERY_MAX);
+    if (!found) return;
+    for (int group = 1; group <= 2; group++) {
+        if (!ui_setting_weapon_mode(group == 2)) continue;
+        const char *mode = group == 2 ? "gpSetts" : "vmSetts";
+        int n = html_dom_query_all(root, "input[id^=slid_], select[onchange], input[type=checkbox][onclick]", found, UI_QUERY_MAX);
+        HtmlElem mode_row = 0;
+        for (int i = 0; i < n; i++) {
+            char key[96], id[112];
+            if (html_dom_get_attr(found[i], "id", id, sizeof(id)) >= 0 && !strncmp(id, "slid_", 5))
+                snprintf(key, sizeof(key), "%s", !strncmp(id + 5, "input_", 6) ? id + 11 : id + 5);
+            else if (!control_setting_key(found[i], key, sizeof(key))) continue;
+            if (!strcmp(key, mode)) mode_row = html_dom_closest(found[i], ".settName");
+            if (per_weapon_group(key) != group) continue;
+            per_weapon_retarget(found[i], key, g_curr_wep);
+            // the clone's value (saved, else the setting's default)
+            char clone[112], text[256];
+            snprintf(clone, sizeof(clone), "%s_%d", key, g_curr_wep);
+            const cJSON *v = ui_setting_saved(clone);
+            if (!v && g_defaults) v = cJSON_GetObjectItem(g_defaults, key);
+            if (!v) continue;
+            if (elem_is_checkbox(found[i])) {
+                html_dom_set_checked(found[i], cJSON_IsTrue(v) || (cJSON_IsNumber(v) && cJSON_GetNumberValue(v) != 0.0));
+            } else {
+                ui_setting_to_string(v, text, sizeof(text));
+                html_dom_set_value(found[i], text);
+            }
+        }
+        if (!mode_row || html_dom_query(root, group == 2 ? "[data-kn-perwep='gpSetts']" : "[data-kn-perwep='vmSetts']")) continue;
+        StrBuf sb = {0};
+        char line[256];
+        snprintf(line, sizeof(line), "<div class='settName' data-kn-perwep='%s'>Select Weapon<select onchange='window.windows[0].changeWep(this)' class='inputGrey2'>", mode);
+        sb_append(&sb, line);
+        for (size_t w = 0; w < rules_weapon_count(); w++) {
+            const Weapon *weapon = rules_weapon((int) w);
+            if (!weapon || !weapon->name || !weapon->name[0]) continue;
+            snprintf(line, sizeof(line), "<option value='%d' %s>", (int) w, (int) w == g_curr_wep ? "selected" : "");
+            sb_append(&sb, line);
+            sb_append(&sb, weapon->name);
+            sb_append(&sb, "</option>");
+        }
+        snprintf(line, sizeof(line), "</select><div class='settingsBtn' style='width: auto;' onclick='window.windows[0].applyAllWeps(\"%s\")'>Apply To All</div>"
+                                     "<div class='settingsBtn' style='width: auto;' onclick='window.windows[0].resetAllWeps(\"%s\")'>Reset All</div></div>", mode, mode);
+        sb_append(&sb, line);
+        char *html = sb_finish(&sb);
+        if (html) html_dom_insert_html(mode_row, HTML_INSERT_AFTER_END, html);
+        free(html);
+    }
+    free(found);
+}
+
+// applyAllWeps / resetAllWeps (v10.js:211014): every weapon's clones of the group take the edited
+// weapon's value (or the default), then the window redraws.
+static void per_weapon_all(const char *mode, const int reset) {
+    const int group = !strcmp(mode, "gpSetts") ? 2 : 1;
+    const char *const *keys = group == 2 ? PER_WEP_G : PER_WEP;
+    const size_t count = group == 2 ? sizeof(PER_WEP_G) / sizeof(PER_WEP_G[0]) : sizeof(PER_WEP) / sizeof(PER_WEP[0]);
+    for (size_t k = 0; k < count; k++) {
+        char clone[112];
+        snprintf(clone, sizeof(clone), "%s_%d", keys[k], g_curr_wep);
+        const cJSON *src = reset ? NULL : ui_setting_saved(clone);
+        if (!src && g_defaults) src = cJSON_GetObjectItem(g_defaults, keys[k]);
+        if (!src) continue;
+        for (size_t w = 0; w < rules_weapon_count(); w++) {
+            if (!rules_weapon((int) w)) continue;
+            snprintf(clone, sizeof(clone), "%s_%d", keys[k], (int) w);
+            store_setting(clone, cJSON_Duplicate(src, 1));
+        }
+    }
+    menu_rerender_if_open(1);
+}
+
 void ui_settings_apply_values(const HtmlElem root) {
     if (!root) return;
     sync_preset_select();
@@ -885,6 +1041,7 @@ void ui_settings_apply_values(const HtmlElem root) {
         }
     }
     free(found);
+    per_weapon_rows(root);
     // settings.list.voiceDistance.hide = voiceChatType == 0: the captured row is display:none
     // (voice.c shows / hides it on a live change)
     char type[8] = "";
@@ -1527,6 +1684,20 @@ int ui_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
     }
     if (!strcmp(name, "importSettingsPopup")) {
         import_popup();
+        return 1;
+    }
+    if (!strcmp(name, "windows.0.changeWep")) { // currWep = parseInt(this.value); updateWindow(1)
+        const HtmlElem sel = argc > 0 && args[0].kind == HTML_ARG_NUM ? 0 : arg_elem(ev, args, argc, 0);
+        char v[16] = "";
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM) snprintf(v, sizeof(v), "%d", (int) args[0].num); // a script's index
+        else if (sel) html_dom_get_value(sel, v, sizeof(v));
+        else if (ev && ev->value) snprintf(v, sizeof(v), "%s", ev->value);
+        g_curr_wep = (int) strtol(v, NULL, 10);
+        menu_rerender_if_open(1);
+        return 1;
+    }
+    if (!strcmp(name, "windows.0.applyAllWeps") || !strcmp(name, "windows.0.resetAllWeps")) {
+        per_weapon_all(arg_text(ev, args, argc, 0, buf, sizeof(buf)), name[10] == 'r');
         return 1;
     }
     if (!strcmp(name, "importSettings")) {

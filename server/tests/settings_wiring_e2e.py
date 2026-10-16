@@ -362,6 +362,38 @@ check(len(o1) >= 3 and max(o1) > 5.0 and max(o1) < 21.0, "tracerOffset 1: the tr
       str([round(v, 2) for v in o1]))
 check("[vfx] trailCol 1.000 0.000 0.000 ropeCol 0.000 1.000 0.000" in log, "trailCol / ropeCol: the trail red, the rope green")
 
+# ---------------------------------------------------------------- per weapon (vmSetts / gpSetts)
+# The Game tab with vmSetts on Per Weapon: "Select Weapon" follows the row and the viewmodel rows edit the
+# picked weapon's clones; Apply To All copies them to every weapon. In game the held weapon reads its
+# clone (weaponOffX 3 moves the viewmodel), and gpSetts' sensitivityX 0.1 (its minimum) slows the mouse to a tenth.
+PW_LOG = os.path.join(WORK, "perwep.csv")
+pw = ["0 menu", "300 call showWindow 1", "600 clickid typeBtn", "900 call windows.0.changeTab 4",
+      '1200 call setSetting "vmSetts" "1"', "1500 nodes @pw [data-kn-perwep=vmSetts]", "1500 nodes @bob0 [id=slid_weaponBob_0]",
+      "1500 nodes @bobh input[oninput*='\"weaponBob_0\"']", "1600 call windows.0.changeWep 2", "1900 nodes @bob2 [id=slid_weaponBob_2]", f"1950 frames {SHOTS}/perweapon 1",
+      '2000 call setSetting "weaponOffX_2" "3"', '2100 call windows.0.applyAllWeps "vmSetts"',
+      "2400 call windows.0.changeTab 1", '2700 call setSetting "gpSetts" "1"', "3000 nodes @gp [data-kn-perwep=gpSetts]",
+      '3100 call setSetting "sensitivityX_2" "0.1"', '3200 call windows.0.applyAllWeps "gpSetts"',
+      "3500 play", "5000 cursor 640 360", "5100 cam @g0", "5150 cursor 700 360", "5200 cursor 760 360", "5300 cam @g1",
+      '5400 call setSetting "gpSetts" "0"', '5400 call setSetting "vmSetts" "0"', "5500 cam @g2", "5550 cursor 820 360",
+      "5600 cursor 880 360", "5700 cam @g3", "5800 quit"]
+log = run("perwep", "\n".join(pw), {"KRUNKNATIVE_INPUT_LOG": PW_LOG})
+check(nodes_of(log, "pw") == 1 and nodes_of(log, "bob0") == 1 and nodes_of(log, "bobh") == 1,
+      "vmSetts Per Weapon: Select Weapon shows and the viewmodel rows edit weapon 0's clones",
+      f"{nodes_of(log, 'pw')} {nodes_of(log, 'bob0')} {nodes_of(log, 'bobh')}")
+check(nodes_of(log, "bob2") == 1, "Select Weapon: the rows follow the picked weapon (2)", str(nodes_of(log, "bob2")))
+check(nodes_of(log, "gp") == 1, "gpSetts Per Weapon: Select Weapon on the Controls tab", str(nodes_of(log, "gp")))
+wp = []
+if os.path.exists(PW_LOG):
+    with open(PW_LOG) as f:
+        wp = [(float(r["t"]), abs(float(r["wp_x"]))) for r in _csv.DictReader(f)]
+on = [v for t, v in wp if 4500 <= t < 5300]
+off = [v for t, v in wp if 5600 <= t < 5800]
+check(on and off and min(on) > 2.5 * max(off), "vmSetts Per Weapon: the held weapon's weaponOffX 3 (applied to all) moves the viewmodel",
+      f"on {min(on, default=None)} off {max(off, default=None)}")
+g = [cam_yaw(log, f"g{i}") for i in range(4)]
+check(None not in g and abs(g[3] - g[2]) > 0.01 and abs(abs(g[1] - g[0]) / abs(g[3] - g[2]) - 0.1) < 0.02,
+      "gpSetts Per Weapon: sensitivityX 0.1 on every weapon turns a tenth of the global setting's 1", str(g))
+
 if failures:
     print(f"FAILED {len(failures)}: logs in {WORK}")
     sys.exit(1)
