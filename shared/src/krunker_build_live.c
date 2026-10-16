@@ -42,6 +42,7 @@ static const KrunkerBuild COMPILED = {
     .health = {KRUNKER_HEALTH_ARG_HEALTH, KRUNKER_HEALTH_ARG_SID, KRUNKER_HEALTH_ARG_SRC_X, KRUNKER_HEALTH_ARG_SRC_Z,
                KRUNKER_HEALTH_ARG_NO_HIT_MARKER, KRUNKER_HEALTH_ARG_RESET_MAX},
     .score = {KRUNKER_SCORE_ARG_DELTA, KRUNKER_SCORE_ARG_RELAY, KRUNKER_SCORE_ARG_ABSOLUTE, KRUNKER_SCORE_ARG_CLASS_INDEX},
+    .bomb = {KRUNKER_BOMB_ARG_BOMBS},
     .cheat_salt = KRUNKER_CHEAT_SALT,
     .cheat_salt_len = KRUNKER_CHEAT_SALT_LEN,
     .cheat_fnv_offset = KRUNKER_CHEAT_FNV_OFFSET,
@@ -64,6 +65,7 @@ static const char *const KILL_NAME[KRB_KILL_COUNT] = {"victim", "deaths", "kille
 static const char *const DAMAGE_NAME[KRB_DAMAGE_COUNT] = {"target", "damage", "crit", "kill", "ai", "silent"};
 static const char *const HEALTH_NAME[KRB_HEALTH_COUNT] = {"health", "sid", "srcX", "srcZ", "noHitMarker", "resetMax"};
 static const char *const SCORE_NAME[KRB_SCORE_COUNT] = {"delta", "relay", "absolute", "classIndex"};
+static const char *const BOMB_NAME[KRB_BOMB_COUNT] = {"bombs"};
 
 #undef KRB_WIRE_
 #undef KRB_KEY_
@@ -138,7 +140,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_UPDATE_OBJECTIVE, KRUNKER_S2C_UPDATE_ROUNDS_DIS, KRUNKER_S2C_UPDATE_WEAPON_STREAK,
     // sights and sounds (official-ingame-fx / -world): tracers, projectiles, explosions, nukes, shakes, sounds, sprays,
     // pings, popups and messages, animations, Big Head, ambience, the host and vote announcements
-    KRUNKER_S2C_SHOW_TRACER, KRUNKER_S2C_SHOW_PROJECTILE, KRUNKER_S2C_END_PROJECTILE, KRUNKER_S2C_EXPLOSION,
+    KRUNKER_S2C_SHOW_TRACER, KRUNKER_S2C_SHOW_PROJECTILE, KRUNKER_S2C_SHOW_BOMBARDMENT, KRUNKER_S2C_END_PROJECTILE,
+    KRUNKER_S2C_EXPLOSION,
     KRUNKER_S2C_NUKE_UPDATE, KRUNKER_S2C_BOMBARDMENT_UPDATE, KRUNKER_S2C_SHAKE, KRUNKER_S2C_EFFECT, KRUNKER_S2C_PLAY_SOUND,
     KRUNKER_S2C_STOP_SOUND, KRUNKER_S2C_PLAYER_SOUND, KRUNKER_S2C_ADD_PLAYER_SOUND, KRUNKER_S2C_REMOVE_PLAYER_SOUND,
     KRUNKER_S2C_TRIGGER_IMG_SOUND, KRUNKER_S2C_JUMP_SCARE, KRUNKER_S2C_ADD_SPRAY, KRUNKER_S2C_MARK_POSITION,
@@ -464,6 +467,7 @@ static int parse_doc(const cJSON *d, KrunkerBuild *b, StrBlock *blk, char *why, 
                         b->health, why, why_n)))
         return rc;
     if ((rc = read_args(lay, "get_score", "GET_SCORE", SCORE_NAME, KRB_SCORE_COUNT, NULL, 0, b->score, why, why_n))) return rc;
+    if ((rc = read_args(lay, "show_bombardment", "SHOW_BOMBARDMENT", BOMB_NAME, KRB_BOMB_COUNT, NULL, 0, b->bomb, why, why_n))) return rc;
 
     // extras: optional (the compiled values stay when one did not extract)
     const cJSON *ex = obj(d, "extras");

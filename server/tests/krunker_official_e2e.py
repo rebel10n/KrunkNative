@@ -111,7 +111,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
-        "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
+        "--fx": "fx", "--bomb": "bomb", "--world": "world", "--actions": "actions", "--live": "live",
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
@@ -768,6 +768,10 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
                 await self.fx_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "bomb":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await self.bomb_phases(send, stop)
             elif self.got_en.is_set() and self.scenario == "world":
                 await send("frs")
                 x, y, z = self.spawn
@@ -1119,6 +1123,29 @@ class Stub:
         await send("so", "cheer_0", 0.5, 1)             # PLAY_SOUND, 2D
         await send("n", 0)                              # NUKE_UPDATE: the siren
         await send("shk", 0.5)                          # SHAKE
+        await hold(3.0)
+        self.sent["done"] = time.monotonic()
+        await hold(2.0)
+
+    async def bomb_phases(self, send, stop):
+        """Bombardment bombs (run_native_bomb): the drop sound ("bbm" 0), two bombs of a "bmb" list over us
+        (x, y, z, sid, pjSp each), a stored[2] "pr" bomb, and the "pre" that ends the first one. An "l" every
+        0.4 s keeps us at 4, 0, 4 and acks the last isn."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["bomb"] = time.monotonic()
+        await send("bbm", 0)                                              # BOMBARDMENT_UPDATE: adrop_0
+        await send("bmb", [4.0, 12.0, 4.0, 500, 0.5, 6.0, 12.0, 6.0, 501, 1.0])  # SHOW_BOMBARDMENT
+        await send("pr", 0.0, 12.0, 0.0, 0.0, -math.pi / 2, 2, 502, 1, None, BOT_SID)  # a stored[2] bomb
+        await hold(0.4)
+        await send("pre", 500, 0, 4.0, 0.0, 4.0, 1)                       # the first bomb lands
         await hold(3.0)
         self.sent["done"] = time.monotonic()
         await hold(2.0)
@@ -2751,6 +2778,32 @@ def run_native_fx():
     check(f"{label}: NUKE_UPDATE 0: the siren", any("play2d siren_0 " in l for l in audio), audio[-6:])
 
 
+def run_native_bomb():
+    """Bombardment bombs (krunker_link.c on_bombardment, projectiles_render.c): the stub (Stub.bomb_phases)
+    drops two bombs over us ("bmb"), sends a stored[2] "pr" bomb and lands one of them ("pre"); the client's
+    projectile log shows each bomb falling at its speed and the landing, and the drop sound plays."""
+    label = "native-bomb"
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n15000 quit\n" % PASTE_TOKEN
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VFX_LOG": "1", "KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="bomb")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("bomb", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    audio = [l for l in lines if "[audio]" in l and " play" in l]
+    check(f"{label}: BOMBARDMENT_UPDATE 0: the drop sound adrop_0", any("play2d adrop_0 " in l for l in audio), audio[-6:])
+    proj = [l for l in lines if "[proj]" in l]
+    check(f"{label}: SHOW_BOMBARDMENT: a bomb at 4, 12, 4 falls at 0.4 x its pjSp 0.5",
+          re.search(r"\[proj\] spawn w-1 bomb at 4\.0 12\.0 4\.0 v -?0\.000 -0\.200 -?0\.000", text), proj[:6])
+    check(f"{label}: SHOW_BOMBARDMENT: the second bomb (pjSp 1) falls at 0.4",
+          re.search(r"\[proj\] spawn w-1 bomb at 6\.0 12\.0 6\.0 v -?0\.000 -0\.400 -?0\.000", text), proj[:6])
+    check(f"{label}: SHOW_PROJECTILE stored[2]: a bomb with no pjSp falls at 0.4",
+          re.search(r"\[proj\] spawn w-1 bomb at 0\.0 12\.0 0\.0 v -?0\.000 -0\.400 -?0\.000", text), proj[:6])
+    check(f"{label}: END_PROJECTILE: the first bomb lands with its impact",
+          re.search(r"\[proj\] end id \d+ at 4\.0 0\.0 4\.0 impact 1", text), proj[:6])
+
+
 def run_native_join_end():
     """Play, then the official lobby's round turns out to be over (the user's report: "the camera just
     continues rotating like I'm in the menu, until the game actually starts"): the server's "end" type 1
@@ -3807,6 +3860,8 @@ def main():
         run_native_seek_modes()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
         run_native_fx()
+    if ONLY == "bomb" and os.path.isfile(f"{BUILD}/client_bin"):  # just the Bombardment bombs run
+        run_native_bomb()
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs
         run_native_reload(False)
         run_native_reload(True)

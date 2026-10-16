@@ -110,6 +110,42 @@ static void test_charge_speed(void) {
     g_me.throw_speed_mlt = 1.0f;
 }
 
+// Bombardment bombs (stored[2], NetProjectilePacket.bomb): a streak_3 visual falling at its speed, never
+// a tracer box, ended by its "pre" (no linger). Their mesh needs GL, so this test only follows the slot.
+static void test_bomb(void) {
+    NetProjectilePacket p;
+    memset(&p, 0, sizeof(p));
+    p.id = 5;
+    p.weapon_index = -1;
+    p.bomb = 1;
+    p.position[0] = 4.0f; p.position[1] = 12.0f; p.position[2] = 4.0f;
+    p.velocity[1] = -0.2f;
+    p.range = 1500.0f;
+    projectiles_render_server_spawn(&g_client, &p);
+
+    const ProjVisual *bomb = NULL;
+    for (int i = 0; i < PROJ_MAX; i++) {
+        if (proj.visuals[i].active && proj.visuals[i].bomb) bomb = &proj.visuals[i];
+    }
+    CHECK(bomb && !bomb->knife && bomb->linked && bomb->server_id == 5 && bomb->spd > 0.19f && bomb->spd < 0.21f && bomb->size.x == 10.0f,
+          "a bomb spawns linked to its slot, at speed 0.2, scale 10");
+
+    ProjectileBox boxes[PROJ_MAX];
+    CHECK(projectiles_render_boxes(boxes, PROJ_MAX) == 0, "a bomb is no tracer box");
+
+    projectiles_render_update(&g_client, 100.0f); // 100 ms at 0.2 units per ms: 20 units down
+    CHECK(bomb && fabsf(bomb->position.y + 8.0f) < 1e-3f, "the bomb falls at its velocity (y %g)", bomb ? bomb->position.y : 0.0f);
+    CHECK(bomb && bomb->spin > 0.0f && bomb->roll > 0.79f && bomb->roll < 0.81f, "the bomb spins about Y at 0.008 per ms (roll %g)", bomb ? bomb->roll : 0.0f);
+
+    NetProjectileEndPacket e;
+    memset(&e, 0, sizeof(e));
+    e.id = 5;
+    e.position[0] = 4.0f; e.position[1] = 0.0f; e.position[2] = 4.0f;
+    e.impact = 1;
+    projectiles_render_server_end(&g_client, &e);
+    CHECK(bomb && !bomb->active, "its \"pre\" ends the bomb, with no linger");
+}
+
 int main(void) {
     g_me.uid = 7;
     g_me.active = 1;
@@ -128,6 +164,7 @@ int main(void) {
 
     test_relink();
     test_charge_speed();
+    test_bomb();
 
     if (g_failures) {
         printf("projectiles_render_test: %d of %d checks failed\n", g_failures, g_checks);

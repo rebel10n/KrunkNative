@@ -14,7 +14,8 @@
 // prediction of the same weapon) instead of spawning a second one.
 //
 // Box projectiles are drawn by vfx.c with the tracer boxes (projectiles_render_boxes);
-// thrown knives are textured melee meshes drawn through a private Scene.
+// thrown knives are textured melee meshes drawn through a private Scene. The Bombardment bombs
+// (stored[2], "bmb" / "pr" with bomb = 1) are the streak_3 model in the same Scene, spun about Y.
 #include <client.h>
 
 typedef struct {

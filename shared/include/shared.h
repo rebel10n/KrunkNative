@@ -2789,6 +2789,7 @@ typedef struct {
     float gravity;         // units/ms^2
     float range;
     uint8_t ai_kind;       // AI shot: projectiles.stored[ai_kind] drawn as "orb_0" (weapon_index unused), 0 none
+    uint8_t bomb;          // Bombardment bomb (Krunker stored[2]): the streak_3 model falling, no weapon or owner
 } NetProjectilePacket;
 
 typedef struct {

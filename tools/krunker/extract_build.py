@@ -1192,8 +1192,18 @@ def extract_get_score(src, tables):
     return _roles(anchor, params, found, ("delta", "relay", "absolute", "classIndex"))
 
 
+def extract_show_bombardment(src, tables):
+    """SHOW_BOMBARDMENT ("bmb"): the handler's one argument is the flat list of bombs (its physObj loop
+    reads them 5 values at a time, :220832). The stride is the client's own constant."""
+    anchor = "SHOW_BOMBARDMENT arguments"
+    params, body = s2c_handler(src, tables, "SHOW_BOMBARDMENT", lambda b: re.search(prop("physObj"), b) and re.search(prop("stored"), b))
+    P = _alt(params)
+    found = {"bombs": _first(P + r"\s*" + prop("length"), body)}
+    return _roles(anchor, params, found, ("bombs",))
+
+
 def extract_layouts(src, tables):
-    return {
+    out = {
         "add_players": extract_add_players(src, tables),
         "update_players": extract_update_players(src, tables),
         "sync_player": extract_sync_player(src, tables),
@@ -1202,6 +1212,11 @@ def extract_layouts(src, tables):
         "change_health": extract_change_health(src, tables),
         "get_score": extract_get_score(src, tables),
     }
+    try:  # optional: a build without the bombardment handler has no bomb list role (the client draws none)
+        out["show_bombardment"] = extract_show_bombardment(src, tables)
+    except ExtractError:
+        pass
+    return out
 
 
 def _opt(name, fn, src, warnings):
@@ -1604,6 +1619,7 @@ ARG_DOCS = (
     ("do_damage", "DAMAGE", "DO_DAMAGE (\"4\"): a hit you dealt; ai: the target is an AI sid"),
     ("change_health", "HEALTH", "CHANGE_HEALTH (\"h\"): sid null means you; srcX / srcZ the hit's source"),
     ("get_score", "SCORE", "GET_SCORE (\"5\"): relay = a spectated player's score, not yours"),
+    ("show_bombardment", "BOMB", "SHOW_BOMBARDMENT (\"bmb\"): bombs, a flat list of 5 values a bomb (x, y, z, sid, pjSp)"),
 )
 
 
@@ -1640,6 +1656,8 @@ def render_layouts(w, lay):
         w("")
     w("/* Argument positions of the per-event packets (the handler's parameters, by role). */")
     for key_, prefix, doc in ARG_DOCS:
+        if key_ not in lay:  # an optional packet whose layout did not extract
+            continue
         A_ = lay[key_]
         names = _c_names(prefix + "_ARG", list(A_["args"]), key_)
         w("/* %s */" % doc)

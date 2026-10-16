@@ -633,7 +633,7 @@ static void test_combat(void) {
     clear();
 }
 
-// Combat visuals / sounds (fx): "9" "s" "so" "sso" "pr" "pre" "ex" "k"[11] "pk" "upk" "bh" "n" "bbm"
+// Combat visuals / sounds (fx): "9" "s" "so" "sso" "pr" "bmb" "pre" "ex" "k"[11] "pk" "upk" "bh" "n" "bbm"
 // "asnd" "rsnd" "fh" "scr" "is" "camb" "shk" "ana"
 static void test_fx(void) {
     KrunkerLink link;
@@ -709,17 +709,20 @@ static void test_fx(void) {
                                         KRUNKER_V_NUM(300), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(7)}, 10);
     feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(M_PI / 2), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
                                         KRUNKER_V_NUM(301), KRUNKER_V_NUM(1), KRUNKER_V_NIL, KRUNKER_V_NUM(7)}, 10);
-    feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(2),
-                                        KRUNKER_V_NUM(302), KRUNKER_V_NUM(1)}, 8); // a bombardment bomb: no visual of ours
+    feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(-M_PI / 2), KRUNKER_V_NUM(2),
+                                        KRUNKER_V_NUM(302), KRUNKER_V_NUM(1)}, 8); // stored[2]: a bombardment bomb, dropped straight down
     {
         READ_IN(NetProjectilePacket, r, PROJECTILE, 0);
         READ_IN(NetProjectilePacket, k, PROJECTILE, 1);
+        READ_IN(NetProjectilePacket, bo, PROJECTILE, 2);
         CHECK(r_p && r.weapon_index == 9 && r.owner_uid == 7 && r.id >= 0 && r.id < GAME_MAX_PROJECTILES && r.position[2] == 3 &&
               fabsf(r.velocity[2] - 0.6f) < 1e-5f && fabsf(r.velocity[0]) < 1e-5f && r.gravity == 0.0001f && r.range == 1200.0f,
               "pr: rocket, yaw PI flies +z at its spd (v %g %g %g)", r.velocity[0], r.velocity[1], r.velocity[2]);
         CHECK(k_p && k.weapon_index == WEAPON_ID_KNIFE && k.id != r.id && fabsf(k.velocity[0] + 0.38f) < 1e-5f && k.range == 1500.0f && !k.ai_kind,
               "pr: stored[0] the thrown knife (v %g %g %g)", k.velocity[0], k.velocity[1], k.velocity[2]);
-        CHECK(!find_in(NET_PACKET_PROJECTILE, 2), "pr: stored[2] dropped");
+        CHECK(bo_p && bo.bomb && bo.weapon_index == -1 && !bo.ai_kind && bo.owner_uid == -1 && bo.range == 1500.0f &&
+              fabsf(bo.velocity[1] + 0.4f) < 1e-5f && fabsf(bo.velocity[0]) < 1e-5f && bo.id != r.id && bo.id != k.id,
+              "pr: stored[2] is a bomb at 0.4 down (v %g %g %g)", bo.velocity[0], bo.velocity[1], bo.velocity[2]);
         feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(300), KRUNKER_V_NUM(0), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1)}, 6);
         feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 6);
         feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(999), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1)}, 6);
@@ -743,6 +746,38 @@ static void test_fx(void) {
             ok &= pp.id >= 0 && pp.id < GAME_MAX_PROJECTILES;
         }
         CHECK(ok, "pr: every projectile gets one of our %d slots", GAME_MAX_PROJECTILES);
+    }
+    clear();
+
+    // "bmb" [x, y, z, sid, pjSp, ...]: two bombs (sids 401 at pjSp 0.5, 402 at 1) and one without a sid
+    {
+        const KrunkerValue bombs[] = {KRUNKER_V_NUM(1.5), KRUNKER_V_NUM(300), KRUNKER_V_NUM(-2), KRUNKER_V_NUM(401), KRUNKER_V_NUM(0.5),
+                                      KRUNKER_V_NUM(4), KRUNKER_V_NUM(310), KRUNKER_V_NUM(7), KRUNKER_V_NUM(402), KRUNKER_V_NUM(1),
+                                      KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NUM(1)};
+        feed(&link, "bmb", (KrunkerValue[]) {KRUNKER_V_ARRAY(bombs, 15)}, 1);
+        READ_IN(NetProjectilePacket, b1, PROJECTILE, 0);
+        READ_IN(NetProjectilePacket, b2, PROJECTILE, 1);
+        CHECK(!find_in(NET_PACKET_PROJECTILE, 2), "bmb: a bomb without a sid is skipped");
+        CHECK(b1_p && b1.bomb && b1.position[0] == 1.5f && b1.position[1] == 300 && b1.position[2] == -2 && b1.owner_uid == -1 &&
+              b1.range == 1500.0f && fabsf(b1.velocity[1] + 0.2f) < 1e-5f && fabsf(b1.velocity[0]) < 1e-5f,
+              "bmb: a bomb at 1.5 300 -2 falls at 0.4 x pjSp 0.5 (v %g %g %g)", b1.velocity[0], b1.velocity[1], b1.velocity[2]);
+        CHECK(b2_p && b2.bomb && b2.position[1] == 310 && b2.id != b1.id && fabsf(b2.velocity[1] + 0.4f) < 1e-5f,
+              "bmb: the second bomb (sid 402) at pjSp 1");
+        // its "pre" ends the first bomb's slot, with its impact
+        feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(401), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(1)}, 6);
+        READ_IN(NetProjectileEndPacket, be, PROJECTILE_END, 0);
+        CHECK(be_p && be.id == b1.id && be.impact, "pre: the bomb's slot ends with its impact");
+    }
+    clear();
+
+    // "pr" stored[2] with customProj { pjSp: 0.25 }: a bomb at 0.1
+    {
+        const KrunkerValue pj_kv[] = {KRUNKER_V_STR("pjSp"), KRUNKER_V_NUM(0.25)};
+        const KrunkerValue pj[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(-M_PI / 2),
+                                   KRUNKER_V_NUM(2), KRUNKER_V_NUM(403), KRUNKER_V_NUM(1), KRUNKER_V_MAP(pj_kv, 1)};
+        feed(&link, "pr", pj, 9);
+        READ_IN(NetProjectilePacket, pb, PROJECTILE, 0);
+        CHECK(pb_p && pb.bomb && fabsf(pb.velocity[1] + 0.1f) < 1e-5f, "pr: stored[2] customProj pjSp scales the bomb (v %g)", pb.velocity[1]);
     }
     clear();
 

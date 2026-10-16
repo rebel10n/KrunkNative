@@ -124,7 +124,9 @@
 //   s       [sound, sid, x, y, z, vol, rate, dist, roll, force, isAsset]  NET_PACKET_SOUND (krunker_sounds.h names)
 //   so      [sound, vol, mode, x, y, z, rate, dist, roll, isAsset]        NET_PACKET_SOUND (mode 1: 2D, uid -2)
 //   sso     [sound, isAsset]                 NET_PACKET_STOP_SOUND
-//   pr      [x, y, z, yaw, pitch, wep|stored, sid, isStored, custom, owner]  NET_PACKET_PROJECTILE (slot remapped)
+//   pr      [x, y, z, yaw, pitch, wep|stored, sid, isStored, custom, owner]  NET_PACKET_PROJECTILE (slot remapped;
+//                                            stored[2], a bomb: bomb = 1, pjSp from custom)
+//   bmb     [bombs]                          NET_PACKET_PROJECTILE per bomb (bomb = 1): x, y, z, sid, pjSp a bomb
 //   pre     [sid|shotCntP, isOwn, x, y, z, impact]  NET_PACKET_PROJECTILE_END (own: NET_PROJECTILE_END_OWN - cnt)
 //   ex      [x, y, z, radius, smCnt, lgCnt]  NET_PACKET_EXPLOSION
 //   k [11]  grapple [x, y, z] | null         NET_PACKET_GRAPPLE on a change

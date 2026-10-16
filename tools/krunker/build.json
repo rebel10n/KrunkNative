@@ -2167,6 +2167,12 @@
     "absolute": 2,
     "classIndex": 3
    }
+  },
+  "show_bombardment": {
+   "argc": 1,
+   "args": {
+    "bombs": 0
+   }
   }
  },
  "cheat_keystream_js": "function iiìììïì(iîÌîíìí, iíÌíììì) {\n    for (var iîIìîîi = iîiïíîî, iíÍîiîì = new Uint8Array(iíÌíììì), iiÍìïîî = 0x0; iiÍìïîî < iíÌíììì; iiÍìïîî++) {\n      iíÍîiîì[iiÍìïîî] = (iîÌîíìí[\"charCodeAt\"](iiÍìïîî % iîÌîíìí['length']) ^ iîIìîîi[iiÍìïîî % iîIìîîi[\"length\"]]) + iiÍìïîî & 0xff;\n    }\n    return iíÍîiîì;\n  }",

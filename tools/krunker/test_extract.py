@@ -64,6 +64,7 @@ KNOWN_ARGS = {
     "do_damage": {"target": 0, "damage": 1, "crit": 2, "kill": 3, "ai": 4, "silent": 5},
     "change_health": {"health": 0, "sid": 1, "srcX": 2, "srcZ": 3, "noHitMarker": 4, "resetMax": 5},
     "get_score": {"delta": 0, "relay": 1, "absolute": 2, "classIndex": 3},
+    "show_bombardment": {"bombs": 0},  # optional (extract_build.extract_layouts): the fixture has no such handler
 }
 KNOWN_LAYOUTS = {"add_stride": 53, "add": KNOWN_ADD, "k_stride": 13, "k": KNOWN_K, "send_vals": 0x1a,
                  "sync": KNOWN_SYNC, "args": KNOWN_ARGS}
@@ -120,7 +121,7 @@ def check_layouts(label, doc, exp):
     check(lay["sync_player"]["send_vals"] == exp["send_vals"], "%s: SYNC_PLAYER sendVals at %s" % (label, lay["sync_player"]["send_vals"]))
     check(sync == exp["sync"], "%s: SYNC_PLAYER layout (wrong: %r)" % (label, {n: o for n, o in sync.items() if exp["sync"].get(n) != o}))
     for key_, args in exp["args"].items():
-        check(lay[key_]["args"] == args and lay[key_]["argc"] == len(args), "%s: %s args %r" % (label, key_, lay[key_]))
+        check(key_ in lay and lay[key_]["args"] == args and lay[key_]["argc"] == len(args), "%s: %s args %r" % (label, key_, lay.get(key_)))
 
 
 def current_bundle():
@@ -514,7 +515,8 @@ FIX_EXP = {"ahkey": 0x2A5F1, "client_version": "9.8.7r3", "build_version": "AbCd
            "salt": "S4LT-x", "c2s": 26, "s2c": 34}
 # The fixture's handlers use their own strides / orders, so nothing can pass by being hard-coded.
 FIX_LAYOUTS = {
-    "add_stride": 16, "k_stride": 12, "send_vals": 0x1a, "sync": KNOWN_SYNC, "args": KNOWN_ARGS,
+    "add_stride": 16, "k_stride": 12, "send_vals": 0x1a, "sync": KNOWN_SYNC,
+    "args": {k: v for k, v in KNOWN_ARGS.items() if k != "show_bombardment"},
     "add": {"id": 0, "sid": 1, "x": 2, "y": 3, "z": 4, "name": 5, "classIndex": 6, "health": 7, "maxHealth": 8,
             "team": 9, "xDire": 10, "secIndex": 11, "attachIndex": 12, "flagIndex": 13, "busy": 14},
     "k": {"sid": 0, "x": 1, "y": 2, "z": 3, "xDire": 4, "yDire": 5, "onGround": 6, "crouchVal": 7, "weapon": 8,
@@ -722,7 +724,7 @@ static const int sync_offs[] = { KRUNKER_SYNC_FIELDS(OFF) };
 _Static_assert(KRUNKER_ADD_ATTACH_INDEX < KRUNKER_ADD_STRIDE && KRUNKER_K_PING < KRUNKER_K_STRIDE, "layout");
 _Static_assert(KRUNKER_SYNC_PROTECTED < KRUNKER_SYNC_SEND_VALS && KRUNKER_KILL_ARG_INFO < KRUNKER_KILL_ARGC &&
                KRUNKER_DAMAGE_ARG_AI < KRUNKER_DAMAGE_ARGC && KRUNKER_HEALTH_ARG_RESET_MAX < KRUNKER_HEALTH_ARGC &&
-               KRUNKER_SCORE_ARG_CLASS_INDEX < KRUNKER_SCORE_ARGC, "args");
+               KRUNKER_SCORE_ARG_CLASS_INDEX < KRUNKER_SCORE_ARGC && KRUNKER_BOMB_ARG_BOMBS < KRUNKER_BOMB_ARGC, "args");
 int main(void) {
     if (add_offs[1] != KRUNKER_ADD_SID || k_offs[0] != KRUNKER_K_SID || sync_offs[0] != KRUNKER_SYNC_INPUT_SN) return 2;
     unsigned ah = 0;

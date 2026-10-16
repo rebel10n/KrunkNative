@@ -294,6 +294,10 @@ typedef enum {
 #define KRUNKER_SCORE_ARG_ABSOLUTE 2
 #define KRUNKER_SCORE_ARG_CLASS_INDEX 3
 
+/* SHOW_BOMBARDMENT ("bmb"): bombs, a flat list of 5 values a bomb (x, y, z, sid, pjSp) */
+#define KRUNKER_BOMB_ARGC 1
+#define KRUNKER_BOMB_ARG_BOMBS 0
+
 /* Packet names, client -> server (138). X(ident, "wire", "KrunkerName") */
 #define KRUNKER_C2S_PACKETS(X_) \
     X_(PING, "po", "PING") \

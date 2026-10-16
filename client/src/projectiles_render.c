@@ -3,6 +3,8 @@
 //   88.js  D (physObj): init / update / disablePhys, lookAt + rotateX(spin), linger
 //   129.js projectiles.stored[0]: the thrown knife (spd 0.38, grav 0.0002, spn 0.035,
 //          scale 1, length 1, linger 5000)
+//   v10 :180041 projectiles.stored[2]: the Bombardment bomb (streak_3, scale 5 x scaleMlt 2, rot PI,
+//          spn 0.008 spun about Y, noLookAt, noFog, no linger; its "pre" hides it)
 //   27.js  weapon projectile blocks (mat BASIC, colour, scale, length, lookDir, dontPred)
 //   55.js  loadMesh(meshConf, 0, 0, 0, PI / 2, 1, container): the knife model inside the
 //          physObj container, rotation.y = PI / 2, scale 1
@@ -31,6 +33,12 @@
 #define KNIFE_MODEL "models/melee/melee_0.obj"     // skins are not ported: melee_0 like player_mesh.c
 #define KNIFE_TEXTURE "textures/melee/melee_0.png"
 
+// stored[2] (the bombs of a Bombardment streak)
+#define BOMB_SPIN 0.008f
+#define BOMB_SIZE 10.0f                     // scale 5 * scaleMlt 2 (length too)
+#define BOMB_MODEL "models/streak_3.obj"
+#define BOMB_TEXTURE "textures/streak_3.png"
+
 // 27.js projectile visuals (the flight values come from shared projectile_config_for()).
 typedef struct {
     const char *src;
@@ -56,6 +64,7 @@ static const ProjVisualConfig proj_visual_bullet = {NULL, 0xffffdb, 1.4f, 10.0f,
 typedef struct {
     unsigned char active;
     unsigned char knife;
+    unsigned char bomb;          // stored[2]: a Bombardment bomb (streak_3, no lookAt, not a box)
     unsigned char look_dir;
     unsigned char predicted;     // the owner's own prediction (physObj owid)
     unsigned char linked;        // server id known
@@ -83,6 +92,9 @@ static struct {
     MeshTransform containers[PROJ_MAX];
     Mesh *knives[PROJ_MAX];
     int knife_failed;
+    MeshTransform bomb_containers[PROJ_MAX];
+    Mesh *bombs[PROJ_MAX];
+    int bomb_failed;
 } proj;
 
 // KRUNKNATIVE_VFX_LOG=1 (shared with vfx.c): print spawns, links and ends to stderr
@@ -134,7 +146,8 @@ static ProjVisual *proj_alloc(void) {
 }
 
 // 88.js D.init (the parts after the velocity): configuration, lookAt the flight direction.
-static ProjVisual *proj_spawn(const Client *client, const int weapon_index, const vec3 position, const vec3 velocity,
+// bomb: stored[2]'s physObj (weapon_index -1, no owner); its spin and size are the bomb's own.
+static ProjVisual *proj_spawn(const Client *client, const int weapon_index, const int bomb, const vec3 position, const vec3 velocity,
                               const float grav, const float dst) {
     const Weapon *weapon = proj_weapon(client, weapon_index);
     ProjVisual *visual = proj_alloc();
@@ -150,9 +163,13 @@ static ProjVisual *proj_spawn(const Client *client, const int weapon_index, cons
     visual->grav = grav;
     visual->dst = dst;
     visual->forward = velocity;
-    visual->knife = (unsigned char) (weapon && weapon->melee);
+    visual->knife = (unsigned char) (!bomb && weapon && weapon->melee);
 
-    if (visual->knife) {
+    if (bomb) {
+        visual->bomb = 1;
+        visual->spin = BOMB_SPIN; // physObj spin: rotateY(spin * dt), noLookAt keeps the orientation
+        visual->size = pv3(BOMB_SIZE, BOMB_SIZE, BOMB_SIZE);
+    } else if (visual->knife) {
         visual->spin = KNIFE_SPIN; // stored[0] has no lookDir: the knife keeps its launch heading
         visual->size = pv3(1.0f, 1.0f, 1.0f);
     } else {
@@ -165,7 +182,8 @@ static ProjVisual *proj_spawn(const Client *client, const int weapon_index, cons
     }
 
     if (proj_log()) {
-        fprintf(stderr, "[proj] spawn w%d %s at %.1f %.1f %.1f v %.3f %.3f %.3f\n", weapon_index, visual->knife ? "knife" : "box",
+        fprintf(stderr, "[proj] spawn w%d %s at %.1f %.1f %.1f v %.3f %.3f %.3f\n", weapon_index,
+                visual->bomb ? "bomb" : visual->knife ? "knife" : "box",
                 position.x, position.y, position.z, velocity.x, velocity.y, velocity.z);
     }
     return visual;
@@ -178,6 +196,17 @@ static int proj_dont_pred(const Client *client, const int weapon_index) {
 
 void projectiles_render_server_spawn(Client *client, const NetProjectilePacket *packet) {
     if (!packet || packet->id < 0) return;
+
+    if (packet->bomb) { // stored[2]: a Bombardment bomb (no owner, so no prediction to link)
+        const vec3 position = {packet->position[0], packet->position[1], packet->position[2]};
+        const vec3 velocity = {packet->velocity[0], packet->velocity[1], packet->velocity[2]};
+        ProjVisual *visual = proj_spawn(client, -1, 1, position, velocity, packet->gravity, packet->range);
+        if (!visual) return;
+
+        visual->linked = 1;
+        visual->server_id = packet->id;
+        return;
+    }
 
     const Player *me = client->me;
     const int own = me && packet->owner_uid == me->uid;
@@ -209,7 +238,7 @@ void projectiles_render_server_spawn(Client *client, const NetProjectilePacket *
     // g9: physObj(x, y, z, yaw, pitch, projectile.range, false, null, null, projectile, sid, null, meleeIndex)
     const vec3 position = {packet->position[0], packet->position[1], packet->position[2]};
     const vec3 velocity = {packet->velocity[0], packet->velocity[1], packet->velocity[2]};
-    ProjVisual *visual = proj_spawn(client, packet->weapon_index, position, velocity, packet->gravity, packet->range);
+    ProjVisual *visual = proj_spawn(client, packet->weapon_index, 0, position, velocity, packet->gravity, packet->range);
     if (!visual) return;
 
     visual->linked = 1;
@@ -301,7 +330,7 @@ void projectiles_render_local_shot(Client *client, const Player *me, const int t
     const vec3 velocity = {speed * sinf(l) * cosf(pitch), speed * sinf(pitch), speed * cosf(l) * cosf(pitch)};
     const vec3 origin = {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
 
-    ProjVisual *visual = proj_spawn(client, weapon_index, origin, velocity, config->gravity, PROJ_LOCAL_DST);
+    ProjVisual *visual = proj_spawn(client, weapon_index, 0, origin, velocity, config->gravity, PROJ_LOCAL_DST);
     if (visual) {
         visual->predicted = 1;
         visual->own_cnt = me->shot_count; // shotCntP, already counted for this shot (player.c)
@@ -345,7 +374,7 @@ int projectiles_render_boxes(ProjectileBox *out, const int max) {
 
     for (int i = 0; i < PROJ_MAX && count < max; i++) {
         const ProjVisual *visual = &proj.visuals[i];
-        if (!visual->active || visual->knife) continue;
+        if (!visual->active || visual->knife || visual->bomb) continue;
 
         out[count++] = (ProjectileBox) {visual->position, visual->forward, visual->roll, visual->size, visual->color, 0};
     }
@@ -409,6 +438,61 @@ static void proj_container_pose(MeshTransform *container, const ProjVisual *visu
     container->rotation.z = 0.0f;
 }
 
+// The bomb's physObj: loadMesh(streak_3, rot PI) in a container at its position, scaled by the size,
+// turned about Y by its accumulated spin (roll).
+static Mesh *proj_bomb_mesh(const int index) {
+    if (proj.bombs[index]) return proj.bombs[index];
+    if (proj.bomb_failed) return NULL;
+
+    char *model_path = concat(assets_path(), BOMB_MODEL);
+    char *texture_path = concat(assets_path(), BOMB_TEXTURE);
+    Geometry *geometry = model_path ? load_obj_model(model_path, 0) : NULL; // cached, like the knife's
+    const unsigned int texture = texture_path ? load_texture(texture_path) : 0;
+    free(model_path);
+    free(texture_path);
+
+    if (!geometry || !texture) {
+        fprintf(stderr, "projectiles: bomb model unavailable, bombardment bombs are not drawn\n");
+        proj.bomb_failed = 1;
+        return NULL;
+    }
+
+    if (!proj.scene) proj.scene = scene_init();
+    if (!proj.scene) return NULL;
+
+    BasicMaterial *material = basic_material_init(); // meshConf: noFog, double sided, depthWrite
+    if (!material) return NULL;
+    material->texture = texture;
+    material->fog_enabled = 0;
+
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    if (!mesh) {
+        material_fini((Material *) material);
+        return NULL;
+    }
+
+    MeshTransform *container = &proj.bomb_containers[index];
+    memset(container, 0, sizeof(*container));
+    container->rotation_order = ROTATION_ORDER_YXZ;
+    container->scale = pv3(1.0f, 1.0f, 1.0f);
+
+    mesh->transform.parent = container;
+    mesh->transform.rotation.y = (float) M_PI; // loadMesh(..., PI, 1, container): rot PI
+    mesh->visible = 0;
+
+    proj.bombs[index] = mesh;
+    scene_add_mesh(proj.scene, mesh);
+    return mesh;
+}
+
+static void proj_bomb_pose(MeshTransform *container, const ProjVisual *visual) {
+    container->position = visual->position;
+    container->rotation.x = 0.0f;
+    container->rotation.y = visual->roll; // the accumulated spin about Y
+    container->rotation.z = 0.0f;
+    container->scale = visual->size;
+}
+
 void projectiles_render_draw_meshes(Client *client, Camera *camera) {
     (void) client;
     int any = 0;
@@ -425,6 +509,18 @@ void projectiles_render_draw_meshes(Client *client, Camera *camera) {
         any = 1;
     }
 
+    for (int i = 0; i < PROJ_MAX; i++) {
+        const ProjVisual *visual = &proj.visuals[i];
+        Mesh *mesh = visual->active && visual->bomb ? proj_bomb_mesh(i) : proj.bombs[i];
+        if (!mesh) continue;
+
+        mesh->visible = visual->active && visual->bomb;
+        if (!mesh->visible) continue;
+
+        proj_bomb_pose(&proj.bomb_containers[i], visual);
+        any = 1;
+    }
+
     if (any && proj.scene) scene_render(proj.scene, camera);
 }
 
@@ -434,10 +530,16 @@ void projectiles_render_reset(void) {
 
 void projectiles_render_fini(void) {
     for (int i = 0; i < PROJ_MAX; i++) {
-        if (!proj.knives[i]) continue;
-        if (proj.scene) scene_remove_mesh(proj.scene, proj.knives[i]);
-        mesh_fini(proj.knives[i]); // frees the material; geometry and texture stay in the loader caches
-        proj.knives[i] = NULL;
+        if (proj.knives[i]) {
+            if (proj.scene) scene_remove_mesh(proj.scene, proj.knives[i]);
+            mesh_fini(proj.knives[i]); // frees the material; geometry and texture stay in the loader caches
+            proj.knives[i] = NULL;
+        }
+        if (proj.bombs[i]) {
+            if (proj.scene) scene_remove_mesh(proj.scene, proj.bombs[i]);
+            mesh_fini(proj.bombs[i]);
+            proj.bombs[i] = NULL;
+        }
     }
 
     if (proj.scene) {

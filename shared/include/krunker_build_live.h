@@ -52,6 +52,7 @@ typedef enum { KRB_KILL_VICTIM, KRB_KILL_DEATHS, KRB_KILL_KILLER, KRB_KILL_STATS
 typedef enum { KRB_DAMAGE_TARGET, KRB_DAMAGE_DAMAGE, KRB_DAMAGE_CRIT, KRB_DAMAGE_KILL, KRB_DAMAGE_AI, KRB_DAMAGE_SILENT, KRB_DAMAGE_COUNT } KrunkerDamageArg;
 typedef enum { KRB_HEALTH_HEALTH, KRB_HEALTH_SID, KRB_HEALTH_SRC_X, KRB_HEALTH_SRC_Z, KRB_HEALTH_NO_HIT_MARKER, KRB_HEALTH_RESET_MAX, KRB_HEALTH_COUNT } KrunkerHealthArg;
 typedef enum { KRB_SCORE_DELTA, KRB_SCORE_RELAY, KRB_SCORE_ABSOLUTE, KRB_SCORE_CLASS_INDEX, KRB_SCORE_COUNT } KrunkerScoreArg;
+typedef enum { KRB_BOMB_LIST, KRB_BOMB_COUNT } KrunkerBombArg; // SHOW_BOMBARDMENT's bombs (optional packet)
 
 #define KRB_MAX_REGIONS 32
 #define KRB_MAX_SALT 64
@@ -75,6 +76,7 @@ typedef struct KrunkerBuild {
     int16_t sync[KRB_SYNC_COUNT];
     int16_t kill[KRB_KILL_COUNT], damage[KRB_DAMAGE_COUNT], health[KRB_HEALTH_COUNT]; // argument positions (-1: absent)
     int16_t score[KRB_SCORE_COUNT]; // GET_SCORE's (an optional packet: a build without its layout keeps -1s)
+    int16_t bomb[KRB_BOMB_COUNT];   // SHOW_BOMBARDMENT's list (optional: a build without its layout keeps -1)
     uint8_t cheat_salt[KRB_MAX_SALT];
     size_t cheat_salt_len;
     uint32_t cheat_fnv_offset, cheat_fnv_prime;

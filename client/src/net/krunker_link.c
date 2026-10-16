@@ -1978,11 +1978,37 @@ static int fx_proj_slot(KrunkerLink *l, const int sid, const int create) {
     return i;
 }
 
+// Bombardment bombs (v10 stored[2], :220832 "bmb" and :220839 "pr" with isStored): the streak_3 model,
+// spd 0.4 times the bomb's pjSp, no gravity, range 1500. A bmb drops it straight down (yaw 0, pitch
+// -PI / 2); its visual (noLookAt, spin about Y) is projectiles_render.c's.
+#define BOMB_SPEED 0.4f
+#define BOMB_RANGE 1500.0f
+#define BOMB_STRIDE 5 // "bmb" list: x, y, z, the server's projectile sid, pjSp per bomb
+
+// A bomb in flight: the server's projectile sid gets its slot, the velocity as Projectile.init (:180002).
+static void emit_bomb(KrunkerLink *l, const double pos[3], const double yaw, const double pitch, const double pj_speed, const int sid,
+                      const int owner) {
+    NetProjectilePacket p;
+    memset(&p, 0, sizeof(p));
+    const float speed = (float) (BOMB_SPEED * pj_speed);
+    const double d = yaw - M_PI;
+    p.id = fx_proj_slot(l, sid, 1);
+    p.owner_uid = owner;
+    p.weapon_index = -1;
+    p.bomb = 1;
+    for (int k = 0; k < 3; k++) p.position[k] = (float) pos[k];
+    p.velocity[0] = (float) (speed * sin(d) * cos(pitch));
+    p.velocity[1] = (float) (speed * sin(pitch));
+    p.velocity[2] = (float) (speed * cos(d) * cos(pitch));
+    p.range = BOMB_RANGE;
+    emit(l, NET_PACKET_PROJECTILE, &p, sizeof(p));
+}
+
 // "pr" SHOW_PROJECTILE [x, y, z, yaw, pitch, index, sid, isStored, customProj, owner] (iìíîíìî
 // :220839): physObj(x, y, z, yaw, pitch, cfg.range, .., cfg, sid) with cfg = weaponConfig[index]
 // .projectile, or projectiles.stored[index] (0 the thrown knife, 1 an AI's orb, 2 a bombardment
-// bomb: no visual of ours). Velocity as Projectile.init (:180002, shared/src/projectile.c): d = yaw -
-// PI, spd * (sin d cos pitch, sin pitch, cos d cos pitch).
+// bomb). Velocity as Projectile.init (:180002, shared/src/projectile.c): d = yaw - PI, spd * (sin d
+// cos pitch, sin pitch, cos d cos pitch).
 static void on_projectile(KrunkerLink *l, const KrunkerFrame *f) {
     if (!krunker_is(arg(f, 6), KRUNKER_NUM)) return;
     const int index = (int) num(arg(f, 5), -1);
@@ -1997,6 +2023,11 @@ static void on_projectile(KrunkerLink *l, const KrunkerFrame *f) {
             p.weapon_index = -1;
             p.ai_kind = 1;
             speed = 0.1f, range = 500.0f;
+        } else if (index == 2) { // stored[2]: a bombardment bomb, its pjSp from customProj (1 when absent)
+            const KrunkerValue *pj = krunker_get(arg(f, 8), "pjSp");
+            const double pos[3] = {num(arg(f, 0), 0), num(arg(f, 1), 0), num(arg(f, 2), 0)};
+            emit_bomb(l, pos, num(arg(f, 3), 0), num(arg(f, 4), 0), num(pj, 1), (int) arg(f, 6)->u.num, (int) num(arg(f, 9), -1));
+            return;
         } else {
             return;
         }
@@ -2016,6 +2047,20 @@ static void on_projectile(KrunkerLink *l, const KrunkerFrame *f) {
     p.gravity = gravity;
     p.range = range;
     emit(l, NET_PACKET_PROJECTILE, &p, sizeof(p));
+}
+
+// "bmb" SHOW_BOMBARDMENT [bombs] (:220832): the handler's list, BOMB_STRIDE values a bomb. Each one is
+// physObj(x, y, z, 0, yD -PI / 2, range, trails, .., stored[2], sid, .., {pjSp}): a bomb falling from the
+// bomber's drop height with no owner; the server's "pre" ends it. The list's position is the build's
+// role (absent: no bombs drawn).
+static void on_bombardment(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *list = role(f, krunker_build()->bomb, KRB_BOMB_LIST);
+    for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i + BOMB_STRIDE <= list->len; i += BOMB_STRIDE) {
+        const KrunkerValue *sid = krunker_at(list, i + 3);
+        if (!krunker_is(sid, KRUNKER_NUM)) continue;
+        const double pos[3] = {num(krunker_at(list, i), 0), num(krunker_at(list, i + 1), 0), num(krunker_at(list, i + 2), 0)};
+        emit_bomb(l, pos, 0.0, -M_PI / 2, num(krunker_at(list, i + 4), 1), (int) sid->u.num, -1);
+    }
 }
 
 // "pre" END_PROJECTILE [sid | ownShotCnt, isOwn, x, y, z, impact] (iiiîïîî :220828): disablePhys
@@ -2165,6 +2210,7 @@ static int on_fx(KrunkerLink *l, const KrunkerS2C id, const KrunkerFrame *f) {
         case KRUNKER_S2C_PLAY_SOUND: on_play_sound(l, f); return 1;
         case KRUNKER_S2C_STOP_SOUND: on_stop_sound(l, f); return 1;
         case KRUNKER_S2C_SHOW_PROJECTILE: on_projectile(l, f); return 1;
+        case KRUNKER_S2C_SHOW_BOMBARDMENT: on_bombardment(l, f); return 1;
         case KRUNKER_S2C_END_PROJECTILE: on_projectile_end(l, f); return 1;
         case KRUNKER_S2C_EXPLOSION: on_explosion(l, f); return 1;
         case KRUNKER_S2C_EFFECT: on_effect(l, f); return 1;
