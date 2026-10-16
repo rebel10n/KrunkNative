@@ -156,6 +156,32 @@ void comp_ui_refresh(Client *client) {
     free(r);
 }
 
+// cmpDatBox (v10 g:219430-219431): the title ("Krunker Ranked" in a ranked match, else "Krunker Competitive") over
+// #cmpDatSub, the "NvN on <map>" line. v10's own assignment to cmpDatBox.innerHTML (g:219431) drops the sub line with
+// the old children; KN writes the sub line again after the title (KN choice: the line stays visible).
+static void comp_ui_box(const Game *game) {
+    StrBuf box = {0};
+    sb_append(&box, game->is_ranked ? "Krunker Ranked" : "Krunker Competitive");
+    sb_append(&box, "<div id=\"cmpDatSub\"></div>");
+    char *html = sb_finish(&box);
+    set_html("cmpDatBox", html);
+    free(html);
+    StrBuf sub = {0};
+    sb_appendf(&sub, "%dv%d <span style='color:rgba(255,255,255,0.5);'>on ", game->config.team_size + 1, game->config.team_size + 1);
+    sb_append_esc(&sub, map_name(game));
+    sb_append(&sub, "</span>");
+    html = sb_finish(&sub);
+    set_html("cmpDatSub", html);
+    free(html);
+}
+
+// v10 INIT for any round (g:219155): cmpSpectBtn hidden in a ranked match (the server refuses spectating there too);
+// a comp menu that is up takes the new title (the server's NET_EXT_KN_RANKED_MATCH may come after the INIT's menu).
+void comp_ui_match_gate(Client *client) {
+    set_display("cmpSpectBtn", client->game.is_ranked ? "none" : "");
+    if (g_shown && comp_menu_on(client)) comp_ui_box(&client->game);
+}
+
 // f1904(Game.isComp) at every round start
 void comp_ui_round(Client *client) {
     set_display("mMenuHolDef", "none");
@@ -194,13 +220,7 @@ void comp_ui_round(Client *client) {
         set_html("instructions", "");
         set_display("instructionHider", "none");
     }
-    StrBuf sub = {0};
-    sb_appendf(&sub, "%dv%d <span style='color:rgba(255,255,255,0.5);'>on ", game->config.team_size + 1, game->config.team_size + 1);
-    sb_append_esc(&sub, map_name(game));
-    sb_append(&sub, "</span>");
-    html = sb_finish(&sub);
-    set_html("cmpDatSub", html);
-    free(html);
+    comp_ui_box(game);
     set_display("aHider", "none");
     set_display("infoHider", "none");
     set_display("mMenuHolComp", "block");

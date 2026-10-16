@@ -26,6 +26,7 @@ int lobby_vote_handler(void *user, const HtmlEvent *ev, const HtmlArg *args, int
 // game (ranked matches) from NET_PACKET_COMP_LOBBY, f1904 / f1892, updSyncDat.
 int  comp_ui_packet(Client*, const void *payload, uint16_t length); // NET_PACKET_COMP_LOBBY
 void comp_ui_round(Client*);                     // f1904 at every round start: the comp or the default menu
+void comp_ui_match_gate(Client*);                // v10 INIT (g:219155, g:219431): the spectate button and the comp box's title by isRanked
 void comp_ui_refresh(Client*);                   // f1892: lists, class locks, Join / Leave Team
 void comp_ui_message(const char *text);          // io_updateGameMessage: #compTimBox
 void comp_ui_class_selected(Client*, int index); // selectClass: updSyncDat("c", i)

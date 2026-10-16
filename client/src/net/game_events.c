@@ -1231,6 +1231,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&res, body, sizeof(res));
                 hud_votekick_on_kpd(client, &res, (const char *) body + sizeof(res), body_length - sizeof(res));
             }
+            else if (subtype == NET_EXT_KN_RANKED_MATCH && body_length >= sizeof(NetRankedMatchPacket)) { // the lobby's ranked flag (v10 isRanked)
+                NetRankedMatchPacket ranked;
+                memcpy(&ranked, body, sizeof(ranked));
+                client->game.is_ranked = ranked.ranked ? 1 : 0;
+                hud_ui_match_gate(client); // the Invite button, the spectate button and the comp box's title
+            }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)

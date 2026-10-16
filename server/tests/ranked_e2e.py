@@ -54,6 +54,8 @@ CHAT_SEND, EXT = 8, 254  # NET_PACKET_EXT: u16 LE subtype + body
 EXT_MARK_POSITION = 0x0900
 MINOR_V7 = 3
 MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping), and the roster's "gsc", names push and "vf"
+EXT_RANKED_MATCH = 0x8050  # NET_EXT_KN_RANKED_MATCH: the lobby's ranked flag after each INIT
+EXT_LRMR = 0x0601  # NET_EXT_LATEST_RANKED_MMR_CHANGE: the rating change (lrmr)
 results = []
 procs = []
 
@@ -210,6 +212,14 @@ def comp_table(conn):
     return table
 
 
+def ext_bodies(conn, subtype):
+    out = []
+    for t, p in conn.packets:
+        if t == EXT and len(p) >= 2 and struct.unpack("<H", p[:2])[0] == subtype:
+            out.append(p[2:])
+    return out
+
+
 def comp_set(conn, key, value):
     conn.send(COMP_SET, struct.pack("<Bi", ord(key), value))
 
@@ -341,6 +351,8 @@ def run():
     inits = [c.read(until=kn_proto.INIT, timeout=10) for c in conns]
     for c in conns:
         c.read(timeout=1.0)
+    flags = [[b[0] for b in ext_bodies(c, EXT_RANKED_MATCH) if len(b) >= 1] for c in conns]
+    check("every roster player is told the lobby is ranked after its INIT (EXT 0x8050 ranked=1)", all(f == [1] for f in flags), str(flags))
     modes = {struct.unpack("<BBBiiHi", p[:struct.calcsize("<BBBiiHi")])[4] for p in inits if p}
     check("INIT: Hardpoint (comp overDat modes [2])", modes == {2}, str(modes))
     uids = [struct.unpack("<BBBiiHi", p[:struct.calcsize("<BBBiiHi")])[6] if p else -1 for p in inits]

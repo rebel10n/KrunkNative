@@ -1467,6 +1467,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     game_config_on_init(&client->game); // WP-E: no GAME_CONFIG before this INIT (older server): the defaults
     lobby_vote_reset();                 // WP-E: the end screen's vote cards go
     // INIT carries the Krunker mode id (modes.js index), not a rotation index
+    client->game.is_ranked = 0; // the server's NET_EXT_KN_RANKED_MATCH follows this INIT (game_events.c)
     game_init(&client->game, init->map_index, game_mode_index_for(&client->game, init->mode_index), 0);
     mod_pack_map_loaded(client->game.map ? client->game.map->raw_data : NULL); // the map's modURL resource pack
     client_load_map(client);

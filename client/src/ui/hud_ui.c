@@ -56,6 +56,7 @@ void hud_ui_hit(Client*, int kill);
 #include <ui_mobile.h>
 #include <hud_gui.h> // map-G: the map's custom GUI (hud_gui.c)
 #include <lobby_ui.h> // WP-E: the end screen's match vote cards (net/lobby_events.c)
+#include <v10_menu.h> // v10 INIT gates: the Invite / Host cards (hud_ui_match_gate)
 #include <badges.h>   // WP-E: v7 badges on the boards
 #include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
@@ -4212,9 +4213,16 @@ void hud_ui_relayout(void) {
     g_hud_ui.in_game = -1;
 }
 
+// v10's INIT gates for a ranked lobby (g:219154-219156, g:219431): the menu's Invite / Host cards and the comp box.
+void hud_ui_match_gate(Client *client) {
+    comp_ui_match_gate(client);
+    v10_menu_match_gate(client->game.is_ranked, client->game.is_official);
+}
+
 // The page parts of a round (INIT, and a fresh page during one).
 static void hud_round_page(Client *client) {
     comp_ui_round(client); // f1904(Game.isComp): the comp lobby's menu or the default one
+    hud_ui_match_gate(client); // v10 INIT isRanked: the Invite button, the spectate button, the comp box's title
     if (!client->game.config.comp) ranked_ui_left_match(); // a round outside a comp lobby: no ranked match any more
     // io_startGame: `if (chatChannel != 1 && Game.isComp) switchChat(chatSwitch)`: a comp lobby
     // (ranked) starts on the team channel

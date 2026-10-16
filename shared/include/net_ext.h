@@ -115,6 +115,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_COUNTDOWN = 0x8038,    // "gmsg" [2]: NetOfficialCountdownPacket (cntd_<n> + the big #timerText number)
     // 0x8040 official combat effects (client-local, like 0x8030)
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
+    // 0x8050 ranked match flag (KrunkNative server, client/src/net/game_events.c -> hud_ui_match_gate)
+    NET_EXT_KN_RANKED_MATCH = 0x8050, // S -> C NetRankedMatchPacket: 1 in a ranked match (v10 INIT isRanked, the in-match gates)
 
     // 0x8100..0x810F reserved for settings-wiring (the v10 settings package; coordinator, 2026-10-15)
     NET_EXT_KN_HIT_DAMAGE = 0x8100, // S -> C NetHitDamagePacket, right before a NET_PACKET_HIT whose damage has a fraction
@@ -494,6 +496,13 @@ typedef struct {
 typedef struct {
     uint8_t reset; // 1: reset ("prpR", true), 0: toggle
 } NetPropRotatePacket;
+
+// NET_EXT_KN_RANKED_MATCH (S -> C): sent to each EXT peer right after its INIT (the client's game is reset there),
+// so the in-match UI follows the lobby: the Invite button greyed, the spectate button hidden and the comp box titled
+// "Krunker Ranked" (v10 initGame isRanked, g:219126-219156 and g:219431).
+typedef struct {
+    uint8_t ranked; // 1 in a ranked match
+} NetRankedMatchPacket;
 #pragma pack(pop)
 
 // NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,

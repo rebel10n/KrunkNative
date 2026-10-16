@@ -853,6 +853,15 @@ static void header_setup(void) {
     wire(html_dom_query(0, "#playerHeaderEl .webpush-container"), "knV10Notifications()");
 }
 
+// v10's INIT (g:219154-219156): inviteButton's buttonD (greyed, no pointer events) in a ranked match. menuBtnHost gets
+// buttonD from `ranked || official` (g:219155) and then from `official` alone (g:219156), so the final state is
+// official only; a ranked match leaves the Host card as it is (KN follows the final state).
+void v10_menu_match_gate(const int ranked, const int official) {
+    HtmlElem invite = by_id("inviteButton"), host = by_id("menuBtnHost");
+    if (invite) html_dom_set_class(invite, "buttonD", ranked);
+    if (host) html_dom_set_class(host, "buttonD", official);
+}
+
 void v10_menu_dom_init(void) {
     if (!v10_menu_page()) return;
     // the action cards (Ranked's click: v10_competitive.c). Ranked's card carries its "2x KR"

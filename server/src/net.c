@@ -603,6 +603,16 @@ static void net_send_game_state(ClientConnection *client) {
     if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
 }
 
+// NET_EXT_KN_RANKED_MATCH: the lobby's ranked flag, sent after the INIT (the client resets its game there).
+// accounts_ranked_active is the roster lobby of a ranked match (accounts.c acc_ranked_setup).
+static void net_send_ranked_match(ClientConnection *client) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    const NetRankedMatchPacket packet = {.ranked = (uint8_t) !!accounts_ranked_active()};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_RANKED_MATCH, &packet, sizeof(packet));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
@@ -626,6 +636,7 @@ static void net_send_init(ClientConnection *client) {
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
     net_send_game_state(client);  // v10 gameState: a joiner learns the phase now (its names follow it)
+    net_send_ranked_match(client); // v10 INIT isRanked: after the INIT, which resets the client's game
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
@@ -1722,6 +1733,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 game_config_send(&g_server->game, client->id);
                 comp_lobby_send_all(&g_server->game, client->id);
                 net_send_social_caps(client);
+                net_send_ranked_match(client); // the ranked flag too: an EXT peer's INIT went out before its HELLO
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
             if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) net_send_game_state(client); // its INIT went out first

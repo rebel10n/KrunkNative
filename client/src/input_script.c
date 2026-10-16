@@ -208,7 +208,8 @@
 #include <entities.h>       // `script`: entities / runtime blocks
 #include <ui_mobile.h>  // `touch`: the phone touch controls
 #include <ai.h>           // `world`: the AI list
-#include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE
+#include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE; `ranked`: NET_EXT_KN_RANKED_MATCH
+#include <lobby_ui.h>     // `ranked`: comp_ui_round (the comp menu an INIT opens)
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -590,6 +591,21 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // (v10_endscreen_e2e.py): the skin is held for the Collect Rewards button (hud_endscreen_v10.c).
         if (client->me) hud_ui_skin_found(client, client->me->uid, (int) e->v[0]);
         fprintf(stderr, "[input_script] skin t=%.0f %d\n", g_script.time, (int) e->v[0]);
+    } else if (!strcmp(e->cmd, "ranked")) {
+        // ranked <0|1> [<0|1>]: the server's NET_EXT_KN_RANKED_MATCH for this round, through the client's own packet
+        // path (game_events.c). A second 1 first makes the game a comp lobby (config.comp, test mode) and opens its menu
+        // as an INIT's comp_ui_round does, so the comp box's title shows (v10 g:219431). The in-match gates are
+        // checked by client/tests/ranked_match_ui_e2e.py.
+        if (e->v[1] != 0) {
+            client->game.config.comp = 1;
+            client->game.config.test_mode = 1;
+            comp_ui_round(client);
+        }
+        const NetRankedMatchPacket ranked = {.ranked = e->v[0] != 0};
+        uint8_t payload[NET_EXT_HEADER_SIZE + sizeof(ranked)];
+        const uint16_t n = net_ext_pack(payload, sizeof(payload), NET_EXT_KN_RANKED_MATCH, &ranked, sizeof(ranked));
+        if (n) client_handle_game_event(client, NET_PACKET_EXT, payload, n);
+        fprintf(stderr, "[input_script] ranked t=%.0f %d comp=%d\n", g_script.time, (int) (e->v[0] != 0), (int) (e->v[1] != 0));
     } else if (!strcmp(e->cmd, "wheel")) {
         // wheel dy: one wheel event through the scroll path (+1 = up, -1 = down)
         GLFWscrollfun cb = glfwSetScrollCallback(client->window, NULL);
