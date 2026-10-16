@@ -758,7 +758,11 @@ static void scenario_step(Client *client) {
     if (due > g_sc.clock_ms + 1e-6 && due < next) next = due;
     scenario_frame(client, next, 0);
     if (spawned(client)) g_sc.seq_seen_spawn = 1;
-    if (g_sc.seq_origin_ms < 0.0 && seq_origin_reached(client)) {
+    // init: in the page an INIT always follows a drawn first frame (the boot curtain up at opacity
+    // 1, menu_ui.c g_boot_settled), so an offline client ready on the boot frame itself has its
+    // origin on the next one, where the fade starts (it was a frame early: timing:curtain 21 ms)
+    const int boot_frame = g_sc.seq_origin == ORIGIN_INIT && g_sc.clock_ms < SCENARIO_FRAME_MS - 1e-3;
+    if (g_sc.seq_origin_ms < 0.0 && !boot_frame && seq_origin_reached(client)) {
         g_sc.seq_origin_ms = g_sc.clock_ms;
         printf("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.clock_ms / 1000.0);
     }
