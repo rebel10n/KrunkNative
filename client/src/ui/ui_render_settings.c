@@ -64,6 +64,9 @@ static ClientRenderSettings g_rs = {
     .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 1, // crosshairDot val true (v7.1.4 and v10)
     .crosshair_color = "#ffffff", .crosshair_shadow = "#000000",
     .crosshair_shadow_thickness = 1.0f, .crosshair_thick = 2.0f, .crosshair_len = 16.0f, .crosshair_gap = 0.0f,
+    .crosshair_type_m = 3, .crosshair_style_m = 0, .crosshair_opacity_m = 1.0f, .crosshair_color_m = "#ffffff",
+    .crosshair_shadow_m = "#000000", .crosshair_shadow_thickness_m = 1.0f, .crosshair_thick_m = 3.0f,
+    .crosshair_len_m = 16.0f, .crosshair_gap_m = 14.0f,
     .hitmarker = 1, .hitmarker_color = "#FFFFFF", .hitmarker_kill_color = "#FF0000",
     .hitmarker_opacity = 1.0f, .hitmarker_length = 25.0f, .hitmarker_thickness = 7.0f, .hitmarker_spacing = 37.0f,
     .hitmarker_anim_size = 0.14f, .hitmarker_anim_speed = 0.008f, .hitmarker_fade = 0.0062f,
@@ -72,6 +75,7 @@ static ClientRenderSettings g_rs = {
     .weapon_off_x = 1.0f, .weapon_off_y = 1.0f, .weapon_off_z = 1.0f, .weapon_ads_off_y = 1.0f,
     .left_hand = 0, .aim_anim = 1, .show_hands = 1, .round_arms = 0, .hide_ads = 0,
     .can_load_mods = 1, .can_change_logo = 1, .auto_load_last = 0, .scope_borders = 1,
+    .scope_border_color = "#000000", .scope_border_opacity = 1.0f, .scope_width = 6.8f, .scope_height = 6.8f, .scope_opacity = 1.0f,
     .reticle_width = 2.0f, .reticle_height = 2.0f, .use_damage_overlay = 1,
     // General
     .lag_comp = 1.0f,
@@ -458,6 +462,21 @@ static const RsEntry RS_TABLE[] = {
     RS_F("crosshairLen", crosshair_len, NULL),
     RS_F("crosshairGap", crosshair_gap, NULL),
     RS_B("crosshairDot", crosshair_dot, NULL),
+    RS_F("crosshairImageW", crosshair_image_w, NULL),   // hud_ui.c type 4: drawImage(.., W || img.width, H || ..)
+    RS_F("crosshairImageH", crosshair_image_h, NULL),
+    RS_I("crosshairShoM", crosshair_type_m, NULL),      // the throwing crosshair (hud_ui.c)
+    RS_I("crosshairStyleM", crosshair_style_m, NULL),
+    RS_U("crosshairImageM", crosshair_image_m, NULL),
+    RS_F("crosshairImageWM", crosshair_image_w_m, NULL),
+    RS_F("crosshairImageHM", crosshair_image_h_m, NULL),
+    RS_F("crosshairOpacityM", crosshair_opacity_m, NULL),
+    RS_B("crosshairUseOpacityM", crosshair_use_opacity_m, NULL),
+    RS_S("crosshairColorM", crosshair_color_m, NULL),
+    RS_S("crosshairShadowM", crosshair_shadow_m, NULL),
+    RS_F("crosshairShadowThickessM", crosshair_shadow_thickness_m, NULL),
+    RS_F("crosshairThickM", crosshair_thick_m, NULL),
+    RS_F("crosshairLenM", crosshair_len_m, NULL),
+    RS_F("crosshairGapM", crosshair_gap_m, NULL),
     RS_B("hitm", hitmarker, NULL),
     RS_S("hitmCol", hitmarker_color, NULL),
     RS_S("hitmKCol", hitmarker_kill_color, NULL),
@@ -488,6 +507,11 @@ static const RsEntry RS_TABLE[] = {
     RS_B("canChangeLogo", can_change_logo, NULL),
     RS_B("autoLoadLast", auto_load_last, NULL),
     RS_B("scopeBorders", scope_borders, mark_dom),      // .black scope bars
+    RS_S("scopeBorderCol", scope_border_color, mark_dom), // .black background-color
+    RS_F("scopeBorderOpac", scope_border_opacity, mark_dom), // .black opacity
+    RS_F("scopeWidth", scope_width, mark_dom),          // #recticleImg width, #leftBox / #rightBox
+    RS_F("scopeHeight", scope_height, mark_dom),        // #recticleImg height, #topBox / #bottomBox
+    RS_F("scopeOpac", scope_opacity, mark_dom),         // #recticleImg opacity (hud_ui.c shows #aimRecticle)
     RS_U("customScope", custom_scope, mark_dom),        // #recticleImg
     RS_U("customADSDot", custom_ads_dot, mark_dom),     // updateAimDot(-2, v): #aimDot src
     RS_F("reticleWidth", reticle_width, mark_dom),      // #aimDot width v * 10 px
@@ -1097,14 +1121,36 @@ static int apply_dom(void) {
     style_if("aimDot", "height", buf);
     apply_menu_filter();
 
-    // scopeBorders.set: every .black bar
+    // scopeBorders / scopeBorderCol / scopeBorderOpac.set: every .black bar (v10.js:207204..207254)
     HtmlElem bars[8];
     const int n = html_dom_query_all(0, ".black", bars, 8);
+    char opacity[24];
+    snprintf(opacity, sizeof(opacity), "%g", g_rs.scope_border_opacity);
     for (int i = 0; i < n; i++) {
-        char current[16];
+        char current[RS_COLOR_MAX + 8];
         const char *want = g_rs.scope_borders ? "block" : "none";
         if (html_dom_get_style(bars[i], "display", current, sizeof(current)) < 0 || strcmp(current, want)) html_dom_set_display(bars[i], want);
+        if (html_dom_get_style(bars[i], "background-color", current, sizeof(current)) < 0 || strcmp(current, g_rs.scope_border_color))
+            html_dom_set_style(bars[i], "background-color", g_rs.scope_border_color);
+        if (html_dom_get_style(bars[i], "opacity", current, sizeof(current)) < 0 || strcmp(current, opacity)) html_dom_set_style(bars[i], "opacity", opacity);
     }
+    // scopeWidth / scopeHeight.set (v10.js:207255): v *= 100; recticleImg width / height = v px; the bars
+    // meet it at calc(50% + e px), e = floor(v / 2) made even (stepped down when odd). scopeOpac
+    // (aimRecticle.opacMlt) fades the scope image only: the bars keep scopeBorderOpac.
+    const double sw = g_rs.scope_width * 100.0, sh = g_rs.scope_height * 100.0;
+    const int ew = (int) floor(sw / 2.0), eh = (int) floor(sh / 2.0);
+    snprintf(buf, sizeof(buf), "%gpx", sw);
+    style_if("recticleImg", "width", buf);
+    snprintf(buf, sizeof(buf), "%gpx", sh);
+    style_if("recticleImg", "height", buf);
+    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", abs(ew) % 2 == 1 && ew > 0 ? ew - 1 : ew);
+    style_if("leftBox", "right", buf);
+    style_if("rightBox", "left", buf);
+    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", abs(eh) % 2 == 1 && eh > 0 ? eh - 1 : eh);
+    style_if("topBox", "top", buf);
+    style_if("bottomBox", "bottom", buf);
+    snprintf(buf, sizeof(buf), "%g", g_rs.scope_opacity);
+    style_if("recticleImg", "opacity", buf);
 
     src_if("ammoIcon", g_rs.custom_ammo, "textures/ammo_0.png");
     src_if("killsIcon", g_rs.custom_kills, "img/skull_0.png");

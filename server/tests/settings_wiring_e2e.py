@@ -172,6 +172,102 @@ else:
     check(off > 0 and abs(on / off - 40 / 530) < 0.01, "mouseFlick + flickClamp 200: a 500 px flick turns like the last 10 px move",
           f"off={off:.4f} on={on:.4f} ratio={on / off if off else 0:.4f}")
 
+# ---------------------------------------------------------------- scope / crosshair
+# In game (DOM): the scope settings reach #aimRecticle's image and bars; the Combat Knife fully aimed
+# (Q, right button held) swaps the crosshair for the throwing one (crosshairShoM 3: dot + 4 bars).
+cross = ["0 menu", "600 play",
+         '1500 call setSetting "scopeWidth" "5"', '1500 call setSetting "scopeHeight" "4.1"',
+         '1500 call setSetting "scopeBorderCol" "#ff0000"', '1500 call setSetting "scopeBorderOpac" "0.5"',
+         '1500 call setSetting "scopeOpac" "0.3"',
+         "1700 style @scope recticleImg:width recticleImg:height recticleImg:opacity leftBox:right rightBox:left "
+         "topBox:top bottomBox:bottom topBox:background-color leftBox:opacity",
+         "1800 nodes @cross0 [id=knCrossCus] > div",
+         "1900 down Q", "2000 up Q", "2600 mdown right", "3400 nodes @crossm [id=knCrossCus] > div",
+         '3450 call setSetting "crosshairShoM" "0"', "3600 vis @crossoff knCrosshair",
+         "3700 mup right", '3700 call setSetting "crosshairShoM" "3"', "4300 nodes @crossup [id=knCrossCus] > div",
+         "4400 down 1", "4450 up 1",
+         '4500 call setSetting "crosshairSho" "4"', '4500 call setSetting "crosshairImage" "https://krunker.io/pro_crosshair.png"',
+         "4800 rects @img0 [id=knCrossCus] > img",
+         '4900 call setSetting "crosshairImageW" "200"', '4900 call setSetting "crosshairImageH" "100"',
+         "5200 rects @img1 [id=knCrossCus] > img", "5300 quit"]
+log = run("cross", "\n".join(cross))
+sc = styles(log, "scope")
+check(sc.get("recticleImg:width") == "500px" and sc.get("recticleImg:height") == "410px" and sc.get("recticleImg:opacity") == "0.3",
+      "scopeWidth 5 / scopeHeight 4.1 / scopeOpac 0.3: the scope image 500 x 410 px at 0.3", str(sc))
+check(sc.get("leftBox:right") == "calc(50%_+_250px)" and sc.get("rightBox:left") == "calc(50%_+_250px)" and
+      sc.get("topBox:top") == "calc(50%_+_204px)" and sc.get("bottomBox:bottom") == "calc(50%_+_204px)",
+      "scopeWidth / Height: the bars meet the image (even half sizes 250 / 204)", str(sc))
+check(sc.get("topBox:background-color") == "#ff0000" and sc.get("leftBox:opacity") == "0.5",
+      "scopeBorderCol / scopeBorderOpac: the bars red at 0.5", str(sc))
+
+
+def nodes_of(log, label):
+    m = re.search(r"\[input_script\] nodes t=\d+ @" + re.escape(label) + r" elements=\d+ match=(\d+)", log)
+    return int(m.group(1)) if m else -1
+
+
+check(nodes_of(log, "cross0") == 0, "default crosshair: no custom layer", str(nodes_of(log, "cross0")))
+check(nodes_of(log, "crossm") == 5, "Combat Knife aimed: the throwing crosshair (precision, dot + 4 bars)", str(nodes_of(log, "crossm")))
+check(vis(log, "crossoff").get("knCrosshair") == "0", "crosshairShoM 0: no crosshair at all while the knife is aimed")
+check(nodes_of(log, "crossup") == 0, "knife not aimed: the normal crosshair is back", str(nodes_of(log, "crossup")))
+
+
+def rect_of(log, label):
+    m = re.search(r"\[input_script\] rects t=\d+ @" + re.escape(label) + r" n=1 \S+@[-\d.]+,[-\d.]+,([\d.]+),([\d.]+)", log)
+    return (float(m.group(1)), float(m.group(2))) if m else None
+
+
+r0, r1 = rect_of(log, "img0"), rect_of(log, "img1")
+check(r0 is not None and r0[1] > 0 and abs(r0[0] / r0[1] - 1.0) < 0.02, "image crosshair, W/H 0: its own 636 x 636 size", str(r0))
+check(r0 is not None and r1 is not None and r1[1] > 0 and abs(r1[0] / r1[1] - 2.0) < 0.05 and abs(r1[0] / r0[0] - 200 / 636) < 0.02,
+      "crosshairImageW 200 / H 100: the image crosshair drawn 200 x 100", f"{r0} -> {r1}")
+
+# Screenshots (--render-scenario): the scoped view with red bars at 0.5, the throwing crosshair in green
+SHOTS = os.environ.get("KN_SETTINGS_SHOTS") or os.path.join(WORK, "shots") # KN_SETTINGS_SHOTS: keep them
+os.makedirs(SHOTS, exist_ok=True)
+
+
+def render(name, state_extra):
+    import json
+    with open("tools/uidiff/scenarios/ingame-scoped.json") as f:
+        sc = json.load(f)
+    sc.pop("ref", None)
+    sc["state"].update(state_extra.pop("state", {}))
+    sc["state"]["hud"].update(state_extra.pop("hud", {}))
+    path = os.path.join(SHOTS, name + ".json")
+    with open(path, "w") as f:
+        json.dump(sc, f)
+    png = os.path.join(SHOTS, name + ".png")
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "scn-cfg")})
+    subprocess.run([f"{BUILD}/client_bin", "--render-scenario", path, png], env=env, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=120)
+    return png if os.path.exists(png) else None
+
+
+def pixel(png, x, y):
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    with Image.open(png) as im:
+        return im.convert("RGB").getpixel((x, y))
+
+
+# the scope's DOM settings apply in game (render scenarios skip the settings' DOM pass): Hunter, aimed
+scope = ["0 menu", '400 call setSetting "scopeBorderCol" "#ff0000"', '400 call setSetting "scopeBorderOpac" "0.5"',
+         '400 call setSetting "scopeWidth" "5"', "600 play", "1500 con class Hunter",
+         "2800 mdown right", f"3900 frames {SHOTS}/scoped 1", "4100 quit"]
+run("scope", "\n".join(scope))
+scoped = os.path.join(SHOTS, "scoped_0000.png")
+px = pixel(scoped, 20, 360) if os.path.exists(scoped) else None
+check(px is not None and px[0] > px[1] + 60 and px[0] > px[2] + 60, "screenshot: Hunter scoped, the side bar is red at half opacity", str(px))
+thrown = render("throw-green", {"state": {"settings": {"crosshairShoM": 3, "crosshairColorM": "#00ff00"}},
+                                "hud": {"scoped": False, "aim": 1, "throwCross": True}})
+px = pixel(thrown, 640, 360) if thrown else None
+check(px is not None and px[1] > 200 and px[0] < 80, "screenshot: the throwing crosshair's dot is crosshairColorM (green)", str(px))
+print(f"screenshots: {SHOTS}")
+
 if failures:
     print(f"FAILED {len(failures)}: logs in {WORK}")
     sys.exit(1)

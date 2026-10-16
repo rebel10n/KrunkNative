@@ -100,6 +100,17 @@ typedef struct {
     int crosshair_use_opacity, crosshair_always, crosshair_dot;
     char crosshair_color[RS_COLOR_MAX], crosshair_shadow[RS_COLOR_MAX];
     float crosshair_shadow_thickness, crosshair_thick, crosshair_len, crosshair_gap;
+    float crosshair_image_w, crosshair_image_h; // crosshairImageW/H: type 4 image size, 0 = natural (v10.js:160545)
+    // The throwing crosshair (cat "crosshairm"): replaces the crosshair while fully aimed with an unthrown
+    // Combat Knife (v10.js:160506 `aimVal == 0 && canThrow && weapon.canThrow`; hud_ui.c). crosshairAlwaysM
+    // and crosshairDotM change nothing in v10 (set to 1 / never read), so they are not kept.
+    int crosshair_type_m;    // crosshairShoM: 0 off, 1 preset (crosshairStyleM, the normal colours), 2 image, 3 precision
+    int crosshair_style_m;   // crosshairStyleM 0..4 (type 1)
+    char crosshair_image_m[RS_URL_MAX];      // crosshairImageM (type 2)
+    float crosshair_image_w_m, crosshair_image_h_m; // crosshairImageWM/HM, 0 = natural
+    float crosshair_opacity_m; int crosshair_use_opacity_m; // crosshairOpacityM + its crosshairUseOpacityM switch
+    char crosshair_color_m[RS_COLOR_MAX], crosshair_shadow_m[RS_COLOR_MAX]; // crosshairColorM / ShadowM (type 3)
+    float crosshair_shadow_thickness_m, crosshair_thick_m, crosshair_len_m, crosshair_gap_m;
     int hitmarker;           // hitm: hit markers enabled
     char hitmarker_color[RS_COLOR_MAX], hitmarker_kill_color[RS_COLOR_MAX]; // hitmCol, hitmKCol
     float hitmarker_opacity, hitmarker_length, hitmarker_thickness, hitmarker_spacing; // hitOpac, hitmLen, hitmThick, hitmSpac
@@ -114,6 +125,10 @@ typedef struct {
     int hide_ads;            // hideADS: hide the weapon while fully aimed (main.c)
     int can_load_mods, can_change_logo, auto_load_last;
     int scope_borders;       // scopeBorders: .black scope bars
+    char scope_border_color[RS_COLOR_MAX];   // scopeBorderCol: .black background-color (v10.js:207204)
+    float scope_border_opacity;              // scopeBorderOpac: .black opacity
+    float scope_width, scope_height;         // scopeWidth/Height (6.8): #recticleImg v * 100 px, the bars around it
+    float scope_opacity;                     // scopeOpac: the scope image's opacity while scoped (aimRecticle.opacMlt)
     char custom_scope[RS_URL_MAX], custom_ads_dot[RS_URL_MAX];
     float reticle_width, reticle_height; // reticleWidth/Height: #aimDot size (x10 px)
     char end_message[RS_URL_MAX];            // endMessage: sent to the chat once when the match ends (game_events.c)

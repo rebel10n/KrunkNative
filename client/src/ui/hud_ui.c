@@ -146,6 +146,7 @@ typedef struct {
     const Weapon *loadout[HUD_UI_LOADOUT_ALL];
     const ViewerSkin *skin[HUD_UI_LOADOUT_ALL]; // the skin worn on each slot (getSkinForLoadout / meleeIndex), NULL none
     int can_throw;                    // player.canThrow: melee slot shows the knife, else fists (thrown)
+    int throw_cross;                  // the throwing crosshair (crosshair*M) replaces the crosshair: fully aimed, knife in hand
     int melee_icon;                   // store.skins[meleeIndex].id || 0: melee/icon_<id> of the melee skin
 } HudUiExtra;
 
@@ -1350,23 +1351,84 @@ static void hud_cross_shape(char *out, const size_t size, size_t *len, const dou
         -outer, -outer, 2.0 * outer, 2.0 * outer, radius, line, color);
 }
 
-// game-overlay ao(): one precision-crosshair bar (or the dot) with the optional 1px
-// shadow stroke (canvas lineWidth 1 centred on the edge -> a 1px border on a 1px larger box).
-static void hud_cross_bar(char *out, const size_t size, size_t *len, const double x, const double y, const double w, const double h,
-                          const char *color, const char *stroke) {
-    if (!stroke) {
+// game-overlay ao(): one precision-crosshair bar (or the dot) with the optional shadow stroke
+// (canvas lineWidth `sw` centred on the edge -> an sw px border on a box sw px larger).
+static void hud_cross_bar_w(char *out, const size_t size, size_t *len, const double x, const double y, const double w, const double h,
+                            const char *color, const char *stroke, const double sw) {
+    if (!stroke || sw <= 0.0) {
         hud_cross_rect(out, size, len, x, y, w, h, color);
         return;
     }
-    hb_append(out, size, len, "<div style='position:absolute;box-sizing:border-box;left:%gpx;top:%gpx;width:%gpx;height:%gpx;background-color:%s;border:1px solid %s'></div>",
-        x - 0.5, y - 0.5, w + 1.0, h + 1.0, color, stroke);
+    hb_append(out, size, len, "<div style='position:absolute;box-sizing:border-box;left:%gpx;top:%gpx;width:%gpx;height:%gpx;background-color:%s;border:%gpx solid %s'></div>",
+        x - sw / 2.0, y - sw / 2.0, w + sw, h + sw, color, sw, stroke);
 }
 
-// Settings the crosshair markup depends on (rebuild when any changes).
-static void hud_cross_sig(const ClientRenderSettings *rs, char *out, const size_t size) {
-    snprintf(out, size, "%d|%d|%s|%s|%s|%g|%g|%g|%g|%d", rs->crosshair_type, rs->crosshair_style, rs->crosshair_color,
+static void hud_cross_bar(char *out, const size_t size, size_t *len, const double x, const double y, const double w, const double h,
+                          const char *color, const char *stroke) {
+    hud_cross_bar_w(out, size, len, x, y, w, h, color, stroke, 1.0);
+}
+
+// Settings the crosshair markup depends on (rebuild when any changes); `throw_cross`: the throwing set.
+static void hud_cross_sig(const ClientRenderSettings *rs, const int throw_cross, char *out, const size_t size) {
+    if (throw_cross) {
+        snprintf(out, size, "M|%d|%d|%s|%s|%s|%s|%s|%g|%g|%g|%g|%g|%g", rs->crosshair_type_m, rs->crosshair_style_m, rs->crosshair_color,
+            rs->crosshair_shadow, rs->crosshair_color_m, rs->crosshair_shadow_m, rs->crosshair_image_m, rs->crosshair_image_w_m,
+            rs->crosshair_image_h_m, rs->crosshair_shadow_thickness_m, rs->crosshair_thick_m, rs->crosshair_len_m, rs->crosshair_gap_m);
+        return;
+    }
+    snprintf(out, size, "%d|%d|%s|%s|%s|%g|%g|%g|%g|%d|%g|%g", rs->crosshair_type, rs->crosshair_style, rs->crosshair_color,
         rs->crosshair_shadow, rs->crosshair_image, rs->crosshair_shadow_thickness, rs->crosshair_thick,
-        rs->crosshair_len, rs->crosshair_gap, rs->crosshair_dot);
+        rs->crosshair_len, rs->crosshair_gap, rs->crosshair_dot, rs->crosshair_image_w, rs->crosshair_image_h);
+}
+
+// An image crosshair centred on the point: drawImage(img, x - w / 2, y - h / 2, w, h) with w = W || its width.
+static void hud_cross_image(char *out, const size_t size, size_t *len, const char *src, const float w, const float h) {
+    hb_append(out, size, len, "<img style='position:absolute;left:0;top:0;transform:translate(-50%%,-50%%)");
+    if (w > 0.0f) hb_append(out, size, len, ";width:%gpx", w);
+    if (h > 0.0f) hb_append(out, size, len, ";height:%gpx", h);
+    hb_append(out, size, len, "' src='");
+    hb_append_escaped(out, size, len, src);
+    hb_append(out, size, len, "'>");
+}
+
+// The throwing crosshair (v10.js:160506..160545, while fully aimed with an unthrown Combat Knife):
+//   1  the crosshairStyleM preset of an() with crosshairThickM / LenM / ShadowThicknessM, in the
+//      normal crosshairColor / crosshairShadow (an() reads only those)
+//   2  crosshairImageM at crosshairImageWM x HM (0: its own size)
+//   3  precision bars (v10.js:160877 _57065 through _57074 with crosshairColorM / ShadowM): the dot,
+//      0.8 x LenM arms left / right, 1.5 x LenM up / down (down with GapM + 1), stroked ShadowThicknessM
+static void hud_crosshair_build_m(const ClientRenderSettings *rs, char *html, const size_t size, size_t *len) {
+    const double bm = rs->crosshair_thick_m, bn = rs->crosshair_len_m, sw = rs->crosshair_shadow_thickness_m;
+    char color[64], shadow[64];
+    if (rs->crosshair_type_m == 1) {
+        hud_css_color(rs->crosshair_color, 1.0, color, sizeof(color));
+        hud_css_color(rs->crosshair_shadow, 0.5, shadow, sizeof(shadow));
+        const int shadow_on = sw != 0.0f;
+        if (rs->crosshair_style_m == 0) {
+            if (shadow_on) hud_cross_rect(html, size, len, -bm * 0.5 - 2.0, -bn - 2.0, bm + 4.0, bn * 2.0 + 4.0, shadow);
+            hud_cross_rect(html, size, len, -bm * 0.5, -bn, bm, bn * 2.0, color);
+            if (shadow_on) hud_cross_rect(html, size, len, -bn - 2.0, -bm / 2.0 - 2.0, bn * 2.0 + 4.0, bm + 4.0, shadow);
+            hud_cross_rect(html, size, len, -bn, -bm / 2.0, bn * 2.0, bm, color);
+            hud_cross_rect(html, size, len, -bm * 0.5, -bn, bm, bn * 2.0, color);
+        } else {
+            const int style = rs->crosshair_style_m;
+            if (shadow_on) hud_cross_shape(html, size, len, bn + 2.0, bm / 2.0, style == 1 || style == 2, style == 2 || style == 4, shadow);
+            hud_cross_shape(html, size, len, bn, bm / 2.0, style == 1 || style == 2, style == 2 || style == 4, color);
+        }
+    } else if (rs->crosshair_type_m == 2 && rs->crosshair_image_m[0]) {
+        hud_cross_image(html, size, len, rs->crosshair_image_m, rs->crosshair_image_w_m, rs->crosshair_image_h_m);
+    } else if (rs->crosshair_type_m == 3) {
+        hud_css_color(rs->crosshair_color_m, 1.0, color, sizeof(color));
+        hud_css_color(rs->crosshair_shadow_m, 1.0, shadow, sizeof(shadow));
+        const double m = bm / 10.0 * 19.0, lh = bn * 0.8 / 10.0 * 19.0, lv = bn * 1.5 / 10.0 * 19.0;
+        const double gap = rs->crosshair_gap_m * 1.0 + 3.0, gap_down = (rs->crosshair_gap_m + 1.0) * 1.0 + 3.0;
+        const char *stroke = sw != 0.0f ? shadow : NULL;
+        hud_cross_rect(html, size, len, -m / 2.0, -m / 2.0, m, m, color);                              // the dot: no stroke
+        hud_cross_bar_w(html, size, len, m / 2.0 + gap, -m / 2.0, lh, m, color, stroke, sw);           // 90
+        hud_cross_bar_w(html, size, len, -(m / 2.0 + gap + lh), -m / 2.0, lh, m, color, stroke, sw);   // -90
+        hud_cross_bar_w(html, size, len, -m / 2.0, -(m / 2.0 + gap + lv), m, lv, color, stroke, sw);   // 0
+        hud_cross_bar_w(html, size, len, -m / 2.0, m / 2.0 + gap_down, m, lv, color, stroke, sw);      // 180
+    }
 }
 
 // The overlay's crosshair (91.js, `crosshairType > 0` branch) as DOM layers in #uiBase
@@ -1378,10 +1440,25 @@ static void hud_cross_sig(const ClientRenderSettings *rs, char *out, const size_
 //                at its natural size; type 5: precision ao() bars (+ dot)
 // Colours: crosshairColor; shadows crosshairShadow at 0.5 alpha (an()) or full alpha (ao()),
 // drawn only when crosshairShadowThickess is non-zero (the overlay only tests it).
-static void hud_crosshair_build(const ClientRenderSettings *rs) {
+static void hud_crosshair_build(const ClientRenderSettings *rs, const int throw_cross) {
     HudUi *ui = &g_hud_ui;
     const HtmlElem ch = ui->crosshair;
     if (!ch) return;
+    if (throw_cross) {
+        char html[4096];
+        size_t len = 0;
+        html[0] = 0;
+        hb_append(html, sizeof(html), &len, "<div id='knCrossDef' style='position:absolute;left:0;top:0'></div>"
+                                            "<div id='knCrossCus' style='position:absolute;left:0;top:0'>");
+        hud_crosshair_build_m(rs, html, sizeof(html), &len);
+        hb_append(html, sizeof(html), &len, "</div>");
+        html_dom_set_html(ch, html);
+        html_dom_set_style(ch, "opacity", "1");
+        ui->cross_def = html_dom_by_id("knCrossDef");
+        ui->cross_cus = html_dom_by_id("knCrossCus");
+        ui->cross_opacity[0] = ui->cross_def_opacity[0] = ui->cross_size[0] = 0;
+        return;
+    }
 
     const int type = rs->crosshair_type;
     const int shadow_on = rs->crosshair_shadow_thickness != 0.0f;
@@ -1423,9 +1500,7 @@ static void hud_crosshair_build(const ClientRenderSettings *rs) {
             hud_cross_shape(html, sizeof(html), &len, bn, bm / 2.0, ellipse, fill, color);
         }
     } else if (type == 4 && rs->crosshair_image[0]) {
-        hb_append(html, sizeof(html), &len, "<img style='position:absolute;left:0;top:0;transform:translate(-50%%,-50%%)' src='");
-        hb_append_escaped(html, sizeof(html), &len, rs->crosshair_image);
-        hb_append(html, sizeof(html), &len, "'>");
+        hud_cross_image(html, sizeof(html), &len, rs->crosshair_image, rs->crosshair_image_w, rs->crosshair_image_h); // v10.js:160545
     } else if (type == 5) {
         const double m = bm / 10.0 * 19.0;              // ao(): aq
         const double l = bn / 10.0 * 19.0;              // |ar|
@@ -1469,9 +1544,9 @@ static void hud_render_crosshair(const HudUiExtra *extra, const int reloading) {
 
     const ClientRenderSettings *rs = client_render_settings();
     char sig[sizeof(ui->cross_sig)];
-    hud_cross_sig(rs, sig, sizeof(sig));
+    hud_cross_sig(rs, extra->throw_cross, sig, sizeof(sig));
     if (strcmp(sig, ui->cross_sig) != 0 || !ui->cross_cus) {
-        hud_crosshair_build(rs);
+        hud_crosshair_build(rs, extra->throw_cross);
         snprintf(ui->cross_sig, sizeof(ui->cross_sig), "%s", sig);
     }
 
@@ -1480,12 +1555,18 @@ static void hud_render_crosshair(const HudUiExtra *extra, const int reloading) {
         ui->cross_dirty = 0;
     }
 
-    const int type = rs->crosshair_type;
+    const int type = extra->throw_cross ? rs->crosshair_type_m : rs->crosshair_type;
     const double aim = CLAMP(extra->aim_pct, 0, 100) / 100.0;
-    const double aim_opacity = (1.0 - aim) * (reloading ? 0.0 : 1.0);
+    double aim_opacity = (1.0 - aim) * (reloading ? 0.0 : 1.0);
     double opacity = aim_opacity;
-    if (type > 1 && rs->crosshair_always) opacity = 1.0;
-    if (type > 1 && rs->crosshair_use_opacity) opacity = rs->crosshair_opacity;
+    if (extra->throw_cross) {
+        // the throwing set: alpha 1, or crosshairOpacityM with its switch; no aim / reload fade
+        opacity = type > 0 && rs->crosshair_use_opacity_m ? rs->crosshair_opacity_m : 1.0;
+        aim_opacity = 0.0;
+    } else {
+        if (type > 1 && rs->crosshair_always) opacity = 1.0;
+        if (type > 1 && rs->crosshair_use_opacity) opacity = rs->crosshair_opacity;
+    }
     const int shown = type > 0 && !extra->scoreboard && opacity > 0.0 && !ui->dead && !ui->ended; // overlay canvas hidden
 
     char size[24];
@@ -3538,6 +3619,7 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
     *ping = hud_json_int(h, "ping", *ping);
     extra->spread = hud_json_int(h, "spread", extra->spread);
     if (cJSON_IsNumber(item = cJSON_GetObjectItemCaseSensitive(h, "aim"))) extra->aim_pct = (int) lround(CLAMP(item->valuedouble, 0.0, 1.0) * 100.0);
+    if ((item = cJSON_GetObjectItemCaseSensitive(h, "throwCross"))) extra->throw_cross = cJSON_IsTrue(item); // scenario: the knife aimed
     if (aim_pct_override >= 0) extra->aim_pct = aim_pct_override;
     extra->scoreboard = hud_json_int(h, "scoreboard", extra->scoreboard);
     if (cJSON_IsArray(item = cJSON_GetObjectItemCaseSensitive(h, "loadout"))) {
@@ -4246,6 +4328,8 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));
     next_extra.aim_pct = (int) lroundf(CLAMP(me->aim_val, 0.0f, 1.0f) * 100.0f);
+    // v10.js:160506: `aimVal == 0 && canThrow && weapon.canThrow` (Krunker's aimVal 0 is KrunkNative's 1)
+    next_extra.throw_cross = weapon && weapon->can_throw && me->can_throw && me->aim_val >= 1.0f;
     // v10 updateCrosshair (v10.js 221608): with a camera offset (thirdPerson) the crosshair stays
     // while aiming, except with a scope (its overlay takes over); so does KrunkNative's third person
     if (third_person_view(client) && !(weapon && weapon->scope)) next_extra.aim_pct = 0;
@@ -4277,14 +4361,16 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // crosshair settings changed in the Display tab (markup or opacity rules)
     const ClientRenderSettings *rs = client_render_settings();
     char cross_sig[sizeof(ui->cross_sig)], cross_opts[sizeof(ui->cross_opts)];
-    hud_cross_sig(rs, cross_sig, sizeof(cross_sig));
-    snprintf(cross_opts, sizeof(cross_opts), "%d|%d|%g", rs->crosshair_always, rs->crosshair_use_opacity, rs->crosshair_opacity);
+    hud_cross_sig(rs, next_extra.throw_cross, cross_sig, sizeof(cross_sig));
+    snprintf(cross_opts, sizeof(cross_opts), "%d|%d|%g|%d|%g", rs->crosshair_always, rs->crosshair_use_opacity, rs->crosshair_opacity,
+             rs->crosshair_use_opacity_m, rs->crosshair_opacity_m);
     const int cross_settings_changed = strcmp(cross_sig, ui->cross_sig) != 0 || strcmp(cross_opts, ui->cross_opts) != 0;
     if (cross_settings_changed) snprintf(ui->cross_opts, sizeof(ui->cross_opts), "%s", cross_opts);
     // v3.1.1 LqKL1: the crosshair opacity is also zero while inspecting the weapon
     const int inspecting = me->inspecting && !ov;
     const int cross_changed = force || inspecting != ui->inspecting || ui->cross_dirty || next_extra.spread != ui->extra.spread || next_extra.aim_pct != ui->extra.aim_pct ||
-                              reloading != ui->reloading || next_extra.scoreboard != ui->extra.scoreboard || cross_settings_changed;
+                              reloading != ui->reloading || next_extra.scoreboard != ui->extra.scoreboard || cross_settings_changed ||
+                              next_extra.throw_cross != ui->extra.throw_cross;
     const int ping_changed = force || ping != ui->ping;
 
     if (!(health_changed || ammo_changed || timer_changed || counters_changed || class_changed || scope_changed ||

@@ -5,7 +5,7 @@
 //   KRUNKNATIVE_FIXED_DELTA=<ms>      every frame advances exactly this much time, so a slow host
 //                                     (Xvfb/llvmpipe) replays at a chosen 30/60/144 fps step
 //
-// Script: one event per line, "<t_ms> <command> [args]", '#' starts a comment. Times count
+// Script: one event per line, "<t_ms> <command> [args]", '#' starts a comment (not inside "..."). Times count
 // summed frame deltas (the round-end slow motion does not stretch them) from the frame the
 // local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
@@ -264,8 +264,14 @@ static void script_load(void) {
 
     char line[1200];
     while (fgets(line, sizeof(line), file) && g_script.count < SCRIPT_MAX_EVENTS) {
-        char *hash = strchr(line, '#');
-        if (hash) *hash = 0;
+        // '#' outside double quotes starts a comment (call setSetting "scopeBorderCol" "#ff0000" keeps its colour)
+        for (char *c = line, quoted = 0; *c; c++) {
+            if (*c == '"') quoted = (char) !quoted;
+            else if (*c == '#' && !quoted) {
+                *c = 0;
+                break;
+            }
+        }
 
         ScriptEvent *e = &g_script.events[g_script.count];
         memset(e, 0, sizeof(*e));
