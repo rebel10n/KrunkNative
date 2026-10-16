@@ -245,9 +245,11 @@ def signed_in_case(brain_port, games):
     check("1: Connect link, Host Game and Quick Match shown", h.get("menuBtnConnect") == "1" and h.get("menuBtnHost") == "1"
           and h.get("menuBtnQuickMatch") == "1", str(h))
     check("1: the class preview is drawn", h.get(":preview") == "1", str(h))
-    # an account keeps the chat and gets the Spectate switch on the menu (v10 hideChatIfGuestUser
-    # v10:208576, hideSpectateIfGuestUser v10:208579)
-    check("1: chat and Spectate switch on the menu for an account", h.get("chatUIHolder") == "1" and h.get("spectButtonHolder") == "1", str(h))
+    # an account gets the Spectate switch on the menu (hideSpectateIfGuestUser v10:208579). The chat
+    # waits for a game (KrunkNative, hud_v10.c: v10 showed an account's chat on the menu here):
+    # the menu's chat is hidden for an account too, and the Spectate switch shows
+    check("1: no chat on the menu before a game (an account too), Spectate switch shown",
+          h.get("chatUIHolder") == "0" and h.get("spectButtonHolder") == "1", str(h))
     n = vis(text, "nav")
     check("1: signed-in nav (Turf Wars, Market, Leaderboards, small Guide; no Guide card)",
           n.get("menuBtnTurfWars") == "1" and n.get("menuBtnMarket") == "1" and n.get("menuBtnLeaderboards") == "1"
@@ -295,7 +297,7 @@ def guest_case(brain_port):
     r = vis(text, "registered")
     check("2: Register signs in: modal closed, signed-in header", r.get("knV10Login") == "-" and r.get("signedInHeaderBar") == "1"
           and r.get("signedOutHeaderBar") == "0" and r.get("knV10Name") == "1", str(r))
-    check("2: signed in: chat and Spectate switch on the menu", r.get("chatUIHolder") == "1" and r.get("spectButtonHolder") == "1", str(r))
+    check("2: signed in: no chat before a game, Spectate switch on the menu", r.get("chatUIHolder") == "0" and r.get("spectButtonHolder") == "1", str(r))
     st, body = http(brain_port, "/auth/login", {"username": user, "password": pw})
     check("2: the account exists in the brain", st == 200 and isinstance(body, dict) and body.get("token"), str(body)[:200])
     o = vis(text, "loggedout")

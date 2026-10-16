@@ -3781,10 +3781,11 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
             else html_dom_set_class(el, "onGameM", 0);
         }
     }
-    // #chatUI: v7 only ever writes it from the showUI setting (settings.js showUI.set:
-    // chatUI.style.display = val ? "block" : "none"), so the chat is up beside the menu (also
-    // before the first spawn), the death screen and the end screen.
-    const int chat = client_render_settings()->show_ui;
+    // #chatUI: v7 wrote it from the showUI setting alone (settings.js showUI.set). KrunkNative: also only
+    // once the player is in a game (client->in_game: entered, dead, spectating, the end screen), so
+    // a menu, a join or a reload with no game shows no chat; showUI still turns it off. The v10
+    // holder (hud_v10_tick) follows the same test.
+    const int chat = client_render_settings()->show_ui && client->in_game;
     if (chat != ui->chat_shown) {
         ui->chat_shown = chat;
         dom_display("chatUI", chat ? "block" : "none");
@@ -4276,7 +4277,7 @@ void hud_ui_leave_game(Client *client) {
 // groups that changed since the last write.
 void client_hud_html_tick(Client *client, const float now_f) {
     if (!html_ui_available()) return;
-    hud_v10_tick(); // every frame, also on the menu / while spectating (#chatUIHolder)
+    hud_v10_tick(client->in_game); // every frame, also on the menu / while spectating (#chatUIHolder)
 
     HudUi *ui = &g_hud_ui;
     HtmlHudState *hud = &client->hud_html;
