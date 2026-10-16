@@ -881,15 +881,16 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "hands")) {
         // hands: both first-person hands as drawn (nettspend_vfx_e2e.py): the trigger hand's and the off
         // hand's centres (world) and where they land in the window (0..1, y down), plus the Drank's
-        // bottle centre, its visibility and where it lands ("none" without first-person arms)
+        // bottle centre, its visibility and where it lands, and whether the off arm is drawn ("none"
+        // without arms)
         vec3 trigger, off, bottle;
-        int bottle_visible = 0;
-        if (client->me && player_hands_points(client->me, &trigger, &off, &bottle, &bottle_visible)) {
+        int bottle_visible = 0, off_visible = 0;
+        if (client->me && player_hands_points(client->me, &trigger, &off, &bottle, &bottle_visible, &off_visible)) {
             const vec2 st = script_project(client, trigger), so = script_project(client, off), sb = script_project(client, bottle);
             fprintf(stderr, "[input_script] hands t=%.0f trigger=%.4f,%.4f,%.4f off=%.4f,%.4f,%.4f screen_trigger=%.4f,%.4f screen_off=%.4f,%.4f "
-                    "bottle=%.4f,%.4f,%.4f visible=%d screen_bottle=%.4f,%.4f\n",
+                    "bottle=%.4f,%.4f,%.4f visible=%d screen_bottle=%.4f,%.4f off_visible=%d\n",
                     g_script.time, trigger.x, trigger.y, trigger.z, off.x, off.y, off.z, st.x, st.y, so.x, so.y, bottle.x, bottle.y, bottle.z,
-                    bottle_visible, sb.x, sb.y);
+                    bottle_visible, sb.x, sb.y, off_visible);
         } else {
             fprintf(stderr, "[input_script] hands t=%.0f none\n", g_script.time);
         }

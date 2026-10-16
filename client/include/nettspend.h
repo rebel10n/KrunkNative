@@ -63,6 +63,10 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // Third person: the trigger hand's hold point is moved this far out (the arm frame's x) from the pistol's
 // (negative: the model's right), so the cup in the hand clears the torso from the over-the-shoulder camera.
 #define NETTSPEND_TP_HAND_SIDE (-1.2f)
+// The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
+// shoulder, this far out to its own side and forward per unit down (only the trigger arm holds the cup)
+#define NETTSPEND_OFF_HAND_AWAY_OUT (-0.12f)
+#define NETTSPEND_OFF_HAND_AWAY_FWD 0.15f
 // The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);

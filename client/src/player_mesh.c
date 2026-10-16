@@ -545,6 +545,28 @@ static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 tar
     arm->pivot.position = (vec3) {sh.x - rsx + bx - rax, sh.y - rsy + by - ray, sh.z - rsz + bz - raz};
 }
 
+// Nettspend Drank: where the off hand is while it does not pour (the arms anchor frame): the arm turned
+// down about its shoulder (arm->anchor's origin) to hang at the side, its reach kept, a little out to
+// its own side and forward (NETTSPEND_OFF_HAND_AWAY_*). `rest` is the hand's centre at rest.
+static vec3 player_off_hand_away(const PlayerArmMesh *arm, const vec3 rest) {
+    if (!arm) return rest;
+    const vec3 sh = arm->anchor.position;
+    const float dx = rest.x - sh.x, dy = rest.y - sh.y, dz = rest.z - sh.z, reach = sqrtf(dx * dx + dy * dy + dz * dz);
+    const float side = sh.x < 0.0f ? -1.0f : 1.0f;
+    float ax = side * NETTSPEND_OFF_HAND_AWAY_OUT, ay = -1.0f, az = -NETTSPEND_OFF_HAND_AWAY_FWD;
+    const float l = sqrtf(ax * ax + ay * ay + az * az);
+    ax /= l, ay /= l, az /= l;
+    return (vec3) {sh.x + ax * reach, sh.y + ay * reach, sh.z + az * reach};
+}
+
+static void player_arm_mesh_set_visible(const PlayerArmMesh *arm, const int visible) {
+    if (!arm) return;
+    if (arm->extender) arm->extender->visible = visible;
+    if (arm->upper) arm->upper->visible = visible;
+    if (arm->joint) arm->joint->visible = visible;
+    for (size_t k = 0; arm->lower && k < arm->lower->mesh_count; k++) arm->lower->meshes[k]->visible = visible;
+}
+
 int player_hose_points(const Player *player, vec3 *tip, vec3 *back, vec3 *hand) {
     const PlayerMesh *mesh = player ? player->mesh : NULL;
     if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
@@ -571,7 +593,7 @@ int player_pour_points(const Player *player, vec3 *mouth, vec3 *rim) {
     return 1;
 }
 
-int player_hands_points(const Player *player, vec3 *trigger, vec3 *off, vec3 *bottle, int *bottle_visible) {
+int player_hands_points(const Player *player, vec3 *trigger, vec3 *off, vec3 *bottle, int *bottle_visible, int *off_visible) {
     const PlayerMesh *mesh = player ? player->mesh : NULL;
     if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
     const PlayerArms *arms = mesh->arms[player->loadout_index];
@@ -582,6 +604,10 @@ int player_hands_points(const Player *player, vec3 *trigger, vec3 *off, vec3 *bo
     if (bottle) *bottle = arms->weapon_left ? transform_point_to(&arms->weapon_left->transform, (vec3) {0.0f, 0.0f, -NETTSPEND_BOTTLE_LENGTH * 0.5f * NETTSPEND_BOTTLE_GRIP}, NULL)
                                             : (vec3) {0.0f, 0.0f, 0.0f};
     if (bottle_visible) *bottle_visible = arms->weapon_left ? arms->weapon_left->visible : 0;
+    if (off_visible) { // the off arm's skin (its hand) as drawn
+        const PlayerArmMesh *arm = player->left_handed ? arms->right : arms->left;
+        *off_visible = arm && arm->lower && arm->lower->mesh_count ? arm->lower->meshes[arm->lower->mesh_count - 1]->visible : 0;
+    }
     return 1;
 }
 
@@ -1673,11 +1699,15 @@ void player_update_meshes(Player *player, const int is_preview) {
         }
     }
 
-    // Nettspend Purple Drank (nettspend.h): the pour-up of the local player's reload, first and third
-    // person: the off hand brings the bottle over the cup and tips it, the trigger hand holds the cup up,
-    // and both arms reach where the cup and the bottle are (player_arm_reach; back at rest, identity,
-    // outside the reload). Only the local player's reload_timer runs on the client (procInputs), like
-    // the reload dip above: the others' pour stays hidden.
+    // Nettspend Purple Drank (nettspend.h): one arm holds the cup out, the other only comes up for the
+    // refill (user, 2026-10-15: "hold out the cup with one arm (the right one) and only pull out the left
+    // arm in order to refill it"). Outside the pour-up the off arm is away (player_off_hand_away: turned
+    // down about its shoulder, the hand at the side; first person also hides it, out of view like a
+    // one-handed viewmodel's). The pour-up of the local player's reload, first and third person: the
+    // off hand brings the bottle up from there, over the cup, tips it and takes it back down, while the
+    // trigger hand holds the cup up, both arms reaching where the cup and the bottle are
+    // (player_arm_reach). Only the local player's reload_timer runs on the client (procInputs), like the
+    // reload dip above: the others' pour stays hidden, their off hand at the side.
     if (held_arms && held_arms->hose && !held_arms->melee_pose && nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) {
         PlayerArmMesh *trigger_arm = player->left_handed ? held_arms->left : held_arms->right;
         PlayerArmMesh *off_arm = player->left_handed ? held_arms->right : held_arms->left;
@@ -1687,15 +1717,17 @@ void player_update_meshes(Player *player, const int is_preview) {
             arm->pivot.position = arm->pivot.rotation = (vec3) {0.0f, 0.0f, 0.0f};
         }
         const vec3 trigger_rest = player_trigger_hand(held_arms, player->left_handed), off_rest = player_off_hand(held_arms, player->left_handed);
+        const vec3 off_away = player_off_hand_away(off_arm, off_rest);
         const float reload_time = player->weapon->reload_time * reload_speed;
         const float progress = player->render_you && player->reload_timer > 0.0f && reload_time > 0.0f ? 1.0f - player->reload_timer / reload_time : -1.0f;
+        const int pouring = progress >= 0.0f && progress <= 1.0f;
         vec3 cup_hand, bottle_hand;
-        nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, trigger_rest, off_rest, left_hand_mlt, held_arms->hose->transform.scale.x, progress,
+        nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, trigger_rest, off_away, left_hand_mlt, held_arms->hose->transform.scale.x, progress,
                             &cup_hand, &bottle_hand);
-        if (progress >= 0.0f && progress <= 1.0f) {
-            player_arm_reach(trigger_arm, trigger_rest, cup_hand);
-            player_arm_reach(off_arm, off_rest, bottle_hand);
-        }
+        if (pouring) player_arm_reach(trigger_arm, trigger_rest, cup_hand);
+        player_arm_reach(off_arm, off_rest, bottle_hand); // away, or carrying the bottle
+        // first person: the off arm shows only for the refill (showHands above already decided the arms)
+        if (player->render_you && !third_person && !pouring) player_arm_mesh_set_visible(off_arm, 0);
     }
 
     // the charm sways with the weapon (players.js:501-504)

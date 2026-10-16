@@ -59,7 +59,7 @@ HOSE_RE = re.compile(rf"\[input_script\] hose t=(\d+) tip={VEC} back={VEC} hand=
 POUR_RE = re.compile(rf"\[input_script\] pour t=(\d+) strength=(-?[\d.]+) mouth={VEC} rim={VEC} "
                      r"screen_mouth=(-?[\d.]+),(-?[\d.]+) screen_rim=(-?[\d.]+),(-?[\d.]+)")
 HANDS_RE = re.compile(rf"\[input_script\] hands t=(\d+) trigger={VEC} off={VEC} screen_trigger=(-?[\d.]+),(-?[\d.]+) "
-                      rf"screen_off=(-?[\d.]+),(-?[\d.]+) bottle={VEC} visible=(\d) screen_bottle=(-?[\d.]+),(-?[\d.]+)")
+                      rf"screen_off=(-?[\d.]+),(-?[\d.]+) bottle={VEC} visible=(\d) screen_bottle=(-?[\d.]+),(-?[\d.]+) off_visible=(\d)")
 POUR_NONE_RE = re.compile(r"\[input_script\] pour t=(\d+) none")
 LACED_RE = re.compile(r"\[input_script\] laced t=(\d+) intensity=(-?[\d.]+) left=(-?[\d.]+) time=(-?[\d.]+)")
 SOURCE_RE = re.compile(r"\[vfx\] stream source (-?[\d.]+) (-?[\d.]+) (-?[\d.]+)")
@@ -80,6 +80,8 @@ BOTTLE_FROM_HAND = 0.05      # units: the bottle's grip (where it is held) from 
 OFF_HAND_RISE = 0.5          # units the off hand at least lifts the bottle above its rest (over the cup) during the pour-up
 TP_SCALE = 1.8               # NETTSPEND_TP_SCALE: third person's cup and bottle (the mouth's reach over the rim scales too)
 HAND_BELOW = 0.12            # window fraction a fist's centre may sit below the bottom edge (the view cuts the arms there)
+TP_OFF_HAND_DROP = 3.0       # third person, outside the pour-up: the off hand hangs at least this far below the cup hand
+POUR_TIPPED = (0.3, 0.75)    # reload progress where the bottle is over the cup (both hands up, in the frame)
 
 
 def check(name, ok, detail=""):
@@ -121,6 +123,8 @@ def drank_script(work, weapon):
               "2300 down R", f"{2300 + 2 * FRAME_MS:.3f} up R", f"{2300 + RELOAD_MS * 0.5:.0f} shot {shot('pour')}"]
     lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "pour")
     lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "hands")
+    # walking and aiming with the cup after the pour-up: one arm still (the off arm out of view)
+    lines += ["3720 down W", f"3800 shot {shot('walk')}", "3800 hands", "3850 up W", "3860 mdown right", "3885 hands", "3895 mup right"]
     lines += ["3900 laced 8000", "4600 laced", f"4600 shot {shot('laced')}", "4700 quit"]
     return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
 
@@ -200,7 +204,7 @@ def run(tag, text, timeout=240):
             if m:
                 g = [float(x) for x in m.groups()]
                 events.append(("hands", {"t": g[0], "trigger": g[1:4], "off": g[4:7], "screen_trigger": g[7:9], "screen_off": g[9:11],
-                                         "bottle": g[11:14], "visible": int(g[14]), "screen_bottle": g[15:17]}))
+                                         "bottle": g[11:14], "visible": int(g[14]), "screen_bottle": g[15:17], "off_visible": int(g[17])}))
                 continue
             m = WSEL_RE.search(line)
             if m:
@@ -295,14 +299,18 @@ def verify_drank(events):
     check(f"{tag}: the hands probe ran", hands)
     if hands:
         rest_hands = hands[0]
-        check(f"{tag}: both hands are in the frame while the cup is held (the fists at the bottom edge)",
-              hand_in_frame(rest_hands["screen_trigger"]) and hand_in_frame(rest_hands["screen_off"]),
-              f"trigger at {rest_hands['screen_trigger']}, off hand at {rest_hands['screen_off']}")
-        poured = [h for h in hands if h["visible"]]
-        verify_off_hand_pour(tag, hands)
-        check(f"{tag}: the pour-up uses both hands (the off hand carries the bottle, the trigger hand holds the cup)",
-              bool(poured) and all(hand_in_frame(h["screen_off"]) and hand_in_frame(h["screen_trigger"]) for h in poured),
-              f"{len(poured)} frames with the bottle out")
+        # one arm holds the cup out (user, 2026-10-15): the off arm only shows for the refill
+        check(f"{tag}: the cup hand is in the frame while the cup is held (its fist at the bottom edge)", hand_in_frame(rest_hands["screen_trigger"]),
+              f"trigger at {rest_hands['screen_trigger']}")
+        idle = [h for h in hands if not h["visible"]]  # idle, after the pour-up, walking, aiming
+        check(f"{tag}: outside the pour-up the off arm is not drawn and its hand is out of view (idle, walking, aiming)",
+              len(idle) >= 3 and all(not h["off_visible"] and not hand_in_frame(h["screen_off"]) for h in idle),
+              f"{len(idle)} probes: " + ", ".join(f"t={h['t']:.0f} drawn={h['off_visible']} at y {h['screen_off'][1]:.2f}" for h in idle[:6]))
+        verify_off_hand_pour(tag, hands, first_person=True)
+        tipped = [h for h in hands if h["visible"] and POUR_TIPPED[0] <= (h["t"] - 2300.0) / RELOAD_MS <= POUR_TIPPED[1]]
+        check(f"{tag}: the pour-up uses both hands (the off arm comes up with the bottle, the trigger hand holds the cup)",
+              len(tipped) >= 5 and all(h["off_visible"] and hand_in_frame(h["screen_off"]) and hand_in_frame(h["screen_trigger"]) for h in tipped),
+              f"{len(tipped)} frames with the bottle over the cup")
 
     last, worst, sprays, unmatched = None, 0.0, 0, 0
     for kind, e in events:
@@ -405,7 +413,16 @@ def verify_tp(events):
         check(f"{tag}: third person holds the {model}", sel and sel["tp"] == 1 and f"model={model}" in sel["sel"] and "hose" not in sel["sel"],
               sel["sel"] if sel else "no wsel line")
     # the pour-up seen from the third-person camera: the same off-hand bottle, over the body's cup
-    verify_off_hand_pour(tag, [e for kind, e in events if kind == "hands"])
+    hands = [e for kind, e in events if kind == "hands"]
+    verify_off_hand_pour(tag, hands)
+    # one arm holds the cup out: outside the pour-up the off hand hangs at the side, holding nothing
+    idle = [h for h in hands if not h["visible"]]
+    drop = min((h["trigger"][1] - h["off"][1] for h in idle), default=0.0)
+    check(f"{tag}: outside the pour-up the off hand hangs at the side, empty (at least {TP_OFF_HAND_DROP} below the cup hand)",
+          len(idle) >= 2 and drop >= TP_OFF_HAND_DROP, f"{len(idle)} probes, the smallest drop {drop:.2f} units")
+    tipped = [h for h in hands if h["visible"] and POUR_TIPPED[0] <= (h["t"] - 2300.0) / RELOAD_MS <= POUR_TIPPED[1]]
+    check(f"{tag}: during the pour-up the off hand is up with the bottle (drawn, at the cup's height)",
+          len(tipped) >= 5 and all(h["off_visible"] and h["off"][1] >= h["trigger"][1] - 1.0 for h in tipped), f"{len(tipped)} frames")
     verify_pour_probes(tag, events, TP_SCALE)
     rest, pour = (os.path.join(WORK, "tp", f"tp_{n}.png") for n in ("drank", "pour"))
     if os.path.exists(rest) and os.path.exists(pour):
@@ -413,9 +430,10 @@ def verify_tp(events):
         check(f"{tag}: the pour-up frame differs from the rest frame (the bottle is in view)", diff >= 0.3, f"{diff:.2f} mean abs difference")
 
 
-def verify_off_hand_pour(tag, hands):
+def verify_off_hand_pour(tag, hands, first_person=False):
     """the bottle comes from the off hand, stays in it (its grip on the fist) while it is carried over the cup and tipped,
-    and goes back: the off hand rises with it and is at its rest again once the reload is over"""
+    and goes back: the off hand rises with it and is at its rest again once the reload is over (first person: back down out
+    of view and not drawn; the away pose hangs ~4 units from the shoulder, so the view's sway moves it ~1 unit in the world)"""
     poured = [h for h in hands if h["visible"]]
     worst = max((length(sub(h["bottle"], h["off"])) for h in poured), default=None)
     check(f"{tag}: the bottle stays in the off hand through the pour-up (every frame)", poured and worst <= BOTTLE_FROM_HAND,
@@ -426,7 +444,12 @@ def verify_off_hand_pour(tag, hands):
     rest = hands[0]["off"]
     rise = max(h["off"][1] for h in poured) - rest[1]
     check(f"{tag}: the off hand carries the bottle up over the cup", rise >= OFF_HAND_RISE, f"rises {rise:.3f} units (>= {OFF_HAND_RISE})")
-    after = [h for h in hands if h["t"] >= 2300 + RELOAD_MS and not h["visible"]]
+    after = [h for h in hands if 2300 + RELOAD_MS <= h["t"] <= 2300 + RELOAD_MS + 100 and not h["visible"]]
+    if first_person:
+        back = after and not after[-1]["off_visible"] and not hand_in_frame(after[-1]["screen_off"])
+        check(f"{tag}: the off hand is back down out of view after the pour-up", back,
+              f"drawn={after[-1]['off_visible']} at y {after[-1]['screen_off'][1]:.2f}" if after else "no probe after the reload")
+        return
     back = after and length(sub(after[-1]["off"], rest)) <= 0.3
     check(f"{tag}: the off hand is back at its rest after the pour-up", back,
           f"{length(sub(after[-1]['off'], rest)):.3f} units from its rest" if after else "no probe after the reload")
