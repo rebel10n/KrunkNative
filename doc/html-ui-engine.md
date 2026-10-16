@@ -268,6 +268,7 @@ in `client_menu_tick()`), and the client uses its built-in menu text and HUD.
 |---|---|
 | `KRUNKNATIVE_UI_DIR=<dir>` | load the page from another directory instead of `ui/` |
 | `KRUNKNATIVE_HTML_PROFILE=1` | engine: per-stage timings every ~2 s: frame, restyle (elements restyled; cascade / post-restyle split), layout (box rebuilds), paint, submit, display-list size, images (resident, lazy MB, decodes, decode ms per frame), last frame's draw calls and culled primitives |
+| `KRUNKNATIVE_HTML_SLOW_FRAME_MS=<ms>` | engine: one line per frame slower than that (turns the profile on): its restyle (elements), layout (rebuilds), paint, submit (image decodes) and the rest of the client's frame |
 | `KRUNKNATIVE_HTML_VERBOSE=1` | engine: log loads, failures and first-layout stats |
 | `KRUNKNATIVE_HTML_DUMP_DL=1` | engine: print the display list once per paint build |
 | `KRUNKNATIVE_HTML_IMAGE_LOG=1\|<file>` | image: one `image-miss` line (key, url as written, referencing document, file path, reason) per image that fails to resolve, read or decode, on stderr (`1`) or appended to `<file>` |

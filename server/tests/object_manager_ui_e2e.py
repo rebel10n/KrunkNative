@@ -29,18 +29,19 @@ import time
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 WORK = tempfile.mkdtemp(prefix="kn-omui-e2e-", dir=os.path.expanduser("~/.cache"))
 
-# per interaction: the largest layout time (ms) of any profile window and the most layouts that
-# rebuilt a subtree in one window. Measured on this host (llvmpipe, a loaded machine), the build
-# before this change (origin/main 206a798a) against the fixed one:
-#   hover   layout max 0.9 ms                 scroll  layout max 5.2 ms
-#   tabs    layout max 220 ms, 16 rebuilds -> 82 ms, 36 rebuilds (restyle 1424 -> 978 elements)
-#   search  layout max 75 ms, 39 rebuilds  -> 19 ms, 13 rebuilds (restyle 1632 -> 18 elements)
-# The budgets are regression guards with headroom over the fixed build, not the old build's numbers.
+# per interaction: the largest layout time (ms) of any profile window, the most layouts that
+# rebuilt a subtree in one window and the most elements one window restyled. om-perf-2 (debug build,
+# NVIDIA, this host loaded), origin/main d11be9a6 -> with the fixes (scrollbar width cached per
+# restyle, word-at-a-time style / paint hashes, a shown subtree restyles only what changed):
+#   hover   layout max 0.3 -> 0.3 ms          scroll  layout max 0.9 -> 0.6 ms
+#   tabs    layout max 97.7 -> 17.7 ms, restyle 990 -> 388 elements, 26 rebuilds either way
+#   search  layout max 4.7 -> 3.9 ms, 9 rebuilds
+# The budgets are regression guards with headroom over the fixed build on a loaded machine.
 PERF_BUDGET = {
-    "hover": {"layout_max": 25.0, "rebuilds": 4},
-    "scroll": {"layout_max": 25.0, "rebuilds": 4},
-    "tabs": {"layout_max": 120.0, "rebuilds": 60},
-    "search": {"layout_max": 40.0, "rebuilds": 20},
+    "hover": {"layout_max": 10.0, "rebuilds": 4, "restyle": 400},
+    "scroll": {"layout_max": 10.0, "rebuilds": 4, "restyle": 400},
+    "tabs": {"layout_max": 45.0, "rebuilds": 40, "restyle": 650},
+    "search": {"layout_max": 15.0, "rebuilds": 20, "restyle": 400},
 }
 
 results = []
@@ -137,7 +138,12 @@ def sc_wrap():
 
 
 def profile_windows(lines):
-    """[(frames, frame_avg, frame_max, layout_avg, layout_max, rebuilds, restyle_elems)] per profile window"""
+    """[(frames, frame_avg, frame_max, layout_avg, layout_max, rebuilds, restyle_elems)] per profile window
+    that closes after the window was opened ("[object-manager] action 0" logged), the first such one
+    dropped: it holds the opening restyle (~560 elements), which a slow boot used to land in a measured
+    window (perf-hover / perf-scroll failing with 8-30 rebuilds on a loaded machine)"""
+    opened = next((i for i, l in enumerate(lines) if "[object-manager] action" in l), None)
+    lines = lines[opened + 1:] if opened is not None else lines
     out = []
     for line in lines:
         if "[html_engine profile]" not in line:
@@ -171,7 +177,7 @@ def sc_perf():
         lines = run_client(f"perf-{phase}", script, env_extra={"KRUNKNATIVE_HTML_PROFILE": "1"})
         if lines is None:
             continue
-        windows = profile_windows(lines)[1:]  # the first window holds the boot
+        windows = profile_windows(lines)[1:]  # the first window after the open holds the open
         busy = [w for w in windows if w["frames"]]
         if not busy:
             record(f"perf-{phase}", "profile windows", "some", 0, False)
@@ -184,6 +190,8 @@ def sc_perf():
               f"layout_rebuilds_per_window_max={rebuilds} restyle_elems_max={max(w['restyle'] for w in busy)}", flush=True)
         record(f"perf-{phase}", "layout spike", f"<= {budget['layout_max']:g} ms", f"{layout_max:.1f} ms", layout_max <= budget["layout_max"])
         record(f"perf-{phase}", "subtree rebuilds per 2 s", f"<= {budget['rebuilds']}", rebuilds, rebuilds <= budget["rebuilds"])
+        restyled = max(w["restyle"] for w in busy)
+        record(f"perf-{phase}", "elements restyled per 2 s", f"<= {budget['restyle']}", restyled, restyled <= budget["restyle"])
 
 
 def main():

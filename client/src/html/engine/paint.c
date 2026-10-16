@@ -2754,7 +2754,7 @@ void paint_mark_dirty(PaintCtx *ctx, const Box *box)
 /* Per-box signature of what paint reads besides geometry (geometry changes
  * raise Box.paint_dirty in layout): style record identity + hashes, flags,
  * z-order, scroll state.  Cheap enough to recompute every frame. */
-#define HASH_FIELD(h, v) ((h) = kn_hash_bytes((h), &(v), sizeof(v)))
+#define HASH_FIELD(h, v) ((h) = kn_hash_mem((h), &(v), sizeof(v)))
 
 static uint64_t hash_box(uint64_t h, const Box *b)
 {

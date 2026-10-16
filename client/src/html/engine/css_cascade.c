@@ -667,6 +667,8 @@ static int restyle_one(Dom *dom, ElemData *d, const CssComputed *parent)
         result |= 2;
     }
 
+    d->scrollbar_w_valid = 0;   /* the layout callback's cached ::-webkit-scrollbar width */
+
     /* ::before / ::after only when some selector targets them */
     {
         int want_before = 0, want_after = 0;
@@ -710,14 +712,12 @@ static void restyle_subtree(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
     int need;
     int child_force = force;
     int changed = 0;   /* this element's record changed: restyle explicit-inherit children */
-    int was_none;
     lxb_dom_node_t *c;
 
     if (d == NULL) {
         return;
     }
     need = force || (d->dirty & DOM_DIRTY_STYLE) != 0 || d->computed == NULL;
-    was_none = d->computed != NULL && d->computed->display == CSS_DISPLAY_NONE;
     if (need) {
         int r = restyle_one(dom, d, parent);
         if (r & (1 | 4)) {
@@ -739,9 +739,11 @@ static void restyle_subtree(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
         }
         return;
     }
-    if (was_none && need) {
-        child_force = 1; /* descendants were skipped while hidden */
-    }
+    /* Shown again (was display: none): the descendants kept their records while hidden; the
+     * ones that changed meanwhile are flagged (their own DOM_DIRTY_STYLE under this element's
+     * DOM_DIRTY_HAS_DIRTY, which the hidden branch above keeps, and DOM_DIRTY_DESCENDANTS for an
+     * inherited change), so only those restyle. Forcing the whole subtree restyled every tile
+     * of an Object Manager grid on each tab click (~170 elements, 6-10 ms). */
     if (child_force || changed || (d->dirty & DOM_DIRTY_HAS_DIRTY)) {
         for (c = node->first_child; c != NULL; c = c->next) {
             if (c->type == LXB_DOM_NODE_TYPE_ELEMENT) {

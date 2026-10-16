@@ -16,7 +16,8 @@
  *   - a static page costs one display-list submit per frame: restyle, layout
  *     and paint only run when something is dirty or an animation is active;
  *   - 53 px per wheel click; input is not paced;
- *   - KRUNKNATIVE_HTML_PROFILE=1 prints avg/max ms per stage every 2 s,
+ *   - KRUNKNATIVE_HTML_PROFILE=1 prints avg/max ms per stage every 2 s;
+ *     KRUNKNATIVE_HTML_SLOW_FRAME_MS=<ms> also prints every frame slower than that, by stage,
  *     KRUNKNATIVE_HTML_VERBOSE=1 logs loads and failures.
  *
  * No JavaScript: <script> elements are ignored; the C UI logic drives the
@@ -180,6 +181,11 @@ struct Engine {
     double decode_ms;                        /* lazy image decodes this frame (budget) */
     int decodes, decodes_deferred;           /* this frame: done / over budget         */
     ProfStat st_decode;                      /* per frame with a decode (profile)       */
+    /* KRUNKNATIVE_HTML_SLOW_FRAME_MS=<ms>: one line per frame slower than that, with this frame's
+     * stages (restyle, layout, paint, submit, decode) and the rest of the client's frame */
+    double slow_frame_ms;
+    double fr_restyle, fr_layout, fr_paint, fr_submit, fr_decode;
+    unsigned fr_elems, fr_rebuilds;
     EngineStats stats;                       /* accumulated for engine_stats() */
 };
 
@@ -536,10 +542,16 @@ static float lh_scrollbar_width(void *user, lxb_dom_node_t *node, float default_
     if (g_hide_scrollbars) return 0.0f;
     const HtmlElem e = dom_node_elem(g->dom, node);
     if (!e) return default_w;
+    /* cached until the element's next restyle (css_cascade.c restyle_one clears it): the selector
+     * match ran per scroll container and layout pass (the Object Manager's ~300 tile names) */
+    ElemData *ed = dom_elem_data(g->dom, e);
+    if (ed && ed->computed && ed->scrollbar_w_valid) return ed->scrollbar_w;
+    float w = default_w;
     CssComputed tmp;
-    if (!cascade_pseudo_computed(g->dom, e, CSS_PE_SCROLLBAR, &tmp)) return default_w;
-    if (tmp.width.kind == CSS_LEN_VALUE && tmp.width.pct == 0.0f) return tmp.width.px;
-    return default_w;
+    if (cascade_pseudo_computed(g->dom, e, CSS_PE_SCROLLBAR, &tmp) && tmp.width.kind == CSS_LEN_VALUE && tmp.width.pct == 0.0f)
+        w = tmp.width.px;
+    if (ed && ed->computed) { ed->scrollbar_w = w; ed->scrollbar_w_valid = 1; }
+    return w;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1323,7 +1335,7 @@ void engine_flush_style(Engine *g)
         g->stats.restyles++;
         g->stats.restyled_elems += n;
         g->prof_restyled += n;
-        if (g->profile) prof_add(&g->st_restyle, ms);
+        if (g->profile) { prof_add(&g->st_restyle, ms); g->fr_restyle += ms; g->fr_elems += n; }
     }
 }
 
@@ -1359,7 +1371,7 @@ LayoutTree *engine_flush_layout(Engine *g)
         const double ms = wall_ms() - t0;
         g->stats.layout_ms += ms;
         g->stats.layouts++;
-        if (g->profile) prof_add(&g->st_layout, ms);
+        if (g->profile) { prof_add(&g->st_layout, ms); g->fr_layout += ms; g->fr_rebuilds += full; }
     }
     if (g->restore_scroll_pending && g->tree) {
         g->restore_scroll_pending = 0;
@@ -2146,6 +2158,10 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     snprintf(g->page, sizeof(g->page), "%s", page && *page ? page : "index.html");
     g->verbose = getenv("KRUNKNATIVE_HTML_VERBOSE") != NULL;
     g->profile = getenv("KRUNKNATIVE_HTML_PROFILE") != NULL;
+    if (getenv("KRUNKNATIVE_HTML_SLOW_FRAME_MS")) {
+        g->slow_frame_ms = atof(getenv("KRUNKNATIVE_HTML_SLOW_FRAME_MS"));
+        if (g->slow_frame_ms > 0.0) g->profile = 1;
+    }
     g->dump_dl = getenv("KRUNKNATIVE_HTML_DUMP_DL") != NULL;
     g->fb_w = width > 0 ? width : 1;
     g->fb_h = height > 0 ? height : 1;
@@ -2500,6 +2516,15 @@ void html_ui_backend_update(void)
     if (g->profile) {
         const double wall = wall_ms();
         if (g->prof_frame_start > 0.0) prof_add(&g->st_frame, wall - g->prof_frame_start);
+        if (g->slow_frame_ms > 0.0 && g->prof_frame_start > 0.0 && wall - g->prof_frame_start >= g->slow_frame_ms) {
+            const double f = wall - g->prof_frame_start;
+            const double engine_ms = g->fr_restyle + g->fr_layout + g->fr_paint + g->fr_submit;
+            fprintf(stderr, "[html_engine slow frame] %.1f ms: restyle %.1f (%u elems) layout %.1f (%u rebuilds) paint %.1f "
+                            "submit %.1f (decode %.1f) other %.1f\n", f, g->fr_restyle, g->fr_elems, g->fr_layout,
+                    g->fr_rebuilds, g->fr_paint, g->fr_submit, g->fr_decode, f - engine_ms);
+        }
+        g->fr_restyle = g->fr_layout = g->fr_paint = g->fr_submit = g->fr_decode = 0.0;
+        g->fr_elems = g->fr_rebuilds = 0;
         g->prof_frame_start = wall;
         g->prof_frames++;
         prof_report(g, now);
@@ -2599,7 +2624,7 @@ void html_ui_backend_render(UI *ui, const int layers)
         const double ms = wall_ms() - t0;
         g->stats.paint_ms += ms;
         g->stats.paints++;
-        if (g->profile) prof_add(&g->st_paint, ms);
+        if (g->profile) { prof_add(&g->st_paint, ms); g->fr_paint += ms; }
     }
 
     /* submit every frame: the scene under the page changes */
@@ -2616,7 +2641,7 @@ void html_ui_backend_render(UI *ui, const int layers)
     }
     glb_end(g->glb);
     image_cache_frame(g->images);
-    if (g->profile && g->decodes) prof_add(&g->st_decode, g->decode_ms);
+    if (g->profile && g->decodes) { prof_add(&g->st_decode, g->decode_ms); g->fr_decode += g->decode_ms; }
     /* glb_end(): blend on with GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA, depth off,
      * caches updated.  Put back what the client had. */
     if (depth_was_on) glEnable(GL_DEPTH_TEST);
@@ -2624,7 +2649,7 @@ void html_ui_backend_render(UI *ui, const int layers)
     const double ms = wall_ms() - t1;
     g->stats.submit_ms += ms;
     g->stats.frames++;
-    if (g->profile) prof_add(&g->st_submit, ms);
+    if (g->profile) { prof_add(&g->st_submit, ms); g->fr_submit += ms; }
 
     update_cursor(g);
 }

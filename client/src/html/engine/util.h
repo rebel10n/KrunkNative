@@ -49,6 +49,26 @@ static inline uint64_t kn_hash_bytes(uint64_t h, const void *data, size_t len)
     return h;
 }
 
+/* Hash of a block of memory 8 bytes at a time (a multiply-xorshift per word, FNV for the
+ * tail): ~8x faster than kn_hash_bytes on big records, the per-restyle CssComputed hashes and
+ * paint's per-box dirty hashes (they were half of a restyle's and a third of a paint's time). */
+static inline uint64_t kn_hash_mem(uint64_t h, const void *data, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)data;
+    size_t i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t w;
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0x9E3779B97F4A7C15ULL;
+        h ^= h >> 29;
+    }
+    for (; i < len; i++) {
+        h ^= p[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
 /* Case-insensitive hash of an ASCII string slice (used by lookup tables). */
 uint64_t kn_hash_str_ci(const char *s, size_t len);
 

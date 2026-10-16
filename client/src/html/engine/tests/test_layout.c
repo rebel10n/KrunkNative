@@ -1458,6 +1458,30 @@ static void t_intrinsic_font_restyle(void)
     fx_free(fx);
 }
 
+/* A display:none subtree shown again restyles only what changed while it was hidden (om-perf-2:
+ * forcing the whole subtree restyled every Object Manager tile on each tab click), and those
+ * changes all arrive: a descendant's own style, a class on another, an inherited value from above,
+ * and a child inserted while hidden. */
+static void t_show_restyles_changes(void)
+{
+    Fx *fx = fx_html("<div id=top style='color:red'><div id=pane style='display:none'><div id=x class=a>x</div><div id=y>y</div>"
+                     "<div id=z>z</div></div></div>", ".a { height: 5px; } .b { height: 7px; }");
+    Dom *d = fx->dom;
+    HtmlElem pane = dom_by_id(d, "pane"), x = dom_by_id(d, "x"), y = dom_by_id(d, "y"), top = dom_by_id(d, "top");
+    dom_set_style(d, x, "width", "30px");          /* own style while hidden */
+    dom_set_class(d, y, "b");                       /* a class while hidden */
+    dom_set_style(d, top, "color", "blue");         /* an inherited value from above */
+    cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+    dom_set_style(d, pane, "display", "block");
+    const uint32_t n = cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+    const CssComputed *cx = dom_elem_data(d, x)->computed, *cy = dom_elem_data(d, y)->computed, *cz = dom_elem_data(d, dom_by_id(d, "z"))->computed;
+    CHECK(cx && cx->width.kind == CSS_LEN_VALUE && NEAR(cx->width.px, 30, 0.01), "shown: the hidden child's own style applied");
+    CHECK(cy && NEAR(cy->height.px, 7, 0.01), "shown: the class set while hidden applied");
+    CHECK(cz && cz->color.b == 255 && cz->color.r == 0, "shown: the inherited colour from above reached every child");
+    CHECK(n >= 1, "shown: restyled %u elements", n);
+    fx_free(fx);
+}
+
 static void t_incremental(void)
 {
     Fx *fx = fx_html(
@@ -2099,6 +2123,7 @@ int main(int argc, char **argv)
     t_root_overflow();
     t_compressible_replaced();
     t_container_scrollbars();
+    t_show_restyles_changes();
     t_incremental();
     t_memo_equivalence();
     t_memo_auto_margin();

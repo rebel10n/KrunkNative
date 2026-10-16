@@ -3848,9 +3848,9 @@ void css_computed_inherit(CssComputed *dst, const CssComputed *parent)
 
 void css_computed_hash(CssComputed *c)
 {
-    c->hash_inherited = kn_hash_bytes(KN_FNV64_INIT, (const char *)c + CSS_COMPUTED_INHERITED_BEGIN,
+    c->hash_inherited = kn_hash_mem(KN_FNV64_INIT, (const char *)c + CSS_COMPUTED_INHERITED_BEGIN,
                                       CSS_COMPUTED_INHERITED_END - CSS_COMPUTED_INHERITED_BEGIN);
-    c->hash_non_inherited = kn_hash_bytes(KN_FNV64_INIT, (const char *)c + CSS_COMPUTED_NON_INHERITED_BEGIN,
+    c->hash_non_inherited = kn_hash_mem(KN_FNV64_INIT, (const char *)c + CSS_COMPUTED_NON_INHERITED_BEGIN,
                                           CSS_COMPUTED_NON_INHERITED_END - CSS_COMPUTED_NON_INHERITED_BEGIN);
 }
 

@@ -87,6 +87,10 @@ typedef struct ElemData {
                                  * the parent (`inherit`, or var() that may be),
                                  * so a parent change must restyle this element */
     uint32_t pseudo;            /* enum DomPseudoState bits                    */
+    /* engine.c's layout callback caches the ::-webkit-scrollbar width here (scrollbar_w_valid);
+     * css_cascade.c clears it at each restyle of the element */
+    float scrollbar_w;
+    uint8_t scrollbar_w_valid;
 
     DomInlineDecl *inline_decls;
     uint32_t inline_count;

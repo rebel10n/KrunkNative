@@ -335,8 +335,9 @@ static void poll_switch(const char *selector, const int value, void (*set)(int))
 
 static void poll_switches(void) {
     // the rows live in the Settings window: no window, nothing to poll (two document-wide selector
-    // queries a frame were ~1.5% of an in-game frame's CPU, doc/perf-audit.md)
-    if (!menu_window_is_open()) return;
+    // queries a frame were ~1.5% of an in-game frame's CPU, doc/perf-audit.md); and they sit after
+    // Settings' Flick Clamp row (ensure_setting_rows), so another window (the Object Manager) has none
+    if (!menu_window_is_open() || !html_dom_by_id("slid_flickClamp")) return;
     poll_switch("[data-dev-console-setting] input[type='checkbox']", g_mods.dev_enabled, mods_set_dev_enabled);
     poll_switch("[data-force-offline-setting] input[type='checkbox']", g_mods.force_offline, mods_set_force_offline);
 }
