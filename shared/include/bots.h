@@ -277,6 +277,9 @@ typedef struct GameBots_t {
     BotNavStats nav_stats;          // bot_path_stats
     int nav_falls;                  // bots that died falling under deathY since the manager was created (bot_nav)
     unsigned char stopped:1;        // bot_stop is in effect (bot_start / bot_stop off resume)
+    // bot_mimic's one controller (Game.players uid of the dev whose inputs the mimicking bots copy;
+    // -1 = nobody holds control). Taking control replaces the holder; see game_bots_mimic_take.
+    int mimic_uid;
     // KrunkNative chat `autofill` (game_bots_set_autofill): off stops the quota fill (its bots leave);
     // forced: turned on by a command, so a hosted custom game fills too (never ranked: server_core.c)
     unsigned char autofill_off:1;
@@ -300,6 +303,16 @@ void game_bots_reset(Game*);                     // BotManager.reset: the non-pe
 void game_bots_setup_local(Game*);
 // BotManager.configure(patch): every live bot and the defaults; returns the live bot count.
 int  game_bots_configure(Game*, const BotAssignments*);
+// bot_mimic, one controller at a time: the dev holding control is the only player whose inputs the
+// mimicTarget bots copy. take: `on` by a dev (replaces the holder); release: `off`, bot_stop and the
+// holder leaving (game_bots_mimic_player_left) free the slot and turn mimicTarget off, with the
+// combat follow config (none of it while bot_stop is in effect); returns the live bot count.
+void game_bots_mimic_take(Game*, int uid);
+int  game_bots_mimic_release(Game*);
+int  game_bots_mimic_holder(const Game*);        // the controller's uid, -1 for none
+const Player *game_bots_mimic_controller(const Game*); // the holder's player when it is in the game and alive
+void game_bots_mimic_player_left(Game*, const Player*);
+int  game_bots_assignments_mimic(const BotAssignments*); // the assignments set mimicTarget (bot_config refuses it)
 // bot_type: switching removes every bot; returns how many.
 int  game_bots_set_type(Game*, BotType);
 // server.cfg bots / bot_quota (+ bot_difficulty applied with game_bots_configure).

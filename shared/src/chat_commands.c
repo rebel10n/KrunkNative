@@ -1558,26 +1558,64 @@ static void cmd_bot_config(ChatCtx *c) {
         reply(c, "%s", a.error);
         return;
     }
+    if (game_bots_assignments_mimic(&a)) { // one controller at a time: bot_mimic on / off is the only way
+        reply(c, "mimicTarget is set by bot_mimic (one controller at a time): bot_mimic on takes control, bot_mimic off releases it.");
+        return;
+    }
     const int updated = game_bots_configure(game, &a);
     bot_describe_config(&a, 0, text, sizeof(text));
     reply(c, "Bot config updated (%s); %d live bot%s updated.", text, updated, plural(updated));
 }
 
-// bot_mimic [on|off]: mimicTarget (the devConsole's toggle) with v7 server's follow config.
+// The name of the dev in connection `uid` (the peer's name, else the player's, else "another dev").
+static void mimic_name(ChatCtx *c, const int uid, char *out, const size_t size) {
+    ChatPeer peer;
+    const Player *player = game_find_player(c->host->game, uid);
+    if (peer_by_id(c->host, uid, &peer) && peer.name && peer.name[0]) snprintf(out, size, "%s", peer.name);
+    else if (player && player->name[0]) snprintf(out, size, "%s", player->name);
+    else snprintf(out, size, "another dev");
+}
+
+// bot_mimic [on|off]: mimicTarget (the devConsole's toggle) with v7 server's follow config, and ONE
+// controller at a time (game_bots_mimic_take): `on` by a dev takes control, a later dev's `on` takes
+// it from the holder. `off` releases it, and only the holder may turn it off (the console may too);
+// bot_stop and the holder leaving release it as well. Mimicking bots copy the holder's inputs only.
 static void cmd_bot_mimic(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
     const int enabled = chat_parse_toggle(c->argc ? c->argv[0] : NULL, 0);
-    char *argv_on[] = {"mimicTarget=on", "attackTarget=off", "followTarget=on", "watchTarget=on", "roam=off"};
-    char *argv_off[] = {"mimicTarget=off", "attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
-    BotAssignments a;
-    bot_parse_assignments(5, enabled ? argv_on : argv_off, &a);
-    const int updated = game_bots_configure(c->host->game, &a);
-    reply(c, "%s mode set (%d live bot%s updated).", enabled ? "Mimic-style follow" : "Combat follow", updated, plural(updated));
+    const int holder = game_bots_mimic_holder(game);
+    char name[96], previous[96];
+    if (enabled) {
+        if (c->sender == CHAT_CMD_CONSOLE) {
+            reply(c, "bot_mimic on needs a dev in the game to take control (the console has no player to copy).");
+            return;
+        }
+        const int took = holder >= 0 && holder != c->sender;
+        if (took) mimic_name(c, holder, previous, sizeof(previous));
+        game_bots_mimic_take(game, c->sender);
+        char *argv_on[] = {"mimicTarget=on", "attackTarget=off", "followTarget=on", "watchTarget=on", "roam=off"};
+        BotAssignments a;
+        bot_parse_assignments(5, argv_on, &a);
+        const int updated = game_bots_configure(game, &a);
+        mimic_name(c, c->sender, name, sizeof(name));
+        if (took) reply(c, "Mimic-style follow mode set (%d live bot%s updated); %s took control from %s.", updated, plural(updated), name, previous);
+        else reply(c, "Mimic-style follow mode set (%d live bot%s updated); %s controls them.", updated, plural(updated), name);
+        return;
+    }
+    if (c->sender != CHAT_CMD_CONSOLE && holder >= 0 && holder != c->sender) {
+        mimic_name(c, holder, name, sizeof(name));
+        reply(c, "%s controls the bots' mimic: only they can turn it off, or run bot_mimic on to take control.", name);
+        return;
+    }
+    const int updated = game_bots_mimic_release(game);
+    reply(c, "Combat follow mode set (%d live bot%s updated).", updated, plural(updated));
 }
 
 // bot_stop [on|off]: BOT_STOP_CONFIG / BOT_RESUME_CONFIG. With no argument it toggles (v7 always
 // stopped again, so a bare bot_stop could never resume); bot_start resumes.
 static void bots_set_stopped(ChatCtx *c, const int stopping) {
+    if (stopping) game_bots_mimic_release(c->host->game); // bot_stop releases bot_mimic control (before the stop config)
     char *argv_stop[] = {"attackTarget=off", "followTarget=off", "watchTarget=off", "roam=off"};
     char *argv_resume[] = {"attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
     BotAssignments a;
@@ -2402,7 +2440,7 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_list", NULL, "", "list spawned bots", CHAT_PERM_HOST_DEV}, cmd_bot_list},
     {{"bot_nav", NULL, "", "bot navigation counters and routes", CHAT_PERM_HOST_DEV}, cmd_bot_nav},
     {{"bot_config", NULL, "[key=value]", "show or update default bot options", CHAT_PERM_HOST_DEV}, cmd_bot_config},
-    {{"bot_mimic", NULL, "[on|off]", "toggle bots mimicking their target inputs", CHAT_PERM_HOST_DEV}, cmd_bot_mimic},
+    {{"bot_mimic", NULL, "[on|off]", "bots copy one dev's inputs: bot_mimic on takes control (one controller at a time), off releases it", CHAT_PERM_HOST_DEV}, cmd_bot_mimic},
     {{"bot_stop", NULL, "[on|off]", "toggle bot movement and attacking", CHAT_PERM_HOST_DEV}, cmd_bot_stop},
     {{"bot_start", NULL, "", "resume bots after bot_stop", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},

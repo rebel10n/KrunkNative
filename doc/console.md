@@ -178,11 +178,11 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 | bot_nav | – | Krunker Box Office: "Bot nav: stuck N, replans N (forced N), goals N, unreachable N, falls N; grid N nodes." + "Routes (id:state:waypoint/count): 1:Hunt:3/12 bhop:clean, …" (bhop as in bot_list) (`id:dead` while a bot respawns) (`shared/src/bot_path.c` counters since the manager was created; `server/tests/bot_nav_e2e.py`) |
 | bot_kick | [all\|index\|name] | "Removing N bots." / "No bots matched 'x'." / "No bots." (LEAVE to everyone) |
 | bot_kill | [all\|index\|name] | "Killed N bots." / "Matched bots are not spawned yet." (players.kill, skipRewards) |
-| bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
+| bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." A mimicTarget key is refused (bot_mimic owns it, one controller at a time). |
 | bot_difficulty, bot_diff | easy\|normal\|hard\|max\|number | "Bot difficulty: 3" / "Bot difficulty set to 1.8 (N live bots updated; applies to future bot_add)." (botDifficultyConfig: accuracy 25/50/85/100, targetDistance 1200/1200/1800/5000) |
 | bot_stop | [on\|off] | "Stopped N live bots; applies to future bot_add." / "Resumed …" (BOT_STOP_CONFIG / BOT_RESUME_CONFIG). No argument toggles. |
 | bot_start (bot_resume) | | Krunker Box Office: resumes bots after bot_stop ("Resumed N live bots; …") |
-| bot_mimic | [on\|off] | "Mimic-style follow mode set (N live bots updated)." / "Combat follow mode set (…)." (+ devConsole's mimicTarget: the bot copies its target's input frames) |
+| bot_mimic | [on\|off] | "Mimic-style follow mode set (N live bots updated); NAME controls them." / "…; NAME took control from NAME2." / "Combat follow mode set (…)." One controller at a time (GameBots.mimic_uid): `on` by a dev takes control, a later dev's `on` takes it from the holder, and every mimicTarget bot copies only the holder's input frames (nobody holding control: the bots stand still). `off` releases control and only the holder (or the console) may turn it off ("NAME controls the bots' mimic: only they can turn it off…"). bot_stop and the holder leaving release control too. The console cannot take control (no player). |
 
 The key=value options are BOT_CONFIG_TYPES with its aliases (`god`, `hp`, `skill`, `bhop`, …):
 accuracy, attackTarget, autoRespawn, back/body, canRespawn, class, clan, cosmeticRarity,

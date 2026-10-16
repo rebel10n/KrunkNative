@@ -300,9 +300,10 @@ static void test_commands(Game *game) {
     run("/bot_resume");
     CHECK(!strcmp(g_reply, "Resumed 3 live bots; applies to future bot_add."), "bot_resume alias (%s)", g_reply);
 
+    // the console has no player to copy: bot_mimic on is for a dev in the game (test_mimic)
     run("/bot_mimic on");
-    CHECK(!strcmp(g_reply, "Mimic-style follow mode set (3 live bots updated)."), "bot_mimic (%s)", g_reply);
-    CHECK(bots->list[0].config.mimic_target && !bots->list[0].config.attack_target, "mimic config");
+    CHECK(!strncmp(g_reply, "bot_mimic on needs a dev", 24), "console bot_mimic on refused (%s)", g_reply);
+    CHECK(!bots->list[0].config.mimic_target, "no mimic config from the console");
     run("/bot_mimic off");
     CHECK(!strcmp(g_reply, "Combat follow mode set (3 live bots updated)."), "bot_mimic off (%s)", g_reply);
 
@@ -372,6 +373,125 @@ static void test_commands(Game *game) {
     run("/bot_place");
     CHECK(!strcmp(g_reply, "Spawned 1 nextbot bot."), "bot_place from the console (%s)", g_reply);
     run("/bot_kick all");
+}
+
+// bot_mimic: one controller at a time. Two devs and a guest are in the game; the bots copy only the
+// dev holding control (the last dev who ran bot_mimic on), never another player's inputs, and
+// their target is the guest (the player the old code copied).
+static ChatPeer g_peers[3];
+static int g_peer_n;
+static void remove_human(Game *game, const int uid);
+
+static int peers_count(void *user) {
+    (void) user;
+    return g_peer_n;
+}
+
+static int peers_at(void *user, const int index, ChatPeer *out) {
+    (void) user;
+    if (index < 0 || index >= g_peer_n) return 0;
+    *out = g_peers[index];
+    return 1;
+}
+
+static const char *say(const int uid, const char *line) {
+    g_reply[0] = 0;
+    chat_command_handle(&g_host, uid, line);
+    return g_reply;
+}
+
+static void queue_move(Player *player, const int move, const int jump) {
+    static int seq;
+    Input in;
+    memset(&in, 0, sizeof(in));
+    in.seq = ++seq;
+    in.delta = 1.0f / 60.0f;
+    in.move_dir = (signed char) move;
+    in.jump = (unsigned char) jump;
+    player_queue_input(player, &in);
+}
+
+// Queue one frame per human (move, jump), tick once, and check every bot copied `move`/`jump`.
+static void mimic_check(Game *game, const char *label, Player *dev, const int move, const int jump) {
+    queue_move(dev, move, jump);
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (!p->is_bot && p != dev) queue_move(p, -move, !jump); // the others press the other way
+    }
+    tick(game, 0.01f, 30.0f);
+    for (int i = 0; i < game->bots->count; i++) {
+        const Input *m = &game->bots->list[i].mimic;
+        CHECK(m->move_dir == move && m->jump == jump, "%s: bot %d copies the controller (move %d jump %d, want %d %d)", label, i,
+              m->move_dir, m->jump, move, jump);
+    }
+}
+
+static void test_mimic(Game *game) {
+    printf("Running bot_mimic control test...\n");
+    reset_sent();
+    run("/bot_add 2 difficulty=normal");
+    CHECK(count_bots(game, 1) == 2, "two bots for bot_mimic (%d)", count_bots(game, 1));
+    Player *dev_a = add_human(game, 500, "Dev_A");
+    Player *dev_b = add_human(game, 600, "Dev_B");
+    Player *guest = add_human(game, 700, "Guest_C");
+    g_peers[0] = (ChatPeer) {.id = 500, .name = "Dev_A", .address = "", .player = dev_a, .dev = 1};
+    g_peers[1] = (ChatPeer) {.id = 600, .name = "Dev_B", .address = "", .player = dev_b, .dev = 1};
+    g_peers[2] = (ChatPeer) {.id = 700, .name = "Guest_C", .address = "", .player = guest, .dev = 0};
+    g_peer_n = 3;
+    g_host.peer_count = peers_count;
+    g_host.peer_at = peers_at;
+    GameBots *bots = game->bots;
+    // the guest stands in front of the bots, the devs farther off: the bots' nearest enemy is the guest
+    for (int i = 0; i < bots->count; i++) {
+        Player *b = bots->list[i].player;
+        guest->position = (vec3) {b->position.x + 3.0f, b->position.y, b->position.z};
+        dev_a->position = (vec3) {b->position.x + 60.0f, b->position.y, b->position.z + 60.0f};
+        dev_b->position = (vec3) {b->position.x - 60.0f, b->position.y, b->position.z + 60.0f};
+    }
+
+    CHECK(!strcmp(run("/bot_mimic off"), "Combat follow mode set (2 live bots updated)."), "bot_mimic off first (%s)", g_reply);
+    CHECK(!strcmp(say(500, "/bot_mimic on"), "Mimic-style follow mode set (2 live bots updated); Dev_A controls them."), "Dev_A takes control (%s)", g_reply);
+    CHECK(bots->list[0].config.mimic_target && bots->list[1].config.mimic_target, "bots mimic");
+    mimic_check(game, "Dev_A holds control", dev_a, 1, 0);
+
+    // a second dev takes over: the first loses control
+    CHECK(!strcmp(say(600, "/bot_mimic on"), "Mimic-style follow mode set (2 live bots updated); Dev_B took control from Dev_A."), "Dev_B takes over (%s)", g_reply);
+    mimic_check(game, "Dev_B took over", dev_b, -1, 1);
+
+    // who does not hold control can neither turn the copying off, nor change the bots' config
+    CHECK(strstr(say(500, "/bot_mimic off"), "only they can turn it off") != NULL, "Dev_A cannot release (%s)", g_reply);
+    CHECK(strstr(say(500, "/bot_config mimicTarget=off"), "bot_mimic") != NULL, "bot_config mimicTarget is refused (%s)", g_reply);
+    CHECK(bots->list[0].config.mimic_target && bots->list[1].config.mimic_target, "the bots still mimic");
+    reset_sent();
+    say(700, "/bot_mimic on");
+    CHECK(g_type_count[NET_PACKET_NOTIFY] == 1 && bots->list[0].config.mimic_target, "a guest may not take control (%d notify)", g_type_count[NET_PACKET_NOTIFY]);
+    mimic_check(game, "guest refused", dev_b, -1, 1);
+    CHECK(strstr(say(CHAT_CMD_CONSOLE, "/bot_mimic on"), "needs a dev") != NULL, "the console cannot take control (%s)", g_reply);
+    mimic_check(game, "console refused", dev_b, -1, 1);
+
+    // the holder releases control: the bots stop mimicking and take the combat follow config
+    CHECK(!strcmp(say(600, "/bot_mimic off"), "Combat follow mode set (2 live bots updated)."), "Dev_B releases (%s)", g_reply);
+    CHECK(!bots->list[0].config.mimic_target && !bots->list[1].config.mimic_target && bots->list[0].config.attack_target, "released: combat follow");
+
+    // the controller leaving releases control
+    say(500, "/bot_mimic on");
+    remove_human(game, 500);
+    CHECK(!bots->list[0].config.mimic_target && !bots->list[1].config.mimic_target, "the controller leaving releases control");
+    say(600, "/bot_mimic on");
+    CHECK(bots->list[0].config.mimic_target, "Dev_B takes control again");
+
+    // bot_stop releases control too, and bot_start resumes without it
+    CHECK(!strncmp(say(600, "/bot_stop"), "Stopped 2 live bots", 19), "bot_stop");
+    CHECK(!bots->list[0].config.mimic_target && !bots->list[1].config.mimic_target, "bot_stop releases control");
+    say(600, "/bot_start");
+    CHECK(!bots->list[0].config.mimic_target && bots->list[0].config.attack_target, "bot_start resumes without the mimic");
+
+    run("/bot_kick all");
+    remove_human(game, 600);
+    remove_human(game, 700);
+    g_host.peer_count = NULL;
+    g_host.peer_at = NULL;
+    g_peer_n = 0;
 }
 
 // The AI: bots find, aim at and kill a human and each other on the arena.
@@ -1416,6 +1536,7 @@ int main(void) {
     g_host.log = host_log;
 
     test_commands(&game);
+    test_mimic(&game);
     test_fight(&game);
     test_teams(&game, 1);
     test_quota(&game);

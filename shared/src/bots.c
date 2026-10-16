@@ -640,6 +640,7 @@ GameBots *game_bots(Game *game) {
         if (!game->bots) return NULL;
         game->bots->next_id = 1;
         game->bots->type = BOT_TYPE_NEXTBOT;
+        game->bots->mimic_uid = -1;
         bot_config_defaults(BOT_TYPE_NEXTBOT, &game->bots->config[BOT_TYPE_NEXTBOT]);
         bot_config_defaults(BOT_TYPE_TFUE, &game->bots->config[BOT_TYPE_TFUE]);
         game->bots->quota_grace = BOT_QUOTA_GRACE_MS;
@@ -1091,6 +1092,51 @@ int game_bots_configure(Game *game, const BotAssignments *a) {
         p->god_mode = bot->config.god_mode;
     }
     return bots->count;
+}
+
+// ---------------------------------------------------------------- bot_mimic control
+
+void game_bots_mimic_take(Game *game, const int uid) {
+    GameBots *bots = game_bots(game);
+    if (bots) bots->mimic_uid = uid;
+}
+
+int game_bots_mimic_holder(const Game *game) {
+    return game && game->bots ? game->bots->mimic_uid : -1;
+}
+
+const Player *game_bots_mimic_controller(const Game *game) {
+    const int uid = game_bots_mimic_holder(game);
+    if (uid < 0) return NULL;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *p = game->players[i];
+        if (p && p->uid == uid) return p->active ? p : NULL;
+    }
+    return NULL;
+}
+
+// mimicTarget off on every bot and the defaults. The combat follow config comes back unless bot_stop
+// is in effect (it owns attackTarget / followTarget / watchTarget / roam then).
+int game_bots_mimic_release(Game *game) {
+    GameBots *bots = game_bots(game);
+    if (!bots) return 0;
+    bots->mimic_uid = -1;
+    char *argv_stopped[] = {"mimicTarget=off"};
+    char *argv_combat[] = {"mimicTarget=off", "attackTarget=on", "followTarget=on", "watchTarget=off", "roam=on"};
+    BotAssignments a;
+    bot_parse_assignments(bots->stopped ? 1 : 5, bots->stopped ? argv_stopped : argv_combat, &a);
+    return game_bots_configure(game, &a);
+}
+
+void game_bots_mimic_player_left(Game *game, const Player *player) {
+    if (player && game_bots_mimic_holder(game) == player->uid) game_bots_mimic_release(game);
+}
+
+int game_bots_assignments_mimic(const BotAssignments *a) {
+    for (int i = 0; i < BOT_KEY_COUNT; i++) {
+        if ((a->set & (1ull << i)) && !strcmp(k_keys[i].name, "mimicTarget")) return 1;
+    }
+    return 0;
 }
 
 int game_bots_set_type(Game *game, const BotType type) {
@@ -1972,17 +2018,25 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
     if (bot->config.nod_yes) f.pitch = (bot->tick & 1) ? BOT_HALF_PI / 4.0f : -(BOT_HALF_PI / 4.0f);
     if (bot->config.force_crouch) f.crouch = 1;
 
-    // mimicTarget: the target's own inputs instead of ours
-    Player *target = bot_target(game, bot);
-    if (bot->config.mimic_target && target) {
-        if (target->input_queue_size) bot->mimic = target->input_queue[target->input_queue_size - 1];
+    // mimicTarget (bot_mimic): the controller's inputs instead of ours. Only the one dev holding
+    // control is copied (GameBots.mimic_uid); with nobody in control, or the holder dead or gone,
+    // the mimicking bot stands still.
+    if (bot->config.mimic_target) {
+        const Player *controller = game_bots_mimic_controller(game);
+        if (controller && controller->input_queue_size) bot->mimic = controller->input_queue[controller->input_queue_size - 1];
+        if (!controller) {
+            memset(&bot->mimic, 0, sizeof(bot->mimic));
+            bot->mimic.move_dir = MOVE_NONE;
+        }
         f.move = bot->mimic.move_dir;
         f.jump = bot->mimic.jump;
         f.crouch = bot->mimic.crouch;
         f.shoot = bot->mimic.shoot;
         f.scope = bot->mimic.scope;
-        f.yaw = bot->yaw = target->direction.y;
-        f.pitch = bot->pitch = target->direction.x;
+        if (controller) {
+            f.yaw = bot->yaw = controller->direction.y;
+            f.pitch = bot->pitch = controller->direction.x;
+        }
     }
     bot_path_guard(game, bot, self, f.yaw, &f.move, &f.jump); // never off a void edge, whatever chose the move
     bot_queue_frames(bot, self, &f, delta_s);

@@ -643,6 +643,7 @@ void game_send_round_state(Game *game, const int uid) {
 }
 
 void game_player_left(Game *game, Player *player) {
+    game_bots_mimic_player_left(game, player); // bot_mimic: the controller leaving releases control
     mode_player_left(game, player); // players.remove: dropFlag
     piss_player_left(game, player);  // KrunkNative Piss: its puddles go
     game_player_drop_all(game, player); // players.remove: dropWeapon(player, true) (WP-C)
