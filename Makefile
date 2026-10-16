@@ -307,6 +307,9 @@ slowmo-arms-test: build ## The first-person arms stay locked to the camera throu
 spawn-camera-test: build ## Every spawn of ours (Play, Play again, third person, a new round) looks along the spawn's yaw, level, with no leftover recoil / zoom / chase (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/spawn_camera_e2e.py $(DEBUG_DIR)
 
+mod-keys-f6-test: build ## F6 opens the editor from the menu and the game page, and does nothing while a text field has focus (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/mod_keys_f6_e2e.py $(DEBUG_DIR)
+
 weapons-client-test: build ## The Slimer streak, Charge Rifle, Grappler and Combat Knife through the real client, as v10 plays them (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/weapons_client_e2e.py $(DEBUG_DIR)
 
@@ -371,7 +374,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
+.PHONY: mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
