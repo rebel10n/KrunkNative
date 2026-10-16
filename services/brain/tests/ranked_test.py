@@ -220,8 +220,10 @@ def result_frame(cfg, lobby, winner, abandoned=(), reward=40):
     players = []
     for t, team in enumerate(cfg["teams"]):
         for p in team:
+            # 40 hits of 100 rays (accuracy 40): the profile's total_accuracy
             players.append({"accountId": p["accountId"], "team": t, "score": 1000, "kills": 10 + t, "deaths": 8,
-                            "assists": 2, "damage": 1500, "objective": 30, "timeMs": 300000, "reward": reward})
+                            "assists": 2, "damage": 1500, "objective": 30, "timeMs": 300000, "reward": reward,
+                            "shots": 100, "hits": 40})
     return {"type": "ranked-result", "matchId": cfg["matchId"], "lobbyId": lobby, "winner": winner, "players": players,
             "abandoned": list(abandoned)}
 
@@ -238,6 +240,11 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     check(code == 200 and info.get("season") == SEASON and len(info.get("maps", [])) == 5 and
           any(m["id"] == 2 for m in info.get("maps", [])), "info: season %d, Sandstorm + 4 maps (%s)" % (SEASON, [m["id"] for m in info.get("maps", [])]))
     check([r["code"] for r in info.get("regions", [])] == ["as", "eu", "na"] and info.get("minLevel") == 1, "info: regions as/eu/na, min level")
+    # Q-MAP: the catalogue has the official maps 0..31 only; Eterno Simulator (39) and Frontier (42) are in
+    # the rotation but not playable, so the list says so and the matcher never hosts them
+    unplayable = sorted(m["id"] for m in info.get("maps", []) if not m["available"])
+    check(all(m["available"] == (m["id"] < 32) for m in info.get("maps", [])) and all(i in (39, 42) for i in unplayable),
+          "maps: the playable ones are listed available, 39 / 42 unavailable (%s)" % unplayable)
     code, p0 = profile(pa, alice, season=0, region="na")
     pr = p0.get("profile", {}) if code == 200 else {}
     check(not upgraded or code == 200 and pr.get("wins") == 3 and pr.get("losses") == 1 and abs(pr.get("conservative_rating", 0) - (25 + 300 / 60.0 - 50 / 3.0)) < 1e-6,
@@ -284,7 +291,7 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     check(code == 200 and conn.get("serverUrl") is None, "no connection once the match is over")
     code, pa1 = profile(pb, alice)
     pr = pa1.get("profile", {})
-    check(code == 200 and pr.get("wins") == 1 and pr.get("total_matches") == 1 and pr.get("total_kills") in (10, 11) and pr.get("rank") == 0
+    check(code == 200 and pr.get("total_accuracy") == 40.0 and pr.get("wins") == 1 and pr.get("total_matches") == 1 and pr.get("total_kills") in (10, 11) and pr.get("rank") == 0
           and pr.get("placement_left") == 5 and pa1.get("rankedPoints") == 20, "profile on the other brain: 1 win, still placing, 20 RP (%s)" % pr)
     code, h = http(pa, "/mm/ranked/history", token=alice["token"], season=SEASON, region="na")
     m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
@@ -498,6 +505,20 @@ def main():
             code, buy = http(pd, "/mm/ranked/purchase", method="POST", body={"skin_id": item.get("id")}, token=alice["token"])
             check(code == 400 and "limit" in buy.get("error", ""), "max_purchase 1")
             check(psql("SELECT count FROM inventory WHERE account_id = %d AND skin_id = 55" % alice["id"]) == "1", "the skin is in the inventory")
+            # Q6: restricted_by "mmr" from the purchase's own rating (the account's peak MMR); Q11: max_purchase 0 = no limit
+            psql("INSERT INTO ranked_shop (skin_id, price, max_purchase) VALUES (56, 1, 0)")
+            psql("INSERT INTO ranked_shop (skin_id, price, max_purchase, min_mmr) VALUES (57, 1, 1, 9000)")
+            psql("INSERT INTO ranked_shop (skin_id, price, max_purchase, max_mmr) VALUES (58, 1, 1, 1)")
+            psql("INSERT INTO ranked_shop (skin_id, price, max_purchase, min_mmr, max_mmr) VALUES (59, 1, 1, 1, 9999)")
+            code, shop = http(pd, "/mm/ranked/shop", token=alice["token"])
+            rows = {x.get("skin_id"): x for x in shop.get("skins", [])} if code == 200 else {}
+            check(code == 200 and all(k in rows for k in (56, 57, 58, 59)) and rows[57]["restricted_by"] == "mmr" and rows[58]["restricted_by"] == "mmr"
+                  and rows[59]["restricted_by"] is None and rows[56]["restricted_by"] is None,
+                  "shop restricted_by: mmr outside the peak window only (%s)" % {k: rows.get(k, {}).get("restricted_by") for k in (56, 57, 58, 59)})
+            buys = [http(pd, "/mm/ranked/purchase", method="POST", body={"skin_id": rows[56]["id"]}, token=alice["token"])[1] for _ in range(2)]
+            check(all(b.get("success") for b in buys), "max_purchase 0 is unlimited: two purchases")
+            code, buy = http(pd, "/mm/ranked/purchase", method="POST", body={"skin_id": rows[57]["id"]}, token=alice["token"])
+            check(code == 400 and "Rating" in buy.get("error", ""), "a restricted item is refused by the purchase too (%s)" % buy)
     finally:
         for p in procs:
             if p.poll() is None:

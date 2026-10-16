@@ -66,7 +66,9 @@ int ranked_rank_min(const int rank) { return rank >= 0 && rank < RANK_COUNT ? k_
 
 double ranked_conservative(const RankedSkill s) { return s.mu - 3.0 * s.sigma; }
 
-int ranked_display(const double conservative) { return 1000 + (int) lround(100.0 * conservative); }
+// v10 _33938: 1000 + Math.round(100 * rating). Math.round is floor(x + 0.5) (half up, also below
+// zero: -2.5 -> -2), where lround would round half away from zero (-2.5 -> -3).
+int ranked_display(const double conservative) { return 1000 + (int) floor(100.0 * conservative + 0.5); }
 
 int ranked_rank_of(const double conservative, const int matches) {
     if (matches < RANKED_PLACEMENT_MATCHES) return RANK_UNRANKED;
@@ -222,13 +224,17 @@ void ranked_season_maps(const int season, int out[RANKED_SEASON_MAPS]) {
 
 // ------------------------------------------------------------------ Ranked Points
 
+// v10 (endOfSeason, v10:112066-112067): the points are 0 below minMatchesForPoints (6, both
+// seasons, "Minimum 6 matches to earn points"), else floor(display MMR * rate) with the rate
+// min(matches / 100, 1) and 1 in the Beta Season. Float math on purpose (JS doubles): 100 * 0.29
+// is 28.999999999999996, so 29 matches at MMR 100 pay 28 in v10, and this does the same.
+// KrunkNative's choice: a rating below 0 pays 0 (the balance is never negative).
 int64_t ranked_season_points(const double conservative, const int matches, const int season) {
+    if (matches < RANKED_PLACEMENT_MATCHES) return 0;
     const int64_t mmr = ranked_display(conservative);
     if (mmr <= 0) return 0;
-    if (season == 0) return mmr;                              // Beta Season: 1:1
-    if (matches < RANKED_PLACEMENT_MATCHES) return 0;
-    if (matches >= RANKED_MAX_MATCHES) return mmr;            // 100 matches = 100%
-    return mmr * matches / RANKED_MAX_MATCHES;                // floor(MMR * matches / 100), exact
+    const double rate = season == 0 ? 1.0 : matches / 100.0 < 1.0 ? matches / 100.0 : 1.0; // Beta: 1:1
+    return (int64_t) floor((double) mmr * rate);
 }
 
 int ranked_match_points(const int reward) {

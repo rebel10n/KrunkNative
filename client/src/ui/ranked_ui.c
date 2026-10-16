@@ -1202,7 +1202,8 @@ static void gen_progression(StrBuf *sb, const cJSON *profile_res) {
     const int last = (int) v10_num(p, "last_milestone_claimed", -1), max = RANKED_MAX_MATCHES, minm = RANKED_PLACEMENT_MATCHES;
     const double pct = matches * 100.0 / max > 100 ? 100 : matches * 100.0 / max;
     const double rate = beta ? (matches >= minm ? 1 : 0) : (matches >= minm ? (matches / 100.0 < 1 ? matches / 100.0 : 1) : 0);
-    const long long points = matches >= minm ? (long long) (ranked_display(v10_num(p, "conservative_rating", 0)) * rate) : 0;
+    // the season-end estimate is the brain's payout formula (shared/src/ranked.c, v10:112066-112067)
+    const long long points = (long long) ranked_season_points(v10_num(p, "conservative_rating", 0), matches, current_season());
     int next_at = -1, i = 0;
     const int count = beta ? 0 : cJSON_GetArraySize(ms);
     const cJSON *m;

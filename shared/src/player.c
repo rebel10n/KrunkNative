@@ -3159,7 +3159,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     if (range <= 0.0f || (!authority && ray >= 0)) return;
     // v10.0.2 noDmg (Compressor): the rays trace nothing and the shot is no "s" stat (v10:172690, 172853)
     const int no_damage = weapon->no_dmg;
-    if (authority && ray >= 0 && player->active) player->life_shots++; // WP-E: totShotsL (the death screen's "Shots Fired")
+    if (authority && ray >= 0 && player->active) { // WP-E: totShotsL (the death screen's "Shots Fired")
+        player->life_shots++;
+        player->match_shots++;
+    }
     if (authority && ray >= 0 && !no_damage) game_inc_stat(game, player, "s"); // WP-E part 2c: incStat("s")
 
     const vec3 origin = {player->position.x, shot_height, player->position.z};
@@ -3242,7 +3245,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         }
 
         // WP-E: hitShotsL counts a ray whose first hit is a player or an AI (players.js vLN02370 == 0)
-        if (i == 0 && (hit->player || hit->ai) && player->active) player->life_hits++;
+        if (i == 0 && (hit->player || hit->ai) && player->active) {
+            player->life_hits++;
+            player->match_hits++;
+        }
         if (i == 0 && (hit->player || hit->ai)) game_inc_stat(game, player, "h"); // WP-E part 2c: incStat("h")
         const float drop = fminf(1.0f, 1.0f - (1.0f - hit->t) * range / (range - weapon->drop_start));
         // v7.1.4: falloff clamps at 0 and a 0 bullet stops (v3.1.1 could go negative)
@@ -3538,13 +3544,19 @@ static void combat_fire_stream(Player *player, const int weapon_id, const float 
     const Weapon *weapon = player->weapon;
     PissStream stream;
     if (!player_stream_trace(player, pitch, yaw, 1, &stream)) return;
-    if (player->active) player->life_shots++;
+    if (player->active) {
+        player->life_shots++;
+        player->match_shots++;
+    }
     game_inc_stat(game, player, "s");
 
     const float damage = weapon->damage * player_attr_damage(player);
     if (stream.hit == PISS_HIT_PLAYER && stream.player) {
         Player *victim = stream.player;
-        if (player->active) player->life_hits++;
+        if (player->active) {
+            player->life_hits++;
+            player->match_hits++;
+        }
         game_inc_stat(game, player, "h");
         const float dealt = player_hit_damage(game, weapon, damage, 0, 0);
         if (dealt > 0.0f && player_change_health(victim, player, dealt, 0) && victim->active) {
@@ -3552,7 +3564,10 @@ static void combat_fire_stream(Player *player, const int weapon_id, const float 
             player_kill(victim, player, &info, 0);
         }
     } else if (stream.hit == PISS_HIT_AI && stream.ai) {
-        if (player->active) player->life_hits++;
+        if (player->active) {
+            player->life_hits++;
+            player->match_hits++;
+        }
         game_inc_stat(game, player, "h");
         game_ai_damage_ex(game, stream.ai, player, player->smite ? 10000.0f : damage, 0, stream.end.y, -1, 0);
     } else if (stream.hit == PISS_HIT_OBJECT && stream.object) {

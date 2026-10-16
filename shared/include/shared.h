@@ -1500,6 +1500,7 @@ typedef struct Player_t {
     // at spawn: guests and bots keep class_stat 0 and pc_stat_index -1.
     float life_start;                  // spawnTime (game->now of the spawn, seconds)
     int life_shots, life_hits;         // totShotsL / hitShotsL: hitscan rays fired, rays that hit a player / AI first
+    int match_shots, match_hits;       // the same counts for the whole game (never reset by a spawn): a ranked result's accuracy
     int life_kills, life_score;        // killsL / scoreL
     int class_stat;                    // account.stats["c" + classIndex] (0 hidden by anonMode / no account)
     int pc_stat_index;                 // pcStatIndex (NET_PACKET_PC_STAT), -1 none / no account

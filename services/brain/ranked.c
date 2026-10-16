@@ -468,10 +468,9 @@ static cJSON *profile_json(const cJSON *row) {
     cJSON_AddNumberToObject(p, "mmr", ranked_display(cr));
     static const char *const keys[] = {"wins", "losses", "draws", "abandons", "total_kills", "total_deaths", "total_assists", "total_score",
                                        "total_objective_score", "total_damage_done", "total_time_played", "highest_kill_count",
-                                       "highest_damage_in_match", "peak_mmr", "last_milestone_claimed"};
+                                       "highest_damage_in_match", "peak_mmr", "last_milestone_claimed", "total_accuracy"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
         cJSON_AddNumberToObject(p, keys[i], row ? kn_json_num(row, keys[i], 0) : (!strcmp(keys[i], "last_milestone_claimed") ? -1 : 0));
-    cJSON_AddNumberToObject(p, "total_accuracy", 0);
     cJSON_AddNumberToObject(p, "total_matches", matches);
     cJSON_AddNumberToObject(p, "placement_left", matches < RANKED_PLACEMENT_MATCHES ? RANKED_PLACEMENT_MATCHES - matches : 0);
     return p;
@@ -483,7 +482,7 @@ static cJSON *profile_json(const cJSON *row) {
     " total_score AS total_score__i, total_objective_score AS total_objective_score__i,"                             \
     " total_damage_done AS total_damage_done__i, total_time_played AS total_time_played__i,"                         \
     " highest_kill_count AS highest_kill_count__i, highest_damage_in_match AS highest_damage_in_match__i,"           \
-    " peak_mmr AS peak_mmr__i, last_milestone_claimed AS last_milestone_claimed__i"
+    " peak_mmr AS peak_mmr__i, last_milestone_claimed AS last_milestone_claimed__i, total_accuracy AS total_accuracy__f"
 
 static void on_profile_rp(kn_db_result *res, void *ud) {
     ReqCtx *c = ud;
@@ -795,11 +794,24 @@ static void h_claim(kn_http_req *req, void *ud) {
     with_account(req, 1, claim_account, c);
 }
 
+/* restricted_by "mmr" (v10:111314, 112369): the item's MMR window against the account's peak MMR over
+ * its seasons, the rating db_ranked.c run_rk_purchase checks, so the shop's lock and the purchase's
+ * refusal always agree (KrunkNative's choice: v10's server rule is not in the bundle). */
 static void on_shop(kn_db_result *res, void *ud) {
     ReqCtx *c = ud;
     if (!kn_db_ok(res)) return db_fail(c, "ranked shop", res);
+    cJSON *skins = kn_db_result_to_json(res);
+    cJSON *s;
+    cJSON_ArrayForEach(s, skins) {
+        const int peak = (int) kn_json_num(s, "peak", 0);
+        const cJSON *lo = cJSON_GetObjectItemCaseSensitive(s, "min_mmr"), *hi = cJSON_GetObjectItemCaseSensitive(s, "max_mmr");
+        const int restricted = (cJSON_IsNumber(lo) && peak < lo->valueint) || (cJSON_IsNumber(hi) && peak > hi->valueint);
+        cJSON_DeleteItemFromObjectCaseSensitive(s, "peak");
+        if (restricted) cJSON_AddStringToObject(s, "restricted_by", "mmr");
+        else cJSON_AddNullToObject(s, "restricted_by");
+    }
     c->out = cJSON_CreateObject();
-    cJSON_AddItemToObject(c->out, "skins", kn_db_result_to_json(res));
+    cJSON_AddItemToObject(c->out, "skins", skins);
     done_ctx(c, 200);
 }
 
@@ -810,12 +822,13 @@ static void shop_account(void *ud, kn_http_req *req, const int64_t id, const int
     (void) name;
     static const kn_sql q = {.any = "SELECT s.id AS id__i, s.skin_id AS skin_id__i, s.price AS price__i, {epoch_ms:s.expires_at} AS expires_at__i,"
                                     " s.max_purchase AS max_purchase__i, coalesce(p.count, 0) AS purchase_count__i,"
-                                    " s.min_mmr AS min_mmr__i, s.max_mmr AS max_mmr__i"
+                                    " s.min_mmr AS min_mmr__i, s.max_mmr AS max_mmr__i,"
+                                    " (SELECT coalesce(max(r.peak_mmr), 0) FROM ranked_profiles r WHERE r.account_id = $2) AS peak__i"
                                     " FROM ranked_shop s LEFT JOIN ranked_shop_purchases p ON p.shop_id = s.id AND p.account_id = $1"
                                     " WHERE s.expires_at IS NULL OR s.expires_at > {now} ORDER BY s.id"};
     char acc[24];
     snprintf(acc, sizeof acc, "%lld", (long long) id);
-    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc), on_shop, c);
+    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc, acc), on_shop, c);
 }
 
 static void h_shop(kn_http_req *req, void *ud) {

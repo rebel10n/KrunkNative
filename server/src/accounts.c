@@ -115,6 +115,7 @@ typedef struct {
     unsigned char left:1;      // left (or never came) before the end: abandoned
     int kills, deaths, score;  // snapshot when leaving
     int assists, damage, objective, reward; // v10 ranked profile totals (snapshot too)
+    int shots, hits;           // hitscan rays fired / that hit a player or AI (match_shots / match_hits): accuracy
     float joined_at;           // server time of the first join (time played)
     float time_played;         // seconds in the match (snapshot)
 } RankedSlot;
@@ -1442,6 +1443,8 @@ static void acc_ranked_snapshot(RankedSlot *slot, const ClientConnection *client
     slot->damage = (int) client->player->damage_dealt;
     slot->objective = client->player->mode.objective_score;
     slot->reward = client->player->reward;
+    slot->shots = client->player->match_shots;
+    slot->hits = client->player->match_hits;
     if (slot->joined) slot->time_played = g_server->now - slot->joined_at;
 }
 
@@ -1511,6 +1514,8 @@ static void acc_ranked_send_result(void) {
         cJSON_AddNumberToObject(p, "damage", slot->damage);
         cJSON_AddNumberToObject(p, "objective", slot->objective);
         cJSON_AddNumberToObject(p, "reward", slot->reward);
+        cJSON_AddNumberToObject(p, "shots", slot->shots);
+        cJSON_AddNumberToObject(p, "hits", slot->hits);
         cJSON_AddNumberToObject(p, "timeMs", (double) (slot->time_played > 0.0f ? slot->time_played * 1000.0f : 0.0f));
         cJSON_AddItemToArray(players, p);
         if (slot->left || !slot->joined) cJSON_AddItemToArray(abandoned, cJSON_CreateNumber(slot->account_id));

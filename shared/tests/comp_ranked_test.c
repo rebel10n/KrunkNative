@@ -144,7 +144,13 @@ static void test_v10(void) {
     CHECK(near(seed.mu, RANKED_MU0) && near(seed.sigma, RANKED_SIGMA0), "no history: the default");
     // Ranked Points
     CHECK(ranked_season_points(0.0, 5, 3) == 0 && ranked_season_points(0.0, 50, 3) == 500 && ranked_season_points(0.0, 150, 3) == 1000 &&
-          ranked_season_points(0.0, 1, 0) == 1000, "season conversion: 0 below 6, matches/100, Beta 1:1");
+          ranked_season_points(0.0, 1, 0) == 0 && ranked_season_points(0.0, 6, 0) == 1000 && ranked_season_points(0.0, 3, 0) == 0,
+          "season conversion: 0 below 6 (Beta too), matches/100, Beta 1:1");
+    // v10 float math: 100 * (29 / 100) = 28.999999999999996 pays 28; Math.round(-250) and half-up
+    CHECK(ranked_season_points(-9.0, 29, 1) == 28 && ranked_season_points(-9.0, 30, 1) == 30 && ranked_season_points(-9.0, 200, 1) == 100 &&
+          ranked_season_points(-20.0, 50, 1) == 0, "season points: floor(MMR * matches / 100) in JS double math, 0 at MMR <= 0");
+    CHECK(ranked_display(-0.025) == 998 && ranked_display(-0.015) == 999 && ranked_display(-0.005) == 1000,
+          "display: Math.round half up at negative values (-2.5 -> -2)");
     CHECK(ranked_match_points(50) == 25 && ranked_match_points(500) == 60 && ranked_match_points(-4) == 0, "per-match RP clamp(reward/2, 0, 60)");
     CHECK(ranked_region_index("eu") == 3 && ranked_region_index("4") == 4 && ranked_region_index("xx") == -1 &&
           !strcmp(ranked_region_code(2), "as") && !strcmp(ranked_region_name("na"), "North America"), "regions as/eu/na = 2/3/4");

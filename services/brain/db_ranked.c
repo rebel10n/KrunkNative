@@ -456,6 +456,9 @@ static kn_db_result *run_rk_match_finish(kn_dbconn *c, int n, const char *const 
         const int kills = (int) jnum(st, "kills"), deaths = (int) jnum(st, "deaths"), assists = (int) jnum(st, "assists");
         const int score = (int) jnum(st, "score"), damage = (int) jnum(st, "damage"), objective = (int) jnum(st, "objective");
         const int64_t time_ms = (int64_t) jnum(st, "timeMs");
+        /* v10 per-match accuracy: hits / shots x 100 (0 with no shot); the profile's total_accuracy adds it */
+        const double shots = jnum(st, "shots"), hits = jnum(st, "hits");
+        const double accuracy = shots > 0 ? hits / shots * 100.0 : 0.0;
         const int rp = quit[i] ? 0 : ranked_match_points((int) jnum(st, "reward"));
         if (!exists[i])
             dbx_exec(&x, SQL(.any = "INSERT INTO ranked_profiles (account_id, season, region, mu, sigma, cr) VALUES ($1, {int:$2}, $3, {float:$4}, {float:$5}, {float:$6})"),
@@ -465,14 +468,14 @@ static kn_db_result *run_rk_match_finish(kn_dbconn *c, int n, const char *const 
                                 " total_kills = total_kills + {int:$11}, total_deaths = total_deaths + {int:$12},"
                                 " total_assists = total_assists + {int:$13}, total_score = total_score + {int:$14},"
                                 " total_objective_score = total_objective_score + {int:$15}, total_damage_done = total_damage_done + {int:$16},"
-                                " total_time_played = total_time_played + {int:$17},"
+                                " total_time_played = total_time_played + {int:$17}, total_accuracy = total_accuracy + {float:$19},"
                                 " highest_kill_count = {greatest:highest_kill_count, {int:$11}},"
                                 " highest_damage_in_match = {greatest:highest_damage_in_match, {int:$16}},"
                                 " peak_mmr = {greatest:peak_mmr, {int:$18}}, last_match_at = {now}, updated_at = {now}"
                                 " WHERE account_id = $1 AND season = {int:$2} AND region = $3"),
-                 18, (const char *const[]){I64S(ids[i]), I64S(season), region, DS(skills[i].mu), DS(skills[i].sigma), DS(cr), I64S(won),
+                 19, (const char *const[]){I64S(ids[i]), I64S(season), region, DS(skills[i].mu), DS(skills[i].sigma), DS(cr), I64S(won),
                                            I64S(lost), I64S(drew), I64S(quit[i]), I64S(kills), I64S(deaths), I64S(assists), I64S(score),
-                                           I64S(objective), I64S(damage), I64S(time_ms), I64S(new_mmr)});
+                                           I64S(objective), I64S(damage), I64S(time_ms), I64S(new_mmr), DS(accuracy)});
         dbx_exec(&x, SQL(.any = "UPDATE mm_ranked_match_players SET rating_after = {int:$3}, kills = {int:$4}, deaths = {int:$5},"
                                 " assists = {int:$6}, score = {int:$7}, damage_done = {int:$8}, victory = $9, abandoned = {bool:$10}, rp = {int:$11}"
                                 " WHERE match_id = $1 AND account_id = $2"),
@@ -613,7 +616,8 @@ static kn_db_result *run_rk_purchase(kn_dbconn *c, int n, const char *const *p) 
                                    KN_DB_ARGS(I64S(acc), I64S(shop)), 0);
     const int peak = (int) dbx_int(&x, SQL(.any = "SELECT max(peak_mmr) FROM ranked_profiles WHERE account_id = $1"), KN_DB_ARGS(I64S(acc)), 0);
     const cJSON *lo = cJSON_GetObjectItemCaseSensitive(item, "lo"), *hi = cJSON_GetObjectItemCaseSensitive(item, "hi");
-    const char *refuse = bought >= (int64_t) jnum(item, "m") ? "Purchase limit reached"
+    const int64_t limit = (int64_t) jnum(item, "m"); /* max_purchase 0: no limit (v10:111313 maxPurchase > 0) */
+    const char *refuse = limit > 0 && bought >= limit ? "Purchase limit reached"
                        : cJSON_IsNumber(lo) && peak < lo->valueint ? "Rating Required"
                        : cJSON_IsNumber(hi) && peak > hi->valueint ? "Rating Required" : NULL;
     if (refuse) {
