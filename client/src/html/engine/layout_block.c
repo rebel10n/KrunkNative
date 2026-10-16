@@ -421,6 +421,26 @@ static float ratio_source_height(const Box *b, float cb_h)
 /* ------------------------------------------------------------------------- */
 
 static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *out_w, float *out_h);
+
+void layout_replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *out_w, float *out_h)
+{
+    replaced_size(t, b, cb_w, cb_h, out_w, out_h);
+}
+
+/* The content height of b's parent when it is definite from its own style (a fixed height),
+ * -1 otherwise: what a replaced child's percentage height resolves against while the parent's
+ * intrinsic width is measured (Strike's class weapon slot: an absolute display:flex box of
+ * height calc(34 * --base-scale) holding an <img height:100%>, 34 x 34 in Chrome, not 256 wide). */
+static float definite_parent_content_h(const Box *b)
+{
+    const Box *p = b->parent;
+    if (!p || !p->style) return -1.0f;
+    const CssComputed *ps = p->style;
+    if (ps->height.kind != CSS_LEN_VALUE || ps->height.pct != 0.0f || ps->height.pct_term) return -1.0f;
+    float h = layout_box_sizing_h(p, ps->height.px);
+    layout_apply_min_max_h(p, -1.0f, &h);
+    return kn_maxf(0.0f, h - layout_vertical_extras(p));
+}
 static void content_widths(LayoutTree *t, Box *b, float *out_min, float *out_max);
 static void min_max_kw_intrinsic(LayoutTree *t, Box *b, float *minw, float *maxw);
 
@@ -438,7 +458,8 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
     float minw, maxw;
     if (box_is_replaced(b)) {
         float w, h;
-        replaced_size(t, b, -1.0f, -1.0f, &w, &h);
+        const int pct_h = s->height.kind == CSS_LEN_VALUE && (s->height.pct != 0.0f || s->height.pct_term);
+        replaced_size(t, b, -1.0f, pct_h ? definite_parent_content_h(b) : -1.0f, &w, &h);
         minw = maxw = w;
         /* CSS Sizing 3 5.2.2: a replaced box whose width or max-width is a percentage is
          * compressible: its min-content contribution is its border and padding only (Chrome:

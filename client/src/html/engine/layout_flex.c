@@ -50,13 +50,14 @@ static int count_items(const Box *b)
 }
 
 /* Lay the item out with the given border-box sizes (-1: auto). */
-static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, float h, int shrink, float avail, int measure)
+static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, float h, int shrink, float avail, int measure,
+                        int definite)
 {
     LayoutInput in;
     memset(&in, 0, sizeof(in));
     in.cb_w = cw; in.cb_h = ch_def; in.avail_w = avail;
     in.override_w = w; in.override_h = h;
-    in.definite_h = h >= 0;
+    in.definite_h = h >= 0 && definite;
     in.shrink_to_fit = shrink;
     in.is_flex_item = 1;
     in.measure_only = measure;
@@ -138,7 +139,14 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         /* content-based size (row: max-content width; column: laid-out height) */
         float content_main;
         float content_min;
-        if (row) {
+        if (row && box_is_replaced(c) && ch >= 0 && cs->height.kind == CSS_LEN_VALUE && (cs->height.pct != 0.0f || cs->height.pct_term)) {
+            /* a percentage height against the container's definite height: the width follows
+             * through the ratio (Strike's Customize box: an <img height:100%> in a flex box clamped
+             * to 54 base px by max-height is 54 x 54, not as wide as the box) */
+            float rw, rh;
+            layout_replaced_size(t, c, cw, ch, &rw, &rh);
+            content_main = content_min = rw;
+        } else if (row) {
             content_main = layout_intrinsic_width(t, c, 1);
             /* the content size suggestion of the automatic minimum size (CSS Flexbox 4.5) is the
              * min-content size of the item's contents: its own width (layout_intrinsic_width) would
@@ -149,7 +157,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(0, cw - it->cm0 - it->cm1) : -1;
-            item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw, 1); /* the cross pass lays it out again */
+            item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw, 1, 1); /* the cross pass lays it out again */
             content_main = c->h;
             /* the content size suggestion: the height its contents give it, not its own height */
             content_min = box_is_replaced(c) ? c->h : c->content_auto_h;
@@ -316,12 +324,17 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         if (row) {
             /* measured only when the stretch pass below lays it out again (same condition) */
             const int again = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->height.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
-            item_layout(t, c, cw, ch, it->main, -1, 0, cw, again);
+            item_layout(t, c, cw, ch, it->main, -1, 0, cw, again, 1);
             it->cross = c->h;
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(box_border_padding_w(c), cw - it->cm0 - it->cm1) : -1;
-            item_layout(t, c, cw, ch, ow, it->main, !stretch, cw, 0);
+            /* the flexed height is definite only in a container whose own height is (CSS Flexbox
+             * 9.8.4): a column capped by max-height alone leaves its items' percentages auto. A
+             * nested flex / grid container still lays its own items out in the flexed height
+             * (the Object Manager's .om column under #menuWindow's max-height) */
+            item_layout(t, c, cw, ch, ow, it->main, !stretch, cw, 0,
+                        main_avail >= 0 || c->type == BOX_FLEX || c->type == BOX_GRID);
             it->cross = c->w;
         }
     }
@@ -370,7 +383,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
                     float hh = kn_maxf(0, ln->cross - it->cm0 - it->cm1);
                     layout_apply_min_max_h(it->b, ch, &hh);
                     if (fabsf(hh - it->cross) > 0.001f || 1) {
-                        item_layout(t, it->b, cw, ch, it->main, hh, 0, cw, 0);
+                        item_layout(t, it->b, cw, ch, it->main, hh, 0, cw, 0, 1);
                         it->cross = it->b->h;
                     }
                 }

@@ -93,6 +93,8 @@ float layout_box_sizing_h(const Box *b, float css_h);
 float layout_horizontal_extras(const Box *b);            /* border + padding + scrollbar */
 float layout_vertical_extras(const Box *b);
 float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content);  /* border-box width */
+/* a replaced box's border-box size for a containing block (-1: indefinite) */
+void  layout_replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *out_w, float *out_h);
 /* min-/max-content border-box width of a box's contents, ignoring its own width / min-width /
  * max-width (what the content-keyword sizes resolve against) */
 float layout_content_width(LayoutTree *t, Box *b, int max_content);

@@ -1812,6 +1812,27 @@ static void t_aspect_ratio_content(void)
     fx_free(fx);
 }
 
+/* Percentage heights of images in flex boxes, Chrome 152 (256 x 256 img/app_0.png): Strike's class
+ * weapon slot (an absolute display:flex box of height 34 px: the img 34 x 34 and the slot as wide);
+ * the Customize box (a flex box of height:100% clamped by max-height 54: the img 54 x 54, centred);
+ * a column capped by max-height alone (its item's height:100% child stays auto: 256). */
+static void t_flex_pct_height_images(void)
+{
+    Fx *fx = fx_html(
+        "<div id=s1 style='position:absolute;left:0;top:0;height:34px;display:flex'><img id=s1i style='height:100%' src='img/app_0.png'></div>"
+        "<div style='position:absolute;left:0;top:40px;width:90px;height:80px;display:flex;flex-direction:column;align-items:center'>"
+        "<div style='height:20px;width:100%;flex:none'></div><div style='width:100%;height:100%;max-height:54px;display:flex;"
+        "justify-content:center;align-items:center'><img id=s2i style='height:100%' src='img/app_0.png'></div></div>"
+        "<div style='position:absolute;left:0;top:200px;width:200px;max-height:60px;display:flex;flex-direction:column'>"
+        "<div style='height:100%'><img id=s4i style='height:100%' src='img/app_0.png'></div></div>", NULL);
+    CHECK_NEAR(rc(fx, "s1").w, 34, 0.01, "abs flex slot of height 34: as wide as its 34 px image");
+    CHECK_NEAR(rc(fx, "s1i").w, 34, 0.01, "height:100%% of a definite 34 px slot: 34 wide through the ratio");
+    CHECK_NEAR(rc(fx, "s2i").w, 54, 0.01, "height:100%% of a max-height-clamped flex box: 54 x 54");
+    CHECK_NEAR(rc(fx, "s2i").x, 18, 0.01, "and centred in the 90 px box");
+    CHECK_NEAR(rc(fx, "s4i").h, 256, 0.01, "a column capped by max-height alone: the percentage stays auto");
+    fx_free(fx);
+}
+
 /* -webkit-line-clamp with display: -webkit-box + -webkit-box-orient: vertical (v10's .eventDesc /
  * .pollDesc): the box ends after the Nth line, which ends in an ellipsis when text follows */
 static void t_line_clamp(void)
@@ -2090,6 +2111,7 @@ int main(int argc, char **argv)
     t_aspect_ratio();
     t_aspect_ratio_content();
     t_line_clamp();
+    t_flex_pct_height_images();
     t_video_intrinsic();
     t_bfc_roots();
 
