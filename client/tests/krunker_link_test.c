@@ -2228,6 +2228,30 @@ int main(void) {
         if (p) memcpy(&rates, p->payload, sizeof(rates));
         CHECK(p && find_in(NET_PACKET_GAME_CONFIG, 0) && rates.send_hz == 10 && rates.tick_hz == 30 && rates.sync_hz == 1, "bare init: default rates");
     }
+    // A custom lobby: init arg 5 is its host, and game.isCustom = !!host (game.deob.js:218198). Our GAME_CONFIG
+    // says "custom" as game_config_send does, so the client's isCustom rules (the Grappler's customOnly gate in
+    // player_spawn, the report / airdrop / stats rules) match the official server's. No host (null, 0): not custom.
+    for (int k = 0; k < 2; k++) {
+        clear();
+        KrunkerValue host_args[6];
+        for (int i = 0; i < 6; i++) host_args[i] = KRUNKER_V_NIL;
+        host_args[0] = KRUNKER_V_NUM(10);
+        host_args[1] = KRUNKER_V_NUM(0);
+        host_args[5] = k == 0 ? KRUNKER_V_STR("hostSock") : KRUNKER_V_NUM(0);
+        feed(&link, "init", host_args, 6);
+        const NetPacket *cfg = find_in(NET_PACKET_GAME_CONFIG, 0);
+        cJSON *msg = NULL;
+        if (cfg) {
+            NetGameConfigChunk chunk;
+            memcpy(&chunk, cfg->payload, cfg->length);
+            msg = cJSON_ParseWithLength((const char *) chunk.data, cfg->length - NET_GAME_CONFIG_HEADER_SIZE);
+        }
+        const cJSON *custom = cJSON_GetObjectItemCaseSensitive(msg, "custom");
+        if (k == 0) CHECK(cJSON_IsTrue(custom), "a custom lobby's GAME_CONFIG says custom");
+        else CHECK(!cJSON_IsTrue(custom), "a lobby with host 0 is not custom");
+        cJSON_Delete(msg);
+    }
+    clear();
     clear();
 
     // "0": two players, the second is us

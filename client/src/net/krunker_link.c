@@ -179,6 +179,10 @@ static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return;
     cJSON_AddNumberToObject(msg, "host", GAME_HOST_CUSTOM);
+    // game.isCustom = !!init.host (game.deob.js:218198, the init's arg 5): a custom lobby. game_config_send says
+    // "custom" for a hosted game, and game_config_is_custom reads it: the Grappler's customOnly gate in
+    // player_spawn (a joiner's loadout follows the server's), the report / airdrop / stats rules.
+    if (truthy(arg(f, 5))) cJSON_AddBoolToObject(msg, "custom", 1);
     cJSON *settings = value_json(arg(f, KRUNKER_INIT_ARG_CONFIG));
     if (!cJSON_IsObject(settings)) {
         cJSON_Delete(settings);
