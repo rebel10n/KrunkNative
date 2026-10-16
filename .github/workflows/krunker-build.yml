@@ -1,42 +1,182 @@
 name: Krunker build
 
-# Krunker's live client against the committed build constants (tools/krunker/extract_build.py,
-# shared/include/krunker_build.h + tools/krunker/build.json, krunker_maps.h): official servers
-# refuse a client whose version, ahNum key or packet tables are stale, as 10.0.3 did (6e198333).
-# Every 6 hours (and by hand) the extractor downloads https://kru.eli.gift/game.deob.js as text
-# (a static parse, nothing executes it) and regenerates the header into a temp file. A changed
-# bundle fails the run and attaches krunker-build.diff, the regenerated files against main:
-# land it with `make krunker-build`. An unreachable or 404 bundle is a warning, not a failure
-# (the check then compares the header with build.json only).
+# Official lobbies speak Krunker's current build without a client rebuild (client/include/krunker_build_fetch.h).
+# Every 30 minutes (and by hand) this extracts https://kru.eli.gift/game.deob.js with
+# tools/krunker/extract_build.py (a static parse of the text: nothing executes it), checks the result
+# with the client's own parser (tools/krunker/build_check.c over shared/src/krunker_build_live.c) and,
+# when it changed, publishes it to the updates store (tools/krunker/publish_build.py):
+#   https://dl.krunk.io/updates/krunker/<sha256>.json      the document (immutable)
+#   https://dl.krunk.io/updates/client/krunker-build.json  the manifest naming it (no-cache), last
+# New values (AHKEY, packet names, offsets, strides, buildVersion) are published silently: clients absorb
+# them. The run fails, and opens (or comments on) the "Krunker build changed shape" issue, only when the
+# bundle no longer extracts or clients would refuse the result: that needs code. A refused build is still
+# published, so a join says why it cannot follow the build instead of failing on a stale buildVersion. An
+# unreachable bundle is a warning. When the live build is not the committed fallback
+# (shared/include/krunker_build.h), the regenerated files are attached as krunker-build.diff (land them
+# with `make krunker-build` whenever convenient: nothing waits on it).
 on:
   schedule:
-    - cron: "23 */6 * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  issues: write
+
+concurrency:
+  group: krunker-build
+  cancel-in-progress: false
 
 jobs:
-  check:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      KRUNKER_BUNDLE: https://kru.eli.gift/game.deob.js
+      PUBLISHED: https://dl.krunk.io/updates/client/krunker-build.json
+      XDG_CACHE_HOME: ${{ github.workspace }}/.cache
     steps:
       - uses: actions/checkout@v7
 
-      - name: Committed constants match the live bundle
-        id: check
-        run: make krunker-build-check
+      # extract_build.py's conditional GET cache (ETag / Last-Modified): most runs get a 304
+      - uses: actions/cache@v6
+        with:
+          path: .cache/krunknative/krunker-build
+          key: krunker-bundle-${{ github.run_id }}
+          restore-keys: krunker-bundle-
 
-      - name: Regenerate (the bundle changed)
-        if: failure() && steps.check.outcome == 'failure'
+      # exit 1: an anchor or a value changed shape (a failure); 3: the bundle could not be read (a warning)
+      - name: Extract the live build
+        id: extract
         run: |
-          make krunker-build FORCE=1 || true
-          git diff --stat
-          git diff > krunker-build.diff
+          set +e
+          python3 -I tools/krunker/extract_build.py "$KRUNKER_BUNDLE" --print > live.json 2> extract.log
+          rc=$?
+          cat extract.log
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" = 3 ]; then
+            echo "::warning::$KRUNKER_BUNDLE could not be read: nothing checked or published"
+          elif [ "$rc" != 0 ]; then
+            exit 1
+          fi
+
+      # the client's verdict: ok, refused (exit 2: the shape changed) or invalid (exit 1)
+      - name: The client can follow it
+        id: follow
+        if: steps.extract.outputs.rc == '0'
+        run: |
+          cc -std=c11 -O1 -Wall -Ishared/include -Ishared/lib/cJSON tools/krunker/build_check.c shared/src/krunker_build_live.c \
+            shared/src/auth_join.c shared/lib/cJSON/cJSON.c -o build_check
+          set +e
+          ./build_check live.json > check.log
+          rc=$?
+          cat check.log
+          case "$rc" in 0) echo "verdict=ok" ;; 2) echo "verdict=refused" ;; *) echo "verdict=invalid" ;; esac >> "$GITHUB_OUTPUT"
+          echo "### Krunker build: $(cat check.log)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$rc" = 0 ] || [ "$rc" = 2 ]
+
+      - name: Stage
+        id: stage
+        if: steps.follow.outcome == 'success'
+        run: |
+          python3 -I tools/krunker/publish_build.py stage live.json stage
+          set +e
+          ./build_check stage/krunker/*.json stage/client/krunker-build.json
+          rc=$?
+          set -e
+          [ "$rc" = 0 ] || [ "$rc" = 2 ]
+          if curl -fsS --max-time 20 "$PUBLISHED" -o published.json && python3 -I tools/krunker/publish_build.py same stage published.json; then
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SSH setup
+        if: steps.stage.outputs.changed == '1' && github.ref == 'refs/heads/main' && vars.KN_UPDATES_UPLOAD == '1'
+        env:
+          KRU_SSH_KEY: ${{ secrets.KRU_SSH_KEY }}
+          KRU_KNOWN_HOSTS: ${{ secrets.KRU_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru
+          chmod 600 ~/.ssh/id_kru
+          printf '%s\n' "$KRU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # the document first, then the manifest naming it (rsync writes a dot file and renames it: nginx
+      # 404s dot files under /updates/, so a client never reads a half-written manifest)
+      - name: Publish
+        if: steps.stage.outputs.changed == '1' && github.ref == 'refs/heads/main' && vars.KN_UPDATES_UPLOAD == '1'
+        env:
+          KRU_HOST: ${{ secrets.KRU_HOST }}
+          KRU_PORT: ${{ secrets.KRU_PORT }}
+        run: |
+          set -euo pipefail
+          ssh_cmd="ssh -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          rsync -rt --chmod=D755,F644 -e "$ssh_cmd" stage/krunker/ "root@$KRU_HOST:/opt/krunknative-updates/public/krunker/"
+          rsync -t --chmod=F644 -e "$ssh_cmd" stage/client/krunker-build.json "root@$KRU_HOST:/opt/krunknative-updates/public/client/krunker-build.json"
+          echo "### published to $PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup key
+        if: always()
+        run: rm -f ~/.ssh/id_kru
+
+      # the compiled fallback (krunker_build.h + build.json) against the live build: the regenerated files
+      # as an artifact when they differ (informational: clients already speak the live build)
+      - name: Regenerate the fallback (the live build is not the committed one)
+        id: fallback
+        if: steps.follow.outputs.verdict == 'ok'
+        run: |
+          live=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_version"])' live.json)
+          committed=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_version"])' tools/krunker/build.json)
+          if [ "$live" != "$committed" ]; then
+            python3 -I tools/krunker/extract_build.py "$KRUNKER_BUNDLE" --force || true
+            git diff > krunker-build.diff
+            echo "The compiled fallback is $committed, the live build $live: krunker-build.diff has the regenerated files." >> "$GITHUB_STEP_SUMMARY"
+            echo "diff=1" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/upload-artifact@v7
-        if: failure() && steps.check.outcome == 'failure'
+        if: steps.fallback.outputs.diff == '1'
         with:
           name: krunker-build-diff
           path: krunker-build.diff
           if-no-files-found: ignore
+
+      - name: A shape change fails the run
+        if: steps.follow.outputs.verdict == 'refused'
+        run: |
+          echo "::error::the live Krunker build is one clients refuse: $(cat check.log)"
+          exit 1
+
+      # only a shape change (the bundle does not extract, or clients refuse or cannot read the result)
+      # reaches the issue: once per distinct reason
+      - name: Report the shape change
+        if: >-
+          failure() && github.ref == 'refs/heads/main' &&
+          (steps.extract.outcome == 'failure' || steps.follow.outcome == 'failure' || steps.follow.outputs.verdict == 'refused')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Krunker build changed shape: official lobbies need code"
+          reason=$( { grep -h "FAILED\|refused:\|invalid:" extract.log check.log 2>/dev/null || true; } | head -n 5)
+          [ -n "$reason" ] || reason="see the run log"
+          {
+            echo "The live Krunker client ($KRUNKER_BUNDLE) is one Krunker Box Office cannot follow from data alone."
+            echo "Official joins refuse it with this reason on the error screen until the code catches up"
+            echo "(shared/src/krunker_build_live.c, client/src/net/krunker_link.c, tools/krunker/extract_build.py)."
+            echo
+            echo '```'
+            echo "$reason"
+            echo '```'
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > issue.md
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -z "$n" ]; then
+            gh issue create --title "$title" --body-file issue.md
+          elif gh issue view "$n" --json body,comments --jq '([.body] + [.comments[].body]) | join("\n")' | grep -qF -- "$reason"; then
+            echo "issue #$n already has this reason"
+          else
+            gh issue comment "$n" --body-file issue.md
+          fi
