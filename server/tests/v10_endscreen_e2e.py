@@ -38,6 +38,7 @@ SCRIPT = """
 3800 skin 2
 4000 check @found inGameUI=1
 5000 con end
+7000 lrmr 14 4 25
 10000 check @endanim endUI=1 inGameUI=0
 15000 check @results endUI=1 endTabbedView=1 matchEndSignupIncentives=1
 15000 nodes @button .collect-rewards-button
@@ -51,9 +52,22 @@ SCRIPT = """
 15000 rects @card #endTabbedView
 15000 nodes @dxp .doubleXPButton
 15000 rects @dxp .doubleXPButton
+15500 nodes @rank1 .rank-display
+15500 text @name1 .rank-display .rank-value
+15500 text @rating1 .rank-display .crVal
+15500 nodes @pos1 .rank-display .crVal.positive
+15500 text @rp1 .otherEarnings .crVal
 16000 text @label-later .auto-collect-label
 16000 nodes @button-later .collect-rewards-button
 16100 call knCollectRewards
+16120 lrmr -7 3 0
+16200 nodes @rank2 .rank-display
+16200 text @name2 .rank-display .rank-value
+16200 text @rating2 .rank-display .crVal
+16200 nodes @neg2 .rank-display .crVal.negative
+16200 text @rp2 .otherEarnings .crVal
+16250 lrmr 0 0 0
+16300 nodes @rank3 .rank-display
 16500 nodes @cards .reward-card
 16500 nodes @overlay-up .rewards-overlay
 17700 nodes @flipped .reward-card.flipped
@@ -174,6 +188,17 @@ def run():
     tab = texts.get("tab", (0, ""))[1]
     check("the Rewards tab is selected afterwards", tab == "Rewards", repr(tab))
     check("the Rewards tab lists the two skins", (n("rewards-list") or 0) == 2, f"{n('rewards-list')} .rewItemHolder")
+    # v10 lrmr (the rating reply's packet, here the input script's lrmr): the rank card and "+N RP" (g:195637, g:195699)
+    check("the rank card shows the rank the match left the player at (Silver 1), held from the end animation",
+          n("rank1") == 1 and texts.get("name1", (0, ""))[1] == "Silver 1", f"{n('rank1')} .rank-display, name {texts.get('name1')}")
+    check("the rating change: \"+14\" in the positive colour (v10 crVal positive)",
+          texts.get("rating1", (0, ""))[1] == "+14" and n("pos1") == 1, f"{texts.get('rating1')} positive={n('pos1')}")
+    check("the RP change: \"+25 RP\" under the card (v10 .otherEarnings)", texts.get("rp1", (0, ""))[1] == "+25 RP", repr(texts.get("rp1")))
+    check("a later rating reply updates the card in place: Bronze 3, \"-7\" in the negative colour",
+          n("rank2") == 1 and texts.get("name2", (0, ""))[1] == "Bronze 3" and texts.get("rating2", (0, ""))[1] == "-7" and n("neg2") == 1,
+          f"{n('rank2')} {texts.get('name2')} {texts.get('rating2')} negative={n('neg2')}")
+    check("no RP in that reply: no \"RP\" line under the card", texts.get("rp2", (0, ""))[1] == "" and (n("rank2") or 0) == 1, repr(texts.get("rp2")))
+    check("a placing reply (rank 0) takes the card away (v10: shown for latestRank > 0 only)", n("rank3") == 0, f"{n('rank3')} .rank-display")
     return all(results)
 
 
