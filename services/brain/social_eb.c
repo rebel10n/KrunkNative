@@ -24,7 +24,7 @@
  *   (login)                              unread:summary {counts: {<id>: {count, name}}}
  *   (presence changes)                   presence:online / presence:offline {id} to online friends
  *   (a follow made / broke a friendship) friends:list {offset: 0} to both, when online
- *   (a new follow, KrunkNative)          friend:request / friend:accepted {from, name} to the followee
+ *   (a follow not followed back, KrunkNative) a Followers mail row (kind 0, social_data.c kml) + "gmc"
  *   (errors)                             error {code, message}: EB_NOT_FRIEND, EB_TARGET_OFFLINE,
  *                                        EB_RATE_LIMITED, EB_TEXT_TOO_LONG, EB_MSG_INVALID, EB_INVITE_INVALID
  * Friend rows: {id, name, premium, online, unread, lastId, lastText, lastFromMe, lastTs} plus,
@@ -682,6 +682,25 @@ void social_eb_presence(int64_t account_id, int online) {
 
 /* ------------------------------------------------------------------ follows (profiles.c) */
 
+/* v10's Followers entry: the follow is a mail row of kind 0 (the follower's name as the sender, shown as
+ * "X has followed you!" with Follow Back in the notification window), counted by "gmc" once written */
+static void follower_mail_done(kn_db_result *res, void *ud) {
+    int64_t *b = ud;
+    if (kn_db_ok(res)) social_push_mail_count(*b);
+    free(b);
+}
+
+static void follower_mail(const int64_t followee, const char *follower) {
+    int64_t *b = malloc(sizeof *b);
+    if (!b) return;
+    *b = followee;
+    char ids[24];
+    if (kn_db_query_sql(g_acct_brain->db,
+                        SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr, kind) VALUES ($1, $2, '', '', 0, 0)"),
+                        KN_DB_ARGS(acct_itoa(ids, followee), follower), follower_mail_done, b) != 0)
+        free(b);
+}
+
 static void follow_checked(kn_db_result *res, void *ud) {
     int64_t *a = ud;
     if (kn_db_ok(res) && kn_db_rows(res) > 0) {
@@ -692,22 +711,15 @@ static void follow_checked(kn_db_result *res, void *ud) {
             refresh_list_of(*a);
             refresh_list_of(b);
         }
-        if (a_follows && b > 0 && b != *a) {
-            /* KrunkNative (the v10 client's notification center, v10_notify.c): a follow that is
-             * not followed back is a friend request; one that is, its acceptance */
-            cJSON *o = eb_obj(b_follows ? "friend:accepted" : "friend:request");
-            cJSON_AddNumberToObject(o, "from", (double) *a);
-            cJSON_AddStringToObject(o, "name", a_name ? a_name : "");
-            eb_push(b, o);
-        }
+        if (a_follows && !b_follows && b > 0 && b != *a) follower_mail(b, a_name ? a_name : ""); /* not followed back yet */
     }
     free(a);
 }
 
 /* `a` followed / unfollowed the player `name` (profiles.c "f", social_gapi.c follow): when that
  * player follows `a`, the follow made or broke a friendship, so both sides get their list again.
- * A new follow also tells that player: "friend:request" {from, name} (not followed back yet) or
- * "friend:accepted" {from, name} (`a` followed back), when online. */
+ * A new follow that is not followed back is a Followers entry for that player (follower_mail: a mail row
+ * of kind 0, then "gmc"); a follow back makes no entry and no notice (v10 has none). */
 void social_eb_follow_changed(int64_t a, const char *name) {
     if (a <= 0 || !name || !*name || !g_acct_brain || !g_acct_brain->db) return;
     int64_t *x = malloc(sizeof *x);

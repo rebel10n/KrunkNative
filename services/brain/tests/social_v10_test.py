@@ -4,7 +4,8 @@ kn_brain on sqlite with its own config, two (three) accounts over the social soc
 
   social_v10_test.py <native build dir> <repo root>
 
-Friends event bus ["eb", {...}]: follow + follow back = friends (both get a fresh friends:list),
+Friends event bus ["eb", {...}]: follow + follow back = friends (both get a fresh friends:list), a follow not
+followed back is a Followers entry (kml kind 0) and a gmc count,
 presence:online / offline, msg:send -> msg:sent + msg:recv, EB_NOT_FRIEND / EB_TARGET_OFFLINE /
 EB_TEXT_TOO_LONG, msg:history paging (oldest first, hasMore), msg:read + unread:summary on login.
 gapi tunnel ["gapi", rid, method, path, body]: /players/search, /players/<name> (follow_state,
@@ -159,11 +160,24 @@ async def scenario(names):
     check(f and f["friends"] == [] and f["offset"] == 0 and f["hasMore"] is False, "no friends yet: empty friends:list")
     st, r = await A.gapi("POST", "/players/%s/follow" % bn, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "A follows B (gapi follow)")
+    gm = await B.recv_until(lambda f: f[0] == "gmc" and f[1] == 1)
+    check(gm is not None, "B's unread count: gmc 1 (A's Followers entry)")
+    await B.send(["kml", 0])
+    m = await B.recv_until(lambda f: f[0] == "kml")
+    fol = [x for x in (m[2] if m else []) if x.get("km_notificationtype") == 0]
+    check(len(fol) == 1 and fol[0]["km_link"] == an and fol[0]["km_playerfrom"] == an and fol[0]["km_archive"] == 0,
+          "B's Followers tab: one unread entry, A has followed you (km_link A)")
     st, r = await B.gapi("GET", "/players/%s" % an)
     check(st == 200 and r["data"]["player_name"] == an and r["data"]["follow_state"] == 0 and r["data"]["online"] == 1,
           "B opens A's profile: not followed, online")
     st, r = await B.gapi("POST", "/players/%s/follow" % an, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "B follows A back")
+    check(await B.recv_until(lambda f: f[0] == "gmc" and f[1] >= 2, timeout=1.0) is None,
+          "a follow back makes no Followers entry and no gmc (v10 has no notice for it)")
+    await B.send(["kml", 0])
+    m = await B.recv_until(lambda f: f[0] == "kml")
+    check(len([x for x in (m[2] if m else []) if x.get("km_notificationtype") == 0]) == 1,
+          "B's Followers tab still holds just A's entry after the follow back")
     fa = await A.eb("friends:list", pred=lambda o: len(o["friends"]) == 1)
     fb = await B.eb("friends:list", pred=lambda o: len(o["friends"]) == 1)
     check(fa and fa["friends"][0]["id"] == b_id and fa["friends"][0]["name"] == bn and fa["friends"][0]["online"] is True,
