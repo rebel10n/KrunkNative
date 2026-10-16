@@ -14,7 +14,8 @@ as GLFW does (client/src/input_script.c), so these runs type the way a keyboard 
   2. bhop toast: the bhop mode message slides in from the top right in its own toast (#knBhopToast,
      bhop_toast.c, the v3.1.1 notify.ts look), starts off the right edge and settles in place; it is
      not a notification (no centre or #knNotify text, no chat line, nothing in the middle of the
-     screen). A generic notification (Ctrl TP, T with no field focused) never shows it.
+     screen). Ctrl TP (T with no field focused) shows its message in it too, the one exception; a
+     generic notification never does and Ctrl TP is not in the notification path any more.
   3. PRESS START: a controller's Start opens the menu with "PRESS START"; once the pad goes quiet and
      the mouse moves the menu reads "CLICK TO PLAY" again (the text follows Gamepad.active).
   4. the Sniper Rifle's scope (#aimRecticle) is gone the moment we die scoped, through the death
@@ -145,17 +146,18 @@ def rect(log, label):
     return tuple(float(v) for v in m.groups()) if m else None
 
 
-# T (Ctrl TP) is a generic notification: it must not show the bhop toast. Then B: the bhop toast.
-script = "0 play\n" + press(1000, "T") + "1300 vis @gen knBhopToast\n1300 vis @genc knNotify\n"
-script += "1300 text @gentoast [id=knNotify]\n1300 text @gencenter .notification-text\n"
+# T (Ctrl TP) shows "Ctrl TP - Enabled" in the bhop toast, and not in the notification path. Then B.
+script = "0 play\n" + press(1000, "T") + "1300 vis @ctp knBhopToast\n1300 vis @ctpn knNotify\n"
+script += "1300 text @ctptoast [id=knBhopToast]\n1300 text @ctpnotice [id=knNotify]\n1300 text @ctpcenter .notification-text\n"
 script += press(3500, "B") + "3560 style @slide knBhopToast:transform\n3560 vis @shown knBhopToast\n"
 script += "3800 style @plat knBhopToast:transform\n3800 vis @toast knBhopToast\n3800 text @toast [id=knBhopToast]\n"
 script += "3800 rect @rect knBhopToast\n3800 grep @chat bhop [id=chatList]\n3800 vis @mid gameMessage roundMessage\n4000 quit\n"
 log3 = run("bhop-toast", script)
-check(vis(log3, "gen").get("knBhopToast") in ("0", "-", None), f"generic notification: the bhop toast stays hidden ({vis(log3, 'gen')})")
-generic_text = (text(log3, "gentoast") or "").startswith("Ctrl TP -") or (text(log3, "gencenter") or "").startswith("Ctrl TP -")
-check(generic_text, f"generic notification: Ctrl TP shows in the notification path (toast {text(log3, 'gentoast')!r}, "
-                    f"centre {text(log3, 'gencenter')!r})")
+check(vis(log3, "ctp").get("knBhopToast") == "1" and (text(log3, "ctptoast") or "").startswith("Ctrl TP - Enabled"),
+      f"Ctrl TP: its message shows in the bhop toast ({vis(log3, 'ctp')} {text(log3, 'ctptoast')!r})")
+ctp_notice = (text(log3, "ctpnotice") or "").startswith("Ctrl TP -") or (text(log3, "ctpcenter") or "").startswith("Ctrl TP -")
+check(not ctp_notice, f"Ctrl TP: not in the notification path (toast {text(log3, 'ctpnotice')!r}, "
+                      f"centre {text(log3, 'ctpcenter')!r})")
 check(vis(log3, "toast").get("knBhopToast") == "1" and (text(log3, "toast") or "").startswith("Bhop -"),
       f"bhop toggle: the bhop toast shows it (toast {vis(log3, 'toast')} {text(log3, 'toast')!r})")
 slide = style_value(log3, "slide")

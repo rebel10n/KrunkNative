@@ -4395,7 +4395,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     social_prop_hud_tick(client, in_game && g_hud_ui.visible > 0, g_hud_layout_epoch); // WP-E: prop controls + taunt keys (hud_social.c)
     hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)
     ui_notify_tick(now * 1000.0); // the notification center (ui_notify.c)
-    bhop_toast_tick(now * 1000.0); // the bhop toast (bhop_toast.c): bhop-only, ticked nowhere else
+    bhop_toast_tick(now * 1000.0); // the bhop toast (bhop_toast.c): ticked nowhere else
 
     if (spectate_active() && !hud_in_game(client)) {
         hud_spectator_tick(client, now);

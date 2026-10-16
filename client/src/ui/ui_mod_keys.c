@@ -3,7 +3,7 @@
 //   - the document keydown switch: F1 io.send("clearLog") + console.clear(), F4
 //     location.href = "/" (KrunkNative: Find New Game, a seek without a reload: Krunker's own
 //     client's F4; servers_ui_find_new_game), F6 window.open("editor.html"),
-//     T toggles Ctrl TP (localStorage "ctrlTp", notify "Ctrl TP - Enabled/Disabled");
+//     T toggles Ctrl TP (localStorage "ctrlTp", the bhop toast "Ctrl TP - Enabled/Disabled");
 //     F1/F4/T are ignored while an INPUT/TEXTAREA has focus, F6 never is. Its F5
 //     location.reload() is the Reconnect bind now (ui_controls.c reconnect_key: rebindable,
 //     the console's `reconnect` natively, still location.reload() on the web);
@@ -16,6 +16,7 @@
 #include <ui_logic.h>
 #include <app_mode.h>
 #include <backend_ui.h> // servers_ui_find_new_game (F4)
+#include <bhop_toast.h> // Ctrl TP shows its toggle message in the bhop toast
 #include <html_ui.h>
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -50,7 +51,8 @@ static void toggle_ctrl_tp(void) {
     g_keys.ctrl_tp_enabled = !g_keys.ctrl_tp_enabled;
     html_storage_set(CTRL_TP_KEY, g_keys.ctrl_tp_enabled ? "1" : "0"); // String(+window.ctrlTpEnabled)
     const char *msg = g_keys.ctrl_tp_enabled ? "Ctrl TP - Enabled" : "Ctrl TP - Disabled";
-    ui_notify(g_keys.ctrl_tp_enabled ? I18N("kn.mods.ctrlTpOn", "Ctrl TP - Enabled") : I18N("kn.mods.ctrlTpOff", "Ctrl TP - Disabled"));
+    // the bhop toast (bhop_toast.h): the one exception to bhop-only, named in the header
+    bhop_toast_show(g_keys.ctrl_tp_enabled ? I18N("kn.mods.ctrlTpOn", "Ctrl TP - Enabled") : I18N("kn.mods.ctrlTpOff", "Ctrl TP - Disabled"));
     printf("%s\n", msg);
 }
 

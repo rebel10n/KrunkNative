@@ -1,4 +1,4 @@
-// The bhop toast (client/include/bhop_toast.h): BHOP-ONLY, see the header. The v3.1.1 offline
+// The bhop toast (client/include/bhop_toast.h): bhop and Ctrl TP only, see the header. The v3.1.1 offline
 // build's notify.ts toast (/home/user/jails/kru/src/Krunker_v3.1.1/mod/notify.ts), ported 1:1
 // over html_dom.h so it works on both the native engine and the web DOM. One <div> appended to
 // <body>, with its own id (knBhopToast) so nothing else can reach it:

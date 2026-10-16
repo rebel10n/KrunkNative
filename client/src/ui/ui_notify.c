@@ -1,7 +1,8 @@
 // ui_notify(): KrunkNative's system messages (reloads, server notices, sign-in / matchmaking /
 // settings feedback, economy notes). They go to Krunker v10.0.2's notification center
 // (v10_notify.c: a text notification, title "Notification", 4000 ms). This file never draws a
-// toast: the top-right slide-in toast is the bhop system's alone (bhop_toast.c, BHOP-ONLY).
+// toast: the top-right slide-in toast is the bhop system's and Ctrl TP's (bhop_toast.c, see its
+// header), and generic messages never use it.
 #include <ui_logic.h>
 #include <v10_notify.h>
 #include <string.h>

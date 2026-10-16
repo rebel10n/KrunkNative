@@ -16,7 +16,8 @@
 //     menu opens or the lock is lost);
 //   - Date.now() -> the GLFW clock; inputs[iInputs.frame] -> a per-input counter;
 //   - notify() -> bhop_toast_show (bhop_toast.c, notify.ts): the bhop toast is the bhop
-//     system's alone; the toggle key and /bhop (ui_bhop_announce) are the only callers. The
+//     system's (and Ctrl TP's, ui_mod_keys.c); the toggle key and /bhop (ui_bhop_announce) are
+//     the bhop callers. The
 //     "Developer Tools" bind row and the document keydown matching that calls toggleBhopMode
 //     belong to ui_mods.c.
 #include <ui_logic.h>
