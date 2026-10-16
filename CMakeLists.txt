@@ -1167,6 +1167,12 @@ else ()
     target_include_directories(window_state_test PRIVATE client/include)
     add_test(NAME window_state_test COMMAND window_state_test)
 
+    # settings_defaults_test: v10.0.2's phone and desktop settings defaults (the isMobile values of
+    # the Display / Game / Mobile rows, client/src/ui/ui_settings_defaults.c)
+    add_executable(settings_defaults_test client/tests/settings_defaults_test.c client/src/ui/ui_settings_defaults.c)
+    target_include_directories(settings_defaults_test PRIVATE client/include)
+    add_test(NAME settings_defaults_test COMMAND settings_defaults_test)
+
     # win_geom_test: the shared geometry rule of the draggable / resizable windows (developer
     # console, editor Quick GUI and side panels): off-screen saves, small windows, grip resizes
     add_executable(win_geom_test client/tests/win_geom_test.c client/src/ui/win_geom.c)

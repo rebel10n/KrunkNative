@@ -1,0 +1,99 @@
+{
+  "scenario": "settings-mobile-2",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "search-switch",
+      "rect": [
+        186,
+        46,
+        163,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "search box and the Basic switch (phone scale 0.394: text rounding)",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "preset-select-buttons",
+      "rect": [
+        478,
+        46,
+        182,
+        18
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "preset select, Import / Export / Reset; the reference has Manage Ads (63 px left of this box): KN writes no ads button (ui_windows.c)",
+      "ref_offset": [
+        -63,
+        0
+      ]
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        186,
+        70,
+        472,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "settingsTabLayout",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "keybinds-gameplay",
+      "rect": [
+        186,
+        100,
+        472,
+        190
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "Keybinds, Gameplay and its four sensitivities"
+    },
+    {
+      "name": "mobile-head",
+      "rect": [
+        186,
+        300,
+        472,
+        30
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 8.5,
+      "note": "Mobile header. v10 draws the Gameplay box edge at a fractional y at the phone scale (0.394 uiBase), with anti-aliasing (the rows below sit about 0.5 px lower); the engine snaps it to whole pixels, so the header edges differ"
+    },
+    {
+      "name": "mobile-rows",
+      "rect": [
+        186,
+        330,
+        472,
+        16
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 10.5,
+      "note": "Mobile rows at the foot (X Sensitivity): the same half-pixel edge snapping as mobile-head (with a 1 px offset the region is 1.4%)"
+    }
+  ]
+}

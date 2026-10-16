@@ -133,6 +133,11 @@ html.kn-preview-bg #canvas {
 .setSugBox2 {
   width: 219px;
 }
+/* A phone (ui_settings.c sync_preset_boxes) has v10's four boxes and no Beautiful one: they keep
+ * v7's 279px. */
+.setSugBox2.knFour {
+  width: 279px;
+}
 
 /* The Download window (showWindow(25), client/src/ui/download_ui.c): v7's header and
  * description, then KrunkNative's packages: the visitor's platform first (.knDlRec,

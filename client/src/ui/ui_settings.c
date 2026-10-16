@@ -7,7 +7,8 @@
 // in KrunkNative reads yet are stored and shown (their consumers come with the v7 settings
 // work).
 #include <ui_logic.h>
-#include <ui_mobile.h> // netRate: the mobile default
+#include <ui_mobile.h> // the phone defaults (collect_defaults) and the Beautiful preset's phone hiding
+#include <ui_settings_defaults.h> // v10's phone and desktop defaults (ui_settings_defaults.c)
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
 #include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
@@ -269,11 +270,21 @@ void ui_settings_collect_defaults(void) {
     html_dom_remove(box);
     free(found);
 
-    // settings.js netRate (Advanced > General "Network Rate (Hz)", read by net/recon.c): val
-    // isMobile ? 1 (60 Hz) : 3 (144 Hz); the captured row has the desktop option selected
-    if (ui_mobile_active()) {
-        cJSON_DeleteItemFromObject(g_defaults, "netRate");
-        cJSON_AddStringToObject(g_defaults, "netRate", "1");
+    // v10.0.2's defaults for the settings in ui_settings_defaults.c (netRate, the phone's Display and
+    // Game values, the Mobile rows): the platform's value over the captured one
+    const int mobile = ui_mobile_active();
+    size_t n_defaults = 0;
+    const UiSettingDefault *table = ui_settings_defaults_table(&n_defaults);
+    for (size_t i = 0; i < n_defaults; i++) {
+        const char *text = mobile ? table[i].phone : table[i].desktop;
+        cJSON_DeleteItemFromObject(g_defaults, table[i].key);
+        if (table[i].kind == UI_DEFAULT_BOOL) {
+            cJSON_AddBoolToObject(g_defaults, table[i].key, !strcmp(text, "true"));
+        } else if (table[i].kind == UI_DEFAULT_NUMBER) {
+            cJSON_AddNumberToObject(g_defaults, table[i].key, strtod(text, NULL));
+        } else {
+            cJSON_AddStringToObject(g_defaults, table[i].key, text);
+        }
     }
 
     for (size_t i = 0; i < sizeof(COLOR_SETTINGS) / sizeof(COLOR_SETTINGS[0]); i++) {
@@ -311,16 +322,6 @@ const cJSON *ui_setting_value(const char *key) {
     }
     const cJSON *v = ui_setting_saved(key);
     if (v) return v;
-    if (key && !strcmp(key, "scaleUI") && ui_mobile_active()) { // v10: scaleUI's val is 0.9 on phones, 0.7 on desktop
-        static cJSON *phone;
-        if (!phone) phone = cJSON_CreateNumber(0.9);
-        return phone;
-    }
-    if (key && !strcmp(key, "oldScoreboard") && ui_mobile_active()) { // v10: oldScoreboard's val is !!isMobile
-        static cJSON *classic;                                            // (the kill feed in the chat)
-        if (!classic) classic = cJSON_CreateTrue();
-        return classic;
-    }
     return g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
 }
 
@@ -780,7 +781,8 @@ static void preset_apply(const int target, const int keep_custom, const int sile
 static void sync_preset_select(void) {
     HtmlElem sel = html_dom_by_id("settingsPreset");
     if (!sel) return;
-    if (!html_dom_query(sel, "option[value=\"4\"]")) {
+    // a phone has v10's four presets (no Beautiful option)
+    if (!ui_mobile_active() && !html_dom_query(sel, "option[value=\"4\"]")) {
         HtmlElem custom = html_dom_query(sel, "option[value=\"2\"]");
         char option[128];
         snprintf(option, sizeof(option), "<option value=\"4\">%s</option>", I18N("kn.settings.preset.beautiful", "Beautiful"));
@@ -890,8 +892,16 @@ static void audio_input_options(const HtmlElem select) {
 // Performance / Custom, each with its .setSugInf tooltip) get KrunkNative's Beautiful box
 // after Performance, in the same markup, so it is clicked and hovered like the others. Added
 // here rather than in ui/windows (a re-import of the v7 templates would drop it); the five
-// boxes share the row (css/krunknative.css narrows .setSugBox2).
+// boxes share the row (css/krunknative.css narrows .setSugBox2). A phone has no Beautiful box: v10
+// shows its four boxes at v7's width (the knFour class, krunknative.css), so none is added there.
 static void sync_preset_boxes(const HtmlElem root) {
+    if (ui_mobile_active()) {
+        HtmlElem *boxes = malloc(sizeof(HtmlElem) * 16);
+        const int n = boxes ? html_dom_query_all(root, ".setSugBox2", boxes, 16) : 0;
+        for (int i = 0; i < n; i++) html_dom_set_class(boxes[i], "knFour", 1);
+        free(boxes);
+        return;
+    }
     if (html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(4)\"]")) return;
     const HtmlElem perf = html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(3)\"]");
     if (!perf) return;
@@ -1005,6 +1015,16 @@ void ui_settings_apply_values(const HtmlElem root) {
     if (!root) return;
     sync_preset_select();
     sync_preset_boxes(root);
+    // Aspect Ratio's placeholder is the window's own size (v10: window.innerWidth + 'x' + innerHeight),
+    // not the template's 1280x720
+    const HtmlElem aspect = html_dom_by_id("slid_aspectRatio");
+    float view_w = 0.0f, view_h = 0.0f;
+    if (aspect) html_dom_viewport(&view_w, &view_h, NULL);
+    if (aspect && view_w > 0.0f && view_h > 0.0f) {
+        char size[32];
+        snprintf(size, sizeof(size), "%dx%d", (int) lroundf(view_w), (int) lroundf(view_h));
+        html_dom_set_attr(aspect, "placeholder", size);
+    }
     HtmlElem *found = malloc(sizeof(HtmlElem) * UI_QUERY_MAX);
     if (!found) return;
 
@@ -1028,7 +1048,10 @@ void ui_settings_apply_values(const HtmlElem root) {
         if (!control_setting_key(found[i], key, sizeof(key))) continue;
         if (!strcmp(key, "audioInput")) audio_input_options(found[i]);
         const cJSON *v = ui_setting_saved(key);
-        if (!v && (!strcmp(key, "netRate") || !strcmp(key, "lang"))) v = ui_setting_value(key); // the device's default (mobile 60 Hz); i18n.locale
+        // a control shows its default only for the keys whose captured markup is the desktop's
+        // (ui_settings_defaults.c: a phone's Map Details off, Network Rate 60 Hz); lang is i18n.locale
+        if (!v && (!strcmp(key, "lang") || ui_settings_default_text(key, ui_mobile_active())))
+            v = ui_setting_value(key);
         if (!v) continue;
         if (elem_is_checkbox(found[i])) {
             // !!settings[key]

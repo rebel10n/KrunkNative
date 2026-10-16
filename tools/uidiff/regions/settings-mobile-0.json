@@ -1,0 +1,113 @@
+{
+  "scenario": "settings-mobile-0",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "search-switch",
+      "rect": [
+        186,
+        46,
+        163,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "search box and the Basic switch (phone scale 0.394: text rounding)",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "preset-select-buttons",
+      "rect": [
+        478,
+        46,
+        182,
+        18
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "preset select, Import / Export / Reset; the reference has Manage Ads (63 px left of this box): KN writes no ads button (ui_windows.c)",
+      "ref_offset": [
+        -63,
+        0
+      ]
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        186,
+        70,
+        472,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "settingsTabLayout",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "presets",
+      "rect": [
+        186,
+        104,
+        472,
+        72
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.5,
+      "note": "Default / Pro / Performance / Custom tiles: four boxes at v7's width (no Beautiful on a phone)"
+    },
+    {
+      "name": "localization-head",
+      "rect": [
+        186,
+        188,
+        472,
+        30
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 0.5,
+      "note": "Localization header and the requires-restart note"
+    },
+    {
+      "name": "default-region",
+      "rect": [
+        186,
+        224,
+        472,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 100.0,
+      "note": "Default Region: v10's list is the matchmaker's (Frankfurt first); KN's is its own regions (Local selected offline)",
+      "skip": true
+    },
+    {
+      "name": "language-and-rest",
+      "rect": [
+        186,
+        246,
+        472,
+        100
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "Language, Server Browser & Matchmaking rows"
+    }
+  ]
+}

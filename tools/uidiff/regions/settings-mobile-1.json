@@ -1,0 +1,86 @@
+{
+  "scenario": "settings-mobile-1",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "search-switch",
+      "rect": [
+        186,
+        46,
+        163,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "search box and the Basic switch (phone scale 0.394: text rounding)",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "preset-select-buttons",
+      "rect": [
+        478,
+        46,
+        182,
+        18
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "preset select, Import / Export / Reset; the reference has Manage Ads (63 px left of this box): KN writes no ads button (ui_windows.c)",
+      "ref_offset": [
+        -63,
+        0
+      ]
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        186,
+        70,
+        472,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "settingsTabLayout",
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "performance-rows",
+      "rect": [
+        186,
+        102,
+        472,
+        206
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.0,
+      "note": "Performance rows: Resolution, Aspect Ratio, Low Spec, Map Details, Particles, Particle / Render Distance, Shadows"
+    },
+    {
+      "name": "interface-head",
+      "rect": [
+        186,
+        310,
+        472,
+        36
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 0.5,
+      "note": "Interface header"
+    }
+  ]
+}
