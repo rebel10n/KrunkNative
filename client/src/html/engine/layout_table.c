@@ -1,7 +1,8 @@
 /*
  * layout_table.c - `display: table / table-row / table-cell` subset
  * (inventory section 6: .menuTabsNew/.menuTabNew, .serverHeader/.sideTabs/
- * .centerTab; no <table> markup).  Span-1 cells only, auto table layout:
+ * .centerTab; no <table> markup).  colspan (cell_span_at) widens the columns it covers;
+ * rowspan is not laid out.  Auto table layout:
  * column min/max from cell min-/max-content, percentage and px cell widths,
  * extra space distributed to auto columns in proportion to their max-content
  * widths (Chrome's AutoTableLayout for these cases), cells of a row share the
@@ -48,30 +49,98 @@ static void table_spacing(const Box *b, float *hs, float *vs)
     *vs = b->style->border_spacing_y.kind == CSS_LEN_VALUE ? b->style->border_spacing_y.px : 0;
 }
 
-static int table_columns(LayoutTree *t, Box *b, ColInfo *cols)
+/* colspan (HTML 4.4.6): a number 1..TBL_MAX_COLS, 0 or junk reads as 1; clamped to the columns
+ * left from column ci. rowspan is not laid out: such a cell keeps its own row. */
+static int cell_span_at(const Box *c, int ci)
+{
+    int span = 1;
+    lxb_dom_node_t *node = c->node;
+    if (node && node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        size_t len = 0;
+        const lxb_char_t *v = lxb_dom_element_get_attribute(lxb_dom_interface_element(node), (const lxb_char_t *)"colspan", 7, &len);
+        if (v && len) {
+            char buf[32];
+            size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+            memcpy(buf, v, n); buf[n] = 0;
+            char *end;
+            long d = strtol(buf, &end, 10);
+            if (end != buf && d > 0) span = d < TBL_MAX_COLS ? (int)d : TBL_MAX_COLS;
+        }
+    }
+    return span < TBL_MAX_COLS - ci ? span : TBL_MAX_COLS - ci;
+}
+
+/* The border-box width of the columns [ci, ci + span) and the spacing between them. */
+static float span_width(const ColInfo *cols, int ci, int span, float hs)
+{
+    float w = hs * (float)(span - 1);
+    for (int k = 0; k < span; k++) w += cols[ci + k].w;
+    return w;
+}
+
+/* A spanning cell's min/max must fit in its columns: any shortfall is shared by them in
+ * proportion to their max-content widths (equally when those are 0). Spacing between the
+ * columns counts toward the cell's width, so it is taken off first. */
+static void widen_span(ColInfo *cols, int span, float need_min, float need_max)
+{
+    float sum_min = 0, sum_max = 0;
+    for (int k = 0; k < span; k++) { sum_min += cols[k].min; sum_max += cols[k].max; }
+    if (need_min > sum_min) {
+        const float extra = need_min - sum_min;
+        for (int k = 0; k < span; k++) cols[k].min += sum_max > 0 ? extra * cols[k].max / sum_max : extra / (float)span;
+        for (int k = 0; k < span; k++) cols[k].max = kn_maxf(cols[k].max, cols[k].min);
+    }
+    sum_max = 0;
+    for (int k = 0; k < span; k++) sum_max += cols[k].max;
+    if (need_max > sum_max) {
+        const float extra = need_max - sum_max;
+        for (int k = 0; k < span; k++) cols[k].max += sum_max > 0 ? extra * cols[k].max / sum_max : extra / (float)span;
+    }
+}
+
+/* One cell's min/max widths: a single-column cell sets its column; a spanning cell widens
+ * the columns it covers (its px width counts as its max, like a single column's). Percentage
+ * widths on spanning cells are ignored (they act as auto). */
+static void table_cell_widths(LayoutTree *t, Box *c, int ci, int span, float hs, ColInfo *cols)
+{
+    float mn = layout_intrinsic_width(t, c, 0);
+    float mx = layout_intrinsic_width(t, c, 1);
+    const CssLength *w = &c->style->width;
+    if (span > 1) {
+        if (w->kind == CSS_LEN_VALUE && w->pct == 0) mx = kn_maxf(mn, layout_box_sizing_w(c, w->px));
+        const float spacing = hs * (float)(span - 1);
+        widen_span(cols + ci, span, mn - spacing, mx - spacing);
+        return;
+    }
+    ColInfo *col = &cols[ci];
+    if (w->kind == CSS_LEN_VALUE && w->pct == 0) {
+        float f = kn_maxf(mn, layout_box_sizing_w(c, w->px));
+        col->fixed = kn_maxf(col->fixed, f);
+        mx = kn_maxf(mn, f);
+    } else if (w->kind == CSS_LEN_VALUE && w->pct > 0) {
+        col->pct = kn_maxf(col->pct, w->pct);
+    }
+    col->min = kn_maxf(col->min, mn);
+    col->max = kn_maxf(col->max, mx);
+}
+
+static int table_columns(LayoutTree *t, Box *b, float hs, ColInfo *cols)
 {
     int nc = 0;
     for (int i = 0; i < TBL_MAX_COLS; i++) { cols[i].min = cols[i].max = 0; cols[i].fixed = cols[i].pct = -1; }
-    for (Box *r = b->first_child; r; r = r->next) {
-        if (r->type != BOX_TABLE_ROW) continue;
-        int ci = 0;
-        for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
-            if (c->type != BOX_TABLE_CELL) continue;
-            ColInfo *col = &cols[ci++];
-            float mn = layout_intrinsic_width(t, c, 0);
-            float mx = layout_intrinsic_width(t, c, 1);
-            const CssLength *w = &c->style->width;
-            if (w->kind == CSS_LEN_VALUE && w->pct == 0) {
-                float f = kn_maxf(mn, layout_box_sizing_w(c, w->px));
-                col->fixed = kn_maxf(col->fixed, f);
-                mx = kn_maxf(mn, f);
-            } else if (w->kind == CSS_LEN_VALUE && w->pct > 0) {
-                col->pct = kn_maxf(col->pct, w->pct);
+    /* the single-column cells first (pass 0), then the spanning cells (pass 1) */
+    for (int pass = 0; pass < 2; pass++) {
+        for (Box *r = b->first_child; r; r = r->next) {
+            if (r->type != BOX_TABLE_ROW) continue;
+            int ci = 0;
+            for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
+                if (c->type != BOX_TABLE_CELL) continue;
+                const int span = cell_span_at(c, ci);
+                if ((span > 1) == (pass == 1)) table_cell_widths(t, c, ci, span, hs, cols);
+                ci += span;
             }
-            col->min = kn_maxf(col->min, mn);
-            col->max = kn_maxf(col->max, mx);
+            if (pass == 0 && ci > nc) nc = ci;
         }
-        if (ci > nc) nc = ci;
     }
     return nc;
 }
@@ -121,7 +190,7 @@ static int table_fixed(const Box *b)
     return b->style->table_layout == CSS_TABLE_LAYOUT_FIXED && b->style->width.kind == CSS_LEN_VALUE;
 }
 
-static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float avail)
+static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float avail, float hs)
 {
     (void)t;
     Box *row = NULL;
@@ -131,10 +200,14 @@ static void distribute_fixed(LayoutTree *t, Box *b, ColInfo *cols, int nc, float
     for (int i = 0; i < nc; i++) cols[i].w = -1;
     for (Box *c = row ? row->first_child : NULL; c && ci < nc; c = c->next) {
         if (c->type != BOX_TABLE_CELL) continue;
+        const int span = cell_span_at(c, ci);
         const CssLength *w = &c->style->width;
-        if (w->kind == CSS_LEN_VALUE && w->pct > 0) cols[ci].w = w->pct * 0.01f * avail;
-        else if (w->kind == CSS_LEN_VALUE) cols[ci].w = layout_box_sizing_w(c, w->px);
-        ci++;
+        float cw = -1;
+        if (w->kind == CSS_LEN_VALUE && w->pct > 0) cw = w->pct * 0.01f * avail;
+        else if (w->kind == CSS_LEN_VALUE) cw = layout_box_sizing_w(c, w->px);
+        /* a spanning cell's width (less the spacing) is split evenly over its columns */
+        if (cw >= 0) for (int k = 0; k < span; k++) cols[ci + k].w = kn_maxf(0, cw - hs * (float)(span - 1)) / (float)span;
+        ci += span;
     }
     for (int i = 0; i < nc; i++) { if (cols[i].w < 0) autos++; else used += cols[i].w; }
     float share = autos ? kn_maxf(0, avail - used) / (float)autos : 0;
@@ -210,10 +283,10 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
     ColInfo cols[TBL_MAX_COLS];
     float hs, vs;
     table_spacing(b, &hs, &vs);
-    int nc = table_columns(t, b, cols);
+    int nc = table_columns(t, b, hs, cols);
     float cx = box_cl(b), cy = box_ct(b), cw = box_cw(b);
     float avail = kn_maxf(0, cw - hs * (float)(nc + 1));
-    if (table_fixed(b)) distribute_fixed(t, b, cols, nc, avail);
+    if (table_fixed(b)) distribute_fixed(t, b, cols, nc, avail, hs);
     else distribute(cols, nc, avail);
     float colx[TBL_MAX_COLS];
     float x = hs;
@@ -235,17 +308,20 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
         int ci = 0;
         for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
             if (c->type != BOX_TABLE_CELL) continue;
-            layout_cell(t, c, cols[ci].w, -1, cw);
+            const int span = cell_span_at(c, ci);
+            layout_cell(t, c, span_width(cols, ci, span, hs), -1, cw);
             float ch = c->h;
             if (c->style->height.kind == CSS_LEN_VALUE && c->style->height.pct == 0)
                 ch = kn_maxf(ch, layout_box_sizing_h(c, c->style->height.px));
             row_h = kn_maxf(row_h, ch);
-            ci++;
+            ci += span;
         }
         ci = 0;
         for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
             if (c->type != BOX_TABLE_CELL) continue;
-            layout_cell(t, c, cols[ci].w, row_h, cw);
+            const int span = cell_span_at(c, ci);
+            const float sw = span_width(cols, ci, span, hs);
+            layout_cell(t, c, sw, row_h, cw);
             const float natural = cell_content_h(c);
             float extra = row_h - natural;
             if (extra > 0) {
@@ -254,9 +330,9 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
             }
             c->lx = colx[ci];
             c->ly = 0;
-            layout_relative_offset(c, cols[ci].w, LAYOUT_INDEFINITE);
+            layout_relative_offset(c, sw, LAYOUT_INDEFINITE);
             if (b->first_baseline < 0 && c->first_baseline >= 0) b->first_baseline = cy + y + c->first_baseline;
-            ci++;
+            ci += span;
         }
         r->lx = cx; r->ly = cy + y;
         r->w = cw; r->h = row_h;
@@ -276,7 +352,7 @@ void layout_table_intrinsic(LayoutTree *t, Box *b, float *min_w, float *max_w)
     ColInfo cols[TBL_MAX_COLS];
     float hs, vs;
     table_spacing(b, &hs, &vs);
-    int nc = table_columns(t, b, cols);
+    int nc = table_columns(t, b, hs, cols);
     float mn = hs * (float)(nc + 1), mx = mn;
     for (int i = 0; i < nc; i++) {
         mn += cols[i].min;

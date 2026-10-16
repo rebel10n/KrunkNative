@@ -896,6 +896,61 @@ static void t_table(void)
     fx_free(fx);
 }
 
+/* colspan (HTML 4.4.6): a spanning cell starts at its first column and is as wide as its
+ * columns together (border-spacing between them included); the rows below keep their own
+ * columns. Strike's mini scoreboard puts a colspan=3 team header over the player columns. */
+static void t_table_colspan(void)
+{
+    /* auto layout: a header spanning the first two columns of 3-cell body rows */
+    Fx *fx = fx_html(
+        "<table id=cs style='border-spacing:0;width:400px'>"
+        "<tr id=ch><td id=hh colspan=2>Team</td><td id=hs>12</td></tr>"
+        "<tr id=cb><td id=p1>1</td><td id=n1>Guest long name</td><td id=k1>3</td></tr></table>", NULL);
+    HtmlRect hh = rc(fx, "hh"), hs = rc(fx, "hs"), p1 = rc(fx, "p1"), n1 = rc(fx, "n1"), k1 = rc(fx, "k1"), cs = rc(fx, "cs");
+    CHECK(hh.y < p1.y, "colspan: header row above the body row");
+    CHECK_NEAR(hh.x, p1.x, 0.01, "colspan auto: spanning cell starts at its column");
+    CHECK_NEAR(hh.w, p1.w + n1.w, 0.01, "colspan auto: spanning cell is as wide as its two columns");
+    CHECK_NEAR(hs.x, k1.x, 0.01, "colspan auto: the cell after the span lines up with the body's third column");
+    CHECK_NEAR(hs.w, k1.w, 0.01, "colspan auto: the third column keeps its width");
+    CHECK_NEAR(cs.w, 400, 0.01, "colspan auto: table width is the specified width");
+    fx_free(fx);
+
+    /* the spanning cell is wider than its columns' max-content: the extra goes to the columns */
+    fx = fx_html(
+        "<table id=cw style='border-spacing:0;width:400px'>"
+        "<tr><td id=wh colspan=2>A very long team header text</td><td id=ws>1</td></tr>"
+        "<tr><td id=wa>1</td><td id=wb>b</td><td id=wk>3</td></tr></table>", NULL);
+    HtmlRect wh = rc(fx, "wh"), ws = rc(fx, "ws"), wa = rc(fx, "wa"), wb = rc(fx, "wb"), wk = rc(fx, "wk");
+    CHECK_NEAR(wh.w, wa.w + wb.w, 0.01, "colspan wide: the two columns grow to the header's width");
+    CHECK_NEAR(ws.x, wk.x, 0.01, "colspan wide: cell after the span stays aligned");
+    CHECK_NEAR(wh.w + ws.w, 400, 0.01, "colspan wide: the row fills the table");
+    fx_free(fx);
+
+    /* table-layout: fixed: the first row's widths set the columns; a spanning cell's px width
+     * is split across its columns (200px over two columns, then 100px for the third) */
+    fx = fx_html(
+        "<table id=cf style='table-layout:fixed;width:300px;border-spacing:0'>"
+        "<tr><td id=fh colspan=2 style='width:200px'>x</td><td id=fs style='width:100px'>y</td></tr>"
+        "<tr><td id=f1>1</td><td id=f2>2</td><td id=f3>3</td></tr></table>", "td, th { padding: 0; }");
+    HtmlRect fh = rc(fx, "fh"), fs = rc(fx, "fs"), f1 = rc(fx, "f1"), f2 = rc(fx, "f2"), f3 = rc(fx, "f3");
+    CHECK_NEAR(fh.x, f1.x, 0.01, "colspan fixed: spanning cell starts at its column");
+    CHECK_NEAR(fh.w, 200, 0.01, "colspan fixed: spanning cell has its px width");
+    CHECK_NEAR(f1.w + f2.w, 200, 0.01, "colspan fixed: the two columns take the span's width");
+    CHECK_NEAR(fs.x, f3.x, 0.01, "colspan fixed: cell after the span lines up with the third column");
+    CHECK_NEAR(f3.w, 100, 0.01, "colspan fixed: third column keeps its px width");
+    fx_free(fx);
+
+    /* colspan="0" is read as 1 (HTML 4.4.6); a huge colspan is clamped and does not overflow */
+    fx = fx_html(
+        "<table style='border-spacing:0;width:300px'>"
+        "<tr><td id=z0 colspan=0>a</td><td id=z1>b</td></tr>"
+        "<tr><td id=z2>c</td><td id=z3>d</td></tr>"
+        "<tr><td id=bg colspan=100000>e</td></tr></table>", NULL);
+    CHECK_NEAR(rc(fx, "z1").x, rc(fx, "z3").x, 0.01, "colspan=0 counts as one column");
+    CHECK(rc(fx, "bg").w > 0, "colspan huge: clamped, cell laid out");
+    fx_free(fx);
+}
+
 static void t_positioned(void)
 {
     Fx *fx = fx_html(
@@ -2199,6 +2254,7 @@ int main(int argc, char **argv)
     t_ua_defaults();
     t_all_unset();
     t_table();
+    t_table_colspan();
     t_positioned();
     t_sticky_scroll();
     t_text();
