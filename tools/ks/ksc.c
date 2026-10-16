@@ -1,6 +1,6 @@
 // ksc: KrunkScript command-line tool (doc/v7/krunkscript.md 6.6).
 //
-//   ksc check [--side client|server] [--json] [--quiet] FILE...
+//   ksc check [--side client|server|shared] [--json] [--quiet] FILE...
 //   ksc import-js [--side client|server] FILE
 //
 // FILE is a .krnk source file or a map .json (its scripts.client / scripts.server,
@@ -128,7 +128,7 @@ static void report(Out *o, const char *file, const char *side_label, KsSide side
         printf("%s{\"file\":", o->first_json ? "" : ",");
         o->first_json = 0;
         json_str(file);
-        printf(",\"side\":\"%s\",\"status\":\"%s\"", side == KS_SIDE_SERVER ? "server" : "client", status);
+        printf(",\"side\":\"%s\",\"status\":\"%s\"", side == KS_SIDE_SERVER ? "server" : side == KS_SIDE_SHARED ? "shared" : "client", status);
         json_diags("errors", &err, failed);
         json_diags("warnings", warns, nwarn);
         putchar('}');
@@ -166,12 +166,12 @@ static int check_file(Out *o, const char *path, int side_opt) {
             return -1;
         }
         cJSON *scripts = cJSON_GetObjectItemCaseSensitive(root, "scripts");
-        static const char *const keys[2] = {"client", "server"};
-        for (int k = 0; k < 2; k++) {
+        static const char *const keys[3] = {"client", "server", "shared"};
+        for (int k = 0; k < 3; k++) {
             if (side_opt >= 0 && side_opt != k) continue;
             cJSON *s = cJSON_IsObject(scripts) ? cJSON_GetObjectItemCaseSensitive(scripts, keys[k]) : NULL;
             const char *text = cJSON_IsString(s) ? s->valuestring : NULL;
-            if (!text && !o->json) continue;
+            if (!text && (!o->json || k == KS_SIDE_SHARED)) continue; // a map without a shared script has none to report
             report(o, path, keys[k], (KsSide) k, text, text ? strlen(text) : 0, 1);
         }
         cJSON_Delete(root);
@@ -185,7 +185,7 @@ static int check_file(Out *o, const char *path, int side_opt) {
 
 static int usage(void) {
     fprintf(stderr,
-            "usage: ksc check [--side client|server] [--json] [--quiet] FILE...\n"
+            "usage: ksc check [--side client|server|shared] [--json] [--quiet] FILE...\n"
             "  FILE: a .krnk script (side: --side, else \"server\" when the path contains \"server\")\n"
             "        or a map .json (checks scripts.client and scripts.server)\n"
             "  exit status: 0 ok, 1 compile errors, 2 usage or I/O error\n"
@@ -206,6 +206,7 @@ static int cmd_check(int argc, char **argv) {
             i++;
             if (strcmp(argv[i], "client") == 0) side = KS_SIDE_CLIENT;
             else if (strcmp(argv[i], "server") == 0) side = KS_SIDE_SERVER;
+            else if (strcmp(argv[i], "shared") == 0) side = KS_SIDE_SHARED;
             else return usage();
         } else if (argv[i][0] == '-' && argv[i][1]) return usage();
     }

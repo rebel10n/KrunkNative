@@ -411,7 +411,11 @@ def triggers(c):
     m = c.mcp
     pid = m.sc("map_new", {"name": "Triggers", "template": "blank"})["id"]
     cat = m.sc("triggers_catalog")
-    check(len(cat["events"]) == 32 and len(cat["actions"]) == 72, "v7 trigger catalog")
+    # v10.0.2's set (editor_data triggers): 32 events, 13 conditions (12 "Custom Action"), 75 actions;
+    # the entity actions 72-74 are listed but not native (no entity runtime yet)
+    check(len(cat["events"]) == 32 and len(cat["actions"]) == 75 and len(cat["conditions"]) == 13, "v10 trigger catalog")
+    check(cat["conditions"][12]["name"] == "Custom Action" and cat["actions"][72]["name"] == "Spawn Entity", "v10 catalog names")
+    check(cat["actions"][71]["native"] is True and cat["actions"][72]["native"] is False, "entity actions are not native")
     gate = m.sc("objects_create", {"project": pid, "objects": [{"prefab": "GATE", "p": [0, 0, 30], "s": [20, 20, 2]}]})["created"][0]
     t = m.sc("triggers_create", {"project": pid, "triggers": [
         {"p": [0, 0, 0], "event": "onEnter", "action": "Toggle Interface Gate"},
@@ -422,6 +426,9 @@ def triggers(c):
     check(link["interface_id"] >= 1 and link["trigger"]["targets"] == [gate], "linked")
     lst = m.sc("triggers_list", {"project": pid})
     check(lst["count"] == 2 and lst["triggers"][1]["action"]["text"] == "hello", "triggers_list decodes")
+    ent = m.sc("triggers_create", {"project": pid, "triggers": [
+        {"p": [40, 0, 0], "event": "onTimer", "event_value": 1, "action": "Spawn Entity", "text": "crate"}]})["created"]
+    check(m.sc("object_get", {"project": pid, "id": ent[0]})["raw"].get("ta") == 72, "Spawn Entity is action 72")
     m.sc("triggers_update", {"project": pid, "updates": [{"id": t[1], "action": "Give Player Score", "value": 50}]})
     check(m.sc("object_get", {"project": pid, "id": t[1]})["raw"]["tc"] == 50, "trigger update")
     ifs = m.sc("interfaces_list", {"project": pid})

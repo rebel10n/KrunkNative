@@ -6098,82 +6098,82 @@
    {
     "id": 16,
     "name": "onInteractKey",
-    "native": false
+    "native": true
    },
    {
     "id": 17,
     "name": "onPlayerSpawn",
-    "native": false
+    "native": true
    },
    {
     "id": 18,
     "name": "onPlayerKill",
-    "native": false
+    "native": true
    },
    {
     "id": 19,
     "name": "onPlayerDie",
-    "native": false
+    "native": true
    },
    {
     "id": 20,
     "name": "onAIDamage",
-    "native": false
+    "native": true
    },
    {
     "id": 21,
     "name": "onNukeStart",
-    "native": false
+    "native": true
    },
    {
     "id": 22,
     "name": "onNukeEnd",
-    "native": false
+    "native": true
    },
    {
     "id": 23,
     "name": "onExitObject",
-    "native": false
+    "native": true
    },
    {
     "id": 24,
     "name": "onCustomValEquals",
-    "native": false
+    "native": true
    },
    {
     "id": 25,
     "name": "onCustomValLesser",
-    "native": false
+    "native": true
    },
    {
     "id": 26,
     "name": "onGameStart",
-    "native": false
+    "native": true
    },
    {
     "id": 27,
     "name": "onObjectiveSwitch",
-    "native": false
+    "native": true
    },
    {
     "id": 28,
     "name": "onPlayerDamage",
-    "native": false
+    "native": true
    },
    {
     "id": 29,
     "name": "onAIHalfHealth",
-    "native": false
+    "native": true
    },
    {
     "id": 30,
     "name": "onCustomValGreater",
-    "native": false
+    "native": true
    },
    {
     "id": 31,
     "name": "onAIKillPlayer",
-    "native": false
+    "native": true
    }
   ],
   "actions": [
@@ -6264,7 +6264,7 @@
    {
     "id": 14,
     "name": "Broadcast Sound",
-    "value": "number",
+    "value": "sound",
     "native": true
    },
    {
@@ -6373,240 +6373,258 @@
     "id": 32,
     "name": "Reward KR",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 33,
     "name": "Clear Player Checkpoints",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 34,
     "name": "Send Sound",
-    "value": "number",
-    "native": false
+    "value": "sound",
+    "native": true
    },
    {
     "id": 35,
     "name": "Explosion",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 36,
     "name": "Spawn AI",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 37,
     "name": "Set Player Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 38,
     "name": "Inc/Dec Player Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 39,
     "name": "Play Animation",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 40,
     "name": "Teleport Player to Path Node",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 41,
     "name": "Teleport Destructible Interface to Path Node",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 42,
     "name": "Reset Destructible Interface Position",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 43,
     "name": "Set Interface Trigger Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 44,
     "name": "Inc/Dec Interface Trigger Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 45,
     "name": "Set Trigger Value (Self)",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 46,
     "name": "Inc/Dec Trigger Value (Self)",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 47,
     "name": "Change Class",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 48,
     "name": "Set Interface Deposit Box Amount",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 49,
     "name": "Save Data",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 50,
     "name": "Change Primary Weapon",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 51,
     "name": "Change Secondary Weapon",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 52,
     "name": "Set Global Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 53,
     "name": "Change Global Value",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 54,
     "name": "Stop Sound",
-    "value": "number",
-    "native": false
+    "value": "sound",
+    "native": true
    },
    {
     "id": 55,
     "name": "Show/Hide GUI Element (All)",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 56,
     "name": "Show/Hide GUI Element (Player)",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 57,
     "name": "Load Data",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 58,
     "name": "Custom Action",
     "value": "text",
-    "native": false
+    "native": true
    },
    {
     "id": 59,
     "name": "Reward Junk",
     "value": "text",
-    "native": false
+    "native": true
    },
    {
     "id": 60,
     "name": "Reward Skin",
     "value": "text",
-    "native": false
+    "native": true
    },
    {
     "id": 61,
     "name": "Change Ambient Sound",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 62,
     "name": "Give Challenge Progress",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 63,
     "name": "Play Animation (Self)",
     "value": "text",
-    "native": false
+    "native": true
    },
    {
     "id": 64,
     "name": "Give Effect",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 65,
     "name": "Give Challenge Progress (All)",
     "value": "both",
-    "native": false
+    "native": true
    },
    {
     "id": 66,
     "name": "Give Random Effect",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 67,
     "name": "Play Video Ad",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 68,
     "name": "Drop Powerup",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 69,
     "name": "Spawn Bot at Node",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 70,
     "name": "Force AI Target",
     "value": "number",
-    "native": false
+    "native": true
    },
    {
     "id": 71,
     "name": "Mode Specific",
     "value": "number",
+    "native": true
+   },
+   {
+    "id": 72,
+    "name": "Spawn Entity",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 73,
+    "name": "Despawn Entity",
+    "value": "text",
+    "native": false
+   },
+   {
+    "id": 74,
+    "name": "Set Entity Value",
+    "value": "both",
     "native": false
    }
   ],
@@ -6658,6 +6676,10 @@
    {
     "id": 11,
     "name": "Player Inventory Value"
+   },
+   {
+    "id": 12,
+    "name": "Custom Action"
    }
   ],
   "emitter_sounds": [

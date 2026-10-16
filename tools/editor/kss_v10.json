@@ -1,0 +1,1112 @@
+{
+ "source": "Krunker v10.0.2 editor bundle E10:11800-12481 (autoComplete, _3211), E10:12482-12624 (sharedAutoComplete, _3212), E10:11795-11799 (_3210 templates); webcracked, identifiers renamed (~/.cache/kn-v10/webcrack/editor/renamed.js). Read-only extraction, no v10 code run.",
+ "autoComplete": [
+  {
+   "text": "GAME.ADMIN.ban(playerID)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.ADMIN.kick(playerID)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.ADS.playVideo()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.AI.list()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.AI.removeBySid(sid)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.AI.spawn(aid, name, x, y, z, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.ANIM.playClip(object, clipID, reps)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.ANIM.stopClip(object, clipID)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.attach()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.detach()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.envZone",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.fov(val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.getObj()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.CAMERA.lookAt(x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.move(x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.position.x",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.position.y",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.position.z",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.rotate(x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CAMERA.rotation.x",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.rotation.y",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.rotation.z",
+   "type": "num"
+  },
+  {
+   "text": "GAME.CAMERA.shake(amnt)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CHAT.broadcast(message, color)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CHAT.send(playerID, message, color)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CONFIG.getClasses()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CONFIG.getHost()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.CONFIG.getMatch()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.CONFIG.getSettings()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.CONFIG.getWeapons()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.COOKIES.has(key)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.COOKIES.load(key)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.COOKIES.removeByKey(key)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.COOKIES.save(key, val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.DEFAULT.disable3D()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.DEFAULT.disablePlayerBehaviour()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.DEFAULT.disablePrediction()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.DEFAULT.disableServerSync()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.ENTITIES.clone(entity)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.ENTITIES.despawn(id)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.ENTITIES.findById(id)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.ENTITIES.findByTag(tag)",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.ENTITIES.list()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.ENTITIES.spawn(archetype, x, y, z, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.INPUTS.disableDefault()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.INPUTS.enableDefault()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.INPUTS.freeMouse()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.INPUTS.keyDown(keyCode)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.INPUTS.lockMouse()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.INPUTS.mouseMovement()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.INPUTS.mousePos()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.INPUTS.mousePosOverlay()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.INPUTS.unlockMouse()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.LIVE_OBJECTS.addCube(x, y, z, w, h, l, s, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.MODS.load(url)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.MODS.reset()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.NETWORK.broadcast(id, data)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.NETWORK.send(id, data, playerID)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.NFT.hasWallet(playerID)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.NFT.ownedAssets(playerID, collection, callb)",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.OBJECTS.getByInterface(id)",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.OBJECTS.getPathNodes()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.OBJECTS.list()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.OVERLAY.arc(x, y, radius, startAngle, endAngle, counterClockwise)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.arcTo(x1, y1, x2, y2, radius)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.beginPath()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.clear()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.closePath()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.drawCircle(x, y, w, h, r, color, opac, center)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.drawImage(aid, x, y, w, h, r, opac)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.drawLine(x1, y1, x2, y2, thickness, color, opac)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.drawRect(x, y, w, h, r, color, opac, center)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.drawText(text, x, y, r, size, align, color, opac, font)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.ellipse(x, y, radiusX, radiusY, rotation, startAngle, endAngle, counterClockwise)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.fill()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.fillStyle(color)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.getSize()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.OVERLAY.globalAlpha(val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.lineDashOffset(offset)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.lineJoin(option)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.lineTo(x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.lineWidth(width)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.measureText(size, text, font)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.OVERLAY.moveTo(x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.offset(x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.quadraticCurveTo(cpx, cpy, x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.restore()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.save()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.scale(scl)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.setTransform(a, b, c, d, e, f)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.stroke()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.strokeRect(x, y, width, height)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.strokeStyle(color)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.strokeText(text, x, y, maxWidth)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.transform(a, b, c, d, e, f)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.OVERLAY.translate(x, y)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.authorizeSpend(player, val, callb, modal)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.charge(player, val, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.getCurrencyBalance(player, currencyName, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.giveCurrency(player, currencyName, val, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.giveKR(player, val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.giveSkin(player, skinId, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.takeCurrency(player, currencyName, val, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PAYMENTS.transact(player, ops, authId, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PLATFORM.isBrowser()",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.PLATFORM.isClient()",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.PLATFORM.isMobile()",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.PLAYERS.disableMeshes()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.PLAYERS.findByID(id)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.PLAYERS.getSelf()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.PLAYERS.list()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.PLAYERS.toggleLOD(val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.RAYCAST.from(x, y, z, xD, yD, zD, dist)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.RAYCAST.fromPlayer(player, dist)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addAsset(aid, x, y, z, scl, colr, data, onLoadCallBack)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addCube(aid, colr, x, y, z, w, h, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addCustom(aid, colr, verts, x, y, z, w, h, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addDirLight(colr, x, y, z, tx, ty, tz, intensity, castShadow)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addLightBar(colr, x, y, z, w, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addLightCone(colr, x, y, z, w, l, h, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addParticles(x, y, z, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addPlane(aid, colr, x, y, z, w, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addPointLight(colr, x, y, z, distance, decay, intensity, castShadow)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addRectLight(colr, x, y, z, w, l, intensity)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addSign(x, y, z, w, l, text, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addSphere(aid, colr, x, y, z, w, h, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addSpotLight(colr, x, y, z, tx, ty, tz, distance, decay, intensity, angle, penumbra, castShadow)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.addSprite(aid, colr, x, y, z, w, h, l, data)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.clear()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.movObj(obj, x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.posToScreen(x, y, z)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SCENE.removeSkyDome()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.rotObj(obj, x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.scaleObj(obj, x, y, z)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.setAmbientLight(color, intensity)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.setFog(colr, distance, near)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.setSkyColor(color)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.setSkyDome(color1, color2, color3, data)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SCENE.setSkyLight(color, intensity, sunAngX, sunAngY, distance)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SETTINGS.get(key, val)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.SETTINGS.list()",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.SETTINGS.set(key, val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.SOUND.play2D(aid, vol, rate, loop)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SOUND.play3D(aid, vol, x, y, z, rate, loop)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.SOUND.stop(aid)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.STORAGE.load(accountName, gameName, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.STORAGE.set(accountName, data, access, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.STORAGE.transact(accountName, data, access, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.STORAGE.update(accountName, data, access, callb)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.TIME.fixedDelta()",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.TIME.freeze()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.TIME.getReadable(time)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.TIME.now()",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.TIME.unfreeze()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.TRIGGERS.execute(id, playerID)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.TRIGGERS.getByInterface(id)",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.TRIGGERS.list()",
+   "type": "obj[] action()"
+  },
+  {
+   "text": "GAME.UI.addDIV(elementId, vis, styl, parentId)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UI.addImage(assetId, elementId, vis, styl, parentId)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UI.getDIVText(id)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UI.getProp(id, prop)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UI.getSize()",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.UI.hideCrosshair()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UI.hideDefault()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UI.moveDIV(oldId, parentId, newId)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UI.removeDIV(id)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UI.updateDIV(id, prop, val)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UI.updateDIVText(id, text)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.URLS.openDiscord()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.URLS.openOpensea()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.URLS.openTwitter()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.URLS.openYoutube()",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UTILS.HEXtoRGB(str)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.UTILS.RGBtoHEX(r, g, b)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.anglDst(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.copyToClipboard(txt)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.UTILS.getDir2D(x, y, x2, y2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.getDir3D(x, y, z, x2, y2, z2)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.UTILS.getDist2D(x1, y1, x2, y2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.getDist3D(x1, y1, z1, x2, y2, z2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.hexFromHue(num)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.invertHex(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.math.E",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.PI",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.PI2",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.abs(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.acos(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.acosh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.asin(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.asinh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atan(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atan2(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atanh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.calcPerc(num, perc)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.ceil(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.cos(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.cosh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.exp(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.floor(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.hypot(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.lerp(x, y, z)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.log(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.max(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.min(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.pow(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.round(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.roundDecimal(num, places)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.roundToNearest(num, near)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sin(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sinh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sqrt(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.tan(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.tanh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.toDeg(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.toRad(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.trunc(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.randFloat(min, max)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.randInt(min, max)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.replaceText(txt, segm, wit)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.textContains(txt, search)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.UTILS.toLower(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.toUpper(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.truncateTxt(str, ln, noDot, start)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.changeGame(name, options)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.log(...args)",
+   "type": "action()"
+  },
+  {
+   "text": "GAME.setTitle(title)",
+   "type": "action()"
+  }
+ ],
+ "sharedAutoComplete": [
+  {
+   "text": "GAME.UTILS.HEXtoRGB(str)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.UTILS.RGBtoHEX(r, g, b)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.anglDst(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.getDir2D(x, y, x2, y2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.getDir3D(x, y, z, x2, y2, z2)",
+   "type": "obj action()"
+  },
+  {
+   "text": "GAME.UTILS.getDist2D(x1, y1, x2, y2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.getDist3D(x1, y1, z1, x2, y2, z2)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.hexFromHue(num)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.invertHex(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.math.E",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.PI",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.PI2",
+   "type": "num"
+  },
+  {
+   "text": "GAME.UTILS.math.abs(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.acos(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.acosh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.asin(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.asinh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atan(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atan2(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.atanh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.calcPerc(num, perc)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.ceil(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.cos(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.cosh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.exp(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.floor(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.hypot(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.lerp(x, y, z)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.log(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.max(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.min(...args)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.pow(x, y)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.round(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.roundDecimal(num, places)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.roundToNearest(num, near)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sin(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sinh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.sqrt(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.tan(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.tanh(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.toDeg(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.toRad(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.math.trunc(x)",
+   "type": "num action()"
+  },
+  {
+   "text": "GAME.UTILS.replaceText(txt, segm, wit)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.textContains(txt, search)",
+   "type": "bool action()"
+  },
+  {
+   "text": "GAME.UTILS.toLower(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.toUpper(str)",
+   "type": "str action()"
+  },
+  {
+   "text": "GAME.UTILS.truncateTxt(str, ln, noDot, start)",
+   "type": "str action()"
+  }
+ ],
+ "templates": {
+  "client": "# Client Script runs only on the client\n# KrunkScript Copyright (C) FRVR Limited\n# \n# Add custom actions here\n\n# Runs when the game starts\npublic action start() {\n\n}\n\n# Runs every game tick\npublic action update(num delta) {\n\n}\n\n# Add rendering logic in here\npublic action render(num delta) {\n\n}\n\n# Player spawns in\npublic action onPlayerSpawn(str id) {\n\n}\n\n# Player died\npublic action onPlayerDeath(str id, str killerID) {\n\n}\n\n# Player update\npublic action onPlayerUpdate(str id, num delta, obj inputs) {\n\n}\n\n# User pressed a key\npublic action onKeyPress(str key, num code) {\n\n}\n\n# User released a key\npublic action onKeyUp(str key, num code) {\n\n}\n\n# User held a key\npublic action onKeyHeld(str key, num code) {\n\n}\n\n# User pressed a button on a controller\npublic action onControllerPress(str key, num code) {\n\n}\n\n# User released a button on a controller\npublic action onControllerUp(str key, num code) {\n\n}\n\n# User held a button on a controller\npublic action onControllerHeld(str key, num code) {\n\n}\n\n# User clicked on screen\npublic action onMouseClick(num button, num x, num y) {\n\n}\n\n# User released clicked on screen\npublic action onMouseUp(num button, num x, num y) {\n\n}\n\n# User scrolled on screen\npublic action onMouseScroll(num dir) {\n\n}\n\n# User clicked a DIV (ID)\npublic action onDIVClicked(str id) {\n\n}\n\n# Client receives network message\npublic action onNetworkMessage(str id, obj data) {\n\n}\n\n# An entity appeared (decorate its visuals here)\npublic action onEntitySpawn(str id, str archetype) {\n\n}\n\n# An entity was removed\npublic action onEntityRemoved(str id) {\n\n}\n\n# An entity emitted an event (play FX here)\npublic action onEntityEvent(str id, str name, num a, num b) {\n\n}",
+  "server": "# Server Script runs only on Hosted server & not in test mode\n# KrunkScript Copyright (C) FRVR Limited\n# \n# Add custom actions here\n\n# Runs when the game starts\npublic action start() {\n\n}\n\n# Runs every game tick\npublic action update(num delta) {\n\n}\n\n# Player spawns in\npublic action onPlayerSpawn(str id) {\n\n}\n\n# Player died\npublic action onPlayerDeath(str id, str killerID) {\n\n}\n\n# Player got damaged\npublic action onPlayerDamage(str id, str doerID, num amount) {\n\n}\n\n# Player update\npublic action onPlayerUpdate(str id, num delta, obj inputs) {\n\n}\n\n# Called from Custom Trigger Action\npublic action onCustomTrigger(str playerID, str customParam, num value) {\n\n}\n\n# Should trigger a trigger? Return true or false\npublic bool action shouldTrigger(str playerID, str triggerID, str customParam) {\n    return true;\n}\n\n# Server receives network message\npublic action onNetworkMessage(str id, obj data, str playerID) {\n\n}\n\n# Server receives chat message\npublic action onChatMessage(str msg, str playerID) {\n\n}\n\n# When a player leaves the server\npublic action onPlayerLeave(str playerID) {\n\n}\n\n# Runs when the round ends\npublic action onGameEnd() {\n\n}\n\n# When a player finished a video\npublic action onAdFinished(str playerID, bool success) {\n\n}\n\n# Runs when the server closes\npublic action onServerClosed() {\n\n}\n\n# When a deposit box is changed\npublic action onDepositBoxChange(str objectID, str playerID, num amount, num finalAmount) {\n\n}\n\n# An entity spawned\npublic action onEntitySpawn(str id, str archetype) {\n\n}\n\n# An entity got damaged\npublic action onEntityDamage(str id, str doerID, num amount) {\n\n}\n\n# An entity was destroyed\npublic action onEntityDestroyed(str id, str doerID) {\n\n}\n\n# A player attached to an entity\npublic action onEntityAttach(str id, str playerID) {\n\n}\n\n# A player detached from an entity (interact, death, disconnect or despawn)\npublic action onEntityDetach(str id, str playerID) {\n\n}\n\n# An entity emitted an event from its shared simulation\npublic action onEntityEvent(str id, str name, num a, num b) {\n\n}",
+  "shared": "# Shared Script runs on both the client & the server\n# KrunkScript Copyright (C) FRVR Limited\n# \n# Only GAME.UTILS & the given context are available in here\n# Keep it deterministic: same inputs must give the same result on both sides\n\n# Entity spawned, return its starting state\npublic obj action onEntityInit(str id, str archetype, obj spawn) {\n    obj state = {};\n    return state;\n}\n\n# Move the entity, return its new state\npublic obj action simulateEntity(str id, str archetype, obj state, obj ctx, num delta) {\n    return state;\n}"
+ }
+}

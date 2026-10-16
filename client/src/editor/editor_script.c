@@ -20,6 +20,9 @@
 //   switch / window close, so an export never misses edits; "Script Saved" still shows on those.
 // - The def rule's "(" counts for auto-indent and show-hint's alias rewrite only touches the
 //   entries it matched (editor_script_lang.c).
+// - The Shared tab (v10.0.2's scripting.html: client, server, shared; E10:15045-15075) is kept
+//   and checked as KS_SIDE_SHARED (GAME.UTILS and the entity hooks only). Nothing runs it yet:
+//   the entity runtime is missing, so Test play validates it and leaves it out of the game.
 #include "editor_internal.h"
 #include "editor_model.h"
 #include "editor_script_lang.h"
@@ -55,21 +58,22 @@ static const uint32_t k_style_color[EKS__COUNT] = {
     0xc3e88dffu, // string
 };
 
+#define SW_SIDES 3              // client, server, shared (the tabs, KE.currentKey 0..2)
 #define SW_MAX_DIAGS 17
 #define SW_HINT_ROWS_EM 288.0f // .CodeMirror-hints max-height 20em at 90% of 16px
 
 typedef struct {
     int open;
-    int tab;                    // KE.currentKey: 0 client, 1 server
-    HtmlElem win, ta[2], tab_el[2], icon[2], hints, errors, compile;
-    char *seen[2];              // the value the window last processed (input diffs)
-    int seen_a[2], seen_b[2];   // its selection
-    int errored[2], validated[2]; // KE.erroredScripts / validatedScripts
-    int changed[2];             // edited since the last Validate: the grey circle (iconC)
-    int pending[2];             // edited, not yet kept in the project
+    int tab;                    // KE.currentKey: 0 client, 1 server, 2 shared
+    HtmlElem win, ta[SW_SIDES], tab_el[SW_SIDES], icon[SW_SIDES], hints, errors, compile;
+    char *seen[SW_SIDES];       // the value the window last processed (input diffs)
+    int seen_a[SW_SIDES], seen_b[SW_SIDES]; // its selection
+    int errored[SW_SIDES], validated[SW_SIDES]; // KE.erroredScripts / validatedScripts
+    int changed[SW_SIDES];      // edited since the last Validate: the grey circle (iconC)
+    int pending[SW_SIDES];      // edited, not yet kept in the project
     double store_at;            // when to keep + check them (g_ed.now)
-    EdKsDiag diags[2][SW_MAX_DIAGS];
-    int ndiags[2];
+    EdKsDiag diags[SW_SIDES][SW_MAX_DIAGS];
+    int ndiags[SW_SIDES];
     EdKsHint *hint;             // the open hint list (show-hint)
     int nhint, hint_sel, hint_top, hint_from, hint_open;
     int poll_a, poll_b;         // cursorActivity poll
@@ -78,14 +82,22 @@ typedef struct {
     int font;                   // settings.scriptFont as applied
     int compile_timer, saved_timer;
     int in_edit;                // our own replaces (the web fires input for them)
-    int open_digits[2];         // line-number digits when the window opened (view_for)
-    int view_digits[2];         // the code view as applied: digits, font
-    int view_font[2];
+    int open_digits[SW_SIDES];  // line-number digits when the window opened (view_for)
+    int view_digits[SW_SIDES];  // the code view as applied: digits, font
+    int view_font[SW_SIDES];
 } ScriptWin;
 
 static ScriptWin g_sw;
 
-static const char *side_name(const int side) { return side ? "server" : "client"; }
+static const char *side_name(const int side) { return side == 2 ? "shared" : side ? "server" : "client"; }
+
+// the tab labels (scripting.html's #tabHolder text)
+static const char *side_label(const int side) { return side == 2 ? "Shared" : side ? "Server" : "Client"; }
+
+static int any_pending(void) {
+    for (int i = 0; i < SW_SIDES; i++) if (g_sw.pending[i]) return 1;
+    return 0;
+}
 
 static char *get_value(const HtmlElem e) {
     const int n = html_dom_get_value(e, NULL, 0);
@@ -124,6 +136,8 @@ static void build(void) {
             "<div style='float:left;margin-top:2px'>Client</div></div>"
             "<div id='server' class='tab' onclick='KE.kn.scriptTab(1)'><span id='tabIcon_server' class='tabIcon'></span>"
             "<div style='float:left;margin-top:2px'>Server</div></div>"
+            "<div id='shared' class='tab' onclick='KE.kn.scriptTab(2)'><span id='tabIcon_shared' class='tabIcon'></span>"
+            "<div style='float:left;margin-top:2px'>Shared</div></div>"
             "<div id='knScriptClose' class='material-icons' onclick='KE.kn.scriptClose()'>close</div>"
             "<div id='label'><a style='color: #fff'>KRUNK</a>SCRIPT</div>"
             "</div>"
@@ -131,6 +145,8 @@ static void build(void) {
             "onkeydown='return KE.kn.scriptKey(0)' onblur='KE.kn.scriptBlur(0)'></textarea>"
             "<textarea id='scriptArea_server' class='knCode' spellcheck='false' wrap='off' style='display:none' oninput='KE.kn.scriptInput(1)' "
             "onkeydown='return KE.kn.scriptKey(1)' onblur='KE.kn.scriptBlur(1)'></textarea>"
+            "<textarea id='scriptArea_shared' class='knCode' spellcheck='false' wrap='off' style='display:none' oninput='KE.kn.scriptInput(2)' "
+            "onkeydown='return KE.kn.scriptKey(2)' onblur='KE.kn.scriptBlur(2)'></textarea>"
             "<ul id='knScriptHints' class='CodeMirror-hints' style='display:none'></ul>"
             "<div id='knScriptErrors' style='display:none'></div>"
             "<div id='compile' onclick='KE.updateScript()'>Validate Script</div>"
@@ -140,10 +156,13 @@ static void build(void) {
     g_sw.win = w;
     g_sw.ta[0] = html_dom_by_id("scriptArea_client");
     g_sw.ta[1] = html_dom_by_id("scriptArea_server");
+    g_sw.ta[2] = html_dom_by_id("scriptArea_shared");
     g_sw.tab_el[0] = html_dom_query(w, "#client");
     g_sw.tab_el[1] = html_dom_query(w, "#server");
+    g_sw.tab_el[2] = html_dom_query(w, "#shared");
     g_sw.icon[0] = html_dom_by_id("tabIcon_client");
     g_sw.icon[1] = html_dom_by_id("tabIcon_server");
+    g_sw.icon[2] = html_dom_by_id("tabIcon_shared");
     g_sw.hints = html_dom_by_id("knScriptHints");
     g_sw.errors = html_dom_by_id("knScriptErrors");
     g_sw.compile = html_dom_query(w, "#compile");
@@ -198,7 +217,7 @@ static void apply_font(void) {
     g_sw.font = px;
     char v[32];
     snprintf(v, sizeof(v), "%dpx", px);
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SW_SIDES; i++) {
         html_dom_set_style(g_sw.ta[i], "font-size", v);
         char *t = get_value(g_sw.ta[i]);
         view_for(i, count_lines(t));
@@ -377,7 +396,7 @@ static void keep(const int side) {
 }
 
 static void flush_pending(void) {
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SW_SIDES; i++) {
         if (g_sw.pending[i]) {
             keep(i);
             run_check(i);
@@ -395,7 +414,7 @@ static void set_seen(const int side) {
 static void load_project(void) {
     g_sw.proj = g_ed.proj;
     g_sw.proj_rev = g_ed.proj ? g_ed.proj->revision : 0;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SW_SIDES; i++) {
         const char *code = g_ed.proj ? ed_ks_script_text(g_ed.proj->scripts, i) : ed_model_script_template(side_name(i));
         g_sw.in_edit++;
         html_dom_set_value(g_sw.ta[i], code);
@@ -438,7 +457,7 @@ static void focus_keep(int side);
 
 static void show_tab(const int side) {
     g_sw.tab = side;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SW_SIDES; i++) {
         html_dom_set_class(g_sw.tab_el[i], "selected", i == side);
         html_dom_set_display(g_sw.ta[i], i == side ? "" : "none");
     }
@@ -493,7 +512,7 @@ static void update_script(const int save_only) {
 
 // changeTab: the old tab is saved (updateTab -> updateScript(true)), the other one shown
 static void change_tab(const int side) {
-    if (side == g_sw.tab || side < 0 || side > 1) return;
+    if (side == g_sw.tab || side < 0 || side >= SW_SIDES) return;
     hint_close();
     update_script(1);
     show_tab(side);
@@ -557,7 +576,9 @@ static void hint_update(const int side) {
     if (!g_sw.hint) g_sw.hint = malloc(sizeof(EdKsHint) * ED_KS_HINT_MAX);
     const cJSON *kss = editor_data_get("kss");
     int from = 0;
-    const int n = g_sw.hint ? ed_ks_hints(v + ls, (size_t) (le - ls), b - ls, cJSON_GetObjectItemCaseSensitive(kss, "autoComplete"),
+    // v10's hint lists: the shared tab has its own (E10:15068-15070)
+    const cJSON *entries = cJSON_GetObjectItemCaseSensitive(kss, side == 2 ? "sharedAutoComplete" : "autoComplete");
+    const int n = g_sw.hint ? ed_ks_hints(v + ls, (size_t) (le - ls), b - ls, entries,
                                           cJSON_GetObjectItemCaseSensitive(kss, "alias"), g_sw.hint, ED_KS_HINT_MAX, &from)
                               : 0;
     if (n <= 0) {
@@ -848,15 +869,21 @@ static int h_update(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n)
     return 1;
 }
 
+// the tab index a handler got (the page passes 0..2)
+static int arg_side(const HtmlArg *a, const int n) {
+    const int side = arg_num(a, n, 0, 0);
+    return side < 0 || side >= SW_SIDES ? 0 : side;
+}
+
 static int h_input(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
     (void) u; (void) ev;
-    on_input(arg_num(a, n, 0, 0) ? 1 : 0);
+    on_input(arg_side(a, n));
     return 1;
 }
 
 static int h_key(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
     (void) u;
-    return on_key(arg_num(a, n, 0, 0) ? 1 : 0, ev);
+    return on_key(arg_side(a, n), ev);
 }
 
 static int h_blur(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
@@ -921,7 +948,7 @@ void editor_script_popup(void) {
     load_project();
     g_sw.tab = -1;
     show_tab(0); // KE.currentKey = "client"
-    for (int i = 0; i < 2; i++) update_tab_icons(i);
+    for (int i = 0; i < SW_SIDES; i++) update_tab_icons(i);
     set_compile("Validate Script", NULL);
     html_dom_set_display(g_sw.win, "");
     focus_keep(0);
@@ -938,8 +965,7 @@ void ed_script_close(void) {
     update_script(1);
     flush_pending();
     g_sw.open = 0;
-    html_dom_blur(g_sw.ta[0]);
-    html_dom_blur(g_sw.ta[1]);
+    for (int i = 0; i < SW_SIDES; i++) html_dom_blur(g_sw.ta[i]);
     html_dom_set_display(g_sw.win, "none");
     if (g_sw.compile_timer) html_timer_cancel(g_sw.compile_timer);
     g_sw.compile_timer = 0;
@@ -958,7 +984,9 @@ int ed_script_escape(void) {
 
 int ed_script_focused(void) {
     const HtmlElem f = html_dom_active_element();
-    return g_sw.open && f && (f == g_sw.ta[0] || f == g_sw.ta[1]);
+    if (!g_sw.open || !f) return 0;
+    for (int i = 0; i < SW_SIDES; i++) if (f == g_sw.ta[i]) return 1;
+    return 0;
 }
 
 void ed_script_tick(void) {
@@ -971,11 +999,11 @@ void ed_script_tick(void) {
         memset(g_sw.validated, 0, sizeof(g_sw.validated));
         memset(g_sw.errored, 0, sizeof(g_sw.errored));
         memset(g_sw.changed, 0, sizeof(g_sw.changed));
-        for (int i = 0; i < 2; i++) update_tab_icons(i);
-    } else if (g_sw.proj && g_sw.proj->revision != g_sw.proj_rev && !g_sw.pending[0] && !g_sw.pending[1]) {
+        for (int i = 0; i < SW_SIDES; i++) update_tab_icons(i);
+    } else if (g_sw.proj && g_sw.proj->revision != g_sw.proj_rev && !any_pending()) {
         // something else changed the map (undo, import, the bus): reload a script that differs
         g_sw.proj_rev = g_sw.proj->revision;
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < SW_SIDES; i++) {
             char *v = get_value(g_sw.ta[i]);
             const char *code = ed_ks_script_text(g_sw.proj->scripts, i);
             if (v && strcmp(v, code)) {
@@ -991,7 +1019,7 @@ void ed_script_tick(void) {
             free(v);
         }
     }
-    if ((g_sw.pending[0] || g_sw.pending[1]) && g_ed.now >= g_sw.store_at) flush_pending();
+    if (any_pending() && g_ed.now >= g_sw.store_at) flush_pending();
     apply_font();
     // cursorActivity: the hint and the bracket marks follow the caret
     const int side = g_sw.tab;
@@ -1008,7 +1036,7 @@ void ed_script_tick(void) {
 }
 
 void ed_script_reset(void) {
-    for (int i = 0; i < 2; i++) free(g_sw.seen[i]);
+    for (int i = 0; i < SW_SIDES; i++) free(g_sw.seen[i]);
     free(g_sw.hint);
     if (g_sw.compile_timer) html_timer_cancel(g_sw.compile_timer);
     if (g_sw.saved_timer) html_timer_cancel(g_sw.saved_timer);
@@ -1019,18 +1047,16 @@ void ed_script_reset(void) {
 // test play (Editor.testMap, E:2183-2215): the server script never runs in Test; the client
 // script is compiled first and an error aborts (io_ksT alert). Host keeps both.
 
-int ed_script_prepare_test(cJSON *map, const int host) {
-    if (g_sw.open) flush_pending();
-    if (host || !map) return 1;
-    cJSON *scripts = cJSON_GetObjectItemCaseSensitive(map, "scripts");
-    const char *client = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, "client"));
-    if (!client || !client[0]) {
-        cJSON_DeleteItemFromObjectCaseSensitive(map, "scripts"); // delete v9140.scripts
-        return 1;
-    }
-    cJSON_DeleteItemFromObjectCaseSensitive(scripts, "server");
+static const char *side_key_name(const int side) { return side == 2 ? "shared" : "client"; }
+
+// one script of a test play: compiled as the game would (side 0 client or 2 shared; the server
+// side never runs in Test). An error opens the window on its tab; 0 = the test does not start.
+static int prepare_test_side(const cJSON *scripts, const int side) {
+    const char *code = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, side_key_name(side)));
+    if (!code || !code[0]) return 1;
+    const char *label = side == 2 ? "Shared Script" : "Client Script";
     size_t len = 0;
-    char *src = ks_decode_script(client, strlen(client), &len);
+    char *src = ks_decode_script(code, strlen(code), &len);
     if (!src) return 1;
     KsDiag err;
     memset(&err, 0, sizeof(err));
@@ -1043,7 +1069,7 @@ int ed_script_prepare_test(cJSON *map, const int host) {
             char msg[320];
             ks_diag_format(&err, msg, sizeof(msg));
             char line[400];
-            snprintf(line, sizeof(line), "Client Script: %s: %s", KS_COMPILED_JS_MESSAGE, msg);
+            snprintf(line, sizeof(line), "%s: %s: %s", label, KS_COMPILED_JS_MESSAGE, msg);
             editor_message(line);
             return 0;
         }
@@ -1056,11 +1082,11 @@ int ed_script_prepare_test(cJSON *map, const int host) {
         char msg[320];
         ks_diag_format(&err, msg, sizeof(msg));
         char line[400];
-        snprintf(line, sizeof(line), "Client Script (imported from compiled JavaScript): %s", msg);
+        snprintf(line, sizeof(line), "%s (imported from compiled JavaScript): %s", label, msg);
         editor_message(line);
         return 0;
     }
-    KsProgram *prog = ks_compile(src, len, KS_SIDE_CLIENT, &err, NULL, 0, NULL);
+    KsProgram *prog = ks_compile(src, len, (KsSide) side, &err, NULL, 0, NULL);
     free(src);
     if (prog) {
         ks_program_free(prog);
@@ -1069,15 +1095,32 @@ int ed_script_prepare_test(cJSON *map, const int host) {
     char msg[320];
     ks_diag_format(&err, msg, sizeof(msg));
     char line[400];
-    snprintf(line, sizeof(line), "Client Script: %s", msg);
+    snprintf(line, sizeof(line), "%s: %s", label, msg);
     editor_message(line); // io_ksT: alert(error), the test does not start
     if (!g_sw.open) editor_script_popup();
     if (g_sw.open) {
-        if (g_sw.tab != 0) change_tab(0);
-        run_check(0);
+        if (g_sw.tab != side) change_tab(side);
+        run_check(side);
         if (err.line > 0) go_to(err.line, err.col);
     }
     return 0;
+}
+
+int ed_script_prepare_test(cJSON *map, const int host) {
+    if (g_sw.open) flush_pending();
+    if (host || !map) return 1;
+    cJSON *scripts = cJSON_GetObjectItemCaseSensitive(map, "scripts");
+    const char *client = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, "client"));
+    const char *shared = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, "shared"));
+    if ((!client || !client[0]) && (!shared || !shared[0])) {
+        cJSON_DeleteItemFromObjectCaseSensitive(map, "scripts"); // delete v9140.scripts
+        return 1;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(scripts, "server");
+    // v10's testMap sends {client, shared} to ksT (E10:14908-14930): both are checked, neither
+    // is run beyond the client's own game (no runtime for the shared side yet)
+    if (!prepare_test_side(scripts, 0)) return 0;
+    return prepare_test_side(scripts, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,7 +1135,8 @@ void ed_script_command(const char *arg) {
     if (!strcmp(arg, "open")) editor_script_popup();
     else if (!strcmp(arg, "close")) ed_script_close();
     else if (!g_sw.open) return;
-    else if (!strncmp(arg, "tab:", 4)) change_tab(!strcmp(arg + 4, "server") || !strcmp(arg + 4, "1"));
+    else if (!strncmp(arg, "tab:", 4)) change_tab(!strcmp(arg + 4, "shared") || !strcmp(arg + 4, "2") ? 2
+                                                  : !strcmp(arg + 4, "server") || !strcmp(arg + 4, "1") ? 1 : 0);
     else if (!strcmp(arg, "validate")) update_script(0);
     else if (!strcmp(arg, "save")) update_script(1);
     else if (!strncmp(arg, "caret:", 6)) {
@@ -1223,8 +1267,8 @@ int ed_script_dump(const char *path) {
         return 1;
     }
     fputs("H KRUNKSCRIPT\n", f);
-    for (int i = 0; i < 2; i++) {
-        fprintf(f, "T %s%s%s%s%s\n", i ? "Server" : "Client", i == g_sw.tab ? " *" : "", g_sw.errored[i] ? " [E]" : "", g_sw.validated[i] ? " [V]" : "",
+    for (int i = 0; i < SW_SIDES; i++) {
+        fprintf(f, "T %s%s%s%s%s\n", side_label(i), i == g_sw.tab ? " *" : "", g_sw.errored[i] ? " [E]" : "", g_sw.validated[i] ? " [V]" : "",
                 g_sw.changed[i] ? " [C]" : "");
     }
     char t[128] = "";

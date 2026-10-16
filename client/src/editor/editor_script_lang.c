@@ -422,30 +422,31 @@ char *ed_ks_toggle_comment(const char *src, const size_t len, int a, int b, int 
 // ---------------------------------------------------------------------------
 // the script store
 
-static const char *side_key(const int server) { return server ? "server" : "client"; }
+// KE.scripts keys by tab: client, server, shared (v10.0.2's Shared tab)
+static const char *side_key(const int side) { return side == 2 ? "shared" : side ? "server" : "client"; }
 
-const char *ed_ks_script_text(const cJSON *scripts, const int server) {
-    const char *code = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, side_key(server)));
-    return code && code[0] ? code : ed_model_script_template(side_key(server)); // code || templates[key]
+const char *ed_ks_script_text(const cJSON *scripts, const int side) {
+    const char *code = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scripts, side_key(side)));
+    return code && code[0] ? code : ed_model_script_template(side_key(side)); // code || templates[key]
 }
 
-void ed_ks_script_store(cJSON *scripts, const int server, const char *code) {
+void ed_ks_script_store(cJSON *scripts, const int side, const char *code) {
     if (!scripts) return;
     cJSON *v = cJSON_CreateString(code ? code : "");
-    if (cJSON_GetObjectItemCaseSensitive(scripts, side_key(server))) cJSON_ReplaceItemInObjectCaseSensitive(scripts, side_key(server), v);
-    else cJSON_AddItemToObject(scripts, side_key(server), v);
+    if (cJSON_GetObjectItemCaseSensitive(scripts, side_key(side))) cJSON_ReplaceItemInObjectCaseSensitive(scripts, side_key(side), v);
+    else cJSON_AddItemToObject(scripts, side_key(side), v);
 }
 
 // ---------------------------------------------------------------------------
 // diagnostics
 
-int ed_ks_check(const char *code, const int server, EdKsDiag *out, const int max) {
+int ed_ks_check(const char *code, const int side, EdKsDiag *out, const int max) {
     if (max <= 0) return 0;
     KsDiag err, warns[32];
     int nw = 0, n = 0;
     memset(&err, 0, sizeof(err));
     const size_t len = code ? strlen(code) : 0;
-    const int rc = ks_validate(code ? code : "", len, server ? KS_SIDE_SERVER : KS_SIDE_CLIENT, &err, warns, 32, &nw);
+    const int rc = ks_validate(code ? code : "", len, (KsSide) side, &err, warns, 32, &nw); // KsSide: client, server, shared
     if (rc != 0) {
         out[n].line = err.line;
         out[n].col = err.col;

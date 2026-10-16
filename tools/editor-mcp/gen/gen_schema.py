@@ -35,10 +35,13 @@ OUT = os.path.join(os.path.dirname(HERE), "data", "schema.json")
 # v3.1.1 names of renamed prefabs (map.c prefab_names, string "i" values of old maps)
 V3_ALIASES = {33: ["SPECTATE_CAM"], 55: ["BOT"]}
 
-# The native engine (shared/src/map.c, shared/src/triggers.c) implements the v3.1.1 set.
+# The native engine (shared/src/map.c, shared/src/triggers.c) implements the v10.0.2 trigger set
+# minus the entity actions: every event (32, trigger_v7_data.c; the runtime dispatches all of them),
+# actions 0-71 (triggers_v7.h "actions 0-71"); 72-74 (Spawn / Despawn Entity, Set Entity Value) wait
+# for the entity runtime and do nothing (TriggerScriptHooks TODO).
 NATIVE_PREFABS = 60
-NATIVE_EVENTS = 16
-NATIVE_ACTIONS = 32
+NATIVE_EVENTS = 32
+NATIVE_ACTIONS = 72
 V3_EVENT_NAMES = {3: "onEnter", 10: "onInteract"}
 
 # when: which prefabs may carry a property. A prefab qualifies when its name is in
@@ -372,7 +375,8 @@ def read_editor_data():
         rows[m.group(1)] = {"label": m.group(2), "size": [float(m.group(3)), float(m.group(4)), float(m.group(5))],
                             "has_size": int(m.group(6)), "scale": float(m.group(7))}
     text_start = src.index("const char editor_data_text[] =")
-    data = json.loads(c_string_concat(src[text_start:src.index(";", text_start)]))
+    # the literal ends at the ";" on its own line (the JSON itself may hold ";", e.g. the KrunkScript templates)
+    data = json.loads(c_string_concat(src[text_start:src.index("\n;\n", text_start)]))
     return rows, data
 
 
@@ -422,16 +426,20 @@ def main():
     textures = [{"id": i, "name": t["name"], "src": t["src"], "variants": t["vars"], "since": "v3" if i < 17 else "v7"}
                 for i, t in enumerate(dump["textures"])]
 
+    # the trigger tables are v10.0.2's (editor_data: 32 events, 13 conditions, 75 actions, with the
+    # entity actions 72-74 and condition 12 "Custom Action"); the v7 dump lacks them
+    trig = edata.get("triggers") or {}
     events = []
-    for i, n in enumerate(dump["events"]):
-        e = {"id": i, "name": n, "native": i < NATIVE_EVENTS}
+    for i, ev in enumerate(trig.get("events") or [{"name": n} for n in dump["events"]]):
+        e = {"id": i, "name": ev["name"], "native": i < NATIVE_EVENTS}
         if i in V3_EVENT_NAMES: e["v3_name"] = V3_EVENT_NAMES[i]
         events.append(e)
     actions = []
-    for i, a in enumerate(dump["actions"]):
-        kind = "sound" if a["custom"] else ("text" if a["type"] == "Text" else ("both" if a["type"] == "Both" else "number"))
+    for i, a in enumerate(trig.get("actions") or dump["actions"]):
+        kind = "sound" if a.get("custom") else ("text" if a.get("type") == "Text" else ("both" if a.get("type") == "Both" else "number"))
         actions.append({"id": i, "name": a["name"], "value": kind, "native": i < NATIVE_ACTIONS})
-    conditions = [{"id": i, "name": n} for i, n in enumerate(dump["conditions"])]
+    conditions = [{"id": i, "name": c["name"] if isinstance(c, dict) else c}
+                  for i, c in enumerate(trig.get("conditions") or dump["conditions"])]
 
     limits = dict(edata.get("limits", {}))
     limits.update(dump["limits"])

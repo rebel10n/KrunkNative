@@ -423,7 +423,7 @@ static int t_triggers_catalog(Ctx *ctx, const cJSON *args, ToolResult *r) {
     (void) ctx;
     (void) args;
     cJSON *o = cJSON_Duplicate(schema_triggers(), 1);
-    cJSON_AddStringToObject(o, "note", "native = simulated by Krunker Box Office (v3.1.1 set); v7-only events / actions are kept in the map and run on v7 servers");
+    cJSON_AddStringToObject(o, "note", "native = run by Krunker Box Office's trigger runtime (v10.0.2 set); the entity actions (72-74, Spawn / Despawn Entity, Set Entity Value) are kept in the map and do nothing until the entity runtime lands");
     cJSON *keys = cJSON_AddObjectToObject(o, "keys");
     cJSON_AddStringToObject(keys, "te", "event");
     cJSON_AddStringToObject(keys, "tce", "event value (timer s, storage threshold, ...)");

@@ -45,6 +45,8 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "client", "src", "editor", "editor_data.c")
 TEMPLATES_OUT = os.path.join(REPO, "assets", "editor", "templates.json")
 V7_PUBLIC = "/home/user/jails/kru/src/Krunker_v7.1.4/public"
+# KrunkScript autocomplete and templates of Krunker v10.0.2 (E10:11795-12624, see the file's "source")
+KSS_V10 = os.path.join(HERE, "kss_v10.json")
 
 # The v3.1.1 editor flags, bits 0..63 (their positions are kept: code may store the low word).
 FLAGS_V3 = [
@@ -140,6 +142,14 @@ def flag_set(prefab, flag):
 def main():
     data = dump_v7()
     ed = dump_editor_v7()
+    with open(KSS_V10, "r", encoding="utf-8") as fh:
+        kss_v10 = json.load(fh)
+    # v10 replaced the v7 autocomplete (211 client/server entries) with 227 and added the shared
+    # tab's 48 entries and template; the templates' other keys stay v7's
+    kss = dict(ed["kss"])
+    kss["autoComplete"] = kss_v10["autoComplete"]
+    kss["sharedAutoComplete"] = kss_v10["sharedAutoComplete"]
+    kss["templates"] = dict(ed["kss"]["templates"], **kss_v10["templates"])
     prefabs, textures, config = data["prefabs"], data["textures"], data["config"]
 
     v7_flags = set()
@@ -239,7 +249,7 @@ def main():
         "perks": ed["perks"],  # PERK_MACHINE "zp" options (config.zombiePerks)
         "inputTypesGUI": ed["inputTypesGUI"],
         "zoneColors": ed["zoneColors"],
-        "kss": ed["kss"],
+        "kss": kss,
         "defaults": {k: config[k] for k in ("shadowRes", "shadowDst", "lightDistance", "lightIntensity",
                                             "ambIntensity", "sunAngleX", "sunAngleY")},
         # object inspector (WP3): model variant names by prefab id (variant id = index) and the

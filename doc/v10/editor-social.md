@@ -82,7 +82,7 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | triggerActionLimit 8; entityLimit 64, archetypeLimit 32, archetypeObjectLimit 40 | CFG:7866-7871 | 5, none | **done** |
 | botPaths import (a BOT_PATH_NODE per point, `bng/bn/bnn/bnr`) and export (grouped, sorted by `bn`) | E10:17046-17064, 16405-16420, 8038-8043 | dropped | **done** (`editor_model.c`, `editor_serialize_test` v10_checks) |
 | ENTITY `eid/ar/tag/as/sp`, parts `pn/sfz` | E10:7443-7457, 8770-8787 | dropped | **done** |
-| `scripts.shared` | E10:10253 | dropped | **done** (kept and exported; no Shared tab yet) |
+| `scripts.shared` | E10:10253 | dropped | **done** (kept, exported and edited in the Shared tab; the template is omitted on export) |
 | top-level `archetypes` | E10:1951-2023 validation | kept as an unknown map key | **partial**: kept, counted; no editing |
 
 ### 1.5 Entities and archetypes, multiplayer, scripting
@@ -91,8 +91,8 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 |---|---|---|
 | Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **missing** (L; the game-side entity runtime is open too, `doc/v10/map-format.md` §9) |
 | Multiplayer co-editing: `mpHost/mpJoin/...` (21 sent, 27 received) on `editor.krunker.io/ws`, invites `?room=`, chat `#mp-chat`, remote players and outlines, script locks | E10:8945-10250, 20263-20314 | **missing** (needs an editor room relay in kn_brain) |
-| KrunkScript Shared tab (template with `onEntityInit` / `simulateEntity`, 48 shared autocomplete entries), 16 new client/server entries, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11796-12633, 14901-14930 | **missing** (the data round-trips; `shared/src/ks` has no shared scripts) |
-| `scripting.html` / `css/scripting.css` | identical to the recovered v7-era page (P10 scripting.html) | **done** |
+| KrunkScript Shared tab (third tab after Server; template with `onEntityInit` / `simulateEntity`; 48 shared autocomplete entries), 16 new client/server entries (227 in all), client/server templates, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11795-12624, 14901-14930, 15045-15075 | **partial**: the tab, template, hints, Validate (`KS_SIDE_SHARED`: GAME.UTILS and the entity hooks only, `ks_check.c`), the export round trip and Test play's check are **done** (`tools/editor/kss_v10.json`, `gen_editor_data.py`, `script_e2e.py`); the entity runtime that runs shared scripts is **missing**; the 18 v10-only GAME members the checker now accepts are no-ops until their subsystems land (`ks_api.h`) |
+| `scripting.html` / `css/scripting.css` | v10's page has a third tab (`shared`, `scriptArea_shared`) and loads `static/scripting-*.js` (not cached; the window's hint rules are the v7 page's); the markup otherwise matches the recovered v7-era page | **partial**: the Shared tab is in the window (editor_script.c), the page's JS is unverified |
 | Dev bridge `?devbridge=` RPC | E10:10356-11300 | **KN**: `editor_bus_link.c` + `tools/editor-mcp` already cover it |
 | Publish Asset per-map UV channels | E10:20417-20456 | **missing** (S, brain storage) |
 

@@ -188,6 +188,12 @@ static int game_path(Ck *c, KsNode *n) {
     if (p >= 0 && ks_api_entry(p)->kind != KS_API_KIND_NS) return GP_NONE;
     int parent = p == GP_ROOT ? -1 : p;
     int id = ks_api_child(parent, n->u.member.name);
+    if (id >= 0 && c->f->side == KS_SIDE_SHARED) {
+        // v10 shared template: "Only GAME.UTILS & the given context are available in here"
+        int top = id;
+        while (ks_api_entry(top)->parent >= 0) top = ks_api_entry(top)->parent;
+        if (top != KS_API_UTILS) id = -1;
+    }
     if (id < 0) {
         char path[160];
         api_path_text(parent, n->u.member.name, path, sizeof path);

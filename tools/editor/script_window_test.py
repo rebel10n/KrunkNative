@@ -79,6 +79,42 @@ def out(c, name):
     return os.path.join(c.tmp, name)
 
 
+# v10.0.2 also has a Shared tab (after Server; tools/editor/script_e2e.py covers it): every dump
+# state gets its "T Shared" line here.
+# v10.0.2 changed the KrunkScript templates (E10:11795-11799, tools/editor/kss_v10.json): the
+# client one gained the three entity hooks, the server one shouldTrigger, onDepositBoxChange and
+# the entity hooks. v7.1.4's dumps count the template lines ("C client lines=89"); the v10 count
+# is the v7 one with the template's own line count, the only dump line the templates change.
+V7_TEMPLATE_LINES = {"client": 89, "server": 69}
+
+
+def v10_template_lines(side):
+    with open(os.path.join(HERE, "kss_v10.json"), encoding="utf-8") as f:
+        return json.load(f)["templates"][side].count("\n") + 1
+
+
+def v10_dump(want, state):
+    """v7.1.4's dump with the v10 template line count where the shown code is the template."""
+    # v10.0.2's third tab (scripting.html: client, server, shared): not selected in these states
+    want = "".join(l + "\n" + ("T Shared\n" if l.startswith("T Server") else "") for l in want.splitlines())
+    side = "server" if state == "scripting-server" else "client"
+    if state == "scripting-error":
+        return want
+    old = "C %s lines=%d " % (side, V7_TEMPLATE_LINES[side])
+    if state == "scripting-hint":
+        old = "C client lines=%d " % (V7_TEMPLATE_LINES["client"] + 1)  # one line added by the hint test
+        new = "C client lines=%d " % (v10_template_lines("client") + 1)
+    else:
+        new = "C %s lines=%d " % (side, v10_template_lines(side))
+    check(old in want, "v7 template line count in %s: %r" % (state, want))
+    want = want.replace(old, new)
+    if state == "scripting-hint":
+        # the caret is at line 8 of the template: v10's copyright line (line 2) is 16 characters
+        # shorter ("Yendis Entertainment Pty Ltd" -> "FRVR Limited"), so the selection moves with it
+        want = want.replace("S 195 195", "S %d %d" % (195 - 16, 195 - 16))
+    return want
+
+
 @test
 def parity(c):
     bad = os.path.join(c.root, BAD)
@@ -94,7 +130,7 @@ def parity(c):
         check(os.path.exists(ref), "missing reference %s (node tools/editor/v7ref.js %s)" % (ref, state))
         _, log = run_editor(c, script % out(c, state + ".txt"), state)
         got = strip_kn(read(out(c, state + ".txt")))
-        want = read(ref)
+        want = v10_dump(read(ref), state)
         check(got == want, "%s differs from v7.1.4:\n--- v7\n%s--- native\n%s(log tail: %s)" % (state, want, got, log[-300:]))
 
 

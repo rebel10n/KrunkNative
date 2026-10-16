@@ -842,6 +842,11 @@ editor-tools-test: build ## Tools / Prefabs panels, Optimize Faces and Color Mer
 editor-script-test: build ## KrunkScript window e2e (v7 parity dumps, ksc diagnostics, editing, export, test play)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/script_window_test.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
 
+# the KrunkScript window against Krunker v10.0.2: the v10 autocomplete and the checker's v10 members (tools/editor/script_e2e.py)
+.PHONY: editor-script-e2e
+editor-script-e2e: build ## KrunkScript window v10.0.2 parity e2e (v10 autocomplete, v10 API members validate)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/script_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 # its own release build dir: only the kn_editor_mcp target, independent of cmake-build-release
 EDITOR_MCP_BUILD := cmake-build-mcp-release
 editor-mcp-install: ## Install a release kn_editor_mcp to EDITOR_MCP_PREFIX/bin (default ~/.local/bin; schema embedded)

@@ -77,8 +77,9 @@ char ed_ks_closer(char open);                 // ( [ { ' " -> its closer, else 0
 char *ed_ks_toggle_comment(const char *src, size_t len, int a, int b, int *ra, int *rb);
 
 // ---- script store: EditorProject.scripts {"client": code, "server": code} ("" = template)
-const char *ed_ks_script_text(const cJSON *scripts, int server); // the code, or the template when empty
-void ed_ks_script_store(cJSON *scripts, int server, const char *code);
+// side: 0 client, 1 server, 2 shared (the tabs in order)
+const char *ed_ks_script_text(const cJSON *scripts, int side); // the code, or the template when empty
+void ed_ks_script_store(cJSON *scripts, int side, const char *code);
 
 // ---- diagnostics (shared/include/ks.h ks_validate): the first error, then warnings
 typedef struct {
@@ -86,4 +87,4 @@ typedef struct {
     int error;        // 1 error, 0 warning
     char message[256];
 } EdKsDiag;
-int ed_ks_check(const char *code, int server, EdKsDiag *out, int max); // count written (<= max)
+int ed_ks_check(const char *code, int side, EdKsDiag *out, int max); // count written (<= max)

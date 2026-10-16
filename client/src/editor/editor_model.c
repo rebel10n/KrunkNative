@@ -2011,7 +2011,7 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
     static const char *const keys[3] = {"client", "server", "shared"};
     for (int k = 0; k < 3; k++) {
         const cJSON *code = G(st->scripts, keys[k]);
-        const char *tpl = k < 2 ? ed_model_script_template(keys[k]) : NULL;
+        const char *tpl = ed_model_script_template(keys[k]);
         if (!cJSON_IsString(code) || !code->valuestring[0] || (tpl && !strcmp(code->valuestring, tpl))) continue;
         char *b64 = ed_model_b64_encode(code->valuestring);
         if (b64) cJSON_AddStringToObject(scripts, keys[k], b64);
@@ -2337,7 +2337,7 @@ int ed_model_import(const cJSON *doc, EdMapState *st, cJSON **objects_out, const
     }
     const cJSON *scripts = G(map, "scripts");
     if (js_truthy(scripts)) {
-        // + v10's "shared" (E10:10253): kept and exported; the script window has no Shared tab yet
+        // + v10's "shared" (E10:10253): kept and exported; its tab is the window's third
         static const char *const keys[3] = {"client", "server", "shared"};
         for (int k = 0; k < 3; k++) {
             const cJSON *code = G(scripts, keys[k]);

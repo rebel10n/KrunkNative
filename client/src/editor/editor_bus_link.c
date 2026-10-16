@@ -708,11 +708,12 @@ static cJSON *paste_objects(EditorProject *p, const cJSON *objects, const cJSON 
     return res;
 }
 
-// a map's "scripts" ({client, server}: base64 or raw, as an export carries them) -> the
+// a map's "scripts" ({client, server, shared}: base64 or raw, as an export carries them) -> the
 // project's decoded scripts; a missing side is the template ("")
 static void set_scripts(EditorProject *p, const cJSON *v) {
-    for (int k = 0; k < 2; k++) {
-        const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(v, k ? "server" : "client"));
+    static const char *const keys[3] = {"client", "server", "shared"};
+    for (int k = 0; k < 3; k++) {
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(v, keys[k]));
         char *dec = t ? ed_model_b64_decode(t) : NULL;
         ed_ks_script_store(p->scripts, k, dec ? dec : t ? t : "");
         free(dec);
