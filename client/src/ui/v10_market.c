@@ -44,6 +44,7 @@
 #include <ui_logic.h>
 #include <weapons.h>
 #include <v10_ui.h>
+#include <kio_store.h> // krunker.io active: the market's writes are read-only
 #include <app_mode.h>
 #include <cJSON.h>
 #include <ctype.h>
@@ -309,8 +310,8 @@ static int list_min_price(const ViewerSkin *s) {
     return econ_rarity_sell(s->rarity);
 }
 
-static const AccountInfo *acc(void) { return account_get(); }
-static int logged_in(void) { return account_get() != NULL; }
+static const AccountInfo *acc(void) { return active_account(); }
+static int logged_in(void) { return active_account() != NULL; }
 
 static int account_owned(const int skin_index) {
     const AccountInfo *a = acc();
@@ -2716,7 +2717,19 @@ static void open_create_trade(const int id, const char *name) {
     render_modal();
 }
 
+// krunker.io is the active backend: market purchases, listings, quick sells, the Black Market and
+// trades change a real krunker.io account, which this client never does (kio_store.h): the market's
+// error modal says so and nothing is sent. 1 = refused.
+static int kio_refused(const char *what) {
+    if (!kio_store_active()) return 0;
+    printf("[kio-store] read-only: market %s not sent to krunker.io\n", what);
+    M.modal = MODAL_NONE;
+    show_error(kio_store_read_only_text());
+    return 1;
+}
+
 static void trade_action(const char *label, const int id, const int act) {
+    if (kio_refused(label)) return;
     char key[48];
     double v[2] = {id, 1};
     M.actioning = id;
@@ -2732,6 +2745,7 @@ static void trade_action(const char *label, const int id, const int act) {
 }
 
 static void confirm_modal(void) {
+    if (M.modal != MODAL_NONE && M.modal != MODAL_START && kio_refused("action")) return;
     const AccountInfo *a = acc();
     switch (M.modal) {
         case MODAL_PURCHASE: {
@@ -3026,7 +3040,7 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.qs_mode = atoi(arg_s(ev, args, argc, 0));
         render_modal();
     } else if (!strcmp(h, "qsgo")) {
-        if (M.busy) return 1;
+        if (M.busy || kio_refused("quick-sell")) return 1;
         M.busy = 1;
         M.qs_err[0] = 0;
         M.pending = ACT_QS;

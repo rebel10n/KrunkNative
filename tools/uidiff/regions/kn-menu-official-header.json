@@ -14,7 +14,7 @@
         60
       ],
       "kind": "text",
-      "note": "KrunkNative's own baseline: the header's krunker.io account (v10's profile item and tooltip)"
+      "note": "KrunkNative's own baseline: v10's signed-in bar for the active (krunker.io) account"
     }
   ]
 }

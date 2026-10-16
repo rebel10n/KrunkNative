@@ -29,7 +29,8 @@
 #define BODY_MAX (256u * 1024u)
 #define REQUEST_TIMEOUT_S 25.0 // a sign-in step / refresh with no answer by then fails (http_stream waits 180 s)
 #define RANK_VAR 0.03          // config.rankVar (Account.updateLevel: floor(rankVar * sqrt(score)))
-#define TOKEN_WAITERS 4
+#define TOKEN_WAITERS 24 // the joins, plus the windows' API requests waiting on one refresh
+#define API_SLOTS 16
 
 typedef enum {
     REQ_NONE = 0,
@@ -37,6 +38,8 @@ typedef enum {
     REQ_CODE,    // /auth/2fa/challenge/<id> | /auth/code-challenge/<id>
     REQ_PROFILE, // /player/me
     REQ_REFRESH, // <auth>/refresh
+    REQ_RECOVER, // /auth/recover-account
+    REQ_API,     // krunker_account_api: a window's request to krunker.io's services
 } ReqKind;
 
 typedef struct {
@@ -58,6 +61,7 @@ static struct {
     // it is known once a krunker.io game has signed the account in this session (not saved)
     int rp_known;
     double rp;
+    double score, funds; // /player/me (this run only: the menu shows them while it knows them)
     char message[300];
     int message_error;
     unsigned generation;
@@ -68,13 +72,27 @@ static struct {
     char challenge[128];
     char code_kind[8];  // "2fa" | "email"
     int captcha_open;   // our Turnstile request is the one krunker_captcha.h shows
-    Req auth, refresh_req;
+    Req auth, refresh_req, recover_req;
     struct {
         KrunkerAccountTokenFn fn;
         void *user;
     } waiters[TOKEN_WAITERS];
     int waiter_count;
 } A;
+
+// krunker_account_api's requests (Req first: on_done gets the Req back)
+typedef struct {
+    Req r;
+    int used;
+    unsigned id;
+    char method[8];
+    char url[1024];
+    char *body;
+    KrunkerApiFn fn;
+    void *user;
+} ApiReq;
+static ApiReq g_api[API_SLOTS];
+static unsigned g_api_ids;
 
 static void wipe(void *p, size_t n) {
     volatile unsigned char *v = p;
@@ -128,6 +146,18 @@ static void api_url(char *out, const size_t n, const char *path) {
     char base[256];
     endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API, base, sizeof(base));
     snprintf(out, n, "%s%s", base, path);
+}
+
+void krunker_service_url(const KrunkerService svc, const char *path, char *out, const size_t n) {
+    char base[256];
+    switch (svc) {
+        case KRUNKER_SVC_SOCIAL: endpoint("KRUNKNATIVE_KRUNKER_SOCIAL", "krunkerSocial", KRUNKER_ACCOUNT_DEFAULT_SOCIAL, base, sizeof(base)); break;
+        case KRUNKER_SVC_EVENT_BUS: endpoint("KRUNKNATIVE_KRUNKER_EVENT_BUS", "krunkerEventBus", KRUNKER_ACCOUNT_DEFAULT_EVENT_BUS, base, sizeof(base)); break;
+        default: endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API, base, sizeof(base)); break;
+    }
+    // the API client joins base and path with one '/' (v10:27526)
+    while (path && *path == '/') path++;
+    snprintf(out, n, "%s/%s", base, path ? path : "");
 }
 
 static void auth_url(char *out, const size_t n, const char *path) {
@@ -360,6 +390,7 @@ static void forget(void) {
     A.level = 0;
     A.rp_known = 0;
     A.rp = 0;
+    A.score = A.funds = 0;
     A.state = KRUNKER_ACCOUNT_GUEST;
     save();
 }
@@ -396,10 +427,7 @@ static void signed_in(const char *access, const char *refresh) {
     A.state = KRUNKER_ACCOUNT_SIGNED_IN;
     save();
     printf("[kio-account] signed in to krunker.io as %s\n", A.name);
-    char text[200];
-    I18N_F(text, "kn.kio.account.signedIn", "Signed in to krunker.io as {0}: krunker.io servers now see this account.", A.name);
-    set_message(0, "%s", text);
-    ui_notify(text);
+    set_message(0, "%s", ""); // v10: the login modal closes (account set), nothing else is said
     // best effort: the account's own name (the game server's "a" names it too, krunker_account_note_game)
     char url[512];
     api_url(url, sizeof(url), "/player/me");
@@ -473,6 +501,15 @@ static void on_profile(const int status, cJSON *res) {
     const cJSON *score = cJSON_GetObjectItemCaseSensitive(data, "player_score");
     if (cJSON_IsNumber(level)) A.level = level->valueint;
     else if (cJSON_IsNumber(score)) A.level = progression_level(score->valuedouble, RANK_VAR);
+    if (cJSON_IsNumber(score)) A.score = score->valuedouble;
+    const char *funds_keys[] = {"player_funds", "funds", "kr"};
+    for (size_t i = 0; i < sizeof(funds_keys) / sizeof(funds_keys[0]); i++) {
+        const cJSON *f = cJSON_GetObjectItemCaseSensitive(data, funds_keys[i]);
+        if (cJSON_IsNumber(f)) {
+            A.funds = f->valuedouble;
+            break;
+        }
+    }
     save();
     changed();
 }
@@ -514,7 +551,22 @@ static void on_done(void *user, const int status, const char *error) {
             if (!http) fail_sign_in(I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
             else on_auth_answer(http, res);
             break;
+        case REQ_API: {
+            ApiReq *q = (ApiReq *) r;
+            const KrunkerApiFn fn = q->fn;
+            void *u = q->user;
+            free(q->body);
+            q->body = NULL;
+            q->used = 0;
+            q->fn = NULL;
+            if (fn) fn(u, http, res);
+            break;
+        }
         case REQ_PROFILE: on_profile(http, res); break;
+        case REQ_RECOVER: // recoverAccount (v10 _39188): any answer is "sent", a failure "Error"
+            if (http >= 200 && http < 300) set_message(0, "%s", I18N("generic.auth.recoverSuccess", "Email with recovery instructions was sent. Check inbox and spam folder."));
+            else set_message(1, "%s", I18N("generic.error", "Error"));
+            break;
         case REQ_REFRESH: on_refresh(http, res); break;
         default: break;
     }
@@ -589,6 +641,57 @@ int krunker_account_sign_in(const char *login, const char *password) {
     return 1;
 }
 
+// loginEmailCode (v10 _39177, "Send Email Code"): POST /auth/login/email-code {"email"}; krunker.io
+// answers enter_code and mails the code (the code step), or refuses.
+int krunker_account_email_code(const char *email) {
+    load();
+    if (A.state == KRUNKER_ACCOUNT_BUSY) {
+        set_message(1, "%s", I18N("kn.kio.account.busy", "A sign-in is already running."));
+        return 0;
+    }
+    if (!email || !email[0] || strlen(email) >= sizeof(A.login)) {
+        set_message(1, "%s", I18N("generic.auth.fillAllFields", "Please fill in all fields"));
+        return 0;
+    }
+    req_cancel(&A.auth);
+    end_attempt();
+    snprintf(A.login, sizeof(A.login), "%s", email);
+    A.email = 1;
+    char url[512], mail[600], body[700];
+    escape_json(mail, sizeof(mail), email);
+    api_url(url, sizeof(url), "/auth/login/email-code");
+    snprintf(body, sizeof(body), "{\"email\":\"%s\"}", mail);
+    A.state = KRUNKER_ACCOUNT_BUSY;
+    set_message(0, "%s", I18N("generic.wait", "Please wait..."));
+    printf("[kio-account] signing in to krunker.io (email code)\n");
+    if (!req_start(&A.auth, REQ_LOGIN, "POST", url, NULL, body)) {
+        fail_sign_in(I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
+        return 0;
+    }
+    changed();
+    return 1;
+}
+
+// recoverAccount (v10 _39188): POST /auth/recover-account {"email"}; krunker.io mails the player
+// a recovery link. The outcome is krunker_account_message().
+int krunker_account_recover(const char *email) {
+    load();
+    if (!email || !email[0] || strlen(email) >= 256) {
+        set_message(1, "%s", I18N("generic.auth.fillAllFields", "Please fill in all fields"));
+        return 0;
+    }
+    char url[512], mail[600], body[700];
+    escape_json(mail, sizeof(mail), email);
+    api_url(url, sizeof(url), "/auth/recover-account");
+    snprintf(body, sizeof(body), "{\"email\":\"%s\"}", mail);
+    set_message(0, "%s", I18N("generic.wait", "Please wait..."));
+    if (!req_start(&A.recover_req, REQ_RECOVER, "POST", url, NULL, body)) {
+        set_message(1, "%s", I18N("generic.error", "Error"));
+        return 0;
+    }
+    return 1;
+}
+
 int krunker_account_submit_code(const char *code) {
     if (A.state != KRUNKER_ACCOUNT_CODE || !A.challenge[0]) return 0;
     char digits[16];
@@ -636,6 +739,44 @@ void krunker_account_sign_out(void) {
     serve_waiters(NULL);
     if (was) printf("[kio-account] signed out of krunker.io\n");
     set_message(0, "%s", I18N("kn.kio.account.signedOut", "Signed out of krunker.io: krunker.io servers are joined as a guest."));
+}
+
+// ---------------------------------------------------------------- the windows' API requests
+
+static void api_with_token(void *user, const char *token) {
+    const unsigned id = (unsigned) (uintptr_t) user;
+    ApiReq *q = NULL;
+    for (int i = 0; i < API_SLOTS && !q; i++)
+        if (g_api[i].used && g_api[i].id == id) q = &g_api[i];
+    if (!q) return; // cancelled meanwhile (signed out)
+    if (!req_start(&q->r, REQ_API, q->method, q->url, token, q->body)) {
+        const KrunkerApiFn fn = q->fn;
+        void *u = q->user;
+        free(q->body);
+        q->body = NULL;
+        q->used = 0;
+        if (fn) fn(u, 0, NULL);
+    }
+}
+
+int krunker_account_api(const char *method, const KrunkerService svc, const char *path, const char *body, const KrunkerApiFn fn, void *user) {
+    load();
+    ApiReq *q = NULL;
+    for (int i = 0; i < API_SLOTS && !q; i++)
+        if (!g_api[i].used) q = &g_api[i];
+    if (!q || !method || !path) return 0;
+    memset(q, 0, sizeof(*q));
+    q->used = 1;
+    q->id = ++g_api_ids;
+    snprintf(q->method, sizeof(q->method), "%s", method);
+    krunker_service_url(svc, path, q->url, sizeof(q->url));
+    q->body = body ? strdup(body) : NULL;
+    q->fn = fn;
+    q->user = user;
+    // the API client's interceptor: Authorization: Bearer <FRVR's fresh access token>, refreshed
+    // first when it is about to expire; a guest's request goes without (public endpoints)
+    krunker_account_fresh_token(api_with_token, (void *) (uintptr_t) q->id);
+    return 1;
 }
 
 // ---------------------------------------------------------------- the join's token
@@ -725,7 +866,7 @@ void krunker_account_tick(void) {
             fail_sign_in(I18N("kn.kio.account.captchaCancelled", "The security challenge was closed, so you were not signed in."));
     }
     const double now = now_s();
-    Req *reqs[] = {&A.auth, &A.refresh_req};
+    Req *reqs[] = {&A.auth, &A.refresh_req, &A.recover_req};
     for (size_t i = 0; i < sizeof(reqs) / sizeof(reqs[0]); i++) {
         Req *r = reqs[i];
         if (!r->stream || now - r->started < REQUEST_TIMEOUT_S) continue;
@@ -735,6 +876,19 @@ void krunker_account_tick(void) {
         if (kind == REQ_LOGIN || kind == REQ_CODE)
             fail_sign_in(I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
         else if (kind == REQ_REFRESH) serve_waiters(access_left() > 5 ? A.access : NULL);
+        else if (kind == REQ_RECOVER) set_message(1, "%s", I18N("generic.error", "Error"));
+    }
+    for (int i = 0; i < API_SLOTS; i++) {
+        ApiReq *q = &g_api[i];
+        if (!q->used || !q->r.stream || now - q->r.started < REQUEST_TIMEOUT_S) continue;
+        req_cancel(&q->r);
+        printf("[kio-account] API request timed out\n");
+        const KrunkerApiFn fn = q->fn;
+        void *u = q->user;
+        free(q->body);
+        q->body = NULL;
+        q->used = 0;
+        if (fn) fn(u, 0, NULL);
     }
 }
 
@@ -757,6 +911,9 @@ int krunker_account_level(void) {
     load();
     return krunker_account_signed_in() ? A.level : 0;
 }
+
+double krunker_account_score(void) { return krunker_account_signed_in() ? A.score : 0; }
+double krunker_account_funds(void) { return krunker_account_signed_in() ? A.funds : 0; }
 
 const char *krunker_account_message(void) { return A.message; }
 int krunker_account_message_is_error(void) { return A.message_error; }

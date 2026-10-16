@@ -165,7 +165,7 @@ static void fmt_cost(char *out, const size_t n, const double usd) {
     else snprintf(out, n, "$%.2f", usd);
 }
 
-static int signed_in(void) { return account_get() != NULL && account_session_token()[0]; }
+static int signed_in(void) { return active_account() != NULL && account_session_token()[0]; }
 
 static int brain_ready(void) { return backend_enabled(); }
 
@@ -369,7 +369,7 @@ static void health_banner(void) {
 // No account indicator in the panel (the hub shows who is signed in); the sign-in gating stays:
 // a guest gets the sign-in card. This only remembers whom the panel was drawn for.
 static void update_account(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     A.signed_in_seen = acc ? acc->id : 0;
 }
 
@@ -1332,7 +1332,7 @@ static cJSON *system_message(void) {
     }
     if (A.mode != 1 && A.web_on && web_available() && model_has_tools())
         edb_add(&b, "web_search and web_fetch look things up on the web.\n");
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (acc) edb_addf(&b, "The user is signed in as %s.\n", acc->name);
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "system");
@@ -2229,7 +2229,7 @@ void ed_ai_toggle(void) {
 void ed_ai_tick(void) {
     http_stream_poll();
     if (!A.built) return;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if ((acc ? acc->id : 0) != A.signed_in_seen) {
         if (acc && A.banner_kind == 4) set_banner(0, NULL);
         if (!acc && A.open) set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");

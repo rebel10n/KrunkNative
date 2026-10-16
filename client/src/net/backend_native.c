@@ -719,7 +719,7 @@ int backend_social_is_open(void) {
     return open;
 }
 
-int backend_social_send_text(const char *json) {
+int backend_social_send_raw(const char *json) {
     if (!backend_enabled() || !json) return 0;
     backend_social_open();
     WsMsg *m = calloc(1, sizeof(*m));

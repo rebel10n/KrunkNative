@@ -80,7 +80,7 @@ int strike_econ_listen(StrikeEconListener fn, void *user);   // up to 8; 0 when 
 void strike_econ_unlisten(StrikeEconListener fn, void *user);
 
 // ---- engine hooks ---------------------------------------------------------------------------
-void strike_econ_tick(void); // per frame (backend_startup.c): sign-in / sign-out follow account_get()
+void strike_econ_tick(void); // per frame (backend_startup.c): sign-in / sign-out follow active_account()
 // ui_loadout_look() under FLAVOR_STRIKE: what the player wears is Strike's loadout only (Box Office
 // picks never leak in): weapon skins of the primary / secondary weapon ids, melee, hat, back, dye,
 // waist, face, shoe, pet, wrist, charm. Returns 1 when applied (FLAVOR_STRIKE), else 0 (untouched).

@@ -184,6 +184,12 @@ typedef struct {
     // optional: an init's map. Called instead of emitting NET_PACKET_INIT: the transport resolves the map
     // (krunker_map_source.h), holds what follows meanwhile and emits info->init with its own map slot.
     void (*map)(void *user, KrunkerLinkInit *info);
+    // optional: the account-scoped frames, as a JSON array ["name", args...] (the socket thread):
+    // "a" ACCOUNT_RESPONSE (its token argument dropped), "ua" UPDATE_ACCOUNT, "uf" UPDATE_FUNDS, "bpdl"
+    // DATA_LOADED, "bppd" SYNC_BP_PROG, "chg" UPDATE_CHALLENGES, "uchp" UPDATE_CHALLENGES_PROGRESS, "cln"
+    // CLAN_RESPONSE (the Clans window's clanData):
+    // v10 keeps the signed-in account (its KR, skins, stats, battle pass) from these (v10:222148)
+    void (*account_frame)(void *user, const char *json, size_t len);
     void *user;
 } KrunkerLinkIO;
 

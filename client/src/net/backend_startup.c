@@ -119,8 +119,7 @@ void backend_frame(Client *client) {
     servers_ui_tick(client);
     krunker_account_tick();   // the krunker.io account (krunker_account.h): sign-in / refresh answers
     krunker_ranked_tick();    // the Ranked queue socket on krunker.io (krunker_ranked.h): its frames
-    krunker_account_ui_tick(); // its UI: the account modal, the Servers window's account line
-    v10_menu_account_tick();   // the menu header: the krunker.io account in a krunker.io server, else the KrunkNative one
+    v10_menu_account_tick();   // the menu header: the active account (backend_ui.h), at once after a switch
     krunker_net_tick(client); // official krunker.io games: notices, captcha
     v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
     strike_econ_tick(); // Krunker Strike: the signed-in account's Strike wallet / items / loadout (strike_econ.c)

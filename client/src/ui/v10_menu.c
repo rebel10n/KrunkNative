@@ -34,9 +34,10 @@
 //     #menuJNKCount / #menuRPCount: no flying number and no count animation there; v10 shows the
 //     flying number only on the Ranked shop's RP balance (CurrencyDisplay showFlyingNumbers,
 //     v10:113910).
-//   - while the client is in a krunker.io server (krunker_net_active), the header shows the krunker.io
-//     account alone (krunker_account.h): its name and level, or Login; the KrunkNative account's bars,
-//     Inbox and Wallet are hidden, nav and Spectate follow a guest. Leaving the server restores them.
+//   - the header, nav and Spectate follow the ACTIVE account (backend_ui.h active_account()): the
+//     krunker.io account in an official game, the krunk.io one elsewhere, each shown exactly as v10
+//     shows its own (signed-in bar, or the guest's Login / Register). Joining or leaving an official
+//     game switches them at once (v10_menu_account_tick).
 // The login / register modal (loginOrRegister) is v10_login.c.
 #include <v10_menu.h>
 #include <backend.h>
@@ -60,15 +61,15 @@
 
 int  v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // v10_login.c
 void v10_login_account_changed(void);
+void v10_login_tick(void); // the krunker.io sign-in's progress in the login modal
 
 static struct {
     int wired;            // the page's markup has its handlers (v10_menu_dom_init)
     int signed_in;        // the header / nav state last applied (-1 = none yet)
     int level;
     int notif_open;       // the Notifications toggle (webpush-container) is expanded
-    int official;         // the header last followed: 1 = the client is in a krunker.io server (-1 = none yet)
-    unsigned kio_gen;     // krunker_account_generation() the header last followed
-} V = {.signed_in = -1, .official = -1};
+    unsigned active_gen;  // account_active_generation() the header last followed
+} V = {.signed_in = -1};
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
 
@@ -181,74 +182,11 @@ static void comma(char *out, const size_t n, const double value) { // _8986: 123
     out[o] = 0;
 }
 
-// #menuRPCount (v10 updateMenuAccountData: rankedPoints || 0, v10:97365; the header's _8986 comma, v10:146528).
-// A krunker.io account signed in is the active one beside a KrunkNative account (ranked_route.h: krunker.io
-// first): its balance, or "--" while no krunker.io game has sent it. Otherwise KrunkNative's value: 0.
-static void header_rp(char *out, const size_t n) {
-    double points = 0;
-    if (!krunker_account_signed_in()) {
-        snprintf(out, n, "0");
-        return;
-    }
-    if (krunker_account_ranked_points(&points)) comma(out, n, points);
-    else snprintf(out, n, "--");
-}
-
-// The krunker.io account's bar (#knKioHeaderBar), shown in a krunker.io server only. In there the
-// krunker.io account is the one v10 would show, so the bar is v10's own: signed in, the profile item
-// of #signedInHeaderBar (avatar, name, "Lv N" badge; no XP or currencies: krunker.io does not send
-// them), as a guest the "Login or Register" item of #signedOutHeaderBar. The only cue that it is the
-// krunker.io account is v10's hover tooltip (.ph-tooltip); a click opens the krunker.io account modal
-// (kioAccount: Login / Logout there). #knKioHeaderText holds what the bar says (tests).
-static void kio_bar_update(const int shown) {
-    HtmlElem bar = by_id("knKioHeaderBar");
-    if (shown && !bar) {
-        HtmlElem out = by_id("signedOutHeaderBar");
-        if (out) {
-            html_dom_insert_html(out, HTML_INSERT_AFTER_END,
-                "<div id=\"knKioHeaderBar\" class=\"svelte-da3zva\" style=\"display:none\">"
-                "<div class=\"ph-item svelte-da3zva\" id=\"knKioHeaderItem\" onclick=\"playSelect(0.1),kioAccount()\" onmouseenter=\"playTick()\"></div></div>");
-            bar = by_id("knKioHeaderBar");
-        }
-    }
-    if (!bar) return;
-    HtmlElem item = by_id("knKioHeaderItem");
-    if (shown && item) {
-        StrBuf sb = {0};
-        if (krunker_account_signed_in()) {
-            const int level = krunker_account_level();
-            char lv[24];
-            snprintf(lv, sizeof(lv), "Lv %d", level > 0 ? level : 1);
-            html_dom_set_attr(item, "class", "ph-item svelte-da3zva");
-            sb_append(&sb, "<img class=\"ph-avatar svelte-da3zva\" src=\"./img/player_pfp.png\"> <div class=\"ph-info svelte-da3zva\" id=\"knKioHeaderText\">"
-                           "<div class=\"ph-name-row svelte-da3zva\"><span class=\"ph-name svelte-da3zva\">");
-            sb_append_esc(&sb, krunker_account_name()[0] ? krunker_account_name() : I18N("kn.accounts.signedIn", "signed in"));
-            sb_append(&sb, "</span></div> <div class=\"ph-level-row svelte-da3zva\"><span class=\"ph-level-badge svelte-da3zva\">");
-            sb_append_esc(&sb, lv);
-            sb_append(&sb, "</span></div></div> <div class=\"ph-tooltip svelte-da3zva\">");
-            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderTip", "Your krunker.io account: krunker.io servers see it"));
-            sb_append(&sb, "</div>");
-        } else {
-            html_dom_set_attr(item, "class", "ph-item ph-login-wrap svelte-da3zva");
-            sb_append(&sb, "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">person</span> <span class=\"ph-label svelte-da3zva\" id=\"knKioHeaderText\">");
-            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderGuest", "Login or Register"));
-            sb_append(&sb, "</span> <div class=\"ph-tooltip svelte-da3zva\">");
-            sb_append_esc(&sb, I18N("kn.accounts.kioHeaderGuestTip", "Log in with your krunker.io account: krunker.io servers see it"));
-            sb_append(&sb, "</div>");
-        }
-        char *html = sb_finish(&sb);
-        if (html) html_dom_set_html(item, html);
-        free(html);
-    }
-    set_display(bar, shown ? "" : "none");
-}
-
 // #signedInHeaderBar (_52526) for an account, #signedOutHeaderBar (_52519) for a guest. Both live
 // in #playerHeaderEl; v10 swaps the component, here the guest bar stays in the page and the
 // signed-in one is built next to it once.
-// In a krunker.io server the header's account is the krunker.io one (kio_bar_update), the KrunkNative
-// bars are hidden. acc: the KrunkNative account, NULL while in a krunker.io server.
-static void header_update(const AccountInfo *acc, const int official) {
+// acc: the active account (backend_ui.h), NULL = a guest.
+static void header_update(const AccountInfo *acc) {
     HtmlElem out = by_id("signedOutHeaderBar");
     HtmlElem in = by_id("signedInHeaderBar");
     if (acc && !in && out) {
@@ -274,7 +212,7 @@ static void header_update(const AccountInfo *acc, const int official) {
             "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span> <span class=\"ph-label svelte-da3zva\">Wallet</span></div></div>");
         in = by_id("signedInHeaderBar");
     }
-    set_display(out, acc || official ? "none" : "");
+    set_display(out, acc ? "none" : "");
     set_display(in, acc ? "" : "none");
     // the Inbox entry (_52295) of .headerBarRight: signed in only
     HtmlElem inbox = by_id("knV10Inbox");
@@ -288,7 +226,6 @@ static void header_update(const AccountInfo *acc, const int official) {
         inbox = by_id("knV10Inbox");
     }
     set_display(inbox, acc ? "contents" : "none");
-    kio_bar_update(official);
     if (!acc) return;
 
     HtmlElem el;
@@ -301,12 +238,10 @@ static void header_update(const AccountInfo *acc, const int official) {
     if ((el = by_id("knV10XpFill"))) html_dom_set_attr(el, "style", text);
     comma(text, sizeof(text), acc->funds);
     if ((el = by_id("menuKRCount"))) html_dom_set_text(el, text);
-    if ((el = by_id("menuJNKCount"))) html_dom_set_text(el, "0.00"); // _8988(junk.toFixed(2)): KrunkNative accounts have no junk
-    if ((el = by_id("menuRPCount"))) {
-        char rp[32];
-        header_rp(rp, sizeof(rp));
-        html_dom_set_text(el, rp);
-    }
+    snprintf(text, sizeof(text), "%.2f", acc->junk); // _8988(junk.toFixed(2)): Box Office accounts have no junk (0.00)
+    if ((el = by_id("menuJNKCount"))) html_dom_set_text(el, text);
+    comma(text, sizeof(text), acc->ranked_points); // _8986(rankedPoints): the krunker.io account's; Box Office's in the Ranked window
+    if ((el = by_id("menuRPCount"))) html_dom_set_text(el, text);
     if ((el = by_id("mailCount"))) {
         char count[16] = "";
         if (acc->mail_unread > 99) snprintf(count, sizeof(count), "99+");
@@ -334,31 +269,26 @@ static void nav_update(const AccountInfo *acc) {
     set_display(nav_item("menuBtnLeaderboards"), guest ? "none" : "");
 }
 
-// --render-scenario state.officialSession: the menu as in a krunker.io server (its header) without one
-static int g_scenario_official;
+// --render-scenario state.officialSession: the menu as in a krunker.io server without one (its
+// account is the active one then: krunker.io's, backend_ui.h)
 void v10_menu_scenario_official(const int on) {
-    g_scenario_official = on;
+    account_ui_scenario_official(on);
     v10_menu_account_changed();
 }
-int v10_menu_official_session(void) { return krunker_net_active() || g_scenario_official; }
-static int official_session(void) { return v10_menu_official_session(); }
+int v10_menu_official_session(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
 
 void v10_menu_account_changed(void) {
     if (!v10_menu_page()) return;
-    // a krunker.io server: the KrunkNative account is not what the menu shows (its nav, Spectate and
-    // header bars follow a guest; the krunker.io bar shows the krunker.io account)
-    const int official = official_session();
-    const AccountInfo *acc = official ? NULL : account_get();
-    header_update(acc, official);
+    const AccountInfo *acc = active_account(); // krunker.io's in an official game, krunk.io's elsewhere
+    header_update(acc);
     nav_update(acc);
     // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
     // the menu's Spectate switch is for accounts only (main.css hides #spectButtonHolder)
     set_display(by_id("spectButtonHolder"), acc ? "block" : "none");
     V.signed_in = acc != NULL;
     V.level = acc ? acc->level : 0;
-    V.official = official;
-    V.kio_gen = krunker_account_generation();
     ranked_ui_account_changed(); // v10's $account effect on the ranked popup (v10:111598-111600)
+    V.active_gen = account_active_generation();
     v10_login_account_changed(); // a login closes the modal (v10: $account set -> the modal leaves the stack)
 }
 
@@ -840,11 +770,12 @@ void v10_menu_tick(void) {
     buffs_update(menu_ui()->client, 0);
 }
 
-// Per frame (backend_frame): joining or leaving a krunker.io server, or the krunker.io account's
-// sign-in / out, changes the header at once (no need for the menu's own account change).
+// Per frame (backend_frame): the active account changed (an official game joined or left, either
+// backend's sign-in / out): the header follows at once.
 void v10_menu_account_tick(void) {
     if (!V.wired || !v10_menu_page()) return;
-    if (official_session() == V.official && krunker_account_generation() == V.kio_gen) return;
+    v10_login_tick();
+    if (account_active_generation() == V.active_gen) return;
     v10_menu_account_changed();
 }
 

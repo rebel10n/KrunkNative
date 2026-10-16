@@ -29,6 +29,7 @@
 #include <ruleset.h>
 #include <store_spins.h> // v10 store.wheels / itemPools
 #include <v10_wild_offer.h>
+#include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
 #include <time.h>
 
 // data/store.js wheels / a TICKET item's spinWheel (skins.json)
@@ -237,7 +238,7 @@ static void comma(char *out, const size_t n, const double v) {
 }
 
 static void spin_kr(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (!acc) return;
     char kr[32], html[128];
     comma(kr, sizeof(kr), acc->funds);
@@ -247,7 +248,7 @@ static void spin_kr(void) {
 
 // account.skins[ind].cnt (0 for none / guests)
 static int owned_count(const int skin) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const cJSON *skins = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -260,7 +261,7 @@ static int owned_count(const int skin) {
 // the account's spin tickets (acc.skins of type TICKET, v10 windows[13] viewTickets / the
 // Prize Wheels header's count)
 static int owned_tickets(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     int n = 0;
     const cJSON *e;
     cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) {
@@ -714,8 +715,12 @@ static void spin_finished(const int next) {
 // spinButton.onclick: ["spin", wheel, ticket, multi] or the Free KR wheel's ["fkr"]
 static void spin_button_click(void) {
     g_spin_button_time = store_now();
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (!g_cur || !acc || g_spinning || !g_can_spin) return;
+    if (kio_store_active()) { // read-only: a krunker.io account's spin (v10: io.send over the game socket) is never sent
+        kio_store_read_only(g_cur->kr ? "the Free KR spin" : "spin");
+        return;
+    }
     if (g_spin_ticket < 0 && acc->funds < g_cur->price) {
         spin_error("Spin Error 9");
         return;
@@ -1348,7 +1353,7 @@ static void v10_store_eterno(StrBuf *sb) {
 }
 
 static char *v10_store_window_gen(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (g_store_tab < 0 || g_store_tab >= V10_SHOP_TABS || g_store_tab == 4) g_store_tab = 0;
     StrBuf sb = {0};
     sb_append(&sb, "<div id=\"store-window-mount\"><div class=\"store-window svelte-v85byk\"><div class=\"store-header svelte-v85byk\"><div style=\"height: 15px;\"></div> <div class=\"store-tabs svelte-v85byk\" role=\"tablist\">");
@@ -1361,7 +1366,10 @@ static char *v10_store_window_gen(void) {
         case 1: v10_store_wheels(&sb, acc); break;
         case 2: v10_store_premium(&sb, acc); break;
         case 3: v10_store_kr(&sb); break;
-        case 5: v10_store_eterno(&sb); break;
+        case 5: // krunker.io: its "limited" display (v10:128293); Box Office: the empty state
+            if (kio_store_active()) kio_store_eterno(&sb);
+            else v10_store_eterno(&sb);
+            break;
         default: break;
     }
     sb_append(&sb, "</div></div>");
@@ -1447,7 +1455,8 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
-        if (!account_get()) menu_show_window(5, 1);
+        if (kio_store_active() && strcmp(name, "showPremiumBenefits")) kio_store_read_only("directPurchase"); // krunker.io: read-only
+        else if (!active_account()) menu_show_window(5, 1);
         else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
@@ -1456,7 +1465,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         StrBuf sb = {0};
         int n = 0;
         sb_append(&sb, "<div><div class=\"popHeader\" style=\"margin-bottom: 30px;\">Spin Tickets</div>");
-        const AccountInfo *acc = account_get();
+        const AccountInfo *acc = active_account();
         const cJSON *e;
         cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) { // acc.skins of type TICKET
             const int skin = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "ind")), cnt = owned_count(skin);
@@ -1478,7 +1487,11 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "windows.13.updateScroll") || !strcmp(name, "windows.13.updateScrollWheel")) return 1;
     if (!strcmp(name, "voucherPopup")) {
-        if (!account_get()) {
+        if (kio_store_active()) { // krunker.io: redeeming a voucher changes the account: read-only
+            kio_store_read_only("voucher");
+            return 1;
+        }
+        if (!active_account()) {
             menu_show_window(5, 1);
             return 1;
         }
@@ -1489,7 +1502,8 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         return 1;
     }
     if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // no payments in KrunkNative
-        if (!account_get()) menu_show_window(5, 1);
+        if (kio_store_active()) kio_store_read_only(name); // krunker.io's checkout: read-only
+        else if (!active_account()) menu_show_window(5, 1);
         else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
@@ -1524,9 +1538,10 @@ void store_ui_sub_tab_tick(const double delta_ms) {
 int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (!name) return -1;
+    if (kio_store_handle(name, ev, args, argc) >= 0) return 1; // knKioShop*: the krunker.io store's cards
     const int r = store_window_handle(name, args, argc);
     if (r >= 0) return r;
-    if (!backend_enabled() || !account_get()) return -1;
+    if (!backend_enabled() || !active_account()) return -1;
     if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
         eterno_music(0);
         return 1;
@@ -1631,7 +1646,7 @@ void store_ui_scenario_wheel(const int index, const int multi) { prize_wheel(ind
 // "live": true keeps the spin running from the first frame (pointers turn, the end animation and
 // the item's fly-in play on the scenario's clock: the sequence captures at several anim_time values)
 void store_ui_scenario_result(const cJSON *result) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const cJSON *items = cJSON_GetObjectItem(result, "item");
     const int n = cJSON_IsArray(items) ? cJSON_GetArraySize(items) : 1;
     const int live = cJSON_IsTrue(cJSON_GetObjectItem(result, "live"));

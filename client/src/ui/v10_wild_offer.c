@@ -240,7 +240,7 @@ static void item_view(void) {
 // ------------------------------------------------------------------ actions
 
 static void ask(const int notify) {
-    if (W.scenario || !account_get()) return;
+    if (W.scenario || !active_account()) return;
     W.asking = 1;
     W.notify_next = W.notify_next || notify;
     account_send_frame("wo");
@@ -401,7 +401,7 @@ int v10_wild_offer_frame(const char *label, const cJSON *frame) {
 
 void v10_wild_offer_tick(const Client *client) {
     W.in_ranked = client && client->game.is_ranked;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const int id = acc ? acc->id : 0;
     if (W.scenario) return;
     if (id != W.account_id) { // sign-in / out: the offer is someone else's
@@ -415,7 +415,7 @@ void v10_wild_offer_tick(const Client *client) {
 }
 
 void v10_wild_offer_store_opened(void) {
-    if (!W.asking && account_get() && (!W.fetched || now_ms() - W.fetched_at > WO_STALE_MS)) ask(0);
+    if (!W.asking && active_account() && (!W.fetched || now_ms() - W.fetched_at > WO_STALE_MS)) ask(0);
 }
 
 int v10_wild_offer_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -433,7 +433,7 @@ int v10_wild_offer_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
         return 1;
     }
     if (!W.offer || !available(W.offer)) return 1;
-    if (!account_get() && !W.scenario) {
+    if (!active_account() && !W.scenario) {
         html_ui_dispatch("loginOrRegister", NULL, NULL, 0);
         return 1;
     }

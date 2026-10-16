@@ -107,7 +107,7 @@ static int class_min_rec(const int index) {
 // guest is 0). Box Office lobbies, the offline sandbox and offline mode open every class. A dev stays
 // exempt on the KrunkNative account's flag, as before.
 int ui_loadout_class_open(const Client *client, const int index) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     return game_class_level_ok(&client->game, index, krunker_account_level(), acc && acc->is_dev);
 }
 
@@ -471,7 +471,7 @@ static int owned_cmp(const void *pa, const void *pb) {
 static int all_skins_unlocked(void) { return !online_mode_online(); }
 
 // The loadout may show and wear store skins: signed in (acc.skins) or offline mode (all of them).
-static int has_inventory(void) { return account_get() || all_skins_unlocked(); }
+static int has_inventory(void) { return active_account() || all_skins_unlocked(); }
 
 // acc.skins ({ind, cnt} entries, account data slot 10), sorted; NULL (count 0) for a guest.
 // Offline mode: one of every skin. Caller frees.
@@ -490,7 +490,7 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
         qsort(all, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
         return all;
     }
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const cJSON *skins = acc ? cJSON_GetArrayItem(acc->data, 10) : NULL;
     const int n = cJSON_GetArraySize(skins);
     OwnedSkin *out = n > 0 ? calloc((size_t) n, sizeof(OwnedSkin)) : NULL;
@@ -522,7 +522,7 @@ static int free_store_spray(const int index) {
 // getRandomOwnedSkin(null, 4) (v10:10178643): one of the account's sprays, the free ones included
 // (offline mode: every spray); -1 for a guest (players.spray then sprays 2482).
 static int random_owned_spray(void) {
-    if (!account_get() && !all_skins_unlocked()) return -1;
+    if (!active_account() && !all_skins_unlocked()) return -1;
     int n = 0, matches = 0, pick = -1;
     OwnedSkin *owned = owned_skins(&n, 0);
     for (int i = 0; i < n; i++) {
@@ -724,7 +724,7 @@ static void charm_box(StrBuf *out, const int slot) {
 // (ui_loadout_class_open); Box Office lobbies, the sandbox and offline mode open every class.
 static void gen_tab_class(StrBuf *out) {
     const MenuUi *ui = menu_ui();
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     sb_append(out, "<div class='skinList' style='text-align: center;'>");
     for (int i = 0; i < ui->class_count; i++) {
         const MenuClass *c = &ui->classes[i];
@@ -927,7 +927,7 @@ static const char *slot_label(const CustSlot *cs) {
 // Non-premium accounts may not wear hat + head or body + back together (v7 decision 9; the
 // offline sandbox player is exempt like v7's sandbox, a dev account too).
 static int premium_pair_blocked(const int i) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (CUST_SLOTS[i].pair < 0 || !acc || acc->premium || acc->is_dev || all_skins_unlocked()) return 0;
     return slot_used(sel(CUST_SLOTS[CUST_SLOTS[i].pair].which)) && slot_used(sel(CUST_SLOTS[i].which));
 }
@@ -1264,7 +1264,7 @@ static char *gen_skins(void) {
 // windows[19] Select Secondary: every `secondary` weapon by minRec; locked ones need that
 // level (unlocked offline and in v7's sandbox).
 static char *gen_secondary(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     StrBuf out = {0};
     sb_append(&out, "<div class='winBackH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(44)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><div class='winSelH'>Select Secondary</div><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>");
     sb_append(&out, "<div id='skinList'>");
@@ -1309,7 +1309,7 @@ static int class_primary_has_attach(void) {
 // KrunkNative's offline sandbox and offline mode count as both, like the secondary lock.
 static int attach_unlocked(const int index, const int class_index) {
     const Client *client = menu_ui()->client;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (index < 0 || index >= ATTACH_COUNT || !ATTACHMENTS[index].min_rec) return 1;
     if (!online_mode_online() || client->offline || game_config_is_custom(&client->game)) return 1;
     if (acc && acc->is_dev) return 1;
@@ -1429,7 +1429,7 @@ static char *gen_scope(void) {
 
 // windows[44] Select Streaks: the streak list (by slot, then kills) and the three slots.
 static char *gen_streaks(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const int dev = acc && acc->is_dev;
     StrBuf out = {0};
     sb_append(&out, "<div class='winBackH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(44)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><div class='winSelH'>Select Streaks</div><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>");
@@ -2113,7 +2113,7 @@ static const char *store_tag_color(const char *tag) {
 
 // account.getSkinCount(index): the cnt of acc.skins' entry (0 for a guest / offline)
 static int account_skin_count(const int index) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const cJSON *skins = acc ? cJSON_GetArrayItem(acc->data, 10) : NULL;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -2221,7 +2221,7 @@ static PoliceIdentity police_identity(void) {
         }
         return id;
     }
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (!acc) return id;
     id.signed_in = 1;
     // KrunkNative's officers are the moderator and DEV accounts (server/src/votekick.c kpd_is_officer)
@@ -2367,7 +2367,7 @@ void ui_loadout_kpd_apply_result(const int ok, const char *text) {
 // already; then "Loading..." and "kpdA" [discord, reason] (NET_EXT_KPD_APPLY). The answer
 // (policeRes code 6, hud_votekick.c) shows the result.
 void ui_loadout_kpd_submit(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     char discord[40] = "", reason[300] = "";
     const HtmlElem d = html_dom_by_id("kpdDiscord"), e = html_dom_by_id("kpdExplain");
     if (d) html_dom_get_value(d, discord, sizeof(discord));

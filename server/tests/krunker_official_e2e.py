@@ -65,7 +65,8 @@ Checks: the seek query, the WebSocket URL, every client frame's ahNum trailer ((
 (isn ascending, a movement key in the changes), "ct" with the chat text, "po" for "pi", "v" for
 "l", the "ccr" (keystream, base64, the JS-double FNV) or no reply where the game sends none, the
 "cptR" proof of work; and on the client side: it joined as the stub's sid, sees the stub player
-move, and showed the chat line.
+move, showed the chat line, and its player list (showWindow(23)) has our row first, the stub's players
+and no staff button for the krunker.io guest (the staff cases: account_unify_e2e.py).
 
 The native run is one headless client_bin (--krunker, KRUNKNATIVE_KRUNKER_MATCHMAKER, an input
 script: play, W, `say`, `players`); the web run is the web build in headless Chromium (?krunker=1,
@@ -1626,7 +1627,13 @@ def run_native():
               # timer (the "t" packet never translated) fails - it must count down.
               "10500 text @timer0 [id=timerVal]\n14000 players\n14100 down W\n15500 up W\n15700 players\n"
               "13500 text @timer1 [id=timerVal]\n15900 con say hello official\n16900 players\n17000 state\n"
-              "17500 text @timer2 [id=timerVal]\n18700 players\n18900 quit\n")
+              "17500 text @timer2 [id=timerVal]\n"
+              # the player list (showWindow(23), pListKey's window) in the official game: our row, the stub's players,
+              # and as a krunker.io guest no staff buttons at all
+              "17600 call showWindow 23\n18100 text @plist [id=playerListH]\n18110 nodes @plistdev .punishButton.tpall\n"
+              "18120 nodes @plistkill .punishButton.kill\n18130 nodes @plistpunish .punishButton.kick\n"
+              "18140 nodes @plisttp .punishButton.tp2\n18150 nodes @plistrows .pListTable tr\n18300 call closWind\n"
+              "18700 players\n18900 quit\n")
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS": str(CB_TTL_MS)})
     try:
         url = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 90, p))
@@ -1670,6 +1677,7 @@ def run_native():
     check("native: our own player is in the game (sid 9, marked *)", any(re.search(r" %d:[^ ]*\*" % MY_SID, r) for r in rows), rows[-1:] if rows else "")
     check("native: the stub's chat line reached the client", "hello from the stub" in text)
     check_killfeed_names("native", lines)
+    check_player_list("native", text)
     check_timer_countdown("native", lines)
     check_sync_trace("native", lines)
 
@@ -1710,6 +1718,21 @@ def check_sync_trace(label, lines):
           [(r["isn"], r["ack"], r["behind"]) for r in sending][:8])
     check(f"{label}: sync trace: \"l\" about once a second, no \"f\"", sum(r["l"] for r in sending) >= len(sending) - 2 and
           not any(r["f"] for r in rows), [(r["l"], r["f"]) for r in rows][:8])
+
+
+def check_player_list(label, text):
+    """The player list (showWindow(23)) in the official game, a krunker.io guest: our row first (Guest_9: the
+    stub's "0" with io-init's socket id), then the stub's players (StubBot, DeadBot); krunker.io is
+    config.isProd, so we are not listed again; no staff button (Kill, TPAll, TP2, the punish popup: v10 shows
+    them for the signed-in account's isDev / isMod only, and a guest has no account)."""
+    m = re.search(r"\[input_script\] text t=\d+ @plist n=1 .*?text=(.*)", text)
+    rows = (m.group(1) if m else "").replace("\u200e", "").replace("\u200f", "")
+    n = {k: int(v) for k, v in re.findall(r"\[input_script\] nodes t=\d+ @(plist\w+) elements=\d+ match=(\d+)", text)}
+    check(f"{label}: the player list: our row first, then the stub's players (StubBot, DeadBot)",
+          rows.startswith("Guest_%d" % MY_SID) and rows.count("Guest_%d" % MY_SID) == 1 and "StubBot" in rows and "DeadBot" in rows and
+          n.get("plistrows") == 3, (rows[:200], n.get("plistrows")))
+    check(f"{label}: the player list: no staff buttons for a krunker.io guest (no Kill, TPAll, TP2, punish popup)",
+          all(n.get(k) == 0 for k in ("plistdev", "plistkill", "plistpunish", "plisttp")), n)
 
 
 def check_timer_countdown(label, lines):

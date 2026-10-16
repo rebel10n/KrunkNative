@@ -112,6 +112,10 @@ static struct {
     char access[KRUNKER_ACCESS_MAX];
     volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
     volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
+    unsigned rpc_counter;        // the socket's rpcCounter (v10:98211)
+    // the account-scoped frames (KrunkerLinkIO.account_frame), socket thread -> krunker_net_tick (K.lock)
+    char *acct_q[32];
+    int acct_n;
     int connected;       // on_client_socket_connect was reported for this socket
     KrunkerLink link;
     pthread_mutex_t lock;
@@ -233,7 +237,9 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
         printf("[krunker] %s (%zu bytes, undecodable)\n", dir, len);
         return;
     }
-    if (!strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_ACCOUNT_RESPONSE)) || !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_NEW_TOKEN))) {
+    // (an outgoing rpc: its arguments may be the account's access token, rpc LOGIN)
+    if ((!strcmp(dir, "=>") && !strcmp(f.name, krunker_c2s_wire(KRUNKER_C2S_RPC))) ||
+        !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_ACCOUNT_RESPONSE)) || !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_NEW_TOKEN))) {
         // the account's answer / a new session token: tokens are never logged
         printf("[krunker] %s %s ah=%d (account data, not logged)\n", dir, f.name, f.ah_echo);
         krunker_frame_free(&f);
@@ -475,9 +481,80 @@ static void kmap_tick(Client *client) {
     pthread_mutex_unlock(&K.lock);
 }
 
+// The account-scoped frames ("a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln") for the main thread
+// (krunker_net_account_listen). Called under K.lock (the link runs under it).
+static void link_account_frame(void *user, const char *json, const size_t len) {
+    (void) user;
+    if (K.acct_n >= (int) (sizeof(K.acct_q) / sizeof(K.acct_q[0]))) return; // (the main thread drains every frame)
+    char *copy = malloc(len + 1);
+    if (!copy) return;
+    memcpy(copy, json, len);
+    copy[len] = 0;
+    K.acct_q[K.acct_n++] = copy;
+}
+
+static KrunkerNetAccountFn g_acct_fn;
+void krunker_net_account_listen(const KrunkerNetAccountFn fn) { g_acct_fn = fn; }
+
+static void account_frames_drop(void) {
+    pthread_mutex_lock(&K.lock);
+    for (int i = 0; i < K.acct_n; i++) free(K.acct_q[i]);
+    K.acct_n = 0;
+    pthread_mutex_unlock(&K.lock);
+}
+
+static void account_frames_tick(void) {
+    char *q[32];
+    pthread_mutex_lock(&K.lock);
+    const int n = K.acct_n;
+    memcpy(q, K.acct_q, sizeof(char *) * (size_t) n);
+    K.acct_n = 0;
+    pthread_mutex_unlock(&K.lock);
+    for (int i = 0; i < n; i++) {
+        cJSON *frame = cJSON_Parse(q[i]);
+        const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
+        if (label && g_acct_fn && K.state != KS_OFF) g_acct_fn(label, frame);
+        cJSON_Delete(frame);
+        free(q[i]);
+    }
+}
+
+// The windows' requests over the game socket while the krunker.io account is the active one (v10
+// sends them there: _33978.send(...)). Read-only requests only: nothing that spends KR or changes the
+// account is sent from this client.
+//   ["bpdl"]          DATA_LOADED: the battle pass's data (answered "bpdl" / "bppd"; v10:209854, 212301)
+//   ["vcln"]          OPEN_CLAN_TAB (v10:213455)
+//   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
+//                     "cln" -> clanData, v10:213437); every other "cln" action (create, join, leave,
+//                     kick, roles, funds, discord) is refused
+int krunker_net_send_account_frame(const cJSON *frame) {
+    const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
+    const int n = cJSON_GetArraySize(frame) - 1;
+    if (!name || K.state != KS_OPEN) return 0;
+    int ok = 0;
+    if ((!strcmp(name, "bpdl") || !strcmp(name, "vcln")) && n == 0) ok = 1;
+    if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
+    if (!ok) return 0;
+    KrunkerValue args[2];
+    char text[2][128];
+    for (int i = 0; i < n; i++) {
+        const cJSON *v = cJSON_GetArrayItem(frame, i + 1);
+        if (cJSON_IsNumber(v)) args[i] = KRUNKER_V_NUM(v->valuedouble);
+        else if (cJSON_IsString(v)) {
+            snprintf(text[i], sizeof(text[i]), "%s", v->valuestring);
+            args[i] = KRUNKER_V_STR(text[i]);
+        } else if (cJSON_IsBool(v)) args[i] = KRUNKER_V_BOOL(cJSON_IsTrue(v));
+        else args[i] = KRUNKER_V_NIL;
+    }
+    pthread_mutex_lock(&K.lock);
+    const int sent = krunker_link_send(&K.link, name, n ? args : NULL, (size_t) n);
+    pthread_mutex_unlock(&K.lock);
+    return sent;
+}
+
 static void link_setup(void) {
     const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha,
-                              .map = link_map, .user = NULL};
+                              .map = link_map, .account_frame = link_account_frame, .user = NULL};
     krunker_map_source_set_fetch(kmap_fetch);
     krunker_link_init(&K.link, &io, krunker_build()->ahkey);
 }
@@ -1289,6 +1366,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         pthread_mutex_lock(&K.lock);
         krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
         krunker_link_reset(&K.link);
+        K.rpc_counter = 0;
         K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
         ws_open();
@@ -1633,6 +1711,7 @@ void krunker_net_leave(Client *client, const char *reason) {
     wipe(K.captcha, sizeof(K.captcha));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
     wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
+    account_frames_drop();
 }
 
 void krunker_net_clear_failure(void) { K.failure[0] = 0; }
@@ -1707,8 +1786,33 @@ static void trace_sync_tick(Client *client) {
     primed = 1;
 }
 
+// v10 _39013 (v10:222894): a sign-in while the game socket is open signs that socket in too,
+// _33978.rpc(LOGIN, accessToken) = ["rpc", rpcCounter++, "login", token] (when the server has not
+// named an account on it yet); its "a" then names the account as on a join with at=.
+static void on_login_token(void *user, const char *token) {
+    if ((unsigned) (uintptr_t) user != K.generation || !token || !token[0] || K.state != KS_OPEN || strlen(token) >= sizeof(K.access)) return;
+    pthread_mutex_lock(&K.lock);
+    int sent = 0;
+    if (!K.link.account_name[0]) {
+        const KrunkerValue args[] = {KRUNKER_V_NUM(K.rpc_counter), KRUNKER_V_STR(krunker_c2s_wire(KRUNKER_C2S_LOGIN)), KRUNKER_V_STR(token)};
+        sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_RPC), args, 3);
+        if (sent) {
+            K.rpc_counter++;
+            snprintf(K.access, sizeof(K.access), "%s", token); // the "a" it answers names this account
+        }
+    }
+    pthread_mutex_unlock(&K.lock);
+    if (sent) printf("[krunker] signed in during the game: the socket logs in with the krunker.io account\n");
+}
+
+void krunker_net_account_signed_in(void) {
+    if (K.state != KS_OPEN) return;
+    krunker_account_fresh_token(on_login_token, (void *) (uintptr_t) K.generation);
+}
+
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
+    account_frames_tick();
     if (K.account_event || K.points_event) { // the game server's "a" (name, level) and "ua" (rankedPoints): the account
         const int signed_in = K.account_event;
         K.account_event = 0;

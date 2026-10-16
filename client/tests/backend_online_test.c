@@ -73,7 +73,7 @@ void html_dom_set_html(unsigned e, const char *html) { (void) e; (void) html; }
 static int g_headless;
 int headless_enabled(void) { return g_headless; }
 double glfwGetTime(void) { return 0.0; }
-const void *account_get(void) { return NULL; }
+const void *active_account(void) { return NULL; }
 const char *account_session_token(void) { return ""; }
 void client_net_send(void *client, int type, const void *data, unsigned short len) { (void) client; (void) type; (void) data; (void) len; }
 int kn_auth_is_hex(const char *s, size_t max_len) { (void) s; (void) max_len; return 1; }

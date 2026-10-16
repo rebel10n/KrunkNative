@@ -1,0 +1,33 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/login-2fa.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "loginOrRegister"
+      ],
+      [
+        "knV10LoginCodeForm",
+        "2fa"
+      ]
+    ],
+    "officialSession": true
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2: a krunker.io sign-in whose answer is check_2fa (v10 _39014): the generic form _6696 'Two-Factor Authentication' with six one-time-code boxes and Submit, no Cancel, over the login modal (v10_login.c code_show; knV10LoginCodeForm shows it without a request). Reference: the same markup laid out by headless Chromium with v10's CSS (tools/uidiff/v10_login_ref.py --2fa on the web build; v10's JS is never run, and no v10 capture of this form exists)"
+}

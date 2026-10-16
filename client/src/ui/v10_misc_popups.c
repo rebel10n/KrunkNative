@@ -445,7 +445,7 @@ static const char *cur_name(const char *ref) { return !strcmp(ref, "1") ? "KR" :
 
 // the account's available quantity of a cost (the skin count in data[10], or the KR balance)
 static int lot_available(const cJSON *cost) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (!acc) return 0;
     const char *type = v10_str(cost, "cost_type");
     const int ref = (int) v10_num(cost, "cost_ref", 0);
@@ -1113,7 +1113,7 @@ void v10_misc_popups_setup(void) {
         G.css = 1;
     }
     // GDC 2025 display mode: the intro for a guest (v10:222205 showingDisplayIntro, :223353 mount)
-    if (!G.scenario && !account_get() && display_mode_kid()) kid_open();
+    if (!G.scenario && !active_account() && display_mode_kid()) kid_open();
 }
 
 void v10_misc_popups_tick(void) {

@@ -345,7 +345,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
     }
     snprintf(client->net_join.game_id, sizeof(client->net_join.game_id), "%s", g_game_id);
     snprintf(client->net_join.client_key, sizeof(client->net_join.client_key), "%s", client_key ? client_key : "");
-    snprintf(client->net_join.session, sizeof(client->net_join.session), "%s", account_get() ? account_session_token() : "");
+    snprintf(client->net_join.session, sizeof(client->net_join.session), "%s", active_account() ? account_session_token() : "");
     snprintf(client->net_address, sizeof(client->net_address), "%s", host);
     client->net_port = (unsigned short) port;
 #ifdef __EMSCRIPTEN__
@@ -411,7 +411,7 @@ static int token_refusal(const char *error) {
 }
 
 // The error screen of an AccountRequired seek offers "Log in" (menu_ui.c).
-int servers_ui_account_required(void) { return g_account_game[0] && !account_get(); }
+int servers_ui_account_required(void) { return g_account_game[0] && !active_account(); }
 
 // ------------------------------------------------------------------ game links
 // v3.1.1 ClientManager.generateHref(id) = "/?game=" + id, the id unescaped. KrunkNative writes
@@ -975,7 +975,7 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         backend_url_encode(enc, sizeof(enc), data_query);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&dataQuery=%s", enc);
     }
-    if (account_get() && account_session_token()[0]) {
+    if (active_account() && account_session_token()[0]) {
         backend_url_encode(enc, sizeof(enc), account_session_token());
         snprintf(path + n, sizeof(path) - (size_t) n, "&token=%s", enc);
     }
@@ -2095,13 +2095,12 @@ static void append_seek_status(StrBuf *sb) {
 // The official krunker.io lobbies' one separator line (native), before their first group, or after
 // ours: v10 lists krunker.io's lobbies with no tag, so this line is the only cue that the groups below
 // are krunker.io's (the header's "online" grey, .kioSep in krunknative.css). It names them, says why
-// there are none (loading, krunker.io refusing this network, unreachable, nothing matching), and on the
-// right which krunker.io account they see, with Login / Logout (krunker_account.h).
+// there are none (loading, krunker.io refusing this network, unreachable, nothing matching). A plain
+// label: which account an official game uses is the one account UI's (backend_ui.h active_account(),
+// v10's header and login modal once the game is joined), never a second login here.
 static void append_krunker_status(StrBuf *sb, const int groups) {
     if (!krunker_lobbies_enabled()) return;
-    sb_append(sb, "<div id='kioStatus' class='kioSep'><span class='kioSepAcc' id='knAccountsKio'>");
-    krunker_account_ui_state_html(sb);
-    sb_append(sb, "</span><span class='kioSepLabel'>");
+    sb_append(sb, "<div id='kioStatus' class='kioSep'><span class='kioSepLabel'>");
     sb_append_esc(sb, I18N("kn.servers.kioSection", "KRUNKER.IO OFFICIAL LOBBIES"));
     sb_append(sb, "</span>");
     const char *why = NULL;
@@ -3284,7 +3283,7 @@ static void on_maps(void *user, const int status, const char *body, const size_t
 
 static void games_request(const int tab) {
     char path[160];
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     int n = snprintf(path, sizeof(path), "/api/maps?index=%d&pos=%d", tab, g_games_tabs[tab].pos);
     if (acc) snprintf(path + n, sizeof(path) - (size_t) n, "&accountId=%d", acc->id);
     g_games_tabs[tab].waiting = 1;
@@ -4149,7 +4148,7 @@ int servers_ui_host_game(const char *config_json) {
     backend_url_encode(region, sizeof(region), g_region[0] ? g_region : "local");
     int len = snprintf(path, n, "/mm/host-game?region=%s&config=%s", region, enc);
     len += snprintf(path + len, n - (size_t) len, "%s", mm_flavor_param(path));
-    if (account_get() && account_session_token()[0]) {
+    if (active_account() && account_session_token()[0]) {
         char tok[256];
         backend_url_encode(tok, sizeof(tok), account_session_token());
         snprintf(path + len, n - (size_t) len, "&token=%s", tok);
@@ -4247,10 +4246,12 @@ int servers_ui_find_new_game(void) {
 }
 
 // --connect with a brain: the session reaches the direct server through JOIN, so an
-// account change in the menu reconnects (same server) to attach or drop it.
+// account change in the menu reconnects (same server) to attach or drop it. That session is the
+// Box Office (krunk.io) account's: the krunker.io account of an official game never reconnects it.
 static void direct_account_tick(Client *client, const int direct) {
     static int last = -1;
-    const AccountInfo *acc = account_get();
+    if (krunker_net_active()) return;
+    const AccountInfo *acc = krunkio_account();
     const int id = acc ? acc->id : 0;
     if (last < 0) last = id;
     if (id == last) return;
@@ -4307,7 +4308,7 @@ void servers_ui_tick(Client *client) {
         // (a slow /mm/status could use the whole window up, and the seek went out as a guest)
         static double brain_ready_at = -1.0;
         if (brain_ready_at < 0.0) brain_ready_at = glfwGetTime() > g_start_time ? glfwGetTime() : g_start_time;
-        if (has_token && !account_get() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
+        if (has_token && !active_account() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
         if (g_reload_game[0]) {
             // F5's relaunch (game_reload.c): the lobby the old process was in, by its id. Never the
             // launch seek (Quickplay), nor a ?game= / ?play= / KRUNKNATIVE_GAME of the launch; gone
@@ -4376,7 +4377,7 @@ void servers_ui_tick(Client *client) {
     // (online_mode.c, like v3.1.1 logging in on the game socket itself); an older one is rejoined
     // so it attaches (or drops) the account
     static int last_account = -1;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const int account_id = acc ? acc->id : 0;
     if (last_account < 0) last_account = account_id;
     if (account_id != last_account) {

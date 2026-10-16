@@ -63,6 +63,7 @@
 #include <html_dom.h>
 #include <v10_social.h> // state.social
 #include <v10_menu.h> // state.officialSession
+#include <kio_store.h> // state.kioStore
 #include <png_write.h>
 #include <pcg_basic.h>
 #include <stb_image.h>
@@ -319,6 +320,7 @@ static void warn_unknown_keys(void) {
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
         "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
+        "kioStore", // krunker.io's store answers {limited, ranked} with officialSession (kio_store.c)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
         "leaderboards", // the v10 Leaderboards popup: {category, tab, region, season} (v10_competitive.c)
@@ -1156,6 +1158,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("krunkerLobbies")) krunker_lobbies_set_fixed(st("krunkerLobbies"));
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)

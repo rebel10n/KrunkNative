@@ -492,7 +492,7 @@ static char *gen_settings(void) {
         char *inner_s = sb_finish(&inner);
         // acc && tabIndex == 0: the account's settings backup row comes from the capture of a
         // guest, so it is added here (social socket uploadS / getS)
-        if (account_get() && tab == 0 && !strstr(inner_s, "uploadSettings()")) {
+        if (active_account() && tab == 0 && !strstr(inner_s, "uploadSettings()")) {
             sb_appendf(&out, "<div class='setBodH'><div class=\"settName\" style=\"margin-top:15px\">\n\t\t\t\t%s\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n\t\t\t</div></div>",
                        I18N("settings.backup", "Backup Settings"));
         }

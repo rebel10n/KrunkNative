@@ -19,7 +19,7 @@ static cJSON *g_items;    // /players/me/items
 static cJSON *g_loadout;  // {slot: itemId}
 static cJSON *g_claims;   // [slotId]
 static cJSON *g_classes;  // [{classId, itemId}]
-static int g_seen_account = -1; // account_get()'s id at the last tick (-1: never looked)
+static int g_seen_account = -1; // active_account()'s id at the last tick (-1: never looked)
 static int g_refreshing;
 
 static struct {
@@ -41,7 +41,7 @@ static Req g_reqs[REQ_MAX];
 static int strike_on(void) { return flavor_get() == FLAVOR_STRIKE; }
 
 static int signed_in(void) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return a && a->id > 0;
 }
 
@@ -143,7 +143,7 @@ static int send_req(const char *method, const char *path, const cJSON *body, Req
     char full[512];
     snprintf(full, sizeof full, "/strike%s", path);
     Req *r = &g_reqs[slot];
-    *r = (Req) {.used = 1, .kind = kind, .fn = fn, .user = user, .account_id = account_get() ? account_get()->id : 0};
+    *r = (Req) {.used = 1, .kind = kind, .fn = fn, .user = user, .account_id = active_account() ? active_account()->id : 0};
     if (!v10_gapi(method, full, body, on_answer, r)) {
         r->used = 0;
         return 0;
@@ -162,7 +162,7 @@ static void on_answer(void *user, int status, const cJSON *data, const cJSON *er
     if (!r->used) return; // dropped (sign-out / cancel)
     const Req q = *r;
     r->used = 0;
-    const int same = account_get() && account_get()->id == q.account_id;
+    const int same = active_account() && active_account()->id == q.account_id;
     if (same && status == 200) {
         switch (q.kind) {
         case K_ME:
@@ -357,7 +357,7 @@ int strike_econ_track_claimable(const char **out, int max) {
 
 void strike_econ_tick(void) {
     if (!strike_on()) return;
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const int id = a ? a->id : 0;
     if (id == g_seen_account) return;
     const int had = g_seen_account > 0;

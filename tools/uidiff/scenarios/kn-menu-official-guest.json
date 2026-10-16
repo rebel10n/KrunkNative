@@ -163,5 +163,5 @@
     "officialSession": true
   },
   "frames": 3,
-  "note": "KrunkNative: the menu in a krunker.io server as a krunker.io guest: v10's own 'Login or Register' item, which opens the krunker.io account modal (v10_menu.c kio_bar_update)"
+  "note": "KrunkNative: the menu in a krunker.io server as a krunker.io guest: v10's own guest bar (Login or Register, Get Signup Rewards), whose login modal signs in to krunker.io (v10_login.c); no separate krunker.io bar"
 }

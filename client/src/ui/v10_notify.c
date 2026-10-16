@@ -385,7 +385,7 @@ static int map_find(const char *name, const size_t len) {
 }
 
 static int account_skin_count(const int index) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const cJSON *inventory = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL, *e;
     cJSON_ArrayForEach(e, inventory) {
         const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
@@ -400,7 +400,7 @@ static int emoji_usable(const int skin) {
     const ViewerSkin *s = viewer_skin(skin);
     if (!s) return 0;
     if (!online_mode_online() || (s->flags & VS_FREE)) return 1;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     return acc && (acc->is_dev || account_skin_count(skin) > 0);
 }
 

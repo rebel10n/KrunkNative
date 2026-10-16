@@ -1,6 +1,11 @@
 // The alt manager window (client/include/alt_manager_ui.h): the saved accounts, which one is active,
 // add / remove / switch. The data and its encryption are in client/src/alt/ (the vault); this file
 // is the window and the account switch, which goes through account_ui.c like a saved login.
+//
+// It lists the ACTIVE BACKEND's accounts (backend_ui.h): the saved krunk.io sessions outside an
+// official game, the krunker.io ones in it; "active" is only ever the account the client plays as
+// now (a guest in an official game sees no krunk.io account marked active). krunker.io accounts are
+// signed in through v10's login modal (loginOrRegister), not pasted here.
 #include <alt_manager_ui.h>
 
 #include <alt_store.h>
@@ -22,15 +27,20 @@ static void rerender(void) {
     menu_rerender_if_open(ALT_MANAGER_WINDOW);
 }
 
-static int64_t now_ms(void) {
-    return (int64_t) time(NULL) * 1000;
-}
-
 static const char *arg_text(const HtmlArg *args, const int argc, const int i) {
     return args && i < argc && args[i].kind == HTML_ARG_STR ? args[i].str : NULL;
 }
 
+static int krunker_backend(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// The profiles of the active backend
+static int listed(const AltProfile *p) { return (p->kind == ALT_KIND_KRUNKER) == krunker_backend(); }
+
+// The account the client plays as now: a krunk.io profile while that session is signed in (and
+// krunk.io is the active backend); a krunker.io one while the krunker.io account is signed in in an
+// official game and the profile is the chosen one.
 static int is_active(const AltVault *v, const AltProfile *p) {
+    if (!listed(p) || !active_account()) return 0;
     return p->kind == ALT_KIND_KN ? !strcmp(v->active_kn, p->id) : !strcmp(v->active_krunker, p->id);
 }
 
@@ -46,8 +56,12 @@ static void use_profile(const char *id) {
         return;
     }
     const AltProfile *p = &v->profiles[i];
+    if (!listed(p)) { // the other backend's (an official game joined or left with the window up)
+        set_msg(I18N("kn.alt.gone", "That account is no longer saved."));
+        return;
+    }
     if (p->kind == ALT_KIND_KN) {
-        if (is_active(v, p) && account_get()) {
+        if (is_active(v, p)) {
             char msg[sizeof(g_msg)];
             I18N_F(msg, "kn.alt.already", "You are already signed in as {0}.", p->label);
             set_msg(msg);
@@ -98,7 +112,7 @@ static void remove_profile(const char *id) {
 
 // Saves the KrunkNative account that is signed in now (normally already saved at sign-in).
 static void save_current(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const char *token = account_session_token();
     if (!acc || !token[0]) {
         set_msg(I18N("kn.alt.signInFirst", "Sign in to Krunker Box Office first, then save the account."));
@@ -111,37 +125,6 @@ static void save_current(void) {
     char msg[sizeof(g_msg)];
     I18N_F(msg, "kn.alt.saved", "Saved {0}.", acc->name);
     set_msg(msg);
-}
-
-// Adds a krunker.io account from the window's two fields. The credential field is cleared at once.
-static void add_krunker(void) {
-    char label[ALT_LABEL_MAX] = "", secret[ALT_SECRET_MAX] = "";
-    const HtmlElem label_el = html_dom_by_id("knAltLabel"), secret_el = html_dom_by_id("knAltSecret");
-    if (label_el) html_dom_get_value(label_el, label, sizeof(label));
-    if (secret_el) {
-        html_dom_get_value(secret_el, secret, sizeof(secret));
-        html_dom_set_value(secret_el, "");
-    }
-    if (!secret[0]) {
-        set_msg(I18N("kn.alt.pasteFirst", "Paste the krunker.io session credential first."));
-        alt_wipe(secret, sizeof(secret));
-        return;
-    }
-    if (!label[0]) snprintf(label, sizeof(label), "%s", I18N("kn.alt.defaultLabel", "krunker.io account"));
-    AltVault *v = alt_store_vault();
-    if (!v) {
-        set_msg(alt_store_error()[0] ? alt_store_error() : I18N("kn.alt.unavailable", "Saved accounts are not available."));
-        alt_wipe(secret, sizeof(secret));
-        return;
-    }
-    char id[ALT_ID_LEN];
-    if (alt_vault_put(v, ALT_KIND_KRUNKER, label, secret, now_ms(), id) < 0) {
-        set_msg(I18N("kn.alt.tooMany", "Cannot save it: the list is full, or the name or credential is too long."));
-    } else {
-        if (!v->active_krunker[0]) alt_vault_switch(v, id);
-        set_msg(alt_store_save() == 0 ? I18N("kn.alt.krunkerSaved", "Saved the krunker.io account.") : I18N("kn.alt.saveFailed", "Could not write the vault."));
-    }
-    alt_wipe(secret, sizeof(secret));
 }
 
 // ---------------------------------------------------------------- window
@@ -203,27 +186,28 @@ char *alt_manager_window_gen(const int id, const char **header) {
             sb_append(&sb, "</div>");
         }
         sb_append(&sb, "<div class='knAltList'>");
-        if (v->count == 0) {
+        int shown = 0;
+        for (int i = 0; i < v->count; i++) {
+            if (!listed(&v->profiles[i])) continue;
+            append_profile(&sb, v, &v->profiles[i]);
+            shown++;
+        }
+        if (!shown) {
             sb_append(&sb, "<div class='knAltEmpty'>");
             sb_append_esc(&sb, I18N("kn.alt.empty", "No saved accounts yet."));
             sb_append(&sb, "</div>");
         }
-        for (int i = 0; i < v->count; i++) append_profile(&sb, v, &v->profiles[i]);
         sb_append(&sb, "</div>");
-        if (account_get() && account_session_token()[0]) {
+        if (!krunker_backend() && active_account() && account_session_token()[0]) {
             sb_append(&sb, "<div class='joinBtn knAltWide' onclick='knAltSaveKn()'>");
             sb_append_esc(&sb, I18N("kn.alt.saveCurrent", "Save the Box Office account I am signed in to"));
             sb_append(&sb, "</div>");
         }
-        sb_append(&sb, "<div class='knAltAdd'><div class='knAltAddTitle'>");
-        sb_append_esc(&sb, I18N("kn.alt.addKrunker", "Add a krunker.io account"));
-        sb_append(&sb, "</div><input id='knAltLabel' class='accountInput' type='text' maxlength='60' placeholder='");
-        sb_append_esc(&sb, I18N("kn.alt.labelPh", "Name for this account"));
-        sb_append(&sb, "'><input id='knAltSecret' class='accountInput' type='password' maxlength='2000' autocomplete='off' placeholder='");
-        sb_append_esc(&sb, I18N("kn.alt.secretPh", "Session credential"));
-        sb_append(&sb, "'><div class='joinBtn knAltWide' onclick='knAltAddKrunker()'>");
-        sb_append_esc(&sb, I18N("kn.alt.add", "Add account"));
-        sb_append(&sb, "</div></div>");
+        if (!active_account()) { // a guest: v10's login modal signs in to the active backend
+            sb_append(&sb, "<div class='joinBtn knAltWide' id='knAltSignIn' onclick='playSelect(0.1);loginOrRegister()'>");
+            sb_append_esc(&sb, I18N("generic.login", "Login"));
+            sb_append(&sb, "</div>");
+        }
     }
     sb_append(&sb, "<div id='knAltMsg' class='knAltMsg'>");
     sb_append_esc(&sb, g_msg);
@@ -242,8 +226,6 @@ int alt_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
         if (id) remove_profile(id);
     } else if (!strcmp(name, "knAltSaveKn")) {
         save_current();
-    } else if (!strcmp(name, "knAltAddKrunker")) {
-        add_krunker();
     } else {
         return -1;
     }

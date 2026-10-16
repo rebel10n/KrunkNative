@@ -40,6 +40,28 @@ authenticated social socket, so both ride on it:
   signed-in social socket on any brain (Redis presence, `hot_presence_online`).
 * gift / report / sales / listings use the existing socket ops (`kr`, `rpt`, `pst`, `uml`).
 
+## The krunker.io account (official games)
+
+While krunker.io is the active account backend (`backend_ui.h`: an official krunker.io game) the hub,
+the profile, the clan view and the Clans window show the krunker.io account's real data, fetched as
+v10 fetches it:
+
+* gapi reads go to krunker.io's gapi (`v10_gapi.c` -> `krunker_account_api(KRUNKER_SVC_API)`, v10's
+  `_10449 = new _10077(GAPI_URI)`, v10:27600) with the account's fresh Bearer token, answers unwrapped
+  as `_10067` (v10:26094). Only GETs of `/players/`, `/social/`, `/clans/`, `/territorial-wars/` are
+  sent; the profile's Sales tab uses v10's `getSales(name, rangeIndex)` / `getListings(name)`.
+* the friends event bus is v10's own socket (`client/src/net/krunker_eb.c`:
+  `<EVENT_BUS_URI>/ws?at=<fresh token>`, natively through the client's proxy with Origin
+  https://krunker.io, the browser's WebSocket on the web, none on Windows) with v10's reconnect
+  backoff. Friends list, presence, history, direct messages and read receipts work as in v10.
+* the Clans window's `vcln` / `["cln", 3]` go over the official game socket (account bridge);
+  its settings tab reads `/clans/<id>/motd | loot-config | recruitment` over gapi.
+* not ported (they change the krunker.io account or spend its KR): follow / unfollow, likes,
+  comments, posts, Gift KR, Report, Trade, clan apply, every Clans window write, Turf Wars apply /
+  takedown, window 5's Remove Friend. Their buttons are hidden as for a v10 guest, the handlers do
+  nothing and `v10_gapi` does not send them. The Turf Wars popup's reads stay kn_brain's.
+* tests: `server/tests/krunker_social_e2e.py`.
+
 ## Giveaways (0112_social_v10)
 
 `POST /social/post {type: 9, text, funds}`: level 20, at least 10 KR, the author pays funds +

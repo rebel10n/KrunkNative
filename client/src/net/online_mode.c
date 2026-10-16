@@ -138,7 +138,7 @@ static void send_hj_join(Client *client) {
     snprintf(join.game_id, sizeof(join.game_id), "%s", client->net_join.game_id);
     pthread_mutex_unlock(&client->net_lock);
     snprintf(join.client_key, sizeof(join.client_key), AUTH_JOIN_KEY_PREFIX "%s", g_join.client_nonce);
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     snprintf(join.name, sizeof(join.name), "%s", acc ? acc->name : "");
     client_net_send(client, NET_PACKET_JOIN, &join, sizeof(join));
     printf("[auth] joining as %s (serverHash %.12s...)\n", join.name, g_join.server_hash);
@@ -173,7 +173,7 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     online_mode_on_connect(); // one challenge per connection: late replies of the previous one are dropped
     live_note_challenge(&ch); // a sign-in later in the session answers the same challenge
     if (!ch.online_mode) return; // offline_mode server: the guest JOIN already sent is all it needs
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     // a saved session (the alt vault's, or the legacy key): account_session_token() holds it at startup
     if (g_online && !acc && !g_join.no_defer && account_session_token()[0] && backend_enabled()) {
         // startup: the token restore on the social socket is still running; retry from the tick
@@ -218,7 +218,7 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
 static void live_tick(Client *client);
 
 void online_mode_tick(void *client) {
-    if (g_join.has_deferred && (account_get() || glfwGetTime() - g_join.deferred_at > DEFER_SECONDS)) {
+    if (g_join.has_deferred && (active_account() || glfwGetTime() - g_join.deferred_at > DEFER_SECONDS)) {
         NetAuthChallengePacket ch = g_join.deferred;
         g_join.has_deferred = 0;
         g_join.no_defer = 1; // no second deferral: signed in by now, or a guest
@@ -295,7 +295,7 @@ unsigned online_mode_server_rights(void) { return g_live.have ? g_live.rights : 
 // the identity the menu has now: the session token while signed in (online mode), else a guest
 static const char *live_desired(void) {
     const char *token = account_session_token();
-    return g_online && account_get() && token && token[0] ? token : LIVE_GUEST;
+    return g_online && active_account() && token && token[0] ? token : LIVE_GUEST;
 }
 
 static void live_send_auth(Client *client, const int kind, const char *name, const char *key) {
@@ -348,7 +348,7 @@ static void live_start(Client *client, const char *want, const double now) {
         live_send_auth(client, kind, NULL, NULL);
         return;
     }
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (kind == NET_ACCOUNT_AUTH_SESSION) {
         printf("[auth] signed in as %s: verifying it on this connection (session)\n", acc ? acc->name : "?");
         live_send_auth(client, kind, NULL, want);

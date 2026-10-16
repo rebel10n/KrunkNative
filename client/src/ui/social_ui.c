@@ -835,7 +835,7 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
         sb_appendf(sb, "<div class='mapCatScrl'>%s</div>", c);
         free(c);
     }
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     const char *last_cat = NULL;
     const cJSON *r;
     cJSON_ArrayForEach(r, rows) {
@@ -897,7 +897,7 @@ static void append_mod_cards(StrBuf *sb, const cJSON *rows, const int tab) {
     if (!cJSON_IsArray(rows) || !cJSON_GetArraySize(rows)) sb_appendf(sb, "<span style='color:rgba(0,0,0,0.4);'>%s</span>", STR_MODS_NONE);
     if (!cJSON_IsArray(rows)) return;
     const HubTab *cfg = list_tab(1, tab);
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     const char *last_cat = NULL;
     const cJSON *r;
     cJSON_ArrayForEach(r, rows) {
@@ -1182,7 +1182,7 @@ static void send_page_request(void) {
     cJSON_AddItemToArray(f, cJSON_CreateString("r"));
     cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.v));
     cJSON_AddItemToArray(f, str_or_null(g_hub.b));
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     cJSON_AddItemToArray(f, acc ? cJSON_CreateNumber(acc->id) : cJSON_CreateNull()); // K: krunker_id
     cJSON_AddItemToArray(f, acc ? cJSON_CreateString(acc->name) : cJSON_CreateNull()); // q: krunker_username
     cJSON_AddItemToArray(f, str_or_null(g_hub.ja_k));
@@ -1221,7 +1221,7 @@ static void update_window(const char *e, const char *a, const char *t, const cha
         else if (!strcmp(g_hub.v, "items")) snprintf(g_hub.b, sizeof(g_hub.b), "items");
         else if (!strcmp(g_hub.v, "leaders")) snprintf(g_hub.b, sizeof(g_hub.b), "player_score");
         else if (!strcmp(g_hub.v, "maps")) snprintf(g_hub.b, sizeof(g_hub.b), "votes");
-        else if (!strcmp(g_hub.v, "profile") && g_hub.logged_in && account_get()) snprintf(g_hub.b, sizeof(g_hub.b), "%s", account_get()->name); // b = q
+        else if (!strcmp(g_hub.v, "profile") && g_hub.logged_in && active_account()) snprintf(g_hub.b, sizeof(g_hub.b), "%s", active_account()->name); // b = q
     }
     for (size_t i = 0; i < sizeof(k_nav_pages) / sizeof(k_nav_pages[0]); i++) set_style(k_nav_pages[i], "opacity", "1");
     if (!str_in(g_hub.v, k_sub_pages, sizeof(k_sub_pages) / sizeof(k_sub_pages[0]))) set_style(g_hub.v, "opacity", "0.5");
@@ -1366,7 +1366,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     const double score = jnum(t, "player_score");
     int k = (int) floor(0.03 * sqrt(score > 0 ? score : 0));
     if (k < 1) k = 1;
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     const HtmlElem pic = el("socialPic");
     if (pic) {
         char src[64];
@@ -1793,7 +1793,7 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
         free(html);
         return;
     }
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     snprintf(key, sizeof(key), "%s_id", pre);
     const int id = (int) jnum(t, key);
     snprintf(key, sizeof(key), "%s_featured", pre);
@@ -1992,7 +1992,7 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
 }
 
 static void hub_render_feed(const cJSON *t) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (acc) {
         char n[32];
         format_num(n, sizeof(n), acc->followers);
@@ -2283,7 +2283,7 @@ static double now_epoch_ms(void) {
 
 // ra(funds): the header's KR after a market action
 static void hub_set_funds(const double funds) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (!acc) return;
     char kr[32];
     comma_number(kr, sizeof(kr), funds);
@@ -2309,7 +2309,7 @@ static HubOffer *g_offers;
 static int g_offer_count;
 
 static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (!acc || acc->level < TRADE_MIN_LVL) {
         sb_appendf(out, "Must be level %d", TRADE_MIN_LVL);
         *shown = -1; // marketList = O, no "none" text
@@ -2457,7 +2457,7 @@ static void market_card(StrBuf *sb, const int pos, void *user) {
 
 // io_0("market", sub, rows): the market / inventory / sales / stats / trades lists
 static void hub_render_market(const char *a, const cJSON *t) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     StrBuf sb = {0};
     int shown = 0;
     const char *sub = a ? a : "market";
@@ -3027,7 +3027,7 @@ static void market_popup(const MarketPop *p) {
 static void market_popup_html(StrBuf *out, const MarketPop *p) {
     const ViewerSkin *g = hub_skin(p->skin);
     if (!g) return;
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     const double l = atof(p->salestart);
     const double h = now_epoch_ms() - l > 0 ? now_epoch_ms() - l : 0;
     const char *col = rarity_color(g);
@@ -3555,7 +3555,7 @@ static void io_chtl(const cJSON *rows) {
 
 // io_chf(ok, err): the sent message (he), or a system line
 static void io_chf(const int ok, const char *err) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (!g_chat_list) g_chat_list = cJSON_CreateArray();
     cJSON *m = cJSON_CreateObject();
     if (ok && g_chat_pending && acc) {
@@ -3585,7 +3585,7 @@ static int login_modal_message(const char *msg);
 static void io_a(const char *error) {
     if (!error) {
         // success: acc = new Account(...)
-        const AccountInfo *acc = account_get();
+        const AccountInfo *acc = active_account();
         if (!acc) return;
         if (!g_hub.fe) io_po(1, NULL);
         g_hub.fe = 0;
@@ -3667,7 +3667,7 @@ static void hub_brain_api(const cJSON *frame) {
         n += snprintf(url + n, sizeof(url) - (size_t) n, "%s=%s&", p->string, enc);
         if ((size_t) n >= sizeof(url)) return;
     }
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (acc) snprintf(url + n, sizeof(url) - (size_t) n, "accountId=%d", acc->id);
     char *copy = strdup(path);
     if (copy && !backend_http_get(url, hub_brain_api_done, copy)) free(copy);
@@ -4274,7 +4274,7 @@ H(h_show_popup) {
     const MarketRow *m = &g_market_rows[row];
     const ViewerSkin *pe = hub_skin(m->skin);
     if (!pe) return 1;
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     MarketPop p = {0};
     snprintf(p.page, sizeof(p.page), "%s", arg_s(ev, args, argc, 0) ? arg_s(ev, args, argc, 0) : g_market_sub);
     p.skin = m->skin;
@@ -4446,7 +4446,7 @@ H(h_calc_fee) {
     char *html = sb_finish(&sb);
     set_html("sellPricFee", html);
     free(html);
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (acc) {
         set_display("postSaleBtn", fee <= acc->funds ? "block" : "none");
         set_display("cPostSaleBtn", fee <= acc->funds ? "none" : "block");
@@ -4521,7 +4521,7 @@ H(h_gift_popup) {
     const HtmlElem pop = el("giftPop");
     if (!pop) return 1;
     html_dom_set_display(pop, "block");
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     char req[64] = "";
     if (!acc) snprintf(req, sizeof(req), "%s", I18N("social.login.gift", "Login to Gift"));
     else if (acc->level < (int) g_econ.gift_min_lvl) {
@@ -4564,7 +4564,7 @@ H(h_calc_gift_fee) {
     } else {
         set_html("giftAmntFee", "Fee: None");
     }
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (acc && el("postSaleBtn") && el("cPostSaleBtn")) {
         const int afford = a + fee <= acc->funds, small = a < g_econ.gift_min;
         set_display("postSaleBtn", afford && !small ? "block" : "none");
@@ -4630,7 +4630,7 @@ static struct {
 } g_trade;
 
 static int trade_max_items(void) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     return (int) (acc && acc->premium > 0 ? g_econ.trade_max_out_p : g_econ.trade_max_out);
 }
 
@@ -4666,7 +4666,7 @@ static int trade_side_total(const int side) {
 
 // f531: store.calcTradeFee of every item on both lists; premium pays none
 static void trade_update_fee(void) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     int fee = 0;
     for (int side = 0; side < 2; side++) {
         for (int k = 0; k < g_trade.nsel[side]; k++) {
@@ -4702,7 +4702,7 @@ static void trade_item_html(StrBuf *sb, const int side, const TradeItem *it, con
 
 // io_trD(name, id, [mine, theirs])
 static void io_trd(const char *name, const int id, const cJSON *invs) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (!acc) return;
     if (name && !strcmp(name, acc->name)) {
         io_po(0, "Cant trade with yourself");
@@ -4770,7 +4770,7 @@ static void io_trd(const char *name, const int id, const cJSON *invs) {
 // tradePopup(): io.send("ri", name, id)
 H(h_trade_popup) {
     UNUSED;
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (!acc) {
         io_po(0, I18N("account.login.required", "Must be logged in"));
     } else if (g_hub.profile_id == acc->id) {
@@ -5960,12 +5960,12 @@ H(h_toggle_view) {
 // The signed-in account is a developer (verify, badges, feature / delete creations) or a
 // developer / moderator (flag, the server checks the same rule).
 static int hub_is_dev(void) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     return acc && acc->is_dev;
 }
 
 static int hub_is_staff(void) {
-    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     return acc && (acc->is_dev || acc->is_mod);
 }
 
@@ -6370,7 +6370,7 @@ static void hub_connected(void) {
     char name[64] = "";
     // the saved session: the alt vault's (account_ui.c), not the plain krunker_token key, which a cipher build empties
     if (g_hub.brain && html_storage_get("krunker_username", name, sizeof(name)) >= 0 && account_session_token()[0] && name[0]) {
-        if (account_get()) {
+        if (active_account()) {
             // account_ui.c's restore already answered on this socket
             g_hub.fe = 1;
             io_a(NULL);

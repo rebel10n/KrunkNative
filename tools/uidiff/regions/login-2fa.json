@@ -1,0 +1,55 @@
+{
+  "note": "a krunker.io sign-in's check_2fa: v10's generic form _6696 'Two-Factor Authentication' over the login modal (v10_login.c code_show) against the same markup in Chromium with v10's CSS (tools/uidiff/v10_login_ref.py --2fa). The first code box is left out: the client focuses it (blue border, caret), the reference was blurred. Text regions differ by glyph rasterisation (FreeType vs Skia)",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 6.0
+  },
+  "regions": [
+    {
+      "name": "form-header",
+      "rect": [
+        408,
+        243,
+        464,
+        40
+      ],
+      "kind": "text",
+      "max_pct": 20.0,
+      "note": "the io-popup-header: Two-Factor Authentication (FreeType's 1 px narrower advances shift the right half of the title: 16 % measured)"
+    },
+    {
+      "name": "description",
+      "rect": [
+        420,
+        314,
+        440,
+        42
+      ],
+      "kind": "text",
+      "max_pct": 18.0,
+      "note": "the description paragraph, two lines at 1280x720 (14.5 % measured, glyph edges)"
+    },
+    {
+      "name": "code-boxes",
+      "rect": [
+        568,
+        366,
+        182,
+        42
+      ],
+      "max_pct": 6.0,
+      "note": "code boxes 2-6: 50 x 55 at the menu's scale, 8 px gaps (.code-input.svelte-1xwmszg)"
+    },
+    {
+      "name": "submit",
+      "rect": [
+        598,
+        412,
+        84,
+        40
+      ],
+      "max_pct": 16.0,
+      "note": "the green Submit (io-button--accept), no Cancel (cancelButton: false) (13 % measured: the label's glyphs; the button's size and green match)"
+    }
+  ]
+}

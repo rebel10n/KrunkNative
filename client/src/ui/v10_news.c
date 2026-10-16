@@ -386,7 +386,7 @@ void v10_news_toggle_log(const HtmlElem obj) {
 static void update_ad_tick(void) {
     HtmlElem ad = html_dom_by_id("updateAd");
     if (!ad) return;
-    const int show = account_get() && !L.ad_hidden && v10_news_version()[0] && !update_viewed();
+    const int show = active_account() && !L.ad_hidden && v10_news_version()[0] && !update_viewed();
     if (show == L.ad_shown) return;
     L.ad_shown = show;
     html_dom_set_display(ad, show ? "" : "none");
@@ -540,7 +540,7 @@ static int guide_find(const char *key) {
 
 // !unlockLevel || acc && acc.level >= unlockLevel
 static int guide_unlocked(const int i) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return !k_guide[i].unlock || (a && a->level >= k_guide[i].unlock);
 }
 

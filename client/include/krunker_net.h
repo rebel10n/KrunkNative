@@ -1,4 +1,5 @@
 #pragma once
+#include <cJSON.h>
 // KN_KRUNKER_OFFICIAL: this client in an OFFICIAL krunker.io game, over Krunker's own protocol
 // (client/src/net/krunker_net.c; the packet translation is client/src/net/krunker_link.c).
 //
@@ -131,6 +132,18 @@ typedef struct {
     int job_rating, job_rating_pos; // jobrating / jobratingpositive (Helpful Reports)
 } KrunkerNetAccount;
 int krunker_net_account(KrunkerNetAccount *out);
+// The krunker.io account was signed in during an official game (account_ui.c): the open socket
+// logs in with it (v10's rpc LOGIN).
+void krunker_net_account_signed_in(void);
+// The official game socket's account-scoped frames, on the main thread: label + the whole frame
+// ["name", args...] ("a" ACCOUNT_RESPONSE without its token, "ua", "uf", "bpdl", "bppd", "chg",
+// "uchp", "cln"). One listener (account_ui.c: the krunker.io account's real data, as v10 keeps it).
+typedef void (*KrunkerNetAccountFn)(const char *label, const cJSON *frame);
+void krunker_net_account_listen(KrunkerNetAccountFn fn);
+// A window's read-only request over the game socket for the krunker.io account, as the frame the
+// window would send kn_brain (["bpdl"], ["vcln"], ["cln", 3, value]); 0 = not sent (not open, or not
+// a read-only request: nothing that spends KR or changes the account goes out).
+int krunker_net_send_account_frame(const cJSON *frame);
 int krunker_net_open(void);        // the WebSocket is open
 // client_net_send_packet while active: our packet translated and sent (or dropped). 1 = sent.
 int krunker_net_send_packet(NetPacketType type, const void *payload, uint16_t length);

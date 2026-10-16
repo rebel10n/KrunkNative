@@ -41,6 +41,8 @@
 #include <avatar_ui.h>      // profile pictures: the "Change Picture" picker and its status line
 #include <v10_social.h> // the window's Friends tab (v10_social.c)
 #include <online_mode.h>  // auth_unreachable: offline mode
+#include <krunker_account.h> // the krunker.io account: the active one in an official game
+#include <krunker_net.h>     // krunker_net_active(): an official game is being joined or played
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
@@ -145,7 +147,257 @@ void account_readable_time(char *out, const size_t n, const double ms) { readabl
 
 // ------------------------------------------------------------------ state
 
-const AccountInfo *account_get(void) { return g_logged_in ? &g_acc : NULL; }
+// ---- the active account (backend_ui.h): krunker.io in an official game, krunk.io elsewhere
+
+static int g_scenario_official; // --render-scenario's state.official: an official game without a socket
+
+AccountBackend account_backend(void) {
+    return krunker_net_active() || g_scenario_official ? ACCOUNT_BACKEND_KRUNKER : ACCOUNT_BACKEND_KRUNKIO;
+}
+
+void account_ui_scenario_official(const int on) { g_scenario_official = on != 0; }
+
+const AccountInfo *krunkio_account(void) { return g_logged_in ? &g_acc : NULL; }
+
+// The krunker.io account as v10's `acc` in an official game: what the official game socket says of it
+// (v10:222148's handlers), never kn_brain. "a" ACCOUNT_RESPONSE [error, id, username, data] builds it
+// from data's player_* fields (new Account(id, name, data), v10:112759); "ua" UPDATE_ACCOUNT [data]
+// replaces them (Account.setData, v10:112835: v10's own slot order); "uf" UPDATE_FUNDS [kr, junk]
+// (v10:208196). Before the game server names it (the menu, a seek), the name and level krunker.io's
+// sign-in and /player/me gave. Its staff rights are krunker.io's (player_developer, player_role).
+static struct {
+    cJSON *obj;            // the player_* object (owned), NULL until "a"
+    int id;
+    char name[64];
+    unsigned gen;          // bumped by every frame that changed it
+    unsigned built_gen, built_kio_gen;
+} g_kio;
+static AccountInfo g_kio_acc;
+
+static void kio_forget(void) {
+    cJSON_Delete(g_kio.obj);
+    g_kio.obj = NULL;
+    g_kio.id = 0;
+    g_kio.name[0] = 0;
+    g_kio.gen++;
+}
+
+static double obj_num(const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_kio.obj, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsBool(v) ? cJSON_IsTrue(v) : cJSON_IsString(v) ? atof(v->valuestring) : 0.0;
+}
+
+static const char *obj_str(const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_kio.obj, key);
+    return cJSON_IsString(v) ? v->valuestring : NULL;
+}
+
+static void obj_set(const char *key, const cJSON *v) {
+    if (!g_kio.obj || !v) return;
+    cJSON *copy = cJSON_Duplicate(v, 1);
+    if (!copy) return;
+    if (cJSON_GetObjectItemCaseSensitive(g_kio.obj, key)) cJSON_ReplaceItemInObjectCaseSensitive(g_kio.obj, key, copy);
+    else cJSON_AddItemToObject(g_kio.obj, key, copy);
+}
+
+// "1,4,9" (player_badge / player_titles) or an array -> a number array (owned)
+static cJSON *number_list(const cJSON *v) {
+    cJSON *out = cJSON_CreateArray();
+    if (cJSON_IsArray(v)) {
+        const cJSON *e;
+        cJSON_ArrayForEach(e, v) if (cJSON_IsNumber(e) || cJSON_IsString(e)) cJSON_AddItemToArray(out, cJSON_CreateNumber(cJSON_IsNumber(e) ? e->valuedouble : atof(e->valuestring)));
+    } else if (cJSON_IsString(v)) {
+        for (const char *p = v->valuestring; *p;) {
+            if (isdigit((unsigned char) *p)) cJSON_AddItemToArray(out, cJSON_CreateNumber(atof(p)));
+            while (*p && *p != ',') p++;
+            if (*p == ',') p++;
+        }
+    }
+    return out;
+}
+
+static void kio_build(void) {
+    cJSON_Delete(g_kio_acc.stats);
+    cJSON_Delete(g_kio_acc.data);
+    cJSON_Delete(g_kio_acc.badges);
+    memset(&g_kio_acc, 0, sizeof(g_kio_acc));
+    const char *name = g_kio.name[0] ? g_kio.name : krunker_account_name();
+    copy_str(g_kio_acc.name, sizeof(g_kio_acc.name), name);
+    copy_str(g_kio_acc.alias, sizeof(g_kio_acc.alias), name);
+    if (!g_kio.obj) { // signed in, not in a game yet: what the sign-in and /player/me said
+        g_kio_acc.level = krunker_account_level() > 0 ? krunker_account_level() : 1;
+        g_kio_acc.score = krunker_account_score();
+        g_kio_acc.funds = krunker_account_funds();
+        g_kio_acc.level_prog = progression_level_prog(g_kio_acc.score, RANK_VAR);
+        return;
+    }
+    AccountInfo *a = &g_kio_acc;
+    a->id = g_kio.id;
+    a->kills = obj_num("player_kills");
+    a->deaths = obj_num("player_deaths");
+    a->wins = obj_num("player_wins");
+    a->games = obj_num("player_games_played");
+    a->funds = obj_num("player_funds");
+    a->score = obj_num("player_score");
+    a->time_played = obj_num("player_timeplayed");
+    a->featured = (int) obj_num("player_featured");
+    a->creator = (int) obj_num("creator_badge");
+    a->hack = (int) obj_num("player_hack");
+    a->is_dev = (int) obj_num("player_developer");
+    const int role = (int) obj_num("player_role");
+    a->is_mod = role == 2; // updatePerms: isMod = role 2 (a Deputy, role 3, gets no moderator actions: genList :214291)
+    a->following = (int) obj_num("player_following");
+    a->followers = (int) obj_num("player_followed");
+    a->job_rating = (int) obj_num("jobrating");
+    a->job_rating_pos = (int) obj_num("jobratingpositive");
+    a->premium = obj_num("player_premium") > 0;
+    const char *twofa = obj_str("player_2FA");
+    a->has_2fa = (twofa && twofa[0]) || obj_num("player_2FA") > 0;
+    const char *clan = obj_str("player_clan");
+    copy_str(a->clan, sizeof(a->clan), clan ? clan : "");
+    const char *alias = obj_str("player_alias");
+    if (a->premium && alias && alias[0]) copy_str(a->alias, sizeof(a->alias), alias);
+    a->junk = obj_num("player_jnk");
+    a->ranked_points = obj_num("ranked_points");
+    a->level = progression_level(a->score, RANK_VAR);
+    a->level_prog = progression_level_prog(a->score, RANK_VAR);
+    // stats: player_stats is JSON text in the object form, an object in setData's
+    const cJSON *st = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "player_stats");
+    a->stats = cJSON_IsString(st) ? cJSON_Parse(st->valuestring) : cJSON_IsObject(st) ? cJSON_Duplicate(st, 1) : NULL;
+    if (!cJSON_IsObject(a->stats)) {
+        cJSON_Delete(a->stats);
+        a->stats = cJSON_CreateObject();
+    }
+    a->badges = number_list(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "player_badge"));
+    // the client's account data array (set_data's slots: kn_brain sends v7's order), so the
+    // inventory (10), premium time (27) and the rest read the krunker.io account like the other
+    a->data = cJSON_CreateArray();
+    for (int i = 0; i < 40; i++) cJSON_AddItemToArray(a->data, cJSON_CreateNull());
+    const struct {
+        int slot;
+        const char *key;
+    } map[] = {{1, "player_kills"}, {2, "player_wins"}, {3, "player_games_played"}, {4, "player_deaths"}, {5, "player_funds"},
+               {6, "player_score"}, {7, "player_clan"}, {8, "player_timeplayed"}, {9, "player_featured"}, {10, "skins"},
+               {11, "player_lastreward"}, {12, "player_developer"}, {13, "player_following"}, {14, "player_followed"},
+               {17, "player_hack"}, {27, "player_premium"}, {28, "player_2FA"}, {29, "player_alias"}, {38, "jobrating"}, {39, "jobratingpositive"}};
+    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(g_kio.obj, map[i].key);
+        if (v) cJSON_ReplaceItemInArray(a->data, map[i].slot, cJSON_Duplicate(v, 1));
+    }
+    if (!cJSON_IsArray(cJSON_GetArrayItem(a->data, 10))) cJSON_ReplaceItemInArray(a->data, 10, cJSON_CreateArray());
+    cJSON_ReplaceItemInArray(a->data, 16, cJSON_Duplicate(a->stats, 1));
+    cJSON_ReplaceItemInArray(a->data, 21, cJSON_CreateNumber(a->is_mod));
+}
+
+static const AccountInfo *kio_account(void) {
+    if (!krunker_account_signed_in()) {
+        if (g_kio.obj) kio_forget();
+        return NULL;
+    }
+    const unsigned kgen = krunker_account_generation();
+    if (g_kio.built_gen != g_kio.gen || g_kio.built_kio_gen != kgen || (!g_kio_acc.name[0])) {
+        g_kio.built_gen = g_kio.gen;
+        g_kio.built_kio_gen = kgen;
+        kio_build();
+    }
+    if (!g_kio.obj) { // the game server's "a" not seen (yet): its staff rights as krunker_net knows them
+        KrunkerNetAccount k;
+        const int in_game = krunker_net_account(&k);
+        g_kio_acc.is_dev = in_game && k.dev;
+        g_kio_acc.is_mod = in_game && k.role == 2;
+    }
+    return &g_kio_acc;
+}
+
+// v10's Account.setData (v10:112835): "ua" carries the account in v10's slot order
+static void kio_set_data(const cJSON *d) {
+    if (!cJSON_IsArray(d) || !g_kio.obj) return;
+    const struct {
+        int slot;
+        const char *key;
+    } map[] = {{1, "player_kills"}, {2, "player_wins"}, {3, "player_games_played"}, {4, "player_deaths"}, {5, "player_funds"},
+               {6, "player_score"}, {7, "player_clan"}, {8, "player_timeplayed"}, {9, "player_featured"}, {10, "skins"},
+               {11, "player_lastreward"}, {12, "player_developer"}, {13, "player_following"}, {14, "player_followed"},
+               {15, "player_stats"}, {16, "player_hack"}, {17, "player_region"}, {18, "player_role"}, {19, "player_premium"},
+               {20, "player_2FA"}, {21, "player_alias"}, {27, "jobrating"}, {28, "jobratingpositive"}, {30, "player_clanrole"},
+               {37, "player_jnk"}, {38, "activeChallenges"}, {39, "player_badge"}};
+    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        const cJSON *v = cJSON_GetArrayItem(d, map[i].slot);
+        if (v) obj_set(map[i].key, v);
+    }
+}
+
+// The official game socket's account frames (krunker_net_account_listen), main thread
+static void kio_frame(const char *label, const cJSON *frame) {
+    if (!strcmp(label, "a")) {
+        const cJSON *err = cJSON_GetArrayItem(frame, 1), *data = cJSON_GetArrayItem(frame, 4);
+        const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 3));
+        if ((cJSON_IsString(err) && err->valuestring[0]) || !name || !cJSON_IsObject(data)) return;
+        cJSON_Delete(g_kio.obj);
+        g_kio.obj = cJSON_Duplicate(data, 1);
+        const cJSON *id = cJSON_GetArrayItem(frame, 2);
+        g_kio.id = cJSON_IsNumber(id) ? id->valueint : 0;
+        copy_str(g_kio.name, sizeof(g_kio.name), name);
+        g_kio.gen++;
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_request(); // io_accountResponse: windows[5].data || send("bpdl")
+        else printf("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
+        printf("[account] the krunker.io account's data from the game server: %s, %.0f KR, %d skins\n", name, obj_num("player_funds"),
+               cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins")));
+    } else if (!strcmp(label, "ua")) {
+        kio_set_data(cJSON_GetArrayItem(frame, 1));
+        g_kio.gen++;
+    } else if (!strcmp(label, "uf")) { // [kr, junk]
+        const cJSON *kr = cJSON_GetArrayItem(frame, 1), *jnk = cJSON_GetArrayItem(frame, 2);
+        if (cJSON_IsNumber(kr)) obj_set("player_funds", kr);
+        if (cJSON_IsNumber(jnk)) obj_set("player_jnk", jnk);
+        g_kio.gen++;
+    } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
+        return; // (the battle pass / clan / challenge answers belong to the krunker.io account's windows)
+    } else if (!strcmp(label, "bpdl") || !strcmp(label, "bppd")) {
+        battlepass_ui_frame(label, frame);
+    } else if (!strcmp(label, "cln")) {
+        clan_ui_frame(frame);
+    } else if ((!strcmp(label, "chg") || !strcmp(label, "uchp")) && g_kio.obj) {
+        // UPDATE_CHALLENGES [PT, CI, PV]... / UPDATE_CHALLENGES_PROGRESS [CI, PV]... (v10:218110 / 218121)
+        cJSON *list = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges");
+        const cJSON *d = cJSON_GetArrayItem(frame, 1);
+        const int step = !strcmp(label, "chg") ? 3 : 2, n = cJSON_GetArraySize(d);
+        for (int i = 0; cJSON_IsArray(list) && i + step - 1 < n; i += step) {
+            const double ci = cJSON_GetNumberValue(cJSON_GetArrayItem(d, i + (step == 3 ? 1 : 0)));
+            cJSON *c;
+            cJSON_ArrayForEach(c, list) {
+                const cJSON *cci = cJSON_GetObjectItemCaseSensitive(c, "CI");
+                if (!cJSON_IsNumber(cci) || cci->valuedouble != ci) continue;
+                const cJSON *pv = cJSON_GetArrayItem(d, i + (step == 3 ? 2 : 1));
+                if (pv) cJSON_ReplaceItemInObjectCaseSensitive(c, "PV", cJSON_Duplicate(pv, 1));
+                if (step == 3) cJSON_ReplaceItemInObjectCaseSensitive(c, "PT", cJSON_CreateNumber(cJSON_GetNumberValue(cJSON_GetArrayItem(d, i))));
+            }
+        }
+        menu_rerender_if_open(33);
+    }
+}
+
+// The windows' frames while krunker.io is the active backend (backend_social_set_held_sender): the
+// read-only ones go over the official game socket, as v10 sends them (krunker_net.h)
+static int kio_held_send(const char *json) {
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) return 0;
+    cJSON *frame = cJSON_Parse(json);
+    const int sent = frame ? krunker_net_send_account_frame(frame) : 0;
+    cJSON_Delete(frame);
+    return sent;
+}
+
+const AccountInfo *active_account(void) {
+    return account_backend() == ACCOUNT_BACKEND_KRUNKER ? kio_account() : krunkio_account();
+}
+
+// What the UI last followed: the backend, the krunk.io login and the krunker.io account's state
+static struct {
+    int backend, kn_logged_in, kio_signed_in;
+    unsigned kio_gen, kio_data_gen, generation;
+} g_active = {.backend = -1};
+
+unsigned account_active_generation(void) { return g_active.generation; }
 
 // One no-argument social frame (v10 "ttl": the account's titles; v10_customize.c). The frame
 // goes through the same queue as the mail frames (backend_social_send_text).
@@ -157,10 +409,13 @@ void account_send_frame(const char *label) {
 
 static void mark_header(void);
 static void rerender_windows(void);
+static void active_tick(void);
+static void update_header(void);
 
 static void reward_tick(int force);
 
 void account_remove_skin(const int skin_index) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in || !g_acc.data) return;
     cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
     cJSON *entry;
@@ -178,12 +433,14 @@ void account_remove_skin(const int skin_index) {
 }
 
 void account_set_last_reward(const double ms) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in || !g_acc.data) return;
     cJSON_ReplaceItemInArray(g_acc.data, 11, cJSON_CreateNumber(ms));
     reward_tick(1);
 }
 
 void account_set_funds(const double funds) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in) return;
     g_acc.funds = funds;
     if (g_acc.data) cJSON_ReplaceItemInArray(g_acc.data, 5, cJSON_CreateNumber(funds));
@@ -191,6 +448,7 @@ void account_set_funds(const double funds) {
 }
 
 int account_add_skin(const int skin_index) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return 0; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in || !g_acc.data) return 0;
     cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
     if (!cJSON_IsArray(skins)) {
@@ -213,10 +471,11 @@ int account_add_skin(const int skin_index) {
     cJSON_AddItemToArray(skins, entry);
     return 1;
 }
-const char *account_session_token(void) { return g_token; }
+const char *account_session_token(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKIO ? g_token : ""; }
 
 // windows[12]: acc.clan = clanData.clan_name / null (data slot 7 follows)
 void account_set_clan(const char *tag) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
     if (!g_logged_in) return;
     copy_str(g_acc.clan, sizeof(g_acc.clan), tag ? tag : "");
     if (g_acc.data) cJSON_ReplaceItemInArray(g_acc.data, 7, tag && tag[0] ? cJSON_CreateString(tag) : cJSON_CreateNull());
@@ -267,18 +526,21 @@ static double stat_num(const char *key) {
 }
 
 // The account name is the name the menu and HUD show (v3.1.1: acc.alias / "Guest").
+// The active account's (backend_ui.h): in an official game the krunker.io account's name or the
+// guest's own, never the krunk.io account's.
 static void apply_menu_name(void) {
     if (!g_client) return;
-    if (g_logged_in) {
+    const AccountInfo *acc = active_account();
+    if (acc) {
         if (!g_guest_name[0]) copy_str(g_guest_name, sizeof(g_guest_name), g_client->menu_name);
-        copy_str(g_client->menu_name, sizeof(g_client->menu_name), g_acc.alias);
+        copy_str(g_client->menu_name, sizeof(g_client->menu_name), acc->alias);
     } else if (g_guest_name[0]) {
         copy_str(g_client->menu_name, sizeof(g_client->menu_name), g_guest_name);
         g_guest_name[0] = 0;
     }
     // the game server reads the session token from the JOIN packet of the next connection
     pthread_mutex_lock(&g_client->net_lock);
-    copy_str(g_client->net_join.session, sizeof(g_client->net_join.session), g_logged_in ? g_token : "");
+    copy_str(g_client->net_join.session, sizeof(g_client->net_join.session), g_logged_in ? account_session_token() : ""); // (a krunker.io game gets no Box Office token)
     pthread_mutex_unlock(&g_client->net_lock);
 }
 
@@ -455,7 +717,7 @@ static void try_restore(void) {
     cJSON_AddItemToArray(payload, cJSON_CreateNull());
     cJSON_AddItemToArray(payload, cJSON_CreateString(token));
     cJSON_AddItemToArray(frame, payload);
-    backend_social_send(frame);
+    backend_social_send_session(frame); // the krunk.io session's upkeep: also while the socket is held
     cJSON_Delete(frame);
     alt_wipe(token, sizeof(token));
 }
@@ -620,6 +882,14 @@ int account_ui_use_session(const char *username, const char *token) {
 // The menu's Logout (logoutAcc) and the developer console's `logout` (ui_console.c): 1 when an
 // account was logged out, 0 for a guest (nothing done)
 int account_ui_logout(void) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account (its tokens only: the krunk.io session stays)
+        if (!krunker_account_signed_in()) return 0;
+        krunker_account_sign_out();
+        printf("[account] signed out of krunker.io\n");
+        active_tick();
+        menu_show_window(5, 1); // showWindow(5): v10's login modal for the guest now
+        return 1;
+    }
     if (!g_logged_in) return 0;
     logout();
     return 1;
@@ -759,6 +1029,8 @@ static void on_social(void *user, const cJSON *frame) {
 void account_ui_init(Client *client) {
     g_client = client;
     alt_store_open(NULL); // the vault, if the player has one (no key is read without a vault file)
+    krunker_net_account_listen(kio_frame);     // the krunker.io account's data (official games)
+    backend_social_set_held_sender(kio_held_send);
     load_session();
     if (!backend_enabled()) return;
     backend_social_listen(on_social, NULL);
@@ -1132,12 +1404,59 @@ static void email_html(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
+// The active account changed (backend_ui.h: an official game joined or left, either backend's
+// sign-in or sign-out): everything that shows the account follows at once, as after a login.
+static void active_changed(void) {
+    g_active.generation++;
+    battlepass_ui_reset(); // windows[5].data, account.BP: the other account's
+    clan_ui_reset();       // clanData: the other account's
+    apply_menu_name();
+    update_header();       // v10_menu_account_changed(): the header bars, the nav, the login modal
+    rerender_windows();    // the Account window, Battle Pass, Store, ... of the open window
+    menu_update_class_box();
+}
+
+static void active_tick(void) {
+    const int backend = (int) account_backend();
+    const int kio = krunker_account_signed_in();
+    const unsigned kio_gen = krunker_account_generation();
+    if (backend == g_active.backend && g_logged_in == g_active.kn_logged_in && kio == g_active.kio_signed_in &&
+        (backend != ACCOUNT_BACKEND_KRUNKER || (kio_gen == g_active.kio_gen && g_kio.gen == g_active.kio_data_gen)))
+        return;
+    const int first = g_active.backend < 0;
+    if (!first && backend == ACCOUNT_BACKEND_KRUNKER && g_active.backend == ACCOUNT_BACKEND_KRUNKER && kio && !g_active.kio_signed_in)
+        krunker_net_account_signed_in(); // signed in from the in-game menu: this game's socket too
+    if (!first && backend != g_active.backend)
+        printf("[account] active account backend: %s\n", backend == ACCOUNT_BACKEND_KRUNKER ? "krunker.io" : "krunk.io");
+    g_active.backend = backend;
+    // a krunker.io game: nothing done under its account reaches the krunk.io account (backend.h)
+    backend_social_hold(backend == ACCOUNT_BACKEND_KRUNKER);
+    g_active.kn_logged_in = g_logged_in;
+    g_active.kio_signed_in = kio;
+    g_active.kio_gen = kio_gen;
+    const int data_only = !first && backend == ACCOUNT_BACKEND_KRUNKER && g_active.kio_data_gen != g_kio.gen && kio_gen == g_active.kio_gen &&
+                          kio == g_active.kio_signed_in;
+    g_active.kio_data_gen = g_kio.gen;
+    if (data_only) { // the krunker.io account's KR / skins / stats moved: the header and the open window follow
+        g_active.generation++;
+        update_header();
+        rerender_windows();
+        return;
+    }
+    if (!first) active_changed();
+    else g_active.generation++;
+}
+
 void account_ui_tick(Client *client) {
     store_ui_tick(); // the wheel screen; also without a brain (a --render-scenario's state.spin)
+    active_tick();
     if (!backend_enabled()) return;
+    // a krunker.io game is not a krunk.io match: its end neither counts toward the krunk.io
+    // account's daily reward nor refreshes it (a krunker.io session never touches that account)
+    const int krunkio = account_backend() == ACCOUNT_BACKEND_KRUNKIO;
     // a match ended (Krunker "end": canClaimReward) -> dc
     static int reward_end = -1;
-    const int end_now = client->net_end_seconds >= 0;
+    const int end_now = krunkio && client->net_end_seconds >= 0;
     if (end_now && reward_end == 0 && g_logged_in) {
         g_reward_played = 1;
         reward_tick(1);
@@ -1151,7 +1470,7 @@ void account_ui_tick(Client *client) {
     // updateAccount after the end screen (unless the brain pushed "upd" already).
     static int last_end = -1;
     static double refresh_at;
-    const int end = client->net_end_seconds >= 0;
+    const int end = krunkio && client->net_end_seconds >= 0;
     if (end && !last_end && g_logged_in) refresh_at = glfwGetTime() + 3.0;
     last_end = end;
     if (refresh_at > 0 && glfwGetTime() >= refresh_at) {
@@ -1454,6 +1773,13 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         auth_unreachable();
         return 1;
     }
+    // krunker.io is the active backend: a krunk.io login form never sends its fields to kn_brain
+    // (v10's login modal signs in to krunker.io itself, v10_login.c)
+    if (name && (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) && account_backend() == ACCOUNT_BACKEND_KRUNKER) return 1;
+    if (name && !strcmp(name, "logoutAcc") && account_backend() == ACCOUNT_BACKEND_KRUNKER) { // also without a brain
+        account_ui_logout();
+        return 1;
+    }
     if (name && !g_logged_in && reset_handle(name)) return 1; // KrunkNative forgot password (works without a brain: says why)
     if (!name || (!backend_enabled() && !g_scenario)) return -1; // g_scenario: --render-scenario's stand-in account
     if (battlepass_ui_handle(name, ev, args, argc) >= 0) return 1; // before the Store: creatorCodeAction(.., 3)
@@ -1735,6 +2061,104 @@ static void pst_num(StrBuf *sb, const char *label, const double v, const int dec
 // windows[4].gen() for a signed-in account (the guest form is ui/windows/5.html): the
 // profile tabs of v7.1.4 (home = Your Account + the four stat tabs, Friends, Partner,
 // Settings, Connections, promo codes) and the logout links.
+// windows[4]'s "Your Stats" (the XP bar and the stat tabs) for an account: the Box Office one
+// (g_acc) or the krunker.io one (its "a" / "ua" data from the official game server)
+static double stat_in(const AccountInfo *acc, const char *key) {
+    const cJSON *v = acc->stats ? cJSON_GetObjectItem(acc->stats, key) : NULL;
+    return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+static void xp_text(const AccountInfo *acc, char *out, const size_t n) {
+    const double m = acc->level > 1 ? pow(acc->level / RANK_VAR, 2) : 0.0;
+    snprintf(out, n, "%d / %d", (int) fmax(acc->score - m, 0), (int) (pow((acc->level + 1) / RANK_VAR, 2) - m));
+}
+
+static void stats_html(StrBuf *sb, const AccountInfo *acc, const int kio) {
+    // config.statTabs + KrunkNative's Medals (the account's medal counts, kn_brain "mdl", WP-E part 2c)
+    static const char *const stat_tabs[] = {"General Stats", "Killstreak Stats", "Other Stats", "Class Stats", "Medals"};
+    char a[64];
+    sb_append(sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
+    xp_text(acc, a, sizeof(a));
+    sb_appendf(sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%.6g%%'></div><span class='xpBarV'>%s</span></div>", acc->level_prog, a);
+    sb_append(sb, "<div id='statHolder'><div style='height:15px;'></div><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;'>");
+    for (int i = 0; i < 5; i++) {
+        sb_appendf(sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);windows[4].switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 16px;'onmouseenter='playTick();'>%s</div>",
+                   i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
+    }
+    sb_append(sb, "</div><div class='statTabB0'>");
+    const double losses = acc->games - acc->wins > 0 ? acc->games - acc->wins : 0;
+    const double shots = stat_in(acc, "s"), hits = fmin(stat_in(acc, "s"), stat_in(acc, "h"));
+    snprintf(a, sizeof(a), "%d", acc->level);
+    pst(sb, "LVL", a);
+    pst_num(sb, "KR", acc->funds, 0);
+    pst_num(sb, "Junk", acc->junk, 0); // acc.junk (the krunker.io account's player_jnk; Box Office accounts have none)
+    pst(sb, "Inventory", " ~0");
+    pst_num(sb, I18N("generic.score", "Score"), acc->score, 0);
+    pst_num(sb, "SPK", acc->score / fmax(acc->kills, 1), 2);
+    pst_num(sb, I18N("generic.kills", "Kills"), acc->kills, 0);
+    pst_num(sb, I18N("generic.deaths", "Deaths"), acc->deaths, 0);
+    pst_num(sb, I18N("generic.kdr", "KDR"), acc->kills / fmax(acc->deaths, 1), 4);
+    pst_num(sb, "KPG", acc->kills / fmax(acc->games, 1), 4);
+    pst_num(sb, I18N("generic.games", "Games"), acc->games, 0);
+    snprintf(a, sizeof(a), "%g", round(acc->wins / fmax(losses, 1) * 1000) / 1000);
+    pst(sb, "W/L", a);
+    pst_num(sb, I18N("generic.wins", "Wins"), acc->wins, 0);
+    pst_num(sb, I18N("generic.lose", "Losses"), losses, 0);
+    pst_num(sb, I18N("stats.assists", "Assists"), stat_in(acc, "ast"), 0);
+    pst_num(sb, I18N("stats.melee", "Melee"), stat_in(acc, "mk"), 0);
+    pst_num(sb, I18N("stats.fistkills", "Beatdowns"), stat_in(acc, "fk"), 0);
+    pst_num(sb, I18N("stats.thrownkills", "Bullseyes"), stat_in(acc, "tmk"), 0);
+    pst_num(sb, I18N("stats.headshots", "Headshots"), stat_in(acc, "hs"), 0);
+    pst_num(sb, I18N("stats.legshots", "Legshots"), stat_in(acc, "ls"), 0);
+    pst_num(sb, I18N("stats.wallbangs", "Wallbangs"), stat_in(acc, "wb"), 0);
+    pst_num(sb, I18N("stats.shots", "Shots"), shots, 0);
+    pst_num(sb, I18N("stats.hits", "Hits"), hits, 0);
+    pst_num(sb, I18N("stats.misses", "Misses"), shots - hits, 0);
+    snprintf(a, sizeof(a), "%g%%", shots > 0 ? round(hits / shots * 100 * 100) / 100 : 0.0);
+    pst(sb, I18N("generic.accuracy", "Accuracy"), a);
+    readable_time(a, sizeof(a), acc->time_played);
+    pst(sb, I18N("generic.timep", "Time Played"), a);
+    sb_append(sb, "</div><div class='statTabB1 hide'>");
+    pst_num(sb, I18N("stats.nukes", "Nukes"), stat_in(acc, "n"), 0);
+    pst_num(sb, I18N("stats.airdrops", "Airdrops"), stat_in(acc, "ad"), 0);
+    pst_num(sb, I18N("stats.airdrops.stolen", "Airdrops Stolen"), stat_in(acc, "sad"), 0);
+    pst_num(sb, I18N("stats.slimers", "Slimers"), stat_in(acc, "sl"), 0);
+    pst_num(sb, I18N("stats.juggernauts", "Juggernauts"), stat_in(acc, "jg"), 0);
+    sb_appendf(sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>%s<strong>%.0f</strong></div>",
+               I18N("stats.juggernauts.killed", "Juggernauts Killed"), stat_in(acc, "kjg"));
+    pst_num(sb, I18N("stats.warmachines", "War Machines"), stat_in(acc, "wm"), 0);
+    sb_append(sb, "</div><div class='statTabB2 hide'>");
+    pst_num(sb, I18N("stats.crouches", "Crouches"), stat_in(acc, "crc"), 0);
+    pst_num(sb, I18N("stats.sprays", "Sprays Placed"), stat_in(acc, "spry"), 0);
+    char kpd[32];
+    snprintf(kpd, sizeof(kpd), "%d/%d", acc->job_rating_pos, acc->job_rating); // jobRatingPos / jobRating
+    pst(sb, I18N("stats.kpd", "Helpful Reports"), kpd);
+    sb_append(sb, "</div><div class='statTabB3 hide'>");
+    const MenuUi *ui = menu_ui();
+    for (int i = 0; i < ui->class_count; i++) {
+        const MenuClass *c = &ui->classes[i];
+        char key[16];
+        snprintf(key, sizeof(key), "c%d", c->index);
+        const double xp = stat_in(acc, key), lv = RANK_VAR * sqrt(xp);
+        int level = (int) floor(lv);
+        const int pct = (int) lround((lv - level) * 100.0);
+        const double lo = level > 1 ? pow(level / RANK_VAR, 2) : 0.0, hi = pow((level + 1) / RANK_VAR, 2);
+        level = level + 1 > 1 ? level + 1 : 1;
+        sb_appendf(sb, "<div class='clsStatCard'><img class='clsStatImg' src='%s'/><div class='clsStatName'>", c->icon);
+        sb_append_esc(sb, c->name ? c->name : "");
+        sb_append(sb, "</div><div class='clsStatWeap'>");
+        sb_append_esc(sb, c->weapon ? c->weapon : "");
+        sb_appendf(sb, "</div><div class='clsStatXPBar'><div class='clsStatXPBarC' style='width:%d%%'></div><div class='clsStatXPBarV'>%d / %d</div></div><div class='clsStatLvl'>Lvl %d</div></div>",
+                   pct, (int) (xp - lo), (int) (hi - lo), level);
+    }
+    sb_append(sb, "</div><div class='statTabB4 hide'>");
+    if (!kio) { // KrunkNative's medal counts (kn_brain "mdl"): no such data for a krunker.io account
+        medal_tab_html(sb);
+        if (!g_medal_counts) backend_social_send_text("[\"mdl\"]");
+    }
+    sb_append(sb, "</div></div>");
+}
+
 static char *gen_account(void) {
     static const char *const tabs[] = {"<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", "Friends", "Partner",
                                        "Settings", "Connections", "<span class='material-icons' style='color:#96ff50;font-size:42px;vertical-align:bottom'>vpn_key</span>"}; // config.profileTabs
@@ -1769,84 +2193,7 @@ static char *gen_account(void) {
         }
         sb_appendf(&sb, "</a></div><div class='settName'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>",
                    I18N("generic.level", "Level"), g_acc.level);
-        sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
-        xp_bar_text(a, sizeof(a));
-        sb_appendf(&sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%.6g%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
-        sb_append(&sb, "<div id='statHolder'><div style='height:15px;'></div><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;'>");
-        for (int i = 0; i < 5; i++) {
-            sb_appendf(&sb, "<div id='statTab%d' class='bigMenTab%s' onclick='playSelect(0.1);windows[4].switchStat(%d)' style='padding-left: 5px; padding-right: 5px; padding-top: 10px; padding-bottom: 5px; line-height: 35px;font-size: 16px;'onmouseenter='playTick();'>%s</div>",
-                       i, i == 0 ? " bigMenTabA" : "", i, stat_tabs[i]);
-        }
-        sb_append(&sb, "</div><div class='statTabB0'>");
-        const double losses = g_acc.games - g_acc.wins > 0 ? g_acc.games - g_acc.wins : 0;
-        const double shots = stat_num("s"), hits = fmin(stat_num("s"), stat_num("h"));
-        snprintf(a, sizeof(a), "%d", g_acc.level);
-        pst(&sb, "LVL", a);
-        pst_num(&sb, "KR", g_acc.funds, 0);
-        pst_num(&sb, "Junk", 0, 0);
-        pst(&sb, "Inventory", " ~0");
-        pst_num(&sb, I18N("generic.score", "Score"), g_acc.score, 0);
-        pst_num(&sb, "SPK", g_acc.score / fmax(g_acc.kills, 1), 2);
-        pst_num(&sb, I18N("generic.kills", "Kills"), g_acc.kills, 0);
-        pst_num(&sb, I18N("generic.deaths", "Deaths"), g_acc.deaths, 0);
-        pst_num(&sb, I18N("generic.kdr", "KDR"), g_acc.kills / fmax(g_acc.deaths, 1), 4);
-        pst_num(&sb, "KPG", g_acc.kills / fmax(g_acc.games, 1), 4);
-        pst_num(&sb, I18N("generic.games", "Games"), g_acc.games, 0);
-        snprintf(a, sizeof(a), "%g", round(g_acc.wins / fmax(losses, 1) * 1000) / 1000);
-        pst(&sb, "W/L", a);
-        pst_num(&sb, I18N("generic.wins", "Wins"), g_acc.wins, 0);
-        pst_num(&sb, I18N("generic.lose", "Losses"), losses, 0);
-        pst_num(&sb, I18N("stats.assists", "Assists"), stat_num("ast"), 0);
-        pst_num(&sb, I18N("stats.melee", "Melee"), stat_num("mk"), 0);
-        pst_num(&sb, I18N("stats.fistkills", "Beatdowns"), stat_num("fk"), 0);
-        pst_num(&sb, I18N("stats.thrownkills", "Bullseyes"), stat_num("tmk"), 0);
-        pst_num(&sb, I18N("stats.headshots", "Headshots"), stat_num("hs"), 0);
-        pst_num(&sb, I18N("stats.legshots", "Legshots"), stat_num("ls"), 0);
-        pst_num(&sb, I18N("stats.wallbangs", "Wallbangs"), stat_num("wb"), 0);
-        pst_num(&sb, I18N("stats.shots", "Shots"), shots, 0);
-        pst_num(&sb, I18N("stats.hits", "Hits"), hits, 0);
-        pst_num(&sb, I18N("stats.misses", "Misses"), shots - hits, 0);
-        snprintf(a, sizeof(a), "%g%%", shots > 0 ? round(hits / shots * 100 * 100) / 100 : 0.0);
-        pst(&sb, I18N("generic.accuracy", "Accuracy"), a);
-        readable_time(a, sizeof(a), g_acc.time_played);
-        pst(&sb, I18N("generic.timep", "Time Played"), a);
-        sb_append(&sb, "</div><div class='statTabB1 hide'>");
-        pst_num(&sb, I18N("stats.nukes", "Nukes"), stat_num("n"), 0);
-        pst_num(&sb, I18N("stats.airdrops", "Airdrops"), stat_num("ad"), 0);
-        pst_num(&sb, I18N("stats.airdrops.stolen", "Airdrops Stolen"), stat_num("sad"), 0);
-        pst_num(&sb, I18N("stats.slimers", "Slimers"), stat_num("sl"), 0);
-        pst_num(&sb, I18N("stats.juggernauts", "Juggernauts"), stat_num("jg"), 0);
-        sb_appendf(&sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>%s<strong>%.0f</strong></div>",
-                   I18N("stats.juggernauts.killed", "Juggernauts Killed"), stat_num("kjg"));
-        pst_num(&sb, I18N("stats.warmachines", "War Machines"), stat_num("wm"), 0);
-        sb_append(&sb, "</div><div class='statTabB2 hide'>");
-        pst_num(&sb, I18N("stats.crouches", "Crouches"), stat_num("crc"), 0);
-        pst_num(&sb, I18N("stats.sprays", "Sprays Placed"), stat_num("spry"), 0);
-        char kpd[32];
-        snprintf(kpd, sizeof(kpd), "%d/%d", g_acc.job_rating_pos, g_acc.job_rating); // jobRatingPos / jobRating
-        pst(&sb, I18N("stats.kpd", "Helpful Reports"), kpd);
-        sb_append(&sb, "</div><div class='statTabB3 hide'>");
-        const MenuUi *ui = menu_ui();
-        for (int i = 0; i < ui->class_count; i++) {
-            const MenuClass *c = &ui->classes[i];
-            char key[16];
-            snprintf(key, sizeof(key), "c%d", c->index);
-            const double xp = stat_num(key), lv = RANK_VAR * sqrt(xp);
-            int level = (int) floor(lv);
-            const int pct = (int) lround((lv - level) * 100.0);
-            const double lo = level > 1 ? pow(level / RANK_VAR, 2) : 0.0, hi = pow((level + 1) / RANK_VAR, 2);
-            level = level + 1 > 1 ? level + 1 : 1;
-            sb_appendf(&sb, "<div class='clsStatCard'><img class='clsStatImg' src='%s'/><div class='clsStatName'>", c->icon);
-            sb_append_esc(&sb, c->name ? c->name : "");
-            sb_append(&sb, "</div><div class='clsStatWeap'>");
-            sb_append_esc(&sb, c->weapon ? c->weapon : "");
-            sb_appendf(&sb, "</div><div class='clsStatXPBar'><div class='clsStatXPBarC' style='width:%d%%'></div><div class='clsStatXPBarV'>%d / %d</div></div><div class='clsStatLvl'>Lvl %d</div></div>",
-                       pct, (int) (xp - lo), (int) (hi - lo), level);
-        }
-        sb_append(&sb, "</div><div class='statTabB4 hide'>");
-        medal_tab_html(&sb);
-        if (!g_medal_counts) backend_social_send_text("[\"mdl\"]");
-        sb_append(&sb, "</div></div>");
+        stats_html(&sb, &g_acc, 0);
     } else if (g_tab_index == 1) {
         // v10's friends tab: mutual follows from the friends event bus (v10_social.c)
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div>");
@@ -1856,9 +2203,6 @@ static char *gen_account(void) {
     } else if (g_tab_index == 2) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;'>Krunker Partner Benefits</div><div class='setBodH'><div class='settName' style='font-size:17px;'>You get <span style='color:#fff !important'>20-40% of Revenue</span> from KR Sales on your Partner Code in the Shop</div><div class='settName' style='font-size:17px;'>You <span style='color:#fff !important;'>earn money</span> when someone Plays your Custom Games/Maps</div><div class='settName' style='font-size:17px;'>Every time a referred player plays the game, you get a <span style='color:#fff !important;'>cut of the Ad Revenue</span></div></div></div><div class='setHed' style='padding-bottom:10px'>Partner Application</div><div class='setBodH' style='padding-top:10px;padding-bottom:10px;'><div style='font-size:19px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom:10px;'>By submitting an Application you agree to the <a href='https://frvr.com/legal/krunker#TermsofService'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:86%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a></div><div id='ctrtRes' style='color:rgba(255,255,255,0.5)'></div></div>");
     } else if (g_tab_index == 3) {
-        // KrunkNative: the two account backends, one per server type (krunker_account.h)
-        sb_appendf(&sb, "<div class='setHedS' style='margin-top:10px;'>%s</div>", I18N("kn.accounts.header", "Accounts"));
-        krunker_account_ui_accounts_html(&sb);
         sb_append(&sb, "<div class='setHedS' style='margin-top:10px;'>Account Settings</div>");
         if (g_acc.premium) {
             sb_append(&sb, "<div class='setBodH'><div class='settName'>Display Name<div class='updDisN' onclick='clearName();' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='changeName();'>Update</div><input type='search' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' id='displayN' class='smlInput' placeholder='");
@@ -2200,9 +2544,16 @@ static char *gen_challenges(void) {
     return sb_finish(&sb);
 }
 
-const cJSON *account_challenges(void) { return g_logged_in ? g_chal : NULL; }
+const cJSON *account_challenges(void) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // account.activeChallenges of the krunker.io account ("ua" slot 38)
+        const cJSON *c = active_account() ? cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges") : NULL;
+        return cJSON_IsArray(c) ? c : NULL;
+    }
+    return g_logged_in ? g_chal : NULL;
+}
 
 void account_challenges_request(void) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return; // (the krunker.io account's come with its "a" / "ua")
     if (!g_logged_in || g_chal || g_chal_requested) return;
     g_chal_requested = 1;
     backend_social_send_text("[\"chg\"]");
@@ -2396,8 +2747,43 @@ void account_ui_scenario_post(void) {
     g_scenario_c2fa = NULL;
 }
 
+// windows[4].gen() for the krunker.io account (the active one in an official game): v10's Account
+// window with what krunker.io tells this client about it (name, level, score, KR); its friends,
+// partner, settings and promo tabs are krunker.io's own services, which this client does not
+// reach: the window has the home tab only, and Logout signs out of krunker.io.
+static char *gen_kio_account(const AccountInfo *acc) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'><div class='bigMenTab bigMenTabA' style='font-size:16px' onmouseenter='playTick(0.1);'>"
+                   "<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span></div></div>");
+    sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
+    sb_append(&sb, "<div id='profilePicM'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'></div>");
+    sb_append(&sb, "<div class='setBodH' id='knKioAccName' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
+    sb_append(&sb, I18N("generic.name", "Name"));
+    sb_append(&sb, "<span class='floatR' style='color:rgba(255,255,255,0.8)'>");
+    sb_append_esc(&sb, acc->name);
+    sb_appendf(&sb, "</span></div><div class='settName' style='width:100%%'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>",
+               I18N("generic.clan", "Clan"));
+    if (acc->clan[0]) {
+        sb_append(&sb, "[");
+        sb_append_esc(&sb, acc->clan);
+        sb_append(&sb, "]");
+    } else {
+        sb_append(&sb, "None");
+    }
+    sb_appendf(&sb, "</span></div><div class='settName'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>",
+               I18N("generic.level", "Level"), acc->level);
+    stats_html(&sb, acc, 1); // its real stats: the official game server's "a" / "ua" data
+    sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' id='knKioLogout' onclick='logoutAcc()'>%s</a>",
+               I18N("generic.logout", "Logout"));
+    return sb_finish(&sb);
+}
+
 char *account_window_gen(const int id, const char **header) {
     (void) header;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account: window 5 only (the others need kn_brain)
+        const AccountInfo *kio = active_account();
+        return kio && id == 5 ? gen_kio_account(kio) : NULL;
+    }
     if ((backend_available() != 1 && !g_scenario) || !g_logged_in) return NULL; // the guest captures (LOGIN REQUIRED cards, login form)
     if (id == 5) return gen_account();
     if (id == 33) return gen_challenges();
@@ -2407,7 +2793,7 @@ char *account_window_gen(const int id, const char **header) {
 
 void account_window_post(const int id) {
     if (id != 5) return;
-    if (g_logged_in && (backend_available() == 1 || g_scenario)) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER ? active_account() != NULL : g_logged_in && (backend_available() == 1 || g_scenario)) {
         // windows[4].gen(): this.width = account ? 1280 : 955. The captured style is the guest's
         // 955 px, too narrow for the signed-in profile (its Name / Clan / Level box is 1004 px
         // beside the 181 px picture: it wrapped under it and its right column was clipped).

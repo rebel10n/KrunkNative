@@ -173,10 +173,6 @@ typedef struct {
 void  sb_append(StrBuf*, const char*);
 void  sb_append_n(StrBuf*, const char*, size_t);
 void  sb_append_esc(StrBuf*, const char*);        // esc(): & < > " '
-// The "Accounts" line (client/src/ui/krunker_account_ui.c): which account KrunkNative servers and
-// krunker.io servers each see (krunker_account.h), with a Login / Logout button per backend.
-void krunker_account_ui_accounts_html(StrBuf *sb);
-void krunker_account_ui_state_html(StrBuf *sb); // its krunker.io half: the name (level) + Logout, or Guest + Login
 void  sb_appendf(StrBuf*, const char *fmt, ...);
 char *sb_finish(StrBuf*);                          // returns the (always non-NULL) buffer; StrBuf is reset
 void  sb_free(StrBuf*);

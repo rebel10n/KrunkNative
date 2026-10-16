@@ -112,7 +112,7 @@ static void set_err(char *dst, const cJSON *error, const char *fallback) { set_m
 static int ok(const int status, const cJSON *error) { return status >= 200 && status < 300 && !error; }
 
 static const char *me(void) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return a ? a->name : "";
 }
 
@@ -1642,7 +1642,7 @@ int v10_studios_invite_count(void) { return S.invite_count; }
 
 // v10.js 213312: the My Games tab asks for the invites at most every 30 s, signed in only
 void v10_studios_poll_invites(void) {
-    if (!account_get() || backend_available() != 1) return;
+    if (!active_account() || backend_available() != 1) return;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     const double now = (double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6;

@@ -268,7 +268,7 @@ static void econ_missions_ask(void) {
 // Se.bpData && account.BP; a Strike account: its missions answer, unlocked
 static int bp_has_data(void) {
     if (econ_on()) return T.econ_missions && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(T.econ_missions, "locked"));
-    return account_get() && battlepass_ui_pass();
+    return active_account() && battlepass_ui_pass();
 }
 
 static const cJSON *missions_list(void) { return econ_on() ? T.econ_cards : account_challenges(); }

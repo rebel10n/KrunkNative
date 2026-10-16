@@ -79,7 +79,7 @@ static char *signup_html(const int match_end) {
 
 // window.showSignupRewards()
 void v10_show_signup_rewards(void) {
-    if (account_get()) return; // _39408 renders nothing for an account
+    if (active_account()) return; // _39408 renders nothing for an account
     char *html = signup_html(0);
     pop_show(html, "signupRewardsPop");
     free(html);
@@ -91,7 +91,7 @@ void v10_show_signup_rewards(void) {
 void v10_rewards_end_screen(void) {
     HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
     if (!el) return;
-    if (account_get()) {
+    if (active_account()) {
         html_dom_set_html(el, "");
         html_dom_set_display(el, "none");
         return;
@@ -134,7 +134,7 @@ int v10_rewards_frame(const char *label, const cJSON *frame) {
     int n = 0;
     cJSON_ArrayForEach(it, (cJSON_IsArray(skins) ? skins : NULL)) if (cJSON_IsNumber(it)) n++;
     fprintf(stderr, "[rewards] register rewards: %d cosmetics%s\n", n, premium ? " + premium" : "");
-    if (account_get()) register_rewards_popup(n, premium);
+    if (active_account()) register_rewards_popup(n, premium);
     return 1;
 }
 
@@ -413,7 +413,7 @@ static char *gen_challenges_guest(void) {
 // The v10 window bodies this file writes (NULL: not ours)
 char *v10_rewards_window_gen(const int id) {
     if (id != CHAL_WINDOW) return NULL;
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     return acc ? gen_challenges(acc) : gen_challenges_guest();
 }
 
@@ -429,7 +429,7 @@ void v10_rewards_challenges_changed(void) {
 static void bp_item_update(void) {
     HtmlElem box = html_dom_by_id("menuItemContainer");
     if (!box) return;
-    const int signed_in = account_get() != NULL;
+    const int signed_in = active_account() != NULL;
     if (signed_in) battlepass_ui_request();
     const BattlePass *bp = signed_in ? battlepass_ui_pass() : NULL;
     char key[sizeof g_bp_item_key];
@@ -490,7 +490,7 @@ int v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
     }
     if (!strcmp(name, "windows.32.openHome")) { // account ? showWindow(33) : loginOrRegister()
         g_chal_typ[0] = 0;
-        if (account_get()) menu_show_window(CHAL_WINDOW, 0);
+        if (active_account()) menu_show_window(CHAL_WINDOW, 0);
         else html_ui_dispatch("loginOrRegister", ev, NULL, 0);
         return 1;
     }
@@ -506,7 +506,7 @@ int v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
         return 1;
     }
     if (!strcmp(name, "openBattlePass")) { // account ? showWindow(6) : loginOrRegister()
-        if (account_get()) menu_show_window(6, 0);
+        if (active_account()) menu_show_window(6, 0);
         else html_ui_dispatch("loginOrRegister", ev, NULL, 0);
         return 1;
     }

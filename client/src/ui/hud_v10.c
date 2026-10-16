@@ -17,7 +17,7 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <ui_logic.h>
-#include <backend_ui.h> // account_get
+#include <backend_ui.h> // active_account
 #include <v10_menu.h>   // v10_menu_page
 #include <stdarg.h>
 #include <stdio.h>
@@ -44,7 +44,7 @@ void hud_v10_tick(const int in_game) {
     // KrunkNative: none before the player is in a game (client->in_game), so an account on the menu
     // and a join or a reload still loading have no chat either.
     const MenuUi *menu = menu_ui();
-    const char *want = !in_game || (menu && menu->menu_open && !account_get()) ? "none" : "block";
+    const char *want = !in_game || (menu && menu->menu_open && !active_account()) ? "none" : "block";
     if (!strcmp(want, g_chat_shown)) return;
     const HtmlElem el = html_dom_by_id("chatUIHolder");
     if (!el) return;
@@ -66,7 +66,7 @@ static void ap(char *out, const size_t size, size_t *len, const char *fmt, ...) 
 void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, const char *kr_html, const int score,
                                   const int kills, const int deaths, const int rank) {
     const char *cell = "display: flex; align-items: center; justify-content: center; padding: 10px 15px;";
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (acc) {
         // Account Level (v10:203104): the level icons (img/levels/<roundToNearest(2) - 1>), the
         // bar at levelProg (the old part, then this match's score in #fff), "<xp> / <need>"
@@ -128,7 +128,7 @@ void hud_v10_end_signup(const int show) {
     if (!hud_v10_page()) return;
     const HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
     if (!el) return;
-    const int on = show && !account_get(); // the component renders nothing for an $account
+    const int on = show && !active_account(); // the component renders nothing for an $account
     html_dom_set_html(el, on ? SIGNUP_HTML : "");
     html_dom_set_display(el, on ? "block" : "none");
 }

@@ -3,9 +3,22 @@
 // (services/brain/social_gapi.c). v10 sends HTTPS requests to gapi.svc.krunker.io with a bearer
 // token; KrunkNative's client already holds the authenticated social socket, so the requests ride
 // on it (doc/v10/social.md). Callbacks run on the main thread from backend_poll().
+//
+// While krunker.io is the active account backend (backend_ui.h: an official krunker.io game), the
+// same calls are v10's own: HTTPS to krunker.io's gapi (krunker_account_api(KRUNKER_SVC_API), v10's
+// _10449 = new _10077(GAPI_URI), v10:27600) with the krunker.io account's fresh access token, the
+// {data, error} answers unwrapped as v10's _10067 does (v10:26094). Only reads go there: GETs of the
+// player / social / clan / Turf Wars groups the Social hub, the profile and the clan views use.
+// Anything else (follow, vote, comment, post, gift, report, clan apply / settings, other groups) is
+// not ported for the krunker.io account and is not sent at all (0: the caller's own failure path);
+// the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
 #include <backend.h>
+#include <backend_ui.h>
+#include <krunker_account.h>
 #include <v10_social.h>
 #include <i18n.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,8 +63,81 @@ static void on_social(void *user, const cJSON *frame) {
     }
 }
 
+// ---- krunker.io's gapi (the krunker.io account's real data)
+
+#define KIO_PENDING 32
+static struct {
+    unsigned id; // 0 = free
+    V10GapiFn fn;
+    void *user;
+} g_kio[KIO_PENDING];
+static unsigned g_kio_ids;
+
+// the reads v10 makes on _10449 from the Social hub, the profile, the clan view and Turf Wars
+static int kio_readable(const char *method, const char *path) {
+    static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/"};
+    if (!method || strcmp(method, "GET") != 0) return 0;
+    for (size_t i = 0; i < sizeof(groups) / sizeof(groups[0]); i++)
+        if (!strncmp(path, groups[i], strlen(groups[i]))) return 1;
+    return 0;
+}
+
+// _10067: 204 / 304 -> no data; 429 -> "Rate limit exceeded. Try again later."; < 200 or >= 500 or a
+// body that is not JSON -> v10 throws (the callers' catch: their fallback text); else {data, error}
+static void kio_done(void *user, const int status, const cJSON *res) {
+    const unsigned id = (unsigned) (uintptr_t) user;
+    for (int i = 0; i < KIO_PENDING; i++) {
+        if (g_kio[i].id != id) continue;
+        const V10GapiFn fn = g_kio[i].fn;
+        void *u = g_kio[i].user;
+        g_kio[i].id = 0;
+        g_kio[i].fn = NULL;
+        if (status == 204 || status == 304) {
+            fn(u, status, NULL, NULL);
+        } else if (status == 429) {
+            cJSON *e = cJSON_CreateString("Rate limit exceeded. Try again later.");
+            fn(u, status, NULL, e);
+            cJSON_Delete(e);
+        } else if (status < 200 || status >= 500 || !cJSON_IsObject(res)) {
+            cJSON *e = status > 0 && status < 500 && !cJSON_IsObject(res) ? cJSON_CreateString("Invalid JSON response from server") : NULL;
+            fn(u, status > 0 && e ? 500 : status, NULL, e);
+            cJSON_Delete(e);
+        } else {
+            const cJSON *data = cJSON_GetObjectItem(res, "data"), *error = cJSON_GetObjectItem(res, "error");
+            if (cJSON_IsNull(data)) data = NULL;
+            if (cJSON_IsNull(error)) error = NULL;
+            fn(u, status, data, error);
+        }
+        return;
+    }
+}
+
+static int kio_gapi(const char *method, const char *path, const cJSON *body, const V10GapiFn fn, void *user) {
+    (void) body;
+    if (!kio_readable(method, path)) {
+        printf("[gapi] %s %s is not sent for the krunker.io account (read-only)\n", method ? method : "GET", path);
+        return 0;
+    }
+    int slot = -1;
+    for (int i = 0; i < KIO_PENDING && slot < 0; i++)
+        if (!g_kio[i].id) slot = i;
+    if (slot < 0) return 0;
+    if (!++g_kio_ids) g_kio_ids = 1;
+    g_kio[slot].id = g_kio_ids;
+    g_kio[slot].fn = fn;
+    g_kio[slot].user = user;
+    if (!krunker_account_api("GET", KRUNKER_SVC_API, path, NULL, kio_done, (void *) (uintptr_t) g_kio_ids)) {
+        g_kio[slot].id = 0;
+        g_kio[slot].fn = NULL;
+        return 0;
+    }
+    return 1;
+}
+
 int v10_gapi(const char *method, const char *path, const cJSON *body, const V10GapiFn fn, void *user) {
-    if (!fn || !path || backend_available() != 1) return 0;
+    if (!fn || !path) return 0;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return kio_gapi(method ? method : "GET", path, body, fn, user);
+    if (backend_available() != 1) return 0;
     if (!g_listening) g_listening = backend_social_listen(on_social, NULL);
     int slot = -1;
     for (int i = 0; i < GAPI_PENDING && slot < 0; i++)
@@ -77,6 +163,8 @@ int v10_gapi(const char *method, const char *path, const cJSON *body, const V10G
 void v10_gapi_cancel(const V10GapiFn fn, void *user) {
     for (int i = 0; i < GAPI_PENDING; i++)
         if (g_pending[i].fn == fn && g_pending[i].user == user) g_pending[i].fn = NULL;
+    for (int i = 0; i < KIO_PENDING; i++)
+        if (g_kio[i].id && g_kio[i].fn == fn && g_kio[i].user == user) g_kio[i].id = 0, g_kio[i].fn = NULL;
 }
 
 // v10 errors.* (ui/i18n/en.json) by code: _34580's table (code -> key, game.deob.js:103796), the

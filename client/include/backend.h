@@ -78,6 +78,18 @@ void backend_social_open(void);
 int backend_social_is_open(void);
 int backend_social_send(const cJSON *frame);
 int backend_social_send_text(const char *json);
+// The krunk.io account is not the active one (backend_ui.h: an official krunker.io game): the
+// social socket is held, every frame is refused (0) so nothing done under the krunker.io account
+// reaches the krunk.io account; only that session's own upkeep (its token restore) still goes, with
+// backend_social_send_session.
+void backend_social_hold(int on);
+int backend_social_held(void);
+// While held, a frame goes to this instead (account_ui.c: the krunker.io account's read-only requests
+// over the official game socket, krunker_net_send_account_frame); 0 = refused.
+typedef int (*BackendHeldSender)(const char *json);
+void backend_social_set_held_sender(BackendHeldSender fn);
+int backend_social_send_session(const cJSON *frame);
+int backend_social_send_raw(const char *json); // (the platform halves: queue the frame, no hold)
 int backend_social_listen(BackendSocialFn fn, void *user); // up to 8 listeners; returns 0 when full
 void backend_social_unlisten(BackendSocialFn fn, void *user);
 

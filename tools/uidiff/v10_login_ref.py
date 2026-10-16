@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reference for the v10 login modal's Register card (tools/uidiff/scenarios/login-register.json).
 
-  python3 -E -P tools/uidiff/v10_login_ref.py <web dist dir>      (needs playwright + its Chromium)
+  python3 -E -P tools/uidiff/v10_login_ref.py <web dist dir> [--2fa]   (needs playwright + its Chromium)
 
 The offline v10 sandbox capture (doc/ref/krunker-v10.0.2/ranked-guest.png) only has the Login card,
 and v10's JS is never run here. v10_login.c emits the Register card from v10's template (_39035 with
@@ -10,6 +10,10 @@ Chromium with v10's CSS: the web build (make web, same C UI, the browser's DOM a
 offline at 1280x720, the 3D canvas hidden over the scenario's flat background, then
 loginOrRegister(true). Writes doc/ref/krunker-v10.0.2/login-register.png and prints the rects of
 the popup and its buttons (tools/uidiff/regions/login-register.json takes them).
+
+--2fa: the krunker.io sign-in's code form instead (tools/uidiff/scenarios/login-2fa.json): v10's
+generic form _6696 "Two-Factor Authentication" (six one-time-code boxes, Submit) over the login
+modal, shown by the knV10LoginCodeForm handler; writes doc/ref/krunker-v10.0.2/login-2fa.png.
 """
 import json
 import os
@@ -19,11 +23,13 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DIST = os.path.abspath(sys.argv[1])
-OUT = os.path.join(ROOT, "doc/ref/krunker-v10.0.2/login-register.png")
+TWOFA = "--2fa" in sys.argv[2:]
+OUT = os.path.join(ROOT, "doc/ref/krunker-v10.0.2/login-2fa.png" if TWOFA else "doc/ref/krunker-v10.0.2/login-register.png")
 RECTS = """() => { const r = s => { const e = document.querySelector(s); if (!e) return null;
                      const b = e.getBoundingClientRect(); return [b.x, b.y, b.width, b.height].map(Math.round); };
                    return {popup: r('#knV10Login .popup'), submit: r('#knV10LoginSubmit'), switch: r('#knV10AuthSwitch'),
-                           bonuses: r('#knV10Login .sign-up-bonuses')}; }"""
+                           bonuses: r('#knV10Login .sign-up-bonuses'), code: r('#knV10Code .popup'),
+                           box0: r('#knV10Code0'), box5: r('#knV10Code5'), codeSubmit: r('#knV10CodeSubmit')}; }"""
 
 
 def main():
@@ -43,7 +49,13 @@ def main():
                 tab.wait_for_function("window.__krunknative_wasm_ready === true", timeout=120000)
                 tab.add_style_tag(content="#canvas{visibility:hidden!important}html,body{background:#222222!important}")
                 tab.wait_for_timeout(4000)
-                tab.evaluate("knCall('loginOrRegister', [true])")
+                if TWOFA:
+                    tab.evaluate("knCall('loginOrRegister', [false])")
+                    tab.wait_for_timeout(500)
+                    tab.evaluate("knCall('knV10LoginCodeForm', ['2fa'])")
+                    tab.evaluate("document.activeElement && document.activeElement.blur()")  # (no focus ring in the reference)
+                else:
+                    tab.evaluate("knCall('loginOrRegister', [true])")
                 tab.wait_for_timeout(1000)
                 tab.screenshot(path=OUT)
                 print(json.dumps(tab.evaluate(RECTS)))

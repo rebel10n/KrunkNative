@@ -6,7 +6,7 @@
 #include "editor_ai.h"
 #include "editor_panel_kit.h"
 #include <app_mode.h>    // app_route_url (Documentation, links)
-#include <backend_ui.h>  // account_get (the Account menu)
+#include <backend_ui.h>  // active_account (the Account menu)
 #include <html_ui.h>
 #include <ctype.h>
 #include <math.h>
@@ -440,12 +440,12 @@ static void tb_prefab_menu(TbBuild *t, const char *name, const int cat, const in
 static int g_toolbar_account = -1; // the account id the toolbar shows (0 = none)
 
 void ed_toolbar_account_check(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if ((acc ? acc->id : 0) != g_toolbar_account) ed_toolbar_show();
 }
 
 void ed_toolbar_show(void) {
-    g_toolbar_account = account_get() ? account_get()->id : 0;
+    g_toolbar_account = active_account() ? active_account()->id : 0;
     EdBuild b;
     ed_gui_begin(&b, PANEL_TOOLBAR);
     TbBuild tb = {.b = &b, .first = {1}, .depth = 0};
@@ -555,7 +555,7 @@ void ed_toolbar_show(void) {
     tb_end(t);
 
     tb_root_begin(t, "Account");
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     if (acc) {
         char name[64];
         snprintf(name, sizeof(name), "Username: %s", acc->name);

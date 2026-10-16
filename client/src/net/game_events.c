@@ -261,9 +261,9 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         card.my_card_url = events_card_url(victim->cosmetics_v7.player_card, my_card, sizeof(my_card));
         // (otherPlayer.level <= 10 || !level) && account && !Game.isCustom: "[key] to Report"
         const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
-        card.report = account_get() && !game_config_is_custom(&client->game) && (!info || info->level <= 10);
+        card.report = active_account() && !game_config_is_custom(&client->game) && (!info || info->level <= 10);
         // our "lvl": account.stats["c" + classIndex] (guests: lvl 1)
-        const AccountInfo *acc = account_get();
+        const AccountInfo *acc = active_account();
         char key[8];
         snprintf(key, sizeof(key), "c%d", victim->class_index);
         const cJSON *cls = acc && acc->stats ? cJSON_GetObjectItemCaseSensitive(acc->stats, key) : NULL;

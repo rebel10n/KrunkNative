@@ -12,6 +12,17 @@
 // gapi calls through v10_gapi() (services/brain/social_gapi.c) and the friends event bus as
 // ["eb", {...}] frames on the social socket (services/brain/social_eb.c). KrunkNative adds element
 // ids (v10s*) for focus / scroll restoration and tests; they carry no style.
+//
+// While krunker.io is the active account backend (backend_ui.h: an official krunker.io game) the hub
+// shows the krunker.io account's real data, fetched as v10 fetches it: the gapi reads go to
+// krunker.io's gapi with that account's token (v10_gapi.c), the friends event bus is v10's own
+// socket (krunker_eb.h: <EVENT_BUS_URI>/ws?at=<fresh token>, v10 _49718, v10:139770) instead of
+// kn_brain's ["eb"] frames, with v10's reconnect backoff (_49724: min(30 s, 2^n s)). Direct messages
+// and read receipts are what v10 sends from the Friends tab, so they go over that socket too. What
+// would change the krunker.io account or spend its KR is not ported here and reads as v10 shows it
+// to a guest (actor() = NULL): Follow / Unfollow (profile, follow list, giveaway card), Like,
+// comments, New post, Gift KR, Report, Trade and the clan view's Request to Join are hidden or do
+// nothing; v10_gapi.c does not send their requests for that account either.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -24,6 +35,8 @@
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
 #include <v10_notify.h> // the notification center: friend requests, direct messages (v10_notify.c)
+#include <krunker_account.h> // the krunker.io account: the event bus's fresh token, its URL
+#include <krunker_eb.h>      // krunker.io's friends event bus socket
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -132,7 +145,12 @@ static struct {
     int64_t selected;                // selected friend id (0 none)
     char friend_filter[64];
     char compose[EB_TEXT_MAX * 4 + 8];
-    int64_t account_id;              // the account the bus is for
+    int64_t account_id;              // the account the bus is for (krunker.io: bus_account()'s key)
+    int backend;                     // the account backend the hub last showed (AccountBackend)
+    // krunker.io's event bus (krunker_eb.h)
+    unsigned kio_gen;                // bumped per (re)connect / reset: a late token is dropped
+    int kio_backoff;                 // v10 _49698: reconnect attempts since the last open
+    double kio_retry_at;             // ms of the next reconnect (0 none)
     double last_ping;
     int list_requested;
     // view stack
@@ -298,13 +316,30 @@ static int level_of(const double score) {
 }
 
 static int my_level(void) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return a ? a->level : 0;
 }
 
 static int64_t my_id(void) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return a ? a->id : 0;
+}
+
+// krunker.io is the active account backend: the hub reads the krunker.io account's data
+static int kio(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// The account the hub acts as: none for the krunker.io account (its writes are not ported: the
+// views show what v10 shows a guest for them), else the active account.
+static const AccountInfo *actor(void) { return kio() ? NULL : active_account(); }
+
+// The account the friends bus is for: kn_brain's id, or (krunker.io, whose account has no kn_brain
+// id) a negative key of the signed-in krunker.io account's name; 0 = none (guest).
+static int64_t bus_account(void) {
+    if (!kio()) return my_id();
+    if (!krunker_account_signed_in()) return 0;
+    uint32_t h = 2166136261u;
+    for (const char *c = krunker_account_name(); *c; c++) h = (h ^ (unsigned char) *c) * 16777619u;
+    return -1 - (int64_t) (h & 0x7fffffff);
 }
 
 // v10 _34422: staff clan tags are gold
@@ -460,15 +495,26 @@ char *v10_social_window_friends_html(void) {
             sb_arg(&sb, url);
             sb_append(&sb, ",1)\">Join</div>");
         }
-        sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
-        sb_arg(&sb, name);
-        sb_appendf(&sb, ",%d)\">Remove Friend</div></div></div></div>", i++);
+        if (!kio()) { // krunker.io account: unfollowing is not ported (it changes that account)
+            sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
+            sb_arg(&sb, name);
+            sb_appendf(&sb, ",%d)\">Remove Friend</div>", i);
+        }
+        i++;
+        sb_append(&sb, "</div></div></div>");
     }
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
 static void eb_send(cJSON *obj) {
+    if (kio()) { // v10 _49728: JSON text on the event bus socket (dropped when it is not open)
+        char *t = cJSON_PrintUnformatted(obj);
+        if (t) krunker_eb_send(t);
+        free(t);
+        cJSON_Delete(obj);
+        return;
+    }
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("eb"));
     cJSON_AddItemToArray(f, obj);
@@ -483,7 +529,13 @@ static void eb_send_type(const char *type, const char *k1, const double v1) {
     eb_send(o);
 }
 
+static int bus_open(void) { return kio() ? krunker_eb_is_open() : backend_social_is_open(); }
+
 static void eb_reset(void) {
+    krunker_eb_close(); // (krunker.io's socket: v10 closes it with 1000 on logout)
+    S.kio_gen++;
+    S.kio_backoff = 0;
+    S.kio_retry_at = 0;
     cJSON_Delete(S.friends);
     S.friends = NULL;
     S.friends_more = S.friends_loading = S.friends_next = 0;
@@ -677,7 +729,9 @@ static void eb_on_history(const cJSON *o) {
         Msg *x = conv_insert(c, at++);
         if (!x) break;
         x->server_id = id;
-        x->sent = (int64_t) jnum(m, "from") == me;
+        // krunker.io: the account's id is not known here; a 1:1 conversation's message not from the
+        // peer is ours (v10: from === account.id)
+        x->sent = kio() ? (int64_t) jnum(m, "from") != peer : (int64_t) jnum(m, "from") == me;
         x->text = strdup(jstr(m, "text"));
         x->ts = jnum(m, "ts");
         x->status = MSG_DELIVERED;
@@ -733,10 +787,12 @@ static void eb_on_error(const cJSON *o) {
     }
 }
 
+static void eb_dispatch(const cJSON *o);
+
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
-    if (!label) return;
+    if (!label || kio()) return; // krunker.io: the bus is krunker.io's socket (the kn_brain one is held)
     if (!strcmp(label, "__close")) {
         if (S.account_id) {
             S.eb_status = EB_ERROR;
@@ -747,7 +803,7 @@ static void on_social(void *user, const cJSON *frame) {
         return;
     }
     if (!strcmp(label, "a")) { // a login answer: the bus is (re)connected for this account
-        const AccountInfo *a = account_get();
+        const AccountInfo *a = active_account();
         if (cJSON_IsNull(cJSON_GetArrayItem(frame, 1)) && a) {
             S.account_id = a->id;
             eb_connected();
@@ -756,7 +812,11 @@ static void on_social(void *user, const cJSON *frame) {
         return;
     }
     if (strcmp(label, "eb") != 0) return;
-    const cJSON *o = cJSON_GetArrayItem(frame, 1);
+    eb_dispatch(cJSON_GetArrayItem(frame, 1));
+}
+
+// one event bus message (kn_brain's ["eb", o] or krunker.io's socket), v10's onmessage switch
+static void eb_dispatch(const cJSON *o) {
     const char *type = jstr(o, "type");
     if (!strcmp(type, "friends:list")) eb_on_friends(o);
     else if (!strcmp(type, "msg:recv")) eb_on_recv(o);
@@ -781,13 +841,85 @@ static void on_social(void *user, const cJSON *frame) {
     if (S.open) render();
 }
 
+static int g_generation; // (defined with the gapi helpers below)
+
+// ---- krunker.io's event bus socket (v10 _49718 connect, _49724 reconnect)
+
+static void kio_retry(void) {
+    if (S.kio_retry_at) return;
+    double ms = 1000.0 * pow(2.0, S.kio_backoff);
+    if (ms > 30000.0) ms = 30000.0;
+    S.kio_backoff++;
+    S.kio_retry_at = now_ms() + ms;
+}
+
+static void kio_fail(const char *text) {
+    S.eb_status = EB_ERROR;
+    if (text) snprintf(S.eb_error, sizeof(S.eb_error), "%s", text); // NULL: an error already said keeps
+    S.list_requested = 0;
+    kio_retry();
+    if (S.open) render();
+}
+
+static void kio_token(void *user, const char *token) {
+    if ((unsigned) (uintptr_t) user != S.kio_gen || !kio() || !S.account_id) return;
+    if (!token || !token[0]) {
+        kio_fail("Not signed in.");
+        return;
+    }
+    char enc[6000], path[6100], url[6400];
+    backend_url_encode(enc, sizeof(enc), token);
+    snprintf(path, sizeof(path), "ws?at=%s", enc);
+    krunker_service_url(KRUNKER_SVC_EVENT_BUS, path, url, sizeof(url));
+    const int opened = krunker_eb_open(url);
+    memset(url, 0, sizeof(url));
+    memset(path, 0, sizeof(path));
+    memset(enc, 0, sizeof(enc));
+    if (!opened) kio_fail("Could not open the event-bus connection.");
+}
+
+static void kio_connect(void) {
+    S.kio_retry_at = 0;
+    S.eb_status = EB_CONNECTING;
+    S.eb_error[0] = 0;
+    S.list_requested = 1;
+    krunker_account_fresh_token(kio_token, (void *) (uintptr_t) ++S.kio_gen);
+}
+
+static void kio_event(void *user, const int event, const char *text, const int code) {
+    (void) user;
+    if (!kio() || !S.account_id) return;
+    if (event == KRUNKER_EB_OPEN) { // onopen: connected, friends:list {offset: 0}, the ping
+        S.kio_backoff = 0;
+        eb_connected();
+    } else if (event == KRUNKER_EB_MESSAGE) {
+        cJSON *o = cJSON_Parse(text);
+        if (o) eb_dispatch(o);
+        cJSON_Delete(o);
+        return; // (eb_dispatch re-rendered)
+    } else if (code != 1000) { // onclose: an error and a reconnect, unless closed normally
+        kio_fail(S.eb_error[0] ? NULL : "Event-bus connection lost.");
+        return;
+    } else {
+        S.eb_status = EB_DISCONNECTED;
+        S.list_requested = 1; // (no automatic reconnect after a normal close, as v10)
+    }
+    if (S.open) render();
+}
+
 void v10_social_account_changed(void) {
-    const int64_t id = my_id();
+    const int64_t id = bus_account();
+    const int backend = (int) account_backend();
+    if (backend != S.backend) { // the other backend's late answers are dropped
+        S.backend = backend;
+        g_generation++;
+    }
     if (id == S.account_id) return;
     views_clear(); // the profile / clan / post views were the old account's
     eb_reset();
     S.account_id = id;
-    if (id && backend_social_is_open()) eb_connected();
+    if (id && kio()) kio_connect();
+    else if (id && backend_social_is_open()) eb_connected();
     for (int i = 0; i < FEED_TABS; i++) S.feeds[i].loaded = 0;
     S.news.loaded = 0;
 }
@@ -849,7 +981,7 @@ static void conv_send(void) {
     cJSON_AddNumberToObject(o, "to", (double) S.selected);
     cJSON_AddStringToObject(o, "text", text);
     eb_send(o);
-    if (!backend_social_is_open()) {
+    if (!bus_open()) {
         m->status = MSG_FAILED;
         snprintf(m->error, sizeof(m->error), "Not connected.");
         c->npending--;
@@ -999,7 +1131,7 @@ static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
         commas(num, sizeof(num), jnum(p, "fds"));
         sb_appendf(sb, "<div class=\"post-giveaway svelte-10yvzvw\"><span class=\"post-giveaway-label svelte-10yvzvw\">Giveaway</span> %s "
                        "<span class=\"post-giveaway-kr svelte-10yvzvw\">KR</span></div> <div class=\"post-giveaway-cta svelte-10yvzvw\">", num);
-        const AccountInfo *a = account_get();
+        const AccountInfo *a = actor();
         if (a && strcmp(a->name, pln) != 0 && !jtrue(p, "_followed")) {
             const int busy = jtrue(p, "_following");
             sb_appendf(sb, "<button class=\"post-follow-btn svelte-10yvzvw\" type=\"button\"%s id=\"%sFollow%lld\" onclick=\"v10s('pfollow',%lld)\">"
@@ -1017,7 +1149,7 @@ static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
         sb_append_esc(sb, jstr(p, "txt"));
         sb_append(sb, "</div> ");
     }
-    const int voted = (int) jnum(p, "dlk") == 1, logged = account_get() != NULL;
+    const int voted = (int) jnum(p, "dlk") == 1, logged = actor() != NULL;
     const int busy = jtrue(p, "_busy");
     commas(num, sizeof(num), jnum(p, "vot"));
     sb_appendf(sb, "<div class=\"post-footer svelte-10yvzvw\"><button class=\"vote-btn svelte-10yvzvw%s\" type=\"button\"%s aria-pressed=\"%s\" "
@@ -1042,7 +1174,7 @@ static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
 }
 
 static void sb_social_tab(StrBuf *sb) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = actor(); // New post
     sb_append(sb, "<div class=\"social-root svelte-1dyc40r\">");
     sb_window_header(sb, "chat", "Social");
     sb_append(sb, "<div class=\"social-search-form svelte-1dyc40r\"><input type=\"text\" class=\"social-search-input svelte-1dyc40r\" "
@@ -1631,7 +1763,7 @@ static void sb_profile_stats(StrBuf *sb, const cJSON *d) {
 
 static void sb_profile_right(StrBuf *sb, View *v) {
     const cJSON *d = v->data;
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const int ntabs = a && (a->is_dev || a->is_mod) ? 8 : 7;
     sb_append(sb, "<div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
     for (int i = 0; i < ntabs; i++)
@@ -1788,7 +1920,7 @@ static void sb_profile(StrBuf *sb, View *v) {
                    "<div class=\"profile-detail-follow-label svelte-1hghrmf\">Following</div></button></div> ",
                lvl, curs, needs, need > 0 ? fmin(100.0, cur / need * 100.0) : 0.0, since, fol, fing);
     sb_append(sb, "<div class=\"profile-detail-actions svelte-1hghrmf\">");
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = actor(); // Follow / Trade / Gift KR / Report
     if (a && strcasecmp(a->name, name) != 0) {
         const int following = jnum(d, "follow_state") > 0;
         sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf%s\" type=\"button\" id=\"v10sProfileFollow\" onclick=\"v10s('follow')\"><i class=\"material-icons svelte-1hghrmf\">%s</i> <span>%s</span></button> ",
@@ -1874,7 +2006,7 @@ static void sb_clan(StrBuf *sb, View *v) {
         sb_arg(sb, jstr(d, "clan_link4"));
         sb_append(sb, ")\"><i class=\"material-icons svelte-5j94nj\">forum</i> <span>Discord</span></button> ");
     }
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = actor(); // Request to Join
     if (a && !a->clan[0]) {
         sb_appendf(sb, "<button class=\"clan-view-join svelte-5j94nj\" type=\"button\"%s id=\"v10sClanJoin\" onclick=\"v10s('apply')\"><i class=\"material-icons svelte-5j94nj\">%s</i> <span>%s</span></button> ",
                    v->apply_busy || v->applied ? " disabled" : "", v->applied ? "check" : "group_add",
@@ -2004,7 +2136,7 @@ static void sb_post_detail(StrBuf *sb, View *v) {
     } else if (post) {
         sb_post(sb, post, 0);
         sb_append(sb, " ");
-        if (account_get()) {
+        if (actor()) { // the reply form
             const char *t = g_reply;
             while (*t == ' ') t++;
             sb_append(sb, "<div class=\"reply-form svelte-h3kymj\"><input class=\"reply-input svelte-h3kymj\" type=\"text\" placeholder=\"Write a reply...\" maxlength=\"500\" id=\"v10sReply\" "
@@ -2102,7 +2234,7 @@ static void sb_follows(StrBuf *sb, View *v) {
         sb_appendf(sb, "<div class=\"follow-state-msg follow-empty svelte-1ef5zjv\">%s</div>", v->follows_tab ? "Not following anyone yet." : "No followers yet.");
     else {
         const cJSON *r;
-        const int64_t me = my_id();
+        const int64_t me = actor() ? my_id() : 0; // the rows' Follow buttons
         cJSON_ArrayForEach(r, list) {
             char since[32];
             fmt_date(since, sizeof(since), jstr(r, "date"));
@@ -2432,7 +2564,7 @@ static void vote_done(const int status, const cJSON *data, const cJSON *error, c
 static void post_vote(const int64_t pid) {
     cJSON *copies[16];
     const int n = post_copies(pid, copies, 16);
-    if (!n || !account_get() || jtrue(copies[0], "_busy")) return;
+    if (!n || !actor() || jtrue(copies[0], "_busy")) return;
     const int value = (int) jnum(copies[0], "dlk") == 1 ? 0 : 1;
     for (int i = 0; i < n; i++) {
         set_num(copies[i], "vot", jnum(copies[i], "vot") + (value ? 1 : -1));
@@ -2464,7 +2596,7 @@ static void post_follow_done(const int status, const cJSON *data, const cJSON *e
 static void post_follow(const int64_t pid) {
     cJSON *copies[16];
     const int n = post_copies(pid, copies, 16);
-    if (!n || !account_get() || jtrue(copies[0], "_following") || jtrue(copies[0], "_followed")) return;
+    if (!n || !actor() || jtrue(copies[0], "_following") || jtrue(copies[0], "_followed")) return;
     for (int i = 0; i < n; i++) cJSON_AddTrueToObject(copies[i], "_following");
     cJSON *body = cJSON_CreateObject();
     cJSON_AddTrueToObject(body, "follow");
@@ -2555,7 +2687,7 @@ static void comment_done(const int status, const cJSON *data, const cJSON *error
 static void post_reply(View *v) {
     const char *t = g_reply;
     while (*t == ' ') t++;
-    if (!*t || v->sending || !account_get()) return;
+    if (!*t || v->sending || !actor()) return;
     v->sending = 1;
     v->reply_error[0] = 0;
     cJSON *body = cJSON_CreateObject();
@@ -2577,7 +2709,7 @@ static void create_done(const int status, const cJSON *data, const cJSON *error,
         return;
     }
     // pop with the locally built post: every feed pane prepends it
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const int giveaway = v->giveaway;
     cJSON *p = cJSON_CreateObject();
     cJSON_AddNumberToObject(p, "pid", jnum(data, "post_id"));
@@ -2708,11 +2840,51 @@ static void on_view_frame(const char *label, const cJSON *frame) {
     }
 }
 
+// krunker.io: v10's own calls (_37210 getSales(name, rangeIndex) -> [{d, f}]; getListings(name) ->
+// [{marketid, skinindex, funds, m}], v10:109908 / 110044), the listings adapted to kn_brain's "ul"
+// rows ({sk, kr}) the Sales tab renders
+static void kio_sales_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v) return;
+    v->sales_loading = 0;
+    cJSON_Delete(v->sales);
+    v->sales = ok(status, error) && cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
+    render_views();
+}
+
+static void kio_listings_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v) return;
+    v->listings_loading = 0;
+    cJSON_Delete(v->listings);
+    v->listings = cJSON_CreateArray();
+    const cJSON *e;
+    if (ok(status, error)) {
+        cJSON_ArrayForEach(e, data) {
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddNumberToObject(row, "sk", jnum(e, "skinindex"));
+            cJSON_AddNumberToObject(row, "kr", jnum(e, "funds"));
+            cJSON_AddNumberToObject(row, "id", jnum(e, "marketid"));
+            cJSON_AddItemToArray(v->listings, row);
+        }
+    }
+    render_views();
+}
+
 static void profile_sales_load(View *v) {
     static const int days[7] = {7, 14, 21, 30, 60, 90, 120};
     if (!v->data) return;
     v->sales_loading = 1;
     v->listings_loading = 1;
+    if (kio()) {
+        char enc[160], path[220];
+        backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_name"));
+        snprintf(path, sizeof(path), "/players/%s/sales?range=%d", enc, v->sales_range);
+        if (!gapi("GET", path, NULL, kio_sales_done, view_tag(v))) kio_sales_done(0, NULL, NULL, view_tag(v));
+        snprintf(path, sizeof(path), "/players/%s/listings", enc);
+        if (!gapi("GET", path, NULL, kio_listings_done, view_tag(v))) kio_listings_done(0, NULL, NULL, view_tag(v));
+        return;
+    }
     social_frame_send("pst", cJSON_CreateString(jstr(v->data, "player_name")), cJSON_CreateNumber(days[v->sales_range]), NULL, NULL);
     social_frame_send("uml", cJSON_CreateNumber(jnum(v->data, "player_id")), NULL, NULL, NULL);
 }
@@ -2858,6 +3030,16 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (strcmp(name, "v10s") != 0) return -1;
     const char *op = arg_str(args, argc, 0);
     View *v = top_view();
+    // krunker.io account: the hub's writes are not ported (follow, like, comment, post, gift,
+    // report, trade, clan apply): their buttons are hidden as for a v10 guest, and a stale or
+    // scripted click does nothing (the stop keeps a card click from opening its post)
+    static const char *const kio_writes[] = {"compose", "submit", "giveaway", "vote", "pfollow", "reply", "follow", "frow",
+                                             "trade", "gift", "giftsend", "report", "reportsend", "apply"};
+    for (size_t i = 0; kio() && i < sizeof(kio_writes) / sizeof(kio_writes[0]); i++)
+        if (!strcmp(op, kio_writes[i])) {
+            html_ui_stop_propagation();
+            return 1;
+        }
     if (!strcmp(op, "stop")) {
         html_ui_stop_propagation();
     } else if (!strcmp(op, "noop")) {
@@ -2881,7 +3063,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             render();
         }
     } else if (!strcmp(op, "compose")) {
-        if (account_get()) {
+        if (actor()) {
             View *c = view_push(V_COMPOSE);
             (void) c;
             g_compose_text[0] = 0;
@@ -3049,7 +3231,12 @@ void v10_social_tick(void) {
     }
     v10_social_account_changed();
     if (S.open && !hub_shown()) hub_closed(); // clearPops() / another popup replaced it
-    if (S.account_id && S.eb_status == EB_DISCONNECTED && backend_social_is_open() && !S.list_requested) eb_connected();
+    krunker_eb_poll(kio_event, NULL); // krunker.io's event bus (nothing queued otherwise)
+    if (kio()) {
+        if (S.account_id && S.eb_status == EB_ERROR && S.kio_retry_at && now_ms() >= S.kio_retry_at) kio_connect();
+    } else if (S.account_id && S.eb_status == EB_DISCONNECTED && backend_social_is_open() && !S.list_requested) {
+        eb_connected();
+    }
     if (S.eb_status == EB_CONNECTED && now_ms() - S.last_ping > EB_PING_MS) {
         S.last_ping = now_ms();
         eb_send_type("presence:ping", NULL, 0);

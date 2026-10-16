@@ -1,9 +1,12 @@
 #pragma once
 #include <stddef.h>
+#include <cJSON.h>
 // The krunker.io account of the client (client/src/net/krunker_account.c): the second account
-// backend, beside the KrunkNative one (kn_brain's session, account_ui.c / backend_ui.h). Each server
-// type has its own: KrunkNative servers see the KrunkNative account, krunker.io servers (official
-// lobbies, krunker_net.h) see this one; both can be signed in at once, and either can be a guest.
+// backend, beside the krunk.io one (kn_brain's session, account_ui.c). Which one the client shows
+// and signs in to is the ACTIVE BACKEND (backend_ui.h active_account()): this one while an official
+// krunker.io game is joined or played, krunk.io everywhere else. There is no UI of its own: v10's
+// login modal (v10_login.c), header and Account window drive it when it is the active backend.
+// Each backend keeps its own session; either can be a guest.
 //
 // Only the player's own account, signed in by the player: no account creation, no automation of
 // anything krunker.io asks a human to do. The flow is the live client's (game.deob.js, READ ONLY;
@@ -37,15 +40,20 @@
 // (html_storage: kio_access_token, kio_refresh_token, beside kio_username / kio_level); passwords and
 // 2FA codes are wiped once their request is sent.
 //
-// Endpoints (tests, mirrors): KRUNKNATIVE_KRUNKER_API (default https://api.krunker.io) and
+// Endpoints (tests, mirrors): KRUNKNATIVE_KRUNKER_API (default https://gapi.svc.krunker.io) and
 // KRUNKNATIVE_KRUNKER_AUTH (default https://crucible.frvr.com/v1/auth); on the web ?krunkerApi= /
 // ?krunkerAuth=. Natively the requests go through the client's proxy (http_proxy.h: its krunker.io
-// scope covers api.krunker.io and crucible.frvr.com).
+// scope covers *.krunker.io and crucible.frvr.com).
 
-#define KRUNKER_ACCOUNT_DEFAULT_API "https://api.krunker.io"
+// v10's API client is `new _10077(_7284)` (v10:27600), _7284 = GAPI_URI = https://gapi.svc.krunker.io
+// (v10:16439): sign-in (/auth/...), /player, /shop, /ranked. (api.krunker.io answers
+// {"status":"Unauthorized"} to every one of them.)
+#define KRUNKER_ACCOUNT_DEFAULT_API "https://gapi.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_GAPI "https://gapi.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND "https://gamefrontend.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_AUTH "https://crucible.frvr.com/v1/auth"
+#define KRUNKER_ACCOUNT_DEFAULT_SOCIAL "https://social.krunker.io"           // v10 SOCIAL_URI
+#define KRUNKER_ACCOUNT_DEFAULT_EVENT_BUS "wss://event-bus.svc.krunker.io"   // v10 EVENT_BUS_URI (friends)
 #define KRUNKER_ACCOUNT_REFRESH_MARGIN_S 60
 
 // The krunker.io hosts v10.0.2's client talks to (_7283 api, _7284 gapi, _7287 gamefrontend). Tests and
@@ -70,6 +78,8 @@ KrunkerAccountState krunker_account_state(void);
 int krunker_account_signed_in(void);
 const char *krunker_account_name(void);   // the account's name ("" as a guest)
 int krunker_account_level(void);          // its level (0 = not known yet)
+double krunker_account_score(void);       // /player/me's player_score (0 = not known)
+double krunker_account_funds(void);       // /player/me's KR (0 = not known)
 // The last outcome for the account UI (an error, "signed out: the session expired", ...), "" none.
 const char *krunker_account_message(void);
 int krunker_account_message_is_error(void);
@@ -81,6 +91,8 @@ unsigned krunker_account_generation(void);
 // Start a sign-in (login: a username, or an email when it has an '@'). 0 = refused at once (empty
 // fields, one already running): krunker_account_message says why.
 int krunker_account_sign_in(const char *login, const char *password);
+int krunker_account_email_code(const char *email); // v10 "Send Email Code": loginEmailCode, then the code step
+int krunker_account_recover(const char *email);    // v10's recover card: recoverAccount (the outcome: krunker_account_message)
 int krunker_account_submit_code(const char *code); // KRUNKER_ACCOUNT_CODE: the code asked for
 void krunker_account_cancel(void);                // a running sign-in / code step ends (guest)
 void krunker_account_sign_out(void);
@@ -103,14 +115,26 @@ int krunker_account_ranked_points(double *out);
 // The held balance moves as v10's moves it after a ranked claim (+reward, v10:98744) or a purchase (-price, v10:111042).
 void krunker_account_add_points(double delta);
 
+// ---- krunker.io's services for the windows (the krunker.io account's real data while krunker.io is
+// the active backend, backend_ui.h): v10's API client (v10:26094 _10067, v10:27520 fetch): base +
+// "/" + path, Accept: application/json, POST bodies as JSON with an X-Idempotency-Key, and the
+// account's fresh access token as Authorization: Bearer (refreshed first; none for a guest).
+// Endpoints: KRUNKNATIVE_KRUNKER_API / _SOCIAL / _EVENT_BUS (web ?krunkerApi= / ?krunkerSocial= /
+// ?krunkerEventBus=). Natively through the client's proxy like the sign-in.
+typedef enum {
+    KRUNKER_SVC_API = 0,   // gapi.svc.krunker.io (v10 GAPI_URI): auth, player, shop, ranked, maps ({data, error} answers)
+    KRUNKER_SVC_SOCIAL,    // social.krunker.io: profiles, clans, feeds
+    KRUNKER_SVC_EVENT_BUS, // event-bus.svc.krunker.io: the friends socket (/ws?at=<token>)
+} KrunkerService;
+void krunker_service_url(KrunkerService svc, const char *path, char *out, size_t n);
+// The answer on the main thread: status 0 = unreachable / timed out; res = the parsed JSON body
+// (NULL when it was not JSON), valid during the call only.
+typedef void (*KrunkerApiFn)(void *user, int status, const cJSON *res);
+// method "GET" / "POST" / ...; body JSON or NULL. 0 = refused at once (every slot busy).
+int krunker_account_api(const char *method, KrunkerService svc, const char *path, const char *body, KrunkerApiFn fn, void *user);
+
 // A username sign-in's Turnstile request is the one krunker_captcha.h shows (krunker_net leaves it open).
 int krunker_account_owns_captcha(void);
 
 // Main thread, once per frame (backend_frame): the requests' answers, the restore at startup.
 void krunker_account_tick(void);
-
-// ---- the UI (client/src/ui/krunker_account_ui.c)
-// The "krunker.io account" modal (page handlers kioAccount() / knKioAccount(n)).
-void krunker_account_ui_open(void);
-void krunker_account_ui_tick(void); // per frame (backend_frame): the modal and the Servers window follow the account
-// krunker_account_ui_accounts_html (the "Accounts" line) is in ui_logic.h (it takes a StrBuf).

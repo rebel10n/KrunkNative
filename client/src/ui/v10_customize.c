@@ -38,7 +38,7 @@ static cJSON *g_owned_titles; // acc.titles (brain "ttl"), NULL none (or still u
 
 // account.titles (v10 _34392 getTitles): the brain's "ttl" reply; asked once
 static void titles_request(void) {
-    if (g_titles_requested || !account_get()) return;
+    if (g_titles_requested || !active_account()) return;
     g_titles_requested = 1;
     account_send_frame("ttl"); // ["ttl"]
 }
@@ -73,7 +73,7 @@ static const cJSON *title_get(const int id) { // _34399
 // acc.titles.indexOf(id) >= 0. A guest has none, and so has an account while the brain has no
 // grants for it (sh_titles: nothing grants titles yet)
 static int title_owned(const int id) {
-    if (!account_get()) return 0;
+    if (!active_account()) return 0;
     const cJSON *e;
     cJSON_ArrayForEach(e, g_owned_titles) if (cJSON_IsNumber(e) && e->valueint == id) return 1;
     return 0;
@@ -118,7 +118,7 @@ void v10_customize_frame(const cJSON *frame) {
 static void toolbar(StrBuf *out, const int tab) {
     static const char *const NAMES[3] = {"Class", "Loadout", "Customize"};
     static const char *const ICONS[3][2] = {{"class.png", "pixelated"}, {"loadout.png", "crisp-edges"}, {"outfit.png", "crisp-edges"}};
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     sb_append(out, "<div id='loadoutToolbar'><div id='loadoutCharName'>");
     sb_append_esc(out, acc ? (acc->alias[0] ? acc->alias : acc->name) : "Guest");
     sb_append(out, "</div><div id='loadoutTabs'>");
@@ -135,7 +135,7 @@ static void toolbar(StrBuf *out, const int tab) {
 
 // windows[52].gen() tab 0, after the slots: #otherContainer (colours, Playercard Stat, Title)
 static void other_container(StrBuf *out) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     // KrunkNative's offline player counts as an account (doc/v7/decisions.md): the colours show
     const int signed_in = acc || !online_mode_online();
     const int premium = acc && acc->premium > 0;

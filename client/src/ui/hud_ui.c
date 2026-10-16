@@ -32,7 +32,7 @@
 // browser can screenshot the HUD without clicking Play; `?kn_hud_demo=1`
 // (KRUNKNATIVE_HUD_DEMO=1) adds kill-feed rows and hit markers on a loop.
 #include <player_accounts.h>
-#include <backend_ui.h> // account_get: the local player's clan in the player list
+#include <backend_ui.h> // active_account: the local player's clan in the player list
 #include <client.h>
 
 // Game-event entry points (prototypes belong in client/include/ui_logic.h):
@@ -773,15 +773,20 @@ static void hud_plist_clan(StrBuf *sb, const char *clan) {
     sb_append(sb, "]</span>");
 }
 
-// The staff rights v10 checks: account.isDev / canTeleport / canGlobalKick (the signed-in account:
-// KrunkNative's DEV / moderator flags) and isHost (the server says this socket hosts the lobby:
-// NET_EXT_KN_ACCOUNT_RIGHTS HOST). Running the offline sandbox is neither (v10's own sandbox shows
-// no staff buttons and no host star either); the server checks every command again anyway.
-static int hud_plist_staff(const Client *client, int *dev, int *host) {
-    const AccountInfo *acc = account_get();
-    *dev = acc && (acc->is_dev || acc->is_mod);
+// The staff rights v10 checks, of the active account (krunk.io's DEV / moderator flags, or what the
+// official game server's "a" says of the krunker.io account): `dev` = account.isDev, which alone gives
+// Kill, TPAll and (canTeleport = isDev) TP2 / TPME; `kick` = canGlobalKick / canGlobalBan /
+// canGlobalFlag = isDev || isMod, the punish popup (v10 Account.updatePerms, game.deob.js:114461-114474;
+// genList :214291-214305). A moderator is not a DEV: no Kill / teleport buttons (the server refuses
+// them to it too). isHost (the server says this socket hosts the lobby: NET_EXT_KN_ACCOUNT_RIGHTS HOST)
+// also gets the punish popup. Running the offline sandbox is neither (v10's own sandbox shows no staff
+// buttons and no host star either); the server checks every command again anyway.
+static int hud_plist_staff(const Client *client, int *dev, int *kick, int *host) {
+    const AccountInfo *acc = active_account();
+    *dev = acc && acc->is_dev;
+    *kick = acc && (acc->is_dev || acc->is_mod);
     *host = client && !client->offline && (online_mode_server_rights() & NET_RIGHTS_HOST) != 0;
-    return *dev || *host;
+    return *kick || *host;
 }
 
 static void hud_plist_focus(StrBuf *sb, const PlistRow *r) {
@@ -796,8 +801,8 @@ static const char *hud_plist_ping_color(const int ping) {
 
 // v10 genList's first row for a K.P.D officer: the suspect (kpdData.sus) in a red frame, the name red
 static void hud_plist_suspect_row(StrBuf *sb, const Client *client, const PlistRow *r) {
-    int dev = 0, host = 0;
-    hud_plist_staff(client, &dev, &host);
+    int dev = 0, kick = 0, host = 0;
+    hud_plist_staff(client, &dev, &kick, &host);
     sb_append(sb, "<tr style='border:solid 2px red'><td class='pListName'>");
     hud_plist_focus(sb, r);
     sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
@@ -807,15 +812,15 @@ static void hud_plist_suspect_row(StrBuf *sb, const Client *client, const PlistR
     sb_append_esc(sb, r->name);
     hud_plist_clan(sb, r->clan);
     sb_append(sb, "</a></td></td><td class='pListActions'>"); // v10's own markup (the stray </td> included)
-    if (dev || host)
+    if (kick || host)
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
                        "<span class='takeAction material-icons'>construction</span></span>", r->uid);
     sb_append(sb, "</td></tr>");
 }
 
 static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, const int scenario) {
-    int dev = 0, host = 0;
-    hud_plist_staff(client, &dev, &host);
+    int dev = 0, kick = 0, host = 0;
+    hud_plist_staff(client, &dev, &kick, &host);
     sb_append(sb, "<tr><td class='pListName'>");
     hud_plist_focus(sb, r);
     if (r->host) sb_append(sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // iíïïiìï == id: the lobby's host
@@ -849,7 +854,7 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tp2' onclick='punishPlayer(\"%d\", 4)'>TP2</span>", r->uid);
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tpme' onclick='punishPlayer(\"%d\", 5)'>TPME</span>", r->uid);
     }
-    if (dev || host) // isHost || account.canGlobalKick / canSilentKick / canGlobalBan / canGlobalFlag
+    if (kick || host) // isHost || account.canGlobalKick / canSilentKick / canGlobalBan / canGlobalFlag
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
                        "<span class='takeAction material-icons'>construction</span></span>", r->uid);
     sb_append(sb, "</td></tr>");
@@ -893,11 +898,14 @@ static char *hud_plist_rows(void) {
     // isLobbyHost: this client runs the game (offline / hosted), like menu_ui.c's idle kick
     const int remote = client && client->net_connected && !client->offline && !client->game.is_local;
     const char *host = client ? client->net_address : "";
-    const int prod = remote && host[0] && strcmp(host, "127.0.0.1") && strcmp(host, "localhost") && strncmp(host, "192.168.", 8);
+    // config.isProd (game.deob.js:16406: the page is not served from 127.0.0.1 / localhost / 192.168.*):
+    // an official game is krunker.io's own, always prod there, so our player is only the first row
+    const int prod = account_backend() == ACCOUNT_BACKEND_KRUNKER ||
+                     (remote && host[0] && strcmp(host, "127.0.0.1") && strcmp(host, "localhost") && strncmp(host, "192.168.", 8));
     const Player *me = client ? client->me : NULL;
     const cJSON *scenario = hud_votekick_override(); // --render-scenario state.playerList
-    int dev = 0, is_host = 0;
-    hud_plist_staff(client, &dev, &is_host);
+    int dev = 0, kick = 0, is_host = 0;
+    hud_plist_staff(client, &dev, &kick, &is_host);
     PlistRow row;
     // the K.P.D officer's suspect first (kpdData.sus; a scenario row with "sus": true)
     int sus = hud_votekick_kpd_sus(client);
@@ -925,7 +933,7 @@ static char *hud_plist_rows(void) {
         sb_append(&sb, "<tr><td class='pListName'>");
         if (is_host) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // isHost
         const NetPlayerInfoPacket *info = me ? player_accounts_get(me->uid) : NULL;
-        const AccountInfo *acc = account_get();
+        const AccountInfo *acc = active_account();
         // the local row is the account's alias when signed in (v10 Game.players alias of the account)
         sb_append_esc(&sb, acc ? acc->name : me ? hud_player_name(client, me) : client ? client->menu_name : "");
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
@@ -2930,7 +2938,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">[",
               h2h >= 0 ? g_h2h[h2h].i_killed_them : 0);
     hb_append_escaped(out, size, &len, my_weapon && my_weapon->name ? my_weapon->name : "");
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img-right\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
                                "\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t", my_img);
     hud_death_banner(out, size, &len, card->my_card_url);
@@ -3433,7 +3441,7 @@ static void hud_end_results(const Client *client) {
     hud_end_title_hide();                       // overlay.vicTitle.show = false
     dom_style("endAHolderR", "opacity", "1");
     dom_style("endAHolderL", "opacity", "1");
-    if (!account_get() || !account_get()->premium) { // the ad slots of a non-premium player
+    if (!active_account() || !active_account()->premium) { // the ad slots of a non-premium player
         dom_display("endAHolderL", "inline-block");
         dom_display("endAHolderR", "inline-block");
     } else {
@@ -4553,8 +4561,8 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 ? (int) args[0].num : -1;
         const char *alias = hud_plist_alias(uid);
         if (!alias) return 1;
-        int dev = 0, host = 0;
-        hud_plist_staff(menu_ui()->client, &dev, &host);
+        int dev = 0, kick = 0, host = 0;
+        hud_plist_staff(menu_ui()->client, &dev, &kick, &host);
         StrBuf sb = {0};
         char q[96];
         snprintf(q, sizeof(q), "Are you sure you want to take action on %s?", alias); // windows.playerlist.punish
@@ -4562,7 +4570,9 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         sb_append_esc(&sb, q);
         sb_append(&sb, "</div><div class='takeActionTable'>");
         sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='punishPlayer(\"%d\", 0);clearPops();'>Kick</span>", uid);
-        if (dev) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
+        // Ban: canGlobalBan = isDev || isMod (v10 punishPopup, game.deob.js:217250; a host's ban is
+        // not offered: the server's admin ban checks DEV / moderator)
+        if (kick) sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn ban' onclick='banPlayer(\"%d\")'>Ban</span>", uid);
         sb_append(&sb, "</div>");
         char *html = sb_finish(&sb);
         ui_loadout_clear_pops();

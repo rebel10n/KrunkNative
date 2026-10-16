@@ -2416,6 +2416,38 @@ static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length
     return sent;
 }
 
+// The account-scoped frames io.account_frame takes (KrunkerLinkIO), and how many arguments of each it
+// passes on ("a": [error, id, username, data], never arg 4, the account's session token)
+static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
+    static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
+        *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;
+        return 1;
+    }
+    return 0;
+}
+
+static void account_frame(KrunkerLink *l, const KrunkerFrame *f) {
+    uint32_t argc = 0;
+    if (!l->io.account_frame || !account_scoped(f, &argc)) return;
+    KrunkerBuf args = {0};
+    const KrunkerValue arr = KRUNKER_V_ARRAY(f->args, argc);
+    if (krunker_value_to_json(&arr, &args) == KRUNKER_PROTO_OK && args.len >= 2) {
+        // ["name", args...]: the name, then the args array without its brackets
+        const size_t n = f->name_len + args.len + 8;
+        char *json = malloc(n);
+        if (json) {
+            const int inner = (int) args.len - 2;
+            const int w = snprintf(json, n, "[\"%.*s\"%s%.*s]", (int) f->name_len, f->name, inner > 0 ? "," : "", inner > 0 ? inner : 0,
+                                   (const char *) args.data + 1);
+            if (w > 0) l->io.account_frame(l->io.user, json, (size_t) w);
+            free(json);
+        }
+    }
+    krunker_buf_free(&args);
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -2424,6 +2456,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         return 0;
     }
     l->frames_in++;
+    account_frame(l, &f);
     switch (krunker_s2c_lookup(f.name, f.name_len)) {
         case KRUNKER_S2C_IO_INIT:
             id_string(arg(&f, 0), l->socket_id, sizeof(l->socket_id));

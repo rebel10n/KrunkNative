@@ -111,7 +111,7 @@ static void menu_idle_tick(Client *client) {
     double limit_ms;
     const int remote = client->net_connected && !client->offline && !client->game.is_local; // !isGameHost (offline: the host)
     const int no_kick = client->game.mode && (client->game.mode->config.no_kick || client->game.mode->config.no_client_kick);
-    const AccountInfo *account = account_get();
+    const AccountInfo *account = active_account();
     const int exempt = no_kick || spectate_active() || (account && account->is_dev) || game_config_is_custom(&client->game);
     if (!g_ui.menu_open || !remote || exempt || !idle_kick_prod(client, &limit_ms)) return;
     g_idle_ms += delta_ms;
@@ -1225,12 +1225,12 @@ void menu_update_class_box(void) {
     set_style("menuClassContainer", "z-index", "99999");
     if (tag_el && police) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan
-    } else if (tag_el && account_get()) {
+    } else if (tag_el && active_account()) {
         // account: level box, name, [clan], creator (verified, creatorBadge), premium (beenhere),
         // featured (check_circle) and the custom badge, each behind its privacy setting (the creator
         // and featured marks behind verifiedBadge, as v10:210861). No partner mark: v10's box never
         // had one.
-        const AccountInfo *acc = account_get();
+        const AccountInfo *acc = active_account();
         const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
         sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:white;'>%d</div><span class='menuClassPlayerName'>", acc->level);

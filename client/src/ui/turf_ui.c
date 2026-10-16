@@ -847,7 +847,7 @@ static void clan_stats(StrBuf *sb, const char *clan_id, const int mine) {
 }
 
 static void gen_my_clan(StrBuf *sb) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     if (!a || !a->clan[0]) {
         sb_append(sb, "<div class=\"my-clan-tab svelte-51j5cz\"><div class=\"no-clan-container svelte-51j5cz\"><div class=\"no-clan-content svelte-51j5cz\"><h2 class=\"no-clan-title svelte-51j5cz\">"
                       "Join the Turf Wars!</h2> <p class=\"no-clan-description svelte-51j5cz\">Create or join a clan to participate in Turf Wars and compete for control of maps!</p> "
@@ -1077,7 +1077,7 @@ static void gen_recruit(StrBuf *sb) {
     if (T.rc_region[0]) o += snprintf(path + o, sizeof(path) - (size_t) o, "&region=%s", region);
     if (T.rc_lang[0]) snprintf(path + o, sizeof(path) - (size_t) o, "&language=%s", lang);
     const V10Req *r = v10_get(path, TTL_MS);
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const int staff = a && (a->is_dev || a->is_mod), no_clan = a && !a->clan[0];
     if (no_clan) { // getMyApplications
         char t[256], p2[400];
@@ -1559,7 +1559,7 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     if (strncmp(name, "knTw", 4)) return -1;
     const int a0 = arg_int(args, argc, 0, 0);
     char s[64];
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const char *mine = a ? a->clan : "";
     if (!strcmp(name, "knTwTab")) {
         if (a0 >= 0 && a0 < TW_TABS) T.tab = a0;
@@ -1682,7 +1682,8 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         T.rc_page += a0;
         if (T.rc_page < 1) T.rc_page = 1;
     } else if (!strcmp(name, "knTwRcApply")) {
-        if (!a || T.rc_applying) return 1;
+        // krunker.io account: applying to a clan is not ported (it changes that account): no-op
+        if (!a || T.rc_applying || account_backend() == ACCOUNT_BACKEND_KRUNKER) return 1;
         char t[256], path[400];
         v10_url_token(t, sizeof(t));
         snprintf(path, sizeof(path), "/api/clans/%d/apply?token=%s", a0, t);
@@ -1690,6 +1691,7 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         T.rc_error[0] = 0;
         v10_send("POST", path, NULL, on_apply, NULL);
     } else if (!strcmp(name, "knTwRcTakedown")) {
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return 1; // krunker.io account: staff takedown not ported
         char tag[48];
         arg_str(ev, args, argc, 1, tag, sizeof(tag));
         confirm_takedown(a0, tag);

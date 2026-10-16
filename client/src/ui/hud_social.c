@@ -4,7 +4,7 @@
 // :16450-16490 and :16573-16580 (pressButton / releaseButton: spray, spray wheel, taunts).
 #include <hud_social.h>
 #include <sprays.h>
-#include <backend_ui.h> // account_get: premiumT
+#include <backend_ui.h> // active_account: premiumT
 #include <console.h>    // ui_console_on_chat: the dev console mirrors chat
 #include <player_accounts.h> // player_accounts_is_bot: a bot's chat line is never hidden
 #include <html_dom.h>
@@ -169,7 +169,7 @@ int social_mark_position(Client *client) {
 // Game.isSandbox || account && account.premiumT > 0; the wheel's "spry" index needs a v7 server.
 int social_spray_wheel_allowed(const Client *client) {
     if (!client || !social_server_v7(client)) return 0;
-    const AccountInfo *account = account_get();
+    const AccountInfo *account = active_account();
     return client->offline || (account && account->premium);
 }
 

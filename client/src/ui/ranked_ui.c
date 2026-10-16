@@ -37,6 +37,7 @@
 #include <krunker_net.h>    // the ranked match's game socket (krunker_net_join_match, krunker_net_ranked_elsewhere)
 #include <flavor.h> // the coordinator's flavor pool: ranked is Box Office's
 #include <math.h>
+#include <kio_store.h> // krunker.io's ranked shop while krunker.io is the active backend
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,7 +93,7 @@ static struct {
     int scenario;
 } R = {.board_page = 1, .history_page = 1};
 
-static const AccountInfo *acc(void) { return account_get(); }
+static const AccountInfo *acc(void) { return active_account(); }
 
 // THE choice of the ranked backend: krunker.io when a krunker.io account is signed in (even beside a
 // KrunkNative one), else KrunkNative, else none. A --render-scenario render answers from the brain's
@@ -320,6 +321,7 @@ static const V10Req *get_history(void) {
 }
 
 static const V10Req *get_shop(void) {
+    if (kio_store_active()) return kio_store_ranked_shop(); // krunker.io: ranked.getShop() with the account's token (v10:26380, _37760)
     if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return kio_get("shop", KRUNKER_RANKED_GAPI, "/ranked/shop", adapt_data, DATA_TTL_MS);
     char t[256], path[400];
     token(t, sizeof(t));
@@ -1143,7 +1145,8 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         return 1;
     } else if (!strcmp(name, "knRkBuy")) {
         html_ui_stop_propagation();
-        if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0);
+        if (kio_store_active()) kio_store_read_only("ranked/purchase"); // krunker.io: RP purchases are never sent
+        else if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0);
         return 1;
     } else if (!strcmp(name, "knRkShare")) {
         char origin[256], url[320];

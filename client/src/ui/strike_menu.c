@@ -177,7 +177,7 @@ static const StrikeAccount *econ(void) {
 }
 
 static void account_values(char *name, size_t nn, int *level, int *kr) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const Client *c = M.client;
     const StrikeAccount *e = econ();
     if (FIXTURE.set) {
@@ -1177,7 +1177,7 @@ static void on_board(void *user, const int status, const cJSON *data, const cJSO
         printf("[strike] leaderboard refused (%d)\n", status);
         return;
     }
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const char *board = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "board"));
     M.live_board_count = 0;
     const cJSON *row;

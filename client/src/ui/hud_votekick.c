@@ -10,7 +10,7 @@
 #include <html_ui.h>
 #include <hud_social.h>
 #include <player_accounts.h>
-#include <backend_ui.h> // account_get: v10 shows Votekick / K.P.D to accounts only; servers_ui_join_game (policeJoin)
+#include <backend_ui.h> // active_account: v10 shows Votekick / K.P.D to accounts only; servers_ui_join_game (policeJoin)
 #include <audio.h>
 #include <net_ext.h>
 #include <game_config.h> // game_config_is_custom: v10 isCustom
@@ -132,7 +132,7 @@ const cJSON *hud_votekick_override(void) { return g_vk.override; }
 // !initiated)) && !isRanked`. isCustom: a hosted lobby (its host kicks); the sandbox has no host.
 int hud_votekick_row_allowed(const Client *client, const char *alias, const int level_ok) {
     (void) level_ok;
-    if (!client || !account_get() || !alias || !alias[0]) return 0;
+    if (!client || !active_account() || !alias || !alias[0]) return 0;
     if (client->game.is_ranked) return 0;
     // !game.isCustom: the offline sandbox is hosted as custom on the server, but v10's sandbox is not,
     // and the client never receives the server's is_sandbox flag, so client->offline stands in for it
@@ -145,7 +145,7 @@ int hud_votekick_row_allowed(const Client *client, const char *alias, const int 
 
 // v10 :214300 iîÌîìiï: `account && account.level >= 5`
 int hud_votekick_kpd_row_allowed(const Client *client) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     return client && acc && acc->level >= 5;
 }
 
@@ -242,7 +242,7 @@ void hud_votekick_on_forfeit(Client *client, const NetVoteForfeitStatePacket *st
 // kickVoteY / kickVoteN (v10 :221373): only while a vote runs, the player is alive, and they have
 // not voted on this target yet. [1] sends v2k(target, 1), [2] v2k(target) and hides the prompt.
 int hud_votekick_key(Client *client, const int yes) {
-    if (!g_vk.active || !client || !client->me || !client->me->active || !account_get()) return 0;
+    if (!g_vk.active || !client || !client->me || !client->me->active || !active_account()) return 0;
     if (voted_on(g_vk.target)) return 0;
     send_vote(client, g_vk.target, yes);
     remember_vote(g_vk.target);

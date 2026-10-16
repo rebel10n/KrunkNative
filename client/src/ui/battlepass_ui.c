@@ -125,12 +125,14 @@ int64_t battlepass_ui_bpp(void) { return g_has_progress ? g_bpp : 0; }
 static void request_data(void) {
     if (g_bp_status) return;
     g_bp_status = 1;
-    backend_social_send_text("[\"bpdl\"]"); // io.send("bpdl")
+    // io.send("bpdl"); not sent (no socket yet, or the active account's server refused it): asked
+    // again by the next window render / sign-in instead of waiting forever
+    if (!backend_social_send_text("[\"bpdl\"]")) g_bp_status = 0;
 }
 
 // v10.0.2 io_accountResponse: windows[5].data || io.send("bpdl") at the login (the sidebar item)
 void battlepass_ui_request(void) {
-    if (account_get()) request_data();
+    if (active_account()) request_data();
 }
 
 // ------------------------------------------------------------------ windows[5].gen
@@ -440,7 +442,7 @@ static char *gen_window(void) {
 }
 
 char *battlepass_window_gen(const int id, const char **header) {
-    if (id != BP_WINDOW || !account_get()) return NULL; // guests: the captured "Sign-in" card
+    if (id != BP_WINDOW || !active_account()) return NULL; // guests: the captured "Sign-in" card
     if (header) *header = "Battle Pass"; // v7 bug fixed: i18n windows.battlepass.header is missing
     return gen_window();
 }
@@ -467,7 +469,7 @@ static void update_scroll(const int dir, const int columns) {
 }
 
 void battlepass_window_post(const int id) {
-    if (id != BP_WINDOW || !account_get()) return;
+    if (id != BP_WINDOW || !active_account()) return;
     const HtmlElem mw = html_dom_by_id("menuWindow");
     if (mw) html_dom_set_style(mw, "width", g_tab ? "1200px" : "1580px"); // this.width = tabIndex ? 1200 : 1580
     if (g_tab == 0 && g_bp && g_lvl - 3 > 0) update_scroll(1, g_lvl - 3);
@@ -606,16 +608,16 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         const HtmlElem b = html_dom_query(0, ".bpInfoBalloon");
         if (b) html_dom_set_display(b, !strcmp(name, "windows.5.showBalloon") ? "block" : "none");
     } else if (!strcmp(name, "windows.5.claimItem") || !strcmp(name, "windows.5.freeclaimItem")) {
-        if (!account_get()) return 1;
+        if (!active_account()) return 1;
         char frame[48];
         loading_popup("Claiming...");
         snprintf(frame, sizeof frame, "[\"bpclm\",%d]", arg_num(args, argc, 0, -1));
         backend_social_send_text(frame);
     } else if (!strcmp(name, "windows.5.purchasePop")) {
-        if (account_get()) purchase_pop();
+        if (active_account()) purchase_pop();
         else menu_show_window(5, 1);
     } else if (!strcmp(name, "windows.5.giftPop") || !strcmp(name, "selectBPGift")) { // v10 Gift VIP Tier
-        if (!account_get()) menu_show_window(5, 1);
+        if (!active_account()) menu_show_window(5, 1);
         else if (!g_bp) {
             g_after_purchase = 2; // afterData = giftPop
             menu_show_window(BP_WINDOW, 0);
@@ -624,7 +626,7 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         char who[64] = "", frame[192];
         const HtmlElem in = html_dom_by_id("giftPlayerName");
         if (in) html_dom_get_value(in, who, sizeof who);
-        if (!who[0] || !account_get()) return 1;
+        if (!who[0] || !active_account()) return 1;
         StrBuf sb = {0};
         sb_append(&sb, "[\"xstbp\",1,\"en\",null,null,null,\"");
         for (const char *p = who; *p; p++) if (*p != '"' && *p != '\\' && (unsigned char) *p >= 0x20) sb_appendf(&sb, "%c", *p);
@@ -636,21 +638,21 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         loading_popup("Please Wait...");
         backend_social_send_text(frame);
     } else if (!strcmp(name, "windows.5.claimAllItems")) { // v10 BP_CLAIM_ALL (no button on v10.0.2's page)
-        if (!account_get()) return 1;
+        if (!active_account()) return 1;
         loading_popup("Claiming...");
         backend_social_send_text("[\"bpclmAll\"]");
     } else if (!strcmp(name, "windows.5.skipLevelPop")) {
-        if (account_get()) skip_level_pop();
+        if (active_account()) skip_level_pop();
     } else if (!strcmp(name, "windows.5.increaseSkip")) {
         increase_skip(arg_num(args, argc, 0, 0));
     } else if (!strcmp(name, "selectBPTier") || !strcmp(name, "windows.5.selectBPTier")) {
         char frame[64];
         snprintf(frame, sizeof frame, "[\"xstbp\",%d,null]", arg_num(args, argc, 1, 1)); // io.send("xstbp", tier, creatorCode)
-        if (account_get()) backend_social_send_text(frame);
+        if (active_account()) backend_social_send_text(frame);
     } else if (!strcmp(name, "skipLevels") || !strcmp(name, "windows.5.skipLevels")) {
         char frame[48];
         snprintf(frame, sizeof frame, "[\"xstbpl\",%d]", skip_count()); // io.send("xstbpl", levels)
-        if (account_get() && html_dom_by_id("bp-skip-num")) backend_social_send_text(frame);
+        if (active_account() && html_dom_by_id("bp-skip-num")) backend_social_send_text(frame);
     } else if (!strcmp(name, "creatorCodeAction") && arg_num(args, argc, 1, 0) == 3) { // the purchase popup's creator code
         char code[128] = "";
         const HtmlElem in = html_dom_by_id("battlepassCreatorCode");
@@ -698,12 +700,12 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
                     bp_add_claimed(g_claimed, id, next, sizeof next);
                     snprintf(g_claimed, sizeof g_claimed, "%s", next);
                 }
-                if (account_get() && jnum(it, "sk") > 0) account_add_skin((int) jnum(it, "sk"));
+                if (active_account() && jnum(it, "sk") > 0) account_add_skin((int) jnum(it, "sk"));
                 count++;
             }
-            if (account_get() && cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
+            if (active_account() && cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
         } else {
-            if (account_get() && cJSON_IsNumber(sk) && sk->valueint > 0) account_add_skin(sk->valueint);
+            if (active_account() && cJSON_IsNumber(sk) && sk->valueint > 0) account_add_skin(sk->valueint);
             if (cJSON_IsObject(item)) {
                 char next[sizeof g_claimed];
                 bp_add_claimed(g_claimed, (int) jnum(item, "id"), next, sizeof next);
@@ -765,7 +767,7 @@ void battlepass_ui_end_clear(void) {
 
 // tabs.performance.gen(): #endBPLayout when (account && !isCustom && bpData)
 int battlepass_ui_end_html(StrBuf *sb) {
-    if (!g_end || !account_get()) return 0;
+    if (!g_end || !active_account()) return 0;
     const double mx = jnum(g_end, "mx") > 0 ? jnum(g_end, "mx") : 1, ml = jnum(g_end, "ml");
     const double bpp = jnum(g_end, "bpp");
     double points = fmod(bpp, mx);

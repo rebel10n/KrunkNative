@@ -138,14 +138,36 @@ void backend_dispatch_text(const char *text) {
     cJSON_Delete(frame);
 }
 
-int backend_social_send(const cJSON *frame) {
-    if (!frame || !backend_enabled()) return 0;
+static int g_social_hold;
+static BackendHeldSender g_held_sender;
+
+void backend_social_hold(const int on) { g_social_hold = on != 0; }
+int backend_social_held(void) { return g_social_hold; }
+void backend_social_set_held_sender(const BackendHeldSender fn) { g_held_sender = fn; }
+
+int backend_social_send_text(const char *json) {
+    if (g_social_hold) return json && g_held_sender ? g_held_sender(json) : 0;
+    return backend_social_send_raw(json);
+}
+
+static int send_frame(const cJSON *frame, const int session) {
+    if (!frame) return 0;
+    if (g_social_hold && !session) {
+        char *text = g_held_sender ? cJSON_PrintUnformatted(frame) : NULL;
+        const int ok = text ? g_held_sender(text) : 0;
+        free(text);
+        return ok;
+    }
+    if (!backend_enabled()) return 0;
     char *text = cJSON_PrintUnformatted(frame);
     if (!text) return 0;
-    const int ok = backend_social_send_text(text);
+    const int ok = backend_social_send_raw(text);
     free(text);
     return ok;
 }
+
+int backend_social_send(const cJSON *frame) { return send_frame(frame, 0); }
+int backend_social_send_session(const cJSON *frame) { return send_frame(frame, 1); }
 
 void backend_url_encode(char *out, const size_t n, const char *s) {
     static const char hex[] = "0123456789ABCDEF";

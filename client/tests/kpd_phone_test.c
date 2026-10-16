@@ -149,7 +149,7 @@ void audio_stop(const char *name) { (void) name; }
 void ui_loadout_clear_pops(void) { g_popups_cleared++; }
 
 // ------------------------------------------------------------------ game / session stubs
-const AccountInfo *account_get(void) { return NULL; }
+const AccountInfo *active_account(void) { return NULL; }
 int game_config_is_custom(const Game *g) { (void) g; return 0; }
 int servers_ui_join_game(const char *game_id) { (void) game_id; return 0; }
 static int g_spectating;

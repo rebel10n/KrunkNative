@@ -38,7 +38,7 @@ static void tier(const int stage, const char **name, const char **color) {
     else *name = "Starter", *color = "#b2f252";
 }
 
-static int claimable(void) { return account_get() && g_ds.known && !g_ds.claimed && g_ds.score >= g_ds.max_score; }
+static int claimable(void) { return active_account() && g_ds.known && !g_ds.claimed && g_ds.score >= g_ds.max_score; }
 
 #define DS_TOOLTIP "<div class=\"dsTooltip svelte-159x57l\"><p class=\"svelte-159x57l\">Earn free spins by playing games and scoring points!</p> <div class=\"dsTipTiers svelte-159x57l\"><div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName svelte-159x57l\" style=\"color:#b2f252;\">Starter</div> <div class=\"dsTipDesc svelte-159x57l\">Default spin (most days)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowElite svelte-159x57l\" style=\"color:#2196F3;\">Elite</div> <div class=\"dsTipDesc svelte-159x57l\">Every 3rd day (better rewards)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowHeroic svelte-159x57l\" style=\"color:#fc9803;\">Heroic</div> <div class=\"dsTipDesc svelte-159x57l\">Every 7th day (best rewards)</div></div></div> <ul class=\"svelte-159x57l\"><li class=\"svelte-159x57l\">Play matches to earn score points</li> <li class=\"svelte-159x57l\">Reach enough points to unlock a free spin</li> <li class=\"svelte-159x57l\">Resets daily — come back tomorrow for more!</li></ul></div>"
 
@@ -50,7 +50,7 @@ static char g_item_html[2048]; // what #dailySpinDiv shows besides the tooltip (
 static void render_item(HtmlElem item) {
     const char *name, *color;
     tier(g_ds.stage, &name, &color);
-    const int can = claimable(), done = account_get() && g_ds.claimed;
+    const int can = claimable(), done = active_account() && g_ds.claimed;
     StrBuf sb = {0};
     sb_append(&sb, "<img class=\"dsLogo svelte-159x57l\" src=\"./img/menu/free_spin.png\" alt=\"Daily Spin\"> <div class=\"dsInfo svelte-159x57l\"><div class=\"menuItemTitle svelte-159x57l\" style=\"color:#fff;\">Daily Spin - ");
     sb_appendf(&sb, "<span class=\"svelte-159x57l\" style=\"color:%s\">%s</span></div> <div class=\"dsMeta svelte-159x57l\">", color, name);
@@ -81,7 +81,7 @@ static void render_item(HtmlElem item) {
 // the item (and v10's divider after it) exists only for an account, in #menuItemContainer
 static void sync_item(void) {
     HtmlElem item = html_dom_by_id("dailySpinDiv");
-    const int want = account_get() != NULL;
+    const int want = active_account() != NULL;
     if (!want) {
         if (item) {
             HtmlElem div = html_dom_by_id("knDailySpinDivider");
@@ -111,7 +111,7 @@ static void ask(void) {
 }
 
 void v10_daily_spin_tick(void) {
-    const AccountInfo *acc = account_get();
+    const AccountInfo *acc = active_account();
     const int id = acc ? acc->id : 0;
     const double t = now_ms();
     if (id != g_ds.account_id) { // a login / logout: the old state is someone else's

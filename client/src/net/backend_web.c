@@ -247,7 +247,7 @@ void backend_social_open(void) {
 
 int backend_social_is_open(void) { return g_ws_open; }
 
-int backend_social_send_text(const char *json) {
+int backend_social_send_raw(const char *json) {
     if (!backend_enabled() || !json) return 0;
     backend_social_open();
     if (g_ws && g_ws_open) return emscripten_websocket_send_utf8_text(g_ws, json) == EMSCRIPTEN_RESULT_SUCCESS;

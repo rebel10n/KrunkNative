@@ -131,7 +131,7 @@ static int brain_ok(void) { return backend_enabled() && backend_available() == 1
 static AccountInfo g_fake_account;
 static int g_fake;
 
-static const AccountInfo *account(void) { return g_fake ? &g_fake_account : account_get(); }
+static const AccountInfo *account(void) { return g_fake ? &g_fake_account : active_account(); }
 
 static void cleanse(EdBuf *b, const char *s) {
     for (; s && *s; s++) {

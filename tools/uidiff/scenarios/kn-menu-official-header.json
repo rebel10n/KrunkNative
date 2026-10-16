@@ -168,5 +168,5 @@
     "officialSession": true
   },
   "frames": 3,
-  "note": "KrunkNative: the menu in a krunker.io server (state.officialSession): the header shows the krunker.io account as v10's own profile item (avatar, name, Lv badge; KrunkNative's bars hidden); hovering it says it is the krunker.io account (v10_menu.c kio_bar_update). Compare with doc/ref/krunker-v10.0.2/main-menu.png's header"
+  "note": "KrunkNative: the menu in a krunker.io server (state.officialSession) signed in to krunker.io (storage kio_*): krunker.io is the active backend (backend_ui.h active_account()), so the header is v10's own signed-in bar for that account (avatar, name, Lv badge, KR / JNK / RP, Wallet), exactly as v10 shows its own; no separate krunker.io bar or tooltip. Compare with doc/ref/krunker-v10.0.2/main-menu.png's header"
 }

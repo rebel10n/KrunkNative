@@ -12,17 +12,25 @@ One HTTP stub (ports from kn_proto.free_ports()) serves three bases:
   /mm    the matchmaker: GET /game-list (four lobbies of one mode), GET /seek-game (records accessToken)
 and a WebSocket game server (records `at=`, sends io-init, "a" ACCOUNT_RESPONSE, load, init).
 
-One headless client_bin (--offline, an input script) then:
-  1. opens the krunker.io account modal (kioAccount()), types a username + password, Login: the Security
-     Challenge modal asks (headless: the paste box), the pasted token goes with the login; the 2FA step
-     asks for the code; signed in (the name from /player/me)
-  2. the Servers window: the Accounts line names both backends (KrunkNative: Guest, krunker.io: the
-     account), the KRUNKER.IO group has a Quick Join; with Settings > Quickplay's map set to Kanji it
-     joins the fullest Kanji lobby with room and no password (not the fuller Burg one, not the full one)
-  3. the join refreshes the about-to-expire session first (FRVR refresh), seeks with accessToken and
-     opens the socket with at= the fresh token; the game server's "a" names the account and its level,
-     shown in the Accounts line
-  4. Logout (the Accounts line's): back to a guest; the next join carries no accessToken / at=
+There is one account UI (backend_ui.h active_account()): v10's own login modal, header and Account
+window, signing in to the ACTIVE BACKEND's account: krunker.io's in an official game, krunk.io's
+elsewhere. No separate krunker.io modal, no "krunker.io: Guest (Login)" bar, no Accounts lines.
+
+One headless client_bin (--offline: krunk.io is a guest, an input script) then:
+  1. the menu: krunk.io's guest bar (v10's Login / Register), no krunker.io bar, the Servers window
+     has no Accounts line; Quick Join joins the fullest Kanji lobby with room (not the fuller Burg one,
+     not the full one) as a krunker.io guest (no accessToken, no at=)
+  2. in the game, the menu shows the krunker.io guest (v10's guest bar); v10's login modal
+     (loginOrRegister) with "(use username instead)": username + password, Login -> the Security
+     Challenge (headless: the paste box) -> v10's "Two-Factor Authentication" form (six code boxes,
+     not dismissable: a click on its overlay leaves it up) -> signed in (the name from /player/me),
+     the modal closes, the header shows the krunker.io account; the open socket logs in with it
+     (v10's rpc LOGIN: the server's "a" names it); the Account window is the krunker.io account's
+  3. leaving the game switches the menu back to krunk.io's guest at once; the next join refreshes the
+     about-to-expire session... (FRVR refresh), seeks with accessToken and opens the socket with at=;
+     the game server's "a" names the account and its level, shown in the header
+  4. Logout (the Account window's, in the game): back to a krunker.io guest (v10's login modal), the
+     next join carries no accessToken / at=
 Checks also that no password, code, Turnstile token, access or refresh token reaches the log, the
 saved session is gone after the logout, and that no "guest only" text is left in the client's
 krunker.io wording. Exit 0 when every check passed, 77 when it cannot run.
@@ -83,6 +91,63 @@ LOBBIES = [  # [id, region, players, max, data, timeLeft]: one mode (0), so one 
     [GAME_PICK, "de-fra", 2, 8, {"i": "Kanji", "g": 0}, 200],     # the pick
 ]
 
+# krunker.io's store (client/src/ui/kio_store.c), in v10's shapes as gapi.svc.krunker.io answers them
+# (shop/displays: {id, type, data, children, products}; ranked/shop: {skins}). Skins from the client's table.
+SHOP_FUTURE = "2099-01-01T00:00:00.000Z"
+
+
+def _product(pid, name, contents, price, **kw):
+    p = {"id": pid, "name": name, "description": kw.pop("description", ""), "image_url": "", "active": True, "prices": [price],
+         "contents": [dict(c, id=pid) for c in contents], "available": True, "display_ids": []}
+    p.update(kw)
+    return p
+
+
+def _kr(amount):
+    return {"id": 1, "price_ref": "io.krunker.v%d" % amount, "type": "virtual", "available": True,
+            "virtual": {"amount": amount, "currency_id": 1, "currency": "KR"}}
+
+
+def _usd(usd, ref):
+    return {"id": 2, "price_ref": ref, "type": "real", "real": {"price_usd": usd}, "available": True}
+
+
+SHOP_LIMITED = {
+    "id": 4, "type": "front", "order": 0, "data": {},
+    "children": [
+        {"id": 5, "parent_id": 4, "order": 0, "type": "product", "data": {}, "product_id": 12},
+        {"id": 6, "parent_id": 4, "order": 1, "type": "product", "data": {}, "product_id": 11},
+        {"id": 7, "parent_id": 4, "order": 2, "type": "product", "data": {}, "product_id": 4},
+        {"id": 8, "parent_id": 4, "order": 3, "type": "product", "data": {}, "product_id": 15},
+        {"id": 9, "parent_id": 4, "order": 4, "type": "product", "data": {}, "product_id": 46},
+        {"id": 33, "parent_id": 4, "order": 5, "type": "dynamic", "product_id": 33,
+         "data": {"dynamic": {"min_quantity": 10, "max_quantity": 1000, "steps": [{"min_quantity": 500, "price_usd": 0.22}]}}},
+        {"id": 40, "parent_id": 4, "order": 6, "type": "section", "data": {"title": "Weekend Picks", "description": "Gone on Monday"},
+         "children": [{"id": 41, "parent_id": 40, "order": 0, "type": "product", "data": {}, "product_id": 35, "expires_at": SHOP_FUTURE}]},
+    ],
+    "products": {
+        "12": _product(12, "Eterno Mug", [{"type": "skin", "ref": "7439", "quantity": 1}], _kr(2000),
+                       purchase_limit=1, purchase_count=0, purchase_limit_scope="per_user"),
+        "11": _product(11, "Selakuku", [{"type": "skin", "ref": "7438", "quantity": 1}], _usd(2.99, "io.krunker.skin7438"),
+                       purchase_limit=1, purchase_count=0, purchase_limit_scope="per_user"),
+        "4": _product(4, "Company Card", [{"type": "skin", "ref": "7431", "quantity": 1}], _kr(5000),
+                      purchase_limit=1, purchase_count=1, purchase_limit_scope="per_user"),
+        "15": _product(15, "Junk", [{"type": "currency", "ref": "2", "quantity": 100}], _kr(2000),
+                       purchase_limit=1000, purchase_count=37, purchase_limit_scope="global"),
+        "46": _product(46, "Season 10 Contributor Badge", [{"type": "badge", "ref": "3", "quantity": 1}], _usd(50, "io.krunker.badge67")),
+        "33": _product(33, "Paint Ticket", [{"type": "skin", "ref": "7994", "quantity": 1}], _usd(0.25, "io.krunker.paint"),
+                       description="Paint any paintable item"),
+        "35": _product(35, "Hovi", [{"type": "skin", "ref": "7994", "quantity": 1}], _kr(100),
+                       purchase_limit=1, purchase_count=0, purchase_limit_scope="per_user"),
+    },
+}
+SHOP_ITEM_NAMES = ["Eterno Mug", "Selakuku", "Company Card", "Junk", "Season 10 Contributor Badge", "Paint Ticket", "Weekend Picks", "Hovi"]
+RANKED_SHOP = {"skins": [
+    {"id": 501, "skin_id": 7613, "price": 1500, "max_purchase": 0, "purchase_count": 0, "expires_at": SHOP_FUTURE},
+    {"id": 502, "skin_id": 7578, "price": 800, "max_purchase": 1, "purchase_count": 0},
+]}
+RANKED_ITEM_NAMES = ["Sand Rhino", "Clan Cape"]
+
 results = []
 
 
@@ -123,7 +188,7 @@ def mp_encode(v):
     if isinstance(v, (list, tuple)):
         return (bytes([0x90 | len(v)]) if len(v) < 16 else b"\xdc" + struct.pack(">H", len(v))) + b"".join(mp_encode(x) for x in v)
     if isinstance(v, dict):
-        return bytes([0x80 | len(v)]) + b"".join(mp_encode(str(k)) + mp_encode(x) for k, x in v.items())
+        return (bytes([0x80 | len(v)]) if len(v) < 16 else b"\xde" + struct.pack(">H", len(v))) + b"".join(mp_encode(str(k)) + mp_encode(x) for k, x in v.items())
     raise TypeError(type(v))
 
 
@@ -142,12 +207,35 @@ def frame_name(data):  # the packet name of a client frame (fixstr / str8 first 
 
 # ---------------------------------------------------------------- the stubs
 
+MY_SID = 9  # our player's sid in the stub's "0" (the socket id is io-init's "sockME")
+
+
+def player_entry(sock, sid, name, x, y, z, level=0):
+    """One player of "0" ADD_PLAYERS: 53 (0x35) values, the live client's offsets (game.deob.js:220269-220289,
+    players.add :171902): [0] socket id [1] sid [2] x [3] y [4] z [5] name [6] classIndex [7] health (null:
+    maxHealth) [8] maxHealth [9] team [10] level [11] clan [16] isHacker [18] xDire. No offset carries a
+    player's krunker.io role (isDev / isMod): v10 knows only its own account's rights (its "a")."""
+    e = [None] * 53
+    e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[8], e[9], e[10], e[18] = sock, sid, x, y, z, name, 0, 100, 0, level, 0.0
+    return e
+
+
 class Stub:
     def __init__(self, http_port, ws_port):
         self.http_port, self.ws_port = http_port, ws_port
+        # opt-in (account_unify_e2e.py): players = [(socket id, sid, name)] added with "0" after init, and our
+        # own player ("sockME", MY_SID, our_name) added on the client's "en", as a live server spawns it;
+        # account_data = the "a" data of each sign-in in turn, merged into the stub account's row
+        # (e.g. {"player_role": 2}: v10 isMod; {"player_developer": 1}: isDev)
+        self.players = None
+        self.our_name = "Guest_%d" % MY_SID
+        self.account_data = []
+        self.a_sent = []  # the "a" data rows sent, in order
+        self.frame_handlers = {}  # extra answers to client frames: {name: async fn(send, raw frame bytes)}
         self.requests = []      # (method, path, query dict, headers dict, body dict | None)
         self.ws_paths = []
         self.ws_frames = []
+        self.rpc_logins = 0
         self.access1 = jwt({"exp": int(time.time()) + 30, "sub": str(ACCOUNT_ID)})  # within the 60 s refresh margin
         self.access2 = jwt({"exp": int(time.time()) + 3600, "sub": str(ACCOUNT_ID)})
         self.loop = None
@@ -197,6 +285,17 @@ class Stub:
                 elif path == "/mm/seek-game":
                     self.reply(200, {"host": "127.0.0.1", "port": stub.ws_port, "gameId": q.get("game") or GAME_PICK, "clientId": CLIENT_ID,
                                      "data": {"i": "Kanji", "g": 0}})
+                elif path == "/api/shop/displays" or path.startswith("/api/shop/displays/"):  # shop.getDisplayByTag / getDisplay
+                    if q.get("tag") == "limited" or path == "/api/shop/displays/%d" % SHOP_LIMITED["id"]:
+                        self.reply(200, {"data": SHOP_LIMITED, "error": None})
+                    else:
+                        self.reply(404, {"data": None, "error": "display not found"})
+                elif path == "/api/ranked/shop":  # ranked.getShop: the account's shop
+                    auth = self.headers.get("Authorization", "")
+                    if auth in ("Bearer " + stub.access1, "Bearer " + stub.access2):
+                        self.reply(200, {"data": RANKED_SHOP, "error": None})
+                    else:
+                        self.reply(401, {"error": "authorization header required"})
                 elif path == "/api/player/me":
                     auth = self.headers.get("Authorization", "")
                     if auth == "Bearer " + stub.access1 or auth == "Bearer " + stub.access2:
@@ -221,7 +320,7 @@ class Stub:
                     else:
                         self.reply(200, {"data": None, "error": "Invalid 2FA code"})
                 elif path == "/frvr/v1/auth/refresh":
-                    if body.get("refreshToken") == REFRESH1:
+                    if body.get("refreshToken") in (REFRESH1, REFRESH2):
                         self.reply(201, {"accessToken": stub.access2, "refreshToken": REFRESH2})
                     else:
                         self.reply(401, {"error": "invalid refresh token"})
@@ -243,19 +342,43 @@ class Stub:
                 ah[0] = (ah[0] + 0x11) & 0xff
                 await ws.send(frame(name, *args, ah=ah[0]))
 
+            async def send_account():
+                data = {"player_score": SCORE, "player_kills": 12}
+                data.update(self.account_data[len(self.a_sent)] if len(self.a_sent) < len(self.account_data) else {})
+                self.a_sent.append(data)
+                await send("a", None, ACCOUNT_ID, ACCOUNT_NAME, data, "legacy-token")
+
             async def reader():
                 async for msg in ws:
                     if not isinstance(msg, str):
-                        self.ws_frames.append(frame_name(msg))
+                        name = frame_name(msg)
+                        self.ws_frames.append(name)
+                        # v10's rpc LOGIN (["_0", id, "login", accessToken]) on a guest's socket: the server signs it in
+                        if name == "_0" and b"login" in msg and (self.access1.encode() in msg or self.access2.encode() in msg):
+                            self.rpc_logins += 1
+                            await send_account()
+                        # ENTER_GAME: the server spawns our player (its "0" with io-init's socket id: isYou, :220268)
+                        if name == "en" and self.players is not None:
+                            await send("0", player_entry("sockME", MY_SID, self.our_name, -343.0, -143.0, -28.0))
+                        handler = self.frame_handlers.get(name)
+                        if handler:
+                            await handler(send, msg)
 
             rd = asyncio.ensure_future(reader())
             try:
                 await send("io-init", "sockME")
                 if q.get("at") == self.access2:  # the account's socket: the server signs it in
-                    await send("a", None, ACCOUNT_ID, ACCOUNT_NAME, {"player_score": SCORE, "player_kills": 12}, "legacy-token")
+                    await send_account()
                 await send("load")
                 await asyncio.sleep(0.5)
                 await send("init", KANJI, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
+                if self.players is not None:  # the players already in the game (10_kanji.json's spawns 1-3)
+                    spots = [(-206.0, -140.0, -395.0), (-188.0, -129.0, -455.0), (191.0, -139.0, -466.0)]
+                    entries = []
+                    for i, (sock, sid, pname) in enumerate(self.players):
+                        x, y, z = spots[i % len(spots)]
+                        entries += player_entry(sock, sid, pname, x, y, z, level=10 + i)
+                    await send("0", entries)
                 await rd
             except (websockets.ConnectionClosed, asyncio.CancelledError):
                 pass
@@ -330,50 +453,70 @@ def run():
     script = "\n".join([
         "0 menu",
         '300 call setSetting "seek_maps" "%d"' % KANJI,
-        "600 call kioAccount",
-        "1400 vis @modal knKioAccountHolder knKioAccountForm knKioSignIn knKioSignOut",
-        "1500 clickid knKioLogin", "1600 type " + LOGIN,
-        "1700 clickid knKioPassword", "1800 type " + PASSWORD,
-        "1900 clickid knKioSignIn",
-        "3200 vis @cap knCaptchaHolder knCaptchaManual",
-        "3300 clickid knCaptchaToken", "3400 type " + TURNSTILE, "3500 clickid knCaptchaUse",
-        "5500 vis @code knKioAccountCodeRow knKioSubmitCode knKioAccountForm",
-        "5600 clickid knKioCode", "5700 type " + CODE, "5800 clickid knKioSubmitCode",
-        "8000 text @signed [id=knKioAccountText]",
-        "8100 vis @signedvis knKioSignOut knKioAccountForm",
-        "8200 clickid knKioClose",
-        "8500 call showWindow 2",
-        "11000 text @kn [id=knAccountsKn]",
-        "11050 text @kio [id=knAccountsKio]",
-        "11100 text @status [id=kioStatus]",
-        "11150 text @window [id=menuWindow]",
-        "11200 nodes @qj .quickJoin",
-        "8900 vis @base signedOutHeaderBar knKioHeaderBar menuBtnQuickMatch",
+        # 1. the menu (krunk.io: a guest here) and the Servers window
+        "800 vis @base signedOutHeaderBar signedInHeaderBar menuBtnQuickMatch",
+        "850 nodes @nokiobar [id=knKioHeaderBar]",
+        "900 nodes @nokiomodal [id=knKioAccountHolder]",
+        "2500 call showWindow 2",
+        "5000 nodes @noaccounts [id^=knAccounts]",
+        "5050 text @status [id=kioStatus]",
+        "5100 text @window [id=menuWindow]",
+        "5150 nodes @qj .quickJoin",
         # open each server group in turn and read its first row: the krunker.io group's index is not fixed
-        "11250 call setExpandedRegion 0", "11255 text @row0 [onclick*=\"krunkerJoin\"]",
-        "11260 call setExpandedRegion 1", "11265 text @row1 [onclick*=\"krunkerJoin\"]",
-        "11270 call setExpandedRegion 2", "11275 text @row2 [onclick*=\"krunkerJoin\"]",
-        "11280 call setExpandedRegion 3", "11285 text @row3 [onclick*=\"krunkerJoin\"]",
-        "11290 call setExpandedRegion 4", "11295 text @row4 [onclick*=\"krunkerJoin\"]",
-        "11300 clicksel .quickJoin",
-        "17000 call showWindow 2",
-        "19500 text @kio2 [id=knAccountsKio]",
-        "19550 text @hdr [id=knKioHeaderText]",
-        '19560 nodes @kioshown [id=knKioHeaderBar][style*="none"]',
-        '19561 nodes @knhidden [id=signedOutHeaderBar][style*="none"]',
-        "19600 clickid knAccountsKioOut",
-        "19650 text @kio3 [id=knAccountsKio]",
-        "19700 con disconnect",
-        "19750 down ESC", "19800 up ESC",  # (a disconnect leaves the game with the menu closed: Esc opens it)
-        '19900 nodes @kiohidden [id=knKioHeaderBar][style*="none"]',
-        '19901 nodes @knshown [id=signedOutHeaderBar][style*="none"]',
-        "19950 text @knhdr [id=signedOutHeaderBar]",
-        "19960 vis @menuhdr menuBtnQuickMatch playerHeaderEl",
-        '21000 nodes @kiohidden2 [id=knKioHeaderBar][style*="none"]',
-        '21001 nodes @knshown2 [id=signedOutHeaderBar][style*="none"]',
-        "21050 text @knhdr2 [id=signedOutHeaderBar]",
-        '25000 call krunkerJoin "%s"' % GAME_PICK,
-        "29000 quit",
+        "5200 call setExpandedRegion 0", "5205 text @row0 [onclick*=\"krunkerJoin\"]",
+        "5210 call setExpandedRegion 1", "5215 text @row1 [onclick*=\"krunkerJoin\"]",
+        "5220 call setExpandedRegion 2", "5225 text @row2 [onclick*=\"krunkerJoin\"]",
+        "5230 call setExpandedRegion 3", "5235 text @row3 [onclick*=\"krunkerJoin\"]",
+        "5240 call setExpandedRegion 4", "5245 text @row4 [onclick*=\"krunkerJoin\"]",
+        "5300 clicksel .quickJoin",
+        # 2. in the game as a krunker.io guest: v10's login modal signs in to krunker.io
+        "9900 state",  # (the joined game shows the menu until the player clicks in)
+        "10000 vis @ingame signedOutHeaderBar signedInHeaderBar",
+        "10050 nodes @nokiobar2 [id=knKioHeaderBar]",
+        "10100 call loginOrRegister",
+        "10600 vis @modal knV10Login accEmail accName",
+        "10700 clickid knV10LoginMode",
+        "10900 vis @umode accName accPass",
+        "11000 clickid accName", "11100 type " + LOGIN,
+        "11300 clickid accPass", "11400 type " + PASSWORD,
+        "11600 clickid knV10LoginSubmit",
+        "13000 vis @cap knCaptchaHolder knCaptchaManual",
+        "13100 clickid knCaptchaToken", "13200 type " + TURNSTILE, "13300 clickid knCaptchaUse",
+        "15400 vis @code knV10Code knV10Code0 knV10CodeSubmit",
+        "15450 text @codehdr [id=knV10Code]",
+        "15500 click 20 20",  # the code form's overlay: not dismissable
+        "15550 vis @codestays knV10Code knV10Login",
+        "15600 clickid knV10Code0", "15660 type 1",
+        "15750 clickid knV10Code1", "15810 type 2",
+        "15900 clickid knV10Code2", "15960 type 3",
+        "16050 clickid knV10Code3", "16110 type 4",
+        "16200 clickid knV10Code4", "16260 type 5",
+        "16350 clickid knV10Code5", "16410 type 6",
+        "18500 nodes @modalgone [id=knV10Login]",
+        "18600 vis @signedin signedInHeaderBar signedOutHeaderBar",
+        "18700 text @hdrname [id=knV10Name]",
+        "19000 call showWindow 5",
+        "19800 text @acc5 [id=knKioAccName]",
+        "19850 vis @acc5v knKioLogout",
+        "19900 call closWind",
+        # 3. leaving the game: the menu is krunk.io's again at once; the next join carries the account
+        "20000 con disconnect",
+        "20200 down ESC", "20250 up ESC",  # (a disconnect leaves the game with the menu closed: Esc opens it)
+        # each bar's own inline display (nodes [style*="none"]: 1 = hidden), so the menu being up does not matter
+        '20800 nodes @leftout [id=signedOutHeaderBar][style*="none"]',
+        '20810 nodes @leftin [id=signedInHeaderBar][style*="none"]',
+        "20850 text @lefthdr [id=signedOutHeaderBar]",
+        '21500 call krunkerJoin "%s"' % GAME_PICK,
+        "27500 text @hdr2 [id=signedInHeaderBar]",
+        "27550 vis @hdr2v signedInHeaderBar signedOutHeaderBar",
+        # 4. Logout (the krunker.io account's window, in the game): a krunker.io guest, v10's login modal
+        "28000 call showWindow 5",
+        "28800 clickid knKioLogout",
+        "29500 vis @loggedout knV10Login signedOutHeaderBar signedInHeaderBar",
+        "29600 call knV10LoginClose",
+        "30000 con disconnect",
+        '30500 call krunkerJoin "%s"' % GAME_PICK,
+        "35000 quit",
     ]) + "\n"
     script_path = os.path.join(WORK, "account.script")
     with open(script_path, "w") as f:
@@ -391,7 +534,7 @@ def run():
         p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
         try:
-            p.wait(timeout=240)
+            p.wait(timeout=300)
         except subprocess.TimeoutExpired:
             check("client_bin finished its script", False, "timeout, log " + log_path)
         finally:
@@ -405,10 +548,38 @@ def run():
     text = "\n".join(lines)
     client_text = "\n".join(l for l in lines if "[input_script]" not in l)  # (the script's own echo of what it typed)
 
-    # 1. sign in
+    # 1. the menu: one account UI
+    base = probe(text, "base")
+    check("the menu: krunk.io's guest bar (v10's Login / Register), not a signed-in one",
+          "signedOutHeaderBar=1" in base and "signedInHeaderBar=1" not in base, base)
+    check("no krunker.io account bar and no krunker.io account modal exist", nodes_match(text, "nokiobar") == 0 and
+          nodes_match(text, "nokiomodal") == 0 and nodes_match(text, "nokiobar2") == 0,
+          (nodes_match(text, "nokiobar"), nodes_match(text, "nokiomodal"), nodes_match(text, "nokiobar2")))
+    check("the Servers window has no Accounts line", nodes_match(text, "noaccounts") == 0, probe(text, "noaccounts"))
+    window = probe(text, "window")
+    check("the Servers window has no \"as a guest\" / \"guest only\" / \"krunker.io servers:\" wording",
+          window and not re.search(r"as a guest|guest only|krunker\.io servers:|KrunkNative servers:", window, re.I), window[:300])
+    check("no \"krunker.io: Guest\" anywhere in the log's page texts", "krunker.io: Guest" not in text, re.findall(r".{30}krunker\.io: Guest.{10}", text)[:2])
+    st = probe(text, "status")
+    check("the krunker.io servers line is a plain label (no account, no Login / Logout)",
+          "KRUNKER.IO OFFICIAL LOBBIES" in st and not re.search(r"guest|login|logout|" + ACCOUNT_NAME, st, re.I), st)
+    qj = re.search(r"elements=\d+ match=(\d+)", probe(text, "qj"))
+    check("a krunker.io group has a Quick Join button (main's group header; krunker.io groups come last)", qj and int(qj.group(1)) >= 1, probe(text, "qj"))
+    check("Quick Join picks the Kanji lobby with room (not the fuller Burg, not the password one or the full one)",
+          ("[krunker] official lobby %s: joining in-client" % GAME_PICK) in text, re.findall(r"\[krunker\] official lobby.*", text)[:3])
+    seeks = stub.find("GET", "/mm/seek-game")
+    check("the first join is a krunker.io guest's (no accessToken, no at=)", seeks and "accessToken" not in seeks[0][2] and
+          stub.ws_paths and "at=" not in stub.ws_paths[0], [("accessToken" in x[2]) for x in seeks][:1])
+    check("joining switches the active account to krunker.io", "[account] active account backend: krunker.io" in text,
+          re.findall(r"\[account\] active.*", text)[:3])
+
+    # 2. in the game: v10's login modal signs in to krunker.io
+    ingame = probe(text, "ingame")
+    check("in the game the menu shows the krunker.io guest (v10's guest bar)", "signedOutHeaderBar=1" in ingame and "signedInHeaderBar=1" not in ingame, ingame)
     modal = probe(text, "modal")
-    check("the krunker.io account modal opens with the login form", "knKioAccountHolder=1" in modal and "knKioAccountForm=1" in modal and
-          "knKioSignIn=1" in modal and "knKioSignOut=0" in modal, modal)
+    check("loginOrRegister opens v10's login modal (Email first)", "knV10Login=1" in modal and "accEmail=1" in modal, modal)
+    check("\"(use username instead)\" shows the Username field and the password", "accName=1" in probe(text, "umode") and "accPass=1" in probe(text, "umode"),
+          probe(text, "umode"))
     cap = probe(text, "cap")
     check("a username login asks the Security Challenge first (Turnstile, the player solves it)", "knCaptchaHolder=1" in cap, cap)
     logins = stub.find("POST", "/api/auth/login/username")
@@ -421,75 +592,53 @@ def run():
           "application/json" in hdr.get("accept", "") and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
                                                                        hdr.get("x-idempotency-key", "")), hdr)
     code = probe(text, "code")
-    check("check_2fa: the modal asks for the code", "knKioAccountCodeRow=1" in code and "knKioSubmitCode=1" in code and "knKioAccountForm=0" in code, code)
+    check("check_2fa: v10's code form (six boxes, Submit)", "knV10Code=1" in code and "knV10Code0=1" in code and "knV10CodeSubmit=1" in code, code)
+    check("... titled \"Two-Factor Authentication\"", "Two-Factor Authentication" in probe(text, "codehdr"), probe(text, "codehdr"))
+    check("... not dismissable: a click on its overlay leaves it up", "knV10Code=1" in probe(text, "codestays"), probe(text, "codestays"))
     twofa = stub.find("POST", "/api/auth/2fa/challenge/" + CHALLENGE)
     check("POST /auth/2fa/challenge/<challenge_id> {code}", len(twofa) == 1 and twofa[0][4] == {"code": CODE}, len(twofa))
     me = stub.find("GET", "/api/player/me")
     check("GET /player/me with the account's Bearer token", me and me[0][3].get("authorization") == "Bearer " + stub.access1, len(me))
-    signed = probe(text, "signed")
-    check("the modal says who is signed in (the name /player/me gave)", "Signed in as %s" % ACCOUNT_NAME in signed, signed)
-    sv = probe(text, "signedvis")
-    check("signed in: Logout instead of the form", "knKioSignOut=1" in sv and "knKioAccountForm=0" in sv, sv)
+    check("signed in: the login modal leaves", nodes_match(text, "modalgone") == 0, probe(text, "modalgone"))
+    si = probe(text, "signedin")
+    check("signed in: the header shows the krunker.io account (v10's signed-in bar)", "signedInHeaderBar=1" in si and "signedOutHeaderBar=0" in si, si)
+    check("... named as /player/me says", ACCOUNT_NAME in probe(text, "hdrname"), probe(text, "hdrname"))
+    check("the open game socket logs in with the account (v10's rpc LOGIN, the server's \"a\")", stub.rpc_logins >= 1 and
+          "[krunker] signed in during the game" in text, (stub.rpc_logins, re.findall(r"\[krunker\] signed in.*", text)[:1]))
+    check("the Account window is the krunker.io account's (its name, Logout)", ACCOUNT_NAME in probe(text, "acc5") and
+          "knKioLogout=1" in probe(text, "acc5v"), (probe(text, "acc5"), probe(text, "acc5v")))
 
-    # 2. the Servers window's krunker.io servers line (the account they see) + Quick Join
-    kn, kio = probe(text, "kn"), probe(text, "kio")
-    check("the Servers window has no KrunkNative accounts row (the menu header shows that account, as v10's does)", kn.startswith("n=0 "), kn)
-    check("the krunker.io servers line shows the krunker.io account with Logout", ACCOUNT_NAME in kio and "Logout" in kio, kio)
-    window = probe(text, "window")
-    check("the Servers window has no \"as a guest\" / \"guest only\" wording", window and not re.search(r"as a guest|guest only", window, re.I),
-          re.findall(r".{40}as a guest.{20}", window)[:2])
-    st = probe(text, "status")
-    check("the KRUNKER.IO section speaks of krunker.io servers", "KRUNKER.IO OFFICIAL LOBBIES" in st and "guest" not in st.lower(), st)
-    qj = re.search(r"elements=\d+ match=(\d+)", probe(text, "qj"))
-    check("a krunker.io group has a Quick Join button (main's group header; krunker.io groups come last)", qj and int(qj.group(1)) >= 1, probe(text, "qj"))
-    check("Quick Join picks the Kanji lobby with room (not the fuller Burg, not the password one or the full one)",
-          ("[krunker] official lobby %s: joining in-client" % GAME_PICK) in text, re.findall(r"\[krunker\] official lobby.*", text)[:3])
-
-    # 3. the join: refresh, accessToken, at=, "a"
+    # 3. leaving switches back; the next join carries the account
+    check("con disconnect leaves the krunker.io server", "[krunker] leaving the official game" in text, re.findall(r"\[krunker\] leaving.*", text)[:1])
+    check("leaving switches the active account back to krunk.io", "[account] active account backend: krunk.io" in text,
+          re.findall(r"\[account\] active.*", text)[:3])
+    check("after leaving, the menu is krunk.io's guest at once (v10's guest bar shown, the signed-in one hidden)",
+          nodes_match(text, "leftout") == 0 and nodes_match(text, "leftin") == 1, (nodes_match(text, "leftout"), nodes_match(text, "leftin")))
+    check("... with its Login, not the krunker.io account", ACCOUNT_NAME not in probe(text, "lefthdr") and "Login" in probe(text, "lefthdr"), probe(text, "lefthdr"))
     refresh = stub.find("POST", "/frvr/v1/auth/refresh")
     check("the about-to-expire session is refreshed first (FRVR POST /refresh {refreshToken})",
           len(refresh) >= 1 and refresh[0][4] == {"refreshToken": REFRESH1}, [r[4] for r in refresh][:1] and "(body hidden)")
-    seeks = stub.find("GET", "/mm/seek-game")
-    check("seek-game carries accessToken = the refreshed access token, for the picked lobby",
-          seeks and seeks[0][2].get("accessToken") == stub.access2 and seeks[0][2].get("game") == GAME_PICK,
-          [(s[2].get("game"), "accessToken" in s[2]) for s in seeks])
-    check("seek-game: accessToken is matchmakerSeek's last parameter", seeks and list(seeks[0][2].keys())[-1] == "accessToken",
-          list(seeks[0][2].keys()) if seeks else None)
-    ws1 = stub.ws_paths[0] if stub.ws_paths else ""
-    check("the game socket opens with at= the account's token", ws1 == "/ws?gameId=%s&clientKey=%s&at=%s" % (GAME_PICK, CLIENT_ID, stub.access2),
-          ws1.split("&at=")[0] + ("&at=(token)" if "&at=" in ws1 else ""))
+    check("the second join seeks with accessToken = the fresh access token, for the picked lobby",
+          len(seeks) >= 2 and seeks[1][2].get("accessToken") == stub.access2 and seeks[1][2].get("game") == GAME_PICK,
+          [(x[2].get("game"), "accessToken" in x[2]) for x in seeks])
+    check("seek-game: accessToken is matchmakerSeek's last parameter", len(seeks) >= 2 and list(seeks[1][2].keys())[-1] == "accessToken",
+          list(seeks[1][2].keys()) if len(seeks) >= 2 else None)
+    ws2 = stub.ws_paths[1] if len(stub.ws_paths) >= 2 else ""
+    check("the game socket opens with at= the account's token", ws2 == "/ws?gameId=%s&clientKey=%s&at=%s" % (GAME_PICK, CLIENT_ID, stub.access2),
+          ws2.split("&at=")[0] + ("&at=(token)" if "&at=" in ws2 else ""))
     check("the game server's \"a\" names the account and its level",
-          "[kio-account] the krunker.io game server names the account %s (level %d)" % (ACCOUNT_NAME, LEVEL) in text or
           "[krunker] the game server signed in the krunker.io account %s (level %d)" % (ACCOUNT_NAME, LEVEL) in text,
           re.findall(r"\[krunker\] the game server signed in.*", text))
-    kio2 = probe(text, "kio2")
-    check("the Accounts line shows the account's level from the game server", ACCOUNT_NAME in kio2 and "Level %d" % LEVEL in kio2, kio2)
+    hdr2 = probe(text, "hdr2")
+    check("in the game the header shows the krunker.io account with the server's level", ACCOUNT_NAME in hdr2 and "Lv %d" % LEVEL in hdr2, hdr2)
+    check("... in v10's signed-in bar", "signedInHeaderBar=1" in probe(text, "hdr2v") and "signedOutHeaderBar=0" in probe(text, "hdr2v"), probe(text, "hdr2v"))
 
-    # 3b. the header box: in a krunker.io server it shows the krunker.io account alone; leaving brings
-    # the KrunkNative account's bar back (the KrunkNative account is a guest in this test)
-    hdr = probe(text, "hdr")
-    check("in a krunker.io server the header shows the krunker.io account (name and level)", ACCOUNT_NAME in hdr and "Lv %d" % LEVEL in hdr, hdr)
-    # each bar's own inline display (nodes [style*="none"]: 1 = hidden), so the menu being up does not matter
-    check("in a krunker.io server the krunker.io bar shows and the KrunkNative bar is hidden",
-          nodes_match(text, "kioshown") == 0 and nodes_match(text, "knhidden") == 1,
-          (nodes_match(text, "kioshown"), nodes_match(text, "knhidden")))
-    check("con disconnect leaves the krunker.io server", "[krunker] leaving the official game" in text, re.findall(r"\[krunker\] leaving.*", text)[:1])
-    base = probe(text, "base")
-    check("baseline: before any join the KrunkNative guest's bar shows (the menu is up)", "signedOutHeaderBar=1" in base, base)
-    check("leaving the krunker.io server restores the KrunkNative bar (its guest's Login)",
-          nodes_match(text, "kiohidden") == 1 and nodes_match(text, "knshown") == 0, (nodes_match(text, "kiohidden"), nodes_match(text, "knshown")))
-    check("... and still after a few seconds (no krunker.io join in between)",
-          nodes_match(text, "kiohidden2") == 1 and nodes_match(text, "knshown2") == 0,
-          (nodes_match(text, "kiohidden2"), nodes_match(text, "knshown2")))
-    knhdr = probe(text, "knhdr2")
-    check("... with the KrunkNative guest's Login or Register", "Login" in knhdr and ACCOUNT_NAME not in knhdr, knhdr)
-
-    # 4. sign out -> a guest again
-    kio3 = probe(text, "kio3")
-    check("Logout: krunker.io servers are joined as a guest again", "Guest" in kio3 and "Login" in kio3 and ACCOUNT_NAME not in kio3, kio3)
-    check("a join after the logout carries no accessToken", len(seeks) >= 2 and "accessToken" not in seeks[-1][2],
-          [("accessToken" in s[2]) for s in seeks])
-    check("... and its socket no at=", len(stub.ws_paths) >= 2 and "at=" not in stub.ws_paths[-1], [p.split("&at=")[0] for p in stub.ws_paths])
+    # 4. sign out -> a krunker.io guest
+    lo = probe(text, "loggedout")
+    check("Logout (the Account window's): a krunker.io guest, v10's login modal", "knV10Login=1" in lo and "signedInHeaderBar=0" in lo, lo)
+    check("a join after the logout carries no accessToken", len(seeks) >= 3 and "accessToken" not in seeks[-1][2],
+          [("accessToken" in x[2]) for x in seeks])
+    check("... and its socket no at=", len(stub.ws_paths) >= 3 and "at=" not in stub.ws_paths[-1], [p.split("&at=")[0] for p in stub.ws_paths])
     saved = []
     for root in (cfg, state):
         for dirpath, _, files in os.walk(root):
@@ -601,11 +750,21 @@ class StaticHandler(SimpleHTTPRequestHandler):
         return os.path.join(DIST, os.path.normpath(p).lstrip("/"))
 
 
+def wait_until(fn, secs):
+    end = time.time() + secs
+    while time.time() < end:
+        if fn():
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def run_web():
-    """The same flow in the web build (headless Chrome, the same stub): sign in (the Turnstile widget
-    answers by itself), the 2FA code, the account kept in the page's storage across a reload; a
-    krunker.io join carries the account (seek-game's accessToken, the socket's at=) and the game
-    server's name shows; after the sign-out the next join is a guest's."""
+    """The same flow in the web build (headless Chrome, the same stub): an official game as a guest,
+    v10's login modal signs in to krunker.io (the Turnstile widget answers by itself, v10's code form),
+    the header shows the account; out of the game (a reload) krunk.io's guest bar, the session kept:
+    the next join carries the account (seek-game's accessToken, the socket's at=); after the in-game
+    Logout the next join is a guest's."""
     mh, wsp, web, cdpp = kn_proto.free_ports(4)
     stub = Stub(mh, wsp)
     stub.start()
@@ -669,22 +828,37 @@ def run_web():
                 time.sleep(0.25)
             return False
 
-        # 1. sign in in the page
-        cdp.send("Page.navigate", {"url": page()})
-        check("web: the page loaded with the account's handler", bool(wait("(() => !!document.getElementById('uiBase'))()", 150)),
-              "\n".join(cdp.console[-10:]))
-        # the page's handlers go in on the first frames after it is ready (krunker_account_ui_tick): retry the open
+        def kio_wait_seek(n_seek, n_ws):
+            ok = wait_seek(n_seek)
+            end = time.time() + 60  # this join's socket (wait_seek returns on an older socket's path)
+            while time.time() < end and len(stub.ws_paths) <= n_ws:
+                time.sleep(0.25)
+            return ok and len(stub.ws_paths) > n_ws
+
+        hdr_js = ("(() => { const o = document.getElementById('signedOutHeaderBar'); const i = document.getElementById('signedInHeaderBar');"
+                  " const n = document.getElementById('knV10Name'); const l = document.getElementById('knV10Level');"
+                  " return JSON.stringify({out: !!o && o.style.display !== 'none', in: !!i && i.style.display !== 'none',"
+                  " name: n ? n.textContent : '', level: l ? l.textContent : '', kio: !!document.getElementById('knKioHeaderBar')}); })()")
+
+        # 1. an official game as a krunker.io guest; v10's login modal signs in to krunker.io
+        cdp.send("Page.navigate", {"url": page("&krunker=" + urllib.parse.quote(GAME_PICK, safe=""))})
+        check("web: the page loaded", bool(wait("(() => !!document.getElementById('uiBase'))()", 150)), "\n".join(cdp.console[-10:]))
+        check("web: the guest's join seeks and opens the socket", kio_wait_seek(0, 0), "\n".join(cdp.console[-15:]))
+        seeks = stub.find("GET", "/mm/seek-game")
+        check("web: the guest's join carries no accessToken", bool(seeks) and "accessToken" not in seeks[0][2], [sorted(x[2]) for x in seeks])
         opened = None
-        for _ in range(60):
-            call("kioAccount")
-            opened = wait(shown("knKioAccountForm"), 2)
+        for _ in range(60):  # (the page's handlers go in on its first frames)
+            call("loginOrRegister")
+            opened = wait("(() => !!document.getElementById('knV10Login'))()", 2)  # (position: fixed: no offsetParent)
             if opened:
                 break
-        check("web: the krunker.io account modal opens with the login form", bool(opened),
-              cdp.eval("(() => { const h = document.getElementById('knKioAccountHolder'); return h ? h.outerHTML.slice(0, 200) : 'no modal'; })()"))
-        put("knKioLogin", LOGIN)
-        put("knKioPassword", PASSWORD)
-        press("knKioSignIn")
+        check("web: v10's login modal opens in the game (no krunker.io modal, no krunker.io bar)", bool(opened) and
+              not cdp.eval("(() => !!document.getElementById('knKioAccountHolder') || !!document.getElementById('knKioHeaderBar'))()"))
+        press("knV10LoginMode")
+        wait(shown("accName"), 10)
+        put("accName", LOGIN)
+        put("accPass", PASSWORD)
+        press("knV10LoginSubmit")
         end = time.time() + 90
         while time.time() < end and not stub.find("POST", "/api/auth/login/username"):
             time.sleep(0.25)
@@ -692,71 +866,47 @@ def run_web():
         check("web: POST /auth/login/username {username, password, b: the Turnstile token}",
               bool(logins) and logins[-1][4] and logins[-1][4].get("username") == LOGIN and logins[-1][4].get("password") == PASSWORD
               and logins[-1][4].get("b") == TURNSTILE, [r[4] and sorted(r[4]) for r in logins])
-        check("web: the 2FA step asks for the code", bool(wait(shown("knKioAccountCodeRow"), 60)))
-        put("knKioCode", CODE)
-        press("knKioSubmitCode")
-        check("web: signed in: the modal says who (the name from /player/me)", bool(wait(shown("knKioSignOut"), 60)) and
-              "KioPlayer" in (cdp.eval(text("knKioAccountText")) or ""), cdp.eval(text("knKioAccountText")))
-        press("knKioClose")
-        check("web: no \"guest only\" text in the page", "guest only" not in page_text().lower())
-
-        # 2. a krunker.io join: the account's token (refreshed first) on seek-game and on the socket
-        n_seek = len(stub.find("GET", "/mm/seek-game"))
-        cdp.send("Page.navigate", {"url": page("&krunker=" + urllib.parse.quote(GAME_PICK, safe=""))})
-        check("web: the join seeks and opens the socket", wait_seek(n_seek), "\n".join(cdp.console[-15:]))
-        seeks = stub.find("GET", "/mm/seek-game")[n_seek:]
-        check("web: the about-to-expire session was refreshed first (FRVR POST /refresh)",
-              bool(stub.find("POST", "/frvr/v1/auth/refresh")), stub.requests[-3:] and [r[1] for r in stub.requests[-3:]])
-        check("web: seek-game carries accessToken = the refreshed access token",
-              bool(seeks) and seeks[0][2].get("accessToken") == stub.access2, [sorted(s[2]) for s in seeks])
-        check("web: the game socket opens with at= the account's token",
-              any(p.endswith("at=" + stub.access2) for p in stub.ws_paths), stub.ws_paths[-2:])
-        check("web: the game server's \"a\" names the account and its level", bool(wait(
-            "(() => { const c = document.body ? document.body.innerText : ''; return /KioPlayer/.test(c) || null; })()", 10)) or
-              any("KioPlayer (level 6)" in l for l in cdp.console), "\n".join(cdp.console[-8:]))
-        # the header box (the krunker.io account alone in the server; each bar's own inline display)
-        hdr_js = ("(() => { const k = document.getElementById('knKioHeaderBar'); const t = document.getElementById('knKioHeaderText');"
-                  " const o = document.getElementById('signedOutHeaderBar'); const i = document.getElementById('signedInHeaderBar');"
-                  " return JSON.stringify({kio: !!k && k.style.display !== 'none', text: t ? t.textContent : '',"
-                  " knOut: !!o && o.style.display === 'none', knIn: !!i && i.style.display !== 'none'}); })()")
-        hdr_lv = wait("(() => { const t = document.getElementById('knKioHeaderText'); return t && /Lv 6/.test(t.textContent) ? 1 : null; })()", 20)
+        check("web: the 2FA step is v10's code form", bool(wait(shown("knV10Code0"), 60)))
+        for i, d in enumerate(CODE):
+            put("knV10Code%d" % i, d)
+        check("web: signed in: the modal leaves", bool(wait("(() => !document.getElementById('knV10Login'))()", 60)))
+        hdr_name = wait("(() => { const n = document.getElementById('knV10Name'); return n && /KioPlayer/.test(n.textContent) ? 1 : null; })()", 30)
         h = json.loads(cdp.eval(hdr_js) or "{}")
-        check("web: in a krunker.io server the header shows the krunker.io account (name and level), the KrunkNative bars hidden",
-              bool(hdr_lv) and h.get("kio") and h.get("knOut") and not h.get("knIn"), h)
+        check("web: the header is v10's signed-in bar with the krunker.io account", bool(hdr_name) and h.get("in") and not h.get("out"), h)
+        check("web: the open socket logs in with the account (rpc LOGIN)", bool(wait("(() => 1)()", 1)) and
+              bool(wait_until(lambda: stub.rpc_logins >= 1, 20)), stub.rpc_logins)
+        check("web: no \"guest only\" / \"krunker.io: Guest\" text in the page",
+              "guest only" not in page_text().lower() and "krunker.io: guest" not in page_text().lower())
         time.sleep(1.0)
         console = list(cdp.console)
 
-        # 3. the session is kept across a reload; sign out; the next join is a guest's
+        # 2. a reload (the web build's leave): krunk.io's guest bar; the krunker.io session kept for the next join
         cdp.send("Page.navigate", {"url": page()})
-        check("web: the signed-in session is restored after a reload (its storage)", bool(wait(
-            "(() => { const e = document.getElementById('uiBase'); return !!e; })()", 150)), "")
-        # the reloaded page's handlers go in on its first frames (as at step 1): retry the open
-        reopened = None
-        for _ in range(60):
-            call("kioAccount")
-            reopened = wait(shown("knKioSignOut"), 2)
-            if reopened:
-                break
-        check("web: ... and the krunker.io account modal says it is signed in (the name from the storage)",
-              bool(reopened) and "KioPlayer" in (cdp.eval(text("knKioAccountText")) or ""), cdp.eval(text("knKioAccountText")))
-        # the reload is the web build's leave of the server: the KrunkNative bar is back, the krunker.io bar gone
+        wait("(() => !!document.getElementById('uiBase'))()", 150)
+        back = wait("(() => { const o = document.getElementById('signedOutHeaderBar'); return o && o.style.display !== 'none' ? 1 : null; })()", 60)
         h = json.loads(cdp.eval(hdr_js) or "{}")
-        check("web: after leaving the server the KrunkNative bar is back and the krunker.io bar is hidden",
-              not h.get("kio") and not h.get("knOut") and "KioPlayer" not in h.get("text", ""), h)
-        press("knKioSignOut")
-        check("web: Logout: the modal shows the login form again", bool(wait(shown("knKioAccountForm"), 30)))
-        press("knKioClose")
-        n_seek = len(stub.find("GET", "/mm/seek-game"))
-        n_ws = len(stub.ws_paths)
+        check("web: out of the game the header is krunk.io's guest bar, not the krunker.io account", bool(back) and not h.get("in"), h)
+        n_seek, n_ws = len(stub.find("GET", "/mm/seek-game")), len(stub.ws_paths)
         cdp.send("Page.navigate", {"url": page("&krunker=" + urllib.parse.quote(GAME_PICK, safe=""))})
-        check("web: after the logout the join seeks again", wait_seek(n_seek), "\n".join(cdp.console[-15:]))
+        check("web: the next join seeks and opens the socket", kio_wait_seek(n_seek, n_ws), "\n".join(cdp.console[-15:]))
+        seeks = stub.find("GET", "/mm/seek-game")[n_seek:]
+        check("web: seek-game carries accessToken = the account's fresh token", bool(seeks) and seeks[0][2].get("accessToken") == stub.access2,
+              [sorted(x[2]) for x in seeks])
+        check("web: the game socket opens with at= the account's token", stub.ws_paths[-1].endswith("at=" + stub.access2), stub.ws_paths[-1:] and "(path)")
+        lv = wait("(() => { const l = document.getElementById('knV10Level'); return l && /Lv 6/.test(l.textContent) ? 1 : null; })()", 30)
+        check("web: in the game the header shows the account with the server's level", bool(lv), cdp.eval(hdr_js))
+        console += list(cdp.console)
+
+        # 3. Logout in the game: a krunker.io guest; the next join carries no token
+        call("logoutAcc")
+        check("web: Logout: v10's login modal for the krunker.io guest", bool(wait("(() => !!document.getElementById('knV10Login'))()", 30)))
+        n_seek, n_ws = len(stub.find("GET", "/mm/seek-game")), len(stub.ws_paths)
+        cdp.send("Page.navigate", {"url": page("&krunker=" + urllib.parse.quote(GAME_PICK, safe=""))})
+        check("web: after the logout the join seeks again", kio_wait_seek(n_seek, n_ws), "\n".join(cdp.console[-15:]))
         seeks = stub.find("GET", "/mm/seek-game")[n_seek:]
         check("web: after the logout seek-game carries no accessToken", bool(seeks) and "accessToken" not in seeks[0][2],
-              [sorted(s[2]) for s in seeks])
-        end = time.time() + 60  # the socket of this join: wait_seek returns on an older socket's path
-        while time.time() < end and len(stub.ws_paths) <= n_ws:
-            time.sleep(0.25)
-        check("web: ... and its socket no at=", len(stub.ws_paths) > n_ws and "at=" not in stub.ws_paths[-1], stub.ws_paths[n_ws:])
+              [sorted(x[2]) for x in seeks])
+        check("web: ... and its socket no at=", "at=" not in stub.ws_paths[-1], "(path)")
         time.sleep(1.0)
         console += list(cdp.console)
         cdp.ws.close()

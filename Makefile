@@ -582,8 +582,16 @@ krunker-official-e2e: build ## Official krunker.io mode (krunker_net.h) against 
 	timeout 900 $(PYTHON) -I server/tests/krunker_official_e2e.py $(DEBUG_DIR) $(DIST_WEB)
 
 .PHONY: krunker-account-e2e
-krunker-account-e2e: build ## The krunker.io account backend (krunker_account.h): sign in (Turnstile, 2FA), Accounts line, krunker.io Quick Join, refresh, accessToken / at=, sign out, against local stubs
-	timeout 300 $(PYTHON) -I server/tests/krunker_account_e2e.py $(DEBUG_DIR)
+krunker-account-e2e: build ## The krunker.io account backend (krunker_account.h) through v10's one account UI: in-game sign-in (Turnstile, 2FA form), krunker.io Quick Join, refresh, accessToken / at=, sign out, against local stubs
+	timeout 400 $(PYTHON) -I server/tests/krunker_account_e2e.py $(DEBUG_DIR)
+
+.PHONY: account-unify-e2e
+account-unify-e2e: build ## One account UI, two backends (backend_ui.h active_account()): krunk.io DEV + official guest, official signed in, switching back (header, player list, dev actions, alt manager, login modal), kn_brain + krunker.io stubs
+	timeout 400 $(PYTHON) -I server/tests/account_unify_e2e.py $(DEBUG_DIR)
+
+.PHONY: kio-store-e2e
+kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
+	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)
 
 .PHONY: ranked-krunker-e2e
 ranked-krunker-e2e: build ## Ranked on a krunker.io account (krunker_ranked.h): v10's paths with Bearer, the queue socket (QUEUED, MATCHED, COOLDOWN), KrunkNative's brain untouched, krunker.io wins when both are signed in (fake krunker.io, scratch kn_brain, headless)

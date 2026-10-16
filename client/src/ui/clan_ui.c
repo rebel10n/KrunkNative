@@ -16,6 +16,14 @@
 // recruitment. mgr2 = owner or role >= 2: MOTD, banner colour, loot config.
 // v10's Svelte views are rendered as HTML strings with the same markup and svelte-* classes
 // (ui/css/svelte.css); the confirm prompts it pushes on its view stack use #genericPop.
+//
+// While krunker.io is the active account backend (an official krunker.io game) the window is the
+// krunker.io account's clan: "vcln" and the ["cln", 3] read go over the official game socket (the
+// account bridge's held-sender route) and its "cln" answer comes back to clan_ui_frame(); the
+// settings tab's reads are v10's own gapi calls (v10_gapi.c: /clans/<id>/motd, /loot-config,
+// /recruitment). Every write (create, join, leave / delete, kick, roles, funds, requests, Discord,
+// banner, logo, MOTD, recruitment, loot config, ownership transfer) is not ported for that account:
+// its handler does nothing (clan_kio_write), so nothing is sent anywhere.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -152,7 +160,7 @@ static void comma(char *out, const size_t n, const double value) {
 }
 
 static int my_id(void) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     return a ? a->id : 0;
 }
 
@@ -336,8 +344,32 @@ static void on_loot(void *user, const int status, const char *body, const size_t
     clan_rerender();
 }
 
+static int kio_clan(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+static void on_recruit(void *user, int status, const char *body, size_t length);
+
+// krunker.io account: v10's clans.getLootConfig / getRecruitment (gapi, v10:26770-26800) answer,
+// rebuilt as the kn_brain route's body for the same handler (user: 0 loot config, 1 recruitment)
+static void kio_settings_read(void *user, const int status, const cJSON *data, const cJSON *error) {
+    cJSON *res = cJSON_CreateObject();
+    if (data) cJSON_AddItemToObject(res, "data", cJSON_Duplicate(data, 1));
+    if (error) cJSON_AddItemToObject(res, "error", cJSON_Duplicate(error, 1));
+    char *body = cJSON_PrintUnformatted(res);
+    if ((intptr_t) user == 0) on_loot((void *) 0, status, body, body ? strlen(body) : 0);
+    else on_recruit((void *) 0, status, body, body ? strlen(body) : 0);
+    free(body);
+    cJSON_Delete(res);
+}
+
 static void fetch_loot(void) {
-    if (g_scenario || S.loot || S.loot_loading || !g_clan || backend_available() != 1) return;
+    if (g_scenario || S.loot || S.loot_loading || !g_clan) return;
+    if (kio_clan()) {
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/loot-config", clan_id());
+        S.loot_loading = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 0) != 0;
+        return;
+    }
+    if (backend_available() != 1) return;
     char path[96];
     snprintf(path, sizeof(path), "/api/clans/%d/loot-config", clan_id());
     S.loot_loading = backend_http_get(path, on_loot, (void *) 0) != 0;
@@ -395,7 +427,14 @@ static void recruit_url(char *out, const size_t n) {
 }
 
 static void fetch_recruit(void) {
-    if (g_scenario || S.recruit_loaded || S.recruit_loading || !g_clan || backend_available() != 1) return;
+    if (g_scenario || S.recruit_loaded || S.recruit_loading || !g_clan) return;
+    if (kio_clan()) {
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
+        S.recruit_loading = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 1) != 0;
+        return;
+    }
+    if (backend_available() != 1) return;
     char url[600];
     recruit_url(url, sizeof(url));
     S.recruit_loading = backend_http_request("GET", url, NULL, on_recruit, (void *) 0) != 0;
@@ -448,7 +487,7 @@ static void gen_loot_display(StrBuf *sb) {
 }
 
 static void gen_home(StrBuf *sb) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     const int leader = i_am_leader();
     const double score = jnum(g_clan, "clan_score");
     const double lv = CLAN_RANK_VAR * sqrt(score);
@@ -664,7 +703,7 @@ static void gen_motd(StrBuf *sb) {
 
 // owned paints: account data slot 10 [{ind, cnt}], counts summed per index
 static int paint_count(const int index) {
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     if (!a || !a->data) return 0;
     int n = 0;
     const cJSON *e;
@@ -896,7 +935,7 @@ static void gen_settings(StrBuf *sb) {
 
 char *clan_window_gen(void) {
     StrBuf sb = {0};
-    const AccountInfo *a = account_get();
+    const AccountInfo *a = active_account();
     if (!a) {
         sb_appendf(&sb, "<div class='reqW login' onclick='showWindow(5)'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LOGIN REQUIRED</div><div class='reqWTxt'>%s</div></div>",
                    I18N("windows.clans.login", "to create and join a clan!"));
@@ -1291,10 +1330,26 @@ static void transfer_send(const int kind, const int accept) {
 
 // ------------------------------------------------------------------ handler table
 
+// the window's writes and the popups that only lead to one (krunker.io account: not ported)
+static int clan_kio_write(const char *name, const char *m) {
+    static const char *const writes[] = {"sendReq", "updReq", "updRol", "chngFunds", "decAll", "updateDis", "bannerApply",
+                                         "logoRemove", "logoRemoveConfirmed", "motdSave", "motdRemove", "recruitSave",
+                                         "recruitRemove", "recruitRemoveConfirmed", "saveLoot", "transferStart",
+                                         "transferCancel", "transferRespond", "delReq", "kickReq", "mangFunds", "declinePop"};
+    if (!strcmp(name, "delClanConfirmed") || !strcmp(name, "kickClanConfirmed")) return 1;
+    for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
+        if (!strcmp(m, writes[i])) return 1;
+    return 0;
+}
+
 int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (!name || (strncmp(name, "windows.12.", 11) && strcmp(name, "delClanConfirmed") && strcmp(name, "kickClanConfirmed"))) return -1;
     const char *m = name + 11;
+    if (kio_clan() && clan_kio_write(name, m)) {
+        printf("[clan] %s: not available for the krunker.io account (read-only)\n", name);
+        return 1;
+    }
     if (!strcmp(name, "delClanConfirmed")) { // _70159 + io.send("cln", 4, 1)
         wait_popup();
         send_cln(4, NULL, NULL);

@@ -218,7 +218,7 @@ static void on_social(void *user, const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
     if (!strcmp(label, "a")) { // a login answer: the friends of this account
-        if (cJSON_IsNull(cJSON_GetArrayItem(frame, 1)) && account_get()) {
+        if (cJSON_IsNull(cJSON_GetArrayItem(frame, 1)) && active_account()) {
             G.signed_in = 1;
             request_friends(0);
         }
@@ -605,7 +605,7 @@ static void report_send(void) {
     char info[2048];
     report_info(info, sizeof(info));
     // ga().reportPlayer(alias, reason, info): kn_brain's "rpt" takes reports from accounts
-    if (!account_get() || !backend_social_is_open()) {
+    if (!active_account() || !backend_social_is_open()) {
         alert(STRIKE_SCREEN_POPUP_ERROR, "Must be logged in");
         return;
     }
@@ -625,14 +625,14 @@ static void report_send(void) {
 static int screen_in_game(const StrikeScreen s) { return s == STRIKE_SCREEN_TAP_TO_PLAY; }
 
 static int screen_shows_friends(const StrikeScreen s) {
-    return s == STRIKE_SCREEN_TAP_TO_PLAY || (s == STRIKE_SCREEN_MAIN_MENU && account_get());
+    return s == STRIKE_SCREEN_TAP_TO_PLAY || (s == STRIKE_SCREEN_MAIN_MENU && active_account());
 }
 
 void strike_social_render(const StrikeScreen s, const HtmlElem root) {
     if (!root) return;
     switch (s) {
     case STRIKE_SCREEN_MAIN_MENU:
-        private_match_place(root, account_get() != NULL);
+        private_match_place(root, active_account() != NULL);
         friends_place(root, 0, screen_shows_friends(s));
         break;
     case STRIKE_SCREEN_TAP_TO_PLAY:
@@ -667,7 +667,7 @@ static void rerender_friends(void) {
         if (root) friends_place(root, screen_in_game(WITH_FRIENDS[i]), screen_shows_friends(WITH_FRIENDS[i]));
     }
     const HtmlElem mm = strike_screen_root(STRIKE_SCREEN_MAIN_MENU);
-    if (mm) private_match_place(mm, account_get() != NULL);
+    if (mm) private_match_place(mm, active_account() != NULL);
     const HtmlElem cm = strike_screen_root(STRIKE_SCREEN_CREATE_MATCH);
     if (cm) match_render(cm);
 }
@@ -782,7 +782,7 @@ void strike_social_tick(Client *client) {
     G.client = client;
     if (!G.listening) G.listening = backend_social_listen(on_social, NULL);
     // signed in before this module listened (the login answer went by): ask now
-    const int signed_in = account_get() != NULL;
+    const int signed_in = active_account() != NULL;
     if (signed_in && !G.requested && backend_social_is_open()) {
         G.requested = 1;
         request_friends(0);

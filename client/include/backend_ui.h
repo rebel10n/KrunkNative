@@ -23,6 +23,8 @@ typedef struct {
     char clan[16];        // "" = none
     double kills, deaths, wins, games, funds, score, time_played;
     double elo;           // player_elo: the current season's ranked rating
+    double junk;          // acc.junk (player_jnk): the krunker.io account's; Box Office accounts have none (0)
+    double ranked_points; // acc.rankedPoints (ranked_points): the krunker.io account's (the Ranked window has the Box Office one)
     int level;
     double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
@@ -36,8 +38,29 @@ typedef struct {
 } AccountInfo;
 
 void account_ui_init(Client*);              // listens on the social socket; restores the saved session
-const AccountInfo *account_get(void);       // NULL = guest (Krunker `acc == null`)
-const char *account_session_token(void);    // saved social session token, "" none
+
+// ---- the active account: one account UI, two backends
+// The client has two account backends: krunk.io (kn_brain's session, this file's `acc`) and
+// krunker.io (krunker_account.h, FRVR auth). The ACTIVE BACKEND is the one the client plays on:
+// krunker.io while an official krunker.io game is being joined or played (krunker_net_active()),
+// krunk.io everywhere else (KrunkNative servers, offline, the menu after leaving an official
+// game). v10's one account UI (header, login modal, Account window, player list, dev / mod
+// actions, alt manager, K.P.D, store, social, chat name, loadout ownership) shows and signs in to
+// the active backend's account, exactly as v10 shows its own; each backend keeps its own session
+// (a krunker.io session never touches the krunk.io account and the other way round).
+//
+// Everything account-dependent reads active_account(); only the krunk.io session code (this file,
+// the alt vault) reads krunkio_account().
+typedef enum {
+    ACCOUNT_BACKEND_KRUNKIO = 0, // kn_brain (account_ui.c)
+    ACCOUNT_BACKEND_KRUNKER = 1, // krunker.io (krunker_account.h)
+} AccountBackend;
+AccountBackend account_backend(void);
+const AccountInfo *active_account(void);    // the active backend's account, NULL = guest (Krunker `acc == null`)
+const AccountInfo *krunkio_account(void);   // the krunk.io account whatever the active backend (NULL = guest)
+unsigned account_active_generation(void);   // bumped when the active account changes (backend switch, sign-in / out)
+// The krunk.io session token while krunk.io is the active backend, "" otherwise (or none saved).
+const char *account_session_token(void);
 int  account_ui_logout(void);               // logoutAcc (menu Logout, console `logout`): 1 logged out, 0 guest
 // The alt manager's switch: sign out of the current account, then sign in with a saved session.
 // 0 started, -1 no account server in this build.
@@ -58,6 +81,7 @@ void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / ""
 // customBadge privacy setting shows it, else -1 (menu header, v7 updateClassPreview).
 int account_custom_badge(void);
 void account_ui_scenario(const cJSON *account); // --render-scenario: state.account stands in for a login
+void account_ui_scenario_official(int on);      // --render-scenario: state.official, krunker.io is the active backend
 void account_ui_scenario_post(void);             // after the scenario's window: account.c2fa (the 2FA popup)
 int account_owns_badge(int badge);
 void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
