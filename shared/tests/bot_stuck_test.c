@@ -266,6 +266,28 @@ static const cJSON *catalog_map(const char *key) {
     return index >= 0 ? map_catalog_json((size_t) index) : NULL;
 }
 
+// Clockwork: its spawn at (338, 18, 71) stands inside the bounds of a cylinder (a tower with a
+// circular collision); the grid must cover it with a node (the bounds-only grid had none there).
+static void test_cylinder_spawn_on_grid(void) {
+    printf("Running cylinder spawn grid test...\n");
+    const cJSON *map = catalog_map("clockwork");
+    Game game;
+    CHECK(map && game_open(&game, map, mode_find("ffa")), "clockwork loads");
+    if (!map || !game.ready) {
+        game_close(&game);
+        return;
+    }
+    const vec3 want = {338.0f, 18.0f, 71.0f};
+    int found = -1;
+    for (size_t i = 0; i < game.map->spawn_count; i++) {
+        const vec3 s = game.map->spawns[i]->position;
+        if (hypotf(s.x - want.x, s.z - want.z) < 1.0f) found = (int) i;
+    }
+    CHECK(found >= 0, "clockwork has a spawn at (%.0f %.0f %.0f)", want.x, want.y, want.z);
+    if (found >= 0) CHECK(bot_nav_on_grid(&game, game.map->spawns[found]->position), "clockwork's spawn at (%.0f %.0f %.0f) is on the nav grid", want.x, want.y, want.z);
+    game_close(&game);
+}
+
 // Freight: a bot hanging beside the top of the ladder at (138, 0, -46) (a body touching a ladder
 // below its top gets no gravity) with its route's next waypoint the floor 32 units straight below
 // stood there for good (the waypoint read as reached, 2D). It must let go and drop.
@@ -325,7 +347,10 @@ int main(void) {
         CHECK(bad == 0, "every spawn of every rotation map is routable (%d are not)", bad);
     }
 
-    if (!only) test_ladder_hang();
+    if (!only) {
+        test_cylinder_spawn_on_grid();
+        test_ladder_hang();
+    }
 
     printf("Running stuck bot test...\n");
     // the fixed list: the stucks found so far, then a spread of the rotation in its common modes
