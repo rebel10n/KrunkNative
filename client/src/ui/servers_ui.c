@@ -2102,7 +2102,7 @@ static void append_krunker_status(StrBuf *sb, const int groups) {
     sb_append(sb, "<div id='kioStatus' class='kioSep'><span class='kioSepAcc' id='knAccountsKio'>");
     krunker_account_ui_state_html(sb);
     sb_append(sb, "</span><span class='kioSepLabel'>");
-    sb_append_esc(sb, I18N("kn.servers.kioSection", "krunker.io servers"));
+    sb_append_esc(sb, I18N("kn.servers.kioSection", "KRUNKER.IO OFFICIAL LOBBIES"));
     sb_append(sb, "</span>");
     const char *why = NULL;
     int error = 0;

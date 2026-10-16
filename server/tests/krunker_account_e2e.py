@@ -439,7 +439,7 @@ def run():
     check("the Servers window has no \"as a guest\" / \"guest only\" wording", window and not re.search(r"as a guest|guest only", window, re.I),
           re.findall(r".{40}as a guest.{20}", window)[:2])
     st = probe(text, "status")
-    check("the KRUNKER.IO section speaks of krunker.io servers", "krunker.io servers" in st and "guest" not in st.lower(), st)
+    check("the KRUNKER.IO section speaks of krunker.io servers", "KRUNKER.IO OFFICIAL LOBBIES" in st and "guest" not in st.lower(), st)
     qj = re.search(r"elements=\d+ match=(\d+)", probe(text, "qj"))
     check("a krunker.io group has a Quick Join button (main's group header; krunker.io groups come last)", qj and int(qj.group(1)) >= 1, probe(text, "qj"))
     check("Quick Join picks the Kanji lobby with room (not the fuller Burg, not the password one or the full one)",

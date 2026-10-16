@@ -229,7 +229,7 @@ def storage(cfg, key):
 
 
 DENIED = "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."
-OPEN_TEXT = "krunker.io servers"  # the separator line before the official groups (servers_ui.c append_krunker_status)
+OPEN_TEXT = "KRUNKER.IO OFFICIAL LOBBIES"  # the separator line before the official groups (servers_ui.c append_krunker_status)
 
 
 def listed(text):
