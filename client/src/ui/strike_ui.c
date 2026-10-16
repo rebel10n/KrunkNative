@@ -62,6 +62,8 @@ static const char *const SCREEN_IDS[STRIKE_SCREEN_COUNT] = {
     [STRIKE_SCREEN_REWARD] = "REWARD",
     [STRIKE_SCREEN_REWARD_CHOICE] = "REWARD_CHOICE",
     [STRIKE_SCREEN_INPUT_BLOCKER] = "INPUT_BLOCKER",
+    [STRIKE_SCREEN_PROFILE_DETAILS] = "PROFILE-DETAILS",
+    [STRIKE_SCREEN_POPUP_MESSAGE] = "POPUP_MESSAGE",
 };
 
 // view.opts: translucent (the screens below stay rendered), keepAlive (rendered while buried)
@@ -76,6 +78,7 @@ static const struct { unsigned char translucent, keep_alive; } SCREEN_OPTS[STRIK
     [STRIKE_SCREEN_LEAN_END] = {0, 1},
     [STRIKE_SCREEN_REPORT_PLAYER] = {1, 0}, // Hy opts {preventReplace, translucent}
     [STRIKE_SCREEN_INPUT_BLOCKER] = {1, 0}, // ws opts {translucent}
+    [STRIKE_SCREEN_PROFILE_DETAILS] = {0, 1}, // jC: keepAlive, so the Settings tab's name field survives an alert
 };
 
 // Dk: generic.tips.* in English (the 1.37.2 i18n table, tools/strike/strike_data.json)

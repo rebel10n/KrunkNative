@@ -1,0 +1,29 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "account": {
+      "name": "Player",
+      "score": 50000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "challenges": []
+    },
+    "strike": {
+      "screen": "PROFILE-DETAILS"
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_profile.c). NO REFERENCE: FRVR has no sandbox capture of PROFILE-DETAILS (jC); its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). Account Overview of a signed-in account ('Player', Logout shown)."
+}

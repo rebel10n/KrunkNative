@@ -95,6 +95,8 @@ typedef enum {
     STRIKE_SCREEN_REWARD,         // VC (Es): a reward's reveal (strike_reward.c)
     STRIKE_SCREEN_REWARD_CHOICE,  // NB (QC): pick one of a level's rewards (strike_reward.c)
     STRIKE_SCREEN_INPUT_BLOCKER,  // ws: "Purchasing..." while a purchase is on its way (strike_reward.c)
+    STRIKE_SCREEN_PROFILE_DETAILS, // jC: Account Details (strike_profile.c)
+    STRIKE_SCREEN_POPUP_MESSAGE,   // Oue: the success / error / warning alert and the Logout / name confirms
     STRIKE_SCREEN_COUNT
 } StrikeScreen;
 
@@ -153,6 +155,15 @@ void strike_meta_tick(Client *client);
 void strike_meta_econ_changed(void);                    // the Strike account changed (strike_econ_listen)
 void strike_meta_scenario(Client *client, const cJSON *state); // --render-scenario state.strike keys
 int  strike_menu_level(void);                           // the account box's level (strike_menu.c)
+int  strike_menu_class_id(void);                        // the selected class's Krunker id (its face, strike_menu.c)
+
+// strike_profile.c: PROFILE-DETAILS (jC) and the message popups (Oue). strike_profile_render returns 1 for the
+// screens it draws; strike_profile_action 1 for the clicks it takes. strike_popup_expect marks that the next
+// account answer (popupResponse kind 0 / 1) belongs to this page: it shows as a message (success text
+// `success` when the answer has none). Used by the Rewards tab's claims (strike_meta.c).
+int  strike_profile_render(StrikeScreen s, HtmlElem root);
+int  strike_profile_action(const char *a);
+void strike_popup_expect(const char *success);
 
 // strike_social.c: FRVR's friends UI on kn_brain's social socket (friends event bus, presence filtered
 // to Strike games, game invites, reports): the menu friends strip / Friends List (S5) on MAIN_MENU and

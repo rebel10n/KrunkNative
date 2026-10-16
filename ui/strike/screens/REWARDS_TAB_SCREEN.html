@@ -1,0 +1,20 @@
+<!-- FRVR Krunker Strike 1.37.2 REWARDS_TAB_SCREEN (OD: the Battle Pass screen's Rewards tab, .tabsContent of _C), TRANSCRIBED from the Mithril views of assets/index-Cz2uYXJQ.js (no sandbox capture exists: not pixel-verified). Free track only (showBothTracks is false, so no VIP column and no Unlock VIP). client/src/ui/strike_meta.c fills it from battlepass_ui's bpdl / bppd / bpclmr data. The clock is a Material glyph: FRVR's clock-symbol.svg is not in the 1.37.2 tree. -->
+<div class="frvr-bp-rewards-tab"><div class="frvr-bp-rewards-tab__treadmill-container"><div class="frvr-bp-rewards-tab__header">{{!header}}</div><div class="frvr-bp-rewards-tab__treadmill frvr-bp-rewards-tab__treadmill--single"><div class="frvr-bp-rewards-tab__row-titles"><div class="frvr-bp-rewards-tab__row-title"><span>Free</span></div></div><div class="frvr-bp-rewards-tab__treadmill-rows"><div class="frvr-bp-rewards-tab__treadmill-button-holder frvr-bp-rewards-tab__treadmill-button-holder--single" onclick="strikeAction('bp-slide:-1')"><div class="frvr-bp-rewards-tab__treadmill-button"><div class="frvr-bp-rewards-tab__treadmill-arrow"></div></div></div><div class="frvr-bp-rewards-tab__treadmill-columns">{{!columns}}</div><div class="frvr-bp-rewards-tab__treadmill-button-holder frvr-bp-rewards-tab__treadmill-button-holder--single" onclick="strikeAction('bp-slide:1')"><div class="frvr-bp-rewards-tab__treadmill-button"><div class="frvr-bp-rewards-tab__treadmill-arrow frvr-bp-rewards-tab__treadmill-arrow--right"></div></div></div></div></div></div><div class="frvr-bp-rewards-tab__button-area">{{!claim}}</div></div>
+<!-- part header -->
+<div class="frvr-bp-rewards-tab__title"><span>{{season}}</span><div class="frvr-bp-rewards-tab__season"><i class="material-icons">schedule</i><span>{{endText}}</span></div></div><div class="frvr-bp-rewards-tab__level"><span>{{levelText}}</span><div class="frvr-bp-rewards-tab__xp"><span class="frvr-bp-rewards-tab__bar-top-value">{{xpText}}</span><div class="frvr-bp-rewards-tab__xp-bar"><div class="frvr-bp-rewards-tab__xp-bar--progress" style="width: {{xpPct}}%;"></div></div></div></div><div class="frvr-bp-rewards-tab__xp"><div class="frvr-bp-rewards-tab__xp-and-symbol"><span class="frvr-bp-rewards-tab__bar-top-value">Available BP</span></div><div class="frvr-bp-rewards-tab__xp-bar"><div class="frvr-bp-rewards-tab__xp-bar--progress" style="width: {{availPct}}%;"></div></div></div>
+<!-- part column -->
+<div class="frvr-bp-rewards-tab__column{{columnClass}}"><div class="frvr-bp-rewards-tab__col-number{{numberClass}}"><span>{{level}}</span></div><div class="frvr-bp-rewards-tab__card{{cardClass}}"{{!onclick}}>{{!slot}}</div></div>
+<!-- part slot -->
+<div class="frvr-bp-rewards-tab__card-img-slot">{{!check}}{{!image}}{{!text}}</div>
+<!-- part check -->
+<div class="frvr-bp-rewards-tab__img-slot-icon-check"><img src="./img/frvr-ui/check.svg"></div>
+<!-- part image -->
+<img src="{{src}}" style="image-rendering: unset;">
+<!-- part text -->
+<div class="frvr-bp-rewards-tab__img-slot-text"><span>{{label}}</span></div>
+<!-- part claim -->
+<div id="claimrewards" class="frvr-button frvr-button--size-xs" onclick="strikeAction('bp-claim-all')"><span class="frvr-button-text">Claim Rewards</span></div>
+<!-- part claim-disabled -->
+<div id="claimrewards" disabled="" class="frvr-button frvr-button--size-xs is-disabled"><span class="frvr-button-text">Claim Rewards</span></div>
+<!-- part junk -->
+<i class="material-icons junk-icon">plumbing</i>

@@ -138,9 +138,12 @@ server/tests/strike_menu_screens_e2e.py opens each one and goes back.
 
 ## Transcribed screens (no capture: not pixel-verified)
 
-MISSION_TAB_SCREEN (`UD`, the Battle Pass screen's Missions tab), REWARD_TO_CLAIM (`XB`, a reward card in the POPUP
-frame), MATCH_DETAILS_SCREEN (`GB` / `Ny`, the round end's podium button) and PROGRESSION_TRACK (`KU`, PROFILE's Rewards
-Track) have no sandbox capture. Their templates (`screens/<VIEW_ID>.html`, hand-written, not generated: the generator
+MISSION_TAB_SCREEN (`UD`, the Battle Pass screen's Missions tab), REWARDS_TAB_SCREEN (`OD`, its Rewards tab: the free
+track, claims; no VIP column), REWARD_TO_CLAIM (`XB`, a reward card in the POPUP frame), MATCH_DETAILS_SCREEN (`GB` /
+`Ny`, the round end's podium button), PROGRESSION_TRACK (`KU`, PROFILE's Rewards Track), PROFILE-DETAILS (`jC`, Account
+Details: the overview, Account Settings with the name change, Logout) and POPUP_MESSAGE (`Oue`, the alert frame of the
+Logout / name confirms and the success / error answers) have no sandbox capture. Where FRVR's icon SVGs are not in the
+1.37.2 tree (clock-symbol, info-*, icon-logout), these use Material glyphs. Their templates (`screens/<VIEW_ID>.html`, hand-written, not generated: the generator
 never touches them) are transcribed from the Mithril views in `assets/index-Cz2uYXJQ.js`, read as text: the same
 elements, classes, inline styles and strings FRVR's code would render, with `<!-- part NAME -->` sections for the row /
 card components that client/src/ui/strike_meta.c fills. Nothing about them is checked against FRVR's own pixels.

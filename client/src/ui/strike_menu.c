@@ -1892,6 +1892,8 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_ITEM_SELECTION:  // transcribed from the bundle (T5 / rde, above)
     case STRIKE_SCREEN_REPORT_PLAYER:   // transcribed from the bundle (strike_social.c)
+    case STRIKE_SCREEN_PROFILE_DETAILS: // jC (strike_profile.c)
+    case STRIKE_SCREEN_POPUP_MESSAGE:   // Oue (strike_profile.c)
         return strike_screen_id(s);
     case STRIKE_SCREEN_REWARD:          // transcribed from the bundle (strike_reward.c)
     case STRIKE_SCREEN_REWARD_CHOICE:   // transcribed from the bundle (strike_reward.c)
@@ -2067,6 +2069,8 @@ static void scenario_items(const cJSON *v) {
     snprintf(a, sizeof(a), "item-slot:%d", (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(v, "category")));
     action(a);
 }
+
+int strike_menu_class_id(void) { return CLASSES[current_class()].id; }
 
 int strike_menu_level(void) {
     char name[64];

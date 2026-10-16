@@ -27,6 +27,9 @@
 //              name, IC, PT (done, the sort key), PV, DAT.val, TR, REW.kr / bpp / jnk. Reward skins
 //              (REW.sk, Krunker skins, not FRVR item definitions) are not shown.
 //   bpData     battlepass_ui_pass() of a signed-in account (Se.bpData && account.BP)
+//   OD REWARDS_TAB_SCREEN  the Battle Pass screen's Rewards tab (the free track; the VIP column and
+//              Unlock VIP are not ported: premium money). Claim Rewards claims the first claimable card
+//              (claimMassItem: _S(t[0])), each card's click claims it (cX).
 //   legacyData the END table (hud_modes_end_rows / _cell: the mode's endStats, the server's endSort
 //              order, team totals), else the players by score
 #include <strike_ui.h>
@@ -36,6 +39,7 @@
 #include <hud_modes.h>
 #include <spectate.h>
 #include <modes.h>
+#include <season.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +53,7 @@ static struct {
     Client *client;
     int bp_tab;                 // FT viewState.selectedTab of the Battle Pass screen
     unsigned long missions_sig; // what the Missions tab shows (re-filled when the challenges change)
+    unsigned long rewards_sig;  // what the Rewards tab shows (the Battle Pass data, BPP and claimed cards)
     int report;                 // TA: Report players was pressed (the board shows report symbols)
     cJSON *progression;         // the game config's accountProgression (owned; NULL = none)
     cJSON *claimed;             // account.progressionClaimedItems (owned)
@@ -354,6 +359,132 @@ static char *mission_card(const cJSON *c) {
     return html;
 }
 
+// ---------------------------------------------------------------- REWARDS_TAB_SCREEN (OD / cX)
+
+// OD's populateRewardList for the free track: a card is claimable when its level is reached and it
+// is not claimed (level col <= the account's level). claimMassItem claims the first one.
+typedef struct {
+    int level;     // the account's Battle Pass level (bp_level)
+    int claimable; // cards that can be claimed now
+    int first;     // the first claimable card's id (0 none)
+} BpScan;
+
+static BpScan bp_scan(const BattlePass *bp, const int64_t bpp) {
+    BpScan s = {0, 0, 0};
+    if (!bp) return s;
+    s.level = bp_level(bp, bpp, NULL, NULL);
+    const char *claimed = battlepass_ui_claimed();
+    for (int col = 1; col <= bp->item_count && col <= s.level; col++) {
+        const BattlePassItem *it = bp_item_at(bp, 0, col - 1);
+        if (!it || bp_is_claimed(claimed, it->id)) continue;
+        if (!s.claimable++) s.first = it->id;
+    }
+    return s;
+}
+
+// cX's card slot: the skin's thumbnail, else KR / junk (sk > kr > jn), its text (kr " KR", jn)
+static char *bp_slot(const BattlePassItem *it, const int claimed) {
+    char image[256] = "", label[64] = "", num[32];
+    int junk = 0;
+    if (it->skin > 0) store_skin_preview(it->skin, image, sizeof image);
+    else if (it->kr > 0) snprintf(image, sizeof image, "./img/currencies/krunkies.png");
+    else if (it->jnk > 0) junk = 1;
+    if (it->kr > 0) snprintf(label, sizeof label, "%d KR", it->kr);
+    else if (it->jnk > 0) {
+        js_num(it->jnk, num, sizeof num);
+        snprintf(label, sizeof label, "%s", num);
+    }
+    char *check = claimed ? part_string("REWARDS_TAB_SCREEN", "check", NULL, 0) : NULL;
+    const StrikeVar iv[] = {{"src", image}};
+    char *img = junk ? part_string("REWARDS_TAB_SCREEN", "junk", NULL, 0)
+              : image[0] ? part_string("REWARDS_TAB_SCREEN", "image", iv, 1) : NULL;
+    const StrikeVar tv[] = {{"label", label}};
+    char *text = label[0] ? part_string("REWARDS_TAB_SCREEN", "text", tv, 1) : NULL;
+    const StrikeVar v[] = {{"check", check ? check : ""}, {"image", img ? img : ""}, {"text", text ? text : ""}};
+    char *slot = part_string("REWARDS_TAB_SCREEN", "slot", v, 3);
+    free(check);
+    free(img);
+    free(text);
+    return slot;
+}
+
+// one column of the treadmill (OD's cX on the free track): the level, the card, its claim state
+static char *bp_column(const BattlePass *bp, const int col, const int level, const char *claimed) {
+    const BattlePassItem *it = bp_item_at(bp, 0, col - 1);
+    const int done = it && bp_is_claimed(claimed, it->id);
+    const int reached = col <= level;
+    char lv[16], column_class[64] = "", number_class[80] = "", card_class[96] = "", onclick[64] = "";
+    snprintf(lv, sizeof lv, "%d", col);
+    if (col > level) snprintf(column_class, sizeof column_class, " frvr-bp-rewards-tab__column--locked");
+    if (col == level) snprintf(number_class, sizeof number_class, " frvr-bp-rewards-tab__col-number--current");
+    else if (col < level) snprintf(number_class, sizeof number_class, " frvr-bp-rewards-tab__col-number--previous");
+    if (done || reached) snprintf(card_class, sizeof card_class, " frvr-bp-rewards-tab__card--claimable-claimed");
+    if (it && !done && reached) snprintf(onclick, sizeof onclick, " onclick=\"strikeAction('bp-claim:%d')\"", it->id);
+    char *slot = it ? bp_slot(it, done) : NULL;
+    const StrikeVar v[] = {{"columnClass", column_class}, {"numberClass", number_class}, {"level", lv}, {"cardClass", card_class},
+                           {"onclick", onclick}, {"slot", slot ? slot : ""}};
+    char *html = part_string("REWARDS_TAB_SCREEN", "column", v, 6);
+    free(slot);
+    return html;
+}
+
+// OD's lX header: the season's name and its end, the level, the BPP into it, the Available BP bar
+// (bp_cap_total / bp_available: the daily cap)
+static char *bp_header(const BattlePass *bp, const int64_t bpp) {
+    const int64_t now = battlepass_ui_now();
+    int64_t points = 0;
+    int complete = 0;
+    const int level = bp_level(bp, bpp, &points, &complete);
+    const int64_t need = bp_level_need(bp, level);
+    const int64_t cap = bp_cap_total(bp, now), avail = bp_available(bp, bpp, now);
+    char end[64], season[256], lvl[32], xp[64], xp_pct[32], avail_pct[32];
+    readable_time(bp->end_s > now ? (double) (bp->end_s - now) * 1000.0 : 0.0, end, sizeof end);
+    snprintf(season, sizeof season, "%s", bp->name);
+    snprintf(lvl, sizeof lvl, "Level %d", level);
+    snprintf(xp, sizeof xp, "BPP: %lld / %lld", (long long) points, (long long) need);
+    js_num(need > 0 ? (double) points / (double) need * 100.0 : 0.0, xp_pct, sizeof xp_pct);
+    js_num(cap > 0 ? (double) avail / (double) cap * 100.0 : 0.0, avail_pct, sizeof avail_pct);
+    const StrikeVar v[] = {{"season", season}, {"endText", end}, {"levelText", lvl}, {"xpText", xp}, {"xpPct", xp_pct}, {"availPct", avail_pct}};
+    return part_string("REWARDS_TAB_SCREEN", "header", v, 6);
+}
+
+// OD's view: the header, the free track's treadmill (every level's column), Claim Rewards
+static char *rewards_html(void) {
+    const BattlePass *bp = battlepass_ui_pass();
+    const int64_t bpp = battlepass_ui_bpp();
+    const char *claimed = battlepass_ui_claimed();
+    const BpScan scan = bp_scan(bp, bpp);
+    StrBuf cols = {0};
+    for (int col = 1; bp && col <= bp->item_count; col++) {
+        char *c = bp_column(bp, col, scan.level, claimed);
+        sb_append(&cols, c);
+        free(c);
+    }
+    char *columns = sb_finish(&cols);
+    char *header = bp_header(bp, bpp);
+    char *claim = part_string("REWARDS_TAB_SCREEN", scan.claimable > 0 ? "claim" : "claim-disabled", NULL, 0);
+    const StrikeVar v[] = {{"header", header ? header : ""}, {"columns", columns ? columns : ""}, {"claim", claim}};
+    char *html = strike_template("REWARDS_TAB_SCREEN", v, 3);
+    printf("[strike] REWARDS_TAB_SCREEN %d levels, level %d, %d claimable\n", bp ? bp->item_count : 0, scan.level, scan.claimable);
+    free(header);
+    free(columns);
+    free(claim);
+    return html;
+}
+
+static unsigned long rewards_signature(void) {
+    const BattlePass *bp = battlepass_ui_pass();
+    unsigned long sig = (unsigned long) (uintptr_t) bp * 31u + (unsigned long) bp_has_data() + (unsigned long) battlepass_ui_bpp() * 7u;
+    for (const char *p = battlepass_ui_claimed(); p && *p; p++) sig = sig * 131u + (unsigned char) *p;
+    return sig;
+}
+
+// the free track's claim of one card (windows[5].claimItem): the answer is a popup (strike_profile.c)
+static void bp_claim(const int id) {
+    strike_popup_expect(NULL);
+    battlepass_ui_claim(id);
+}
+
 // FT: the tab selector's .selected and the tab's content (g(UD) or g(I2, {screen}))
 static void bp_tab(const HtmlElem root, const int tab) {
     T.bp_tab = tab;
@@ -364,7 +495,9 @@ static void bp_tab(const HtmlElem root, const int tab) {
     if (!content) return;
     char *html = NULL;
     if (tab == 1 && !T.econ_missions_asked) econ_missions_ask(); // a Strike account: GET /strike/v1/missions/me
-    if (tab == 1 && bp_has_data()) {
+    if (tab == 0 && bp_has_data()) {
+        html = rewards_html();
+    } else if (tab == 1 && bp_has_data()) {
         if (!econ_on()) account_challenges_request(); // account.activeMissions: asked once per session
         const cJSON *list[64];
         const int count = daily_missions(list, 64);
@@ -380,8 +513,7 @@ static void bp_tab(const HtmlElem root, const int tab) {
         free(body);
         printf("[strike] MISSION_TAB_SCREEN %d daily missions\n", count);
     } else {
-        // I2: "Loading Rewards" / "Loading Missions" (the Rewards tab's OD is not ported: with bpData
-        // it stays at I2 as before)
+        // I2: "Loading Rewards" / "Loading Missions" (no bpData, or no account: FRVR shows the same)
         const StrikeVar v[] = {{"screen", tab == 1 ? "Missions" : "Rewards"}};
         html = strike_template_part("MISSION_TAB_SCREEN", "loading", v, 1);
     }
@@ -404,6 +536,7 @@ static void bp_tab(const HtmlElem root, const int tab) {
         }
     }
     T.missions_sig = missions_signature();
+    T.rewards_sig = rewards_signature();
 }
 
 static void bp_render(const HtmlElem root) {
@@ -414,7 +547,8 @@ static void bp_render(const HtmlElem root) {
         snprintf(hook, sizeof(hook), "strikeAction('bp-tab:%d')", i);
         html_dom_set_attr(items[i], "onclick", hook);
     }
-    bp_tab(root, 0); // a new FT: viewState.selectedTab 0
+    battlepass_ui_request(); // "bpdl" once (io_accountResponse): the Rewards tab fills when it arrives
+    bp_tab(root, 0);         // a new FT: viewState.selectedTab 0
 }
 
 // ---------------------------------------------------------------- REWARD_TO_CLAIM (XB / wg)
@@ -811,15 +945,23 @@ static void track_render(const HtmlElem profile) {
     free(columns);
 }
 
-// KU.slide(n): one page of columns left / right; the arrows' --available follow
-static void track_slide(const int dir) {
-    const HtmlElem profile = strike_screen_root(STRIKE_SCREEN_PROFILE);
-    const HtmlElem cols = profile ? html_dom_query(profile, ".frvr-progression-track-rewards__treadmill-columns") : 0;
+// The selectors of one treadmill: KU (PROFILE's Rewards Track) and OD (the Battle Pass Rewards tab)
+typedef struct {
+    const char *cols, *col, *button, *avail;
+} Treadmill;
+static const Treadmill TM_TRACK = {".frvr-progression-track-rewards__treadmill-columns", ".frvr-progression-track-rewards__column",
+                                   ".frvr-progression-track-rewards__treadmill-button", "frvr-progression-track-rewards__treadmill-button--available"};
+static const Treadmill TM_BP = {".frvr-bp-rewards-tab__treadmill-columns", ".frvr-bp-rewards-tab__column",
+                                ".frvr-bp-rewards-tab__treadmill-button", "frvr-bp-rewards-tab__treadmill-button--available"};
+
+// KU.slide(n) / OD.slide(n): one page of columns left / right; the arrows' --available follow
+static void treadmill_slide(const HtmlElem screen, const Treadmill *tm, const int dir) {
+    const HtmlElem cols = screen ? html_dom_query(screen, tm->cols) : 0;
     if (!cols) return;
     HtmlScroll sc = {0};
     if (!html_dom_get_scroll(cols, &sc)) return;
     HtmlElem kids[256];
-    const int n = html_dom_query_all(cols, ".frvr-progression-track-rewards__column", kids, 256);
+    const int n = html_dom_query_all(cols, tm->col, kids, 256);
     HtmlRect first = {0};
     if (n > 0) html_dom_get_rect(kids[0], &first);
     const float r = (float) (n - 1) * first.w - sc.client_w;
@@ -827,9 +969,9 @@ static void track_slide(const int dir) {
     const int left_ok = !(l <= 0.0f && dir == -1), right_ok = !(u >= r && dir == 1);
     html_dom_set_scroll(cols, l, sc.top);
     HtmlElem buttons[2];
-    if (html_dom_query_all(profile, ".frvr-progression-track-rewards__treadmill-button", buttons, 2) == 2) {
-        html_dom_set_class(buttons[0], "frvr-progression-track-rewards__treadmill-button--available", left_ok);
-        html_dom_set_class(buttons[1], "frvr-progression-track-rewards__treadmill-button--available", right_ok);
+    if (html_dom_query_all(screen, tm->button, buttons, 2) == 2) {
+        html_dom_set_class(buttons[0], tm->avail, left_ok);
+        html_dom_set_class(buttons[1], tm->avail, right_ok);
     }
 }
 
@@ -837,6 +979,7 @@ static void track_slide(const int dir) {
 
 void strike_meta_render(const StrikeScreen s, const HtmlElem root) {
     if (!root) return;
+    if (strike_profile_render(s, root)) return; // PROFILE-DETAILS, the message popups (strike_profile.c)
     switch (s) {
     case STRIKE_SCREEN_BATTLEPASS:
         bp_render(root);
@@ -856,6 +999,7 @@ void strike_meta_render(const StrikeScreen s, const HtmlElem root) {
 }
 
 int strike_meta_action(const char *a) {
+    if (strike_profile_action(a)) return 1; // Account Details, the Logout and name confirms (strike_profile.c)
     if (!strncmp(a, "bp-tab:", 7)) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
@@ -880,7 +1024,20 @@ int strike_meta_action(const char *a) {
         return 1;
     }
     if (!strncmp(a, "track-slide:", 12)) {
-        track_slide(atoi(a + 12) < 0 ? -1 : 1);
+        treadmill_slide(strike_screen_root(STRIKE_SCREEN_PROFILE), &TM_TRACK, atoi(a + 12) < 0 ? -1 : 1);
+        return 1;
+    }
+    if (!strncmp(a, "bp-slide:", 9)) {
+        treadmill_slide(strike_screen_root(STRIKE_SCREEN_BATTLEPASS), &TM_BP, atoi(a + 9) < 0 ? -1 : 1);
+        return 1;
+    }
+    if (!strncmp(a, "bp-claim:", 9)) {
+        bp_claim(atoi(a + 9));
+        return 1;
+    }
+    if (!strcmp(a, "bp-claim-all")) { // claimMassItem(A): the first claimable card
+        const BpScan scan = bp_scan(battlepass_ui_pass(), battlepass_ui_bpp());
+        if (scan.first) bp_claim(scan.first);
         return 1;
     }
     if (!strcmp(a, "track-claim")) { // gn.claimSlots(l): every claimable slot, one after another (Fy)
@@ -918,14 +1075,16 @@ void strike_meta_econ_changed(void) {
 
 void strike_meta_tick(Client *client) {
     T.client = client;
-    // the Missions tab follows account.activeMissions (Mithril redraws on every change)
-    if (T.bp_tab == 1) {
-        const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
-        if (root && missions_signature() != T.missions_sig) bp_tab(root, 1);
-    }
+    // the Rewards tab follows the Battle Pass data (bpdl / bppd / bpclmr), the Missions tab
+    // account.activeMissions (Mithril redraws on every change)
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
+    if (!root) return;
+    if (T.bp_tab == 0 && rewards_signature() != T.rewards_sig) bp_tab(root, 0);
+    else if (T.bp_tab == 1 && missions_signature() != T.missions_sig) bp_tab(root, 1);
 }
 
-// state.strike (strike_ui_scenario): "progression" (the game config's accountProgression:
+// state.strike (strike_ui_scenario): "profileTab" (PROFILE-DETAILS: 0 / 1), "logoutConfirm" (the Logout
+// confirm), "progression" (the game config's accountProgression:
 // {"<level>": {slotId, items: [{type, currency, amount} ...], isPlayerChoice, bundleName}}),
 // "claimed" (progressionClaimedItems: slot ids), "reward" (REWARD_TO_CLAIM's {type, currency,
 // amount}), "battlepassTab" (the Battle Pass tab), "matchDetails" (true: the podium button)
@@ -953,4 +1112,11 @@ void strike_meta_scenario(Client *client, const cJSON *st) {
         strike_meta_action(a);
     }
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(st, "matchDetails"))) strike_menu_action("match-details");
+    const cJSON *ptab = cJSON_GetObjectItemCaseSensitive(st, "profileTab"); // PROFILE-DETAILS' tab (strike_profile.c)
+    if (cJSON_IsNumber(ptab)) {
+        char a[24];
+        snprintf(a, sizeof(a), "profile-tab:%d", ptab->valueint);
+        strike_profile_action(a);
+    }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(st, "logoutConfirm"))) strike_profile_action("logout");
 }

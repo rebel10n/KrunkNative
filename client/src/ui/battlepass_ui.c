@@ -119,6 +119,7 @@ static void set_progress(const cJSON *p) {
 }
 
 int battlepass_ui_tier(void) { return g_has_progress ? g_tier : 0; }
+const char *battlepass_ui_claimed(void) { return g_claimed; }   // account.BP.items_claimed ("id,id,...")
 const BattlePass *battlepass_ui_pass(void) { return g_bp; }
 int64_t battlepass_ui_bpp(void) { return g_has_progress ? g_bpp : 0; }
 
@@ -200,6 +201,7 @@ static void readable_v10(char *out, const size_t n, const double ms, const int s
 }
 
 static int64_t now_s(void) { return g_now_override ? g_now_override : (int64_t) time(NULL); }
+int64_t battlepass_ui_now(void) { return now_s(); }  // the clock the pass reads (a scenario's "now")
 
 static int g_countdown_timer;
 
@@ -584,6 +586,16 @@ static void purchase_error(const cJSON *err) {
 }
 
 static void loading_popup(const char *text) { account_popup(2, NULL, text); } // io_loadingPopup
+
+// Claims one card (windows[5].claimItem, io.send("bpclm", id)): the answer is "bpclmr" (battlepass_ui_frame).
+// Strike's Rewards tab calls it; the loading popup is the same as the menu's.
+void battlepass_ui_claim(const int id) {
+    if (!active_account()) return;
+    char frame[48];
+    loading_popup("Claiming...");
+    snprintf(frame, sizeof frame, "[\"bpclm\",%d]", id);
+    backend_social_send_text(frame);
+}
 
 // ------------------------------------------------------------------ handlers
 

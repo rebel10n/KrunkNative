@@ -85,6 +85,9 @@ void account_ui_scenario_official(int on);      // --render-scenario: state.offi
 void account_ui_scenario_post(void);             // after the scenario's window: account.c2fa (the 2FA popup)
 int account_owns_badge(int badge);
 void account_popup(int kind, const char *error, const char *text); // popupResponse: 0 error, 1 success, 2 loading
+// Strike's message popups: 1 when the Strike page shows the answer of a request it made (strike_popup_expect),
+// so account_ui's popup_response stops there; 0 otherwise (the v10 popup).
+int  strike_popup_message(int kind, const char *error, const char *text);
 void account_readable_time(char *out, size_t n, double ms);         // UTILS.getReadableTime
 // account.activeChallenges (kn_brain "chgL"; NULL = not loaded / guest), its request, and
 // challenges.updateNames' N
@@ -107,6 +110,9 @@ int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 
 const struct BattlePass *battlepass_ui_pass(void); // windows[5].data parsed (NULL none)
 int64_t battlepass_ui_bpp(void);            // account.BP.bpp (0 without)
 void battlepass_ui_request(void);           // v10: "bpdl" once an account is signed in (no-op when asked)
+const char *battlepass_ui_claimed(void);     // account.BP.items_claimed ("id,id,...", "" none)
+int64_t battlepass_ui_now(void);            // the Battle Pass clock (unix s; a scenario's "now")
+void battlepass_ui_claim(int id);           // bpclm: claim one card (Strike's Rewards tab)
 
 // ---- v10_rewards.c (Krunker v10.0.2: signup rewards, windows[32], the sidebar's Battle Pass item)
 void v10_show_signup_rewards(void);         // window.showSignupRewards
