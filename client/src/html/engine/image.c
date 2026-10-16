@@ -5,6 +5,7 @@
  */
 #include "image.h"
 #include "svg.h"
+#include "webp.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -696,15 +697,11 @@ int image_decode_data_url(const char *url, unsigned char **out, size_t *out_len)
 
 /* Cache key of a data: URL: its length + FNV-1a 64 (the URL itself can be far
  * longer than IMAGE_KEY_MAX). */
-/* WebP.  stb_image has no WebP decoder and the engine vendors none: v7's only
- * WebP images are the player card banners (assets/textures/playercards/
- * card_<id>.webp, viewer_skin_preview_path() with texExt "webp").  At import time
- * tools/ui-import/game_assets.py --v7 decodes every real WebP of the asset tree
- * into "<name>.webp.png" next to it (the first frame of an animated one; stb
- * gives the first frame of a GIF too), and a ".webp" that stb can't decode is
- * read from that sidecar.  Some of v7's .webp files are PNG data, which stb
- * decodes directly.  The page keeps v7's URLs: the web build's browser decodes
- * the .webp itself. */
+/* WebP.  A still WebP (lossy, lossy + alpha, lossless) decodes natively (webp.c over simplewebp).
+ * An animated one does not (simplewebp has no animation): it is read from the "<name>.webp.png"
+ * sidecar tools/ui-import/game_assets.py --v7 writes next to every real WebP (the first frame, as
+ * stb gives the first frame of a GIF). Some of v7's .webp files are PNG data, which stb decodes
+ * from the .webp itself. */
 #define IMAGE_WEBP_EXT ".webp"
 #define IMAGE_WEBP_SIDECAR ".png"
 
@@ -792,6 +789,8 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
         w = (int) lrintf(fw < 1 ? 1 : fw > 4096 ? 4096 : fw);
         h = (int) lrintf(fh < 1 ? 1 : fh > 4096 ? 4096 : fh);
         px = slot->svg ? svg_image_rasterize(slot->svg, w, h) : NULL;
+    } else if (webp_is_webp(bytes, len)) {
+        px = webp_decode_rgba(bytes, len, &w, &h);   /* still WebP: webp.c (simplewebp) */
     } else {
         px = stbi_load_from_memory(bytes, (int) len, &w, &h, &channels, 4);
     }
@@ -833,7 +832,7 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
 }
 
 /* A file image's natural size from its header (layout needs no pixels); the pixels are
- * decoded on its first draw (image_entry_load).  SVG and WebP (sidecar) load now. */
+ * decoded on its first draw (image_entry_load).  SVG and WebP load now. */
 static void image_probe(const ImageCache *cache, ImageSlot *slot) {
     unsigned char *bytes = NULL;
     size_t len = 0;

@@ -38,6 +38,7 @@
 #include <stb_image.h>
 
 #include "image.h"
+#include "../webp.h"
 
 static int g_failures;
 static int g_checks;
@@ -634,12 +635,71 @@ static void test_animated_gif(ImageCache *cache) {
     CHECK(glGetError() == GL_NO_ERROR, "guide gif: GL error");
 }
 
+static unsigned char *read_file(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *b = n > 0 ? malloc((size_t) n) : NULL;
+    if (b && fread(b, 1, (size_t) n, f) != (size_t) n) { free(b); b = NULL; }
+    fclose(f);
+    *len = b ? (size_t) n : 0;
+    return b;
+}
+
+/* WebP decodes natively (webp.c over simplewebp): v10's lossy, lossy + alpha (VP8X + ALPH) and
+ * plain VP8 files, against the .webp.png sidecars Pillow (libwebp) wrote, and the two that never
+ * had a sidecar (gift.webp, snowy_bg.webp: they failed to load before). */
+static void test_webp(const char *ui_dir) {
+    static const struct { const char *name; int w, h, sidecar; } files[] = {
+        {"img/lottery_bg.webp", 1300, 840, 1}, {"img/logo_10.webp", 840, 400, 1}, {"img/territory_map.webp", 1330, 760, 1},
+        {"img/gift.webp", 512, 512, 0}, {"img/snowy_bg.webp", 1024, 1024, 0},
+    };
+    for (size_t i = 0; i < sizeof files / sizeof *files; i++) {
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%s", ui_dir, files[i].name);
+        size_t len = 0;
+        unsigned char *bytes = read_file(path, &len);
+        CHECK(bytes != NULL, "webp: read %s", path);
+        if (!bytes) continue;
+        int w = 0, h = 0;
+        unsigned char *px = webp_decode_rgba(bytes, len, &w, &h);
+        free(bytes);
+        CHECK(px && w == files[i].w && h == files[i].h, "webp: %s decodes %dx%d (got %dx%d)", files[i].name, files[i].w, files[i].h, w, h);
+        if (px && files[i].sidecar) {
+            char side[1100];
+            snprintf(side, sizeof side, "%s.png", path);
+            int sw = 0, sh = 0, ch = 0;
+            stbi_set_flip_vertically_on_load_thread(0);
+            unsigned char *ref = stbi_load(side, &sw, &sh, &ch, 4);
+            CHECK(ref && sw == w && sh == h, "webp: %s sidecar %dx%d", files[i].name, sw, sh);
+            if (ref && sw == w && sh == h) {
+                double sum = 0;
+                int worst = 0;
+                const size_t n = (size_t) w * (size_t) h * 4;
+                for (size_t k = 0; k < n; k++) {
+                    const int d = abs((int) px[k] - (int) ref[k]);
+                    sum += d;
+                    if (d > worst) worst = d;
+                }
+                /* the same libwebp decoder (simplewebp derives from it): equal up to its fancy
+                 * upsampling and rounding, which Pillow's build may set differently */
+                CHECK(sum / (double) n < 1.5, "webp: %s matches its sidecar (mean diff %.3f, max %d)", files[i].name, sum / (double) n, worst);
+            }
+            stbi_image_free(ref);
+        }
+        free(px);
+    }
+}
+
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
     const char *ui_dir = argc > 1 ? argv[1] : "../ui/";
 
     test_url_resolution();
     test_geometry();
+    test_webp(ui_dir);
 
     if (!headless_glfw_init()) {
         fprintf(stderr, "glfwInit failed\n");
