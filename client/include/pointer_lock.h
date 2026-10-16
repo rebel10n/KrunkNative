@@ -37,6 +37,8 @@ typedef struct {
 typedef struct {
     int controls; // CONTROLS.enabled: keys / buttons reach the game (mouse_state.locked)
     int lock;     // the pointer should be locked (GLFW_CURSOR_DISABLED / requestPointerLock)
+    int play;     // the game is in play: `controls` with the window's focus left out. A player in play
+                  // enters the game when a round starts (main.c client_tick_game), focused or not
 } PointerLockWant;
 
 typedef struct {

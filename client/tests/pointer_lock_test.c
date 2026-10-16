@@ -173,6 +173,45 @@ static void test_modal(void) {
     EXPECT(pointer_lock_step(&t, &in), 1, 1, "the modal closed: locked again");
 }
 
+// The game is in play with the window out of focus (the alt-tab during a round or its end): no
+// controls and no lock (nothing may grab the pointer), but still in play, so a round that starts
+// then enters the player (client_tick_game). Over a menu, the results, a KrunkScript unlock or the
+// title that ran free, nothing is in play.
+static void test_unfocused_play(void) {
+    PointerLockTracker t = {0};
+    PointerLockInputs in = playing();
+    in.focused = 0;
+    PointerLockWant w = pointer_lock_step(&t, &in);
+    EXPECT(w, 0, 0, "alt-tab in play: no controls, no lock");
+    CHECK(w.play, "alt-tab in play: still in play (a round start enters the player)");
+    in = in_menu();
+    in.focused = 0;
+    w = pointer_lock_step(&t, &in);
+    CHECK(!w.play, "alt-tab with the menu open: not in play");
+    in = playing();
+    in.focused = 0;
+    in.end_results = 1;
+    in.end_up = 1;
+    w = pointer_lock_step(&t, &in);
+    CHECK(!w.play, "the results: not in play");
+    in.end_results = 0; // the next round: the results go, the title is over
+    in.end_up = 0;
+    w = pointer_lock_step(&t, &in);
+    CHECK(w.play, "the next round, window still out of focus: in play again");
+    in.script_unlock = 1;
+    w = pointer_lock_step(&t, &in);
+    CHECK(!w.play, "INPUTS.unlockMouse: not in play");
+    in.script_unlock = 0;
+    in.modal = 1; // the security challenge takes the pointer
+    w = pointer_lock_step(&t, &in);
+    CHECK(!w.play, "the challenge modal: not in play");
+    in.modal = 0;
+    in.focused = 1;
+    w = pointer_lock_step(&t, &in);
+    EXPECT(w, 1, 1, "focus back: controls and lock again");
+    CHECK(w.play, "focus back: in play");
+}
+
 int main(void) {
     test_menu_round_trip();
     test_modal();
@@ -182,6 +221,7 @@ int main(void) {
     test_end_focus_loss();
     test_respawn();
     test_script();
+    test_unfocused_play();
     printf("pointer_lock_test: %d/%d checks passed\n", checks - failures, checks);
     return failures ? 1 : 0;
 }

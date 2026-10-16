@@ -8,10 +8,13 @@ PointerLockWant pointer_lock_step(PointerLockTracker *t, const PointerLockInputs
     if (!in->end_up) t->end_freed = 0;
     t->end_up = in->end_up;
 
-    const int view = in->game && in->focused && !in->menu_open && !in->console_open && !in->end_results && !in->modal &&
-                     !(in->end_up && t->end_freed);
+    // in play: the game view with nothing over it (the focus left out; the window's focus is what
+    // turns the controls on and takes the pointer)
+    const int play = in->game && !in->menu_open && !in->console_open && !in->end_results && !in->modal &&
+                     !(in->end_up && t->end_freed) && !in->script_unlock;
     PointerLockWant want;
-    want.controls = view && !in->script_unlock;
+    want.play = play;
+    want.controls = play && in->focused;
     want.lock = want.controls && !in->script_free;
     t->was_controls = want.controls;
     return want;

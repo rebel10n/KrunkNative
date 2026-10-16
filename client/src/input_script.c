@@ -40,7 +40,9 @@
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
-//   100 blur                     the window loses focus (alt-tab)
+//   100 blur                     the window loses focus (alt-tab): the GLFW focus callback (keyboard focus
+//                                gone, pointer free, menu or end title as on a lost lock)
+//   100 focus                    the window has the keyboard focus again (the callback with focused = 1)
 //   100 nethit 0 | nethit 1      a NET_PACKET_HIT from the server (no target, no damage; 1 = the kill
 //                                variant) through the client's event handler: the hit sound and
 //                                marker, as when your shot lands (hitmarker tests, alive or dead)
@@ -1147,7 +1149,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "resize")) {
         if (e->v[0] >= 1.0f && e->v[1] >= 1.0f) glfwSetWindowSize(client->window, (int) e->v[0], (int) e->v[1]);
     } else if (!strcmp(e->cmd, "blur")) {
-        client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
+        client_window_focus_changed(client, 0); // alt-tab: the GLFW focus callback (main.c)
+    } else if (!strcmp(e->cmd, "focus")) {
+        client_window_focus_changed(client, 1); // back in the window
     } else if (!strcmp(e->cmd, "play") && g_script.boot_mode) {
         g_script.play_pending = 1; // input_script_tick enters once the map is ready
     } else if (!strcmp(e->cmd, "play") && g_script.menu_mode) {

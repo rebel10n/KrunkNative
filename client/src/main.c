@@ -1797,8 +1797,9 @@ void client_window_focus_lost(Client *client) {
     }
 }
 
-static void window_focus_callback(GLFWwindow *window, const int focused) {
-    Client *client = glfwGetWindowUserPointer(window);
+// The native window's keyboard focus changed: the GLFW focus callback, and the input script's
+// blur / focus (input_script.c), which drive the same path.
+void client_window_focus_changed(Client *client, const int focused) {
     if (!focused) client_window_focus_lost(client);
 #ifndef __EMSCRIPTEN__ // the browser drops its lock itself (pointer_lock.h: `focused` is always 1 there)
     if (client && html_ui_available()) client_pointer_focus(client, focused); // after the menu took the pointer
@@ -1809,6 +1810,10 @@ static void window_focus_callback(GLFWwindow *window, const int focused) {
 // has the focus: keys and characters go to the page (the menu closed does not route them there)
 static int strike_page_typing(void) {
     return strike_ui_active() && !html_ui_is_menu_open() && strike_ui_pointer_to_page() && ui_text_input_focused();
+}
+
+static void window_focus_callback(GLFWwindow *window, const int focused) {
+    client_window_focus_changed(glfwGetWindowUserPointer(window), focused);
 }
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
@@ -2094,7 +2099,12 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // Dead: v3.1.1 only respawns from the menu cE() reopens after config.deathDelay
     // (enterGame runs on pointer lock, never per frame), so no ENT while that is pending;
     // otherwise the frame the delay runs out could respawn before the menu shows.
-    if (!menu_open && client->mouse_state.locked && (!client->me || !client->me->active) && !client->net_death_menu_pending) {
+    // enterGame follows the game being in play (pointer_lock.h `play`), not the lock itself: the lock
+    // needs the window's focus, so a player in play whose window is in the background (a round that
+    // starts while it is out of focus) would sit in an empty game view until a click. The focus still
+    // gates the controls and the pointer lock, so the player is in the game with the pointer free.
+    const int in_play = html_menu ? client_pointer_play_wanted(client) : client->mouse_state.locked;
+    if (!menu_open && in_play && (!client->me || !client->me->active) && !client->net_death_menu_pending) {
         client_enter_game(client);
     }
 

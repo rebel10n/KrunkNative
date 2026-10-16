@@ -786,9 +786,11 @@ int  client_pointer_look_allowed(const Client*); // the mouse may turn the camer
 void client_mouse_settings_changed(void);
 int  client_pointer_click(Client*);              // a press on the game view with the lock off: lock again (1 = taken)
 void client_pointer_focus(Client*, int focused); // native window focus changes
+int  client_pointer_play_wanted(const Client*);   // the player is in play (the window's focus left out): enter the game
 void client_pointer_end_free(Client*);           // the lock went during the end title: free until a click
 void client_pointer_refresh(Client*);            // the window changed monitor / size (F11): apply the lock again
 void client_window_focus_lost(Client*); // native alt-tab: resetKeys + menu, as on pointer lock loss (main.c)
+void client_window_focus_changed(Client*, int focused); // the window's keyboard focus (GLFW callback, input script blur / focus)
 void client_hud_html_tick(Client*, float); // HTML HUD (client/src/ui/hud_ui.c)
 
 // Class preview (client/src/ui/class_preview.c). Rect is in CSS px (menu_send_preview_rect in menu_ui.c).

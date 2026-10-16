@@ -552,6 +552,78 @@ def sc_pointer_lock_next_map():
         record(f"next-map-{name}", "server", "maps", "?", "->".join(maps) or "-", True)
 
 
+def sc_end_unfocused():
+    """The window out of focus through a match end (alt-tab, input script `blur`), then the next round
+    (the sandbox's end timer runs out, the INIT): the next round shows the game UI and the player is
+    alive, as with the window focused (the server respawns the players who joined the round); the
+    pointer stays free while the window has no focus, and locks again on `focus`. Two alt-tabs: during
+    the end title, and with the results (and the vote) up. The next round comes ~28 s after `con end`
+    (the sandbox's endTimer). A guard for the round start, not the discriminating check: the
+    menu-closed scenario below is (the server does not respawn a player who did not join the round)."""
+    free = {"menu": "0", "locked": "0", "cursor": "normal", "ended": "0"}
+    locked = {"menu": "0", "locked": "1", "cursor": "disabled", "ended": "0"}
+    variants = {
+        "title": "3000 blur",     # alt-tab as the end title runs (con end at 2000)
+        "results": "9500 blur",   # alt-tab once the results and the vote cards are up (~8 s into the title)
+    }
+    for name, blur in variants.items():
+        script = f"""
+            0 play
+            1000 check @alive {HUD}
+            2000 con end
+            {blur}
+            15000 check @results-unfocused endUI=1 matchVoteHolder=1
+            15000 state @results-unfocused
+            34000 check @next-round-unfocused {HUD} endUI=0 matchVoteHolder=0
+            34000 state @next-round-unfocused
+            34100 cursor 700 400
+            34600 state @next-round-unfocused-look
+            35000 focus
+            35500 state @next-round-focused
+            36000 check @next-round-focused {HUD} endUI=0
+            36500 quit
+        """
+        expects = {
+            "results-unfocused": dict(free, ended="1"),
+            "next-round-unfocused": free,
+            "next-round-unfocused-look": dict(free, look="same", since="next-round-unfocused"),  # no look without the focus
+            "next-round-focused": locked,
+        }
+        lines = run_client(f"end-unfocused-{name}", ["--offline", "--map", "kanji"], script, timeout=150)
+        check_states(f"end-unfocused-{name}", lines, script, expects)
+
+
+def sc_menu_closed_unfocused():
+    """The menu closed while the window has no focus (the scripted blur, then Esc): the player is in play,
+    so it enters the game as it does with the window focused (client_enter_game, main.c, on the play
+    state). Before, the enter waited for the pointer lock, which needs the focus, so the game view
+    stayed bare (the chat only, as the user saw after a match) until a click gave the window the focus
+    back. The pointer stays free while the window has no focus, and locks again on `focus`."""
+    free = {"menu": "0", "locked": "0", "cursor": "normal", "ended": "0"}
+    locked = {"menu": "0", "locked": "1", "cursor": "disabled", "ended": "0"}
+    script = """
+        0 menu
+        1000 check @menu menuHolder=1
+        1100 blur
+        1300 esc
+        3500 check @closed-unfocused {HUD} menuHolder=0
+        3500 state @closed-unfocused
+        3600 cursor 700 400
+        4100 state @closed-unfocused-look
+        4500 focus
+        5000 state @focused
+        5500 check @focused {HUD} menuHolder=0
+        6000 quit
+    """.replace("{HUD}", HUD)
+    expects = {
+        "closed-unfocused": free,
+        "closed-unfocused-look": free,  # (the menu camera turns while the player is not in the game: no look check)
+        "focused": locked,
+    }
+    lines = run_client("menu-closed-unfocused", ["--offline", "--map", "kanji"], script, timeout=150)
+    check_states("menu-closed-unfocused", lines, script, expects)
+
+
 def sc_endscreen_team():
     """End screen of a team mode: the team totals survive the ESC round trip too."""
     run_client("endscreen-tdm", ["--offline", "--map", "kanji"], """
@@ -1871,6 +1943,8 @@ SCENARIOS["server-list"] = sc_server_list
 SCENARIOS["pointer-lock"] = sc_pointer_lock
 SCENARIOS["pointer-lock-chat"] = sc_pointer_lock_chat
 SCENARIOS["pointer-lock-next-map"] = sc_pointer_lock_next_map
+SCENARIOS["end-unfocused"] = sc_end_unfocused
+SCENARIOS["menu-closed-unfocused"] = sc_menu_closed_unfocused
 SCENARIOS["leave-state"] = sc_leave_state
 SCENARIOS["join-end"] = sc_join_end
 SCENARIOS["join-waiting"] = sc_join_waiting

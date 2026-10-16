@@ -323,6 +323,13 @@ void client_pointer_update(Client *client) {
     g_ptr.applied = lock;
 }
 
+// The game is in play by the UI state, the window's focus left out (pointer_lock.h `play`): the
+// round start enters a player in play (main.c client_tick_game), as the pointer lock does with focus.
+int client_pointer_play_wanted(const Client *client) {
+    if (!client || !pointer_owner_active()) return 0;
+    return g_ptr.want.play;
+}
+
 // main.c: this frame's mouse movement may turn the camera (v7 f2137: only while CONTROLS.enabled,
 // i.e. under the pointer lock). A free cursor never looks: menu, end screen, console, freeMouse.
 int client_pointer_look_allowed(const Client *client) {
