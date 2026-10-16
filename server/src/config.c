@@ -52,11 +52,10 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->max_players = flavor_max_players() > 0 ? flavor_max_players() : 8; // Krunker Strike: 10
     cfg->game = *flavor_default_game_config(); // base: g_default_game_config
     cfg->custom_games = 1;
-    // KrunkNative: the game's own welcome chat line to every joiner on its first spawn ($ = its name;
-    // user, 2026-10-14: "we need the welcome msg for da game"). v10's client only has the map's
-    // welMsg line (window.welcome, hud_ui.c). A config's "motd" replaces it ([] or "" = none).
-    gs_copy(cfg->motd[0], sizeof(cfg->motd[0]), "Welcome to " KN_PRODUCT_NAME ", $!");
-    cfg->motd_count = 1;
+    // The server's chat lines to every joiner on their first spawn ($ = their name); none by default.
+    // The map's welMsg is the menu's line (menu_ui.c #mapWelcome), so no game welcome line is sent
+    // unless a config's "motd" asks for one.
+    cfg->motd_count = 0;
     gs_copy(cfg->join_message, sizeof(cfg->join_message), "$ joined the game"); // config.serverMessages[0]
     gs_copy(cfg->leave_message, sizeof(cfg->leave_message), "$ left the game"); // serverMessages[1]
     cfg->idle_timeout = 60.0f;          // gameserver.ts SERVER_IDLE_TIMEOUT_MS

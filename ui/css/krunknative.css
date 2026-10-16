@@ -1026,3 +1026,13 @@ html.kn-bare-window #instructions {
 .polConfPop > div:first-child {
   line-height: 32px;
 }
+
+/* KrunkNative: the map's welMsg line in the menu (menu_ui.c #mapWelcome, shown only when the map has
+ * one), above the Contact / Terms row of #mapInfoHolder; the same 16px white text as #mapInfo. */
+#mapWelcome {
+  color: #fff;
+  font-size: 16px;
+  max-width: 480px;
+  margin: 0 0 8px;
+  text-align: right;
+}

@@ -206,7 +206,7 @@ def pump_all(peers, seconds):
 
 def refused(peer, mark, server_log, command, before):
     """The guest got the notify and nothing else, and the server logged the denial."""
-    # broadcasts, and the server's welcome line (the default motd) on a first spawn
+    # broadcasts, and a configured motd line (none by default) on a first spawn
     texts = [p for p in peer.texts(mark) if b" joined the game" not in p and b" left the game" not in p and b"Welcome to " not in p]
     refusals = (b"DEV only", b"Host or developer required", b"premium custom host", b"Only the host or a developer")
     notified = any(any(r in p for r in refusals) for p in texts)

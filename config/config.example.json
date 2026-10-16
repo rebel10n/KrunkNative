@@ -302,9 +302,7 @@
       "allowSpect": true
     },
     "custom_games": true,
-    "motd": [
-      "Welcome to Krunker Box Office, $!"
-    ],
+    "motd": [],
     "join_message": "$ joined the game",
     "leave_message": "$ left the game",
     "billboards": [

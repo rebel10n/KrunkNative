@@ -4,9 +4,9 @@
   python3 -I client/tests/hud_chat_e2e.py BUILD_DIR          (run from the repository root)
 
 Offline (the in-process sandbox server), headless, fixed 16.667 ms frames:
-  1. welcome: the game's welcome line ("Welcome to Krunker Box Office, <name>!", the server's
-     default motd) and the map's welMsg (Krunk Plaza) are chat lines once each; switching to a map
-     with another welMsg (Soul Sanctum) adds that line (v10 window.welcome on a map init)
+  1. welcome: no chat line for the game's welcome (the server's motd defaults to none); the map's
+     welMsg is the menu's line (#mapWelcome: Krunk Plaza, then Soul Sanctum after a map switch, nothing
+     on a map without welMsg, Kanji) and not a chat line
   2. deaths on a desktop: the kill-feed row goes to #killFeed (v10 leaderType 1), no chat row and no
      toast (#knNotify)
   3. deaths on a phone (KRUNKNATIVE_MOBILE=1, oldScoreboard's v10 default !!isMobile): the row is a
@@ -91,21 +91,45 @@ def match(lines, label):
     return int(g["match"]) if g else -1
 
 
+def menu_text(lines, label):
+    """the text of the first `[input_script] text ... @label` line (None when not logged)"""
+    for l in lines:
+        if l.startswith("[input_script] text ") and f" {label} " in l + " ":
+            return l.split(" text=", 1)[1] if " text=" in l else ""
+    return None
+
+
 def welcome():
+    # the map's welMsg is the menu's line (the Now Playing block's map), never a chat line; the game's
+    # own "Welcome to Krunker Box Office" line is gone (server motd defaults to none)
     script = ["0 play",
-              "2500 grep @w0 Welcome [id^=chatMsg_]", "2500 grep @p0 Plaza [id^=chatMsg_]",
-              "2500 grep @kbo0 Box [id^=chatMsg_]",
+              "2000 grep @w0 Welcome [id^=chatMsg_]", "2000 grep @kbo0 Box [id^=chatMsg_]",
+              "2000 grep @p0 Plaza [id^=chatMsg_]",
+              "2100 down ESC", "2110 up ESC",
+              "2600 text @m0 [id=mapWelcome]",
               "3000 con map Soul Sanctum",
-              "9000 grep @s1 Sanctum [id^=chatMsg_]", "9000 grep @p1 Plaza [id^=chatMsg_]",
-              "9000 grep @j1 joined [id^=chatMsg_]",
-              "9100 quit"]
+              "6000 down ESC", "6010 up ESC",                 # a map switch leaves the menu closed: reopen it
+              "8000 text @m1 [id=mapWelcome]", "8000 grep @s1 Sanctum [id^=chatMsg_]",
+              "9000 con map Kanji",
+              "12000 down ESC", "12010 up ESC",
+              "14000 text @m2 [id=mapWelcome]", "14000 text @k2 [id=mapInfo]",
+              "14000 grep @w2 Welcome [id^=chatMsg_]",
+              "14100 quit"]
     lines = run_client("welcome", ["--offline", "assets/maps/krunk_plaza_v2.json"], script)
     rows = [l for l in lines if "[input_script] grep" in l]
-    check("welcome: one game welcome line (Welcome to Krunker Box Office, <name>!)",
-          hits(lines, "@kbo0") == 1, f"{rows[:3]}")
-    check("welcome: the map's welMsg is one chat line", hits(lines, "@p0") == 1, f"Plaza rows {hits(lines, '@p0')}")
-    check("welcome: the next map's welMsg is a chat line too", hits(lines, "@s1") == 1 and hits(lines, "@p1") == 1,
-          f"Sanctum rows {hits(lines, '@s1')}, Plaza {hits(lines, '@p1')}, joined lines {hits(lines, '@j1')}")
+    m0, m1, m2 = menu_text(lines, "@m0"), menu_text(lines, "@m1"), menu_text(lines, "@m2")
+    check("welcome: the map's welMsg shows in the menu (Krunk Plaza)",
+          m0 is not None and "Welcome to the Krunker Plaza" in m0, f"menu text {m0!r}")
+    check("welcome: no Box Office welcome line in chat", hits(lines, "@w0") == 0 and hits(lines, "@kbo0") == 0,
+          f"{rows[:3]}")
+    check("welcome: the map's welMsg is not a chat line", hits(lines, "@p0") == 0, f"rows {rows[:3]}")
+    check("welcome: the next map's welMsg replaces it in the menu (Soul Sanctum)",
+          m1 is not None and "You have entered the Soul Sanctum" in m1 and hits(lines, "@s1") == 0,
+          f"menu text {m1!r}, Sanctum chat rows {hits(lines, '@s1')}")
+    k2 = menu_text(lines, "@k2")
+    check("welcome: a map without welMsg shows nothing in the menu (Kanji)",
+          m2 == "" and hits(lines, "@w2") == 0 and k2 is not None and "Kanji" in k2,
+          f"menu text {m2!r}, map info {k2!r}, chat rows {hits(lines, '@w2')}")
 
 
 def deaths(tag, mobile):

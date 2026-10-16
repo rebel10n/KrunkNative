@@ -1146,6 +1146,17 @@ void menu_set_game_name(const char *name) {
     set_display("infoHolder", name && name[0] ? "" : "none");
 }
 
+// The map's welMsg (shared map->welcome: NULL when absent or not a valid welcome) is the menu's
+// line in #mapWelcome, above the Contact / Terms row of #infoHolder, and it is hidden on a map
+// without one. v10 sends the welMsg to chat on a map init (window.welcome, _69625); Box Office
+// shows it in the menu instead and never in chat.
+static void menu_set_map_welcome(const Client *client) {
+    const char *msg = client->game.map && client->game.map->welcome ? client->game.map->welcome : "";
+    HtmlElem el = by_id("mapWelcome");
+    if (el) html_dom_set_text(el, msg);
+    set_display("mapWelcome", msg[0] ? "" : "none");
+}
+
 static void menu_update_info_holder(void) {
 #ifdef UI_SCENARIO_SUPPORTED
     if (ui_scenario_active()) return; // the scenario's state.gameName drives it
@@ -1161,6 +1172,7 @@ static void menu_update_info_holder(void) {
     if (g_ui.map_name[0]) snprintf(name, sizeof(name), "%s on %s", mode && mode[0] ? mode : "Free for All", g_ui.map_name);
     HtmlElem info = by_id("mapInfo");
     if (info) html_dom_set_text(info, name);
+    menu_set_map_welcome(client);
     set_display("infoHolder", "");
 }
 

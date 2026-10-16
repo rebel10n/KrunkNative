@@ -15,7 +15,8 @@
 //     layout, #timerHolder/#timerInner/#timerIcon/#timerVal/#matchInfo with .topLeftOld
 //   #pingText "-" while the ping is unknown (coloured by COLORS.ping), #fpsDisplay per showFPS
 //   #weapHolder: one .weapItem per loadout slot (key name, weapon name, 0.5 opacity when holstered)
-//   chat: map welMsg + "<name> joined the game" rows; v7 rows carry data-tab (chat channel)
+//   chat: "<name> joined the game" rows; v7 rows carry data-tab (chat channel). The map's welMsg is
+//     the menu's line (menu_ui.c #mapWelcome), not a chat row
 //   f2024: <div id='feed_N'><div class='killfeedItem'><span class='killfeedMsg'>..</span></div><br>
 //   f1985 (leaderType 1): #centerLeaderDisplay table while the scoreboard key is held
 //   game-overlay default crosshair (type 1): four 4x21 bars on a square of
@@ -1153,13 +1154,6 @@ static const char *hud_map_name(const Client *client) {
 static const char *hud_mode_name(const Client *client) {
     if (!client->game.mode) return "";
     return client->game.mode->config.name ? client->game.mode->config.name : "";
-}
-
-// Map "welMsg" (Krunker shows it in chat on join; only some maps define it).
-static const char *hud_welcome_msg(const Client *client) {
-    if (!client->game.map || !client->game.map->raw_data) return "";
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(client->game.map->raw_data, "welMsg");
-    return cJSON_IsString(item) && item->valuestring ? item->valuestring : "";
 }
 
 // Krunker shows the server's match clock as "MM:SS" (utils.getTime): the round clock
@@ -2515,9 +2509,6 @@ void hud_ui_found_junk(const char *line) {
     hud_add_chat_markup(markup);
 }
 
-static char g_welcome_last[128]; // the welMsg last seen (v10 _59519), map welMsg <= 70 chars
-static int g_welcome_adopt;      // take the next welMsg as seen without a line (a scenario's chat)
-
 // Empties #chatList and marks the session's join lines as written (a scenario brings
 // its own chat history).
 void hud_ui_clear_chat(void) {
@@ -2528,35 +2519,17 @@ void hud_ui_clear_chat(void) {
     }
     g_hud_ui.chat_seq = 0;
     g_hud_ui.chat_seeded = 1;
-    g_welcome_adopt = 1;
-}
-
-// window.welcome(welMsg) on a map init (game.deob.js 167354): the map's line again whenever the
-// loaded map's welMsg differs from the last one seen, e.g. the next map of the rotation.
-static void hud_welcome_step(const Client *client) {
-    if (!g_hud_ui.chat_seeded || !client->game.map) return;
-    const char *msg = hud_welcome_msg(client);
-    if (!strcmp(msg, g_welcome_last)) return;
-    snprintf(g_welcome_last, sizeof(g_welcome_last), "%s", msg);
-    if (!g_welcome_adopt) hud_add_server_chat(msg, SERVER_MSG_COLOR);
-    g_welcome_adopt = 0;
 }
 
 static void hud_seed_chat(const Client *client) {
     HudUi *ui = &g_hud_ui;
-    if (ui->chat_seeded) {
-        hud_welcome_step(client);
-        return;
-    }
+    if (ui->chat_seeded) return;
     // The join line names the player like the server does ("Guest_1"): wait for SPAWN's
     // name, then fall back to the menu name.
     if (client->me && !client->me->name[0] && ui->seed_wait++ < HUD_SEED_WAIT_SAMPLES) return;
     ui->chat_seeded = 1;
     ui->seed_wait = 0;
 
-    hud_add_server_chat(hud_welcome_msg(client), SERVER_MSG_COLOR); // map welMsg
-    snprintf(g_welcome_last, sizeof(g_welcome_last), "%s", hud_welcome_msg(client));
-    g_welcome_adopt = 0;
     const char *name = hud_my_name(client);
     if (name[0]) {                                                   // config.serverMessages[0]
         char msg[PLAYER_NAME_SIZE + sizeof(client->menu_name) + 32];
@@ -4258,8 +4231,6 @@ void hud_ui_leave_game(Client *client) {
     ui->chat_seeded = 0;
     ui->seed_wait = 0;
     ui->in_game_was = 0;
-    g_welcome_last[0] = 0;
-    g_welcome_adopt = 0;
     g_h2h_count = 0;
     g_leader_stats_valid = 0;
     ui->board_shown = -1;
@@ -4316,7 +4287,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // hud.js state.inGame came from the `state` event (client->in_game); the values
     // below are only sampled while the local player is alive.
     const int in_game = client->in_game && client->me;
-    if (in_game && !ui->in_game_was) { // new session: welcome lines again, fresh head-to-head counts
+    if (in_game && !ui->in_game_was) { // new session: join lines again, fresh head-to-head counts
         ui->chat_seeded = 0;
         g_h2h_count = 0;
     }
