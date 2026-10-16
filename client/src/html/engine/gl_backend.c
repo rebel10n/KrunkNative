@@ -82,7 +82,8 @@ enum {
     MODE_GROUP = 7,
     MODE_BLUR = 8,
     MODE_SHADOW_INSET = 9,
-    MODE_GROUP_MASKED = 10
+    MODE_GROUP_MASKED = 10,
+    MODE_GROUP_BLEND = 11
 };
 
 typedef struct {
@@ -170,7 +171,7 @@ struct GlBackend {
     GLint loc_poly_n, loc_poly_evenodd, loc_poly_edges;
     int up_poly_n, up_poly_evenodd;          // the polygon clip the program holds (flush uploads changes)
     float up_poly[GLB_POLY_EDGES * 4];
-    GLint loc_blur_clamp, loc_mask;
+    GLint loc_blur_clamp, loc_mask, loc_backdrop, loc_blend;
 
     // frame
     int in_frame;
@@ -1642,7 +1643,7 @@ static void push_group(GlBackend *b, const DisplayList *list, int index) {
 
     int prims = 0;
     find_group_end(list, index, &prims);
-    if (prims <= 1 && g->n_filters == 0 && !g->masked && !g->projective) {
+    if (prims <= 1 && g->n_filters == 0 && !g->masked && !g->projective && g->blend == CSS_BLEND_NORMAL) {
         f->fast = 1;
         b->opacity_mul *= f->opacity;
         return;
@@ -1925,8 +1926,46 @@ static void pop_group(GlBackend *b) {
 
     const int masked = g->masked && f->mask_entry >= 0;
     const uint8_t white[4] = {255, 255, 255, 255};
+    // mix-blend-mode: the target under the group (its backdrop) is copied out, and the shader
+    // blends the group's colours with it (Compositing and Blending 1: Cs' = (1 - ab) Cs +
+    // ab B(Cb, Cs), then source-over) - a plain offscreen group only (a masked or projective
+    // one composites normally)
+    int backdrop = -1;
+    if (g->blend != CSS_BLEND_NORMAL && !masked && !g->projective) {
+        const int x0 = (int) maxf(0.0f, f->bx), y0 = (int) maxf(0.0f, f->by);
+        const int x1 = (int) minf((float) b->target.w, f->bx + f->bw), y1 = (int) minf((float) b->target.h, f->by + f->bh);
+        if (x1 > x0 && y1 > y0) backdrop = fbo_acquire(b, bw, bh);
+        if (backdrop >= 0) {
+            const FboEntry *e = &b->fbos[backdrop];
+            GLfloat cc[4];
+            glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+            glDisable(GL_SCISSOR_TEST);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, e->fbo);
+            glClearColor(0, 0, 0, 0);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glClearColor(cc[0], cc[1], cc[2], cc[3]);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, b->target.fbo);
+            // target rows are y-down; the copy keeps the group entry's layout (entry pixel (0, 0) =
+            // target pixel (bx, by)), so the shader samples it with the group's own uv
+            const int dx0 = x0 - (int) f->bx, dy0 = y0 - (int) f->by;
+            glBlitFramebuffer(x0, b->target.h - y1, x1, b->target.h - y0, dx0, e->h - (dy0 + (y1 - y0)), dx0 + (x1 - x0), e->h - dy0,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer(GL_FRAMEBUFFER, b->target.fbo);
+            apply_scissor(b);
+            b->frame_stats.fbo_passes++;
+        }
+    }
     batch_texture(b, b->fbos[cur].tex, -1);
-    GlbVertex t = vertex_template(b, masked ? MODE_GROUP_MASKED : MODE_GROUP, white);
+    GlbVertex t = vertex_template(b, masked ? MODE_GROUP_MASKED : backdrop >= 0 ? MODE_GROUP_BLEND : MODE_GROUP, white);
+    if (backdrop >= 0) {
+        const FboEntry *ce = &b->fbos[cur], *be = &b->fbos[backdrop];
+        t.p1[0] = (float) ce->w / (float) be->w;
+        t.p1[1] = (float) ce->h / (float) be->h;
+        glUniform1i(b->loc_blend, (int) g->blend);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, be->tex);
+        glActiveTexture(GL_TEXTURE0);
+    }
     if (masked) {
         const FboEntry *ce = &b->fbos[cur], *me = &b->fbos[f->mask_entry];
         t.p1[0] = (float) ce->w / (float) me->w;
@@ -1945,6 +1984,12 @@ static void pop_group(GlBackend *b) {
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE0);
+    }
+    if (backdrop >= 0) {
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+        fbo_release(b, backdrop);
     }
     fbo_release(b, cur);
     if (f->mask_entry >= 0) fbo_release(b, f->mask_entry);
@@ -2108,6 +2153,8 @@ GlBackend *glb_create(void) {
     b->loc_poly_edges = glGetUniformLocation(b->program, "u_poly_edges");
     b->loc_blur_clamp = glGetUniformLocation(b->program, "u_blur_clamp");
     b->loc_mask = glGetUniformLocation(b->program, "u_mask");
+    b->loc_backdrop = glGetUniformLocation(b->program, "u_backdrop");
+    b->loc_blend = glGetUniformLocation(b->program, "u_blend");
 
     glGenVertexArrays(1, &b->vao);
     glBindVertexArray(b->vao);
@@ -2161,6 +2208,7 @@ GlBackend *glb_create(void) {
     glUniform1i(b->loc_tex, 0);
     glUniform1i(b->loc_gamma, 1);
     glUniform1i(b->loc_mask, 2);
+    glUniform1i(b->loc_backdrop, 3);
     glUseProgram(0);
     g_active_shader = 0;
 

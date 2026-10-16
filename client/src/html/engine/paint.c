@@ -276,6 +276,7 @@ int paint_is_stacking_context(const Box *b)
     if (s->clip_path.kind != CSS_CLIP_PATH_NONE) return 1;
     /* grouping properties (CSS Transforms 2 / Filter Effects 2 / Masking) */
     if (s->backdrop_filter_count > 0 || s->mask_layer_count > 0) return 1;
+    if (s->mix_blend_mode != CSS_BLEND_NORMAL) return 1;
     if (s->transform_style == CSS_TRANSFORM_STYLE_PRESERVE_3D) return 1;
     return 0;
 }
@@ -2129,12 +2130,14 @@ static int push_group(Painter *p, const Box *b)
     if (!s || box_anon(b)) return 0;
     const int proj = box_transform_homography(b, h);
     const int masked = s->mask_layer_count > 0;
-    if (s->opacity >= 1.0f && s->filter_count == 0 && !proj && !masked) return 0;
+    const uint8_t blend = s->mix_blend_mode;
+    if (s->opacity >= 1.0f && s->filter_count == 0 && !proj && !masked && blend == CSS_BLEND_NORMAL) return 0;
     memset(&it, 0, sizeof it);
     it.op = DL_PUSH_GROUP;
     it.u.group.rect = subtree_bounds(p, b);
     it.u.group.opacity = s->opacity;
     it.u.group.masked = (uint8_t) masked;
+    it.u.group.blend = blend;
     it.u.group.projective = (uint8_t) proj;
     if (proj) memcpy(it.u.group.h, h, sizeof h);
     for (int i = 0; i < s->filter_count && it.u.group.n_filters < CSS_MAX_FILTER_OPS; i++) {
@@ -2184,7 +2187,8 @@ static void pop_group(Painter *p, int start, int children_before)
 {
     DisplayList *dl = p->dl;
     DlItem *g = &dl->items[start];
-    if (g->u.group.n_filters == 0 && !g->u.group.masked && !g->u.group.projective && p->cache->n_children == children_before) {
+    if (g->u.group.n_filters == 0 && !g->u.group.masked && !g->u.group.projective && g->u.group.blend == CSS_BLEND_NORMAL &&
+        p->cache->n_children == children_before) {
         int prims = 0, prim_index = -1, other = 0;
         for (int i = start + 1; i < dl->n; i++) {
             if (item_is_primitive(&dl->items[i])) {

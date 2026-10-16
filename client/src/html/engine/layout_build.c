@@ -550,6 +550,7 @@ static void set_dynamic_flags(LayoutTree *t, Box *b, int parent_is_flex_or_grid)
     if (positioned && !s->z_index_auto) sc = 1;
     if (s->position == CSS_POSITION_FIXED || s->position == CSS_POSITION_STICKY) sc = 1;
     if (s->opacity < 1.0f) sc = 1;
+    if (s->mix_blend_mode != CSS_BLEND_NORMAL) sc = 1;
     if (style_has_transform(s) || s->filter_count > 0 || s->clip_path.kind != CSS_CLIP_PATH_NONE) sc = 1;
     if (parent_is_flex_or_grid && !s->z_index_auto) sc = 1;
     if (sc) b->flags |= BOXF_STACKING_CONTEXT;

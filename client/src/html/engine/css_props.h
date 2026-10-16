@@ -78,6 +78,7 @@ extern "C" {
     X(APPEARANCE,                 "appearance",                 0, "none") \
     X(WILL_CHANGE,                "will-change",                0, "auto") \
     X(CONTAIN,                    "contain",                    0, "none") \
+    X(MIX_BLEND_MODE,             "mix-blend-mode",             0, "normal") \
     X(Z_INDEX,                    "z-index",                    0, "auto") \
     X(OPACITY,                    "opacity",                    0, "1") \
     X(TOP,                        "top",                        0, "auto") \

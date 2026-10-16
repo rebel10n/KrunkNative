@@ -41,6 +41,8 @@ uniform float u_opacity;        // group opacity
 uniform vec2 u_blur_dir;        // blur pass: step between taps in texcoords
 uniform vec4 u_blur_clamp;      // blur pass: texcoord clamp rect (u0, v0, u1, v1)
 uniform sampler2D u_mask;       // unit 2: mask of a masked group (mode 10)
+uniform sampler2D u_backdrop;   // unit 3: the target under a blend-mode group (mode 11)
+uniform int u_blend;            // mode 11: CssBlendMode (1 multiply .. 15 luminosity)
 uniform int u_stencil_pass;     // 1: discard fragments under half coverage (stencil shape pass)
 // clip-path: polygon(): its boundary as edges (x0, y0, x1, y1) in target pixels, the two
 // traversals of a ring bridge (Krunker Strike's frames) cancelled out (gl_backend.c)
@@ -207,6 +209,50 @@ vec4 blur_tap(vec2 uv) {
     return texture(u_tex, clamp(uv, u_blur_clamp.xy, u_blur_clamp.zw));
 }
 
+// Compositing and Blending 1, section 10: B(Cb, Cs) for the separable and non-separable modes.
+float blend_soft(float cb, float cs) {
+    if (cs <= 0.5) return cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb);
+    float d = cb <= 0.25 ? ((16.0 * cb - 12.0) * cb + 4.0) * cb : sqrt(cb);
+    return cb + (2.0 * cs - 1.0) * (d - cb);
+}
+float blend_dodge(float cb, float cs) { return cb <= 0.0 ? 0.0 : (cs >= 1.0 ? 1.0 : min(1.0, cb / (1.0 - cs))); }
+float blend_burn(float cb, float cs) { return cb >= 1.0 ? 1.0 : (cs <= 0.0 ? 0.0 : 1.0 - min(1.0, (1.0 - cb) / cs)); }
+vec3 blend_hard(vec3 cb, vec3 cs) {
+    vec3 m = cb * 2.0 * cs, s = cb + (2.0 * cs - 1.0) - cb * (2.0 * cs - 1.0);
+    return mix(m, s, vec3(greaterThan(cs, vec3(0.5))));
+}
+float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+vec3 clip_color(vec3 c) {
+    float l = lum(c), n = min(min(c.r, c.g), c.b), x = max(max(c.r, c.g), c.b);
+    if (n < 0.0) c = l + (c - l) * l / max(l - n, 1e-6);
+    if (x > 1.0) c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
+    return c;
+}
+vec3 set_lum(vec3 c, float l) { return clip_color(c + (l - lum(c))); }
+float sat(vec3 c) { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
+vec3 set_sat(vec3 c, float s) {
+    float mx = max(max(c.r, c.g), c.b), mn = min(min(c.r, c.g), c.b);
+    return mx > mn ? (c - mn) * s / (mx - mn) : vec3(0.0);
+}
+vec3 blend_mode(int m, vec3 cb, vec3 cs) {
+    if (m == 1) return cb * cs;
+    if (m == 2) return cb + cs - cb * cs;
+    if (m == 3) return blend_hard(cs, cb);             // overlay = hard-light with the layers swapped
+    if (m == 4) return min(cb, cs);
+    if (m == 5) return max(cb, cs);
+    if (m == 6) return vec3(blend_dodge(cb.r, cs.r), blend_dodge(cb.g, cs.g), blend_dodge(cb.b, cs.b));
+    if (m == 7) return vec3(blend_burn(cb.r, cs.r), blend_burn(cb.g, cs.g), blend_burn(cb.b, cs.b));
+    if (m == 8) return blend_hard(cb, cs);
+    if (m == 9) return vec3(blend_soft(cb.r, cs.r), blend_soft(cb.g, cs.g), blend_soft(cb.b, cs.b));
+    if (m == 10) return abs(cb - cs);
+    if (m == 11) return cb + cs - 2.0 * cb * cs;
+    if (m == 12) return set_lum(set_sat(cs, sat(cb)), lum(cb));
+    if (m == 13) return set_lum(set_sat(cb, sat(cs)), lum(cb));
+    if (m == 14) return set_lum(cs, lum(cb));
+    if (m == 15) return set_lum(cb, lum(cs));
+    return cs;
+}
+
 vec4 premul_rgba(vec4 c) {
     return vec4(c.rgb * c.a, c.a);
 }
@@ -294,6 +340,17 @@ void main() {
         u = clamp(u_cm * u + u_cm_offset * step(1e-5, t.a), 0.0, 1.0);
         vec2 muv = vec2(v_uv.x * v_p1.x, 1.0 - (1.0 - v_uv.y) * v_p1.y);
         color = premul_rgba(u) * (u_opacity * texture(u_mask, muv).a);
+    } else if (mode == 11) {
+        // blend-mode group: Cs' = (1 - ab) Cs + ab B(Cb, Cs), output premultiplied for source-over
+        vec4 t = texture(u_tex, v_uv);
+        vec4 u = unpremul(t);
+        u = clamp(u_cm * u + u_cm_offset * step(1e-5, t.a), 0.0, 1.0);
+        vec2 buv = vec2(v_uv.x * v_p1.x, 1.0 - (1.0 - v_uv.y) * v_p1.y);
+        vec4 bp = texture(u_backdrop, buv);
+        vec3 cb = bp.a > 1e-5 ? bp.rgb / bp.a : vec3(0.0);
+        vec3 cs = mix(u.rgb, blend_mode(u_blend, cb, u.rgb), bp.a);
+        float a = u.a * u_opacity;
+        color = vec4(cs * a, a);
     }
 
     cov *= clip_coverage();

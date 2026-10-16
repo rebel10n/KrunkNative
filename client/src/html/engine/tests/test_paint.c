@@ -1679,6 +1679,23 @@ static void test_device_scale_baseline_css_px(void)
     CHECK_F(y[2] - y[0], 1.0f);
 }
 
+/* mix-blend-mode makes a group (a stacking context) that is never folded into its single primitive,
+ * and carries the mode to the backend (Strike's .card-light overlay and store colour tints). */
+static void test_mix_blend_group(void)
+{
+    printf("mix-blend-mode group\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    Box *b = mk(root, BOX_BLOCK, 10, 10, 40, 40);
+    st(b)->background_color = rgba(255, 255, 255, 255);
+    st(b)->mix_blend_mode = CSS_BLEND_OVERLAY;
+    b->flags |= BOXF_STACKING_CONTEXT;
+    build(root);
+    const int g = find_op(&g_dl, DL_PUSH_GROUP, 0), r = find_op(&g_dl, DL_RECT, 0), pop = find_op(&g_dl, DL_POP_GROUP, 0);
+    CHECK(g >= 0 && g_dl.items[g].u.group.blend == CSS_BLEND_OVERLAY);
+    CHECK(r > g && pop > r);
+}
+
 int main(void)
 {
     paint_ctx_init(&g_ctx);
@@ -1709,6 +1726,7 @@ int main(void)
     test_backdrop_mask_clip_text_outline();
     test_gradient_tiles_masked_backdrop();
     test_device_scale_baseline_css_px();
+    test_mix_blend_group();
     paint_ctx_free(&g_ctx);
     dl_free(&g_dl);
     printf("%d passed, %d failed\n", g_pass, g_fail);

@@ -923,6 +923,8 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "pointer-events", "all") && c.pointer_events == CSS_POINTER_EVENTS_ALL);
     CHECK(apply(&c, NULL, "visibility", "hidden") && c.visibility == CSS_VISIBILITY_HIDDEN);
     CHECK(apply(&c, NULL, "will-change", "transform, opacity") && c.will_change == (CSS_WILL_CHANGE_TRANSFORM | CSS_WILL_CHANGE_OPACITY));
+    CHECK(apply(&c, NULL, "mix-blend-mode", "overlay") && c.mix_blend_mode == CSS_BLEND_OVERLAY);
+    CHECK(apply(&c, NULL, "mix-blend-mode", "color") && c.mix_blend_mode == CSS_BLEND_COLOR);
     CHECK(apply(&c, NULL, "contain", "content") && c.contain == (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT | CSS_CONTAIN_STYLE));
     CHECK(apply(&c, NULL, "contain", "paint layout") && c.contain == (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT));
     CHECK(apply(&c, NULL, "contain", "none") && c.contain == CSS_CONTAIN_NONE);

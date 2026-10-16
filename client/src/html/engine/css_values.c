@@ -1038,6 +1038,14 @@ static const CssKeyword kw_mask_mode[] = { { "match-source", CSS_MASK_MODE_MATCH
 static const CssKeyword kw_box_orient[] = { { "horizontal", CSS_BOX_ORIENT_HORIZONTAL }, { "inline-axis", CSS_BOX_ORIENT_HORIZONTAL },
                                             { "vertical", CSS_BOX_ORIENT_VERTICAL }, { "block-axis", CSS_BOX_ORIENT_VERTICAL }, { NULL, 0 } };
 static const CssKeyword kw_pointer_events[] = { { "auto", CSS_POINTER_EVENTS_AUTO }, { "none", CSS_POINTER_EVENTS_NONE }, { "all", CSS_POINTER_EVENTS_ALL }, { "visible", CSS_POINTER_EVENTS_AUTO }, { "painted", CSS_POINTER_EVENTS_AUTO }, { NULL, 0 } };
+static const CssKeyword kw_mix_blend_mode[] = {
+    { "normal", CSS_BLEND_NORMAL }, { "multiply", CSS_BLEND_MULTIPLY }, { "screen", CSS_BLEND_SCREEN },
+    { "overlay", CSS_BLEND_OVERLAY }, { "darken", CSS_BLEND_DARKEN }, { "lighten", CSS_BLEND_LIGHTEN },
+    { "color-dodge", CSS_BLEND_COLOR_DODGE }, { "color-burn", CSS_BLEND_COLOR_BURN }, { "hard-light", CSS_BLEND_HARD_LIGHT },
+    { "soft-light", CSS_BLEND_SOFT_LIGHT }, { "difference", CSS_BLEND_DIFFERENCE }, { "exclusion", CSS_BLEND_EXCLUSION },
+    { "hue", CSS_BLEND_HUE }, { "saturation", CSS_BLEND_SATURATION }, { "color", CSS_BLEND_COLOR },
+    { "luminosity", CSS_BLEND_LUMINOSITY }, { "plus-lighter", CSS_BLEND_NORMAL }, { NULL, 0 }
+};
 static const CssKeyword kw_user_select[] = { { "auto", CSS_USER_SELECT_AUTO }, { "none", CSS_USER_SELECT_NONE }, { "text", CSS_USER_SELECT_TEXT }, { "all", CSS_USER_SELECT_ALL }, { "contain", CSS_USER_SELECT_AUTO }, { NULL, 0 } };
 static const CssKeyword kw_direction[] = { { "ltr", CSS_DIRECTION_LTR }, { "rtl", CSS_DIRECTION_RTL }, { NULL, 0 } };
 static const CssKeyword kw_appearance[] = { { "auto", CSS_APPEARANCE_AUTO }, { "none", CSS_APPEARANCE_NONE }, { "textfield", CSS_APPEARANCE_TEXTFIELD }, { "menulist", CSS_APPEARANCE_MENULIST }, { "menulist-button", CSS_APPEARANCE_MENULIST }, { "button", CSS_APPEARANCE_BUTTON }, { "checkbox", CSS_APPEARANCE_AUTO }, { "radio", CSS_APPEARANCE_AUTO }, { "slider-horizontal", CSS_APPEARANCE_AUTO }, { NULL, 0 } };
@@ -4011,6 +4019,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_APPEARANCE: CP(appearance); break;
     case CSS_PROP_WILL_CHANGE: CP(will_change); break;
     case CSS_PROP_CONTAIN: CP(contain); break;
+    case CSS_PROP_MIX_BLEND_MODE: CP(mix_blend_mode); break;
     case CSS_PROP_Z_INDEX: CP(z_index); CP(z_index_auto); break;
     case CSS_PROP_OPACITY: CP(opacity); break;
     case CSS_PROP_TOP: case CSS_PROP_RIGHT: case CSS_PROP_BOTTOM: case CSS_PROP_LEFT: CP(inset[id - CSS_PROP_TOP]); break;
@@ -4279,6 +4288,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_APPEARANCE: SET_KW(kw_appearance, appearance);
     case CSS_PROP_WILL_CHANGE: { uint8_t b; if (!css_parse_will_change(t, m, &b)) return 0; d->will_change = b; return 1; }
     case CSS_PROP_CONTAIN: { uint8_t b; if (!css_parse_contain(t, m, &b)) return 0; d->contain = b; return 1; }
+    case CSS_PROP_MIX_BLEND_MODE: SET_KW(kw_mix_blend_mode, mix_blend_mode);
     case CSS_PROP_Z_INDEX: {
         int32_t z; int a;
         if (!css_parse_z_index(t, m, &z, &a)) return 0;

@@ -239,6 +239,13 @@ typedef enum CssRadialExtent { CSS_RADIAL_FARTHEST_CORNER = 0, CSS_RADIAL_CLOSES
 
 /* will-change is accepted and ignored; kept as bits for completeness */
 /* contain (CSS Containment 2): strict = size layout paint style, content = layout paint style */
+/* mix-blend-mode (Compositing and Blending 1): separable modes, then the non-separable ones */
+typedef enum CssBlendMode {
+    CSS_BLEND_NORMAL = 0, CSS_BLEND_MULTIPLY, CSS_BLEND_SCREEN, CSS_BLEND_OVERLAY, CSS_BLEND_DARKEN,
+    CSS_BLEND_LIGHTEN, CSS_BLEND_COLOR_DODGE, CSS_BLEND_COLOR_BURN, CSS_BLEND_HARD_LIGHT,
+    CSS_BLEND_SOFT_LIGHT, CSS_BLEND_DIFFERENCE, CSS_BLEND_EXCLUSION, CSS_BLEND_HUE,
+    CSS_BLEND_SATURATION, CSS_BLEND_COLOR, CSS_BLEND_LUMINOSITY
+} CssBlendMode;
 enum { CSS_CONTAIN_NONE = 0, CSS_CONTAIN_SIZE = 1, CSS_CONTAIN_LAYOUT = 2, CSS_CONTAIN_STYLE = 4, CSS_CONTAIN_PAINT = 8,
        CSS_CONTAIN_INLINE_SIZE = 16 };
 enum { CSS_WILL_CHANGE_NONE = 0, CSS_WILL_CHANGE_TRANSFORM = 1, CSS_WILL_CHANGE_OPACITY = 2, CSS_WILL_CHANGE_OTHER = 4 };
@@ -495,6 +502,7 @@ typedef struct CssComputed {
     uint8_t overflow_x, overflow_y;   /* CssOverflow                           */
     uint8_t appearance;               /* CssAppearance                         */
     uint8_t will_change;              /* bits, ignored by layout               */
+    uint8_t mix_blend_mode;           /* CssBlendMode                          */
     uint8_t contain;                  /* CSS_CONTAIN_* bits; layout reads only
                                          layout / paint (a BFC root)            */
     int32_t z_index;                  /* clamped to int32 like Chrome          */

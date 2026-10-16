@@ -92,6 +92,7 @@ typedef struct {
     CssFilterOp filters[CSS_MAX_FILTER_OPS];
     int n_filters;
     uint8_t masked;
+    uint8_t blend;              /* CssBlendMode: composite through the backdrop (mix-blend-mode) */
     uint8_t projective;
     float h[9];
 } DlGroup;
