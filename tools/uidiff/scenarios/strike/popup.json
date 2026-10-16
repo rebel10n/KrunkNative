@@ -12,10 +12,11 @@
     "name": "Guest_4821",
     "classIndex": 0,
     "menu": true,
+    "anim_seek": 800,
     "strike": {
       "screen": "POPUP"
     }
   },
   "frames": 3,
-  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). The popup frame (POPUP) with no content: the dark blur and the popup holder. Reference: capture-strike.js strike-popup: Pt(In, {builder: () => []})."
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). The popup frame (POPUP) with no content: the dark blur and the popup holder. Reference: capture-strike.js strike-popup: Pt(In, {builder: () => []}); FINISH_ANIMS (infinite animations at currentTime 800 ms), hence state.anim_seek."
 }

@@ -12,6 +12,7 @@
     "name": "Guest_4821",
     "classIndex": 0,
     "menu": true,
+    "anim_seek": 800,
     "strike": {
       "screen": "STORE",
       "account": {
@@ -24,5 +25,5 @@
     }
   },
   "frames": 3,
-  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). Extras (STORE): the SPINS / MARKET / CURRENCY tabs over the menu scene; reference: FRVR's own client in the offline sandbox (tools/uidiff/capture-strike.js strike-store: Pt(STORE) on a clean stack)."
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). Extras (STORE): the SPINS / MARKET / CURRENCY tabs over the menu scene; reference: FRVR's own client in the offline sandbox (tools/uidiff/capture-strike.js strike-store: Pt(STORE) on a clean stack); FINISH_ANIMS (infinite animations at currentTime 800 ms), hence state.anim_seek."
 }

@@ -12,10 +12,11 @@
     "name": "Guest_4821",
     "classIndex": 0,
     "menu": true,
+    "anim_seek": 800,
     "strike": {
       "screen": "CUSTOMIZE_CONTROLS"
     }
   },
   "frames": 3,
-  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). Controls editor (CUSTOMIZE_CONTROLS, from Settings > Game > Customize Controls): the mobile controls laid out for editing. Reference: capture-strike.js strike-customize-controls: Pt(ZC, {onHide})."
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). Controls editor (CUSTOMIZE_CONTROLS, from Settings > Game > Customize Controls): the mobile controls laid out for editing. Reference: capture-strike.js strike-customize-controls: Pt(ZC, {onHide}); FINISH_ANIMS (infinite animations at currentTime 800 ms), hence state.anim_seek."
 }

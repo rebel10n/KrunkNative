@@ -12,6 +12,7 @@
     "name": "Guest_4821",
     "classIndex": 0,
     "menu": true,
+    "anim_seek": 800,
     "strike": {
       "screen": "LEADERBOARD_PLAYERS",
       "leaderboard": [
@@ -32,5 +33,5 @@
     }
   },
   "frames": 3,
-  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). LEADERBOARD_PLAYERS (YB: f1e header + K5 rows) on its own, as the capture pushed it; FRVR hosts it only in its tournament rewards popup (no hosted tournaments here). Rows: the capture's LEADERS (their stats had no Score / Kills keys, so the cells are empty). Reference: capture-strike.js strike-leaderboard-players."
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). LEADERBOARD_PLAYERS (YB: f1e header + K5 rows) on its own, as the capture pushed it; FRVR hosts it only in its tournament rewards popup (no hosted tournaments here). Rows: the capture's LEADERS (their stats had no Score / Kills keys, so the cells are empty). Reference: capture-strike.js strike-leaderboard-players; FINISH_ANIMS (infinite animations at currentTime 800 ms), hence state.anim_seek."
 }
