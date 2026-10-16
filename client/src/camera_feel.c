@@ -79,6 +79,37 @@ static float camera_feel_zoom(const Player *me) {
     return 1.0f + (zoom - 1.0f) * me->aim_val * ads_fov_mlt;
 }
 
+// wallLean / wallLeanMlt (v10.js:221617, the game loop after moveCam): while wall sliding (onWall, the
+// class can wall jump, crouched) the camera rolls towards lean = 0.15 * wallLeanMlt, signed by the wall's
+// side and scaled by the look's component along it, easing in at dt / 30 per ms; off the wall it eases
+// back by 1 / 40 per frame and snaps to 0 under 1e-4. Not with a detached (KrunkScript) camera.
+static float g_wall_roll;
+
+void camera_feel_wall_lean(Client *client, const float delta_ms) {
+    const ClientRenderSettings *rs = client_render_settings();
+    const Player *me = client->me;
+    const float lean = rs->wall_lean ? 0.15f * rs->wall_lean_mlt : 0.0f;
+    if (!me || lean <= 0.0f) {
+        g_wall_roll = 0.0f;
+        return;
+    }
+    if (me->on_wall && me->wall_jump && me->crouch_val) {
+        const int side = me->on_wall == 3 || me->on_wall == 4;
+        const float yaw = me->direction.y, pitch = me->direction.x;
+        const float dir = side ? -sinf(yaw) * cosf(pitch) : -cosf(yaw) * cosf(pitch); // getWorldDirection().x / .z
+        const float target = (side ? -lean : lean) * (me->on_wall % 2 ? -1.0f : 1.0f) * dir;
+        g_wall_roll += fminf(delta_ms, 33.0f) * (target - g_wall_roll) / 30.0f;
+    } else {
+        g_wall_roll += (0.0f - g_wall_roll) / 40.0f;
+        if (fabsf(g_wall_roll) < 0.0001f) g_wall_roll = 0.0f;
+    }
+    client->camera.rotation.z = g_wall_roll;
+}
+
+float camera_feel_wall_roll(void) {
+    return g_wall_roll;
+}
+
 void camera_feel_apply(Client *client) {
     const Player *me = client->me;
     if (!me) return;

@@ -306,6 +306,9 @@ typedef struct {
     int tracers;
     int damage_overlay;
     vec4 tracer_color;
+    float tracer_offset; // tracerOffset (Editing, 0..1): the local tracer starts up to 20 x v off the barrel
+    vec4 trail_color;    // trailCol (#ededed): bullet trails (v10.js:194333 RENDER.trailColor)
+    vec4 rope_color;     // ropeCol (#b3b3b3): the grapple rope (v10.js:194276 RENDER.ropeColor)
 } VfxSettings;
 
 typedef struct {
@@ -514,12 +517,28 @@ static void vfx_read_settings(void) {
     else if (cJSON_IsNumber(color)) s->tracer_color = hex_to_vec((int) cJSON_GetNumberValue(color));
     s->tracer_color.w = 1.0f;
 
+    double offset = 0.0; // tracerOffset.set: RENDER.tracerOffset = v || 0
+    s->tracer_offset = ui_setting_number("tracerOffset", &offset) && offset == offset ? (float) offset : 0.0f;
+    s->trail_color = hex_to_vec(VFX_TRAIL_COLOR);
+    const cJSON *trail = ui_setting_value("trailCol");
+    if (cJSON_IsString(trail)) parse_hex_color(cJSON_GetStringValue(trail), &s->trail_color);
+    s->rope_color = hex_to_vec(VFX_ROPE_COLOR);
+    const cJSON *rope = ui_setting_value("ropeCol");
+    if (cJSON_IsString(rope)) parse_hex_color(cJSON_GetStringValue(rope), &s->rope_color);
+
     static int logged;
     if (vfx.log && !logged) {
         logged = 1;
         char *text = color ? cJSON_PrintUnformatted(color) : NULL;
         fprintf(stderr, "[vfx] bulletTracerCol %s -> %.3f %.3f %.3f\n", text ? text : "(unset)", s->tracer_color.x, s->tracer_color.y, s->tracer_color.z);
         free(text);
+    }
+    // the Editing colours as the renderer has them, whenever they change (vfx log)
+    static vec4 logged_trail = {-1.0f, 0.0f, 0.0f, 0.0f}, logged_rope = {-1.0f, 0.0f, 0.0f, 0.0f};
+    if (vfx.log && (memcmp(&logged_trail, &s->trail_color, sizeof(vec4)) || memcmp(&logged_rope, &s->rope_color, sizeof(vec4)))) {
+        logged_trail = s->trail_color, logged_rope = s->rope_color;
+        fprintf(stderr, "[vfx] trailCol %.3f %.3f %.3f ropeCol %.3f %.3f %.3f\n", s->trail_color.x, s->trail_color.y, s->trail_color.z,
+                s->rope_color.x, s->rope_color.y, s->rope_color.z);
     }
 }
 
@@ -1074,6 +1093,16 @@ static void local_shot(Client *client, Player *me) {
 
             const float back = scoped ? VFX_SCOPED_TRACER_BACK : 0.0f;
             start = v3_sub(start, v3_scale(direction, back));
+            if (vfx.settings.tracer_offset) {
+                // tracerOffset (v10.js:173081, the local player's shots only): the start moves to a random
+                // point of a 20 x v ring across the shot's yaw (up/down and sideways); it still ends at the
+                // hit, and the length is not recomputed
+                const float a = rand_float((float) -M_PI, (float) M_PI), r = 20.0f * vfx.settings.tracer_offset;
+                const float side = atan2f(direction.x, direction.z) + (float) M_PI / 2.0f;
+                start.x += r * sinf(side) * cosf(a);
+                start.y += r * sinf(a);
+                start.z += r * cosf(side) * cosf(a);
+            }
             spawn_tracer(start, hit, fminf(distance + back, VFX_TRACER_MAX_DST), fx->trail);
             if (vfx.log) {
                 fprintf(stderr, "[vfx] tracer start %.2f %.2f %.2f dst %.2f (camera %.2f %.2f %.2f fov %.2f)\n", start.x, start.y, start.z,
@@ -1683,7 +1712,9 @@ static void batch_trail(const VfxTrail *trail) {
     const vec3 ez = v3_scale(y, -trail->scale);
     const vec3 corner = v3_sub(trail->start, v3_scale(v3_add(ex, ez), 0.5f));
 
-    batch_box(corner, ex, ey, ez, color_from_hex(VFX_TRAIL_COLOR, VFX_TRAIL_OPACITY), 0, (vec4) {0});
+    vec4 color = vfx.settings.trail_color; // trailCol
+    color.w = VFX_TRAIL_OPACITY;
+    batch_box(corner, ex, ey, ez, color, 0, (vec4) {0});
 }
 
 static void camera_axes(const Camera *camera, vec3 *right, vec3 *up, vec3 *forward) {
@@ -1837,7 +1868,8 @@ static int rope_box(const Player *player, VfxBox *box) {
     box->position = v3_add(hook, v3_scale(along, 0.5f));
     box->forward = along;
     box->size = v3(VFX_ROPE_SCALE, VFX_ROPE_SCALE, length);
-    box->color = color_from_hex(VFX_ROPE_COLOR, 1.0f);
+    box->color = vfx.settings.rope_color; // ropeCol
+    box->color.w = 1.0f;
     return 1;
 }
 

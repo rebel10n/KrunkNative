@@ -1519,7 +1519,8 @@ void player_update_meshes(Player *player, const int is_preview) {
     // ao = swapTime / weapon.swapTime. players.js reload() only sets swapTime for isYou on a
     // rendering client, so other players never show the swap dip (their swap_timer is set by
     // player_spawn but only ticks down in procInputs, which they never run here).
-    const float swap_anim = player->is_you && player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time : 0.0f;
+    // * RENDER.weapSwapY (v10.js:170917): a negative weapSwapY swaps the weapon in from above
+    const float swap_anim = player->is_you && player->weapon->swap_time > 0.0f ? player->swap_timer / player->weapon->swap_time * settings->weap_swap_y : 0.0f;
     const float left_hand_mlt = player->left_handed ? -1.0f : 1.0f;
 
     const vec3 weapon_offset = {
@@ -1531,6 +1532,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float reload_speed = player->game->config.reload_speed > 0.0f ? player->game->config.reload_speed : 1.0f; // (reSpd || 1)
     float reload_anim = player->reload_timer > 0.0f && player->weapon->reload_time > 0.0f ? 1.0f - player->reload_timer / (player->weapon->reload_time * reload_speed) : 0.0f;
     if (reload_anim > 0.5f) reload_anim = 1.0f - reload_anim;
+    reload_anim *= settings->weap_reload_y; // * RENDER.weapReloadY * weapon.reloY (v10.js:170919; every stock reloY is 1)
 
     reload_anim *= player->render_you ? 1.0f : 0.3f;
     // Nettspend Purple Drank (nettspend.h): the pour-up is the first-person reload animation, so the

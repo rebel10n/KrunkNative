@@ -74,6 +74,7 @@ static ClientRenderSettings g_rs = {
     .weapon_bob = 0.9f, .weapon_lean = 1.0f, .weapon_rot = 0.0f,
     .weapon_off_x = 1.0f, .weapon_off_y = 1.0f, .weapon_off_z = 1.0f, .weapon_ads_off_y = 1.0f,
     .left_hand = 0, .aim_anim = 1, .show_hands = 1, .round_arms = 0, .hide_ads = 0,
+    .weap_swap_y = 1.0f, .weap_reload_y = 1.0f, .wall_lean = 0, .wall_lean_mlt = 0.5f,
     .can_load_mods = 1, .can_change_logo = 1, .auto_load_last = 0, .scope_borders = 1,
     .scope_border_color = "#000000", .scope_border_opacity = 1.0f, .scope_width = 6.8f, .scope_height = 6.8f, .scope_opacity = 1.0f,
     .reticle_width = 2.0f, .reticle_height = 2.0f, .use_damage_overlay = 1,
@@ -498,6 +499,10 @@ static const RsEntry RS_TABLE[] = {
     RS_F("weaponOffY", weapon_off_y, NULL),
     RS_F("weaponOffZ", weapon_off_z, NULL),
     RS_F("weaponADSOffY", weapon_ads_off_y, NULL),
+    RS_F("weapSwapY", weap_swap_y, NULL),               // player_mesh.c: the swap dip
+    RS_F("weapReloadY", weap_reload_y, NULL),           // player_mesh.c: the reload dip
+    RS_B("wallLean", wall_lean, NULL),                  // camera_feel.c: the wall lean roll
+    RS_F("wallLeanMlt", wall_lean_mlt, NULL),
     RS_B("leftHand", left_hand, NULL),
     RS_B("aimAnim", aim_anim, NULL),
     RS_B("hideADS", hide_ads, NULL),                    // main.c: no first-person weapon while fully aimed

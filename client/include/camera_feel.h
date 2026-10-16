@@ -12,6 +12,9 @@ void camera_feel_explosion(const Camera*, vec3 position);
 // Pose client->camera from client->me after its input: eye position, look + recoil
 // (recoilAnimY * recoilMlt) + landing bob (landBobY * 0.1) + shake, and the ADS zoom.
 void camera_feel_apply(Client*);
+// wallLean: the camera roll on a wall slide (after camera_feel_apply, frame delta in ms); its current value
+void camera_feel_wall_lean(Client*, float delta_ms);
+float camera_feel_wall_roll(void);
 // RENDER.updateShake(delta): once per rendered frame; delta in seconds (clamped like Krunker's).
 void camera_feel_update(float delta);
 // The current shake offsets (RENDER.shakeX / shakeY) camera_feel_apply adds to the look.

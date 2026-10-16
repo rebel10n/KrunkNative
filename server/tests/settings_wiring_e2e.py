@@ -31,7 +31,7 @@ def check(ok, what, detail=""):
         failures.append(what)
 
 
-def run(name, script, extra_env=None, timeout=180):
+def run(name, script, extra_env=None, timeout=180, args=()):
     """client_bin --offline with the script; returns the log text."""
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
@@ -44,7 +44,7 @@ def run(name, script, extra_env=None, timeout=180):
                 "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     env.update(extra_env or {})
     with open(log, "w") as out:
-        p = subprocess.Popen([f"{BUILD}/client_bin", "--offline"], stdout=out, stderr=subprocess.STDOUT,
+        p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", *args], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)
@@ -185,7 +185,7 @@ cross = ["0 menu", "600 play",
          "1900 down Q", "2000 up Q", "2600 mdown right", "3400 nodes @crossm [id=knCrossCus] > div",
          '3450 call setSetting "crosshairShoM" "0"', "3600 vis @crossoff knCrosshair",
          "3700 mup right", '3700 call setSetting "crosshairShoM" "3"', "4300 nodes @crossup [id=knCrossCus] > div",
-         "4400 down 1", "4450 up 1",
+         "4400 down E", "4450 up E",
          '4500 call setSetting "crosshairSho" "4"', '4500 call setSetting "crosshairImage" "https://krunker.io/pro_crosshair.png"',
          "4800 rects @img0 [id=knCrossCus] > img",
          '4900 call setSetting "crosshairImageW" "200"', '4900 call setSetting "crosshairImageH" "100"',
@@ -267,6 +267,100 @@ thrown = render("throw-green", {"state": {"settings": {"crosshairShoM": 3, "cros
 px = pixel(thrown, 640, 360) if thrown else None
 check(px is not None and px[1] > 200 and px[0] < 80, "screenshot: the throwing crosshair's dot is crosshairColorM (green)", str(px))
 print(f"screenshots: {SHOTS}")
+
+# ---------------------------------------------------------------- viewmodel / camera
+# wallLean: a wall slide (Run N Gun airborne along a wall, crouch held) rolls the camera only with the setting on.
+import json as _json
+WALL_MAP = os.path.join(WORK, "wall.json")
+with open(WALL_MAP, "w") as f:
+    _json.dump({"name": "Wall", "objects": [{"p": [0, 0, 0], "s": [400, 2, 400]}, {"p": [0, 2, -30], "s": [400, 200, 4]}],
+                "spawns": [[0, 2, 0, 0, 0, 0]], "modes": [0]}, f)
+
+
+def cam_rolls(log, prefix):
+    return [abs(float(m)) for m in re.findall(r"\[input_script\] cam t=\d+ @" + prefix + r"\d+ .*?rot=[-\d.]+,[-\d.]+,([-\d.]+)", log)]
+
+
+for lean in ("false", "true"):
+    wall = ["0 menu", f'300 call setSetting "wallLean" "{lean}"', '300 call setSetting "wallLeanMlt" "1"', "600 play",
+            '1500 con class "Run N Gun"',  # the class that wall jumps (player.wallJump)
+            "2000 pose 0 2 -24 0.6 0", "2100 down W", "2150 down SPACE", "2250 up SPACE", "2250 down SHIFT"]
+    wall += [f"{t} cam @wl{t}" for t in range(2300, 3300, 50)]
+    wall += ["3300 up W", "3300 up SHIFT", "3400 quit"]
+    log = run("wall-" + lean, "\n".join(wall), args=(WALL_MAP,))
+    rolls = cam_rolls(log, "wl")
+    if lean == "false":
+        check(len(rolls) >= 15 and max(rolls) == 0.0, "wallLean off: no camera roll against the wall", str(rolls))
+    else:
+        check(len(rolls) >= 15 and 0.01 < max(rolls) <= 0.15 + 1e-3, "wallLean on (x1): the wall slide rolls the camera, at most 0.15",
+              str(rolls))
+
+# weapReloadY / weapSwapY: the upper body's pitch (the input log's ubr_x) dips -2.8 x the reload fold and
+# -PI/4 x the swap; weapReloadY 0 keeps it level, weapSwapY -1 brings the weapon in from above.
+import csv as _csv
+VM_LOG = os.path.join(WORK, "viewmodel.csv")
+vm = ["0 menu", '300 call setSetting "weapReloadY" "0"', "600 play", "1500 mdown left", "1800 mup left",
+      "2000 down R", "2050 up R", '3600 call setSetting "weapReloadY" "1"', "3700 mdown left", "3900 mup left",
+      "4000 down R", "4050 up R", '5600 call setSetting "weapSwapY" "-1"', "5700 down E", "5750 up E",
+      '6400 call setSetting "weapSwapY" "1"', "6500 down E", "6550 up E", "7200 quit"]
+run("viewmodel", "\n".join(vm), {"KRUNKNATIVE_INPUT_LOG": VM_LOG})
+rows = []
+if os.path.exists(VM_LOG):
+    with open(VM_LOG) as f:
+        rows = [(float(r["t"]), float(r["ubr_x"]) - float(r["cam_pitch"])) for r in _csv.DictReader(f)]
+
+
+def span(t0, t1):
+    return [v for t, v in rows if t0 <= t < t1]
+
+
+r0, r1, s_up, s_down = span(2000, 3500), span(4000, 5500), span(5700, 6200), span(6500, 7000)
+check(r0 and max(abs(v) for v in r0) < 0.1, "weapReloadY 0: no reload dip", f"{min(r0, default=None)}..{max(r0, default=None)}")
+check(r1 and min(r1) < -0.5, "weapReloadY 1: the reload dips the weapon", f"min {min(r1, default=None)}")
+check(s_up and max(s_up) > 0.3, "weapSwapY -1: the swap comes in from above", f"max {max(s_up, default=None)}")
+check(s_down and min(s_down) < -0.3, "weapSwapY 1: the swap comes in from below", f"min {min(s_down, default=None)}")
+
+# prog*: the interact hold bar (an onInteract trigger held with the shoot button for 30 s) placed, sized,
+# turned and coloured by the Editing tab's settings
+INTERACT_MAP = os.path.join(WORK, "interact.json")
+with open(INTERACT_MAP, "w") as f:
+    _json.dump({"name": "InteractTest", "objects": [{"p": [0, -10, 0], "s": [200, 10, 200], "t": 3},
+                                                    {"p": [0, 0, 0], "s": [60, 30, 60], "i": 29, "te": 10, "tce": 30, "tc": 1}],
+                "spawns": [[-40, 0, 0, 0, 1, 0], [40, 0, 0, 0, 3, 0]]}, f)
+prog = ["0 menu", '300 call setSetting "progOffX" "3"', '300 call setSetting "progOffY" "4"', '300 call setSetting "progScale" "0.5"',
+        '300 call setSetting "progRot" "90"', '300 call setSetting "progOpac" "0.6"', '300 call setSetting "progColor" "#00ff00"',
+        "600 play", "2000 pose 0 0 0 0 0", "2400 mdown left", "3600 vis @pv interactProg",
+        "3600 style @ps interactProg:left interactProg:top interactProg:width interactProg:height interactProg:transform "
+        "interactProg:opacity interProgB:background-color", f"3650 frames {SHOTS}/interact 1", "3700 mup left", "3900 quit"]
+log = run("prog", "\n".join(prog), args=(INTERACT_MAP,))
+ps = styles(log, "ps")
+check(vis(log, "pv").get("interactProg") == "1", "an interact hold shows the progress bar", str(vis(log, "pv")))
+check(ps.get("interactProg:left") == "30%" and ps.get("interactProg:top") == "40%" and ps.get("interactProg:width") == "200px" and
+      ps.get("interactProg:height") == "15px", "progOffX 3 / progOffY 4 / progScale 0.5: the bar at 30 % / 40 %, 200 x 15 px", str(ps))
+check("rotate(1.5708rad)" in (ps.get("interactProg:transform") or "") and ps.get("interactProg:opacity") == "0.6" and
+      ps.get("interProgB:background-color") == "#00ff00", "progRot 90 / progOpac 0.6 / progColor: turned, faded, green", str(ps))
+
+# tracerOffset: the local tracers leave the barrel (0) or a point up to 20 units off it (1); trailCol /
+# ropeCol reach the renderer's colours (the vfx log)
+tr = ["0 menu", "600 play", "2000 mdown left", "2700 mup left", '2800 call setSetting "tracerOffset" "1"', "3600 mdown left",
+      "4300 mup left", '4400 call setSetting "trailCol" "#ff0000"', '4400 call setSetting "ropeCol" "#00ff00"', "4700 quit"]
+log = run("tracer", "\n".join(tr), {"KRUNKNATIVE_VFX_LOG": "1"})
+cut = log.find("call t=28")
+pat = r"\[vfx\] tracer start ([-\d.]+) ([-\d.]+) ([-\d.]+) dst [-\d.]+ \(camera ([-\d.]+) ([-\d.]+) ([-\d.]+)"
+
+
+def rel(text):
+    return [(float(a) - float(d), float(b) - float(e), float(c) - float(f_)) for a, b, c, d, e, f_ in re.findall(pat, text)]
+
+
+v0, v1 = rel(log[:cut]) if cut > 0 else [], rel(log[cut:]) if cut > 0 else []
+mean = [sum(v[i] for v in v0) / len(v0) for i in range(3)] if v0 else [0, 0, 0]
+off = lambda vs: [sum((v[i] - mean[i]) ** 2 for i in range(3)) ** 0.5 for v in vs]
+o0, o1 = off(v0), off(v1)
+check(len(o0) >= 3 and max(o0) < 1.0, "tracerOffset 0: every tracer leaves the barrel", str([round(v, 2) for v in o0]))
+check(len(o1) >= 3 and max(o1) > 5.0 and max(o1) < 21.0, "tracerOffset 1: the tracers start up to 20 units off the barrel",
+      str([round(v, 2) for v in o1]))
+check("[vfx] trailCol 1.000 0.000 0.000 ropeCol 0.000 1.000 0.000" in log, "trailCol / ropeCol: the trail red, the rope green")
 
 if failures:
     print(f"FAILED {len(failures)}: logs in {WORK}")

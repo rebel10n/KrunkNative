@@ -225,14 +225,63 @@ static void update_prompt(Client *client) {
     }
 }
 
+static double setting_or(const char *key, const double def) {
+    double v;
+    return ui_setting_number(key, &v) && v == v ? v : def;
+}
+
+// The bar as the Editing tab's prog* settings place it (v10.js:206825..206900; drawn on the overlay
+// canvas at v10.js:160627, the DOM bar here): a 400 x 30 px (x progScale, `|| 1`) roundRect at
+// left = progOffX * 10 %, top = progOffY * 10 % of the overlay (its top centre; defaults 50 % / 72 %),
+// rotated progRot degrees there, at globalAlpha progOpac; the track rgba(0,0,0,.4) radius 4, the fill
+// progColor radius 2, both stroked #000000 (lineWidth 1) with progShadow.
+static void apply_progress_style(const HtmlElem holder, const HtmlElem bar) {
+    static char applied[256];
+    const cJSON *col = ui_setting_value("progColor");
+    const char *color = cJSON_IsString(col) && cJSON_GetStringValue(col)[0] ? cJSON_GetStringValue(col) : "#ffffff";
+    double scale = setting_or("progScale", 1.0);
+    if (scale == 0.0) scale = 1.0;
+    const double left = setting_or("progOffX", 5.0) * 10.0, top = setting_or("progOffY", 7.2) * 10.0;
+    const double rot = setting_or("progRot", 0.0) * M_PI / 180.0, opacity = setting_or("progOpac", 1.0);
+    const int shadow = !ui_setting_is_false("progShadow");
+    char sig[256];
+    snprintf(sig, sizeof(sig), "%s|%g|%g|%g|%g|%g|%d", color, scale, left, top, rot, opacity, shadow);
+    if (!strcmp(sig, applied)) return;
+    snprintf(applied, sizeof(applied), "%s", sig);
+    char v[96];
+    snprintf(v, sizeof(v), "%g%%", left);
+    html_dom_set_style(holder, "left", v);
+    snprintf(v, sizeof(v), "%g%%", top);
+    html_dom_set_style(holder, "top", v);
+    html_dom_set_style(holder, "bottom", "auto");
+    snprintf(v, sizeof(v), "%gpx", 400.0 * scale);
+    html_dom_set_style(holder, "width", v);
+    snprintf(v, sizeof(v), "%gpx", 30.0 * scale);
+    html_dom_set_style(holder, "height", v);
+    html_dom_set_style(holder, "transform-origin", "50% 0");
+    snprintf(v, sizeof(v), "translate(-50%%, 0) rotate(%grad)", rot);
+    html_dom_set_style(holder, "transform", v);
+    snprintf(v, sizeof(v), "%g", opacity);
+    html_dom_set_style(holder, "opacity", v);
+    html_dom_set_style(holder, "background-color", "rgba(0, 0, 0, 0.4)");
+    html_dom_set_style(holder, "border-radius", "4px");
+    html_dom_set_style(holder, "box-shadow", shadow ? "0 0 0 1px #000000" : "none");
+    if (bar) {
+        html_dom_set_style(bar, "background-color", color);
+        html_dom_set_style(bar, "border-radius", "2px");
+        html_dom_set_style(bar, "box-shadow", shadow ? "0 0 0 1px #000000" : "none");
+    }
+}
+
 // updateInteractProgress ("p" = the player's interProg): #interactProg shows while > 0,
 // #interProgB is the bar. The local copy computes the same interact_progress.
 static void update_progress(Client *client) {
     static float shown = -1.0f;
     const float progress = in_game(client) ? roundf(client->me->interact_progress * 1000.0f) / 1000.0f : 0.0f;
-    if (progress == shown) return;
     const HtmlElem holder = html_dom_by_id("interactProg");
     const HtmlElem bar = html_dom_by_id("interProgB");
+    if (holder && progress > 0.0f) apply_progress_style(holder, bar);
+    if (progress == shown) return;
     if (holder) html_dom_set_display(holder, progress > 0.0f ? "block" : "none");
     if (bar && progress > 0.0f) {
         char width[32];

@@ -122,6 +122,10 @@ typedef struct {
     float weapon_bob, weapon_lean, weapon_rot; // weaponBob, weaponLean, weaponRot (viewmodel)
     float weapon_off_x, weapon_off_y, weapon_off_z, weapon_ads_off_y;
     int left_hand, aim_anim, show_hands, round_arms;
+    float weap_swap_y;       // weapSwapY (1, -2..2): the swap dip's depth (v10.js:170917 swapTime / swapTime * weapSwapY)
+    float weap_reload_y;     // weapReloadY (1, 0..1): how far the weapon lowers while reloading (v10.js:170919)
+    int wall_lean;           // wallLean (off): roll the camera on a wall slide / jump (v10.js:221617, camera_feel.c)
+    float wall_lean_mlt;     // wallLeanMlt (0.5): lean = 0.15 * v
     int hide_ads;            // hideADS: hide the weapon while fully aimed (main.c)
     int can_load_mods, can_change_logo, auto_load_last;
     int scope_borders;       // scopeBorders: .black scope bars

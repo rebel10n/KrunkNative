@@ -2222,6 +2222,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // frame shows this frame's input.
     if (client->me && client->me->active) {
         camera_feel_apply(client);
+        if (!third_person_view(client)) camera_feel_wall_lean(client, frame_delta * 1000.0f); // wallLean roll
         if (third_person_view(client)) {
             third_person_apply_camera(client, g_look, delta); // over the shoulder (third_person.c)
         } else if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
