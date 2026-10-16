@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1336,6 +1337,90 @@ def sc_join_waiting():
             stop(server)
 
 
+def silent_server():
+    """A TCP listener that accepts every connection and never answers: a join that waits for its INIT."""
+    (port,) = free_ports(1)
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", port))
+    srv.listen(8)
+    held = []
+
+    def accept_loop():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            held.append(conn)
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+    return srv, port
+
+
+def sc_esc_loading():
+    """Esc does nothing while the game loads: Krunker Strike's loading screen (the static boot screen,
+    then FRVR's loading screen after Play) and a join that has not got its INIT yet (the menu closed
+    over the game). The in-game menu does not open, and the boot screen's menu does not close into a
+    game that is not there. Once the game runs, Esc opens the menu again."""
+    strike = ["--flavor", "strike", "--offline", "--map", "kanji"]
+    script = """
+        0 menu
+        1000 esc
+        1100 state @boot-esc
+        4000 state @boot-later
+        4100 quit
+    """
+    lines = run_client("esc-boot", strike, script, timeout=90)
+    check_states("esc-boot", lines, script, {
+        "boot-esc": {"menu": "1", "locked": "0"},
+        "boot-later": {"menu": "1", "locked": "0"},
+    })
+
+    script = """
+        0 menu
+        3000 clicksel [onclick="strikeAction('play')"]
+        3100 state @play
+        3200 esc
+        3300 state @loading-esc
+        3300 nodes @loading-esc .frvr-loading-holder .loading-screen
+        5600 nodes @loaded .frvr-loading-holder .loading-screen
+        5800 esc
+        6000 state @game-esc
+        6100 quit
+    """
+    lines = run_client("esc-loading-strike", strike, script, timeout=90)
+    check_states("esc-loading-strike", lines, script, {
+        "play": {"menu": "0", "locked": "1"},
+        "loading-esc": {"menu": "0", "locked": "1"},
+        "game-esc": {"menu": "1"},
+    })
+    nodes = probes(lines, "nodes")
+    loading = nodes.get("loading-esc", {}).get("match", "no probe")
+    record("esc-loading-strike", "loading-esc", "loading screen up", ">=1", loading,
+           loading.isdigit() and int(loading) >= 1)
+    loaded = nodes.get("loaded", {}).get("match", "no probe")
+    record("esc-loading-strike", "loaded", "loading screen gone", "0", loaded, loaded == "0")
+
+    server, port = silent_server()
+    try:
+        script = f"""
+            0 play
+            1000 con connect 127.0.0.1:{port}
+            1200 state @join-wait
+            1300 esc
+            1500 state @join-wait-esc
+            3000 quit
+        """
+        lines = run_client("esc-join-wait", ["--offline", "--map", "kanji"], script, timeout=90)
+        check_states("esc-join-wait", lines, script, {
+            "join-wait": {"menu": "0"},
+            "join-wait-esc": {"menu": "0"},
+        })
+    finally:
+        server.close()
+
+
 class Manifest(http.server.BaseHTTPRequestHandler):
     body = b""
 
@@ -1948,6 +2033,7 @@ SCENARIOS["menu-closed-unfocused"] = sc_menu_closed_unfocused
 SCENARIOS["leave-state"] = sc_leave_state
 SCENARIOS["join-end"] = sc_join_end
 SCENARIOS["join-waiting"] = sc_join_waiting
+SCENARIOS["esc-loading"] = sc_esc_loading
 
 
 def main():

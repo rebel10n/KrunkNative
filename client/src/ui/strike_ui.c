@@ -504,6 +504,8 @@ void strike_loading_show(const char *info, const int no_anim) {
 
 int strike_loading_shown(void) { return S.ld.shown; }
 
+int strike_loading_up(void) { return strike_ui_active() && (!S.mounted || S.ld.shown); }
+
 static void loading_removed(void *user) {
     (void) user;
     S.ld.remove_timer = 0;

@@ -106,6 +106,9 @@ void strike_screen_rerender(StrikeScreen s);      // g.redraw() for one screen: 
 void strike_loading_show(const char *info, int no_anim);
 void strike_loading_complete(void);
 int  strike_loading_shown(void);
+// The page is still loading and covers the menu: the static boot screen until the mount, then FRVR's loading
+// screen while it shows. Escape does nothing then (main.c key_callback).
+int  strike_loading_up(void);
 
 // Templates: ui/strike/screens/<name>.html with {{key}} placeholders (strike_ui.c). The result
 // is malloc'd; values are HTML-escaped unless the key starts with '!' (raw markup).

@@ -1449,6 +1449,13 @@ int menu_connecting(void) {
     return g_connecting;
 }
 
+// The game is still loading: a connect under way (the spinner), the v10 boot curtain waiting for its INIT,
+// or Krunker Strike's loading screen. Escape does nothing meanwhile (main.c key_callback).
+int menu_loading(void) {
+    if (strike_ui_active()) return strike_loading_up() || g_connecting;
+    return g_connecting || menu_boot_waiting();
+}
+
 // Starts the spinner for a connect to a server whose game (map) is `map` ("" or NULL: not known).
 // Idempotent: a later call (the lobby's map once the join is answered) only updates the text.
 void menu_show_connecting_map(const char *map) {
@@ -2063,7 +2070,7 @@ void client_menu_tick(Client *client) {
     // gesture the browser needs to lock again). Not over the end screen (hideUI: UI.active = false;
     // a click on the game view locks again, client_pointer_click); KrunkScript's unlockMouse /
     // freeMouse released the lock on purpose (want.lock is 0 then).
-    if (pointer_owner_active() && g_ptr.want.lock && !hud_ui_end_screen_up() && !html_ui_is_menu_open() &&
+    if (pointer_owner_active() && g_ptr.want.lock && !hud_ui_end_screen_up() && !html_ui_is_menu_open() && !menu_loading() &&
         (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) && !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }

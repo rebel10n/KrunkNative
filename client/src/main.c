@@ -1847,13 +1847,19 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
     // the menu is open, and the browser drops pointer lock (detected in
     // client_menu_tick) while in game, so toggling here would double up.
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && html_ui_available() && client) {
+        // Escape does nothing while the game loads: Krunker Strike's loading screen covers the page
+        // (its menu too), and a join waits for its INIT, before there is a round for the in-game menu
+        // (menu_loading). The normal menu keeps its Escape. Only the game page loads a game.
+        const int game_page = app_mode() == APP_MODE_GAME;
         // While the menu is open the page's Escape handling decides (ui_handlers.c:
         // a focused input blurs, an open window closes, otherwise the menu closes),
         // like Krunker's own menu script. main.c only opens the menu.
         if (html_ui_is_menu_open()) {
+            if (game_page && strike_loading_up()) return;
             html_ui_key(key, scancode, action, mods);
             return;
         }
+        if (game_page && (menu_loading() || !client->game.ready)) return;
         if (hud_ui_end_screen_up()) return; // the end screen keeps precedence (e.g. Escape blurring the chat)
         client_set_menu_open(client, !html_ui_is_menu_open());
         return;
