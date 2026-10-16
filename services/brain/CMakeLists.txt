@@ -99,6 +99,7 @@ set(KN_BRAIN_SOURCES
     stream_thumbs.c                 # the Live Streams cards' Twitch previews: GET /streams/thumb (allow-listed, capped, cached)
     user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
     ../../shared/src/user_asset_path.c # the user-asset paths and content rules (shared with the client's fetch)
+    ../../shared/src/knv.c          # video.mp4.knv: the frame sidecar format (shared with the clients' players)
     ../../shared/src/youtube_link.c # map YouTube video ids (creations.c: uploadM stores the id)
     ../../shared/src/ai_proto.c
     # profile pictures (0123_account_avatars): intake (PNG / JPEG / WebP, libwebp encode), the

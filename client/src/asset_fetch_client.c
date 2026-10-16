@@ -10,6 +10,7 @@
 #include <audio.h>
 #include <client.h>
 #include <gltf.h>
+#include <user_asset.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +78,7 @@ static void arrived(void *user, const char *path) {
     texture_cache_reload(path);  // a placeholder (or an earlier copy) gets the file's pixels
     geometry_cache_reload(path); // a placeholder model is rebuilt in place
     gltf_model_forget(path);     // parsed again on its next use
+    user_asset_arrived(path);    // a map object waiting for its model gets it
     const char *base = assets_path();
     const size_t blen = base ? strlen(base) : 0;
     char name[256];

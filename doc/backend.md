@@ -1153,6 +1153,11 @@ CORS headers). Paths and content rules: `shared/include/user_asset_path.h` (an a
 cache); an upstream 404 is remembered `user_assets.fail_cache_s`. Config keys: `config/config.example.json`
 `"user_assets"`.
 
+`<id>/video.mp4.knv` is not on Krunker's host: it is the asset's `video.mp4` (fetched as above) as
+KrunkNative's frame sidecar (`shared/include/knv.h`), made with `user_assets.ffmpeg` (role `kn_brain`
+installs ffmpeg) and cached like a fetched file; the clients play it on the map object
+(`client/src/map_video.c`). No ffmpeg or no video: 404.
+
 Proxy: the upstream fetch goes through, in order, `KN_USER_ASSETS_PROXY`, `user_assets.proxy`,
 `KN_FETCH_PROXY` (curl syntax; none = direct). Krunker's CDN refuses kru's network as it refuses this
 dev machine's: on kru the deploy (role `kn_brain`, `tasks/user_assets_proxy.yml`) reads `PROXY` from the

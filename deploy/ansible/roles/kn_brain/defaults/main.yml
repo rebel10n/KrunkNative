@@ -51,7 +51,9 @@ kn_brain_ai_upstream_key: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_KEY'
 # accounts.email.require_verified: social features that need a verified email (chat, post, gift,
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []
-kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb3]
+# ffmpeg: the user-asset mirror turns a map's video asset into its frame sidecar (video.mp4.knv,
+# services/brain/user_assets.c); without it those answer 404 and the clients show texture.png.
+kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb3, ffmpeg]
 # hiredis (the Redis hot tier, knsvc_redis) by Debian release: 11/12 ship 0.14, 13 ships 1.1.
 kn_brain_hiredis_package: >-
   {{ 'libhiredis1.1.0' if (ansible_facts.distribution_major_version | int) >= 13 else 'libhiredis0.14' }}

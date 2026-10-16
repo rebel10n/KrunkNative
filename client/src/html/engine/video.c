@@ -15,54 +15,11 @@
 #include <stb_image.h>
 
 #define VIDEO_HEADER_SIZE 32u
-#define VIDEO_MAX_FRAMES 100000u
 #define VIDEO_RETRY_S 1.0          /* a missing sidecar is looked for again (native asset fetch) */
 
 static uint32_t rd32(const unsigned char *p) { return (uint32_t) p[0] | (uint32_t) p[1] << 8 | (uint32_t) p[2] << 16 | (uint32_t) p[3] << 24; }
 static int rd16(const unsigned char *p) { return (int) ((uint32_t) p[0] | (uint32_t) p[1] << 8); }
 
-int video_parse(const unsigned char *data, size_t len, VideoInfo *info, const uint32_t **offsets)
-{
-    VideoInfo vi;
-    if (!data || len < VIDEO_HEADER_SIZE || memcmp(data, "KNVF", 4) != 0 || rd32(data + 4) != 1) return 0;
-    vi.natural_w = rd16(data + 8);
-    vi.natural_h = rd16(data + 10);
-    vi.frame_w = rd16(data + 12);
-    vi.frame_h = rd16(data + 14);
-    vi.fps_num = rd32(data + 16);
-    vi.fps_den = rd32(data + 20);
-    vi.frame_count = rd32(data + 24);
-    vi.duration_ms = rd32(data + 28);
-    if (vi.natural_w <= 0 || vi.natural_h <= 0 || vi.frame_w <= 0 || vi.frame_h <= 0 || !vi.fps_num || !vi.fps_den
-        || !vi.frame_count || vi.frame_count > VIDEO_MAX_FRAMES)
-        return 0;
-    const size_t table = VIDEO_HEADER_SIZE + 4u * ((size_t) vi.frame_count + 1u);
-    if (len < table) return 0;
-    /* offsets ascending, inside the file; read as bytes (no alignment assumption) */
-    uint32_t prev = (uint32_t) table;
-    for (uint32_t i = 0; i <= vi.frame_count; i++) {
-        const uint32_t o = rd32(data + VIDEO_HEADER_SIZE + 4u * i);
-        if (o < prev || o > len) return 0;
-        prev = o;
-    }
-    if (info) *info = vi;
-    if (offsets) *offsets = (const uint32_t *) (const void *) (data + VIDEO_HEADER_SIZE);
-    return 1;
-}
-
-uint32_t video_frame_at(const VideoInfo *info, double t, int loop, int *ended)
-{
-    if (ended) *ended = 0;
-    if (!info || !info->frame_count) return 0;
-    if (!(t > 0.0)) return 0;
-    const double f = floor(t * (double) info->fps_num / (double) info->fps_den + 1e-6);
-    if (loop) return (uint32_t) fmod(f, (double) info->frame_count);
-    if (f >= (double) info->frame_count - 1.0) {
-        if (ended) *ended = f >= (double) info->frame_count;
-        return info->frame_count - 1;
-    }
-    return (uint32_t) f;
-}
 
 int video_sidecar_path(const char *ui_dir, const char *url, const char *base_url, char *out, size_t cap)
 {

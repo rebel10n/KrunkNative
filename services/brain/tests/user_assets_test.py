@@ -16,7 +16,10 @@ block page), a body over the size cap and a redirect (never followed) answer 502
 user_assets.enabled=false answers 503. Proxy: with user_assets.upstream on a host name only a stub
 forward proxy knows, KN_USER_ASSETS_PROXY (what the deploy writes from the krunkbox .env) and, without
 it, KN_FETCH_PROXY (the local-run convention) send the fetch through the proxy (absolute-URI GET);
-with neither the fetch fails (502).
+with neither the fetch fails (502). Video frames: <id>/video.mp4.knv is the host's video.mp4 (a 2 s clip
+made here with ffmpeg) as a frame sidecar (shared/include/knv.h: KNVF header, 15 fps, JPEG frames),
+cached (a second ask and the mp4 make no upstream request); an id without a video answers 404; with
+user_assets.ffmpeg missing it answers 404 (the clients then show texture.png). Skipped without ffmpeg.
 
 Database: as streams_test.py (sqlite here). 77 = skip (no database driver).
 """
@@ -147,6 +150,37 @@ class Proxy:
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = "http://127.0.0.1:%d" % self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+
+def make_mp4(work):
+    """a 2 s 64x48 test clip (mpeg4 in mp4: no external encoder needed); None without ffmpeg"""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    out = os.path.join(work, "clip.mp4")
+    r = subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=25:duration=2", "-c:v", "mpeg4",
+                        "-y", out], capture_output=True)
+    return open(out, "rb").read() if r.returncode == 0 and os.path.exists(out) else None
+
+
+def scenario_video(port, host, work, cache):
+    st, body, hd = get(port, "/api/user-assets/30000/video.mp4.knv", timeout=60)
+    check(st == 200 and body[:4] == b"KNVF", "video.mp4.knv: a KNVF sidecar (%d)" % st)
+    if st != 200 or len(body) < 32:
+        return
+    import struct
+    ver, nw, nh, fw, fh, fnum, fden, count, dur = struct.unpack("<I4H4I", body[4:32])
+    check(ver == 1 and (fw, fh) == (64, 48) and fnum == 15 and fden == 1, "header: v1 64x48 15 fps (%r)" % ((ver, fw, fh, fnum, fden),))
+    check(28 <= count <= 32 and abs(dur - count * 1000 // 15) <= 1, "header: ~30 frames over 2 s (%d frames, %d ms)" % (count, dur))
+    offs = struct.unpack("<%dI" % (count + 1), body[32:32 + 4 * (count + 1)])
+    check(offs[-1] == len(body) and all(body[o:o + 2] == b"\xff\xd8" for o in offs[:-1]), "every frame a JPEG, the table ends at the file's end")
+    check(os.path.exists(os.path.join(work, cache, "30000", "video.mp4.knv")) and
+          os.path.exists(os.path.join(work, cache, "30000", "video.mp4")), "the sidecar and the mp4 are cached")
+    before = host.count("/30000/video.mp4")
+    st2, body2, _ = get(port, "/api/user-assets/30000/video.mp4.knv")
+    check(st2 == 200 and body2 == body and host.count("/30000/video.mp4") == before == 1, "a second ask comes from the cache")
+    st, _, _ = get(port, "/api/user-assets/30001/video.mp4.knv")
+    check(st == 404, "an id without a video: 404 (%d)" % st)
 
 
 def bound_port(log_path, proc):
@@ -281,6 +315,25 @@ def main():
         proc.terminate()
         proc.wait(10)
         proxy.srv.shutdown()
+
+        clip = make_mp4(work)
+        if clip:
+            host.files["/30000/video.mp4"] = ("video/mp4", clip)
+            print("video frames (ffmpeg):")
+            proc, log_path = run_brain(env, work, host, "video", cache="cache-video")
+            procs.append(proc)
+            scenario_video(bound_port(log_path, proc), host, work, "cache-video")
+            proc.terminate()
+            proc.wait(10)
+            print("video frames without ffmpeg:")
+            proc, log_path = run_brain(env, work, host, "noffmpeg", ["--user_assets.ffmpeg=/nonexistent/ffmpeg"], cache="cache-noffmpeg")
+            procs.append(proc)
+            st, _, _ = get(bound_port(log_path, proc), "/api/user-assets/30000/video.mp4.knv", timeout=60)
+            check(st == 404, "404 (%d)" % st)
+            proc.terminate()
+            proc.wait(10)
+        else:
+            print("ffmpeg not found: the video frame checks are skipped")
 
         print("off (user_assets.enabled=false):")
         proc, log_path = run_brain(env, work, host, "off", ["--user_assets.enabled=false"])

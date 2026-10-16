@@ -134,7 +134,25 @@ Fix: user assets are fetched on demand like game content.
   tree, its cache (`user_assets.cache_dir`, on kru `/var/lib/krunknative/user-assets`), else
   Krunker's host (`user_assets.proxy` / `KN_USER_ASSETS_PROXY` when kru's network is refused).
 
-Tests: `client/tests/user_assets_e2e.py` (`make user-assets-test`: the fixture map
+Late files and videos (follow-up):
+
+- A model whose file arrives after the load-time wait is built into the running map: an OBJ is
+  re-centred on its real geometry (loadMesh's bounding-box centring; the placeholder had none), a GLTF
+  / GLB instance is created under the carrier mesh the object got at build time and added to the scene
+  (`user_asset_arrived`, from the native fetch's arrivals).
+- GLTF map assets used to be destroyed whenever the map left the scene, also for a new round on the
+  same map, which keeps the map's meshes (game_init's `map_reset`); the offline game does exactly that
+  at its first INIT, so GLTF user assets never showed offline. Their instances now live as long as their
+  carrier meshes (`user_asset_mesh_freed` from `map_fini` / `map_object_free`).
+- Video assets (`"at": "<id>v"`, Krunker's VideoTexture of `<id>/video.mp4`) play: the brain's mirror
+  makes `<id>/video.mp4.knv`, the frame sidecar the HTML engine's `<video>` already plays
+  (`shared/include/knv.h`; ffmpeg on the brain's host, 512 px / 15 fps / 120 s at most), and
+  `client/src/map_video.c` decodes it onto the material, looped, on both platforms. No sidecar: the
+  asset's `texture.png`, else black (what a VideoTexture shows before its first frame). Real example:
+  `30538v` (Strike's Krunk Plaza), 48 s, 719 frames, 9.7 MB.
+
+Tests: `client/tests/user_assets_late_e2e.py` (`make user-assets-test` runs both: models held back
+past the wait, a looping red / blue sidecar, a texture.png fallback), `client/tests/user_assets_e2e.py` (the fixture map
 `client/tests/data/user_assets_map.json` from stub hosts), `asset_fetch_test` (user assets),
 `services/brain/tests/user_assets_test.py` (ctest `brain_user_assets_e2e`). Nothing is vendored:
 the files are fetched at run time, not committed.

@@ -237,7 +237,13 @@
     "cache_dir": "cache/user-assets",
     "timeout_ms": 20000,
     "fail_cache_s": 600,
-    "error_cache_s": 10
+    "error_cache_s": 10,
+    "_comment_video": "<id>/video.mp4.knv: the asset's video.mp4 as KrunkNative's frame sidecar (shared/include/knv.h), made with ffmpeg (a missing binary: 404, the clients show texture.png): at most video_width px wide, video_fps, the first video_max_s seconds, JPEG quality video_quality (ffmpeg -q:v, 2 best .. 31).",
+    "ffmpeg": "ffmpeg",
+    "video_width": 512,
+    "video_fps": 15,
+    "video_quality": 6,
+    "video_max_s": 120
   },
   "ai": {
     "_comment": "The map editor's AI proxy (services/brain/ai.h). The upstream URL and key come from the KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY environment (~/.config/kn-secrets/ai.env locally, /etc/krunknative/ai.env on kru): never put the key here. Unset = the AI routes answer 503.",

@@ -343,8 +343,9 @@ window-center-test: build ## The client window maps where it stays: centred on t
 asset-fetch-test: build ## Native on-demand content fetch: deleted airdrop files are downloaded from stub origins, verified and pop in; mismatch refused, 404 given up once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/asset_fetch_e2e.py $(DEBUG_DIR)
 
-user-assets-test: build ## A community map's Krunker user assets (texture, OBJ model) fetched from stub hosts (a 403'ing Krunker, the mirror) and drawn; 404 / block page show the placeholder (headless; EGL_DEVICE=)
+user-assets-test: build ## A community map's Krunker user assets (texture, OBJ model) fetched from stub hosts (a 403'ing Krunker, the mirror) and drawn; 404 / block page show the placeholder; late models built into the running map; video sidecars play (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/user_assets_e2e.py $(DEBUG_DIR)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/user_assets_late_e2e.py $(DEBUG_DIR)
 
 console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)

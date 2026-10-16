@@ -35,10 +35,18 @@ int user_asset_load(const UserAssetFlags *flags, UserAssetModel *out);
 Mesh *user_asset_object_mesh(Object *object, const cJSON *raw_obj, const vec4 *colors);
 
 // GLTF map assets: add / remove their instances to / from the scene (map_post.c), and play
-// their clips each frame (visibility follows the carrier mesh).
+// their clips each frame (visibility follows the carrier mesh). The instances stay while their
+// carriers do (a new round on the same map keeps the map's meshes): user_asset_mesh_freed drops them.
 void user_asset_map_load(Scene *scene);
 void user_asset_map_unload(Scene *scene);
+// A map object's mesh is about to be freed (shared/src/map.c map_fini / map_object_free): its GLTF
+// instance and any wait for its model go with it.
+void user_asset_mesh_freed(const void *mesh);
 void user_asset_frame(void);
+// A downloaded file arrived (asset_fetch_client.c, after the loaders' caches were refreshed): a map
+// object whose model was still downloading when the map was built gets it now (an OBJ is re-centred on
+// the real geometry, a GLTF / GLB instance is created under its carrier and added to the scene).
+void user_asset_arrived(const char *path);
 // Game.playAnim on a GLTF map asset: the instance hanging off `carrier` plays `clip` reps times
 // (render.js playClip). No-op for other meshes.
 void user_asset_play_clip(const Mesh *carrier, const char *clip, int reps);

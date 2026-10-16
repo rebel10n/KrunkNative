@@ -33,6 +33,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <knv.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,19 +41,7 @@ extern "C" {
 
 enum { VIDEO_AUTOPLAY = 1, VIDEO_LOOP = 2 };
 
-/* Header of a parsed .knv sidecar. */
-typedef struct VideoInfo {
-    int natural_w, natural_h;   /* the source video's size (intrinsic size)     */
-    int frame_w, frame_h;       /* stored frames                                 */
-    uint32_t fps_num, fps_den;
-    uint32_t frame_count;
-    uint32_t duration_ms;
-} VideoInfo;
-
-/* Parses a .knv image held in memory (not copied).  1 on success. */
-int video_parse(const unsigned char *data, size_t len, VideoInfo *info, const uint32_t **offsets);
-/* Frame index shown at `t` seconds of playback (looping or clamped). */
-uint32_t video_frame_at(const VideoInfo *info, double t, int loop, int *ended);
+/* VideoInfo, video_parse, video_frame_at: the .knv format itself (shared/include/knv.h). */
 
 /* The sidecar path of a media URL as written in the page: `url` resolved against
  * `base_url` like an image (image_resolve_url; "/assets/..." = the game asset

@@ -16,6 +16,7 @@
 #include <canvas2d.h>
 #include <billboard_ad.h>
 #include <user_asset.h>
+#include <map_video.h>
 #include "viewer/viewer_store.h"
 #include <weapons.h>
 #include <nettspend.h> // the Drank's cup / the Money Spread's cash stack as pickups
@@ -579,41 +580,21 @@ static unsigned int prefab_load_texture_src(const char *src) {
 }
 
 // A src of the v7 map texture table, a user asset ("<id>/texture", the "at" key) or a video asset
-// ("<id>/video"): v7 plays user-assets/<id>/video.mp4 on a VideoTexture. KN has no video
-// textures: a video asset shows its "<id>/texture.png" when one ships, else stays black like a
-// VideoTexture before its first frame (documented placeholder).
+// ("<id>/video"): v7 plays user-assets/<id>/video.mp4 on a VideoTexture; KN plays its frame
+// sidecar (map_video.h).
 static unsigned int prefab_texture(const char *src, const int asset, const int video) {
     if (!src || !src[0] || !strcmp(src, "default")) return 0;
     if (!asset) return prefab_load_texture_src(src);
 
     char relative[160];
     if (video) {
+        // render.js: a VideoTexture of user-assets/<id>/video.mp4 (map_video.c: its frame sidecar;
+        // texture.png when it has none, black before the first frame)
         char id[32];
         snprintf(id, sizeof(id), "%s", src);
         char *slash = strchr(id, '/');
         if (slash) *slash = 0;
-        snprintf(relative, sizeof(relative), "user-assets/%s/texture.png", id);
-        char *path = concat(assets_path(), relative);
-        FILE *f = path && ensure_asset_file(path) ? fopen(path, "rb") : NULL;
-        const int downloading = !f && path && asset_prefetch(path) == 0; // load_texture's placeholder
-        free(path);
-        if (f) fclose(f);
-        if (downloading) return prefab_load_texture_file(relative);
-        if (!f) {
-            static unsigned int black;
-            if (!black) {
-                static const unsigned char pixel[4] = {0, 0, 0, 255};
-                glGenTextures(1, &black);
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, black);
-                g_active_texture = black;
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-            }
-            return black;
-        }
-        return prefab_load_texture_file(relative);
+        return map_video_texture(id);
     }
     snprintf(relative, sizeof(relative), "user-assets/%s.png", src);
     return prefab_load_texture_file(relative);
@@ -1372,7 +1353,7 @@ static int prefab_prefetch_asset_id(const cJSON *json, char *out, const size_t s
 }
 
 // user assets: "aid" (CUSTOM_ASSET, TRIGGER, AI: user_asset.c / ai_render.c) and "at" (a texture or
-// video asset of a cube / plane / ...: prefab_texture; a video shows its texture.png in KN)
+// video asset of a cube / plane / ...: prefab_texture)
 static void prefab_prefetch_user_assets(PrefabPrefetch *list, const cJSON *raw_obj, const ClientRenderSettings *settings) {
     char id[24], flags[24];
     if (prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "aid"), id, sizeof(id), flags, sizeof(flags))) {
@@ -1397,9 +1378,10 @@ static void prefab_prefetch_user_assets(PrefabPrefetch *list, const cJSON *raw_o
             }
         }
     }
-    if (!settings->no_textures && prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "at"), id, sizeof(id), NULL, 0)) {
+    if (!settings->no_textures && prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "at"), id, sizeof(id), flags, sizeof(flags))) {
         char rel[64];
-        snprintf(rel, sizeof(rel), "user-assets/%s/texture.png", id);
+        // a video ("<id>v"): its frame sidecar (map_video.h; texture.png only when it has none)
+        snprintf(rel, sizeof(rel), "user-assets/%s/%s", id, strchr(flags, 'v') ? "video.mp4.knv" : "texture.png");
         prefab_prefetch_add(list, "%s", rel);
     }
 }

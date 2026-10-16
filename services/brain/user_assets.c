@@ -21,6 +21,13 @@
  *      other failures answer 502 and are remembered for a few seconds.
  * At most UA_FETCHES transfers run at once; requests for a path being fetched wait for that fetch.
  * Responses carry Cache-Control: public (a week): Krunker never changes a published file in place.
+ *
+ * <id>/video.mp4.knv is not on Krunker's host: it is the asset's video.mp4 (fetched as above) as
+ * KrunkNative's frame sidecar (shared/include/knv.h: JPEG frames, user_assets.video_width wide at most,
+ * user_assets.video_fps, the first user_assets.video_max_s seconds), made with user_assets.ffmpeg and
+ * cached like a fetched file: the clients have no video decoder (client/src/map_video.c plays it on a
+ * map object's material, Krunker's VideoTexture). Without ffmpeg it answers 404 and the clients show
+ * the asset's texture.png instead.
  */
 #include "user_assets.h"
 
@@ -32,7 +39,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -40,6 +50,7 @@
 #include "knsvc/http.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
+#include "knv.h"
 #include "user_asset_path.h"
 
 #ifdef KN_HAVE_CURL
@@ -60,6 +71,8 @@ static struct {
     char tree_dir[1024];
     int64_t fail_ms, error_ms;
     int timeout_ms;
+    char ffmpeg[256];
+    int video_width, video_fps, video_quality, video_max_s;
 } C;
 
 typedef struct {
@@ -76,7 +89,6 @@ typedef struct {
     int slot;
     unsigned gen;
     char rel[UA_REL_MAX];
-    char url[512];
     unsigned char *data;
     size_t len;
     int status;             /* 200 ok, 404 missing upstream, 502 other */
@@ -211,13 +223,17 @@ static int progress_cb(void *ud, curl_off_t dl, curl_off_t dt, curl_off_t ul, cu
 }
 #endif
 
-static void job_fetch(Job *j) {
-    j->status = 502;
+/* upstream <rel> into *data / *len: 200, 404 (the host has no such file) or 502 */
+static int fetch_upstream(const char *rel, unsigned char **data, size_t *len) {
+    *data = NULL;
+    *len = 0;
 #ifdef KN_HAVE_CURL
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", C.upstream, rel);
     CURL *c = curl_easy_init();
-    if (!c) return;
-    Body b = {.max = (size_t) user_asset_max_bytes(j->rel)};
-    curl_easy_setopt(c, CURLOPT_URL, j->url);
+    if (!c) return 502;
+    Body b = {.max = (size_t) user_asset_max_bytes(rel)};
+    curl_easy_setopt(c, CURLOPT_URL, url);
 #if LIBCURL_VERSION_NUM >= 0x075500
     curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
 #else
@@ -237,24 +253,196 @@ static void job_fetch(Job *j) {
     const CURLcode rc = curl_easy_perform(c);
     if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(c);
-    if (rc == CURLE_OK && code == 200 && !b.too_large && user_asset_content_ok(j->rel, b.data, b.len)) {
-        j->data = b.data;
-        j->len = b.len;
-        j->status = 200;
-        cache_write(j->rel, j->data, j->len);
-        return;
+    if (rc == CURLE_OK && code == 200 && !b.too_large && user_asset_content_ok(rel, b.data, b.len)) {
+        *data = b.data;
+        *len = b.len;
+        cache_write(rel, b.data, b.len);
+        return 200;
     }
-    if (rc == CURLE_OK && code == 404) j->status = 404;
     char why[96];
     if (rc != CURLE_OK && !b.too_large) snprintf(why, sizeof(why), "%s", curl_easy_strerror(rc));
     else if (b.too_large) snprintf(why, sizeof(why), "larger than %zu bytes", b.max);
     else if (code != 200) snprintf(why, sizeof(why), "HTTP %ld", code);
-    else snprintf(why, sizeof(why), "not a %s", strrchr(j->rel, '/') + 1);
-    KN_WARN(MOD, "%s: %s", j->url, why);
+    else snprintf(why, sizeof(why), "not a %s", strrchr(rel, '/') + 1);
+    KN_WARN(MOD, "%s: %s", url, why);
     free(b.data);
+    return rc == CURLE_OK && code == 404 ? 404 : 502;
 #else
-    (void) j;
+    (void) rel;
+    return 502;
 #endif
+}
+
+/* ---- video.mp4.knv: the asset's video as KrunkNative's frame sidecar (knv.h), made with ffmpeg */
+
+typedef struct {
+    unsigned char *data;
+    size_t len, cap;
+} Bytes;
+
+static int bytes_add(Bytes *b, const void *p, const size_t n) {
+    if (b->len + n > b->cap) {
+        size_t cap = b->cap ? b->cap * 2 : 1 << 16;
+        while (cap < b->len + n) cap *= 2;
+        unsigned char *grown = realloc(b->data, cap);
+        if (!grown) return 0;
+        b->data = grown;
+        b->cap = cap;
+    }
+    memcpy(b->data + b->len, p, n);
+    b->len += n;
+    return 1;
+}
+
+/* the size of a baseline / progressive JPEG (its SOF marker); 0 when none */
+static int jpeg_size(const unsigned char *p, const size_t n, int *w, int *h) {
+    for (size_t i = 2; i + 9 < n;) {
+        if (p[i] != 0xff) return 0;
+        const unsigned m = p[i + 1];
+        if (m >= 0xc0 && m <= 0xcf && m != 0xc4 && m != 0xc8 && m != 0xcc) {
+            *h = p[i + 5] << 8 | p[i + 6];
+            *w = p[i + 7] << 8 | p[i + 8];
+            return 1;
+        }
+        i += 2u + (size_t) (p[i + 2] << 8 | p[i + 3]);
+    }
+    return 0;
+}
+
+/* ffmpeg's MJPEG stream of `mp4` (a file) as a .knv; 200, 404 (no ffmpeg / no video stream) or 502 */
+static int make_knv(const char *mp4, const char *rel, unsigned char **out, size_t *out_len) {
+    *out = NULL;
+    *out_len = 0;
+    char vf[160], q[16], t[16], fps[16];
+    snprintf(vf, sizeof(vf), "fps=%d,scale='min(%d,iw)':-2", C.video_fps, C.video_width);
+    snprintf(q, sizeof(q), "%d", C.video_quality);
+    snprintf(t, sizeof(t), "%d", C.video_max_s);
+    snprintf(fps, sizeof(fps), "%d", C.video_fps);
+    char *const argv[] = {C.ffmpeg, "-nostdin", "-v", "error", "-t", t, "-i", (char *) mp4, "-an", "-vf", vf,
+                          "-q:v", q, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1", NULL};
+    int fd[2];
+    if (pipe(fd)) return 502;
+    const pid_t pid = fork();
+    if (pid < 0) {
+        close(fd[0]);
+        close(fd[1]);
+        return 502;
+    }
+    if (pid == 0) {
+        dup2(fd[1], 1);
+        close(fd[0]);
+        close(fd[1]);
+        const int null = open("/dev/null", O_RDWR);
+        if (null >= 0) {
+            dup2(null, 0);
+            dup2(null, 2);
+        }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(fd[1]);
+    Bytes stream = {0};
+    const size_t max = (size_t) user_asset_max_bytes(rel);
+    unsigned char buf[65536];
+    int overflow = 0;
+    for (;;) {
+        const ssize_t n = read(fd[0], buf, sizeof(buf));
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        if (stream.len + (size_t) n > max || !bytes_add(&stream, buf, (size_t) n) || atomic_load(&g_cancel)) {
+            overflow = 1;
+            kill(pid, SIGKILL);
+            break;
+        }
+    }
+    close(fd[0]);
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    if (WIFEXITED(st) && WEXITSTATUS(st) == 127) {
+        KN_WARN(MOD, "%s: no %s to make video frames (user_assets.ffmpeg)", rel, C.ffmpeg);
+        free(stream.data);
+        return 404;
+    }
+    if (overflow || !WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+        KN_WARN(MOD, "%s: ffmpeg failed%s", rel, overflow ? " (larger than the cap)" : "");
+        free(stream.data);
+        return 502;
+    }
+    /* split the MJPEG stream at each SOI (FFD8FF) that follows an EOI (FFD9) */
+    size_t *starts = NULL, nframes = 0;
+    for (size_t i = 0; i + 3 <= stream.len; i++) {
+        if (stream.data[i] != 0xff || stream.data[i + 1] != 0xd8 || stream.data[i + 2] != 0xff) continue;
+        if (i && !(stream.data[i - 2] == 0xff && stream.data[i - 1] == 0xd9)) continue;
+        size_t *grown = realloc(starts, (nframes + 1) * sizeof(*starts));
+        if (!grown) break;
+        starts = grown;
+        starts[nframes++] = i;
+        if (nframes >= KNV_MAX_FRAMES) break;
+    }
+    int w = 0, h = 0;
+    if (!nframes || !jpeg_size(stream.data, stream.len, &w, &h) || w <= 0 || h <= 0 || w > 65535 || h > 65535) {
+        KN_WARN(MOD, "%s: ffmpeg made no frames", rel);
+        free(starts);
+        free(stream.data);
+        return 404;
+    }
+    const VideoInfo info = {.natural_w = w, .natural_h = h, .frame_w = w, .frame_h = h, .fps_num = (uint32_t) C.video_fps,
+                            .fps_den = 1, .frame_count = (uint32_t) nframes,
+                            .duration_ms = (uint32_t) (nframes * 1000u / (unsigned) C.video_fps)};
+    Bytes knv = {0};
+    unsigned char head[KNV_HEADER_SIZE];
+    knv_write_header(head, &info);
+    int ok = bytes_add(&knv, head, sizeof(head));
+    const size_t table = KNV_HEADER_SIZE + 4u * (nframes + 1u);
+    for (size_t i = 0; ok && i <= nframes; i++) {
+        const size_t o = table + (i < nframes ? starts[i] : stream.len) - starts[0];
+        const unsigned char le[4] = {(unsigned char) o, (unsigned char) (o >> 8), (unsigned char) (o >> 16), (unsigned char) (o >> 24)};
+        ok = bytes_add(&knv, le, 4);
+    }
+    ok = ok && bytes_add(&knv, stream.data + starts[0], stream.len - starts[0]);
+    free(starts);
+    free(stream.data);
+    if (!ok || knv.len > max || !video_parse(knv.data, knv.len, NULL, NULL)) {
+        free(knv.data);
+        return 502;
+    }
+    KN_INFO(MOD, "%s: %zu frames %dx%d at %d fps (%zu bytes)", rel, nframes, w, h, C.video_fps, knv.len);
+    *out = knv.data;
+    *out_len = knv.len;
+    return 200;
+}
+
+/* video.mp4.knv: video.mp4 from the tree / cache / upstream, then ffmpeg */
+static int fetch_knv(const char *rel, unsigned char **data, size_t *len) {
+    char mp4_rel[UA_REL_MAX], path[1400];
+    snprintf(mp4_rel, sizeof(mp4_rel), "%.*s", (int) (strlen(rel) - 4), rel); /* without ".knv" */
+    const char *mp4 = NULL;
+    snprintf(path, sizeof(path), "%suser-assets/%s", C.tree_dir, mp4_rel);
+    if (C.tree_dir[0] && !access(path, R_OK)) mp4 = path;
+    if (!mp4) {
+        snprintf(path, sizeof(path), "%s%s", C.cache_dir, mp4_rel);
+        if (access(path, R_OK)) {
+            unsigned char *video = NULL;
+            size_t video_len = 0;
+            const int st = fetch_upstream(mp4_rel, &video, &video_len); /* cached on success */
+            free(video);
+            if (st != 200) return st;
+        }
+        if (!access(path, R_OK)) mp4 = path;
+    }
+    if (!mp4) return 502; /* no cache dir to transcode from */
+    const int st = make_knv(mp4, rel, data, len);
+    if (st == 200) cache_write(rel, *data, *len);
+    return st;
+}
+
+static int ends_with(const char *s, const char *suffix) {
+    const size_t a = strlen(s), b = strlen(suffix);
+    return a >= b && !strcmp(s + a - b, suffix);
+}
+
+static void job_fetch(Job *j) {
+    j->status = ends_with(j->rel, ".knv") ? fetch_knv(j->rel, &j->data, &j->len) : fetch_upstream(j->rel, &j->data, &j->len);
 }
 
 static void job_done(kn_loop *loop, void *ud);
@@ -353,7 +541,6 @@ static void h_asset(kn_http_req *req, void *ud) {
         j->slot = (int) (s - S);
         j->gen = s->gen;
         snprintf(j->rel, sizeof(j->rel), "%s", rel);
-        snprintf(j->url, sizeof(j->url), "%s%s", C.upstream, rel);
         pthread_t t;
         pthread_attr_t attr;
         pthread_attr_init(&attr);
@@ -406,6 +593,15 @@ int user_assets_init(Brain *b) {
     C.fail_ms = kn_config_int(b->cfg, "user_assets.fail_cache_s", 600) * 1000;
     C.error_ms = kn_config_int(b->cfg, "user_assets.error_cache_s", 10) * 1000;
     C.timeout_ms = (int) kn_config_int(b->cfg, "user_assets.timeout_ms", 20000);
+    snprintf(C.ffmpeg, sizeof(C.ffmpeg), "%s", kn_config_str(b->cfg, "user_assets.ffmpeg", "ffmpeg"));
+    C.video_width = (int) kn_config_int(b->cfg, "user_assets.video_width", 512);
+    C.video_fps = (int) kn_config_int(b->cfg, "user_assets.video_fps", 15);
+    C.video_quality = (int) kn_config_int(b->cfg, "user_assets.video_quality", 6);
+    C.video_max_s = (int) kn_config_int(b->cfg, "user_assets.video_max_s", 120);
+    if (C.video_width < 16) C.video_width = 16;
+    if (C.video_fps < 1) C.video_fps = 1;
+    if (C.video_quality < 2) C.video_quality = 2;
+    if (C.video_max_s < 1) C.video_max_s = 1;
     kn_http_route(b->http, "GET", "/api/user-assets/:id/:file", h_asset, b);
     kn_http_route(b->http, "GET", "/user-assets/:id/:file", h_asset, b);
 #ifndef KN_HAVE_CURL

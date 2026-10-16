@@ -1343,7 +1343,7 @@ else ()
         # <video> sidecars (test_video.c: the .knv header, frame index, real sidecars under assets/)
         krunknative_html_engine_test(html_video_test GL
             SOURCES ${KN_ENGINE_DIR}/tests/test_video.c ${KN_ENGINE_DIR}/video.c ${KN_ENGINE_DIR}/image.c
-                    ${KN_ENGINE_DIR}/svg.c ${KN_ENGINE_DIR}/webp.c ${KN_ENGINE_DIR}/util.c client/src/stb_image.c shared/src/utils.c
+                    ${KN_ENGINE_DIR}/svg.c ${KN_ENGINE_DIR}/webp.c ${KN_ENGINE_DIR}/util.c client/src/stb_image.c shared/src/utils.c shared/src/knv.c
             LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
     endif ()
 

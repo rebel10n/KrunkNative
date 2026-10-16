@@ -12,6 +12,7 @@
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>
 #include <map_post.h> // map_post_object_freed (Object Manager)
+#include <user_asset.h> // user_asset_mesh_freed
 #elif defined(KRUNKNATIVE_SERVER)
 #include <server.h>
 #endif
@@ -1328,6 +1329,7 @@ void map_object_free(Object *object) {
 #ifdef KRUNKNATIVE_CLIENT
     if (object->mesh) {
         map_post_object_freed(object); // map_post.c: a run-time object's mesh leaves the scene
+        user_asset_mesh_freed(object->mesh); // its GLTF model instance (user_asset.c)
         mesh_fini(object->mesh);
     }
 #endif
@@ -1352,7 +1354,10 @@ void map_fini(Map *map) {
             free(object->trig);
 
 #ifdef KRUNKNATIVE_CLIENT
-            if (object->mesh) mesh_fini(object->mesh);
+            if (object->mesh) {
+                user_asset_mesh_freed(object->mesh); // its GLTF model instance (user_asset.c)
+                mesh_fini(object->mesh);
+            }
 #endif
 
             free(object);

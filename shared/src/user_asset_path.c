@@ -6,6 +6,7 @@
 static const char *const k_files[] = {
     "texture.png", "thumb.png", "model.obj", "model.png", "model_e.png", "model_l.png", "model_n.png",
     "model.gltf", "model.glb", "sound.mp3", "video.mp4", "data.json", "mod.zip",
+    "video.mp4.knv", // not Krunker's: KrunkNative's frames of video.mp4 (knv.h), made by the brain's mirror
 };
 
 static int digits(const char *s, const size_t n) {
@@ -39,7 +40,7 @@ static int ends_with(const char *s, const char *suffix) {
 }
 
 long long user_asset_max_bytes(const char *rel) {
-    if (rel && (ends_with(rel, ".zip") || ends_with(rel, ".mp4"))) return 64ll << 20;
+    if (rel && (ends_with(rel, ".zip") || ends_with(rel, ".mp4") || ends_with(rel, ".knv"))) return 64ll << 20;
     return 32ll << 20; // Krunker's upload limit is far below (models: a few MB)
 }
 
@@ -65,6 +66,7 @@ int user_asset_content_ok(const char *rel, const unsigned char *data, const size
         return 0;
     }
     if (ends_with(rel, ".zip")) return len >= 4 && !memcmp(data, "PK", 2);
+    if (ends_with(rel, ".knv")) return len >= 4 && !memcmp(data, "KNVF", 4);
     if (ends_with(rel, ".glb")) return len >= 4 && !memcmp(data, "glTF", 4);
     return len > 0;
 }
