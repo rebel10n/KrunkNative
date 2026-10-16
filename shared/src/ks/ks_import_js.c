@@ -97,6 +97,8 @@ typedef struct {
     int is_public;
     KsType ret;
     int ret_set, done;
+    KsType *ptypes;      // helper parameter types from typed call sites (NULL until one is seen)
+    uint8_t *pknown;
 } Fn;
 
 typedef struct {
@@ -134,6 +136,12 @@ typedef struct {
 
     Var *vars;
     int nvars, cap_vars, scope;
+    int tmp_count;       // ks_tmpN temporaries (addTo of a parenthesised value)
+    int probe;           // first emission pass: records helper parameter types, its output is discarded
+    Nd **assigns;        // every `name = expr` / `addTo name v` (E_ID target): types an untyped `[]` declaration
+    int nassigns, cap_assigns;
+    Nd **decls;          // every let / const declaration (any scope): types a use that is not declared yet
+    int ndecls, cap_decls;
     Fn *cur_fn;
     Buf out, body;       // the script, the action being emitted (in Imp: they survive longjmp)
 } Imp;
@@ -624,11 +632,30 @@ static Nd *primary(Imp *I) {
             return m;
         }
         if (is_id(t, "DE")) {
-            // DE(a, i) = remove a[i] (statements only)
-            if (helper_args(I, args, 4) != 2) fail(I, t->line, t->col, "DE() takes two arguments.");
+            // DE(a, i) = remove a[i] (statements only). v10 wraps the index in the bounds check:
+            // DE(a, BC(a, i, line, col)) (the `remove a[i];` lowering inside a loop)
+            I->pos += 2; // DE (
+            Nd *arr = expr(I);
+            expect_p(I, ",");
+            Nd *idx;
+            if (is_id(cur(I), "BC") && is_p(peekn(I, 1), "(")) {
+                I->pos += 2;
+                Nd *bc_arr = expr(I);
+                expect_p(I, ",");
+                idx = expr(I);
+                expect_p(I, ",");
+                note_hint(I, int_lit(I));
+                expect_p(I, ",");
+                int_lit(I);
+                expect_p(I, ")");
+                if (!same(bc_arr, arr)) fail(I, t->line, t->col, "BC() checks a different array than the one removed from.");
+            } else {
+                idx = expr(I);
+            }
+            expect_p(I, ")");
             n = mk(I, E_DE, t);
-            n->a = args[0];
-            n->b = args[1];
+            n->a = arr;
+            n->b = idx;
             return n;
         }
         if (t->len <= 2 && t->s[0] >= 'A' && t->s[0] <= 'Z')
@@ -776,6 +803,10 @@ static Nd *expr(Imp *I) {
 // ---------------------------------------------------------------------------
 // Statements
 
+static void note_assign(Imp *I, Nd *n);
+static int program_array_use(Imp *I, const char *name);
+static void probe_guard_expr(Imp *I, Buf *b, const Nd *e);
+static KsType infer_decl(Imp *I, const char *name);
 static Nd *stmt(Imp *I);
 
 static Nd *strip_paren(Nd *e) {
@@ -816,6 +847,7 @@ static Nd *simple(Imp *I) {
         n->op = dup_n(I, o->s, (size_t) o->len);
         n->a = lvalue(I, e);
         n->b = expr(I);
+        if (n->a->k == E_ID || n->a->k == E_PAREN) note_assign(I, n);
         return n;
     }
     if (is_p(o, "++") || is_p(o, "--")) {
@@ -831,6 +863,7 @@ static Nd *simple(Imp *I) {
         n = mk(I, S_ADDTO, t);
         n->a = e->a;
         n->b = e->b;
+        if (n->a->k == E_ID || n->a->k == E_PAREN) note_assign(I, n);
         return n;
     case E_DE: {
         n = mk(I, S_REMOVE, t);
@@ -868,6 +901,8 @@ static Nd *let_decl(Imp *I) {
     I->pos++;
     if (!acc(I, "=")) fail(I, t->line, t->col, "Declaration of \"%s\" without an initialiser (its type cannot be recovered).", n->s);
     n->a = expr(I);
+    I->decls = grow(I, I->decls, &I->cap_decls, I->ndecls + 1, sizeof *I->decls);
+    I->decls[I->ndecls++] = n;
     return n;
 }
 
@@ -1158,12 +1193,14 @@ static const HookSig g_client_hooks[] = {
     {"onPlayerUpdate", "sno"}, {"onKeyPress", "sn"}, {"onKeyUp", "sn"}, {"onKeyHeld", "sn"},
     {"onControllerPress", "sn"}, {"onControllerUp", "sn"}, {"onControllerHeld", "sn"},
     {"onMouseClick", "nnn"}, {"onMouseUp", "nnn"}, {"onMouseScroll", "n"}, {"onDIVClicked", "s"},
-    {"onNetworkMessage", "so"},
+    {"onNetworkMessage", "so"}, {"onEntitySpawn", "ss"}, {"onEntityRemoved", "s"}, {"onEntityEvent", "ssnn"},
 };
 static const HookSig g_server_hooks[] = {
     {"start", ""}, {"update", "n"}, {"onPlayerSpawn", "s"}, {"onPlayerDeath", "ss"}, {"onPlayerDamage", "ssn"},
     {"onPlayerUpdate", "sno"}, {"onCustomTrigger", "ssn"}, {"onNetworkMessage", "sos"}, {"onChatMessage", "ss"},
     {"onPlayerLeave", "s"}, {"onGameEnd", ""}, {"onAdFinished", "sb"}, {"onServerClosed", ""},
+    {"onDepositBoxChange", "ssnn"}, {"onEntitySpawn", "ss"}, {"onEntityDamage", "ssn"}, {"onEntityDestroyed", "ss"},
+    {"onEntityAttach", "ss"}, {"onEntityDetach", "ss"}, {"onEntityEvent", "ssnn"}, {"onEntityRemoved", "s"},
 };
 
 static const char *hook_sig(KsSide side, const char *name) {
@@ -1229,6 +1266,8 @@ static KsType cast_type(Imp *I, const Nd *n) {
         // A(x, f) maps arrays element-wise: (num[]) x for an array operand
         const KsType x = infer(I, n->a);
         if (x.dims > 0) t.dims = x.dims;
+        // (obj) e lowers to O(e), never A: A(x, O) is always the (obj[]) array cast
+        else if (n->cast == KS_T_OBJ) t.dims = 1;
     }
     return t;
 }
@@ -1240,7 +1279,7 @@ static KsType infer(Imp *I, const Nd *n) {
     case E_BOOL: return T_BOOL;
     case E_ID: {
         const Var *v = lookup(I, n->s);
-        return v ? v->t : T_ANY;
+        return v ? v->t : infer_decl(I, n->s);
     }
     case E_MEMBER: {
         const KsApiEntry *e = api_of(n);
@@ -1344,6 +1383,26 @@ static void emit_name(Imp *I, Buf *b, const Nd *at, const char *name) {
     bputs(I, b, name);
 }
 
+// A call to a helper action (not a hook) teaches its parameter types: the first typed argument per
+// parameter wins. The probe pass sees every call before the real pass emits any helper.
+static void note_call_types(Imp *I, const Nd *call) {
+    Fn *f = find_fn(I, call->a->s);
+    if (!f || !f->nparams || (f->is_public && hook_sig(I->side, f->name))) return;
+    if (!f->pknown) {
+        f->ptypes = alloc(I, (size_t) f->nparams * sizeof *f->ptypes);
+        f->pknown = alloc(I, (size_t) f->nparams);
+        memset(f->pknown, 0, (size_t) f->nparams);
+    }
+    for (int i = 0; i < f->nparams && i < call->n; i++) {
+        if (f->pknown[i]) continue;
+        const KsType t = infer(I, call->items[i]);
+        if (known(t) && t.base != KS_T_ACTION) {
+            f->ptypes[i] = t;
+            f->pknown[i] = 1;
+        }
+    }
+}
+
 static void emit_expr(Imp *I, Buf *b, const Nd *n, KsType expect) {
     switch (n->k) {
     case E_NUM:
@@ -1373,6 +1432,7 @@ static void emit_expr(Imp *I, Buf *b, const Nd *n, KsType expect) {
         bputs(I, b, "]");
         return;
     case E_CALL:
+        if (n->a->k == E_ID && !lookup(I, n->a->s)) note_call_types(I, n);
         emit_tight(I, b, n->a);
         bputs(I, b, "(");
         for (int i = 0; i < n->n; i++) {
@@ -1444,12 +1504,17 @@ static void emit_expr(Imp *I, Buf *b, const Nd *n, KsType expect) {
         emit_expr(I, b, n->a, expect);
         bputs(I, b, ")");
         return;
-    case E_CAST:
+    case E_CAST: {
+        // A(x, f) of an operand with no static type is either: the target type decides (expect)
+        KsType ct = cast_type(I, n);
+        if (n->from_a && expect.base == n->cast && expect.dims != ct.dims && infer(I, n->a).base == KS_T_ANY)
+            ct.dims = expect.dims;
         bputs(I, b, "(");
-        emit_type(I, b, cast_type(I, n));
+        emit_type(I, b, ct);
         bputs(I, b, ") ");
         emit_tight(I, b, n->a);
         return;
+    }
     case E_LEN:
     case E_NE:
         bputs(I, b, n->k == E_LEN ? "lengthOf " : "notEmpty ");
@@ -1485,11 +1550,72 @@ static void emit_body(Imp *I, Buf *b, const Nd *body, int ind) {
     bputs(I, b, "}");
 }
 
+static void note_assign(Imp *I, Nd *n) {
+    while (n->a->k == E_PAREN) n->a = n->a->a; // (name).push(v) / (name) = v
+    I->assigns = grow(I, I->assigns, &I->cap_assigns, I->nassigns + 1, sizeof *I->assigns);
+    I->assigns[I->nassigns++] = n;
+}
+
+// `T name = []` has no static type in JS; the script's later `name = <typed array>` does
+// (the v10 map 018 "adminMenuSpectators" pattern). The first assignment with a known array type.
+static KsType array_hint(Imp *I, const char *name) {
+    static int depth;
+    if (depth > 6) return T_ANY;
+    depth++;
+    KsType found = T_ANY;
+    for (int i = 0; i < I->nassigns && !known(found); i++) {
+        const Nd *a = I->assigns[i];
+        if (a->a->k != E_ID || strcmp(a->a->s, name) != 0) continue;
+        if (a->k == S_ADDTO) { // addTo name value: an array of the value's type
+            const KsType e = infer(I, a->b);
+            if (known(e) && e.base != KS_T_ACTION) {
+                found = e;
+                found.dims++;
+            }
+            continue;
+        }
+        const KsType t = infer(I, a->b);
+        if (t.dims > 0 && known(t) && t.base != KS_T_ACTION) found = t;
+    }
+    depth--;
+    return found;
+}
+
+// A name used before its declaration is seen (a local declared later in the emitted text, or
+// in another action): its first declaration whose initialiser has a known type. Depth-guarded.
+static KsType infer_decl(Imp *I, const char *name) {
+    static int depth;
+    if (depth > 6) return T_ANY;
+    depth++;
+    KsType t = T_ANY;
+    for (int i = 0; i < I->ndecls && !known(t); i++) {
+        const Nd *d = I->decls[i];
+        if (strcmp(d->s, name) != 0) continue;
+        t = infer(I, d->a);
+        if (!known(t) && d->a->k == E_ARR && d->a->n == 0) t = array_hint(I, name);
+    }
+    depth--;
+    return t;
+}
+
 // `T name = init` (no ";"), declared in the current scope.
 static void emit_var(Imp *I, Buf *b, const Nd *s) {
-    const KsType t = infer(I, s->a);
-    if (!known(t) || t.base == KS_T_ACTION)
+    KsType t = infer(I, s->a);
+    if (s->a->k == E_CAST && s->a->from_a && t.dims == 0 && program_array_use(I, s->s)) t.dims = 1;
+    if ((!known(t) || t.base == KS_T_ACTION) && s->a->k == E_ARR && s->a->n == 0) {
+        t = array_hint(I, s->s);
+        // never assigned a typed array (map 018 "votesActive"): its elements are only read by
+        // member (`.id`), which needs an object, so the declaration is obj[]
+        if (!known(t) && program_array_use(I, s->s)) t = (KsType) {KS_T_OBJ, 1};
+    }
+    if (!known(t) || t.base == KS_T_ACTION) {
+        if (I->probe) { // the probe pass only learns call sites (in the initialiser too); the real pass reports
+            probe_guard_expr(I, b, s->a);
+            declare(I, s->s, T_ANY);
+            return;
+        }
         fail(I, s->line, s->col, "Cannot recover the type of \"%s\" (its initialiser has no static type).", s->s);
+    }
     emit_type(I, b, t);
     bputs(I, b, " ");
     emit_name(I, b, s, s->s);
@@ -1586,10 +1712,13 @@ static void emit_stmt(Imp *I, Buf *b, const Nd *s, int ind) {
     case S_RET:
         bputs(I, b, "return");
         if (s->a) {
-            const KsType t = infer(I, s->a);
             Fn *f = I->cur_fn;
-            if (!known(t) || t.base == KS_T_ACTION)
+            // an empty array literal takes the action's return type from its other returns
+            const KsType t = s->a->k == E_ARR && s->a->n == 0 && f && f->ret_set ? f->ret : infer(I, s->a);
+            if (!known(t) || t.base == KS_T_ACTION) {
+                if (I->probe) return; // the probe pass only learns call sites; the real pass reports
                 fail(I, s->line, s->col, "Cannot recover the return type of action \"%s\".", f->name);
+            }
             if (f->ret_set && !teq(f->ret, t))
                 fail(I, s->line, s->col, "Action \"%s\" returns values of different types.", f->name);
             f->ret = t;
@@ -1606,15 +1735,35 @@ static void emit_stmt(Imp *I, Buf *b, const Nd *s, int ind) {
         bputs(I, b, "continue;");
         break;
     case S_ADDTO: {
+        const Nd *v = s->b;
+        KsType elem = infer(I, s->a);
+        if (elem.dims) elem.dims--;
+        // `addTo a (x)` would parse as the call a(x): a parenthesised or cast value goes through a
+        // temporary first (`obj ks_tmp1 = (obj) x; addTo a ks_tmp1;`), in the same scope
+        if (v->k == E_PAREN || v->k == E_CAST || (v->k == E_BIN && v->a->k == E_PAREN)) {
+            const KsType vt = known(elem) ? elem : infer(I, v);
+            char name[32];
+            snprintf(name, sizeof name, "ks_tmp%d", ++I->tmp_count);
+            if (!I->probe) {
+                emit_type(I, b, vt);
+                bputs(I, b, " ");
+                bputs(I, b, name);
+                bputs(I, b, " = ");
+                emit_expr(I, b, v, vt);
+                bputs(I, b, ";\n");
+            }
+            declare(I, name, vt);
+            Nd tmp = {.k = E_ID, .s = name, .line = s->line, .col = s->col};
+            bputs(I, b, "addTo ");
+            emit_tight(I, b, s->a);
+            bputs(I, b, " ");
+            emit_expr(I, b, &tmp, T_ANY);
+            bputs(I, b, ";");
+            break;
+        }
         bputs(I, b, "addTo ");
         emit_tight(I, b, s->a);
         bputs(I, b, " ");
-        // `addTo a (x)` would parse as the call a(x)
-        const Nd *v = s->b;
-        if (v->k == E_PAREN || v->k == E_CAST || (v->k == E_BIN && v->a->k == E_PAREN))
-            fail(I, s->line, s->col, "addTo with a parenthesised value cannot be written in KrunkScript.");
-        KsType elem = infer(I, s->a);
-        if (elem.dims) elem.dims--;
         emit_expr(I, b, v, elem);
         bputs(I, b, ";");
         break;
@@ -1632,13 +1781,65 @@ static void emit_stmt(Imp *I, Buf *b, const Nd *s, int ind) {
     bputs(I, b, "\n");
 }
 
+// Whether the script indexes, measures or pushes `name` somewhere (an array's use): `A(x, F)`
+// is `(num[]) x` or `(num) x`, and only such a use tells the array apart.
+static int array_use(const Nd *n, const char *name) {
+    if (!n) return 0;
+    if ((n->k == E_INDEX || n->k == E_LEN || n->k == E_PUSH || n->k == S_ADDTO || n->k == E_DE || n->k == S_REMOVE) && n->a &&
+        n->a->k == E_ID && strcmp(n->a->s, name) == 0)
+        return 1;
+    if (array_use(n->a, name) || array_use(n->b, name) || array_use(n->c, name) || array_use(n->d, name)) return 1;
+    for (int i = 0; i < n->n && n->items; i++)
+        if (array_use(n->items[i], name)) return 1;
+    return 0;
+}
+
+static int program_array_use(Imp *I, const char *name) {
+    for (int i = 0; i < I->nglobals; i++)
+        if (array_use(I->globals[i], name)) return 1;
+    for (int i = 0; i < I->nfns; i++)
+        if (array_use(I->fns[i].body, name)) return 1;
+    return 0;
+}
+
+// Whether anything in the script names `name` (a call, a `.bind(this)` value).
+static int name_referenced(const Nd *n, const char *name) {
+    if (!n) return 0;
+    if (n->k == E_ID && strcmp(n->s, name) == 0) return 1;
+    if (name_referenced(n->a, name) || name_referenced(n->b, name) || name_referenced(n->c, name) || name_referenced(n->d, name))
+        return 1;
+    for (int i = 0; i < n->n && n->items; i++)
+        if (name_referenced(n->items[i], name)) return 1;
+    return 0;
+}
+
 static void emit_function(Imp *I, Buf *out, Fn *f) {
     const char *sig = f->is_public ? hook_sig(I->side, f->name) : NULL;
-    if (f->nparams && !sig)
-        fail(I, f->line, f->col, "Cannot recover the parameter types of action \"%s\" (not a %s hook).", f->name,
-             I->side == KS_SIDE_SERVER ? "server" : "client");
+    KsType ptypes[f->nparams > 0 ? f->nparams : 1];
     if (sig && f->nparams > (int) strlen(sig))
         fail(I, f->line, f->col, "Hook \"%s\" takes at most %d parameters.", f->name, (int) strlen(sig));
+    if (f->nparams && !sig) {
+        for (int i = 0; i < f->nparams; i++) ptypes[i] = T_ANY;
+        int all = 1;
+        for (int i = 0; i < f->nparams; i++) {
+            if (f->pknown && f->pknown[i]) ptypes[i] = f->ptypes[i];
+            else all = 0;
+        }
+        if (!all && !I->probe) {
+            // a helper nothing names can never run: it is dropped (no behaviour, no types to recover)
+            int used = 0;
+            for (int i = 0; i < I->nglobals && !used; i++) used = name_referenced(I->globals[i], f->name);
+            for (int i = 0; i < I->nfns && !used; i++) used = name_referenced(I->fns[i].body, f->name);
+            if (!used) {
+                f->done = 1;
+                return;
+            }
+            fail(I, f->line, f->col, "Cannot recover the parameter types of action \"%s\" (not a %s hook, no typed call).",
+                 f->name, I->side == KS_SIDE_SERVER ? "server" : "client");
+        }
+    }
+    // a hook's parameter types come from its signature; a helper's from its call sites
+#define PTYPE(i) (sig ? sig_type(sig[i]) : ptypes[i])
 
     // body first (it decides the return type), then the header line in front of it
     Buf *body = &I->body;
@@ -1646,7 +1847,7 @@ static void emit_function(Imp *I, Buf *out, Fn *f) {
     body->line = out->line + 1;
     I->cur_fn = f;
     push_scope(I);
-    for (int i = 0; i < f->nparams; i++) declare(I, f->params[i], sig_type(sig[i]));
+    for (int i = 0; i < f->nparams; i++) declare(I, f->params[i], PTYPE(i));
     for (int i = 0; i < f->body->n; i++) emit_stmt(I, body, f->body->items[i], 1);
     pop_scope(I);
     f->done = 1;
@@ -1663,13 +1864,50 @@ static void emit_function(Imp *I, Buf *out, Fn *f) {
     bputs(I, out, "(");
     for (int i = 0; i < f->nparams; i++) {
         if (i) bputs(I, out, ", ");
-        emit_type(I, out, sig_type(sig[i]));
+        emit_type(I, out, PTYPE(i));
         bputs(I, out, " ");
         emit_name(I, out, &at, f->params[i]);
     }
+#undef PTYPE
     bputs(I, out, ") {\n");
     if (body->len) bput(I, out, body->p, body->len);
     bputs(I, out, "}\n");
+}
+
+// Probe pass: an expression walked for its call sites; a failure in it is not an error yet (the
+// real pass reports it), the walk goes on with the next statement.
+static void probe_guard_expr(Imp *I, Buf *b, const Nd *e) {
+    jmp_buf saved;
+    memcpy(saved, I->jb, sizeof saved);
+    const int nv = I->nvars, sc = I->scope;
+    if (setjmp(I->jb) == 0) emit_expr(I, b, e, T_ANY);
+    memcpy(I->jb, saved, sizeof saved);
+    I->nvars = nv;
+    I->scope = sc;
+}
+
+static void probe_guard_fn(Imp *I, Buf *out, Fn *f) {
+    jmp_buf saved;
+    memcpy(saved, I->jb, sizeof saved);
+    const int nv = I->nvars, sc = I->scope;
+    if (setjmp(I->jb) == 0) emit_function(I, out, f);
+    memcpy(I->jb, saved, sizeof saved);
+    I->nvars = nv;
+    I->scope = sc;
+    I->cur_fn = NULL;
+}
+
+static void emit_program(Imp *I, Buf *out) {
+    for (int g = 0; g < I->nglobals; g++) {
+        const Nd *s = I->globals[g];
+        while (s->hint > out->line) bputs(I, out, "\n");
+        emit_var(I, out, s);
+        bputs(I, out, ";\n");
+    }
+    for (int f = 0; f < I->nfns; f++) {
+        if (I->probe) probe_guard_fn(I, out, &I->fns[f]);
+        else emit_function(I, out, &I->fns[f]);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1731,13 +1969,18 @@ char *ks_import_js(const char *js, size_t len, KsSide side, size_t *out_len, KsD
 
         Buf *out = &I->out;
         bputs(I, out, "# KrunkScript recovered from the v7 compiler's JavaScript output (KrunkNative ks_import_js).\n");
-        for (int g = 0; g < I->nglobals; g++) {
-            const Nd *s = I->globals[g];
-            while (s->hint > out->line) bputs(I, out, "\n");
-            emit_var(I, out, s);
-            bputs(I, out, ";\n");
-        }
-        for (int f = 0; f < I->nfns; f++) emit_function(I, out, &I->fns[f]);
+        // pass 1 (probe) learns the helpers' parameter types from their typed call sites; pass 2 emits
+        I->probe = 1;
+        Buf scratch = {0};
+        emit_program(I, &scratch);
+        free(scratch.p);
+        I->probe = 0;
+        if (I->err) memset(I->err, 0, sizeof *I->err); // the probe's messages are not the script's
+        I->nvars = 0;
+        I->scope = 0;
+        I->cur_fn = NULL;
+        for (int f = 0; f < I->nfns; f++) I->fns[f].done = 0;
+        emit_program(I, out);
         result = I->out.p;
         if (out_len) *out_len = I->out.len;
         I->out.p = NULL;
@@ -1750,6 +1993,7 @@ char *ks_import_js(const char *js, size_t len, KsSide side, size_t *out_len, KsD
     free(I->globals);
     free(I->fns);
     free(I->vars);
+    free(I->assigns);
     free(I);
     return result;
 }
