@@ -71,6 +71,7 @@ typedef enum {
     // 0x0900 in-game actions of v10 without a NetPacket id
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
     NET_EXT_GAME_STATE = 0x0901,    // "gsc" S -> C NetGameStatePacket: v10 gameState (INITIALIZING .. ENDED), every change
+    NET_EXT_VOTE_FORFEIT = 0x0902,  // "vf" S -> C NetVoteForfeitPacket: the team's forfeit vote (team only; null when it ends)
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
@@ -436,6 +437,20 @@ typedef struct {
 typedef struct {
     uint8_t state;
 } NetGameStatePacket;
+
+// NET_EXT_VOTE_FORFEIT (S -> C, v10 "vf" [initiator | null, num, req, isStart, initiatorName, 1]): the
+// forfeit vote of the recipient's team (server/src/forfeit.c). active 0 is v10's "vf" null (the panel
+// hides). opened 1 is the broadcast that opened the vote (the panel names the initiator); the rest
+// are the counts (votes / needed) after a vote or a change of the eligible voters.
+typedef struct {
+    uint8_t active;
+    uint8_t opened;
+    uint8_t team;
+    uint8_t reserved;
+    int32_t votes;
+    int32_t needed;
+    char initiator[32];
+} NetVoteForfeitPacket;
 typedef struct {
     float x, y, z;
 } NetMarkPositionSendPacket;

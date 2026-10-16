@@ -1773,6 +1773,38 @@ typedef enum {
     GAME_STATE_ENDED = 5,
 } GameState;
 
+// game.voteToForfeit (v10 config voteForfeitTimer 60000, voteForfeitDisconnectGrace 30000): a team's
+// vote to forfeit the round (shared/src/forfeit.c owns the rules and the packets). `voters` are the
+// uids that voted (the initiator's counts, once each); `leavers` are the team players who left in
+// this game, eligible again for the grace (they count while they are away); `starts` are the uids
+// that opened a vote this game (one start per player). `forced_team` is the team the forfeit gave
+// the round to (0 none), read by mode_pick_winner.
+#define FORFEIT_VOTERS_MAX 32
+#define FORFEIT_STARTS_MAX 32
+#define FORFEIT_LEAVERS_MAX 16
+#define FORFEIT_TIMER_S 60.0f
+#define FORFEIT_GRACE_S 30.0f
+typedef struct {
+    int uid;
+    int team;
+    float at;     // game time of the leave (Game.now)
+} ForfeitLeaver;
+typedef struct {
+    unsigned char active;                 // a vote runs (voteToForfeit)
+    unsigned char team;                   // the voting team (1 / 2)
+    float timer;                          // seconds left
+    int votes;                            // voters counted (num)
+    int req;                              // eligible voters (req)
+    char initiator[32];                   // who opened it
+    int voters[FORFEIT_VOTERS_MAX];
+    int voter_count;
+    int starts[FORFEIT_STARTS_MAX];
+    int start_count;
+    ForfeitLeaver leavers[FORFEIT_LEAVERS_MAX];
+    int leaver_count;
+    int forced_team;
+} GameForfeit;
+
 // Server-side match events leave the shared game through these hooks; the native
 // server (server/src/net.c) and the offline client's in-process game (client/src/net/local_game.c)
 // route them to their connections. A NULL hook drops the event (tests, client mirror).
@@ -2040,6 +2072,7 @@ typedef struct Game_t {
     // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked).
     unsigned char is_ranked;
     unsigned char game_state;     // GameState (v10 gameState): INITIALIZING until the first round starts
+    GameForfeit forfeit;          // the team forfeit vote (shared/src/forfeit.c)
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
     Map *map;

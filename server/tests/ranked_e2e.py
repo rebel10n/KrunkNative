@@ -30,6 +30,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -164,6 +165,24 @@ def spawn_names(conn):
             if info:
                 out.append((state, info["uid"], info["name"]))
     return out
+
+
+# NetVoteForfeitPacket (0x0902, "vf"): active, opened, team, reserved, votes, needed, initiator[32]
+VF = "<BBBBii32s"
+
+
+def vf_packets(conn):
+    out = []
+    for t, p in conn.packets:
+        if t == EXT and p[:2] == struct.pack("<H", 0x0902) and len(p) >= 2 + struct.calcsize(VF):
+            a, o, team, _, votes, needed, init = struct.unpack(VF, p[2:2 + struct.calcsize(VF)])
+            out.append({"active": a, "opened": o, "team": team, "votes": votes, "needed": needed,
+                        "initiator": kn_proto.uncstr(init)})
+    return out
+
+
+def say(conn, text):
+    conn.send(8, kn_proto.cstr(text, 288))  # NET_PACKET_CHAT_SEND
 
 
 def gsc_wait(conn, state, timeout):
@@ -403,6 +422,44 @@ def run():
     check("own name stays real during WARMUP", bool(own) and own[-1] == names[0], str(own[-1:]))
     real = {n for st, uid, n in phases if st == 3}
     check("real names pushed at IN_PROGRESS", set(names) <= real, str(sorted(real)))
+
+    # 3b. the team forfeit vote (G8, v10 voteToForfeit): /forfeit (alias of /ff) opens team 1's vote, only
+    # team 1 gets its "vf"; a rival's /ff is refused; a teammate's vote counts "Vote Submitted - n/needed";
+    # a second vote from the same player is refused. Passing and expiry: the unit test (forfeit_test),
+    # since a passed vote would end the round this match still needs for the abandon check.
+    team_of = {i: teams[names[i]] for i in range(8)}
+    t1 = [i for i in range(8) if team_of[i] == 1]
+    t2 = [i for i in range(8) if team_of[i] == 2]
+    starter, mate, rival = t1[0], t1[1], t2[0]
+    say(conns[starter], "/forfeit")
+    for c in conns:
+        c.read(timeout=0.6)
+    opened = [vf for i in range(8) for vf in vf_packets(conns[i]) if vf["active"] and vf["opened"]]
+    needed = opened[0]["needed"] if opened else -1
+    check("forfeit: /forfeit opens team 1's vote, every team 1 player gets its vf",
+          all(any(v["active"] and v["opened"] for v in vf_packets(conns[i])) for i in t1) and opened and opened[0]["team"] == 1,
+          json.dumps(opened)[:200])
+    check("forfeit: vf is team only (team 2 gets nothing)", not any(vf_packets(conns[i]) for i in t2),
+          str([len(vf_packets(conns[i])) for i in t2]))
+    check("forfeit: the initiator is named in the vf", bool(opened) and opened[0]["initiator"] == names[starter],
+          str(opened[:1]))
+    say(conns[rival], "/ff")
+    say(conns[mate], "/ff")
+    for c in conns:
+        c.read(timeout=0.6)
+    check("forfeit: a rival's /ff is refused while team 1 votes",
+          any("already running for the other team" in t for t in chats(conns[rival])), str(chats(conns[rival])[-1:]))
+    submitted = [re.search(r"Vote Submitted - (\d+)/(\d+)", t) for t in chats(conns[mate])]
+    submitted = [m for m in submitted if m]
+    check("forfeit: a teammate's /ff counts (Vote Submitted - 2/%d)" % needed,
+          bool(submitted) and submitted[-1].group(1) == "2" and submitted[-1].group(2) == str(needed),
+          str([m.group(0) for m in submitted]))
+    say(conns[mate], "/ff")
+    for c in conns:
+        c.read(timeout=0.6)
+    check("forfeit: a second vote from the same player is refused",
+          any("already voted" in t for t in chats(conns[mate])), str(chats(conns[mate])[-1:]))
+    check("forfeit: the round is still running (no end yet)", 4 not in gsc_states(conns[0]), str(gsc_states(conns[0])))
 
     # 4. a player abandons: the round ends, the other team wins
     quitter = 5

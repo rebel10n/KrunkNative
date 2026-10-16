@@ -1,6 +1,7 @@
 #include <object_manager.h>
 #include <piss.h> // KrunkNative Piss puddles
 #include <drank.h> // KrunkNative Drank: laced timers
+#include <forfeit.h>  // the team forfeit vote (v10 voteToForfeit)
 #include <net_ext.h> // game_send_hit: NET_EXT_KN_HIT_DAMAGE
 #include <shared.h>
 #include <ruleset.h>
@@ -453,6 +454,7 @@ void game_start_round(Game *game) {
     // finishInit: resetAll / resetPickups / triggerQueue / globalVals (WP-C), then the mode's clock
     // (gameTime), waitTimers, conditions, objectives, gameStart, then multiObjectTrigger("onGameStart")
     game_set_state(game, GAME_STATE_INITIALIZING); // v10 setGameState(INITIALIZING) at startGame
+    forfeit_round_start(game);                     // v10 startGame: no forfeit vote, no starts
     trigger_round_reset(game);
     zombies_round_start(game); // WP-H finishInit: mystery boxes / krum machines, power-ups, airdrops
     if (game->mode) mode_round_start(game);
@@ -631,6 +633,8 @@ void game_set_endless(Game *game, const int on) {
 void game_send_round_state(Game *game, const int uid) {
     if (!game->ready || !game_is_authority(game)) return;
 
+    forfeit_send_to(game, uid); // a forfeit vote of the joiner's team in progress
+
     object_manager_send_state(game, uid); // KrunkNative: spawned objects first (their pickups sync below)
     piss_send_state(game, uid);           // KrunkNative Piss: the live puddles
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
@@ -651,6 +655,7 @@ void game_send_round_state(Game *game, const int uid) {
 
 void game_player_left(Game *game, Player *player) {
     game_bots_mimic_player_left(game, player); // bot_mimic: the controller leaving releases control
+    forfeit_player_left(game, player); // the team forfeit vote keeps a leaver eligible for its grace
     mode_player_left(game, player); // players.remove: dropFlag
     piss_player_left(game, player);  // KrunkNative Piss: its puddles go
     game_player_drop_all(game, player); // players.remove: dropWeapon(player, true) (WP-C)
@@ -825,6 +830,9 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                 game->vote_kick = NULL;
             }
         }
+
+        // v10 game.update: voteToForfeit's timer, the pass check (forfeit.c)
+        forfeit_tick(game, delta);
     }
 
     // v7.1.4 game.update order (doc/v7/map-logic.md §2.0): 1 timers, 2 streaks, 3 vote-kick,

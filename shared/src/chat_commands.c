@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <forfeit.h> // /ff and /forfeit: the team forfeit vote (forfeit.c)
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -2397,6 +2398,13 @@ static void cmd_third_person(ChatCtx *c) {
     reply(c, "Third Person - %s", on ? "Enabled" : "Disabled");
 }
 
+// /ff (v10's vote text "Enter /ff to vote"; /forfeit is the alias): starts or votes on the forfeit
+// of the sender's team in a ranked match (forfeit.c). Players only: the menu and the console have none.
+static void cmd_ff(ChatCtx *c) {
+    if (!c->player) return;
+    forfeit_command(c->host->game, c->player);
+}
+
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
     {{"count", "c", "", "alias for /c (show connected players and menu count)", CHAT_PERM_ANY}, cmd_c},
@@ -2464,6 +2472,8 @@ static const ChatCommand COMMANDS[] = {
     // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
     {{"class", NULL, "<name|id> [secondary]", "switch your class now (dev, offline sandbox): its loadout and health, and the secondary weapon", CHAT_PERM_DEV}, cmd_class},
     {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
+    {{"ff", NULL, "", "vote to forfeit the match with your team (ranked; one start per game)", CHAT_PERM_ANY}, cmd_ff},
+    {{"forfeit", NULL, "", "alias for /ff (vote to forfeit with your team)", CHAT_PERM_ANY}, cmd_ff},
 };
 
 #define COMMAND_COUNT ((int) (sizeof(COMMANDS) / sizeof(COMMANDS[0])))

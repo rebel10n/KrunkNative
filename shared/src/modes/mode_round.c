@@ -3,6 +3,7 @@
 // setTeam / add / score; doc/v7/map-logic.md §4.1 "Engine flow changes").
 #include "mode_internal.h"
 #include <ai.h>
+#include <forfeit.h>
 #include <pcg_basic.h>
 #include <limits.h>
 #include <math.h>
@@ -454,6 +455,12 @@ ModeWinner mode_pick_winner(Game *game) {
     GameMode *mode = game->mode;
     ModeWinner winner = {0, NULL};
     if (!mode) return winner;
+
+    // v10 prepareForfeit: a team forfeit gave the round to the other team (forfeit.c)
+    if (forfeit_forced_team(game)) {
+        winner.team = forfeit_forced_team(game);
+        return winner;
+    }
 
     if (mode->config.win_condition) return mode->config.win_condition(game);
 

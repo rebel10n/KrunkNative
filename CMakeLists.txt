@@ -724,6 +724,13 @@ else ()
         target_link_libraries(comp_ranked_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # forfeit_test: the ranked team forfeit vote (shared/src/forfeit.c, v10 voteToForfeit)
+    add_executable(forfeit_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/forfeit_test.c)
+    target_link_libraries(forfeit_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(forfeit_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # season_test: v7.1.4 seasons, the Battle Pass (levels, daily BPP cap, claims, skips), season
     # badges and the challenge contexts (shared/src/season.c, progression.c)
     add_executable(season_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/season_test.c)
