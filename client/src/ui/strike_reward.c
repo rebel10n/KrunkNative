@@ -11,6 +11,9 @@
 //   NB (QC)  REWARD_CHOICE   a pick-one level's options; Submit = onChoice(selected) then kt()
 //   ws       INPUT_BLOCKER   "Purchasing..." while $r waits for the shop
 //   U2       the product popup in the POPUP frame (sU's market item: Pt(In, {builder: U2}))
+//   battlepass  a reward of FRVR's gi.BATTLEPASS: the ticket image (reward-image--bp), no title, and Awesome!
+//            (kr(_C)): this reward goes and BATTLEPASS_SCREEN opens. No brain answer carries one yet; the
+//            developer console's `strike_reward battlepass` shows a sample (strike_reward_sample)
 // Differences (documented): r1 is the 2D viewer (the "reward_viewer" feature's 3D mode loads FRVR's item
 // meshes; KrunkNative shows the item's store thumbnail, as build2DReward does); a class reward's character
 // viewer (yc) is not drawn (the native class preview shows the selected class only); a Dye shows its
@@ -199,6 +202,9 @@ static void build_reward(StrBuf *sb, const cJSON *r) {
             const StrikeVar v[] = {{"image", "./img/frvr-ui/missions/missions-icon.svg"}, {"class", "reward-image"}};
             sb_part(sb, "REWARD", "image", v, 2);
         }
+    } else if (is_type(r, "battlepass")) { // the pass's ticket (FRVR: img.reward-image.reward-image--bp)
+        const StrikeVar v[] = {{"image", "./img/battlepass/ticket.svg"}, {"class", "reward-image reward-image--bp"}};
+        sb_part(sb, "REWARD", "image", v, 2);
     }
 }
 
@@ -277,6 +283,9 @@ static void build_buttons(StrBuf *sb, const cJSON *r) {
         free(power);
     } else if (is_type(r, "class")) {
         sb_part(sb, "REWARD", "buttons-class", NULL, 0);
+    } else if (is_type(r, "battlepass")) { // Awesome! (generic.awesome): kr(_C), the Battle Pass screen
+        const StrikeVar v[] = {{"action", "reward-battlepass"}, {"label", "Awesome!"}};
+        sb_part(sb, "REWARD", "buttons-one", v, 2);
     } else if (is_currency(r, "spin_ticket")) {
         const StrikeVar v[] = {{"action", "reward-use-ticket"}, {"label", "Use Now!"}};
         sb_part(sb, "REWARD", "buttons-one", v, 2);
@@ -573,6 +582,11 @@ int strike_reward_action(const char *a) {
         if (R.rewards) finish(1);
         return 1;
     }
+    if (!strcmp(a, "reward-battlepass")) { // Awesome! = kr(_C): this reward goes (its onPop), the Battle Pass opens
+        if (R.rewards) finish(1);
+        strike_screen_push(STRIKE_SCREEN_BATTLEPASS);
+        return 1;
+    }
     if (!strcmp(a, "reward-equip")) { // equipItem(e.item, itemDef) = CO: the item into its loadout slot
         const char *id = reward_item_id(current());
         if (!R.equipped && id && !strike_econ_equip(id, on_equipped, NULL)) printf("[strike] reward equip %s: no Strike account (sign in)\n", id);
@@ -613,6 +627,19 @@ int strike_reward_action(const char *a) {
         return 1;
     }
     return 0;
+}
+
+// the developer console's `strike_reward <kind>`: one sample reward of that kind through the same flow
+// (battlepass: the Awesome! opener). 0 = no such kind
+int strike_reward_sample(const char *kind) {
+    if (!kind || strcmp(kind, "battlepass")) return 0;
+    cJSON *rewards = cJSON_CreateArray();
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddStringToObject(r, "type", kind);
+    cJSON_AddItemToArray(rewards, r);
+    strike_reward_show(rewards, "console", 0, NULL, NULL);
+    cJSON_Delete(rewards); // strike_reward_show keeps its own copy
+    return 1;
 }
 
 void strike_reward_tick(Client *client) {

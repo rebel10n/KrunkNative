@@ -190,6 +190,7 @@ build's `public/` tree, so these are the files it serves today, not a 1.37.2 sna
 | img/frvr-ui/xp-icon.svg | https://krunkerstrike.frvr.com/img/frvr-ui/xp-icon.svg | e409063952b8c06fd4a94ecf450d07f9dbdc49ea3b50cbd2d775ed570b3bc4ea |
 | img/victory-screen-bg.png | https://krunkerstrike.frvr.com/img/victory-screen-bg.png | 6bed743d09925967b357dbf2743c04b127e8b389a55b63da155c359046d313f8 |
 | img/battlepass/skull_bg.svg | https://krunkerstrike.frvr.com/img/battlepass/skull_bg.svg | 56b57272ff882538c0d831302cc48ede7bd055edb642b4a68c3cfa5bbc9172fd |
+| img/battlepass/ticket.svg | https://krunkerstrike.frvr.com/img/battlepass/ticket.svg | 27b320619dd5ed31abd3d92042f25e5ce9ac44ec0de1d1ab13af38d661d83375 |
 | img/frvr-ui/check.svg | https://krunkerstrike.frvr.com/img/frvr-ui/check.svg | 7787d59d9f7c010ca116962767b0e1f5d93dee74a47fc6bd4af031f0cf239d48 |
 | img/frvr-ui/warning-octagon-red.svg | https://krunkerstrike.frvr.com/img/frvr-ui/warning-octagon-red.svg | 57fd7a9fa6a85987eec0222316e2f934b187bc1684fa97d299641ef3fbe9cf52 |
 | img/frvr-ui/xp-symbol.svg | https://krunkerstrike.frvr.com/img/frvr-ui/xp-symbol.svg | 95ea4f0cd95b2ceffa44b8fa9e93723ed2f444b2fdc3424cc147607c4e0e8b22 |

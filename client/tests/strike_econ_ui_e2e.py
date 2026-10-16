@@ -25,6 +25,9 @@ client/src/ui/strike_econ.c, services/brain/strike_econ.c), end to end through t
      another (POST /players/me/claim/progression): level 1 is a pick-one slot, so the choice popup
      (REWARD_CHOICE, FRVR's QC) shows its 3 options first and the pick is the claim's choice; every
      claim's rewards show on the reward screen, whose Okay leads to the next level
+  10. the Battle Pass opener: --render-scenario of a battlepass reward (REWARD with the pass's ticket and
+     Awesome!), then live: the developer console's `strike_reward battlepass` shows it, and Awesome! ends
+     the reward and opens BATTLEPASS_SCREEN (FRVR's kr(_C))
 
   python3 -I client/tests/strike_econ_ui_e2e.py BUILD_DIR      (repository root)
 Headless (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs), the brain's port from
@@ -36,6 +39,7 @@ import re
 import shutil
 import signal
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -257,7 +261,13 @@ SCRIPT = """0 menu
 88830 clicksel .reward-choice__item
 88960 clickid rewardChoiceSubmit
 89600 nodes @reward-left .frvr-reward-screen, .reward-choice-content
-89900 quit
+89900 con strike_reward battlepass
+90600 nodes @bp-reward .frvr-reward-screen .reward-image--bp
+90600 text @bp-button .frvr-reward-screen .frvr-button-text
+90700 clicksel .frvr-reward-screen .buttons .frvr-button
+91500 nodes @bp-screen .frvr-bp-screen
+91500 nodes @bp-reward-gone .frvr-reward-screen
+92000 quit
 """
 
 
@@ -468,6 +478,13 @@ def main_scenario(brain_port, dbpath):
     shown = len(re.findall(r"\[strike\] REWARD (item|class|currency|feature) ", text.split("[strike] Rewards Track: claiming", 1)[-1]))
     check("9. every claimed level showed its rewards, one after another", shown >= want and "[strike] Rewards Track: done" in text
           and nodes.get("reward-left") == 0, f"{shown} reward screens for {want} levels, left {nodes.get('reward-left')}")
+    bp_text = text.split("[strike] REWARD battlepass", 1)[-1]
+    check("10. the battlepass reward shows its ticket (REWARD, reward-image--bp)", nodes.get("bp-reward") == 1
+          and "[strike] REWARD battlepass" in text, f"{nodes.get('bp-reward')}")
+    check("10. the battlepass reward's button is Awesome!", texts.get("bp-button") == "Awesome!", repr(texts.get("bp-button")))
+    check("10. Awesome! ends the reward and opens BATTLEPASS_SCREEN", "[strike] screen BATTLEPASS_SCREEN" in bp_text
+          and nodes.get("bp-screen") == 1 and nodes.get("bp-reward-gone") == 0,
+          f"screen {'[strike] screen BATTLEPASS_SCREEN' in bp_text}, screen nodes {nodes.get('bp-screen')}, reward left {nodes.get('bp-reward-gone')}")
     check("no request was refused", "refused" not in text, "; ".join(l for l in text.splitlines() if "refused" in l)[:300])
     # the art the screens above draw is shipped in ui/strike/img (the reward's coin and feature logos, the
     # product popup's background, the back / home icons): the client logs every image it cannot find
@@ -476,8 +493,43 @@ def main_scenario(brain_port, dbpath):
           "; ".join(missing)[:300])
 
 
+def battlepass_render():
+    """10: --render-scenario of a battlepass reward: REWARD shows the pass's ticket and Awesome! (no brain)"""
+    with open(os.path.join(ROOT, "tools", "uidiff", "scenarios", "strike", "reward-kr.json")) as f:
+        scen = json.load(f)
+    scen["note"] = "battlepass reward (client/tests/strike_econ_ui_e2e.py)"
+    scen["state"]["strike"]["rewardScreen"] = {"origin": "battlepass", "rewards": [{"type": "battlepass"}]}
+    scen_path = os.path.join(WORK, "battlepass-reward.json")
+    with open(scen_path, "w") as f:
+        json.dump(scen, f)
+    out = os.path.join(WORK, "battlepass-reward.png")
+    cfg = os.path.join(WORK, "cfg-render")
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KN_FLAVOR", "KRUNKNATIVE_UI_DIR")}
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+                "XDG_STATE_HOME": cfg + "-state", "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+    os.makedirs(cfg, exist_ok=True)
+    log = os.path.join(WORK, "battlepass-render.log")
+    with open(log, "w") as f:
+        rc = subprocess.run([os.path.join(BUILD, "client_bin"), "--flavor", "strike", "--render-scenario", scen_path, out], cwd=ROOT,
+                            env=env, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=240).returncode
+    text = read(log)
+    size = None
+    try:
+        with open(out, "rb") as f:
+            head = f.read(24)
+        size = struct.unpack(">II", head[16:24]) if head[:8] == b"\x89PNG\r\n\x1a\n" else None
+    except OSError:
+        pass
+    check("10. the battlepass reward renders (rc 0, a 1280x720 PNG)", rc == 0 and size == (1280, 720), f"rc {rc}, size {size}")
+    check("10. the render is REWARD showing a battlepass reward", "[strike] screen REWARD" in text
+          and "[strike] REWARD battlepass" in text, text[-300:])
+    missing = [l for l in text.splitlines() if "file not found" in l and "img/" in l]
+    check("10. the ticket art is shipped (no \"file not found\" for img/)", not missing, "; ".join(missing)[:300])
+
+
 def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+    battlepass_render()
     brain_port, = free_ports(1)
     dbpath = os.path.join(WORK, "brain.db")
     brain_log = os.path.join(WORK, "brain.log")

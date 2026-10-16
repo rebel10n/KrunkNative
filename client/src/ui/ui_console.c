@@ -38,6 +38,7 @@
 #include <third_person.h>
 #include <win_geom.h>   // the console box stays in the window (win_geom.h)
 #include <game_reload.h> // `reload`: F5's full reload
+#include <strike_ui.h>   // strike_reward: a sample Krunker Strike reward (strike_reward.c)
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -417,6 +418,7 @@ static const ConArg A_BUILD_FILL[] = {{"count", ARG_NUMBER, 1}, {"kind", ARG_NUM
 static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_STRING, 1}};
 // KrunkNative class (dev): the class, and the loadout's secondary weapon (the class's other weapons are its own)
 static const ConArg A_CLASS[] = {{"name|id", ARG_STRING, 0}, {"secondary", ARG_STRING, 1}};
+static const ConArg A_STRIKE_REWARD[] = {{"kind", ARG_STRING, 0}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -1450,6 +1452,15 @@ static void cmd_firstperson(const int argc, char **argv, const char *rest) {
     third_person_first_person(con_client());
 }
 
+// strike_reward <kind>: a sample Krunker Strike reward screen (battlepass: its Awesome! opens the Battle Pass)
+static void cmd_strike_reward(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    if (argc < 1 || !strike_reward_sample(argv[0])) {
+        append("usage: strike_reward battlepass", COL_LOG);
+        return;
+    }
+}
+
 // class <name|id> [secondary] (KrunkNative dev): the server switches a spawned player's class now (the offline
 // sandbox only for now). The line goes out as typed, quotes included, so the server reads a quoted class name
 // ("Spray N Pray") as one argument. The server refuses what it may not give and says why.
@@ -1531,6 +1542,7 @@ static void register_commands(void) {
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
     register_local("thirdperson", NO_ARGS, "over-the-shoulder camera (offline, devs, custom games that allow it)", cmd_thirdperson);
     register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
+    register_dev("strike_reward", ARGS(A_STRIKE_REWARD), "a sample Krunker Strike reward screen (battlepass: Awesome! opens the Battle Pass)", cmd_strike_reward);
     register_dev("class", ARGS(A_CLASS), "switch your class now (offline sandbox): its loadout and health, and the secondary weapon", cmd_class);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);

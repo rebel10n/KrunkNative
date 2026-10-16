@@ -195,6 +195,7 @@ void strike_reward_render(StrikeScreen s, HtmlElem root);
 int  strike_reward_action(const char *name);           // 1 = one of its strikeAction()s
 void strike_reward_tick(Client *client);
 void strike_reward_scenario(const cJSON *state);       // state.strike "rewardScreen" / "rewardChoice"
+int  strike_reward_sample(const char *kind);           // the dev console's strike_reward <kind>: 1 = shown
 // Oo(itemDef): an item's power label (+bonus % and its stat icon) by catalogue id; 0 = it has none
 int strike_item_power(const char *item_id, char *bonus, size_t n, const char **img);
 // strike_menu.c: Fne(weapon): the Strike class whose primary weapon it is (its name), NULL none
