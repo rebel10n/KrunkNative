@@ -1932,6 +1932,76 @@ static void server_password_leave(void) {
     servers_ui_retry();
 }
 
+// ---------------------------------------------------------------- FEEDBACK (v5 / g5)
+
+// The main menu's feedback banner opens FRVR's form: the text (at least 5 characters, else the error line
+// under it) and an optional e-mail (a valid address when one is typed). Submit posts /v1/feedback in FRVR
+// (Khe); kn_brain has no feedback route, so nothing is sent. The form still goes to FRVR's thanks screen.
+static struct { char text[512], email[160]; int validate, validate_email, sent; } FB;
+
+static int email_valid(const char *e) {
+    const char *at = strchr(e, '@');
+    if (!at || at == e || strchr(e, ' ')) return 0;
+    const char *dot = strrchr(at, '.');
+    return dot && dot > at + 1 && dot[1] != 0;
+}
+
+// the error line under field 0 (the textarea) or 1 (the e-mail), or none (msg NULL)
+static void feedback_error(const HtmlElem root, const int field, const char *msg) {
+    HtmlElem groups[2];
+    if (html_dom_query_all(root, ".feedback-form .frvr-input-group", groups, 2) < 2) return;
+    const HtmlElem old = html_dom_query(groups[field], ".input-error");
+    if (old) html_dom_remove(old);
+    const HtmlElem control = html_dom_query(groups[field], field ? "input" : "textarea");
+    if (control) html_dom_set_class(control, "is-error", msg != NULL);
+    if (msg) {
+        char html[160];
+        snprintf(html, sizeof(html), "<div class=\"input-error\">%s</div>", msg);
+        html_dom_insert_html(groups[field], HTML_INSERT_BEFORE_END, html);
+    }
+}
+
+// validateExtraInfo / validateEmail: once Submit was pressed both are checked on every change
+static void feedback_check(const HtmlElem root) {
+    const int text_bad = FB.validate && strlen(FB.text) < 5;
+    const int email_bad = FB.validate_email && FB.email[0] && !email_valid(FB.email);
+    feedback_error(root, 0, text_bad ? "More information required (5 or more characters)." : NULL);
+    feedback_error(root, 1, email_bad ? "Must be a valid e-mail." : NULL);
+}
+
+// the textarea / e-mail's oninput (strikeFeedback('text' | 'email')); a script's call may give the value as its
+// second argument (call strikeFeedback "text" "...") in place of the typed one
+static int h_strike_feedback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user;
+    if (argc < 1 || args[0].kind != HTML_ARG_STR || !args[0].str) return 1;
+    const int scripted = argc > 1 && args[1].kind == HTML_ARG_STR && args[1].str;
+    const char *v = scripted ? args[1].str : ev && ev->value ? ev->value : "";
+    if (!strcmp(args[0].str, "text")) snprintf(FB.text, sizeof(FB.text), "%s", v);
+    else if (!strcmp(args[0].str, "email")) snprintf(FB.email, sizeof(FB.email), "%s", v);
+    else return 1;
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_FEEDBACK_FORM);
+    if (root) feedback_check(root);
+    return 0;
+}
+
+// Submit (the form's onclick, strikeAction('feedback-submit')): validate, then the thanks screen replaces the
+// form (kr(g5): pop, push)
+static void feedback_submit(void) {
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_FEEDBACK_FORM);
+    if (!root || FB.sent) return;
+    FB.validate = 1;
+    FB.validate_email = FB.email[0] != 0; // shouldValidateEmail = !!this.email
+    char *e = FB.email;
+    while (*e == ' ') memmove(e, e + 1, strlen(e));    // email.trim()
+    while (strlen(e) && e[strlen(e) - 1] == ' ') e[strlen(e) - 1] = 0;
+    feedback_check(root);
+    if (strlen(FB.text) < 5 || (FB.email[0] && !email_valid(FB.email))) return;
+    FB.sent = 1;
+    printf("[strike] feedback taken: kn_brain has no feedback route, so nothing is sent\n");
+    strike_screen_pop();
+    strike_screen_push(STRIKE_SCREEN_FEEDBACK_THANKS);
+}
+
 // ---------------------------------------------------------------- actions
 
 static void play(void) {
@@ -2197,6 +2267,10 @@ static void action(const char *a) {
         if (root) settings_tab(root, 0);
     } else if (!strcmp(a, "unlock-info")) {
         class_unlock_open(); // cde(): the store or the profile
+    } else if (!strcmp(a, "feedback")) {
+        strike_screen_push(STRIKE_SCREEN_FEEDBACK_FORM); // Pt(v5)
+    } else if (!strcmp(a, "feedback-submit")) {
+        feedback_submit();
     } else if (!strcmp(a, "kr-limit-info")) {
         kr_bubble_toggle();
     } else if (!strcmp(a, "kr-limit-bubble-close")) {
@@ -2236,6 +2310,8 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_POPUP_WARNING: // the connection popups (strike_connect.c)
     case STRIKE_SCREEN_MATCH_DETAILS:   // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
+    case STRIKE_SCREEN_FEEDBACK_FORM:   // transcribed from the bundle (strike_menu.c, feedback)
+    case STRIKE_SCREEN_FEEDBACK_THANKS:
     case STRIKE_SCREEN_ITEM_SELECTION:  // transcribed from the bundle (T5 / rde, above)
     case STRIKE_SCREEN_REPORT_PLAYER:   // transcribed from the bundle (strike_social.c)
     case STRIKE_SCREEN_PROFILE_DETAILS: // jC (strike_profile.c)
@@ -2278,6 +2354,7 @@ void strike_menu_install(void) {
     if (!listening) listening = strike_econ_listen(on_econ, NULL);
     preset_load();
     html_ui_add_handler("strikeAction", h_strike_action);
+    html_ui_add_handler("strikeFeedback", h_strike_feedback);
     html_ui_add_handler("strikeSetting", h_strike_setting);
 }
 
@@ -2368,6 +2445,8 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
         if (input) html_dom_focus(input);
         break;
     }
+    case STRIKE_SCREEN_FEEDBACK_FORM:
+        memset(&FB, 0, sizeof(FB)); // a new form: empty, nothing validated
     default:
         break;
     }

@@ -71,11 +71,24 @@ def script():
          "19500 nodes @profile-class .class-selection__class-bullet-holder",
          "19600 clicksel .frvr-settings-screen .frvr-button-back",
          "20200 nodes @class-back .class-selection__class-bullet-holder",
+         "20300 clicksel .frvr-button-back",
          "20900 clicksel .frvr-button-back",
-         "21500 clicksel .frvr-button-back",
-         "22100 nodes @main-back .frvr-kr-limit",
-         "22100 nodes @bubble-gone .speech-bubble-container",
-         "22200 quit",
+         "21200 nodes @bubble-gone .speech-bubble-container",
+         "21500 clicksel [onclick=\"strikeAction('feedback')\"]",
+         "22100 nodes @form .feedback-form",
+         "22200 clicksel [onclick=\"strikeAction('feedback-submit')\"]",
+         "22700 text @err-text .feedback-form .input-error",
+         "22800 call strikeFeedback \"text\" \"great game\"",
+         "22900 call strikeFeedback \"email\" \"nope\"",
+         "23000 clicksel [onclick=\"strikeAction('feedback-submit')\"]",
+         "23300 text @err-email .feedback-form .input-error",
+         "23400 call strikeFeedback \"email\" \"player@example.com\"",
+         "23500 clicksel [onclick=\"strikeAction('feedback-submit')\"]",
+         "24100 nodes @thanks .feedback-thanks",
+         "24100 text @thanks-text .feedback-thanks__title",
+         "24200 clicksel .feedback-thanks .frvr-button",
+         "24800 nodes @main-again .frvr-kr-limit",
+         "24900 quit",
          ]
     return s
 
@@ -86,7 +99,18 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
 
 
+def seed_played(cfg):
+    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c strike_ftue_first_run): a first run goes to quick
+    connect and MAIN_MENU is never up. The file is in the Strike flavor's own config directory (flavor_storage_subdir:
+    "krunknative-strike", not Box Office's "krunknative"), where a --flavor strike client reads its html storage keys."""
+    path = os.path.join(cfg, "krunknative-strike", "knFtue.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write('{"guest":{"played":true}}')
+
+
 def run(name, script_lines):
+    seed_played(os.path.join(WORK, "cfg"))
     path = os.path.join(WORK, f"{name}.script")
     with open(path, "w") as f:
         f.write("\n".join(script_lines) + "\n")
@@ -148,7 +172,13 @@ def main():
           "Rewards Track" in texts.get("unlock-track-text", ""), texts.get("unlock-track-text", ""))
     check("the track's unlock line opens the profile", nodes.get("profile") == 1, str(nodes.get("profile")))
     check("the profile's back returns to CLASS_SELECTION", nodes.get("class-back", 0) >= 1, str(nodes.get("class-back")))
-    check("the menu is back after CUSTOMIZE and CLASS_SELECTION", nodes.get("main-back") == 1, str(nodes.get("main-back")))
+    check("the feedback banner opens FEEDBACK_FORM", nodes.get("form") == 1, str(nodes.get("form")))
+    check("an empty Submit asks for more text", "More information required" in texts.get("err-text", ""), texts.get("err-text", ""))
+    check("a bad e-mail is named by the next Submit (FRVR checks it from the first Submit on)", "valid e-mail" in texts.get("err-email", ""), texts.get("err-email", ""))
+    check("a valid form goes to FRVR's thanks screen", nodes.get("thanks") == 1 and "Thank you for your feedback" in texts.get("thanks-text", ""),
+          texts.get("thanks-text", ""))
+    check("the feedback is not sent anywhere yet (no kn_brain route)", "no feedback route, so nothing is sent" in text)
+    check("the thanks screen's Return goes back to the main menu", nodes.get("main-again") == 1, str(nodes.get("main-again")))
     return all(results)
 
 

@@ -91,6 +91,8 @@ typedef enum {
     STRIKE_SCREEN_POPUP,
     STRIKE_SCREEN_POPUP_WARNING, // FRVR's UI (POPUP_WARNING): the connection popups (strike_connect.c)
     STRIKE_SCREEN_PROFILE,
+    STRIKE_SCREEN_FEEDBACK_FORM,    // v5 (strike_menu.c): the main menu's feedback banner
+    STRIKE_SCREEN_FEEDBACK_THANKS,  // g5: the form's submit
     STRIKE_SCREEN_ITEM_SELECTION, // T5, a Customization category's items (transcribed, strike_menu.c)
     STRIKE_SCREEN_REPORT_PLAYER,  // Hy (strike_social.c)
     STRIKE_SCREEN_POPUP_SUCCESS,  // XA

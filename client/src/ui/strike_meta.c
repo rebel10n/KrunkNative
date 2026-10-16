@@ -64,6 +64,8 @@ static struct {
     int econ_missions_asked;    // a request is out / answered for the current state
     unsigned econ_seq;          // bumped on every answer (the Missions tab re-fills)
     int track_asked;            // the game config (accountProgression) was asked
+    int tap_missions;           // TAP_TO_PLAY's showMissions (the Missions logo's toggle)
+    unsigned long widget_sig;   // what the daily missions widgets show (re-filled when it changes)
 } T;
 
 // A signed-in Strike account (strike_econ.c): missions and the track come from kn_brain's /strike
@@ -980,12 +982,137 @@ static void treadmill_slide(const HtmlElem screen, const Treadmill *tm, const in
     }
 }
 
+// ---------------------------------------------------------------- daily missions widget (k5 / hd)
+
+// k5 (Daily Missions): the main menu's box (Xc.Square: grey-box, min width 162) and the Tap-to-Play panel
+// (Xc.Simple: the logo, min width 150, its completed missions left out). The bars are hd (the progress bar,
+// text on top): the bar is 8 px high, its width * 175 / 193 with 4 / 193 and 10 / 193 at the ends, the
+// fill and the completed border by the mission's progress. Shown for an unlocked account only (bp_has_data,
+// the Missions tab's gate): a guest or a locked account gets none (FRVR's lock box is not ported).
+// The missions are daily_missions() (the Missions tab's list), so completed ones come first: FRVR's k5 keeps
+// the server's order, a small deviation kept so the widget and the tab read the same list.
+#define MISSION_BAR_DX (175.0 / 193.0)
+#define MISSION_BAR_ACE (4.0 / 193.0)
+#define MISSION_BAR_OCE (10.0 / 193.0)
+
+// hd's markup for one daily mission at `size` px wide
+static void mission_bar(StrBuf *sb, const cJSON *c, const int size, const int simple) {
+    const cJSON *dat = cJSON_GetObjectItemCaseSensitive(c, "DAT");
+    char title[192], value[64];
+    const char *n = jstr(c, "N");
+    if (n[0]) snprintf(title, sizeof(title), "%s", n);
+    else account_challenge_name(c, title, sizeof(title));
+    const int complete = jnum(c, "PT") != 0.0;
+    const double target = jnum(dat, "val"), cur = fmin(jnum(c, "PV"), target);
+    const double ratio = target != 0.0 ? cur / target : 0.0;
+    const char *color = complete ? "progress-bar__green" : "progress-bar__orange";
+    char a[24], b[24];
+    js_num(cur, a, sizeof(a));
+    js_num(target, b, sizeof(b));
+    snprintf(value, sizeof(value), complete ? "Completed" : "%s/%s", a, b);
+    sb_appendf(sb, "<div class=\"progress-bar__progress-bar-holder progress-bar--text-on-top\" style=\"--progress-width: %d;\">", size);
+    sb_appendf(sb, "<div class=\"progress-bar__text-holder\"><div class=\"progress-bar__left-holder progress-bar__font-chakra\" "
+                   "style=\"--left-holder-width: %g;\"><span class=\"progress-bar__font-chakra\">", simple ? (double) size : size * 64.8 / 100.0);
+    sb_append_esc(sb, title);
+    sb_append(sb, " </span><span class=\"progress-bar__font-chakra\"></span></div>");
+    if (!simple) {
+        sb_append(sb, "<div class=\"progress-bar__right-holder\"><div class=\"progress-bar__value-gained\"></div>"
+                      "<div class=\"progress-bar__font-chakra\">");
+        sb_append_esc(sb, value);
+        sb_append(sb, "</div></div>");
+    }
+    sb_append(sb, "</div>");
+    if (!simple) {
+        const double pw = size * MISSION_BAR_DX * ratio;
+        char edge[96];
+        snprintf(edge, sizeof(edge), ratio == 1.0 ? "progress-bar__bar--border-completed %s" : "progress-bar__bar--border-base", color);
+        sb_appendf(sb, "<div class=\"progress-bar__bar-wrapper\" style=\"--bar-height: 8;\">"
+                       "<div class=\"progress-bar__bar progress-bar__bar--left %s\" style=\"--pos1: %g; --pos2: %g; --posEnd: 1; --posStart: 0; "
+                       "--bar-left-width: %g;\">"
+                       "<div class=\"progress-bar__bar-inner %s\" style=\"--bar-progress-width: %g; --bar-height: 6;\"></div>"
+                       "<div class=\"progress-bar__bar-inner-inner %s\" style=\"--bar-progress-width: %g; --bar-height: 6;\"></div>"
+                       "</div>"
+                       "<div class=\"progress-bar__bar progress-bar__bar--middle %s\" style=\"--bar-middle-width: %g;\"></div>"
+                       "<div class=\"progress-bar__bar progress-bar__bar--right %s\" style=\"--bar-right-width: %g;\"></div>"
+                       "</div>",
+                   edge, ratio, ratio, size * MISSION_BAR_DX,
+                   color, pw, color, pw,
+                   edge, size * MISSION_BAR_ACE,
+                   edge, size * MISSION_BAR_OCE);
+    }
+    sb_append(sb, "</div>");
+}
+
+// the box's markup: k5's grey-box (main menu) or the simple panel (Tap-to-Play, with the logo)
+static char *missions_box(const int simple) {
+    StrBuf bars = {0}, box = {0};
+    const cJSON *list[64];
+    const int count = daily_missions(list, 64);
+    for (int i = 0; i < count; i++) {
+        const cJSON *c = list[i];
+        if (simple && jnum(c, "PT") != 0.0) continue;
+        char *wrap = NULL;
+        StrBuf one = {0};
+        mission_bar(&one, c, simple ? 150 : 162, simple);
+        wrap = sb_finish(&one);
+        sb_appendf(&bars, "<div class=\"missions-bar-wrapper \">%s</div>", wrap ? wrap : "");
+        free(wrap);
+    }
+    char *rows = sb_finish(&bars);
+    if (simple) {
+        sb_appendf(&box, "<div class=\"missions-container missions-container--padding__simple\" style=\"--min-width: 150;\">"
+                         "<div class=\"missions-container__simple missions-container__simple--rotate\"></div>"
+                         "<img class=\"missions-logo\" src=\"./img/frvr-ui/missions/missions-icon.svg\">"
+                         "<div class=\"missions-header\"><span>Daily Missions</span><div class=\"missions-separator\"></div>"
+                         "<div class=\"missions-bullet\"></div></div>");
+    } else {
+        sb_append(&box, "<div class=\"missions-container missions-container--padding__grey-box\" style=\"--min-width: 162;\">"
+                        "<div class=\"missions-container__grey-box\"></div>"
+                        "<div class=\"missions-header\"><span>Daily Missions</span><div class=\"missions-separator\"></div></div>");
+    }
+    sb_appendf(&box, "<div class=\"missions-bars-wrapper\">%s</div></div>", rows ? rows : "");
+    free(rows);
+    return sb_finish(&box);
+}
+
+static void widget_fill_main(const HtmlElem root) {
+    const HtmlElem host = html_dom_query(root, ".frvr-main-menu--middle-left");
+    if (!host) return;
+    char *html = bp_has_data() ? missions_box(0) : NULL;
+    html_dom_set_html(host, html ? html : "");
+    free(html);
+}
+
+// the Tap-to-Play panel: .tap-to-play-missions in the top-right, before the info bar, while showMissions
+static void widget_fill_tap(const HtmlElem root) {
+    const HtmlElem logo = html_dom_query(root, ".tap-to-play-missions-logo");
+    if (logo) html_dom_set_attr(logo, "onclick", "strikeAction('tap-missions')");
+    const HtmlElem old = html_dom_query(root, ".tap-to-play-missions");
+    if (old) html_dom_remove(old);
+    const HtmlElem info = html_dom_query(root, ".frvr-main-menu-info-bar");
+    if (!info || !T.tap_missions || !bp_has_data()) return;
+    char *box = missions_box(1);
+    if (!box) return;
+    StrBuf wrap = {0};
+    sb_appendf(&wrap, "<div class=\"tap-to-play-missions\">%s</div>", box);
+    char *html = sb_finish(&wrap);
+    html_dom_insert_html(info, HTML_INSERT_BEFORE_BEGIN, html ? html : "");
+    free(html);
+    free(box);
+}
+
 // ---------------------------------------------------------------- hooks
 
 void strike_meta_render(const StrikeScreen s, const HtmlElem root) {
     if (!root) return;
     if (strike_profile_render(s, root)) return; // PROFILE-DETAILS, the message popups (strike_profile.c)
     switch (s) {
+    case STRIKE_SCREEN_MAIN_MENU:
+        widget_fill_main(root);
+        break;
+    case STRIKE_SCREEN_TAP_TO_PLAY:
+        widget_fill_tap(root);
+        break;
     case STRIKE_SCREEN_BATTLEPASS:
         bp_render(root);
         break;
@@ -1005,6 +1132,12 @@ void strike_meta_render(const StrikeScreen s, const HtmlElem root) {
 
 int strike_meta_action(const char *a) {
     if (strike_profile_action(a)) return 1; // Account Details, the Logout and name confirms (strike_profile.c)
+    if (!strcmp(a, "tap-missions")) { // showMissions = !showMissions
+        T.tap_missions = !T.tap_missions;
+        const HtmlElem root = strike_screen_root(STRIKE_SCREEN_TAP_TO_PLAY);
+        if (root) widget_fill_tap(root);
+        return 1;
+    }
     if (!strncmp(a, "bp-tab:", 7)) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
@@ -1083,13 +1216,27 @@ void strike_meta_tick(Client *client) {
     // the Rewards tab follows the Battle Pass data (bpdl / bppd / bpclmr), the Missions tab
     // account.activeMissions (Mithril redraws on every change)
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
-    if (!root) return;
-    if (T.bp_tab == 0 && rewards_signature() != T.rewards_sig) bp_tab(root, 0);
-    else if (T.bp_tab == 1 && missions_signature() != T.missions_sig) bp_tab(root, 1);
+    if (root) {
+        if (T.bp_tab == 0 && rewards_signature() != T.rewards_sig) bp_tab(root, 0);
+        else if (T.bp_tab == 1 && missions_signature() != T.missions_sig) bp_tab(root, 1);
+    }
+    // the daily missions widgets follow the same data; a Strike account's missions are asked for
+    // here too (the Missions tab may never open), once per session
+    if (econ_on()) econ_missions_ask();
+    const unsigned long sig = missions_signature();
+    if (sig != T.widget_sig) {
+        T.widget_sig = sig;
+        if (!econ_on() && bp_has_data()) account_challenges_request(); // account.activeMissions: asked once per session
+        const HtmlElem menu = strike_screen_root(STRIKE_SCREEN_MAIN_MENU);
+        if (menu) widget_fill_main(menu);
+        const HtmlElem tap = strike_screen_root(STRIKE_SCREEN_TAP_TO_PLAY);
+        if (tap) widget_fill_tap(tap);
+    }
 }
 
 // state.strike (strike_ui_scenario): "profileTab" (PROFILE-DETAILS: 0 / 1), "logoutConfirm" (the Logout
-// confirm), "progression" (the game config's accountProgression:
+// confirm), "tapMissions" (TAP_TO_PLAY's Missions panel is up), "progression" (the game config's
+// accountProgression:
 // {"<level>": {slotId, items: [{type, currency, amount} ...], isPlayerChoice, bundleName}}),
 // "claimed" (progressionClaimedItems: slot ids), "reward" (REWARD_TO_CLAIM's {type, currency,
 // amount}), "battlepassTab" (the Battle Pass tab), "matchDetails" (true: the podium button)
@@ -1116,6 +1263,7 @@ void strike_meta_scenario(Client *client, const cJSON *st) {
         snprintf(a, sizeof(a), "bp-tab:%d", tab->valueint);
         strike_meta_action(a);
     }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(st, "tapMissions"))) T.tap_missions = 1; // the panel up (showMissions)
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(st, "matchDetails"))) strike_menu_action("match-details");
     const cJSON *ptab = cJSON_GetObjectItemCaseSensitive(st, "profileTab"); // PROFILE-DETAILS' tab (strike_profile.c)
     if (cJSON_IsNumber(ptab)) {

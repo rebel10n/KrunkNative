@@ -142,8 +142,10 @@ def run3():
 
 
 def seed_played(cfg):
-    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect."""
-    path = os.path.join(cfg, "krunknative", "knFtue.json")
+    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect.
+    The file is in the Strike flavor's own config directory (flavor_storage_subdir: "krunknative-strike", not Box
+    Office's "krunknative"), where a --flavor strike client reads its html storage keys."""
+    path = os.path.join(cfg, "krunknative-strike", "knFtue.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write('{"guest":{"played":true}}')
