@@ -593,6 +593,15 @@ void net_comp_lobby_sync(ClientConnection *client) {
     if (team) comp_lobby_set_team(game, client->id, team);
 }
 
+// "gsc" to one connection (EXT peers): the current game state
+static void net_send_game_state(ClientConnection *client) {
+    if (!client || client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    NetGameStatePacket state = {.state = g_server->game.game_state};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(state)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_GAME_STATE, &state, sizeof(state));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void net_send_init(ClientConnection *client) {
     accounts_send_billboard(client); // init "bill" (config gameserver.billboards), before the map loads
     net_send_map_info(client);
@@ -615,9 +624,26 @@ static void net_send_init(ClientConnection *client) {
     };
 
     net_send_packet(client->fd, NET_PACKET_INIT, &packet, sizeof(packet));
+    net_send_game_state(client);  // v10 gameState: a joiner learns the phase now (its names follow it)
     net_send_social_caps(client); // WP-E part 2b: after the INIT (the client resets it there)
     net_comp_lobby_sync(client);  // comp lobby: the connection's entry + the table
     game_ai_sync_non_players(&g_server->game); // a connection without a player: every AI's "aai" next AI.sync
+}
+
+// v10 getName under isUsingRankedNames: a ranked player's name is "Player_<n>" for everyone else
+// until the match starts (game_names_masked: WARMUP or earlier). n is the roster slot (KN choice;
+// v10 numbers the lobby's players in join order). `real` is the connection's name.
+static ClientConnection *net_client_of_player(const Player *player) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (player && g_server->clients[i].player == player) return &g_server->clients[i];
+    }
+    return NULL;
+}
+
+static void net_shown_name(const ClientConnection *to, const ClientConnection *subject, const char *real, char *out, const size_t size) {
+    const int id = subject ? accounts_ranked_lobby_id(subject) : 0;
+    if (id > 0 && to != subject && game_names_masked(&g_server->game)) snprintf(out, size, "Player_%d", id);
+    else snprintf(out, size, "%s", real ? real : "");
 }
 
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
@@ -642,7 +668,7 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
         .head_mlt = player->head_mlt > 0.0f ? player->head_mlt : 1.0f,
     };
 
-    strncpy(packet.name, player->name, sizeof(packet.name) - 1);
+    net_shown_name(client, net_client_of_player(player), player->name, packet.name, sizeof(packet.name));
 
     // WP-F: the v7.1.4 slots (players.js sync). badgeIndex only when the player shows its custom
     // badge, and not in anonMode (except to itself and dev viewers).
@@ -1336,7 +1362,9 @@ static int net_client_admitted(const ClientConnection *client, const char *what)
 // older peers the v3 NET_PACKET_CHAT.
 static void net_send_player_chat(ClientConnection *to, const ClientConnection *from, const int channel, const char *text) {
     NetChatV7Packet packet = {.channel = (int8_t) channel, .account_id = from->acct.account_id};
-    net_packet_chat(&packet.chat, from->id, NET_CHAT_PLAYER, from->name, text);
+    char name[sizeof(from->name)];
+    net_shown_name(to, from, from->name, name, sizeof(name));
+    net_packet_chat(&packet.chat, from->id, NET_CHAT_PLAYER, name, text);
     if (ks_server_peer_v7(to)) net_send_packet(to->fd, NET_PACKET_CHAT_V7, &packet, sizeof(packet));
     else net_send_packet(to->fd, NET_PACKET_CHAT, &packet.chat, sizeof(packet.chat));
 }
@@ -1685,6 +1713,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 net_send_social_caps(client);
                 if (g_server->game.end_timer > 0.0f) game_send_match_votes(&g_server->game, client->id);
             }
+            if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT && g_server->game.ready) net_send_game_state(client); // its INIT went out first
             // the game announcement: a gated join gets it when it settles (accounts.c acc_set_ready);
             // an ungated one is settled from its connect, before this HELLO named its protocol
             if (client->acct.join_state == SERVER_JOIN_READY) net_send_game_announcement(client);
@@ -1916,9 +1945,33 @@ void net_poll_clients(void) {
     net_process_pending_kicks(); // chat /kick, /ban, /banip (and the CLI running them)
 }
 
+// v10 setGameState's ranked branch (game.deob.js:191765-191816): on every phase change of a ranked
+// match the roster's names are pushed again (the masked ones before IN_PROGRESS, the real ones
+// after), each player seeing its own name. NET_EXT_PLAYER_NAME (0x0203) is the rename packet.
+static void net_game_state_changed(Game *game, const GameState state) {
+    (void) state;
+    if (!game->is_ranked) return;
+    for (size_t r = 0; r < g_server->client_count; r++) {
+        ClientConnection *to = &g_server->clients[r];
+        if (to->peer_minor < NET_PROTOCOL_MINOR_EXT) continue;
+        for (size_t i = 0; i < game->player_count; i++) {
+            const Player *player = game->players[i];
+            if (!player) continue;
+            NetPlayerNamePacket rename;
+            memset(&rename, 0, sizeof(rename));
+            rename.uid = player->uid;
+            net_shown_name(to, net_client_of_player(player), player->name, rename.name, sizeof(rename.name));
+            uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(rename)];
+            const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_PLAYER_NAME, &rename, sizeof(rename));
+            if (n) net_send_packet(to->fd, NET_PACKET_EXT, buf, n);
+        }
+    }
+}
+
 void net_install_game_hooks(void) {
     // Match events leave the shared game through these hooks (see GameHooks).
     g_server->game.hooks.user = g_server;
+    g_server->game.hooks.state_changed = net_game_state_changed; // v10 setGameState: ranked names
     votekick_init(&g_server->game); // hooks.vote_kick_expired, fresh ban / cooldown lists
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.next_round = net_game_next_round;

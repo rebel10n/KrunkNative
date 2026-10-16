@@ -70,6 +70,7 @@ typedef enum {
 
     // 0x0900 in-game actions of v10 without a NetPacket id
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
+    NET_EXT_GAME_STATE = 0x0901,    // "gsc" S -> C NetGameStatePacket: v10 gameState (INITIALIZING .. ENDED), every change
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
@@ -431,6 +432,10 @@ typedef struct {
 // NET_EXT_MARK_POSITION, v10's ping (ranked / comp: markPositionKey, M2): C -> S the camera ray's first
 // map hit (tmpPlayer.markPosition :170208, range 1000); S -> C addPingIcon(key, position) (:160954):
 // one marker per key (the pinging player's id), drawn 4 s at position.y + 2 (img/ping.png).
+// NET_EXT_GAME_STATE (S -> C, v10 "gsc" [gameState]): the match phase, a GameState value (shared.h).
+typedef struct {
+    uint8_t state;
+} NetGameStatePacket;
 typedef struct {
     float x, y, z;
 } NetMarkPositionSendPacket;

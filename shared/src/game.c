@@ -452,11 +452,17 @@ void game_start_round(Game *game) {
 
     // finishInit: resetAll / resetPickups / triggerQueue / globalVals (WP-C), then the mode's clock
     // (gameTime), waitTimers, conditions, objectives, gameStart, then multiObjectTrigger("onGameStart")
+    game_set_state(game, GAME_STATE_INITIALIZING); // v10 setGameState(INITIALIZING) at startGame
     trigger_round_reset(game);
     zombies_round_start(game); // WP-H finishInit: mystery boxes / krum machines, power-ups, airdrops
     if (game->mode) mode_round_start(game);
     world_round_start(game); // WP-B: resetZone, movedObjs, saveColls (shared/src/world.c)
     piss_round_start(game);  // KrunkNative Piss: no puddles
+    // v10 startGame: a warmup (config.warmupTime) is WARMUP, else the wait timers make IDLE, else
+    // the round is IN_PROGRESS (mode_round.c sets that when the timers drain)
+    if (game->config.warmup_time > 0.0f) game_set_state(game, GAME_STATE_WARMUP);
+    else if (mode_match_starting(game)) game_set_state(game, GAME_STATE_IDLE);
+    else game_set_state(game, GAME_STATE_IN_PROGRESS);
     trigger_multi_event(game, TRIGGER_EVENT_ON_GAME_START, NULL);
 }
 
@@ -529,6 +535,7 @@ void game_end_round(Game *game) {
 
     const float end_timer = game_ruleset(game)->end_timer; // config.endTimer (Krunker Strike: 30 s)
     game->end_timer = end_timer > 0.0f ? end_timer : GAME_END_TIMER;
+    game_set_state(game, GAME_STATE_POST_MATCH); // v10 endGame: setGameState(POST_MATCH)
     game->round_timer = 0.0f;
     game->round_seconds_sent = -1;
     game->nuke_timer = 0.0f;
@@ -676,6 +683,7 @@ static int game_tick_round(Game *game, const float delta) {
 
         if (game->end_timer <= 0.0f) {
             game->end_timer = 0.0f;
+            game_set_state(game, GAME_STATE_ENDED); // v10 endTimer <= 0: setGameState(ENDED), then the next game
             return 1;
         }
 

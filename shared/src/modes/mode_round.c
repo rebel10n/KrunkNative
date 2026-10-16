@@ -175,6 +175,17 @@ int mode_waiting(const Game *game) {
     return mode && mode->wait_timer_count && !mode->wait_timers[0].cont_time;
 }
 
+// A timer that is not contTime counts down before the match (warmup ends, match starting in, the
+// lives' 12 s start). Objective rotations (contTime) run through the round and never end the wait.
+int mode_match_starting(const Game *game) {
+    const GameMode *mode = game->mode;
+    if (!mode) return 0;
+    for (int i = 0; i < mode->wait_timer_count; i++) {
+        if (!mode->wait_timers[i].cont_time) return 1;
+    }
+    return 0;
+}
+
 static void mode_message(Game *game, const char *text) {
     GameMode *mode = game->mode;
     mode->message_sent = text && text[0];
@@ -208,6 +219,7 @@ static int mode_tick_wait(Game *game, const float delta) {
             memmove(&mode->wait_timers[0], &mode->wait_timers[1], (size_t) (mode->wait_timer_count - 1) * sizeof(ModeWaitTimer));
             mode->wait_timer_count--;
             mode->wait_second_sent = -1;
+            if (!mode_match_starting(game)) game_set_state(game, GAME_STATE_IN_PROGRESS); // v10: the wait timers are done
 
             if (!mode->wait_timer_count && !no_clear) mode_message(game, "");
         }

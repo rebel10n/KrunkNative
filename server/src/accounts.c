@@ -1419,6 +1419,12 @@ int accounts_ranked_active(void) {
     return g_rk.active;
 }
 
+int accounts_ranked_lobby_id(const ClientConnection *client) {
+    if (!g_rk.active || !client) return 0;
+    const RankedSlot *slot = acc_ranked_slot(client->acct.account_id);
+    return slot ? (int) (slot - g_rk.slots) + 1 : 0;
+}
+
 // Only the roster plays a ranked lobby; a roster player who left is out (needAll).
 static const char *acc_ranked_refusal(const ClientConnection *client) {
     if (!g_rk.active) return NULL;

@@ -1761,6 +1761,18 @@ typedef struct {
     int voter_count;
 } VoteKick;
 
+// v10 gameState (Krunker INITIALIZING 0 .. ENDED 5, game.deob.js:186517): the match phase the
+// "gsc" GAME_STATE_CHANGED packet reports (NET_EXT_GAME_STATE, shared/src/game_state.c). Names of
+// a ranked match are masked while the state is WARMUP or earlier (v10 isUsingRankedNames).
+typedef enum {
+    GAME_STATE_INITIALIZING = 0,
+    GAME_STATE_IDLE = 1,
+    GAME_STATE_WARMUP = 2,
+    GAME_STATE_IN_PROGRESS = 3,
+    GAME_STATE_POST_MATCH = 4,
+    GAME_STATE_ENDED = 5,
+} GameState;
+
 // Server-side match events leave the shared game through these hooks; the native
 // server (server/src/net.c) and the offline client's in-process game (client/src/net/local_game.c)
 // route them to their connections. A NULL hook drops the event (tests, client mirror).
@@ -1847,6 +1859,9 @@ typedef struct {
     // server (server/src/votekick.c) tells every client the vote failed; the game frees it right
     // after. NULL = nothing.
     void (*vote_kick_expired)(struct Game_t*);
+    // The game state changed (game_set_state, after the "gsc" packet went out): the server
+    // (server/src/net.c) pushes the names a ranked match now shows. NULL = nothing.
+    void (*state_changed)(struct Game_t*, GameState state);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2024,6 +2039,7 @@ typedef struct Game_t {
     // 1 in a ranked match (server/src/accounts.c acc_ranked_setup; v10 game.isRanked): the
     // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked).
     unsigned char is_ranked;
+    unsigned char game_state;     // GameState (v10 gameState): INITIALIZING until the first round starts
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
     Map *map;
@@ -2149,6 +2165,10 @@ int game_end_late_spawn(const Game*, const Player*); // ENT while the round is o
 void game_send_end_late(Game*, int uid);              // then the "end" with didWin -1 for that uid
 void game_player_changing(const Game*, Player*, int done); // GameHooks.player_changing, when set
 void game_send(Game*, int uid, int type, const void*, uint16_t); // through hooks.send
+// v10 setGameState: a change sends "gsc" (NET_EXT_GAME_STATE, to every EXT peer) and calls
+// hooks.state_changed. game_names_masked: a ranked match before IN_PROGRESS shows Player_<n> names.
+void game_set_state(Game*, GameState);
+int game_names_masked(const Game*);
 // player-viewer WP-E part 2c (shared/src/game.c): v7 game.isPubType() (no host, or mimicPubs; the
 // offline sandbox counts), game.incStat(key, player), challenges.update(game, key, value,
 // {wep, stk}, player) through GameHooks.progress, and game.incMedal(name, player) (accounts and

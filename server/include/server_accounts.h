@@ -58,6 +58,8 @@ int accounts_clan_war_allowed(const ClientConnection*); // knClanWar: only the t
 const char *accounts_clan_war_label(void);              // "Clan War: [A] vs [B]", NULL when none
 // 1 while this lobby plays a ranked match (its roster's teams are fixed: no "cd" team picks).
 int accounts_ranked_active(void);
+// v10 lobbyPlayerId stand-in: the connection's roster slot in the ranked match, 1-based (0: not on the roster)
+int accounts_ranked_lobby_id(const ClientConnection *client);
 // A one-line server notice in the chat of `client` (v7's ranked.* messages, refusals).
 void accounts_notice(ClientConnection*, const char *text);
 // The account hosting the current custom lobby (requirePremiumCheatPerm's custom host).

@@ -51,7 +51,8 @@ WORK = tempfile.mkdtemp(prefix="kn-rk-e2e-", dir=os.path.expanduser("~/.cache"))
 CHAT, TEAM, COMP_SET, COMP_LOBBY = 9, 42, 184, 185
 CHAT_SEND, EXT = 8, 254  # NET_PACKET_EXT: u16 LE subtype + body
 EXT_MARK_POSITION = 0x0900
-MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping) reaches the peer
+MINOR_V7 = 3
+MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping), and the roster's "gsc", names push and "vf"
 results = []
 procs = []
 
@@ -124,6 +125,54 @@ def chats(conn):
 
 # NetCompLobbyPacket: op B + entry (uid i, a B, rej B, t b, c b, i i, l i, v B, f h, n 32s, cl 8s)
 ENTRY = "<iBBbbiiBh32s8s"
+
+
+# NET_EXT_GAME_STATE (0x0901, "gsc" [state]) and NET_EXT_PLAYER_NAME (0x0203, [uid, name[32]]) in
+# the conn's packet log (kn_proto.Conn.packets); GameState: INITIALIZING 0 .. ENDED 5 (shared.h).
+EXT = 254
+
+
+def ext_packets(conn, subtype):
+    want = struct.pack("<H", subtype)
+    return [p for t, p in conn.packets if t == EXT and p[:2] == want]
+
+
+def gsc_states(conn):
+    return [p[2] for p in ext_packets(conn, 0x0901) if len(p) >= 3]
+
+
+def rename_phases(conn):
+    # [(last gsc state seen before it or None, uid, name)] in arrival order
+    out, state = [], None
+    for t, p in conn.packets:
+        if t == EXT and p[:2] == struct.pack("<H", 0x0901) and len(p) >= 3:
+            state = p[2]
+        elif t == EXT and p[:2] == struct.pack("<H", 0x0203) and len(p) >= 2 + 36:
+            uid = struct.unpack("<i", p[2:6])[0]
+            out.append((state, uid, p[6:38].split(b"\0")[0].decode("utf-8", "replace")))
+    return out
+
+
+def spawn_names(conn):
+    # [(last gsc state seen before the spawn or None, uid, name)]: NetSpawnPacket names as the conn got them
+    out, state = [], None
+    for t, p in conn.packets:
+        if t == EXT and p[:2] == struct.pack("<H", 0x0901) and len(p) >= 3:
+            state = p[2]
+        elif t == kn_proto.SPAWN:
+            info = kn_proto.spawn_info(p)
+            if info:
+                out.append((state, info["uid"], info["name"]))
+    return out
+
+
+def gsc_wait(conn, state, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        if state in gsc_states(conn):
+            return True
+        conn.read(timeout=0.5)
+    return state in gsc_states(conn)
 
 
 def comp_table(conn):
@@ -267,7 +316,7 @@ def run():
                   kn_proto.error_info(err)[0] if err else "no ERROR")
             stranger.close()
         c = kn_proto.Conn("127.0.0.1", int(s["status"]["c"]["port"]))
-        c.send(1, bytes([1, MINOR_EXT, 0]))  # HELLO 1.4 (v7 lobby packets and the EXT envelope)
+        c.send(1, bytes([1, MINOR_EXT, 2]))  # HELLO 1.4 (v7 lobby packets + the EXT envelope)
         c.join(client_key=s["status"]["c"]["clientId"], session=tokens[i])
         conns.append(c)
     inits = [c.read(until=kn_proto.INIT, timeout=10) for c in conns]
@@ -278,6 +327,8 @@ def run():
     uids = [struct.unpack("<BBBiiHi", p[:struct.calcsize("<BBBiiHi")])[6] if p else -1 for p in inits]
     check("ranked.join notice", all(any("Joined Ranked Match" in t for t in chats(c)) for c in conns),
           str(chats(conns[0])[-3:]))
+    check("gsc: the comp warmup (WARMUP 2) reaches the roster", all(gsc_wait(c, 2, timeout=5) for c in conns),
+          str([gsc_states(c) for c in conns][:2]))
     table = wait_for(lambda: (lambda t: t if len(t) == 8 else None)(comp_table(conns[0])), timeout=5) or comp_table(conns[0])
     check("comp lobby: 8 entries with account names", len(table) == 8 and sorted(e["n"] for e in table.values()) == sorted(names),
           json.dumps(table)[:300])
@@ -340,11 +391,26 @@ def run():
     conns[0].send(CHAT_SEND, kn_proto.cstr("/score 5000", 288))
     conns[0].read(timeout=0.8)
 
+    # v10 setGameState(IN_PROGRESS) when the warmup timers drain, then the names push (G9, G6)
+    check("gsc: IN_PROGRESS (3) after the warmup", gsc_wait(conns[0], 3, timeout=45),
+          str(gsc_states(conns[0])) + " spawned " + str([spawned(c, uids[i]) for i, c in enumerate(conns)]))
+    phases = rename_phases(conns[0])
+    warm = spawn_names(conns[0])
+    masked = [n for st, uid, n in warm if st == 2 and uid != uids[0]]
+    check("names masked as Player_<n> for the others during WARMUP", bool(masked) and all(n.startswith("Player_") for n in masked),
+          str(masked[:4]))
+    own = [n for st, uid, n in warm if st == 2 and uid == uids[0]]
+    check("own name stays real during WARMUP", bool(own) and own[-1] == names[0], str(own[-1:]))
+    real = {n for st, uid, n in phases if st == 3}
+    check("real names pushed at IN_PROGRESS", set(names) <= real, str(sorted(real)))
+
     # 4. a player abandons: the round ends, the other team wins
     quitter = 5
     conns[quitter].close()
     ended = wait_for(lambda: "[ranked] match" in log("game.log") and " over: winner team" in log("game.log"), timeout=20)
     check("abandon ends the match", bool(ended), "" if ended else log("game.log")[-400:])
+    conns[0].read(timeout=1.5)
+    check("gsc: POST_MATCH (4) when the round ends", 4 in gsc_states(conns[0]), str(gsc_states(conns[0])))
     prof = lambda t: http("/mm/ranked/profile", token=t, region="na")[1].get("profile", {})
     rated = wait_for(lambda: all(prof(t).get("total_matches") == 1 for t in tokens), timeout=15)
     check("every roster player rated once", bool(rated))

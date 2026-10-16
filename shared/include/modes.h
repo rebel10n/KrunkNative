@@ -485,6 +485,7 @@ enum { MODE_ROUND_HOLD, MODE_ROUND_RUN, MODE_ROUND_END };
 int mode_tick_round(struct Game_t*, float delta);    // waitTimers + conditions: hold the clock / run it / endGame()
 void mode_tick(struct Game_t*, float delta);         // flags, dom zones, mode.update, conversions, respawns
 int mode_waiting(const struct Game_t*);              // waitTimers active and the clock is not running
+int mode_match_starting(const struct Game_t*);       // a pre-match timer (not contTime: warmup, "match starting in") is left
 // endGame() rounds: 1 when the match goes on (next round with an intermission, or noDraws
 // overtime), so the caller must not end it. Called by game.c before game_end_round.
 int mode_end_game(struct Game_t*);
