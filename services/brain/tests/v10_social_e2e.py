@@ -154,6 +154,7 @@ def main():
         for aid in ids:
             q("UPDATE players SET player_score = 2000000, player_funds = 5000, player_premium = 1 WHERE player_id = ?", aid)
         a, b, c = ids
+        q("UPDATE players SET player_moderator = 1 WHERE player_id = ?", a)  # alice sees the Reports tab
         cid = q("INSERT INTO clans (clan_name, clan_playerid, clan_score, clan_discord) VALUES ('V10C', ?, 777777, 'abc') RETURNING clan_id", a)[0][0]
         q("INSERT INTO clan_members (account_id, clan_id, rank, score) VALUES (?, ?, 3, 5000)", a, cid)
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", a, b, b, a)
@@ -190,6 +191,18 @@ def main():
         A.click("v10sProfileFollow")
         time.sleep(1.0)
         check(q("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?", a, c), "Follow on the profile: the follows row (friend request)")
+        # Report carol: v10's Report view sends the reason's index (0 = Hacking); the brain files it (rptr)
+        A.click("v10sProfileReport")
+        check(A.has("v10sReportSend"), "Report opens the report view")
+        A.type("v10sReportText", "carol is using an aimbot in the lobby")
+        A.click("v10sReportSend")
+        time.sleep(1.2)
+        check(q("SELECT reason, details FROM reports WHERE reporter_id = ? AND target_id = ?", a, c)
+              == [("Hacking", "carol is using an aimbot in the lobby")], "Report: filed as v10's reason Hacking (rptr true)")
+        A.ui("v10s('back')")  # the report view's Done: the profile again
+        A.click("v10sPtab7")  # Reports (moderators): gapi GET /players/<name>/reports
+        check(A.has("v10sReport0"), "the Reports tab lists the report")
+        A.shot("profile-reports")
         A.ui("v10s('back')")
         A.click("v10sTab1")
         peer = peer_session(names[2], tokens[2], names[0], 8.0)

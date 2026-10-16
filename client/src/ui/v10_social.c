@@ -103,8 +103,8 @@ typedef struct {
     int tab;             // profile right-side tab
     int follow_busy;
     int sales_range;
-    cJSON *sales, *listings, *feed; // owned
-    int sales_loading, listings_loading, feed_loading;
+    cJSON *sales, *listings, *feed, *reports; // owned
+    int sales_loading, listings_loading, feed_loading, reports_loading;
     // clan view
     int applied, apply_busy;
     char apply_error[128];
@@ -1577,6 +1577,7 @@ static void view_free(View *v) {
     cJSON_Delete(v->sales);
     cJSON_Delete(v->listings);
     cJSON_Delete(v->feed);
+    cJSON_Delete(v->reports);
     cJSON_Delete(v->followers);
     cJSON_Delete(v->following);
     memset(v, 0, sizeof(*v));
@@ -1630,6 +1631,8 @@ static View *view_of(const intptr_t tag) {
 // ---- player profile (_34510)
 
 static const char *const k_profile_tabs[8] = {"Stats", "Feed", "Sales", "Badges", "Titles", "Creations", "Match History", "Reports"};
+// v10 REPORT_REASONS (v10.js _7525): the reporter's select; a report stores the index or the name
+static const char *const k_report_reasons[7] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting", "Market Manipulation"};
 
 static void profile_feed_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
     View *v = view_of(tag);
@@ -1637,6 +1640,26 @@ static void profile_feed_done(const int status, const cJSON *data, const cJSON *
     v->feed_loading = 0;
     cJSON_Delete(v->feed);
     v->feed = ok(status, error) ? cJSON_Duplicate(cJSON_GetObjectItem(data, "posts"), 1) : cJSON_CreateArray();
+    render_views();
+}
+
+// the Reports tab (developers and moderators; v10 getReports, GET /players/<name>/reports): loaded when
+// the tab opens; the rows are the brain's {rp_id, rp_date, rp_reportername, rp_index, rp_text}
+static void profile_reports_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v) return;
+    v->reports_loading = 0;
+    cJSON_Delete(v->reports);
+    v->reports = ok(status, error) && cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
+    render_views();
+}
+
+static void profile_reports_load(View *v) {
+    char enc[160], path[200];
+    backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_name"));
+    snprintf(path, sizeof(path), "/players/%s/reports", enc);
+    v->reports_loading = gapi("GET", path, NULL, profile_reports_done, view_tag(v));
+    if (!v->reports_loading) v->reports = cJSON_CreateArray();
     render_views();
 }
 
@@ -1777,9 +1800,9 @@ static void sb_profile_right(StrBuf *sb, View *v) {
     const int ntabs = a && (a->is_dev || a->is_mod) ? 8 : 7;
     sb_append(sb, "<div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
     for (int i = 0; i < ntabs; i++)
-        sb_appendf(sb, "<div class=\"simple-tab svelte-1oqd18e%s\" role=\"tab\" aria-selected=\"%s\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\" "
+        sb_appendf(sb, "<div class=\"simple-tab svelte-1oqd18e%s\" role=\"tab\" aria-selected=\"%s\" tabindex=\"0\" id=\"v10sPtab%d\" onmouseenter=\"playTick(0.1)\" "
                        "onclick=\"playSelect(0.1);v10s('ptab',%d)\"><span class=\"simple-tab-label svelte-1oqd18e\">%s</span></div>",
-                   v->tab == i ? " simple-tab-active" : "", v->tab == i ? "true" : "false", i, k_profile_tabs[i]);
+                   v->tab == i ? " simple-tab-active" : "", v->tab == i ? "true" : "false", i, i, k_profile_tabs[i]);
     sb_append(sb, "</div> ");
     switch (v->tab) {
     case 0: sb_profile_stats(sb, d); break;
@@ -1860,6 +1883,25 @@ static void sb_profile_right(StrBuf *sb, View *v) {
         break;
     }
     case 6: sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No recent matches.</div>"); break;
+    case 7: { // Reports (v10 "Reports", developers and moderators): the reports of this player, newest first
+        if (v->reports_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
+        else if (!cJSON_GetArraySize(v->reports)) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No reports.</div>");
+        else {
+            const cJSON *rp;
+            int row = 0;
+            cJSON_ArrayForEach(rp, v->reports) {
+                const int idx = (int) jnum(rp, "rp_index");
+                sb_appendf(sb, "<div class=\"profile-detail-report svelte-1hghrmf\" id=\"v10sReport%d\"><div class=\"profile-detail-report-head svelte-1hghrmf\"><b>", row++);
+                sb_append(sb, idx >= 0 && idx < 7 ? k_report_reasons[idx] : "Unknown"); // rp_text is escaped by the brain
+                sb_append(sb, "</b> <span>from </span>");
+                sb_append_esc(sb, jstr(rp, "rp_reportername"));
+                sb_append(sb, "</div><div class=\"profile-detail-report-text svelte-1hghrmf\">");
+                sb_append(sb, jstr(rp, "rp_text"));
+                sb_append(sb, "</div></div>");
+            }
+        }
+        break;
+    }
     default: sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No reports.</div>"); break;
     }
 }
@@ -2274,7 +2316,6 @@ static void sb_follows(StrBuf *sb, View *v) {
 
 static char g_gift_amount[32] = "100", g_gift_msg[600], g_report_text[600];
 static int g_report_reason;
-static const char *const k_report_reasons[7] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting", "Market Manipulation"};
 
 static void sb_gift(StrBuf *sb, View *v) {
     sb_append(sb, "<div class=\"gift-root svelte-g5j1wf\" role=\"dialog\" aria-label=\"Gift KR\" id=\"v10sGiftWin\"><div class=\"gift-header svelte-g5j1wf\"><button class=\"gift-back svelte-g5j1wf\" type=\"button\" "
@@ -2824,9 +2865,9 @@ static void on_view_frame(const char *label, const cJSON *frame) {
             snprintf(v->error, sizeof(v->error), "%s", e && e[0] ? e : "Failed to send gift");
         }
         render_views();
-    } else if (v->type == V_REPORT && v->loading && (!strcmp(label, "rpr") || !strcmp(label, "po"))) {
+    } else if (v->type == V_REPORT && v->loading && (!strcmp(label, "rptr") || !strcmp(label, "po"))) {
         v->loading = 0;
-        if (!strcmp(label, "rpr") && cJSON_IsTrue(cJSON_GetArrayItem(frame, 1))) v->done = 1;
+        if (!strcmp(label, "rptr") && cJSON_IsTrue(cJSON_GetArrayItem(frame, 1))) v->done = 1;
         else snprintf(v->error, sizeof(v->error), "%s", cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)) ? cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)) : "Failed to submit report");
         render_views();
     } else if (v->type == V_PROFILE && !strcmp(label, "psd") && v->sales_loading) {
@@ -3133,6 +3174,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     } else if (!strcmp(op, "ptab") && v && v->type == V_PROFILE) {
         v->tab = (int) arg_num(args, argc, 1, 0);
         if (v->tab == 2 && !v->sales) profile_sales_load(v);
+        if (v->tab == 7 && !v->reports && !v->reports_loading && v->data) profile_reports_load(v);
         render_views();
     } else if (!strcmp(op, "range") && v && v->type == V_PROFILE) {
         v->sales_range = (int) arg_num(args, argc, 1, 3);

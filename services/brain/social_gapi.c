@@ -21,10 +21,10 @@
  *   GET  /players/<name>                                                profile object
  *   POST /players/<name>/follow {follow}                                {following}
  *   GET  /players/<name>/followers | /following                         [{player_id, player_name, ...}]
- *   POST /players/<name>/gift {amount, message}                         {funds, amount, fee}
- *   POST /players/<name>/report {reason, text}                          {}
- *   GET  /players/<name>/sales?range=<0..6>                             [{d, f}]
- *   GET  /players/<name>/listings                                       [{marketid, skinindex, m, funds}]
+ *   POST /players/<name>/report {reason, text} (reason: v10's index 0..6 or the name)     {}
+ *   GET  /players/<name>/reports (moderators and developers; others get [])               [{rp_id, rp_date, rp_reportername, rp_index, rp_text}]
+ *   Not routed here yet: gift (POST .../gift), sales (GET .../sales?range), listings (GET .../listings)
+ *   and verify (POST .../verify). The v10 page sends them as socket ops "kr", "pst", "uml" and "ver".
  *   GET  /clans/<id>/profile, /clans/by-name/<name>                     clan profile (the clan view)
  *   POST /clans/<id>/apply                                              {}
  * Other /clans/* paths are clan_v10.c's (the clan window's settings tab), the /studios paths studios.c's.
@@ -680,6 +680,46 @@ static void players_follows(SocialSession *s, const GapiReq *r, const char *name
     "SELECT c.clan_id AS clan_id__i, c.clan_name, (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creator_name, " \
     "c.clan_score AS clan_score__i, coalesce(c.clan_discord, '') AS clan_link4 FROM clans c "
 
+/* GET /players/<name>/reports (v10 getReports): {data: [{rp_id, rp_date, rp_reportername, rp_index,
+ * rp_text}]}; moderators and developers see the reports, others an empty list */
+static void reports_done(SocialSession *s, kn_db_result *res, void *extra) {
+    GCtx *c = extra;
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, "reports");
+        gapi_error(s, c->rid, 500, "PLAYERS_REPORTS_FAILED", "Failed to load reports");
+        return;
+    }
+    gapi_reply(s, c->rid, kn_db_result_to_json(res));
+}
+
+static void players_reports(SocialSession *s, const GapiReq *r, const char *name) {
+    if (!need_login(s, r)) return;
+    profile_reports_query(s, name, reports_done, gctx(r, 0, 0, NULL));
+}
+
+static void report_filed_done(SocialSession *s, kn_db_result *res, void *extra) {
+    GCtx *c = extra;
+    if (!kn_db_ok(res) || kn_db_affected(res) < 1) {
+        if (!kn_db_ok(res)) acct_db_error(res, "report");
+        gapi_error(s, c->rid, 400, "PLAYERS_REPORT_FAILED", "Could not submit the report.");
+        return;
+    }
+    gapi_reply(s, c->rid, cJSON_CreateObject());
+}
+
+/* POST /players/<name>/report {reason, text}: reason is v10's index (0..6) or the name; {} when filed */
+static void players_report(SocialSession *s, const GapiReq *r, const char *name) {
+    if (!need_login(s, r)) return;
+    const cJSON *reason = cJSON_GetObjectItemCaseSensitive(r->body, "reason");
+    const char *text = kn_json_str(r->body, "text", "");
+    if (!profile_report_reason(reason) || strlen(text) > 2000) {
+        gapi_error(s, r->rid, 400, "PLAYERS_REPORT_INVALID", "Invalid report.");
+        return;
+    }
+    if (profile_report_submit(s, name, reason, text, report_filed_done, gctx(r, 0, 0, NULL)) != 0)
+        gapi_error(s, r->rid, 400, "PLAYERS_REPORT_FAILED", "Could not submit the report.");
+}
+
 static void clan_members_done(SocialSession *s, kn_db_result *res, void *extra) {
     GCtx *c = extra;
     cJSON *clan = (cJSON *) (intptr_t) c->b;
@@ -785,6 +825,8 @@ static int route(SocialSession *s, const GapiReq *r) {
         else if (gapi_is(r, "POST", "/players/:name/follow")) players_follow(s, r, r->seg[1]);
         else if (gapi_is(r, "GET", "/players/:name/followers")) players_follows(s, r, r->seg[1], 1);
         else if (gapi_is(r, "GET", "/players/:name/following")) players_follows(s, r, r->seg[1], 0);
+        else if (gapi_is(r, "GET", "/players/:name/reports")) players_reports(s, r, r->seg[1]);
+        else if (gapi_is(r, "POST", "/players/:name/report")) players_report(s, r, r->seg[1]);
         else return 0;
         return 1;
     }

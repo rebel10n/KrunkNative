@@ -10,7 +10,8 @@ EB_TEXT_TOO_LONG, msg:history paging (oldest first, hasMore), msg:read + unread:
 gapi tunnel ["gapi", rid, method, path, body]: /players/search, /players/<name> (follow_state,
 online), /players/<name>/follow, followers / following, /social/post (level gate, giveaway funds
 and fee, draw), /social/feed tabs, /social/post/<id> (+ comments), vote, comment, /social/news,
-/clans/by-name/<tag>, /clans/<id>/profile, /clans/<id>/apply.
+/clans/by-name/<tag>, /clans/<id>/profile, /clans/<id>/apply; the mail of a giveaway win (kml rows as
+Inbox mail); reports by v10's reason index or name (rpt, grp, GET /players/<name>/reports, POST .../report).
 77 = skip (no kn_brain / websockets).
 """
 import asyncio
@@ -264,6 +265,36 @@ async def scenario(names):
     check(st == 200 and r["data"]["post"]["vot"] == 0, "unlike")
     st, r = await A.gapi("GET", "/social/news")
     check(st == 200 and r["data"]["news"] == ["<b>KN news</b>"], "news from accounts.news")
+    # --- reports: v10's page sends the reason's index (0..6), v7's hub the name; the Reports tab lists them
+    await B.send(["rpt", an, 0, "They are using an aimbot in the lobby"])
+    f = await B.recv_until(lambda f: f[0] == "rptr")
+    check(f and f[1] is True, "report by index 0 (Hacking): rptr true")
+    await C.send(["rpt", an, "Scamming", "asked me for my KR, detail here"])
+    f = await C.recv_until(lambda f: f[0] == "rptr")
+    check(f and f[1] is True, "report by name (v7 hub): rptr true")
+    await B.send(["rpt", an, 9, "a reason that is not in the list"])
+    f = await B.recv_until(lambda f: f[0] == "rptr")
+    check(f and f[1] is None, "reason index 9: refused (rptr null)")
+    st, r = await B.gapi("GET", "/players/%s/reports" % an)
+    check(st == 200 and r["data"] == [], "a plain account sees no reports")
+    q("UPDATE players SET player_moderator = 1 WHERE player_id = ?", c_id)
+    st, r = await C.gapi("GET", "/players/%s/reports" % an)
+    rows = r["data"] if st == 200 else []
+    check([x["rp_index"] for x in rows] == [2, 0] and rows[0]["rp_reportername"] == cn and rows[1]["rp_text"] == "They are using an aimbot in the lobby"
+          and rows[1]["rp_reportername"] == bn, "moderator: newest first, rp_index is v10's reason index")
+    await C.send(["grp", an])
+    f = await C.recv_until(lambda f: f[0] == "rps")
+    check(f and [x["rp_index"] for x in f[1]] == [2, 0], "the socket's grp lists the same rows")
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 3, "text": "a second report, by B"})
+    check(st == 200 and r["data"] == {}, "POST /players/<name>/report: filed")
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 7, "text": "unknown reason"})
+    check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_INVALID", "gapi report: reason 7 is PLAYERS_REPORT_INVALID")
+    st, r = await A.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "reporting myself"})
+    check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_FAILED", "a self report is refused (PLAYERS_REPORT_FAILED)")
+    st, r = await C.gapi("GET", "/players/%s/reports" % an)
+    check(st == 200 and [x["rp_index"] for x in r["data"]] == [3, 2, 0], "the gapi report is in the moderator's list")
+    q("UPDATE players SET player_moderator = 0 WHERE player_id = ?", c_id)
+
     # the giveaway draw: B (follows A) likes it; end it now and wait for the timer
     await B.gapi("POST", "/social/post/%d/vote" % gid, {"value": 1})
     q("UPDATE feed_posts SET ends_at = " + AGO_1S + " WHERE id = ?", gid)

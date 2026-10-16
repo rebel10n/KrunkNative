@@ -245,6 +245,12 @@ void sh_profile_stats(SocialSession *s, const cJSON *f); /* "pst" */
 void sh_user_feed(SocialSession *s, const cJSON *f);   /* "guf" */
 void sh_reports(SocialSession *s, const cJSON *f);     /* "grp" */
 void sh_report(SocialSession *s, const cJSON *f);      /* "rpt" */
+/* v10 reports (profiles.c): the reason of a frame or body (v10's index or name, NULL refused), the
+ * reports list (gapi GET /players/<name>/reports, "grp") and filing one (gapi POST .../report, "rpt") */
+const char *profile_report_reason(const cJSON *v);
+void profile_reports_query(SocialSession *s, const char *name, SocialDbFn fn, void *extra);
+int profile_report_submit(SocialSession *s, const char *name, const cJSON *reason, const char *details, SocialDbFn fn,
+                          void *extra);
 void sh_flag(SocialSession *s, const cJSON *f);        /* "flg" */
 void sh_staff_badge(SocialSession *s, const cJSON *f); /* "sbdg": give (1) / remove (0) a badge, developers */
 void sh_verify(SocialSession *s, const cJSON *f);      /* "ver" */

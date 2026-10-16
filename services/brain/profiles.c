@@ -379,24 +379,50 @@ void sh_user_feed(SocialSession *s, const cJSON *f) {
 
 /* ------------------------------------------------------------------ reports and staff actions */
 
-/* ["grp", name] -> ["rps", rows] (moderators only) */
-void sh_reports(SocialSession *s, const cJSON *f) {
-    if (!social_require_auth(s)) return;
+/* v10's report reasons (v10.js _7525): the reporter's select and the staff list's rp_index (an index
+ * into this list). The reports table keeps the reason's name; v7's hub sends the name itself. */
+static const char *const REPORT_REASONS[7] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting",
+                                              "Market Manipulation"};
+
+/* a reason from a frame or a request body: v10's index (0..6) or a reason name; NULL when refused */
+const char *profile_report_reason(const cJSON *v) {
+    if (cJSON_IsNumber(v)) {
+        const int i = (int) v->valuedouble;
+        return v->valuedouble == (double) i && i >= 0 && i < 7 ? REPORT_REASONS[i] : NULL;
+    }
+    if (!cJSON_IsString(v) || !v->valuestring[0] || strlen(v->valuestring) > 64) return NULL;
+    return v->valuestring;
+}
+
+/* the reports of a player (v10 GET /players/<name>/reports, socket "grp"): moderators and developers
+ * only (an empty list for others). Rows: {rp_id, rp_date, rp_reportername, rp_index (v10's reason
+ * index; reasons not in v10's list count as Other), rp_text}, newest first. */
+void profile_reports_query(SocialSession *s, const char *name, SocialDbFn fn, void *extra) {
     char me[24];
     social_query(s,
                  SQL(.pg = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
-                 "kn_html(rp.reason) AS rp_index, kn_html(rp.details) AS rp_text "
-                 "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
-                 "WHERE rp.target_id = kn_account_id($1) "
-                 "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
-                 "ORDER BY rp.id DESC LIMIT 100",
+                           "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "
+                           "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, "
+                           "kn_html(rp.details) AS rp_text "
+                           "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
+                           "WHERE rp.target_id = kn_account_id($1) "
+                           "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
+                           "ORDER BY rp.id DESC LIMIT 100",
                      .any = "SELECT rp.id AS rp_id, rp.created_at AS rp_date, a.username AS rp_reportername, "
-                 "{html:rp.reason} AS rp_index, {html:rp.details} AS rp_text "
-                 "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
-                 "WHERE rp.target_id = " ACCOUNT_ID_OF_1 " "
-                 "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
-                 "ORDER BY rp.id DESC LIMIT 100"),
-                 KN_DB_ARGS(fa_str(f, 1) ? fa_str(f, 1) : "", social_viewer(s, me)), rows_reply_done, strdup("rps"));
+                            "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "
+                            "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, "
+                            "{html:rp.details} AS rp_text "
+                            "FROM reports rp LEFT JOIN accounts a ON a.id = rp.reporter_id "
+                            "WHERE rp.target_id = " ACCOUNT_ID_OF_1 " "
+                            "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) "
+                            "ORDER BY rp.id DESC LIMIT 100"),
+                 KN_DB_ARGS(name ? name : "", social_viewer(s, me)), fn, extra);
+}
+
+/* ["grp", name] -> ["rps", rows] (moderators only) */
+void sh_reports(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    profile_reports_query(s, fa_str(f, 1), rows_reply_done, strdup("rps"));
 }
 
 static void report_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -406,23 +432,29 @@ static void report_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "rptr", 1, ok ? cJSON_CreateTrue() : cJSON_CreateNull());
 }
 
-/* ["rpt", name, reason, details] -> ["rptr", ok] */
+/* file a report of `name` (v10 POST /players/<name>/report, socket "rpt"): reason is v10's index or a
+ * name, details the text. fn gets the result: affected rows 1 when filed (not for self, an unknown
+ * name, or past 20 reports an hour). Returns 0 when the request was refused before the query. */
+int profile_report_submit(SocialSession *s, const char *name, const cJSON *reason, const char *details, SocialDbFn fn,
+                          void *extra) {
+    const char *why = profile_report_reason(reason);
+    if (!name || !why || !details || strlen(details) > 2000) return -1;
+    char me[24];
+    return social_query(s,
+                        SQL(.pg = "INSERT INTO reports (reporter_id, target_id, reason, details) "
+                                  "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
+                                  "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                            .any = "INSERT INTO reports (reporter_id, target_id, reason, details) "
+                                   "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
+                                   "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > {ago:3600}) < 20"),
+                        KN_DB_ARGS(social_viewer(s, me), name, why, details), fn, extra);
+}
+
+/* ["rpt", name, reason, details] -> ["rptr", ok] (v10's reason index or the name; v10's page sends the index) */
 void sh_report(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
-    const char *name = fa_str(f, 1), *reason = fa_str(f, 2), *details = fa_str(f, 3);
-    if (!name || !reason || !details || strlen(details) > 2000 || strlen(reason) > 64) {
+    if (profile_report_submit(s, fa_str(f, 1), fa(f, 2), fa_str(f, 3), report_done, NULL) != 0)
         social_send_n(s, "rptr", 1, cJSON_CreateNull());
-        return;
-    }
-    char me[24];
-    social_query(s,
-                 SQL(.pg = "INSERT INTO reports (reporter_id, target_id, reason, details) "
-                           "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
-                           "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > now() - interval '1 hour') < 20",
-                     .any = "INSERT INTO reports (reporter_id, target_id, reason, details) "
-                            "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
-                            "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > {ago:3600}) < 20"),
-                 KN_DB_ARGS(social_viewer(s, me), name, reason, details), report_done, NULL);
 }
 
 typedef struct FlagCtx {
