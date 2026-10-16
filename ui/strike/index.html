@@ -12,6 +12,13 @@
     <link rel="stylesheet" href="./icons.css" data-id="fantasticon:icons" />
     <!-- KrunkNative: workarounds for engine gaps only (README.md "Overrides"); never restyles FRVR's UI -->
     <link rel="stylesheet" href="./css/kn-strike-overrides.css" />
+    <!-- KrunkNative: #canvas below takes the place of FRVR's #game-canvas (three.js's renderer.domElement,
+         which showCanvas appends to <body>), so it gets that rule from assets/index-CJ_IUjn5.css: out of
+         flow, behind the UI. Left in flow (only FRVR's canvas{display:block;height:100%}) it pushed the
+         boot #frvrLoadingScreen (position:relative, height:100%) down by its own height on the web. -->
+    <style>
+      #canvas{position:absolute;left:var(--left-safe-area);right:var(--right-safe-area);top:var(--top-safe-area);bottom:var(--bottom-safe-area);z-index:-2;width:calc(100% - var(--left-safe-area) - var(--right-safe-area));height:calc(100% - var(--top-safe-area) - var(--bottom-safe-area))}
+    </style>
     <!-- KrunkNative web build only (the native engine ignores <script>): DOM glue + client loader;
          this page sits one level below the client files and the game content -->
     <meta name="kn-root" content="../" />

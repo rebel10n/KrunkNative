@@ -15,7 +15,8 @@ own assets/), one headless Chromium drives it over CDP.
   3. Strike (/strike/, the manifest's start_url, no flag): Chrome sees /strike/manifest.webmanifest,
      id /strike/, scope /strike/ (a different app), no installability errors beyond Box Office's;
      the client starts as Krunker Strike (banner, FRVR's page up in #frvrMenuMobileHolder, or on
-     the generated page body.kn-flavor-strike; "Krunker Strike" title);
+     the generated page body.kn-flavor-strike; "Krunker Strike" title; on FRVR's page the GL canvas
+     is out of flow and the boot loading screen covers the window from the top);
      its own storage keys all start with "strike." and the Box Office keys are untouched.
   4. Strike offline (/strike/?offline=1&map=burg): the address bar the client writes stays in
      /strike/ (a reload stays in the Strike app).
@@ -251,6 +252,17 @@ async def browser_checks(origin, cdp_port):
         if frvr:
             check("Strike: FRVR's Strike page is up, driven by the client (screens in #frvrMenuMobileHolder)",
                   await until("document.getElementById('frvrMenuMobileHolder').children.length > 0", 30))
+            # the GL #canvas takes FRVR's #game-canvas place (out of flow, the whole window): in flow it
+            # pushed the page's boot #frvrLoadingScreen down by its height (curtains only at the bottom)
+            boot_js = ("(() => { const c = document.getElementById('canvas'), l = document.getElementById('frvrLoadingScreen');"
+                       " if (!c || !l) return null; const css = l.style.cssText; l.style.setProperty('display', 'flex', 'important');"
+                       " const r = l.getBoundingClientRect(), k = c.getBoundingClientRect(); l.style.cssText = css;"
+                       " return JSON.stringify({pos: getComputedStyle(c).position, canvas: [k.x, k.y, k.width, k.height],"
+                       " boot: [r.x, r.y, r.width, r.height], win: [innerWidth, innerHeight]}); })()")
+            boot = json.loads(await evaluate(boot_js) or "null")
+            check("Strike: the GL canvas is out of flow and fills the window; the boot loading screen covers it from the top",
+                  bool(boot) and boot["pos"] == "absolute" and boot["canvas"] == [0, 0] + boot["win"]
+                  and boot["boot"] == [0, 0] + boot["win"], boot)
         else:
             check("Strike: the page is branded (body.kn-flavor-strike)",
                   await until("document.body.classList.contains('kn-flavor-strike')", 30))
