@@ -1,0 +1,48 @@
+{
+  "scenario": "kn-ingame-gametime-counters",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "counters-row",
+      "rect": [
+        1066,
+        70,
+        207,
+        30
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": ".topRightCounters with every stat tile on (400px wide under the old board)"
+    },
+    {
+      "name": "game-time-tile-row",
+      "rect": [
+        1166,
+        104,
+        108,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#gameTimeCount wraps onto its own row, right-aligned, clear of the board"
+    },
+    {
+      "name": "board-rows-clear",
+      "rect": [
+        1070,
+        20,
+        100,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the board's name column: no tile over the rows"
+    }
+  ]
+}

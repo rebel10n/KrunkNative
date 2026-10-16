@@ -187,6 +187,9 @@ static const ClientSetting SETTINGS[] = {
     // ---- Game (glorp "Auto Spectate", "Always Play HS Sound on Kill")
     {"autoSpec", "Auto Spectate", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads"},
     {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
+    // KrunkNative only (v10 has no game time): the top-right tile of the time this device has played (game_time.h)
+    {"gameTime", "Show Game Time", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false",
+     "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike"},
     // ---- Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
     // Web: a page cannot open a folder; Open tells where the client's files are (the browser's storage).
     {"openConfig", "Client Folder", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "", "Settings, swapper and custom.css",
@@ -235,6 +238,8 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.proxyScope.info", "krunker.io only: the krunker.io server list and account. All client traffic: also the account service, server finder, news and downloads")
 //   I18N("kn.client.autoSpec.name", "Auto Spectate")  I18N("kn.client.autoSpec.info", "Turn Spectate on when the game loads")
 //   I18N("kn.client.hsSound.name", "Always Play HS Sound on Kill")
+//   I18N("kn.client.gameTime.name", "Show Game Time")
+//   I18N("kn.client.gameTime.info", "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike")
 //   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")
 //   I18N("kn.client.clearCache.name", "Clear Cache & Storage")  I18N("kn.client.clearCache.button", "Clear Now")
 //   I18N("kn.client.clearCache.info", "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept")
@@ -696,6 +701,10 @@ int client_settings_hs_sound_always(void) {
     return g_cs.hs_sound;
 }
 
+int client_settings_game_time(void) {
+    return cs_bool("gameTime"); // read each time: the HUD asks every frame (cached store, cheap)
+}
+
 int client_settings_auto_restart(void) {
     store_load(); // asked before the startup too (a server ERROR right after the connect)
     return cs_bool("autoRestart");
@@ -807,6 +816,7 @@ static void relaunch(void) {
 #endif
 
 void client_settings_exit(void) {
+    hud_ui_game_time_flush(); // the game time total (ui_logic.h): the play since its last store
 #ifndef __EMSCRIPTEN__
     discord_rpc_shutdown();
     if (g_cs.relaunch) relaunch();

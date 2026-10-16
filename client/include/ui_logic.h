@@ -311,6 +311,7 @@ void hud_ui_on_config(Client*); // a GAME_CONFIG applied (it may follow the INIT
 // The game was left (client_leave_game): v10 loads a new page, so #chatList, #killFeed, the death
 // card, the end screen, the damage indicators and the leader stats of that game all go.
 void hud_ui_leave_game(Client*);
+void hud_ui_game_time_flush(void);       // the game time total stored now (client_settings_exit: at exit)
 char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" (pListKey, showWindow(23)); malloc'd
 // The player list's actions (client/src/ui/hud_votekick.c): the vote kick
 // prompt (#voteToKick, io "vk"), the kickVoteY / kickVoteN keys, the K.P.D call and its answer.

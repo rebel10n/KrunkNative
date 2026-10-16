@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ingame-gametime",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "game-time-tile",
+      "rect": [
+        1166,
+        70,
+        108,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#gameTimeCount: timer icon + 2h 14m 33s, the last tile of .topRightCounters under the board"
+    },
+    {
+      "name": "board-rows-clear",
+      "rect": [
+        1070,
+        20,
+        100,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the board's name column: no tile over the rows"
+    }
+  ]
+}

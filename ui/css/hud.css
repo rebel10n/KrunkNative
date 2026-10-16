@@ -165,3 +165,9 @@ html.kn-hud-visible #aimRecticle {
 #timerIcon.topLeftOld {
   image-rendering: auto;
 }
+
+/* The game time tile (hud_ui.c hud_gametime_step): the last .topRightCounters tile, drawn like the
+ * kill / death / streak tiles (their icon is 24px, their values #killsVal's .7 white). */
+#gameTimeVal {
+  color: rgba(255, 255, 255, 0.7);
+}

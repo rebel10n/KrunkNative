@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ingame-gametime-mobile",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "game-time-tile",
+      "rect": [
+        766,
+        66,
+        76,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#gameTimeCount on the phone layout (844x390), under the stat tiles, clear of the board and feed"
+    },
+    {
+      "name": "board-rows-clear",
+      "rect": [
+        700,
+        4,
+        140,
+        30
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the phone board's name column: no tile over the rows"
+    }
+  ]
+}

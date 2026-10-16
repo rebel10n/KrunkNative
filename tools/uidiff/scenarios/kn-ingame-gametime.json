@@ -1,0 +1,113 @@
+{
+  "ref": "doc/ref/krunknative/kn-ingame-gametime.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 0.8,
+    "hud": {
+      "health": 100,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 30,
+      "ammoMax": 30,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "03:45",
+      "kills": 3,
+      "deaths": 1,
+      "score": 225,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 0,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 0,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0,
+      "streak": 3
+    },
+    "chat": [
+      {
+        "text": "Spawned a Bot",
+        "color": "#fc03ec"
+      }
+    ],
+    "killfeed": [
+      {
+        "killer": "You",
+        "killerIsYou": true,
+        "victim": "Bot",
+        "weapon": "Assault Rifle",
+        "weaponIcon": "icon_2",
+        "headshot": false,
+        "age_ms": 500
+      }
+    ],
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 225,
+        "me": true
+      },
+      {
+        "rank": 2,
+        "name": "Bot",
+        "score": 0
+      },
+      {
+        "rank": 3,
+        "name": "Bot 2",
+        "score": 0
+      }
+    ],
+    "settings": {
+      "oldScoreboard": false
+    },
+    "account": {
+      "name": "Local User",
+      "score": 225,
+      "funds": 0
+    },
+    "storage": {
+      "knClient": "{\"gameTime\": true}",
+      "knGameTime": "8073900"
+    }
+  },
+  "frames": 3,
+  "note": "The game time tile (hud_ui.c hud_gametime_step), opt-in: Settings > Client > Game > Show Game Time is on in this capture (state.storage knClient). The total is the device's own (state.storage knGameTime, 8073900 ms = 2h 14m 33.9s), read at the first frame. A signed-in stand-in account (state.account) shows the same tile: nothing comes from the account. Default settings otherwise (every stat tile off), so the tile is the only one in the counters row. KrunkNative's own render (doc/ref/krunknative/, llvmpipe); v10 has no such tile or setting."
+}

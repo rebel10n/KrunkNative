@@ -1043,6 +1043,12 @@ else ()
     target_include_directories(seek_choice_test PRIVATE client/include client/lib shared/include)
     target_link_libraries(seek_choice_test PRIVATE cJSON)
     add_test(NAME seek_choice_test COMMAND seek_choice_test)
+    # game_time_test (client/src/ui/game_time.c): the in-game game time counter's text (v7.1.4's
+    # getReadableTime) and its count against the account's total (commits re-anchor, guests and official games count nothing)
+    add_executable(game_time_test client/tests/game_time_test.c client/src/ui/game_time.c)
+    target_include_directories(game_time_test PRIVATE client/include shared/include)
+    target_link_libraries(game_time_test PRIVATE m)
+    add_test(NAME game_time_test COMMAND game_time_test)
 
     # kpd_phone_test: the K.P.D phone (client/src/ui/hud_votekick.c) under a call with no answer: it comes
     # down at KPD_NO_ANSWER_MS, and so does every other way out of a call (an answer, a refusal, a new

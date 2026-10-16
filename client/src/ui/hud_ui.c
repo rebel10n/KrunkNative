@@ -75,6 +75,8 @@ void hud_ui_hit(Client*, int kill);
 #include <string.h>
 #include <ruleset.h>
 #include <hud_v10.h>
+#include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
+#include <client_settings.h> // client_settings_game_time: Client > Game > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -248,6 +250,12 @@ typedef struct {
 } HudUi;
 
 static unsigned g_combat_hash; // hud_combat_step: FNV-1a of the last written perks / streaks state, 0 = rewrite
+
+// The top-right game time tile (#gameTimeCount, hud_gametime_step): the time this device has played.
+static GameTime g_game_time;
+static int g_gt_loaded;          // the stored total is read (the first HUD frame)
+static int g_gt_shown = -1;      // #gameTimeCount's display last written (-1 never)
+static long long g_gt_sec = -1;  // the seconds last written to #gameTimeVal
 
 static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .hit_frame_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1,
                          .vic = {0.0, 0.05, 2.5, 0.005, 0.01}, .tick_last_ms = -1.0};
@@ -3742,6 +3750,60 @@ static void hud_minimap_layout(void) {
     dom_display("timerHolder", "block");
 }
 
+// The game time tile: the last stat tile of .topRightCounters (statIcon, like the kill / death / score
+// tiles). Opt-in: the Client tab's "Show Game Time" (default off, KrunkNative only: v10 has no such
+// setting, doc/v10/). It shows the time this device has spent in games (game_time.c), for guests and
+// signed-in accounts alike; nothing of it comes from or goes to the account. The total is counted whether
+// or not the tile is shown, and stored under "knGameTime" (html_storage: native files, web localStorage)
+// every GAME_TIME_FLUSH_MS of play, when a game ends and at exit (hud_ui_game_time_flush).
+static void hud_gametime_store(void) {
+    char text[32];
+    if (game_time_store(&g_game_time, text, sizeof(text))) html_storage_set("knGameTime", text);
+}
+
+void hud_ui_game_time_flush(void) {
+    if (g_gt_loaded) hud_gametime_store(); // client_settings_exit: the play since the last store
+}
+
+static void hud_gametime_step(const Client *client, const int shown, const double now_ms) {
+    if (!g_gt_loaded) {
+        char text[32];
+        game_time_load(&g_game_time, html_storage_get("knGameTime", text, sizeof(text)) >= 0 ? text : NULL);
+        g_gt_loaded = 1;
+    }
+    // a game is up for the local player (any server, official krunker.io games included: the client sees
+    // them); counted while it is on screen (not over the ESC menu, not on the end screen)
+    const int session = client->in_game && client->me;
+    const int counting = session && shown && !client_round_ended(client);
+    if (game_time_step(&g_game_time, session, counting, now_ms)) hud_gametime_store();
+
+    if (!html_dom_by_id("gameTimeCount")) {
+        const HtmlElem counters = html_dom_query(0, ".topRightCounters");
+        if (!counters) return;
+        // KrunkNative's own tile, drawn as v10's stat tiles are (a 24px icon, the value)
+        html_dom_insert_html(counters, HTML_INSERT_BEFORE_END,
+                             "<div id=\"gameTimeCount\" class=\"statIcon\" style=\"display:none\"><div class=\"greyInner\">"
+                             "<i class=\"material-icons\" style=\"color:#fff;font-size:24px\">timer</i> "
+                             "<span id=\"gameTimeVal\">0m 0s</span></div></div>");
+        g_gt_shown = -1;
+        g_gt_sec = -1; // the new element still says "0m 0s": write the count at the next change
+    }
+    const int want = client_settings_game_time() && shown && session;
+    if (want != g_gt_shown) {
+        const HtmlElem tile = html_dom_by_id("gameTimeCount");
+        if (tile) html_dom_set_display(tile, want ? "inline-block" : "none");
+        g_gt_shown = want;
+    }
+    if (!want) return;
+    const long long sec = (long long) floor(game_time_ms(&g_game_time) / 1000.0);
+    if (sec != g_gt_sec) {
+        char text[48];
+        game_time_readable(text, sizeof(text), (double) sec * 1000.0);
+        dom_text("gameTimeVal", text);
+        g_gt_sec = sec;
+    }
+}
+
 // Mirrors UI.toggleGameUI(true) + toggleControlUI(true) with v7's default settings (DOM of
 // its sandbox game, FFA/TDM, guest).
 static void hud_apply_visibility(Client *client, const int in_game, const int visible) {
@@ -4311,6 +4373,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     }
     alive_was = alive;
     hud_apply_visibility(client, in_game, in_game && !html_ui_is_menu_open());
+    hud_gametime_step(client, in_game && !html_ui_is_menu_open(), hud_now_ms(client)); // the top-right game time tile
     hud_v7modes_tick(client, in_game, g_hud_layout_epoch); // rounds, KR tags, big head, speed run (hud_v7modes.c)
     social_prop_hud_tick(client, in_game && g_hud_ui.visible > 0, g_hud_layout_epoch); // WP-E: prop controls + taunt keys (hud_social.c)
     hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)

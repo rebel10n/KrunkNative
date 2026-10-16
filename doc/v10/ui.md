@@ -142,6 +142,26 @@ they do not show up in `getElementById` greps. v10 HUD additions:
 | Emoji panel | `emojiPanelHolder` -> `.emoji-panel` (in-game emotes) | v10:222874, 197374 |
 | Removed (not referenced anywhere in v10 JS) | 177 v7/ui ids, including `#menuBtnMaps/Mods/Profile/Settings/Join`, `#menuKRCount`, `#menuLevelBar`, `#streamContainer`, `#twoFAWindow`, partner ids, `#shopMainNav`, creator-code fields, `#consentWindow` | list: `~/.cache/kn-v10/ids.txt` + script `~/.cache/kn-v10-tools/ids.py` *(the v10 index.html was not supplied, so ids that exist only in its static markup cannot be ruled out)* |
 
+### KrunkNative additions (not in v10)
+
+| Element | What | Where |
+|---|---|---|
+| Game time tile `#gameTimeCount` | the last tile of `.topRightCounters` (a `statIcon` with a timer icon): the time this device has spent in games, v7.1.4's readable format (`2h 14m 33s`, `UTILS.getReadableTime(ms, true)`), ticking once a second | `client/src/ui/hud_ui.c` (`hud_gametime_step`), `client/src/ui/game_time.c`, `ui/css/hud.css` |
+| Setting "Show Game Time" | Settings > Client > Game, default **off**. v10 has no such setting or tile: an intentional difference, not a parity gap. It only shows the tile; the time is counted either way, so the total is complete when it is turned on | `client/src/ui/ui_client_settings.c` (`gameTime` row), `client/include/client_settings.h` |
+
+What the tile counts and where it lives (KrunkNative decisions):
+
+- The total is kept on the device only and never comes from or goes to the account: guests and
+  signed-in accounts see the same tile, and the brain's `player_timeplayed` plays no part.
+- Counted: the local player's session in any game the client is in (Box Office games and official
+  krunker.io games alike, since the client sees both), while the game is on screen: not over the ESC
+  menu, not on the end screen. Dead and spectating count (the game goes on).
+- Stored under the html_storage key `knGameTime` (decimal ms: `$XDG_CONFIG_HOME/krunknative/knGameTime.json`
+  natively, localStorage on the web), read once at the first HUD frame, written every 10 s of play, when
+  a game ends and at exit. A crash loses at most the last 10 s.
+- The tile sits in the counters row, so it wraps with the stat tiles and clears the board and the kill
+  feed (`tools/uidiff/scenarios/kn-ingame-gametime*.json`; references are KrunkNative's own renders).
+
 ## 6. Settings / i18n deltas affecting the page
 
 | Key | v7 | v10 |
