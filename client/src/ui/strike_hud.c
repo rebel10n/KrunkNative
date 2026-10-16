@@ -19,6 +19,7 @@
 // a Strike player respawns on their own, no menu in between (strike_hud_death_tick).
 // The round end: LEAN_END_SCREEN (WB, the template LEAN_END_SCREEN.html) over the game.
 #include <strike_ui.h>
+#include <strike_econ.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <shared.h>
@@ -59,8 +60,9 @@ static struct {
     char last_score[160], last_health[64], last_timer[64], last_reload[32], last_desk[128], last_hint[96];
     int last_card;
     int end_shown;
+    char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
-    int scenario, scn_health, scn_max_health;
+    int scenario, scn_health, scn_max_health, scn_reward;
 } H;
 
 // ---------------------------------------------------------------- helpers
@@ -447,38 +449,169 @@ static void update(Client *client) {
 
 // ---------------------------------------------------------------- the round end (LEAN_END_SCREEN)
 
+// the progress bar (the bundle's progress-bar hd at size 252, text horizontal, --end-screen): the
+// bar's segments are 252 x 175/193, 4/193 and 10/193 wide
+#define LEAN_BAR_WIDTH 252.0
+#define LEAN_BAR_DX (175.0 / 193.0)
+#define LEAN_BAR_MIDDLE (4.0 / 193.0)
+#define LEAN_BAR_RIGHT (10.0 / 193.0)
+
+// tB's copies: the stroke copy of each text, then the copy with its class (classes: gold / silver / bronze / place)
+static void victory_copy(StrBuf *sb, const int stroke, const char *cls, const char *text) {
+    sb_append(sb, "<div class=\"frvr-in-game-ui__victory-text ");
+    if (stroke) sb_append(sb, "frvr-in-game-ui__victory-text--stroke ");
+    else if (cls) sb_appendf(sb, "%s ", cls);
+    sb_append(sb, "frvr-in-game-ui__victory-text--small\"");
+    if (stroke) sb_append(sb, " style=\"--stroke-size: 2;\"");
+    sb_appendf(sb, ">%s</div>", text);
+}
+
+// _Ae(isFFA, rank, victoryState) through tB: FFA "#1 VICTORY" (gold), "2nd PLACE" (silver), "3rd
+// PLACE" (bronze), "Nth PLACE" (place); a team mode VICTORY / DEFEAT / DRAW, plain
+static void lean_words(const int ffa, const int rank, const int result, char *first, const size_t fn, char *second, const size_t sn,
+                       const char **cls) {
+    first[0] = 0;
+    *cls = NULL;
+    if (ffa && rank == 1) {
+        snprintf(first, fn, "#1");
+        *cls = "frvr-in-game-ui__victory-text--gold";
+        snprintf(second, sn, " VICTORY");
+    } else if (ffa) {
+        snprintf(first, fn, "%d%s", rank, rank == 2 ? "nd" : rank == 3 ? "rd" : "th");
+        *cls = rank == 2 ? "frvr-in-game-ui__victory-text--silver" : rank == 3 ? "frvr-in-game-ui__victory-text--bronze" : "frvr-in-game-ui__victory-text--place";
+        snprintf(second, sn, " PLACE");
+    } else {
+        snprintf(second, sn, "%s", result > 0 ? "VICTORY" : result == 0 ? "DEFEAT" : "DRAW");
+    }
+}
+
+static void lean_title(StrBuf *sb, const int ffa, const int rank, const int result) {
+    char first[16], second[24];
+    const char *cls;
+    lean_words(ffa, rank, result, first, sizeof(first), second, sizeof(second), &cls);
+    // FRVR's img gets no victory state class here (_Ae returns no victoryState)
+    sb_append(sb, "<div class=\"lean-end-screen__victory-defeat\"><img src=\"./img/victory-screen-bg.png\" class=\"lean-end-screen__victory-defeat--small \">");
+    sb_append(sb, "<div class=\"frvr-in-game-ui__victory-text-holder\">");
+    if (first[0]) victory_copy(sb, 1, NULL, first);
+    victory_copy(sb, 1, NULL, second);
+    sb_append(sb, "</div><div class=\"frvr-in-game-ui__victory-text-holder\">");
+    if (first[0]) victory_copy(sb, 0, cls, first);
+    victory_copy(sb, 0, NULL, second);
+    sb_append(sb, "</div></div>");
+}
+
+// the next level's reward image: the first reward of the track slot (free track: the first one), the
+// currency images of pa(reward); items and features have no image without FRVR's item definitions
+static const char *next_reward_image(const StrikeTrackSlot *slot, char *buf, const size_t n) {
+    if (!slot || slot->reward_count <= 0) return NULL;
+    const StrikeReward *r = &slot->rewards[0];
+    if (strcmp(r->type, "currency")) return NULL;
+    if (!strcmp(r->currency, "kr")) return "./img/currencies/krunkies.png";
+    if (!strcmp(r->currency, "xp")) return "./img/frvr-ui/xp-symbol.svg";
+    if (!strcmp(r->currency, "spin_ticket")) {
+        if (r->amount >= 1 && r->amount <= 3) snprintf(buf, n, "./img/frvr-ui/spin-ticket-%d.png", r->amount);
+        else snprintf(buf, n, "./img/frvr-ui/spin-ticket-many.png");
+        return buf;
+    }
+    return NULL;
+}
+
+// the lean screen's progress bar and rewards (WB.view): the account's level and XP (strike_econ),
+// the KR the server sent this player (player.reward), and the next level's reward. The XP gained
+// this match is not in the END packet, so the XP card and the bar's gain stay out (no levelUp).
+static void lean_main(StrBuf *sb, const StrikeLevel *lv, const int in_cap, const int reward, const StrikeTrackSlot *next) {
+    const double prog = lv->xp_to_next > 0 ? (double) lv->xp_in_level / (double) lv->xp_to_next : 0.0;
+    const double bar = LEAN_BAR_WIDTH * LEAN_BAR_DX;
+    const double fill = bar * prog;
+    sb_append(sb, "<div class=\"progress-bar__progress-bar-holder progress-bar--animate progress-bar--text-horizontal\" style=\"--progress-width: 252;\">");
+    sb_append(sb, "<div class=\"progress-bar__horizontal-holder\"><div class=\"progress-bar__left-text\">");
+    sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%s </span>", in_cap ? "Max Level" : "Level");
+    if (in_cap) sb_append(sb, "<span class=\"progress-bar__font-ode\"></span></div>");
+    else sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%d </span></div>", lv->level);
+
+    sb_appendf(sb, "<div class=\"progress-bar__bar-wrapper\" style=\"--bar-height: 16;\">");
+    sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--left progress-bar__bar--border-base\" style=\"--pos1: %.14g; --pos2: %.14g; --posEnd: 1; --posStart: 0; --bar-left-width: %.14g;\">", prog, prog, bar);
+    sb_appendf(sb, "<div class=\"progress-bar__bar-inner progress-bar__yellow progress-bar__bar-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div>", fill);
+    sb_appendf(sb, "<div class=\"progress-bar__bar-inner-inner progress-bar__yellow progress-bar__bar-inner-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div></div>", fill);
+    sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--middle progress-bar__bar--border-base\" style=\"--bar-middle-width: %.14g;\"></div>", LEAN_BAR_WIDTH * LEAN_BAR_MIDDLE);
+    sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--right progress-bar__bar--border-base\" style=\"--bar-right-width: %.14g;\"></div></div>", LEAN_BAR_WIDTH * LEAN_BAR_RIGHT);
+    sb_appendf(sb, "<div class=\"progress-bar__right-text progress-bar__font-ode\">%lld / %lld</div></div></div>", (long long) lv->xp_in_level, (long long) lv->xp_to_next);
+
+    sb_append(sb, "<div class=\"lean-end-screen__rewards-wrapper\"><div class=\"lean-end-screen__rewards-container\">");
+    if (reward > 0) {
+        sb_appendf(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\"><img src=\"./img/frvr-ui/krunkies.svg\" class=\"lean-end-screen__reward-image\" style=\"image-rendering: unset;\"></div>"
+                       "<div class=\"lean-end-screen__reward-bottom\"><div class=\"lean-end-screen__reward-text \">%d KR</div></div></div>", reward);
+    }
+    char image_buf[96];
+    const char *image = next_reward_image(next, image_buf, sizeof(image_buf));
+    const int group = next && next->reward_count > 0; // the group's one reward (its image when we have it)
+    sb_append(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\">");
+    if (image) sb_appendf(sb, "<img src=\"%s\" class=\"lean-end-screen__reward-image \" style=\"image-rendering: unset;\">", image);
+    sb_appendf(sb, "</div><div class=\"lean-end-screen__reward-bottom\"><div class=\"lean-end-screen__reward-text%s\">Next level reward</div></div></div>",
+               group ? " lean-end-screen__reward-text--small-text" : " ");
+    sb_append(sb, "</div></div>");
+}
+
 static void end_fill(Client *client, const int result) {
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_LEAN_END);
     if (!root) return;
-    // tB: the victory title (#1 VICTORY / DEFEAT / DRAW) on the lean screen
-    const char *state = result > 0 ? "--victory" : result == 0 ? "--defeat" : "--draw";
-    HtmlElem imgs[8];
-    const int n = html_dom_query_all(root, ".lean-end-screen__victory-defeat img", imgs, 8);
-    for (int i = 0; i < n; i++) {
-        html_dom_set_class(imgs[i], "lean-end-screen__victory-defeat--victory", result > 0);
-        html_dom_set_class(imgs[i], "lean-end-screen__victory-defeat--defeat", result == 0);
-        html_dom_set_class(imgs[i], "lean-end-screen__victory-defeat--draw", result < 0);
-    }
-    (void) state;
-    // rank: the place among the players by score (legacyData.rank "#N")
+    const StrikeAccount *acc = strike_econ_account();
+    const StrikeLevel lv = strike_level_for_xp(acc->xp);
+    const int in_cap = acc->max_level > 0 && lv.level >= acc->max_level;
     const Player *me = me_player(client);
-    int rank = 1;
-    if (me) {
-        for (size_t i = 0; i < client->game.player_count; i++) {
-            const Player *p = client->game.players[i];
-            if (p && p != me && p->score > me->score) rank++;
+    const int reward = H.scenario ? H.scn_reward : me ? me->reward : 0;
+    const int ffa = !team_mode(client);
+    // .frvr-end-screen__map: getGameNameAndMode(), "mode - map"
+    const char *mode_name = client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : "";
+    const char *map_name = menu_ui()->map_name;
+    char label[160];
+    snprintf(label, sizeof(label), "%s%s%s", mode_name, mode_name[0] && map_name[0] ? " - " : "", map_name);
+
+    StrBuf hs = {0}, ms = {0};
+    lean_title(&hs, ffa, client->net_end_rank, result);
+    sb_append(&hs, "<div class=\"frvr-end-screen__map\">");
+    sb_append_esc(&hs, label);
+    sb_append(&hs, "</div>");
+    lean_main(&ms, &lv, in_cap, reward, strike_track_level(lv.level + 1));
+    char *head = sb_finish(&hs), *main_html = sb_finish(&ms);
+    // the bar animates on its first draw: rebuild the header and the rewards only when they change
+    if (!H.lean_head || strcmp(H.lean_head, head) || strcmp(H.lean_main, main_html)) {
+        const HtmlElem header = html_dom_query(root, ".lean-end-screen__header");
+        if (header) html_dom_set_html(header, head);
+        // the template's bar and rewards are replaced in place: the bottom row (the podium button, the
+        // timer) sits inside .lean-end-screen__main-container too, so the container's markup stays
+        const HtmlElem bar = html_dom_query(root, ".progress-bar__progress-bar-holder");
+        const HtmlElem rewards = html_dom_query(root, ".lean-end-screen__rewards-wrapper");
+        if (bar) {
+            html_dom_insert_html(bar, HTML_INSERT_BEFORE_BEGIN, main_html);
+            html_dom_remove(bar);
         }
+        if (rewards) html_dom_remove(rewards);
+        char first[16], second[24];
+        const char *cls;
+        lean_words(ffa, client->net_end_rank, result, first, sizeof(first), second, sizeof(second), &cls);
+        printf("[strike] end screen: title \"%s%s\" level %d (%lld / %lld), reward %d KR\n", first, second, lv.level,
+               (long long) lv.xp_in_level, (long long) lv.xp_to_next, reward);
+        free(H.lean_head);
+        free(H.lean_main);
+        H.lean_head = head;
+        H.lean_main = main_html;
+    } else {
+        free(head);
+        free(main_html);
     }
-    // tB textArray ["#N", " VICTORY"]: a stroke copy and a gold / plain copy of each part
-    HtmlElem texts[8];
-    const int tn = html_dom_query_all(root, ".frvr-in-game-ui__victory-text", texts, 8);
-    char first[16];
-    snprintf(first, sizeof(first), "#%d", rank);
-    const char *second = result > 0 ? " VICTORY" : result == 0 ? " DEFEAT" : " DRAW";
-    for (int i = 0; i < tn; i++) html_dom_set_text(texts[i], i % 2 == 0 ? first : second);
-    // .frvr-end-screen__map: the map's name
-    const HtmlElem map = html_dom_query(root, ".frvr-end-screen__map");
-    if (map) html_dom_set_text(map, menu_ui()->map_name[0] ? menu_ui()->map_name : "");
+    // .lean-end-screen__timer: "Next round in" + the end timer's seconds (every timer packet)
+    const HtmlElem timer = html_dom_query(root, ".lean-end-screen__timer__time");
+    char t[16];
+    time_text(client->net_end_seconds, t, sizeof(t));
+    if (timer) html_dom_set_text(timer, t);
+}
+
+// the lean screen's state is rebuilt with each new screen
+static void lean_forget(void) {
+    free(H.lean_head);
+    free(H.lean_main);
+    H.lean_head = H.lean_main = NULL;
 }
 
 void strike_hud_end(Client *client, const int result) {
@@ -492,6 +625,7 @@ void strike_hud_end(Client *client, const int result) {
     }
     H.kill_card = 0;
     strike_touch_reset();
+    lean_forget();
     strike_screen_replace(STRIKE_SCREEN_LEAN_END); // nu(Ad, ...)
     end_fill(client, result);
     H.end_shown = 1;
@@ -502,6 +636,7 @@ void strike_hud_end_hide(Client *client) {
     (void) client;
     if (!strike_ui_active() || !H.end_shown) return;
     H.end_shown = 0;
+    lean_forget();
     if (strike_screen_top() == STRIKE_SCREEN_LEAN_END) strike_screen_clear();
 }
 
@@ -581,6 +716,7 @@ void strike_hud_reset(void) {
     H.log_count = 0;
     H.kill_card = 0;
     H.end_shown = 0;
+    lean_forget();
 }
 
 void strike_hud_tick(Client *client) {
@@ -607,6 +743,13 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
     H.scenario = 1;
     H.scn_health = sjn(st, "health", 0);
     H.scn_max_health = sjn(st, "maxHealth", 0);
+    // the round end's values (no players in a scenario): the place (1 = first), the KR of the match
+    // (player.reward) and the end timer's seconds
+    H.scn_reward = sjn(st, "endReward", 0);
+    if (client) {
+        client->net_end_rank = sjn(st, "endRank", 1);
+        client->net_end_seconds = sjn(st, "endSeconds", 0);
+    }
     const cJSON *feed = cJSON_GetObjectItemCaseSensitive(st, "killfeed");
     const cJSON *row;
     cJSON_ArrayForEach(row, feed) {

@@ -13,7 +13,9 @@
     "classIndex": 0,
     "menu": true,
     "strike": {
-      "end": 1
+      "end": 1,
+      "endReward": 25,
+      "endSeconds": 30
     }
   },
   "frames": 3,

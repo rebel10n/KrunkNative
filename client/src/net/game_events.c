@@ -361,9 +361,12 @@ static void events_end(Client *client, const NetEndPacket *packet) {
     client->spawn_requested = 0;
     events_apply_board(client, &packet->board);
     // endData.ed "reward": player.reward of every board row (0 = "NONE")
+    // legacyData.rank: the local player's place in the board's order (the END order)
+    client->net_end_rank = 0;
     for (int i = 0; i < packet->board.count && i < GAME_LEADERBOARD_MAX; i++) {
         Player *player = events_find_player(client, packet->board.entries[i].uid);
         if (player) player->reward = packet->rewards[i];
+        if (client->me && !client->net_end_rank && packet->board.entries[i].uid == client->me->uid) client->net_end_rank = i + 1;
     }
     const int playing = (client->me && client->me->active) || spectate_active();
     // v10's end handler (v10.js:219715): a playing or spectating player gets the title, then the
@@ -1279,6 +1282,7 @@ void client_game_events_reset(Client *client) {
     client->net_round_seconds = -1;
     client->net_end_seconds = -1;
     client->net_end_result = INT32_MIN;
+    client->net_end_rank = 0;
     g_end_message_sent = 0; // startGame: the next match end sends endMessage again
     g_kpd_case = 0;
     // "init" -> CONTROLS.reset(): keys = {}, didPressed = {}. A key held through the end

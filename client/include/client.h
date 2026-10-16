@@ -721,6 +721,7 @@ typedef struct {
     int net_round_seconds;         // round clock (TIMER), -1 = no round clock received yet
     int net_end_seconds;           // end screen "Next Round in" seconds, -1 = no end screen
     int net_end_result;            // END result: 1 victory, 0 defeat, -1 draw
+    int net_end_rank;              // END: the local player's place on the board (1 first), 0 not on it
     int net_damage_from_valid;     // the last HEALTH for `me` carried a dealer position
     float net_damage_from_x;       // dealer x/z of that hit (Krunker "h" packet args 3/4)
     float net_damage_from_z;
