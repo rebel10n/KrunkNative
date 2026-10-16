@@ -78,11 +78,11 @@ NOTIFICATIONS = [
 def main():
     os.makedirs(RG, exist_ok=True)
     emit("kn-notify-center", "ingame-plain", {"notifications": NOTIFICATIONS},
-         [region("center", [8, 440, 240, 170], "#notificationCenter: three stacked notifications, newest on top, bars at 100 / 62.5 / 15 %. max_pct 5.5: the layout matches Chrome's to the sub-pixel (rects probed in the capture); what is left is rasterisation: the titles' synthetic bold (font-weight 600, GameFont has no bold face) is anchored bottom-left by FT_Outline_EmboldenXY where Chrome centres it (~3 %: centring it in text.c drops the title rows to 0.1 %), and the 1.74 px expiration bars at fractional y under the in-game 0.579 scale, which Chrome antialiases over three rows (~1.5 %)", max_pct=5.5)],
+         [region("center", [8, 440, 240, 170], "#notificationCenter: three stacked notifications, newest on top, bars at 100 / 62.5 / 15 %. max_pct 3.0 (2.04 %): the layout matches Chrome's to the sub-pixel (rects probed in the capture) and the titles' synthetic bold (font-weight 600, GameFont has no bold face) is Chrome's centred one; what is left is the 1.74 px expiration bars at fractional y under the in-game 0.579 scale, which Chrome antialiases over three rows (~1.5 %)", max_pct=3.0)],
          "In game, v10's notification center with three stacked notifications (newest on top, countdown bars frozen).",
          ref="notify-center")
     emit("kn-notify-announcement", "ingame-plain", {"announcement": "Double XP weekend is live! Play now."},
-         [region("banner", [8, 566, 240, 48], ".game-announcement.show with its .ga-message line, bottom left above the chat. max_pct 5.5: the label's synthetic bold (font-weight bold) rasterised uncentred (~2.8 %, see kn-notify-center) and its 0.58 px underline (1px under the 0.579 scale) that Chrome spreads over two rows (~1.6 %); a full-width underline (max-width: fit-content lost) is 6 %", max_pct=5.5)],
+         [region("banner", [8, 566, 240, 48], ".game-announcement.show with its .ga-message line, bottom left above the chat; the label is a block with max-width: fit-content, so its underline spans the text only (a full-width one is 6 %). max_pct 4.0 (2.89 %): what is left is the 0.58 px underline (1px under the 0.579 scale) that Chrome spreads over two rows (~1.6 %) and glyph rasterisation", max_pct=4.0)],
          "In game, v10's game announcement banner showing a server message.", ref="notify-announcement")
     emit("kn-notify-emoji", "ingame-chat-open", {"emoji": {"chat": "gg :ok", "selected": 1}},
          [region("panel", [0, 380, 300, 240], "#emojiPanelHolder: the filtered emoji list above the chat, the second one selected")],

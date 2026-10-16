@@ -13,8 +13,8 @@
         240,
         48
       ],
-      "note": ".game-announcement.show with its .ga-message line, bottom left above the chat. max_pct 5.5: the label's synthetic bold (font-weight bold) rasterised uncentred (~2.8 %, see kn-notify-center) and its 0.58 px underline (1px under the 0.579 scale) that Chrome spreads over two rows (~1.6 %); a full-width underline (max-width: fit-content lost) is 6 %",
-      "max_pct": 5.5
+      "note": ".game-announcement.show with its .ga-message line, bottom left above the chat; the label is a block with max-width: fit-content, so its underline spans the text only (a full-width one is 6 %). max_pct 4.0 (2.89 %): what is left is the 0.58 px underline (1px under the 0.579 scale) that Chrome spreads over two rows (~1.6 %) and glyph rasterisation",
+      "max_pct": 4.0
     }
   ]
 }

@@ -977,10 +977,3 @@ html.kn-bare-window #instructions {
 .polConfPop > div:first-child {
   line-height: 32px;
 }
-
-/* v10's game announcement (v10_notify.c): its "Game Announcement" label (.game-announcement:before)
- * is a block with max-width: fit-content, so the label's underline spans the text only. The engine
- * resolves only length max-widths; for an auto-width block width: fit-content is the same box. */
-.game-announcement.svelte-1m80xxc:before {
-  width: fit-content;
-}
