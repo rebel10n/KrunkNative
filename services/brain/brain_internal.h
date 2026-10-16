@@ -55,6 +55,8 @@ int internal_ws_init(Brain *b);
 void internal_ws_shutdown(Brain *b);
 /* Send a frame to a LOCAL node (not consumed). 0 ok, -1 not connected. */
 int internal_ws_send(Brain *b, const char *node_id, const cJSON *frame);
+/* Every connected node gets the frame (not consumed): a brain-wide notice (ranked queue start). */
+void internal_ws_broadcast(Brain *b, const cJSON *frame);
 /* Request/response to a local node: adds "rid" to frame (consumed) and calls cb
  * once with the reply frame (matching rid), or reply NULL + err on timeout or
  * disconnect. Returns 0, or -1 (cb not called) when the node is not local. */

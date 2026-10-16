@@ -221,6 +221,16 @@ void social_push_account_ex(int64_t account_id, cJSON *frame, int json_only) {
 
 void social_push_account(int64_t account_id, cJSON *frame) { social_push_account_ex(account_id, frame, 0); }
 
+/* A frame to every signed-in JSON social socket of this brain (a brain-wide notice, e.g. the
+ * ranked queue start): the sockets of other brains get it from their own queue. */
+void social_push_all_json(cJSON *frame) {
+    if (!frame) return;
+    for (SocialSession *s = s_online; s; s = s->next) {
+        if (social_open(s) && s->json) social_send(s, cJSON_Duplicate(frame, 1));
+    }
+    cJSON_Delete(frame);
+}
+
 cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
     const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",

@@ -19,8 +19,15 @@ kn_proto.free_ports()), registers 8 accounts, then:
   4. a player quits mid-match: needAll ends the round, ranked-result -> the other team wins:
      winners' MMR up, the abandoner's down + COOLDOWN + 1 abandon (/mm/ranked/profile),
      players.player_elo mirrors the MMR, the match history has it
+  5. every roster player had a lobby team (no "Please join a Team to Spawn" for anyone)
+  6. a ranked queue's notice ("<name> queued for ranked", v10 server.message.queued, the ranked
+     green #5ce05a) goes to every player: a player in a game gets it as NET_CHAT_RANKED (4), and
+     a signed-in social socket with no game gets the "ranked:queued" event (eb) on the brain
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
+import asyncio
+import base64
+import hashlib
 import json
 import os
 import secrets
@@ -39,7 +46,7 @@ import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_rk_e2e_{os.getpid()}")
-BRAIN_PORT, GAME_PORT = kn_proto.free_ports(2)
+BRAIN_PORT, GAME_PORT, GAME2_PORT = kn_proto.free_ports(3)
 WORK = tempfile.mkdtemp(prefix="kn-rk-e2e-", dir=os.path.expanduser("~/.cache"))
 CHAT, TEAM, COMP_SET, COMP_LOBBY = 9, 42, 184, 185
 MINOR_V7 = 3
@@ -74,6 +81,14 @@ def http(path, **q):
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"null")
+
+
+def read_file(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
 
 
 def log(name):
@@ -136,6 +151,40 @@ def spawned(conn, me_uid):
             if info and info["uid"] == me_uid:
                 return struct.unpack("<iBBii", p[:14])[4]  # NetSpawnPacket.team
     return None
+
+
+def pw_hash(password, iterations=600000):
+    """kn_password_hash's "$pbkdf2-sha256$i=N$salt$key" (services/common/src/crypto.c)"""
+    salt = secrets.token_bytes(16)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations, 32)
+    return "$pbkdf2-sha256$i=%d$%s$%s" % (iterations, base64.b64encode(salt).decode(), base64.b64encode(key).decode())
+
+
+async def social_queue_notice(name, password, trigger):
+    """A signed-in social socket (JSON) with no game: logs in, runs trigger() (the queue), then
+    collects frames until the ranked:queued event shows up or 12 s pass."""
+    import websockets  # noqa: PLC0415 - the v10 page e2e needs it too
+
+    frames = []
+    async with websockets.connect("ws://127.0.0.1:%d/social/ws?enc=json" % BRAIN_PORT, open_timeout=10) as ws:
+        await ws.send(json.dumps(["a", 1, [name, password, 0]]))  # login (sh_auth action 1)
+        end = time.time() + 10
+        while time.time() < end and not any(f[0] == "a" for f in frames):
+            try:
+                frames.append(json.loads(await asyncio.wait_for(ws.recv(), 1.0)))
+            except asyncio.TimeoutError:
+                pass
+        logged_in = any(f[0] == "eb" and isinstance(f[1], dict) and f[1].get("type") == "unread:summary" for f in frames) or any(f[0] == "a" for f in frames)
+        trigger()
+        end = time.time() + 12
+        while time.time() < end:
+            if any(f[0] == "eb" and isinstance(f[1], dict) and f[1].get("type") == "ranked:queued" for f in frames):
+                break
+            try:
+                frames.append(json.loads(await asyncio.wait_for(ws.recv(), 1.0)))
+            except asyncio.TimeoutError:
+                pass
+    return logged_in, frames
 
 
 def main():
@@ -263,6 +312,9 @@ def run():
             c.ent(class_index=0)
     for c in conns:
         c.read(timeout=1.0)
+    no_team_refusal = not any("Please join a Team" in t for c in conns for t in chats(c))
+    check("every roster player has a lobby team: no 'Please join a Team to Spawn'", no_team_refusal and len(table) == 8,
+          json.dumps([t for c in conns for t in chats(c) if "Please join a Team" in t])[:200])
 
     # 4. a player abandons: the round ends, the other team wins
     quitter = 5
@@ -292,6 +344,82 @@ def run():
     check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))
     for c in conns:
         c.close()
+
+    # 6. the queue notice: a player in a game (the public lobby, once the ranked match is over and
+    # everyone left) queues; the brain's "ranked-notice" reaches its game's chat in NET_CHAT_RANKED
+    NOTICE_NAME = "rk_queue"
+    notice_token = secrets.token_hex(16)
+    psql(f"SELECT kn_register('{NOTICE_NAME}', 'x', '127.0.0.1', '', 0, 0, '{notice_token}', 3600, 'e2e')")
+    back_public = wait_for(lambda: "back to the public rotation" in log("game.log"), timeout=20)
+    check("the ranked lobby went back to the public rotation", bool(back_public))
+    watcher = kn_proto.Conn("127.0.0.1", GAME_PORT)
+    watcher.send(1, bytes([1, MINOR_V7, 0]))
+    watcher.join(session=notice_token)
+    watcher.read(until=kn_proto.INIT, timeout=10)
+    watcher.read(timeout=1.5)  # READY (the session settles): the brain sees the player in this game
+    queued = http("/mm/ranked/queue", token=notice_token, regions="na")[1]
+    check("the player in a game queues for ranked", queued.get("payload", {}).get("status") == "QUEUED",
+          json.dumps(queued)[:200])
+    notice = None
+    end = time.time() + 10
+    while notice is None and time.time() < end:
+        watcher.read(timeout=0.5)
+        for t, p in watcher.packets:
+            if t == CHAT and len(p) >= 4 + 1 + 32 + 288 and p[4] == 4:
+                text = kn_proto.uncstr(p[37:37 + 288])
+                if text == f"{NOTICE_NAME} queued for ranked":
+                    notice = text
+    check("the game's chat gets '<name> queued for ranked' in NET_CHAT_RANKED (4)", notice is not None,
+          str([(p[4], kn_proto.uncstr(p[37:37 + 288])) for t, p in watcher.packets if t == CHAT][-3:]))
+    watcher.close()
+
+    # a second game node (another server of the same brain), with a player in its public lobby
+    cfg2 = os.path.join(WORK, "rk2.cfg")
+    with open(cfg2, "w") as f:
+        f.write(f'hostname "Ranked E2E 2"\nport {GAME2_PORT}\nnode_id RKE2\nregion local\nmaxplayers 10\n'
+                f"coordinator_url ws://127.0.0.1:{BRAIN_PORT}/mm/internal/ws\n"
+                f"coordinator_http_url http://127.0.0.1:{BRAIN_PORT}\nmapcycle Burg\nmode ffa\njoin_timeout 4\n")
+    game2_log = os.path.join(WORK, "game2.log")
+    procs.append(subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", cfg2, "--config", os.path.join(WORK, "none.json")],
+                                  stdout=open(game2_log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
+    check("a second game node links to the brain", bool(wait_for(lambda: "welcomed" in read_file(game2_log))))
+    other_token = secrets.token_hex(16)
+    psql(f"SELECT kn_register('rk_node2', 'x', '127.0.0.1', '', 0, 0, '{other_token}', 3600, 'e2e')")
+    node2 = kn_proto.Conn("127.0.0.1", GAME2_PORT)
+    node2.send(1, bytes([1, MINOR_V7, 0]))
+    node2.join(session=other_token)
+    node2.read(until=kn_proto.INIT, timeout=10)
+    node2.read(timeout=1.5)
+
+    # the same notice for a signed-in social socket with no game (every player, not only a game's)
+    SOCIAL_NAME, SOCIAL_PW = "rk_social", "rk-social-pw"
+    social_token = secrets.token_hex(16)
+    psql(f"SELECT kn_register('{SOCIAL_NAME}', '{pw_hash(SOCIAL_PW, 1000)}', '127.0.0.1', '', 0, 0, '{social_token}', 3600, 'e2e')")
+    queued_again = []
+
+    def queue_social():  # the socket's own account queues: its line goes to every socket, the queuer's too
+        queued_again.append(http("/mm/ranked/queue", token=social_token, regions="na")[1])
+
+    try:
+        logged_in, frames = asyncio.run(social_queue_notice(SOCIAL_NAME, SOCIAL_PW, queue_social))
+    except Exception as e:  # noqa: BLE001 - reported as a failed check
+        logged_in, frames = False, [repr(e)]
+    node2_notice = None
+    end = time.time() + 10
+    while node2_notice is None and time.time() < end:
+        node2.read(timeout=0.5)
+        for t, p in node2.packets:
+            if t == CHAT and len(p) >= 4 + 1 + 32 + 288 and p[4] == 4 and kn_proto.uncstr(p[37:37 + 288]) == f"{SOCIAL_NAME} queued for ranked":
+                node2_notice = p
+    check("a player on another game node gets '<name> queued for ranked' in NET_CHAT_RANKED (#5ce05a)", node2_notice is not None,
+          str([(p[4], kn_proto.uncstr(p[37:37 + 288])) for t, p in node2.packets if t == CHAT][-3:]))
+    node2.close()
+    eb = [f[1] for f in frames if isinstance(f, list) and f and f[0] == "eb" and isinstance(f[1], dict)
+          and f[1].get("type") == "ranked:queued"]
+    check("the social socket with no game logs in", bool(logged_in), str(frames[:2])[:200])
+    check("a social socket with no game gets '<name> queued for ranked' (ranked:queued, #5ce05a)",
+          bool(eb) and eb[0].get("text") == f"{SOCIAL_NAME} queued for ranked" and eb[0].get("color") == "#5ce05a",
+          str(eb[:1])[:200] if eb else str([f[:2] if isinstance(f, list) else f for f in frames])[:300])
 
 
 main()

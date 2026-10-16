@@ -272,6 +272,7 @@ void net_change_map(int map_index, int mode_index);
 // Caller holds g_server->lock.
 #define SERVER_HAVE_NET_CHAT 1
 void net_broadcast_chat(const char *from, const char *msg);
+void net_broadcast_ranked_notice(const char *msg); // the brain's "ranked-notice" line (NET_CHAT_RANKED)
 
 // v10's game announcement banner (NET_EXT_GAME_ANNOUNCEMENT, shared/include/net_ext.h): the CLI's
 // `announce` sets the server's message ("" clears it) and sends it to every client; each client

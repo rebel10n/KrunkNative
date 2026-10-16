@@ -19,6 +19,9 @@ void social_ws_shutdown(Brain *b);
  * (consumes frame). For other modules that want realtime notifications. */
 void social_push_account(int64_t account_id, cJSON *frame);
 
+/* Every signed-in JSON social socket of this brain gets the frame (consumed). */
+void social_push_all_json(cJSON *frame);
+
 /* Hub creation catalogue routes /api/maps, /api/mods, /api/assets, /api/search,
  * /api/streams, /api/prices (creations.c, v3.1.1 publicRoutes.ts). BrainModule hook. */
 int creations_init(Brain *b);

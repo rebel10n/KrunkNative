@@ -3036,6 +3036,7 @@ static void acc_handle_frame(cJSON *frame) {
     else if (!strcmp(type, "drain")) acc_handle_drain(frame);
     else if (!strcmp(type, "rcon")) rcon_handle_brain_frame(frame);
     else if (!strcmp(type, "ranked-result-reply")) acc_handle_ranked_reply(frame);
+    else if (!strcmp(type, "ranked-notice")) net_broadcast_ranked_notice(acc_str(cJSON_GetObjectItem(frame, "text"), "")); // a queue's line
     else if (!strcmp(type, "map-data")) acc_handle_map_data(frame);
     else if (!strcmp(type, "bot-banter-reply")) bot_banter_on_brain_frame(frame); // bot chat (server/src/bot_banter.c)
     else if (!strcmp(type, "assign")) {

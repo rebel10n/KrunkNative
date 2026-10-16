@@ -119,6 +119,14 @@ void net_broadcast_chat(const char *from, const char *msg) {
     net_broadcast_chat_except(NULL, -1, NET_CHAT_SERVER, from, text);
 }
 
+// The brain's ranked notice ("ranked-notice"): a line for every player of this game server.
+void net_broadcast_ranked_notice(const char *msg) {
+    char text[NET_CHAT_TEXT_SIZE];
+    if (!net_chat_sanitize(text, sizeof(text), msg, msg ? strlen(msg) : 0)) return;
+
+    net_broadcast_chat_except(NULL, -1, NET_CHAT_RANKED, NULL, text);
+}
+
 static char g_game_announcement[NET_GAME_ANNOUNCEMENT_TEXT];
 
 const char *net_game_announcement(void) { return g_game_announcement; }

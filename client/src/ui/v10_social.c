@@ -576,6 +576,14 @@ static void notify_open_conv(void *user) {
 
 static void notify_open_profile(void *user) { open_profile((const char *) user); }
 
+// A ranked queue started (v10 server.message.queued "{0} queued for ranked"): the notification centre,
+// for every signed-in player; the game chat carries the same line in the ranked green.
+static void notify_ranked_queued(const cJSON *o) {
+    const char *text = jstr(o, "text");
+    if (!text[0]) return;
+    v10_notify_push_ex("Ranked", text, NOTIFY_FRIEND_MS, NULL, NULL);
+}
+
 static void notify_friend(const cJSON *o, const int accepted) {
     const char *name = jstr(o, "name");
     if (!name[0]) return;
@@ -761,6 +769,7 @@ static void on_social(void *user, const cJSON *frame) {
     else if (!strcmp(type, "error")) eb_on_error(o);
     else if (!strcmp(type, "friend:request")) notify_friend(o, 0); // KrunkNative (kn_brain social_eb.c)
     else if (!strcmp(type, "friend:accepted")) notify_friend(o, 1);
+    else if (!strcmp(type, "ranked:queued")) notify_ranked_queued(o); // KrunkNative: a ranked queue started (services/brain/ranked.c)
     else return; // presence:pong
     if (!strcmp(type, "friends:list") || !strncmp(type, "presence:", 9)) menu_rerender_if_open(5); // window 5's Friends tab
     // an open conversation reads what arrives (v10: msg:read whenever its length changes)

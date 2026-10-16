@@ -88,6 +88,14 @@ int internal_ws_send(Brain *b, const char *node_id, const cJSON *frame) {
     return send_frame(conn_by_node(node_id), frame);
 }
 
+/* Every connected (helloed) node of this brain gets the frame (not consumed). */
+void internal_ws_broadcast(Brain *b, const cJSON *frame) {
+    (void) b;
+    for (NodeConn *c = g_conns; c; c = c->next) {
+        if (c->helloed) send_frame(c, frame);
+    }
+}
+
 int internal_ws_node_count(void) {
     int n = 0;
     for (NodeConn *c = g_conns; c; c = c->next) n += c->helloed;

@@ -52,6 +52,7 @@
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
+#include "social_ws.h"
 
 #define MOD "ranked"
 #define MAX_CAND 512
@@ -206,7 +207,33 @@ typedef struct JoinCtx {
     kn_http_req *req;
     char regions[32];
     char key[64];
+    char name[64];
 } JoinCtx;
+
+/* v10 server.message.queued "{0} queued for ranked" (the ranked queue start), to every player
+ * this brain serves: each connected game node gets a "ranked-notice" (its players' chat, as
+ * NET_CHAT_RANKED) and each signed-in JSON social socket an "eb" "ranked:queued" event (the menu's
+ * notification). The colour is the ranked UI's green (#5ce05a). Other brains' nodes and sockets
+ * get nothing from this queue (federation pushes are per account). */
+static void queue_notice(const char *name) {
+    char text[96];
+    snprintf(text, sizeof text, "%s queued for ranked", name && name[0] ? name : "A player");
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "type", "ranked-notice");
+    cJSON_AddStringToObject(node, "text", text);
+    cJSON_AddStringToObject(node, "color", "#5ce05a");
+    internal_ws_broadcast(R.b, node);
+    cJSON_Delete(node);
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "type", "ranked:queued");
+    cJSON_AddStringToObject(obj, "name", name && name[0] ? name : "");
+    cJSON_AddStringToObject(obj, "text", text);
+    cJSON_AddStringToObject(obj, "color", "#5ce05a");
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString("eb"));
+    cJSON_AddItemToArray(frame, obj);
+    social_push_all_json(frame);
+}
 
 static void on_joined(kn_db_result *res, void *ud) {
     JoinCtx *j = ud;
@@ -237,6 +264,7 @@ static void on_joined(kn_db_result *res, void *ud) {
         cJSON_AddStringToObject(p, "regions", j->regions);
         cJSON_AddNumberToObject(p, "season", current_season());
         cJSON_AddNumberToObject(p, "estimatedWaitTime", 120);
+        queue_notice(j->name);
         brain_reply_json(j->req, 200, o);
         cJSON_Delete(o);
     }
@@ -247,6 +275,7 @@ static void on_joined(kn_db_result *res, void *ud) {
 static void join_account(void *ud, kn_http_req *req, const int64_t id, const int level, const char *name) {
     JoinCtx *j = ud;
     (void) req;
+    snprintf(j->name, sizeof j->name, "%s", name ? name : "");
     if (level < R.min_level) {
         reply_mm_error(j->req, "MIN_LEVEL_REQUIREMENT", "You must be level 10 or higher to access Ranked Mode.", NULL);
         free(j);

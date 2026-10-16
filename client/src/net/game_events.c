@@ -56,6 +56,7 @@
 #include <ruleset.h>
 
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
+#define RANKED_CHAT_COLOR "#5ce05a" // the ranked UI's green: a ranked queue's notice (NET_CHAT_RANKED)
 
 void client_net_send(Client *client, const NetPacketType type, const void *payload, const uint16_t length) {
     client_net_tally_egress(length); // WP-E: #egressPacketCount
@@ -407,6 +408,9 @@ static void events_chat(const NetChatPacket *packet) {
             break;
         case NET_CHAT_SERVER:
             hud_ui_add_chat(NULL, text, SERVER_CHAT_COLOR);
+            break;
+        case NET_CHAT_RANKED: // the brain's "queued for ranked" line (ranked_ui.c's green)
+            hud_ui_add_chat(NULL, text, RANKED_CHAT_COLOR);
             break;
         case NET_CHAT_FOUND_JUNK: // io_foundJunk
             hud_ui_found_junk(text);

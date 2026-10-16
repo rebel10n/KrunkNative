@@ -2380,6 +2380,9 @@ typedef enum {
     // v7 "jnk" -> io_foundJunk: the finder's "You found [x.xx] Junk" (text: that plain line; the
     // client colours "You" and the amount). Older clients show it as a plain game line.
     NET_CHAT_FOUND_JUNK = 3,
+    // KrunkNative: a ranked queue's notice (v10 server.message.queued), in the ranked UI's green
+    // (#5ce05a, the client's RANKED_CHAT_COLOR). Older clients show it as a plain game line.
+    NET_CHAT_RANKED = 4,
 } NetChatKind;
 
 enum {
