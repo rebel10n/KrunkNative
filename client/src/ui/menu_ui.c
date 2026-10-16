@@ -1480,6 +1480,11 @@ static void menu_set_connect(const int connected, const char *error, const char 
     if (connected) g_ui.connect_error[0] = 0;
     else snprintf(g_ui.connect_error, sizeof(g_ui.connect_error), "%s", error && error[0] ? error : CONNECT_ERROR_DEFAULT);
     snprintf(g_connect_code, sizeof(g_connect_code), "%s", !connected && code && code[0] ? code : "000000");
+    if (strike_ui_active()) { // Krunker Strike's popups (strike_connect.c): the Game Updating / Lost Connection text
+        const StrikeConnState st = connected ? STRIKE_CONN_CONNECTED
+                                 : !strcmp(g_ui.connect_error, "GAME UPDATING") ? STRIKE_CONN_UPDATING : STRIKE_CONN_LOST;
+        strike_connection_state(st, connect_error_text(g_ui.connect_error), g_connect_code, g_connect_close_code, g_connect_close_reason);
+    }
     if (connected) menu_idle_reset(); // Krunker's retry link reloads the page: a fresh idle timer
     if (connected) krunker_net_clear_failure(); // a later error screen is this session's, not the official game's before it
     if (!connected) g_ui.ready = 0; // the next INIT (reconnect) makes the client ready again
@@ -1689,6 +1694,8 @@ static void menu_poll_connection(Client *client) {
     // a transport that retries by itself (within its budget) or a rejoin under way: the spinner
     const int transport_retries = !gave_up && !client->net_hold_retry && !client->net_should_quit;
     if (rejoining || transport_retries) {
+        // a dropped session reconnects behind Krunker Strike's "Reconnecting..." loading screen (strike_connect.c)
+        if (had_session && strike_ui_active()) strike_connection_state(STRIKE_CONN_RECONNECTING, NULL, NULL, 0, NULL);
         connecting_spinner();
         return;
     }

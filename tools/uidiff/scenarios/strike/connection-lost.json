@@ -1,0 +1,26 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "state": {
+    "connected": false,
+    "ready": false,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "connection": {
+        "state": "lost",
+        "error": "Disconnected from the server",
+        "code": "000001",
+        "closeCode": 1006,
+        "reason": "Connection lost"
+      }
+    }
+  },
+  "note": "KrunkNative only (no FRVR capture): the Lost Connection popup (POPUP_WARNING, strike_connect.c) over the main menu's stack, as FRVR's dSe shows it: title, message, ID / Code / Reason and the Reconnect button."
+}

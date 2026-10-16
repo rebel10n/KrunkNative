@@ -161,6 +161,14 @@ Notes from the bundle:
   Profile pictures are the default (class icon 0); the platform invite dialog ("Invite Friends", "+ More Friends") has
   no KrunkNative counterpart and is not shown / does nothing.
 
+## Connection popup (POPUP_WARNING, 2026-10-15)
+
+`screens/POPUP_WARNING.html` is the bundle's POPUP_WARNING view (`Oue`, reached through `Pt(UI, ...)` by oN / dSe:
+Lost Connection with its ID, Code and Reason and a Reconnect button, or Game Updating with no button), hand-written from the
+bundle and not a sandbox capture. `client/src/ui/strike_connect.c` fills it. Its icon `img/frvr-ui/info-warning.svg` is one GET
+from `https://krunkerstrike.frvr.com/img/frvr-ui/info-warning.svg` (HTTP 200, 702 bytes, sha256
+4e2e00cd34098955d26f37b4d306d97fbf4aa5dc69b5885d85ca984f12c4b4d9; not in the sandbox's public tree).
+
 ## Images fetched for the transcribed screens and the friends panel (2026-10-15)
 
 GET only, one request every 4 to 5 s, exact paths, no cookies, nothing executed. The bundle loads `./img/...` from the

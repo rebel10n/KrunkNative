@@ -1,0 +1,22 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "state": {
+    "connected": false,
+    "ready": false,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "connection": {
+        "state": "updating"
+      }
+    }
+  },
+  "note": "KrunkNative only (no FRVR capture): the Game Updating popup (POPUP_WARNING with hideAction: no button), as FRVR's oN shows it for GAME UPDATING."
+}

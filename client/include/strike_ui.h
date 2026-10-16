@@ -11,6 +11,7 @@
 //                                  screen (vb / fz: curtains, cog, logo, bar), templates, tick
 //   client/src/ui/strike_menu.c    main menu, class selection, tap to play, settings, meta screens
 //   client/src/ui/strike_meta.c    missions tab, reward card, match details, the rewards track
+//   client/src/ui/strike_connect.c the connection popups: Lost Connection, Game Updating, Reconnecting...
 //   client/src/ui/strike_hud.c     the in-game UI (H5 / IN_GAME_UI): health, ammo, timer, kill feed,
 //                                  scoreboard, kill card, end screens
 //   client/src/ui/strike_touch.c   the mobile controls (a5: joystick zones, control buttons): mouse
@@ -85,6 +86,7 @@ typedef enum {
     STRIKE_SCREEN_MATCH_DETAILS,
     STRIKE_SCREEN_LEADERBOARD_PLAYERS,
     STRIKE_SCREEN_POPUP,
+    STRIKE_SCREEN_POPUP_WARNING, // FRVR's UI (POPUP_WARNING): the connection popups (strike_connect.c)
     STRIKE_SCREEN_PROFILE,
     STRIKE_SCREEN_ITEM_SELECTION, // T5, a Customization category's items (transcribed, strike_menu.c)
     STRIKE_SCREEN_REPORT_PLAYER,  // Hy (strike_social.c)
@@ -104,8 +106,26 @@ void strike_screen_push(StrikeScreen s);          // Pt(view): no-op when alread
 void strike_screen_pop(void);                     // kt(): back
 void strike_screen_replace(StrikeScreen s);       // nu(view): the stack becomes [s]
 void strike_screen_clear(void);                   // in game: nothing but the in-game UI
+void strike_screen_remove(StrikeScreen s);         // the topmost entry of that screen goes (no back)
 HtmlElem strike_screen_root(StrikeScreen s);      // the screen's root element, 0 when not shown
 void strike_screen_rerender(StrikeScreen s);      // g.redraw() for one screen: template again
+
+// The connection popups (strike_connect.c): menu_ui.c reports the transport's state (menu_set_connect,
+// menu_poll_connection). FRVR's disconnect handling (oN / dSe in the bundle): "GAME UPDATING" (and
+// NoServersMatchQuery) shows Game Updating with no button; a dropped session shows "Reconnecting..." on the
+// loading screen while the reconnect runs, then Lost Connection (ID, Code, Reason; a Reconnect button) when
+// it fails. error / code / close_code / close_reason: the Lost Connection text (ignored by the others).
+typedef enum {
+    STRIKE_CONN_CONNECTED = 0, // the popups go; a reconnect's loading screen completes
+    STRIKE_CONN_RECONNECTING,  // the loading screen's "Reconnecting..."
+    STRIKE_CONN_UPDATING,      // Game Updating
+    STRIKE_CONN_LOST,          // Lost Connection
+} StrikeConnState;
+void strike_connection_state(StrikeConnState state, const char *error, const char *code, int close_code, const char *close_reason);
+void strike_connect_tick(void);                  // the popup follows the state over the stack (strike_ui_tick)
+int  strike_connect_action(const char *name);    // strikeAction(name): 1 = "reconnect" (the Reconnect button)
+void strike_connect_render(HtmlElem root);       // POPUP_WARNING's content (strike_menu_render)
+void strike_connect_scenario(const cJSON *state); // state.strike.connection (strike_ui.c strike_ui_scenario)
 
 // FRVR's loading screen (vb + fz): Fm(Al, {info}) shows it, RA() completes it (curtains open
 // after max(0, 1500 ms - shown) then it goes 700 ms later). no_anim: noEnterAnimation.

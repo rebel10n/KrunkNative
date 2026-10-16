@@ -53,6 +53,7 @@ static const char *const SCREEN_IDS[STRIKE_SCREEN_COUNT] = {
     [STRIKE_SCREEN_MATCH_DETAILS] = "MATCH_DETAILS_SCREEN",
     [STRIKE_SCREEN_LEADERBOARD_PLAYERS] = "LEADERBOARD_PLAYERS",
     [STRIKE_SCREEN_POPUP] = "POPUP",
+    [STRIKE_SCREEN_POPUP_WARNING] = "POPUP_WARNING",
     [STRIKE_SCREEN_PROFILE] = "PROFILE",
     [STRIKE_SCREEN_ITEM_SELECTION] = "ITEM_SELECTION_SCREEN",
     [STRIKE_SCREEN_REPORT_PLAYER] = "REPORT_PLAYER",
@@ -379,6 +380,18 @@ void strike_screen_pop(void) {
     sync_stack();
 }
 
+// The topmost entry of that screen goes, without a back (the connection popup once it is answered).
+void strike_screen_remove(const StrikeScreen s) {
+    for (int i = S.depth - 1; i >= 0; i--) {
+        if (S.stack[i].screen != s) continue;
+        unrender_entry(i);
+        memmove(&S.stack[i], &S.stack[i + 1], sizeof(S.stack[0]) * (size_t) (S.depth - i - 1));
+        S.depth--;
+        sync_stack();
+        return;
+    }
+}
+
 void strike_screen_replace(const StrikeScreen s) {
     strike_screen_clear();
     strike_screen_push(s);
@@ -644,6 +657,7 @@ void strike_ui_tick(Client *client) {
         if (html_ui_is_menu_open()) strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
     }
     if (!S.booted) return;
+    strike_connect_tick(); // the connection popups (strike_connect.c) follow the transport
     strike_menu_tick(client);
     strike_hud_tick(client);
     strike_touch_tick(client);
@@ -676,6 +690,7 @@ int strike_ui_pointer_to_page(void) {
 //   "leaderboard": [{name, classIndex, you, score, kills}]  LEADERBOARD_PLAYERS' rows (no score / kills:
 //                           empty stat cells, as the capture's)
 //   "loading": "<info>"     FRVR's Mithril loading screen (Fm(Al, {info})) from the capture clock 0
+//   "connection": {"state": "lost" | "updating" | "reconnecting", ...} (strike_connect.c)
 //   "killfeed": [{killer, victim, killerIsYou, victimIsYou, weapon: "icon_1", headshot}]
 //   "killcard": {killer, weapon, level, score, classIndex}
 //   "end": 1 | 0 | -1       the round end (victory / defeat / draw)
@@ -714,6 +729,7 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     }
     const cJSON *loading = cJSON_GetObjectItemCaseSensitive(st, "loading");
     if (cJSON_IsString(loading)) strike_loading_show(loading->valuestring, 0);
+    strike_connect_scenario(st); // connection: the Lost Connection / Game Updating popups, Reconnecting...
     strike_hud_scenario(client, st);
     strike_meta_scenario(client, st); // progression / reward / battlepassTab / matchDetails (strike_meta.c)
     strike_menu_scenario_state(st);   // itemSelection (T5 over Customize), product (U2) (strike_menu.c)

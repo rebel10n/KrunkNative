@@ -1,0 +1,22 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "frames": 3,
+  "state": {
+    "connected": false,
+    "ready": false,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "connection": {
+        "state": "reconnecting"
+      }
+    }
+  },
+  "note": "KrunkNative only (no FRVR capture): the loading screen's Reconnecting... (FRVR's oN: Fm(Al, {info: \"Reconnecting...\"})) over the page."
+}

@@ -19,6 +19,8 @@
 //   wb CUSTOMIZE_CONTROLS Settings > Game "Customize Controls": Pt(ZC, {onHide: kt}); back kt(), home
 //                         onHide() + kt() (Settings goes too), Reset = Ahe() (the layout to Gw defaults)
 //   In POPUP              the popup frame (Pt(In, {builder})): .frvr-dark-blur-75 dismisses (kt)
+//   UI POPUP_WARNING      the connection popups (Pt(UI, {message, actionText}): Lost Connection, Game
+//                         Updating), strike_connect.c; its Reconnect button is strikeAction('reconnect')
 //   YB LEADERBOARD_PLAYERS FRVR hosts it only in its tournament rewards popup (qB, In); KrunkNative has no
 //                         hosted tournaments, so only a scenario (state.strike.leaderboard) shows it
 // The Strike classes are FRVR's six (tools/strike/strike_data.json "classes"): Krunker class ids
@@ -1723,6 +1725,7 @@ static void action(const char *a) {
     if (strike_meta_action(a)) return;   // missions tab, match details report, rewards track (strike_meta.c)
     if (strike_social_action(a)) return; // friends, invites, report (strike_social.c)
     if (strike_reward_action(a)) return; // the reward screen, the choice popup (strike_reward.c)
+    if (strike_connect_action(a)) return; // the Lost Connection popup's Reconnect (strike_connect.c)
     if (!strcmp(a, "play")) play();
     else if (!strncmp(a, "buy-confirm:", 12)) {
         // U2's YA: onPurchase (kt: the popup goes), then $r
@@ -1884,6 +1887,7 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_CUSTOMIZE_CONTROLS:
     case STRIKE_SCREEN_LEADERBOARD_PLAYERS:
     case STRIKE_SCREEN_POPUP:
+    case STRIKE_SCREEN_POPUP_WARNING: // the connection popups (strike_connect.c)
     case STRIKE_SCREEN_MATCH_DETAILS:   // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_ITEM_SELECTION:  // transcribed from the bundle (T5 / rde, above)
@@ -2004,6 +2008,9 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
         break;
     case STRIKE_SCREEN_POPUP:
         popup_fill(root);
+        break;
+    case STRIKE_SCREEN_POPUP_WARNING:
+        strike_connect_render(root);
         break;
     default:
         break;
