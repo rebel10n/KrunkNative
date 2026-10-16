@@ -6,6 +6,7 @@
 // refused, no WebSocket, no beacons, a seeded Math.random, CSS animations paused at a chosen time.
 //
 //   node tools/uidiff/capture-v10-popups.js [--out doc/ref/krunker-v10] [--list] [name...]
+// (also the Game Settings advanced tabs settings-advanced-{general,controls,game,sound}, into settings/)
 //
 // What each reference is (v10 reaches it, or the popup is named where it is not):
 //   popup-kid        the k-ID dialog: the saved display mode gdc-kid (localStorage krunker-display-mode,
@@ -250,6 +251,22 @@ scenario('popup-survey', async (c) => {
   console.error('[capture-v10-popups] survey dom: ' + await c.eval(`JSON.stringify({ items: document.querySelectorAll('.survey-notification').length, lists: document.querySelectorAll('.notification-list').length, center: document.querySelectorAll('.notification-item').length, nc: (document.getElementById('notificationCenter')||{}).outerHTML && document.getElementById('notificationCenter').outerHTML.slice(0,1400), ncl: (document.querySelector('.notification-item')||{}).outerHTML && document.querySelector('.notification-item').outerHTML.slice(0,600) })`));
   await settle(c, 800);
 });
+
+// Game Settings, advanced view: windows[0].settingType / tabIndex are the page's own tab state (v10:211036 toggleType,
+// 211001 changeTab), set as capture-v7.js's win-settings-<tab> does; the ui/windows/settings-advanced-<n>.html tabs
+// (General 0, Controls 1, Display 2, Render 3, Game 4, Sound 5). Guest, like the KN scenarios.
+function settingsAdvanced(name, tab) {
+  scenario(name, async (c) => {
+    await waitSandbox(c);
+    await c.eval(flatPage('#000000'));
+    await c.eval(`(() => { closWind(); windows[0].settingType = 'advanced'; windows[0].tabIndex = ${tab}; windows[0].settingSearch = null; showWindow(1, true); return 1; })()`);
+    await settle(c, 900);
+  }, { dir: 'settings', storage: { krunker_haslogin: null } });
+}
+settingsAdvanced('settings-advanced-general', 0);
+settingsAdvanced('settings-advanced-controls', 1);
+settingsAdvanced('settings-advanced-game', 4);
+settingsAdvanced('settings-advanced-sound', 5);
 
 // the Ranked popup's Home tab (openRankedMenu, v10:215664 -> rankedMenuModal) for a signed-in level-60 player: the
 // sign-in that creates the ranked client's session is FRVR's (the stub's isLoggedIn follows window.__knLoggedIn),
