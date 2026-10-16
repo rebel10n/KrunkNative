@@ -9,7 +9,7 @@
 // not reach it), the same on both platforms; its buttons call the one page handler knCaptcha(n).
 //
 // Web: the real Turnstile widget (the script loads on demand, like the live getCaptchaToken, :115623,
-// with KRUNKER_TURNSTILE_SITE_KEY and appearance "interaction-only"). Its sitekey only works on the
+// with the current build's site key (krunker_build_live.h) and appearance "interaction-only"). Its sitekey only works on the
 // domains Cloudflare has for it: elsewhere (krunk.io) it answers 110200 (or another 1101xx / 1102xx
 // code), which the modal says plainly before offering the manual path. Native with a webview
 // (kn_webview.h, KN_WEBVIEW): silent first. The challenge runs in a hidden window on a real krunker.io
@@ -24,7 +24,7 @@
 // to the requester once, then wiped; never logged, never stored.
 #include <krunker_captcha.h>
 #include <krunker_captcha_cb.h>
-#include <krunker_build.h>
+#include <krunker_build_live.h> // the current build's Turnstile site key
 #include <kn_webview.h>
 #ifndef __EMSCRIPTEN__
 #include <http_proxy.h>
@@ -339,7 +339,7 @@ static int webview_start(const int show_now) {
     if (!kn_webview_available()) return 0;
     char err[200], proxy[1024];
     webview_proxy(proxy, sizeof(proxy));
-    const int up = kn_webview_captcha_open(NULL, KRUNKER_TURNSTILE_SITE_KEY, I18N("kn.captcha.title", "Security Challenge"), proxy, show_now, err,
+    const int up = kn_webview_captcha_open(NULL, krunker_build()->turnstile_site_key, I18N("kn.captcha.title", "Security Challenge"), proxy, show_now, err,
                                            sizeof(err));
     wipe(proxy, sizeof(proxy));
     if (!up) {
@@ -413,7 +413,7 @@ static void widget_start(void) {
     set_text("knCaptchaStatus", I18N("kn.captcha.loading", "Loading Cloudflare's challenge..."));
     if (C.widget_timer) html_timer_cancel(C.widget_timer);
     C.widget_timer = html_timer_add(CAPTCHA_WIDGET_TIMEOUT_MS, widget_timeout, (void *) (uintptr_t) C.gen);
-    kn_js_turnstile_render((int) C.gen, KRUNKER_TURNSTILE_SITE_KEY);
+    kn_js_turnstile_render((int) C.gen, krunker_build()->turnstile_site_key);
 }
 
 static void widget_event(const unsigned gen, const int kind, const char *text) {

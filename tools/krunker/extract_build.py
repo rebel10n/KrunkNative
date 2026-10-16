@@ -39,6 +39,9 @@ game.manifest.json. Default: https://kru.eli.gift/game.deob.js (conditional GET,
 ETag / Last-Modified under $XDG_CACHE_HOME/krunknative/krunker-build/), falling back to the
 cache, then to ~/.cache/kn-official/game.deob.js when the URL is unreachable.
 
+Exit status: 0 done, 1 the bundle does not extract (an anchor or a value changed shape: the message names
+it), 3 the bundle could not be read (unreachable, no cache / local copy), 2 --check --strict unreachable.
+
 Regeneration is skipped (exit 0, "up to date") when the bundle's sha256 and the generator
 revision match the committed build.json; --force regenerates anyway.
 
@@ -57,7 +60,9 @@ import tempfile
 import urllib.error
 import urllib.request
 
-GENERATOR_REV = 3  # bump when the output format or the extraction rules change
+GENERATOR_REV = 4  # bump when the output format or the extraction rules change
+# (rev 4: the X-macros take X_, so a field named X (ADD_PLAYERS x) can be X_(X, ...): with X the field name
+# itself was replaced by the caller's macro)
 SCHEMA = 1         # KRUNKER_BUILD_SCHEMA: bump when the header's C interface changes
 
 DEFAULT_URL = os.environ.get("KRUNKER_BUILD_URL", "https://kru.eli.gift/game.deob.js")
@@ -1566,9 +1571,9 @@ def render_header(b):
                              ("packets_s2c", "server -> client", "KRUNKER_S2C")):
         ents = b[side]
         w("/* Packet names, %s (%d). X(ident, \"wire\", \"KrunkerName\") */" % (title, len(ents)))
-        w("#define %s_PACKETS(X) \\" % pre)
+        w("#define %s_PACKETS(X_) \\" % pre)
         for i, e in enumerate(ents):
-            w("    X(%s, %s, %s)%s" % (c_ident(e["name"]), c_str(e["wire"]), c_str(e["name"]),
+            w("    X_(%s, %s, %s)%s" % (c_ident(e["name"]), c_str(e["wire"]), c_str(e["name"]),
                                     " \\" if i + 1 < len(ents) else ""))
         w("")
         w("typedef enum {")
@@ -1623,9 +1628,9 @@ def render_layouts(w, lay):
             w("#define KRUNKER_%s_STRIDE %d" % (prefix, L_["stride"]))
         if "send_vals" in L_:
             w("#define KRUNKER_%s_SEND_VALS %d" % (prefix, L_["send_vals"]))
-        w("#define KRUNKER_%s_FIELDS(X) \\" % prefix)
+        w("#define KRUNKER_%s_FIELDS(X_) \\" % prefix)
         for i, f in enumerate(fields):
-            w("    X(%s, %d, %s)%s" % (names[f["name"]][len("KRUNKER_%s_" % prefix):], f["offset"], c_str(f["name"]),
+            w("    X_(%s, %d, %s)%s" % (names[f["name"]][len("KRUNKER_%s_" % prefix):], f["offset"], c_str(f["name"]),
                                     " \\" if i + 1 < len(fields) else ""))
         w("")
         w("typedef enum {")
@@ -1789,6 +1794,10 @@ def main(argv=None):
 
     try:
         text, prov = load_source(a.source)
+    except ExtractError as e:
+        log("FAILED: %s" % e)
+        return 3  # the bundle could not be read at all: not a change of its shape (krunker-build.yml)
+    try:
         if (not a.print and not a.force and old and old["source"]["sha256"] == prov["sha256"]
                 and old.get("generator_rev") == GENERATOR_REV and read_text(a.header) == render_header(old)):
             log("up to date (bundle sha256 %s, %s)" % (prov["sha256"][:16], prov["origin"]))

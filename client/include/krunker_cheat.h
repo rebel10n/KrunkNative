@@ -26,8 +26,10 @@
 extern "C" {
 #endif
 
-/* Build constants come from the generated krunker_build.h (tools/krunker/
- * extract_build.py, anchored on game.deob.js:194974 and :218200):
+/* Build constants: the current KrunkerBuild's (krunker_build_live.h: a published
+ * build.json's, else the compiled ones), whose defaults are the generated
+ * krunker_build.h's (tools/krunker/extract_build.py, anchored on
+ * game.deob.js:194974 and :218200):
  *   KRUNKER_CHEAT_SALT / _SALT_LEN  the keystream salt, read as _SALT_LEN raw
  *                                   bytes (a string literal or a brace list)
  *   KRUNKER_CHEAT_FNV_OFFSET/_PRIME the hash constants
@@ -35,6 +37,7 @@ extern "C" {
  *                                   build); 0: an exact 32-bit Math.imul step
  *   KRUNKER_CHEAT_KS_FORMULA        keystream formula revision (1, below) */
 #include "krunker_build.h"
+#include "krunker_build_live.h" /* the values used at runtime: krunker_build() (a published build.json may change them) */
 
 #if KRUNKER_CHEAT_KS_FORMULA != 1
 #error "krunker_build.h: unknown CHEAT_CHECK keystream formula; port the new one in krunker_cheat.c"

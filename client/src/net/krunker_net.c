@@ -8,6 +8,8 @@
 // the input compression state) holds K.lock, so frames leave in encode order from both threads.
 #include <krunker_net.h>
 #include <krunker_link.h>
+#include <krunker_build_fetch.h> // the live Krunker build (a published build.json, else krunker_build.h)
+#include <krunker_build_live.h>
 #include <krunker_altcha.h>
 #include <krunker_captcha.h>
 #include <recent_lobbies.h>
@@ -17,6 +19,7 @@
 #include <backend.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <i18n.h> // i18n_trf
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <cJSON.h>
 #include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
@@ -43,9 +46,9 @@
 #error "krunker_build.h: unknown schema (tools/krunker/extract_build.py)"
 #endif
 
-#define KRUNKER_DEFAULT_MATCHMAKER KRUNKER_MATCHMAKER_URL
-static const char *const k_regions[] = {KRUNKER_REGIONS};
-#define KRUNKER_DEFAULT_REGION (k_regions[0]) // the prod list's first ("de-fra")
+// The per-build values (matchmaker, regions, buildVersion, AHKEY, ...) are the current KrunkerBuild's
+// (krunker_build_live.h), fetched before each join (KS_BUILD, krunker_build_fetch.h).
+#define KRUNKER_DEFAULT_REGION (krunker_build()->regions[0]) // the prod list's first ("de-fra")
 #define KRUNKER_HTTP_TIMEOUT_MS 8000
 #define KRUNKER_WS_MAX_MESSAGE (4u * 1024u * 1024u)
 // client->net_socket while the official socket is open: never a real descriptor (net.c's
@@ -60,6 +63,7 @@ static const char *const k_regions[] = {KRUNKER_REGIONS};
 typedef enum {
     KS_OFF = 0,    // not in an official game
     KS_ACCOUNT,    // the krunker.io account's fresh access token (krunker_account.h; a refresh may run)
+    KS_BUILD,      // the current Krunker build (krunker_build_fetch.h: the published one, cached, or compiled)
     KS_LIST,       // Find New Game: GET /game-list, to pick a game this client was not in lately
     KS_TOKEN,      // GET /generate-token (after a captcha: the retry's fresh validation token)
     KS_SEEK,       // GET /seek-game
@@ -80,6 +84,11 @@ static struct {
     KrunkerState state;
     unsigned generation; // bumped per join / leave: late callbacks of an older attempt are ignored
     char game_id[96], region[48], token[512], matchmaker[512];
+    int mm_override;          // KRUNKNATIVE_KRUNKER_MATCHMAKER / ?krunkerMM names another matchmaker
+    // the matchmaker refused a seek for its build (InvalidVersion / NoServersMatchQuery): the builds tried
+    // this join (a forced refresh, then the compiled one), at most one retry each
+    int version_retries;
+    char refused_build[2][64];
     // Find New Game (krunker_net_seek_new): the seek's excludeGame, the answers re-sought so far, and
     // the best of them (the least recent, rank as recent_lobbies_rank) to fall back on
     int seek_new, seek_new_retries;
@@ -457,7 +466,7 @@ static void link_setup(void) {
     const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha,
                               .map = link_map, .user = NULL};
     krunker_map_source_set_fetch(kmap_fetch);
-    krunker_link_init(&K.link, &io, KRUNKER_AHKEY);
+    krunker_link_init(&K.link, &io, krunker_build()->ahkey);
 }
 
 // ---------------------------------------------------------------- socket state -> client
@@ -885,19 +894,20 @@ static void ws_close(void) {}
 
 // ---------------------------------------------------------------- matchmaker
 
+// The override, else the current build's matchmaker (krunker.io's own: the build's extras, else
+// KRUNKER_MATCHMAKER_URL).
 static const char *matchmaker(void) {
     char v[512];
-    if (option("KRUNKNATIVE_KRUNKER_MATCHMAKER", "krunkerMM", v, sizeof(v)) && strcmp(v, "off") != 0 && strcmp(v, "0") != 0) {
-        snprintf(K.matchmaker, sizeof(K.matchmaker), "%s", v);
-    } else {
-        snprintf(K.matchmaker, sizeof(K.matchmaker), "%s", KRUNKER_DEFAULT_MATCHMAKER);
-    }
+    K.mm_override = option("KRUNKNATIVE_KRUNKER_MATCHMAKER", "krunkerMM", v, sizeof(v)) && strcmp(v, "off") != 0 && strcmp(v, "0") != 0;
+    snprintf(K.matchmaker, sizeof(K.matchmaker), "%s", K.mm_override ? v : krunker_build()->matchmaker_url);
     size_t n = strlen(K.matchmaker);
     while (n && K.matchmaker[n - 1] == '/') K.matchmaker[--n] = 0;
     return K.matchmaker;
 }
 
-static int is_production(void) { return !strcmp(K.matchmaker, KRUNKER_DEFAULT_MATCHMAKER); }
+static int is_production(void) {
+    return !K.mm_override || !strcmp(K.matchmaker, krunker_build()->matchmaker_url) || !strcmp(K.matchmaker, KRUNKER_MATCHMAKER_URL);
+}
 
 // The proxy (Settings > Client, http_proxy.h) a connection to url's host goes through: its label in
 // label, 1 = proxied. The web has none (the browser is the network stack).
@@ -1032,6 +1042,8 @@ static int stale(void *user) { return (unsigned) (uintptr_t) user != K.generatio
 
 static void on_seek(void *user, int status, const char *body, size_t length);
 static void seek(void);
+static int retry_version(const char *error);
+static int build_http(const char *url, KrunkerBuildHttpDone done, void *ctx);
 
 static void seek(void) {
     // matchmakerSeek (game.deob.js:147610-147631): hostname, region, autoChangeGame,
@@ -1055,13 +1067,15 @@ static void seek(void) {
     if (K.seek_new && !K.game_id[0]) {
         // iïîìîíì: {v: buildVersion} plus the saved seek_maps / seek_modes as dsma / dsmo (:222271-222275)
         char dq[160];
-        int n = snprintf(dq, sizeof(dq), "{\"v\":\"%s\"", KRUNKER_BUILD_VERSION);
+        int n = snprintf(dq, sizeof(dq), "{\"v\":\"%s\"", krunker_build()->build_version);
         if (seek_prefs_map() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsma\":[%d]", seek_prefs_map());
         if (seek_prefs_mode() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsmo\":[%d]", seek_prefs_mode());
         snprintf(dq + n, sizeof(dq) - (size_t) n, "}");
         append_param(url, sizeof(url), "dataQuery", dq);
     } else {
-        append_param(url, sizeof(url), "dataQuery", "{\"v\":\"" KRUNKER_BUILD_VERSION "\"}"); // iïîìîíì: {v: buildVersion}
+        char dq[96];
+        snprintf(dq, sizeof(dq), "{\"v\":\"%s\"}", krunker_build()->build_version); // iïîìîíì: {v: buildVersion}
+        append_param(url, sizeof(url), "dataQuery", dq);
     }
     const size_t logged = strlen(url); // the log stops before the captcha and access tokens: never logged
     K.captcha_sent = K.captcha[0] != 0;
@@ -1205,6 +1219,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         cJSON_Delete(res);
         seek();
         return;
+    } else if (error && (!strcmp(error, "InvalidVersion") || !strcmp(error, "NoServersMatchQuery")) && retry_version(error)) {
+        // (retry_version runs the refresh; on_build_retry seeks again or fails)
     } else if (status != 200 || error || !host || !game || !client_id) {
         char detail[200], text[300];
         // the matchmaker's own error word, else the start of its body on one line (the log)
@@ -1254,6 +1270,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         K.state = KS_CONNECTING;
         kmap_reset();
         pthread_mutex_lock(&K.lock);
+        krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
         krunker_link_reset(&K.link);
         K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
@@ -1266,6 +1283,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 
 void krunker_net_attach(Client *client) {
     K.client = client;
+    krunker_build_fetch_set_http(build_http);
     link_setup();
 }
 
@@ -1293,13 +1311,8 @@ static void stop_socket(void) {
     ws_close();
 }
 
-// The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
-// Then Find New Game's lobby list (seek_new 2), or seek-game at once.
-static void on_access(void *user, const char *token) {
-    if (stale(user) || K.state != KS_ACCOUNT) return;
-    snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
-    if (K.access[0]) printf("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
-    else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
+// Find New Game's lobby list (seek_new 2), or seek-game at once.
+static void start_seek(void) {
     if (K.seek_new == 2) {
         K.state = KS_LIST;
         char url[600];
@@ -1307,6 +1320,99 @@ static void on_access(void *user, const char *token) {
         if (http_get(url, on_game_list)) return;
     }
     seek();
+}
+
+// the HTTP GET of the build fetch (krunker_build_fetch.h): the client's own, like the matchmaker's
+static int build_http(const char *url, const KrunkerBuildHttpDone done, void *ctx) {
+#ifdef __EMSCRIPTEN__
+    return backend_http_request("GET", url, NULL, done, ctx); // dl.krunk.io answers Access-Control-Allow-Origin: *
+#else
+    return backend_http_get_external(url, KRUNKER_HTTP_TIMEOUT_MS, done, ctx);
+#endif
+}
+
+static const char *build_url(void) {
+    char v[1024];
+    option("KRUNKNATIVE_KRUNKER_BUILD_URL", "krunkerBuild", v, sizeof(v));
+    return krunker_build_fetch_url(!K.mm_override, v);
+}
+
+// The published Krunker build refused (krunker_build_fetch.h): the join fails saying which build and why
+// (the error box holds 159 bytes: the action comes before the reason, which may be cut).
+static void fail_build_refused(const char *client_version, const char *why) {
+    const char *args[] = {client_version && client_version[0] ? client_version : "a new version", why && why[0] ? why : "?"};
+    char text[300];
+    i18n_trf(text, sizeof(text), "kn.kio.buildUnsupported",
+             "krunker.io updated to Krunker {0}: this client needs an update to join its games ({1}).",
+             2, args);
+    fail("%s", text);
+}
+
+// The current Krunker build is settled (KS_BUILD): the matchmaker it names, then the seek.
+static void on_build(void *user, const KrunkerBuildSource src, const char *client_version, const char *why) {
+    if (stale(user) || K.state != KS_BUILD) return;
+    if (src == KRUNKER_BUILD_SRC_REFUSED) {
+        fail_build_refused(client_version, why);
+        return;
+    }
+    matchmaker(); // (the build may name another one; an override stays)
+    start_seek();
+}
+
+// The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
+// Then the current Krunker build (on_build), then the seek.
+static void on_access(void *user, const char *token) {
+    if (stale(user) || K.state != KS_ACCOUNT) return;
+    snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
+    if (K.access[0]) printf("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
+    else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
+    K.state = KS_BUILD;
+    krunker_build_refresh(build_url(), 0, on_build, user);
+}
+
+// A seek refused for its build (seek-game InvalidVersion / NoServersMatchQuery: no server runs the
+// buildVersion of dataQuery.v). Krunker shipped a build this client has not seen yet, or the cached one
+// is stale: a forced refresh of the published build, then the compiled one, each only when it is a
+// buildVersion not refused yet. 1 = a retry runs.
+static void on_build_retry(void *user, KrunkerBuildSource src, const char *client_version, const char *why);
+static int retry_version(const char *error) {
+    if (K.version_retries >= 2 || (!build_url() && !krunker_build()->live)) return 0; // (nowhere else to get a build)
+    snprintf(K.refused_build[K.version_retries], sizeof(K.refused_build[0]), "%s", krunker_build()->build_version);
+    K.version_retries++;
+    printf("[krunker] seek-game: %s for buildVersion %s: checking for a newer Krunker build\n", error, krunker_build()->build_version);
+    K.state = KS_BUILD;
+    krunker_build_refresh(build_url(), 1, on_build_retry, (void *) (uintptr_t) K.generation);
+    return 1;
+}
+
+static int build_refused(const char *build_version) {
+    for (int i = 0; i < K.version_retries; i++) {
+        if (!strcmp(K.refused_build[i], build_version)) return 1;
+    }
+    return 0;
+}
+
+static void on_build_retry(void *user, const KrunkerBuildSource src, const char *client_version, const char *why) {
+    if (stale(user) || K.state != KS_BUILD) return;
+    if (src == KRUNKER_BUILD_SRC_REFUSED) {
+        fail_build_refused(client_version, why);
+        return;
+    }
+    if (build_refused(krunker_build()->build_version) && !build_refused(krunker_build_compiled()->build_version)) {
+        printf("[krunker] the published build is the refused one: trying the compiled build (%s)\n", krunker_build_compiled()->client_version);
+        krunker_build_use(NULL);
+    }
+    if (build_refused(krunker_build()->build_version)) {
+        char text[300];
+        printf("[krunker] no Krunker build this client knows is served now\n");
+        join_error_text("NoServersMatchQuery", text, sizeof(text)); // v10's GAME UPDATING
+        fail("%s", text);
+        return;
+    }
+    printf("[krunker] seeking again with Krunker %s (buildVersion %s)\n", krunker_build()->client_version, krunker_build()->build_version);
+    matchmaker();
+    K.captcha_attempts = K.captcha_sent = 0;
+    start_seek();
 }
 
 // krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
@@ -1343,6 +1449,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     K.connected = 0;
     K.altcha_pending = 0;
     K.captcha_attempts = K.captcha_sent = 0;
+    K.version_retries = 0;
     K.pow_shown = 0;
     K.leave_unsupported = 0;
     K.leave_closed = 0;

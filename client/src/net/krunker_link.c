@@ -19,6 +19,7 @@
 #include <krunker_link.h>
 #include "krunker_link_internal.h" // krunker_link_world.c: mode objectives / world objects
 #include <krunker_cheat.h>
+#include <krunker_build_live.h> // the current build's strides, offsets and argument positions
 #include <krunker_altcha.h>
 #include <cJSON.h>
 #include <game_config.h>
@@ -48,6 +49,10 @@
 // ---------------------------------------------------------------- helpers
 
 static const KrunkerValue *arg(const KrunkerFrame *f, const uint32_t i) { return krunker_frame_arg(f, i); }
+// the argument of a role in the current build (KrunkerBuild kill / damage / health: -1 absent)
+static const KrunkerValue *role(const KrunkerFrame *f, const int16_t *positions, const int r) {
+    return positions[r] >= 0 ? krunker_frame_arg(f, (uint32_t) positions[r]) : NULL;
+}
 static int is_nil(const KrunkerValue *v) { return !v || v->type == KRUNKER_NIL; }
 static double num(const KrunkerValue *v, const double def) { return krunker_num(v, def); }
 static int truthy(const KrunkerValue *v) {
@@ -300,39 +305,41 @@ static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
 // players.add arguments (:171902, player.init :169089): [0] id (socket id) [1] sid [2] x [3] y
 // [4] z [5] name [6] classIndex [7] health (null: maxHealth) [8] maxHealth [9] team [15] secIndex
-// [18] xDire (yaw, radians) [22] attachIndex [28] alias. Stride and offsets: KRUNKER_ADD_* (krunker_build.h).
+// [18] xDire (yaw, radians) [22] attachIndex [28] alias. Stride and offsets: the current build's
+// (krunker_build_live.h; the compiled ones are KRUNKER_ADD_* of krunker_build.h).
 static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerBuild *b = krunker_build();
     const KrunkerValue *list = arg(f, 0);
     if (!krunker_is(list, KRUNKER_ARRAY)) return;
-    for (uint32_t i = 0; i + 1 < list->len; i += KRUNKER_ADD_STRIDE) {
+    for (uint32_t i = 0; i + 1 < list->len; i += (uint32_t) b->add_stride) {
         const KrunkerValue *e = list->u.items + i;
         const uint32_t left = list->len - i;
-#define E(k) ((uint32_t) (k) < left ? &e[(k)] : NULL)
-        if (!krunker_is(E(KRUNKER_ADD_SID), KRUNKER_NUM)) continue;
+#define E(slot) (b->add[(slot)] >= 0 && (uint32_t) b->add[(slot)] < left ? &e[b->add[(slot)]] : NULL)
+        if (!krunker_is(E(KRB_ADD_SID), KRUNKER_NUM)) continue;
         NetSpawnPacket s;
         memset(&s, 0, sizeof(s));
-        s.uid = (int32_t) E(KRUNKER_ADD_SID)->u.num;
+        s.uid = (int32_t) E(KRB_ADD_SID)->u.num;
         char id[64];
-        id_string(E(KRUNKER_ADD_ID), id, sizeof(id));
+        id_string(E(KRB_ADD_ID), id, sizeof(id));
         s.is_you = l->socket_id[0] && !strcmp(id, l->socket_id);
         s.active = 1;
-        s.class_index = (int32_t) num(E(KRUNKER_ADD_CLASS_INDEX), 0);
-        s.team = (int32_t) num(E(KRUNKER_ADD_TEAM), 0);
-        s.max_health = (int32_t) num(E(KRUNKER_ADD_MAX_HEALTH), 100);
-        s.health = (float) (is_nil(E(KRUNKER_ADD_HEALTH)) ? s.max_health : num(E(KRUNKER_ADD_HEALTH), s.max_health));
-        s.position[0] = (float) num(E(KRUNKER_ADD_X), 0);
-        s.position[1] = (float) num(E(KRUNKER_ADD_Y), 0);
-        s.position[2] = (float) num(E(KRUNKER_ADD_Z), 0);
+        s.class_index = (int32_t) num(E(KRB_ADD_CLASS_INDEX), 0);
+        s.team = (int32_t) num(E(KRB_ADD_TEAM), 0);
+        s.max_health = (int32_t) num(E(KRB_ADD_MAX_HEALTH), 100);
+        s.health = (float) (is_nil(E(KRB_ADD_HEALTH)) ? s.max_health : num(E(KRB_ADD_HEALTH), s.max_health));
+        s.position[0] = (float) num(E(KRB_ADD_X), 0);
+        s.position[1] = (float) num(E(KRB_ADD_Y), 0);
+        s.position[2] = (float) num(E(KRB_ADD_Z), 0);
         s.direction[0] = 0.0f;                     // yDire is not in "0"
-        s.direction[1] = (float) num(E(KRUNKER_ADD_X_DIRE), 0);    // xDire
+        s.direction[1] = (float) num(E(KRB_ADD_X_DIRE), 0);    // xDire
         // the name everything shows is the alias: players.add `alias = [28] || name` (:171939)
-        const char *name = krunker_str(E(KRUNKER_ADD_ALIAS));
-        if (!name || !name[0]) name = krunker_str(E(KRUNKER_ADD_NAME));
+        const char *name = krunker_str(E(KRB_ADD_ALIAS));
+        if (!name || !name[0]) name = krunker_str(E(KRB_ADD_NAME));
         if (name && name[0]) snprintf(s.name, sizeof(s.name), "%s", name);
         else snprintf(s.name, sizeof(s.name), "Guest_%d", s.uid); // players.add's default
-        s.secondary_index = (int32_t) num(E(KRUNKER_ADD_SEC_INDEX), -1);
+        s.secondary_index = (int32_t) num(E(KRB_ADD_SEC_INDEX), -1);
         s.cosmetics = PLAYER_COSMETICS_NONE;
-        s.attach_index = (int32_t) num(E(KRUNKER_ADD_ATTACH_INDEX), 0); // was 23 (pcStatIndex)
+        s.attach_index = (int32_t) num(E(KRB_ADD_ATTACH_INDEX), 0); // was 23 (pcStatIndex)
         s.head_mlt = 1.0f;
         s.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
         KrunkerLinkPlayer *p = player(l, s.uid, 1);
@@ -342,20 +349,20 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
             p->team = s.team;
             snprintf(p->id, sizeof(p->id), "%s", id); // "chgp" findById
             p->class_index = s.class_index;
-            const char *real = krunker_str(E(KRUNKER_ADD_NAME));
+            const char *real = krunker_str(E(KRB_ADD_NAME));
             snprintf(p->name, sizeof(p->name), "%s", real && real[0] ? real : s.name);
             NetPlayerInfoPacket *in = &p->info;
             memset(in, 0, sizeof(*in));
             in->uid = s.uid;
-            in->account_id = (int32_t) num(E(KRUNKER_ADD_ACCID), 0);
-            in->level = (int32_t) num(E(KRUNKER_ADD_LEVEL), 0);
-            const char *clan = krunker_str(E(KRUNKER_ADD_CLAN));
+            in->account_id = (int32_t) num(E(KRB_ADD_ACCID), 0);
+            in->level = (int32_t) num(E(KRB_ADD_LEVEL), 0);
+            const char *clan = krunker_str(E(KRB_ADD_CLAN));
             if (clan) snprintf(in->clan, sizeof(in->clan), "%s", clan);
-            in->flags = (uint8_t) ((num(E(KRUNKER_ADD_PREMIUM_T), 0) > 0 ? NET_PLAYER_INFO_PREMIUM : 0) |
-                                   (truthy(E(KRUNKER_ADD_FEATURED)) ? NET_PLAYER_INFO_VERIFIED : 0) |
-                                   (truthy(E(KRUNKER_ADD_IS_HACKER)) ? NET_PLAYER_INFO_HACKER : 0) |
-                                   (truthy(E(KRUNKER_ADD_IS_BOT)) ? NET_PLAYER_INFO_BOT : 0) |
-                                   (truthy(E(KRUNKER_ADD_CREATOR_BADGE)) ? NET_PLAYER_INFO_CREATOR : 0));
+            in->flags = (uint8_t) ((num(E(KRB_ADD_PREMIUM_T), 0) > 0 ? NET_PLAYER_INFO_PREMIUM : 0) |
+                                   (truthy(E(KRB_ADD_FEATURED)) ? NET_PLAYER_INFO_VERIFIED : 0) |
+                                   (truthy(E(KRB_ADD_IS_HACKER)) ? NET_PLAYER_INFO_HACKER : 0) |
+                                   (truthy(E(KRB_ADD_IS_BOT)) ? NET_PLAYER_INFO_BOT : 0) |
+                                   (truthy(E(KRB_ADD_CREATOR_BADGE)) ? NET_PLAYER_INFO_CREATOR : 0));
         }
 #undef E
         if (s.is_you) {
@@ -374,14 +381,17 @@ static void fx_grapple(KrunkerLink *l, int sid, const KrunkerValue *g); // comba
 // "k" UPDATE_PLAYERS [list, sendRateA, servTim] (game.deob.js:220529): 13 values per player,
 // [0] sid [1..3] x y z [4] xDire (deg) [5] yDire (deg) [6] stepVal [7] onGround [8] crouchVal
 // [9] weapon (loadout index) [10] aimVal [11] grapple [12] ping. Our own sid is skipped (as in JS).
-// Stride and offsets: KRUNKER_K_* (krunker_build.h).
+// Stride and offsets: the current build's (krunker_build_live.h; compiled: KRUNKER_K_*).
 static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerBuild *b = krunker_build();
     const KrunkerValue *list = arg(f, 0);
     if (!krunker_is(list, KRUNKER_ARRAY)) return;
-    for (uint32_t i = 0; i + KRUNKER_K_STRIDE <= list->len; i += KRUNKER_K_STRIDE) {
+    const uint32_t stride = (uint32_t) b->k_stride;
+    for (uint32_t i = 0; i + stride <= list->len; i += stride) {
         const KrunkerValue *e = list->u.items + i;
-        if (!krunker_is(&e[KRUNKER_K_SID], KRUNKER_NUM)) continue;
-        const int sid = (int) e[KRUNKER_K_SID].u.num;
+#define K(slot) (b->k[(slot)] >= 0 && (uint32_t) b->k[(slot)] < stride ? &e[b->k[(slot)]] : NULL)
+        if (!krunker_is(K(KRB_K_SID), KRUNKER_NUM)) continue;
+        const int sid = (int) K(KRB_K_SID)->u.num;
         if (sid == l->my_sid) continue;
         const KrunkerLinkPlayer *p = player(l, sid, 0);
         NetStatePacket s;
@@ -389,17 +399,18 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.uid = sid;
         s.ack_seq = 0;
         s.active = 1;
-        s.loadout_index = (int32_t) num(&e[KRUNKER_K_WEAPON], 0);
-        s.position[0] = (float) num(&e[KRUNKER_K_X], 0);
-        s.position[1] = (float) num(&e[KRUNKER_K_Y], 0);
-        s.position[2] = (float) num(&e[KRUNKER_K_Z], 0);
-        s.direction[0] = (float) (num(&e[KRUNKER_K_Y_DIRE], 0) * (M_PI / 180.0)); // pitch
-        s.direction[1] = (float) (num(&e[KRUNKER_K_X_DIRE], 0) * (M_PI / 180.0)); // yaw
+        s.loadout_index = (int32_t) num(K(KRB_K_WEAPON), 0);
+        s.position[0] = (float) num(K(KRB_K_X), 0);
+        s.position[1] = (float) num(K(KRB_K_Y), 0);
+        s.position[2] = (float) num(K(KRB_K_Z), 0);
+        s.direction[0] = (float) (num(K(KRB_K_Y_DIRE), 0) * (M_PI / 180.0)); // pitch
+        s.direction[1] = (float) (num(K(KRB_K_X_DIRE), 0) * (M_PI / 180.0)); // yaw
         s.health = p ? p->health : 100.0f;
-        s.aim_val = 1.0f - (float) num(&e[KRUNKER_K_AIM_VAL], 1); // Krunker 1 = hip, ours 0
-        s.crouch_val = (float) num(&e[KRUNKER_K_CROUCH_VAL], 0);
+        s.aim_val = 1.0f - (float) num(K(KRB_K_AIM_VAL), 1); // Krunker 1 = hip, ours 0
+        s.crouch_val = (float) num(K(KRB_K_CROUCH_VAL), 0);
         emit(l, NET_PACKET_STATE, &s, sizeof(s));
-        fx_grapple(l, sid, &e[KRUNKER_K_GRAPPLE]);
+        fx_grapple(l, sid, K(KRB_K_GRAPPLE));
+#undef K
     }
 }
 
@@ -407,46 +418,48 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
 // [6] velX [7] velZ [8] xDire [9] onGround [10] didJump [11] didJumpW [12] wallJumpC [13] onWall
 // [14] onLadder [15] aimVal [16] crouchVal [17] weapon index [18] slideTimer (ms) [19] canSlide
 // [20] onTerrain [21] xVelC [22] zVelC [23] grapple || null [24] canSlideT (ms). Always answered
-// with PONG "v" (first statement of the handler). Offsets: KRUNKER_SYNC_* (krunker_build.h).
+// with PONG "v" (first statement of the handler). Offsets: the current build's (krunker_build_live.h;
+// compiled: KRUNKER_SYNC_*).
 static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerBuild *b = krunker_build();
     send_c2s(l, KRUNKER_C2S_PONG, NULL, 0);
     const KrunkerValue *a = arg(f, 0);
     if (!krunker_is(a, KRUNKER_ARRAY)) return;
-#define A(k) krunker_at(a, (k))
+#define A(slot) (b->sync[(slot)] >= 0 ? krunker_at(a, (uint32_t) b->sync[(slot)]) : NULL)
     NetReconPacket r;
     memset(&r, 0, sizeof(r));
-    r.ack_seq = (int32_t) num(A(KRUNKER_SYNC_INPUT_SN), NET_RECON_SEQ_ALL);
-    r.position[0] = (float) num(A(KRUNKER_SYNC_X), 0);
-    r.position[1] = (float) num(A(KRUNKER_SYNC_Y), 0);
-    r.position[2] = (float) num(A(KRUNKER_SYNC_Z), 0);
-    r.velocity[0] = (float) num(A(KRUNKER_SYNC_VEL_X), 0);
-    r.velocity[1] = (float) num(A(KRUNKER_SYNC_VEL_Y), 0);
-    r.velocity[2] = (float) num(A(KRUNKER_SYNC_VEL_Z), 0);
-    r.yaw = (float) num(A(KRUNKER_SYNC_X_DIRE), 0);
-    r.wall_jump_count = (uint16_t) num(A(KRUNKER_SYNC_WALL_JUMP_C), 0);
-    const double on_wall = num(A(KRUNKER_SYNC_ON_WALL), 0); // the wall's side 1..4 (procInputs), 0 none
+    r.ack_seq = (int32_t) num(A(KRB_SYNC_INPUT_SN), NET_RECON_SEQ_ALL);
+    r.position[0] = (float) num(A(KRB_SYNC_X), 0);
+    r.position[1] = (float) num(A(KRB_SYNC_Y), 0);
+    r.position[2] = (float) num(A(KRB_SYNC_Z), 0);
+    r.velocity[0] = (float) num(A(KRB_SYNC_VEL_X), 0);
+    r.velocity[1] = (float) num(A(KRB_SYNC_VEL_Y), 0);
+    r.velocity[2] = (float) num(A(KRB_SYNC_VEL_Z), 0);
+    r.yaw = (float) num(A(KRB_SYNC_X_DIRE), 0);
+    r.wall_jump_count = (uint16_t) num(A(KRB_SYNC_WALL_JUMP_C), 0);
+    const double on_wall = num(A(KRB_SYNC_ON_WALL), 0); // the wall's side 1..4 (procInputs), 0 none
     r.on_wall = (uint8_t) (on_wall >= 1 && on_wall <= 4 ? on_wall : 0);
-    r.aim_val = 1.0f - (float) num(A(KRUNKER_SYNC_AIM_VAL), 1); // Krunker 1 = hip, ours 0
-    r.crouch_val = (float) num(A(KRUNKER_SYNC_CROUCH_VAL), 0);
-    r.loadout_index = (int32_t) num(A(KRUNKER_SYNC_WEAPON), 0);
-    r.slide_ms = num(A(KRUNKER_SYNC_SLIDE_TIMER), 0);
+    r.aim_val = 1.0f - (float) num(A(KRB_SYNC_AIM_VAL), 1); // Krunker 1 = hip, ours 0
+    r.crouch_val = (float) num(A(KRB_SYNC_CROUCH_VAL), 0);
+    r.loadout_index = (int32_t) num(A(KRB_SYNC_WEAPON), 0);
+    r.slide_ms = num(A(KRB_SYNC_SLIDE_TIMER), 0);
     r.slide_timer = (float) (r.slide_ms / 1000.0);
-    r.x_vel_cylinder = (float) num(A(KRUNKER_SYNC_X_VEL_C), 0);
-    r.z_vel_cylinder = (float) num(A(KRUNKER_SYNC_Z_VEL_C), 0);
-    r.can_slide_timer = (float) (num(A(KRUNKER_SYNC_CAN_SLIDE_T), 0) / 1000.0);
-    r.flags = (truthy(A(KRUNKER_SYNC_ON_GROUND)) ? NET_RECON_ON_GROUND : 0) |
-              (truthy(A(KRUNKER_SYNC_DID_JUMP)) ? NET_RECON_DID_JUMP : 0) |
-              (truthy(A(KRUNKER_SYNC_DID_JUMP_W)) ? NET_RECON_DID_JUMP_W : 0) |
-              (truthy(A(KRUNKER_SYNC_ON_LADDER)) ? NET_RECON_ON_LADDER : 0) |
-              (truthy(A(KRUNKER_SYNC_CAN_SLIDE)) ? NET_RECON_CAN_SLIDE : 0) |
-              (truthy(A(KRUNKER_SYNC_ON_TERRAIN)) ? NET_RECON_ON_TERRAIN : 0) |
+    r.x_vel_cylinder = (float) num(A(KRB_SYNC_X_VEL_C), 0);
+    r.z_vel_cylinder = (float) num(A(KRB_SYNC_Z_VEL_C), 0);
+    r.can_slide_timer = (float) (num(A(KRB_SYNC_CAN_SLIDE_T), 0) / 1000.0);
+    r.flags = (truthy(A(KRB_SYNC_ON_GROUND)) ? NET_RECON_ON_GROUND : 0) |
+              (truthy(A(KRB_SYNC_DID_JUMP)) ? NET_RECON_DID_JUMP : 0) |
+              (truthy(A(KRB_SYNC_DID_JUMP_W)) ? NET_RECON_DID_JUMP_W : 0) |
+              (truthy(A(KRB_SYNC_ON_LADDER)) ? NET_RECON_ON_LADDER : 0) |
+              (truthy(A(KRB_SYNC_CAN_SLIDE)) ? NET_RECON_CAN_SLIDE : 0) |
+              (truthy(A(KRB_SYNC_ON_TERRAIN)) ? NET_RECON_ON_TERRAIN : 0) |
               (l->noclip ? NET_RECON_NOCLIP : 0); // "l" has no noclip: the live client keeps "noc"'s through reconcilePlayer
-    const KrunkerValue *g = A(KRUNKER_SYNC_GRAPPLE);
+    const KrunkerValue *g = A(KRB_SYNC_GRAPPLE);
     if (krunker_is(g, KRUNKER_ARRAY) && g->len >= 3) {
         r.grapple_active = 1;
         for (uint32_t k = 0; k < 4 && k < g->len; k++) r.grapple[k] = (float) num(&g->u.items[k], 0);
     }
-    const KrunkerValue *ping = A(KRUNKER_SYNC_PING);
+    const KrunkerValue *ping = A(KRB_SYNC_PING);
 #undef A
     emit(l, NET_PACKET_RECON, &r, sizeof(r));
     l->syncs++;
@@ -501,14 +514,15 @@ static void emit_death_info(KrunkerLink *l, const NetKillPacket *k, const Krunke
 // (game.deob.js:220579; the feed row :221222-221246 reads killInfo {wId (null: the killer's held
 // weapon), stk (+ pkg), fs, pj, wb, hs}; hideFeed: no row, killedBy still counts, :220629)
 static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
-    if (!krunker_is(arg(f, KRUNKER_KILL_ARG_VICTIM), KRUNKER_NUM)) return;
+    const KrunkerBuild *b = krunker_build();
+    if (!krunker_is(role(f, b->kill, KRB_KILL_VICTIM), KRUNKER_NUM)) return;
     NetKillPacket k;
     memset(&k, 0, sizeof(k));
-    k.victim_uid = (int32_t) arg(f, KRUNKER_KILL_ARG_VICTIM)->u.num;
-    k.victim_deaths = (int32_t) num(arg(f, KRUNKER_KILL_ARG_DEATHS), 0);
-    k.killer_uid = (int32_t) num(arg(f, KRUNKER_KILL_ARG_KILLER), -1);
+    k.victim_uid = (int32_t) role(f, b->kill, KRB_KILL_VICTIM)->u.num;
+    k.victim_deaths = (int32_t) num(role(f, b->kill, KRB_KILL_DEATHS), 0);
+    k.killer_uid = (int32_t) num(role(f, b->kill, KRB_KILL_KILLER), -1);
     k.weapon_index = -1;
-    const KrunkerValue *info = arg(f, KRUNKER_KILL_ARG_INFO);
+    const KrunkerValue *info = role(f, b->kill, KRB_KILL_INFO);
     if (krunker_is(info, KRUNKER_MAP)) {
         k.weapon_index = (int32_t) num(krunker_get(info, "wId"), -1);
         const KrunkerValue *stk = krunker_get(info, "stk");
@@ -520,7 +534,7 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     } else if (krunker_is(info, KRUNKER_NUM)) {
         k.weapon_index = (int32_t) info->u.num;
     }
-    if (truthy(arg(f, KRUNKER_KILL_ARG_HIDE_FEED))) k.fists |= NET_KILL_HIDE_FEED;
+    if (truthy(role(f, b->kill, KRB_KILL_HIDE_FEED))) k.fists |= NET_KILL_HIDE_FEED;
     const KrunkerLinkPlayer *killer = k.killer_uid >= 0 ? player(l, k.killer_uid, 0) : NULL;
     k.killer_class = killer ? killer->class_index : -1; // the kill card's class icon (killer.classIndex, :220616)
     k.respawn_delay = GAME_DEATH_DELAY;
@@ -531,7 +545,7 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     k.killer_kills = ks ? ks->kills : 0;
     KrunkerLinkStats *vs = stats(l, k.victim_uid);
     if (vs) vs->deaths = k.victim_deaths;
-    if (k.victim_uid == l->my_sid) emit_death_info(l, &k, arg(f, KRUNKER_KILL_ARG_STATS), info);
+    if (k.victim_uid == l->my_sid) emit_death_info(l, &k, role(f, b->kill, KRB_KILL_STATS), info);
     emit(l, NET_PACKET_KILL, &k, sizeof(k));
 }
 
@@ -539,34 +553,36 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
 // Math.ceil(dmg) (settings dmgType 0, "Rounded", the default, :221259). Not carried: silent (no
 // hit sound) and the live build's crit_0 sound (10.0.3; v10.0.2 and our assets have hit_0 only).
 static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerBuild *b = krunker_build();
     NetHitPacket h;
     memset(&h, 0, sizeof(h));
-    h.target_uid = (int32_t) num(arg(f, KRUNKER_DAMAGE_ARG_TARGET), -1);
-    h.damage = (int32_t) ceil(num(arg(f, KRUNKER_DAMAGE_ARG_DAMAGE), 0));
-    h.crit = truthy(arg(f, KRUNKER_DAMAGE_ARG_CRIT)) ? 1 : 0;
-    h.kill = truthy(arg(f, KRUNKER_DAMAGE_ARG_KILL)) ? 1 : 0;
-    h.ai = truthy(arg(f, KRUNKER_DAMAGE_ARG_AI)) ? 1 : 0;
+    h.target_uid = (int32_t) num(role(f, b->damage, KRB_DAMAGE_TARGET), -1);
+    h.damage = (int32_t) ceil(num(role(f, b->damage, KRB_DAMAGE_DAMAGE), 0));
+    h.crit = truthy(role(f, b->damage, KRB_DAMAGE_CRIT)) ? 1 : 0;
+    h.kill = truthy(role(f, b->damage, KRB_DAMAGE_KILL)) ? 1 : 0;
+    h.ai = truthy(role(f, b->damage, KRB_DAMAGE_AI)) ? 1 : 0;
     emit(l, NET_PACKET_HIT, &h, sizeof(h));
 }
 
 // "h" CHANGE_HEALTH [health, sid (null: you), srcX, srcZ, ..., resetMax] (game.deob.js:221040):
 // (health > maxHealth || resetMax) && (maxHealth = health): a resetMax may lower it (Juggernaut ends)
 static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
-    const int sid = is_nil(arg(f, KRUNKER_HEALTH_ARG_SID)) ? l->my_sid : (int) num(arg(f, KRUNKER_HEALTH_ARG_SID), -1);
+    const KrunkerBuild *b = krunker_build();
+    const int sid = is_nil(role(f, b->health, KRB_HEALTH_SID)) ? l->my_sid : (int) num(role(f, b->health, KRB_HEALTH_SID), -1);
     if (sid < 0) return;
     NetHealthPacket h;
     memset(&h, 0, sizeof(h));
     h.uid = sid;
-    h.health = (float) num(arg(f, KRUNKER_HEALTH_ARG_HEALTH), 0);
+    h.health = (float) num(role(f, b->health, KRB_HEALTH_HEALTH), 0);
     // the hit direction only without noHitMarker (:221062-221075: falls, zones, regen send none)
-    if (krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_X), KRUNKER_NUM) && krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_Z), KRUNKER_NUM) &&
-        !truthy(arg(f, KRUNKER_HEALTH_ARG_NO_HIT_MARKER))) {
+    if (krunker_is(role(f, b->health, KRB_HEALTH_SRC_X), KRUNKER_NUM) && krunker_is(role(f, b->health, KRB_HEALTH_SRC_Z), KRUNKER_NUM) &&
+        !truthy(role(f, b->health, KRB_HEALTH_NO_HIT_MARKER))) {
         h.has_source = 1;
-        h.source_x = (float) arg(f, KRUNKER_HEALTH_ARG_SRC_X)->u.num;
-        h.source_z = (float) arg(f, KRUNKER_HEALTH_ARG_SRC_Z)->u.num;
+        h.source_x = (float) role(f, b->health, KRB_HEALTH_SRC_X)->u.num;
+        h.source_z = (float) role(f, b->health, KRB_HEALTH_SRC_Z)->u.num;
     }
     KrunkerLinkPlayer *p = player(l, sid, 1);
-    const int reset_max = truthy(arg(f, KRUNKER_HEALTH_ARG_RESET_MAX));
+    const int reset_max = truthy(role(f, b->health, KRB_HEALTH_RESET_MAX));
     int max_changed = 0;
     if (p) {
         p->health = h.health;
@@ -859,10 +875,11 @@ static void on_team_score(KrunkerLink *l, const KrunkerFrame *f) {
 // popup; unless relay (a spectator's copy of the followed player's, :173709) our score becomes delta
 // (absolute) or score + delta. classIndex feeds account classScores only (not modelled).
 static void on_get_score(KrunkerLink *l, const KrunkerFrame *f) {
-    const double d = num(arg(f, KRUNKER_SCORE_ARG_DELTA), 0);
+    const KrunkerBuild *b = krunker_build();
+    const double d = num(role(f, b->score, KRB_SCORE_DELTA), 0);
     const int delta = isfinite(d) ? (int) js_round(d) : 0;
-    const int absolute = truthy(arg(f, KRUNKER_SCORE_ARG_ABSOLUTE));
-    if (!truthy(arg(f, KRUNKER_SCORE_ARG_RELAY))) {
+    const int absolute = truthy(role(f, b->score, KRB_SCORE_ABSOLUTE));
+    if (!truthy(role(f, b->score, KRB_SCORE_RELAY))) {
         l->my_score = absolute ? delta : l->my_score + delta;
         KrunkerLinkStats *s = l->my_sid >= 0 ? stats(l, l->my_sid) : NULL;
         if (s) s->score = l->my_score;

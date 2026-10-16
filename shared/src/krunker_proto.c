@@ -6,6 +6,7 @@
 // knsvc follows msgpack-lite (int32 range -> int, else float64), the official client uses
 // @msgpack/msgpack (every safe integer -> smallest int, uint64 / int64 included).
 #include "krunker_proto.h"
+#include "krunker_build_live.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,29 +19,27 @@
 #error "krunker_build.h schema changed: update krunker_proto.c"
 #endif
 
-#define KRUNKER_X_WIRE_(ident, wire, name) wire,
+// Ids are krunker_build.h's (bundle keys); the wire names are the current build's
+// (krunker_build_live.h: the compiled header's, or a published build.json's), NULL when it has none.
 #define KRUNKER_X_NAME_(ident, wire, name) name,
-static const char *const C2S_WIRE[KRUNKER_C2S_COUNT] = {KRUNKER_C2S_PACKETS(KRUNKER_X_WIRE_)};
 static const char *const C2S_KEY[KRUNKER_C2S_COUNT] = {KRUNKER_C2S_PACKETS(KRUNKER_X_NAME_)};
-static const char *const S2C_WIRE[KRUNKER_S2C_COUNT] = {KRUNKER_S2C_PACKETS(KRUNKER_X_WIRE_)};
 static const char *const S2C_KEY[KRUNKER_S2C_COUNT] = {KRUNKER_S2C_PACKETS(KRUNKER_X_NAME_)};
-#undef KRUNKER_X_WIRE_
 #undef KRUNKER_X_NAME_
 
-const char *krunker_c2s_wire(KrunkerC2S id) { return (unsigned)id < KRUNKER_C2S_COUNT ? C2S_WIRE[id] : NULL; }
+const char *krunker_c2s_wire(KrunkerC2S id) { return (unsigned)id < KRUNKER_C2S_COUNT ? krunker_build()->c2s_wire[id] : NULL; }
 const char *krunker_c2s_key(KrunkerC2S id) { return (unsigned)id < KRUNKER_C2S_COUNT ? C2S_KEY[id] : NULL; }
-const char *krunker_s2c_wire(KrunkerS2C id) { return (unsigned)id < KRUNKER_S2C_COUNT ? S2C_WIRE[id] : NULL; }
+const char *krunker_s2c_wire(KrunkerS2C id) { return (unsigned)id < KRUNKER_S2C_COUNT ? krunker_build()->s2c_wire[id] : NULL; }
 const char *krunker_s2c_key(KrunkerS2C id) { return (unsigned)id < KRUNKER_S2C_COUNT ? S2C_KEY[id] : NULL; }
 
 static int lookup(const char *const *table, int count, const char *wire, size_t len) {
     if (!wire) return -1;
     for (int i = 0; i < count; i++)
-        if (strlen(table[i]) == len && memcmp(table[i], wire, len) == 0) return i;
+        if (table[i] && strlen(table[i]) == len && memcmp(table[i], wire, len) == 0) return i;
     return -1;
 }
 
-int krunker_c2s_lookup(const char *wire, size_t len) { return lookup(C2S_WIRE, KRUNKER_C2S_COUNT, wire, len); }
-int krunker_s2c_lookup(const char *wire, size_t len) { return lookup(S2C_WIRE, KRUNKER_S2C_COUNT, wire, len); }
+int krunker_c2s_lookup(const char *wire, size_t len) { return lookup(krunker_build()->c2s_wire, KRUNKER_C2S_COUNT, wire, len); }
+int krunker_s2c_lookup(const char *wire, size_t len) { return lookup(krunker_build()->s2c_wire, KRUNKER_S2C_COUNT, wire, len); }
 
 // ---------------------------------------------------------------- values
 
@@ -217,8 +216,8 @@ void krunker_session_init(KrunkerSession *s, int64_t ahkey) {
 void krunker_session_reset(KrunkerSession *s) { s->ah_num = 0; }
 
 int krunker_proto_ahnum_exempt(const char *name, size_t name_len) {
-    static const char exempt[] = KRUNKER_AHNUM_EXEMPT_WIRE;
-    return name && name_len == sizeof exempt - 1 && memcmp(name, exempt, name_len) == 0;
+    const char *exempt = krunker_build()->ahnum_exempt_wire; // the current build's (cptR)
+    return name && name_len == strlen(exempt) && memcmp(name, exempt, name_len) == 0;
 }
 
 // JS (a + AHKEY) & 0xff on int32: only the low 8 bits of the sum survive, so it is the sum

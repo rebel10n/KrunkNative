@@ -19,10 +19,10 @@
 // (|n| <= 2^53-1) takes the smallest int format (uint64 / int64 included), every other
 // number is float64; strings fixstr / str8 / str16 / str32; arrays and maps as usual.
 //
-// AHKEY (KRUNKER_AHKEY), the exempt packet (KRUNKER_AHNUM_EXEMPT_WIRE) and the packet name
-// tables are build specific and come from the generated shared/include/krunker_build.h
-// (tools/krunker/extract_build.py); KrunkerSession takes the AHKEY at runtime so an AHKEY
-// extracted from a newer bundle works without a rebuild.
+// AHKEY, the exempt packet and the packet name tables are build specific: they come from the
+// current KrunkerBuild (shared/include/krunker_build_live.h), the generated krunker_build.h's
+// values or a published build.json's, so a newer Krunker build works without a rebuild.
+// KrunkerSession takes the AHKEY at init (krunker_build()->ahkey).
 //
 // Values: a small tagged tree (KrunkerValue) rather than cJSON:
 //   - O(1) indexing into the contiguous items of an array. Sync packets ('l', 'k', '0') are
@@ -43,14 +43,16 @@
 // ---------------------------------------------------------------- packet name tables
 // krunker_build.h defines the ids: KrunkerC2S (KRUNKER_C2S_ENTER_GAME, ..., KRUNKER_C2S_COUNT)
 // and KrunkerS2C, one per X(ident, "wire", "Name") entry of KRUNKER_C2S_PACKETS /
-// KRUNKER_S2C_PACKETS. Ids are build specific (bundle order): store wire names, not ids.
+// KRUNKER_S2C_PACKETS, identified by the bundle key ("ENTER_GAME"). The wire names are the current
+// build's (krunker_build()): store wire names only for the build that sent them.
 
-// Wire name ("en") / bundle key ("ENTER_GAME") of a packet id; NULL out of range.
+// Wire name ("en") of the current build / bundle key ("ENTER_GAME") of a packet id; NULL out of
+// range or when the current build has no such packet.
 const char *krunker_c2s_wire(KrunkerC2S id);
 const char *krunker_c2s_key(KrunkerC2S id);
 const char *krunker_s2c_wire(KrunkerS2C id);
 const char *krunker_s2c_key(KrunkerS2C id);
-// Packet id of a wire name (len bytes, need not be NUL-terminated); -1 when this build has none.
+// Packet id of a wire name in the current build (len bytes, need not be NUL-terminated); -1 when it has none.
 int krunker_c2s_lookup(const char *wire, size_t len);
 int krunker_s2c_lookup(const char *wire, size_t len);
 
@@ -132,14 +134,14 @@ const char *krunker_proto_strerror(int err);
 // ---------------------------------------------------------------- session (ahNum)
 
 typedef struct KrunkerSession {
-    int64_t ahkey;    // the build's AHKEY (KRUNKER_AHKEY or one extracted at runtime)
+    int64_t ahkey;    // the build's AHKEY (krunker_build()->ahkey when the session starts)
     uint8_t ah_num;   // trailer value of the last frame sent; 0 after init / reset
 } KrunkerSession;
 
 void krunker_session_init(KrunkerSession *s, int64_t ahkey);
 // JS socket.reset() (a new connection): ahNum = 0.
 void krunker_session_reset(KrunkerSession *s);
-// 1 when sending `name` does not rotate ahNum (KRUNKER_AHNUM_EXEMPT_WIRE, 'cptR').
+// 1 when sending `name` does not rotate ahNum (the current build's exempt packet, 'cptR').
 int krunker_proto_ahnum_exempt(const char *name, size_t name_len);
 // The rotation socket.send applies right before each send: ahNum = (ahNum + AHKEY) & 0xff,
 // skipped for the exempt packet. Returns the trailer value of the frame being sent. Call it

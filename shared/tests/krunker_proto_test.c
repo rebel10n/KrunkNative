@@ -11,6 +11,9 @@
 // ahNum = (ahNum + 0x17153) & 0xff before every send but 'cptR' (98214); the msgpack bytes
 // follow the spec under that encoder's rules (safe integer -> smallest int, else float64).
 #include <krunker_proto.h>
+#include <krunker_build_live.h>
+#include <auth_join.h>
+#include <cJSON.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -520,6 +523,330 @@ static void test_fuzz(void) {
     printf("  fuzz: %d random frames decoded ok\n", ok);
 }
 
+// ---------------------------------------------------------------- the live build (krunker_build_live.h)
+// A published build.json (tools/krunker/build.json, modified the way a new Krunker build changes it)
+// becomes the build the codec speaks; what this client cannot follow is refused with a reason.
+
+#ifndef KN_SOURCE_DIR
+#define KN_SOURCE_DIR "."
+#endif
+
+static char *slurp(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = n > 0 ? malloc((size_t) n + 1) : NULL;
+    if (buf && fread(buf, 1, (size_t) n, f) != (size_t) n) {
+        free(buf);
+        buf = NULL;
+    }
+    fclose(f);
+    if (buf) {
+        buf[n] = 0;
+        *len = (size_t) n;
+    }
+    return buf;
+}
+
+static cJSON *committed_doc(void) {
+    size_t len = 0;
+    char *text = slurp(KN_SOURCE_DIR "/tools/krunker/build.json", &len);
+    cJSON *d = text ? cJSON_ParseWithLength(text, len) : NULL;
+    free(text);
+    if (!d) printf("FAIL: cannot read %s/tools/krunker/build.json\n", KN_SOURCE_DIR);
+    return d;
+}
+
+static cJSON *packet(cJSON *doc, const char *side, const char *name) {
+    cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItem(doc, side)) {
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(e, "name")), name)) return e;
+    }
+    return NULL;
+}
+static void set_wire(cJSON *doc, const char *side, const char *name, const char *wire) {
+    cJSON *e = packet(doc, side, name);
+    if (e) cJSON_ReplaceItemInObject(e, "wire", cJSON_CreateString(wire));
+}
+static cJSON *layout(cJSON *doc, const char *name) { return cJSON_GetObjectItem(cJSON_GetObjectItem(doc, "layouts"), name); }
+static cJSON *field(cJSON *doc, const char *lay, const char *name) {
+    cJSON *f;
+    cJSON_ArrayForEach(f, cJSON_GetObjectItem(layout(doc, lay), "fields")) {
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(f, "name")), name)) return f;
+    }
+    return NULL;
+}
+static void set_offset(cJSON *doc, const char *lay, const char *name, const int off) {
+    cJSON *f = field(doc, lay, name);
+    if (f) cJSON_ReplaceItemInObject(f, "offset", cJSON_CreateNumber(off));
+}
+static void set_num(cJSON *o, const char *key, const double v) {
+    if (cJSON_GetObjectItem(o, key)) cJSON_ReplaceItemInObject(o, key, cJSON_CreateNumber(v));
+    else cJSON_AddNumberToObject(o, key, v);
+}
+static void set_str(cJSON *o, const char *key, const char *v) {
+    if (cJSON_GetObjectItem(o, key)) cJSON_ReplaceItemInObject(o, key, cJSON_CreateString(v));
+    else cJSON_AddStringToObject(o, key, v);
+}
+
+static int parse(cJSON *doc, KrunkerBuild **b, char *why, const size_t n) {
+    char *text = cJSON_PrintUnformatted(doc);
+    const int rc = krunker_build_parse(text, strlen(text), b, why, n);
+    free(text);
+    return rc;
+}
+
+// a new Krunker build: another AHKEY and versions, renamed packets, a new one, moved fields, a new field
+static cJSON *next_build_doc(void) {
+    cJSON *d = committed_doc();
+    if (!d) return NULL;
+    set_num(d, "ahkey", 0x17);
+    set_str(d, "build_version", "LiveTestBuildVersion0123456789ab");
+    set_str(d, "client_version", "10.0.9r2");
+    set_wire(d, "packets_s2c", "ADD_PLAYERS", "A0");
+    set_wire(d, "packets_s2c", "UPDATE_PLAYERS", "Ak");
+    set_wire(d, "packets_c2s", "ENTER_GAME", "Aen");
+    set_wire(d, "packets_c2s", "cptR", "cR2");
+    set_str(cJSON_GetObjectItem(d, "ahnum_exempt"), "wire", "cR2");
+    cJSON *np = cJSON_CreateObject();
+    cJSON_AddStringToObject(np, "name", "BRAND_NEW_PACKET");
+    cJSON_AddStringToObject(np, "wire", "bnp");
+    cJSON_AddItemToArray(cJSON_GetObjectItem(d, "packets_s2c"), np);
+    set_num(layout(d, "add_players"), "stride", 60);
+    set_offset(d, "add_players", "sid", 55);
+    set_offset(d, "add_players", "name", 56);
+    cJSON *nf = cJSON_CreateObject();
+    cJSON_AddNumberToObject(nf, "offset", 59);
+    cJSON_AddStringToObject(nf, "name", "someNewField");
+    cJSON_AddItemToArray(cJSON_GetObjectItem(layout(d, "add_players"), "fields"), nf);
+    set_num(layout(d, "update_players"), "stride", 15);
+    set_offset(d, "update_players", "sid", 13);
+    set_offset(d, "update_players", "x", 14);
+    cJSON *ka = cJSON_GetObjectItem(layout(d, "kill_player"), "args");
+    set_num(ka, "victim", 2);
+    set_num(ka, "killer", 0);
+    cJSON *cheat = cJSON_GetObjectItem(d, "cheat");
+    cJSON_DeleteItemFromObject(cheat, "salt_bytes");
+    set_str(cheat, "salt", "N3W_SALT");
+    set_str(cheat, "fnv_prime", "0x01000197");
+    return d;
+}
+
+static void test_live_compiled_equal(void) {
+    // the committed build.json is the header's build: parsed, it equals krunker_build_compiled()
+    cJSON *d = committed_doc();
+    KrunkerBuild *b = NULL;
+    char why[240] = "";
+    const int rc = d ? parse(d, &b, why, sizeof why) : -99;
+    if (rc) printf("  committed build.json refused: %s\n", why);
+    CHECK(rc == KRUNKER_BUILD_OK && b && b->live);
+    const KrunkerBuild *c = krunker_build_compiled();
+    CHECK(!c->live && krunker_build() == c);
+    if (b) {
+        CHECK(!strcmp(b->client_version, c->client_version) && !strcmp(b->build_version, c->build_version));
+        CHECK(b->ahkey == c->ahkey && !strcmp(b->ahnum_exempt_wire, c->ahnum_exempt_wire));
+        int same = 1;
+        for (int i = 0; i < KRUNKER_C2S_COUNT; i++) same &= b->c2s_wire[i] && !strcmp(b->c2s_wire[i], c->c2s_wire[i]);
+        for (int i = 0; i < KRUNKER_S2C_COUNT; i++) same &= b->s2c_wire[i] && !strcmp(b->s2c_wire[i], c->s2c_wire[i]);
+        CHECK(same);
+        CHECK(b->add_stride == KRUNKER_ADD_STRIDE && !memcmp(b->add, c->add, sizeof b->add));
+        CHECK(b->k_stride == KRUNKER_K_STRIDE && !memcmp(b->k, c->k, sizeof b->k));
+        CHECK(b->sync_send_vals == KRUNKER_SYNC_SEND_VALS && !memcmp(b->sync, c->sync, sizeof b->sync));
+        CHECK(!memcmp(b->kill, c->kill, sizeof b->kill) && !memcmp(b->damage, c->damage, sizeof b->damage) &&
+              !memcmp(b->health, c->health, sizeof b->health) && !memcmp(b->score, c->score, sizeof b->score));
+        CHECK(b->cheat_salt_len == KRUNKER_CHEAT_SALT_LEN && !memcmp(b->cheat_salt, c->cheat_salt, b->cheat_salt_len));
+        CHECK(b->cheat_fnv_offset == KRUNKER_CHEAT_FNV_OFFSET && b->cheat_fnv_prime == KRUNKER_CHEAT_FNV_PRIME &&
+              b->cheat_fnv_double == KRUNKER_CHEAT_FNV_DOUBLE_MUL);
+        CHECK(!strcmp(b->matchmaker_url, KRUNKER_MATCHMAKER_URL) && !strcmp(b->turnstile_site_key, KRUNKER_TURNSTILE_SITE_KEY));
+        CHECK(b->region_count == KRUNKER_REGION_COUNT && !strcmp(b->regions[0], c->regions[0]));
+        CHECK(c->add[KRB_ADD_X] == KRUNKER_ADD_X && c->k[KRB_K_SID] == KRUNKER_K_SID && c->sync[KRB_SYNC_PING] == KRUNKER_SYNC_PING);
+    }
+    krunker_build_free(b);
+    cJSON_Delete(d);
+}
+
+static void test_live_values(void) {
+    // the codec speaks the build in use: its wire names, its AHKEY, its exempt packet
+    cJSON *d = next_build_doc();
+    KrunkerBuild *b = NULL;
+    char why[240] = "";
+    const int rc = d ? parse(d, &b, why, sizeof why) : -99;
+    if (rc) printf("  next build refused: %s\n", why);
+    CHECK(rc == KRUNKER_BUILD_OK && b);
+    if (!b) {
+        cJSON_Delete(d);
+        return;
+    }
+    CHECK(!strcmp(b->build_version, "LiveTestBuildVersion0123456789ab") && !strcmp(b->client_version, "10.0.9r2") && b->ahkey == 0x17);
+    CHECK(b->add_stride == 60 && b->add[KRB_ADD_SID] == 55 && b->add[KRB_ADD_NAME] == 56 && b->add[KRB_ADD_X] == KRUNKER_ADD_X);
+    CHECK(b->k_stride == 15 && b->k[KRB_K_SID] == 13 && b->k[KRB_K_X] == 14);
+    CHECK(b->kill[KRB_KILL_VICTIM] == 2 && b->kill[KRB_KILL_KILLER] == 0);
+    CHECK(b->cheat_salt_len == 8 && !memcmp(b->cheat_salt, "N3W_SALT", 8) && b->cheat_fnv_prime == 0x01000197u);
+    krunker_build_use(b);
+    CHECK(krunker_build() == b);
+    CHECK(!strcmp(krunker_c2s_wire(KRUNKER_C2S_ENTER_GAME), "Aen") && !strcmp(krunker_c2s_key(KRUNKER_C2S_ENTER_GAME), "ENTER_GAME"));
+    CHECK(krunker_s2c_lookup("A0", 2) == KRUNKER_S2C_ADD_PLAYERS && krunker_s2c_lookup("Ak", 2) == KRUNKER_S2C_UPDATE_PLAYERS);
+    CHECK(krunker_s2c_lookup("0", 1) == -1 && krunker_s2c_lookup("k", 1) == -1); // the old names are no packet now
+    CHECK(krunker_s2c_lookup("bnp", 3) == -1); // a packet this client does not know: ignored
+    KrunkerSession s;
+    krunker_session_init(&s, krunker_build()->ahkey);
+    CHECK(krunker_proto_next_ahnum(&s, "Aen") == 0x17);
+    CHECK(krunker_proto_next_ahnum(&s, "cR2") == 0x17);        // the new exempt packet does not rotate
+    CHECK(krunker_proto_next_ahnum(&s, "cptR") == 0x2e);       // the old one does now
+    KrunkerBuf out = {0};
+    CHECK(krunker_proto_encode(&s, krunker_c2s_wire(KRUNKER_C2S_ENTER_GAME), NULL, 0, &out) == KRUNKER_PROTO_OK &&
+          out.len >= 2 && out.data[out.len - 2] == (0x45 >> 4) && out.data[out.len - 1] == (0x45 & 0xf));
+    krunker_buf_free(&out);
+    krunker_build_use(NULL);
+    CHECK(krunker_build() == krunker_build_compiled() && krunker_s2c_lookup("0", 1) == KRUNKER_S2C_ADD_PLAYERS);
+    krunker_build_free(b);
+    cJSON_Delete(d);
+}
+
+typedef void (*Breaker)(cJSON *d);
+static void br_no_sid(cJSON *d) { cJSON_DeleteItemFromArray(cJSON_GetObjectItem(layout(d, "add_players"), "fields"), 1); }
+static void br_no_sync(cJSON *d) {
+    cJSON *list = cJSON_GetObjectItem(d, "packets_s2c");
+    int i = 0;
+    cJSON *e;
+    cJSON_ArrayForEach(e, list) {
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(e, "name")), "SYNC_PLAYER")) break;
+        i++;
+    }
+    cJSON_DeleteItemFromArray(list, i);
+}
+static void br_keystream(cJSON *d) { set_str(cJSON_GetObjectItem(d, "cheat"), "keystream_formula", "v2"); }
+static void br_offset(cJSON *d) { set_offset(d, "update_players", "x", 40); }
+static void br_schema(cJSON *d) { set_num(d, "schema", 2); }
+static void br_trailer(cJSON *d) { set_str(d, "ahnum_trailer", "bytes"); }
+static void br_victim(cJSON *d) { cJSON_DeleteItemFromObject(cJSON_GetObjectItem(layout(d, "kill_player"), "args"), "victim"); }
+static void br_https(cJSON *d) { set_str(cJSON_GetObjectItem(d, "extras"), "matchmaker_url", "http://matchmaker.example"); }
+static void br_cc(cJSON *d) { set_num(cJSON_GetObjectItem(cJSON_GetObjectItem(d, "cheat"), "cc_args"), "ciphertext", 1); }
+static void br_klist(cJSON *d) { set_num(cJSON_GetObjectItem(layout(d, "update_players"), "args"), "list", 1); }
+static void br_mul(cJSON *d) { set_str(cJSON_GetObjectItem(d, "cheat"), "fnv_multiply", "bigint"); }
+static void br_no_end(cJSON *d) {
+    cJSON *list = cJSON_GetObjectItem(d, "packets_s2c");
+    int i = 0;
+    cJSON *e;
+    cJSON_ArrayForEach(e, list) {
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(e, "name")), "END_GAME")) break;
+        i++;
+    }
+    cJSON_DeleteItemFromArray(list, i);
+}
+
+static void test_live_refusals(void) {
+    // a build this client cannot follow is refused (ESHAPE), naming what changed
+    const struct {
+        Breaker brk;
+        const char *want;
+    } cases[] = {
+        {br_no_sid, "ADD_PLAYERS no longer has \"sid\""},
+        {br_no_sync, "server packet SYNC_PLAYER is gone"},
+        {br_keystream, "keystream changed (v2)"},
+        {br_offset, "UPDATE_PLAYERS field \"x\" at 40 is outside"},
+        {br_schema, "schema"},
+        {br_trailer, "trailer"},
+        {br_victim, "KILL_PLAYER no longer has the argument \"victim\""},
+        {br_https, "not https"},
+        {br_cc, "cheat check's arguments moved"},
+        {br_klist, "player list moved"},
+        {br_mul, "hash step changed (bigint)"},
+        {br_no_end, "server packet END_GAME is gone"},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        cJSON *d = committed_doc();
+        if (!d) return;
+        cases[i].brk(d);
+        KrunkerBuild *b = NULL;
+        char why[240] = "";
+        const int rc = parse(d, &b, why, sizeof why);
+        if (rc != KRUNKER_BUILD_ESHAPE || !strstr(why, cases[i].want))
+            printf("  refusal %zu: rc %d why \"%s\" (want \"%s\")\n", i, rc, why, cases[i].want);
+        CHECK(rc == KRUNKER_BUILD_ESHAPE && !b && strstr(why, cases[i].want));
+        CHECK(krunker_build() == krunker_build_compiled());
+        cJSON_Delete(d);
+    }
+    // an optional (cosmetic) packet may go: the build is accepted, the packet has no wire
+    cJSON *od = committed_doc();
+    if (od) {
+        cJSON *list = cJSON_GetObjectItem(od, "packets_s2c");
+        int i = 0;
+        cJSON *e;
+        cJSON_ArrayForEach(e, list) {
+            if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(e, "name")), "ADD_MEDAL")) break;
+            i++;
+        }
+        cJSON_DeleteItemFromArray(list, i);
+        KrunkerBuild *ob = NULL;
+        char owhy[240] = "";
+        CHECK(parse(od, &ob, owhy, sizeof owhy) == KRUNKER_BUILD_OK && ob && !ob->s2c_wire[KRUNKER_S2C_ADD_MEDAL] &&
+              ob->s2c_wire[KRUNKER_S2C_END_GAME]);
+        krunker_build_free(ob);
+        cJSON_Delete(od);
+    }
+    // not a document at all: EJSON (a broken download, the fallback's case)
+    KrunkerBuild *b = NULL;
+    char why[240];
+    CHECK(krunker_build_parse("not json", 8, &b, why, sizeof why) == KRUNKER_BUILD_EJSON && !b);
+    CHECK(krunker_build_parse("[1,2]", 5, &b, why, sizeof why) == KRUNKER_BUILD_EJSON && !b);
+    // a document without the optional extras keeps the compiled ones
+    cJSON *d = committed_doc();
+    if (d) {
+        cJSON_DeleteItemFromObject(d, "extras");
+        CHECK(parse(d, &b, why, sizeof why) == KRUNKER_BUILD_OK && b && !strcmp(b->matchmaker_url, KRUNKER_MATCHMAKER_URL) &&
+              b->region_count == KRUNKER_REGION_COUNT);
+        krunker_build_free(b);
+        cJSON_Delete(d);
+    }
+}
+
+static void test_live_manifest(void) {
+    // the manifest pins the document by sha256 and versions
+    cJSON *d = next_build_doc();
+    if (!d) return;
+    char *doc = cJSON_PrintUnformatted(d);
+    const size_t len = strlen(doc);
+    uint8_t dig[32];
+    char sha[65], json[512];
+    kn_sha256_bytes(doc, len, dig);
+    kn_sha256_hex(dig, sha);
+    snprintf(json, sizeof json,
+             "{\"schema\":1,\"build_version\":\"LiveTestBuildVersion0123456789ab\",\"client_version\":\"10.0.9r2\","
+             "\"sha256\":\"%s\",\"path\":\"krunker/%s.json\",\"published\":\"2026-10-15T12:00:00Z\"}",
+             sha, sha);
+    KrunkerBuildManifest m;
+    char why[240] = "";
+    CHECK(krunker_build_manifest_parse(json, strlen(json), &m, why, sizeof why) == KRUNKER_BUILD_OK && !strcmp(m.sha256, sha));
+    KrunkerBuild *b = NULL;
+    CHECK(krunker_build_accept(&m, doc, len, &b, why, sizeof why) == KRUNKER_BUILD_OK && b && b->ahkey == 0x17);
+    krunker_build_free(b);
+    b = NULL;
+    doc[len / 2] ^= 1; // one flipped bit: refused as a broken download (EJSON), not as a shape change
+    CHECK(krunker_build_accept(&m, doc, len, &b, why, sizeof why) == KRUNKER_BUILD_EJSON && !b && strstr(why, "sha256"));
+    doc[len / 2] ^= 1;
+    KrunkerBuildManifest other = m;
+    snprintf(other.build_version, sizeof other.build_version, "%s", "SomeOtherBuild");
+    CHECK(krunker_build_accept(&other, doc, len, &b, why, sizeof why) == KRUNKER_BUILD_EJSON && !b);
+    CHECK(krunker_build_manifest_parse("{\"schema\":2,\"build_version\":\"x\"}", 34, &m, why, sizeof why) == KRUNKER_BUILD_ESHAPE);
+    CHECK(krunker_build_manifest_parse("{\"schema\":1,\"build_version\":\"x\"}", 34, &m, why, sizeof why) == KRUNKER_BUILD_EJSON);
+    char bad[512];
+    snprintf(bad, sizeof bad, "{\"schema\":1,\"build_version\":\"a\",\"client_version\":\"1.0.0\",\"sha256\":\"%s\",\"path\":\"../x.json\"}", sha);
+    CHECK(krunker_build_manifest_parse(bad, strlen(bad), &m, why, sizeof why) == KRUNKER_BUILD_EJSON);
+    // the document's URL: next to the manifest's directory
+    KrunkerBuildManifest u = {.path = "krunker/abc.json"};
+    char url[256];
+    CHECK(krunker_build_doc_url("https://dl.krunk.io/updates/client/krunker-build.json", &u, url, sizeof url) &&
+          !strcmp(url, "https://dl.krunk.io/updates/krunker/abc.json"));
+    CHECK(krunker_build_doc_url("http://127.0.0.1:8080/updates/client/krunker-build.json?x=1", &u, url, sizeof url) &&
+          !strcmp(url, "http://127.0.0.1:8080/updates/krunker/abc.json"));
+    CHECK(!krunker_build_doc_url("https://host/krunker-build.json", &u, url, sizeof url));
+    free(doc);
+    cJSON_Delete(d);
+}
+
 int main(void) {
     test_tables();
     test_ahnum();
@@ -528,6 +855,10 @@ int main(void) {
     test_round_trips();
     test_malformed();
     test_fuzz();
+    test_live_compiled_equal();
+    test_live_values();
+    test_live_refusals();
+    test_live_manifest();
     if (g_fail) {
         printf("krunker_proto_test FAILED\n");
         return 1;

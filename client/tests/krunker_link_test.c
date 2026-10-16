@@ -3,6 +3,7 @@
 // -> Krunker frames out (decoded again and checked field by field, ahNum trailers included).
 //   cmake-build-debug/krunker_link_test
 #include <krunker_link.h>
+#include <krunker_build_live.h>
 #include <krunker_maps.h>
 #include <auth_join.h>
 #include <net_ext.h>
@@ -1254,6 +1255,60 @@ static void test_actions(void) {
     clear();
 }
 
+// ---- a live build: tools/krunker/build.json changed the way a new Krunker build changes it
+#ifndef KN_SOURCE_DIR
+#define KN_SOURCE_DIR "."
+#endif
+static cJSON *jfind(cJSON *list, const char *name) {
+    cJSON *e;
+    cJSON_ArrayForEach(e, list) {
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(e, "name")), name)) return e;
+    }
+    return NULL;
+}
+static void jset(cJSON *o, const char *key, cJSON *v) {
+    if (o && cJSON_GetObjectItem(o, key)) cJSON_ReplaceItemInObject(o, key, v);
+    else if (o) cJSON_AddItemToObject(o, key, v);
+    else cJSON_Delete(v);
+}
+static KrunkerBuild *next_build(void) {
+    FILE *f = fopen(KN_SOURCE_DIR "/tools/krunker/build.json", "rb");
+    if (!f) return NULL;
+    static char text[1 << 20];
+    const size_t n = fread(text, 1, sizeof(text) - 1, f);
+    fclose(f);
+    cJSON *d = cJSON_ParseWithLength(text, n);
+    cJSON *c2s = cJSON_GetObjectItem(d, "packets_c2s"), *s2c = cJSON_GetObjectItem(d, "packets_s2c");
+    cJSON *lay = cJSON_GetObjectItem(d, "layouts");
+    cJSON *add = cJSON_GetObjectItem(lay, "add_players"), *k = cJSON_GetObjectItem(lay, "update_players");
+    jset(d, "ahkey", cJSON_CreateNumber(0x17));
+    jset(d, "build_version", cJSON_CreateString("LiveTestBuildVersion0123456789ab"));
+    jset(d, "client_version", cJSON_CreateString("10.0.9r2"));
+    jset(jfind(s2c, "ADD_PLAYERS"), "wire", cJSON_CreateString("A0"));
+    jset(jfind(s2c, "UPDATE_PLAYERS"), "wire", cJSON_CreateString("Ak"));
+    jset(jfind(s2c, "KILL_PLAYER"), "wire", cJSON_CreateString("A3"));
+    jset(jfind(c2s, "LOAD"), "wire", cJSON_CreateString("Aload"));
+    jset(jfind(c2s, "PONG"), "wire", cJSON_CreateString("Av"));
+    jset(add, "stride", cJSON_CreateNumber(60));
+    jset(jfind(cJSON_GetObjectItem(add, "fields"), "id"), "offset", cJSON_CreateNumber(58));
+    jset(jfind(cJSON_GetObjectItem(add, "fields"), "sid"), "offset", cJSON_CreateNumber(55));
+    jset(jfind(cJSON_GetObjectItem(add, "fields"), "name"), "offset", cJSON_CreateNumber(56));
+    jset(jfind(cJSON_GetObjectItem(add, "fields"), "x"), "offset", cJSON_CreateNumber(57));
+    jset(k, "stride", cJSON_CreateNumber(15));
+    jset(jfind(cJSON_GetObjectItem(k, "fields"), "sid"), "offset", cJSON_CreateNumber(13));
+    jset(jfind(cJSON_GetObjectItem(k, "fields"), "x"), "offset", cJSON_CreateNumber(14));
+    cJSON *ka = cJSON_GetObjectItem(cJSON_GetObjectItem(lay, "kill_player"), "args");
+    jset(ka, "victim", cJSON_CreateNumber(2));
+    jset(ka, "killer", cJSON_CreateNumber(0));
+    char *out = cJSON_PrintUnformatted(d);
+    KrunkerBuild *b = NULL;
+    char why[240] = "";
+    if (krunker_build_parse(out, strlen(out), &b, why, sizeof(why)) != KRUNKER_BUILD_OK) printf("next build refused: %s\n", why);
+    free(out);
+    cJSON_Delete(d);
+    return b;
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2047,6 +2102,74 @@ int main(void) {
     test_fx();
     test_world();
     test_actions();
+
+    { // a live build (krunker_build_live.h): its packet names, AHKEY, strides, offsets and argument positions
+        KrunkerBuild *nb = next_build();
+        CHECK(nb != NULL, "the next build parses");
+        if (nb) {
+            krunker_build_use(nb);
+            KrunkerLink lv;
+            krunker_link_init(&lv, &io, krunker_build()->ahkey);
+            clear();
+            feed(&lv, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockL")}, 1);
+            feed(&lv, "load", NULL, 0);
+            CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "Aload") && g_out[0].ah_echo == 0x17, "load answered as Aload, ahNum 0x17 (%s %d)",
+                  g_out_count ? g_out[0].name : "-", g_out_count ? g_out[0].ah_echo : -1);
+            clear();
+            // "A0": 60 values per player, id at 58, sid at 55, name at 56, x at 57 (y / z where they were)
+            KrunkerValue e[120];
+            for (int i = 0; i < 120; i++) e[i] = KRUNKER_V_NIL;
+            e[58] = KRUNKER_V_STR("sockL"); e[55] = KRUNKER_V_NUM(31); e[56] = KRUNKER_V_STR("Me"); e[57] = KRUNKER_V_NUM(12.5);
+            e[KRUNKER_ADD_Z] = KRUNKER_V_NUM(-3); e[KRUNKER_ADD_MAX_HEALTH] = KRUNKER_V_NUM(100);
+            e[60 + 58] = KRUNKER_V_STR("sockO"); e[60 + 55] = KRUNKER_V_NUM(32); e[60 + 56] = KRUNKER_V_STR("Other");
+            e[60 + 57] = KRUNKER_V_NUM(7);
+            const KrunkerValue add_args[] = {KRUNKER_V_ARRAY(e, 120)};
+            feed(&lv, "A0", add_args, 1);
+            const NetPacket *sp0 = find_in(NET_PACKET_SPAWN, 0), *sp1 = find_in(NET_PACKET_SPAWN, 1);
+            NetSpawnPacket s0, s1;
+            memset(&s0, 0, sizeof(s0));
+            memset(&s1, 0, sizeof(s1));
+            if (sp0) memcpy(&s0, sp0->payload, sizeof(s0));
+            if (sp1) memcpy(&s1, sp1->payload, sizeof(s1));
+            CHECK(sp0 && s0.uid == 31 && s0.is_you && !strcmp(s0.name, "Me") && s0.position[0] == 12.5f && s0.position[2] == -3.0f,
+                  "A0 player 1 from the new offsets (uid %d you %d name %s x %.1f)", s0.uid, s0.is_you, s0.name, s0.position[0]);
+            CHECK(sp1 && s1.uid == 32 && !s1.is_you && !strcmp(s1.name, "Other") && s1.position[0] == 7.0f, "A0 player 2 (stride 60)");
+            CHECK(lv.my_sid == 31, "joined as sid 31 (%d)", lv.my_sid);
+            clear();
+            // the old wire names are no packet in this build
+            KrunkerValue old[KRUNKER_ADD_STRIDE];
+            for (int i = 0; i < KRUNKER_ADD_STRIDE; i++) old[i] = KRUNKER_V_NIL;
+            old[KRUNKER_ADD_SID] = KRUNKER_V_NUM(40);
+            const KrunkerValue old_args[] = {KRUNKER_V_ARRAY(old, KRUNKER_ADD_STRIDE)};
+            feed(&lv, "0", old_args, 1);
+            CHECK(!find_in(NET_PACKET_SPAWN, 0), "\"0\" is ignored in this build");
+            clear();
+            // "Ak": 15 values per player, sid at 13, x at 14
+            KrunkerValue ke[15];
+            for (int i = 0; i < 15; i++) ke[i] = KRUNKER_V_NUM(0);
+            ke[13] = KRUNKER_V_NUM(32); ke[14] = KRUNKER_V_NUM(9.25); ke[KRUNKER_K_Z] = KRUNKER_V_NUM(4);
+            const KrunkerValue k_args[] = {KRUNKER_V_ARRAY(ke, 15), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)};
+            feed(&lv, "Ak", k_args, 3);
+            const NetPacket *st = find_in(NET_PACKET_STATE, 0);
+            NetStatePacket sv;
+            memset(&sv, 0, sizeof(sv));
+            if (st) memcpy(&sv, st->payload, sizeof(sv));
+            CHECK(st && sv.uid == 32 && sv.position[0] == 9.25f && sv.position[2] == 4.0f, "Ak from the new offsets (uid %d x %.2f)", sv.uid,
+                  sv.position[0]);
+            clear();
+            // "A3": victim and killer swapped places
+            feed(&lv, "A3", (KrunkerValue[]) {KRUNKER_V_NUM(31), KRUNKER_V_NUM(0), KRUNKER_V_NUM(32), KRUNKER_V_NIL, KRUNKER_V_NUM(2)}, 5);
+            const NetPacket *kp = find_in(NET_PACKET_KILL, 0);
+            NetKillPacket kv;
+            memset(&kv, 0, sizeof(kv));
+            if (kp) memcpy(&kv, kp->payload, sizeof(kv));
+            CHECK(kp && kv.victim_uid == 32 && kv.killer_uid == 31, "A3 victim at 2, killer at 0 (%d %d)", kv.victim_uid, kv.killer_uid);
+            clear();
+            krunker_build_use(NULL);
+            krunker_build_free(nb);
+        }
+        clear();
+    }
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

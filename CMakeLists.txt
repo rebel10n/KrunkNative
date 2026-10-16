@@ -615,9 +615,13 @@ else ()
     # official Krunker socket codec (shared/src/krunker_proto.c: msgpack + ahNum trailer, no I/O).
     # Built with ASan + UBSan whenever the toolchain links them: its malformed-frame and fuzz cases
     # are meant to run sanitized.
+    # Also the runtime KrunkerBuild (shared/src/krunker_build_live.c): the compiled build, a published
+    # build.json's (parse, shape refusals, the manifest's hash pin) and the codec speaking it.
     add_executable(krunker_proto_test shared/include/krunker_proto.h shared/include/krunker_build.h
-        shared/src/krunker_proto.c shared/tests/krunker_proto_test.c)
+        shared/include/krunker_build_live.h shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c
+        shared/tests/krunker_proto_test.c)
     target_link_libraries(krunker_proto_test PRIVATE m)
+    target_compile_definitions(krunker_proto_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json
     if (NOT WIN32)
         include(CheckCSourceCompiles)
         set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
@@ -628,7 +632,7 @@ else ()
             target_link_libraries(krunker_proto_test PRIVATE -fsanitize=address,undefined)
         endif ()
     endif ()
-    add_test(NAME krunker_proto_test COMMAND krunker_proto_test)
+    add_test(NAME krunker_proto_test COMMAND krunker_proto_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # editor bus (shared/src/editor_bus.c: framing, scopes, tokens, unix socket + TCP fallback)
     add_executable(editor_bus_test shared/include/editor_bus.h shared/src/editor_bus.c shared/tests/editor_bus_test.c)
@@ -986,10 +990,22 @@ else ()
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
     add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c
                    client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
-                   shared/src/krunker_proto.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c shared/src/season.c)
+                   shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c shared/src/season.c)
     target_include_directories(krunker_link_test PRIVATE client/include shared/include)
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
-    add_test(NAME krunker_link_test COMMAND krunker_link_test)
+    target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
+    add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    # krunker_build_fetch_test (client/include/krunker_build_fetch.h): the live Krunker build of an official
+    # join over a fake HTTP layer: published (hash-checked, cached), the cached / compiled fallbacks, refusals
+    if (NOT WIN32)
+        add_executable(krunker_build_fetch_test client/tests/krunker_build_fetch_test.c client/src/net/krunker_build_fetch.c
+                       shared/src/krunker_build_live.c shared/src/auth_join.c)
+        target_include_directories(krunker_build_fetch_test PRIVATE client/include shared/include)
+        target_link_libraries(krunker_build_fetch_test PRIVATE cJSON)
+        target_compile_definitions(krunker_build_fetch_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        add_test(NAME krunker_build_fetch_test COMMAND krunker_build_fetch_test)
+    endif ()
 
     # community_maps_test (client/include/community_maps.h): the Games window's /api/search request,
     # the mode tags, the catalogue match of a row and the map slot (community_maps_core.c)
@@ -1090,7 +1106,7 @@ else ()
     # double-rounded FNV-1a) against hand-derived vectors, cc -> ccr round trips through the
     # QuickJS sandbox, and the sandbox limits (client/src/net/krunker_cheat*.c)
     add_executable(krunker_cheat_test client/tests/krunker_cheat_test.c client/src/net/krunker_cheat.c
-                   client/src/net/krunker_cheat_qjs.c)
+                   client/src/net/krunker_cheat_qjs.c shared/src/krunker_build_live.c shared/src/auth_join.c)
     target_include_directories(krunker_cheat_test PRIVATE client/include client/src/net)
     target_link_libraries(krunker_cheat_test PRIVATE kn_quickjs)
     add_test(NAME krunker_cheat_test COMMAND krunker_cheat_test)

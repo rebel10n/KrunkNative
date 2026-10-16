@@ -13,6 +13,10 @@
    as C11 with -Wall -Wextra -Werror (when a C compiler is installed); the current bundle (the
    one build.json names by sha256: the URL cache or a local copy) regenerates it identically
    and yields the known per-player layouts (ADD_PLAYERS 53/player, UPDATE_PLAYERS 13, ...).
+4. The live build: tools/krunker/publish_build.py stages build.json as the published document +
+   manifest, tools/krunker/build_check.c (the client's parser) accepts it, absorbs moved values,
+   refuses a lost field and a document the manifest does not pin; krunker_build_live.c requires
+   every packet id the client code names.
 
 usage: python3 -I tools/krunker/test_extract.py [-v]
 """
@@ -736,11 +740,90 @@ int main(void) {
         check(subprocess.run([exe], timeout=30).returncode == 0, "header values usable from C")
 
 
+# ------------------------------------------------------- 4. the live build (published, checked by the client's parser)
+
+def test_live(tmp):
+    """tools/krunker/publish_build.py stages build.json as the published document + manifest;
+    tools/krunker/build_check.c (the client's own parser) accepts it, refuses a shape change and a
+    swapped document; every packet id the client names is one krunker_build_live.c requires."""
+    import publish_build as P
+    out = os.path.join(tmp, "stage")
+    with redirect_stdout(io.StringIO()):
+        m = P.stage(E.OUT_JSON, out, published="2026-10-15T00:00:00Z")
+    with open(E.OUT_JSON, encoding="utf8") as f:
+        doc = json.load(f)
+    docp = os.path.join(out, m["path"])
+    with open(docp, "rb") as f:
+        data = f.read()
+    check(hashlib.sha256(data).hexdigest() == m["sha256"] and m["build_version"] == doc["build_version"],
+          "staged document is pinned by the manifest's sha256")
+    pub = json.loads(data)
+    check("cheat_keystream_js" not in pub and "maps" not in pub and pub["layouts"] == doc["layouts"] and
+          pub["packets_s2c"] == doc["packets_s2c"], "the published document drops what clients never read (the JS, maps)")
+    with redirect_stdout(io.StringIO()):
+        check(P.main(["same", out, os.path.join(out, "client", "krunker-build.json")]) == 0, "same manifest: nothing to upload")
+
+    # every KRUNKER_C2S_* / KRUNKER_S2C_* the client code names is listed for a live build (REQUIRED_* or OPTIONAL_*)
+    with open(os.path.join(ROOT, "shared", "src", "krunker_build_live.c"), encoding="utf8") as f:
+        live_c = f.read()
+    required = set(re.findall(r"KRUNKER_(?:C2S|S2C)_\w+", live_c[live_c.index("REQUIRED_C2S[]"):live_c.index("REQUIRED_ADD[]")]))
+    used = set()
+    for sub in ("client/src", "client/include", "shared/src"):
+        for dp, _, files in os.walk(os.path.join(ROOT, sub)):
+            for fn in files:
+                if fn.endswith((".c", ".h")) and fn != "krunker_build_live.c":
+                    with open(os.path.join(dp, fn), encoding="utf8", errors="replace") as f:
+                        used |= set(re.findall(r"KRUNKER_(?:C2S|S2C)_\w+", f.read()))
+    used -= {"KRUNKER_C2S_COUNT", "KRUNKER_S2C_COUNT", "KRUNKER_C2S_PACKETS", "KRUNKER_S2C_PACKETS"}
+    check(used and not (used - required), "krunker_build_live.c lists every packet the client names in REQUIRED_* / OPTIONAL_* "
+          "(missing: %s)" % ", ".join(sorted(used - required)))
+
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if not cc:
+        print("  SKIP build_check (no compiler)")
+        return
+    exe = os.path.join(tmp, "build_check")
+    r = subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", os.path.join(ROOT, "shared", "include"), "-I",
+                        os.path.join(ROOT, "shared", "lib", "cJSON"), os.path.join(HERE, "build_check.c"),
+                        os.path.join(ROOT, "shared", "src", "krunker_build_live.c"), os.path.join(ROOT, "shared", "src", "auth_join.c"),
+                        os.path.join(ROOT, "shared", "lib", "cJSON", "cJSON.c"), "-o", exe], capture_output=True, text=True, timeout=120)
+    check(r.returncode == 0, "build_check compiles: %s" % r.stderr[:300])
+    if r.returncode:
+        return
+    run = lambda *a: subprocess.run([exe, *a], capture_output=True, text=True, timeout=30)
+    r = run(E.OUT_JSON)
+    check(r.returncode == 0 and r.stdout.startswith("ok %s %s" % (doc["client_version"], doc["build_version"])),
+          "build_check accepts the committed build.json: %s" % r.stdout.strip())
+    r = run(docp, os.path.join(out, "client", "krunker-build.json"))
+    check(r.returncode == 0, "build_check accepts the staged document against its manifest: %s" % r.stdout.strip())
+    # a new Krunker build with moved values is fine; one that lost a field the client reads is refused (2)
+    moved = json.loads(json.dumps(doc))
+    moved["ahkey"], moved["build_version"] = 0x2b, "MovedBuild" + "0" * 22
+    for f in moved["layouts"]["update_players"]["fields"]:
+        if f["name"] == "x":
+            f["offset"] = 13
+    moved["layouts"]["update_players"]["stride"] = 14
+    lost = json.loads(json.dumps(doc))
+    lost["layouts"]["sync_player"]["fields"] = [f for f in lost["layouts"]["sync_player"]["fields"] if f["name"] != "inputSN"]
+    for name, d in (("moved", moved), ("lost", lost)):
+        with open(os.path.join(tmp, name + ".json"), "w", encoding="utf8") as f:
+            json.dump(d, f)
+    r = run(os.path.join(tmp, "moved.json"))
+    check(r.returncode == 0 and "AHKEY 0x2b" in r.stdout and "not the compiled build" in r.stdout,
+          "build_check: moved values are absorbed: %s" % r.stdout.strip())
+    r = run(os.path.join(tmp, "lost.json"))
+    check(r.returncode == 2 and 'SYNC_PLAYER no longer has "inputSN"' in r.stdout, "build_check: a lost field is refused (2): %s" %
+          r.stdout.strip())
+    # the manifest pins the document: another one under its name is invalid (1), not a shape change
+    r = run(os.path.join(tmp, "moved.json"), os.path.join(out, "client", "krunker-build.json"))
+    check(r.returncode == 1 and "sha256" in r.stdout, "build_check: a document the manifest does not name (1): %s" % r.stdout.strip())
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="kn-krunker-extract-test-")
     try:
         for name, fn in (("real bundles", test_real_bundles), ("synthetic bundles", test_synthetic),
-                         ("committed header", test_committed)):
+                         ("committed header", test_committed), ("live build", test_live)):
             print("%s:" % name)
             fn(tmp)
     finally:

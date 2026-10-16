@@ -296,6 +296,7 @@
  "kn.kio.account.signedOut": "Signed out of krunker.io: krunker.io servers are joined as a guest.",
  "kn.kio.account.title": "krunker.io account",
  "kn.kio.account.unreachable": "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client.",
+ "kn.kio.buildUnsupported": "krunker.io updated to Krunker {0}: this client needs an update to join its games ({1}).",
  "kn.kio.captchaCancelled": "You closed krunker.io's security challenge, so no game was joined. Pick the lobby again to retry.",
  "kn.kio.captchaNoUi": "krunker.io asks for a security challenge, and this build has no menu to show it in: no game was joined.",
  "kn.kio.denied": "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client.",

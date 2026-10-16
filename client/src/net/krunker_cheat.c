@@ -31,7 +31,7 @@
 
  * Keystream  iïìiîïì(nonce, len)                       @ game.deob.js:194974
  *   const SALT = [0x4b,0x52,0x55,0x4e,0x4b,0x33,0x52,0x5f,0x41,0x43];
- *          // "KRUNK3R_AC": KRUNKER_CHEAT_SALT / _SALT_LEN in krunker_build.h
+ *          // "KRUNK3R_AC": the current build's cheat_salt (krunker_build_live.h)
  *   for i in 0..len:
  *       ks[i] = (nonce.charCodeAt(i % nonce.length) ^ SALT[i % SALT.length])
  *               + i  & 0xff
@@ -55,7 +55,7 @@
  *   32-bit Math.imul would instead keep the exact low 32 bits, giving a
  *   different answer (e.g. 'abc12345{"r":1}' -> c3639e34, imul 69b94211). We
  *   reproduce the float rounding exactly with 64-bit integer arithmetic
- *   (fnv_mul below; KRUNKER_CHEAT_FNV_DOUBLE_MUL=0 switches to imul), so no
+ *   (fnv_mul below; a build with cheat_fnv_double 0 switches to imul), so no
  *   FPU rounding mode or long double is relied upon.
  *
  * Matching JS string semantics:
@@ -102,9 +102,10 @@ static size_t nonce_units(const char *nonce, uint8_t **units);
 static void xor_stream(const char *nonce, const uint8_t *data, uint8_t *out,
                        size_t len)
 {
-    /* the salt literal read as KRUNKER_CHEAT_SALT_LEN raw bytes */
-    static const unsigned char salt[KRUNKER_CHEAT_SALT_LEN + 1] = KRUNKER_CHEAT_SALT;
-    const size_t slen = KRUNKER_CHEAT_SALT_LEN;
+    /* the current build's salt (krunker_build_live.h; compiled: KRUNKER_CHEAT_SALT) */
+    const KrunkerBuild *b = krunker_build();
+    const unsigned char *salt = b->cheat_salt;
+    const size_t slen = b->cheat_salt_len;
     uint8_t *u = NULL;
     const size_t ulen = nonce_units(nonce, &u);
     for (size_t i = 0; i < len; i++) {
@@ -266,17 +267,17 @@ static uint64_t round_to_double_u64(uint64_t p)
 
 static int32_t fnv_mul(int32_t x)
 {
-#if KRUNKER_CHEAT_FNV_DOUBLE_MUL
-    const uint64_t prime = (uint64_t)(uint32_t)KRUNKER_CHEAT_FNV_PRIME;
+    /* the current build's prime and step (krunker_build_live.h; compiled: KRUNKER_CHEAT_FNV_*) */
+    const KrunkerBuild *b = krunker_build();
+    if (!b->cheat_fnv_double)
+        return (int32_t)((uint32_t)x * b->cheat_fnv_prime); /* Math.imul */
+    const uint64_t prime = (uint64_t)b->cheat_fnv_prime;
     int neg = x < 0;
     uint64_t ax = neg ? (uint64_t)(-(int64_t)x) : (uint64_t)x;
     uint32_t r = (uint32_t)round_to_double_u64(ax * prime);
     if (neg)
         r = 0u - r;
     return (int32_t)r;
-#else
-    return (int32_t)((uint32_t)x * (uint32_t)KRUNKER_CHEAT_FNV_PRIME); /* Math.imul */
-#endif
 }
 
 /* Fold one UTF-16 code unit into the running hash. */
@@ -375,7 +376,7 @@ static void fnv_hex(int32_t h, char out9[9])
     out9[8] = '\0';
 }
 
-#define FNV_OFFSET ((int32_t)(uint32_t)KRUNKER_CHEAT_FNV_OFFSET)
+#define FNV_OFFSET ((int32_t)krunker_build()->cheat_fnv_offset)
 
 void krunker_cheat_fnv1a_js(const char *str, char out9[9])
 {

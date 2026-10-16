@@ -2,7 +2,7 @@
 """KN_KRUNKER_OFFICIAL end to end against a local stub of krunker.io (client/include/krunker_net.h):
 nothing leaves the machine.
 
-  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web|--webview|--exclude]   (repo root)
+  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web|--webview|--exclude|--live]   (repo root)
 
 Stubs (Python, ports from kn_proto.free_ports()):
   - Krunker's matchmaker: GET /generate-token (a token) and GET /seek-game (checks the exact query
@@ -23,6 +23,16 @@ Stubs (Python, ports from kn_proto.free_ports()):
 Map run "native-hq": init with map 34 (HQ, refused before this client shipped Krunker's whole list); the
 client must load assets/maps/official/34_hq.json, stand on the floor at the HQ spawn the stub puts it on
 (no "l" corrects it) and walk across it with W while the stub takes its "q" frames.
+Live build runs (client/include/krunker_build_fetch.h; part of --native, or --live alone): the stub's
+matchmaker also publishes a Krunker build (tools/krunker/publish_build.py's manifest + document,
+KRUNKNATIVE_KRUNKER_BUILD_URL) and its game server speaks only that build. "native-live": a build that is
+not the compiled one (another buildVersion and AHKEY, renamed packets, moved ADD_PLAYERS / UPDATE_PLAYERS
+offsets and strides, KILL_PLAYER's victim and killer swapped, a packet the client does not know): the client
+fetches it, seeks with its buildVersion and plays the whole game in it. "native-live-refused": the published
+build lost a field the client reads: the join fails on the error screen saying which build and why, before
+any seek. "native-live-stale": the matchmaker refuses the published build's buildVersion (InvalidVersion):
+the client asks the manifest again, then seeks with the compiled build and joins. "native-live-fallback": the
+manifest answers 503: the compiled build joins.
 Find New Game runs (--exclude alone): "native-exclude" (Quick Match with Server Type Official, the lobby
 list: never the game it leaves, no bouncing between two, the least recent once all are recent) and
 "native-exclude-mm" (no list from krunker_lobbies: krunker_net's own list pick, then the live client's
@@ -100,7 +110,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
-        "--fx": "fx", "--world": "world", "--actions": "actions"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -298,6 +308,113 @@ ALTCHA = {"algorithm": "SHA-256", "challenge": hashlib.sha256((ALTCHA_SALT + str
 ALTCHA_UNSOLVABLE = dict(ALTCHA, algorithm="SHA-512", challenge=hashlib.sha512((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest())
 
 
+# ---------------------------------------------------------------- a live Krunker build (krunker_build_fetch.h)
+
+sys.path.insert(0, os.path.join(ROOT, "tools/krunker"))
+import publish_build  # noqa: E402
+
+with open(os.path.join(ROOT, "tools/krunker/build.json")) as _f:
+    COMMITTED_BUILD = json.load(_f)  # the compiled build (krunker_build.h), the stub's own language
+LIVE_VERSION, LIVE_CLIENT, LIVE_AHKEY = "LiveE2EBuildVersion0000000000000", "10.0.9r1", 0x2b
+
+
+class LiveBuild:
+    """A Krunker build (a build.json document) the stub speaks instead of the compiled one: its packets
+    are renamed, its per-player arrays and KILL_PLAYER's arguments laid out by Krunker field name."""
+
+    def __init__(self, doc):
+        self.doc = doc
+        live_s2c = {e["name"]: e["wire"] for e in doc["packets_s2c"]}
+        live_c2s = {e["name"]: e["wire"] for e in doc["packets_c2s"]}
+        self.s2c = {e["wire"]: live_s2c.get(e["name"], e["wire"]) for e in COMMITTED_BUILD["packets_s2c"]}
+        self.c2s_back = {live_c2s[e["name"]]: e["wire"] for e in COMMITTED_BUILD["packets_c2s"] if e["name"] in live_c2s}
+
+    def layout(self, which):
+        return COMMITTED_BUILD["layouts"][which], self.doc["layouts"][which]
+
+    def remap(self, values, which, stride_key="stride"):
+        base, live = self.layout(which)
+        live_off = {f["name"]: f["offset"] for f in live["fields"]}
+        bs = base.get(stride_key) or len(values)
+        # one state (no stride): as long as the live offsets of the values given
+        ls = live.get(stride_key) or (max(live_off[f["name"]] for f in base["fields"] if f["offset"] < len(values) and f["name"] in live_off) + 1)
+        out = []
+        for i in range(0, len(values), bs):
+            chunk, new = values[i:i + bs], [None] * ls
+            for f in base["fields"]:
+                if f["offset"] < len(chunk) and f["name"] in live_off:
+                    new[live_off[f["name"]]] = chunk[f["offset"]]
+            out += new
+        return out
+
+    def out(self, name, args):
+        if name == "0" and args and isinstance(args[0], list):
+            args = [self.remap(args[0], "add_players")] + args[1:]
+        elif name == "k" and args and isinstance(args[0], list):
+            args = [self.remap(args[0], "update_players")] + args[1:]
+        elif name == "l" and args and isinstance(args[0], list):
+            args = [self.remap(args[0], "sync_player", "none")] + args[1:]  # (one state: no stride)
+        elif name == "3":
+            base, live = (lay["args"] for lay in self.layout("kill_player"))
+            new = [None] * self.doc["layouts"]["kill_player"]["argc"]
+            for role, pos in base.items():
+                if pos < len(args) and role in live:
+                    new[live[role]] = args[pos]
+            args = new
+        return self.s2c.get(name, name), args
+
+    def back(self, name):
+        return self.c2s_back.get(name, name)
+
+
+def next_build_doc(lose_field=None):
+    """The committed build.json as a new Krunker build changes it (LiveBuild); lose_field: (layout, name) renamed
+    away, a change the client cannot follow."""
+    d = json.loads(json.dumps(COMMITTED_BUILD))
+    d.update(ahkey=LIVE_AHKEY, ahkey_hex="0x%x" % LIVE_AHKEY, ahnum_step=LIVE_AHKEY & 0xff, build_version=LIVE_VERSION,
+             client_version=LIVE_CLIENT)
+    ren = {"packets_s2c": {"ADD_PLAYERS": "P0", "UPDATE_PLAYERS": "Pk", "SYNC_PLAYER": "Pl", "KILL_PLAYER": "P3"},
+           "packets_c2s": {"ENTER_GAME": "Pen", "INPUT": "Pq", "PONG": "Pv", "LOAD": "Pld"}}
+    for side, names in ren.items():
+        for e in d[side]:
+            e["wire"] = names.get(e["name"], e["wire"])
+    d["packets_s2c"].append({"name": "SOME_NEW_PACKET", "wire": "snp"})
+    add, k = d["layouts"]["add_players"], d["layouts"]["update_players"]
+    add["stride"], add["server_stride"], k["stride"] = 56, 56, 15
+    for lay, moves in ((add, {"sid": 53, "name": 54, "x": 55}), (k, {"sid": 13, "x": 14})):
+        for f in lay["fields"]:
+            f["offset"] = moves.get(f["name"], f["offset"])
+    ka = d["layouts"]["kill_player"]["args"]
+    ka["victim"], ka["killer"] = ka["killer"], ka["victim"]
+    if lose_field:
+        for f in d["layouts"][lose_field[0]]["fields"]:
+            if f["name"] == lose_field[1]:
+                f["name"] = lose_field[1] + "Renamed"
+    return d
+
+
+def publish(stub, doc, label):
+    """Stage doc as tools/krunker/publish_build.py does and serve it from the stub's matchmaker."""
+    path = os.path.join(WORK, label + "-build.json")
+    with open(path, "w") as f:
+        json.dump(doc, f)
+    out = os.path.join(WORK, label + "-stage")
+    with open(os.devnull, "w") as null:
+        old, sys.stdout = sys.stdout, null
+        try:
+            m = publish_build.stage(path, out)
+        finally:
+            sys.stdout = old
+    for rel in ("client/krunker-build.json", m["path"]):
+        with open(os.path.join(out, rel), "rb") as f:
+            stub.published["/updates/" + rel] = (200, f.read())
+    return m
+
+
+def build_url(stub):
+    return "http://127.0.0.1:%d/updates/client/krunker-build.json" % stub.mm_port
+
+
 # ---------------------------------------------------------------- the stubs
 
 class Stub:
@@ -335,6 +452,15 @@ class Stub:
         self.gone_after = {}  # the reload runs: gameId -> seeks answered before it is gone (InvalidGameId)
         self.list_requests = 0
         self.client_closed_t = None  # time.monotonic() when the client closed the game socket
+        # the Krunker build the game server speaks and the matchmaker serves (LiveBuild; None = the compiled one),
+        # and what /updates/... answers (path -> (status, bytes)): the published manifest + document
+        self.live = None
+        self.ahkey, self.build_version = AHKEY, BUILD_VERSION
+        self.published = {}
+
+    def speak(self, live):
+        self.live = live
+        self.ahkey, self.build_version = live.doc["ahkey"], live.doc["build_version"]
 
     # matchmaker
     def start_http(self):
@@ -349,7 +475,10 @@ class Stub:
                 q = urllib.parse.parse_qsl(u.query, keep_blank_values=True)
                 stub.http_log.append((u.path, q, u.query))
                 status = 200
-                if u.path == "/generate-token":
+                if u.path in stub.published:  # the published Krunker build (tools/krunker/publish_build.py)
+                    status, body = stub.published[u.path]
+                    ctype = "application/json"
+                elif u.path == "/generate-token":
                     tok = "tok_e2e_%d_0123456789abcdefghijklmnopqrstuvwxyz0123456789" % len(stub.issued)
                     stub.issued.append(tok)
                     body, ctype = tok.encode(), "text/plain"
@@ -368,7 +497,14 @@ class Stub:
                 elif u.path == "/seek-game" and stub.lobbies is not None:
                     qd = dict(q)
                     game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
-                    if game in stub.gone_after and stub.gone_after[game] <= 0:
+                    try:
+                        seek_v = json.loads(qd.get("dataQuery") or "{}").get("v")
+                    except (ValueError, TypeError):
+                        seek_v = None
+                    if seek_v != stub.build_version:  # no server runs that build (the version gate below)
+                        stub.bad_version_seeks.append(seek_v)
+                        status, body = 400, json.dumps({"error": "InvalidVersion"}).encode()
+                    elif game in stub.gone_after and stub.gone_after[game] <= 0:
                         status, body = 404, json.dumps({"error": "InvalidGameId"}).encode()  # the game ended
                     else:
                         if game in stub.gone_after:
@@ -391,7 +527,7 @@ class Stub:
                         status, body = 400, json.dumps({"error": "CaptchaRequired"}).encode()  # the live answer
                         if cap:
                             stub.used_captchas.add(cap)
-                    elif seek_v != BUILD_VERSION:
+                    elif seek_v != stub.build_version:
                         # captcha accepted, but the build the client presents is not the one we serve
                         stub.used_captchas.add(cap)
                         stub.bad_version_seeks.append(seek_v)
@@ -423,6 +559,8 @@ class Stub:
 
         async def send(name, *args):
             ah[0] = (ah[0] + 0x11) & 0xff  # the server's own trailer (the client never checks it)
+            if self.live:  # the stub's packets are written in the compiled build: say them in the live one
+                name, args = self.live.out(name, list(args))
             await ws.send(frame(name, *args, ah=ah[0]))
 
         def player(sock, sid, name, x, z, y=0, team=0):
@@ -470,11 +608,13 @@ class Stub:
                 except Exception as e:  # noqa: BLE001
                     self.errors.append("undecodable client frame: %s" % e)
                     continue
+                if self.live:  # the live build's wire names, back to the compiled ones the checks use
+                    name = self.live.back(name)
                 # the server validates the auth-byte stream: every frame except "cptR" advances
                 # ahNum by AHKEY (game.deob.js:98214); a wrong trailer is a desync. Checked here on
                 # the wire so a broken rotation or a dropped/reordered frame fails the test.
                 if name != "cptR":
-                    ah_exp[0] = (ah_exp[0] + AHKEY) & 0xff
+                    ah_exp[0] = (ah_exp[0] + self.ahkey) & 0xff
                 if trailer != ah_exp[0]:
                     self.proto_errors.append("ahNum %s: trailer %d, expected %d (frame %d)" % (name, trailer, ah_exp[0], len(self.frames)))
                 # "q" firstIsn must strictly advance (isn increments per input frame, never resets
@@ -1022,7 +1162,7 @@ def check_run(label, stub, client_lines, cheat_expected):
     ah, bad = 0, []
     for name, _, trailer in frames:
         if name != "cptR":
-            ah = (ah + AHKEY) & 0xff
+            ah = (ah + stub.ahkey) & 0xff
         if trailer != ah:
             bad.append((name, trailer, ah))
     check(f"{label}: every client frame's ahNum trailer ({len(frames)} frames)", frames and not bad, bad[:5])
@@ -1147,6 +1287,10 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
     if display:
         env["DISPLAY"] = display  # a private Xvfb of the test's own (the challenge window runs; the game stays headless)
+    # the live Krunker build's cache stays in the run (krunker_build_fetch.h); a stub publishing a build names it
+    env["KRUNKNATIVE_KRUNKER_BUILD_CACHE"] = os.path.join(WORK, label + "-build-cache")
+    if stub.published:
+        env["KRUNKNATIVE_KRUNKER_BUILD_URL"] = build_url(stub)
     env.update(extra_env)
     out = open(log, "w")
     p = subprocess.Popen([*wrap, "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
@@ -2078,6 +2222,121 @@ def run_native_reload(gone):
           "[mm] launch seek" not in after and "[mm] joining" not in after, "")
 
 
+# ---------------------------------------------------------------- native: the live Krunker build
+
+LIVE_SCRIPT = ("0 boot\n4000 play\n5000 text @timer0 [id=timerVal]\n5500 text @feed0 [id=killFeed]\n6500 text @feed1 [id=killFeed]\n"
+               "7500 text @feed2 [id=killFeed]\n8000 players\n8100 down W\n9500 up W\n9700 players\n9900 con say hello official\n"
+               "10500 text @timer1 [id=timerVal]\n11000 players\n12500 text @timer2 [id=timerVal]\n13000 players\n13500 quit\n")
+
+
+def run_native_live():
+    """Krunker shipped a build that is not the compiled one: the client takes it from the published manifest
+    and plays the whole game in it (another buildVersion and AHKEY, renamed packets, moved offsets)."""
+    label = "native-live"
+    published = {}
+
+    def setup(st):
+        st.lobbies = [(GAME_ID, 3)]  # no captcha: the build is what this run is about
+        doc = next_build_doc()
+        st.speak(LiveBuild(doc))
+        published.update(publish(st, doc, label))
+
+    stub, p, out, log = launch_native(label, LIVE_SCRIPT, {}, stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    doc_path = "/updates/" + published.get("path", "?")
+    check(f"{label}: the manifest, then the document it names, then seek-game",
+          paths[:3] == ["/updates/client/krunker-build.json", doc_path, "/seek-game"], paths[:4])
+    check(f"{label}: the client took the published build (live {LIVE_CLIENT}, AHKEY 0x{LIVE_AHKEY:x})",
+          f"[krunker] Krunker build: live {LIVE_CLIENT} (buildVersion {LIVE_VERSION}, AHKEY 0x{LIVE_AHKEY:x})" in text,
+          [l for l in lines if "Krunker build" in l][:3])
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: seek-game carries the published buildVersion (the matchmaker's version gate)",
+          seeks and all(json.loads(q.get("dataQuery", "{}")).get("v") == LIVE_VERSION for q in seeks) and not stub.bad_version_seeks,
+          (seeks[:1], stub.bad_version_seeks))
+    text = check_run(label, stub, lines, True)  # every frame in the live build's names, trailers on its AHKEY
+    names = [f[0] for f in stub.frames]
+    check(f"{label}: \"Pen\" / \"Pq\" / \"Pv\" / \"Pld\" (the renamed packets) arrived as en / q / v / load",
+          {"en", "q", "v", "load"} <= set(names), sorted(set(names)))
+    rows = [l for l in lines if "[input_script] players" in l]
+    xs = [float(m.group(1)) for m in (re.search(r" %d:StubBot@([-\d.]+)," % BOT_SID, r) for r in rows) if m]
+    check(f"{label}: the stub player moves (\"Pk\": 15 values a player, sid at 13, x at 14)", len(xs) >= 2 and xs[-1] > xs[0], xs)
+    check(f"{label}: our player is in the game (\"P0\": 56 values a player, sid at 53)",
+          any(re.search(r" %d:[^ ]*\*" % MY_SID, r) for r in rows), rows[-1:])
+    check_killfeed_names(label, lines)  # "P3": victim and killer swapped places
+    check_timer_countdown(label, lines)
+    cache = os.path.join(WORK, label + "-build-cache", "krunker-build.json")
+    check(f"{label}: the published document is cached", os.path.isfile(cache) and
+          hashlib.sha256(open(cache, "rb").read()).hexdigest() == published.get("sha256"))
+
+
+def run_native_live_refused():
+    """The published build lost a field the client reads: the join fails on the error screen, naming the
+    build and the reason, and never reaches the matchmaker (no silent desync)."""
+    label = "native-live-refused"
+
+    def setup(st):
+        publish(st, next_build_doc(lose_field=("add_players", "sid")), label)
+
+    stub, p, out, log = launch_native(label, "0 boot\n4000 text @inst [id=instructionsUpdate]\n4300 quit\n", {}, stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
+    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    check(f"{label}: the manifest and the document, no seek-game", paths[:2] and paths[0] == "/updates/client/krunker-build.json" and
+          "/seek-game" not in paths and not stub.ws_paths, paths)
+    check(f"{label}: the log says which build was refused and why",
+          f'[krunker] Krunker build {LIVE_CLIENT} refused: ADD_PLAYERS no longer has "sid"' in text, [l for l in lines if "refused" in l][:3])
+    inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
+    check(f"{label}: the error screen says krunker.io updated, the client needs an update, and why",
+          inst and f"krunker.io updated to Krunker {LIVE_CLIENT}: this client needs an update to join its games" in inst.group(1) and
+          'ADD_PLAYERS no longer has "sid"' in inst.group(1), inst.group(1) if inst else None)
+
+
+def run_native_live_stale():
+    """The matchmaker is the judge: it refuses the published build's buildVersion (InvalidVersion: no server
+    runs it), the client asks the manifest again (the same build), then seeks with the compiled build, which
+    the servers run, and joins."""
+    label = "native-live-stale"
+
+    def setup(st):
+        st.lobbies = [(GAME_ID, 3)]
+        publish(st, next_build_doc(), label)  # published, but the stub's servers run the compiled build
+
+    stub, p, out, log = launch_native(label, "0 boot\n5000 play\n7000 players\n7300 quit\n", {}, stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list",) and not pth.startswith("/updates/krunker/")]
+    check(f"{label}: manifest, seek-game (refused), the manifest again (forced), seek-game",
+          paths[:4] == ["/updates/client/krunker-build.json", "/seek-game", "/updates/client/krunker-build.json", "/seek-game"], paths[:5])
+    vs = [json.loads(dict(q).get("dataQuery", "{}")).get("v") for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: the published buildVersion, then the compiled one", vs[:2] == [LIVE_VERSION, BUILD_VERSION], vs)
+    check(f"{label}: the log says why it seeks again", "seek-game: InvalidVersion for buildVersion %s" % LIVE_VERSION in text and
+          "trying the compiled build" in text, [l for l in lines if "[krunker]" in l and ("build" in l.lower())][:6])
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
+
+def run_native_live_fallback():
+    """The manifest cannot be fetched (503) and nothing is cached: the compiled build joins as before."""
+    label = "native-live-fallback"
+
+    def setup(st):
+        st.lobbies = [(GAME_ID, 3)]
+        st.published["/updates/client/krunker-build.json"] = (503, b"unavailable")
+
+    stub, p, out, log = launch_native(label, "0 boot\n4000 play\n6000 players\n6300 quit\n", {}, stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
+    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]  # (the server browser's list may come first)
+    check(f"{label}: the manifest (503), then seek-game", paths[:2] == ["/updates/client/krunker-build.json", "/seek-game"], paths[:3])
+    check(f"{label}: the compiled build, saying why", re.search(r"\[krunker\] Krunker build: compiled \S+ \(buildVersion %s, AHKEY 0x%x\): .*HTTP 503"
+                                                               % (re.escape(BUILD_VERSION), AHKEY), text) is not None,
+          [l for l in lines if "Krunker build" in l][:2])
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: seek-game carries the compiled buildVersion", seeks and json.loads(seeks[0].get("dataQuery", "{}")).get("v") == BUILD_VERSION)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
+
 # ---------------------------------------------------------------- native: the challenge window (kn_webview.h)
 
 WEBVIEW_SOLVE_MS = 1500  # the stub widget's "player" solves it this long after it is shown
@@ -2626,6 +2885,10 @@ def main():
         run_native_exclude_mm()
         run_native_reload(False)
         run_native_reload(True)
+        run_native_live()
+        run_native_live_refused()
+        run_native_live_stale()
+        run_native_live_fallback()
         ran = True
     if ONLY == "ingame" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame's run
         run_native_ingame()
@@ -2633,6 +2896,11 @@ def main():
         run_native_world()
     if ONLY == "actions" and os.path.isfile(f"{BUILD}/client_bin"):  # just the player actions' run
         run_native_actions()
+    if ONLY == "live" and os.path.isfile(f"{BUILD}/client_bin"):  # just the live Krunker build's runs
+        run_native_live()
+        run_native_live_refused()
+        run_native_live_stale()
+        run_native_live_fallback()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
