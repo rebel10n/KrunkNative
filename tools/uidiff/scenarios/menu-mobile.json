@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunker-v10/mobile/menu-mobile.png",
+  "size": [
+    844,
+    390
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "mobile": true
+  },
+  "frames": 3,
+  "note": "Phone menu, landscape 844x390 (v10 window._isMobile): the live guest menu, no backend (capture-v10.js menu-mobile: matchmaker held pending, so the instructions show the connecting spinner)."
+}

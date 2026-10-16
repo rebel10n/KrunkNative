@@ -42,6 +42,8 @@ const V7_PUBLIC = process.env.KN_V7_PUBLIC || '/home/user/jails/kru/src/Krunker_
 const ASSET_DIRS = [path.join(HOME, '.cache/kn-v10/live/stage/assets'), path.join(HOME, '.cache/kn-v10/live/web/assets.krunker.io'),
   path.join(REPO, 'assets', 'v10'), path.join(REPO, 'assets'), V7_PUBLIC, path.join(REPO, 'ui')];
 const PROXY = 'http://127.0.0.1:9'; // closed: nothing unanswered leaves the machine
+// the phone captures' user agent (openPage o.mobile): an Android Chrome phone
+const PHONE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 const ANIM_MS = 800;
 let OUT = path.join(REPO, 'doc', 'ref', 'krunker-v10');
 
@@ -90,6 +92,8 @@ function offlineFile(u, stubs) {
   }
   // the other API reads the boot makes: a 404 is not JSON, so the page logs an error; empty answers instead
   if (stubs && stubs.includes('titles') && u.hostname === 'gapi.svc.krunker.io' && p === 'titles') return ['[]', '.json'];
+  // the ping list (region -> host): empty, so the live menu's region probe finds no server to ping
+  if (stubs && stubs.includes('ping-list') && u.hostname === 'matchmaker.krunker.io' && p === 'ping-list') return ['{}', '.json'];
   if (stubs && stubs.includes('streams') && u.hostname === 'api.krunker.io' && p === 'streams/top') return ['{"streams":[]}', '.json'];
   if (/^(gapi\.svc|api|matchmaker)\.krunker\.io$/.test(u.hostname)) return '';
   const f = path.join(OFFLINE, p);
@@ -145,11 +149,13 @@ function mapJson(file, mode) {
 
 // Before any page script: guest storage (a returning guest: krunker_haslogin, consent), the
 // sandbox map, no WebSocket / beacons, seeded Math.random, the pointer-lock shim.
-function preScript(storage) {
+function preScript(storage, hang) {
   return `(() => { const s = ${JSON.stringify(storage)};
     try { for (const k in s) localStorage.setItem(k, s[k]); } catch (e) {}
     window.__knMap = s.custMap;
-    const Blocked = function () { throw new DOMException('blocked by capture-v10.js', 'SecurityError'); };
+    // hang: a socket that stays CONNECTING (no error, no close): the live menu with no backend stays up
+    // instead of the Lost Connection card (v10:11078295), as the desktop menu references were taken
+    const Blocked = ${hang ? 'class { constructor() { this.readyState = 0; } send() {} close() {} addEventListener() {} removeEventListener() {} }' : 'function () { throw new DOMException(\'blocked by capture-v10.js\', \'SecurityError\'); }'};
     Blocked.CONNECTING = 0; Blocked.OPEN = 1; Blocked.CLOSING = 2; Blocked.CLOSED = 3;
     Object.defineProperty(window, 'WebSocket', { value: Blocked, writable: false, configurable: false });
     navigator.sendBeacon = () => false;
@@ -280,6 +286,29 @@ scenario('ingame-mobile', async (c) => {
   await enterGame(c);
   await settle(c, 800);
 }, { size: [844, 390], mobile: true });
+// the phone menu (dir mobile/): v10's live main menu on a phone, a guest (no krunker_haslogin, no custMap, so
+// the boot does not start the sandbox: the sandbox hides the play column, subLogoButtons, v10:11105776) at
+// 844x390 landscape and 390x844 portrait. window._isMobile sets uiBase.isMobile and the mobile menu rules.
+const GUEST = { krunker_haslogin: undefined, custMap: undefined };
+const LIVE_STUBS = ['skins', 'spins', 'titles', 'streams'];
+async function liveMenu(c) {
+  for (let i = 0; i < 60; i++) {
+    if (await c.eval(`/CLICK TO PLAY|TAP TO PLAY/i.test(instructions.innerText)`).catch(() => false)) break;
+    await sleep(500);
+  }
+  await c.eval(flatPage('#222222'));
+  await settle(c, 1500);
+}
+scenario('menu-mobile', liveMenu, { dir: 'mobile', size: [844, 390], mobile: true, storage: GUEST, hangSockets: true, stubs: LIVE_STUBS });
+scenario('menu-mobile-portrait', liveMenu, { dir: 'mobile', size: [390, 844], mobile: true, storage: GUEST, hangSockets: true, stubs: LIVE_STUBS });
+// the Settings window's basic tabs on a phone (the Mobile category shows: v10's isMobile rows)
+for (let t = 0; t < 4; t++) {
+  scenario('settings-mobile-' + t, async (c) => {
+    await liveMenu(c);
+    await c.eval(`(() => { windows[0].settingType = 'basic'; windows[0].tabIndex = ${t}; windows[0].settingSearch = null; showWindow(1, true); return 1; })()`);
+    await settle(c, 1200);
+  }, { dir: 'mobile', size: [844, 390], mobile: true, storage: GUEST, hangSockets: true, stubs: LIVE_STUBS });
+}
 scenario('ingame-scoreboard', async (c) => {
   await enterGame(c);
   await key(c, 'Tab', 'Tab', 9, true);
@@ -575,6 +604,8 @@ async function openPage(o) {
         const p = m.params; const u = new URL(p.request.url); const meth = p.request.method;
         const why = !['http:', 'https:'].includes(u.protocol) ? 'scheme' : !ALLOW_HOST(u.hostname) ? 'host' : !['GET', 'HEAD'].includes(meth) ? 'method' : '';
         if (why) { blocked.push([meth, p.request.url, why]); c.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}); return; }
+        // hangSockets: the matchmaker never answers (its requests stay pending), so the live menu does not join or fail
+        if (o.hangSockets && u.hostname === 'matchmaker.krunker.io') return;
         const f = offlineFile(u, o.stubs);
         const stub = Array.isArray(f);
         const body = stub ? Buffer.from(f[0]) : f ? fs.readFileSync(f) : Buffer.from('');
@@ -593,10 +624,20 @@ async function openPage(o) {
     await c.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
     await c.send('Runtime.enable');
     await c.send('Page.enable');
-    await c.setViewport(o.w, o.h);
+    if (o.mobile) {
+      // Chrome device emulation of a phone: a mobile viewport (the page's width=device-width meta
+      // applies), touch events (maxTouchPoints 5, no mouse) and an Android Chrome user agent, so the
+      // page's own inline script sets window._isMobile (v10's detectmobilebrowsers regex) as on a phone
+      await c.send('Emulation.setDeviceMetricsOverride', { width: o.w, height: o.h, deviceScaleFactor: 1, mobile: true,
+        screenOrientation: o.w > o.h ? { type: 'landscapePrimary', angle: 90 } : { type: 'portraitPrimary', angle: 0 } });
+      await c.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await c.send('Emulation.setUserAgentOverride', { userAgent: PHONE_UA, platform: 'Linux armv8l' });
+    } else {
+      await c.setViewport(o.w, o.h);
+    }
     CURRENT_MAP = mapJson(o.map, o.mode);
     const storage = Object.assign({ krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP }, o.storage || {});
-    await c.send('Page.addScriptToEvaluateOnNewDocument', { source: (o.mobile ? "Object.defineProperty(window, '_isMobile', { get: () => true, set() {}, configurable: true });" : '') + preScript(storage) });
+    await c.send('Page.addScriptToEvaluateOnNewDocument', { source: (o.mobile ? "Object.defineProperty(window, '_isMobile', { get: () => true, set() {}, configurable: true });" : '') + preScript(storage, o.hangSockets) });
     // capture-v10-seq.js: extra pre-page script, virtual time before the first page script, a query
     if (o.preScript) await c.send('Page.addScriptToEvaluateOnNewDocument', { source: o.preScript });
     if (o.beforeNavigate) await o.beforeNavigate(c);
@@ -608,7 +649,7 @@ async function openPage(o) {
 
 async function capture(sc, idx) {
   const base = +process.env.KN_CAPTURE_PORT_BASE || 9540;
-  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, mobile: sc.mobile, stubs: sc.stubs, settle: 10000 });
+  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, mobile: sc.mobile, hangSockets: sc.hangSockets, stubs: sc.stubs, settle: 10000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

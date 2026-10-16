@@ -1,0 +1,27 @@
+{
+  "size": [
+    844,
+    390
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunker-v10/mobile/settings-mobile-1.png",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 0,
+    "settingsTab": 1,
+    "settingsView": "basic",
+    "mobile": true
+  },
+  "frames": 3,
+  "note": "Phone Settings window, basic view, tab 1, 844x390 (v10 window._isMobile: the Mobile category shows, the isMobile defaults; capture-v10.js settings-mobile-1)"
+}
