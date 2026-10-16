@@ -1283,7 +1283,7 @@ int servers_ui_connect_game(const char *text, char *err, const size_t n) {
 
 // The Join field / a pasted link (v3.1.1 f9, v10 _72569): a game link or a lobby id joins that
 // game (servers_ui_connect_game); anything else, or a link that cannot join, is an error. The error
-// is shown as a notice (ui_notify) and the Join window stays as it is. 1 = joining.
+// is shown as the error popup and the Join window stays as it is. 1 = joining.
 int servers_ui_join_link(const char *text) {
     if (text && strike_join_code(text)) return 1;
     char err[200] = "";
@@ -1291,7 +1291,7 @@ int servers_ui_join_link(const char *text) {
     if (game > 0) return 1;
     if (!game) snprintf(err, sizeof(err), "%s", I18N("kn.join.notLink", "Not a game link: paste a krunker.io or Box Office game link, or a lobby code such as CH2:kz862"));
     printf("[mm] join refused: %s\n", err);
-    ui_notify(err);
+    ui_error_popup(err); // the error popup, not a toast: the Join window stays as it is
     return 0;
 }
 
@@ -2964,7 +2964,7 @@ void servers_quick_join_next(void) {
 #endif
     }
     g_quick_join_left = 0;
-    if (g_quick_join_kio_group) ui_notify(I18N("windows.servers.none", "No Joinable Games Found..."));
+    if (g_quick_join_kio_group) ui_error_popup(I18N("windows.servers.none", "No Joinable Games Found..."));
 }
 
 static void quick_join_region(const int index) {
@@ -3032,7 +3032,7 @@ static void quick_join_region(const int index) {
     }
     if (g_quick_join_kio_group) { // official krunker.io lobbies: the first joinable one (servers_quick_join_next)
         if (!g_quick_join_count) {
-            ui_notify(I18N("windows.servers.none", "No Joinable Games Found..."));
+            ui_error_popup(I18N("windows.servers.none", "No Joinable Games Found..."));
             return;
         }
         g_quick_join_left = 10;

@@ -529,7 +529,7 @@ static void on_refresh(const int status, cJSON *res) {
         printf("[kio-account] the krunker.io session ended (refresh: HTTP %d): signed out\n", status);
         forget();
         set_message(1, "%s", I18N("kn.kio.account.expired", "Your krunker.io session ended: sign in again. Joining krunker.io servers as a guest until then."));
-        ui_notify(A.message);
+        printf("[kio-account] %s\n", A.message); // logged only: the session end shows in the account header, not as a toast
         serve_waiters(NULL);
         return;
     }

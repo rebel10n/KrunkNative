@@ -585,8 +585,9 @@ static void on_seek_region(void *user, const char *region) {
 int krunker_lobbies_seek(void) {
     if (!krunker_lobbies_enabled()) return 0;
     if (!krunker_seek_region()[0]) {
-        // v10's seek asks getRegion first: the ping race, then this seek again (on_seek_region)
-        if (!R.racing) ui_notify(I18N("kn.kio.looking", "Looking for a krunker.io server..."));
+        // v10's seek asks getRegion first: the ping race, then this seek again (on_seek_region). The
+        // wait shows the loading spinner, not a toast (no toast in the join flow)
+        if (!R.racing && g_lobbies_client && !g_lobbies_client->net_connected && !g_lobbies_client->offline && !menu_connecting()) menu_show_connecting_map(NULL);
         krunker_seek_region_resolve(on_seek_region, NULL);
         return 1;
     }

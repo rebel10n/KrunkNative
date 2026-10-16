@@ -444,7 +444,7 @@ void online_mode_on_rights(void *client_ptr, const void *body, const unsigned le
             char text[192];
             I18N_F(text, "kn.auth.liveRefused", "This server could not verify your account: you play on as before ({0})",
                    r.message[0] ? r.message : I18N("kn.auth.refused", "refused"));
-            ui_notify(text);
+            printf("[auth] %s\n", text); // logged only: the connect flow shows no toast (the account header keeps the state)
         }
     }
     g_live.rights = r.rights;
