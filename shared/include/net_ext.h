@@ -131,6 +131,9 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_LIVE_OBJECT = 0x8080,  // "lo" one [id, {type, x, y, z, w, l, h, s, data}] (NetExtJsonChunk; init syncData.lo)
     NET_EXT_KN_OFFICIAL_LIVE_SYNC = 0x8081,    // "slo" one [id, op] ("remove") (NetExtJsonChunk)
     NET_EXT_KN_OFFICIAL_OBJECT_MOVED = 0x8082, // "objmv" NetObjectMovedPacket (init syncData.chg too)
+
+    // 0x8110 Krunker Strike's Tap-to-Play "Switch Teams" (client/src/ui/strike_menu.c, mode_swap_team)
+    NET_EXT_KN_SWAP_TEAM = 0x8110, // C -> S NetSwapTeamPacket: the team this player takes between lives (FRVR SWAP_TEAM "swpt")
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -201,6 +204,16 @@ typedef struct {
     uint8_t ai;            // NetHitPacket.ai
 } NetHitDamagePacket;
 #pragma pack(pop)
+
+// NET_EXT_KN_SWAP_TEAM (C -> S, FRVR's SWAP_TEAM "swpt" [team] from Tap-to-Play's Switch Teams, sent
+// when its 5 s countdown ends): `team` 1 or 2, the team the player takes. The server accepts it only
+// between lives (the player is not alive: the Tap-to-Play screen), in a team mode with selTeam on and
+// not in a comp / ranked lobby (mode_swap_team, shared/src/modes/mode_actions.c). A refused request
+// changes nothing. An accepted one is broadcast as NET_PACKET_TEAM (the scoreboards); the next spawn
+// (Play) is on the new team, as FRVR's Play is.
+typedef struct {
+    uint8_t team; // 1 or 2
+} NetSwapTeamPacket;
 
 // NET_EXT_PLAYER_SPEED_BOOST (S -> C, to the player): Krunker "spb" [speedBoost, silent]
 // (game.deob.js:220498): Player.speed_boost (the movement acceleration x it, 0 = none); unless

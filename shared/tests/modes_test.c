@@ -252,6 +252,44 @@ static void test_ffa(Game *game) {
     CHECK(end_result_for(1) == 1 && end_result_for(2) == 0, "FFA: the best score wins (%d / %d)", end_result_for(1), end_result_for(2));
 }
 
+// NET_EXT_KN_SWAP_TEAM (mode_swap_team, the Tap-to-Play switch): between lives only (a living player keeps
+// its team), a team mode with selTeam and not a comp lobby, teams 1 and 2; the change is broadcast as "tm".
+static void test_swap_team(Game *game) {
+    printf("Running Switch Teams test...\n");
+    start_mode(game, MODE_ID_TDM);
+    game->config.select_team = 1;
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    const int other = a->team == 1 ? 2 : 1;
+    const int b_team = b->team;
+    CHECK(a->team == 1 || a->team == 2, "a TDM player has a team (%d)", a->team);
+    CHECK(!mode_swap_team(game, a, other) && a->team != other, "a living player keeps its team");
+    a->active = 0; // between lives: the Tap-to-Play screen
+    g_sent_count = 0;
+    CHECK(!mode_swap_team(game, a, 0) && !mode_swap_team(game, a, 3), "only teams 1 and 2");
+    CHECK(!mode_swap_team(game, a, a->team), "the same team: nothing changes");
+    CHECK(mode_swap_team(game, a, other) == 1 && a->team == other, "between lives the team flips");
+    int sent = 0;
+    const SentPacket *tm = count_type(NET_PACKET_TEAM, &sent);
+    CHECK(sent >= 1 && tm, "the change is broadcast as NET_PACKET_TEAM (%d)", sent);
+    if (tm) {
+        NetTeamPacket team;
+        memcpy(&team, tm->payload, sizeof(team));
+        CHECK(team.uid == a->uid && team.team == other, "NET_PACKET_TEAM: uid %d team %d", team.uid, team.team);
+    }
+    CHECK(b->team == b_team, "the other player keeps its team");
+    game->config.comp = 1;
+    CHECK(!mode_swap_team(game, a, a->team == 1 ? 2 : 1), "a comp lobby's roster picks the teams");
+    game->config.comp = 0;
+    game->config.select_team = 0;
+    CHECK(!mode_swap_team(game, a, a->team == 1 ? 2 : 1), "selTeam off: no switch");
+    start_mode(game, MODE_ID_FFA);
+    game->config.select_team = 1;
+    Player *f = add_player(game, 1, 0);
+    f->active = 0;
+    CHECK(!mode_swap_team(game, f, 1) && f->team == 0, "FFA has no teams to switch to");
+}
+
 static void test_tdm(Game *game) {
     printf("Running TDM test...\n");
     start_mode(game, MODE_ID_TDM);
@@ -1624,6 +1662,7 @@ int main(void) {
     test_table();
     test_ffa(&game);
     test_tdm(&game);
+    test_swap_team(&game);
     test_point(&game);
     test_king(&game);
     test_ctf(&game);

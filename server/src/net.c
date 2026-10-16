@@ -1557,6 +1557,17 @@ static void net_handle_premium_action(ClientConnection *client, const NetPacket 
     chat_command_premium_action(net_chat_host(), client->id, packet->payload[0]);
 }
 
+// NET_EXT_KN_SWAP_TEAM (Krunker Strike's Tap-to-Play "Switch Teams", FRVR SWAP_TEAM): the sender takes
+// the team it asked for between lives (mode_swap_team: team modes with selTeam, not comp). Ranked's
+// roster is fixed, as COMP_SET 't' says. A refused request changes nothing and gets no answer.
+static void net_handle_swap_team(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    NetSwapTeamPacket req;
+    if (!client || !client->player || length < sizeof(req)) return;
+    memcpy(&req, body, sizeof(req));
+    if (accounts_ranked_active()) return;
+    mode_swap_team(&g_server->game, client->player, req.team);
+}
+
 // io_tp(x, y, z): DEV only with perms; finite coordinates; the feet go EYE_OFFSET_Y below
 // the given y; position/velocity/ground state reset; the sender gets the ack.
 static void net_handle_teleport(ClientConnection *client, const NetPacket *packet) {
@@ -1954,6 +1965,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 game_prop_pick(&g_server->game, client->player, pick.prop_id);
             } else if (subtype == NET_EXT_PROP_ROTATE && body_length >= sizeof(NetPropRotatePacket) && client->player) // "prpR" [reset]
                 game_prop_rotate(&g_server->game, client->player, body[0] != 0);
+            else if (subtype == NET_EXT_KN_SWAP_TEAM) net_handle_swap_team(client, body, body_length); // Tap-to-Play Switch Teams
             break;
         }
         default:

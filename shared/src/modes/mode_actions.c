@@ -34,6 +34,20 @@ void mode_update_team(Game *game, Player *player, const int team) {
     game->leaders_dirty = 1;
 }
 
+// NET_EXT_KN_SWAP_TEAM: the Tap-to-Play switch. The modes are /team's (chat_commands.c cmd_team: teams,
+// not friendly / clanWar / convertTeam), and the button FRVR shows needs selTeam. Between lives only:
+// a living player keeps its team (FRVR's switch is made on the Tap-to-Play screen, never mid-life).
+// A comp lobby's teams are its roster's (comp_lobby.c): refused here, as COMP_SET 't' is for ranked.
+int mode_swap_team(Game *game, Player *player, const int team) {
+    if (!game || !player || !game->mode || team < 1 || team > 2) return 0;
+    const GameModeConfig *cfg = &game->mode->config;
+    if (!cfg->teams || cfg->friendly || cfg->clan_war || cfg->convert_team) return 0;
+    if (!game->config.select_team || game->config.comp) return 0;
+    if (player->active || player->team == team) return 0;
+    mode_update_team(game, player, team); // "tm" to everyone: the scoreboards
+    return 1;
+}
+
 // pickBoss / pickStalker / pickSimon: aK3 = health, health = aK3, regen = 0, "h".
 void mode_set_role_health(Game *game, Player *player, const int health) {
     player->max_health = health;

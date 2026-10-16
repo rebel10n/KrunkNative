@@ -33,6 +33,9 @@
 #include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
 #include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
 #include <audio.h>       // SOUND.play("reward") when the wheel stops
+#include <client.h>
+#include <net_ext.h> // NET_EXT_KN_SWAP_TEAM (Switch Teams)
+#include <gltf.h>    // gltf_clock(): the menu's clock for the Switch Teams count
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,6 +153,9 @@ static struct {
     int board_fixture;
     BoardRow board[BOARD_MAX];
     int board_count;
+    int swap_phase;       // Switch Teams: SWAP_IDLE / SWAP_IN (5 s) / SWAP_AGAIN (10 s)
+    double swap_t0;       // gltf_clock() when the current count started
+    char swap_shown[64];  // the button's label and state as last written (switch_teams_update)
     struct {
         int open;  // M5's kr-limit speech bubble is up (eM)
         int timer; // its 5 s hide timer (html_timer_add), 0 = none
@@ -1859,6 +1865,98 @@ static void play(void) {
     menu_play();
 }
 
+// ---------------------------------------------------------------- Switch Teams (FRVR switchTeamsBtn)
+
+// TAP_TO_PLAY's button above Play, in a team mode with selTeam (FRVR: Game.config.selTeam). A click
+// starts a 5 s count, "Switching in N"; when it ends the other team is sent (FRVR's toggleTeam: SWAP_TEAM),
+// then "Switch again in N" counts 10 s. The button is disabled meanwhile. The rule itself is the
+// server's (mode_swap_team, shared/src/modes/mode_actions.c): the same modes, between lives only.
+#define SWAP_IN_S 5
+#define SWAP_AGAIN_S 10
+#define SWAP_SEND_DELAY_S 0.5 // FRVR's setTimeout runs the toggle 500 ms after its count
+enum { SWAP_IDLE, SWAP_IN, SWAP_AGAIN };
+#define SWITCH_TEAMS_HTML                                                                                              \
+    "<div id=\"switchTeamsBtn\" class=\"frvr-button frvr-button--gray frvr-button--size-xs frvr-button--width-150\" "  \
+    "trackingid=\"switch_teams\" style=\"display: none;\" onclick=\"strikeAction('switch_teams')\">"                  \
+    "<img src=\"./img/rotating-arrows.svg\" class=\"frvr-button__icon-left\">"                                         \
+    "<span class=\"frvr-button-text\">Switch Teams</span></div>"
+
+static int switch_teams_allowed(const Client *client) {
+    if (!client || !client->me) return 0;
+    const GameModeConfig *cfg = client->game.mode ? &client->game.mode->config : NULL;
+    if (!cfg || !cfg->teams || cfg->friendly || cfg->clan_war || cfg->convert_team) return 0; // /team's modes
+    return client->game.config.select_team && !client->game.config.comp; // comp rosters pick their teams
+}
+
+// NET_EXT_KN_SWAP_TEAM: the other team than the player's (FRVR: toggleTeam(team == 1 ? 2 : 1)).
+static void send_swap_team(Client *client, const int team) {
+    NetSwapTeamPacket req = {.team = (uint8_t) team};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(req)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SWAP_TEAM, &req, sizeof(req));
+    if (n && client) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+}
+
+static void switch_teams_start(void) {
+    if (!M.client || M.swap_phase != SWAP_IDLE || !switch_teams_allowed(M.client) || M.client->me->active) return;
+    M.swap_phase = SWAP_IN;
+    M.swap_t0 = gltf_clock();
+}
+
+// Each frame (strike_menu_tick): the count's end sends the switch, or drops it when the player is alive
+// (a living player keeps its team, and the server refuses it too).
+static void switch_teams_tick(Client *client) {
+    if (M.swap_phase == SWAP_IDLE) return;
+    const double now = gltf_clock();
+    if (M.swap_phase == SWAP_IN && now - M.swap_t0 >= SWAP_IN_S + SWAP_SEND_DELAY_S) {
+        if (client && client->me && !client->me->active) {
+            send_swap_team(client, client->me->team == 1 ? 2 : 1);
+            M.swap_phase = SWAP_AGAIN;
+            M.swap_t0 = now;
+        } else {
+            M.swap_phase = SWAP_IDLE;
+        }
+    } else if (M.swap_phase == SWAP_AGAIN && now - M.swap_t0 >= SWAP_AGAIN_S + SWAP_SEND_DELAY_S) {
+        M.swap_phase = SWAP_IDLE;
+    }
+}
+
+// The button's label and enabled state; FRVR counts from total + 1 (its Yo / Xo start there).
+static void switch_teams_update(const HtmlElem root, const Client *client) {
+    HtmlElem btn = html_dom_query(root, "#switchTeamsBtn");
+    if (!btn) {
+        const HtmlElem join = html_dom_query(root, ".frvr-kr-limit");
+        const HtmlElem bottom = html_dom_query(root, ".frvr-main-menu--bottom-right");
+        if (join) html_dom_insert_html(join, HTML_INSERT_BEFORE_BEGIN, SWITCH_TEAMS_HTML);
+        else if (bottom) html_dom_insert_html(bottom, HTML_INSERT_BEFORE_END, SWITCH_TEAMS_HTML);
+        btn = html_dom_query(root, "#switchTeamsBtn");
+        if (!btn) return;
+        M.swap_shown[0] = 0; // a new button: write its state even when the key matches
+    }
+    const int allowed = switch_teams_allowed(client);
+    char label[32] = "Switch Teams";
+    const double now = gltf_clock();
+    if (M.swap_phase == SWAP_IN) {
+        const int left = SWAP_IN_S + 1 - (int) (now - M.swap_t0);
+        snprintf(label, sizeof(label), "Switching in %d", left > 0 ? left : 0);
+    } else if (M.swap_phase == SWAP_AGAIN) {
+        const int left = SWAP_AGAIN_S + 1 - (int) (now - M.swap_t0);
+        snprintf(label, sizeof(label), "Switch again in %d", left > 0 ? left : 0);
+    }
+    char key[64];
+    snprintf(key, sizeof(key), "%d|%s", allowed, label);
+    if (!strcmp(key, M.swap_shown)) return; // only write what changed
+    snprintf(M.swap_shown, sizeof(M.swap_shown), "%s", key);
+    const int counting = M.swap_phase != SWAP_IDLE;
+    html_dom_set_display(btn, allowed ? "" : "none");
+    if (counting) html_dom_set_attr(btn, "disabled", "");
+    else html_dom_remove_attr(btn, "disabled");
+    html_dom_set_style(btn, "opacity", counting ? "0.6" : "");
+    const HtmlElem text = html_dom_query(btn, ".frvr-button-text");
+    if (text) html_dom_set_text(text, label);
+    const HtmlElem icon = html_dom_query(btn, "img");
+    if (icon) html_dom_set_display(icon, counting ? "none" : "");
+}
+
 static void action(const char *a) {
     printf("[strike] action %s\n", a);
     if (strike_meta_action(a)) return;   // missions tab, match details report, rewards track (strike_meta.c)
@@ -1874,6 +1972,7 @@ static void action(const char *a) {
         return;
     }
     if (!strcmp(a, "play")) play();
+    else if (!strcmp(a, "switch_teams")) switch_teams_start();
     else if (!strncmp(a, "buy-confirm:", 12)) {
         // U2's YA: onPurchase (kt: the popup goes), then $r
         if (strike_screen_top() == STRIKE_SCREEN_POPUP) strike_screen_pop();
@@ -2124,6 +2223,7 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     case STRIKE_SCREEN_TAP_TO_PLAY:
         fill_account(root);
         kr_limit_hook(root);
+        switch_teams_update(root, M.client);
         break;
     case STRIKE_SCREEN_CLASS_SELECTION:
         M.previewed = current_class(); // _r = loadout.classIndex
@@ -2245,6 +2345,7 @@ void strike_menu_tick(Client *client) {
     strike_meta_tick(client);
     spin_tick();
     customize_controls_tick();
+    switch_teams_tick(client);
     strike_social_tick(client);
     strike_reward_tick(client);
     // the account box follows the account / name (Mithril redraws on every change)
@@ -2259,4 +2360,6 @@ void strike_menu_tick(Client *client) {
         const HtmlElem b = strike_screen_root(STRIKE_SCREEN_TAP_TO_PLAY);
         if (b) fill_account(b);
     }
+    const HtmlElem tap = strike_screen_root(STRIKE_SCREEN_TAP_TO_PLAY);
+    if (tap) switch_teams_update(tap, client); // the button follows the mode, the count and the life
 }
