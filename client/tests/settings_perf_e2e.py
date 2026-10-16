@@ -11,6 +11,8 @@ Headless client_bin runs (offline Kanji, private XDG_CONFIG_HOME):
   3. selectSettingPre(4) (Beautiful) stores resolution 1, not 2.
   4. SIGINT and SIGTERM end the client through its normal shutdown: exit code 0, a
      "[client] SIG...: shutting down" line, no crash.
+  5. a windowed run (xvfb-run, a private X server; needs xvfb-run) with vsync off and no frame cap
+     is uncapped: its fps lines show cap 0, and KRUNKNATIVE_HEADLESS=false does not make it headless.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -76,13 +78,16 @@ def env_for(name, script=None, extra=None):
     return env
 
 
-def start(name, script=None, extra=None):
+def start(name, script=None, extra=None, windowed=False):
     os.makedirs(cfg_dir(name), exist_ok=True)
     log = os.path.join(WORK, name, "client.log")
     out = open(log, "w")
-    p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
-                         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env_for(name, script, extra),
-                         start_new_session=True)
+    # windowed: a window on a private Xvfb (xvfb-run -a), never the desktop's display
+    cmd = [f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"]
+    if windowed:
+        cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24"] + cmd
+    p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         env=env_for(name, script, extra), start_new_session=True)
     return p, out, log
 
 
@@ -98,13 +103,13 @@ def finish(p, out, log, timeout):
         return code, f.read()
 
 
-def run(name, script, extra=None, timeout=180):
-    p, out, log = start(name, script, extra)
+def run(name, script, extra=None, timeout=180, windowed=False):
+    p, out, log = start(name, script, extra, windowed)
     return finish(p, out, log, timeout)
 
 
 def fps_lines(text):
-    return re.findall(r"\[render\] fps \d+ \(cap (\d+)(?: headless)?, vsync (\d)\)", text)
+    return re.findall(r"\[render\] fps \d+ \(cap (\d+)(?: headless)?, vsync (\d)(?:, display \d+ Hz)?\)", text)
 
 
 def wait_for(log, pattern, timeout):
@@ -165,6 +170,21 @@ def main():
         check(f"{sig.name}: exit code 0", code == 0, f"code {code}, {took:.1f}s, log {log}")
         check(f"{sig.name}: the shutdown line is logged", f"[client] {sig.name}: shutting down" in text)
         check(f"{sig.name}: no crash in the shutdown", not re.search(r"Segmentation|AddressSanitizer|Aborted|core dumped", text))
+
+    # 5. A windowed run with vsync off and no frame cap is uncapped: no headless cap (120) in its fps
+    #    lines. KRUNKNATIVE_HEADLESS=false is not headless (a "false" that enabled headless gave a
+    #    windowless run capped at 120 fps). Needs xvfb-run; skipped without it.
+    if shutil.which("xvfb-run"):
+        code, text = run("windowed-off", "0 play\n4000 quit\n",
+                         {"KRUNKNATIVE_HEADLESS": "false", "KRUNKNATIVE_VSYNC": "0"}, windowed=True)
+        lines = fps_lines(text)
+        check("KRUNKNATIVE_HEADLESS=false opens a window, not a headless pbuffer",
+              "pbuffer, no window" not in text and not re.search(r"\[headless\] using EGL", text), "see " + WORK)
+        check("windowed, vsync off, no frame cap: the fps lines carry no headless cap",
+              lines and not re.search(r"\(cap \d+ headless", text) and all(c == "0" for c, _ in lines), str(lines[:3]))
+        check("windowed, vsync off: the fps lines say vsync 0", lines and all(v == "0" for _, v in lines), str(lines[:3]))
+    else:
+        print("SKIP  windowed checks: xvfb-run is not installed", flush=True)
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)}")

@@ -1013,6 +1013,36 @@ int client_render_fps(void) {
     return g_frame_count;
 }
 
+// The refresh rate (Hz) of the monitor the window overlaps most; 0 when unknown (headless, no window).
+// The fps log prints it: a no-vsync window on a 120 Hz monitor whose driver still syncs swaps
+// runs at that rate, which reads as a cap.
+static int window_refresh_hz(const Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (!client || !client->window || headless_enabled()) return 0;
+    int wx = 0, wy = 0, ww = 0, wh = 0;
+    glfwGetWindowPos(client->window, &wx, &wy);
+    glfwGetWindowSize(client->window, &ww, &wh);
+    int count = 0;
+    GLFWmonitor **monitors = glfwGetMonitors(&count);
+    const GLFWvidmode *best = NULL;
+    long best_area = 0;
+    for (int i = 0; i < count; i++) {
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(monitors[i], &mx, &my);
+        const GLFWvidmode *mode = glfwGetVideoMode(monitors[i]);
+        if (!mode) continue;
+        const int right = wx + ww < mx + mode->width ? wx + ww : mx + mode->width;
+        const int bottom = wy + wh < my + mode->height ? wy + wh : my + mode->height;
+        const long ox = right - (wx > mx ? wx : mx), oy = bottom - (wy > my ? wy : my);
+        if (ox > 0 && oy > 0 && ox * oy > best_area) best_area = ox * oy, best = mode;
+    }
+    return best ? best->refreshRate : 0;
+#else
+    (void) client;
+    return 0;
+#endif
+}
+
 void client_render_frame_end(Client *client) {
     count_frame();
 #ifndef __EMSCRIPTEN__
@@ -1024,8 +1054,11 @@ void client_render_frame_end(Client *client) {
     const double now = now_ms();
     if (g_fps_log && now - g_last_fps_log_ms >= 1000.0) {
         g_last_fps_log_ms = now;
-        fprintf(stderr, "[render] fps %d (cap %d%s, vsync %d)\n", g_frame_count, g_rs.frame_cap,
-                g_headless_cap > 0 ? " headless" : "", g_rs.vsync);
+        const int hz = window_refresh_hz(client);
+        char display[32] = "";
+        if (hz > 0) snprintf(display, sizeof(display), ", display %d Hz", hz);
+        fprintf(stderr, "[render] fps %d (cap %d%s, vsync %d%s)\n", g_frame_count, g_rs.frame_cap,
+                g_headless_cap > 0 ? " headless" : "", g_rs.vsync, display);
     }
 
 #ifndef __EMSCRIPTEN__
