@@ -1,4 +1,5 @@
 #pragma once
+#include <country_flag.h> // COUNTRY_FLAG_COUNT: the brain's range for stats.flg
 // Game.flags (Krunker v3.1.1 src/data/flags.js): [name, iso code] in index order;
 // the account's Country Flag (acc.stats.flg, -1 = none) indexes it.
 typedef struct { const char *name, *code; } AccountFlag;
@@ -59,6 +60,7 @@ static const AccountFlag ACCOUNT_FLAGS[] = {
     {"Western Sahara", "eh"}, {"Yemen", "ye"}, {"Zambia", "zm"}, {"Zimbabwe", "zw"},
 };
 #define ACCOUNT_FLAG_COUNT ((int) (sizeof(ACCOUNT_FLAGS) / sizeof(ACCOUNT_FLAGS[0])))
+_Static_assert(ACCOUNT_FLAG_COUNT == COUNTRY_FLAG_COUNT, "account_flags.h and shared/include/country_flag.h disagree");
 
 // The ISO code ("us") of a Country Flag index (stats.flg); NULL for none (-1) or out of range.
 static inline const char *account_flag_code(const int index) {

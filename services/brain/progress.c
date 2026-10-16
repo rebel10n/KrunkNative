@@ -9,6 +9,7 @@
  *   ["chg"]          -> ["chgL", activeChallenges]   (KrunkNative label: v7's "chg" is the
  *                                                     match-end result triples)
  *   ["bdg", badge]   -> ["bdgr", badge] | ["po", null, err]     (io_badgeUpdate)
+ *   ["flg", index]   -> ["flgr", index] | ["po", null, err]     (io_flgr; the Country Flag, stats.flg)
  *   ["cbdg", badge]  -> ["cbdgr", badge] | ["po", null, err]    (io_badgeClaimResponse)
  *   ["mdl"]          -> ["mdl", {medal: count}]      (KrunkNative: the account's medal counts)
  */
@@ -42,6 +43,7 @@ static void prog_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON *v = acct_db_json(res);
     cJSON *out = NULL;
     if (!strcmp(r->label, "bdgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "bdg", -1));
+    else if (!strcmp(r->label, "flgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "flg", -1));
     else if (!strcmp(r->label, "cbdgr")) out = cJSON_CreateNumber((double) kn_json_int(v, "badge", -1));
     else out = v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull();
     social_send_n(s, r->label, 1, out);
@@ -60,6 +62,14 @@ void sh_badge_select(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     char me[24], badge[24];
     social_call(s, &P_BADGE_SELECT, KN_DB_ARGS(social_viewer(s, me), acct_itoa(badge, fa_int(f, 1, -1))), prog_done, prog_reply("bdgr"));
+}
+
+/* ["flg", index] -> ["flgr", index] | ["po", null, err] (io_flgr: the account's Country Flag, -1 none).
+ * The same label as the staff hacker flag ["flg", name, 0|1]: profiles.c sh_flag tells them apart. */
+void sh_country_flag(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    char me[24], flag[24];
+    social_call(s, &P_COUNTRY_FLAG, KN_DB_ARGS(social_viewer(s, me), acct_itoa(flag, fa_int(f, 1, -1))), prog_done, prog_reply("flgr"));
 }
 
 void sh_badge_claim(SocialSession *s, const cJSON *f) {

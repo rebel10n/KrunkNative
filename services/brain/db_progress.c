@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "badges.h"
+#include "country_flag.h" // COUNTRY_FLAG_COUNT: stats.flg range
 #include "knsvc/json.h"
 #include "progression.h"
 #include "season.h"
@@ -320,6 +321,43 @@ static kn_db_result *run_badge_select(kn_dbconn *c, int n, const char *const *p)
     return dbx_json(&x, "badge", out);
 }
 const kn_proc P_BADGE_SELECT = {"badge_select", NULL, run_badge_select};
+
+/* (account id, flag) -> {flg}: stats.flg = the Country Flag index (-1 clears). The index is
+ * refused past COUNTRY_FLAG_COUNT (the client's list, account_flags.h). Same stats JSON as the
+ * badge: the next game join reads it into the server's account (accounts.c acc_apply_account). */
+static kn_db_result *run_country_flag(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t id = PI(0);
+    int64_t flag = PI(1);
+    if (flag < -1) flag = -1;
+    if (flag >= COUNTRY_FLAG_COUNT) {
+        dbx_refuse(&x, "Unknown country flag");
+        return dbx_finish(&x, NULL);
+    }
+    char *text = dbx_text(&x, SQL(.any = "SELECT player_stats FROM players WHERE player_id = $1 {for_update}"), KN_DB_ARGS(I64S(id)));
+    cJSON *stats = text ? cJSON_Parse(text) : NULL;
+    free(text);
+    if (dbx_failed(&x)) {
+        cJSON_Delete(stats);
+        return dbx_finish(&x, NULL);
+    }
+    if (!cJSON_IsObject(stats)) {
+        cJSON_Delete(stats);
+        stats = cJSON_CreateObject();
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(stats, "flg");
+    cJSON_AddNumberToObject(stats, "flg", (double) flag);
+    char *merged = cJSON_PrintUnformatted(stats);
+    cJSON_Delete(stats);
+    const int64_t done = dbx_exec(&x, SQL(.any = "UPDATE players SET player_stats = $2, updated_at = {now} WHERE player_id = $1"),
+                                  KN_DB_ARGS(I64S(id), merged));
+    free(merged);
+    if (done == 0) dbx_refuse(&x, "Account not found.");
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddNumberToObject(out, "flg", (double) flag);
+    return dbx_json(&x, "flag", out);
+}
+const kn_proc P_COUNTRY_FLAG = {"country_flag", NULL, run_country_flag};
 
 /* (actor, name, badge, on) -> one row when the badge was given (on = 1) or removed (on = 0) by a
  * developer (v10's Give Badge / Remove on a profile). Removing the badge a player has equipped

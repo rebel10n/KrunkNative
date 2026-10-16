@@ -2315,6 +2315,11 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     if (acc_truthy(cJSON_GetObjectItem(account, "mod"))) client->acct.flags |= NET_PLAYER_INFO_MOD;
     // WP-F: the custom badge (v7 account.stats.bdg, badges.js index), when the brain supplies one
     const cJSON *stats = cJSON_GetObjectItem(account, "stats");
+    if (!cJSON_IsObject(stats)) { // kn_brain's join account keeps the stats in the 40-slot "data" array (Account.getData(), slot 16)
+        const cJSON *data = cJSON_GetObjectItem(account, "data");
+        const cJSON *slot = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 16) : NULL;
+        if (cJSON_IsObject(slot)) stats = slot;
+    }
     const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
     // the Country Flag (stats.flg, an index into the client's Country Flag list): the Strike kill card's flag
     const cJSON *flg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "flg") : NULL;

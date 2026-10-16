@@ -353,6 +353,7 @@ void sh_claim(SocialSession *s, const cJSON *f);         /* "clm" */
 void sh_challenges(SocialSession *s, const cJSON *f);    /* "chg" */
 void sh_badge_select(SocialSession *s, const cJSON *f);  /* "bdg" */
 void sh_badge_claim(SocialSession *s, const cJSON *f);   /* "cbdg" */
+void sh_country_flag(SocialSession *s, const cJSON *f);  /* "flg" with a number: the Country Flag (progress.c) */
 void sh_medals(SocialSession *s, const cJSON *f);        /* "mdl" */
 /* v7.1.4 seasons and the Battle Pass (season.c) */
 void sh_bp_data(SocialSession *s, const cJSON *f);       /* "bpdl" */

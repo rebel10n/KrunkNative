@@ -14,7 +14,8 @@ server on /mm/internal/ws commits a match with challenge tallies, stat keys and 
 socket gets the match-end pushes (chg, chgC, chlR, nbdgr), the list shows the progress, a
 duplicate commit and a partial (left mid-match) commit change nothing, the Nuclear I badge is
 auto-awarded and can be selected, claims are refused, the medal counts add up, and the account
-object (social "a", internal "get") carries "badges" and v7's levelProg.
+object (social "a", internal "get") carries "badges" and v7's levelProg. The Country Flag ("flg" with
+an index) is stored in stats.flg, refused past the list, and a name still goes to the staff flag.
 """
 import asyncio
 import json
@@ -248,6 +249,21 @@ async def scenario(port):
             check(err is None and data.get("badges") == [11], "internal get: badges %s" % (data or {}).get("badges"))
             r = await s.call("bdgr", "bdg", -1)
             check(r[1] == -1, "clear the badge: %s" % r)
+
+            print("== country flag (stats.flg; the staff flag shares the label)")
+            r = await s.call("flgr", "flg", 5)
+            check(r[1] == 5, "pick Country Flag 5: %s" % r)
+            r = await s.call("a", "a", 1, [alice, None, token])
+            check(r[4][16].get("flg") == 5, "account stats.flg 5: %s" % r[4][16].get("flg"))
+            err, data = await n.op("get", id=alice_id)
+            slots = (data or {}).get("data") or []  # the 40-slot account array: stats at slot 16
+            check(err is None and len(slots) > 16 and (slots[16] or {}).get("flg") == 5, "internal get stats.flg 5")
+            r = await s.call("po", "flg", 240)
+            check(r[2] == "Unknown country flag", "an index past the list is refused: %s" % r)
+            r = await s.call("flgr", "flg", -1)
+            check(r[1] == -1, "clear the Country Flag: %s" % r)
+            r = await s.call("fgr", "flg", alice, 0)
+            check(r[1] is None, "a name still takes the staff flag path (a plain account: refused): %s" % r)
 
             print("== medals")
             r = await s.call("mdl", "mdl")

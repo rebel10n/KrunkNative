@@ -482,7 +482,12 @@ static void staff_set(SocialSession *s, const cJSON *f, const kn_proc *proc, con
     social_call(s, proc, KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(v, on)), flag_done, c);
 }
 
-void sh_flag(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_HACK, "fgr"); }
+/* "flg" carries two messages (v7 shares the name): ["flg", index] is the account's Country Flag
+ * (io_flgr, progress.c), ["flg", name, 0|1] the staff hacker flag (fgr). A name is a string. */
+void sh_flag(SocialSession *s, const cJSON *f) {
+    if (cJSON_IsNumber(cJSON_GetArrayItem(f, 1))) sh_country_flag(s, f);
+    else staff_set(s, f, &P_SET_HACK, "fgr");
+}
 void sh_verify(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_FEATURED, "verr"); }
 void sh_creator(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_CREATOR, "crtr"); }
 
