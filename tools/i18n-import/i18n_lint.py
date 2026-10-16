@@ -72,7 +72,7 @@ def c_literals(src, i):
     return (out.decode("utf-8", "replace"), i) if found else (None, i)
 
 
-CALL = re.compile(r"\bI18N(_F)?\s*\(")
+CALL = re.compile(r"\bI18N(_F)?\s*\(|\bi18n_trf\s*\(")
 
 
 def scan(root):
@@ -88,7 +88,10 @@ def scan(root):
                     src = fh.read()
                 for m in CALL.finditer(src):
                     i = m.end()
-                    if m.group(1):  # I18N_F(buf, "key", "english", ...): skip the buffer argument
+                    # I18N_F(buf, "key", "english", ...) skips the buffer argument; i18n_trf(buf, size, "key", ...)
+                    # (the function behind I18N_F, called directly) skips the buffer and its size
+                    skip = 2 if m.group(0).startswith("i18n_trf") else (1 if m.group(1) else 0)
+                    for _ in range(skip):
                         depth = 0
                         while i < len(src):
                             c = src[i]
@@ -111,7 +114,7 @@ def scan(root):
                     if english is None:
                         continue
                     line = src.count("\n", 0, m.start()) + 1
-                    uses.append((os.path.relpath(path, root), line, key, english, bool(m.group(1))))
+                    uses.append((os.path.relpath(path, root), line, key, english, m.group(0).startswith("i18n_trf") or bool(m.group(1))))
     return uses
 
 
