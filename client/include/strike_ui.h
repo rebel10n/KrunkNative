@@ -225,6 +225,9 @@ void strike_hud_respawn(Client *client);
 void strike_hud_install(void);
 void strike_hud_tick(Client *client);
 void strike_hud_reset(void);                       // a new page / session: in-game UI removed
+int  strike_hud_spectating(void);                  // spectate_active(): the spectate panel (Strike's Se.isSpectatingOn)
+int  strike_hud_action(const char *name);          // spectate-prev / -next / -play, spectate (the HUD buttons); 1 handled
+int  strike_hud_pointer(float x, float y);         // a press at a HUD button (CSS px): 1 when it ran one
 
 // --render-scenario: state.strike (strike_ui.c strike_ui_scenario lists its keys)
 void strike_ui_scenario(Client *client, const cJSON *state);

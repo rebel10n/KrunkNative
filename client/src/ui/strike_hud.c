@@ -29,6 +29,7 @@
 #include <weapons.h>
 #include <zombies.h>
 #include <i18n.h>
+#include <spectate.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,8 +76,9 @@ static struct {
     char *last_board;
     // last rendered values (Mithril's diff)
     char last_score[160], last_health[64], last_timer[64], last_reload[32], last_desk[128], last_hint[96];
-    int last_card;
+    int last_card;              // card_key() when the kill card / its Spectate button was drawn
     int end_shown;
+    int rendered_spec;          // spectate_active() when the HUD was drawn (the panel replaces the health and reload)
     char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
     int scenario, scn_health, scn_max_health, scn_reward;
@@ -229,7 +231,7 @@ static void view_reload(const Client *client, StrBuf *sb) {
 // tfe: the desktop reload overlay shows while the weapon can reload and the keyboard is the input
 static int desktop_reload_shown(const Client *client) {
     const Player *me = me_player(client);
-    if (!me || !me->active || !me->weapon || strike_touch_input()) return 0;
+    if (!me || !me->active || !me->weapon || strike_touch_input() || spectate_active()) return 0;
     return me->weapon->reload_time > 0.0f && !me->weapon->no_reload; // weapon.reload
 }
 
@@ -249,7 +251,7 @@ static void view_reload_desktop(const Client *client, StrBuf *sb) {
 static int reload_hint_shown(const Client *client) {
     Player *me = client ? client->me : NULL;
     const GameMode *mode = client ? client->game.mode : NULL;
-    if (!me || !me->active || !me->weapon || !mode || strike_touch_input()) return 0;
+    if (!me || !me->active || !me->weapon || !mode || strike_touch_input() || spectate_active()) return 0;
     if (mode->config.no_reloads || mode->config.has_ammo_limit || me->weapon->ammo == 0) return 0;
     const int idx = me->loadout_index;
     if (!me->ammo || idx < 0 || idx >= me->loadout_size || me->ammo[idx] > 0) return 0;
@@ -275,6 +277,27 @@ static void view_reload_hint(const Client *client, StrBuf *sb) {
     sb_append(sb, "<div class=\"frvr-in-game-ui__msg-holder\"><div class=\"frvr-in-game-ui__message\"><span>");
     sb_append_esc(sb, label);
     sb_append(sb, "</span></div></div>");
+}
+
+// Krunker Strike's spectate HUD (no FRVR view: FRVR 1.37.2 never sets Se.isSpectatingOn). Our state
+// is spectate.c's (spectate_active, the spectate request); the panel is the dead player's entry point
+// (FRVR's strings: menu.btn.spectate.mobile "Spectate" on the kill card, app.spectate.mobile "TAP TO
+// SPECTATE"), then the target's name and team, the first / third person label and Prev / Next / Play.
+// view_spectate: .frvr-in-game-ui__spectate (replaces the health and reload while spectating)
+static void view_spectate(const Client *client, StrBuf *sb) {
+    const int uid = spectate_target_uid();
+    const Player *target = uid >= 0 ? client_find_player((Client *) client, uid) : NULL;
+    sb_append(sb, "<div class=\"frvr-in-game-ui__spectate\"><div class=\"frvr-in-game-ui__spectate-title\">Spectating</div>");
+    sb_append(sb, "<div class=\"frvr-in-game-ui__spectate-name\">");
+    if (target) sb_append_esc(sb, target->name);
+    else sb_append(sb, "Free Camera");
+    sb_append(sb, "</div>");
+    if (target && team_mode(client) && target->team) sb_appendf(sb, "<div class=\"frvr-in-game-ui__spectate-team\">Team %d</div>", (int) target->team);
+    sb_appendf(sb, "<div class=\"frvr-in-game-ui__spectate-person\">%s</div>", spectate_person_label());
+    sb_append(sb, "<div class=\"frvr-in-game-ui__spectate-row\">"
+                  "<div class=\"frvr-in-game-ui__spectate-button frvr-in-game-ui__spectate-prev\">Prev</div>"
+                  "<div class=\"frvr-in-game-ui__spectate-button frvr-in-game-ui__spectate-next\">Next</div>"
+                  "<div class=\"frvr-in-game-ui__spectate-button frvr-in-game-ui__spectate-play\">Play</div></div></div>");
 }
 
 // AF(): the colour class of a kill-log name
@@ -323,6 +346,7 @@ static void view_kill_card(StrBuf *sb) {
         sb_appendf(sb, "</div></div><div class=\"frvr-in-game-ui__kill-card-lvl-flag\"><div class=\"frvr-in-game-ui__kill-card-lvl\">LVL %d</div></div>", H.kc_level);
         sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-card-score\">+ %d</div></div>", H.kc_score);
     }
+    if (!spectate_requested()) sb_append(sb, "<div class=\"frvr-in-game-ui__kill-card-spectate\">Spectate</div>");
     sb_append(sb, "</div>");
 }
 
@@ -463,6 +487,9 @@ static void view_board(const Client *client, StrBuf *sb) {
     sb_append(sb, "</table></div></div>");
 }
 
+// what the kill card shows: none, or the card with its Spectate button (until it is requested)
+static int card_key(void) { return H.kill_card ? 1 + spectate_requested() : 0; }
+
 // ---------------------------------------------------------------- rendering
 
 static HtmlElem holder(void) { return html_dom_by_id("frvrMenuMobileHolder"); }
@@ -513,15 +540,20 @@ static void update_board(const Client *client) {
 static void render(Client *client) {
     const HtmlElem h = holder();
     if (!h) return;
+    const int spec = spectate_active();
     StrBuf sb = {0};
     sb_append(&sb, "<div id=\"InGameUIMobile\" class=\"frvr-in-game-ui\">");
     view_scorebar(client, &sb);
-    view_health(client, &sb);
-    view_reload(client, &sb);
-    view_reload_desktop(client, &sb);
-    view_reload_hint(client, &sb);
+    if (spec) {
+        view_spectate(client, &sb);
+    } else {
+        view_health(client, &sb);
+        view_reload(client, &sb);
+        view_reload_desktop(client, &sb);
+        view_reload_hint(client, &sb);
+    }
     view_kill_log(client, &sb);
-    if (H.kill_card) view_kill_card(&sb);
+    if (H.kill_card && !spec) view_kill_card(&sb);
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     const HtmlElem anchor = game_anchor(h);
@@ -530,12 +562,14 @@ static void render(Client *client) {
     free(html);
     H.root = html_dom_by_id("InGameUIMobile");
     H.log_dirty = 0;
-    H.last_card = H.kill_card;
+    H.last_card = card_key();
+    H.rendered_spec = spec;
 }
 
 static void unrender(void) {
     if (H.root) html_dom_remove(H.root);
     H.root = 0;
+    H.rendered_spec = 0;
     H.last_score[0] = H.last_health[0] = H.last_timer[0] = H.last_reload[0] = H.last_desk[0] = H.last_hint[0] = 0;
     free(H.last_board);
     H.last_board = NULL;
@@ -566,22 +600,35 @@ static void update(Client *client) {
         replace_part(".scorebar-augmented", html);
         free(html);
     }
-    snprintf(key, sizeof(key), "%d/%d/%d/%d", me ? (int) floorf(me->health * 100.0f) : 0, me ? me->max_health : 0, me ? me->class_index : 0,
-             H.scn_health + H.scn_max_health);
-    if (strcmp(key, H.last_health)) {
-        snprintf(H.last_health, sizeof(H.last_health), "%s", key);
-        view_health(client, &sb);
-        html = sb_finish(&sb);
-        replace_part(".frvr-in-game-ui__health-holder", html);
-        free(html);
-    }
-    snprintf(key, sizeof(key), "%d", reload_ms(client) > 0);
-    if (strcmp(key, H.last_reload)) {
-        snprintf(H.last_reload, sizeof(H.last_reload), "%s", key);
-        view_reload(client, &sb);
-        html = sb_finish(&sb);
-        replace_part(".frvr-in-game-ui__ammo-overlay", html);
-        free(html);
+    if (H.rendered_spec) {
+        const int uid = spectate_target_uid();
+        const Player *target = uid >= 0 ? client_find_player(client, uid) : NULL;
+        snprintf(key, sizeof(key), "%d/%s/%s", uid, target ? target->name : "", spectate_person_label());
+        if (strcmp(key, H.last_health)) {
+            snprintf(H.last_health, sizeof(H.last_health), "%s", key);
+            view_spectate(client, &sb);
+            html = sb_finish(&sb);
+            replace_part(".frvr-in-game-ui__spectate", html);
+            free(html);
+        }
+    } else {
+        snprintf(key, sizeof(key), "%d/%d/%d/%d", me ? (int) floorf(me->health * 100.0f) : 0, me ? me->max_health : 0, me ? me->class_index : 0,
+                 H.scn_health + H.scn_max_health);
+        if (strcmp(key, H.last_health)) {
+            snprintf(H.last_health, sizeof(H.last_health), "%s", key);
+            view_health(client, &sb);
+            html = sb_finish(&sb);
+            replace_part(".frvr-in-game-ui__health-holder", html);
+            free(html);
+        }
+        snprintf(key, sizeof(key), "%d", reload_ms(client) > 0);
+        if (strcmp(key, H.last_reload)) {
+            snprintf(H.last_reload, sizeof(H.last_reload), "%s", key);
+            view_reload(client, &sb);
+            html = sb_finish(&sb);
+            replace_part(".frvr-in-game-ui__ammo-overlay", html);
+            free(html);
+        }
     }
     // the desktop overlay and the keyboard hint come and go with their gates: rebuilt when their state changes
     char desk[128] = "";
@@ -622,8 +669,8 @@ static void update(Client *client) {
         replace_part(".frvr-in-game-ui__kill-log-container", html);
         free(html);
     }
-    if (H.kill_card != H.last_card) {
-        H.last_card = H.kill_card;
+    if (card_key() != H.last_card) {
+        H.last_card = card_key();
         const HtmlElem old = part(".frvr-in-game-ui__kill-card-container");
         if (old) html_dom_remove(old);
         if (H.kill_card) {
@@ -915,17 +962,60 @@ void strike_hud_reset(void) {
     lean_forget();
 }
 
+int strike_hud_spectating(void) { return spectate_active(); }
+
+// The spectate actions (the panel's and the kill card's buttons, strike_hud_pointer). Spectating
+// is spectate.c's: the request is what the server reads on our next ENT (client_enter_game).
+int strike_hud_action(const char *name) {
+    if (!strcmp(name, "spectate")) {
+        spectate_set_requested(1); // the kill card's Spectate: the respawn (strike_hud_respawn) enters spectating
+    } else if (!strcmp(name, "spectate-prev") || !strcmp(name, "spectate-next")) {
+        if (H.client) spectate_mode(H.client, !strcmp(name, "spectate-next") ? 1 : -1);
+    } else if (!strcmp(name, "spectate-play")) {
+        // leave spectating: the request off, one ENT that spawns us (client_enter_game's leave path)
+        spectate_set_requested(0);
+        if (H.client) client_enter_game(H.client);
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+// A press at a page point (CSS px) on one of the HUD's buttons: runs its action, 1 when it hit one.
+// strike_touch.c calls it before the touch controls (the HUD's buttons sit where the controls are not).
+int strike_hud_pointer(const float x, const float y) {
+    static const struct { const char *sel, *action; } BUTTONS[] = {
+        {".frvr-in-game-ui__kill-card-spectate", "spectate"},
+        {".frvr-in-game-ui__spectate-prev", "spectate-prev"},
+        {".frvr-in-game-ui__spectate-next", "spectate-next"},
+        {".frvr-in-game-ui__spectate-play", "spectate-play"},
+    };
+    if (!H.root) return 0;
+    for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); i++) {
+        const HtmlElem el = part(BUTTONS[i].sel);
+        HtmlRect r;
+        if (!el || !html_dom_get_rect(el, &r) || r.w <= 0.0f || r.h <= 0.0f) continue;
+        if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) continue;
+        return strike_hud_action(BUTTONS[i].action);
+    }
+    return 0;
+}
+
 void strike_hud_tick(Client *client) {
     H.client = client;
-    // Mt.inGameUI.visible: in a game, the menu closed (Yh(true)), not the end screen
-    const int want = client && client->in_game && client->me && !html_ui_is_menu_open() && !H.end_shown;
+    const int spec = spectate_active();
+    // Mt.inGameUI.visible: in a game, the menu closed (Yh(true)), not the end screen; spectating has no
+    // player of ours, the spectate panel is the HUD
+    const int want = client && client->in_game && (client->me || spec) && !html_ui_is_menu_open() && !H.end_shown;
     // Mt.showMiniScoreBoard: the scoreboard key held (ui_controls.c: not while typing); a dead player
     // sees the kill card instead (Mt.displayInfoUI is false then)
     H.board = want && !H.kill_card && (H.scn_board || ui_controls_scoreboard_held());
+    if (H.root && H.rendered_spec != spec) unrender(); // spectating began or ended: the panel and the health swap
     if (want && !H.root) render(client);
     else if (!want && H.root) unrender();
     if (H.root) update(client);
-    if (H.kill_card && !H.scenario && client && client->me && client->me->active) H.kill_card = 0; // spawned: Yh(true) hides the card
+    // spawned: Yh(true) hides the card; spectating has no card (the panel replaces it)
+    if (H.kill_card && !H.scenario && client && ((client->me && client->me->active) || spec)) H.kill_card = 0;
 }
 
 static const char *sjs(const cJSON *o, const char *k) {

@@ -71,6 +71,15 @@
 .golden-spin-meter__value { color: #c9c9c9; }
 .golden-spin-meter__bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; margin-top: 4px; }
 .golden-spin-meter__fill { height: 100%; background: #f2d833; }
+/* KrunkNative (client/src/ui/strike_hud.c view_spectate, kill card): FRVR 1.37.2 has no spectate view, so
+   the spectate panel is ours. A dark card at the bottom centre, where the kill card sits. */
+.frvr-in-game-ui__spectate{position:absolute;bottom:calc(10 * var(--base-scale));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:calc(3 * var(--base-scale));padding:calc(4 * var(--base-scale)) calc(8 * var(--base-scale));background:rgba(0,0,0,.6);border-radius:calc(4 * var(--base-scale));color:#fff;text-align:center;white-space:nowrap}
+.frvr-in-game-ui__spectate-title{font-size:calc(6 * var(--base-scale));opacity:.8}
+.frvr-in-game-ui__spectate-name{font-size:calc(9 * var(--base-scale));font-weight:bold}
+.frvr-in-game-ui__spectate-team,.frvr-in-game-ui__spectate-person{font-size:calc(5 * var(--base-scale));opacity:.8}
+.frvr-in-game-ui__spectate-row{display:flex;gap:calc(4 * var(--base-scale));margin-top:calc(2 * var(--base-scale))}
+.frvr-in-game-ui__spectate-button,.frvr-in-game-ui__kill-card-spectate{padding:calc(3 * var(--base-scale)) calc(6 * var(--base-scale));background:#fff;color:#000;border-radius:calc(3 * var(--base-scale));font-size:calc(6 * var(--base-scale));font-weight:bold}
+.frvr-in-game-ui__kill-card-spectate{margin-top:calc(6 * var(--base-scale))}
 
 /* The developer console on the Strike page (ui/css/devconsole.css, client/src/ui/ui_console.c). That sheet's box
  * (744 x 280 at most, sized for a desktop page) is 624 x 294 outer here: 97% of the 640x360 phone page's width

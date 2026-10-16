@@ -408,7 +408,7 @@ static void aim_stick_end(void) {
 
 // ---------------------------------------------------------------- the control buttons (vhe)
 
-static int spectating(void) { return 0; } // Se.isSpectatingOn: KrunkNative spectators keep their own HUD
+static int spectating(void) { return strike_hud_spectating(); } // Se.isSpectatingOn: spectate.c's state (strike_hud.c's spectate panel)
 
 static int control_visible(const Control c) {
     const Player *me = T.client ? T.client->me : NULL;
@@ -965,7 +965,7 @@ int strike_touch_event(Client *client, const int phase, const long id, const flo
     T.client = client;
     if (phase == 0) T.touch_input = 1;
     if (strike_touch_customize_pointer(phase > 2 ? 2 : phase, x, y)) return 1; // Customize Controls drags
-    if (phase == 0) return touch_start(id, x, y);
+    if (phase == 0) return strike_hud_pointer(x, y) || touch_start(id, x, y); // the HUD's buttons first
     if (phase == 1) return touch_move(id, x, y);
     return touch_end(id);
 }
@@ -973,7 +973,7 @@ int strike_touch_event(Client *client, const int phase, const long id, const flo
 int strike_touch_mouse_button(Client *client, const int button, const int action, const float x, const float y) {
     T.client = client;
     if (button != 0) return 1; // one finger: the left button; the others do nothing on a phone
-    if (action == 1) return touch_start(MOUSE_ID, x, y) || 1;
+    if (action == 1) return strike_hud_pointer(x, y) || touch_start(MOUSE_ID, x, y) || 1;
     return touch_end(MOUSE_ID) || 1;
 }
 
