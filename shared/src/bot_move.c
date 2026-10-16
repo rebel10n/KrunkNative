@@ -294,7 +294,12 @@ int bot_move_plan(const Game *game, const Player *self, const float look_yaw, co
     const vec3 look = bm_forward(look_yaw);
     const float speed = hypotf(self->velocity.x, self->velocity.z);
     const float push = k->jump_push * jump_mlt * speed;
-    const vec3 vel = {self->velocity.x + look.x * push, up, self->velocity.z + look.z * push};
+    // a hop out of a slide: the slide has turned the velocity to the look (player.c: v7 slides always follow
+    // the look), so the speed leaves along it. Skytemple: a bot that landed sliding on a drop hopped, and the
+    // flight planned along its old velocity found the floor the hop really flew past (50 units off the ledge).
+    const int sliding = self->on_ground && self->slide_timer > 0.0f;
+    const vec3 vel = sliding ? (vec3) {look.x * (speed + push), up, look.z * (speed + push)}
+                             : (vec3) {self->velocity.x + look.x * push, up, self->velocity.z + look.z * push};
     const vec3 key = isnan(key_yaw) ? (vec3) {0.0f, 0.0f, 0.0f} : bm_forward(key_yaw);
     return bm_flight(game, self, self->position, vel, key, self->position.y, look, run_limit, out);
 }

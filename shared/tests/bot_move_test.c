@@ -407,7 +407,9 @@ static void test_ai_corridor(Game *game, const int corridor) {
         game_init(game, corridor, 0, 1);
         CHECK(game->ready, "corridor loaded");
         pcg32_srandom((uint64_t) seed, 54u);
-        run("/bot_add 2 difficulty=hard targetBots=false");
+        // no fights: a NextBot targets bots whatever targetBots says (bots.c bot_perceive), and the
+        // hops of two bots that meet and fight in the corridor measured the fight, not the walk
+        run("/bot_add 2 difficulty=hard targetBots=false attackTarget=false watchTarget=false followTarget=false");
         AiStats st;
         ai_run(game, 40.0f, 0.0f, &st);
         printf("  seed %d, 40 s, 2 bots: %d hops, %d head bumps, %d wall contacts (%d in a hop / slide), %d jumps refused, %d hops refused, travelled %.0f\n",

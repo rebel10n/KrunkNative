@@ -15,10 +15,12 @@
 #define BOT_SENSE_FORGET_MS 10000.0f   // KNOWN_THREAT_FORGET_MS (the max profile; lower tiers forget sooner)
 #define BOT_SENSE_VISIBLE_BONUS 250.0f // KNOWN_THREAT_VISIBLE_BONUS
 #define BOT_SENSE_SWITCH_MARGIN 350.0f // TARGET_SWITCH_SCORE_MARGIN
+#define BOT_SENSE_SWITCH_HOT_MS 1500.0f // a switch this soon after the last engagement is a flick (a third of the reaction)
 #define BOT_SENSE_RECOGNIZE_MS 120.0f  // VISION_MIN_RECOGNIZE_MS (divided by the skill)
 #define BOT_SENSE_PREDICT_MS 800.0f    // how far a lost target's last velocity is extrapolated
 #define BOT_SENSE_SEARCH_STEP_MS 2500.0f // one search spot is looked at this long at most
 #define BOT_SENSE_SEARCH_REACHED 40.0f // a search spot / predicted position counts as reached within it
+#define BOT_SENSE_SEARCH_AREA 250.0f // a search spot's time (BOT_SENSE_SEARCH_STEP_MS) runs within this of the predicted position
 
 // combat.ts AimPart (aimPointForPart): points on a player a ray is traced to, best first.
 typedef enum { BOT_AIM_GUT = 0, BOT_AIM_CHEST, BOT_AIM_HEAD, BOT_AIM_FEET, BOT_AIM_ORIGIN, BOT_AIM_PARTS } BotAimPart;
@@ -87,6 +89,8 @@ typedef struct {
     float lock_ms;            // continuous visible time on aim_uid
     float unseen_ms;          // ms since aim_uid was last visible
     float reaction_left;      // ms before the trigger may be pulled
+    float engaged_at;         // sense time of the last engagement (bot_sense_engage), with has_engaged
+    unsigned char has_engaged;
     float err_yaw, err_pitch; // the current tracking error
     float err_goal_yaw, err_goal_pitch, err_timer;
     float aim_yaw, aim_pitch; // the last true target angles bot_sense_aim saw (angular speed)

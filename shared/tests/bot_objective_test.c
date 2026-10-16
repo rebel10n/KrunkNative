@@ -8,6 +8,7 @@
 #include <bots.h>
 #include <bot_objective.h>
 #include <map_catalog.h>
+#include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,7 +113,10 @@ static void test_ctf(Game *game, const int mode_index) {
     }
     int states[8] = {0}, pickups = 0, home_runs = 0, picked_in_time = 0;
     float first_capture = 0.0f;
-    for (int s = 0; s < 150 * 30 && !first_capture; s++) {
+    // 240 s: a capture usually comes in 25-50 s (KN_BOT_SEED 1-6), but a round where both sides keep
+    // killing the carriers takes longer (the default stream: 39 kills, no capture by 150 s since the
+    // bots see through the objective volumes as v7 does; main itself captured at 131 s)
+    for (int s = 0; s < 240 * 30 && !first_capture; s++) {
         tick(game, 1.0f / 30.0f, 30.0f);
         for (int i = 0; i < game->bots->count; i++) {
             const GameBot *bot = &game->bots->list[i];
@@ -134,7 +138,7 @@ static void test_ctf(Game *game, const int mode_index) {
     CHECK(states[BOT_STATE_OBJECTIVE] > states[BOT_STATE_HUNT], "bots play the objective rather than roam");
     CHECK(picked_in_time, "a flag is picked up within 45 s");
     CHECK(pickups > 0 && home_runs >= pickups * 9 / 10, "carriers head home, or for the enemy carrier in a stalemate (%d of %d ticks)", home_runs, pickups);
-    CHECK(g_captures >= 1, "a flag is captured within 150 s (team scores %d / %d)", game->mode->team_scores[1], game->mode->team_scores[2]);
+    CHECK(g_captures >= 1, "a flag is captured within 240 s (team scores %d / %d)", game->mode->team_scores[1], game->mode->team_scores[2]);
 }
 
 // Hardpoint: bots stand on the active objective and score; a bot holds it for 5 s straight.
@@ -437,6 +441,145 @@ static void test_zone_freeze(void) {
     CHECK(frozen == 0, "no bot stands still at the zone over %.0f s (%d)", ZONE_FREEZE_S, frozen);
 }
 
+
+// "bots just seem to all aggregate around zone points and stare at each other ... moving but don't
+// actually fire at each other. it's like they just have a party in the zones" (the user). Hardpoint,
+// King of the Hill and Domination on rotation maps, four bots a side for 60 s: enemies that meet at
+// a zone (both within ZONE_NEAR of a zone volume, at most ZONE_MEET_RANGE apart) fight. Checked: the
+// bots fire (shots per minute), land damage and kill in every run, and the party (such a pair where
+// neither has fired for ZONE_STANDOFF_S) takes at most a quarter of the time they spend there. The
+// cause on main: game.canSee counted the Hardpoint / KOTH objective volume as a wall (ai.c), so the
+// bots on a point could not see each other. Line of sight is not required here for that reason: it
+// is the thing under test.
+#define ZONE_MEET_RANGE 150.0f
+#define ZONE_STANDOFF_S 3.0f
+// floors and caps per run-minute, from 8 runs: main (the objective hid the point) 97 shots, 491
+// damage, 6.8 kills, 287 s of party; fixed 170-206 shots, 1676-1888 damage, 20-24 kills, 5 s of party
+#define ZONE_FIGHT_SHOTS_MIN 140.0f
+#define ZONE_FIGHT_DAMAGE_MIN 1000.0f
+#define ZONE_FIGHT_KILLS_MIN 12.0f
+#define ZONE_PARTY_MAX_S 10.0f       // party seconds per run, averaged
+#define ZONE_PARTY_RUN_MAX_S 30.0f   // ... and in any one run
+typedef struct { float shots, damage, meet, standoff; int kills; } ZoneFight;
+
+static int zone_near_any(const Game *game, const vec3 p) {
+    const GameMode *mode = game->mode;
+    if (mode->config.dom) {
+        for (int z = 0; z < mode->dom_zone_count; z++) {
+            if (zone_outside(p, mode->dom_zones[z].position, mode->dom_zones[z].half) <= ZONE_NEAR) return 1;
+        }
+        return 0;
+    }
+    const ModeObjective *obj = mode_objective_by_uid(game, mode->active_objective);
+    return obj && zone_outside(p, obj->position, obj->half) <= ZONE_NEAR;
+}
+
+static int zone_fight_run(const cJSON *map, const char *map_name, const int mode, const char *mode_name, const float seconds, ZoneFight *out) {
+    static const cJSON *maps[1];
+    static int modes[1];
+    maps[0] = map;
+    modes[0] = mode;
+    Game game = {0};
+    g_game = &game;
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game.round_length = 100000.0f;
+    game_init(&game, 0, 0, 1);
+    memset(out, 0, sizeof(*out));
+    if (!game.ready || !game.mode || !(game.mode->config.dom ? game.mode->dom_zone_count : game.mode->objective_count)) {
+        game_bots_remove_all(&game);
+        free_players(&game);
+        return 0;
+    }
+    for (int team = 1; team <= 2; team++) {
+        for (int i = 0; i < 4; i++) {
+            char team_arg[16];
+            snprintf(team_arg, sizeof(team_arg), "team=%d", team);
+            char *argv[] = {team_arg, "difficulty=normal"};
+            BotAssignments a;
+            bot_parse_assignments(2, argv, &a);
+            CHECK(game_bots_add(&game, &a, NULL, 0.0f) != NULL, "bot added");
+        }
+    }
+    tick(&game, 1.0f, 30.0f);
+    reset_counts();
+    const float dt = 1.0f / 30.0f;
+    float last_shot[GAME_BOTS_MAX], health[GAME_BOTS_MAX];
+    long serial[GAME_BOTS_MAX];
+    for (int i = 0; i < GAME_BOTS_MAX; i++) last_shot[i] = -100.0f, health[i] = -1.0f, serial[i] = -1;
+    for (int s = 0; s < (int) (seconds * 30.0f); s++) {
+        tick(&game, dt, 30.0f);
+        const float now = (float) s * dt;
+        const int n = game.bots->count < GAME_BOTS_MAX ? game.bots->count : GAME_BOTS_MAX;
+        for (int i = 0; i < n; i++) {
+            const Player *p = game.bots->list[i].player;
+            const int alive = p && p->active && p->health > 0.0f;
+            const unsigned int fired = p ? (unsigned int) p->life_shots + p->shot_count : 0u; // shots this life + projectiles
+            if (alive && serial[i] >= 0 && fired > (unsigned int) serial[i]) {
+                out->shots += (float) (fired - (unsigned int) serial[i]);
+                last_shot[i] = now;
+            }
+            serial[i] = p ? (long) fired : -1;
+            if (alive && health[i] >= 0.0f && p->health < health[i]) out->damage += health[i] - p->health;
+            health[i] = alive ? p->health : -1.0f;
+        }
+        for (int i = 0; i < n; i++) {
+            const Player *a = game.bots->list[i].player;
+            if (!a || !a->active || !zone_near_any(&game, a->position)) continue;
+            for (int j = i + 1; j < n; j++) {
+                const Player *b = game.bots->list[j].player;
+                if (!b || !b->active || b->team == a->team || !zone_near_any(&game, b->position)) continue;
+                const float dx = a->position.x - b->position.x, dz = a->position.z - b->position.z;
+                if (dx * dx + dz * dz > ZONE_MEET_RANGE * ZONE_MEET_RANGE) continue;
+                out->meet += dt;
+                if (now - last_shot[i] > ZONE_STANDOFF_S && now - last_shot[j] > ZONE_STANDOFF_S) out->standoff += dt;
+            }
+        }
+    }
+    out->kills = g_kills;
+    printf("  %s on %s: %.0f shots/min, %.0f damage, %d kills, enemies together at a zone %.1f s, without a shot %.1f s\n", mode_name, map_name,
+           out->shots * 60.0f / seconds, out->damage, out->kills, out->meet, out->standoff);
+    game_bots_remove_all(&game);
+    free_players(&game);
+    return 1;
+}
+
+static void test_zone_fight(void) {
+    printf("Running zone fight test...\n");
+    static const struct { const char *mode, *map; } k_runs[] = {
+        {"point", "sandstorm_v3"}, {"point", "kanji"}, {"point", "burg_new"},
+        {"king", "industry"}, {"king", "littletown"},
+        {"dom", "sandstorm_v3"}, {"dom", "industry"}, {"dom", "tropicano"},
+    };
+    ZoneFight total = {0};
+    int runs = 0, quiet_runs = 0;
+    float worst_party = 0.0f;
+    for (size_t r = 0; r < sizeof(k_runs) / sizeof(k_runs[0]); r++) {
+        const int key = map_catalog_index_of_key(k_runs[r].map);
+        const cJSON *map = key >= 0 ? map_catalog_json((size_t) key) : NULL;
+        CHECK(map != NULL, "map %s", k_runs[r].map);
+        ZoneFight f;
+        if (!map || !zone_fight_run(map, k_runs[r].map, mode_find(k_runs[r].mode), k_runs[r].mode, 60.0f, &f)) continue;
+        runs++;
+        quiet_runs += f.kills == 0;
+        if (f.standoff > worst_party) worst_party = f.standoff;
+        total.shots += f.shots, total.damage += f.damage, total.meet += f.meet, total.standoff += f.standoff, total.kills += f.kills;
+    }
+    const float minutes = (float) runs;
+    printf("  %d runs: %.0f shots/min, %.0f damage/min, %.1f kills/min, together %.0f s, without a shot %.0f s (%.0f%%), %d runs without a kill\n", runs,
+           total.shots / minutes, total.damage / minutes, (float) total.kills / minutes, total.meet, total.standoff,
+           total.meet > 0.0f ? 100.0f * total.standoff / total.meet : 0.0f, quiet_runs);
+    CHECK(runs == (int) (sizeof(k_runs) / sizeof(k_runs[0])), "every zone run played (%d)", runs);
+    CHECK(total.meet > 0.0f, "enemies meet at the zones (%.0f s)", total.meet);
+    CHECK(total.shots / minutes >= ZONE_FIGHT_SHOTS_MIN, "the bots fire (%.0f shots/min, at least %.0f)", total.shots / minutes, ZONE_FIGHT_SHOTS_MIN);
+    CHECK(total.damage / minutes >= ZONE_FIGHT_DAMAGE_MIN, "damage lands (%.0f/min, at least %.0f)", total.damage / minutes, ZONE_FIGHT_DAMAGE_MIN);
+    CHECK((float) total.kills / minutes >= ZONE_FIGHT_KILLS_MIN && quiet_runs == 0, "and kills (%.1f/min, at least %.1f; %d runs without one)",
+          (float) total.kills / minutes, ZONE_FIGHT_KILLS_MIN, quiet_runs);
+    CHECK(total.standoff / minutes <= ZONE_PARTY_MAX_S && worst_party <= ZONE_PARTY_RUN_MAX_S,
+          "no party at the zones: enemies together without a shot %.1f s per run (at most %.0f), %.1f s in the worst run (at most %.0f)",
+          total.standoff / minutes, ZONE_PARTY_MAX_S, worst_party, ZONE_PARTY_RUN_MAX_S);
+}
+
 int main(void) {
     const int key = map_catalog_index_of_key("sandstorm_v3");
     const cJSON *sandstorm = key >= 0 ? map_catalog_json((size_t) key) : NULL;
@@ -466,6 +609,7 @@ int main(void) {
     CHECK(!strcmp(bot_state_name(BOT_STATE_OBJECTIVE), "Objective"), "state name");
     CHECK(!strcmp(bot_goal_name(BOT_GOAL_HOME), "home") && !strcmp(bot_role_name(BOT_ROLE_DEFEND), "defend"), "goal / role names");
 
+    if (getenv("KN_BOT_SEED")) pcg32_srandom((uint64_t) atoll(getenv("KN_BOT_SEED")), 54u); // another run of the same tests (as bot_test)
     test_ctf(&game, 0);
     test_ctf_small(&game);
     test_point(&game, 1);
@@ -475,6 +619,7 @@ int main(void) {
     test_tdf(&game, 4);
     test_lms(&game, 5);
     test_zone_freeze();
+    test_zone_fight();
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

@@ -60,6 +60,7 @@
 #define NB_ATTACK_YAW_TOLERANCE 0.45f
 #define NB_RETREAT_HEALTH_FRACTION 0.3f
 #define NB_RETREAT_DURATION_MS 2500.0f
+#define BOT_LOF_CONE_MAX 0.03f             // the line-of-fire gate's widest cone (radians, per axis; ~1.7 degrees)
 #define NB_COMBAT_RANGE 350.0f
 #define NB_HYSTERESIS_RANGE 100.0f
 #define NB_DODGE_RANGE 600.0f
@@ -1410,6 +1411,12 @@ static void bot_walk(Game *game, GameBot *bot, Player *self, const vec3 goal, co
     bot_move_toward(game, bot, self, point, on_path, dt, f);
 }
 
+static int bot_secondary_reaches(const Player *self, const float range) {
+    const int id = self->loadout[1];
+    const Weapon *s = self->game && self->game->weapons && id >= 0 ? self->game->weapons[id] : NULL;
+    return s && s->secondary && !s->melee && (s->range <= 0.0f || s->range >= range);
+}
+
 static void bot_weapon_upkeep(const GameBot *bot, const Player *self, BotFrame *f, const int in_combat, const float range) {
     const Weapon *w = self->weapon;
     if (!w || !self->ammo || !self->loadout) return;
@@ -1421,6 +1428,11 @@ static void bot_weapon_upkeep(const GameBot *bot, const Player *self, BotFrame *
         if (in_combat && slot == 0 && range < 200.0f && self->loadout_size > 2 && self->ammo[1] > 0) f->swap = 1;
         else if (slot != 0 && self->ammo[0] > 0) f->swap = 3;
         else f->reload = 1;
+    } else if (in_combat && slot == 0 && !w->melee && range > (w->range > 0.0f ? w->range : 700.0f) && self->loadout_size > 2 && self->ammo[1] > 0 &&
+               self->swap_timer <= 0.0f && self->reload_timer <= 0.0f && bot_secondary_reaches(self, range)) {
+        // KrunkNative: the primary does not reach the target and the secondary does (the Nettspend's
+        // Purple Drank sprays 47 units: holding a zone, its bots stood among the enemy without a shot)
+        f->swap = 1;
     } else if (!in_combat && !w->melee && w->ammo && ammo < w->ammo && self->reload_timer <= 0.0f && bot->state_time > 1500.0f) {
         f->reload = 1; // tactical reload once things calm down
     } else if (!in_combat && slot != 0 && self->reload_timer <= 0.0f && self->swap_timer <= 0.0f) {
@@ -1654,7 +1666,10 @@ static void bot_attack(Game *game, GameBot *bot, Player *self, Player *target, c
         int clear = 0;
         if (aimed && ready && in_range) {
             const float climb = bot_sense_shot_climb(self, dt);
-            const float spread = melee ? 0.0f : bot_sense_shot_spread(self, dt) * 1.1f;
+            // capped at BOT_LOF_CONE_MAX: past it the spread is a scatter of misses (a shotgun's pellets, a
+            // hip-fire spray), and a gate over all of it held fire for any wall near the line (bots
+            // facing an enemy across a zone never shot)
+            const float spread = melee ? 0.0f : MIN(bot_sense_shot_spread(self, dt) * 1.1f, BOT_LOF_CONE_MAX);
             clear = bot_sense_clear_shot(game, self, bot->yaw, bot->pitch + climb, range, spread, target->position.y + 1.0f);
         }
         f->shoot = (unsigned char) (bot_sense_fire(&bot->sense, senses, self, aimed && ready && clear, bot->sees_target, in_range, dt) != 0);

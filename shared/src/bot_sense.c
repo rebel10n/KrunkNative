@@ -481,7 +481,10 @@ int bot_sense_search(Game *game, BotSense *sense, const int uid, const Player *s
         sense->search_active = 1;
         sense->search_timer = 0.0f;
     }
-    sense->search_timer -= dt;
+    // a spot's time runs once the bot is in the search area (the fan reaches 210 from the predicted
+    // position): from further out the walk there took longer than a step, so the spot kept moving
+    // before the bot got anywhere near it and it wandered between them
+    if (bs_d2d(self->position, predicted) < BOT_SENSE_SEARCH_AREA) sense->search_timer -= dt;
     const int reached = arrived || bs_d2d(self->position, sense->search_point) < BOT_SENSE_SEARCH_REACHED;
     if (sense->search_timer <= 0.0f || reached || sense->search_step == 0) {
         // a fan of spots along the way it was going (any way when it stood still), further out
@@ -536,7 +539,13 @@ void bot_sense_engage(BotSense *sense, const BotSenseProfile *profile, const Pla
         sense->err_pitch = sense->err_goal_pitch = sinf(a) * r * 0.6f;
         sense->err_timer = 0.0f;
     }
-    sense->reaction_left = profile->reaction_ms + extra_ms;
+    // a switch in the middle of a fight (engaged within BOT_SENSE_SWITCH_HOT_MS) is a flick with the gun
+    // already up: a third of the reaction. Every switch used to cost the full one, and in a crowded
+    // zone a bot that kept switching between the enemies around it never got a shot off
+    const int hot = sense->has_engaged && sense->time - sense->engaged_at < BOT_SENSE_SWITCH_HOT_MS;
+    sense->reaction_left = profile->reaction_ms * (hot ? 0.35f : 1.0f) + extra_ms;
+    sense->engaged_at = sense->time;
+    sense->has_engaged = 1;
     sense->burst_count = 0;
     sense->burst_rest = 0.0f;
     sense->trigger = 0;

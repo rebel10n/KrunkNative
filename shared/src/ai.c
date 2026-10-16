@@ -777,6 +777,12 @@ static int ai_object_blocks(const Object *object) {
         case PREFAB_SPAWN_POINT:
         case PREFAB_CAMERA_POSITION:
         case PREFAB_SPECTATE_CAM:
+        // v10's addObjective / addBombSite keep these volumes out of manager.objects, the list canSee walks
+        // (as player.c's shot test does). Fixed KN bug (the user: bots "have a party in the zones"): a
+        // Hardpoint / KOTH objective or a bomb site (collision forced) hid everyone inside it from the
+        // bots, so enemies on one point stood next to each other without a shot
+        case PREFAB_OBJECTIVE:
+        case PREFAB_BOMB_SITE:
             return 0;
         default:
             return 1;
