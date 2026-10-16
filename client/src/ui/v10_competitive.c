@@ -189,6 +189,18 @@ void v10_forget(const char *prefix) {
     if (!g_req_gen) g_req_gen = 1;
 }
 
+// Like v10_forget, but a cached answer stays up: the next v10_get asks again, and the answer is replaced when the new
+// one comes. In-flight answers under the prefix are dropped (they may predate the change).
+void v10_expire(const char *prefix) {
+    if (g_scenario) return;
+    const size_t n = prefix ? strlen(prefix) : 0;
+    for (int i = 0; i < REQ_SLOTS; i++) {
+        if (!g_req[i].path || strncmp(g_req[i].path, prefix ? prefix : "", n)) continue;
+        if (g_req[i].inflight) g_req[i].gen = 0;
+        else g_req[i].at_ms = 1; // a time long past (0 is pending, which v10_get does not ask again)
+    }
+}
+
 typedef struct {
     V10DoneFn fn;
     void *user;

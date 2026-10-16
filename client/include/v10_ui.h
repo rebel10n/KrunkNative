@@ -48,6 +48,7 @@ const V10Req *v10_get(const char *path, int ttl_ms);
 // The Leaderboards window's Rating tab for a krunker.io account (ranked_ui.c): NULL when the account is not one
 const V10Req *ranked_ui_rating_board(int season, int region);
 void v10_forget(const char *prefix);      // drop cached answers whose path starts with prefix ("" = all)
+void v10_expire(const char *prefix);      // as v10_forget, but the answers stay up until the next one comes
 void v10_scenario_answer(const char *path, const cJSON *json); // --render-scenario: a fixed answer (path without query = any query)
 // POST / PUT / DELETE: fn gets the answer once (no cache); body may be NULL
 typedef void (*V10DoneFn)(void *user, int status, const cJSON *json);

@@ -657,7 +657,13 @@ static void on_queue(void *user, const int status, const char *body, const size_
     (void) length;
     cJSON *msg = status == 200 ? cJSON_Parse(body) : NULL;
     if (cJSON_IsObject(msg)) handle_message(msg);
-    else queue_unparseable(); // a brain frame that is not an object: v10's parse error
+    else if (status == 200) queue_unparseable(); // a brain frame that is not an object: v10's parse error
+    else { // the queue could not be reached (v10's socket onerror, v10:98443-98450): the Internal Error popup, no banner
+        clear_state();
+        R.busy = 0;
+        internal_error();
+        render();
+    }
     cJSON_Delete(msg);
     if (R.state == MM_SEARCHING) poll_fire(NULL);
 }
@@ -853,16 +859,37 @@ static void challenges_scroll(void *user) {
     html_dom_set_scroll(win, sc.left, sc.top + hr.y - wr.y);
 }
 
-static void on_claim(void *user, const int status, const cJSON *json) {
-    (void) user;
-    // v10 (onClaimMilestone, v10:112238-112240): only a success refetches; a failure shows nothing (v10:98757-98764)
-    if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(json, "success"))) {
-        invalidate(); // _33975.clear(): the profile (and RP balance) again
-        render();
+static int g_claim_reward; // the milestone the claim takes (knRkClaim sets it): v10's _33842[index].reward (v10:98744)
+
+// The reward of the milestone a claim takes: the one after last_milestone_claimed, in the rows of the last profile
+// fetch (v10's claimable row, v10:98927). 0 when there is none.
+static int next_milestone_reward(const RankedBackend be) {
+    if (be == RANKED_BACKEND_KRUNKER) { // the krunker.io profile's rows (adapt_profile keeps them)
+        const int next = g_last_claimed + 1;
+        return g_milestones && next >= 0 && next < cJSON_GetArraySize(g_milestones) ? (int) v10_num(cJSON_GetArrayItem(g_milestones, next), "reward", 0) : 0;
     }
+    const V10Req *pr = get_profile(current_season()); // the brain's profile: {profile, milestones, rankedPoints} (services/brain/ranked.c)
+    const int last = (int) v10_num(profile_of(pr), "last_milestone_claimed", -1);
+    return (int) v10_num(cJSON_GetArrayItem(cJSON_GetObjectItem(pr->json, "milestones"), last + 1), "reward", 0);
 }
 
-static int g_claim_reward;  // the milestone the krunker.io claim takes: v10's _33842[index].reward (v10:98744)
+static void on_claim(void *user, const int status, const cJSON *json) {
+    (void) user;
+    // v10 (onClaimMilestone, v10:112238-112240): a failed claim is silent, nothing is refetched (v10:98757-98764)
+    if (status != 200 || !cJSON_IsTrue(cJSON_GetObjectItem(json, "success"))) return;
+    // v10 (v10:98744): the balance grows by the reward at once, then the profile is fetched again. A krunker.io
+    // account's balance is the account row (on_kio_claim changes it). The brain's is the cached profile's: it is bumped
+    // in place and the answers are expired, not dropped, so the bumped profile stays up until the new one comes.
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) {
+        invalidate(); // _33975.clear(): the profile (and RP balance) again
+    } else {
+        const V10Req *pr = get_profile(current_season());
+        cJSON *rp = pr->json ? cJSON_GetObjectItem(pr->json, "rankedPoints") : NULL;
+        if (cJSON_IsNumber(rp) && g_claim_reward > 0) cJSON_SetNumberValue(rp, rp->valuedouble + g_claim_reward);
+        v10_expire("/mm/ranked/");
+    }
+    render();
+}
 
 static void on_kio_claim(void *user, const int status, const cJSON *body) {
     (void) user;
@@ -1145,13 +1172,12 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     } else if (!strcmp(name, "knRkClaim")) { // onClaimMilestone(index): the next one, in order
         const RankedBackend be = ranked_active_backend();
         if (be == RANKED_BACKEND_NONE) return 1;
+        // v10 (v10:112105-112116): the next milestone's reward flies off its marker before the request
+        g_claim_reward = next_milestone_reward(be);
+        if (g_claim_reward > 0 && ev) v10_flying_number(ev->target, g_claim_reward);
         if (be == RANKED_BACKEND_KRUNKER) { // claimMilestone(index) (v10:25974): the region index
             char path[96];
             snprintf(path, sizeof(path), "/player-profile/me/claim-milestone/region/%d", ranked_region_index(my_region()));
-            // the milestone the claim takes: the one after last_milestone_claimed (v10's claimable row, the template at v10:98927)
-            const int next = g_last_claimed + 1;
-            g_claim_reward = g_milestones && next >= 0 && next < cJSON_GetArraySize(g_milestones)
-                                 ? (int) v10_num(cJSON_GetArrayItem(g_milestones, next), "reward", 0) : 0;
             if (!krunker_ranked_request(KRUNKER_RANKED_API, "POST", path, NULL, on_kio_claim, NULL)) on_claim(NULL, 0, NULL);
             return 1;
         }
@@ -1357,10 +1383,14 @@ static void gen_home(StrBuf *sb) {
     int maps[RANKED_SEASON_MAPS];
     ranked_season_maps(season, maps);
     sb_appendf(sb, "<div class=\"map-carousel-container svelte-17kea4i\" style=\"--total-maps: %d; --extended-maps: %d;\">", RANKED_SEASON_MAPS, 2 * RANKED_SEASON_MAPS);
+    const cJSON *pmaps = cJSON_GetObjectItem(r->json, "maps"); // the brain's season maps (available: the queue can play it)
     for (int k = 0; k < 2 * RANKED_SEASON_MAPS; k++) { // [...maps, ...maps]: the carousel loops
         const int id = maps[k % RANKED_SEASON_MAPS];
         const char *name = ranked_pool_map_name(id);
-        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\" alt=\"", id);
+        // a pool map the queue cannot play is greyed (KN choice: v10 lists every pool map as playable)
+        const int playable = !cJSON_IsFalse(cJSON_GetObjectItem(cJSON_GetArrayItem(pmaps, k % RANKED_SEASON_MAPS), "available"));
+        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"%s><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\" alt=\"",
+                   playable ? "" : " style=\"opacity: 0.35;\"", id);
         sb_append_esc(sb, name ? name : "");
         sb_append(sb, "\"> <div class=\"map-name svelte-17kea4i\">");
         sb_append_esc(sb, name ? name : "");
