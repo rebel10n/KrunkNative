@@ -24,6 +24,7 @@
 #include <bots.h>         // game_bots_count (lobby meta "bots")
 #include <flavor_rules.h> // the flavor's lobby config (Krunker Strike)
 #include <modes.h>        // mode_team_score: the ranked result's teamScores
+#include <comp_lobby.h>   // comp_lobby_get / comp_lobby_update: a rejoining roster player keeps its class
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
@@ -118,6 +119,7 @@ typedef struct {
     int shots, hits;           // hitscan rays fired / that hit a player or AI (match_shots / match_hits): accuracy
     float joined_at;           // server time of the first join (time played)
     float time_played;         // seconds in the match (snapshot)
+    int class_index;           // the comp class at the leave (-1 none): kept for a rejoin (v10:187185)
 } RankedSlot;
 
 static struct {
@@ -1336,6 +1338,7 @@ static void acc_ranked_setup(const cJSON *config) {
             memset(slot, 0, sizeof(*slot));
             slot->account_id = id->valueint;
             slot->team = t;
+            slot->class_index = -1;
             snprintf(slot->name, sizeof(slot->name), "%s", acc_str(cJSON_GetObjectItem(member, "name"), ""));
             g_rk.count++;
         }
@@ -1426,11 +1429,13 @@ int accounts_ranked_lobby_id(const ClientConnection *client) {
     return slot ? (int) (slot - g_rk.slots) + 1 : 0;
 }
 
-// Only the roster plays a ranked lobby; a roster player who left is out (needAll).
+// Only the roster plays a ranked lobby. A roster player may come back to its own slot at any time
+// the lobby is open (v10 allowsReconnection, v10:191796: a ranked game in WARMUP..POST_MATCH keeps
+// the lobby player's team and class, v10:187185); anyone else is refused.
 static const char *acc_ranked_refusal(const ClientConnection *client) {
     if (!g_rk.active) return NULL;
-    RankedSlot *slot = acc_ranked_slot(client->acct.account_id);
-    if (!slot || slot->left || g_rk.ended) return "Game in Progress"; // ranked.progress
+    const RankedSlot *slot = acc_ranked_slot(client->acct.account_id);
+    if (!slot) return "Game in Progress"; // ranked.progress
     return NULL;
 }
 
@@ -1456,13 +1461,17 @@ static ClientConnection *acc_client_by_account(const int account_id) {
     return NULL;
 }
 
+// A roster player who leaves mid-match does not end it (v10 checkLeave only logs the leave, v10:188210):
+// the slot is marked left, the team plays short, and the leave counts as an abandon at the result.
+// The comp class is kept for a rejoin (acc_set_ready): accounts_on_disconnect runs before comp_lobby_leave.
 static void acc_ranked_on_leave(const ClientConnection *client) {
     RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
     if (!slot || g_rk.ended || slot->left || client->acct.join_state != SERVER_JOIN_READY) return;
     acc_ranked_snapshot(slot, client);
+    const CompLobbyEntry *entry = comp_lobby_get(&g_server->game, client->id);
+    slot->class_index = entry ? entry->class_index : -1;
     slot->left = 1;
-    g_rk.end_now = 1; // leaveGame: needAll -> endGame(3)
-    server_log("[ranked] %s (account %d) left the match: abandoned, ending the round", client->name, slot->account_id);
+    server_log("[ranked] %s (account %d) left the match: the team plays short, abandoned at the result", client->name, slot->account_id);
 }
 
 // The winning team index (0/1), -1 draw: abandoners lose to a team that stayed, else the
@@ -1740,11 +1749,20 @@ static void acc_set_ready(ClientConnection *client) {
     RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
     if (slot && !slot->joined) acc_chat_to(client, "Joined Ranked Match. Abandoning a match will result in a temporary ban"); // ranked.join
     if (slot && !slot->joined) slot->joined_at = g_server->now;
+    // a roster player who was out (left, or never came) is back in its slot: no abandon at the result,
+    // and a player who left goes on with its time played
+    const int rejoined = slot && slot->joined && slot->left;
+    if (slot) slot->left = 0;
+    if (rejoined) {
+        slot->joined_at = g_server->now - slot->time_played;
+        server_log("[ranked] %s (account %d) rejoined the match", client->name, slot->account_id);
+    }
     if (slot) slot->joined = 1;
     const int was_waiting = client->acct.join_state != SERVER_JOIN_READY;
     client->acct.join_state = SERVER_JOIN_READY;
     acc_resume_note(client->acct.ticket_jti, 1); // a reconnect may resume this ticket (accounts_handle_join)
     net_comp_lobby_sync(client); // comp lobby: the account identity (+ the roster team)
+    if (rejoined && slot->class_index >= 0) comp_lobby_update(&g_server->game, client->id, 'c', slot->class_index); // its class back
     client->acct.auth_rid = 0;
     if (client->acct.account_id && gs_is_op(&g_gs_config, client->acct.account_id, client->acct.username)) {
         client->op = 1;

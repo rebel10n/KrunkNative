@@ -418,6 +418,14 @@ def run():
           str(pings[0]))
     check("the pinger gets no marker of its own", pings[2] is None)
 
+    # the start countdown (wait timers) holds the round clock while the roster is short (v10 waitTimers and
+    # minPlayers, v10:191352): the leave comes once the round clock runs, as in a match that is under way
+    def round_running():
+        conns[0].read(timeout=0.5)
+        return any(t == 15 and len(p) >= 5 and struct.unpack("<i", p[:4])[0] < 240 for t, p in conns[0].packets)
+
+    check("the round clock runs (the start countdown is over)", bool(wait_for(round_running, timeout=60)))
+
     # 3c. a scoring player: /score (cheats all: the host's dev command) gives conns[0] points for the round
     conns[0].send(CHAT_SEND, kn_proto.cstr("/score 5000", 288))
     conns[0].read(timeout=0.8)
@@ -438,7 +446,7 @@ def run():
     # 3b. the team forfeit vote (G8, v10 voteToForfeit): /forfeit (alias of /ff) opens team 1's vote, only
     # team 1 gets its "vf"; a rival's /ff is refused; a teammate's vote counts "Vote Submitted - n/needed";
     # a second vote from the same player is refused. Passing and expiry: the unit test (forfeit_test),
-    # since a passed vote would end the round this match still needs for the abandon check.
+    # since a passed vote would end the round this match still needs for the leave and rejoin checks.
     team_of = {i: teams[names[i]] for i in range(8)}
     t1 = [i for i in range(8) if team_of[i] == 1]
     t2 = [i for i in range(8) if team_of[i] == 2]
@@ -473,36 +481,76 @@ def run():
           any("already voted" in t for t in chats(conns[mate])), str(chats(conns[mate])[-1:]))
     check("forfeit: the round is still running (no end yet)", 4 not in gsc_states(conns[0]), str(gsc_states(conns[0])))
 
-    # 4. a player abandons: the round ends, the other team wins
-    quitter = 5
+    # 4. a player leaves mid-match (v10 checkLeave: the match plays on, the team short). The leave does not end
+    # the match; the roster players come back into their slots (v10 allowsReconnection, the team and the class
+    # kept, no abandon); with the roster whole again /end (cheats all) ends the round, and the winners are rated
+    def rejoin(i):
+        code, rc = http("/mm/ranked/connection", token=tokens[i], region="na")
+        conn = kn_proto.Conn("127.0.0.1", GAME_PORT)
+        conn.send(1, bytes([1, MINOR_EXT, 0]))
+        conn.join(client_key=rc["assignment"]["clientId"], session=tokens[i])
+        init = conn.read(until=kn_proto.INIT, timeout=10)
+        conn.read(timeout=1.0)
+        uid = struct.unpack("<BBBiiHi", init[:struct.calcsize("<BBBiiHi")])[6] if init else -1  # the new connection's uid
+        return conn, uid, init
+
+    quitter, qmate = 5, next(i for i in range(8) if i != 5 and teams[names[i]] == teams[names[5]])
     conns[quitter].close()
-    ended = wait_for(lambda: "[ranked] match" in log("game.log") and " over: winner team" in log("game.log"), timeout=20)
-    check("abandon ends the match", bool(ended), "" if ended else log("game.log")[-400:])
-    conns[0].read(timeout=1.5)
+    left = wait_for(lambda: "left the match: the team plays short" in log("game.log"), timeout=10)
+    time.sleep(3)
+    check("a leave does not end the match: the team plays short", bool(left) and " over: winner team" not in log("game.log"),
+          "" if left else log("game.log")[-300:])
+    conns[qmate].close()
+    wait_for(lambda: log("game.log").count("left the match: the team plays short") >= 2, timeout=10)
+    qconn, quid, qinit = rejoin(qmate)
+    qentry = comp_table(qconn).get(quid, {})
+    check("a roster player rejoins its slot: INIT, its team and its class kept",
+          bool(qinit) and qentry.get("t") == teams[names[qmate]] and qentry.get("c") == [0, 1, 2, 3, 4, 5, 6, 8][qmate],
+          f"{'INIT' if qinit else 'no INIT'} {qentry}")
+    check("the rejoin is not an abandon", "rejoined the match" in log("game.log"))
+    qconn.ent(class_index=0)
+    rconn, ruid, rinit = rejoin(quitter)
+    rconn.ent(class_index=0)
+    for c in (qconn, rconn):
+        c.read(timeout=1.0)
+    back = [spawned(qconn, quid) is not None, spawned(rconn, ruid) is not None]
+    check("both rejoined players spawn on their roster teams", all(back) and spawned(qconn, quid) == teams[names[qmate]]
+          and spawned(rconn, ruid) == teams[names[quitter]], str(back))
+    conns[0].send(CHAT_SEND, kn_proto.cstr("/end", 288))  # the round clock to 3 s: the round ends
+    conns[0].read(timeout=0.8)
+
+    def ended_now():
+        conns[0].read(timeout=0.5)
+        return "[ranked] match" in log("game.log") and " over: winner team" in log("game.log")
+
+    ended = wait_for(ended_now, timeout=60)
+    check("the round's end ends the match", bool(ended), "" if ended else log("game.log")[-400:])
+    ends = [struct.unpack("<bi", p[:5]) for t, p in conns[0].packets if t == 16 and len(p) >= 5]
+    check("the ranked end screen lasts until the lobby's shutdown (next_round 120 s, v10 shutdownTimer 120000)",
+          bool(ends) and ends[-1][1] == 120, str(ends[-1:]))
     check("gsc: POST_MATCH (4) when the round ends", 4 in gsc_states(conns[0]), str(gsc_states(conns[0])))
     prof = lambda t: http("/mm/ranked/profile", token=t, region="na")[1].get("profile", {})
     rated = wait_for(lambda: all(prof(t).get("total_matches") == 1 for t in tokens), timeout=15)
-    check("every roster player rated once", bool(rated))
-    quit_team = teams[names[quitter]]
+    check("every roster player rated once, nobody abandoned", bool(rated) and all(
+        prof(t).get("abandons") == 0 for t in tokens))
+    win_team = teams[names[0]]  # the scorer (5000 points) is on the winning team
     for i, t in enumerate(tokens):
         r = prof(t)
         code, h = http("/mm/ranked/history", token=t, region="na")
         m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
-        if i == quitter:
-            q = http("/mm/ranked/queue", token=t, regions="na")[1]
-            check("abandoner: abandons 1, MMR down, COOLDOWN", r.get("abandons") == 1 and m.get("mmr_change", 0) < 0 and m.get("abandoned") is True
-                  and q.get("payload", {}).get("code") == "COOLDOWN", json.dumps(r)[:300])
-        elif teams[names[i]] != quit_team:
+        if teams[names[i]] == win_team:
             check(f"winner {names[i]}: MMR up, a win", r.get("wins") == 1 and m.get("mmr_change", 0) > 0 and m.get("victory") == 1, json.dumps(m)[:300])
-            elo = psql(f"SELECT player_elo FROM players WHERE player_id = {ids[names[i]]}")
-            check(f"players.player_elo mirrors the MMR ({names[i]})", elo == str(r.get("mmr")), f"{elo} vs {r.get('mmr')}")
         else:
-            check(f"loser {names[i]}: MMR down, a loss", r.get("losses") == 1 and m.get("mmr_change", 0) < 0, json.dumps(m)[:300])
+            check(f"loser {names[i]}: MMR down, a loss", r.get("losses") == 1 and m.get("mmr_change", 0) < 0 and m.get("victory") == 0, json.dumps(m)[:300])
+    elo = psql(f"SELECT player_elo FROM players WHERE player_id = {ids[names[0]]}")
+    check("players.player_elo mirrors the MMR (scorer)", elo == str(prof(tokens[0]).get("mmr")), f"{elo} vs {prof(tokens[0]).get('mmr')}")
     scored = int(psql(f"SELECT coalesce(max(score), -1) FROM match_results WHERE account_id = {ids[names[0]]}") or -1)
     check("the score reaches the account's match result (ranked: score, no games or kills)", scored >= 5000, f"score {scored}")
     conns[0].read(timeout=1.5)
     chat = [t for t in chats(conns[0]) if t.startswith("Ranked: ")]
     check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))
+    qconn.close()
+    rconn.close()
     for c in conns:
         c.close()
 

@@ -2,6 +2,7 @@
 // update :4743-4870 and endGame :4407-4560 with the rounds / best-of / overtime flow; players.js
 // setTeam / add / score; doc/v7/map-logic.md §4.1 "Engine flow changes").
 #include "mode_internal.h"
+#include <ruleset.h>   // game_is_ranked: a ranked match is one round
 #include <ai.h>
 #include <forfeit.h>
 #include <pcg_basic.h>
@@ -342,6 +343,9 @@ static void mode_intermission_end(Game *game, const float overflow) {
 int mode_end_game(Game *game) {
     GameMode *mode = game->mode;
     if (!mode || !game_is_authority(game)) return 0;
+    // a ranked match is one round: v10's round logic (round wins, overtime, the next round) is for pub-type
+    // games only (v10:191041 `isPubType()`), and a ranked match is hosted, so the round ends the match
+    if (game_is_ranked(game)) return 0;
 
     int match_won = 0;
     if (mode->best_of) {

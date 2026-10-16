@@ -535,7 +535,11 @@ void game_send_end_late(Game *game, const int uid) {
 void game_end_round(Game *game) {
     if (game->end_timer > 0.0f) return;
 
-    const float end_timer = game_ruleset(game)->end_timer; // config.endTimer (Krunker Strike: 30 s)
+    const Ruleset *rules = game_ruleset(game);
+    float end_timer = rules->end_timer; // config.endTimer (Krunker Strike: 30 s)
+    // a ranked match has no next round (v10 endTimer "inf" when ranked): its end screen stays until the
+    // lobby's shutdown (v10 shutdownTimer 120000, v10:191217), so the lobby closes then (accounts.c)
+    if (game_is_ranked(game) && rules->ranked.shutdown_ms > 0) end_timer = rules->ranked.shutdown_ms / 1000.0f;
     game->end_timer = end_timer > 0.0f ? end_timer : GAME_END_TIMER;
     game_set_state(game, GAME_STATE_POST_MATCH); // v10 endGame: setGameState(POST_MATCH)
     game->round_timer = 0.0f;
