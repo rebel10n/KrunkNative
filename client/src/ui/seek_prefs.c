@@ -111,6 +111,14 @@ const char *seek_prefs_krunker_region(void) {
 #endif
 }
 
+void seek_prefs_set_servers(const SeekServers servers) {
+#ifndef __EMSCRIPTEN__
+    ui_settings_set_string(SEEK_SERVERS_KEY, servers == SEEK_SERVERS_OFFICIAL ? "official" : servers == SEEK_SERVERS_BOTH ? "both" : "kn");
+#else
+    (void) servers; // the web client has no server type row
+#endif
+}
+
 // The switch stores a boolean (checkbox onclick, setSetting); a script's 0 / "0" / "false" counts as
 // off too. Unset (no default in the tables) is on.
 int seek_prefs_on_launch(void) {

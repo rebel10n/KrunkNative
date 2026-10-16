@@ -33,6 +33,7 @@
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <krunker_map_source.h> // the official map list: v10 playMap / dsma indices
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
+#include <first_run_ui.h>  // the start-up seek waits for the first-run choice; the Connect window's note
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
@@ -2523,6 +2524,11 @@ int servers_ui_parse_address(const char *text, char *host, const size_t host_n, 
 
 char *servers_connect_window_gen(void) {
     StrBuf sb = {0};
+    if (first_run_ui_connect_note()) { // the first-run choice of Private server (first_run_ui.h)
+        sb_append(&sb, "<div class='kn-connect-note' style='margin-bottom:12px;font-size:18px;color:rgba(255,255,255,0.75);text-align:center'>");
+        sb_append_esc(&sb, I18N("kn.firstRun.connectNote", "If you were given an IP and port, use this: enter them below as IP:port."));
+        sb_append(&sb, "</div>");
+    }
     sb_append(&sb, "<input id='connectAddr' type='text' placeholder='");
     sb_append_esc(&sb, I18N("kn.connect.placeholder", "Enter Server Address (host:port)"));
     sb_append(&sb, "' class='accountInput' style='margin-top:0;margin-bottom:10px;' value='");
@@ -4339,6 +4345,7 @@ void servers_ui_tick(Client *client) {
         game = getenv("KRUNKNATIVE_GAME") ? strdup(getenv("KRUNKNATIVE_GAME")) : NULL;
 #endif
         }
+        if (!game && first_run_ui_wait()) return; // the first-run choice (first_run_ui.h) comes before any launch seek
         if (!game && seek_prefs_on_launch()) { // Auto Seek on Launch: the Quickplay seek, once the menu is up
             if (!menu_ready_for_launch()) return;
             g_started = 1;

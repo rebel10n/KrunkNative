@@ -33,6 +33,8 @@ typedef enum {
 // rows then; with the defaults every row is listed, as before).
 int seek_prefs_filtering(void);
 SeekServers seek_prefs_servers(void);
+// Stores the Server Type (the Quickplay row's setting; the first-run choice writes it).
+void seek_prefs_set_servers(SeekServers servers);
 // Settings > Quickplay > Auto Seek on Launch (knSeekOnLaunch, default on; v10 has no such option):
 // the launch seeks the way F4 does, once the menu is up, unless it names a lobby or starts offline.
 int seek_prefs_on_launch(void);

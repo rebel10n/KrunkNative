@@ -1,0 +1,143 @@
+/* The first-run choice (client/src/ui/first_run_ui.c): the v10 page's popup shell (.view-stack >
+   .popup-container > .popup > .io-popup-container, as the login and Usernames popups) with three options.
+   The colours are v10's: the header bar of .io-popup-header, the accept green of .io-button--accept for the
+   recommended option, the grey of .io-button for the others. Phone width: the popup takes the screen minus a
+   16px gutter on each side, and every option is a full-width finger target of 56px and up. */
+
+.kn-firstrun {
+    width: 800px;
+    max-width: calc(100% - 32px);
+    box-sizing: border-box;
+}
+
+.kn-firstrun-body {
+    padding: 18px 20px 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+}
+
+.kn-firstrun-lead {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.kn-firstrun-option {
+    all: unset;
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    min-height: 56px;
+    cursor: pointer;
+    padding: 12px 16px;
+    border-radius: 6px;
+    border: 2px solid #494949;
+    background-color: #363636;
+    color: #ffffff;
+    text-align: left;
+}
+
+.kn-firstrun-option:hover {
+    background-color: #4a4a4a;
+}
+
+.kn-firstrun-option--recommended {
+    border-color: #36e017;
+    background-color: rgba(41, 201, 13, 0.22);
+}
+
+.kn-firstrun-option--recommended:hover {
+    background-color: rgba(41, 201, 13, 0.32);
+}
+
+.kn-firstrun-tag {
+    display: inline-block;
+    margin-bottom: 6px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background-color: #29c90d;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.kn-firstrun-name {
+    display: block;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.kn-firstrun-desc {
+    display: block;
+    margin-top: 4px;
+    font-size: 15px;
+    line-height: 1.3;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+/* The touch layout (first_run_ui.c: ui_mobile_active): the page's design scale (ui-scale, about a third on a
+   phone) is dropped for this popup, so its text and finger targets are real CSS pixels. The popup keeps its
+   16px gutters and scrolls inside the phone's height when the three options do not fit. */
+.kn-firstrun-touch .view-wrapper {
+    width: 100%;
+    height: 100%;
+    transform: none;
+}
+
+.kn-firstrun-touch .kn-firstrun {
+    width: 560px;
+    max-width: calc(100% - 32px);
+    max-height: calc(100% - 32px);
+}
+
+.kn-firstrun-touch .io-popup-header {
+    padding: 6px 10px;
+    font-size: 24px;
+    line-height: 1.4;
+}
+
+.kn-firstrun-touch .kn-firstrun-body {
+    padding: 10px 14px 12px;
+    gap: 6px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+}
+
+.kn-firstrun-touch .kn-firstrun-lead {
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.kn-firstrun-touch .kn-firstrun-option {
+    min-height: 56px;
+    padding: 6px 12px;
+}
+
+.kn-firstrun-touch .kn-firstrun-tag {
+    margin-bottom: 2px;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.kn-firstrun-touch .kn-firstrun-name {
+    font-size: 15px;
+    line-height: 1.2;
+}
+
+.kn-firstrun-touch .kn-firstrun-desc {
+    margin-top: 1px;
+    font-size: 12px;
+    line-height: 1.3;
+}
+
+@media (max-width: 600px) {
+    .kn-firstrun-touch .kn-firstrun-option {
+        min-height: 64px;
+    }
+}

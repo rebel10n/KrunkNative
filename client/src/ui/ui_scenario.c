@@ -87,6 +87,7 @@
 #include <v10_ui.h> // state.leaderboards / state.v10responses
 #include <spectate.h> // state.spectate
 #include <hud_map.h>  // state.customMap (the minimap of custom-map games)
+#include <first_run_ui.h> // state.firstRun (the first-run choice's modal)
 #include <backend_ui.h> // store_skin_preview: killcard player card banners
 #include <update_ui.h> // state.update: the Outdated box
 #include <lobby_ui.h> // state.matchVotes: the end screen's vote cards
@@ -355,6 +356,7 @@ static void warn_unknown_keys(void) {
         "officialSession", // true: the menu as in a krunker.io server (the header shows the krunker.io account, v10_menu.c)
         "remoteImages", // {url: local file}: the http(s) images the page shows, no network (remote_images.h)
         "krunkerLobbies", // krunker.io's /game-list answer {games, totalPlayerCount} or {error} (krunker_lobbies_set_fixed)
+        "firstRun",   // true: the first-run choice popup over the menu (first_run_ui.c; nothing stored)
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
@@ -1163,6 +1165,7 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
+    first_run_ui_scenario(st("firstRun")); // the first-run choice's modal (first_run_ui.c)
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check

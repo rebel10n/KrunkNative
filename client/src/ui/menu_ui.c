@@ -46,6 +46,7 @@
 #include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
 #include <online_mode.h> // live sign-in: the session's rights end with it
 #include <audio.h> // the auto-respawn countdown's tick_0
+#include <first_run_ui.h> // the first-run choice: Krunker servers, Box Office or a private server (once per device)
 #include <nettspend.h>   // the Nettspend's weapon previews
 #include <krunker_captcha.h> // krunker_captcha_needs_player: the security challenge frees the pointer
 
@@ -2035,6 +2036,7 @@ void client_menu_tick(Client *client) {
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
         v10_news_tick();    // the v10 menu's What's New item (v10_news.c)
         v10_wild_offer_tick(client); // the account's Wild Offer: fetched after sign-in, notified once (v10_wild_offer.c)
+        first_run_ui_tick(client); // the first-run choice, once per device (first_run_ui.c)
         ui_loadout_tick();  // item pickers: only the cards near the scroll position exist (ui_vgrid.h)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
