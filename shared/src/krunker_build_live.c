@@ -130,6 +130,9 @@ static const int OPTIONAL_C2S[] = {
     KRUNKER_C2S_MARK_POSITION, KRUNKER_C2S_SPRAY, KRUNKER_C2S_PROP_HUNT_TAUNT, KRUNKER_C2S_MATCH_VOTE, KRUNKER_C2S_fpSp,
     // voice chat clips (official-ingame-voice)
     KRUNKER_C2S_VOICE_CHAT,
+    // the krunker.io account in the game (account-unify): the socket login after a sign-in, the ranked
+    // join ("joinedRank"), and the account's RPC (v10 _33978.rpc). A build without them only loses the account
+    KRUNKER_C2S_LOGIN, KRUNKER_C2S_RPC, KRUNKER_C2S_JOINED_RANK,
     -1,
 };
 static const int OPTIONAL_S2C[] = {
@@ -152,6 +155,9 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_VOTE_FORFEIT, KRUNKER_S2C_PLAYER_RECONNECTED, KRUNKER_S2C_SKIN_REWARD, KRUNKER_S2C_SKIN_FOUND_MESSAGE,
     // voice chat clips (official-ingame-voice)
     KRUNKER_S2C_VOICE_CHAT,
+    // the krunker.io account's numbers in the game (account-unify, krunker_link.c): name / level / rankedPoints
+    // ("ua"), balances (KR, junk), challenge rewards ("chlR"). Without them the account shows what it had
+    KRUNKER_S2C_UPDATE_ACCOUNT, KRUNKER_S2C_UPDATE_BALANCES, KRUNKER_S2C_UPDATE_CHALLENGE_REWARDS,
     // the Stalker banner (official-ingame-popups)
     KRUNKER_S2C_STALKER_PICKED,
     // the password popup's "Submit - Ns" countdown (official-ingame-lobby)
