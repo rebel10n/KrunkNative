@@ -1098,32 +1098,24 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     if (html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0 || strcmp(cached, pinged)) cached[0] = 0; // a race confirmed it
     const cJSON *setting = ui_setting_saved("defaultRegion");
     if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(saved, sizeof(saved), "%s", setting->valuestring);
-    // a saved Default Region the ping list does not name is an error (seek_region_choose returns
-    // SEEK_REGION_UNLISTED): no seek, never another region in its place (the error is shown below)
+    // a saved Default Region the ping list does not name is not an error: the seek goes on in an
+    // available region (seek_region_choose: the first listed one, then the ping race below picks the
+    // lowest measured one), logged here only
     const int have_list = cJSON_IsObject(list);
     const SeekRegionChoice how = seek_region_choose(have_list ? list : NULL, saved, cached, g_region, sizeof(g_region));
+    if (how == SEEK_REGION_UNLISTED) printf("[mm] default region %s is not in the matchmaker's list: seeking in %s instead\n", saved, g_region);
     if (have_list) {
         cJSON_Delete(g_ping_regions);
         g_ping_regions = list; // the region pickers' options
         list = NULL;
     }
     cJSON_Delete(list);
-    if (how == SEEK_REGION_UNLISTED && g_pin == PIN_NONE) {
-        printf("[mm] default region %s is not in the matchmaker's list: no seek\n", g_region);
-        g_find_seek = g_find_both = 0; // (start_seek's failure path)
-        g_exclude_game[0] = 0;
-        g_reload_next = 0;
-        char text[320];
-        I18N_F(text, "kn.mm.regionUnavailable", "Your default region {0} is not available: pick another one in Settings > Default Region",
-               region_long_name(g_region));
-        fatal_error(text);
-        free((void *) requested_game);
-        return;
-    }
-    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
+    // ClientManager.setDefaultRegion: an unlisted Default Region's fallback is not a ping result, so it is not cached
+    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region);
     // v10 getRegion: no Default Region and no confirmed cache (the list's first region, or none): the ping
-    // race decides, and seeks in its winner (on_region_race)
-    if ((how == SEEK_REGION_FIRST || how == SEEK_REGION_NONE) && have_list && region_ping_race(g_ping_regions, NULL, on_region_race, requested_game)) {
+    // race decides, and seeks in its winner (on_region_race). An unlisted Default Region races the same way
+    if ((how == SEEK_REGION_FIRST || how == SEEK_REGION_NONE || how == SEEK_REGION_UNLISTED) && have_list &&
+        region_ping_race(g_ping_regions, NULL, on_region_race, requested_game)) {
         g_region_racing = 1;
         return;
     }

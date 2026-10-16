@@ -28,14 +28,14 @@ static void test_regions(void) {
     choose(k_list, "VA", "", &how, out, sizeof(out));
     CHECK(!strcmp(out, "VA") && how == SEEK_REGION_SAVED, "saved VA listed: got %s (%d)", out, how);
 
-    // Ashburn (VA) is not listed (its node is down): it stays the choice and is reported as
-    // unlisted (an error for the caller); the seek never goes to the Middle East the list starts with
+    // Ashburn (VA) is not listed (its node is down): no error, an available region is sought instead:
+    // the first listed one (me-bhn here), never the saved one
     choose(k_list_no_va, "VA", "", &how, out, sizeof(out));
-    CHECK(!strcmp(out, "VA") && how == SEEK_REGION_UNLISTED, "saved VA unlisted: got %s (%d), want VA unlisted", out, how);
+    CHECK(!strcmp(out, "me-bhn") && how == SEEK_REGION_UNLISTED, "saved VA unlisted: got %s (%d), want me-bhn unlisted", out, how);
 
-    // ... and the cache does not replace it either, even when the cache is listed
+    // ... the cache does not replace the first listed region either (no error, no cache for a default)
     choose(k_list_no_va, "VA", "us-nj", &how, out, sizeof(out));
-    CHECK(!strcmp(out, "VA") && how == SEEK_REGION_UNLISTED, "saved VA unlisted, cache us-nj: got %s (%d)", out, how);
+    CHECK(!strcmp(out, "me-bhn") && how == SEEK_REGION_UNLISTED, "saved VA unlisted, cache us-nj: got %s (%d)", out, how);
 
     // no saved choice: the cached region when the list has it
     choose(k_list, "", "us-nj", &how, out, sizeof(out));
@@ -57,9 +57,10 @@ static void test_regions(void) {
     choose(NULL, "", "", &how, out, sizeof(out));
     CHECK(!strcmp(out, "local") && how == SEEK_REGION_NONE, "no list, nothing: got %s (%d)", out, how);
 
-    // an empty list (no node registered): the saved choice is unlisted, nothing is picked for it
+    // an empty list (no node registered): the saved choice is unlisted and nothing is picked for it
+    // (the seek falls back to the cache or "local")
     choose("{}", "VA", "", &how, out, sizeof(out));
-    CHECK(!strcmp(out, "VA") && how == SEEK_REGION_UNLISTED, "empty list, saved VA: got %s (%d)", out, how);
+    CHECK(!strcmp(out, "local") && how == SEEK_REGION_UNLISTED, "empty list, saved VA: got %s (%d)", out, how);
     choose("{}", "", "", &how, out, sizeof(out));
     CHECK(!strcmp(out, "local") && how == SEEK_REGION_NONE, "empty list, nothing: got %s (%d)", out, how);
 }

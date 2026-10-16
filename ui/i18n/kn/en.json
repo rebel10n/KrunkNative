@@ -393,7 +393,6 @@
  "kn.matchmaker.unreachable": "Could not reach the matchmaker",
  "kn.mm.noOtherLobby": "No other lobby has room: you stay in this one",
  "kn.mm.reconnecting": "Reconnecting...",
- "kn.mm.regionUnavailable": "Your default region {0} is not available: pick another one in Settings > Default Region",
  "kn.mm.rejoinFailed": "Could not rejoin: {0} again",
  "kn.mm.rejoining": "Rejoining a game...",
  "kn.mods.bhopMode": "Bhop Mode",

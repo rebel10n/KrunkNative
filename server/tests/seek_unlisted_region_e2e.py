@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A saved Default Region the matchmaker does not list is an error, not a silent fallback, end to end
-(client/src/ui/servers_ui.c on_ping_list, seek_choice.c).
+"""A saved Default Region the matchmaker does not list is never an error: the seek quietly goes on in an
+available region, end to end (client/src/ui/servers_ui.c on_ping_list, seek_choice.c).
 
   python3 -I server/tests/seek_unlisted_region_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -8,8 +8,8 @@ kn_brain on a scratch sqlite database with one brain-linked server_bin node in r
 brain's /mm/ping-list lists "local" only. Two headless clients, each started twice on one config
 dir (the first run sets Settings > Default Region, the second boots and seeks):
 
-  1. Default Region "VA" (Ashburn, not listed): the client logs that the region is not listed and
-     shows the error; it sends no seek to the brain (no join)
+  1. Default Region "VA" (Ashburn, not listed): no error text and no popup; the seek goes on in the
+     first listed region ("local") and joins the node
   2. Default Region "local" (listed): the startup seek joins the node
 
 Exit 77 when sqlite scratch databases or the binaries are unavailable.
@@ -140,13 +140,17 @@ def main():
         if not listed:
             return 1
 
-        # 1. Ashburn (VA) is not listed: an error, no seek
+        # 1. Ashburn (VA) is not listed: no error, the seek goes on in an available region
         cfg = os.path.join(WORK, "cfg-va")
         run_client("set-va", cfg, '0 call setSetting "defaultRegion" "VA"\n1500 quit\n', brain_port)
         log = run_client("boot-va", cfg, "0 boot\n6000 quit\n", brain_port)
-        check("unlisted default region VA is reported, not sought in another region",
-              "[mm] default region VA is not in the matchmaker's list: no seek" in log, [l for l in log.splitlines() if "[mm]" in l][:4])
-        check("no join with an unlisted default region", "[mm] joining " not in log)
+        check("unlisted default region VA is logged and the seek goes on in local",
+              "[mm] default region VA is not in the matchmaker's list: seeking in local instead" in log,
+              [l for l in log.splitlines() if "[mm]" in l][:4])
+        check("an unlisted default region shows no error text", "not available" not in log and "seek failed" not in log and
+              "Could not reach" not in log, [l for l in log.splitlines() if "fail" in l.lower() or "error" in l.lower()][:4])
+        check("an unlisted default region still starts a seek and joins an available region", "[mm] joining LOC1" in log,
+              [l for l in log.splitlines() if "[mm]" in l][-3:])
 
         # 2. local is listed: the startup seek joins the node
         cfg2 = os.path.join(WORK, "cfg-local")

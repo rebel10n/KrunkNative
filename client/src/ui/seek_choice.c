@@ -26,8 +26,15 @@ SeekRegionChoice seek_region_choose(const cJSON *list, const char *saved, const 
         return cached[0] ? SEEK_REGION_CACHED : SEEK_REGION_NONE;
     }
     if (saved[0]) {
-        set_region(out, n, saved);
-        return listed(list, saved) ? SEEK_REGION_SAVED : SEEK_REGION_UNLISTED;
+        if (listed(list, saved)) {
+            set_region(out, n, saved);
+            return SEEK_REGION_SAVED;
+        }
+        // not listed: no error, an available region is picked instead (the first listed one here; a
+        // ping race picks the lowest measured one where it runs) and the seek goes on
+        if (list->child && list->child->string) set_region(out, n, list->child->string);
+        else set_region(out, n, cached[0] ? cached : "local");
+        return SEEK_REGION_UNLISTED;
     }
     if (cached[0] && listed(list, cached)) {
         set_region(out, n, cached);
