@@ -8,7 +8,7 @@ WebSocket like Krunker v3.1.1's social page / menu would (msgpack frames with th
 
 usage: social_ws_test.py <kn_brain> <repo_root>
 env:   KN_TEST_DB_NAME (default krunknative_svcacc), KN_TEST_SCHEMA (default
-       kn_test_accounts_<pid>, dropped afterwards), config/config.json for host/user/password.
+       kn_test_accounts_<pid>, dropped afterwards), KN_TEST_CONFIG or config/config.json for host/user/password.
        KN_TEST_DB_DRIVER=sqlite|mysql runs on that store driver instead (db_scratch.py:
        a temp sqlite file, or a scratch database on KN_TEST_MYSQL_HOST/PORT/USER/PASSWORD).
 Exit 77 (CTest skip) when the database or python websockets is unavailable.
@@ -658,7 +658,7 @@ def main():
     global ROOT
     brain, root = sys.argv[1], os.path.abspath(sys.argv[2])
     ROOT = root
-    with open(os.path.join(root, "config", "config.json")) as fp:
+    with open(os.environ.get("KN_TEST_CONFIG", os.path.join(root, "config", "config.json"))) as fp:  # the database credentials
         db = json.load(fp).get("database", {})
     dbname = os.environ.get("KN_TEST_DB_NAME", "krunknative_svcacc")
     # one schema per run: concurrent runs (several build dirs / agents) never share tables

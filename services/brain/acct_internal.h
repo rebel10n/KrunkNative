@@ -146,6 +146,22 @@ void store_shutdown(Brain *b);
 /* ---- social socket sessions (social_ws.c) */
 struct kn_ws;
 
+/* One token bucket per message class and connection (doc/social-rate-limit.md; the classes and
+ * their rates are social_ws.c's k_rate table). */
+#define SOCIAL_RATE_CLASSES 5
+typedef struct SocialRateBucket {
+    double tokens;
+    uint64_t at_ms;                 /* when tokens was last updated */
+    int started;                    /* 0 until the first frame of the class (the bucket starts full) */
+    int window;                     /* a refusal notice went out and no frame of the class passed since */
+} SocialRateBucket;
+
+/* A coalesced state push waiting for the flush (social_ws.c): the newest value per key. */
+typedef struct SocialOutItem {
+    char key[48];
+    cJSON *frame;
+} SocialOutItem;
+
 typedef struct SocialSession {
     struct kn_ws *ws;               /* NULL once the socket closed */
     int refs;                       /* pending async work + 1 while open */
@@ -163,8 +179,10 @@ typedef struct SocialSession {
     int draining;
     struct SocialFrameQ *q_head, *q_tail; /* frames waiting for busy == 0 (per-socket order) */
     int q_len;
-    double bucket;                  /* rate limit tokens */
-    uint64_t bucket_ms;
+    SocialRateBucket rate[SOCIAL_RATE_CLASSES]; /* inbound frames, per class */
+    SocialOutItem *out;             /* coalesced state pushes not yet sent (newest value per key) */
+    int out_n, out_cap;
+    uint64_t out_timer;             /* the flush timer; while set it holds a reference (0 = none) */
     struct SocialSession *prev, *next;  /* presence list (authenticated sockets) */
 } SocialSession;
 

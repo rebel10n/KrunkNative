@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "hot.h"
 #include "knsvc/buf.h"
@@ -29,11 +30,16 @@
 
 #define MOD "social"
 
-#define RATE_PER_S 20.0
-#define RATE_BURST 60.0
-
 static SocialSession *s_online;   /* authenticated sessions */
 static int s_open_count;
+static kn_loop *s_loop;           /* the brain's loop: the flush timers of the coalesced pushes */
+
+/* Coalesced pushes leave this long after the first one of a burst (the newest value of each key
+ * is what goes out). Outbound pushes are not charged to the client's rate limit (doc). */
+#define OUT_FLUSH_MS 100
+#define OUT_MAX 128       /* pending keys per connection; a fuller map is flushed at once */
+/* a passing frame that finds the socket's queue full is refused with this retry time */
+#define QUEUE_RETRY_MS 250
 
 /* ------------------------------------------------------------------ session lifetime */
 
@@ -42,14 +48,31 @@ SocialSession *social_retain(SocialSession *s) {
     return s;
 }
 
+/* what an inbound frame is, for the limiter and its answer (see the rate limits section) */
+typedef enum {
+    KIND_CLASS,      /* a route: charged to its class */
+    KIND_UNKNOWN,    /* a label that is no route (or an eb type that is none) */
+    KIND_MALFORMED,  /* no label: not an array, or no string first element */
+    KIND_EXEMPT      /* "po", the anti-hack reply: no answer, never limited */
+} RateKind;
+
+typedef enum {
+    QM_DISPATCH,     /* run the frame's handler */
+    QM_ANSWER        /* answer the frame (refused, unknown or malformed) */
+} QueueMode;
+
 typedef struct SocialFrameQ {
     cJSON *frame;
+    QueueMode mode;
+    RateKind kind;              /* QM_ANSWER */
+    int64_t retry_ms;           /* QM_ANSWER: > 0 when refused */
     struct SocialFrameQ *next;
 } SocialFrameQ;
 
 #define QUEUE_MAX 128
 
 static void dispatch(SocialSession *s, const cJSON *frame);
+static void answer(SocialSession *s, const cJSON *frame, RateKind kind, int64_t retry_ms);
 
 static void queue_clear(SocialSession *s) {
     while (s->q_head) {
@@ -70,7 +93,8 @@ static void drain(SocialSession *s) {
         s->q_head = n->next;
         if (!s->q_head) s->q_tail = NULL;
         s->q_len--;
-        dispatch(s, n->frame);
+        if (n->mode == QM_ANSWER) answer(s, n->frame, n->kind, n->retry_ms);
+        else dispatch(s, n->frame);
         cJSON_Delete(n->frame);
         free(n);
     }
@@ -84,11 +108,19 @@ static void clear_pending(SocialSession *s) {
     s->pending_pass = s->pending_name = NULL;
 }
 
+static void out_clear(SocialSession *s) {
+    for (int i = 0; i < s->out_n; i++) cJSON_Delete(s->out[i].frame);
+    free(s->out);
+    s->out = NULL;
+    s->out_n = s->out_cap = 0;
+}
+
 void social_release(SocialSession *s) {
     if (!s || --s->refs > 0) return;
     memset(s->token, 0, sizeof s->token);
     clear_pending(s);
     queue_clear(s);
+    out_clear(s);
     free(s);
 }
 
@@ -203,12 +235,103 @@ int social_require_auth(SocialSession *s) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ coalesced state pushes
+ *
+ * A state push carries the whole current value of one thing (a friend's presence, a friend's
+ * game, the friends page, the mail count, the account header), so while one is waiting on a
+ * socket the newer one replaces it: the socket gets each key's newest value once, OUT_FLUSH_MS
+ * after the first of the burst. Other pushes (a chat line, a challenge result) are sent at once. */
+
+/* the coalescing key of a state push, or 0 (sent as it is) */
+static int state_key(const cJSON *frame, char *key, size_t n) {
+    const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
+    if (!label) return 0;
+    if (!strcmp(label, "gmc") || !strcmp(label, "ua")) {
+        snprintf(key, n, "%s", label);
+        return 1;
+    }
+    if (!strcmp(label, "eb")) {
+        const cJSON *o = fa(frame, 1);
+        const char *type = kn_json_str(o, "type", "");
+        if (!strcmp(type, "presence:online") || !strcmp(type, "presence:offline")) {
+            snprintf(key, n, "presence:%lld", (long long) kn_json_int(o, "id", 0));
+            return 1;
+        }
+        if (!strcmp(type, "presence:game")) {
+            snprintf(key, n, "game:%lld", (long long) kn_json_int(o, "id", 0));
+            return 1;
+        }
+        if (!strcmp(type, "friends:list")) {
+            snprintf(key, n, "friends");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void out_flush(SocialSession *s) {
+    SocialOutItem *items = s->out;
+    const int n = s->out_n;
+    s->out = NULL;
+    s->out_n = s->out_cap = 0;
+    for (int i = 0; i < n; i++) social_send(s, items[i].frame); /* consumes each frame */
+    free(items);
+}
+
+static void out_timer_cb(kn_loop *loop, void *ud) {
+    (void) loop;
+    SocialSession *s = ud;
+    s->out_timer = 0;
+    out_flush(s);
+    social_release(s); /* the timer's reference */
+}
+
+/* Queues the newest value of `key` for the socket (consumes frame). */
+static void out_put(SocialSession *s, const char *key, cJSON *frame) {
+    for (int i = 0; i < s->out_n; i++) {
+        if (strcmp(s->out[i].key, key)) continue;
+        cJSON_Delete(s->out[i].frame);
+        s->out[i].frame = frame; /* the key keeps its place: the first push of the burst */
+        return;
+    }
+    if (s->out_n >= OUT_MAX || !s_loop) {
+        out_flush(s);
+        if (!s_loop) {
+            social_send(s, frame);
+            return;
+        }
+    }
+    if (s->out_n == s->out_cap) {
+        const int cap = s->out_cap ? s->out_cap * 2 : 8;
+        SocialOutItem *grown = realloc(s->out, (size_t) cap * sizeof *grown);
+        if (!grown) {
+            social_send(s, frame);
+            return;
+        }
+        s->out = grown;
+        s->out_cap = cap;
+    }
+    SocialOutItem *it = &s->out[s->out_n++];
+    snprintf(it->key, sizeof it->key, "%s", key);
+    it->frame = frame;
+    if (!s->out_timer) {
+        s->out_timer = kn_loop_add_timer(s_loop, OUT_FLUSH_MS, 0, out_timer_cb, social_retain(s));
+        if (!s->out_timer) { /* no timer: send now (drops the reference taken for it) */
+            social_release(s);
+            out_flush(s);
+        }
+    }
+}
+
 /* This brain's sockets of the account (also what other brains' pushes arrive as, hot.h). */
 static void push_local(int64_t account_id, cJSON *frame, int json_only) {
     if (!frame) return;
+    char key[48];
+    const int coalesce = state_key(frame, key, sizeof key);
     for (SocialSession *s = s_online; s; s = s->next) {
-        if (s->account_id == account_id && social_open(s) && (!json_only || s->json))
-            social_send(s, cJSON_Duplicate(frame, 1));
+        if (s->account_id != account_id || !social_open(s) || (json_only && !s->json)) continue;
+        if (coalesce) out_put(s, key, cJSON_Duplicate(frame, 1));
+        else social_send(s, cJSON_Duplicate(frame, 1));
     }
     cJSON_Delete(frame);
 }
@@ -665,18 +788,254 @@ static const SocialRoute k_routes[] = {
     {"uploadA", sh_upload_files},
 };
 
-static int rate_ok(SocialSession *s) {
-    const uint64_t now = kn_now_ms();
-    if (!s->bucket_ms) {
-        s->bucket = RATE_BURST;
-        s->bucket_ms = now;
+/* ------------------------------------------------------------------ rate limits
+ *
+ * Every inbound frame but "po" (the anti-hack reply) takes one token from the bucket of its
+ * class on this connection. The limits, the classes and the answers are documented in
+ * doc/social-rate-limit.md: keep that table and k_rate / k_label_class / k_eb_class in step.
+ *
+ * A refused frame is answered, never silently dropped, with one exception: a NOTICE frame
+ * (no reply slot) refused while a notice for its class is already out gets no answer of its own.
+ * A refused frame with a reply slot is answered in order, behind the work in flight. */
+
+typedef enum {
+    RC_AUTH,    /* login, register, 2FA, password and e-mail codes, logout everywhere */
+    RC_READ,    /* gapi GET, search, feed, profiles, lists, eb friends:list and msg:history */
+    RC_WRITE,   /* gapi POST/PUT/DELETE, eb msg:send / msg:read, posts, follows, market, clans, gifts */
+    RC_LIVE,    /* eb presence:ping */
+    RC_NOTICE   /* fire-and-forget frames: the client's analytics events and unknown labels */
+} RateClass;
+
+typedef enum {
+    ANS_REPLY,  /* every refused frame gets its own reply (gapi 429, eb error, "po" or "a" error) */
+    ANS_NOTICE  /* no reply slot: one notice per refusal window */
+} RateAnswer;
+
+typedef struct RateSpec {
+    double per_s;   /* tokens refilled per second */
+    double burst;   /* bucket size: the most frames that pass back to back */
+} RateSpec;
+
+/* indexed by RateClass; the same numbers as doc/social-rate-limit.md */
+static const RateSpec k_rate[SOCIAL_RATE_CLASSES] = {
+    {0.5, 10},   /* auth */
+    {50.0, 200}, /* read */
+    {20.0, 100}, /* write */
+    {2.0, 20},   /* live */
+    {5.0, 20},   /* notice */
+};
+
+typedef struct LabelClass {
+    const char *label;
+    RateClass cls;
+    RateAnswer ans;
+} LabelClass;
+
+/* socket labels (k_routes) that are not gapi / eb; a route missing here is a write with replies,
+ * and a label that is no route at all is a notice */
+static const LabelClass k_label_class[] = {
+    {"a", RC_AUTH, ANS_REPLY}, {"2fa", RC_AUTH, ANS_REPLY}, {"a2FA", RC_AUTH, ANS_REPLY},
+    {"a2FAc", RC_AUTH, ANS_REPLY}, {"d2FA", RC_AUTH, ANS_REPLY}, {"d2FAc", RC_AUTH, ANS_REPLY},
+    {"cemail", RC_AUTH, ANS_REPLY}, {"emailv", RC_AUTH, ANS_REPLY}, {"emailS", RC_AUTH, ANS_REPLY},
+    {"rpr", RC_AUTH, ANS_REPLY}, {"rpc", RC_AUTH, ANS_REPLY}, {"rps", RC_AUTH, ANS_REPLY},
+    {"upp", RC_AUTH, ANS_REPLY}, {"las", RC_AUTH, ANS_REPLY},
+    {"r", RC_READ, ANS_REPLY}, {"sp", RC_READ, ANS_REPLY}, {"gfs", RC_READ, ANS_REPLY},
+    {"gfg", RC_READ, ANS_REPLY}, {"pst", RC_READ, ANS_REPLY}, {"guf", RC_READ, ANS_REPLY},
+    {"grp", RC_READ, ANS_REPLY}, {"gps", RC_READ, ANS_REPLY}, {"chtb", RC_READ, ANS_REPLY},
+    {"ctd", RC_READ, ANS_REPLY}, {"getS", RC_READ, ANS_REPLY}, {"ttl", RC_READ, ANS_REPLY},
+    {"dsp", RC_READ, ANS_REPLY}, {"krh", RC_READ, ANS_REPLY}, {"spinH", RC_READ, ANS_REPLY},
+    {"sst", RC_READ, ANS_REPLY}, {"chg", RC_READ, ANS_REPLY}, {"mdl", RC_READ, ANS_REPLY},
+    {"bpdl", RC_READ, ANS_REPLY}, {"ri", RC_READ, ANS_REPLY}, {"ecfg", RC_READ, ANS_REPLY},
+    {"st", RC_READ, ANS_REPLY}, {"kml", RC_READ, ANS_REPLY}, {"fil", RC_READ, ANS_REPLY},
+    {"uml", RC_READ, ANS_REPLY},
+    {"f", RC_WRITE, ANS_REPLY}, {"ps", RC_WRITE, ANS_REPLY}, {"com", RC_WRITE, ANS_REPLY},
+    {"lps", RC_WRITE, ANS_REPLY}, {"dps", RC_WRITE, ANS_REPLY}, {"ict", RC_WRITE, ANS_REPLY},
+    {"kr", RC_WRITE, ANS_REPLY}, {"cln", RC_WRITE, ANS_REPLY}, {"clnR", RC_WRITE, ANS_REPLY},
+    {"clnRA", RC_WRITE, ANS_REPLY}, {"rpt", RC_WRITE, ANS_REPLY}, {"flg", RC_WRITE, ANS_REPLY},
+    {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
+    {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},
+    {"uploadMo", RC_WRITE, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY},
+    {"fvM", RC_WRITE, ANS_REPLY}, {"ftC", RC_WRITE, ANS_REPLY}, {"delC", RC_WRITE, ANS_REPLY},
+    {"li", RC_WRITE, ANS_REPLY}, {"uli", RC_WRITE, ANS_REPLY}, {"pi", RC_WRITE, ANS_REPLY},
+    {"qsi", RC_WRITE, ANS_REPLY}, {"ctr", RC_WRITE, ANS_REPLY}, {"trA", RC_WRITE, ANS_REPLY},
+    {"trC", RC_WRITE, ANS_REPLY}, {"trCA", RC_WRITE, ANS_REPLY}, {"srt", RC_WRITE, ANS_REPLY},
+    {"pbm", RC_WRITE, ANS_REPLY}, {"spin", RC_WRITE, ANS_REPLY}, {"fkr", RC_WRITE, ANS_REPLY},
+    {"clm", RC_WRITE, ANS_REPLY}, {"bdg", RC_WRITE, ANS_REPLY}, {"cbdg", RC_WRITE, ANS_REPLY},
+    {"bpclm", RC_WRITE, ANS_REPLY}, {"bpclmAll", RC_WRITE, ANS_REPLY}, {"xstbp", RC_WRITE, ANS_REPLY},
+    {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
+    {"raml", RC_WRITE, ANS_REPLY},
+    /* fire-and-forget: no reply, one notice per refusal window */
+    {"sfkr", RC_NOTICE, ANS_NOTICE}, {"lfkr", RC_NOTICE, ANS_NOTICE}, {"fkrf", RC_NOTICE, ANS_NOTICE},
+    {"unbx", RC_NOTICE, ANS_NOTICE}, {"vcln", RC_NOTICE, ANS_NOTICE},
+};
+
+/* ["eb", {type}] by type; an unknown type is a notice */
+static const LabelClass k_eb_class[] = {
+    {"presence:ping", RC_LIVE, ANS_REPLY},
+    {"friends:list", RC_READ, ANS_REPLY},
+    {"msg:history", RC_READ, ANS_REPLY},
+    {"msg:send", RC_WRITE, ANS_REPLY},
+    {"msg:read", RC_WRITE, ANS_NOTICE},
+};
+
+static const LabelClass *find_class(const LabelClass *t, size_t n, const char *key) {
+    for (size_t i = 0; i < n; i++)
+        if (!strcmp(t[i].label, key)) return &t[i];
+    return NULL;
+}
+
+static int is_route(const char *label) {
+    for (size_t i = 0; i < sizeof k_routes / sizeof k_routes[0]; i++)
+        if (!strcmp(k_routes[i].label, label)) return 1;
+    return 0;
+}
+
+/* the label of an inbound frame, NULL unless it is an array whose first element is a string */
+static const char *frame_label(const cJSON *frame) {
+    return cJSON_IsArray(frame) ? cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0)) : NULL;
+}
+
+typedef struct RateDecision {
+    RateClass cls;
+    RateAnswer ans;
+    RateKind kind;
+    int64_t retry_ms;   /* when refused: the time until the bucket holds a token */
+} RateDecision;
+
+static void classify(const cJSON *frame, RateDecision *d) {
+    const char *label = frame_label(frame);
+    d->cls = RC_NOTICE;
+    d->ans = ANS_NOTICE;
+    d->kind = KIND_CLASS;
+    d->retry_ms = 0;
+    if (!label) {
+        d->kind = KIND_MALFORMED;
+        return;
     }
-    s->bucket += (double) (now - s->bucket_ms) * RATE_PER_S / 1000.0;
-    if (s->bucket > RATE_BURST) s->bucket = RATE_BURST;
-    s->bucket_ms = now;
-    if (s->bucket < 1.0) return 0;
-    s->bucket -= 1.0;
-    return 1;
+    if (!strcmp(label, "po")) {
+        d->kind = KIND_EXEMPT;
+        return;
+    }
+    if (!strcmp(label, "gapi")) {
+        const char *method = fa_str(frame, 2);
+        d->cls = method && !strcasecmp(method, "GET") ? RC_READ : RC_WRITE;
+        d->ans = ANS_REPLY;
+        return;
+    }
+    if (!strcmp(label, "eb")) {
+        const LabelClass *e = find_class(k_eb_class, sizeof k_eb_class / sizeof k_eb_class[0], kn_json_str(fa(frame, 1), "type", ""));
+        if (e) {
+            d->cls = e->cls;
+            d->ans = e->ans;
+        } else {
+            d->kind = KIND_UNKNOWN;
+        }
+        return;
+    }
+    const LabelClass *l = find_class(k_label_class, sizeof k_label_class / sizeof k_label_class[0], label);
+    if (l) {
+        d->cls = l->cls;
+        d->ans = l->ans;
+    } else if (is_route(label)) {
+        d->cls = RC_WRITE;
+        d->ans = ANS_REPLY;
+    } else {
+        d->kind = KIND_UNKNOWN;
+    }
+}
+
+/* 1 = admitted (one token spent, or exempt), 0 = refused with d->retry_ms */
+static int rate_admit(SocialSession *s, const cJSON *frame, RateDecision *d) {
+    classify(frame, d);
+    if (d->kind == KIND_EXEMPT) return 1;
+    SocialRateBucket *b = &s->rate[d->cls];
+    const RateSpec *r = &k_rate[d->cls];
+    const uint64_t now = kn_now_ms();
+    if (!b->started) {
+        b->started = 1;
+        b->tokens = r->burst;
+        b->at_ms = now;
+    }
+    b->tokens += (double) (now - b->at_ms) * r->per_s / 1000.0;
+    if (b->tokens > r->burst) b->tokens = r->burst;
+    b->at_ms = now;
+    if (b->tokens >= 1.0) {
+        b->tokens -= 1.0;
+        b->window = 0; /* a passing frame ends the refusal window of its class */
+        return 1;
+    }
+    d->retry_ms = (int64_t) ((1.0 - b->tokens) * 1000.0 / r->per_s) + 1;
+    return 0;
+}
+
+static void queue_push(SocialSession *s, SocialFrameQ *n) {
+    if (s->q_tail) s->q_tail->next = n;
+    else s->q_head = n;
+    s->q_tail = n;
+    s->q_len++;
+}
+
+/* The explicit answer to a frame. Refused (retry_ms > 0): "Rate limited, retry in N ms." with the
+ * retry time; otherwise "Unknown request." / "Malformed request.". gapi: 429 with its rid; eb: an
+ * error with `of` (EB_RATE_LIMITED, or EB_UNKNOWN_TYPE for an eb type that is none); "a": the
+ * auth error; anything else: the page's error popup (social_error). */
+static void answer(SocialSession *s, const cJSON *frame, RateKind kind, int64_t retry_ms) {
+    const char *label = frame_label(frame);
+    const int refused = retry_ms > 0;
+    char msg[96];
+    if (refused) snprintf(msg, sizeof msg, "Rate limited, retry in %lld ms.", (long long) retry_ms);
+    else snprintf(msg, sizeof msg, "%s", kind == KIND_MALFORMED ? "Malformed request." : "Unknown request.");
+    if (label && !strcmp(label, "gapi")) {
+        cJSON *e = cJSON_CreateObject(), *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "code", refused ? "RATE_LIMITED" : "UNKNOWN");
+        cJSON_AddStringToObject(e, "message", msg);
+        if (refused) cJSON_AddNumberToObject(e, "retry_ms", (double) retry_ms);
+        cJSON_AddItemToObject(o, "error", e);
+        social_send_n(s, "gapi", 3, cJSON_CreateNumber((double) fa_int(frame, 1, 0)), cJSON_CreateNumber(refused ? 429 : 404), o);
+    } else if (label && !strcmp(label, "eb")) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "type", "error");
+        cJSON_AddStringToObject(o, "code", refused ? "EB_RATE_LIMITED" : "EB_UNKNOWN_TYPE");
+        cJSON_AddStringToObject(o, "message", msg);
+        if (refused) cJSON_AddNumberToObject(o, "retry_ms", (double) retry_ms);
+        cJSON_AddStringToObject(o, "of", kn_json_str(fa(frame, 1), "type", "")); /* the client fails its oldest message only for msg:send */
+        social_send_n(s, "eb", 1, o);
+    } else if (label && !strcmp(label, "a") && refused) {
+        send_auth_error(s, msg);
+    } else {
+        social_error(s, msg);
+    }
+}
+
+/* Answers a frame in order: now, or queued behind the work in flight so the socket's replies keep
+ * their order. Consumes frame. */
+static void reply_in_order(SocialSession *s, cJSON *frame, RateKind kind, int64_t retry_ms) {
+    if ((s->busy > 0 || s->q_head) && s->q_len < QUEUE_MAX) {
+        SocialFrameQ *n = calloc(1, sizeof *n);
+        if (n) {
+            n->frame = frame;
+            n->mode = QM_ANSWER;
+            n->kind = kind;
+            n->retry_ms = retry_ms;
+            queue_push(s, n);
+            return;
+        }
+    }
+    answer(s, frame, kind, retry_ms);
+    cJSON_Delete(frame);
+}
+
+/* A refused frame: a notice-answered class sends its notice once per window, a reply-answered
+ * one always gets its reply. Consumes frame. */
+static void refuse(SocialSession *s, cJSON *frame, const RateDecision *d) {
+    if (d->ans == ANS_NOTICE) {
+        if (s->rate[d->cls].window) {
+            cJSON_Delete(frame);
+            return;
+        }
+        s->rate[d->cls].window = 1;
+    }
+    reply_in_order(s, frame, d->kind, d->retry_ms);
 }
 
 static void dispatch(SocialSession *s, const cJSON *frame) {
@@ -713,31 +1072,34 @@ static void on_message(kn_ws *ws, const void *data, size_t len, int is_binary, v
         frame = kn_json_parse(data, len);
         if (frame) s->json = 1;
     }
-    if (!cJSON_IsArray(frame)) {
+    /* every frame is decided here: charged to its class, then answered or dispatched (a frame
+     * that does not parse has no label and gets the malformed answer) */
+    RateDecision d;
+    if (!rate_admit(s, frame, &d)) {
+        refuse(s, frame, &d); /* consumes frame */
+        return;
+    }
+    if (d.kind == KIND_EXEMPT) { /* "po": the client's answer to our "pi"; nothing to answer */
         cJSON_Delete(frame);
         return;
     }
-    if (!rate_ok(s)) {
-        cJSON_Delete(frame);
+    if (d.kind != KIND_CLASS) { /* unknown or malformed, within its burst: its explicit answer */
+        reply_in_order(s, frame, d.kind, 0);
         return;
     }
     if (s->busy > 0 || s->q_head) {
         /* the previous request is still running: keep the socket's order */
-        if (s->q_len >= QUEUE_MAX) {
-            KN_WARN(MOD, "%s: request queue full, dropping a frame", s->socket_id);
-            cJSON_Delete(frame);
-            return;
+        if (s->q_len < QUEUE_MAX) {
+            SocialFrameQ *n = calloc(1, sizeof *n);
+            if (n) {
+                n->frame = frame;
+                n->mode = QM_DISPATCH;
+                queue_push(s, n);
+                return;
+            }
         }
-        SocialFrameQ *n = calloc(1, sizeof *n);
-        if (!n) {
-            cJSON_Delete(frame);
-            return;
-        }
-        n->frame = frame;
-        if (s->q_tail) s->q_tail->next = n;
-        else s->q_head = n;
-        s->q_tail = n;
-        s->q_len++;
+        d.retry_ms = QUEUE_RETRY_MS; /* the queue is full: refused, and answered */
+        refuse(s, frame, &d);
         return;
     }
     social_retain(s);
@@ -754,6 +1116,12 @@ static void on_close(kn_ws *ws, int code, const char *reason, void *ud) {
     presence_leave(s);
     clear_pending(s);
     queue_clear(s);
+    if (s->out_timer) {
+        kn_loop_cancel_timer(s_loop, s->out_timer);
+        s->out_timer = 0;
+        social_release(s); /* the flush timer's reference */
+    }
+    out_clear(s);
     s->ws = NULL;
     s_open_count--;
     social_release(s);
@@ -821,6 +1189,7 @@ static void h_presence(kn_http_req *req, void *ud) {
 }
 
 int social_ws_init(Brain *b) {
+    s_loop = b->loop;
     if (!b->http) return 0;
     kn_http_route(b->http, "GET", "/api/ws", ws_route, NULL);
     kn_http_route(b->http, "GET", "/social/ws", ws_route, NULL);

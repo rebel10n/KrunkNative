@@ -1317,7 +1317,8 @@ socket's frames run strictly in order: a frame waits until the database work of 
 previous one finished (v3.1.1 ran them on synchronous SQLite), so e.g. `["f", ...]`
 then `["r", "profile", ...]` sees the follow. Errors
 without their own reply label are `["po", null, "message"]` (the page's `io_po`
-error popup). Rate limit: 20 frames/s, burst 60 (excess dropped). Pushes that only
+error popup). Rate limit: one token bucket per message class and connection (doc/social-rate-limit.md);
+a refused frame is answered (gapi 429, eb `EB_RATE_LIMITED`, `po`), never dropped. Pushes that only
 the Krunker Box Office menu understands (`gmc`, `ua`) go to JSON clients only.
 
 Auth (`socialWs.ts` handleAuth / packetHandlers io_a):

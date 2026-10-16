@@ -768,6 +768,16 @@ static void eb_on_game(const cJSON *o) {
 static void eb_on_error(const cJSON *o) {
     const char *code = jstr(o, "code");
     const char *text = v10_gapi_error_text(o, I18N("errors.common.unknown", "An unexpected error occurred. Please try again."));
+    // a refused frame (social_ws.c's rate limit) names the frame it refuses in "of": only a refused
+    // msg:send is a failed message; the others release their own loading flag and show the brain's text
+    const char *of = jstr(o, "of");
+    if (!strcmp(code, "EB_RATE_LIMITED") && of[0] && strcmp(of, "msg:send")) {
+        if (!strcmp(of, "friends:list")) S.friends_loading = 0;
+        if (!strcmp(of, "msg:history"))
+            for (int i = 0; i < S.nconv; i++) S.convs[i].loading = 0;
+        snprintf(S.eb_error, sizeof(S.eb_error), "%s", jstr(o, "message"));
+        return;
+    }
     if (strcmp(code, "EB_TARGET_OFFLINE") && strcmp(code, "EB_NOT_FRIEND") && strcmp(code, "EB_RATE_LIMITED") &&
         strcmp(code, "EB_TEXT_TOO_LONG") && strcmp(code, "EB_MSG_INVALID")) {
         snprintf(S.eb_error, sizeof(S.eb_error), "%s", text);

@@ -31,7 +31,8 @@ event bus (`wss://event-bus.svc.krunker.io/ws?at=<token>`). KrunkNative's client
 authenticated social socket, so both ride on it:
 
 * gapi: `["gapi", rid, method, path, body]` -> `["gapi", rid, status, {data} | {error: {code, message}}]`
-  (`services/brain/social_gapi.c`, `client/src/ui/v10_gapi.c`). Writes are rate limited per account.
+  (`services/brain/social_gapi.c`, `client/src/ui/v10_gapi.c`). Requests are rate limited per class
+  and connection, a refused one answered with a 429 `RATE_LIMITED` (doc/social-rate-limit.md).
 * event bus: `["eb", {type, ...}]` both ways, v10's objects verbatim (`services/brain/social_eb.c`):
   `friends:list`, `presence:ping/pong/online/offline/game`, `msg:send/sent/recv/read/history`,
   `msg:history:result`, `unread:summary`, `error` (EB_* codes). Friends are mutual follows (v10's
