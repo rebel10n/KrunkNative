@@ -244,7 +244,7 @@ int   servers_ui_entry_incompatible(const cJSON *entry);
 char *servers_ui_entry_badge_html(const cJSON *entry);      // "" or an Outdated / Incompatible badge
 char *servers_ui_download_button_html(const cJSON *list_response); // "Download server" -> downloadServer()
 void  servers_ui_open_download(void);                       // downloadServer(): the release page / OS asset
-int  servers_ui_host_game(const char *config_json); // /mm/host-game: disabled (hosting = server_bin), 0 unless KRUNKNATIVE_ALLOW_CLIENT_HOST
+int  servers_ui_host_game(const char *config_json); // Start Game on Box Office servers (/mm/host-game, host_flow_ui.c): 0 when not sent
 // Join a lobby with a ticket the brain issued elsewhere (ranked match): native TCP host:port,
 // web web_url or /native?target=.
 // playMap(name): join a brain lobby on that map, else host it (brain); a published map that

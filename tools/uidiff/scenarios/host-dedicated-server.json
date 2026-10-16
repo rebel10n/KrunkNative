@@ -20,7 +20,7 @@
     "windowActions": [
       ["openHostWindow", false, 0],
       ["knHostFlow", "map", "kanji"],
-      ["knHostFlow", "go", 3],
+      ["knHostFlow", "go", 4],
       ["knHostFlow", "download"]
     ]
   },

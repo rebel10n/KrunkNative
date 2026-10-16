@@ -212,9 +212,6 @@ const char *ui_window_key(int id);                        // "1".."52"; NULL unk
 const char *ui_map_thumb(const char *name);               // mapThumb()
 void        servers_ui_set_host_type(int host_type);      // openHostWindow(false, type): the Host Game window's config.hostTypes index
 int         servers_ui_host_type(void);                   // GAME_HOST_CUSTOM unless set
-int         ui_host_checked_mode(void);                   // createPrivateRoom: first checked hostable #gameMode<id>, -1 none
-const char *ui_host_checked_map(void);                    // createPrivateRoom: first checked #gameMap<i>, NULL none
-int ui_host_checked_map_index(void);                       // the same as a map catalogue index (map_catalog.h), -1 none
 
 // ---- ui_settings.c
 void ui_settings_load(void);                     // loadSettings (knSettings)
@@ -575,7 +572,7 @@ void hud_objectives_fini(void);                   // its canvas (GL)
 #define OBJECT_MANAGER_WINDOW (KN_WINDOW_BASE + 0)
 // KN_WINDOW_BASE + 1: free (it was the Turf Wars window; Turf Wars is v10's popup now, turf_ui.c)
 // KN_WINDOW_BASE + 2: SERVERS_WINDOW_CONNECT (backend_ui.h), the menu's Connect window
-#define HOST_FLOW_WINDOW (KN_WINDOW_BASE + 3) // the Host Game flow (host_flow_ui.h): every Host Game entry point
+// KN_WINDOW_BASE + 3: free (it was the Host Game flow of KrunkNative; the Host Game window is v10's window 8, host_flow_ui.h)
 // The Host Game practice: the embedded offline game plays catalogue map `catalog_index` in Krunker
 // mode `mode` (-1 keeps it); the Games window's Play and the Host Game flow's Play offline (ui_handlers.c)
 void host_catalog_map(int catalog_index, int mode);

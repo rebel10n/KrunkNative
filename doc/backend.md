@@ -1997,9 +1997,9 @@ challenges / class score stats (svc-accounts `elo` / `challenge` ops exist).
 
 ### 8.7 Hosting a server (dedicated server exe)
 
-Hosting is running `server_bin`, like a CS:Source dedicated server. The client has no
-Host Game flow any more (section 8.11). One process is one lobby; a network is many
-processes (8.10).
+Hosting is running `server_bin`, like a CS:Source dedicated server. The client's Host Game
+window (section 8.11) can also start a game on Box Office servers or krunker.io; it never runs one itself.
+One process is one lobby; a network is many processes (8.10).
 
 ```sh
 make server-dist            # dist/server/: server_bin + assets/maps + cfg/server.cfg + kn-query.py
@@ -2171,18 +2171,32 @@ web build reloads with `?game=`. Lobby-to-lobby moves therefore always go throug
 fresh seek-game ticket; there is no server-to-server state hand-off (the stats of the
 old server are committed as a partial on disconnect).
 
-### 8.11 No hosting from the client
+### 8.11 Hosting from the client: the Host Game window
 
-Removed: the menu's Host Game button (`#menuBtnHost` hidden with `display:none`, kept in
-the DOM for v3.1.1 parity; `--render-scenario` keeps it visible for uidiff), the
-`openHostWindow` handler (now an alert "run the dedicated server: server_bin"),
-`createPrivateRoom` -> `/mm/host-game`, `playMap` -> `/mm/host-game` (a map no server
-runs is played offline), and `servers_ui_host_game()` returns 0 (debug only:
-`KRUNKNATIVE_ALLOW_CLIENT_HOST=1`). The Servers window's "+ Host Game" link is replaced by
-direct connect / community servers (coord-auth). Kept: offline / practice play
-(`local_game.c`, "play offline" on the error screen, editor Test Map), the server
-browser and join. `/mm/host-game` and node `host-request` stay on the coordinator for
-admin tooling (6.3); clients never call them.
+The Host Game window (`client/src/ui/host_flow_ui.c`, MENU_WINDOW_HOST = windows[8]) is v10's own
+host_games window: Select, Game Settings, Advanced and Server tabs, then the last step, Start Game, which
+is the choice of where the game runs. The choice has up to three paths; the first one shown depends on
+the active backend (`krunker_net_active()`: the official krunker.io connection):
+
+- **krunker.io** (while the official krunker.io connection is active): krunker.io's own hosting. The
+  request is v10's createPrivateRoom object (`krunker_net_host_custom`, `client/src/net/krunker_net.c`):
+  the `custom` packet over the official socket, answered by `cust` (v10.js:198129, :197942). The game
+  joins on the reply. A community map is not sent here (krunker.io does not know it).
+- **Box Office servers** (otherwise): the brain would host the game. The same object goes to
+  `GET /mm/host-game?region=R&config=JSON` (`servers_ui_host_game`, section 8.5 of this document): the
+  brain finds a server with capacity, and the client joins. A community map is its `customMap`. The client
+  call is off by default (`servers_ui_host_game` returns 0 unless `KRUNKNATIVE_ALLOW_CLIENT_HOST=1`, the
+  policy of sections 6.3 and 8.7), so the button reports that Box Office is unavailable and points to the
+  dedicated server.
+- **Host it yourself** (always): the server_bin command for the settings (`shared/src/host_command.c`), the
+  Dedicated Server window (section 8.7), and Play this map offline (KrunkNative only: the embedded offline
+  game on the chosen map, the catalogue map or the published one, checked like v10).
+
+The Select tab's checkboxes are Krunker's own maps (catalogue `hostable`). A community map is chosen in the
+Games window (v10's Browse Community Games banner, the Games window's Host button) and replaces them.
+Raw game data, Social (share on hub), Server Upgrades, Host Presets and Rehost are not in the window: the
+server cannot take the first, and the rest need accounts and features KrunkNative does not have. The menu's
+Host Game button is shown; the chooser is v10's.
 
 ### 8.12 Build version and outdated servers
 

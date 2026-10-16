@@ -7,7 +7,7 @@
 The Host Game flow's last step has "Get the dedicated server". It used to open a krunk.io web page
 (a 404); now it opens a window in the client, built like the Download window (showWindow(25)):
   - native: a headless offline client_bin driven by an input script goes Host Game (window 42) ->
-    the flow (openHostWindow) -> a map -> the Server & command step, clicks the button, and the window
+    the Host window (openHostWindow) -> a map -> the last step (Start Game: the choice), clicks the button, and the window
     shows: its head, this computer's package with its .sha256, every server_bin release asset of
     `server-latest` (release.yml's platforms), quick start, server.cfg, port forwarding (TCP and UDP
     21015), the coordinator listing (finder_url) and the dated VPS prices; Back returns to the flow's
@@ -113,24 +113,25 @@ script = [
     "300 call showWindow 42",
     "800 call openHostWindow 0 0",
     '1200 call knHostFlow "map" "kanji"',
-    '1500 call knHostFlow "go" 3',
+    '1500 call knHostFlow "go" 4',
     "2000 vis @flow hostFlowCommand hostFlowGetServer knDsHead",
-    "2100 clickid hostFlowGetServer",
-    "2700 vis @ds knDsHead knDsRec knDsOther knDsBack knDsQuick knDsCfg knDsPorts knDsList knDsVps knDsPrices hostFlowCommand",
-    "2700 text @head [id=knDsHead]",
-    "2700 nodes @sha a[href$='.sha256']",
-    "2700 nodes @release a[href^='" + RELEASE + "']",
+    "2050 setscroll menuWindow 100000", # the last step is taller than the window: its button is at the bottom
+    "2300 clickid hostFlowGetServer",
+    "3000 vis @ds knDsHead knDsRec knDsOther knDsBack knDsQuick knDsCfg knDsPorts knDsList knDsVps knDsPrices hostFlowCommand",
+    "3000 text @head [id=knDsHead]",
+    "3000 nodes @sha a[href$='.sha256']",
+    "3000 nodes @release a[href^='" + RELEASE + "']",
 ]
 for i, a in enumerate(ASSETS):
-    script.append(f"2700 nodes @asset{i} a[href='{RELEASE}{a}']")
+    script.append(f"3000 nodes @asset{i} a[href='{RELEASE}{a}']")
 for i, n in enumerate(NEEDLES):
     if " " not in n:  # grep takes one word
-        script.append(f"2700 grep @n{i} {n} [id=menuWindow]")
-script += ["2800 clickid knDsBack", "3400 vis @back hostFlowCommand knDsHead", "3500 quit"]
+        script.append(f"3000 grep @n{i} {n} [id=menuWindow]")
+script += ["3100 clickid knDsBack", "3700 vis @back hostFlowCommand knDsHead", "3800 quit"]
 log = run_native("\n".join(script))
 
 flow = vis(log, "@flow")
-check(flow.get("hostFlowCommand") == "1", f"native: the Host Game flow's Server & command step is up ({flow})")
+check(flow.get("hostFlowCommand") == "1", f"native: the Host Game window's last step (Start Game: the choice) is up ({flow})")
 ds = vis(log, "@ds")
 for key in ("knDsHead", "knDsRec", "knDsOther", "knDsBack", "knDsQuick", "knDsCfg", "knDsPorts", "knDsList", "knDsVps", "knDsPrices"):
     check(ds.get(key) == "1", f"native: Get the dedicated server -> the window shows #{key} ({ds.get(key)})")
@@ -145,7 +146,7 @@ for i, n in enumerate(NEEDLES):
         check(grep(log, f"@n{i}") >= 1, f"native: the window mentions {n!r}")
 back = vis(log, "@back")
 check(back.get("hostFlowCommand") == "1" and back.get("knDsHead") in ("0", "-"),
-      f"native: Back to Host Game returns to the flow's Server step ({back})")
+      f"native: Back to Host Game returns to the choice step ({back})")
 
 
 # ---------------------------------------------------------------- web build (KN_WEB_DIST)
@@ -237,11 +238,11 @@ def web_part():
                 await until("!!document.querySelector('#menuWindow [onclick*=\"knHostFlow\"]')", 20)
                 await evaluate("knHostFlow('map', 'kanji'), 1")
                 await asyncio.sleep(0.5)
-                await evaluate("knHostFlow('go', 3), 1")
+                await evaluate("knHostFlow('go', 4), 1")  # the Start Game step: the self-host choice
                 result["flow"] = await until("!!document.getElementById('hostFlowCommand')", 20)
                 # the button itself, as a player clicks it
                 await evaluate("(b => { if (b) b.click(); return !!b; })"
-                               "(document.querySelector('#hostFlowGetServer [onclick]'))")
+                               "(document.getElementById('hostFlowGetServer'))")
                 await until("!!document.getElementById('knDsHead')", 20)
                 result["ds"] = json.loads(await evaluate(snap_js) or "{}")
                 await evaluate("(b => { if (b) b.click(); return !!b; })(document.getElementById('knDsBack'))")

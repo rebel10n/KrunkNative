@@ -25,6 +25,7 @@
 #include <modes.h>       // gameModes alias / name (server rows, host modes)
 #include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
 #include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
+#include <host_flow_ui.h>   // the Host Game window (windows[8]): its markup and tab switch
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <join_errors.h>   // a failed join's text and place (join_errors.c)
 #include <region_ping.h>   // the seek region's ping race (v10 getRegion)
@@ -2863,7 +2864,6 @@ static void on_player_count(void *user, const int status, const char *body, cons
 }
 
 static char *games_window_gen(void);
-static char *host_window_gen(void);
 
 // loadData()'s loading text: "<div style='padding-top:19px;>" lacks its closing quote in v7.1.4, which
 // swallows the text (a blank window while loading): fixed
@@ -2880,7 +2880,7 @@ char *servers_window_gen(const int id, const char **header) {
         if (header) *header = I18N("kn.connect.title", "Connect"); // KrunkNative window
         return servers_connect_window_gen();
     }
-    if (id == MENU_WINDOW_HOST) return host_window_gen();
+    if (id == MENU_WINDOW_HOST) return host_flow_window_gen(); // the Host Game window (host_flow_ui.c)
     if (id != 2) return NULL;
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
     krunker_lobbies_refresh(0); // official lobbies (native, cached; listed whatever the server type)
@@ -3130,7 +3130,6 @@ static void open_server_window(const int which) {
 
 static void games_load_more(const HtmlEvent *ev);
 
-static void host_switch_tab(int tab);
 static void games_search(const HtmlArg *args, int argc);
 
 int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -3213,7 +3212,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     const int host_config = ui_host_config_handle(name, ev, args, argc); // WP-E windows.7.* rows, slider labels
     if (host_config >= 0) return host_config;
     if (!strcmp(name, "windows.7.switchTab")) {
-        host_switch_tab(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
+        host_flow_switch_tab(argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0);
         return 1;
     }
     if (!strcmp(name, "favoriteM") || !strcmp(name, "windows.9.searchMaps")) {
@@ -3794,13 +3793,7 @@ static void games_search(const HtmlArg *args, const int argc) {
     free(cards);
 }
 
-// ---- windows[7] (Host Custom Game, showWindow(8)): v7's captured markup with the map
-// catalogue's hostable maps as the "Default Krunker Maps" cards (gameMap<index>, read back by
-// createPrivateRoom through ui_host_checked_*), and WP-E's game-config bodies
-// (client/src/ui/ui_host_config.c) in place of the captured hostTb1 / hostTb2 / hostTb3 ones.
-// Hosting a server is server_bin's job (doc/backend.md 8.11). Every Host Game entry point now opens
-// the Host Game flow (host_flow_ui.c), which ends at the server_bin command; this window (windows[8])
-// is kept for --render-scenario and the editor's templates, and its Start Game plays the pick offline.
+// ---- the Host Game window's type (windows[7] / showWindow(8): its markup is host_flow_ui.c's)
 static int g_host_type = GAME_HOST_CUSTOM; // openHostWindow(false, type): config.hostTypes index
 
 void servers_ui_set_host_type(const int host_type) {
@@ -3809,141 +3802,6 @@ void servers_ui_set_host_type(const int host_type) {
 
 int servers_ui_host_type(void) {
     return g_host_type;
-}
-
-// Just past the </div> that closes the <div ...> starting at `open`; NULL when unbalanced.
-static const char *div_end(const char *open) {
-    int depth = 0;
-    const char *p = open;
-    for (;;) {
-        const char *o = strstr(p, "<div"), *c = strstr(p, "</div>");
-        if (!c) return NULL;
-        if (o && o < c) {
-            depth++;
-            p = o + 4;
-            continue;
-        }
-        p = c + 6;
-        if (--depth <= 0) return p;
-    }
-}
-
-// s[from, to) replaced with `with` (s is freed; the result is malloc'd)
-static char *splice(char *s, const size_t from, const size_t to, const char *with) {
-    StrBuf sb = {0};
-    sb_append_n(&sb, s, from);
-    sb_append(&sb, with ? with : "");
-    sb_append(&sb, s + to);
-    free(s);
-    return sb_finish(&sb);
-}
-
-// The captured hostTb1 block, the run of hostTb2 bodies after it and hostTb3's inside become
-// windows[7].gen's markup for the window's host type.
-static char *host_config_splice(char *html, const int host_type) {
-    char *tab;
-    const char *a, *b;
-    const char *tb1 = "<div class=\"hostTb1 hide\">";
-    if ((a = strstr(html, tb1)) && (b = div_end(a))) {
-        tab = ui_host_config_tab_html(HOST_CONFIG_TAB_MODES, host_type, NULL);
-        html = splice(html, (size_t) (a - html), (size_t) (b - html), tab);
-        free(tab);
-    }
-    const char *tb2 = "<div class=\"hostTb2 hide\">"; // the Advanced bodies (not the empty one with a style)
-    if ((a = strstr(html, tb2))) {
-        b = a;
-        const char *next;
-        while (!strncmp(b, tb2, strlen(tb2)) && (next = div_end(b))) b = next;
-        tab = ui_host_config_tab_html(HOST_CONFIG_TAB_ADVANCED, host_type, NULL);
-        html = splice(html, (size_t) (a - html), (size_t) (b - html), tab);
-        free(tab);
-    }
-    const char *tb3 = "<div class=\"hostTb3 hide\"";
-    if ((a = strstr(html, tb3)) && (b = div_end(a))) {
-        const char *inner = strchr(a, '>');
-        if (inner && inner < b) {
-            tab = ui_host_config_tab_html(HOST_CONFIG_TAB_SERVER, host_type, NULL);
-            html = splice(html, (size_t) (inner + 1 - html), (size_t) (b - 6 - html), tab);
-            free(tab);
-        }
-    }
-    const char *title = game_host_type_name(host_type); // hostTypes[i].title ("Custom Game Setup")
-    const char *captured = "Custom Game Setup";
-    if (title && (a = strstr(html, captured))) html = splice(html, (size_t) (a - html), (size_t) (a - html) + strlen(captured), title);
-    return html;
-}
-
-static char *host_window_gen(void) {
-    const char *tpl = ui_windows_html("8");
-    const char *anchor = "<div class=\"mapListCat\">Default Krunker Maps</div>";
-    const char *a = strstr(tpl, anchor);
-    const char *b = a ? strstr(a, "</div></div><div id=\"forcedSettings\"") : NULL;
-    StrBuf sb = {0};
-    if (!a || !b) {
-        sb_append(&sb, tpl);
-        return host_config_splice(sb_finish(&sb), g_host_type);
-    }
-    a += strlen(anchor);
-    sb_append_n(&sb, tpl, (size_t) (a - tpl));
-    for (size_t i = 0; i < map_catalog_count(); i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (!e->hostable) continue;
-        char thumb[48];
-        sb_append(&sb, "<label class=\"hostMap\"><div class=\"hostMapName blackShad\">");
-        sb_append_esc(&sb, e->name);
-        sb_appendf(&sb, "</div><input onclick=\"playSelect(0.1)\" id=\"gameMap%d\" type=\"checkbox\"><img loading=\"lazy\" onmouseenter=\"playTick();\" draggable=\"false\" class=\"hostMapImg\" src=\"%s\"></label>",
-                   e->index, map_catalog_thumb(e, thumb, sizeof(thumb)) ? thumb : "./img/noimg.png");
-    }
-    sb_append(&sb, b);
-    return host_config_splice(sb_finish(&sb), g_host_type);
-}
-
-// windows[7].switchTab(n): hstTab<n> active, the .hostTb<n> bodies shown
-static void host_switch_tab(const int tab) {
-    for (int i = 0; i < 4; i++) {
-        char id[16], sel[24];
-        snprintf(id, sizeof(id), "hstTab%d", i);
-        HtmlElem t = html_dom_by_id(id);
-        if (!t) continue;
-        html_dom_set_class(t, "bigMenTabA", i == tab);
-        snprintf(sel, sizeof(sel), "#menuWindow .hostTb%d", i);
-        HtmlElem bodies[16];
-        const int n = html_dom_query_all(0, sel, bodies, 16);
-        for (int k = 0; k < n; k++) html_dom_set_class(bodies[k], "hide", i != tab);
-    }
-}
-
-// createPrivateRoom's mode read-back: the first checked hostable #gameMode<id> (Krunker
-// rotates through all checked modes; the offline server plays one). -1 = none checked.
-int ui_host_checked_mode(void) {
-    int total = 0;
-    mode_list(&total);
-    for (int i = 0; i < total; i++) {
-        char id[24];
-        snprintf(id, sizeof(id), "gameMode%d", i);
-        HtmlElem box = mode_hostable(i) ? html_dom_by_id(id) : 0;
-        if (box && html_dom_get_checked(box)) return i;
-    }
-    return -1;
-}
-
-// createPrivateRoom's map read-back: the first checked #gameMap<mapIndex> box (KrunkNative's
-// local server plays one map). Returns its map catalogue index, -1 when none is checked.
-int ui_host_checked_map_index(void) {
-    for (size_t i = 0; i < map_catalog_count(); i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (!e->hostable) continue;
-        char id[24];
-        snprintf(id, sizeof(id), "gameMap%d", e->index);
-        HtmlElem box = html_dom_by_id(id);
-        if (box && html_dom_get_checked(box)) return (int) i;
-    }
-    return -1;
-}
-
-const char *ui_host_checked_map(void) {
-    const int index = ui_host_checked_map_index();
-    return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
 }
 
 // A Popular Now card (v10: openURL("/?play=" + name)): one of our custom games on that map is playMap's;
@@ -4126,10 +3984,10 @@ static void on_host(void *user, const int status, const char *body, const size_t
     cJSON_Delete(res);
 }
 
-// The client no longer hosts (doc/backend.md 8.7): kept for the brain admin flow only,
-// never called by the UI. KRUNKNATIVE_ALLOW_CLIENT_HOST=1 re-enables it for debugging.
+// Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the
+// request's config (the game is created on a server it finds; "Game Created" then the join). 0 when
+// the brain is not available or the request cannot be sent.
 int servers_ui_host_game(const char *config_json) {
-    if (!getenv("KRUNKNATIVE_ALLOW_CLIENT_HOST")) return 0;
     if (backend_available() != 1 || !config_json) return 0;
     if (!g_region[0]) {
         char cached[32] = "";

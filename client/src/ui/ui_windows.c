@@ -11,7 +11,7 @@
 #include <download_ui.h>
 #include <dedicated_server_ui.h> // the Dedicated Server window (KrunkNative, from the Host Game flow)
 #include <seek_prefs.h> // General > Quickplay rows (mm-token)
-#include <host_flow_ui.h> // the Host Game flow (windows[HOST_FLOW_WINDOW])
+#include <host_flow_ui.h> // the Host Game window (windows[8], host_flow_ui.c)
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -516,8 +516,8 @@ static char *gen_settings(void) {
     return sb_finish(&out);
 }
 
-// The Custom Games (windows[9]), Host (windows[7]) and Servers (windows[1]) windows and the
-// host window's read-back (ui_host_checked_*) live in servers_ui.c with the matchmaker client.
+// The Custom Games (windows[9]), Host (windows[7]) and Servers (windows[1]) windows live in servers_ui.c
+// with the matchmaker client; the Host window's markup and read-back are host_flow_ui.c's.
 
 static char *gen_static(const char *key) {
     StrBuf out = {0};
@@ -579,7 +579,6 @@ static char *gen_alt_manager(void) { return alt_manager_window_gen(ALT_MANAGER_W
 static const WindowDef WINDOWS[] = {
     {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
     {OBJECT_MANAGER_WINDOW, gen_object_manager},          // KrunkNative: the Object Manager (object_manager_ui.c)
-    {HOST_FLOW_WINDOW, host_flow_window_gen},             // KrunkNative: the Host Game flow (host_flow_ui.c)
     {ALT_MANAGER_WINDOW, gen_alt_manager},                // KrunkNative: the saved accounts (alt_manager_ui.c)
     {1, gen_settings},
     {3, gen_loadout},

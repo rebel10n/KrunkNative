@@ -13,7 +13,7 @@
 #include <seek_prefs.h> // seek_prefs_handle
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
-#include <host_flow_ui.h>   // the Host Game flow: openHostWindow, selectHostMap, showGames(true)
+#include <host_flow_ui.h>   // the Host Game window: openHostWindow, selectHostMap, showGames(true), Start Game
 #include <game_config.h>    // GAME_HOST_CUSTOM
 #include <cJSON.h>
 #include <map_catalog.h>  // Host Game / Games window maps
@@ -148,9 +148,8 @@ H(h_open_url) {
     return 1;
 }
 
-// openHostWindow(false, type): the chooser's server-type cards (window 42) open the Host Game flow
-// (host_flow_ui.c) at its Map step for that config.hostTypes index. The flow ends at the server_bin
-// command for the dedicated server; practice play on the embedded offline game stays (playMap, knHostOffline).
+// openHostWindow(false, type): the chooser's server-type cards (window 42) open the Host Game window
+// (host_flow_ui.c, v10's host_games) for that config.hostTypes index.
 H(h_open_host_window) {
     UNUSED;
     host_flow_open(arg_int(args, argc, 1, GAME_HOST_CUSTOM));
@@ -212,10 +211,9 @@ void host_catalog_map(const int catalog_index, const int mode) {
 // here the first checked map becomes the selection and the embedded server is started.
 H(h_create_private_room) {
     UNUSED;
-    // createPrivateRoom's checks, in order, into #hostGameMsg: a map (or raw game data),
-    // then at least one mode
-    HtmlElem msg = html_dom_by_id("hostGameMsg");
-    if (ranked_ui_in_ranked()) { // v7: if (config.isComp) custom.host.ranked
+    // v7: if (config.isComp) custom.host.ranked
+    if (ranked_ui_in_ranked()) {
+        HtmlElem msg = html_dom_by_id("hostGameMsg");
         if (msg) {
             char html[256];
             snprintf(html, sizeof(html), "<span class='error'>%s</span>", I18N("custom.host.ranked", "Can't host match while in ranked."));
@@ -223,42 +221,7 @@ H(h_create_private_room) {
         }
         return 1;
     }
-    const int catalog_index = ui_host_checked_map_index();
-    char raw[64] = "";
-    HtmlElem raw_el = html_dom_by_id("rawMapData");
-    if (raw_el) html_dom_get_value(raw_el, raw, sizeof(raw));
-    if (catalog_index < 0 && !raw[0]) {
-        if (msg) {
-            char html[256];
-            snprintf(html, sizeof(html), "<span class='error'>%s</span>", I18N("custom.map.missing", "Select at least one Game or Map"));
-            html_dom_set_html(msg, html);
-        }
-        return 1;
-    }
-    // WP-E: the Game Settings / Advanced / Server rows (ui_host_config.c): at least one mode and
-    // one class, the password length; the request carries the config the game plays with
-    char err[128] = "";
-    cJSON *request = ui_host_config_collect(servers_ui_host_type(), err, sizeof(err));
-    if (!request) {
-        if (msg) {
-            StrBuf sb = {0};
-            sb_append(&sb, "<span class='error'>");
-            sb_append_esc(&sb, err[0] ? err : I18N("kn.host.invalidSettings", "Invalid game settings"));
-            sb_append(&sb, "</span>");
-            char *html = sb_finish(&sb);
-            html_dom_set_html(msg, html);
-            free(html);
-        }
-        return 1;
-    }
-    const int mode = ui_host_checked_mode(); // the offline game plays one mode; -1 (restricted types): keep
-#ifdef LOCAL_GAME_HAVE_HOST_CONFIG
-    local_game_host_config(menu_ui()->client, request, servers_ui_host_type()); // the next round's game config
-#endif
-    cJSON_Delete(request);
-    // No brain /mm/host-game from the client any more (hosting = server_bin): the window
-    // (only reachable from --render-scenario / the console now) starts offline practice.
-    host_catalog_map(catalog_index, mode);
+    host_flow_start(); // the Start Game step: krunker.io's hosting or Box Office servers (host_flow_ui.c)
     return 1;
 }
 
@@ -460,11 +423,11 @@ H(h_client) { (void) user; ui_client_settings_handle(html_ui_current_handler(), 
 // closWind(): UI.toggleWindow(false) (the window's close button / backdrop)
 H(h_close_wind) { UNUSED; menu_toggle_window(0); return 1; }
 // showGames(hostType): windows[9].hostType = hostType || null; showWindow(10). The chooser's Community
-// Games card (showGames(true)) is the Host Game flow's community maps; Custom Games (no argument) browses.
+// Games card (showGames(true)) browses the community maps for the Host Game window; Custom Games browses too.
 H(h_show_games) {
     UNUSED;
     if (arg_bool(ev, args, argc, 0, 0)) {
-        host_flow_open_community();
+        host_flow_browse_community();
         return 1;
     }
     menu_show_window(10, 0);

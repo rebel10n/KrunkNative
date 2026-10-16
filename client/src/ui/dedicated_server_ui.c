@@ -241,7 +241,7 @@ static void quick_start(StrBuf *sb) {
                                           "{2}public_ip{3} (the address players connect to). Every key is explained in {2}server.cfg.example{3}."));
     step(sb, 3, I18N("kn.dserver.quick3", "Run {2}./server_bin{3} in that folder ({2}server_bin.exe{3} on Windows). Or paste the command from "
                                           "Host Game's last step: it carries the map, mode and rules you picked."));
-    step(sb, 4, I18N("kn.dserver.quick4", "Open port {0}" DS_PORT "{1} for TCP and UDP (below), then join from another network: "
+    step(sb, 4, I18N("kn.dserver.quick4", "Open port {0}21015{1} for TCP and UDP (below), then join from another network: "
                                           "Servers, Direct Connect, {2}your-ip:" DS_PORT "{3}."));
     code(sb, "tar -xzf krunknative-server-linux-x86_64.tar.gz\n"
              "cd krunknative-server-linux-x86_64\n"
@@ -258,7 +258,7 @@ static void config_keys(StrBuf *sb) {
                                          "Flags on the command line win over the file."));
     int odd = 0;
     row(sb, odd++ & 1, "hostname", 1, I18N("kn.dserver.cfg.hostname", "The server's name in the server browser."));
-    row(sb, odd++ & 1, "port", 1, I18N("kn.dserver.cfg.port", "Game port, TCP and UDP (default " DS_PORT ")."));
+    row(sb, odd++ & 1, "port", 1, I18N("kn.dserver.cfg.port", "Game port, TCP and UDP (default 21015)."));
     row(sb, odd++ & 1, "public_ip", 1, I18N("kn.dserver.cfg.publicIp", "The address players connect to: your public IP or a domain. Leave it unset only for LAN games."));
     row(sb, odd++ & 1, "maxplayers", 1, I18N("kn.dserver.cfg.maxplayers", "Lobby size (1 to 31, default 8)."));
     row(sb, odd++ & 1, "sv_password", 1, I18N("kn.dserver.cfg.password", "Players need it to join; {2}\"\"{3} = open."));
@@ -266,7 +266,7 @@ static void config_keys(StrBuf *sb) {
     row(sb, odd++ & 1, "mode", 1, I18N("kn.dserver.cfg.mode", "{2}ffa{3}, {2}tdm{3}, {2}ctf{3}, {2}point{3}, ... or {2}rotation{3} (the public rotation)."));
     row(sb, odd++ & 1, "bots / bot_quota", 1, I18N("kn.dserver.cfg.bots", "Keep N bots in the lobby, or fill it up to N players with bots that leave as people join."));
     row(sb, odd++ & 1, "region", 1, I18N("kn.dserver.cfg.region", "Region code shown in the list."));
-    row(sb, odd++ & 1, "finder_url", 1, I18N("kn.dserver.cfg.finder", "{2}" DS_FINDER "{3} lists it in the server browser (below)."));
+    row(sb, odd++ & 1, "finder_url", 1, I18N("kn.dserver.cfg.finder", "{2}https://matchmaker.krunk.io{3} lists it in the server browser (below)."));
     row(sb, odd++ & 1, "online_mode", 1, I18N("kn.dserver.cfg.online", "{2}1{3}: signed-in players are checked with the account service, so names cannot be faked. Guests still join."));
     row(sb, odd++ & 1, "rcon_password", 1, I18N("kn.dserver.cfg.rcon", "With {2}rcon_port{3}: a remote console on 127.0.0.1 ({2}server_bin --rcon{3}). Never forward it."));
     row(sb, odd++ & 1, "game.<setting>", 1, I18N("kn.dserver.cfg.game", "Any Host Game setting, e.g. {2}game.gravMlt 0.5{3}."));
@@ -274,7 +274,7 @@ static void config_keys(StrBuf *sb) {
 
 static void port_forwarding(StrBuf *sb) {
     heading(sb, "knDsPorts", I18N("kn.dserver.ports", "Port forwarding"));
-    para(sb, I18N("kn.dserver.portsIntro", "Players outside your home network reach the server only through port {0}" DS_PORT "{1}, "
+    para(sb, I18N("kn.dserver.portsIntro", "Players outside your home network reach the server only through port {0}21015{1}, "
                                            "{0}TCP and UDP{1}: the game uses both, and the server browser checks the server over UDP."));
     step(sb, 1, I18N("kn.dserver.ports1", "Give the computer a fixed local address: a DHCP reservation in the router (e.g. {2}192.168.1.50{3})."));
     step(sb, 2, I18N("kn.dserver.ports2", "Open the router's page (usually {2}192.168.0.1{3} or {2}192.168.1.1{3}), find Port Forwarding "
@@ -290,9 +290,9 @@ static void port_forwarding(StrBuf *sb) {
 
 static void coordinator(StrBuf *sb) {
     heading(sb, "knDsList", I18N("kn.dserver.list", "Get listed (coordinator)"));
-    step(sb, 1, I18N("kn.dserver.list1", "Add {2}finder_url " DS_FINDER "{3} to {2}cfg/server.cfg{3} and restart. The server sends a "
+    step(sb, 1, I18N("kn.dserver.list1", "Add {2}finder_url https://matchmaker.krunk.io{3} to {2}cfg/server.cfg{3} and restart. The server sends a "
                                          "heartbeat every minute."));
-    step(sb, 2, I18N("kn.dserver.list2", "The coordinator then asks the server for its info over UDP " DS_PORT ". Once it answers, the "
+    step(sb, 2, I18N("kn.dserver.list2", "The coordinator then asks the server for its info over UDP 21015. Once it answers, the "
                                          "server shows under Community Servers in everyone's server browser. No answer (port closed, "
                                          "wrong {2}public_ip{3}): not listed."));
     step(sb, 3, I18N("kn.dserver.list3", "Optional: {2}online_mode 1{3} checks signed-in players with the account service "

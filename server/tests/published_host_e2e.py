@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Published maps hosted by server_bin (server/src/published_maps.c, accounts.c) and picked in the
-Host Game flow (client/src/ui/host_flow_ui.c), against a local kn_brain.
+Host Game window (client/src/ui/host_flow_ui.c: the Select banner, the last step's command), against a local kn_brain.
 
   python3 -I server/tests/published_host_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -164,12 +164,9 @@ CLIENT_SCRIPT = """0 menu
 1700 call selectHostMap "{good}" "" "1" "{account}" 0
 4000 grep @cmd {spec} [id=hostFlowCommand]
 4100 call knHostFlow "go" 0
-4200 call knHostFlow "filter" 2
-5500 grep @card {good} [id=hostFlowStep0] .hostMap
+5500 grep @card {good} [id=hostCMapPickr]
 5600 call knHostFlow "map" "kanji"
-5650 setscroll hostFlowMaps 100000
-5700 clicksel [id=hostFlowStep0] .hostMap
-6000 call knHostFlow "go" 3
+6000 call knHostFlow "go" 4
 6500 grep @cmd2 published:{account}/ [id=hostFlowCommand]
 6600 grep @cmd3 gameserver.maps=kanji [id=hostFlowCommand]
 6700 quit
@@ -250,9 +247,9 @@ def main():
         text = run_client(port, account, token, good, spec)
         playing = script_line(text, "text", "playing")
         check("the client joined A and plays GOOD", playing.endswith("on " + good), playing)
-        check("Games window Host button on GOOD: the Host Game flow opens with it", "selectHostMap: %s -> host flow" % good in text)
+        check("Games window Host button on GOOD: the Host Game window opens with it", "selectHostMap: %s -> host flow" % good in text)
         check("the flow's server command names it (gameserver.maps=%s)" % spec, grep_hits(text, "cmd") == 1, script_line(text, "grep", "cmd"))
-        check("the flow's map step lists GOOD (Community maps)", grep_hits(text, "card") == 1, script_line(text, "grep", "card"))
+        check("the Host window's Select banner names GOOD (the community map)", grep_hits(text, "card") == 1, script_line(text, "grep", "card"))
         check("clicking a published map's card in the map step puts it in the command (not the catalogue map before it)",
               grep_hits(text, "cmd2") == 1 and grep_hits(text, "cmd3") == 0, script_line(text, "grep", "cmd2") + " / " + script_line(text, "grep", "cmd3"))
         stop(a)
