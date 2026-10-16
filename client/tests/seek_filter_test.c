@@ -7,6 +7,8 @@
 #include <flavor.h>
 #include <flavor_rules.h>
 #include <modes.h>
+#include <krunker_maps.h> // KRUNKER_OFFICIAL_MAP_COUNT
+#include <ranked.h>       // ranked_pool_map_name
 #include <stdio.h>
 #include <string.h>
 
@@ -214,6 +216,111 @@ static void test_hosted(void) {
     CHECK(!seek_filter_lobby_ok(&f, MODE_ID_DOM, "Burg", SEEK_LOBBY_HOSTED), "FFA switched on: a hosted Domination lobby is not");
 }
 
+// ---- Quickplay presets (seek_filter.h SeekPreset): the fixed lists, and applying one saves the text the
+// switches would save for the same choice, so the switches show it and a switch after it works as before
+
+static int has_id(const int *list, const int n, const int v) {
+    for (int i = 0; i < n; i++) {
+        if (list[i] == v) return 1;
+    }
+    return 0;
+}
+
+// The saved list after a player flips the switches from the rotation (nothing saved) to `want`: each switch
+// on the rotation and not wanted is turned off, each wanted switch not on the rotation is turned on, every
+// step through seek_filter_toggle as Settings > Quickplay saves it. Returns the count written to out.
+static int flip_from_rotation(const int *rot, const int rot_n, const int *want, const int want_n, int *out) {
+    int saved[SEEK_FILTER_MAX], tmp[SEEK_FILTER_MAX], n = 0;
+    for (int i = 0; i < rot_n; i++) {
+        if (has_id(want, want_n, rot[i])) continue;
+        const int m = seek_filter_toggle(saved, n, rot, rot_n, rot[i], 0, tmp, SEEK_FILTER_MAX);
+        memcpy(saved, tmp, sizeof(int) * (size_t) m);
+        n = m;
+    }
+    // when every switch was turned off above, saved is empty and the toggle reads the rotation again (as the page does)
+    for (int i = 0; i < want_n; i++) {
+        if (has_id(rot, rot_n, want[i])) continue;
+        const int m = seek_filter_toggle(saved, n, rot, rot_n, want[i], 1, tmp, SEEK_FILTER_MAX);
+        memcpy(saved, tmp, sizeof(int) * (size_t) m);
+        n = m;
+    }
+    memcpy(out, saved, sizeof(int) * (size_t) n);
+    return n;
+}
+
+static void test_presets(void) {
+    SeekPresetLists p[SEEK_PRESET_COUNT];
+    char text[512];
+    CHECK(SEEK_PRESET_COUNT == 5, "five presets, %d", SEEK_PRESET_COUNT);
+    CHECK(!seek_preset_lists(SEEK_PRESET_COUNT, &p[0]) && !seek_preset_lists(-1, &p[0]), "an out of range preset has no lists");
+    CHECK(seek_preset_key(SEEK_PRESET_COUNT) == NULL && seek_preset_key(-1) == NULL, "an out of range preset has no key");
+    static const char *const keys[SEEK_PRESET_COUNT] = {"rotation", "team", "ffa", "ranked", "any"};
+    for (int i = 0; i < SEEK_PRESET_COUNT; i++) {
+        CHECK(seek_preset_lists(i, &p[i]), "preset %d has lists", i);
+        CHECK(seek_preset_key(i) && !strcmp(seek_preset_key(i), keys[i]), "preset %d is \"%s\"", i, keys[i]);
+        // every entry in range, ascending, no duplicates
+        for (int k = 0; k < p[i].mode_count; k++) {
+            CHECK(p[i].modes[k] >= 0 && p[i].modes[k] < MODE_COUNT, "%s: mode %d in range", keys[i], p[i].modes[k]);
+            CHECK(k == 0 || p[i].modes[k - 1] < p[i].modes[k], "%s: modes ascending", keys[i]);
+        }
+        for (int k = 0; k < p[i].map_count; k++) {
+            CHECK(p[i].maps[k] >= 0 && p[i].maps[k] < KRUNKER_OFFICIAL_MAP_COUNT, "%s: map %d in range", keys[i], p[i].maps[k]);
+            CHECK(k == 0 || p[i].maps[k - 1] < p[i].maps[k], "%s: maps ascending", keys[i]);
+        }
+    }
+    // the lists the table names (modes.h ids, the Ranked pool of ranked.h)
+    CHECK(p[SEEK_PRESET_ROTATION].mode_count == 0 && p[SEEK_PRESET_ROTATION].map_count == 0, "rotation: both lists empty (the rotation)");
+    seek_filter_list_text(p[SEEK_PRESET_TEAM].modes, p[SEEK_PRESET_TEAM].mode_count, text, sizeof(text));
+    CHECK(!strcmp(text, "1,2,3,19,25,26") && p[SEEK_PRESET_TEAM].map_count == 0, "team: modes \"%s\" (TDM, Hardpoint, CTF, KC, Domination, SDM), rotation maps", text);
+    seek_filter_list_text(p[SEEK_PRESET_FFA].modes, p[SEEK_PRESET_FFA].mode_count, text, sizeof(text));
+    CHECK(!strcmp(text, "0,8,10,13,27,34") && p[SEEK_PRESET_FFA].map_count == 0, "ffa: modes \"%s\" (FFA, LMS, Gun Game, Classic FFA, Kranked, Bighead), rotation maps", text);
+    seek_filter_list_text(p[SEEK_PRESET_RANKED].modes, p[SEEK_PRESET_RANKED].mode_count, text, sizeof(text));
+    CHECK(!strcmp(text, "2") && p[SEEK_PRESET_RANKED].map_count == 7, "ranked: Hardpoint only (\"%s\"), the 7-map Ranked pool", text);
+    for (int k = 0; k < p[SEEK_PRESET_RANKED].map_count; k++) {
+        CHECK(ranked_pool_map_name(p[SEEK_PRESET_RANKED].maps[k]) != NULL, "ranked: map %d is in the Ranked pool", p[SEEK_PRESET_RANKED].maps[k]);
+    }
+    CHECK(p[SEEK_PRESET_ANY].mode_count == MODE_COUNT && p[SEEK_PRESET_ANY].map_count == KRUNKER_OFFICIAL_MAP_COUNT,
+          "any: every mode (%d) and every official map (%d)", p[SEEK_PRESET_ANY].mode_count, p[SEEK_PRESET_ANY].map_count);
+    // the list text: "" for none, the entries that fit otherwise
+    CHECK(seek_filter_list_text(NULL, 0, text, sizeof(text)) == 0 && text[0] == 0, "no entries: \"\" (the rotation)");
+    const int three[] = {1, 2, 3};
+    CHECK(seek_filter_list_text(three, 3, text, 4) == 3 && !strcmp(text, "1,2"), "a list that does not fit keeps the whole entries (\"%s\")", text);
+}
+
+// applying a preset saves what the switches save for the same choice (the same text), for modes and maps
+static void test_presets_match_switches(void) {
+    const int *rot_modes = NULL, *rot_maps = NULL;
+    const int rot_mode_n = (int) flavor_rotation_modes(FLAVOR_BASE, &rot_modes);
+    const int rot_map_n = (int) seek_filter_rotation_maps(&rot_maps);
+    static const char *const keys[SEEK_PRESET_COUNT] = {"rotation", "team", "ffa", "ranked", "any"};
+    for (int i = 0; i < SEEK_PRESET_COUNT; i++) {
+        SeekPresetLists p;
+        seek_preset_lists(i, &p);
+        int flipped[SEEK_FILTER_MAX];
+        char switches[512], preset[512];
+        int n = flip_from_rotation(rot_modes, rot_mode_n, p.modes, p.mode_count, flipped);
+        seek_filter_list_text(flipped, n, switches, sizeof(switches));
+        seek_filter_list_text(p.modes, p.mode_count, preset, sizeof(preset));
+        CHECK(!strcmp(switches, preset), "%s: the switches save modes \"%s\", the preset \"%s\"", keys[i], switches, preset);
+        n = flip_from_rotation(rot_maps, rot_map_n, p.maps, p.map_count, flipped);
+        seek_filter_list_text(flipped, n, switches, sizeof(switches));
+        seek_filter_list_text(p.maps, p.map_count, preset, sizeof(preset));
+        CHECK(!strcmp(switches, preset), "%s: the switches save maps \"%s\", the preset \"%s\"", keys[i], switches, preset);
+        // what the seek then looks for is the same too (the effective lists)
+        int eff_a[SEEK_FILTER_MAX], eff_b[SEEK_FILTER_MAX];
+        const int na = seek_filter_effective(flipped, n, rot_maps, rot_map_n, eff_a, SEEK_FILTER_MAX);
+        const int nb = seek_filter_effective(p.maps, p.map_count, rot_maps, rot_map_n, eff_b, SEEK_FILTER_MAX);
+        CHECK(na == nb && !memcmp(eff_a, eff_b, sizeof(int) * (size_t) na), "%s: the same maps are sought", keys[i]);
+    }
+    // a preset is a starting point: a switch after it still changes the saved list (the team preset plus Parkour)
+    SeekPresetLists team;
+    seek_preset_lists(SEEK_PRESET_TEAM, &team);
+    int out[SEEK_FILTER_MAX], n = seek_filter_toggle(team.modes, team.mode_count, rot_modes, rot_mode_n, MODE_ID_BHOP, 1, out, SEEK_FILTER_MAX);
+    char text[512];
+    seek_filter_list_text(out, n, text, sizeof(text));
+    CHECK(!strcmp(text, "1,2,3,4,19,25,26"), "team preset, then Parkour switched on: \"%s\"", text);
+}
+
 int main(void) {
     test_parse();
     test_rotation_data();
@@ -224,6 +331,8 @@ int main(void) {
     test_flags();
     test_data_query();
     test_hosted();
+    test_presets();
+    test_presets_match_switches();
     if (failures) {
         printf("seek_filter_test: %d failure(s)\n", failures);
         return 1;

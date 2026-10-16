@@ -139,6 +139,32 @@ html.kn-preview-bg #canvas {
   width: 279px;
 }
 
+/* Settings > Quickplay presets (seek_prefs.c presets_html): one row of buttons above the section's folders,
+ * shown with the section folded too. Each button writes its lists; the switches below then show them. */
+.knSeekPresets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 0 10px 0;
+}
+.knSeekPresetsLbl {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 15px;
+  margin: 0 12px 8px 0;
+}
+.knSeekPreset {
+  margin: 0 8px 8px 0;
+  padding: 7px 14px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+.knSeekPreset:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
 /* The Download window (showWindow(25), client/src/ui/download_ui.c): v7's header and
  * description, then KrunkNative's packages: the visitor's platform first (.knDlRec,
  * highlighted), every other platform below (.knDlRow), in the window's dark palette. */

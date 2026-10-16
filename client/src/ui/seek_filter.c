@@ -1,5 +1,8 @@
 // The seek filter's pure core (client/include/seek_filter.h).
 #include <seek_filter.h>
+#include <krunker_maps.h> // KRUNKER_OFFICIAL_MAP_COUNT: the official maps a preset can switch on
+#include <modes.h>        // MODE_ID_*, MODE_COUNT
+#include <ranked.h>       // g_ranked_map_pool: the Ranked map pool
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,4 +132,69 @@ void seek_filter_dq_fields(const SeekFilter *f, char *out, const size_t n) {
     // v10: dsma, then dsmo (v10.js:222051-222055)
     const int len = append_list(out, n, 0, "dsma", f->maps, f->map_count);
     append_list(out, n, len, "dsmo", f->modes, f->mode_count);
+}
+
+size_t seek_filter_list_text(const int *list, const int count, char *out, const size_t n) {
+    if (!out || !n) return 0;
+    out[0] = 0;
+    size_t len = 0;
+    for (int i = 0; list && i < count; i++) {
+        char item[16];
+        const int w = snprintf(item, sizeof(item), "%s%d", i ? "," : "", list[i]);
+        if (w < 0 || len + (size_t) w >= n) break; // out too small: the whole entries that fit
+        memcpy(out + len, item, (size_t) w + 1);
+        len += (size_t) w;
+    }
+    return len;
+}
+
+// The presets. The mode lists are sorted when they are built (seek_preset_lists).
+static const int k_preset_team_modes[] = {MODE_ID_TDM, MODE_ID_POINT, MODE_ID_CTF, MODE_ID_KC, MODE_ID_DOM, MODE_ID_SDM};
+static const int k_preset_ffa_modes[] = {MODE_ID_FFA, MODE_ID_CLAS, MODE_ID_GUN, MODE_ID_LMS, MODE_ID_KRANK, MODE_ID_BHFFA};
+static const int k_preset_ranked_modes[] = {MODE_ID_POINT};
+static const char *const k_preset_keys[SEEK_PRESET_COUNT] = {"rotation", "team", "ffa", "ranked", "any"};
+
+// ascending insertion sort of a preset's list (the lists are short)
+static void sort_ids(int *ids, const int count) {
+    for (int i = 1; i < count; i++) {
+        for (int j = i; j > 0 && ids[j - 1] > ids[j]; j--) {
+            const int t = ids[j - 1];
+            ids[j - 1] = ids[j];
+            ids[j] = t;
+        }
+    }
+}
+
+static void copy_ids(int *out, int *count, const int *src, const int n) {
+    *count = 0;
+    for (int i = 0; i < n && *count < SEEK_FILTER_MAX; i++) out[(*count)++] = src[i];
+    sort_ids(out, *count);
+}
+
+const char *seek_preset_key(const int preset) {
+    return preset >= 0 && preset < SEEK_PRESET_COUNT ? k_preset_keys[preset] : NULL;
+}
+
+int seek_preset_lists(const int preset, SeekPresetLists *out) {
+    if (!out || preset < 0 || preset >= SEEK_PRESET_COUNT) return 0;
+    memset(out, 0, sizeof(*out));
+    switch ((SeekPreset) preset) {
+    case SEEK_PRESET_ROTATION:
+        break; // both lists empty: the rotation
+    case SEEK_PRESET_TEAM:
+        copy_ids(out->modes, &out->mode_count, k_preset_team_modes, (int) (sizeof(k_preset_team_modes) / sizeof(k_preset_team_modes[0])));
+        break;
+    case SEEK_PRESET_FFA:
+        copy_ids(out->modes, &out->mode_count, k_preset_ffa_modes, (int) (sizeof(k_preset_ffa_modes) / sizeof(k_preset_ffa_modes[0])));
+        break;
+    case SEEK_PRESET_RANKED:
+        copy_ids(out->modes, &out->mode_count, k_preset_ranked_modes, (int) (sizeof(k_preset_ranked_modes) / sizeof(k_preset_ranked_modes[0])));
+        copy_ids(out->maps, &out->map_count, g_ranked_map_pool, RANKED_POOL_COUNT);
+        break;
+    case SEEK_PRESET_ANY:
+        for (int i = 0; i < MODE_COUNT && out->mode_count < SEEK_FILTER_MAX; i++) out->modes[out->mode_count++] = i;
+        for (int i = 0; i < KRUNKER_OFFICIAL_MAP_COUNT && out->map_count < SEEK_FILTER_MAX; i++) out->maps[out->map_count++] = i;
+        break;
+    }
+    return 1;
 }

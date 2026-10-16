@@ -87,6 +87,14 @@ def storage(key):
         return None
 
 
+def rect_box(log, label, element):
+    """the `rect @label` line's box of an element id: (x, y, w, h, offsetWidth, offsetHeight), None when not rendered (-)"""
+    m = re.search(r"\[input_script\] rect t=\d+ @" + re.escape(label) + r" .*?" + re.escape(element) + r"=([^ \n]*)", log)
+    if not m or m.group(1) in ("-", ""):
+        return None
+    return tuple(float(v) for v in m.group(1).split(","))
+
+
 def positions(log):
     return [tuple(map(float, m.group(1).split(","))) for m in
             re.finditer(r"\[input_script\] state t=\d+ .*?pos=([-\d.]+,[-\d.]+,[-\d.]+)", log)]
@@ -105,6 +113,9 @@ script1 = """
 900 nodes @qp [id=setHed_quickplay]
 900 nodes @qpmodes [id^=knSeekMode]
 900 text @qpnote [id=knSeekModeNote]
+900 text @qphed [id=setHed_quickplay]
+900 nodes @qpfolded [id=setBod_quickplay][style*="none"]
+900 rect @qprow knSeekPreset0 knSeekPreset4 setBod_quickplay
 1000 clicksel input[onclick*="defaultRegionOnly"]
 1200 text @b0 input[onclick*="defaultRegionOnly"]
 1300 call windows.0.changeTab 1
@@ -180,6 +191,11 @@ check(nodes(log1, "presets") >= 4, f"General's preset boxes ({nodes(log1, 'prese
 check(nodes(log1, "qp") == 1 and nodes(log1, "qpmodes") >= 30, f"basic General: the Quickplay section with its Seek Modes switches ({nodes(log1, 'qpmodes')})")
 check("Krunker's public rotation is on by default: Free for All, Hardpoint, Capture the Flag" in (probe(log1, "qpnote")["text"] or ""),
       "Seek Modes says what the switches start on: Krunker's public rotation")
+check((probe(log1, "qphed")["text"] or "").startswith("keyboard_arrow_right") and nodes(log1, "qpfolded") == 1,
+      f"Quickplay starts folded: chevron right, body hidden ({probe(log1, 'qphed')['text']!r})")
+qprow = rect_box(log1, "qprow", "knSeekPreset0")
+check(qprow is not None and qprow[3] > 0 and rect_box(log1, "qprow", "setBod_quickplay") is None,
+      f"the presets row shows while the section is folded (Team, Krunker rotation boxes: {qprow})")
 check(probe(log1, "b0")["checked"] == 1 and "handler setSetting defaultRegionOnly=true" in log1,
       "basic General: Default Region Only switched on")
 check(probe(log1, "b1")["checked"] == 1 and "[ui] setting showFPS=true" in log1, "basic Display: Show FPS on, applied")
@@ -285,11 +301,13 @@ else:
 # ---------------------------------------------------------------- run 2c: Settings > Quickplay's switches
 # (seek_prefs.c: one switch per mode, in a folder; seek_modes stored as v10 reads it, a comma list.
 # The rotation (0, 2, 3, 19, 25) is on at first; a switch saves the list of the switches on, in order.
-# The Seek Modes folder starts open: no click on its header here (that would collapse it).)
+# The Quickplay section starts folded: the click at its header opens it, the Seek Modes folder is open.)
 script2c = """
 0 menu
 300 call showWindow 1
 800 call windows.0.changeTab 0
+900 setscroll menuWindow 100000
+950 clickid setHed_quickplay
 1000 setscroll menuWindow 1470
 1500 text @trade0 [id=knSeekMode18]
 1550 text @ffa0 [id=knSeekMode0]
@@ -311,6 +329,86 @@ check("[ui] Quickplay seek_modes=0,2,3,18,19,25\n" in log2c and "[ui] Quickplay 
       "Quickplay: each switch saves the list of the switches on (the rotation plus Trade, then Parkour, then no Free for All)")
 saved_modes = json.loads(storage("knSettings") or "{}").get("seek_modes")
 check(saved_modes == "2,3,4,18,19,25", f"Quickplay: seek_modes persisted as v10's comma list ({saved_modes!r})")
+
+# ---------------------------------------------------------------- run 2d: Quickplay's folded section and presets
+# (seek_prefs.c presets_html / apply_preset). A new client on the same settings: the section is folded again
+# (its state is not saved), the presets work while it is folded, the header opens and folds it, and a preset
+# shows its switches. Team = modes 1, 2, 3, 19, 25, 26 on the rotation maps; Competitive = Hardpoint on the
+# Ranked pool (2, 4, 11, 14, 17, 39, 42); Every mode and map = all 37 modes and 46 maps; Krunker rotation = both empty.
+script2d = """
+0 menu
+300 call showWindow 1
+800 call windows.0.changeTab 0
+900 text @hed0 [id=setHed_quickplay]
+900 nodes @folded0 [id=setBod_quickplay][style*="none"]
+900 rect @rect0 knSeekPreset0 setBod_quickplay
+950 setscroll menuWindow 100000
+1000 clickid knSeekPreset1
+1200 text @team1 [id=knSeekMode1]
+1250 text @team0 [id=knSeekMode0]
+1300 text @team19 [id=knSeekMode19]
+1350 text @team4 [id=knSeekMode4]
+1400 text @teammap39 [id=knSeekMap39]
+1420 text @teammap5 [id=knSeekMap5]
+1500 clickid knSeekPreset3
+1700 text @ranked39 [id=knSeekMap39]
+1750 text @ranked0 [id=knSeekMap0]
+1760 text @ranked17 [id=knSeekMap17]
+1800 text @ranked1 [id=knSeekMode1]
+1800 text @ranked2 [id=knSeekMode2]
+1900 clickid knSeekPreset4
+2100 text @any36 [id=knSeekMode36]
+2150 text @any0 [id=knSeekMode0]
+2200 text @any45 [id=knSeekMap45]
+2300 clickid knSeekPreset0
+2500 text @rot0 [id=knSeekMode0]
+2550 text @rot4 [id=knSeekMode4]
+2600 text @rotmap2 [id=knSeekMap2]
+2650 text @rotmap5 [id=knSeekMap5]
+2700 clickid knSeekPreset1
+2900 call knSeekSwitch "seek_modes" 4 1
+3050 text @custom1 [id=knSeekMode1]
+3100 setscroll menuWindow 100000
+3150 clickid setHed_quickplay
+3300 text @hed1 [id=setHed_quickplay]
+3300 nodes @folded1 [id=setBod_quickplay][style*="none"]
+3300 rect @rect1 setBod_quickplay knSeekMode4
+3350 setscroll menuWindow 200
+3400 clickid setHed_quickplay
+3600 text @hed2 [id=setHed_quickplay]
+3600 nodes @folded2 [id=setBod_quickplay][style*="none"]
+3700 quit
+"""
+log2d = run("run2d", script2d)
+check((probe(log2d, "hed0")["text"] or "").startswith("keyboard_arrow_right") and nodes(log2d, "folded0") == 1,
+      "a new client on the same settings: Quickplay starts folded again (not saved)")
+check(rect_box(log2d, "rect0", "knSeekPreset0") is not None and rect_box(log2d, "rect0", "setBod_quickplay") is None,
+      "folded: the presets row is shown, the switches are not")
+check(probe(log2d, "team1")["checked"] == 1 and probe(log2d, "team0")["checked"] == 0 and probe(log2d, "team19")["checked"] == 1
+      and probe(log2d, "team4")["checked"] == 0, "Team preset: Team Deathmatch, Hardpoint, Kill Confirmed on; Free for All and Parkour off")
+check(probe(log2d, "teammap5")["checked"] == 0 and probe(log2d, "teammap39")["checked"] == 1,
+      "Team preset: the maps stay the rotation (Eterno Simulator, in it, on; Shipment, not in it, off)")
+check("[ui] Quickplay seek_modes=1,2,3,19,25,26\n" in log2d and "[ui] Quickplay seek_maps=(none: the public rotation)\n" in log2d,
+      "Team preset saves seek_modes 1,2,3,19,25,26 and the rotation maps, as the switches would")
+check(probe(log2d, "ranked39")["checked"] == 1 and probe(log2d, "ranked17")["checked"] == 1 and probe(log2d, "ranked0")["checked"] == 0
+      and probe(log2d, "ranked1")["checked"] == 0 and probe(log2d, "ranked2")["checked"] == 1,
+      "Competitive: Hardpoint and the Ranked pool (Bureau, Eterno Simulator) on; Burg (the rotation) and Team Deathmatch off")
+check("[ui] Quickplay seek_maps=2,4,11,14,17,39,42\n" in log2d and "[ui] Quickplay seek_modes=2\n" in log2d,
+      "Competitive saves seek_modes 2 and the Ranked pool 2,4,11,14,17,39,42")
+check(probe(log2d, "any36")["checked"] == 1 and probe(log2d, "any0")["checked"] == 1 and probe(log2d, "any45")["checked"] == 1,
+      "Every mode and map: the last mode, the first mode and the last map are on")
+check(probe(log2d, "rot0")["checked"] == 1 and probe(log2d, "rot4")["checked"] == 0 and probe(log2d, "rotmap2")["checked"] == 1
+      and probe(log2d, "rotmap5")["checked"] == 0, "Krunker rotation: the rotation switches on again, Parkour and Shipment off")
+check("[ui] Quickplay seek_modes=(none: the public rotation)\n" in log2d, "Krunker rotation saves the empty list (the rotation)")
+check(probe(log2d, "custom1")["checked"] == 1, "after the Team preset, its switches still show it (Hardpoint on)")
+saved_d = json.loads(storage("knSettings") or "{}")
+check(saved_d.get("seek_modes") == "1,2,3,4,19,25,26" and saved_d.get("seek_maps") in (None, ""),
+      f"a switch after the Team preset saves the list with Parkour (seek_modes {saved_d.get('seek_modes')!r})")
+check((probe(log2d, "hed1")["text"] or "").startswith("keyboard_arrow_down") and nodes(log2d, "folded1") == 0,
+      "the header opens the section: chevron down, body shown")
+check((rect_box(log2d, "rect1", "setBod_quickplay") or (0, 0, 0, 0, 0, 0))[5] > 0, "opened: the body is rendered (its switches with it)")
+check((probe(log2d, "hed2")["text"] or "").startswith("keyboard_arrow_right") and nodes(log2d, "folded2") == 1,
+      "the header folds it again")
 
 # ---------------------------------------------------------------- run 3: Reset
 script3 = """

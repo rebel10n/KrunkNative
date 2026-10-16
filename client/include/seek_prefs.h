@@ -14,6 +14,9 @@
 // Parkour map or a custom game by default. The lobby-list picks (krunker_lobbies_pick, krunker_net's
 // Find New Game list) and the server browser apply the same lists here.
 //
+// The Quickplay section starts folded (its header opens it; the state is not saved), with a row of presets
+// above it (SeekPreset, seek_filter.h): each saves the lists its switches would save, then shows them.
+//
 // Plus the server type of the native client: Box Office servers, the official krunker.io lobbies
 // (krunker_lobbies.h) or both, ours first. The server type only picks what Quick Match / F4 seek
 // into: the native server browser always lists both. The web build always seeks our servers and

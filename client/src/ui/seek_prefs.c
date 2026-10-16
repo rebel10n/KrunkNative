@@ -307,11 +307,61 @@ static void pool_note(char *out, const size_t n) {
              1, I18N_ARGV(names));
 }
 
+// The presets (seek_filter.h SeekPreset): one button each, above the folded section (always shown). A
+// button writes its lists (knSeekPreset, below); its title names what it switches on.
+static const char *preset_name(const int preset) {
+    switch (preset) {
+    case SEEK_PRESET_ROTATION: return I18N("kn.quickplay.preset.rotation", "Krunker rotation");
+    case SEEK_PRESET_TEAM: return I18N("kn.quickplay.preset.team", "Team modes");
+    case SEEK_PRESET_FFA: return I18N("kn.quickplay.preset.ffa", "Free for All");
+    case SEEK_PRESET_RANKED: return I18N("kn.quickplay.preset.ranked", "Competitive");
+    case SEEK_PRESET_ANY: return I18N("kn.quickplay.preset.any", "Every mode and map");
+    default: return "";
+    }
+}
+
+static const char *preset_info(const int preset) {
+    switch (preset) {
+    case SEEK_PRESET_ROTATION:
+        return I18N("kn.quickplay.preset.rotation.info", "Krunker's public rotation of modes and maps: what Quick Play seeks with every switch off");
+    case SEEK_PRESET_TEAM:
+        return I18N("kn.quickplay.preset.team.info", "Team Deathmatch, Hardpoint, Capture the Flag, Kill Confirmed, Domination and Squad Deathmatch, on the rotation maps");
+    case SEEK_PRESET_FFA:
+        return I18N("kn.quickplay.preset.ffa.info", "Free for All, Classic FFA, Gun Game, Last Man Standing, Kranked FFA and Bighead FFA, on the rotation maps");
+    case SEEK_PRESET_RANKED:
+        return I18N("kn.quickplay.preset.ranked.info", "Hardpoint, the mode of Ranked, on the Ranked map pool: Sandstorm, Undergrowth, Industry, Site, Bureau, Eterno Simulator and Frontier");
+    case SEEK_PRESET_ANY:
+        return I18N("kn.quickplay.preset.any.info", "Every mode and every official map: any public lobby");
+    default:
+        return "";
+    }
+}
+
+static void presets_html(StrBuf *sb) {
+    sb_append(sb, "<div class=\"knSeekPresets\"><span class=\"knSeekPresetsLbl\">");
+    sb_append_esc(sb, I18N("kn.quickplay.presets", "Presets"));
+    sb_append(sb, "</span>");
+    for (int i = 0; i < SEEK_PRESET_COUNT; i++) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "<div class=\"knSeekPreset\" id=\"knSeekPreset%d\" onclick=\"knSeekPreset(%d)\" title=\"", i, i);
+        sb_append(sb, buf);
+        sb_append_esc(sb, preset_info(i));
+        sb_append(sb, "\">");
+        sb_append_esc(sb, preset_name(i));
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div>");
+}
+
+// The section: its header (a chevron, collapsed by default; collapseFolder toggles the body; the state is
+// the page's, never saved), the presets row, then the body with the switches
 static void section_html(StrBuf *sb, const int server_rows) {
     sb_append(sb, "<div class=\"setHed\" id=\"setHed_quickplay\" onclick=\"window.windows[0].collapseFolder(this)\">"
-                  "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ");
+                  "<span class=\"material-icons plusOrMinus\">keyboard_arrow_right</span> ");
     sb_append_esc(sb, I18N("kn.quickplay.header", "Quickplay"));
-    sb_append(sb, "</div><div class=\"setBodH\" id=\"setBod_quickplay\">");
+    sb_append(sb, "</div>");
+    presets_html(sb);
+    sb_append(sb, "<div class=\"setBodH\" id=\"setBod_quickplay\" style=\"display:none\">");
 #ifndef __EMSCRIPTEN__
     if (server_rows) {
         server_type_html(sb);
@@ -329,6 +379,14 @@ static void section_html(StrBuf *sb, const int server_rows) {
     sb_append(sb, "</div>");
 }
 
+// Saves one of the lists as the switches write it ("" = none: the rotation)
+static void save_list(const char *key, const int *list, const int count) {
+    char text[512] = "";
+    seek_filter_list_text(list, count, text, sizeof(text));
+    printf("[ui] Quickplay %s=%s\n", key, text[0] ? text : "(none: the public rotation)");
+    ui_settings_set_string(key, text);
+}
+
 // knSeekSwitch(key, index, checked): the saved list with that switch flipped (the rotation when none
 // was switched on), ascending, saved as a comma list ("" when every switch is off: the rotation is sought)
 static void save_switch(const char *key, const int maps, const int index, const int checked) {
@@ -336,14 +394,47 @@ static void save_switch(const char *key, const int maps, const int index, const 
     const int on_count = saved_list(key, on, SEEK_FILTER_MAX, maps ? map_valid : mode_valid);
     const int def_count = maps ? rotation_maps(def, SEEK_FILTER_MAX) : rotation_modes(def, SEEK_FILTER_MAX);
     const int n = seek_filter_toggle(on, on_count, def, def_count, index, checked, out, SEEK_FILTER_MAX);
-    char list[1024] = "";
-    int len = 0;
-    for (int i = 0; i < n && (size_t) len < sizeof(list); i++) len += snprintf(list + len, sizeof(list) - (size_t) len, "%s%d", i ? "," : "", out[i]);
-    printf("[ui] Quickplay %s=%s\n", key, list[0] ? list : "(none: the public rotation)");
-    ui_settings_set_string(key, list);
+    save_list(key, out, n);
+}
+
+// One switch's checkbox shows `on` (the page's element; none when the page has no such row)
+static void set_switch(const int maps, const int index, const int on) {
+    char id[32];
+    snprintf(id, sizeof(id), "%s%d", maps ? "knSeekMap" : "knSeekMode", index);
+    const HtmlElem el = html_dom_by_id(id);
+    if (el) html_dom_set_checked(el, on);
+}
+
+// knSeekPreset(n): the preset's lists saved as the switches save them (its entries this flavor plays only),
+// then every switch shown to match the effective lists (the rotation when none is on)
+static void apply_preset(const int preset) {
+    SeekPresetLists p;
+    if (!seek_preset_lists(preset, &p)) return;
+    int modes[SEEK_FILTER_MAX], maps[SEEK_FILTER_MAX], mode_n = 0, map_n = 0;
+    for (int i = 0; i < p.mode_count; i++) {
+        if (mode_valid(p.modes[i])) modes[mode_n++] = p.modes[i];
+    }
+    for (int i = 0; i < p.map_count; i++) {
+        if (map_valid(p.maps[i])) maps[map_n++] = p.maps[i];
+    }
+    save_list(SEEK_MODES_KEY, modes, mode_n);
+    save_list(SEEK_MAPS_KEY, maps, map_n);
+    SeekFilter f;
+    current_filter(&f);
+    for (int i = 0; i < MODE_COUNT; i++) {
+        if (mode_valid(i)) set_switch(0, i, list_contains(f.modes, f.mode_count, i));
+    }
+    for (int i = 0; i < KRUNKER_OFFICIAL_MAP_COUNT; i++) {
+        if (map_valid(i)) set_switch(1, i, list_contains(f.maps, f.map_count, i));
+    }
 }
 
 int seek_prefs_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    if (name && !strcmp(name, "knSeekPreset")) { // knSeekPreset(n): n = the preset's index (seek_filter.h)
+        const double n = argc >= 1 ? args[0].num : -1.0;
+        if (n >= 0 && n < SEEK_PRESET_COUNT && n == (double) (int) n) apply_preset((int) n);
+        return 1;
+    }
     if (!name || strcmp(name, "knSeekSwitch")) return -1;
     if (argc < 3 || args[0].kind != HTML_ARG_STR || !args[0].str) return 1;
     const char *key = args[0].str;

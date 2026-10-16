@@ -209,6 +209,21 @@ the General tab in both views (the basic view also gets Server Type / krunker.io
 v10's own "Server Browser & Matchmaking" folder; `--render-scenario` leaves the basic view's rows out,
 so uidiff still compares v10's tab):
 
+* **Folded, with presets** (KrunkNative): the Quickplay header starts folded (chevron right; `collapseFolder`
+  shows the body). The state is the page's, not saved, so each opening of the menu starts folded. Above the
+  body, always shown, a row of presets (`knSeekPreset(n)`, `SeekPreset` in `seek_filter.h`), each saving the
+  lists its switches would save (the same text, `save_list`) and setting the switches to match; a switch
+  can still be changed after it:
+  * Krunker rotation: both lists empty, the default (every switch off).
+  * Team modes: Team Deathmatch, Hardpoint, Capture the Flag, Kill Confirmed, Domination, Squad Deathmatch
+    (modes 1, 2, 3, 19, 25, 26) on the rotation maps.
+  * Free for All: Free for All, Classic FFA, Gun Game, Last Man Standing, Kranked FFA, Bighead FFA (modes
+    0, 13, 10, 8, 27, 34) on the rotation maps.
+  * Competitive: Hardpoint, the mode of Ranked, on the Ranked map pool (`g_ranked_map_pool`: maps 2, 4, 11,
+    14, 17, 39, 42).
+  * Every mode and map: all 37 modes and all 46 official maps.
+  Unit test `seek_filter_test` (the table; a preset's text equals the switches' text for the same choice);
+  e2e `v10_settings_e2e.py` run 2d (folded at start, the presets, the header).
 * **One switch per mode and per map**: Seek Modes (a folder, open at first) and Seek Maps (closed), each
   row a `label.switch` like Settings > General's own switches, under a `setHed` folder (collapseFolder).
   A switch click saves the switches that are on, in order, as v10 reads them (`"0,2,3,18,19,25"`;
