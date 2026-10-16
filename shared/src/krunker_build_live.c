@@ -82,6 +82,8 @@ static const int REQUIRED_C2S[] = {
     // KILL_STREAK_0 + slot), map triggers, the connection data
     KRUNKER_C2S_INTERACT, KRUNKER_C2S_SECONDARY_INTERACT, KRUNKER_C2S_DROP_WEAPON, KRUNKER_C2S_KILL_STREAK_0,
     KRUNKER_C2S_KILL_STREAK_1, KRUNKER_C2S_KILL_STREAK_2, KRUNKER_C2S_CUSTOM_TRIGGER_INTERACTION, KRUNKER_C2S_SYNC_CONNECTION_DATA,
+    // a private lobby's password (official-ingame-lobby): without it a coded lobby cannot be joined
+    KRUNKER_C2S_CODE,
 };
 static const int REQUIRED_S2C[] = {
     KRUNKER_S2C_ACCOUNT_RESPONSE, KRUNKER_S2C_ADD_CHAT, KRUNKER_S2C_ADD_PLAYERS, KRUNKER_S2C_CHANGE_HEALTH,
@@ -112,6 +114,8 @@ static const int REQUIRED_S2C[] = {
     KRUNKER_S2C_UPDATE_POWER_UP, KRUNKER_S2C_SET_HIDDEN,
     // whether we can enter again after a refused "en" (official-ingame-social)
     KRUNKER_S2C_FAILED_TO_ENDER,
+    // a private lobby asks for its password and lets us in (official-ingame-lobby)
+    KRUNKER_S2C_ENTER_CODE, KRUNKER_S2C_CODE_PASSED,
 };
 // (-1 ends each list; the parser never needs them, they document the choice and satisfy the check)
 static const int OPTIONAL_C2S[] = {
@@ -142,6 +146,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_VOICE_CHAT,
     // the Stalker banner (official-ingame-popups)
     KRUNKER_S2C_STALKER_PICKED,
+    // the password popup's "Submit - Ns" countdown (official-ingame-lobby)
+    KRUNKER_S2C_UPDATE_CODE_TIMER,
     -1,
 };
 static const int REQUIRED_ADD[] = {

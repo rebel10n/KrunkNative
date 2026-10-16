@@ -113,7 +113,8 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
         "--voice": "voice", "--popups": "popups", "--state": "state",
-        "--webvoice": "webvoice"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--webvoice": "webvoice",
+        "--lobbyui": "lobbyui"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -434,6 +435,8 @@ class Stub:
         self.isn_restart = 0      # rounds: our respawn after Switching Sides: the client's next "q" may restart its isn
         self.k_paused = False     # rounds: no "k" while the server has every player inactive (Switching Sides)
         self.ended = False        # hud: "end" went out: the clock frames carry state 1 ("Next Round in")
+        self.end_state = None     # lobbyui: the state an ended round's clock frames carry instead (2 Match Over, 3 Abandoned)
+        self.code_sent = []       # lobbyui: the passwords the client sent ("code" frames)
         self.http_log = []      # (path, query list)
         self.ws_paths = []
         self.frames = []        # (name, args, ah) from the client
@@ -598,7 +601,7 @@ class Stub:
                 if fmt != last_fmt:
                     last_fmt = fmt
                     self.timer_sent.append(remain)
-                    await send("t", fmt, 1 if self.ended else 0, remain)
+                    await send("t", fmt, (self.end_state or 1) if self.ended else 0, remain)
                 n += 1
                 if n % 10 == 0:
                     await send("pi")
@@ -656,6 +659,19 @@ class Stub:
         rd = asyncio.ensure_future(reader_safe())
         try:
             await send("io-init", "sockME")
+            if self.scenario == "lobbyui":  # a private lobby: ENTER_CODE, our "code", the Submit countdown, CODE_PASSED
+                self.sent["code"] = time.monotonic()
+                await send("code")
+                for _ in range(300):
+                    self.code_sent = [f[1][0] for f in self.frames if f[0] == "code" and f[1]]
+                    if self.code_sent or stop.is_set():
+                        break
+                    await asyncio.sleep(0.1)
+                await send("codeT", 3)
+                await asyncio.sleep(1.5)
+                if self.code_sent and self.code_sent[-1] == LOBBY_CODE:
+                    self.sent["codeP"] = time.monotonic()
+                    await send("codeP")
             await send("load")
             for _ in range(150):
                 if any(f[0] == "load" for f in self.frames):
@@ -729,6 +745,10 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 0.0, 20.0, team=1))
                 await self.rounds_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "lobbyui":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await self.lobbyui_phases(send, stop)
             elif self.got_en.is_set() and self.scenario == "popups":
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -980,6 +1000,34 @@ class Stub:
                                            BOT_SID, ["StubBot", "StubBot"], 90, 1, 5, 0, 120, "NONE"],
                                     "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 2}, 1, 3, 12, None, {})
         await hold(10.0)
+        self.sent["done"] = time.monotonic()
+
+    async def lobbyui_phases(self, send, stop):
+        """official-ingame-lobby (run_native_lobbyui): a server line in its own colour, a player line with its
+        nameColor, then the end of the match whose clock says "MATCH OVER" (state 2), then "MATCH ABANDONED" (3).
+        An "l" every 0.4 s keeps us at 4, 0, 4."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(2.5)
+        self.sent["chat"] = time.monotonic()
+        await send("ch", -1, None, "server green", 2, "#00ff00")                     # a server line in its colour
+        await send("ch", -1, "Vip", "gold name", 0, None, "#ffd700", 0)             # a player line, its name in nameColor
+        await hold(2.0)
+        self.sent["end"] = time.monotonic()
+        self.end_state = 2
+        self.ended = True
+        await send("end", 0, True, {"ed": [MY_SID, ["Guest_9", "Guest_9"], 10, 1, 0, "NONE", BOT_SID, ["StubBot", "StubBot"], 40, 2, 1, "NONE"],
+                                    "tms": None, "mdls": [], "mts": [], "vo": {}, "modeIndex": 0}, -1, 1, 0, None, {})
+        await hold(4.0)
+        self.sent["aband"] = time.monotonic()
+        self.end_state = 3
+        await hold(4.0)
         self.sent["done"] = time.monotonic()
 
     async def popups_phases(self, send, stop):
@@ -2003,6 +2051,61 @@ def run_native_rounds():
     endtab = probe("endtab")
     check(f"{label}: \"end\": the row of a player who left (Gone31) and Hardpoint's dmg (812 / 377)",
           any("Gone31" in t and "812" in t and "377" in t for t in endtab), endtab[-1:])
+
+
+LOBBY_CODE = "secret42"  # run_native_lobbyui: the private lobby's password
+
+
+def run_native_lobbyui():
+    """official-ingame-lobby: a private official lobby asks for its password (v10's gameCode() popup:
+    "code", our "code" [value], "codeT" -> "Submit - 3s", "codeP" clears it), then a coloured server line and a
+    player line in its nameColor, then the end screen's clock: "MATCH OVER" (state 2), "MATCH ABANDONED" (3)."""
+    label = "native-lobbyui"
+    dense = ["vis @pop genericPop", "text @btn [id=confirmBtn]"]
+    probes = "".join("%d %s\n" % (t + k, kind) for t in range(2000, 9000, 300) for k, kind in enumerate(dense))
+    # the probe engine's [attr='...'] does not match a value with "#" in it: the colours by substring
+    late = ["text @endtimer [id=endTimer]", "nodes @srv [style*='00ff00']", "nodes @nc [style*='ffd700']",
+            "grep @gold gold [id=chatList]", "grep @green green [id=chatList]", "vis @end endUI"]
+    probes += "".join("%d %s\n" % (t + k, kind) for t in range(10000, 23000, 500) for k, kind in enumerate(late))
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n"
+              "4400 clickid codeInput\n4500 type %s\n4700 clickid confirmBtn\n8000 play\n%s23500 quit\n") % (PASTE_TOKEN, LOBBY_CODE, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    store = os.path.join(WORK, label + "-cfg", "krunknative")  # Show Player Messages on (v10's default off)
+    os.makedirs(store, exist_ok=True)
+    with open(os.path.join(store, "knSettings.json"), "w") as f:
+        json.dump({"showMessages": True}, f)
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="lobbyui")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    for name in ("code", "codeP", "chat", "end", "aband", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    vis = re.findall(r"\[input_script\] vis t=(\d+) @pop genericPop=(\d)", text)
+    check(f"{label}: \"code\": v10's password popup shows", any(v == "1" for _, v in vis), vis[:3])
+    check(f"{label}: Submit sends [\"code\", the typed password]", stub.code_sent[-1:] == [LOBBY_CODE], stub.code_sent)
+    btn = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @btn n=1 checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: \"codeT\": Submit - 3s", "Submit - 3s" in btn, sorted(set(btn)))
+    shown = [int(t) for t, v in vis if v == "1"]
+    hidden_after = [int(t) for t, v in vis if v == "0" and shown and int(t) > max(shown)]
+    check(f"{label}: \"codeP\": the popup goes (clearPops)", shown and hidden_after, vis[-3:])
+    check(f"{label}: the game went on after the password (joined)", f"joined as sid {MY_SID}" in text)
+
+    def nodes(name):
+        return [int(m.group(1)) for m in re.finditer(r"\[input_script\] nodes t=\d+ @%s elements=\d+ match=(\d+)" % name, text)]
+
+    def grep(name):
+        return [int(m.group(1)) for m in re.finditer(r"\[input_script\] grep t=\d+ @%s needle=\S+ n=\d+ hits=(\d+)" % name, text)]
+
+    check(f"{label}: \"ch\" kind 2: the line in its own colour", max(grep("green") or [0]) >= 1 and max(nodes("srv") or [0]) >= 1,
+          (grep("green")[-2:], nodes("srv")[-2:]))
+    check(f"{label}: \"ch\" kind 0: the name in its nameColor", max(grep("gold") or [0]) >= 1 and max(nodes("nc") or [0]) >= 1,
+          (grep("gold")[-2:], nodes("nc")[-2:]))
+    timers = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @endtimer n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: \"t\" state 2: #endTimer MATCH OVER", "MATCH OVER" in timers, sorted(set(timers)))
+    check(f"{label}: \"t\" state 3: #endTimer MATCH ABANDONED", "MATCH ABANDONED" in timers, sorted(set(timers)))
+    # (before the first state-2 "t" the END's own placeholder countdown shows: v10 leaves #endTimer as it was)
+    after = timers[timers.index("MATCH OVER"):] if "MATCH OVER" in timers else []
+    check(f"{label}: once state 2 / 3 came, never a \"Next Round in\"", after and not any(t.startswith("Next Round in") for t in after), sorted(set(after)))
 
 
 def run_native_popups():
@@ -3476,6 +3579,7 @@ def main():
         run_native_social()
         run_native_voice()
         run_native_popups()
+        run_native_lobbyui()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -3511,6 +3615,8 @@ def main():
         run_native_voice()
     if ONLY == "popups" and os.path.isfile(f"{BUILD}/client_bin"):  # just the text popups / countdown run
         run_native_popups()
+    if ONLY == "lobbyui" and os.path.isfile(f"{BUILD}/client_bin"):  # just the official lobby UI's run (clock, password, chat colours)
+        run_native_lobbyui()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

@@ -440,7 +440,14 @@ static void hud_chat_row_html(const char *name, const char *msg, const char *col
     hb_append(out, size, &len, ">");
     if (name && name[0]) {
         char shown[PLAYER_NAME_SIZE];
+        // a named line's colour is its name's (v10 addChat kind 0: nameColor wraps the sender)
+        if (color && color[0]) {
+            hb_append(out, size, &len, "<span style='color:");
+            hb_append_escaped(out, size, &len, color);
+            hb_append(out, size, &len, "'>");
+        }
         hb_append_fixed(out, size, &len, streamer_name(name, shown, sizeof(shown))); // addChat: scrambleS(sender) in streamer mode
+        if (color && color[0]) hb_append(out, size, &len, "</span>");
         hb_append(out, size, &len, ": <span class='chatMsg'>");
     } else if (color && color[0]) {
         hb_append(out, size, &len, "<span class='chatMsg' style='color:");
@@ -2308,6 +2315,11 @@ void hud_ui_add_player_chat(const char *name, const char *msg, const int human) 
 }
 
 // io_addChat(channel, ...) of a v7 "ch": the channel is forced to -1 outside team modes.
+void hud_ui_add_chat_line_on(const char *msg, const char *color, const int channel) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    hud_add_chat_row_on(NULL, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, "line");
+}
+
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     if (human && !client_render_settings()->show_messages) return;
@@ -2751,6 +2763,22 @@ static const Weapon *hud_weapon_by_name(const Game *game, const char *name);
 
 static int g_end_result;        // io_gameEnd: 1 victory, 0 defeat, -1 draw
 static char g_end_timer[32];    // "Next Round in <time>" (i18n timer.end)
+static int g_end_clock_state;    // an official "t" state (hud_ui_set_end_clock_state): 2 Match Over, 3 Match Abandoned, else 0
+
+// #endTimer: "Next Round in <time>", or v10's "t" state 2 / 3 text (generic.matchover / matchaband, :220235)
+static void hud_end_timer_text(void) {
+    char text[128];
+    if (g_end_clock_state == 2) I18N_F(text, "generic.matchover", "MATCH OVER");
+    else if (g_end_clock_state == 3) I18N_F(text, "generic.matchaband", "MATCH ABANDONED");
+    else if (g_end_timer[0]) I18N_F(text, "timer.end", "Next Round in {0}", g_end_timer);
+    else return;
+    dom_text("endTimer", text);
+}
+
+void hud_ui_set_end_clock_state(const int state) {
+    g_end_clock_state = state == 2 || state == 3 ? state : 0;
+    if (html_ui_available() && html_ui_is_ready() && (g_end_clock_state || g_end_timer[0])) hud_end_timer_text();
+}
 
 // UI.toggleGameUI(j) (v7 src/libs/UI.js) while not spectating: the holders the death screen
 // swaps out (j = false) and back (j = true).
@@ -3054,11 +3082,7 @@ static void hud_end_screen_dom(const int start) {
         html_dom_set_display(sub, g_hud_ui.end_phase == 2 ? "" : "none");
     }
     if (g_hud_ui.end_phase == 2) dom_display("endInfo", "block");
-    if (g_end_timer[0]) {
-        char text[128];
-        I18N_F(text, "timer.end", "Next Round in {0}", g_end_timer);
-        dom_text("endTimer", text);
-    }
+    hud_end_timer_text();
     hud_hide_crosshair();
     hud_hide_hit();
     hud_dmg_hide_all();
@@ -3534,9 +3558,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
         return;
     }
-    char text[128];
-    I18N_F(text, "timer.end", "Next Round in {0}", g_end_timer);
-    dom_text("endTimer", text);
+    hud_end_timer_text();
 }
 
 // 1 while the end screen shows its clickable results (Krunker frees the pointer at
@@ -3587,6 +3609,7 @@ void hud_ui_hide_end_screen(Client *client) {
     ui->end_phase = 0;
     if (client) client_pointer_update(client); // the next round: locked again unless the menu is up
     g_end_timer[0] = 0;
+    g_end_clock_state = 0;
     // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
     memset(&g_end_medals, 0, sizeof(g_end_medals));
     g_end_skin_count = 0;

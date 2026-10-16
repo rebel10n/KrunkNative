@@ -612,32 +612,41 @@ static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
 }
 
 // "ch" ADD_CHAT [team, name, text, kind, color, nameColor, senderAccountId, extra] (game.deob.js:221172):
-// kind 0 player line, 1 / 4 game line, 2 server line (color), 3 trade request (text = the sender's
-// sid). A player line goes out as our v7 chat (NET_PACKET_CHAT_V7): arg 0 is its chat tab (0 global,
-// 1 team; the HUD forces -1 outside team modes, as addChat does) and arg 6 the account the mute list
-// checks. Not carried: a server line's own colour (the HUD's #fc03ec default), nameColor, extra actions.
+// kind 0 player line, 1 / 4 game line, 2 server line (color), 3 trade request (text = the sender's sid,
+// not shown). Every line goes out as NET_EXT_KN_OFFICIAL_CHAT: its tab (arg 0), a server line's colour,
+// a player name's nameColor and the sender's account (the mute list). Not carried: extra.actions.
+static void emit_hud_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length); // below
+
+// addChat's tab (iíïíííï: `team || 0`, -1 outside team modes, which the HUD applies): 1 team, -1 every tab, else 0
+static int8_t chat_channel(const KrunkerValue *team) {
+    const double t = num(team, 0);
+    return (int8_t) (t == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : t < 0 ? CHAT_CHANNEL_ALL : CHAT_CHANNEL_GLOBAL);
+}
+
 static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     const char *text = krunker_str(arg(f, 2));
     const int kind = (int) num(arg(f, 3), 0);
     if (!text || kind == 3) return;
-    NetChatPacket c;
-    memset(&c, 0, sizeof(c));
-    c.uid = -1;
-    c.kind = kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME;
+    NetOfficialChatHeader h;
+    memset(&h, 0, sizeof(h));
+    h.channel = chat_channel(arg(f, 0));
+    h.kind = (uint8_t) (kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME);
+    h.account_id = (int32_t) num(arg(f, 6), 0);
+    const char *color = krunker_str(arg(f, 4)), *name_color = krunker_str(arg(f, 5));
+    if (color) snprintf(h.color, sizeof(h.color), "%s", color);
+    if (name_color) snprintf(h.name_color, sizeof(h.name_color), "%s", name_color);
     const char *name = krunker_str(arg(f, 1));
-    snprintf(c.name, sizeof(c.name), "%s", name ? name : "");
-    snprintf(c.text, sizeof(c.text), "%s", text);
-    if (kind == 0) {
-        NetChatV7Packet v;
-        memset(&v, 0, sizeof(v));
-        const double team = num(arg(f, 0), 0);
-        v.channel = (int8_t) (team == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : team < 0 ? CHAT_CHANNEL_ALL : CHAT_CHANNEL_GLOBAL);
-        v.account_id = (int32_t) num(arg(f, 6), 0);
-        v.chat = c;
-        emit(l, NET_PACKET_CHAT_V7, &v, sizeof(v));
-        return;
-    }
-    emit(l, NET_PACKET_CHAT, &c, sizeof(c));
+    if (!name) name = "";
+    uint8_t body[NET_EXT_BODY_MAX];
+    const size_t nl = strlen(name) + 1;
+    size_t tl = strlen(text) + 1;
+    if (sizeof(h) + nl + 1 > sizeof(body)) return;
+    if (sizeof(h) + nl + tl > sizeof(body)) tl = sizeof(body) - sizeof(h) - nl; // cut the text, keep it terminated
+    memcpy(body, &h, sizeof(h));
+    memcpy(body + sizeof(h), name, nl);
+    memcpy(body + sizeof(h) + nl, text, tl);
+    body[sizeof(h) + nl + tl - 1] = 0;
+    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CHAT, body, (uint16_t) (sizeof(h) + nl + tl));
 }
 
 static void emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length); // below
@@ -1196,13 +1205,15 @@ static void on_action(KrunkerLink *l, const KrunkerFrame *f) {
 // addChat(team, name, i18n.t(key, ...args), kind, color). Translated by the client (main thread).
 // One localized chat line (Krunker's addChat(team, name, i18n.t(key, ...args), kind, color)) as
 // NET_EXT_KN_OFFICIAL_CHAT_I18N; kind is Krunker's (0 player, 2 server, else a game line).
-static void emit_chat_i18n(KrunkerLink *l, const int kind, const char *name, const char *key, const char *const *args,
-                           const int argc, const char *color) {
+static void emit_chat_i18n(KrunkerLink *l, const int8_t channel, const int kind, const char *name, const char *key,
+                           const char *const *args, const int argc, const char *color, const char *name_color) {
     uint8_t body[NET_EXT_BODY_MAX];
     NetOfficialChatI18nHeader h;
     memset(&h, 0, sizeof(h));
     h.kind = (uint8_t) (kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME);
+    h.channel = channel;
     if (color) snprintf(h.color, sizeof(h.color), "%s", color);
+    if (name_color) snprintf(h.name_color, sizeof(h.name_color), "%s", name_color);
     size_t len = sizeof(h);
     const char *head[2] = {name ? name : "", key};
     for (int i = 0; i < 2; i++) {
@@ -1236,7 +1247,7 @@ static void on_chat_i18n(KrunkerLink *l, const KrunkerFrame *f) {
         js_string(krunker_at(k, i + 1), store[n], sizeof(store[n]));
         args[n] = store[n];
     }
-    emit_chat_i18n(l, kind, krunker_str(arg(f, 1)), ks, args, n, krunker_str(arg(f, 4)));
+    emit_chat_i18n(l, chat_channel(arg(f, 0)), kind, krunker_str(arg(f, 1)), ks, args, n, krunker_str(arg(f, 4)), krunker_str(arg(f, 5)));
 }
 
 // "uh" UPDATE_HOST [hostSocketId | null, silent] (iíîíïìï :219273): game.host (the player list's star:
@@ -1249,13 +1260,13 @@ static void on_update_host(KrunkerLink *l, const KrunkerFrame *f) {
     for (int i = 0; changed && i < l->player_count; i++) emit_player_info(l, &l->players[i]);
     if (truthy(arg(f, 1)) || !host[0]) return;
     if (l->socket_id[0] && !strcmp(host, l->socket_id)) {
-        emit_chat_i18n(l, 2, NULL, "host.transfer.you", NULL, 0, NULL);
+        emit_chat_i18n(l, CHAT_CHANNEL_GLOBAL, 2, NULL, "host.transfer.you", NULL, 0, NULL, NULL); // addChat(0, null, ..)
         return;
     }
     for (int i = 0; i < l->player_count; i++) {
         if (strcmp(l->players[i].id, host) != 0) continue;
         const char *args[1] = {l->players[i].name};
-        emit_chat_i18n(l, 2, NULL, "host.transfer", args, 1, NULL);
+        emit_chat_i18n(l, CHAT_CHANNEL_GLOBAL, 2, NULL, "host.transfer", args, 1, NULL, NULL);
         return;
     }
 }
@@ -1575,8 +1586,13 @@ static void on_timer(KrunkerLink *l, const KrunkerFrame *f) {
     NetTimerPacket t;
     memset(&t, 0, sizeof(t));
     t.seconds = timer_seconds(arg(f, 2), arg(f, 0));
-    // state 0 is the running round clock; 1/2/3 are the end-screen countdown / "match over" states
+    // state 0 is the running round clock; 1/2/3 are the end screen's #endTimer (:220235): 1 "Next Round in"
+    // + the time, 2 "MATCH OVER", 3 "MATCH ABANDONED" (the state goes first: the TIMER redraws #endTimer)
     t.end = state != 0 ? 1 : 0;
+    if (state >= 1 && state <= 3) {
+        const uint8_t st = (uint8_t) state;
+        emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CLOCK_STATE, &st, sizeof(st));
+    }
     emit(l, NET_PACKET_TIMER, &t, sizeof(t));
 }
 
@@ -2528,7 +2544,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_SKIN_FOUND_MESSAGE: on_skin_found_message(l, &f); break;
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
-            if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f)) l->unknown_in++;
+            if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f)) l->unknown_in++;
             break;
         }
     }
@@ -2892,6 +2908,15 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
                                            KRUNKER_V_STR("z"), KRUNKER_V_NUM(m.z)};
                 const KrunkerValue args[] = {KRUNKER_V_MAP(kv, 3)};
                 return send_c2s(l, KRUNKER_C2S_MARK_POSITION, args, 1);
+            }
+            if (subtype == NET_EXT_KN_OFFICIAL_GAME_CODE && body_length >= 1) { // submitGameCode (:219238): ["code", value]
+                char code[128];
+                const size_t n = body_length < sizeof(code) ? body_length : sizeof(code) - 1;
+                memcpy(code, body, n);
+                code[n] = 0;
+                if (!code[0]) return 0;
+                const KrunkerValue args[] = {KRUNKER_V_STR(code)};
+                return send_c2s(l, KRUNKER_C2S_CODE, args, 1);
             }
             if (subtype == NET_EXT_VOTE_KICK && body_length >= sizeof(NetVoteKickPacket)) {
                 NetVoteKickPacket v; // kickVote / [1]: ["v2k", alias, 1]; [2]: ["v2k", alias]

@@ -30,6 +30,7 @@
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
 #include <third_person.h>
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
+#include <v10_party.h>     // official lobbies' password prompt ("code" / "codeT" / "codeP")
 #include <hud_social.h>    // WP-E part 2b: NET_PACKET_CHAT_V7 / VOICE_V7 / SPRAY_V7 (social_v7.h)
 #include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
 #include <world_events.h>  // map-logic WP-B: NET_PACKET_ZONE / BUILD / LOG_TIME / OBJECT_ANIM
@@ -733,6 +734,19 @@ static void events_round_switch(Client *client) {
     client->net_death_menu_pending = 1;
 }
 
+// One official addChat line (iíïíííï, game.deob.js:221172): a player line (kind 0: Show Player Messages, the
+// mute list, its name in nameColor) or a game / server line (a server line in its colour, default #fc03ec),
+// on its chat tab (0 global, 1 team; every tab outside team modes)
+static void events_official_line(const int kind, const int channel, const int32_t account, const char *name, const char *text,
+                                 const char *color, const char *name_color) {
+    if (!text) return;
+    if (kind == NET_CHAT_PLAYER && account && social_chat_muted(account)) return; // mutedChatAccountIds
+    const char *who = name && name[0] ? name : "unknown";
+    ui_console_on_chat(kind == NET_CHAT_PLAYER ? who : NULL, text, kind);
+    if (kind == NET_CHAT_PLAYER) hud_ui_add_chat_channel(who, text, name_color && name_color[0] ? name_color : NULL, channel, 1);
+    else hud_ui_add_chat_line_on(text, kind == NET_CHAT_SERVER ? (color && color[0] ? color : SERVER_CHAT_COLOR) : NULL, channel);
+}
+
 // An official krunker.io server's HUD packets that our own NetPackets cannot carry (krunker_link.c
 // makes them, net_ext.h NET_EXT_KN_OFFICIAL_*).
 // An official server refused our "en" ("fe" FAILED_TO_ENDER, v10 iíìiîîì :208203): loading ends, the
@@ -781,15 +795,13 @@ static void events_official_hud(Client *client, const uint16_t subtype, const ui
         NetOfficialChatI18nHeader h;
         memcpy(&h, body, sizeof(h));
         h.color[sizeof(h.color) - 1] = 0;
+        h.name_color[sizeof(h.name_color) - 1] = 0;
         const char *str[2 + 16];
         const int n = official_strings(body + sizeof(h), length - sizeof(h), str, 2 + (h.argc < 16 ? h.argc : 16));
         if (n < 2) return;
         char text[NET_CHAT_TEXT_SIZE];
         i18n_format(text, sizeof(text), str[1], n - 2, str + 2);
-        const char *name = str[0][0] ? str[0] : NULL;
-        ui_console_on_chat(h.kind == NET_CHAT_PLAYER ? (name ? name : "unknown") : NULL, text, h.kind);
-        if (h.kind == NET_CHAT_PLAYER && name) hud_ui_add_chat(name, text, NULL);
-        else hud_ui_add_chat(NULL, text, h.kind == NET_CHAT_SERVER ? (h.color[0] ? h.color : SERVER_CHAT_COLOR) : NULL);
+        events_official_line(h.kind, h.channel, 0, str[0], text, h.color, h.name_color);
     } else if (subtype == NET_EXT_KN_OFFICIAL_MEDAL && length == sizeof(NetOfficialMedalPacket)) {
         // "am" -> addMedal([name, score, sound, count]): the score as given ("12 KR")
         NetOfficialMedalPacket m;
@@ -1211,6 +1223,23 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&state, body, sizeof(state));
                 hud_votekick_on_forfeit(client, &state);
             }
+            else if (subtype == NET_EXT_KN_OFFICIAL_CLOCK_STATE && body_length == 1) hud_ui_set_end_clock_state(body[0]); // "t" state
+            else if (subtype == NET_EXT_KN_OFFICIAL_CHAT && body_length > sizeof(NetOfficialChatHeader)) { // "ch"
+                NetOfficialChatHeader h;
+                memcpy(&h, body, sizeof(h));
+                h.color[sizeof(h.color) - 1] = 0;
+                h.name_color[sizeof(h.name_color) - 1] = 0;
+                const char *str[2] = {"", ""};
+                if (official_strings(body + sizeof(h), body_length - sizeof(h), str, 2) == 2)
+                    events_official_line(h.kind, h.channel, h.account_id, str[0], str[1], h.color, h.name_color);
+            }
+            else if (subtype == NET_EXT_KN_OFFICIAL_CODE_PROMPT) v10_party_password_prompt_official(); // "code": gameCode()
+            else if (subtype == NET_EXT_KN_OFFICIAL_CODE_TIMER && body_length == sizeof(int32_t)) { // "codeT"
+                int32_t seconds;
+                memcpy(&seconds, body, sizeof(seconds));
+                v10_party_code_timer(seconds);
+            }
+            else if (subtype == NET_EXT_KN_OFFICIAL_CODE_PASSED) v10_party_code_passed(); // "codeP": clearPops
             else if (subtype == NET_EXT_KN_OFFICIAL_SHAKE && body_length == sizeof(NetOfficialShakePacket)) { // "shk"
                 NetOfficialShakePacket shake;
                 memcpy(&shake, body, sizeof(shake));

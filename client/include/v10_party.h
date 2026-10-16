@@ -33,5 +33,11 @@ int v10_party_open_url(const char *url);
 // #codeInput, Submit / Leave). servers_ui.c shows it when a server refuses the join for its
 // password (ERROR 004005).
 void v10_party_password_prompt(void);
+// The same popup for an official krunker.io lobby, whose server asks after the join (ENTER_CODE "code"):
+// Submit sends ["code", value] over the session (no rejoin) and the popup stays until CODE_PASSED;
+// UPDATE_CODE_TIMER writes "Submit - Ns" on #confirmBtn; Leave leaves the official game.
+void v10_party_password_prompt_official(void);
+void v10_party_code_timer(int seconds); // "codeT"
+void v10_party_code_passed(void);       // "codeP": clearPops
 // Inline handlers of the popup: submitGameCode, knGameCodeLeave. -1 = not ours.
 int v10_party_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

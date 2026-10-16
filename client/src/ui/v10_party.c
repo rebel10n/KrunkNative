@@ -22,6 +22,8 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <server_names.h> // kn_game_link_parse
+#include <krunker_net.h>  // the official lobby's "code": krunker_net_send_packet, krunker_net_leave
+#include <net_ext.h>      // NET_EXT_KN_OFFICIAL_GAME_CODE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -141,7 +143,10 @@ static void generic_popup(const char *html, const char *cls) {
     menu_schedule_rect();
 }
 
+static int g_code_official; // the shown password popup is an official lobby's ("code"), not our server's refusal
+
 void v10_party_password_prompt(void) {
+    g_code_official = 0;
     printf("[party] the game needs a password\n");
     // window.gameCode() (Leave: v10's onclick='location=location.origin')
     // i18n custom.passcode.input; the placeholder and the buttons are English in v10's markup
@@ -156,11 +161,39 @@ void v10_party_password_prompt(void) {
     if (input) html_dom_focus(input);
 }
 
+void v10_party_password_prompt_official(void) {
+    v10_party_password_prompt();
+    g_code_official = 1;
+    printf("[party] the official lobby needs a password\n");
+}
+
+void v10_party_code_timer(const int seconds) {
+    HtmlElem btn = html_dom_by_id("confirmBtn"); // iïiìïíï (:219224): confirmBtn.innerHTML = "Submit - " + n + "s"
+    if (!btn || !g_code_official) return;
+    char text[32];
+    snprintf(text, sizeof(text), "Submit - %ds", seconds);
+    html_dom_set_html(btn, text);
+}
+
+void v10_party_code_passed(void) {
+    if (!g_code_official) return;
+    g_code_official = 0;
+    ui_loadout_clear_pops(); // CODE_PASSED: clearPops (:219221)
+    printf("[party] the official lobby took the password\n");
+}
+
 static void submit_game_code(void) {
     char code[64] = "";
     HtmlElem input = html_dom_by_id("codeInput");
     if (input) html_dom_get_value(input, code, sizeof(code));
     if (!code[0]) return; // _72781.value && send(CODE, value)
+    if (g_code_official) { // submitGameCode (:219238): send(CODE, value); the popup stays until "codeP"
+        uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(code)];
+        const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_GAME_CODE, code, (uint16_t) (strlen(code) + 1));
+        if (n) krunker_net_send_packet(NET_PACKET_EXT, ext, n);
+        printf("[party] password sent to the official lobby\n");
+        return;
+    }
     if (strlen(code) >= SERVER_PASSWORD_MAX) {
         ui_alert(I18N("custom.passcode.long", "Password too long"));
         return;
@@ -180,6 +213,12 @@ int v10_party_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
     }
     if (!strcmp(name, "knGameCodeLeave")) {
         ui_loadout_clear_pops();
+        if (g_code_official) { // location = location.origin: the official game is left, back to the menu
+            g_code_official = 0;
+            krunker_net_leave(menu_ui()->client, NULL);
+            menu_show_window(MENU_WINDOW_NONE, 0);
+            return 1;
+        }
         if (!servers_ui_retry()) menu_show_window(MENU_WINDOW_NONE, 0); // location = location.origin
         return 1;
     }

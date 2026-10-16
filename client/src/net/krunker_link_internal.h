@@ -13,3 +13,5 @@ int krunker_link_world_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *
 // init's syncData (arg 11) and round wins (arg 3) of those packets for a joiner / a new round
 // (initGame, game.deob.js:219395-219470 and :219535-219540); called by on_init_hud.
 void krunker_link_world_init(KrunkerLink *l, const KrunkerFrame *f);
+// krunker_link_lobby.c: the private lobby's password prompt ("code", "codeT", "codeP"). 1 = handled.
+int krunker_link_lobby_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);

@@ -108,6 +108,13 @@ typedef enum {
 
     // 0x8100..0x810F reserved for settings-wiring (the v10 settings package; coordinator, 2026-10-15)
     NET_EXT_KN_HIT_DAMAGE = 0x8100, // S -> C NetHitDamagePacket, right before a NET_PACKET_HIT whose damage has a fraction
+    // 0x8060 official lobby UI (client/src/net/krunker_link.c / krunker_link_lobby.c, client-local, like 0x8030)
+    NET_EXT_KN_OFFICIAL_CLOCK_STATE = 0x8060,  // "t" arg 1, u8: 1 "Next Round in", 2 "MATCH OVER", 3 "MATCH ABANDONED" (#endTimer)
+    NET_EXT_KN_OFFICIAL_CHAT = 0x8061,         // "ch" NetOfficialChatHeader + name + text: a line with its tab and colours
+    NET_EXT_KN_OFFICIAL_CODE_PROMPT = 0x8062,  // "code" ENTER_CODE, no body: v10's gameCode() password popup
+    NET_EXT_KN_OFFICIAL_CODE_TIMER = 0x8063,   // "codeT" UPDATE_CODE_TIMER, int32 seconds: "Submit - Ns"
+    NET_EXT_KN_OFFICIAL_CODE_PASSED = 0x8064,  // "codeP" CODE_PASSED, no body: clearPops
+    NET_EXT_KN_OFFICIAL_GAME_CODE = 0x8065,    // client -> link only: the typed password, NUL-terminated -> C2S "code" [value]
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -220,7 +227,21 @@ typedef struct {
     uint8_t kind;     // NetChatKind of the line (Krunker 1 / 4 game, 2 server, 0 player)
     uint8_t argc;     // i18n arguments
     char color[16];   // CSS colour of a kind-2 line ("" = the default #fc03ec)
+    int8_t channel;   // arg 0 team: the chat tab (0 global, 1 team; the HUD forces -1 outside team modes)
+    char name_color[16]; // arg 5 nameColor of a player line's name ("" none)
 } NetOfficialChatI18nHeader;
+
+// NET_EXT_KN_OFFICIAL_CHAT: Krunker "ch" ADD_CHAT [team, name, text, kind, color, nameColor, senderAccountId,
+// extra] (iíïíííï, game.deob.js:221172): the line on its chat tab (data-tab = team || 0; -1 outside team modes),
+// a kind-2 line in `color` (default #fc03ec), a player line's name in nameColor. Followed by the sender's name and
+// the text, NUL-terminated. Not carried: extra.actions (v10's only one, "Join Queue", needs its ranked queue).
+typedef struct {
+    int8_t channel;      // team arg: 0 global, 1 team, -1 every tab
+    uint8_t kind;        // NetChatKind (Krunker 0 player, 2 server, 1 / 4 game)
+    int32_t account_id;  // the sender's account (the mute list), 0 none
+    char color[16];      // kind 2: the line's colour ("" = #fc03ec)
+    char name_color[16]; // kind 0: the name's colour ("" none)
+} NetOfficialChatHeader;
 
 // NET_EXT_KN_OFFICIAL_LEADER_BOARD: Krunker "ulb" UPDATE_LEADER_BOARD [index, [player, value, ...]]
 // (game.deob.js:220065 -> map.manager.updatePendingLeader): the rows of a map's LEADERBOARD object.

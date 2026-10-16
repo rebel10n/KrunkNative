@@ -277,6 +277,9 @@ void hud_ui_hide_death(Client*);                 // respawn: UI.toggleGameUI(tru
 void hud_ui_round_switch(Client*);               // official "rds": death card hidden, onDeathScrn, game UI off (until the respawn)
 // UI.showEndScreen(false) + fq()/fD(): result 1 victory, 0 defeat, -1 draw; next_round "MM:SS".
 void hud_ui_show_end_screen(Client*, int result, const char *next_round);
+// An official lobby's clock state ("t" arg 1): 2 "MATCH OVER", 3 "MATCH ABANDONED" in #endTimer instead of the
+// "Next Round in" countdown; 0 / 1 the countdown again (krunker_link.c NET_EXT_KN_OFFICIAL_CLOCK_STATE)
+void hud_ui_set_end_clock_state(int state);
 // Next round started (net INIT): undo hud_ui_show_end_screen (#endUI hidden, menu or HUD
 // back per the current state, damage indicators cleared).
 #define HUD_UI_HAVE_HIDE_END_SCREEN 1
@@ -363,6 +366,9 @@ void hud_ui_damage_number(Client*, float x, float y, float z, double value, int 
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel, int human); // WP-E: a v7 "ch" line on its channel (-1 all); human: Show Player Messages may hide it
+// A game / server line (no sender) on a chat tab (0 global, 1 team; every tab outside team modes, -1 always),
+// in `color` (NULL: the plain style): an official lobby's addChat lines (game_events.c NET_EXT_KN_OFFICIAL_CHAT)
+void hud_ui_add_chat_line_on(const char *msg, const char *color, int channel);
 void hud_ui_add_player_chat(const char *name, const char *msg, int human); // a NET_CHAT_PLAYER line: human hidden by Show Player Messages off, a bot's always shown
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
 void hud_ui_clear_player_chat(void);             // showMessages off: the human rows of #chatList go; bot and system rows stay

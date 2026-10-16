@@ -171,6 +171,18 @@ static const uint8_t *ext_body(const int nth, const uint16_t subtype, uint16_t *
 
 static int find_ext(uint16_t subtype, int nth, uint16_t *len); // the nth EXT of a subtype (below)
 
+// the nth NET_EXT_KN_OFFICIAL_CHAT ("ch"): its header, sender name and text; 0 = none
+static int official_chat(const int nth, NetOfficialChatHeader *h, const char **name, const char **text) {
+    uint16_t len = 0;
+    const int k = find_ext(NET_EXT_KN_OFFICIAL_CHAT, nth, &len);
+    const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_KN_OFFICIAL_CHAT, &len) : NULL;
+    if (!b || len <= sizeof(*h)) return 0;
+    memcpy(h, b, sizeof(*h));
+    *name = (const char *) b + sizeof(*h);
+    *text = *name + strlen(*name) + 1;
+    return 1;
+}
+
 // Clusters C / D of the packet audit: score / kills / ammo HUD, objectives / flags / rounds / end
 static void test_hud(void) {
     KrunkerLink link;
@@ -565,15 +577,18 @@ static void test_combat(void) {
     }
     clear();
 
-    // "ch": a team line with the sender's account; a server line stays a v3 chat
+    // "ch": a team line with the sender's account; a server line with its colour
     feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_STR("Ace"), KRUNKER_V_STR("push b"), KRUNKER_V_NUM(0), KRUNKER_V_NIL,
                                         KRUNKER_V_NIL, KRUNKER_V_NUM(4242)}, 7);
     feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_STR("server says"), KRUNKER_V_NUM(2), KRUNKER_V_STR("#00ff00")}, 5);
     {
-        READ_IN(NetChatV7Packet, v, CHAT_V7, 0);
-        READ_IN(NetChatPacket, c, CHAT, 0);
-        CHECK(v_p && v.channel == CHAT_CHANNEL_TEAM && v.account_id == 4242 && !strcmp(v.chat.text, "push b"), "ch: team tab + account");
-        CHECK(c_p && c.kind == NET_CHAT_SERVER && !strcmp(c.text, "server says"), "ch: a server line");
+        NetOfficialChatHeader v, c;
+        const char *vn = "", *vt = "", *cn = "", *ct = "";
+        const int vp = official_chat(0, &v, &vn, &vt), cp = official_chat(1, &c, &cn, &ct);
+        CHECK(vp && v.channel == CHAT_CHANNEL_TEAM && v.kind == NET_CHAT_PLAYER && v.account_id == 4242 && !strcmp(vn, "Ace") &&
+              !strcmp(vt, "push b"), "ch: team tab + account");
+        CHECK(cp && c.kind == NET_CHAT_SERVER && c.channel == CHAT_CHANNEL_ALL && !strcmp(c.color, "#00ff00") && !strcmp(ct, "server says"),
+              "ch: a server line in its colour");
     }
     clear();
 
@@ -1627,6 +1642,83 @@ static void test_popups(void) {
     clear();
 }
 
+// The official lobby UI (official-ingame-lobby): the clock's end states ("t" [fmt, state, ms]), chat tabs
+// and colours ("ch" / "chi"), the private lobby's password ("code" / "codeT" / "codeP", our ["code", value])
+static void test_lobby(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+    // "t": state 0 a running clock (no state EXT); 1 / 2 / 3 the end screen's, each before its TIMER
+    for (int st = 0; st <= 3; st++) {
+        feed(&link, "t", (KrunkerValue[]) {KRUNKER_V_STR("0:09"), KRUNKER_V_NUM(st), KRUNKER_V_NUM(9000)}, 3);
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_CLOCK_STATE, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_KN_OFFICIAL_CLOCK_STATE, &len) : NULL;
+        const NetPacket *xp = k >= 0 ? find_in(NET_PACKET_EXT, k) : NULL, *tp = find_in(NET_PACKET_TIMER, 0);
+        NetTimerPacket t = {0};
+        if (tp) memcpy(&t, tp->payload, sizeof(t));
+        if (st == 0) CHECK(!b && tp && !t.end && t.seconds == 9, "t state 0: the round clock only");
+        else CHECK(b && len == 1 && b[0] == st && xp < tp && t.end == 1, "t state %d: CLOCK_STATE %d before the end TIMER", st, st);
+        clear();
+    }
+    // "ch" kind 0 with nameColor; kind 1 on the global tab; a trade request (kind 3) is not shown
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_STR("Vip"), KRUNKER_V_STR("hi"), KRUNKER_V_NUM(0), KRUNKER_V_NIL,
+                                        KRUNKER_V_STR("#ffd700"), KRUNKER_V_NUM(77)}, 7);
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_STR("a game line"), KRUNKER_V_NUM(1)}, 4);
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_STR("T"), KRUNKER_V_NUM(5), KRUNKER_V_NUM(3)}, 4);
+    {
+        NetOfficialChatHeader a, g, x;
+        const char *an = "", *at = "", *gn = "", *gt = "", *xn = "", *xt = "";
+        CHECK(official_chat(0, &a, &an, &at) && a.kind == NET_CHAT_PLAYER && a.channel == CHAT_CHANNEL_GLOBAL && !strcmp(a.name_color, "#ffd700") &&
+              a.account_id == 77 && !strcmp(an, "Vip") && !strcmp(at, "hi"), "ch kind 0: nameColor, account, global tab");
+        CHECK(official_chat(1, &g, &gn, &gt) && g.kind == NET_CHAT_GAME && g.channel == CHAT_CHANNEL_GLOBAL && !g.color[0] && !gn[0] &&
+              !strcmp(gt, "a game line"), "ch kind 1: a game line");
+        CHECK(!official_chat(2, &x, &xn, &xt), "ch kind 3: no line");
+    }
+    clear();
+    // "chi" [team, name, key, kind, color, nameColor]: the tab and both colours ride its header
+    feed(&link, "chi", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_STR("Mate"), KRUNKER_V_STR("modes.round.win"), KRUNKER_V_NUM(0),
+                                         KRUNKER_V_NIL, KRUNKER_V_STR("#00ffff")}, 6);
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_CHAT_I18N, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len) : NULL;
+        NetOfficialChatI18nHeader h;
+        memset(&h, 0, sizeof(h));
+        if (b) memcpy(&h, b, sizeof(h));
+        CHECK(b && h.channel == CHAT_CHANNEL_TEAM && h.kind == NET_CHAT_PLAYER && !strcmp(h.name_color, "#00ffff"), "chi: team tab, nameColor");
+    }
+    clear();
+    // the password: "code" -> the prompt, "codeT" 4 -> "Submit - 4s", "codeP" -> cleared
+    feed(&link, "code", NULL, 0);
+    feed(&link, "codeT", (KrunkerValue[]) {KRUNKER_V_NUM(4)}, 1);
+    feed(&link, "codeP", NULL, 0);
+    {
+        uint16_t len = 0;
+        const int p0 = find_ext(NET_EXT_KN_OFFICIAL_CODE_PROMPT, 0, &len), t0 = find_ext(NET_EXT_KN_OFFICIAL_CODE_TIMER, 0, &len);
+        const uint8_t *tb = t0 >= 0 ? ext_body(t0, NET_EXT_KN_OFFICIAL_CODE_TIMER, &len) : NULL;
+        int32_t sec = 0;
+        if (tb && len == sizeof(sec)) memcpy(&sec, tb, sizeof(sec));
+        const int c0 = find_ext(NET_EXT_KN_OFFICIAL_CODE_PASSED, 0, &len);
+        CHECK(p0 == 0 && t0 == 1 && sec == 4 && c0 == 2 && !link.unknown_in, "code / codeT 4 / codeP in order");
+    }
+    clear();
+    // our typed password -> ["code", value]; an empty one sends nothing
+    {
+        uint8_t ext[NET_EXT_HEADER_SIZE + 16];
+        uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_GAME_CODE, "hunter2", 8);
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n) == 1 && g_out_count == 1 && !strcmp(g_out[0].name, "code") &&
+              g_out[0].argc == 1 && krunker_str(krunker_frame_arg(&g_out[0], 0)) &&
+              !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "hunter2"), "our password -> [\"code\", \"hunter2\"]");
+        clear();
+        n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_OFFICIAL_GAME_CODE, "", 1);
+        CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n) && !g_out_count, "an empty password sends nothing");
+    }
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -1846,10 +1938,12 @@ int main(void) {
     if (p) memcpy(&kill, p->payload, sizeof(kill));
     CHECK(p && kill.victim_uid == 7 && kill.killer_uid == 9 && kill.weapon_index == 3 && kill.victim_deaths == 2, "KILL");
     feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_STR("Other"), KRUNKER_V_STR("hello there"), KRUNKER_V_NUM(0)}, 4);
-    p = find_in(NET_PACKET_CHAT_V7, 0); // a player line: our v7 chat (channel -1 = every tab)
-    CHECK(p && p->length == sizeof(NetChatV7Packet) && !strcmp(((const NetChatV7Packet *) p->payload)->chat.text, "hello there") &&
-          !strcmp(((const NetChatV7Packet *) p->payload)->chat.name, "Other") && ((const NetChatV7Packet *) p->payload)->chat.kind == NET_CHAT_PLAYER &&
-          ((const NetChatV7Packet *) p->payload)->channel == CHAT_CHANNEL_ALL && !find_in(NET_PACKET_CHAT, 0), "CHAT");
+    {
+        NetOfficialChatHeader ch;
+        const char *cn = "", *ct = "";
+        CHECK(official_chat(0, &ch, &cn, &ct) && !strcmp(ct, "hello there") && !strcmp(cn, "Other") && ch.kind == NET_CHAT_PLAYER &&
+              ch.channel == CHAT_CHANNEL_ALL && !find_in(NET_PACKET_CHAT, 0) && !find_in(NET_PACKET_CHAT_V7, 0), "CHAT"); // channel -1: every tab
+    }
     feed(&link, "2", (KrunkerValue[]) {KRUNKER_V_NUM(7)}, 1);
     p = find_in(NET_PACKET_LEAVE, 0);
     CHECK(p && ((const NetLeavePacket *) p->payload)->uid == 7, "LEAVE");
@@ -2505,6 +2599,7 @@ int main(void) {
         clear();
     }
     test_popups();
+    test_lobby();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
