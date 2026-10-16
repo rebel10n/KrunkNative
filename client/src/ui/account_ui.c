@@ -1198,9 +1198,8 @@ static void auth_unreachable(void) {
     g_auth_sent_at = 0;
 }
 
-// ---- KrunkNative password reset ("Forgot password?" in the guest Account window)
+// ---- KrunkNative password reset (the login popup's recover card, v10_login.c recover())
 //
-// v7.1.4's login form only says "For lost Passwords/Accounts contact recovery@yendis.ch".
 // kn_brain mails a one-time code to the account's verified email (services/brain/
 // account_security.c): ["rpr", name | email] -> ["rpr", err | null, msg]; ["rpc", code] ->
 // ["rpc", err | null, username]; ["rps", code, new, repeat] -> ["rps", err | null, msg,
@@ -2414,31 +2413,8 @@ void account_window_post(const int id) {
         if (mw) html_dom_set_style(mw, "width", "1280px");
         return;
     }
-    if (backend_available() != 1 || g_logged_in) return;
-    // v3.1.1 prefills the login form with getSavedVal("krunker_username")
-    char name[64];
-    storage_get("krunker_username", name, sizeof(name));
-    HtmlElem input = html_dom_by_id("accName");
-    if (input) html_dom_set_value(input, name);
-    // KrunkNative: the email Register needs (kn_brain mails a verification link); Login takes
-    // it instead of the username too (v10's placeholder: generic.auth.enterEmail)
-    HtmlElem pass = html_dom_by_id("accPass");
-    if (pass && !html_dom_by_id("accEmail")) {
-        char input[160];
-        snprintf(input, sizeof(input), "<input id='accEmail' type='email' placeholder='%s' class='accountInput'>",
-                 I18N("generic.auth.enterEmail", "Enter Email"));
-        html_dom_insert_html(pass, HTML_INSERT_AFTER_END, input);
-    }
-    // KrunkNative: password reset by email (v7.1.4: "contact recovery@yendis.ch")
-    HtmlElem mail = html_dom_by_id("accEmail");
-    if (mail && !html_dom_by_id("knForgot")) {
-        char forgot[384];
-        snprintf(forgot, sizeof(forgot), "<div id='knForgot' style='text-align:right;margin-top:6px;font-size:17px;color:rgba(255,255,255,0.5)'>"
-                                         "<span onclick='knResetOpen()' style='cursor:pointer;color:rgba(255,255,255,0.8);text-decoration:underline'>"
-                                         "%s</span></div>", I18N("kn.account.forgot", "Forgot password?"));
-        html_dom_insert_html(mail, HTML_INSERT_AFTER_END, forgot);
-    }
-    HtmlElem resp = html_dom_by_id("accResp");
-    if (resp) html_dom_set_html(resp, I18N("kn.account.forgotHint", "Forgot your password? Reset it with the email on your account."));
-    if (g_reset.step > 0) reset_render(); // a re-render (account update) keeps the reset step
+    // A guest never gets this window on the v10 page: v10_login_guest_window opens the login popup
+    // (v10 windows[4].gen, autoWindowClose) and the template is v10's own, empty one. It is only the
+    // frame of the password-reset steps, and a re-render (account update) keeps the step.
+    if (!g_logged_in && g_reset.step > 0) reset_render();
 }

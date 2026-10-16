@@ -203,7 +203,7 @@ WINDOWS = [
     ("win-loadout", 3, {"windowActions": [["windows.2.switchTab", 1]]}, "Change Loadout, Loadout tab"),
     ("win-classes", 3, {"windowActions": [["windows.2.switchTab", 0]]}, "Change Loadout, Class tab (v3's Select Class)"),
     ("win-mods", 4, {}, "Mod Manager"),
-    ("win-profile-login", 5, {}, "Account: Register or Login"),
+    ("win-profile-login", 5, {}, "Account: a guest gets v10's login popup"),
     ("win-keybinds", 7, {"windowActions": [["windows.6.switchTab", 0]]}, "Change Controls, General tab"),
     ("win-host", 8, {}, "Host Custom Game (hosting is server_bin's in KrunkNative)"),
     ("win-spray", 9, {}, "Select Spray"),

@@ -2,7 +2,8 @@
 """The v10 Customize / Loadout / Titles / Store flow end to end (client/src/ui/v10_customize.c,
 store_ui.c) on a real kn_brain (sqlite, temp dir) and server_bin:
 
-  register -> the Customize tab of Change Loadout (windows[2] tab 2) -> the Hat picker (the shell
+  a guest's locked classes and Acog Scope -> register -> the Acog Scope locked at class level 1, open
+  at 20 -> the Customize tab of Change Loadout (windows[2] tab 2) -> the Hat picker (the shell
   wraps it, goBackWindow(52)) -> equip a granted hat -> Title window (windows[53]: the catalogue
   with every title locked, a locked pick does not equip) -> the Store on the v10 layout
   (store-window-mount) -> Prize Wheels -> a real Starter spin: KR charged, the item granted (the
@@ -110,25 +111,33 @@ def scenario(brain_url, game_port, dbpath):
 2500 clicksel [onclick*="tabIndex=0"]
 3500 rects @locked .lockedClass
 3600 rects @cards .classCard
-3700 quit
+3700 call showWindow 31
+4500 rects @attach .noBtnCard
+4550 rects @acoglock .lockedCard
+4600 rects @acogopen [onclick*="selectAttachment(1)"]
+4700 quit
 """, brain_url, game_port)
     check("guest: every class but the level-0 ones is locked (Register to unlock)",
           count(log, "locked") >= 10 and count(log, "locked") < count(log, "cards"), "locked=%d cards=%d" % (count(log, "locked"), count(log, "cards")))
+    # v10 "Acog Scope": minRec 20 on the class level (stats.c<class>), devs exempt (v10.js:178106)
+    check("guest: Select Attachment locks the Acog Scope (None, Reflex Sight, a locked Acog)",
+          count(log, "attach") == 3 and count(log, "acoglock") == 1 and count(log, "acogopen") == 0,
+          "cards=%d locked=%d acog onclick=%d" % (count(log, "attach"), count(log, "acoglock"), count(log, "acogopen")))
 
-    # 1. register (the Account window's form) and give the account KR through the fixture DB
+    # 1. register (showWindow(5) as a guest: v10's login popup, "Register here") and give the account
+    #    KR through the fixture DB
     log = run_client("register", """0 menu
 500 call showWindow 5
-1200 clickid accName
-1300 type %s
-1400 down TAB
-1410 up TAB
-1500 type %s
-1550 down TAB
-1560 up TAB
-1580 type %s@example.com
-1600 clicksel .accBtn.buttonP
+1000 clickid knV10AuthSwitch
+1400 clickid accName
+1450 type %s
+1500 clickid accPass
+1550 type %s
+1600 clickid accEmail
+1650 type %s@example.com
+1700 clickid knV10LoginSubmit
 5000 quit
-""" % (NAME, PASS, NAME), brain_url, game_port)  # Tab: name -> password -> email (v10 registers by email)
+""" % (NAME, PASS, NAME), brain_url, game_port)
     check("register through the native form", f"[account] logged in as {NAME}" in log)
     db(dbpath, "UPDATE players SET player_funds = 2000 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,))
     db(dbpath, "INSERT INTO inventory (account_id, skin_id, count) SELECT id, ?, 1 FROM accounts WHERE username = ?",
@@ -156,6 +165,23 @@ def scenario(brain_url, game_port, dbpath):
     m = re.search(r"\[input_script\] rects t=\d+ @cards n=(\d+).*", log)
     check("the granted hat is the picker's owned card", bool(m) and int(m.group(1)) == 1 and (" %d@" % GRANTED) in m.group(0),
           m.group(0) if m else "no rects")
+
+    # 2b. the Acog Scope: locked at Triggerman level 1, open once stats.c0 makes it level 20
+    #     (floor(0.03 * sqrt(500000)) + 1 = 22)
+    acog = """0 menu
+1500 call showWindow 31
+2500 rects @acoglock .lockedCard
+2600 rects @acogopen [onclick*="selectAttachment(1)"]
+2700 quit
+"""
+    log = run_client("acog-l1", acog, brain_url, game_port)
+    check("an account at class level 1: the Acog Scope is still locked", count(log, "acoglock") == 1 and count(log, "acogopen") == 0,
+          "locked=%d onclick=%d" % (count(log, "acoglock"), count(log, "acogopen")))
+    db(dbpath, "UPDATE players SET player_stats = json_set(COALESCE(NULLIF(player_stats, ''), '{}'), '$.c0', 500000) "
+               "WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,))
+    log = run_client("acog-l22", acog, brain_url, game_port)
+    check("Triggerman level 22: the Acog Scope is open", count(log, "acoglock") == 0 and count(log, "acogopen") == 1,
+          "locked=%d onclick=%d" % (count(log, "acoglock"), count(log, "acogopen")))
 
     # 3. equip the granted hat, then the Title window and a locked title
     log = run_client("equip", f"""0 menu

@@ -378,7 +378,8 @@ static const char *k_inventory[] = {
     "windows.13.subTabT=", "windows.13.subTab=", "updateWindow", "windows.13.premium",
     "windows.13.craftMenu", "windows.13.updateScroll", "windows.13.updateScrollWheel", "loadMod",
     "loadModURL", "joinGame", "windows.29.readAll", "windows.29.switchTab", "openServerWindow",
-    "registerAcc", "loginAcc", "windows.5.switchTab", "windows.6.switchTab", "windows.6.collapseFolder",
+    /* registerAcc / loginAcc went with v7's guest Account form (ui/windows/5.html is v10's, empty) */
+    "windows.5.switchTab", "windows.6.switchTab", "windows.6.collapseFolder",
     "resetCont", "unbindCont", "changeCont", "openOneTrust", "resetSettings", "exportSettings",
     "importSettingsPopup", "selectSettingPre", "windows.0.searchList", "windows.0.toggleType",
     "windows.0.changeTab", "windows.0.collapseFolder", "window.setSetting", "windows.9.switchTab", "openURL",
@@ -416,13 +417,13 @@ static void test_parser_corpus(const char *repo)
         closedir(d);
     }
     printf("corpus: %d inline handlers, %d parse failures, %d distinct callees\n", total, failed, g_callee_n);
-    CHECK(total == 2308);
+    CHECK(total == 2306);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);
     printf("\n");
     const int inv_n = (int)(sizeof(k_inventory) / sizeof(k_inventory[0]));
-    CHECK(inv_n == 110);
+    CHECK(inv_n == 108);
     for (int i = 0; i < inv_n; i++) {
         int found = 0;
         for (int j = 0; j < g_callee_n; j++) if (!strcmp(g_callees[j].name, k_inventory[i])) found = 1;

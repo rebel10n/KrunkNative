@@ -147,8 +147,10 @@ static const struct { const char *name; int id; } SCOPES[] = {
 };
 #define SCOPE_COUNT ((int) (sizeof(SCOPES) / sizeof(SCOPES[0])))
 
-// data/attach.js (Game.attach, id == index)
-static const char *ATTACHMENTS[] = {"Reflex Sight", "Acog Scope"};
+// data/attach.js (Game.attach, id == index, already in minRec order): name and minRec. v10 gives
+// the Acog Scope `minRec: 20` with a req on the CLASS level (stats.c<class>), devs exempt
+// (v10.js:178106 "Acog Scope"); the Reflex Sight has none.
+static const struct { const char *name; int min_rec; } ATTACHMENTS[] = {{"Reflex Sight", 0}, {"Acog Scope", 20}};
 #define ATTACH_COUNT 2
 
 // data/streaks.js (Game.streaks, index order): name, slot, kills, devOnly
@@ -196,7 +198,7 @@ static Selected g_sel[SEL_COUNT] = {
     [SEL_SECONDARY] = {"secondaryInd", 2, 2},  [SEL_PC_STAT] = {"pcStatIndex", -1, -1},
     [SEL_SPRAY] = {"sprayIndex", 0, 0},
     [SEL_STREAK1] = {"streakIndex1", -1, -1},  [SEL_STREAK2] = {"streakIndex2", -1, -1},
-    [SEL_STREAK3] = {"streakIndex3", 0, 0},
+    [SEL_STREAK3] = {"streakIndex3", 0, 0}, // v10.js:210268 _70281(2, streakIndex3, 0): a new loadout has the Nuke
 };
 static int g_sel_loaded;
 static int g_skin_weapon = 1; // activeSkinSel: the weapon the Select Skin window is for
@@ -1300,17 +1302,50 @@ static int class_primary_has_attach(void) {
     return w && w->attach;
 }
 
-// windows[30] Select Attachment: Reflex Sight and Acog Scope (no minRec in v7.1.4).
+// v10 Acog Scope req (v10.js:178111): a dev, or the CLASS level max(1, floor(rankVar * sqrt(stats.c<class>)) + 1)
+// >= minRec. The window also opens it in a custom game and in the sandbox (isCustom / isSandbox, v10.js:214308):
+// KrunkNative's offline sandbox and offline mode count as both, like the class and secondary locks.
+static int attach_unlocked(const int index, const int class_index) {
+    const Client *client = menu_ui()->client;
+    const AccountInfo *acc = account_get();
+    if (index < 0 || index >= ATTACH_COUNT || !ATTACHMENTS[index].min_rec) return 1;
+    if (!online_mode_online() || client->offline || game_config_is_custom(&client->game)) return 1;
+    if (acc && acc->is_dev) return 1;
+    char key[16];
+    snprintf(key, sizeof(key), "c%d", class_index);
+    const cJSON *xp_v = acc && acc->stats ? cJSON_GetObjectItem(acc->stats, key) : NULL;
+    const double xp = cJSON_IsNumber(xp_v) ? xp_v->valuedouble : 0.0;
+    const int level = (int) floor(RANK_VAR * sqrt(xp)) + 1;
+    return (level > 1 ? level : 1) >= ATTACHMENTS[index].min_rec;
+}
+
+// windows[30] Select Attachment (v10.js:214299): None, then Game.attach by minRec; a locked one has
+// no onclick, "Req lvl 20" and the lock card, an open one with a minRec says "Unlocked".
 static char *gen_attach(void) {
+    const int cls = menu_ui()->client->menu_class_index;
     StrBuf out = {0};
-    sb_append(&out, "<div id='skinList'><div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey' onclick='selectAttachment(-1)'>None<div class='skinRandom blackShad' style='top: 60px;'>X</div></div>");
+    sb_appendf(&out, "<div id='skinList'><div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey' onclick='selectAttachment(-1)'>%s<div class='skinRandom blackShad' style='top: 60px;'>X</div></div>",
+               I18N("generic.none", "None"));
     if (class_primary_has_attach()) {
         for (int i = 0; i < ATTACH_COUNT; i++) {
-            char img[256], path[64];
+            const int open = attach_unlocked(i, cls);
+            char img[256], path[64], own[64];
             snprintf(path, sizeof(path), "textures/previews/attach/attach_%d.png", i);
             asset(path, img, sizeof(img));
-            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey' onclick='selectAttachment(%d)'>%s<div class='itemOwn'>%s</div><img loading='lazy' draggable='false' class='noBtnImgA' src='%s' /></div>",
-                       i, ATTACHMENTS[i], I18N("generic.default", "Default"), img);
+            if (!ATTACHMENTS[i].min_rec) {
+                snprintf(own, sizeof(own), "%s", I18N("generic.default", "Default"));
+            } else if (open) {
+                snprintf(own, sizeof(own), "%s", I18N("windows.secondary.unlocked", "Unlocked"));
+            } else {
+                char lvl[16];
+                snprintf(lvl, sizeof(lvl), "%d", ATTACHMENTS[i].min_rec);
+                I18N_F(own, "windows.secondary.req", "Req lvl {0}", lvl);
+            }
+            sb_append(&out, "<div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey'");
+            if (open) sb_appendf(&out, " onclick='selectAttachment(%d)'", i);
+            sb_appendf(&out, ">%s<div class='itemOwn'>%s</div><img loading='lazy' draggable='false' class='noBtnImgA' src='%s' />%s</div>",
+                       ATTACHMENTS[i].name, own, img,
+                       open ? "" : "<div class='lockedCard'><span class='material-icons' style='font-size: 70px;color:#fff;'>lock</span></div>");
         }
     }
     sb_append(&out, "</div>");

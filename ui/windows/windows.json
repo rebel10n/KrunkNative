@@ -38,8 +38,7 @@
       "file": "5.html",
       "label": "profile",
       "cls": "dark",
-      "style": "overflow-y: auto; width: 955px;",
-      "from": "v7.1.4"
+      "style": "overflow-y: auto; width: 955px;"
     },
     "6": {
       "header": "UNLOCALIZED STRING",

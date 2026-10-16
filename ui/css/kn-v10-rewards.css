@@ -49,3 +49,14 @@
 #genericPop.genericFormPop { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 520px; pointer-events: all; }
 .genericFormPop .io-popup-content p { font-size: 16px; margin: 0; }
 .genericFormPop .accountInput { width: calc(100% - 20px); margin: 0; }
+
+/* 5. The Register card's sign-up bonuses (svelte-16z1lxi, v10_login.c): svelte.css nests
+ *    `span.svelte-16z1lxi {...}` and `li.svelte-16z1lxi {...}` inside .sign-up-bonuses, flattened here.
+ *    The bare <li>s (in a <div>, no <ul>) get Chrome's outside disc marker, which the engine does not
+ *    draw: a ::before disc stands in for it, placed and sized to match the reference (the engine rounds a
+ *    7 px circle to about Chrome's 5 px disc). */
+.sign-up-bonuses.svelte-16z1lxi span.svelte-16z1lxi { color: white; max-width: 150px; font-size: 24px; font-weight: 500;
+    text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.2); }
+.sign-up-bonuses.svelte-16z1lxi li.svelte-16z1lxi { text-align: left; color: white; position: relative; }
+.sign-up-bonuses.svelte-16z1lxi li.svelte-16z1lxi::before { content: ""; position: absolute; left: -25px; top: 50%;
+    width: 7px; height: 7px; border-radius: 50%; background-color: white; }

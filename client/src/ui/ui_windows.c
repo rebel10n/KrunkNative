@@ -675,10 +675,6 @@ void ui_window_post(const int id) {
     html_dom_set_class(html_dom_root(), "kn-bare-window", id == OBJECT_MANAGER_WINDOW);
     if (id == 1 || id == 32 || id == 41) { // 32 / 41: the reticle / scope pickers' settings rows
         ui_settings_apply_values(html_dom_by_id("menuWindow"));
-    } else if (id == 5) {
-        const MenuUi *ui = menu_ui();
-        HtmlElem input = html_dom_by_id("accName");
-        if (input) html_dom_set_value(input, ui->name_set ? ui->client->menu_name : "");
     }
     account_window_post(id); // brain: the saved krunker_username instead of the nickname
     v10_customize_window_post(id); // v10 page: the class preview into #charPreviewSlot

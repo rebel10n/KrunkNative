@@ -2,10 +2,12 @@
 """Accounts in the native client, end to end through the menu UI (client/src/ui/account_ui.c) against a
 local kn_brain (sqlite, temp dir) and services/common/tests/fake_smtp.py:
 
-  register with an email (name, Tab, password, Tab, email, Register) -> the verification mail -> its
-  link verifies -> logout -> login with Enter -> logout -> Forgot password? -> the reset mail -> the
-  code typed into the client -> a new password -> signed in -> the old password is refused and the
-  new one logs in. Plus: a login while the account server is down says why (not "Please try again.").
+  v10's login popup (client/src/ui/v10_login.c; showWindow(5) as a guest opens it): register with an
+  email (email, Tab, username, Tab, password, Register) -> the verification mail -> its link verifies ->
+  logout -> login with Enter -> logout -> Forgot password? -> the recover card -> the reset mail -> the
+  code typed into the reset steps (account_ui.c, in window 5's frame) -> a new password -> signed in ->
+  the old password is refused and the new one logs in. Plus: a login while the account server is down
+  says why (not "Please try again.").
 
   python3 -I client/tests/native_auth_e2e.py BUILD_DIR      (repository root)
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs), a local
@@ -97,27 +99,33 @@ def storage(key):
         return text
 
 
-# the guest Account window: the header bar's "Login or Register"
-OPEN = "0 menu\n500 clickid signedOutHeaderBar\n"
+# a guest: the header bar's "Login or Register" opens v10's login popup
+OPEN = "0 menu\n500 clickid knV10LoginBtn\n"
+# the popup's login card by username (no saved one: it opens on Email), where "Forgot password?" sits
+BY_NAME = "800 clickid knV10LoginMode\n"
 
 
 def scenario(brain_url, game_port, smtp, db):
-    # 1. register through the form: Tab moves name -> password -> email (native focus order)
-    log = run_client("register", OPEN + f"""1200 clickid accName
-1300 type {NAME}
+    # 1. register through the popup's Register card: Tab moves email -> username -> password (its order)
+    log = run_client("register", OPEN + f"""800 clickid knV10AuthSwitch
+1200 clickid accEmail
+1300 type {ADDR}
 1400 down TAB
 1410 up TAB
-1500 type pass_word1
+1500 type {NAME}
 1600 down TAB
 1610 up TAB
-1700 type {ADDR}
-1800 clicksel .accBtn.buttonP
+1700 type pass_word1
+1800 clickid knV10LoginSubmit
 5000 quit
 """, brain_url, game_port)
     check("register through the native form", f"[account] logged in as {NAME}" in log)
     row = sqlite3.connect(db).execute("SELECT email FROM accounts WHERE username = ?", (NAME,)).fetchone()
-    check("Tab put the password and the email in their own fields", row and row[0] == ADDR, repr(row))
-    check("the session token is saved (krunker_token)", len(storage("krunker_token") or "") >= 32)
+    check("Tab put the username and the password in their own fields", row and row[0] == ADDR, repr(row))
+    # the session lives in the alt vault (client/src/alt/, c7f73bd4), never in the plain krunker_token key;
+    # the next run signing in (Account Security below) shows it was kept
+    check("the session token is not left in plain storage (krunker_token)", not storage("krunker_token"),
+          repr((storage("krunker_token") or "")[:8]))
     mails = smtp.wait_messages(1, 20)
     check("verification mail captured", len(mails) == 1 and mails[0]["rcpt"] == [ADDR])
     _, text = mail_text(mails[0]) if mails else (None, "")
@@ -141,11 +149,11 @@ def scenario(brain_url, game_port, smtp, db):
     # 3. logout, then login with Enter from the password field
     log = run_client("relogin", f"""0 menu
 1500 call showWindow 5
-2000 clicksel [onclick*="logoutAcc"]
+2000 call logoutAcc
+2400 clickid knV10LoginMode
 2600 clickid accName
 2700 type {NAME}
-2800 down TAB
-2810 up TAB
+2800 clickid accPass
 2900 type pass_word1
 3000 down ENTER
 3010 up ENTER
@@ -154,31 +162,35 @@ def scenario(brain_url, game_port, smtp, db):
     check("logout", "[account] logged out" in log)
     check("Enter in the password field logs in", log.count(f"[account] logged in as {NAME}") >= 2, "restore + login expected")
 
-    # 4. forgot password: logout, Forgot password? -> email -> code -> new password -> signed in
+    # 4. forgot password: logout (the popup comes up), Forgot password? -> the recover card's email ->
+    #    the reset steps in window 5's (empty, v10) frame at the code step -> new password -> signed in
     before = len(smtp.messages)
     log = run_client("forgot", f"""0 menu
 1500 call showWindow 5
-2000 clicksel [onclick*="logoutAcc"]
-2600 clicksel [onclick*="knResetOpen"]
-3000 vis @step1 knResetWho knResetGo
-3100 clickid knResetWho
+2000 call logoutAcc
+2400 clickid knV10LoginMode
+2600 clickid knV10Forgot
+3000 vis @card recoveryEmail knV10RecoverSubmit
+3100 clickid recoveryEmail
 3200 type {ADDR.upper()}
 3300 down ENTER
 3310 up ENTER
-6000 vis @step2 knResetCode
+6000 vis @step2 knResetCode knV10Login
 6100 quit
 """, brain_url, game_port)
-    check("Forgot password? opens the reset form", vis(log, "step1").get("knResetWho") == "1", str(vis(log, "step1")))
-    check("sending the code moves to the code step", vis(log, "step2").get("knResetCode") == "1", str(vis(log, "step2")))
+    check("Forgot password? opens the popup's recover card", vis(log, "card").get("recoveryEmail") == "1", str(vis(log, "card")))
+    check("its Submit mails the code: the reset steps at the code step", vis(log, "step2").get("knResetCode") == "1"
+          and vis(log, "step2").get("knV10Login") == "-", str(vis(log, "step2")))
     mails = smtp.wait_messages(before + 1, 20)
     m, text = mail_text(mails[-1]) if len(mails) > before else (None, "")
     code = re.search(r"code ([A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4})", text)
     check("reset mail with a code", m is not None and str(m["Subject"]) == "Reset your Krunker Box Office password" and code, repr(text[:200]))
     code = code.group(1) if code else "AAAA-AAAA-AAAA"
-    log = run_client("reset", f"""0 menu
-1000 clickid signedOutHeaderBar
-1500 clicksel [onclick*="knResetOpen"]
-1800 clickid knResetHave
+    # an address with no account answers the same (no enumeration) and mails nothing: the first code stays the one
+    log = run_client("reset", OPEN + BY_NAME + """1100 clickid knV10Forgot
+1300 clickid recoveryEmail
+1350 type nobody@example.com
+1400 clickid knV10RecoverSubmit
 2100 clickid knResetCode
 2200 type AAAA-AAAA-AAAA
 2300 down ENTER
@@ -187,7 +199,7 @@ def scenario(brain_url, game_port, smtp, db):
 3600 call knResetBack
 3700 clickid knResetHave
 3900 clickid knResetCode
-4000 type {code.lower()}
+4000 type %s
 4100 down ENTER
 4110 up ENTER
 5500 vis @step3 knResetPass knResetPass2
@@ -199,7 +211,7 @@ def scenario(brain_url, game_port, smtp, db):
 6000 clickid knResetGo
 9000 vis @done knResetPass
 9100 quit
-""", brain_url, game_port)
+""" % code.lower(), brain_url, game_port)
     check("a wrong code stays on the code step", vis(log, "wrong").get("knResetCode") == "1" and vis(log, "wrong").get("knResetPass") == "-",
           str(vis(log, "wrong")))
     check("the mailed code (any case) moves to the new password", vis(log, "step3").get("knResetPass") == "1", str(vis(log, "step3")))
@@ -208,12 +220,13 @@ def scenario(brain_url, game_port, smtp, db):
     # 5. the old password is refused, the new one works
     log = run_client("newpass", f"""0 menu
 1500 call showWindow 5
-2000 clicksel [onclick*="logoutAcc"]
+2000 call logoutAcc
+2400 clickid knV10LoginMode
 2600 clickid accName
 2700 type {NAME}
 2800 clickid accPass
 2900 type new_pass_2
-3000 clicksel .accBtn.buttonG
+3000 clickid knV10LoginSubmit
 6000 quit
 """, brain_url, game_port)
     check("login with the new password", log.count(f"[account] logged in as {NAME}") >= 2)
@@ -224,11 +237,12 @@ def scenario(brain_url, game_port, smtp, db):
 def down_scenario(game_port):
     """The login while the account server is down: the reason, not v3.1.1's "Please try again."."""
     (dead,) = free_ports(1)
+    # the username saved by the last login: the popup opens on its Username card
     log = run_client("down", OPEN + """1200 clickid accName
 1300 type someone
 1400 clickid accPass
 1500 type some_pass
-1600 clicksel .accBtn.buttonG
+1600 clickid knV10LoginSubmit
 11000 quit
 """, "http://127.0.0.1:%d" % dead, game_port)
     check("a down account server: the specific reason", "[account] the social socket to" in log and "did not open" in log,

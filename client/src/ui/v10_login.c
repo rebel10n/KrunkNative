@@ -266,8 +266,7 @@ static void open_modal(const int reg) {
 // returns autoWindowClose, so the window closes. Every guest showWindow(5) (the comp menu, Store /
 // Market "Register to craft!", LOGIN REQUIRED cards, Battle Pass, a logout with the window up)
 // lands here. KrunkNative keeps the window only as the frame of its password-reset steps
-// (account_ui.c): v7's guest form under it (ui/windows/5.html) is not v10's, and its .accBtn
-// Register / Login buttons were text-sized on the v10 page, which has no CSS for them.
+// (account_ui.c); its template (ui/windows/5.html) is v10's own guest capture, which is empty.
 int v10_login_guest_window(void) {
     if (account_get() || L.to_reset || account_ui_reset_active() || !v10_menu_page()) return 0;
     if (menu_window_is_open()) menu_toggle_window(0); // closWind()

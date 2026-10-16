@@ -1750,7 +1750,9 @@ static void setup_dom(void) {
     // (menu_boot_tick); v10 never touches #loadingBg1 (empty, like #loadingBg)
     set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
-    set_display("aHider", "none");            // ads: none in KrunkNative
+    // ads: none in KrunkNative, as v10 with !window.canShowAds or premium (v10.js:219405): so no
+    // #aContainer, the dark rgba(0,0,0,.6) box v10's browser capture shows under Now Playing
+    set_display("aHider", "none");
     set_display("topRightAdHolder", "none");
     set_display("topLeftAdHolder", "none");
     set_display("menuFPSDisplay", "none");

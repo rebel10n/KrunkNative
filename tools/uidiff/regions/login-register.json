@@ -1,5 +1,5 @@
 {
-  "note": "loginOrRegister(true): v10_login.c's Register card against the same markup in Chromium with v10's CSS (tools/uidiff/v10_login_ref.py). Chromium's popup is 6 px taller (the sign-up bonuses wrap, see that region), so the regions above it read the reference 3 px higher and those below 3 px lower. The input fields are left out (focus ring / caret). The text regions differ by glyph rasterisation (FreeType vs Skia, 1 px advances); a text-sized button would differ by far more",
+  "note": "loginOrRegister(true): v10_login.c's Register card against the same markup in Chromium with v10's CSS (tools/uidiff/v10_login_ref.py). The input fields are left out (focus ring / caret). The text regions differ by glyph rasterisation (FreeType vs Skia, 1 px advances); a text-sized button would differ by far more",
   "defaults": {
     "fuzz": 12,
     "max_pct": 8.0
@@ -13,10 +13,6 @@
         200,
         38
       ],
-      "ref_offset": [
-        0,
-        3
-      ],
       "max_pct": 8.0,
       "note": "the green Register submit: full size (193 x 32 at 1280x720); a text-sized one leaves most of this dark"
     },
@@ -27,10 +23,6 @@
         134,
         134,
         34
-      ],
-      "ref_offset": [
-        0,
-        -3
       ],
       "max_pct": 16.0,
       "note": "the black Login here switch (.login-button, padding 8px 40px)"
@@ -43,10 +35,6 @@
         446,
         44
       ],
-      "ref_offset": [
-        0,
-        -3
-      ],
       "kind": "text",
       "max_pct": 14.0
     },
@@ -57,10 +45,6 @@
         600,
         445,
         26
-      ],
-      "ref_offset": [
-        0,
-        3
       ],
       "kind": "text",
       "max_pct": 12.0
@@ -73,8 +57,9 @@
         445,
         56
       ],
-      "skip": true,
-      "note": "engine gaps, not buttons: svelte.css nests `span.svelte-16z1lxi {max-width:150px;font-size:24px}` inside .sign-up-bonuses (CSS nesting is not parsed) and the bare <li>s get no list markers"
+      "note": "the purple sign-up bonuses: svelte.css nests its span / li rules inside .sign-up-bonuses (no CSS nesting in the engine) and the bare <li>s get Chrome's disc markers: kn-v10-rewards.css flattens the rules and draws the discs (\"Sign up bonuses\" wraps at 150 px, the list is left-aligned with a disc per line)",
+      "kind": "text",
+      "max_pct": 14.0
     }
   ]
 }

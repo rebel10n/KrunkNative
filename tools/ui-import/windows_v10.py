@@ -14,8 +14,10 @@ Differences from the v7 split, all intentional:
 - The capture's client ran offline (``KN_V10_PUBLIC``: the mirror, no API, a logged-out guest),
   so windows built from server data come out empty or fail. ``FROM_V7`` lists the windows taken
   from v7.1.4's capture instead (``"from": "v7.1.4"`` in windows.json), because the C UI needs a
-  template for them: 5 (Account: v10 opens its login popup for a guest instead of the window)
-  and 14 (Store: v10's generator needs the store API).
+  template for it: 14 (Store: v10's generator needs the store API). Window 5 (Account) stays
+  v10's own, empty: v10 opens its login popup for a guest instead of the window, and the C UI
+  generates the signed-in one (v7's guest form carried "Register or Login" and v7's recovery
+  address, neither of which v10 shows).
 - ``UNUSED`` slots: v10's empty ``windows[]`` entries, plus 28 (v7's Partner Dashboard, which
   v10 dropped).
 - ``<canvas id="classPreviewCanvas">``: v10 moves the menu's class preview canvas into the
@@ -36,7 +38,7 @@ import windows_v7 as w7  # noqa: E402  (trim/drop helpers, client_download_templ
 
 SOURCE = os.path.join(HERE, "krunker-windows-v10.json.gz")
 UNUSED = {"11", "12", "22", "28", "29"}
-FROM_V7 = {"5": "Account: v10 shows a guest its login popup", "14": "Store: needs the store API"}
+FROM_V7 = {"14": "Store: needs the store API"}
 CANVAS_RE = re.compile(r'<canvas id="classPreviewCanvas"[^>]*>\s*</canvas>')
 
 

@@ -7,8 +7,6 @@
  "kn.account.emailUnavailable": "Verification emails are unavailable on this server",
  "kn.account.emailVerified": "Verified",
  "kn.account.enterName": "Enter a username",
- "kn.account.forgot": "Forgot password?",
- "kn.account.forgotHint": "Forgot your password? Reset it with the email on your account.",
  "kn.account.noAnswer": "The account server did not answer. Please try again.",
  "kn.account.noServer": "No account server is set. Check Settings &gt; Client &gt; Matchmaker URL.",
  "kn.account.notInBuild": "Accounts are not available in this build yet. Please try again after the next update.",
