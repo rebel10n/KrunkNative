@@ -276,3 +276,27 @@ const char *ranked_region_name(const char *code) {
     }
     return "";
 }
+
+// v10 _7296 (game-server node -> ranked region index, the matchmaker's regionIND) and _7297
+// (index -> acronym: 1 oc, 2 as, 3 eu, 4 na, 5 sa); v10 _34037 folds oc -> as and sa -> na.
+// KrunkNative's node ids are v10's (sgp, us-nj, de-fra, ...); "local" and unknown nodes are not in
+// the table. KrunkNative choice: they fold to the default region (eu, v10 _34037's default).
+static const struct {
+    const char *node;
+    int index;
+} k_region_nodes[] = {
+    {"sgp", 2}, {"jb-hnd", 2}, {"us-nj", 4}, {"us-fl", 4}, {"us-ca-sv", 4}, {"brz", 5}, {"us-tx", 4}, {"au-syd", 1},
+    {"de-fra", 3}, {"sss", 3}, {"gb-lon", 3}, {"blr", 2}, {"as-mb", 2}, {"me-bhn", 2}, {"as-seoul", 2}, {"af-ct", 3},
+    {"mx-cmx", 5}, {"tor", 4}, {"eu-stm", 3}, {"pol", 3}, {"us-hi", 4},
+};
+
+int ranked_region_of_node(const char *node) {
+    if (!node || !*node) return -1;
+    for (size_t i = 0; i < sizeof(k_region_nodes) / sizeof(k_region_nodes[0]); i++) {
+        if (!strcmp(k_region_nodes[i].node, node)) {
+            const int index = k_region_nodes[i].index;
+            return index == 1 ? 2 : index == 5 ? 4 : index; // oc -> as, sa -> na
+        }
+    }
+    return -1;
+}

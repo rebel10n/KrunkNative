@@ -251,6 +251,10 @@ async def scenario(pa, pb, pc, node, v7_seeded):
           "a v7 rating 300 (3-1) is the Beta season profile: mu 30, sigma 2/3 sigma0 (%s)" % pr)
     check(p0.get("milestones") == [], "no milestones during the Beta season")
 
+    # Q2 (v10 defaults to eu) and Q17 (the min level comes from the profile response)
+    code, dflt = http(pa, "/mm/ranked/profile", token=alice["token"], season=SEASON)
+    check(code == 200 and dflt.get("region") == "eu" and dflt.get("minLevel") == 1,
+          "profile without a region: eu, min level from the brain (%s, %s)" % (dflt.get("region"), dflt.get("minLevel")))
     print("== a 4v4 across two brains")
     code, r0 = profile(pa, alice)
     check(code == 200 and r0["profile"]["rank"] == 0 and r0["profile"]["placement_left"] == 6 and r0.get("rankedPoints") == 0,
@@ -345,6 +349,15 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     print("== gates, leave")
     gl = queue(pc, accs[2])
     check(gl.get("payload", {}).get("code") == "MIN_LEVEL_REQUIREMENT", "level 10 gate -> MIN_LEVEL_REQUIREMENT")
+    if DRIVER == "postgres":  # Q16: a match still creating (no host yet) is seen by the join check and the rejoin lookup alike
+        psql("INSERT INTO mm_ranked_matches (match_id, queue_id, region, brain_id, status) VALUES ('rk-creating-test', 'ranked', 'na', 'test', 'creating')")
+        psql("INSERT INTO mm_ranked_match_players (match_id, account_id, username, team, rating_key, rating_before)"
+             " VALUES ('rk-creating-test', %d, 'creating', 0, 'elo', 1000)" % accs[3]["id"])
+        jr = queue(pa, accs[3])
+        code, cn = http(pa, "/mm/ranked/connection", token=accs[3]["token"])
+        check(jr.get("payload", {}).get("code") == "ALREADY_IN_MATCH" and not jr["payload"]["payload"].get("serverUrl") and code == 200 and cn.get("serverUrl") is None,
+              "a creating match: ALREADY_IN_MATCH and /mm/ranked/connection agree (no host yet)")
+        psql("DELETE FROM mm_ranked_matches WHERE match_id = 'rk-creating-test'")
     code, st = http(pa, "/mm/ranked/queue", regions="na")
     check(st.get("payload", {}).get("code") == "LOGIN_REQUIRED", "no session -> LOGIN_REQUIRED")
     js = queue(pa, spare, "as")

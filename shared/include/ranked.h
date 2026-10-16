@@ -121,6 +121,10 @@ extern const RankedMilestone g_ranked_milestones[RANKED_MILESTONE_COUNT];
 
 // v10 ranked regions (the matchmaker's): as / eu / na, regionIndex 2 / 3 / 4.
 #define RANKED_REGION_COUNT 3
+#define RANKED_DEFAULT_REGION_INDEX 3 // eu: v10 _34037's default (no defaultRegion, or one the table does not hold)
 const char *ranked_region_code(int index);   // 2 -> "as", NULL otherwise
 int ranked_region_index(const char *code);   // "eu" -> 3, -1 unknown (accepts "3" too)
 const char *ranked_region_name(const char *code); // "Europe"
+// v10 _34037 fold of a game-server node id ("de-fra", "us-nj", ...) to its ranked region index (2 / 3 / 4),
+// -1 when the table does not hold the node ("local"). The Ranked popup defaults to eu when -1.
+int ranked_region_of_node(const char *node);

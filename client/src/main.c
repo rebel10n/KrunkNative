@@ -1463,6 +1463,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     entities_reset(); // its entities / runtime blocks went with the old map (entities.c)
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
+    ranked_ui_on_init(client);        // a ranked match's first INIT: "joinedRank" (ranked_ui.c)
 
     game_config_on_init(&client->game); // WP-E: no GAME_CONFIG before this INIT (older server): the defaults
     lobby_vote_reset();                 // WP-E: the end screen's vote cards go

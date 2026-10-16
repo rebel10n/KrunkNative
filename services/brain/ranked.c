@@ -866,7 +866,8 @@ static void on_connection(kn_db_result *res, void *ud) {
     ReqCtx *c = ud;
     if (!kn_db_ok(res)) return db_fail(c, "ranked connection", res);
     c->out = cJSON_CreateObject();
-    const char *t = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : "";
+    /* a match still creating has no assignment yet (NULL): no serverUrl, as the join check's ALREADY_IN_MATCH */
+    const char *t = kn_db_rows(res) > 0 && !kn_db_isnull(res, 0, 0) ? kn_db_get(res, 0, 0) : "";
     cJSON *as = t[0] ? kn_json_parse(t, strlen(t)) : NULL;
     if (cJSON_IsObject(as)) {
         cJSON_AddStringToObject(c->out, "serverUrl", kn_json_str(as, "connection", ""));
@@ -883,9 +884,10 @@ static void connection_account(void *ud, kn_http_req *req, const int64_t id, con
     (void) req;
     (void) level;
     (void) name;
+    /* the same match the join check (db_ranked.c run_rk_join) reports as ALREADY_IN_MATCH: creating or live */
     static const kn_sql q = {.any = "SELECT mp.assignment FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
-                                    " WHERE mp.account_id = $1 AND m.status = 'live' AND NOT mp.abandoned AND mp.assignment IS NOT NULL"
-                                    " ORDER BY m.started_at DESC LIMIT 1"};
+                                    " WHERE mp.account_id = $1 AND m.status IN ('creating', 'live') AND NOT mp.abandoned"
+                                    " ORDER BY m.created_at DESC LIMIT 1"};
     char acc[24];
     snprintf(acc, sizeof acc, "%lld", (long long) id);
     kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc), on_connection, c);

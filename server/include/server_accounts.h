@@ -30,6 +30,7 @@ void accounts_on_disconnect(ClientConnection*);
 // NET_EXT_KN_ACCOUNT_RIGHTS. accounts_push_rights: the connection's rights now (STATE), e.g. after
 // a console op / deop.
 void accounts_handle_live_auth(ClientConnection*, const uint8_t *body, uint16_t length);
+void accounts_handle_joined_rank(ClientConnection*); // NET_EXT_JOINED_RANK "joinedRank" (ranked match joined)
 void accounts_push_rights(ClientConnection*);
 void accounts_on_end_packet(int uid, const NetEndPacket*);
 void accounts_send_billboard(ClientConnection*);          // before INIT

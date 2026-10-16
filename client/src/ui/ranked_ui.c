@@ -35,6 +35,7 @@
 #include <krunker_account.h> // the krunker.io account (krunker_account_signed_in, its name and level)
 #include <krunker_ranked.h> // v10's ranked services at krunker.io
 #include <krunker_net.h>    // the ranked match's game socket (krunker_net_join_match, krunker_net_ranked_elsewhere)
+#include <net_ext.h> // NET_EXT_JOINED_RANK (v10 JOINED_RANK)
 #include <flavor.h> // the coordinator's flavor pool: ranked is Box Office's
 #include <math.h>
 #include <kio_store.h> // krunker.io's ranked shop while krunker.io is the active backend
@@ -66,6 +67,9 @@ static struct {
     int poll_inflight;
     cJSON *assignment;            // MATCHED assignment (owned)
     int in_match;                 // joined a ranked match
+    char join_host[96];           // the host of that match (v10 isInOtherRankedMatch compares hosts)
+    int join_pending;             // joined, its INIT not applied yet: "joinedRank" goes out with it
+    int in_game_match;            // the joined match's game is applied (INIT) and not left: v10 _33840 + the socket
     char status[128];             // the status line ("" = the default)
     char status_icon[16];
     char status_color[16];
@@ -122,25 +126,31 @@ static int active_level(void) {
 
 static int current_season(void) { return ranked_season_at((int64_t) time(NULL)); }
 
-// v10 regionAcronym (_34037): the default region folds oc -> as, sa -> na; ranked regions are as /
-// eu / na. KrunkNative's defaultRegion values are its own server regions, folded by their prefix;
-// krunker_rankedRegion (KrunkNative) pins one. Default eu, as v10's _34041 (v10:34041).
+// v10 regionAcronym (_34037): the default region is the saved defaultRegion's node folded to its ranked
+// region (shared/src/ranked.c ranked_region_of_node, v10's _7296 / _7297 table), else the region the client
+// seeks in (pingRegion7, ClientManager.getRegion), else eu (v10's default). KrunkNative's own server regions
+// that are not v10 nodes fold by their prefix (oc -> as, sa -> na). krunker_rankedRegion (KrunkNative) pins one.
 static const char *my_region(void) {
     static char region[8];
     if (html_storage_get("krunker_rankedRegion", region, sizeof(region)) >= 0 && ranked_region_index(region) >= 0) return region;
     const cJSON *def = ui_setting_saved("defaultRegion");
-    const char *v = cJSON_IsString(def) ? def->valuestring : "";
-    static const struct { const char *prefix, *region; } fold[] = {
-        {"eu", "eu"}, {"de", "eu"}, {"fr", "eu"}, {"gb", "eu"}, {"uk", "eu"}, {"nl", "eu"}, {"pl", "eu"},
-        {"as", "as"}, {"sg", "as"}, {"jp", "as"}, {"jb", "as"}, {"au", "as"}, {"oc", "as"}, {"in", "as"}, {"kr", "as"}, {"hk", "as"},
-        {"na", "na"}, {"us", "na"}, {"ca", "na"}, {"sa", "na"}, {"br", "na"}, {"mx", "na"},
-    };
-    snprintf(region, sizeof(region), "eu");
-    for (size_t i = 0; v && v[0] && i < sizeof(fold) / sizeof(fold[0]); i++)
-        if (!strncmp(v, fold[i].prefix, strlen(fold[i].prefix))) {
-            snprintf(region, sizeof(region), "%s", fold[i].region);
-            break;
-        }
+    char node[96] = "";
+    if (cJSON_IsString(def) && def->valuestring[0]) snprintf(node, sizeof(node), "%s", def->valuestring);
+    else html_storage_get("pingRegion7", node, sizeof(node));
+    int index = ranked_region_of_node(node);
+    if (index < 0) {
+        static const struct { const char *prefix; int index; } fold[] = {
+            {"eu", 3}, {"de", 3}, {"fr", 3}, {"gb", 3}, {"uk", 3}, {"nl", 3}, {"pl", 3},
+            {"as", 2}, {"sg", 2}, {"jp", 2}, {"jb", 2}, {"au", 2}, {"oc", 2}, {"in", 2}, {"kr", 2}, {"hk", 2},
+            {"na", 4}, {"us", 4}, {"ca", 4}, {"sa", 4}, {"br", 4}, {"mx", 4},
+        };
+        for (size_t i = 0; i < sizeof(fold) / sizeof(fold[0]); i++)
+            if (!strncmp(node, fold[i].prefix, strlen(fold[i].prefix))) {
+                index = fold[i].index;
+                break;
+            }
+    }
+    snprintf(region, sizeof(region), "%s", ranked_region_code(index >= 0 ? index : RANKED_DEFAULT_REGION_INDEX));
     return region;
 }
 
@@ -289,7 +299,15 @@ static const V10Req *get_profile(const int season) {
     return v10_get(path, DATA_TTL_MS);
 }
 
-static const cJSON *profile_of(const V10Req *r) { return r->status == 200 ? cJSON_GetObjectItem(r->json, "profile") : NULL; }
+// the brain's level gate (brain.ranked.min_level, the profile's minLevel; v10:111566 hard-codes 10 until it is known)
+static int g_min_level = RANKED_MIN_LEVEL;
+
+static const cJSON *profile_of(const V10Req *r) {
+    if (r->status != 200) return NULL;
+    const cJSON *min = cJSON_GetObjectItem(r->json, "minLevel");
+    if (cJSON_IsNumber(min) && min->valueint > 0) g_min_level = min->valueint;
+    return cJSON_GetObjectItem(r->json, "profile");
+}
 
 static const V10Req *get_board(void) {
     if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) { // getLeaderboard(50, page, season, regionIndex) (v10:25961)
@@ -479,11 +497,14 @@ static void join_assignment(const cJSON *as) {
     const int port = (int) v10_num(as, "port", 0);
     if (!host[0] || port <= 0) return;
     printf("[ranked] joining %s (%s)\n", game, v10_str(as, "connection"));
-    R.in_match = 1;
     invalidate();
     v10_popup_close();      // quickJoinRankedMatch / acceptMatch: clearPops()
     menu_show_window(MENU_WINDOW_NONE, 0);
     servers_ui_join_ticket(host, port, game, ticket, web);
+    // after the call: joining leaves the previous game (client_leave_game -> ranked_ui_left_match), which must not undo this
+    R.in_match = 1;
+    R.join_pending = 1;
+    snprintf(R.join_host, sizeof(R.join_host), "%s", host);
 }
 
 // v10's joinAssignment (v10:98678) / quickJoinRankedMatch (v10:98729) for a krunker.io match: the match's
@@ -537,9 +558,11 @@ static void handle_message(const cJSON *msg) {
         clear_state();
         banner_error(v10_str(p, "message")); // v10: message = payload.message || "Unknown error", show true
         R.busy = 0;
-        if (!strcmp(code, "MIN_LEVEL_REQUIREMENT"))
-            show_overlay("Level Required", "You must be level 10 or higher to access Ranked Mode.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
-        else if (!strcmp(code, "LOGIN_REQUIRED"))
+        if (!strcmp(code, "MIN_LEVEL_REQUIREMENT")) {
+            char text[96];
+            snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
+            show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
+        } else if (!strcmp(code, "LOGIN_REQUIRED"))
             show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
         else if (!strcmp(code, "FLAVOR_UNAVAILABLE"))
             show_overlay("Ranked Unavailable", "Ranked is not available in this game.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
@@ -573,9 +596,18 @@ static void handle_message(const cJSON *msg) {
         }
         R.busy = 0;
     } else if (!strcmp(status, "MATCHED")) {
-        if (g_kio_queue && krunker_net_ranked_elsewhere(v10_str(cJSON_GetObjectItem(p, "assignment"), "connection"))) {
+        const cJSON *as = cJSON_GetObjectItem(p, "assignment");
+        if (g_kio_queue && krunker_net_ranked_elsewhere(v10_str(as, "connection"))) {
             printf("[ranked] match found while in another ranked game: ignored (v10 isInOtherRankedMatch)\n");
             clear_state();
+            render();
+            return;
+        }
+        // v10:98509 isInOtherRankedMatch: already in a ranked game on another host: the match is dropped, silently
+        if (R.in_game_match && strcmp(v10_str(as, "host"), R.join_host)) {
+            clear_state();
+            R.busy = 0;
+            update_banner();
             render();
             return;
         }
@@ -583,7 +615,7 @@ static void handle_message(const cJSON *msg) {
         R.state = MM_FOUND;
         R.busy = 0;
         cJSON_Delete(R.assignment);
-        R.assignment = cJSON_Duplicate(cJSON_GetObjectItem(p, "assignment"), 1);
+        R.assignment = cJSON_Duplicate(as, 1);
         set_status("Match found!", "\xe2\x9c\xa8", "#5ce05a");
         audio_play("pop_3", 0.15f, 0, 1.0f);
         html_timer_add(ACCEPT_DELAY_MS, accept_fire, NULL);
@@ -786,10 +818,23 @@ void ranked_ui_account_changed(void) {
     R.overlay.intro = R.overlay.outro = 0;
     v10_refresh();
 }
+// quickJoinRankedMatch's JOINED_RANK: the match's INIT is applied, so the server has this client in
+// its ranked game. KrunkNative sends it as NET_EXT "joinedRank" (no body) once, for the joined match.
+void ranked_ui_on_init(Client *client) {
+    if (!R.join_pending || !client) return;
+    R.join_pending = 0;
+    R.in_game_match = 1;
+    uint8_t buf[NET_EXT_HEADER_SIZE];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_JOINED_RANK, NULL, 0);
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+}
 
 void ranked_ui_left_match(void) {
     if (R.in_match) invalidate(); // the profile changed
     R.in_match = 0;
+    R.in_game_match = 0;
+    R.join_pending = 0;
+    R.join_host[0] = 0;
     R.status_lock = 0;
     R.rejoin[0] = 0;
 }
@@ -1087,6 +1132,12 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
             R.rejoin[0] = 0;
             join_kio_match(url, NULL);
             render();
+            return 1;
+        }
+        // REJOIN with no server yet (the match is still being formed, ALREADY_IN_MATCH without a serverUrl):
+        // look the connection up again instead of starting a new search (v10 quickJoinRankedMatch with no URL)
+        if (R.status_lock) {
+            fetch_connection();
             return 1;
         }
         if (R.state == MM_IDLE) start_matchmaking();
@@ -1732,8 +1783,11 @@ static void open_popup(void) {
     R.overlay.visible = 0;
     if (ranked_active_backend() == RANKED_BACKEND_NONE && !R.scenario)
         show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
-    else if (active_level() >= 0 && active_level() < RANKED_MIN_LEVEL) // (krunker.io: the level is known once its game server said so)
-        show_overlay("Level Required", "You must be level 10 or higher to access Ranked Mode.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 1);
+    else if (active_level() >= 0 && active_level() < g_min_level) { // (krunker.io: the level is known once its game server said so)
+        char text[96];
+        snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
+        show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 1);
+    }
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
     R.board_page = R.history_page = 1;
     memset(R.match_open, 0, sizeof(R.match_open));

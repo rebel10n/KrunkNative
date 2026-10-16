@@ -154,6 +154,9 @@ static void test_v10(void) {
     CHECK(ranked_match_points(50) == 25 && ranked_match_points(500) == 60 && ranked_match_points(-4) == 0, "per-match RP clamp(reward/2, 0, 60)");
     CHECK(ranked_region_index("eu") == 3 && ranked_region_index("4") == 4 && ranked_region_index("xx") == -1 &&
           !strcmp(ranked_region_code(2), "as") && !strcmp(ranked_region_name("na"), "North America"), "regions as/eu/na = 2/3/4");
+    CHECK(ranked_region_of_node("de-fra") == 3 && ranked_region_of_node("us-nj") == 4 && ranked_region_of_node("sgp") == 2 &&
+          ranked_region_of_node("au-syd") == 2 && ranked_region_of_node("brz") == 4 && ranked_region_of_node("local") == -1 &&
+          ranked_region_of_node(NULL) == -1, "node fold (v10 _7296 / _34037): au -> as, brz -> na, local unknown");
 }
 
 // Krunker v10.0.2 Turf Wars rules (shared/include/turf_wars.h)

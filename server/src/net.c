@@ -1940,7 +1940,8 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             uint16_t subtype, body_length;
             const uint8_t *body;
             if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, &body, &body_length)) break;
-            if (subtype == NET_EXT_KN_ACCOUNT_AUTH) accounts_handle_live_auth(client, body, body_length); // live sign-in (accounts.c)
+            if (subtype == NET_EXT_JOINED_RANK) accounts_handle_joined_rank(client);                      // "joinedRank" (accounts.c)
+            else if (subtype == NET_EXT_KN_ACCOUNT_AUTH) accounts_handle_live_auth(client, body, body_length); // live sign-in (accounts.c)
             else if (subtype == NET_EXT_VOTE_KICK) votekick_handle(client, body, body_length);           // "v2k" (votekick.c)
             else if (subtype == NET_EXT_ADMIN_ACTION) votekick_handle_admin(client, body, body_length); // ADMIN_ACTIONS (votekick.c)
             else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)

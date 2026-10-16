@@ -1474,6 +1474,18 @@ static void acc_ranked_on_leave(const ClientConnection *client) {
     server_log("[ranked] %s (account %d) left the match: the team plays short, abandoned at the result", client->name, slot->account_id);
 }
 
+// NET_EXT_JOINED_RANK ("joinedRank", v10 JOINED_RANK): the client is in the ranked match's game (its INIT is
+// applied). acc_set_ready records a roster player's join too, with the same chat line; whichever comes first
+// records it, so the order does not matter. Other accounts, games and joined players: nothing.
+void accounts_handle_joined_rank(ClientConnection *client) {
+    RankedSlot *slot = g_rk.active && client ? acc_ranked_slot(client->acct.account_id) : NULL;
+    if (!slot || slot->left || slot->joined) return;
+    acc_chat_to(client, "Joined Ranked Match. Abandoning a match will result in a temporary ban"); // ranked.join
+    slot->joined_at = g_server->now;
+    slot->joined = 1;
+    server_log("[ranked] %s joined the match (joinedRank)", client->name);
+}
+
 // The winning team index (0/1), -1 draw: abandoners lose to a team that stayed, else the
 // round's END (didWin of a roster player).
 static int acc_ranked_winner(void) {

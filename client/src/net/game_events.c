@@ -1360,6 +1360,7 @@ void client_game_events_reset(Client *client) {
 void client_leave_game(Client *client) {
     if (!client || !g_game_joined) return;
     g_game_joined = 0;
+    ranked_ui_left_match();           // the ranked game is left: a new matchmaker match may be joined (ranked_ui.c)
     if (client->game.player_count || client->me) client_clear_players(client); // spectating ends with them
     client_game_events_reset(client); // the round clock, the end screen, the vote kick, the mode HUD
     g_game_joined = 0;                // (client_game_events_reset marks a game joined)
