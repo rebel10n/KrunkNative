@@ -104,6 +104,9 @@ static cJSON *grant(Dbx *x, const char *id, const cJSON *rewards, int64_t times,
             char fid[64];
             snprintf(fid, sizeof fid, "feature:%s", kn_json_str(r, "feature", ""));
             item_add(x, id, fid, 1, kind, ref);
+        } else if (!strcmp(type, "battlepass")) {
+            /* FRVR's Battle Pass ticket: nothing to add here (the pass is the Battle Pass system's); it is
+             * echoed so the client shows the ticket and its Awesome! opens the pass */
         } else {
             continue;
         }

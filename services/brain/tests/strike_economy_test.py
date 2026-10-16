@@ -508,6 +508,20 @@ async def scenario(port):
         set_progress(bob_id, xp=1000000)
         st, res = await b.gapi("POST", "/strike/v1/players/me/claim/progression", {"slotId": "31_00"})
         check(st == 200 and res["rewards"] == [{"type": "currency", "currency": "spin_ticket", "amount": 1}], "past level 30: 1 spin ticket")
+        # a configured catalogue entry: the level 4 track slot's reward is a Battle Pass ticket (strike_track row)
+        query("UPDATE strike_track SET rewards = '[{\"type\": \"battlepass\"}]', player_choice = 0 WHERE slot_id = '4_00'")
+        for _ in range(60):
+            st, cfg = await b.gapi("GET", "/strike/v1/game-config")
+            if st == 200 and cfg["accountProgression"]["4"]["items"] == [{"type": "battlepass"}]:
+                break
+            await asyncio.sleep(0.25)
+        check(st == 200 and cfg["accountProgression"]["4"]["items"] == [{"type": "battlepass"}], "the configured track slot 4_00 is a battle pass reward")
+        kr0, tk0 = wallet(bob_id, "kr"), wallet(bob_id, "spin_ticket")
+        st, res = await b.gapi("POST", "/strike/v1/players/me/claim/progression", {"slotId": "4_00"})
+        check(st == 200 and res["rewards"] == [{"type": "battlepass"}], "a battle pass reward is granted as the reward: %s" % res)
+        check(wallet(bob_id, "kr") == kr0 and wallet(bob_id, "spin_ticket") == tk0, "the pass ticket moves no wallet")
+        st, err = await b.gapi("POST", "/strike/v1/players/me/claim/progression", {"slotId": "4_00"})
+        check(st == 400 and err["message"] == "Reward already claimed", "the battle pass reward is claimed once")
         st, res = await b.gapi("POST", "/strike/v1/players/me/claim/progression", {"slotId": "5_00"})
         check(st == 200 and res["rewards"][0]["type"] == "class", "level 5: a class (Run N Gun)")
         st, cl = await b.gapi("GET", "/strike/v1/players/me/classes")
@@ -583,7 +597,7 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
-        proc, port = start_brain(env, log_path, [])
+        proc, port = start_brain(env, log_path, ["--accounts.store_reload_ms=1500"])  # a configured row reloads in 1.5 s
         asyncio.run(scenario(port))
     finally:
         if proc:

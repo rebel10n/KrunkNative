@@ -153,6 +153,11 @@ static int reward_info(const cJSON *r, char *image, const size_t in, char *label
         }
         return 1;
     }
+    if (!strcmp(type, "battlepass")) { // the pass's ticket (FRVR's reward-image--bp art)
+        snprintf(image, in, "./img/battlepass/ticket.svg");
+        snprintf(label, ln, "Battle Pass");
+        return 1;
+    }
     if (!strcmp(type, "feature")) {
         static const struct { const char *feature, *image, *label; } FEATURES[] = {
             {"daily_missions", "./img/frvr-ui/missions/missions-icon.svg", "Daily Missions"},
