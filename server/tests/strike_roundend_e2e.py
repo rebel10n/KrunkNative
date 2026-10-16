@@ -91,7 +91,7 @@ def banner_line(text):
 
 
 def end_line(text):
-    m = re.search(r'\[strike\] end screen: title "([^"]*)" level (\d+) \((\d+) / (\d+)\), reward (\d+) KR', text)
+    m = re.search(r'\[strike\] end screen: title "([^"]*)" level (\d+) \((\d+) / (\d+)\), reward (\d+) KR, xp \+(\d+), claim (up|no)', text)
     return m.groups() if m else None
 
 
@@ -103,7 +103,7 @@ def scenario_case():
                    os.path.join(WORK, "cfg-end"), os.path.join(WORK, "end.log"))
     check("1: end.json rendered 1280x720", rc == 0 and png_size(out) == (1280, 720), f"rc {rc}, {png_size(out)}")
     check("1: title #1 VICTORY, a guest's level 1 at 0 / 100, the 25 KR reward",
-          end_line(text) == ("#1 VICTORY", "1", "0", "100", "25"), str(end_line(text)))
+          end_line(text) == ("#1 VICTORY", "1", "0", "100", "25", "0", "no"), str(end_line(text)))
 
     # the victory banner (Nde) before the lean screen: "#1 VICTORY" for the first place, "MATCH OVER" for the rest
     for rank, words in ((1, "#1 VICTORY"), (2, "MATCH OVER")):
@@ -113,12 +113,20 @@ def scenario_case():
         check(f"1: endRank {rank}: the victory banner says \"{words}\" (endAnim, then the lean screen)",
               rc == 0 and banner_line(text) == words and end_line(text) is None, str(banner_line(text)))
 
+    # a level-up from the round's XP (150 XP: level 1 -> 2, 50 / 100 into level 2): the XP card, the
+    # bar's level-up and the claim button of the track's level 2 slot (up at once in a scenario)
+    path = scenario_json("xp", {"end": 1, "endRank": 1, "endReward": 25, "endSeconds": 30, "round": {"xp": 150, "gained": 150}, "claim": 1})
+    rc, text = run([f"{BUILD}/client_bin", "--render-scenario", path, os.path.join(WORK, "xp.png")],
+                   os.path.join(WORK, "cfg-xp"), os.path.join(WORK, "xp.log"))
+    check("2: a level-up: title, level 2 at 50 / 100, +150 XP, the Claim button up",
+          rc == 0 and end_line(text) == ("#1 VICTORY", "2", "50", "100", "25", "150", "up"), str(end_line(text)))
+
     for rank, title in ((2, "2nd PLACE"), (3, "3rd PLACE"), (12, "12th PLACE")):
         path = scenario_json(f"rank{rank}", {"end": 1, "endRank": rank, "endReward": 0, "endSeconds": 12})
         rc, text = run([f"{BUILD}/client_bin", "--render-scenario", path, os.path.join(WORK, f"rank{rank}.png")],
                        os.path.join(WORK, f"cfg-rank{rank}"), os.path.join(WORK, f"rank{rank}.log"))
         got = end_line(text)
-        check(f"2: endRank {rank} -> {title}, no reward card at 0 KR", rc == 0 and got == (title, "1", "0", "100", "0"), str(got))
+        check(f"2: endRank {rank} -> {title}, no reward card at 0 KR", rc == 0 and got == (title, "1", "0", "100", "0", "0", "no"), str(got))
 
 
 # ---------------------------------------------------------------- 3. the live client

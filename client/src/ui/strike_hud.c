@@ -83,9 +83,13 @@ static struct {
     int end_shown, end_result;  // the round end is up this round (and its result: strike_hud_end)
     int rendered_spec;          // spectate_active() when the HUD was drawn (the panel replaces the health and reload)
     int banner_timer;           // the victory banner (endAnim) until it opens LEAN_END_SCREEN, 0 none
+    NetStrikeRoundPacket round; // the commit's XP of this round (NET_EXT_KN_STRIKE_ROUND)
+    int round_valid;
+    int claim_timer, claim_shown; // the track claim button: 2 s after a level-up; claim_shown once it is up
+    int lvl_timer, lvl_now;     // the level number counting up after a level-up
     char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
-    int scenario, scn_health, scn_max_health, scn_reward, scn_banner;
+    int scenario, scn_health, scn_max_health, scn_reward, scn_banner, scn_claim;
     int scn_board, scn_row_count;   // state.strike.scoreboard (held) and state.strike.board (rows)
     int scn_cross;                  // state.strike.crosshair: the Dynamic crosshair shown (cross_tick)
     BoardRow scn_rows[BOARD_ROWS_MAX];
@@ -904,6 +908,8 @@ static void update(Client *client) {
 #define LEAN_BAR_DX (175.0 / 193.0)
 #define LEAN_BAR_MIDDLE (4.0 / 193.0)
 #define LEAN_BAR_RIGHT (10.0 / 193.0)
+#define LEAN_CLAIM_MS 2000.0    // WB.computeNextReward: showClaimNextReward 2 s after the screen is built
+#define LEAN_LEVEL_MS 1500.0    // progress-bar hd: the level number counts up again after a level-up
 
 // tB's copies: the stroke copy of each text, then the copy with its class (classes: gold / silver / bronze / place);
 // size "--small" (the lean screen, stroke 2) or "--large" (the banner, stroke 4)
@@ -966,48 +972,139 @@ static const char *next_reward_image(const StrikeTrackSlot *slot, char *buf, con
     return NULL;
 }
 
-// the lean screen's progress bar and rewards (WB.view): the account's level and XP (strike_econ),
-// the KR the server sent this player (player.reward), and the next level's reward. The XP gained
-// this match is not in the END packet, so the XP card and the bar's gain stay out (no levelUp).
-static void lean_main(StrBuf *sb, const StrikeLevel *lv, const int in_cap, const int reward, const StrikeTrackSlot *next) {
-    const double prog = lv->xp_to_next > 0 ? (double) lv->xp_in_level / (double) lv->xp_to_next : 0.0;
+// the round as the lean screen reads it: the account's XP after the round and the XP the round gave
+// (NET_EXT_KN_STRIKE_ROUND; the account's own XP until it arrives), the levels before and after, and
+// the track's slots. WB.computeLevelProgression / computeNextReward.
+typedef struct {
+    int64_t xp, gained;
+    StrikeLevel now, prev;      // the level after the round / before it (xp - gained)
+    int lvl_up, in_cap;
+    int claimable;              // a level-up whose track slot can be claimed now (not a choice slot)
+    const StrikeTrackSlot *cur; // the level reached: its slot
+    const StrikeTrackSlot *next; // the group card's reward: the reached level's, or the next level's
+} LeanState;
+
+static void lean_state(LeanState *st) {
+    const StrikeAccount *acc = strike_econ_account();
+    st->xp = H.round_valid ? H.round.xp : acc->xp;
+    st->gained = H.round_valid ? H.round.xp_gained : 0;
+    st->now = strike_level_for_xp(st->xp);
+    st->prev = strike_level_for_xp(st->xp - st->gained);
+    st->lvl_up = st->now.level > st->prev.level;
+    st->in_cap = acc->max_level > 0 && st->now.level >= acc->max_level;
+    st->cur = strike_track_level(st->now.level);
+    st->claimable = st->lvl_up && st->cur && !st->cur->player_choice && !strike_econ_track_claimed(st->cur->slot_id);
+    st->next = strike_track_level(st->claimable ? st->now.level : st->now.level + 1);
+}
+
+// showClaimNextReward: the claim button is up after LEAN_CLAIM_MS (or at once in a scenario)
+static int claim_visible(const LeanState *st) { return st->claimable && (H.claim_shown || H.scn_claim); }
+
+// the lean screen's timers and its last markup (a new screen rebuilds them)
+static void lean_timers_cancel(void) {
+    if (H.claim_timer) html_timer_cancel(H.claim_timer);
+    if (H.lvl_timer) html_timer_cancel(H.lvl_timer);
+    H.claim_timer = H.lvl_timer = 0;
+    H.claim_shown = 0;
+}
+
+static void lean_forget(void) {
+    free(H.lean_head);
+    free(H.lean_main);
+    H.lean_head = H.lean_main = NULL;
+}
+
+// the group card (WB.buildRewards: _F with the group's images, the text "Next level reward" or the Claim button)
+static void lean_group_html(StrBuf *sb, const LeanState *st, const int claim) {
+    char image_buf[96];
+    const char *image = next_reward_image(st->next, image_buf, sizeof(image_buf));
+    const int group = st->next && st->next->reward_count > 0; // the group's one reward (its image when we have it)
+    sb_append(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\">");
+    if (image) sb_appendf(sb, "<img src=\"%s\" class=\"lean-end-screen__reward-image \" style=\"image-rendering: unset;\">", image);
+    sb_append(sb, "</div><div class=\"lean-end-screen__reward-bottom\">");
+    if (claim) // knStrikeClaimLevel: strike_econ_claim_level(slot, -1), the track's claim (POST progression)
+        sb_appendf(sb, "<div class=\"frvr-button frvr-button--size-xs frvr-button--width-90\" onclick=\"knStrikeClaimLevel('%s',-1)\">"
+                       "<span class=\"frvr-button-text\">Claim</span></div>", st->cur->slot_id);
+    else
+        sb_appendf(sb, "<div class=\"lean-end-screen__reward-text%s\">Next level reward</div>", group ? " lean-end-screen__reward-text--small-text" : " ");
+    sb_append(sb, "</div></div>");
+}
+
+// the lean screen's progress bar and rewards (WB.view): the account's level and XP, the XP gained
+// (the XP card, the bar's previous fill), the KR the server sent this player (player.reward), the group card
+static void lean_main(StrBuf *sb, const LeanState *st, const int reward) {
+    const double prog = st->now.xp_to_next > 0 ? (double) st->now.xp_in_level / (double) st->now.xp_to_next : 0.0;
+    const double prev = st->prev.xp_to_next > 0 ? (double) st->prev.xp_in_level / (double) st->prev.xp_to_next : 0.0;
     const double bar = LEAN_BAR_WIDTH * LEAN_BAR_DX;
     const double fill = bar * prog;
+    const int lvl = st->lvl_up ? st->now.level - 1 : st->now.level; // hd's leftValue: counts up after a level-up
     sb_append(sb, "<div class=\"progress-bar__progress-bar-holder progress-bar--animate progress-bar--text-horizontal\" style=\"--progress-width: 252;\">");
     sb_append(sb, "<div class=\"progress-bar__horizontal-holder\"><div class=\"progress-bar__left-text\">");
-    sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%s </span>", in_cap ? "Max Level" : "Level");
-    if (in_cap) sb_append(sb, "<span class=\"progress-bar__font-ode\"></span></div>");
-    else sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%d </span></div>", lv->level);
-
+    sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%s </span>", st->in_cap ? "Max Level" : "Level");
+    if (st->in_cap) sb_append(sb, "<span class=\"progress-bar__font-ode\"></span></div>");
+    else sb_appendf(sb, "<span class=\"progress-bar__font-ode\">%d </span></div>", lvl);
     sb_appendf(sb, "<div class=\"progress-bar__bar-wrapper\" style=\"--bar-height: 16;\">");
-    sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--left progress-bar__bar--border-base\" style=\"--pos1: %.14g; --pos2: %.14g; --posEnd: 1; --posStart: 0; --bar-left-width: %.14g;\">", prog, prog, bar);
-    sb_appendf(sb, "<div class=\"progress-bar__bar-inner progress-bar__yellow progress-bar__bar-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div>", fill);
-    sb_appendf(sb, "<div class=\"progress-bar__bar-inner-inner progress-bar__yellow progress-bar__bar-inner-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div></div>", fill);
+    sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--left progress-bar__bar--border-base\" style=\"--pos1: %.14g; --pos2: %.14g; --posEnd: 1; --posStart: 0; --bar-left-width: %.14g;\">", prev, prog, bar);
+    sb_appendf(sb, "<div class=\"progress-bar__bar-inner %sprogress-bar__yellow progress-bar__bar-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div>",
+               st->lvl_up ? "progress-bar__bar-inner--leveled-up " : "", fill);
+    sb_appendf(sb, "<div class=\"progress-bar__bar-inner-inner %sprogress-bar__yellow progress-bar__bar-inner-inner--end-screen\" style=\"--bar-progress-width: %.14g; --bar-height: 14;\"></div></div>",
+               st->lvl_up ? "progress-bar__bar-inner-inner--leveled-up " : "", fill);
     sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--middle progress-bar__bar--border-base\" style=\"--bar-middle-width: %.14g;\"></div>", LEAN_BAR_WIDTH * LEAN_BAR_MIDDLE);
     sb_appendf(sb, "<div class=\"progress-bar__bar progress-bar__bar--right progress-bar__bar--border-base\" style=\"--bar-right-width: %.14g;\"></div></div>", LEAN_BAR_WIDTH * LEAN_BAR_RIGHT);
-    sb_appendf(sb, "<div class=\"progress-bar__right-text progress-bar__font-ode\">%lld / %lld</div></div></div>", (long long) lv->xp_in_level, (long long) lv->xp_to_next);
+    sb_appendf(sb, "<div class=\"progress-bar__right-text progress-bar__font-ode\">%lld / %lld</div></div></div>", (long long) st->now.xp_in_level, (long long) st->now.xp_to_next);
 
     sb_append(sb, "<div class=\"lean-end-screen__rewards-wrapper\"><div class=\"lean-end-screen__rewards-container\">");
     if (reward > 0) {
         sb_appendf(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\"><img src=\"./img/frvr-ui/krunkies.svg\" class=\"lean-end-screen__reward-image\" style=\"image-rendering: unset;\"></div>"
                        "<div class=\"lean-end-screen__reward-bottom\"><div class=\"lean-end-screen__reward-text \">%d KR</div></div></div>", reward);
     }
-    char image_buf[96];
-    const char *image = next_reward_image(next, image_buf, sizeof(image_buf));
-    const int group = next && next->reward_count > 0; // the group's one reward (its image when we have it)
-    sb_append(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\">");
-    if (image) sb_appendf(sb, "<img src=\"%s\" class=\"lean-end-screen__reward-image \" style=\"image-rendering: unset;\">", image);
-    sb_appendf(sb, "</div><div class=\"lean-end-screen__reward-bottom\"><div class=\"lean-end-screen__reward-text%s\">Next level reward</div></div></div>",
-               group ? " lean-end-screen__reward-text--small-text" : " ");
+    if (st->gained > 0) {
+        sb_appendf(sb, "<div class=\"lean-end-screen__reward\"><div class=\"lean-end-screen__reward-top\"><img src=\"./img/frvr-ui/xp-icon.svg\" class=\"lean-end-screen__reward-image\" style=\"image-rendering: unset;\"></div>"
+                       "<div class=\"lean-end-screen__reward-bottom\"><div class=\"lean-end-screen__reward-text \">%lld XP</div></div></div>", (long long) st->gained);
+    }
+    lean_group_html(sb, st, 0); // the claim button comes with its timer (lean_group_refresh)
     sb_append(sb, "</div></div>");
+}
+
+// the group card alone (the claim button and the claimed track's next reward)
+static void lean_group_refresh(void) {
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_LEAN_END);
+    HtmlElem cards[16];
+    const int n = root ? html_dom_query_all(root, ".lean-end-screen__reward", cards, 16) : 0;
+    if (n <= 0) return;
+    LeanState st;
+    lean_state(&st);
+    StrBuf sb = {0};
+    lean_group_html(&sb, &st, claim_visible(&st));
+    char *html = sb_finish(&sb);
+    html_dom_insert_html(cards[n - 1], HTML_INSERT_BEFORE_BEGIN, html);
+    html_dom_remove(cards[n - 1]);
+    free(html);
+}
+
+static void claim_due(void *user) {
+    (void) user;
+    H.claim_timer = 0;
+    H.claim_shown = 1;
+    lean_group_refresh();
+}
+
+static void level_due(void *user) {
+    (void) user;
+    H.lvl_timer = 0;
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_LEAN_END);
+    HtmlElem spans[4];
+    const int n = root ? html_dom_query_all(root, ".progress-bar__left-text span", spans, 4) : 0;
+    char text[16];
+    snprintf(text, sizeof(text), "%d ", H.lvl_now);
+    if (n >= 2) html_dom_set_text(spans[1], text);
 }
 
 static void end_fill(Client *client, const int result) {
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_LEAN_END);
     if (!root) return;
-    const StrikeAccount *acc = strike_econ_account();
-    const StrikeLevel lv = strike_level_for_xp(acc->xp);
-    const int in_cap = acc->max_level > 0 && lv.level >= acc->max_level;
+    LeanState st;
+    lean_state(&st);
     const Player *me = me_player(client);
     const int reward = H.scenario ? H.scn_reward : me ? me->reward : 0;
     const int ffa = !team_mode(client);
@@ -1022,7 +1119,7 @@ static void end_fill(Client *client, const int result) {
     sb_append(&hs, "<div class=\"frvr-end-screen__map\">");
     sb_append_esc(&hs, label);
     sb_append(&hs, "</div>");
-    lean_main(&ms, &lv, in_cap, reward, strike_track_level(lv.level + 1));
+    lean_main(&ms, &st, reward);
     char *head = sb_finish(&hs), *main_html = sb_finish(&ms);
     // the bar animates on its first draw: rebuild the header and the rewards only when they change
     if (!H.lean_head || strcmp(H.lean_head, head) || strcmp(H.lean_main, main_html)) {
@@ -1037,11 +1134,18 @@ static void end_fill(Client *client, const int result) {
             html_dom_remove(bar);
         }
         if (rewards) html_dom_remove(rewards);
+        if (claim_visible(&st)) lean_group_refresh();
         char first[16], second[24];
         const char *cls;
         lean_words(ffa, client->net_end_rank, result, first, sizeof(first), second, sizeof(second), &cls);
-        printf("[strike] end screen: title \"%s%s\" level %d (%lld / %lld), reward %d KR\n", first, second, lv.level,
-               (long long) lv.xp_in_level, (long long) lv.xp_to_next, reward);
+        printf("[strike] end screen: title \"%s%s\" level %d (%lld / %lld), reward %d KR, xp +%lld, claim %s\n", first, second, st.now.level,
+               (long long) st.now.xp_in_level, (long long) st.now.xp_to_next, reward, (long long) st.gained,
+               claim_visible(&st) ? "up" : "no");
+        if (st.lvl_up) {
+            if (H.lvl_timer) html_timer_cancel(H.lvl_timer);
+            H.lvl_now = st.now.level;
+            H.lvl_timer = html_timer_add(LEAN_LEVEL_MS, level_due, NULL);
+        }
         free(H.lean_head);
         free(H.lean_main);
         H.lean_head = head;
@@ -1050,6 +1154,8 @@ static void end_fill(Client *client, const int result) {
         free(head);
         free(main_html);
     }
+    // the claim button: 2 s after a level-up is on screen (WB.computeNextReward's setTimeout)
+    if (st.claimable && !H.claim_shown && !H.claim_timer) H.claim_timer = html_timer_add(LEAN_CLAIM_MS, claim_due, NULL);
     // .lean-end-screen__timer: "Next round in" + the end timer's seconds (every timer packet)
     const HtmlElem timer = html_dom_query(root, ".lean-end-screen__timer__time");
     char t[16];
@@ -1058,17 +1164,35 @@ static void end_fill(Client *client, const int result) {
     strike_double_xp_end_fill(root); // the reward row's Double XP button (strike_double_xp.c)
 }
 
-// the lean screen's state is rebuilt with each new screen
-static void lean_forget(void) {
-    free(H.lean_head);
-    free(H.lean_main);
-    H.lean_head = H.lean_main = NULL;
+// the group's claim state and the account's track changed (strike_econ): the group card follows
+static void econ_changed(void *user, StrikeEconEvent event) {
+    (void) user;
+    (void) event;
+    if (!H.end_shown || !strike_screen_shown(STRIKE_SCREEN_LEAN_END)) return;
+    LeanState st;
+    lean_state(&st);
+    if (st.claimable == 0) H.claim_shown = 0;
+    lean_group_refresh();
+}
+
+// NET_EXT_KN_STRIKE_ROUND: the commit's XP. A round end already on screen fills in again (the XP card,
+// the bar's level-up), a round end still in its banner takes the XP when it opens.
+void strike_hud_round_progress(Client *client, const NetStrikeRoundPacket *round) {
+    if (!strike_ui_active()) return;
+    H.round = *round;
+    H.round_valid = 1;
+    strike_econ_refresh(NULL, NULL); // the account's XP and track claims follow the commit
+    if (H.end_shown && strike_screen_shown(STRIKE_SCREEN_LEAN_END)) {
+        lean_forget();
+        end_fill(client, H.end_result);
+    }
 }
 
 // nu(Ad, ...): LEAN_END_SCREEN over the game, its values filled
 static void lean_show(Client *client, const int result) {
     H.kill_card = 0;
     strike_touch_reset();
+    lean_timers_cancel();
     lean_forget();
     strike_screen_replace(STRIKE_SCREEN_LEAN_END); // nu(Ad, ...)
     end_fill(client, result);
@@ -1177,6 +1301,7 @@ void strike_hud_end_hide(Client *client) {
     banner_cancel();
     if (!H.end_shown) return;
     H.end_shown = 0;
+    lean_timers_cancel();
     lean_forget();
     if (strike_screen_top() == STRIKE_SCREEN_LEAN_END) strike_screen_clear();
 }
@@ -1276,7 +1401,9 @@ void strike_hud_damage_number(Client *client, const int key, const float x, cons
     strike_damage_add(&FX.dmg, rs->damage_number_mode, key, x, feet_y, z, shown, crit, game_constants.player_height, dir);
 }
 
-void strike_hud_install(void) {}
+void strike_hud_install(void) {
+    strike_econ_listen(econ_changed, NULL); // the round end's claim follows the track (strike_econ)
+}
 
 void strike_hud_reset(void) {
     unrender();
@@ -1287,6 +1414,8 @@ void strike_hud_reset(void) {
     H.log_count = 0;
     H.kill_card = 0;
     H.end_shown = 0;
+    H.round_valid = 0;
+    lean_timers_cancel();
     lean_forget();
 }
 
@@ -1365,6 +1494,13 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
     // (player.reward) and the end timer's seconds
     H.scn_reward = sjn(st, "endReward", 0);
     H.scn_banner = sjn(st, "endBanner", 0);
+    H.scn_claim = sjn(st, "claim", 0); // the claim button up at once
+    const cJSON *round = cJSON_GetObjectItemCaseSensitive(st, "round"); // {xp, gained}: the round's XP
+    if (cJSON_IsObject(round)) {
+        H.round.xp = sjn(round, "xp", 0);
+        H.round.xp_gained = sjn(round, "gained", 0);
+        H.round_valid = 1;
+    }
     if (client) {
         client->net_end_rank = sjn(st, "endRank", 1);
         client->net_end_seconds = sjn(st, "endSeconds", 0);

@@ -1272,6 +1272,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             }
             else if (subtype == NET_EXT_KN_OFFICIAL_ENTER_FAILED) events_enter_failed(client, (const char *) body, body_length); // "fe"
             else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_END_ROW) events_official_hud(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_KN_STRIKE_ROUND && body_length == sizeof(NetStrikeRoundPacket)) { // "srnd": Strike's round XP (strike_hud.c)
+                NetStrikeRoundPacket round;
+                memcpy(&round, body, sizeof(round));
+                strike_hud_round_progress(client, &round);
+            }
             else if (subtype == NET_EXT_KN_OFFICIAL_ROUND_SWITCH) events_round_switch(client);
             else if (subtype == NET_EXT_KN_OFFICIAL_TEXT_POPUP && body_length > sizeof(NetOfficialTextPopupHeader)) { // textPopup
                 NetOfficialTextPopupHeader h;

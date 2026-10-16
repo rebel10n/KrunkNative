@@ -3090,6 +3090,17 @@ static void acc_tick_custom(void) {
 
 // ------------------------------------------------------------------ brain events
 
+// NET_EXT_KN_STRIKE_ROUND (Krunker Strike): the round's XP for the player's round end (strike_hud.c)
+static void acc_send_strike_round(ClientConnection *client, const double xp, const double gained) {
+    NetStrikeRoundPacket r;
+    memset(&r, 0, sizeof(r));
+    r.xp = (int32_t) xp;
+    r.xp_gained = (int32_t) gained;
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(r)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_STRIKE_ROUND, &r, sizeof(r));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void acc_handle_commit_reply(const cJSON *frame) {
     const cJSON *result;
     cJSON_ArrayForEach(result, cJSON_GetObjectItem(frame, "results")) {
@@ -3108,6 +3119,8 @@ static void acc_handle_commit_reply(const cJSON *frame) {
             const int old_level = client->acct.level;
             if (cJSON_IsNumber(level)) client->acct.level = level->valueint;
             if (cJSON_IsNumber(funds)) client->acct.funds = funds->valueint;
+            const cJSON *xp = cJSON_GetObjectItem(result, "xp"), *gained = cJSON_GetObjectItem(result, "xpGained");
+            if (flavor_get() == FLAVOR_STRIKE && cJSON_IsNumber(xp) && cJSON_IsNumber(gained)) acc_send_strike_round(client, xp->valuedouble, gained->valuedouble);
             if (client->acct.level != old_level) acc_broadcast_info(client);
         }
     }

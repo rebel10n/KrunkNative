@@ -1436,6 +1436,7 @@ static void commit_done(kn_db_result *res, void *ud) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "accountId", (double) c->account);
     cJSON_AddNumberToObject(o, "xp", kn_json_num(v, "xp", 0));
+    cJSON_AddNumberToObject(o, "xpGained", kn_json_num(v, "xp", 0) - kn_json_num(v, "xp_before", 0)); // 0 for a duplicate
     cJSON_AddNumberToObject(o, "level", after);
     cJSON_AddBoolToObject(o, "levelUp", after > before);
     cJSON_AddNumberToObject(o, "kr", kn_json_num(v, "kr", 0));

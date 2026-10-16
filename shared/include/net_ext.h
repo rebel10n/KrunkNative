@@ -118,6 +118,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
     // 0x8050 ranked match flag (KrunkNative server, client/src/net/game_events.c -> hud_ui_match_gate)
     NET_EXT_KN_RANKED_MATCH = 0x8050, // S -> C NetRankedMatchPacket: 1 in a ranked match (v10 INIT isRanked, the in-match gates)
+    // 0x8090 Krunker Strike: the round's commit (S -> C, the player whose commit the brain answered)
+    NET_EXT_KN_STRIKE_ROUND = 0x8090,          // "srnd" NetStrikeRoundPacket: the account's Strike XP after the round
 
     // 0x8100..0x810F reserved for settings-wiring (the v10 settings package; coordinator, 2026-10-15)
     NET_EXT_KN_HIT_DAMAGE = 0x8100, // S -> C NetHitDamagePacket, right before a NET_PACKET_HIT whose damage has a fraction
@@ -248,6 +250,14 @@ typedef struct {
 typedef struct {
     float amount;
 } NetOfficialShakePacket;
+
+// NET_EXT_KN_STRIKE_ROUND (S -> C, Krunker Strike): the account's Strike XP after the round's commit and
+// the XP the round gave (kn_brain strike_econ_commit's xp / xpGained; 0 for a duplicate commit). The round
+// end's XP card, XP bar and level-up (FRVR's playerEndData XP rewards) read it.
+typedef struct {
+    int32_t xp;
+    int32_t xp_gained;
+} NetStrikeRoundPacket;
 
 // NET_EXT_KN_OFFICIAL_CHAT_I18N: Krunker "chi" ADD_CHATI18N [team, name, key | [key, ...args], kind,
 // color] (game.deob.js:221142): addChat with i18n.t(key, ...args), translated on the client's main

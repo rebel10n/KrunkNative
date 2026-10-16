@@ -24,6 +24,7 @@
 #include <client.h>
 #include <html_dom.h>
 #include <ui_logic.h> // HudKillCard
+#include <net_ext.h>   // NetStrikeRoundPacket (strike_hud_round_progress)
 #include <cJSON.h>
 
 // 1 when this process shows the Strike page (flavor Strike and the HTML UI available).
@@ -223,6 +224,7 @@ void strike_hud_killfeed(Client *client, const char *killer, int killer_is_you, 
                          const Weapon *weapon, int headshot, int thrown, int wallbang, int hidden); // killer NULL: a suicide / world death; hidden: NET_KILL_HIDE_FEED, no row
 void strike_hud_death(Client *client, const HudKillCard *card, const Player *killer); // io_killPlayer (us): the kill card
 void strike_hud_end(Client *client, int result);   // endGame: 1 victory, 0 defeat, -1 draw
+void strike_hud_round_progress(Client *client, const NetStrikeRoundPacket *round); // NET_EXT_KN_STRIKE_ROUND: the round's XP
 void strike_hud_end_hide(Client *client);          // the next round's INIT
 int  strike_hud_end_up(void);                      // the round-end screen is up
 void strike_hud_end_restore(void);                 // the menu closed over a round end still up: its screen comes back

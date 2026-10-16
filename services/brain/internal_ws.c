@@ -415,7 +415,7 @@ static void on_commit_stats(void *ud, const char *err, const cJSON *data) {
         cc->all_ok = 0;
         cJSON_AddStringToObject(res, "err", err);
     } else if (data) {
-        const char *keys[] = {"funds", "level", "score", "kr_awarded", "duplicate", "xp", "levelUp", "kr", "missions"};
+        const char *keys[] = {"funds", "level", "score", "kr_awarded", "duplicate", "xp", "xpGained", "levelUp", "kr", "missions"};
         for (size_t i = 0; i < sizeof(keys) / sizeof(*keys); i++) {
             const cJSON *v = cJSON_GetObjectItemCaseSensitive(data, keys[i]);
             if (v) cJSON_AddItemToObject(res, keys[i], cJSON_Duplicate(v, 1));
