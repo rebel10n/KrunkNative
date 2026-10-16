@@ -1283,7 +1283,18 @@ static int v7_is_at(const char *bind, const int index, const int code) {
     return i >= 0 && code >= 0 && (g_ctl.val[i] == code || g_ctl.alt[i] == code);
 }
 
+// scoreBoardTrigger (Controls, "Press (Toggle)" 0 / "Continuous (Hold)" 1, v10.js:220536): with Toggle
+// each sBoardKey press flips the board (`1 == down ? !shown : shown`) and the release keeps it.
+static int g_board_toggled;
+
+static int scoreboard_toggles(void) {
+    double v = 1.0;
+    return ui_setting_number("scoreBoardTrigger", &v) && (int) v == 0;
+}
+
 int ui_controls_scoreboard_held(void) {
+    if (scoreboard_toggles()) return g_board_toggled;
+    g_board_toggled = 0;
     return !ui_text_input_focused() && ui_controls_down(UI_CONTROL_BOARD);
 }
 
@@ -1339,7 +1350,8 @@ static void press_button(Client *client, const int code) {
         client_set_menu_open(client, 1);
         html_timer_add(0.0, show_player_list, NULL);
     }
-    // sBoardKey: g6(1) -> hud_ui polls ui_controls_scoreboard_held()
+    // sBoardKey: g6(1) -> hud_ui polls ui_controls_scoreboard_held(); a press flips it with scoreBoardTrigger 0
+    if (bind_is(UI_CONTROL_BOARD, code) && !ui_text_input_focused() && scoreboard_toggles()) g_board_toggled = !g_board_toggled;
     // window.Bf5: F free cam, H/0 objective cams, 1-9 players, R first/third person (raw keyCodes).
     // kpdVoteY / kpdVoteN (v10 :221340, spectating with a K.P.D case): the verdict steps (hud_votekick.c)
     if (client && spectate_active() && (v7_is("kpdVoteY", code) || v7_is("kpdVoteN", code)) &&

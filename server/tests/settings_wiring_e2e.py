@@ -362,6 +362,15 @@ check(len(o1) >= 3 and max(o1) > 5.0 and max(o1) < 21.0, "tracerOffset 1: the tr
       str([round(v, 2) for v in o1]))
 check("[vfx] trailCol 1.000 0.000 0.000 ropeCol 0.000 1.000 0.000" in log, "trailCol / ropeCol: the trail red, the rope green")
 
+# scoreBoardTrigger: Continuous (Hold, the default) shows the board only while Tab is held; Press (Toggle)
+# keeps it after the release and the next press hides it
+sb = ["0 menu", "600 play", "2000 down TAB", "2200 vis @h-down centerLeaderDisplay", "2300 up TAB", "2500 vis @h-up centerLeaderDisplay",
+      '2600 call setSetting "scoreBoardTrigger" "0"', "2700 down TAB", "2800 up TAB", "3000 vis @t-up centerLeaderDisplay",
+      "3100 down TAB", "3200 up TAB", "3400 vis @t-again centerLeaderDisplay", "3500 quit"]
+log = run("board", "\n".join(sb))
+seen = [vis(log, k).get("centerLeaderDisplay") for k in ("h-down", "h-up", "t-up", "t-again")]
+check(seen == ["1", "0", "1", "0"], "scoreBoardTrigger: Hold shows the board while held; Toggle keeps it up until the next press", str(seen))
+
 # ---------------------------------------------------------------- per weapon (vmSetts / gpSetts)
 # The Game tab with vmSetts on Per Weapon: "Select Weapon" follows the row and the viewmodel rows edit the
 # picked weapon's clones; Apply To All copies them to every weapon. In game the held weapon reads its
