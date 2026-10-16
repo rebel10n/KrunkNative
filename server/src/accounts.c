@@ -1139,10 +1139,11 @@ static void acc_turf_round_start(void) {
     memset(&g_turf, 0, sizeof(g_turf));
     const int map = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
                         ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
-    // isEligibleGame (isPubType) + isEligibleMap: an official public round on Burg / Sandstorm /
-    // Subzero in FFA / TDM. A hosted custom game (even with mimicPubs, a clan war host included)
-    // or a published map never counts: v10 requires official servers.
-    g_turf.eligible = brain_enabled() && turf_game_eligible(map, game_mode_id(game), !g_acc.custom && game_is_pub_type(game),
+    // isEligibleGame (game.isPubType(): no host, or mimicPubs) + isEligibleMap: a round on Burg /
+    // Sandstorm / Subzero in FFA / TDM. A published map (v10 isCustom && customMapData) and ranked
+    // never count. A hosted game counts when its request (a player's Host Game config, the operator's preset)
+    // sets mimicPubs, as v10 counts it: the flag reaches game.mimic_pubs through every round.
+    g_turf.eligible = brain_enabled() && turf_game_eligible(map, game_mode_id(game), game_is_pub_type(game),
                                                             g_acc.published_map[0] != 0, g_rk.active);
     g_turf.map_index = map;
 }
@@ -1361,8 +1362,8 @@ int accounts_is_custom_host(const ClientConnection *client) {
 // KrunkNative offers it as host options of team modes (knClanWar, knClanA / knClanB): the two
 // clans are the teams, members are sorted onto their clan's team and everyone else (no clan,
 // another clan, guests) may only spectate. Untagged sides are claimed by the first clans to
-// join. A clan war is a hosted custom game, so it never counts for Turf Wars (official public
-// games only, as v10's isEligibleGame requires).
+// join. A clan war is a player-hosted game: it counts for Turf Wars only when its request sets
+// mimicPubs (v10 isPubType: no host, or mimicPubs). Its own config never sets it.
 
 static int acc_clan_war_active(void) {
     const Game *game = &g_server->game;

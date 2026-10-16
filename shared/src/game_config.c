@@ -810,7 +810,8 @@ cJSON *game_config_from_map(const cJSON *map_config) {
     if (!out || !cJSON_IsObject(map_config)) return out;
     const cJSON *entry;
     cJSON_ArrayForEach(entry, gc_item(map_config, "settings")) {
-        if (entry->string) cJSON_AddItemToObject(out, entry->string, cJSON_Duplicate(entry, 1));
+        // a published map cannot make its game a pub game (mimicPubs comes from the host's request)
+        if (entry->string && strcmp(entry->string, "mimicPubs")) cJSON_AddItemToObject(out, entry->string, cJSON_Duplicate(entry, 1));
     }
     static const char *const keys[] = {"modes", "classes", "weps", "cls", "prks"};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
@@ -887,7 +888,9 @@ cJSON *game_config_setup(const int host_index, const cJSON *requested, const cJS
         if (mode && (allow_prevented || !mode->prevent_custom)) cJSON_AddItemToArray(modes, cJSON_CreateNumber(mode->id));
     }
     gc_set(cfg, "modes", modes);
-    gc_set(cfg, "mimicPubs", cJSON_CreateBool(0));
+    // mimicPubs is kept as the request gave it (v10 game.mimicPubs = !!cfg.mimicPubs, v10:222266): an
+    // overDat host (Comp) has no such key, so it is off; a forceDat host (Zombies, Raid) sets it below.
+    // A published map's settings never set it (game_config_from_map).
 
     if (ht->force_dat) {
         cJSON *pre = cfg;

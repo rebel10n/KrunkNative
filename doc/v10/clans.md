@@ -94,6 +94,14 @@ GET `/clans/by-name/<name>` (`v10:26750-26840`, `v10:143826-143990`). The raw me
 
 Server-side details (pool size per kill, top-20 enforcement, payout job) are not in the bundle.
 
+KrunkNative note on `mimicPubs` (the only way a hosted game is a pub game): v10 sets it from the game's
+create object and forceDat (Zombies and Raid, maps 27 / 18, never a turf map); v10's Host Game UI has
+no option for it. KN carries it from a hosted game's request, a Host Game request (`accounts.c`
+`acc_host_apply`) or the operator's preset (`gameserver.game.mimicPubs`, `config.c` `gs_game_typed`),
+through every round (`game_config_setup`). Deliberate KN decision (coordinator, user-approved): a
+player's own Host Game request can set `mimicPubs`, so a player's mimicPubs game counts for Turf Wars
+(and for the pub progress hooks). A published map's settings never set it (`game_config_from_map`).
+
 ### In-game effect
 
 - On `init` (`v10:219253`) or `warsClan` packet, the client gets the controlling clan

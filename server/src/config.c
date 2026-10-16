@@ -329,6 +329,12 @@ static cJSON *gs_game_typed(const cJSON *obj) {
             if (cJSON_IsArray(item) || cJSON_IsObject(item)) cJSON_AddItemToObject(typed, item->string, cJSON_Duplicate(item, 1));
             continue;
         }
+        // v10 game.mimicPubs: a hosted game's request (the operator's preset, or a Host Game request)
+        // may make it a pub-type game (Turf Wars, pub progress)
+        if (!strcmp(item->string, "mimicPubs")) {
+            if (cJSON_IsBool(item)) cJSON_AddBoolToObject(typed, "mimicPubs", cJSON_IsTrue(item));
+            continue;
+        }
         const GameConfigOption *o = gs_game_option(item->string);
         if (!o) continue;
         cJSON_DeleteItemFromObjectCaseSensitive(typed, o->var);

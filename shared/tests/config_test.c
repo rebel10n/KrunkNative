@@ -394,6 +394,61 @@ static void test_map_config(cJSON *sandstorm) {
     cJSON_Delete(plaza);
 }
 
+static void test_mimic_pubs(cJSON *sandstorm) {
+    printf("mimicPubs (game.isPubType): a host's request (operator preset, Host Game) and forced hosts carry it, a map's settings do not...\n");
+    // setupGameConfig: forceDat (Zombies) sets it, overDat (Comp) has no key, a custom host keeps the request's
+    cJSON *request = cJSON_Parse("{\"mimicPubs\":true}");
+    cJSON *zombies = game_config_setup(GAME_HOST_ZOMBIES, NULL, NULL, 1);
+    cJSON *comp = game_config_setup(GAME_HOST_COMP, request, NULL, 1);
+    cJSON *custom = game_config_setup(GAME_HOST_CUSTOM, request, NULL, 1);
+    CHECK(zombies && cJSON_IsTrue(cJSON_GetObjectItem(zombies, "mimicPubs")), "Zombies (forceDat) mimics pubs");
+    CHECK(comp && !cJSON_IsTrue(cJSON_GetObjectItem(comp, "mimicPubs")), "Comp (overDat) never mimics pubs");
+    CHECK(custom && cJSON_IsTrue(cJSON_GetObjectItem(custom, "mimicPubs")), "a custom host keeps the mimicPubs of its request");
+    cJSON_Delete(zombies);
+    cJSON_Delete(comp);
+    cJSON_Delete(custom);
+    cJSON_Delete(request);
+
+    // a published map's embedded settings cannot set it
+    cJSON *map_config = cJSON_Parse("{\"settings\":{\"mimicPubs\":true,\"gameTime\":5}}");
+    cJSON *from_map = game_config_from_map(map_config);
+    CHECK(from_map && !cJSON_GetObjectItem(from_map, "mimicPubs") && cJSON_GetObjectItem(from_map, "gameTime"), "a map's settings never set mimicPubs");
+    cJSON_Delete(from_map);
+    cJSON_Delete(map_config);
+
+    // game.isPubType() = !hasHost() || mimicPubs, read on every round of a hosted game
+    const cJSON *maps[1] = {sandstorm};
+    Game pub;
+    memset(&pub, 0, sizeof(pub));
+    game_configure(&pub, NULL, memcpy(malloc(sizeof(maps)), maps, sizeof(maps)), 1, NULL, 0, NULL, 0, NULL, 0);
+    pub.hooks.send = test_send;
+    game_init(&pub, 0, 0, 1);
+    CHECK(pub.ready && game_is_pub_type(&pub) && !game_config_is_custom(&pub), "a public game is a pub-type game");
+    game_off(&pub);
+
+    Game hosted;
+    memset(&hosted, 0, sizeof(hosted));
+    game_configure(&hosted, NULL, memcpy(malloc(sizeof(maps)), maps, sizeof(maps)), 1, NULL, 0, NULL, 0, NULL, 0);
+    hosted.hooks.send = test_send;
+    request = cJSON_Parse("{\"mimicPubs\":true}");
+    game_config_host(&hosted, request, GAME_HOST_CUSTOM);
+    cJSON_Delete(request);
+    for (int round = 0; round < 2; round++) {
+        game_init(&hosted, 0, 0, 1);
+        CHECK(hosted.ready && game_config_is_custom(&hosted) && game_is_pub_type(&hosted), "a hosted game with mimicPubs is a pub-type game (round %d)", round + 1);
+    }
+    game_off(&hosted);
+
+    Game plain;
+    memset(&plain, 0, sizeof(plain));
+    game_configure(&plain, NULL, memcpy(malloc(sizeof(maps)), maps, sizeof(maps)), 1, NULL, 0, NULL, 0, NULL, 0);
+    plain.hooks.send = test_send;
+    game_config_host(&plain, NULL, GAME_HOST_CUSTOM);
+    game_init(&plain, 0, 0, 1);
+    CHECK(plain.ready && game_config_is_custom(&plain) && !game_is_pub_type(&plain), "a hosted game without mimicPubs is not a pub-type game");
+    game_off(&plain);
+}
+
 static void test_sync(const cJSON *map) {
     printf("GAME_CONFIG / NETWORK_DATA sync...\n");
     Game server, client;
@@ -692,6 +747,7 @@ int main(void) {
     test_inputs_and_merge();
     test_class_overrides(sandstorm);
     test_map_config(sandstorm);
+    test_mimic_pubs(sandstorm);
     test_sync(sandstorm);
     test_votes();
     test_rotation();

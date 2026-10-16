@@ -4,8 +4,8 @@
 // daily settlement, services/brain/turf.c) and the client (the Turf Wars window, turf_ui.c).
 //
 // v10 (bundle class territorialWars + its "How to Play" text): kills by clan members against
-// players of another clan (or clanless players) on official public FFA / TDM games of Burg (0),
-// Sandstorm (2) and Subzero (3) count. Days start at 00:00 UTC, day 0 = 2026-03-17. At the end of
+// players of another clan (or clanless players) on public FFA / TDM games (no host, or mimicPubs)
+// of Burg (0), Sandstorm (2) and Subzero (3) count. Days start at 00:00 UTC, day 0 = 2026-03-17. At the end of
 // a day the clan with the most kills on a map controls it the next day; only the top 20
 // contributors per clan and map count; the day's kills on a map become a KR pool that the top 3
 // clans split 60 / 30 / 10, each clan sharing its cut by its loot config. The pool size per kill
@@ -24,8 +24,9 @@ const char *turf_map_name(int map_index);              // "Burg", NULL when not 
 
 // getDayNumber: max(0, floor((now - intro) / 86400 s))
 int turf_day_at(int64_t unix_s);
-// isEligibleMap + isEligibleGame: an official public game (not custom, not a custom map, not ranked)
-// of FFA (mode 0) or TDM (mode 1) on a turf map.
+// isEligibleMap + isEligibleGame: a pub-type game (game_is_pub_type: no host, or mimicPubs; the
+// caller passes it as pub_game), not a published map, not ranked, on a turf map in FFA (mode 0) or
+// TDM (mode 1).
 int turf_game_eligible(int map_index, int mode_id, int pub_game, int custom_map, int ranked);
 // onPlayerDeath: the kill counts when the killer is a real player with an account and a clan, and
 // the victim is not of that clan. Clans are compared case-insensitively ("" = none).

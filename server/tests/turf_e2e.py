@@ -12,7 +12,10 @@ kn_proto.free_ports(), cheats "all" so /kill <name> makes kills), registers 4 ac
      (/api/territorial-wars/status, clan/AAA/players)
   2. a hosted clan war (knClanWar, knClanA AAA, knClanB BBB, TDM): a0 / a1 spawn on team 1, b0 on
      team 2, c0 (no clan) is moved to spectating with the "Clan War: [AAA] vs [BBB]" notice; the
-     kills of a hosted game never count for Turf Wars (official public games only)
+     kills of a hosted game without mimicPubs never count for Turf Wars
+  3. a player's Host Game request with config.mimicPubs: a pub-type game, so its kills count
+  4. a second node, an operator preset (gameserver.host_type custom, gameserver.game.mimicPubs true):
+     a hosted pub-type game, so a0's kill on b0 counts (AAA's kill in the brain's turf_kills)
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import json
@@ -33,7 +36,7 @@ import kn_proto  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 DB = os.environ.get("KN_TEST_DB", f"kn_turf_e2e_{os.getpid()}")
-BRAIN_PORT, GAME_PORT = kn_proto.free_ports(2)
+BRAIN_PORT, GAME_PORT, PRESET_PORT = kn_proto.free_ports(3)
 WORK = tempfile.mkdtemp(prefix="kn-turf-e2e-", dir=os.path.expanduser("~/.cache"))
 CHAT_SEND, CHAT = 8, 9
 results = []
@@ -241,6 +244,74 @@ def run():
     after = psql("SELECT coalesce(sum(kills), 0) FROM turf_kills")
     check("a hosted clan war never counts for Turf Wars", before == after and before == "3", f"{before} -> {after}")
     for c, _ in war.values():
+        c.close()
+
+    # 3. a player's Host Game request with mimicPubs: a pub-type game, so the kills count (v10 isPubType)
+    time.sleep(2.0)  # the clan war's lobby reverts to the public rotation once it is empty
+    code, host = http("/mm/host-game", body={"config": {"modes": [0], "maps": [0], "maxPlayers": 6, "mimicPubs": True}}, token=tokens["te_a0"])
+    check("a player's mimicPubs game is hosted", code == 200 and host.get("clientId"), str(host)[:200])
+    if code != 200:
+        return
+    mimic = {"te_a0": play(host, tokens["te_a0"])}
+    code, seek = http("/mm/seek-game", token=tokens["te_b0"], game=host["gameId"])
+    if code != 200 or "port" not in seek:
+        check("te_b0 seeks the player's mimicPubs game", False, f"{code} {str(seek)[:200]}")
+        return
+    mimic["te_b0"] = play(seek, tokens["te_b0"])
+    for c, uid in mimic.values():
+        c.ent(class_index=0)
+    for c, _ in mimic.values():
+        c.read(timeout=2.0)
+    before = psql("SELECT coalesce(sum(kills), 0) FROM turf_kills")
+    say(mimic["te_a0"][0], "/kill te_b0")
+    mimic["te_a0"][0].read(timeout=1.0)
+    game.stdin.write("round end\n")
+    game.stdin.flush()
+    time.sleep(3.0)
+    after = psql("SELECT coalesce(sum(kills), 0) FROM turf_kills")
+    check("a player's mimicPubs game counts for Turf Wars (AAA's kill)", after == str(int(before) + 1), f"{before} -> {after}")
+    for c, _ in mimic.values():
+        c.close()
+
+    # 4. an operator's hosted preset (gameserver.host_type custom, gameserver.game.mimicPubs): a pub-type game,
+    # its kills count (the preset server is a second node on the same brain)
+    preset_json = os.path.join(WORK, "preset.json")
+    with open(preset_json, "w") as f:
+        json.dump({"database": cfgdb(), "gameserver": {"host_type": "custom", "game": {"mimicPubs": True}}}, f)
+    preset_cfg = os.path.join(WORK, "preset.cfg")
+    with open(preset_cfg, "w") as f:
+        f.write(f'hostname "Turf Preset"\nport {PRESET_PORT}\nnode_id TRP\nregion local\nmaxplayers 10\ncheats all\n'
+                f"coordinator_url ws://127.0.0.1:{BRAIN_PORT}/mm/internal/ws\n"
+                f"coordinator_http_url http://127.0.0.1:{BRAIN_PORT}\nmapcycle Burg\nmode ffa\njoin_timeout 4\n")
+    preset = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", preset_cfg, "--config", preset_json],
+                              stdout=open(os.path.join(WORK, "preset.log"), "w"), stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True)
+    procs.append(preset)
+    check("the preset server is linked to the coordinator", bool(wait_for(lambda: "welcomed" in log("preset.log"))))
+    lobby = wait_for(lambda: ([g[0] for g in http("/mm/game-list")[1].get("games", []) if g[0].startswith("TRP:")] + [None])[0])
+    check("the preset lobby is listed", bool(lobby))
+    if not lobby:
+        return
+    preset_players = {}
+    for n in ("te_a0", "te_b0"):
+        code, seek = http("/mm/seek-game", token=tokens[n], game=lobby)
+        if code != 200 or "port" not in seek:
+            check(f"{n} seeks the preset lobby", False, f"{code} {str(seek)[:200]}")
+            return
+        preset_players[n] = play(seek, tokens[n])
+    for c, _ in preset_players.values():
+        c.ent(class_index=0)
+    for c, _ in preset_players.values():
+        c.read(timeout=2.0)
+    before = psql("SELECT coalesce(sum(kills), 0) FROM turf_kills")
+    say(preset_players["te_a0"][0], "/kill te_b0")
+    preset_players["te_a0"][0].read(timeout=1.0)
+    preset.stdin.write("round end\n")
+    preset.stdin.flush()
+    sent = wait_for(lambda: "[turf] round on map 0" in log("preset.log"), timeout=15)
+    after = psql("SELECT coalesce(sum(kills), 0) FROM turf_kills")
+    check("a hosted preset with mimicPubs counts for Turf Wars (AAA's kill)", bool(sent) and after == str(int(before) + 1),
+          f"{before} -> {after}; " + ("" if sent else log("preset.log")[-300:]))
+    for c, _ in preset_players.values():
         c.close()
 
 
