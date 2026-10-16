@@ -1275,6 +1275,20 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 v10_party_code_timer(seconds);
             }
             else if (subtype == NET_EXT_KN_OFFICIAL_CODE_PASSED) v10_party_code_passed(); // "codeP": clearPops
+            else if (subtype == NET_EXT_VOTE_FORFEIT && body_length >= sizeof(NetVoteForfeitPacket)) { // KrunkNative's team vote (server/src/forfeit.c)
+                NetVoteForfeitPacket vf;
+                memcpy(&vf, body, sizeof(vf));
+                NetVoteForfeitStatePacket state; // the same box as the official lobbies'; the voter's line is the server's chat
+                memset(&state, 0, sizeof(state));
+                state.active = vf.active;
+                state.opened = vf.opened;
+                state.update_only = (uint8_t) (vf.opened ? 0 : 1);
+                state.votes = vf.votes;
+                state.needed = vf.needed;
+                memcpy(state.initiator, vf.initiator, sizeof(state.initiator));
+                state.initiator[sizeof(state.initiator) - 1] = 0;
+                hud_votekick_on_forfeit(client, &state);
+            }
             else if (subtype == NET_EXT_KN_OFFICIAL_SHAKE && body_length == sizeof(NetOfficialShakePacket)) { // "shk"
                 NetOfficialShakePacket shake;
                 memcpy(&shake, body, sizeof(shake));
