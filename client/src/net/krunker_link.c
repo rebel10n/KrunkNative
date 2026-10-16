@@ -1624,6 +1624,17 @@ static void on_error(KrunkerLink *l, const KrunkerFrame *f) {
     note(l, KRUNKER_LINK_EV_ERROR, "%s", e.message);
 }
 
+// "cust" [message, gameId, teams]: the answer to our CUSTOM_SERVER (v10's customRoomResponse, _67341,
+// v10.js:197942: the message is the host window's line, a gameId is the new game's). Strings are NUL-terminated.
+static void on_custom_response(KrunkerLink *l, const KrunkerFrame *f) {
+    const char *message = krunker_str(arg(f, 0)), *game_id = krunker_str(arg(f, 1));
+    if (!l->io.custom) {
+        note(l, KRUNKER_LINK_EV_NOTE, "cust: %s", game_id && game_id[0] ? game_id : (message ? message : ""));
+        return;
+    }
+    l->io.custom(l->io.user, message ? message : "", game_id ? game_id : "", truthy(arg(f, 2)));
+}
+
 // ---------------------------------------------------------------- movement locks / buffs (audit cluster A)
 
 static void emit_lock(KrunkerLink *l, const NetLockKind kind, const int locked) {
@@ -2609,6 +2620,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_cpt: on_captcha(l, &f); break;
         case KRUNKER_S2C_cptR: note(l, KRUNKER_LINK_EV_NOTE, "security challenge accepted"); break; // _hideCaptcha
         case KRUNKER_S2C_ERROR: on_error(l, &f); break;
+        case KRUNKER_S2C_CUSTOM_RESPONSE: on_custom_response(l, &f); break; // "cust": our CUSTOM_SERVER's answer
         case KRUNKER_S2C_VOTE_KICK: on_vote_kick(l, &f); break;
         case KRUNKER_S2C_KPD_RESPONSE: on_kpd_response(l, &f); break;
         case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)

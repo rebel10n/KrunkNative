@@ -154,6 +154,18 @@ void krunker_net_reconnect(Client *client); // the page's reconnect: seek the sa
 int krunker_net_failure_shown(const char *error);
 void krunker_net_clear_failure(void); // main thread: a session is in (menu_ui.c), any later error screen is its own
 void krunker_net_tick(Client *client);      // main thread, once per frame: notices, captcha
+// Hosting a custom game on krunker.io's official servers (v10's createPrivateRoom, v10.js:198129: CUSTOM_SERVER
+// "custom" over the official socket, answered by "cust"). config: v10's request object, a JSON object that the
+// call does not consume (flags, maps / modes / classes, passCode, serverConfig varN keys, teams / specs, weps /
+// cls / prks overrides). done runs once on the main thread (from krunker_net_tick): with game_id set and error
+// NULL when the game was made (join it with krunker_net_join(client, game_id, region)); with game_id NULL and
+// error the sentence to show otherwise: the server's refusal, or "Please try again." when no answer comes within
+// the HTTP timeout. region: the official session's region.
+// Returns 0 when the request was not sent and done is not called: no official connection, a signed-out account
+// (v10's guest step, the security challenge "bCpt", is not implemented), a request already waiting, or a config
+// that is not an object. 1 = sent.
+typedef void (*KrunkerHostDoneFn)(void *user, const char *game_id, const char *region, const char *error);
+int krunker_net_host_custom(const cJSON *config, KrunkerHostDoneFn done, void *user);
 // Whether the official session wants no input frame built now (net/recon.c samples none): v10's gameLoop
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
 // init's map still loading (the packets after it held) is the latter. 0 when no official game is open.

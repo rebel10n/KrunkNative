@@ -39,6 +39,7 @@
 //   cpt     [challenge]                      the ALTCHA proof of work (krunker_altcha.h) -> "cptR" [payload]
 //                                            (no ahNum step); unsolvable: KRUNKER_LINK_EV_CAPTCHA (:98132)
 //   error   [message, code]                  NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR
+//   cust    [message, gameId, teams]         the answer to our CUSTOM_SERVER (a hosted custom game): io.custom
 // Movement locks and modifiers of our own player (cluster A of the packet audit):
 //   lm      [x, y, z, xDire]                 LOCK_MOVE: NET_PACKET_LOCK (MOVE, 1) + TELEPORT_ACK (resetPosition)
 //                                            (iîiîìïì :220428 -> game.lockMove :188432)
@@ -195,6 +196,10 @@ typedef struct {
     // optional: the clock in ms the "q" syncTimes read (v7.1.4 Date.now(): io_updatePlayers' newSync and
     // queueInputFrame's Game.now share it). NULL: 0, so no frame carries a syncTime
     double (*now_ms)(void *user);
+    // optional: the answer to our CUSTOM_SERVER, "cust" [message, gameId, teams] (v10's customRoomResponse,
+    // v10.js:197942): gameId "" when the server refused, message says why. Called on the transport's thread
+    // with the link's lock held (krunker_net.c host_custom_tick delivers it on the main thread).
+    void (*custom)(void *user, const char *message, const char *game_id, int teams);
     void *user;
 } KrunkerLinkIO;
 

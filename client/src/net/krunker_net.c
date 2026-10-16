@@ -26,6 +26,7 @@
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <cJSON.h>
 #include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -559,9 +560,51 @@ static double link_now_ms(void *user) {
     return glfwGetTime() * 1000.0;
 }
 
+// krunker_net_host_custom's one request. The socket thread records the answer (link_custom, under K.lock);
+// the main thread delivers it (host_custom_tick) once, with the timeout. `active` is written by the main
+// thread only, so the tick reads it unlocked.
+#define KRUNKER_CUSTOM_TRYAGAIN "Please try again." // v10's custom.tryagain
+static struct {
+    int active;                // a request waits for its answer or for its timeout
+    int replied;               // the answer came (link_custom)
+    double deadline;           // glfwGetTime() at which the wait ends unanswered (the HTTP timeout)
+    KrunkerHostDoneFn done;
+    void *user;
+    char game_id[sizeof(K.game_id)], error[256]; // the answer (K.lock)
+} hosting;
+
+// a game id as krunker.io writes it ("NY:bbbbb"): [A-Za-z0-9:_-] (krunker_lobbies.c id_ok, krunker_net_invite_link)
+static int game_id_ok(const char *id) {
+    if (!id[0] || strlen(id) >= sizeof(K.game_id)) return 0;
+    for (const char *p = id; *p; p++) {
+        if (!(isalnum((unsigned char) *p) || *p == ':' || *p == '_' || *p == '-')) return 0;
+    }
+    return 1;
+}
+
+// the socket thread, K.lock held (krunker_link_on_frame): an answer while a request waits is its answer; a late
+// one (after the timeout) or none is dropped
+static void link_custom(void *user, const char *message, const char *game_id, const int teams) {
+    (void) user;
+    (void) teams;
+    if (!hosting.active || hosting.replied) {
+        printf("[krunker] custom game: an answer with no request waiting is dropped\n");
+        return;
+    }
+    hosting.replied = 1;
+    hosting.game_id[0] = hosting.error[0] = 0;
+    if (game_id[0]) {
+        if (game_id_ok(game_id)) snprintf(hosting.game_id, sizeof(hosting.game_id), "%s", game_id);
+        else snprintf(hosting.error, sizeof(hosting.error), "%s", KRUNKER_CUSTOM_TRYAGAIN);
+    } else {
+        snprintf(hosting.error, sizeof(hosting.error), "%s", message); // the server's refusal, as its host window shows it
+    }
+}
+
 static void link_setup(void) {
     const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha,
-                              .map = link_map, .account_frame = link_account_frame, .now_ms = link_now_ms, .user = NULL};
+                              .map = link_map, .account_frame = link_account_frame, .now_ms = link_now_ms, .custom = link_custom,
+                              .user = NULL};
     krunker_map_source_set_fetch(kmap_fetch);
     krunker_link_init(&K.link, &io, krunker_build()->ahkey);
 }
@@ -1759,6 +1802,121 @@ int krunker_net_inputs_paused(void) {
     return paused;
 }
 
+// v10's request object (createPrivateRoom's _67377) as the codec's values: a KrunkerValue tree whose strings
+// and keys point into the cJSON tree (alive for the call); the arrays and maps take their item slots from
+// one block of config_slots() values, which the caller frees after the send.
+static size_t config_slots(const cJSON *j) {
+    size_t n = 0;
+    if (cJSON_IsArray(j)) n = (size_t) cJSON_GetArraySize(j);
+    else if (cJSON_IsObject(j)) n = 2 * (size_t) cJSON_GetArraySize(j); // key and value
+    const cJSON *c = NULL;
+    if (cJSON_IsArray(j) || cJSON_IsObject(j)) {
+        cJSON_ArrayForEach(c, j) n += config_slots(c);
+    }
+    return n;
+}
+
+static KrunkerValue config_value(const cJSON *j, KrunkerValue **pool) {
+    if (cJSON_IsBool(j)) return KRUNKER_V_BOOL(cJSON_IsTrue(j));
+    if (cJSON_IsNumber(j)) return KRUNKER_V_NUM(j->valuedouble);
+    if (cJSON_IsString(j) && j->valuestring) return KRUNKER_V_STR(j->valuestring);
+    if (cJSON_IsArray(j)) {
+        const int n = cJSON_GetArraySize(j);
+        KrunkerValue *items = *pool;
+        *pool += n;
+        int i = 0;
+        const cJSON *c = NULL;
+        cJSON_ArrayForEach(c, j) items[i++] = config_value(c, pool);
+        return KRUNKER_V_ARRAY(items, n);
+    }
+    if (cJSON_IsObject(j)) {
+        const int n = cJSON_GetArraySize(j);
+        KrunkerValue *items = *pool;
+        *pool += 2 * n;
+        int i = 0;
+        const cJSON *c = NULL;
+        cJSON_ArrayForEach(c, j) {
+            items[2 * i] = KRUNKER_V_STR(c->string);
+            items[2 * i + 1] = config_value(c, pool);
+            i++;
+        }
+        return KRUNKER_V_MAP(items, n);
+    }
+    return KRUNKER_V_NIL; // null, or a value JSON does not have
+}
+
+int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, void *user) {
+    if (!done || !cJSON_IsObject(config)) return 0;
+    if (K.state != KS_OPEN) {
+        printf("[krunker] custom game: no official connection (join an official game first)\n");
+        return 0;
+    }
+    if (!krunker_account_signed_in()) {
+        // v10 first asks the socket for a security challenge (rpc "bCpt", the ALTCHA answer as the request's rid);
+        // krunker_link has no rpc, so a guest cannot host on krunker.io yet
+        printf("[krunker] custom game: a guest cannot host on krunker.io yet (security challenge rpc bCpt not implemented);"
+               " sign in to krunker.io\n");
+        return 0;
+    }
+    if (hosting.active) {
+        printf("[krunker] custom game: a request is already waiting for krunker.io's answer\n");
+        return 0;
+    }
+    const size_t slots = config_slots(config);
+    KrunkerValue *pool = calloc(slots ? slots : 1, sizeof(*pool));
+    if (!pool) return 0;
+    KrunkerValue *next = pool;
+    // v10's send(CUSTOM_SERVER, config, rid, rehost): rid is undefined for a signed-in account (nil), rehost false
+    const KrunkerValue args[3] = {config_value(config, &next), KRUNKER_V_NIL, KRUNKER_V_BOOL(0)};
+    int sent = 0;
+    pthread_mutex_lock(&K.lock);
+    if (K.state == KS_OPEN) sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_CUSTOM_SERVER), args, 3);
+    if (sent) {
+        hosting.active = 1;
+        hosting.replied = 0;
+        hosting.deadline = glfwGetTime() + KRUNKER_HTTP_TIMEOUT_MS / 1000.0;
+        hosting.done = done;
+        hosting.user = user;
+        hosting.game_id[0] = hosting.error[0] = 0;
+    }
+    pthread_mutex_unlock(&K.lock);
+    free(pool);
+    if (!sent) {
+        printf("[krunker] custom game: the request was not sent\n");
+        return 0;
+    }
+    printf("[krunker] custom game: request sent to krunker.io (%zu config values)\n", slots);
+    return 1;
+}
+
+// main thread, once per frame: the answer (or the timeout) is delivered to done, once
+static void host_custom_tick(const double now) {
+    if (!hosting.active) return;
+    char game[sizeof(K.game_id)] = "", error[sizeof(hosting.error)] = "", region[sizeof(K.region)] = "";
+    pthread_mutex_lock(&K.lock);
+    const int replied = hosting.replied;
+    if (!replied && now < hosting.deadline) {
+        pthread_mutex_unlock(&K.lock);
+        return;
+    }
+    snprintf(game, sizeof(game), "%s", hosting.game_id);
+    snprintf(error, sizeof(error), "%s", hosting.error);
+    snprintf(region, sizeof(region), "%s", K.region);
+    const KrunkerHostDoneFn done = hosting.done;
+    void *user = hosting.user;
+    hosting.active = 0;
+    hosting.done = NULL;
+    pthread_mutex_unlock(&K.lock);
+    if (!replied) printf("[krunker] custom game: no answer from krunker.io\n");
+    if (!done) return;
+    if (game[0]) {
+        printf("[krunker] custom game: created %s\n", game);
+        done(user, game, region, NULL);
+        return;
+    }
+    done(user, NULL, region, error[0] ? error : KRUNKER_CUSTOM_TRYAGAIN);
+}
+
 // KRUNKNATIVE_KRUNKER_TRACE=sync: one line a second while we have a player in the official game, the
 // numbers that tell "the server does not take my inputs" from "it takes them and disagrees": "q"
 // windows and input frames sent in that second (v10: ~tf windows a second, netRate frames), the last
@@ -1826,6 +1984,7 @@ void krunker_net_account_signed_in(void) {
 
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
+    host_custom_tick(glfwGetTime()); // a custom game's answer or its timeout (krunker_net_host_custom)
     account_frames_tick();
     if (K.account_event || K.points_event) { // the game server's "a" (name, level) and "ua" (rankedPoints): the account
         const int signed_in = K.account_event;

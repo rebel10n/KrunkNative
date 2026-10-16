@@ -1008,6 +1008,21 @@ else ()
     add_executable(ranked_route_test client/tests/ranked_route_test.c client/src/net/ranked_route.c)
     target_include_directories(ranked_route_test PRIVATE client/include shared/include)
     add_test(NAME ranked_route_test COMMAND ranked_route_test)
+    # krunker_host_custom_test (client/src/net/krunker_net.c, krunker_net_host_custom): a custom game hosted on
+    # krunker.io's official servers (CUSTOM_SERVER, the "cust" reply, the timeout). krunker_net.c is included
+    # whole, with doubles for its client, account and map callers; no socket is opened
+    if (NOT WIN32)
+        add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
+                       client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
+                       client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
+                       shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
+                       shared/src/season.c shared/src/voice.c shared/src/social.c)
+        # the headers krunker_net.c includes (client.h: freetype; GLFW for glfwGetTime, which the test defines itself)
+        target_include_directories(krunker_host_custom_test PRIVATE client/include shared/include client/lib/glfw/include)
+        target_link_libraries(krunker_host_custom_test PRIVATE cJSON freetype m pthread)
+        target_compile_definitions(krunker_host_custom_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+        add_test(NAME krunker_host_custom_test COMMAND krunker_host_custom_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
 
     # krunker_build_fetch_test (client/include/krunker_build_fetch.h): the live Krunker build of an official
     # join over a fake HTTP layer: published (hash-checked, cached), the cached / compiled fallbacks, refusals
