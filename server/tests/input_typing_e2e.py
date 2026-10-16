@@ -11,9 +11,10 @@ as GLFW does (client/src/input_script.c), so these runs type the way a keyboard 
      Object Manager's search land in the field and fire neither the bhop toggle nor Ctrl TP; the same
      keys with no field focused do (the control: the log lines this test looks for exist). SHIFT+A
      types "A", CTRL+A types nothing.
-  2. bhop toggle message: a notification (ui_notify: v10's notification centre where it shows, else the
-     #knNotify toast), no chat line, nothing in the middle of the screen (v10 has no bhop mode and so
-     no message of its own).
+  2. bhop toast: the bhop mode message slides in from the top right in its own toast (#knBhopToast,
+     bhop_toast.c, the v3.1.1 notify.ts look), starts off the right edge and settles in place; it is
+     not a notification (no centre or #knNotify text, no chat line, nothing in the middle of the
+     screen). A generic notification (Ctrl TP, T with no field focused) never shows it.
   3. PRESS START: a controller's Start opens the menu with "PRESS START"; once the pad goes quiet and
      the mouse moves the menu reads "CLICK TO PLAY" again (the text follows Gamepad.active).
   4. the Sniper Rifle's scope (#aimRecticle) is gone the moment we die scoped, through the death
@@ -131,15 +132,39 @@ check(value(log2, "om") == "bt", f"Object Manager search: B and T type (value {v
 check(toggles(before_free) == (0, 0), f"no bhop toggle / Ctrl TP while typing in game (seen {toggles(before_free)})")
 check(toggles(log2) == (1, 1), f"control: B and T with no field focused toggle bhop and Ctrl TP (seen {toggles(log2)})")
 
-# ---------------------------------------------------------------- 2. the bhop message
-script = "0 play\n1000 down B\n1040 up B\n1300 vis @toast knNotify\n1300 text @toast [id=knNotify]\n"
-script += "1300 text @center .notification-text\n"
-script += "1300 grep @chat bhop [id=chatList]\n1300 vis @mid gameMessage roundMessage\n1500 quit\n"
+# ---------------------------------------------------------------- 2. the bhop toast
+def style_value(log, label):
+    """the `style @label id:prop` probe's inline value for the bhop toast's transform"""
+    m = re.search(r"\[input_script\] style t=\d+ @" + re.escape(label) + r" knBhopToast:transform=(\S+)", log)
+    return m.group(1) if m else None
+
+
+def rect(log, label):
+    """the `rect @label id` probe as (x, y, w, h), None when absent"""
+    m = re.search(r"\[input_script\] rect t=\d+ @" + re.escape(label) + r" knBhopToast=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", log)
+    return tuple(float(v) for v in m.groups()) if m else None
+
+
+# T (Ctrl TP) is a generic notification: it must not show the bhop toast. Then B: the bhop toast.
+script = "0 play\n" + press(1000, "T") + "1300 vis @gen knBhopToast\n1300 vis @genc knNotify\n"
+script += "1300 text @gentoast [id=knNotify]\n1300 text @gencenter .notification-text\n"
+script += press(3500, "B") + "3560 style @slide knBhopToast:transform\n3560 vis @shown knBhopToast\n"
+script += "3800 style @plat knBhopToast:transform\n3800 vis @toast knBhopToast\n3800 text @toast [id=knBhopToast]\n"
+script += "3800 rect @rect knBhopToast\n3800 grep @chat bhop [id=chatList]\n3800 vis @mid gameMessage roundMessage\n4000 quit\n"
 log3 = run("bhop-toast", script)
-toast = vis(log3, "toast").get("knNotify") == "1" and (text(log3, "toast") or "").startswith("Bhop -")
-center = (text(log3, "center") or "").startswith("Bhop -")
-check(toast or center, f"bhop toggle: a notification shows it (toast {vis(log3, 'toast')} {text(log3, 'toast')!r}, "
-                       f"centre {text(log3, 'center')!r})")
+check(vis(log3, "gen").get("knBhopToast") in ("0", "-", None), f"generic notification: the bhop toast stays hidden ({vis(log3, 'gen')})")
+generic_text = (text(log3, "gentoast") or "").startswith("Ctrl TP -") or (text(log3, "gencenter") or "").startswith("Ctrl TP -")
+check(generic_text, f"generic notification: Ctrl TP shows in the notification path (toast {text(log3, 'gentoast')!r}, "
+                    f"centre {text(log3, 'gencenter')!r})")
+check(vis(log3, "toast").get("knBhopToast") == "1" and (text(log3, "toast") or "").startswith("Bhop -"),
+      f"bhop toggle: the bhop toast shows it (toast {vis(log3, 'toast')} {text(log3, 'toast')!r})")
+slide = style_value(log3, "slide")
+check(slide is not None and slide.startswith("translateX(") and float(slide[len("translateX("):-len("px)")]) > 0,
+      f"bhop toast slides in: off the right edge at the start (transform {slide!r})")
+check(style_value(log3, "plat") == "translateX(0.00px)", f"bhop toast settles in place (transform {style_value(log3, 'plat')!r})")
+r = rect(log3, "rect")
+check(r is not None and r[0] + r[2] >= 1200 and r[0] > 640 and r[1] <= 40,
+      f"bhop toast sits in the top right corner (x,y,w,h {r})")
 m = re.search(r"\[input_script\] grep t=\d+ @chat needle=\S+ n=(\d+) hits=(\d+)", log3)
 check(m is not None and m.group(1) == "1" and m.group(2) == "0", "bhop toggle: no chat line")
 check(set(vis(log3, "mid").values()) <= {"0", "-"}, f"bhop toggle: nothing in the middle of the screen ({vis(log3, 'mid')})")

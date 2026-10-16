@@ -743,7 +743,7 @@ void  v10_daily_spin_tick(void);                 // per frame: the item follows 
 int   v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 not ours
 // END v10_customize block
 
-// BEGIN ui_bhop block (client/src/ui/ui_bhop.c, ui_notify.c): the v3.1.1 offline build's
+// BEGIN ui_bhop block (client/src/ui/ui_bhop.c, bhop_toast.c): the v3.1.1 offline build's
 // client mod (Krunker_v3.1.1/mod/mods.ts bhop + notify.ts), ported 1:1. The "Developer
 // Tools" bind rows and the mods.ts keydown matching live in ui_mods.c (console agent).
 enum {
@@ -753,12 +753,13 @@ enum {
 int  ui_bhop_mode(void);                         // window.bhopMode (BhopMode value)
 void ui_bhop_set_mode(int mode);                 // window.bhopMode/bhopEnabled + localStorage "bhop"; no toast
 const char *ui_bhop_mode_name(int mode);         // BHOP_MODE_NAMES ("Disabled", "Slidehop (while moving)", ...)
-void ui_bhop_toggle(void);                       // toggleBhopMode: next in BHOP_MODE_ORDER, store, notify
+void ui_bhop_toggle(void);                       // toggleBhopMode: next in BHOP_MODE_ORDER, store, bhop toast
+void ui_bhop_announce(char *text, size_t size);  // "Bhop - <current mode>" into text, and the bhop toast (toggle, /bhop)
 const char *ui_bhop_bind(void);                  // window.bhopModeKey: KeyboardEvent.code ("KeyB"), "" = unbound
 void ui_bhop_set_bind(const char *code);         // setBhopModeBind: stores krk_bhop_mode_bind
 void ui_bhop_fill_input(Client*, Input*);        // patchInputs on this input frame (ui_controls_fill_input tail)
-void ui_notify(const char *html);                // a system message: v10 notification center (v10_notify.c), else the notify.ts toast
-void ui_notify_tick(double now_ms);              // hud_ui.c per frame: v10_notify_tick + the toast animation
+void ui_notify(const char *html);                // a system message: v10 notification center (v10_notify.c); never the bhop toast
+void ui_notify_tick(double now_ms);              // hud_ui.c per frame: v10_notify_tick
 // client/src/ui/ui_mod_keys.c: the rest of mods.ts' keys. ui_mods.c calls the keydown
 // switch after its bind matching (`input` = a text field has focus); 0 = not consumed.
 int  ui_mod_keys_keydown(Client*, int glfw_key, int input); // F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP

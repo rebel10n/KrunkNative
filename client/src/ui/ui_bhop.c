@@ -15,9 +15,12 @@
 //     DOM keyCodes 32 / 16 (only set while the game owns the keyboard, reset when the
 //     menu opens or the lock is lost);
 //   - Date.now() -> the GLFW clock; inputs[iInputs.frame] -> a per-input counter;
-//   - notify() -> ui_notify (ui_notify.c, notify.ts); the "Developer Tools" bind row and
-//     the document keydown matching that calls toggleBhopMode belong to ui_mods.c.
+//   - notify() -> bhop_toast_show (bhop_toast.c, notify.ts): the bhop toast is the bhop
+//     system's alone; the toggle key and /bhop (ui_bhop_announce) are the only callers. The
+//     "Developer Tools" bind row and the document keydown matching that calls toggleBhopMode
+//     belong to ui_mods.c.
 #include <ui_logic.h>
+#include <bhop_toast.h>
 #include <html_ui.h>
 #include <spectate.h> // ui_controls_code_down (CONTROLS.keys by DOM keyCode)
 #include <GLFW/glfw3.h>
@@ -138,17 +141,26 @@ const char *ui_bhop_mode_name(const int mode) {
     return BHOP_MODES[i >= 0 ? i : 0].name;
 }
 
+// The mode message, "Bhop - <current mode>" (the names the toggle notice shows), into `text`,
+// and the bhop toast. Both the toggle key and /bhop come through here (v3.1.1: /bhop's chat
+// line and its window.notify(msg) carry the same text).
+void ui_bhop_announce(char *text, const size_t size) {
+    bhop_load();
+    char shown[192];
+    I18N_F(shown, "kn.bhop.notify", "Bhop - {0}", bhop_shown_name(g_bhop.mode));
+    snprintf(text, size, "%s", shown);
+    bhop_toast_show(text);
+}
+
 // toggleBhopMode()
 void ui_bhop_toggle(void) {
     bhop_load();
     const int index = order_index(g_bhop.mode);
     g_bhop.mode = BHOP_MODES[((index >= 0 ? index : 0) + 1) % BHOP_MODE_COUNT].mode;
     store_mode();
-    char msg[64], shown[192];
-    snprintf(msg, sizeof(msg), "Bhop - %s", ui_bhop_mode_name(g_bhop.mode));
-    I18N_F(shown, "kn.bhop.notify", "Bhop - {0}", bhop_shown_name(g_bhop.mode));
-    ui_notify(shown);
-    printf("%s\n", msg); // console.log(msg)
+    char msg[192];
+    ui_bhop_announce(msg, sizeof(msg));
+    printf("Bhop - %s\n", ui_bhop_mode_name(g_bhop.mode)); // console.log(msg): the English name
 }
 
 const char *ui_bhop_bind(void) {

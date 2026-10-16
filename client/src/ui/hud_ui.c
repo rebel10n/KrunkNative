@@ -45,6 +45,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <bhop_toast.h>
 #include <v10_notify.h> // S5: chat emoji (v10_emoji_append_chat)
 #include <third_person.h>
 #include <hud_map.h> // part 2a: minimap layout
@@ -4305,7 +4306,8 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_v7modes_tick(client, in_game, g_hud_layout_epoch); // rounds, KR tags, big head, speed run (hud_v7modes.c)
     social_prop_hud_tick(client, in_game && g_hud_ui.visible > 0, g_hud_layout_epoch); // WP-E: prop controls + taunt keys (hud_social.c)
     hud_gui_update(client); // map-G: the map's custom "gui" elements in #customGUIHolder (hud_gui.c)
-    ui_notify_tick(now * 1000.0); // v3.1.1 mod notify.ts toast (ui_notify.c)
+    ui_notify_tick(now * 1000.0); // the notification center (ui_notify.c)
+    bhop_toast_tick(now * 1000.0); // the bhop toast (bhop_toast.c): bhop-only, ticked nowhere else
 
     if (spectate_active() && !hud_in_game(client)) {
         hud_spectator_tick(client, now);

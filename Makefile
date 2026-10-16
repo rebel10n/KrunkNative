@@ -771,6 +771,12 @@ lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@# nor timegm in what the Windows build compiles: #define timegm _mkgmtime under _WIN32 (account_ui.c)
 	@bad=$$(grep -lE '\btimegm\(' $$(git ls-files 'client/*.c' 'shared/*.c' 'server/*.c') | xargs -r grep -L '_WIN32'); \
 		if [ -n "$$bad" ]; then echo "timegm without a _WIN32 path: $$bad"; exit 1; fi
+	@# The bhop toast is bhop-only (client/include/bhop_toast.h): only ui_bhop.c shows it, only hud_ui.c
+	@# ticks it, and nothing else names its element or includes its header
+	@bad=$$(grep -lE 'bhop_toast_show\(' $$(git ls-files 'client/*.c' 'shared/*.c' 'server/*.c') | grep -vE '^(client/src/ui/bhop_toast|client/src/ui/ui_bhop)\.c$$'); \
+		bad2=$$(grep -lE 'bhop_toast_tick\(' $$(git ls-files 'client/*.c' 'shared/*.c' 'server/*.c') | grep -vE '^(client/src/ui/bhop_toast|client/src/ui/hud_ui)\.c$$'); \
+		bad3=$$(grep -lE 'knBhopToast|bhop_toast\.h' $$(git ls-files 'client/*.c' 'client/*.h' 'shared/*.c' 'shared/*.h' 'server/*.c' 'server/*.h') | grep -vE '^(client/src/ui/bhop_toast\.c|client/include/bhop_toast\.h|client/src/ui/ui_bhop\.c|client/src/ui/hud_ui\.c)$$'); \
+		if [ -n "$$bad$$bad2$$bad3" ]; then echo "bhop toast used outside the bhop system (bhop_toast_show: $$bad; bhop_toast_tick: $$bad2; knBhopToast/bhop_toast.h: $$bad3)"; exit 1; fi
 	@echo "lint ok"
 
 .PHONY: ks-test

@@ -34,7 +34,8 @@ void v10_notify_dismiss(int id); // iïïiïíï(id); unknown ids are ignored
 void v10_notify_clear(void);
 int v10_notify_count(void);
 // 1 when the center can be seen now: its column (#chatUIHolder > #chatUI) is shown and v10's
-// `hidden` rule (!$hasMenuUI && !$hasGameUI) is off. ui_notify() falls back to its toast otherwise.
+// `hidden` rule (!$hasMenuUI && !$hasGameUI) is off. Where it is hidden, ui_notify() still queues the
+// message here (it is shown when the center can be seen again, while its countdown runs).
 int v10_notify_visible(void);
 
 // ---- game announcement

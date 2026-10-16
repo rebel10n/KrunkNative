@@ -1693,10 +1693,9 @@ static int bhop_command(const char *line) {
         return 1;
     }
     ui_bhop_set_mode(next);
-    char msg[64];
-    snprintf(msg, sizeof(msg), "Bhop - %s", next ? "Hold Jump/Crouch" : "Disabled"); // devConsole's BHOP_MODE_NAMES
+    char msg[192];
+    ui_bhop_announce(msg, sizeof(msg)); // the chat line and the bhop toast: the current mode's name (v3.1.1 /bhop)
     append(msg, COL_REPLY);
-    ui_notify(msg);
     return 1;
 }
 
