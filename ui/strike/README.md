@@ -111,10 +111,20 @@ DOM (tools/strike/strike_screens.py, doc/ref/krunker-strike-1.37.2/strike-<name>
 Extras opens STORE, whose Spins section lists the shop's wheels (OC) and opens SPIN (the wheel drawn into the page's canvas by
 `client/src/ui/spin_wheel.c`); a currency's "+" opens STORE on that currency's section; Settings > Game > Customize Controls opens
 CUSTOMIZE_CONTROLS, where controls drag and the layout is saved (`mobile_layouts`, `client/src/ui/strike_touch.c`, which the in-game
-controls use) and Reset restores and saves the defaults. POPUP is the frame other views open in; LEADERBOARD_PLAYERS lives only in
-FRVR's tournament rewards popup, so (no hosted tournaments) only its scenario shows it. FRVR serves the shop's wheels from its
-gateway, so the wheels are the capture sandbox's (`capture-strike.js` SPIN_WHEELS). Not wired here: spinning a wheel and the Market /
-Currency sections' products (no Strike economy service yet). server/tests/strike_menu_screens_e2e.py opens each one and goes back.
+controls use) and Reset restores and saves the defaults. POPUP is the frame other views open in.
+
+The screens run on the signed-in account's Strike economy (`client/src/ui/strike_econ.c` over kn_brain's `/strike`
+gateway): the account box and the currency headers show its wallet; the Spins section lists the catalogue's shop wheels
+(`strike_economy()`, the KR and spin-ticket ones) and SPIN's 1x / 10x buttons spin on kn_brain, the wheel turning onto
+the result as `aue` does (the reward screen `Es` is not ported: the result holds, then the wheel is ready again); Market
+and Currency list the shop's products and buy them (KR only; FRVR's product popup `U2` is skipped); Customize's
+category boxes open ITEM_SELECTION_SCREEN (transcribed from `T5` / `rde`) to equip and unequip the account's items; the
+Battle Pass Missions tab lists the day's missions (a completed one is claimed from its card); Profile's Rewards Track
+comes from the game config and Claim Rewards claims every reached level; a leaderboard opens in the POPUP frame from
+`strikeAction('leaderboard[:board]')` (FRVR shows player boards only in its tournament popup; no button reaches it).
+A scenario with `state.strike.account` keeps the capture sandbox's wheels (`capture-strike.js` SPIN_WHEELS) so its
+pixels compare with the references. client/tests/strike_econ_ui_e2e.py runs it against a local kn_brain;
+server/tests/strike_menu_screens_e2e.py opens each one and goes back.
 
 ## Transcribed screens (no capture: not pixel-verified)
 

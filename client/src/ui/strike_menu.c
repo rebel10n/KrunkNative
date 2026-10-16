@@ -28,10 +28,13 @@
 #include <ui_logic.h>
 #include <backend_ui.h>
 #include <spin_wheel.h>
+#include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
+#include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
     int id;
@@ -58,28 +61,28 @@ static const StrikeClass CLASSES[] = {
 
 static const char *const SETTINGS_TABS[] = {"presets", "display", "game", "sound", "other"};
 
-// The shop's prize wheels. FRVR serves them from its gateway (GET /v2/spin-wheels/list, the wheel
-// itself /v1/spin-wheels/<id>); the 1.37.2 bundle and tools/strike/strike_data.json carry none, so
-// these are the wheels of the sandbox that captured STORE / SPIN (tools/uidiff/capture-strike.js
-// SPIN_WHEELS), in OC's order (KR wheels by price, highest first, then the ticket wheel). Their odds
-// are the capture's too; the rarity names are FRVR's windows.spin.rarity.* strings.
-typedef struct { const char *name, *color; double weight; } StrikeOdd;
-static const StrikeOdd WHEEL_ODDS[] = {
-    {"Common", "#a7b1c2", 0.5}, {"Uncommon", "#79d94a", 0.28}, {"Rare", "#3aa0ff", 0.14}, {"Epic", "#b45cff", 0.06}, {"Legendary", "#ffb800", 0.02},
-};
-#define WHEEL_ODD_COUNT ((int) (sizeof(WHEEL_ODDS) / sizeof(WHEEL_ODDS[0])))
+// The shop's prize wheels (OC / SA): kn_brain's Strike catalogue (strike_economy()->wheels, the same
+// rows /strike/v2/spin-wheels/list serves): the ones a shop lists (not hideInShop) with a price in KR or
+// spin tickets. FRVR also lists its ad wheels (timeBetweenSpins: Gn.canShowAds) and the golden wheel
+// only through the golden ticket; KrunkNative shows no ads, so neither is a block here.
+// A --render-scenario with state.strike.account (the capture's guest) shows the capture sandbox's
+// wheels instead (tools/uidiff/capture-strike.js SPIN_WHEELS), so its pixels compare with the reference.
+typedef struct { char pool[24], name[32], color[16]; double weight; } OddView;
 typedef struct {
-    const char *id, *name;
+    char id[32], name[48];
     int ticket; // price.currency spin_ticket (else kr)
     int amount; // price.amount
-} StrikeWheel;
-static const StrikeWheel WHEELS[] = {
-    {"lucky-draw", "Lucky Draw", 0, 500},
-    {"wheel-kr", "KR Spin", 0, 250},
-    {"wheel-ticket", "Ticket Spin", 1, 1},
+    OddView odds[SPIN_WHEEL_MAX_SLICES];
+    int odd_count;
+} WheelView;
+#define WHEELS_MAX 8
+static const struct { const char *id, *name; int ticket, amount; } CAPTURE_WHEELS[] = {
+    {"lucky-draw", "Lucky Draw", 0, 500}, {"wheel-kr", "KR Spin", 0, 250}, {"wheel-ticket", "Ticket Spin", 1, 1},
 };
-#define WHEEL_COUNT ((int) (sizeof(WHEELS) / sizeof(WHEELS[0])))
-#define WHEEL_DEFAULT 2 // the ticket wheel (the SPIN capture's spinnerIndex)
+static const OddView CAPTURE_ODDS[] = {
+    {"common", "Common", "#a7b1c2", 0.5}, {"uncommon", "Uncommon", "#79d94a", 0.28}, {"rare", "Rare", "#3aa0ff", 0.14},
+    {"epic", "Epic", "#b45cff", 0.06}, {"legendary", "Legendary", "#ffb800", 0.02},
+};
 // OC's grid spans per wheel count ("column/row")
 static const char *const WHEEL_GRID[][8] = {
     {0}, {"12/2"}, {"6/2", "6/2"}, {"6/2", "6/1", "6/1"}, {"6/1", "6/1", "6/1", "6/1"},
@@ -89,8 +92,11 @@ static const char *const WHEEL_GRID[][8] = {
 typedef struct {
     char name[32];
     int class_id, you;
-    int has_stats, score, kills;
+    int has_stats, score, kills; // the two stat columns (Score / Kills, or a board's Level / value)
+    int score_rank;              // the board's rank (0: the row's place)
 } BoardRow;
+
+typedef enum { POPUP_NONE, POPUP_LEADERBOARD } PopupKind;
 
 static struct {
     Client *client;
@@ -98,7 +104,30 @@ static struct {
     int settings_tab;
     int preset;           // selectedPresetIndex (3 = Custom)
     char last_account[160];
-    int spin;             // SA's spinnerIndex (a WHEELS index)
+    WheelView wheels[WHEELS_MAX];
+    int wheel_count, wheels_fixture; // wheels_fixture: built for a scenario (-1: not built)
+    int spin;             // SA's spinnerIndex (a wheels[] index)
+    cJSON *shop;          // GET /strike/v1/shop (strike_econ_get_shop)
+    // T5: the Customization category open in ITEM_SELECTION_SCREEN
+    int item_cat;
+    char item_default_img[256];
+    char item_ids[64][24]; // the shown squares' item ids ("" = Default)
+    int item_count;
+    PopupKind popup;      // what POPUP's builder shows
+    BoardRow live_board[BOARD_MAX];
+    int live_board_count;
+    char board_cols[2][16];
+    char buying[64];      // a purchase on its way
+    // aue's spin (onSpin / render): p[] pointers -> d[] targets at speeds A[], then the won pool grows
+    struct {
+        int phase;        // 0 idle, 1 asked, 2 pointers turning, 3 the end (u -> f), 4 held
+        int n;
+        double p[SPIN_WHEEL_MAX_POINTERS], d[SPIN_WHEEL_MAX_POINTERS], A[SPIN_WHEEL_MAX_POINTERS];
+        char pool[24];    // C: the won pool (rewards[0].poolId)
+        double c, u, f;   // c poolWeight, u -> f = 100 - c * 100
+        double step_ms, hold_ms, last_s;
+        int wheel;        // the wheels[] index spun
+    } sp;
     int store_section;    // bce: the active section title
     SpinWheelDraw wheel;  // SPIN's canvas this frame (spin_wheel.c draws it into the page's canvas)
     float wheel_f;        // aue's F (the canvas side, CSS px) last applied
@@ -106,7 +135,7 @@ static struct {
     int board_fixture;
     BoardRow board[BOARD_MAX];
     int board_count;
-} M = {.preset = 3, .spin = WHEEL_DEFAULT};
+} M = {.preset = 3, .wheels_fixture = -1, .spin = -1};
 
 // ---------------------------------------------------------------- helpers
 
@@ -135,22 +164,37 @@ static struct {
     char name[32];
 } FIXTURE;
 
+// The signed-in account's Strike state (strike_econ.c: /strike/v1/players/me), 0 = none / not loaded
+static const StrikeAccount *econ(void) {
+    const StrikeAccount *a = strike_econ_account();
+    return a->account_id > 0 && a->loaded ? a : NULL;
+}
+
 static void account_values(char *name, size_t nn, int *level, int *kr) {
     const AccountInfo *acc = account_get();
     const Client *c = M.client;
+    const StrikeAccount *e = econ();
     if (FIXTURE.set) {
         snprintf(name, nn, "%s", FIXTURE.name);
         *level = FIXTURE.level;
         *kr = FIXTURE.kr;
     } else if (acc) {
+        // jU: the account's name, its Strike level (the bundle's XP curve) and wallet.kr
         snprintf(name, nn, "%s", acc->alias[0] ? acc->alias : acc->name);
-        *level = acc->level > 0 ? acc->level : 1;
-        *kr = (int) acc->funds;
+        *level = e ? e->level.level : acc->level > 0 ? acc->level : 1;
+        *kr = e ? (int) e->wallet[STRIKE_CUR_KR] : 0;
     } else {
         snprintf(name, nn, "%s", c && c->menu_name[0] ? c->menu_name : "Guest");
         *level = 1;
         *kr = 0;
     }
+}
+
+// Po(Se.account): wallet.spin_ticket
+static int spin_tickets(void) {
+    if (FIXTURE.set) return FIXTURE.tickets;
+    const StrikeAccount *e = econ();
+    return e ? (int) e->wallet[STRIKE_CUR_SPIN_TICKET] : 0;
 }
 
 void strike_menu_scenario(const cJSON *acc, const char *name) {
@@ -176,11 +220,12 @@ static void fill_account(const HtmlElem root) {
     HtmlElem cur[4];
     const int n = html_dom_query_all(root, ".account-currency span", cur, 4);
     if (n >= 2) html_dom_set_text(cur[1], buf); // [0] spin tickets, [1] KR
-    if (n >= 1) html_dom_set_text(cur[0], FIXTURE.set ? (snprintf(buf, sizeof(buf), "%d", FIXTURE.tickets), buf) : "0");
-    if (FIXTURE.set) {
-        snprintf(buf, sizeof(buf), "%d", FIXTURE.xp);
+    if (n >= 1) html_dom_set_text(cur[0], (snprintf(buf, sizeof(buf), "%d", spin_tickets()), buf));
+    const StrikeAccount *e = econ();
+    if (FIXTURE.set || e) { // xpInCurrentLevel / xpToNextLevel
+        snprintf(buf, sizeof(buf), "%lld", FIXTURE.set ? (long long) FIXTURE.xp : (long long) e->level.xp_in_level);
         set_text(root, ".account-current-xp", buf);
-        snprintf(buf, sizeof(buf), "/%d", FIXTURE.next_xp);
+        snprintf(buf, sizeof(buf), "/%lld", FIXTURE.set ? (long long) FIXTURE.next_xp : (long long) e->level.xp_to_next);
         set_text(root, ".account-xp-to-next-level", buf);
     }
     // the face: the selected class's icon (Se.account face / getClassIcon)
@@ -190,8 +235,6 @@ static void fill_account(const HtmlElem root) {
         html_dom_set_attr(img, "src", buf);
     }
 }
-
-static int spin_tickets(void) { return FIXTURE.set ? FIXTURE.tickets : 0; } // Po(Se.account)
 
 // The currency header of STORE / SPIN (FRVR's .currency-header, A1): spin tickets and KR as the account
 // box shows them (the tickets are 0 on a fresh account, as fill_account does). Only the header's: SPIN's
@@ -229,15 +272,82 @@ static void sb_ticket_amount(StrBuf *sb, const int amount, const int small, cons
     sb_append(sb, "</div>");
 }
 
+static int wheel_cmp(const void *pa, const void *pb) {
+    // OC's sort: a spin-ticket wheel after a KR one, else the higher price first
+    const WheelView *a = pa, *b = pb;
+    if (a->ticket != b->ticket) return a->ticket ? 1 : -1;
+    return b->amount - a->amount;
+}
+
+static int odd_cmp(const void *pa, const void *pb) {
+    const OddView *a = pa, *b = pb; // rewards.sort((a, b) => b.weight - a.weight)
+    return a->weight < b->weight ? 1 : a->weight > b->weight ? -1 : 0;
+}
+
+static void wheels_build(void) {
+    const int fixture = FIXTURE.set;
+    if (M.wheels_fixture == fixture) return;
+    M.wheels_fixture = fixture;
+    M.wheel_count = 0;
+    if (fixture) {
+        for (size_t i = 0; i < sizeof(CAPTURE_WHEELS) / sizeof(CAPTURE_WHEELS[0]); i++) {
+            WheelView *w = &M.wheels[M.wheel_count++];
+            memset(w, 0, sizeof(*w));
+            snprintf(w->id, sizeof(w->id), "%s", CAPTURE_WHEELS[i].id);
+            snprintf(w->name, sizeof(w->name), "%s", CAPTURE_WHEELS[i].name);
+            w->ticket = CAPTURE_WHEELS[i].ticket;
+            w->amount = CAPTURE_WHEELS[i].amount;
+            w->odd_count = (int) (sizeof(CAPTURE_ODDS) / sizeof(CAPTURE_ODDS[0]));
+            memcpy(w->odds, CAPTURE_ODDS, sizeof(CAPTURE_ODDS));
+        }
+    } else {
+        const StrikeEconomy *e = strike_economy();
+        for (int i = 0; i < e->wheel_count && M.wheel_count < WHEELS_MAX; i++) {
+            const StrikeWheel *sw = &e->wheels[i];
+            if (sw->hide_in_shop || !sw->price_currency) continue;
+            const int ticket = !strcmp(sw->price_currency, "spin_ticket");
+            if (!ticket && strcmp(sw->price_currency, "kr") != 0) continue; // golden tickets: the golden spin only
+            WheelView *w = &M.wheels[M.wheel_count++];
+            memset(w, 0, sizeof(*w));
+            snprintf(w->id, sizeof(w->id), "%s", sw->id);
+            snprintf(w->name, sizeof(w->name), "%s", sw->name);
+            w->ticket = ticket;
+            w->amount = sw->price_amount;
+            for (int k = 0; k < sw->slice_count && w->odd_count < SPIN_WHEEL_MAX_SLICES; k++) {
+                const StrikePool *pool = strike_pool(sw->slices[k].pool);
+                OddView *o = &w->odds[w->odd_count++];
+                snprintf(o->pool, sizeof(o->pool), "%s", sw->slices[k].pool);
+                snprintf(o->name, sizeof(o->name), "%s", pool ? pool->name : sw->slices[k].pool);
+                snprintf(o->color, sizeof(o->color), "%s", pool && pool->color ? pool->color : "#ffffff");
+                o->weight = sw->slices[k].weight;
+            }
+            qsort(w->odds, (size_t) w->odd_count, sizeof(OddView), odd_cmp);
+        }
+        qsort(M.wheels, (size_t) M.wheel_count, sizeof(WheelView), wheel_cmp);
+    }
+    // SA's spinnerIndex default: the capture's ticket wheel, else the first
+    M.spin = 0;
+    for (int i = 0; i < M.wheel_count; i++) {
+        if (M.wheels[i].ticket) M.spin = i;
+    }
+}
+
+static const WheelView *current_wheel(void) {
+    wheels_build();
+    return M.wheel_count ? &M.wheels[M.spin >= 0 && M.spin < M.wheel_count ? M.spin : 0] : NULL;
+}
+
 // OC.view: one _I block per wheel (renderBackgroundImage: the wheel's imageUrl, none here), title r(p)
 // (KR: the coin + amount, tickets: qf), subtitle the wheel's name, overlay l(p) (a ticket wheel: wce,
 // the tickets owned), the click eb(p._id) -> SPIN
 static char *store_wheels_html(void) {
+    wheels_build();
     StrBuf sb = {0};
-    for (int i = 0; i < WHEEL_COUNT; i++) {
-        const StrikeWheel *w = &WHEELS[i];
+    const int count = M.wheel_count;
+    for (int i = 0; i < count; i++) {
+        const WheelView *w = &M.wheels[i];
         char col[8] = "", row[8] = "";
-        const char *span = WHEEL_COUNT < (int) (sizeof(WHEEL_GRID) / sizeof(WHEEL_GRID[0])) ? WHEEL_GRID[WHEEL_COUNT][i] : "3/1";
+        const char *span = count < (int) (sizeof(WHEEL_GRID) / sizeof(WHEEL_GRID[0])) ? WHEEL_GRID[count][i] : "3/1";
         sscanf(span ? span : "3/1", "%7[^/]/%7s", col, row);
         sb_appendf(&sb, "<div id=\"wheelStoreBlock\" class=\"frvr-store-block-container store-wheel\" style=\"grid-column: span %s; grid-row: span %s;\""
                         " onclick=\"strikeAction('spin:%d')\"><div class=\"frvr-store-block\"><div class=\"frvr-store-block-title\">",
@@ -257,6 +367,128 @@ static char *store_wheels_html(void) {
     return sb_finish(&sb);
 }
 
+// ---- the Market / Currency sections: GET /strike/v1/shop (strike_econ_get_shop). FRVR's fg builds
+// Market from its N2 market and Currency from yU (ticket packs) + the KR packs (_I blocks,
+// .store-krunkies); kn_brain's shop has no real money, so every product is a KR (or free) _I block
+// here: title its price, subtitle its title, the click buys it (strike_econ_buy; FRVR first shows the
+// product popup U2). Market = categories deals / bundles / free, Currency = tickets / currency.
+static const char *product_section(const char *category) {
+    if (!category) return NULL;
+    if (!strcmp(category, "deals") || !strcmp(category, "bundles") || !strcmp(category, "free")) return "1";
+    if (!strcmp(category, "tickets") || !strcmp(category, "currency")) return "2";
+    return NULL;
+}
+
+static void product_image(const cJSON *product, char *out, const size_t n) {
+    out[0] = 0;
+    const cJSON *reward = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(product, "products"), 0);
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "type"));
+    if (type && !strcmp(type, "item")) {
+        const StrikeItem *it = strike_item(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "item")));
+        if (it && it->skin >= 0) store_skin_preview(it->skin, out, n);
+    } else if (type && !strcmp(type, "currency")) {
+        const char *cur = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "currency"));
+        const int amount = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(reward, "amount"));
+        if (cur && !strcmp(cur, "spin_ticket")) { // pa(): spin-ticket-1..3 / -many
+            if (amount >= 1 && amount <= 3) snprintf(out, n, "./img/frvr-ui/spin-ticket-%d.png", amount);
+            else snprintf(out, n, "./img/frvr-ui/spin-ticket-many.png");
+        } else if (cur && !strcmp(cur, "kr")) {
+            snprintf(out, n, "./img/currencies/krunkies.png");
+        }
+    }
+}
+
+static void store_products_fill(const HtmlElem root) {
+    const cJSON *products = cJSON_GetObjectItemCaseSensitive(M.shop, "products");
+    for (int section = 1; section <= 2; section++) {
+        char want[4];
+        snprintf(want, sizeof(want), "%d", section);
+        StrBuf sb = {0};
+        int index = 0, count = 0;
+        const cJSON *p;
+        cJSON_ArrayForEach(p, products) {
+            const int i = index++;
+            const char *sec = product_section(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "category")));
+            if (!sec || strcmp(sec, want) != 0) continue;
+            const cJSON *price = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(p, "price"), 0);
+            const char *ptype = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(price, "type"));
+            const int amount = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(price, "amount"));
+            const int bought = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(p, "purchaseCount"));
+            const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(p, "maxPurchaseCount"));
+            const int sold_out = max > 0 && bought >= max;
+            char image[512];
+            product_image(p, image, sizeof(image));
+            sb_appendf(&sb, "<div class=\"frvr-store-block-container store-product%s\" style=\"grid-column: span 3;\" data-product=\"",
+                       sold_out ? " is-gray is-locked" : "");
+            sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id")) : "");
+            sb_appendf(&sb, "\" onclick=\"strikeAction('buy-product:%d')\"><div class=\"frvr-store-block\">", i);
+            if (image[0]) {
+                sb_append(&sb, "<div class=\"frvr-store-block-render\" style=\"background-image: url('");
+                sb_append_esc(&sb, image);
+                sb_append(&sb, "');\"></div>");
+            }
+            if (sold_out) sb_append(&sb, "<span class=\"material-icons\">lock</span>");
+            sb_append(&sb, "<div class=\"frvr-store-block-title\">");
+            if (ptype && !strcmp(ptype, "free")) sb_append(&sb, "Free");
+            else sb_appendf(&sb, "<img class=\"frvr-store-block-title__KRimg\" src=\"img/frvr-ui/icon-krunkie-coin.svg\"><span>%d</span>", amount);
+            sb_append(&sb, "</div><div class=\"frvr-store-block-subtitle\">");
+            sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "title")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "title")) : "");
+            sb_append(&sb, "</div></div></div>");
+            count++;
+        }
+        char *blocks = sb_finish(&sb);
+        char sel[96];
+        snprintf(sel, sizeof(sel), ".sectioned-scroll__section[data-index=\"%d\"]", section);
+        HtmlElem secs[4];
+        const int n = html_dom_query_all(root, sel, secs, 4);
+        for (int k = 0; k < n; k++) {
+            // Sr: .frvr-store-section > .frvr-store-section__content
+            StrBuf w = {0};
+            if (count) {
+                sb_append(&w, "<div class=\"frvr-store-section \"><div class=\"frvr-store-section__content\">");
+                sb_append(&w, blocks ? blocks : "");
+                sb_append(&w, "</div></div>");
+            }
+            char *html = sb_finish(&w);
+            html_dom_set_html(secs[k], html ? html : "");
+            free(html);
+        }
+        free(blocks);
+    }
+}
+
+static void on_shop(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    if (status != 200 || !cJSON_IsObject(data)) return;
+    cJSON_Delete(M.shop);
+    M.shop = cJSON_Duplicate(data, 1);
+    printf("[strike] shop: %d products\n", cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(M.shop, "products")));
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
+    if (root) store_products_fill(root);
+}
+
+static void on_bought(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) data;
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    if (status == 200) printf("[strike] bought %s\n", M.buying);
+    else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
+    M.buying[0] = 0;
+    strike_econ_get_shop(on_shop, NULL); // purchaseCount moved
+}
+
+static void buy_product(const int index) {
+    const cJSON *p = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(M.shop, "products"), index);
+    const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id"));
+    if (!id || M.buying[0]) return;
+    snprintf(M.buying, sizeof(M.buying), "%s", id);
+    if (!strike_econ_buy(id, 1, on_bought, NULL)) {
+        printf("[strike] purchase %s: no Strike account (sign in)\n", id);
+        M.buying[0] = 0;
+    }
+}
+
 // bce: the section titles select their section (sectioned-scroll__title--active)
 static void store_section(const HtmlElem root, const int section) {
     M.store_section = section;
@@ -266,6 +498,15 @@ static void store_section(const HtmlElem root, const int section) {
         HtmlElem titles[8];
         const int tn = html_dom_query_all(scrolls[s], ".sectioned-scroll__title", titles, 8);
         for (int i = 0; i < tn; i++) html_dom_set_class(titles[i], "sectioned-scroll__title--active", i == section);
+        // the title's onclick: .sectioned-scroll__content scrollBy(top: section top - content top)
+        const HtmlElem content = html_dom_query(scrolls[s], ".sectioned-scroll__content");
+        char sel[64];
+        snprintf(sel, sizeof(sel), ".sectioned-scroll__section[data-index=\"%d\"]", section);
+        const HtmlElem target = content ? html_dom_query(content, sel) : 0;
+        HtmlRect cr, tr;
+        HtmlScroll sc;
+        if (target && html_dom_get_rect(content, &cr) && html_dom_get_rect(target, &tr) && html_dom_get_scroll(content, &sc))
+            html_dom_set_scroll(content, sc.left, sc.top + (tr.y - cr.y));
     }
 }
 
@@ -285,32 +526,38 @@ static void store_fill(const HtmlElem root) {
     const int cn = html_dom_query_all(root, ".sectioned-scroll__section[data-index=\"0\"] .frvr-store-section__content", content, 4);
     for (int i = 0; i < cn && wheels; i++) html_dom_set_html(content[i], wheels);
     free(wheels);
+    if (M.shop) store_products_fill(root);
+    strike_econ_get_shop(on_shop, NULL); // Qo(): the shop, again on every visit
 }
 
 // ---------------------------------------------------------------- SPIN (SA / aue / oU)
 
 static void spin_fill(const HtmlElem root) {
-    const StrikeWheel *w = &WHEELS[M.spin >= 0 && M.spin < WHEEL_COUNT ? M.spin : WHEEL_DEFAULT];
+    const WheelView *w = current_wheel();
+    if (!w) return;
     char buf[64];
     set_text(root, ".spinner-title", w->name);
     // oU: one row per reward pool, weight * 100 %
     const HtmlElem odds = html_dom_query(root, ".odds");
     if (odds) {
         StrBuf sb = {0};
-        for (int i = 0; i < WHEEL_ODD_COUNT; i++) {
-            sb_appendf(&sb, "<div class=\"odd\"><div class=\"odd-icon\" style=\"background: %s;\"></div><div class=\"odd-name\">", WHEEL_ODDS[i].color);
-            sb_append_esc(&sb, WHEEL_ODDS[i].name);
-            sb_appendf(&sb, "</div><div class=\"odd-chance\">%g%%</div></div>", WHEEL_ODDS[i].weight * 100.0);
+        for (int i = 0; i < w->odd_count; i++) {
+            sb_appendf(&sb, "<div class=\"odd\"><div class=\"odd-icon\" style=\"background: %s;\"></div><div class=\"odd-name\">", w->odds[i].color);
+            sb_append_esc(&sb, w->odds[i].name);
+            sb_appendf(&sb, "</div><div class=\"odd-chance\">%g%%</div></div>", w->odds[i].weight * 100.0);
         }
         char *html = sb_finish(&sb);
         html_dom_set_html(odds, html);
         free(html);
     }
-    // buttonTicketsSplit: 10x the price on top, 1x below
+    // buttonTicketsSplit: 10x the price on top (onWheelClick(e, 10)), 1x below (onWheelClick(e))
     snprintf(buf, sizeof(buf), "%d", w->amount * 10);
     set_text(root, "#spinTopSection .spin-tickets span", buf);
     snprintf(buf, sizeof(buf), "%d", w->amount);
     set_text(root, "#oneTicketSpin .spin-tickets span", buf);
+    const HtmlElem top = html_dom_query(root, "#spinTopSection"), bottom = html_dom_query(root, "#spinBottomSection");
+    if (top) html_dom_set_attr(top, "onclick", "strikeAction('spin-buy:10')");
+    if (bottom) html_dom_set_attr(bottom, "onclick", "strikeAction('spin-buy:1')");
     // the header's currencies (A1) only for a spin-ticket wheel
     const HtmlElem header = html_dom_query(root, ".frvr-controls-right .currency-header");
     if (header) {
@@ -318,6 +565,98 @@ static void spin_fill(const HtmlElem root) {
         else html_dom_remove(header);
     }
     M.wheel_f = 0.0f;
+}
+
+// onSpin's answer: C = the won pool, c its weight, d[] the pointers' targets (even: 2 pi (rand + 13) +
+// pi / 2, odd: pi / 2 - 2 pi (13 - rand)), A[] their speeds (.5 + random * .5, over the largest)
+static void on_spun(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    if (status != 200 || !cJSON_IsObject(data)) {
+        const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+        printf("[strike] spin refused (%d): %s\n", status, msg ? msg : "no answer"); // M(ee): Js(message)
+        M.sp.phase = 0;
+        return;
+    }
+    const cJSON *rewards = cJSON_GetObjectItemCaseSensitive(data, "rewards");
+    const int n = cJSON_GetArraySize(rewards);
+    if (n <= 0) {
+        M.sp.phase = 0;
+        return;
+    }
+    M.sp.n = n < SPIN_WHEEL_MAX_POINTERS ? n : SPIN_WHEEL_MAX_POINTERS;
+    double amax = 0.0;
+    for (int k = 0; k < M.sp.n; k++) {
+        const cJSON *r = cJSON_GetArrayItem(rewards, k);
+        const double rnd = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "rand"));
+        M.sp.p[k] = 0.0;
+        M.sp.d[k] = k % 2 == 0 ? 2.0 * M_PI * (rnd + 13.0) + M_PI / 2.0 : M_PI / 2.0 - 2.0 * M_PI * (13.0 - rnd);
+        M.sp.A[k] = 0.5 + (double) rand() / RAND_MAX * 0.5;
+        if (M.sp.A[k] > amax) amax = M.sp.A[k];
+        const cJSON *item = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(r, "reward"), "item");
+        printf("[strike] spin result %d: pool %s rand %.4f item %s\n", k, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "poolId")), rnd,
+               cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "itemId")) : "-");
+    }
+    for (int k = 0; k < M.sp.n; k++) M.sp.A[k] /= amax;
+    const cJSON *first = cJSON_GetArrayItem(rewards, 0);
+    snprintf(M.sp.pool, sizeof(M.sp.pool), "%s", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "poolId")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "poolId")) : "");
+    M.sp.c = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(first, "poolWeight"));
+    M.sp.u = M.sp.f = 0.0;
+    M.sp.step_ms = 0.0;
+    M.sp.phase = 2;
+}
+
+static void spin_buy(const int count) {
+    const WheelView *w = current_wheel();
+    if (!w || M.sp.phase != 0 || strike_screen_top() != STRIKE_SCREEN_SPIN) return; // isSpinning
+    if (FIXTURE.set) return; // a capture fixture's wheel is not kn_brain's
+    M.sp.wheel = M.spin;
+    M.sp.phase = 1;
+    if (!strike_econ_spin(w->id, count, 0, on_spun, NULL)) {
+        // Se.isLoggedIn || Pt(Zu): the login popup; there is no Strike login screen here
+        printf("[strike] spin %s x%d: no Strike account (sign in)\n", w->id, count);
+        M.sp.phase = 0;
+        return;
+    }
+    printf("[strike] spin %s x%d\n", w->id, count);
+}
+
+// One 1/60 s step of aue.render's spin state (FRVR moves the pointers by a fixed share per frame)
+static void spin_step(void) {
+    if (M.sp.phase == 2) {
+        int done = 1;
+        for (int k = 0; k < M.sp.n; k++) {
+            if (M.sp.p[k] == M.sp.d[k]) continue;
+            M.sp.p[k] += (M.sp.d[k] - M.sp.p[k]) * M.sp.A[k] * 0.024;
+            if (fabs(M.sp.d[k] - M.sp.p[k]) <= 0.003 / M.sp.A[k]) M.sp.p[k] = M.sp.d[k]; // onPointerSpinFinished
+            else done = 0;
+        }
+        if (done) { // showRewardScreen: f = 100 - c * 100
+            M.sp.f = 100.0 - M.sp.c * 100.0;
+            M.sp.u = 0.0;
+            M.sp.phase = M.sp.f > 0.0 ? 3 : 4;
+            printf("[strike] spin landed on %s\n", M.sp.pool);
+        }
+    } else if (M.sp.phase == 3) {
+        M.sp.u += 1000.0 / 60.0 * 0.4; // u += F * .4
+        if (M.sp.u >= M.sp.f) {
+            M.sp.u = M.sp.f;
+            M.sp.phase = 4;
+        }
+    } else if (M.sp.phase == 4) {
+        // FRVR pushes the reward screen (Es) here; it has no capture yet, so the result holds for a
+        // moment and the wheel is ready again
+        M.sp.hold_ms += 1000.0 / 60.0;
+        if (M.sp.hold_ms >= 1500.0) {
+            M.sp.phase = 0;
+            M.sp.hold_ms = 0.0;
+        }
+    }
+}
+
+static double now_s(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double) ts.tv_sec + (double) ts.tv_nsec * 1e-9;
 }
 
 // aue.resize + render: the canvas is F x F, F = the smaller side of its parent's content box (the
@@ -361,22 +700,59 @@ static void spin_tick(void) {
     d->canvas_w = M.wheel_f;
     d->canvas_h = M.wheel_f;
     d->radius = M.wheel_f / 2.0f * 0.95f;
+    // the spin's frames (fixed 1/60 s steps of the wall clock, at most a quarter second at a time)
+    const double t = now_s();
+    if (M.sp.phase >= 2) {
+        double dt = M.sp.last_s > 0.0 ? (t - M.sp.last_s) * 1000.0 : 0.0;
+        if (dt > 250.0) dt = 250.0;
+        M.sp.step_ms += dt;
+        while (M.sp.step_ms >= 1000.0 / 60.0 && M.sp.phase >= 2) {
+            M.sp.step_ms -= 1000.0 / 60.0;
+            spin_step();
+        }
+    }
+    M.sp.last_s = t;
+    const WheelView *w = current_wheel();
+    const int spinning = M.sp.phase >= 2 && M.sp.wheel == M.spin;
+    const double uf = spinning && M.sp.f > 0.0 ? M.sp.u / M.sp.f : 0.0;
+    // the end animation: the won pool grows by u, the others give way, the wheel turns so the won
+    // pool's middle comes under the pointer (rotate(j - pi * u / f))
+    double j = 0.0;
+    if (spinning && M.sp.phase >= 3) {
+        for (int i = 0; w && i < w->odd_count; i++) {
+            if (!strcmp(w->odds[i].pool, M.sp.pool)) {
+                j += w->odds[i].weight * 100.0 / 2.0;
+                break;
+            }
+            j += w->odds[i].weight * 100.0;
+        }
+        j = fmod(2.0 * M_PI * (j / 100.0) * uf, 2.0 * M_PI);
+        d->slice_rotation = (float) (j - M_PI * uf);
+    }
     float from = 0.0f;
-    for (int i = 0; i < WHEEL_ODD_COUNT && i < SPIN_WHEEL_MAX_SLICES; i++) {
-        const float span = (float) (2.0 * M_PI * WHEEL_ODDS[i].weight);
+    for (int i = 0; w && i < w->odd_count && i < SPIN_WHEEL_MAX_SLICES; i++) {
+        double x = w->odds[i].weight * 100.0;
+        if (spinning && M.sp.phase >= 3) x += !strcmp(w->odds[i].pool, M.sp.pool) ? M.sp.u : -M.sp.u * (w->odds[i].weight * 100.0 / M.sp.f);
+        const float span = x > 0.0 ? (float) (2.0 * M_PI * x / 100.0) : 0.0f;
         d->slice_from[i] = from;
         d->slice_to[i] = from + span;
         unsigned r = 0, g = 0, b = 0;
-        sscanf(WHEEL_ODDS[i].color + 1, "%02x%02x%02x", &r, &g, &b);
+        sscanf(w->odds[i].color + 1, "%02x%02x%02x", &r, &g, &b);
         d->slice_rgb[i][0] = (float) r / 255.0f;
         d->slice_rgb[i][1] = (float) g / 255.0f;
         d->slice_rgb[i][2] = (float) b / 255.0f;
         from += span;
         d->slices = i + 1;
     }
-    d->pointer_count = 1; // p = [0]: one pointer, straight up
-    d->pointer_rotation[0] = 0.0f;
-    d->pointer_scale = 1.0f; // V = 1 before a spin
+    if (spinning) {
+        d->pointer_count = M.sp.n;
+        for (int k = 0; k < M.sp.n; k++) d->pointer_rotation[k] = (float) M.sp.p[k];
+        d->pointer_scale = (float) (1.0 - uf); // V
+    } else {
+        d->pointer_count = 1; // p = [0]: one pointer, straight up
+        d->pointer_rotation[0] = 0.0f;
+        d->pointer_scale = 1.0f;
+    }
 }
 
 const SpinWheelDraw *strike_menu_wheel_draw(void) { return &M.wheel; }
@@ -442,7 +818,11 @@ static void customize_controls_fill(const HtmlElem root) {
 // YB's enemyPlayers: the tournament board's rows (A1e). Without hosted tournaments only a
 // --render-scenario fixture supplies them; none = no rows.
 static int board_rows(BoardRow *rows, const int max) {
-    if (!M.board_fixture) return 0;
+    if (!M.board_fixture) {
+        const int n = M.live_board_count < max ? M.live_board_count : max;
+        memcpy(rows, M.live_board, sizeof(BoardRow) * (size_t) n);
+        return n;
+    }
     const int n = M.board_count < max ? M.board_count : max;
     memcpy(rows, M.board, sizeof(BoardRow) * (size_t) n);
     return n;
@@ -461,12 +841,18 @@ static void leaderboard_fill(const HtmlElem root) {
     }
     BoardRow rows[BOARD_MAX];
     const int n = board_rows(rows, BOARD_MAX);
+    if (!M.board_fixture && M.board_cols[0][0]) { // f1e's stat titles: the board's columns
+        HtmlElem titles[2];
+        const int tn = html_dom_query_all(content, ".frvr-lboard-end-screen__stat-col--title", titles, 2);
+        for (int i = 0; i < tn; i++) html_dom_set_text(titles[i], M.board_cols[i]);
+    }
     StrBuf sb = {0};
     for (int i = 0; i < n; i++) {
         const BoardRow *r = &rows[i];
         const char *P = "frvr-lboard-end-screen__";
         sb_appendf(&sb, "<div class=\"%srow-wrapper\" style=\"--row-index: %d;\"><div class=\"%srow\">", P, i + 1, P);
-        sb_appendf(&sb, "<div class=\"%sposition %sposition--%s\"><span>%d</span></div>", P, P, r->you ? "player" : "ffa", i + 1);
+        sb_appendf(&sb, "<div class=\"%sposition %sposition--%s\"><span>%d</span></div>", P, P, r->you ? "player" : "ffa",
+                   M.board_fixture || r->score_rank <= 0 ? i + 1 : r->score_rank);
         sb_appendf(&sb, "<div class=\"%spfp\"><img src=\"./cdn/textures/classes/icon_%d.png\" style=\"image-rendering: pixelated;\"></div>", P, r->class_id);
         sb_appendf(&sb, "<div class=\"%splayer-name%s\"><span><strong>", P, r->you ? " frvr-lboard-end-screen__player-name--player" : "");
         sb_append_esc(&sb, r->name);
@@ -514,6 +900,191 @@ static void popup_fill(const HtmlElem root) {
     // isDismissableOnBackground (default true): the dark blur's onclick kt()
     const HtmlElem blur = html_dom_query(root, ".frvr-dark-blur-75");
     if (blur) html_dom_set_attr(blur, "onclick", "strikeAction('back')");
+    const HtmlElem holder = html_dom_query(root, ".popup__holder");
+    if (holder && M.popup == POPUP_LEADERBOARD) { // g(QM, {enemyPlayers, playerData, stats}) in the frame
+        char *html = strike_template("LEADERBOARD_PLAYERS", NULL, 0);
+        if (html) {
+            html_dom_set_html(holder, html);
+            free(html);
+        }
+        leaderboard_fill(holder);
+    }
+}
+
+static void popup_open(const PopupKind kind) {
+    M.popup = kind;
+    if (strike_screen_shown(STRIKE_SCREEN_POPUP)) strike_screen_rerender(STRIKE_SCREEN_POPUP);
+    else strike_screen_push(STRIKE_SCREEN_POPUP); // Pt(In, {builder}, {preventReplace: true})
+}
+
+// ---------------------------------------------------------------- CUSTOMIZATION (Ly / hde) and T5
+
+// Ly.categories: the boxes by title (windows.loadout.*), their item type ($i) and FRVR's loadout key.
+// Skin Color (skinColIndex, no item) opens nothing here.
+static const struct { const char *title; int type; } CATS[] = {
+    {"Weapon", STRIKE_ITEM_WEAPON}, {"Head", STRIKE_ITEM_HAT}, {"Back", STRIKE_ITEM_BACK}, {"Melee", STRIKE_ITEM_MELEE},
+    {"Clothing", STRIKE_ITEM_DYE}, {"Waist", STRIKE_ITEM_WAIST}, {"Face", STRIKE_ITEM_FACE}, {"Body", STRIKE_ITEM_CHEST},
+};
+#define CAT_COUNT ((int) (sizeof(CATS) / sizeof(CATS[0])))
+
+// I5(): the selected class's primary weapon (its skin slot w<weapon>, strike_econ_apply_look)
+static int class_weapon(void) {
+    const int id = CLASSES[current_class()].id;
+    const ClassConfig *c = rules_classes();
+    return c && id >= 0 && id < (int) rules_class_count() && c[id].loadout ? c[id].loadout[0] : 0;
+}
+
+// The loadout slot of a category ("w<weapon>", "t<type>"; "" when the type does not equip)
+static void cat_slot(const int cat, char *out, const size_t n) {
+    out[0] = 0;
+    if (CATS[cat].type == STRIKE_ITEM_WEAPON) snprintf(out, n, "w%d", class_weapon());
+    else if (CATS[cat].type != STRIKE_ITEM_CHEST) snprintf(out, n, "t%d", CATS[cat].type);
+}
+
+// hde: the box's label / image follow the equipped item (Default without one)
+static void customization_fill(const HtmlElem root) {
+    HtmlElem boxes[24];
+    const int n = html_dom_query_all(root, ".customization-screen__cat-box", boxes, 24);
+    for (int i = 0; i < n; i++) {
+        const HtmlElem t = html_dom_query(boxes[i], ".customization-screen__cat-box-title span");
+        char title[48] = "";
+        if (t) html_dom_get_text(t, title, sizeof(title));
+        int cat = -1;
+        for (int c = 0; c < CAT_COUNT; c++) {
+            if (!strcmp(CATS[c].title, title)) cat = c;
+        }
+        if (cat < 0) continue;
+        char hook[40], slot[16];
+        snprintf(hook, sizeof(hook), "strikeAction('item-slot:%d')", cat); // Pt(T5, {itemDef, index, title, itemType})
+        html_dom_set_attr(boxes[i], "onclick", hook);
+        cat_slot(cat, slot, sizeof(slot));
+        const char *equipped = slot[0] ? strike_econ_equipped(slot) : NULL;
+        const StrikeItem *it = equipped ? strike_item(equipped) : NULL;
+        const HtmlElem label = html_dom_query(boxes[i], ".customization-screen__cat-box-label span");
+        if (label) html_dom_set_text(label, it ? it->name : "Default");
+        const HtmlElem img = html_dom_query(boxes[i], ".customization-screen__cat-box-middle img");
+        if (img) {
+            char cur[256] = "", orig[256] = "";
+            html_dom_get_attr(img, "src", cur, sizeof(cur));
+            if (html_dom_get_attr(img, "data-kn-default", orig, sizeof(orig)) < 0) {
+                html_dom_set_attr(img, "data-kn-default", cur);
+                snprintf(orig, sizeof(orig), "%s", cur);
+            }
+            char src[512];
+            if (it && it->skin >= 0) store_skin_preview(it->skin, src, sizeof(src));
+            else snprintf(src, sizeof(src), "%s", orig);
+            html_dom_set_attr(img, "src", src);
+        }
+    }
+}
+
+static int item_rarity_cmp(const void *pa, const void *pb) {
+    const StrikeItem *a = strike_item((const char *) pa), *b = strike_item((const char *) pb);
+    return (b ? b->rarity : 0) - (a ? a->rarity : 0); // rarity, highest first
+}
+
+// T5: the account's items of the category (skin.type, the class weapon's for Weapon) by rarity, then
+// "Default"; rde: the square of the equipped one (none: Default) is --selected, a click equips
+static void item_selection_fill(const HtmlElem root) {
+    const int cat = M.item_cat;
+    char slot[16];
+    cat_slot(cat, slot, sizeof(slot));
+    const int weapon = class_weapon();
+    M.item_count = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, strike_econ_items()) {
+        if (M.item_count >= 63) break;
+        const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "itemId"));
+        const StrikeItem *it = id ? strike_item(id) : NULL;
+        if (!it || it->is_default || it->type != CATS[cat].type) continue;
+        if (it->type == STRIKE_ITEM_WEAPON && it->weapon != weapon) continue;
+        snprintf(M.item_ids[M.item_count++], sizeof(M.item_ids[0]), "%s", id);
+    }
+    qsort(M.item_ids, (size_t) M.item_count, sizeof(M.item_ids[0]), item_rarity_cmp);
+    M.item_ids[M.item_count++][0] = 0; // the Default square
+    const char *equipped = slot[0] ? strike_econ_equipped(slot) : NULL;
+    StrBuf sb = {0};
+    for (int i = 0; i < M.item_count; i++) {
+        const StrikeItem *it = M.item_ids[i][0] ? strike_item(M.item_ids[i]) : NULL;
+        const int selected = it ? equipped && !strcmp(equipped, M.item_ids[i]) : !equipped;
+        char image[512], index[16], rarity[48];
+        if (it && it->skin >= 0) store_skin_preview(it->skin, image, sizeof(image));
+        else snprintf(image, sizeof(image), "%s", M.item_default_img);
+        snprintf(index, sizeof(index), "%d", i);
+        if (it && it->rarity >= 0) snprintf(rarity, sizeof(rarity), " item-rarity-banner--%d", it->rarity);
+        else rarity[0] = 0;
+        const StrikeVar v[] = {{"selected", selected ? " item-selection__item-square--selected" : ""}, {"index", index},
+                               {"image", image}, {"!rarity", rarity}, {"name", it ? it->name : "Default"}};
+        char *html = strike_template_part("ITEM_SELECTION_SCREEN", "item", v, 5);
+        if (html) sb_append(&sb, html);
+        free(html);
+    }
+    char *items = sb_finish(&sb);
+    const HtmlElem grid = html_dom_query(root, ".item-selection__items-grid");
+    if (grid) html_dom_set_html(grid, items ? items : "");
+    free(items);
+    const HtmlElem title = html_dom_query(root, ".frvr-window-title");
+    if (title) html_dom_set_text(title, CATS[cat].title);
+}
+
+static void on_equipped(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) data;
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    if (status == 200) printf("[strike] equipped (%s)\n", M.item_cat >= 0 && M.item_cat < CAT_COUNT ? CATS[M.item_cat].title : "?");
+    else printf("[strike] equip refused (%d): %s\n", status, msg ? msg : "no answer");
+}
+
+static void item_pick(const int index) {
+    if (index < 0 || index >= M.item_count) return;
+    char slot[16];
+    cat_slot(M.item_cat, slot, sizeof(slot));
+    if (!slot[0]) return;
+    const char *equipped = strike_econ_equipped(slot);
+    const char *id = M.item_ids[index];
+    if (id[0] ? equipped && !strcmp(equipped, id) : !equipped) return; // o: already the selected one
+    const int sent = id[0] ? strike_econ_equip(id, on_equipped, NULL) : strike_econ_unequip(slot, on_equipped, NULL);
+    if (!sent) printf("[strike] equip %s: no Strike account (sign in)\n", id[0] ? id : slot);
+}
+
+// ---------------------------------------------------------------- leaderboards (strike_econ)
+
+// GET /strike/v1/leaderboards/:board: {board, players: [{rank, playerId, name, value, level}], me}. FRVR
+// shows player boards only in its tournament rewards popup (YB in In); KrunkNative has no hosted
+// tournaments, so a board opens in the same frame from strikeAction('leaderboard[:xp|kills|wins|
+// score|games]') (no FRVR button reaches it). Columns: Level and the board's value.
+static void on_board(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    if (status != 200 || !cJSON_IsObject(data)) {
+        printf("[strike] leaderboard refused (%d)\n", status);
+        return;
+    }
+    const AccountInfo *acc = account_get();
+    const char *board = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "board"));
+    M.live_board_count = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(data, "players")) {
+        if (M.live_board_count >= BOARD_MAX) break;
+        BoardRow *r = &M.live_board[M.live_board_count++];
+        memset(r, 0, sizeof(*r));
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "name"));
+        snprintf(r->name, sizeof(r->name), "%s", name ? name : "");
+        r->has_stats = 1;
+        r->score = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "level"));
+        r->kills = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "value"));
+        r->score_rank = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "rank"));
+        const char *pid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "playerId"));
+        r->you = acc && pid && atoi(pid) == acc->id;
+    }
+    snprintf(M.board_cols[0], sizeof(M.board_cols[0]), "Level");
+    static const char *const NAMES[][2] = {{"xp", "XP"}, {"kills", "Kills"}, {"wins", "Wins"}, {"score", "Score"}, {"games", "Games"}};
+    snprintf(M.board_cols[1], sizeof(M.board_cols[1]), "%s", board ? board : "");
+    for (size_t i = 0; board && i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+        if (!strcmp(board, NAMES[i][0])) snprintf(M.board_cols[1], sizeof(M.board_cols[1]), "%s", NAMES[i][1]);
+    }
+    printf("[strike] leaderboard %s: %d players\n", board ? board : "?", M.live_board_count);
+    popup_open(POPUP_LEADERBOARD);
 }
 
 // ---------------------------------------------------------------- CLASS_SELECTION (B5 / ode / lde)
@@ -699,10 +1270,38 @@ static void action(const char *a) {
         if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
     } else if (!strncmp(a, "spin:", 5)) {
         const int i = atoi(a + 5);
-        if (i >= 0 && i < WHEEL_COUNT) {
+        wheels_build();
+        if (i >= 0 && i < M.wheel_count) {
             M.spin = i;
             strike_screen_push(STRIKE_SCREEN_SPIN); // eb(id, {onHide: kt}) = Pt(SA, {spinnerIndex})
         }
+    } else if (!strncmp(a, "item-slot:", 10)) {
+        const int cat = atoi(a + 10);
+        if (cat >= 0 && cat < CAT_COUNT) {
+            M.item_cat = cat;
+            // T5's default thumbnail: the box's own default image
+            M.item_default_img[0] = 0;
+            const HtmlElem root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION);
+            HtmlElem boxes[24];
+            const int n = root ? html_dom_query_all(root, ".customization-screen__cat-box", boxes, 24) : 0;
+            for (int i = 0; i < n; i++) {
+                const HtmlElem t = html_dom_query(boxes[i], ".customization-screen__cat-box-title span");
+                char title[48] = "";
+                if (t) html_dom_get_text(t, title, sizeof(title));
+                const HtmlElem img = html_dom_query(boxes[i], ".customization-screen__cat-box-middle img");
+                if (img && !strcmp(title, CATS[cat].title)) html_dom_get_attr(img, "data-kn-default", M.item_default_img, sizeof(M.item_default_img));
+            }
+            strike_screen_push(STRIKE_SCREEN_ITEM_SELECTION);
+        }
+    } else if (!strncmp(a, "item-pick:", 10)) {
+        item_pick(atoi(a + 10));
+    } else if (!strncmp(a, "leaderboard", 11)) {
+        const char *board = a[11] == ':' ? a + 12 : "xp";
+        if (!strike_econ_get_leaderboard(board, BOARD_MAX, 0, on_board, NULL)) printf("[strike] leaderboard %s: no kn_brain\n", board);
+    } else if (!strncmp(a, "spin-buy:", 9)) {
+        spin_buy(atoi(a + 9) == 10 ? 10 : 1);
+    } else if (!strncmp(a, "buy-product:", 12)) {
+        buy_product(atoi(a + 12));
     } else if (!strncmp(a, "store-section:", 14)) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
         if (root) store_section(root, atoi(a + 14));
@@ -789,6 +1388,7 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_POPUP:
     case STRIKE_SCREEN_MATCH_DETAILS:   // transcribed from the bundle (strike_meta.c)
     case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
+    case STRIKE_SCREEN_ITEM_SELECTION:  // transcribed from the bundle (T5 / rde, above)
         return strike_screen_id(s);
     default:
         return NULL; // no template of it yet (README.md "Not ported yet"); MISSION_TAB_SCREEN is
@@ -796,7 +1396,23 @@ const char *strike_menu_template(const StrikeScreen s) {
     }
 }
 
+// strike_econ_listen: Mithril redraws every view on a state change; here the views that show the
+// account's Strike state follow it (wallet, items, loadout, progress)
+static void on_econ(void *user, const StrikeEconEvent event) {
+    (void) user;
+    (void) event;
+    M.last_account[0] = 0; // the account box (strike_menu_tick)
+    HtmlElem root;
+    if ((root = strike_screen_root(STRIKE_SCREEN_STORE))) fill_currency(root);
+    if ((root = strike_screen_root(STRIKE_SCREEN_SPIN))) fill_currency(root);
+    if ((root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION))) customization_fill(root);
+    if ((root = strike_screen_root(STRIKE_SCREEN_ITEM_SELECTION))) item_selection_fill(root);
+    strike_meta_econ_changed(); // missions, the rewards track (strike_meta.c)
+}
+
 void strike_menu_install(void) {
+    static int listening;
+    if (!listening) listening = strike_econ_listen(on_econ, NULL);
     html_ui_add_handler("strikeAction", h_strike_action);
     html_ui_add_handler("strikeSetting", h_strike_setting);
 }
@@ -850,7 +1466,11 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
             for (int i = 0; i < pn; i++) html_dom_set_class(presets[i], "frvr-preset__button--active", i == M.preset);
         }
         break;
+    case STRIKE_SCREEN_ITEM_SELECTION:
+        item_selection_fill(root);
+        break;
     case STRIKE_SCREEN_CUSTOMIZATION: {
+        customization_fill(root);
         char buf[64];
         snprintf(buf, sizeof(buf), "%s", CLASSES[current_class()].name);
         set_text(root, ".customization-screen__class-selection .frvr-button-text", buf);

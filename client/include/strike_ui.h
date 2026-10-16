@@ -80,6 +80,7 @@ typedef enum {
     STRIKE_SCREEN_LEADERBOARD_PLAYERS,
     STRIKE_SCREEN_POPUP,
     STRIKE_SCREEN_PROFILE,
+    STRIKE_SCREEN_ITEM_SELECTION, // T5, a Customization category's items (transcribed, strike_menu.c)
     STRIKE_SCREEN_COUNT
 } StrikeScreen;
 
@@ -114,6 +115,7 @@ char *strike_template_part(const char *name, const char *part, const StrikeVar *
 void strike_meta_render(StrikeScreen s, HtmlElem root); // after strike_menu_render
 int  strike_meta_action(const char *name);              // 1 = one of its strikeAction()s
 void strike_meta_tick(Client *client);
+void strike_meta_econ_changed(void);                    // the Strike account changed (strike_econ_listen)
 void strike_meta_scenario(Client *client, const cJSON *state); // --render-scenario state.strike keys
 int  strike_menu_level(void);                           // the account box's level (strike_menu.c)
 

@@ -21,6 +21,7 @@ Headless client_bin --flavor strike --offline (Kanji) runs, one private config, 
          shoot button at its default place.
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device.
 """
+import json
 import os
 import re
 import shutil
@@ -33,6 +34,15 @@ BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-strike-menu-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 results = []
+
+
+def shop_wheels():
+    """the Store's wheel blocks in OC's order: kn_brain's Strike catalogue (tools/strike/gen_economy.py),
+    the paid KR / spin-ticket wheels, KR ones first by price (highest first), then the ticket ones"""
+    r = subprocess.run([sys.executable, "-I", os.path.join(os.getcwd(), "tools", "strike", "gen_economy.py"), "--json"], capture_output=True)
+    wheels = [w for w in json.loads(r.stdout)["wheels"] if w.get("currency") in ("kr", "spin_ticket")]
+    wheels.sort(key=lambda w: (w["currency"] == "spin_ticket", -w["amount"]))
+    return wheels
 
 CUSTOMIZE = "[onclick=\"strikeAction('customize-controls')\"]"
 WHEEL_BLOCK = ".sectioned-scroll:first-child .store-wheel"  # the capture renders the sections twice
@@ -192,7 +202,7 @@ EXPECT1 = [
     ("wheels", lambda n: n >= 3, "STORE's Spins section shows the shop's wheel blocks (OC)"),
     ("spin", 1, "a wheel block opens SPIN (eb -> Pt(SA))"),
     ("spin-store", 1, "STORE stays rendered under SPIN (keepAlive)"),
-    ("spin-odds", 5, "SPIN lists the wheel's five odds (oU)"),
+    ("spin-odds", "ODDS", "SPIN lists the clicked wheel's odds (oU)"),
     ("spin-canvas", 1, "SPIN's wheel canvas is sized and drawn (aue.resize)"),
     ("spinback", 0, "SPIN's back closes it"),
     ("spinback-store", 1, "SPIN's back returns to STORE"),
@@ -217,13 +227,19 @@ EXPECT1 = [
 
 
 def main():
+    wheels = shop_wheels()
+    last = wheels[-1] if wheels else {"slices": [], "id": "?"}
+    names = {"starter": "Starter", "elite": "Elite", "lucky_draw": "Lucky Draw"}  # strike_economy_data.c k_wheels
     text, nodes, texts, rects = run("run1", run1())
     for label, want, name in EXPECT1:
+        if want == "ODDS":
+            want = len(last["slices"])
         n = nodes.get(label)
         ok = n is not None and (want(n) if callable(want) else n == want)
         check(name, ok, f"@{label} match={n}" + ("" if callable(want) else f" (want {want})"))
     check("STORE opens on its first section (Spins)", texts.get("store-section") == "Spins", texts.get("store-section"))
-    check("SPIN's title is the clicked wheel's name", texts.get("spin-title") == "Ticket Spin", texts.get("spin-title"))
+    check("SPIN's title is the clicked wheel's (the last block's) name", texts.get("spin-title") == names.get(last["id"]),
+          f"{texts.get('spin-title')} vs {names.get(last['id'])}")
     check("the KR \"+\" selects STORE's Currency section", texts.get("buykr-section") == "Currency", texts.get("buykr-section"))
     check("the ticket \"+\" selects STORE's Spins section", texts.get("buyticket-section") == "Spins", texts.get("buyticket-section"))
     before, after, again = shoot(rects, "before"), shoot(rects, "after"), shoot(rects, "again")

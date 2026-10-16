@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strike_econ.h> // a signed-in Strike account's missions and rewards track (kn_brain /strike)
 
 #define MD_ROWS_MAX 64
 
@@ -51,7 +52,19 @@ static struct {
     cJSON *progression;         // the game config's accountProgression (owned; NULL = none)
     cJSON *claimed;             // account.progressionClaimedItems (owned)
     cJSON *reward;              // REWARD_TO_CLAIM's reward (owned)
+    // kn_brain's Strike missions (GET /strike/v1/missions/me) as UD's cards read them (owned)
+    cJSON *econ_missions;       // the answer
+    cJSON *econ_cards;          // its daily missions in the challenge shape mission_card() reads
+    int econ_missions_asked;    // a request is out / answered for the current state
+    unsigned econ_seq;          // bumped on every answer (the Missions tab re-fills)
+    int track_asked;            // the game config (accountProgression) was asked
 } T;
+
+// A signed-in Strike account (strike_econ.c): missions and the track come from kn_brain's /strike
+static int econ_on(void) {
+    const StrikeAccount *a = strike_econ_account();
+    return a->account_id > 0 && a->loaded;
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -154,10 +167,113 @@ static int reward_info(const cJSON *r, char *image, const size_t in, char *label
 
 // ---------------------------------------------------------------- MISSION_TAB_SCREEN (UD / hX)
 
-static int bp_has_data(void) { return account_get() && battlepass_ui_pass(); } // Se.bpData && account.BP
+// chall.name.<key> (tools/strike/strike_data.json i18n, the 1.37.2 English table): {0} the required
+// value, {1} the weapon part (none for Strike's daily missions)
+static const char *const CHALL_NAMES[][2] = {
+    {"airk", "Get {0} mid-air kills {1}"}, {"ast", "Get {0} assists {1}"}, {"bzk", "Get {0} buzz kills {1}"},
+    {"cc", "Get {0} close-calls {1}"}, {"d", "Die {0} times"}, {"dmg", "Deal {0} damage {1}"}, {"drk", "Get {0} drift kills {1}"},
+    {"fb", "Get {0} first bloods {1}"}, {"fk", "Get {0} fist kills {1}"}, {"gp", "Play {0} matches {1}"},
+    {"hs", "Get {0} headshots {1}"}, {"k", "Kill {0} opponents {1}"}, {"kstk", "Get a {0} killstreak {1}"},
+    {"lns", "Get {0} longshots {1}"}, {"ls", "Get {0} legshots {1}"}, {"mk", "Get {0} melee kills {1}"},
+    {"ns", "Get {0} no-scopes {1}"}, {"qs", "Get {0} quickscopes {1}"}, {"rk", "Deal {0} revenge kills {1}"},
+    {"score", "Get {0} score"}, {"tk", "Get {0} turbo kills {1}"}, {"tmk", "Get {0} throwing knife kills {1}"},
+    {"w", "Win {0} matches"}, {"wb", "Get {0} wallbangs {1}"},
+};
+
+static void chall_name(const char *key, const double value, char *out, const size_t n) {
+    const char *tmpl = NULL;
+    for (size_t i = 0; key && i < sizeof(CHALL_NAMES) / sizeof(CHALL_NAMES[0]); i++) {
+        if (!strcmp(CHALL_NAMES[i][0], key)) tmpl = CHALL_NAMES[i][1];
+    }
+    if (!tmpl) {
+        snprintf(out, n, "chall.name.%s", key ? key : ""); // i18n.t of a missing key prints the key
+        return;
+    }
+    char val[32];
+    js_num(value, val, sizeof(val));
+    size_t o = 0;
+    for (const char *p = tmpl; *p && o + 1 < n; p++) {
+        if (p[0] == '{' && (p[1] == '0' || p[1] == '1') && p[2] == '}') {
+            for (const char *v = p[1] == '0' ? val : ""; *v && o + 1 < n; v++) out[o++] = *v;
+            p += 2;
+        } else {
+            out[o++] = *p;
+        }
+    }
+    while (o > 0 && out[o - 1] == ' ') o--;
+    out[o] = 0;
+}
+
+// /missions/me's dailyMissions.missions [{details: {_id, key, requiredValue, rewards}, progress, completed,
+// claimed}] as the challenge cards hX reads: N, IC (the mission's catalogue place: FRVR's icon index is
+// server data), PV, PT, TR (the day's refresh), DAT.val, REW.kr
+static void econ_cards_build(void) {
+    cJSON_Delete(T.econ_cards);
+    T.econ_cards = cJSON_CreateArray();
+    const cJSON *daily = cJSON_GetObjectItemCaseSensitive(T.econ_missions, "dailyMissions");
+    const double tr = jnum(daily, "timeSecondsToRefresh") * 1000.0;
+    const cJSON *m;
+    cJSON_ArrayForEach(m, cJSON_GetObjectItemCaseSensitive(daily, "missions")) {
+        const cJSON *det = cJSON_GetObjectItemCaseSensitive(m, "details");
+        const char *id = jstr(det, "_id"), *key = jstr(det, "key");
+        cJSON *c = cJSON_CreateObject();
+        char name[160];
+        chall_name(key, jnum(det, "requiredValue"), name, sizeof(name));
+        cJSON_AddStringToObject(c, "T", "daily");
+        cJSON_AddStringToObject(c, "N", name);
+        int ic = 0;
+        const StrikeEconomy *e = strike_economy();
+        for (int i = 0; i < e->mission_count; i++) {
+            if (!strcmp(e->missions[i].id, id)) ic = i;
+        }
+        cJSON_AddNumberToObject(c, "IC", ic);
+        cJSON_AddNumberToObject(c, "PV", jnum(m, "progress"));
+        cJSON_AddNumberToObject(c, "PT", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m, "completed")) ? 1 : 0);
+        cJSON_AddNumberToObject(c, "TR", tr);
+        cJSON_AddNumberToObject(cJSON_AddObjectToObject(c, "DAT"), "val", jnum(det, "requiredValue"));
+        double kr = 0.0;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, cJSON_GetObjectItemCaseSensitive(det, "rewards")) {
+            if (!strcmp(jstr(r, "type"), "currency") && !strcmp(jstr(r, "currency"), "kr")) kr += jnum(r, "amount");
+        }
+        cJSON_AddNumberToObject(cJSON_AddObjectToObject(c, "REW"), "kr", kr);
+        cJSON_AddStringToObject(c, "_id", id);
+        cJSON_AddBoolToObject(c, "claimable", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m, "completed"))
+                                                  && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(m, "claimed")));
+        cJSON_AddItemToArray(T.econ_cards, c);
+    }
+}
+
+static void on_missions(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    if (status != 200 || !cJSON_IsObject(data)) {
+        printf("[strike] missions refused (%d)\n", status);
+        return;
+    }
+    cJSON_Delete(T.econ_missions);
+    T.econ_missions = cJSON_Duplicate(data, 1);
+    econ_cards_build();
+    T.econ_seq++;
+    printf("[strike] missions: %d daily%s\n", cJSON_GetArraySize(T.econ_cards),
+           cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "locked")) ? " (locked)" : "");
+}
+
+static void econ_missions_ask(void) {
+    if (T.econ_missions_asked || !econ_on()) return;
+    T.econ_missions_asked = strike_econ_get_missions(on_missions, NULL);
+}
+
+// Se.bpData && account.BP; a Strike account: its missions answer, unlocked
+static int bp_has_data(void) {
+    if (econ_on()) return T.econ_missions && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(T.econ_missions, "locked"));
+    return account_get() && battlepass_ui_pass();
+}
+
+static const cJSON *missions_list(void) { return econ_on() ? T.econ_cards : account_challenges(); }
 
 static int daily_missions(const cJSON **out, const int max) {
-    const cJSON *list = account_challenges(), *c;
+    const cJSON *list = missions_list(), *c;
     int n = 0;
     cJSON_ArrayForEach(c, list) {
         if (n < max && !strcmp(jstr(c, "T"), "daily")) out[n++] = c;
@@ -176,8 +292,8 @@ static int daily_missions(const cJSON **out, const int max) {
 }
 
 static unsigned long missions_signature(void) {
-    const cJSON *list = account_challenges(), *c;
-    unsigned long sig = (unsigned long) (uintptr_t) list * 31u + (unsigned long) bp_has_data();
+    const cJSON *list = missions_list(), *c;
+    unsigned long sig = (unsigned long) (uintptr_t) list * 31u + (unsigned long) bp_has_data() + T.econ_seq * 977u;
     cJSON_ArrayForEach(c, list) sig = sig * 131u + (unsigned long) (jnum(c, "PV") * 7 + jnum(c, "PT") * 3 + jnum(c, "TR") / 60000.0);
     return sig;
 }
@@ -246,8 +362,9 @@ static void bp_tab(const HtmlElem root, const int tab) {
     const HtmlElem content = html_dom_query(root, ".tabsContent");
     if (!content) return;
     char *html = NULL;
+    if (tab == 1 && !T.econ_missions_asked) econ_missions_ask(); // a Strike account: GET /strike/v1/missions/me
     if (tab == 1 && bp_has_data()) {
-        account_challenges_request(); // account.activeMissions: asked once per session
+        if (!econ_on()) account_challenges_request(); // account.activeMissions: asked once per session
         const cJSON *list[64];
         const int count = daily_missions(list, 64);
         StrBuf cards = {0};
@@ -270,6 +387,20 @@ static void bp_tab(const HtmlElem root, const int tab) {
     if (html) {
         html_dom_set_html(content, html);
         free(html);
+    }
+    // KrunkNative: a completed Strike mission pays out when its card is clicked (POST
+    // /strike/v1/missions/claim/:id); FRVR 1.37.2's hX card has no claim of its own
+    if (tab == 1 && econ_on() && bp_has_data()) {
+        const cJSON *list[64];
+        const int count = daily_missions(list, 64);
+        HtmlElem cards[64];
+        const int cn = html_dom_query_all(content, ".frvr-mission-card", cards, 64);
+        for (int i = 0; i < count && i < cn; i++) {
+            if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(list[i], "claimable"))) continue;
+            char hook[96];
+            snprintf(hook, sizeof(hook), "strikeAction('mission-claim:%s')", jstr(list[i], "_id"));
+            html_dom_set_attr(cards[i], "onclick", hook);
+        }
     }
     T.missions_sig = missions_signature();
 }
@@ -489,6 +620,7 @@ static int track_max_level(void) {
 }
 
 static int track_claimed(const char *slot_id) {
+    if (econ_on() && strike_econ_track_claimed(slot_id)) return 1; // progressionClaimedItems
     const cJSON *c;
     cJSON_ArrayForEach(c, T.claimed) {
         if (cJSON_IsString(c) && !strcmp(c->valuestring, slot_id)) return 1;
@@ -550,11 +682,40 @@ static char *track_column(const int level, const int player_level, int *claimabl
     return html;
 }
 
+// GET /strike/v1/game-config: its accountProgression is the track ({"<level>": {slotId, items,
+// isPlayerChoice}}, the same shape a scenario's state.strike.progression has)
+static void on_game_config(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    const cJSON *prog = status == 200 ? cJSON_GetObjectItemCaseSensitive(data, "accountProgression") : NULL;
+    if (!cJSON_IsObject(prog)) {
+        T.track_asked = 0;
+        return;
+    }
+    cJSON_Delete(T.progression);
+    T.progression = cJSON_Duplicate(prog, 1);
+    strike_screen_rerender(STRIKE_SCREEN_PROFILE);
+}
+
+static void track_ask(void) { T.track_asked = strike_econ_get_game_config(on_game_config, NULL); }
+
+static void on_claimed(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) data;
+    const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    if (status == 200) printf("[strike] claimed %s\n", user ? "a mission" : "a track level");
+    else printf("[strike] claim refused (%d): %s\n", status, msg ? msg : "no answer");
+    if (user) { // a mission: its list again
+        T.econ_missions_asked = 0;
+        econ_missions_ask();
+    }
+}
+
 static void track_render(const HtmlElem profile) {
     const HtmlElem host = html_dom_query(profile, ".frvr-account-progression");
     if (!host) return;
     const HtmlElem old = html_dom_query(host, ".frvr-progression-track-rewards");
     if (old) html_dom_remove(old);
+    if (!cJSON_IsObject(T.progression) && econ_on() && !T.track_asked) track_ask(); // the game config
     if (!cJSON_IsObject(T.progression)) return; // !X2: no game config, no track
     const int level = strike_menu_level();
     const int max = track_max_level();
@@ -624,6 +785,7 @@ int strike_meta_action(const char *a) {
     if (!strncmp(a, "bp-tab:", 7)) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
+        if (t == 1) T.econ_missions_asked = 0; // the Missions tab asks for the account's missions on every visit
         if (root && (t == 0 || t == 1)) bp_tab(root, t);
         return 1;
     }
@@ -646,11 +808,31 @@ int strike_meta_action(const char *a) {
         track_slide(atoi(a + 12) < 0 ? -1 : 1);
         return 1;
     }
-    if (!strcmp(a, "track-claim")) { // gn.claimSlots(l): FRVR's progression service
-        printf("[strike] Rewards Track: claiming needs FRVR's progression service (none here)\n");
+    if (!strcmp(a, "track-claim")) { // gn.claimSlots(l): every claimable slot (a pick-one slot: its first reward)
+        const char *slots[64];
+        const int n = econ_on() ? strike_econ_track_claimable(slots, 64) : 0;
+        for (int i = 0; i < n; i++) strike_econ_claim_level(slots[i], 0, on_claimed, NULL);
+        if (!econ_on()) printf("[strike] Rewards Track: claiming needs a signed-in Strike account\n");
+        else printf("[strike] Rewards Track: claiming %d level(s)\n", n);
+        return 1;
+    }
+    if (!strncmp(a, "mission-claim:", 14)) {
+        if (!strike_econ_claim_mission(a + 14, on_claimed, (void *) 1)) printf("[strike] mission claim: no Strike account\n");
         return 1;
     }
     return 0;
+}
+
+void strike_meta_econ_changed(void) {
+    if (strike_screen_root(STRIKE_SCREEN_PROFILE)) strike_screen_rerender(STRIKE_SCREEN_PROFILE); // claims, level
+    if (!econ_on()) { // signed out: nothing of the old account stays
+        cJSON_Delete(T.econ_missions);
+        T.econ_missions = NULL;
+        cJSON_Delete(T.econ_cards);
+        T.econ_cards = NULL;
+        T.econ_missions_asked = 0;
+        T.econ_seq++;
+    }
 }
 
 void strike_meta_tick(Client *client) {

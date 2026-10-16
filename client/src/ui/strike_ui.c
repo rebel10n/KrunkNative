@@ -54,6 +54,7 @@ static const char *const SCREEN_IDS[STRIKE_SCREEN_COUNT] = {
     [STRIKE_SCREEN_LEADERBOARD_PLAYERS] = "LEADERBOARD_PLAYERS",
     [STRIKE_SCREEN_POPUP] = "POPUP",
     [STRIKE_SCREEN_PROFILE] = "PROFILE",
+    [STRIKE_SCREEN_ITEM_SELECTION] = "ITEM_SELECTION_SCREEN",
 };
 
 // view.opts: translucent (the screens below stay rendered), keepAlive (rendered while buried)
