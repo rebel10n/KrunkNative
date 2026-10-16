@@ -40,12 +40,14 @@ static int is_array(KsType t) { return t.dims > 0; }
 
 typedef struct { const char *name; int params; } Hook;
 
+// v10.0.2 editor templates (client): the entity hooks run when the entity manager (KS entities)
+// reaches this side: onEntitySpawn(id, archetype), onEntityRemoved(id), onEntityEvent(id, name, a, b)
 static const Hook client_hooks[] = {
     {"start", 0}, {"update", 1}, {"render", 1}, {"onPlayerSpawn", 1}, {"onPlayerDeath", 2},
     {"onPlayerUpdate", 3}, {"onKeyPress", 2}, {"onKeyUp", 2}, {"onKeyHeld", 2},
     {"onControllerPress", 2}, {"onControllerUp", 2}, {"onControllerHeld", 2},
     {"onMouseClick", 3}, {"onMouseUp", 3}, {"onMouseScroll", 1}, {"onDIVClicked", 1},
-    {"onNetworkMessage", 2},
+    {"onNetworkMessage", 2}, {"onEntitySpawn", 2}, {"onEntityRemoved", 1}, {"onEntityEvent", 4},
 };
 
 static const Hook server_hooks[] = {
@@ -54,6 +56,9 @@ static const Hook server_hooks[] = {
     {"onNetworkMessage", 3}, {"onChatMessage", 2}, {"onPlayerLeave", 1}, {"onGameEnd", 0},
     {"onAdFinished", 2}, {"onServerClosed", 0},
     {"shouldTrigger", 3}, // v10.0.2: trigger condition 12 "Custom Action" (playerId, triggerSid, param) -> bool
+    {"onDepositBoxChange", 4}, // v10.0.2 (objectID, playerID, amount, finalAmount)
+    {"onEntitySpawn", 2}, {"onEntityDamage", 3}, {"onEntityDestroyed", 2}, {"onEntityAttach", 2},
+    {"onEntityDetach", 2}, {"onEntityEvent", 4}, {"onEntityRemoved", 1},
 };
 
 int ks_hook_param_count(KsSide side, const char *name) {

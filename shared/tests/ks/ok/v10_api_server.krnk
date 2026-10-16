@@ -1,0 +1,40 @@
+# side: server
+# v10.0.2 server API surface (doc/v10/map-format.md section 6): every member is known to the checker
+num count = 0;
+public action start() {
+    obj match = GAME.CONFIG.getMatch();
+    num capacity = (num) match.capacity;
+    obj[] triggers = GAME.TRIGGERS.list();
+    obj[] tagged = GAME.TRIGGERS.getByInterface(7);
+    obj[] objs = GAME.OBJECTS.getByInterface(7);
+    GAME.TRIGGERS.execute(7, "NONE");
+    obj cube = GAME.LIVE_OBJECTS.addCube(0, 0, 0, 1, 1, 1, 0, {color: "#fff"});
+    obj[] list = GAME.ENTITIES.list();
+    obj found = GAME.ENTITIES.findById(3);
+    obj[] tags = GAME.ENTITIES.findByTag("crate");
+    obj spawned = GAME.ENTITIES.spawn("crate", 0, 0, 0, {tag: "crate"});
+    GAME.ENTITIES.despawn(3);
+    GAME.PAYMENTS.giveCurrency("1", "gold", 5, cashed);
+    GAME.PAYMENTS.takeCurrency("1", "gold", 5, cashed);
+    GAME.PAYMENTS.getCurrencyBalance("1", "gold", cashed);
+    GAME.PAYMENTS.giveSkin("1", 10000001, cashed);
+    GAME.PAYMENTS.authorizeSpend("1", 5, cashed, true);
+    GAME.PAYMENTS.charge("1", 5, cashed);
+    obj[] ops = obj[];
+    GAME.PAYMENTS.transact("1", ops, "auth", cashed);
+    GAME.AI.removeBySid(4);
+    GAME.ANIM.playClip(cube, 0, 1);
+    GAME.ANIM.stopClip(cube, 0);
+    GAME.URLS.openDiscord();
+}
+action cashed(str playerID, bool success, num value) {
+    count += 1;
+}
+public action onDepositBoxChange(str objectID, str playerID, num amount, num finalAmount) { }
+public action onEntitySpawn(str id, str archetype) { }
+public action onEntityDamage(str id, str doerID, num amount) { }
+public action onEntityDestroyed(str id, str doerID) { }
+public action onEntityAttach(str id, str playerID) { }
+public action onEntityDetach(str id, str playerID) { }
+public action onEntityEvent(str id, str name, num a, num b) { }
+public action onEntityRemoved(str id) { }

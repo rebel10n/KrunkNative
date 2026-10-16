@@ -1424,8 +1424,17 @@ static KsValue sc_scale_obj(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_undef();
 }
 
+static KsValue sc_add_particles_none(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    (void) s; (void) u; (void) args; (void) argc;
+    return ks_undef();
+}
+
 void ks_scene_api(KsApiImpl *api) {
     api[KS_API_SCENE_POSTOSCREEN].fn = sc_pos_to_screen;
+    // SCENE.addParticles (v10 L182830): the particle emitter is not ported yet (the KS particle
+    // layer is a gap, see the krunkscript gap list); the call is accepted and answers undefined
+    api[KS_API_SCENE_ADDPARTICLES].fn = sc_add_particles_none;
     api[KS_API_SCENE_CLEAR].fn = sc_clear;
     api[KS_API_SCENE_SETFOG].fn = sc_set_fog;
     api[KS_API_SCENE_SETAMBIENTLIGHT].fn = sc_set_ambient;

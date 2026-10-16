@@ -1,0 +1,15 @@
+# side: client
+# v10.0.2 client API surface: client-only members and the entity hooks
+public action start() {
+    GAME.COOKIES.removeByKey("best");
+    GAME.SCENE.addParticles(0, 5, 0, {texture: "glow", count: 10, color: "#fff"});
+    obj[] list = GAME.ENTITIES.list();
+    GAME.ANIM.stopClip(0, 0);
+    GAME.URLS.openTwitter();
+    GAME.CONFIG.getSettings();
+    obj p = GAME.PLAYERS.getSelf();
+    num px = (num) p.x;
+}
+public action onEntitySpawn(str id, str archetype) { }
+public action onEntityRemoved(str id) { }
+public action onEntityEvent(str id, str name, num a, num b) { }

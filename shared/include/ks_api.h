@@ -172,7 +172,7 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(STORAGE_LOAD, "STORAGE.load", "load", KS_API_STORAGE, FN, S, ANY) \
     X(COOKIES, "COOKIES", "COOKIES", -1, NS, C, ANY) \
     X(COOKIES_SAVE, "COOKIES.save", "save", KS_API_COOKIES, FN, C, ANY) \
-    X(COOKIES_REMOVE, "COOKIES.remove", "remove", KS_API_COOKIES, FN, C, ANY) \
+    X(COOKIES_REMOVEBYKEY, "COOKIES.removeByKey", "removeByKey", KS_API_COOKIES, FN, C, ANY) \
     X(COOKIES_LOAD, "COOKIES.load", "load", KS_API_COOKIES, FN, C, STR) \
     X(COOKIES_HAS, "COOKIES.has", "has", KS_API_COOKIES, FN, C, BOOL) \
     X(SOUND, "SOUND", "SOUND", -1, NS, C, ANY) \
@@ -227,7 +227,7 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(SCENE_SCALEOBJ, "SCENE.scaleObj", "scaleObj", KS_API_SCENE, FN, C, ANY) \
     X(PAYMENTS, "PAYMENTS", "PAYMENTS", -1, NS, B, ANY) \
     X(PAYMENTS_GIVEKR, "PAYMENTS.giveKR", "giveKR", KS_API_PAYMENTS, FN, S, ANY) \
-    X(PAYMENTS_CHARGE, "PAYMENTS.charge", "charge", KS_API_PAYMENTS, FN, B, ANY) \
+    X(PAYMENTS_CHARGE, "PAYMENTS.charge", "charge", KS_API_PAYMENTS, FN, S, ANY) \
     X(PLAYERS, "PLAYERS", "PLAYERS", -1, NS, B, ANY) \
     X(PLAYERS_GETSELF, "PLAYERS.getSelf", "getSelf", KS_API_PLAYERS, FN, C, OBJ) \
     X(PLAYERS_TOGGLELOD, "PLAYERS.toggleLOD", "toggleLOD", KS_API_PLAYERS, FN, C, ANY) \
@@ -236,11 +236,11 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(PLAYERS_FINDBYID, "PLAYERS.findByID", "findByID", KS_API_PLAYERS, FN, B, OBJ) \
     X(AI, "AI", "AI", -1, NS, S, ANY) \
     X(AI_SPAWN, "AI.spawn", "spawn", KS_API_AI, FN, S, OBJ) \
-    X(AI_REMOVE, "AI.remove", "remove", KS_API_AI, FN, S, ANY) \
+    X(AI_REMOVEBYSID, "AI.removeBySid", "removeBySid", KS_API_AI, FN, S, ANY) \
     X(AI_LIST, "AI.list", "list", KS_API_AI, FN, S, OBJARR) \
     X(TRIGGERS, "TRIGGERS", "TRIGGERS", -1, NS, B, ANY) \
-    X(TRIGGERS_LIST, "TRIGGERS.list", "list", KS_API_TRIGGERS, FN, B, ANY) \
-    X(TRIGGERS_EXECUTE, "TRIGGERS.execute", "execute", KS_API_TRIGGERS, FN, B, ANY) \
+    X(TRIGGERS_LIST, "TRIGGERS.list", "list", KS_API_TRIGGERS, FN, B, OBJARR) \
+    X(TRIGGERS_EXECUTE, "TRIGGERS.execute", "execute", KS_API_TRIGGERS, FN, S, ANY) \
     X(OBJECTS, "OBJECTS", "OBJECTS", -1, NS, B, ANY) \
     X(OBJECTS_GETPATHNODES, "OBJECTS.getPathNodes", "getPathNodes", KS_API_OBJECTS, FN, B, OBJARR) \
     X(OBJECTS_LIST, "OBJECTS.list", "list", KS_API_OBJECTS, FN, B, OBJARR) \
@@ -258,10 +258,28 @@ enum { KS_API_SIDE_CLIENT = 1, KS_API_SIDE_SERVER = 2, KS_API_SIDE_BOTH = 3 };
     X(PLATFORM_ISMOBILE, "PLATFORM.isMobile", "isMobile", KS_API_PLATFORM, FN, B, BOOL) \
     X(CONFIG, "CONFIG", "CONFIG", -1, NS, B, ANY) \
     X(CONFIG_GETHOST, "CONFIG.getHost", "getHost", KS_API_CONFIG, FN, S, OBJ) \
-    X(CONFIG_GETMATCH, "CONFIG.getMatch", "getMatch", KS_API_CONFIG, FN, B, ANY) \
+    X(CONFIG_GETMATCH, "CONFIG.getMatch", "getMatch", KS_API_CONFIG, FN, B, OBJ) \
     X(CONFIG_GETSETTINGS, "CONFIG.getSettings", "getSettings", KS_API_CONFIG, FN, B, ANY) \
     X(CONFIG_GETWEAPONS, "CONFIG.getWeapons", "getWeapons", KS_API_CONFIG, FN, B, ANY) \
-    X(CONFIG_GETCLASSES, "CONFIG.getClasses", "getClasses", KS_API_CONFIG, FN, B, ANY)
+    X(CONFIG_GETCLASSES, "CONFIG.getClasses", "getClasses", KS_API_CONFIG, FN, B, ANY) \
+    X(LIVE_OBJECTS, "LIVE_OBJECTS", "LIVE_OBJECTS", -1, NS, S, ANY) \
+    X(LIVE_OBJECTS_ADDCUBE, "LIVE_OBJECTS.addCube", "addCube", KS_API_LIVE_OBJECTS, FN, S, OBJ) \
+    X(ENTITIES, "ENTITIES", "ENTITIES", -1, NS, B, ANY) \
+    X(ENTITIES_SPAWN, "ENTITIES.spawn", "spawn", KS_API_ENTITIES, FN, S, OBJ) \
+    X(ENTITIES_CLONE, "ENTITIES.clone", "clone", KS_API_ENTITIES, FN, S, OBJ) \
+    X(ENTITIES_DESPAWN, "ENTITIES.despawn", "despawn", KS_API_ENTITIES, FN, S, ANY) \
+    X(ENTITIES_LIST, "ENTITIES.list", "list", KS_API_ENTITIES, FN, B, OBJARR) \
+    X(ENTITIES_FINDBYID, "ENTITIES.findById", "findById", KS_API_ENTITIES, FN, B, OBJ) \
+    X(ENTITIES_FINDBYTAG, "ENTITIES.findByTag", "findByTag", KS_API_ENTITIES, FN, B, OBJARR) \
+    X(SCENE_ADDPARTICLES, "SCENE.addParticles", "addParticles", KS_API_SCENE, FN, C, OBJ) \
+    X(PAYMENTS_GIVECURRENCY, "PAYMENTS.giveCurrency", "giveCurrency", KS_API_PAYMENTS, FN, S, ANY) \
+    X(PAYMENTS_TAKECURRENCY, "PAYMENTS.takeCurrency", "takeCurrency", KS_API_PAYMENTS, FN, S, ANY) \
+    X(PAYMENTS_GETCURRENCYBALANCE, "PAYMENTS.getCurrencyBalance", "getCurrencyBalance", KS_API_PAYMENTS, FN, S, ANY) \
+    X(PAYMENTS_GIVESKIN, "PAYMENTS.giveSkin", "giveSkin", KS_API_PAYMENTS, FN, S, ANY) \
+    X(PAYMENTS_AUTHORIZESPEND, "PAYMENTS.authorizeSpend", "authorizeSpend", KS_API_PAYMENTS, FN, S, ANY) \
+    X(PAYMENTS_TRANSACT, "PAYMENTS.transact", "transact", KS_API_PAYMENTS, FN, S, ANY) \
+    X(TRIGGERS_GETBYINTERFACE, "TRIGGERS.getByInterface", "getByInterface", KS_API_TRIGGERS, FN, B, OBJARR) \
+    X(OBJECTS_GETBYINTERFACE, "OBJECTS.getByInterface", "getByInterface", KS_API_OBJECTS, FN, B, OBJARR)
 
 typedef enum {
 #define KS_API_X_ENUM(id, path, name, parent, kind, sides, ret) KS_API_##id,

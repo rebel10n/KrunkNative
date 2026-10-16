@@ -586,6 +586,9 @@ static KsValue pl_rotation(KsScript *s, void *n, uint32_t id) { return pl_sub(s,
 
 #define KS_PLAYER_SHARED_PROPS                                                                                         \
     {"id", pl_id, NULL, NULL, 0},                                                                                      \
+    {"x", ppos_x, ppos_sx, NULL, 0},                                                                                   \
+    {"y", ppos_y, ppos_sy, NULL, 0},                                                                                   \
+    {"z", ppos_z, ppos_sz, NULL, 0},                                                                                   \
     {"sid", pl_sid, NULL, NULL, 0},                                                                                    \
     {"username", pl_username, NULL, NULL, 0},                                                                          \
     {"isYou", pl_is_you, NULL, NULL, 0},                                                                               \
@@ -905,7 +908,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     return ai ? ks_game_wrap_ai(s, game, ai->sid) : ks_undef();
 }
 
-static KsValue api_ai_remove(KsScript *s, void *u, const KsValue *args, int argc)
+static KsValue api_ai_remove_by_sid(KsScript *s, void *u, const KsValue *args, int argc)
 {
     KsGame *kg = u;
     Game *game = api_game(u);
@@ -937,20 +940,131 @@ static KsValue api_ai_list(KsScript *s, void *u, const KsValue *args, int argc)
     return list;
 }
 
+// An interface id argument: a finite number (anything else matches no interface: -1, never a real id)
+static int interface_arg(const KsValue v)
+{
+    const double d = ks_to_float(v);
+    return isfinite(d) && fabs(d) < 2147483647.0 ? (int) d : -1;
+}
+
+// TRIGGERS.list / OBJECTS.getByInterface / TRIGGERS.getByInterface (v10 L183707-183746): the map
+// objects that carry a trigger (trig, any side), or whose interface id is `id`.
+static KsValue objects_where(KsScript *s, void *u, int trigger_only, int by_interface, int interface_id)
+{
+    Game *game = api_game(u);
+    KsValue list = ks_arr_new(s);
+    if (!game || !game->map) return list;
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        if (trigger_only && !object->trig) continue;
+        if (by_interface && object->interface_id != interface_id) continue;
+        ks_arr_push(s, list, ks_game_wrap_map_object(s, game, (int) i));
+    }
+    return list;
+}
+
+static KsValue api_trigger_list(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    (void) args;
+    (void) argc;
+    return objects_where(s, u, 1, 0, 0);
+}
+
+static KsValue api_trigger_by_interface(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    return objects_where(s, u, 1, 1, interface_arg(ARG(0)));
+}
+
+static KsValue api_objects_by_interface(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    return objects_where(s, u, 0, 1, interface_arg(ARG(0)));
+}
+
+// TRIGGERS.execute(id, playerID) (server, v10 L183717): every object with interface `id` runs its
+// trigger for that player (a missing player id: the trigger runs without a source).
+static KsValue api_trigger_execute(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    Game *game = api_game(u);
+    if (!game || !game->map) return ks_undef();
+    Player *player = NULL;
+    if (ARG(1).tag != KS_UNDEF && ARG(1).tag != KS_NULL) {
+        player = ks_game_player_by_id(game, ARG(1));
+        if (!player) return ks_undef(); // v10: "Invalid player" is silent here
+    }
+    const int interface_id = interface_arg(ARG(0));
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        Object *object = game->map->objects[i];
+        if (object->interface_id == interface_id) game_on_trigger(game, player, object, NULL);
+    }
+    return ks_undef();
+}
+
+// CONFIG.getMatch (v10 L183841): {players: active players, capacity: maxPlayers, teams}
+static KsValue api_config_get_match(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    (void) args;
+    (void) argc;
+    Game *game = api_game(u);
+    KsValue match = ks_obj_new(s);
+    int active = 0;
+    for (size_t i = 0; game && i < game->player_count; i++)
+        if (game->players[i] && game->players[i]->active) active++;
+    ks_obj_set(s, match, "players", ks_num(active));
+    ks_obj_set(s, match, "capacity", ks_num(game ? game->config.max_players : 0));
+    ks_obj_set(s, match, "teams", ks_num(game ? mode_team_count(game) : 0));
+    return match;
+}
+
+// v10 leaves these empty (`function () {}`): the call answers undefined
+static KsValue api_undefined(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    (void) s; (void) u; (void) args; (void) argc;
+    return ks_undef();
+}
+
+// ENTITIES (v10 L183661): no entity manager runs on this build yet (KrunkScript entities are the
+// next package), so the lookups see none and spawn / clone answer undefined.
+static KsValue api_entities_none_list(KsScript *s, void *u, const KsValue *args, int argc)
+{
+    (void) u; (void) args; (void) argc;
+    return ks_arr_new(s);
+}
+
 void ks_hostobj_api_fill(KsApiImpl *api, const KsSide side)
 {
+    api[KS_API_TRIGGERS_LIST].fn = api_trigger_list;
+    api[KS_API_TRIGGERS_GETBYINTERFACE].fn = api_trigger_by_interface;
+    api[KS_API_OBJECTS_GETBYINTERFACE].fn = api_objects_by_interface;
+    api[KS_API_CONFIG_GETMATCH].fn = api_config_get_match;
+    api[KS_API_ANIM_PLAYCLIP].fn = api_undefined;
+    api[KS_API_ANIM_STOPCLIP].fn = api_undefined;
+    api[KS_API_URLS_OPENDISCORD].fn = api_undefined;
+    api[KS_API_URLS_OPENTWITTER].fn = api_undefined;
+    api[KS_API_URLS_OPENYOUTUBE].fn = api_undefined;
+    api[KS_API_URLS_OPENOPENSEA].fn = api_undefined;
+    api[KS_API_CONFIG_GETSETTINGS].fn = api_undefined;
+    api[KS_API_CONFIG_GETWEAPONS].fn = api_undefined;
+    api[KS_API_CONFIG_GETCLASSES].fn = api_undefined;
+    api[KS_API_ENTITIES_LIST].fn = api_entities_none_list;
+    api[KS_API_ENTITIES_FINDBYTAG].fn = api_entities_none_list;
+    api[KS_API_ENTITIES_FINDBYID].fn = api_undefined;
     api[KS_API_PLAYERS_LIST].fn = api_players_list;
     api[KS_API_PLAYERS_FINDBYID].fn = api_players_find;
     api[KS_API_OBJECTS_LIST].fn = api_objects_list;
     api[KS_API_OBJECTS_GETPATHNODES].fn = api_path_nodes;
     api[KS_API_NFT_HASWALLET].fn = api_false;
     if (side == KS_SIDE_SERVER) {
+        api[KS_API_TRIGGERS_EXECUTE].fn = api_trigger_execute;
+        api[KS_API_ENTITIES_SPAWN].fn = api_undefined;
+        api[KS_API_ENTITIES_CLONE].fn = api_undefined;
+        api[KS_API_ENTITIES_DESPAWN].fn = api_undefined;
+        api[KS_API_LIVE_OBJECTS_ADDCUBE].fn = api_undefined; // runtime blocks: the official-lobby package (entities.c "lo")
         api[KS_API_PLATFORM_ISCLIENT].fn = api_false;
         api[KS_API_PLATFORM_ISBROWSER].fn = api_false;
         api[KS_API_PLATFORM_ISMOBILE].fn = api_false;
         api[KS_API_NFT_OWNEDASSETS].fn = api_owned_assets;
         api[KS_API_AI_SPAWN].fn = api_ai_spawn;
-        api[KS_API_AI_REMOVE].fn = api_ai_remove;
+        api[KS_API_AI_REMOVEBYSID].fn = api_ai_remove_by_sid;
         api[KS_API_AI_LIST].fn = api_ai_list;
     }
 }

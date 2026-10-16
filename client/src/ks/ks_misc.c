@@ -63,6 +63,7 @@ static KsValue ck_save(KsScript *s, void *u, const KsValue *a, int n) {
     return ks_undef();
 }
 
+// COOKIES.removeByKey (v10 L182677): client only; keys are the "krkcst_<map>_<key>" storage entries
 static KsValue ck_remove(KsScript *s, void *u, const KsValue *a, int n) {
     (void) u;
     char key[512];
@@ -284,7 +285,7 @@ static KsValue u_copy(KsScript *s, void *u, const KsValue *a, int n) {
 
 void ks_misc_api(KsApiImpl *api) {
     api[KS_API_COOKIES_SAVE].fn = ck_save;
-    api[KS_API_COOKIES_REMOVE].fn = ck_remove;
+    api[KS_API_COOKIES_REMOVEBYKEY].fn = ck_remove;
     api[KS_API_COOKIES_LOAD].fn = ck_load;
     api[KS_API_COOKIES_HAS].fn = ck_has;
     api[KS_API_SETTINGS_SET].fn = st_set;

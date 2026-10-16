@@ -72,8 +72,8 @@ public action start() {
     for (obj entry : rows) { }
     if (x > 0) { num x = 2; GAME.log(x); }      # shadowing in an inner block
     GAME.log(fact(5), describe(1, {}, noop, fact, describe));
-    GAME.COOKIES.remove("k");
-    GAME.AI.remove(1);
+    GAME.COOKIES.removeByKey("k");
+    GAME.AI.removeBySid(1);
     GAME.UI.addDIV("title", true, );
     GAME.changeGame((str) nested.map, { host: true, private: true });
     obj sz = GAME.OVERLAY.getSize();

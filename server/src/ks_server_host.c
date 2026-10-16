@@ -616,6 +616,224 @@ static KsValue pay_give_kr(KsScript *s, void *user, const KsValue *args, int arg
     return ks_undef();
 }
 
+// ------------------------------------------------------------------ GAME.PAYMENTS (v10 L183384-183500)
+// This server has no studio economy: isMonetized() is false, currency and skin grants reach no
+// account service, and game.transact logs "Transactions disabled for now". The calls validate and
+// rate-limit exactly as v10 does (the same messages, the same windows), then answer their callback
+// with success false.
+#define KS_CUSTOM_SKIN_BASE 10000000   // v10 customSkinBase (L17249)
+
+// The player an argument names: a player id, or a player host object.
+static Player *pay_player(KsScript *s, const KsValue v)
+{
+    Game *game = game_of(s);
+    Player *player = ks_game_player_by_id(game, v);
+    if (!player && v.tag == KS_HOST) player = ks_game_player_by_id(game, ks_obj_get(s, v, "id"));
+    return player;
+}
+
+// callback(playerId, success, value): the first argument is the player's id string ("" if unknown)
+static void pay_answer(KsScript *s, const KsValue callback, const KsValue player_arg, Player *player, const int nargs, const KsValue value)
+{
+    if (callback.tag != KS_FN) return;
+    char id[32] = "";
+    if (player) {
+        ks_player_id(player, id, sizeof id);
+    } else if (player_arg.tag == KS_HOST || player_arg.tag == KS_OBJ) { // v10: the argument's own id, if any
+        const KsValue raw = ks_obj_get(s, player_arg, "id");
+        if (raw.tag != KS_UNDEF && raw.tag != KS_NULL) ks_to_string(s, raw, id, sizeof id);
+    }
+    const KsValue args[3] = {ks_str(s, id, strlen(id)), ks_bool(0), value};
+    ks_call_value(s, callback, args, nargs, NULL);
+}
+
+// the callback argument of an answer that needs one (v10: `callb && typeof callb == "function"`)
+static KsValue pay_callback(const KsValue v) { return v.tag == KS_FN ? v : ks_undef(); }
+
+static KsValue pay_zero(void) { return ks_num(0); }
+
+// Rate limit key of v10 (`cc_<kind>_<account key>`): the player's id stands for the account
+static int pay_rate(KsScript *s, Player *player, const char *kind, int limit)
+{
+    if (!player) return 1;
+    char key[64], id[32];
+    ks_player_id(player, id, sizeof id);
+    snprintf(key, sizeof key, "cc_%s_%s", kind, id);
+    return ks_game_rate(game_of(s), key, limit, 1);
+}
+
+static KsValue pay_give_currency(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    Player *player = pay_player(s, ARG(0));
+    const KsValue cb = pay_callback(ARG(3));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, ks_bool(0));
+        return ks_undef();
+    }
+    if (ARG(1).tag != KS_STR) {
+        log_error_text("Invalid currency name");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    const double amount = ARG(2).tag == KS_NUM && isfinite(ARG(2).as.num) ? ARG(2).as.num : 0.0;
+    if (amount > 0) {
+        if (!pay_rate(s, player, "giv", 5)) {
+            log_error_text("Calling giveCurrency too much");
+            pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+            return ks_undef();
+        }
+    }
+    pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+    return ks_undef();
+}
+
+static KsValue pay_take_currency(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    Player *player = pay_player(s, ARG(0));
+    const KsValue cb = pay_callback(ARG(3));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, ks_bool(0));
+        return ks_undef();
+    }
+    if (ARG(1).tag != KS_STR) {
+        log_error_text("Invalid currency name");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    const double amount = ARG(2).tag == KS_NUM && isfinite(ARG(2).as.num) ? ARG(2).as.num : 0.0;
+    if (amount > 0 && !pay_rate(s, player, "tak", 5)) {
+        log_error_text("Calling takeCurrency too much");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+    return ks_undef();
+}
+
+static KsValue pay_currency_balance(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    const KsValue cb = pay_callback(ARG(2));
+    if (cb.tag != KS_FN) {
+        log_error_text("Missing callback");
+        return ks_undef();
+    }
+    Player *player = pay_player(s, ARG(0));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, pay_zero());
+        return ks_undef();
+    }
+    if (ARG(1).tag != KS_STR) {
+        log_error_text("Invalid currency name");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    if (!pay_rate(s, player, "bal", 10)) {
+        log_error_text("Calling getCurrencyBalance too much");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+    return ks_undef();
+}
+
+static KsValue pay_give_skin(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    const KsValue cb = pay_callback(ARG(2));
+    Player *player = pay_player(s, ARG(0));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 2, ks_bool(0));
+        return ks_undef();
+    }
+    const double skin = ARG(1).tag == KS_NUM && isfinite(ARG(1).as.num) ? floor(ARG(1).as.num) : -1;
+    if (skin < KS_CUSTOM_SKIN_BASE) {
+        log_error_text("Invalid skin id");
+        pay_answer(s, cb, ARG(0), player, 2, ks_bool(0));
+        return ks_undef();
+    }
+    if (!pay_rate(s, player, "skn", 5)) {
+        log_error_text("Calling giveSkin too much");
+        pay_answer(s, cb, ARG(0), player, 2, ks_bool(0));
+        return ks_undef();
+    }
+    pay_answer(s, cb, ARG(0), player, 2, ks_bool(0));
+    return ks_undef();
+}
+
+static KsValue pay_authorize_spend(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    const KsValue cb = pay_callback(ARG(2));
+    if (cb.tag != KS_FN) {
+        log_error_text("Missing callback");
+        return ks_undef();
+    }
+    Player *player = pay_player(s, ARG(0));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, ks_str(s, "", 0));
+        return ks_undef();
+    }
+    const double amount = ARG(1).tag == KS_NUM && isfinite(ARG(1).as.num) ? ARG(1).as.num : 0.0;
+    if (amount > 0) {
+        if (!pay_rate(s, player, "auth", 3)) {
+            log_error_text("Calling authorizeSpend too much");
+        } else {
+            log_error_text("Monetization is not enabled for this studio");
+        }
+    }
+    pay_answer(s, cb, ARG(0), player, 3, ks_str(s, "", 0));
+    return ks_undef();
+}
+
+static KsValue pay_charge(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    const KsValue cb = pay_callback(ARG(2));
+    Player *player = pay_player(s, ARG(0));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, pay_zero());
+        return ks_undef();
+    }
+    const double amount = ARG(1).tag == KS_NUM && isfinite(ARG(1).as.num) ? ARG(1).as.num : 0.0;
+    if (amount > 0) {
+        if (!pay_rate(s, player, "chg", 3)) {
+            log_error_text("Calling charge too much");
+        } else {
+            log_error_text("Monetization is not enabled for this studio");
+        }
+    }
+    pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+    return ks_undef();
+}
+
+static KsValue pay_transact(KsScript *s, void *user, const KsValue *args, int argc)
+{
+    (void) user;
+    const KsValue cb = pay_callback(ARG(3));
+    Player *player = pay_player(s, ARG(0));
+    if (!player) {
+        log_error_text("Invalid player");
+        pay_answer(s, cb, ARG(0), NULL, 3, pay_zero());
+        return ks_undef();
+    }
+    if (!pay_rate(s, player, "tx", 5)) {
+        log_error_text("Calling transact too much");
+        pay_answer(s, cb, ARG(0), player, 3, pay_zero());
+        return ks_undef();
+    }
+    log_error_text("Transactions disabled for now"); // game.transact: the callback never runs
+    return ks_undef();
+}
+
 // CONFIG.getHost: game.host. KN has no hosted custom games on the dedicated server (null);
 // the offline sandbox is hosted by the local player.
 static KsValue cfg_get_host(KsScript *s, void *user, const KsValue *args, int argc)
@@ -661,6 +879,13 @@ static const KsHost *server_host(void)
     g_api[KS_API_ADMIN_KICK].fn = admin_kick;
     g_api[KS_API_ADMIN_BAN].fn = admin_ban;
     g_api[KS_API_PAYMENTS_GIVEKR].fn = pay_give_kr;
+    g_api[KS_API_PAYMENTS_GIVECURRENCY].fn = pay_give_currency;
+    g_api[KS_API_PAYMENTS_TAKECURRENCY].fn = pay_take_currency;
+    g_api[KS_API_PAYMENTS_GETCURRENCYBALANCE].fn = pay_currency_balance;
+    g_api[KS_API_PAYMENTS_GIVESKIN].fn = pay_give_skin;
+    g_api[KS_API_PAYMENTS_AUTHORIZESPEND].fn = pay_authorize_spend;
+    g_api[KS_API_PAYMENTS_CHARGE].fn = pay_charge;
+    g_api[KS_API_PAYMENTS_TRANSACT].fn = pay_transact;
     g_api[KS_API_CONFIG_GETHOST].fn = cfg_get_host;
     g_host = (KsHost) {.side = KS_SIDE_SERVER, .log = host_log, .now_ms = host_now, .api = g_api};
     return &g_host;

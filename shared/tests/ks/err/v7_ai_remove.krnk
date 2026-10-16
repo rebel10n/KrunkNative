@@ -1,0 +1,4 @@
+# side: server
+public action start() {
+    GAME.AI.remove(1);
+}
