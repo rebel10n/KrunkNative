@@ -436,6 +436,7 @@ static struct {
     char toggle_sets[TOGGLE_COUNT][SETTING_KEY_MAX]; // "" = -1 (None)
     char messages[MESSAGE_COUNT][MESSAGE_MAX];       // CONTROLS.chatMessages (cont_43_set ..)
     int scroll_bound;        // !scrollToSwap: a bind uses the wheel
+    int scroll_key;          // a control is bound to the wheel key (SCROLL, 20000): it fires, the wheel does not swap
     int changer;             // CONTROLS.inputChanger: V7_BINDS index waiting for "Press any Key", -1 none
     int changer_alt;
     int tab;                 // windows[6].tabIndex
@@ -617,8 +618,9 @@ static void check_for_scroll(void) {
     // Krunker Strike: checkScroll always leaves scrollToSwap false (the wheel never swaps weapons)
     const StrikeRules *r = flavor_current()->rules;
     g_ctl.scroll_bound = r && !r->scroll_to_swap;
+    g_ctl.scroll_key = 0;
     for (int i = 0; i < V7_BIND_COUNT; i++) {
-        if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL) g_ctl.scroll_bound = 1;
+        if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL) g_ctl.scroll_key = g_ctl.scroll_bound = 1;
     }
 }
 
@@ -1458,6 +1460,25 @@ static void release_code(Client *client, const int code) {
     if (slot >= 0) g_ctl.keys[slot] = 0;
 }
 
+// KrunkNative console '+name' / '-name' (a bind's command, ui_console.c): press / release the key or
+// button bound to the control `name` (a v7 ControlBind's bind name: jump, crouch, shoot, ...). 1 when
+// there is such a control (bound or not), 0 for an unknown name.
+int ui_controls_bind_hold(Client *client, const char *name, const int down) {
+    ensure_loaded();
+    if (!name || !*name) return 0;
+    if (!client) client = menu_ui()->client; // a typed '+name' in the menu (ui_controller_key's fallback)
+    for (int i = 0; i < V7_BIND_COUNT; i++) {
+        if (V7_BINDS[i].index >= 0 || strcasecmp(V7_BINDS[i].bind, name)) continue;
+        const int code = g_ctl.val[i];
+        if (code >= 0) {
+            if (down) press_code(client, code);
+            else release_code(client, code);
+        }
+        return 1;
+    }
+    return 0;
+}
+
 // ---------------------------------------------------------------- GLFW events
 
 // The Reload Game bind (F5): natively the client relaunches, as F4 used to (game_reload.h
@@ -1615,16 +1636,21 @@ int ui_controls_scroll_event(Client *client, const double dy, const int in_game)
     if (social_spray_scroll(dy)) return 1;
     // window.Bf5: the wheel sets the free-cam speed / follow distance (then Q() as usual).
     if (client) spectate_scroll(client, dy > 0.0);
-    // v3.1.1 offline mod (mods.ts installScrollWheelPatch / patchScrollInput): with a live
-    // player, the controls enabled, no "Press any Key" and no spectating, the wheel always
-    // swaps weapons (scrollToSwap, scrollDirM) and its key state is cleared, so a SCROLL
-    // bind never fires. main.c turns the kept scroll_delta into the swap.
-    if (client && client->me && client->me->active && ui_controls_enabled(client) && !ui_controls_capturing() && !spectate_active()) return 0;
+    // KrunkNative console binds mwheelup / mwheeldown (ui_console.c): the bound direction runs its
+    // command and does not swap weapons; the other direction swaps as usual. v10 has one wheel key
+    // for both directions, so this per-direction rule has no v10 counterpart.
+    const int console_bound = ui_console_wheel(dy > 0.0);
+    // v10 controls.js: with the wheel key (SCROLL) bound to a control the wheel fires it and does not
+    // swap (checkScroll); with none the wheel swaps weapons (scrollToSwap, scrollDirM), and main.c
+    // turns the kept scroll_delta into the swap. The v3.1.1 offline mod (mods.ts
+    // installScrollWheelPatch) always swapped with a live player, so a SCROLL bind never fired there.
+    if (client && client->me && client->me->active && ui_controls_enabled(client) && !ui_controls_capturing() && !spectate_active() &&
+        !g_ctl.scroll_key && !console_bound) return 0;
     // Q(null, 20000): the wheel is a key for one input frame; it swaps weapons only
     // while no bind uses it (bMoQ7).
     press_code(client, KEY_SCROLL);
     g_ctl.scroll_pressed = 1;
-    return g_ctl.scroll_bound;
+    return g_ctl.scroll_bound || console_bound;
 }
 
 // ---------------------------------------------------------------- controller
@@ -1862,6 +1888,7 @@ void ui_controls_end_frame(void) {
         release_code(NULL, KEY_SCROLL);
         g_ctl.scroll_pressed = 0;
     }
+    ui_console_wheel_end_frame(); // a mwheel bind's '+' tap lets go after the frame that sampled it
 }
 
 // ---------------------------------------------------------------- inline handlers

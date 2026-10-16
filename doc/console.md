@@ -44,7 +44,7 @@ silent (only the `] line` echo), as in the mod.
 | help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (91 commands, with `give` / `drop`, `cls`, `thirdperson` / `firstperson`, `reload`, `console_reset` and `logout`) |
 | clear | empties the log | same; Krunker Box Office alias `cls` |
 | echo / print text | prints the text | same |
-| bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
+| bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing. KrunkNative: `mwheelup` / `mwheeldown` bind the mouse wheel (in game; the bound direction runs its command and does not swap weapons, the other direction swaps as before). `+name` presses a control (`jump`, `shoot`, `crouch`, ...: the v7 bind names, the key or button bound to it) and `-name` lets go: a key bind's `+name` holds until the key is released, a wheel bind's until the frame ends. Typed `+name` / `-name` run the same way (no release by itself) |
 | unbind key | "unbound k" | same |
 | alias [name] [cmd] | session aliases, registered as commands ("alias for: …") | same |
 | exec a;b | runs `;`-separated commands | same |
@@ -557,7 +557,7 @@ and adds completion for arguments:
 |---|---|
 | help, exec | command names (with aliases) |
 | alias | 1: existing aliases, 2: command names |
-| bind | 1: keys (bound keys, then `e.key` values a-z / 0-9 / F1-F12 / Space / Tab / Shift / Control / Alt, then `e.code` KeyA… / Digit0…), 2: command names |
+| bind | 1: keys (bound keys, `mwheelup` / `mwheeldown`, then `e.key` values a-z / 0-9 / F1-F12 / Space / Tab / Shift / Control / Alt, then `e.code` KeyA… / Digit0…), 2: command names |
 | unbind | bound keys |
 | toggle | the server toggles: god, noclip, smite, forcehide, unlimitedammo, borders, forcecol, endless, bhop |
 | god, ungod, noclip, smite, notarget, forcehide, unlimitedammo | 1: player names in the game (and the selectors once `*`, `@` or `!` is typed), or on / off; 2: on / off |

@@ -23,6 +23,11 @@ void ui_console_toggle(int go_to_game);     // toggleConsole(goToGame): update()
 // keydown (toggle key, F8 cycle, bhop key), handleConsoleKeydown, typing into the input
 // while visible, and the session key binds while hidden. 1 = consumed.
 int  ui_console_key_event(Client*, int key, int scancode, int action, int mods);
+// The mwheelup / mwheeldown binds (in game, the console hidden; ui_controls_scroll_event): runs the
+// bound command, 1 = the direction is bound (no weapon swap). A '+name' holds its control until
+// ui_console_wheel_end_frame (after the input frame that sampled it).
+int  ui_console_wheel(int up);
+void ui_console_wheel_end_frame(void);
 // The same on the other pages (editor, hub, viewer: app_mode.c's key callback, before the page):
 // the toggle key and the open console's keys; no game / mod keys or session binds.
 int  ui_console_app_page_key_event(Client*, int key, int scancode, int action, int mods);

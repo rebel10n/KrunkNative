@@ -504,6 +504,7 @@ int  ui_controls_take_game_key(void);            // web: the game owned the curr
 int  ui_controls_key_event(Client*, int key, int scancode, int action, int mods);
 int  ui_controls_mouse_event(Client*, int button, int action, int in_game);
 int  ui_controls_scroll_event(Client*, double dy, int in_game); // in game: 1 = the wheel is bound (no weapon swap)
+int  ui_controls_bind_hold(Client*, const char *name, int down); // console '+name' / '-name': the control's key or button down / up
 // Chat (#chatInput)
 void ui_controls_chat_focus(int focused);        // focusChat(on)
 // document.activeElement is an INPUT / TEXTAREA / SELECT / contenteditable (any page), or the

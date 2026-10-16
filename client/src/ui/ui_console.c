@@ -123,6 +123,15 @@ typedef struct {
     char value[CON_TEXT_MAX];
 } ConPair;
 
+// A '+name' bind holding its control: `key` is the GLFW key that pressed it, or CON_HOLD_WHEEL for a
+// mwheel bind (released when the frame ends, after the input frame sampled the press).
+#define CON_HOLDS_MAX 16
+#define CON_HOLD_WHEEL (-2)
+typedef struct {
+    int key;
+    char name[CON_NAME_MAX];
+} ConHold;
+
 #define CON_CANDS_MAX 256
 typedef struct {
     char items[CON_CANDS_MAX][CON_NAME_MAX];
@@ -152,6 +161,8 @@ typedef struct {
     int cmd_count;
     ConPair binds[CON_BINDS_MAX];     // keyBinds (session only)
     int bind_count;
+    ConHold holds[CON_HOLDS_MAX];     // '+' binds still held: released by their key's release or the frame's end
+    int hold_count;
     ConPair aliases[CON_BINDS_MAX];   // aliases (session only)
     int alias_count;
 
@@ -1019,6 +1030,75 @@ static void cmd_unbind(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "unbound %s", argv[0]);
 }
 
+// ---------------------------------------------------------------- '+name' holds
+
+// The control name of a '+name' / '-name' command (case kept: "playerList")
+static void hold_name(const char *cmd, char *name, const size_t n) {
+    size_t len = strcspn(cmd + 1, " \t");
+    if (len >= n) len = n - 1;
+    memcpy(name, cmd + 1, len);
+    name[len] = 0;
+}
+
+static int hold_named(const char *name) {
+    for (int i = 0; i < g_con.hold_count; i++) {
+        if (!strcmp(g_con.holds[i].name, name)) return 1;
+    }
+    return 0;
+}
+
+// A '+name' bind pressed `key` (or a mwheel bind: CON_HOLD_WHEEL): the control stays held until then
+static void hold_add(const int key, const char *name) {
+    if (!name[0]) return;
+    for (int i = 0; i < g_con.hold_count; i++) {
+        if (g_con.holds[i].key == key && !strcmp(g_con.holds[i].name, name)) return;
+    }
+    if (g_con.hold_count == CON_HOLDS_MAX) return;
+    g_con.holds[g_con.hold_count].key = key;
+    snprintf(g_con.holds[g_con.hold_count].name, sizeof(g_con.holds[0].name), "%s", name);
+    g_con.hold_count++;
+}
+
+// The holds of `key` end ('-name'); a control another key still holds stays down
+static void hold_release(const int key) {
+    for (int i = 0; i < g_con.hold_count;) {
+        if (g_con.holds[i].key != key) {
+            i++;
+            continue;
+        }
+        char name[CON_NAME_MAX];
+        snprintf(name, sizeof(name), "%s", g_con.holds[i].name);
+        memmove(&g_con.holds[i], &g_con.holds[i + 1], sizeof(ConHold) * (size_t) (g_con.hold_count - i - 1));
+        g_con.hold_count--;
+        if (!hold_named(name)) ui_controls_bind_hold(con_client(), name, 0);
+    }
+}
+
+// The keyBinds of the mwheelup / mwheeldown names (ui_controls_scroll_event, in game, console hidden):
+// the command runs; a '+name' holds the control until the frame ends. 1 when the direction is bound.
+int ui_console_wheel(const int up) {
+    if (g_con.visible) return 0;
+    const ConPair *bind = pair_find(g_con.binds, g_con.bind_count, up ? "mwheelup" : "mwheeldown");
+    if (!bind) return 0;
+    char cmd[CON_TEXT_MAX];
+    snprintf(cmd, sizeof(cmd), "%s", bind->value);
+    trim(cmd);
+    if (cmd[0] == '+') { // a tap: no log line per wheel tick
+        char name[CON_NAME_MAX];
+        hold_name(cmd, name, sizeof(name));
+        ui_controls_bind_hold(con_client(), name, 1);
+        hold_add(CON_HOLD_WHEEL, name);
+    } else {
+        con_exec(cmd);
+    }
+    return 1;
+}
+
+// After the input frame (ui_controls_end_frame): a wheel's '+' tap lets go
+void ui_console_wheel_end_frame(void) {
+    hold_release(CON_HOLD_WHEEL);
+}
+
 static const ConCommand *g_running; // the command being run (alias commands find their body)
 
 static void cmd_alias_run(const int argc, char **argv, const char *rest) {
@@ -1550,6 +1630,12 @@ static void con_exec(const char *raw) {
     trim(line);
     if (!line[0]) return;
     appendf(COL_CMD, "] %s", line);
+    if (line[0] == '+' || line[0] == '-') { // '+jump' presses the control, '-jump' lets go (a bind's hold)
+        char name[CON_NAME_MAX];
+        hold_name(line, name, sizeof(name));
+        ui_controls_bind_hold(con_client(), name, line[0] == '+');
+        return;
+    }
     const char *stripped = line[0] == '/' ? line + 1 : line;
     const char *space = strchr(stripped, ' ');
     char name[CON_NAME_MAX];
@@ -1759,6 +1845,8 @@ static void con_mode_candidates(ConCands *c, const char *prefix) {
 
 static void con_key_candidates(ConCands *c, const char *prefix) {
     for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
+    cand_add(c, "mwheelup", prefix); // the mouse wheel's two directions (ui_console_wheel)
+    cand_add(c, "mwheeldown", prefix);
     static const int KEYS[] = {GLFW_KEY_F1, GLFW_KEY_F2, GLFW_KEY_F3, GLFW_KEY_F4, GLFW_KEY_F5, GLFW_KEY_F6, GLFW_KEY_F7,
                                GLFW_KEY_F8, GLFW_KEY_F9, GLFW_KEY_F10, GLFW_KEY_F11, GLFW_KEY_F12, GLFW_KEY_SPACE,
                                GLFW_KEY_TAB, GLFW_KEY_LEFT_SHIFT, GLFW_KEY_LEFT_CONTROL, GLFW_KEY_LEFT_ALT};
@@ -2179,6 +2267,8 @@ static int key_event(Client *client, const int key, const int scancode, const in
     if (!html_ui_available()) return 0;
     const int press = action == GLFW_PRESS;
     const int typing = ui_text_input_focused(); // a text field has focus (the console's own input too)
+    // a '+name' bind's hold ends with its key's release, also while the console is open
+    if (game && action == GLFW_RELEASE) hold_release(key);
 
     // handleConsoleKeydown (window capture)
     if (g_con.visible && (press || action == GLFW_REPEAT)) {
@@ -2220,7 +2310,13 @@ static int key_event(Client *client, const int key, const int scancode, const in
         if (bind) {
             char cmd[CON_TEXT_MAX];
             snprintf(cmd, sizeof(cmd), "%s", bind->value);
+            trim(cmd);
             con_exec(cmd);
+            if (cmd[0] == '+') {
+                char name[CON_NAME_MAX];
+                hold_name(cmd, name, sizeof(name));
+                hold_add(key, name);
+            }
         }
     }
     return 0;
