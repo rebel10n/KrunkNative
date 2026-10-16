@@ -900,6 +900,11 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "content", "attr(data-badge)") && c.content.kind == CSS_CONTENT_ATTR && strcmp(c.content.str, "data-badge") == 0);
     CHECK(apply(&c, NULL, "content", "none") && c.content.kind == CSS_CONTENT_NONE);
     CHECK(apply(&c, NULL, "content", "'x'") && strcmp(c.content.str, "x") == 0);
+    /* CSS string escapes: icons.css's glyphs ("\\f126"), a space ends a hex escape, "\\" + char, "\\" + newline */
+    CHECK(apply(&c, NULL, "content", "\"\\f126\"") && c.content.kind == CSS_CONTENT_STRING && strcmp(c.content.str, "\xef\x84\xa6") == 0);
+    CHECK(apply(&c, NULL, "content", "\"\\41 B\"") && strcmp(c.content.str, "AB") == 0);
+    CHECK(apply(&c, NULL, "content", "'a\\'b'") && strcmp(c.content.str, "a'b") == 0);
+    CHECK(apply(&c, NULL, "content", "'\\0'") && strcmp(c.content.str, "\xef\xbf\xbd") == 0);
     CHECK(apply(&c, NULL, "cursor", "pointer") && c.cursor == CSS_CURSOR_POINTER);
     CHECK(apply(&c, NULL, "cursor", "crosshair") && c.cursor == CSS_CURSOR_CROSSHAIR);
     CHECK(apply(&c, NULL, "cursor", "url(a.cur), default") && c.cursor == CSS_CURSOR_DEFAULT);

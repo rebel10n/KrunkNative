@@ -95,6 +95,23 @@ def files_case():
     check(f"1: the {len(refs)} images the transcribed screens use are in ui/strike/", not missing, " ".join(missing))
 
 
+def icons_case():
+    """icons.css's font (vendored, sha256 as README.md records) loads: the round end's podium glyph is a
+    CSS escape decoded from the sheet, and no @font-face src is an SVG or EOT the engine cannot read."""
+    readme = open(os.path.join(STRIKE, "README.md"), encoding="utf-8").read()
+    for p in ("icons.woff2", "icons.woff", "icons.ttf", "icons.svg", "icons.eot"):
+        f = os.path.join(STRIKE, p)
+        digest = re.search(r"^\| " + re.escape(p) + r" \| https://\S+ \| ([0-9a-f]{64}) \|$", readme, re.M)
+        ok = os.path.isfile(f) and digest is not None and hashlib.sha256(open(f, "rb").read()).hexdigest() == digest.group(1)
+        check(f"1: ui/strike/{p} vendored, sha256 as README.md records", ok)
+    out = os.path.join(WORK, "icons-end.png")
+    rc, text = run([f"{BUILD}/client_bin", "--render-scenario", "tools/uidiff/scenarios/strike/end.json", out],
+                   os.path.join(WORK, "cfg-icons"), os.path.join(WORK, "icons-end.log"))
+    check("1: the round end renders with icons.css's font", rc == 0 and png_size(out) == (1280, 720), f"rc {rc}")
+    check("1: icons.css's face registers (no 'failed to load face')", "failed to load face 'icons'" not in text,
+          os.path.join(WORK, "icons-end.log"))
+
+
 # ---------------------------------------------------------------- 2. the scenarios
 
 SCENARIOS = [
@@ -268,6 +285,7 @@ def main():
         print(f"no {BUILD}/client_bin", file=sys.stderr)
         return 2
     files_case()
+    icons_case()
     scenario_case()
     live_case()
     hud_case()

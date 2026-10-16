@@ -410,6 +410,22 @@ static int range_covers_latin(const char *r)
     return !any;
 }
 
+/* FreeType reads TTF/OTF/WOFF (and WOFF2 through its .ttf twin); an SVG or EOT src
+ * (icons.css lists them first) registers as a face it can never load, so the next src
+ * in the list must be tried instead, as a browser does with format(). */
+static int font_src_is_loadable(const char *url)
+{
+    size_t n = strlen(url);
+    const char *cut = strpbrk(url, "?#"); /* icons.css: "./icons.svg?<hash>#icons" */
+    if (cut) n = (size_t) (cut - url);
+    static const char *const skip[] = {".svg", ".eot"};
+    for (size_t k = 0; k < sizeof skip / sizeof skip[0]; k++) {
+        const size_t m = strlen(skip[k]);
+        if (n >= m && kn_str_ieq(url + n - m, m, skip[k])) return 0;
+    }
+    return 1;
+}
+
 static void register_font_faces(Engine *g, const CssSheet *sheet)
 {
     uint32_t count = 0;
@@ -421,7 +437,8 @@ static void register_font_faces(Engine *g, const CssSheet *sheet)
         int ok = 0;
         for (int s = 0; s < f->src_count && !ok; s++) {
             char key[512];
-            if (!f->src[s] || !image_resolve_url(f->src[s], base, key, sizeof(key))) continue;
+            if (!f->src[s] || !font_src_is_loadable(f->src[s])) continue;
+            if (!image_resolve_url(f->src[s], base, key, sizeof(key))) continue;
             const int style = f->style == CSS_FONT_STYLE_NORMAL ? TEXT_STYLE_NORMAL : TEXT_STYLE_ITALIC;
             ok = text_register_face(g->text, f->family, key, f->weight ? f->weight : 400, style) == 0;
             vlog("@font-face '%s' %s -> %s", f->family, key, ok ? "registered" : "FAILED");

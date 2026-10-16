@@ -310,3 +310,22 @@ wallbang file is byte-identical to `cdn/img/chals/icon_9.png` above (same sha256
 |---|---|---|
 | img/thrown_0.png | https://krunkerstrike.frvr.com/img/thrown_0.png | 9878189e00b2238d7513b554a1d17c7243e8c8989f8187033c74f27aad0ab6e4 |
 | img/wallbang_0.png | https://krunkerstrike.frvr.com/img/wallbang_0.png | d5193c6b1839635ad2f72f4f8daa6f71487451d51d32a0383e31e1a7290eed71 |
+
+## Icon font (icons.css, 2026-10-15)
+
+`icons.css` (FRVR's `fantasticon:icons` sheet, the page's own file) loads `./icons.svg|ttf|woff|woff2|eot` from the page root, and no
+copy was vendored. FRVR's bundle uses two of its glyphs, `podium` and `share` (`fontIcon:` on the round end's buttons: `LEAN_END_SCREEN`
+and the shareable end screen). cdn.frvr.com answered 404 for all
+five names; the page origin answered 200, so those five files were fetched from it (GET only, one request per 1.2 s, no cookies, no
+body, nothing executed) and vendored unchanged next to `icons.css`:
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| icons.woff2 | https://krunkerstrike.frvr.com/icons.woff2 | 48d9a7032af53c57ca12048bd41927069115fca8e4ee8d66aa6b2c382e48a8ce |
+| icons.woff | https://krunkerstrike.frvr.com/icons.woff | 48d6c1ba754022ba1f0b356fea682bfa54f3a0a88a671862ecd82125e88a2e6b |
+| icons.ttf | https://krunkerstrike.frvr.com/icons.ttf | 9b85dd1dfa4ea24a0bf83b69875cf41264cbb09c5b1ead6b1b7253b75296f135 |
+| icons.svg | https://krunkerstrike.frvr.com/icons.svg | 019f43386e4ac2f24cfab273706581090c675448aa412f234892ccf325df5394 |
+| icons.eot | https://krunkerstrike.frvr.com/icons.eot | 85be7b7cf132d7ece799fffd959f38e002b3aced5febe6e3aaafd271dcdb6dab |
+
+The HTML engine cannot read SVG or EOT: `font_src_is_loadable()` (client/src/html/engine/engine.c) skips those `src` entries, so the
+TTF is used. Glyph codes in `icons.css` are CSS escapes (`content: "\f126"`); `css_parse_content()` decodes them.

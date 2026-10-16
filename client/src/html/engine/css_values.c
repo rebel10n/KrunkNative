@@ -3035,6 +3035,30 @@ int css_parse_vertical_align(const CssToken *tokens, int n, uint8_t *kw, CssLeng
     return 1;
 }
 
+/* CSS string escapes (CSS Syntax 3 4.3.7): "\\HHHHHH" (1-6 hex digits, one optional
+ * whitespace after) is a code point, "\\" + a newline is dropped, "\\X" is X. The token keeps the
+ * raw text; content: strings (icons.css's ::before glyphs) need the decoded text. */
+static const char *css_string_unescape(const char *s, size_t len)
+{
+    char buf[1024];
+    size_t o = 0;
+    for (size_t i = 0; i < len && o + 8 < sizeof buf;) {
+        if (s[i] != '\\') { buf[o++] = s[i++]; continue; }
+        i++;
+        if (i >= len) break;
+        if (s[i] == '\n') { i++; continue; }
+        if (!kn_is_hex((unsigned char) s[i])) { buf[o++] = s[i++]; continue; }
+        uint32_t cp = 0;
+        int digits = 0;
+        while (i < len && digits < 6 && kn_is_hex((unsigned char) s[i])) { cp = cp * 16 + (uint32_t) kn_hex_val((unsigned char) s[i]); i++; digits++; }
+        if (i < len && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n')) i++;
+        if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+        o += (size_t) kn_utf8_encode(cp, buf + o);
+    }
+    buf[o] = 0;
+    return kn_atom(buf, o);
+}
+
 int css_parse_content(const CssToken *tokens, int n, CssContent *out)
 {
     CssToken t[16];
@@ -3043,7 +3067,7 @@ int css_parse_content(const CssToken *tokens, int n, CssContent *out)
     memset(&c, 0, sizeof(c));
     if (m == 1 && tok_is_ident(&t[0], "none")) { c.kind = CSS_CONTENT_NONE; *out = c; return 1; }
     if (m == 1 && tok_is_ident(&t[0], "normal")) { c.kind = CSS_CONTENT_NORMAL; *out = c; return 1; }
-    if (m == 1 && t[0].type == CSS_TOK_STRING) { c.kind = CSS_CONTENT_STRING; c.str = kn_atom(t[0].text, t[0].len); *out = c; return 1; }
+    if (m == 1 && t[0].type == CSS_TOK_STRING) { c.kind = CSS_CONTENT_STRING; c.str = css_string_unescape(t[0].text, t[0].len); *out = c; return 1; }
     if (m == 3 && tok_is_func(&t[0], "attr") && t[1].type == CSS_TOK_IDENT && t[2].type == CSS_TOK_RPAREN) {
         c.kind = CSS_CONTENT_ATTR; c.str = kn_atom_lower(t[1].text, t[1].len); *out = c; return 1;
     }
