@@ -16,6 +16,7 @@
 #include <weapons.h>
 #include <world.h> // build_fill: game_build_object
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -296,7 +297,7 @@ static PlayerKeep *keep_of(const ChatCtx *c, const int uid) {
     return c->host->keep && uid != CHAT_CMD_CONSOLE ? c->host->keep(c->host->user, uid) : NULL;
 }
 
-unsigned int player_keep_apply(Player *player, const PlayerKeep *keep) {
+unsigned int player_keep_apply(Player *player, PlayerKeep *keep) {
     if (!player || !keep) return 0;
     unsigned int changed = 0;
 #define KEEP_APPLY(bit, field) \
@@ -312,6 +313,13 @@ unsigned int player_keep_apply(Player *player, const PlayerKeep *keep) {
     KEEP_APPLY(PLAYER_KEEP_FORCE_HIDE, force_hide)
 #undef KEEP_APPLY
     if (player->unlimited_ammo) player->can_throw = 1;
+    if (keep->set & PLAYER_KEEP_SCORE) { // /score from the menu: the points once, then nothing is kept
+        const int points = keep->score;
+        keep->set &= (unsigned char) ~PLAYER_KEEP_SCORE;
+        keep->score = 0;
+        if (points) player_score(player, points, 0);
+        changed |= PLAYER_KEEP_SCORE;
+    }
     return changed;
 }
 
@@ -1273,10 +1281,14 @@ static void cmd_teams(ChatCtx *c) {
     if (!shown) reply(c, "No active players.");
 }
 
+// /score [amount]: the points on the live Player. KrunkNative: not spawned in (the menu, dead), the
+// connection's keep takes them and the next spawn adds them once (player_keep_apply).
 static void cmd_score(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
     Player *player = c->player;
-    if (!player || !player->active) {
+    const int live = player && player->active;
+    PlayerKeep *keep = !live && c->has_self ? keep_of(c, c->sender) : NULL;
+    if (!live && !keep) {
         reply(c, "Score command unavailable (no active player).");
         return;
     }
@@ -1290,8 +1302,17 @@ static void cmd_score(ChatCtx *c) {
         reply(c, "Usage: /score <amount> (default 100).");
         return;
     }
-    player_score(player, (int) amount, 0);
-    reply(c, "%s%d score (total %d).", amount > 0 ? "+" : "", (int) amount, player->score);
+    const int points = amount >= (double) INT_MAX ? INT_MAX : amount <= (double) INT_MIN ? INT_MIN : (int) amount;
+    if (!live) {
+        const int waiting = keep->set & PLAYER_KEEP_SCORE ? keep->score : 0;
+        const long long sum = (long long) waiting + points;
+        keep->score = (int) (sum > INT_MAX ? INT_MAX : sum < INT_MIN ? INT_MIN : sum);
+        keep->set |= PLAYER_KEEP_SCORE;
+        reply(c, "%s%d score at your next spawn (%s%d waiting).", amount > 0 ? "+" : "", points, keep->score > 0 ? "+" : "", keep->score);
+        return;
+    }
+    player_score(player, points, 0);
+    reply(c, "%s%d score (total %d).", amount > 0 ? "+" : "", points, player->score);
 }
 
 // game.ts listSoulSanctumAIs, joined like `names.join(", ")`

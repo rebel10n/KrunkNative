@@ -2404,6 +2404,10 @@ static void test_menu_state(TestClient *m, TestClient *b) {
     snprintf(tp, sizeof(tp), "/tp %.2f %.2f %.2f", (double) there.x, (double) there.y, (double) there.z);
     say(m, tp);
     CHECK(strstr(server_line(m), "You will spawn at") != NULL, "tp from the menu: '%s'", server_line(m));
+    // /score from the menu (KrunkNative): the points wait in the keep; the spawn adds them once
+    say(m, "/score 40");
+    CHECK(strstr(server_line(m), "+40 score at your next spawn (+40 waiting).") != NULL && mc->keep.score == 40,
+          "score from the menu: '%s' (kept %d)", server_line(m), mc->keep.score);
     // a guest in the menu: the Object Manager says "Spawn first", as before
     set_dev(m, 0);
     r = request(m, OM_ACTION_SPAWN_OBJECT, 10, -0.8f);
@@ -2415,6 +2419,7 @@ static void test_menu_state(TestClient *m, TestClient *b) {
     Player *p = player_of(m);
     const int spawn_at = index_of(m, NET_PACKET_SPAWN, 0);
     CHECK(p && p->active && p->god_mode && p->noclip, "spawned with god and noclip (god %d noclip %d)", p ? p->god_mode : -1, p ? p->noclip : -1);
+    CHECK(p && p->score == 40 && !(mc->keep.set & PLAYER_KEEP_SCORE), "the spawn adds the kept 40 once (score %d, kept %u)", p ? p->score : -1, mc->keep.set);
     CHECK(p && loadout_has(p, 5), "and the Shotgun given in the menu");
     CHECK(p && fabsf(p->position.x - there.x) < 1.0f && fabsf(p->position.z - there.z) < 1.0f, "at the menu tp's spot (%.1f %.1f, want %.1f %.1f)",
           p ? p->position.x : 0.0f, p ? p->position.z : 0.0f, there.x, there.z);
@@ -2427,10 +2432,19 @@ static void test_menu_state(TestClient *m, TestClient *b) {
     CHECK(!p->active, "dead");
     say(m, "/ungod");
     CHECK(strstr(server_line(m), "God mode OFF") != NULL && !mc->keep.god_mode, "ungod while dead: '%s'", server_line(m));
+    const int score_dead = p->score;
+    say(m, "/score 9"); // dead: kept like the menu's
+    CHECK(strstr(server_line(m), "+9 score at your next spawn (+9 waiting).") != NULL && mc->keep.score == 9, "score while dead: '%s'", server_line(m));
     p->death_time = g_server->game.now - 10.0f;
     spawn_client(m);
     p = player_of(m);
     CHECK(p && p->active && !p->god_mode && p->noclip, "the next life: god off, noclip still on");
+    CHECK(p && p->score == score_dead + 9 && !(mc->keep.set & PLAYER_KEEP_SCORE), "the next life adds the kept 9 once (score %d, was %d)", p ? p->score : -1, score_dead);
+    // in game: /score adds now and keeps nothing
+    const int score_live = p->score;
+    say(m, "/score 5");
+    CHECK(strstr(server_line(m), "+5 score (total ") != NULL && player_of(m)->score == score_live + 5 && !(mc->keep.set & PLAYER_KEEP_SCORE),
+          "in game /score: '%s' (%d -> %d)", server_line(m), score_live, player_of(m)->score);
     r = request(m, OM_ACTION_UNDO, 0, 0.0f); // the crate spawned from the menu is this player's
     CHECK(r.status == OM_STATUS_OK && spawned_count() == objects, "the menu's crate is this player's to undo (status %u)", r.status);
     say(m, "/noclip off");

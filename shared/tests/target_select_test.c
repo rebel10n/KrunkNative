@@ -1,6 +1,8 @@
 // Player target selectors (shared/src/target_select.c) and the chat commands that use them
 // (shared/src/chat_commands.c): globs, teams, bots, self, no match; god * / ungod * / kill @bots /
 // kick * / give * over a game with humans and bots; a selector never widens a command's gate.
+// The menu (no Player yet): /score keeps its points for the next spawn (player_keep_apply) and
+// /score in game adds them now.
 // Run from the repository root: ./<build>/target_select_test
 #include <shared.h>
 #include <bots.h>
@@ -140,6 +142,8 @@ static Game *g_game;
 static ChatCommandHost g_host;
 #define PEERS 3
 static ChatPeer g_peers[PEERS]; // the humans (uid 1..3); peer 0 is the dev
+static int g_peer_count = PEERS;
+static PlayerKeep g_keeps[8];   // the connections' keeps, by uid (test_menu_keep)
 
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game; (void) uid; (void) length;
@@ -157,7 +161,12 @@ static void host_log(void *user, const char *text) {
 
 static int peer_count(void *user) {
     (void) user;
-    return PEERS;
+    return g_peer_count;
+}
+
+static PlayerKeep *keep_for(void *user, const int id) {
+    (void) user;
+    return id > 0 && id < (int) (sizeof(g_keeps) / sizeof(g_keeps[0])) ? &g_keeps[id] : NULL;
 }
 
 static int peer_at(void *user, const int index, ChatPeer *out) {
@@ -345,9 +354,113 @@ static void test_commands(void) {
     cJSON_Delete(arena);
 }
 
+// ---------------------------------------------------------------- the menu keep (/score)
+
+static const char *k_menu_arena =
+    "{\"name\":\"Menu Arena\",\"spawns\":[[0,0,0,0,0,0],[300,0,0,0,0,0]],"
+    "\"objects\":[{\"p\":[0,-10,0],\"s\":[1200,10,1200]}]}";
+
+static void test_menu_keep(void) {
+    printf("Running menu keep test...\n");
+    cJSON *arena = cJSON_Parse(k_menu_arena);
+    static const cJSON *maps[1];
+    maps[0] = arena;
+    static int modes[1];
+    modes[0] = MODE_ID_FFA;
+    static Game game;
+    g_game = &game;
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game.round_length = 100000.0f;
+    game.is_sandbox = 1;
+    game_init(&game, 0, 0, 1);
+    CHECK(game.ready, "menu game ready");
+    if (!game.ready) return;
+
+    memset(g_keeps, 0, sizeof(g_keeps));
+    add_human(&game, 1, "Joel"); // in game
+    // uid 4: a dev in the menu (no Player); uid 5: a guest in the menu
+    g_peer_count = 3;
+    g_peers[0] = (ChatPeer) {.id = 1, .name = "Joel", .address = "127.0.0.1", .ping_ms = 0, .dev = 1};
+    g_peers[1] = (ChatPeer) {.id = 4, .name = "Menu", .address = "203.0.113.4", .ping_ms = 0, .dev = 1};
+    g_peers[2] = (ChatPeer) {.id = 5, .name = "Guest", .address = "203.0.113.5", .ping_ms = 0};
+    g_host.game = &game;
+    g_host.user = NULL;
+    g_host.peer_count = peer_count;
+    g_host.peer_at = peer_at;
+    g_host.log = host_log;
+    g_host.disconnect = host_disconnect;
+    g_host.keep = keep_for;
+    g_host.perms = 1;
+    g_host.cheats_open = 0;
+
+    // from the menu: the amount is kept, the reply says when it applies (sums, signs)
+    CHECK(!strcmp(say(4, "/score 250"), "+250 score at your next spawn (+250 waiting)."), "menu /score 250 (%s)", g_reply);
+    CHECK((g_keeps[4].set & PLAYER_KEEP_SCORE) && g_keeps[4].score == 250, "the menu keeps 250 (%d)", g_keeps[4].score);
+    CHECK(!game_find_player(&game, 4), "no Player in the menu");
+    CHECK(!strcmp(say(4, "/score 50"), "+50 score at your next spawn (+300 waiting)."), "a second menu /score adds (%s)", g_reply);
+    CHECK(!strcmp(say(4, "/score -20"), "-20 score at your next spawn (+280 waiting)."), "a negative menu /score (%s)", g_reply);
+    CHECK(g_keeps[4].score == 280, "the kept sum is 280 (%d)", g_keeps[4].score);
+    CHECK(!strcmp(say(4, "/score x"), "Usage: /score <amount> (default 100)."), "a bad amount is refused (%s)", g_reply);
+    CHECK(g_keeps[4].score == 280, "a refused amount keeps nothing new (%d)", g_keeps[4].score);
+    // the default is 100; guests and the console have no keep
+    CHECK(!strcmp(say(4, "/score"), "+100 score at your next spawn (+380 waiting)."), "menu /score: the default 100 (%s)", g_reply);
+    say(4, "/score -100");
+    g_notify[0] = 0;
+    say(5, "/score 10");
+    CHECK(g_notify[0] && !(g_keeps[5].set & PLAYER_KEEP_SCORE), "a guest's menu /score is denied and keeps nothing (%s)", g_notify);
+    CHECK(!strcmp(say(CHAT_CMD_CONSOLE, "/score 5"), "Score command unavailable (no active player)."), "console /score without a player (%s)", g_reply);
+    // the menu's other refusals that need a live world (the audit in the report)
+    CHECK(!strcmp(say(4, "/summon fiend"), "Summon unavailable (no active player)."), "menu /summon refuses (%s)", g_reply);
+    CHECK(!strcmp(say(4, "/drop"), "drop needs a player: run it in game."), "menu /drop refuses (%s)", g_reply);
+
+    // the next spawn applies the kept score once (the server's order: spawn, then the keep)
+    Player *menu = player_init(&game);
+    menu->uid = 4;
+    snprintf(menu->name, sizeof(menu->name), "%s", "Menu");
+    menu->class_index = 0;
+    game_players_add(&game, menu);
+    player_spawn(menu);
+    const int before = menu->score;
+    const unsigned int applied = player_keep_apply(menu, &g_keeps[4]);
+    CHECK(applied & PLAYER_KEEP_SCORE, "the spawn applies the kept score (%u)", applied);
+    CHECK(menu->score == before + 280, "the spawn adds 280 (%d -> %d)", before, menu->score);
+    CHECK(!(g_keeps[4].set & PLAYER_KEEP_SCORE) && g_keeps[4].score == 0, "and clears it (set %u, %d)", g_keeps[4].set, g_keeps[4].score);
+    player_keep_apply(menu, &g_keeps[4]);
+    CHECK(menu->score == before + 280, "the next spawn adds nothing (%d)", menu->score);
+
+    // in game: /score adds now, on the live Player, and keeps nothing
+    const int joel = game_find_player(&game, 1)->score;
+    CHECK(!strncmp(say(1, "/score 100"), "+100 score (total ", 18), "in game /score: the live reply (%s)", g_reply);
+    CHECK(game_find_player(&game, 1)->score == joel + 100, "in game /score 100 adds now (%d -> %d)", joel, game_find_player(&game, 1)->score);
+    CHECK(!(g_keeps[1].set & PLAYER_KEEP_SCORE), "in game keeps nothing");
+
+    // a dead Player (not active) keeps it too, like the menu
+    Player *dead = game_find_player(&game, 1);
+    dead->active = 0;
+    CHECK(!strcmp(say(1, "/score 7"), "+7 score at your next spawn (+7 waiting)."), "dead /score keeps (%s)", g_reply);
+    dead->active = 1;
+    CHECK(g_keeps[1].score == 7 && (g_keeps[1].set & PLAYER_KEEP_SCORE), "the dead Player's keep holds 7 (%d)", g_keeps[1].score);
+
+    for (size_t i = 0; i < game.player_count; i++) {
+        Player *p = game.players[i];
+        if (!p) continue;
+        free(p->loadout);
+        free(p->ammo);
+        free(p->reloads);
+        free(p->input_queue);
+        free(p);
+    }
+    free(game.players);
+    game.players = NULL;
+    game.player_count = 0;
+    cJSON_Delete(arena);
+}
+
 int main(void) {
     test_resolver();
     test_commands();
+    test_menu_keep();
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);
         return 1;

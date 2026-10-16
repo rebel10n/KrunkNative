@@ -1522,17 +1522,20 @@ typedef struct Player_t {
 #define PLAYER_KEEP_SMITE 8u
 #define PLAYER_KEEP_UNLIMITED_AMMO 16u
 #define PLAYER_KEEP_FORCE_HIDE 32u
+#define PLAYER_KEEP_SCORE 64u
 typedef struct {
     unsigned char set;            // PLAYER_KEEP_* bits
     unsigned char god_mode, noclip, notarget, smite, unlimited_ammo, force_hide;
     unsigned char has_spawn;      // `tp` while not spawned in: the next spawn's feet (once)
     vec3 spawn_at;
+    int score;                    // `score` while not spawned in: the points the next spawn adds, summed (once; PLAYER_KEEP_SCORE)
     unsigned char has_view;       // the last life's eye and look (Object Manager spawns from the menu)
     vec3 view_eye;
     vec2 view_direction;          // pitch, yaw
 } PlayerKeep;
-// The kept cheats onto `player` (a spawn): returns PLAYER_KEEP_* of the ones that changed
-unsigned int player_keep_apply(Player*, const PlayerKeep*);
+// The kept cheats onto `player` (a spawn): returns PLAYER_KEEP_* of the ones that changed. The kept
+// score is added once and its bit cleared (the keep is the connection's, so the next spawn has none).
+unsigned int player_keep_apply(Player*, PlayerKeep*);
 
 typedef struct {
     int streak;         // v7 info.stk + 1 (STREAK_NUKE + 1: a Nuke kill), 0 = not a streak kill
