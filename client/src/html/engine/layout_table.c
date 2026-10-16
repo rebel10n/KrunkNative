@@ -2,7 +2,8 @@
  * layout_table.c - `display: table / table-row / table-cell` subset
  * (inventory section 6: .menuTabsNew/.menuTabNew, .serverHeader/.sideTabs/
  * .centerTab; no <table> markup).  colspan (cell_span_at) widens the columns it covers;
- * rowspan is not laid out.  Auto table layout:
+ * rowspan (cell_rowspan_at) takes the grid cells below it and grows its rows when it is
+ * taller than they are (table_grow_span).  Auto table layout:
  * column min/max from cell min-/max-content, percentage and px cell widths,
  * extra space distributed to auto columns in proportion to their max-content
  * widths (Chrome's AutoTableLayout for these cases), cells of a row share the
@@ -49,25 +50,82 @@ static void table_spacing(const Box *b, float *hs, float *vs)
     *vs = b->style->border_spacing_y.kind == CSS_LEN_VALUE ? b->style->border_spacing_y.px : 0;
 }
 
-/* colspan (HTML 4.4.6): a number 1..TBL_MAX_COLS, 0 or junk reads as 1; clamped to the columns
- * left from column ci. rowspan is not laid out: such a cell keeps its own row. */
+/* A cell's integer presentational attribute (colspan / rowspan); dflt when missing or junk. */
+static long cell_attr_int(const Box *c, const char *name, size_t nlen, long dflt)
+{
+    lxb_dom_node_t *node = c->node;
+    if (!node || node->type != LXB_DOM_NODE_TYPE_ELEMENT) return dflt;
+    size_t len = 0;
+    const lxb_char_t *v = lxb_dom_element_get_attribute(lxb_dom_interface_element(node), (const lxb_char_t *)name, nlen, &len);
+    if (!v || !len) return dflt;
+    char buf[32];
+    size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+    memcpy(buf, v, n); buf[n] = 0;
+    char *end;
+    long d = strtol(buf, &end, 10);
+    return end == buf ? dflt : d;
+}
+
+/* colspan (HTML 4.4.6): 0 or junk reads as 1; clamped to the columns left from column ci
+ * (ci < TBL_MAX_COLS). */
 static int cell_span_at(const Box *c, int ci)
 {
-    int span = 1;
-    lxb_dom_node_t *node = c->node;
-    if (node && node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        size_t len = 0;
-        const lxb_char_t *v = lxb_dom_element_get_attribute(lxb_dom_interface_element(node), (const lxb_char_t *)"colspan", 7, &len);
-        if (v && len) {
-            char buf[32];
-            size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
-            memcpy(buf, v, n); buf[n] = 0;
-            char *end;
-            long d = strtol(buf, &end, 10);
-            if (end != buf && d > 0) span = d < TBL_MAX_COLS ? (int)d : TBL_MAX_COLS;
-        }
+    long d = cell_attr_int(c, "colspan", 7, 1);
+    if (d < 1) d = 1;
+    return d < TBL_MAX_COLS - ci ? (int)d : TBL_MAX_COLS - ci;
+}
+
+/* rowspan (HTML 4.4.6): 0 spans to the table's last row; junk reads as 1; clamped to the rows
+ * left from the cell's row (rows_left >= 1). */
+static int cell_rowspan_at(const Box *c, int rows_left)
+{
+    long d = cell_attr_int(c, "rowspan", 7, 1);
+    if (d == 0) d = rows_left;
+    else if (d < 1) d = 1;
+    return d < rows_left ? (int)d : rows_left;
+}
+
+/* The cells of one row placed on the grid: each cell takes the first column no rowspan from an
+ * earlier row holds (busy[col] counts the rows, this one included, that still hold it). */
+typedef struct RowCells {
+    Box *cell[TBL_MAX_COLS];
+    int col[TBL_MAX_COLS], span[TBL_MAX_COLS], rspan[TBL_MAX_COLS];
+    int n;
+} RowCells;
+
+static void table_row_cells(Box *r, int rows_left, int *busy, RowCells *rc)
+{
+    rc->n = 0;
+    int col = 0;
+    for (Box *c = r->first_child; c; c = c->next) {
+        if (c->type != BOX_TABLE_CELL) continue;
+        while (col < TBL_MAX_COLS && busy[col] > 0) col++;
+        if (col >= TBL_MAX_COLS) break;
+        const int span = cell_span_at(c, col), rs = cell_rowspan_at(c, rows_left);
+        const int k = rc->n++;
+        rc->cell[k] = c; rc->col[k] = col; rc->span[k] = span; rc->rspan[k] = rs;
+        for (int i = 0; i < span; i++) busy[col + i] = rs;
+        col += span;
     }
-    return span < TBL_MAX_COLS - ci ? span : TBL_MAX_COLS - ci;
+}
+
+/* Leaving a row: every rowspan that reached this row has one row fewer to hold its columns. */
+static void table_row_done(int *busy)
+{
+    for (int i = 0; i < TBL_MAX_COLS; i++) if (busy[i] > 0) busy[i]--;
+}
+
+static int table_row_count(const Box *b)
+{
+    int n = 0;
+    for (const Box *r = b->first_child; r; r = r->next) if (r->type == BOX_TABLE_ROW) n++;
+    return n;
+}
+
+static Box *next_table_row(Box *r)
+{
+    for (Box *n = r->next; n; n = n->next) if (n->type == BOX_TABLE_ROW) return n;
+    return NULL;
 }
 
 /* The border-box width of the columns [ci, ci + span) and the spacing between them. */
@@ -124,22 +182,27 @@ static void table_cell_widths(LayoutTree *t, Box *c, int ci, int span, float hs,
     col->max = kn_maxf(col->max, mx);
 }
 
+/* The column count (the widest row's columns, rowspans included) and the columns' min/max. */
 static int table_columns(LayoutTree *t, Box *b, float hs, ColInfo *cols)
 {
     int nc = 0;
+    const int nrows = table_row_count(b);
     for (int i = 0; i < TBL_MAX_COLS; i++) { cols[i].min = cols[i].max = 0; cols[i].fixed = cols[i].pct = -1; }
     /* the single-column cells first (pass 0), then the spanning cells (pass 1) */
     for (int pass = 0; pass < 2; pass++) {
+        int busy[TBL_MAX_COLS];
+        memset(busy, 0, sizeof(busy));
+        int ri = 0;
         for (Box *r = b->first_child; r; r = r->next) {
             if (r->type != BOX_TABLE_ROW) continue;
-            int ci = 0;
-            for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
-                if (c->type != BOX_TABLE_CELL) continue;
-                const int span = cell_span_at(c, ci);
-                if ((span > 1) == (pass == 1)) table_cell_widths(t, c, ci, span, hs, cols);
-                ci += span;
+            RowCells rc;
+            table_row_cells(r, nrows - ri, busy, &rc);
+            for (int k = 0; k < rc.n; k++) {
+                if ((rc.span[k] > 1) == (pass == 1)) table_cell_widths(t, rc.cell[k], rc.col[k], rc.span[k], hs, cols);
+                if (rc.col[k] + rc.span[k] > nc) nc = rc.col[k] + rc.span[k];
             }
-            if (pass == 0 && ci > nc) nc = ci;
+            table_row_done(busy);
+            ri++;
         }
     }
     return nc;
@@ -277,6 +340,43 @@ static void layout_cell(LayoutTree *t, Box *c, float w, float h, float cb_w)
     layout_box(t, c, &in, &o);
 }
 
+/* A cell's border-box height its specified `height` asks for (after layout at its column width). */
+static float cell_need_h(const Box *c)
+{
+    float ch = c->h;
+    if (c->style->height.kind == CSS_LEN_VALUE && c->style->height.pct == 0)
+        ch = kn_maxf(ch, layout_box_sizing_h(c, c->style->height.px));
+    return ch;
+}
+
+/* The height of the rows first.. first + rspan - 1 with the spacing between them. */
+static float table_span_h(Box *first, int rspan, float first_h, float vs)
+{
+    float h = first_h;
+    Box *r = first;
+    for (int k = 1; k < rspan && r; k++) {
+        r = next_table_row(r);
+        if (r) h += vs + r->h;
+    }
+    return h;
+}
+
+/* A rowspan cell taller than its rows gets the difference, shared by those rows in proportion
+ * to their heights (equally when they are all 0), like the column widths of a spanning cell. */
+static void table_grow_span(Box *first, const Box *c, int rspan, float vs)
+{
+    const float need = cell_need_h(c);
+    const float have = table_span_h(first, rspan, first->h, vs);
+    if (need <= have) return;
+    const float extra = need - have;
+    float sum = 0;
+    int n = 0;
+    for (Box *r = first; r && n < rspan; r = next_table_row(r), n++) sum += r->h;
+    Box *r = first;
+    for (int k = 0; k < n && r; k++, r = next_table_row(r))
+        r->h += sum > 0 ? extra * r->h / sum : extra / (float)n;
+}
+
 void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *content_h)
 {
     (void)in;
@@ -295,44 +395,70 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
     for (Box *c = b->first_child; c; c = c->next)
         if (c->flags & BOXF_OUT_OF_FLOW) { c->static_x = cx; c->static_y = cy; c->static_fx = c->static_fy = 0; }
 
-    float y = vs;
-    int any_row = 0;
-    b->first_baseline = -1;
+    const int nrows = table_row_count(b);
+    int busy[TBL_MAX_COLS];
+    int ri = 0;
+
+    /* 1. each row's own height: its cells that do not span rows, laid out at their column widths
+     * (rows[].h holds the result until step 3) */
+    memset(busy, 0, sizeof(busy));
     for (Box *r = b->first_child; r; r = r->next) {
         if (r->type != BOX_TABLE_ROW) continue;
-        any_row = 1;
         layout_resolve_edges(t, r, cw);
         float row_h = 0;
         if (r->style->height.kind == CSS_LEN_VALUE && r->style->height.pct == 0 && !(r->flags & BOXF_ANONYMOUS)) row_h = r->style->height.px;
         else if (r->style->height.kind == CSS_LEN_AUTO && !(r->flags & BOXF_ANONYMOUS)) row_h = row_attr_height(r);
-        int ci = 0;
-        for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
-            if (c->type != BOX_TABLE_CELL) continue;
-            const int span = cell_span_at(c, ci);
-            layout_cell(t, c, span_width(cols, ci, span, hs), -1, cw);
-            float ch = c->h;
-            if (c->style->height.kind == CSS_LEN_VALUE && c->style->height.pct == 0)
-                ch = kn_maxf(ch, layout_box_sizing_h(c, c->style->height.px));
-            row_h = kn_maxf(row_h, ch);
-            ci += span;
+        RowCells rc;
+        table_row_cells(r, nrows - ri, busy, &rc);
+        for (int k = 0; k < rc.n; k++) {
+            layout_cell(t, rc.cell[k], span_width(cols, rc.col[k], rc.span[k], hs), -1, cw);
+            if (rc.rspan[k] == 1) row_h = kn_maxf(row_h, cell_need_h(rc.cell[k]));
         }
-        ci = 0;
-        for (Box *c = r->first_child; c && ci < TBL_MAX_COLS; c = c->next) {
-            if (c->type != BOX_TABLE_CELL) continue;
-            const int span = cell_span_at(c, ci);
-            const float sw = span_width(cols, ci, span, hs);
-            layout_cell(t, c, sw, row_h, cw);
+        r->h = row_h;
+        table_row_done(busy);
+        ri++;
+    }
+
+    /* 2. rowspan cells taller than the rows they cover make those rows taller */
+    memset(busy, 0, sizeof(busy));
+    ri = 0;
+    for (Box *r = b->first_child; r; r = r->next) {
+        if (r->type != BOX_TABLE_ROW) continue;
+        RowCells rc;
+        table_row_cells(r, nrows - ri, busy, &rc);
+        for (int k = 0; k < rc.n; k++)
+            if (rc.rspan[k] > 1) table_grow_span(r, rc.cell[k], rc.rspan[k], vs);
+        table_row_done(busy);
+        ri++;
+    }
+
+    /* 3. place the rows and their cells (a rowspan cell covers its rows) */
+    float y = vs;
+    int any_row = 0;
+    b->first_baseline = -1;
+    memset(busy, 0, sizeof(busy));
+    ri = 0;
+    for (Box *r = b->first_child; r; r = r->next) {
+        if (r->type != BOX_TABLE_ROW) continue;
+        any_row = 1;
+        const float row_h = r->h;
+        RowCells rc;
+        table_row_cells(r, nrows - ri, busy, &rc);
+        for (int k = 0; k < rc.n; k++) {
+            Box *c = rc.cell[k];
+            const float sw = span_width(cols, rc.col[k], rc.span[k], hs);
+            const float cell_h = table_span_h(r, rc.rspan[k], row_h, vs);
+            layout_cell(t, c, sw, cell_h, cw);
             const float natural = cell_content_h(c);
-            float extra = row_h - natural;
+            float extra = cell_h - natural;
             if (extra > 0) {
                 if (c->vertical_align == CSS_VERTICAL_ALIGN_MIDDLE) shift_contents(c, extra * 0.5f);
                 else if (c->vertical_align == CSS_VERTICAL_ALIGN_BOTTOM) shift_contents(c, extra);
             }
-            c->lx = colx[ci];
+            c->lx = colx[rc.col[k]];
             c->ly = 0;
             layout_relative_offset(c, sw, LAYOUT_INDEFINITE);
             if (b->first_baseline < 0 && c->first_baseline >= 0) b->first_baseline = cy + y + c->first_baseline;
-            ci += span;
         }
         r->lx = cx; r->ly = cy + y;
         r->w = cw; r->h = row_h;
@@ -341,6 +467,8 @@ void layout_table_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
         for (Box *c = r->first_child; c; c = c->next) if (c->type == BOX_TABLE_CELL) layout_overflow_union_child(r, c);
         r->dirty = 0;
         y += row_h + vs;
+        table_row_done(busy);
+        ri++;
     }
     if (!any_row) y = 0;
     b->baseline_offset = b->first_baseline;

@@ -951,6 +951,80 @@ static void t_table_colspan(void)
     fx_free(fx);
 }
 
+/* rowspan (HTML 4.4.6): a cell takes its column in the rows it covers, so those rows skip the
+ * column; its width is its column's, its height is shared out over its rows. */
+static void t_table_rowspan(void)
+{
+    /* auto widths: the next row's cells start after the spanned column */
+    Fx *fx = fx_html(
+        "<table id=rs style='border-spacing:0;width:400px'>"
+        "<tr><td id=ra rowspan=2>Team</td><td id=rb>x</td><td id=rc>1</td></tr>"
+        "<tr><td id=rd>longer second row text</td><td id=re>2</td></tr></table>", NULL);
+    HtmlRect ra = rc(fx, "ra"), rb = rc(fx, "rb"), rcc = rc(fx, "rc"), rd = rc(fx, "rd"), re = rc(fx, "re");
+    CHECK_NEAR(rb.x - ra.x, ra.w, 0.01, "rowspan auto: the cell after it starts past its column");
+    CHECK_NEAR(rd.x, rb.x, 0.01, "rowspan auto: the next row's first cell takes the second column");
+    CHECK_NEAR(re.x, rcc.x, 0.01, "rowspan auto: the next row's second cell lines up with the third column");
+    CHECK_NEAR(rd.w, rb.w, 0.01, "rowspan auto: the second column is shared by both rows");
+    CHECK_NEAR(ra.y, rb.y, 0.01, "rowspan auto: the cell starts on its row");
+    CHECK_NEAR(ra.y + ra.h, rd.y + rd.h, 0.01, "rowspan auto: the cell covers both rows");
+    fx_free(fx);
+
+    /* a rowspan cell wider than its column's content widens that column */
+    fx = fx_html(
+        "<table id=rw style='border-spacing:0;width:300px'>"
+        "<tr><td id=wa rowspan=2>A very long header in the spanning cell</td><td id=wb>b</td></tr>"
+        "<tr><td id=wc>c</td></tr></table>", NULL);
+    HtmlRect wa = rc(fx, "wa"), wb = rc(fx, "wb"), wc = rc(fx, "wc");
+    CHECK(wa.w > wb.w, "rowspan wide: the spanning cell's column is wider (%.1f > %.1f)", wa.w, wb.w);
+    CHECK_NEAR(wc.x, wb.x, 0.01, "rowspan wide: the next row's cell is in the second column");
+    CHECK_NEAR(wc.w, wb.w, 0.01, "rowspan wide: the second column keeps one width");
+    fx_free(fx);
+
+    /* table-layout: fixed: the first row sets the columns; the cell below skips the spanned one */
+    fx = fx_html(
+        "<table id=rf style='table-layout:fixed;width:300px;border-spacing:0'>"
+        "<tr><td id=fa rowspan=2 style='width:100px;padding:0'>a</td><td id=fb style='width:200px;padding:0'>b</td></tr>"
+        "<tr><td id=fc style='padding:0'>c</td></tr></table>", NULL);
+    HtmlRect fa = rc(fx, "fa"), fb = rc(fx, "fb"), fc = rc(fx, "fc");
+    CHECK_NEAR(fa.w, 100, 0.01, "rowspan fixed: spanning cell keeps its px width");
+    CHECK_NEAR(fb.w, 200, 0.01, "rowspan fixed: the second column keeps its px width");
+    CHECK_NEAR(fc.x - fa.x, 100, 0.01, "rowspan fixed: the cell below starts in the second column");
+    CHECK_NEAR(fc.w, 200, 0.01, "rowspan fixed: the cell below has the second column's width");
+    fx_free(fx);
+
+    /* height: the spanning cell (100px) is taller than its two 30px rows and the 4px spacing
+     * between them (64px): the 36px extra gives each row 18px more (48px each) */
+    fx = fx_html(
+        "<table id=rh style='border-spacing:4px;width:300px'>"
+        "<tr id=h1 style='height:30px'><td id=ha rowspan=2 style='height:100px;padding:0'>x</td><td id=hb style='padding:0'>b</td></tr>"
+        "<tr id=h2 style='height:30px'><td id=hc style='padding:0'>c</td></tr></table>", NULL);
+    HtmlRect ha = rc(fx, "ha"), hb = rc(fx, "hb"), hc = rc(fx, "hc"), h1 = rc(fx, "h1"), h2 = rc(fx, "h2");
+    CHECK_NEAR(h1.h, 48, 0.01, "rowspan height: first row takes its share of the extra");
+    CHECK_NEAR(h2.h, 48, 0.01, "rowspan height: second row takes its share of the extra");
+    CHECK_NEAR(ha.h, 100, 0.01, "rowspan height: spanning cell is as tall as its rows and the spacing");
+    CHECK_NEAR(hc.y - ha.y, 52, 0.01, "rowspan height: the row after starts after the first row and spacing");
+    CHECK_NEAR(hb.h, h1.h, 0.01, "rowspan height: the row's own cell is as tall as the row");
+    fx_free(fx);
+
+    /* rowspan=0 spans to the last row; a rowspan past the table's end is clamped to it;
+     * colspan and rowspan together take a 2x2 block */
+    fx = fx_html(
+        "<table id=rx style='border-spacing:0;width:300px'>"
+        "<tr><td id=xa colspan=2 rowspan=2 style='padding:0'>a</td><td id=xb style='padding:0'>b</td></tr>"
+        "<tr><td id=xc style='padding:0'>c</td></tr>"
+        "<tr><td id=xd rowspan=0 style='padding:0'>d</td><td id=xe style='padding:0'>e</td></tr>"
+        "<tr><td id=xf rowspan=9 style='padding:0'>f</td><td id=xg style='padding:0'>g</td></tr></table>", NULL);
+    HtmlRect xa = rc(fx, "xa"), xb = rc(fx, "xb"), xc = rc(fx, "xc"), xd = rc(fx, "xd"), xe = rc(fx, "xe"), xf = rc(fx, "xf"), xg = rc(fx, "xg");
+    CHECK_NEAR(xa.w, xd.w + xe.w, 0.01, "colspan+rowspan: the 2x2 cell is as wide as its two columns");
+    CHECK_NEAR(xa.y + xa.h, xc.y + xc.h, 0.01, "colspan+rowspan: the 2x2 cell covers both of its rows");
+    CHECK_NEAR(xc.x, xb.x, 0.01, "colspan+rowspan: the row below starts after the block");
+    CHECK_NEAR(xd.y + xd.h, xg.y + xg.h, 0.01, "rowspan=0: the cell covers the rows to the table's end");
+    CHECK_NEAR(xf.x, xe.x, 0.01, "rowspan=0: the last row's cell skips the cell that spans down");
+    CHECK_NEAR(xg.x, xb.x, 0.01, "rowspan=0: the last column lines up");
+    CHECK_NEAR(xf.h, xg.h, 0.01, "rowspan past the table's end: clamped to one row");
+    fx_free(fx);
+}
+
 static void t_positioned(void)
 {
     Fx *fx = fx_html(
@@ -2255,6 +2329,7 @@ int main(int argc, char **argv)
     t_all_unset();
     t_table();
     t_table_colspan();
+    t_table_rowspan();
     t_positioned();
     t_sticky_scroll();
     t_text();
