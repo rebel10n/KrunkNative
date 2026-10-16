@@ -62,6 +62,12 @@ static const StrikeClass CLASSES[] = {
 
 static const char *const SETTINGS_TABS[] = {"presets", "display", "game", "sound", "other"};
 
+// window.selectSettingPre's i (the bundle's jue): 0 Default, 1 Pro, 2 Custom (the start, selectedPresetIndex
+// || 2), 3 Performance. The page's buttons come in the order Default, Pro, Performance, Custom
+// (SETTINGS-presets.html: preset:0..3), so BUTTON_PRESET maps a button to its id.
+enum { PRESET_DEFAULT = 0, PRESET_PRO = 1, PRESET_CUSTOM = 2, PRESET_PERFORMANCE = 3 };
+static const int BUTTON_PRESET[4] = {PRESET_DEFAULT, PRESET_PRO, PRESET_PERFORMANCE, PRESET_CUSTOM};
+
 // The shop's prize wheels (OC / SA): kn_brain's Strike catalogue (strike_economy()->wheels, the same
 // rows /strike/v2/spin-wheels/list serves): the ones a shop lists (not hideInShop) with a price in KR or
 // spin tickets. FRVR also lists its ad wheels (timeBetweenSpins: Gn.canShowAds) and the golden wheel
@@ -103,7 +109,7 @@ static struct {
     Client *client;
     int previewed;        // _r: the class bullet shown in CLASS_SELECTION
     int settings_tab;
-    int preset;           // selectedPresetIndex (3 = Custom)
+    int preset;           // selectedPresetIndex: a PRESET_* id (FRVR's i, not the button's order)
     char last_account[160];
     WheelView wheels[WHEELS_MAX];
     WheelView golden;     // the golden wheel of the shop's front (golden_wheel)
@@ -140,7 +146,11 @@ static struct {
     int board_fixture;
     BoardRow board[BOARD_MAX];
     int board_count;
-} M = {.preset = 3, .wheels_fixture = -1, .spin = -1};
+    struct {
+        int open;  // M5's kr-limit speech bubble is up (eM)
+        int timer; // its 5 s hide timer (html_timer_add), 0 = none
+    } kr_bubble;
+} M = {.preset = PRESET_CUSTOM, .wheels_fixture = -1, .spin = -1};
 
 static void popup_open(PopupKind kind);
 
@@ -1320,6 +1330,50 @@ static void on_board(void *user, const int status, const cJSON *data, const cJSO
 
 // ---------------------------------------------------------------- CLASS_SELECTION (B5 / ode / lde)
 
+// A class's `unlockable` (To, the bundle's bs list): Hunter from a Bundle, Run N Gun and Rocketeer from the
+// Rewards Track, Shotgunner and Detective from Spin tickets; Triggerman has none (a starter class).
+typedef enum { UNLOCK_NONE, UNLOCK_SPIN_TICKETS, UNLOCK_REWARDS_TRACK, UNLOCK_BUNDLE } ClassUnlock;
+
+static ClassUnlock class_unlockable(const int class_id) {
+    switch (class_id) {
+    case 1: return UNLOCK_BUNDLE;
+    case 2:
+    case 7: return UNLOCK_REWARDS_TRACK;
+    case 4:
+    case 5: return UNLOCK_SPIN_TICKETS;
+    default: return UNLOCK_NONE;
+    }
+}
+
+// ude(unlockable): the line under a locked class
+static const char *class_unlock_text(const int class_id) {
+    switch (class_unlockable(class_id)) {
+    case UNLOCK_SPIN_TICKETS: return "Unlockable from Spin tickets";
+    case UNLOCK_REWARDS_TRACK: return "Unlockable from the Rewards Track";
+    case UNLOCK_BUNDLE: return "Unlockable from a Bundle purchase";
+    default: return "";
+    }
+}
+
+// the account owns the class (FRVR's classAvailable over Se.account.classes; a guest owns Triggerman)
+static int class_owned(const int slot) { return strike_econ_class_owned(CLASSES[slot].id); }
+
+// cde(unlockable): the spin tickets and bundles open STORE, the Rewards Track opens PROFILE
+static void class_unlock_open(void) {
+    switch (class_unlockable(CLASSES[M.previewed].id)) {
+    case UNLOCK_REWARDS_TRACK:
+        strike_screen_push(STRIKE_SCREEN_PROFILE); // Pt(pg): pg is the profile (YC)
+        break;
+    case UNLOCK_SPIN_TICKETS:
+    case UNLOCK_BUNDLE:
+        M.store_section = 0;                       // Pt(cc())
+        strike_screen_push(STRIKE_SCREEN_STORE);
+        break;
+    default:
+        break;
+    }
+}
+
 static void class_selection_fill(const HtmlElem root) {
     HtmlElem holders[STRIKE_CLASS_COUNT];
     const int n = html_dom_query_all(root, ".class-selection__class-bullet-holder", holders, STRIKE_CLASS_COUNT);
@@ -1349,15 +1403,24 @@ static void class_selection_fill(const HtmlElem root) {
     set_text(root, ".class-selection__selected-name span", buf);
     set_text(root, ".class-selection__selected-description span", c->description);
     set_text(root, ".class-selection__selected-weapon--name", c->weapon);
-    // _t: disabled + "Selected" for the class in use, else "Select"
-    const HtmlElem btn = html_dom_query(root, ".class-selection__select-class .frvr-button");
-    if (btn) {
+    // the class's box (FRVR's .class-selection__select-class): a class the account owns gets _t,
+    // "Selected" (disabled) for the class in use and "Select" otherwise; a locked class gets the
+    // unlock line instead (ude), which opens the store or the profile when tapped (cde)
+    const HtmlElem box = html_dom_query(root, ".class-selection__select-class");
+    if (!box) return;
+    char html[512];
+    if (class_owned(M.previewed)) {
         const int in_use = M.previewed == current_class();
-        if (in_use) html_dom_set_attr(btn, "disabled", "");
-        else html_dom_remove_attr(btn, "disabled");
-        html_dom_set_class(btn, "is-disabled", in_use);
-        set_text(btn, ".frvr-button-text", in_use ? "Selected" : "Select");
+        snprintf(html, sizeof(html),
+                 "<div class=\"frvr-button frvr-button--size-sm frvr-button--width-170%s\"%s onclick=\"strikeAction('select-class')\">"
+                 "<span class=\"frvr-button-text\">%s</span></div>",
+                 in_use ? " is-disabled" : "", in_use ? " disabled=\"\"" : "", in_use ? "Selected" : "Select");
+    } else {
+        snprintf(html, sizeof(html),
+                 "<div class=\"class-selection__unlock-info\" onclick=\"strikeAction('unlock-info')\"><span>%s</span></div>",
+                 class_unlock_text(CLASSES[M.previewed].id));
     }
+    html_dom_set_html(box, html);
 }
 
 // ---------------------------------------------------------------- SETTINGS (Dy): values
@@ -1402,11 +1465,132 @@ static void fmt_number(const double v, char *buf, const size_t n) {
     snprintf(buf, n, "%g", v);
 }
 
+// ---------------------------------------------------------------- SETTINGS presets (jue / selectSettingPre)
+
+// settings.list[k].pro / .perf in the 1.37.2 bundle (index-Cz2uYXJQ.deob.js 146940-150560, read as text):
+// the value a preset sets. A setting without one takes its default (zt.list[a][pro|perf] ?? def), so
+// the Pro and Performance presets set every row of SETTING_ROWS; NAN = none.
+typedef struct { const char *key; double pro, perf; } StrikePreset;
+static const StrikePreset PRESET_VALUES[] = {
+    {"resolution", 1, 0.4}, {"lowSpec", NAN, 1}, {"particles", 0, 0}, {"textureAnim", NAN, 0},
+    {"objectAnim", NAN, 0}, {"hitIndicators", 1, 0}, {"showFPS", 1, 0}, {"sound", 0.1, 0.1},
+    {"fov", 110, NAN}, {"fpsFOV", 105, NAN},
+};
+
+static double preset_value(const StrikeSetting *r, const int id) {
+    for (size_t i = 0; i < sizeof(PRESET_VALUES) / sizeof(PRESET_VALUES[0]); i++) {
+        const StrikePreset *p = &PRESET_VALUES[i];
+        if (strcmp(p->key, r->key)) continue;
+        const double v = id == PRESET_PRO ? p->pro : id == PRESET_PERFORMANCE ? p->perf : NAN;
+        if (!isnan(v)) return v;
+    }
+    return r->def;
+}
+
+// The rows that are switches (checkboxes on the Display / Game / Sound tabs): stored as bools.
+static int is_switch(const char *key) {
+    static const char *const SWITCHES[] = {"lowSpec", "particles", "textureAnim", "objectAnim", "hitIndicators", "showPing",
+                                           "showFPS", "autoFireMbl", "aimAssist", "invertYMbl", "vibrationMbl", "gradSpeedMbl",
+                                           "mob_ctrl_disable_tap_jump", "leftHanded"};
+    for (size_t i = 0; i < sizeof(SWITCHES) / sizeof(SWITCHES[0]); i++) {
+        if (!strcmp(SWITCHES[i], key)) return 1;
+    }
+    return 0;
+}
+
+// the store's value of a row (its default when the page has none, as the row shows it)
+static double key_number(const char *key) {
+    for (size_t i = 0; i < sizeof(SETTING_ROWS) / sizeof(SETTING_ROWS[0]); i++) {
+        if (!strcmp(SETTING_ROWS[i].key, key)) return setting_number(&SETTING_ROWS[i]);
+    }
+    return 0.0;
+}
+
+static void preset_store(const StrikeSetting *r, const double v) {
+    HtmlArg a = {0};
+    a.kind = is_switch(r->key) ? HTML_ARG_BOOL : HTML_ARG_NUM;
+    a.num = v;
+    ui_settings_set(r->key, &a);
+}
+
+// krk_customPre: every row's value, kept when Custom is left
+static void preset_save_custom(void) {
+    cJSON *o = cJSON_CreateObject();
+    for (size_t i = 0; o && i < sizeof(SETTING_ROWS) / sizeof(SETTING_ROWS[0]); i++) {
+        const double v = setting_number(&SETTING_ROWS[i]);
+        if (is_switch(SETTING_ROWS[i].key)) cJSON_AddBoolToObject(o, SETTING_ROWS[i].key, v != 0.0);
+        else cJSON_AddNumberToObject(o, SETTING_ROWS[i].key, v);
+    }
+    char *json = o ? cJSON_PrintUnformatted(o) : NULL;
+    if (json) html_storage_set("strikeCustomPre", json);
+    printf("[strike] custom saved: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
+    free(json);
+    cJSON_Delete(o);
+}
+
+// Custom: the values saved when it was last left (selectSettingPre(2) with !e)
+static void preset_restore_custom(void) {
+    char buf[4096];
+    if (html_storage_get("strikeCustomPre", buf, sizeof(buf)) < 0) return;
+    cJSON *o = cJSON_Parse(buf);
+    for (size_t i = 0; o && i < sizeof(SETTING_ROWS) / sizeof(SETTING_ROWS[0]); i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, SETTING_ROWS[i].key);
+        if (cJSON_IsBool(v)) preset_store(&SETTING_ROWS[i], cJSON_IsTrue(v) ? 1.0 : 0.0);
+        else if (cJSON_IsNumber(v)) preset_store(&SETTING_ROWS[i], v->valuedouble);
+    }
+    cJSON_Delete(o);
+    printf("[strike] custom restored: resolution %g, fov %g\n", key_number("resolution"), key_number("fov"));
+}
+
+static void preset_save_index(void) {
+    char idx[16];
+    snprintf(idx, sizeof(idx), "%d", M.preset);
+    html_storage_set("strikePreIndex", idx);
+}
+
+// selectSettingPre(i) from a preset button (no confirm: the page passes t = true). Default / Pro /
+// Performance set their values through the settings store (so each one reaches the client as a
+// manual change would); leaving Custom saves the values first, entering Custom restores them.
+static void preset_select(const int id) {
+    if (id == M.preset) return;
+    if (id == PRESET_CUSTOM) {
+        preset_restore_custom();
+    } else {
+        if (M.preset == PRESET_CUSTOM) preset_save_custom();
+        for (size_t i = 0; i < sizeof(SETTING_ROWS) / sizeof(SETTING_ROWS[0]); i++)
+            preset_store(&SETTING_ROWS[i], preset_value(&SETTING_ROWS[i], id));
+    }
+    M.preset = id;
+    preset_save_index();
+    printf("[strike] preset %d: resolution %g, fov %g\n", id, key_number("resolution"), key_number("fov"));
+}
+
+// a setting changed by hand: the preset becomes Custom (selectSettingPre(2, true): nothing is restored)
+static void preset_mark_custom(void) {
+    if (M.preset == PRESET_CUSTOM) return;
+    M.preset = PRESET_CUSTOM;
+    preset_save_index();
+}
+
+static void preset_load(void) {
+    char buf[16];
+    const int saved = html_storage_get("strikePreIndex", buf, sizeof(buf)) >= 0 && buf[0] ? atoi(buf) : PRESET_CUSTOM;
+    M.preset = saved >= PRESET_DEFAULT && saved <= PRESET_PERFORMANCE ? saved : PRESET_CUSTOM;
+}
+
+// the active preset button (frvr-preset__button--active)
+static void presets_mark(const HtmlElem root) {
+    HtmlElem presets[4];
+    const int pn = html_dom_query_all(root, ".frvr-preset__button", presets, 4);
+    for (int i = 0; i < pn && i < 4; i++) html_dom_set_class(presets[i], "frvr-preset__button--active", BUTTON_PRESET[i] == M.preset);
+}
+
 // window.setSetting(key, value) from a slider / switch; the number box and the range follow
 static int h_strike_setting(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user;
     if (argc < 1 || args[0].kind != HTML_ARG_STR || !args[0].str) return 1;
     const char *key = args[0].str;
+    preset_mark_custom(); // a hand change: the preset reads Custom (sets with the setSetting's b flag off)
     char buf[32];
     if (ev->target && !strcmp(ev->type, "click")) {
         snprintf(buf, sizeof(buf), "%s", html_dom_get_checked(ev->target) ? "true" : "false");
@@ -1472,11 +1656,58 @@ static void settings_tab(const HtmlElem root, const int tab) {
         free(html);
     }
     settings_values(content);
-    if (tab == 0) {
-        HtmlElem presets[4];
-        const int pn = html_dom_query_all(content, ".frvr-preset__button", presets, 4);
-        for (int i = 0; i < pn; i++) html_dom_set_class(presets[i], "frvr-preset__button--active", i == M.preset);
+    if (tab == 0) presets_mark(content);
+}
+
+// ---------------------------------------------------------------- KR limit info bubble (M5 / eM)
+
+// The info icon beside the KR counter (M5's .frvr-kr-limit__info) toggles a speech bubble inside the
+// counter's holder: "There's a limit to the KRs you can get each day from playing matches." It hides
+// after 5 s (bubbleDuration) or when tapped (mm(type, false)). Its border image is not in FRVR's tree.
+static void kr_bubble_hide(void) {
+    if (M.kr_bubble.timer) html_timer_cancel(M.kr_bubble.timer);
+    M.kr_bubble.timer = 0;
+    M.kr_bubble.open = 0;
+    // the bubble sits in the counter of the menu it was opened on (the screen on top may be another one by now)
+    const StrikeScreen menus[] = {STRIKE_SCREEN_MAIN_MENU, STRIKE_SCREEN_TAP_TO_PLAY};
+    for (size_t i = 0; i < sizeof(menus) / sizeof(menus[0]); i++) {
+        const HtmlElem root = strike_screen_root(menus[i]);
+        const HtmlElem bubble = root ? html_dom_query(root, ".speech-bubble-container") : 0;
+        if (bubble) html_dom_remove(bubble);
     }
+}
+
+static void kr_bubble_timeout(void *user) {
+    (void) user;
+    M.kr_bubble.timer = 0; // the timer fired: nothing left to cancel
+    kr_bubble_hide();
+}
+
+static void kr_bubble_place(const HtmlElem root) {
+    const HtmlElem holder = root ? html_dom_query(root, ".frvr-kr-limit__holder") : 0;
+    if (!holder || html_dom_query(holder, ".speech-bubble-container")) return;
+    html_dom_insert_html(holder, HTML_INSERT_BEFORE_END,
+                         "<div id=\"mobSpeechBubble\" class=\"speech-bubble-container\" onclick=\"strikeAction('kr-limit-bubble-close')\">"
+                         "<div class=\"speech-bubble speech-bubble-kr-limit speech-bubble-flipped\">"
+                         "There's a limit to the KRs you can get each day from playing matches.</div></div>");
+}
+
+// a menu screen with the KR counter was rendered: its info icon opens the bubble, and a bubble that
+// is still up (its timer runs) comes back on the new render
+static void kr_limit_hook(const HtmlElem root) {
+    const HtmlElem info = root ? html_dom_query(root, ".frvr-kr-limit__info") : 0;
+    if (info) html_dom_set_attr(info, "onclick", "strikeAction('kr-limit-info')");
+    if (M.kr_bubble.open) kr_bubble_place(root);
+}
+
+static void kr_bubble_toggle(void) {
+    if (M.kr_bubble.open) {
+        kr_bubble_hide();
+        return;
+    }
+    M.kr_bubble.open = 1;
+    kr_bubble_place(strike_screen_root(strike_screen_top()));
+    M.kr_bubble.timer = html_timer_add(5000.0, kr_bubble_timeout, NULL);
 }
 
 // ---------------------------------------------------------------- actions
@@ -1602,7 +1833,7 @@ static void action(const char *a) {
             if (root) class_selection_fill(root);
         }
     } else if (!strcmp(a, "select-class")) {
-        if (M.previewed != current_class()) {
+        if (M.previewed != current_class() && class_owned(M.previewed)) {
             menu_set_class_index(CLASSES[M.previewed].id, 0); // window.selectClass(_r)
             strike_screen_pop();                               // kt()
         }
@@ -1611,9 +1842,16 @@ static void action(const char *a) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
         if (root && t >= 0 && t < (int) (sizeof(SETTINGS_TABS) / sizeof(SETTINGS_TABS[0]))) settings_tab(root, t);
     } else if (!strncmp(a, "preset:", 7)) {
-        M.preset = atoi(a + 7);
+        const int button = atoi(a + 7);
+        if (button >= 0 && button < 4) preset_select(BUTTON_PRESET[button]);
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
         if (root) settings_tab(root, 0);
+    } else if (!strcmp(a, "unlock-info")) {
+        class_unlock_open(); // cde(): the store or the profile
+    } else if (!strcmp(a, "kr-limit-info")) {
+        kr_bubble_toggle();
+    } else if (!strcmp(a, "kr-limit-bubble-close")) {
+        kr_bubble_hide();
     }
 }
 
@@ -1684,6 +1922,7 @@ static void on_econ(void *user, const StrikeEconEvent event) {
 void strike_menu_install(void) {
     static int listening;
     if (!listening) listening = strike_econ_listen(on_econ, NULL);
+    preset_load();
     html_ui_add_handler("strikeAction", h_strike_action);
     html_ui_add_handler("strikeSetting", h_strike_setting);
 }
@@ -1718,9 +1957,11 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     case STRIKE_SCREEN_MAIN_MENU:
         class_preview_canvas(root, "canvas", 0.0f, 0.0f, 100.0f, 100.0f); // MAIN_MENU: canvas{width:100%;height:100%} of the screen
         fill_account(root);
+        kr_limit_hook(root);
         break;
     case STRIKE_SCREEN_TAP_TO_PLAY:
         fill_account(root);
+        kr_limit_hook(root);
         break;
     case STRIKE_SCREEN_CLASS_SELECTION:
         M.previewed = current_class(); // _r = loadout.classIndex
@@ -1731,11 +1972,7 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
         break;
     case STRIKE_SCREEN_SETTINGS:
         if (M.settings_tab != 0) settings_tab(root, M.settings_tab);
-        else {
-            HtmlElem presets[4];
-            const int pn = html_dom_query_all(root, ".frvr-preset__button", presets, 4);
-            for (int i = 0; i < pn; i++) html_dom_set_class(presets[i], "frvr-preset__button--active", i == M.preset);
-        }
+        else presets_mark(root);
         break;
     case STRIKE_SCREEN_ITEM_SELECTION:
         item_selection_fill(root);
