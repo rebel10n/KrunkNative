@@ -26,6 +26,7 @@
 // The Strike classes are FRVR's six (tools/strike/strike_data.json "classes"): Krunker class ids
 // 0 Triggerman, 1 Hunter, 2 Run N Gun, 4 Shotgunner (Krunker's Vince), 5 Detective, 7 Rocketeer.
 #include <strike_ui.h>
+#include <strike_notify.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <backend_ui.h>
@@ -1959,6 +1960,7 @@ static void switch_teams_update(const HtmlElem root, const Client *client) {
 
 static void action(const char *a) {
     printf("[strike] action %s\n", a);
+    if (strike_notify_action(a)) return; // the notifications holder (strike_notify.c)
     if (strike_meta_action(a)) return;   // missions tab, match details report, rewards track (strike_meta.c)
     if (strike_social_action(a)) return; // friends, invites, report (strike_social.c)
     if (strike_reward_action(a)) return; // the reward screen, the choice popup (strike_reward.c)

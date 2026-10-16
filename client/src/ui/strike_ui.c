@@ -14,6 +14,7 @@
 // first-load bar) stays up while this client loads the game (FRVR: the bundle and its assets),
 // then the mount swaps it for "Loading Game" without an enter animation and MAIN_MENU is pushed.
 #include <strike_ui.h>
+#include <strike_notify.h>
 #include <flavor.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -670,6 +671,7 @@ void strike_ui_tick(Client *client) {
     strike_connect_tick(); // the connection popups (strike_connect.c) follow the transport
     strike_menu_tick(client);
     strike_hud_tick(client);
+    strike_notify_tick(); // the holder: the timers, then the redraw (strike_notify.c)
     strike_touch_tick(client);
 }
 
@@ -747,6 +749,7 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     const cJSON *loading = cJSON_GetObjectItemCaseSensitive(st, "loading");
     if (cJSON_IsString(loading)) strike_loading_show(loading->valuestring, 0);
     strike_connect_scenario(st); // connection: the Lost Connection / Game Updating popups, Reconnecting...
+    strike_notify_scenario(cJSON_GetObjectItemCaseSensitive(st, "notifications")); // the holder (strike_notify.c)
     strike_hud_scenario(client, st);
     strike_meta_scenario(client, st); // progression / reward / battlepassTab / matchDetails (strike_meta.c)
     strike_menu_scenario_state(st);   // itemSelection (T5 over Customize), product (U2) (strike_menu.c)

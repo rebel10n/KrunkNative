@@ -993,6 +993,12 @@ else ()
     endif ()
     add_test(NAME strike_assist_test COMMAND strike_assist_test)
 
+    # strike_notify_test: Krunker Strike's notification queue (client/src/ui/strike_notify_queue.c, FRVR's OI / Ag)
+    add_executable(strike_notify_test client/src/ui/strike_notify_queue.c client/include/strike_notify.h
+                   client/tests/strike_notify_test.c)
+    target_include_directories(strike_notify_test PRIVATE client/include)
+    add_test(NAME strike_notify_test COMMAND strike_notify_test)
+
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
     add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c

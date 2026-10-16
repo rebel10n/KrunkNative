@@ -1,0 +1,27 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "anim_seek": 800,
+    "strike": {
+      "screen": "MAIN_MENU",
+      "notifications": [
+        {"name": "Ada", "gameId": "g1"},
+        {"name": "Bo", "gameId": "g2"},
+        {"name": "Cy", "gameId": "g3"},
+        {"name": "Dee", "gameId": "g4"}
+      ]
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the notifications holder (strike_notify.c, _ue / OI in the bundle 98829-98884): four game invites pushed, three on screen (the game-invite view N5) and the fourth queued. No capture of the holder with invites exists; the view's markup is transcribed from N5 (bundle 109980)."
+}
