@@ -314,6 +314,12 @@ static kn_db_result *run_clan_kick(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_CLAN_KICK = {"clan_kick", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_kick};
 
+/* clan_members.rank (v10 windows[12] roles, config.clanRoles): Recruit 0, Soldier 1, Captain 2, Commander 3 */
+#define CLAN_RANK_SOLDIER 1
+#define CLAN_RANK_CAPTAIN 2
+#define CLAN_MAX_SOLDIERS 25
+#define CLAN_MAX_CAPTAINS 5
+
 static kn_db_result *run_clan_role(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int64_t clan = clan_of(&x, P(0));
@@ -324,6 +330,15 @@ static kn_db_result *run_clan_role(kn_dbconn *c, int n, const char *const *p) {
     if (PI(1) == PI(0) || clan_leader(&x, P(1), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
     if (!clan_leader(&x, P(0), clan) && (PI(2) >= 2 || clan_rank_of(&x, P(1), clan) >= 2))
         return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    /* the role limits the clan menu shows ("Soldiers 25 max", "Captains 5 max"): a change into a
+     * full role is refused (the owner is the Commander, not counted) */
+    const int64_t role = PI(2), was = clan_rank_of(&x, P(1), clan);
+    if (role != was && (role == CLAN_RANK_SOLDIER || role == CLAN_RANK_CAPTAIN)) {
+        const int64_t cap = role == CLAN_RANK_SOLDIER ? CLAN_MAX_SOLDIERS : CLAN_MAX_CAPTAINS;
+        if (dbx_int(&x, SQL(.any = "SELECT count(*) FROM clan_members WHERE clan_id = $1 AND rank = {int:$2}"),
+                    KN_DB_ARGS(I64S(clan), I64S(role)), 0) >= cap)
+            return dbx_finish(&x, kn_db_result_user_error(role == CLAN_RANK_SOLDIER ? "Soldiers are full (25 max)" : "Captains are full (5 max)"));
+    }
     if (dbx_exec(&x, SQL(.any = "UPDATE clan_members SET rank = $3 WHERE account_id = $1 AND clan_id = $2"),
                  KN_DB_ARGS(P(1), I64S(clan), P(2))) == 0)
         dbx_refuse(&x, "Member not found");

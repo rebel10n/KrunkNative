@@ -10,7 +10,7 @@ the settings tab's gapi routes (services/brain/clan_v10.c, social_data.c, db_soc
 Covers: create clan, join request + accept, the owner making a Captain, a Captain's rights (role
 change but no Captains, Decline All, no Discord), the Discord link (cln 9), s7, MOTD set / get /
 delete (members read, only role >= 2 writes), banner colour from a seeded paint (consumed; none
-left = refused), ownership transfer initiate / cancel / respond, and the loot config read.
+left = refused), ownership transfer initiate / cancel / respond, and the loot config read; the Captain (5) and Soldier (25) role limits.
 77 = skip (no kn_brain / websockets).
 """
 import asyncio
@@ -246,6 +246,45 @@ async def scenario(port):
         await s.close()
 
 
+async def role_caps(port):
+    """the role limits the clan menu shows (config.clanRoles: Soldier 25, Captain 5): a change into a
+    full role is refused, a freed place can be taken again (cln 6)"""
+    stamp = str(int(time.time()) % 100000)
+    owner = await Sock.open(port)
+    await owner.auth("rcO" + stamp)
+    tag = "R" + stamp[-3:]
+    f = await owner.cln(1, tag)
+    check(f and f[3] == 1, "role caps: a clan for the limits", f)
+    members = []
+    for i in range(32):
+        m = await Sock.open(port)
+        await m.auth("rcM%02d%s" % (i, stamp))
+        f = await m.cln(2, tag)
+        assert f and f[1] == "Request Sent", f
+        await owner.send("clnR", m.id, 1)
+        await owner.wait(lambda f: f[0] == "cln" and len(f) >= 5)
+        members.append(m)
+    f = None
+    for m in members[:5]:
+        f = await owner.cln(6, m.id, {"r": 2})
+    check(f and f[3] == 1 and f[2]["r"] == 2, "five Captains (the limit)", f)
+    f = await owner.cln(6, members[5].id, {"r": 2})
+    check(f and f[3] == 0 and "Captains are full" in str(f[1]), "a sixth Captain is refused", f)
+    for m in members[6:31]:  # 25 Soldiers
+        f = await owner.cln(6, m.id, {"r": 1})
+    check(f and f[3] == 1 and f[2]["r"] == 1, "twenty-five Soldiers (the limit)", f)
+    f = await owner.cln(6, members[31].id, {"r": 1})
+    check(f and f[3] == 0 and "Soldiers are full" in str(f[1]), "a twenty-sixth Soldier is refused", f)
+    f = await owner.cln(6, members[6].id, {"r": 0})
+    check(f and f[3] == 1, "a Soldier demoted to Recruit frees a place")
+    f = await owner.cln(6, members[31].id, {"r": 1})
+    check(f and f[3] == 1 and f[2]["r"] == 1, "the freed place goes to the next Soldier", f)
+    f = await owner.cln(6, members[0].id, {"r": 2})
+    check(f and f[3] == 1, "a Captain set to Captain again is allowed at the limit", f)
+    for s in [owner] + members:
+        await s.close()
+
+
 def main():
     (port,) = free_ports(1)
     log = open(os.path.join(WORK, "brain.log"), "w")
@@ -283,6 +322,7 @@ def main():
                 break
             time.sleep(0.1)
         asyncio.run(scenario(port))
+        asyncio.run(role_caps(port))
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
