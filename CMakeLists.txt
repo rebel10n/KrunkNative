@@ -997,6 +997,11 @@ else ()
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
     add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+    # ranked_route_test (client/include/ranked_route.h): the Ranked popup's backend rule (krunker.io first)
+    add_executable(ranked_route_test client/tests/ranked_route_test.c client/src/net/ranked_route.c)
+    target_include_directories(ranked_route_test PRIVATE client/include shared/include)
+    add_test(NAME ranked_route_test COMMAND ranked_route_test)
+
     # krunker_build_fetch_test (client/include/krunker_build_fetch.h): the live Krunker build of an official
     # join over a fake HTTP layer: published (hash-checked, cached), the cached / compiled fallbacks, refusals
     if (NOT WIN32)

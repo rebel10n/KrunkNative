@@ -11,10 +11,18 @@
 // While searching, the .ranked-matchmaking-status banner (svelte-3k0h7w) shows in
 // #matchmakingStatusEl like v10's matchmakingStatusEl mount.
 //
-// Transport (deviation, doc/v10/ranked-impl.md): v10 opens a WebSocket to its matchmaker; this
-// client long-polls the brain's /mm/ranked/* routes (same {type, payload} messages), so the queue
-// works through the HTTPS edge relays and in the web build. A MATCHED assignment is joined after
-// 1 s (v10: pop_3, wait 1 s, acceptMatch) with its ticket.
+// Two backends (ranked_route.h, ranked_active_backend below): a krunker.io account uses v10's own ranked
+// services at krunker.io (krunker_ranked.h: api / gapi, and the queue WebSocket of v10's gamefrontend),
+// their answers reshaped into the brain's shape here, so the renderers below read one shape. A
+// KrunkNative account uses kn_brain's /mm/ranked/* routes. krunker.io wins when both are signed in.
+//
+// Transport of the KrunkNative backend (deviation, doc/v10/ranked-impl.md): v10 opens a WebSocket to
+// its matchmaker; this client long-polls the brain's /mm/ranked/* routes (same {type, payload}
+// messages), so the queue works through the HTTPS edge relays and in the web build. A MATCHED
+// assignment is joined after 1 s (v10: pop_3, wait 1 s, acceptMatch) with its ticket. The krunker.io
+// queue delivers v10's frames unchanged, and its MATCHED joins the match's game socket like v10's
+// joinAssignment: JOINED_RANK on an open game socket, then the socket at the assignment's connection
+// with the account's token (krunker_net_join_match). Nothing is shown for it but the loading screen.
 #include <v10_ui.h>
 #include <v10_menu.h> // v10_menu_handle("loginOrRegister"): guests get v10's login modal
 #include <audio.h>
@@ -23,10 +31,16 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ranked.h>
+#include <ranked_route.h>   // which backend: krunker.io first, then KrunkNative
+#include <krunker_account.h> // the krunker.io account (krunker_account_signed_in, its name and level)
+#include <krunker_ranked.h> // v10's ranked services at krunker.io
+#include <krunker_net.h>    // the ranked match's game socket (krunker_net_join_match, krunker_net_ranked_elsewhere)
 #include <flavor.h> // the coordinator's flavor pool: ranked is Box Office's
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <time.h>
 #include "../viewer/viewer_store.h"
 
@@ -80,11 +94,36 @@ static struct {
 
 static const AccountInfo *acc(void) { return account_get(); }
 
+// THE choice of the ranked backend: krunker.io when a krunker.io account is signed in (even beside a
+// KrunkNative one), else KrunkNative, else none. A --render-scenario render answers from the brain's
+// routes (its fixtures), whoever is signed in.
+static RankedBackend ranked_active_backend(void) {
+    if (R.scenario) return RANKED_BACKEND_KN;
+    return ranked_backend_route(krunker_account_signed_in(), acc() != NULL);
+}
+
+// The active account's name and level (level -1 = not known yet: krunker.io's level comes from the game
+// server; the server still refuses an unready account with MIN_LEVEL_REQUIREMENT).
+static const char *active_name(void) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return krunker_account_name();
+    const AccountInfo *a = acc();
+    return a ? a->name : "";
+}
+
+static int active_level(void) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) {
+        const int level = krunker_account_level();
+        return level > 0 ? level : -1;
+    }
+    const AccountInfo *a = acc();
+    return a ? a->level : -1;
+}
+
 static int current_season(void) { return ranked_season_at((int64_t) time(NULL)); }
 
 // v10 regionAcronym (_34037): the default region folds oc -> as, sa -> na; ranked regions are as /
 // eu / na. KrunkNative's defaultRegion values are its own server regions, folded by their prefix;
-// krunker_rankedRegion (KrunkNative) pins one. Default na: KrunkNative's game servers are there.
+// krunker_rankedRegion (KrunkNative) pins one. Default eu, as v10's _34041 (v10:34041).
 static const char *my_region(void) {
     static char region[8];
     if (html_storage_get("krunker_rankedRegion", region, sizeof(region)) >= 0 && ranked_region_index(region) >= 0) return region;
@@ -95,7 +134,7 @@ static const char *my_region(void) {
         {"as", "as"}, {"sg", "as"}, {"jp", "as"}, {"jb", "as"}, {"au", "as"}, {"oc", "as"}, {"in", "as"}, {"kr", "as"}, {"hk", "as"},
         {"na", "na"}, {"us", "na"}, {"ca", "na"}, {"sa", "na"}, {"br", "na"}, {"mx", "na"},
     };
-    snprintf(region, sizeof(region), "na");
+    snprintf(region, sizeof(region), "eu");
     for (size_t i = 0; v && v[0] && i < sizeof(fold) / sizeof(fold[0]); i++)
         if (!strncmp(v, fold[i].prefix, strlen(fold[i].prefix))) {
             snprintf(region, sizeof(region), "%s", fold[i].region);
@@ -106,9 +145,143 @@ static const char *my_region(void) {
 
 static void token(char *out, const size_t n) { v10_url_token(out, n); }
 
+// ------------------------------------------------------------------ krunker.io data (krunker_ranked.h)
+//
+// The same cache rules as v10_get (one answer per request, DATA_TTL_MS, the stale answer stays up while
+// the new one loads). Each v10 answer is reshaped by an adapter into the brain's shape, which the
+// renderers read: profile {profile, milestones}, leaderboard {leaderboard, totalPages}, history
+// {matchHistory}, shop {skins}, wallet {rankedPoints}, connection {serverUrl}.
+
+#define KIO_SLOTS 12
+typedef cJSON *(*KioAdapt)(const cJSON *body); // v10's {data, error} envelope -> the brain's shape (NULL: failed)
+
+typedef struct {
+    char key[96];
+    int used;
+    int inflight;
+    unsigned gen;     // kio_forget() bumps it: an answer of an older generation is dropped
+    double at_ms;     // when the answer came (0 = never)
+    V10Req req;
+    KioAdapt adapt;
+} KioSlot;
+
+static KioSlot g_kio[KIO_SLOTS];
+static unsigned g_kio_gen = 1;
+
+static double kio_now_ms(void) { return (double) time(NULL) * 1000.0; }
+
+static cJSON *adapt_data(const cJSON *body) { // data as it is (an object; a 204's null data: an empty one)
+    const cJSON *data = cJSON_GetObjectItem(body, "data");
+    return cJSON_IsObject(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateObject();
+}
+
+// v10 keeps the milestone rows of the last profile fetch (_33842, set by getPlayerProfile, v10:98579) across
+// its refetches, and a claim takes its reward from them and from last_milestone_claimed (v10:98738-98744).
+static cJSON *g_milestones;
+static int g_last_claimed = -1;
+
+static cJSON *adapt_profile(const cJSON *body) { // v10 playerProfile: data.profile and data.milestones (v10:98579)
+    const cJSON *data = cJSON_GetObjectItem(body, "data");
+    cJSON *out = cJSON_CreateObject();
+    if (!out) return NULL;
+    const cJSON *p = cJSON_GetObjectItem(data, "profile"), *ms = cJSON_GetObjectItem(data, "milestones");
+    if (p) cJSON_AddItemToObject(out, "profile", cJSON_Duplicate(p, 1));
+    if (ms) cJSON_AddItemToObject(out, "milestones", cJSON_Duplicate(ms, 1));
+    if (ms) {
+        cJSON_Delete(g_milestones);
+        g_milestones = cJSON_Duplicate(ms, 1);
+    }
+    if (p) g_last_claimed = (int) v10_num(p, "last_milestone_claimed", -1);
+    return out;
+}
+
+// v10's {data: {success}, error} (claimMilestone, purchaseSkin) as the brain's {success, error} the popups read
+static cJSON *kio_result(const cJSON *body) {
+    const cJSON *data = cJSON_GetObjectItem(body, "data");
+    const cJSON *err = cJSON_GetObjectItem(data, "error");
+    if (!err) err = cJSON_GetObjectItem(body, "error");
+    cJSON *out = cJSON_CreateObject();
+    if (!out) return NULL;
+    cJSON_AddBoolToObject(out, "success", cJSON_IsTrue(cJSON_GetObjectItem(data, "success")));
+    cJSON_AddStringToObject(out, "error", cJSON_IsString(err) ? err->valuestring : "");
+    return out;
+}
+
+static void on_kio(void *user, const int status, const cJSON *body) {
+    KioSlot *s = &g_kio[(size_t) (uintptr_t) user];
+    s->inflight = 0;
+    if (s->gen != g_kio_gen) { // forgotten meanwhile: the popup asks again
+        cJSON_Delete(s->req.json);
+        s->req.json = NULL;
+        s->used = 0;
+        v10_refresh();
+        return;
+    }
+    cJSON_Delete(s->req.json);
+    s->req.json = status == 200 && s->adapt ? s->adapt(body) : NULL;
+    s->req.status = s->req.json ? 200 : status ? status : -1;
+    s->at_ms = kio_now_ms();
+    v10_refresh();
+}
+
+// The cached krunker.io answer of `key` (one per request), requested when it is due. Like v10_get.
+static const V10Req *kio_get(const char *key, const KrunkerRankedHost host, const char *path, const KioAdapt adapt, const int ttl_ms) {
+    const double now = kio_now_ms();
+    int index = -1, free_slot = -1, oldest = -1;
+    for (int i = 0; i < KIO_SLOTS; i++) {
+        if (!g_kio[i].used) {
+            if (free_slot < 0) free_slot = i;
+            continue;
+        }
+        if (!strcmp(g_kio[i].key, key)) index = i;
+        else if (!g_kio[i].inflight && (oldest < 0 || g_kio[i].at_ms < g_kio[oldest].at_ms)) oldest = i;
+    }
+    if (index >= 0) {
+        KioSlot *s = &g_kio[index];
+        if (s->inflight || !s->at_ms || ttl_ms <= 0 || now - s->at_ms < ttl_ms) return &s->req;
+    } else {
+        index = free_slot >= 0 ? free_slot : oldest;
+        if (index < 0) {
+            static const V10Req busy = {-1, NULL};
+            return &busy;
+        }
+        KioSlot *s = &g_kio[index];
+        cJSON_Delete(s->req.json);
+        memset(s, 0, sizeof(*s));
+        snprintf(s->key, sizeof(s->key), "%s", key);
+        s->used = 1;
+    }
+    KioSlot *s = &g_kio[index];
+    s->adapt = adapt;
+    s->gen = g_kio_gen;
+    s->inflight = 1;
+    if (!krunker_ranked_request(host, "GET", path, NULL, on_kio, (void *) (uintptr_t) index)) { // not sent: no krunker.io session
+        s->inflight = 0;
+        s->req.status = -1;
+        s->at_ms = now;
+    }
+    return &s->req;
+}
+
+static void kio_forget(void) {
+    g_kio_gen++;
+    if (!g_kio_gen) g_kio_gen = 1;
+    for (int i = 0; i < KIO_SLOTS; i++) {
+        if (!g_kio[i].used || g_kio[i].inflight) continue;
+        cJSON_Delete(g_kio[i].req.json);
+        memset(&g_kio[i], 0, sizeof(g_kio[i]));
+    }
+}
+
 // ------------------------------------------------------------------ data (v10_get, 60 s cache)
 
 static const V10Req *get_profile(const int season) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) { // getPlayerProfile(season, regionIndex) (v10:25953)
+        char key[96], path[128];
+        snprintf(key, sizeof(key), "profile/%d/%s", season, my_region());
+        snprintf(path, sizeof(path), "/player-profile/me/season/%d/region/%d", season, ranked_region_index(my_region()));
+        return kio_get(key, KRUNKER_RANKED_API, path, adapt_profile, DATA_TTL_MS);
+    }
     char t[256], path[512];
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/profile?token=%s&season=%d&region=%s", t, season, my_region());
@@ -118,12 +291,27 @@ static const V10Req *get_profile(const int season) {
 static const cJSON *profile_of(const V10Req *r) { return r->status == 200 ? cJSON_GetObjectItem(r->json, "profile") : NULL; }
 
 static const V10Req *get_board(void) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) { // getLeaderboard(50, page, season, regionIndex) (v10:25961)
+        char key[96], path[256];
+        snprintf(key, sizeof(key), "board/%d/%s/%d", current_season(), my_region(), R.board_page);
+        snprintf(path, sizeof(path), "/leaderboards/rankings/season/%d/region/%d?limit=50&offset=%d", current_season(),
+                 ranked_region_index(my_region()), R.board_page - 1);
+        return kio_get(key, KRUNKER_RANKED_API, path, adapt_data, DATA_TTL_MS);
+    }
     char path[256];
     snprintf(path, sizeof(path), "/mm/ranked/leaderboard?season=%d&region=%s&limit=50&offset=%d", current_season(), my_region(), R.board_page - 1);
     return v10_get(path, DATA_TTL_MS);
 }
 
 static const V10Req *get_history(void) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) {
+        // getMatchHistory(limit, page, season, region) (v10:25937): v10 sends the unset gameMode as "undefined"
+        char key[96], path[320];
+        snprintf(key, sizeof(key), "history/%d/%s/%d", current_season(), my_region(), R.history_page);
+        snprintf(path, sizeof(path), "/match-history/me/season/%d/gameMode/undefined/isRanked/true/region/%d?limit=%d&offset=%d", current_season(),
+                 ranked_region_index(my_region()), HISTORY_PAGE, R.history_page - 1);
+        return kio_get(key, KRUNKER_RANKED_API, path, adapt_data, DATA_TTL_MS);
+    }
     char t[256], path[512];
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/history?token=%s&season=%d&region=%s&limit=%d&offset=%d", t, current_season(), my_region(), HISTORY_PAGE,
@@ -132,13 +320,39 @@ static const V10Req *get_history(void) {
 }
 
 static const V10Req *get_shop(void) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return kio_get("shop", KRUNKER_RANKED_GAPI, "/ranked/shop", adapt_data, DATA_TTL_MS);
     char t[256], path[400];
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/shop?token=%s", t);
     return v10_get(path, DATA_TTL_MS);
 }
 
-static void invalidate(void) { v10_forget("/mm/ranked/"); }
+// The RP balance. A krunker.io account's is its account row's rankedPoints (v10's Account.rankedPoints,
+// row[47], v10:112873): the game server sends the row ("a" / "ua") when a krunker.io game signs the account
+// in, so it is unknown until then (rp_balance returns 0: no balance); v10 never asks krunker.io for it.
+// KrunkNative's is the brain's profile.
+static int rp_balance(double *out) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return krunker_account_ranked_points(out);
+    *out = v10_num(get_profile(current_season())->json, "rankedPoints", 0);
+    return 1;
+}
+
+static void invalidate(void) {
+    v10_forget("/mm/ranked/");
+    kio_forget();
+}
+
+// The Leaderboards window's Rating tab for a krunker.io account (v10 getLeaderboard(40, 0, season, region),
+// v10:139145): the krunker.io rankings of that season and region, 40 from the top. NULL = not a krunker.io
+// account (the caller asks the brain). region 0 = Global (no region in the path).
+const V10Req *ranked_ui_rating_board(const int season, const int region) {
+    if (ranked_active_backend() != RANKED_BACKEND_KRUNKER) return NULL;
+    char key[96], path[200];
+    snprintf(key, sizeof(key), "rating/%d/%d", season, region);
+    if (region) snprintf(path, sizeof(path), "/leaderboards/rankings/season/%d/region/%d?limit=40&offset=0", season, region);
+    else snprintf(path, sizeof(path), "/leaderboards/rankings/season/%d?limit=40&offset=0", season);
+    return kio_get(key, KRUNKER_RANKED_API, path, adapt_data, DATA_TTL_MS);
+}
 
 static void render(void);
 
@@ -168,11 +382,24 @@ static void emoji(StrBuf *sb, const char *icon, const char *cls) {
 static void fmt_time(char *out, const size_t n, const int s) { snprintf(out, n, "%d:%02d", s / 60, s % 60); }
 
 // $rankedMatchMakingStatus: the .ranked-matchmaking-status banner (v10 matchmakingStatusEl)
+// v10's $rankedMatchMakingStatus.message while its error is shown (v10:98476-98490, 98444-98452): the banner
+// shows it, and the component opens the popup for error.code (v10:111606-111646). "" = none.
+static char g_banner_error[160];
+
+static void update_banner(void);
+
+static void banner_error(const char *message) {
+    snprintf(g_banner_error, sizeof(g_banner_error), "%s", message && message[0] ? message : "Unknown error");
+    update_banner();
+}
+
 static void update_banner(void) {
     const HtmlElem holder = html_dom_by_id("matchmakingStatusEl");
     if (!holder) return;
-    char text[96] = "";
-    if (R.state == MM_SEARCHING) {
+    char text[160] = "";
+    if (g_banner_error[0]) {
+        snprintf(text, sizeof(text), "%s", g_banner_error);
+    } else if (R.state == MM_SEARCHING) {
         char t[16];
         fmt_time(t, sizeof(t), (int) ((double) time(NULL) - R.queued_at));
         snprintf(text, sizeof(text), "Searching for match... (%s)", t);
@@ -180,7 +407,7 @@ static void update_banner(void) {
         snprintf(text, sizeof(text), "Match found!");
     }
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class=\"ranked-matchmaking-status svelte-3k0h7w%s\">", R.state != MM_IDLE ? " show" : "");
+    sb_appendf(&sb, "<div class=\"ranked-matchmaking-status svelte-3k0h7w%s\">", R.state != MM_IDLE || g_banner_error[0] ? " show" : "");
     sb_append_esc(&sb, text);
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
@@ -192,7 +419,14 @@ static void update_banner(void) {
 
 static void poll_fire(void *user);
 
-static void clear_state(void) { // clearState
+static int g_kio_queue;          // the queue is krunker.io's socket (krunker_ranked_queue_start), not the brain's
+
+static void clear_state(void) { // clearState (v10 closes its socket here)
+    if (g_kio_queue) {
+        g_kio_queue = 0;
+        krunker_ranked_queue_stop();
+    }
+    g_banner_error[0] = 0; // (v10 clearState: message '', show false, v10:98416)
     R.state = MM_IDLE;
     R.key[0] = 0;
     R.queued_at = 0;
@@ -250,14 +484,44 @@ static void join_assignment(const cJSON *as) {
     servers_ui_join_ticket(host, port, game, ticket, web);
 }
 
+// v10's joinAssignment (v10:98678) / quickJoinRankedMatch (v10:98729) for a krunker.io match: the match's
+// game socket at connection (krunker_net_join_match: JOINED_RANK first when a game socket is open). The
+// popups close as v10's clearPops does. No connection, nothing to join (v10 answers success false).
+static void join_kio_match(const char *connection, const char *game) {
+    if (!connection || !connection[0]) return;
+    printf("[ranked] joining %s (%s)\n", game ? game : "", connection);
+    R.in_match = 1;
+    invalidate();
+    v10_popup_close();
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    if (!krunker_net_join_match(connection, game)) printf("[ranked] the match could not be joined: no krunker.io game client\n");
+}
+
 static void accept_fire(void *user) { // acceptMatch: "Connecting to match..."
     (void) user;
     if (R.state != MM_FOUND || !R.assignment) return;
     cJSON *as = R.assignment;
     R.assignment = NULL;
+    const int kio = g_kio_queue; // (clear_state ends the krunker.io queue)
     clear_state();
+    if (kio) {
+        join_kio_match(v10_str(as, "connection"), v10_str(as, "gameId"));
+        cJSON_Delete(as);
+        render();
+        return;
+    }
     join_assignment(as);
     cJSON_Delete(as);
+    render();
+}
+
+// A queue frame that does not parse (v10's catch, v10:98489-98497): the state clears, the banner says so and
+// the popup is the internal error (INTERNAL_ERROR)
+static void queue_unparseable(void) {
+    clear_state();
+    R.busy = 0;
+    banner_error("Failed to parse server message");
+    internal_error();
     render();
 }
 
@@ -269,6 +533,7 @@ static void handle_message(const cJSON *msg) {
         const char *code = v10_str(p, "code");
         const cJSON *inner = cJSON_GetObjectItem(p, "payload");
         clear_state();
+        banner_error(v10_str(p, "message")); // v10: message = payload.message || "Unknown error", show true
         R.busy = 0;
         if (!strcmp(code, "MIN_LEVEL_REQUIREMENT"))
             show_overlay("Level Required", "You must be level 10 or higher to access Ranked Mode.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
@@ -306,6 +571,13 @@ static void handle_message(const cJSON *msg) {
         }
         R.busy = 0;
     } else if (!strcmp(status, "MATCHED")) {
+        if (g_kio_queue && krunker_net_ranked_elsewhere(v10_str(cJSON_GetObjectItem(p, "assignment"), "connection"))) {
+            printf("[ranked] match found while in another ranked game: ignored (v10 isInOtherRankedMatch)\n");
+            clear_state();
+            render();
+            return;
+        }
+        printf("[ranked] match found\n");
         R.state = MM_FOUND;
         R.busy = 0;
         cJSON_Delete(R.assignment);
@@ -325,7 +597,8 @@ static void on_poll(void *user, const int status, const char *body, const size_t
     if (!R.key[0] || R.state != MM_SEARCHING) return;
     if (status == 404) { // the brain forgot the key (it stopped polling for too long)
         clear_state();
-        set_status("Failed to connect to matchmaking server", "\xe2\x9d\x8c", "#ff3939");
+        banner_error("Failed to connect to matchmaking server");
+        internal_error();
         render();
         return;
     }
@@ -350,12 +623,7 @@ static void on_queue(void *user, const int status, const char *body, const size_
     (void) length;
     cJSON *msg = status == 200 ? cJSON_Parse(body) : NULL;
     if (cJSON_IsObject(msg)) handle_message(msg);
-    else {
-        clear_state();
-        R.busy = 0;
-        set_status("Failed to connect to matchmaking server", "\xe2\x9d\x8c", "#ff3939");
-        render();
-    }
+    else queue_unparseable(); // a brain frame that is not an object: v10's parse error
     cJSON_Delete(msg);
     if (R.state == MM_SEARCHING) poll_fire(NULL);
 }
@@ -376,8 +644,74 @@ static void status_tick(void *user) {
     R.tick_timer = html_timer_add(1000, status_tick, NULL);
 }
 
+// ------------------------------------------------------------------ krunker.io queue (v10's matchmaking socket)
+
+// v10's handleWebSocketMessage: the socket's {type, payload} frames are handled as the brain's are
+static void kio_frame(void *user, const cJSON *frame) {
+    (void) user;
+    if (frame) handle_message(frame);
+    else queue_unparseable();
+}
+
+// the socket ended: v10's onclose clears the state (no message), a socket that never opened says so
+static void kio_done(void *user, const int failed) {
+    (void) user;
+    clear_state();
+    R.busy = 0;
+    if (failed) { // v10 onerror: message "Failed to connect to matchmaking server", error INTERNAL_ERROR (v10:98441-98452)
+        banner_error("Failed to connect to matchmaking server");
+        internal_error();
+    }
+    render();
+}
+
+// startMatchmaking(allRegions): connectWebSocket with the region (v10:98420); the queue's frames follow
+static void start_kio_queue(void) {
+    if (flavor_get() != FLAVOR_BASE) { // another app's client never queues a Box Office ranked match (FLAVOR_UNAVAILABLE)
+        show_overlay("Ranked Unavailable", "Ranked is not available in this game.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
+        return;
+    }
+    R.state = MM_SEARCHING;
+    R.busy = 1;
+    R.queued_at = (double) time(NULL);
+    set_status("Looking for match... (0:00)", "\xf0\x9f\x94\x8d", "#5ce05a");
+    g_kio_queue = 1;
+    g_banner_error[0] = 0; // (v10 updateGlobalStatus: error null, v10:98389)
+    if (!krunker_ranked_queue_start(R.all_regions ? "as,eu,na" : my_region(), kio_frame, kio_done, NULL)) {
+        g_kio_queue = 0;
+        clear_state();
+        R.busy = 0;
+        banner_error("Failed to connect to matchmaking server");
+        internal_error();
+    }
+    if (!R.tick_timer) R.tick_timer = html_timer_add(1000, status_tick, NULL);
+    update_banner();
+}
+
+// v10 ranked.getMyConnection (api, v10:25985): the game socket's URL of a match in progress. v10's
+// REJOIN (quickJoinRankedMatch) joins it; the popup shows "You are already in a Ranked game." and REJOIN.
+static void on_kio_connection(void *user, const int status, const cJSON *body) {
+    (void) user;
+    R.busy = 0;
+    const cJSON *data = cJSON_GetObjectItem(body, "data");
+    const char *url = status == 200 ? v10_str(data, "serverUrl") : "";
+    snprintf(R.rejoin, sizeof(R.rejoin), "%s", url);
+    cJSON_Delete(R.rejoin_as);
+    R.rejoin_as = NULL;
+    if (R.rejoin[0]) R.status_lock = 1;
+    render();
+}
+
+static void fetch_kio_connection(void) { // fetchIsPlayerInRankedMatch
+    if (R.scenario) return;
+    R.busy = 1;
+    if (!krunker_ranked_request(KRUNKER_RANKED_API, "GET", "/ranked/me/connection", NULL, on_kio_connection, NULL)) R.busy = 0;
+}
+
 static void start_matchmaking(void) { // startMatchmaking(allRegions)
-    if (R.state != MM_IDLE || !acc()) return;
+    const RankedBackend be = ranked_active_backend();
+    if (R.state != MM_IDLE || be == RANKED_BACKEND_NONE) return;
+    if (be == RANKED_BACKEND_KRUNKER) return start_kio_queue();
     char t[256], path[512];
     token(t, sizeof(t));
     int len = snprintf(path, sizeof(path), "/mm/ranked/queue?token=%s&regions=%s", t, R.all_regions ? "as,eu,na" : my_region());
@@ -399,6 +733,10 @@ static void start_matchmaking(void) { // startMatchmaking(allRegions)
 }
 
 static void cancel_matchmaking(void) { // cancelMatchmaking: v10 closes the socket
+    if (g_kio_queue) { // (no leave request: v10's cancel only closes its socket)
+        clear_state();
+        return;
+    }
     if (R.key[0]) {
         char key[256], path[400];
         backend_url_encode(key, sizeof(key), R.key);
@@ -423,7 +761,9 @@ static void on_connection(void *user, const int status, const char *body, const 
 }
 
 static void fetch_connection(void) { // fetchIsPlayerInRankedMatch
-    if (R.scenario || !acc() || backend_available() != 1) return;
+    const RankedBackend be = ranked_active_backend();
+    if (be == RANKED_BACKEND_KRUNKER) return fetch_kio_connection();
+    if (R.scenario || be == RANKED_BACKEND_NONE || backend_available() != 1) return;
     char t[256], path[400];
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/connection?token=%s", t);
@@ -437,6 +777,14 @@ const char *ranked_ui_status(void) {
 }
 const char *ranked_ui_ready(void) { return NULL; } // v10: solo queue, no party ready count
 int ranked_ui_in_ranked(void) { return R.state != MM_IDLE || R.in_match; }
+// v10's effect on $account (v10:111598-111600): a Login Required popup hides once an account is signed in
+void ranked_ui_account_changed(void) {
+    if (!R.overlay.visible || strcmp(R.overlay.title, "Login Required") || ranked_active_backend() == RANKED_BACKEND_NONE) return;
+    R.overlay.visible = 0;
+    R.overlay.intro = R.overlay.outro = 0;
+    v10_refresh();
+}
+
 void ranked_ui_left_match(void) {
     if (R.in_match) invalidate(); // the profile changed
     R.in_match = 0;
@@ -447,14 +795,38 @@ void ranked_ui_class_changed(const int index) { (void) index; } // v10: the clas
 
 // ------------------------------------------------------------------ milestones, shop
 
+// v10 openRankedChallenges (v10:215670-215676): menuWindow.scrollTop = #challRankedHeadr.offsetTop, the window being
+// the header's offsetParent. Here the header's top relative to the window's top, plus the window's scroll.
+static void challenges_scroll(void *user) {
+    (void) user;
+    const HtmlElem head = html_dom_by_id("challRankedHeadr"), win = html_dom_by_id("menuWindow");
+    HtmlRect hr, wr;
+    HtmlScroll sc;
+    if (!head || !win || !html_dom_get_rect(head, &hr) || !html_dom_get_rect(win, &wr) || !html_dom_get_scroll(win, &sc)) return;
+    html_dom_set_scroll(win, sc.left, sc.top + hr.y - wr.y);
+}
+
 static void on_claim(void *user, const int status, const cJSON *json) {
     (void) user;
-    if (status != 200 || !cJSON_IsTrue(cJSON_GetObjectItem(json, "success"))) {
-        const char *e = v10_str(json, "error");
-        v10_view_push(v10_io_error("Error", e[0] ? e : "Failed to claim milestone"), NULL, NULL, NULL);
+    // v10 (onClaimMilestone, v10:112238-112240): only a success refetches; a failure shows nothing (v10:98757-98764)
+    if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(json, "success"))) {
+        invalidate(); // _33975.clear(): the profile (and RP balance) again
+        render();
     }
-    invalidate(); // _33975.clear(): the profile (and RP balance) again
-    render();
+}
+
+static int g_claim_reward;  // the milestone the krunker.io claim takes: v10's _33842[index].reward (v10:98744)
+
+static void on_kio_claim(void *user, const int status, const cJSON *body) {
+    (void) user;
+    cJSON *res = kio_result(body);
+    // v10 adds the reward to its balance when the claim succeeds (rankedPoints += reward, v10:98744)
+    if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(res, "success"))) {
+        printf("[ranked] milestone claimed: +%d RP to the balance\n", g_claim_reward);
+        krunker_account_add_points(g_claim_reward);
+    }
+    on_claim(NULL, status, res);
+    cJSON_Delete(res);
 }
 
 typedef struct {
@@ -464,6 +836,7 @@ typedef struct {
 } Purchase;
 
 static Purchase g_buy;
+static int g_buy_kio;   // the purchase is krunker.io's: its skin is not added to the KrunkNative inventory
 
 static void on_purchase(void *user, const int status, const cJSON *json) {
     (void) user;
@@ -479,23 +852,44 @@ static void on_purchase(void *user, const int status, const cJSON *json) {
         v10_view_clear();
         v10_view_push(v10_io_success("Purchase complete!", msg, "Nice!", "accept slim"), NULL, NULL, NULL);
         free(msg);
-        account_add_skin(g_buy.skin);
+        if (!g_buy_kio) account_add_skin(g_buy.skin);
     } else {
         const char *e = v10_str(json, "error");
-        v10_view_push(v10_io_error("Error", e[0] ? e : "Purchase failed. Please try again."), NULL, NULL, NULL);
+        // v10: a thrown request is "Network error" (v10:111062); an answer without success or error is "Purchase failed" (v10:111056)
+        v10_view_push(v10_io_error("Error", status == 0 ? "Network error" : e[0] ? e : "Purchase failed"), NULL, NULL, NULL);
     }
     invalidate();
     render();
 }
 
+static void on_kio_purchase(void *user, const int status, const cJSON *body) {
+    (void) user;
+    cJSON *res = kio_result(body);
+    // v10 takes the price off its balance when the purchase succeeds (rankedPoints -= price, v10:111042)
+    if (status == 200 && cJSON_IsTrue(cJSON_GetObjectItem(res, "success"))) {
+        printf("[ranked] skin bought: -%d RP from the balance\n", g_buy.price);
+        krunker_account_add_points(-(double) g_buy.price);
+    }
+    on_purchase(NULL, status, res);
+    cJSON_Delete(res);
+}
+
 static void confirm_closed(const int accepted, void *user) {
     (void) user;
     if (!accepted || R.buying) return;
+    R.buying = 1;
+    render();
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) { // purchaseSkin({skin_id: the shop row's id}) (v10:111039)
+        char body[48];
+        snprintf(body, sizeof(body), "{\"skin_id\":%d}", g_buy.id);
+        g_buy_kio = 1;
+        if (!krunker_ranked_request(KRUNKER_RANKED_GAPI, "POST", "/ranked/purchase", body, on_kio_purchase, NULL)) on_purchase(NULL, 0, NULL);
+        return;
+    }
+    g_buy_kio = 0;
     char t[256], path[400];
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/purchase?token=%s&id=%d", t, g_buy.id);
-    R.buying = 1;
-    render();
     v10_send("POST", path, NULL, on_purchase, NULL);
 }
 
@@ -536,14 +930,9 @@ static void mmr_requirement(const cJSON *s, char *out, const size_t n) {
     else if (hi) snprintf(out, n, "Requires MMR: up to %.0f", v10_num(s, "max_mmr", 0));
 }
 
-// restricted_by "mmr": the brain says so, else the player's rating is outside the item's range
+// v10's restrictedBy === "mmr" (v10:111314, 112369): the server's restricted_by, nothing else
 static int mmr_restricted(const cJSON *s) {
-    if (!strcmp(v10_str(s, "restricted_by"), "mmr")) return 1;
-    if (!has_num(s, "min_mmr") && !has_num(s, "max_mmr")) return 0;
-    const cJSON *p = profile_of(get_profile(current_season()));
-    if (!p) return 0;
-    const int mmr = ranked_display(v10_num(p, "conservative_rating", 0));
-    return (has_num(s, "min_mmr") && mmr < v10_num(s, "min_mmr", 0)) || (has_num(s, "max_mmr") && mmr > v10_num(s, "max_mmr", 0));
+    return !strcmp(v10_str(s, "restricted_by"), "mmr");
 }
 
 static void countdown(StrBuf *sb, const double expires_ms, const char *hash) {
@@ -647,8 +1036,14 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     if (!name) return -1;
     const int arg0 = arg_num(args, argc, 0, 0);
     if (!strcmp(name, "openRankedMenu")) { // v10: guests get loginOrRegister()
-        if (acc() || R.scenario) open_popup();
+        if (ranked_active_backend() != RANKED_BACKEND_NONE || R.scenario) open_popup();
         else if (v10_menu_handle("loginOrRegister", NULL, NULL, 0) < 0) menu_show_window(5, 1);
+        return 1;
+    }
+    if (!strcmp(name, "openRankedChallenges")) { // v10 openRankedChallenges (v10:215670): clearPops, windows[32].openHome, scroll
+        v10_popup_close();
+        html_ui_dispatch("windows.32.openHome", ev, NULL, 0);
+        html_timer_add(0, challenges_scroll, NULL); // (after the window lays out)
         return 1;
     }
     if (strncmp(name, "knRk", 4)) return -1;
@@ -673,7 +1068,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         R.all_regions = on != 0;
         html_storage_set("s_rankedAllRegions", R.all_regions ? "true" : "false");
     } else if (!strcmp(name, "knRkStart")) { // the start button: REJOIN / FIND MATCH / CANCEL
-        if (!acc() || R.busy || R.state == MM_FOUND) return 1;
+        if (ranked_active_backend() == RANKED_BACKEND_NONE || R.busy || R.state == MM_FOUND) return 1;
         if (R.status_lock && R.rejoin_as) {
             cJSON *as = R.rejoin_as;
             R.rejoin_as = NULL;
@@ -683,10 +1078,30 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
             cJSON_Delete(as);
             return 1;
         }
+        if (R.status_lock && ranked_active_backend() == RANKED_BACKEND_KRUNKER && R.rejoin[0]) { // REJOIN: quickJoinRankedMatch (v10:98729)
+            char url[sizeof(R.rejoin)];
+            snprintf(url, sizeof(url), "%s", R.rejoin);
+            R.status_lock = 0;
+            R.rejoin[0] = 0;
+            join_kio_match(url, NULL);
+            render();
+            return 1;
+        }
         if (R.state == MM_IDLE) start_matchmaking();
         else if (R.state == MM_SEARCHING) cancel_matchmaking();
     } else if (!strcmp(name, "knRkClaim")) { // onClaimMilestone(index): the next one, in order
-        if (!acc()) return 1;
+        const RankedBackend be = ranked_active_backend();
+        if (be == RANKED_BACKEND_NONE) return 1;
+        if (be == RANKED_BACKEND_KRUNKER) { // claimMilestone(index) (v10:25974): the region index
+            char path[96];
+            snprintf(path, sizeof(path), "/player-profile/me/claim-milestone/region/%d", ranked_region_index(my_region()));
+            // the milestone the claim takes: the one after last_milestone_claimed (v10's claimable row, the template at v10:98927)
+            const int next = g_last_claimed + 1;
+            g_claim_reward = g_milestones && next >= 0 && next < cJSON_GetArraySize(g_milestones)
+                                 ? (int) v10_num(cJSON_GetArrayItem(g_milestones, next), "reward", 0) : 0;
+            if (!krunker_ranked_request(KRUNKER_RANKED_API, "POST", path, NULL, on_kio_claim, NULL)) on_claim(NULL, 0, NULL);
+            return 1;
+        }
         char t[256], path[400];
         token(t, sizeof(t));
         snprintf(path, sizeof(path), "/mm/ranked/claim-milestone?token=%s&region=%d", t, ranked_region_index(my_region()));
@@ -706,6 +1121,8 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         if (next >= 1 && next <= (pages > 0 ? pages : 1)) {
             R.history_page = next;
             memset(R.match_open, 0, sizeof(R.match_open));
+            memset(R.match_sort, 0, sizeof(R.match_sort)); // v10 builds each page's entries again at the default sort (v10:108072-108080)
+            memset(R.match_desc, 0, sizeof(R.match_desc));
         }
     } else if (!strcmp(name, "knRkMatch")) {
         if (arg0 >= 0 && arg0 < MATCHES_MAX) R.match_open[arg0] = !R.match_open[arg0];
@@ -726,7 +1143,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         return 1;
     } else if (!strcmp(name, "knRkBuy")) {
         html_ui_stop_propagation();
-        if (acc()) buy(arg0);
+        if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0);
         return 1;
     } else if (!strcmp(name, "knRkShare")) {
         char origin[256], url[320];
@@ -757,13 +1174,15 @@ static Derived derive(const cJSON *p) {
     d.wins = v10_num(p, "wins", 0);
     d.losses = v10_num(p, "losses", 0);
     // KrunkNative counts draws too (placement and ranks are the brain's); v10's wins + losses otherwise
-    d.matches = v10_num(p, "total_matches", d.wins + d.losses);
+    // v10's _34033 (v10:98335) sets total_matches to wins + losses and derives every ratio from the totals
+    d.matches = ranked_active_backend() == RANKED_BACKEND_KRUNKER ? d.wins + d.losses : v10_num(p, "total_matches", d.wins + d.losses);
     if (d.matches <= 0) return d;
     const double kills = v10_num(p, "total_kills", 0), deaths = v10_num(p, "total_deaths", 0), time_ms = v10_num(p, "total_time_played", 0);
     d.avg_kills = kills / d.matches;
     d.avg_deaths = deaths / d.matches;
     d.kd = kills / (deaths > 1 ? deaths : 1);
-    d.dpm = time_ms > 0 ? v10_num(p, "total_damage_done", 0) / (time_ms / 60000.0) : 0;
+    d.dpm = v10_num(p, "total_damage_done", 0) / (time_ms / 60000.0); // v10 (v10:98338): NaN (0 / 0) reads 0
+    if (isnan(d.dpm)) d.dpm = 0;
     d.avg_score = v10_num(p, "total_score", 0) / d.matches;
     d.avg_obj = v10_num(p, "total_objective_score", 0) / d.matches;
     d.win_rate = d.wins / d.matches * 100.0;
@@ -876,7 +1295,7 @@ static void gen_home(StrBuf *sb) {
                    "<span class=\"quick-stat-label svelte-17kea4i\">KD Average</span></div></div></div></div> ",
                rank != RANK_UNRANKED ? ranked_display(v10_num(p, "conservative_rating", 0)) : 0, d.matches, d.win_rate, d.kd);
     gen_progression(sb, r->json);
-    sb_append(sb, " <div class=\"challenges-link svelte-17kea4i\" onclick=\"openRankedChallenges()\" onmouseenter=\"playTick()\"><span class=\"material-icons challenges-link-icon svelte-17kea4i\">"
+    sb_append(sb, " <div class=\"challenges-link svelte-17kea4i\" onclick=\"playSelect(0.1),openRankedChallenges()\" onmouseenter=\"playTick()\"><span class=\"material-icons challenges-link-icon svelte-17kea4i\">"
                   "emoji_events</span> <span class=\"challenges-link-text svelte-17kea4i\">Ranked Challenges</span> <span class=\"material-icons svelte-17kea4i\">chevron_right</span></div> "
                   "<div class=\"description-container svelte-17kea4i\"><p class=\"svelte-17kea4i\">Compete in a best of 3 - 4v4 Hardpoint - map pool rotates every season</p> "
                   "<div class=\"map-carousel-wrapper svelte-17kea4i\">");
@@ -914,7 +1333,7 @@ static void gen_profile(StrBuf *sb) {
     rank_img(sb, rank, "rank-icon svelte-18dbnt3", "Rank");
     sb_append(sb, "</div> <div class=\"profile-info svelte-18dbnt3\"><div class=\"username svelte-18dbnt3\">");
     const char *name = v10_str(p, "player_name");
-    sb_append_esc(sb, name[0] ? name : acc() ? acc()->name : "");
+    sb_append_esc(sb, name[0] ? name : active_name());
     sb_appendf(sb, "</div> <div class=\"rank-display svelte-18dbnt3\" style=\"color: %s\">%s</div></div></div> ", ranked_rank_color(rank), ranked_rank_name(rank));
 #define CARD(cls, val, label) sb_appendf(sb, "<div class=\"stat-card%s svelte-18dbnt3\"><span class=\"stat-value svelte-18dbnt3\">%s</span> <span class=\"stat-label svelte-18dbnt3\">%s</span></div>", cls, val, label)
     char v[16][48];
@@ -985,7 +1404,8 @@ static void gen_leaderboard(StrBuf *sb) {
         sb_append(sb, "<div class=\"error svelte-1enb567\">Failed to load leaderboard data. Please try again.</div></div>");
         return;
     }
-    const AccountInfo *a = acc();
+    const cJSON *own = profile_of(get_profile(current_season())); // v10 compares with the profile's player_name (v10:111751)
+    const char *me = v10_str(own, "player_name");
     const int pages = (int) v10_num(r->json, "totalPages", 0);
     sb_append(sb, "<div class=\"leaderboard-content svelte-1enb567\"><div class=\"table-wrapper svelte-1enb567\"><table class=\"header-table svelte-1enb567\"><thead><tr>"
                   "<th class=\"rank-cell svelte-1enb567\">#</th><th class=\"name-cell svelte-1enb567\">Name</th><th class=\"rank-cell svelte-1enb567\">Rank</th>"
@@ -997,7 +1417,7 @@ static void gen_leaderboard(StrBuf *sb) {
         const cJSON *p = cJSON_GetObjectItem(row, "profile");
         const int rank = (int) v10_num(p, "rank", 0);
         const char *name = v10_str(p, "player_name")[0] ? v10_str(p, "player_name") : v10_str(row, "player_name");
-        const int mine = a && !strcmp(name, a->name);
+        const int mine = me[0] && !strcmp(name, me);
         sb_appendf(sb, "<tr class=\"%ssvelte-1enb567\"><td class=\"rank-cell svelte-1enb567\">%.0f</td><td class=\"name-cell svelte-1enb567\">"
                        "<button type=\"button\" class=\"player-name-link\" onclick=\"openPlayerProfile('",
                    mine ? "highlight-row " : rank == RANK_KRACKED ? "kracked-row " : "", v10_num(row, "position", 0));
@@ -1046,8 +1466,7 @@ static void gen_history(StrBuf *sb) {
     const cJSON *mh = cJSON_GetObjectItem(r->json, "matchHistory");
     const cJSON *rows = cJSON_GetObjectItem(mh, "matches");
     const int loading = r->status == 0;
-    const AccountInfo *a = acc();
-    const char *me = a ? a->name : "";
+    const char *me = active_name();
     sb_append(sb, "<div class=\"match-history svelte-1irqx9a\">");
     if (loading && !cJSON_GetArraySize(rows)) {
         sb_append(sb, "<div class=\"loading svelte-1irqx9a\">Loading match history...</div></div>");
@@ -1106,7 +1525,7 @@ static void gen_history(StrBuf *sb) {
             static const char *const keys[] = {"player_name", "score", "kills", "assists", "deaths", "kd", "objective_score", "damage_done"};
             static const char *const labels[] = {"Player", "Score", "Kills", "Assists", "Deaths", "K/D", "Objective", "Damage"};
             const char *key = R.match_sort[index][0] ? R.match_sort[index] : "score";
-            const int desc = R.match_sort[index][0] ? R.match_desc[index] : 0;
+            const int desc = R.match_sort[index][0] ? R.match_desc[index] : 1; // v10's default: score, descending (v10:108078, toggled from asc at :108099)
             sb_append(sb, "<div class=\"match-details svelte-1irqx9a\" onclick=\"\"><table class=\"table-container svelte-1irqx9a\"><thead><tr class=\"table-row svelte-1irqx9a\">");
             for (int c = 0; c < 8; c++)
                 sb_appendf(sb, "<td class=\"table-header sortable svelte-1irqx9a\" onclick=\"playTick(0.5);knRkSort(%d,%d)\">%s %s</td>", index, c, labels[c],
@@ -1150,12 +1569,45 @@ static void gen_history(StrBuf *sb) {
 }
 
 // _37915 shop (svelte-1gtpoav) with _37839 items (svelte-1q06uv7)
+// v10's countdown onExpired (v10:112316-112320, 112384-112393) refetches the shop (getShop, v10:111020): an item's
+// expires_at (epoch ms) passing drops the shop's cached answer and re-renders. One timer per expiry, at most 32.
+#define EXPIRY_TIMERS 32
+static double g_expiry_set[EXPIRY_TIMERS];
+static int g_expiry_n;
+
+static void shop_expired(void *user) {
+    (void) user;
+    for (int i = 0; i < KIO_SLOTS; i++) { // the shop's krunker.io answer
+        if (!g_kio[i].used || g_kio[i].inflight || strcmp(g_kio[i].key, "shop")) continue;
+        cJSON_Delete(g_kio[i].req.json);
+        memset(&g_kio[i], 0, sizeof(g_kio[i]));
+    }
+    v10_forget("/mm/ranked/shop");   // the brain's
+    v10_refresh();
+}
+
+static void schedule_expiry(const double expires_ms) {
+    if (expires_ms <= 0) return;
+    for (int i = 0; i < g_expiry_n; i++)
+        if (g_expiry_set[i] == expires_ms) return;
+    const double left = expires_ms - (double) time(NULL) * 1000.0;
+    if (left <= 0 || g_expiry_n >= EXPIRY_TIMERS) return;
+    g_expiry_set[g_expiry_n++] = expires_ms;
+    html_timer_add(left + 1000, shop_expired, NULL); // (a second over: the countdown reads 0 by then)
+}
+
 static void gen_shop(StrBuf *sb) {
     const V10Req *r = get_shop();
-    const V10Req *pr = get_profile(current_season());
+    const cJSON *expiring;
+    cJSON_ArrayForEach(expiring, cJSON_GetObjectItem(r->json, "skins"))
+        if (has_num(expiring, "expires_at")) schedule_expiry(v10_num(expiring, "expires_at", 0));
     sb_append(sb, "<div class=\"shop-container svelte-1gtpoav\"><div class=\"shop-header svelte-1gtpoav\"><div class=\"header-top svelte-1gtpoav\">"
                   "<div class=\"header-subtitle svelte-1gtpoav\">Spend your Ranked Points on exclusive items.</div> <div class=\"rp-balance svelte-1gtpoav\">");
-    v10_currency(sb, v10_num(pr->json, "rankedPoints", 0), "RP", "large", 0);
+    double rp = 0;
+    if (rp_balance(&rp)) v10_currency(sb, rp, "RP", "large", 0);
+    else sb_append(sb, "<div class=\"currency-display svelte-1r6bdx8\" style=\"--text-size: 20px; --icon-size: 22px;\">"
+                       "<span class=\"currency-amount svelte-1r6bdx8\" style=\"color: #4caf50;\">--</span> "
+                       "<span class=\"material-icons currency-icon svelte-1r6bdx8\" style=\"color: #4caf50;\">emoji_events</span></div>"); // not known yet
     sb_append(sb, "</div></div></div> <div class=\"shop-grid svelte-1gtpoav\">");
     const cJSON *s;
     cJSON_ArrayForEach(s, cJSON_GetObjectItem(r->json, "skins")) {
@@ -1274,10 +1726,9 @@ static void open_popup(void) {
         R.all_regions = html_storage_get("s_rankedAllRegions", v, sizeof(v)) >= 0 && (v[0] == '1' || v[0] == 't');
     }
     R.overlay.visible = 0;
-    const AccountInfo *a = acc();
-    if (!a && !R.scenario)
+    if (ranked_active_backend() == RANKED_BACKEND_NONE && !R.scenario)
         show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
-    else if (a && a->level < RANKED_MIN_LEVEL)
+    else if (active_level() >= 0 && active_level() < RANKED_MIN_LEVEL) // (krunker.io: the level is known once its game server said so)
         show_overlay("Level Required", "You must be level 10 or higher to access Ranked Mode.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 1);
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
     R.board_page = R.history_page = 1;

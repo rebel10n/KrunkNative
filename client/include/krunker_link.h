@@ -152,6 +152,7 @@ typedef enum {
     KRUNKER_LINK_EV_CLOSE,      // the server told us to close the socket ("00" with keepOpen falsy)
     KRUNKER_LINK_EV_ACCOUNT,    // "a" ACCOUNT_RESPONSE: the game server signed our krunker.io account in
                                 // (text: its name; account_name / account_level of the link)
+    KRUNKER_LINK_EV_ACCOUNT_POINTS, // "ua" UPDATE_ACCOUNT: the account row's rankedPoints (account_ranked_points)
 } KrunkerLinkEvent;
 
 // init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289): what the
@@ -260,6 +261,10 @@ typedef struct {
     // the account row's K.P.D fields (Account :112781-112904): player_role (2 isMod "Marshal", 3
     // isDeputy), player_developer, jobrating / jobratingpositive (the Helpful Reports)
     int account_role, account_dev, account_job_rating, account_job_rating_pos;
+    // the account row's rankedPoints (v10 Account.setData, row[47] = rankedPoints, v10:112873) from "a" or
+    // "ua": account_rp_known = 1 once a frame carried it
+    int account_rp_known;
+    double account_ranked_points;
     // init after we had a player: v10 drops it (you = null, game.deob.js initGame) and builds no input
     // frame until our next "0" brings it back; the old round's player must not send into the new one
     int you_gone;

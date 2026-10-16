@@ -54,6 +54,10 @@ static struct {
     char access[TOKEN_MAX + 1], refresh[TOKEN_MAX + 1];
     char name[64];
     int level;
+    // the account row's rankedPoints (v10 Account.rankedPoints): the game server's "a" / "ua" carry it, so
+    // it is known once a krunker.io game has signed the account in this session (not saved)
+    int rp_known;
+    double rp;
     char message[300];
     int message_error;
     unsigned generation;
@@ -129,6 +133,20 @@ static void api_url(char *out, const size_t n, const char *path) {
 static void auth_url(char *out, const size_t n, const char *path) {
     char base[256];
     endpoint("KRUNKNATIVE_KRUNKER_AUTH", "krunkerAuth", KRUNKER_ACCOUNT_DEFAULT_AUTH, base, sizeof(base));
+    snprintf(out, n, "%s%s", base, path);
+}
+
+void krunker_host_url(const KrunkerHost host, const char *path, char *out, const size_t n) {
+    static const struct {
+        const char *env, *param, *fallback;
+    } hosts[] = {
+        {"KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API},
+        {"KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi", KRUNKER_ACCOUNT_DEFAULT_GAPI},
+        {"KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND},
+    };
+    char base[256];
+    const size_t i = (size_t) host < sizeof(hosts) / sizeof(hosts[0]) ? (size_t) host : 0;
+    endpoint(hosts[i].env, hosts[i].param, hosts[i].fallback, base, sizeof(base));
     snprintf(out, n, "%s%s", base, path);
 }
 
@@ -340,6 +358,8 @@ static void forget(void) {
     wipe(A.refresh, sizeof(A.refresh));
     A.name[0] = 0;
     A.level = 0;
+    A.rp_known = 0;
+    A.rp = 0;
     A.state = KRUNKER_ACCOUNT_GUEST;
     save();
 }
@@ -361,6 +381,8 @@ static void fail_sign_in(const char *text) {
 }
 
 static void signed_in(const char *access, const char *refresh) {
+    A.rp_known = 0; // another balance until a game server says it (the account may differ)
+    A.rp = 0;
     snprintf(A.access, sizeof(A.access), "%s", access);
     snprintf(A.refresh, sizeof(A.refresh), "%s", refresh ? refresh : "");
     if (!A.email && A.login[0]) snprintf(A.name, sizeof(A.name), "%s", A.login);
@@ -666,6 +688,31 @@ void krunker_account_note_game(const char *name, const int level) {
         changed();
         printf("[kio-account] the krunker.io game server names the account %s (level %d)\n", A.name, A.level);
     }
+}
+
+void krunker_account_note_points(const double points) {
+    load();
+    if (!krunker_account_signed_in()) return;
+    if (A.rp_known && A.rp == points) return;
+    A.rp_known = 1;
+    A.rp = points;
+    changed();
+}
+
+// v10 changes its balance itself after a ranked claim (rankedPoints += reward, v10:98744) and a purchase
+// (rankedPoints -= price, v10:111042); the same change to the held balance. Nothing when it is not known.
+void krunker_account_add_points(const double delta) {
+    load();
+    if (!krunker_account_signed_in() || !A.rp_known) return;
+    A.rp += delta;
+    changed();
+}
+
+int krunker_account_ranked_points(double *out) {
+    load();
+    if (!out || !krunker_account_signed_in() || !A.rp_known) return 0;
+    *out = A.rp;
+    return 1;
 }
 
 void krunker_account_tick(void) {

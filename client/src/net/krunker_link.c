@@ -226,6 +226,9 @@ static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_NETWORK_DATA, &rates, sizeof(rates));
 }
 static void on_account(KrunkerLink *l, const KrunkerFrame *f);
+static void on_update_account(KrunkerLink *l, const KrunkerFrame *f);
+static void on_balances(KrunkerLink *l, const KrunkerFrame *f);
+static void on_challenge_rewards(KrunkerLink *l, const KrunkerFrame *f);
 
 // init arg 9 (customsData, :219300 -> prepareGame :188875): {data: "<map JSON>", id, creator, ...} of
 // a custom game. data is a JSON string (prepareGame JSON.parses it); an object is taken as well.
@@ -2520,6 +2523,9 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)
         case KRUNKER_S2C_DISCONNECT: note(l, KRUNKER_LINK_EV_ERROR, "the server disconnected us (dc)"); break;
         case KRUNKER_S2C_ACCOUNT_RESPONSE: on_account(l, &f); break;
+        case KRUNKER_S2C_UPDATE_ACCOUNT: on_update_account(l, &f); break;
+        case KRUNKER_S2C_UPDATE_BALANCES: on_balances(l, &f); break;
+        case KRUNKER_S2C_UPDATE_CHALLENGE_REWARDS: on_challenge_rewards(l, &f); break;
         // objectives / flags / rounds / end (audit cluster D)
         case KRUNKER_S2C_UPDATE_FLAG_INFO: on_flag_info(l, &f); break;
         case KRUNKER_S2C_UPDATE_FLAG: on_flag(l, &f); break;
@@ -2560,6 +2566,21 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
 // row (new Account(id, name, data), :114314): its level is floor(rankVar * sqrt(player_score))
 // (updateLevel, rankVar 0.03). An error string (arg 0) = not signed in. The token (arg 4, the
 // legacy krunker_token) is not kept: krunker_account.h holds the session.
+// v10's Account.setData(row) reads row[47] as rankedPoints (v10:112873): JS's row[47] is the array's item
+// 47 or the "47" key of an object, so the row is read both ways. NULL: the row carries no such value.
+static const KrunkerValue *row_points(const KrunkerValue *row) {
+    if (krunker_is(row, KRUNKER_ARRAY)) return krunker_at(row, 47);
+    return krunker_get(row, "47");
+}
+
+// v10's Account.setData reads score from row[6] (v10:112832), and updateLevel derives the level from it
+// (v10:112893: max(1, floor(0.03 * sqrt(score))), _7340 = 0.03 at v10:16549). The map form is the constructor's
+// player_score (v10:112762). NULL: the row has no score.
+static const KrunkerValue *row_score(const KrunkerValue *row) {
+    if (krunker_is(row, KRUNKER_ARRAY)) return krunker_at(row, 6);
+    return krunker_get(row, "player_score");
+}
+
 static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     const char *error = krunker_str(arg(f, 0));
     if (error && error[0]) {
@@ -2569,7 +2590,7 @@ static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     const char *name = krunker_str(arg(f, 2));
     if (!name || !name[0]) return;
     snprintf(l->account_name, sizeof(l->account_name), "%s", name);
-    const KrunkerValue *score = krunker_get(arg(f, 3), "player_score");
+    const KrunkerValue *score = row_score(arg(f, 3));
     const double s = krunker_num(score, 0);
     const int level = (int) floor(0.03 * sqrt(s > 0 ? s : 0)); // progression_level (shared/src/progression.c)
     l->account_level = level < 1 ? 1 : level;
@@ -2578,7 +2599,49 @@ static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     l->account_dev = (int) krunker_num(krunker_get(data, "player_developer"), 0);
     l->account_job_rating = (int) krunker_num(krunker_get(data, "jobrating"), 0);
     l->account_job_rating_pos = (int) krunker_num(krunker_get(data, "jobratingpositive"), 0);
+    const KrunkerValue *points = row_points(data);
+    if (krunker_is(points, KRUNKER_NUM)) {
+        l->account_rp_known = 1;
+        l->account_ranked_points = krunker_num(points, 0);
+    }
     note(l, KRUNKER_LINK_EV_ACCOUNT, "%s", l->account_name);
+}
+
+// The balance from a wallet packet: the account's rankedPoints, as the link keeps it (note: the event tells krunker_net)
+static void set_points(KrunkerLink *l, const double points) {
+    l->account_rp_known = 1;
+    l->account_ranked_points = points;
+    note(l, KRUNKER_LINK_EV_ACCOUNT_POINTS, "rankedPoints %.0f", l->account_ranked_points);
+}
+
+// "ua" UPDATE_ACCOUNT [row] (v10: setData(row), :222148): the same row; only its rankedPoints is kept here
+static void on_update_account(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *points = row_points(arg(f, 0));
+    if (krunker_is(points, KRUNKER_NUM)) set_points(l, krunker_num(points, 0));
+}
+
+// The item at index i of an array, or the "i" key of a map (JS's x[i] reads both, as row_points does)
+static const KrunkerValue *item_at(const KrunkerValue *v, const uint32_t i) {
+    if (krunker_is(v, KRUNKER_ARRAY)) return krunker_at(v, i);
+    char key[16];
+    snprintf(key, sizeof(key), "%u", (unsigned) i);
+    return krunker_get(v, key);
+}
+
+// "ub" UPDATE_BALANCES [balances] (v10: _69707, game.deob.js:208200, registered at :222187): v10 takes
+// balances[3] (the ranked points, type 3) as the wallet's rankedPoints: its {amount, change}
+static void on_balances(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *rp = item_at(arg(f, 0), 3);
+    if (!krunker_is(rp, KRUNKER_MAP)) return;
+    const KrunkerValue *amount = krunker_get(rp, "amount");
+    if (krunker_is(amount, KRUNKER_NUM)) set_points(l, krunker_num(amount, 0));
+}
+
+// "chlR" UPDATE_CHALLENGE_REWARDS (v10: _69709 at :208212-208248): argument 6 is the ranked points the challenges
+// gave (v10 applies the rest only when it is set), argument 7 the balance after them (parseInt, || 0)
+static void on_challenge_rewards(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_num(arg(f, 6), 0)) return;
+    set_points(l, krunker_num(arg(f, 7), 0));
 }
 
 // ---------------------------------------------------------------- outbound

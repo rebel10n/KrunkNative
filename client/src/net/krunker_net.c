@@ -17,6 +17,7 @@
 #include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
 #include <krunker_lobbies.h> // krunker_seek_region: the region a seek looks in (the ping race)
 #include <krunker_account.h>
+#include <ranked_route.h> // a ranked match's socket URL and host (v10's joinAssignment, ranked_ui.c)
 #include <krunker_map_source.h>
 #include <backend.h>
 #include <html_ui.h>
@@ -87,6 +88,9 @@ static struct {
     KrunkerState state;
     unsigned generation; // bumped per join / leave: late callbacks of an older attempt are ignored
     char game_id[96], region[48], token[512], matchmaker[512];
+    // the game socket's host (v10's _6640: isInOtherRankedMatch compares it) and, for a ranked match's join
+    // (krunker_net_join_match), the assignment's connection "host[:port]" ("" for a seek)
+    char host[256], match[256];
     int mm_override;          // KRUNKNATIVE_KRUNKER_MATCHMAKER / ?krunkerMM names another matchmaker
     // the matchmaker refused a seek for its build (InvalidVersion / NoServersMatchQuery): the builds tried
     // this join (a forced refresh, then the compiled one), at most one retry each
@@ -107,6 +111,7 @@ static struct {
     // seek-game's accessToken and the socket's at=. Never logged; wiped on leave.
     char access[KRUNKER_ACCESS_MAX];
     volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
+    volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
     int connected;       // on_client_socket_connect was reported for this socket
     KrunkerLink link;
     pthread_mutex_t lock;
@@ -324,6 +329,9 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
             break;
         case KRUNKER_LINK_EV_ACCOUNT: // "a": the account is signed in on this socket (krunker_net_tick tells krunker_account)
             K.account_event = 1;
+            break;
+        case KRUNKER_LINK_EV_ACCOUNT_POINTS: // "ua": the account's rankedPoints changed (krunker_net_tick)
+            K.points_event = 1;
             break;
         default:
             break;
@@ -1272,6 +1280,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         }
         // the krunker.io account: "at=" + the fresh access token as it is (iîíîiìî :222367, after tc)
         snprintf(K.ws_url, sizeof(K.ws_url), "%s%s%s", K.ws_log, K.access[0] ? "&at=" : "", K.access);
+        snprintf(K.host, sizeof(K.host), "%s", host);
         printf("[krunker] seek-game: game %s on %s:%s, opening %s%s\n", game, host, port_s, K.ws_log,
                K.access[0] ? "&at=(the krunker.io account's token)" : "");
         load_ws_texts();
@@ -1367,6 +1376,34 @@ static void on_build(void *user, const KrunkerBuildSource src, const char *clien
     start_seek();
 }
 
+// The game socket of a ranked match (v10's _33929 with the assignment's connection, v10:97583, 222104-222135):
+// the URL from ranked_match_url (at= the fresh token, no gameId / clientKey), then the same socket as a seek's.
+// Production (the krunker.io API is the default) is wss:// with no port; a mirror (KRUNKNATIVE_KRUNKER_API)
+// takes its scheme from that API and the port the assignment gives. No seek and no build fetch: v10 joins
+// with the build the page loaded (its ahkey).
+static void open_match(void) {
+    char api[256];
+    krunker_host_url(KRUNKER_HOST_API, "", api, sizeof(api));
+    const int production = !strcmp(api, KRUNKER_ACCOUNT_DEFAULT_API);
+    if (!ranked_match_host(K.match, K.host, sizeof(K.host)) ||
+        !ranked_match_url(K.match, production, !strncmp(api, "https:", 6), K.access, K.ws_url, sizeof(K.ws_url), K.ws_log, sizeof(K.ws_log))) {
+        char text[300];
+        join_error_text("GameIssue", text, sizeof(text));
+        fail("%s", text);
+        return;
+    }
+    printf("[krunker] ranked match: opening %s%s\n", K.ws_log, K.access[0] ? "at=(the krunker.io account's token)" : "");
+    load_ws_texts();
+    K.state = KS_CONNECTING;
+    kmap_reset();
+    pthread_mutex_lock(&K.lock);
+    krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
+    krunker_link_reset(&K.link);
+    K.link.account = K.access[0] != 0;
+    pthread_mutex_unlock(&K.lock);
+    ws_open();
+}
+
 // The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
 // Then the current Krunker build (on_build), then the seek.
 static void on_access(void *user, const char *token) {
@@ -1374,6 +1411,7 @@ static void on_access(void *user, const char *token) {
     snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
     if (K.access[0]) printf("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
     else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
+    if (K.match[0]) return open_match();
     K.state = KS_BUILD;
     krunker_build_refresh(build_url(), 0, on_build, user);
 }
@@ -1442,7 +1480,8 @@ static void on_region(void *user, const char *region) {
 
 // krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
 // the lobby list first (on_game_list).
-static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude, const int reload) {
+static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude, const int reload,
+                const char *connection) {
     if (!client) return 0;
     if (!K.client) krunker_net_attach(client);
     client_leave_game(client); // the game being left (ours, the offline one or another official one) goes now
@@ -1460,6 +1499,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
 
     K.generation++;
     snprintf(K.game_id, sizeof(K.game_id), "%s", game_id ? game_id : "");
+    snprintf(K.match, sizeof(K.match), "%s", connection ? connection : "");
     K.seek_new = seek_new;
     K.seek_new_retries = 0;
     K.reload = reload && K.game_id[0];
@@ -1486,6 +1526,12 @@ static int join(Client *client, const char *game_id, const char *region, const i
     load_texts();
     matchmaker();
     wipe(K.access, sizeof(K.access));
+    if (K.match[0]) { // a ranked match's socket (v10's _33929): no region to resolve, the account's token first
+        printf("[krunker] joining the ranked match at %s (game %s)\n", K.match, K.game_id[0] ? K.game_id : "(any)");
+        K.state = KS_ACCOUNT;
+        krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
+        return K.state != KS_CLOSED;
+    }
     if (!K.region[0]) {
         // v10's seek: __REGION__ || regionId || await getRegion() (v10.js:147397): no region given,
         // chosen or cached, so the ping race picks it first (on_region)
@@ -1498,7 +1544,31 @@ static int join(Client *client, const char *game_id, const char *region, const i
 }
 
 int krunker_net_join(Client *client, const char *game_id, const char *region) {
-    return join(client, game_id, region, 0, NULL, 0);
+    return join(client, game_id, region, 0, NULL, 0, NULL);
+}
+
+// v10's joinAssignment (v10:98678) and quickJoinRankedMatch (v10:98729): JOINED_RANK on the open game socket
+// (only when one is open: v10's `connected` check), then the match's socket at connection (open_match). The
+// current socket is left as an intended switch, like a join's. 1 = started; 0 = no client to join with.
+int krunker_net_join_match(const char *connection, const char *game_id) {
+    if (!K.client || !connection || !connection[0]) return 0;
+    if (K.state == KS_OPEN) {
+        pthread_mutex_lock(&K.lock);
+        krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_JOINED_RANK), NULL, 0);
+        pthread_mutex_unlock(&K.lock);
+    }
+    return join(K.client, game_id, NULL, 0, NULL, 0, connection);
+}
+
+// v10's isInOtherRankedMatch (v10:98528): the open game socket is a ranked game (its init's isRanked) on a
+// host other than connection's. A MATCHED for it is ignored, as v10 does.
+int krunker_net_ranked_elsewhere(const char *connection) {
+    char host[256];
+    if (K.state != KS_OPEN || !ranked_match_host(connection, host, sizeof(host))) return 0;
+    pthread_mutex_lock(&K.lock);
+    const int ranked = K.link.is_ranked;
+    pthread_mutex_unlock(&K.lock);
+    return ranked && K.host[0] && strcmp(host, K.host) != 0;
 }
 
 // Reload (game_reload.c): the official game the player was in, by its id (the copies: K.game_id may be
@@ -1508,7 +1578,7 @@ int krunker_net_reload_join(Client *client, const char *game_id, const char *reg
     snprintf(game, sizeof(game), "%s", game_id ? game_id : "");
     snprintf(r, sizeof(r), "%s", region ? region : "");
     printf("[krunker] reload: rejoining official game %s\n", game[0] ? game : "(any)");
-    return join(client, game, r[0] ? r : NULL, 0, NULL, 1);
+    return join(client, game, r[0] ? r : NULL, 0, NULL, 1, NULL);
 }
 
 // krunker.io's Find New Game (F4 / backToOrigin(false, {exclude: game}), game.deob.js :141618-141626,
@@ -1518,7 +1588,7 @@ int krunker_net_seek_new(Client *client, const char *region, const int use_list)
     char r[sizeof(K.region)] = "";
     if (region && region[0]) snprintf(r, sizeof(r), "%s", region);
     else if (K.region[0]) snprintf(r, sizeof(r), "%s", K.region); // the region the player is playing in
-    return join(client, NULL, r[0] ? r : NULL, use_list ? 2 : 1, K.recent.count ? K.recent.ids[0] : NULL, 0);
+    return join(client, NULL, r[0] ? r : NULL, use_list ? 2 : 1, K.recent.count ? K.recent.ids[0] : NULL, 0, NULL);
 }
 
 int krunker_net_recent_rank(const char *game_id) { return recent_lobbies_rank(&K.recent, game_id); }
@@ -1639,15 +1709,24 @@ static void trace_sync_tick(Client *client) {
 
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
-    if (K.account_event) { // the game server's "a": the account's name and level for the account UI
+    if (K.account_event || K.points_event) { // the game server's "a" (name, level) and "ua" (rankedPoints): the account
+        const int signed_in = K.account_event;
         K.account_event = 0;
+        K.points_event = 0;
         char name[sizeof(K.link.account_name)];
+        int level = 0, rp_known = 0;
+        double points = 0;
         pthread_mutex_lock(&K.lock);
         snprintf(name, sizeof(name), "%s", K.link.account_name);
-        const int level = K.link.account_level;
+        level = K.link.account_level;
+        rp_known = K.link.account_rp_known;
+        points = K.link.account_ranked_points;
         pthread_mutex_unlock(&K.lock);
-        printf("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
-        if (K.access[0]) krunker_account_note_game(name, level);
+        if (signed_in) {
+            printf("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
+            if (K.access[0]) krunker_account_note_game(name, level);
+        }
+        if (K.access[0] && rp_known) krunker_account_note_points(points);
     }
     if (K.state != KS_OFF) kmap_tick(client ? client : K.client);
     trace_sync_tick(client ? client : K.client);

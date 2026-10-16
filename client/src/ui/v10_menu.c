@@ -181,6 +181,19 @@ static void comma(char *out, const size_t n, const double value) { // _8986: 123
     out[o] = 0;
 }
 
+// #menuRPCount (v10 updateMenuAccountData: rankedPoints || 0, v10:97365; the header's _8986 comma, v10:146528).
+// A krunker.io account signed in is the active one beside a KrunkNative account (ranked_route.h: krunker.io
+// first): its balance, or "--" while no krunker.io game has sent it. Otherwise KrunkNative's value: 0.
+static void header_rp(char *out, const size_t n) {
+    double points = 0;
+    if (!krunker_account_signed_in()) {
+        snprintf(out, n, "0");
+        return;
+    }
+    if (krunker_account_ranked_points(&points)) comma(out, n, points);
+    else snprintf(out, n, "--");
+}
+
 // The krunker.io account's bar (#knKioHeaderBar), shown in a krunker.io server only. In there the
 // krunker.io account is the one v10 would show, so the bar is v10's own: signed in, the profile item
 // of #signedInHeaderBar (avatar, name, "Lv N" badge; no XP or currencies: krunker.io does not send
@@ -289,7 +302,11 @@ static void header_update(const AccountInfo *acc, const int official) {
     comma(text, sizeof(text), acc->funds);
     if ((el = by_id("menuKRCount"))) html_dom_set_text(el, text);
     if ((el = by_id("menuJNKCount"))) html_dom_set_text(el, "0.00"); // _8988(junk.toFixed(2)): KrunkNative accounts have no junk
-    if ((el = by_id("menuRPCount"))) html_dom_set_text(el, "0");     // _8986(rankedPoints): the ranked window shows the balance
+    if ((el = by_id("menuRPCount"))) {
+        char rp[32];
+        header_rp(rp, sizeof(rp));
+        html_dom_set_text(el, rp);
+    }
     if ((el = by_id("mailCount"))) {
         char count[16] = "";
         if (acc->mail_unread > 99) snprintf(count, sizeof(count), "99+");
@@ -341,6 +358,7 @@ void v10_menu_account_changed(void) {
     V.level = acc ? acc->level : 0;
     V.official = official;
     V.kio_gen = krunker_account_generation();
+    ranked_ui_account_changed(); // v10's $account effect on the ranked popup (v10:111598-111600)
     v10_login_account_changed(); // a login closes the modal (v10: $account set -> the modal leaves the stack)
 }
 

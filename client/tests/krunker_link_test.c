@@ -2226,6 +2226,69 @@ int main(void) {
     CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 0 && !strcmp(link.account_name, "KioPlayer"), "a with an error: not signed in");
     clear();
 
+    // rankedPoints: v10's row[47] (Account.setData, v10:112873). The row as an array (index 47) or as a map
+    // with the "47" key (JS reads both); "ua" (UPDATE_ACCOUNT) carries the same row; a row without it changes nothing
+    {
+        KrunkerValue arr[48];
+        for (int i = 0; i < 48; i++) arr[i] = KRUNKER_V_NUM(0);
+        arr[47] = KRUNKER_V_NUM(777);
+        feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("KioPlayer"), KRUNKER_V_ARRAY(arr, 48), KRUNKER_V_STR("legacy")}, 5);
+        CHECK(link.account_rp_known == 1 && link.account_ranked_points == 777, "a: rankedPoints is row[47] of the array row (%.0f)", link.account_ranked_points);
+        clear();
+        const KrunkerValue keyed[] = {KRUNKER_V_STR("player_score"), KRUNKER_V_NUM(10), KRUNKER_V_STR("47"), KRUNKER_V_NUM(4242)};
+        feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("KioPlayer"), KRUNKER_V_MAP(keyed, 2), KRUNKER_V_STR("legacy")}, 5);
+        CHECK(link.account_ranked_points == 4242 && g_events[KRUNKER_LINK_EV_ACCOUNT] == 1, "a: rankedPoints is the \"47\" key of a map row (%.0f)", link.account_ranked_points);
+        clear();
+        arr[47] = KRUNKER_V_NUM(999);
+        feed(&link, "ua", (KrunkerValue[]) {KRUNKER_V_ARRAY(arr, 48)}, 1);
+        CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT_POINTS] == 1 && link.account_ranked_points == 999 && g_out_count == 0,
+              "ua: the row's rankedPoints replaces the balance (%.0f)", link.account_ranked_points);
+        clear();
+        const KrunkerValue short_row[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2)};
+        feed(&link, "ua", (KrunkerValue[]) {KRUNKER_V_ARRAY(short_row, 2)}, 1);
+        CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT_POINTS] == 0 && link.account_ranked_points == 999, "ua without row[47]: the balance is kept");
+        clear();
+        feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_STR("Invalid session"), KRUNKER_V_NIL, KRUNKER_V_NIL}, 3);
+        clear();
+    }
+
+    // the wallet packets: "ub" (v10 :208200) balances[3].amount is the ranked points; "chlR" (v10 :208212-208248)
+    // gives the balance after the challenges' ranked points (argument 6 set; argument 7 the balance)
+    {
+        const KrunkerValue rp_map[] = {KRUNKER_V_STR("amount"), KRUNKER_V_NUM(5000), KRUNKER_V_STR("change"), KRUNKER_V_NUM(100)};
+        const KrunkerValue balances[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_MAP(rp_map, 2)};
+        feed(&link, "ub", (KrunkerValue[]) {KRUNKER_V_ARRAY(balances, 4)}, 1);
+        CHECK(link.account_rp_known && link.account_ranked_points == 5000 && g_events[KRUNKER_LINK_EV_ACCOUNT_POINTS] == 1,
+              "ub: balances[3].amount is the balance (%.0f)", link.account_ranked_points);
+        clear();
+        const KrunkerValue chl[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                    KRUNKER_V_NUM(0), KRUNKER_V_NUM(50), KRUNKER_V_NUM(7777)};
+        feed(&link, "chlR", chl, 8);
+        CHECK(link.account_ranked_points == 7777, "chlR: the ranked points won set the balance to argument 7 (%.0f)", link.account_ranked_points);
+        clear();
+        KrunkerValue none[8];
+        for (int i = 0; i < 8; i++) none[i] = KRUNKER_V_NUM(0);
+        none[7] = KRUNKER_V_NUM(1);
+        feed(&link, "chlR", none, 8);
+        CHECK(link.account_ranked_points == 7777, "chlR without ranked points: the balance is kept");
+        clear();
+    }
+
+    // the level from an array row (v10's setData: score is row[6], v10:112832; updateLevel: max(1, floor(0.03 * sqrt(score))),
+    // v10:112893): 40000 -> 6, 0 -> 1 (the map form, player_score, gives the same level)
+    {
+        KrunkerValue row[55];
+        for (int i = 0; i < 55; i++) row[i] = KRUNKER_V_NUM(0);
+        row[6] = KRUNKER_V_NUM(40000);
+        feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("ArrPlayer"), KRUNKER_V_ARRAY(row, 55), KRUNKER_V_STR("legacy")}, 5);
+        CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 1 && link.account_level == 6, "a: level from row[6] of an array row (%d)", link.account_level);
+        clear();
+        row[6] = KRUNKER_V_NUM(0);
+        feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("ArrPlayer"), KRUNKER_V_ARRAY(row, 55), KRUNKER_V_STR("legacy")}, 5);
+        CHECK(link.account_level == 1, "a: an array row with no score is level 1 (%d)", link.account_level);
+        clear();
+    }
+
     // input windows -> "q"
     NetInputPacket in[3];
     memset(in, 0, sizeof(in));

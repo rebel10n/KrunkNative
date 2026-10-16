@@ -98,6 +98,14 @@ int krunker_net_reload_join(Client *client, const char *game_id, const char *reg
 // it (twice at most) and the least recent answer is joined when only recent games come back; without
 // the list a bounce between two games can then remain (the matchmaker's choice). 1 = started.
 int krunker_net_seek_new(Client *client, const char *region, int use_list);
+// A ranked match's game socket (v10's joinAssignment / quickJoinRankedMatch, ranked_ui.c): connection is
+// the assignment's "host[:port]" (v10's _33940), game_id its gameId for the log and the session ("" none).
+// JOINED_RANK goes on the open game socket first, when one is open (v10 sends it on its connected socket
+// only). The krunker.io account's token goes as at= (no gameId / clientKey). 1 = started, 0 = no client.
+int krunker_net_join_match(const char *connection, const char *game_id);
+// v10's isInOtherRankedMatch (v10:98528): the open game socket is a ranked game on another host than the
+// connection's; the MATCHED for it is ignored. 1 = yes.
+int krunker_net_ranked_elsewhere(const char *connection);
 // 1 = the official game this client is in (or joined last), 2.. older ones; 0 = not one of the last
 // RECENT_LOBBIES_MAX (recent_lobbies.h). krunker_lobbies_pick picks those last.
 int krunker_net_recent_rank(const char *game_id);

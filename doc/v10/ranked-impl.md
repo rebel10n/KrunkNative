@@ -146,6 +146,29 @@ booking flow because v10 has none.
   `turf/<map>-raised.png` overlays are not shipped.
 - Vote forfeit, reconnect into ranked, the ping marker and the lrmr packet itself are
   v10-gameplay's; this port sends the rating change as a chat line.
+- A krunker.io account uses v10's own ranked services at krunker.io (client/src/net/krunker_ranked.c):
+  the api / gapi requests with its Bearer token and v10's queue WebSocket. krunker.io wins when a
+  KrunkNative account is signed in beside it (client/src/net/ranked_route.c, ranked_active_backend in
+  ranked_ui.c). The paths and answers are v10's; the popup reshapes them into the brain's shape.
+- A krunker.io MATCHED joins the match's game socket like v10's joinAssignment (ranked_ui.c join_kio_match,
+  krunker_net.c krunker_net_join_match): JOINED_RANK goes on the open game socket when there is one (v10's
+  `connected` check, v10:98686), then the socket at the assignment's connection (v10:97583, 222104-222135)
+  as `ws(s)://host:port/ws?at=<the account's fresh token>` (no gameId / clientKey; production is wss with no
+  port, the mirror keeps the port). A MATCHED while the open game socket is a ranked game on another host is
+  ignored (v10:98528). REJOIN (/ranked/me/connection's serverUrl) joins the same way (v10:98729).
+  From the menu no game socket is open, so no joinedRank leaves this client for a MATCHED (v10 does the same:
+  it sends it only on a connected socket).
+- The RP balance is the account row's rankedPoints, row[47] (v10:112873, v10:70129 / setData): the game
+  server's "a" ACCOUNT_RESPONSE and "ua" UPDATE_ACCOUNT carry the row (krunker_link.c row_points), held for the
+  session by krunker_account.c. It is unknown ("--") until a krunker.io game has signed the account in; v10
+  never asks krunker.io for the balance, so /player/me is not called.
+- Season and payout: the Ranked reads are v10's, with the current season (ranked_season_at, v10's _7307)
+  and the region index: profile (player-profile/me/season/<s>/region/<r>, v10:25953), leaderboard
+  (leaderboards/rankings/season/<s>/region/<r>?limit=50&offset=<page-1>, v10:25961), match history
+  (match-history/me/season/<s>/gameMode/undefined/isRanked/true/region/<r>?limit=5&offset=<page-1>, v10:25923).
+  v10's season picker only changes <s> ($selectedSeason, v10:34189); KrunkNative's popup has none.
+  No client write path exists in v10 for the season close, the RP conversion, the rating and
+  placement updates or the ranked result: the server owns them and the client only reads them.
 
 ## 5. Tests
 

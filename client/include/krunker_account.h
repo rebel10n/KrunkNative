@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 // The krunker.io account of the client (client/src/net/krunker_account.c): the second account
 // backend, beside the KrunkNative one (kn_brain's session, account_ui.c / backend_ui.h). Each server
 // type has its own: KrunkNative servers see the KrunkNative account, krunker.io servers (official
@@ -42,8 +43,21 @@
 // scope covers api.krunker.io and crucible.frvr.com).
 
 #define KRUNKER_ACCOUNT_DEFAULT_API "https://api.krunker.io"
+#define KRUNKER_ACCOUNT_DEFAULT_GAPI "https://gapi.svc.krunker.io"
+#define KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND "https://gamefrontend.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_AUTH "https://crucible.frvr.com/v1/auth"
 #define KRUNKER_ACCOUNT_REFRESH_MARGIN_S 60
+
+// The krunker.io hosts v10.0.2's client talks to (_7283 api, _7284 gapi, _7287 gamefrontend). Tests and
+// mirrors override each: KRUNKNATIVE_KRUNKER_API / _GAPI / _GAMEFRONTEND (on the web ?krunkerApi= /
+// ?krunkerGapi= / ?krunkerGamefrontend=). krunker_host_url writes the host's base + path (path starts
+// with '/'); the base has no trailing slash.
+typedef enum {
+    KRUNKER_HOST_API = 0,
+    KRUNKER_HOST_GAPI,
+    KRUNKER_HOST_GAMEFRONTEND,
+} KrunkerHost;
+void krunker_host_url(KrunkerHost host, const char *path, char *out, size_t n);
 
 typedef enum {
     KRUNKER_ACCOUNT_GUEST = 0, // nobody signed in: krunker.io servers are joined as a guest
@@ -80,6 +94,14 @@ void krunker_account_fresh_token(KrunkerAccountTokenFn fn, void *user);
 // The game server's ACCOUNT_RESPONSE ("a") for this account's socket: its name and level (-1 = not
 // in it). Main thread.
 void krunker_account_note_game(const char *name, int level);
+// The account's rankedPoints (v10's Account.rankedPoints, row[47]): the game server's "a" / "ua" carry the
+// row (krunker_net_tick passes it on, krunker_account_note_points). Session only: a sign-in or sign-out
+// forgets it. krunker_account_ranked_points: 1 = known (out filled), 0 = not yet (no krunker.io game has
+// signed this account in). Nothing else asks krunker.io for the balance (v10 never calls /player/me).
+void krunker_account_note_points(double points);
+int krunker_account_ranked_points(double *out);
+// The held balance moves as v10's moves it after a ranked claim (+reward, v10:98744) or a purchase (-price, v10:111042).
+void krunker_account_add_points(double delta);
 
 // A username sign-in's Turnstile request is the one krunker_captcha.h shows (krunker_net leaves it open).
 int krunker_account_owns_captcha(void);

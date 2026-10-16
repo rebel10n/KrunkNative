@@ -805,7 +805,9 @@ static void lb_ranked_rating(StrBuf *sb) {
     char path[160];
     if (region) snprintf(path, sizeof(path), "/mm/ranked/leaderboard?season=%d&region=%d&limit=40&offset=0", season, region);
     else snprintf(path, sizeof(path), "/mm/ranked/leaderboard?season=%d&region=global&limit=40&offset=0", season);
-    const V10Req *r = v10_get(path, 60000);
+    // a krunker.io account reads the krunker.io rankings (v10 getLeaderboard, v10:139145); the others the brain's
+    const V10Req *kio = ranked_ui_rating_board(season, region);
+    const V10Req *r = kio ? kio : v10_get(path, 60000);
     sb_append(sb, "<div class=\"ranked-rating-tab svelte-1gdnqq5\"><div class=\"controls-row svelte-1gdnqq5\"><div class=\"region-tabs svelte-1gdnqq5\">");
     for (int i = 0; i < (int) (sizeof(k_ranked_regions) / sizeof(k_ranked_regions[0])); i++)
         sb_appendf(sb, "<button type=\"button\" class=\"region-btn svelte-1gdnqq5%s\" onclick=\"knLbRegion(%d)\">%s</button>", i == LB.ranked_region ? " active" : "", i,

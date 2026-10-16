@@ -10,6 +10,7 @@
 #include <online_mode.h>
 #include <krunker_net.h>
 #include <krunker_account.h>
+#include <krunker_ranked.h>
 #include <krunker_lobbies.h>
 #include <v10_menu.h>
 #include <stdio.h>
@@ -117,6 +118,7 @@ void backend_frame(Client *client) {
     v10_rewards_tick(); // v10.0.2: the sidebar's Battle Pass item (v10_rewards.c)
     servers_ui_tick(client);
     krunker_account_tick();   // the krunker.io account (krunker_account.h): sign-in / refresh answers
+    krunker_ranked_tick();    // the Ranked queue socket on krunker.io (krunker_ranked.h): its frames
     krunker_account_ui_tick(); // its UI: the account modal, the Servers window's account line
     v10_menu_account_tick();   // the menu header: the krunker.io account in a krunker.io server, else the KrunkNative one
     krunker_net_tick(client); // official krunker.io games: notices, captcha

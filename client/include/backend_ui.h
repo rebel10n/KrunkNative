@@ -235,6 +235,7 @@ const char *ranked_ui_ready(void);    // queueReadyMessage
 void ranked_ui_class_changed(int index);
 int  ranked_ui_in_ranked(void);       // queued or in a ranked match (v7 config.isComp: custom.host.ranked)
 void ranked_ui_left_match(void);      // the ranked match's lobby was left
+void ranked_ui_account_changed(void); // $account changed: a Login Required popup hides (v10:111598-111600)
 // --render-scenario: state.ranked {open, tab, profile, board, history, shop, ...} stands in for the brain
 void ranked_ui_scenario(const cJSON *state);
 // Custom Games window (windows[9]) rows from GET /api/maps?index=<tab>&pos=<n>&accountId=:
