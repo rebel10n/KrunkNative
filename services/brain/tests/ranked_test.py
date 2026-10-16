@@ -50,6 +50,9 @@ DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "postgres")
 if not DB and DRIVER == "postgres":
     print("ranked test: no database configured; skipped")
     sys.exit(77)
+# a statement error ("<what> failed: <pg error>") or a level-tagged ERROR/FATAL line; a WARN that
+# quotes a database error text (the v7-era database has no strike catalogue) is not one
+LOG_ERROR_RE = r"failed:|\s(?:ERROR|FATAL)\s+\["
 SCHEMA = "kn_test_rq_%d" % os.getpid()
 SECRET = "kn-ranked-test-%d" % os.getpid()
 FAILS = []
@@ -438,7 +441,7 @@ def main():
                  " (%d, 7, 300, 310, 2, 2, 0)" % (acc, acc))
             with open(logs[0]) as f:
                 v7log = f.read()
-            if re.search(r"failed:|ERROR|FATAL", v7log):
+            if re.search(LOG_ERROR_RE, v7log):
                 check(False, "the v7-era brain logged errors")
         subprocess.run([BRAIN, "--migrate-only", "--database.migrations_dir=" + os.path.join(ROOT, "services", "db", "migrations")], cwd=ROOT,
                        env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -512,7 +515,7 @@ def main():
     bad = []
     for path in logs:
         with open(path) as f:
-            bad += [l.strip() for l in f if re.search(r"failed:|ERROR|FATAL", l)]
+            bad += [l.strip() for l in f if re.search(LOG_ERROR_RE, l)]
     check(not bad, "no statement errors in the brain logs %s" % bad[:3])
     print("ranked test: " + ("OK" if not FAILS else "%d failure(s)" % len(FAILS)))
     if FAILS:
