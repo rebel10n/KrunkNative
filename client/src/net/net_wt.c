@@ -110,7 +110,10 @@ EM_JS(void, kn_wt_open, (const char *target_c, int gen), {
                 _free(p);
             }
         } catch (e) {
-            console.warn('[wt] ' + (e && e.message ? e.message : e));
+            const msg = e && e.message ? e.message : e;
+            // no relay configured (wt.json missing): an info line, the WebSocket carries the game
+            if (/^no WebTransport relay/.test(msg)) console.info('[wt] ' + msg + ': the game uses the WebSocket');
+            else console.warn('[wt] ' + msg);
             _kn_dg_on_close(gen);
         }
     })();

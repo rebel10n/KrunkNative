@@ -121,7 +121,10 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
         // who failed, as both ends see it: the browser's user agent and the address / session number the
         // gateway logged (X-KN-RTC-Peer), so a console line matches the gateway's log line
         const who = (s.peer || 'no answer from the gateway') + '; ' + (typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown browser');
-        console.warn('[rtc] ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' [' + who + '] -- ' + Module.knRtcDiag(s));
+        // no gateway configured at all (a plain dev or deploy page): the WebSocket is the transport, one
+        // line says so; the diagnostics are for a gateway that was there and failed
+        if (!s.up && /^no WebRTC gateway configured/.test(reason)) console.info('[rtc] ' + reason + ': the game uses the WebSocket');
+        else console.warn('[rtc] ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' [' + who + '] -- ' + Module.knRtcDiag(s));
         if (!live()) return; // the client closed it meanwhile
         note(1, 'webrtc ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' [' + who + ']'); // the in-game console
         Module.knRtc = undefined;
