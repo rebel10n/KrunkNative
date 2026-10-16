@@ -14,6 +14,11 @@ is the space its text may fill, and each text box under it must fit inside it. A
 KRUNKNATIVE_UI_DIR=<copy of ui/ without the .lockedClassText text-wrap line> renders the pre-fix page
 for comparison (the check then fails). A second render without state.official (a KrunkNative lobby) must show
 no lock on the Nettspend's card. Exit 0 when the label fits and the lock is official-only, 1 otherwise.
+
+The class level req (ui_loadout.c class_unlocked, v10.0.2 _34270) is checked on the whole class tab through
+KRUNKNATIVE_SCENARIO_HTML (the captured DOM): a guest in an official krunker.io game (state.official) sees each
+class with minRec locked ("Register to unlock", "Req lvl N") and the classes without one open; a guest in a
+KrunkNative lobby sees every class open, no lock card at all (Box Office has no level req).
 """
 import json
 import os
@@ -22,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from html.parser import HTMLParser
 
 ROOT = os.getcwd()
 # the worktree lacks the untracked assets/ (fonts): KRUNKNATIVE_ASSETS_DIR points at the checkout's
@@ -86,6 +92,87 @@ def render(name, official, dump):
     return (label, texts), lines
 
 
+class CardParser(HTMLParser):
+    """The class tab's cards: every <div class="classCard"> with its onclick, whether it carries a
+    lockedClass overlay, and its text (nested divs counted, so the card ends at its own close tag)."""
+
+    def __init__(self):
+        super().__init__()
+        self.cards, self.cur, self.depth = [], None, 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "div":
+            return
+        a = dict(attrs)
+        classes = (a.get("class") or "").split()
+        if self.cur is None:
+            if "classCard" in classes:
+                self.cur = {"onclick": a.get("onclick") or "", "locked": False, "text": ""}
+                self.depth = 1
+            return
+        self.depth += 1
+        if "lockedClass" in classes:
+            self.cur["locked"] = True
+
+    def handle_endtag(self, tag):
+        if tag != "div" or self.cur is None:
+            return
+        self.depth -= 1
+        if self.depth == 0:
+            self.cards.append(self.cur)
+            self.cur = None
+
+    def handle_data(self, data):
+        if self.cur is not None:
+            self.cur["text"] += data
+
+
+def class_cards(name, official):
+    """The class tab's cards (CardParser) of one render, or None when the render failed."""
+    scen = scenario(name, official)
+    out = os.path.join(WORK, name + ".png")
+    html = os.path.join(WORK, name + ".html")
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update({
+        "KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
+        "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
+        "KRUNKNATIVE_SCENARIO_HTML": html, "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+    })
+    proc = subprocess.run([CLIENT, "--render-scenario", scen, out], env=env, cwd=ROOT, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0 or not os.path.exists(html):
+        return None
+    parser = CardParser()
+    with open(html, encoding="utf-8", errors="replace") as f:
+        parser.feed(f.read())
+    return parser.cards
+
+
+def check_class_gate():
+    """The level req on the whole class tab: official guest locked by minRec, KrunkNative guest all open."""
+    official = class_cards("gate-official", True)
+    check("official guest: the class tab renders", official is not None and len(official) > 1,
+          "" if official is not None else "client_bin --render-scenario failed")
+    if official:
+        reg = [c for c in official if c["locked"] and "Register to unlock" in c["text"]]
+        req = [c for c in official if c["locked"] and re.search(r"Req lvl \d+", c["text"])]
+        open_cards = [c for c in official if not c["locked"]]
+        nett = official[-1]
+        check("official guest: the level-locked classes show the lock and their req",
+              len(reg) > 0 and len(req) == len(reg), f"{len(reg)} locked, {len(req)} with a Req lvl line")
+        check("official guest: the classes without a minRec stay open", len(open_cards) > 0,
+              f"{len(open_cards)} open of {len(official)}")
+        check("official guest: the Nettspend is still locked for not being on official servers",
+              nett["locked"] and "Not on official servers" in nett["text"])
+    krunknative = class_cards("gate-krunknative", False)
+    check("krunknative guest: the class tab renders", krunknative is not None and len(krunknative) > 1,
+          "" if krunknative is not None else "client_bin --render-scenario failed")
+    if krunknative:
+        locked = [c for c in krunknative if c["locked"]]
+        check("krunknative guest: every class is open with no lock card (Box Office has no level req)",
+              not locked and all("selectClass(" in c["onclick"] for c in krunknative),
+              f"{len(locked)} of {len(krunknative)} cards locked")
+
+
 def main():
     if not os.path.exists(CLIENT):
         print(f"no {CLIENT}: build client_bin first")
@@ -112,6 +199,7 @@ def main():
     check("krunknative: the class tab renders", got is not None, "" if got is not None else "client_bin --render-scenario failed")
     if got is not None:
         check("krunknative: the Nettspend's card is not locked", got[0] is None, f"label width {got[0]}")
+    check_class_gate()
     shutil.rmtree(WORK, ignore_errors=True)
     failed = len(results) - sum(results)
     print(f"locked_class_label_e2e: {len(results) - failed}/{len(results)}")

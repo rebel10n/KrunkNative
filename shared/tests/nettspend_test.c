@@ -240,6 +240,40 @@ static void test_gating(const cJSON **maps) {
           "game_class_allowed: Krunker's classes always, the Nettspend in a plain game, nothing past the table");
 }
 
+// The level req (game_config.h game_class_level_ok, v10.0.2 _34270): a KrunkNative lobby (public, custom,
+// the sandbox, offline) has none, so every class is playable at level 0 as a guest. An official krunker.io
+// game (Game.is_official) keeps v10's: a class with minRec needs the account's level >= minRec, a dev is
+// exempt, a guest is level 0.
+static void test_level_gate(const cJSON **maps) {
+    printf("Level req: every class in Box Office lobbies, minRec against the level in official krunker.io games...\n");
+    Game box = {0}; // a public KrunkNative lobby
+    game_configure(&box, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    Game official = {0};
+    game_configure(&official, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    official.is_official = 1;
+    const ClassConfig *classes = rules_classes();
+    const size_t count = rules_class_count();
+    int req = 0, box_bad = 0, guest_bad = 0, guest_open = 0, level_bad = 0, dev_bad = 0, top = 0;
+    for (size_t i = 0; i < count; i++) {
+        const int min_rec = classes[i].min_rec;
+        if (min_rec > top) top = min_rec;
+        if (!game_class_level_ok(&box, (int) i, 0, 0)) box_bad++;
+        if (min_rec > 0) req++;
+        if (min_rec > 0 && game_class_level_ok(&official, (int) i, 0, 0)) guest_bad++;
+        if (min_rec == 0 && !game_class_level_ok(&official, (int) i, 0, 0)) guest_open++;
+        if (!game_class_level_ok(&official, (int) i, min_rec, 0)) level_bad++;
+        if (min_rec > 1 && game_class_level_ok(&official, (int) i, min_rec - 1, 0)) level_bad++;
+        if (!game_class_level_ok(&official, (int) i, 0, 1)) dev_bad++;
+    }
+    CHECK(req > 0 && top > 0, "the class table has minRec classes to gate (%d of %zu)", req, count);
+    CHECK(box_bad == 0, "Box Office lobbies: every class playable at level 0 (%d of %zu refused)", box_bad, count);
+    CHECK(guest_bad == 0, "official krunker.io, guest: no minRec class open (%d of %d open)", guest_bad, req);
+    CHECK(guest_open == 0, "official krunker.io, guest: the classes without minRec stay open (%d closed)", guest_open);
+    CHECK(level_bad == 0, "official krunker.io: a class opens at its minRec and not one level below (%d wrong)", level_bad);
+    CHECK(dev_bad == 0, "official krunker.io: a dev plays every class (%d refused)", dev_bad);
+    CHECK(game_class_level_ok(&official, 0, 0, 0) == (classes[0].min_rec == 0), "official krunker.io: class 0 follows its minRec");
+}
+
 static void test_class_spawn(Game *custom, Game *pub) {
     printf("Spawns: Drank + Money Spread + knife in every lobby (custom, public, comp)...\n");
     Player *p = add_player(custom, 10, CLASS_ID_NETTSPEND);
@@ -505,6 +539,7 @@ int main(void) {
     test_tables(&game);
     test_class_spawn(&game, &pub);
     test_gating(maps);
+    test_level_gate(maps);
 
     Player *p = add_player(&game, 1, CLASS_ID_NETTSPEND);
     Player *target = add_player(&game, 2, 0);

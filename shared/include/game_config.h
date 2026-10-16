@@ -133,6 +133,12 @@ void game_config_free(Game*);            // drops the state, the game back on th
 // no, the class picker locks the card (ui_loadout.c) and the ENT sent to an official game never carries it
 // (main.c client_enter_game).
 int game_class_allowed(const Game*, int class_index);
+// The class's level req (v10.0.2 _34270, the Change Loadout lock; ui_loadout.c ui_loadout_class_open): 1 when
+// `class_index` may be picked at account `level` (the krunker.io account's; a guest is 0). Only an official
+// krunker.io game (Game.is_official) has one: a class with minRec needs level >= minRec. A dev (`dev`) and
+// every class without a minRec are always open, and so is every KrunkNative lobby (Box Office, custom, the
+// offline sandbox): KrunkNative has no level req, so every class is playable there at any level.
+int game_class_level_ok(const Game*, int class_index, int level, int dev);
 // setClass: config.classes (classes[0] when not listed), then the mode's classes when forceC.
 int game_config_class_for(const Game*, int class_index);
 // The class's ClassOverrides, or the v7 defaults when no cls[id] touched it.

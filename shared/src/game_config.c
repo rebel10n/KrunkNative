@@ -1559,6 +1559,14 @@ int game_class_allowed(const Game *game, const int class_index) {
     return !(class_index >= CLASS_COUNT && game && game->is_official);
 }
 
+int game_class_level_ok(const Game *game, const int class_index, const int level, const int dev) {
+    if (!game || !game->is_official || dev) return 1;
+    const size_t count = game->class_count ? game->class_count : rules_class_count();
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
+    if (class_index < 0 || (size_t) class_index >= count || !classes[class_index].min_rec) return 1;
+    return level >= classes[class_index].min_rec;
+}
+
 int game_config_class_for(const Game *game, const int class_index) {
     if (!game || game->config.class_list_count <= 0) return class_index;
     for (int i = 0; i < game->config.class_list_count; i++) {

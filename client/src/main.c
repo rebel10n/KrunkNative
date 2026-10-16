@@ -1937,8 +1937,11 @@ void client_enter_game(Client *client) {
     // NetEntPacket is #pragma pack(1) (shared.h): its PlayerSkins sits at an odd offset, so the
     // look is built in an aligned local and copied in; never hand out pointers to its members.
     // A KrunkNative-only class (the Nettspend) is not playable in an official krunker.io game (game_class_allowed):
-    // that spawn is the Triggerman's, as player_spawn falls back on a KrunkNative server.
-    const int class_index = game_class_allowed(&client->game, client->menu_class_index) ? client->menu_class_index : 0;
+    // that spawn is the Triggerman's, as player_spawn falls back on a KrunkNative server. So is a class whose
+    // level req the account does not meet there (ui_loadout_class_open; the Triggerman has no minRec).
+    const int class_index = game_class_allowed(&client->game, client->menu_class_index) && ui_loadout_class_open(client, client->menu_class_index)
+                                ? client->menu_class_index
+                                : 0;
     LoadoutLook look;
     ui_loadout_look(class_index, 1, &look);
     NetEntPacket packet = {.class_index = class_index, .secondary_index = look.secondary_index};

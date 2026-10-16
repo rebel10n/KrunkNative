@@ -34,6 +34,7 @@
 #include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
 #include <krunker_net.h> // the K.P.D's account in an official krunker.io game (police_identity)
 #include <game_config.h> // game_class_allowed: KrunkNative's own classes are out of official krunker.io games
+#include <krunker_account.h> // krunker_account_level: the level an official krunker.io game checks (game_class_level_ok)
 #include <strike_econ.h> // Krunker Strike: the look is Strike's loadout (strike_econ_apply_look)
 
 // ---------------------------------------------------------------- Krunker tables
@@ -101,15 +102,16 @@ static int class_min_rec(const int index) {
     return index >= 0 && (size_t) index < count ? classes[index].min_rec : 0;
 }
 
-static int class_unlocked(const int index) {
-    const Client *client = menu_ui()->client;
-    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
-    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
-    const ClassConfig *c = index >= 0 && (size_t) index < count ? &classes[index] : NULL;
+// The class's level req (game_class_level_ok, v10 _34270): only an official krunker.io game has one, and
+// the level is the krunker.io account's (the official servers see that account, krunker_account.h; a
+// guest is 0). Box Office lobbies, the offline sandbox and offline mode open every class. A dev stays
+// exempt on the KrunkNative account's flag, as before.
+int ui_loadout_class_open(const Client *client, const int index) {
     const AccountInfo *acc = account_get();
-    if (!c || !c->min_rec || !online_mode_online() || client->offline || (acc && acc->is_dev)) return 1;
-    return acc && acc->level >= c->min_rec;
+    return game_class_level_ok(&client->game, index, krunker_account_level(), acc && acc->is_dev);
 }
+
+static int class_unlocked(const int index) { return ui_loadout_class_open(menu_ui()->client, index); }
 
 static LoadoutClass class_at(const int index) {
     const Client *client = menu_ui()->client;
@@ -718,8 +720,8 @@ static void charm_box(StrBuf *out, const int slot) {
     sb_append(out, "\n\t\t\t</div>");
 }
 
-// tab 0: the class cards (Game.config.classes). Classes that need an account stay unlocked:
-// the offline player counts as having one (doc/v7/decisions.md) and v7's sandbox does the same.
+// tab 0: the class cards (Game.config.classes). Only an official krunker.io game locks a class by level
+// (ui_loadout_class_open); Box Office lobbies, the sandbox and offline mode open every class.
 static void gen_tab_class(StrBuf *out) {
     const MenuUi *ui = menu_ui();
     const AccountInfo *acc = account_get();
@@ -1304,7 +1306,7 @@ static int class_primary_has_attach(void) {
 
 // v10 Acog Scope req (v10.js:178111): a dev, or the CLASS level max(1, floor(rankVar * sqrt(stats.c<class>)) + 1)
 // >= minRec. The window also opens it in a custom game and in the sandbox (isCustom / isSandbox, v10.js:214308):
-// KrunkNative's offline sandbox and offline mode count as both, like the class and secondary locks.
+// KrunkNative's offline sandbox and offline mode count as both, like the secondary lock.
 static int attach_unlocked(const int index, const int class_index) {
     const Client *client = menu_ui()->client;
     const AccountInfo *acc = account_get();

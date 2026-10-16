@@ -664,6 +664,9 @@ typedef struct {
     int attach_index;              // the sight: 0 Reflex, 1 Acog, -1 none
 } LoadoutLook;
 void ui_loadout_look(int class_index, int for_ent, LoadoutLook *out);
+// The class's level req for this client (ui_loadout.c): 1 open, 0 locked. Only an official krunker.io game
+// (Game.is_official) locks by level; the Change Loadout cards and the join's class (client_enter_game) use it.
+int  ui_loadout_class_open(const Client *client, int class_index);
 // The store skin the Loadout tab and the menu class box show on `weapon` (skinsLoadout[weapon] with an
 // inventory), -1 for none / Random.
 int  ui_loadout_weapon_skin_shown(int weapon);
