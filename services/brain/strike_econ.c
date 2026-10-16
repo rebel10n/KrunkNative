@@ -16,7 +16,7 @@
  *   GET  /strike/v2/spin-wheels/list, /strike/v1/spin-wheels/:id, /strike/v2/spin-wheels/firstSpinDate
  *   POST /strike/v2/spin-wheels/details {ids?}            the wheels with their pools' items
  *   POST /strike/v2/spin-wheels/:id/spin {count, golden}   -> spin result + wallet
- *   GET  /strike/v1/shop                                   products (+ today's deals) and sections
+ *   GET  /strike/v1/shop                                   products (+ today's deals), sections and front.sections (golden spin)
  *   POST /strike/v1/shop/purchase {productId, priceId, quantity}   virtual currency / free only
  *   POST /strike/v1/shop/validate                          refused: KrunkNative takes no real money
  *   GET  /strike/v1/missions/me, POST /strike/v1/missions/claim/:id
@@ -905,6 +905,48 @@ static cJSON *deals_today(void) {
     return out;
 }
 
+/* front.sections (FRVR's shop v2 front, kI.storeSpinWheelDetails): the SpinWheel section that mounts the
+ * Lucky Draw's golden spin. Its spinWheels are the catalogue's golden_spin wheels (hideInShop: not in the
+ * Spins list); its products are the ones that grant a golden spin ticket, with spinWheelType golden_spin
+ * (FRVR's buildSpinButtonFromProduct). Built from the catalogue, so a wheel or product added there shows. */
+static cJSON *front_json(void) {
+    cJSON *front = cJSON_CreateObject();
+    cJSON *sections = cJSON_AddArrayToObject(front, "sections");
+    cJSON *sec = cJSON_CreateObject();
+    cJSON_AddStringToObject(sec, "id", "lucky-draw");
+    cJSON_AddStringToObject(sec, "titleKey", "store.section.spins");
+    cJSON *content = cJSON_AddArrayToObject(sec, "content");
+    cJSON *section = cJSON_CreateObject();
+    cJSON_AddStringToObject(section, "type", "spin_wheel");
+    cJSON *ws = cJSON_AddArrayToObject(section, "spinWheels");
+    const cJSON *w;
+    cJSON_ArrayForEach(w, s_cat.wheels) {
+        if (strcmp(kn_json_str(w, "type", ""), "golden_spin")) continue;
+        cJSON *wr = cJSON_CreateObject();
+        cJSON_AddStringToObject(wr, "type", "spin_wheel_ref");
+        cJSON_AddStringToObject(wr, "spinWheelId", kn_json_str(w, "_id", ""));
+        cJSON_AddItemToArray(ws, wr);
+    }
+    cJSON *ps = cJSON_AddArrayToObject(section, "products");
+    const cJSON *p;
+    cJSON_ArrayForEach(p, s_cat.products) {
+        const cJSON *rw;
+        int golden = 0;
+        cJSON_ArrayForEach(rw, cJSON_GetObjectItemCaseSensitive(p, "products"))
+            if (!strcmp(kn_json_str(rw, "type", ""), "currency") && !strcmp(kn_json_str(rw, "currency", ""), "spin_golden_ticket")) golden = 1;
+        if (!golden) continue;
+        cJSON *ref = cJSON_CreateObject();
+        cJSON *pr = cJSON_AddObjectToObject(ref, "productRef");
+        cJSON_AddStringToObject(pr, "type", "product_ref");
+        cJSON_AddStringToObject(pr, "productId", kn_json_str(p, "_id", ""));
+        cJSON_AddStringToObject(ref, "spinWheelType", "golden_spin");
+        cJSON_AddItemToArray(ps, ref);
+    }
+    cJSON_AddItemToArray(content, section);
+    cJSON_AddItemToArray(sections, sec);
+    return front;
+}
+
 /* products + sections; purchases = the account's strike_purchases rows (NULL for a guest) */
 static cJSON *shop_json(const cJSON *purchases) {
     cJSON *o = cJSON_CreateObject();
@@ -965,6 +1007,7 @@ static cJSON *shop_json(const cJSON *purchases) {
         if (cJSON_GetArraySize(content) > 0) cJSON_AddItemToArray(sections, sec);
         else cJSON_Delete(sec);
     }
+    cJSON_AddItemToObject(o, "front", front_json());
     return o;
 }
 

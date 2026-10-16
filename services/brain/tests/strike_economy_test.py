@@ -377,6 +377,14 @@ async def scenario(port):
         check(st == 200 and "tickets_1" in pids and any(p.startswith("deal_") for p in pids) and shop["sections"][0]["id"] == "spins",
               "shop: products, today's deals, sections")
         check(all(p["price"][0]["type"] in ("virtual_currency", "free") for p in shop["products"]), "no real-money prices")
+        # front.sections (FRVR's shop v2 front): the golden spin's SpinWheel section; the golden wheel is not in the Spins list
+        fsec = [s for s in shop.get("front", {}).get("sections", []) if s.get("id") == "lucky-draw"]
+        fcont = fsec[0]["content"][0] if fsec else {}
+        gw = [r["spinWheelId"] for r in fcont.get("spinWheels", [])]
+        gp = [r["productRef"]["productId"] for r in fcont.get("products", []) if r.get("spinWheelType") == "golden_spin"]
+        spins = [r["spinWheelId"] for s in shop["sections"] if s["id"] == "spins" for c in s["content"] for r in c["spinWheels"]]
+        check(gw == ["golden_spin"] and gp == ["golden_ticket_1"] and "golden_spin" not in spins,
+              f"front: golden spin section {gw} {gp}, not in the Spins list")
         kr = wallet(alice_id, "kr")
         st, res = await a.gapi("POST", "/strike/v1/shop/purchase", {"productId": "tickets_1", "priceId": "tickets_1_p0", "quantity": 2})
         check(st == 200 and wallet(alice_id, "kr") == kr - 160 and wallet(alice_id, "spin_ticket") == 2, "2 x 1 Spin Ticket for 80 KR")

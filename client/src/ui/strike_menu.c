@@ -106,6 +106,7 @@ static struct {
     int preset;           // selectedPresetIndex (3 = Custom)
     char last_account[160];
     WheelView wheels[WHEELS_MAX];
+    WheelView golden;     // the golden wheel of the shop's front (golden_wheel)
     int wheel_count, wheels_fixture; // wheels_fixture: built for a scenario (-1: not built)
     int spin;             // SA's spinnerIndex (a wheels[] index)
     cJSON *shop;          // GET /strike/v1/shop (strike_econ_get_shop)
@@ -290,6 +291,24 @@ static int odd_cmp(const void *pa, const void *pb) {
     return a->weight < b->weight ? 1 : a->weight > b->weight ? -1 : 0;
 }
 
+// one WheelView from a catalogue wheel: its price, its odds (the pools' colours, sorted by weight)
+static void wheel_view_fill(const StrikeWheel *sw, WheelView *w) {
+    memset(w, 0, sizeof(*w));
+    snprintf(w->id, sizeof(w->id), "%s", sw->id);
+    snprintf(w->name, sizeof(w->name), "%s", sw->name);
+    w->ticket = !strcmp(sw->price_currency, "spin_ticket");
+    w->amount = sw->price_amount;
+    for (int k = 0; k < sw->slice_count && w->odd_count < SPIN_WHEEL_MAX_SLICES; k++) {
+        const StrikePool *pool = strike_pool(sw->slices[k].pool);
+        OddView *o = &w->odds[w->odd_count++];
+        snprintf(o->pool, sizeof(o->pool), "%s", sw->slices[k].pool);
+        snprintf(o->name, sizeof(o->name), "%s", pool ? pool->name : sw->slices[k].pool);
+        snprintf(o->color, sizeof(o->color), "%s", pool && pool->color ? pool->color : "#ffffff");
+        o->weight = sw->slices[k].weight;
+    }
+    qsort(w->odds, (size_t) w->odd_count, sizeof(OddView), odd_cmp);
+}
+
 static void wheels_build(void) {
     const int fixture = FIXTURE.set;
     if (M.wheels_fixture == fixture) return;
@@ -310,24 +329,10 @@ static void wheels_build(void) {
         const StrikeEconomy *e = strike_economy();
         for (int i = 0; i < e->wheel_count && M.wheel_count < WHEELS_MAX; i++) {
             const StrikeWheel *sw = &e->wheels[i];
-            if (sw->hide_in_shop || !sw->price_currency) continue;
+            if (sw->hide_in_shop || !sw->price_currency) continue; // the golden wheel: golden_wheel(), from the front
             const int ticket = !strcmp(sw->price_currency, "spin_ticket");
-            if (!ticket && strcmp(sw->price_currency, "kr") != 0) continue; // golden tickets: the golden spin only
-            WheelView *w = &M.wheels[M.wheel_count++];
-            memset(w, 0, sizeof(*w));
-            snprintf(w->id, sizeof(w->id), "%s", sw->id);
-            snprintf(w->name, sizeof(w->name), "%s", sw->name);
-            w->ticket = ticket;
-            w->amount = sw->price_amount;
-            for (int k = 0; k < sw->slice_count && w->odd_count < SPIN_WHEEL_MAX_SLICES; k++) {
-                const StrikePool *pool = strike_pool(sw->slices[k].pool);
-                OddView *o = &w->odds[w->odd_count++];
-                snprintf(o->pool, sizeof(o->pool), "%s", sw->slices[k].pool);
-                snprintf(o->name, sizeof(o->name), "%s", pool ? pool->name : sw->slices[k].pool);
-                snprintf(o->color, sizeof(o->color), "%s", pool && pool->color ? pool->color : "#ffffff");
-                o->weight = sw->slices[k].weight;
-            }
-            qsort(w->odds, (size_t) w->odd_count, sizeof(OddView), odd_cmp);
+            if (!ticket && strcmp(sw->price_currency, "kr") != 0) continue;
+            wheel_view_fill(sw, &M.wheels[M.wheel_count++]);
         }
         qsort(M.wheels, (size_t) M.wheel_count, sizeof(WheelView), wheel_cmp);
     }
@@ -338,7 +343,39 @@ static void wheels_build(void) {
     }
 }
 
+// The Lucky Draw's golden spin (FRVR's lucky-draw component): the shop's front.sections SpinWheel
+// content (kn_brain front_json), whose spinWheels name the golden_spin wheel. It is not in the Spins
+// list (hideInShop) and has no M.wheels row: M.spin == GOLDEN_SPIN selects it.
+#define GOLDEN_SPIN (-2)
+static const cJSON *golden_front(void) {
+    const cJSON *front = M.shop ? cJSON_GetObjectItemCaseSensitive(M.shop, "front") : NULL;
+    const cJSON *sec;
+    cJSON_ArrayForEach(sec, cJSON_GetObjectItemCaseSensitive(front, "sections")) {
+        const cJSON *c;
+        cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(sec, "content")) {
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c, "type"));
+            if (type && !strcmp(type, "spin_wheel")) return c;
+        }
+    }
+    return NULL;
+}
+
+static const WheelView *golden_wheel(void) {
+    const cJSON *c = golden_front();
+    const cJSON *ref;
+    cJSON_ArrayForEach(ref, cJSON_GetObjectItemCaseSensitive(c, "spinWheels")) {
+        const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ref, "spinWheelId"));
+        const StrikeWheel *sw = id ? strike_wheel(id) : NULL;
+        if (sw && sw->price_currency && !strcmp(sw->price_currency, "spin_golden_ticket")) {
+            wheel_view_fill(sw, &M.golden);
+            return &M.golden;
+        }
+    }
+    return NULL;
+}
+
 static const WheelView *current_wheel(void) {
+    if (M.spin == GOLDEN_SPIN) return golden_wheel();
     wheels_build();
     return M.wheel_count ? &M.wheels[M.spin >= 0 && M.spin < M.wheel_count ? M.spin : 0] : NULL;
 }
@@ -463,6 +500,8 @@ static void store_products_fill(const HtmlElem root) {
     }
 }
 
+static void store_spins_fill(const HtmlElem root);
+
 static void on_shop(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) user;
     (void) error;
@@ -471,7 +510,10 @@ static void on_shop(void *user, const int status, const cJSON *data, const cJSON
     M.shop = cJSON_Duplicate(data, 1);
     printf("[strike] shop: %d products\n", cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(M.shop, "products")));
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_STORE);
-    if (root) store_products_fill(root);
+    if (root) {
+        store_products_fill(root);
+        store_spins_fill(root); // the golden block follows the shop's front
+    }
 }
 
 // $r's answer: ws goes (Tn() == ws && kt()), then Vw: Pt(Es, {rewards: products, origin: store})
@@ -536,6 +578,74 @@ static void store_section(const HtmlElem root, const int section) {
     }
 }
 
+// the golden spin meter (FRVR's "Golden Spin Meter" bar, X/10): the account's count of paid spins
+static char *golden_meter_html(void) {
+    const StrikeAccount *a = strike_econ_account();
+    const int need = a->spins_to_golden > 0 ? a->spins_to_golden : strike_economy()->golden_spin_meter;
+    int have = a->golden_spin_count;
+    if (have > need) have = need;
+    if (have < 0) have = 0;
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class=\"golden-spin-meter\"><div class=\"golden-spin-meter__head\">"
+                    "<span class=\"golden-spin-meter__label\">Golden Spin Meter</span>"
+                    "<span class=\"golden-spin-meter__value\">%d/%d</span></div>"
+                    "<div class=\"golden-spin-meter__bar\"><div class=\"golden-spin-meter__fill\" style=\"width: %d%%;\"></div></div></div>",
+               have, need, need > 0 ? have * 100 / need : 0);
+    return sb_finish(&sb);
+}
+
+// the Lucky Draw's golden block (FRVR lce's golden meter and golden button) from the shop's front: the
+// button spins the golden wheel when the account holds a golden ticket, else it buys one (the front's
+// golden product, buy-product by its index in the shop's products)
+static char *store_golden_html(void) {
+    const cJSON *front = golden_front();
+    if (FIXTURE.set || !front || !golden_wheel()) return NULL;
+    const StrikeAccount *a = strike_econ_account();
+    const int64_t tickets = a->wallet[STRIKE_CUR_GOLDEN_TICKET];
+    const cJSON *ref = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(front, "products"), 0);
+    const char *pid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(ref, "productRef"), "productId"));
+    int pindex = -1, price = 0;
+    const cJSON *products = cJSON_GetObjectItemCaseSensitive(M.shop, "products");
+    const cJSON *p;
+    int i = 0;
+    cJSON_ArrayForEach(p, products) {
+        if (pid && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id")) : "", pid)) {
+            pindex = i;
+            price = (int) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(p, "price"), 0), "amount"));
+        }
+        i++;
+    }
+    char *meter = golden_meter_html();
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div id=\"luckyDrawGolden\" class=\"golden-spin-block\" style=\"grid-column: 1 / -1;\">%s<div class=\"golden-spin-block__actions\">", meter);
+    if (tickets >= 1) {
+        sb_appendf(&sb, "<div id=\"luckyDrawOneSpin\" class=\"golden-spin-block__button\" onclick=\"strikeAction('spin-golden')\">Spin 1 x</div>"
+                        "<div class=\"golden-spin-block__tickets\">%lld golden tickets</div>", (long long) tickets);
+    } else if (pindex >= 0) {
+        sb_appendf(&sb, "<div id=\"luckyDrawOneSpin\" class=\"golden-spin-block__button\" onclick=\"strikeAction('buy-product:%d')\">Golden Spin Ticket %d KR</div>"
+                        "<div class=\"golden-spin-block__tickets\">0 golden tickets</div>", pindex, price);
+    }
+    sb_append(&sb, "</div></div>");
+    free(meter);
+    return sb_finish(&sb);
+}
+
+// the Spins section's content (Sr): the golden block from the shop's front, then the wheels (OC)
+static void store_spins_fill(const HtmlElem root) {
+    char *golden = store_golden_html();
+    char *wheels = store_wheels_html();
+    StrBuf sb = {0};
+    if (golden) sb_append(&sb, golden);
+    if (wheels) sb_append(&sb, wheels);
+    char *html = sb_finish(&sb);
+    HtmlElem content[4];
+    const int cn = html_dom_query_all(root, ".sectioned-scroll__section[data-index=\"0\"] .frvr-store-section__content", content, 4);
+    for (int i = 0; i < cn; i++) html_dom_set_html(content[i], html);
+    free(golden);
+    free(wheels);
+    free(html);
+}
+
 static void store_fill(const HtmlElem root) {
     fill_currency(root);
     HtmlElem titles[16];
@@ -546,12 +656,7 @@ static void store_fill(const HtmlElem root) {
         html_dom_set_attr(titles[i], "onclick", hook);
     }
     store_section(root, M.store_section);
-    // the Spins section's Sr content: the wheels (OC)
-    char *wheels = store_wheels_html();
-    HtmlElem content[4];
-    const int cn = html_dom_query_all(root, ".sectioned-scroll__section[data-index=\"0\"] .frvr-store-section__content", content, 4);
-    for (int i = 0; i < cn && wheels; i++) html_dom_set_html(content[i], wheels);
-    free(wheels);
+    store_spins_fill(root);
     if (M.shop) store_products_fill(root);
     strike_econ_get_shop(on_shop, NULL); // Qo(): the shop, again on every visit
 }
@@ -591,6 +696,15 @@ static void spin_fill(const HtmlElem root) {
         else html_dom_remove(header);
     }
     M.wheel_f = 0.0f;
+    // the golden screen (FRVR lce's meter, above the wheel); other wheels have none
+    HtmlElem old = html_dom_query(root, ".golden-spin-meter");
+    if (old) html_dom_remove(old);
+    const HtmlElem center = html_dom_query(root, ".spin-wheel__container");
+    if (center && M.spin == GOLDEN_SPIN) {
+        char *meter = golden_meter_html();
+        html_dom_insert_html(center, HTML_INSERT_BEFORE_BEGIN, meter);
+        free(meter);
+    }
 }
 
 // onSpin's answer: C = the won pool, c its weight, d[] the pointers' targets (even: 2 pi (rand + 13) +
@@ -1415,6 +1529,12 @@ static void action(const char *a) {
             M.spin = i;
             strike_screen_push(STRIKE_SCREEN_SPIN); // eb(id, {onHide: kt}) = Pt(SA, {spinnerIndex})
         }
+    } else if (!strcmp(a, "spin-golden")) {
+        // the golden block's button (FRVR luckyDrawOneSpin): the golden wheel's screen
+        if (golden_wheel()) {
+            M.spin = GOLDEN_SPIN;
+            strike_screen_push(STRIKE_SCREEN_SPIN);
+        }
     } else if (!strncmp(a, "item-slot:", 10)) {
         const int cat = atoi(a + 10);
         if (cat >= 0 && cat < CAT_COUNT) {
@@ -1551,7 +1671,10 @@ static void on_econ(void *user, const StrikeEconEvent event) {
     (void) event;
     M.last_account[0] = 0; // the account box (strike_menu_tick)
     HtmlElem root;
-    if ((root = strike_screen_root(STRIKE_SCREEN_STORE))) fill_currency(root);
+    if ((root = strike_screen_root(STRIKE_SCREEN_STORE))) {
+        fill_currency(root);
+        store_spins_fill(root); // the golden block's meter and its ticket / purchase button
+    }
     if ((root = strike_screen_root(STRIKE_SCREEN_SPIN))) fill_currency(root);
     if ((root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZATION))) customization_fill(root);
     if ((root = strike_screen_root(STRIKE_SCREEN_ITEM_SELECTION))) item_selection_fill(root);
