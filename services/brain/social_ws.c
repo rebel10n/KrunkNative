@@ -846,6 +846,7 @@ static const LabelClass k_label_class[] = {
     {"grp", RC_READ, ANS_REPLY}, {"gps", RC_READ, ANS_REPLY}, {"chtb", RC_READ, ANS_REPLY},
     {"ctd", RC_READ, ANS_REPLY}, {"getS", RC_READ, ANS_REPLY}, {"ttl", RC_READ, ANS_REPLY},
     {"dsp", RC_READ, ANS_REPLY}, {"krh", RC_READ, ANS_REPLY}, {"spinH", RC_READ, ANS_REPLY},
+    {"wo", RC_READ, ANS_REPLY},
     {"sst", RC_READ, ANS_REPLY}, {"chg", RC_READ, ANS_REPLY}, {"mdl", RC_READ, ANS_REPLY},
     {"bpdl", RC_READ, ANS_REPLY}, {"ri", RC_READ, ANS_REPLY}, {"ecfg", RC_READ, ANS_REPLY},
     {"st", RC_READ, ANS_REPLY}, {"kml", RC_READ, ANS_REPLY}, {"fil", RC_READ, ANS_REPLY},
@@ -864,7 +865,7 @@ static const LabelClass k_label_class[] = {
     {"pbm", RC_WRITE, ANS_REPLY}, {"spin", RC_WRITE, ANS_REPLY}, {"fkr", RC_WRITE, ANS_REPLY},
     {"clm", RC_WRITE, ANS_REPLY}, {"bdg", RC_WRITE, ANS_REPLY}, {"cbdg", RC_WRITE, ANS_REPLY},
     {"bpclm", RC_WRITE, ANS_REPLY}, {"bpclmAll", RC_WRITE, ANS_REPLY}, {"xstbp", RC_WRITE, ANS_REPLY},
-    {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
+    {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
