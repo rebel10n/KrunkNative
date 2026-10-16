@@ -606,6 +606,15 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const uint16_t n = net_ext_pack(payload, sizeof(payload), NET_EXT_KN_RANKED_MATCH, &ranked, sizeof(ranked));
         if (n) client_handle_game_event(client, NET_PACKET_EXT, payload, n);
         fprintf(stderr, "[input_script] ranked t=%.0f %d comp=%d\n", g_script.time, (int) (e->v[0] != 0), (int) (e->v[1] != 0));
+    } else if (!strcmp(e->cmd, "lrmr")) {
+        // lrmr <mmr_change> <latest_rank> <rp_change>: the rating reply's packet (accounts.c acc_send_latest_mmr) through the
+        // client's packet path (game_events.c -> hud_endscreen_v10_ranked): the end screen's rank card and "+N RP"
+        const NetLatestRankedMmrPacket packet = {.mmr_change = (int32_t) e->v[0], .latest_rank = (int32_t) e->v[1],
+                                                 .rp_change = (int32_t) e->v[2]};
+        uint8_t payload[NET_EXT_HEADER_SIZE + sizeof(packet)];
+        const uint16_t n = net_ext_pack(payload, sizeof(payload), NET_EXT_LATEST_RANKED_MMR_CHANGE, &packet, sizeof(packet));
+        if (n) client_handle_game_event(client, NET_PACKET_EXT, payload, n);
+        fprintf(stderr, "[input_script] lrmr t=%.0f %d %d %d\n", g_script.time, packet.mmr_change, packet.latest_rank, packet.rp_change);
     } else if (!strcmp(e->cmd, "wheel")) {
         // wheel dy: one wheel event through the scroll path (+1 = up, -1 = down)
         GLFWscrollfun cb = glfwSetScrollCallback(client->window, NULL);

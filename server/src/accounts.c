@@ -1545,6 +1545,14 @@ static void acc_ranked_send_result(void) {
     brain_post(frame, 1); // reliable: the brain closes the match once
 }
 
+// NET_EXT_LATEST_RANKED_MMR_CHANGE (v10 lrmr) to a roster player with an EXT peer (client hud_endscreen_v10.c)
+static void acc_send_latest_mmr(ClientConnection *client, const NetLatestRankedMmrPacket *packet) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(*packet)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_LATEST_RANKED_MMR_CHANGE, packet, sizeof(*packet));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void acc_handle_ranked_reply(const cJSON *frame) {
     const cJSON *rating;
     cJSON_ArrayForEach(rating, cJSON_GetObjectItem(frame, "ratings")) {
@@ -1569,7 +1577,17 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
                      acc_truthy(cJSON_GetObjectItem(rating, "abandoned")) ? " (abandoned)" : "", cJSON_IsNumber(rp) ? rp->valueint : 0);
         server_log("[ranked] account %d %s", id->valueint, text);
         ClientConnection *client = acc_client_by_account(id->valueint);
-        if (client) acc_chat_to(client, text);
+        if (!client) continue;
+        acc_chat_to(client, text);
+        // the end screen's "Rating +N" (v10 lrmr): the change, the rank the player is left at (0 while placing), the RP
+        const double change = cJSON_IsNumber(delta) ? delta->valuedouble
+                                                     : new_value->valuedouble - (cJSON_IsNumber(old_value) ? old_value->valuedouble : new_value->valuedouble);
+        const NetLatestRankedMmrPacket packet = {
+            .mmr_change = (int32_t) lround(change),
+            .latest_rank = placed && cJSON_IsNumber(rank) ? rank->valueint : 0,
+            .rp_change = cJSON_IsNumber(rp) ? rp->valueint : 0,
+        };
+        acc_send_latest_mmr(client, &packet);
     }
     if (!cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok"))) {
         server_log_error("[ranked] result rejected: %s", acc_str(cJSON_GetObjectItem(frame, "err"), "?"));

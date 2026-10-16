@@ -24,6 +24,7 @@
 #include <camera_feel.h>
 #include <spectate.h> // NET_PACKET_SPECTATE -> spectate_begin / spectate_end
 #include <hud_map.h>  // WP-E part 2a: death markers, minimap blips
+#include <hud_endscreen_v10.h> // NET_EXT_LATEST_RANKED_MMR_CHANGE: the end screen's rank card (lrmr)
 #include <menu_view.h> // g1(): CONTROLS.camLookAt(killer) death chase camera
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
@@ -1237,6 +1238,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&ranked, body, sizeof(ranked));
                 client->game.is_ranked = ranked.ranked ? 1 : 0;
                 hud_ui_match_gate(client); // the Invite button, the spectate button and the comp box's title
+            } else if (subtype == NET_EXT_LATEST_RANKED_MMR_CHANGE && body_length >= sizeof(NetLatestRankedMmrPacket)) { // "lrmr"
+                NetLatestRankedMmrPacket lrmr;
+                memcpy(&lrmr, body, sizeof(lrmr));
+                hud_endscreen_v10_ranked(lrmr.mmr_change, lrmr.latest_rank, lrmr.rp_change); // the rank card's "Rating +N"
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"

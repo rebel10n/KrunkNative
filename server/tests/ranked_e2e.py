@@ -55,7 +55,7 @@ EXT_MARK_POSITION = 0x0900
 MINOR_V7 = 3
 MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping), and the roster's "gsc", names push and "vf"
 EXT_RANKED_MATCH = 0x8050  # NET_EXT_KN_RANKED_MATCH: the lobby's ranked flag after each INIT
-EXT_LRMR = 0x0601  # NET_EXT_LATEST_RANKED_MMR_CHANGE: the rating change (lrmr)
+EXT_LRMR = 0x0601  # NET_EXT_LATEST_RANKED_MMR_CHANGE: the rating change (v10 lrmr)
 results = []
 procs = []
 
@@ -549,6 +549,23 @@ def run():
     conns[0].read(timeout=1.5)
     chat = [t for t in chats(conns[0]) if t.startswith("Ranked: ")]
     check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))
+    # the rating packet (v10 lrmr, EXT 0x0601): each roster player gets its rating change, the rank it is left at
+    # (0 while placing: no rank card, v10 latestRank > 0) and the RP the chat line names. The reply goes to the account's
+    # connected client, so the rejoined roster players (qmate, quitter) are checked on their new connections
+    live = {i: c for i, c in enumerate(conns)}
+    live[qmate], live[quitter] = qconn, rconn
+    for c in live.values():
+        c.read(timeout=1.0)
+    for i in range(8):
+        c = live[i]
+        code, h = http("/mm/ranked/history", token=tokens[i], region="na")
+        m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
+        bodies = ext_bodies(c, EXT_LRMR)
+        rp_chat = [int(x) for t in chats(c) if t.startswith("Ranked: ") for x in re.findall(r"\+(\d+) RP", t)]
+        vals = struct.unpack("<iii", bodies[0][:12]) if len(bodies) == 1 and len(bodies[0]) >= 12 else None
+        check(f"rating packet (v10 lrmr) to {names[i]}: change = history, rank 0 while placing, RP = chat",
+              vals is not None and vals[0] == m.get("mmr_change") and vals[1] == 0 and rp_chat == [vals[2]],
+              f"packet {vals} (count {len(bodies)}), history {m.get('mmr_change')}, chat RP {rp_chat}")
     qconn.close()
     rconn.close()
     for c in conns:

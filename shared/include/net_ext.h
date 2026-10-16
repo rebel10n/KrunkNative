@@ -52,6 +52,7 @@ typedef enum {
 
     // 0x0600 ranked
     NET_EXT_JOINED_RANK = 0x0600, // "joinedRank" C -> S, no body (v7 key, first used by v10)
+    NET_EXT_LATEST_RANKED_MMR_CHANGE = 0x0601, // "lrmr" S -> C NetLatestRankedMmrPacket: the roster player's rating change
 
     // 0x0700 protocol / ruleset (KrunkNative, the version toggle)
     NET_EXT_BLOCK_PROTOCOL = 0x0700,
@@ -516,6 +517,17 @@ typedef struct {
 typedef struct {
     uint8_t ranked; // 1 in a ranked match
 } NetRankedMatchPacket;
+
+// NET_EXT_LATEST_RANKED_MMR_CHANGE (S -> C, to each roster player when the brain's rating reply arrives; v10 lrmr
+// LATEST_RANKED_MMR_CHANGE [mmrChange, latestRank], g:218186 sets $latestMMRChange / $latestRank, the end screen's
+// rank card reads them): mmr_change = the new rating - the old (the TrueSkill display rating, 0 when it did not move),
+// latest_rank = the rank after the match (0 while placing: no card, v10 shows it only for latestRank > 0), rp_change =
+// the ranked points the match gave (KrunkNative's: v10 shows them from its balance update, which KN does not send).
+typedef struct {
+    int32_t mmr_change;
+    int32_t latest_rank;
+    int32_t rp_change;
+} NetLatestRankedMmrPacket;
 #pragma pack(pop)
 
 // NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,
