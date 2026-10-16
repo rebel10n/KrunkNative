@@ -92,6 +92,12 @@ html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(
  * (white balloon, black text: .speech-bubble). The controls view's root is FRVR's full-page layer; touches reach
  * the game only with .ftue-controls__ignore-events (the page's own rule). */
 .ftue-controls__root{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+/* GAP (touch): FRVR's .joystick-zones is position:fixed at 100% x 100%, and the engine lays a fixed box that is
+ * inserted into the mobile holder after its first layout at zero size (rects: zones 0x0, the drawn sticks laid out).
+ * Absolute inside the full-screen holder is the same box (the holder is the viewport in game, safe areas 0), so the
+ * move and look zones have a hit box, only while the game has the pointer (strike_touch.c redraw sets
+ * kn-zones-live): under a Strike screen they must not take presses, they cover the menu's clicks. */
+.joystick-zones.kn-zones-live{position:absolute}
 /* GAP (native engine): the killer's picture in the kill card ("Killed By") is a replaced element that is a flex
  * item of a 50 x 50 box. FRVR sizes it with max-height:100% and width:auto, and the browser takes the stretched
  * height through the image's aspect ratio (the 8 x 8 class icon is 50 x 50). The engine keeps the image's

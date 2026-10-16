@@ -123,16 +123,49 @@ def file_sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def run_controls(name):
-    """The controls tutorial on the sandbox map: the taps and the timed steps, on the real clock."""
-    return ["0 menu",
-            "3000 nodes @ingame .ftue-controls__tap-text",
-            "3500 click 640 360",   # welcome -> basics
-            "5000 click 640 360",   # basics -> hold
-            "6500 click 640 360",   # hold -> move
-            "8000 click 640 360",   # move -> move_controls (the stick: not driven here)
-            "9500 click 640 360",
-            "11000 quit"]
+# The controls tutorial, step by step (FRVR controls_ftue, ftue_flows). Each input waits for the step it needs
+# (input_script "waitfor <selector>", a node that exists; "waitfor !<selector>" until none does): the clock alone
+# cannot time a flow whose steps wait on the page, and a loaded host runs few frames.
+CONTROLS_STEPS = ["welcome", "basics", "hold", "move", "move_controls", "move_interaction", "move_end", "camera",
+                  "camera_controls", "camera_interaction", "camera_end", "jump", "jump_end", "reload", "complete",
+                  "complete_go"]
+TAP_STEPS = 6  # the tap blur passes welcome, basics, hold, move, camera, complete
+
+
+def run_controls():
+    """The whole tutorial on the sandbox map, driven through the page (taps), the touch sticks and the keys."""
+    gated = [
+        ("waitfor !.frvr-loading-holder .loading-screen", None),  # the quick connect loading screen is gone
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # welcome -> basics
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # basics -> hold
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # hold -> move
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # move -> move_controls
+        ("waitfor .ftue-controls__touch-hand-vertical", None),    # move_controls: the move stick
+        ("cursor 200 470", None), ("mdown left", None), ("cursor 190 420", None), ("cursor 180 400", None),
+        ("mup left", None),                                       # -> move_interaction -> move_end (timed)
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # camera (after move_end's timer) -> camera_controls
+        ("waitfor .ftue-controls__arrows-horizontal", None),      # camera_controls: the look stick
+        ("cursor 1000 400", None), ("mdown left", None), ("cursor 1040 400", None), ("cursor 1060 400", None),
+        ("mup left", None),                                       # -> camera_interaction -> camera_end (timed)
+        ("waitfor .ftue-controls__right .ripples", None),         # jump (after camera_end's timer)
+        ("down SPACE", None), ("up SPACE", None),                 # -> jump_end (timed)
+        ("waitfor .ftue-controls__highlight-reload-animation", None),  # reload (after jump_end's timer)
+        ("down R", None), ("up R", None),                         # -> complete
+        ("waitfor .ftue-controls__tap-text", "click 640 360"),    # complete -> complete_go
+        ("waitfor .ftue-controls__button", None),                 # "Let's Go!"
+        ("clicksel .ftue-controls__button", None),                # the flow ends, the game is left
+        ("waitfor !.ftue-controls__root", None),                  # the overlay is gone (complete_go's last step)
+    ]
+    lines = ["0 menu"]
+    t = 200
+    for cmd, follow in gated:
+        t += 200
+        lines.append(f"{t} {cmd}")
+        if follow:
+            t += 200
+            lines.append(f"{t} {follow}")
+    lines.append(f"{t + 500} quit")
+    return lines
 
 
 def main():
@@ -158,17 +191,19 @@ def main():
     # the controls tutorial (run 4): a fresh config, the first run's quick connect starts the flow in the sandbox
     shutil.rmtree(CFG, ignore_errors=True)
     os.makedirs(CFG, exist_ok=True)
-    text, nodes = run("run4", run_controls("run4"))
+    text, nodes = run("run4", run_controls())
     check("controls: the sandbox map is loaded for the first run (FRVR bot_ftue_v2)",
           "[strike] ftue: controls sandbox bot_ftue_v2" in text)
     steps = re.findall(r"\[strike\] ftue: controls step (\w+)", text)
-    check("controls: the welcome step starts the tutorial", steps[:1] == ["welcome"], str(steps))
-    check("controls: the tap steps advance in FRVR's order (welcome, basics, hold, move, move_controls)",
-          steps[:5] == ["welcome", "basics", "hold", "move", "move_controls"], str(steps))
+    check("controls: every live step runs in FRVR's order (enemy steps are skipped: no FTUE bots)",
+          steps == CONTROLS_STEPS, str(steps))
     check("controls: the taps go through the tap blur (strikeAction ftue-tap)",
-          text.count("[strike] action ftue-tap") >= 4, f"taps={text.count('[strike] action ftue-tap')}")
+          text.count("[strike] action ftue-tap") >= TAP_STEPS, f"taps={text.count('[strike] action ftue-tap')}")
+    check("controls: \"Let's Go!\" ends the flow (strikeAction ftue-go, the flow's end)",
+          "[strike] action ftue-go" in text and "[strike] ftue: controls done" in text)
+    check("controls: no wait timed out", "waitfor timeout" not in text)
     flow = ((stored() or {}).get("guest") or {}).get("flows", {}).get("controls_ftue")
-    check("controls: the flow's last step is stored in knFtue.json", bool(steps) and flow == steps[-1], f"stored={flow} last={steps[-1] if steps else None}")
+    check("controls: the finished flow is stored as done in knFtue.json", flow == "done", f"stored={flow}")
 
     # the sandbox map is FRVR's copy (the Strike catalogue), and the art is the fetched file
     mp = os.path.join(REPO, "assets", "maps", "strike", "bot_ftue_v2.json")

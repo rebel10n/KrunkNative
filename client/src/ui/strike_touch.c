@@ -88,6 +88,7 @@ static struct {
     Client *client;
     int built;
     HtmlElem zones, move_zone, aim_zone, buttons;
+    int zones_live;        // .joystick-zones has kn-zones-live (the pointer is the game's, not a Strike screen's)
     HtmlElem el[C_COUNT];
     Nipple move_nipple;    // dynamic: created on touch
     Nipple fake_nipple, aim_nipple; // static
@@ -740,6 +741,7 @@ static void build(void) {
     html_dom_insert_html(anchor, HTML_INSERT_BEFORE_BEGIN, html);
     free(html);
     T.zones = html_dom_query(holder, ".joystick-zones");
+    T.zones_live = 0;
     T.buttons = html_dom_query(holder, ".control-buttons");
     HtmlElem zones[2] = {0};
     if (T.zones) html_dom_query_all(T.zones, ".joystick-zone", zones, 2);
@@ -780,6 +782,13 @@ static void teardown(void) {
 
 // g.redraw(): visibility, the melee toggle, the reload ring
 static void redraw(void) {
+    if (T.zones) { // the move and look zones take presses over the game only (ui/strike/css/kn-strike-overrides.css)
+        const int live = !strike_ui_pointer_to_page();
+        if (live != T.zones_live) {
+            T.zones_live = live;
+            html_dom_set_class(T.zones, "kn-zones-live", live);
+        }
+    }
     for (int c = 0; c < C_COUNT; c++) {
         const int vis = control_visible((Control) c);
         if (vis == T.vis[c] || !T.el[c]) continue;

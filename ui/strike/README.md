@@ -366,27 +366,39 @@ catalogue keeps Krunker v10's own `assets/maps/custom/bot_ftue_v2.json` ("Mini I
 
 ### FTUE steps (controls_ftue)
 
-Verified in a headless sandbox run (client/src/ui/strike_ftue_controls.c, server/tests/strike_ftue_e2e.py run 4): the
-first run's quick connect loads the sandbox and starts the flow; welcome, basics, hold and move advance in order on
-their tap (strikeAction 'ftue-tap'), move_controls is entered and stored in knFtue.json.
+Run in the first run's sandbox (client/src/ui/strike_ftue_controls.c; server/tests/strike_ftue_e2e.py run 4 drives the whole
+flow headless through the page taps, the touch sticks and the keys, each input waiting for its step). Verified in a
+headless run, in order: welcome, basics, hold, move (taps, strikeAction 'ftue-tap'); move_controls (the move stick: a drag
+on the left zone), move_interaction, move_end (timed, nextStepTimer 3000 ms); camera (tap); camera_controls (a drag on the
+right: the look stick), camera_interaction, camera_end (timed); jump (Space: the jump control), jump_end (timed); reload (R:
+the reload control); complete (tap); complete_go ("Let's Go!", strikeAction 'ftue-go': the flow ends, the game is left).
+The flow is stored as "done" in knFtue.json.
 
-Implemented but NOT verified in the sandbox (the flow stops at move_controls, see below): move_controls (the move
-stick), move_interaction, move_end (timed, 3000 ms), camera, camera_controls, camera_interaction (the look stick),
-camera_end, jump (Space / the jump control), jump_end, reload (the reload control), complete, complete_go ("Let's Go!"
-leaves the game for the menu). Their advance events come from strike_touch.c's move / look / key paths and
-ui_controls.c's press_code, the same paths the game uses; the timed steps use html_timer_add.
+Fixed on the way (both in the Strike page's layer, not in the tutorial):
+- The move and look zones (`.joystick-zones`, FRVR position:fixed at 100% x 100%) laid out at zero size in game: the
+  engine does not size a fixed box inserted after the first layout (input-script `rects`: zones 0x0, the drawn sticks laid
+  out). ui/strike/css/kn-strike-overrides.css makes them absolute inside the full-screen mobile holder (the same box in
+  game; the holder is the viewport there, safe areas are 0), so the sticks have a hit box. The override applies only with
+  the class `kn-zones-live`, which client/src/ui/strike_touch.c sets while no Strike screen or loading screen has the
+  pointer: unconditionally, the zones (z-index 9999999999) covered the Strike menu and swallowed its clicks (the Battle
+  Pass Missions tab in server/tests/strike_screens_e2e.py failed 25/26 on that, and passed 26/26 without it). GAP comment
+  in that file.
+- While the tutorial shows its tap blur or "Let's Go!", a press is a click on the page, not a touch
+  (strike_ui_pointer_to_page -> strike_ftue_controls_pointer_to_page). Before, the touch layer took those presses once the
+  loading screen was gone, so the tap steps never advanced.
 
-Why the flow stops: in the sandbox the move stick's zone (`.joystick-zone`) has a zero-size box under the page's mobile
-holder (input-script `rects`: zone 0x0, the drawn `.joystick` at 138,410 in 1280x720), so a press on the stick does not
-reach T_MOVE_ZONE, and the keyboard keys (W, D) do not advance move_controls either (move_controls ends on the stick).
-The look drag does reach the touch layer. This is a layout issue of the Strike touch layer on the page, outside the
-tutorial, and it is not fixed here.
+Harness: input_script's `waitfor <selector>` (and `waitfor !<selector>`) holds the script and its clock until a node
+matches (90 s wall-clock budget, then logged as "waitfor timeout"). A loaded host runs few frames, so a flow that is timed
+by the clock alone (the timers, the stick steps) flakes; the e2e waits on the step's own node instead.
 
-Scope: only a first run starts the flow (strike_ftue_first_run); a returning account whose flow has not ended does not
-resume it. FRVR starts controls_ftue whenever it has not completed, so this is a known difference.
-
-Skipped (need FRVR's FTUE bots: `FTUE_BOTS` / `FTUE_RESPAWN` packets, which the engine does not have): enemies_near,
-enemies_near_controls, enemies_near_interaction, enemies_near_end, enemies_far, enemies_far_controls,
-enemies_far_interaction, enemies_far_end. The flow advances past them only by the bot steps; they are not run here.
+Skipped: the enemy steps, enemies_near, enemies_near_controls, enemies_near_interaction, enemies_near_end, enemies_far,
+enemies_far_controls, enemies_far_interaction, enemies_far_end. They need FRVR's FTUE bots: their loadStep sends
+`FTUE_BOTS` (spawnBots: two bots at forward/right offsets from the player, 20 and 80 units out) and `FTUE_RESPAWN`
+(respawnPlayer). The engine has no FTUE bot packets, and the 1.37.2 client bundle only sends them (assets/index-
+Cz2uYXJQ.deob.js ~110420-110480): the bots' server-side behaviour (spawn placement, what they do, their removal) is not in
+any reference we have. The sandbox's generic bot_add would put bots in, but not FRVR's FTUE bots, so the steps stay skipped
+until that behaviour is known.
 
 Not part of this patch: the bots second FTUE, the customize / name-change / hall-of-fame flows and the round-end FTUE steps.
+A returning account whose controls flow has not ended does not resume it (only the first run starts the flow); FRVR starts
+controls_ftue whenever it has not completed.

@@ -9,6 +9,8 @@
 // summed frame deltas (the round-end slow motion does not stretch them) from the frame the
 // local player became active after `play`.
 //   0 play                       close the menu and enter the game (waits for the map)
+//   100 waitfor <selector>       hold the script (its clock too) until a node matches the selector, `waitfor !<selector>`
+//                                until none does (gives up after 90 s, logged); for steps the clock alone cannot time
 //   0 menu                       as the first event instead of play: the clock starts on the menu once
 //                                the map is ready (menu clicks before any spawn, e.g. a comp lobby's
 //                                team / class picks); a later `play` then enters the game
@@ -239,6 +241,8 @@ static struct {
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
     int page_wait;    // `page`: 1 until that page is shown and ready, -1 one more frame (its UI ticks), 0 none
     int spawn_wait;   // `spawn`: 1 until our player is active and the menu closed (spawn_waiting)
+    char wait_sel[192]; // `waitfor <selector>`: the clock and the events stop until a node matches (clock_held)
+    double wait_start;  // glfwGetTime() when the current waitfor began (WAIT_SECONDS_MAX, then the event gives up)
     AppMode page_mode;
     char shot[160];   // pending `shot` path (written at frame end)
     char frames[160]; // `frames` prefix: one PNG per frame while frames_left > 0
@@ -309,6 +313,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
+            !strcmp(e->cmd, "waitfor") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
@@ -697,6 +702,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
             len += snprintf(line + len, sizeof(line) - (size_t) len, " %s@%.1f,%.1f,%.1f,%.1f", index, r.x * kx, r.y * ky, r.w * kx, r.h * ky);
         }
         fprintf(stderr, "%s\n", line);
+    } else if (!strcmp(e->cmd, "waitfor")) {
+        snprintf(g_script.wait_sel, sizeof(g_script.wait_sel), "%s", e->arg);
+        g_script.wait_start = glfwGetTime();
+        fprintf(stderr, "[input_script] waitfor t=%.0f %s\n", g_script.time, e->arg);
     } else if (!strcmp(e->cmd, "nodes")) {
         char label[64] = "", sel[192] = "";
         sscanf(e->arg, "%63s %191[^\n]", label, sel);
@@ -1280,12 +1289,34 @@ static int spawn_waiting(Client *client) {
 }
 
 // the clock stands still while `page` or `spawn` holds the script
-static int clock_held(void) { return g_script.page_wait || g_script.spawn_wait; }
+static int clock_held(void) { return g_script.page_wait || g_script.spawn_wait || g_script.wait_sel[0]; }
 
 // `page`: 1 while the page it asked for is not shown and ready yet (the game page: its menu set up),
 // then one more frame so the page's UI ticked once; no events run and the clock stands still.
+// `waitfor <selector>` holds the script until a node matches, `waitfor !<selector>` until none does; a wait that
+// outlives WAIT_SECONDS_MAX (wall clock: a loaded host runs few frames) is logged and dropped, so a failed wait shows
+// in the log, not as a hang
+#define WAIT_SECONDS_MAX 90.0
+
 static int page_waiting(Client *client) {
     if (spawn_waiting(client)) return 1;
+    if (g_script.wait_sel[0]) {
+        const char *sel = g_script.wait_sel;
+        const int none = sel[0] == '!'; // `waitfor !<selector>`: until no node matches
+        if (none) sel++;
+        const int n = html_ui_available() ? html_dom_query_all(0, sel, NULL, 0) : 0;
+        if (none ? n == 0 : n > 0) {
+            fprintf(stderr, "[input_script] waitfor done %s after %.1f s\n", g_script.wait_sel, glfwGetTime() - g_script.wait_start);
+            g_script.wait_sel[0] = 0;
+            return 0;
+        }
+        if (glfwGetTime() - g_script.wait_start >= WAIT_SECONDS_MAX) {
+            fprintf(stderr, "[input_script] waitfor timeout %s\n", g_script.wait_sel);
+            g_script.wait_sel[0] = 0;
+            return 0;
+        }
+        return 1;
+    }
     if (!g_script.page_wait) return 0;
     if (g_script.page_wait < 0) {
         g_script.page_wait = 0;
@@ -1359,7 +1390,7 @@ void input_script_tick(Client *client) {
         script_run(client, e);
         g_script.next++;
         ran = 1;
-        if (clock_held()) break; // `page` / `spawn`: the rest waits for that page or our spawn
+        if (clock_held()) break; // `page` / `spawn` / `waitfor`: the rest waits for that page, our spawn or the waitfor
     }
 
     if (g_script.play_pending) {
@@ -1524,7 +1555,7 @@ void input_script_page_tick(Client *client) {
         for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
         if (!skip) script_run(client, e);
         ran = 1;
-        if (clock_held()) break; // `page` / `spawn`: the rest waits for that page or our spawn
+        if (clock_held()) break; // `page` / `spawn` / `waitfor`: the rest waits for that page, our spawn or the waitfor
     }
 }
 
