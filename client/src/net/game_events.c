@@ -41,6 +41,7 @@
 #include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <net_ext.h> // NET_PACKET_EXT (254)
 #include <render_settings.h> // endMessage, dmgType
+#include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies)
 #include <nettspend.h> // Nettspend: the laced post-effect, the Money Spread's bills
 #include <drank.h>     // KrunkNative Drank: drank_apply_laced (the shared laced timer)
 #include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
@@ -1245,6 +1246,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&shake, body, sizeof(shake));
                 if (isfinite(shake.amount)) camera_feel_shake(shake.amount);
             }
+            else entities_on_ext(client, subtype, body, body_length); // v10 entities, runtime blocks, objmv, plk (entities.c)
             return 1;
         }
         default:

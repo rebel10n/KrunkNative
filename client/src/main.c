@@ -86,6 +86,7 @@
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
+#include <entities.h> // v10 KrunkScript entities / runtime blocks (official lobbies)
 #endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
@@ -1433,6 +1434,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     social_reset_server(); // WP-E part 2b: v7 social packets after the server's NET_PACKET_SOCIAL_V7
     object_manager_ui_reset(); // KrunkNative Object Manager: this server's caps are asked again
     if (client->map_loaded) client_unload_map(client);
+    entities_reset(); // its entities / runtime blocks went with the old map (entities.c)
     client_clear_players(client);
     client_game_events_reset(client); // next round: end screen down, fresh clock
 
@@ -2257,6 +2259,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         client_tick_textures(client, client_render_settings()->texture_anim ? now : 0.0f);
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
         map_environment_update(client->game.map, client->camera.position); // v7 ENVIRONMENT_ZONE swaps (map_environment.c)
+        entities_frame(client, delta); // v10 entity bodies' visual blend (entities.c)
         map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
         om_interp_frame(client); // Object Manager: others' edits eased, our own carry where it is now (om_interp.c)
         zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)

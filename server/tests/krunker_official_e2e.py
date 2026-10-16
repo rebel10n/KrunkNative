@@ -114,7 +114,8 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
-        "--lobbyui": "lobbyui"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--lobbyui": "lobbyui",
+        "--script": "script"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -695,6 +696,9 @@ class Stub:
             elif self.scenario == "popups":  # TDM (1): "rds" names the leading team
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
+            elif self.scenario == "script":  # an inline custom map (arg 9) with a dyn cube and an archetype; syncData lo: a block
+                await send("init", 0, 0, 0, None, None, None, {}, None, 0, {"data": json.dumps(SCRIPT_MAP), "id": "kn-script-e2e"}, None,
+                           {"gor": True, "lo": [[0, SCRIPT_BLOCK]]}, None, False, True, False, None, None, 0)
             elif ingame:  # TDM (1); arg 5: the bot hosts this (custom) lobby; arg 14 isOfficial
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], "sockBOT", {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
@@ -716,6 +720,8 @@ class Stub:
                 await asyncio.sleep(0.1)
             if self.scenario == "joinend":
                 await self.joinend_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "script":
+                await self.script_phases(send, stop, player)
             elif self.got_en.is_set() and self.scenario == "spawn":
                 # the live server's spawn: our player where the map's spawn is (x, y, z); no "l" corrects it,
                 # so where the client stands and walks is its own simulation of this map
@@ -1308,6 +1314,37 @@ class Stub:
         self.sent["frs"] = time.monotonic()
         await send("frs")
         await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+        while not stop.is_set():
+            await asyncio.sleep(0.2)
+
+    async def script_phases(self, send, stop, player):
+        """official-ingame-script (run_native_script): our player spawns above the init's runtime block (syncData lo)
+        and lands on it (no "l" corrects us: the client's own collision), the block goes ("slo"), an entity spawns,
+        moves on its baseline and goes ("e+" / "es" / "e-"), the map's dyn cube moves ("objmv"), "plk" locks shooting."""
+        async def wait(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                await asyncio.sleep(0.1)
+
+        await send("frs")
+        await send("0", player("sockME", MY_SID, "Guest_9", 0.0, 0.0, 14.0))  # above the 6-high block at 0, 0, 0
+        self.sent["spawn"] = time.monotonic()
+        await wait(4.0)
+        self.sent["slo"] = time.monotonic()
+        await send("slo", [[0, "remove"]])  # SYNC_LIVE_OBJECTS: the block goes, we fall to the floor (y 0)
+        await wait(3.0)
+        self.sent["e+"] = time.monotonic()
+        await send("e+", [10000, 1, 0, {"x": 30, "y": 0, "z": 0, "yaw": 0}, "lift", "sim", 0])  # ENTITY_SPAWN (archetype 1 "lift")
+        await wait(1.5)
+        await send("es", [[10000, 5, {"x": 30, "y": 5, "z": 4, "yaw": 1.5}]])  # ENTITY_STATE: up 5, z 4
+        self.sent["es"] = time.monotonic()
+        await wait(2.0)
+        self.sent["e-"] = time.monotonic()
+        await send("e-", 10000, "gone")  # ENTITY_REMOVE
+        await send("objmv", 1, -30.0, 13.0, 0.0)  # OBJECT_MOVED: the dyn cube (uid 1, 6 high) up to a centre at 13 (bottom 10)
+        await send("plk", True, False)  # PLAYER_LOCKS: no shooting
+        await wait(3.0)
+        self.sent["done"] = time.monotonic()
         while not stop.is_set():
             await asyncio.sleep(0.2)
 
@@ -2400,6 +2437,53 @@ def run_native_social():
     cards = [int(v) for _, v in at("nodes", r"@card elements=\d+ match=(\d+)")]
     rew = [v for _, v in at("vis", r"@rew skinRewardHolder=(\d)")]
     check(f"{label}: \"skin\": our card in #skinRewardHolder > #skinRewList", max(cards or [0]) >= 1 and "1" in rew, (cards[-3:], rew[-3:]))
+
+
+# official-ingame-script's inline custom map: a floor (top at y 0), a dyn cube (uid 1) and an archetype "lift"
+SCRIPT_MAP = {"name": "KnScriptE2E", "spawns": [[0, 0, 0, 0, 0]],
+              "objects": [{"p": [0, -2, 0], "s": [400, 2, 400]}, {"p": [-30, 0, 0], "s": [6, 6, 6], "dyn": 1}],
+              "archetypes": [{"id": 1, "name": "lift", "coll": 1, "objects": [{"p": [0, 0, 0], "s": [10, 2, 10], "c": "#ff0000"}]}]}
+SCRIPT_BLOCK = {"type": "block", "x": 0, "y": 0, "z": 0, "w": 20, "l": 20, "h": 6, "s": [1, 1, 1, 1, 1, 1], "data": {"src": "wall_0", "colr": "#00ff00"}}
+SCRIPT_RE = re.compile(r"\[input_script\] script t=(\d+) entities=(\d+) parts=(\d+) solid=(\d+) live=(\d+) .* first=(-?\d+)@([-\d.]+),([-\d.]+),([-\d.]+)/([-\d.]+) "
+                       r"me=([-\d.]+),([-\d.]+),([-\d.]+) ground=(\d) obj=([-\d.]+),([-\d.]+),([-\d.]+) lockshoot=(-?\d+)")
+
+
+def run_native_script():
+    """official-ingame-script (krunker_link_script.c -> entities.c): a runtime block (init syncData lo) we land on by
+    the client's own collision, its removal ("slo"), an entity's spawn / baseline / removal, a dyn cube moved
+    ("objmv"), the script's shooting lock ("plk")."""
+    label = "native-script"
+    probes = "".join("%d script 1\n" % t for t in range(5000, 22000, 300))
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="script")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the custom map loaded and we joined", f"joined as sid {MY_SID}" in text and "could not be loaded" not in text)
+    for name in ("spawn", "slo", "e+", "es", "e-", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    rows = [m.groups() for m in (SCRIPT_RE.search(l) for l in lines) if m]
+    R = [dict(t=int(r[0]), ents=int(r[1]), parts=int(r[2]), solid=int(r[3]), live=int(r[4]), first=int(r[5]), fx=float(r[6]), fy=float(r[7]),
+              fz=float(r[8]), fyaw=float(r[9]), mx=float(r[10]), my=float(r[11]), mz=float(r[12]), ground=int(r[13]), oy=float(r[15]),
+              lock=int(r[17])) for r in rows]
+    check(f"{label}: the script probe ran", len(R) > 20, len(R))
+    on_block = [r for r in R if r["live"] == 1 and r["ground"] and abs(r["my"] - 6.0) < 0.3]
+    check(f"{label}: \"lo\" (init syncData): we land on the runtime block (feet at its top, y 6)", len(on_block) >= 2,
+          [(r["t"], r["live"], r["my"], r["ground"]) for r in R][:12])
+    fell = [r for r in R if r["live"] == 0 and r["ground"] and abs(r["my"]) < 0.3 and on_block and r["t"] > on_block[-1]["t"]]
+    check(f"{label}: \"slo\" remove: the block goes and we fall to the floor (y 0)", len(fell) >= 2,
+          [(r["t"], r["live"], r["my"]) for r in R if on_block and r["t"] > on_block[-1]["t"]][:8])
+    spawned = [r for r in R if r["ents"] == 1 and r["first"] == 10000 and r["parts"] == 1 and r["solid"] == 1]
+    check(f"{label}: \"e+\": entity 10000 with its archetype's one solid part at 30, 0, 0",
+          any(abs(r["fx"] - 30) < 0.01 and abs(r["fy"]) < 0.01 for r in spawned), [(r["t"], r["ents"], r["first"], r["fx"], r["fy"]) for r in R][-12:])
+    check(f"{label}: \"es\": its baseline moves it to 30, 5, 4 (yaw 1.5)",
+          any(abs(r["fy"] - 5) < 0.01 and abs(r["fz"] - 4) < 0.01 and abs(r["fyaw"] - 1.5) < 0.01 for r in spawned), spawned[-3:])
+    gone = [r for r in R if spawned and r["t"] > spawned[-1]["t"]]
+    check(f"{label}: \"e-\": the entity goes", gone and all(r["ents"] == 0 for r in gone), gone[:3])
+    check(f"{label}: \"objmv\": the dyn cube (uid 1) moves to a bottom at y 10", any(abs(r["oy"] - 10.0) < 0.01 for r in R) and abs(R[0]["oy"]) < 0.01,
+          sorted(set(r["oy"] for r in R)))
+    check(f"{label}: \"plk\": shooting locked", any(r["lock"] == 1 for r in R) and R[0]["lock"] == 0, sorted(set(r["lock"] for r in R)))
 
 
 def run_native_lobby():
@@ -3613,6 +3697,8 @@ def main():
         run_native_social()
     if ONLY == "voice" and os.path.isfile(f"{BUILD}/client_bin"):  # just the voice chat run
         run_native_voice()
+    if ONLY == "script" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame-script's run
+        run_native_script()
     if ONLY == "popups" and os.path.isfile(f"{BUILD}/client_bin"):  # just the text popups / countdown run
         run_native_popups()
     if ONLY == "lobbyui" and os.path.isfile(f"{BUILD}/client_bin"):  # just the official lobby UI's run (clock, password, chat colours)
@@ -3628,6 +3714,7 @@ def main():
     if ONLY in ("", "native", "state") and os.path.isfile(f"{BUILD}/client_bin"):  # joining mid end screen, leaving
         run_native_join_end()
         run_native_leave_state()
+        run_native_script()
         ran = True
     webview_skipped = None
     if ONLY in ("", "native", "webview") and os.path.isfile(f"{BUILD}/client_bin"):

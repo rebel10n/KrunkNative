@@ -193,6 +193,7 @@
 #include <ruleset.h>      // `class`: the class names
 #include <map_post.h>     // `builds`, `placewatch`
 #include <gamepad.h>      // `gpad`
+#include <entities.h>       // `script`: entities / runtime blocks
 #include <ai.h>           // `world`: the AI list
 #include <net_ext.h>      // `damage`: NET_EXT_KN_HIT_DAMAGE
 #include <GLFW/glfw3.h>
@@ -781,6 +782,18 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden",
                 client->camera.rotation.y, client->camera.rotation.x); // the camera's look (mouse-look checks)
+    } else if (!strcmp(e->cmd, "script")) {
+        // script [uid]: v10 KrunkScript entities / runtime blocks (entities.c), our feet and, with a uid,
+        // that map object's bottom centre (objmv checks)
+        char info[384];
+        entities_describe(client, info, sizeof(info));
+        const Player *me = client->me;
+        const Map *map = client->game.ready ? client->game.map : NULL;
+        const int uid = (int) e->v[0];
+        const Object *o = map && uid > 0 && (size_t) uid < map->object_count ? map->objects[uid] : NULL;
+        fprintf(stderr, "[input_script] script t=%.0f %s me=%.2f,%.2f,%.2f ground=%d obj=%.2f,%.2f,%.2f lockshoot=%d\n", g_script.time, info,
+                me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f, me ? me->on_ground : 0,
+                o ? o->position.x : 0.0f, o ? o->position.y : 0.0f, o ? o->position.z : 0.0f, me ? me->lock_shooting : -1);
     } else if (!strcmp(e->cmd, "world")) {
         // world: the mode objectives / world objects the official world packets drive (krunker_link_world.c):
         // #gameMessage, Domination zones (capturedBy/captureT ms), spawnables (type:sid), destroyed map

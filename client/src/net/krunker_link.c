@@ -1490,6 +1490,7 @@ static void on_init_hud(KrunkerLink *l, const KrunkerFrame *f) {
     }
     zone_packet(l, krunker_get(sync, "zone"));
     krunker_link_world_init(l, f); // round wins / roundC / lockT, dest, mov, spwns, pkups, gates, banks, dyno, gbl, doms, zombies
+    krunker_link_script_init(l, f);  // live blocks, entities and their attachments, moved objects (krunker_link_script.c)
 }
 
 // "cc" CHEAT_CHECK [nonce, unused, ciphertextB64] -> "ccr" [nonce, payloadB64, fnvHex]
@@ -2544,7 +2545,9 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_SKIN_FOUND_MESSAGE: on_skin_found_message(l, &f); break;
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
-            if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f)) l->unknown_in++;
+            if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f) && !krunker_link_lobby_frame(l, id, &f) &&
+                !krunker_link_script_frame(l, id, &f))
+                l->unknown_in++;
             break;
         }
     }

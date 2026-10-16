@@ -15,3 +15,10 @@ int krunker_link_world_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *
 void krunker_link_world_init(KrunkerLink *l, const KrunkerFrame *f);
 // krunker_link_lobby.c: the private lobby's password prompt ("code", "codeT", "codeP"). 1 = handled.
 int krunker_link_lobby_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
+
+// krunker_link_script.c: KrunkerScript entities ("e+" "e-" "es" "ee" "ea+" "ea-"), runtime blocks
+// ("lo" "slo"), moved dyn objects ("objmv") and the script's player locks ("plk") -> the EXTs
+// client/src/entities.c consumes. 1 = the packet was one of those (handled).
+int krunker_link_script_frame(KrunkerLink *l, KrunkerS2C id, const KrunkerFrame *f);
+// init's syncData lo / ent / entAtt / chg (:219478-219496); called by on_init_hud.
+void krunker_link_script_init(KrunkerLink *l, const KrunkerFrame *f);

@@ -573,6 +573,8 @@ int ks_player_allows(const Player *player, const int what)
     if (player && player->frozen &&
         (what & (KS_PLAYER_DEFAULT_MOVEMENT | KS_PLAYER_DEFAULT_VELOCITY | KS_PLAYER_CAN_SHOOT | KS_PLAYER_CAN_MELEE)))
         return 0;
+    if (player && ((player->lock_shooting && (what & KS_PLAYER_CAN_SHOOT)) || (player->lock_melee && (what & KS_PLAYER_CAN_MELEE))))
+        return 0; // "plk" (official lobbies): the server's script locks
     if (!player || !player->game || !player->game->ks) return 1;
     const KsRef *ref = ks_ref_find(player->game->ks, KS_REF_PLAYER, player->uid);
     return !ref || (ref->allow & what) == what;

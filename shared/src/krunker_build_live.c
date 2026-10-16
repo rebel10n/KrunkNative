@@ -116,6 +116,11 @@ static const int REQUIRED_S2C[] = {
     KRUNKER_S2C_FAILED_TO_ENDER,
     // a private lobby asks for its password and lets us in (official-ingame-lobby)
     KRUNKER_S2C_ENTER_CODE, KRUNKER_S2C_CODE_PASSED,
+    // KrunkScript bodies the player collides with or is carried by, and its shooting / melee locks
+    // (official-ingame-script): entities, runtime blocks, moved dyn objects
+    KRUNKER_S2C_ENTITY_SPAWN, KRUNKER_S2C_ENTITY_REMOVE, KRUNKER_S2C_ENTITY_STATE, KRUNKER_S2C_ENTITY_ATTACH,
+    KRUNKER_S2C_ENTITY_DETACH, KRUNKER_S2C_SYNC_NEW_OBJECTS, KRUNKER_S2C_SYNC_LIVE_OBJECTS, KRUNKER_S2C_OBJECT_MOVED,
+    KRUNKER_S2C_PLAYER_LOCKS,
 };
 // (-1 ends each list; the parser never needs them, they document the choice and satisfy the check)
 static const int OPTIONAL_C2S[] = {
@@ -148,6 +153,8 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_STALKER_PICKED,
     // the password popup's "Submit - Ns" countdown (official-ingame-lobby)
     KRUNKER_S2C_UPDATE_CODE_TIMER,
+    // entity events: only the map's client script reads them (official-ingame-script)
+    KRUNKER_S2C_ENTITY_EVENT,
     -1,
 };
 static const int REQUIRED_ADD[] = {

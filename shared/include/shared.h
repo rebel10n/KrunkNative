@@ -1162,6 +1162,10 @@ typedef struct Player_t {
     // disableShooting, disableMelee (ks_player_allows answers 0 for those while set). Only official
     // lobbies send it (krunker_link.c); it stays until "frz" false.
     unsigned char frozen:1;
+    // Krunker "plk" PLAYER_LOCKS (iìïîììî :220492): player.disableShooting / disableMelee set by the
+    // lobby's KrunkScript; ks_player_allows answers 0 for KS_PLAYER_CAN_SHOOT / _CAN_MELEE while set
+    unsigned char lock_shooting:1;
+    unsigned char lock_melee:1;
     unsigned char smite:1;      // /smite: every hit this player deals does 10000 damage (Krunker player.smite)
     unsigned char notarget:1;   // /notarget (KrunkNative, Source's notarget): bots and AIs never pick this player as a target
     unsigned char interpolate:1;

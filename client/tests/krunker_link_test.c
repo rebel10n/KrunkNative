@@ -1604,6 +1604,148 @@ static void test_voice(void) {
 }
 
 // v10's textPopup and the gmsg countdown (official-ingame-popups): "tx" [title, sub, silent, subSize],
+
+// The JSON record of the nth NetExtJsonChunk EXT of `subtype` (slices reassembled), malloc'd; NULL none
+static char *json_ext(const uint16_t subtype, const int nth, int *slices) {
+    char *out = NULL;
+    size_t len = 0;
+    int n = -1;
+    *slices = 0;
+    for (int k = 0; find_in(NET_PACKET_EXT, k); k++) {
+        uint16_t blen = 0;
+        const uint8_t *b = ext_body(k, subtype, &blen);
+        if (!b || blen < sizeof(NetExtJsonChunk)) continue;
+        NetExtJsonChunk h;
+        memcpy(&h, b, sizeof(h));
+        if (h.part == 0) n++;
+        if (n != nth) continue;
+        char *grown = realloc(out, len + blen - sizeof(h) + 1);
+        if (!grown) break;
+        out = grown;
+        memcpy(out + len, b + sizeof(h), blen - sizeof(h));
+        len += blen - sizeof(h);
+        out[len] = 0;
+        (*slices)++;
+        if (h.part + 1 == h.parts) break;
+    }
+    return out;
+}
+
+// KrunkScript entities / runtime blocks / objmv / plk (official-ingame-script: krunker_link_script.c)
+static void test_script(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    clear();
+    // "e+" [eid, archId, tick, state, tag, mode, hp]
+    const KrunkerValue st[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(1.5), KRUNKER_V_STR("yaw"), KRUNKER_V_NUM(0.5)};
+    const KrunkerValue payload[] = {KRUNKER_V_NUM(10000), KRUNKER_V_NUM(1), KRUNKER_V_NUM(7), KRUNKER_V_MAP(st, 2), KRUNKER_V_STR("lift"),
+                                    KRUNKER_V_STR("sim"), KRUNKER_V_NUM(0)};
+    feed(&link, "e+", (KrunkerValue[]) {KRUNKER_V_ARRAY(payload, 7)}, 1);
+    int slices = 0;
+    char *j = json_ext(NET_EXT_ENTITY_SPAWN, 0, &slices);
+    cJSON *rec = j ? cJSON_Parse(j) : NULL;
+    CHECK(rec && slices == 1 && cJSON_GetArraySize(rec) == 7 && cJSON_GetArrayItem(rec, 0)->valuedouble == 10000 &&
+          cJSON_GetObjectItem(cJSON_GetArrayItem(rec, 3), "yaw")->valuedouble == 0.5 && !strcmp(cJSON_GetArrayItem(rec, 4)->valuestring, "lift"),
+          "e+: the spawn payload as one JSON record (%s)", j ? j : "-");
+    cJSON_Delete(rec);
+    free(j);
+    clear();
+    // a state too large for one body: sliced, reassembled exactly
+    char big[64 * 8 + 1];
+    memset(big, 'q', 64);
+    big[64] = 0;
+    KrunkerValue bst[16];
+    char keys[8][8];
+    for (int i = 0; i < 8; i++) {
+        snprintf(keys[i], sizeof(keys[i]), "k%d", i);
+        bst[2 * i] = KRUNKER_V_STR(keys[i]);
+        bst[2 * i + 1] = KRUNKER_V_STR(big);
+    }
+    const KrunkerValue bpay[] = {KRUNKER_V_NUM(10001), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_MAP(bst, 8)};
+    feed(&link, "e+", (KrunkerValue[]) {KRUNKER_V_ARRAY(bpay, 4)}, 1);
+    j = json_ext(NET_EXT_ENTITY_SPAWN, 0, &slices);
+    rec = j ? cJSON_Parse(j) : NULL;
+    CHECK(rec && slices == 2 && cJSON_GetObjectItem(cJSON_GetArrayItem(rec, 3), "k7") &&
+          strlen(cJSON_GetObjectItem(cJSON_GetArrayItem(rec, 3), "k7")->valuestring) == 64, "e+: a %d-byte state in %d slices", j ? (int) strlen(j) : 0,
+          slices);
+    cJSON_Delete(rec);
+    free(j);
+    clear();
+    // "es" [[eid, tick, state], ...]: one record each; "e-", "ee", "ea+", "ea-": the args
+    const KrunkerValue s1[] = {KRUNKER_V_STR("y"), KRUNKER_V_NUM(4)};
+    const KrunkerValue b1[] = {KRUNKER_V_NUM(10000), KRUNKER_V_NUM(8), KRUNKER_V_MAP(s1, 1)};
+    const KrunkerValue b2[] = {KRUNKER_V_NUM(10002), KRUNKER_V_NUM(8), KRUNKER_V_MAP(s1, 1)};
+    const KrunkerValue bases[] = {KRUNKER_V_ARRAY(b1, 3), KRUNKER_V_ARRAY(b2, 3)};
+    feed(&link, "es", (KrunkerValue[]) {KRUNKER_V_ARRAY(bases, 2)}, 1);
+    feed(&link, "e-", (KrunkerValue[]) {KRUNKER_V_NUM(10000), KRUNKER_V_STR("gone")}, 2);
+    feed(&link, "ee", (KrunkerValue[]) {KRUNKER_V_NUM(10000), KRUNKER_V_STR("hit"), KRUNKER_V_NUM(1), KRUNKER_V_NIL}, 4);
+    const KrunkerValue opt[] = {KRUNKER_V_STR("lk"), KRUNKER_V_BOOL(1)};
+    feed(&link, "ea+", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(10000), KRUNKER_V_MAP(opt, 1)}, 3);
+    feed(&link, "ea-", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(10000)}, 2);
+    {
+        char *a = json_ext(NET_EXT_ENTITY_STATE, 0, &slices), *b = json_ext(NET_EXT_ENTITY_STATE, 1, &slices);
+        char *r = json_ext(NET_EXT_ENTITY_REMOVE, 0, &slices), *ev = json_ext(NET_EXT_ENTITY_EVENT, 0, &slices);
+        char *at = json_ext(NET_EXT_ENTITY_ATTACH, 0, &slices), *dt = json_ext(NET_EXT_ENTITY_DETACH, 0, &slices);
+        CHECK(a && b && !strcmp(a, "[10000,8,{\"y\":4}]") && !strcmp(b, "[10002,8,{\"y\":4}]"), "es: one record per baseline (%s %s)", a ? a : "-",
+              b ? b : "-");
+        CHECK(r && !strcmp(r, "[10000,\"gone\"]") && ev && !strcmp(ev, "[10000,\"hit\",1,null]") && at && !strcmp(at, "[9,10000,{\"lk\":true}]") &&
+              dt && !strcmp(dt, "[9,10000]"), "e- / ee / ea+ / ea-: their args (%s %s %s %s)", r ? r : "-", ev ? ev : "-", at ? at : "-", dt ? dt : "-");
+        free(a), free(b), free(r), free(ev), free(at), free(dt);
+    }
+    clear();
+    // "lo" [[id, {type, x, y, z, w, l, h, s, data}]], "slo" [[id, "remove"]], "objmv", "plk"
+    const KrunkerValue blk[] = {KRUNKER_V_STR("type"), KRUNKER_V_STR("block"), KRUNKER_V_STR("x"), KRUNKER_V_NUM(5), KRUNKER_V_STR("y"), KRUNKER_V_NUM(0),
+                                KRUNKER_V_STR("w"), KRUNKER_V_NUM(10)};
+    const KrunkerValue lo1[] = {KRUNKER_V_NUM(0), KRUNKER_V_MAP(blk, 4)};
+    feed(&link, "lo", (KrunkerValue[]) {KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(lo1, 2)}), 1)}, 1);
+    const KrunkerValue rm[] = {KRUNKER_V_NUM(0), KRUNKER_V_STR("remove")};
+    feed(&link, "slo", (KrunkerValue[]) {KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(rm, 2)}), 1)}, 1);
+    feed(&link, "objmv", (KrunkerValue[]) {KRUNKER_V_NUM(12), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2.5), KRUNKER_V_NUM(-3)}, 4);
+    feed(&link, "plk", (KrunkerValue[]) {KRUNKER_V_BOOL(1), KRUNKER_V_NUM(0)}, 2);
+    {
+        char *lo = json_ext(NET_EXT_KN_OFFICIAL_LIVE_OBJECT, 0, &slices), *slo = json_ext(NET_EXT_KN_OFFICIAL_LIVE_SYNC, 0, &slices);
+        CHECK(lo && !strcmp(lo, "[0,{\"type\":\"block\",\"x\":5,\"y\":0,\"w\":10}]") && slo && !strcmp(slo, "[0,\"remove\"]"), "lo / slo (%s %s)",
+              lo ? lo : "-", slo ? slo : "-");
+        free(lo), free(slo);
+        uint16_t len = 0;
+        const int km = find_ext(NET_EXT_KN_OFFICIAL_OBJECT_MOVED, 0, &len), kp = find_ext(NET_EXT_PLAYER_LOCKS, 0, &len);
+        NetObjectMovedPacket m = {0};
+        NetPlayerLocksPacket pl = {0};
+        const uint8_t *mb = km >= 0 ? ext_body(km, NET_EXT_KN_OFFICIAL_OBJECT_MOVED, &len) : NULL;
+        if (mb && len == sizeof(m)) memcpy(&m, mb, sizeof(m));
+        const uint8_t *pb = kp >= 0 ? ext_body(kp, NET_EXT_PLAYER_LOCKS, &len) : NULL;
+        if (pb && len == sizeof(pl)) memcpy(&pl, pb, sizeof(pl));
+        CHECK(mb && m.uid == 12 && m.x == 1.0f && m.y == 2.5f && m.z == -3.0f, "objmv: uid 12 to 1, 2.5, -3");
+        CHECK(pb && pl.disable_shooting == 1 && pl.disable_melee == 0, "plk: shooting locked, melee not");
+    }
+    clear();
+    // init syncData: lo, ent, entAtt, chg
+    const KrunkerValue att[] = {KRUNKER_V_NUM(9), KRUNKER_V_NUM(10000), KRUNKER_V_NIL};
+    const KrunkerValue chg[] = {KRUNKER_V_NUM(12), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2)};
+    const KrunkerValue sync[] = {KRUNKER_V_STR("lo"), KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(lo1, 2)}), 1),
+                                 KRUNKER_V_STR("ent"), KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(payload, 7)}), 1),
+                                 KRUNKER_V_STR("entAtt"), KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(att, 3)}), 1),
+                                 KRUNKER_V_STR("chg"), KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_ARRAY(chg, 4)}), 1)};
+    KrunkerValue init[12];
+    for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(0);
+    init[11] = KRUNKER_V_MAP(sync, 4);
+    feed(&link, "init", init, 12);
+    {
+        char *lo = json_ext(NET_EXT_KN_OFFICIAL_LIVE_OBJECT, 0, &slices), *en = json_ext(NET_EXT_ENTITY_SPAWN, 0, &slices);
+        char *at = json_ext(NET_EXT_ENTITY_ATTACH, 0, &slices);
+        uint16_t len = 0;
+        CHECK(lo && en && at && !strncmp(en, "[10000,1,7,", 11) && !strcmp(at, "[9,10000,null]") && find_ext(NET_EXT_KN_OFFICIAL_OBJECT_MOVED, 0, &len) >= 0 &&
+              find_in(NET_PACKET_INIT, 0) && (const void *) find_in(NET_PACKET_INIT, 0) < (const void *) find_in(NET_PACKET_EXT, 0),
+              "init syncData: lo, ent, entAtt, chg after the INIT");
+        free(lo), free(en), free(at);
+    }
+    clear();
+    CHECK(link.unknown_in == 0, "every script packet was handled (%u unknown)", link.unknown_in);
+}
+
 // "stlkpd", "gmsg" [.., n, [title, sub]] -> NET_EXT_KN_OFFICIAL_TEXT_POPUP / _COUNTDOWN
 static void test_popups(void) {
     KrunkerLink link;
@@ -2600,6 +2742,7 @@ int main(void) {
     }
     test_popups();
     test_lobby();
+    test_script();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

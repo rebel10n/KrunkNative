@@ -22,17 +22,18 @@
 typedef enum {
     NET_EXT_NONE = 0x0000,
 
-    // 0x0100 entities (v10 KrunkScript entities; doc/v10/net.md "Entities"), S -> C
-    NET_EXT_ENTITY_SPAWN = 0x0100,  // "e+"  [[eid, archId, tick, state{}, tag, mode, hp]]
-    NET_EXT_ENTITY_REMOVE = 0x0101, // "e-"  eid, reason
-    NET_EXT_ENTITY_STATE = 0x0102,  // "es"  [[eid, tick, state{}], ...]
-    NET_EXT_ENTITY_EVENT = 0x0103,  // "ee"  eid, name, a, b
-    NET_EXT_ENTITY_ATTACH = 0x0104, // "ea+" playerSid, eid, {o, lk, ctl, soft, nd}
-    NET_EXT_ENTITY_DETACH = 0x0105, // "ea-" playerSid, eid
+    // 0x0100 entities (v10 KrunkScript entities; doc/v10/net.md "Entities"), S -> C. Bodies: a
+    // NetExtJsonChunk header + a slice of one JSON array (below); one EXT per entity record:
+    NET_EXT_ENTITY_SPAWN = 0x0100,  // "e+"  [eid, archId, tick, state{}, tag, mode, hp] (also init syncData.ent, one each)
+    NET_EXT_ENTITY_REMOVE = 0x0101, // "e-"  [eid, reason]
+    NET_EXT_ENTITY_STATE = 0x0102,  // "es"  [eid, tick, state{}] (one EXT per baseline of the "es" list)
+    NET_EXT_ENTITY_EVENT = 0x0103,  // "ee"  [eid, name, a, b]
+    NET_EXT_ENTITY_ATTACH = 0x0104, // "ea+" [playerSid, eid, {o, lk, ctl, soft, nd}] (also init syncData.entAtt)
+    NET_EXT_ENTITY_DETACH = 0x0105, // "ea-" [playerSid, eid]
 
     // 0x0200 player state, S -> C
     NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  sid, pose | 0
-    NET_EXT_PLAYER_LOCKS = 0x0201, // "plk" disableShooting, disableMelee
+    NET_EXT_PLAYER_LOCKS = 0x0201, // "plk" NetPlayerLocksPacket: disableShooting, disableMelee
     NET_EXT_PLAYER_SPEED_BOOST = 0x0202, // "spb" speedBoost, silent (NetSpeedBoostPacket; official lobbies, krunker_link.c)
     NET_EXT_PLAYER_NAME = 0x0203,        // "00" a player's new name (NetPlayerNamePacket; official lobbies, krunker_link.c)
 
@@ -115,6 +116,10 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_CODE_TIMER = 0x8063,   // "codeT" UPDATE_CODE_TIMER, int32 seconds: "Submit - Ns"
     NET_EXT_KN_OFFICIAL_CODE_PASSED = 0x8064,  // "codeP" CODE_PASSED, no body: clearPops
     NET_EXT_KN_OFFICIAL_GAME_CODE = 0x8065,    // client -> link only: the typed password, NUL-terminated -> C2S "code" [value]
+    // 0x8080 official KrunkScript runtime objects (client-local, client/src/entities.c)
+    NET_EXT_KN_OFFICIAL_LIVE_OBJECT = 0x8080,  // "lo" one [id, {type, x, y, z, w, l, h, s, data}] (NetExtJsonChunk; init syncData.lo)
+    NET_EXT_KN_OFFICIAL_LIVE_SYNC = 0x8081,    // "slo" one [id, op] ("remove") (NetExtJsonChunk)
+    NET_EXT_KN_OFFICIAL_OBJECT_MOVED = 0x8082, // "objmv" NetObjectMovedPacket (init syncData.chg too)
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -446,6 +451,31 @@ typedef struct {
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
+
+#pragma pack(push, 1)
+// The JSON-bodied subtypes (entities 0x0100-0x0105, live objects 0x8080-0x8081): one UTF-8 JSON
+// array per record, split over consecutive EXTs of the same subtype when longer than one body
+// (an entity's state alone may be 512 bytes): part 0..parts-1 in order, nothing in between.
+typedef struct {
+    uint8_t part;  // this slice's index
+    uint8_t parts; // slices of the record (>= 1)
+} NetExtJsonChunk;
+#define NET_EXT_JSON_CHUNK_DATA (NET_EXT_BODY_MAX - (int) sizeof(NetExtJsonChunk))
+
+// NET_EXT_PLAYER_LOCKS: v10 "plk" PLAYER_LOCKS [disableShooting, disableMelee] (iìïîììî :220492):
+// our player's KrunkScript locks (player.disableShooting / disableMelee), until the next "plk"
+typedef struct {
+    uint8_t disable_shooting;
+    uint8_t disable_melee;
+} NetPlayerLocksPacket;
+
+// NET_EXT_KN_OFFICIAL_OBJECT_MOVED: v10 "objmv" OBJECT_MOVED [uid, x, y, z] (game.moveObject :187893):
+// a dyn map object moved; y is the GameObject's centre (bottom + h / 2); riders move with it
+typedef struct {
+    int32_t uid;
+    float x, y, z;
+} NetObjectMovedPacket;
+#pragma pack(pop)
 
 // Writes the envelope (subtype + body) into out (at least NET_EXT_HEADER_SIZE + body_length
 // bytes); returns its length, 0 when the body is too long.
