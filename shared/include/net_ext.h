@@ -88,6 +88,9 @@ typedef enum {
     // queues them into the client's own inbound stream, no server sends them
     NET_EXT_KN_INPUTS_DROPPED = 0x8020, // no body: Krunker's "f" SYNC_FAILED cleared tmpInpts (the
                                         // pending prediction inputs) (game.deob.js:220333)
+    NET_EXT_KN_END_TYPE = 0x8021,       // body: u8, the official "end"'s arg0, right before its NET_PACKET_END:
+                                        // 1 = show the end screen and its results at once even when we are not
+                                        // in the game (a joiner's: v10.js:219715 `2 == a0 || a0 && showEndScreen`)
     // 0x8030 official krunker.io HUD (client/src/net/krunker_link.c -> client/src/net/game_events.c),
     // client-local: the link turns an official packet our own NetPackets cannot carry into one of
     // these for the client's inbound queue; no server sends or receives them

@@ -340,6 +340,7 @@ static void events_show_end(Client *client) {
 // clears on startGame) unless this client is a K.P.D officer on a case (kpdData), whoever won and
 // whether or not we were playing.
 static int g_end_message_sent, g_kpd_case;
+static int g_end_show_now; // NET_EXT_KN_END_TYPE 1 (official "end" type 1) for the END that follows it
 
 static void events_end_message(Client *client) {
     const char *message = client_render_settings()->end_message;
@@ -350,6 +351,8 @@ static void events_end_message(Client *client) {
 
 static void events_end(Client *client, const NetEndPacket *packet) {
     events_end_message(client);
+    const int show_now = g_end_show_now;
+    g_end_show_now = 0;
     client->net_end_seconds = packet->next_round;
     client->net_round_seconds = 0;
     client->spawn_requested = 0;
@@ -359,11 +362,16 @@ static void events_end(Client *client, const NetEndPacket *packet) {
         Player *player = events_find_player(client, packet->board.entries[i].uid);
         if (player) player->reward = packet->rewards[i];
     }
-    if (!(client->me && client->me->active) && !spectate_active()) return;
+    const int playing = (client->me && client->me->active) || spectate_active();
+    // v10's end handler (v10.js:219715): a playing or spectating player gets the title, then the
+    // results; one who is not in the game gets them only from an "end" of type 1 (an official
+    // lobby's to a player who joins it while its round is over), at once and without the title
+    if (!playing && !show_now) return;
 
     client->net_end_result = packet->result;
     client->net_death_menu_pending = 0;
     events_show_end(client);
+    if (!playing) hud_ui_end_results_now(client); // showEndScreen + the results, no vicTitle
 }
 
 static void events_timer(Client *client, const NetTimerPacket *packet) {
@@ -1150,6 +1158,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
             else if (subtype == NET_EXT_KN_INPUTS_DROPPED) client_recon_drop_pending(client); // official "f" (krunker_link.c)
+            else if (subtype == NET_EXT_KN_END_TYPE && body_length >= 1) g_end_show_now = body[0] == 1; // official "end" type
             else if (subtype == NET_EXT_GAME_ANNOUNCEMENT) v10_announce_on_packet(body, body_length); // the banner (v10_notify.c)
             else if (subtype == NET_EXT_KN_HIT_DAMAGE && body_length >= sizeof(NetHitDamagePacket)) { // dmgType "Float"
                 memcpy(&g_hit_damage, body, sizeof(g_hit_damage));

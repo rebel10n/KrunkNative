@@ -112,7 +112,7 @@ DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
         "--social": "social", "--rounds": "rounds", "--hud": "hud",
-        "--voice": "voice", "--popups": "popups"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--voice": "voice", "--popups": "popups", "--state": "state"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -694,10 +694,12 @@ class Stub:
             await send("cpt", self.cpt)
             tk = asyncio.ensure_future(ticker())
             for _ in range(900):
-                if self.got_en.is_set() or stop.is_set():
+                if self.got_en.is_set() or stop.is_set() or self.scenario == "joinend":
                     break
                 await asyncio.sleep(0.1)
-            if self.got_en.is_set() and self.scenario == "spawn":
+            if self.scenario == "joinend":
+                await self.joinend_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "spawn":
                 # the live server's spawn: our player where the map's spawn is (x, y, z); no "l" corrects it,
                 # so where the client stands and walks is its own simulation of this map
                 await send("frs")
@@ -1225,6 +1227,40 @@ class Stub:
         await send("skin", 2)                           # we found store item 2
         await hold(4.0)
         self.sent["done"] = time.monotonic()
+
+    async def joinend_phases(self, send, stop, player):
+        """run_native_join_end: the lobby's round is over when we join. Our "en" (Play) enters nothing:
+        the server answers it with the joiner's end screen, "end" type 1 (didWin -1, the end table, v10's
+        end handler shows it with its results at once, v10.js:219715), and its clock says "Next Round in"
+        ("t" state 1). The next round's "init" ends it; then "en" spawns us ("frs")."""
+        for _ in range(60):  # Play, or 6 s on the menu
+            if self.got_en.is_set() or stop.is_set():
+                break
+            await asyncio.sleep(0.1)
+        self.ended = True
+        self.sent["end"] = time.monotonic()
+        await send("end", 1, -1, {"ed": [BOT_SID, ["StubBot", "StubBot"], 40, 2, 1, "NONE"], "tms": None, "mdls": [], "mts": [], "vo": {},
+                                  "modeIndex": 0}, -1, 1, 0, None, {})
+        for _ in range(100):  # the end screen, 10 s
+            if stop.is_set():
+                return
+            await asyncio.sleep(0.1)
+        self.ended = False
+        self.got_en.clear()
+        self.sent["init2"] = time.monotonic()
+        await send("init", self.map_index, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
+        await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0))
+        for _ in range(300):
+            if self.got_en.is_set() or stop.is_set():
+                break
+            await asyncio.sleep(0.1)
+        if not self.got_en.is_set():
+            return
+        self.sent["frs"] = time.monotonic()
+        await send("frs")
+        await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+        while not stop.is_set():
+            await asyncio.sleep(0.2)
 
     def start_ws(self):
         started = threading.Event()
@@ -2417,6 +2453,84 @@ def run_native_fx():
     check(f"{label}: NUKE_UPDATE 0: the siren", any("play2d siren_0 " in l for l in audio), audio[-6:])
 
 
+def run_native_join_end():
+    """Play, then the official lobby's round turns out to be over (the user's report: "the camera just
+    continues rotating like I'm in the menu, until the game actually starts"): the server's "end" type 1
+    shows the end screen with its results at once (v10.js:219715, no victory title for a player who is not
+    in the game) and "Next Round in"; the next round's init takes it down and we enter it (like a
+    KrunkNative server's next round: the pointer locks again, client_enter_game)."""
+    label = "native-join-end"
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "9000 vis @end endUI endInfo endMidHolder menuHolder inGameUI instructionHolder\n9100 text @timer [id=endTimer]\n"
+              "9200 grep @table StubBot [id=endTable]\n9300 state\n"
+              "22000 vis @next endUI menuHolder\n22500 play\n27000 vis @playing inGameUI endUI menuHolder\n27100 players\n27500 quit\n"
+              % PASTE_TOKEN)
+    stub, p, out, log = launch_native(label, script, {}, scenario="joinend")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the stub sent its \"end\" type 1, then the next round's init and \"frs\"",
+          all(k in stub.sent for k in ("end", "init2", "frs")), sorted(stub.sent))
+    end = re.search(r"\[input_script\] vis t=\d+ @end (.*)", text)
+    want = {"endUI": "1", "endInfo": "1", "endMidHolder": "1", "menuHolder": "0", "inGameUI": "0", "instructionHolder": "0"}
+    got = dict(kv.split("=", 1) for kv in end.group(1).split()) if end else {}
+    check(f"{label}: Play during the end screen: the end screen with its results, not the menu camera", got == want, got)
+    timer = re.search(r"\[input_script\] text t=\d+ @timer n=\d+ .*?text=(.*)", text)
+    check(f"{label}: \"Next Round in\" (t state 1)", timer and "Next Round in" in timer.group(1), timer.group(1) if timer else None)
+    table = re.search(r"\[input_script\] grep t=\d+ @table needle=\S+ n=\d+ hits=(\d+)", text)
+    check(f"{label}: the end table lists the lobby's players", table and int(table.group(1)) >= 1, table.group(0) if table else None)
+    nxt = re.search(r"\[input_script\] vis t=\d+ @next (.*)", text)
+    check(f"{label}: the next round's init takes the end screen down", nxt and nxt.group(1).split()[0] == "endUI=0",
+          nxt.group(1) if nxt else None)
+    playing = re.search(r"\[input_script\] vis t=\d+ @playing (.*)", text)
+    check(f"{label}: then Play spawns us (the HUD)", playing and playing.group(1).split() == ["inGameUI=1", "endUI=0", "menuHolder=0"],
+          playing.group(1) if playing else None)
+
+
+def run_native_leave_state():
+    """Official -> KrunkNative -> official: leaving a game clears its state (client_leave_game; v10 leaves a
+    game by loading a new page): the official lobby's chat line is gone on the KrunkNative server, the
+    KrunkNative server's chat line is gone in the next official lobby."""
+    label = "native-leave-state"
+    (port,) = kn_proto.free_ports(1)
+    slog = open(os.path.join(WORK, label + "-server.log"), "w")
+    server = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", "none", "--port", str(port)], stdout=slog, stderr=subprocess.STDOUT,
+                              stdin=subprocess.DEVNULL, start_new_session=True, cwd=ROOT)
+    cfg = os.path.join(WORK, label + "-cfg", "krunknative")
+    os.makedirs(cfg, exist_ok=True)
+    with open(os.path.join(cfg, "knSettings.json"), "w") as f:
+        f.write('{"showMessages":true}')  # player chat on (KrunkNative's default is off; v10's is on)
+    token2 = PASTE_TOKEN.replace("Pasted", "Second")
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "8000 grep @official hello [id=chatList]\n"
+              "8100 con connect 127.0.0.1:%d\n8300 grep @left-official hello [id=chatList]\n"
+              "12000 play\n15000 grep @kn hello [id=chatList]\n15000 nodes @kn [id=chatList] .chatItem\n15100 con say zzknmark\n"
+              "16500 grep @kn-said zzknmark [id=chatList]\n"
+              "16800 down ESC\n16850 up ESC\n17000 call krunkerJoin \"%s\"\n17300 grep @left-kn zzknmark [id=chatList]\n17300 nodes @left-kn [id=chatList] .chatItem\n"
+              "18500 clickid knCaptchaToken\n18600 type %s\n18700 clickid knCaptchaUse\n21000 play\n"
+              "25000 grep @official2 zzknmark [id=chatList]\n25100 grep @official2-stub hello [id=chatList]\n25500 quit\n"
+              % (PASTE_TOKEN, port, GAME_ID, token2))
+    try:
+        stub, p, out, log = launch_native(label, script, {})
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+    finally:
+        if server.poll() is None:
+            os.killpg(server.pid, signal.SIGTERM)
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(server.pid, signal.SIGKILL)
+        slog.close()
+    text = "\n".join(lines)
+    hits = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\S+) needle=\S+ n=\d+ hits=(\d+)", text)}
+    rows = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] nodes t=\d+ @(\S+) elements=\d+ match=(\d+)", text)}
+    check(f"{label}: the official lobby's chat line showed", hits.get("official") == 1, hits)
+    check(f"{label}: official -> KrunkNative: it is gone as the game is left", hits.get("left-official") == 0, hits)
+    check(f"{label}: and on the KrunkNative server (only its own join lines)", hits.get("kn") == 0 and 1 <= rows.get("kn", 0) <= 3, (hits, rows))
+    check(f"{label}: the KrunkNative server's chat line showed", hits.get("kn-said") == 1, hits)
+    check(f"{label}: KrunkNative -> official: it is gone as the game is left", hits.get("left-kn") == 0 and rows.get("left-kn") == 0, (hits, rows))
+    check(f"{label}: and in the next official lobby, which shows its own", hits.get("official2") == 0 and hits.get("official2-stub") == 1, hits)
+
+
 def run_native_optout():
     """KRUNKNATIVE_KRUNKER_JOIN=browser: the click opens krunker.io/?game=<id> in the system browser
     (KRUNKNATIVE_NO_BROWSER logs it), nothing is sought in-client."""
@@ -3244,6 +3358,10 @@ def main():
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs
         run_native_reload(False)
         run_native_reload(True)
+    if ONLY in ("", "native", "state") and os.path.isfile(f"{BUILD}/client_bin"):  # joining mid end screen, leaving
+        run_native_join_end()
+        run_native_leave_state()
+        ran = True
     webview_skipped = None
     if ONLY in ("", "native", "webview") and os.path.isfile(f"{BUILD}/client_bin"):
         webview_skipped = webview_skip_reason()

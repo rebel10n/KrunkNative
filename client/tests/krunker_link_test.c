@@ -444,7 +444,21 @@ static void test_hud(void) {
     {
         READ_IN(NetEndPacket, e, END, 0);
         CHECK(e_p && e.result == -1 && e.winner_uid == -1, "end: didWin -1 is a draw");
+        uint16_t len = 0;
+        const uint8_t *type = ext_body(0, NET_EXT_KN_END_TYPE, &len);
+        CHECK(type && len == 1 && type[0] == 0, "end type 0: END_TYPE 0 (the title for a player in the game only)");
     }
+    clear();
+    // type 1 (a joiner's end screen, v10.js:219715): END_TYPE 1 right before the END
+    end_args[0] = KRUNKER_V_NUM(1);
+    feed(&link, "end", end_args, 8);
+    {
+        uint16_t len = 0;
+        const uint8_t *type = ext_body(0, NET_EXT_KN_END_TYPE, &len);
+        const NetPacket *xp = find_in(NET_PACKET_EXT, 0), *ep = find_in(NET_PACKET_END, 0);
+        CHECK(type && len == 1 && type[0] == 1 && ep && xp < ep, "end type 1: END_TYPE 1, then the END (the results at once)");
+    }
+    end_args[0] = KRUNKER_V_NUM(0);
     clear();
     // another build's endStats (FFA, 4 columns sent where ours has 6): the rows are found by the name cells
     feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);

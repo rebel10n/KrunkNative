@@ -1414,6 +1414,10 @@ static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
     end.next_round = (int32_t) GAME_END_TIMER;
     const int win_team = (int) num(arg(f, 3), -1);
     end.winner_uid = win_team <= 0 && end.result != -1 && end.board.count ? end.board.entries[0].uid : -1; // FFA: the first row
+    // type 1: the end screen with its results at once, also for a player who is not in the game (one who
+    // joins the lobby while its round is over: v10's end handler, v10.js:219715): the client is told first
+    const uint8_t end_type = (uint8_t) (type == 1);
+    emit_ext(l, NET_EXT_KN_END_TYPE, &end_type, sizeof(end_type));
     emit(l, NET_PACKET_END, &end, sizeof(end));
 
     me.mode_id = l->mode;
