@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <v10_wild_offer.h>
 #include <game_reload.h> // F5: game_reload_tick
 #include <badges.h> // WP-E part 2c: the custom badge in the class box
 #include <ks_client.h> // ks_client_pointer_free
@@ -1992,6 +1993,7 @@ void client_menu_tick(Client *client) {
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
         v10_news_tick();    // the v10 menu's What's New item (v10_news.c)
+        v10_wild_offer_tick(client); // the account's Wild Offer: fetched after sign-in, notified once (v10_wild_offer.c)
         ui_loadout_tick();  // item pickers: only the cards near the scroll position exist (ui_vgrid.h)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.

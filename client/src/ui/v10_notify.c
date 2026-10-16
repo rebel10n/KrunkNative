@@ -69,6 +69,7 @@ typedef struct {
     int mounted;        // the item is in the page
     V10NotifyClick on_click;
     void *user;
+    char *html;         // a component notification's markup (v10_notify_push_html), else NULL
 } Notif;
 
 typedef struct {
@@ -142,12 +143,18 @@ static void item_html(StrBuf *sb, const Notif *n) {
     notif_ids(n, item, sizeof(item), bar, sizeof(bar));
     // iîíííïï "<div class=notification-item><!> <!></div>" with iîiîiíì (text) and, duration > 0,
     // iíîïíiï (the expiration bar); onclick / id: KrunkNative
-    sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\" onclick=\"knNotifyClick(%d)\">", item, n->id);
-    sb_append(sb, "<div class=\"text-notification svelte-nrigjp\"><h3 class=\"notification-title svelte-nrigjp\">");
-    esc_into(sb, n->title);
-    sb_append(sb, "</h3> <p class=\"notification-text svelte-nrigjp\">");
-    esc_into(sb, n->text);
-    sb_append(sb, "</p></div> ");
+    if (n->html) { // a component (iíiìïïi({content}): Wild Offer, ...): its own controls, no click to dismiss
+        sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\">", item);
+        sb_append(sb, n->html);
+        sb_append(sb, " ");
+    } else {
+        sb_appendf(sb, "<div class=\"notification-item svelte-nrigjp\" id=\"%s\" onclick=\"knNotifyClick(%d)\">", item, n->id);
+        sb_append(sb, "<div class=\"text-notification svelte-nrigjp\"><h3 class=\"notification-title svelte-nrigjp\">");
+        esc_into(sb, n->title);
+        sb_append(sb, "</h3> <p class=\"notification-text svelte-nrigjp\">");
+        esc_into(sb, n->text);
+        sb_append(sb, "</p></div> ");
+    }
     if (n->duration > 0.0) {
         sb_appendf(sb, "<div class=\"expiration-bar svelte-16a8kon%s\"><div class=\"expiration-bar-track svelte-16a8kon\">"
                        "<div class=\"expiration-bar-fill svelte-16a8kon\" id=\"%s\" style=\"width: %.17g%%\"></div></div></div>",
@@ -191,6 +198,7 @@ static void remove_at(const int i, const char *why) {
     if (i < 0 || i >= N.count) return;
     printf("[notify] %s #%d\n", why, N.items[i].id);
     unmount(&N.items[i]);
+    free(N.items[i].html);
     memmove(&N.items[i], &N.items[i + 1], (size_t) (N.count - i - 1) * sizeof(N.items[0]));
     N.count--;
 }
@@ -213,6 +221,20 @@ int v10_notify_push_ex(const char *title, const char *content, const double dura
         mount_items();
     }
     return n->id;
+}
+
+int v10_notify_push_html(const char *title, const char *html, const double duration_ms) {
+    const int id = v10_notify_push_ex(title, "", duration_ms, NULL, NULL);
+    const int i = find(id);
+    if (i < 0) return id;
+    Notif *n = &N.items[i];
+    if (n->mounted) { // mounted as text already (the page was up): again with the markup
+        unmount(n);
+        n->mounted = 0;
+    }
+    n->html = strdup(html ? html : "");
+    if (html_ui_available() && html_ui_is_ready()) mount_items();
+    return id;
 }
 
 int v10_notify_push(const char *title, const char *content, const double duration_ms) {

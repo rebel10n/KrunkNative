@@ -19,6 +19,7 @@
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <v10_wild_offer.h>
 #include <v10_notify.h> // econN: gifts, sales, trades in the notification center
 #include <ctype.h>
 #include <math.h>
@@ -661,6 +662,7 @@ static void on_social(void *user, const cJSON *frame) {
         v10_customize_frame(frame);
     } else if (!strcmp(label, "dsp") || !strcmp(label, "dslr")) { // v10 Daily Spin progress / claim (v10_daily_spin.c)
         v10_daily_spin_frame(label, frame);
+    } else if (v10_wild_offer_frame(label, frame)) { // v10 Wild Offers: wo / wob / wor (v10_wild_offer.c)
     } else if (v10_rewards_frame(label, frame)) { // v10.0.2 signup perks: prr (v10_rewards.c)
     } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])

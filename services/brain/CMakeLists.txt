@@ -31,6 +31,7 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/store_spins.c        # v10 wheels and item pools (shared/include/store_spins.h)
     ../../shared/src/store_spins_table.c  # generated: gapi /data/spins (tools/ui-import/gen_viewer_store.js)
     daily_spin.c                    # v10 Daily Spin ("dsp" / "dsl")
+    wild_offer.c                    # v10 Wild Offers ("wo" / "wob" / "wor")
     shared_shim.c
     # coord-auth: roles, central auth, server finder
     roles.c

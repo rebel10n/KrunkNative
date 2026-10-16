@@ -281,6 +281,9 @@ void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
 void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account titles) */
 void sh_daily_spin(SocialSession *s, const cJSON *f);  /* "dsp" (v10 Daily Spin progress, daily_spin.c) */
 void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_SPIN_CLAIM) */
+void sh_wild_offer(SocialSession *s, const cJSON *f);         /* "wo" (v10 Wild Offer, wild_offer.c) */
+void sh_wild_offer_buy(SocialSession *s, const cJSON *f);     /* "wob" (purchase) */
+void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh) */
 int store_wheel_ticket(const char *name);              /* a store wheel's ticketIndex, -1 none (store.c) */
 void sh_alias(SocialSession *s, const cJSON *f);       /* "nme" */
 void sh_password(SocialSession *s, const cJSON *f);    /* "upp" */

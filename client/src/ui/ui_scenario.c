@@ -44,6 +44,7 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <v10_wild_offer.h>
 #include <ui_mobile.h> // state.mobile (ui_mobile_force)
 #include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
@@ -1155,6 +1156,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (st_bool("gameCode", 0)) v10_party_password_prompt(); // v10 gameCode(): the server password popup
+    if (menu_open) v10_wild_offer_scenario(st("wildOffer")); // the brain's "wo" reply (v10_wild_offer.c)
     if (menu_open && st_has("spin")) {
         store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));
         const cJSON *result = st("spinResult");

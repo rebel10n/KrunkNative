@@ -28,6 +28,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <store_spins.h> // v10 store.wheels / itemPools
+#include <v10_wild_offer.h>
 #include <time.h>
 
 // data/store.js wheels / a TICKET item's spinWheel (skins.json)
@@ -1337,8 +1338,13 @@ static void v10_store_eterno(StrBuf *sb) {
 #else
         "";
 #endif
-    sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\"%s class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> <div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>",
+    sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\"%s class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> ",
                poster, vid);
+    // the shop front (svelte-1nzacef): the account's wild offer (v10_wild_offer.c), else the empty state
+    const size_t before = sb->len;
+    v10_wild_offer_shop(sb);
+    if (sb->len == before)
+        sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>");
 }
 
 static char *v10_store_window_gen(void) {
@@ -1379,8 +1385,14 @@ static void eterno_music(const int on) {
 void store_ui_window_post(const int id) {
     eterno_music(id == 14 && g_store_tab == 5);
     if (id != 14) return;
+    v10_wild_offer_store_opened();
     HtmlElem mw = html_dom_by_id("menuWindow");
     if (mw) html_dom_set_class(mw, "eterno", g_store_tab == 5);
+}
+
+void store_ui_open_tab(const int tab) {
+    g_store_tab = tab >= 0 && tab < V10_SHOP_TABS && tab != 4 ? tab : 0;
+    menu_show_window(14, 1);
 }
 
 // windows[13].gen()

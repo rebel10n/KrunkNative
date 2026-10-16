@@ -598,6 +598,9 @@ static const SocialRoute k_routes[] = {
     {"ttl", sh_titles},                 /* v10: the account's titles (v10_customize.c) */
     {"dsp", sh_daily_spin},             /* v10 Daily Spin progress (daily_spin.c) */
     {"dsl", sh_daily_spin_claim},       /* v10 DAILY_SPIN_CLAIM -> "dslr" */
+    {"wo", sh_wild_offer},              /* v10 shop.getWildOffer (wild_offer.c) */
+    {"wob", sh_wild_offer_buy},         /* v10 shop.purchaseWildOffer */
+    {"wor", sh_wild_offer_refresh},     /* v10 shop.refreshWildOffer */
     {"clnRA", sh_clan_decline_all},     /* v10 clan window: Decline All */
     {"vcln", sh_clan_viewed},           /* v10 OPEN_CLAN_TAB */
     {"uploadS", sh_settings_up},

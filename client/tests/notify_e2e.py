@@ -183,47 +183,52 @@ def friend_request_flow(port, ids, tokens, names):
 
         # alice follows bob: the brain pushes friend:request to bob's open socket. A retry unfollows
         # first (the follow that exists makes no event)
+        # a signed-in account also gets its Wild Offer in the center at sign-in (v10_wild_offer.c): the
+        # ids below are the friend request's and the message's own, whatever came before them
+        def shown_id(title):
+            m = re.search(r'\[notify\] show #(\d+) "%s' % re.escape(title), bob.text())
+            return int(m.group(1)) if m else None
+
         raised = False
         for _ in range(20):
             asyncio.run(social_do(port, names[0], ["f", names[1], 0], 0.3))
             asyncio.run(social_do(port, names[0], ["f", names[1], 1]))
-            if wait(lambda: "[notify] show #1" in bob.text(), 3.0):
+            if wait(lambda: shown_id("Friend Request") is not None, 3.0):
                 raised = True
                 break
-        check(raised, "bob's notification center raises the friend request (\"[notify] show #1\")")
+        fr = shown_id("Friend Request")
+        check(raised, "bob's notification center raises the friend request (\"[notify] show #%s \"Friend Request\"\")" % fr)
         if not raised:
             raise RuntimeError("no friend request notification (log %s)" % bob.log)
-        check('"Friend Request"' in bob.text(), "the notification is titled Friend Request",
-              [l for l in bob.text().splitlines() if "[notify] show #1" in l][:1])
 
         # the countdown: the bar narrows between two samples (10 s duration)
         time.sleep(0.6)  # the 0.3 s slide-in
-        r1 = bob.rect("knNotifBar1")
+        r1 = bob.rect("knNotifBar%d" % fr)
         time.sleep(2.0)
-        r2 = bob.rect("knNotifBar1")
+        r2 = bob.rect("knNotifBar%d" % fr)
         check(r1 is not None and r2 is not None and r2[2] < r1[2] - 1.0,
               "the friend request's countdown bar narrows (%s -> %s px)" % (r1 and r1[2], r2 and r2[2]))
-        check(bool(bob.rect("knNotif1")), "the notification item is in the center")
+        check(bool(bob.rect("knNotif%d" % fr)), "the notification item is in the center")
 
         # a click dismisses it
-        check(bob.click("knNotif1"), "clicking the notification")
-        check(wait(lambda: "[notify] dismiss #1" in bob.text(), 5.0), "the click dismisses it (\"[notify] dismiss #1\")")
-        check(bob.rect("knNotif1") is None, "the dismissed item is gone from the page")
+        check(bob.click("knNotif%d" % fr), "clicking the notification")
+        check(wait(lambda: "[notify] dismiss #%d" % fr in bob.text(), 5.0), "the click dismisses it (\"[notify] dismiss #%d\")" % fr)
+        check(bob.rect("knNotif%d" % fr) is None, "the dismissed item is gone from the page")
 
         # bob follows alice back: they are friends; alice's direct message is a notification too
         asyncio.run(social_do(port, names[1], ["f", names[0], 1]))  # bob follows back: friends
         asyncio.run(social_do(port, names[0], ["eb", {"type": "msg:send", "to": B, "text": "hi bob"}]))
-        check(wait(lambda: "[notify] show #2" in bob.text(), 10.0), "a direct message raises a notification (\"[notify] show #2\")")
-        check('"Message from %s"' % names[0] in bob.text(), "the message notification names its sender")
+        check(wait(lambda: shown_id("Message from %s" % names[0]) is not None, 10.0), "a direct message raises a notification titled with its sender")
+        dm = shown_id("Message from %s" % names[0]) or -1
         time.sleep(0.6)
-        d1 = bob.rect("knNotifBar2")
+        d1 = bob.rect("knNotifBar%d" % dm)
         time.sleep(1.5)
-        d2 = bob.rect("knNotifBar2")
+        d2 = bob.rect("knNotifBar%d" % dm)
         check(d1 is not None and d2 is not None and d2[2] < d1[2] - 1.0,
               "the message's countdown bar narrows (%s -> %s px)" % (d1 and d1[2], d2 and d2[2]))
-        check(wait(lambda: "[notify] expired #2" in bob.text(), 12.0),
-              "the message expires on its own after 6 s (\"[notify] expired #2\")")
-        check(bob.rect("knNotif2") is None, "the expired item is gone from the page")
+        check(wait(lambda: "[notify] expired #%d" % dm in bob.text(), 12.0),
+              "the message expires on its own after 6 s (\"[notify] expired #%d\")" % dm)
+        check(bob.rect("knNotif%d" % dm) is None, "the expired item is gone from the page")
         shot = os.path.join(WORK, "bob-center.png")
         bob.cmd("shot " + shot)
         wait(lambda: os.path.exists(shot), 10)

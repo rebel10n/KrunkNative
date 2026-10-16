@@ -119,6 +119,7 @@ void store_ui_window_post(int id);          // v10 page: #menuWindow.eterno on t
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" / "spinKR" / "spinH" replies
 void store_ui_free_kr_wheel(void);          // claimReward(): the Free KR wheel
+void store_ui_open_tab(int tab);            // windows[13].switchTab(tab) + showWindow(14) (5: the Eterno Shop's shop front)
 void store_ui_account_changed(void);        // a login / logout: the spin history is the old account's
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
 void store_ui_scenario_wheel(int index, int multi); // --render-scenario state.spin(+spinMulti): prizeWheel(index, null, multi) with noAnim

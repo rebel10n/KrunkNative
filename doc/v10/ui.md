@@ -109,7 +109,7 @@ All are `genericPopup({component, props}, cls)` or Svelte overlays.
 | Community and events | `openCommunityMenu()` | `communityPopup`, `_66842` | polls (`windows.community.polls.*`) | 215754 |
 | Guide / tutorial | `openGuide()` | `tutorialPopup`, `.tutorialContent` | 29 `img/guide/*.png`, `videos/tutorial/basics.mp4` | 197030, 216856 |
 | Username purchase | `showUsernamePurchase(name, renew)` | `.usernames-content` | `usernamePriceUSD 9.99`, `usernameValidDays 365`, `usernameSwapDays 7`, `usernameGraceHours 167`, `usernameHoldMins 15`; product id `username-renew:<name>`; blocked on Steam (`account.usernames.steam`) | 113085, 209249 |
-| Wild offers | `showWildOfferPurchase` | `.wild-offer-notification`, `.wild-offer-showcase` | product id `wildoffer:<id>` | 126471-126847, 209224 |
+| Wild offers | `showWildOfferPurchase` | `.wild-offer-notification`, `.wild-offer-showcase` | product id `wildoffer:<id>`. Ported: client/src/ui/v10_wild_offer.c (notification, shop front item, item view, buy / refresh) over kn_brain's `wo` / `wob` / `wor` (services/brain/wild_offer.c: one KR offer per account and UTC day). Differs: KR offers only, the shop front holds only the wild offer | 126471-126847, 209224 |
 | Signup / register rewards | `showSignupRewards()` | `signupRewardsPop`, `registerRewardsPop` | `img/register_rewards_crd.png`, "Welcome to the Family!" (24 h premium) | 115207, 196633, 215763 |
 | Guest earnings | after match as guest | `.guest-earned-collect` | `guestKRCap 20`, `guestScoreCap 2500` | 115125 |
 | Email opt-in / verify | account flow | `.optin` (`./img/email_optin_bg.webp`), `windows.verifyEmail.*` | | 114510, 113519 |

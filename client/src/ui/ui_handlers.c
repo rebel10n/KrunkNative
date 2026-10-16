@@ -9,6 +9,7 @@
 #include <v10_social.h>
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
 #include <ui_logic.h>
+#include <v10_wild_offer.h>
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
 #include <host_flow_ui.h>   // the Host Game flow: openHostWindow, selectHostMap, showGames(true)
@@ -624,6 +625,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     v10_customize_handle,      // v10_customize.c: the v10 page's Change Loadout tabs, Title window
     v10_daily_spin_handle,     // v10_daily_spin.c: the sidebar's Daily Spin
+    v10_wild_offer_handle,     // v10_wild_offer.c: v10 Wild Offers (knWo*)
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item

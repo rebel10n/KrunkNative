@@ -26,6 +26,10 @@ typedef void (*V10NotifyClick)(void *user);
 // no expiry (v10: duration > 0 shows the bar and arms the removal). Returns its id (> 0).
 int v10_notify_push(const char *title, const char *content, double duration_ms);
 int v10_notify_push_ex(const char *title, const char *content, double duration_ms, V10NotifyClick on_click, void *user);
+// A component notification (v10 iíiìïïi({title, content: Component, props})): `html` is the
+// component's markup inside the .notification-item (it brings its own close control, which calls
+// v10_notify_dismiss); title is for the log. Returns its id.
+int v10_notify_push_html(const char *title, const char *html, double duration_ms);
 void v10_notify_dismiss(int id); // iïïiïíï(id); unknown ids are ignored
 void v10_notify_clear(void);
 int v10_notify_count(void);
