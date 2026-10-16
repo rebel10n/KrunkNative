@@ -261,6 +261,7 @@ typedef struct {
     int you_gone;
     // init [15] isComp / [16] isRanked (initGame :219366-219367): "mpos" leaves only in such a game
     int is_comp, is_ranked;
+    int is_official; // init [14] isOfficial (:219331): "end" tables carry the "reward" column (:219864)
     // the ENT's companions our client sends right before it (NET_PACKET_STREAK_SLOTS / PC_STAT) and the
     // comp lobby's team pick ("cd" "t"): the next "en" carries them ([26..28], [13], [8])
     int8_t streak_slots[3];

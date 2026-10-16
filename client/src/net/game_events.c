@@ -705,6 +705,26 @@ static int official_strings(const uint8_t *p, size_t left, const char **out, con
     return n;
 }
 
+// Official "rds" Switching Sides (game.deob.js:219244-219262, NET_EXT_KN_OFFICIAL_ROUND_SWITCH): every
+// player inactive and its model gone, our aim off, the death card hidden (uiBase.onDeathScrn, game UI
+// off), the camera gliding to the overview (camTarget(0, 220, 100, -PI / 2 * 0.7, 0)), and the menu
+// after 3 s unless our next "0" respawned us (the death-menu timer, cleared by our SPAWN).
+static void events_round_switch(Client *client) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        Player *p = client->game.players[i];
+        if (p && p->active) events_player_dead(client, p);
+    }
+    client->camera.zoom = 1.0f; // toggleAim(you, 0)
+    if (client->me) client->me->aim_val = 0.0f;
+    client_recon_on_death(client);
+    hud_ui_round_switch(client);
+    menu_view_overview(client);
+    client->spawn_requested = 0;
+    client->net_death_time = glfwGetTime();
+    client->net_respawn_delay = 3.0f; // setTimeout(.., 3000)
+    client->net_death_menu_pending = 1;
+}
+
 // An official krunker.io server's HUD packets that our own NetPackets cannot carry (krunker_link.c
 // makes them, net_ext.h NET_EXT_KN_OFFICIAL_*).
 // An official server refused our "en" ("fe" FAILED_TO_ENDER, v10 iíìiîîì :208203): loading ends, the
@@ -762,6 +782,18 @@ static void events_official_hud(Client *client, const uint16_t subtype, const ui
         ui_console_on_chat(h.kind == NET_CHAT_PLAYER ? (name ? name : "unknown") : NULL, text, h.kind);
         if (h.kind == NET_CHAT_PLAYER && name) hud_ui_add_chat(name, text, NULL);
         else hud_ui_add_chat(NULL, text, h.kind == NET_CHAT_SERVER ? (h.color[0] ? h.color : SERVER_CHAT_COLOR) : NULL);
+    } else if (subtype == NET_EXT_KN_OFFICIAL_MEDAL && length == sizeof(NetOfficialMedalPacket)) {
+        // "am" -> addMedal([name, score, sound, count]): the score as given ("12 KR")
+        NetOfficialMedalPacket m;
+        memcpy(&m, body, sizeof(m));
+        m.text[sizeof(m.text) - 1] = 0;
+        m.score[sizeof(m.score) - 1] = 0;
+        hud_popups_medal_scored(m.text, m.score, m.sound, m.count);
+    } else if (subtype == NET_EXT_KN_OFFICIAL_END_ROW && length == sizeof(NetOfficialEndRowPacket)) {
+        NetOfficialEndRowPacket row; // an "end" row: the end table prints it even when its player left
+        memcpy(&row, body, sizeof(row));
+        row.name[sizeof(row.name) - 1] = 0;
+        hud_modes_end_row(&row);
     } else if (subtype == NET_EXT_KN_OFFICIAL_LEADER_BOARD && length >= sizeof(NetOfficialLeaderBoardHeader)) {
         // "ulb" -> map.manager.updatePendingLeader(index, rows): the canvas of that LEADERBOARD object
         NetOfficialLeaderBoardHeader h;
@@ -1150,8 +1182,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 ping.key[sizeof(ping.key) - 1] = 0;
                 hud_ping_marker_add(ping.key, (vec3) {ping.x, ping.y, ping.z});
             }
-            else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_LEADER_BOARD) events_official_hud(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_OFFICIAL_ENTER_FAILED) events_enter_failed(client, (const char *) body, body_length); // "fe"
+            else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_END_ROW) events_official_hud(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_KN_OFFICIAL_ROUND_SWITCH) events_round_switch(client);
             else if (subtype == NET_EXT_VOTE_FORFEIT_STATE && body_length >= sizeof(NetVoteForfeitStatePacket)) { // "vf" (hud_votekick.c)
                 NetVoteForfeitStatePacket state;
                 memcpy(&state, body, sizeof(state));

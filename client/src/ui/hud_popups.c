@@ -86,6 +86,7 @@ static int g_score_total;            // bN: accumulated while the "+N" is up
 static struct {
     char text[192];                  // medal names, trigger popup texts (TRIGGER_TEXT_MAX), translated lines
     int score;
+    char score_text[24];             // a score as given ("12 KR", official "am"), "" = the number
     int index;                       // overlay.medalsList index, -1 = a text (classic banner only)
     int sound;                       // medal_<sound>
     int count;
@@ -373,7 +374,8 @@ static void medal_show(const double delay) {
     if (g_medal_count <= 0) return;
     if (!client_render_settings()->show_medals && strcmp(g_medals[0].text, "Reward") && strcmp(g_medals[0].text, "Spent")) return;
     char text2[24] = "";
-    if (g_medals[0].score) snprintf(text2, sizeof(text2), "%s%d", g_medals[0].score > 0 ? "+" : "", g_medals[0].score);
+    if (g_medals[0].score_text[0]) snprintf(text2, sizeof(text2), "%s", g_medals[0].score_text);
+    else if (g_medals[0].score) snprintf(text2, sizeof(text2), "%s%d", g_medals[0].score > 0 ? "+" : "", g_medals[0].score);
     if (!setting_on("classicMedals", 0) && g_medals[0].index >= 0) {
         medal_animate_icon(g_medals[0].index, text2[0] ? text2 : NULL, g_medals[0].sound, g_medals[0].count, MEDAL_ANIM_MS, 50.0,
                            delay, medal_done);
@@ -404,6 +406,7 @@ static void medal_add(const char *text, const int score, const int sound, const 
     if (g_medal_count >= MEDAL_QUEUE_MAX) return;
     snprintf(g_medals[g_medal_count].text, sizeof(g_medals[0].text), "%s", text);
     g_medals[g_medal_count].score = score;
+    g_medals[g_medal_count].score_text[0] = 0;
     g_medals[g_medal_count].index = index;
     g_medals[g_medal_count].sound = sound;
     g_medals[g_medal_count].count = c; // v7 pushes 1 here (documented above)
@@ -421,6 +424,18 @@ void hud_popups_medals(const NetMedalPacket *medals, const int count) {
         medal_add(text, medals[i].score, 0, 1);
     }
     if (was_empty) medal_show(MEDAL_DELAY_MS);
+}
+
+// Official "am" [name, score, sound, count] (krunker_link.c, NET_EXT_KN_OFFICIAL_MEDAL): the score as
+// the server gave it ("12 KR" under "Reward", "+20"), the medal's sound and count (stacked like v10).
+void hud_popups_medal_scored(const char *text, const char *score, const int sound, const int count) {
+    if (g_comp || !text || !text[0]) return;
+    const int was_empty = g_medal_count == 0;
+    const int before = g_medal_count;
+    medal_add(text, 0, sound, count);
+    if (g_medal_count > before && score && score[0])
+        snprintf(g_medals[g_medal_count - 1].score_text, sizeof(g_medals[0].score_text), "%s", score);
+    if (was_empty && g_medal_count) medal_show(MEDAL_DELAY_MS);
 }
 
 // "am" [text, null] of a Broadcast / Send Popup trigger: one medal without score.

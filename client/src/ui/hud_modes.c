@@ -4,6 +4,7 @@
 // updateTeam ("tm"), updateLives ("lv"), actionFeed ("ac"), lockPlayer ("lock"),
 // Game.updateFlags (the CTF flag messages) and the end screen's teamTotal0/1 + endStats.
 #include <hud_modes.h>
+#include <audio.h> // "rds": woosh_0
 #include <streamer.h>
 #include <mode_world.h>
 #include <html_ui.h>
@@ -77,6 +78,25 @@ typedef struct {
 } HudModes;
 
 static HudModes g_modes = {.mode_id = -1, .lives = -1};
+// official "end" rows (NET_EXT_KN_OFFICIAL_END_ROW): the name / values of a row whose player left
+static NetOfficialEndRowPacket g_end_rows[NET_MODE_END_MAX];
+static int g_end_row_count;
+
+void hud_modes_end_row(const NetOfficialEndRowPacket *row) {
+    int i = 0;
+    while (i < g_end_row_count && g_end_rows[i].uid != row->uid) i++;
+    if (i == g_end_row_count) {
+        if (g_end_row_count >= NET_MODE_END_MAX) return;
+        g_end_row_count++;
+    }
+    g_end_rows[i] = *row;
+}
+
+static const NetOfficialEndRowPacket *end_row(const int uid) {
+    for (int i = 0; i < g_end_row_count; i++)
+        if (g_end_rows[i].uid == uid) return &g_end_rows[i];
+    return NULL;
+}
 static char g_scenario_message[NET_GAME_MESSAGE_SIZE]; // --render-scenario modeHud.gameMessage
 static int g_scenario_message_set;
 
@@ -312,6 +332,7 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
             if (rounds.win_team > 0) snprintf(lead, sizeof(lead), "%s is in the Lead!", mode_team_name(game, rounds.win_team));
             else snprintf(lead, sizeof(lead), "Both Teams are Equal!");
             snprintf(g_modes.popup_title, sizeof(g_modes.popup_title), "Switching Sides");
+            audio_play("woosh_0", 0.5f, 0, 1.0f); // SOUND.play("woosh_0", 0.5) (:219260)
             snprintf(g_modes.popup_text, sizeof(g_modes.popup_text), "%s", lead);
             g_modes.popup_seq++;
             hud_popups_medal_text(I18N("modes.round.switch", "Switching Sides. Prepare for the next Round"));
@@ -559,6 +580,7 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
 
 void hud_modes_reset(Client *client) {
     mode_world_unload(client);
+    g_end_row_count = 0;
     const int chat_seq = g_modes.chat_seq;
     memset(&g_modes, 0, sizeof(g_modes));
     g_modes.mode_id = -1;
@@ -843,13 +865,28 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
     for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len < 15000; r++) {
         const NetModeEndEntry *entry = &g_modes.end.entries[r];
         const Player *player = client_find_player((Client *) client, entry->uid);
-        if (!player) continue;
+        // an official row prints its player even after it left (v10 :219871-219890: the row's own
+        // [name, alias] cell and values); our own server's rows are all of present players
+        const NetOfficialEndRowPacket *row = end_row(entry->uid);
+        static Player ghost;
+        if (!player && row) {
+            memset(&ghost, 0, sizeof(ghost));
+            ghost.uid = row->uid;
+            snprintf(ghost.name, sizeof(ghost.name), "%s", row->name);
+            ghost.score = row->score;
+            ghost.kills = (unsigned int) (row->kills > 0 ? row->kills : 0);
+            ghost.deaths = (unsigned int) (row->deaths > 0 ? row->deaths : 0);
+            ghost.reward = row->reward;
+        }
+        const int left = !player;
+        if (left && !row) continue;
+        if (left) player = &ghost;
 
         // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
         char name[PLAYER_NAME_SIZE * 6], shown_name[PLAYER_NAME_SIZE * 6], shown[PLAYER_NAME_SIZE];
         html_escape(player->name, name, sizeof(name));
         html_escape(streamer_name(player->name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
-        const char *color = player == client->me ? "#fff" : local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
+        const char *color = player == client->me ? "#fff" : !left && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, 16384 - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
@@ -859,7 +896,8 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
                                          "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
             } else {
                 char value[64];
-                hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
+                if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
+                else hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
                 len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'>%s</td>", value);
             }
         }

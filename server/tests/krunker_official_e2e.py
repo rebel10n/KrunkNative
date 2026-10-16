@@ -111,7 +111,7 @@ BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--world": "world", "--actions": "actions", "--live": "live",
-        "--social": "social"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--social": "social", "--rounds": "rounds", "--hud": "hud"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -429,6 +429,8 @@ class Stub:
         self.spawn = spawn or (4.0, 0.0, 4.0)
         self.frame_t = []         # time.monotonic() of every client frame (parallel to self.frames)
         self.sent = {}            # sync / hud: what the stub sent when (name -> time.monotonic())
+        self.isn_restart = 0      # rounds: our respawn after Switching Sides: the client's next "q" may restart its isn
+        self.k_paused = False     # rounds: no "k" while the server has every player inactive (Switching Sides)
         self.ended = False        # hud: "end" went out: the clock frames carry state 1 ("Next Round in")
         self.http_log = []      # (path, query list)
         self.ws_paths = []
@@ -571,6 +573,7 @@ class Stub:
 
         hud = self.scenario == "hud"
         ingame = self.scenario == "ingame"
+        rounds = self.scenario == "rounds"
         actions = self.scenario == "actions"
 
         stop = asyncio.Event()
@@ -584,8 +587,10 @@ class Stub:
             base_ms = 300000  # 5:00
             last_fmt = None
             while not stop.is_set():
-                x += 0.5
-                await send("k", [BOT_SID, x, 0, 0, 90, 0, 0, 1, 0, 0, 0, None, 30], 10, int(time.time() * 1000) & 0xffffff)
+                if self.scenario != "rounds":  # rounds: the bot stands at 0, 0, 0 in front of us (its Juggernaut marker)
+                    x += 0.5
+                if not self.k_paused:
+                    await send("k", [BOT_SID, x, 0, 0, 90, 0, 0, 1, 0, 0, 0, None, 30], 10, int(time.time() * 1000) & 0xffffff)
                 remain = max(0, base_ms - int((time.monotonic() - t0) * 1000))
                 fmt = "%d:%02d" % (remain // 60000, (remain // 1000) % 60)
                 if fmt != last_fmt:
@@ -620,6 +625,9 @@ class Stub:
                     self.proto_errors.append("ahNum %s: trailer %d, expected %d (frame %d)" % (name, trailer, ah_exp[0], len(self.frames)))
                 # "q" firstIsn must strictly advance (isn increments per input frame, never resets
                 # without a respawn; the stub never kills our player) - a stall or rewind is a desync.
+                if name == "q" and self.isn_restart:  # a new player of ours (rounds' respawn): a new input sequence
+                    self.isn_restart = 0
+                    last_q_isn[0] = None
                 if name == "q" and len(args) > 1:
                     try:
                         isn = int(args[1])
@@ -663,6 +671,9 @@ class Stub:
                 await send("init", self.map_index, 3, 0, [[1, 0], [2, 0]], [[1, 3, "AT BASE"], [2, 1, "AT BASE"]], None, {}, None, 0, None, None,
                            {"gor": True, "flg": [[40, 0.0, 0.0, 0.0, 0, None], [41, 20.0, 0.0, 20.0, 0, None]], "obj": [None, 0]},
                            None, False, True, False, None, None, 0)
+            elif rounds:  # Hardpoint (2), arg 14 isOfficial: the end table's "reward" column
+                await send("init", self.map_index, 2, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
+                           None, False, True, False, None, None, 0)
             elif ingame:  # TDM (1); arg 5: the bot hosts this (custom) lobby; arg 14 isOfficial
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], "sockBOT", {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
@@ -673,7 +684,7 @@ class Stub:
                 bot[6], bot[10], bot[11], bot[25], bot[28], bot[31] = 1, 33, "CLN", True, "AceBot", 777
                 await send("0", bot)
             else:
-                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions else 0))
+                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions or rounds else 0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -707,6 +718,10 @@ class Stub:
                     if stop.is_set():
                         break
                     await asyncio.sleep(0.1)
+            elif self.got_en.is_set() and rounds:
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 0.0, 20.0, team=1))
+                await self.rounds_phases(send, stop, player)
             elif self.got_en.is_set() and ingame:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -730,7 +745,7 @@ class Stub:
             elif self.got_en.is_set() and hud:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
-                await self.hud_phases(send, stop)
+                await self.hud_phases(send, stop, player)
             elif self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
@@ -863,7 +878,7 @@ class Stub:
             mark("closed")
 
 
-    async def hud_phases(self, send, stop):
+    async def hud_phases(self, send, stop, player):
         """Packet-audit clusters C / D against a live client (run_native_hud): scores, kills, the
         leaderboard, ammo, CTF flags, the action feed, localized chat, then the end of the match. An
         "l" every 0.4 s keeps us where we spawned and acks the last isn."""
@@ -877,11 +892,16 @@ class Stub:
 
         await hold(3.0)
         self.sent["hud"] = time.monotonic()
+        # the round popup goes first: the medal queue shows one medal at a time, and the end screen hides the HUD.
+        # Switching Sides makes every player inactive (v10): like the live server, ours comes back with a "0"
+        # once the popup had its time (a spawn clears the medal queue the popup rides here)
+        await send("rds", 2, False, 1, {"1": 2, "2": 1})  # UPDATE_ROUNDS_DIS: Switching Sides, Alpha leads
+        await asyncio.sleep(2.5)
+        self.isn_restart = 1
+        await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
         await send("ts", 1, 5)                        # TEAM_SCORE: team 1 = 5
         await send("5", 120, False, False, 0)         # GET_SCORE: +120
         await send("6", [9, 100, 0, 1], 0, 3, 1)      # GET_KILL: Headshot +100, totalKills 3
-        # the round popup goes early: the medal queue shows one medal at a time, and the end screen hides the HUD
-        await send("rds", 2, False, 1, {"1": 2, "2": 1})  # UPDATE_ROUNDS_DIS: Switching Sides, Alpha leads
         await send("3", BOT_SID, 1, MY_SID, None, {"wId": 0}, False)  # KILL_PLAYER: the bot, by us
         await send("7", [MY_SID, 1, 220, BOT_SID, 0, 40])  # UPDATE_LEADERS, CTF's [caps, score]
         await send("ulb", 1, ["Alice", 500, "Bob", 1.5])   # UPDATE_LEADER_BOARD: a map board's rows
@@ -909,6 +929,42 @@ class Stub:
                                            BOT_SID, ["StubBot", "StubBot"], 40, 0, 1, 0, "NONE"],
                                     "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 3}, 1, 3, 12, None, {})
         await hold(12.0)
+        self.sent["done"] = time.monotonic()
+
+    async def rounds_phases(self, send, stop, player):
+        """official-ingame-rounds (run_native_rounds): the bot (sid 5, an enemy at 0, 0, 0 in front of us at 0, 0, 20)
+        becomes a Juggernaut (its marker), a "Reward" medal with its "12 KR", then Switching Sides ("rds": every
+        player inactive, no "q" from us until our next "0" 2 s later), then the end (Hardpoint's dmg column, a row
+        of sid 31 who left before it). An "l" every 0.4 s keeps us at 0, 0, 20 and acks the last isn."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 0.0, 0, 20.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["jg"] = time.monotonic()
+        await send("jg", BOT_SID, True)                  # SET_JUGGERNAUT: the enemy marker (jugg_2)
+        await send("am", ["Reward", "12 KR", 0, 1])     # ADD_MEDAL: "Reward" / "12 KR"
+        await hold(4.0)
+        self.k_paused = True
+        self.sent["rds"] = time.monotonic()
+        await send("rds", 2, False, 1, {"1": 1, "2": 0})  # Switching Sides: Alpha leads
+        await asyncio.sleep(2.0)
+        self.sent["respawn"] = time.monotonic()
+        self.isn_restart = 1
+        await send("0", player("sockME", MY_SID, "Guest_9", 0.0, 20.0, team=2) + player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=1))
+        self.k_paused = False
+        await hold(3.0)
+        self.sent["end"] = time.monotonic()
+        self.ended = True
+        await send("end", 0, True, {"ed": [MY_SID, ["Guest_9", "Guest_9"], 300, 5, 2, 40, 812, "<span style='color:#F8C55C'>+12</span> KR",
+                                           31, ["acct31", "Gone31"], 150, 3, 4, 10, 377, "NONE",
+                                           BOT_SID, ["StubBot", "StubBot"], 90, 1, 5, 0, 120, "NONE"],
+                                    "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 2}, 1, 3, 12, None, {})
+        await hold(10.0)
         self.sent["done"] = time.monotonic()
 
     async def ingame_phases(self, send, stop):
@@ -1795,6 +1851,49 @@ def run_native_hud():
     endtab = [clean(t) for t in probe("endtab")]
     check(f"{label}: END_GAME: the results list both players with our reward", any("Guest_9" in t and "StubBot" in t and "12" in t
                                                                                      for t in endtab), endtab[-1:])
+
+
+def run_native_rounds():
+    """official-ingame-rounds: Switching Sides, the Juggernaut marker, a "Reward" medal's text score and an end
+    table with a row of a player who left (Stub.rounds_phases)."""
+    label = "native-rounds"
+    dense = ["text @medal [id=knMedal]", "text @chal [id=knChalName]", "jugg", "players"]
+    probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 500) for k, kind in enumerate(dense))
+    tab = ("29800 clicksel .tabHeader:first-child\n29900 text @endtab [id=endTable]\n30500 text @endtab [id=endTable]\n")
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s%s31000 quit\n" % (PASTE_TOKEN, probes, tab)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="rounds")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("jg", "rds", "respawn", "end", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    clean = lambda t: t.replace("‎", "").replace("‏", "")  # noqa: E731
+
+    def probe(name):
+        return [clean(m.group(1)) for m in re.finditer(r"\[input_script\] text t=\d+ @%s n=\d+ checked=\d+ value=\S* text=(.*)" % name, text)]
+
+    jugg = [int(v) for v in re.findall(r"\[input_script\] jugg t=\d+ shown=(\d+)", text)]
+    check(f"{label}: \"jg\": the Juggernaut marker is drawn over the enemy", jugg and max(jugg) >= 1, jugg[-5:])
+    pops = [t.upper() for t in probe("medal") + probe("chal")]
+    check(f"{label}: \"am\" Reward: the popup reads 12 KR", any("12 KR" in t for t in pops), sorted(set(pops))[-5:])
+    # Switching Sides: no "q" from 0.5 s after "rds" until our "0" (2 s later), and they come back after it
+    t_rds, t_spawn = stub.sent.get("rds", 0), stub.sent.get("respawn", 0)
+    qs = [t for (name, _, _), t in zip(stub.frames, stub.frame_t) if name == "q"]
+    during = [round(t - t_rds, 2) for t in qs if t_rds + 0.5 < t < t_spawn]
+    after = [t for t in qs if t > t_spawn + 0.3]
+    check(f"{label}: \"rds\": no input frame until our next \"0\"", t_rds and t_spawn and not during, during[:5])
+    check(f"{label}: \"rds\": the input frames resume after our \"0\"", after, len(after))
+    rows = re.findall(r"\[input_script\] players t=(\d+) n=\d+(.*)", text)
+    inactive = [r for t, r in rows if re.search(r" %d:[^ ]*\*-" % MY_SID, r) and re.search(r" %d:[^ ]*-" % BOT_SID, r)]
+    check(f"{label}: \"rds\": every player inactive (players probe '-')", inactive, rows[-1:] if rows else "")
+    first = next((i for i, (_, r) in enumerate(rows) if r in inactive), None)
+    check(f"{label}: after our \"0\" we are active again", first is not None and
+          any(re.search(r" %d:[^ ]*\*(?:$| )" % MY_SID, r) for _, r in rows[first + 1:]), rows[-1:] if rows else "")
+    endtab = probe("endtab")
+    check(f"{label}: \"end\": the row of a player who left (Gone31) and Hardpoint's dmg (812 / 377)",
+          any("Gone31" in t and "812" in t and "377" in t for t in endtab), endtab[-1:])
 
 
 def run_native_ingame():
@@ -2957,6 +3056,7 @@ def main():
         run_native_hq()
         run_native_hud()
         run_native_ingame()
+        run_native_rounds()
         run_native_world()
         run_native_actions()
         run_native_social()
@@ -2974,6 +3074,10 @@ def main():
         run_native_live_stale()
         run_native_live_fallback()
         ran = True
+    if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
+        run_native_hud()
+    if ONLY == "rounds" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame-rounds' run
+        run_native_rounds()
     if ONLY == "ingame" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame's run
         run_native_ingame()
     if ONLY == "world" and os.path.isfile(f"{BUILD}/client_bin"):  # just the mode-objective / world packets

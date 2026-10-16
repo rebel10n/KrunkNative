@@ -263,6 +263,7 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     l->unsupported_map = -1;
     l->is_comp = truthy(arg(f, 15));   // initGame iîIiiïï (:219366)
     l->is_ranked = truthy(arg(f, 16)); // iiÎîîíî
+    l->is_official = truthy(arg(f, 14)); // iìÎíììì
     l->vote_count = 0;
     emit_lobby_config(l, f);
     NetInitPacket init;
@@ -1024,10 +1025,38 @@ static void on_weapon_streak(KrunkerLink *l, const KrunkerFrame *f) {
 }
 
 // "am" ADD_MEDAL [[medal, score, sound, count]] (iîíìiïì :220960): one popup per medal
+// "am" ADD_MEDAL [[name | medal index, score, sound, count]*] (iîíìiïì :220960): each medal as v10 shows
+// it: the score as given (a text such as the reward's "12 KR", a number as "+N"), its sound and count
+// (NET_EXT_KN_OFFICIAL_MEDAL); a bare text (a trigger's popup) stays a NET_PACKET_MEDAL without score
 static void on_add_medal(KrunkerLink *l, const KrunkerFrame *f) {
-    NetMedalPacket medals[NET_KILL_MEDALS_MAX];
-    const int n = medals_from(arg(f, 0), medals, NET_KILL_MEDALS_MAX);
-    for (int i = 0; i < n; i++) emit(l, NET_PACKET_MEDAL, &medals[i], sizeof(medals[i]));
+    const KrunkerValue *list = arg(f, 0);
+    if (!krunker_is(list, KRUNKER_ARRAY)) {
+        NetMedalPacket medals[NET_KILL_MEDALS_MAX];
+        const int n = medals_from(list, medals, NET_KILL_MEDALS_MAX);
+        for (int i = 0; i < n; i++) emit(l, NET_PACKET_MEDAL, &medals[i], sizeof(medals[i]));
+        return;
+    }
+    for (uint32_t i = 0; i < list->len; i += 4) {
+        const KrunkerValue *name = &list->u.items[i], *score = krunker_at(list, i + 1);
+        NetOfficialMedalPacket m;
+        memset(&m, 0, sizeof(m));
+        if (krunker_is(name, KRUNKER_NUM)) {
+            const int index = (int) name->u.num;
+            if (index < 0 || index >= PROGRESSION_MEDAL_COUNT) continue;
+            snprintf(m.text, sizeof(m.text), "%s", g_progression_medals[index]);
+        } else if (krunker_is(name, KRUNKER_STR) && name->len) {
+            snprintf(m.text, sizeof(m.text), "%s", krunker_str(name));
+        } else {
+            continue; // '' != name
+        }
+        if (krunker_is(score, KRUNKER_NUM) && isfinite(score->u.num) && score->u.num != 0)
+            snprintf(m.score, sizeof(m.score), "%s%d", score->u.num > 0 ? "+" : "", (int) score->u.num);
+        else if (krunker_is(score, KRUNKER_STR)) snprintf(m.score, sizeof(m.score), "%s", krunker_str(score));
+        const double sound = num(krunker_at(list, i + 2), 0), count = num(krunker_at(list, i + 3), 1);
+        m.sound = (uint8_t) (sound > 0 && sound < 256 ? sound : 0);
+        m.count = (uint8_t) (count >= 1 && count < 256 ? count : 1); // iìÏiïiî[i + 3] || 1
+        emit_hud_ext(l, NET_EXT_KN_OFFICIAL_MEDAL, &m, sizeof(m));
+    }
 }
 
 // "krt" UPDATE_KR_TAGS [dogTags, depositType] (iííîïii :220680): our tag count (#krTagHolder). A
@@ -1134,6 +1163,11 @@ static void on_rounds(KrunkerLink *l, const KrunkerFrame *f) {
         p.team_round_wins[t] = (int32_t) num(krunker_get(wins, key), 0);
     }
     emit(l, NET_PACKET_ROUNDS, &p, sizeof(p));
+    // Switching Sides (:219244-219262): every player inactive (our own included: no input frame leaves
+    // until our next "0", as with no `you`), aim off, the death card hidden, the overview camera and
+    // the menu after 3 s unless we were respawned; the client does the visible part
+    if (l->my_sid >= 0) l->you_gone = 1;
+    emit_ext(l, NET_EXT_KN_OFFICIAL_ROUND_SWITCH, NULL, 0);
 }
 
 // "zn" UPDATE_ZONE [[x, z, sizeX, sizeZ]] (game.updateZone :189401 -> zone.update(0, data))
@@ -1292,7 +1326,7 @@ static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
     for (; n < ncols && n < 23; n++) names[n] = cols[n];
     int has_reward = 0;
     for (int i = 0; i < n; i++) has_reward |= !strcmp(names[i], "reward");
-    if (!has_reward) names[n++] = "reward"; // isOfficial: endStats.push("reward") (:191350)
+    if (!has_reward && l->is_official) names[n++] = "reward"; // isOfficial: endStats.push("reward") (:191350, :219864)
     // the row length: the columns, unless they do not fit the rows (another build's endStats): then
     // the distance between two name cells ([name, alias]), and only the sids are read
     uint32_t stride = (uint32_t) n;
@@ -1326,16 +1360,31 @@ static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
         NetModeEndEntry *m = me.count < NET_MODE_END_MAX ? &me.entries[me.count] : NULL;
         e->uid = sid;
         if (m) m->uid = sid;
+        NetOfficialEndRowPacket er;
+        memset(&er, 0, sizeof(er));
+        er.uid = sid;
+        er.dmg = -1;
+        // the name cell [name, alias] (alias || name), as v10 prints a player who already left (:219880)
+        const KrunkerValue *cell = stride > 1 ? &ed->u.items[i + 1] : NULL;
+        const KrunkerValue *shown = krunker_is(cell, KRUNKER_ARRAY) ? krunker_at(cell, 1) : cell;
+        if (!krunker_is(shown, KRUNKER_STR) || !shown->len) shown = krunker_is(cell, KRUNKER_ARRAY) ? krunker_at(cell, 0) : NULL;
+        if (krunker_is(shown, KRUNKER_STR)) snprintf(er.name, sizeof(er.name), "%s", krunker_str(shown));
         for (int c = 1; fits && c < n; c++) {
             const KrunkerValue *v = &row[c];
             if (!strcmp(names[c], "reward")) {
                 end.rewards[end.board.count] = end_reward(v);
-            } else if (!strcmp(names[c], "score") && s) {
-                s->score = (int) js_round(num(v, s->score));
-            } else if (!strcmp(names[c], "kills") && s) {
-                s->kills = (int) num(v, s->kills);
-            } else if (!strcmp(names[c], "deaths") && s) {
-                s->deaths = (int) num(v, s->deaths);
+                er.reward = end.rewards[end.board.count];
+            } else if (!strcmp(names[c], "dmg")) {
+                er.dmg = (int32_t) num(v, 0); // endForm.dmg: round(dmgDealt || 0)
+            } else if (!strcmp(names[c], "score")) {
+                er.score = (int32_t) js_round(num(v, s ? s->score : 0));
+                if (s) s->score = er.score;
+            } else if (!strcmp(names[c], "kills")) {
+                er.kills = (int32_t) num(v, s ? s->kills : 0);
+                if (s) s->kills = er.kills;
+            } else if (!strcmp(names[c], "deaths")) {
+                er.deaths = (int32_t) num(v, s ? s->deaths : 0);
+                if (s) s->deaths = er.deaths;
             } else if (m) {
                 const int stat = end_stat(names[c]);
                 if (stat == NET_MODE_STAT_TIME) m->stats[stat] = (int16_t) end_time(v);
@@ -1347,6 +1396,8 @@ static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
             e->kills = s->kills;
             e->deaths = s->deaths;
         }
+        if (s) er.score = e->score, er.kills = e->kills, er.deaths = e->deaths;
+        emit_hud_ext(l, NET_EXT_KN_OFFICIAL_END_ROW, &er, sizeof(er));
         end.board.count++;
         if (m) me.count++;
     }

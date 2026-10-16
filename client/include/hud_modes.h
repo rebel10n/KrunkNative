@@ -6,6 +6,7 @@
 // v3.1.1 index.js initGame / updateTeamScore / updateFlagInfo / updateGameMessage /
 // updateTeam / updateLives / actionFeed / endGame markup (ui/index.html ids).
 #include <client.h>
+#include <net_ext.h> // NetOfficialEndRowPacket
 
 int  hud_modes_handle_packet(Client*, const NetPacket*); // 1: a mode packet (NET_PACKET_MODE_STATE..MEDAL)
 int  hud_modes_handle_event(Client*, int type, const void *payload, uint16_t length); // same, typed payload (offline game)
@@ -32,6 +33,9 @@ const char *const *hud_modes_end_stats(const Client*);
 int  hud_modes_end_rows(int *uids, int max);
 void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
 int  hud_modes_end_team_score(int team);
+// An official "end" row (net_ext.h NET_EXT_KN_OFFICIAL_END_ROW, before its END): #endTable prints it
+// even when its player already left (its name cell), and its "dmg" cell.
+void hud_modes_end_row(const NetOfficialEndRowPacket*);
 
 // WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
 // ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.

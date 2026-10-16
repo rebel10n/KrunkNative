@@ -749,6 +749,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "pings")) {
         // pings: the v10 ping markers ("mpos", hud_map.c) on screen now and whether we spectate
         fprintf(stderr, "[input_script] pings t=%.0f shown=%d spect=%d\n", g_script.time, hud_ping_markers_shown(), spectate_active());
+    } else if (!strcmp(e->cmd, "jugg")) {
+        // jugg: the v10 Juggernaut markers (hud_objectives.c) the overlay drew last frame
+        fprintf(stderr, "[input_script] jugg t=%.0f shown=%d\n", g_script.time, hud_objectives_juggernauts());
     } else if (!strcmp(e->cmd, "players")) {
         // players: every player of the session, "uid:name@x,y,z" (+ "*" for us, "-" inactive)
         char line[2048];

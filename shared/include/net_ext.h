@@ -95,6 +95,9 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
     NET_EXT_KN_OFFICIAL_ENTER_FAILED = 0x8033, // "fe" FAILED_TO_ENDER: the server's message, NUL-terminated ("" none)
+    NET_EXT_KN_OFFICIAL_MEDAL = 0x8034,        // "am" NetOfficialMedalPacket (a text score, sound, count)
+    NET_EXT_KN_OFFICIAL_END_ROW = 0x8035,      // "end" NetOfficialEndRowPacket per endData.ed row, ahead of the END
+    NET_EXT_KN_OFFICIAL_ROUND_SWITCH = 0x8036, // "rds" Switching Sides, no body: every player inactive, the menu in 3 s
     // 0x8040 official combat effects (client-local, like 0x8030)
     NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
 
@@ -221,6 +224,27 @@ typedef struct {
     int32_t index;    // the leaderboard (pendingLeaders key: the map's n-th LEADERBOARD object)
     uint8_t cells;    // strings that follow
 } NetOfficialLeaderBoardHeader;
+
+// NET_EXT_KN_OFFICIAL_MEDAL: one Krunker "am" ADD_MEDAL entry [name | medal index, score, sound, count]
+// (iîíìiïì :220960): v10 shows the score as given, so the server's ["Reward", "12 KR", 0, 1] reads
+// "12 KR" under "Reward" (NET_PACKET_MEDAL's score is a number); count stacks a medal already up.
+typedef struct {
+    char text[32];    // the medal's name (overlay.medalsList[index] for an index)
+    char score[24];   // "" none; a number as "+N" / "-N"
+    uint8_t sound;    // medal_<sound>
+    uint8_t count;    // >= 1
+} NetOfficialMedalPacket;
+
+// NET_EXT_KN_OFFICIAL_END_ROW: one endData.ed row of an official "end" (game.deob.js:219871-219890):
+// v10 prints every row, a player who already left by the row's own [name, alias] cell, so the END's
+// board (which our client resolves to its players) is completed by these. Values are the row's cells.
+typedef struct {
+    int32_t uid;
+    char name[32];    // the name cell: alias || name
+    int32_t score, kills, deaths;
+    int32_t dmg;      // the "dmg" cell (Hardpoint / Raid endStats), -1 none
+    int32_t reward;   // the reward cell's "+N" (0 = "NONE")
+} NetOfficialEndRowPacket;
 #pragma pack(pop)
 // NET_EXT_KN_BOT_PATH (S -> C): the spectated bot's AI state for the show_navmeshes overlay
 // (client/src/nav_overlay.c) and the spectator HUD's state line (hud_spectate.c). The server

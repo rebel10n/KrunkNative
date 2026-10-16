@@ -18,6 +18,9 @@
 void  menu_view_death_cam(Client*, const Player *killer);
 // CONTROLS.reset(): drop the death view and the chase target (spawn, new round, spectating).
 void  menu_view_reset(void);
+// Official "rds" Switching Sides: CONTROLS.camTarget(0, 220, 100, -PI / 2 * 0.7, 0), the chase gliding
+// from where the camera is to the overview until our next spawn.
+void  menu_view_overview(Client*);
 // The death view is up (menu_view_death_cam ran and no spawn / spectate since): the rig takes the look.
 int   menu_view_dead(void);
 // CONTROLS.updateMouseInp while dead: the mouse turns the death rig (ui_controls_fill_look sensitivity,

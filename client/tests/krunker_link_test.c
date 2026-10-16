@@ -12,6 +12,7 @@
 #include <social_v7.h>
 #include <ai.h> // test_fx / test_world: the AI packets
 #include <krunker_sounds.h>
+#include <progression.h> // test_rounds: overlay.medalsList
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -52,10 +53,12 @@ const Weapon *rules_weapon(const int id) {
 // ---- test double: the mode table (shared/src/modes/modes.c in the client): CTF (3)'s columns
 static const char *const k_ctf_lead[] = {"caps", "score", NULL};
 static const char *const k_ctf_end[] = {"sid", "name", "score", "kills", "deaths", "caps", "reward", NULL};
+static const char *const k_point_end[] = {"sid", "name", "score", "kills", "deaths", "obj", "dmg", "reward", NULL};
 const GameModeConfig *mode_config(const int id) {
     static const GameModeConfig ctf = {.leader_stats = k_ctf_lead, .end_stats = k_ctf_end};
     static const GameModeConfig shrp = {.obj_weapon = 1}, parkour = {.show_ms = 1}; // test_world: 22, 5
-    return id == 3 ? &ctf : id == 22 ? &shrp : id == 5 ? &parkour : NULL;
+    static const GameModeConfig point = {.end_stats = k_point_end};                  // test_rounds: Hardpoint (2)
+    return id == 3 ? &ctf : id == 22 ? &shrp : id == 5 ? &parkour : id == 2 ? &point : NULL;
 }
 
 static int fake_cheat(void *user, const char *nonce, const char *ct, KrunkerCcr *out) {
@@ -324,8 +327,14 @@ static void test_hud(void) {
               "st / kst / wstk");
         const NetPacket *as = find_in(NET_PACKET_ASSIST, 0);
         CHECK(as && as->length == 0, "10: ASSIST");
-        READ_IN(NetMedalPacket, m, MEDAL, 0);
-        CHECK(m_p && !strcmp(m.text, "Pickup") && m.score == 20, "am: medalsList[24] Pickup +20");
+        const NetOfficialMedalPacket *m = NULL;
+        for (int k = 0; !m && find_in(NET_PACKET_EXT, k); k++) {
+            uint16_t ml = 0;
+            const uint8_t *mb = ext_body(k, NET_EXT_KN_OFFICIAL_MEDAL, &ml);
+            if (mb && ml == sizeof(NetOfficialMedalPacket)) m = (const NetOfficialMedalPacket *) mb;
+        }
+        CHECK(m && !strcmp(m->text, "Pickup") && !strcmp(m->score, "+20") && m->count == 1 && !find_in(NET_PACKET_MEDAL, 0),
+              "am: medalsList[24] Pickup +20 (NET_EXT_KN_OFFICIAL_MEDAL)");
         READ_IN(NetModeCounterPacket, kr, MODE_COUNTER, 0);
         CHECK(kr_p && kr.kind == NET_MODE_COUNTER_KR_TAGS && kr.uid == 9 && kr.value == 3.0f, "krt: our 3 tags");
     }
@@ -1375,6 +1384,100 @@ static void test_social(void) {
     CHECK(link.unknown_in == 0, "every social packet was handled (%u unknown)", link.unknown_in);
 }
 
+// Switching Sides, official medals with a text score, end rows of players who left (official-ingame-rounds)
+static int find_ext(const uint16_t subtype, const int nth, uint16_t *len) {
+    for (int k = 0, n = 0; find_in(NET_PACKET_EXT, k); k++) {
+        if (ext_body(k, subtype, len) && n++ == nth) return k;
+    }
+    return -1;
+}
+
+static void test_rounds(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    KrunkerValue init[15];
+    for (int i = 0; i < 15; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(2); // Hardpoint
+    init[14] = KRUNKER_V_BOOL(1); // isOfficial
+    feed(&link, "init", init, 15);
+    KrunkerValue add[53];
+    for (int i = 0; i < 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100); add[9] = KRUNKER_V_NUM(1);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 53)}, 1);
+    CHECK(link.is_official && link.my_sid == 9 && !krunker_link_inputs_paused(&link), "rounds: official Hardpoint, in the game");
+    clear();
+
+    // "rds" with its update-only flag: nothing; Switching Sides: ROUNDS, then the switch, no input until our "0"
+    feed(&link, "rds", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_BOOL(1)}, 2);
+    CHECK(!find_in(NET_PACKET_ROUNDS, 0) && !find_in(NET_PACKET_EXT, 0) && !krunker_link_inputs_paused(&link), "rds update-only: nothing");
+    feed(&link, "rds", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(1)}, 3);
+    {
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_ROUND_SWITCH, 0, &len);
+        const NetPacket *r = find_in(NET_PACKET_ROUNDS, 0);
+        CHECK(r && k >= 0 && len == 0 && r < find_in(NET_PACKET_EXT, k) && krunker_link_inputs_paused(&link),
+              "rds: ROUNDS, the switch after it, our inputs paused");
+    }
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 53)}, 1);
+    CHECK(!krunker_link_inputs_paused(&link), "rds: our next \"0\" resumes the inputs");
+    clear();
+
+    // "am": the reward's text score, a medal index with its sound and count, a bare trigger text
+    const KrunkerValue am[] = {KRUNKER_V_STR("Reward"), KRUNKER_V_STR("12 KR"), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1),
+                               KRUNKER_V_NUM(9), KRUNKER_V_NUM(100), KRUNKER_V_NUM(3), KRUNKER_V_NUM(2)};
+    feed(&link, "am", (KrunkerValue[]) {KRUNKER_V_ARRAY(am, 8)}, 1);
+    feed(&link, "am", (KrunkerValue[]) {KRUNKER_V_STR("Trigger text")}, 1);
+    {
+        uint16_t l0 = 0, l1 = 0;
+        const int k0 = find_ext(NET_EXT_KN_OFFICIAL_MEDAL, 0, &l0), k1 = find_ext(NET_EXT_KN_OFFICIAL_MEDAL, 1, &l1);
+        const NetOfficialMedalPacket *a = k0 >= 0 ? (const NetOfficialMedalPacket *) ext_body(k0, NET_EXT_KN_OFFICIAL_MEDAL, &l0) : NULL;
+        const NetOfficialMedalPacket *b = k1 >= 0 ? (const NetOfficialMedalPacket *) ext_body(k1, NET_EXT_KN_OFFICIAL_MEDAL, &l1) : NULL;
+        CHECK(a && !strcmp(a->text, "Reward") && !strcmp(a->score, "12 KR") && a->count == 1, "am: Reward / 12 KR");
+        CHECK(b && !strcmp(b->text, g_progression_medals[9]) && !strcmp(b->score, "+100") && b->sound == 3 && b->count == 2,
+              "am: medal 9, +100, sound 3, count 2");
+        READ_IN(NetMedalPacket, t, MEDAL, 0);
+        CHECK(t_p && !strcmp(t.text, "Trigger text") && !t.score, "am: a bare text stays a MEDAL");
+    }
+    clear();
+
+    // "end": Hardpoint's columns + "reward" (isOfficial); sid 31 left before the end: its row still comes
+    const KrunkerValue n9[] = {KRUNKER_V_STR("Guest_9"), KRUNKER_V_STR("Guest_9")};
+    const KrunkerValue n31[] = {KRUNKER_V_STR("acct31"), KRUNKER_V_STR("Gone31")};
+    const KrunkerValue ed[] = {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(n9, 2), KRUNKER_V_NUM(300), KRUNKER_V_NUM(5), KRUNKER_V_NUM(2), KRUNKER_V_NUM(40),
+                               KRUNKER_V_NUM(812), KRUNKER_V_STR("<span style='color:#F8C55C'>+12</span> KR"),
+                               KRUNKER_V_NUM(31), KRUNKER_V_ARRAY(n31, 2), KRUNKER_V_NUM(150), KRUNKER_V_NUM(3), KRUNKER_V_NUM(4), KRUNKER_V_NUM(10),
+                               KRUNKER_V_NUM(377), KRUNKER_V_STR("NONE")};
+    const KrunkerValue data[] = {KRUNKER_V_STR("ed"), KRUNKER_V_ARRAY(ed, 16)};
+    feed(&link, "end", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_BOOL(1), KRUNKER_V_MAP(data, 1), KRUNKER_V_NUM(1)}, 4);
+    {
+        uint16_t l0 = 0, l1 = 0;
+        const int k0 = find_ext(NET_EXT_KN_OFFICIAL_END_ROW, 0, &l0), k1 = find_ext(NET_EXT_KN_OFFICIAL_END_ROW, 1, &l1);
+        NetOfficialEndRowPacket a, b;
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        if (k0 >= 0) memcpy(&a, ext_body(k0, NET_EXT_KN_OFFICIAL_END_ROW, &l0), sizeof(a));
+        if (k1 >= 0) memcpy(&b, ext_body(k1, NET_EXT_KN_OFFICIAL_END_ROW, &l1), sizeof(b));
+        CHECK(k0 >= 0 && a.uid == 9 && !strcmp(a.name, "Guest_9") && a.score == 300 && a.kills == 5 && a.deaths == 2 && a.dmg == 812 &&
+              a.reward == 12, "end row 9: values, dmg 812, reward 12");
+        CHECK(k1 >= 0 && b.uid == 31 && !strcmp(b.name, "Gone31") && b.score == 150 && b.kills == 3 && b.deaths == 4 && b.dmg == 377 && !b.reward,
+              "end row 31 (left): its alias, values, dmg 377");
+        READ_IN(NetEndPacket, e, END, 0);
+        CHECK(e_p && e.board.count == 2 && find_in(NET_PACKET_EXT, k1) < e_p, "end: the rows come before END");
+    }
+    clear();
+    // not official: no "reward" column is appended (Hardpoint's own list has one, so the row stays 8 wide)
+    link.is_official = 0;
+    feed(&link, "end", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_BOOL(1), KRUNKER_V_MAP(data, 1), KRUNKER_V_NUM(1)}, 4);
+    {
+        READ_IN(NetEndPacket, e, END, 0);
+        CHECK(e_p && e.board.count == 2 && e.rewards[0] == 12, "end (custom lobby): the same rows");
+    }
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -2180,6 +2283,7 @@ int main(void) {
     test_combat();
     test_fx();
     test_world();
+    test_rounds();
     test_actions();
     test_social();
 

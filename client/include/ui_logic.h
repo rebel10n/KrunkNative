@@ -274,6 +274,7 @@ typedef struct {
 // v7 io_killPlayer for the local player: #deathUIHolder (f1975) + UI.toggleGameUI(false).
 void hud_ui_show_death(Client*, const HudKillCard *card);
 void hud_ui_hide_death(Client*);                 // respawn: UI.toggleGameUI(true)
+void hud_ui_round_switch(Client*);               // official "rds": death card hidden, onDeathScrn, game UI off (until the respawn)
 // UI.showEndScreen(false) + fq()/fD(): result 1 victory, 0 defeat, -1 draw; next_round "MM:SS".
 void hud_ui_show_end_screen(Client*, int result, const char *next_round);
 // Next round started (net INIT): undo hud_ui_show_end_screen (#endUI hidden, menu or HUD
@@ -552,6 +553,7 @@ void build_ui_fini(void);                         // its canvas (GL)
 // canvas items (flag pings, the Hardpoint Capture / Next marker, CONTESTED, Domination zones and
 // the capture bar)
 void hud_objectives_render(Client*);              // per frame, after the HUD
+int  hud_objectives_juggernauts(void);            // Juggernaut markers the last render drew (tests)
 int  hud_objectives_shown(void);                  // the last hud_objectives_render drew something (tests)
 void hud_objectives_fini(void);                   // its canvas (GL)
 // END hud_objectives block
@@ -761,6 +763,7 @@ void hud_v7modes_format_time(double ms, int with_ms, char *out, size_t size); //
 void hud_popups_score(int delta);                // gf(): "5" score popup (bN accumulates while up)
 void hud_popups_checkpoint(void);                // gg(): "chp" Checkpoint! (showMedals)
 void hud_popups_medals(const NetMedalPacket *medals, int count); // gm(): "6" / "am" medal queue
+void hud_popups_medal_scored(const char *text, const char *score, int sound, int count); // "am" with its score as given ("12 KR")
 void hud_popups_assist(void);                    // gl(): "10" Assist medal
 void hud_popups_medal_text(const char *text);    // gm([text, null]): a trigger's Broadcast / Send Popup
 void hud_popups_on_spawn(void);                  // "start": medal queue cleared, overlay.reset()

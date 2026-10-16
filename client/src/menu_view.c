@@ -113,6 +113,20 @@ void menu_view_death_cam(Client *client, const Player *killer) {
     chase_clamp_target(&client->game);
 }
 
+void menu_view_overview(Client *client) {
+    menu_view_reset();
+    if (!client) return;
+    g_view.dead = 1;
+    g_view.position = client->camera.position;
+    g_view.yaw = client->camera.rotation.y;
+    g_view.pitch = client->camera.rotation.x;
+    // camTarget(x, y, z, xD, yD): target = {x: 0, y: 220, z: 100, xD: -PI / 2 * 0.7, yD: 0}
+    g_view.target = (vec3) {0.0f, 220.0f, 100.0f};
+    g_view.target_pitch = -(float) M_PI / 2.0f * 0.7f;
+    g_view.target_yaw = 0.0f;
+    g_view.chase = 1;
+}
+
 void menu_view_reset(void) {
     g_view.dead = 0;
     g_view.chase = 0;

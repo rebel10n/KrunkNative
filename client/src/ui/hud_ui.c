@@ -216,6 +216,7 @@ typedef struct {
     int inspecting;          // crosshair hidden while inspecting (Krunker: * (inspecting ? 0 : 1))
     int chat_shown;          // last applied #chatUI display (-1 never applied)
     int dead;                // death card up (UI.toggleGameUI(false) applied, hud_ui_show_death)
+    int round_switch;        // official "rds" Switching Sides until our respawn: the popups still show (v10's textPopup)
     int ended;               // end screen up (UI.showEndScreen, hud_ui_show_end_screen)
     int board_shown;         // #newLeaderDisplay last written shown state (-1 unknown)
     int old_board;           // last applied oldScoreboard (-1 unknown): .topRightCounters width
@@ -2977,8 +2978,22 @@ void hud_ui_show_death(Client *client, const HudKillCard *card) {
     dom_display("deathUIHolder", "block");
 }
 
+// Official "rds" Switching Sides (game.deob.js:219253-219256): toggleGameUI(false), the death card
+// hidden, uiBase.onDeathScrn; the next spawn undoes it (hud_ui_hide_death)
+void hud_ui_round_switch(Client *client) {
+    (void) client;
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    g_hud_ui.dead = 1;
+    g_hud_ui.round_switch = 1;
+    hud_toggle_game_ui(0);
+    dom_display("deathUIHolder", "none");
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) html_dom_set_class(base, "onDeathScrn", 1);
+}
+
 // Respawn: toggleGameUI(true) (toggleMenuHider drops onDeathScrn).
 void hud_ui_hide_death(Client *client) {
+    g_hud_ui.round_switch = 0;
     if (!g_hud_ui.dead) return;
     g_hud_ui.dead = 0;
     hud_dmg_clear();
@@ -4139,6 +4154,7 @@ static void hud_round_page(Client *client) {
 }
 
 void hud_ui_on_init(Client *client) {
+    g_hud_ui.round_switch = 0; // a new round: no Switching Sides any more
     hud_ui_relayout();
     hud_ui_on_config(client);
 }
@@ -4271,7 +4287,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     hud_feed_step(now * 1000.0);
     // game-overlay text popups (client/src/ui/hud_popups.c): drawn while playing (no kill card / menu)
     hud_popups_set_comp(client->game.config.comp);
-    hud_popups_tick(now * 1000.0, hud_in_game(client) && !html_ui_is_menu_open());
+    hud_popups_tick(now * 1000.0, (hud_in_game(client) || (g_hud_ui.round_switch && client->in_game)) && !html_ui_is_menu_open());
 
     // hud.js state.inGame came from the `state` event (client->in_game); the values
     // below are only sampled while the local player is alive.

@@ -107,13 +107,13 @@ static void ho_alpha(const HoFrame *f, const double x, const double y) {
 }
 
 static C2DImage *ho_texture(Canvas2D *c, const char *name) {
-    static const char *const names[] = {"flag_r", "flag_b", "marker_0", "marker_0_next"};
-    static unsigned char fetched[4];
+    static const char *const names[] = {"flag_r", "flag_b", "marker_0", "marker_0_next", "jugg_1", "jugg_2"};
+    static unsigned char fetched[6];
     char rel[96];
     snprintf(rel, sizeof(rel), "textures/%s.png", name);
     char *full = concat(assets_path(), rel);
     if (!full) return NULL;
-    for (int i = 0; i < 4; i++) { // web: fetch each once (the canvas caches the image by path)
+    for (int i = 0; i < 6; i++) { // web: fetch each once (the canvas caches the image by path)
         if (!strcmp(name, names[i]) && !fetched[i]) fetched[i] = (unsigned char) (ensure_asset_file(full) ? 1 : 0);
     }
     C2DImage *img = c2d_image(c, full);
@@ -157,6 +157,52 @@ static void draw_flags(const HoFrame *f, const Client *client, const GameMode *m
         c2d_draw_image(f->c, img, -iw / 2.0, -ih / 2.0, iw, ih);
         c2d_restore(f->c);
     }
+}
+
+// ------------------------------------------------------------------ juggernauts
+
+// v10.0.2's overlay (game.deob.js :160079): a Juggernaut (player.isJuggernaut, the "jg" streak) not
+// around the camera gets textures/jugg_1.png (a teammate in a team mode) or jugg_2.png at its
+// x, y + height / 2, z, max(0.3, 1 - d / 600) * 70 px wide, objectiveOpacity (adsObjectiveOpacity
+// near the crosshair while aiming), in any mode.
+static int g_jugg_drawn; // markers drawn by the last render (tests: hud_objectives_juggernauts)
+
+static int juggernauts_up(const Client *client) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && p->active && p->is_juggernaut && p != client->me) return 1;
+    }
+    return 0;
+}
+
+static void draw_juggernauts(const HoFrame *f, const Client *client, const GameMode *mode, const int team) {
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (!p || !p->active || !p->is_juggernaut || p == client->me) continue;
+        const vec3 center = {p->position.x, p->position.y + p->height / 2.0f, p->position.z};
+        if (in_box(f->camera->position, center, (vec3) {p->scale > 0 ? p->scale : 1.0f, p->height / 2.0f, p->scale > 0 ? p->scale : 1.0f}))
+            continue;
+        double x, y, size;
+        if (!ho_place(f, center, &x, &y, &size)) continue;
+        const int ally = p->team && mode && mode->config.teams && p->team == team;
+        C2DImage *img = ho_texture(f->c, ally ? "jugg_1" : "jugg_2");
+        if (!img) continue;
+        int iw = 0, ih = 0;
+        c2d_image_size(img, &iw, &ih);
+        if (iw <= 0 || ih <= 0) continue;
+        ho_alpha(f, x, y);
+        const double k = size / iw;
+        c2d_save(f->c);
+        c2d_translate(f->c, x, y);
+        c2d_scale(f->c, k, k);
+        c2d_draw_image(f->c, img, -iw / 2.0, -ih / 2.0, iw, ih);
+        c2d_restore(f->c);
+        g_jugg_drawn++;
+    }
+}
+
+int hud_objectives_juggernauts(void) {
+    return g_jugg_drawn;
 }
 
 // ------------------------------------------------------------------ objectives
@@ -344,7 +390,8 @@ void hud_objectives_render(Client *client) {
     const HtmlElem death = html_dom_by_id("deathUIHolder");
     const int shown = mode && client->game.map && !html_ui_is_menu_open() && !hud_ui_end_screen_up() && !(death && html_dom_is_shown(death)) &&
                       ((mode->config.flags || mode->config.oneflag) || (mode->config.objective && mode->objective_count) ||
-                       (mode->config.dom && mode->dom_zone_count));
+                       (mode->config.dom && mode->dom_zone_count) || juggernauts_up(client));
+    g_jugg_drawn = 0;
     if (!shown && !g_ho.drawn) return;
 
     GLFWwindow *window = headless_current_window();
@@ -374,6 +421,7 @@ void hud_objectives_render(Client *client) {
         if (mode->config.flags || mode->config.oneflag) draw_flags(&f, client, mode, team);
         if (mode->config.objective && mode->objective_count) draw_objectives(&f, client, mode, me);
         if (mode->config.dom && mode->dom_zone_count) draw_dom(&f, mode, me, team);
+        draw_juggernauts(&f, client, mode, team);
         c2d_restore(c);
         c2d_set_global_alpha(c, 1);
     }
