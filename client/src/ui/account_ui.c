@@ -20,7 +20,6 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
-#include <v10_notify.h> // econN: gifts, sales, trades in the notification center
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -1021,20 +1020,9 @@ static void on_social(void *user, const cJSON *frame) {
         if (text && text[0] && ui_settings_import_text(text)) popup_response(1, NULL, I18N("settings.loaded", "Settings Loaded"));
         else popup_response(0, I18N("settings.loaded.none", "No settings found"), NULL);
         menu_rerender_if_open(1);
-    } else if (!strcmp(label, "econN")) { // KrunkNative economy note (kn_brain economy.c): a notification outside the hub
-        const char *kind = str_at(frame, 1), *text = str_at(frame, 2);
-        if (text && app_mode() != APP_MODE_HUB && v10_notify_visible()) { // the v10 notification center (v10_notify.c)
-            const char *title = kind && !strcmp(kind, "gift") ? I18N("kn.notify.giftTitle", "Gift Received")
-                              : kind && !strcmp(kind, "sale") ? I18N("kn.notify.saleTitle", "Market Sale")
-                                                              : I18N("kn.notify.tradeTitle", "Trade");
-            v10_notify_push(title, text, 6000.0);
-        } else if (text && app_mode() != APP_MODE_HUB) {
-            StrBuf sb = {0};
-            sb_append_esc(&sb, text);
-            char *html = sb_finish(&sb);
-            ui_notify(html);
-            free(html);
-        }
+    } else if (!strcmp(label, "econN")) {
+        // KrunkNative economy note (kn_brain economy.c): no notification on the menu. v10's centre has
+        // no economy notes: a gift or a sale is Inbox mail (gmc), a trade shows in the hub's Trades.
     } else if (!strcmp(label, "gmc")) { // updateMailCount(count)
         mail_count((int) num_at(frame, 1));
     } else if (!strcmp(label, "kml")) { // mailListResponse(tab, rows)
@@ -1179,6 +1167,33 @@ static double parse_date_ms(const char *s) {
     return (double) mktime(&tmv) * 1000.0;
 }
 
+// a JS string argument inside an inline handler attribute (double-quoted attribute, single-quoted arg)
+static void mail_arg(StrBuf *sb, const char *s) {
+    sb_append(sb, "'");
+    for (; s && *s; s++) {
+        if (*s == '\'' || *s == '\\') sb_append(sb, "\\");
+        if (*s == '"') sb_append(sb, "&quot;");
+        else if (*s == '&') sb_append(sb, "&amp;");
+        else if (*s == '<') sb_append(sb, "&lt;");
+        else sb_append_n(sb, s, 1);
+    }
+    sb_append(sb, "'");
+}
+
+// v10's Followers entry (windows[29].gen, km_notificationtype 0): "X has followed you!" with Follow Back
+// (followPlayer, v10_social.c) and the name opening the profile. An unread entry is highlighted like
+// v10's unread rows (mailUnread, the 2 px border); the Archive tab shows it plain.
+static void mail_follower_row(StrBuf *sb, const int id, const char *ago, const char *name, const int unread) {
+    sb_appendf(sb, "<div class='mailObj%s' id='mail_%d' onclick='windows[29].readMail(this, %d, 0)'%s><div style='position:relative;'><div class='mailDate'>%s<div class='followBack' onclick=\"followPlayer(",
+               unread ? " mailUnread" : "", id, id, unread ? " style='border: 2px solid #5699eb;'" : "", ago);
+    mail_arg(sb, name);
+    sb_append(sb, ", this)\">Follow Back</div></div></div><div class='followFrom'><a onclick=\"openPlayerProfile(");
+    mail_arg(sb, name);
+    sb_append(sb, ")\">");
+    sb_append_esc(sb, name);
+    sb_append(sb, "</a> has followed you!</div></div>");
+}
+
 static char *gen_mail(void) {
     static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs
     StrBuf sb = {0};
@@ -1209,6 +1224,11 @@ static char *gen_mail(void) {
             const int id = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "km_id"));
             char ago[32];
             readable_time2(ago, sizeof(ago), now - parse_date_ms(cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_datesent"))));
+            const char *follower = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_link"));
+            if (type == 0 && follower && follower[0]) {
+                mail_follower_row(&sb, id, ago, follower, !archived);
+                continue;
+            }
             sb_appendf(&sb, "<div class='mailObj' id='mail_%d' onclick='windows[29].readMail(this, %d, %d)'><div style='position:relative;'><div class='mailDate'>%s</div></div><div class='mailFrom' style='margin-bottom:15px'>",
                        id, id, type, ago);
             const char *from = cJSON_GetStringValue(cJSON_GetObjectItem(r, "km_playerfrom"));

@@ -2,10 +2,10 @@
 """v10's notification center, the emoji panel and the item tooltips end to end (client/src/ui/
 v10_notify.c, ui_tooltip.c) on the v10 page:
 
-  1. Friend request (native + kn_brain on sqlite, temp dir): alice follows bob, so bob's
-     notification center raises "Friend Request" (10 s); its countdown bar narrows over time; a
-     click dismisses it. bob follows alice back; alice's direct message raises "Message from
-     alice" (6 s) that counts down and expires on its own.
+  1. Follows and messages (native + kn_brain on sqlite, temp dir): alice follows bob, so bob's Inbox
+     holds a Followers entry (mail kind 0) and the center raises nothing; bob follows alice back (no
+     new entry); alice's direct message raises nothing in the center either (v10's center carries
+     Wild Offer, Survey and Register only).
   2. Emoji panel (offline, in game): ":lo" opens the panel, Enter picks the selected emoji
      (:love:) without sending, Enter sends; the chat line shows the emoji's image.
   3. Loadout hover (offline, Change Loadout > Hat picker): a card's item tooltip (#knTip) appears
@@ -173,62 +173,38 @@ class UiClient:
         self.out.close()
 
 
-def friend_request_flow(port, ids, tokens, names):
-    """1. the friend request, its countdown and click dismissal; 2. the direct message, its expiry"""
+def followers_entries(account_id):
+    """the Followers mail rows (kind 0) of an account in the brain's database: the sender is the follower"""
+    con = sqlite3.connect(DB)
+    try:
+        return [r[0] for r in con.execute("SELECT sender FROM mail WHERE account_id = ? AND kind = 0", (account_id,))]
+    finally:
+        con.close()
+
+
+def follow_flow(port, ids, tokens, names):
+    """1. alice follows bob: no notification in the center (v10's has none for a follow); bob's Inbox
+    holds alice's Followers entry (mail kind 0) and follow back makes no entry; 2. alice's direct
+    message is no notification either (the chat and the Friends tab carry it)"""
     A, B = ids
     bob = UiClient(port, names[1], tokens[1], "bob")
     try:
         check(bool(bob.rect("menuBtnSocial", 60)), "bob: the v10 page is up with the social button")
         time.sleep(2.0)  # bob's social socket (the login) settles before anyone follows him
 
-        # alice follows bob: the brain pushes friend:request to bob's open socket. A retry unfollows
-        # first (the follow that exists makes no event)
-        # a signed-in account also gets its Wild Offer in the center at sign-in (v10_wild_offer.c): the
-        # ids below are the friend request's and the message's own, whatever came before them
-        def shown_id(title):
-            m = re.search(r'\[notify\] show #(\d+) "%s' % re.escape(title), bob.text())
-            return int(m.group(1)) if m else None
+        asyncio.run(social_do(port, names[0], ["f", names[1], 1]))  # alice follows bob (not followed back)
+        check(wait(lambda: names[0] in followers_entries(B), 10.0),
+              "bob's Inbox holds alice's Followers entry (mail kind 0, sender alice)")
+        time.sleep(3.0)  # a center notice would have shown by now
+        check(not re.search(r'\[notify\] show #\d+ "Friend Request', bob.text()),
+              "a follow raises no notification in the center (no \"Friend Request\")")
 
-        raised = False
-        for _ in range(20):
-            asyncio.run(social_do(port, names[0], ["f", names[1], 0], 0.3))
-            asyncio.run(social_do(port, names[0], ["f", names[1], 1]))
-            if wait(lambda: shown_id("Friend Request") is not None, 3.0):
-                raised = True
-                break
-        fr = shown_id("Friend Request")
-        check(raised, "bob's notification center raises the friend request (\"[notify] show #%s \"Friend Request\"\")" % fr)
-        if not raised:
-            raise RuntimeError("no friend request notification (log %s)" % bob.log)
+        asyncio.run(social_do(port, names[1], ["f", names[0], 1]))  # bob follows back: friends, no new entry
+        check(followers_entries(B).count(names[0]) == 1, "a follow back makes no second Followers entry")
 
-        # the countdown: the bar narrows between two samples (10 s duration)
-        time.sleep(0.6)  # the 0.3 s slide-in
-        r1 = bob.rect("knNotifBar%d" % fr)
-        time.sleep(2.0)
-        r2 = bob.rect("knNotifBar%d" % fr)
-        check(r1 is not None and r2 is not None and r2[2] < r1[2] - 1.0,
-              "the friend request's countdown bar narrows (%s -> %s px)" % (r1 and r1[2], r2 and r2[2]))
-        check(bool(bob.rect("knNotif%d" % fr)), "the notification item is in the center")
-
-        # a click dismisses it
-        check(bob.click("knNotif%d" % fr), "clicking the notification")
-        check(wait(lambda: "[notify] dismiss #%d" % fr in bob.text(), 5.0), "the click dismisses it (\"[notify] dismiss #%d\")" % fr)
-        check(bob.rect("knNotif%d" % fr) is None, "the dismissed item is gone from the page")
-
-        # bob follows alice back: they are friends; alice's direct message is a notification too
-        asyncio.run(social_do(port, names[1], ["f", names[0], 1]))  # bob follows back: friends
         asyncio.run(social_do(port, names[0], ["eb", {"type": "msg:send", "to": B, "text": "hi bob"}]))
-        check(wait(lambda: shown_id("Message from %s" % names[0]) is not None, 10.0), "a direct message raises a notification titled with its sender")
-        dm = shown_id("Message from %s" % names[0]) or -1
-        time.sleep(0.6)
-        d1 = bob.rect("knNotifBar%d" % dm)
-        time.sleep(1.5)
-        d2 = bob.rect("knNotifBar%d" % dm)
-        check(d1 is not None and d2 is not None and d2[2] < d1[2] - 1.0,
-              "the message's countdown bar narrows (%s -> %s px)" % (d1 and d1[2], d2 and d2[2]))
-        check(wait(lambda: "[notify] expired #%d" % dm in bob.text(), 12.0),
-              "the message expires on its own after 6 s (\"[notify] expired #%d\")" % dm)
-        check(bob.rect("knNotif%d" % dm) is None, "the expired item is gone from the page")
+        time.sleep(3.0)
+        check('"Message from %s' % names[0] not in bob.text(), "a direct message raises no notification in the center")
         shot = os.path.join(WORK, "bob-center.png")
         bob.cmd("shot " + shot)
         wait(lambda: os.path.exists(shot), 10)
@@ -409,7 +385,7 @@ def main():
                 i, t = asyncio.run(auth(port, n, 0))
                 ids.append(i)
                 tokens.append(t)
-            friend_request_flow(port, ids, tokens, names)
+            follow_flow(port, ids, tokens, names)
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()

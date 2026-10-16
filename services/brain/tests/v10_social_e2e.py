@@ -172,8 +172,12 @@ def main():
         check(A.has("v10sMsgInput"), "the conversation opened")
         A.type("v10sMsgInput", "hello from the e2e")
         A.click("v10sSend")
-        time.sleep(1.2)
-        sent = q("SELECT body FROM chat_messages WHERE sender_id = ? AND receiver_id = ? ORDER BY id DESC", a, b)
+        sent, end = [], time.time() + 10.0  # polled: the row lands later than a second under load
+        while time.time() < end:
+            sent = q("SELECT body FROM chat_messages WHERE sender_id = ? AND receiver_id = ? ORDER BY id DESC", a, b)
+            if sent and sent[0][0] == "hello from the e2e":
+                break
+            time.sleep(0.2)
         check(sent and sent[0][0] == "hello from the e2e", "Send reached kn_brain (chat_messages)")
         A.shot("hub-friends")
         A.click("v10sTab2")

@@ -34,7 +34,6 @@
 #include <math.h>
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
-#include <v10_notify.h> // the notification center: friend requests, direct messages (v10_notify.c)
 #include <desktop_notify.h> // the same items on the desktop, when the Notifications switch is on
 #include <krunker_account.h> // the krunker.io account: the event bus's fresh token, its URL
 #include <krunker_eb.h>      // krunker.io's friends event bus socket
@@ -606,47 +605,22 @@ static void eb_on_friends(const cJSON *o) {
     S.friends_next = offset + count;
 }
 
-// ------------------------------------------------------------------ notifications (KrunkNative)
-// v10's notification center (v10_notify.c) also carries the event bus's news: a direct message
-// that is not on screen, a friend request (a follow not followed back: kn_brain's friend:request)
-// and its acceptance. A click opens the conversation / the player's profile.
-#define NOTIFY_DM_MS 6000.0
-#define NOTIFY_FRIEND_MS 10000.0
-static void open_profile(const char *name);
-static void open_hub(int tab);
-static void conv_open(int64_t peer);
-static void render(void);
+// ------------------------------------------------------------------ notifications
+// The notification center (v10_notify.c) carries v10's set only (Wild Offer, Survey, Register): the
+// event bus's news is not in it. A direct message shows in the game chat and the Friends tab's unread
+// badge; a follow not followed back is a Followers entry in the Inbox (windows[29], the mail count).
+// KrunkNative's desktop notifier (desktop_notify.c) still posts a follow and a message that is not on
+// screen to the OS.
 
-static char g_notify_names[8][32]; // the profiles the friend notifications open (a ring)
-static int g_notify_name_next;
-
-static void notify_open_conv(void *user) {
-    const int64_t peer = (int64_t) (intptr_t) user;
-    open_hub(TAB_FRIENDS);
-    conv_open(peer);
-    render();
-}
-
-static void notify_open_profile(void *user) { open_profile((const char *) user); }
-
-// A ranked queue started (v10 server.message.queued "{0} queued for ranked"): the notification centre,
-// for every signed-in player; the game chat carries the same line in the ranked green.
-static void notify_ranked_queued(const cJSON *o) {
-    const char *text = jstr(o, "text");
-    if (!text[0]) return;
-    v10_notify_push_ex("Ranked", text, NOTIFY_FRIEND_MS, NULL, NULL);
-}
-
+// A follow (kn_brain's friend:request: a follow not followed back) and its acceptance: the OS
+// notification only; the menu shows them as the Inbox's Followers entry.
 static void notify_friend(const cJSON *o, const int accepted) {
     const char *name = jstr(o, "name");
     if (!name[0]) return;
-    char *slot = g_notify_names[g_notify_name_next++ % 8];
-    snprintf(slot, sizeof(g_notify_names[0]), "%s", name);
     char text[192];
     if (accepted) I18N_F(text, "kn.notify.friendAccepted", "{0} followed you back. You are now friends.", name);
     else I18N_F(text, "kn.notify.friendRequest", "{0} followed you. Follow them back to become friends.", name);
     const char *title = accepted ? I18N("kn.notify.friendAcceptedTitle", "Friend Added") : I18N("kn.notify.friendRequestTitle", "Friend Request");
-    v10_notify_push_ex(title, text, NOTIFY_FRIEND_MS, notify_open_profile, slot);
     desktop_notify_item(title, text);
 }
 
@@ -670,10 +644,9 @@ static void eb_on_recv(const cJSON *o) {
     const char *name = friend_name(from);
     snprintf(line, sizeof(line), "[DM from %s]: %s", name[0] ? name : "Unknown", jstr(o, "text"));
     if (!menu_ui()->menu_open) dm_chat_line(line); // the in-game chat (v10 _49706 listeners)
-    if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen
+    if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen: the OS notification
         char title[96];
         I18N_F(title, "kn.notify.dmTitle", "Message from {0}", name[0] ? name : "Unknown");
-        v10_notify_push_ex(title, jstr(o, "text"), NOTIFY_DM_MS, notify_open_conv, (void *) (intptr_t) from);
         desktop_notify_item(title, jstr(o, "text"));
     }
 }
@@ -840,10 +813,9 @@ static void eb_dispatch(const cJSON *o) {
     else if (!strcmp(type, "presence:offline")) eb_on_presence(o, 0);
     else if (!strcmp(type, "presence:game")) eb_on_game(o);
     else if (!strcmp(type, "error")) eb_on_error(o);
-    else if (!strcmp(type, "friend:request")) notify_friend(o, 0); // KrunkNative (kn_brain social_eb.c)
+    else if (!strcmp(type, "friend:request")) notify_friend(o, 0); // KrunkNative (kn_brain social_eb.c): the OS notification; the menu's is the Inbox's Followers entry
     else if (!strcmp(type, "friend:accepted")) notify_friend(o, 1);
-    else if (!strcmp(type, "ranked:queued")) notify_ranked_queued(o); // KrunkNative: a ranked queue started (services/brain/ranked.c)
-    else return; // presence:pong
+    else return; // presence:pong, ranked:queued (no notice on the menu)
     if (!strcmp(type, "friends:list") || !strncmp(type, "presence:", 9)) menu_rerender_if_open(5); // window 5's Friends tab
     // an open conversation reads what arrives (v10: msg:read whenever its length changes)
     if (S.open && S.tab == TAB_FRIENDS && S.selected && !strcmp(type, "msg:recv") &&
@@ -2996,6 +2968,19 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         if (who[0]) {
             cJSON *body = cJSON_CreateObject();
             cJSON_AddFalseToObject(body, "follow");
+            char enc[96], path[160];
+            backend_url_encode(enc, sizeof(enc), who);
+            snprintf(path, sizeof(path), "/players/%s/follow", enc);
+            v10_gapi("POST", path, body, NULL_GAPI, NULL);
+            cJSON_Delete(body);
+        }
+        return 1;
+    }
+    if (!strcmp(name, "followPlayer")) { // the Inbox's Followers entry: Follow Back (v10 followPlayer)
+        const char *who = arg_str(args, argc, 0);
+        if (who[0]) {
+            cJSON *body = cJSON_CreateObject();
+            cJSON_AddTrueToObject(body, "follow");
             char enc[96], path[160];
             backend_url_encode(enc, sizeof(enc), who);
             snprintf(path, sizeof(path), "/players/%s/follow", enc);

@@ -28,14 +28,15 @@
 // KrunkNative differences (intentional):
 //  - text notifications are dismissed by a click on them (v10's only expire; its component ones,
 //    Register / Wild Offer / Survey, have their own close button), running the source's action
-//    first (a friend request opens the Friends tab). Items carry ids knNotif<N> / knNotifBar<N>,
+//    first, if it has one. Items carry ids knNotif<N> / knNotifBar<N>,
 //    the panel knEmojiPanel / knEmoji<i> (no style; tests and the click handler).
 //  - v10 evaluates the emoji query on keyup; here once per frame when #chatInput's value or caret
 //    changed (the same result, up to a key's hold time earlier).
 //  - the chat key with the panel open and no emoji listed sends the message (v10 throws on
 //    filtered[selected][0] and the key does nothing: a line ending in ':' could not be sent).
-//  - the sources: v10 pushes only Register, Wild Offer and Survey; KrunkNative pushes its friend
-//    requests, direct messages, gifts / trades and system messages (ui_notify.c) as text ones.
+//  - the sources: the same as v10's (Register, Wild Offer and Survey). KrunkNative pushes no text
+//    notification here: its system messages are ui_notify.c's generic toast, a follow and a gift /
+//    sale are Inbox mail (windows[29], the unread count), a message is in the chat and the Friends tab.
 #include <v10_notify.h>
 #include <html_ui.h>
 #include <ui_logic.h>

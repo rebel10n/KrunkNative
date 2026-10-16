@@ -756,8 +756,8 @@ void ui_bhop_announce(char *text, size_t size);  // "Bhop - <current mode>" into
 const char *ui_bhop_bind(void);                  // window.bhopModeKey: KeyboardEvent.code ("KeyB"), "" = unbound
 void ui_bhop_set_bind(const char *code);         // setBhopModeBind: stores krk_bhop_mode_bind
 void ui_bhop_fill_input(Client*, Input*);        // patchInputs on this input frame (ui_controls_fill_input tail)
-void ui_notify(const char *html);                // a system message: v10 notification center (v10_notify.c); never the bhop toast
-void ui_notify_tick(double now_ms);              // hud_ui.c per frame: v10_notify_tick
+void ui_notify(const char *html);                // a system message: the generic toast (ui_notify.c, knNotify); never the centre or the bhop toast
+void ui_notify_tick(double now_ms);              // hud_ui.c per frame: the generic toast + v10_notify_tick
 // client/src/ui/ui_mod_keys.c: the rest of mods.ts' keys. ui_mods.c calls the keydown
 // switch after its bind matching (`input` = a text field has focus); 0 = not consumed.
 int  ui_mod_keys_keydown(Client*, int glfw_key, int input); // F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP
