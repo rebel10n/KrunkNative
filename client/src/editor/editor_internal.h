@@ -594,6 +594,7 @@ void ed_net_my_assets(void);                            // KE.myAssets (Account 
 void ed_net_publish_asset(void);                        // KE.publishAssetPopup (Publish > Asset)
 int ed_net_script(const char *cmd, const char *arg);    // KRUNKNATIVE_EDITOR_SCRIPT "net:..." (1 = handled)
 void ed_net_publish(void);                              // toolbar Publish... (publishMap)
+void ed_response_popup(const char *type, const char *err, const char *msg); // _3291(type, err, msg): the red / INFO / SUCCESS popup
 void ed_net_frame(void);                                // page_tick after the 3D view is drawn (publish thumbnail)
 int ed_net_keydown(const HtmlEvent *ev);                // Enter in a browser search field; 1 = handled
 void ed_net_script_publish(const char *arg);             // KRUNKNATIVE_EDITOR_SCRIPT "publish[:category]"

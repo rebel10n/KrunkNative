@@ -26,6 +26,7 @@
 #include <debug_capture.h> // debug_capture_dispatch (script "ui:")
 #include <gl.h>
 #include <html_ui.h>
+#include <map_validate.h> // testMap: validateMap(export, cb, true)
 #include <math.h>
 #include <sky.h>
 #include <ui_logic.h> // ui_text_input_focused
@@ -426,6 +427,16 @@ vec3 editor_near_position(void) {
     return (vec3) {roundf(p.x - u.x * 5 + f.x * 30), roundf(p.y - u.y * 5 + f.y * 30), roundf(p.z - u.z * 5 + f.z * 30)};
 }
 
+// testMap's validateMap(export, cb, true) (E10:14897-14901): the name and spawn checks are skipped
+// for a test; the first error is the response popup and nothing starts
+static const char *test_map_error(const cJSON *map) {
+    static MapIssue issue;
+    const MapValidateOptions options = {.skip_header = 1, .no_warnings = 1, .first_only = 1};
+    size_t errors = 0;
+    map_validate(map, &options, &issue, 1, &errors);
+    return errors ? issue.message : NULL;
+}
+
 void editor_test_map(const int host, const int at_camera) {
     // testMap(e, t) (E:2183-2215): saveVal(e ? "custToLoad" : "custMap", getMapExport()); with
     // t (right click on the play button) the map gets player: {pos, rot: [pitch, yaw]} from the
@@ -436,6 +447,12 @@ void editor_test_map(const int host, const int at_camera) {
     if (!text) return;
     cJSON *map = cJSON_Parse(text);
     free(text);
+    const char *error = map ? test_map_error(map) : "Map error occured.";
+    if (error) {
+        cJSON_Delete(map);
+        ed_response_popup(NULL, error, NULL);
+        return;
+    }
     if (map && !ed_script_prepare_test(map, host)) { // KrunkScript: Test drops the server script, compiles the client one
         cJSON_Delete(map);
         return;

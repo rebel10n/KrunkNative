@@ -286,6 +286,7 @@ int ed_load_quick(const int index, const int script, const int default_map) {
             if (text) {
                 memcpy(text, buf, len);
                 text[len] = 0;
+                editor_close_window(); // loadQuick: closeWindow(); importMap (E10:19982-20005)
                 ok = ed_map_import(text);
                 free(text);
             }

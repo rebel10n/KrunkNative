@@ -37,10 +37,13 @@
 // - uploadA is sent as v7 sends it; kn_brain answers ["upMp", "File uploads are not supported on
 //   this server"] (no asset hosting), shown in the popup. A pubR reply (a server that hosts
 //   files) is answered with "Upload Request Failed": the client has no multipart POST.
-// - updateMapLB (ulb) and chngMapFunds (mfnds) are sent as in v7; a server that never answers
-//   (kn_brain has neither yet) ends the "Please Wait..." popup after REPLY_TIMEOUT_S with an
-//   error instead of waiting forever. An upMp reply to ulb is shown as a success popup (v7
-//   writes it into the absent #gameUpResp).
+// - updateMapLB (ulb) is v10's: no reply timeout, so the "Please wait..." popup stays until the
+//   user closes it, and the upMp reply goes through uploadResp into #gameUpResp, which the
+//   leaderboard popup does not have (nothing shows). kn_brain stores the settings on the map's
+//   LEADERBOARD objects and answers upMp "Leaderboard Updated!" (creations.c sh_update_map_lb).
+// - chngMapFunds (mfnds) is sent as in v7; a server that never answers (kn_brain has neither
+//   yet) ends the "Please Wait..." popup after REPLY_TIMEOUT_S with an error instead of waiting
+//   forever.
 // - edMp with an unknown map ("edMp", null) shows "Map not found" (v7 ignores it).
 // - The Sounds window's empty / error text goes to its own list (v7 writes #assetTList).
 // - v7's mapResp share link and the update video field come from an archive.org capture
@@ -285,6 +288,8 @@ static void io_po(const char *type, const char *err, const char *msg) {
     ed_generic_popup(h.buf, type && !strcmp(type, "INFO") ? "infoPop" : "responsePop");
     edb_free(&h);
 }
+
+void ed_response_popup(const char *type, const char *err, const char *msg) { io_po(type, err, msg); }
 
 static void wait_popup(const char *text) {
     char h[512];
@@ -1320,6 +1325,50 @@ static void file_field(EdBuf *h, const int f, const int hidden) {
                  k_files[f].kb ? "0," : " 1, ", limit, k_files[f].id, limit, k_files[f].kb ? "KB" : "MB");
 }
 
+// the texture slots of v10's per-map UV channel options (publishAssetPopup, E10:20417-20456), in
+// its order: the popup's row names (the element ids are game<slot>Chan[H]) and the uploadA keys
+#define UV_SLOTS 10
+static const char *const k_uv_slot[UV_SLOTS] = {"Diffuse", "Emissive", "Normal", "Specular", "Alpha", "Displacement", "Roughness", "Metalness", "Bump", "Light"};
+static const char *const k_uv_key[UV_SLOTS] = {"diffuse", "emissive", "normal", "specular", "alpha", "displacement", "roughness", "metalness", "bump", "light"};
+
+// the "Advanced: per-map UV channel" checkbox and one number row (channel 0..7) per texture slot;
+// the rows show while the checkbox is on, and uploadAsset sends the non-zero channels (uv_channels)
+static void uv_channel_rows(EdBuf *h) {
+    edb_add(h, "<div style='color:rgba(255, 255, 255, 0.6)!important;font-size:18px;margin-bottom: 5px;' id='gameAdvancedTexH'>"
+               "<div style='color:rgba(255, 255, 255, 0.6)!important;font-size:16px'>Advanced: per-map UV channel"
+               "<input type='checkbox' id='gameAdvancedTex' style='float:right;margin-top:8px;' onchange='KE.toggleAdvancedTexOptions()'></div></div>");
+    for (int i = 0; i < UV_SLOTS; i++)
+        edb_addf(h, "<div class='gameTexChanRow' id='game%sChanH' style='display:none;color:rgba(255, 255, 255, 0.6)!important;font-size:14px;margin:2px 0 6px 20px;'>"
+                    "%s UV Channel<input type='number' id='game%sChan' value='0' min='0' max='7' style='width:48px;float:right;'></div>",
+                 k_uv_slot[i], k_uv_slot[i], k_uv_slot[i]);
+}
+
+// KE.toggleAdvancedTexOptions(): the channel rows follow the checkbox
+static void toggle_advanced_tex(void) {
+    const int on = read_checked("gameAdvancedTex");
+    for (int i = 0; i < UV_SLOTS; i++) {
+        char id[48];
+        snprintf(id, sizeof(id), "game%sChanH", k_uv_slot[i]);
+        html_dom_set_display(html_dom_by_id(id), on ? "block" : "none");
+    }
+}
+
+// uploadAsset's uvc: {slot: channel} for the channels 1..7 (parseInt, v10 E10:20479-20490), null when none
+static cJSON *uv_channels(void) {
+    if (!read_checked("gameAdvancedTex")) return NULL;
+    cJSON *uvc = NULL;
+    for (int i = 0; i < UV_SLOTS; i++) {
+        char id[48], v[16];
+        snprintf(id, sizeof(id), "game%sChan", k_uv_slot[i]);
+        read_value(id, v, sizeof(v));
+        const int ch = atoi(v);
+        if (ch <= 0 || ch > 7) continue;
+        if (!uvc) uvc = cJSON_CreateObject();
+        cJSON_AddNumberToObject(uvc, k_uv_key[i], ch);
+    }
+    return uvc;
+}
+
 void ed_net_publish_asset(void) {
     // publishAssetPopup()
     g_asset_type = 0;
@@ -1340,6 +1389,7 @@ void ed_net_publish_asset(void) {
     edb_add(&h, "</select></div>");
     edb_add(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;margin-top:4px;margin-bottom:10px;border-bottom:2px solid;padding-bottom:10px;'>Private <label class='switch2'><input id='gamePrivNew' type='checkbox'><span class='slider2'></span></label></div>");
     for (int f = AF_THUMB; f <= AF_ICON; f++) file_field(&h, f, f == AF_SOUND || f == AF_VIDEO || f == AF_TEXTURE);
+    uv_channel_rows(&h);
     edb_addf(&h, "<div style='color:rgba(255, 255, 255, 0.6)!important;font-size:14px;margin-top:12px;border-top:2px solid;padding-top:10px;' id='maxSizeH'>Max Size"
                  "<span style='color:rgba(255, 255, 255, 0.6)!important;font-size:14px;float:right;' id='gameSize'>0 / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>mb</span></span></div>",
              a->premium ? ASSET_SIZE_P : ASSET_SIZE);
@@ -1502,6 +1552,9 @@ static void upload_asset(void) {
         cJSON_AddItemToArray(f, cJSON_CreateString(data ? data : ""));
         cJSON_AddItemToArray(f, sizes);
         cJSON_AddItemToArray(f, cJSON_CreateString(g_files[AF_MODEL].size > 0 && dot ? dot + 1 : "obj"));
+        cJSON_AddItemToArray(f, cJSON_CreateNull()); // v10's 8th argument (undefined)
+        cJSON *uvc = uv_channels();
+        cJSON_AddItemToArray(f, uvc ? uvc : cJSON_CreateNull()); // uploadA's uvc: the per-map UV channels or null
         free(data);
     } else {
         // texture (2) / sound (3) / video (4): category 16 / 17 / 16, kind = type
@@ -1615,6 +1668,7 @@ static void update_map_lb(const double id) {
     cJSON_AddItemToArray(f, cJSON_CreateString(cust));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(atoi(order)));
     if (!social_send(f, "upMp", 0)) io_po(NULL, "Upload Request Failed", NULL);
+    else g_wait_until = HUGE_VAL; // v10 sets no timeout for ulb: the popup waits until it is closed
 }
 
 static void delete_creation_conf(const double id, const int kind) {
@@ -1691,11 +1745,7 @@ static void on_social(void *user, const cJSON *frame) {
         map_resp(strstr(text, "Updated") ? "Game Updated!" : "Game Uploaded!", g_pub_name);
     } else if (!strcmp(l, "upMp")) {
         if (cJSON_GetArraySize(frame) > 2) return; // mod uploads: uploadResp(e, 1)
-        if (!strcmp(g_wait, "upMp")) { // ulb (see the notes)
-            wait_done();
-            io_po("SUCCESS", NULL, text);
-            return;
-        }
+        // v10's uploadResp for every upMp, ulb's included (see the notes): #gameUpResp when the popup has it
         g_publish_sent = 0;
         wait_done();
         upload_resp(text);
@@ -1879,6 +1929,8 @@ static int h_net(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n) {
         upload_asset();
     } else if (!strcmp(name, "KE.uploadGame")) {
         upload_game();
+    } else if (!strcmp(name, "KE.toggleAdvancedTexOptions")) {
+        toggle_advanced_tex();
     } else if (!strcmp(name, "selectFile")) {
         const int f = file_index(arg_str(a, n, 0, s1, sizeof(s1)));
         if (f >= 0) ed_pick_file(k_files[f].accept, file_picked, (void *) (intptr_t) f);
@@ -1955,6 +2007,24 @@ int ed_net_script(const char *cmd, const char *arg) {
         g_thumb = thumb;
         g_pub_map = map;
         g_fake = 0;
+    } else if (!strcmp(p[0], "uv") && p[1]) {
+        // test: "uv:on" ticks "Advanced: per-map UV channel" (and shows its rows, as the checkbox's
+        // onchange does); "uv:<slot>:<channel>" sets a slot's channel (slot = the popup's order)
+        if (!strcmp(p[1], "on")) {
+            html_dom_set_checked(html_dom_by_id("gameAdvancedTex"), 1);
+            toggle_advanced_tex();
+        } else if (p[2] && atoi(p[1]) >= 0 && atoi(p[1]) < UV_SLOTS) {
+            char id[48];
+            snprintf(id, sizeof(id), "game%sChan", k_uv_slot[atoi(p[1])]);
+            html_dom_set_value(html_dom_by_id(id), p[2]);
+        }
+    } else if (!strcmp(p[0], "uvc")) {
+        // test: the uploadA uvc the popup would send (null when the checkbox is off)
+        cJSON *uvc = uv_channels();
+        char *text = uvc ? cJSON_PrintUnformatted(uvc) : NULL;
+        fprintf(stderr, "[editor] uvc %s\n", text ? text : "null");
+        free(text);
+        cJSON_Delete(uvc);
     } else if (!strcmp(p[0], "pending") && p[1] && lw_of_window(atoi(p[1])) >= 0) {
         // the list of window N as while its request has not been answered (v7's capture state; uidiff)
         const int w = lw_of_window(atoi(p[1]));
@@ -2002,7 +2072,7 @@ void ed_net_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
         {"KE.selectAsset", h_net}, {"KE.selectMod", h_net}, {"testSound", h_net}, {"copyAssetID", h_net},
         {"deleteCreationConf", h_net}, {"deleteCreation", h_net}, {"openEdit", h_net}, {"loadMap", h_net}, {"calcMapFee", h_net},
         {"chngMapFunds", h_net}, {"updateMapLB", h_net}, {"KE.publishAssetPopup", h_net}, {"KE.updateAssetType", h_net},
-        {"KE.uploadAsset", h_net}, {"KE.uploadGame", h_net}, {"selectFile", h_net}, {"shareMapLink", h_net},
+        {"KE.uploadAsset", h_net}, {"KE.uploadGame", h_net}, {"KE.toggleAdvancedTexOptions", h_net}, {"selectFile", h_net}, {"shareMapLink", h_net},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];
 }

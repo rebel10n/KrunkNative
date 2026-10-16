@@ -35,6 +35,7 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | Toolbar menus File..Documentation | identical to v7 (IDX:14434-14552) | v7 | **done** |
 | Object > Group > Save as Archetype; Object > Entity > Place / Edit Selected / Archetypes | IDX:14511-14516 → E10:18065, 18095, 18128, 18417 | missing | **missing** (entities, 1.5) |
 | Tools / Basic menu lists | 99-prefab table: Tools gain BOT_PATH_NODE, ENTITY; Basic gains SCRAPCRATE | 97 v7 prefabs | **done** (`editor_data.c` regenerated) |
+| Templates window KrunkScript tiles (E10 `_2189`, 29: + Particle Bursts .. Payments & Skins) | E10:13401-13433, 6356 | 18 v7 templates, 3 empty | **done** (`assets/editor/templates.json` from the v10 bundle via `gen_editor_data.py`; tiles' thumbnails from the asset host) |
 | Playbar | ▶ / host / teleport + 4th `#mpToolbarBtn` group_add (E10:9700-9714) | 3 buttons | **done** (button opens window 16) |
 | canvasUI toggles | unchanged | v7 | **done** |
 | canvasInfo | + Entities n/64, Archetypes n/32, shown when either > 0 (E10:19940-19960; CFG:7869-7870) | 6 stats | **done** (`editor_update_object_count`) |
@@ -96,9 +97,9 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **missing** (L; the game-side entity runtime is open too, `doc/v10/map-format.md` §9) |
 | Multiplayer co-editing: `mpHost/mpJoin/...` (21 sent, 27 received) on `editor.krunker.io/ws`, invites `?room=`, chat `#mp-chat`, remote players and outlines, script locks | E10:8945-10250, 20263-20314 | **missing** (needs an editor room relay in kn_brain) |
 | KrunkScript Shared tab (third tab after Server; template with `onEntityInit` / `simulateEntity`; 48 shared autocomplete entries), 16 new client/server entries (227 in all), client/server templates, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11795-12624, 14901-14930, 15045-15075 | **partial**: the tab, template, hints, Validate (`KS_SIDE_SHARED`: GAME.UTILS and the entity hooks only, `ks_check.c`), the export round trip and Test play's check are **done** (`tools/editor/kss_v10.json`, `gen_editor_data.py`, `script_e2e.py`); the entity runtime that runs shared scripts is **missing**; the 18 v10-only GAME members the checker now accepts are no-ops until their subsystems land (`ks_api.h`) |
-| `scripting.html` / `css/scripting.css` | v10's page has a third tab (`shared`, `scriptArea_shared`) and loads `static/scripting-*.js` (not cached; the window's hint rules are the v7 page's); the markup otherwise matches the recovered v7-era page | **partial**: the Shared tab is in the window (editor_script.c), the page's JS is unverified |
+| `scripting.html` / `css/scripting.css` | identical to the recovered v7-era page (P10 scripting.html) | **done** |
 | Dev bridge `?devbridge=` RPC | E10:10356-11300 | **KN**: `editor_bus_link.c` + `tools/editor-mcp` already cover it |
-| Publish Asset per-map UV channels | E10:20417-20456 | **missing** (S, brain storage) |
+| Publish Asset per-map UV channels ("Advanced" box, ten 0..7 rows, uploadA `uvc` = {slot: channel} for channels 1..7, else null) | E10:20417-20456, 20479-20490 | **done** (`editor_net.c` `uv_channel_rows`; kn_brain takes no asset uploads, so the value is only sent) |
 
 ## 2. Hub (`social.html`)
 

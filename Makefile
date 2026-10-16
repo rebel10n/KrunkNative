@@ -834,6 +834,10 @@ editor-windows-test: build ## Assets / Mods / Textures / Sounds / My Games windo
 editor-publish-test: build ## Editor publishing / My Games / asset windows against a local kn_brain (headless; needs config/config.json DB creds or KN_TEST_DB_DRIVER=sqlite)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_e2e.py $(DEBUG_DIR)
 
+.PHONY: editor-publish-ui-e2e
+editor-publish-ui-e2e: build ## Test play, Templates / Welcome / Publishing Guide windows, toolbar menus, asset UV channels vs v10.0.2 (headless, no brain; tools/editor/publish_ui_e2e.py)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/publish_ui_e2e.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)
+
 .PHONY: editor-tools-test
 editor-tools-test: build ## Tools / Prefabs panels, Optimize Faces and Color Merging vs v7.1.4 (headless; tools/editor/tools_check.py)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I tools/editor/tools_check.py --bin $(DEBUG_DIR)/$(CLIENT_BIN)

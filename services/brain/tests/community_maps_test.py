@@ -223,6 +223,44 @@ async def scenario(port):
     except urllib.error.HTTPError as e:
         check(e.code == 404, "map-data of an unknown name is 404")
 
+    print("== ulb: the editor's Leaderboard Display (v10 updateMapLB) on the map's LEADERBOARD objects")
+    lb_name = "Lb_" + stamp
+    lb_doc = json.loads(make_map(lb_name))
+    lb_doc["objects"].append({"i": 72, "p": [0, 5, 0], "s": [4, 2, 1]})
+    r = await publish(alice_sock, json.dumps(lb_doc))
+    check(r[0] == "pubMR", "a map with a LEADERBOARD object published: %r" % r)
+    lb_row = [x for x in get(base, "/api/search?type=map&val=" + urllib.parse.quote(lb_name.lower()) + "&source=community")["data"]
+              if x.get("map_name") == lb_name]
+    lb_id = lb_row[0]["map_id"] if lb_row else 0
+
+    def stored_objects(map_id):
+        doc = json.loads(urllib.request.urlopen(base + "/api/map-data?id=%s" % map_id).read())
+        return doc["objects"]
+
+    def leaderboards(map_id):
+        return [o for o in stored_objects(map_id) if o.get("i") == 72]
+
+    r = await bob_sock.call("upMp", "ulb", lb_id, 1, "Kills", 1)
+    check(r == ["upMp", "Not allowed"], "ulb by another creator: %r" % (r,))
+    r = await alice_sock.call("upMp", "ulb", lb_id, 1, "Kills", 1)
+    check(r == ["upMp", "Leaderboard Updated!"], "ulb by the creator: %r" % (r,))
+    lbs = leaderboards(lb_id)
+    check(len(lbs) == 1 and lbs[0].get("ldt") == 1 and lbs[0].get("ldc") == "Kills" and lbs[0].get("ldo") == 1,
+          "the LEADERBOARD carries ldt / ldc / ldo: %r" % lbs)
+    check(all("ldt" not in o for o in stored_objects(lb_id) if o.get("i") != 72), "other objects are untouched")
+    lb_row = [x for x in get(base, "/api/search?type=map&val=" + urllib.parse.quote(lb_name.lower()) + "&source=community")["data"]
+              if x.get("map_name") == lb_name]
+    check(lb_row and lb_row[0].get("map_updatecounter") == 2, "the update republishes the map (updatecounter 2)")
+    r = await alice_sock.call("upMp", "ulb", lb_id, 0, "", 0)
+    check(r == ["upMp", "Leaderboard Updated!"], "ulb back to Score / ASC: %r" % (r,))
+    lbs = leaderboards(lb_id)
+    check(len(lbs) == 1 and not any(k in lbs[0] for k in ("ldt", "ldc", "ldo")),
+          "zero type, empty custom and zero order are left out (v10's export): %r" % lbs)
+    r = await alice_sock.call("upMp", "ulb", 99999999, 0, "", 0)
+    check(r == ["upMp", "Not allowed"], "ulb on an unknown map: %r" % (r,))
+    r = await alice_sock.call("upMp", "ulb", row.get("map_id") or 0, 1, "Kills", 1)
+    check(r == ["upMp", "No leaderboard on this map"], "ulb on a map without a LEADERBOARD: %r" % (r,))
+
     for sock in (alice_sock, bob_sock):
         await sock.ws.close()
 

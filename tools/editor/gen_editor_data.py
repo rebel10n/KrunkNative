@@ -47,6 +47,11 @@ TEMPLATES_OUT = os.path.join(REPO, "assets", "editor", "templates.json")
 V7_PUBLIC = "/home/user/jails/kru/src/Krunker_v7.1.4/public"
 # KrunkScript autocomplete and templates of Krunker v10.0.2 (E10:11795-12624, see the file's "source")
 KSS_V10 = os.path.join(HERE, "kss_v10.json")
+# Krunker v10.0.2's editor bundle, webcracked and renamed (doc/v10/editor-social.md): the Templates
+# window's KrunkScript templates (const _2189, 29 entries) replace v7's 18. Read as text; the array
+# literal is parsed without running it. Missing bundle: the v7 list stays.
+V10_EDITOR_BUNDLE = os.environ.get("KN_V10_EDITOR_BUNDLE",
+                                   os.path.expanduser("~/.cache/kn-v10/webcrack/editor/renamed.js"))
 
 # The v3.1.1 editor flags, bits 0..63 (their positions are kept: code may store the low word).
 FLAGS_V3 = [
@@ -195,6 +200,29 @@ def flag_set(prefab, flag):
     return bool(prefab.get(flag))
 
 
+def v10_script_templates(path):
+    """The v10 KrunkScript templates (E10 const _2189) as {name, icon, data} dicts, or None."""
+    import re
+    try:
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+    except OSError:
+        return None
+    m = re.search(r"const _2189 = \[", src)
+    if not m:
+        return None
+    end = src.find("\n}];", m.end())
+    if end < 0:
+        return None
+    body = src[m.end() - 1:end + 3]
+    out = []
+    for e in re.finditer(r'name: ("(?:[^"\\]|\\.)*"),\s*icon: ([^,\n]+),\s*data: ("(?:[^"\\]|\\.)*")', body):
+        icon = e.group(2).strip()
+        out.append({"name": json.loads(e.group(1)), "icon": int(icon) if icon.isdigit() else "",
+                    "data": json.loads(e.group(3))})
+    return out or None
+
+
 def main():
     data = dump_v7()
     ed = dump_editor_v7()
@@ -338,9 +366,13 @@ def main():
         fh.write("\n".join(header_flags) + "\n")
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
+    templates = ed["templates"]
+    v10_scripts = v10_script_templates(V10_EDITOR_BUNDLE)
+    if v10_scripts:
+        templates["script"] = v10_scripts
     os.makedirs(os.path.dirname(TEMPLATES_OUT), exist_ok=True)
     with open(TEMPLATES_OUT, "w", encoding="utf-8") as fh:
-        json.dump(ed["templates"], fh, separators=(",", ":"), ensure_ascii=False)
+        json.dump(templates, fh, separators=(",", ":"), ensure_ascii=False)
         fh.write("\n")
     print("wrote %s (%d prefabs, %d textures, %d flags, %d bytes of config)" % (
         os.path.relpath(OUT, REPO), len(prefabs), len(textures), len(flags), len(text)))

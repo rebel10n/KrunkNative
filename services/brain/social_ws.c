@@ -783,6 +783,7 @@ static const SocialRoute k_routes[] = {
     {"sst", sh_season_stats},
     {"unbx", sh_noop},
     {"edMp", sh_edit_map},
+    {"ulb", sh_update_map_lb}, /* v10 updateMapLB: the Leaderboard Display of an own map */
     {"fvM", sh_fav_creation},
     {"ftC", sh_feature_creation},
     {"delC", sh_delete_creation},
@@ -857,7 +858,7 @@ static const LabelClass k_label_class[] = {
     {"clnRA", RC_WRITE, ANS_REPLY}, {"rpt", RC_WRITE, ANS_REPLY}, {"flg", RC_WRITE, ANS_REPLY},
     {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
     {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},
-    {"uploadMo", RC_WRITE, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY},
+    {"uploadMo", RC_WRITE, ANS_REPLY}, {"uploadA", RC_WRITE, ANS_REPLY}, {"edMp", RC_WRITE, ANS_REPLY}, {"ulb", RC_WRITE, ANS_REPLY},
     {"fvM", RC_WRITE, ANS_REPLY}, {"ftC", RC_WRITE, ANS_REPLY}, {"delC", RC_WRITE, ANS_REPLY},
     {"li", RC_WRITE, ANS_REPLY}, {"uli", RC_WRITE, ANS_REPLY}, {"pi", RC_WRITE, ANS_REPLY},
     {"qsi", RC_WRITE, ANS_REPLY}, {"ctr", RC_WRITE, ANS_REPLY}, {"trA", RC_WRITE, ANS_REPLY},

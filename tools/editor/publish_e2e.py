@@ -14,7 +14,8 @@ any display) restore its session from storage and drive editor_net.c with KRUNKN
    mapResp "Game Uploaded!"), the map on /api/maps; publishMap again: "Update Game" / "Publish v0.2"
    -> "Game Updated!"; Publish > Asset -> uploadA -> kn_brain's "File uploads are not supported".
 2. My Games (window 14) lists the map; openEdit; loadMap (edMp) imports the published map;
-   updateMapLB (ulb, no kn_brain answer) ends with "No reply from the server"; deleteCreation
+   updateMapLB (ulb) keeps v10's "Please wait..." popup (kn_brain answers upMp; the brain test checks the stored
+   LEADERBOARD fields); deleteCreation
    (delC) -> "Deleted", gone from /api/maps; selectAsset from the Sounds / Assets windows.
 The windows 2/5/7/9/14 are dumped too: with the brain they show v7's markup with real lists.
 Exit 77 when the database or python websockets is missing.
@@ -232,7 +233,8 @@ def main():
         loaded = [l for l in read(D("loaded.txt")).splitlines() if l.strip()]
         check("Load in Editor (edMp) imports the published map (3 objects + the spawn)", len(loaded) == 4, "%d objects" % len(loaded))
         lb = read(D("lb.txt"))
-        check("ulb without a kn_brain answer: \"No reply from the server\"", "No reply from the server" in lb, lb)
+        check("ulb: v10's upMp reply shows nothing, the \"Please wait...\" popup stays",
+              "Please wait" in lb and "Unknown request" not in lb and "No reply from the server" not in lb, lb)
         ai = read(D("ai.txt"))
         check("selectShootHit sets the AI's shootHitSound", '"atkh":77' in ai.replace(" ", ""), ai[:300])
         custom = read(D("custom.txt"))

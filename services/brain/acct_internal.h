@@ -339,6 +339,7 @@ void rewards_shutdown(Brain *b);
 void sh_mail_read_all(SocialSession *s, const cJSON *f); /* "raml" */
 void sh_upload_map(SocialSession *s, const cJSON *f);    /* "uploadM" (creations.c) */
 void sh_edit_map(SocialSession *s, const cJSON *f);      /* "edMp" */
+void sh_update_map_lb(SocialSession *s, const cJSON *f); /* "ulb" (creations.c) */
 void sh_fav_creation(SocialSession *s, const cJSON *f);  /* "fvM" */
 void sh_feature_creation(SocialSession *s, const cJSON *f); /* "ftC" */
 void sh_delete_creation(SocialSession *s, const cJSON *f);  /* "delC" */

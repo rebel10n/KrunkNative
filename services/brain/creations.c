@@ -42,6 +42,7 @@
 #include "knsvc/log.h"
 #include "map_catalog.h"
 #include "map_validate.h"
+#include "shared.h" // PREFAB_LEADERBOARD (a map object's "i")
 #include "youtube_link.h"
 
 #define MOD "creations"
@@ -508,6 +509,103 @@ void sh_edit_map(SocialSession *s, const cJSON *f) {
                  SQL(.any = "SELECT map_data FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND (creator_id = $1 "
                             "OR EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"),
                  KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : ""), edit_map_done, NULL);
+}
+
+/* ["ulb", mapId, type, custom, order] (v10 updateMapLB: the editor's Leaderboard Display, type 0
+ * Score / 1 Time, a custom type text, order 0 ASC / 1 DESC). The map's LEADERBOARD objects get
+ * ldt / ldc / ldo, written the way v10's editor exports them (a zero type, an empty custom type
+ * and a zero order are left out), and the map is republished (map_updatecounter + 1) so game
+ * servers reload it. Own maps only (creator, devs, map mods), as edMp. The reply is
+ * ["upMp", msg], v10's uploadResp text: the leaderboard popup has no #gameUpResp, so the editor
+ * shows nothing on success. */
+typedef struct LbUpdate {
+    int64_t type, order;
+    char cust[128];
+    char map_id[24];
+} LbUpdate;
+
+static void lb_write_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    if (!kn_db_ok(res))
+        social_send_n(s, "upMp", 1, cJSON_CreateString(acct_db_error(res, "ulb")));
+    else if (kn_db_affected(res) > 0)
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Leaderboard Updated!"));
+    else
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Not allowed"));
+}
+
+static void lb_set_number(cJSON *o, const char *key, int64_t v) {
+    cJSON_DeleteItemFromObjectCaseSensitive(o, key);
+    if (v) cJSON_AddNumberToObject(o, key, (double) v);
+}
+
+static void lb_read_done(SocialSession *s, kn_db_result *res, void *extra) {
+    const LbUpdate *u = extra;
+    if (!kn_db_ok(res)) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString(acct_db_error(res, "ulb")));
+        return;
+    }
+    if (kn_db_rows(res) == 0) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Not allowed"));
+        return;
+    }
+    cJSON *map = cJSON_Parse(kn_db_get(res, 0, 0));
+    if (!map) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Invalid Map"));
+        return;
+    }
+    int found = 0;
+    cJSON *objs = cJSON_GetObjectItemCaseSensitive(map, "objects");
+    if (cJSON_IsArray(objs)) {
+        cJSON *o;
+        cJSON_ArrayForEach(o, objs) {
+            if (kn_json_int(o, "i", -1) != PREFAB_LEADERBOARD) continue;
+            lb_set_number(o, "ldt", u->type);
+            cJSON_DeleteItemFromObjectCaseSensitive(o, "ldc");
+            if (u->cust[0]) cJSON_AddStringToObject(o, "ldc", u->cust);
+            lb_set_number(o, "ldo", u->order);
+            found++;
+        }
+    }
+    if (!found) {
+        cJSON_Delete(map);
+        social_send_n(s, "upMp", 1, cJSON_CreateString("No leaderboard on this map"));
+        return;
+    }
+    char *text = cJSON_PrintUnformatted(map);
+    cJSON_Delete(map);
+    if (!text) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Map error occured."));
+        return;
+    }
+    /* the params are consumed by the call (as social_call's do), so u and text may go after it */
+    social_query(s,
+                 SQL(.any = "UPDATE published_maps SET map_data = $2, map_updatecounter = map_updatecounter + 1"
+                            " WHERE map_id = $1 AND deleted_at IS NULL"),
+                 KN_DB_ARGS(u->map_id, text), lb_write_done, NULL);
+    free(text);
+}
+
+void sh_update_map_lb(SocialSession *s, const cJSON *f) {
+    if (s->account_id <= 0) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Must be logged in"));
+        return;
+    }
+    LbUpdate *u = calloc(1, sizeof *u);
+    if (!u) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Map error occured."));
+        return;
+    }
+    u->type = fa_int(f, 2, 0);
+    u->order = fa_int(f, 4, 0);
+    const char *cust = fa_str(f, 3);
+    snprintf(u->cust, sizeof u->cust, "%s", cust ? cust : "");
+    acct_itoa(u->map_id, fa_int(f, 1, 0));
+    char me[24];
+    social_query(s,
+                 SQL(.any = "SELECT map_data FROM published_maps WHERE map_id = $2 AND deleted_at IS NULL AND (creator_id = $1 "
+                            "OR EXISTS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_mapmod > 0)))"),
+                 KN_DB_ARGS(social_viewer(s, me), u->map_id), lb_read_done, u);
 }
 
 static void silent_done(SocialSession *s, kn_db_result *res, void *extra) {
