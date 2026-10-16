@@ -330,7 +330,12 @@ def client_cases(loop, brain_port, nodes, alice, bob, bob_sock):
     check("2: bob's social socket: alice's presence:game names PTA (her client's session)", gid == pta.game, str(f))
     code = pta.game
 
-    def bob_run(name, lines, game=None, until="@done", secs=90):
+    # the client runs on the script's clock, so under load a join can outlive the script: the runs of the
+    # joins wait for the join's own line ("[mm] joining <game> at"), not for a fixed time
+    def joining(game_id):
+        return "[mm] joining %s at" % game_id
+
+    def bob_run(name, lines, game=None, until="@done", secs=120):
         p, log = client(name, brain_port, "\n".join(["0 menu"] + lines + ["%d state" % 60000, "61000 quit"]) + "\n",
                         game or ptb.game, acc_b)
         wait_for(lambda: until in read_log(log), secs)
@@ -347,7 +352,7 @@ def client_cases(loop, brain_port, nodes, alice, bob, bob_sock):
         "1900 clip @pasted",
         "2000 call closWind",
         "2300 clickid menuBtnJoin",
-        "9000 vis @done menuBtnJoin"])
+        "9000 vis @done menuBtnJoin"], until=joining(pta.game))
     ids = joined(text)
     check("3: bob starts in PTB", ids[:1] and same_game(ids[0], ptb.game), str(ids))
     check("3: Join reads the clipboard", "[party] join from the clipboard: " + link in text, text[-500:])
@@ -370,7 +375,7 @@ def client_cases(loop, brain_port, nodes, alice, bob, bob_sock):
     # 5. a friend's Join (the Friends tab: openURL('/?game=<gid>', 1))
     text = bob_run("bob-friend", [
         "1000 call openURL \"/?game=%s\" 1" % gid,
-        "9000 vis @done menuBtnJoin"])
+        "9000 vis @done menuBtnJoin"], until=joining(pta.game))
     ids = joined(text)
     check("5: the Friends tab's Join (openURL of a same-site game link) -> alice's game, in place",
           len(ids) >= 2 and same_game(ids[-1], pta.game) and "[mm] join game " + gid in text, str(ids))
@@ -379,11 +384,11 @@ def client_cases(loop, brain_port, nodes, alice, bob, bob_sock):
     # 6. a password-protected game
     text = bob_run("bob-password", [
         "1000 call openURL \"/?game=%s\" 1" % ptc.game,
-        "5000 vis @asked genericPop codeInput",
-        "5200 clickid codeInput",
-        "5300 type " + PASSWORD,
-        "5500 clickid confirmBtn",
-        "12000 vis @done genericPop"])
+        "20000 vis @asked genericPop codeInput",
+        "20200 clickid codeInput",
+        "20300 type " + PASSWORD,
+        "20500 clickid confirmBtn",
+        "35000 vis @done genericPop"])
     ids = joined(text)
     check("6: PTC refuses bob without its password, the popup asks for it",
           "This server needs a password" in ptc.text() and re.search(r"@asked genericPop=1 codeInput=1", text) is not None,
