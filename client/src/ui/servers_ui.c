@@ -37,6 +37,7 @@
 #include <first_run_ui.h>  // the start-up seek waits for the first-run choice; the Connect window's note
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
+#include <strike_ui.h>       // Krunker Strike's own server password prompt (strike_menu.c)
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
@@ -1322,7 +1323,9 @@ int servers_ui_invite_game(char *out, const size_t n) {
 // reconnected.
 int servers_ui_join_password(const char *password) {
     if (!g_client || !password) return 0;
-    const int lobby = g_brain_mode && g_pin == PIN_NONE && g_game_id[0] && backend_available() == 1;
+    // a Strike director game is sought again too, for a fresh join ticket (the refused join's may not be good again)
+    const int lobby = g_pin == PIN_NONE && g_game_id[0] &&
+                      (strike_via_director() || (g_brain_mode && backend_available() == 1));
     pthread_mutex_lock(&g_client->net_lock);
     snprintf(g_client->net_join.password, sizeof(g_client->net_join.password), "%s", password);
     if (lobby) snprintf(g_password_game, sizeof(g_password_game), "%s", g_game_id);
@@ -2268,7 +2271,10 @@ static int connection_dropped(char *error, const size_t error_size) {
 int servers_ui_connection_lost(char *error, const size_t error_size, const char *code, const int dropped, const int had_session) {
     if (!g_client || g_client->offline || !code) return servers_ui_rejoining();
     // the game needs its server password (v10 ENTER_CODE -> gameCode()): ask; Submit joins again
-    if (!dropped && !strcmp(code, NET_ERROR_CODE_PASSWORD) && !ci_contains(error, "too many")) v10_party_password_prompt();
+    if (!dropped && !strcmp(code, NET_ERROR_CODE_PASSWORD) && !ci_contains(error, "too many")) {
+        if (strike_ui_active()) strike_menu_server_password(); // Krunker Strike's prompt (SERVER_PASSWORD)
+        else v10_party_password_prompt();
+    }
     if (dropped) return g_pin == PIN_IDLE ? servers_ui_rejoining() : connection_dropped(error, error_size);
     const int restart = !strcmp(code, NET_ERROR_CODE_UPDATING) || !strcmp(code, NET_ERROR_CODE_SHUTDOWN);
     const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");

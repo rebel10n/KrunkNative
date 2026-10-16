@@ -97,6 +97,7 @@ typedef enum {
     STRIKE_SCREEN_INPUT_BLOCKER,  // ws: "Purchasing..." while a purchase is on its way (strike_reward.c)
     STRIKE_SCREEN_PROFILE_DETAILS, // jC: Account Details (strike_profile.c)
     STRIKE_SCREEN_POPUP_MESSAGE,   // Oue: the success / error / warning alert and the Logout / name confirms
+    STRIKE_SCREEN_SERVER_PASSWORD, // KrunkNative: the server password of a refused join (strike_menu.c)
     STRIKE_SCREEN_COUNT
 } StrikeScreen;
 
@@ -231,3 +232,6 @@ void strike_hud_scenario(Client *client, const cJSON *state); // killfeed / kill
 void strike_menu_scenario(const cJSON *account, const char *name); // state.strike.account (the account box)
 void strike_menu_scenario_board(const cJSON *rows); // state.strike.leaderboard (LEADERBOARD_PLAYERS' rows)
 void strike_menu_scenario_state(const cJSON *st);   // state.strike.itemSelection (T5 over Customize), .product (U2)
+// servers_ui.c: the server refused the join for its password (ERROR 004005): the SERVER_PASSWORD prompt.
+// Submit sends the same game again with the typed password, Leave goes back (strike_menu.c).
+void strike_menu_server_password(void);

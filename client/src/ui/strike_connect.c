@@ -74,6 +74,8 @@ void strike_connect_render(const HtmlElem root) {
 
 void strike_connection_state(const StrikeConnState state, const char *error, const char *code, const int close_code, const char *close_reason) {
     if (C.held && state == STRIKE_CONN_CONNECTED) return;
+    // a join refused for the server password: the password prompt (strike_menu.c) asks instead of a Lost Connection
+    if (state == STRIKE_CONN_LOST && strike_screen_shown(STRIKE_SCREEN_SERVER_PASSWORD)) return;
     if (state == STRIKE_CONN_RECONNECTING) {
         if (!C.reconnecting) {
             C.reconnecting = 1;

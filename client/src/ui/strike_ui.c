@@ -64,6 +64,7 @@ static const char *const SCREEN_IDS[STRIKE_SCREEN_COUNT] = {
     [STRIKE_SCREEN_INPUT_BLOCKER] = "INPUT_BLOCKER",
     [STRIKE_SCREEN_PROFILE_DETAILS] = "PROFILE-DETAILS",
     [STRIKE_SCREEN_POPUP_MESSAGE] = "POPUP_MESSAGE",
+    [STRIKE_SCREEN_SERVER_PASSWORD] = "SERVER_PASSWORD",
 };
 
 // view.opts: translucent (the screens below stay rendered), keepAlive (rendered while buried)
@@ -79,6 +80,7 @@ static const struct { unsigned char translucent, keep_alive; } SCREEN_OPTS[STRIK
     [STRIKE_SCREEN_REPORT_PLAYER] = {1, 0}, // Hy opts {preventReplace, translucent}
     [STRIKE_SCREEN_INPUT_BLOCKER] = {1, 0}, // ws opts {translucent}
     [STRIKE_SCREEN_PROFILE_DETAILS] = {0, 1}, // jC: keepAlive, so the Settings tab's name field survives an alert
+    [STRIKE_SCREEN_SERVER_PASSWORD] = {1, 0}, // a prompt over the menu, as REPORT_PLAYER
 };
 
 // Dk: generic.tips.* in English (the 1.37.2 i18n table, tools/strike/strike_data.json)
@@ -657,7 +659,12 @@ void strike_ui_tick(Client *client) {
     if (!S.mounted && boot_done(client)) mount();
     if (S.mounted && !S.booted && S.fm_done) {
         S.booted = 1;
-        if (html_ui_is_menu_open()) strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
+        if (html_ui_is_menu_open()) {
+            // a server password prompt pushed by a refused startup connect (before the mount) stays on top
+            const int password = strike_screen_shown(STRIKE_SCREEN_SERVER_PASSWORD);
+            strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
+            if (password) strike_screen_push(STRIKE_SCREEN_SERVER_PASSWORD);
+        }
     }
     if (!S.booted) return;
     strike_connect_tick(); // the connection popups (strike_connect.c) follow the transport

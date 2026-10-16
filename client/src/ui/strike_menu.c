@@ -1808,6 +1808,49 @@ static void kr_bubble_toggle(void) {
     M.kr_bubble.timer = html_timer_add(5000.0, kr_bubble_timeout, NULL);
 }
 
+// ---------------------------------------------------------------- SERVER_PASSWORD (KrunkNative)
+
+// A server refused the join for its password (ERROR 004005): v10's gameCode popup in Strike's prompt frame
+// (SERVER_PASSWORD.html, the ids v10 uses). Submit joins the same game again with the typed password
+// (servers_ui_join_password: a fresh ticket from the director, else the same address); Leave goes back
+// (servers_ui_retry: a seek, or nothing for a direct server).
+void strike_menu_server_password(void) {
+    printf("[strike] the game needs a password\n");
+    strike_screen_push(STRIKE_SCREEN_SERVER_PASSWORD);
+}
+
+static void server_password_error(const char *message) {
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SERVER_PASSWORD);
+    const HtmlElem group = root ? html_dom_query(root, ".frvr-input-group") : 0;
+    if (!group) return;
+    HtmlElem old;
+    while ((old = html_dom_query(group, ".input-error"))) html_dom_remove(old);
+    char html[160];
+    snprintf(html, sizeof(html), "<div class=\"input-error\">%s</div>", message);
+    html_dom_insert_html(group, HTML_INSERT_BEFORE_END, html);
+}
+
+// v10 submitGameCode(): an empty field does nothing; a password that does not fit the JOIN packet is refused here
+// (the packet would cut it short and the server would answer "Wrong server password")
+static void server_password_submit(void) {
+    char code[64] = "";
+    const HtmlElem input = html_dom_by_id("codeInput");
+    if (input) html_dom_get_value(input, code, sizeof(code));
+    if (!code[0]) return;
+    if (strlen(code) >= sizeof(((Client *) 0)->net_join.password)) {
+        server_password_error("Password too long");
+        return;
+    }
+    if (strike_screen_top() == STRIKE_SCREEN_SERVER_PASSWORD) strike_screen_pop(); // clearPops, then the join
+    servers_ui_join_password(code);
+}
+
+// v10 knGameCodeLeave: location = location.origin, i.e. back to the menu (and a new seek where the menu has one)
+static void server_password_leave(void) {
+    if (strike_screen_top() == STRIKE_SCREEN_SERVER_PASSWORD) strike_screen_pop();
+    servers_ui_retry();
+}
+
 // ---------------------------------------------------------------- actions
 
 static void play(void) {
@@ -1822,6 +1865,14 @@ static void action(const char *a) {
     if (strike_social_action(a)) return; // friends, invites, report (strike_social.c)
     if (strike_reward_action(a)) return; // the reward screen, the choice popup (strike_reward.c)
     if (strike_connect_action(a)) return; // the Lost Connection popup's Reconnect (strike_connect.c)
+    if (!strcmp(a, "join-password")) {   // SERVER_PASSWORD's Submit / Leave
+        server_password_submit();
+        return;
+    }
+    if (!strcmp(a, "join-password-leave")) {
+        server_password_leave();
+        return;
+    }
     if (!strcmp(a, "play")) play();
     else if (!strncmp(a, "buy-confirm:", 12)) {
         // U2's YA: onPurchase (kt: the popup goes), then $r
@@ -1997,6 +2048,7 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_REPORT_PLAYER:   // transcribed from the bundle (strike_social.c)
     case STRIKE_SCREEN_PROFILE_DETAILS: // jC (strike_profile.c)
     case STRIKE_SCREEN_POPUP_MESSAGE:   // Oue (strike_profile.c)
+    case STRIKE_SCREEN_SERVER_PASSWORD: // KrunkNative's own prompt (SERVER_PASSWORD.html)
         return strike_screen_id(s);
     case STRIKE_SCREEN_REWARD:          // transcribed from the bundle (strike_reward.c)
     case STRIKE_SCREEN_REWARD_CHOICE:   // transcribed from the bundle (strike_reward.c)
@@ -2118,6 +2170,11 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     case STRIKE_SCREEN_POPUP_WARNING:
         strike_connect_render(root);
         break;
+    case STRIKE_SCREEN_SERVER_PASSWORD: {
+        const HtmlElem input = html_dom_by_id("codeInput"); // v10 gameCode(): the field has the focus
+        if (input) html_dom_focus(input);
+        break;
+    }
     default:
         break;
     }

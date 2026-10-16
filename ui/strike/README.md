@@ -163,6 +163,9 @@ Notes from the bundle:
   counts only when it is a Strike game (presence gameFlavor), invites are the brain's game:invite, reports its "rpt".
   Profile pictures are the default (class icon 0); the platform invite dialog ("Invite Friends", "+ More Friends") has
   no KrunkNative counterpart and is not shown / does nothing.
+- SERVER_PASSWORD (KrunkNative's own, not an FRVR view): the server password prompt of a join the server refused
+  (ERROR 004005), v10's gameCode popup with the same ids (`codeInput`, `confirmBtn`, `declineBtn`) in the prompt frame;
+  strike_menu.c drives it (`join-password` / `join-password-leave`). Hand-written, not pixel-verified.
 
 ## Connection popup (POPUP_WARNING, 2026-10-15)
 
