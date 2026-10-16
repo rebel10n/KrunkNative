@@ -1868,6 +1868,7 @@ static void acc_set_ready(ClientConnection *client) {
 void accounts_on_connect(ClientConnection *client) {
     memset(&client->acct, 0, sizeof(client->acct));
     client->acct.badge = -1;
+    client->acct.flag = -1;
     client->acct.round_result = -1;
     const int gated = g_acc.brain || g_gs_config.online_mode || g_gs_config.password[0] || director_gate_enabled();
     client->acct.join_state = gated ? SERVER_JOIN_AWAIT : SERVER_JOIN_READY;
@@ -1897,6 +1898,7 @@ static void acc_become_guest(ClientConnection *client, const char *why) {
     // online_mode verifies accounts but admits guests, like every Krunker lobby: whoever is not
     // a verified account plays as a guest (Guest_N, nothing saved), never under a claimed name
     client->acct.central_pending = 0;
+    client->acct.flag = -1;
     client->acct.username[0] = 0;
     if (director_gate_enabled()) { // Krunker Strike: required tickets, private lobbies (director_gate.h)
         char msg[96] = "";
@@ -1939,6 +1941,7 @@ static int acc_director_join(ClientConnection *client, const NetJoinPacket *join
     }
     // the director's guest: no account (Strike accounts are not kn accounts)
     client->acct.central_pending = 0;
+    client->acct.flag = -1;
     client->acct.username[0] = 0;
     client->acct.account_id = 0;
     acc_set_ready(client);
@@ -2313,6 +2316,9 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     // WP-F: the custom badge (v7 account.stats.bdg, badges.js index), when the brain supplies one
     const cJSON *stats = cJSON_GetObjectItem(account, "stats");
     const cJSON *bdg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "bdg") : cJSON_GetObjectItem(account, "badge");
+    // the Country Flag (stats.flg, an index into the client's Country Flag list): the Strike kill card's flag
+    const cJSON *flg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "flg") : NULL;
+    client->acct.flag = cJSON_IsNumber(flg) && flg->valueint >= 0 ? flg->valueint : -1;
     client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
     // WP-E part 2c: only a badge the account owns (kn_brain's account "badges", badges.js indices)
     const cJSON *owned = cJSON_GetObjectItem(account, "badges");

@@ -137,6 +137,8 @@ typedef enum {
 
     // 0x8110 Krunker Strike's Tap-to-Play "Switch Teams" (client/src/ui/strike_menu.c, mode_swap_team)
     NET_EXT_KN_SWAP_TEAM = 0x8110, // C -> S NetSwapTeamPacket: the team this player takes between lives (FRVR SWAP_TEAM "swpt")
+    // 0x8131 Krunker Strike kill card flag (the first id after 0x8130 no queued patch takes)
+    NET_EXT_KN_STRIKE_KILL_FLAG = 0x8131, // S -> C NetStrikeKillFlagPacket, right before the victim's NET_PACKET_KILL
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -217,6 +219,21 @@ typedef struct {
 typedef struct {
     uint8_t team; // 1 or 2
 } NetSwapTeamPacket;
+// NET_EXT_KN_STRIKE_KILL_FLAG (S -> C, to the victim, Krunker Strike peers only): the killer's Country
+// Flag for the Strike kill card. FRVR's killCardInfo.flag is img/flags/3x2/<CODE>.svg from the killer's
+// player record (flagType, the account's country); the card is the victim's alone, so only the victim
+// gets it. The server's kill hook (server/src/net.c net_game_kill) sends it before the victim's KILL
+// (player_kill runs the hook first), so the client holds it when the KILL arrives. `flag` is the
+// killer's account stats.flg, an index into client/src/ui/account_flags.h's Country Flag list; -1 for
+// none (guests, bots). `killer_uid` is the NetKillPacket.killer_uid it belongs to, so a stale flag is
+// ignored. Older peers ignore the subtype.
+#pragma pack(push, 1)
+typedef struct {
+    int32_t killer_uid; // NetKillPacket.killer_uid
+    int16_t flag;       // the Country Flag index, -1 none
+} NetStrikeKillFlagPacket;
+#pragma pack(pop)
+_Static_assert(sizeof(NetStrikeKillFlagPacket) == 6, "NetStrikeKillFlagPacket: the wire body is 6 bytes");
 
 // NET_EXT_PLAYER_SPEED_BOOST (S -> C, to the player): Krunker "spb" [speedBoost, silent]
 // (game.deob.js:220498): Player.speed_boost (the movement acceleration x it, 0 = none); unless

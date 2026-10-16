@@ -265,6 +265,7 @@ typedef struct {
     const char *pc_stat_name;    // the killer's player card stat: config.playerCardStats[i].name, NULL = none ("3" [2] null)
     const char *pc_stat_value;
     int report;                  // "[<playerList key>] to Report" (killer level <= 10, signed in, public game)
+    const char *flag_code;       // the killer's Country Flag, ISO code ("us"): Strike's kill card flag (img/flags/3x2), NULL none
 } HudKillCard;
 // v7 io_killPlayer for the local player: #deathUIHolder (f1975) + UI.toggleGameUI(false).
 void hud_ui_show_death(Client*, const HudKillCard *card);

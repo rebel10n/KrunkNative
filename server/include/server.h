@@ -66,6 +66,7 @@ typedef struct {
     char username[32];
     int level;                 // 0 guest
     char clan[8];
+    int flag;                  // stats.flg: the Country Flag index (client account_flags.h), -1 none (the Strike kill card)
     unsigned char flags;       // NET_PLAYER_INFO_*
     unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
     unsigned char premium:1;
@@ -146,6 +147,7 @@ typedef struct {
     unsigned char first_packet_seen:1; // NET_PACKET_FORWARDED counts only as the first packet
     unsigned char peer_minor;      // HELLO minor of a NET_PROTOCOL_MAJOR peer (0 before / other majors): per-peer packet gates
     unsigned char peer_patch;      // WP-C: its HELLO patch (0 for a 2-byte HELLO): net_peer_has_wpc(peer_minor, peer_patch)
+    unsigned char peer_flavor;     // its HELLO flavor nibble (GameFlavor; FLAVOR_BASE for a base or absent nibble)
 
     float connected_at;
     float spawned_at;

@@ -50,6 +50,7 @@
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <strike_ui.h>       // Krunker Strike: its own in-game UI gets the same events (strike_hud.c)
 #include <prop_hunt_client.h> // Prop Hunt: "up" / "prpR"
+#include "../ui/account_flags.h" // account_flag_code: the killer's Country Flag for the Strike kill card
 #include <i18n.h>     // NET_EXT_KN_OFFICIAL_CHAT_I18N: an official server's "chi" key, translated here
 #include <map_post.h> // NET_EXT_KN_OFFICIAL_LEADER_BOARD: a map LEADERBOARD's rows
 #include <math.h>
@@ -99,6 +100,11 @@ void client_chat_send(Client *client, const char *text) {
 // NET_EXT_KN_HIT_DAMAGE: the exact damage of the NET_PACKET_HIT right behind it (net_ext.h)
 static NetHitDamagePacket g_hit_damage;
 static int g_hit_damage_valid;
+
+// NET_EXT_KN_STRIKE_KILL_FLAG: the killer's Country Flag for the Strike kill card, sent right before
+// the KILL it belongs to (net_ext.h); events_kill takes it when that KILL's killer matches.
+static NetStrikeKillFlagPacket g_strike_kill_flag;
+static int g_strike_kill_flag_valid;
 
 // The damage number's value: the exact one when the server sent it for this hit, else the HIT's.
 static double events_hit_damage(const NetHitPacket *hit) {
@@ -297,6 +303,10 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         card.life_score = death->score;
     }
     card.score = packet->score;
+    // the Strike kill card's flag: the killer's Country Flag, when the server sent it for this KILL
+    if (by_other && g_strike_kill_flag_valid && g_strike_kill_flag.killer_uid == packet->killer_uid)
+        card.flag_code = account_flag_code(g_strike_kill_flag.flag);
+    g_strike_kill_flag_valid = 0;
 
     hud_ui_show_death(client, &card);
     strike_hud_death(client, &card, killer && killer != victim ? killer : NULL); // the Strike kill card
@@ -1231,6 +1241,9 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             else if (subtype == NET_EXT_KN_HIT_DAMAGE && body_length >= sizeof(NetHitDamagePacket)) { // dmgType "Float"
                 memcpy(&g_hit_damage, body, sizeof(g_hit_damage));
                 g_hit_damage_valid = 1;
+            } else if (subtype == NET_EXT_KN_STRIKE_KILL_FLAG && body_length >= sizeof(NetStrikeKillFlagPacket)) { // Strike kill card
+                memcpy(&g_strike_kill_flag, body, sizeof(g_strike_kill_flag));
+                g_strike_kill_flag_valid = 1;
             } else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect

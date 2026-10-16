@@ -59,3 +59,8 @@ static const AccountFlag ACCOUNT_FLAGS[] = {
     {"Western Sahara", "eh"}, {"Yemen", "ye"}, {"Zambia", "zm"}, {"Zimbabwe", "zw"},
 };
 #define ACCOUNT_FLAG_COUNT ((int) (sizeof(ACCOUNT_FLAGS) / sizeof(ACCOUNT_FLAGS[0])))
+
+// The ISO code ("us") of a Country Flag index (stats.flg); NULL for none (-1) or out of range.
+static inline const char *account_flag_code(const int index) {
+    return index >= 0 && index < ACCOUNT_FLAG_COUNT ? ACCOUNT_FLAGS[index].code : NULL;
+}

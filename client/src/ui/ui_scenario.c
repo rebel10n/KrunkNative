@@ -975,6 +975,7 @@ static void apply_killcard(Client *client) {
         card.level = (int) obj_num(kc, "level", 1);
         card.score = (int) obj_num(kc, "score", 0);
         card.class_index = (int) obj_num(kc, "classIndex", 0);
+        card.flag_code = obj_str(kc, "flag"); // the killer's Country Flag ISO code ("us"): Strike's kill card flag
         // v7 death screen: weaponIcon / myLevel and the life's stats [timeAlive ms, shots, "acc%", kills, score]
         card.weapon_icon = obj_str(kc, "weaponIcon");
         card.my_level = (int) obj_num(kc, "myLevel", 0);

@@ -328,10 +328,28 @@ static void net_game_give_skin(Game *game, const Player *player, const int skin,
     accounts_give_skin(player, skin, reason);
 }
 
-// GameHooks.kill: v10 Turf Wars (accounts.c)
+// NET_EXT_KN_STRIKE_KILL_FLAG (net_ext.h): the killer's Country Flag for the victim's Krunker Strike
+// kill card (FRVR killCardInfo.flag). Only the victim's card shows it, so only the victim's Strike
+// connection gets it, before the KILL that player_kill sends after this hook.
+static void net_send_strike_kill_flag(const Player *victim, const Player *killer) {
+    if (!victim || !killer || killer == victim) return;
+    ClientConnection *client = net_client_by_id(victim->uid);
+    if (!client || client->peer_flavor != FLAVOR_STRIKE || !net_peer_takes(client, NET_PACKET_EXT)) return;
+    const ClientConnection *killer_client = net_client_by_id(killer->uid); // NULL for a bot: no flag
+    const NetStrikeKillFlagPacket body = {
+        .killer_uid = killer->uid,
+        .flag = (int16_t) (killer_client ? killer_client->acct.flag : -1),
+    };
+    uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_STRIKE_KILL_FLAG, &body, sizeof(body));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buffer, n);
+}
+
+// GameHooks.kill: v10 Turf Wars (accounts.c); the Strike kill card's flag rides before the KILL
 static void net_game_kill(Game *game, const Player *victim, const Player *killer) {
     (void) game;
     accounts_on_kill(victim, killer);
+    net_send_strike_kill_flag(victim, killer);
 }
 
 // GameHooks.respawn: a mode respawns a dead player itself (forceSpawn, Krunker "frs").
@@ -1730,6 +1748,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 // a base / absent nibble is accepted (net-bridge, the server-list probe, a base
                 // client — a non-base client refuses us from our own INIT instead).
                 const GameFlavor peer_flavor = (GameFlavor) NET_WIRE_FLAVOR(hello.rulesets);
+                client->peer_flavor = (unsigned char) peer_flavor; // the Strike kill card's flag goes to Strike peers only
                 if (peer_flavor != FLAVOR_BASE && peer_flavor != flavor_get()) {
                     char msg[sizeof(((NetErrorPacket *) 0)->message)];
                     snprintf(msg, sizeof(msg), "This is a %s server", flavor_display_name(flavor_get()));
