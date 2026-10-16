@@ -371,6 +371,19 @@ log = run("board", "\n".join(sb))
 seen = [vis(log, k).get("centerLeaderDisplay") for k in ("h-down", "h-up", "t-up", "t-again")]
 check(seen == ["1", "0", "1", "0"], "scoreBoardTrigger: Hold shows the board while held; Toggle keeps it up until the next press", str(seen))
 
+# leftHand: the viewmodel sits on the left (the input log's wp_x, the held weapon's x, changes sign)
+LH_LOG = os.path.join(WORK, "lefthand.csv")
+xs = {}
+for lh in ("false", "true"):
+    path = LH_LOG + lh
+    run("lefthand-" + lh, "\n".join(["0 menu", f'300 call setSetting "leftHand" "{lh}"', "600 play", "2500 quit"]),
+        {"KRUNKNATIVE_INPUT_LOG": path})
+    if os.path.exists(path):
+        with open(path) as f:
+            xs[lh] = [float(r["wp_x"]) for r in _csv.DictReader(f) if float(r["t"]) > 1500]
+check(xs.get("false") and xs.get("true") and min(xs["false"]) > 0.1 and max(xs["true"]) < -0.1,
+      "leftHand: the weapon moves to the left hand", f"right {xs.get('false', [None])[:1]} left {xs.get('true', [None])[:1]}")
+
 # ---------------------------------------------------------------- per weapon (vmSetts / gpSetts)
 # The Game tab with vmSetts on Per Weapon: "Select Weapon" follows the row and the viewmodel rows edit the
 # picked weapon's clones; Apply To All copies them to every weapon. In game the held weapon reads its

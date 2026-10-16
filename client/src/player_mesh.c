@@ -1052,6 +1052,10 @@ static float player_head_mlt(const Player *player) {
 void player_generate_meshes(Player *player, const int render_you) {
     if (player->mesh) return;
     player->render_you = render_you;
+    // leftHand (Game > View Model, v10.js:171160): every model this client builds takes RENDER.leftHand,
+    // its upper body mirrored (v10.js:171752; here the arms' offsets flip, generate_arm) and the muzzles with
+    // it (vfx.c). Like v10 it holds from the next model build (a respawn), not live.
+    player->left_handed = (unsigned char) !!client_render_settings()->left_hand;
 
     PlayerLook look;
     player_look(player, &look);
