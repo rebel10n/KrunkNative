@@ -286,3 +286,16 @@ Still missing from the snapshot, and not used by any markup this port has: the M
 `market-dealer.png`, `market-complexity.png`: STORE.html's Market products carry no `store-market__decoration` markup, so the
 decoration FRVR draws around them is not ported yet), the tournament, seasonal, MVP and end-screen premium art, the speech
 bubbles and the watch-ad icon. Their CSS references stay unresolved, as they were before.
+
+## Images fetched for the in-game HUD (2026-10-15)
+
+The kill feed's thrown and wallbang icons (Kde, B:107159-107190: `./img/thrown_0.png`, `./img/wallbang_0.png`, read as text). The
+page's `./img/` paths come from the page origin, `https://krunkerstrike.frvr.com/`, which answered 200 (image/png) for both. GET
+only, one request every 1.1 s, no cookies, no request body, nothing executed. `img/headshot_0.png` was already vendored. The
+wallbang file is byte-identical to `cdn/img/chals/icon_9.png` above (same sha256). The kill card's flag image
+(`img/flags/3x2/<TYPE>.svg`, the setter at B:155586) is not fetched: the player record's flag field is not in our protocol yet.
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| img/thrown_0.png | https://krunkerstrike.frvr.com/img/thrown_0.png | 9878189e00b2238d7513b554a1d17c7243e8c8989f8187033c74f27aad0ab6e4 |
+| img/wallbang_0.png | https://krunkerstrike.frvr.com/img/wallbang_0.png | d5193c6b1839635ad2f72f4f8daa6f71487451d51d32a0383e31e1a7290eed71 |

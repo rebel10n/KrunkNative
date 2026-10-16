@@ -1,0 +1,47 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "inGame": true,
+    "menu": false,
+    "strike": {
+      "killfeed": [
+        {
+          "killer": "Guest_4821",
+          "killerIsYou": 1,
+          "victim": "Botman",
+          "weapon": "icon_1",
+          "headshot": 1,
+          "wallbang": 1
+        },
+        {
+          "killer": "Krunky",
+          "victim": "Guest_4821",
+          "victimIsYou": 1,
+          "weapon": "icon_2",
+          "thrown": 1
+        },
+        {
+          "killer": "Krunky",
+          "victim": "Nova",
+          "weapon": "icon_2",
+          "headshot": 1,
+          "wallbang": 1,
+          "thrown": 1
+        }
+      ],
+      "health": 140,
+      "maxHealth": 180
+    }
+  },
+  "frames": 3,
+  "note": "Kill feed icons (Kde B:107159-107190): img/thrown_0.png before the weapon, img/wallbang_0.png and img/headshot_0.png after it. No FRVR capture of these icons: the bundle is the reference (ui/strike/README.md)."
+}

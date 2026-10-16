@@ -15,6 +15,8 @@
 //   jde / Kde     .frvr-in-game-ui__kill-log-container: Ybe = 3 rows, each dropped 10 s after it came;
 //                 killer / victim coloured by AF (friend-colors--you / --enemy / --teammate)
 //   Yde           .frvr-in-game-ui__kill-card-container: "Killed By" + the killer's card, or "You Died"
+//   Gde / U5      .frvr-in-game-ui__score-board-container: table.mini-score-board (rank, name, the mode's
+//                 leaderStats) while the scoreboard key (Tab, hold) is down; not on touch (no key events)
 // The death: Mt.showKillCard, the mobile controls hidden, and xe.deathDelay later Cg() (goToPlay):
 // a Strike player respawns on their own, no menu in between (strike_hud_death_tick).
 // The round end: LEAN_END_SCREEN (WB, the template LEAN_END_SCREEN.html) over the game.
@@ -26,6 +28,7 @@
 #include <modes.h>
 #include <weapons.h>
 #include <zombies.h>
+#include <i18n.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,13 +39,24 @@
 #define KILL_LOG_MS 10000.0     // a row's setTimeout
 #define HEALTH_BARS 6           // Sx
 #define KILL_NAME_MAX 48
+#define BOARD_ROWS_MAX 64       // U5's rows (FRVR lists every player)
+#define BOARD_STAT_KEYS 4       // the most leaderStats columns a mode has (NET_LEADER_STATS_MAX)
 
 typedef struct {
     char killer[KILL_NAME_MAX], victim[KILL_NAME_MAX];
     char weapon[96];            // icon src ("" none)
     int killer_is_you, victim_is_you, killer_team, victim_team, headshot;
+    int thrown, wallbang;       // img/thrown_0.png before the weapon, img/wallbang_0.png after it
     int timer;
 } KillLogRow;
+
+// One mini-scoreboard row: a live player (stats from mode_leader_stat_value) or a scenario row.
+typedef struct {
+    const Player *player;       // NULL for a scenario row
+    char name[PLAYER_NAME_SIZE];
+    int team, is_you, class_index, order;
+    int score, kills, deaths;   // scenario rows (a live row takes the mode's stats)
+} BoardRow;
 
 static struct {
     Client *client;
@@ -54,8 +68,11 @@ static struct {
     // the kill card (Mt.showKillCard / Mt.killCardInfo)
     int kill_card;
     int killed_by;
-    char kc_name[KILL_NAME_MAX], kc_weapon[96], kc_pfp[96];
+    char kc_name[KILL_NAME_MAX], kc_weapon[96], kc_pfp[96], kc_color[64];
     int kc_level, kc_score;
+    // the mini scoreboard (Mt.showMiniScoreBoard): this tick's flag and the markup last written
+    int board;
+    char *last_board;
     // last rendered values (Mithril's diff)
     char last_score[160], last_health[64], last_timer[64], last_reload[32], last_desk[128], last_hint[96];
     int last_card;
@@ -63,6 +80,8 @@ static struct {
     char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
     int scenario, scn_health, scn_max_health, scn_reward;
+    int scn_board, scn_row_count;   // state.strike.scoreboard (held) and state.strike.board (rows)
+    BoardRow scn_rows[BOARD_ROWS_MAX];
 } H;
 
 // ---------------------------------------------------------------- helpers
@@ -279,7 +298,9 @@ static void view_kill_log(const Client *client, StrBuf *sb) {
             sb_append(sb, "</div>");
         }
         sb_append(sb, "<div class=\"frvr-in-game-ui__kill-log-imgs\">");
+        if (r->thrown) sb_append(sb, "<div class=\"frvr-in-game-ui__kill-log-img\"><img src=\"./img/thrown_0.png\"></div>");
         if (r->weapon[0]) sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-log-img\"><img src=\"%s\"></div>", r->weapon);
+        if (r->wallbang) sb_append(sb, "<div class=\"frvr-in-game-ui__kill-log-img\"><img src=\"./img/wallbang_0.png\"></div>");
         if (r->headshot) sb_append(sb, "<div class=\"frvr-in-game-ui__kill-log-img\"><img src=\"./img/headshot_0.png\"></div>");
         sb_append(sb, "</div>");
         sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-log-text %s\">", af_class(r->victim_is_you, r->victim_team, my_team));
@@ -297,12 +318,149 @@ static void view_kill_card(StrBuf *sb) {
         sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-card-card\"><div class=\"frvr-in-game-ui__kill-card-pfp\"><img src=\"%s\"></div>", H.kc_pfp);
         sb_append(sb, "<div class=\"frvr-in-game-ui__kill-card-middle\"><div class=\"frvr-in-game-ui__kill-card-nickname\">");
         sb_append_esc(sb, H.kc_name);
-        sb_append(sb, "</div><div class=\"frvr-in-game-ui__kill-card-weapon\" style=\"color: rgb(255, 255, 255);\">");
+        sb_appendf(sb, "</div><div class=\"frvr-in-game-ui__kill-card-weapon\" style=\"color: %s;\">", H.kc_color);
         sb_append_esc(sb, H.kc_weapon);
         sb_appendf(sb, "</div></div><div class=\"frvr-in-game-ui__kill-card-lvl-flag\"><div class=\"frvr-in-game-ui__kill-card-lvl\">LVL %d</div></div>", H.kc_level);
         sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-card-score\">+ %d</div></div>", H.kc_score);
     }
     sb_append(sb, "</div>");
+}
+
+// ---------------------------------------------------------------- the mini scoreboard (Gde / U5)
+
+// One stat of a row: the mode's leaderStats key (Player fields through mode_leader_stat_value).
+static int row_stat(const BoardRow *r, const char *key) {
+    if (r->player) return mode_leader_stat_value(r->player, key);
+    if (!strcmp(key, "score")) return r->score;
+    if (!strcmp(key, "kills")) return r->kills;
+    if (!strcmp(key, "deaths")) return r->deaths;
+    return 0;
+}
+
+// U5's columns: mode.leaderStats, default ["score"] (FRVR's `s.mode && s.mode.leaderStats`).
+static const char *const BOARD_DEFAULT_KEYS[] = {"score", NULL};
+
+static const char *const *board_keys(const Client *client, int *count) {
+    const char *const *keys = client && client->game.mode && client->game.mode->config.leader_stats ? client->game.mode->config.leader_stats
+                                                                                                    : BOARD_DEFAULT_KEYS;
+    int n = 0;
+    while (keys[n] && n < BOARD_STAT_KEYS) n++;
+    *count = n;
+    return keys;
+}
+
+static int key_listed(const char *const *keys, const int count, const char *key) {
+    for (int i = 0; i < count; i++) {
+        if (!strcmp(keys[i], key)) return 1;
+    }
+    return 0;
+}
+
+// Se.leaderboardData normalised (normalizeData): every player, highest score first (the server's
+// board order; ties keep the game's player order).
+static int row_compare(const void *a, const void *b) {
+    const BoardRow *x = a, *y = b;
+    if (x->score != y->score) return x->score > y->score ? -1 : 1;
+    return x->order - y->order;
+}
+
+static int board_rows(const Client *client, BoardRow *out, const int max) {
+    int n = 0;
+    if (H.scn_row_count > 0) {
+        for (int i = 0; i < H.scn_row_count && n < max; i++) {
+            out[n] = H.scn_rows[i];
+            out[n].order = n;
+            n++;
+        }
+    } else if (client && client->game.players) {
+        for (size_t i = 0; i < client->game.player_count && n < max; i++) {
+            const Player *p = client->game.players[i];
+            if (!p) continue;
+            BoardRow *r = &out[n];
+            memset(r, 0, sizeof(*r));
+            r->player = p;
+            snprintf(r->name, sizeof(r->name), "%s", p->name);
+            r->team = p->team;
+            r->is_you = p == client->me;
+            r->class_index = p->class_index;
+            r->score = p->score;
+            r->order = n++;
+        }
+    }
+    qsort(out, (size_t) n, sizeof(out[0]), row_compare);
+    return n;
+}
+
+// getTranslatedStatName: "generic.<key>" (the key itself when no table has it)
+static void board_label(const char *key, char *out, const size_t n) {
+    char id[64];
+    snprintf(id, sizeof(id), "generic.%s", key);
+    snprintf(out, n, "%s", i18n_tr(id, key));
+}
+
+// normalizeData's team names: teamOptions, else FRVR's default team names
+static const char *board_team_name(const Client *client, const int team) {
+    const GameMode *mode = client->game.mode;
+    if (team >= 1 && team <= 2) {
+        if (mode && mode->config.team_options[team - 1]) return mode->config.team_options[team - 1];
+        return team == 2 ? "Bravo" : "Alpha";
+    }
+    return "";
+}
+
+// Gde: .frvr-in-game-ui__score-board-container > .frvr-in-game-ui__score-board > table.mini-score-board
+// (U5.view): the header row, then per team (in team modes) a team header and its players, or one
+// group of the players. Rank = the place within the group.
+static void view_board(const Client *client, StrBuf *sb) {
+    BoardRow rows[BOARD_ROWS_MAX];
+    const int n = board_rows(client, rows, BOARD_ROWS_MAX);
+    int columns;
+    const char *const *keys = board_keys(client, &columns);
+    const int teams = team_mode(client);
+    sb_append(sb, "<div class=\"frvr-in-game-ui__score-board-container\"><div class=\"frvr-in-game-ui__score-board\"><table class=\"mini-score-board\">");
+    sb_append(sb, "<tr class=\"header-row\"><td class=\"top-left\">#</td><td></td><td></td>");
+    for (int k = 0; k < columns; k++) {
+        char label[64];
+        board_label(keys[k], label, sizeof(label));
+        sb_appendf(sb, "<td class=\"mini-score-board__%s\">", keys[k]);
+        sb_append_esc(sb, label);
+        sb_append(sb, "</td>");
+    }
+    sb_append(sb, "</tr>");
+    int done[BOARD_ROWS_MAX] = {0};
+    for (int i = 0; i < n; i++) {
+        if (done[i]) continue;
+        const int team = rows[i].team;
+        if (teams) { // getTeamHeader: the team's score, then the sums of kills, deaths and assists
+            const char *sums_of[3] = {"kills", "deaths", "assists"};
+            int sums[3] = {0, 0, 0};
+            for (int j = 0; j < n; j++) {
+                if (rows[j].team != team) continue;
+                for (int s = 0; s < 3; s++) sums[s] += key_listed(keys, columns, sums_of[s]) ? row_stat(&rows[j], sums_of[s]) : 0;
+            }
+            const int team_score = client->game.mode && (team == 1 || team == 2) ? client->game.mode->team_scores[team] : 0;
+            sb_append(sb, "<tr class=\"mini-score-board__team-header\"><td colspan=\"3\">");
+            sb_append_esc(sb, board_team_name(client, team));
+            sb_appendf(sb, "</td><td class=\"mini-score-board__team-stat\">%d</td><td class=\"mini-score-board__team-stat\">%d</td>"
+                           "<td class=\"mini-score-board__team-stat\">%d</td><td class=\"mini-score-board__team-stat\">%d</td></tr>",
+                       team_score, sums[0], sums[1], sums[2]);
+        }
+        int pos = 0;
+        for (int j = i; j < n; j++) {
+            if (done[j] || rows[j].team != team) continue;
+            done[j] = 1;
+            char icon[96];
+            class_icon(rows[j].class_index, icon, sizeof(icon));
+            sb_appendf(sb, "<tr class=\"data-row%s\">", rows[j].is_you ? " mini-score-board__thats-you-row" : "");
+            sb_appendf(sb, "<td class=\"mini-score-board__pos\">%d</td><td class=\"mini-score-board__avatar\"><img src=\"%s\"></td>"
+                           "<td class=\"mini-score-board__name\">", ++pos, icon);
+            sb_append_esc(sb, rows[j].name);
+            sb_append(sb, "</td>");
+            for (int k = 0; k < columns; k++) sb_appendf(sb, "<td class=\"mini-score-board__%s\">%d</td>", keys[k], row_stat(&rows[j], keys[k]));
+            sb_append(sb, "</tr>");
+        }
+    }
+    sb_append(sb, "</table></div></div>");
 }
 
 // ---------------------------------------------------------------- rendering
@@ -322,6 +480,34 @@ static void replace_part(const char *sel, const char *html) {
     if (!old) return;
     html_dom_insert_html(old, HTML_INSERT_BEFORE_BEGIN, html);
     html_dom_remove(old);
+}
+
+// The board comes and goes with H.board (the scoreboard key); its markup is rewritten only when it
+// changed, and it sits before the kill log (H5's child order: scorebar, health, reload, board, log).
+static void update_board(const Client *client) {
+    const HtmlElem old = part(".frvr-in-game-ui__score-board-container");
+    if (!H.board) {
+        if (old) html_dom_remove(old);
+        free(H.last_board);
+        H.last_board = NULL;
+        return;
+    }
+    StrBuf sb = {0};
+    view_board(client, &sb);
+    char *html = sb_finish(&sb);
+    if (old && H.last_board && !strcmp(html, H.last_board)) {
+        free(html);
+        return;
+    }
+    free(H.last_board);
+    H.last_board = html; // kept for the next tick's comparison
+    if (old) {
+        replace_part(".frvr-in-game-ui__score-board-container", html);
+        return;
+    }
+    const HtmlElem anchor = part(".frvr-in-game-ui__kill-log-container");
+    if (anchor) html_dom_insert_html(anchor, HTML_INSERT_BEFORE_BEGIN, html);
+    else html_dom_insert_html(H.root, HTML_INSERT_BEFORE_END, html);
 }
 
 static void render(Client *client) {
@@ -351,6 +537,8 @@ static void unrender(void) {
     if (H.root) html_dom_remove(H.root);
     H.root = 0;
     H.last_score[0] = H.last_health[0] = H.last_timer[0] = H.last_reload[0] = H.last_desk[0] = H.last_hint[0] = 0;
+    free(H.last_board);
+    H.last_board = NULL;
 }
 
 // Mithril redraw: only the parts whose inputs changed are rebuilt (keeps CSS transitions /
@@ -445,6 +633,7 @@ static void update(Client *client) {
             free(html);
         }
     }
+    update_board(client);
 }
 
 // ---------------------------------------------------------------- the round end (LEAN_END_SCREEN)
@@ -654,16 +843,16 @@ static void log_expire(void *user) {
 }
 
 static void killfeed_add(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                         const char *icon, const int headshot);
+                         const char *icon, const int headshot, const int thrown, const int wallbang);
 
 void strike_hud_killfeed(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                         const Weapon *weapon, const int headshot) {
+                         const Weapon *weapon, const int headshot, const int thrown, const int wallbang) {
     if (!strike_ui_active()) return;
-    killfeed_add(client, killer, killer_is_you, victim, victim_is_you, weapon ? weapon->icon : NULL, headshot);
+    killfeed_add(client, killer, killer_is_you, victim, victim_is_you, weapon ? weapon->icon : NULL, headshot, thrown, wallbang);
 }
 
 static void killfeed_add(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                         const char *icon, const int headshot) {
+                         const char *icon, const int headshot, const int thrown, const int wallbang) {
     H.client = client;
     if (H.log_count >= KILL_LOG_MAX) {
         if (H.log[0].timer) html_timer_cancel(H.log[0].timer);
@@ -677,6 +866,8 @@ static void killfeed_add(Client *client, const char *killer, const int killer_is
     r->killer_is_you = killer_is_you;
     r->victim_is_you = victim_is_you;
     r->headshot = headshot;
+    r->thrown = thrown;
+    r->wallbang = wallbang;
     if (icon && icon[0]) snprintf(r->weapon, sizeof(r->weapon), "./cdn/textures/weapons/%s.png", icon);
     r->timer = html_timer_add(KILL_LOG_MS, log_expire, NULL);
     H.log_dirty = 1;
@@ -690,6 +881,8 @@ void strike_hud_death(Client *client, const HudKillCard *card, const Player *kil
     if (H.killed_by) {
         snprintf(H.kc_name, sizeof(H.kc_name), "%s", card->killer);
         snprintf(H.kc_weapon, sizeof(H.kc_weapon), "%s[%s]", card->thrown ? "Thrown " : "", card->weapon ? card->weapon : "");
+        // the weapon's colour: the killer's skin rarity (weapon_color), else FRVR's rgba(255,255,255,0.7)
+        snprintf(H.kc_color, sizeof(H.kc_color), "%s", card->weapon_color && card->weapon_color[0] ? card->weapon_color : "rgba(255,255,255,0.7)");
         class_icon(killer ? killer->class_index : card->class_index, H.kc_pfp, sizeof(H.kc_pfp));
         H.kc_level = card->level > 0 ? card->level : 1;
         H.kc_score = card->score;
@@ -723,6 +916,9 @@ void strike_hud_tick(Client *client) {
     H.client = client;
     // Mt.inGameUI.visible: in a game, the menu closed (Yh(true)), not the end screen
     const int want = client && client->in_game && client->me && !html_ui_is_menu_open() && !H.end_shown;
+    // Mt.showMiniScoreBoard: the scoreboard key held (ui_controls.c: not while typing); a dead player
+    // sees the kill card instead (Mt.displayInfoUI is false then)
+    H.board = want && !H.kill_card && (H.scn_board || ui_controls_scoreboard_held());
     if (want && !H.root) render(client);
     else if (!want && H.root) unrender();
     if (H.root) update(client);
@@ -754,18 +950,38 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
     const cJSON *row;
     cJSON_ArrayForEach(row, feed) {
         killfeed_add(client, sjs(row, "killer"), sjn(row, "killerIsYou", 0), sjs(row, "victim"), sjn(row, "victimIsYou", 0), sjs(row, "weapon"),
-                     sjn(row, "headshot", 0));
+                     sjn(row, "headshot", 0), sjn(row, "thrown", 0), sjn(row, "wallbang", 0));
     }
     const cJSON *kc = cJSON_GetObjectItemCaseSensitive(st, "killcard");
     if (cJSON_IsObject(kc)) {
         HudKillCard card = {0};
         card.killer = sjs(kc, "killer");
         card.weapon = sjs(kc, "weapon");
+        card.weapon_color = sjs(kc, "weaponColor");
+        card.thrown = sjn(kc, "thrown", 0);
         card.level = sjn(kc, "level", 1);
         card.score = sjn(kc, "score", 0);
         card.class_index = sjn(kc, "classIndex", 0);
         strike_hud_death(client, &card, NULL);
     }
+    // state.strike.scoreboard: the scoreboard key held; state.strike.board: [{name, team, me, classIndex, score, kills, deaths}]
+    H.scn_board = sjn(st, "scoreboard", 0);
+    const cJSON *board = cJSON_GetObjectItemCaseSensitive(st, "board");
+    cJSON_ArrayForEach(row, board) {
+        if (H.scn_row_count >= BOARD_ROWS_MAX) break;
+        BoardRow *r = &H.scn_rows[H.scn_row_count++];
+        const char *name = sjs(row, "name");
+        memset(r, 0, sizeof(*r));
+        snprintf(r->name, sizeof(r->name), "%s", name ? name : "");
+        r->team = sjn(row, "team", 0);
+        r->is_you = sjn(row, "me", 0);
+        r->class_index = sjn(row, "classIndex", 0);
+        r->score = sjn(row, "score", 0);
+        r->kills = sjn(row, "kills", 0);
+        r->deaths = sjn(row, "deaths", 0);
+    }
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(st, "end");
     if (cJSON_IsNumber(end)) strike_hud_end(client, end->valueint);
+    printf("[strike] in-game scenario: %d kill-feed rows, kill card %d, scoreboard %d (%d rows)\n", H.log_count, H.kill_card, H.scn_board,
+           H.scn_row_count);
 }

@@ -78,7 +78,8 @@ def png_size(path):
 def files_case():
     readme = open(os.path.join(STRIKE, "README.md"), encoding="utf-8").read()
     recorded = dict(re.findall(r"^\| ((?:cdn/)?img/[^ |]+) \| https://[^ |]+ \| ([0-9a-f]{64}) \|$", readme, re.M))
-    for p in ("img/currencies/krunkies.png", "img/frvr-ui/krunkies.svg", "img/frvr-ui/xp-icon.svg", "img/victory-screen-bg.png"):
+    for p in ("img/currencies/krunkies.png", "img/frvr-ui/krunkies.svg", "img/frvr-ui/xp-icon.svg", "img/victory-screen-bg.png",
+              "img/thrown_0.png", "img/wallbang_0.png"):
         f = os.path.join(STRIKE, p)
         ok = os.path.isfile(f) and p in recorded and hashlib.sha256(open(f, "rb").read()).hexdigest() == recorded[p]
         check(f"1: {p} vendored, sha256 as README.md records", ok, recorded.get(p, "not in README.md"))
@@ -101,6 +102,12 @@ SCENARIOS = [
     ("reward-to-claim", r"\[strike\] screen REWARD_TO_CLAIM"),
     ("match-details", r"\[strike\] MATCH_DETAILS_SCREEN ffa, 1 players, 3 stat columns"),
     ("progression-track", r"\[strike\] PROGRESSION_TRACK 50 levels, level 12, 12 claimable"),
+    # the in-game UI (strike_hud.c): the kill feed's thrown / wallbang icons, the kill card's weapon colour,
+    # the mini scoreboard in FFA and TDM (team headers)
+    ("ingame-killfeed-icons", r"\[strike\] in-game scenario: 3 kill-feed rows, kill card 0, scoreboard 0 \(0 rows\)"),
+    ("killcard", r"\[strike\] in-game scenario: 0 kill-feed rows, kill card 1, scoreboard 0 \(0 rows\)"),
+    ("ingame-scoreboard", r"\[strike\] in-game scenario: 0 kill-feed rows, kill card 0, scoreboard 1 \(4 rows\)"),
+    ("ingame-scoreboard-team", r"\[strike\] in-game scenario: 0 kill-feed rows, kill card 0, scoreboard 1 \(4 rows\)"),
 ]
 
 
@@ -225,6 +232,37 @@ def live_case():
           f"{nodes(text, 'mdgone')} {n} {title!r}")
 
 
+# The in-game mini scoreboard (strike_hud.c, Gde / U5): the scoreboard key (Tab) held shows the
+# table, released hides it. Desktop only: FRVR installs the key listeners for non-mobile clients.
+HUD_SCRIPT = """0 play
+2000 nodes @hud .frvr-in-game-ui__kill-log-container
+2100 nodes @boardoff .frvr-in-game-ui__score-board-container
+2200 down TAB
+2400 nodes @boardon .frvr-in-game-ui__score-board-container
+2420 nodes @boardrows .mini-score-board .data-row
+2430 nodes @boardme .mini-score-board .mini-score-board__thats-you-row
+2440 frames {shots}/scoreboard 1
+2500 up TAB
+2700 nodes @boardgone .frvr-in-game-ui__score-board-container
+2800 quit
+"""
+
+
+def hud_case():
+    script = os.path.join(WORK, "hud.txt")
+    with open(script, "w") as f:
+        f.write(HUD_SCRIPT.format(shots=WORK))
+    rc, text = run([f"{BUILD}/client_bin", "--flavor", "strike", "--offline"], os.path.join(WORK, "cfg-hud"),
+                   os.path.join(WORK, "hud.log"), {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+    check("3: hud: live client ran its script", rc == 0 and "[strike] Krunker Strike page ready" in text, f"rc {rc}")
+    check("3: hud: no board without the key", nodes(text, "boardoff") == 0, str(nodes(text, "boardoff")))
+    check("3: hud: holding Tab shows the mini scoreboard", nodes(text, "boardon") == 1, str(nodes(text, "boardon")))
+    check("3: hud: the board lists the player and marks our row", nodes(text, "boardrows") >= 1 and nodes(text, "boardme") == 1,
+          f"{nodes(text, 'boardrows')} {nodes(text, 'boardme')}")
+    check("3: hud: the board's screenshot", png_size(os.path.join(WORK, "scoreboard_0000.png")) == (1280, 720))
+    check("3: hud: releasing Tab hides it", nodes(text, "boardgone") == 0, str(nodes(text, "boardgone")))
+
+
 def main():
     if not os.path.isfile(f"{BUILD}/client_bin"):
         print(f"no {BUILD}/client_bin", file=sys.stderr)
@@ -232,6 +270,7 @@ def main():
     files_case()
     scenario_case()
     live_case()
+    hud_case()
     ok = all(results)
     print(f"\n{sum(results)}/{len(results)} passed" + ("" if ok else f"  (logs in {WORK})"))
     if ok:

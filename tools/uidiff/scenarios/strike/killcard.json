@@ -19,7 +19,8 @@
         "weapon": "Sniper Rifle",
         "level": 7,
         "score": 100,
-        "classIndex": 1
+        "classIndex": 1,
+        "weaponColor": "#fff"
       },
       "health": 140,
       "maxHealth": 180

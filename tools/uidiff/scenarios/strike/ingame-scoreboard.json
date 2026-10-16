@@ -1,0 +1,59 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "inGame": true,
+    "menu": false,
+    "modeName": "ffa",
+    "strike": {
+      "scoreboard": true,
+      "board": [
+        {
+          "name": "Guest_4821",
+          "team": 0,
+          "me": true,
+          "classIndex": 0,
+          "score": 420,
+          "kills": 6,
+          "deaths": 2
+        },
+        {
+          "name": "Krunky",
+          "team": 0,
+          "classIndex": 1,
+          "score": 780,
+          "kills": 9,
+          "deaths": 3
+        },
+        {
+          "name": "Botman",
+          "team": 0,
+          "classIndex": 2,
+          "score": 310,
+          "kills": 4,
+          "deaths": 5
+        },
+        {
+          "name": "Nova",
+          "team": 0,
+          "classIndex": 4,
+          "score": 150,
+          "kills": 2,
+          "deaths": 7
+        }
+      ],
+      "health": 140,
+      "maxHealth": 180
+    }
+  },
+  "frames": 3,
+  "note": "Mini scoreboard (Gde / U5, Tab held): FFA columns score, kills, deaths; rows by score. FRVR's markup and CSS: the bundle B:107104-107123 and index-CJ_IUjn5.css (.mini-score-board)."
+}
