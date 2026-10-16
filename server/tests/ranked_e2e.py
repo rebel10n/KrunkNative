@@ -49,7 +49,9 @@ DB = os.environ.get("KN_TEST_DB", f"kn_rk_e2e_{os.getpid()}")
 BRAIN_PORT, GAME_PORT, GAME2_PORT = kn_proto.free_ports(3)
 WORK = tempfile.mkdtemp(prefix="kn-rk-e2e-", dir=os.path.expanduser("~/.cache"))
 CHAT, TEAM, COMP_SET, COMP_LOBBY = 9, 42, 184, 185
-MINOR_V7 = 3
+CHAT_SEND, EXT = 8, 254  # NET_PACKET_EXT: u16 LE subtype + body
+EXT_MARK_POSITION = 0x0900
+MINOR_EXT = 4  # HELLO 1.4: the EXT envelope (the "mpos" ping) reaches the peer
 results = []
 procs = []
 
@@ -227,7 +229,7 @@ def run():
     check("coordinator up", up, "" if up else log("brain.log")[-300:])
     cfg = os.path.join(WORK, "rk.cfg")
     with open(cfg, "w") as f:
-        f.write(f'hostname "Ranked E2E"\nport {GAME_PORT}\nnode_id RKE\nregion local\nmaxplayers 10\n'
+        f.write(f'hostname "Ranked E2E"\nport {GAME_PORT}\nnode_id RKE\nregion local\nmaxplayers 10\ncheats all\n'
                 f"coordinator_url ws://127.0.0.1:{BRAIN_PORT}/mm/internal/ws\n"
                 f"coordinator_http_url http://127.0.0.1:{BRAIN_PORT}\nmapcycle Burg\nmode ffa\njoin_timeout 4\n")
     procs.append(subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", cfg, "--config", os.path.join(WORK, "none.json")],
@@ -258,14 +260,14 @@ def run():
     for i, s in enumerate(states):
         if i == 7:  # the lobby still has a free seat: a stranger is refused by the roster rule
             stranger = kn_proto.Conn("127.0.0.1", GAME_PORT)
-            stranger.send(1, bytes([1, MINOR_V7, 0]))
+            stranger.send(1, bytes([1, MINOR_EXT, 0]))
             stranger.join(name="intruder")
             err = stranger.read(until=kn_proto.ERROR, timeout=8)
             check("a stranger is refused: Game in Progress", bool(err) and "Game in Progress" in kn_proto.error_info(err)[0],
                   kn_proto.error_info(err)[0] if err else "no ERROR")
             stranger.close()
         c = kn_proto.Conn("127.0.0.1", int(s["status"]["c"]["port"]))
-        c.send(1, bytes([1, MINOR_V7, 0]))  # HELLO 1.3 (v7 lobby packets)
+        c.send(1, bytes([1, MINOR_EXT, 0]))  # HELLO 1.4 (v7 lobby packets and the EXT envelope)
         c.join(client_key=s["status"]["c"]["clientId"], session=tokens[i])
         conns.append(c)
     inits = [c.read(until=kn_proto.INIT, timeout=10) for c in conns]
@@ -316,6 +318,28 @@ def run():
     check("every roster player has a lobby team: no 'Please join a Team to Spawn'", no_team_refusal and len(table) == 8,
           json.dumps([t for c in conns for t in chats(c) if "Please join a Team" in t])[:200])
 
+    # 3b. a ping (v10 markPosition, NET_EXT_MARK_POSITION): every other roster connection gets addPingIcon
+    # (key = the pinging connection's id, the hit position); the pinger gets none
+    conns[2].send(EXT, struct.pack("<H", EXT_MARK_POSITION) + struct.pack("<3f", 12.5, 2.0, -7.25))
+    for c in conns:
+        c.read(timeout=0.8)
+
+    def ping_of(conn):
+        for t, p in conn.packets:
+            if t == EXT and len(p) == 2 + 60 and struct.unpack("<H", p[:2])[0] == EXT_MARK_POSITION:
+                return kn_proto.uncstr(p[2:50]), struct.unpack("<3f", p[50:62])
+        return None
+
+    pings = [ping_of(c) for c in conns]
+    check("a ping reaches the other roster players (addPingIcon, the pinger's id as key)",
+          pings[0] is not None and pings[0][0].isdigit() and pings[0][1] == (12.5, 2.0, -7.25) and pings[7] == pings[0],
+          str(pings[0]))
+    check("the pinger gets no marker of its own", pings[2] is None)
+
+    # 3c. a scoring player: /score (cheats all: the host's dev command) gives conns[0] points for the round
+    conns[0].send(CHAT_SEND, kn_proto.cstr("/score 5000", 288))
+    conns[0].read(timeout=0.8)
+
     # 4. a player abandons: the round ends, the other team wins
     quitter = 5
     conns[quitter].close()
@@ -339,6 +363,8 @@ def run():
             check(f"players.player_elo mirrors the MMR ({names[i]})", elo == str(r.get("mmr")), f"{elo} vs {r.get('mmr')}")
         else:
             check(f"loser {names[i]}: MMR down, a loss", r.get("losses") == 1 and m.get("mmr_change", 0) < 0, json.dumps(m)[:300])
+    scored = int(psql(f"SELECT coalesce(max(score), -1) FROM match_results WHERE account_id = {ids[names[0]]}") or -1)
+    check("the score reaches the account's match result (ranked: score, no games or kills)", scored >= 5000, f"score {scored}")
     conns[0].read(timeout=1.5)
     chat = [t for t in chats(conns[0]) if t.startswith("Ranked: ")]
     check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))

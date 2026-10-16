@@ -304,10 +304,19 @@ async def scenario(pa, pb, pc, node, v7_seeded):
           and board[0]["profile"]["conservative_rating"] >= board[-1]["profile"]["conservative_rating"], "leaderboard: 8 placed, by rating, paged")
     code, cl = http(pa, "/mm/ranked/claim-milestone", method="POST", token=alice["token"], region="na")
     check(code == 400 and "not reached" in cl.get("error", ""), "milestone 10 not reached at 6 matches")
-    for _ in range(4):
+    for k in range(4):
         keys, states = await full_match(pa, pb, accs, node)
         lobby, cfg = node.hosted[-1]
-        await node.request(result_frame(cfg, lobby, 1))
+        draw = k == 3  # v10: a draw is Alpha's victory in the match history (team 0), not Bravo's
+        await node.request(result_frame(cfg, lobby, -1 if draw else 1))
+        if draw:
+            by_id = {a["id"]: a for a in accs}
+            for t in (0, 1):
+                member = by_id[cfg["teams"][t][0]["accountId"]]
+                code, h = http(pa, "/mm/ranked/history", token=member["token"], season=SEASON, region="na")
+                m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
+                check(code == 200 and m.get("victory") == (1 if t == 0 else 0),
+                      "a draw in history: team %d victory %s (%s)" % (t + 1, m.get("victory"), m.get("mmr_change")))
     code, cl = http(pa, "/mm/ranked/claim-milestone", method="POST", token=alice["token"], region="na")
     check(code == 200 and cl.get("success") and cl.get("reward") == 100 and cl.get("balance") == 10 * 20 + 100, "milestone 10 claimed: +100 RP (%s)" % cl)
     code, cl = http(pa, "/mm/ranked/claim-milestone", method="POST", token=alice["token"], region="na")

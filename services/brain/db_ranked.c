@@ -448,6 +448,9 @@ static kn_db_result *run_rk_match_finish(kn_dbconn *c, int n, const char *const 
         const int won = !quit[i] && (winner == 0 || winner == 1) && team[i] == winner;
         const int lost = quit[i] || ((winner == 0 || winner == 1) && team[i] != winner);
         const int drew = !won && !lost;
+        /* the history's victory (v10:186666 `_64055 === team`): a draw goes to Alpha (ON_DRAW_FAVOUR_TEAM,
+         * v10:186536), so team 0 has the victory and team 1 none; the rating above stays TrueSkill's draw */
+        const int victory = won || (drew && team[i] == 0);
         const double cr = ranked_conservative(skills[i]);
         const int old_mmr = ranked_display(ranked_conservative(before[i])), new_mmr = ranked_display(cr);
         const int kills = (int) jnum(st, "kills"), deaths = (int) jnum(st, "deaths"), assists = (int) jnum(st, "assists");
@@ -474,7 +477,7 @@ static kn_db_result *run_rk_match_finish(kn_dbconn *c, int n, const char *const 
                                 " assists = {int:$6}, score = {int:$7}, damage_done = {int:$8}, victory = $9, abandoned = {bool:$10}, rp = {int:$11}"
                                 " WHERE match_id = $1 AND account_id = $2"),
                  11, (const char *const[]){P(0), I64S(ids[i]), I64S(new_mmr), I64S(kills), I64S(deaths), I64S(assists), I64S(score),
-                                           I64S(damage), won ? "1" : lost ? "0" : NULL, quit[i] ? "1" : "0", I64S(rp)});
+                                           I64S(damage), victory ? "1" : "0", quit[i] ? "1" : "0", I64S(rp)});
         /* the account's player_elo (profile data, v10 ranked_rank): the new MMR */
         dbx_exec(&x, SQL(.any = "UPDATE players SET player_elo = {int:$2} WHERE player_id = $1"), KN_DB_ARGS(I64S(ids[i]), I64S(new_mmr)));
         if (rp > 0) rp_add(&x, ids[i], rp, "match", P(0));

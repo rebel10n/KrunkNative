@@ -1076,6 +1076,9 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
     // updateAccounts: hosted games and noReward modes only add time played
     const int counts = !g_acc.custom && !(mode && mode->no_reward) && !client->acct.hack;
+    // v10 updateAccounts (v10:188166): the score is added outside the ranked branch (v10:188150), so a ranked
+    // match adds it while its games, kills, deaths and wins stay out (a ranked match is hosted: custom)
+    const int ranked_score = g_rk.active && !(mode && mode->no_reward) && !client->acct.hack;
     const float seconds = client->acct.match_since > 0.0f ? g_server->now - client->acct.match_since : 0.0f;
     const int won = final && client->acct.round_result == 1;
 
@@ -1084,7 +1087,7 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddStringToObject(p, "name", client->name);
     cJSON_AddNumberToObject(p, "kills", counts && player ? player->kills : 0);
     cJSON_AddNumberToObject(p, "deaths", counts && player ? player->deaths : 0);
-    cJSON_AddNumberToObject(p, "score", counts && player ? player->score : 0);
+    cJSON_AddNumberToObject(p, "score", (counts || ranked_score) && player ? player->score : 0);
     cJSON_AddBoolToObject(p, "won", counts && won);
     cJSON_AddNumberToObject(p, "timePlayed", (double) (int64_t) (seconds * 1000.0f)); // ms (Krunker timePlayed)
     cJSON_AddNumberToObject(p, "games", counts && final ? 1 : 0);

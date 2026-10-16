@@ -1625,6 +1625,33 @@ static int net_packet_is_activity(const uint8_t type) {
     }
 }
 
+// v10 ping (NET_EXT_MARK_POSITION, "mpos"): tmpPlayer.markPosition (:170189) sends the camera ray's
+// first hit when the game is ranked or comp (:221125) and the player is alive. Every other connection
+// gets it as addPingIcon(key, position) (:160954) with key = the pinging connection's id. Nothing is
+// echoed to the sender (v10's client draws no local marker either).
+static void net_handle_mark_position(ClientConnection *client, const uint8_t *body, const uint16_t body_length) {
+    const Game *game = &g_server->game;
+    if (!(game->is_ranked || game->config.comp) || body_length < sizeof(NetMarkPositionSendPacket)) return;
+    if (!client->player || !client->player->active) return;
+    NetMarkPositionSendPacket hit;
+    memcpy(&hit, body, sizeof(hit));
+    if (!isfinite(hit.x) || !isfinite(hit.y) || !isfinite(hit.z)) return;
+    NetMarkPositionPacket ping;
+    memset(&ping, 0, sizeof(ping));
+    snprintf(ping.key, sizeof(ping.key), "%d", client->id);
+    ping.x = hit.x;
+    ping.y = hit.y;
+    ping.z = hit.z;
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(ping)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_MARK_POSITION, &ping, sizeof(ping));
+    if (!n) return;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *other = &g_server->clients[i];
+        if (other == client || !net_peer_takes(other, NET_PACKET_EXT)) continue;
+        net_send_packet(other->fd, NET_PACKET_EXT, buf, n);
+    }
+}
+
 // Returns 0 when the client was removed.
 int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
@@ -1867,6 +1894,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
+            else if (subtype == NET_EXT_MARK_POSITION) net_handle_mark_position(client, body, body_length); // "mpos": a ranked / comp ping
             break;
         }
         default:
