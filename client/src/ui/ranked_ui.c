@@ -77,6 +77,7 @@ static struct {
     int busy;                     // _37947: LOADING... (the connection check, a request in flight)
     char rejoin[96];              // /mm/ranked/connection serverUrl ("" none)
     cJSON *rejoin_as;
+    int home_check;               // the home load's rejoin check is in flight: open the popup if it is in a match (v10:209847)
     int all_regions;              // s_rankedAllRegions
     int board_page;               // leaderboard page (1-based)
     int history_page;             // match history page (1-based)
@@ -375,6 +376,7 @@ const V10Req *ranked_ui_rating_board(const int season, const int region) {
 }
 
 static void render(void);
+static void open_popup(void);
 
 // ------------------------------------------------------------------ the status line and banner
 
@@ -797,6 +799,13 @@ static void on_connection(void *user, const int status, const char *body, const 
     R.rejoin_as = url && url[0] ? cJSON_DetachItemFromObject(res, "assignment") : NULL;
     if (R.rejoin[0]) R.status_lock = 1; // "You are already in a Ranked game." + REJOIN
     cJSON_Delete(res);
+    if (R.home_check) { // the home load found a match: the popup opens with the REJOIN status (v10:209847)
+        R.home_check = 0;
+        if (R.rejoin[0]) {
+            open_popup();
+            return;
+        }
+    }
     render();
 }
 
@@ -808,7 +817,21 @@ static void fetch_connection(void) { // fetchIsPlayerInRankedMatch
     token(t, sizeof(t));
     snprintf(path, sizeof(path), "/mm/ranked/connection?token=%s", t);
     R.busy = 1;
-    if (!backend_http_get(path, on_connection, NULL)) R.busy = 0;
+    if (!backend_http_get(path, on_connection, NULL)) {
+        R.busy = 0;
+        R.home_check = 0;
+    }
+}
+
+// v10 (v10:209847): once the signed-in home has loaded, fetchIsPlayerInRankedMatch(); a player in a
+// ranked match gets the Ranked popup. Returns 0 while the check cannot run yet (no account, the
+// brain not reachable): the menu asks again.
+int ranked_ui_home_ready(void) {
+    if (R.scenario) return 1;
+    if (!acc() || R.busy || R.state != MM_IDLE || backend_available() != 1) return 0;
+    R.home_check = 1;
+    fetch_connection();
+    return 1;
 }
 
 const char *ranked_ui_status(void) {
@@ -847,17 +870,6 @@ void ranked_ui_left_match(void) {
 void ranked_ui_class_changed(const int index) { (void) index; } // v10: the class is picked in the match's comp lobby
 
 // ------------------------------------------------------------------ milestones, shop
-
-// v10 openRankedChallenges (v10:215670-215676): menuWindow.scrollTop = #challRankedHeadr.offsetTop, the window being
-// the header's offsetParent. Here the header's top relative to the window's top, plus the window's scroll.
-static void challenges_scroll(void *user) {
-    (void) user;
-    const HtmlElem head = html_dom_by_id("challRankedHeadr"), win = html_dom_by_id("menuWindow");
-    HtmlRect hr, wr;
-    HtmlScroll sc;
-    if (!head || !win || !html_dom_get_rect(head, &hr) || !html_dom_get_rect(win, &wr) || !html_dom_get_scroll(win, &sc)) return;
-    html_dom_set_scroll(win, sc.left, sc.top + hr.y - wr.y);
-}
 
 static int g_claim_reward; // the milestone the claim takes (knRkClaim sets it): v10's _33842[index].reward (v10:98744)
 
@@ -1106,6 +1118,31 @@ static int arg_num(const HtmlArg *args, const int argc, const int i, const int d
 
 static void open_popup(void);
 
+// v10 (openRankedChallenges, v10:215670-215678): the Challenges window scrolls to its Ranked block,
+// #challRankedHeadr, when that is inside #menuWindow. The page is scaled (scaleBase), so the viewport
+// distance is divided by the header's scale to get the layout offset that scrollTop takes.
+static void scroll_to_ranked_challenges(HtmlElem mw, HtmlElem head) {
+    HtmlRect hr = {0}, mr = {0};
+    HtmlScroll s = {0};
+    if (!html_dom_get_rect(head, &hr) || !html_dom_get_rect(mw, &mr) || !html_dom_get_scroll(mw, &s)) return;
+    const float ow = html_dom_offset_width(head), scale = ow > 0.0f && hr.w > 0.0f ? hr.w / ow : 1.0f;
+    html_dom_set_scroll(mw, s.left, s.top + (hr.y - mr.y) / scale);
+}
+
+// The window shows "Loading" until its challenges arrive (account_ui.c gen_challenges), so the Ranked
+// block is there a little later: look for it every 100 ms for up to 10 s, then scroll once.
+#define RANKED_SCROLL_TRIES 100
+static int g_ranked_scroll_tries;
+static void scroll_ranked_header_fire(void *user) {
+    (void) user;
+    HtmlElem mw = html_dom_by_id("menuWindow"), head = html_dom_by_id("challRankedHeadr");
+    if (!mw || !head) {
+        if (++g_ranked_scroll_tries < RANKED_SCROLL_TRIES) html_timer_add(100.0, scroll_ranked_header_fire, NULL);
+        return;
+    }
+    scroll_to_ranked_challenges(mw, head);
+}
+
 int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
     const int arg0 = arg_num(args, argc, 0, 0);
@@ -1114,10 +1151,13 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         else if (v10_menu_handle("loginOrRegister", NULL, NULL, 0) < 0) menu_show_window(5, 1);
         return 1;
     }
-    if (!strcmp(name, "openRankedChallenges")) { // v10 openRankedChallenges (v10:215670): clearPops, windows[32].openHome, scroll
-        v10_popup_close();
-        html_ui_dispatch("windows.32.openHome", ev, NULL, 0);
-        html_timer_add(0, challenges_scroll, NULL); // (after the window lays out)
+    if (!strcmp(name, "openRankedChallenges")) { // the home's "Ranked Challenges" link (v10:215670)
+        const HtmlArg select = {.kind = HTML_ARG_NUM, .num = 0.1};
+        html_ui_dispatch("playSelect", ev, &select, 1); // playSelect(0.1)
+        v10_popup_close();                               // clearPops()
+        html_ui_dispatch("windows.32.openHome", ev, NULL, 0); // windows[32].openHome(): showWindow(33) for an account
+        g_ranked_scroll_tries = 0;
+        html_timer_add(0.0, scroll_ranked_header_fire, NULL);
         return 1;
     }
     if (strncmp(name, "knRk", 4)) return -1;
@@ -1198,7 +1238,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         const int pages = (int) v10_num(cJSON_GetObjectItem(r->json, "matchHistory"), "totalPages", 1);
         const int next = R.history_page + arg0;
         if (next >= 1 && next <= (pages > 0 ? pages : 1)) {
-            R.history_page = next;
+            R.history_page = next; // v10 rebuilds the page's entries: collapsed, sorted by score again (v10:108074-108078)
             memset(R.match_open, 0, sizeof(R.match_open));
             memset(R.match_sort, 0, sizeof(R.match_sort)); // v10 builds each page's entries again at the default sort (v10:108072-108080)
             memset(R.match_desc, 0, sizeof(R.match_desc));
@@ -1821,6 +1861,8 @@ static void open_popup(void) {
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
     R.board_page = R.history_page = 1;
     memset(R.match_open, 0, sizeof(R.match_open));
+    memset(R.match_sort, 0, sizeof(R.match_sort));
+    memset(R.match_desc, 0, sizeof(R.match_desc));
     if (R.state == MM_IDLE && !R.status_lock) fetch_connection();
     char *html = gen_popup();
     v10_popup_show(POPUP_CLASS, html, render);

@@ -270,6 +270,10 @@ static void nav_update(const AccountInfo *acc) {
     set_display(nav_item("menuBtnLeaderboards"), guest ? "none" : "");
 }
 
+// v10 runs fetchIsPlayerInRankedMatch() once per sign-in, when the home loads (v10:209847); this
+// is set by a sign-in and sent by v10_menu_tick once the brain can answer (ranked_ui_home_ready)
+static int g_rejoin_check;
+
 // --render-scenario state.officialSession: the menu as in a krunker.io server without one (its
 // account is the active one then: krunker.io's, backend_ui.h)
 void v10_menu_scenario_official(const int on) {
@@ -281,6 +285,7 @@ int v10_menu_official_session(void) { return account_backend() == ACCOUNT_BACKEN
 void v10_menu_account_changed(void) {
     if (!v10_menu_page()) return;
     const AccountInfo *acc = active_account(); // krunker.io's in an official game, krunk.io's elsewhere
+    if (acc && V.signed_in != 1) g_rejoin_check = 1;
     header_update(acc);
     nav_update(acc);
     // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
@@ -758,6 +763,7 @@ static void store_item_interval(void *user) { // the KR sale timer's 1 s interva
 
 void v10_menu_tick(void) {
     if (!V.wired || !v10_menu_page()) return;
+    if (g_rejoin_check && ranked_ui_home_ready()) g_rejoin_check = 0; // v10:209847: the rejoin check (ranked_ui.c)
     if (!P.first_done) { // onMount (see popular_render)
         if (backend_available() == -1 && !scenario_on()) return;
         P.first_done = 1;

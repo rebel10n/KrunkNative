@@ -267,6 +267,7 @@ int  ranked_ui_in_ranked(void);       // queued or in a ranked match (v7 config.
 void ranked_ui_left_match(void);      // the ranked match's lobby was left
 void ranked_ui_account_changed(void); // $account changed: a Login Required popup hides (v10:111598-111600)
 void ranked_ui_on_init(Client *client); // INIT (client_apply_init): a joined ranked match sends NET_EXT "joinedRank" (v10 JOINED_RANK)
+int  ranked_ui_home_ready(void);      // the signed-in home loaded: the rejoin check (v10:209847); 0 = ask again
 // --render-scenario: state.ranked {open, tab, profile, board, history, shop, ...} stands in for the brain
 void ranked_ui_scenario(const cJSON *state);
 // Custom Games window (windows[9]) rows from GET /api/maps?index=<tab>&pos=<n>&accountId=:
