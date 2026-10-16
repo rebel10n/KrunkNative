@@ -440,6 +440,13 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         float w, h;
         replaced_size(t, b, -1.0f, -1.0f, &w, &h);
         minw = maxw = w;
+        /* CSS Sizing 3 5.2.2: a replaced box whose width or max-width is a percentage is
+         * compressible: its min-content contribution is its border and padding only (Chrome:
+         * an <img width: 100%> in a width: min-content box is 0 wide; with padding 5 and a
+         * 2px border, 14) */
+        const int pct_w = s->width.kind == CSS_LEN_VALUE && (s->width.pct != 0.0f || s->width.pct_term);
+        const int pct_max = s->max_width.kind == CSS_LEN_VALUE && (s->max_width.pct != 0.0f || s->max_width.pct_term);
+        if (pct_w || pct_max) minw = box_border_padding_w(b);
     } else if (s->width.kind == CSS_LEN_VALUE && s->width.pct == 0.0f) {
         minw = maxw = layout_box_sizing_w(b, s->width.px);
     } else if (layout_pref_ratio(b) > 0.0f && s->width.kind == CSS_LEN_AUTO && ratio_source_height(b, -1.0f) >= 0.0f) {
@@ -629,7 +636,12 @@ static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *
     float bw = (w_auto && h_auto) || (w_auto) ? (s->box_sizing == CSS_BOX_SIZING_BORDER_BOX && !w_auto ? w : (w_auto ? w + box_border_padding_w(b) : w)) : layout_box_sizing_w(b, w);
     float bh = (h_auto) ? h + box_border_padding_h(b) : layout_box_sizing_h(b, h);
     if (w_auto && !h_auto) bw = w + box_border_padding_w(b) - (s->box_sizing == CSS_BOX_SIZING_BORDER_BOX ? box_border_padding_w(b) : 0);
+    const float bw_unclamped = bw;
     layout_apply_min_max_w(b, cb_w, &bw);
+    /* CSS 2 10.4 table: a min/max-width that changed the width of a box with an auto height and a
+     * ratio carries over to the height (Chrome: an <img max-width: 100%> in a 0 px box is 0 x 0) */
+    if (h_auto && ratio > 0 && fabsf(bw - bw_unclamped) > 0.001f)
+        bh = kn_maxf(0.0f, bw - box_border_padding_w(b)) * ratio + box_border_padding_h(b);
     layout_apply_min_max_h(b, cb_h, &bh);
     *out_w = bw; *out_h = bh;
 }

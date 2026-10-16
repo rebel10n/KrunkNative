@@ -1286,6 +1286,26 @@ static void t_anonymous_style(void)
     fx_free(fx);
 }
 
+/* CSS Sizing 3 5.2.2, Chrome 152: a replaced box whose width or max-width is a percentage is
+ * compressible, its min-content contribution only its border and padding; and a max-width that
+ * clamps an auto-height image's width carries over to its height (256 x 256 img/app_0.png). */
+static void t_compressible_replaced(void)
+{
+    Fx *fx = fx_html(
+        "<div id=a style='width:min-content'><img id=ai style='width:100%' src='img/app_0.png'></div>"
+        "<div id=b style='width:min-content'><img style='width:50%;padding:5px;border:2px solid red' src='img/app_0.png'></div>"
+        "<div id=c style='width:min-content'><img id=ci style='max-width:100%' src='img/app_0.png'></div>"
+        "<div id=d style='width:max-content'><img style='width:100%' src='img/app_0.png'></div>"
+        "<div id=e style='width:min-content'><img style='width:100px' src='img/app_0.png'></div>", NULL);
+    CHECK_NEAR(rc(fx, "a").w, 0, 0.01, "width: 100%% img: min-content 0");
+    CHECK_NEAR(rc(fx, "b").w, 14, 0.01, "width: 50%% img: min-content = padding + border");
+    CHECK_NEAR(rc(fx, "c").w, 0, 0.01, "max-width: 100%% img: min-content 0");
+    CHECK_NEAR(rc(fx, "ci").h, 0, 0.01, "max-width clamps the width to 0: the height follows the ratio");
+    CHECK_NEAR(rc(fx, "d").w, 256, 0.01, "max-content keeps the natural width");
+    CHECK_NEAR(rc(fx, "e").w, 100, 0.01, "a fixed width is not compressible");
+    fx_free(fx);
+}
+
 static void t_root_overflow(void)
 {
     /* <html>/<body> overflow:hidden and 0px tall (everything positioned), like ui/index.html */
@@ -2056,6 +2076,7 @@ int main(int argc, char **argv)
     t_float_relayout();
     t_anonymous_style();
     t_root_overflow();
+    t_compressible_replaced();
     t_container_scrollbars();
     t_incremental();
     t_memo_equivalence();
