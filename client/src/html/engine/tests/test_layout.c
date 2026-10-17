@@ -1141,6 +1141,23 @@ static void t_text(void)
     fx_free(fx);
 }
 
+/* clip-path: polygon() clips pointer hits too, as in a browser: Krunker Strike's split spin button
+ * (FRVR's spin-wheel__button--split-top / -bottom) is two full-size circles, each clipped to a half
+ * and the bottom one later in the DOM, so a point in the top half is the top half's (a 10x spin) */
+static void t_hit_clip_path(void)
+{
+    Fx *fx = fx_html(
+        "<div id=sct style='position:absolute;left:0;top:0;width:200px;height:200px;"
+        "clip-path:polygon(0 0,100% 0,100% calc(50% - 2px),0 calc(50% - 2px))'></div>"
+        "<div id=scb style='position:absolute;left:0;top:0;width:200px;height:200px;"
+        "clip-path:polygon(0 calc(50% + 2px),100% calc(50% + 2px),100% 100%,0 100%)'></div>", NULL);
+    Box *b = layout_hit_test(fx->tree, 100, 50, 1);
+    CHECK(b && strcmp(box_id(b), "sct") == 0, "hit: a clip-path's upper half is the top's, not the later box below (%s)", box_id(b));
+    b = layout_hit_test(fx->tree, 100, 150, 1);
+    CHECK(b && strcmp(box_id(b), "scb") == 0, "hit: the lower half is the bottom's (%s)", box_id(b));
+    fx_free(fx);
+}
+
 static void t_hit_test(void)
 {
     Fx *fx = fx_html(
@@ -2334,6 +2351,7 @@ int main(int argc, char **argv)
     t_sticky_scroll();
     t_text();
     t_hit_test();
+    t_hit_clip_path();
     t_html_table();
     t_end_table();
     t_ellipsis_owner();

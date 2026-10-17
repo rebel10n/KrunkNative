@@ -224,7 +224,34 @@ static int point_in(float x, float y, float rx, float ry, float rw, float rh)
     return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
 }
 
-/* Clipped by an overflow ancestor on the containing-block chain? */
+/* clip-path: polygon(): is the point (lx, ly, the box's frame) inside the box's polygon? The same
+ * points as paint.c's push_clip_path (the border box's origin plus each length), filled with the
+ * polygon's rule (nonzero unless evenodd). A box without a polygon, and an anonymous box (it borrows
+ * its element's style, so its lengths are not its own), always passes. */
+static float clip_len(CssLength l, float ref) { return l.kind == CSS_LEN_VALUE ? l.px + l.pct * ref / 100.0f : 0.0f; }
+
+static int in_clip_polygon(const Box *b, float lx, float ly)
+{
+    const CssClipPath *cp = b->style ? &b->style->clip_path : NULL;
+    if (!cp || cp->kind != CSS_CLIP_PATH_POLYGON || cp->point_count < 3 || !b->node || (b->flags & BOXF_ANONYMOUS)) return 1;
+    int winding = 0, crossings = 0;
+    const int n = cp->point_count;
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        const float x0 = b->x + clip_len(cp->x[i], b->w), y0 = b->y + clip_len(cp->y[i], b->h);
+        const float x1 = b->x + clip_len(cp->x[j], b->w), y1 = b->y + clip_len(cp->y[j], b->h);
+        const float side = (x1 - x0) * (ly - y0) - (lx - x0) * (y1 - y0); /* > 0: left of the edge */
+        if (y0 <= ly) {
+            if (y1 > ly && side > 0) winding++;
+        } else if (y1 <= ly && side < 0) {
+            winding--;
+        }
+        if ((y0 > ly) != (y1 > ly) && lx < x0 + (ly - y0) * (x1 - x0) / (y1 - y0)) crossings++;
+    }
+    return cp->evenodd ? (crossings & 1) != 0 : winding != 0;
+}
+
+/* Clipped by an overflow ancestor (or a clip-path polygon) on the containing-block chain? */
 static int clipped_out(const Hit *h, const Box *b)
 {
     for (const Box *c = b->container; c; c = c->container) {
@@ -236,6 +263,7 @@ static int clipped_out(const Hit *h, const Box *b)
         float lx, ly;
         layout_point_to_box(c, h->vx, h->vy, &lx, &ly);
         if (!point_in(lx, ly, box_padding_x(c), box_padding_y(c), box_padding_w(c), box_padding_h(c))) return 1;
+        if (!in_clip_polygon(c, lx, ly)) return 1;
     }
     return 0;
 }
@@ -270,6 +298,7 @@ static int self_hit(const Hit *h, const Box *b)
         return 0;
     }
     if (b->type == BOX_LINEBREAK || b->type == BOX_TEXT) return 0;
+    if (!in_clip_polygon(b, lx, ly)) return 0;
     return point_in(lx, ly, b->x, b->y, b->w, b->h);
 }
 
