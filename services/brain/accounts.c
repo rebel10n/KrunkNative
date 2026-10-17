@@ -1321,7 +1321,8 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
      * (kpd_call, args = the call), an officer rates it (kpd_rate, args {call, id, rating}), an
      * officer's lists (kpd_calls / kpd_log, args.limit; kpd_stats, args.id), an application (kpd_apply,
      * args {id, name, discord, reason}), the pending ones (kpd_apps, args.limit) and a developer's grant
-     * or revoke of the officer flag (kpd_officer, args {actor, name, on}) */
+     * or revoke of the officer flag (kpd_officer, args {actor, name, on}), the Demos window (kpd_demos,
+     * args {off, limit, q}) and the Reviewers window (kpd_reviewers) */
     if (!strcmp(op, "kpd_call") || !strcmp(op, "kpd_rate") || !strcmp(op, "kpd_apply") || !strcmp(op, "kpd_officer")) {
         OpCtx *o = op_new(cb, ud, op);
         if (!o) return -1;
@@ -1349,6 +1350,21 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         OpCtx *o = op_new(cb, ud, op);
         if (!o) return -1;
         kn_db_call(g_acct_brain->db, &P_KPD_STATS, KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "id", 0))), op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_demos")) { /* the Demos window: a page of suspect groups (args off, limit, q: the name) */
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_KPD_DEMOS,
+                   KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "off", 0)), acct_itoa(v2, kn_json_int(args, "limit", 30)),
+                              kn_json_str(args, "q", "")),
+                   op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_reviewers")) { /* the Reviewers window: the officers' handled calls, month and all time */
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_KPD_REVIEWERS, 0, NULL, op_json_done, o);
         return 0;
     }
     cb(ud, "Unknown op.", NULL);

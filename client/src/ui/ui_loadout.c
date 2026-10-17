@@ -2194,8 +2194,10 @@ static void view_item(const int index, const int mode) {
 static const char *const KPD_TABS[] = {"Active Calls", "Ban Logs", "Stats", "Demos", "Reviewers"};
 #define KPD_TAB_COUNT ((int) (sizeof(KPD_TABS) / sizeof(KPD_TABS[0])))
 static int g_kpd_tab; // _71731
+static int g_kpd_demo_off;      // _71738: the Demos page's offset (v10 kpdDemoPage steps 30 suspects)
+static char g_kpd_demo_q[24];   // _71739: the Demos search (a player's name, "" none)
+#define KPD_DEMO_PAGE 30
 #define KPD_APPLY_REPORTS 20 // v10: an application from 20 positive reports (and a rating above 0.7)
-#define KPD_APPLY_LEVEL 50   // v10 kpdSubmit: level 50
 
 // v10's _67362 for the K.P.D: the account the game server knows. In an official krunker.io game that is
 // the krunker.io account its server signed in on the socket ("a", krunker_net_account), or a guest: our
@@ -2267,7 +2269,7 @@ void ui_loadout_show_police_pop(void) {
     g_police_timer = html_timer_add(rand_between(15000, 30000), police_idle, NULL);
     const PoliceIdentity id = police_identity();
     const PoliceIdentity *acc = id.signed_in ? &id : NULL;
-    const int officer = id.officer, official = krunker_net_active();
+    const int officer = id.officer;
     police_say(officer ? "Welcome Back Officer. Let's see who needs our help today..."
                : acc   ? "You look Strong. Why don't you join us?"
                        : "Sign In to Join the Fight against the Hackers!");
@@ -2275,6 +2277,7 @@ void ui_loadout_show_police_pop(void) {
     if (c) {
         StrBuf sb = {0};
         sb_append(&sb, "<div style='font-size:30px;margin-bottom:12px;color:#858585'>Krunker Police Department</div>");
+        if (officer) sb_appendf(&sb, "<div class='kpdRank'>%s</div>", id.deputy ? "Deputy" : "Marshal"); // v10 role 3 / 2
         if (officer) {
             sb_append(&sb, "<div style='margin-top:0px;color:rgba(0,0,0,0.6)'>When responding to a <b>Distress Call</b>, please remember to "
                            "follow the <a href='./docs/kpd.txt' class='menuLink' style='font-size:15px'>Mod Rules</a></div>"
@@ -2300,12 +2303,8 @@ void ui_loadout_show_police_pop(void) {
                            acc->job_rating_pos, acc->job_rating, 100.0 * ratio, col);
             sb_append(&sb, "<div style='margin-top:20px;margin-bottom:20px;font-size:25px;color:white;'>");
             if (!acc) sb_append(&sb, "Sign-in to apply for K.P.D");
-            else if (acc->job_rating_pos >= KPD_APPLY_REPORTS && ratio > 0.7 && official)
-                // krunker.io's K.P.D: v10's own Google Form
-                sb_append(&sb, "You may qualify to become a K.P.D officer. Submit a application <a href='https://forms.gle/1xy2LznPkYn9gh8Q7' target='_blank' style='color:#fff'>here</a>");
             else if (acc->job_rating_pos >= KPD_APPLY_REPORTS && ratio > 0.7)
-                // v10 links its Google Form here; KrunkNative's form is in the game (kpdApplyPop), on v10's own kpdSubmit
-                sb_append(&sb, "You may qualify to become a K.P.D officer. Submit a application <a href='#' onclick='kpdApplyPop()' style='color:#fff'>here</a>");
+                sb_append(&sb, "You may qualify to become a K.P.D officer. Submit a application <a href='https://forms.gle/1xy2LznPkYn9gh8Q7' target='_blank' style='color:#fff'>here</a>");
             else sb_append(&sb, "When you reach 20 positive reports, you can apply to become part of K.P.D and gain rewards!");
             sb_append(&sb, "</div>");
         }
@@ -2313,13 +2312,10 @@ void ui_loadout_show_police_pop(void) {
         html_dom_set_html(c, html);
         free(html);
     }
-    if (officer) { // the tab's list: "kpd" tab + 1 (Active Calls, Ban Logs, Stats); the answer fills #kpdCalls
-        if (g_kpd_tab < 3) {
-            hud_votekick_kpd_request(ui->client, g_kpd_tab + 1);
-        } else {
-            HtmlElem calls = html_dom_by_id("kpdCalls");
-            if (calls) html_dom_set_text(calls, g_kpd_tab == 3 ? "K.P.D demos are not recorded on this server" : "Reviewers are not tracked on this server");
-        }
+    if (officer) { // the tab's list: "kpd" tab + 1 (Active Calls 1, Ban Logs 2, Stats 3, Demos 4, Reviewers 5); the answer fills #kpdCalls
+        if (g_kpd_tab < 3) hud_votekick_kpd_request(ui->client, g_kpd_tab + 1);
+        else if (g_kpd_tab == 3) hud_votekick_kpd_list(ui->client, 4, g_kpd_demo_off, g_kpd_demo_q); // listDemos({off, q})
+        else hud_votekick_kpd_list(ui->client, 5, 0, ""); // reviewers()
     }
     menu_schedule_rect();
 }
@@ -2336,49 +2332,42 @@ static void kpd_generic_popup(const char *html, const char *cls) {
     html_dom_set_display(pop, "block");
 }
 
-// KrunkNative: the K.P.D application form. v10's popup links a Google Form; its own kpdSubmit (v10.js
-// :216034) reads #kpdDiscord and #kpdExplain, which no v10 markup creates. This is that form.
-void ui_loadout_kpd_apply_pop(void) {
-    kpd_generic_popup("<div style='font-size:30px;margin-bottom:12px;color:#fff;text-align:center'>K.P.D Application</div>"
-                      "<div style='color:rgba(255,255,255,0.6);font-size:18px;margin-bottom:6px'>Discord</div>"
-                      "<input id='kpdDiscord' type='text' class='accountInput' maxlength='37' autocomplete='off' placeholder='Discord username' style='margin-top:0'>"
-                      "<div style='color:rgba(255,255,255,0.6);font-size:18px;margin:10px 0 6px'>Why do you want to join the K.P.D?</div>"
-                      "<textarea id='kpdExplain' class='accountInput' maxlength='300' rows='5' style='margin-top:0;resize:none'></textarea>"
-                      "<div style='margin-top:15px'><div id='confirmBtn' onclick='kpdSubmit()'>Submit</div><div id='declineBtn' onclick='clearPops()'>Cancel</div></div>",
-                      "polConfPop");
-}
-
-// _69540(kind, error, text): the SUCCESS popup or the error one (responsePop)
-void ui_loadout_kpd_apply_result(const int ok, const char *text) {
-    if (!ok) {
-        ui_error_popup(text);
-        return;
-    }
+// v10 _69540(null, text): the error response popup (responsePop, a red clear icon)
+void ui_loadout_response_popup(const char *text) {
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
-    sb_append_esc(&sb, text && text[0] ? text : "Success!");
+    sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#e33b3b'>clear</i></div>"
+                   "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
+    sb_append_esc(&sb, text && text[0] ? text : "Request Failed");
     sb_append(&sb, "</div></div>");
     char *html = sb_finish(&sb);
     kpd_generic_popup(html, "responsePop");
     free(html);
 }
 
-// kpdSubmit() (v10.js :216034): level 50 and not flagged, a Discord name and a reason, not K.P.D
-// already; then "Loading..." and "kpdA" [discord, reason] (NET_EXT_KPD_APPLY). The answer
-// (policeRes code 6, hud_votekick.c) shows the result.
-void ui_loadout_kpd_submit(void) {
-    const AccountInfo *acc = active_account();
-    char discord[40] = "", reason[300] = "";
-    const HtmlElem d = html_dom_by_id("kpdDiscord"), e = html_dom_by_id("kpdExplain");
-    if (d) html_dom_get_value(d, discord, sizeof(discord));
-    if (e) html_dom_get_value(e, reason, sizeof(reason));
-    if (!acc || acc->level < KPD_APPLY_LEVEL || acc->hack) ui_error_popup("Requires Lvl 50");
-    else if (!discord[0]) ui_error_popup("Invalid Discord");
-    else if (!reason[0]) ui_error_popup("Invalid Reason");
-    else if (acc->is_mod || acc->is_dev) ui_error_popup("Already K.P.D");
-    else {
-        kpd_generic_popup("<div style='width:100%;text-align:center'><div class='lds-ring'><div></div><div></div><div></div><div></div></div>"
-                          "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>Loading...</div></div>", "loadingPop");
-        hud_votekick_kpd_apply(menu_ui()->client, discord, reason);
-    }
+void ui_loadout_kpd_demo_query(int *off, const char **q) {
+    if (off) *off = g_kpd_demo_off;
+    if (q) *q = g_kpd_demo_q;
+}
+
+// kpdDemoSearch(clear) (v10 :216202): the search box's text trimmed (none when cleared), page 1 again
+void ui_loadout_kpd_demo_search(const int clear) {
+    char text[64] = "";
+    const HtmlElem input = html_dom_by_id("kpdDemoQ");
+    if (!clear && input) html_dom_get_value(input, text, sizeof(text));
+    const char *start = text;
+    while (*start == ' ' || *start == '\t') start++;
+    size_t len = strlen(start);
+    while (len && (start[len - 1] == ' ' || start[len - 1] == '\t')) len--;
+    if (len >= sizeof(g_kpd_demo_q)) len = sizeof(g_kpd_demo_q) - 1;
+    memcpy(g_kpd_demo_q, start, clear ? 0 : len);
+    g_kpd_demo_q[clear ? 0 : len] = 0;
+    g_kpd_demo_off = 0;
+    ui_loadout_show_police_pop();
+}
+
+// kpdDemoPage(delta) (v10 :216208): 30 suspects back or on, never below the first page
+void ui_loadout_kpd_demo_page(const int delta) {
+    const int off = g_kpd_demo_off + KPD_DEMO_PAGE * delta;
+    g_kpd_demo_off = off > 0 ? off : 0;
+    ui_loadout_show_police_pop();
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The in-game player list's K.P.D call on kn_brain (services/brain/db_kpd.c, migration 0209_kpd_calls): the game server's "acct" ops kpd_call / kpd_calls / kpd_log / kpd_rate / kpd_stats / kpd_apply / kpd_apps / kpd_officer.
+"""The in-game player list's K.P.D call on kn_brain (services/brain/db_kpd.c, migration 0209_kpd_calls): the game server's "acct" ops kpd_call / kpd_calls / kpd_log / kpd_rate / kpd_stats / kpd_apply / kpd_apps / kpd_officer / kpd_demos / kpd_reviewers.
   kpd_test.py <kn_brain> <repo root> [database]
 Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name (local
 PostgreSQL); every run uses its own schema (kn_test_kpd_<pid>, dropped after) and an ephemeral port.
@@ -10,7 +10,7 @@ Two accounts register over the social socket; a fake game server on /mm/internal
   - the same suspect in another lobby: a new call; a guest suspect (no account) by name
   - a guest reporter (id 0): refused
   - kpd_calls: the open calls newest first with v10's Distress Calls fields (can, con, gst, gco, typ,
-    jop / jor / cos: the reporter's rating)
+    jop / jor: the reporter's rating; crs / cos: the reporter's and the suspect's XP, 0 for a guest)
   - kpd_rate: an officer's verdict (rating 1 tagged / 0 not), status handled, once per call; the
     reporter's rating jop / jor follows; kpd_log: the rated calls {modn, htag, hckn}
   - kpd_stats: the officer's tagged verdicts by range (v10's Stats tab: 1day .. alltimeEntries)
@@ -18,6 +18,11 @@ Two accounts register over the social socket; a fake game server on /mm/internal
   - kpd_apply: refused below 20 positive reports, kept from there (one pending), listed by kpd_apps;
     kpd_officer: refused for a player, a developer grants (moderator flag, application closed), the
     console (actor 0) revokes, moderation_log keeps both; an officer cannot apply
+  - kpd_demos (the Demos window, migration 0346_kpd_demos; rows are inserted directly, there is no
+    recorder yet): a page is 30 suspect groups with more, the next page the rest; a named suspect's
+    name shows only when banned; a guest is gst 1 by its group; the flat rows keep each group's demos
+    together; q is the name (case-insensitive exact); dur is milliseconds; myv is null
+  - kpd_reviewers (the Reviewers window): the officers' handled calls, the last 30 days and all time
 """
 import asyncio
 import json
@@ -186,6 +191,8 @@ async def scenario(port, dbcfg):
         check(err and "not found" in err, "no suspect: %s" % err)
 
         print("== kpd_calls (Distress Calls)")
+        sql(dbcfg, "UPDATE players SET player_score = 4000 WHERE player_id = %d" % alice_id)
+        sql(dbcfg, "UPDATE players SET player_score = 9000 WHERE player_id = %d" % bob_id)
         err, data = await n.op("kpd_calls", limit=10)
         check(err is None and isinstance(data, list) and len(data) == 3, "three open calls: %s %s" % (err, data))
         if isinstance(data, list) and len(data) == 3:
@@ -193,8 +200,11 @@ async def scenario(port, dbcfg):
             check(names == sorted([(alice, bob, 0), (bob, alice, 0), (alice, "Guest_7", 1)]), "reporter / suspect / guest: %s" % names)
             custom = [d for d in data if d["can"] == bob][0]
             check(custom["typ"] == 3 and custom["gco"] == "KPD:zz99x" and custom["tim"] > 0, "type, game code, time: %s" % custom)
-            mine = [d for d in data if d["can"] == alice][0]
-            check(mine["cos"] == 2 and mine["jor"] == 0 and mine["jop"] == 0, "alice's rating 0/0, 2 calls: %s" % mine)
+            mine = [d for d in data if d["can"] == alice and d["con"] == bob][0]
+            check(mine["jor"] == 0 and mine["jop"] == 0, "alice's rating 0/0: %s" % mine)
+            check(mine["crs"] == 4000 and mine["cos"] == 9000, "the reporter's and the suspect's XP: %s" % mine)
+            guest = [d for d in data if d["con"] == "Guest_7"][0]
+            check(guest["cos"] == 0 and guest["crs"] == 4000, "a guest suspect has no XP: %s" % guest)
 
         print("== kpd_rate (an officer's verdict) and kpd_log (moderation log)")
         err, data = await n.op("kpd_log", limit=10)
@@ -241,6 +251,61 @@ async def scenario(port, dbcfg):
         err, data = await n.op("kpd_stats", id=alice_id)
         st = data[0] if isinstance(data, list) and data else {}
         check(err is None and all(st.get(r + "Entries") == 0 for r in ranges), "alice rated nothing: %s %s" % (err, data))
+
+        print("== kpd_demos (the Demos window: suspect groups, 30 a page)")
+        demo_rows = [("tok-bob-1", "ct-bob", bob_id, bob, 1, 1, 240000, 1, 0, 1, 2, 1),
+                     ("tok-bob-2", "ct-bob", bob_id, bob, 1, 0, 90000, 1, 1, 0, 3, 0),
+                     ("tok-alice-1", "ct-alice", alice_id, alice, 2, 0, 60000, 0, 1, 0, 0, 0),
+                     ("tok-guest-9", "ct-g9", None, "Guest_9", 9, 0, 120000, 0, 0, 1, 0, 0)]
+        for i in range(31):  # 31 guest groups more: 34 groups in all, two pages
+            demo_rows.append(("tok-pg-%d" % i, "ct-pg", None, "Pager_%d" % i, 100 + i, 3, 30000, 0, 0, 1, 0, 0))
+        for tok, ct, sid, name, grp, typ, dur, ban, rsl, opn, yes, no in demo_rows:
+            sql(dbcfg, "INSERT INTO kpd_demos (token, ct, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms,"
+                       " banned, resolved, opened, yes_votes, no_votes) VALUES ('%s', '%s', %s, '%s', %d, %d, 'Burg', 'Hardpoint',"
+                       " %d, %d, %d, %d, %d, %d)" % (tok, ct, "NULL" if sid is None else str(sid), name, grp, typ, dur, ban, rsl,
+                                                       opn, yes, no))
+        err, page1 = await n.op("kpd_demos", off=0, q="")
+        err2, page2 = await n.op("kpd_demos", off=30, q="")
+        groups1 = {(r["grp"], r["gst"]) for r in (page1 or {}).get("demos", [])}
+        groups2 = {(r["grp"], r["gst"]) for r in (page2 or {}).get("demos", [])}
+        check(err is None and err2 is None and page1 and page1["more"] is True and len(groups1) == 30,
+              "the first page: 30 groups and more: %s %s" % (len(groups1), (page1 or {}).get("more")))
+        check(page2 and page2["more"] is False and len(groups2) == 4 and not (groups1 & groups2),
+              "the next page: the other 4 groups, no more: %s" % (len(groups2),))
+        # newest group first: the pagers (inserted last) fill page 1; bob's and alice's groups are older
+        all_rows = (page1 or {}).get("demos", []) + (page2 or {}).get("demos", [])
+        bob_rows = [r for r in all_rows if r["grp"] == 1]
+        if bob_rows:
+            r = [x for x in bob_rows if x["tok"] == "tok-bob-1"][0]  # the older demo: 240 s, tagged
+            check(len(bob_rows) == 2 and r["name"] == bob and r["ban"] == 1 and r["gst"] == 0 and r["dur"] == 240000
+                  and r["myv"] is None and r["dat"] > 0 and r["mod"] == "Hardpoint" and r["map"] == "Burg",
+                  "bob's group: named when banned, two demos, duration in ms, no own vote: %s" % r)
+            check(r["typ"] == 1 and r["yes"] == 2 and r["f_no"] == 1 and r["opn"] == 1 and r["rsl"] == 0,
+                  "the demo's type, votes and status: %s" % r)
+            check({x["tok"] for x in bob_rows} == {"tok-bob-1", "tok-bob-2"}, "bob's two demos: %s" % [x["tok"] for x in bob_rows])
+            idx = [i for i, x in enumerate(all_rows) if x["grp"] == 1]
+            check(idx == list(range(idx[0], idx[0] + len(idx))), "a group's demos are adjacent")
+        else:
+            check(False, "bob's group is on a page: %s" % [r["grp"] for r in all_rows][:5])
+        alice_rows = [r for r in all_rows if r["grp"] == 2]
+        check(alice_rows and alice_rows[0]["name"] == "" and alice_rows[0]["ban"] == 0 and alice_rows[0]["gst"] == 0,
+              "an unbanned named suspect shows no name: %s" % alice_rows[:1])
+        err, data = await n.op("kpd_demos", off=0, q=bob.upper())
+        rows = (data or {}).get("demos", [])
+        check(err is None and len(rows) == 2 and all(r["grp"] == 1 for r in rows) and (data or {}).get("more") is False,
+              "q: the name in any case, bob's demos only: %s %s" % (err, data))
+        err, data = await n.op("kpd_demos", off=0, q="Guest_9")
+        rows = (data or {}).get("demos", [])
+        check(err is None and len(rows) == 1 and rows[0]["gst"] == 1 and rows[0]["name"] == "" and rows[0]["tok"] == "tok-guest-9",
+              "q: a guest by name, shown as a guest: %s" % rows)
+        err, data = await n.op("kpd_demos", off=0, q="nobody_" + stamp)
+        check(err is None and data == {"demos": [], "more": False}, "q: no demos for that name: %s %s" % (err, data))
+
+        print("== kpd_reviewers (the Reviewers window: the officers' handled calls)")
+        err, data = await n.op("kpd_reviewers")
+        rv = (data or {}).get("reviewers", [])
+        check(err is None and rv == [{"name": bob, "cnt": 2, "range": "month"}, {"name": bob, "cnt": 2, "range": "all"}],
+              "bob handled two calls (the tagged one and the guest's), listed for the month and all time: %s %s" % (err, rv))
 
         print("== the reporter's Helpful Reports (players.jobrating / jobratingpositive: v10 jobRating / jobRatingPos)")
         rows = sql(dbcfg, "SELECT jobrating, jobratingpositive FROM players WHERE player_id = %d" % alice_id)

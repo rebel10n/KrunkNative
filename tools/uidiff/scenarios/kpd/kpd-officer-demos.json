@@ -1,0 +1,114 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Cop",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "dev": 1
+    },
+    "kpdPolice": {
+      "tab": 3,
+      "list": {
+        "code": 4,
+        "json": [
+          {
+            "grp": 7,
+            "name": "",
+            "gst": 0,
+            "ban": 0,
+            "tok": "tokA",
+            "ct": "ctA",
+            "typ": 1,
+            "map": "Kanji",
+            "mod": "ffa",
+            "dat": 1700000000,
+            "dur": 125000,
+            "rsl": 0,
+            "opn": 1,
+            "yes": 3,
+            "f_no": 1,
+            "myv": 2
+          },
+          {
+            "grp": 7,
+            "name": "",
+            "gst": 0,
+            "ban": 0,
+            "tok": "tokB",
+            "ct": "ctB",
+            "typ": 0,
+            "map": "Sandstorm",
+            "mod": "tdm",
+            "dat": 1700000100,
+            "dur": 60000,
+            "rsl": 1,
+            "opn": 0,
+            "yes": 0,
+            "f_no": 0,
+            "myv": null
+          },
+          {
+            "grp": 9,
+            "name": "Bad_Ann",
+            "gst": 0,
+            "ban": 1,
+            "tok": "tokC",
+            "ct": "",
+            "typ": 0,
+            "map": "Burg",
+            "mod": "ffa",
+            "dat": 1700000200,
+            "dur": 0,
+            "rsl": 0,
+            "opn": 0,
+            "yes": 0,
+            "f_no": 0,
+            "myv": null
+          },
+          {
+            "grp": 11,
+            "name": "",
+            "gst": 1,
+            "ban": 0,
+            "tok": "tokD",
+            "ct": "",
+            "typ": 0,
+            "map": "Burg",
+            "mod": "ffa",
+            "dat": 1700000300,
+            "dur": 0,
+            "rsl": 0,
+            "opn": 0,
+            "yes": 0,
+            "f_no": 0,
+            "myv": null
+          },
+          {
+            "more": 1
+          }
+        ]
+      }
+    }
+  },
+  "frames": 3,
+  "note": "K.P.D popup, officer, Demos tab (two suspects, trailer: more). No v10 reference (regression baseline; the v10 markup is v10.js :215977-216273)."
+}

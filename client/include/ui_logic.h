@@ -328,7 +328,11 @@ int  hud_votekick_active(void);                   // a vote runs (voteToKick sho
 const char *hud_votekick_target(void);            // its target alias ("" none)
 int  hud_votekick_row_allowed(const Client*, const char *alias, int level_ok); // the row's Votekick button (v10 :214300)
 int  hud_votekick_kpd_row_allowed(const Client*); // the row's K.P.D button (account level >= 5)
-void hud_votekick_kpd_apply(Client*, const char *discord, const char *reason); // "kpdA": the K.P.D application
+void hud_votekick_kpd_list(Client*, int code, int off, const char *q); // "kpd" tab 4 Demos (off, q) / 5 Reviewers: NET_EXT_KPD_LIST
+void hud_votekick_scenario_lists(int on);          // --render-scenario state.kpdPolice: lists from the fixture, no request
+void hud_votekick_scenario_list(Client*, int code, const char *json); // the fixture's policeRes (one page)
+void hud_votekick_watch_demo(const char *tok, const char *ct);   // watchDemo: no demo file here, v10's failed download
+void hud_votekick_copy_demo_link(const char *tok, const char *ct); // copyDemoLink: "?demo=tok&sus=ct" to the clipboard
 void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2 / 3: an officer's list for the K.P.D popup
 void hud_votekick_admin_action(Client*, int uid, int action); // NET_EXT_ADMIN_ACTION: 0 kick, 1 ban (DEV; the server checks)
 char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 / 3 table, malloc'd
@@ -679,9 +683,10 @@ void ui_loadout_select_tab(int tab);             // the same from selectClass: r
 void ui_loadout_show_police_pop(void);           // shoPolicePop
 void ui_loadout_switch_kpd_tab(int tab);         // switchKPDTab(i): an officer's tab, showPolicePop() again
 int  ui_loadout_kpd_tab(void);                   // the officer's tab on show (_71731: 0 Active Calls .. 4 Reviewers)
-void ui_loadout_kpd_apply_pop(void);             // kpdApplyPop(): the K.P.D application form (KrunkNative)
-void ui_loadout_kpd_submit(void);                // kpdSubmit(): v10's checks, then NET_EXT_KPD_APPLY
-void ui_loadout_kpd_apply_result(int ok, const char *text); // the application's answer (policeRes code 6)
+void ui_loadout_kpd_demo_query(int *off, const char **q);   // the Demos tab's page offset and search (_71738, _71739)
+void ui_loadout_kpd_demo_search(int clear);      // kpdDemoSearch(clear): the search box, page 1 again
+void ui_loadout_kpd_demo_page(int delta);        // kpdDemoPage(delta): 30 suspects back or on
+void ui_loadout_response_popup(const char *text); // v10 _69540(null, text): the error response popup
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops
 void ui_loadout_reset_pops(void);                // resetPops (the popup holder stays up)

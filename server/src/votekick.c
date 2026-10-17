@@ -386,6 +386,13 @@ static KpdRecent *kpd_recent(const ClientConnection *target) {
     return NULL;
 }
 
+// The K.P.D window's lists are for officers (a moderator or DEV account): 1 when this request is refused
+static int kpd_list_refused(ClientConnection *client, const uint8_t tab) {
+    if ((client->acct.flags & NET_PLAYER_INFO_MOD) || net_client_is_dev(client)) return 0;
+    votekick_kpd_reply(client, tab, NET_KPD_REFUSED, "K.P.D officers only", "", "[]");
+    return 1;
+}
+
 void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const uint16_t length) {
     if (!client || length < sizeof(NetKpdCallPacket)) return;
     NetKpdCallPacket req;
@@ -394,12 +401,13 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
         votekick_kpd_reply(client, 0, NET_KPD_REFUSED, "Sign in to call the K.P.D", "", NULL);
         return;
     }
-    if (req.tab != 0) { // the K.P.D window's lists (1 Active Calls, 2 Ban Logs, 3 Stats): moderators (and DEV) only
-        if (!(client->acct.flags & NET_PLAYER_INFO_MOD) && !net_client_is_dev(client)) {
-            votekick_kpd_reply(client, req.tab, NET_KPD_REFUSED, "K.P.D officers only", "", "[]");
+    if (req.tab != 0) { // the K.P.D window's lists (1 Active Calls, 2 Ban Logs, 3 Stats, 4 Demos, 5 Reviewers): officers only
+        if (kpd_list_refused(client, req.tab)) return;
+        if (req.tab == 4 || req.tab == 5) { // Demos / Reviewers: their first page (NET_EXT_KPD_LIST pages through it)
+            accounts_kpd_list(client, req.tab, 0, "");
             return;
         }
-        if (req.tab > 3) { // v10's Demos / Reviewers come from its web API, not this socket
+        if (req.tab > 5) {
             votekick_kpd_reply(client, req.tab, NET_KPD_UNAVAILABLE, "Not available on this server", "", "[]");
             return;
         }
@@ -446,6 +454,21 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
     const int recent_index = (int) (recent - g_vk.recent);
     accounts_kpd_request(client, 0, target); // the record (kn_brain), then the answer
     kpd_offer_new_call(recent_index);       // an officer already here: the case now (its call id follows the record)
+}
+
+// NET_EXT_KPD_LIST (v10 kpd.listDemos {off, q} / kpd.reviewers()): the Demos (tab 4, a page of 30 suspect
+// groups from `off`, the name `q`) and Reviewers (tab 5) lists. The answer is NET_EXT_KPD_RESPONSE code 4 / 5.
+void votekick_handle_kpd_list(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    if (!client || length < sizeof(NetKpdListPacket)) return;
+    NetKpdListPacket req;
+    memcpy(&req, body, sizeof(req));
+    req.q[sizeof(req.q) - 1] = 0;
+    if (kpd_list_refused(client, req.tab)) return;
+    if (req.tab != 4 && req.tab != 5) {
+        votekick_kpd_reply(client, req.tab, NET_KPD_UNAVAILABLE, "Not available on this server", "", "[]");
+        return;
+    }
+    accounts_kpd_list(client, req.tab, req.off > 0 ? req.off : 0, req.q);
 }
 
 // NET_EXT_KPD_APPLY (v10 "kpdA" from kpdSubmit): v10's client rules again here (an account of level

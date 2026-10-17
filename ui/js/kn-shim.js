@@ -117,6 +117,7 @@
     'toggleHF', 'setExpandedRegion', 'selectSettingPre', 'knRetry', 'knHostOffline', 'knHostMap',
     'selectSkin', 'selectHat', 'selectBack', 'selectWaist', 'selectMelee', 'selectDye', 'selectFace',
     'selectAttachment', 'selectReticle', 'selectSpray', 'hidePolicePop', 'updateWindow',
+    'kpdDemoSearch', 'kpdDemoPage', 'watchDemo', 'copyDemoLink',
     // Krunker v7.1.4 menu chrome (index.html; knForwardHandlers also finds them in the markup)
     'playSelect', 'logBtnFRVR', 'closWind', 'showGames', 'openDiscord', 'openGuide', 'setSpect', 'purchaseCancel',
     'openServerWindow', 'clientExitPopup', 'abTestsPopup', 'expertMode', 'switchChat', 'goBackWindow',

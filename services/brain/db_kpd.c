@@ -5,9 +5,11 @@
  *   P_KPD_CALL  (json {id, name, level, suspect, suspect_name, lobby, node, region, map, mode, typ})
  *               -> {id, n, calls}: the call; "Already reported" while an open call about the same
  *               suspect in the same lobby is younger than a minute (v10 config.kpdAutoTime)
- *   P_KPD_CALLS (limit) -> [{id, can, con, gst, tim, gco, typ, jop, jor, cos}]: the open calls of the
- *               last day, newest first, with the reporter's rating (jop helpful / jor handled) and
- *               call count (cos), the fields v10's Distress Calls tab reads (policeRes code 1)
+ *   P_KPD_CALLS (limit) -> [{id, can, con, gst, tim, gco, typ, jop, jor, crs, cos}]: the open calls of
+ *               the last day, newest first, with the reporter's rating (jop helpful / jor handled), the
+ *               reporter's XP (crs) and the suspect's XP (cos, 0 for a guest): v10 shows the level badges
+ *               from XP (players.player_score; level = max(1, floor(0.03 * sqrt(xp)))). The fields v10's
+ *               Distress Calls tab reads (policeRes code 1)
  *   P_KPD_LOG   (limit) -> [{modn, htag, hckn, dat}]: the rated calls (policeRes code 2)
  *   P_KPD_STATS (officer id) -> [{1dayEntries, 3dayEntries, ..., 90dayEntries, alltimeEntries}]: the
  *               officer's tags (calls it rated tagged) by range, v10's Stats tab (policeRes code 3)
@@ -22,6 +24,16 @@
  *   P_KPD_OFFICER (json {actor, name, on}) -> {id, n, on}: grant (1) or revoke (0) the officer flag
  *               (players.player_moderator); actor 0 is the game server's console, else a developer.
  *               A grant closes the account's pending application; moderation_log keeps it.
+ *   P_KPD_DEMOS (off, limit, q) -> {demos: [row...], more}: the Demos window (v10 kpd.listDemos, tab 4).
+ *               A page is `limit` suspect groups (30; v10's Prev / Next step), newest group first; `off`
+ *               counts groups. A group is one suspect: its account (suspect_id), or a guest's
+ *               suspect_group. q: the suspect's name, case-insensitive exact match ("" all). One row per
+ *               demo (migration 0346_kpd_demos), grouped in order: {grp, name (banned suspects only),
+ *               gst, ban, tok, ct, typ, map, mod, dat (epoch s), dur (ms), rsl, opn, yes, f_no, myv (null:
+ *               no votes yet)}. more: another group exists after this page.
+ *   P_KPD_REVIEWERS () -> {reviewers: [{name, cnt, range}]}: the officers who handled the most K.P.D
+ *               calls (kpd_calls status 1 by handled_by), range "month" (last 30 days) then "all", up to
+ *               50 each, ties by name (v10 kpd.reviewers, tab 5).
  */
 #include "db_procs.h"
 
@@ -118,10 +130,14 @@ static kn_db_result *run_kpd_calls(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int64_t limit = PI(0);
     if (limit <= 0 || limit > 200) limit = 50;
-    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT id AS id__i, reporter_id AS rid__i, reporter_name AS can__t, suspect_id AS sid__i,"
-                                          " suspect_name AS con__t, lobby AS gco__t, typ AS typ__i, map AS map__t, mode AS mode__i,"
-                                          " {epoch_ms:created_at} AS tim__i FROM kpd_calls WHERE status = 0 AND created_at > {ago:86400}"
-                                          " ORDER BY created_at DESC LIMIT {int:$1}"),
+    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT k.id AS id__i, k.reporter_id AS rid__i, k.reporter_name AS can__t, k.suspect_id AS sid__i,"
+                                          " k.suspect_name AS con__t, k.lobby AS gco__t, k.typ AS typ__i, k.map AS map__t, k.mode AS mode__i,"
+                                          " {epoch_ms:k.created_at} AS tim__i, coalesce(rp.player_score, 0) AS crs__i,"
+                                          " coalesce(sp.player_score, 0) AS cos__i FROM kpd_calls k"
+                                          " LEFT JOIN players rp ON rp.player_id = k.reporter_id"
+                                          " LEFT JOIN players sp ON sp.player_id = k.suspect_id"
+                                          " WHERE k.status = 0 AND k.created_at > {ago:86400}"
+                                          " ORDER BY k.created_at DESC LIMIT {int:$1}"),
                            KN_DB_ARGS(I64S(limit)));
     cJSON *out = cJSON_CreateArray();
     const cJSON *r;
@@ -140,7 +156,8 @@ static kn_db_result *run_kpd_calls(kn_dbconn *c, int n, const char *const *p) {
         rating_of(&x, (int64_t) jnum(r, "rid"), &jop, &jor, &calls);
         cJSON_AddNumberToObject(o, "jop", (double) jop);
         cJSON_AddNumberToObject(o, "jor", (double) jor);
-        cJSON_AddNumberToObject(o, "cos", (double) calls);
+        cJSON_AddNumberToObject(o, "crs", jnum(r, "crs")); /* the reporter's XP (players.player_score) */
+        cJSON_AddNumberToObject(o, "cos", jnum(r, "cos")); /* the suspect's XP, 0 for a guest */
         cJSON_AddItemToArray(out, o);
     }
     cJSON_Delete(rows);
@@ -335,3 +352,109 @@ static kn_db_result *run_kpd_officer(kn_dbconn *c, int n, const char *const *p) 
     return dbx_json(&x, "officer", o);
 }
 const kn_proc P_KPD_OFFICER = {"kpd_officer", NULL, run_kpd_officer};
+
+/* ---- the Demos (tab 4) and Reviewers (tab 5) windows (migration 0346_kpd_demos) */
+
+/* a page of the Demos window: 30 suspect groups (v10's Prev / Next step) */
+#define KPD_DEMO_GROUPS 30
+#define KPD_DEMO_GROUPS_MAX 50
+
+/* one flat demo row of the page (the group's fields repeat on each of its demos) */
+static cJSON *kpd_demo_row(const cJSON *r) {
+    const int banned = jnum(r, "gban") != 0.0;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "grp", jnum(r, "grp"));
+    cJSON_AddStringToObject(o, "name", banned ? jstr(r, "gname") : ""); /* a guest's or unbanned suspect's name stays hidden */
+    cJSON_AddNumberToObject(o, "gst", jnum(r, "ggst") != 0.0 ? 1 : 0);
+    cJSON_AddNumberToObject(o, "ban", banned ? 1 : 0);
+    cJSON_AddStringToObject(o, "tok", jstr(r, "tok"));
+    cJSON_AddStringToObject(o, "ct", jstr(r, "ct"));
+    cJSON_AddNumberToObject(o, "typ", jnum(r, "typ"));
+    cJSON_AddStringToObject(o, "map", jstr(r, "map"));
+    cJSON_AddStringToObject(o, "mod", jstr(r, "mod"));
+    cJSON_AddNumberToObject(o, "dat", jnum(r, "dat") / 1000.0); /* seconds */
+    cJSON_AddNumberToObject(o, "dur", jnum(r, "dur"));          /* milliseconds (v10 prints M:SS from ms) */
+    cJSON_AddNumberToObject(o, "rsl", jnum(r, "rsl") != 0.0 ? 1 : 0);
+    cJSON_AddNumberToObject(o, "opn", jnum(r, "opn") != 0.0 ? 1 : 0);
+    cJSON_AddNumberToObject(o, "yes", jnum(r, "yes"));
+    cJSON_AddNumberToObject(o, "f_no", jnum(r, "fno"));
+    cJSON_AddNullToObject(o, "myv"); /* the asking officer's own vote: no vote route yet */
+    return o;
+}
+
+static kn_db_result *run_kpd_demos(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    int64_t off = PI(0), limit = PI(1);
+    const char *q = nz(P(2));
+    if (off < 0) off = 0;
+    if (limit <= 0 || limit > KPD_DEMO_GROUPS_MAX) limit = KPD_DEMO_GROUPS;
+    /* the groups of the page: one more than the page, so its existence is "more" (its rows are left out).
+     * The derived table orders the groups; the join brings each group's demos in the same order. */
+    cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT g.gk AS gk__i, g.gname AS gname__t, g.gban AS gban__i, g.ggst AS ggst__i,"
+                                          " d.token AS tok__t, d.ct AS ct__t, d.typ AS typ__i, d.map AS map__t, d.mode_name AS mod__t,"
+                                          " {epoch_ms:d.created_at} AS dat__i, d.duration_ms AS dur__i, d.resolved AS rsl__i,"
+                                          " d.opened AS opn__i, d.yes_votes AS yes__i, d.no_votes AS fno__i, d.suspect_group AS grp__i"
+                                          " FROM kpd_demos d JOIN (SELECT coalesce(suspect_id, -suspect_group) AS gk,"
+                                          " max(suspect_name) AS gname, max(banned) AS gban,"
+                                          " max(CASE WHEN suspect_id IS NULL THEN 1 ELSE 0 END) AS ggst, max(created_at) AS last_at"
+                                          " FROM kpd_demos WHERE ($3 = '' OR lower(suspect_name) = lower($3))"
+                                          " GROUP BY coalesce(suspect_id, -suspect_group)"
+                                          " ORDER BY last_at DESC, gk DESC LIMIT {int:$2} OFFSET {int:$1}) g"
+                                          " ON coalesce(d.suspect_id, -d.suspect_group) = g.gk"
+                                          " WHERE ($3 = '' OR lower(d.suspect_name) = lower($3))"
+                                          " ORDER BY g.last_at DESC, g.gk DESC, d.created_at DESC, d.id DESC"),
+                           KN_DB_ARGS(I64S(off), I64S(limit + 1), q));
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *r;
+    int64_t groups = 0, key = 0;
+    int more = 0;
+    cJSON_ArrayForEach(r, rows) {
+        const int64_t k = (int64_t) jnum(r, "gk");
+        if (groups == 0 || k != key) {
+            groups++;
+            key = k;
+        }
+        if (groups > limit) { /* the page's last group is done: this one is the next page's */
+            more = 1;
+            break;
+        }
+        cJSON_AddItemToArray(out, kpd_demo_row(r));
+    }
+    cJSON_Delete(rows);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "demos", out);
+    cJSON_AddBoolToObject(o, "more", more);
+    return dbx_json(&x, "demos", o);
+}
+const kn_proc P_KPD_DEMOS = {"kpd_demos", NULL, run_kpd_demos};
+
+/* the officers with the most handled calls in one range ("month": the last 30 days; "all") */
+static void kpd_reviewer_rows(Dbx *x, cJSON *out, const char *range, const kn_sql *q) {
+    cJSON *rows = dbx_rows(x, q, 0, NULL);
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", jstr(r, "uname"));
+        cJSON_AddNumberToObject(o, "cnt", jnum(r, "cnt"));
+        cJSON_AddStringToObject(o, "range", range);
+        cJSON_AddItemToArray(out, o);
+    }
+    cJSON_Delete(rows);
+}
+
+static kn_db_result *run_kpd_reviewers(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *out = cJSON_CreateArray();
+    kpd_reviewer_rows(&x, out, "month",
+                      SQL(.any = "SELECT a.username AS uname__t, count(*) AS cnt__i FROM kpd_calls k"
+                                 " JOIN accounts a ON a.id = k.handled_by WHERE k.status = 1 AND k.handled_at > {ago:2592000}"
+                                 " GROUP BY a.id, a.username ORDER BY count(*) DESC, a.username LIMIT 50"));
+    kpd_reviewer_rows(&x, out, "all",
+                      SQL(.any = "SELECT a.username AS uname__t, count(*) AS cnt__i FROM kpd_calls k"
+                                 " JOIN accounts a ON a.id = k.handled_by WHERE k.status = 1"
+                                 " GROUP BY a.id, a.username ORDER BY count(*) DESC, a.username LIMIT 50"));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "reviewers", out);
+    return dbx_json(&x, "reviewers", o);
+}
+const kn_proc P_KPD_REVIEWERS = {"kpd_reviewers", NULL, run_kpd_reviewers};

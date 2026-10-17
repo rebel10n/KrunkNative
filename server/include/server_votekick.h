@@ -32,6 +32,9 @@ void votekick_send_state(const ClientConnection *to); // the running vote to a (
 
 // NET_EXT_KPD_CALL: the rules (level, the target, rate limits), then accounts_kpd_request
 void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, uint16_t length);
+// NET_EXT_KPD_LIST ("kpd" tab 4 Demos / 5 Reviewers, v10 kpd.listDemos / kpd.reviewers): officers only,
+// then accounts_kpd_list
+void votekick_handle_kpd_list(ClientConnection *client, const uint8_t *body, uint16_t length);
 // K.P.D officers (moderator / DEV accounts, v10 isMod / isDeputy): one who joins a lobby with an open
 // call gets the case (NET_EXT_KPD_DATA, v10 startGame kpdData), and so does an officer already in the
 // lobby with no open case when a call comes in (votekick_handle_kpd; not its own call). One officer per

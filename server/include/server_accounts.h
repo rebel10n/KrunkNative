@@ -104,6 +104,9 @@ void accounts_kpd_request(ClientConnection *client, int tab, const ClientConnect
 void accounts_kpd_rate(ClientConnection *officer, int64_t call_id, int tagged, const char *suspect);
 // A K.P.D application (NET_EXT_KPD_APPLY, op kpd_apply): the answer is policeRes code 6.
 void accounts_kpd_apply(ClientConnection *client, const char *discord, const char *reason);
+// The K.P.D window's Demos (tab 4, op kpd_demos: a page of 30 suspect groups from `off`, the name `q`)
+// and Reviewers (tab 5, op kpd_reviewers) lists (NET_EXT_KPD_LIST): the answer is code 4 / 5.
+void accounts_kpd_list(ClientConnection *client, int tab, int off, const char *q);
 // /kpd <name> on|off and /kpd apps (chat_commands.c, DEV): ops kpd_officer / kpd_apps; the answer goes
 // to `requester` (a connection id, or CHAT_CMD_CONSOLE: the log). A grant reaches a connection of that
 // account here at once. 0 when nothing could be sent (told already).

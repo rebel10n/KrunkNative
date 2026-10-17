@@ -233,6 +233,40 @@ scenario('popup-usernames', async (c) => {
   await settle(c, 800);
 });
 
+// The K.P.D popup (showPolicePop, v10:215977) for an officer (isMod, role 2 = Marshal): the Demos tab, its
+// list answered by the /kpd/demos fixture (kpd.listDemos -> policeRes 4, v10:216006), and the Active
+// Calls tab with its rows handed to policeRes 1 (v10:216110; the socket never answers offline).
+const KPD_OFFICER = "{ name: 'Cop', level: 60, isDev: false, isMod: true, role: 2, funds: 2500, score: 200000, jobRating: 9, jobRatingPos: 6, " +
+  "stats: {}, skins: [], badges: [], getSkinCount: () => 0 }";
+const KPD_DEMO_GROUPS = [
+  { grp: 7, name: '', gst: 0, ban: 0, demos: [
+    { tok: 'tokA', ct: 'ctA', typ: 1, map: 'Kanji', mod: 'ffa', dat: 1700000000, dur: 125000, rsl: 0, opn: 1, yes: 3, f_no: 1, myv: 2 },
+    { tok: 'tokB', ct: 'ctB', typ: 0, map: 'Sandstorm', mod: 'tdm', dat: 1700000100, dur: 60000, rsl: 1, opn: 0, yes: 0, f_no: 0, myv: null }] },
+  { grp: 9, name: 'Bad_Ann', gst: 0, ban: 1, demos: [
+    { tok: 'tokC', ct: '', typ: 0, map: 'Burg', mod: 'ffa', dat: 1700000200, dur: 0, rsl: 0, opn: 0, yes: 0, f_no: 0, myv: null }] },
+  { grp: 11, name: '', gst: 1, ban: 0, demos: [
+    { tok: 'tokD', ct: '', typ: 0, map: 'Burg', mod: 'ffa', dat: 1700000300, dur: 0, rsl: 0, opn: 0, yes: 0, f_no: 0, myv: null }] },
+];
+scenario('popup-kpd-demos', async (c) => {
+  await waitSandbox(c);
+  await c.eval(flatPage('#000000'));
+  await c.eval(`(() => { window.__knScope().setAcc(${KPD_OFFICER}); switchKPDTab(3); return 1; })()`);
+  // kpd.listDemos fails offline (its error text lands first); policeRes 4 with the same data as the API
+  // answers it (v10:216006, the data is {rows, more}) then fills the list
+  await sleep(2500);
+  await c.eval(`(() => { policeRes(4, '', { rows: ${JSON.stringify(KPD_DEMO_GROUPS)}, more: 1 }); return 1; })()`);
+  await settle(c, 800);
+});
+scenario('popup-kpd-calls', async (c) => {
+  await waitSandbox(c);
+  await c.eval(flatPage('#000000'));
+  await c.eval(`(() => { window.__knScope().setAcc(${KPD_OFFICER}); showPolicePop(); policeRes(1, '', [
+    { can: 'rep_one', con: 'suspect_a', gst: 0, gco: 'NODE:lobby1', typ: 1, jop: 5, jor: 6, tim: Date.now() / 1000 - 300, crs: 4000, cos: 90000, id: 1 },
+    { can: 'rep_two', con: '', gst: 1, gco: 'NODE:lobby2', typ: 0, jop: 1, jor: 4, tim: Date.now() / 1000 - 3600, crs: 900, cos: 0, id: 2 }]); return 1; })()`);
+  await sleep(800);
+  await settle(c, 800);
+});
+
 // GAME_SURVEY as the server sends it (the survey's question and answers, expiresAt in unix seconds)
 scenario('popup-survey', async (c) => {
   await waitSandbox(c);

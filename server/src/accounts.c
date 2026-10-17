@@ -644,13 +644,14 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
 // v10's "kpd" packet reaches its backend through the game server: KrunkNative records the call in
 // kn_brain (op kpd_call: the kpd_calls table of migration 0209) with the lobby's identity, map and
 // mode, and answers the caller like v10's KPD_RESPONSE ("Reported <name> to the K.P.D", or why not).
-// Officers' lists (tabs 1..3) are the kpd_calls / kpd_log ops. Without a coordinator the call is
+// Officers' lists (tabs 1..3) are the kpd_calls / kpd_log / kpd_stats ops, the Demos and Reviewers
+// windows (tabs 4, 5) kpd_demos / kpd_reviewers (accounts_kpd_list). Without a coordinator the call is
 // still applied (rate limits, log line) and acknowledged: there is nobody else to tell.
 #define ACC_KPD_PENDING 8
 static struct {
     uint32_t rid;
     int conn_id;
-    uint8_t tab;        // 0 a call, 1..3 an officer's list, ACC_KPD_RATE a verdict, ACC_KPD_APPLY / _OFFICER / _APPS
+    uint8_t tab;        // 0 a call, 1..5 an officer's list, ACC_KPD_RATE a verdict, ACC_KPD_APPLY / _OFFICER / _APPS
     int on;             // ACC_KPD_OFFICER: grant (1) or revoke (0)
     int suspect_id;     // a call's suspect connection (votekick_kpd_recorded)
     float since;        // the request's server time (acc_kpd_expire)
@@ -789,6 +790,26 @@ void accounts_kpd_apply(ClientConnection *client, const char *discord, const cha
         votekick_kpd_reply(client, 6, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", "", NULL);
 }
 
+// The K.P.D window's Demos (tab 4: kpd_demos, a page of 30 suspect groups from `off`, the name `q`) and
+// Reviewers (tab 5: kpd_reviewers) lists (NET_EXT_KPD_LIST). The answer comes back through
+// acc_handle_kpd_reply as codes 4 / 5 in pages (acc_kpd_send_list).
+void accounts_kpd_list(ClientConnection *client, const int tab, const int off, const char *q) {
+    if (!g_acc.brain || !brain_linked()) {
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "No moderation backend on this server", "", "[]");
+        return;
+    }
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddNumberToObject(args, "id", client->acct.account_id);
+    cJSON_AddStringToObject(args, "name", client->name);
+    if (tab == 4) {
+        cJSON_AddNumberToObject(args, "off", off);
+        cJSON_AddNumberToObject(args, "limit", 30); // suspect groups a page: v10's Prev / Next step
+        cJSON_AddStringToObject(args, "q", q ? q : "");
+    }
+    if (acc_kpd_post(client->id, (uint8_t) tab, tab == 4 ? "kpd_demos" : "kpd_reviewers", args, "", 0) != 0)
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", "", "[]");
+}
+
 // The answer of a console / chat command: the requester's chat, or the server log for the console
 static void acc_kpd_tell(const int requester, const char *text) {
     ClientConnection *client = requester >= 0 ? acc_client_by_id(requester) : NULL;
@@ -889,50 +910,61 @@ static void acc_kpd_expire(const float now) {
     }
 }
 
+// The pages of a list being built: each page is one JSON array that fits a NET_EXT_KPD_RESPONSE tail.
+#define ACC_KPD_ROOM (NET_EXT_BODY_MAX - (int) sizeof(NetKpdResponsePacket))
+#define ACC_KPD_PAGES_MAX 256 // a Demos page (30 suspect groups, ~200 bytes a demo row) is ~15 packets; more are cut
+typedef struct {
+    char *pages[ACC_KPD_PAGES_MAX];
+    int count;
+    char text[ACC_KPD_ROOM + 1];
+    size_t len;
+} KpdPages;
+
+// Closes the page being built into the page list
+static void kpd_pages_flush(KpdPages *kp) {
+    if (!kp->len) return;
+    kp->text[kp->len++] = ']';
+    kp->text[kp->len] = 0;
+    if (kp->count < ACC_KPD_PAGES_MAX) kp->pages[kp->count++] = strdup(kp->text);
+    kp->len = 0;
+}
+
+// Adds one row (its JSON text) to the page being built. A row too long for a packet is left out.
+static void kpd_pages_add(KpdPages *kp, const char *text) {
+    const size_t n = strlen(text);
+    if (!n || n + 2 > ACC_KPD_ROOM) return; // "[" row "]"
+    if (kp->len && kp->len + 1 + n + 1 > ACC_KPD_ROOM) kpd_pages_flush(kp); // the page is full: close it
+    kp->text[kp->len] = kp->len ? ',' : '[';
+    kp->len++;
+    memcpy(kp->text + kp->len, text, n);
+    kp->len += n;
+}
+
 // An officer's list (policeRes code `tab`) in as many NET_EXT_KPD_RESPONSE packets as it needs: each
 // carries a whole JSON array of rows and `name` "page/pages" (1-based); the client joins the pages and
 // renders the list with the last one. A row longer than one packet is left out. (One packet holds
 // about three Distress Calls rows: a list cut to fit one would not parse.)
-static void acc_kpd_send_list(const ClientConnection *client, const int tab, const cJSON *data) {
-    enum { ROOM = NET_EXT_BODY_MAX - (int) sizeof(NetKpdResponsePacket), PAGES_MAX = 64 };
-    char *pages[PAGES_MAX];
-    int count = 0;
-    char page[ROOM + 1];
-    size_t len = 0;
+// `more` (the Demos window, tab 4: another page of suspect groups exists after this one) is a trailer
+// element {"more":1} as the array's last element, only then: the client drops it and reads it as more.
+static void acc_kpd_send_list(const ClientConnection *client, const int tab, const cJSON *data, const int more) {
+    KpdPages kp = {.count = 0, .len = 0};
     const cJSON *rows = cJSON_IsArray(data) ? data : NULL, *row;
     cJSON_ArrayForEach(row, rows) {
         char *text = cJSON_PrintUnformatted(row);
-        const size_t n = text ? strlen(text) : 0;
-        if (!n || n + 2 > ROOM) { // "[" row "]"
-            free(text);
-            continue;
-        }
-        if (len && len + 1 + n + 1 > ROOM) { // the page is full: close it
-            page[len++] = ']';
-            page[len] = 0;
-            if (count < PAGES_MAX) pages[count++] = strdup(page);
-            len = 0;
-        }
-        page[len] = len ? ',' : '[';
-        len++;
-        memcpy(page + len, text, n);
-        len += n;
+        if (text) kpd_pages_add(&kp, text);
         free(text);
     }
-    if (len) {
-        page[len++] = ']';
-        page[len] = 0;
-        if (count < PAGES_MAX) pages[count++] = strdup(page);
-    }
-    if (!count) {
+    if (more) kpd_pages_add(&kp, "{\"more\":1}");
+    kpd_pages_flush(&kp);
+    if (!kp.count) {
         votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", "", "[]");
         return;
     }
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < kp.count; i++) {
         char tag[16];
-        snprintf(tag, sizeof(tag), "%d/%d", i + 1, count);
-        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", tag, pages[i] ? pages[i] : "[]");
-        free(pages[i]);
+        snprintf(tag, sizeof(tag), "%d/%d", i + 1, kp.count);
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", tag, kp.pages[i] ? kp.pages[i] : "[]");
+        free(kp.pages[i]);
     }
 }
 
@@ -980,8 +1012,12 @@ static int acc_handle_kpd_reply(const cJSON *frame) {
             char text[64];
             snprintf(text, sizeof(text), "Reported %s to the K.P.D", name);
             votekick_kpd_reply(client, 0, NET_KPD_REPORTED, text, name, NULL);
+        } else if (tab == 4) { // the Demos window: {demos: rows, more} (kpd_demos)
+            acc_kpd_send_list(client, tab, cJSON_GetObjectItem(data, "demos"), cJSON_IsTrue(cJSON_GetObjectItem(data, "more")));
+        } else if (tab == 5) { // the Reviewers window: {reviewers: rows} (kpd_reviewers)
+            acc_kpd_send_list(client, tab, cJSON_GetObjectItem(data, "reviewers"), 0);
         } else {
-            acc_kpd_send_list(client, tab, data);
+            acc_kpd_send_list(client, tab, data, 0);
         }
         return 1;
     }

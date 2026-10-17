@@ -1977,6 +1977,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
+            else if (subtype == NET_EXT_KPD_LIST) votekick_handle_kpd_list(client, body, body_length);   // "kpd" tab 4 / 5 (votekick.c)
             else if (subtype == NET_EXT_MARK_POSITION) net_handle_mark_position(client, body, body_length); // "mpos": a ranked / comp ping
             else if (subtype == NET_EXT_PROP_PICK && body_length >= sizeof(NetPropPickPacket) && client->player) { // "prp" (prop_hunt.h)
                 NetPropPickPacket pick;

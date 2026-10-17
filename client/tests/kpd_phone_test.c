@@ -5,8 +5,10 @@
 //   * callPolice raises the phone (#phoneImg margin-bottom 0px), sends one "kpd" request and arms the
 //     no-answer timer at KPD_NO_ANSWER_MS (15 s); nothing answers, so at 15 s the phone is down, the
 //     busy tone plays and the K.P.D says it did not answer. A second call can go out after that.
-//   * an answer (reported, refused, busy) takes the phone down at once and cancels the timer, so the
-//     timer cannot end a later call. A late answer after the timeout is shown and the phone stays down.
+//   * the ring plays 700 ms after the call and every 2200 ms while the phone is up without an answer.
+//   * an answer refused or busy takes the phone down at once and cancels the timers, so no timer can end a
+//     later call; a report keeps the phone up, its picture blinks, and the phone drops 2200 ms later with
+//     the whoosh. A late answer after the timeout is shown and the phone stays down.
 //   * a new round (INIT: hud_votekick_reset) and a lost session (hud_votekick_on_session_lost) end a
 //     call and cancel its timer; a second callPolice while a call runs sends nothing.
 //   * with no socket (and not offline) nothing is sent: the phone is never raised.
@@ -14,7 +16,10 @@
 //   * a list in pages (name "page/pages") is joined and rendered into #kpdCalls with the last page;
 //     a list for another tab than the one on show is ignored; v10's call order and rating colours;
 //     the Stats tab's Range / Tag Count table
-//   * kpdSubmit sends one "kpdA"; its answer (code 6) shows the success or the error popup
+//   * the Demos tab (code 4: NET_EXT_KPD_LIST with off and q) renders the search line, the suspects' table
+//     with Watch / copy, Prev / Next from the trailer, and the empty texts; watchDemo fails with v10's text
+//   * the Reviewers tab (code 5) renders Last 30 Days and All Time side by side
+//   * an officer's list needs a session: with none it says "Not connected to a server" and sends nothing
 //   * [Y] twice (kpdVoteY) tags the case: one "rkpd" 1; no case or not spectating: the key does nothing
 //   * a list request nobody answers (an official krunker.io server that sends an officer's list only to
 //     its own officers, a dropped brain request) says "Request Failed" after KPD_NO_ANSWER_MS instead of
@@ -120,6 +125,56 @@ void html_clipboard_write(const char *text) { (void) text; }
 
 static int phone_up(void) { return !strcmp(g_phone_margin, "0px"); }
 
+// ------------------------------------------------------------------ StrBuf (ui_windows.c's, without its window code)
+#include <stdarg.h>
+void sb_append_n(StrBuf *sb, const char *s, size_t n) {
+    if (sb->len + n + 1 > sb->cap) {
+        size_t cap = sb->cap ? sb->cap : 256;
+        while (sb->len + n + 1 > cap) cap *= 2;
+        sb->data = realloc(sb->data, cap);
+        sb->cap = cap;
+    }
+    memcpy(sb->data + sb->len, s, n);
+    sb->len += n;
+    sb->data[sb->len] = 0;
+}
+void sb_append(StrBuf *sb, const char *s) { if (s) sb_append_n(sb, s, strlen(s)); }
+void sb_append_esc(StrBuf *sb, const char *s) {
+    if (!s) return;
+    for (; *s; s++) {
+        switch (*s) {
+            case '&': sb_append(sb, "&amp;"); break;
+            case '<': sb_append(sb, "&lt;"); break;
+            case '>': sb_append(sb, "&gt;"); break;
+            case '"': sb_append(sb, "&quot;"); break;
+            case '\'': sb_append(sb, "&#39;"); break;
+            default: sb_append_n(sb, s, 1); break;
+        }
+    }
+}
+void sb_appendf(StrBuf *sb, const char *fmt, ...) {
+    char stack[512];
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(stack, sizeof(stack), fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t) n < sizeof(stack)) { sb_append_n(sb, stack, (size_t) n); return; }
+    char *heap = malloc((size_t) n + 1);
+    if (!heap) return;
+    va_start(ap, fmt);
+    vsnprintf(heap, (size_t) n + 1, fmt, ap);
+    va_end(ap);
+    sb_append_n(sb, heap, (size_t) n);
+    free(heap);
+}
+char *sb_finish(StrBuf *sb) {
+    char *out = sb->data ? sb->data : strdup("");
+    sb->data = NULL;
+    sb->len = sb->cap = 0;
+    return out;
+}
+
 // ------------------------------------------------------------------ chat, audio, popups
 #define LOG_MAX 32
 static char g_chat[LOG_MAX][96];
@@ -161,12 +216,15 @@ MenuUi *menu_ui(void) { return &g_menu; }
 void menu_show_window(int id, int force) { (void) id; (void) force; }
 int ui_loadout_kpd_tab(void) { return g_kpd_tab_shown; }
 void ui_loadout_switch_kpd_tab(int tab) { g_kpd_tab_shown = tab; }
-static int g_apply_results, g_apply_ok;
-static char g_apply_text[96];
-void ui_loadout_kpd_apply_result(int ok, const char *text) {
-    g_apply_results++;
-    g_apply_ok = ok;
-    snprintf(g_apply_text, sizeof(g_apply_text), "%s", text ? text : "");
+static int g_response_popups, g_demo_off;
+static char g_response_text[96];
+void ui_loadout_response_popup(const char *text) {
+    g_response_popups++;
+    snprintf(g_response_text, sizeof(g_response_text), "%s", text ? text : "");
+}
+void ui_loadout_kpd_demo_query(int *off, const char **q) {
+    if (off) *off = g_demo_off;
+    if (q) *q = "";
 }
 
 // The packets the client sends: the count, and the last one's subtype
@@ -253,9 +311,9 @@ static void case_reported_answer_cancels_timer(void) {
     Client *c = make_client(1);
     call(c, "carol", 9);
     answer(c, 0, 0, "Reported carol to the K.P.D", "carol"); // NET_KPD_REPORTED
-    CHECK(!phone_up(), "a report takes the phone down at once");
+    CHECK(phone_up(), "a report keeps the phone up for the blink");
     CHECK(chat_has("Reported carol"), "the report is said in chat");
-    CHECK(live_timers() == 0, "the report cancels the no-answer timer");
+    CHECK(live_timers() == 2, "the blink and the drop are armed, the no-answer timer is not (%d)", live_timers());
     advance(60000);
     CHECK(!chat_has("did not answer") && sounds_of("busy_0") == 0, "the cancelled timer does not fire later");
     free(c);
@@ -279,7 +337,7 @@ static void case_second_call_during_call(void) {
     call(c, "carol", 9);
     CHECK(g_sent == 1, "a second call during a call sends nothing (sent %d)", g_sent);
     CHECK(phone_up(), "the phone stays up for the call in flight");
-    CHECK(live_timers() == 1, "one timer for the one call");
+    CHECK(live_timers() == 2, "the no-answer timer and the ring for the one call (%d)", live_timers());
     advance(15000);
     CHECK(!phone_up(), "the one timer still takes the phone down");
     free(c);
@@ -416,22 +474,89 @@ static void case_verdict_keys(void) {
     free(c);
 }
 
-// kpdSubmit's "kpdA" and its answer (policeRes code 6)
-static void case_application(void) {
+static void case_ring_and_report_drop(void) {
+    reset_world();
+    Client *c = make_client(1);
+    call(c, "carol", 9);
+    advance(699);
+    CHECK(sounds_of("ring_0") == 0, "no ring before 700 ms");
+    advance(1);
+    CHECK(sounds_of("ring_0") == 1, "the ring at 700 ms (%d)", sounds_of("ring_0"));
+    advance(2200);
+    CHECK(sounds_of("ring_0") == 2, "the ring again 2200 ms later (%d)", sounds_of("ring_0"));
+    answer(c, 0, NET_KPD_REPORTED, "Reported carol to the K.P.D", "carol");
+    advance(2199);
+    CHECK(phone_up(), "a report: the phone is still up just before 2200 ms");
+    advance(1);
+    CHECK(!phone_up() && sounds_of("whoosh_0") >= 1, "a report: the phone drops 2200 ms after the answer");
+    advance(10000);
+    CHECK(sounds_of("ring_0") == 2 && live_timers() == 0, "no ring after the answer and no timer left (%d rings)", sounds_of("ring_0"));
+    free(c);
+}
+
+// NET_EXT_KPD_LIST: the Demos tab asks with its page and search; the answer's rows and trailer render
+static void case_demos_list(void) {
     reset_world();
     Client *c = make_client(0);
-    g_apply_results = 0;
-    hud_votekick_kpd_apply(c, "cop#1", "I hunt hackers");
-    CHECK(g_sent == 1 && g_last_sub == NET_EXT_KPD_APPLY && g_last_byte == 'c', "kpdSubmit sends one kpdA (%d %#x)", g_sent, g_last_sub);
-    answer(c, 6, NET_KPD_REPORTED, "Application sent! The K.P.D will review it.", "");
-    CHECK(g_apply_results == 1 && g_apply_ok && strstr(g_apply_text, "Application sent"), "received: the success popup (%s)", g_apply_text);
-    answer(c, 6, NET_KPD_REFUSED, "Your application is already in review", "");
-    CHECK(g_apply_results == 2 && !g_apply_ok && strstr(g_apply_text, "already in review"), "refused: the error popup (%s)", g_apply_text);
-    CHECK(!phone_up() && !chat_has("review"), "an application's answer is no call's: no phone, no chat");
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    g_kpd_tab_shown = 3; // Demos
+    g_demo_off = 30;     // the second page: Prev is on
+    hud_votekick_kpd_list(c, 4, 30, "");
+    CHECK(g_sent == 1 && g_last_sub == NET_EXT_KPD_LIST && g_last_byte == 4, "the Demos request is one NET_EXT_KPD_LIST for tab 4 (%d %#x %d)", g_sent, g_last_sub, g_last_byte);
+    list_page(c, 4, "", "[{\"grp\":7,\"name\":\"\",\"gst\":0,\"ban\":0,\"tok\":\"tokA\",\"ct\":\"ctA\",\"typ\":1,\"map\":\"Kanji\","
+                        "\"mod\":\"ffa\",\"dat\":1700000000,\"dur\":125000,\"rsl\":0,\"opn\":1,\"yes\":3,\"f_no\":1,\"myv\":2},"
+                        "{\"grp\":7,\"name\":\"\",\"gst\":0,\"ban\":0,\"tok\":\"tokB\",\"ct\":\"ctB\",\"typ\":0,\"map\":\"Sandstorm\","
+                        "\"mod\":\"tdm\",\"dat\":1700000100,\"dur\":60000,\"rsl\":1,\"opn\":0,\"yes\":0,\"f_no\":0,\"myv\":null},"
+                        "{\"grp\":9,\"name\":\"Bad_Ann\",\"gst\":0,\"ban\":1,\"tok\":\"tokC\",\"ct\":\"\",\"typ\":0,\"map\":\"Burg\","
+                        "\"mod\":\"ffa\",\"dat\":1700000200,\"dur\":0,\"rsl\":0,\"opn\":0,\"yes\":0,\"f_no\":0,\"myv\":null},"
+                        "{\"grp\":11,\"name\":\"\",\"gst\":1,\"ban\":0,\"tok\":\"tokD\",\"ct\":\"\",\"typ\":0,\"map\":\"Burg\","
+                        "\"mod\":\"ffa\",\"dat\":1700000300,\"dur\":0,\"rsl\":0,\"opn\":0,\"yes\":0,\"f_no\":0,\"myv\":2},"
+                        "{\"more\":1}]");
+    const char *h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(strstr(h, "id='kpdDemoQ'") && strstr(h, "onclick='kpdDemoSearch()'") && !strstr(h, "kpdDemoSearch(true)"),
+          "the search line: Search, and no Clear for an empty search");
+    CHECK(strstr(h, "watchDemo('tokA','ctA')") && strstr(h, "copyDemoLink(this,'tokD','')"), "each demo has Watch and the copy link");
+    CHECK(strstr(h, "color:var(--red)'>Bad_Ann") && strstr(h, "Suspect #7") && strstr(h, "Suspect #11</span> <span style='color:#858585;font-size:13px'>guest"),
+          "a banned suspect is named, a suspect is Suspect #grp, a guest says so");
+    CHECK(strstr(h, "[ranked] Kanji") && strstr(h, "2:05") && strstr(h, "2023-11-1"), "the match, the length (2:05) and the date");
+    CHECK(strstr(h, "BANNED") && strstr(h, "RESOLVED") && strstr(h, "3Y") && strstr(h, "1N") && strstr(h, "&#9679;"),
+          "the status: BANNED, RESOLVED, the open votes and the dot for a vote of this officer: %s", h);
+    CHECK(strstr(h, "kpdDemoPage(1)") && strstr(h, "kpdDemoPage(-1)") && !strstr(h, "No Demos"), "the trailer says more; page 2 has Prev");
+    CHECK(!strstr(h, "{\"more\""), "the trailer is not a row");
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    g_demo_off = 0;
+    list_page(c, 4, "", "[]");
+    CHECK(g_kpd_calls_html && strstr(g_kpd_calls_html, "No Recorded Demos") && !strstr(g_kpd_calls_html, "kpdDemoPage(-1)"),
+          "no demos on page 1: No Recorded Demos, no Prev");
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
     c->net_socket = -1;
     g_sent = 0;
-    hud_votekick_kpd_apply(c, "cop#1", "again");
-    CHECK(g_sent == 0 && g_apply_results == 3 && !g_apply_ok, "no session: nothing sent, the error popup");
+    hud_votekick_kpd_list(c, 4, 0, "");
+    CHECK(g_sent == 0 && g_kpd_calls_html && !strcmp(g_kpd_calls_html, "Not connected to a server"), "no session: nothing sent, the text says so");
+    free(c);
+}
+
+static void case_reviewers_and_watch(void) {
+    reset_world();
+    Client *c = make_client(0);
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    g_kpd_tab_shown = 4; // Reviewers
+    list_page(c, 5, "", "[{\"name\":\"rev_one\",\"cnt\":4,\"range\":\"month\"},{\"name\":\"rev_two\",\"cnt\":9,\"range\":\"all\"}]");
+    const char *h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(strstr(h, "Last 30 Days") && strstr(h, "All Time") && strstr(h, "rev_one") && strstr(h, "rev_two"), "the two ranges side by side");
+    CHECK(strstr(h, "display:flex;gap:30px"), "the flex row");
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    list_page(c, 5, "", "[{\"name\":\"rev_two\",\"cnt\":9,\"range\":\"all\"}]");
+    CHECK(g_kpd_calls_html && strstr(g_kpd_calls_html, "No Data") && strstr(g_kpd_calls_html, "rev_two"), "an empty range says No Data");
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    hud_votekick_watch_demo("tokA", "ctA");
+    CHECK(g_response_popups == 1 && !strcmp(g_response_text, "Demo Download Failed"), "watchDemo fails with v10's popup (%d %s)", g_response_popups, g_response_text);
     free(c);
 }
 
@@ -512,7 +637,9 @@ int main(void) {
     case_scenario_phone();
     case_officer_list_pages();
     case_verdict_keys();
-    case_application();
+    case_ring_and_report_drop();
+    case_demos_list();
+    case_reviewers_and_watch();
     case_list_no_answer();
     case_vision_case_owner();
     free(g_kpd_calls_html);

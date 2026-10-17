@@ -328,6 +328,7 @@ static void warn_unknown_keys(void) {
         "social",  // the v10 Social hub popup / views: {tab, sub, feed, friends, selected, messages, search, view} (v10_social.c)
         "clan",    // the Clans window (13): {data: clanData, tab, motd, loot, recruit} (clan_ui.c)
         "kpdPhone", // in game: true = the K.P.D phone up with a call in flight, no request sent (hud_votekick.c)
+        "kpdPolice", // the K.P.D popup (shoPolicePop): {tab, list: {code, json}}, the list from the fixture (ui_loadout.c)
         "nametags", // in game: the players' nametags (page elements) drawn over the background (the world is not)
         "kpdCase",  // spectating: an officer's case (kpdData) on the first other player, the second its caller (hud_votekick.c)
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
@@ -722,6 +723,7 @@ static void run_frames(Client *client, int n);
 static int read_back(const char *path);
 static void run_console(double clock_ms);
 static void apply_kpd_case(Client *client);
+static void apply_kpd_police(Client *client);
 
 /* ------------------------------------------------------------ frame sequences */
 
@@ -1169,6 +1171,7 @@ static int ui_scenario_apply(Client *client) {
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
     if (menu_open) apply_window(client);
+    if (menu_open) apply_kpd_police(client); // after the window: the popup on its tab, the list from the fixture
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (st_bool("gameCode", 0)) v10_party_password_prompt(); // v10 gameCode(): the server password popup
@@ -1265,6 +1268,22 @@ static void run_console(const double clock_ms) {
         printf("[scenario] console at %.3f s: %s\n", clock_ms / 1000.0, g_sc.console[i].cmd);
         ui_console_exec(g_sc.console[i].cmd);
     }
+}
+
+// state.kpdPolice: the K.P.D popup (showPolicePop) on {tab}: an officer's tab asks the server, which the
+// scenario does not wait for; its list comes from {list: {code, json}} instead (the server's answer shape).
+static void apply_kpd_police(Client *client) {
+    const cJSON *kp = st("kpdPolice");
+    if (!cJSON_IsObject(kp)) return;
+    hud_votekick_scenario_lists(1);
+    const cJSON *tab = cJSON_GetObjectItem(kp, "tab");
+    ui_loadout_switch_kpd_tab(cJSON_IsNumber(tab) ? tab->valueint : 0);
+    const cJSON *list = cJSON_GetObjectItem(kp, "list");
+    if (!cJSON_IsObject(list)) return;
+    const cJSON *code = cJSON_GetObjectItem(list, "code"), *rows = cJSON_GetObjectItem(list, "json");
+    char *text = cJSON_IsArray(rows) ? cJSON_PrintUnformatted(rows) : NULL;
+    hud_votekick_scenario_list(client, cJSON_IsNumber(code) ? code->valueint : 1, text ? text : "[]");
+    free(text);
 }
 
 // state.kpdCase: the officer's case (NET_EXT_KPD_DATA {sus, caller}) once every console command ran

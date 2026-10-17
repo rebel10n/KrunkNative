@@ -1,0 +1,51 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Cop",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "dev": 1
+    },
+    "kpdPolice": {
+      "tab": 1,
+      "list": {
+        "code": 2,
+        "json": [
+          {
+            "modn": "officer_one",
+            "htag": 1,
+            "hckn": "cheat_x",
+            "dat": 1700000000
+          },
+          {
+            "modn": "KPD Demo",
+            "htag": 0,
+            "hckn": "cheat_y",
+            "dat": 1700003600
+          }
+        ]
+      }
+    }
+  },
+  "frames": 3,
+  "note": "K.P.D popup, officer, Ban Logs tab. No v10 reference (regression baseline; the v10 markup is v10.js :215977-216273)."
+}

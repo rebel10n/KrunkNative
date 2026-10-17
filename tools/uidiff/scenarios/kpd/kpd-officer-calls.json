@@ -1,0 +1,67 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Cop",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "dev": 1
+    },
+    "kpdPolice": {
+      "tab": 0,
+      "list": {
+        "code": 1,
+        "json": [
+          {
+            "can": "rep_one",
+            "con": "suspect_a",
+            "gst": 0,
+            "gco": "NODE:lobby1",
+            "typ": 1,
+            "jop": 5,
+            "jor": 6,
+            "tim": 1700000000,
+            "crs": 4000,
+            "cos": 90000,
+            "map": "Kanji",
+            "mode": 0
+          },
+          {
+            "can": "rep_two",
+            "con": "",
+            "gst": 1,
+            "gco": "NODE:lobby2",
+            "typ": 0,
+            "jop": 1,
+            "jor": 4,
+            "tim": 1700000500,
+            "crs": 900,
+            "cos": 0,
+            "map": "Burg",
+            "mode": 0
+          }
+        ]
+      }
+    }
+  },
+  "frames": 3,
+  "note": "K.P.D popup, officer, Active Calls tab with two distress calls. No v10 reference (regression baseline; the v10 markup is v10.js :215977-216273)."
+}

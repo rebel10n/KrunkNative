@@ -20,6 +20,11 @@ Accounts (levels from player_score, Krunker v10 level = 0.03 * sqrt(score)): ali
      caller bob}; a verdict right away is refused ("kpdf", kpdWatchTime); after 10 s "rkpd" tagged: the
      row is handled (status 1, rating 1, handled_by the officer, handled_at); bob's Helpful Reports 1/1;
      "/kpd <officer> off" revokes it, moderation_log has both
+  5. the K.P.D window's Demos and Reviewers (NET_EXT_KPD_LIST, tab 4 / 5): a player (alice) is refused
+     (code 4 "K.P.D officers only", also via the "kpd" call with tab 4); bob grants the officer again;
+     the officer's Demos: a page of 30 suspect groups, newest first, the rest in the next page
+     (off 30), the "more" trailer only on the first; the name search (q) finds carol's group; the
+     Reviewers list (code 5) has the officer's one handled call, the month and all time
 Exit 77 when the database is unavailable.
 """
 import json
@@ -56,6 +61,7 @@ CHAT_SEND = 8
 EXT_AUTH, EXT_RIGHTS = 0x8000, 0x8001
 EXT_VOTE_KICK, EXT_VK_STATE, EXT_KPD_CALL, EXT_KPD_RESPONSE, EXT_KPD_RESET, EXT_KPD_DATA, EXT_KPD_RATE = (
     0x0800, 0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806)
+EXT_KPD_LIST = 0x080A  # NetKpdListPacket: tab, off, q[24]
 AUTH_SESSION = 1
 ST_STATE, ST_OK = 0, 1
 RIGHTS_FMT = "<BBBBii32s64s"
@@ -136,6 +142,26 @@ class Sql:
                 return None
             return [l.split("|") for l in r.stdout.splitlines() if l and l != "SET" and not l.startswith(("UPDATE", "INSERT"))]
         return None
+
+
+def kpd_list_pages(peer, code, mark=0):
+    """The NET_EXT_KPD_RESPONSE pages of a list (code 4 / 5) since mark: [(name "i/n", parsed JSON tail)]."""
+    out = []
+    head = struct.calcsize(KPD_RESPONSE_FMT)
+    for b in ext_bodies(peer.packets, EXT_KPD_RESPONSE, mark):
+        v = struct.unpack(KPD_RESPONSE_FMT, b[:head])
+        if v[0] == code:
+            out.append((kn_proto.uncstr(v[3]), json.loads(b[head:].decode() or "[]")))
+    return out
+
+
+def kpd_list_wait(peer, code, mark=0):
+    """Waits for the last page of a list (name "n/n"), then returns its pages."""
+    def done():
+        pages = kpd_list_pages(peer, code, mark)
+        return pages and pages[-1][0].split("/")[0] == pages[-1][0].split("/")[1]
+    peer.wait(done, 8)
+    return kpd_list_pages(peer, code, mark)
 
 
 def ext_bodies(packets, subtype, mark=0):
@@ -417,6 +443,58 @@ def scenario(port, log, sql, tokens):
     check("4: the account is no moderator any more", rows == [["0"]], str(rows))
     rows = sql("SELECT action FROM moderation_log WHERE target_id = %d ORDER BY id" % ids[COP])
     check("4: moderation_log: kpd_grant, kpd_revoke", rows == [["kpd_grant"], ["kpd_revoke"]], str(rows))
+    # 5. the K.P.D window's Demos (tab 4) and Reviewers (tab 5), NET_EXT_KPD_LIST
+    mark = len(a.packets)
+    a.ext(EXT_KPD_LIST, struct.pack("<Bi24s", 4, 0, kn_proto.cstr("", 24)))
+    refused = a.wait(lambda: [r for r in a.kpd_responses(mark) if r["code"] == 4], 5)
+    check("5: a player's Demos request is refused (code 4)", refused and refused[0]["status"] == KPD_REFUSED
+          and refused[0]["message"] == "K.P.D officers only", str(refused))
+    mark = len(a.packets)
+    a.ext(EXT_KPD_CALL, struct.pack("<Bi", 4, 0))  # the call packet with a list tab
+    refused = a.wait(lambda: [r for r in a.kpd_responses(mark) if r["code"] == 4], 5)
+    check("5: the same through the call packet (tab 4): refused too", refused and refused[0]["status"] == KPD_REFUSED, str(refused))
+    mark = len(b.packets)
+    b.say("/kpd %s on" % COP)
+    told = b.wait(lambda: [t for t in b.chats(mark) if "K.P.D" in t], 8)
+    check("5: bob grants the officer again", told and "%s is now a K.P.D officer" % COP in told[0], str(told))
+    # 31 guest suspects more: 32 suspect groups, carol's the newest of them (page 1 is 30 groups)
+    for i in range(31):
+        sql("INSERT INTO kpd_demos (token, ct, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms,"
+            " banned, resolved, opened, yes_votes, no_votes) VALUES ('vk%d-g%d', 'vkct', NULL, 'Pg_%d', %d, 0, 'Burg',"
+            " 'Hardpoint', 60000, 0, 0, 1, 0, 0)" % (STAMP, i, i, 100 + i))
+    sql("INSERT INTO kpd_demos (token, ct, suspect_id, suspect_name, suspect_group, typ, map, mode_name, duration_ms,"
+        " banned, resolved, opened, yes_votes, no_votes) VALUES ('vk%d-carol', 'vkct', %d, '%s', 7, 2, 'Burg',"
+        " 'Hardpoint', 240000, 1, 0, 1, 0, 0)" % (STAMP, ids[CAROL], CAROL))
+    mark = len(o.packets)
+    o.ext(EXT_KPD_LIST, struct.pack("<Bi24s", 4, 0, kn_proto.cstr("", 24)))
+    pages = kpd_list_wait(o, 4, mark)
+    rows = [r for _, page in pages for r in page]
+    more = bool(rows) and rows[-1] == {"more": 1}
+    rows = [r for r in rows if r != {"more": 1}]
+    groups = {(r["grp"], r["gst"]) for r in rows}
+    check("5: the officer's Demos: 30 suspect groups, more (the trailer on the last page)",
+          len(groups) == 30 and more and len(pages) > 1, f"{len(groups)} {more} {len(pages)}")
+    carol_rows = [r for r in rows if r["name"] == CAROL]
+    check("5: carol's banned group is named, newest first (on page 1)", carol_rows and carol_rows[0]["ban"] == 1
+          and carol_rows[0]["dur"] == 240000 and carol_rows[0]["myv"] is None, str(carol_rows[:1]))
+    mark = len(o.packets)
+    o.ext(EXT_KPD_LIST, struct.pack("<Bi24s", 4, 30, kn_proto.cstr("", 24)))
+    pages = kpd_list_wait(o, 4, mark)
+    rows2 = [r for _, page in pages for r in page]
+    check("5: the next page (off 30): the other 2 groups, no more", len({(r["grp"], r["gst"]) for r in rows2}) == 2
+          and not any(r == {"more": 1} for r in rows2) and not ({(r["grp"], r["gst"]) for r in rows2} & groups),
+          str(len(rows2)))
+    mark = len(o.packets)
+    o.ext(EXT_KPD_LIST, struct.pack("<Bi24s", 4, 0, kn_proto.cstr(CAROL.upper(), 24)))
+    pages = kpd_list_wait(o, 4, mark)
+    rows3 = [r for _, page in pages for r in page]
+    check("5: the name search (any case): carol's demo only", len(rows3) == 1 and rows3[0]["name"] == CAROL, str(rows3))
+    mark = len(o.packets)
+    o.ext(EXT_KPD_LIST, struct.pack("<Bi24s", 5, 0, kn_proto.cstr("", 24)))
+    pages = kpd_list_wait(o, 5, mark)
+    rv = [r for _, page in pages for r in page]
+    check("5: the Reviewers: the officer's one handled call, month and all time",
+          rv == [{"name": COP, "cnt": 1, "range": "month"}, {"name": COP, "cnt": 1, "range": "all"}], str(rv))
     for p in (a, b, c, o):
         p.close()
 

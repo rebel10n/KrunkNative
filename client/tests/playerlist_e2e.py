@@ -480,18 +480,11 @@ def first_launch(brain, node_log, sql, tokens, ids, peers):
           and "you will be granted KR as a reward" in pop and c.count("#policePopC img.kpdGuideImg") == 1
           and c.count("#policePopC .menuTabNew") == 0, pop)
     check("4: her Helpful Reports 21/22, and she may apply", "21/22 Helpful Reports" in pop and "You may qualify to become a K.P.D officer" in pop, pop)
-    check("4: the application link", c.clicksel(1, "#policePopC a"))
-    check("4: the application form", wait_for(lambda: c.has_box("kpdDiscord") and c.has_box("kpdExplain"), 5))
-    c.cmd("focus kpdDiscord")
-    c.cmd("text alice#1")
-    c.cmd("focus kpdExplain")
-    c.cmd("text I\\shunt\\shackers")
-    time.sleep(0.5)
-    c.cmd("clickid confirmBtn")
-    sent = wait_for(lambda: (lambda t: t if t and "Application sent" in t else None)(c.textof("genericPop")), 8)
-    check("4: Submit: \"Application sent!\"", sent, c.textof("genericPop"))
-    rows = sql("SELECT account_id, discord, reason, status FROM kpd_applications")
-    check("4: kpd_applications keeps it (pending)", rows == [[str(ids[ALICE]), "alice#1", "I hunt hackers", "0"]], str(rows))
+    # the link is an <a href> in the popup (ui_loadout.c): the URL is not in the text dump, so the check counts the anchor
+    # whose href is v10's Google Form
+    check("4: the application link is v10's Google Form", c.count("#policePopC a[href='https://forms.gle/1xy2LznPkYn9gh8Q7']") == 1,
+          str(c.count("#policePopC a")))
+    check("4: no KrunkNative application form (v10 has none)", not c.has_box("kpdDiscord") and not c.has_box("kpdExplain"))
     c.cmd("ui clearPops()")
     c.cmd("ui showWindow(1)")  # Settings: the `kpd: true` rows are for officers only
     check("4: Settings has no KPD folder for a player", wait_for(lambda: c.has_box("setHed_local"), 6) and not c.has_box("setHed_kpd")

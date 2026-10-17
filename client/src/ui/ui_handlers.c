@@ -378,8 +378,10 @@ H(h_select_skin) { UNUSED; ui_loadout_select_skin(arg_int(args, argc, 0, -1), ar
 H(h_loadout_action) { UNUSED; ui_loadout_action(arg_int(args, argc, 0, 0)); return 1; }
 H(h_toggle_log) { UNUSED; v10_news_toggle_log(arg_elem(ev, args, argc, 0)); return 1; } // v10_news.c
 // toggleSpect(this.checked): `co`, read by enterGame (client/src/spectate.c)
-H(h_kpd_apply_pop) { UNUSED; ui_loadout_kpd_apply_pop(); return 1; } // KrunkNative: the K.P.D application form
-H(h_kpd_submit) { UNUSED; ui_loadout_kpd_submit(); return 1; }        // v10 kpdSubmit()
+H(h_kpd_demo_search) { UNUSED; ui_loadout_kpd_demo_search(arg_bool(ev, args, argc, 0, 0)); return 1; } // kpdDemoSearch(clear)
+H(h_kpd_demo_page) { UNUSED; ui_loadout_kpd_demo_page(arg_int(args, argc, 0, 0)); return 1; }          // kpdDemoPage(delta)
+H(h_watch_demo) { UNUSED; hud_votekick_watch_demo(arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 1, "")); return 1; } // watchDemo(tok, ct)
+H(h_copy_demo_link) { UNUSED; hud_votekick_copy_demo_link(arg_str(ev, args, argc, 1, ""), arg_str(ev, args, argc, 2, "")); return 1; } // copyDemoLink(this, tok, ct)
 H(h_toggle_spect) {
     UNUSED;
     spectate_set_requested(arg_bool(ev, args, argc, 0, 0));
@@ -535,8 +537,10 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"toggleSpect", h_toggle_spect},
     {"claimReward", h_claim_reward},
     {"shoPolicePop", h_police_pop},
-    {"kpdApplyPop", h_kpd_apply_pop},
-    {"kpdSubmit", h_kpd_submit},
+    {"kpdDemoSearch", h_kpd_demo_search},
+    {"kpdDemoPage", h_kpd_demo_page},
+    {"watchDemo", h_watch_demo},
+    {"copyDemoLink", h_copy_demo_link},
     {"sub2FA", h_noop},
     {"focusChat", h_focus_chat},
     {"sendReaction", h_noop},

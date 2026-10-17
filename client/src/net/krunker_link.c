@@ -3159,6 +3159,18 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
                 const KrunkerValue args[] = {KRUNKER_V_NUM(0), KRUNKER_V_MAP(kv, 1)};
                 return send_c2s(l, KRUNKER_C2S_KPD, args, 2);
             }
+            if (subtype == NET_EXT_KPD_LIST && body_length >= sizeof(NetKpdListPacket)) {
+                // v10's Demos (tab 4) and Reviewers (tab 5) are web API lists (kpd.listDemos / kpd.reviewers),
+                // not socket packets: an official game has no such list here, so the request fails the way
+                // v10's does (_71741: "Request Failed")
+                NetKpdResponsePacket r;
+                memset(&r, 0, sizeof(r));
+                r.code = body[0];
+                r.status = NET_KPD_UNAVAILABLE;
+                snprintf(r.message, sizeof(r.message), "%s", "Request Failed");
+                emit_ext(l, NET_EXT_KPD_RESPONSE, &r, sizeof(r));
+                return 0;
+            }
             if (subtype == NET_EXT_KPD_RATE && body_length >= sizeof(NetKpdRatePacket)) { // the officer's verdict: ["rkpd", 0 | 1]
                 const KrunkerValue args[] = {KRUNKER_V_NUM(body[0] ? 1 : 0)};
                 return send_c2s(l, KRUNKER_C2S_RATE_KPD, args, 1);

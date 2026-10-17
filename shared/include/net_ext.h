@@ -68,6 +68,7 @@ typedef enum {
     NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
     NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
     NET_EXT_VOTE_FORFEIT_STATE = 0x0809, // "vf" S -> C NetVoteForfeitStatePacket: the ranked forfeit vote (#voteToForfeit)
+    NET_EXT_KPD_LIST = 0x080A,        // "kpd" C -> S NetKpdListPacket: the K.P.D window's Demos (tab 4) / Reviewers (tab 5) list
 
     // 0x0900 in-game actions of v10 without a NetPacket id
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
@@ -472,6 +473,16 @@ typedef struct {
     char discord[40];
     char reason[300];
 } NetKpdApplyPacket;
+
+// NET_EXT_KPD_LIST (C -> S, v10 kpd.listDemos {off, q} / kpd.reviewers()): an officer's Demos (tab 4)
+// or Reviewers (tab 5) list. off: the page's first suspect group (0, then 10, 20 ... for Prev / Next);
+// q: the player name of the search (empty: all). The answer is NET_EXT_KPD_RESPONSE code 4 (demos,
+// data {rows, more}) or code 5 (reviewers, data {month, all}); a non-officer is refused (code 4 / 5).
+typedef struct {
+    uint8_t tab;   // 4 Demos, 5 Reviewers
+    int32_t off;   // the Demos page (suspect groups)
+    char q[24];    // the Demos search (player name), 0-terminated
+} NetKpdListPacket;
 
 // NET_EXT_KPD_RATE (C -> S, v10 "rkpd" [tagged]): the officer's verdict, 1 tagged (hacking: [Y] twice,
 // "Are you 100% sure?"), 0 not tagged ([N]). The server records it on the call (kn_brain kpd_rate:
