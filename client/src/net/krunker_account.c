@@ -78,7 +78,19 @@ static struct {
         void *user;
     } waiters[TOKEN_WAITERS];
     int waiter_count;
+    int resuming;      // a krunker_account_resume's refresh is in flight
 } A;
+
+static KrunkerAccountEventFn g_event_fn;
+static void *g_event_user;
+static void emit(const KrunkerAccountEvent ev) {
+    if (g_event_fn) g_event_fn(g_event_user, ev);
+}
+
+void krunker_account_listen_events(const KrunkerAccountEventFn fn, void *user) {
+    g_event_fn = fn;
+    g_event_user = user;
+}
 
 // krunker_account_api's requests (Req first: on_done gets the Req back)
 typedef struct {
@@ -409,6 +421,7 @@ static void fail_sign_in(const char *text) {
     A.state = A.access[0] || A.refresh[0] ? KRUNKER_ACCOUNT_SIGNED_IN : KRUNKER_ACCOUNT_GUEST;
     printf("[kio-account] sign-in failed: %s\n", text);
     set_message(1, "%s", text);
+    emit(KRUNKER_EV_SIGN_IN_FAILED);
 }
 
 static void signed_in(const char *access, const char *refresh) {
@@ -432,6 +445,7 @@ static void signed_in(const char *access, const char *refresh) {
     char url[512];
     api_url(url, sizeof(url), "/player/me");
     req_start(&A.auth, REQ_PROFILE, "GET", url, A.access, NULL);
+    emit(KRUNKER_EV_SIGNED_IN);
 }
 
 // The challenge loop's next step (iííìiïï): login_ok, a code, or a step for krunker.io itself.
@@ -472,6 +486,7 @@ static void on_auth_answer(const int status, cJSON *res) {
         snprintf(A.code_kind, sizeof(A.code_kind), "%s", !strcmp(type, "check_2fa") ? "2fa" : "email");
         A.state = KRUNKER_ACCOUNT_CODE;
         printf("[kio-account] krunker.io asks for a %s code\n", A.code_kind);
+        emit(KRUNKER_EV_CODE_ASKED);
         set_message(0, "%s", !strcmp(type, "check_2fa") ? I18N("kn.kio.account.ask2fa", "Enter the 6-digit code from your authenticator app.")
                                                         : I18N("kn.kio.account.askEmailCode", "Enter the code krunker.io sent to your email."));
         return;
@@ -516,17 +531,34 @@ static void on_profile(const int status, cJSON *res) {
 
 static void on_refresh(const int status, cJSON *res) {
     const char *access = json_str(res, "accessToken"), *refresh = json_str(res, "refreshToken");
+    const int resuming = A.resuming;
+    A.resuming = 0;
     if ((status == 200 || status == 201) && access && access[0] && strlen(access) <= TOKEN_MAX && (!refresh || strlen(refresh) <= TOKEN_MAX)) {
         snprintf(A.access, sizeof(A.access), "%s", access);
         if (refresh && refresh[0]) snprintf(A.refresh, sizeof(A.refresh), "%s", refresh);
         save();
-        printf("[kio-account] the krunker.io session was refreshed\n");
+        if (resuming) {
+            A.state = KRUNKER_ACCOUNT_SIGNED_IN;
+            printf("[kio-account] resumed the krunker.io account %s\n", A.name);
+        } else {
+            printf("[kio-account] the krunker.io session was refreshed\n");
+        }
         changed();
         serve_waiters(A.access);
+        emit(resuming ? KRUNKER_EV_RESUMED : KRUNKER_EV_REFRESHED);
+        return;
+    }
+    if (resuming && status != 401) { // unreachable / an odd answer: nothing is resumed
+        printf("[kio-account] resuming the krunker.io account failed (HTTP %d)\n", status);
+        forget();
+        set_message(1, "%s", I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
+        serve_waiters(NULL);
+        emit(KRUNKER_EV_RESUME_FAILED);
         return;
     }
     if (status == 401) { // FRVR's INVALID_CREDENTIALS: the refresh token is no good any more
         printf("[kio-account] the krunker.io session ended (refresh: HTTP %d): signed out\n", status);
+        emit(KRUNKER_EV_EXPIRED);
         forget();
         set_message(1, "%s", I18N("kn.kio.account.expired", "Your krunker.io session ended: sign in again. Joining krunker.io servers as a guest until then."));
         printf("[kio-account] %s\n", A.message); // logged only: the session end shows in the account header, not as a toast
@@ -781,6 +813,58 @@ int krunker_account_api(const char *method, const KrunkerService svc, const char
 
 // ---------------------------------------------------------------- the join's token
 
+// <auth>/refresh with the stored refresh token (FRVR's AUTH_REFRESH); 0 = not started
+static int start_refresh(void) {
+    char url[512], token[TOKEN_MAX + 8], body[TOKEN_MAX + 64];
+    auth_url(url, sizeof(url), "/refresh");
+    escape_json(token, sizeof(token), A.refresh);
+    snprintf(body, sizeof(body), "{\"refreshToken\":\"%s\"}", token);
+    const int ok = req_start(&A.refresh_req, REQ_REFRESH, "POST", url, NULL, body);
+    wipe(token, sizeof(token));
+    wipe(body, sizeof(body));
+    return ok;
+}
+
+int krunker_account_resume(const char *name, const char *refresh) {
+    load();
+    if (A.state == KRUNKER_ACCOUNT_BUSY) {
+        set_message(1, "%s", I18N("kn.kio.account.busy", "A sign-in is already running."));
+        return 0;
+    }
+    if (!name || !name[0] || strlen(name) >= sizeof(A.name) || !refresh || !refresh[0] || strlen(refresh) > TOKEN_MAX) return 0;
+    req_cancel(&A.auth);
+    if (A.refresh_req.kind == REQ_REFRESH) {
+        req_cancel(&A.refresh_req);
+        serve_waiters(NULL);
+    }
+    end_attempt();
+    wipe(A.access, sizeof(A.access));
+    snprintf(A.refresh, sizeof(A.refresh), "%s", refresh);
+    snprintf(A.name, sizeof(A.name), "%s", name);
+    A.level = 0;
+    A.rp_known = 0;
+    A.rp = 0;
+    A.resuming = 1;
+    A.state = KRUNKER_ACCOUNT_BUSY;
+    printf("[kio-account] resuming the krunker.io account %s\n", A.name);
+    changed();
+    if (!start_refresh()) {
+        A.resuming = 0;
+        forget();
+        emit(KRUNKER_EV_RESUME_FAILED);
+    }
+    return 1;
+}
+
+int krunker_account_refresh_token(char *out, const size_t n) {
+    load();
+    if (!out || !n) return 0;
+    out[0] = 0;
+    if (!A.refresh[0]) return 0;
+    snprintf(out, n, "%s", A.refresh);
+    return 1;
+}
+
 void krunker_account_fresh_token(const KrunkerAccountTokenFn fn, void *user) {
     load();
     if (!A.access[0] && !A.refresh[0]) {
@@ -800,14 +884,7 @@ void krunker_account_fresh_token(const KrunkerAccountTokenFn fn, void *user) {
     A.waiters[A.waiter_count].user = user;
     A.waiter_count++;
     if (A.refresh_req.kind == REQ_REFRESH) return; // one refresh serves every waiter
-    char url[512], token[TOKEN_MAX + 8], body[TOKEN_MAX + 64];
-    auth_url(url, sizeof(url), "/refresh");
-    escape_json(token, sizeof(token), A.refresh);
-    snprintf(body, sizeof(body), "{\"refreshToken\":\"%s\"}", token);
-    const int ok = req_start(&A.refresh_req, REQ_REFRESH, "POST", url, NULL, body);
-    wipe(token, sizeof(token));
-    wipe(body, sizeof(body));
-    if (!ok) serve_waiters(left > 5 ? A.access : NULL);
+    if (!start_refresh()) serve_waiters(left > 5 ? A.access : NULL);
 }
 
 // ---------------------------------------------------------------- state

@@ -244,7 +244,7 @@ static void render(void) {
     read_value("accName", name, sizeof(name));
     read_value("accEmail", mail, sizeof(mail));
     read_value("accPass", pass, sizeof(pass));
-    if (!name[0] && !mail[0] && !kio() && html_storage_get("krunker_username", name, sizeof(name)) < 0) name[0] = 0; // getSavedVal("krunker_username")
+    if (!name[0] && !mail[0] && !kio() && !account_saved_name(name, sizeof(name))) name[0] = 0; // getSavedVal("krunker_username"): the resumed account
     render_with(name, mail, pass);
     memset(pass, 0, sizeof(pass));
 }
@@ -289,7 +289,7 @@ static void open_modal(const int reg) {
     L.kio_gen = krunker_account_generation();
     L.backend = (int) account_backend();
     char saved[64] = ""; // _39221: Email first unless a username is saved (krunk.io's: never offered to krunker.io)
-    if (kio() || html_storage_get("krunker_username", saved, sizeof(saved)) < 0) saved[0] = 0;
+    if (kio() || !account_saved_name(saved, sizeof(saved))) saved[0] = 0;
     const char *t = saved;
     while (*t == ' ') t++;
     L.email = *t == 0;

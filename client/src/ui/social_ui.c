@@ -4031,7 +4031,7 @@ H(h_login_popup) {
     UNUSED;
     if (g_hub.logged_in) return 1;
     char saved[128] = "";
-    if (html_storage_get("krunker_username", saved, sizeof(saved)) < 0) saved[0] = 0;
+    if (!account_saved_name(saved, sizeof(saved))) saved[0] = 0;
     clear_pops();
     g_login.open = 1;
     g_login.msg[0] = 0;
@@ -6369,7 +6369,7 @@ static void hub_connected(void) {
     g_hub.connected = 1;
     char name[64] = "";
     // the saved session: the alt vault's (account_ui.c), not the plain krunker_token key, which a cipher build empties
-    if (g_hub.brain && html_storage_get("krunker_username", name, sizeof(name)) >= 0 && account_session_token()[0] && name[0]) {
+    if (g_hub.brain && account_saved_name(name, sizeof(name)) && account_session_token()[0] && name[0]) {
         if (active_account()) {
             // account_ui.c's restore already answered on this socket
             g_hub.fe = 1;

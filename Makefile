@@ -352,6 +352,9 @@ v10-market-e2e: build ## v10 Market & Trading from the v10 page: list, buy, quic
 native-auth-test: build ## Native client accounts e2e: register with email, verify, login, forgot password -> mailed code -> reset (local kn_brain + fake SMTP, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/native_auth_e2e.py $(DEBUG_DIR)
 
+account-manager-test: build ## Native client Account Manager e2e: register, Add with a typed login, switch with a stored session, refused session -> password, Remove, restart (local kn_brain + fake SMTP, headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/account_manager_e2e.py $(DEBUG_DIR)
+
 resize-early-test: build ## Window resizes during startup / stale resize events reach the viewport and HTML layout (private Xvfb + xfwm4 + xdotool)
 	timeout 600 $(PYTHON) -I client/tests/resize_early_e2e.py $(DEBUG_DIR)
 
@@ -389,7 +392,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
+.PHONY: mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test account-manager-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

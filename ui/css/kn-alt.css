@@ -1,6 +1,6 @@
-/* KrunkNative: the saved accounts window (client/src/ui/alt_manager_ui.c, ALT_MANAGER_WINDOW).
-   v10's own classes (joinBtn, accountInput) come from the page's CSS; this file only adds the
-   manager's rows, its badges and its warning / note boxes. Colours follow v10's dark menus. */
+/* KrunkNative: the Account Manager window (client/src/ui/alt_manager_ui.c, ALT_MANAGER_WINDOW).
+   v10's own classes (joinBtn, accountInput) come from the page's CSS; this file adds the list's grid and
+   the tags. Every row is the same grid, so the name, tag and action columns line up across the list. */
 .knAlt {
 	color: #fff;
 	text-align: left;
@@ -11,14 +11,7 @@
 .knAltTitle {
 	font-size: 24px;
 	font-weight: bold;
-	margin-bottom: 8px;
-}
-
-.knAltIntro {
-	color: rgba(255, 255, 255, 0.7);
-	font-size: 14px;
 	margin-bottom: 12px;
-	line-height: 1.4;
 }
 
 .knAltWarn {
@@ -28,21 +21,10 @@
 	padding: 10px 12px;
 	margin-bottom: 12px;
 	font-size: 14px;
-	line-height: 1.4;
-}
-
-.knAltNote {
-	background-color: rgba(255, 214, 0, 0.12);
-	border-radius: 6px;
-	padding: 8px 12px;
-	margin-bottom: 12px;
-	font-size: 13px;
-	color: rgba(255, 255, 255, 0.85);
-	line-height: 1.4;
 }
 
 .knAltList {
-	margin-bottom: 12px;
+	margin-bottom: 4px;
 }
 
 .knAltEmpty {
@@ -51,50 +33,62 @@
 	text-align: center;
 }
 
+/* name | tag | Use | Remove: one grid for every row */
 .knAltRow {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 96px 72px 84px;
+	column-gap: 8px;
+	align-items: center;
+	white-space: nowrap;
 	background-color: rgba(0, 0, 0, 0.35);
 	border-radius: 8px;
-	padding: 10px 12px;
-	margin-bottom: 8px;
-	overflow: hidden;
+	padding: 8px 12px;
+	margin-bottom: 6px;
 }
 
+/* an inset outline, not a border: the active row's frame does not move the columns */
 .knAltRow.knAltActive {
 	background-color: rgba(255, 214, 0, 0.14);
-	border: 1px solid rgba(255, 214, 0, 0.55);
-	padding: 9px 11px;
-}
-
-.knAltWho {
-	margin-bottom: 8px;
+	box-shadow: inset 0 0 0 1px rgba(255, 214, 0, 0.55);
 }
 
 .knAltName {
-	font-size: 18px;
+	min-width: 0;
+	font-size: 16px;
 	font-weight: bold;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
 }
 
-.knAltKind {
-	font-size: 13px;
-	color: rgba(255, 255, 255, 0.6);
-	margin-top: 2px;
+.knAltTag {
+	width: 84px;
+	box-sizing: border-box;
+	padding: 3px 0;
+	border-radius: 10px;
+	font-size: 12px;
+	text-align: center;
+	white-space: nowrap;
 }
 
-.knAltBtns {
-	text-align: right;
+.knAltTagKn {
+	background-color: rgba(90, 160, 255, 0.25);
+	color: #cfe4ff;
+}
+
+.knAltTagKio {
+	background-color: rgba(255, 140, 60, 0.25);
+	color: #ffdcc2;
 }
 
 .knAltBtn {
-	display: inline-block;
-	min-width: 84px;
-	text-align: center;
-	padding: 6px 12px;
+	box-sizing: border-box;
+	height: 30px;
+	line-height: 30px;
 	border-radius: 6px;
-	margin-left: 6px;
-	font-size: 15px;
+	font-size: 14px;
+	text-align: center;
+	white-space: nowrap;
 	cursor: pointer;
 	background-color: rgba(255, 255, 255, 0.12);
 	color: #fff;
@@ -104,13 +98,18 @@
 	background-color: rgba(255, 255, 255, 0.22);
 }
 
+.knAltUseBtn {
+	width: 100%;
+}
+
 .knAltBtn.knAltOn {
 	cursor: default;
-	background-color: rgba(255, 214, 0, 0.3);
+	opacity: 0.55;
+	background-color: rgba(255, 214, 0, 0.2);
 }
 
 .knAltBtn.knAltOn:hover {
-	background-color: rgba(255, 214, 0, 0.3);
+	background-color: rgba(255, 214, 0, 0.2);
 }
 
 .knAltBtn.knAltDanger {
@@ -121,22 +120,29 @@
 	background-color: rgba(255, 90, 90, 0.4);
 }
 
-.knAltWide {
-	display: block;
-	text-align: center;
-	margin: 10px 0 0 0;
-}
-
 .knAltAdd {
 	border-top: 1px solid rgba(255, 255, 255, 0.12);
 	margin-top: 14px;
 	padding-top: 12px;
 }
 
-.knAltAddTitle {
-	font-size: 16px;
-	font-weight: bold;
+.knAltChips {
 	margin-bottom: 8px;
+}
+
+.knAltChip {
+	display: inline-block;
+	margin-right: 8px;
+	padding: 5px 12px;
+	border-radius: 14px;
+	font-size: 14px;
+	cursor: pointer;
+	background-color: rgba(255, 255, 255, 0.1);
+}
+
+.knAltChip.knAltChipOn {
+	background-color: rgba(255, 214, 0, 0.3);
+	font-weight: bold;
 }
 
 .knAlt .accountInput {
@@ -144,6 +150,12 @@
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 0 8px 0;
+}
+
+.knAltWide {
+	display: block;
+	text-align: center;
+	margin: 10px 0 0 0;
 }
 
 .knAltMsg {

@@ -236,6 +236,7 @@ class Stub:
         self.ws_paths = []
         self.ws_frames = []
         self.rpc_logins = 0
+        self.refresh_ok = (REFRESH1, REFRESH2)  # refresh tokens the stub accepts (an account manager test refuses them)
         self.access1 = jwt({"exp": int(time.time()) + 30, "sub": str(ACCOUNT_ID)})  # within the 60 s refresh margin
         self.access2 = jwt({"exp": int(time.time()) + 3600, "sub": str(ACCOUNT_ID)})
         self.loop = None
@@ -320,7 +321,7 @@ class Stub:
                     else:
                         self.reply(200, {"data": None, "error": "Invalid 2FA code"})
                 elif path == "/frvr/v1/auth/refresh":
-                    if body.get("refreshToken") in (REFRESH1, REFRESH2):
+                    if body.get("refreshToken") in stub.refresh_ok:
                         self.reply(201, {"accessToken": stub.access2, "refreshToken": REFRESH2})
                     else:
                         self.reply(401, {"error": "invalid refresh token"})

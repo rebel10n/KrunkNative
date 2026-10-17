@@ -265,8 +265,8 @@ def checks(text, stub):
     check("1. the menu account box names the DEV account", DEV in text_of(text, "knname"), text_of(text, "knname"))
     check("1. the player list (Alt) names the DEV account and shows its dev actions (TPAll)",
           DEV in text_of(text, "knplistrows") and nodes(text, "knplistdev") >= 1, (text_of(text, "knplistrows")[:120], nodes(text, "knplistdev")))
-    check("1. the alt manager marks the DEV account active", DEV in text_of(text, "knaltname") and nodes(text, "knaltactive") == 1,
-          (text_of(text, "knaltname"), nodes(text, "knaltactive")))
+    check("1. the alt manager lists no account: a plain sign-in is not stored (only the Account Manager's Add lists one)",
+          nodes(text, "knaltactive") == 0 and not text_of(text, "knaltname"), (text_of(text, "knaltname"), nodes(text, "knaltactive")))
 
     check("2. joining the official game makes krunker.io the active backend", "[account] active account backend: krunker.io" in text,
           re.findall(r"\[account\] active.*", text)[:3])
@@ -323,7 +323,7 @@ def checks(text, stub):
           (nodes(text, "backout"), nodes(text, "backin")))
     check("4. ... naming the DEV account: the krunker.io session never signed it out", DEV in text_of(text, "backname"), text_of(text, "backname"))
     check("4. the krunk.io account stayed signed in throughout", "[account] logged out" not in text, re.findall(r"\[account\] logged.*", text)[:2])
-    check("4. the alt manager marks the DEV account active again", DEV in text_of(text, "baltname") and nodes(text, "baltactive") == 1,
+    check("4. the alt manager still lists no account for the DEV sign-in", nodes(text, "baltactive") == 0 and not text_of(text, "baltname"),
           (text_of(text, "baltname"), nodes(text, "baltactive")))
     check("4. the krunker.io session is kept too: the next official join carries its token",
           len(seeks) >= 2 and seeks[-1][2].get("accessToken") == stub.access2, [("accessToken" in x[2]) for x in seeks])

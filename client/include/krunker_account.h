@@ -96,6 +96,26 @@ int krunker_account_recover(const char *email);    // v10's recover card: recove
 int krunker_account_submit_code(const char *code); // KRUNKER_ACCOUNT_CODE: the code asked for
 void krunker_account_cancel(void);                // a running sign-in / code step ends (guest)
 void krunker_account_sign_out(void);
+// Resume a krunker.io account from its stored refresh token (the Account Manager's Use): the token is
+// refreshed at once (FRVR's refresh, as a join does); the outcome comes as KRUNKER_EV_RESUMED or
+// KRUNKER_EV_EXPIRED / KRUNKER_EV_RESUME_FAILED. 0 = refused at once (a sign-in running, no token).
+int krunker_account_resume(const char *name, const char *refresh);
+// The refresh token of the signed-in account (copied; it is a session secret: never logged, never shown).
+// 1 = out filled, 0 = not signed in.
+int krunker_account_refresh_token(char *out, size_t n);
+// The account's sign-in and session events, for one listener (the Account Manager, alt_manager_ui.c). Called
+// on the main thread. EXPIRED / RESUME_FAILED come before the account is forgotten (its name still reads).
+typedef enum {
+    KRUNKER_EV_SIGNED_IN,      // a sign-in succeeded (krunker_account_name())
+    KRUNKER_EV_SIGN_IN_FAILED, // a sign-in failed (krunker_account_message says why)
+    KRUNKER_EV_RESUMED,        // krunker_account_resume succeeded
+    KRUNKER_EV_RESUME_FAILED,  // krunker_account_resume failed (unreachable / odd answer)
+    KRUNKER_EV_EXPIRED,        // the session ended at the refresh (401): forgotten
+    KRUNKER_EV_REFRESHED,      // the access token was refreshed (the refresh token may have rotated)
+    KRUNKER_EV_CODE_ASKED,     // the sign-in asks for a code (krunker_account_code_kind): krunker_account_submit_code
+} KrunkerAccountEvent;
+typedef void (*KrunkerAccountEventFn)(void *user, KrunkerAccountEvent ev);
+void krunker_account_listen_events(KrunkerAccountEventFn fn, void *user); // one listener (NULL = none)
 
 // The access token for a krunker.io join, fresh (refreshed first when it is about to expire):
 // fn(user, token) once, on the main thread (maybe before this returns); token NULL = join as a

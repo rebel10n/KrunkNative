@@ -55,6 +55,7 @@
 #include <modes.h>
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
+#include <alt_manager_ui.h> // state.altAccounts: the Account Manager's stand-in rows
 #include <app_mode.h> // state.page: hub / editor / viewer pages
 #include <flavor.h> // top-level "flavor": the Krunker Strike page (strike_ui.c)
 #include <strike_ui.h> // state.strike
@@ -317,6 +318,7 @@ static void warn_unknown_keys(void) {
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "altAccounts", // the Account Manager's rows [{name, backend: "krunk.io" | "krunker.io", active}] (alt_manager_ui.c)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
         "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
@@ -1161,6 +1163,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("krunkerLobbies")) krunker_lobbies_set_fixed(st("krunkerLobbies"));
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts
     kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)

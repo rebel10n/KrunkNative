@@ -25,4 +25,9 @@ int alt_store_kn_session(char *name, size_t namecap, char *token, size_t tokenca
 int alt_store_kn_save(const char *username, const char *token);
 // Signs out: the active pointer clears, the saved profile stays. 0 ok (or nothing to clear).
 int alt_store_kn_sign_out(void);
+// The KrunkNative profile with this login name is listed (1) or not (0; 0 when not ready).
+int alt_store_kn_listed(const char *username);
+// Forgets the session of the listed profile with this name: its token is wiped, the profile stays
+// listed (it asks for its password next time) and signed out. 0 ok or not listed, -1 failure.
+int alt_store_kn_forget(const char *username);
 void alt_store_close(void); // wipes the vault and the key from memory

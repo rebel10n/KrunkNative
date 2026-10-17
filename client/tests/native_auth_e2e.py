@@ -122,10 +122,11 @@ def scenario(brain_url, game_port, smtp, db):
     check("register through the native form", f"[account] logged in as {NAME}" in log)
     row = sqlite3.connect(db).execute("SELECT email FROM accounts WHERE username = ?", (NAME,)).fetchone()
     check("Tab put the username and the password in their own fields", row and row[0] == ADDR, repr(row))
-    # the session lives in the alt vault (client/src/alt/, c7f73bd4), never in the plain krunker_token key;
-    # the next run signing in (Account Security below) shows it was kept
+    # a sign-in is not stored: only an Account Manager Add lists an account (its sealed vault, client/src/alt/);
+    # the next run starts as a guest, so each run below signs in by typing the credentials
     check("the session token is not left in plain storage (krunker_token)", not storage("krunker_token"),
           repr((storage("krunker_token") or "")[:8]))
+    check("a plain sign-in stores no account (no alt vault)", not os.path.exists(os.path.join(WORK, "cfg", "krunknative", "alt", "vault.bin")))
     mails = smtp.wait_messages(1, 20)
     check("verification mail captured", len(mails) == 1 and mails[0]["rcpt"] == [ADDR])
     _, text = mail_text(mails[0]) if mails else (None, "")
@@ -133,11 +134,16 @@ def scenario(brain_url, game_port, smtp, db):
     check("the mail links to this brain", link and link.group(1).startswith(brain_url))
 
     # 2. Account Security shows the address unverified; the link verifies it
-    log = run_client("security", f"""0 menu
-2000 call showWindow 5
-2500 clicksel [onclick*="switchTab(3)"]
-3500 vis @sec accEmailNew emailRes
-3600 quit
+    log = run_client("security", OPEN + BY_NAME + f"""1000 clickid accName
+1100 type {NAME}
+1200 clickid accPass
+1300 type pass_word1
+1400 down ENTER
+1410 up ENTER
+5000 call showWindow 5
+5500 clicksel [onclick*="switchTab(3)"]
+6500 vis @sec accEmailNew emailRes
+6600 quit
 """, brain_url, game_port)
     check("Account Security has the email block", vis(log, "sec").get("accEmailNew") == "1", str(vis(log, "sec")))
     with urllib.request.urlopen(link.group(1) if link else brain_url, timeout=10) as r:
@@ -149,7 +155,6 @@ def scenario(brain_url, game_port, smtp, db):
     # 3. logout, then login with Enter from the password field
     log = run_client("relogin", f"""0 menu
 1500 call showWindow 5
-2000 call logoutAcc
 2400 clickid knV10LoginMode
 2600 clickid accName
 2700 type {NAME}
@@ -157,10 +162,18 @@ def scenario(brain_url, game_port, smtp, db):
 2900 type pass_word1
 3000 down ENTER
 3010 up ENTER
-6000 quit
+5000 call logoutAcc
+6000 clickid knV10LoginMode
+6200 clickid accName
+6300 type {NAME}
+6400 clickid accPass
+6500 type pass_word1
+6600 down ENTER
+6610 up ENTER
+9000 quit
 """, brain_url, game_port)
     check("logout", "[account] logged out" in log)
-    check("Enter in the password field logs in", log.count(f"[account] logged in as {NAME}") >= 2, "restore + login expected")
+    check("Enter in the password field logs in", log.count(f"[account] logged in as {NAME}") >= 2, "sign-in, logout, sign-in expected")
 
     # 4. forgot password: logout (the popup comes up), Forgot password? -> the recover card's email ->
     #    the reset steps in window 5's (empty, v10) frame at the code step -> new password -> signed in
@@ -229,7 +242,7 @@ def scenario(brain_url, game_port, smtp, db):
 3000 clickid knV10LoginSubmit
 6000 quit
 """, brain_url, game_port)
-    check("login with the new password", log.count(f"[account] logged in as {NAME}") >= 2)
+    check("login with the new password", log.count(f"[account] logged in as {NAME}") >= 1)
     ok = sqlite3.connect(db).execute("SELECT count(*) FROM email_tokens WHERE kind = 'reset' AND used_at IS NULL").fetchone()
     check("the reset code is used up", ok and ok[0] == 0, repr(ok))
 
@@ -237,8 +250,8 @@ def scenario(brain_url, game_port, smtp, db):
 def down_scenario(game_port):
     """The login while the account server is down: the reason, not v3.1.1's "Please try again."."""
     (dead,) = free_ports(1)
-    # the username saved by the last login: the popup opens on its Username card
-    log = run_client("down", OPEN + """1200 clickid accName
+    # the login card by username (a guest keeps no saved name: the popup opens on Email)
+    log = run_client("down", OPEN + BY_NAME + """1200 clickid accName
 1300 type someone
 1400 clickid accPass
 1500 type some_pass

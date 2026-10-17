@@ -10,12 +10,14 @@
 // ["a", error, id, username, data, token]). The game server learns the account from
 // the session token / seek ticket in NET_PACKET_JOIN (client/src/net/net.c).
 //
-// Storage keys are v3.1.1's (krunker_id, krunker_username, krunker_token); the
-// social hub (social_ui.c) reads the same ones.
+// The session is not kept in the game's storage: a listed account's session lives in the alt vault
+// (client/src/alt/, the Account Manager). The v3.1.1 keys (krunker_id, krunker_username, krunker_token)
+// are only read once, to move an older build's session into the list (load_session).
 #include <v10_menu.h> // the v10 page's header bar (v10_menu.c)
 #include <backend.h>
 #include <backend_ui.h>
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
+#include <alt_manager_ui.h> // the Account Manager's answers to its Add / switch requests
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -62,6 +64,12 @@ static int g_restore_sent;       // a token restore is in flight
 static int g_tab_index;          // windows[4].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
+static char g_session_user[ALT_LABEL_MAX]; // the login name g_token belongs to ("" = no session)
+// The Account Manager's request in flight (alt_manager_ui.c): Add lists the account once it signs in,
+// a switch resumes a listed one and reports when its saved session is refused.
+enum { AM_NONE, AM_ADD, AM_SWITCH };
+static int g_am_request;
+static char g_am_name[ALT_LABEL_MAX];
 static char g_guest_name[32];    // client->menu_name before the account took it over
 static int g_reward_played;      // dc: a match ended this session (canClaimReward)
 static char g_reward_text[16];   // d8: last #claimTimer text
@@ -668,77 +676,58 @@ static void send_account_request(const int action, const char *name, const char 
     send_account_request_email(action, name, pass, third, NULL);
 }
 
-// KrunkNative session storage (client/src/alt/alt_store.c). Where the build has a cipher the session
-// token lives only in the alt vault: the plain krunker_token key is emptied, and a sign-in whose vault
-// cannot be written lasts this session only, never as plain text. Builds without a cipher keep the
-// v3.1.1 key as before.
-static void save_session(const char *username, const char *token) {
-    if (alt_crypto_available()) {
-        if (token && token[0] && username && username[0]) alt_store_kn_save(username, token);
-        html_storage_set("krunker_token", "");
-        return;
-    }
-#ifdef __EMSCRIPTEN__
-    // the web without a vault (no SubtleCrypto: an insecure origin) keeps the token in memory for this
-    // page load only; plain browser storage never holds it
-    html_storage_set("krunker_token", "");
-#else
-    html_storage_set("krunker_token", token ? token : "");
-#endif
+// The session is kept in memory (g_token, g_session_user) and stored only for an account the Account
+// Manager lists (the sealed alt vault, client/src/alt/): the game keeps no login name or token of its
+// own. A sign-in refreshes a listed account's stored token and makes it the one resumed at start; any
+// other sign-in stores nothing and clears that resume pointer. add: the Account Manager's Add, which
+// lists the account. Returns 0 (stored, or nothing to store), -1 when the vault could not be written.
+static int persist_session(const char *username, const char *token, const int add) {
+    if (!username || !username[0] || !token || !token[0]) return 0;
+    if (add || alt_store_kn_listed(username)) return alt_store_kn_save(username, token);
+    return alt_store_kn_sign_out();
 }
 
-// A saved session the server refused, or a switch that failed: nothing restores it from storage again.
+static void set_session(const char *username, const char *token) {
+    copy_str(g_session_user, sizeof(g_session_user), username ? username : "");
+    copy_str(g_token, sizeof(g_token), token ? token : "");
+}
+
+static void clear_session(void) {
+    g_session_user[0] = 0;
+    g_token[0] = 0;
+}
+
+// A saved session the server refused: its token is forgotten, the account stays listed and asks for
+// its password next time.
 static void forget_saved_session(void) {
-    html_storage_set("krunker_token", "");
-    alt_store_kn_sign_out();
-    g_token[0] = 0;
+    alt_store_kn_forget(g_session_user);
+    clear_session();
 }
 
-// Startup: the vault's active session becomes g_token. A plain token (an older build's, or one written
-// into the storage directory since) moves into the vault and wins: every save here empties the plain
-// key, so a plain token is always newer than the vault's session. A vault that exists but cannot be
-// opened yields no sign-in.
+// Startup: the vault's active listed account becomes the session. The plain keys of older builds
+// (krunker_token, krunker_username, krunker_id) are read once: a session they hold moves into the
+// list when the vault can be written, and the keys are removed either way, so the game keeps no
+// session of its own.
 static void load_session(void) {
-    g_token[0] = 0;
-    if (!alt_crypto_available()) {
-#ifdef __EMSCRIPTEN__
-        html_storage_set("krunker_token", ""); // a plain token from an older build is removed, never read
-#else
-        storage_get("krunker_token", g_token, sizeof(g_token));
-#endif
-        return;
-    }
-    if (!alt_store_ready()) {
-#ifdef __EMSCRIPTEN__
-        html_storage_set("krunker_token", ""); // the vault did not open: no plain copy stays in browser storage
-#endif
-        return;
-    }
-    char legacy[sizeof(g_token)], user[64];
+    clear_session();
+    char legacy[sizeof(g_token)], user[sizeof(g_session_user)];
     storage_get("krunker_token", legacy, sizeof(legacy));
     storage_get("krunker_username", user, sizeof(user));
-    const int moved = legacy[0] && user[0] && alt_store_kn_save(user, legacy) == 0;
-    if (moved) {
-        copy_str(g_token, sizeof(g_token), legacy);
-        html_storage_set("krunker_token", "");
-    }
+    if (legacy[0] && user[0] && alt_store_ready()) alt_store_kn_save(user, legacy);
     alt_wipe(legacy, sizeof(legacy));
-    if (moved) return;
-    char name[64];
-    if (alt_store_kn_session(name, sizeof(name), g_token, sizeof(g_token)) == 1) {
-        // the restore sends krunker_username with the token: they must name the same account
-        html_storage_set("krunker_username", name);
-    }
-#ifdef __EMSCRIPTEN__
-    html_storage_set("krunker_token", ""); // a plain copy the vault could not take never stays in browser storage
-#endif
+    html_storage_set("krunker_token", NULL);
+    html_storage_set("krunker_username", NULL);
+    html_storage_set("krunker_id", NULL);
+    char name[sizeof(g_session_user)], token[sizeof(g_token)];
+    if (alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1) set_session(name, token);
+    alt_wipe(token, sizeof(token));
 }
 
-// readyLoad(): the saved session (krunker_username + g_token) -> sendAccountRequest(1, [name, null, token])
+// readyLoad(): the session (g_session_user + g_token) -> sendAccountRequest(1, [name, null, token])
 static void try_restore(void) {
     if (g_restore_sent || !backend_enabled()) return;
-    char name[64], token[sizeof(g_token)];
-    storage_get("krunker_username", name, sizeof(name));
+    char name[sizeof(g_session_user)], token[sizeof(g_token)];
+    copy_str(name, sizeof(name), g_session_user);
     copy_str(token, sizeof(token), g_token);
     if (!name[0] || !token[0]) {
         alt_wipe(token, sizeof(token));
@@ -851,20 +840,26 @@ static void set_stat(const char *key, const double value) {
 static void account_response(const cJSON *frame) {
     const cJSON *err = cJSON_GetArrayItem(frame, 1);
     const int was_restore = g_restore_sent;
+    const int am = g_am_request;
+    g_am_request = AM_NONE;
     g_restore_sent = 0;
     g_auth_sent_at = 0;
     if (cJSON_IsString(err) && err->valuestring[0]) {
         show_acc_resp(err->valuestring);
         if (was_restore && !g_logged_in) {
-            // a stale saved token: v3.1.1 keeps the values, but nothing would ever log in
-            // with them again; drop the token so the next start does not retry it
+            // a stale saved token: nothing would ever log in with it again, so it is forgotten
+            // (the account stays listed and asks for its password)
             forget_saved_session();
         }
+        if (am) alt_manager_ui_sign_in_done(was_restore ? ALT_SIGN_IN_EXPIRED : ALT_SIGN_IN_REFUSED, g_am_name, err->valuestring);
         return;
     }
     const cJSON *id = cJSON_GetArrayItem(frame, 2);
     const char *username = str_at(frame, 3);
-    if (!cJSON_IsNumber(id) || !username) return;
+    if (!cJSON_IsNumber(id) || !username) {
+        if (am) alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, NULL);
+        return;
+    }
 
     const int had = g_logged_in;
     clear_account();
@@ -881,15 +876,11 @@ static void account_response(const cJSON *frame) {
         set_dxp(info);
     }
 
-    char idtext[24];
-    snprintf(idtext, sizeof(idtext), "%d", g_acc.id);
-    html_storage_set("krunker_id", idtext);
-    html_storage_set("krunker_username", username);
     const char *token = str_at(frame, 5);
-    if (token && token[0]) {
-        copy_str(g_token, sizeof(g_token), token);
-        save_session(username, token);
-    }
+    const int have_token = token && token[0];
+    if (have_token) set_session(username, token);
+    const int stored = have_token ? persist_session(username, token, am == AM_ADD) : -1;
+    if (am) alt_manager_ui_sign_in_done(stored == 0 ? ALT_SIGN_IN_OK : ALT_SIGN_IN_UNSAVED, username, NULL);
     apply_menu_name();
     mark_header();
     show_acc_resp(NULL);
@@ -905,11 +896,8 @@ static void account_response(const cJSON *frame) {
 static void end_session(void) {
     send_account_request(-1, NULL, NULL, NULL);
     show_acc_resp(NULL);
-    html_storage_set("krunker_id", "");
-    html_storage_set("krunker_username", "");
-    html_storage_set("krunker_token", "");
-    alt_store_kn_sign_out();
-    g_token[0] = 0;
+    alt_store_kn_sign_out(); // the listed account stays listed, it is just not the one resumed at start
+    clear_session();
     g_tab_index = 0;
     g_logout_sessions = 0;
     clear_account();
@@ -931,11 +919,45 @@ static void logout(void) {
 int account_ui_use_session(const char *username, const char *token) {
     if (!username || !username[0] || !token || !token[0] || !backend_enabled()) return -1;
     if (g_logged_in) end_session();
-    html_storage_set("krunker_username", username);
-    copy_str(g_token, sizeof(g_token), token);
+    set_session(username, token);
+    g_am_request = AM_SWITCH;
+    copy_str(g_am_name, sizeof(g_am_name), username);
+    g_auth_sent_at = glfwGetTime(); // a switch that never answers says so (auth_unreachable)
     g_restore_sent = 0;
-    try_restore(); // the result (a token refresh included) comes back as "a" and is saved by save_session
+    try_restore(); // the answer ("a", a token refresh included) comes back to account_response
     return 0;
+}
+
+// The Account Manager's Remove: the removed account is signed out first when it is the one signed in.
+int account_ui_sign_out_of(const char *username) {
+    if (!g_logged_in || !username || strcmp(g_acc.name, username)) return 0;
+    end_session();
+    printf("[account] logged out\n");
+    menu_update_class_box();
+    return 1;
+}
+
+// The Account Manager's Add: the typed login name and password sign in through the login's own request
+// (loginAcc: sendAccountRequest(1, [name, pass, null])); account_response lists the account when the
+// server accepts them. 0 started, -1 no account server to ask (the window says so).
+int account_ui_add_sign_in(const char *name, const char *pass) {
+    if (!name || !name[0] || !pass || !pass[0] || !backend_enabled() || backend_available() == 0) return -1;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return -1;
+    g_am_request = AM_ADD;
+    copy_str(g_am_name, sizeof(g_am_name), name);
+    send_account_request(1, name, pass, NULL);
+    g_auth_sent_at = glfwGetTime();
+    return 0;
+}
+
+// The saved account the client resumes at start (the listed, active one with its session): 1 and its
+// login name, 0 none. The login card and the hub read this instead of a stored login name.
+int account_saved_name(char *out, const size_t n) {
+    char token[sizeof(g_token)];
+    const int found = alt_store_kn_session(out, n, token, sizeof(token));
+    alt_wipe(token, sizeof(token));
+    if (!found && n) out[0] = 0;
+    return found;
 }
 
 // The menu's Logout (logoutAcc) and the developer console's `logout` (ui_console.c): 1 when an
@@ -1078,8 +1100,8 @@ static void on_social(void *user, const cJSON *frame) {
     } else if (!strcmp(label, "upp")) { // changePasswordResponse(msg, newToken)
         const char *token = str_at(frame, 2);
         if (token && token[0]) {
-            copy_str(g_token, sizeof(g_token), token);
-            save_session(g_acc.name, token);
+            set_session(g_acc.name, token);
+            persist_session(g_acc.name, token, 0); // a listed account keeps its new session
             apply_menu_name();
         }
         HtmlElem res = html_dom_by_id("newPRes");
@@ -1094,6 +1116,7 @@ void account_ui_init(Client *client) {
     g_client = client;
     backend_set_brain_gate(brain_gated);
     alt_store_open(NULL); // the vault, if the player has one (no key is read without a vault file)
+    alt_manager_ui_init();                     // the krunker.io accounts' events (the Account Manager's rows)
     krunker_net_account_listen(kio_frame);     // the krunker.io account's data (official games)
     backend_social_set_held_sender(kio_held_send);
     load_session();
@@ -1617,6 +1640,10 @@ static void auth_unreachable(void) {
     }
     show_acc_resp(msg);
     g_auth_sent_at = 0;
+    if (g_am_request) { // the Account Manager's request never answered
+        g_am_request = AM_NONE;
+        alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, msg);
+    }
 }
 
 // ---- KrunkNative password reset (the login popup's recover card, v10_login.c recover())
@@ -1794,9 +1821,8 @@ static int reset_frame(const char *label, const cJSON *frame) {
         const char *user = str_at(frame, 3), *token = str_at(frame, 4);
         memset(&g_reset, 0, sizeof(g_reset));
         if (user && user[0] && token && token[0]) {
-            html_storage_set("krunker_username", user);
-            copy_str(g_token, sizeof(g_token), token);
-            save_session(user, token);
+            set_session(user, token);
+            persist_session(user, token, 0);
             g_restore_sent = 0;
             try_restore();
         }

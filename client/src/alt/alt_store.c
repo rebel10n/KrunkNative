@@ -124,10 +124,30 @@ int alt_store_save(void) {
     return 0;
 }
 
+static const AltProfile *kn_profile_named(const char *username) {
+    if (!g_ready || !username || !*username) return NULL;
+    for (int i = 0; i < g_vault.count; i++) {
+        const AltProfile *p = &g_vault.profiles[i];
+        if (p->kind == ALT_KIND_KN && !strcmp(p->label, username)) return p;
+    }
+    return NULL;
+}
+
+int alt_store_kn_listed(const char *username) { return kn_profile_named(username) != NULL; }
+
+int alt_store_kn_forget(const char *username) {
+    const AltProfile *p = kn_profile_named(username);
+    if (!p) return 0;
+    char id[ALT_ID_LEN];
+    snprintf(id, sizeof(id), "%s", p->id);
+    alt_vault_clear_secret(&g_vault, id);
+    return alt_store_save();
+}
+
 int alt_store_kn_session(char *name, const size_t namecap, char *token, const size_t tokencap) {
     if (!g_ready || !name || !token || !namecap || !tokencap) return 0;
     const AltProfile *p = alt_vault_active(&g_vault, ALT_KIND_KN);
-    if (!p) return 0;
+    if (!p || !p->secret[0]) return 0; // a listed account whose session was forgotten has no token to resume
     snprintf(name, namecap, "%s", p->label);
     snprintf(token, tokencap, "%s", p->secret);
     return 1;

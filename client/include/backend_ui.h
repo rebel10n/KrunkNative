@@ -66,6 +66,12 @@ int  account_ui_logout(void);               // logoutAcc (menu Logout, console `
 // The alt manager's switch: sign out of the current account, then sign in with a saved session.
 // 0 started, -1 no account server in this build.
 int  account_ui_use_session(const char *username, const char *token);
+// The Account Manager (alt_manager_ui.c, Box Office accounts): Add signs in with typed credentials
+// (0 started, -1 no account server or no Box Office account here), Remove signs out when the removed
+// account is the one signed in (1 signed out), and the resumed account's login name (1 found, 0 none).
+int  account_ui_add_sign_in(const char *username, const char *pass);
+int  account_ui_sign_out_of(const char *username);
+int  account_saved_name(char *out, size_t n);
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
 void account_send_frame(const char *label);  // one no-argument social frame ("ttl": the account's titles)
 int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

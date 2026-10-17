@@ -30,7 +30,7 @@
 typedef enum {
     ALT_KIND_NONE = 0,
     ALT_KIND_KN = 1,      // a KrunkNative account: the secret is its session token
-    ALT_KIND_KRUNKER = 2, // a krunker.io account: the secret is the session credential pasted from the site
+    ALT_KIND_KRUNKER = 2, // a krunker.io account: the secret is its refresh token (krunker_account.h)
 } AltKind;
 
 typedef struct {
@@ -59,6 +59,9 @@ int alt_vault_find(const AltVault *v, const char *id);                // index, 
 int alt_vault_put(AltVault *v, int kind, const char *label, const char *secret, int64_t now_ms, char *out_id);
 // Removes a profile; an active pointer that named it is cleared. 0 ok, -1 not found.
 int alt_vault_remove(AltVault *v, const char *id);
+// Wipes a profile's secret (its session) and keeps the profile listed: the account asks for its
+// password at the next use. An active pointer that named it is cleared. 0 ok, -1 not found.
+int alt_vault_clear_secret(AltVault *v, const char *id);
 // Makes a profile the active one for its kind (a KN profile is the signed-in account, a krunker.io
 // profile the chosen one). 0 ok, -1 not found.
 int alt_vault_switch(AltVault *v, const char *id);

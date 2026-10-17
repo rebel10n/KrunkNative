@@ -409,6 +409,23 @@ static void test_store(const char *dir) {
     CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 0, "still signed out after a restart");
     CHECK(alt_store_vault() && alt_store_vault()->count == 1, "the profile is kept after signing out");
 
+    // a listed account whose session is forgotten stays listed, signed out and without its token, and
+    // the token is not resumed after a restart (the Account Manager asks for the password then)
+    CHECK(alt_store_kn_listed("alice") == 1 && alt_store_kn_listed("bob") == 0, "listed: alice yes, bob no");
+    CHECK(alt_store_kn_save("alice", "tokA-store-444") == 0, "alice's session stored again");
+    CHECK(alt_store_kn_forget("alice") == 0, "forget alice's session");
+    CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 0, "a forgotten session is not resumed");
+    CHECK(alt_store_kn_listed("alice") == 1, "a forgotten account stays listed");
+    alt_store_close();
+    CHECK(alt_store_open(dir) == 0, "reopen after forgetting");
+    CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 0, "still nothing resumed after a restart");
+    CHECK(alt_store_vault() && alt_store_vault()->count == 1 && alt_store_vault()->profiles[0].secret[0] == 0,
+          "the forgotten token is gone from the vault");
+    uint8_t *raw2 = read_all(vault_path, &n);
+    CHECK(raw2 && !contains(raw2, n, "tokA-store-444"), "no token in the vault file after forgetting");
+    free(raw2);
+    CHECK(alt_store_kn_forget("nobody") == 0, "forgetting an unlisted name is fine");
+
     // a vault whose key is gone is refused, and nothing is replaced
     char keypath[700];
     join(keypath, sizeof(keypath), dir, "alt/master.key");

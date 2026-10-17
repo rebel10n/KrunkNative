@@ -91,6 +91,15 @@ int alt_vault_remove(AltVault *v, const char *id) {
     return 0;
 }
 
+int alt_vault_clear_secret(AltVault *v, const char *id) {
+    const int i = alt_vault_find(v, id);
+    if (i < 0) return -1;
+    alt_wipe(v->profiles[i].secret, sizeof(v->profiles[i].secret));
+    if (!strcmp(v->active_kn, id)) v->active_kn[0] = 0;
+    if (!strcmp(v->active_krunker, id)) v->active_krunker[0] = 0;
+    return 0;
+}
+
 int alt_vault_switch(AltVault *v, const char *id) {
     const int i = alt_vault_find(v, id);
     if (i < 0) return -1;

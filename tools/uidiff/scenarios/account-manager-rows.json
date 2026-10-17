@@ -1,0 +1,22 @@
+{
+  "size": [1280, 720],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 104,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "altAccounts": [
+      { "name": "alice_kn", "backend": "krunk.io", "active": true },
+      { "name": "bob_krunker_with_a_longer_name", "backend": "krunker.io", "active": false }
+    ]
+  }
+}
