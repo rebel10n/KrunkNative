@@ -696,6 +696,7 @@ void strike_ui_menu_open(Client *client, const int open) {
         // Yh(true): the game; the screens go, RA() completes a loading screen
         strike_screen_clear();
         strike_loading_complete();
+        strike_hud_end_restore(); // a round end still up stays on the game view (FRVR keeps it on its stack)
     }
 }
 

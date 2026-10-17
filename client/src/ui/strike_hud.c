@@ -78,7 +78,7 @@ static struct {
     // last rendered values (Mithril's diff)
     char last_score[160], last_health[64], last_timer[64], last_reload[32], last_desk[128], last_hint[96];
     int last_card;              // card_key() when the kill card / its Spectate button was drawn
-    int end_shown;
+    int end_shown, end_result;  // the round end is up this round (and its result: strike_hud_end)
     int rendered_spec;          // spectate_active() when the HUD was drawn (the panel replaces the health and reload)
     char *lean_head, *lean_main; // the last header / rewards markup of LEAN_END_SCREEN (NULL: none yet)
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
@@ -855,10 +855,12 @@ static void lean_forget(void) {
 void strike_hud_end(Client *client, const int result) {
     if (!strike_ui_active()) return;
     H.client = client;
-    // the end timer's packets repeat this every second: the round end is up already (with the
-    // screens pushed over it, MATCH_DETAILS_SCREEN), so only its values follow
-    if (H.end_shown && strike_screen_shown(STRIKE_SCREEN_LEAN_END)) {
-        end_fill(client, result);
+    // FRVR's endGame pushes LEAN_END_SCREEN once (nu(Ad, ...)); its end timer only updates the
+    // screen's values (endTimer). The end timer's packets repeat this every second, so once this round
+    // end was shown, a screen the player left (Home, Settings over the menu) stays left: only the
+    // values of a round end that is still on the stack follow (MATCH_DETAILS_SCREEN pushed over it).
+    if (H.end_shown) {
+        if (strike_screen_shown(STRIKE_SCREEN_LEAN_END)) end_fill(client, result);
         return;
     }
     H.kill_card = 0;
@@ -867,6 +869,7 @@ void strike_hud_end(Client *client, const int result) {
     strike_screen_replace(STRIKE_SCREEN_LEAN_END); // nu(Ad, ...)
     end_fill(client, result);
     H.end_shown = 1;
+    H.end_result = result;
     printf("[strike] end screen (%s)\n", result > 0 ? "victory" : result == 0 ? "defeat" : "draw");
 }
 
@@ -879,6 +882,15 @@ void strike_hud_end_hide(Client *client) {
 }
 
 int strike_hud_end_up(void) { return H.end_shown; }
+
+// The menu closed over a round end that is still on (strike_ui_menu_open(0) cleared the screens): the
+// round end comes back over the game view, as FRVR's end screen stays on its back stack.
+void strike_hud_end_restore(void) {
+    if (!H.end_shown || !H.client || strike_screen_shown(STRIKE_SCREEN_LEAN_END)) return;
+    lean_forget();
+    strike_screen_push(STRIKE_SCREEN_LEAN_END);
+    end_fill(H.client, H.end_result);
+}
 
 // ---------------------------------------------------------------- game events
 

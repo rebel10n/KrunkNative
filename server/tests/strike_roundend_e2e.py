@@ -15,6 +15,10 @@ VICTORY / DEFEAT / DRAW), the level and XP bar (strike_econ's account), the KR t
   3. a live offline Strike client (--flavor strike --offline, an input script): after `bot 2` + `end`
      the lean screen's title, the bar's text (a guest: Level 1, 0 / 100), the next level reward card,
      the timer's MM:SS (ticking), and no sample numbers (no "Level 12", "100 / 400", "350 XP", Claim).
+  4. the round end's Settings (Home -> MAIN_MENU -> Settings): Settings stays up while the end timer
+     packets come in (they only update the lean screen's values, FRVR's endTimer; they never push the
+     round end again), and closing it (Back) lands on the menu, since the round is over. Escape from
+     the menu over the round end keeps the round end up (the game view never shows with it gone).
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Prints PASS/FAIL lines; exit 0 only when all
 passed.
@@ -156,12 +160,88 @@ def live_case():
     check("3: the round end's screenshot", png_size(os.path.join(WORK, "round-end_0000.png")) == (1280, 720))
 
 
+# ---------------------------------------------------------------- 4. Settings over the round end
+
+SETTINGS_SCRIPT = """menu
+1500 nodes @page #frvrMenuMobile
+4000 con bot 2
+4500 con end
+24000 nodes @lean-up .lean-end-screen__header
+24200 clicksel .frvr-button-home
+24700 nodes @menu-home .frvr-main-menu--top-right
+24900 clickid mobMenuSett
+25100 nodes @settings-open .frvr-settings-screen
+27500 nodes @settings-later .frvr-settings-screen
+27500 nodes @lean-later .lean-end-screen__header
+27700 clicksel .frvr-button-back
+27900 nodes @settings-closed .frvr-settings-screen
+27900 nodes @menu-back .frvr-main-menu--top-right
+27900 nodes @lean-closed .lean-end-screen__header
+28100 quit
+"""
+
+# Escape over a round end: the menu closes (Krunker's pressButton(27) ends the menu), the round end
+# stays up on the game view, and it is still up after the end timer's packets.
+ESCAPE_SCRIPT = """menu
+1500 nodes @page #frvrMenuMobile
+4000 con bot 2
+4500 con end
+24000 nodes @lean-up .lean-end-screen__header
+24200 clicksel .frvr-button-home
+24700 nodes @menu-home .frvr-main-menu--top-right
+24900 down ESC
+24950 up ESC
+25100 state
+25100 nodes @lean-esc .lean-end-screen__header
+27500 state
+27500 nodes @lean-later .lean-end-screen__header
+27700 quit
+"""
+
+
+def escape_case():
+    script = os.path.join(WORK, "escape.txt")
+    with open(script, "w") as f:
+        f.write(ESCAPE_SCRIPT)
+    rc, text = run([f"{BUILD}/client_bin", "--flavor", "strike", "--offline"], os.path.join(WORK, "cfg-escape"),
+                   os.path.join(WORK, "escape.log"), {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+    check("4: Escape run ran its script", rc == 0 and "[strike] Krunker Strike page ready" in text, f"rc {rc}")
+    check("4: the round end is up before Escape", nodes(text, "lean-up") == 1, str(nodes(text, "lean-up")))
+    check("4: Escape over the round end closes the menu (the game view is up)", re.search(r"state t=\d+ .*menu=0", text) is not None,
+          "no menu=0 state" if re.search(r"state t=\d+ .*menu=0", text) is None else "")
+    check("4: the round end is still up after Escape (its screen is not cleared with the menu)",
+          nodes(text, "lean-esc") == 1, str(nodes(text, "lean-esc")))
+    check("4: and after the end timer's packets", nodes(text, "lean-later") == 1, str(nodes(text, "lean-later")))
+
+
+def settings_case():
+    escape_case()
+    script = os.path.join(WORK, "settings.txt")
+    with open(script, "w") as f:
+        f.write(SETTINGS_SCRIPT)
+    rc, text = run([f"{BUILD}/client_bin", "--flavor", "strike", "--offline"], os.path.join(WORK, "cfg-settings"),
+                   os.path.join(WORK, "settings.log"), {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+    check("4: live client ran its script", rc == 0 and "[strike] Krunker Strike page ready" in text, f"rc {rc}")
+    check("4: the round end is up before Home", nodes(text, "lean-up") == 1, str(nodes(text, "lean-up")))
+    check("4: Home takes the player to the main menu (the round end goes with it)", nodes(text, "menu-home") >= 1, str(nodes(text, "menu-home")))
+    check("4: Settings opens over the main menu", nodes(text, "settings-open") == 1, str(nodes(text, "settings-open")))
+    check("4: Settings stays up after the end timer's packets (no round end pushed over it)",
+          nodes(text, "settings-later") == 1, f"settings {nodes(text, 'settings-later')}, lean end {nodes(text, 'lean-later')}")
+    check("4: the round end is not pushed again while Settings is up", nodes(text, "lean-later") == 0, str(nodes(text, "lean-later")))
+    check("4: the round end screen was pushed once this round", text.count("[strike] screen LEAN_END_SCREEN") == 1,
+          str(text.count("[strike] screen LEAN_END_SCREEN")))
+    check("4: Back closes Settings and lands on the main menu (the round is over)", nodes(text, "settings-closed") == 0 and nodes(text, "menu-back") >= 1,
+          f"settings {nodes(text, 'settings-closed')}, menu {nodes(text, 'menu-back')}")
+    check("4: no round end after closing Settings", nodes(text, "lean-closed") == 0, str(nodes(text, "lean-closed")))
+
+
 def main():
     if not os.path.isfile(f"{BUILD}/client_bin"):
         print(f"no {BUILD}/client_bin", file=sys.stderr)
         return 2
     scenario_case()
     live_case()
+    settings_case()
     ok = all(results)
     print(f"\n{sum(results)}/{len(results)} passed" + ("" if ok else f"  (logs in {WORK})"))
     if ok:

@@ -222,6 +222,7 @@ void strike_hud_death(Client *client, const HudKillCard *card, const Player *kil
 void strike_hud_end(Client *client, int result);   // endGame: 1 victory, 0 defeat, -1 draw
 void strike_hud_end_hide(Client *client);          // the next round's INIT
 int  strike_hud_end_up(void);                      // the round-end screen is up
+void strike_hud_end_restore(void);                 // the menu closed over a round end still up: its screen comes back
 // xe.deathDelay after our death: Cg() -> goToPlay, the Strike player respawns without the menu
 // (game_events.c client_game_events_tick, instead of reopening the menu)
 void strike_hud_respawn(Client *client);
