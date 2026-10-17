@@ -629,6 +629,14 @@ void client_render_settings_init(Client *client) {
     g_dom_dirty = 1;
 }
 
+int client_render_window_mode(void) {
+#ifdef __EMSCRIPTEN__
+    return g_rs.window_mode; // the web has no GLFW window to switch: the store's mode is the one in effect
+#else
+    return g_window_mode_applied;
+#endif
+}
+
 void client_render_toggle_fullscreen(Client *client) {
 #ifndef __EMSCRIPTEN__
     if (!client || !client->window) return;
@@ -644,6 +652,12 @@ void client_render_toggle_fullscreen(Client *client) {
     ui_settings_set_string("windowMode", text);
     apply_window_mode(client); // no page/store (HTML engine off): apply directly
 #else
+    // The web: the browser's F11 is its own, so only the page's buttons (Strike's Fullscreen Mode) call this. Its
+    // store write runs apply_window_mode, which asks the page for fullscreen (web_set_fullscreen), as Box Office's
+    // Window Mode row does.
+    char text[8];
+    snprintf(text, sizeof(text), "%d", g_rs.window_mode == RS_WINDOWED ? RS_FULLSCREEN : RS_WINDOWED);
+    ui_settings_set_string("windowMode", text);
     (void) client;
 #endif
 }

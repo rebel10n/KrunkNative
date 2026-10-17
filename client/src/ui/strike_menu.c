@@ -34,6 +34,8 @@
 #include <spin_wheel.h>
 #include <strike_double_xp.h>
 #include <strike_hud_fx.h> // the Damage Number Display's modes and labels (its dropdown)
+#include <render_settings.h> // the V-Sync row and the Fullscreen Mode button (ui_render_settings.c)
+#include <i18n.h>            // the rows' kn.* copy (I18N)
 #include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
 #include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
 #include <audio.h>       // SOUND.play("reward") when the wheel stops
@@ -1551,8 +1553,9 @@ static void class_selection_fill(const HtmlElem root) {
 // settings store (ui_settings.c) so the audio sliders drive client_apply_setting like v10's.
 typedef struct { const char *label, *key; double def; } StrikeSetting;
 static const StrikeSetting SETTING_ROWS[] = {
-    {"Resolution", "resolution", 0.4}, {"Frame Cap", "updateRate", 60}, {"Low Spec", "lowSpec", 0}, {"Particles", "particles", 1},
+    {"Resolution", "resolution", 0.4}, {"Frame Cap", "updateRate", 0}, {"Low Spec", "lowSpec", 0}, {"Particles", "particles", 1},
     {"Particle Distance", "particlesDist", 600}, {"Texture Animations", "textureAnim", 1}, {"Object Animations", "objectAnim", 1},
+    {"No Textures", "noTex", 0}, {"Map Details", "mapDet", 1}, // Box Office's keys (ui_render_settings.c RS_TABLE)
     {"Show Hit Indicators", "hitIndicators", 1}, {"Show Ping", "showPing", 0}, {"Show FPS", "showFPS", 0},
     {"Auto Fire", "autoFireMbl", 1}, {"Aim Assist", "aimAssist", 1}, {"X Sensitivity", "sensitivityXMbl", 1.4},
     {"Y Sensitivity", "sensitivityYMbl", 1.4}, {"Aim X Sensitivity", "aimSensitivityXMbl", 1.4}, {"Aim Y Sensitivity", "aimSensitivityYMbl", 1.4},
@@ -1565,6 +1568,15 @@ static const StrikeSetting SETTING_ROWS[] = {
     {"Weapon Volume", "gunsVolume", 0.3}, {"Player Volume", "playerVolume", 1}, {"Cosmetics Volume", "skinVolume", 1},
     {"UI Volume", "uiVolume", 1}, {"Asset Volume", "assetVolume", 1},
 };
+
+// The Display tab's V-Sync row (Box Office's "vsync", ui_client_settings.c): not one of FRVR's rows, so
+// settings_insert_vsync adds it after Frame Cap with FRVR's row markup. It is a store row like the others
+// (client_apply_setting -> the swap interval re-syncs in client_render_frame_end), but no preset sets it and
+// a change leaves the preset as it is (FRVR's presets set FRVR's rows only).
+static const StrikeSetting VSYNC_ROW = {"V-Sync", "vsync", 1};
+static int is_native_row(const char *key) {
+    return !strcmp(key, VSYNC_ROW.key);
+}
 
 static const StrikeSetting *setting_row(const char *label) {
     for (size_t i = 0; i < sizeof(SETTING_ROWS) / sizeof(SETTING_ROWS[0]); i++) {
@@ -1595,6 +1607,7 @@ static const StrikePreset PRESET_VALUES[] = {
     {"resolution", 1, 0.4}, {"lowSpec", NAN, 1}, {"particles", 0, 0}, {"textureAnim", NAN, 0},
     {"objectAnim", NAN, 0}, {"hitIndicators", 1, 0}, {"showFPS", 1, 0}, {"sound", 0.1, 0.1},
     {"fov", 110, NAN}, {"fpsFOV", 105, NAN},
+    {"updateRate", NAN, 60}, // Frame Cap: the Default and Pro presets take the row's default (0, uncapped); Performance caps at 60
 };
 
 static double preset_value(const StrikeSetting *r, const int id) {
@@ -1611,7 +1624,7 @@ static double preset_value(const StrikeSetting *r, const int id) {
 static int is_switch(const char *key) {
     static const char *const SWITCHES[] = {"lowSpec", "particles", "textureAnim", "objectAnim", "hitIndicators", "showPing",
                                            "showFPS", "autoFireMbl", "aimAssist", "invertYMbl", "vibrationMbl", "gradSpeedMbl",
-                                           "mob_ctrl_disable_tap_jump", "leftHanded"};
+                                           "mob_ctrl_disable_tap_jump", "leftHanded", "noTex", "mapDet", "vsync"};
     for (size_t i = 0; i < sizeof(SWITCHES) / sizeof(SWITCHES[0]); i++) {
         if (!strcmp(SWITCHES[i], key)) return 1;
     }
@@ -1710,9 +1723,17 @@ static int h_strike_setting(void *user, const HtmlEvent *ev, const HtmlArg *args
     (void) user;
     if (argc < 1 || args[0].kind != HTML_ARG_STR || !args[0].str) return 1;
     const char *key = args[0].str;
-    preset_mark_custom(); // a hand change: the preset reads Custom (sets with the setSetting's b flag off)
+    // a hand change: the preset reads Custom (sets with the setSetting's b flag off); V-Sync is no preset row
+    if (!is_native_row(key)) preset_mark_custom();
     char buf[32];
     if (ev->target && !strcmp(ev->type, "click")) {
+        if (is_native_row(key)) { // V-Sync is stored as a bool, as Box Office's switch stores it
+            HtmlArg on = {0};
+            on.kind = HTML_ARG_BOOL;
+            on.num = html_dom_get_checked(ev->target) ? 1.0 : 0.0;
+            ui_settings_set(key, &on);
+            return 0;
+        }
         snprintf(buf, sizeof(buf), "%s", html_dom_get_checked(ev->target) ? "true" : "false");
         ui_settings_set_string(key, buf);
         return 0;
@@ -1785,6 +1806,50 @@ static void damage_row_refresh(void) {
     }
 }
 
+// ---------------------------------------------------------------- SETTINGS: Display tab's window rows
+
+// The Fullscreen Mode button (FRVR's row, no handler in its markup): strikeAction('fullscreen') toggles the
+// window (F11's toggle: ui_render_settings.c client_render_toggle_fullscreen); its text is the mode it leads to.
+#define FULLSCREEN_ROW_LABEL "Fullscreen Mode"
+static const char *fullscreen_label(void) {
+    return client_render_window_mode() != RS_WINDOWED ? I18N("kn.strike.settings.fullscreen.exit", "Exit Fullscreen")
+                                                      : I18N("kn.strike.settings.fullscreen.enter", "Enter Fullscreen");
+}
+
+static void fullscreen_row(const HtmlElem row) {
+    const HtmlElem button = html_dom_query(row, ".frvr-button");
+    const HtmlElem text = html_dom_query(row, ".frvr-button-text");
+    if (button) html_dom_set_attr(button, "onclick", "strikeAction('fullscreen')");
+    if (text) html_dom_set_text(text, fullscreen_label());
+}
+
+// The V-Sync row goes after Frame Cap, in FRVR's row markup (<div class="setting"> with a .switch); the
+// checkbox's hook is the setSetting handler of the other switches (h_strike_setting, is_native_row).
+static void settings_insert_vsync(const HtmlElem content) {
+    HtmlElem rows[24];
+    const int n = html_dom_query_all(content, ".setting", rows, 24);
+    for (int i = 0; i < n; i++) {
+        const HtmlElem name = html_dom_query(rows[i], ".settName");
+        char label[96] = "";
+        if (name) html_dom_get_text(name, label, sizeof(label));
+        if (strcmp(label, "Frame Cap")) continue;
+        StrBuf sb = {0};
+        const int on = setting_number(&VSYNC_ROW) != 0.0;
+        sb_append(&sb, "<div id=\"\" class=\"setting\" style=\"display: flex;\"><div title=\"");
+        sb_append_esc(&sb, I18N("kn.client.vsync.info", "Wait for the display refresh (swap interval 1)"));
+        sb_append(&sb, "\" class=\"settName\">");
+        sb_append_esc(&sb, I18N("kn.client.vsync.name", "V-Sync"));
+        sb_appendf(&sb, "</div><div class=\"settVal\"><label class=\"switch\"><input type=\"checkbox\" id=\"knVsync\"%s "
+                        "onclick=\"strikeSetting('%s')\"><span class=\"switch__slider\"><span class=\"switch__grooves\"></span>"
+                        "</span></label></div></div>",
+                   on ? " checked=\"\"" : "", VSYNC_ROW.key);
+        char *html = sb_finish(&sb);
+        if (html) html_dom_insert_html(rows[i], HTML_INSERT_AFTER_END, html);
+        free(html);
+        return;
+    }
+}
+
 // the rows of a tab's markup take their values from the store (FRVR: SETTINGS.list[i].val)
 static void settings_values(const HtmlElem content) {
     HtmlElem rows[24];
@@ -1795,6 +1860,10 @@ static void settings_values(const HtmlElem content) {
         if (name) html_dom_get_text(name, label, sizeof(label));
         if (!strcmp(label, DMG_ROW_LABEL)) {
             damage_dropdown(rows[i]);
+            continue;
+        }
+        if (!strcmp(label, FULLSCREEN_ROW_LABEL)) {
+            fullscreen_row(rows[i]);
             continue;
         }
         const StrikeSetting *r = setting_row(label);
@@ -1838,6 +1907,7 @@ static void settings_tab(const HtmlElem root, const int tab) {
         free(html);
     }
     settings_values(content);
+    if (!strcmp(SETTINGS_TABS[tab], "display")) settings_insert_vsync(content);
     if (tab == 0) presets_mark(content);
 }
 
@@ -2301,6 +2371,11 @@ static void action(const char *a) {
         const int t = atoi(a + 13);
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
         if (root && t >= 0 && t < (int) (sizeof(SETTINGS_TABS) / sizeof(SETTINGS_TABS[0]))) settings_tab(root, t);
+    } else if (!strcmp(a, "fullscreen")) {
+        // the Display tab's Fullscreen Mode button: F11's toggle, then the row's text follows the window
+        client_render_toggle_fullscreen(M.client);
+        const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
+        if (root) settings_tab(root, M.settings_tab);
     } else if (!strcmp(a, "dmgnum-toggle")) {
         g_dmg_open = !g_dmg_open;
         damage_row_refresh();

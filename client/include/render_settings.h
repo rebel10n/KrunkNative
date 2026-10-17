@@ -169,6 +169,9 @@ void client_render_settings_init(Client *client);
 void client_render_force_window_mode(int mode);
 // F11: windowed <-> fullscreen (or borderless when that was the chosen mode); persisted.
 void client_render_toggle_fullscreen(Client *client);
+// The window mode in effect (RS_WINDOWED / RS_FULLSCREEN / RS_BORDERLESS): what the toggle acts on, which
+// a forced mode (--windowed etc.) can differ from the stored windowMode. The Strike Display tab's button text.
+int client_render_window_mode(void);
 
 // Native window state across F4 / relaunch / restarts (window_state.h). main.c, before
 // glfwCreateWindow: reads and clears KRUNKNATIVE_RESTORE_WINDOW, resolves the startup

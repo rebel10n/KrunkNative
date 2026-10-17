@@ -371,6 +371,10 @@ console-settings-test: build ## Dev console switch survives Settings opens / res
 fps-uncapped-test: build ## Launch paths run uncapped with V-Sync and Frame Cap off in the stored settings: make -n pacing, no display, windowed (xvfb-run), --flavor strike's store
 	timeout 900 $(PYTHON) -I client/tests/fps_uncapped_e2e.py $(DEBUG_DIR)
 
+.PHONY: strike-vsync-test
+strike-vsync-test: build ## Krunker Strike's Display tab: V-Sync and Frame Cap are there, change, and reach the client (the fps lines, the krunknative-strike store; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/strike_vsync_e2e.py $(DEBUG_DIR)
+
 gltf-test: build ## GLTF loader on v7 animated store models via the pet path, pets.js follow AI, skin animations (headless GL)
 	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/gltf_test --headless
 

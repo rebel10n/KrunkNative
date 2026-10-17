@@ -1085,6 +1085,15 @@ void ui_settings_apply_values(const HtmlElem root) {
     }
 }
 
+// Krunker Strike's Frame Cap default: 0 (uncapped), the client's own default, while nothing is stored. The defaults
+// scrape (ui_settings_collect_defaults) runs on Box Office's page only, so the default is registered here: a typed
+// slider value ("30") is then stored as a number (coerce_string needs the default's type), and the row shows 0.
+static void register_strike_frame_cap_default(void) {
+    if (flavor_current()->rules && g_defaults && !cJSON_GetObjectItem(g_defaults, "updateRate")) {
+        cJSON_AddNumberToObject(g_defaults, "updateRate", 0);
+    }
+}
+
 void ui_settings_push_saved(void) {
     Client *client = menu_ui()->client;
     char text[256];
@@ -1104,6 +1113,7 @@ void ui_settings_push_saved(void) {
         ui_setting_to_string(item, text, sizeof(text));
         client_apply_setting(client, item->string, text);
     }
+    register_strike_frame_cap_default();
 }
 
 // F5 (game_reload.c): knSettings read again from disk, every setting pushed again; a setting the
