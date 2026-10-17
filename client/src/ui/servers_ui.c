@@ -2716,8 +2716,9 @@ static char *gen_list(void) {
     char *servers = get_servers();
     // the two tabs, one per backend (krunk.io, krunker.io); each shows the map carousel and the groups of its list
     const char *tabs[SERVER_TAB_COUNT] = {I18N("kn.servers.tabKrunk", "krunk.io"), I18N("kn.servers.tabKrunker", "krunker.io")};
-    sb_append(&sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
-    for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' style='height:18px;' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
+    // srvTabs (krunknative.css) sets the tabs' padding and line-height: the label sits in the middle of each tab
+    sb_append(&sb, "<div class='bigMenTabs srvTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
+    for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div>");
     carousel_html(&sb); // the tab's custom games' carousel (customsInfo.length >= 3)
     sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");

@@ -96,6 +96,18 @@ html.kn-preview-bg #canvas {
   width: 100%;
 }
 
+/* The Servers window's krunk.io / krunker.io tabs (servers_ui.c, .srvTabs). main.css's .bigMenTab
+ * sets a 45px line box under 15px / 10px padding; the old inline height:18px made the cell 18px of
+ * content under that 45px line box, so the label sat at the bottom. The line box is now 18px and the
+ * padding moves 1px down (16px / 9px), so the 43px tab keeps its height and the label's ink is
+ * centred in it. Only .srvTabs: the games and ranked tabs keep main.css's and ranked-kn.css's own
+ * line boxes and padding. */
+.srvTabs .bigMenTab {
+  padding-top: 16px;
+  padding-bottom: 9px;
+  line-height: 18px;
+}
+
 /* Settings selects whose options are this machine's devices (Sound > Audio/Mic
  * Input, Audio Output; Client > Audio Backend): a select is as wide as its widest
  * option, and real device names ("Monitor of ... Digital Stereo (IEC958)") make it
