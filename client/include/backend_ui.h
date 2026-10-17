@@ -35,6 +35,7 @@ typedef struct {
     cJSON *stats;         // acc.stats (object, owned)
     cJSON *data;          // the raw 40-slot data array (owned)
     cJSON *badges;        // acc.badges: earned badges.js indices (array, owned; kn_brain info "badges")
+    int offer_claimable;  // dxp.offer.claimable: the end screen's 2x XP claim is open (double_xp_offer.h)
 } AccountInfo;
 
 void account_ui_init(Client*);              // listens on the social socket; restores the saved session
@@ -76,6 +77,7 @@ char *account_window_gen(int id, const char **header);
 void account_window_post(int id);
 double account_reward_ms(void);             // daily free KR: ms left, 0 claimable, -1 no account / level too low
 void account_set_funds(double funds);       // updateFunds(funds): header + windows
+void account_double_xp_claimed(double player_score); // rrqdxp: account.score = playerScore, the offer is spent
 void account_set_clan(const char *tag);      // windows[12]: acc.clan (NULL / "" = none)
 // WP-E part 2c: the account's selected custom badge (stats.bdg) when it owns it and the
 // customBadge privacy setting shows it, else -1 (menu header, v7 updateClassPreview).

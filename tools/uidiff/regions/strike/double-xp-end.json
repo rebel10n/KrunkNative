@@ -1,0 +1,35 @@
+{
+  "scenario": "strike/double-xp-end",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "double-xp-button",
+      "rect": [
+        480,
+        530,
+        320,
+        75
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the reward row's Double XP button (.lean-end-screen__double-reward: blue frvr-button, ad icon, pulsing)"
+    },
+    {
+      "name": "dxp-badge",
+      "rect": [
+        1040,
+        66,
+        230,
+        76
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the top-right \"2x XP for:\" badge (.booster-time-left, strike_double_xp.c): the time left (pinned clock)"
+    }
+  ]
+}

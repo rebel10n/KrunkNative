@@ -42,7 +42,8 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#endButtonsHolder: Double XP (the ad icon: svg mask + shadow filter) and the Collect Rewards button (gift.webp, COLLECT, 7s to auto collect)"
+      "note": "#endButtonsHolder: v10 shows the Double XP button (the ad icon) to a guest; Krunker Box Office shows it only while the account's 2x XP offer is claimable (dxp.offer.claimable, the brain's rule: games % 3 == 0, once per match), so a guest's row has COLLECT alone and centred. Reported, not failed, by design (double_xp_offer.c). The COLLECT button is unchanged.",
+      "skip": true
     }
   ]
 }

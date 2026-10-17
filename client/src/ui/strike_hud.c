@@ -22,6 +22,7 @@
 // The round end: LEAN_END_SCREEN (WB, the template LEAN_END_SCREEN.html) over the game.
 #include <strike_ui.h>
 #include <strike_econ.h>
+#include <strike_double_xp.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <shared.h>
@@ -841,6 +842,7 @@ static void end_fill(Client *client, const int result) {
     char t[16];
     time_text(client->net_end_seconds, t, sizeof(t));
     if (timer) html_dom_set_text(timer, t);
+    strike_double_xp_end_fill(root); // the reward row's Double XP button (strike_double_xp.c)
 }
 
 // the lean screen's state is rebuilt with each new screen

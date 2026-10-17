@@ -183,3 +183,12 @@ html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(
 @keyframes shine-slide{0%{transform:translate(-50%)}66%{transform:translate(-50%)}to{transform:translate(120%)}}
 @keyframes fade-in{0%{opacity:0;transform:scale(5)}to{opacity:1;transform:scale(1)}}
 /* ==== END GENERATED ==== */
+
+/* KrunkNative: the "2x XP for:" badge (client/src/ui/strike_double_xp.c) is FRVR's booster layout
+ * (.booster-time-left, top right). FRVR fills its __bg with the season's booster art (timeLeftBG), which
+ * the page does not have, so a gold-edged pill stands in for it. The Double XP popup is a plain message in
+ * the POPUP screen (FRVR's reward cards need a reward; the Double XP claim has none to show). */
+.dxp-badge__bg{position:absolute;top:0;left:0;width:100%;height:100%;box-sizing:border-box;border-radius:calc(8 * var(--base-scale));background:linear-gradient(90deg,rgba(20,20,20,0.85),rgba(60,45,5,0.85));border:calc(2 * var(--base-scale)) solid #ffe540}
+.dxp-badge .booster-time-left__text-holder{position:relative;z-index:1}
+.dxp-badge .booster-time-left__text{color:#ffe540;font-size:var(--font-size-xs)}
+.dxp-popup{display:flex;flex-direction:column;align-items:center;gap:calc(16 * var(--base-scale));padding:calc(24 * var(--base-scale))}

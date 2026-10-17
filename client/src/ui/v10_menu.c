@@ -654,11 +654,12 @@ static void buffs_update(const Client *client, const int force) {
     if (!force && !strcmp(init, g_buff_init)) return; // v10 keeps what the last INIT set
     snprintf(g_buff_init, sizeof g_buff_init, "%s", init);
     const double now = menu_now_ms();
+    // #doubleXPAd: the mode's doubleXP flag (v10:219357; the account's offer is not a buff)
     const int xp = game && game->map && game->mode && game->mode->config.double_xp;
     const int class_xp = game && game->map && double_class_xp(now), raid = game && game->map && double_raid_drops(now);
+    set_display(by_id("doubleXPAd"), xp ? "block" : "none");
     set_display(by_id("doubleClassXPAd"), class_xp ? "block" : "none");
     set_display(by_id("doubleRaidDropsAd"), raid ? "block" : "none");
-    set_display(by_id("doubleXPAd"), xp ? "block" : "none");
     set_display(by_id("buffSepStart"), class_xp || raid || xp ? "" : "none");
 }
 

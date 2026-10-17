@@ -333,3 +333,5 @@ body, nothing executed) and vendored unchanged next to `icons.css`:
 
 The HTML engine cannot read SVG or EOT: `font_src_is_loadable()` (client/src/html/engine/engine.c) skips those `src` entries, so the
 TTF is used. Glyph codes in `icons.css` are CSS escapes (`content: "\f126"`); `css_parse_content()` decodes them.
+
+Krunker Box Office's `ui/img/frvr-ui/ad-icon.svg` (the same FRVR icon) is copied to `img/frvr-ui/ad-icon.svg`: the Double XP button's icon (client/src/ui/strike_double_xp.c). It is not in the 1.37.2 mirror above.

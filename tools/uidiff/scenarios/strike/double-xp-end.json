@@ -1,0 +1,43 @@
+{
+  "ref": "doc/ref/krunknative/strike-double-xp-end.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Player",
+    "classIndex": 0,
+    "menu": true,
+    "account": {
+      "name": "Player",
+      "score": 50000,
+      "funds": 2500,
+      "games": 3,
+      "dxp": {
+        "offer": {
+          "games": 3,
+          "xp": 1200,
+          "claimable": true
+        },
+        "doubleClassXP": false,
+        "doubleRaidDrops": false
+      }
+    },
+    "strike": {
+      "end": 1
+    },
+    "windowActions": [
+      [
+        "knV10MenuClock",
+        1791979200000
+      ]
+    ],
+    "modeName": "All or Nothing"
+  },
+  "frames": 3,
+  "note": "Krunker Strike's round end (LEAN_END_SCREEN) for a signed-in player whose match offer is claimable (dxp.offer.claimable, games 3): the reward row's Double XP button (FRVR's .lean-end-screen__double-reward, the blue ad icon, pulsing) and, in a doubleXP mode (All or Nothing), the top-right \"2x XP\" badge (strike_double_xp.c). Krunker Strike's own render (a regression baseline; FRVR shows the button, not the badge)."
+}

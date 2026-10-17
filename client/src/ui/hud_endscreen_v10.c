@@ -19,9 +19,12 @@
 #include <ranked.h>
 #include <html_dom.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <backend_ui.h>
 #include <client.h>
+#include <double_xp_offer.h>
+#include <v10_ui.h>
 #include <audio.h>
 #include "../viewer/viewer_store.h"
 #include <stdio.h>
@@ -33,10 +36,10 @@
 #define END_EVENTS_MAX 512
 #define AUTO_COLLECT_MS 10000.0 // autoCollectTime = now + 0x2710
 #define RAID_MODE_INDEX 23      // showRaidPromo: 0x17 !== modeIndex
-// #doubleXPButton (v10 g:203332, not a comp game): the ad icon and the Double XP label. The rewarded
-// ad is not served here, so the click does nothing (h_double_xp).
+// #doubleXPButton (v10 g:203332, not a comp game): the ad icon and the Double XP label. The click claims the
+// offer ("rqdxp", double_xp_offer.c); the button is shown only while the offer is claimable (double_xp_sync).
 // v10's whitespace kept: the newline + tabs between the inline icon and #returnText lay out as one space.
-#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
+#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" style=\"display:none\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
     "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">\n\t\t\t\t\t\t" \
     "<div id=\"returnText\">Double XP</div>\n\t\t\t\t\t</div>"
 
@@ -273,8 +276,47 @@ static int h_collect(void *user, const HtmlEvent *ev, const HtmlArg *args, const
     return 1;
 }
 
+// v10's "XP Doubled!" pop (genericPopup, dxp-pop: window.endgame.player.xpDoubled / xpDoubleSubTitle)
+static void xp_doubled_pop(void) {
+    ui_loadout_clear_pops(); // clearPops() before the popup, as genericPopup does
+    char html[1024];
+    snprintf(html, sizeof(html),
+             "<div class=\"dxp-img-holder\">\n\t\t\t<div class=\"dxp-img-anim\"><div></div></div>\n\t\t\t<div class=\"dxp-img\"></div>\n\t\t</div>\n"
+             "\t\t<div class=\"dxp-text\">\n\t\t\t<div class=\"dxp-header\">%s</div>\n"
+             "\t\t\t<div class=\"dxp-info\">%s</div>\n\t\t</div>\n"
+             "\t\t<div class=\"dxp-btn-holder\">\n\t\t\t<div class='button dxp-btn' onmouseenter=\"playTick(0.1);\" "
+             "onclick='playSelect(0.1);clearPops();'>%s</div>\n\t\t</div>",
+             I18N("window.endgame.player.xpDoubled", "XP Doubled!"),
+             I18N("window.endgame.player.xpDoubleSubTitle", "The more XP the better, right? Let's go!"),
+             I18N("generic.nice", "Nice!"));
+    v10_popup_show("dxp-pop no-box-shadow", html, NULL);
+}
+
+// showDoubleXPRewardedAd()'s answer (double_xp_offer.c): a claimed offer pops "XP Doubled!" (v10's rrqdxp
+// answer, _73930). Nothing else shows (v10 shows nothing for a failed claim either).
+static void double_xp_done(void *user, const DoubleXpResult result) {
+    (void) user;
+    if (result == DOUBLE_XP_GRANTED) xp_doubled_pop();
+}
+
+// The button is shown only while the account's offer is claimable (dxp.offer.claimable: games % 3 == 0,
+// once per match). Written when it changes (the end card re-renders the button).
+static HtmlElem g_dxp_button;
+static int g_dxp_shown = -1;
+
+static void double_xp_sync(void) {
+    const HtmlElem button = html_dom_by_id("doubleXPButton");
+    if (!button) return;
+    const int shown = double_xp_offer_open();
+    if (button == g_dxp_button && shown == g_dxp_shown) return;
+    g_dxp_button = button;
+    g_dxp_shown = shown;
+    html_dom_set_display(button, shown ? "" : "none");
+}
+
 static int h_double_xp(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user; (void) ev; (void) args; (void) argc; // showDoubleXPRewardedAd(): no ad here
+    (void) user; (void) ev; (void) args; (void) argc;
+    double_xp_claim(double_xp_done, NULL);
     return 1;
 }
 
@@ -593,6 +635,7 @@ void hud_endscreen_v10_shown(void) {
 
 void hud_endscreen_v10_tick(const double now_ms) {
     E.now = now_ms;
+    double_xp_sync();
     if (E.btn_mounted && !E.collected && by_id("collectRewardsButtonContainer")) {
         while (E.btn_mounted && now_ms >= E.next_tick) {
             E.next_tick += 1000.0;

@@ -15,6 +15,7 @@
 // then the mount swaps it for "Loading Game" without an enter animation and MAIN_MENU is pushed.
 #include <strike_ui.h>
 #include <strike_notify.h>
+#include <strike_double_xp.h>
 #include <flavor.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -673,6 +674,7 @@ void strike_ui_tick(Client *client) {
     strike_hud_tick(client);
     strike_notify_tick(); // the holder: the timers, then the redraw (strike_notify.c)
     strike_touch_tick(client);
+    strike_double_xp_tick(); // the 2x XP badge and the end screen's claim button (strike_double_xp.c)
 }
 
 void strike_ui_menu_open(Client *client, const int open) {

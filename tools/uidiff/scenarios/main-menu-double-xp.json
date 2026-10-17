@@ -1,0 +1,41 @@
+{
+  "ref": "doc/ref/krunknative/main-menu-double-xp.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 50000,
+      "funds": 2500,
+      "games": 3,
+      "dxp": {
+        "offer": null,
+        "doubleClassXP": false,
+        "doubleRaidDrops": false
+      }
+    },
+    "windowActions": [
+      [
+        "knV10MenuClock",
+        1791979200000
+      ]
+    ],
+    "modeName": "All or Nothing"
+  },
+  "frames": 3,
+  "note": "Box Office main menu, signed in, in a match mode with the doubleXP flag (All or Nothing: mode.doubleXP, aon): #activeBuffs shows 2x XP after the buff separator (v10_menu.c buffs_update, v10:219357; the account's offer is not a badge). Box Office's own render (a regression baseline; v10's 2x XP is this same mode badge)."
+}

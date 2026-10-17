@@ -296,6 +296,8 @@
  "kn.dserver.vps.provider": "Provider",
  "kn.dserver.vpsIntro": "A small rented Linux server keeps a lobby up around the clock without touching your home network. One {2}server_bin{3} is one lobby and needs little: about 110 MB of memory and a few percent of one CPU with a full lobby, so the cheapest plan is enough. Pick a location close to your players.",
  "kn.dserver.vpsSetup": "On the VPS (Ubuntu or Debian), as a normal user:",
+ "kn.dxp.badge": "2x XP",
+ "kn.dxp.collected": "Collected",
  "kn.error.connectFailed": "Could not connect to the game server",
  "kn.error.loginToJoin": "{0}Log in{1} to join it.",
  "kn.error.playOffline": "Play Offline",

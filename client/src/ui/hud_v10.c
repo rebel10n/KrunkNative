@@ -38,8 +38,24 @@ int hud_v10_page(void) {
     return g_is_v10;
 }
 
+// The 2x XP badge under the timer (#dxpHudBadge, ui/index.html) while the match's mode has the doubleXP flag
+// (v10's #doubleXPAd rule, v10:219357): checked each frame, changed only when the mode changes. A KrunkNative
+// addition to v10's HUD, which has no such badge.
+static int g_dxp_shown = -1;
+
+static void double_xp_hud(void) {
+    const MenuUi *menu = menu_ui();
+    const Client *client = menu ? menu->client : NULL;
+    const int on = client && client->game.map && client->game.mode && client->game.mode->config.double_xp;
+    if (on == g_dxp_shown) return;
+    g_dxp_shown = on;
+    const HtmlElem badge = html_dom_by_id("dxpHudBadge");
+    if (badge) html_dom_set_display(badge, on ? "block" : "none");
+}
+
 void hud_v10_tick(const int chat_wanted) {
     if (!hud_v10_page()) return;
+    double_xp_hud();
     // UI.toggleMenuHider(on) -> hideChatIfGuestUser(on): on ? (account ? block : none) : block.
     // KrunkNative: block whenever the chat is wanted (not loading), on the menu for a guest too.
     const char *want = chat_wanted ? "block" : "none";

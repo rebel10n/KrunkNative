@@ -755,6 +755,28 @@ static void clear_account(void) {
     memset(&g_email, 0, sizeof(g_email));
 }
 
+// dxp.offer of kn_brain's account info (v10's account object: dxp = {offer: null | {games, xp, claimable},
+// doubleClassXP, doubleRaidDrops}). An info object without dxp has no offer; a null info (an "upd" without
+// one) keeps what the account had.
+static void set_dxp(const cJSON *info) {
+    if (!cJSON_IsObject(info)) return;
+    const cJSON *dxp = cJSON_GetObjectItem(info, "dxp");
+    const cJSON *offer = cJSON_IsObject(dxp) ? cJSON_GetObjectItem(dxp, "offer") : NULL;
+    const cJSON *claimable = cJSON_IsObject(offer) ? cJSON_GetObjectItem(offer, "claimable") : NULL;
+    g_acc.offer_claimable = claimable && (cJSON_IsTrue(claimable) || (cJSON_IsNumber(claimable) && claimable->valueint));
+}
+
+// rrqdxp: the match's score was doubled (v10's RECIEVE_DOUBLE_XP): account.score = playerScore, and the
+// offer is spent until the next match (v10's lastDoubleAttempt = games)
+void account_double_xp_claimed(const double player_score) {
+    if (!g_logged_in) return;
+    g_acc.score = player_score;
+    update_level();
+    g_acc.offer_claimable = 0;
+    mark_header();
+    rerender_windows();
+}
+
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
 // creatorBadge (~~creator_badge, v10:112770) comes with it
 static void set_badges(const cJSON *info) {
@@ -835,6 +857,7 @@ static void account_response(const cJSON *frame) {
         const cJSON *mail = cJSON_GetObjectItem(info, "mail_unread");
         if (cJSON_IsNumber(mail)) g_acc.mail_unread = mail->valueint;
         set_badges(info);
+        set_dxp(info);
     }
 
     char idtext[24];
@@ -939,6 +962,7 @@ static void on_social(void *user, const cJSON *frame) {
     } else if ((!strcmp(label, "ua") || !strcmp(label, "upd")) && g_logged_in) { // ua: updateAccount(data) after a match
         set_data(cJSON_GetArrayItem(frame, 1));
         set_badges(cJSON_GetArrayItem(frame, 2)); // WP-E part 2c: the info's "badges"
+        set_dxp(cJSON_GetArrayItem(frame, 2)); // the info's dxp.offer (double_xp_offer.c)
         mark_header();
         rerender_windows();
     } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
@@ -2726,12 +2750,14 @@ void account_ui_scenario(const cJSON *account) {
     copy_str(g_acc.clan, sizeof(g_acc.clan), clan);
     g_acc.score = cnum(account, "score");
     g_acc.funds = cnum(account, "funds");
+    g_acc.games = cnum(account, "games"); // the per-match Double XP offer (games % 3, double_xp_offer.c)
     g_acc.premium = cnum(account, "premium") != 0.0;
     g_acc.is_dev = cnum(account, "dev") != 0.0; // the player list's Kick / Ban (punishPopup) need DEV rights
     update_level();
     const cJSON *stats = cJSON_GetObjectItem(account, "stats");
     g_acc.stats = cJSON_IsObject(stats) ? cJSON_Duplicate(stats, 1) : cJSON_CreateObject();
     set_badges(account);
+    set_dxp(account); // state.account.dxp = {offer: {claimable}}: the end screen's 2x XP button
     const cJSON *chal = cJSON_GetObjectItem(account, "challenges"), *medals = cJSON_GetObjectItem(account, "medals");
     g_chal = cJSON_IsArray(chal) ? cJSON_Duplicate(chal, 1) : NULL;
     g_medal_counts = cJSON_IsObject(medals) ? cJSON_Duplicate(medals, 1) : NULL;

@@ -1,0 +1,35 @@
+{
+  "scenario": "main-menu-double-xp",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "active-buffs",
+      "rect": [
+        620,
+        610,
+        190,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "#activeBuffs: the separator and 2x XP with its countdown (buff-badge #ffd54f, buffGlow) in the match-info bar's Invite/Join segment"
+    },
+    {
+      "name": "match-info",
+      "rect": [
+        420,
+        608,
+        440,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 18.0,
+      "note": "the whole match-info bar: the badge widens its third segment and the bar stays centred"
+    }
+  ]
+}

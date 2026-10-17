@@ -31,6 +31,7 @@
 #include <ui_logic.h>
 #include <backend_ui.h>
 #include <spin_wheel.h>
+#include <strike_double_xp.h>
 #include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
 #include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
 #include <audio.h>       // SOUND.play("reward") when the wheel stops
@@ -1996,6 +1997,7 @@ static void action(const char *a) {
             }
         }
     }
+    else if (!strcmp(a, "double-xp")) strike_double_xp_claim(); // the lean end screen's Double XP (strike_double_xp.c)
     else if (!strcmp(a, "back")) {
         strike_screen_pop(); // kt()
         if (strike_screen_top() == STRIKE_SCREEN_NONE && html_ui_is_menu_open()) strike_screen_push(STRIKE_SCREEN_MAIN_MENU);
