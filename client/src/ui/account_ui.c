@@ -14,6 +14,7 @@
 // (client/src/alt/, the Account Manager). The v3.1.1 keys (krunker_id, krunker_username, krunker_token)
 // are only read once, to move an older build's session into the list (load_session).
 #include <v10_menu.h> // the v10 page's header bar (v10_menu.c)
+#include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
@@ -2311,12 +2312,15 @@ static char *gen_account(void) {
         sb_append(&sb, "</a></div><div id='pfpStatus' class='settName' style='width:181px;font-size:13px;margin-top:6px'></div>");
         sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
         sb_append(&sb, I18N("generic.name", "Name"));
-        sb_append(&sb, "<a href='/social.html?p=profile&q=");
-        sb_append_esc(&sb, g_acc.name);
-        sb_append(&sb, "' class='floatR' target='_blank'>");
-        sb_append_esc(&sb, g_acc.name);
+        if (player_names_hidden()) sb_append(&sb, "<a class='floatR'>"); // no profile link while names are hidden (the real account's)
+        else {
+            sb_append(&sb, "<a href='/social.html?p=profile&q=");
+            sb_append_esc(&sb, g_acc.name);
+            sb_append(&sb, "' class='floatR' target='_blank'>");
+        }
+        sb_append_esc(&sb, player_names_account(g_acc.name));
         sb_appendf(&sb, "</a></div><div class='settName' style='width:100%%'>%s<a style='float:right'  onclick='showWindow(13)'>", I18N("generic.clan", "Clan"));
-        if (g_acc.clan[0]) {
+        if (player_names_clan(g_acc.clan)[0]) {
             sb_append(&sb, "[");
             sb_append_esc(&sb, g_acc.clan);
             sb_append(&sb, "]");
@@ -2896,10 +2900,10 @@ static char *gen_kio_account(const AccountInfo *acc) {
     sb_append(&sb, "<div class='setBodH' id='knKioAccName' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
     sb_append(&sb, I18N("generic.name", "Name"));
     sb_append(&sb, "<span class='floatR' style='color:rgba(255,255,255,0.8)'>");
-    sb_append_esc(&sb, acc->name);
+    sb_append_esc(&sb, player_names_account(acc->name)); // Hide player names: "Player"
     sb_appendf(&sb, "</span></div><div class='settName' style='width:100%%'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>",
                I18N("generic.clan", "Clan"));
-    if (acc->clan[0]) {
+    if (player_names_clan(acc->clan)[0]) {
         sb_append(&sb, "[");
         sb_append_esc(&sb, acc->clan);
         sb_append(&sb, "]");

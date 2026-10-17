@@ -42,6 +42,7 @@
 //     game switches them at once (v10_menu_account_tick).
 // The login / register modal (loginOrRegister) is v10_login.c.
 #include <v10_menu.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
 #include <client_settings.h>
@@ -254,7 +255,7 @@ static void header_update(const AccountInfo *acc) {
 
     HtmlElem el;
     // premiumT && settings.tmp.premiumBadge ? alias : name
-    if ((el = by_id("knV10Name"))) html_dom_set_text(el, acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name);
+    if ((el = by_id("knV10Name"))) html_dom_set_text(el, player_names_account(acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name));
     char text[48];
     snprintf(text, sizeof(text), "Lv %d", acc->level > 0 ? acc->level : 1);
     if ((el = by_id("knV10Level"))) html_dom_set_text(el, text);

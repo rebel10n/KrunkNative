@@ -5,6 +5,7 @@
 // and counts, Join / Leave Team), toggleTeam / selectClass (updSyncDat "t" / "c") and
 // io_updateGameMessage's #compTimBox. The lobby table itself is shared/src/comp_lobby.c.
 #include <lobby_ui.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <comp_lobby.h>
 #include <ui_logic.h>
 #include <html_ui.h>
@@ -61,7 +62,7 @@ static const char *map_name(const Game *game) {
     return name ? name : "Unknown";
 }
 
-static void player_slot(StrBuf *sb, const Game *game, const CompLobbyEntry *e, const int left, const int my_team, const int slot) {
+static void player_slot(StrBuf *sb, const Game *game, const CompLobbyEntry *e, const int left, const int my_team, const int slot, const int self) {
     const int hidden = e && my_team != e->team; // the other team's classes stay secret: "???"
     char weapon[160] = "";
     const char *icon = e && e->class_index >= 0 && !hidden ? class_weapon_icon(game, e->class_index) : NULL;
@@ -75,13 +76,15 @@ static void player_slot(StrBuf *sb, const Game *game, const CompLobbyEntry *e, c
     snprintf(pfp, sizeof(pfp), "<img class='compPLstIcn' id='compPfpI%d' style='border:3px solid #fff' src='./textures/classes/icon_%d.png' />", slot, icon_index);
     if (left) {
         sb_appendf(sb, "<div class='compPlLitL'><div class='compPlWepsL'>%s</div>%s<div class='compPLstSt'>%s", weapon, pfp, verified);
-        if (e) sb_append_esc(sb, e->name[0] ? e->name : "Guest Player");
+        char pn[PLAYER_NAME_SIZE];
+        if (e) sb_append_esc(sb, player_names_shown(e->uid, self, e->name[0] ? e->name : "Guest Player", pn, sizeof(pn)));
         else sb_append(sb, "Open Slot");
         sb_appendf(sb, "<div class='compPLstCl'>%s</div></div></div>", class_name);
     } else {
         sb_append(sb, "<div class='compPlLitR'><div class='compPLstSt compPLstStR' style='text-align:right'>");
         if (e) {
-            sb_append_esc(sb, e->name[0] ? e->name : "Guest Player");
+            char pn[PLAYER_NAME_SIZE];
+            sb_append_esc(sb, player_names_shown(e->uid, self, e->name[0] ? e->name : "Guest Player", pn, sizeof(pn)));
             sb_append(sb, verified);
         } else {
             sb_append(sb, "Open Slot");
@@ -141,7 +144,7 @@ void comp_ui_refresh(Client *client) {
                 break;
             }
         }
-        player_slot(team == 1 ? &left : &right, game, e, team == 1, my_team, slot);
+        player_slot(team == 1 ? &left : &right, game, e, team == 1, my_team, slot, e->uid == client->net_client_id);
     }
     if (game->config.select_team) { // selTeam: Join / Leave Team under each list
         sb_appendf(&left, "<div class='compSwpTmB' style='background-color:#eb4034' onmouseenter='playTick()' onclick='playSelect();toggleTeam(%d)'>%s</div>",

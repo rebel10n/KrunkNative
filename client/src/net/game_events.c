@@ -58,6 +58,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <player_names.h>
 
 #define SERVER_CHAT_COLOR "#fc03ec" // gB type 2 default
 #define RANKED_CHAT_COLOR "#5ce05a" // the ranked UI's green: a ranked queue's notice (NET_CHAT_RANKED)
@@ -138,8 +139,10 @@ static const Weapon *events_weapon(const Client *client, const int index) {
     return index >= 0 && index < (int) count ? weapons[index] : NULL;
 }
 
-static const char *events_name(const Player *player) {
-    return player && player->name[0] ? player->name : "unknown";
+// The name a kill feed / death card shows (Hide player names, player_names.h); `out` holds it when hidden.
+static const char *events_name(const Client *client, const Player *player, char *out, const size_t size) {
+    if (!player) return "unknown";
+    return player_names_shown(player->uid, player == client->me, player->name[0] ? player->name : "unknown", out, size);
 }
 
 // players.kill(player) on the client: stop simulating and drop the meshes.
@@ -227,7 +230,8 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     if (killer && killer != victim) killer->kills = (unsigned int) packet->killer_kills;
     if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot, killer, packet->weapon_index); // gk: kill sound (getKillSnd)
 
-    const char *victim_name = events_name(victim);
+    char killer_shown[PLAYER_NAME_SIZE], victim_shown[PLAYER_NAME_SIZE];
+    const char *victim_name = events_name(client, victim, victim_shown, sizeof(victim_shown));
 
     if (killer) { // g1: b8 found, even when it is the victim (hC = "": weapon + victim only, e.g. own rocket)
         const int self = killer == victim;
@@ -237,10 +241,10 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const Weapon *feed_weapon = weapon ? weapon : killer->weapon;
         const int feed_flags = (packet->wallbang ? HUD_FEED_WALLBANG : 0) | (packet->fists & NET_KILL_FISTS ? HUD_FEED_FISTS : 0) |
                                (packet->fists & NET_KILL_THROWN ? HUD_FEED_THROWN : 0) | (packet->fists & NET_KILL_HIDE_FEED ? HUD_FEED_HIDDEN : 0);
-        hud_ui_add_killfeed_flags(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
+        hud_ui_add_killfeed_flags(client, self ? NULL : events_name(client, killer, killer_shown, sizeof(killer_shown)), !self && killer == client->me, victim_name,
                                   victim && victim == client->me, feed_weapon && feed_weapon->icon ? feed_weapon->icon : NULL, packet->headshot,
                                   stk, feed_flags);
-        strike_hud_killfeed(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
+        strike_hud_killfeed(client, self ? NULL : events_name(client, killer, killer_shown, sizeof(killer_shown)), !self && killer == client->me, victim_name,
                             victim && victim == client->me, weapon, packet->headshot, packet->fists & NET_KILL_THROWN ? 1 : 0,
                             packet->wallbang ? 1 : 0, packet->fists & NET_KILL_HIDE_FEED ? 1 : 0);
     } else {
@@ -265,7 +269,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     if (by_other) {
         const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
         const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
-        card.killer = events_name(killer);
+        card.killer = events_name(client, killer, killer_shown, sizeof(killer_shown));
         card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, (packet->fists & NET_KILL_FISTS) || (death && death->fists), &card.weapon_color);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
         if (death) {
@@ -417,8 +421,8 @@ static void events_timer(Client *client, const NetTimerPacket *packet) {
     client->net_round_seconds = packet->seconds;
 }
 
-static void events_chat(const NetChatPacket *packet) {
-    char name[PLAYER_NAME_SIZE];
+static void events_chat(Client *client, const NetChatPacket *packet) {
+    char name[PLAYER_NAME_SIZE], shown[PLAYER_NAME_SIZE];
     char text[NET_CHAT_TEXT_SIZE];
 
     memcpy(name, packet->name, sizeof(name));
@@ -430,11 +434,14 @@ static void events_chat(const NetChatPacket *packet) {
         const NetPlayerInfoPacket *info = player_accounts_get(packet->uid);
         if (info && social_chat_muted(info->account_id)) return;
     }
-    ui_console_on_chat(packet->kind == NET_CHAT_PLAYER ? (name[0] ? name : "unknown") : NULL, text, packet->kind);
+    // the sender's name as shown (Hide player names): the uid says who, the local player is "Player"
+    const int self = packet->uid >= 0 && client && client->me && packet->uid == client->me->uid;
+    const char *sender = player_names_shown(packet->uid, self, name[0] ? name : "unknown", shown, sizeof(shown));
+    ui_console_on_chat(packet->kind == NET_CHAT_PLAYER ? sender : NULL, text, packet->kind);
 
     switch (packet->kind) {
         case NET_CHAT_PLAYER: // a bot's line (the server's bot chat) is never hidden by Show Player Messages
-            hud_ui_add_player_chat(name[0] ? name : "unknown", text, !player_accounts_is_bot(packet->uid));
+            hud_ui_add_player_chat(sender, text, !player_accounts_is_bot(packet->uid));
             break;
         case NET_CHAT_SERVER:
             hud_ui_add_chat(NULL, text, SERVER_CHAT_COLOR);
@@ -803,7 +810,10 @@ static void events_official_line(const int kind, const int channel, const int32_
                                  const char *color, const char *name_color) {
     if (!text) return;
     if (kind == NET_CHAT_PLAYER && account && social_chat_muted(account)) return; // mutedChatAccountIds
-    const char *who = name && name[0] ? name : "unknown";
+    char shown[PLAYER_NAME_SIZE];
+    const AccountInfo *me = active_account();
+    const int self = account > 0 && me && account == me->id;
+    const char *who = player_names_shown(-1, self, name && name[0] ? name : "unknown", shown, sizeof(shown));
     ui_console_on_chat(kind == NET_CHAT_PLAYER ? who : NULL, text, kind);
     if (kind == NET_CHAT_PLAYER) hud_ui_add_chat_channel(who, text, name_color && name_color[0] ? name_color : NULL, channel, 1);
     else hud_ui_add_chat_line_on(text, kind == NET_CHAT_SERVER ? (color && color[0] ? color : SERVER_CHAT_COLOR) : NULL, channel);
@@ -901,7 +911,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
     switch (type) {
         case NET_PACKET_CHAT: {
             EVENTS_READ(NetChatPacket, chat);
-            events_chat(&chat);
+            events_chat(client, &chat);
             return 1;
         }
         case NET_PACKET_KILL: {
@@ -919,7 +929,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             return ks_client_handle_packet(client, type, payload, length);
         case NET_PACKET_SCRIPT_CHAT: { // GAME.CHAT.send / broadcast: a server chat line (its colour is not shown)
             EVENTS_READ(NetScriptChatPacket, script_chat);
-            events_chat(&script_chat.chat);
+            events_chat(client, &script_chat.chat);
             return 1;
         }
         case NET_PACKET_HIT: {
@@ -1402,6 +1412,7 @@ void client_game_events_reset(Client *client) {
 void client_leave_game(Client *client) {
     if (!client || !g_game_joined) return;
     g_game_joined = 0;
+    player_names_reset(); // Hide player names: the match's numbering (Player_<n>) ends with it
     ranked_ui_left_match();           // the ranked game is left: a new matchmaker match may be joined (ranked_ui.c)
     if (client->game.player_count || client->me) client_clear_players(client); // spectating ends with them
     client_game_events_reset(client); // the round clock, the end screen, the vote kick, the mode HUD

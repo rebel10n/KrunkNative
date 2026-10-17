@@ -40,6 +40,9 @@ int  client_settings_hs_sound_always(void);              // "Always Play HS Soun
 // "Show Game Time" (Client > Game, default off): the top-right tile of the time played on this device (hud_ui.c).
 // KrunkNative only: v10 has no such setting (doc/v10/ notes the difference).
 int  client_settings_game_time(void);
+// "Hide player names" (Client tab, knClient hidePlayerNames, default off): every other player shows as
+// Player_<n>, the local one as Player, and no clan tag or profile picture (client/include/player_names.h).
+int  client_settings_hide_player_names(void);
 // The Notifications switch (v10_menu.c): desktop notifications for the notification centre's items
 // (desktop_notify.c). knClient "desktopNotify", default on; the setter also updates the notifier.
 int  client_settings_desktop_notify(void);

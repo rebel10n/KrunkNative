@@ -13,6 +13,7 @@
 //     Their gen() is v7's (ui_loadout.c) without the close button, the cosmetics going back to
 //     the Customize tab (goBackWindow(52))
 #include <ui_logic.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <backend_ui.h>
 #include <online_mode.h>
 #include <client.h>
@@ -120,7 +121,7 @@ static void toolbar(StrBuf *out, const int tab) {
     static const char *const ICONS[3][2] = {{"class.png", "pixelated"}, {"loadout.png", "crisp-edges"}, {"outfit.png", "crisp-edges"}};
     const AccountInfo *acc = active_account();
     sb_append(out, "<div id='loadoutToolbar'><div id='loadoutCharName'>");
-    sb_append_esc(out, acc ? (acc->alias[0] ? acc->alias : acc->name) : "Guest");
+    sb_append_esc(out, acc ? player_names_account(acc->alias[0] ? acc->alias : acc->name) : "Guest");
     sb_append(out, "</div><div id='loadoutTabs'>");
     for (int i = 0; i < 3; i++) {
         char src[96];

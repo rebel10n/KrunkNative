@@ -305,6 +305,11 @@ mobile-touch-test: build ## Phone controls with fingers only (TAP TO PLAY, joyst
 nametag-test: build ## Offline FFA bots: each bot's nametag shows when in view with line of sight, no random flips, the killer's tag clears on respawn (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/nametag_visibility_e2e.py $(DEBUG_DIR)
 
+hide-names-test: build ## Client > Hide player names: the numbering unit test, the menu / scoreboard / chat DOM of two scenarios and a live offline scoreboard, on and off (headless; EGL_DEVICE=)
+	./$(DEBUG_DIR)/player_names_test
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/hide_names_e2e.py $(DEBUG_DIR)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/hide_names_live_e2e.py $(DEBUG_DIR)
+
 selection-test: build ## Page text selection (dev console): engine checks (ui_test selection) + a headless client drag / Ctrl+C / Ctrl+A run (EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) env -u DISPLAY -u WAYLAND_DISPLAY timeout 120 ./$(DEBUG_DIR)/ui_test --headless selection
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/console_select_e2e.py $(DEBUG_DIR)

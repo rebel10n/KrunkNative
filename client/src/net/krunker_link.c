@@ -17,6 +17,7 @@
 //     (recon.c, NET_PACKET_INPUT_BATCH): that window becomes one delta-compressed "q".
 //   - cosmetics / skins / account fields are not mapped (a guest has none): SPAWNs carry none.
 #include <krunker_link.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include "krunker_link_internal.h" // krunker_link_world.c: mode objectives / world objects
 #include <krunker_cheat.h>
 #include <krunker_build_live.h> // the current build's strides, offsets and argument positions
@@ -1286,7 +1287,8 @@ static void on_update_host(KrunkerLink *l, const KrunkerFrame *f) {
     }
     for (int i = 0; i < l->player_count; i++) {
         if (strcmp(l->players[i].id, host) != 0) continue;
-        const char *args[1] = {l->players[i].name};
+        char shown[PLAYER_NAME_SIZE];
+        const char *args[1] = {player_names_shown(-1, 0, l->players[i].name, shown, sizeof(shown))}; // Hide player names
         emit_chat_i18n(l, CHAT_CHANNEL_GLOBAL, 2, NULL, "host.transfer", args, 1, NULL, NULL);
         return;
     }

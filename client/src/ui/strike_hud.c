@@ -21,6 +21,7 @@
 // a Strike player respawns on their own, no menu in between (strike_hud_death_tick).
 // The round end: LEAN_END_SCREEN (WB, the template LEAN_END_SCREEN.html) over the game.
 #include <strike_ui.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <strike_econ.h>
 #include <strike_double_xp.h>
 #include <strike_hud_fx.h>
@@ -302,7 +303,8 @@ static void view_spectate(const Client *client, StrBuf *sb) {
     const Player *target = uid >= 0 ? client_find_player((Client *) client, uid) : NULL;
     sb_append(sb, "<div class=\"frvr-in-game-ui__spectate\"><div class=\"frvr-in-game-ui__spectate-title\">Spectating</div>");
     sb_append(sb, "<div class=\"frvr-in-game-ui__spectate-name\">");
-    if (target) sb_append_esc(sb, target->name);
+    char pn[PLAYER_NAME_SIZE];
+    if (target) sb_append_esc(sb, player_names_shown(target->uid, target == client->me, target->name, pn, sizeof(pn)));
     else sb_append(sb, "Free Camera");
     sb_append(sb, "</div>");
     if (target && team_mode(client) && target->team) sb_appendf(sb, "<div class=\"frvr-in-game-ui__spectate-team\">Team %d</div>", (int) target->team);
@@ -419,7 +421,8 @@ static int board_rows(const Client *client, BoardRow *out, const int max) {
             BoardRow *r = &out[n];
             memset(r, 0, sizeof(*r));
             r->player = p;
-            snprintf(r->name, sizeof(r->name), "%s", p->name);
+            char pn[PLAYER_NAME_SIZE];
+            snprintf(r->name, sizeof(r->name), "%s", player_names_shown(p->uid, p == client->me, p->name, pn, sizeof(pn))); // Hide player names
             r->team = p->team;
             r->is_you = p == client->me;
             r->class_index = p->class_index;

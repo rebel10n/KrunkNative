@@ -92,6 +92,7 @@
 #include <ui_logic.h>
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
+#include <player_names.h>
 #endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
@@ -1272,6 +1273,7 @@ static void client_apply_skins(const NetSkinsPacket *packet) {
 // dead right now: kept without meshes so the scoreboard and kill feed have its name.
 void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     Player *player = client_find_player(client, packet->uid);
+    if (!packet->is_you) player_names_see(packet->uid); // Hide player names: the others, numbered in the order the client first sees them
 
     if (!packet->active) {
         if (!player) {

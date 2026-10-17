@@ -6,6 +6,7 @@
 // and the HUD (#powerUpHolder, the finiteAmmo reserve, #roundMessage: client/src/ui/hud_zombies.c)
 // read Game.zombies.
 #include <client.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <audio.h>
 #include <spectate.h>
 #include <ui_logic.h>
@@ -19,7 +20,10 @@
 
 static const char *player_label(const Client *client, const Player *player, const int own, char *out, const size_t size) {
     if (player == client->me) snprintf(out, size, "%s", own ? "Your" : "You");
-    else snprintf(out, size, "%s", player->name);
+    else {
+        char pn[PLAYER_NAME_SIZE];
+        snprintf(out, size, "%s", player_names_shown(player->uid, 0, player->name, pn, sizeof(pn))); // Hide player names
+    }
     return out;
 }
 

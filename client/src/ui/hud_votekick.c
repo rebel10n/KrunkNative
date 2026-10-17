@@ -5,6 +5,7 @@
 // packets are NET_PACKET_EXT subtypes (shared/include/net_ext.h 0x0800..); the rules are the
 // server's (server/src/votekick.c).
 #include <ui_logic.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <client.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -157,19 +158,29 @@ int hud_votekick_kpd_row_allowed(const Client *client) {
 
 // ---------------------------------------------------------------- the prompt (io "vk")
 
+// The name a vote popup shows for an alias (Hide player names); the vote itself sends the alias
+static const char *vk_shown(const Client *client, const char *alias, char *out, const size_t size) {
+    for (size_t i = 0; client && i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && !strcmp(p->name, alias)) return player_names_shown(p->uid, p == client->me, alias, out, size);
+    }
+    return player_names_shown(-1, 0, alias, out, size);
+}
+
 static void show_prompt(const Client *client, const int opened) {
+    char shown[PLAYER_NAME_SIZE];
     char html[160];
     size_t len = 0;
     html[0] = 0;
     if (opened) { // "<voter> voted to kick <target>"
-        append_esc(html, sizeof(html), &len, g_vk.initiator);
+        append_esc(html, sizeof(html), &len, vk_shown(client, g_vk.initiator, shown, sizeof(shown)));
         append_esc(html, sizeof(html), &len, " voted to kick ");
-        append_esc(html, sizeof(html), &len, g_vk.target);
+        append_esc(html, sizeof(html), &len, vk_shown(client, g_vk.target, shown, sizeof(shown)));
         dom_html("voteKickInfo", html);
         len = 0;
         html[0] = 0;
         append_esc(html, sizeof(html), &len, "Kick ");
-        append_esc(html, sizeof(html), &len, g_vk.target);
+        append_esc(html, sizeof(html), &len, vk_shown(client, g_vk.target, shown, sizeof(shown)));
         dom_html("voteKickName", html);
     }
     snprintf(html, sizeof(html), "Votes: %d/%d", g_vk.votes, g_vk.needed);
@@ -283,10 +294,12 @@ static void kick_vote(Client *client, const int uid) {
 // confirmPolice(alias, id): v10's genericPopup(..., "polConfPop")
 static void confirm_police(const char *alias, const int uid) {
     if (g_vk.calling) return;
-    char esc[96];
-    size_t len = 0;
+    char esc[96], shown_esc[96], shown[PLAYER_NAME_SIZE];
+    size_t len = 0, shown_len = 0;
     esc[0] = 0;
-    append_esc(esc, sizeof(esc), &len, alias);
+    shown_esc[0] = 0;
+    append_esc(esc, sizeof(esc), &len, alias); // callPolice takes the alias
+    append_esc(shown_esc, sizeof(shown_esc), &shown_len, player_names_shown(uid, 0, alias, shown, sizeof(shown))); // the text shows the name as shown
     char html[900];
     snprintf(html, sizeof(html),
              "<div style='color:rgba(255,255,255,0.6);font-size:20px;margin-bottom:15px;'>Only call the <b>K.P.D</b> if you strongly suspect <b>%s</b>"
@@ -294,7 +307,7 @@ static void confirm_police(const char *alias, const int uid) {
              "<div id='confirmBtn' style='width:142px;margin-right:5px' onclick='callPolice(`%s`,`%d`)'>Call<span class='material-icons'"
              " style='color:#fff;margin-left:10px;font-size:28px;vertical-align:bottom;margin-bottom:1px'>call</span></div>"
              "<div id='declineBtn' style='width:142px;margin-left:3px' onclick='clearPops()'>Cancel</div>",
-             esc, esc, uid);
+             shown_esc, esc, uid);
     ui_loadout_clear_pops();
     dom_display("popupHolder", "block");
     const HtmlElem pop = html_dom_by_id("genericPop");

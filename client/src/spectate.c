@@ -18,6 +18,7 @@
 //   - specNames toggles showSpectatorNameTags (nametags.c), next / previous skip bots that
 //     count as AI (mode.botsAsAI).
 #include <spectate.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <hud_map.h> // specMiniMap
@@ -275,8 +276,8 @@ static void spectate_focus(Client *client, const int uid) {
         return;
     }
     if (player) {
-        char line[96];
-        snprintf(line, sizeof(line), "Focusing - %s", player->name);
+        char line[96], pn[PLAYER_NAME_SIZE];
+        snprintf(line, sizeof(line), "Focusing - %s", player_names_shown(player->uid, player->is_you, player->name, pn, sizeof(pn)));
         hud_ui_add_chat(NULL, line, "#fc03ec");
     }
     g_spect.focused_uid = uid;
@@ -305,8 +306,8 @@ void spectate_focus_player(Client *client, const int uid, const int quiet_auto) 
     const Player *player = client_find_player(client, uid);
     if (g_spect.focused_uid == uid) return;
     if (player) {
-        char line[96];
-        snprintf(line, sizeof(line), "Focusing - %s", player->name);
+        char line[96], pn[PLAYER_NAME_SIZE];
+        snprintf(line, sizeof(line), "Focusing - %s", player_names_shown(player->uid, player->is_you, player->name, pn, sizeof(pn)));
         hud_ui_add_chat(NULL, line, "#fc03ec");
     } else hud_ui_add_chat(NULL, "Auto Focusing Suspect", "#fc03ec");
     g_spect.focused_uid = uid;

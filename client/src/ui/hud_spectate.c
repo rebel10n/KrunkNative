@@ -18,6 +18,7 @@
 // keeps the holders it would otherwise leave in the wrong state in line every frame
 // (inline style compared first, written only on a difference).
 #include <spectate.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <render_settings.h>
@@ -93,8 +94,9 @@ static void hs_append_escaped(char *out, const size_t size, size_t *len, const c
     out[*len] = 0;
 }
 
-static const char *hs_name(const Player *player) {
-    return player->name[0] ? player->name : "Guest";
+// The name the spectate panel shows (Hide player names: player_names.h); `out` holds it when replaced.
+static const char *hs_name(const Player *player, char *out, const size_t size) {
+    return player_names_shown(player->uid, player->is_you, player->name[0] ? player->name : "Guest", out, size);
 }
 
 /* ------------------------------------------------------------ visibility */
@@ -211,7 +213,8 @@ static void hs_slot_add(const Player *player, const int column) {
         "<img src='textures/classes/icon_%d.png' class='specPlayerIcon%s' id='specPI_%d'>"
         "<div class='specPlayerFlag' id='sf_-1'></div><div class='specPlayerName'>",
         player->class_index, player->active ? "" : " silhouette", player->class_index);
-    hs_append_escaped(html, sizeof(html), &len, hs_name(player));
+    char pname[PLAYER_NAME_SIZE];
+    hs_append_escaped(html, sizeof(html), &len, hs_name(player, pname, sizeof(pname)));
     char num[8] = "";
     if (index < 9) snprintf(num, sizeof(num), "%d", index + 1);
     snprintf(html + len, sizeof(html) - len,
@@ -315,7 +318,8 @@ static void hs_update_stats(const Client *client) {
         const int mhp = target->max_health > 0 ? target->max_health : 100;
         // #specSUS (SUSPECT) while the followed player is the K.P.D case's suspect (v10 :209342)
         const int sus = hud_votekick_kpd_sus(client) == target->uid;
-        snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, sus, hs_name(target));
+        char pname[PLAYER_NAME_SIZE];
+        snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, sus, hs_name(target, pname, sizeof(pname)));
     } else {
         snprintf(key, sizeof(key), "-");
     }
@@ -345,7 +349,8 @@ static void hs_update_stats(const Client *client) {
         "<img class='spectPIcon' src='textures/classes/icon_%d.png' /><span id='f_-1' class='specFlag'></span>"
         "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_0' "
         "style='color:white;'>0</div><span class='specPHead' id='s_%d'>", target->class_index, target->uid);
-    hs_append_escaped(html, sizeof(html), &len, hs_name(target));
+    char pname[PLAYER_NAME_SIZE];
+    hs_append_escaped(html, sizeof(html), &len, hs_name(target, pname, sizeof(pname)));
     snprintf(html + len, sizeof(html) - len,
         "</span><i class='material-icons specVerified' style='display:none'>check_circle</i><div id='spectHPB'>"
         "<span id='spectHPV'>%d | %d</span><div id='spectHPBI' style='width:%s%%;background-color:%s'></div></div></div>",

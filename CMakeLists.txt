@@ -1018,7 +1018,7 @@ else ()
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
-    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/ui/player_names.c
                    client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
                    shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                    shared/src/season.c shared/src/voice.c shared/src/social.c)
@@ -1047,7 +1047,7 @@ else ()
     if (NOT WIN32)
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
-                       client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
+                       client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c client/src/ui/player_names.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                        shared/src/season.c shared/src/voice.c shared/src/social.c)
         # the headers krunker_net.c includes (client.h: freetype; GLFW for glfwGetTime, which the test defines itself)
@@ -1097,6 +1097,11 @@ else ()
     target_include_directories(game_time_test PRIVATE client/include shared/include)
     target_link_libraries(game_time_test PRIVATE m)
     add_test(NAME game_time_test COMMAND game_time_test)
+    # player_names_test (client/src/ui/player_names.c): Hide player names: Player_<n> in the order the client first sees
+    # the players (kept for the match, restarts on a new match), Player for the local player and the account, no clan
+    add_executable(player_names_test client/tests/player_names_test.c client/src/ui/player_names.c)
+    target_include_directories(player_names_test PRIVATE client/include shared/include)
+    add_test(NAME player_names_test COMMAND player_names_test)
     # desktop_notify_test (client/src/ui/desktop_notify.c): the Notifications switch (default on), that each centre
     # item reaches the desktop once while it is on, and the toggle's caption; the sink stands in for the OS notifier
     add_executable(desktop_notify_test client/tests/desktop_notify_test.c client/src/ui/desktop_notify.c)
@@ -1107,7 +1112,7 @@ else ()
     # down at KPD_NO_ANSWER_MS, and so does every other way out of a call (an answer, a refusal, a new
     # round, a lost session, no socket). The page, audio, chat and socket are stubs; the timers run on a
     # fake clock (client/tests/kpd_phone_test.c). The headers only need the client's include tree.
-    add_executable(kpd_phone_test client/tests/kpd_phone_test.c client/src/ui/hud_votekick.c shared/src/net_ext.c)
+    add_executable(kpd_phone_test client/tests/kpd_phone_test.c client/src/ui/hud_votekick.c shared/src/net_ext.c client/src/ui/player_names.c)
     target_include_directories(kpd_phone_test PRIVATE client/include client/lib shared/include)
     target_link_libraries(kpd_phone_test PRIVATE cJSON freetype glfw m)
     add_test(NAME kpd_phone_test COMMAND kpd_phone_test)
@@ -1116,7 +1121,7 @@ else ()
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
     add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
                    client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_sounds.c
-                   client/src/net/krunker_altcha.c)
+                   client/src/net/krunker_altcha.c client/src/ui/player_names.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)
     target_link_libraries(krunker_sync_test PRIVATE m)
     if (WIN32)

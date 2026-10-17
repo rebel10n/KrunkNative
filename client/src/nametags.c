@@ -39,6 +39,7 @@
 #endif
 #include <stdlib.h>
 #include <string.h>
+#include <player_names.h> // Hide player names: the tag's name and clan (player_names.h)
 
 #define NT_MAX_TAGS 64
 #define NT_MAX_SITES 8
@@ -594,11 +595,16 @@ static void nt_info(const Player *player, TagInfo *info) {
     info->custom_badge = -1;
     if (client_render_settings()->stream_mode) snprintf(info->name, sizeof(info->name), "Player %d", player->uid);
     else snprintf(info->name, sizeof(info->name), "%s", player->name);
+    if (player_names_hidden()) { // Hide player names: Player_<n> (Player for the local player), see player_names.h
+        char shown[PLAYER_NAME_SIZE];
+        snprintf(info->name, sizeof(info->name), "%s", player_names_shown(player->uid, player->is_you, player->name, shown, sizeof(shown)));
+    }
     // account data from a brain-linked server (NET_PACKET_PLAYER_INFO): level box, clan, badges
     const NetPlayerInfoPacket *account = player_accounts_get(player->uid);
     if (account && account->account_id > 0) {
         info->level = account->level > 0 ? account->level : 1;
-        if (!client_render_settings()->stream_mode && account->clan[0]) snprintf(info->clan, sizeof(info->clan), "%s", account->clan);
+        const char *clan = player_names_clan(account->clan); // Hide player names: no clan tag
+        if (!client_render_settings()->stream_mode && clan[0]) snprintf(info->clan, sizeof(info->clan), "%s", clan);
         info->badge[NT_BADGE_PREMIUM] = (account->flags & NET_PLAYER_INFO_PREMIUM) != 0;
         info->badge[NT_BADGE_FEATURED] = (account->flags & NET_PLAYER_INFO_VERIFIED) != 0;
     }

@@ -4,6 +4,7 @@
 // updateTeam ("tm"), updateLives ("lv"), actionFeed ("ac"), lockPlayer ("lock"),
 // Game.updateFlags (the CTF flag messages) and the end screen's teamTotal0/1 + endStats.
 #include <hud_modes.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <audio.h> // "rds": woosh_0
 #include <streamer.h>
 #include <mode_world.h>
@@ -166,7 +167,8 @@ static void hud_modes_add_action(Client *client, const NetActionPacket *packet) 
         snprintf(left, sizeof(left), "<span style='color:%s'>You</span>", MODES_COLOR_YOU);
     } else {
         char shown[PLAYER_NAME_SIZE];
-        html_escape(streamer_name(actor->name, shown, sizeof(shown)), name, sizeof(name)); // fixStr(scrambleS(alias)) in streamer mode
+        char pn[PLAYER_NAME_SIZE];
+        html_escape(streamer_name(player_names_shown(actor->uid, 0, actor->name, pn, sizeof(pn)), shown, sizeof(shown)), name, sizeof(name)); // fixStr(scrambleS(alias)) in streamer mode
         snprintf(left, sizeof(left), "<span style='color:%s'>%s</span>", local_team && local_team == actor->team ? MODES_COLOR_ALLY : MODES_COLOR_ENEMY, name);
     }
 
@@ -175,7 +177,8 @@ static void hud_modes_add_action(Client *client, const NetActionPacket *packet) 
         snprintf(right, sizeof(right), "<span style='color:#fff'>You</span>");
     } else if (other) {
         char shown[PLAYER_NAME_SIZE];
-        html_escape(streamer_name(other->name, shown, sizeof(shown)), other_name, sizeof(other_name));
+        char pn[PLAYER_NAME_SIZE];
+        html_escape(streamer_name(player_names_shown(other->uid, 0, other->name, pn, sizeof(pn)), shown, sizeof(shown)), other_name, sizeof(other_name));
         snprintf(right, sizeof(right), "<span style='color:%s'>%s</span>", local_team && local_team == other->team ? MODES_COLOR_ALLY : MODES_COLOR_ENEMY, other_name);
     }
 
@@ -882,14 +885,19 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
 
         // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
         char name[PLAYER_NAME_SIZE * 6], shown_name[PLAYER_NAME_SIZE * 6], shown[PLAYER_NAME_SIZE];
-        html_escape(player->name, name, sizeof(name));
-        html_escape(streamer_name(player->name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
+        char pn[PLAYER_NAME_SIZE];
+        const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
+        html_escape(raw_name, name, sizeof(name));
+        html_escape(streamer_name(raw_name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
         const char *color = player == client->me ? "#fff" : !left && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, 16384 - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
         for (int i = 1; i < stat_count; i++) {
-            if (!strcmp(stats[i], "name")) {
+            if (!strcmp(stats[i], "name") && player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
+                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
+                                         "<span class='endTableN' style='color:%s'>%s</span></td>", color, shown_name);
+            } else if (!strcmp(stats[i], "name")) {
                 len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
                                          "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
             } else {

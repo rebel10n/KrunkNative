@@ -73,6 +73,7 @@
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
+#include <player_names.h> // Hide player names: the scenario's names as the game shows them
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -952,7 +953,8 @@ static void apply_chat(void) {
         const char *name = obj_str(row, "name"), *msg = obj_str(row, "msg");
         const char *text = obj_str(row, "text"), *color = obj_str(row, "color");
         if (name && msg) {
-            hud_ui_add_chat(name, msg, NULL);
+            char pn[PLAYER_NAME_SIZE]; // the scenario's sender as the game's chat shows it (Hide player names)
+            hud_ui_add_chat(player_names_shown(-1, 0, name, pn, sizeof(pn)), msg, NULL);
             continue;
         }
         // White rows are Krunker's plain game lines (type 1: .chatMsg default colour).
@@ -1045,8 +1047,10 @@ static void apply_timed(Client *client, const double capture_ms) {
         const cJSON *row;
         cJSON_ArrayForEach(row, feed) {
             const char *icon = obj_str(row, "weaponIcon");
-            hud_ui_add_killfeed_ex(client, obj_str(row, "killer"), (int) obj_num(row, "killerIsYou", 0),
-                                   obj_str(row, "victim"), (int) obj_num(row, "victimIsYou", 0),
+            char kpn[PLAYER_NAME_SIZE], vpn[PLAYER_NAME_SIZE]; // the names as the kill feed shows them (Hide player names)
+            const int killer_you = (int) obj_num(row, "killerIsYou", 0), victim_you = (int) obj_num(row, "victimIsYou", 0);
+            hud_ui_add_killfeed_ex(client, player_names_shown(-1, killer_you, obj_str(row, "killer"), kpn, sizeof(kpn)), killer_you,
+                                   player_names_shown(-1, victim_you, obj_str(row, "victim"), vpn, sizeof(vpn)), victim_you,
                                    icon, (int) obj_num(row, "headshot", 0), (int) obj_num(row, "streak", -1), // stk: a Nuke kill's icon
                                    obj_num(row, "age_ms", 0.0) - ahead);
         }

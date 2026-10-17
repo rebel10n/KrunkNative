@@ -12,6 +12,7 @@
 // The icons are Material glyphs (FRVR's info-*.svg / icon-logout.svg are not in the 1.37.2 tree). Answers to the
 // page's requests (nmeR, bpclmr) arrive as popupResponse: strike_popup_message takes them while expected.
 #include <strike_ui.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <strike_econ.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -83,7 +84,7 @@ static char *escaped(const char *text) {
 static const char *account_name(void) {
     static char name[64];
     const AccountInfo *acc = active_account();
-    snprintf(name, sizeof name, "%s", !acc ? "Guest" : acc->alias[0] ? acc->alias : acc->name);
+    snprintf(name, sizeof name, "%s", !acc ? "Guest" : player_names_account(acc->alias[0] ? acc->alias : acc->name));
     return name;
 }
 

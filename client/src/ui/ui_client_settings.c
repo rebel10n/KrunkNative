@@ -23,6 +23,7 @@
 #include <desktop_notify.h> // the Notifications switch (desktopNotify) drives the desktop notifier
 #include <ui_logic.h>
 #include <backend.h>         // backend_social_reconnect (a proxy change)
+#include <v10_menu.h>       // the menu account name after Hide player names changes
 #include <krunker_lobbies.h> // krunker_lobbies_network_changed (a proxy change)
 #include <backend_ui.h> // servers_ui_region_options (Default Region)
 #include <discord_rpc.h>
@@ -155,6 +156,9 @@ static const ClientSetting SETTINGS[] = {
     {"swapper", "Resource Swapper", "Client", CS_SWITCH, CS_NATIVE | CS_RESTART, "true",
      "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)",
      NULL, 0, "Open folder", "openSwapper"},
+    // Client > Hide player names: the names, clan tags and profile pictures other players and the account show
+    // (client/include/player_names.h); the label only, no description
+    {"hidePlayerNames", "Hide player names", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
     {"autoRestart", "Auto-restart for updates", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
      "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end"},
     // Web: the CSS is the text Edit saved in this browser (knCustomCSS, window.prompt), not a file.
@@ -242,6 +246,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.autoSpec.name", "Auto Spectate")  I18N("kn.client.autoSpec.info", "Turn Spectate on when the game loads")
 //   I18N("kn.client.hsSound.name", "Always Play HS Sound on Kill")
 //   I18N("kn.client.gameTime.name", "Show Game Time")
+//   I18N("kn.settings.hidePlayerNames", "Hide player names")
 //   I18N("kn.client.gameTime.info", "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike")
 //   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")
 //   I18N("kn.client.clearCache.name", "Clear Cache & Storage")  I18N("kn.client.clearCache.button", "Clear Now")
@@ -253,7 +258,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("settings.network.header", "Network")  I18N("kn.client.cat.game", "Game")  I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.sound", "Sound")
 //   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
 static const struct { const char *row, *key; } CS_V10_NAMES[] = {
-    {"resolution", "settings.quality.res"},
+    {"resolution", "settings.quality.res"}, {"hidePlayerNames", "kn.settings.hidePlayerNames"},
     {"swapper", "settings.client.resourceSwapper"}, {"resetClient", "settings.client.resetSettings"},
 };
 
@@ -717,6 +722,11 @@ int client_settings_hs_sound_always(void) {
 
 int client_settings_game_time(void) {
     return cs_bool("gameTime"); // read each time: the HUD asks every frame (cached store, cheap)
+}
+
+// "Hide player names" (client/src/ui/player_names.c): read each time, the names are asked every frame.
+int client_settings_hide_player_names(void) {
+    return cs_bool("hidePlayerNames");
 }
 
 int client_settings_auto_restart(void) {
@@ -1276,6 +1286,7 @@ static void apply_setting(const ClientSetting *s) {
     else if (!strcmp(k, "resolution")) apply_resolution();
     else if (!strcmp(k, "autoSpec")) apply_auto_spectate();
     else if (!strcmp(k, "hsSound")) g_cs.hs_sound = cs_bool("hsSound");
+    else if (!strcmp(k, "hidePlayerNames")) v10_menu_account_changed(); // the menu's account name and clan (player_names.h)
     else if (!strcmp(k, "proxy") || !strcmp(k, "proxyScope")) apply_proxy();
     else if (!strcmp(k, "audioOutput")) {
         char output[AUDIO_DEVICE_NAME_MAX];

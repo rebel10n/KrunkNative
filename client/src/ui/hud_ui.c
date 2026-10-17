@@ -81,6 +81,7 @@ void hud_ui_hit(Client*, int kill);
 #include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
 #include <client_settings.h> // client_settings_game_time: Client > Game > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
+#include <player_names.h>  // Hide player names: the names, clans and the local player shown (player_names.h)
 #include <strike_ui.h>   // strike_ui_active(): Krunker Strike's round end is its own banner and lean screen (strike_hud.c)
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -509,6 +510,7 @@ void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet) {
 // The " [clan]" tag of a board row: COLORS.getClanCol(clan, fallback) (v7.1.4: DEV, VIP and CMD
 // keep a colour; the clan war rank colours are gone).
 static void hb_append_clan(char *out, const size_t size, size_t *len, const char *clan, const char *fallback) {
+    clan = player_names_clan(clan); // Hide player names: no clan tag
     if (!clan || !clan[0]) return;
     const char *col = !strcmp(clan, "DEV") ? "#40C4FF" : !strcmp(clan, "VIP") ? "#11D445" : !strcmp(clan, "CMD") ? "#993299" : fallback;
     hb_append(out, size, len, "<span style='color:%s'> [", col);
@@ -537,6 +539,7 @@ static void hb_append_badges(char *out, const size_t size, size_t *len, const Ne
 // One board entry, sampled from the game or a scenario row.
 typedef struct {
     const char *name;
+    char name_buf[PLAYER_NAME_SIZE]; // name's storage: the name shown (Hide player names may replace it)
     int stats[BOARD_STAT_MAX];    // one per hud_board_keys() column
     int is_you, is_ally, team;
     int badge;                    // badgeIndex, -1 none
@@ -572,15 +575,28 @@ static void hud_center_board_row_html(char *out, const size_t size, size_t *len,
     hb_append(out, size, len, "</tr>");
 }
 
-static const char *hud_player_name(const Client *client, const Player *player) {
+// A player's name as the server knows it (SPAWN "Guest_N"; the menu name for us, "Guest" for an unnamed one).
+static const char *hud_raw_player_name(const Client *client, const Player *player) {
     if (player->name[0]) return player->name;
     return player == client->me ? client->menu_name : "Guest";
 }
 
+// The name a row, popup or board shows for a player (Hide player names: player_names.h). `out` holds it when replaced.
+static const char *hud_player_name(const Client *client, const Player *player, char *out, const size_t size) {
+    return player_names_shown(player->uid, player == client->me, hud_raw_player_name(client, player), out, size);
+}
+
 // The local player's name as the server knows it (SPAWN "Guest_N"), else the menu name.
-static const char *hud_my_name(const Client *client) {
+static const char *hud_raw_my_name(const Client *client) {
     if (!client) return "";
-    return client->me ? hud_player_name(client, client->me) : client->menu_name;
+    return client->me ? hud_raw_player_name(client, client->me) : client->menu_name;
+}
+
+// The local player's name as shown: "Player" while names are hidden (player_names.h).
+static const char *hud_my_name(const Client *client) {
+    static char shown[PLAYER_NAME_SIZE];
+    if (!client) return "";
+    return player_names_shown(client->me ? client->me->uid : -1, 1, hud_raw_my_name(client), shown, sizeof(shown));
 }
 
 // The server's player list (client->game.players, LEADERBOARD packets) sorted by score,
@@ -620,7 +636,7 @@ static void hud_board_fill(const Client *client, const Player *p, const int32_t 
     const char *const *keys = hud_board_keys(client, &columns);
     const int my_team = client->me ? client->me->team : 0;
     memset(r, 0, sizeof(*r));
-    r->name = hud_player_name(client, p);
+    r->name = hud_player_name(client, p, r->name_buf, sizeof(r->name_buf));
     for (int k = 0; k < columns; k++) r->stats[k] = values && k < value_count ? values[k] : mode_leader_stat_value(p, keys[k]);
     r->team = p->team;
     r->is_you = p == client->me;
@@ -636,7 +652,7 @@ static void hud_board_fill(const Client *client, const Player *p, const int32_t 
 static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out, const int max) {
     int n = 0, columns;
     const char *const *keys = hud_board_keys(client, &columns);
-    const char *my_name = hud_my_name(client);
+    const char *my_name = hud_raw_my_name(client); // the server's name: the rows' names are the raw ones here
     const int my_team = client->me ? client->me->team : 0;
     if (cJSON_IsArray(rows)) {
         const int count = cJSON_GetArraySize(rows);
@@ -647,9 +663,10 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
             const cJSON *me = cJSON_GetObjectItemCaseSensitive(row, "me");
             BoardRow *r = &out[n++];
             memset(r, 0, sizeof(*r));
-            r->name = cJSON_IsString(name) ? name->valuestring : "";
+            const char *raw = cJSON_IsString(name) ? name->valuestring : "";
             // an FFA board always lists the local player: a single row is them
-            r->is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name[0] && !strcmp(r->name, my_name));
+            r->is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name[0] && !strcmp(raw, my_name));
+            r->name = player_names_shown(-1, r->is_you, raw, r->name_buf, sizeof(r->name_buf)); // Hide player names
 #define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
             for (int k = 0; k < columns; k++) r->stats[k] = ROW_INT(keys[k]);
             r->team = ROW_INT("team");
@@ -672,7 +689,7 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
     if (n == 0 && max > 0) {
         BoardRow *r = &out[n++];
         memset(r, 0, sizeof(*r));
-        r->name = my_name;
+        r->name = hud_my_name(client);
         for (int k = 0; k < columns; k++) r->stats[k] = client->me ? mode_leader_stat_value(client->me, keys[k]) : 0;
         r->team = my_team;
         r->is_you = 1;
@@ -740,7 +757,8 @@ static char g_plist_search[64]; // windows[22].playerSearch
 
 typedef struct {
     int uid;
-    char name[PLAYER_NAME_SIZE * 2];
+    char name[PLAYER_NAME_SIZE * 2];  // the name shown (Hide player names)
+    char raw[PLAYER_NAME_SIZE];      // the server's name: what the server actions and the vote take
     char clan[16];
     int ping;
     int account_id;  // 0 guest (v10 level 0: no mute buttons)
@@ -763,6 +781,7 @@ static int hud_plist_matches(const char *name) {
 }
 
 static void hud_plist_clan(StrBuf *sb, const char *clan) {
+    clan = player_names_clan(clan); // Hide player names: no clan tag
     if (!clan || !clan[0]) return;
     // v10 COLORS.getClanCol(clan, "#353535") (game.deob.js:4306488): the staff clans are #FBC02D, any
     // other clan (VIP, CMD, ...) the #353535 default. The list is lowercased in v10.
@@ -807,16 +826,32 @@ static const char *hud_plist_ping_color(const int ping) {
     return ping >= 150 ? PING_COLOR_HIGH : ping >= 50 ? PING_COLOR_MEDIUM : ping <= 0 ? "#fff" : PING_COLOR_LOW; // COLORS.ping
 }
 
+// A row's names: the name shown (Hide player names) and the server's raw one for the actions and the vote
+static void hud_plist_set_names(PlistRow *r, const int uid, const int self, const char *raw) {
+    char shown[PLAYER_NAME_SIZE];
+    snprintf(r->raw, sizeof(r->raw), "%s", raw ? raw : "");
+    snprintf(r->name, sizeof(r->name), "%s", player_names_shown(uid, self, r->raw, shown, sizeof(shown)));
+}
+
+// The name's link: openPlayerProfile(name) opens the profile of the name shown, so none while names are hidden
+static void hud_plist_name_link(StrBuf *sb, const PlistRow *r, const char *cls) {
+    sb_appendf(sb, "<a href='javascript:void(0)' class='%s'", cls);
+    if (!player_names_hidden()) {
+        sb_append(sb, " onclick='openPlayerProfile(\"");
+        sb_append_esc(sb, r->name);
+        sb_append(sb, "\")'");
+    }
+    sb_appendf(sb, " oncontextmenu='copyUser(this, &quot;%d&quot;)'>", r->uid);
+}
+
 // v10 genList's first row for a K.P.D officer: the suspect (kpdData.sus) in a red frame, the name red
 static void hud_plist_suspect_row(StrBuf *sb, const Client *client, const PlistRow *r) {
     int dev = 0, kick = 0, host = 0;
     hud_plist_staff(client, &dev, &kick, &host);
     sb_append(sb, "<tr style='border:solid 2px red'><td class='pListName'>");
     hud_plist_focus(sb, r);
-    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
-                   "<a href='javascript:void(0)' class='red' onclick='openPlayerProfile(\"", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0);
-    sb_append_esc(sb, r->name);
-    sb_appendf(sb, "\")' oncontextmenu='copyUser(this, &quot;%d&quot;)'>", r->uid);
+    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0);
+    hud_plist_name_link(sb, r, "red");
     sb_append_esc(sb, r->name);
     hud_plist_clan(sb, r->clan);
     sb_append(sb, "</a></td></td><td class='pListActions'>"); // v10's own markup (the stray </td> included)
@@ -832,11 +867,8 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     sb_append(sb, "<tr><td class='pListName'>");
     hud_plist_focus(sb, r);
     if (r->host) sb_append(sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // iíïïiìï == id: the lobby's host
-    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>"
-                   "<a href='javascript:void(0)' class='%s' onclick='openPlayerProfile(\"", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0,
-               r->hacker ? "red" : "");
-    sb_append_esc(sb, r->name);
-    sb_appendf(sb, "\")' oncontextmenu='copyUser(this, &quot;%d&quot;)'>", r->uid);
+    sb_appendf(sb, "<span class='pListPing material-icons' style='color:%s' title='%dms'>signal_cellular_alt</span>", hud_plist_ping_color(r->ping), r->ping > 0 ? r->ping : 0);
+    hud_plist_name_link(sb, r, r->hacker ? "red" : "");
     sb_append_esc(sb, r->name);
     hud_plist_clan(sb, r->clan);
     sb_append(sb, "</a>");
@@ -852,10 +884,10 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     }
     if (hud_votekick_kpd_row_allowed(client)) {
         sb_append(sb, "<span onmouseenter='playTick()' class='punishButton kdf' onclick='confirmPolice(`");
-        sb_append_esc(sb, r->name);
+        sb_append_esc(sb, r->raw);
         sb_appendf(sb, "`,`%d`)'><img src='./img/police.png' style='height:25px;vertical-align:middle;margin-top:-6px'></span>", r->uid);
     }
-    if (hud_votekick_row_allowed(client, r->name, 1))
+    if (hud_votekick_row_allowed(client, r->raw, 1))
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton vote' onclick='kickVote(\"%d\")'>Votekick</span>", r->uid);
     if (dev) sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", r->uid);
     if (dev) { // account.canTeleport: staff (the host teleports with /tp and /bring)
@@ -872,7 +904,7 @@ static void hud_plist_row_json(PlistRow *r, const cJSON *o) {
     memset(r, 0, sizeof(*r));
     const cJSON *v;
     r->uid = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "uid")) ? v->valueint : 0;
-    snprintf(r->name, sizeof(r->name), "%s", cJSON_IsString(v = cJSON_GetObjectItem(o, "name")) ? v->valuestring : "");
+    hud_plist_set_names(r, r->uid, 0, cJSON_IsString(v = cJSON_GetObjectItem(o, "name")) ? v->valuestring : "");
     snprintf(r->clan, sizeof(r->clan), "%s", cJSON_IsString(v = cJSON_GetObjectItem(o, "clan")) ? v->valuestring : "");
     r->ping = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "ping")) ? v->valueint : 0;
     r->account_id = cJSON_IsNumber(v = cJSON_GetObjectItem(o, "account")) ? v->valueint : 0;
@@ -888,7 +920,7 @@ static void hud_plist_row_of(const Client *client, const Player *p, PlistRow *ro
     const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
     memset(row, 0, sizeof(*row));
     row->uid = p->uid;
-    snprintf(row->name, sizeof(row->name), "%s", hud_player_name(client, p));
+    hud_plist_set_names(row, p->uid, p == client->me, hud_raw_player_name(client, p));
     if (info && info->account_id > 0) snprintf(row->clan, sizeof(row->clan), "%s", info->clan);
     row->ping = p->ping;
     row->account_id = info ? info->account_id : 0;
@@ -943,7 +975,8 @@ static char *hud_plist_rows(void) {
         const NetPlayerInfoPacket *info = me ? player_accounts_get(me->uid) : NULL;
         const AccountInfo *acc = active_account();
         // the local row is the account's alias when signed in (v10 Game.players alias of the account)
-        sb_append_esc(&sb, acc ? acc->name : me ? hud_player_name(client, me) : client ? client->menu_name : "");
+        char own[PLAYER_NAME_SIZE];
+        sb_append_esc(&sb, acc ? player_names_account(acc->name) : me ? hud_player_name(client, me, own, sizeof(own)) : client ? player_names_account(client->menu_name) : "");
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
         sb_append(&sb, "</td><td class='pListActions'>");
         if (spectate_active()) sb_append(&sb, "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>");
@@ -972,11 +1005,23 @@ static char *hud_plist_rows(void) {
 }
 
 // The alias of player `uid` (Game.players.findById(id).alias), NULL when not in the game
+static const char *hud_plist_alias(const int uid);
+// The name of player `uid` as a popup shows it (Hide player names); hud_plist_alias is the server's
+static const char *hud_plist_shown_alias(const int uid, char *out, const size_t size) {
+    const Client *client = menu_ui()->client;
+    for (size_t i = 0; client && client->game.players && i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && p->uid == uid) return hud_player_name(client, p, out, size);
+    }
+    const char *alias = hud_plist_alias(uid);
+    return alias ? player_names_shown(uid, 0, alias, out, size) : NULL;
+}
+
 static const char *hud_plist_alias(const int uid) {
     const Client *client = menu_ui()->client;
     for (size_t i = 0; client && client->game.players && i < client->game.player_count; i++) {
         const Player *p = client->game.players[i];
-        if (p && p->uid == uid) return hud_player_name(client, p);
+        if (p && p->uid == uid) return hud_raw_player_name(client, p); // the server's alias: the actions take it
     }
     // --render-scenario state.playerList stands in for the lobby's players (their rows have no Game.players entry)
     const cJSON *scenario = hud_votekick_override();
@@ -2244,7 +2289,8 @@ void hud_ui_kill_streak(Client *client, const int uid, const int streak) {
     } else {
         const Player *me = client->me;
         const int ally = me && me->team && client->game.mode && client->game.mode->config.teams && me->team == player->team;
-        hud_feed_name_span(who, sizeof(who), &wlen, hud_player_name(client, player), 0, ally);
+        char pname[PLAYER_NAME_SIZE];
+        hud_feed_name_span(who, sizeof(who), &wlen, hud_player_name(client, player, pname, sizeof(pname)), 0, ally);
         hb_append(who, sizeof(who), &wlen, " is");
     }
     snprintf(num, sizeof(num), "%d", streak);
@@ -2494,7 +2540,8 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     char who[PLAYER_NAME_SIZE * 2], shown[PLAYER_NAME_SIZE];
     size_t wlen = 0;
     who[0] = 0;
-    hb_append_escaped(who, sizeof(who), &wlen, streamer_name(hud_player_name(client, player), shown, sizeof(shown)));
+    char pname[PLAYER_NAME_SIZE];
+    hb_append_escaped(who, sizeof(who), &wlen, streamer_name(hud_player_name(client, player, pname, sizeof(pname)), shown, sizeof(shown)));
     // i18n "windows.store.found" = "{0}{1} found": "<span style='color:#fff'>" + fixStr(name) + "</span> found"
     char lrm_who[sizeof(who) + 8], found[sizeof(who) + 128];
     snprintf(lrm_who, sizeof(lrm_who), LRM "%s" LRM, who);
@@ -2954,7 +3001,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>"
                                "\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
               my_class < 0 ? 0 : my_class, card->my_level > 1 ? card->my_level : 1);
-    hb_append_escaped(out, size, &len, acc ? (acc->premium && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client));
+    hb_append_escaped(out, size, &len, acc ? player_names_account(acc->premium && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client));
     hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t<div class=\"death-stats\">%s</div>\n\t\t\t</div>\n\t\t", stats);
 }
 
@@ -3216,7 +3263,7 @@ static void hud_end_row_html(char *out, const size_t size, size_t *len, const in
 // every row but ours gets COLORS.teams[1] like a live FFA table.
 static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, char *out, const size_t size, size_t *len) {
     const int count = cJSON_GetArraySize(rows);
-    const char *my_name = hud_my_name(client);
+    const char *my_name = hud_raw_my_name(client); // the server's name: the rows' names are the raw ones here
     int index = 0;
     const cJSON *row;
     cJSON_ArrayForEach(row, rows) {
@@ -3224,6 +3271,8 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
         const cJSON *me = cJSON_GetObjectItemCaseSensitive(row, "me");
         const char *name = cJSON_IsString(n) ? n->valuestring : "";
         const int is_you = cJSON_IsBool(me) ? cJSON_IsTrue(me) : count == 1 || (my_name[0] && !strcmp(name, my_name));
+        char pname[PLAYER_NAME_SIZE];
+        name = player_names_shown(-1, is_you, name, pname, sizeof(pname)); // Hide player names
 #define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
         index++;
         hud_end_row_html(out, size, len, index, index >= count, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
@@ -3255,7 +3304,8 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         // null there, so `0 == null` makes every other FFA row red.
         const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
         const char *color = p == client->me ? "#fff" : p->team && p->team == local_team ? "rgba(255,255,255,0.6)" : FEED_COLOR_ENEMY;
-        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p), color, p->score, (int) p->kills,
+        char pname[PLAYER_NAME_SIZE];
+        hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p, pname, sizeof(pname)), color, p->score, (int) p->kills,
                          (int) p->deaths, p->reward);
     }
     hb_append(out, size, len, "</table>");
@@ -4640,7 +4690,8 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     }
     if (!strcmp(name, "punishPopup")) { // punishPopup(id): v10 genericPopup(..., "confPop")
         const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 ? (int) args[0].num : -1;
-        const char *alias = hud_plist_alias(uid);
+        char shown[PLAYER_NAME_SIZE];
+        const char *alias = hud_plist_shown_alias(uid, shown, sizeof(shown));
         if (!alias) return 1;
         int dev = 0, kick = 0, host = 0;
         hud_plist_staff(menu_ui()->client, &dev, &kick, &host);
@@ -4678,7 +4729,8 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     }
     if (!strcmp(name, "banPlayer")) { // banPlayer(id): v10's YES/NO confirm, then punishPlayer(id, 1)
         const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
-        const char *alias = hud_plist_alias(uid);
+        char shown[PLAYER_NAME_SIZE];
+        const char *alias = hud_plist_shown_alias(uid, shown, sizeof(shown));
         if (!alias) return 1;
         char q[160];
         snprintf(q, sizeof(q), "Are you sure you want ban %s from this game?", alias); // windows.playerlist.ban

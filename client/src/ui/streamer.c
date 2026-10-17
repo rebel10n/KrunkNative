@@ -1,5 +1,6 @@
 // Streamer mode name scrambling: Krunker v3.1.1 UTILS.scrambleS. See client/include/streamer.h.
 #include <streamer.h>
+#include <player_names.h>
 #include <render_settings.h>
 
 #include <string.h>
@@ -47,7 +48,8 @@ int streamer_mode(void) {
 }
 
 const char *streamer_name(const char *name, char *out, const size_t size) {
-    if (!name || !streamer_mode()) return name;
+    // a name the Hide player names setting already replaced (player_names.h) is not scrambled again
+    if (!name || !streamer_mode() || player_names_hidden()) return name;
     streamer_scramble(name, out, size);
     return out;
 }

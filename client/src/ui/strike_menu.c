@@ -26,6 +26,7 @@
 // The Strike classes are FRVR's six (tools/strike/strike_data.json "classes"): Krunker class ids
 // 0 Triggerman, 1 Hunter, 2 Run N Gun, 4 Shotgunner (Krunker's Vince), 5 Detective, 7 Rocketeer.
 #include <strike_ui.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <strike_notify.h>
 #include <strike_ftue.h>
 #include <html_ui.h>
@@ -215,7 +216,7 @@ static void account_values(char *name, size_t nn, int *level, int *kr) {
         *kr = FIXTURE.kr;
     } else if (acc) {
         // jU: the account's name, its Strike level (the bundle's XP curve) and wallet.kr
-        snprintf(name, nn, "%s", acc->alias[0] ? acc->alias : acc->name);
+        snprintf(name, nn, "%s", player_names_account(acc->alias[0] ? acc->alias : acc->name));
         *level = e ? e->level.level : acc->level > 0 ? acc->level : 1;
         *kr = e ? (int) e->wallet[STRIKE_CUR_KR] : 0;
     } else {

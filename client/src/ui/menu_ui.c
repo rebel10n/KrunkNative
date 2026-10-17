@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <player_names.h> // Hide player names (player_names.h)
 #include <v10_wild_offer.h>
 #include <krunker_net.h> // the official error screen's Find Game
 #include <game_reload.h> // F5: game_reload_tick
@@ -1235,9 +1236,9 @@ void menu_update_class_box(void) {
         const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
         sb_appendf(&sb, "<div class='menuClassLevelBox' style='color:white;'>%d</div><span class='menuClassPlayerName'>", acc->level);
-        sb_append_esc(&sb, premium && acc->alias[0] ? acc->alias : acc->name);
+        sb_append_esc(&sb, player_names_account(premium && acc->alias[0] ? acc->alias : acc->name)); // Hide player names: "Player"
         sb_append(&sb, "</span>");
-        if (acc->clan[0]) {
+        if (player_names_clan(acc->clan)[0]) {
             sb_appendf(&sb, "<span class='menuClassPlayerClan' style='color:%s'>[", menu_clan_colour(acc->clan));
             sb_append_esc(&sb, acc->clan);
             sb_append(&sb, "]</span>");
