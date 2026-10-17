@@ -184,6 +184,17 @@ int main(void) {
     CHECK(near(strike_crosshair_opacity(0.0f, 0, 0, 0.5f), 0.0, 1e-6), "a reload hides it");
     CHECK(near(strike_crosshair_opacity(0.0f, 1, 0, 0.0f), 0.0, 1e-6), "inspecting hides it");
 
+    // ---- the aim reticles (FRVR's toggleAim): aimDot for an attachment sight, aimRecticle for a scope weapon,
+    // both once fully aimed (KN aim_val 1) and never in third person
+    CHECK(!strike_aim_dot_shown(0.0f, 1, 0) && !strike_aim_dot_shown(0.99f, 1, 0), "the sight's dot is not shown before fully aimed");
+    CHECK(strike_aim_dot_shown(1.0f, 1, 0), "fully aimed with a sight: the dot is shown (FRVR's reticle_0)");
+    CHECK(!strike_aim_dot_shown(1.0f, 0, 0), "fully aimed without a sight (no attach): no dot");
+    CHECK(!strike_aim_dot_shown(1.0f, 1, 1), "third person: no dot");
+    CHECK(!strike_scope_shown(1.0f, 0, 0), "a weapon without scope: no scope when aimed");
+    CHECK(!strike_scope_shown(0.5f, 1, 0), "a scope weapon half aimed: no scope yet");
+    CHECK(strike_scope_shown(1.0f, 1, 0), "fully aimed with a scope weapon: the scope shows");
+    CHECK(!strike_scope_shown(1.0f, 1, 1), "third person: no scope");
+
     if (g_failures) {
         printf("strike_hud_fx_test: %d of %d checks failed\n", g_failures, g_checks);
         return 1;

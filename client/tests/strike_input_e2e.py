@@ -71,7 +71,9 @@ PAD = """300 state
 1200 gpad shoulder_bottom_right down
 1400 gpad shoulder_bottom_right up
 1450 state
+1480 vis @hip knStrikeAimDot knStrikeCross
 1500 gpad shoulder_bottom_left down
+1650 vis @aimed knStrikeAimDot knStrikeCross
 1700 state
 1750 gpad shoulder_bottom_left up
 1800 gpad button_1 down
@@ -191,6 +193,19 @@ def probe(text, pattern, label):
     return None
 
 
+def vis(text, label, ids):
+    """the shown flags ("1" / "0", "-" for no such id) of the page elements `ids` in the vis probe named `label`
+    (client/src/input_script.c: "[input_script] vis t=100 @label id=1 ...")"""
+    for line in text.splitlines():
+        if line.startswith("[input_script] vis ") and f" @{label} " in line:
+            flags = {}
+            for i in ids:
+                m = re.search(rf" {re.escape(i)}=(\S+)", line)
+                flags[i] = m.group(1) if m else None
+            return flags
+    return None
+
+
 def offsets(text):
     """the states after the spawn, keyed by their time from it (the bodies' times)"""
     return {t - SPAWN: v for t, v in states(text).items() if t >= SPAWN}
@@ -227,6 +242,13 @@ def pad(text):
     check("pad: the right trigger (shoot) fires", s[1450]["ammo"] < s[300]["ammo"], f"ammo {s[300]['ammo']} -> {s[1450]['ammo']}")
     check("pad: the left shoulder (aim) aims while held", s[1700]["aim"] > 0.5, f"aim {s[1700]['aim']}")
     check("pad: a face button reaches the machine", "[gamepad] press button_1" in text)
+    # the sight's reticle (FRVR's aimDot) shows once fully aimed with the Reflex sight, and the Dynamic crosshair
+    # hides then (FRVR's updateCrosshair opacity follows aimVal); at the hip it is the other way round
+    ids = ("knStrikeAimDot", "knStrikeCross")
+    hip, aimed = vis(text, "hip", ids), vis(text, "aimed", ids)
+    check("pad: at the hip the crosshair shows and no reticle", hip == {"knStrikeAimDot": "0", "knStrikeCross": "1"}, f"{hip}")
+    check("pad: aimed, the sight's reticle shows and the crosshair hides", aimed == {"knStrikeAimDot": "1", "knStrikeCross": "0"},
+          f"{aimed}")
     check("pad: START opens the menu", s[2050]["menu"] == 1, f"menu={s[2050]['menu']}")
     # the page marks one element with an outline of its own: the ring adds one more
     before, after = probe(text, NODES, "ring0"), probe(text, NODES, "ring1")

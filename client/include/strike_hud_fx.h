@@ -96,4 +96,17 @@ void strike_crosshair_span(float scale, float *near, float *far);
 // is 1 - aim_val): 1 - aim_val, and 0 while inspecting, with no_cross (noCross) or while reloading. Clamped to 0..1.
 float strike_crosshair_opacity(float aim_val, int inspecting, int no_cross, float reload_timer);
 
+// ---- the aim reticles (FRVR's toggleAim: aimDot = textures/reticles/reticle_0.png, aimRecticle =
+// textures/scopes/scope_0.png with black borders). Sizes are CSS px of the page, as FRVR's literal values.
+#define STRIKE_AIM_DOT_SIZE 20.0f    // aimDot.width / height: the 32 px reticle_0.png drawn at 20
+#define STRIKE_SCOPE_SIZE 680.0f     // aimRecticle.width / height: the 1024 px scope_0.png drawn at 680
+#define STRIKE_SCOPE_BORDER_INSET 2.0f // the borders run 2 px under the scope picture's edge (FRVR's + 2 / - 2)
+
+// The sight's reticle (aimDot) shows once fully aimed (KN aim_val 1; FRVR's toggleAim sets opacity 1 when aimVal
+// reaches 0) with an attachment sight (has_sight: weapon_attachment() is not NULL), not in third person.
+int strike_aim_dot_shown(float aim_val, int has_sight, int third_person);
+
+// The scope (aimRecticle and its borders) shows once fully aimed with a scope weapon (weapon.scope), not in third person.
+int strike_scope_shown(float aim_val, int scope_weapon, int third_person);
+
 #endif

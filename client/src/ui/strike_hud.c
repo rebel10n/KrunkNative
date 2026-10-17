@@ -34,6 +34,7 @@
 #include <zombies.h>
 #include <i18n.h>
 #include <spectate.h>
+#include <third_person.h>
 #include <math.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -521,7 +522,10 @@ static struct {
     HtmlElem cross_bar[4];             // top, right, bottom, left
     HtmlElem cross_dot;
     float cross_scale;                 // the spread radius the lines are placed for (-1: not placed)
-} FX = {.cross_scale = -1.0f};
+    HtmlElem aim_dot;                  // #knStrikeAimDot: the sight's reticle (FRVR's aimDot)
+    HtmlElem scope;                    // #knStrikeScope: the scope picture and its borders (FRVR's aimRecticle)
+    int aim_dot_on, scope_on;          // what the two show (-1: not yet set); the style is written on a change only
+} FX = {.cross_scale = -1.0f, .aim_dot_on = -1, .scope_on = -1};
 
 static void fx_forget(void) {
     strike_damage_reset(&FX.dmg);
@@ -531,6 +535,8 @@ static void fx_forget(void) {
     memset(FX.dmg_text, 0, sizeof(FX.dmg_text));
     memset(FX.cross_bar, 0, sizeof(FX.cross_bar));
     FX.cross_scale = -1.0f;
+    FX.aim_dot = FX.scope = 0;
+    FX.aim_dot_on = FX.scope_on = -1;
 }
 
 // The markup: the layer, then the crosshair's origin with its four lines and its dot (sized and coloured by
@@ -545,7 +551,24 @@ static void view_fx(StrBuf *sb) {
                   "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
                   "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
                   "<div class=\"kn-cross-dot\" style=\"position:absolute\"></div>"
-                  "</div></div>");
+                  "</div>");
+    // the scope (FRVR's aimRecticle: four black rects around the picture's 680 px square, each running 2 px under the
+    // picture's edge, then the picture) and the sight's reticle (aimDot, drawn over the scope)
+    const float half = STRIKE_SCOPE_SIZE / 2.0f, edge = half - STRIKE_SCOPE_BORDER_INSET; // 340, 338
+    sb_appendf(sb, "<div id=\"knStrikeScope\" class=\"kn-strike-scope\" style=\"position:absolute;left:0;top:0;width:100%%;height:100%%;display:none\">"
+                   "<div class=\"kn-scope-border\" style=\"position:absolute;left:0;top:0;width:100%%;height:calc(50%% - %gpx);background:#000000\"></div>"
+                   "<div class=\"kn-scope-border\" style=\"position:absolute;left:0;top:calc(50%% + %gpx);width:100%%;height:calc(50%% - %gpx);background:#000000\"></div>"
+                   "<div class=\"kn-scope-border\" style=\"position:absolute;left:0;top:0;height:100%%;width:calc(50%% - %gpx);background:#000000\"></div>"
+                   "<div class=\"kn-scope-border\" style=\"position:absolute;left:calc(50%% + %gpx);top:0;height:100%%;width:calc(50%% - %gpx);background:#000000\"></div>"
+                   "<img src=\"./cdn/textures/scopes/scope_0.png\" style=\"position:absolute;left:50%%;top:50%%;width:%gpx;height:%gpx;margin:%gpx 0 0 %gpx\">"
+                   "</div>",
+              edge, edge, edge, edge, edge, edge, STRIKE_SCOPE_SIZE, STRIKE_SCOPE_SIZE, -half, -half);
+    sb_appendf(sb, "<div id=\"knStrikeAimDot\" class=\"kn-strike-aim-dot\" style=\"position:absolute;left:50%%;top:50%%;width:%gpx;height:%gpx;"
+                   "margin:%gpx 0 0 %gpx;display:none\">"
+                   "<img src=\"./cdn/textures/reticles/reticle_0.png\" style=\"position:absolute;left:0;top:0;width:100%%;height:100%%\">"
+                   "</div>"
+                   "</div>",
+              STRIKE_AIM_DOT_SIZE, STRIKE_AIM_DOT_SIZE, -STRIKE_AIM_DOT_SIZE / 2.0f, -STRIKE_AIM_DOT_SIZE / 2.0f);
 }
 
 static void cross_style(void) {
@@ -595,6 +618,9 @@ static void fx_mount(void) {
     const int n = FX.layer ? html_dom_query_all(FX.layer, ".kn-cross-bar", bars, 4) : 0;
     for (int i = 0; i < 4; i++) FX.cross_bar[i] = i < n ? bars[i] : 0;
     FX.cross_dot = FX.layer ? html_dom_query(FX.layer, ".kn-cross-dot") : 0;
+    FX.scope = html_dom_by_id("knStrikeScope");
+    FX.aim_dot = html_dom_by_id("knStrikeAimDot");
+    FX.aim_dot_on = FX.scope_on = -1;
     memset(FX.dmg_el, 0, sizeof(FX.dmg_el));
     memset(FX.dmg_text, 0, sizeof(FX.dmg_text));
     FX.cross_scale = -1.0f;
@@ -697,6 +723,26 @@ static void cross_tick(Client *client) {
     html_dom_set_display(FX.cross, shown && opacity > 0.0f ? "block" : "none");
 }
 
+// FRVR's toggleAim: #aimDot (the sight's reticle) and #aimRecticle (the scope) show once the player is fully aimed,
+// in first person; the rules are strike_hud_fx.c's. Shown only where the crosshair is: no board, kill card or
+// spectating (FRVR's `p`, the same gate its reticle draw has).
+static void aim_tick(Client *client) {
+    const Player *me = me_player(client);
+    const int shown = !H.board && !spectate_active() && !H.kill_card && me && me->active;
+    const int third = third_person_view(client);
+    const int has_sight = shown && me->weapon && weapon_attachment(me->weapon, player_attach_index(me)) != NULL;
+    const int dot = strike_aim_dot_shown(me ? me->aim_val : 0.0f, has_sight, third);
+    const int scope = strike_scope_shown(me ? me->aim_val : 0.0f, shown && me->weapon && me->weapon->scope, third);
+    if (FX.aim_dot && dot != FX.aim_dot_on) {
+        html_dom_set_display(FX.aim_dot, dot ? "block" : "none");
+        FX.aim_dot_on = dot;
+    }
+    if (FX.scope && scope != FX.scope_on) {
+        html_dom_set_display(FX.scope, scope ? "block" : "none");
+        FX.scope_on = scope;
+    }
+}
+
 static void fx_tick(Client *client) {
     if (!FX.layer) return;
     const double now = hud_ui_now_ms(client);
@@ -708,6 +754,7 @@ static void fx_tick(Client *client) {
                        game_constants.player_height);
     fx_numbers_tick(client);
     cross_tick(client);
+    aim_tick(client);
 }
 
 // ---------------------------------------------------------------- rendering

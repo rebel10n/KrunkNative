@@ -224,3 +224,13 @@ float strike_crosshair_opacity(const float aim_val, const int inspecting, const 
     if (inspecting || no_cross || reload_timer > 0.0f) return 0.0f;
     return (float) clampd(aim_v, 0.0, 1.0);
 }
+
+int strike_aim_dot_shown(const float aim_val, const int has_sight, const int third_person) {
+    // FRVR's toggleAim: aimDot.opacity = 1 only when `camType.isNormal` and the weapon's sight (attach) exists
+    return has_sight && !third_person && aim_val >= 1.0f;
+}
+
+int strike_scope_shown(const float aim_val, const int scope_weapon, const int third_person) {
+    // FRVR's toggleAim: aimRecticle.opacity = 1 for a `scope` weapon (noScope skins are not in Strike) when aimed
+    return scope_weapon && !third_person && aim_val >= 1.0f;
+}
