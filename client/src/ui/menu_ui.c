@@ -230,6 +230,9 @@ static struct {
 
 static void request_pointer_lock_if_web(void) {
     if (ui_mobile_active()) return; // no pointer lock on phones (v10's locklessChange): no fullscreen or orientation lock
+    // the developer console keeps the pointer free (pointer_lock.h): a lock requested now would be
+    // taken and held over the console, its clicks and typing lost to the locked canvas
+    if (ui_console_shown()) return;
 #ifdef __EMSCRIPTEN__
     if (!g_lock.waiting) g_lock.errors = web_pointer_lock_errors();
     g_lock.since = glfwGetTime();
@@ -241,7 +244,7 @@ static void request_pointer_lock_if_web(void) {
 // lock is held); a refused or unanswered web request drops the Play request instead.
 static int menu_lock_ready(Client *client) {
 #ifdef __EMSCRIPTEN__
-    if (client_pointer_locked(client)) return 1;
+    if (client_pointer_locked(client) || ui_console_shown()) return 1; // no lock is wanted over the console: nothing to wait for
     if (web_pointer_lock_errors() != g_lock.errors || glfwGetTime() - g_lock.since > MENU_LOCK_WAIT_SECONDS) {
         client->menu_play_pending = 0;
         g_lock.waiting = 0;
@@ -658,8 +661,9 @@ void menu_apply_open(const int open) {
 
 void menu_request_open(const int open) {
 #ifdef __EMSCRIPTEN__
-    // Leaving the menu waits for the pointer lock (menu_lock_ready, client_menu_tick).
-    if (!open && html_ui_is_menu_open() && !client_pointer_locked(g_ui.client)) {
+    // Leaving the menu waits for the pointer lock (menu_lock_ready, client_menu_tick); over an open
+    // console there is no lock to wait for (the pointer stays free for it).
+    if (!open && html_ui_is_menu_open() && !client_pointer_locked(g_ui.client) && !ui_console_shown()) {
         request_pointer_lock_if_web();
         g_lock.waiting = 1;
         return;

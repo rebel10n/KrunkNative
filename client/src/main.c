@@ -1665,13 +1665,16 @@ static int strike_customize_mouse(const int phase, double x, double y) {
     return strike_touch_customize_pointer(phase, (float) x, (float) y);
 }
 
-// The page takes pointer input while the menu is open or the end-screen results are up.
+// The page takes pointer input while the menu is open, the developer console is on screen or the
+// end-screen results are up. The console counts on its own: Click to Play closes the menu behind an
+// open console (the pointer stays free for it, pointer_lock.h), and its clicks must still reach its modal.
 static int html_pointer_input(void) {
     // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
     if (strike_ui_active()) return strike_ui_pointer_to_page();
     // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
     // krunker_captcha_needs_player: the security challenge's modal, also over a game with the menu closed
-    return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free() || krunker_captcha_needs_player();
+    return html_ui_is_menu_open() || ui_console_shown() || hud_ui_end_screen_interactive() || ks_client_pointer_free() ||
+           krunker_captcha_needs_player();
 }
 
 // mouseFlick / flickClamp natively (v10.js:202374 CONTROLS: per mouse event, `if (!mouseSkipFix ||
@@ -1919,7 +1922,8 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
 static void char_callback(GLFWwindow *window, const unsigned int codepoint) {
     (void) window;
     if (krunker_captcha_inline_char(codepoint)) return; // the challenge drawn in the game UI: its widget's text
-    if (html_ui_is_menu_open() || ui_controls_chat_focused() || krunker_captcha_needs_player() || strike_page_typing()) html_ui_char(codepoint);
+    // the developer console's input takes the typing too once Click to Play has closed the menu behind it
+    if (html_ui_is_menu_open() || ui_console_shown() || ui_controls_chat_focused() || krunker_captcha_needs_player() || strike_page_typing()) html_ui_char(codepoint);
 }
 
 void client_animate_object_texture(Object *object, const float now) {
