@@ -21,6 +21,9 @@ the sandbox is the menu's game; the brain still signs in):
      still signed in (the krunker.io session never touched it), and the krunker.io session is kept
      too (the next official join carries its token)
   5. that join's "a" says the krunker.io account is a DEV (player_developer 1): v10's isDev actions
+  7. child windows: the editor (`con editor`, its own process: app_window.c) opened in the official game
+     is on krunker.io too (the router's session: KRUNKNATIVE_APP_BACKEND at spawn, then "backend" lines),
+     and follows the router back to krunk.io when the player leaves (its log says which backend it plays on)
      (Kill, TPAll, TP2 / TPME, the punish popup) show in the player list
 The official game server stub spawns players like a live one: "0" ADD_PLAYERS with two other players
 after init and ours (io-init's socket id) on the client's "en" (respawn in the script). The player list
@@ -154,6 +157,7 @@ def script():
           '12100 call krunkerJoin "%s"' % kae.GAME_PICK,
           # Play: the client's "en", the server's "0" spawns us; ESC brings the menu back
           "15000 respawn", "16300 players", "16400 down ESC", "16450 up ESC",
+          "16900 con editor",  # 7. a child window opened by the official game
           "17000 vis @kio0 " + SIGNED]
     s += window_probe(17100, "gplist", 23)
     s += window_probe(18100, "galt", 104)
@@ -189,7 +193,8 @@ def script():
           "32550 text @backname [id=knV10Name]", "32560 text @backkr [id=menuKRCount]"]
     s += window_probe(32600, "balt", 104)
     s += window_probe(33600, "bplist", 23)
-    s += ['34600 call krunkerJoin "%s"' % kae.GAME_PICK,
+    s += ["34300 con editor",  # 7. the child window follows the router back to krunk.io
+          '34600 call krunkerJoin "%s"' % kae.GAME_PICK,
           "37200 respawn", "38200 down ESC", "38250 up ESC"]
     # 5. that game's "a": the krunker.io account is a DEV
     s += window_probe(38600, "dplist", 23)
@@ -347,6 +352,22 @@ def checks(text, stub):
           nodes(text, "dplistdev") == 1 and nodes(text, "dplistkill") == len(OTHERS) + 1 and nodes(text, "dplisttp") == len(OTHERS) and
           nodes(text, "dplistpunish") == len(OTHERS),
           (nodes(text, "dplistdev"), nodes(text, "dplistkill"), nodes(text, "dplisttp"), nodes(text, "dplistpunish")))
+
+    # 7. child windows (app_window.c): each window is its own process whose log lines carry its pid (the
+    # "[account] active account backend: X (pid N)" line). The router's pid is the first such line's; the editor
+    # the official game opened (a child) plays on krunker.io, and follows the router back to krunk.io.
+    marks = [m.start() for m in re.finditer(r"\[app\] (?:new |)editor window", text)]
+    check("7. the official game opened the editor as a child window", len(marks) >= 2, len(marks))
+    lines = re.findall(r"\[account\] active account backend: (krunker\.io|krunk\.io) \(pid (\d+)\)", text)
+    router_pid = lines[0][1] if lines else None
+    router = [b for b, pid in lines if pid == router_pid]
+    child = [b for b, pid in lines if pid != router_pid]
+    check("7. the router's backend: krunk.io at start, krunker.io in the official game, krunk.io after leaving, krunker.io rejoined",
+          router == ["krunk.io", "krunker.io", "krunk.io", "krunker.io"], router)
+    check("7. the editor window starts on krunker.io (the router's session at spawn) and follows the router to krunk.io on leaving",
+          child[:2] == ["krunker.io", "krunk.io"], child)
+    check("7. ... and back to krunker.io with the router's rejoin (the same window, reloaded, never its own session)",
+          child == ["krunker.io", "krunk.io", "krunker.io"], child)
 
 
 def main():

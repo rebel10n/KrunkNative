@@ -32,6 +32,32 @@ void backend_store_url(const char *url) {
 
 int backend_enabled(void) { return g_url[0] != 0; }
 
+// ---- the brain gate (backend.h): the brain is not the active backend while the gate answers 1
+static BackendBrainGateFn g_brain_gate;
+static int g_refused_logged;
+
+void backend_set_brain_gate(const BackendBrainGateFn fn) { g_brain_gate = fn; }
+
+static int refused(const char *what) {
+    // a poll that keeps asking must not flood the log: the first few only
+    if (g_refused_logged < 4) {
+        g_refused_logged++;
+        fprintf(stderr, "[backend] %s not sent: the active backend is krunker.io (the brain is krunk.io's)\n", what);
+    }
+    return 1;
+}
+
+int backend_brain_refuses_path(void) {
+    return g_brain_gate && g_url[0] && g_brain_gate() ? refused("brain request") : 0;
+}
+
+int backend_brain_refuses_url(const char *url) {
+    if (!url || !g_brain_gate || !g_url[0]) return 0;
+    const size_t n = strlen(g_url);
+    if (strncmp(url, g_url, n) != 0 || (url[n] && url[n] != '/' && url[n] != '?')) return 0; // another host
+    return g_brain_gate() ? refused("brain request") : 0; // the URL may carry a token: not logged
+}
+
 // ---- brain probe (default URLs)
 static int g_avail = 1;        // backend_available()
 static int g_probing;
@@ -52,6 +78,9 @@ static void probe_done(void *user, const int status, const char *body, const siz
 
 void backend_probe_start(void) {
     if (!backend_enabled() || g_probing || !backend_url_is_default()) return;
+    // krunker.io is the active backend (the brain gate): no probe now, and the state stays as it is, so the
+    // probe that runs after the player leaves the official server is a real one (not "no account server")
+    if (backend_brain_refuses_path()) return;
     g_probing = 1;
     if (g_avail == 1) g_avail = -1;
     if (!backend_http_get("/mm/status", probe_done, NULL)) {

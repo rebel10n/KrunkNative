@@ -349,6 +349,7 @@ int backend_http_get_external(const char *url, const int timeout_ms, const Backe
 }
 
 int backend_http_get_media(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
+    if (backend_brain_refuses_url(url)) return 0;
     return http_queue_lane(HTTP_LANE_MEDIA, timeout_ms, "GET", url, NULL, fn, user);
 }
 
@@ -364,7 +365,7 @@ static void *http_job_thread(void *arg) {
 }
 
 int backend_http_get_parallel(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
-    if (!url || !url[0]) return 0;
+    if (!url || !url[0] || backend_brain_refuses_url(url)) return 0;
     HttpJob *job = calloc(1, sizeof(*job));
     if (!job) return 0;
     job->timeout_ms = timeout_ms > 0 ? timeout_ms : HTTP_TIMEOUT_MS;
@@ -383,7 +384,7 @@ int backend_http_get_parallel(const char *url, const int timeout_ms, const Backe
 }
 
 int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
-    if (!backend_enabled() || !path) return 0;
+    if (!backend_enabled() || !path || backend_brain_refuses_path()) return 0;
     char url[2048];
     pthread_mutex_lock(&g_lock);
     const int n = snprintf(url, sizeof(url), "%s%s", backend_url(), path);
@@ -402,6 +403,7 @@ int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
 }
 
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {
+    if (backend_brain_refuses_url(url)) return 0;
     return http_queue(method && method[0] ? method : "GET", url, json_body, fn, user);
 }
 

@@ -1,10 +1,9 @@
 #pragma once
 #include <stddef.h>
-// Which ranked backend the Ranked popup uses (client/src/ui/ranked_ui.c). Two account systems can be
-// signed in at once: a krunker.io account (krunker_account.h), which uses v10.0.2's ranked services at
-// krunker.io (krunker_ranked.h), and a KrunkNative account, which uses kn_brain's /mm/ranked/* routes.
-// krunker.io wins when both are signed in: v10's ranked is the krunker.io one, and the KrunkNative
-// account stays signed in beside it (its own servers keep it). A guest (neither) gets no ranked backend.
+// Which ranked backend the Ranked popup uses (client/src/ui/ranked_ui.c). The connected server decides
+// (backend_ui.h account_backend()): on an official krunker.io server the krunker.io account's ranked services
+// (krunker_ranked.h: v10's paths, Bearer), elsewhere KrunkNative's kn_brain /mm/ranked/* routes. The other
+// account stays signed in beside it, unused (the two backends are never mixed in one session).
 typedef enum {
     RANKED_BACKEND_NONE = 0, // nobody signed in: the popup asks for a sign-in
     RANKED_BACKEND_KN,       // a KrunkNative account: kn_brain's routes
@@ -12,8 +11,9 @@ typedef enum {
 } RankedBackend;
 
 // The routing rule, as a pure function. ranked_active_backend() (ranked_ui.c) is the one place that
-// feeds it the account state and the one the popup asks.
-RankedBackend ranked_backend_route(int krunker_signed_in, int kn_signed_in);
+// feeds it the connected server and the account state, and the one the popup asks. A guest on the
+// connected server's kind gets no ranked backend.
+RankedBackend ranked_backend_route(int official, int krunker_signed_in, int kn_signed_in);
 
 // The game socket of a ranked match (v10's joinAssignment / quickJoinRankedMatch -> _33940 -> _33929,
 // v10:98678, 98729, 97583, 222104-222135): the assignment's connection "host[:port]" (port 3000 when none)

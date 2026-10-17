@@ -25,8 +25,9 @@ Four headless client_bin runs (input scripts on the v10 page), one after another
   3. kn_only:      a KrunkNative account only (kn_brain on a scratch database, a server_bin node for the
                    startup seek to join): the popup reads the brain's /mm/ranked/* routes; no krunker.io
                    request is made, no queue socket opens.
-  4. both:         both accounts signed in: krunker.io wins (its queue socket opens for the krunker.io
-                   account, and its requests carry that account's token).
+  4. both:         both accounts signed in, the client in the menu (no official connection): KrunkNative wins,
+                   the connected server decides (backend_ui.h account_backend()); no ranked request or
+                   queue / game socket carries the krunker.io account's token.
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1), python websockets, and the scratch database helper
 (services/brain/tests/db_scratch.py). Exit 77 when a prerequisite is missing, 0 when every check passed.
@@ -786,15 +787,10 @@ def check_kn_only(text, entries, kn_user):
 
 
 def check_both(text, entries):
-    queues = [e for e in entries if e.get("ws") == "queue"]
-    check("both: krunker.io wins: the queue socket is the krunker.io account's", bool(queues) and queues[0]["account"] == "kio_both",
-          str(queues)[:200])
-    game = [e for e in entries if e.get("ws") == "game"]
-    check("both: the match joins the krunker.io account's game socket (at= its token)", len(game) == 1 and game[0]["account"] == "kio_both",
-          str(game)[:200])
-    api = [e for e in entries if e.get("p", "").startswith(("/api/", "/gapi/"))]
-    check("both: the krunker.io requests carry the krunker.io account's Bearer", bool(api) and all(e["account"] == "kio_both" for e in api),
-          str([(e["p"], e["account"]) for e in api])[:200])
+    # the krunker.io account restores in the menu too (its /player/me): only the ranked traffic is judged
+    ranked = [e for e in entries if e.get("ws") in ("queue", "game") or "/ranked" in e.get("p", "")]
+    check("both: the menu is KrunkNative's: no ranked request or socket carries the krunker.io account",
+          not [e for e in ranked if e.get("account") == "kio_both"], str([(e.get("ws"), e.get("p"), e.get("account")) for e in ranked])[:200])
 
 
 # ---------------------------------------------------------------- main
@@ -849,7 +845,7 @@ def main():
                                        {"krunker_username": kn["name"], "krunker_token": kn["token"]})
         check_kn_only(text, entries, kn_user)
 
-        # 4 both: krunker.io wins (the real brain and node for the KrunkNative account beside it)
+        # 4 both: the menu is KrunkNative's (the real brain and node for the KrunkNative account beside it)
         tok = fake_jwt("kio_both")
         text, entries = run_kio_client("both", kn_user, brain_url,
                                        {"krunker_username": kn["name"], "krunker_token": kn["token"],

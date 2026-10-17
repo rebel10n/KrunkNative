@@ -53,6 +53,13 @@ int backend_http_get(const char *path, BackendHttpFn fn, void *user);
 // with OpenSSL (KRUNKNATIVE_HAVE_TLS); web uses fetch(). Same callback rules as above;
 // status is the HTTP status (204 has an empty body), 0 = transport error.
 int backend_http_request(const char *method, const char *url, const char *json_body, BackendHttpFn fn, void *user);
+// The brain gate (account_ui.c registers it): while it answers 1 the brain is not the active backend
+// (the player is connected to an official krunker.io server, backend_ui.h account_backend()). Every brain
+// request (backend_http_get, backend_http_request / parallel / media GETs on a URL under backend_url())
+// then fails at once (0), the callers' failure path; requests to other hosts (krunker.io, its lists, the
+// media hosts) are not affected. NULL = no gate (the brain is always the backend, as before).
+typedef int (*BackendBrainGateFn)(void);
+void backend_set_brain_gate(BackendBrainGateFn fn);
 #ifndef __EMSCRIPTEN__
 // Native: GET of a URL on another host (krunker.io's game list, krunker_lobbies.c) on its own
 // worker, with its own connect / receive timeout, so it never queues behind (or delays) the

@@ -23,6 +23,8 @@
 #if !defined(__EMSCRIPTEN__)
 
 #include <app_mode.h>
+#include <app_backend.h> // the backend session: the router's and the children's connections (official krunker.io)
+#include <krunker_net.h> // krunker_net_active(): this window's own official connection
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +55,7 @@ typedef struct {
     int pid;            // 0 = no window
     int to_child;       // write end (router -> child)
     int from_child;     // read end (child -> router)
+    int official;       // the child reports an official krunker.io connection (app_backend.h)
     char inbuf[APP_WINDOW_LINE_MAX];
     size_t inlen;
 } AppChild;
@@ -64,6 +67,8 @@ static int g_parent_out = -1;  // child: us -> router
 static char g_parent_buf[APP_WINDOW_LINE_MAX];
 static size_t g_parent_len;
 static int g_initialized;
+static int g_broadcast;       // router: the session state last sent to its children (app_backend.h)
+static int g_reported = -1;   // child: the own connection state last reported to the router
 
 static void exe_path(const char *argv0) {
 #if defined(_WIN32)
@@ -124,6 +129,8 @@ void app_window_init(const char *argv0) {
     g_initialized = 1;
     exe_path(argv0);
     for (int i = 0; i < APP_MODE_COUNT; i++) g_children[i].to_child = g_children[i].from_child = -1;
+    // the router's session at spawn (app_backend.h); a window the router did not open has none
+    const int router_session = app_backend_parse_env(getenv(APP_BACKEND_ENV));
 #ifndef _WIN32
     signal(SIGPIPE, SIG_IGN); // a closed window's pipe must not kill the writer
     const char *ipc = getenv("KRUNKNATIVE_APP_IPC");
@@ -133,13 +140,36 @@ void app_window_init(const char *argv0) {
         g_parent_out = out;
         set_nonblock_cloexec(in);
         set_nonblock_cloexec(out);
+        app_backend_set_router(router_session);
     }
     unsetenv("KRUNKNATIVE_APP_IPC"); // not inherited by the windows this one opens
+    unsetenv(APP_BACKEND_ENV);
+#else
+    app_backend_set_router(router_session);
 #endif
 }
 
 int app_window_has_router(void) {
     return g_parent_out >= 0;
+}
+
+static int own_official(void) { return krunker_net_active() ? 1 : 0; }
+
+// The router's session counts the child windows that report an official connection (app_backend.h).
+#ifndef _WIN32
+// One session line to a window (app_backend.h wire form, newline-terminated like every line of this pipe).
+static void write_session_line(const int fd, const int official) {
+    char line[64];
+    snprintf(line, sizeof(line), "%s\n", app_backend_line(official));
+    write_line(fd, line);
+}
+#endif
+
+static void count_official_children(void) {
+    int n = 0;
+    for (int m = 0; m < APP_MODE_COUNT; m++)
+        if (g_children[m].pid && g_children[m].official) n++;
+    app_backend_set_children_official(n);
 }
 
 static int child_alive(AppChild *c) {
@@ -155,6 +185,8 @@ static int child_alive(AppChild *c) {
     c->pid = 0;
     c->to_child = c->from_child = -1;
     c->inlen = 0;
+    c->official = 0;
+    count_official_children();
     return 0;
 #endif
 }
@@ -179,12 +211,14 @@ static int spawn_window(Client *client, const AppMode mode, const char *query) {
     snprintf(cmd, sizeof(cmd), "\"%s\" --windowed%s %s \"%s\"", g_exe, offline ? " --offline" : "", k_mode_flags[mode], query ? query : "");
     SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_SIZE", size + strlen("KRUNKNATIVE_WINDOW_SIZE="));
     if (pos[0]) SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_NEAR", pos + strlen("KRUNKNATIVE_WINDOW_NEAR="));
+    SetEnvironmentVariableA(APP_BACKEND_ENV, app_backend_env_value(own_official() || app_backend_official_session()));
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
     si.cb = sizeof(si);
     const BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_SIZE", NULL);
     SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_NEAR", NULL);
+    SetEnvironmentVariableA(APP_BACKEND_ENV, NULL);
     if (!ok) return 0;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -210,16 +244,22 @@ static int spawn_window(Client *client, const AppMode mode, const char *query) {
     // environment: ours + the window size + the IPC fds
     size_t n = 0;
     while (environ[n]) n++;
-    char **envp = calloc(n + 4, sizeof(char *));
+    // the session's backend at spawn (app_backend.h): the child starts on the server kind its router is on
+    char backend[64];
+    snprintf(backend, sizeof(backend), APP_BACKEND_ENV "=%s", app_backend_env_value(own_official() || app_backend_official_session()));
+    char **envp = calloc(n + 5, sizeof(char *));
     size_t e = 0;
     for (size_t i = 0; i < n; i++) {
         if (!strncmp(environ[i], "KRUNKNATIVE_WINDOW_SIZE=", 24) || !strncmp(environ[i], "KRUNKNATIVE_WINDOW_NEAR=", 24) ||
-            !strncmp(environ[i], "KRUNKNATIVE_APP_IPC=", 20)) continue;
+            !strncmp(environ[i], "KRUNKNATIVE_APP_IPC=", 20) || !strncmp(environ[i], APP_BACKEND_ENV "=", strlen(APP_BACKEND_ENV) + 1) ||
+            !strncmp(environ[i], "KRUNKNATIVE_INPUT_SCRIPT", 24)) // a window the game opened is not the script's: it would replay the steps
+            continue;
         envp[e++] = environ[i];
     }
     envp[e++] = size;
     if (pos[0]) envp[e++] = pos;
     envp[e++] = "KRUNKNATIVE_APP_IPC=3,4";
+    envp[e++] = backend;
     envp[e] = NULL;
 
     char *argv[8];
@@ -286,19 +326,35 @@ static AppMode mode_named(const char *name, size_t len) {
 }
 
 #ifndef _WIN32
+typedef struct {
+    Client *client;
+    AppChild *child;
+} ChildLineCtx;
+
 static void on_child_line(const char *line, void *user) {
-    Client *client = user;
+    ChildLineCtx *ctx = user;
+    const int official = app_backend_parse_line(line);
+    if (official >= 0) { // the child's own connection (app_backend.h)
+        ctx->child->official = official;
+        count_official_children();
+        return;
+    }
     if (strncmp(line, "open ", 5) != 0) return;
     const char *name = line + 5;
     const char *sp = strchr(name, ' ');
     const size_t len = sp ? (size_t) (sp - name) : strlen(name);
     const AppMode mode = mode_named(name, len);
     if (mode == APP_MODE_COUNT) return;
-    app_mode_open_window(client, mode, sp ? sp + 1 : "");
+    app_mode_open_window(ctx->client, mode, sp ? sp + 1 : "");
 }
 
 static void on_parent_line(const char *line, void *user) {
     Client *client = user;
+    const int official = app_backend_parse_line(line);
+    if (official >= 0) { // the router's session (app_backend.h)
+        app_backend_set_router(official);
+        return;
+    }
     if (!strncmp(line, "nav ", 4)) app_mode_navigate_self(client, line + 4);
     else if (!strcmp(line, "nav")) app_mode_navigate_self(client, "");
 }
@@ -306,10 +362,25 @@ static void on_parent_line(const char *line, void *user) {
 
 void app_window_poll(Client *client) {
 #ifndef _WIN32
+    if (g_parent_out >= 0) { // a child: our own connection, once per change (the router's session follows it)
+        const int own = own_official();
+        if (own != g_reported) {
+            write_session_line(g_parent_out, own);
+            g_reported = own;
+        }
+    } else { // the router: its session (its own connection or a child's) to every child, once per change
+        const int session = own_official() || app_backend_official_session();
+        if (session != g_broadcast) {
+            g_broadcast = session;
+            for (int m = 0; m < APP_MODE_COUNT; m++)
+                if (g_children[m].pid && g_children[m].to_child >= 0) write_session_line(g_children[m].to_child, session);
+        }
+    }
     for (int m = 0; m < APP_MODE_COUNT; m++) {
         AppChild *c = &g_children[m];
         if (!c->pid) continue;
-        if (c->from_child >= 0 && !read_lines(c->from_child, c->inbuf, &c->inlen, on_child_line, client)) {
+        ChildLineCtx ctx = {client, c};
+        if (c->from_child >= 0 && !read_lines(c->from_child, c->inbuf, &c->inlen, on_child_line, &ctx)) {
             close(c->from_child);
             c->from_child = -1;
         }

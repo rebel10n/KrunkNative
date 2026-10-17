@@ -75,7 +75,8 @@ static unsigned g_kio_ids;
 
 // the reads v10 makes on _10449 from the Social hub, the profile, the clan view and Turf Wars
 static int kio_readable(const char *method, const char *path) {
-    static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/"};
+    // the reads v10's own pages make of gapi (v10 getNews, getUpcomingEvents, getTopStreams); nothing that changes an account
+    static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/", "/creators/", "/streams/"};
     if (!method || strcmp(method, "GET") != 0) return 0;
     for (size_t i = 0; i < sizeof(groups) / sizeof(groups[0]); i++)
         if (!strncmp(path, groups[i], strlen(groups[i]))) return 1;
@@ -129,6 +130,36 @@ static int kio_gapi(const char *method, const char *path, const cJSON *body, con
     if (!krunker_account_api("GET", KRUNKER_SVC_API, path, NULL, kio_done, (void *) (uintptr_t) g_kio_ids)) {
         g_kio[slot].id = 0;
         g_kio[slot].fn = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+typedef struct {
+    BackendHttpFn fn;
+    void *user;
+} GapiHttp;
+
+static void gapi_http_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    GapiHttp *h = user;
+    cJSON *env = cJSON_CreateObject();
+    if (data) cJSON_AddItemToObject(env, "data", cJSON_Duplicate(data, 1));
+    if (error) cJSON_AddItemToObject(env, "error", cJSON_Duplicate(error, 1));
+    char *text = cJSON_PrintUnformatted(env);
+    cJSON_Delete(env);
+    h->fn(h->user, status, text ? text : "", text ? strlen(text) : 0);
+    free(text);
+    free(h);
+}
+
+int v10_gapi_http(const char *path, const BackendHttpFn fn, void *user) {
+    if (!fn || !path) return 0;
+    GapiHttp *h = malloc(sizeof(*h));
+    if (!h) return 0;
+    h->fn = fn;
+    h->user = user;
+    if (!v10_gapi("GET", path, NULL, gapi_http_done, h)) {
+        free(h);
         return 0;
     }
     return 1;

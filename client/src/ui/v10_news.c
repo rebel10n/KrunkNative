@@ -17,6 +17,7 @@
 #include <backend_ui.h>
 #include <ui_logic.h>
 #include <v10_misc_popups.h>
+#include <v10_social.h> // v10_gapi_http: the official account's gapi reads (news, creators' events)
 #include <html_ui.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -260,7 +261,13 @@ static void on_news(void *user, const int status, const char *body, const size_t
 }
 
 static void news_fetch(void) {
-    if (L.scenario || L.news_inflight || L.news_fresh || backend_available() != 1) return;
+    if (L.scenario || L.news_inflight || L.news_fresh) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the official account's news: krunker.io's gapi (v10 getNews)
+        L.news_inflight = 1;
+        if (!v10_gapi_http("/social/news", on_news, NULL)) L.news_inflight = 0;
+        return;
+    }
+    if (backend_available() != 1) return;
     L.news_inflight = 1;
     if (!backend_http_get("/social/news", on_news, NULL)) L.news_inflight = 0;
 }
@@ -886,7 +893,8 @@ void v10_news_open_community(void) {
         E.events = cJSON_CreateArray();
         E.polls = cJSON_CreateArray();
         // without a brain the request fails at once: v10's catch, then loading = false
-        if (backend_available() == 1) E.loading = backend_http_get("/creators/events", on_events, (void *) (intptr_t) E.serial) != 0;
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) E.loading = v10_gapi_http("/creators/events", on_events, (void *) (intptr_t) E.serial) != 0;
+        else if (backend_available() == 1) E.loading = backend_http_get("/creators/events", on_events, (void *) (intptr_t) E.serial) != 0;
     }
     char *html = community_markup();
     generic_popup("communityPopup", html);

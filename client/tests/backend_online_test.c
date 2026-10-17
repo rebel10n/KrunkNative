@@ -8,6 +8,7 @@
 // backend_native.c to no-op stubs: no account service, an empty server finder, and a game
 // connection to 127.0.0.1. CI runs it on Windows too (.github/workflows/client.yml).
 #include <backend.h>
+#include "../src/net/backend_internal.h" // backend_brain_refuses_url (the gate's exact URL match)
 #include <online_mode.h>
 
 #include <stdio.h>
@@ -258,6 +259,45 @@ static void test_transport(void) {
     CHECK(down.status == 0 && down.body[0], "status 0 with the reason, got %d '%s'", down.status, down.body);
 }
 
+// ------------------------------------------------------------------ the brain gate (backend.h)
+// While the gate answers 1 (krunker.io is the active backend) the brain takes no request: a path on it and
+// a URL under it fail at once, and no connection is made. Other hosts (krunker.io, its lists) are not gated.
+static int g_gate_on;
+static int gate_on(void) { return g_gate_on; }
+
+static void test_brain_gate(void) {
+    CHECK(start_server(), "loopback server for the gate");
+    char brain[128], url[160];
+    snprintf(brain, sizeof(brain), "http://127.0.0.1:%d", g_port);
+    backend_set_url(brain);
+    backend_set_brain_gate(gate_on);
+
+    g_gate_on = 1;
+    Result path = {0}, req = {0};
+    CHECK(backend_http_get("/servers", on_done, &path) == 0, "gated: a brain path is not sent");
+    snprintf(url, sizeof(url), "%s/servers", brain);
+    CHECK(backend_http_request("GET", url, NULL, on_done, &req) == 0, "gated: a brain URL is not sent");
+    CHECK(backend_http_get_parallel(url, 2000, on_done, &req) == 0, "gated: a parallel brain GET is not sent");
+    CHECK(!path.done && !req.done, "gated: no callback for a refused request");
+    CHECK(backend_brain_refuses_url(brain) == 1 && backend_brain_refuses_url(url) == 1 && backend_brain_refuses_url("http://127.0.0.1:1/x") == 0,
+          "gated: the brain's own URLs are refused, a foreign port is not");
+    snprintf(url, sizeof(url), "%s5/servers", brain); // the brain's port with one more digit: another host
+    CHECK(backend_brain_refuses_url(url) == 0, "gated: a host whose name starts like the brain's is not the brain");
+
+    Result other = {0};
+    CHECK(backend_http_request("GET", "http://127.0.0.1:1/x", NULL, on_done, &other) == 1, "gated: a krunker.io-style URL is sent");
+    CHECK(wait_for(&other) && other.status == 0, "gated: the request to another host completes (refused connection)");
+
+    g_gate_on = 0;
+    Result open = {0};
+    CHECK(backend_http_get("/servers", on_done, &open) == 1, "ungated: the brain path is sent");
+    CHECK(wait_for(&open) && open.status == 200, "ungated: the brain answers, got %d", open.status);
+
+    backend_set_brain_gate(NULL);
+    backend_set_url("");
+    sock_close(g_listen);
+}
+
 int main(void) {
 #ifdef _WIN32
     WSADATA wsa;
@@ -266,6 +306,7 @@ int main(void) {
     test_mode_defaults();
     test_backend_url();
     test_transport();
+    test_brain_gate();
     printf("backend_online_test: %d/%d checks passed\n", checks - failures, checks);
     return failures ? 1 : 0;
 }

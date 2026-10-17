@@ -24,6 +24,11 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#if defined(_WIN32)
+#include <process.h>
+#elif !defined(__EMSCRIPTEN__)
+#include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -43,6 +48,7 @@
 #include <online_mode.h>  // auth_unreachable: offline mode
 #include <krunker_account.h> // the krunker.io account: the active one in an official game
 #include <krunker_net.h>     // krunker_net_active(): an official game is being joined or played
+#include <app_backend.h>     // app_backend_official_session(): the router's / a child window's official connection
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
@@ -151,9 +157,25 @@ void account_readable_time(char *out, const size_t n, const double ms) { readabl
 
 static int g_scenario_official; // --render-scenario's state.official: an official game without a socket
 
-AccountBackend account_backend(void) {
-    return krunker_net_active() || g_scenario_official ? ACCOUNT_BACKEND_KRUNKER : ACCOUNT_BACKEND_KRUNKIO;
+static long process_id(void) {
+#if defined(_WIN32)
+    return (long) _getpid();
+#elif defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    return (long) getpid();
+#endif
 }
+
+// The backend follows the server the player is connected to (the official krunker.io game this window
+// joins or plays, or the one a window of this client's tree plays: app_backend.h), never the sign-in state.
+AccountBackend account_backend(void) {
+    return krunker_net_active() || app_backend_official_session() || g_scenario_official ? ACCOUNT_BACKEND_KRUNKER
+                                                                                          : ACCOUNT_BACKEND_KRUNKIO;
+}
+
+// The brain gate (backend.h backend_set_brain_gate): no brain request while krunker.io is the active backend.
+static int brain_gated(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
 
 void account_ui_scenario_official(const int on) { g_scenario_official = on != 0; }
 
@@ -1082,6 +1104,7 @@ static void on_social(void *user, const cJSON *frame) {
 
 void account_ui_init(Client *client) {
     g_client = client;
+    backend_set_brain_gate(brain_gated);
     alt_store_open(NULL); // the vault, if the player has one (no key is read without a vault file)
     krunker_net_account_listen(kio_frame);     // the krunker.io account's data (official games)
     backend_social_set_held_sender(kio_held_send);
@@ -1480,8 +1503,11 @@ static void active_tick(void) {
     const int first = g_active.backend < 0;
     if (!first && backend == ACCOUNT_BACKEND_KRUNKER && g_active.backend == ACCOUNT_BACKEND_KRUNKER && kio && !g_active.kio_signed_in)
         krunker_net_account_signed_in(); // signed in from the in-game menu: this game's socket too
-    if (!first && backend != g_active.backend)
-        printf("[account] active account backend: %s\n", backend == ACCOUNT_BACKEND_KRUNKER ? "krunker.io" : "krunk.io");
+    // every window logs the backend it starts on and each change, with its pid: stderr, as the window
+    // processes' own diagnostics are (a child window's stdout is buffered when it goes to a file)
+    if (backend != g_active.backend)
+        fprintf(stderr, "[account] active account backend: %s (pid %ld)\n", backend == ACCOUNT_BACKEND_KRUNKER ? "krunker.io" : "krunk.io",
+                process_id());
     g_active.backend = backend;
     // a krunker.io game: nothing done under its account reaches the krunk.io account (backend.h)
     backend_social_hold(backend == ACCOUNT_BACKEND_KRUNKER);

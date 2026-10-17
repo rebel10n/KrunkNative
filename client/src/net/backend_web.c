@@ -122,7 +122,7 @@ EM_JS(void, backend_web_fetch, (const char *method, const char *url, const char 
 });
 
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {
-    if (!url || !url[0]) return 0;
+    if (!url || !url[0] || backend_brain_refuses_url(url)) return 0;
     WebReq *req = calloc(1, sizeof(*req));
     if (!req) return 0;
     req->fn = fn;
@@ -135,7 +135,7 @@ int backend_http_request(const char *method, const char *url, const char *json_b
 // no body, so a 403 {"error":"AccountRequired"} / 404 InvalidGameId reached the matchmaker as
 // a bare status (shown as "Game is full.").
 int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
-    if (!backend_enabled() || !path) return 0;
+    if (!backend_enabled() || !path || backend_brain_refuses_path()) return 0;
     const size_t n = strlen(backend_url()) + strlen(path) + 1;
     char *url = malloc(n);
     if (!url) return 0;

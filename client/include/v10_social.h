@@ -3,6 +3,7 @@
 #ifndef KRUNKNATIVE_V10_SOCIAL_H
 #define KRUNKNATIVE_V10_SOCIAL_H
 
+#include <backend.h>
 #include <cJSON.h>
 #include <html_dom.h>
 
@@ -15,6 +16,10 @@ int v10_gapi(const char *method, const char *path, const cJSON *body, V10GapiFn 
 void v10_gapi_cancel(V10GapiFn fn, void *user); // forget pending requests of (fn, user): fn is not called for them
 // v10's _34582: an error object -> the English text (errors.* i18n), else `fallback`
 const char *v10_gapi_error_text(const cJSON *error, const char *fallback);
+// A gapi GET answered as the brain's HTTP answer (BackendHttpFn, backend.h): the body is the {"data", "error"}
+// envelope as text, so a caller that parses the brain's body parses the krunker.io answer the same way. For
+// the official account's reads (v10_gapi: krunker.io while it is the active backend). 0 = not sent.
+int v10_gapi_http(const char *path, BackendHttpFn fn, void *user);
 
 // ---- the Social hub (v10_social.c)
 int  v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

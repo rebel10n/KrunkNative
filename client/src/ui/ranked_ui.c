@@ -100,12 +100,12 @@ static struct {
 
 static const AccountInfo *acc(void) { return active_account(); }
 
-// THE choice of the ranked backend: krunker.io when a krunker.io account is signed in (even beside a
-// KrunkNative one), else KrunkNative, else none. A --render-scenario render answers from the brain's
-// routes (its fixtures), whoever is signed in.
+// THE choice of the ranked backend: the connected server's (backend_ui.h account_backend(): krunker.io on an
+// official server, KrunkNative elsewhere), never the other account. A --render-scenario render answers from
+// the brain's routes (its fixtures), whoever is signed in.
 static RankedBackend ranked_active_backend(void) {
     if (R.scenario) return RANKED_BACKEND_KN;
-    return ranked_backend_route(krunker_account_signed_in(), acc() != NULL);
+    return ranked_backend_route(account_backend() == ACCOUNT_BACKEND_KRUNKER, krunker_account_signed_in(), krunkio_account() != NULL);
 }
 
 // The active account's name and level (level -1 = not known yet: krunker.io's level comes from the game

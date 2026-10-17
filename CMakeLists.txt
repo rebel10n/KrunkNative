@@ -1016,10 +1016,15 @@ else ()
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
     add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-    # ranked_route_test (client/include/ranked_route.h): the Ranked popup's backend rule (krunker.io first)
+    # ranked_route_test (client/include/ranked_route.h): the Ranked popup's backend rule (the connected server's)
     add_executable(ranked_route_test client/tests/ranked_route_test.c client/src/net/ranked_route.c)
     target_include_directories(ranked_route_test PRIVATE client/include shared/include)
     add_test(NAME ranked_route_test COMMAND ranked_route_test)
+    # app_backend_test (client/include/app_backend.h): the backend session across the windows (router, children,
+    # the wire and environment forms; app_window.c)
+    add_executable(app_backend_test client/tests/app_backend_test.c client/src/app_backend.c)
+    target_include_directories(app_backend_test PRIVATE client/include shared/include)
+    add_test(NAME app_backend_test COMMAND app_backend_test)
     # kn_webview_test (client/src/ui/kn_webview.c built without GTK): the captcha's game UI / window choice, the
     # game UI's stall watchdog and the frame conversion. The live run is kn_webview_live_test (a display: not ctest)
     add_executable(kn_webview_test client/tests/kn_webview_test.c client/src/ui/kn_webview.c)

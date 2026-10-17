@@ -51,6 +51,7 @@
 #include <krunker_account.h>
 #include <krunker_net.h>
 #include <krunker_lobbies.h> // Popular Now: krunker.io's custom games
+#include <v10_social.h>       // v10_gapi_http: the official account's streams (gapi getTopStreams)
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <store_spins.h>
@@ -635,7 +636,10 @@ static void streams_body(void *user, const int status, const char *body, size_t 
 
 static void streams_fetch(void) {
     if (L.override) return;
-    if (backend_available() != 1 || !backend_http_get("/streams/top?cb=2", streams_body, NULL)) streams_apply(NULL);
+    // the official account: krunker.io's gapi (v10 getTopStreams); otherwise kn_brain's route
+    const int sent = account_backend() == ACCOUNT_BACKEND_KRUNKER ? v10_gapi_http("/streams/top?cb=2", streams_body, NULL)
+                                                                  : backend_available() == 1 && backend_http_get("/streams/top?cb=2", streams_body, NULL);
+    if (!sent) streams_apply(NULL);
 }
 
 static void streams_interval(void *user) {

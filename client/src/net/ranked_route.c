@@ -3,10 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
-RankedBackend ranked_backend_route(const int krunker_signed_in, const int kn_signed_in) {
-    if (krunker_signed_in) return RANKED_BACKEND_KRUNKER;
-    if (kn_signed_in) return RANKED_BACKEND_KN;
-    return RANKED_BACKEND_NONE;
+RankedBackend ranked_backend_route(const int official, const int krunker_signed_in, const int kn_signed_in) {
+    if (official) return krunker_signed_in ? RANKED_BACKEND_KRUNKER : RANKED_BACKEND_NONE;
+    return kn_signed_in ? RANKED_BACKEND_KN : RANKED_BACKEND_NONE;
 }
 
 int ranked_match_host(const char *connection, char *host, const size_t host_n) {
