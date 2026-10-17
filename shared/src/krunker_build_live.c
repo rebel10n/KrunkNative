@@ -135,6 +135,12 @@ static const int OPTIONAL_C2S[] = {
     // the krunker.io account in the game (account-unify): the socket login after a sign-in, the ranked
     // join ("joinedRank"), and the account's RPC (v10 _33978.rpc). A build without them only loses the account
     KRUNKER_C2S_LOGIN, KRUNKER_C2S_RPC, KRUNKER_C2S_JOINED_RANK,
+    // the host's Kick / Ban on an official game (the player list's staff buttons, krunker_link_is_host): v10 sends
+    // ADMIN_ACTIONS only from them, and the server checks the sender's right. A build without it: those buttons do nothing
+    KRUNKER_C2S_ADMIN_ACTIONS,
+    // hosting a custom game on krunker.io's servers (the Host Game window's krunker.io hosting): a build without it sends
+    // no request ("the request was not sent") and every other packet works as before
+    KRUNKER_C2S_CUSTOM_SERVER,
     -1,
 };
 static const int OPTIONAL_S2C[] = {
@@ -168,6 +174,9 @@ static const int OPTIONAL_S2C[] = {
     KRUNKER_S2C_ENTITY_EVENT,
     // Prop Hunt (official-ingame-prophunt): a prop's size and the prop model's rotation; only the Prop Hunt mode sends them
     KRUNKER_S2C_UPDATE_PROP, KRUNKER_S2C_UPDATE_PROP_ROT,
+    // the answer to CUSTOM_SERVER (its game id, or the refusal): only read after a custom request. A build without it
+    // loses that reply, so the hosting attempt times out ("Please try again.")
+    KRUNKER_S2C_CUSTOM_RESPONSE,
     -1,
 };
 static const int REQUIRED_ADD[] = {
