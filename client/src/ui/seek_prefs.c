@@ -80,11 +80,6 @@ static void current_filter(SeekFilter *f) {
     for (int i = 0; i < f->map_count; i++) f->map_names[i] = krunker_official_map_name(f->maps[i]);
 }
 
-int seek_prefs_filtering(void) {
-    int tmp[SEEK_FILTER_MAX];
-    return saved_list(SEEK_MODES_KEY, tmp, SEEK_FILTER_MAX, mode_valid) > 0 || saved_list(SEEK_MAPS_KEY, tmp, SEEK_FILTER_MAX, map_valid) > 0;
-}
-
 // The Server Type as saved (knSeekServers): what the Quickplay row shows. Krunker Strike seeks its own
 // servers only (the coordinator's Strike pool): official krunker.io lobbies are Box Office's
 // (krunker_lobbies_enabled), whatever a shared config says.
@@ -167,8 +162,6 @@ void seek_prefs_data_query(char *out, const size_t n) {
     if (fields[0]) snprintf(out, n, "{%s}", fields + 1);
     else out[0] = 0;
 }
-
-int seek_prefs_match(const int mode, const char *map_name) { return seek_prefs_lobby_ok(mode, map_name, 0); }
 
 int seek_prefs_flag(const void *value) { return seek_filter_flag(value); }
 

@@ -1515,18 +1515,6 @@ static void server_tab_follow(void) {
     g_server_tab = backend ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK;
 }
 
-// Settings > Quickplay: the browser shows the server type's lists, rows of the seek mode / map
-static int row_prefs_match(const cJSON *t) {
-    const GameModeConfig *mode = row_mode(t);
-    int id = -1;
-    int count = 0;
-    const GameModeConfig *list = mode_list(&count);
-    if (mode && list) id = (int) (mode - list);
-    const char *map = meta_str(t, "map")[0] ? meta_str(t, "map") : row_i(t);
-    return seek_prefs_match(id, map);
-}
-static int prefs_filtering(void) { return seek_prefs_filtering(); } // a chosen mode / map (none = every row)
-
 typedef struct {
     char key[32];       // "official", "custom", a region id or a mode alias
     char name[64];
@@ -1705,7 +1693,6 @@ static int build_groups(ServerGroup *groups, const int max) {
     rebuild_finder_rows();
     const cJSON *lists[2];
     const int nlists = tab_lists(lists);
-    const int filter = prefs_filtering();
     snprintf(groups[0].key, sizeof(groups[0].key), "official");
     snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
     groups[0].order = 1;
@@ -1718,7 +1705,7 @@ static int build_groups(ServerGroup *groups, const int max) {
         const cJSON *t;
         cJSON_ArrayForEach(t, lists[l]) {
             const char *region = tuple_str(t, 1);
-            if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
+            if (!meta_of(t)) continue;
             if (row_krunker(t)) { // krunker.io's customs and its regions (kio_group)
                 const int gi = kio_group(groups, &count, max, t);
                 if (gi >= 0) group_push(&groups[gi], t);
@@ -2046,21 +2033,6 @@ static void append_finder_error(StrBuf *sb) {
     sb_append(sb, " <span style='color:rgba(255,255,255,0.5)'>(");
     sb_append_esc(sb, online_finder_url());
     sb_append(sb, ")</span></div>");
-}
-
-#define STATUS_BOX "class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);"
-
-// mm-token: what Settings > Quickplay does to the list (the seek mode / map filter).
-static void append_seek_status(StrBuf *sb) {
-    if (prefs_filtering()) {
-        char want[128];
-        seek_prefs_describe(want, sizeof(want));
-        char line[256];
-        I18N_F(line, "kn.servers.seekFilter", "Showing {0} (Settings > General > Quickplay)", want);
-        sb_append(sb, "<div id='knSeekFilter' " STATUS_BOX "color:rgba(255,255,255,0.7)'>");
-        sb_append_esc(sb, line);
-        sb_append(sb, "</div>");
-    }
 }
 
 // The official krunker.io lobbies' one separator line (native), before their first group, or after
@@ -2737,7 +2709,6 @@ static char *gen_list(void) {
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     append_finder_error(&sb);
-    append_seek_status(&sb);
     char *servers = get_servers();
     // the two tabs, one per backend (krunk.io, krunker.io); each shows the map carousel and the groups of its list
     const char *tabs[SERVER_TAB_COUNT] = {I18N("kn.servers.tabKrunk", "krunk.io"), I18N("kn.servers.tabKrunker", "krunker.io")};

@@ -12,7 +12,8 @@
 // uses the rotation again, never an empty pool. Quick Play, the launch seek, Find New Game and our
 // brain's seek send both lists (dsma, dsmo) as they are switched on, so nobody lands in Trade, a
 // Parkour map or a custom game by default. The lobby-list picks (krunker_lobbies_pick, krunker_net's
-// Find New Game list) and the server browser apply the same lists here.
+// Find New Game list) apply the same lists here. The server browser does not: it lists every row
+// whatever the switches say (the switches narrow the seek only).
 //
 // The Quickplay section starts folded (its header opens it; the state is not saved), with a row of presets
 // above it (SeekPreset, seek_filter.h): each saves the lists its switches would save, then shows them.
@@ -33,9 +34,6 @@ typedef enum {
     SEEK_SERVERS_BOTH = 2,     // ours when one matches, else an official lobby
 } SeekServers;
 
-// Whether a seek is narrowed by a switch the player changed (the server browser shows only matching
-// rows then; with the defaults every row is listed, as before).
-int seek_prefs_filtering(void);
 SeekServers seek_prefs_servers(void);
 // Stores the Server Type (the Quickplay row's setting).
 void seek_prefs_set_servers(SeekServers servers);
@@ -55,8 +53,6 @@ const char *seek_prefs_krunker_region(void);
 void seek_prefs_dq_fields(char *out, size_t n);
 // dataQuery JSON for our /mm/seek-game ({"dsma":[5],"dsmo":[0,2,3,19,25]}).
 void seek_prefs_data_query(char *out, size_t n);
-// Does a lobby (mode id, map name) match the switches? mode -1 / map NULL = unknown (no match then).
-int seek_prefs_match(int mode, const char *map_name);
 // Official lobby filter over krunker.io's game-list entry: mode, map name and the flags (SEEK_LOBBY_*).
 int seek_prefs_lobby_ok(int mode, const char *map_name, unsigned flags);
 int seek_prefs_flag(const void *value); // krunker.io's flag (true or 1)

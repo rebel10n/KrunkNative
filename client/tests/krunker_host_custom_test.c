@@ -86,7 +86,6 @@ size_t rules_class_count(void) { NOT_REACHED(); }
 const ClassConfig *rules_classes(void) { NOT_REACHED(); }
 const Weapon *rules_weapon(int id) { (void) id; NOT_REACHED(); }
 int seek_prefs_map(void) { NOT_REACHED(); }
-int seek_prefs_match(int mode, const char *map_name) { (void) mode; (void) map_name; NOT_REACHED(); }
 int seek_prefs_mode(void) { NOT_REACHED(); }
 void seek_prefs_dq_fields(char *out, size_t n) { (void) out; (void) n; NOT_REACHED(); }
 int seek_prefs_flag(const void *value) { (void) value; NOT_REACHED(); }

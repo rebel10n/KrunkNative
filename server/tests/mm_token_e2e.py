@@ -29,6 +29,8 @@ kn_proto.free_ports().
   client 6: Quick Join on the krunker.io group joins its first lobby in-client (not a seek)
   client 7: krunker.io's official customs / custom games are their own krunker.io groups, never Box Office's
     (the tabs: krunk.io holds Box Office's groups, krunker.io's own tab holds krunker.io's Custom Games first)
+  client 8: Quickplay's seek mode and map narrow the seek, not the server list: the krunker.io tab lists the same
+    rows in the same groups with a restricted seek as with none picked, and no 'Showing ...' line
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
 """
@@ -406,17 +408,51 @@ def client_settings(port, game_b):
     check("C3: the next run's seek lands on the node playing the saved mode", joined(text)[:1] == [game_b[0]], str(joined(text)))
 
 
-def client_official(port):
+def client_list_all(port):
+    """Settings > Quickplay narrows what a seek picks, never the server list (the list is the objective view
+    of every server): on krunker.io's tab, with a seek mode and map restricted (TDM on Sandstorm), the list shows
+    the same krunker.io rows as with nothing picked, and no 'Showing ...' line. Each group is opened in turn."""
+    reads = ""
+    for g in range(10):
+        t = 6000 + 300 * g
+        reads += ("%d call setExpandedRegion %d\n%d nodes @kio%d_%d [id=serverHolder] .kioRow\n"
+                  "%d nodes @ny%d [onclick*=bbbbb]\n") % (t, g, t + 60, 1, g, t + 120, g)
+    end = "9100 nodes @shown [id=knSeekFilter]\n9200 quit\n"
+    restricted = '300 call setSetting "seek_modes" "%d"\n400 call setSetting "seek_maps" "%d"\n' % (MODES["b"], SANDSTORM)
+    seen, ny_at = {}, {}
+    for label, setup in (("list-none", ""), ("list-restricted", restricted)):
+        p, log = client(label, port, "0 play\n" + setup + "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n"
+                        "5800 text @head .setHed\n" + reads + end)
+        finish(p, 90)
+        text = read_log(log)
+        rows = [int(x) for x in re.findall(r"nodes t=\d+ @kio1_\d+ elements=\d+ match=(\d+)", text)]
+        shown = re.search(r"nodes t=\d+ @shown elements=\d+ match=(\d+)", text)
+        seen[label] = (sum(rows), len(rows), int(shown.group(1)) if shown else -1)
+        # the NY read of group g is at 6000 + 300 g + 120
+        hits = [(int(t) - 6120) // 300 for t, n in re.findall(r"nodes t=(\d+) @ny\d+ elements=\d+ match=(\d+)", text) if int(n) > 0]
+        ny_at[label] = hits[0] if len(hits) == 1 else -1
+    none, restricted_seen = seen["list-none"], seen["list-restricted"]
+    want = len(STUB_GAMES["games"])
+    check("Q1: with nothing picked the krunker.io tab lists every krunker.io lobby the matchmaker sent (%d)" % want,
+          none[0] == want, str(seen))
+    check("Q1: with a seek mode and map picked the krunker.io tab lists the same rows (not only the TDM on Sandstorm ones)",
+          restricted_seen[0] == none[0] and restricted_seen[1] == none[1], str(seen))
+    check("Q1: ... and no 'Showing ...' line for the Quickplay switches", restricted_seen[2] == 0, str(seen))
+    check("Q1: NY:bbbbb is in one group, the same one in both runs", ny_at["list-none"] >= 0 and ny_at["list-none"] == ny_at["list-restricted"], str(ny_at))
+    return ny_at["list-none"]
+
+
+def client_official(port, ny):
     """The browser opt-out (KRUNKNATIVE_KRUNKER_JOIN=browser): official lobbies open on krunker.io.
     The default, in-client, is client_both's and krunker_official_e2e.py's."""
     hits = len(stub_hits)
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "1000 down F4\n1050 up F4\n4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @status [id=kioStatus]\n"
-                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(0,\"]\n6200 call setExpandedRegion 0\n"
+                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(%d,\"]\n6200 call setExpandedRegion %d\n"
                     "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
-                    "6700 call quickJoinRegion 0\n7500 quit\n" % (MODES["b"], SANDSTORM),
+                    "6700 call quickJoinRegion %d\n7500 quit\n" % (MODES["b"], SANDSTORM, ny, ny, ny),
                     extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
     finish(p, 60)
     text = read_log(log)
@@ -428,9 +464,7 @@ def client_official(port):
           re.search(r"@status n=1 .*text=.*KRUNKER\.IO OFFICIAL LOBBIES\s*krunker\.io servers open in your browser", text),
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
-    # the seek's filter (seek mode tdm on Sandstorm) leaves krunker.io's New York lobbies alone on its tab
-    check("C4: the server type only steers the seek: krunker.io's tab lists the seek's lobbies (New York) only",
-          m and "New York" in m.group(1), m.group(1) if m else "")
+    check("C4: the server type only steers the seek: the krunker.io tab is not narrowed (NY's group is found)", ny >= 0, str(ny))
     m = re.search(r"nodes t=\d+ @kgroups elements=\d+ match=(\d+)", text)
     check("C4: then one krunker.io region group (New York: tdm on Sandstorm)", m and m.group(1) == "1", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
@@ -445,13 +479,13 @@ def client_official(port):
     check("C4: the official list was fetched once (cached >= 15 s)", len(lists) == 1, str(stub_hits[hits:]))
 
 
-def client_quick_join(port):
+def client_quick_join(port, ny):
     """Quick Join on the official krunker.io group, in-client (the default): its first joinable lobby
     (NY:bbbbb; the full NY:ccccc is skipped) is joined through krunker_net, not in the browser."""
     p, log = client("quickjoin", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
-                    "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @head .setHed\n6100 call setExpandedRegion 0\n"
-                    "6300 nodes @rows .kioRow\n6400 call quickJoinRegion 0\n7500 quit\n" % (MODES["b"], SANDSTORM))
+                    "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @head .setHed\n6100 call setExpandedRegion %d\n"
+                    "6300 nodes @rows .kioRow\n6400 call quickJoinRegion %d\n7500 quit\n" % (MODES["b"], SANDSTORM, ny, ny))
     finish(p, 60)
     text = read_log(log)
     check("C6: Quick Join on the krunker.io group joins its first lobby in-client",
@@ -563,8 +597,9 @@ def main():
         client_launch(port, node_b[1])
         client_f5(port)
         client_settings(port, node_b[1])
-        client_official(port)
-        client_quick_join(port)
+        ny = client_list_all(port)
+        client_official(port, ny)
+        client_quick_join(port, ny)
         client_hoist(port)
         client_both(port)
     finally:
