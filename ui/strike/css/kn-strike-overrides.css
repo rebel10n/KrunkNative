@@ -205,3 +205,9 @@ html #devConsoleOverlay > .modal{width:min(400px,calc(100vw - 30px));height:min(
 .dxp-badge .booster-time-left__text-holder{position:relative;z-index:1}
 .dxp-badge .booster-time-left__text{color:#ffe540;font-size:var(--font-size-xs)}
 .dxp-popup{display:flex;flex-direction:column;align-items:center;gap:calc(16 * var(--base-scale));padding:calc(24 * var(--base-scale))}
+
+/* KrunkNative: the round end's level bar is one row centred on the screen at every width. On a narrow (portrait)
+ * screen "LEVEL 1" and "0 / 100" wrapped into columns pushed to the left edge, so the bar sat off centre; the labels
+ * stay on one line and the row is centred (FRVR's bar at 640 x 360 keeps its place). */
+.lean-end-screen__main-container .progress-bar__horizontal-holder{justify-content:center;width:100%}
+.lean-end-screen__main-container .progress-bar__horizontal-holder .progress-bar__left-text,.lean-end-screen__main-container .progress-bar__horizontal-holder .progress-bar__right-text{white-space:nowrap}

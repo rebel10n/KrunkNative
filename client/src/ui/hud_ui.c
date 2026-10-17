@@ -80,6 +80,7 @@ void hud_ui_hit(Client*, int kill);
 #include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
 #include <client_settings.h> // client_settings_game_time: Client > Game > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
+#include <strike_ui.h>   // strike_ui_active(): Krunker Strike's round end is its own banner and lean screen (strike_hud.c)
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -3518,7 +3519,9 @@ static void hud_end_step(const Client *client, const double now_ms) {
         ui->end_phase = 2;
         hud_end_results(client); // hides the title
     }
-    const int show = ui->ended && ui->end_phase == 1 && !html_ui_is_menu_open();
+    // Krunker Strike's round end draws its own title (strike_hud.c: the victory banner, then the lean screen),
+    // so v10's canvas title stays off there: one result message on screen at a time
+    const int show = ui->ended && ui->end_phase == 1 && !html_ui_is_menu_open() && !strike_ui_active();
     if (g_hud_clock_s >= 0.0 && show) {
         // --render-scenario: the pinned clock jumps to the capture time; replay the jump as the
         // 60 Hz frames it stands for, so a capture `after_ms` past the END shows that frame.

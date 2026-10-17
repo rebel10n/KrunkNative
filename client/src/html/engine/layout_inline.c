@@ -113,6 +113,11 @@ static void flatten_text(Flattener *f, Box *tb)
     float ls = letter_spacing_of(p);
     const CssComputed *s = p->style;
     int nowrap = s->white_space == CSS_WHITE_SPACE_NOWRAP || s->white_space == CSS_WHITE_SPACE_PRE;
+    /* white-space: pre / pre-wrap preserve every space (css-text-3 white-space-collapse: preserve): a
+     * run's leading and trailing spaces are not collapsible, so a line start or the previous run's
+     * space keeps them and they count in the run's width (FRVR's victory title is "#1" + " VICTORY" in
+     * two pre divs: the space between them is the second div's). */
+    int preserve = s->white_space == CSS_WHITE_SPACE_PRE || s->white_space == CSS_WHITE_SPACE_PRE_WRAP;
     int break_all = s->word_break == CSS_WORD_BREAK_BREAK_ALL;
     uint8_t *flags = malloc(tb->text_len + 1);
     if (!flags) return;
@@ -131,9 +136,9 @@ static void flatten_text(Flattener *f, Box *tb)
         InNode n;
         memset(&n, 0, sizeof(n));
         n.kind = IN_TEXT; n.box = tb; n.start = start; n.end = i;
-        n.starts_space = is_space_byte(tb->text[start]);
+        n.starts_space = !preserve && is_space_byte(tb->text[start]);
         uint32_t e = i;
-        while (e > start && is_space_byte(tb->text[e - 1])) e--;
+        if (!preserve) while (e > start && is_space_byte(tb->text[e - 1])) e--;
         n.ends_space = (e < i);
         n.breakable_after = !nowrap && (i < tb->text_len);
         n.w = layout_text_width(f->t, tb->font, tb->text + start, i - start, ls);

@@ -148,6 +148,35 @@ LIVE_SCRIPT = """menu
 """
 
 
+# the round end's timeline: every SAMPLE_STEP ms of script time from the END, the victory banner, the lean screen
+# and the canvas title (#knVicTitle, hud_ui.c: v10's end title, which the Strike page does not draw) are read. The
+# window ends before the end-state checks (30 s): sampling slows the frames, and the sandbox rotates to the next map a
+# few seconds after the END, which the slowed clock then waits on.
+SAMPLE_START, SAMPLE_END, SAMPLE_STEP = 4600, 16000, 100
+
+
+def timeline_samples():
+    lines = []
+    for t in range(SAMPLE_START, SAMPLE_END + 1, SAMPLE_STEP):
+        # the three read one frame (the same script time): a banner and a lean screen one frame apart are not doubled
+        lines.append(f"{t} nodes @b{t} .frvr-in-game-ui__victory-screen")
+        lines.append(f"{t} nodes @l{t} .lean-end-screen__victory-defeat")
+        lines.append(f"{t} attr @v{t} style #knVicTitle")
+    return "\n".join(lines) + "\n"
+
+
+def timeline(text):
+    """the samples of the live run: {t: count} for the banner and the lean screen, {t: style} for the canvas title"""
+    banner = {int(t): int(n) for t, n in re.findall(r"nodes t=\d+ @b(\d+) elements=\d+ match=(\d+)", text)}
+    lean = {int(t): int(n) for t, n in re.findall(r"nodes t=\d+ @l(\d+) elements=\d+ match=(\d+)", text)}
+    canvas = {int(t): v.strip() for t, v in re.findall(r"attr t=\d+ @v(\d+) n=\d+ style=([^\n]*)", text)}
+    return banner, lean, canvas
+
+
+def canvas_shown(style):
+    return "display:block" in style or "display:flex" in style
+
+
 def nodes(text, label):
     m = re.search(r"\[input_script\] nodes t=\d+ @%s elements=\d+ match=(\d+)" % re.escape(label), text)
     return int(m.group(1)) if m else -1
@@ -160,11 +189,27 @@ def text_of(text, label):
 
 def live_case():
     script = os.path.join(WORK, "live.txt")
+    head, tail = LIVE_SCRIPT.split("30000 text", 1)
     with open(script, "w") as f:
-        f.write(LIVE_SCRIPT.format(shots=WORK))
+        f.write((head + timeline_samples() + "30000 text" + tail).format(shots=WORK))
     rc, text = run([f"{BUILD}/client_bin", "--flavor", "strike", "--offline"], os.path.join(WORK, "cfg-live"),
-                   os.path.join(WORK, "live.log"), {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                   os.path.join(WORK, "live.log"), {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667"},
+                   timeout=600)
     check("3: live client ran its script", rc == 0 and "[strike] Krunker Strike page ready" in text, f"rc {rc}")
+
+    banner, lean, canvas = timeline(text)
+    ts = sorted(set(banner) | set(lean))
+    # one result message at a time: the banner, the lean screen and the canvas title, sampled every 100 ms
+    doubled = [t for t in ts if (banner.get(t, 0) > 0) + (lean.get(t, 0) > 0) + canvas_shown(canvas.get(t, "")) > 1]
+    check("3: never more than one result message on screen (banner, lean screen or canvas title; sampled every 100 ms)",
+          bool(ts) and not doubled, f"{len(ts)} samples, doubled at {doubled[:3]}")
+    banner_ts = [t for t in ts if banner.get(t, 0) > 0]
+    lean_ts = [t for t in ts if lean.get(t, 0) > 0]
+    check("3: the victory banner comes up at the END, then the lean screen takes its place",
+          bool(banner_ts) and bool(lean_ts) and max(banner_ts) < min(lean_ts),
+          f"banner {min(banner_ts) if banner_ts else -1}..{max(banner_ts) if banner_ts else -1}, lean from {min(lean_ts) if lean_ts else -1}")
+    check("3: the canvas title (#knVicTitle, the v10 end title) never shows under Strike",
+          not any(canvas_shown(v) for v in canvas.values()), str([v for v in canvas.values() if canvas_shown(v)][:2]))
     title = text_of(text, "title")
     # the holder's text: "#N VICTORY" (first) or "Nth PLACE" (the bot round's FFA board)
     check("3: the title is \"#N VICTORY\" or \"Nth PLACE\"", re.match(r"^(#\d+ VICTORY|\d+(st|nd|rd|th) PLACE)$", title[1]) is not None, str(title))
