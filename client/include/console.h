@@ -43,6 +43,11 @@ int  ui_console_chat_command(Client*, const char *text);
 // hookChat: every "ch" line, and the "noc" / "unl" / "fh" packets (NetCheatFlag).
 void ui_console_on_chat(const char *name, const char *text, int kind);
 void ui_console_on_cheat(int flag, int on);
+// The offline game on catalogue map `catalog_index` (-1 keeps the running one), leaving the lobby
+// this client is joined to first: the console's `offline <map>` / `sandbox`, and the Games window's
+// Play when no lobby runs the map (servers_ui.c, ui_handlers.c h_play_map). `command` names it in
+// the console's failure line.
+void ui_console_go_offline(Client *client, int catalog_index, const char *command);
 void ui_console_exec(const char *line);     // devConsole.exec(line)
 // `reconnect` without its echo (F5, game_reload.c): 1 = the offline game restarted or a server is
 // being joined again, 0 = nothing to reconnect to (an error line in the console).

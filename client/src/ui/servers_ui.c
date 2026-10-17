@@ -14,6 +14,7 @@
 // ?game=<id>: the web build does exactly that, the native client re-seeks in place.
 #include <backend.h>
 #include <backend_ui.h>
+#include <console.h>     // ui_console_go_offline: the Games window's Play leaves a joined lobby
 #include <game_reload.h> // game_reload_server_updating: the auto-restart on a server update
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -647,6 +648,7 @@ static int seek_request_token(SeekReq *r) {
 }
 
 static void start_seek(const char *game_id);
+static void on_play_list(void *user, int status, const char *body, size_t length);
 
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
@@ -761,10 +763,12 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                                                     !strcmp(err->valuestring, "NoServersMatchQuery") ||
                                                     !strcmp(err->valuestring, "NoOtherLobby"));
         if (play && cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") || !strcmp(err->valuestring, "NoServersMatchQuery"))) {
-            // v10 (v10.js:222085): no lobby plays the map: the plain seek again, in place
-            printf("[mm] play: no lobby plays the map: a plain seek\n");
+            // no lobby plays the map (v10.js:222085 seeks again plainly and then hosts the map; this
+            // client never hosts): the lobby list, then the offline game on the map (on_play_list). A
+            // plain seek would join some other lobby, and the play would end there, not on the map.
+            printf("[mm] play: no lobby plays the map: the offline game on it\n");
             cJSON_Delete(res);
-            start_seek(NULL);
+            mm_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
             return;
         }
         if (find && (nothing || g_client->net_connected)) {
@@ -3821,16 +3825,27 @@ static void on_play_list(void *user, const int status, const char *body, const s
         menu_show_window(MENU_WINDOW_NONE, 0);
         switch_server(found);
     } else if (g_play_catalogue) {
-        // no server runs it: practice it offline (the client never hosts; doc/backend.md 8.7)
+        // no server runs it: practice it offline (the client never hosts; doc/backend.md 8.7). The
+        // lobby this client is joined to is left first (the console's `offline <map>`): v10's Play
+        // ends the page, so the player ends up on the map, not in the lobby they came from.
         const int index = map_catalog_find(g_play_name);
-        const int slot = index >= 0 ? map_catalog_slot(&g_client->game.maps, &g_client->game.map_count, (size_t) index) : -1;
-        if (slot >= 0) {
-            menu_select_map(slot);
+        // no lobby of ours runs it: the offline game on it, leaving the lobby this client is joined to
+        // (v10's Play ends the page, so the player ends up on the map, not in that lobby)
+        if (index < 0) {
+            menu_log("play: %s is not in the map catalogue", g_play_name);
+        } else if (g_client->offline) {
+            // the running offline game restarts on the map in the play's mode (the raid promo's Raid);
+            // ui_console_go_offline would keep the running game's mode (local_game_pick_map)
+            const int slot = map_catalog_slot(&g_client->game.maps, &g_client->game.map_count, (size_t) index);
+            if (slot >= 0) {
+                menu_select_map(slot);
+                if (g_play_mode >= 0) g_client->net_mode_index = g_play_mode; // local_game_host reads it (Krunker mode id)
+                local_game_host(g_client, slot, g_client->net_mode_index);
+                menu_host_offline();
+            }
+        } else {
             if (g_play_mode >= 0) g_client->net_mode_index = g_play_mode; // local_game_start reads it (Krunker mode id)
-            if (g_client->offline) local_game_host(g_client, slot, g_client->net_mode_index);
-            else g_client->offline_start_map = g_client->game.maps[slot];
-            menu_host_offline();
-            g_client->offline_start_map = NULL;
+            ui_console_go_offline(g_client, index, "play");
         }
     } else {
         fetch_map_data(g_play_name); // a published map: offline practice too

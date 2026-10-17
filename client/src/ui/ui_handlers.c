@@ -244,19 +244,21 @@ H(h_dialog) { UNUSED; ui_dialog_answer(arg_int(args, argc, 0, 0)); return 1; } /
 H(h_export_settings) { UNUSED; ui_settings_export(); return 1; }
 
 // playMap(name): Krunker opens /?play=<name> and autoHostMap creates a room on that map;
-// natively the local server hosts the catalogue map (Free for All unless Host Game picked
-// another mode).
+// KrunkNative joins a lobby on it (servers_ui.c), else plays the catalogue map offline (the
+// embedded local server; Free for All unless Host Game picked another mode).
 H(h_play_map) {
     UNUSED;
     const char *name = arg_str(ev, args, argc, 0, "");
     const int index = community_catalogue_index(name, NULL);
-    // brain: a lobby on that map, else /mm/host-game; a published map: its JSON (servers_ui.c)
+    // brain: a lobby on that map (servers_ui.c); a published map: its JSON, played offline there
     if (servers_ui_play_map(name, index >= 0)) return 1;
     if (index < 0) {
         menu_log("playMap: %s is not in the map catalogue", name);
         return 1;
     }
-    host_catalog_map(index, -1);
+    // no brain lobby to join: the offline game on it, leaving the server this client is joined to
+    // (the console's offline <map>; host_catalog_map would keep playing on that server)
+    ui_console_go_offline(menu_ui()->client, index, "play");
     return 1;
 }
 

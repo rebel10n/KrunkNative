@@ -1288,7 +1288,7 @@ static void clear_ping_counter(void) {
 // playCustomMap() (the single player game) + clearPingCounter(): leave the server for the
 // in-process sandbox server. `catalog_index` (-1 none) is the map it starts on, or the one a
 // running offline game reloads on (local_game_pick_map).
-static void go_offline(Client *client, const int catalog_index, const char *command) {
+void ui_console_go_offline(Client *client, const int catalog_index, const char *command) {
     nav_overlay_map_switch(); // runOfflineSandbox: clearNavOverlayForMapSwitch + scheduleNavOverlayRebuild
 #ifndef __EMSCRIPTEN__
     if (!client->offline) stop_net(client);
@@ -1321,7 +1321,7 @@ static void cmd_offline(const int argc, char **argv, const char *rest) {
         appendf(COL_ERROR, "offline: map '%s' not found. Use maps to list choices.", name);
         return;
     }
-    go_offline(client, index, "offline");
+    ui_console_go_offline(client, index, "offline");
 }
 
 // sandbox: the offline game on the sandbox map (--sandbox / web ?sandbox): v7.1.4's
@@ -1335,7 +1335,7 @@ static void cmd_sandbox(const int argc, char **argv, const char *rest) {
         append("sandbox failed: the map catalogue has no sandbox map (" LOCAL_GAME_SANDBOX_MAP ")", COL_ERROR);
         return;
     }
-    go_offline(client, index, "sandbox");
+    ui_console_go_offline(client, index, "sandbox");
 }
 
 // console_reset (KrunkNative): the console back at the stylesheet's place and size (top right,
