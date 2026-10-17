@@ -32,6 +32,16 @@ modal's passive card, saying so, for a moment.
 the first seek in the live order (no `validationToken`) still answers `400 {"error":"CaptchaRequired"}`,
 with or without the `accept-language` header. Skipping the early token does not avoid the captcha.
 
+The validation token's lifetime in KN (`client/src/net/krunker_net.c`, `fetch_token` / `seek` / `on_seek`):
+a token is fetched only for the seek after a captcha (after the player's Turnstile, or after a refused
+token) and the seek that carries it spends it (`seek()` wipes it), so no later seek of the join sends it:
+Find New Game's re-seeks, the build's retry and a reload's fallback send none and get `CaptchaRequired`
+again, as the live client's seek does. A refused token (`InvalidClientValidationToken`,
+`ExpiredClientValidationToken`) gets one fresh token and one more seek per join, without the captcha (it
+went with the refused seek); a second refusal is the error, "Socket Error". v10 shows the error at the
+first refusal and has no such retry: that is KN's addition. The matchmaker's own spend rule and token
+lifetime are not visible from the client; the rule above is what the client does, and what the e2e pins.
+
 ## Web build
 
 1. `CaptchaRequired` opens the "Security Challenge" modal (the live socket-captcha modal's look:
@@ -246,6 +256,10 @@ challenge); the client side of the exchange is covered by the tests below.
 - native `native`: the callback (wrong secret 404, foreign Origin 403, a non-token 400, the preflight,
   refused after its TTL, "Open krunker.io" re-arms a new secret, one token taken, a second refused), then
   the whole game as before;
+- native `native-token-refused` / `native-token-refused-twice` / `native-token-reuse` (`--token`): the
+  matchmaker refuses the captcha's token as stale (one retry: a fresh token, no captcha, the second
+  captcha, joined; a second refusal is "Socket Error"), and the build's retry after a captcha carries no
+  validation token (the spent one is never sent again: that was "Socket Error" before);
 - native `native-paste`: a bad paste refused in the modal, a token the matchmaker refuses brings the
   modal back saying so, the next one joins; the box is cleared;
 - native `native-webview` (alone: `--webview`; skipped with a message, exit 77 alone, when the build

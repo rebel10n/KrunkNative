@@ -132,6 +132,9 @@ static struct {
     // and whether the last seek carried one (a CaptchaRequired after it = the token was refused)
     int captcha_attempts, captcha_sent;
     char captcha[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
+    // the matchmaker refused a validation token this join (InvalidClientValidationToken / ExpiredClientValidationToken):
+    // a fresh one and one more seek, once per join (on_seek); the second refusal is shown
+    int token_retries;
     // the player's texts the socket thread needs, looked up on the main thread per join (i18n is the
     // main thread's): {0} placeholders filled with i18n_replace where they are used
     struct {
@@ -1189,7 +1192,9 @@ static void seek(void) {
     // matchmakerSeek (game.deob.js:147610-147631): hostname, region, autoChangeGame,
     // validationToken, then game / excludeGame / dataQuery / captchaToken / accessToken when set
     // (null ones are dropped, matchmakerRequest :147647). The first seek has no validationToken
-    // (iïîìîíì passes undefined for a guest); only the captcha retry fetches one (:147466).
+    // (iïîìîíì passes undefined for a guest); only the captcha retry fetches one (:147466). A token is
+    // single use: the seek that carries it spends it (wiped below), so a later seek of this join
+    // (Find New Game, the build's retry, a reload's fallback) sends none unless it fetched a fresh one.
     static char url[32768];
     snprintf(url, sizeof(url), "%s/seek-game", K.matchmaker);
     append_param(url, sizeof(url), "hostname", "krunker.io");
@@ -1201,6 +1206,7 @@ static void seek(void) {
         token_at = strlen(url) + sizeof("&validationToken=") - 1;
         append_param(url, sizeof(url), "validationToken", K.token);
         token_end = strlen(url);
+        wipe(K.token, sizeof(K.token)); // spent by this seek: never sent with another
     }
     if (K.game_id[0]) append_param(url, sizeof(url), "game", K.game_id);
     else if (K.exclude[0]) append_param(url, sizeof(url), "excludeGame", K.exclude); // backToOrigin's ?exclude= (:141624, :222302)
@@ -1277,6 +1283,19 @@ static void on_game_list(void *user, const int status, const char *body, const s
 // same seek with captchaToken (game.deob.js:147459-147466).
 static void on_token(void *user, int status, const char *body, size_t length);
 
+// GET <matchmaker>/generate-token: a fresh validation token for the next seek (fetchValidationToken,
+// game.deob.js:147576). on_token seeks with it. Asked for after the player's captcha (captcha_done) and
+// after a refused token (on_seek), each time: a token is never sent twice.
+static void fetch_token(void) {
+    K.state = KS_TOKEN;
+    char url[600];
+    snprintf(url, sizeof(url), "%s/generate-token", K.matchmaker);
+    if (!http_get(url, on_token)) {
+        wipe(K.captcha, sizeof(K.captcha));
+        fail_unreachable();
+    }
+}
+
 static void captcha_done(void *user, const char *token) {
     if (stale(user) || K.state != KS_CAPTCHA) return;
     if (!token) {
@@ -1288,13 +1307,7 @@ static void captcha_done(void *user, const char *token) {
         return;
     }
     snprintf(K.captcha, sizeof(K.captcha), "%s", token);
-    K.state = KS_TOKEN;
-    char url[600];
-    snprintf(url, sizeof(url), "%s/generate-token", K.matchmaker); // fetchValidationToken (game.deob.js:147576)
-    if (!http_get(url, on_token)) {
-        wipe(K.captcha, sizeof(K.captcha));
-        fail_unreachable();
-    }
+    fetch_token();
 }
 
 static void on_token(void *user, const int status, const char *body, const size_t length) {
@@ -1310,6 +1323,12 @@ static void on_token(void *user, const int status, const char *body, const size_
     if (K.token[0]) printf("[krunker] generate-token: %zu chars\n", strlen(K.token));
     else fprintf(stderr, "[krunker] generate-token failed (HTTP %d): seeking without a validation token\n", status);
     seek();
+}
+
+// The matchmaker's refusals of a validation token that a fresh one can cure: spent, expired (the words of v10's
+// ERRORS table, v10.js:147689-147692). The brain path (servers_ui.c token_refusal) retries these too, and two more.
+static int token_refusal(const char *error) {
+    return error && (!strcmp(error, "InvalidClientValidationToken") || !strcmp(error, "ExpiredClientValidationToken"));
 }
 
 // {host, port, gameId, clientId, data} -> the WebSocket URL (game.deob.js:222360-222371)
@@ -1364,6 +1383,15 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         return;
     } else if (error && (!strcmp(error, "InvalidVersion") || !strcmp(error, "NoServersMatchQuery")) && retry_version(error)) {
         // (retry_version runs the refresh; on_build_retry seeks again or fails)
+    } else if (token_refusal(error) && K.token_retries < 1) {
+        // the matchmaker refused the validation token (the one this seek carried, spent by it): a fresh token and
+        // one more seek (on_token). That seek has no captcha (the refused one spent it), so the matchmaker asks for
+        // the player's Turnstile again, as the live client does. A second refusal is shown below (the generic error).
+        K.token_retries++;
+        printf("[krunker] validation token refused (%s): seeking again with a fresh one\n", error);
+        cJSON_Delete(res);
+        fetch_token();
+        return;
     } else if (status != 200 || error || !host || !game || !client_id) {
         char detail[200], text[300];
         // the matchmaker's own error word, else the start of its body on one line (the log)
@@ -1595,7 +1623,7 @@ static void join_seek(void) {
     else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
     // the live client's order (seek, :147412): the account's fresh access token first (a refresh when it
     // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
-    // generate-token only before a captcha retry (captcha_done)
+    // generate-token only before a captcha retry (captcha_done) or after a refused token (on_seek)
     K.state = KS_ACCOUNT;
     krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
 }
@@ -1639,10 +1667,11 @@ static int join(Client *client, const char *game_id, const char *region, const i
     else if (option("KRUNKNATIVE_KRUNKER_REGION", "krunkerRegion", r, sizeof(r))) snprintf(K.region, sizeof(K.region), "%s", r);
     else if (seek_prefs_krunker_region()[0]) snprintf(K.region, sizeof(K.region), "%s", seek_prefs_krunker_region()); // Settings > Quickplay
     else snprintf(K.region, sizeof(K.region), "%s", krunker_seek_region()); // the ping race's ("" = it runs first)
-    K.token[0] = 0;
+    wipe(K.token, sizeof(K.token)); // a token of an earlier join is never carried into this one
     K.connected = 0;
     K.altcha_pending = 0;
     K.captcha_attempts = K.captcha_sent = 0;
+    K.token_retries = 0;
     K.version_retries = 0;
     K.pow_shown = 0;
     K.leave_unsupported = 0;
@@ -1759,6 +1788,7 @@ void krunker_net_leave(Client *client, const char *reason) {
     wipe(K.access, sizeof(K.access));
     if (!krunker_account_owns_captcha()) krunker_captcha_close(); // a pending Turnstile request ends with the session (not a sign-in's)
     wipe(K.captcha, sizeof(K.captcha));
+    wipe(K.token, sizeof(K.token));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
     wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
     account_frames_drop();

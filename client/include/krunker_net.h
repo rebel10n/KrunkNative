@@ -27,7 +27,10 @@
 //      GET <matchmaker>/generate-token (a fresh validation token) and seek-game again with
 //      validationToken=<token> after autoChangeGame and captchaToken=<turnstile> after dataQuery
 //      (:147445-147467; at most 2 captcha prompts per join, like the live client). Turnstile tokens
-//      are single-use: sent once, wiped, never logged.
+//      are single-use: sent once, wiped, never logged. The validation token is single-use too: the seek
+//      that carries it spends it (wiped), and no later seek of the join sends it. A refused one
+//      (InvalidClientValidationToken / ExpiredClientValidationToken) gets one fresh token and one more
+//      seek per join, without the captcha (spent); a second refusal is the error.
 //   3. WebSocket <scheme>://<host>[:port]/ws?gameId=<gameId>&clientKey=<clientId>[&at=<access token>]
 //      (:222360-222371); a signed-in socket gets "a" ACCOUNT_RESPONSE (the account's name and level,
 //      shown by the account UI) and our "en" carries the player's own loadout (krunker_link.c)

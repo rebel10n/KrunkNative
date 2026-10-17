@@ -44,6 +44,10 @@ Security Challenge modal first ends the join saying so, a second click + a paste
 Reload runs (--reload alone): "native-reload" (--krunker, a lobby joined, F5: the relaunched client,
 whose command line alone would join the matchmaker's pick, rejoins that official game by its id) and
 "native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
+Validation token runs (--token alone; part of --native): "native-token-refused" (the matchmaker refuses the captcha's
+validation token as stale: one fresh token and one more seek, then the captcha again, joined), "native-token-refused-twice"
+(refused again: the error screen says Socket Error after that one retry), "native-token-reuse" (the build is refused after the
+captcha: the retry's seek carries no validation token, the spent one is never sent again).
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
 token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
@@ -116,7 +120,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
-        "--script": "script", "--prophunt": "prophunt"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--script": "script", "--prophunt": "prophunt", "--token": "token"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -451,6 +455,8 @@ class Stub:
         self.got_en = threading.Event()
         self.closed = threading.Event()
         self.issued = []          # validation tokens handed out
+        self.spent_tokens = set() # validation tokens a seek has carried: single use, a second seek is refused
+        self.refuse_tokens = 0    # the next N tokens a seek carries are refused as stale (InvalidClientValidationToken)
         self.used_captchas = set()
         self.bad_version_seeks = []  # dataQuery.v values refused as InvalidVersion
         self.captcha_ok = threading.Event()
@@ -539,7 +545,20 @@ class Stub:
                         seek_v = json.loads(qd.get("dataQuery") or "{}").get("v")
                     except (ValueError, TypeError):
                         seek_v = None
-                    if not stub.captcha_free and (not cap or cap in stub.used_captchas or val not in stub.issued):
+                    # the validation token (generate-token): single use. A token this matchmaker did not issue, or one a
+                    # seek already carried, is InvalidClientValidationToken ("Socket Error"); so is a token the run
+                    # scripted as stale (refuse_tokens). The seek that carries a token spends it.
+                    token_ok = val is None or (val in stub.issued and val not in stub.spent_tokens)
+                    if val is not None and token_ok:
+                        stub.spent_tokens.add(val)
+                        if stub.refuse_tokens > 0:
+                            stub.refuse_tokens -= 1
+                            token_ok = False
+                    if not token_ok:
+                        if cap:
+                            stub.used_captchas.add(cap)  # (the captcha went with the seek: spent)
+                        status, body = 400, json.dumps({"error": "InvalidClientValidationToken"}).encode()
+                    elif not stub.captcha_free and (not cap or cap in stub.used_captchas or val is None):
                         status, body = 400, json.dumps({"error": "CaptchaRequired"}).encode()  # the live answer
                         if cap:
                             stub.used_captchas.add(cap)
@@ -1881,6 +1900,103 @@ def run_native_paste():
     # (the `type` lines of the input script are the test's echo of what it typed: not the client's)
     check_matchmaker(label, stub, [BURNT_TOKEN, PASTE_TOKEN], "\n".join(l for l in lines if "[input_script]" not in l))
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
+
+# ---------------------------------------------------------------- native: the matchmaker's validation token
+
+TOKEN_CAPTCHAS = ("0.e2eFirstCaptcha_" + "c" * 200 + ".sig-Ab1_901", "0.e2eSecondCaptcha_" + "d" * 200 + ".sig-Cd2_902")
+
+
+def post_captcha_prompts(log, p, tokens, timeout=60):
+    """One token per Security Challenge prompt: each prompt's one-shot callback is read from the input script's
+    #knCaptchaCallback box (run_native_token's reads, every 1.5 s), and the next token is POSTed to it as the
+    player's own userscript on krunker.io would. Returns the callbacks' answers (200 each when taken)."""
+    seen, statuses = set(), []
+    end = time.time() + timeout
+    while len(statuses) < len(tokens) and time.time() < end and p.poll() is None:
+        for url in re.findall(r"\[input_script\] text t=\d+ @cb\d+ n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", log.read()):
+            if url not in seen and len(statuses) < len(tokens):
+                seen.add(url)
+                statuses.append(post(url, tokens[len(statuses)]))
+        time.sleep(0.2)
+    return statuses
+
+
+def run_native_token(mode):
+    """The matchmaker's validation token at the official matchmaker (game.deob.js seek :147445-147467; the client:
+    krunker_net.c on_seek / on_token), three ways.
+    "refused": the matchmaker refuses the token of the captcha's seek as stale (InvalidClientValidationToken). The
+      client mints a fresh token and seeks once more, without the captcha that seek spent; the matchmaker asks for
+      the captcha again, the second one's seek carries a fresh token, and the join goes through.
+    "refused-twice": the retry is refused too: the join ends on the error screen ("Socket Error"), after that one retry.
+    "reuse": the matchmaker refuses the build (InvalidVersion) after the captcha, and the seek that retries it carries
+      no validation token: the one the refused seek spent is never sent again (v10 sends one only with its captcha).
+    Captcha prompts are answered through the modal's callback, one token each."""
+    label = "native-token-" + mode
+
+    def setup(st):
+        if mode == "refused":
+            st.refuse_tokens = 1
+        elif mode == "refused-twice":
+            st.refuse_tokens = 2
+        else:
+            publish(st, next_build_doc(), label)  # published, but the stub's servers run the compiled build
+
+    # (the joined run plays at 9000: "joined as sid" is our own player's first frame, sent after "en")
+    timed = [(t, "%d text @cb%d [id=knCaptchaCallback]\n" % (t, i)) for i, t in enumerate(range(1500, 19500, 1500))]
+    timed += [(9000, "9000 play\n"), (20000, "20000 text @inst [id=instructionsUpdate]\n"), (20500, "20500 quit\n")]
+    script = "0 boot\n" + "".join(line for _, line in sorted(timed))
+    stub, p, out, log = launch_native(label, script, {}, stub_setup=setup)
+    tokens = TOKEN_CAPTCHAS[:1] if mode == "refused-twice" else TOKEN_CAPTCHAS
+    statuses = post_captcha_prompts(log, p, tokens)
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
+    check(f"{label}: each Security Challenge prompt's callback took its token (200)", statuses == [200] * len(tokens), statuses)
+    paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list") and not pth.startswith("/updates/")]
+    seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    keys = [[k for k, _ in q] for q in seeks]
+    val = [dict(q).get("validationToken") for q in seeks]
+    cap = [dict(q).get("captchaToken") for q in seeks]
+    ver = [json.loads(dict(q).get("dataQuery") or "{}").get("v") for q in seeks]
+    check(f"{label}: the seeks' tokens are the matchmaker's, each fresh and none spent twice (issued: {len(stub.issued)})",
+          len(set(v for v in val if v)) == len([v for v in val if v]) and all(v in stub.issued for v in val if v), val)
+    if mode == "refused":
+        want = ["/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game"]
+        check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game refused, generate-token, seek-game (CaptchaRequired), generate-token, seek-game",
+              paths == want, paths)
+        check(f"{label}: the first seek has neither a token nor a captcha", keys[:1] == [["hostname", "region", "autoChangeGame", "dataQuery"]] and val[0] is None and cap[0] is None, keys[:1])
+        check(f"{label}: the captcha's seek carries the first fresh token and the player's first captcha",
+              val[1] == stub.issued[0] and cap[1] == TOKEN_CAPTCHAS[0], (val[1:2], cap[1:2]))
+        check(f"{label}: the retry carries a fresh token and no captcha (the refused seek spent it)",
+              len(val) > 2 and val[2] == stub.issued[1] and cap[2] is None, (val[2:3], cap[2:3]))
+        check(f"{label}: the last seek carries a fresh token and the second captcha",
+              len(val) > 3 and val[3] == stub.issued[2] and cap[3] == TOKEN_CAPTCHAS[1], (val[3:4], cap[3:4]))
+        check(f"{label}: the client logged the refusal and sought once more", "validation token refused (InvalidClientValidationToken): seeking again with a fresh one" in text)
+        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
+    elif mode == "refused-twice":
+        want = ["/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game"]
+        check(f"{label}: one retry, then the error: seek-game, CaptchaRequired, generate-token, refused, generate-token, refused (no third seek)",
+              paths == want, paths)
+        check(f"{label}: the retry carries a fresh token and no captcha", len(val) > 2 and val[2] == stub.issued[1] and cap[2] is None, (val[2:3], cap[2:3]))
+        check(f"{label}: the refusal is logged once and not retried again", text.count("seek-game refused (HTTP 400): InvalidClientValidationToken") == 1 and
+              text.count("validation token refused (InvalidClientValidationToken)") == 1, text.count("seek-game refused"))
+        inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
+        check(f"{label}: the error screen says Socket Error", inst and "Socket Error" in inst.group(1), inst.group(1) if inst else None)
+        check(f"{label}: the join did not go through", f"joined as sid {MY_SID}" not in text)
+    else:
+        want = ["/seek-game", "/generate-token", "/seek-game", "/seek-game", "/generate-token", "/seek-game"]
+        check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game refused (InvalidVersion), the build again, seek-game (CaptchaRequired), generate-token, seek-game",
+              paths == want, paths)
+        check(f"{label}: the seeks ask for the published build, then the compiled one", ver == [LIVE_VERSION, LIVE_VERSION, BUILD_VERSION, BUILD_VERSION], ver)
+        check(f"{label}: the build's retry carries no validation token (the one the refused seek spent is never sent again)",
+              len(keys) > 2 and keys[2] == ["hostname", "region", "autoChangeGame", "dataQuery"] and val[2] is None and cap[2] is None, (keys[2:3], val[2:3]))
+        check(f"{label}: the last seek carries a fresh token and the second captcha",
+              len(val) > 3 and val[3] == stub.issued[1] and cap[3] == TOKEN_CAPTCHAS[1], (val[3:4], cap[3:4]))
+        check(f"{label}: the log says it seeks the compiled build", "trying the compiled build" in text)
+        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
+    leaked = [t for t in stub.issued if t in text or urllib.parse.quote(t, safe="") in text]
+    check(f"{label}: no validation token reaches the log", stub.issued and not leaked and "validationToken=(redacted)" in text, leaked or len(stub.issued))
+    check(f"{label}: no Turnstile token reaches the log", not any(t in text for t in TOKEN_CAPTCHAS))
 
 
 SYNC_RE = re.compile(r"\[input_script\] sync t=(\d+) move_lock=(-?\d+) locked=(-?\d+) frozen=(-?\d+) boost=([-\d.]+) noclip=(-?\d+) "
@@ -3946,6 +4062,9 @@ def main():
         run_native_live_refused()
         run_native_live_stale()
         run_native_live_fallback()
+        run_native_token("refused")
+        run_native_token("refused-twice")
+        run_native_token("reuse")
         ran = True
     if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
         run_native_hud()
@@ -3957,6 +4076,10 @@ def main():
         run_native_world()
     if ONLY == "actions" and os.path.isfile(f"{BUILD}/client_bin"):  # just the player actions' run
         run_native_actions()
+    if ONLY == "token" and os.path.isfile(f"{BUILD}/client_bin"):  # just the validation token runs (refused, refused-twice, reuse)
+        run_native_token("refused")
+        run_native_token("refused-twice")
+        run_native_token("reuse")
     if ONLY == "live" and os.path.isfile(f"{BUILD}/client_bin"):  # just the live Krunker build's runs
         run_native_live()
         run_native_live_refused()
