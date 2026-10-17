@@ -115,12 +115,12 @@
         0,
         140,
         270,
-        240
+        210
       ],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 0.5,
-      "note": "Empty menu background left of the spinner (the centre glow and the spinner are outside)"
+      "note": "Empty menu background left of the spinner (the centre glow and the spinner are outside) The box ends at y 349, above the guest chat input (its top edge is at y 360 in the mobile render; the chat is KrunkNative's, on the idle menu for a guest, and is not in the v10 reference)."
     }
   ]
 }
