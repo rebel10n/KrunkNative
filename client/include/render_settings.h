@@ -77,6 +77,7 @@ typedef struct {
     int show_kills, show_kill_c, show_deaths, show_score, show_streak, show_ping, show_net_stat, show_fps; // DOM toggles
     float fps_rate;          // fpsRate: ms between #ingameFPS / #menuFPS rewrites (v10.js:221350, default 100)
     int dmg_type;            // dmgType: 0 "Default" Math.ceil(dmg), 1 "Float" the exact dmg.round(1) (v10.js:221015)
+    int damage_number_mode;  // damageNumberDisplayMode (Krunker Strike's Display tab): 0 Stacking, 1 Individual, 2 Legacy (strike_hud_fx.h)
     int show_kd;             // showKD (v7.1.4): #kdCount
     int show_speed;          // showSpeed: speedometer (HUD)
     float speed_off_x, speed_off_y, speed_scale, speed_opacity; // speedOffX/Y, speedScale, speedOpacity

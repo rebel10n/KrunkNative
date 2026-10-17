@@ -32,6 +32,7 @@
 #include <backend_ui.h>
 #include <spin_wheel.h>
 #include <strike_double_xp.h>
+#include <strike_hud_fx.h> // the Damage Number Display's modes and labels (its dropdown)
 #include <strike_econ.h> // the account's Strike wallet, items, spins, shop, leaderboards (kn_brain /strike)
 #include <ruleset.h>     // rules_classes(): the class's primary weapon (its skin slot)
 #include <audio.h>       // SOUND.play("reward") when the wheel stops
@@ -1724,6 +1725,63 @@ static int h_strike_setting(void *user, const HtmlEvent *ev, const HtmlArg *args
     return 0;
 }
 
+// ---------------------------------------------------------------- SETTINGS: Damage Number Display (a dropdown)
+
+// The Display tab's dropdown (FRVR: settings.interface.damageNumberDisplayMode, options Stacking /
+// Individual / Legacy). Its value is the store's damageNumberDisplayMode, which strike_hud.c reads when a hit
+// makes a number (strike_hud_fx.h). Default Legacy: FRVR's damage_numbers_display_mode feature gives
+// default_damage_numbers_mode 2 to a player who has not chosen one (the 1.37.2 config in doc/ref); the
+// bundle's own val 0 (Stacking) only holds where that feature is absent.
+#define DMG_ROW_LABEL "Damage Number Display"
+#define DMG_MODE_COUNT 3
+static int g_dmg_open; // the options list is open
+
+static int damage_mode_value(void) {
+    double v = 0.0;
+    if (!ui_setting_number("damageNumberDisplayMode", &v)) return STRIKE_DMG_LEGACY;
+    return v >= 0.0 && v < DMG_MODE_COUNT ? (int) v : STRIKE_DMG_LEGACY;
+}
+
+// the row's dropdown: the header with the mode's label, and the options while the list is open
+static void damage_dropdown(const HtmlElem row) {
+    const HtmlElem box = html_dom_query(row, ".settVal");
+    if (!box) return;
+    const HtmlElem old = html_dom_query(box, ".dropdown-container");
+    if (old) html_dom_remove(old);
+    const int mode = damage_mode_value();
+    StrBuf sb = {0};
+    sb_append(&sb, "<div tabindex=\"0\" class=\"dropdown-container\">");
+    sb_appendf(&sb, "<div class=\"dropdown-header\" onclick=\"strikeAction('dmgnum-toggle')\"><span>%s</span>"
+                    "<div class=\"material-icons\">%s</div></div>",
+               strike_damage_mode_label(mode), g_dmg_open ? "expand_less" : "expand_more");
+    if (g_dmg_open) {
+        sb_append(&sb, "<div class=\"dropdown-options-wrapper\"><div class=\"dropdown-options\">");
+        for (int i = 0; i < DMG_MODE_COUNT; i++) {
+            sb_appendf(&sb, "<div class=\"dropdown-option\" onclick=\"strikeAction('dmgnum:%d')\">%s</div>", i,
+                       strike_damage_mode_label(i));
+        }
+        sb_append(&sb, "</div></div>");
+    }
+    sb_append(&sb, "</div>");
+    char *html = sb_finish(&sb);
+    if (html) html_dom_insert_html(box, HTML_INSERT_BEFORE_END, html);
+    free(html);
+}
+
+// the dropdown on the open Settings page (after a click on its header or an option)
+static void damage_row_refresh(void) {
+    const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
+    if (!root) return;
+    HtmlElem rows[24];
+    const int n = html_dom_query_all(root, ".setting", rows, 24);
+    for (int i = 0; i < n; i++) {
+        const HtmlElem name = html_dom_query(rows[i], ".settName");
+        char label[96] = "";
+        if (name) html_dom_get_text(name, label, sizeof(label));
+        if (!strcmp(label, DMG_ROW_LABEL)) damage_dropdown(rows[i]);
+    }
+}
+
 // the rows of a tab's markup take their values from the store (FRVR: SETTINGS.list[i].val)
 static void settings_values(const HtmlElem content) {
     HtmlElem rows[24];
@@ -1732,6 +1790,10 @@ static void settings_values(const HtmlElem content) {
         const HtmlElem name = html_dom_query(rows[i], ".settName");
         char label[96] = "";
         if (name) html_dom_get_text(name, label, sizeof(label));
+        if (!strcmp(label, DMG_ROW_LABEL)) {
+            damage_dropdown(rows[i]);
+            continue;
+        }
         const StrikeSetting *r = setting_row(label);
         if (!r) continue;
         char buf[64], hook[160];
@@ -1759,6 +1821,7 @@ static void settings_values(const HtmlElem content) {
 
 static void settings_tab(const HtmlElem root, const int tab) {
     M.settings_tab = tab;
+    g_dmg_open = 0; // a tab change closes the dropdown
     HtmlElem items[8];
     const int n = html_dom_query_all(root, ".tabSelectorItem", items, 8);
     for (int i = 0; i < n; i++) html_dom_set_class(items[i], "selected", i == tab);
@@ -2114,6 +2177,19 @@ static void action(const char *a) {
         const int t = atoi(a + 13);
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_SETTINGS);
         if (root && t >= 0 && t < (int) (sizeof(SETTINGS_TABS) / sizeof(SETTINGS_TABS[0]))) settings_tab(root, t);
+    } else if (!strcmp(a, "dmgnum-toggle")) {
+        g_dmg_open = !g_dmg_open;
+        damage_row_refresh();
+    } else if (!strncmp(a, "dmgnum:", 7)) {
+        const int mode = atoi(a + 7);
+        if (mode >= 0 && mode < DMG_MODE_COUNT) {
+            HtmlArg v = {0};
+            v.kind = HTML_ARG_NUM;
+            v.num = mode;
+            ui_settings_set("damageNumberDisplayMode", &v);
+        }
+        g_dmg_open = 0;
+        damage_row_refresh();
     } else if (!strncmp(a, "preset:", 7)) {
         const int button = atoi(a + 7);
         if (button >= 0 && button < 4) preset_select(BUTTON_PRESET[button]);

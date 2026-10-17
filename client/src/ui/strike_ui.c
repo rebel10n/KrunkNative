@@ -140,6 +140,11 @@ int strike_ui_active(void) {
     return flavor_get() == FLAVOR_STRIKE && html_ui_available();
 }
 
+// The page's height in CSS px (window.innerHeight; 0 before the first layout).
+float strike_ui_page_height(void) {
+    return S.vh;
+}
+
 char *strike_ui_page_dir(const char *base_dir) {
     const char *base = base_dir ? base_dir : "";
     if (flavor_get() != FLAVOR_STRIKE) return concat(base, "");

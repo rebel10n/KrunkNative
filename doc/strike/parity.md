@@ -87,6 +87,30 @@ on main before this pass (8271e3e5 data-driven rules).
 | trigger action limit | triggerActionLimit **5** | 8 (v10) | 5 |
 | lobby cap, bots, tick | 10, 7, 30 Hz | = main | = main |
 
+## 6. In-game feedback: damage numbers and the crosshair (strike-hit-feedback)
+
+FRVR draws both on its game canvas (`ue.render`), under the DOM HUD, so the 1.37.2 DOM captures
+(`doc/ref/krunker-strike-1.37.2/strike-ingame*.png`, black where the canvas was) show neither; the
+rules are the bundle's. Krunker Box Office lays them out as DOM under `#InGameUIMobile`
+(`#knStrikeFx`: `.kn-strike-dmg` numbers and `#knStrikeCross`, `client/src/ui/strike_hud.c`), the
+numbers and geometry in `client/src/ui/strike_hud_fx.c` (`strike_hud_fx_test`), end to end in
+`server/tests/strike_damage_numbers_e2e.py`. The base game's own HUD (`hud_ui.c`, `#inGameUI`) never
+mounts on the Strike page, which is why Strike showed no number and no reticle before this.
+
+| item | Strike 1.37.2 (source) | ours before | ours after |
+|---|---|---|---|
+| damage number on a hit | `doDamage`: `dmgType == 0 && (e = Math.ceil(e))`, `e && showDMG && ue.addDamageNumber(id, x, y, z, dmg, crit, heal)` (AI: id undefined) | none | `strike_hud_damage_number` from game_events.c's HIT (players by uid, bots share `STRIKE_DMG_KEY_AI`); dmgType / showDMG / dmgScale / critColor are the shared settings (FRVR defaults: Float, on, 1, #FFD542) |
+| Damage Number Display | settings `damageNumberDisplayMode` val **0** (Stacking), options 0 Stacking / 1 Individual / 2 Legacy (`settings.interface.damageNumberDisplayMode.*`), Display tab's dropdown; but the feature `damage_numbers_display_mode` sets `default_damage_numbers_mode` **2** (Legacy) when the player has no saved choice (`FRVR.features.getFeature(...)` in the bundle; the 1.37.2 config in doc/ref/krunker-strike-1.37.2 has it as 2), so a new player sees Legacy | row rendered with the template's "Select", no handler | the dropdown (header + the three options) in strike_menu.c, default **Legacy**, stored as `damageNumberDisplayMode` with the Strike settings (knSettings, `krunknative-strike`), read by `client_render_settings()->damage_number_mode` |
+| Stacking | `newDmgVal` with mode 0: the victim's live number by id (`r.val += abs(dmg)`), life **1000** ms, at feet + **1.25 x playerHeight** | | same (`strike_damage_add`) |
+| Individual | mode 1: a number per hit, life **750** ms, at feet + playerHeight; numbers within **15** units get `needsHeightBoost` (lifted `lerp(2, 15, dist * (zoom > 1 ? 1.1 : 1) / 300)` once) | | same |
+| Legacy | mode 2: `dmgVal`: life **1000** ms, y + **7**, rises **.022**/ms, drifts **.013**/ms at `randFloat(-PI, PI)`, no fade, white (`dmgColor`) / `critColor`, `#2e2e2e` stroke | | same (v10's number) |
+| step and draw (Stacking / Individual) | rise `eye = .001`/ms for the first half of life, `tye = .025`/ms after; `globalAlpha = life / (life / 2)`; screen nudge `offsetX = min(.03, playerScale * .5 / (75 / d * 100) * zoom * 2)`, `offsetY` likewise (`playerHeight * .2`, `50 / d`) past 30 units; font `dmgScale * (crit ? 1.1 : 1) px GameFont`, `lineWidth 8` stroke; colours `interpolateColors` from the hit's (`#f87c7c` / `#8b0000`, crit `#FFD542` / `#D40B0B`) to white / black (crit `#ffeaa0` / `#5f0000`) over the first half; off the frustum: not drawn | | same: left / top as page fractions, opacity, colour and an eight-way text-shadow for the stroke; an off-screen or dead number has no element |
+| crosshair | `updateCrosshair(max(58, spread * .85 * UH), aimVal * (inspecting ? 0 : 1) * (noCross ? 0 : 1) * (reloadTimer > 0 ? 0 : 1) * ...)` each frame (UH = page height / 693); `ue.render`: for `crosshairType > 0` (default **1**, Dynamic; Strike's settings have no crosshair rows) with the mini scoreboard down and not spectating, type 1 / 3: four `Hr(te, 6, 23, scale / 2 - 2, shadowThickness 1, angle)` lines (fill `crosshairColor` white, stroke `crosshairShadow` black) plus the 6 px dot; drawn on mobile too (no mobile guard) | none on the Strike page | `#knStrikeCross`: the four 6 x 23 px lines from scale / 2 - 22 to scale / 2 + 1 of the centre and the dot, opacity `strike_crosshair_opacity` (1 at the hip, fading as `aim_val` rises; 0 inspecting / noCross / reloading), hidden on the scoreboard, the kill card and while spectating; a uidiff scenario shows it only with `state.strike.crosshair` (FRVR's DOM captures have none) |
+
+Not ported (not reachable in Strike's settings): crosshair types 2, 4, 5 (shapes, image, precision), the
+throwing-knife crosshair (`crosshairTypeM`), `crosshairAlways` / custom opacity (type > 1 only),
+`mapCross`; heal numbers (no healing in Strike's modes).
+
 ## Formerly open rows (closed in strike-gameplay3)
 
 | id | item | now |

@@ -51,7 +51,7 @@ static ClientRenderSettings g_rs = {
     .dynamic_hp = 1, .show_hit_ind = 1, .hit_color = "#FF3F3F", .show_dmg = 1, .dmg_color = 1,
     .crit_color = "#FFD542", .dmg_scale = 1.0f,
     .show_kills = 1, .show_kill_c = 0, .show_deaths = 0, .show_score = 0, .show_streak = 0,
-    .show_ping = 1, .show_net_stat = 0, .show_fps = 0, .fps_rate = 100.0f, .dmg_type = 1,
+    .show_ping = 1, .show_net_stat = 0, .show_fps = 0, .fps_rate = 100.0f, .dmg_type = 1, .damage_number_mode = 2, // Legacy: FRVR's default_damage_numbers_mode (1.37.2 config)
     .show_speed = 0, .speed_off_x = 5.0f, .speed_off_y = 5.4f, .speed_scale = 2.4f, .speed_opacity = 1.0f,
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_scale = 1.0f, .nametag_style = 0, .health_num = 0,
@@ -426,6 +426,7 @@ static const RsEntry RS_TABLE[] = {
     RS_S("hitColor", hit_color, NULL),
     RS_B("showDMG", show_dmg, NULL),
     RS_I("dmgType", dmg_type, NULL),                    // hud_ui_damage_number: 0 ceil, 1 the exact value
+    RS_I("damageNumberDisplayMode", damage_number_mode, NULL), // Strike's Display tab: strike_hud_damage_number (strike_hud.c)
     RS_B("dmgColor", dmg_color, NULL),
     RS_S("critColor", crit_color, NULL),
     RS_SHARED_F("dmgScale", dmg_scale, NULL),

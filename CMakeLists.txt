@@ -999,6 +999,17 @@ else ()
     endif ()
     add_test(NAME strike_assist_test COMMAND strike_assist_test)
 
+    # strike_hud_fx_test: Krunker Strike's damage numbers (the three Damage Number Display modes) and the
+    # Dynamic crosshair's rules (client/src/ui/strike_hud_fx.c) against FRVR 1.37.2's bundle
+    add_executable(strike_hud_fx_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/ui/strike_hud_fx.c client/include/strike_hud_fx.h
+                   client/tests/strike_hud_fx_test.c)
+    target_include_directories(strike_hud_fx_test PRIVATE client/include)
+    target_link_libraries(strike_hud_fx_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(strike_hud_fx_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME strike_hud_fx_test COMMAND strike_hud_fx_test)
+
     # strike_notify_test: Krunker Strike's notification queue (client/src/ui/strike_notify_queue.c, FRVR's OI / Ag)
     add_executable(strike_notify_test client/src/ui/strike_notify_queue.c client/include/strike_notify.h
                    client/tests/strike_notify_test.c)

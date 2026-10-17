@@ -136,3 +136,15 @@ Office's (FRVR's economy is separate from Krunker's): its own wallet (`kr` = kru
 - **Client.** `client/include/strike_econ.h` is the API the Strike screens use (state, requests,
   change events, `knStrike*` page handlers); under `FLAVOR_STRIKE` the player wears the Strike
   loadout (`ui_loadout_look`).
+
+## In-game feedback (damage numbers, crosshair)
+
+FRVR draws its damage numbers and crosshair on the game canvas; Krunker Box Office's base HUD
+(`hud_ui.c`, `#inGameUI`) never mounts on the Strike page, so Strike had neither until
+`client/src/ui/strike_hud.c` grew its own layer (`#knStrikeFx` under `#InGameUIMobile`, both the
+desktop and the touch layout): FRVR's damage numbers in the Display tab's three "Damage Number
+Display" modes (Stacking / Individual / Legacy, stored as `damageNumberDisplayMode` with the Strike
+settings; Legacy by default, FRVR's `default_damage_numbers_mode`) and its Dynamic crosshair. The rules (life, rise, fade, colours, the crosshair's spread
+radius and opacity) are `client/src/ui/strike_hud_fx.c` (`strike_hud_fx_test`); the sources and
+values are in `doc/strike/parity.md` section 6; `server/tests/strike_damage_numbers_e2e.py` drives
+hits through the offline Strike client.

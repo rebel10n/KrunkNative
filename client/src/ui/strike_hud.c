@@ -23,6 +23,8 @@
 #include <strike_ui.h>
 #include <strike_econ.h>
 #include <strike_double_xp.h>
+#include <strike_hud_fx.h>
+#include <render_settings.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <shared.h>
@@ -84,6 +86,7 @@ static struct {
     // --render-scenario: a pinned card / health (the reference states hold them while the sandbox player lives)
     int scenario, scn_health, scn_max_health, scn_reward;
     int scn_board, scn_row_count;   // state.strike.scoreboard (held) and state.strike.board (rows)
+    int scn_cross;                  // state.strike.crosshair: the Dynamic crosshair shown (cross_tick)
     BoardRow scn_rows[BOARD_ROWS_MAX];
 } H;
 
@@ -491,6 +494,211 @@ static void view_board(const Client *client, StrBuf *sb) {
 // what the kill card shows: none, or the card with its Spectate button (until it is requested)
 static int card_key(void) { return H.kill_card ? 1 + spectate_requested() : 0; }
 
+// ---------------------------------------------------------------- the in-game feedback (strike_hud_fx.h)
+
+// FRVR draws the damage numbers and the crosshair on the game canvas, under its DOM HUD. Here they are a
+// layer (#knStrikeFx, the first child of #InGameUIMobile): they live and die with the HUD (in game, the menu
+// closed, not the end screen) and sit under the HUD's text. The rules are strike_hud_fx.c's.
+static struct {
+    StrikeDamageSet dmg;               // the live numbers
+    double clock_ms;                   // hud_ui_now_ms at the last step; clock_valid: it has one
+    int clock_valid;
+    HtmlElem layer;                    // #knStrikeFx, 0 while the HUD is not rendered
+    HtmlElem dmg_el[STRIKE_DMG_MAX];   // a number's element, made on its first use
+    char dmg_text[STRIKE_DMG_MAX][24]; // the text an element shows (rewritten only on a change)
+    HtmlElem cross;                    // #knStrikeCross: the page centre, the Dynamic crosshair's origin
+    HtmlElem cross_bar[4];             // top, right, bottom, left
+    HtmlElem cross_dot;
+    float cross_scale;                 // the spread radius the lines are placed for (-1: not placed)
+} FX = {.cross_scale = -1.0f};
+
+static void fx_forget(void) {
+    strike_damage_reset(&FX.dmg);
+    FX.clock_valid = 0;
+    FX.layer = FX.cross = FX.cross_dot = 0;
+    memset(FX.dmg_el, 0, sizeof(FX.dmg_el));
+    memset(FX.dmg_text, 0, sizeof(FX.dmg_text));
+    memset(FX.cross_bar, 0, sizeof(FX.cross_bar));
+    FX.cross_scale = -1.0f;
+}
+
+// The markup: the layer, then the crosshair's origin with its four lines and its dot (sized and coloured by
+// fx_mount / cross_layout / cross_style)
+static void view_fx(StrBuf *sb) {
+    sb_append(sb, "<div id=\"knStrikeFx\" class=\"kn-strike-fx\" style=\"position:absolute;left:0;top:0;width:100%;height:100%;"
+                  "pointer-events:none;overflow:hidden\">"
+                  "<div id=\"knStrikeCross\" class=\"kn-strike-cross\" style=\"position:absolute;left:50%;top:50%;width:0;height:0;"
+                  "display:none\">"
+                  "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
+                  "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
+                  "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
+                  "<div class=\"kn-cross-bar\" style=\"position:absolute;box-sizing:border-box\"></div>"
+                  "<div class=\"kn-cross-dot\" style=\"position:absolute\"></div>"
+                  "</div></div>");
+}
+
+static void cross_style(void) {
+    const ClientRenderSettings *rs = client_render_settings();
+    char border[96];
+    snprintf(border, sizeof(border), "%gpx solid %s", STRIKE_CROSS_OUTLINE, rs->crosshair_shadow);
+    for (int i = 0; i < 4; i++) {
+        if (!FX.cross_bar[i]) continue;
+        html_dom_set_style(FX.cross_bar[i], "background", rs->crosshair_color);
+        html_dom_set_style(FX.cross_bar[i], "border", border);
+    }
+    if (FX.cross_dot) html_dom_set_style(FX.cross_dot, "background", rs->crosshair_color);
+}
+
+static void place(const HtmlElem el, const float x, const float y, const float w, const float h) {
+    if (!el) return;
+    char v[32];
+    snprintf(v, sizeof(v), "%.2fpx", x);
+    html_dom_set_style(el, "left", v);
+    snprintf(v, sizeof(v), "%.2fpx", y);
+    html_dom_set_style(el, "top", v);
+    snprintf(v, sizeof(v), "%.2fpx", w);
+    html_dom_set_style(el, "width", v);
+    snprintf(v, sizeof(v), "%.2fpx", h);
+    html_dom_set_style(el, "height", v);
+}
+
+// The lines for a spread radius (strike_crosshair_span): each is a 6 x 23 px rectangle whose inner end is
+// `near` and outer end `far` from the centre; the top one is above it, and so on
+static void cross_layout(const float scale) {
+    float near_d = 0.0f, far_d = 0.0f;
+    strike_crosshair_span(scale, &near_d, &far_d);
+    const float t = STRIKE_CROSS_BAR_THICK, l = STRIKE_CROSS_BAR_LEN;
+    place(FX.cross_bar[0], -t / 2.0f, -far_d, t, l); // top: y from -far to -near
+    place(FX.cross_bar[1], near_d, -t / 2.0f, l, t); // right: x from near to far
+    place(FX.cross_bar[2], -t / 2.0f, near_d, t, l); // bottom
+    place(FX.cross_bar[3], -far_d, -t / 2.0f, l, t); // left
+    place(FX.cross_dot, -STRIKE_CROSS_DOT / 2.0f, -STRIKE_CROSS_DOT / 2.0f, STRIKE_CROSS_DOT, STRIKE_CROSS_DOT);
+    FX.cross_scale = scale;
+}
+
+// after the markup is in: the elements the layer holds (their numbers are made on demand)
+static void fx_mount(void) {
+    FX.layer = html_dom_by_id("knStrikeFx");
+    FX.cross = html_dom_by_id("knStrikeCross");
+    HtmlElem bars[4];
+    const int n = FX.layer ? html_dom_query_all(FX.layer, ".kn-cross-bar", bars, 4) : 0;
+    for (int i = 0; i < 4; i++) FX.cross_bar[i] = i < n ? bars[i] : 0;
+    FX.cross_dot = FX.layer ? html_dom_query(FX.layer, ".kn-cross-dot") : 0;
+    memset(FX.dmg_el, 0, sizeof(FX.dmg_el));
+    memset(FX.dmg_text, 0, sizeof(FX.dmg_text));
+    FX.cross_scale = -1.0f;
+    cross_style();
+}
+
+// A number's element (.kn-strike-dmg): a block whose bottom centre sits on the number's page point, as
+// FRVR's fillText(val, -width / 2, 0) puts the text's baseline there; in GameFont like the canvas. It exists
+// only while its number is on screen, so the page holds exactly the numbers a player sees.
+static HtmlElem fx_number(const int i) {
+    if (FX.dmg_el[i]) return FX.dmg_el[i];
+    if (!FX.layer) return 0;
+    const HtmlElem el = html_dom_create("div", NULL);
+    if (!el) return 0;
+    html_dom_set_attr(el, "class", "kn-strike-dmg");
+    html_dom_set_style(el, "position", "absolute");
+    html_dom_set_style(el, "white-space", "nowrap");
+    html_dom_set_style(el, "line-height", "1");
+    html_dom_set_style(el, "pointer-events", "none");
+    html_dom_set_style(el, "font-family", "GameFont");
+    html_dom_set_style(el, "transform", "translate(-50%, -80%)");
+    html_dom_append(FX.layer, el);
+    FX.dmg_el[i] = el;
+    FX.dmg_text[i][0] = 0;
+    return el;
+}
+
+static void fx_number_drop(const int i) {
+    if (FX.dmg_el[i]) html_dom_remove(FX.dmg_el[i]);
+    FX.dmg_el[i] = 0;
+    FX.dmg_text[i][0] = 0;
+}
+
+// the eight-way ring of the stroke (FRVR's strokeText with lineWidth 8: about 3 px around the glyphs)
+static void ring_shadow(const char *colour, char *out, const size_t n) {
+    snprintf(out, n, "3px 0 %s, -3px 0 %s, 0 3px %s, 0 -3px %s, 2px 2px %s, -2px -2px %s, 2px -2px %s, -2px 2px %s", colour, colour, colour,
+             colour, colour, colour, colour, colour);
+}
+
+// FRVR's draw of newDmgNums / dmgNums: a number in the camera's frustum is drawn at its projected point
+// nudged by offsetX / offsetY (left and up), at dmgScale px (1.1 times for a crit), its fill and stroke
+// the mode's colours, its alpha strike_damage_alpha; one off screen or dead is not drawn at all
+static void fx_numbers_tick(Client *client) {
+    const ClientRenderSettings *rs = client_render_settings();
+    for (int i = 0; i < STRIKE_DMG_MAX; i++) {
+        const StrikeDamageNum *n = &FX.dmg.nums[i];
+        double sx = 0.0, sy = 0.0;
+        if (!n->used || !hud_ui_project(client, n->x, n->y, n->z, &sx, &sy)) {
+            fx_number_drop(i);
+            continue;
+        }
+        const HtmlElem el = fx_number(i);
+        if (!el) continue;
+        char v[64], fill[24], stroke[24], shadow[320], text[24];
+        if (n->mode == STRIKE_DMG_LEGACY) { // the Legacy draw (FRVR's Wwe): critColor, else dmgColor (on #DE292F, off white), #2e2e2e stroke
+            snprintf(fill, sizeof(fill), "%s", n->crit ? rs->crit_color : rs->dmg_color ? "#DE292F" : "#ffffff");
+            snprintf(stroke, sizeof(stroke), "%s", "#2e2e2e");
+        } else {
+            strike_damage_color(n, 0, fill, sizeof(fill));
+            strike_damage_color(n, 1, stroke, sizeof(stroke));
+        }
+        ring_shadow(stroke, shadow, sizeof(shadow));
+        snprintf(v, sizeof(v), "%.3f%%", (sx - n->offset_x) * 100.0);
+        html_dom_set_style(el, "left", v);
+        snprintf(v, sizeof(v), "%.3f%%", (sy - n->offset_y) * 100.0);
+        html_dom_set_style(el, "top", v);
+        snprintf(v, sizeof(v), "%.2fpx", strike_damage_font_px(n, rs->dmg_scale));
+        html_dom_set_style(el, "font-size", v);
+        snprintf(v, sizeof(v), "%.3f", strike_damage_alpha(n));
+        html_dom_set_style(el, "opacity", v);
+        html_dom_set_style(el, "color", fill);
+        html_dom_set_style(el, "text-shadow", shadow);
+        strike_damage_text(n->value, text, sizeof(text));
+        if (strcmp(FX.dmg_text[i], text)) {
+            html_dom_set_text(el, text);
+            snprintf(FX.dmg_text[i], sizeof(FX.dmg_text[i]), "%s", text);
+        }
+    }
+}
+
+// The Dynamic crosshair (crosshairSho 1, FRVR's default; type 3 draws the same lines): FRVR draws it while
+// in play with the mini scoreboard down and not spectating (a dead player's kill card replaces the view),
+// its opacity and spread from the player (strike_crosshair_opacity / _scale). Strike's settings have no
+// crosshair rows, so the type is the default unless the store says otherwise; a scenario shows it only
+// when its state asks (state.strike.crosshair), FRVR's DOM captures have none (the canvas is not in them).
+static void cross_tick(Client *client) {
+    if (!FX.cross) return;
+    const ClientRenderSettings *rs = client_render_settings();
+    const Player *me = me_player(client);
+    const int type_ok = rs->crosshair_type == 1 || rs->crosshair_type == 3;
+    const int shown = H.scenario ? H.scn_cross : type_ok && !H.board && !spectate_active() && !H.kill_card && me && me->active;
+    const float scale = strike_crosshair_scale(me ? me->spread : 0.0f, strike_ui_page_height());
+    if (fabsf(scale - FX.cross_scale) > 1e-3f) cross_layout(scale);
+    const float opacity = !shown ? 0.0f
+                          : me   ? strike_crosshair_opacity(me->aim_val, me->inspecting, me->weapon ? me->weapon->no_cross : 0, me->reload_timer)
+                                 : 1.0f;
+    char v[16];
+    snprintf(v, sizeof(v), "%.3f", opacity);
+    html_dom_set_style(FX.cross, "opacity", v);
+    html_dom_set_display(FX.cross, shown && opacity > 0.0f ? "block" : "none");
+}
+
+static void fx_tick(Client *client) {
+    if (!FX.layer) return;
+    const double now = hud_ui_now_ms(client);
+    const double dt = FX.clock_valid ? now - FX.clock_ms : 0.0;
+    FX.clock_ms = now;
+    FX.clock_valid = 1;
+    const Camera *cam = &client->camera;
+    strike_damage_step(&FX.dmg, dt, cam->position.x, cam->position.y, cam->position.z, cam->zoom, game_constants.player_scale,
+                       game_constants.player_height);
+    fx_numbers_tick(client);
+    cross_tick(client);
+}
+
 // ---------------------------------------------------------------- rendering
 
 static HtmlElem holder(void) { return html_dom_by_id("frvrMenuMobileHolder"); }
@@ -544,6 +752,7 @@ static void render(Client *client) {
     const int spec = spectate_active();
     StrBuf sb = {0};
     sb_append(&sb, "<div id=\"InGameUIMobile\" class=\"frvr-in-game-ui\">");
+    view_fx(&sb);
     view_scorebar(client, &sb);
     if (spec) {
         view_spectate(client, &sb);
@@ -562,6 +771,7 @@ static void render(Client *client) {
     else html_dom_insert_html(h, HTML_INSERT_BEFORE_END, html);
     free(html);
     H.root = html_dom_by_id("InGameUIMobile");
+    fx_mount();
     H.log_dirty = 0;
     H.last_card = card_key();
     H.rendered_spec = spec;
@@ -571,6 +781,7 @@ static void unrender(void) {
     if (H.root) html_dom_remove(H.root);
     H.root = 0;
     H.rendered_spec = 0;
+    fx_forget(); // the numbers and the crosshair go with the HUD (a fresh render starts them again)
     H.last_score[0] = H.last_health[0] = H.last_timer[0] = H.last_reload[0] = H.last_desk[0] = H.last_hint[0] = 0;
     free(H.last_board);
     H.last_board = NULL;
@@ -963,6 +1174,19 @@ void strike_hud_respawn(Client *client) {
     client_enter_game(client);
 }
 
+// A hit on a victim (game_events.c NET_PACKET_HIT under Strike): FRVR's addDamageNumber, when showDMG is on.
+// key: the victim's uid, STRIKE_DMG_KEY_AI for a bot; (x, feet_y, z) the victim's feet. The mode is the Display
+// tab's damageNumberDisplayMode, dmgType "Rounded" rounds up (ceil) as FRVR's Qce does.
+void strike_hud_damage_number(Client *client, const int key, const float x, const float feet_y, const float z, const double value,
+                              const int crit) {
+    (void) client;
+    const ClientRenderSettings *rs = client_render_settings();
+    if (!H.root || !rs->show_dmg || value == 0.0) return; // no HUD (menu open, end screen): nothing to draw on
+    const double shown = rs->dmg_type == 0 ? ceil(value) : value;
+    const float dir = (float) (((double) rand() / RAND_MAX) * 2.0 * M_PI - M_PI); // Legacy's randFloat(-PI, PI)
+    strike_damage_add(&FX.dmg, rs->damage_number_mode, key, x, feet_y, z, shown, crit, game_constants.player_height, dir);
+}
+
 void strike_hud_install(void) {}
 
 void strike_hud_reset(void) {
@@ -1028,6 +1252,7 @@ void strike_hud_tick(Client *client) {
     if (want && !H.root) render(client);
     else if (!want && H.root) unrender();
     if (H.root) update(client);
+    if (H.root) fx_tick(client); // the damage numbers rise and fade; the crosshair follows the player
     // spawned: Yh(true) hides the card; spectating has no card (the panel replaces it)
     if (H.kill_card && !H.scenario && client && ((client->me && client->me->active) || spec)) H.kill_card = 0;
 }
@@ -1087,6 +1312,7 @@ void strike_hud_scenario(Client *client, const cJSON *st) {
         r->kills = sjn(row, "kills", 0);
         r->deaths = sjn(row, "deaths", 0);
     }
+    H.scn_cross = sjn(st, "crosshair", 0); // state.strike.crosshair: the Dynamic crosshair at rest (none by default)
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(st, "end");
     if (cJSON_IsNumber(end)) strike_hud_end(client, end->valueint);
     printf("[strike] in-game scenario: %d kill-feed rows, kill card %d, scoreboard %d (%d rows)\n", H.log_count, H.kill_card, H.scn_board,

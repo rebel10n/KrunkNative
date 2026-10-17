@@ -13,6 +13,7 @@
 #include <v10_notify.h> // NET_EXT_GAME_ANNOUNCEMENT: the game announcement banner
 #include <nettspend_audio.h> // NET_EXT_KN_LACED: the Purple Drank's laced spell, its ambience (nettspend_audio.c)
 #include <client.h>
+#include <strike_hud_fx.h>   // STRIKE_DMG_KEY_AI: the Strike damage numbers' bot key (events_strike_damage_number)
 #include <hud_modes.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -110,6 +111,19 @@ static double events_hit_damage(const NetHitPacket *hit) {
 
 static Player *events_find_player(Client *client, const int uid) {
     return uid < 0 ? NULL : game_find_player(&client->game, uid);
+}
+
+// Krunker Strike's damage number for a hit (FRVR's doDamage -> addDamageNumber) at the victim's feet; a bot's
+// number shares the AI key (strike_hud.c draws it on the in-game layer, the Display tab's mode)
+static void events_strike_damage_number(Client *client, const NetHitPacket *hit, const double damage) {
+    if (!hit->damage) return;
+    if (hit->ai) {
+        const GameAI *ai = game_ai_find(&client->game, hit->target_uid);
+        if (ai) strike_hud_damage_number(client, STRIKE_DMG_KEY_AI, ai->position.x, ai->position.y, ai->position.z, damage, hit->crit);
+        return;
+    }
+    const Player *target = events_find_player(client, hit->target_uid);
+    if (target) strike_hud_damage_number(client, hit->target_uid, target->position.x, target->position.y, target->position.z, damage, hit->crit);
 }
 
 static const Weapon *events_weapon(const Client *client, const int index) {
@@ -903,6 +917,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             sound_events_hitmarker();     // gF: hit_0
             hud_ui_hit(client, hit.kill); // gF -> aV.showHit(isKill)
             const double damage = events_hit_damage(&hit);
+            if (strike_ui_active()) { // Krunker Strike: FRVR's damage numbers on the in-game layer (strike_hud.c)
+                events_strike_damage_number(client, &hit, damage);
+                return 1;
+            }
 #ifdef HUD_UI_HAVE_DAMAGE_NUMBERS
             if (hit.ai) { // doDamage(.., isAI): Game.AI.findBySid -> dmgVal(ai.x, ai.y, ai.z)
                 const GameAI *ai = game_ai_find(&client->game, hit.target_uid);

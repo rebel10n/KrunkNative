@@ -28,6 +28,7 @@
 
 // 1 when this process shows the Strike page (flavor Strike and the HTML UI available).
 int strike_ui_active(void);
+float strike_ui_page_height(void); // the page's height in CSS px (window.innerHeight), 0 before the first layout
 // The page tree for main.c: "<ui>/strike/" under the flavor, else base_dir unchanged (malloc'd).
 char *strike_ui_page_dir(const char *base_dir);
 
@@ -216,6 +217,8 @@ const char *strike_menu_template(StrikeScreen s);  // template file of a menu sc
 struct SpinWheelDraw;
 const struct SpinWheelDraw *strike_menu_wheel_draw(void);
 // Game events (client/src/net/game_events.c, beside hud_ui.c's): no-ops unless strike_ui_active().
+// A hit's damage number (FRVR's addDamageNumber; strike_hud_fx.h): key = the victim's uid or STRIKE_DMG_KEY_AI.
+void strike_hud_damage_number(Client *client, int key, float x, float feet_y, float z, double value, int crit);
 void strike_hud_killfeed(Client *client, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
                          const Weapon *weapon, int headshot, int thrown, int wallbang, int hidden); // killer NULL: a suicide / world death; hidden: NET_KILL_HIDE_FEED, no row
 void strike_hud_death(Client *client, const HudKillCard *card, const Player *killer); // io_killPlayer (us): the kill card
