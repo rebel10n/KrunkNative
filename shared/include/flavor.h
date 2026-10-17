@@ -49,3 +49,10 @@ const FlavorConfig *flavor_config(GameFlavor flavor);               // bounded; 
 GameFlavor flavor_from_key(const char *key, GameFlavor fallback);   // parse a key, else fallback
 const char *flavor_key(GameFlavor flavor);                          // "base" / "strike"
 const char *flavor_display_name(GameFlavor flavor);                 // the brand string
+
+// The native storage directory of a flavor, as a name under the config root ($XDG_CONFIG_HOME or
+// ~/.config): "krunknative" for Box Office (unchanged, so its settings, sign-in and alt vault stay
+// where they are) and "krunknative-<key>" for every other flavor ("krunknative-strike"). 1 on success,
+// 0 when out does not hold it. html_dom_core.c (the knSettings and other html storage keys) and
+// alt_store.c (the alt vault) join it onto the config root, so the flavors never share native settings.
+int flavor_storage_subdir(GameFlavor flavor, char *out, size_t n);

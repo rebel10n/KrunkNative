@@ -2,6 +2,7 @@
 #include <flavor.h>
 #include <build_info.h> // KN_PRODUCT_NAME: FLAVOR_BASE's display name stays the base product name
 #include <strike_rules.h> // g_strike_rules: FRVR's Krunker Strike as data
+#include <stdio.h>      // snprintf: flavor_storage_subdir
 #include <strings.h>    // strcasecmp
 
 // One entry per GameFlavor, indexed by the enum. FLAVOR_BASE has no rules, so a base build is the
@@ -52,3 +53,13 @@ int flavor_set_key(const char *key) {
 
 const char *flavor_key(const GameFlavor flavor) { return flavor_config(flavor)->key; }
 const char *flavor_display_name(const GameFlavor flavor) { return flavor_config(flavor)->display_name; }
+
+// Box Office keeps the original "krunknative" directory; any other flavor's is "krunknative-<key>",
+// named from its key so the directory follows the flavor table (flavor.h).
+int flavor_storage_subdir(const GameFlavor flavor, char *out, const size_t n) {
+    if (!out || !n) return 0;
+    const FlavorConfig *cfg = flavor_config(flavor);
+    const int written = cfg->flavor == FLAVOR_BASE ? snprintf(out, n, "krunknative")
+                                                   : snprintf(out, n, "krunknative-%s", cfg->key);
+    return written > 0 && (size_t) written < n;
+}

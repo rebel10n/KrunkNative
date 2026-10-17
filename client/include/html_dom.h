@@ -228,7 +228,8 @@ int   html_channel_open(const char *name);                  // 1 when available
 void  html_channel_post(const char *name, const char *text); // to every other tab on the channel
 char *html_channel_take(const char *name);                  // next received message (malloc'd) or NULL
 
-// ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/krunknative/<key>.json, web localStorage
+// ---- storage (localStorage equivalent): native $XDG_CONFIG_HOME/<flavor directory>/<key>.json (flavor.h
+// flavor_storage_subdir: krunknative for Box Office, krunknative-strike for Krunker Strike), web localStorage
 // On the web the Krunker Strike app (/strike/, flavor.h) is its own installed app on the same
 // origin as Krunker Box Office: its keys live under HTML_STORAGE_STRIKE_PREFIX, so the two apps never
 // read each other's settings, loadouts or sign-in (Android shares an origin's storage between PWAs).

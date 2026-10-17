@@ -8,7 +8,8 @@
 
 #include <stddef.h>
 
-// config_dir NULL = $XDG_CONFIG_HOME/krunknative (else ~/.config/krunknative), the storage directory.
+// config_dir NULL = $XDG_CONFIG_HOME/<the flavor's directory> (else ~/.config/...; flavor.h
+// flavor_storage_subdir: krunknative for Box Office, krunknative-strike for Krunker Strike).
 // 0 open (a vault loaded, or none yet), -1 unavailable: alt_store_error() says why.
 int alt_store_open(const char *config_dir);
 int alt_store_ready(void);

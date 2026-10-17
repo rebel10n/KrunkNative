@@ -2,6 +2,7 @@
 #include <alt_store.h>
 
 #include <alt_keystore.h>
+#include <flavor.h> // flavor_storage_subdir: the vault's directory is per flavor
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,11 +30,14 @@ static int resolve_dir(const char *config_dir) {
     if (config_dir && *config_dir) {
         return snprintf(g_dir, sizeof(g_dir), "%s", config_dir) > 0 ? 0 : -1;
     }
+    // the flavor's own directory (flavor.h): Box Office's vault is unchanged, Krunker Strike has its own
+    char sub[64];
+    if (!flavor_storage_subdir(flavor_get(), sub, sizeof(sub))) return -1;
     const char *xdg = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
     int n;
-    if (xdg && *xdg) n = snprintf(g_dir, sizeof(g_dir), "%s/krunknative", xdg);
-    else n = snprintf(g_dir, sizeof(g_dir), "%s/.config/krunknative", home && *home ? home : ".");
+    if (xdg && *xdg) n = snprintf(g_dir, sizeof(g_dir), "%s/%s", xdg, sub);
+    else n = snprintf(g_dir, sizeof(g_dir), "%s/.config/%s", home && *home ? home : ".", sub);
     return n > 0 && (size_t) n < sizeof(g_dir) ? 0 : -1;
 }
 

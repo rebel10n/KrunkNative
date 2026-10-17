@@ -248,6 +248,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	$(PYTHON) -I tools/strike/gen_economy.py --check
 	./$(DEBUG_DIR)/strike_economy_test
 	./$(DEBUG_DIR)/flavor_gameplay_test
+	./$(DEBUG_DIR)/flavor_storage_test
 	./$(DEBUG_DIR)/strike_maps_test
 	./$(DEBUG_DIR)/projectiles_render_test
 	./$(DEBUG_DIR)/death_cam_test

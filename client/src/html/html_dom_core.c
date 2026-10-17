@@ -4,6 +4,7 @@
 // themselves live in the backend (engine/engine.c natively, web_dom.c under
 // Emscripten); both call html_ui_dispatch()/html_ui_dispatch_listener() when
 // the page produces an event and html_timers_tick() once per frame.
+#include <flavor.h> // flavor_storage_subdir: the native storage directory of this flavor
 #include <html_dom.h>
 #include <shared.h>
 #include <stdio.h>
@@ -346,21 +347,30 @@ void html_timers_tick(const double now_ms) {
 }
 
 // --------------------------------------------------------------------------- storage (native)
+// Web: localStorage keys carry html_storage_prefix() (web_dom.c: "" for Box Office, "strike." for
+// Krunker Strike, html_dom.h), so Strike's knSettings is "strike.knSettings" and Box Office's stays
+// "knSettings". That per-flavor key namespace predates the native split and is kept as it is, so
+// settings already stored in a browser still load. Native: one directory per flavor (below).
 
 #ifndef __EMSCRIPTEN__
 
+// The config root's directory of this flavor (flavor.h flavor_storage_subdir): "krunknative" for Box
+// Office, unchanged, and "krunknative-strike" for Krunker Strike, so the two never share a settings
+// store. The flavor is read per call; it is set once at startup, before any storage read.
 static int storage_dir(char *out, const size_t n) {
+    char sub[64];
+    if (!flavor_storage_subdir(flavor_get(), sub, sizeof(sub))) return 0;
     const char *xdg = getenv("XDG_CONFIG_HOME");
     int written;
     if (xdg && *xdg) {
-        written = snprintf(out, n, "%s/krunknative", xdg);
+        written = snprintf(out, n, "%s/%s", xdg, sub);
     } else {
         const char *home = getenv("HOME");
 #ifdef _WIN32
         if (!home || !*home) home = getenv("USERPROFILE");
 #endif
         if (!home || !*home) home = ".";
-        written = snprintf(out, n, "%s/.config/krunknative", home);
+        written = snprintf(out, n, "%s/.config/%s", home, sub);
     }
     return written > 0 && (size_t) written < n;
 }

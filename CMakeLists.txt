@@ -686,7 +686,8 @@ else ()
     # flavor_gameplay_test: the product-flavor gameplay (Krunker Strike plays FRVR's tables; base unchanged)
     # strike_rules_test: Krunker Strike's rules (strike_rules.h) against tools/strike/strike_data.json
     # strike_economy_test: Krunker Strike's economy (strike_economy.h): catalogue, wheel odds, XP curve
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test)
+    # flavor_storage_test: each flavor's native storage directory (Box Office unchanged, Strike its own)
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -1188,8 +1189,9 @@ else ()
     # in the file, profile switches, the file keystore's 0600 key and the store's save / reopen
     # (client/src/alt/). Uses the file keystore only (KRUNKNATIVE_ALT_KEYSTORE=file, set by the test).
     if (OpenSSL_FOUND AND NOT WIN32)
+        # SHARED_SOURCES: alt_store.c's vault directory is the flavor's (flavor.c, which the shared core links)
         add_executable(alt_vault_test client/tests/alt_vault_test.c client/src/alt/alt_crypto.c client/src/alt/alt_vault.c
-                       client/src/alt/alt_keystore.c client/src/alt/alt_store.c)
+                       client/src/alt/alt_keystore.c client/src/alt/alt_store.c ${SHARED_HEADERS} ${SHARED_SOURCES})
         target_include_directories(alt_vault_test PRIVATE client/include)
         target_compile_definitions(alt_vault_test PRIVATE KRUNKNATIVE_HAVE_TLS=1)
         target_link_libraries(alt_vault_test PRIVATE cJSON OpenSSL::SSL OpenSSL::Crypto m)
