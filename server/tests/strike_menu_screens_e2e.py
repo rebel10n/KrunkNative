@@ -141,6 +141,14 @@ def run3():
         f"{t + 4500} quit"]
 
 
+def seed_played(cfg):
+    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect."""
+    path = os.path.join(cfg, "krunknative", "knFtue.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write('{"guest":{"played":true}}')
+
+
 def check(name, ok, detail=""):
     ok = bool(ok)
     results.append(ok)
@@ -148,6 +156,7 @@ def check(name, ok, detail=""):
 
 
 def run(name, script_lines):
+    seed_played(os.path.join(WORK, "cfg"))
     script = os.path.join(WORK, f"{name}.script")
     with open(script, "w") as f:
         f.write("\n".join(script_lines) + "\n")

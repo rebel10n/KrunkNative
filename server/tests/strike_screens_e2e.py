@@ -52,6 +52,14 @@ def env(cfg, extra=None):
     return e
 
 
+def seed_played(cfg):
+    """A returning player (the FTUE gate, client/src/ui/strike_ftue.c): the boot goes to the menu, not quick connect."""
+    path = os.path.join(cfg, "krunknative", "knFtue.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write('{"guest":{"played":true}}')
+
+
 def run(args, cfg, log, extra=None, timeout=240):
     os.makedirs(cfg, exist_ok=True)
     try:
@@ -207,6 +215,7 @@ def rects(text, label):
 
 
 def live_case():
+    seed_played(os.path.join(WORK, "cfg-live"))
     script = os.path.join(WORK, "live.txt")
     with open(script, "w") as f:
         f.write(LIVE_SCRIPT.format(shots=WORK))

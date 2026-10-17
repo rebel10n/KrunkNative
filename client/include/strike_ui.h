@@ -14,6 +14,7 @@
 //   client/src/ui/strike_connect.c the connection popups: Lost Connection, Game Updating, Reconnecting...
 //   client/src/ui/strike_hud.c     the in-game UI (H5 / IN_GAME_UI): health, ammo, timer, kill feed,
 //                                  scoreboard, kill card, end screens
+//   client/src/ui/strike_ftue.c    the first-run gate, FTUE storage and the FTUE overlay (CAe, .ftue-overlay)
 //   client/src/ui/strike_touch.c   the mobile controls (a5: joystick zones, control buttons): mouse
 //                                  natively, touch on the web (always the mobile version)
 //
@@ -209,6 +210,7 @@ void strike_menu_install(void);                   // inline handlers of the menu
 void strike_menu_render(StrikeScreen s, HtmlElem root); // after a screen's markup is inserted
 void strike_menu_tick(Client *client);
 void strike_menu_action(const char *name);         // strikeAction(name) (tests: pageActions / the e2e)
+void strike_menu_quick_connect(void);              // quickConnect(): loading, then the game (boot gate, PLAY)
 const char *strike_menu_template(StrikeScreen s);  // template file of a menu screen, NULL none
 // SPIN's wheel this frame (visible 0 when SPIN is not up): spin_wheel.c draws it into the page's canvas
 struct SpinWheelDraw;

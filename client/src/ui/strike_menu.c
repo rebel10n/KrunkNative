@@ -1959,6 +1959,9 @@ static void switch_teams_update(const HtmlElem root, const Client *client) {
     if (icon) html_dom_set_display(icon, counting ? "none" : "");
 }
 
+// quickConnect (FRVR): the boot gate's first run and the PLAY button
+void strike_menu_quick_connect(void) { play(); }
+
 static void action(const char *a) {
     printf("[strike] action %s\n", a);
     if (strike_notify_action(a)) return; // the notifications holder (strike_notify.c)

@@ -1,0 +1,31 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "MAIN_MENU",
+      "ftue": {
+        "highlight": "#mobMenuPlay",
+        "blur": true,
+        "blocker": true,
+        "bottomText": "Tap anywhere to continue",
+        "tutor": {
+          "text": "This is the <span style=\"color: #15C5D0\">PLAY</span> button",
+          "side": "left",
+          "check": false
+        }
+      }
+    }
+  },
+  "frames": 3,
+  "note": "Krunker Strike FTUE overlay shell (client/src/ui/strike_ftue.c, FRVR CAe .ftue-overlay): the blocker around the PLAY button, its hand, the dark blur, the bottom text and the tutor bubble. The tutor and hand art (img/ftue/controls/*) is not in the 1.37.2 copy, so those image slots stay empty."
+}

@@ -16,6 +16,7 @@
 #include <strike_ui.h>
 #include <strike_notify.h>
 #include <strike_double_xp.h>
+#include <strike_ftue.h>
 #include <flavor.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -623,9 +624,11 @@ void strike_ui_dom_init(Client *client) {
     srand((unsigned) time(NULL));
     printf("[strike] Krunker Strike page ready (FRVR 1.37.2 mobile UI)\n");
     // the persistent parts of swe.view
-    html_dom_set_html(S.holder, "<div class=\"frvr-notifications-holder\"></div><div class=\"frvr-loading-holder\"></div>");
+    html_dom_set_html(S.holder, "<div class=\"frvr-notifications-holder\"></div><div class=\"ftue-overlay\"></div>"
+                                "<div class=\"frvr-loading-holder\"></div>");
     S.notifications = html_dom_query(S.holder, ".frvr-notifications-holder");
     S.loading_holder = html_dom_query(S.holder, ".frvr-loading-holder");
+    strike_ftue_bind(html_dom_query(S.holder, ".ftue-overlay"));
     apply_viewport();
     strike_menu_install();
     strike_hud_install();
@@ -664,12 +667,17 @@ void strike_ui_tick(Client *client) {
         if (html_ui_is_menu_open()) {
             // a server password prompt pushed by a refused startup connect (before the mount) stays on top
             const int password = strike_screen_shown(STRIKE_SCREEN_SERVER_PASSWORD);
-            strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
-            if (password) strike_screen_push(STRIKE_SCREEN_SERVER_PASSWORD);
+            // FRVR's boot gate (c_e): a first run goes to quickConnect, the FTUE runs in that game
+            if (!password && strike_ftue_first_run()) strike_menu_quick_connect();
+            else {
+                strike_screen_replace(STRIKE_SCREEN_MAIN_MENU);
+                if (password) strike_screen_push(STRIKE_SCREEN_SERVER_PASSWORD);
+            }
         }
     }
     if (!S.booted) return;
     strike_connect_tick(); // the connection popups (strike_connect.c) follow the transport
+    strike_ftue_tick();
     strike_menu_tick(client);
     strike_hud_tick(client);
     strike_notify_tick(); // the holder: the timers, then the redraw (strike_notify.c)
@@ -752,6 +760,7 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     if (cJSON_IsString(loading)) strike_loading_show(loading->valuestring, 0);
     strike_connect_scenario(st); // connection: the Lost Connection / Game Updating popups, Reconnecting...
     strike_notify_scenario(cJSON_GetObjectItemCaseSensitive(st, "notifications")); // the holder (strike_notify.c)
+    strike_ftue_scenario(cJSON_GetObjectItemCaseSensitive(st, "ftue")); // the FTUE overlay (strike_ftue.c)
     strike_hud_scenario(client, st);
     strike_meta_scenario(client, st); // progression / reward / battlepassTab / matchDetails (strike_meta.c)
     strike_menu_scenario_state(st);   // itemSelection (T5 over Customize), product (U2) (strike_menu.c)
