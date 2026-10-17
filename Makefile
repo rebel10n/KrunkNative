@@ -680,6 +680,10 @@ server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each 
 seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_region_e2e.py $(DEBUG_DIR)
 
+.PHONY: seek-servers-migrate-e2e
+seek-servers-migrate-e2e: build ## Server Type reset once per profile (knSeekServersMigrated): a saved krunker.io choice from the old popup becomes Box Office once; a later pick is kept (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_servers_migrate_e2e.py $(DEBUG_DIR)
+
 .PHONY: client-proxy-e2e
 client-proxy-e2e: build ## Settings > Client > Proxy: krunker.io's lobby list through a stub HTTP CONNECT / SOCKS5 proxy, persisted, live change, HTTP_PROXY, the ACCESS DENIED message (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/client_proxy_e2e.py $(DEBUG_DIR)

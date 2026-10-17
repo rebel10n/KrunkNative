@@ -25,6 +25,7 @@
 #define SEEK_MODES_KEY "seek_modes"
 #define SEEK_MAPS_KEY "seek_maps"
 #define SEEK_SERVERS_KEY "knSeekServers"
+#define SEEK_SERVERS_MIGRATED_KEY "knSeekServersMigrated" // 1 once seek_prefs_migrate_servers has run
 #define SEEK_ON_LAUNCH_KEY "knSeekOnLaunch"
 #define KRUNKER_REGION_KEY "knKrunkerRegion"
 
@@ -121,6 +122,25 @@ const char *seek_prefs_krunker_region(void) {
 
 void seek_prefs_set_servers(const SeekServers servers) {
     ui_settings_set_string(SEEK_SERVERS_KEY, servers == SEEK_SERVERS_OFFICIAL ? "official" : servers == SEEK_SERVERS_BOTH ? "both" : "kn");
+}
+
+// The one-time Server Type reset, once per profile (knSeekServersMigrated). The first-run popup (gone,
+// d270817d) saved "Krunker servers" as knSeekServers "official", and a launch still seeks krunker.io for
+// it. Box Office is the default for everyone now, so an "official" or "both" saved before the flag becomes
+// "kn"; once the flag is set the saved choice is never touched again (a later krunker.io pick is kept).
+// The web keeps its saved choice (its seeks stay on Box Office, seek_prefs_servers) and only gets the flag.
+// Called once at startup, before the stored settings are pushed (main.c).
+void seek_prefs_migrate_servers(void) {
+    if (ui_setting_saved(SEEK_SERVERS_MIGRATED_KEY)) return;
+#ifndef __EMSCRIPTEN__
+    const char *s = cJSON_GetStringValue(ui_setting_saved(SEEK_SERVERS_KEY));
+    if (s && (!strcmp(s, "official") || !strcmp(s, "both"))) {
+        printf("[ui] Quickplay %s=%s -> kn (Box Office by default)\n", SEEK_SERVERS_KEY, s);
+        ui_settings_set_string(SEEK_SERVERS_KEY, "kn");
+    }
+#endif
+    const HtmlArg one = {HTML_ARG_NUM, 1.0, NULL};
+    ui_settings_set(SEEK_SERVERS_MIGRATED_KEY, &one);
 }
 
 // The switch stores a boolean (checkbox onclick, setSetting); a script's 0 / "0" / "false" counts as

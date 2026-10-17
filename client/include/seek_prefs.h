@@ -39,6 +39,9 @@ int seek_prefs_filtering(void);
 SeekServers seek_prefs_servers(void);
 // Stores the Server Type (the Quickplay row's setting).
 void seek_prefs_set_servers(SeekServers servers);
+// The one-time Server Type reset of a profile (knSeekServersMigrated, seek_prefs.c): "official" / "both"
+// saved before it become "kn"; later choices are kept. Called once at startup, before ui_settings_push_saved.
+void seek_prefs_migrate_servers(void);
 // Settings > Quickplay > Auto Seek on Launch (knSeekOnLaunch, default on; v10 has no such option):
 // the launch seeks the way F4 does, once the menu is up, unless it names a lobby or starts offline.
 int seek_prefs_on_launch(void);

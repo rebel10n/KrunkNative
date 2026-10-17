@@ -23,6 +23,7 @@
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
+#include <seek_prefs.h> // seek_prefs_migrate_servers: the one-time Server Type reset at startup
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
 #include <install_root.h> // startup chdir of packaged installs
@@ -982,6 +983,7 @@ int main(int argc, char **argv) {
         // menu pushes them again once its DOM is set up, which is idempotent.
         if (!SCENARIO_ACTIVE()) {
             ui_settings_load();
+            seek_prefs_migrate_servers(); // once per profile: knSeekServersMigrated
             ui_settings_push_saved();
         }
     }
