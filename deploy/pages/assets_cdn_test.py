@@ -67,9 +67,13 @@ def publish(root, tree, packaged, version):
         f.write(version + "\n")
 
 
-def run(*args):
+def run(*args, gha=False):
+    # GITHUB_ACTIONS (set on CI) switches warnings to ::warning:: annotations: the plain form is tested unless gha
+    env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+    if gha:
+        env["GITHUB_ACTIONS"] = "true"
     p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "assets_cdn.py"), *args], capture_output=True, text=True,
-                       timeout=120)
+                       timeout=120, env=env)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -162,6 +166,9 @@ def main():
             json.dump(cfg, f)
         code, _o, err = run(out, "--config", cfg_path, "--origin", o_url, "--dry-run")
         check(code == 0 and "warning: shard a has 7 files, over the 6" in err, "over the file's max_files: a warning only")
+        code, _o, err = run(out, "--config", cfg_path, "--origin", o_url, "--dry-run", gha=True)
+        check(code == 0 and "::warning::assets_cdn: shard a has 7 files, over the 6" in err,
+              "on GitHub Actions the warning is an annotation (%s)" % [l for l in err.splitlines() if "warning" in l])
         code, _o, err = run(out, "--config", cfg_path, "--origin", o_url, "--dry-run", "--exclude", "models/")
         check("excluded models/" in err and "shard a (p-a, https://assets.example/): 6 files" in err,
               "--exclude adds a prefix on no shard")

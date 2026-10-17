@@ -224,7 +224,7 @@ static Result run(const GameFlavor flavor) {
     return r;
 }
 
-static int near(const float a, const float b, const float tol) { return fabsf(a - b) <= tol; }
+static int approx(const float a, const float b, const float tol) { return fabsf(a - b) <= tol; }
 
 int main(void) {
     printf("-- base (Krunker v10.0.2)\n");
@@ -243,7 +243,7 @@ int main(void) {
     CHECK(base.posed, "base: posed hit boxes");
     CHECK(base.body_damage > 22.0f && base.body_damage <= 23.0f, "base AR body shot ~23 (%.2f)", (double) base.body_damage);
     CHECK(base.head_damage > 1.5f * 22.0f && base.head_damage <= 1.5f * 23.0f + 0.01f, "base AR headshot ~23 x 1.5 (%.2f)", (double) base.head_damage);
-    CHECK(near(base.recoil, 3.0f, 1e-4f), "base AR recoil 0.003/ms");
+    CHECK(approx(base.recoil, 3.0f, 1e-4f), "base AR recoil 0.003/ms");
 
     // Strike: class pick
     CHECK(st.hunter_class == 1 && st.hunter_health == 110 && st.hunter_weapon == 0, "Strike Hunter: 110 HP, Sniper Rifle (%d HP, weapon %d)",
@@ -254,26 +254,26 @@ int main(void) {
     // movement: the walk ratio follows the class speed x weapon spdMlt
     const float ratio = st.trigger_walk > 0.0f ? st.hunter_walk / st.trigger_walk : 0.0f;
     const float base_ratio = base.trigger_walk > 0.0f ? base.hunter_walk / base.trigger_walk : 0.0f;
-    CHECK(near(ratio, 0.85f, 0.02f), "Strike walk Hunter / Triggerman %.3f (0.85 / 1.0)", (double) ratio);
-    CHECK(near(base_ratio, (1.0f * 0.95f) / (1.05f * 0.95f), 0.02f), "base walk ratio %.3f (1.0 / 1.05)", (double) base_ratio);
+    CHECK(approx(ratio, 0.85f, 0.02f), "Strike walk Hunter / Triggerman %.3f (0.85 / 1.0)", (double) ratio);
+    CHECK(approx(base_ratio, (1.0f * 0.95f) / (1.05f * 0.95f), 0.02f), "base walk ratio %.3f (1.0 / 1.05)", (double) base_ratio);
     // Strike's classConfig ground acceleration default grA 0.048 (v10 0.042), speed 1 x spdMlt 1 (v10 1.05 x .95)
     const float tw = base.trigger_walk > 0.0f ? st.trigger_walk / base.trigger_walk : 0.0f;
-    CHECK(near(tw, (0.048f / 0.042f) * 1.0f / (1.05f * 0.95f), 0.02f), "Strike Triggerman walks %.3f x base (grA .048/.042, speed 1 / 1.05 x .95)",
+    CHECK(approx(tw, (0.048f / 0.042f) * 1.0f / (1.05f * 0.95f), 0.02f), "Strike Triggerman walks %.3f x base (grA .048/.042, speed 1 / 1.05 x .95)",
           (double) tw);
     // damage through the v7 AABB
     CHECK(!st.posed, "Strike: padded AABB hit test (no posed boxes)");
     CHECK(st.body_damage > 19.5f && st.body_damage <= 20.0f, "Strike AR body shot ~20 (%.2f)", (double) st.body_damage);
     CHECK(st.head_damage > 1.45f * 19.5f && st.head_damage <= 1.45f * 20.0f + 0.01f, "Strike AR headshot ~20 x 1.45 (%.2f)", (double) st.head_damage);
     // recoil and spread
-    CHECK(near(st.recoil, 2.0f, 1e-4f) && st.recoil_force > 0.0f && st.recoil_force <= 2.0f + 1e-3f,
+    CHECK(approx(st.recoil, 2.0f, 1e-4f) && st.recoil_force > 0.0f && st.recoil_force <= 2.0f + 1e-3f,
           "Strike AR recoil 0.002/ms (kick %.3f)", (double) st.recoil_force);
-    CHECK(near(st.spread, 40.0f, 1e-3f) && near(base.spread, 100.0f, 1e-3f), "AR spread: Strike 40, v10 100");
+    CHECK(approx(st.spread, 40.0f, 1e-3f) && approx(base.spread, 100.0f, 1e-3f), "AR spread: Strike 40, v10 100");
 
     // Stalker: v10 floor(200 + 50 x (2 - 1)) and the x0.6 swing with a 10 heal; Strike (v7) 400 HP, the
     // swing takes the target's whole health and heals the stalker 40
-    CHECK(base.stalker_health == 250 && base.stalker_knife && near(base.stalk_melee, 30.0f, 1e-3f) && near(base.stalk_heal, 10.0f, 1e-3f),
+    CHECK(base.stalker_health == 250 && base.stalker_knife && approx(base.stalk_melee, 30.0f, 1e-3f) && approx(base.stalk_heal, 10.0f, 1e-3f),
           "base Stalker: 250 HP, knife, swing x0.6 (%.1f) heals 10 (%.1f)", (double) base.stalk_melee, (double) base.stalk_heal);
-    CHECK(st.stalker_health == 400 && st.stalker_knife && near(st.stalk_melee, st.living_health, 1e-3f) && near(st.stalk_heal, 40.0f, 1e-3f),
+    CHECK(st.stalker_health == 400 && st.stalker_knife && approx(st.stalk_melee, st.living_health, 1e-3f) && approx(st.stalk_heal, 40.0f, 1e-3f),
           "Strike Stalker: 400 HP, knife, swing takes the whole health (%.1f) heals 40 (%.1f)", (double) st.stalk_melee, (double) st.stalk_heal);
     CHECK(st.see_blocked && st.see_padded && st.see_low && st.see_high, "canSee from a point: wall blocks, pad shrinks, ray cameraHeight below (%d %d %d %d)",
           st.see_blocked, st.see_padded, st.see_low, st.see_high);
