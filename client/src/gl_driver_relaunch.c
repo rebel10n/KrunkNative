@@ -4,7 +4,6 @@
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 
-#include <cJSON.h>
 #include <errno.h>
 #include <headless.h> // headless_env_flag_on: the KRUNKNATIVE_HEADLESS rule (headless.c)
 #include <html_dom.h> // html_storage_get: the knSettings entry (html_dom_core.c)
@@ -22,30 +21,25 @@ static int nvidia_driver_present(void) {
     return access("/proc/driver/nvidia/version", F_OK) == 0;
 }
 
-// The stored "vsync" (knSettings): ui_render_settings.c applies it, and a missing key is on
-// (.vsync = 1). A string is read with the parse_bool rules, as the store's "true"/"false" strings are.
-static int stored_vsync(void) {
+// The stored "vsync" (knSettings), read the way the client reads it at startup (ui_settings_load: the same
+// entry, the same 64 KiB buffer). `what` says what the store held, for the log line. No file, a file over
+// the buffer (its JSON would be cut) or no usable key: on (.vsync = 1).
+static int stored_vsync(char *what, const size_t n) {
+    int found = 0;
     int on = 1;
     char *buf = malloc(KN_SETTINGS_JSON_MAX);
-    if (!buf) return on;
-    if (html_storage_get(KN_SETTINGS_KEY, buf, KN_SETTINGS_JSON_MAX) >= 0) {
-        cJSON *root = cJSON_Parse(buf);
-        const cJSON *v = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "vsync") : NULL;
-        if (v && cJSON_IsBool(v)) on = cJSON_IsTrue(v);
-        else if (v && cJSON_IsNumber(v)) on = cJSON_GetNumberValue(v) != 0.0;
-        else if (v && cJSON_IsString(v)) on = gl_driver_parse_vsync(cJSON_GetStringValue(v));
-        cJSON_Delete(root);
+    const int size = buf ? html_storage_get(KN_SETTINGS_KEY, buf, KN_SETTINGS_JSON_MAX) : -1;
+    if (size < 0) {
+        snprintf(what, n, "no knSettings");
+    } else if (size >= KN_SETTINGS_JSON_MAX) {
+        snprintf(what, n, "knSettings over 64 KiB");
+    } else {
+        on = gl_driver_vsync_from_settings(buf, &found);
+        if (found) snprintf(what, n, "vsync %s", on ? "true" : "false");
+        else snprintf(what, n, "no usable vsync");
     }
     free(buf);
     return on;
-}
-
-// The V-Sync in effect: KRUNKNATIVE_VSYNC beats the store for the whole run
-// (ui_render_settings.c client_render_settings_init), else the stored value.
-static int effective_vsync(void) {
-    const char *env = getenv("KRUNKNATIVE_VSYNC");
-    if (env && *env) return gl_driver_parse_vsync(env);
-    return stored_vsync();
 }
 
 // Tests, agents and tools never relaunch: headless (KRUNKNATIVE_HEADLESS or --headless), the render
@@ -67,9 +61,32 @@ static int tool_run(const int argc, char **argv) {
 void gl_driver_vsync_relaunch(const int argc, char **argv) {
     // the store is read only where the driver reads the variable
     const int nvidia = nvidia_driver_present();
-    const int vsync = nvidia ? effective_vsync() : 1;
-    const int wanted = gl_driver_relaunch_wanted(nvidia, vsync, getenv(GL_DRIVER_SYNC_ENV) != NULL,
-                                                 getenv(GL_DRIVER_RELAUNCH_ENV) != NULL, tool_run(argc, argv));
+    if (!nvidia) return;
+    char stored[48];
+    const int stored_on = stored_vsync(stored, sizeof(stored));
+    // KRUNKNATIVE_VSYNC beats the store for the whole run (ui_render_settings.c client_render_settings_init)
+    const char *env_vsync = getenv("KRUNKNATIVE_VSYNC");
+    const int overridden = env_vsync && *env_vsync;
+    const int vsync = overridden ? gl_driver_parse_vsync(env_vsync) : stored_on;
+    const char *sync_env = getenv(GL_DRIVER_SYNC_ENV);
+    const int relaunched = getenv(GL_DRIVER_RELAUNCH_ENV) != NULL;
+    const int tool = tool_run(argc, argv);
+    const int wanted = gl_driver_relaunch_wanted(nvidia, vsync, sync_env != NULL, relaunched, tool);
+    if (!tool) { // the decision, once per process: why it did or did not relaunch
+        const char *reason = wanted ? "relaunching with __GL_SYNC_TO_VBLANK=0"
+            : vsync ? "V-Sync is on"
+            : sync_env ? "__GL_SYNC_TO_VBLANK is already set"
+            : relaunched ? "already relaunched"
+            : "no relaunch";
+        char source[96];
+        if (overridden) snprintf(source, sizeof(source), "KRUNKNATIVE_VSYNC=%s", env_vsync);
+        else snprintf(source, sizeof(source), "store");
+        char sync_state[64];
+        if (sync_env) snprintf(sync_state, sizeof(sync_state), "set to %s", sync_env);
+        else snprintf(sync_state, sizeof(sync_state), "unset");
+        fprintf(stderr, "[gl] V-Sync relaunch: %s (%s); V-Sync %s from %s; stored: %s; __GL_SYNC_TO_VBLANK %s\n",
+                wanted ? "yes" : "no", reason, vsync ? "on" : "off", source, stored, sync_state);
+    }
     if (!wanted) return;
 
     // the same executable and the same argv (argv is the process's own, untouched by main so far)

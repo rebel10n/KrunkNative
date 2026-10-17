@@ -1222,6 +1222,7 @@ else ()
     # no user __GL_SYNC_TO_VBLANK, never twice, never in a tool run (client/src/gl_driver_relaunch.c is the glue)
     add_executable(gl_driver_env_test client/tests/gl_driver_env_test.c client/src/gl_driver_env.c)
     target_include_directories(gl_driver_env_test PRIVATE client/include)
+    target_link_libraries(gl_driver_env_test PRIVATE cJSON)
     add_test(NAME gl_driver_env_test COMMAND gl_driver_env_test)
 
     # settings_defaults_test: v10.0.2's phone and desktop settings defaults (the isMobile values of

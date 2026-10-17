@@ -1,10 +1,10 @@
-// gl_driver_env_test: the V-Sync relaunch decision (client/src/gl_driver_env.c, gl_driver_env.h) and the
-// V-Sync text rules it shares with ui_render_settings.c. Every branch: NVIDIA only, V-Sync off only, an
-// explicit __GL_SYNC_TO_VBLANK wins, never twice, never in a tool run; all 32 input combinations.
+// gl_driver_env_test: the V-Sync relaunch decision (client/src/gl_driver_env.c, gl_driver_env.h), the V-Sync
+// text rules it shares with ui_render_settings.c, and the knSettings "vsync" read that feeds it. Every
+// branch: NVIDIA only, V-Sync off only, an explicit __GL_SYNC_TO_VBLANK wins, never twice, never in a tool
+// run; all 32 input combinations; a stored vsync false relaunches, a stored true or no store does not.
 #include <gl_driver_env.h>
 
 #include <stdio.h>
-#include <string.h>
 
 static int failures, checks;
 #define CHECK(c, ...) do { checks++; if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
@@ -57,9 +57,36 @@ static void test_parse_vsync(void) {
     CHECK(gl_driver_parse_vsync("off") == 1, "other text is on (ui_render_settings.c parse_bool)");
 }
 
+// The stored read (gl_driver_relaunch.c stored_vsync) hands its vsync to the decision: a readable
+// knSettings with vsync false must relaunch on NVIDIA, the same text the settings UI writes.
+static void test_stored_vsync(void) {
+    int found = -1;
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":false}", &found) == 0 && found == 1, "stored false is off");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":\"false\"}", &found) == 0 && found == 1, "a \"false\" string is off");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":0}", &found) == 0 && found == 1, "a stored 0 is off");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":true}", &found) == 1 && found == 1, "stored true is on");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":\"true\"}", &found) == 1 && found == 1, "a \"true\" string is on");
+    CHECK(gl_driver_vsync_from_settings("{\"zoom\":1.5,\"vsync\":false,\"fov\":90}", &found) == 0 && found == 1,
+          "vsync among other settings");
+    CHECK(gl_driver_vsync_from_settings("{\"zoom\":1.5}", &found) == 1 && found == 0, "no vsync key: on, not found");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":null}", &found) == 1 && found == 0, "null is no value");
+    CHECK(gl_driver_vsync_from_settings("{\"vsync\":false", &found) == 1 && found == 0, "cut JSON: on, not found");
+    CHECK(gl_driver_vsync_from_settings("[false]", &found) == 1 && found == 0, "not an object: on, not found");
+    CHECK(gl_driver_vsync_from_settings(NULL, &found) == 1 && found == 0, "no text: on, not found");
+
+    // the read feeds the decision: NVIDIA, nothing set, not a tool run
+    int vsync = gl_driver_vsync_from_settings("{\"vsync\":false}", &found);
+    CHECK(gl_driver_relaunch_wanted(1, vsync, 0, 0, 0) == 1, "stored false on NVIDIA: relaunch");
+    vsync = gl_driver_vsync_from_settings("{\"vsync\":true}", &found);
+    CHECK(gl_driver_relaunch_wanted(1, vsync, 0, 0, 0) == 0, "stored true on NVIDIA: no relaunch");
+    vsync = gl_driver_vsync_from_settings(NULL, &found);
+    CHECK(gl_driver_relaunch_wanted(1, vsync, 0, 0, 0) == 0, "no store: on by default, no relaunch");
+}
+
 int main(void) {
     test_relaunch_branches();
     test_parse_vsync();
+    test_stored_vsync();
     if (failures) {
         fprintf(stderr, "gl_driver_env_test: %d of %d checks failed\n", failures, checks);
         return 1;

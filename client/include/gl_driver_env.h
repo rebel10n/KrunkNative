@@ -5,8 +5,9 @@
 // before anything else: when V-Sync is off it re-executes this client once with the variable set,
 // so the driver reads it at load.
 //
-// - client/src/gl_driver_env.c: the decision (pure, no dependencies; client/tests/gl_driver_env_test.c).
-// - client/src/gl_driver_relaunch.c: the glue (the NVIDIA probe, the stored "vsync", execv).
+// - client/src/gl_driver_env.c: the decision and the text rules (pure; cJSON for the knSettings text;
+//   client/tests/gl_driver_env_test.c).
+// - client/src/gl_driver_relaunch.c: the glue (the NVIDIA probe, the knSettings read, the log line, execv).
 //
 // Linux only (the glue is empty elsewhere): the decision is the same on every platform.
 
@@ -23,6 +24,12 @@ int gl_driver_relaunch_wanted(int nvidia, int vsync, int sync_env_set, int relau
 // parse_bool rules, so the relaunch sees the same value the client applies. NULL / "" / "false" are
 // off, "true" on, numbers by their value, other text on.
 int gl_driver_parse_vsync(const char *text);
+
+// The stored "vsync" of a knSettings text (ui_settings.c's store): a bool, a number (0 is off) or a
+// "true"/"false" string, read with gl_driver_parse_vsync. *found is 1 when the key holds one of those and
+// the return value is it. Otherwise (NULL, not JSON, not an object, no usable key) *found is 0 and the
+// return is on, the default (ui_render_settings.c .vsync = 1).
+int gl_driver_vsync_from_settings(const char *json, int *found);
 
 // main(), first thing: may re-execute the process (never returns from a successful relaunch). When
 // it does not relaunch, or the exec fails, it returns and the client starts as before.
