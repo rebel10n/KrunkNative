@@ -1,0 +1,26 @@
+{
+  "scenario": "strike/killcard",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 8.0
+  },
+  "regions": [
+    {
+      "name": "killer-pfp",
+      "rect": [
+        490,
+        556,
+        100,
+        100
+      ],
+      "ref_offset": [
+        0,
+        44
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 8.0,
+      "note": "The Killed By picture: the killer's class icon (8 x 8, pixelated) in the 50 x 50 pfp box. FRVR's card sits 44 px lower (its bottom at the container's 10-unit inset): KN's Spectate button under the card lifts it by 44 px, so the reference is cropped at rect + (0, 44). Before the GAP rule in kn-strike-overrides.css the icon was drawn 8 x 50."
+    }
+  ]
+}
