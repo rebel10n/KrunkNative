@@ -377,7 +377,7 @@ async def scenario(base, internal_url, secret):
         err, acc = await g.op("token", token=alice_token)
         check(err is None and acc["id"] == alice_id and acc["level"] == 1, "internal token lookup: %r" % err)
         err, acc = await g.op("stats", id=alice_id, match="m-%s" % stamp, kills=10, deaths=4, score=50000,
-                              won=1, games=1, time_ms=120000, kr=40, **{"class": 3})
+                              won=1, games=1, time_ms=120000, kr=40, **{"class": 3, "classDouble": 0})  # the round's class XP flag, pinned: not the weekend schedule
         check(err is None and acc["score"] == 50000 and acc["level"] == 6 and acc["funds"] == 1040,
               "stats commit: %r %r" % (err, acc and (acc.get("score"), acc.get("level"), acc.get("funds"))))
         err, acc = await g.op("stats", id=alice_id, match="m-%s" % stamp, kills=10, score=50000, kr=40)

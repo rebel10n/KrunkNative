@@ -805,7 +805,7 @@ static const SocialRoute k_routes[] = {
 typedef enum {
     RC_AUTH,    /* login, register, 2FA, password and e-mail codes, logout everywhere */
     RC_READ,    /* gapi GET, search, feed, profiles, lists, eb friends:list and msg:history */
-    RC_WRITE,   /* gapi POST/PUT/DELETE, eb msg:send / msg:read, posts, follows, market, clans, gifts */
+    RC_WRITE,   /* gapi POST/PUT/DELETE, eb msg:send / msg:read / game:invite, posts, follows, market, clans, gifts */
     RC_LIVE,    /* eb presence:ping */
     RC_NOTICE   /* fire-and-forget frames: the client's analytics events and unknown labels */
 } RateClass;
@@ -884,6 +884,7 @@ static const LabelClass k_eb_class[] = {
     {"msg:history", RC_READ, ANS_REPLY},
     {"msg:send", RC_WRITE, ANS_REPLY},
     {"msg:read", RC_WRITE, ANS_NOTICE},
+    {"game:invite", RC_WRITE, ANS_REPLY}, /* answered game:invite:sent or an eb error (social_eb.c) */
 };
 
 static const LabelClass *find_class(const LabelClass *t, size_t n, const char *key) {
