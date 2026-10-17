@@ -203,7 +203,8 @@ fov = probe(log1, "b2")["value"]
 check(fov not in (None, "", "100") and f"[ui] setting fov={fov}" in log1, f"basic Game: FOV slider -> {fov}, applied")
 check(probe(log1, "b3")["value"] == "0.5" and "[ui] setting sound=0.5" in log1, "basic Sound: Master Volume -> 0.5, applied")
 adv = probe(log1, "adv")["text"] or ""
-check(adv.startswith("General Controls Display Render Game Sound"), f"advanced view tabs ({adv!r})")
+check(adv.startswith("General Controls Display Render Game Sound") and adv.endswith("Client"),
+      f"advanced view tabs, the native Client tab last ({adv!r})")
 check(probe(log1, "a0")["checked"] == 1 and "[render] setting showNetStat=true" in log1, "advanced General: Show Network Stats on, applied")
 check(probe(log1, "a1")["checked"] == 1 and "[ui] setting invertY=true" in log1, "advanced Controls: Invert Y on, applied")
 check(probe(log1, "a2")["checked"] == 0 and "[render] setting dynamicHP=false" in log1, "advanced Display: Dynamic HP Bars off, applied")

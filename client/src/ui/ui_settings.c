@@ -1631,7 +1631,8 @@ static void toggle_type(const int advanced) {
     MenuUi *ui = menu_ui();
     ui->settings_view = !!advanced;
     html_storage_set("krk_advanced", advanced ? "1" : "0");
-    if (ui->settings_tab != ui_client_settings_tab() && (ui->settings_tab < 0 || ui->settings_tab >= ui_settings_view_tab_count(ui->settings_view)))
+    const int client = ui_client_settings_tab(); // -1 on web: no Client tab to keep
+    if (!(client >= 0 && ui->settings_tab == client) && (ui->settings_tab < 0 || ui->settings_tab >= ui_settings_view_tab_count(ui->settings_view)))
         ui->settings_tab = 0;
     menu_rerender_if_open(1);
 }

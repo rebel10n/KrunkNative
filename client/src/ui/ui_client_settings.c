@@ -6,8 +6,10 @@
 // Rows here use the markup of v7.1.4's own settings generator (_html.settings.input:
 // .setHed / .setBodH setBod_ folders, .settName rows, label.switch with its grooves,
 // select.inputGrey2, sliderVal + sliderM, settingsBtn; "<span style='color: #eb5656'>*</span>"
-// = needsRestart), so the tab looks like Krunker's other tabs. The native client and the web
-// build show the same rows (CS_NATIVE / CS_WEB below). A row the browser cannot do is shown
+// = needsRestart), so the tab looks like Krunker's other tabs. The Client tab is native-only
+// (client_tab_shown): the web build shows no Client tab and generates none of its rows (the
+// Sound tab's Audio Output row, CS_SOUND_TAB, is still generated there). The native client
+// shows the rows of CS_NATIVE. A row the browser cannot do is shown
 // with the honest equivalent in its flags' comment; only the Resource Swapper (files from a
 // folder on the player's disk) and the Network folder (a page cannot route through a proxy:
 // the browser's own network settings apply) are native-only.
@@ -588,6 +590,17 @@ static int chrome_visible(void) {
     return 1;
 }
 
+// The Client tab and its rows are native-only: V-Sync, the frame cap, the window and launcher
+// options and the Resource Swapper do nothing in a browser, so the web build has no Client tab.
+// The settings keep their storage (knClient) and the apply / startup code reads them as before.
+static int client_tab_shown(void) {
+#ifdef __EMSCRIPTEN__
+    return 0;
+#else
+    return chrome_visible();
+#endif
+}
+
 static void apply_exit_button(void) {
     HtmlElem el = html_dom_by_id("clientExit");
     if (!el) return;
@@ -996,7 +1009,7 @@ void ui_client_settings_dom_init(void) {
 // ---------------------------------------------------------------- tab markup
 
 int ui_client_settings_tab(void) {
-    return chrome_visible() ? ui_settings_view_tab_count(menu_ui()->settings_view) : -1;
+    return client_tab_shown() ? ui_settings_view_tab_count(menu_ui()->settings_view) : -1;
 }
 
 char *ui_client_settings_head(const char *head, const int active_tab) {
@@ -1173,7 +1186,7 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
 
 char *ui_client_settings_tab_html(const int searching) {
     StrBuf sb = {0};
-    if (!chrome_visible()) return sb_finish(&sb);
+    if (!client_tab_shown()) return sb_finish(&sb);
     const char *cat = NULL;
     for (int i = 0; i < COUNT(SETTINGS); i++) {
         const ClientSetting *s = &SETTINGS[i];

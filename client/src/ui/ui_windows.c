@@ -422,11 +422,13 @@ static char *gen_settings(void) {
     const MenuUi *ui = menu_ui();
     const int view = ui->settings_view;
     const int tabs = ui_settings_view_tab_count(view);
-    const int client_tab = ui_client_settings_tab(); // desktop client: "Client" after Krunker's tabs
+    const int client_tab = ui_client_settings_tab(); // desktop client: "Client" after Krunker's tabs (-1 on web)
+    // client_tab is -1 without the Client tab, the same as a search's tabIndex -1: only a shown Client tab matches
+    const int on_client = client_tab >= 0 && ui->settings_tab == client_tab;
     int tab = ui->settings_tab;
-    if (tab != client_tab && (tab < 0 || tab >= tabs)) tab = 0;
+    if (!on_client && (tab < 0 || tab >= tabs)) tab = 0;
     // the captured tab (or the first one for the Client tab: same header, settings replaced)
-    const char *tpl = ui_settings_view_tab_html(view, tab == client_tab ? 0 : tab);
+    const char *tpl = ui_settings_view_tab_html(view, on_client ? 0 : tab);
     StrBuf out = {0};
     const char *holder = strstr(tpl, "<div id=\"settHolder\">");
     const char *layout = strstr(tpl, "<div id=\"settingsTabLayout\">");
@@ -476,10 +478,10 @@ static char *gen_settings(void) {
     }
     if (client_tab >= 0) // the desktop client's Client tab (ui_client_settings.c), as v7's own client adds it
         sb_appendf(&out, "\n<div class=\"settingTab %s\" onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">%s</div>",
-                   tab == client_tab ? "tabANew" : "", client_tab, I18N("settings.client.header", "Client"));
+                   on_client ? "tabANew" : "", client_tab, I18N("settings.client.header", "Client"));
     sb_append(&out, "</div></div>");
     sb_append(&out, "<div id=\"settHolder\">");
-    if (tab == client_tab) {
+    if (on_client) {
         char *client = ui_client_settings_tab_html(0);
         sb_append(&out, client);
         free(client);
