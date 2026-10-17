@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""The native client never offers "Download our client" (the Download window, showWindow(25),
-client/src/ui/download_ui.c): not at startup, not from the menu, not from the hub.
+"""The native client offers "Download our client" (the Download window, showWindow(25),
+client/src/ui/download_ui.c): the More Krunker tile and the hub's Android app badge. It is how mobile
+players get the client, so it stays on the desktop build and in the phone layout (KRUNKNATIVE_MOBILE=1).
 
   python3 -I client/tests/download_screen_e2e.py BUILD_DIR      (from the repository root)
 
-A fresh profile (an empty XDG_CONFIG_HOME) and a headless offline client_bin on Kanji, driven by an
-input script:
-  1. startup: the menu is up, no window is open and the Download window's package list (.knDlFoot,
-     download_ui.c) is not in the page;
-  2. More Krunker (showMoreKrunker, the nav's "more" button): its four tiles are there, and there is
-     no "Download our client" block (.moreKrunkerClient) or "Download" text in the popup;
-  3. the hub (page hub): the Android app badge (#androidDB) is not shown; it is a link to the Download
-     window natively (social_ui.c), and the desktop client is the client already;
-  4. positive control: showWindow(25) puts the package list (.knDlFoot) in the page, so the probe can see
-     the window at all.
-The header's client.png (menu_ui.c) is gated the same way natively and is not probed here.
+For each layout (desktop, mobile): a fresh profile (an empty XDG_CONFIG_HOME) and a headless offline
+client_bin on Kanji, driven by an input script:
+  1. startup: the menu is up, no window is open and the Download window's package list (.knDlFoot)
+     is not in the page (the window opens on a click, not at startup);
+  2. More Krunker (showMoreKrunker, the nav's "more" button): its four tiles and the "Download our
+     client" block (.moreKrunkerClient) are there, and the popup says Download;
+  3. clicking "Download our client" opens the Download window (its package list is in the page);
+  4. the hub (page hub): the Android app badge (#androidDB) is shown; it links to the Download window
+     (/?download, social_ui.c);
 Exit code 0 when every check passed; logs are kept in ~/.cache/kn-dlscreen-e2e-* on failure.
 """
 import os
@@ -37,23 +36,25 @@ def check(ok, what):
         failures.append(what)
 
 
-def run_native(script, timeout=240):
-    path = os.path.join(WORK, "native.script")
+def run_native(tag, script, mobile, timeout=240):
+    path = os.path.join(WORK, tag + ".script")
     with open(path, "w") as f:
         f.write(script.strip() + "\n")
-    log = os.path.join(WORK, "native.log")
+    log = os.path.join(WORK, tag + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
-                "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "XDG_STATE_HOME": os.path.join(WORK, "state"),
+                "XDG_CONFIG_HOME": os.path.join(WORK, tag + "-cfg"), "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+    if mobile:
+        env["KRUNKNATIVE_MOBILE"] = "1"
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "--map", "kanji"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            check(False, f"client_bin finished within {timeout} s")
+            check(False, f"{tag}: client_bin finished within {timeout} s")
         finally:
             if p.poll() is None:
                 os.killpg(p.pid, signal.SIGKILL)
@@ -78,7 +79,7 @@ def grep(log, label):
 
 
 # '#' starts a comment in input scripts: ids are [id=...]
-script = [
+SCRIPT = [
     "0 menu",
     "300 vis @start menuWindow",
     "300 nodes @start0 .knDlFoot",
@@ -87,31 +88,33 @@ script = [
     "700 nodes @promo .moreKrunkerClient",
     "700 grep @dl Download [id=genericPop]",
     "700 vis @more genericPop",
-    "900 call showWindow 25",
-    "1100 nodes @open .knDlFoot",
+    "900 clicksel .moreKrunkerClientBtn",
+    "1100 nodes @clicked .knDlFoot",
     "1200 call clearPops",
-    "1300 page hub",
-    "2500 vis @hub androidDB",
-    "2600 quit",
+    "1500 page hub",
+    "2600 vis @hub androidDB",
+    "2700 quit",
 ]
-log = run_native("\n".join(script))
 
-start = vis(log, "@start")
-check(nodes(log, "@start0") == 0, f"native, fresh profile: no Download window's package list at startup ({nodes(log, '@start0')})")
-check(start.get("menuWindow") in ("0", "-"), f"native, fresh profile: no window is open at startup ({start})")
-check(nodes(log, "@more") == 4, f"native: More Krunker shows its four tiles ({nodes(log, '@more')})")
-check(nodes(log, "@promo") == 0, f"native: More Krunker has no 'Download our client' block ({nodes(log, '@promo')})")
-check(grep(log, "@dl") == 0, f"native: More Krunker says Download nowhere ({grep(log, '@dl')})")
-more = vis(log, "@more")
-check(more.get("genericPop") == "1", f"native: More Krunker is the popup on screen ({more})")
-check(nodes(log, "@open") == 1,
-      f"positive control: showWindow(25) puts the Download window's package list in the page ({nodes(log, '@open')})")
-hub = vis(log, "@hub")
-check(hub.get("androidDB") in ("0", "-"), f"native: the hub's Android app badge is not shown ({hub})")
-check("[input_script] page" in log and "[hub]" in log, "the hub page was entered (its log line is there)")
 
-shutil.rmtree(WORK, ignore_errors=True) if not failures else print(f"logs kept in {WORK}")
+def check_layout(tag, mobile):
+    log = run_native(tag, "\n".join(SCRIPT), mobile)
+    print(f"-- {tag} layout ({'phone, KRUNKNATIVE_MOBILE=1' if mobile else 'desktop'})")
+    check(nodes(log, "@start0") == 0, f"{tag}: no Download window's package list at startup ({nodes(log, '@start0')})")
+    check(vis(log, "@start").get("menuWindow") in ("0", "-"), f"{tag}: no window is open at startup")
+    check(nodes(log, "@more") == 4, f"{tag}: More Krunker shows its four tiles ({nodes(log, '@more')})")
+    check(nodes(log, "@promo") == 1, f"{tag}: More Krunker has the 'Download our client' block ({nodes(log, '@promo')})")
+    check(grep(log, "@dl") >= 1, f"{tag}: More Krunker says Download ({grep(log, '@dl')})")
+    check(vis(log, "@more").get("genericPop") == "1", f"{tag}: More Krunker is the popup on screen")
+    check(nodes(log, "@clicked") == 1, f"{tag}: 'Download our client' opens the Download window ({nodes(log, '@clicked')})")
+    check(vis(log, "@hub").get("androidDB") == "1", f"{tag}: the hub's Android app badge is shown ({vis(log, '@hub')})")
+
+
+check_layout("desktop", mobile=False)
+check_layout("mobile", mobile=True)
+
 if failures:
-    print(f"{len(failures)} check(s) failed")
+    print(f"{len(failures)} check(s) failed; logs kept in {WORK}")
     sys.exit(1)
+shutil.rmtree(WORK, ignore_errors=True)
 print("download screen: all checks passed")

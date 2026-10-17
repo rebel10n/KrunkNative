@@ -6472,12 +6472,8 @@ static void social_enter(Client *client, const char *query) {
     // the app badge: v10 shows #androidDB when window.canShowExternalLinks (always true in
     // KrunkNative, as in ui_handlers.c; social/renamed.js:1514-1518); #iosDB stays hidden and v10's
     // page has no #steamDB. KrunkNative: the badge opens the menu's Download window (/?download: the
-    // Android APK; tools/ui-import/social_page.py APP_BADGES). The native client is the client already,
-    // so its badge (a link to that window) is web only; a scenario render keeps v10's.
-#ifndef __EMSCRIPTEN__
-    if (ui_scenario_active())
-#endif
-        set_display("androidDB", "block");
+    // Android APK; tools/ui-import/social_page.py APP_BADGES).
+    set_display("androidDB", "block");
 
     // updateWindow(de("p"), de("q"), de("s"), de("i")) (?games opens the maps)
     char p[64], q[HUB_KEY_MAX], s[HUB_KEY_MAX], i[HUB_KEY_MAX], tmp[8];

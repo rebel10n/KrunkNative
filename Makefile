@@ -705,7 +705,7 @@ console-visible-test: build ## Dev console never hidden while on: menu, windows,
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
 
 .PHONY: download-screen-test
-download-screen-test: build ## The native client never offers Download our client: no Download window at startup, no More Krunker tile, no hub app badge on a fresh profile (headless; EGL_DEVICE=...)
+download-screen-test: build ## The native client offers Download our client on a fresh profile, desktop and phone layout: the More Krunker tile opens the Download window, the hub's Android badge shows, and no window is open at startup (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/download_screen_e2e.py $(DEBUG_DIR)
 
 .PHONY: console-strike-test
