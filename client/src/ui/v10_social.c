@@ -643,7 +643,7 @@ static void eb_on_recv(const cJSON *o) {
     char line[MSG_TEXT + 96];
     const char *name = friend_name(from);
     snprintf(line, sizeof(line), "[DM from %s]: %s", name[0] ? name : "Unknown", jstr(o, "text"));
-    if (!menu_ui()->menu_open) dm_chat_line(line); // the in-game chat (v10 _49706 listeners)
+    dm_chat_line(line); // v10 _49706 listeners: every new message, on any page (the chat list keeps it for the game)
     if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen: the OS notification
         char title[96];
         I18N_F(title, "kn.notify.dmTitle", "Message from {0}", name[0] ? name : "Unknown");
@@ -688,7 +688,7 @@ static void eb_on_unread_summary(const cJSON *o) {
         char line[160];
         const char *name = jstr(e, "name");
         snprintf(line, sizeof(line), "[DM] %d new %s from %s", n, n == 1 ? "message" : "messages", name[0] ? name : "a friend");
-        if (!menu_ui()->menu_open) dm_chat_line(line); // v10 _49707 listeners
+        dm_chat_line(line); // v10 _49707 listeners: each friend with unread messages at sign-in
     }
 }
 

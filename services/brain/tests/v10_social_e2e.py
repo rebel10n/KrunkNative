@@ -67,6 +67,25 @@ def peer_session(name, token, follow, hold_s):
     return t
 
 
+def dm_session(name, token, to, text, hold_s=6.0):
+    """A second session of `name` (a thread) that sends one DM to account `to`, then stays online hold_s."""
+    async def run():
+        async with websockets.connect("ws://127.0.0.1:%d/social/ws?enc=json" % PORT) as ws:
+            await ws.send(json.dumps(["a", 1, [name, None, token]]))
+            await ws.send(json.dumps(["eb", {"type": "msg:send", "to": to, "text": text}]))
+            end = time.time() + hold_s
+            while time.time() < end:
+                try:
+                    f = json.loads(await asyncio.wait_for(ws.recv(), 0.5))
+                    if f and f[0] == "pi":
+                        await ws.send(json.dumps(["po"]))
+                except asyncio.TimeoutError:
+                    pass
+    t = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
+    t.start()
+    return t
+
+
 class Client:
     def __init__(self, name, token, tag):
         self.tag, self.cmds = tag, os.path.join(WORK, tag + ".cmds")
@@ -112,6 +131,18 @@ class Client:
 
     def click(self, elem_id):
         self.cmd("clickid " + elem_id); time.sleep(0.5)
+
+    def chat_has(self, needle, timeout=10.0):
+        """#chatList's text (textof) contains needle: the in-game chat lines (v10 _49706 / _49707)."""
+        end = time.time() + timeout
+        while time.time() < end:
+            m = self.mark()
+            self.cmd("textof chatList")
+            if self.wait_line("[ui_cmds] textof chatList = '", m, 2.0):
+                found = re.search(r"\[ui_cmds\] textof chatList = '(.*)'", self.text()[m:])
+                if found and needle in found.group(1): return True
+            time.sleep(0.3)
+        return False
 
     def ui(self, calls):
         self.cmd("ui " + calls); time.sleep(0.6)
@@ -162,6 +193,11 @@ def main():
         A, B = Client(names[0], tokens[0], "alice"), Client(names[1], tokens[1], "bob")
         clients = [A, B]
         check(A.has("menuBtnSocial"), "the v10 main page is up (#menuBtnSocial)")
+        # v10 chat lines while on the menu: the unread summary of sign-in (bob's "see you in game"),
+        # then a live DM from bob ([DM from <name>]: text, the _49706 listener; the page is the menu)
+        check(A.chat_has("[DM] 1 new message from %s" % names[1], 15), "sign-in: \"[DM] 1 new message from <bob>\" in #chatList")
+        dm_session(names[1], tokens[1], a, "dm while on the menu")
+        check(A.chat_has("[DM from %s]: dm while on the menu" % names[1], 15), "a DM on the menu: \"[DM from <bob>]: text\" in #chatList")
         A.click("menuBtnSocial")
         check(A.has("v10sTab1"), "the Social hub popup opened (sidebar tabs)")
         check(A.has("v10sFeed0"), "the Social tab's feeds are mounted")
