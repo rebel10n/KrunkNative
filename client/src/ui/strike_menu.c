@@ -434,7 +434,8 @@ static char *store_wheels_html(void) {
 
 // ---- the Market / Currency sections: GET /strike/v1/shop (strike_econ_get_shop). FRVR's fg builds
 // Market from its N2 market and Currency from yU (ticket packs) + the KR packs (_I blocks,
-// .store-krunkies); kn_brain's shop has no real money, so every product is a KR (or free) _I block
+// .store-krunkies); kn_brain's shop prices a product in KR or free, and a KR package in USD (shown as
+// $ with no payment provider; the purchase credits it). Every product is an _I block
 // here: title its price, subtitle its title, the click buys it (strike_econ_buy; FRVR first shows the
 // product popup U2). Market = categories deals / bundles / free, Currency = tickets / currency.
 static const char *product_section(const char *category) {
@@ -495,6 +496,7 @@ static void store_products_fill(const HtmlElem root) {
             if (sold_out) sb_append(&sb, "<span class=\"material-icons\">lock</span>");
             sb_append(&sb, "<div class=\"frvr-store-block-title\">");
             if (ptype && !strcmp(ptype, "free")) sb_append(&sb, "Free");
+            else if (ptype && !strcmp(ptype, "real_money")) sb_appendf(&sb, "$%d.%02d", amount / 100, amount % 100); // a KR package: US cents
             else sb_appendf(&sb, "<img class=\"frvr-store-block-title__KRimg\" src=\"img/frvr-ui/icon-krunkie-coin.svg\"><span>%d</span>", amount);
             sb_append(&sb, "</div><div class=\"frvr-store-block-subtitle\">");
             sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "title")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "title")) : "");
@@ -684,7 +686,7 @@ static void store_fill(const HtmlElem root) {
 }
 
 // yU's exchange (Jce, the spin's shortfall): the spin tickets Mf the stepper buys with KR, one ticket
-// at tickets_1's price (the shop's, else the catalogue's). Real-money packs are not sold here (no IAP).
+// at tickets_1's price (the shop's, else the catalogue's). The KR packs are bought in the Currency section.
 #define TICKET_PRODUCT "tickets_1"
 
 static int krunkies(void) {
@@ -856,7 +858,7 @@ static void spin_buy(const int count) {
     if (FIXTURE.set) return; // a capture fixture's wheel is not kn_brain's
     // onSpin: a ticket wheel with fewer tickets than spins, and KR for one ticket, opens the exchange (Jce)
     // instead of spinning. FRVR tests the ticket count for every wheel; a KR wheel is paid in KR, so here
-    // only the ticket wheel is gated. Real-money packs (RU / eue) are not sold.
+    // only the ticket wheel is gated. The KR packs are bought in the store, not here.
     if (w->ticket && count > spin_tickets() && krunkies() >= ticket_price()) {
         tickets_open();
         return;

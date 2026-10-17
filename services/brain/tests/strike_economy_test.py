@@ -250,7 +250,8 @@ async def scenario(port):
                                                                  "strike_missions_def", "strike_track", "strike_pool_items")}
     check(counts["strike_item_defs"] == len(gen["items"]) and counts["strike_item_defs"] > 600, "item definitions: %s" % counts)
     check(counts["strike_pools"] == 7 and counts["strike_pool_items"] == sum(p["count"] for p in gen["pools"]), "pools")
-    check(counts["strike_wheels"] == len(gen["wheels"]) and counts["strike_products"] == len(gen["products"])
+    # the generated products plus the two KR packages migration 0345 adds (the store's KR purchase)
+    check(counts["strike_wheels"] == len(gen["wheels"]) and counts["strike_products"] == len(gen["products"]) + 2
           and counts["strike_missions_def"] == len(gen["missions"]) and counts["strike_track"] == len(gen["track"]),
           "wheels / products / missions / track")
     async with Social(social) as g:
@@ -376,7 +377,14 @@ async def scenario(port):
         pids = [p["_id"] for p in shop["products"]] if st == 200 else []
         check(st == 200 and "tickets_1" in pids and any(p.startswith("deal_") for p in pids) and shop["sections"][0]["id"] == "spins",
               "shop: products, today's deals, sections")
-        check(all(p["price"][0]["type"] in ("virtual_currency", "free") for p in shop["products"]), "no real-money prices")
+        # the KR packages (section currency) are the one real-money price: with no payment provider they are credited
+        check(all(p["price"][0]["type"] in ("virtual_currency", "free") or p["_id"].startswith("kr_") for p in shop["products"]),
+              "real-money prices only on the KR packages")
+        krp = [p for p in shop["products"] if p["_id"].startswith("kr_")]
+        check(len(krp) >= 1 and all(p["category"] == "currency" and p["price"][0]["type"] == "real_money"
+                                    and p["price"][0]["currency"] == "usd" and p["price"][0]["amount"] > 0 for p in krp)
+              and all(r["currency"] == "kr" for p in krp for r in p["products"]),
+              "shop: the KR packages sit in the currency section, priced in USD, granting KR: %s" % [p["_id"] for p in krp])
         # front.sections (FRVR's shop v2 front): the golden spin's SpinWheel section; the golden wheel is not in the Spins list
         fsec = [s for s in shop.get("front", {}).get("sections", []) if s.get("id") == "lucky-draw"]
         fcont = fsec[0]["content"][0] if fsec else {}
@@ -392,6 +400,17 @@ async def scenario(port):
         check(st == 200 and res["rewards"][0]["currency"] == "kr" and res["rewards"][0]["amount"] == 10, "the daily free KR package: %s" % res)
         st, err = await a.gapi("POST", "/strike/v1/shop/purchase", {"productId": "free_daily"})
         check(st == 400 and err["message"] == "Already purchased", "once a day")
+        # buy KR: no payment provider is configured, so the pack is credited (the dev path); the reply is the purchase's
+        pack = krp[0] if krp else {"_id": "kr_missing", "products": [{"amount": 0, "currency": "kr"}]}
+        pack_kr = pack["products"][0]["amount"]
+        kr = wallet(alice_id, "kr")
+        st, res = await a.gapi("POST", "/strike/v1/shop/purchase", {"productId": pack["_id"], "priceId": pack["_id"] + "_p0", "quantity": 1})
+        check(st == 200 and wallet(alice_id, "kr") == kr + pack_kr and res["wallet"]["kr"] == kr + pack_kr
+              and res["rewards"][0]["currency"] == "kr" and res["rewards"][0]["amount"] == pack_kr,
+              "buy KR: %s credits %d KR (%d -> %d): %s" % (pack["_id"], pack_kr, kr, wallet(alice_id, "kr"), res))
+        st, res = await a.gapi("POST", "/strike/v1/shop/purchase", {"productId": pack["_id"], "priceId": pack["_id"] + "_p0", "quantity": 2})
+        check(st == 200 and wallet(alice_id, "kr") == kr + 3 * pack_kr, "buy KR x2 credits 2 packs")
+        kr = wallet(alice_id, "kr")
         deal = next(p for p in shop["products"] if p["_id"].startswith("deal_"))
         deal_item = deal["products"][0]["item"]["itemId"]
         before = qint("SELECT coalesce(sum(count), 0) FROM strike_items WHERE account_id = %d AND item_id = '%s'" % (alice_id, deal_item))

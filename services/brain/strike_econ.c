@@ -17,7 +17,7 @@
  *   POST /strike/v2/spin-wheels/details {ids?}            the wheels with their pools' items
  *   POST /strike/v2/spin-wheels/:id/spin {count, golden}   -> spin result + wallet
  *   GET  /strike/v1/shop                                   products (+ today's deals), sections and front.sections (golden spin)
- *   POST /strike/v1/shop/purchase {productId, priceId, quantity}   virtual currency / free only
+ *   POST /strike/v1/shop/purchase {productId, priceId, quantity}   virtual currency / free; a KR package (real money) is credited with no payment provider
  *   POST /strike/v1/shop/validate                          refused: KrunkNative takes no real money
  *   GET  /strike/v1/missions/me, POST /strike/v1/missions/claim/:id
  *   GET  /strike/v1/players/me, /players/me/items, /players/me/classes
@@ -1011,6 +1011,13 @@ static cJSON *shop_json(const cJSON *purchases) {
     return o;
 }
 
+/* Real money is taken by a payment provider (payments.provider in the config). None is implemented, so with none
+ * configured a real-money pack (a KR package) is credited at no cost: the dev / test path. */
+static int payments_configured(void) {
+    const char *provider = kn_config_str(g_acct_brain->cfg, "payments.provider", "");
+    return provider && *provider;
+}
+
 static void r_purchase(SocialSession *s, const GapiReq *r) {
     const char *pid = body_str(r, "productId");
     cJSON *deals = deals_today();
@@ -1023,7 +1030,8 @@ static void r_purchase(SocialSession *s, const GapiReq *r) {
     }
     const cJSON *price = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(p, "price"), 0);
     const char *ptype = kn_json_str(price, "type", "");
-    if (strcmp(ptype, "virtual_currency") && strcmp(ptype, "free")) {
+    const int real = !strcmp(ptype, "real_money");
+    if ((real && payments_configured()) || (!real && strcmp(ptype, "virtual_currency") && strcmp(ptype, "free"))) {
         cJSON_Delete(deals);
         gapi_error(s, r->rid, 400, "PAYMENT_UNAVAILABLE", "Real-money purchases are not available"); /* no real payments */
         return;
@@ -1043,7 +1051,7 @@ static void r_purchase(SocialSession *s, const GapiReq *r) {
     social_call(s, &P_STRIKE_PURCHASE,
                 KN_DB_ARGS(acct_itoa(id, s->account_id), kn_json_str(p, "_id", ""), acct_itoa(per, product_period(p)),
                            acct_itoa(max, kn_json_int(p, "maxPurchaseCount", 0)), kn_json_str(price, "currency", ""),
-                           acct_itoa(cost, strcmp(ptype, "free") ? kn_json_int(price, "amount", 0) : 0), rewards, acct_itoa(q, qty)),
+                           acct_itoa(cost, !strcmp(ptype, "virtual_currency") ? kn_json_int(price, "amount", 0) : 0), rewards, acct_itoa(q, qty)),
                 json_done, c);
     free(rewards);
     cJSON_Delete(deals);

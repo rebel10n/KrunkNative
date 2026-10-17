@@ -119,9 +119,10 @@ Office's (FRVR's economy is separate from Krunker's): its own wallet (`kr` = kru
   an Epic or better), Heroic 0/48/35/14/2.49/0.5/0.01 (the Golden spin, 1 golden ticket). Every 10
   paid spins fill the golden spin meter for a golden ticket. Rolls are kn_brain's; charge and grant
   are one transaction.
-- **Store.** Virtual currency and free products only (no real money): spin tickets, a golden ticket,
-  the Hunter bundle (the class FRVR sells), a name change, a daily free KR package and four daily
-  deals priced by rarity.
+- **Store.** Virtual currency and free products, and two KR packages (real money in FRVR, priced in USD
+  here, migration 0345): spin tickets, a golden ticket, the Hunter bundle (the class FRVR sells), a name
+  change, a daily free KR package, four daily deals priced by rarity. With no payment provider configured
+  (payments.provider) a KR package is credited at no cost, the dev / test path; no real payment is taken.
 - **Progression.** Strike XP from Strike matches; the free track (30 levels, then a spin ticket per
   level) unlocks Run N Gun (5) and Rocketeer (15) (FRVR's `rewards_track` classes), daily missions
   (level 3) and golden tickets; Shotgunner and Detective come from spin tickets.
