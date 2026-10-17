@@ -30,6 +30,9 @@
 // status 0 = transport error; body is then the reason as plain text ("cannot connect to ...",
 // "host not found (WinHTTP error 12007)"), never JSON, and the failure is already logged as
 // "[http] <method> <url> failed: <reason>".
+// BACKEND_HTTP_TLS_FAILED (-2): the target's TLS handshake failed (its certificate or name did not
+// verify). Only backend_http_get_parallel reports it; every other request sees 0 for it.
+#define BACKEND_HTTP_TLS_FAILED (-2)
 typedef void (*BackendHttpFn)(void *user, int status, const char *body, size_t length);
 typedef void (*BackendSocialFn)(void *user, const cJSON *frame);
 
@@ -70,7 +73,8 @@ int backend_http_get_external(const char *url, int timeout_ms, BackendHttpFn fn,
 int backend_http_get_media(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
 // Native: a GET on a thread of its own, at once and alongside any other (a region ping race,
 // region_ping.h: every region's /ping in flight together, the answers delivered in the order they
-// came). Same callback rules as backend_http_get. The web's backend_http_request is concurrent already.
+// came). Same callback rules as backend_http_get, and this one alone reports BACKEND_HTTP_TLS_FAILED.
+// The web's backend_http_request is concurrent already.
 int backend_http_get_parallel(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
 // Native: the social socket reconnects (same brain), e.g. through a changed proxy (http_proxy.h).
 void backend_social_reconnect(void);

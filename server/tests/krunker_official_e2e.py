@@ -41,6 +41,8 @@ Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the
 (GET /game-list) in the server browser from the offline game: it is joined in-client (Cancel in the
 Security Challenge modal first ends the join saying so, a second click + a pasted token joins);
 "native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
+Server browser TLS run (--tls alone; part of --native): "native-kio-tls" (the ping list names a region whose host fails
+the TLS handshake: its official lobbies are left out of the list and its group is gone; the reachable region stays).
 Reload runs (--reload alone): "native-reload" (--krunker, a lobby joined, F5: the relaunched client,
 whose command line alone would join the matchmaker's pick, rejoins that official game by its id) and
 "native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
@@ -90,6 +92,9 @@ import os
 import re
 import shutil
 import signal
+import socket
+import socketserver
+import ssl
 import struct
 import subprocess
 import sys
@@ -121,7 +126,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
-        "--script": "script", "--prophunt": "prophunt", "--token": "token"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -478,6 +483,10 @@ class Stub:
         self.live = None
         self.ahkey, self.build_version = AHKEY, BUILD_VERSION
         self.published = {}
+        # the TLS runs (run_native_kio_tls): krunker.io's /ping-list ({region: host}, None = not served) and the
+        # game-list rows added to the stub's own lobbies
+        self.ping_list = None
+        self.extra_games = []
 
     def speak(self, live):
         self.live = live
@@ -503,6 +512,8 @@ class Stub:
                     tok = "tok_e2e_%d_0123456789abcdefghijklmnopqrstuvwxyz0123456789" % len(stub.issued)
                     stub.issued.append(tok)
                     body, ctype = tok.encode(), "text/plain"
+                elif u.path == "/ping-list" and stub.ping_list is not None:  # krunker.io's region ping hosts (the TLS run)
+                    body, ctype = json.dumps(stub.ping_list).encode(), "application/json"
                 elif u.path == "/game-list" and stub.lobbies is not None:  # the exclude runs' lobbies
                     stub.list_requests += 1
                     if stub.list_fail < 0 or stub.list_requests <= stub.list_fail:
@@ -517,7 +528,8 @@ class Stub:
                         [OLD_BURG_GAME, "de-fra", 2, 8, {"i": "Old_Burg", "g": 0}, 240],
                         # krunker.io's customs (never joined): their rows stay in the KRUNKER.IO groups (run_native_kio_groups)
                         [KIO_CUSTOM_GAME, "de-fra", 4, 8, {"i": "Kanji", "g": 0, "c": True, "h": "KioCustomRoom"}, 240],
-                        [KIO_OFFICIAL_GAME, "de-fra", 3, 8, {"i": "Kanji", "g": 0, "c": True, "oc": True, "h": "KioOfficialRoom"}, 240]]}).encode(), "application/json"
+                        [KIO_OFFICIAL_GAME, "de-fra", 3, 8, {"i": "Kanji", "g": 0, "c": True, "oc": True, "h": "KioOfficialRoom"}, 240]]
+                                           + stub.extra_games}).encode(), "application/json"
                 elif u.path == "/seek-game" and stub.lobbies is not None:
                     qd = dict(q)
                     game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
@@ -2877,6 +2889,123 @@ def run_native_kio_groups():
     check(f"{label}: the krunker.io custom and official custom are in different groups", kc_group and ko_group and kc_group != ko_group, (kc_group, ko_group))
 
 
+TLS_PING_HOST, TLS_GAME_ID = "lobby-tls.supersecretserver.krunker.io", "SSS:TlsRoom01"  # a region whose ping host fails TLS
+
+
+class TlsDecoy:
+    """The host of a region whose TLS handshake fails: a self-signed certificate (no trusted chain) on a loopback TLS
+    server, reached through a loopback HTTP CONNECT proxy that ignores the name it is asked for (the client's
+    handshake then checks the name against that certificate and refuses it). Nothing leaves the machine."""
+
+    def __init__(self, cert_dir):
+        self.cert, self.key = os.path.join(cert_dir, "decoy.pem"), os.path.join(cert_dir, "decoy.key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", self.key, "-out", self.cert,
+                        "-days", "2", "-subj", "/CN=decoy.invalid"], check=True, capture_output=True)
+        self.tls_port, self.proxy_port = kn_proto.free_ports(2)
+        self.servers = []
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(self.cert, self.key)
+
+        class TLS(socketserver.BaseRequestHandler):
+            def handle(self):
+                try:  # the client refuses the certificate: the handshake raises here
+                    with ctx.wrap_socket(self.request, server_side=True) as s:
+                        s.recv(1)
+                except (OSError, ssl.SSLError):
+                    pass
+
+        def pump(src, dst):
+            try:
+                while True:
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            except OSError:
+                pass
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+        class Proxy(socketserver.BaseRequestHandler):
+            def handle(self):
+                head = b""
+                while b"\r\n\r\n" not in head and len(head) < 8192:
+                    chunk = self.request.recv(1024)
+                    if not chunk:
+                        return
+                    head += chunk
+                if not head.startswith(b"CONNECT "):
+                    self.request.sendall(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                    return
+                upstream = socket.create_connection(("127.0.0.1", self.server.tls_port), timeout=5)
+                self.request.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                rest = head.split(b"\r\n\r\n", 1)[1]
+                if rest:
+                    upstream.sendall(rest)
+                t = threading.Thread(target=pump, args=(upstream, self.request), daemon=True)
+                t.start()
+                pump(self.request, upstream)
+                t.join(5)
+                upstream.close()
+
+        for handler, port in ((TLS, self.tls_port), (Proxy, self.proxy_port)):
+            srv = socketserver.ThreadingTCPServer(("127.0.0.1", port), handler)
+            srv.daemon_threads = True
+            srv.allow_reuse_address = True
+            srv.tls_port = self.tls_port
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            self.servers.append(srv)
+
+    @property
+    def proxy_url(self):
+        return "http://127.0.0.1:%d" % self.proxy_port
+
+    def stop(self):
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
+
+
+def run_native_kio_tls():
+    """A region whose ping host fails the TLS handshake (a certificate nobody trusts) has its official lobbies left
+    out of the server browser's list: the matchmaker's list, krunker.io's ping list and every region's /ping timed
+    (v10's loadData) stay as they are, only the lobbies of a region that failed TLS go (krunker_lobbies.c hide_tls_failed).
+    The stub lists one lobby in region sss, whose ping host fails TLS, and the Frankfurt lobbies, whose host answers.
+    krunker.io's tab then has no group for sss (three groups: Official Customs, Custom Games, Frankfurt), and the
+    failure is logged once. The seek never picks it either (it reads the same list)."""
+    label = "native-kio-tls"
+    decoy = TlsDecoy(WORK)
+    try:
+        def setup(st):
+            st.ping_list = {"de-fra": "127.0.0.1:%d" % st.mm_port, "sss": TLS_PING_HOST}  # a loopback host answers /ping (404 ok)
+            st.extra_games = [[TLS_GAME_ID, "sss", 2, 8, {"i": MAP_NAME, "g": 0}, 240]]
+        steps = ["0 menu", "300 call showWindow 2", "350 call windows.1.switchTab 1", "3000 nodes @hdrs1 [id=serverHolder] .setHed",
+                 "3010 nodes @kiohdr1 [id=serverHolder] .kioHed", "3100 nodes @rows .quickJoin", "3200 quit"]
+        # the proxy only for the non-loopback ping host (the matchmaker is loopback: never proxied); no proxy config of the
+        # machine's own may win over it (env2 reads the lower-case name first, NO_PROXY would exempt the host)
+        proxy_env = {"HTTPS_PROXY": decoy.proxy_url, "https_proxy": decoy.proxy_url, "NO_PROXY": "", "no_proxy": "", "KN_FETCH_PROXY": ""}
+        stub, p, out, log = launch_native(label, "\n".join(steps) + "\n", proxy_env, args=("--offline",), stub_setup=setup)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+    finally:
+        decoy.stop()
+    text = "\n".join(lines)
+    check(f"{label}: the matchmaker's ping list was asked (krunker.io's regions, timed with the list)",
+          any(pth == "/ping-list" for pth, _, _ in stub.http_log), [pth for pth, _, _ in stub.http_log][:8])
+    check(f"{label}: the TLS handshake to the sss ping host failed (the certificate is not trusted)",
+          re.search(r"\[http\] TLS to %s failed" % re.escape(TLS_PING_HOST), text) is not None, [l for l in lines if "TLS" in l][:4])
+    check(f"{label}: the lobby is hidden, its region named in the log once",
+          len(re.findall(r"\[krunker\] hid 1 official lobby in region sss: its ping host failed the TLS handshake", text)) == 1,
+          [l for l in lines if "[krunker]" in l][-6:])
+    hdrs1 = re.search(r"nodes t=\d+ @hdrs1 elements=\d+ match=(\d+)", text)
+    kiohdr1 = re.search(r"nodes t=\d+ @kiohdr1 elements=\d+ match=(\d+)", text)
+    check(f"{label}: krunker.io's tab: three groups (Official Customs, Custom Games, Frankfurt), no sss group",
+          hdrs1 and int(hdrs1.group(1)) == 3 and kiohdr1 and int(kiohdr1.group(1)) == 3, (hdrs1 and hdrs1.group(0), text[-400:]))
+    check(f"{label}: the reachable region's pings were measured (both regions answered their timed ping round)",
+          "[krunker] lobby row pings measured: 2 regions" in text, [l for l in lines if "pings measured" in l][-2:])
+
+
 BAD_MAP_INDEX = 999  # past krunker_maps.h's table, not in the (private) cache, and the maps API does not answer
 
 
@@ -4079,6 +4208,7 @@ def main():
         run_native_lobbyui()
         run_native_lobby()
         run_native_kio_groups()
+        run_native_kio_tls()
         run_native_badmap()
         run_native_kick()
         run_native_fx()
@@ -4132,6 +4262,8 @@ def main():
         run_native_prophunt()
     if ONLY == "groups" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server browser's krunker.io groups run
         run_native_kio_groups()
+    if ONLY == "tls" and os.path.isfile(f"{BUILD}/client_bin"):  # just the official lobbies of a region whose ping host fails TLS
+        run_native_kio_tls()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

@@ -167,12 +167,38 @@ static cJSON *to_tuple(const cJSON *g) {
     return t;
 }
 
+static void run_waiting(void);
+
+// The official lobbies of a region whose ping host failed the TLS handshake (region_ping.h REGION_PING_TLS_FAILED)
+// leave the list: the server browser, the seek and Find Game all read it. KrunkNative's rule, v10 has none: the list
+// is krunker.io's as it sent it, and only the lobbies of that region go (its group with them).
+static void hide_tls_failed(void) {
+    if (!K.list) return;
+    cJSON *p;
+    cJSON_ArrayForEach(p, K.pings) {
+        if (!p->string || !cJSON_IsNumber(p) || p->valuedouble != REGION_PING_TLS_FAILED) continue;
+        int hidden = 0;
+        for (int i = cJSON_GetArraySize(K.list) - 1; i >= 0; i--) {
+            const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(cJSON_GetArrayItem(K.list, i), 1));
+            if (region && !strcmp(region, p->string)) {
+                cJSON_DeleteItemFromArray(K.list, i);
+                hidden++;
+            }
+        }
+        if (hidden)
+            printf("[krunker] hid %d official %s in region %s: its ping host failed the TLS handshake\n", hidden, hidden == 1 ? "lobby" : "lobbies",
+                   p->string);
+    }
+}
+
 static void on_pings(void *user, cJSON *pings) {
     (void) user;
     cJSON_Delete(K.pings);
     K.pings = pings;
     K.pinging = 0;
     printf("[krunker] lobby row pings measured: %d regions\n", cJSON_GetArraySize(pings));
+    hide_tls_failed();
+    run_waiting(); // the seek / Find Game that waited for these pings
     menu_rerender_if_open(2); // the rows' ping icons (windows[1].pingData)
 }
 
@@ -180,7 +206,10 @@ static void on_kio_ping_list(void *user, const int status, const char *body, con
     (void) user;
     (void) length;
     cJSON *list = status == 200 && body ? cJSON_Parse(body) : NULL;
-    if (!cJSON_IsObject(list) || !region_ping_measure(list, on_pings, NULL)) K.pinging = 0; // nothing pingable: no icons
+    if (!cJSON_IsObject(list) || !region_ping_measure(list, on_pings, NULL)) { // nothing pingable: no icons
+        K.pinging = 0;
+        run_waiting();
+    }
     cJSON_Delete(list);
 }
 
@@ -202,6 +231,21 @@ int krunker_lobbies_region_ping_ms(const char *region, double *ms) {
 
 static int finder_open(int mode); // Find Game's official customs of a mode (below)
 static void finder_none(void);
+
+// The seek and Find Game that waited for the list's pings (krunker_lobbies_seek / krunker_lobbies_find_custom while
+// K.pinging) run now, on the list the pings settled: never on a list that still holds a TLS-failed region's lobbies.
+static void run_waiting(void) {
+    if (K.pinging) return;
+    if (K.seek_pending) {
+        K.seek_pending = 0;
+        krunker_lobbies_seek();
+    }
+    if (K.finder_mode) {
+        const int mode = K.finder_mode;
+        K.finder_mode = 0;
+        if (!finder_open(mode)) finder_none();
+    }
+}
 
 static void on_list(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -246,6 +290,7 @@ static void on_list(void *user, const int status, const char *body, const size_t
         cJSON_Delete(built);
         cJSON_Delete(K.list);
         K.list = list;
+        hide_tls_failed(); // the last known pings: a refresh does not show a TLS-failed region's lobbies for a moment
         const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
         K.players = cJSON_IsNumber(total) ? total->valuedouble : 0;
         K.answered_ms = now_ms();
@@ -281,15 +326,7 @@ static void on_list(void *user, const int status, const char *body, const size_t
         fprintf(stderr, "[krunker] game list failed (HTTP %d%s%s): %s\n", status, proxied ? " via proxy " : "", proxied ? proxy : "", K.error);
     }
     cJSON_Delete(res);
-    if (K.seek_pending) {
-        K.seek_pending = 0;
-        krunker_lobbies_seek();
-    }
-    if (K.finder_mode) {
-        const int mode = K.finder_mode;
-        K.finder_mode = 0;
-        if (!finder_open(mode)) finder_none();
-    }
+    if (!K.pinging) run_waiting(); // else on_pings (or the ping list's failure) runs them on the settled list
     menu_rerender_if_open(2); // the Servers window shows the section
     v10_menu_popular_changed(); // Popular Now counts krunker.io's custom games (v10 fetchMatches)
 }
@@ -562,6 +599,10 @@ void krunker_lobbies_find_custom(const int mode) {
         finder_none();
         return;
     }
+    if (K.pinging) { // the list's pings are out: Find Game reads the list they settle (run_waiting)
+        K.finder_mode = mode;
+        return;
+    }
     if (now_ms() - K.answered_ms >= KRUNKER_LOBBIES_CACHE_MS || !K.list) {
         // v10 asks the list again for the finder (fetchGameList): the fresh answer decides (on_list)
         K.finder_mode = mode;
@@ -589,6 +630,13 @@ int krunker_lobbies_seek(void) {
         // wait shows the loading spinner, not a toast (no toast in the join flow)
         if (!R.racing && g_lobbies_client && !g_lobbies_client->net_connected && !g_lobbies_client->offline && !menu_connecting()) menu_show_connecting_map(NULL);
         krunker_seek_region_resolve(on_seek_region, NULL);
+        return 1;
+    }
+    if (K.pinging) {
+        // the list's pings are out: the lobbies of a region whose TLS failed leave the list when they answer, so the
+        // seek waits for that (on_pings runs this again); the spinner, as while the list loads
+        K.seek_pending = 1;
+        if (g_lobbies_client && !g_lobbies_client->net_connected && !g_lobbies_client->offline && !menu_connecting()) menu_show_connecting_map(NULL);
         return 1;
     }
     if (now_ms() - K.answered_ms >= KRUNKER_LOBBIES_CACHE_MS || !K.list) {

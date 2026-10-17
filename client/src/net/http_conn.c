@@ -25,6 +25,7 @@
 // Why the calling thread's last http_conn_open failed (http_conn_error): the launcher shows it
 // when it cannot reach the updates server, so a DNS failure does not read like a refused port.
 static _Thread_local char t_open_err[256];
+static _Thread_local int t_open_tls; // the last failure was the target's TLS handshake (http_conn_tls_failed)
 
 static void open_err(const char *fmt, ...) {
     va_list ap;
@@ -35,6 +36,10 @@ static void open_err(const char *fmt, ...) {
 
 const char *http_conn_error(void) {
     return t_open_err;
+}
+
+int http_conn_tls_failed(void) {
+    return t_open_tls;
 }
 
 // http(s)://host[:port][/base] (also ws:// / wss://); TLS needs KRUNKNATIVE_HAVE_TLS
@@ -467,6 +472,7 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
     memset(c, 0, sizeof(*c));
     c->fd = -1;
     t_open_err[0] = 0;
+    t_open_tls = 0;
     HttpProxy px;
     const int via = http_proxy_for(a->host, a->tls, &px);
     char label[160] = "";
@@ -510,7 +516,10 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
     if (a->tls) {
         SSL *under = c->ssl; // the https:// proxy's TLS, NULL otherwise
         SSL *ssl = tls_start(c->fd, under, a->host);
-        if (!ssl) goto fail;
+        if (!ssl) {
+            t_open_tls = 1; // the host's own handshake (not a proxy's): region pings report it (BACKEND_HTTP_TLS_FAILED)
+            goto fail;
+        }
         c->proxy_ssl = under;
         c->ssl = ssl;
     }

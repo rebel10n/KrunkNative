@@ -34,6 +34,9 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms);
 // Why the calling thread's last failed http_conn_open failed ("cannot resolve dl.krunk.io (DNS:
 // ...)", "cannot connect to <host> port 443 (timed out)", "TLS handshake with <host> failed: ...").
 const char *http_conn_error(void);
+// Whether the calling thread's last failed http_conn_open failed in the target's own TLS handshake (the
+// certificate or the host name did not verify), not in the connect or a proxy. 0 otherwise.
+int http_conn_tls_failed(void);
 void http_conn_close(HttpConn *c);
 int http_conn_send(HttpConn *c, const void *data, size_t len);
 // >0 bytes, 0 closed, <0 error (errno EAGAIN on a receive timeout)

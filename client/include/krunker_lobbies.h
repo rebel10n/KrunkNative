@@ -41,7 +41,8 @@ int krunker_lobbies_loading(void);
 const char *krunker_lobbies_error(void);        // "" = the last request answered; else a sentence for the player
 // The proxy setting changed (ui_client_settings.c): the next Servers window asks again at once.
 void krunker_lobbies_network_changed(void);
-// krunker.io's region ping (v10 pingData, ms; -1 = the ping failed) from the last list load: the row's icon.
+// krunker.io's region ping (v10 pingData, ms; -1 = the ping failed, REGION_PING_TLS_FAILED = its TLS handshake did)
+// from the last list load: the row's icon.
 // 1 = measured (*ms written), 0 = not measured yet.
 int krunker_lobbies_region_ping_ms(const char *region, double *ms);
 double krunker_lobbies_players(void);           // totalPlayerCount of the last answer

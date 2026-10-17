@@ -50,8 +50,8 @@ static void on_ping(void *user, const int status, const char *body, const size_t
     Ping *p = user;
     Race *r = p->race;
     // fetch() resolves on any HTTP answer (v10's .then): only no answer at all (status 0: refused,
-    // timed out, no route) is a failed ping
-    if (status != 0) {
+    // timed out, no route; BACKEND_HTTP_TLS_FAILED: the handshake) is a failed ping
+    if (status > 0) {
         if (!r->done) printf("[mm] ping race: %s answered first\n", p->region);
         finish(r, p->region);
     } else if (++r->failed >= r->started) {
@@ -126,8 +126,12 @@ static void on_timed(void *user, const int status, const char *body, const size_
     (void) length;
     Timed *t = user;
     Measure *m = t->measure;
-    // a round trip for any HTTP answer; no answer at all (refused, timed out, no route) is -1 (v10's catch)
-    cJSON_AddNumberToObject(m->results, t->region, status != 0 ? glfwGetTime() * 1000.0 - t->start_ms : -1.0);
+    // a round trip for any HTTP answer; no answer at all (refused, timed out, no route) is -1 (v10's catch),
+    // a failed TLS handshake REGION_PING_TLS_FAILED
+    double ms = -1.0;
+    if (status > 0) ms = glfwGetTime() * 1000.0 - t->start_ms;
+    else if (status == BACKEND_HTTP_TLS_FAILED) ms = REGION_PING_TLS_FAILED;
+    cJSON_AddNumberToObject(m->results, t->region, ms);
     m->answered++;
     free(t);
     measure_release(m);

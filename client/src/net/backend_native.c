@@ -87,6 +87,8 @@ typedef struct HttpJob {
     size_t length;
     int timeout_ms; // connect / receive timeout
     char err[192];  // status 0: why (handed to the callback as the body, backend.h)
+    int tls_reply;  // backend_http_get_parallel: a failed TLS handshake is BACKEND_HTTP_TLS_FAILED, not 0
+    int tls_failed; // the target's TLS handshake failed (http_conn_tls_failed when the connection did not open)
 } HttpJob;
 
 typedef struct WsMsg {
@@ -218,6 +220,7 @@ static void http_run(HttpJob *job) {
     }
     HttpConn c;
     if (!http_conn_open(&c, &a, job->timeout_ms)) {
+        job->tls_failed = http_conn_tls_failed();
         snprintf(job->err, sizeof(job->err), "cannot connect to %s:%s%s", a.host, a.port, a.tls ? " (TLS)" : "");
         free(req_body);
         return;
@@ -373,6 +376,7 @@ int backend_http_get_parallel(const char *url, const int timeout_ms, const Backe
     job->url = strdup(url);
     job->fn = fn;
     job->user = user;
+    job->tls_reply = 1;
     pthread_t t;
     if (!job->url || pthread_create(&t, NULL, http_job_thread, job) != 0) {
         free(job->url);
@@ -785,7 +789,9 @@ void backend_poll(void) {
 
     while (done) {
         HttpJob *next = done->next;
-        if (!done->status) {
+        // a parallel request whose TLS handshake failed says so (backend.h BACKEND_HTTP_TLS_FAILED); the rest see 0
+        const int status = done->status ? done->status : done->tls_failed && done->tls_reply ? BACKEND_HTTP_TLS_FAILED : 0;
+        if (!status) {
             // a transport error: say which request and why (silent before: an empty server
             // finder looked like "no servers"); the reason is also the callback's body
             if (!done->err[0]) snprintf(done->err, sizeof(done->err), "no answer");
@@ -794,8 +800,8 @@ void backend_poll(void) {
             free(shown);
         }
         if (done->fn) {
-            const char *body = done->status ? (done->body ? done->body : "") : done->err;
-            done->fn(done->user, done->status, body, done->status ? done->length : strlen(done->err));
+            const char *body = status > 0 ? (done->body ? done->body : "") : done->err;
+            done->fn(done->user, status, body, status > 0 ? done->length : strlen(done->err));
         }
         free(done->url);
         free(done->body);

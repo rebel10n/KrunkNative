@@ -12,6 +12,10 @@
 #include <stddef.h>
 
 #define REGION_PING_TIMEOUT_MS 5000 // v10 ClientManager.PING_TIMEOUT_MS
+// region_ping_measure's value for a region whose ping host failed the TLS handshake (its certificate or
+// name did not verify): a failed ping like -1, told apart so krunker_lobbies.c can leave that region's
+// official lobbies out of the list. Any other failure (refused, timed out, no route) stays -1.
+#define REGION_PING_TLS_FAILED (-2)
 
 // region = the winner, NULL = every ping failed (or nothing was pingable). Main thread.
 typedef void (*RegionPingFn)(void *user, const char *region);
@@ -24,7 +28,8 @@ typedef int (*RegionPingEligible)(const char *region);
 int region_ping_race(const cJSON *ping_list, RegionPingEligible eligible, RegionPingFn fn, void *user);
 
 // The server browser's row pings (v10 getRegionPing, v10.js:147494-147530): every listed region's /ping
-// at once, each round trip in ms (-1 when the ping failed, v10's catch). fn runs once every ping answered
+// at once, each round trip in ms (-1 when the ping failed, v10's catch; REGION_PING_TLS_FAILED when its TLS
+// handshake failed). fn runs once every ping answered
 // (from backend_poll, never inside this call) with `pings`, an object {region: ms} the callee owns; 0 =
 // nothing could be started (fn is NOT called). Unlike the race, every listed region is pinged (v10 pings
 // all of its ping list, dedicated-only regions too).
