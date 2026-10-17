@@ -123,17 +123,15 @@ void seek_prefs_set_servers(const SeekServers servers) {
 // d270817d) saved "Krunker servers" as knSeekServers "official", and a launch still seeks krunker.io for
 // it. Box Office is the default for everyone now, so an "official" or "both" saved before the flag becomes
 // "kn"; once the flag is set the saved choice is never touched again (a later krunker.io pick is kept).
-// The web keeps its saved choice (its seeks stay on Box Office, seek_prefs_servers) and only gets the flag.
-// Called once at startup, before the stored settings are pushed (main.c).
+// The web runs the same reset: its seeks are Box Office either way (seek_prefs_servers), so the reset only makes
+// the Server Type row true. Called once at startup, before the stored settings are pushed (main.c).
 void seek_prefs_migrate_servers(void) {
     if (ui_setting_saved(SEEK_SERVERS_MIGRATED_KEY)) return;
-#ifndef __EMSCRIPTEN__
     const char *s = cJSON_GetStringValue(ui_setting_saved(SEEK_SERVERS_KEY));
     if (s && (!strcmp(s, "official") || !strcmp(s, "both"))) {
         printf("[ui] Quickplay %s=%s -> kn (Box Office by default)\n", SEEK_SERVERS_KEY, s);
         ui_settings_set_string(SEEK_SERVERS_KEY, "kn");
     }
-#endif
     const HtmlArg one = {HTML_ARG_NUM, 1.0, NULL};
     ui_settings_set(SEEK_SERVERS_MIGRATED_KEY, &one);
 }
