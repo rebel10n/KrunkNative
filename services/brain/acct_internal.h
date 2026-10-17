@@ -305,6 +305,7 @@ void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
 void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account titles) */
 void sh_daily_spin(SocialSession *s, const cJSON *f);  /* "dsp" (v10 Daily Spin progress, daily_spin.c) */
 void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_SPIN_CLAIM) */
+void sh_redeem_voucher(SocialSession *s, const cJSON *f);   /* "vr" (v10 REDEEM_VOUCHER, redeem.c) */
 void sh_wild_offer(SocialSession *s, const cJSON *f);         /* "wo" (v10 Wild Offer, wild_offer.c) */
 void sh_wild_offer_buy(SocialSession *s, const cJSON *f);     /* "wob" (purchase) */
 void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh) */

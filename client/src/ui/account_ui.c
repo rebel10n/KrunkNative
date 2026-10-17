@@ -945,6 +945,19 @@ static void twofa_res(const cJSON *frame);
 static void email_frame(const char *label, const cJSON *frame);
 static int reset_frame(const char *label, const cJSON *frame);
 
+// v10 REDEEM_VOUCHER_RESPONSE(funds, msg) ("vr", brain redeem.c): msg is the line under the code box;
+// funds (set on success) is the account's KR, the header. The granted items come with the "ua" push.
+static void redeem_voucher_frame(const cJSON *frame) {
+    HtmlElem res = html_dom_by_id("vouchRes");
+    if (res) {
+        const char *msg = str_at(frame, 2);
+        html_dom_set_text(res, msg ? msg : "");
+        html_dom_set_display(res, "block");
+    }
+    const cJSON *funds = cJSON_GetArrayItem(frame, 1);
+    if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
+}
+
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
     const char *label = str_at(frame, 0);
@@ -967,6 +980,8 @@ static void on_social(void *user, const cJSON *frame) {
         rerender_windows();
     } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
         store_ui_frame(frame);
+    } else if (!strcmp(label, "vr")) { // v10 REDEEM_VOUCHER_RESPONSE: the redeem popup's answer
+        redeem_voucher_frame(frame);
     } else if (!strcmp(label, "ttl")) { // v10: the account's titles (v10_customize.c)
         v10_customize_frame(frame);
     } else if (!strcmp(label, "dsp") || !strcmp(label, "dslr")) { // v10 Daily Spin progress / claim (v10_daily_spin.c)
@@ -1990,9 +2005,15 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         free(text);
         return 1;
     }
-    if (!strcmp(name, "redeemVoucher")) { // io.send("vr", code)
+    if (!strcmp(name, "redeemVoucher")) { // io.send("vr", code); v10 sends nothing for a blank box
         char code[64];
         read_input("redVouch", code, sizeof(code));
+        if (!code[0]) return 1;
+        HtmlElem res = html_dom_by_id("vouchRes"); // v10: "Loading..." until the answer
+        if (res) {
+            html_dom_set_text(res, "Loading...");
+            html_dom_set_display(res, "block");
+        }
         cJSON *frame = cJSON_CreateArray();
         cJSON_AddItemToArray(frame, cJSON_CreateString("vr"));
         cJSON_AddItemToArray(frame, cJSON_CreateString(code));

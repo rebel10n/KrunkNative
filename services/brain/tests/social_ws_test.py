@@ -651,6 +651,60 @@ async def scenario(base, internal_url, secret):
         check(r[1] is None and r[4][28] == 0, "password login without 2FA again")
 
 
+# the v10 redeem codes of the test config (accounts.redeem_codes): code -> the skin granted, how many
+REDEEM_CODES = {
+    "KRTICKET2": {"skin": 8067, "count": 2, "max_uses": 2},  # two Universal Starter Tickets (TICKET items)
+    "KRSINGLE": {"skin": 8067, "count": 1, "max_uses": 1},   # one use in all
+}
+
+
+async def redeem_scenario(base):
+    """v10 REDEEM_VOUCHER ("vo" -> "vr"): ["vr", code] -> ["vr", funds, msg] (funds set on success)
+    or ["vr", null, error]. A valid code grants its item (a ticket: spins with it), the account's
+    inventory is pushed ("ua"), a code redeems once per account and up to max_uses in all."""
+    ws_url = base + "/social/ws"
+    stamp = str(int(time.time()) % 100000)
+    names = ["redeem" + stamp, "redeem2" + stamp, "redeem3" + stamp]
+    async with Social(ws_url, json_mode=True) as s:
+        await s.recv("pi")
+        await s.recv("io-init")
+        r = await s.call("a", "a", 0, [names[0], "hunter22", 0], "captcha")
+        check(r[1] is None, "redeem: account registered")
+        r = await s.call("vr", "vr", "NOPE-NOT-A-CODE")
+        check(r[1] is None and isinstance(r[2], str) and r[2], "an unknown code: vr with null funds and the error: %r" % r)
+        r = await s.call("vr", "vr", "   ")
+        check(r[1] is None and isinstance(r[2], str) and r[2], "a blank code is refused: %r" % r)
+        r = await s.call("vr", "vr", " KRTICKET2 ")
+        check(isinstance(r[1], int) and isinstance(r[2], str), "a valid code (surrounding blanks trimmed): vr with funds: %r" % r)
+        ua = await s.recv("ua")
+        inv = {e["ind"]: e["cnt"] for e in ((ua[1] or [None] * 11)[10] or [])}
+        check(inv.get(8067) == 2, "the code's two tickets are in the inventory: %r" % inv)
+        r = await s.call("spin", "spin", None, 8067, False)
+        check(r[1] is None and r[5] == 8067, "a redeemed ticket spins its own wheel, one ticket goes: %r" % r)
+        r = await s.call("vr", "vr", "KRTICKET2")
+        check(r[1] is None and isinstance(r[2], str) and r[2], "a code is redeemed once per account: %r" % r)
+    async with Social(ws_url, json_mode=True) as s:
+        await s.recv("pi")
+        await s.recv("io-init")
+        r = await s.call("a", "a", 0, [names[1], "hunter22", 0], "captcha")
+        check(r[1] is None, "redeem: second account registered")
+        r = await s.call("vr", "vr", "KRSINGLE")
+        check(isinstance(r[1], int) and isinstance(r[2], str), "a single-use code: vr with funds: %r" % r)
+        await s.recv("ua")
+    async with Social(ws_url, json_mode=True) as s:
+        await s.recv("pi")
+        await s.recv("io-init")
+        r = await s.call("a", "a", 0, [names[2], "hunter22", 0], "captcha")
+        check(r[1] is None, "redeem: third account registered")
+        r = await s.call("vr", "vr", "KRSINGLE")
+        check(r[1] is None and isinstance(r[2], str) and r[2], "a code used up (max_uses) is refused: %r" % r)
+    async with Social(ws_url, json_mode=True) as s:
+        await s.recv("pi")
+        await s.recv("io-init")
+        r = await s.call("vr", "vr", "KRTICKET2")
+        check(r[1] is None and isinstance(r[2], str) and r[2], "a guest cannot redeem: %r" % r)
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -694,7 +748,7 @@ def main():
                     "password_iterations": 10000, "login_throttle_s": 1, "starting_kr": 1000,
                      "gift_fee_percent": 0, "gift_min_level": 0, "market_fee_bypass": 100,
                      "market_fee_percent": 5, "market_min_level": 0, "sale_grace_s": 0, "trade_min_level": 0, "skins_file": os.path.join(root, "assets", "skins.json"),
-                     "leaderboard_cache_s": 0},
+                     "leaderboard_cache_s": 0, "redeem_codes": REDEEM_CODES},
     }
     tmp = tempfile.mkdtemp(prefix="kn-svcacc-test-")
     cfg_path = os.path.join(tmp, "config.json")
@@ -722,6 +776,7 @@ def main():
             raise RuntimeError("kn_brain did not start listening")
         base = "ws://127.0.0.1:%d" % port
         asyncio.run(scenario(base, base + "/mm/internal/ws", secret))
+        asyncio.run(redeem_scenario(base))
         rc = 1 if FAILS else 0
     except Exception as e:  # noqa: BLE001
         print("FAIL exception: %r" % (e,))

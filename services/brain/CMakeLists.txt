@@ -32,6 +32,7 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/store_spins.c        # v10 wheels and item pools (shared/include/store_spins.h)
     ../../shared/src/store_spins_table.c  # generated: gapi /data/spins (tools/ui-import/gen_viewer_store.js)
     daily_spin.c                    # v10 Daily Spin ("dsp" / "dsl")
+    redeem.c                        # v10 voucher codes ("vr": accounts.redeem_codes)
     wild_offer.c                    # v10 Wild Offers ("wo" / "wob" / "wor")
     # v10 double XP: the end-screen 2x XP claim ("rqdxp"), the weekend schedules and the offer (0341_double_xp)
     db_double_xp.c                  # the pure rules: ../../shared/src/double_xp.c (every shared/src/*.c is in the brain)

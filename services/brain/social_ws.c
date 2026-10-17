@@ -732,6 +732,7 @@ static const SocialRoute k_routes[] = {
     {"ttl", sh_titles},                 /* v10: the account's titles (v10_customize.c) */
     {"dsp", sh_daily_spin},             /* v10 Daily Spin progress (daily_spin.c) */
     {"dsl", sh_daily_spin_claim},       /* v10 DAILY_SPIN_CLAIM -> "dslr" */
+    {"vr", sh_redeem_voucher},          /* v10 REDEEM_VOUCHER -> "vr" (redeem.c) */
     {"wo", sh_wild_offer},              /* v10 shop.getWildOffer (wild_offer.c) */
     {"wob", sh_wild_offer_buy},         /* v10 shop.purchaseWildOffer */
     {"wor", sh_wild_offer_refresh},     /* v10 shop.refreshWildOffer */
@@ -867,6 +868,7 @@ static const LabelClass k_label_class[] = {
     {"clm", RC_WRITE, ANS_REPLY}, {"bdg", RC_WRITE, ANS_REPLY}, {"cbdg", RC_WRITE, ANS_REPLY},
     {"bpclm", RC_WRITE, ANS_REPLY}, {"bpclmAll", RC_WRITE, ANS_REPLY}, {"xstbp", RC_WRITE, ANS_REPLY},
     {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
+    {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
@@ -1008,6 +1010,8 @@ static void answer(SocialSession *s, const cJSON *frame, RateKind kind, int64_t 
         social_send_n(s, "eb", 1, o);
     } else if (label && !strcmp(label, "a") && refused) {
         send_auth_error(s, msg);
+    } else if (label && !strcmp(label, "vr")) { /* v10 REDEEM_VOUCHER_RESPONSE: (funds, error) */
+        social_send_n(s, "vr", 2, cJSON_CreateNull(), cJSON_CreateString(msg));
     } else {
         social_error(s, msg);
     }
