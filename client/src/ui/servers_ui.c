@@ -2838,9 +2838,18 @@ char *servers_window_gen(const int id, const char **header) {
     // gen() (v10 windows[1]): within serverBrowserRate the list is not asked again, the re-renders the
     // other answers cause included; while the first answer is in flight, the loading text
     if (now_ms() - g_last_load_ms < SERVER_BROWSER_RATE_MS) return g_loaded ? gen_list() : loading_html();
-    g_last_load_ms = now_ms();
     g_loaded = 0;
-    mm_get("/mm/game-list?hostname=krunknative", on_game_list, NULL);
+    if (!mm_get("/mm/game-list?hostname=krunknative", on_game_list, NULL)) {
+        // refused by the brain gate (krunker.io is the active backend: no brain request goes out, backend.h) or not
+        // queued: no answer will come, so the list is what the finder has (tab_lists: the krunk.io tab's finder
+        // servers), not LOADING. The brain's lobbies of an earlier load go too: they are not reachable from here.
+        // The rate stamp is not set, so the next render asks again (the gate may be open by then).
+        cJSON_Delete(g_games);
+        g_games = NULL;
+        g_loaded = 1;
+        return gen_list();
+    }
+    g_last_load_ms = now_ms();
     mm_get("/mm/ping-list", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
     backend_http_get("/api/player-count", on_player_count, NULL);
     return loading_html();

@@ -126,7 +126,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
-        "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -487,6 +487,10 @@ class Stub:
         # game-list rows added to the stub's own lobbies
         self.ping_list = None
         self.extra_games = []
+        # the server list runs (run_native_kio_list): the Box Office finder's servers (GET /servers) and the brain's
+        # lobbies (GET /brain/mm/game-list: the brain URL is <stub>/brain, so the finder URL is not under it)
+        self.finder_servers = None
+        self.brain_games = None
 
     def speak(self, live):
         self.live = live
@@ -514,6 +518,10 @@ class Stub:
                     body, ctype = tok.encode(), "text/plain"
                 elif u.path == "/ping-list" and stub.ping_list is not None:  # krunker.io's region ping hosts (the TLS run)
                     body, ctype = json.dumps(stub.ping_list).encode(), "application/json"
+                elif u.path == "/servers" and stub.finder_servers is not None:  # the server finder (KRUNKNATIVE_FINDER_URL)
+                    body, ctype = json.dumps({"servers": stub.finder_servers}).encode(), "application/json"
+                elif u.path == "/brain/mm/game-list" and stub.brain_games is not None:  # the brain's lobbies (the brain URL)
+                    body, ctype = json.dumps({"success": True, "totalPlayerCount": 4, "games": stub.brain_games}).encode(), "application/json"
                 elif u.path == "/game-list" and stub.lobbies is not None:  # the exclude runs' lobbies
                     stub.list_requests += 1
                     if stub.list_fail < 0 or stub.list_requests <= stub.list_fail:
@@ -1696,7 +1704,8 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
     env["KRUNKNATIVE_KRUNKER_BUILD_CACHE"] = os.path.join(WORK, label + "-build-cache")
     if stub.published:
         env["KRUNKNATIVE_KRUNKER_BUILD_URL"] = build_url(stub)
-    env.update(extra_env)
+    # extra_env may be a function of the stub (the URLs that name its own port: the brain's, the finder's)
+    env.update(extra_env(stub) if callable(extra_env) else extra_env)
     out = open(log, "w")
     p = subprocess.Popen([*wrap, "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
@@ -3006,6 +3015,93 @@ def run_native_kio_tls():
           "[krunker] lobby row pings measured: 2 regions" in text, [l for l in lines if "pings measured" in l][-2:])
 
 
+FINDER_ROOM, BRAIN_ROOM = "FinderAlphaRoom", "BrainBravoRoom"  # the two Box Office rows' names (grep needles)
+
+
+def run_native_kio_list():
+    """Both tabs of the Servers window list servers whatever the session's backend (servers_ui.c servers_window_gen,
+    tab_lists). "list-krunker": the session is on krunker.io (an official game joined, captcha skipped): the brain is
+    not reachable from there (its requests are gated, backend.h), so no brain request goes out and the krunk.io tab is
+    not LOADING: it lists the finder's Box Office server; krunker.io's tab lists its official lobbies.
+    "list-offline": the session is on krunk.io (--offline) with the brain answering: the krunk.io tab lists the brain's
+    lobby and the finder's server (two groups), krunker.io's tab its official lobbies. The brain URL is <stub>/brain
+    and the finder's <stub>/servers, so the gate's prefix match leaves the finder alone."""
+    finder = [{"host": "127.0.0.1", "port": 7201, "name": FINDER_ROOM, "map": "Kanji", "region": "de-fra", "players": 2, "max": 8, "mode": 0}]
+    brain = [["BOHOST:1", "us-nj", 2, 8, {"i": "Kanji", "g": 0, "cs": True, "h": BRAIN_ROOM, "host": "127.0.0.1", "port": 7101}, 240]]
+
+    def steps_for():
+        steps = ["0 menu", "300 call showWindow 2", "3000 call windows.1.switchTab 0", "3100 nodes @hdrs0 [id=serverHolder] .setHed",
+                 "3110 text @ld0 [id=menuWindow]"]
+        t = 3200
+        for i in range(3):  # krunk.io's groups in list order (a group index past the last one opens nothing)
+            steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @f{i} {FINDER_ROOM} [id=serverHolder] .settNameIn",
+                      f"{t + 60} grep @b{i} {BRAIN_ROOM} [id=serverHolder] .settNameIn"]
+            t += 150
+        steps += [f"{t} call windows.1.switchTab 1", f"{t + 50} nodes @hdrs1 [id=serverHolder] .setHed",
+                  f"{t + 60} nodes @kiohdr1 [id=serverHolder] .kioHed", f"{t + 100} quit"]
+        return "\n".join(steps) + "\n"
+
+    def setup(st):
+        st.finder_servers, st.brain_games = finder, brain
+
+    def hits_of(text):
+        return {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\w+) needle=\S+ n=\d+ hits=(\d+)", text)}
+
+    def krunk_tab_checks(label, text, lines):
+        """The krunk.io tab: its groups hold the finder's room (and the brain's, when it answers); never LOADING."""
+        ld = re.search(r"@ld0 n=\d+ checked=\d value=\S* text=(.*)", text)
+        check(f"{label}: the krunk.io tab is not on LOADING (its list is the finder's servers, not a wait for the brain)",
+              ld is not None and "LOADING" not in ld.group(1), ld.group(1)[:200] if ld else text[-300:])
+        hdrs0 = re.search(r"nodes t=\d+ @hdrs0 elements=\d+ match=(\d+)", text)
+        hits = hits_of(text)
+        finder_groups = [i for i in range(3) if hits.get(f"f{i}")]
+        brain_groups = [i for i in range(3) if hits.get(f"b{i}")]
+        check(f"{label}: the krunk.io tab lists the finder's Box Office server (in one group)",
+              len(finder_groups) == 1 and hits.get(f"f{finder_groups[0]}") == 1, (hits, hdrs0 and hdrs0.group(0)))
+        return hdrs0, finder_groups, brain_groups
+
+    def krunker_tab_checks(label, text):
+        hdrs1 = re.search(r"nodes t=\d+ @hdrs1 elements=\d+ match=(\d+)", text)
+        kiohdr1 = re.search(r"nodes t=\d+ @kiohdr1 elements=\d+ match=(\d+)", text)
+        check(f"{label}: krunker.io's tab lists its official lobbies (groups of its own)",
+              kiohdr1 and int(kiohdr1.group(1)) >= 1 and hdrs1 and int(hdrs1.group(1)) >= 1,
+              (hdrs1 and hdrs1.group(0), kiohdr1 and kiohdr1.group(0)))
+
+    # the session on krunker.io: the default run's official game, its captcha skipped (the stub lets the first seek through)
+    label = "native-kio-list-krunker"
+    def krunker_setup(st):
+        setup(st)
+        st.captcha_free = True
+    stub, p, out, log = launch_native(label, steps_for(), lambda st: {
+        "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port, "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % st.mm_port},
+        stub_setup=krunker_setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the session is on krunker.io (the official game's socket opened)", len(stub.ws_paths) >= 1, stub.ws_paths[:2])
+    # (the social socket's upgrade is logged too; the requests the gate covers are the brain's /mm and /api ones)
+    brain_asked = [pth for pth, _, _ in stub.http_log if pth.startswith(("/brain/mm/", "/brain/api/", "/brain/streams/"))]
+    check(f"{label}: no brain request went out (the gate refused it)", not brain_asked and
+          "[backend] brain request not sent: the active backend is krunker.io" in text, (brain_asked, [l for l in lines if "brain request" in l][:2]))
+    krunk_tab_checks(label, text, lines)
+    krunker_tab_checks(label, text)
+
+    # the session on krunk.io: no official game; the brain answers, the finder's server is the second group
+    label = "native-kio-list-offline"
+    stub, p, out, log = launch_native(label, steps_for(), lambda st: {
+        "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port, "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % st.mm_port},
+        stub_setup=setup, args=("--offline",))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the brain was asked for its lobbies (the session is on krunk.io)",
+          any(pth == "/brain/mm/game-list" for pth, _, _ in stub.http_log), [pth for pth, _, _ in stub.http_log][:8])
+    hdrs0, finder_groups, brain_groups = krunk_tab_checks(label, text, lines)
+    check(f"{label}: the krunk.io tab lists the brain's lobby too (in one group of its own)",
+          len(brain_groups) == 1 and not set(brain_groups) & set(finder_groups), (brain_groups, finder_groups))
+    check(f"{label}: two groups on the krunk.io tab (the brain's region, the finder's)",
+          hdrs0 and int(hdrs0.group(1)) == 2, hdrs0 and hdrs0.group(0))
+    krunker_tab_checks(label, text)
+
+
 BAD_MAP_INDEX = 999  # past krunker_maps.h's table, not in the (private) cache, and the maps API does not answer
 
 
@@ -4209,6 +4305,7 @@ def main():
         run_native_lobby()
         run_native_kio_groups()
         run_native_kio_tls()
+        run_native_kio_list()
         run_native_badmap()
         run_native_kick()
         run_native_fx()
@@ -4264,6 +4361,8 @@ def main():
         run_native_kio_groups()
     if ONLY == "tls" and os.path.isfile(f"{BUILD}/client_bin"):  # just the official lobbies of a region whose ping host fails TLS
         run_native_kio_tls()
+    if ONLY == "list" and os.path.isfile(f"{BUILD}/client_bin"):  # just the Servers window's lists on both backends (the finder)
+        run_native_kio_list()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
