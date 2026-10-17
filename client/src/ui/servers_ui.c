@@ -38,7 +38,7 @@
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
 #include <strike_ui.h>       // Krunker Strike's own server password prompt (strike_menu.c)
-#include <recent_lobbies.h>  // Find New Game / Quick Match / quick join never land back in the lobby they leave
+#include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
 #include <strings.h>
@@ -78,7 +78,7 @@ static double g_start_time;
 static char g_region[32];        // region id the client seeks in
 static char g_exclude_game[160]; // v10 Quick Match: the next seek's excludeGame (the lobby it leaves)
 // the lobbies (game ids) and servers (host:port, finder / Strike) this client was in lately, most
-// recent first: Find New Game / Quick Match send them as excludeRecent / the finder's exclude, quick join tries
+// recent first: F4 / Quick Match send them as excludeRecent / the finder's exclude, quick join tries
 // them last, so a new seek never bounces between the last two (recent_lobbies.h)
 static RecentLobbies g_recent_games, g_recent_servers;
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
@@ -88,7 +88,7 @@ static int g_director_mode;      // Krunker Strike: the director matchmakes at s
 static char g_strike_code[16];   // the private lobby code of this session ("" = public)
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
 static char g_account_game[160]; // AccountRequired: the lobby a guest was refused (joined after login)
-// Find New Game / Quick Match (servers_ui_find_new_game): the seek in flight is one, made
+// Find New Game (F4) / Quick Match (servers_ui_find_new_game): the seek in flight is one, made
 // from this lobby (restored when it finds nothing: the player stays in the game, told by a toast),
 // and with server type Both an official krunker.io lobby is the fallback
 static int g_find_seek, g_find_both;
@@ -826,7 +826,7 @@ static void on_strike_finder(void *user, const int status, const char *body, con
         const char *flavor = cJSON_GetStringValue(cJSON_GetObjectItem(srv, "flavor"));
         if (!flavor || strcmp(flavor, "strike") || cJSON_IsTrue(cJSON_GetObjectItem(srv, "password")) || players >= max) continue;
         if (!cJSON_IsString(cJSON_GetObjectItem(srv, "host"))) continue;
-        // Find New Game / Quick Match: a server this client was not in lately first (also with a finder that
+        // F4 / Quick Match: a server this client was not in lately first (also with a finder that
         // ignores ?exclude=), then the older recent ones; the fullest among equals
         char server[RECENT_LOBBY_ID_MAX];
         snprintf(server, sizeof(server), "%s:%d", cJSON_GetStringValue(cJSON_GetObjectItem(srv, "host")),
@@ -864,7 +864,7 @@ static int strike_finder_seek(const char *error) {
     char url[2048];
     const int n = snprintf(url, sizeof(url), "%s%cflavor=strike&space=1", finder, strchr(finder, '?') ? '&' : '?');
     if (g_find_seek && g_recent_servers.count && n > 0 && (size_t) n < sizeof(url)) {
-        // Find New Game / Quick Match: the servers it leaves (this one and the recent ones), listed only when
+        // F4 / Quick Match: the servers it leaves (this one and the recent ones), listed only when
         // nothing else has room (finder.h ?exclude=)
         char recent[RECENT_LOBBIES_MAX * RECENT_LOBBY_ID_MAX], enc[sizeof(url)];
         recent_lobbies_join(&g_recent_servers, NULL, recent, sizeof(recent));
@@ -1139,7 +1139,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
 
 static void start_seek(const char *game_id);
 
-// Auto Seek on Launch (seek_prefs.h): the launch's one seek, the one Find New Game runs for the same Quickplay
+// Auto Seek on Launch (seek_prefs.h): the launch's one seek, the one F4 runs for the same Quickplay
 // settings. Official (or Both without a matchmaker) is krunker.io's list; ours is the startup seek
 // (start_seek: its dataQuery carries the Seek Mode / Seek Map). Both = ours when one matches, else
 // an official lobby (on_seek's Find New Game fallback, with no lobby to stay in).
@@ -4031,7 +4031,7 @@ int servers_ui_quick_match(void) {
     return servers_ui_find_new_game();
 }
 
-// Find New Game (Krunker's client) and Quick Match: Settings > Quickplay decides where
+// Find New Game (F4, Krunker's client) and Quick Match: Settings > Quickplay decides where
 // (seek_prefs.h): KrunkNative = a new seek here excluding this lobby and the recent ones
 // (recent_lobbies.h; with the seek mode / map);
 // Official = an official krunker.io lobby, joined in this client (native; krunker_lobbies_open, the
@@ -4052,28 +4052,6 @@ int servers_ui_find_new_game(void) {
     g_find_both = type == SEEK_SERVERS_BOTH;
     snprintf(g_find_prev_game, sizeof(g_find_prev_game), "%s", g_game_id);
     return quick_match_seek();
-}
-
-// F4 in game (ui_mod_keys.c): leave the game and show the main menu at once. The session ends the
-// way the console's disconnect ends it (PIN_IDLE: nothing reconnects or seeks by itself); the game's
-// chat, feed, players and end screen go now (client_leave_game, no toast); an offline game stops.
-// The menu comes up with Play and no error screen: the stop's FAILED is the player's own leave
-// (menu_ui.c menu_leave_to_menu), and Play seeks a game again. 0 = no game to leave (in the menu).
-int servers_ui_leave_to_menu(Client *client) {
-    if (!client || !client->in_game) return 0;
-    printf("[mm] F4: left the game for the menu\n");
-    if (g_pin != PIN_IDLE) g_last_direct = g_pin == PIN_DIRECT || !g_brain_mode || !g_game_id[0];
-    g_pin = PIN_IDLE;
-    g_left_offline = client->offline; // as the disconnect: `reconnect` starts the offline game again
-    page_game_url(NULL, NULL);
-    client_leave_game(client); // the game's chat, feed, players and end screen go now
-    menu_leave_to_menu(client->offline); // the menu first: the stop below must not show an error screen
-    if (client->offline) local_game_stop(client);
-    client_net_stop(client, "Left the game");
-    client->in_game = 0;
-    client->spawn_requested = 0;
-    client->menu_play_pending = 0;
-    return 1;
 }
 
 // --connect with a brain: the session reaches the direct server through JOIN, so an

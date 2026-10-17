@@ -49,7 +49,7 @@
 //
 // Switches:
 //   Official games are joined in this client by default: a click on an official lobby of the server
-//       browser, Quick Match / Find New Game with Settings > Quickplay > Server Type Official or
+//       browser, Quick Match / Find New Game (F4) with Settings > Quickplay > Server Type Official or
 //       Both (krunker_lobbies_open), and --krunker / ?krunker= below.
 //   KRUNKNATIVE_KRUNKER_JOIN=browser (native) / ?krunkerJoin=browser (web)   the opt-out: lobby clicks
 //       and seeks open https://krunker.io/?game=<id> in the system browser instead, as before the
@@ -93,7 +93,7 @@ int krunker_net_join(Client *client, const char *game_id, const char *region);
 // player was in. Only when the matchmaker says it is gone (InvalidGameId) or full (GameFull): a notice
 // says so and the matchmaker picks another game in the region (no excludeGame). 1 = started.
 int krunker_net_reload_join(Client *client, const char *game_id, const char *region);
-// Find New Game for an official game (Find New Game / Quick Match): use_list = 1 first asks <matchmaker>/game-list
+// Find New Game for an official game (F4 / Quick Match): use_list = 1 first asks <matchmaker>/game-list
 // and joins the busiest public game with room in the same region (region NULL: the one the player is
 // in) for the saved seek mode / map that is not one of the recent games (recent_lobbies.h). Without
 // such a game (or a list) it seeks the way krunker.io's client does (backToOrigin's ?exclude=):

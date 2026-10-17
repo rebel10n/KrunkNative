@@ -1,5 +1,5 @@
 #pragma once
-// The lobbies this client was in lately, most recent first: Find New Game, Quick Match and
+// The lobbies this client was in lately, most recent first: Find New Game (F4), Quick Match and
 // quick join exclude them so a new seek never lands back in the lobby it leaves, nor bounces
 // between the last two. Only when nothing else exists do they come back (the older ones before the
 // one the player is in). Used for our matchmaker (servers_ui.c: excludeGame + excludeRecent, the

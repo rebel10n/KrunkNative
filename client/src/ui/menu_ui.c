@@ -68,9 +68,6 @@ static char g_connect_code[8]; // Krunker's error code on the connection error s
 static int g_connect_close_code;        // ... its "Code:" (a lost session's WebSocket close code), 0 none
 static char g_connect_close_reason[24]; // ... its "Reason:" (a lost session's cause), "" = "0"
 static int g_error_screen;      // the Lost Connection screen shows (menu_apply_error_screen)
-// F4 left the game (menu_leave_to_menu): no session, no error screen; Play starts a game again
-// (menu_play). Cleared by the next connect or connected session.
-static int g_left, g_left_offline;
 
 // Krunker v7.1.4 idle kick (index.js gameLoop + config.kickTimer 120000): while the menu is
 // up (menuHolder shown), not spectating, on a production page, not the game host
@@ -1001,8 +998,6 @@ void menu_update_instructions(void) {
                 sb_append(&sb, "</div>");
             }
         }
-    } else if (g_left && !error) {
-        sb_append(&sb, I18N("app.play", "CLICK TO PLAY")); // F4 left the game: Play starts one again
     } else if (!error) {
         sb_append(&sb, MENU_LOAD_SPINNER);
     }
@@ -1462,12 +1457,9 @@ int menu_loading(void) {
     return g_connecting || menu_boot_waiting();
 }
 
-int menu_left_game(void) { return g_left; }
-
 // Starts the spinner for a connect to a server whose game (map) is `map` ("" or NULL: not known).
 // Idempotent: a later call (the lobby's map once the join is answered) only updates the text.
 void menu_show_connecting_map(const char *map) {
-    g_left = 0; // a connect is under way: the spinner, not Play
     snprintf(g_connect_map, sizeof(g_connect_map), "%s", map ? map : "");
     if (!g_connecting) {
         g_connecting = 1;
@@ -1484,30 +1476,10 @@ void menu_show_connecting_map(const char *map) {
     menu_update_instructions();
 }
 
-// F4 in game (servers_ui_leave_to_menu): the game is left and the session ended on purpose, and the
-// main menu comes up with Play at once: no spinner, no Lost Connection screen, no chat (the game's
-// chat went with client_leave_game). The menu stays open; Play (menu_play) starts a game again.
-void menu_leave_to_menu(const int offline) {
-    if (!g_ui.client) return;
-    g_left = 1;
-    g_left_offline = offline;
-    g_connecting = 0;
-    g_ui.connected = 0;
-    g_ui.ready = 0;
-    g_ui.connect_error[0] = 0;
-    g_connect_map[0] = 0;
-    g_ui.client->menu_connect_sent = 0;
-    g_ui.client->menu_connect_error[0] = 0;
-    client_set_menu_open(g_ui.client, 1);
-    menu_update_top_bar();
-    menu_update_instructions();
-}
-
 // The old `connect {connected, error}` event, applied directly.
 static void menu_set_connect(const int connected, const char *error, const char *code) {
     Client *client = g_ui.client;
     g_connecting = 0;
-    if (connected) g_left = 0;
     g_ui.connected = !!connected;
     if (connected) g_ui.connect_error[0] = 0;
     else snprintf(g_ui.connect_error, sizeof(g_ui.connect_error), "%s", error && error[0] ? error : CONNECT_ERROR_DEFAULT);
@@ -1572,17 +1544,7 @@ static void menu_request_play(const int offline) {
 }
 
 void menu_play(void) {
-    if (!can_play()) {
-        // F4 left the game (no session): Play starts one again. An offline game restarts (Play
-        // Offline); otherwise a fresh seek (menu_retry_connect: the brain's Quickplay, or the last
-        // server) whose spinner shows here until its join, then Play enters the game as usual.
-        if (g_left && g_ui.client && !client_is_connected(g_ui.client)) {
-            g_left = 0;
-            if (g_left_offline) menu_host_offline();
-            else menu_retry_connect();
-        }
-        return;
-    }
+    if (!can_play()) return;
     // A click while the controls are off is CONTROLS.toggle(true); once the end screen shows its
     // results, CONTROLS.disable() has locked them, so it only runs UI.toggleEndScreen(): the
     // results come back over the menu and the pointer stays free for them (no lock request).
@@ -1672,11 +1634,6 @@ static void menu_poll_connection(Client *client) {
 
     // a session that had been joined (its INIT made the menu ready, or its players exist), as
     // opposed to a connect the server refused (a drain answers that with 004004 too)
-    if (g_left && status == NET_STATUS_FAILED) { // F4 left the game: the session ended on purpose, no error screen
-        client->net_connected = 0;
-        online_mode_session_ended();
-        return;
-    }
     const int had_session = status == NET_STATUS_FAILED && !client->offline &&
                             (g_ui.ready || client->me != NULL || client->game.player_count > 0);
     if (status == NET_STATUS_CONNECTED) {

@@ -16,16 +16,16 @@ kn_proto.free_ports().
     serves one with one; dataQuery dsmo / dsma pick the matching node, NoMatchingServers when none;
     server_bin refuses a forged and an expired ticket, and a reused ticket replaces the first
     connection (one seat per ticket)
-  client 1: a headless client_bin gets a token over HTTP, joins with the ticket; F4 leaves the game for
-    the main menu at once (no session, no error screen), and Play starts a game again (a fresh seek)
+  client 1: a headless client_bin gets a token over HTTP, joins with the ticket; F4 = Find New
+    Game: another lobby, same process (no relaunch)
   client 2: F5 relaunches the client (the same pid: exec), which comes back into the same lobby
   client 3: Settings > General (advanced view) > Quickplay: the rows render; seek mode tdm set through setSetting persists
     (knSettings) and the next run's startup seek lands on the tdm node
-  client 4: server type Official: Find New Game opens the matching official lobby in the browser (logged with
+  client 4: server type Official: F4 opens the matching official lobby in the browser (logged with
     KRUNKNATIVE_NO_BROWSER), the Servers window shows the krunker.io section after ours (the server
     type only steers seeks), a row opens its lobby; the stub was asked once (cache)
   (the proxy for krunker.io, its block page and the default server type: client_proxy_e2e.py)
-  client 5: server type Both, a mode only krunker.io plays: Find New Game falls back to the official lobby
+  client 5: server type Both, a mode only krunker.io plays: F4 falls back to the official lobby
   client 6: Quick Join on the krunker.io group joins its first lobby in-client (not a seek)
   client 7: krunker.io's official customs / custom games are their own krunker.io groups, never Box Office's
     (the tabs: krunk.io holds Box Office's groups, krunker.io's own tab holds krunker.io's Custom Games first)
@@ -116,31 +116,6 @@ def wait_for(fn, secs=10.0):
             pass
         time.sleep(0.1)
     return None
-
-
-def post(port, path, body):
-    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status, json.loads(r.read() or b"null")
-    except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read() or b"null")
-
-
-def account_cfg(port, name):
-    """a client config dir signed in as a new account (the saved session the client restores at launch)"""
-    user = "f4acct%d" % (os.getpid() % 100000)
-    st, reg = post(port, "/auth/register", {"username": user, "password": "pw-f4-%d" % os.getpid()})
-    token = reg.get("token", "") if isinstance(reg, dict) else ""
-    if st != 200 or not token:
-        return None
-    cfg = os.path.join(WORK, name + "-cfg")
-    os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
-    for key, value in (("krunker_username", user), ("krunker_token", token)):
-        with open(os.path.join(cfg, "krunknative", key + ".json"), "w") as f:
-            f.write(value)
-    return cfg
 
 
 def http(port, path, raw=False):
@@ -340,89 +315,33 @@ def in_game(st):
     return bool(st) and st[-1][2] == "0" and int(st[-1][0]) > 0 and st[-1][1] != "-"
 
 
-# the probe times after F4: every 20 ms through the leave, then every 100 ms through the wait for Play,
-# the seek and the join (Play is clicked at 6000, 9000 and 12000). A probe after another input event
-# runs in its own frame (input_script.c); a no-op `look 0 0` between two probes keeps them apart, so
-# each probe samples a frame of its own instead of all of them sharing one frame after a stall.
-F4_TIMES = list(range(2060, 2501, 20)) + list(range(5000, 12001, 100))
-
-
-def f4_probes():
-    """vis probes after F4, one per frame: the menu, the game HUD, the chat holder and the chat box."""
-    out = []
-    for t in F4_TIMES:
-        out.append("%d look 0 0\n" % (t - 1))
-        out.append("%d vis @f4-%d inGameUI menuHolder chatUIHolder chatUI chatHolder chatList endUI\n" % (t, t))
-    return "".join(out)
-
-
-def f4_page(text):
-    """[(script-time, {element: '0'|'1'|'-'})] of the F4 probes, in script order."""
-    out = []
-    for t, rest in re.findall(r"vis t=\S+ @f4-(\d+) ([^\n]*)", text):
-        out.append((int(t), dict(kv.split("=", 1) for kv in rest.split() if "=" in kv)))
-    return out
-
-
-def client_f4(port, game_a, game_b, cfg=None):
+def client_f4(port, game_a, game_b):
     # both nodes' modes picked (Settings > Quickplay): with none picked a seek takes only the public rotation
-    # (seek_prefs.h), which the tdm node is not in, so Play's seek could not find the other lobby
-    cfg = cfg or os.path.join(WORK, "f4-cfg")
+    # (seek_prefs.h), which the tdm node is not in, so F4 would have no other lobby
+    cfg = os.path.join(WORK, "f4-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     with open(os.path.join(cfg, "krunknative", "knSettings.json"), "w") as f:
         json.dump({"seek_modes": "%d,%d" % (game_a[4]["mode"], game_b[4]["mode"])}, f)
-    # F4 in game leaves the game for the main menu at once: the menu is up (no game HUD, no chat, no
-    # spinner) and offers Play. Nothing joins by itself; Play starts a game again (a fresh seek).
-    # The join lands late on a loaded machine, so Play is pressed three times (a click on the
-    # spinner does nothing; once the lobby is up, the first one that lands enters it).
-    # signed in as an account (cfg): an account sees the chat on the menu (v10 hideChatIfGuestUser), so
-    # the chat must stay hidden for it too until the game is in game
-    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n" + f4_probes() +
-                    "2600 nodes @f4-chat [id=chatList] .chatItem\n"
-                    "2600 grep @f4-play CLICK [id=instructions]\n"
-                    + "".join("%d clickid instructionHolder\n" % t for t in range(6000, 20001, 1000)) +
-                    "21000 call copyInviteLink\n23000 state\n24000 quit\n", cfg=cfg)
+    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n9000 respawn\n12000 call copyInviteLink\n15000 state\n16000 quit\n", cfg=cfg)
     done = finish(p, 90)
     text = read_log(log)
     js = joined(text)
-    page = f4_page(text)
-    check("C1: F4 leaves the game: the main menu is up at once (menuHolder=1, inGameUI=0)",
-          bool(page) and page[0][1].get("menuHolder") == "1" and page[0][1].get("inGameUI") == "0", str(page[:2]))
-    waiting = [(t, el) for t, el in page if t < 6000]  # F4 until Play is clicked
-    bad = [t for t, el in waiting if el.get("inGameUI") != "0" or el.get("menuHolder") != "1"]
-    check("C1: and stays so until Play (no game HUD, no grey page)", bool(page) and not bad,
-          "not the menu at %s" % bad[:5])
-    shown = [t for t, el in page if el.get("inGameUI") != "1" and any(el.get(k) == "1" for k in ("chatUIHolder", "chatUI", "chatHolder"))]
-    check("C1: no chat bar from F4 until the game is in game (menu, Play, the seek and the join)",
-          bool(page) and not shown, "chat shown at script times %s" % shown[:8])
-    chat = re.search(r"\[input_script\] nodes t=\d+ @f4-chat elements=\d+ match=(\d+)", text)
-    signed = "[account] logged in as" in text if cfg else True
-    check("C1: the client ran signed in as an account" if cfg else "C1: (guest run)", signed, "")
-    check("C1: the game's chat is cleared (no chat rows left)", bool(chat) and chat.group(1) == "0",
-          chat.group(0) if chat else "no probe")
-    cta = re.search(r"\[input_script\] grep t=\d+ @f4-play needle=CLICK n=\d+ hits=(\d+)", text)
-    check("C1: the menu offers Play (CLICK TO PLAY, no spinner)", bool(cta) and cta.group(1) == "1",
-          cta.group(0) if cta else "no probe")
-    left = text.find("[mm] F4: left the game for the menu")
-    check("C1: F4 left the game (the session ended, no error screen)", left >= 0 and "[client] left the game" in text
-          and "Lost Connection" not in text and "error screen:" not in text[left:], str(left))
-    between = text[left:text.find("@f4-chat")] if left >= 0 and "@f4-chat" in text else ""
-    check("C1: and joined nothing by itself (only Play does)", left >= 0 and "[mm] joining" not in between,
-          between[:200])
-    after = [m.start() for m in re.finditer(r"\[mm\] joining (\S+) at ", text) if left >= 0 and m.start() > left]
-    check("C1: Play starts a game again (a fresh seek and a join)", len(after) >= 1, str(js))
     # a KrunkNative match: the Invite link is ours (the public origin, the lobby's short ?game= id)
     inv = re.search(r"\[party\] invite link copied: (\S+)", text)
     check("C1: Invite in a KrunkNative match copies our link", inv is not None and inv.group(1).startswith("https://krunk.io/?game=")
           and "krunker.io/?game=" not in inv.group(1), inv.group(1) if inv else text[-300:])
     check("C1: the client fetched a validation token over HTTP", "[mm] validation token (" in text, text[-500:])
-    check("C1: in the game after Play", in_game(states(text)), str(states(text)))
-    check("C1: in the same process (no relaunch)", done and p.returncode == 0 and "[app] reload: restarting" not in text,
+    check("C1: and joined a lobby with the ticket", len(js) >= 1 and js[0] in (game_a[0], game_b[0]), str(js))
+    check("C1: F4 seeks a new game", "[controls] F4: find new game" in text and "[mm] quick match: seeking a lobby other than" in text,
+          text[-500:])
+    check("C1: ... another lobby", len(js) == 2 and js[1] != js[0], str(js))
+    check("C1: ... in the same process (no relaunch)", done and p.returncode == 0 and "[app] reload: restarting" not in text,
           "exit %s" % p.returncode)
+    check("C1: in the game after F4", in_game(states(text)), str(states(text)))
 
 
 def client_launch(port, game_b):
-    """Auto Seek on Launch (Settings > Quickplay, on by default): the launch seeks once, the way Find New Game does,
+    """Auto Seek on Launch (Settings > Quickplay, on by default): the launch seeks once, the way F4 does,
     after the menu is up; a launch that names a lobby (KRUNKNATIVE_GAME, ?game=) does not seek."""
     p, log = client("launch", port, "0 play\n6000 state\n9000 quit\n")
     finish(p, 60)
@@ -529,7 +448,7 @@ def client_official(port, ny):
     hits = len(stub_hits)
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
-                    "1000 call backToOrigin\n4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @status [id=kioStatus]\n"
+                    "1000 down F4\n1050 up F4\n4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @status [id=kioStatus]\n"
                     "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(%d,\"]\n6200 call setExpandedRegion %d\n"
                     "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
@@ -537,7 +456,7 @@ def client_official(port, ny):
                     extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
     finish(p, 60)
     text = read_log(log)
-    check("C4: opt-out: Find New Game with Official opens the matching official lobby in the browser",
+    check("C4: opt-out: F4 with Official opens the matching official lobby in the browser",
           "[krunker] official lobby NY:bbbbb: opening https://krunker.io/?game=NY:bbbbb" in text
           and "open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb" in text, text[-600:])
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
@@ -552,8 +471,8 @@ def client_official(port, ny):
     check("C4: its rows (the open and the full lobby)", m and m.group(1) == "2", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @wired elements=\d+ match=(\d+)", text)
     check("C4: the rows open krunkerJoin(id) (the browser), not a seek", m and m.group(1) == "2", m.group(0) if m else "")
-    # Find New Game, the row and Quick Join each open the first lobby in the browser (3); none of them seeks
-    check("C4: krunkerJoin and Quick Join open their lobby in the browser (Find New Game too: 3 opens)",
+    # F4, the row and Quick Join each open the first lobby in the browser (3); none of them seeks
+    check("C4: krunkerJoin and Quick Join open their lobby in the browser (F4 too: 3 opens)",
           text.count("open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb") == 3, "")
     # (the seek's region first: /ping-list, the ping race of region_ping.h; this stub lists none)
     lists = [h for h in stub_hits[hits:] if h.startswith("/game-list")]
@@ -628,7 +547,7 @@ def client_hoist(port):
 
 def client_both(port):
     p, log = client("both", port, '0 play\n300 call setSetting "knSeekServers" "both"\n400 call setSetting "seek_modes" "%d"\n'
-                    "1000 call backToOrigin\n5000 quit\n" % MODES["kio"])
+                    "1000 down F4\n1050 up F4\n5000 quit\n" % MODES["kio"])
     finish(p, 60)
     text = read_log(log)
     check("C5: Both: no KrunkNative server plays it -> the official lobby, joined in-client (the default)",
@@ -674,7 +593,7 @@ def main():
         for g in STUB_GAMES["games"]:
             g[4]["g"] = {"Burg": MODES["a"], "Sandstorm": MODES["b"]}.get(g[4]["i"], MODES["kio"])
         protocol(port, env, node_a, node_b)
-        client_f4(port, node_a[1], node_b[1], account_cfg(port, "f4"))
+        client_f4(port, node_a[1], node_b[1])
         client_launch(port, node_b[1])
         client_f5(port)
         client_settings(port, node_b[1])
