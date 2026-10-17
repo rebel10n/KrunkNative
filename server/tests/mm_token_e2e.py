@@ -28,7 +28,7 @@ kn_proto.free_ports().
   client 5: server type Both, a mode only krunker.io plays: F4 falls back to the official lobby
   client 6: Quick Join on the krunker.io group joins its first lobby in-client (not a seek)
   client 7: krunker.io's official customs / custom games are their own krunker.io groups, never Box Office's
-    (the old browser: after ours; the mode browser's Custom Servers tab: krunker.io - Custom Games first)
+    (the tabs: krunk.io holds Box Office's groups, krunker.io's own tab holds krunker.io's Custom Games first)
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
 """
@@ -412,11 +412,11 @@ def client_official(port):
     hits = len(stub_hits)
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
-                    "1000 down F4\n1050 up F4\n4000 call showWindow 2\n6000 text @status [id=kioStatus]\n"
-                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(1,\"]\n6200 call setExpandedRegion 1\n"
+                    "1000 down F4\n1050 up F4\n4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @status [id=kioStatus]\n"
+                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[onclick*=\"quickJoinRegion(0,\"]\n6200 call setExpandedRegion 0\n"
                     "6500 nodes @rows .kioRow\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n"
-                    "6700 call quickJoinRegion 1\n7500 quit\n" % (MODES["b"], SANDSTORM),
+                    "6700 call quickJoinRegion 0\n7500 quit\n" % (MODES["b"], SANDSTORM),
                     extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
     finish(p, 60)
     text = read_log(log)
@@ -428,10 +428,11 @@ def client_official(port):
           re.search(r"@status n=1 .*text=.*KRUNKER\.IO OFFICIAL LOBBIES\s*krunker\.io servers open in your browser", text),
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
-    check("C4: the server type only steers the seek: our (tdm) group is still listed, first",
-          m and m.group(1) and "krunker.io" not in m.group(1), m.group(1) if m else "")
+    # the seek's filter (seek mode tdm on Sandstorm) leaves krunker.io's New York lobbies alone on its tab
+    check("C4: the server type only steers the seek: krunker.io's tab lists the seek's lobbies (New York) only",
+          m and "New York" in m.group(1), m.group(1) if m else "")
     m = re.search(r"nodes t=\d+ @kgroups elements=\d+ match=(\d+)", text)
-    check("C4: then one krunker.io group (New York: tdm on Sandstorm)", m and m.group(1) == "1", m.group(0) if m else "")
+    check("C4: then one krunker.io region group (New York: tdm on Sandstorm)", m and m.group(1) == "1", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
     check("C4: its rows (the open and the full lobby)", m and m.group(1) == "2", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @wired elements=\d+ match=(\d+)", text)
@@ -449,8 +450,8 @@ def client_quick_join(port):
     (NY:bbbbb; the full NY:ccccc is skipped) is joined through krunker_net, not in the browser."""
     p, log = client("quickjoin", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
-                    "4000 call showWindow 2\n6000 text @head .setHed\n6100 call setExpandedRegion 1\n"
-                    "6300 nodes @rows .kioRow\n6400 call quickJoinRegion 1\n7500 quit\n" % (MODES["b"], SANDSTORM))
+                    "4000 call showWindow 2\n4100 call windows.1.switchTab 1\n6000 text @head .setHed\n6100 call setExpandedRegion 0\n"
+                    "6300 nodes @rows .kioRow\n6400 call quickJoinRegion 0\n7500 quit\n" % (MODES["b"], SANDSTORM))
     finish(p, 60)
     text = read_log(log)
     check("C6: Quick Join on the krunker.io group joins its first lobby in-client",
@@ -459,40 +460,55 @@ def client_quick_join(port):
 
 
 def client_hoist(port):
-    """krunker.io's official customs and custom games sit in their own krunker.io groups, never in Box Office's
-    (servers_ui.c kio_group): SV:cust1, a krunker.io custom game, is in 'krunker.io - Custom Games'. Old browser:
-    Box Office's groups come first and that group holds only krunker.io rows; mode browser: its Custom Servers tab (1)."""
-    steps = "0 play\n4000 call showWindow 2\n6000 text @head .setHed\n"
-    groups = 8  # Box Office's regions, then krunker.io's groups (the test list has 3 Box Office regions)
-    for i in range(groups):  # the groups in list order: open each, count its rows and the custom game's rows
+    """The tabs (servers_ui.c tab_lists): krunker.io's official customs and custom games sit in krunker.io's own tab,
+    in its groups (kio_group: Official Customs, Custom Games, then the regions), and never on krunk.io's tab, which
+    holds Box Office's groups only. SV:cust1, a krunker.io custom game, is in 'Custom Games' on krunker.io's tab."""
+    # krunk.io's tab (the default: no official game): every group opened in turn, no krunker.io row in any
+    steps = "0 play\n4000 call showWindow 2\n6000 text @head0 .setHed\n"
+    for i in range(4):  # Box Office's regions (the test list has 3)
         t = 6100 + 200 * i
-        steps += ("%d call setExpandedRegion %d\n%d grep @cg%d Somebody's [id=serverHolder] .settNameIn\n"
+        steps += "%d call setExpandedRegion %d\n%d nodes @krows0_%d [id=serverHolder] .kioRow\n" % (t, i, t + 60, i)
+    p, log = client("hoist-krunk", port, steps + "7100 quit\n")
+    finish(p, 60)
+    text = read_log(log)
+    m = re.search(r"@head0 n=\d+ checked=\d value=\S* text=(.*)", text)
+    check("C7: krunk.io's tab: its first group is Box Office's, no krunker.io group",
+          m and "krunker.io" not in m.group(1) and "Official Customs" not in m.group(1), m.group(1) if m else "")
+    krows = [int(x) for x in re.findall(r"nodes t=\d+ @krows0_\d+ elements=\d+ match=(\d+)", text)]
+    check("C7: krunk.io's tab: no krunker.io row in its groups", krows and sum(krows) == 0, str(krows))
+    # krunker.io's tab: its groups in list order; the custom game is in one group, which holds only krunker.io rows
+    steps = "0 play\n4000 call showWindow 2\n5800 call windows.1.switchTab 1\n6000 text @head .setHed\n"
+    groups = 8
+    for i in range(groups):
+        t = 6100 + 200 * i
+        steps += ("%d call setExpandedRegion %d\n%d grep @cg%d Somebody [id=serverHolder] .settNameIn\n"
                   "%d nodes @rows%d [id=serverHolder] .settNameIn\n%d nodes @krows%d [id=serverHolder] .kioRow\n"
                   % (t, i, t + 40, i, t + 60, i, t + 80, i))
     p, log = client("hoist-old", port, steps + "%d quit\n" % (6100 + 200 * groups + 100))
     finish(p, 60)
     text = read_log(log)
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
-    check("C7: old browser: the first group is Box Office's (krunker.io's groups come after it)",
-          m and "krunker.io" not in m.group(1), m.group(1) if m else "")
+    check("C7: krunker.io's tab: the first group is its Custom Games (no Box Office group before it)",
+          m and "Custom Games" in m.group(1) and "Official Customs" not in m.group(1), m.group(1) if m else "")
     custom = [i for i in range(groups) if re.search(r"grep t=\d+ @cg%d needle=\S+ n=\d+ hits=1\b" % i, text)]
-    check("C7: old browser: the krunker.io custom game is in one group", len(custom) == 1, str(custom))
+    check("C7: krunker.io's tab: the krunker.io custom game is in one group", len(custom) == 1, str(custom))
     if custom:
         i = custom[0]
         rows = re.search(r"nodes t=\d+ @rows%d elements=\d+ match=(\d+)" % i, text)
         krows = re.search(r"nodes t=\d+ @krows%d elements=\d+ match=(\d+)" % i, text)
-        check("C7: old browser: that group holds only krunker.io rows (no Box Office game)",
+        check("C7: krunker.io's tab: that group holds only krunker.io rows (no Box Office game)",
               rows and krows and rows.group(1) == krows.group(1) == "1", "%s / %s" % (rows.group(0) if rows else "", krows.group(0) if krows else ""))
+    # the Legacy Browser setting no longer changes the groups: the krunker.io tab reads the same with it off
     p, log = client("hoist-modes", port, '0 play\n300 call setSetting "oldBrowser" "false"\n4000 call showWindow 2\n'
                     "6000 call windows.1.switchTab 1\n6100 text @head .setHed\n6200 call setExpandedRegion 0\n"
                     "6300 nodes @rows .kioRow\n7500 quit\n")
     finish(p, 60)
     text = read_log(log)
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
-    check("C7: mode browser, Custom Servers tab: the first group is krunker.io - Custom Games",
-          m and "krunker.io - Custom Games" in m.group(1), m.group(1) if m else "")
+    check("C7: Legacy Browser off, krunker.io's tab: the first group is still its Custom Games",
+          m and "Custom Games" in m.group(1), m.group(1) if m else "")
     m = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
-    check("C7: mode browser: that group holds the krunker.io custom game", m and m.group(1) == "1", m.group(0) if m else "")
+    check("C7: ... and that group holds the krunker.io custom game", m and m.group(1) == "1", m.group(0) if m else "")
 
 
 def client_both(port):

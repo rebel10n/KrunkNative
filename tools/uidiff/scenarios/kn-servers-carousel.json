@@ -202,7 +202,13 @@
       "https://user-assets.krunker.io/m115530/thumb.png": "tools/uidiff/remote/m115530-thumb.png",
       "https://user-assets.krunker.io/m158288/thumb.png": "tools/uidiff/remote/m158288-thumb.png",
       "https://user-assets.krunker.io/m101668/thumb.png": "tools/uidiff/remote/m101668-thumb.png"
-    }
+    },
+    "windowActions": [
+      [
+        "windows.1.switchTab",
+        1
+      ]
+    ]
   },
   "frames": 3,
   "note": "The Servers window with krunker.io's custom games that run published maps (c + cm): v10's carousel of them (customsInfo, PureJSCarousel) above the groups, most players first (Trench_War_H1's two lobbies summed), each slide the map's user-assets thumbnail (state.remoteImages: real thumbnails of these maps, downscaled to the slide's 265x140 in tools/uidiff/remote/), its name, players and VIETNAM_WAR's 24/7 tag. Reference: v10 with the same list and thumbnails (tools/uidiff/capture-v10-servers.js servers-carousel)"

@@ -1883,22 +1883,30 @@ static KrunkerValue config_value(const cJSON *j, KrunkerValue **pool) {
     return KRUNKER_V_NIL; // null, or a value JSON does not have
 }
 
+KrunkerHostBlock krunker_net_host_block(void) {
+    if (K.state != KS_OPEN) return KRUNKER_HOST_NOT_CONNECTED;
+    if (!krunker_account_signed_in()) return KRUNKER_HOST_GUEST; // v10's security challenge (bCpt) is not implemented
+    if (hosting.active) return KRUNKER_HOST_BUSY;
+    return KRUNKER_HOST_READY;
+}
+
 int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, void *user) {
     if (!done || !cJSON_IsObject(config)) return 0;
-    if (K.state != KS_OPEN) {
+    switch (krunker_net_host_block()) {
+    case KRUNKER_HOST_NOT_CONNECTED:
         printf("[krunker] custom game: no official connection (join an official game first)\n");
         return 0;
-    }
-    if (!krunker_account_signed_in()) {
+    case KRUNKER_HOST_GUEST:
         // v10 first asks the socket for a security challenge (rpc "bCpt", the ALTCHA answer as the request's rid);
         // krunker_link has no rpc, so a guest cannot host on krunker.io yet
         printf("[krunker] custom game: a guest cannot host on krunker.io yet (security challenge rpc bCpt not implemented);"
                " sign in to krunker.io\n");
         return 0;
-    }
-    if (hosting.active) {
+    case KRUNKER_HOST_BUSY:
         printf("[krunker] custom game: a request is already waiting for krunker.io's answer\n");
         return 0;
+    case KRUNKER_HOST_READY:
+        break;
     }
     const size_t slots = config_slots(config);
     KrunkerValue *pool = calloc(slots ? slots : 1, sizeof(*pool));

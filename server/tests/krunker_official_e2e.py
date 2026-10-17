@@ -2737,7 +2737,7 @@ def run_native_lobby():
     click seeks it, the Security Challenge modal asks; Cancel ends the join saying so; a second click
     and a pasted token join the game."""
     label = "native-lobby"
-    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
+    script = ("0 menu\n300 call showWindow 2\n350 call windows.1.switchTab 1\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
               # the KRUNKER.IO group (the last one) opened: its rows' titles
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
@@ -2802,11 +2802,12 @@ def run_native_lobby():
 
 
 def run_native_kio_groups():
-    """The Servers window's groups (servers_ui.c build_groups): krunker.io's official customs and custom games sit
-    in their own KRUNKER.IO groups (kio:official, kio:custom), its other lobbies in its region groups, all after ours.
-    Box Office's Custom Games and its region groups hold Box Office games only. Box Office's games come from
+    """The Servers window's groups (servers_ui.c build_groups) per tab: krunk.io's tab holds Box Office's lobbies only
+    (its Custom Games, then its regions), krunker.io's tab holds krunker.io's lobbies only, in their own groups:
+    Official Customs (kio:official), Custom Games (kio:custom), then its regions. Box Office's games come from
     KRUNKNATIVE_SERVER_LIST (a custom game and a Frankfurt lobby, offline: no brain), krunker.io's from the stub's
-    list. Each group is opened in turn (call setExpandedRegion i) and its rows are counted by title."""
+    list. Each group is opened in turn (call setExpandedRegion i) and its rows are counted by title; the default tab
+    is krunk.io (no official game), krunker.io's is opened with windows.1.switchTab 1."""
     label = "native-kio-groups"
     servers = os.path.join(WORK, label + "-servers.json")
     with open(servers, "w") as f:
@@ -2814,36 +2815,48 @@ def run_native_kio_groups():
             ["BOHOST:1", "de-fra", 2, 8, {"i": "Kanji", "h": "BoCustomRoom", "cs": True, "host": "127.0.0.1", "port": 7101}, 240],
             ["BOHOST:2", "de-fra", 3, 8, {"i": "Kanji", "g": 0, "host": "127.0.0.1", "port": 7102}, 240]],
             "totalPlayerCount": 5}, f)
-    steps = ["0 menu", "300 call showWindow 2", "3000 nodes @hdrs [id=serverHolder] .setHed", "3010 nodes @kiohdr [id=serverHolder] .kioHed"]
-    for i in range(6):  # the groups in list order (a group index past the last one opens nothing)
+    steps = ["0 menu", "300 call showWindow 2", "3000 nodes @hdrs0 [id=serverHolder] .setHed", "3010 nodes @kiohdr0 [id=serverHolder] .kioHed"]
+    for i in range(6):  # krunk.io's groups in list order (a group index past the last one opens nothing)
         t = 3100 + 150 * i
         steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @bo{i} BoCustomRoom [id=serverHolder] .settNameIn",
                   f"{t + 60} grep @kc{i} KioCustomRoom [id=serverHolder] .settNameIn", f"{t + 80} grep @ko{i} KioOfficialRoom [id=serverHolder] .settNameIn"]
-    end = 3100 + 150 * 6 + 100
-    steps.append(f"{end} quit")
+    t = 3100 + 150 * 6 + 100
+    steps += [f"{t} call windows.1.switchTab 1", f"{t + 50} nodes @hdrs1 [id=serverHolder] .setHed", f"{t + 60} nodes @kiohdr1 [id=serverHolder] .kioHed"]
+    t += 100
+    for i in range(6):  # krunker.io's groups
+        steps += [f"{t} call setExpandedRegion {i}", f"{t + 40} grep @kbo{i} BoCustomRoom [id=serverHolder] .settNameIn",
+                  f"{t + 60} grep @kkc{i} KioCustomRoom [id=serverHolder] .settNameIn", f"{t + 80} grep @kko{i} KioOfficialRoom [id=serverHolder] .settNameIn"]
+        t += 150
+    steps.append(f"{t + 100} quit")
     # no server finder (its 20 servers would join the Box Office groups)
     stub, p, out, log = launch_native(label, "\n".join(steps) + "\n",
                                       {"KRUNKNATIVE_SERVER_LIST": servers, "KRUNKNATIVE_FINDER_URL": "off"}, args=("--offline",))
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
-    nodes = re.search(r"nodes t=\d+ @hdrs elements=\d+ match=(\d+)", text)
-    kio_hdr = re.search(r"nodes t=\d+ @kiohdr elements=\d+ match=(\d+)", text)
-    total = int(nodes.group(1)) if nodes else -1
-    krunker_headers = int(kio_hdr.group(1)) if kio_hdr else -1  # the krunker.io groups' headers (class kioHed)
+    hdrs0 = re.search(r"nodes t=\d+ @hdrs0 elements=\d+ match=(\d+)", text)
+    kiohdr0 = re.search(r"nodes t=\d+ @kiohdr0 elements=\d+ match=(\d+)", text)
+    hdrs1 = re.search(r"nodes t=\d+ @hdrs1 elements=\d+ match=(\d+)", text)
+    kiohdr1 = re.search(r"nodes t=\d+ @kiohdr1 elements=\d+ match=(\d+)", text)
     hits = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\w+) needle=\S+ n=\d+ hits=(\d+)", text)}
     bo = [hits.get(f"bo{i}", 0) for i in range(6)]
     kc = [hits.get(f"kc{i}", 0) for i in range(6)]
     ko = [hits.get(f"ko{i}", 0) for i in range(6)]
-    check(f"{label}: the groups are five: Box Office's Custom Games and Frankfurt, krunker.io's Official Customs, Custom Games and Frankfurt",
-          total == 5 and krunker_headers == 3, (total, krunker_headers, text[-400:]))
+    kbo = [hits.get(f"kbo{i}", 0) for i in range(6)]
+    kkc = [hits.get(f"kkc{i}", 0) for i in range(6)]
+    kko = [hits.get(f"kko{i}", 0) for i in range(6)]
+    check(f"{label}: krunk.io's tab: two groups, Box Office's Custom Games and Frankfurt, no krunker.io group",
+          hdrs0 and int(hdrs0.group(1)) == 2 and kiohdr0 and int(kiohdr0.group(1)) == 0, (hdrs0 and hdrs0.group(0), text[-400:]))
     bo_group = [i for i in range(6) if bo[i]]
-    kc_group = [i for i in range(6) if kc[i]]
-    ko_group = [i for i in range(6) if ko[i]]
     check(f"{label}: the Box Office custom game is in one group", len(bo_group) == 1, (bo, kc, ko))
-    check(f"{label}: no krunker.io row sits in a Box Office group (its custom game, its official custom)",
-          bo_group and not any(kc[i] or ko[i] for i in bo_group), (bo, kc, ko))
-    check(f"{label}: krunker.io's custom game is in one krunker.io group, not Box Office's", len(kc_group) == 1 and not bo[kc_group[0]], (bo, kc, ko))
-    check(f"{label}: krunker.io's official custom is in one krunker.io group, not Box Office's", len(ko_group) == 1 and not bo[ko_group[0]], (bo, kc, ko))
+    check(f"{label}: no krunker.io row on krunk.io's tab (its custom game, its official custom)",
+          not any(kc) and not any(ko), (bo, kc, ko))
+    check(f"{label}: krunker.io's tab: three krunker.io groups (Official Customs, Custom Games, Frankfurt)",
+          hdrs1 and int(hdrs1.group(1)) == 3 and kiohdr1 and int(kiohdr1.group(1)) == 3,
+          (hdrs1 and hdrs1.group(0), kiohdr1 and kiohdr1.group(0), text[-400:]))
+    kc_group = [i for i in range(6) if kkc[i]]
+    ko_group = [i for i in range(6) if kko[i]]
+    check(f"{label}: krunker.io's custom game is in one krunker.io group, not Box Office's", len(kc_group) == 1 and not any(kbo), (kbo, kkc, kko))
+    check(f"{label}: krunker.io's official custom is in one krunker.io group, not Box Office's", len(ko_group) == 1 and not any(kbo), (kbo, kkc, kko))
     check(f"{label}: the krunker.io custom and official custom are in different groups", kc_group and ko_group and kc_group != ko_group, (kc_group, ko_group))
 
 
@@ -3139,7 +3152,8 @@ def run_native_optout():
     """KRUNKNATIVE_KRUNKER_JOIN=browser: the click opens krunker.io/?game=<id> in the system browser
     (KRUNKNATIVE_NO_BROWSER logs it), nothing is sought in-client."""
     label = "native-optout"
-    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3200 call krunkerJoin \"%s\"\n4200 quit\n" % GAME_ID)
+    # the krunker.io status line is on the krunker.io tab (switchTab 1); krunk.io is the default
+    script = ("0 menu\n300 call showWindow 2\n350 call windows.1.switchTab 1\n3000 text @status [id=kioStatus]\n3200 call krunkerJoin \"%s\"\n4200 quit\n" % GAME_ID)
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_JOIN": "browser"}, args=("--offline",))
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)

@@ -255,6 +255,7 @@ def main():
 600 text @type [id=knSeekServers]
 700 call knClientSet "proxy" " http://127.0.0.1:%d "
 800 call showWindow 2
+850 call windows.1.switchTab 1
 5000 text @status [id=kioStatus]
 5100 nodes @kgroups .setHed.kioHed .quickJoin
 5150 text @head .setHed.kioHed
@@ -284,6 +285,7 @@ def main():
 300 call windows.0.changeTab 4
 800 text @proxy [id=knClient_proxy]
 900 call showWindow 2
+950 call windows.1.switchTab 1
 5000 text @status [id=kioStatus]
 5100 quit
 """, cfg)
@@ -297,6 +299,7 @@ def main():
         log = run("blocked", """
 0 menu
 100 call showWindow 2
+150 call windows.1.switchTab 1
 4000 text @status [id=kioStatus]
 4100 quit
 """, os.path.join(WORK, "cfg-blocked"), {"KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % BLOCK_PORT})
@@ -311,6 +314,7 @@ def main():
 0 menu
 100 call knClientSet "proxy" "http://127.0.0.1:%d"
 200 call showWindow 2
+250 call windows.1.switchTab 1
 4000 text @first [id=kioStatus]
 4100 call knClientSet "proxy" "socks5h://127.0.0.1:%d"
 4200 call knClientSet "proxy" "ftp://nope"
@@ -330,6 +334,7 @@ def main():
         log = run("env", """
 0 menu
 100 call showWindow 2
+150 call windows.1.switchTab 1
 4000 text @status [id=kioStatus]
 4100 quit
 """, os.path.join(WORK, "cfg-env"), {"HTTP_PROXY": "http://127.0.0.1:%d" % PX_GOOD, "NO_PROXY": "example.com"})

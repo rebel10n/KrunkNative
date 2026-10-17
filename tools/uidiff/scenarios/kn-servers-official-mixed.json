@@ -163,6 +163,10 @@
     },
     "windowActions": [
       [
+        "windows.1.switchTab",
+        1
+      ],
+      [
         "setExpandedRegion",
         4
       ]

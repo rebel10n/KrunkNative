@@ -169,6 +169,14 @@ void krunker_net_tick(Client *client);      // main thread, once per frame: noti
 // that is not an object. 1 = sent.
 typedef void (*KrunkerHostDoneFn)(void *user, const char *game_id, const char *region, const char *error);
 int krunker_net_host_custom(const cJSON *config, KrunkerHostDoneFn done, void *user);
+// Why krunker_net_host_custom sends nothing now: the window says it instead of failing silently.
+typedef enum {
+    KRUNKER_HOST_READY = 0,
+    KRUNKER_HOST_NOT_CONNECTED,   // no official krunker.io connection (join a krunker.io game first)
+    KRUNKER_HOST_GUEST,           // signed out: a guest cannot host (the security challenge bCpt is not implemented)
+    KRUNKER_HOST_BUSY,            // a request is already waiting for krunker.io's answer
+} KrunkerHostBlock;
+KrunkerHostBlock krunker_net_host_block(void);
 // Whether the official session wants no input frame built now (net/recon.c samples none): v10's gameLoop
 // builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
 // init's map still loading (the packets after it held) is the latter. 0 when no official game is open.

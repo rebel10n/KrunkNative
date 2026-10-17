@@ -22,7 +22,11 @@ void host_flow_browse_community(void);
 char *host_flow_window_gen(void);
 // windows[7].switchTab(n) on the page: the tab and its body (the Start Game step refreshes the command)
 void host_flow_switch_tab(int tab);
-// Start Game (the choice's first option; createPrivateRoom, ui_handlers.c): hosts on the active backend
+// The Host Game window opened from a Servers tab's "+ Host Game" (windows.1.hostGame): krunker (1) = krunker.io's
+// hosting, 0 = Box Office's. The window's backend is this one (not the session's): the session backend is not changed.
+void host_flow_open_backend(int host_type, int krunker);
+// Start Game (the choice's first option; createPrivateRoom, ui_handlers.c): hosts on the window's backend
+// (its tab's; the active one when it was opened from elsewhere)
 void host_flow_start(void);
 // knHostFlow(action, ...) (ui_handlers.c's module chain). -1 when the name is not the flow's.
 int host_flow_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

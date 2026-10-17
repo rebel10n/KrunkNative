@@ -9,6 +9,7 @@ custom games on published maps, c + cm, one map twice) and user-assets (GET /m<c
 thumbnails of tools/uidiff/remote/, one 404, one HTML page instead of an image). The client asks
 KRUNKNATIVE_KRUNKER_MATCHMAKER / KRUNKNATIVE_KRUNKER_USER_ASSETS = the stub: nothing leaves the machine.
 
+  (the Servers window opens on the krunker.io tab: its custom games are the carousel)
   1 cold cache: the Servers window shows v10's carousel (three sets of the 5 slides), every thumbnail is
     asked for once on the media lane, the good ones land in the disk cache and pop in ("[image] ...:
     arrived"), the 404 and the HTML page are refused with their reason and never cached; the carousel's
@@ -147,6 +148,7 @@ def main():
         log = run("cold", """
 0 menu
 300 call showWindow 2
+350 call windows.1.switchTab 1
 4000 nodes @slides [id=carousel-infinite] .slide
 4050 nodes @originals [id=carousel-infinite] .purejscarousel-slide:not(.purejscarousel-slide-clone)
 4100 text @first """ + FIRST + """
@@ -182,6 +184,7 @@ def main():
         log = run("warm", """
 0 menu
 300 call showWindow 2
+350 call windows.1.switchTab 1
 3000 nodes @slides [id=carousel-infinite] .slide
 3500 quit
 """, cache_dir)
@@ -195,6 +198,7 @@ def main():
         log = run("search", """
 0 menu
 300 call showWindow 2
+350 call windows.1.switchTab 1
 3000 call windows.1.searchList "TowerWar_3"
 3300 text @search [id=serverSearch]
 3400 nodes @rows [id=serverHolder] .settNameIn

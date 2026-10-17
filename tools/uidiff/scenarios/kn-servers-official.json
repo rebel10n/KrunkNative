@@ -116,7 +116,13 @@
           0
         ]
       ]
-    }
+    },
+    "windowActions": [
+      [
+        "windows.1.switchTab",
+        1
+      ]
+    ]
   },
   "frames": 3,
   "note": "The Servers window with only krunker.io's lobbies (state.krunkerLobbies, the same list tools/uidiff/capture-v10-servers.js answers v10's /game-list with): Official Customs, Custom Games, then New York, Frankfurt, Sydney in krunker.io's order, each header v10's (place name, Quick Join, N online), and the footer's 61 In Game. KrunkNative's differences: the krunker.io servers line before the region groups (the account; servers_ui.c append_krunker_status) and the header's download button; the regions offset the reference by them"

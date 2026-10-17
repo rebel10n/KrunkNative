@@ -160,7 +160,12 @@ static double g_last_load_ms = -1e18;
 static int g_loaded;
 static int g_expanded = -1;      // windows[1].expandedRegion
 static char g_search[64];        // windows[1].serverSearch
-static int g_server_tab;         // windows[1].tabIndex (the mode-grouped browser, oldBrowser off)
+// windows[1].tabIndex: the Servers window's two tabs, one per backend. Each shows v10's layout (the map
+// carousel, Official Customs, Custom Games, then the regions) of its own list only: krunk.io (Box Office's
+// lobbies and finder servers) or krunker.io (its official lobbies). A tab never mixes the two.
+enum { SERVER_TAB_KRUNK = 0, SERVER_TAB_KRUNKER = 1, SERVER_TAB_COUNT = 2 };
+static int g_server_tab = SERVER_TAB_KRUNK;
+static int g_server_tab_backend = -1; // the backend the default tab last followed (server_tab_follow)
 static double g_list_start_ms;   // windows[1].startTime (the list's arrival: time-left base)
 static double g_timer_tick_ms;   // updateTimers: the last 1 s step
 static int g_hide_full = -1;     // dK (krk_hideFull), -1 = not read yet
@@ -1487,6 +1492,29 @@ static int search_matches(const cJSON *t) {
 // mm-token: an official krunker.io lobby (krunker_lobbies.c), joined through krunker_net (krunkerJoin)
 static int row_krunker(const cJSON *t) { return meta_flag(t, "krunker"); }
 
+static const cJSON *brain_games(void); // the brain's lobbies while it answers (below)
+// The lists the current tab shows, its own backend only: krunk.io = our brain lobbies and the finder
+// servers, krunker.io = its official lobbies (NULL until listed). Returns how many of `lists` are set.
+static int tab_lists(const cJSON *lists[2]) {
+    if (g_server_tab == SERVER_TAB_KRUNKER) {
+        lists[0] = krunker_lobbies_list();
+        lists[1] = NULL;
+        return 1;
+    }
+    lists[0] = brain_games();
+    lists[1] = g_finder_rows;
+    return 2;
+}
+
+// The default tab is the active backend's (krunker_net_active): it follows the backend when that changes,
+// and stays where the player put it while it does not.
+static void server_tab_follow(void) {
+    const int backend = krunker_net_active() ? 1 : 0;
+    if (backend == g_server_tab_backend) return;
+    g_server_tab_backend = backend;
+    g_server_tab = backend ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK;
+}
+
 // Settings > Quickplay: the browser shows the server type's lists, rows of the seek mode / map
 static int row_prefs_match(const cJSON *t) {
     const GameModeConfig *mode = row_mode(t);
@@ -1599,14 +1627,6 @@ static int find_group(ServerGroup *groups, const int count, const char *key) {
     return -1;
 }
 
-// region index in config.regionIND order (KrunkNative: its region table)
-static int region_rank(const char *id) {
-    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
-        if (id && !strcmp(k_regions[i].id, id)) return (int) i;
-    }
-    return (int) (sizeof(k_regions) / sizeof(k_regions[0]));
-}
-
 static char g_sort_region[32];
 static int cmp_games_old(const void *a, const void *b) {
     const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
@@ -1618,40 +1638,15 @@ static int cmp_games_region(const void *a, const void *b) {
     const int dx = !strcmp(tuple_str(x, 1), g_sort_region), dy = !strcmp(tuple_str(y, 1), g_sort_region);
     return dy - dx;
 }
-static int new_score(const cJSON *t) {
-    int score = row_players(t) + region_rank(tuple_str(t, 1)) * 100;
-    if (!strcmp(tuple_str(t, 1), g_sort_region)) score += 10000;
-    if (row_players(t) <= 0) score -= 50000;
-    return score;
-}
-static int cmp_games_new(const void *a, const void *b) {
-    return new_score(*(const cJSON *const *) a) - new_score(*(const cJSON *const *) b);
-}
 static int cmp_groups_order(const void *a, const void *b) {
     const ServerGroup *x = a, *y = b;
     const int d = (y->order ? y->order : -1) - (x->order ? x->order : -1);
     return d ? d : x->region_rank - y->region_rank; // qsort is not stable: insertion order breaks ties
 }
-// The top groups of both browsers: Official Customs, then Custom Games (oldBrowser's order)
-static int group_top(const ServerGroup *g) {
-    return !strcmp(g->key, "official") ? 1 : !strcmp(g->key, "custom") ? 2 : 0;
-}
-// krunker.io's own groups, in their section after ours: its Official Customs and Custom Games
-// (v10's top two, never merged with ours), then its regions or modes
+// krunker.io's own groups: its Official Customs and Custom Games (v10's top two), then its regions
 static int kio_rank(const char *key) {
     return !strcmp(key, "kio:official") ? 0 : !strcmp(key, "kio:custom") ? 1 : 2;
 }
-static int cmp_groups_players(const void *a, const void *b) {
-    const ServerGroup *x = a, *y = b;
-    const int tx = group_top(x), ty = group_top(y);
-    if (tx || ty) return tx && ty ? tx - ty : ty ? 1 : -1; // official and custom first
-    const int kx = !strncmp(x->key, "kio:", 4), ky = !strncmp(y->key, "kio:", 4);
-    if (kx != ky) return kx - ky; // krunker.io's groups after ours (mm-token)
-    if (kx && kio_rank(x->key) != kio_rank(y->key)) return kio_rank(x->key) - kio_rank(y->key);
-    if (y->players != x->players) return y->players > x->players ? 1 : -1;
-    return x->region_rank - y->region_rank;
-}
-
 // Stable sort (v8's Array.prototype.sort is stable): insertion sort, the lists are short.
 static void stable_sort(const cJSON **games, const int n, int (*cmp)(const void *, const void *)) {
     for (int i = 1; i < n; i++) {
@@ -1671,14 +1666,15 @@ static void group_push(ServerGroup *g, const cJSON *t) {
 }
 
 // The group of a krunker.io row (mm-token): kio:official / kio:custom for its official customs and
-// custom games (their own groups, never Box Office's Custom Games or Official Customs), else
-// kio:<region> (one group per Krunker region, v10's place name). Both are added after ours. Ours
-// never take a krunker.io row. Returns the group index, -1 = none.
+// custom games, named as krunker.io names them, else kio:<region> (one group per Krunker region, v10's place
+// name). The krunker.io tab lists krunker.io's rows only (tab_lists), so these groups hold nothing else.
+// The top two and the default region are order 1 (cmp_groups_order: the layout of v10's getServers).
+// Returns the group index, -1 = none.
 static int kio_group(ServerGroup *groups, int *count, const int max, const cJSON *t) {
-    char key[32], name[64];
+    char key[32], name[64], def[32] = "";
     if (row_official(t) || row_custom(t)) {
         snprintf(key, sizeof(key), "%s", row_official(t) ? "kio:official" : "kio:custom");
-        snprintf(name, sizeof(name), "krunker.io - %s", row_official(t) ? "Official Customs" : "Custom Games");
+        snprintf(name, sizeof(name), "%s", row_official(t) ? "Official Customs" : "Custom Games");
     } else {
         snprintf(key, sizeof(key), "kio:%s", tuple_str(t, 1));
         snprintf(name, sizeof(name), "%s", krunker_region_name(tuple_str(t, 1)));
@@ -1689,13 +1685,16 @@ static int kio_group(ServerGroup *groups, int *count, const int max, const cJSON
         snprintf(g->key, sizeof(g->key), "%s", key);
         snprintf(g->name, sizeof(g->name), "%s", name);
         g->region_rank = 1000 + (kio_rank(key) < 2 ? kio_rank(key) : 2 + *count);
+        default_region(def, sizeof(def));
+        if (!strcmp(key, "kio:official") || !strcmp(key, "kio:custom") || !strcmp(tuple_str(t, 1), def)) g->order = 1;
         gi = (*count)++;
     }
     return gi;
 }
 
-// getServers(): the region groups (oldBrowser, the default) or the mode groups of the
-// Official / Custom Servers tab; empty groups are dropped. Returns the group count.
+// getServers(): the groups of the current tab, v10's layout (getServers' oldBrowser branch): Official Customs,
+// Custom Games, then one group per region, the default region first. The lists are the tab's (tab_lists);
+// empty groups are dropped. Returns the group count.
 static int build_groups(ServerGroup *groups, const int max) {
     char def[32] = "";
     default_region(def, sizeof(def));
@@ -1704,98 +1703,41 @@ static int build_groups(ServerGroup *groups, const int max) {
     memset(groups, 0, sizeof(*groups) * (size_t) max);
     int count = 0;
     rebuild_finder_rows();
-    // ours, then the official krunker.io lobbies (natively only, krunker_lobbies.c: their own
-    // groups after ours), whatever Settings > Quickplay > Server Type says: that one only picks
-    // what Quick Match / F4 seek into
-    const cJSON *lists[3] = {brain_games(), g_finder_rows, krunker_lobbies_list()};
+    const cJSON *lists[2];
+    const int nlists = tab_lists(lists);
     const int filter = prefs_filtering();
-    if (old_browser()) {
-        snprintf(groups[0].key, sizeof(groups[0].key), "official");
-        snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
-        groups[0].order = 1;
-        snprintf(groups[1].key, sizeof(groups[1].key), "custom");
-        snprintf(groups[1].name, sizeof(groups[1].name), "Custom Games");
-        groups[1].order = 1;
-        groups[1].region_rank = 1;
-        count = 2;
-        for (int l = 0; l < 3; l++) {
-            const cJSON *t;
-            cJSON_ArrayForEach(t, lists[l]) {
-                const char *region = tuple_str(t, 1);
-                if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
-                if (row_krunker(t)) { // krunker.io's customs and its regions, after ours (kio_group)
-                    const int gi = kio_group(groups, &count, max, t);
-                    if (gi >= 0) group_push(&groups[gi], t);
-                    continue;
-                }
-                if (only_default && strcmp(def, region)) continue;
-                if (find_group(groups, count, region) < 0 && count < max) {
-                    ServerGroup *g = &groups[count];
-                    snprintf(g->key, sizeof(g->key), "%s", region);
-                    if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_long_name(region));
-                    else snprintf(g->name, sizeof(g->name), "%s",
-                                       !strcmp(def, region) ? I18N("settings.local.region", "Default Region")
-                                       : !strcmp(g_region, region) ? I18N("kn.servers.currentRegion", "Current Region")
-                                       : I18N("kn.servers.hiddenRegion", "Hidden Region"));
-                    if (!strcmp(def, region)) g->order = 1;
-                    g->region_rank = count;
-                    count++;
-                }
-                const int gi = find_group(groups, count, row_official(t) ? "official" : row_custom(t) ? "custom" : region);
-                if (gi >= 0) group_push(&groups[gi], t);
-            }
-        }
-        int kept = 0;
-        for (int i = 0; i < count; i++) {
-            if (groups[i].game_count) groups[kept++] = groups[i];
-        }
-        count = kept;
-        qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_order);
-        for (int i = 0; i < count; i++) {
-            stable_sort(groups[i].games, groups[i].game_count, cmp_games_old);
-            const char *key = groups[i].key;
-            if (!strcmp(key, "custom") || !strcmp(key, "official") || !strcmp(key, "kio:custom") || !strcmp(key, "kio:official")) {
-                stable_sort(groups[i].games, groups[i].game_count, cmp_games_region);
-            }
-        }
-        return count;
-    }
-    // the top groups, as oldBrowser's: official customs and custom games, whatever their mode
     snprintf(groups[0].key, sizeof(groups[0].key), "official");
     snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
+    groups[0].order = 1;
     snprintf(groups[1].key, sizeof(groups[1].key), "custom");
     snprintf(groups[1].name, sizeof(groups[1].name), "Custom Games");
+    groups[1].order = 1;
     groups[1].region_rank = 1;
     count = 2;
-    // the mode groups (gameModes order); tab 0 = Official Servers (no customs), 1 = Custom Servers
-    int modes = 0;
-    const GameModeConfig *list = mode_list(&modes);
-    for (int i = 0; list && i < modes && count < max; i++) {
-        if (!list[i].alias || find_group(groups, count, list[i].alias) >= 0) continue;
-        snprintf(groups[count].key, sizeof(groups[count].key), "%s", list[i].alias);
-        snprintf(groups[count].name, sizeof(groups[count].name), "%s", list[i].name ? list[i].name : list[i].alias);
-        groups[count].region_rank = count;
-        count++;
-    }
-    for (int l = 0; l < 3; l++) {
+    for (int l = 0; l < nlists; l++) {
         const cJSON *t;
         cJSON_ArrayForEach(t, lists[l]) {
-            const int custom = row_custom(t) && !row_official(t);
+            const char *region = tuple_str(t, 1);
             if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
-            if (!row_krunker(t) && only_default && strcmp(def, tuple_str(t, 1))) continue;
-            if ((g_server_tab == 0 && custom) || (g_server_tab == 1 && !custom)) continue;
-            int gi;
-            if (row_krunker(t) && (row_official(t) || row_custom(t))) { // krunker.io's customs: their own groups, after ours
-                gi = kio_group(groups, &count, max, t);
-            } else if (row_official(t)) { // official customs: the top group
-                gi = find_group(groups, count, "official");
-            } else if (custom) { // custom games: the top group
-                gi = find_group(groups, count, "custom");
-            } else {
-                // ours and the official lobbies alike: the mode's group (v10 lists every lobby of a mode
-                // in one group; an official row's region cell reads its id prefix, "NY")
-                gi = find_group(groups, count, row_alias(t));
+            if (row_krunker(t)) { // krunker.io's customs and its regions (kio_group)
+                const int gi = kio_group(groups, &count, max, t);
+                if (gi >= 0) group_push(&groups[gi], t);
+                continue;
             }
+            if (only_default && strcmp(def, region)) continue;
+            if (find_group(groups, count, region) < 0 && count < max) {
+                ServerGroup *g = &groups[count];
+                snprintf(g->key, sizeof(g->key), "%s", region);
+                if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_long_name(region));
+                else snprintf(g->name, sizeof(g->name), "%s",
+                                   !strcmp(def, region) ? I18N("settings.local.region", "Default Region")
+                                   : !strcmp(g_region, region) ? I18N("kn.servers.currentRegion", "Current Region")
+                                   : I18N("kn.servers.hiddenRegion", "Hidden Region"));
+                if (!strcmp(def, region)) g->order = 1;
+                g->region_rank = count;
+                count++;
+            }
+            const int gi = find_group(groups, count, row_official(t) ? "official" : row_custom(t) ? "custom" : region);
             if (gi >= 0) group_push(&groups[gi], t);
         }
     }
@@ -1804,8 +1746,14 @@ static int build_groups(ServerGroup *groups, const int max) {
         if (groups[i].game_count) groups[kept++] = groups[i];
     }
     count = kept;
-    qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_players);
-    for (int i = 0; i < count; i++) stable_sort(groups[i].games, groups[i].game_count, cmp_games_new);
+    qsort(groups, (size_t) count, sizeof(*groups), cmp_groups_order);
+    for (int i = 0; i < count; i++) {
+        stable_sort(groups[i].games, groups[i].game_count, cmp_games_old);
+        const char *key = groups[i].key;
+        if (!strcmp(key, "custom") || !strcmp(key, "official") || !strcmp(key, "kio:custom") || !strcmp(key, "kio:official")) {
+            stable_sort(groups[i].games, groups[i].game_count, cmp_games_region);
+        }
+    }
     return count;
 }
 
@@ -1933,7 +1881,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_append(sb, badge);
     free(badge);
     sb_appendf(sb, "<div class='serverPCount'>%d/%d</div>", row_players(t), tuple_int(t, 3));
-    // v7 shows tuple[0].split(":")[0] on custom / official rows and in the mode-grouped browser.
+    // v7 shows tuple[0].split(":")[0] on custom / official rows.
     // KrunkNative: on every brain lobby, as the server's proper name ("Chicago 2", the node id
     // CHITOWN2 as tooltip): a region group holds several servers (finder rows: their host).
     // an official row as v10 draws it: the cell only on custom / official-custom rows and in the mode
@@ -1995,7 +1943,7 @@ static char *get_servers(void) {
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
-        if (!kio_status && !strncmp(g->key, "kio:", 4)) { // the krunker.io groups come last (cmp_groups_*)
+        if (!kio_status && !strncmp(g->key, "kio:", 4)) { // the krunker.io tab's groups: their status line first
             append_krunker_status(&sb, kio_groups);
             kio_status = 1;
         }
@@ -2029,7 +1977,7 @@ static char *get_servers(void) {
             sb_appendf(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>%s</div>", I18N("windows.servers.none", "No Joinable Games Found..."));
         sb_append(&sb, "</div>");
     }
-    if (!kio_status) append_krunker_status(&sb, kio_groups); // no group of their own (mode browser, customs only, none): after ours
+    if (!kio_status && g_server_tab == SERVER_TAB_KRUNKER) append_krunker_status(&sb, kio_groups); // no group of its own: the status alone
     return sb_finish(&sb);
 }
 
@@ -2612,14 +2560,12 @@ void servers_ui_menu_setup(void) {
 // server in KrunkNative (doc/backend.md 8.7), so natively the link is hidden like the menu's
 // Host Game button; --render-scenario keeps it for uidiff. (Direct connects: the menu's
 // Connect button, servers_ui_menu_setup.)
-static void append_header_left(StrBuf *sb) {
-#ifdef UI_SCENARIO_SUPPORTED
-    if (ui_scenario_active()) {
-        sb_append(sb, "<div style='display:inline-block'><a onclick='showWindow(42)'>+ Host Game</a></div>");
-        return;
-    }
-#endif
-    sb_append(sb, "<div style='display:none'><a onclick='showWindow(42)'>+ Host Game</a></div>");
+// The tab's "+ Host Game" (windows[1].hostGame): the Host Game window on this tab's backend, never the session's
+// (host_flow_open_backend). v10's header link, shown on both tabs.
+static void append_host_game_button(StrBuf *sb) {
+    sb_append(sb, "<div style='display:inline-block'><a id='hostGameBtn' onclick='playSelect(0.1);windows[1].hostGame()'>");
+    sb_append_esc(sb, I18N("kn.servers.hostGame", "+ Host Game"));
+    sb_append(sb, "</a></div>");
 }
 
 // ---- the custom games' carousel (v10 windows[1].customsInfo + genList + post: PureJSCarousel)
@@ -2652,11 +2598,12 @@ static const char *user_assets_url(void) {
     return over && over[0] ? over : "https://user-assets.krunker.io";
 }
 
-// customsInfo from every list the browser shows (krunker.io's custom games carry cm)
+// customsInfo from the lists the tab shows (krunker.io's custom games carry cm)
 static void carousel_collect(void) {
-    const cJSON *lists[3] = {brain_games(), g_finder_rows, krunker_lobbies_list()};
+    const cJSON *lists[2];
+    const int count = tab_lists(lists);
     C.n = 0;
-    for (int l = 0; l < 3; l++) {
+    for (int l = 0; l < count; l++) {
         const cJSON *t;
         cJSON_ArrayForEach(t, lists[l]) {
             const cJSON *cm = cJSON_GetObjectItem(meta_of(t), "cm");
@@ -2771,10 +2718,9 @@ static void carousel_go(const int dir) {
 
 // windows[1].genList()
 static char *gen_list(void) {
-    const int old = old_browser();
     StrBuf sb = {0};
     sb_append(&sb, "<div class='serverHeader'><div class='setBodH' style='padding:10px;margin-top:0px;margin-bottom:8px;width:calc(100% - 20px) !important;margin-left:0px;'>");
-    append_header_left(&sb);
+    append_host_game_button(&sb);
     sb_append(&sb, "<div style='display:inline-block;'><input id='serverSearch' style='width:450px;margin-left:16px;margin-right:18px' type='text' placeholder='Search: FFA, SYD, Burg'");
     if (g_search[0]) {
         sb_append(&sb, " value='");
@@ -2793,22 +2739,15 @@ static char *gen_list(void) {
     append_finder_error(&sb);
     append_seek_status(&sb);
     char *servers = get_servers();
-    if (old) {
-        carousel_html(&sb); // the custom games' carousel (customsInfo.length >= 3)
-        sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
-        sb_append(&sb, servers);
-        sb_append(&sb, "</div>");
-    } else {
-        static const char *const tabs[] = {"Official Servers", "&nbsp;Custom Servers&nbsp;"}; // config.serverTabs
-        sb_append(&sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
-        for (int i = 0; i < 2; i++) sb_appendf(&sb, "<div class='bigMenTab%s' style='height:18px;' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
-        sb_append(&sb, "</div>");
-        if (g_server_tab != 2) {
-            sb_append(&sb, "<div id='serverHolder'>");
-            sb_append(&sb, servers);
-            sb_append(&sb, "</div>");
-        }
-    }
+    // the two tabs, one per backend (krunk.io, krunker.io); each shows the map carousel and the groups of its list
+    const char *tabs[SERVER_TAB_COUNT] = {I18N("kn.servers.tabKrunk", "krunk.io"), I18N("kn.servers.tabKrunker", "krunker.io")};
+    sb_append(&sb, "<div class='bigMenTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
+    for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' style='height:18px;' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
+    sb_append(&sb, "</div>");
+    carousel_html(&sb); // the tab's custom games' carousel (customsInfo.length >= 3)
+    sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
+    sb_append(&sb, servers);
+    sb_append(&sb, "</div>");
     free(servers);
     char total[32], social[32];
     // after get_servers: + finder-only; + the official krunker.io lobbies' players when they are listed
@@ -2909,6 +2848,7 @@ char *servers_window_gen(const int id, const char **header) {
     }
     if (id == MENU_WINDOW_HOST) return host_flow_window_gen(); // the Host Game window (host_flow_ui.c)
     if (id != 2) return NULL;
+    server_tab_follow(); // the default tab: the active backend's (krunker_net_active)
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
     krunker_lobbies_refresh(0); // official lobbies (native, cached; listed whatever the server type)
     if (backend_available() != 1 || g_games_override) {
@@ -3131,21 +3071,16 @@ static void on_checked_info(void *user, const int status, const char *body, cons
 }
 
 // openServerWindow(n) (Server Finder, showWindow(48)): 0 Public / 1 Customs open the Servers
-// window (Customs: oldBrowser collapses the regions, else the Custom Servers tab); 2 Raids /
+// window (Customs: the active backend's tab); 2 Raids /
 // 3 Zombies / 4 Trade Plaza join the official krunker.io custom game of that mode with room
 // (krunker_lobbies_find_custom, v10.js:218379-218415), "Couldnt find any" when there is none.
 static void open_server_window(const int which) {
     if (which == 0 || which == 1) {
         menu_show_window(2, 0);
-        if (which == 1) {
-            if (old_browser()) {
-                g_expanded = -1;
-                refresh_holder();
-            } else {
-                g_server_tab = 1;
-                g_expanded = -1;
-                menu_rerender_if_open(2);
-            }
+        if (which == 1) { // Customs: the active backend's tab (its customs are in its groups)
+            g_server_tab = krunker_net_active() ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK;
+            g_expanded = -1;
+            menu_rerender_if_open(2);
         }
         return;
     }
@@ -3200,9 +3135,14 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "windows.1.switchTab")) {
-        g_server_tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        const int tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
+        g_server_tab = tab >= 0 && tab < SERVER_TAB_COUNT ? tab : SERVER_TAB_KRUNK;
         g_expanded = -1;
         menu_rerender_if_open(2); // updateWindow(2)
+        return 1;
+    }
+    if (!strcmp(name, "windows.1.hostGame")) { // + Host Game: the Host Game window on the tab's backend
+        host_flow_open_backend(GAME_HOST_CUSTOM, g_server_tab == SERVER_TAB_KRUNKER);
         return 1;
     }
     if (!strcmp(name, "knCarousel")) { // the carousel's prev / next (PureJSCarousel's buttons)

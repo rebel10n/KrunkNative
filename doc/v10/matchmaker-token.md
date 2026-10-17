@@ -264,9 +264,11 @@ with its message, the game left behind it); a find whose only lobby is the one t
 back in it without a word, as v10's matchmaker does. The startup seek also sends the preferences (v10
 parity) but never opens krunker.io.
 
-The server browser (Servers, window 2) shows ours and (native) the official krunker.io lobbies
-whatever the server type, filtered to the seek mode and map, with a "Showing <mode> on <map>" line
-when a filter is set.
+The server browser (Servers, window 2) has two tabs, one per backend: krunk.io (ours) and krunker.io (the
+official lobbies, native). Each tab is one list in v10's legacy layout (the map carousel, Official Customs,
+Custom Games, then the regions) and never mixes the two; the default tab is the active backend's, and "+ Host
+Game" on a tab hosts on that tab's backend (host_flow_open_backend). Whatever the server type, the rows
+are filtered to the seek mode and map, with a "Showing <mode> on <map>" line when a filter is set.
 
 Refresh (v10 windows[1], v10.js:211155-211240, 211452-211460): the list is asked again only when the
 window opens (or switches tab) and the last request is older than 10 s (v10's `serverBrowserRate`); the

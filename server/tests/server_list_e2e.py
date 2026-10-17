@@ -176,12 +176,16 @@ def rows():
     cfg = os.path.join(WORK, "rows-cfg")
     # each region group is expanded in turn (one at a time), and the two rows are read by their join ids
     # ([onclick*=...]: Box Office's MB:mmmmm, krunker.io's NY:nnnnn), whichever group holds them
+    # each tab's rows: Box Office's on krunk.io (tab 0), krunker.io's on krunker.io (tab 1); each region group is
+    # expanded in turn (one at a time), and the rows are read by their join ids ([onclick*=...])
     reads, t = [], 7000
-    for group in range(4):
-        reads.append("%d call setExpandedRegion %d" % (t, group))
-        reads.append("%d attr @mb%d style [onclick*=mmmmm] .serverPing" % (t + 50, group))
-        reads.append("%d attr @kio%d style [onclick*=nnnnn] .serverPing" % (t + 60, group))
-        t += 300
+    for tab, key, join_id in ((0, "mb", "mmmmm"), (1, "kio", "nnnnn")):
+        reads.append("%d call windows.1.switchTab %d" % (t, tab))
+        t += 200
+        for group in range(4):
+            reads.append("%d call setExpandedRegion %d" % (t, group))
+            reads.append("%d attr @%s%d style [onclick*=%s] .serverPing" % (t + 50, key, group, join_id))
+            t += 300
     script = ("0 boot\n4000 call showWindow 2\n" + "\n".join(reads) + "\n"
               "%d call windows.1.switchTab 0\n%d call windows.1.switchTab 0\n%d call windows.1.switchTab 0\n%d quit\n" % (t + 200, t + 2200, t + 11500, t + 12500))
     text = run_client("R1", script, env, (), cfg, timeout=120)

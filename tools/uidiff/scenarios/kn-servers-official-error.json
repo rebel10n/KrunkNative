@@ -64,7 +64,13 @@
     },
     "krunkerLobbies": {
       "error": "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."
-    }
+    },
+    "windowActions": [
+      [
+        "windows.1.switchTab",
+        1
+      ]
+    ]
   },
   "frames": 3,
   "note": "KrunkNative: krunker.io refused the official list: the krunker.io servers line says why in red where the official groups would be; our groups are unchanged"

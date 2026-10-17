@@ -5,9 +5,11 @@
 // on the page only), so every value stays in the page until a step reads it back (sync_page). The state
 // (g_flow) keeps them across a trip to the Dedicated Server window and back (knHostFlow 'reopen').
 //
-// The last step offers, by the active backend (krunker_net_active(): the official krunker.io connection):
+// The last step offers, by the window's backend: the Servers tab it was opened from (host_flow_open_backend,
+// the "+ Host Game" of krunk.io or krunker.io), else the active one (krunker_net_active(): the official krunker.io
+// connection). The session's backend is never changed here.
 //   krunker.io  -> krunker.io's official hosting: v10's CUSTOM_SERVER request (krunker_net_host_custom)
-//   otherwise   -> Box Office servers: the brain hosts the game (/mm/host-game, servers_ui_host_game)
+//   krunk.io    -> Box Office servers: the brain hosts the game (/mm/host-game, servers_ui_host_game)
 //   always      -> host it yourself: the server_bin command and the Dedicated Server window
 #include <host_flow_ui.h>
 #include <host_command.h>
@@ -19,7 +21,7 @@
 #include <html_ui.h>
 #include <i18n.h>
 #include <krunker_net.h>         // the krunker.io branch: the official connection and its hosting
-#include <backend_ui.h>       // servers_ui_host_game: Start Game on Box Office servers
+#include <backend_ui.h>       // servers_ui_host_game: Start Game on Box Office servers; account_backend (one backend per session)
 #include <map_catalog.h>
 #include <shared.h>
 #include <ui_host_config.h>
@@ -37,6 +39,7 @@
 // The flow's state. The page holds the values while the window is open; sync_page() reads them back.
 static struct {
     int host_type;                         // config.hostTypes index (GAME_HOST_*)
+    int backend;                           // the Start Game's backend: 1 krunker.io, 0 Box Office, -1 the active one
     int step;                              // the tab shown (FLOW_STEP_*)
     unsigned char maps[FLOW_MAP_MAX];      // gameMap<mapIndex> checked (Krunker's own maps)
     char custom_key[256];                  // a community map chosen in the Games window: its key or published spec ("" none)
@@ -56,8 +59,9 @@ static int official_hostable(const MapCatalogEntry *e) {
     return e && e->source == MAP_SOURCE_OFFICIAL && e->hostable && e->index >= 0 && e->index < FLOW_MAP_MAX;
 }
 
-// The last step's backend: krunker.io's hosting while the official connection is active (krunker_net.h)
-static int krunker_backend(void) { return krunker_net_active(); }
+// The last step's backend: the window's (the Servers tab it opened from), else krunker.io's hosting while the
+// official connection is active (krunker_net.h)
+static int krunker_backend(void) { return g_flow.backend < 0 ? krunker_net_active() : g_flow.backend; }
 
 // ------------------------------------------------------------------ the page's values
 
@@ -246,13 +250,34 @@ void host_flow_start(void) {
     }
     int sent = 0;
     if (krunker_backend()) {
+#ifdef __EMSCRIPTEN__
+        set_message(I18N("kn.hostflow.kio.web", "Hosting on krunker.io is not available in the browser build"), 1);
+#else
         if (g_flow.custom_key[0]) { // a community map is Box Office's (kn_brain) and is not on krunker.io
             set_message(I18N("kn.hostflow.kio.community", "Community maps are hosted on Box Office servers or on your own server."), 1);
         } else {
-            set_message(I18N("generic.wait", "Please wait..."), 0);
-            sent = krunker_net_host_custom(config, on_krunker_hosted, NULL);
-            if (!sent) set_message(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."), 1);
+            // the refusals say why (krunker_net_host_block): the player can act on each one
+            switch (krunker_net_host_block()) {
+            case KRUNKER_HOST_NOT_CONNECTED:
+                set_message(I18N("kn.hostflow.kio.notConnected", "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection."), 1);
+                break;
+            case KRUNKER_HOST_GUEST:
+                set_message(I18N("kn.hostflow.kio.signIn", "Sign in to your krunker.io account to host a game there."), 1);
+                break;
+            case KRUNKER_HOST_BUSY:
+                set_message(I18N("kn.hostflow.kio.busy", "krunker.io is still answering the last game. Wait for it, then try again."), 1);
+                break;
+            case KRUNKER_HOST_READY:
+                set_message(I18N("generic.wait", "Please wait..."), 0);
+                sent = krunker_net_host_custom(config, on_krunker_hosted, NULL);
+                if (!sent) set_message(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."), 1);
+                break;
+            }
         }
+#endif
+    } else if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // one backend per session: the brain sends nothing while krunker.io is the active backend (account_ui.c)
+        set_message(I18N("kn.hostflow.box.gated", "Box Office servers are not reachable while you play on krunker.io. Leave that game first."), 1);
     } else {
         char *json = cJSON_PrintUnformatted(config);
         sent = json ? servers_ui_host_game(json) : 0; // "Creating Game..." until the brain answers
@@ -583,6 +608,7 @@ static void flow_show(void) { menu_show_window(MENU_WINDOW_HOST, 1); }
 static void flow_reset(const int host_type) {
     cJSON_Delete(g_flow.request);
     memset(&g_flow, 0, sizeof(g_flow));
+    g_flow.backend = -1;
     g_flow.host_type = game_host_type_name(host_type) ? host_type : GAME_HOST_CUSTOM;
     g_flow.port = FLOW_DEFAULT_PORT;
     servers_ui_set_host_type(g_flow.host_type); // the rows' read-back (ui_host_config_collect) reads it
@@ -591,6 +617,14 @@ static void flow_reset(const int host_type) {
 // openHostWindow(false, type): the chooser's server-type cards (window 42)
 void host_flow_open(const int host_type) {
     flow_reset(host_type);
+    flow_show();
+}
+
+// "+ Host Game" on a Servers tab (windows.1.hostGame): the window's backend is the tab's (krunker: 1 = krunker.io,
+// 0 = Box Office), whatever the session's is
+void host_flow_open_backend(const int host_type, const int krunker) {
+    flow_reset(host_type);
+    g_flow.backend = krunker ? 1 : 0;
     flow_show();
 }
 
