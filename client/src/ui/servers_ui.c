@@ -935,6 +935,10 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     g_play_seek = 0;
     const int auto_change = play ? 0 : auto_change_in;
     g_pin = PIN_NONE;
+    // a Box Office seek replaces the error screen on the screen: an earlier official krunker.io failure
+    // (krunker_net_failure_shown) must not make this seek's own error (a refused token: "Socket Error")
+    // route its Find Game to krunker.io's lobbies (menu_retry_connect)
+    krunker_net_clear_failure();
     if (g_client && !g_client->net_connected && !menu_connecting()) menu_show_connecting_map(NULL); // looking for the server: the spinner
     g_rejoin_seek = g_rejoin_next;
     g_rejoin_next = 0;

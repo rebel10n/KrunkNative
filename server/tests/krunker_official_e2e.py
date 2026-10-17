@@ -47,7 +47,8 @@ whose command line alone would join the matchmaker's pick, rejoins that official
 Validation token runs (--token alone; part of --native): "native-token-refused" (the matchmaker refuses the captcha's
 validation token as stale: one fresh token and one more seek, then the captcha again, joined), "native-token-refused-twice"
 (refused again: the error screen says Socket Error after that one retry), "native-token-reuse" (the build is refused after the
-captcha: the retry's seek carries no validation token, the spent one is never sent again).
+captcha: the retry's seek carries no validation token, the spent one is never sent again), "native-token-socket-error" (the
+live run 1: the first seek, with no token, is refused "Socket Error"; a fresh token's seek is let through, joined).
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
 token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
@@ -430,6 +431,7 @@ def build_url(stub):
 
 class Stub:
     captcha_free = False  # True: the first seek is let through (a run that never shows the captcha UI, e.g. Strike's page)
+    socket_error_no_token = False  # True: a seek with no validationToken is refused "Socket Error" (the live word, run 1)
 
     def __init__(self, mm_port, ws_port, scenario="default", map_index=None, spawn=None):
         self.mm_port, self.ws_port = mm_port, ws_port
@@ -554,7 +556,10 @@ class Stub:
                         if stub.refuse_tokens > 0:
                             stub.refuse_tokens -= 1
                             token_ok = False
-                    if not token_ok:
+                    if val is None and stub.socket_error_no_token:
+                        # the live matchmaker's answer to a seek with no validation token (build 10.0.3, run 1): "Socket Error"
+                        status, body = 400, json.dumps({"error": "Socket Error"}).encode()
+                    elif not token_ok:
                         if cap:
                             stub.used_captchas.add(cap)  # (the captcha went with the seek: spent)
                         status, body = 400, json.dumps({"error": "InvalidClientValidationToken"}).encode()
@@ -1931,6 +1936,9 @@ def run_native_token(mode):
     "refused-twice": the retry is refused too: the join ends on the error screen ("Socket Error"), after that one retry.
     "reuse": the matchmaker refuses the build (InvalidVersion) after the captcha, and the seek that retries it carries
       no validation token: the one the refused seek spent is never sent again (v10 sends one only with its captcha).
+    "socket-error": the run 1 of the live matchmaker (build 10.0.3, signed in, no captcha shown): the first seek carries
+      no validation token and is refused "Socket Error" (the word, not InvalidClientValidationToken); the client mints a
+      fresh token and seeks once more with it, and the join goes through (krunker_net.c token_refusal).
     Captcha prompts are answered through the modal's callback, one token each."""
     label = "native-token-" + mode
 
@@ -1939,6 +1947,9 @@ def run_native_token(mode):
             st.refuse_tokens = 1
         elif mode == "refused-twice":
             st.refuse_tokens = 2
+        elif mode == "socket-error":
+            st.captcha_free = True  # no captcha: the live run 1 never showed one
+            st.socket_error_no_token = True
         else:
             publish(st, next_build_doc(), label)  # published, but the stub's servers run the compiled build
 
@@ -1947,7 +1958,7 @@ def run_native_token(mode):
     timed += [(9000, "9000 play\n"), (20000, "20000 text @inst [id=instructionsUpdate]\n"), (20500, "20500 quit\n")]
     script = "0 boot\n" + "".join(line for _, line in sorted(timed))
     stub, p, out, log = launch_native(label, script, {}, stub_setup=setup)
-    tokens = TOKEN_CAPTCHAS[:1] if mode == "refused-twice" else TOKEN_CAPTCHAS
+    tokens = [] if mode == "socket-error" else TOKEN_CAPTCHAS[:1] if mode == "refused-twice" else TOKEN_CAPTCHAS
     statuses = post_captcha_prompts(log, p, tokens)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
@@ -1983,6 +1994,12 @@ def run_native_token(mode):
         inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
         check(f"{label}: the error screen says Socket Error", inst and "Socket Error" in inst.group(1), inst.group(1) if inst else None)
         check(f"{label}: the join did not go through", f"joined as sid {MY_SID}" not in text)
+    elif mode == "socket-error":
+        check(f"{label}: seek-game (refused Socket Error), generate-token, seek-game: the live order of run 1", paths == ["/seek-game", "/generate-token", "/seek-game"], paths)
+        check(f"{label}: the first seek has no validation token; the retry carries the fresh one", val == [None, stub.issued[0]] if stub.issued else False, val)
+        check(f"{label}: the client logged the refusal and sought once more", "validation token refused (Socket Error): seeking again with a fresh one" in text)
+        check(f"{label}: no error screen: the matchmaker's refusal is not the player's", "The matchmaker refused this join" not in text)
+        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
     else:
         want = ["/seek-game", "/generate-token", "/seek-game", "/seek-game", "/generate-token", "/seek-game"]
         check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game refused (InvalidVersion), the build again, seek-game (CaptchaRequired), generate-token, seek-game",
@@ -4079,6 +4096,7 @@ def main():
         run_native_token("refused")
         run_native_token("refused-twice")
         run_native_token("reuse")
+        run_native_token("socket-error")
         ran = True
     if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
         run_native_hud()
@@ -4090,10 +4108,11 @@ def main():
         run_native_world()
     if ONLY == "actions" and os.path.isfile(f"{BUILD}/client_bin"):  # just the player actions' run
         run_native_actions()
-    if ONLY == "token" and os.path.isfile(f"{BUILD}/client_bin"):  # just the validation token runs (refused, refused-twice, reuse)
+    if ONLY == "token" and os.path.isfile(f"{BUILD}/client_bin"):  # just the validation token runs (refused, refused-twice, reuse, socket-error)
         run_native_token("refused")
         run_native_token("refused-twice")
         run_native_token("reuse")
+        run_native_token("socket-error")
     if ONLY == "live" and os.path.isfile(f"{BUILD}/client_bin"):  # just the live Krunker build's runs
         run_native_live()
         run_native_live_refused()

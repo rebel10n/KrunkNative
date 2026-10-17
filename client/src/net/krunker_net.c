@@ -1326,9 +1326,13 @@ static void on_token(void *user, const int status, const char *body, const size_
 }
 
 // The matchmaker's refusals of a validation token that a fresh one can cure: spent, expired (the words of v10's
-// ERRORS table, v10.js:147689-147692). The brain path (servers_ui.c token_refusal) retries these too, and two more.
+// ERRORS table, v10.js:147689-147692), and "Socket Error": the word the live krunker.io matchmaker (build 10.0.3)
+// answers a seek that carries no validation token with, which the join_errors text shows as "Socket Error". The
+// first seek of a join has none (krunker_net.c seek), so without this retry that refusal ended the join.
+// The brain path (servers_ui.c token_refusal) retries the first two too, and two more.
 static int token_refusal(const char *error) {
-    return error && (!strcmp(error, "InvalidClientValidationToken") || !strcmp(error, "ExpiredClientValidationToken"));
+    return error && (!strcmp(error, "InvalidClientValidationToken") || !strcmp(error, "ExpiredClientValidationToken") ||
+                     !strcmp(error, "Socket Error"));
 }
 
 // {host, port, gameId, clientId, data} -> the WebSocket URL (game.deob.js:222360-222371)
