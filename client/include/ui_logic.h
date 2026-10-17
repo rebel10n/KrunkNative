@@ -479,7 +479,7 @@ typedef struct {
     // General > Experimental (v10.js:203387..203426; CONTROLS v10.js:202299..202402): main.c mouse look
     int mouse_flick;        // mouseFlick ("Mouse Flick Fix" switch, off on desktop): CONTROLS.mouseSkipFix
     float flick_clamp;      // flickClamp (200): a mouse event's axis delta >= this repeats the last accepted one
-    int raw_mouse;          // rawMouse (off): web pointerrawupdate events; natively GLFW raw motion with rawInput
+    int raw_mouse;          // rawMouse (on, Box Office's default): web pointerrawupdate events; natively GLFW raw motion
     int aim_freeze_fix;     // aimFreezeFix (off): web only, alternate rAF / 16 ms timeout frames while shooting
 } UiInputSettings;
 

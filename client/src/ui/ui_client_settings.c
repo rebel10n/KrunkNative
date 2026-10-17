@@ -135,9 +135,7 @@ static const ClientSetting SETTINGS[] = {
      "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)"},
     // Web: requestAnimationFrame is always paced by the display, so the switch is kept and has no further effect.
     {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_WEB | CS_GAME, "true", "Wait for the display refresh (swap interval 1)"},
-    // ---- System (glorp "Raw Input", "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND)
-    // Web: the pointer-lock look reads pointerrawupdate (the same raw path as v10's Raw Mouse Input).
-    {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Unaccelerated mouse motion while the pointer is locked"},
+    // ---- System (glorp "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND). Raw mouse motion is Controls > Raw Mouse Input (rawMouse)
     // Web: the browser's Web Audio is the only backend (Auto).
     {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "",
      "Sound output (and voice chat input); Auto tries every backend of this build in order"},
@@ -217,7 +215,6 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.windowMode.opt.0", "Windowed")  I18N("kn.client.windowMode.opt.2", "Borderless")  I18N("kn.client.windowMode.opt.1", "Fullscreen")
 //   I18N("settings.quality.res", "Resolution")  I18N("kn.client.resolution.info", "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)")
 //   I18N("kn.client.vsync.name", "V-Sync")  I18N("kn.client.vsync.info", "Wait for the display refresh (swap interval 1)")
-//   I18N("kn.client.rawInput.name", "Raw Input")  I18N("kn.client.rawInput.info", "Unaccelerated mouse motion while the pointer is locked")
 //   I18N("kn.client.audioBackend.name", "Audio Backend")  I18N("kn.client.audioBackend.info", "Sound output (and voice chat input); Auto tries every backend of this build in order")
 //   I18N("kn.client.audioBackend.opt.auto", "Auto")  I18N("kn.client.audioBackend.opt.null", "None (silent)")
 //   I18N("kn.client.audioOutput.name", "Audio Output")  I18N("kn.client.audioOutput.info", "Select hardware device for audio output")
@@ -613,16 +610,17 @@ static void apply_exit_button(void) {
     html_dom_set_display(el, chrome_visible() && cs_bool("exitButton") ? "flex" : "none");
 }
 
-// Raw (unaccelerated) motion while the pointer is locked: the Client tab's rawInput, or v10's rawMouse.
+// Raw (unaccelerated) motion while the pointer is locked: Controls > Raw Mouse Input (rawMouse).
 // v10's rawMouse (v10.js:203387, toggleMouseInputs) reads pointerrawupdate's coalesced events instead
 // of mousemove; that is the web build's look listener (main.c web_take_look). Natively every motion
-// event already reaches the game, so the nearest counterpart is GLFW's raw motion, on with either row.
+// event already reaches the game, so the nearest counterpart is GLFW's raw motion.
 static void apply_raw_input(void) {
-    const int raw = cs_bool("rawInput") || ui_controls_settings()->raw_mouse;
+    const int raw = ui_controls_settings()->raw_mouse;
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client;
     if (!client || !client->window || !glfwRawMouseMotionSupported()) return;
     glfwSetInputMode(client->window, GLFW_RAW_MOUSE_MOTION, raw ? GLFW_TRUE : GLFW_FALSE);
+    printf("[client] raw mouse motion %s\n", raw ? "on" : "off");
 #else
     // main.c's web look (web_take_look) reads pointerrawupdate while Module.knMouse.raw is set
     EM_ASM({ var m = Module.knMouse || (Module.knMouse = {}); m.raw = $0; }, raw ? 1 : 0);
@@ -929,10 +927,26 @@ static int rpc_allowed(void) {
 }
 #endif
 
+// The Client tab's Raw Input (rawInput, default on) is gone: Controls > Raw Mouse Input (rawMouse) is
+// the one switch. A profile that stored Raw Input keeps its value, copied to rawMouse once, unless
+// rawMouse was set already; the stored rawInput is then dropped, so later starts leave rawMouse alone.
+static void migrate_raw_input(void) {
+    const cJSON *old = cJSON_GetObjectItem(g_cs.store, "rawInput");
+    if (!old) return; // never stored: rawMouse's default (on) is the value Raw Input had
+    ui_settings_load(); // knSettings for ui_setting_saved (main.c loads it again once the page is up)
+    if (cJSON_IsBool(old) && !ui_setting_saved("rawMouse")) {
+        const HtmlArg on = {HTML_ARG_BOOL, cJSON_IsTrue(old) ? 1.0 : 0.0, NULL};
+        ui_settings_set("rawMouse", &on);
+    }
+    cJSON_DeleteItemFromObject(g_cs.store, "rawInput");
+    store_save();
+}
+
 void client_settings_startup(Client *client, int *offline) {
     g_cs.client = client;
     g_cs.launch_time = (long long) time(NULL);
     store_load();
+    migrate_raw_input();
     g_cs.hs_sound = cs_bool("hsSound");
     desktop_notify_set_enabled(client_settings_desktop_notify());
 #ifndef __EMSCRIPTEN__
@@ -1279,8 +1293,7 @@ static void rerender(void) {
 
 static void apply_setting(const ClientSetting *s) {
     const char *k = s->key;
-    if (!strcmp(k, "rawInput")) apply_raw_input();
-    else if (!strcmp(k, "exitButton")) apply_exit_button();
+    if (!strcmp(k, "exitButton")) apply_exit_button();
     else if (!strcmp(k, "discordRPC")) apply_discord();
     else if (!strcmp(k, "customCSS")) apply_custom_css();
     else if (!strcmp(k, "resolution")) apply_resolution();

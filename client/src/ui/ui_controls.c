@@ -465,7 +465,8 @@ static struct {
     float speed_lmt;         // speedLmt (gradSpeed); 1 = full speed
 } g_ctl = {
     .changer = -1,
-    .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f, 1, 0, 0, 200.0f, 0, 0},
+    // raw_mouse on: Box Office's default (v10 ships rawMouse off; ui_settings_defaults.c)
+    .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f, 1, 0, 0, 200.0f, 1, 0},
     // cntrlInput after the settings' set(): sensitivity*Cntrl x5, deadZoneL 0.3 (the
     // setting's val overrides cntrlInput's own 0.25), deadZoneR 0.25, triggerThres 0.1,
     // invertYCntrl off, vibration on, gradSpeed off, vibrationMlt 1.

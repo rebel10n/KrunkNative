@@ -158,8 +158,6 @@
  "kn.client.proxyScope.name": "Proxy Scope",
  "kn.client.proxyScope.opt.all": "All client traffic",
  "kn.client.proxyScope.opt.krunker": "krunker.io only",
- "kn.client.rawInput.info": "Unaccelerated mouse motion while the pointer is locked",
- "kn.client.rawInput.name": "Raw Input",
  "kn.client.requiresRestart": "Requires Restart",
  "kn.client.resetClient.confirm": "Are you sure you want to reset all your client settings?",
  "kn.client.resolution.info": "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)",

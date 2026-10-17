@@ -1719,7 +1719,7 @@ void client_mouse_settings_changed(void) {
 #else
     (void) in;
 #endif
-    client_settings_apply_raw_mouse(); // m.raw on the web: the Client tab's Raw Input or the controls' Raw Mouse Input
+    client_settings_apply_raw_mouse(); // m.raw on the web and GLFW raw motion natively: the controls' Raw Mouse Input
 }
 
 // The challenge drawn in the game UI (kn_webview.h) takes the widget's keys and clicks first: the GLFW keys

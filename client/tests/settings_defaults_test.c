@@ -47,6 +47,11 @@ static const Expect MOBILE[] = {
     {"gradSpeedMbl", "true", "true"},
 };
 
+// Box Office's own default (ui_settings_defaults.c): v10 ships rawMouse off, the Client tab's Raw Input was on
+static const Expect BOX_OFFICE[] = {
+    {"rawMouse", "true", "true"},
+};
+
 static const char *text_of(const char *key, const int mobile) { return ui_settings_default_text(key, mobile); }
 
 int main(void) {
@@ -69,6 +74,15 @@ int main(void) {
         CHECK(!strcmp(phone, e->phone), "%s phone %s, want %s", e->key, phone, e->phone);
     }
 
+    for (size_t i = 0; i < sizeof(BOX_OFFICE) / sizeof(BOX_OFFICE[0]); i++) {
+        const Expect *e = &BOX_OFFICE[i];
+        const char *desktop = text_of(e->key, 0), *phone = text_of(e->key, 1);
+        CHECK(desktop && phone, "%s: missing from the table", e->key);
+        if (!desktop || !phone) continue;
+        CHECK(!strcmp(desktop, e->desktop), "%s desktop %s, want %s", e->key, desktop, e->desktop);
+        CHECK(!strcmp(phone, e->phone), "%s phone %s, want %s", e->key, phone, e->phone);
+    }
+
     // keys outside the table: the captured (scraped) default stands on both platforms
     CHECK(text_of("fov", 0) == NULL && text_of("fov", 1) == NULL, "fov is not a phone default");
     CHECK(text_of("lowSpec", 1) == NULL, "lowSpec keeps its captured default");
@@ -79,8 +93,8 @@ int main(void) {
     // the table is well formed: unique keys, typed values that parse
     size_t n = 0;
     const UiSettingDefault *table = ui_settings_defaults_table(&n);
-    CHECK(table && n == sizeof(PHONE) / sizeof(PHONE[0]) + sizeof(MOBILE) / sizeof(MOBILE[0]),
-          "table holds %zu entries", n);
+    CHECK(table && n == sizeof(PHONE) / sizeof(PHONE[0]) + sizeof(MOBILE) / sizeof(MOBILE[0]) +
+              sizeof(BOX_OFFICE) / sizeof(BOX_OFFICE[0]), "table holds %zu entries", n);
     for (size_t i = 0; table && i < n; i++) {
         const UiSettingDefault *a = &table[i];
         CHECK(a->key && a->desktop && a->phone, "entry %zu is incomplete", i);

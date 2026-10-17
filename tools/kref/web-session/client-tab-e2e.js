@@ -10,7 +10,7 @@ const { openPage, sleep, stackEnv } = require('./session.js');
 // The native tab, in its folder order (ui_client_settings.c SETTINGS, native rows only).
 const NATIVE_FOLDERS = {
   Display: ['Window Mode', 'Resolution', 'V-Sync'],
-  System: ['Raw Input', 'Audio Backend', 'Process Priority'],
+  System: ['Audio Backend', 'Process Priority'],
   Client: ['Exit Button', 'Discord Rich Presence', 'Resource Swapper', 'Auto-restart for updates', 'Custom CSS'],
   Startup: ['Start Offline', 'Auto Join', 'Account Mode', 'Account Service URL', 'Server Finder URL'],
   Network: ['Proxy', 'Proxy Scope'],

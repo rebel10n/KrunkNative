@@ -69,7 +69,7 @@ static const char *CORE_SETTINGS[] = {
     "showFPS", "speedScale", "dmgScale", "ambientVolume", "gunsVolume", "playerVolume", "uiVolume",
     "oldScoreboard", // its default depends on the device (ui_setting_value)
     // input/camera settings (ui_controls.c)
-    "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat", "slidCont",
+    "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat", "slidCont", "rawMouse",
     "sound", "voiceVolume", "assetVolume",
     // v7 voice chat (voice.c): micQuality / micVolume ride in "vc", proximity voice, muteSpec, toggle
     "micQuality", "micVolume", "voiceChatType", "voiceDistance", "muteSpec", "voiceChatTrigger",

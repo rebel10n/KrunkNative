@@ -38,6 +38,9 @@ static const UiSettingDefault DEFAULTS[] = {
     {"invertYMbl", UI_DEFAULT_BOOL, "false", "false"},
     {"vibrationMbl", UI_DEFAULT_BOOL, "true", "true"},
     {"gradSpeedMbl", UI_DEFAULT_BOOL, "true", "true"},
+    // Box Office, not v10 (v10.js:203387 ships rawMouse off): raw mouse motion stays on, as the Client tab's
+    // Raw Input was (ui_client_settings.c migrate_raw_input carries a stored value over)
+    {"rawMouse", UI_DEFAULT_BOOL, "true", "true"},
 };
 
 const UiSettingDefault *ui_settings_defaults_table(size_t *count) {

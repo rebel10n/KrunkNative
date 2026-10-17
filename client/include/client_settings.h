@@ -51,7 +51,7 @@ void client_settings_set_desktop_notify(int on);
 // page reloads) when the server stops for an update or a newer client is ready to run.
 int  client_settings_auto_restart(void);
 void client_settings_fullscreen_size(int *w, int *h);    // "Resolution" for exclusive fullscreen (unchanged when unset)
-// GLFW raw mouse motion again: the Client tab's rawInput, or v10's rawMouse (General > Experimental)
+// GLFW raw mouse motion again: Controls > Raw Mouse Input (rawMouse)
 void client_settings_apply_raw_mouse(void);
 
 // ---- UI (client/src/ui)
