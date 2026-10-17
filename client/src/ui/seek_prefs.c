@@ -15,7 +15,7 @@
 #include <modes.h>
 #include <flavor.h> // Krunker Strike: its own servers only; flavor_get (the flavor's rotation)
 #include <flavor_rules.h> // flavor_rotation_modes, flavor_mode_allowed
-#include <krunker_relay.h> // the web's krunker.io state (Server Type row, first-run note)
+#include <krunker_relay.h> // the web's krunker.io state (Server Type row)
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>

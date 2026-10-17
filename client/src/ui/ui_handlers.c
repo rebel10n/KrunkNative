@@ -27,7 +27,6 @@
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
 #include <strike_econ.h>  // Krunker Strike: the economy's knStrike* handlers (strike_econ.c)
-#include <first_run_ui.h> // the first-run choice's knFirstRun handlers (first_run_ui.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
@@ -617,7 +616,6 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     alt_manager_ui_handle,     // alt_manager_ui.c: the KrunkNative saved accounts (knAlt*)
     v10_party_ui_handle,       // v10_party.c: the server password popup (submitGameCode)
     strike_econ_handle,        // strike_econ.c: Krunker Strike's economy (knStrikeEquip, knStrikeSpin, knStrikeBuy, ...)
-    first_run_ui_handle,       // first_run_ui.c: the first-run choice (knFirstRun, knFirstRunBlock)
 };
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
