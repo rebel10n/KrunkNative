@@ -2426,6 +2426,14 @@ static void class_preview_canvas(const HtmlElem root, const char *box, const flo
     html_dom_set_style(el, "bottom", "auto");
 }
 
+// TAP_TO_PLAY's top-centre mode label (FRVR's Yw, .frvr-tap-to-play-map-mode-name-label): the game
+// mode's name, as the end screen's header has it (strike_hud.c). The template is FRVR's sandbox
+// capture, which had no mode and wrote the text "null" there; with no mode the label is empty.
+static void tap_to_play_mode_label(const HtmlElem root, const Client *client) {
+    const char *mode = client && client->game.mode && client->game.mode->config.name ? client->game.mode->config.name : "";
+    set_text(root, ".frvr-tap-to-play-map-mode-name-label", mode);
+}
+
 void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     switch (s) {
     case STRIKE_SCREEN_MAIN_MENU:
@@ -2437,6 +2445,7 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
         fill_account(root);
         kr_limit_hook(root);
         switch_teams_update(root, M.client);
+        tap_to_play_mode_label(root, M.client);
         break;
     case STRIKE_SCREEN_CLASS_SELECTION:
         M.previewed = current_class(); // _r = loadout.classIndex

@@ -212,7 +212,9 @@ def client(name, brain_port, script, game, account):
     with open(path, "w") as f:
         f.write(script)
     cfg = os.path.join(WORK, name + "-cfg")
-    folder = os.path.join(cfg, "krunknative")
+    # the Strike flavor's own config directory (flavor_storage_subdir: "krunknative-strike"; Box Office keeps
+    # "krunknative"): a --flavor strike client reads its html storage keys only there
+    folder = os.path.join(cfg, "krunknative-strike")
     os.makedirs(folder, exist_ok=True)
     for key, value in (("krunker_username", account[0]), ("krunker_token", account[1]), ("consent", "1")):
         with open(os.path.join(folder, key + ".json"), "w") as f:
