@@ -46,6 +46,7 @@
 #include <backend_ui.h>
 #include <client_settings.h>
 #include <desktop_notify.h>
+#include <web_push.h> // the web build's Notifications switch (Web Push, web_push.c)
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
@@ -974,20 +975,27 @@ static void more_krunker(void) {
     free(html);
 }
 
-// The Notifications toggle (webpush-container, _52289). Expanded, it shows the desktop notifications
-// switch (client settings desktopNotify, default on; desktop_notify.c posts the centre's friend
-// requests, messages, Wild Offers and surveys) and what the switch can do on this system. Each
-// expand writes the content again, so it always shows the stored state. The web build keeps v10's
-// "not supported" line: its Web Push subscribe is the next step (ui/sw.js).
+// The Notifications toggle (webpush-container, _52289). Expanded, it shows the Notifications switch and what
+// the switch can do on this system. Each expand writes the content again, so it always shows the stored state.
+// Native: the desktop notifications switch (client settings desktopNotify, default on; desktop_notify.c posts
+// the centre's friend requests, messages, Wild Offers and surveys). Web: the Web Push switch (web_push.c: the
+// browser subscription, recorded with the brain for a signed-in account); a browser without the Push API keeps
+// v10's "not supported" line.
 static void notifications_render(const HtmlElem content) {
-#ifdef __EMSCRIPTEN__
-    (void) content;
-    html_dom_set_html(content, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
-                               "Push notifications are not supported in your browser.</p></div>");
-#else
-    const int on = client_settings_desktop_notify();
+    int on;
     char caption[256];
+#ifdef __EMSCRIPTEN__
+    if (!web_push_supported()) {
+        html_dom_set_html(content, "<div class=\"webpush-message unsupported svelte-5kyah8\"><p class=\"svelte-5kyah8\">"
+                                   "Push notifications are not supported in your browser.</p></div>");
+        return;
+    }
+    on = web_push_on();
+    snprintf(caption, sizeof(caption), "%s", web_push_status());
+#else
+    on = client_settings_desktop_notify();
     desktop_notify_caption(on, desktop_notify_available(), caption, sizeof(caption));
+#endif
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"webpush-message svelte-5kyah8\"><label class=\"switch\" style=\"margin-right:10px\">"
                    "<input type=\"checkbox\" id=\"knDesktopNotify\" onclick=\"knV10DesktopNotify()\"");
@@ -998,7 +1006,6 @@ static void notifications_render(const HtmlElem content) {
     char *html = sb_finish(&sb);
     html_dom_set_html(content, html);
     free(html);
-#endif
 }
 
 static HtmlElem notifications_content(const HtmlElem box) {
@@ -1010,6 +1017,15 @@ static HtmlElem notifications_content(const HtmlElem box) {
     return content;
 }
 
+#ifdef __EMSCRIPTEN__
+// A Web Push answer changed the caption: redraw it while the panel is open.
+static void notifications_redraw(void) {
+    HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
+    if (!box || !V.notif_open) return;
+    notifications_render(notifications_content(box));
+}
+#endif
+
 static void notifications_toggle(void) {
     HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
     if (!box) return;
@@ -1020,11 +1036,21 @@ static void notifications_toggle(void) {
     HtmlElem content = notifications_content(box);
     if (V.notif_open) notifications_render(content);
     set_display(content, V.notif_open ? "" : "none");
+#ifdef __EMSCRIPTEN__
+    if (V.notif_open) {
+        web_push_set_listener(notifications_redraw); // an answer from the brain / the browser redraws the caption
+        web_push_refresh();                          // records the subscription again (a sign-in since the switch)
+    }
+#endif
 }
 
-// The switch (knV10DesktopNotify): flips the stored desktopNotify and writes the caption again.
+// The switch (knV10DesktopNotify): flips the stored choice (desktopNotify; web: Web Push) and writes the caption again.
 static void notifications_switch(void) {
+#ifdef __EMSCRIPTEN__
+    web_push_set(!web_push_on());
+#else
     client_settings_set_desktop_notify(!client_settings_desktop_notify());
+#endif
     HtmlElem box = html_dom_query(0, "#playerHeaderEl .webpush-container");
     HtmlElem content = box ? notifications_content(box) : 0;
     if (content) notifications_render(content);

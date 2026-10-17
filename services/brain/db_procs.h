@@ -120,6 +120,7 @@ extern const kn_proc P_SEASON_ENSURE, P_BP_DATA, P_BP_CLAIM, P_BP_BUY, P_BP_SKIP
 extern const kn_proc P_SIGNUP_REWARDS, P_SIGNUP_PREMIUM_SWEEP;
 /* ---- profile pictures (db_avatar.c, 0123_account_avatars; avatar.c) */
 extern const kn_proc P_AVATAR_PUT, P_AVATAR_VERDICT, P_AVATAR_GET, P_AVATAR_PUBLIC, P_AVATAR_DELETE;
+extern const kn_proc P_PUSH_SUBSCRIBE, P_PUSH_UNSUBSCRIBE; /* db_push.c (0344_push_subscriptions) */
 /* The season's active pass (malloc'd; NULL when none / on failure); *row: its battlepasses row. */
 struct BattlePass *db_bp_load(Dbx *x, int season, cJSON **row);
 /* checkBadges with the season badges: adds every claimable badge whose rule holds (stats =

@@ -1516,6 +1516,104 @@ void html_clipboard_read(const HtmlClipboardFn fn, void *user) {
     kn_js_clipboard_read(req);
 }
 
+// ---- Web Push (html_dom.h): ui/sw.js is the page's service worker; the browser subscription is made
+// through it. The answer is the PushSubscription's JSON (malloc'd by stringToNewUTF8, 0 = none), freed
+// here like the clipboard's text. The promise settles once, whatever happens (the guard below).
+
+typedef struct {
+    HtmlPushFn fn;
+    void *user;
+} PushReq;
+
+EMSCRIPTEN_KEEPALIVE void kn_ui_push_done(PushReq *req, char *json) {
+    if (req && req->fn) req->fn(req->user, json);
+    free(json);
+    free(req);
+}
+
+EM_JS(int, kn_js_push_supported, (void), {
+    return window.isSecureContext && ('serviceWorker' in navigator) && ('PushManager' in window) ? 1 : 0;
+});
+
+// the browser's subscription for the VAPID key (the existing one when there is one), as JSON
+EM_JS(void, kn_js_push_subscribe, (void *req, const char *key), {
+    var finished = false;
+    var done = function (json) {
+        if (finished) return;
+        finished = true;
+        _kn_ui_push_done(req, json ? stringToNewUTF8(json) : 0);
+    };
+    if (!window.isSecureContext || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        done(null);
+        return;
+    }
+    var b64 = UTF8ToString(key).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    navigator.serviceWorker.register('sw.js').then(function () {
+        return navigator.serviceWorker.ready;
+    }).then(function (reg) {
+        return reg.pushManager.getSubscription().then(function (sub) {
+            if (sub) return sub;
+            var raw = atob(b64), bytes = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+            return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+        });
+    }).then(function (sub) {
+        done(sub ? JSON.stringify(sub) : null);
+    }).catch(function () {
+        done(null);
+    });
+});
+
+// removes the browser's subscription; the one it removed comes back as JSON (NULL: there was none)
+EM_JS(void, kn_js_push_unsubscribe, (void *req), {
+    var finished = false;
+    var done = function (json) {
+        if (finished) return;
+        finished = true;
+        _kn_ui_push_done(req, json ? stringToNewUTF8(json) : 0);
+    };
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) {
+        done(null);
+        return;
+    }
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+        return reg ? reg.pushManager.getSubscription() : null;
+    }).then(function (sub) {
+        if (!sub) return null;
+        var json = JSON.stringify(sub);
+        return sub.unsubscribe().catch(function () {}).then(function () { return json; });
+    }).then(function (json) {
+        done(json);
+    }).catch(function () {
+        done(null);
+    });
+});
+
+int html_push_supported(void) { return kn_js_push_supported(); }
+
+void html_push_subscribe(const char *vapid_public_key_b64url, const HtmlPushFn fn, void *user) {
+    PushReq *req = calloc(1, sizeof(*req));
+    if (!req) {
+        if (fn) fn(user, NULL);
+        return;
+    }
+    req->fn = fn;
+    req->user = user;
+    kn_js_push_subscribe(req, vapid_public_key_b64url ? vapid_public_key_b64url : "");
+}
+
+void html_push_unsubscribe(const HtmlPushFn fn, void *user) {
+    PushReq *req = calloc(1, sizeof(*req));
+    if (!req) {
+        if (fn) fn(user, NULL);
+        return;
+    }
+    req->fn = fn;
+    req->user = user;
+    kn_js_push_unsubscribe(req);
+}
+
 // ---- cross-tab channel
 
 int html_channel_open(const char *name) { return name && *name ? kn_js_channel_open(name) : 0; }

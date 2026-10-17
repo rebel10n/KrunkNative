@@ -128,6 +128,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.cors_origins` | `["*"]` | allowed CORS origins for the web build |
 | `brain.trust_proxy` | `false` | take client IP from X-Forwarded-For (behind nginx) |
 | `brain.node_ttl_s` | `30` | node/lobby row TTL (v3.1.1 `STALE_AFTER_MS`) |
+| `vapid.public_key` | `""` (off) | the VAPID public key of Web Push (env `KN_VAPID_PUBLIC_KEY`): unpadded base64url of the 65-byte P-256 point (87 characters). `GET /api/push/vapid-key` answers it (404 when unset); the page subscribes with it (services/brain/push.c, push_rules.c). The private key and the subject are the send step's (not read yet) |
 | `brain.heartbeat_s` | `5` | how often the owning brain refreshes its rows |
 | `brain.ping_interval_s` | `10` | internal WS ping interval (v3.1.1 `PING_INTERVAL_MS`) |
 | `brain.regions` | `[{"id":"local","name":"Local"}]` | known regions (`id`, `name`, optional `ping_host`); ids are the 2-letter region codes (`SV`, `LA`, `CH`, `VA`): the prefix of short game links (`?game=CH2:kz862`); the client shows their place names |

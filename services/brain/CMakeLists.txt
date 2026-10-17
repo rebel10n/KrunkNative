@@ -114,6 +114,10 @@ set(KN_BRAIN_SOURCES
     avatar_verdict.c
     db_avatar.c
     avatar_stb.c
+    # Web Push subscriptions (0344_push_subscriptions): the subscribe side, the send is a later step
+    push.c
+    push_rules.c
+    db_push.c
 )
 
 # The publish checks are the editor's validateMap (shared/src/map_validate.c): it needs the prefab,
@@ -180,6 +184,12 @@ if (KN_WEBP_FOUND)
 endif ()
 add_test(NAME brain_avatar COMMAND kn_brain_avatar_test ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(brain_avatar PROPERTIES LABELS "knsvc;brain;avatar")
+
+# Web Push (push_rules.c, pure, no database): the endpoint and key rules of the subscribe route
+add_executable(kn_brain_push_test tests/test_push_validation.c push_rules.c)
+target_include_directories(kn_brain_push_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME brain_push_validation COMMAND kn_brain_push_test)
+set_tests_properties(brain_push_validation PROPERTIES LABELS "knsvc;brain;push")
 
 # v10 double XP: the weekend schedules, the ISO week, the per-match offer gate and the placeholder (pure)
 add_executable(kn_brain_double_xp_test tests/test_double_xp.c ${CMAKE_SOURCE_DIR}/shared/src/double_xp.c)

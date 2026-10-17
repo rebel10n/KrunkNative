@@ -211,6 +211,16 @@ void html_clipboard_write(const char *text);            // UTILS.copyToClipboard
 typedef void (*HtmlClipboardFn)(void *user, const char *text);
 void html_clipboard_read(HtmlClipboardFn fn, void *user);
 
+// ---- Web Push (web build; native has none). The page subscribes through its service worker (ui/sw.js):
+// the browser's PushSubscription comes back as JSON ({endpoint, expirationTime, keys: {p256dh, auth}}).
+// html_push_subscribe / html_push_unsubscribe call fn exactly once, later from the browser's event loop;
+// the subscription is NULL when it cannot be made (no Push API, notifications refused, a bad key). Native:
+// fn runs at once with NULL, html_push_supported() is 0.
+typedef void (*HtmlPushFn)(void *user, const char *subscription_json);
+int  html_push_supported(void);                                        // 1: a secure context with the Push API
+void html_push_subscribe(const char *vapid_public_key_b64url, HtmlPushFn fn, void *user);
+void html_push_unsubscribe(HtmlPushFn fn, void *user);                 // fn gets the subscription it removed (NULL: none)
+
 // ---- cross-window channel: web, a BroadcastChannel between same-origin tabs (the editor's
 // tabs share their clipboard and project lists over it); natively unavailable (0 / NULL):
 // native editor windows talk over the editor bus (shared/include/editor_bus.h). Text messages.
