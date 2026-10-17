@@ -561,8 +561,8 @@ def run():
           window and not re.search(r"as a guest|guest only|krunker\.io servers:|KrunkNative servers:", window, re.I), window[:300])
     check("no \"krunker.io: Guest\" anywhere in the log's page texts", "krunker.io: Guest" not in text, re.findall(r".{30}krunker\.io: Guest.{10}", text)[:2])
     st = probe(text, "status")
-    check("the krunker.io servers line is a plain label (no account, no Login / Logout)",
-          "KRUNKER.IO OFFICIAL LOBBIES" in st and not re.search(r"guest|login|logout|" + ACCOUNT_NAME, st, re.I), st)
+    check("the krunker.io servers line is there and plain (no account, no Login / Logout)",
+          st.startswith("n=1") and not re.search(r"guest|login|logout|" + ACCOUNT_NAME, st, re.I), st)
     qj = re.search(r"elements=\d+ match=(\d+)", probe(text, "qj"))
     check("a krunker.io group has a Quick Join button (main's group header; krunker.io groups come last)", qj and int(qj.group(1)) >= 1, probe(text, "qj"))
     check("Quick Join picks the Kanji lobby with room (not the fuller Burg, not the password one or the full one)",

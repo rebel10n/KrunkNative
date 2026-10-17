@@ -522,7 +522,6 @@
  "kn.servers.kioLoading": "Loading the krunker.io servers...",
  "kn.servers.kioNoMatch": "No krunker.io server matches the search or filter.",
  "kn.servers.kioOpensInBrowser": "krunker.io servers open in your browser.",
- "kn.servers.kioSection": "KRUNKER.IO OFFICIAL LOBBIES",
  "kn.servers.outdated": "Outdated",
  "kn.servers.outdatedRuns": " (runs {0})",
  "kn.servers.outdatedTitle": "Older than the latest server release",

@@ -948,17 +948,15 @@ html.kn-bare-window #instructions {
   background-color: #9e9e9e;
 }
 
-/* The Servers window's one separator before the official krunker.io groups (servers_ui.c
- * append_krunker_status). v10 lists krunker.io's lobbies with no tag, so this line is the only cue:
- * the group header's "online" grey at the window's 20px, a plain label (which account an official
- * game uses is the one account UI's, backend_ui.h). #menuWindow.dark div sets every div white
- * (main.css), hence the selectors' weight. */
+/* The Servers window's status line before the official krunker.io groups (servers_ui.c
+ * append_krunker_status): empty when the lobbies are listed, else why there are none. Its
+ * font and color are the group header's "online" grey, at the window's 20px. #menuWindow.dark div
+ * sets every div white (main.css), hence the selectors' weight. */
 #menuWindow.dark div.kioSep {
   margin: 24px 15px -8px 6px;
   font-size: 18px;
   color: rgba(255, 255, 255, 0.6);
 }
-.kioSep .kioSepLabel,
 #menuWindow.dark div.kioSepWhy {
   color: rgba(255, 255, 255, 0.6);
 }

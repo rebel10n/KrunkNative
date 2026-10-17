@@ -2772,8 +2772,8 @@ def run_native_lobby():
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
     st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
-    # the one separator before the official groups: its label, nothing after it (they join here)
-    check(f"{label}: the krunker.io servers line says its lobbies are listed and join here", st and st.group(1).rstrip().endswith("KRUNKER.IO OFFICIAL LOBBIES"),
+    # the status line before the official groups: nothing to say (no reason why there are none), so they join here
+    check(f"{label}: the krunker.io status line is empty: its lobbies are listed and join here", st and not st.group(1).strip(),
           st.group(1) if st else None)
     loading = re.search(r"\[input_script\] text t=\d+ @loading n=1 .*?text=(.*)", text)
     check(f"{label}: the click raises v10's loading screen with the lobby's map (Loading {MAP_NAME} ...)",

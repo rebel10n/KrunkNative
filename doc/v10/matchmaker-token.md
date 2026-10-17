@@ -345,11 +345,10 @@ Server list (windows[1] loadData): a failed game list keeps the window on LOADIN
   Official Customs or Custom Games. Its other lobbies sit in one group per Krunker region after
   those, with v10's header: the place name (`_7517`, "New York"). Each krunker.io group has Quick
   Join and "N online". In the mode-grouped browser the customs take the same two groups and the
-  other lobbies join the mode's own group, as in v10. One line before the official groups is the
-  only cue that they are krunker.io's (`#kioStatus`, `.kioSep`): "krunker.io servers", why there
-  are none when there are none (loading, refused, unreachable, nothing matching) and, on the right,
-  the krunker.io account they see with Login / Logout. The footer's "In Game" adds krunker.io's
-  `totalPlayerCount`.
+  other lobbies join the mode's own group, as in v10. The status line before the official groups
+  (`#kioStatus`, `.kioSep`) has no label: the krunker.io tab says whose lobbies these are. It says
+  why there are none when there are none (loading, refused, unreachable, nothing matching) and is
+  empty when they are listed. The footer's "In Game" adds krunker.io's `totalPlayerCount`.
 * Region: Settings > Quickplay > krunker.io Region (`knKrunkerRegion`, the matchmaker's regions by
   Krunker's place names) is the region official seeks ask for (after `KRUNKNATIVE_KRUNKER_REGION`)
   and the one Quick Match / F4 prefer in the list; Default is the ping race's region (1.2

@@ -2043,17 +2043,15 @@ static void append_finder_error(StrBuf *sb) {
     sb_append(sb, ")</span></div>");
 }
 
-// The official krunker.io lobbies' one separator line (native), before their first group, or after
-// ours: v10 lists krunker.io's lobbies with no tag, so this line is the only cue that the groups below
-// are krunker.io's (the header's "online" grey, .kioSep in krunknative.css). It names them, says why
-// there are none (loading, krunker.io refusing this network, unreachable, nothing matching). A plain
-// label: which account an official game uses is the one account UI's (backend_ui.h active_account(),
-// v10's header and login modal once the game is joined), never a second login here.
+// The official krunker.io lobbies' status line (native), before their first group, or after ours. It
+// has no label: the krunker.io tab says which servers these are. It says why there are none (loading,
+// krunker.io refusing this network, unreachable, nothing matching) and stays empty when the lobbies
+// are listed. The line is a plain one: which account an official game uses is the one account UI's
+// (backend_ui.h active_account(), v10's header and login modal once the game is joined), never a
+// second login here.
 static void append_krunker_status(StrBuf *sb, const int groups) {
     if (!krunker_lobbies_enabled()) return;
-    sb_append(sb, "<div id='kioStatus' class='kioSep'><span class='kioSepLabel'>");
-    sb_append_esc(sb, I18N("kn.servers.kioSection", "KRUNKER.IO OFFICIAL LOBBIES"));
-    sb_append(sb, "</span>");
+    sb_append(sb, "<div id='kioStatus' class='kioSep'>");
     const char *why = NULL;
     int error = 0;
     if (!krunker_lobbies_list() && krunker_lobbies_loading()) why = I18N("kn.servers.kioLoading", "Loading the krunker.io servers...");
@@ -2061,7 +2059,7 @@ static void append_krunker_status(StrBuf *sb, const int groups) {
     else if (!groups) why = I18N("kn.servers.kioNoMatch", "No krunker.io server matches the search or filter.");
     else if (!krunker_net_in_client()) why = I18N("kn.servers.kioOpensInBrowser", "krunker.io servers open in your browser.");
     if (why) {
-        sb_append(sb, error ? "<div class='kioSepWhy kioSepErr'>" : "<div class='kioSepWhy'>"); // its own line, under the label
+        sb_append(sb, error ? "<div class='kioSepWhy kioSepErr'>" : "<div class='kioSepWhy'>");
         sb_append_esc(sb, why);
         sb_append(sb, "</div>");
     }
