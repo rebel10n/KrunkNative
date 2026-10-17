@@ -113,7 +113,7 @@ v10's hub is still v7's social.js with targeted changes (S10 routes, settings an
 | navBar, menu buttons feed / market / leaders / maps / mods / items, `updateWindow(p,q,s,i)` routes, `?games` | S10:6943-7003 | v7 | **done** |
 | Settings popup (13 settings) | S10:1749, 1949 (= v7) | v7 | **done** |
 | Krunk TV, Who to Follow side boxes | removed from the page | still written | **done** (`side_boxes`: the ad box only, S10:2389) |
-| App badges: Android only | S10:1514-1518; no `#steamDB` | iOS + Android (+ Steam in scenarios) | **done** (KN: opens the Download window) |
+| App badges: Android only | S10:1514-1518; no `#steamDB` | iOS + Android (+ Steam in scenarios) | **done** (KN: opens the Download window; web only, the native client is the client: no badge) |
 | `#hackText` BANNED | page markup | from markup | **done** |
 | Krunker News side box | S10:4342 (`news`) | static | **missing** (brain route GET /social/news exists now) |
 | Market ambient loop dropped (ambient_8 Black Market kept) | S10:6953 | neither | **missing** (S) |

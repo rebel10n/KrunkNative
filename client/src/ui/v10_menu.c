@@ -951,8 +951,8 @@ static void generic_popup(const char *html, const char *cls) {
 // showMoreKrunker(): the moreKrunkerPopup (_66797). Mods: window.canShowMods (the Mod Manager
 // exists natively); Sandbox: openURL("/?sandbox") = KrunkNative's embedded offline game; Editor:
 // openURL("/editor.html") (app_mode); KPD: showPolicePop(); "Download our client": the Client
-// window (showWindow(25), download_ui.c). The Account Manager (KrunkNative's saved accounts) is
-// the guest header's button, not an item here.
+// window (showWindow(25), download_ui.c), web only (below). The Account Manager (KrunkNative's
+// saved accounts) is the guest header's button, not an item here.
 static void more_krunker(void) {
     const struct { const char *title, *symbol, *img, *desc, *action; } k_options[] = {
         {"Mods", "color_lens", NULL, "Customize your experience", "clearPops(),showWindow(4)"},
@@ -970,10 +970,17 @@ static void more_krunker(void) {
         else sb_appendf(&sb, "<span class=\"material-icons-outlined\" style=\"font-size: 76px; color: #fff; vertical-align: middle;\">%s</span>", k_options[i].symbol);
         sb_appendf(&sb, " <div class=\"moreKrunkerOptionDescription svelte-19783yx\">%s</div></div>", k_options[i].desc);
     }
-    sb_append(&sb, "</div> <div class=\"moreKrunkerClient svelte-19783yx\"><img src=\"./img/client-promo.png\" class=\"svelte-19783yx\"> "
-                   "<div class=\"moreKrunkerClientBtn svelte-19783yx\" onclick=\"clearPops(),showWindow(25)\" onmouseenter=\"playTick()\"><span class=\"svelte-19783yx\">"
-                   "Download our client</span></div> <div class=\"moreKrunkerClientDesc svelte-19783yx\"><span class=\"svelte-19783yx\">"
-                   "Play Krunker on your PC to get increased performance</span></div></div></div></div>");
+    sb_append(&sb, "</div> ");
+    // KrunkNative: the native build is the desktop client already, so no "Download our client" block
+    // (the Download window, showWindow(25)); the web build keeps v10's, and a scenario render keeps it.
+#ifndef __EMSCRIPTEN__
+    if (scenario_on())
+#endif
+        sb_append(&sb, "<div class=\"moreKrunkerClient svelte-19783yx\"><img src=\"./img/client-promo.png\" class=\"svelte-19783yx\"> "
+                       "<div class=\"moreKrunkerClientBtn svelte-19783yx\" onclick=\"clearPops(),showWindow(25)\" onmouseenter=\"playTick()\"><span class=\"svelte-19783yx\">"
+                       "Download our client</span></div> <div class=\"moreKrunkerClientDesc svelte-19783yx\"><span class=\"svelte-19783yx\">"
+                       "Play Krunker on your PC to get increased performance</span></div></div>");
+    sb_append(&sb, "</div></div>");
     char *html = sb_finish(&sb);
     generic_popup(html, "moreKrunkerPopup");
     free(html);

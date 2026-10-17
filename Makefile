@@ -704,6 +704,10 @@ console-reload-test: build ## Dev console kept in the window (off-screen save, r
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
 
+.PHONY: download-screen-test
+download-screen-test: build ## The native client never offers Download our client: no Download window at startup, no More Krunker tile, no hub app badge on a fresh profile (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/download_screen_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-strike-test
 console-strike-test: build ## Dev console on Krunker Strike's page: opens styled, runs a typed command and reads its output (also the default page) (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I client/tests/console_strike_e2e.py $(DEBUG_DIR)
