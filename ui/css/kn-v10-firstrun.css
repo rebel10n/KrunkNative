@@ -81,6 +81,13 @@
     color: rgba(255, 255, 255, 0.75);
 }
 
+/* The web's krunker.io note under the Krunker option (first_run_ui.c web_krunker_note): said plainly, the
+   option stays selectable */
+.kn-firstrun-warn {
+    color: rgba(255, 255, 255, 0.9);
+    font-style: italic;
+}
+
 /* The touch layout (first_run_ui.c: ui_mobile_active): the page's design scale (ui-scale, about a third on a
    phone) is dropped for this popup, so its text and finger targets are real CSS pixels. The popup keeps its
    16px gutters and scrolls inside the phone's height when the three options do not fit. */

@@ -4,9 +4,12 @@
 // options are buttons in v10's colours (css/kn-v10-firstrun.css). The choice is written to html_storage
 // (knFirstRun) before anything else happens; then the Server Type (knSeekServers) and the window
 // follow it, and the start-up seek either runs (Box Office) or waits for the player (the others).
+// The web build asks the same way (its localStorage is the device); on the web the Krunker choice
+// says whether krunker.io is reachable from this bridge (krunker_relay.h), once the probe answered.
 #include <first_run_ui.h>
 #include <backend_ui.h>   // SERVERS_WINDOW_CONNECT, servers_ui_skip_startup_seek
 #include <flavor.h>       // Krunker Strike has its own page and servers: no first-run popup
+#include <krunker_relay.h> // the web's krunker.io note (krunker_relay_on / _probing)
 #ifndef __EMSCRIPTEN__
 #include <headless.h> // headless runs (the tests, renders) do not ask unless KRUNKNATIVE_FIRST_RUN=1
 #endif
@@ -42,11 +45,11 @@ static int stored_choice(void) {
 }
 
 int first_run_ui_applicable(void) {
-#ifdef __EMSCRIPTEN__
-    return 0; // the web build: the browser's own page, no first-run choice
-#else
     if (flavor_get() != FLAVOR_BASE) return 0; // Krunker Strike: its own page and its own servers
     if (!html_ui_available()) return 0;
+#ifdef __EMSCRIPTEN__
+    return 1; // the web build asks too (a fresh browser profile is a fresh device)
+#else
     const char *env = getenv("KRUNKNATIVE_FIRST_RUN"); // 1: ask in a headless run too, 0: never ask
     if (env && !strcmp(env, "0")) return 0;
     if (env && !strcmp(env, "1")) return 1;
@@ -69,7 +72,19 @@ int first_run_ui_connect_note(void) { return g_note; }
 
 // ---------------------------------------------------------------- the popup
 
-static void option_html(StrBuf *sb, const int index, const int recommended, const char *name, const char *tag, const char *desc) {
+// The web's note under the Krunker option: whether krunker.io is reachable from this bridge
+// (krunker_relay.h). NULL natively, where krunker.io is joined directly.
+static const char *web_krunker_note(void) {
+#ifdef __EMSCRIPTEN__
+    return krunker_relay_on()
+        ? I18N("kn.kio.relayNotBuilt", "krunker.io's relay is on here, but joining krunker.io from the browser is not in this build yet. Box Office servers still work.")
+        : I18N("kn.kio.relayOff", "krunker.io is not reachable from this server right now. Box Office servers still work.");
+#else
+    return NULL;
+#endif
+}
+
+static void option_html(StrBuf *sb, const int index, const int recommended, const char *name, const char *tag, const char *desc, const char *note) {
     sb_appendf(sb, "<button type=\"button\" class=\"kn-firstrun-option%s\" id=\"knFirstRunOpt%d\" onclick=\"knFirstRun(%d)\">",
                recommended ? " kn-firstrun-option--recommended" : "", index, index);
     if (tag) {
@@ -81,7 +96,13 @@ static void option_html(StrBuf *sb, const int index, const int recommended, cons
     sb_append_esc(sb, name);
     sb_append(sb, "</span><span class=\"kn-firstrun-desc\">");
     sb_append_esc(sb, desc);
-    sb_append(sb, "</span></button>");
+    sb_append(sb, "</span>");
+    if (note) { // the web's krunker.io state (web_krunker_note): said plainly, the option stays
+        sb_append(sb, "<span class=\"kn-firstrun-desc kn-firstrun-warn\">");
+        sb_append_esc(sb, note);
+        sb_append(sb, "</span>");
+    }
+    sb_append(sb, "</button>");
 }
 
 static char *popup_html(void) {
@@ -100,11 +121,12 @@ static char *popup_html(void) {
                                                  "Your choice is kept on this device."));
     sb_append(&sb, "</p>");
     option_html(&sb, FIRST_RUN_KRUNKER, 1, I18N("kn.firstRun.krunker", "Krunker servers"), I18N("kn.firstRun.recommended", "Recommended"),
-                I18N("kn.firstRun.krunker.desc", "krunker.io's own servers, joined right here. Use your krunker.io account, or play as a guest."));
+                I18N("kn.firstRun.krunker.desc", "krunker.io's own servers, joined right here. Use your krunker.io account, or play as a guest."),
+                web_krunker_note());
     option_html(&sb, FIRST_RUN_BOX_OFFICE, 0, I18N("kn.firstRun.boxOffice", "Box Office"), NULL,
-                I18N("kn.firstRun.boxOffice.desc", "What krunk.io players use. A fair private server hosted by the developers, with its own economy."));
+                I18N("kn.firstRun.boxOffice.desc", "What krunk.io players use. A fair private server hosted by the developers, with its own economy."), NULL);
     option_html(&sb, FIRST_RUN_PRIVATE, 0, I18N("kn.firstRun.private", "Private server"), NULL,
-                I18N("kn.firstRun.private.desc", "Connect by IP and port. If you were given an IP and port, use this."));
+                I18N("kn.firstRun.private.desc", "Connect by IP and port. If you were given an IP and port, use this."), NULL);
     sb_append(&sb, "</div></div></div></div></div></div></div>");
     return sb_finish(&sb);
 }
@@ -148,6 +170,7 @@ static void choose(const FirstRunChoice c) {
         seek_prefs_set_servers(SEEK_SERVERS_OFFICIAL);
         servers_ui_skip_startup_seek();
         menu_show_window(2, 0);
+        if (web_krunker_note()) ui_notify(web_krunker_note()); // the web: krunker.io's state, once, as a toast
         break;
     case FIRST_RUN_BOX_OFFICE:
         // Box Office stays the backend: the start-up seek runs as it always did
@@ -167,6 +190,7 @@ static void choose(const FirstRunChoice c) {
 
 void first_run_ui_tick(Client *client) {
     if (g_open || !first_run_ui_wait()) return;
+    if (krunker_relay_probing()) return; // the web: the popup's krunker.io note waits for the bridge's answer
     if (client && (client->in_game || client->net_connected)) return; // a game is joined: asked when the menu is back
     open_popup();
 }

@@ -11,14 +11,15 @@
 //   Private server    the Connect window (SERVERS_WINDOW_CONNECT, the host:port form) with a note:
 //                     if you were given an IP and port, use this.
 //
-// Never on the web build (the browser's page is the same ui/ tree, but no choice is asked there),
-// never in Krunker Strike (its own page, its own servers), and never in headless runs unless
+// On the web build too (a fresh browser profile is a fresh device): the same popup, its Krunker option
+// says whether krunker.io is reachable from this bridge (krunker_relay.h, asked at start-up; off when the
+// bridge does not report the relay). Never in Krunker Strike (its own page, its own servers), and never in headless runs unless
 // KRUNKNATIVE_FIRST_RUN=1 asks for it (the e2e tests run headless; KRUNKNATIVE_FIRST_RUN=0 turns it
 // off). The modal is the v10 page's own popup (client/src/ui/first_run_ui.c, css/kn-v10-firstrun.css):
 // it has no close button and ignores the backdrop, so it is always answered.
 //
 // Stored under html_storage key "knFirstRun" ("krunker" | "boxoffice" | "private"; native:
-// $XDG_CONFIG_HOME/krunknative/knFirstRun.json, so per device). A missing or unreadable value means
+// $XDG_CONFIG_HOME/krunknative/knFirstRun.json, so per device; web: localStorage, per browser profile). A missing or unreadable value means
 // not decided, the modal shows again. Written when the choice is made; never shown again after that.
 #include <client.h>
 #include <html_dom.h>

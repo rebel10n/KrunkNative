@@ -12,6 +12,7 @@
 #include <krunker_account.h>
 #include <krunker_ranked.h>
 #include <krunker_lobbies.h>
+#include <krunker_relay.h>   // the web build reads the bridge's krunker.io relay flag once
 #include <v10_menu.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ void backend_parse_args(int *argc, char **argv) {
 
 int backend_startup(Client *client, const int offline, const int scenario) {
     krunker_net_attach(client); // KN_KRUNKER_OFFICIAL (official krunker.io games, krunker_net.h)
+    krunker_relay_probe();      // web: the bridge's krunker.io relay flag (krunker_relay.h); native: nothing
     krunker_lobbies_attach(client);
     remote_images_init(); // the HTML engine's http(s) images (remote_images.h)
     // --connect host[:port]: a direct server, no matchmaking (the brain still serves

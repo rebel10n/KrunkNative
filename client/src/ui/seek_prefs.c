@@ -15,6 +15,7 @@
 #include <modes.h>
 #include <flavor.h> // Krunker Strike: its own servers only; flavor_get (the flavor's rotation)
 #include <flavor_rules.h> // flavor_rotation_modes, flavor_mode_allowed
+#include <krunker_relay.h> // the web's krunker.io state (Server Type row, first-run note)
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,17 +84,24 @@ int seek_prefs_filtering(void) {
     return saved_list(SEEK_MODES_KEY, tmp, SEEK_FILTER_MAX, mode_valid) > 0 || saved_list(SEEK_MAPS_KEY, tmp, SEEK_FILTER_MAX, map_valid) > 0;
 }
 
-SeekServers seek_prefs_servers(void) {
-#ifdef __EMSCRIPTEN__
-    return SEEK_SERVERS_KN; // platform behaviour: the web client only lists and seeks our servers
-#else
-    // the Krunker Strike app seeks its own servers only (the coordinator's Strike pool): official
-    // krunker.io lobbies are Box Office's (krunker_lobbies_enabled), whatever a shared config says
+// The Server Type as saved (knSeekServers): what the Quickplay row shows. Krunker Strike seeks its own
+// servers only (the coordinator's Strike pool): official krunker.io lobbies are Box Office's
+// (krunker_lobbies_enabled), whatever a shared config says.
+static SeekServers saved_servers(void) {
     if (flavor_get() != FLAVOR_BASE) return SEEK_SERVERS_KN;
     const char *s = cJSON_GetStringValue(ui_setting_saved(SEEK_SERVERS_KEY));
     if (s && !strcmp(s, "official")) return SEEK_SERVERS_OFFICIAL;
     if (s && !strcmp(s, "both")) return SEEK_SERVERS_BOTH;
     return SEEK_SERVERS_KN;
+}
+
+SeekServers seek_prefs_servers(void) {
+#ifdef __EMSCRIPTEN__
+    // the web's seeks stay on Box Office servers: the krunker.io join from the browser (over the
+    // bridge's relay, krunker_relay.h) is not built, so the saved choice waits for it and the row says so
+    return SEEK_SERVERS_KN;
+#else
+    return saved_servers();
 #endif
 }
 
@@ -112,11 +120,7 @@ const char *seek_prefs_krunker_region(void) {
 }
 
 void seek_prefs_set_servers(const SeekServers servers) {
-#ifndef __EMSCRIPTEN__
     ui_settings_set_string(SEEK_SERVERS_KEY, servers == SEEK_SERVERS_OFFICIAL ? "official" : servers == SEEK_SERVERS_BOTH ? "both" : "kn");
-#else
-    (void) servers; // the web client has no server type row
-#endif
 }
 
 // The switch stores a boolean (checkbox onclick, setSetting); a script's 0 / "0" / "false" counts as
@@ -184,7 +188,6 @@ void seek_prefs_describe(char *out, const size_t n) {
     i18n_trf(out, n, "kn.quickplay.describe", "{0} on {1}", 2, I18N_ARGV(mode_text, map_text));
 }
 
-#ifndef __EMSCRIPTEN__
 static void option(StrBuf *sb, const char *value, const char *label, const int selected) {
     sb_append(sb, "<option value=\"");
     sb_append_esc(sb, value);
@@ -193,11 +196,32 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
     sb_append(sb, "</option>");
 }
 
-// Server Type (native only: the web client never lists krunker.io lobbies): what Quick Match and
+// The web's Server Type row (seek_prefs_servers: the seeks stay on Box Office servers): the saved choice
+// in the same select, and krunker.io's state said plainly under it (krunker_relay.h). Its change is
+// saved like the native row's; nothing on the web seeks krunker.io until the relay join is built.
+static void server_type_web_html(StrBuf *sb) {
+    const SeekServers servers = saved_servers();
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.serverType.infoWeb", "What Quick Match and Find New Game (F4) look for. This browser plays on Box Office servers"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
+    sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    option(sb, "kn", I18N("kn.quickplay.serverType.boxOffice", "Box Office servers"), servers == SEEK_SERVERS_KN);
+    option(sb, "official", I18N("kn.quickplay.serverType.official", "krunker.io servers"), servers == SEEK_SERVERS_OFFICIAL);
+    option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
+    sb_append(sb, "</select></div><div class=\"settName\" id=\"knKioRelayNote\" style=\"color:rgba(255,255,255,0.75);font-size:15px\">");
+    sb_append_esc(sb, krunker_relay_on()
+        ? I18N("kn.kio.relayNotBuilt", "krunker.io's relay is on here, but joining krunker.io from the browser is not in this build yet. Box Office servers still work.")
+        : I18N("kn.kio.relayOff", "krunker.io is not reachable from this server right now. Box Office servers still work."));
+    sb_append(sb, "</div>");
+}
+
+#ifndef __EMSCRIPTEN__
+// Server Type (native only: the web has its own row, server_type_web_html): what Quick Match and
 // Find New Game (F4) seek into; the server browser lists both kinds whatever it says. Official
 // lobbies are joined in this client (krunker_net.h) unless the browser opt-out is set.
 static void server_type_html(StrBuf *sb) {
-    const SeekServers servers = seek_prefs_servers();
+    const SeekServers servers = saved_servers();
     const int here = krunker_net_in_client();
     sb_append(sb, "<div class=\"settName\" title=\"");
     sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.infoJoin", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
@@ -353,6 +377,16 @@ static void presets_html(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
+// The Server Type rows (the web's own, or the native Server Type and krunker.io Region)
+static void server_rows_html(StrBuf *sb) {
+#ifdef __EMSCRIPTEN__
+    server_type_web_html(sb);
+#else
+    server_type_html(sb);
+    krunker_region_html(sb);
+#endif
+}
+
 // The section: its header (a chevron, collapsed by default; collapseFolder toggles the body; the state is
 // the page's, never saved), the presets row, then the body with the switches
 static void section_html(StrBuf *sb, const int server_rows) {
@@ -362,14 +396,7 @@ static void section_html(StrBuf *sb, const int server_rows) {
     sb_append(sb, "</div>");
     presets_html(sb);
     sb_append(sb, "<div class=\"setBodH\" id=\"setBod_quickplay\" style=\"display:none\">");
-#ifndef __EMSCRIPTEN__
-    if (server_rows) {
-        server_type_html(sb);
-        krunker_region_html(sb);
-    }
-#else
-    (void) server_rows;
-#endif
+    if (server_rows) server_rows_html(sb);
     launch_seek_html(sb);
     char note[600];
     pool_note(note, sizeof(note));
@@ -474,9 +501,6 @@ char *seek_prefs_extend_basic_tab(const char *tab) {
 #endif
     if (!tab || !strstr(tab, "id=\"setBod_local\"") || strstr(tab, "id=\"setHed_quickplay\"")) return NULL;
     StrBuf sb = {0};
-#ifdef __EMSCRIPTEN__
-    sb_append(&sb, tab);
-#else
     // v10's basic General tab: Localization, then Server Browser & Matchmaking (Legacy Browser,
     // Default Region Only): the Server Type / krunker.io Region rows go last in that folder
     const char *bod = strstr(tab, "id=\"setBod_serverb\"");
@@ -498,13 +522,11 @@ char *seek_prefs_extend_basic_tab(const char *tab) {
     }
     if (p && !strstr(tab, "id=\"knSeekServers\"")) {
         sb_append_n(&sb, tab, (size_t) (p - tab));
-        server_type_html(&sb);
-        krunker_region_html(&sb);
+        server_rows_html(&sb);
         sb_append(&sb, p); // the folder's own </div> onwards
     } else {
         sb_append(&sb, tab);
     }
-#endif
     section_html(&sb, 0); // the switches: the basic view has them too (they are what Quick Play seeks)
     return sb_finish(&sb);
 }
