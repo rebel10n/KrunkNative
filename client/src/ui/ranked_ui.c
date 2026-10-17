@@ -47,7 +47,7 @@
 #include "../viewer/viewer_store.h"
 
 #define POLL_WAIT_S 6           // long poll: under backend_native.c HTTP_TIMEOUT_MS (8 s), so an idle poll answers instead of timing out
-#define DATA_TTL_MS 60000       // v10's request cache: 60 s
+#define DATA_TTL_MS 0           // v10 keeps no ranked answers (getOrFetch TTL 0, v10:98587, 98620, 98639): see open_popup
 #define ACCEPT_DELAY_MS 1000    // MATCHED: wait 1 s, then acceptMatch()
 #define POPUP_CLASS "rankedMenuModal"
 
@@ -1858,6 +1858,7 @@ static void open_popup(void) {
         snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
         show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 1);
     }
+    invalidate(); // v10's component fetches on mount, nothing kept from an earlier visit (v10:98587-98639)
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
     R.board_page = R.history_page = 1;
     memset(R.match_open, 0, sizeof(R.match_open));
