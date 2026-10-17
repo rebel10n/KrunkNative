@@ -1009,7 +1009,7 @@ static void on_social(void *user, const cJSON *frame) {
         v10_daily_spin_frame(label, frame);
     } else if (v10_wild_offer_frame(label, frame)) { // v10 Wild Offers: wo / wob / wor (v10_wild_offer.c)
     } else if (v10_rewards_frame(label, frame)) { // v10.0.2 signup perks: prr (v10_rewards.c)
-    } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
+    } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER && battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd (kn_brain's answers: the krunk.io account's, never the krunker.io one; the krunker.io pass comes over the game socket, kio_frame)
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
         clan_ui_frame(frame);
     } else if (!strcmp(label, "pRes") && !v10_market_owns_frame(label)) { // uploadS reply: popupResponse(kind, error, text)

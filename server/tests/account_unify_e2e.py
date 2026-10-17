@@ -338,6 +338,8 @@ def checks(text, stub):
     check("4. back on krunk.io the header's KR is the DEV account's again", text_of(text, "backkr") not in ("1,234", "1,500"), text_of(text, "backkr"))
     check("6. the Battle Pass is fetched over the game socket (\"bpdl\", as v10 sends it)", "bpdl" in stub.ws_frames, stub.ws_frames[-20:])
     check("6. the Battle Pass window shows krunker.io's pass", "KioPass" in text_of(text, "kbp"), text_of(text, "kbp")[:200])
+    check("6. ... not \"No Battle Pass Found\" (the krunker.io account's answer, never kn_brain's)",
+          "No Battle Pass Found" not in text_of(text, "kbp") and "Loading Battle Pass" not in text_of(text, "kbp"), text_of(text, "kbp")[:200])
     check("6. the Clans window asks the game socket for the clan page (\"cln\" 3)", "cln" in stub.ws_frames, stub.ws_frames[-20:])
     check("6. the Clans window shows the krunker.io account's clan", "KIOC" in text_of(text, "kclan"), text_of(text, "kclan")[:200])
     check("6. a KR change from the game server (\"uf\") reaches the header", text_of(text, "kiokr2") == "1,500", text_of(text, "kiokr2"))
