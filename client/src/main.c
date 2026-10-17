@@ -629,10 +629,19 @@ int main(int argc, char **argv) {
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
 #endif
     // NVIDIA's GL driver reads __GL_SYNC_TO_VBLANK when it loads, so V-Sync off on NVIDIA re-executes the client
-    // once with it set (gl_driver_env.h). It runs first: the relaunch gets argv as typed (before --flavor is
-    // stripped) and the banner prints once.
-    gl_driver_vsync_relaunch(argc, argv);
+    // once with it set (gl_driver_env.h). The relaunch reads the stored V-Sync of the flavor it will run as (each
+    // flavor has its own knSettings), so the flavor is resolved first. The re-exec needs argv as typed, so the
+    // relaunch gets a copy taken before client_resolve_flavor strips --flavor from argv. The relaunch runs before
+    // the banner below, so a relaunched process is the only one that prints it.
+    const int typed_argc = argc;
+    char **typed_argv = malloc(((size_t) argc + 1) * sizeof(*typed_argv));
+    if (typed_argv) {
+        memcpy(typed_argv, argv, (size_t) argc * sizeof(*argv));
+        typed_argv[argc] = NULL;
+    }
     client_resolve_flavor(&argc, argv); // branding for --version, the banner and the window title; strips --flavor
+    if (typed_argv) gl_driver_vsync_relaunch(typed_argc, typed_argv);
+    free(typed_argv);
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) {

@@ -1071,19 +1071,18 @@ void client_render_frame_end(Client *client) {
         const int hz = window_refresh_hz(client);
         char display[32] = "";
         if (hz > 0) snprintf(display, sizeof(display), ", display %d Hz", hz);
-        fprintf(stderr, "[render] fps %d (cap %d%s, vsync %d%s)\n", g_frame_count, g_rs.frame_cap,
-                g_headless_cap > 0 ? " headless" : "", g_rs.vsync, display);
+        fprintf(stderr, "[render] fps %d (cap %d%s, vsync %d, swap %d%s)\n", g_frame_count, g_rs.frame_cap,
+                g_headless_cap > 0 ? " headless" : "", g_rs.vsync, g_swap_interval < 0 ? 0 : g_swap_interval, display);
     }
 
 #ifndef __EMSCRIPTEN__
     // vsync on: swap interval 1; otherwise 0 (uncapped or paced below). emscripten's
     // glfwSwapInterval(0) would leave requestAnimationFrame, so the web never calls it.
     if (g_swap_dirty) {
-        const int want = g_rs.vsync ? 1 : 0;
-        if (want != g_swap_interval) {
-            headless_swap_interval(want); // glfwSwapInterval (no-op headless: no GLFW context)
-            g_swap_interval = want;
-        }
+        // Every sync, not only a change: a window-mode switch can reset the driver's swap interval, which is
+        // why set_window_mode marks it dirty (headless: glfwSwapInterval is a no-op).
+        g_swap_interval = g_rs.vsync ? 1 : 0;
+        headless_swap_interval(g_swap_interval); // glfwSwapInterval (no-op headless: no GLFW context)
         g_swap_dirty = 0;
     }
 

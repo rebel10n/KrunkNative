@@ -2,8 +2,9 @@
 // V-Sync off on NVIDIA (Linux): the driver reads __GL_SYNC_TO_VBLANK when its GL library loads.
 // A value set by the process after that is ignored, so V-Sync off in the client did not lift the
 // display's 120 fps cap on the NVIDIA driver. main() therefore calls gl_driver_vsync_relaunch()
-// before anything else: when V-Sync is off it re-executes this client once with the variable set,
-// so the driver reads it at load.
+// before any GL library loads: when V-Sync is off it re-executes this client once with the variable
+// set, so the driver reads it at load. main() calls it once the flavor is resolved (--flavor /
+// KN_FLAVOR pick the knSettings it reads) and passes the argv as typed (main keeps a copy of it).
 //
 // - client/src/gl_driver_env.c: the decision and the text rules (pure; cJSON for the knSettings text;
 //   client/tests/gl_driver_env_test.c).

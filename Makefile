@@ -367,6 +367,9 @@ user-assets-test: build ## A community map's Krunker user assets (texture, OBJ m
 console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)
 
+fps-uncapped-test: build ## Launch paths run uncapped with V-Sync and Frame Cap off in the stored settings: make -n pacing, no display, windowed (xvfb-run), --flavor strike's store
+	timeout 900 $(PYTHON) -I client/tests/fps_uncapped_e2e.py $(DEBUG_DIR)
+
 gltf-test: build ## GLTF loader on v7 animated store models via the pet path, pets.js follow AI, skin animations (headless GL)
 	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/gltf_test --headless
 

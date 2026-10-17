@@ -109,7 +109,7 @@ def run(name, script, extra=None, timeout=180, windowed=False):
 
 
 def fps_lines(text):
-    return re.findall(r"\[render\] fps \d+ \(cap (\d+)(?: headless)?, vsync (\d)(?:, display \d+ Hz)?\)", text)
+    return re.findall(r"\[render\] fps \d+ \(cap (\d+)(?: headless)?, vsync (\d), swap \d(?:, display \d+ Hz)?\)", text)
 
 
 def wait_for(log, pattern, timeout):

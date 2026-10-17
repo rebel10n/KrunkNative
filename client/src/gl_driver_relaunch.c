@@ -5,6 +5,7 @@
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 
 #include <errno.h>
+#include <flavor.h>  // flavor_get / flavor_key: the store of the flavor this process runs as (main resolves it first)
 #include <headless.h> // headless_env_flag_on: the KRUNKNATIVE_HEADLESS rule (headless.c)
 #include <html_dom.h> // html_storage_get: the knSettings entry (html_dom_core.c)
 #include <limits.h>
@@ -80,7 +81,7 @@ void gl_driver_vsync_relaunch(const int argc, char **argv) {
             : "no relaunch";
         char source[96];
         if (overridden) snprintf(source, sizeof(source), "KRUNKNATIVE_VSYNC=%s", env_vsync);
-        else snprintf(source, sizeof(source), "store");
+        else snprintf(source, sizeof(source), "store (%s)", flavor_key(flavor_get()));
         char sync_state[64];
         if (sync_env) snprintf(sync_state, sizeof(sync_state), "set to %s", sync_env);
         else snprintf(sync_state, sizeof(sync_state), "unset");
