@@ -445,12 +445,20 @@ static const char *product_section(const char *category) {
     return NULL;
 }
 
+// a product reward's item id: "item": "<id>" (the catalogue's), or kn_brain's resolved item object (its _id,
+// the same two forms strike_reward.c reads); a picture needs the id, so the object form must parse too
+static const char *reward_item_id(const cJSON *reward) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(reward, "item");
+    if (cJSON_IsObject(item)) item = cJSON_GetObjectItemCaseSensitive(item, "_id");
+    return cJSON_GetStringValue(item);
+}
+
 static void product_image(const cJSON *product, char *out, const size_t n) {
     out[0] = 0;
     const cJSON *reward = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(product, "products"), 0);
     const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "type"));
     if (type && !strcmp(type, "item")) {
-        const StrikeItem *it = strike_item(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "item")));
+        const StrikeItem *it = strike_item(reward_item_id(reward));
         if (it && it->skin >= 0) store_skin_preview(it->skin, out, n);
     } else if (type && !strcmp(type, "currency")) {
         const char *cur = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reward, "currency"));

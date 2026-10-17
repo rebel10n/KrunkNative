@@ -110,6 +110,7 @@ SCRIPT = """0 menu
 55300 call strikeAction "home"
 55800 clickid mobMenuStoreH
 56500 clicksel .sectioned-scroll:first-child [onclick="strikeAction('store-section:1')"]
+56600 nodes @deal-pics .sectioned-scroll:first-child [data-product^="deal_"] .frvr-store-block-render
 57200 call strikeAction "buy-product:{deal_index}"
 57900 nodes @product-popup .popup__holder .store-confirm-purchase
 57900 text @product-name .store-confirm-purchase__header-name
@@ -451,6 +452,9 @@ def main_scenario(brain_port, dbpath):
     check("6c. a market deal opens the product popup (U2)", nodes.get("product-popup") == 1
           and texts.get("product-name", "").lower() == deal_def.get("name", "?").lower(),
           f"{nodes.get('product-popup')} popup, {texts.get('product-name')!r} vs {deal_def.get('name')!r}")
+    # the shop's item reward is kn_brain's resolved object ({_id, ...}): its deal tiles still show the skin's picture
+    check("6c. the market's item deals show their pictures", nodes.get("deal-pics", 0) >= 1,
+          f"{nodes.get('deal-pics')} picture(s) on the deal tiles")
     check("6c. its price button bought the item", deal is not None and any(r[0] == deal_item for r in sd.get("items", [])), str(deal and deal.group(1)))
     check("6c. the reward screen shows the bought item", nodes.get("reward4") == 1 and texts.get("reward4-title", "").lower() == deal_def.get("name", "?").lower(),
           repr(texts.get("reward4-title")))
