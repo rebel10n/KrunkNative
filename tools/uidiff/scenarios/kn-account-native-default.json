@@ -1,0 +1,33 @@
+{
+  "ref": "doc/ref/krunknative/kn-account-native-default.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 5,
+    "account": {
+      "name": "Player",
+      "score": 50000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "challenges": []
+    }
+  },
+  "frames": 3,
+  "note": "KN only: the Account window (showWindow(5)) of a native account with the default picture (the stock icon_0 at 181 px, #profilePicM.blurred). The reference is KN's own render; the region is the picture's box. kn-account-kio-default is the same window for a signed-in krunker.io account."
+}

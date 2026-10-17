@@ -1,0 +1,15 @@
+{
+  "note": "KN only: the krunker.io account's default picture (#profilePicM, the stock icon_0 at 109 px in the 1280x720 window, a .blurred box). Before the fix (no class) the picture was smoothed (bilinear, full colour); v10's blurred treatment pixelates it, as the native account's picture (kn-account-native-default). Reference: KN's own render after the fix",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "default-picture",
+      "rect": [280, 214, 112, 112],
+      "max_pct": 2.0,
+      "note": "the 8x8 stock picture upscaled with nearest-neighbour filtering: a smoothed render differs from it in most of the circle"
+    }
+  ]
+}

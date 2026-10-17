@@ -1,0 +1,30 @@
+{
+  "ref": "doc/ref/krunknative/kn-account-kio-default.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "window": 5,
+    "officialSession": true,
+    "storage": {
+      "kio_access_token": "h.eyJ1c2VybmFtZSI6IlBsYXllciIsImV4cCI6NDEwMjQ0NDgwMH0.s",
+      "kio_username": "Player",
+      "kio_level": "5"
+    }
+  },
+  "frames": 3,
+  "note": "KN only: the Account window (showWindow(5)) of a signed-in krunker.io account with the default picture (the stock icon_0 at 181 px). v10 gives #profilePicM the blurred class for a picture that is not premium, so the picture is pixelated (image-rendering: pixelated) and greyed at half opacity, as the native account's picture (kn-account-default). The reference is KN's render after the fix; the region is the picture's box."
+}

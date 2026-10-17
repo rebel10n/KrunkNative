@@ -2818,7 +2818,9 @@ static char *gen_kio_account(const AccountInfo *acc) {
     sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'><div class='bigMenTab bigMenTabA' style='font-size:16px' onmouseenter='playTick(0.1);'>"
                    "<span class='material-icons' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span></div></div>");
     sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
-    sb_append(&sb, "<div id='profilePicM'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'></div>");
+    // v10's #profilePicM gets .blurred (image-rendering pixelated, greyed) unless a premium account shows its own
+    // upload. This page shows only the stock icon_0, so it is blurred, as the native account's picture is (above)
+    sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'></div>");
     sb_append(&sb, "<div class='setBodH' id='knKioAccName' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
     sb_append(&sb, I18N("generic.name", "Name"));
     sb_append(&sb, "<span class='floatR' style='color:rgba(255,255,255,0.8)'>");

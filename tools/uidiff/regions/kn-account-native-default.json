@@ -1,0 +1,14 @@
+{
+  "note": "KN only: the native account's default picture (#profilePicM.blurred, the stock icon_0 at 109 px). Pixelated since the .blurred class (account_ui.c); a guard for kn-account-kio-default, which must match it",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "default-picture",
+      "rect": [280, 162, 112, 112],
+      "max_pct": 2.0
+    }
+  ]
+}
