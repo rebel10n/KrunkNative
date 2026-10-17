@@ -130,6 +130,8 @@ void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
 void menu_show_connecting(void);                 // the loading spinner for a reconnect / retry (the page's map)
 void menu_show_connecting_map(const char *map);  // the spinner for a server switch to the game on `map` ("" / NULL: not known)
+void menu_leave_to_menu(int offline);            // F4 left the game: the main menu with Play, no error screen, no spinner (servers_ui_leave_to_menu)
+int  menu_left_game(void);                      // F4 left the game and no connect has started since: the chat stays down (hud_chat_wanted)
 int  menu_connecting(void);                     // the spinner is up (a connect under way)
 int  menu_loading(void);                        // the game is loading (a connect, the boot curtain, Strike's loading screen): Escape does nothing
 // v10.0.2 boot curtain (#instructionsFadeBG until the first INIT, then its 0.7 s fade), #loadGamNm

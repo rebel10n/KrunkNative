@@ -213,7 +213,7 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
 static void server_type_web_html(StrBuf *sb) {
     const SeekServers servers = saved_servers();
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.serverType.infoWeb", "What Quick Match and Find New Game (F4) look for. This browser plays on Box Office servers"));
+    sb_append_esc(sb, I18N("kn.quickplay.serverType.infoWeb", "What Quick Match and Find New Game look for. This browser plays on Box Office servers"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
     sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
@@ -229,15 +229,15 @@ static void server_type_web_html(StrBuf *sb) {
 
 #ifndef __EMSCRIPTEN__
 // Server Type (native only: the web has its own row, server_type_web_html): what Quick Match and
-// Find New Game (F4) seek into; the server browser lists both kinds whatever it says. Official
+// Find New Game seek into; the server browser lists both kinds whatever it says. Official
 // lobbies are joined in this client (krunker_net.h) unless the browser opt-out is set.
 static void server_type_html(StrBuf *sb) {
     const SeekServers servers = saved_servers();
     const int here = krunker_net_in_client();
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.infoJoin", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.infoJoin", "What Quick Match and Find New Game look for. The server browser lists both; "
                                                                        "krunker.io servers are joined in this client")
-                           : I18N("kn.quickplay.serverType.infoBrowser", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+                           : I18N("kn.quickplay.serverType.infoBrowser", "What Quick Match and Find New Game look for. The server browser lists both; "
                                                                           "krunker.io servers open in your browser"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
@@ -246,9 +246,9 @@ static void server_type_html(StrBuf *sb) {
     option(sb, "official", I18N("kn.quickplay.serverType.official", "krunker.io servers"), servers == SEEK_SERVERS_OFFICIAL);
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
-    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. krunker.io servers are joined in this client with your "
+    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and Find New Game seek into these. krunker.io servers are joined in this client with your "
                                                                        "krunker.io account (krunker.io may ask for a security check first). Both prefers a Box Office server when one matches.")
-                           : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. krunker.io servers open in your browser. "
+                           : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and Find New Game seek into these. krunker.io servers open in your browser. "
                                                                           "Both prefers a Box Office server when one matches."));
     sb_append(sb, "</div>");
 }
@@ -260,7 +260,7 @@ static void krunker_region_html(StrBuf *sb) {
     // the player's choice, else the region the ping race picked (v10's Region row shows the ping cache)
     const char *current = seek_prefs_krunker_region()[0] ? seek_prefs_krunker_region() : krunker_seek_region_auto();
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.kioRegion.info", "The region Quick Match, Find New Game (F4) and krunker.io's matchmaker look in for krunker.io servers"));
+    sb_append_esc(sb, I18N("kn.quickplay.kioRegion.info", "The region Quick Match, Find New Game and krunker.io's matchmaker look in for krunker.io servers"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.kioRegion", "krunker.io Region"));
     sb_append(sb, " <select id=\"knKrunkerRegion\" onchange=\"window.setSetting(&quot;" KRUNKER_REGION_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
@@ -273,7 +273,7 @@ static void krunker_region_html(StrBuf *sb) {
 // Auto Seek on Launch: a switch row like v10's settings switches (onclick setSetting, checked when on)
 static void launch_seek_html(StrBuf *sb) {
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.autoSeek.info", "When the game starts, seek a game with the Server Type, Seek Modes and Seek Maps, as Find New Game (F4) does"));
+    sb_append_esc(sb, I18N("kn.quickplay.autoSeek.info", "When the game starts, seek a game with the Server Type, Seek Modes and Seek Maps, as Find New Game does"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.autoSeek", "Auto Seek on Launch"));
     sb_append(sb, " <label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" onclick=\"window.setSetting(&quot;" SEEK_ON_LAUNCH_KEY

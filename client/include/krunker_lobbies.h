@@ -14,8 +14,8 @@
 // https://krunker.io/?game=<id> in the system browser.
 //
 // The Servers window lists them on every native client in their own KRUNKER.IO section after
-// ours, whatever Settings > Quickplay > Server Type says (that one only picks what Quick Match /
-// F4 seek into). krunker.io refuses some networks outright (a 403 "ACCESS DENIED" HTML page):
+// ours, whatever Settings > Quickplay > Server Type says (that one only picks what Quick Match and
+// Find New Game seek into). krunker.io refuses some networks outright (a 403 "ACCESS DENIED" HTML page):
 // the section then says so and points at Settings > Client > Proxy (http_proxy.h), which by
 // default carries krunker.io's requests only.
 //

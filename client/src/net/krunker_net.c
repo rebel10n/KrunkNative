@@ -1738,7 +1738,7 @@ int krunker_net_reload_join(Client *client, const char *game_id, const char *reg
     return join(client, game, r[0] ? r : NULL, 0, NULL, 1, NULL);
 }
 
-// krunker.io's Find New Game (F4 / backToOrigin(false, {exclude: game}), game.deob.js :141618-141626,
+// krunker.io's Find New Game (backToOrigin(false, {exclude: game}), game.deob.js :141618-141626,
 // :222300-222308): a seek in the same region with excludeGame = the game the player is in (or was in
 // last); recent ones the matchmaker still answers are re-sought (on_seek).
 int krunker_net_seek_new(Client *client, const char *region, const int use_list) {

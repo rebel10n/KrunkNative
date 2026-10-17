@@ -173,8 +173,9 @@ int  servers_ui_session_target(char *out, size_t n);
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
 int  servers_ui_quick_match(void);           // v10 Quick Match: = servers_ui_find_new_game
-int  servers_ui_find_new_game(void);         // F4 / Quick Match per Settings > Quickplay (seek_prefs.h); 0 = nothing to seek
+int  servers_ui_find_new_game(void);         // Find New Game / Quick Match per Settings > Quickplay (seek_prefs.h); 0 = nothing to seek
 int  servers_ui_official_find_game(void);    // the official error screen's Find Game: a new krunker.io game (0 = none could start)
+int  servers_ui_leave_to_menu(Client*);     // F4 in game: the game is left, the main menu comes up at once (1 = left; 0 = no game)
 // A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006),
 // a refused join key (004001) or a session the transport lost without a server ERROR (dropped: not
 // a kick / ban) starts a rejoin through the matchmaker with a fresh ticket (direct servers: the

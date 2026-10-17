@@ -19,7 +19,7 @@
 // above it (SeekPreset, seek_filter.h): each saves the lists its switches would save, then shows them.
 //
 // Plus the server type of the native client: Box Office servers, the official krunker.io lobbies
-// (krunker_lobbies.h) or both, ours first. The server type only picks what Quick Match / F4 seek
+// (krunker_lobbies.h) or both, ours first. The server type only picks what Quick Match and Find New Game seek
 // into: the native server browser always lists both. The web build has the same Server Type row (the
 // saved choice, knSeekServers, and krunker.io's state from the bridge's relay flag, krunker_relay.h), but
 // its seeks stay on Box Office servers until the krunker.io join over the relay is built.
@@ -41,7 +41,7 @@ void seek_prefs_set_servers(SeekServers servers);
 // saved before it become "kn"; later choices are kept. Called once at startup, before ui_settings_push_saved.
 void seek_prefs_migrate_servers(void);
 // Settings > Quickplay > Auto Seek on Launch (knSeekOnLaunch, default on; v10 has no such option):
-// the launch seeks the way F4 does, once the menu is up, unless it names a lobby or starts offline.
+// the launch seeks the way Find New Game does, once the menu is up, unless it names a lobby or starts offline.
 int seek_prefs_on_launch(void);
 // Settings > Quickplay > krunker.io Region (knKrunkerRegion, native): the Krunker matchmaker region
 // (KRUNKER_REGIONS, krunker_build.h) official seeks ask for and Quick Match prefers, like v10's Default
