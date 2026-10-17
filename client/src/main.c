@@ -20,6 +20,7 @@
 #include <ruleset.h>  // the startup log: Krunker v10.0.2
 #include <flavor.h>   // --flavor / KN_FLAVOR: the product flavor (Krunker Strike branding)
 #include <strike_ui.h> // Krunker Strike: FRVR's mobile page ui/strike/ and its touch controls
+#include <strike_ftue.h> // Krunker Strike: the desktop tutorial hooks (the press, the keys and the look)
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
@@ -1680,7 +1681,7 @@ static int strike_customize_mouse(const int phase, double x, double y) {
 // end-screen results are up. The console counts on its own: Click to Play closes the menu behind an
 // open console (the pointer stays free for it, pointer_lock.h), and its clicks must still reach its modal.
 static int html_pointer_input(void) {
-    // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
+    // Krunker Strike: a screen over the game takes the pointer; in game the page has none
     if (strike_ui_active()) return strike_ui_pointer_to_page();
     // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
     // krunker_captcha_needs_player: the security challenge's modal, also over a game with the menu closed
@@ -1754,7 +1755,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
         if (ui_mobile_mouse(UI_TOUCH_MOVE, (float) mx, (float) my)) return;
     }
     if (!html_pointer_input()) {
-        if (strike_ui_active()) { // Krunker Strike: a finger dragging over the mobile controls
+        if (strike_touch_layer()) { // Krunker Strike on a phone: a finger dragging over the touch controls
             html_cursor_scale(window, &x, &y);
             html_css_point(&x, &y);
             strike_touch_mouse_move(glfwGetWindowUserPointer(window), (float) x, (float) y);
@@ -1771,15 +1772,24 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
 static void mouse_button_callback(GLFWwindow *window, const int button, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
     if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
-    if (!html_pointer_input() && strike_ui_active()) {
-        // Krunker Strike: the mobile version everywhere; the left button is a finger on the touch
-        // controls (strike_touch.c), never a desktop shot / aim
+    if (!html_pointer_input() && strike_touch_layer()) {
+        // Krunker Strike on a phone: the left button is a finger on the touch controls (strike_touch.c),
+        // never a desktop shot / aim
         double tx, ty;
         glfwGetCursorPos(window, &tx, &ty);
         html_cursor_scale(window, &tx, &ty);
         html_css_point(&tx, &ty);
         strike_touch_mouse_button(client, button, action, (float) tx, (float) ty);
         return;
+    }
+    if (!html_pointer_input() && strike_ui_active() && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        // Krunker Strike on a desktop: the in-game HUD's own buttons (the kill card's Spectate, the spectate
+        // panel) take the click; any other press is the game's shot / aim below
+        double tx, ty;
+        glfwGetCursorPos(window, &tx, &ty);
+        html_cursor_scale(window, &tx, &ty);
+        html_css_point(&tx, &ty);
+        if (strike_hud_pointer((float) tx, (float) ty)) return;
     }
     if (ui_mobile_active() && !strike_ui_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT) { // the touch controls' mouse touch
         double mx, my;
@@ -1788,6 +1798,8 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
         if (ui_mobile_mouse(action == GLFW_PRESS ? UI_TOUCH_START : UI_TOUCH_END, (float) mx, (float) my)) return;
     }
     if (!html_pointer_input()) {
+        // Krunker Strike on a desktop: a press is the tutorial's tap too (strike_ftue_controls.c), the game gets it
+        if (action == GLFW_PRESS && strike_ui_active() && !strike_touch_layer()) strike_ftue_controls_desktop_press();
         // CONTROLS mousedown with the controls off (a free end title): toggle(true), no shot
         if (action == GLFW_PRESS && client_pointer_click(client)) return;
         // In game: Krunker's canvas mousedown/mouseup (left shoots, right aims, the
@@ -2187,9 +2199,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
     look_x = (float) web_x;
     look_y = (float) web_y;
 #endif
-    // Krunker Strike: no pointer lock, the cursor never turns the camera; the aim zone / aim
-    // joystick drags do (strike_touch.c, FRVR fakeMouse(2, dx, dy, "mblInput"))
-    if (strike_ui_active()) {
+    // Krunker Strike on a phone: no pointer lock, the cursor never turns the camera; the aim zone /
+    // aim joystick drags do (strike_touch.c, FRVR fakeMouse(2, dx, dy, "mblInput")). On a desktop the
+    // mouse turns the camera under the pointer lock, as in Krunker.
+    if (strike_touch_layer()) {
         float touch_x = 0.0f, touch_y = 0.0f;
         look_x = look_y = 0.0f;
         if (strike_touch_take_look(&touch_x, &touch_y)) ui_mobile_add_look(client, touch_x, touch_y);
@@ -2197,6 +2210,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // v7 f2137: mouse movement only reaches the camera under the pointer lock. A free cursor (the
     // menu, the end screen, a free end title, the console, freeMouse) never turns it.
     if (!client_pointer_look_allowed(client)) look_x = look_y = 0.0f;
+    if (strike_ui_active() && !strike_touch_layer()) strike_ftue_controls_desktop_frame(look_x != 0.0f || look_y != 0.0f);
 #ifdef __EMSCRIPTEN__
     web_look_note(client, web_x, web_y, look_x != 0.0f || look_y != 0.0f);
 #endif

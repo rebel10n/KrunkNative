@@ -2600,3 +2600,134 @@ void strike_menu_tick(Client *client) {
     const HtmlElem tap = strike_screen_root(STRIKE_SCREEN_TAP_TO_PLAY);
     if (tap) switch_teams_update(tap, client); // the button follows the mode, the count and the life
 }
+
+// ---------------------------------------------------------------- the controller in the screens
+// FRVR 1.37.2's pages take the mouse and the touch only. KrunkNative's controller works them as a
+// focus ring while the menu is open on Krunker Strike (gamepad.c routes the pad here): the d-pad or
+// the left stick moves the focus to the nearest visible button in that direction, A (button_1)
+// clicks it through the page's own mouse path, B (button_2) sends Escape (the page's back / close).
+// START keeps opening and closing the menu (gamepad.c). The game's controls are untouched: this only
+// runs while the menu is open and the loading screen is not up.
+#include <GLFW/glfw3.h>
+
+static struct {
+    HtmlElem focus;   // the outlined button (0: none)
+} P;
+
+#define PAD_MAX 256
+#define PAD_SELECTOR "button, [onclick], .frvr-button"
+
+// The focus ring's outline (inline style, so the page's CSS needs nothing).
+static void pad_outline(const HtmlElem el, const int on) {
+    if (!el) return;
+    html_dom_set_style(el, "outline", on ? "3px solid #ffd54f" : "");
+    html_dom_set_style(el, "outline-offset", on ? "2px" : "");
+}
+
+static int pad_active(void) {
+    return strike_ui_active() && html_ui_is_menu_open() && !strike_loading_up();
+}
+
+// The ring's element while it is still one of the page's buttons (a screen change may have removed it:
+// the handle is only dereferenced once it is in the page's current list). 0 otherwise.
+static HtmlElem pad_live_focus(void) {
+    if (!P.focus) return 0;
+    static HtmlElem all[PAD_MAX];
+    const int n = html_dom_query_all(0, PAD_SELECTOR, all, PAD_MAX);
+    for (int i = 0; i < n && i < PAD_MAX; i++) {
+        if (all[i] == P.focus) return P.focus;
+    }
+    P.focus = 0;
+    return 0;
+}
+
+// A visible element with a box in the viewport, as its centre in CSS px.
+static int pad_centre(const HtmlElem el, float *cx, float *cy, float vw, float vh) {
+    HtmlRect r;
+    if (!el || !html_dom_is_shown(el) || !html_dom_get_rect(el, &r) || r.w <= 0.0f || r.h <= 0.0f) return 0;
+    *cx = r.x + r.w / 2.0f;
+    *cy = r.y + r.h / 2.0f;
+    return *cx >= 0.0f && *cy >= 0.0f && *cx <= vw && *cy <= vh;
+}
+
+// The page's CSS px and the framebuffer px the page's mouse takes (the window is the framebuffer).
+static void pad_click(const float cx, const float cy, const float dpr) {
+    html_ui_mouse_move((double) cx * dpr, (double) cy * dpr);
+    html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
+    html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
+}
+
+// Moves the focus one step in (dx, dy) (+x right, +y down): the nearest visible button that lies in that
+// direction, scored by its distance along it plus twice its offset across it; with no focus, the first one.
+static void pad_move(const int dx, const int dy) {
+    float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+    html_dom_viewport(&vw, &vh, &dpr);
+    static HtmlElem all[PAD_MAX];
+    const HtmlElem focus = pad_live_focus();
+    const int n = html_dom_query_all(0, PAD_SELECTOR, all, PAD_MAX);
+    float fx = 0.0f, fy = 0.0f;
+    const int have = focus && pad_centre(focus, &fx, &fy, vw, vh);
+    HtmlElem best = 0;
+    float best_score = 1e30f;
+    for (int i = 0; i < n && i < PAD_MAX; i++) {
+        float cx = 0.0f, cy = 0.0f;
+        if (!pad_centre(all[i], &cx, &cy, vw, vh) || all[i] == focus) continue;
+        if (!have) { // the top-left-most one
+            const float score = cy * 10000.0f + cx;
+            if (score < best_score) best_score = score, best = all[i];
+            continue;
+        }
+        const float along = (cx - fx) * dx + (cy - fy) * dy;
+        if (along <= 1.0f) continue;
+        const float across = fabsf((cx - fx) * dy) + fabsf((cy - fy) * dx);
+        const float score = along + 2.0f * across;
+        if (score < best_score) best_score = score, best = all[i];
+    }
+    if (!best) return; // no button that way: the ring stays where it is
+    pad_outline(focus, 0);
+    P.focus = best;
+    pad_outline(P.focus, 1);
+}
+
+// The focus ring's A: a click at the focused button's centre.
+static void pad_press(void) {
+    float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+    html_dom_viewport(&vw, &vh, &dpr);
+    float cx = 0.0f, cy = 0.0f;
+    const HtmlElem focus = pad_live_focus();
+    if (!focus || !pad_centre(focus, &cx, &cy, vw, vh)) return;
+    pad_click(cx, cy, dpr > 0.0f ? dpr : 1.0f);
+}
+
+// gamepad.c, on a button press while the menu is open: 1 = the focus ring took it (START is not the ring's).
+int strike_menu_pad_button(const int button, const int pressed) {
+    if (!pressed || !pad_active()) return 0;
+    switch (button) {
+        case 12: pad_move(0, -1); return 1; // d_pad_up
+        case 13: pad_move(0, 1); return 1;  // d_pad_down
+        case 14: pad_move(-1, 0); return 1; // d_pad_left
+        case 15: pad_move(1, 0); return 1;  // d_pad_right
+        case 0: pad_press(); return 1;      // button_1 (A)
+        case 1: // button_2 (B): Escape, the page's back
+            html_ui_key(GLFW_KEY_ESCAPE, 0, GLFW_PRESS, 0);
+            html_ui_key(GLFW_KEY_ESCAPE, 0, GLFW_RELEASE, 0);
+            return 1;
+        default: return 0;
+    }
+}
+
+// gamepad.c, the left stick's first deflection while the menu is open: one step of the ring in its
+// dominant direction (x right, y down). 1 = taken.
+int strike_menu_pad_stick(const double x, const double y) {
+    if (!pad_active()) return 0;
+    if (fabs(x) >= fabs(y)) pad_move(x > 0.0 ? 1 : -1, 0);
+    else pad_move(0, y > 0.0 ? 1 : -1);
+    return 1;
+}
+
+// The menu closed (or the screens went): the ring lets go of its element.
+void strike_menu_pad_forget(void) {
+    const HtmlElem focus = pad_live_focus();
+    pad_outline(focus, 0);
+    P.focus = 0;
+}

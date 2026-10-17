@@ -704,6 +704,7 @@ void strike_ui_menu_open(Client *client, const int open) {
         if (S.depth == 0) strike_screen_push(client && client->in_game ? STRIKE_SCREEN_TAP_TO_PLAY : STRIKE_SCREEN_MAIN_MENU);
     } else {
         // Yh(true): the game; the screens go, RA() completes a loading screen
+        strike_menu_pad_forget(); // the controller's focus ring (strike_menu.c) lets go
         strike_screen_clear();
         strike_loading_complete();
         strike_hud_end_restore(); // a round end still up stays on the game view (FRVR keeps it on its stack)

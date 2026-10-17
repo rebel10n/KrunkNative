@@ -25,3 +25,6 @@ void gamepad_set_disabled(int disabled); // v10 toggleGamepad (Settings > Contro
 // Input scripts: a press + release of the standard button named as in gamepad.js ("start",
 // "button_1", ...), through the event machine as a pad would; 0 for an unknown name.
 int  gamepad_script_button(const char *name);
+// Input scripts' `gpad` argument: a press + release, a held button (`<button> down|up`) or a stick
+// (`stick left|right x y`) of a scripted standard pad (gamepad.c); 0 for anything else.
+int  gamepad_script_input(const char *arg);

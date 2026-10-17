@@ -13,9 +13,10 @@
 //   JU (nipplejs 0.10)    the nipple DOM (div.nipple.collection_N#nipple_N_M > .back + .front) with its
 //                         inline styles, show / hide / rest timings (fadeTime 250 ms), the clamp and
 //                         direction maths
-// The page is the same on every platform: natively the mouse is one finger (left button), on the web
-// real touches arrive through strike_touch_event (emscripten touch callbacks on the page) and the
-// mouse works the same way as natively.
+// The page is the same on every device. On a phone (strike_touch_layer: ui_mobile_active) the touch layer
+// is the input: natively the mouse is one finger (left button), on the web real touches arrive through
+// strike_touch_event (emscripten touch callbacks on the page) and the mouse works the same way as natively.
+// On a desktop the layer is off and the mouse and keyboard play (main.c routes them to the game).
 // The layout numbers (Gw's positions and sizes, the 640x360 base, the tap-to-jump travel, the move
 // angles) are FRVR's data: StrikeRules.touch (shared/include/strike_rules.h, extracted into
 // tools/strike/strike_data.json "input.touch"); the table below keeps what is code (binds, kinds).
@@ -666,6 +667,10 @@ int strike_touch_customize_pointer(const int phase, const float x, const float y
 
 int strike_touch_input(void) { return T.touch_input; }
 
+// The touch layer is the input on a phone only (FRVR's useMobileControls = window._isMobile). On a
+// desktop the mouse and keyboard play (main.c routes them to the game), and no control layer shows.
+int strike_touch_layer(void) { return strike_ui_active() && ui_mobile_active(); }
+
 // $U: the reload button's ammo ring and "cur / max" label (vx = 290). The desktop overlay (strike_hud.c)
 // draws the same ring and label.
 void strike_touch_ammo_text(char *out, const size_t n, int *offset_pct, int *visible) {
@@ -1053,7 +1058,7 @@ void strike_touch_tick(Client *client) {
 #endif
     const Player *me = client ? client->me : NULL;
     const int alive = client && client->in_game && me && me->active;
-    const int want = !html_ui_is_menu_open() && !hud_ui_end_screen_up() && alive && game_enabled();
+    const int want = strike_touch_layer() && !html_ui_is_menu_open() && !hud_ui_end_screen_up() && alive && game_enabled();
     if (want && !T.built) build();
     else if (!want && T.built) {
         strike_touch_reset();

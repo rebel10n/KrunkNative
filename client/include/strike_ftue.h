@@ -61,8 +61,13 @@ void strike_ftue_controls_control_down(int ui_control); // UI_CONTROL_JUMP / UI_
 void strike_ftue_controls_tap(void);              // the .frvrMenuBlur was tapped (FRVR: Tx unless disableTapToPass)
 void strike_ftue_controls_go(void);               // "Let's Go!" on complete_go (FRVR: Tx, then backToOrigin)
 int  strike_ftue_controls_running(void);
-// 1 while the step takes the pointer on the page (its tap blur, or the "Let's Go!" button): such presses are the
-// page's clicks, not the touch controls' (strike_ui_pointer_to_page)
+// Desktop (no phone: strike_touch_layer() 0): there is no tap blur, the mouse reaches the game. A press is a tap
+// (it passes a tap step, not a hideBlur / disableTapToPass one), the keys WASD advance move_controls and
+// move_interaction, the mouse look camera_controls and camera_interaction (looking = the look moved this frame).
+void strike_ftue_controls_desktop_press(void);
+void strike_ftue_controls_desktop_frame(int looking);
+// 1 while the step takes the pointer on the page (its tap blur on a phone, or the "Let's Go!" button): such presses
+// are the page's clicks, not the game's (strike_ui_pointer_to_page)
 int  strike_ftue_controls_pointer_to_page(void);
 
 // The controls view (FRVR nB): the step's parameters, set by strike_ftue_controls.c. The strings are copied.

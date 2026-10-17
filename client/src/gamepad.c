@@ -34,6 +34,8 @@
 // devices the browser never lists (absolute pointers, tablets: anything with keys and
 // axes), so unmapped devices are ignored (SDL_GAMECONTROLLERCONFIG can map them).
 // navigator.getGamepads()[0] is the lowest GLFW slot holding a gamepad.
+// Input scripts can stand in for a pad (gamepad_script_input): one standard-layout pad whose buttons
+// and sticks the script holds and releases, sampled by the same loop as a real one.
 //
 // KrunkNative notes:
 //   - Native has no rumble: GLFW exposes no force feedback. The rumble call is logged
@@ -56,6 +58,7 @@
 #include <ks_client.h> // KrunkScript controller hooks
 #include <ui_logic.h>
 #include <html_ui.h>
+#include <strike_ui.h> // Krunker Strike's screens: the controller's focus ring (strike_menu.c)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -142,6 +145,13 @@ typedef struct {
 
 enum { GP_PRESS, GP_HOLD, GP_RELEASE };
 static const char *const GP_TYPE[] = {"press", "hold", "release"};
+
+// The scripted pad (input scripts, `gpad`): on once a script names a button or stick.
+static struct {
+    int on;
+    unsigned char pressed[GP_BUTTON_NAMES];
+    double axes[4];        // left x, left y, right x, right y (as the sample's)
+} g_script_pad;
 
 static struct {
     Client *client;
@@ -400,7 +410,10 @@ static void trigger(const int type, const GpEvent *e) {
     // KrunkNative: no pad press / hold acts while a text field has focus (ui_text_input_focused,
     // the keyboard hotkeys' rule; v3.1.1 lets the pad through). Releases still land.
     if (type != GP_RELEASE && ui_text_input_focused()) return;
-    if (e->name < GP_BUTTON_NAMES) on_mapped_button(type, e->name, e->value);
+    // Krunker Strike with the menu open: the focus ring takes the pad's buttons (not START, which
+    // still opens and closes the menu), and the game's binds wait
+    const int ring = e->name < GP_BUTTON_NAMES && e->name != GP_START && type == GP_PRESS && strike_menu_pad_button(e->name, 1);
+    if (e->name < GP_BUTTON_NAMES && !ring) on_mapped_button(type, e->name, e->value);
     // KrunkScript onControllerPress / Held / Up (CTL:1137-1141), after the mapping, for every
     // button and stick name (v10 registers the listener on all of them): the name and the key
     // code of the bind it presses (0 for the unmapped buttons and the sticks)
@@ -413,6 +426,7 @@ static void trigger(const int type, const GpEvent *e) {
     }
     const UiControllerInput *c = ui_controls_cntrl_input();
     if (e->name == GP_STICK_AXIS_LEFT) {
+        if (type == GP_PRESS && strike_menu_pad_stick(e->axis[0], e->axis[1])) return; // the ring's step
         if (type == GP_HOLD) on_left_stick_hold(e->axis[0], e->axis[1]);
         else if (type == GP_RELEASE) {
             key(UI_CONTROL_FORWARD, 0);
@@ -449,11 +463,27 @@ static void handle_events(GpEvents *list) {
 
 // ---------------------------------------------------------------- the loop
 
+// navigator.getGamepads()[0], or the scripted pad while a script drives one.
+static int sample_active_pad(GpSample *out) {
+    if (!g_script_pad.on) return sample_pad(0, out);
+    memset(out, 0, sizeof(*out));
+    out->connected = 1;
+    out->standard = 1;
+    out->button_count = GP_BUTTON_NAMES;
+    out->axis_count = 4;
+    for (int i = 0; i < GP_BUTTON_NAMES; i++) {
+        out->pressed[i] = g_script_pad.pressed[i];
+        out->value[i] = g_script_pad.pressed[i] ? 1.0 : 0.0;
+    }
+    for (int i = 0; i < 4; i++) out->axes[i] = g_script_pad.axes[i];
+    return 1;
+}
+
 // Gamepad._loop: sample getGamepads()[0], update the events, fire them.
 static void gamepad_loop(void) {
     if (g_gp.disabled) return;
     GpSample pad;
-    if (sample_pad(0, &pad) && pad.connected) {
+    if (sample_active_pad(&pad) && pad.connected) {
         listen_buttons(&pad);
         listen_axes(&pad);
     }
@@ -707,17 +737,23 @@ void gamepad_frame(Client *client, const int rendered) {
 #ifdef __EMSCRIPTEN__
     gamepad_loop(); // this main-loop callback is the animation frame
 #else
-    const double now = glfwGetTime();
-    if (g_gp.next_frame <= 0.0) g_gp.next_frame = now;
-    if (now < g_gp.next_frame) {
-        if (rendered) log_state(client);
-        return;
+    if (g_script_pad.on) {
+        // the scripted pad (gamepad_script_input) is sampled once per game frame, as the script's clock runs:
+        // a button held for one frame (`gpad <button> down`, `up` a frame later) is seen whatever the wall clock
+        if (rendered && g_gp.running) gamepad_loop();
+    } else {
+        const double now = glfwGetTime();
+        if (g_gp.next_frame <= 0.0) g_gp.next_frame = now;
+        if (now < g_gp.next_frame) {
+            if (rendered) log_state(client);
+            return;
+        }
+        int frames = 1 + (int) ((now - g_gp.next_frame) / g_gp.frame_period);
+        if (frames > GP_MAX_LOOPS) frames = GP_MAX_LOOPS;
+        g_gp.next_frame += frames * g_gp.frame_period;
+        if (g_gp.next_frame <= now) g_gp.next_frame = now + g_gp.frame_period; // after a stall
+        for (int i = 0; i < frames && g_gp.running; i++) gamepad_loop();
     }
-    int frames = 1 + (int) ((now - g_gp.next_frame) / g_gp.frame_period);
-    if (frames > GP_MAX_LOOPS) frames = GP_MAX_LOOPS;
-    g_gp.next_frame += frames * g_gp.frame_period;
-    if (g_gp.next_frame <= now) g_gp.next_frame = now + g_gp.frame_period; // after a stall
-    for (int i = 0; i < frames && g_gp.running; i++) gamepad_loop();
 #endif
     if (rendered) log_state(client);
 }
@@ -739,6 +775,39 @@ int gamepad_script_button(const char *name) {
         return 1;
     }
     return 0;
+}
+
+// Scripted pad, the input_script.c `gpad` forms (the first connection makes it the connected pad):
+//   gpad <button>               press and release at once (gamepad_script_button)
+//   gpad <button> down | up     held until released: the loop sees it over the frames it lasts
+//   gpad stick left|right x y   the stick's deflection (-1..1), held until the next one (0 0: centred)
+// 0 for anything else.
+int gamepad_script_input(const char *arg) {
+    if (!arg) return 0;
+    char name[32], state[16];
+    double x = 0.0, y = 0.0;
+    if (sscanf(arg, "stick %15s %lf %lf", name, &x, &y) == 3) {
+        const int axis = !strcmp(name, "left") ? 0 : !strcmp(name, "right") ? 2 : -1;
+        if (axis < 0) return 0;
+        g_script_pad.axes[axis] = x;
+        g_script_pad.axes[axis + 1] = y;
+    } else if (sscanf(arg, "%31s %15s", name, state) == 2 && (!strcmp(state, "down") || !strcmp(state, "up"))) {
+        int index = -1;
+        for (int i = 0; i < GP_BUTTON_NAMES; i++) {
+            if (!strcmp(GP_NAME[i], name)) index = i;
+        }
+        if (index < 0) return 0;
+        g_script_pad.pressed[index] = !strcmp(state, "down");
+    } else {
+        return gamepad_script_button(arg);
+    }
+    if (!g_script_pad.on) {
+        g_script_pad.on = 1;
+        GpSample pad;
+        sample_active_pad(&pad);
+        on_connected(&pad, "script pad");
+    }
+    return 1;
 }
 
 void gamepad_set_active(const int active) {

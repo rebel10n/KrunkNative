@@ -28,7 +28,6 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <spectate.h>
-#include <flavor.h> // Krunker Strike is the mobile version on every platform
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,9 +125,9 @@ static struct {
 // iPadOS desktop-mode Safari (a "Macintosh" UA with multi-touch) as mobile, and accepts
 // ?mobile=1 / ?mobile=0 to force either layout (testing on desktop browsers).
 static int detect_mobile(void) {
-    // Krunker Strike: FRVR's mobile UI everywhere (window._isMobile / useMobileControls forced on,
-    // strike_ui.h): no pointer lock, the touch controls of strike_touch.c, mobile settings
-    if (flavor_get() == FLAVOR_STRIKE) return 1;
+    // Krunker Strike detects a phone the same way (FRVR's window._isMobile is the user agent test
+    // below): a phone gets the touch controls of strike_touch.c, a desktop the mouse and keyboard
+    // (pointer lock, the game's binds). The Strike page itself is the same on both.
 #ifdef __EMSCRIPTEN__
     return EM_ASM_INT({
         try {

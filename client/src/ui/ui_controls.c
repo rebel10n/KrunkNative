@@ -1656,8 +1656,10 @@ int ui_controls_scroll_event(Client *client, const double dy, const int in_game)
     // swap (checkScroll); with none the wheel swaps weapons (scrollToSwap, scrollDirM), and main.c
     // turns the kept scroll_delta into the swap. The v3.1.1 offline mod (mods.ts
     // installScrollWheelPatch) always swapped with a live player, so a SCROLL bind never fired there.
+    // Krunker Strike (scroll_bound from its rules: scrollToSwap is never on) takes the wheel as a key too:
+    // the wheel never swaps weapons there, whichever bind (none) it has.
     if (client && client->me && client->me->active && ui_controls_enabled(client) && !ui_controls_capturing() && !spectate_active() &&
-        !g_ctl.scroll_key && !console_bound) return 0;
+        !g_ctl.scroll_key && !g_ctl.scroll_bound && !console_bound) return 0;
     // Q(null, 20000): the wheel is a key for one input frame; it swaps weapons only
     // while no bind uses it (bMoQ7).
     press_code(client, KEY_SCROLL);

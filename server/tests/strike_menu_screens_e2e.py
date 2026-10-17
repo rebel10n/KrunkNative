@@ -169,9 +169,12 @@ def run(name, script_lines):
     # and they all run in one frame: the SPIN canvas check and the Customize Controls rect reads then
     # see the screen before its first layout and canvas draw (the canvas gets its width attribute and the
     # shoot button its saved place only in a frame that renders them). strike_screens_e2e.py pins it too.
+    # a phone (ui_mobile.c detect_mobile): the touch layer is the in-game input and Customize Controls edits it
+    # (strike_touch_layer); a desktop has no shoot button or menu button in game
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
-                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FIXED_DELTA": "16.667",
+                "KRUNKNATIVE_MOBILE": "1"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--flavor", "strike", "--offline", "--map", "kanji"],
                              stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)

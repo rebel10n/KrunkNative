@@ -61,6 +61,8 @@ void ui_controls_toggle(Client *c, int on) { (void) c; g_toggles++; g_enabled = 
 int ui_controls_enabled(const Client *c) { (void) c; return g_enabled; }
 int ui_text_input_focused(void) { return 0; }
 void menu_update_instructions(void) {}
+int strike_menu_pad_button(int button, int pressed) { (void) button; (void) pressed; return 0; }
+int strike_menu_pad_stick(double x, double y) { (void) x; (void) y; return 0; }
 int html_ui_is_menu_open(void) { return 0; }
 int menu_window_is_open(void) { return 0; }
 int ui_controls_input_is_cntrl(void) { return 0; }

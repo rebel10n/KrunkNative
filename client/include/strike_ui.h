@@ -15,12 +15,14 @@
 //   client/src/ui/strike_hud.c     the in-game UI (H5 / IN_GAME_UI): health, ammo, timer, kill feed,
 //                                  scoreboard, kill card, end screens
 //   client/src/ui/strike_ftue.c    the first-run gate, FTUE storage and the FTUE overlay (CAe, .ftue-overlay)
-//   client/src/ui/strike_touch.c   the mobile controls (a5: joystick zones, control buttons): mouse
-//                                  natively, touch on the web (always the mobile version)
+//   client/src/ui/strike_touch.c   the phone's controls (a5: joystick zones, control buttons): mouse
+//                                  natively, touch on the web; a desktop has none
 //
-// The Strike page is always THE MOBILE VERSION (FRVR's window._isMobile / useMobileControls true on
-// every platform): no pointer lock, touch controls, a 640x360 base layout scaled to the window.
-// A base (FLAVOR_BASE) client never calls into these modules: ui/index.html is untouched.
+// The Strike page is FRVR's one page on every device; the device decides the input (FRVR's
+// window._isMobile, ui_mobile_active): a phone gets the touch layer (strike_touch_layer, a 640x360
+// layout scaled to the window, no pointer lock), a desktop the mouse and keyboard (pointer lock, the
+// Strike binds, LMB shoot / RMB aim). A base (FLAVOR_BASE) client never calls into these modules:
+// ui/index.html is untouched.
 #include <client.h>
 #include <html_dom.h>
 #include <ui_logic.h> // HudKillCard
@@ -41,9 +43,11 @@ void strike_ui_tick(Client *client);
 // The menu state changed (client_set_menu_open): the screen stack follows (menu <-> game).
 void strike_ui_menu_open(Client *client, int open);
 
-// main.c input routing. In game (menu closed) every mouse event is the mobile controls' (a touch
-// with the mouse, strike_touch.c); with a screen up the page takes it as usual. 1 = consumed.
+// main.c input routing. In game (menu closed) on a phone every mouse event is the touch layer's (a touch
+// with the mouse, strike_touch.c); on a desktop it is the game's (shoot, aim, look). With a screen up
+// the page takes it as usual. 1 = consumed.
 int  strike_ui_pointer_to_page(void);   // the page takes pointer input now (a menu screen is up)
+int  strike_touch_layer(void);          // 1 on a phone under Strike: the touch controls are the input
 int  strike_touch_mouse_button(Client *client, int button, int action, float x, float y); // CSS px
 int  strike_touch_mouse_move(Client *client, float x, float y);
 // Real touches (web: emscripten touch callbacks on the page). phase 0 start, 1 move, 2 end/cancel.
@@ -249,3 +253,9 @@ void strike_menu_scenario_state(const cJSON *st);   // state.strike.itemSelectio
 // servers_ui.c: the server refused the join for its password (ERROR 004005): the SERVER_PASSWORD prompt.
 // Submit sends the same game again with the typed password, Leave goes back (strike_menu.c).
 void strike_menu_server_password(void);
+// The controller in the screens (strike_menu.c): with the menu open a d-pad / stick step moves a focus
+// ring over the page's buttons, A clicks it, B sends Escape. gamepad.c calls them: button = gamepad.js's
+// index (0 A .. 15 d-pad right), pressed; each 1 = taken. strike_menu_pad_forget drops the ring (menu closed).
+int  strike_menu_pad_button(int button, int pressed);
+int  strike_menu_pad_stick(double x, double y);
+void strike_menu_pad_forget(void);

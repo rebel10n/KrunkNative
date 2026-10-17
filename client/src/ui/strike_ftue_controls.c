@@ -15,6 +15,7 @@
 #include <html_ui.h>
 #include <map_catalog.h>
 #include <strike_ftue.h>
+#include <strike_ui.h>     // strike_touch_layer: a phone has the tap blur, a desktop none
 #include <ui_logic.h>
 #include <stdio.h>
 #include <string.h>
@@ -85,6 +86,8 @@ static struct {
     int timer;        // nextStepTimer's html timer, 0 none
     int delayed;      // delayedParameters' html timer, 0 none
     int delayed_done; // the welcome step's hand and ripple are on
+    int moving;       // desktop: WASD held (the move start / end edge)
+    int looking;      // desktop: the look moved this frame or the last (the look start / end edge)
 } G;
 
 static void cancel_timers(void) {
@@ -112,7 +115,7 @@ static void show(void) {
         .tutor_check = s->tutor_check,
         .middle = s->middle,
         .middle_flipped = s->middle_flipped,
-        .blur = !s->hide_blur,
+        .blur = !s->hide_blur && strike_touch_layer(), // a desktop has no tap blur: the mouse reaches the game
         .ignore_events = s->enable,
         .hand_side = late ? NULL : s->hand_side,
         .hand_anim = late ? NULL : s->hand_anim,
@@ -166,6 +169,7 @@ static void begin(void) {
     if (G.running || strike_ftue_completed(CONTROLS_FLOW)) return; // FRVR's start(): a finished flow does not run again
     G.running = 1;
     G.index = -1;
+    G.moving = G.looking = 0;
     next();
 }
 
@@ -217,8 +221,34 @@ void strike_ftue_controls_go(void) {
 
 int strike_ftue_controls_running(void) { return G.running; }
 
+// A desktop's tap steps take the mouse as a tap (strike_ftue_controls_desktop_press), so only "Let's Go!" is a page target
 int strike_ftue_controls_pointer_to_page(void) {
     if (!G.running) return 0;
     const CtlStep *s = &STEPS[G.index];
+    if (!strike_touch_layer()) return s->complete;
     return !s->hide_blur || s->complete; // the tap blur (hideBlur off) and "Let's Go!" are DOM targets in FRVR
+}
+
+// A mouse press on a desktop is the tap the blur would take: it passes the step unless hideBlur, disableTapToPass
+// or the "Let's Go!" step (its button is the page's)
+void strike_ftue_controls_desktop_press(void) {
+    if (!G.running || strike_touch_layer()) return;
+    const CtlStep *s = &STEPS[G.index];
+    if (!s->hide_blur && !s->no_tap && !s->complete) next();
+}
+
+// The desktop's keys and look, per game frame (client_tick_game): the move edges come from WASD held, the look
+// edges from the look moving (the stick's touch events, strike_touch.c, are the phone's)
+void strike_ftue_controls_desktop_frame(const int looking) {
+    if (!G.running || strike_touch_layer()) return;
+    const int moving = ui_controls_down(UI_CONTROL_FORWARD) || ui_controls_down(UI_CONTROL_BACKWARD) ||
+                       ui_controls_down(UI_CONTROL_LEFT) || ui_controls_down(UI_CONTROL_RIGHT);
+    if (moving != G.moving) {
+        G.moving = moving;
+        strike_ftue_controls_event(moving ? STRIKE_FTUE_EV_MOVE_START : STRIKE_FTUE_EV_MOVE_END);
+    }
+    if (looking != G.looking) {
+        G.looking = looking;
+        strike_ftue_controls_event(looking ? STRIKE_FTUE_EV_LOOK_START : STRIKE_FTUE_EV_LOOK_END);
+    }
 }

@@ -12,7 +12,7 @@ only (no touch event: strike_touch_input() is 0, so the keyboard is the input):
      the overlay reads "0 / <max>".
   3. the Reload key (R): the overlay shows "- / <max>" while reloading (state reload > 0).
   4. a touch on the Strike page (`touch X Y`) makes the touch controls the input: the desktop overlay
-     and the hint go, and the touch reload ring is shown again (its label has a box).
+     and the hint go. The touch layer (and its reload ring) is a phone's: a desktop builds none.
 KRUNKNATIVE_E2E_KEEP=1 keeps the work directory (the live log) when everything passed.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). KRUNKNATIVE_ASSETS_DIR is passed through
 (a worktree without the untracked asset dirs). Prints PASS/FAIL lines; exit 0 only when all passed.
@@ -147,9 +147,9 @@ def main():
     n, t = text_of(text, "hint3")
     check("touch: no keyboard hint", n == 0, f"n={n} text={t!r}")
     count, w, h = rect_of(text, "rbtn0")
-    check("keyboard: the touch reload ring is hidden (no box)", count == 1 and w == 0 and h == 0, f"n={count} w={w} h={h}")
+    check("keyboard: no touch reload ring on a desktop (the touch layer is a phone's)", count == 0, f"n={count} w={w} h={h}")
     count, w, h = rect_of(text, "rbtn")
-    check("touch: the touch reload ring is shown again", count == 1 and w > 0 and h > 0, f"n={count} w={w} h={h}")
+    check("touch: still no touch reload ring on a desktop (strike_touch_layer() is phone only)", count == 0, f"n={count} w={w} h={h}")
 
     ok = all(results)
     print(f"\n{sum(results)}/{len(results)} passed" + ("" if ok else f"  (logs in {WORK})"))

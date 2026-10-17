@@ -28,12 +28,18 @@
 //   100 gpad start               a game controller button press + release (gamepad.js names: start,
 //                                button_1, ...) through the gamepad event machine, as a pad would
 //                                (Gamepad.active, then CONTROLS' listeners); no pad is needed
+//   100 gpad shoulder_bottom_right down | up   the button held (down) until released (up): the trigger
+//                                holds shoot, as the pad's loop sees it over the frames
+//   100 gpad stick left 0 -1    a stick held at that deflection (x y, -1..1) until the next stick line
+//                                (gpad stick right 0 0 centres it); the scripted pad is connected at its first line
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 touch start 1 640 360    a finger (id 1) down / moved / lifted on the phone controls (ui_mobile.c, the
 //   100 touch move 1 700 360     web build's #mobileUI touch listeners): several ids at once are several fingers
 //   100 touch end 1             (joystick + look + fire); window px like click. Needs KRUNKNATIVE_MOBILE=1
 //   100 touch tap 640 360        a finger down and up at a point through the mouse callbacks (a page tap: the
 //                                menu's TAP TO PLAY, or a #mobileUI button, as the mouse touch routes it)
+//   100 touch start 1 300 500    under Krunker Strike the same verbs drive the page's touch layer (strike_touch.c):
+//                                window px like the phone's, converted to the page's CSS px
 //   100 touch 320 180           the Krunker Strike form: a finger (id 1) tapped at that CSS point of the Strike
 //                                page (strike_touch.c); the first touch makes the touch controls the input
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
@@ -202,6 +208,7 @@
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
 #include <spectate.h>     // `cam`: spectate_active
 #include <strike_ui.h>    // `touch`: a finger on the Krunker Strike touch layer (strike_touch.c)
+#include <html_dom.h>     // html_dom_viewport: the Strike page's CSS px for `touch start|move|end`
 #include <hud_map.h>     // `pings`: the ping markers on screen
 #include <nettspend.h>    // `pour`, `laced`
 #include <ruleset.h>      // `class`: the class names
@@ -312,7 +319,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
@@ -478,6 +485,16 @@ static void script_touch(Client *client, const char *arg) {
         x *= (float) fw / (float) ww;
         y *= (float) fh / (float) wh;
     }
+    if (strike_ui_active()) { // Krunker Strike: the finger on the page's touch layer (strike_touch.c), CSS px
+        float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+        html_dom_viewport(&vw, &vh, &dpr);
+        if (dpr > 0.0f) {
+            x /= dpr;
+            y /= dpr;
+        }
+        strike_touch_event(client, phase == UI_TOUCH_START ? 0 : phase == UI_TOUCH_MOVE ? 1 : 2, id, x, y);
+        return;
+    }
     const int used = ui_mobile_touch_point(phase, id, x, y);
     fprintf(stderr, "[input_script] touch %s id=%ld at=%.0f,%.0f used=%d\n", verb, id, x, y, used);
 }
@@ -512,7 +529,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
             }
         }
     } else if (!strcmp(e->cmd, "gpad")) {
-        if (!gamepad_script_button(e->arg)) fprintf(stderr, "[input_script] gpad %s: unknown button\n", e->arg);
+        if (!gamepad_script_input(e->arg)) fprintf(stderr, "[input_script] gpad %s: unknown button or stick\n", e->arg);
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
         const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : !strcmp(e->arg, "middle") ? GLFW_MOUSE_BUTTON_MIDDLE : GLFW_MOUSE_BUTTON_LEFT;
         const int action = e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
