@@ -6,6 +6,7 @@ import path from "path";
 import type { AddressInfo, Socket } from "net";
 import version from "./version.json";
 import * as krunkerProxy from "./krunkerProxy";
+import * as krunkerRelay from "./krunkerRelay";
 import * as brainProxy from "./brainProxy";
 import * as browserProxy from "./proxy";
 import * as publicRoutes from "./publicRoutes";
@@ -70,6 +71,8 @@ function usage(): string {
     "                                                        (e.g. cf-connecting-ip; default X-Forwarded-For)",
     "  KRUNK_NATIVE_WEB_DIR                                  web build dir for --web",
     "  KRUNK_NATIVE_WEB_COI=1                                add COOP/COEP headers (SharedArrayBuffer)",
+    "  KN_BRIDGE_KRUNKER_PROXY=socks5h://user:pass@HOST:PORT  send krunker.io traffic (/krunker-relay/http, /krunker-relay/ws)",
+    "                                                        through this internal proxy (web / bridge-only; unset = off)",
   ].join("\n");
 }
 
@@ -213,11 +216,16 @@ function upgradeNative(
  * served elsewhere.
  */
 function startBridgeOnly(): ReturnType<typeof createServer> {
+  const relay = relayOrExit();
   const http = createServer((req, res) => {
     const pathname = (req.url || "/").split("?")[0];
     if (req.method === "GET" && pathname === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ ok: true, version, ...webBridge.getStats() }));
+      return;
+    }
+    if (relay.handlesHttp(pathname)) {
+      relay.handleHttp(req, res);
       return;
     }
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -230,6 +238,10 @@ function startBridgeOnly(): ReturnType<typeof createServer> {
       pathname = new URL(request.url || "/", "http://localhost").pathname;
     } catch (_err) {
       pathname = "";
+    }
+    if (relay.handlesUpgrade(pathname)) {
+      relay.handleUpgrade(request, socket, head);
+      return;
     }
     if (pathname !== webBridge.WEB_WS_PATH) {
       socket.destroy();
@@ -248,12 +260,24 @@ function startBridgeOnly(): ReturnType<typeof createServer> {
   return http;
 }
 
+// KN_BRIDGE_KRUNKER_PROXY is read once at startup; a value that is not a proxy URL stops the bridge
+// (a silent direct connection would be the wrong way round). The message holds no credentials.
+function relayOrExit(): krunkerRelay.KrunkerRelay {
+  try {
+    return krunkerRelay.relayFromEnv();
+  } catch (err) {
+    console.error(`net-bridge: ${(err as Error).message}`);
+    process.exit(2);
+  }
+}
+
 /**
  * `--web`: static web build + raw `/native` WebSocket passthrough to the
  * native TCP server. The legacy `/ws` translator stays attached because it
  * costs nothing and lets the same bridge serve both clients.
  */
 function startWeb(options: CliOptions): ReturnType<typeof createServer> {
+  const relay = relayOrExit();
   const webDir = path.resolve(
     options.webDir || process.env.KRUNK_NATIVE_WEB_DIR || DEFAULT_WEB_DIR,
   );
@@ -294,6 +318,10 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
   const http = createServer(async (req, res) => {
     try {
       const pathname = (req.url || "/").split("?")[0];
+      if (relay.handlesHttp(pathname)) {
+        relay.handleHttp(req, res);
+        return;
+      }
       if (brainProxy.isBrainPath(pathname)) {
         brainProxy.proxyHttp(brain, req, res, () => {
           localRoutes(req, res).catch((err) => {
@@ -332,6 +360,10 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
       return;
     }
 
+    if (relay.handlesUpgrade(url.pathname)) {
+      relay.handleUpgrade(request, socket as Socket, head);
+      return;
+    }
     if (brainProxy.isBrainWsPath(url.pathname)) {
       brainProxy.proxyUpgrade(brain, request, socket, head); // the social socket (kn_brain)
       return;

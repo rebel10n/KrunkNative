@@ -13,6 +13,9 @@ User={{ kn_user }}
 Group={{ kn_group }}
 WorkingDirectory={{ kn_bridge_base }}
 EnvironmentFile={{ kn_etc_dir }}/bridge.env
+# Optional, not templated by ansible (root:kn 0640): KN_BRIDGE_KRUNKER_PROXY=socks5h://user:pass@HOST:PORT
+# routes krunker.io through an internal proxy (net-bridge/krunkerRelay.ts). Unset or the file missing = off.
+EnvironmentFile=-{{ kn_etc_dir }}/bridge-proxy.env
 # libuv's io_uring backend is not in the syscall filter below.
 Environment=UV_USE_IO_URING=0 NODE_ENV=production
 ExecStart={{ kn_bridge_node_dir }}/bin/node --no-deprecation {{ kn_bridge_base }}/net-bridge.js --bridge-only

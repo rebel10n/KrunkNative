@@ -10,6 +10,9 @@ Type=simple
 User=krunknative
 Group=krunknative
 WorkingDirectory=/opt/krunknative/net-bridge
+# Optional internal proxy for krunker.io (net-bridge/krunkerRelay.ts): put
+#   KN_BRIDGE_KRUNKER_PROXY=socks5h://user:password@PROXY_HOST:PORT
+# in /etc/krunknative/net-bridge.env (mode 0640), then restart. Unset = off: no krunker.io traffic.
 EnvironmentFile=-/etc/krunknative/net-bridge.env
 Environment=KRUNK_NATIVE_BRIDGE_HOST=127.0.0.1 KRUNK_NATIVE_BRIDGE_PORT=8080
 ExecStart=/usr/bin/node -r ts-node/register/transpile-only index.ts --web

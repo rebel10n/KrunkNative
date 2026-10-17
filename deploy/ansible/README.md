@@ -326,6 +326,10 @@ TCP to the edge. Role `kn_bridge` (tag `bridge`):
   `/usr/local/bin/node` (20, EOL, used by the pm2 app) is not used or touched.
 - `kn-bridge.service`: user `kn`, kn_brain-style hardening (minus MemoryDenyWriteExecute, V8
   needs W+X), settings in `/etc/krunknative/bridge.env` (root:kn 0640, no secrets).
+  The optional internal proxy for krunker.io (`KN_BRIDGE_KRUNKER_PROXY`, net-bridge/krunkerRelay.ts)
+  goes in `/etc/krunknative/bridge-proxy.env` (root:kn 0640, not templated, so ansible never writes or
+  reads the credentials): one line `KN_BRIDGE_KRUNKER_PROXY=socks5h://user:password@PROXY_HOST:PORT`,
+  then `systemctl restart kn-bridge`. Empty or missing = off.
 - Allowlist (`KRUNK_NATIVE_TARGETS`), generated from the `edges` inventory: `<edge>-<n>.krunk.io`
   for n = 1..11 and each edge's `kn_public_ip`, ports 21015-21025 (`kn_bridge_target_port_lo/hi`).
   Anything else, including a missing `target`, loopback and other kru ports, is refused with 403
