@@ -66,6 +66,7 @@ void hud_ui_hit(Client*, int kill);
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
+#include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
 #include <cJSON.h>
 #include <limits.h>
 #include <ctype.h>
@@ -309,13 +310,6 @@ static void hb_append_fixed(char *buf, const size_t size, size_t *len, const cha
     hb_append(buf, size, len, LRM);
 }
 
-// JS Number -> string for the values the HUD prints: integers without a fraction,
-// otherwise the shortest round-trip-ish form (%.16g matches JS for 1/3-style values).
-static void fmt_number(const double value, char *out, const size_t size) {
-    if (value == floor(value) && fabs(value) < 1e15) snprintf(out, size, "%.0f", value);
-    else snprintf(out, size, "%.16g", value);
-}
-
 // String(+x.toFixed(3)): three decimals, trailing zeros and dot dropped ("1", "0.25").
 static void fmt_opacity(const double value, char *out, const size_t size) {
     snprintf(out, size, "%.3f", value);
@@ -354,7 +348,7 @@ static void hud_health_bar_html(int hp, int max, int segs, char *out, const size
     for (int i = 0; i < segs; i++) {
         const double v = left - (double) i;
         char width[32];
-        fmt_number((v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v) * 100.0, width, sizeof(width));
+        hud_format_number((v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v) * 100.0, width, sizeof(width));
         hb_append(out, size, &len, "<div class='nHealthBarSeg'><div class='nHpBSeg' style='width:%s%%;background-color:%s;color:%s'></div></div>",
                   width, color, color);
     }
@@ -1984,7 +1978,7 @@ static void hud_nums_step(const Client *client, const double now_ms) {
             // dmgColor is a switch+colour row (val COLORS.damage #DE292F); ClientRenderSettings
             // keeps only the switch, so on = #DE292F, off = white. Crits use critColor.
             html_dom_set_style(el, "color", num->crit ? rs->crit_color : rs->dmg_color ? "#DE292F" : "#ffffff");
-            fmt_number(num->value, text, sizeof(text)); // String(val): "24", "23.4"
+            hud_format_number(num->value, text, sizeof(text)); // String(val): "24", "23.4" (two decimals at most)
             html_dom_set_text(el, text);
             html_dom_set_display(el, "block");
             num->shown = 1;
@@ -4538,7 +4532,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
         // kdVal = (kills / (deaths || 1)).round(1).toString()
         char kd[32];
         const double ratio = (double) hud->kills / (hud->deaths ? hud->deaths : 1);
-        fmt_number(round(ratio * 10.0) / 10.0, kd, sizeof(kd));
+        hud_format_number(round(ratio * 10.0) / 10.0, kd, sizeof(kd));
         if (!hud->kills && !hud->deaths) snprintf(kd, sizeof(kd), "0.0"); // resetGameSessionState: kdVal = "0.0"
         dom_text("kdVal", kd);
     }

@@ -1228,6 +1228,13 @@ else ()
     target_link_libraries(vic_title_test PRIVATE cJSON m)
     add_test(NAME vic_title_test COMMAND vic_title_test ${CMAKE_SOURCE_DIR})
 
+    # hud_format_test: the HUD's number text (client/src/ui/hud_format.c) for the damage numbers, the health bar and
+    # the K/D ratio: two decimals at most, no exponent, no double noise (client/tests/hud_format_test.c)
+    add_executable(hud_format_test client/tests/hud_format_test.c client/src/ui/hud_format.c)
+    target_include_directories(hud_format_test PRIVATE client/src/ui)
+    target_link_libraries(hud_format_test PRIVATE m)
+    add_test(NAME hud_format_test COMMAND hud_format_test)
+
     # window_state_test: the window state F4 / the Settings relaunch pass to the new process
     # (KRUNKNATIVE_RESTORE_WINDOW) and a normal restart keeps (client/src/window_state.c)
     add_executable(window_state_test client/tests/window_state_test.c client/src/window_state.c)
