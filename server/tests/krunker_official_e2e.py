@@ -126,7 +126,8 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
-        "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
+        "--joinlines": "joinlines"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -174,6 +175,7 @@ AHKEY = int(header_value("KRUNKER_AHKEY"), 0)
 BUILD_VERSION = header_value("KRUNKER_BUILD_VERSION")
 SALT = b"KRUNK3R_AC"
 GAME_ID, CLIENT_ID, MY_SID, BOT_SID = "TEST:abc12", "cid-42", 9, 5
+QUENTIN_SID = 11  # run_native_join_lines: a late joiner
 OLD_BURG_GAME = "TEST:oldbg"  # a second official lobby in the browser's list, on Old_Burg (never joined)
 KIO_CUSTOM_GAME, KIO_OFFICIAL_GAME = "TEST:kcust", "TEST:ocust"  # krunker.io's custom game and official custom (never joined)
 MAP_INDEX, MAP_NAME = 43, "Bastion"  # past v7.1.4's 32 maps: the map the client used to refuse
@@ -851,6 +853,18 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
                 await self.hud_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario == "joinlines":
+                # run_native_join_lines: krunker.io's join line (server.message.join, ADD_CHATI18N kind 2) at each
+                # first spawn, the joiner's own included (a lone player's chat shows his own "joined the game"):
+                # ours after our spawn, then a late joiner's
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await send("chi", -1, None, ["server.message.join", "Guest_9"], 2, "#fc03ec")
+                await asyncio.sleep(1.0)
+                await send("0", player("sockQ", QUENTIN_SID, "Quentin", 6.0, 4.0))
+                await send("chi", -1, None, ["server.message.join", "Quentin"], 2, "#fc03ec")
+                while not stop.is_set():
+                    await asyncio.sleep(0.2)
             elif self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
@@ -2769,6 +2783,37 @@ def run_native_script():
     check(f"{label}: \"plk\": shooting locked", any(r["lock"] == 1 for r in R) and R[0]["lock"] == 0, sorted(set(r["lock"] for r in R)))
 
 
+def run_native_join_lines(hidden):
+    """The join lines of an official game (hud_ui.c hud_seed_chat, game_events.c): the server sends one "joined
+    the game" line per first spawn, to everyone, the joiner too, so each player's join reads once in #chatList.
+    The stub (scenario "joinlines") sends ours after our spawn and a late joiner's (Quentin). Hidden (Settings >
+    Game > Hide player names): ours reads Player, Quentin's Player_<n>, and no raw name shows."""
+    label = "native-join-hidden" if hidden else "native-join-lines"
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "9000 grep @jn joined [id^=chatMsg_]\n9000 grep @jme Guest_9 [id^=chatMsg_]\n9000 grep @jq Quentin [id^=chatMsg_]\n"
+              "9000 grep @jplayer Player [id^=chatMsg_]\n9000 grep @jpn Player_ [id^=chatMsg_]\n"
+              "12000 grep @jn2 joined [id^=chatMsg_]\n12000 grep @jme2 Guest_9 [id^=chatMsg_]\n12500 quit\n") % PASTE_TOKEN
+    store = os.path.join(WORK, label + "-cfg", "krunknative")
+    os.makedirs(store, exist_ok=True)
+    with open(os.path.join(store, "knClient.json"), "w") as f:
+        json.dump({"hidePlayerNames": True} if hidden else {}, f)
+    stub, p, out, log = launch_native(label, script, {}, scenario="joinlines")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    grep = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\w+) needle=\S+ n=\d+ hits=(\d+)", text)}
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    # the count at 9 s and again at 12 s: two join lines in all, and nothing is added later
+    check(f"{label}: two join lines in all (ours and Quentin's)", grep.get("jn", -1) == 2 and grep.get("jn2", -1) == 2, grep)
+    if hidden:
+        # ours reads "Player" (the local player is never numbered); Quentin's reads Player_<n> (n: the match's count)
+        check(f"{label}: our join line reads Player and Quentin's Player_<n>, no raw name in either", grep.get("jplayer", -1) == 2
+              and grep.get("jpn", -1) == 1 and grep.get("jme", -1) == 0 and grep.get("jme2", -1) == 0 and grep.get("jq", -1) == 0, grep)
+    else:
+        check(f"{label}: exactly one join line for us (the server's, none from the client as well)", grep.get("jme", -1) == 1
+              and grep.get("jme2", -1) == 1, grep)
+        check(f"{label}: exactly one join line for the late joiner", grep.get("jq", -1) == 1, grep)
+
+
 def run_native_lobby():
     """The default (no KRUNKNATIVE_KRUNKER_JOIN): a click on the official lobby in the server browser
     joins it in this client. From the offline game: the Servers window lists the stub's lobby, the
@@ -4325,6 +4370,8 @@ def main():
         run_native_hq()
         run_native_hud()
         run_native_ingame()
+        run_native_join_lines(False)
+        run_native_join_lines(True)
         run_native_rounds()
         run_native_world()
         run_native_actions()
@@ -4358,6 +4405,9 @@ def main():
         ran = True
     if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
         run_native_hud()
+    if ONLY == "joinlines" and os.path.isfile(f"{BUILD}/client_bin"):  # just the join lines (server.message.join) runs
+        run_native_join_lines(False)
+        run_native_join_lines(True)
     if ONLY == "rounds" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame-rounds' run
         run_native_rounds()
     if ONLY == "ingame" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame's run

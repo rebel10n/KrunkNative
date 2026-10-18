@@ -2679,6 +2679,13 @@ void hud_ui_clear_chat(void) {
 static void hud_seed_chat(const Client *client) {
     HudUi *ui = &g_hud_ui;
     if (ui->chat_seeded) return;
+    // krunker.io's server sends the joiner its own "joined the game" line at the first spawn (v3.1.1's lobbies show
+    // a lone player's), so an official game gets no seed: the line would read twice. Box Office's server skips
+    // the joiner (net.c), so its seed stays.
+    if (client->game.is_official) {
+        ui->chat_seeded = 1;
+        return;
+    }
     // The join line names the player like the server does ("Guest_1"): wait for SPAWN's
     // name, then fall back to the menu name.
     if (client->me && !client->me->name[0] && ui->seed_wait++ < HUD_SEED_WAIT_SAMPLES) return;
