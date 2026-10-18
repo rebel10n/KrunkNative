@@ -2309,7 +2309,9 @@ static char *gen_account(void) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
         sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='knPfpPick();'>");
         sb_append(&sb, I18N("windows.profile.picture", "Change Picture"));
-        sb_append(&sb, "</a></div><div id='pfpStatus' class='settName' style='width:181px;font-size:13px;margin-top:6px'></div>");
+        // The upload status line (avatar_ui.c set_status) is hidden until it has text: an empty settName drew
+        // a rule under the picture and, as a block, pushed the name box below it (v7.1.4 / v10 have neither).
+        sb_append(&sb, "</a></div><div id='pfpStatus' style='display:none;width:181px;font-size:13px;margin-top:6px;color:rgba(255,255,255,0.6)'></div>");
         sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
         sb_append(&sb, I18N("generic.name", "Name"));
         if (player_names_hidden()) sb_append(&sb, "<a class='floatR'>"); // no profile link while names are hidden (the real account's)

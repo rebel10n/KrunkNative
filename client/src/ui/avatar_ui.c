@@ -89,6 +89,7 @@ static void set_status(const char *text) {
     HtmlElem el = html_dom_by_id("pfpStatus");
     if (!el) return;
     html_dom_set_text(el, text ? text : "");
+    html_dom_set_style(el, "display", text && text[0] ? "block" : "none"); // hidden while empty (account_ui.c)
 }
 
 // The brain's error name -> what the player is told (kn_brain: avatar.c).

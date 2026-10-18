@@ -7,7 +7,7 @@
   "regions": [
     {
       "name": "default-picture",
-      "rect": [280, 162, 112, 112],
+      "rect": [280, 214, 112, 112],
       "max_pct": 2.0
     }
   ]
