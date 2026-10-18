@@ -1940,7 +1940,7 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
     (void) client;
 #endif
 
-    // the security challenge's modal over a game takes the keys too (its token box: paste, erase)
+    // the security challenge's modal over a game takes the keys too (the challenge's widget, Cancel)
     if (html_ui_is_menu_open() || krunker_captcha_needs_player()) html_ui_key(key, scancode, action, mods);
 }
 

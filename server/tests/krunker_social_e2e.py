@@ -274,8 +274,7 @@ def script():
           "19000 clickid knV10LoginMode",
           "19200 clickid accName", "19250 type " + kae.LOGIN,
           "19400 clickid accPass", "19450 type " + kae.PASSWORD,
-          "19600 clickid knV10LoginSubmit",
-          "21000 clickid knCaptchaToken", "21100 type " + kae.TURNSTILE, "21200 clickid knCaptchaUse"]
+          "19600 clickid knV10LoginSubmit"]  # the Security Challenge: the challenge webview passes by itself
     t = 23500
     for i, d in enumerate(kae.CODE):
         s += ["%d clickid knV10Code%d" % (t, i), "%d type %s" % (t + 60, d)]
@@ -322,8 +321,10 @@ def run_client(brain_port, stub, front):
                 "KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % front.http_port,
                 "KRUNKNATIVE_KRUNKER_EVENT_BUS": "ws://127.0.0.1:%d" % front.ws_port,
                 "KRUNKNATIVE_KRUNKER_AUTH": base + "/frvr/v1/auth", "KRUNKNATIVE_ASSETS_DIR": kae.ASSETS,
-                "KRUNKNATIVE_ASSET_FETCH": "off"})
-    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], cwd=ROOT, stdout=open(log, "w"),
+                "KRUNKNATIVE_ASSET_FETCH": "off",
+                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + kae.CAPTCHA_PATH})  # the challenge webview's page: its own stub
+    # a private Xvfb for the challenge webview (WebKitGTK needs a display; the game itself stays headless)
+    p = subprocess.Popen(["xvfb-run", "-a", "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     procs.append(p)
     marks = {}

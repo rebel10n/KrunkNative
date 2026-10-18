@@ -10,8 +10,10 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   out), a restart lists nothing.
 
   python3 -I client/tests/account_manager_e2e.py BUILD_DIR      (repository root)
-Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs), a local server_bin
-for the menu's map, ports from kn_proto.free_ports(). 77 = skip (no kn_brain / openssl).
+Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, private XDG dirs) under xvfb-run's private Xvfb (the
+krunker.io challenge webview needs a display; the game stays headless): its Security Challenge passes by itself on
+the krunker.io stub's /captcha page (KRUNKNATIVE_KRUNKER_CAPTCHA_URL), a stub Turnstile widget answering the
+test's token. A local server_bin for the menu's map, ports from kn_proto.free_ports(). 77 = skip (no kn_brain / openssl).
 """
 import json
 import os
@@ -65,11 +67,13 @@ def run_client(name, script, brain_url, game_port, timeout=150):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FINDER_URL": "off"})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FINDER_URL": "off",
+                "KRUNKNATIVE_ASSETS_DIR": kae.ASSETS})  # the full asset tree (a worktree has no models / fonts)
     env.update(KIO_ENV)
     with open(log, "w") as out:
-        p = subprocess.Popen([os.path.join(BUILD, "client_bin"), "--mode", "online", "--brain", brain_url, "--finder", "off",
-                              "--connect", "127.0.0.1:%d" % game_port], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+        # a private Xvfb for the challenge webview (xvfb-run -a supplies DISPLAY; the game itself stays headless)
+        p = subprocess.Popen(["xvfb-run", "-a", os.path.join(BUILD, "client_bin"), "--mode", "online", "--brain", brain_url,
+                              "--finder", "off", "--connect", "127.0.0.1:%d" % game_port], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)
@@ -239,7 +243,7 @@ def clear_kio_session():
 
 
 def krunker_row(brain_url, game_port, stub):
-    """A krunker.io row: added with a typed login (the captcha: its Turnstile token typed), used with its stored
+    """A krunker.io row: added with a typed login (the Security Challenge passes by itself in the webview), used with its stored
     refresh token, refused (the session ended) so the row asks for its password, added again, removed."""
     kio_log = lambda log: log.count(f"[kio-account] signed in to krunker.io as {kae.LOGIN}")
     log = run_client("kio_add", f"""0 menu
@@ -250,9 +254,6 @@ def krunker_row(brain_url, game_port, stub):
 1400 clickid knAltPass
 1500 type {kae.PASSWORD}
 1600 clicksel [onclick*="knAltAdd"]
-3000 clickid knCaptchaToken
-3100 type {kae.TURNSTILE}
-3200 clickid knCaptchaUse
 5000 clickid knAltCode
 5100 type {kae.CODE}
 5200 clicksel [onclick*="knAltCodeSubmit"]
@@ -294,9 +295,6 @@ def krunker_row(brain_url, game_port, stub):
 4300 clickid knAltPass
 4400 type {kae.PASSWORD}
 4600 clicksel [onclick*="knAltAdd"]
-6000 clickid knCaptchaToken
-6100 type {kae.TURNSTILE}
-6200 clickid knCaptchaUse
 8000 clickid knAltCode
 8100 type {kae.CODE}
 8200 clicksel [onclick*="knAltCodeSubmit"]
@@ -350,7 +348,8 @@ def main():
                                       stdin=subprocess.DEVNULL, start_new_session=True))
         stub.start()
         KIO_ENV.update({"KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % http_port,
-                        "KRUNKNATIVE_KRUNKER_AUTH": "http://127.0.0.1:%d/frvr/v1/auth" % http_port})
+                        "KRUNKNATIVE_KRUNKER_AUTH": "http://127.0.0.1:%d/frvr/v1/auth" % http_port,
+                        "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": "http://127.0.0.1:%d%s" % (http_port, kae.CAPTCHA_PATH)})
         for _ in range(100):
             try:
                 with urllib.request.urlopen(brain_url + "/mm/status", timeout=1) as r:

@@ -21,7 +21,7 @@
 //     the only mode when in_ui is 0.
 // Backends: Linux WebKitGTK (webkit2gtk-4.1) when built with KN_WEBVIEW (CMake -DKN_WEBVIEW=AUTO|ON|OFF,
 // AUTO = on when pkg-config finds it). Everywhere else (macOS, Windows, the web build, KN_WEBVIEW off)
-// kn_webview_available() is 0 and the callers keep the system-browser / paste-box paths.
+// kn_webview_available() is 0 and the callers end the request (no challenge is shown).
 // Main thread only: kn_webview_pump() runs the toolkit's events, once per frame.
 #include <stddef.h>
 

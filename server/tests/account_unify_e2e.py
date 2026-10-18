@@ -171,8 +171,7 @@ def script():
           "21000 clickid knV10LoginMode",
           "21200 clickid accName", "21250 type " + kae.LOGIN,
           "21400 clickid accPass", "21450 type " + kae.PASSWORD,
-          "21600 clickid knV10LoginSubmit",
-          "23000 clickid knCaptchaToken", "23100 type " + kae.TURNSTILE, "23200 clickid knCaptchaUse"]
+          "21600 clickid knV10LoginSubmit"]  # the Security Challenge: the challenge webview passes by itself
     t = 25500
     for i, d in enumerate(kae.CODE):
         s += ["%d clickid knV10Code%d" % (t, i), "%d type %s" % (t + 60, d)]
@@ -221,8 +220,10 @@ def run_client(brain_port, stub):
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_FINDER_URL": "off",
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": base + "/mm", "KRUNKNATIVE_KRUNKER_API": base + "/api",
                 "KRUNKNATIVE_KRUNKER_AUTH": base + "/frvr/v1/auth", "KRUNKNATIVE_ASSETS_DIR": kae.ASSETS,
-                "KRUNKNATIVE_ASSET_FETCH": "off"})
-    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], cwd=ROOT, stdout=open(log, "w"),
+                "KRUNKNATIVE_ASSET_FETCH": "off",
+                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + kae.CAPTCHA_PATH})  # the challenge webview's page: its own stub
+    # a private Xvfb for the challenge webview (WebKitGTK needs a display; the game itself stays headless)
+    p = subprocess.Popen(["xvfb-run", "-a", "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     procs.append(p)
     try:

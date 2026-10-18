@@ -4,12 +4,14 @@ krunker.io's API, FRVR's auth service, the matchmaker and a game server: nothing
 
   python3 -I server/tests/krunker_account_e2e.py BUILD_DIR   (repo root)
 
-One HTTP stub (ports from kn_proto.free_ports()) serves three bases:
+One HTTP stub (ports from kn_proto.free_ports()) serves three bases and the challenge page:
   /api   krunker.io's API: POST /auth/login/username (checks username, password and the Turnstile token
          "b"; answers check_2fa), POST /auth/2fa/challenge/<id> (the code; answers login_ok with an access
          JWT that expires in 30 s and a refresh token), GET /player/me (Bearer: the account's name)
   /frvr  FRVR's auth: POST /v1/auth/refresh {"refreshToken"} -> 201 {accessToken, refreshToken}
   /mm    the matchmaker: GET /game-list (four lobbies of one mode), GET /seek-game (records accessToken)
+  /captcha  the krunker.io page the challenge webview loads (KRUNKNATIVE_KRUNKER_CAPTCHA_URL): a stub of
+         Turnstile's widget that answers with the test's token by itself
 and a WebSocket game server (records `at=`, sends io-init, "a" ACCOUNT_RESPONSE, load, init).
 
 There is one account UI (backend_ui.h active_account()): v10's own login modal, header and Account
@@ -22,7 +24,8 @@ One headless client_bin (--offline: krunk.io is a guest, an input script) then:
      not the full one) as a krunker.io guest (no accessToken, no at=)
   2. in the game, the menu shows the krunker.io guest (v10's guest bar); v10's login modal
      (loginOrRegister) with "(use username instead)": username + password, Login -> the Security
-     Challenge (headless: the paste box) -> v10's "Two-Factor Authentication" form (six code boxes,
+     Challenge, which the webview passes by itself (the modal stays hidden) -> v10's
+     "Two-Factor Authentication" form (six code boxes,
      not dismissable: a click on its overlay leaves it up) -> signed in (the name from /player/me),
      the modal closes, the header shows the krunker.io account; the open socket logs in with it
      (v10's rpc LOGIN: the server's "a" names it); the Account window is the krunker.io account's
@@ -207,6 +210,28 @@ def frame_name(data):  # the packet name of a client frame (fixstr / str8 first 
 
 # ---------------------------------------------------------------- the stubs
 
+# The krunker.io page the challenge webview loads (kn_webview.c, KRUNKNATIVE_KRUNKER_CAPTCHA_URL = this
+# stub's /captcha): a stub of Cloudflare api.js's `turnstile` (render(el, opts) / remove(id)). Its widget
+# "is solved" by itself: ~1.5 s after it renders it calls its own callback with the test's token.
+CAPTCHA_PATH = "/captcha"
+CAPTCHA_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>krunker.io (e2e stub)</title>
+<script>
+window.turnstile = {
+  render: function (el, o) {
+    var box = document.createElement('div');
+    box.textContent = 'stub challenge: solved by the player';
+    if (el) el.appendChild(box);
+    setTimeout(function () { o.callback(%(token)s); }, 1500);
+    return 'stub-widget';
+  },
+  remove: function () {}
+};
+</script></head>
+<body><pre>User-agent: *
+Allow: /</pre></body></html>
+"""
+
 MY_SID = 9  # our player's sid in the stub's "0" (the socket id is io-init's "sockME")
 
 
@@ -281,7 +306,14 @@ class Stub:
 
             def do_GET(self):
                 path, q, _ = self.record("GET")
-                if path == "/mm/game-list":
+                if path == CAPTCHA_PATH:
+                    body = (CAPTCHA_PAGE % {"token": json.dumps(TURNSTILE)}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif path == "/mm/game-list":
                     self.reply(200, {"success": True, "totalPlayerCount": 23, "games": LOBBIES})
                 elif path == "/mm/seek-game":
                     self.reply(200, {"host": "127.0.0.1", "port": stub.ws_port, "gameId": q.get("game") or GAME_PICK, "clientId": CLIENT_ID,
@@ -481,8 +513,8 @@ def run():
         "11000 clickid accName", "11100 type " + LOGIN,
         "11300 clickid accPass", "11400 type " + PASSWORD,
         "11600 clickid knV10LoginSubmit",
-        "13000 vis @cap knCaptchaHolder knCaptchaManual",
-        "13100 clickid knCaptchaToken", "13200 type " + TURNSTILE, "13300 clickid knCaptchaUse",
+        "13000 vis @cap knCaptchaHolder",  # the challenge webview passes by itself: the modal stays hidden
+        "15300 vis @capdone knCaptchaHolder",
         "15400 vis @code knV10Code knV10Code0 knV10CodeSubmit",
         "15450 text @codehdr [id=knV10Code]",
         "15500 click 20 20",  # the code form's overlay: not dismissable
@@ -529,10 +561,12 @@ def run():
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": base + "/mm", "KRUNKNATIVE_KRUNKER_API": base + "/api",
                 "KRUNKNATIVE_KRUNKER_AUTH": base + "/frvr/v1/auth", "KRUNKNATIVE_KRUNKER_TRACE": "1",
                 "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off",
-                "KRUNKNATIVE_FINDER_URL": "off"})  # no public server list in the test (its groups would shift)
+                "KRUNKNATIVE_FINDER_URL": "off",  # no public server list in the test (its groups would shift)
+                "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": base + CAPTCHA_PATH})  # the challenge webview's page: its own stub
     log_path = os.path.join(WORK, "account.log")
     with open(log_path, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], stdout=out, stderr=subprocess.STDOUT,
+        # a private Xvfb for the challenge webview (WebKitGTK needs a display; the game itself stays headless)
+        p = subprocess.Popen(["xvfb-run", "-a", "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--offline"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
         try:
             p.wait(timeout=300)
@@ -581,8 +615,9 @@ def run():
     check("loginOrRegister opens v10's login modal (Email first)", "knV10Login=1" in modal and "accEmail=1" in modal, modal)
     check("\"(use username instead)\" shows the Username field and the password", "accName=1" in probe(text, "umode") and "accPass=1" in probe(text, "umode"),
           probe(text, "umode"))
-    cap = probe(text, "cap")
-    check("a username login asks the Security Challenge first (Turnstile, the player solves it)", "knCaptchaHolder=1" in cap, cap)
+    cap, capdone = probe(text, "cap"), probe(text, "capdone")
+    check("a username login passes the Security Challenge by itself (the webview; the modal stays hidden)",
+          "knCaptchaHolder=0" in cap and "knCaptchaHolder=0" in capdone, (cap, capdone))
     logins = stub.find("POST", "/api/auth/login/username")
     body = logins[0][4] if logins else None
     check("POST /auth/login/username {username, password, b: the Turnstile token}", len(logins) == 1 and isinstance(body, dict) and

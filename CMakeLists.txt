@@ -122,16 +122,16 @@ endif ()
 # KN_WEBVIEW = AUTO (default: on when pkg-config finds webkit2gtk-4.1), ON (required) or OFF. Linux
 # only; client_bin only (never server/ or shared/). kn_webview.c is then built as its own library so
 # GTK's include paths stay out of the rest of the client; without it (macOS, Windows, the web build,
-# OFF, not found) the same file compiles to its stub inside the client and the captcha keeps the
-# system-browser / paste-box paths.
+# OFF, not found) the same file compiles to its stub inside the client and no security check is shown
+# (the join ends with its sentence).
 set(KN_WEBVIEW AUTO CACHE STRING "Native captcha webview (WebKitGTK): AUTO = on when webkit2gtk-4.1 is found, ON, OFF")
 set(KN_WEBVIEW_GTK OFF)
 string(TOUPPER "${KN_WEBVIEW}" KN_WEBVIEW_MODE)
 if (KN_WEBVIEW_MODE MATCHES "^(OFF|0|FALSE|NO|N)$")
-    message(STATUS "Webview: KN_WEBVIEW is OFF; the captcha uses the system browser / paste box")
+    message(STATUS "Webview: KN_WEBVIEW is OFF; the captcha has no challenge window")
 elseif (EMSCRIPTEN OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if (NOT EMSCRIPTEN)
-        message(STATUS "Webview: no backend on ${CMAKE_SYSTEM_NAME} yet; the captcha uses the system browser / paste box")
+        message(STATUS "Webview: no backend on ${CMAKE_SYSTEM_NAME} yet; the captcha has no challenge window")
     endif ()
 else ()
     find_package(PkgConfig QUIET)
@@ -145,7 +145,7 @@ else ()
     elseif (KN_WEBVIEW_MODE MATCHES "^(ON|1|TRUE|YES|Y)$")
         message(FATAL_ERROR "KN_WEBVIEW=ON needs webkit2gtk-4.1 (pkg-config webkit2gtk-4.1)")
     else ()
-        message(STATUS "Webview: webkit2gtk-4.1 not found; the captcha uses the system browser / paste box")
+        message(STATUS "Webview: webkit2gtk-4.1 not found; the captcha has no challenge window (no security check is shown)")
     endif ()
 endif ()
 

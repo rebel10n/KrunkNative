@@ -635,11 +635,14 @@ static void post_login(const char *turnstile) {
     changed();
 }
 
-static void turnstile_done(void *user, const char *token) {
+static void turnstile_done(void *user, const char *token, const int unavailable) {
     if ((unsigned) (uintptr_t) user != A.attempt || A.state != KRUNKER_ACCOUNT_BUSY) return;
     A.captcha_open = 0;
     if (!token) {
-        fail_sign_in(I18N("kn.kio.account.captchaCancelled", "The security challenge was closed, so you were not signed in."));
+        if (unavailable) // no challenge can be shown here: a login without the Turnstile token is refused, so say why
+            fail_sign_in(I18N("kn.kio.account.captchaNeedsWebview", "Could not sign in: krunker.io requires a security check that needs WebKitGTK installed."));
+        else
+            fail_sign_in(I18N("kn.kio.account.captchaCancelled", "The security challenge was closed, so you were not signed in."));
         return;
     }
     post_login(token);

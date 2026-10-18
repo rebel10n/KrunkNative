@@ -38,33 +38,32 @@ list: never the game it leaves, no bouncing between two, the least recent once a
 "native-exclude-mm" (no list from krunker_lobbies: krunker_net's own list pick, then the live client's
 excludeGame seeks around the recent games); the stub then has three lobbies and no captcha.
 Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the stub's official lobby
-(GET /game-list) in the server browser from the offline game: it is joined in-client (Cancel in the
-Security Challenge modal first ends the join saying so, a second click + a pasted token joins);
+(GET /game-list) in the server browser from the offline game: it is joined in-client, the first seek
+being let through (no challenge: the matchmaker lets it pass, see Stub.captcha_free);
 "native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
 Server browser TLS run (--tls alone; part of --native): "native-kio-tls" (the ping list names a region whose host fails
 the TLS handshake: its official lobbies are left out of the list and its group is gone; the reachable region stays).
 Reload runs (--reload alone): "native-reload" (--krunker, a lobby joined, F5: the relaunched client,
 whose command line alone would join the matchmaker's pick, rejoins that official game by its id) and
 "native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
-Validation token runs (--token alone; part of --native): "native-token-refused" (the matchmaker refuses the captcha's
-validation token as stale: one fresh token and one more seek, then the captcha again, joined), "native-token-refused-twice"
-(refused again: the error screen says Socket Error after that one retry), "native-token-reuse" (the build is refused after the
-captcha: the retry's seek carries no validation token, the spent one is never sent again), "native-token-socket-error" (the
-live run 1: the first seek, with no token, is refused "Socket Error"; a fresh token's seek is let through, joined).
-Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
-a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
-token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
-challenge window of kn_webview.h, WebKitGTK on a private Xvfb of the run's own whose top-level windows
-x11_watch.py records: it loads the test's stub krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose
+Validation token runs (--token alone; part of --native): "native-token-socket-error" (the live run 1: the first seek, with
+no token, is refused "Socket Error"; a fresh token's seek is let through, joined). The captcha-refusal runs (a refused
+captcha token, refused twice, a build refused after the captcha) need a token from the challenge window: the webview run
+("native-webview") covers the first refusal; the others were paste-box / callback runs and are gone.
+Captcha runs (krunker_captcha.h): with no display and no webview, "native-unavailable" (captcha_free off): the
+matchmaker's CaptchaRequired is answered by no challenge at all; the client retries the seek once without a token,
+the matchmaker refuses it, and the error screen says the security check needs WebKitGTK. The modal never comes up
+and there is no paste box or callback. Native "webview" (alone: `--webview`; the challenge window of kn_webview.h,
+WebKitGTK on a private Xvfb of the run's own whose top-level windows x11_watch.py records: it loads the test's stub
+krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose
 stub `turnstile` widget "is solved" by firing its own callback; silent first: it passes by itself, so
 the challenge runs hidden, nothing is ever mapped and the security-challenge modal stays hidden at every
 probe of the run; the first token is refused by the matchmaker, the challenge runs again hidden, the
 second joins; a frame of another origin tries to post a forged token), native
 "webview-interactive" (the stub widget calls before-interactive-callback first: only then is the window
-created, mapped once already centred on the work area, never moved, and the modal comes up with it),
-web "widget" (the stub widget's
-token) and web "domain" (110200: the modal says why and falls back to the paste box). Those native
-runs without a display (callback, paste) also cover a webview build falling back. Each
+created, mapped once already centred on the work area, never moved, and the modal comes up with it), web "widget"
+(the stub widget's token) and web "domain" (110200: the modal says why, offers Cancel and no paste box; Cancel
+ends the join with one seek). Each
 checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
 seek-game with validationToken + captchaToken, and that no token reaches the log.
 Checks: the seek query, the WebSocket URL, every client frame's ahNum trailer ((prev + AHKEY) & 0xff,
@@ -437,7 +436,8 @@ def build_url(stub):
 # ---------------------------------------------------------------- the stubs
 
 class Stub:
-    captcha_free = False  # True: the first seek is let through (a run that never shows the captcha UI, e.g. Strike's page)
+    captcha_free = True  # True (the default: headless, no webview): the first seek is let through, no Security Challenge is asked;
+    #                      False: the matchmaker answers CaptchaRequired until a Turnstile token comes back (the webview's runs)
     socket_error_no_token = False  # True: a seek with no validationToken is refused "Socket Error" (the live word, run 1)
 
     def __init__(self, mm_port, ws_port, scenario="default", map_index=None, spawn=None):
@@ -1650,8 +1650,6 @@ def check_run(label, stub, client_lines, cheat_expected):
 
 NATIVE_TOKEN = "0.e2eNativeCallbackToken_" + "x" * 300 + ".sig-AbC_123"
 PASTE_TOKEN = "0.e2ePastedToken_" + "y" * 200 + ".sig-DeF_456"
-BURNT_TOKEN = "0.e2eAlreadyUsedToken_" + "u" * 120 + ".sig-MnO_345"  # the stub refuses it (used / expired)
-CB_TTL_MS = 4000  # KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS: the callback's lifetime in the callback run
 
 
 class Log:
@@ -1678,21 +1676,6 @@ class Log:
                 return None
             time.sleep(0.1)
         return None
-
-
-def post(url, body, origin="https://krunker.io", ctype="text/plain"):
-    """POST to the captcha callback: the HTTP status, or "refused" when nothing listens."""
-    headers = {"Content-Type": ctype}
-    if origin:
-        headers["Origin"] = origin
-    req = urllib.request.Request(url, data=body.encode() if isinstance(body, str) else body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=5) as r:
-            return r.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except (urllib.error.URLError, ConnectionError, OSError):
-        return "refused"
 
 
 def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default", stub_setup=None, display=None,
@@ -1741,15 +1724,12 @@ def finish_native(label, stub, p, out, log, timeout=240):
     return log.read().splitlines()
 
 
-def cb_url_from(m):
-    return m.group(1) if m else None
-
-
 def run_native():
-    """The callback path, then the whole game (the original native run)."""
+    """The whole game, joined without the challenge: the matchmaker lets the first seek through (captcha_free), so
+    no Security Challenge modal comes up at all (the probes stay hidden)."""
     label = "native"
-    script = ("0 boot\n1500 text @cb [id=knCaptchaCallback]\n1600 vis @modal knCaptchaHolder knCaptchaManual knCaptchaCbRow\n"
-              "8000 clickid knCaptchaOpen\n8300 text @cb2 [id=knCaptchaCallback]\n9000 play\n"
+    modal = "".join("%d vis @modal knCaptchaHolder\n" % t for t in range(1500, 9000, 1500))
+    script = ("0 boot\n" + modal + "9000 play\n"
               # the stub void-kills DeadBot and an unknown sid right after we enter (on its "en");
               # the rows live 4 s, so probe #killFeed a few times inside that window.
               "10000 text @feed0 [id=killFeed]\n11000 text @feed1 [id=killFeed]\n12000 text @feed2 [id=killFeed]\n12800 text @feed3 [id=killFeed]\n"
@@ -1764,38 +1744,16 @@ def run_native():
               "18120 nodes @plistkill .punishButton.kill\n18130 nodes @plistpunish .punishButton.kick\n"
               "18140 nodes @plisttp .punishButton.tp2\n18150 nodes @plistrows .pListTable tr\n18300 call closWind\n"
               "18700 players\n18900 quit\n")
-    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS": str(CB_TTL_MS)})
+    stub, p, out, log = launch_native(label, script, {})
     try:
-        url = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 90, p))
-        check(f"{label}: the modal shows a one-time 127.0.0.1 callback", url, log.path)
-        vis = log.wait(r"\[input_script\] vis t=\d+ @modal (.*)", 10, p)
-        check(f"{label}: the Security Challenge modal is shown (manual path)",
-              vis and "knCaptchaHolder=1" in vis.group(1) and "knCaptchaManual=1" in vis.group(1) and "knCaptchaCbRow=1" in vis.group(1),
-              vis.group(1) if vis else None)
-        if url:
-            base, secret = url.rsplit("/", 1)
-            wrong = "%s/%s" % (base, ("0" if secret[0] != "0" else "1") + secret[1:])
-            check(f"{label}: callback: a wrong secret gets 404", post(wrong, NATIVE_TOKEN) == 404)
-            check(f"{label}: callback: a foreign Origin gets 403", post(url, NATIVE_TOKEN, origin="https://evil.example") == 403)
-            check(f"{label}: callback: a body that is not a token gets 400", post(url, "not a token!") == 400)
-            check(f"{label}: callback: the preflight from krunker.io is answered",
-                  post_options(url) == 204)
-            expired = log.wait(r"\[krunker\] captcha callback expired", CB_TTL_MS / 1000 + 8, p)
-            r = post(url, NATIVE_TOKEN)
-            check(f"{label}: callback: after its TTL the token is refused", expired and r in ("refused", 410), r)
-        url2 = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb2 n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 30, p))
-        check(f"{label}: \"Open krunker.io\" re-arms a new callback (new secret)", url2 and url2 != url, url2)
-        if url2:
-            r1 = post(url2, json.dumps({"token": NATIVE_TOKEN}), ctype="application/json")
-            r2 = post(url2, NATIVE_TOKEN + "z")
-            check(f"{label}: callback: the token is taken (200)", r1 == 200, r1)
-            check(f"{label}: callback: a second token is refused", r2 in (410, "refused"), r2)
+        pass
     finally:
         lines = finish_native(label, stub, p, out, log)
     text = "\n".join(lines)
-    check(f"{label}: the browser link carried the callback in its fragment, not in the log",
-          "https://krunker.io/#(not logged)" in text and (not url or url.rsplit("/", 1)[1] not in re.sub(r"value=http://127\.0\.0\.1:\d+/[0-9a-f]{32}", "", text)))
-    check_matchmaker(label, stub, [NATIVE_TOKEN], text)
+    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
+    check(f"{label}: the Security Challenge modal never comes up (the matchmaker let the first seek through)", len(vis) >= 3 and set(vis) <= {"0", "-"}, vis)
+    check_seek_once_without_captcha(label, stub)
+    check(f"{label}: the browser link is never offered (no paste box, no callback)", "knCaptchaCallback" not in text and "#kn-captcha=" not in text)
     text = check_run(label, stub, lines, True)  # client_bin evaluates cc with QuickJS (krunker_cheat_qjs.c)
     rows = [l for l in lines if "[input_script] players" in l]
     xs = []
@@ -1810,6 +1768,14 @@ def run_native():
     check_player_list("native", text)
     check_timer_countdown("native", lines)
     check_sync_trace("native", lines)
+
+
+def check_seek_once_without_captcha(label, stub):
+    """The join's seeks: one, with no captchaToken and no validation token (nothing was asked of the player)."""
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    gen = [pth for pth, _, _ in stub.http_log if pth == "/generate-token"]
+    check(f"{label}: one seek-game, no captchaToken, no generate-token",
+          len(seeks) == 1 and "captchaToken" not in seeks[0] and not gen, [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"])
 
 
 SYNC_TRACE_RE = re.compile(r"\[krunker\] sync ([\d.]+)s: q (\d+) \((\d+) inputs\) isn (-?\d+) ack (-?\d+) \((-?\d+) behind\) l (\d+) f (\d+) "
@@ -1896,159 +1862,65 @@ def check_killfeed_names(label, lines):
           not bad, bad[:3])
 
 
-def post_options(url):
-    req = urllib.request.Request(url, method="OPTIONS", headers={"Origin": "https://krunker.io", "Access-Control-Request-Method": "POST",
-                                                                  "Access-Control-Request-Private-Network": "true"})
-    try:
-        with urllib.request.urlopen(req, timeout=5) as r:
-            ok = r.headers.get("Access-Control-Allow-Private-Network") == "true" and r.headers.get("Access-Control-Allow-Origin") == "https://krunker.io"
-            return r.status if ok else "headers %s" % dict(r.headers)
-    except urllib.error.HTTPError as e:
-        return e.code
-    except (urllib.error.URLError, OSError):
-        return "refused"
-
-
-def run_native_paste():
-    """The paste box: a bad paste is refused in the modal; a token the matchmaker refuses (used or
-    expired) brings the modal back saying so; the next one is used once."""
-    label = "native-paste"
-    script = ("0 boot\n1400 rect @r knCaptchaToken knCaptchaUse knCaptchaModal\n1450 frames %s 1\n"
-              "1500 clickid knCaptchaToken\n1600 type not a token!\n1700 clickid knCaptchaUse\n1800 text @bad [id=knCaptchaStatus]\n"
-              "1900 vis @bad knCaptchaHolder\n1950 clickid knCaptchaToken\n2000 down CTRL+A\n2050 up CTRL+A\n2100 down DELETE\n2150 up DELETE\n"
-              "2300 type %s\n2400 clickid knCaptchaUse\n2900 text @again [id=knCaptchaStatus]\n2950 vis @again knCaptchaManual\n"
-              "3000 clickid knCaptchaToken\n3100 type %s\n3200 clickid knCaptchaUse\n3400 vis @used knCaptchaManual knCaptchaCancel knCaptchaHolder\n"
-              "3500 text @box [id=knCaptchaToken]\n3800 play\n8000 players\n8200 quit\n"
-              % (os.path.join(WORK, "native-modal"), BURNT_TOKEN, PASTE_TOKEN))
-    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_TRACE": ""})  # unset: the trace's default
-    stub.used_captchas.add(BURNT_TOKEN)
-    lines = finish_native(label, stub, p, out, log, timeout=180)
-    text = "\n".join(lines)
-    check(f"{label}: no krunker trace by default (no frame lines, no sync line)",
-          not any("[krunker] sync " in l or "[krunker] <= " in l or "[krunker] => " in l for l in lines))
-    bad = re.search(r"\[input_script\] text t=\d+ @bad n=1 checked=0 value= text=(.*)", text)
-    check(f"{label}: a paste that is not a token is refused in the modal", bad and "not a Turnstile token" in bad.group(1), bad.group(1) if bad else None)
-    check(f"{label}: the modal stays up after the bad paste", "@bad knCaptchaHolder=1" in text)
-    again = re.search(r"\[input_script\] text t=\d+ @again n=1 checked=0 value= text=(.*)", text)
-    check(f"{label}: a refused token brings the modal back, saying so", again and "refused that token" in again.group(1) and
-          "@again knCaptchaManual=1" in text and "attempt 2, the last token was refused" in text, again.group(1) if again else None)
-    # (the game socket's "cpt" is answered with nothing on screen: the whole holder is gone)
-    check(f"{label}: the good paste closes the modal", "@used knCaptchaManual=0 knCaptchaCancel=0 knCaptchaHolder=0" in text)
-    box = re.search(r"\[input_script\] text t=\d+ @box n=1 checked=0 value=(\S*) ", text)
-    check(f"{label}: the paste box is emptied", box is not None and box.group(1) == "", box.group(0) if box else None)
-    check(f"{label}: the bad paste never reached the matchmaker", not any("not a token" in r for _, _, r in stub.http_log))
-    # (the `type` lines of the input script are the test's echo of what it typed: not the client's)
-    check_matchmaker(label, stub, [BURNT_TOKEN, PASTE_TOKEN], "\n".join(l for l in lines if "[input_script]" not in l))
-    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
-
-
-# ---------------------------------------------------------------- native: the matchmaker's validation token
-
-TOKEN_CAPTCHAS = ("0.e2eFirstCaptcha_" + "c" * 200 + ".sig-Ab1_901", "0.e2eSecondCaptcha_" + "d" * 200 + ".sig-Cd2_902")
-
-
-def post_captcha_prompts(log, p, tokens, timeout=60):
-    """One token per Security Challenge prompt: each prompt's one-shot callback is read from the input script's
-    #knCaptchaCallback box (run_native_token's reads, every 1.5 s), and the next token is POSTed to it as the
-    player's own userscript on krunker.io would. Returns the callbacks' answers (200 each when taken)."""
-    seen, statuses = set(), []
-    end = time.time() + timeout
-    while len(statuses) < len(tokens) and time.time() < end and p.poll() is None:
-        for url in re.findall(r"\[input_script\] text t=\d+ @cb\d+ n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", log.read()):
-            if url not in seen and len(statuses) < len(tokens):
-                seen.add(url)
-                statuses.append(post(url, tokens[len(statuses)]))
-        time.sleep(0.2)
-    return statuses
-
-
-def run_native_token(mode):
-    """The matchmaker's validation token at the official matchmaker (game.deob.js seek :147445-147467; the client:
-    krunker_net.c on_seek / on_token), three ways.
-    "refused": the matchmaker refuses the token of the captcha's seek as stale (InvalidClientValidationToken). The
-      client mints a fresh token and seeks once more, without the captcha that seek spent; the matchmaker asks for
-      the captcha again, the second one's seek carries a fresh token, and the join goes through.
-    "refused-twice": the retry is refused too: the join ends on the error screen ("Socket Error"), after that one retry.
-    "reuse": the matchmaker refuses the build (InvalidVersion) after the captcha, and the seek that retries it carries
-      no validation token: the one the refused seek spent is never sent again (v10 sends one only with its captcha).
-    "socket-error": the run 1 of the live matchmaker (build 10.0.3, signed in, no captcha shown): the first seek carries
-      no validation token and is refused "Socket Error" (the word, not InvalidClientValidationToken); the client mints a
-      fresh token and seeks once more with it, and the join goes through (krunker_net.c token_refusal).
-    Captcha prompts are answered through the modal's callback, one token each."""
-    label = "native-token-" + mode
+def run_native_unavailable():
+    """No challenge webview here (the run has no display of its own), so no Security Challenge can be shown: the
+    matchmaker's CaptchaRequired gets one retry of the seek without a token (krunker_net.c captcha_done), the matchmaker
+    refuses it the same way, and the join ends on the error screen with the sentence that says why. The modal never
+    comes up, and no paste box or callback exists to fall back to."""
+    label = "native-unavailable"
 
     def setup(st):
-        if mode == "refused":
-            st.refuse_tokens = 1
-        elif mode == "refused-twice":
-            st.refuse_tokens = 2
-        elif mode == "socket-error":
-            st.captcha_free = True  # no captcha: the live run 1 never showed one
-            st.socket_error_no_token = True
-        else:
-            publish(st, next_build_doc(), label)  # published, but the stub's servers run the compiled build
+        st.captcha_free = False  # the matchmaker asks for the Turnstile on every seek without a token
 
-    # (the joined run plays at 9000: "joined as sid" is our own player's first frame, sent after "en")
-    timed = [(t, "%d text @cb%d [id=knCaptchaCallback]\n" % (t, i)) for i, t in enumerate(range(1500, 19500, 1500))]
-    timed += [(9000, "9000 play\n"), (20000, "20000 text @inst [id=instructionsUpdate]\n"), (20500, "20500 quit\n")]
-    script = "0 boot\n" + "".join(line for _, line in sorted(timed))
+    probes = "".join("%d vis @modal knCaptchaHolder\n" % t for t in range(1500, 19500, 1500))
+    script = "0 boot\n" + probes + "20000 text @inst [id=instructionsUpdate]\n20500 quit\n"
     stub, p, out, log = launch_native(label, script, {}, stub_setup=setup)
-    tokens = [] if mode == "socket-error" else TOKEN_CAPTCHAS[:1] if mode == "refused-twice" else TOKEN_CAPTCHAS
-    statuses = post_captcha_prompts(log, p, tokens)
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
-    check(f"{label}: each Security Challenge prompt's callback took its token (200)", statuses == [200] * len(tokens), statuses)
+    vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
+    check(f"{label}: the Security Challenge modal never comes up", len(vis) >= 3 and set(vis) == {"0"}, vis)
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    gen = [pth for pth, _, _ in stub.http_log if pth == "/generate-token"]
+    check(f"{label}: seek-game, CaptchaRequired, one retry without a token, CaptchaRequired (no generate-token, no third seek)",
+          len(seeks) == 2 and not gen and not any("captchaToken" in s or "validationToken" in s for s in seeks), [sorted(s) for s in seeks])
+    check(f"{label}: the log says why it seeks again without a token", "no challenge can be shown here: seeking again without one" in text)
+    check(f"{label}: the join did not go through", f"joined as sid {MY_SID}" not in text)
+    inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
+    check(f"{label}: the error screen says the security check needs WebKitGTK",
+          inst and "Could not join: krunker.io requires a security check that needs WebKitGTK installed." in inst.group(1),
+          inst.group(1) if inst else None)
+
+
+def run_native_token_socket_error():
+    """The validation token at the official matchmaker, "socket-error" (krunker_net.c on_seek / on_token): the run 1
+    of the live matchmaker (build 10.0.3, signed in, no captcha shown): the first seek carries no validation token and is
+    refused "Socket Error" (the word, not InvalidClientValidationToken); the client mints a fresh token and seeks once
+    more with it, and the join goes through (krunker_net.c token_refusal). No captcha is asked (captcha_free)."""
+    label = "native-token-socket-error"
+
+    def setup(st):
+        st.captcha_free = True  # no captcha: the live run 1 never showed one
+        st.socket_error_no_token = True
+
+    script = "0 boot\n9000 play\n20000 text @inst [id=instructionsUpdate]\n20500 quit\n"
+    stub, p, out, log = launch_native(label, script, {}, stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
     paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list") and not pth.startswith("/updates/")]
     seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
-    keys = [[k for k, _ in q] for q in seeks]
     val = [dict(q).get("validationToken") for q in seeks]
     cap = [dict(q).get("captchaToken") for q in seeks]
-    ver = [json.loads(dict(q).get("dataQuery") or "{}").get("v") for q in seeks]
     check(f"{label}: the seeks' tokens are the matchmaker's, each fresh and none spent twice (issued: {len(stub.issued)})",
           len(set(v for v in val if v)) == len([v for v in val if v]) and all(v in stub.issued for v in val if v), val)
-    if mode == "refused":
-        want = ["/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game"]
-        check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game refused, generate-token, seek-game (CaptchaRequired), generate-token, seek-game",
-              paths == want, paths)
-        check(f"{label}: the first seek has neither a token nor a captcha", keys[:1] == [["hostname", "region", "autoChangeGame", "dataQuery"]] and val[0] is None and cap[0] is None, keys[:1])
-        check(f"{label}: the captcha's seek carries the first fresh token and the player's first captcha",
-              val[1] == stub.issued[0] and cap[1] == TOKEN_CAPTCHAS[0], (val[1:2], cap[1:2]))
-        check(f"{label}: the retry carries a fresh token and no captcha (the refused seek spent it)",
-              len(val) > 2 and val[2] == stub.issued[1] and cap[2] is None, (val[2:3], cap[2:3]))
-        check(f"{label}: the last seek carries a fresh token and the second captcha",
-              len(val) > 3 and val[3] == stub.issued[2] and cap[3] == TOKEN_CAPTCHAS[1], (val[3:4], cap[3:4]))
-        check(f"{label}: the client logged the refusal and sought once more", "validation token refused (InvalidClientValidationToken): seeking again with a fresh one" in text)
-        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
-    elif mode == "refused-twice":
-        want = ["/seek-game", "/generate-token", "/seek-game", "/generate-token", "/seek-game"]
-        check(f"{label}: one retry, then the error: seek-game, CaptchaRequired, generate-token, refused, generate-token, refused (no third seek)",
-              paths == want, paths)
-        check(f"{label}: the retry carries a fresh token and no captcha", len(val) > 2 and val[2] == stub.issued[1] and cap[2] is None, (val[2:3], cap[2:3]))
-        check(f"{label}: the refusal is logged once and not retried again", text.count("seek-game refused (HTTP 400): InvalidClientValidationToken") == 1 and
-              text.count("validation token refused (InvalidClientValidationToken)") == 1, text.count("seek-game refused"))
-        inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
-        check(f"{label}: the error screen says Socket Error", inst and "Socket Error" in inst.group(1), inst.group(1) if inst else None)
-        check(f"{label}: the join did not go through", f"joined as sid {MY_SID}" not in text)
-    elif mode == "socket-error":
-        check(f"{label}: seek-game (refused Socket Error), generate-token, seek-game: the live order of run 1", paths == ["/seek-game", "/generate-token", "/seek-game"], paths)
-        check(f"{label}: the first seek has no validation token; the retry carries the fresh one", val == [None, stub.issued[0]] if stub.issued else False, val)
-        check(f"{label}: the client logged the refusal and sought once more", "validation token refused (Socket Error): seeking again with a fresh one" in text)
-        check(f"{label}: no error screen: the matchmaker's refusal is not the player's", "The matchmaker refused this join" not in text)
-        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
-    else:
-        want = ["/seek-game", "/generate-token", "/seek-game", "/seek-game", "/generate-token", "/seek-game"]
-        check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game refused (InvalidVersion), the build again, seek-game (CaptchaRequired), generate-token, seek-game",
-              paths == want, paths)
-        check(f"{label}: the seeks ask for the published build, then the compiled one", ver == [LIVE_VERSION, LIVE_VERSION, BUILD_VERSION, BUILD_VERSION], ver)
-        check(f"{label}: the build's retry carries no validation token (the one the refused seek spent is never sent again)",
-              len(keys) > 2 and keys[2] == ["hostname", "region", "autoChangeGame", "dataQuery"] and val[2] is None and cap[2] is None, (keys[2:3], val[2:3]))
-        check(f"{label}: the last seek carries a fresh token and the second captcha",
-              len(val) > 3 and val[3] == stub.issued[1] and cap[3] == TOKEN_CAPTCHAS[1], (val[3:4], cap[3:4]))
-        check(f"{label}: the log says it seeks the compiled build", "trying the compiled build" in text)
-        check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: seek-game (refused Socket Error), generate-token, seek-game: the live order of run 1",
+          paths == ["/seek-game", "/generate-token", "/seek-game"], paths)
+    check(f"{label}: the first seek has no validation token; the retry carries the fresh one", val == [None, stub.issued[0]] if stub.issued else False, val)
+    check(f"{label}: no captcha was asked", all(c is None for c in cap), cap)
+    check(f"{label}: the client logged the refusal and sought once more", "validation token refused (Socket Error): seeking again with a fresh one" in text)
+    check(f"{label}: no error screen: the matchmaker's refusal is not the player's", "The matchmaker refused this join" not in text)
+    check(f"{label}: the join went through", f"joined as sid {MY_SID}" in text)
     leaked = [t for t in stub.issued if t in text or urllib.parse.quote(t, safe="") in text]
     check(f"{label}: no validation token reaches the log", stub.issued and not leaked and "validationToken=(redacted)" in text, leaked or len(stub.issued))
-    check(f"{label}: no Turnstile token reaches the log", not any(t in text for t in TOKEN_CAPTCHAS))
 
 
 SYNC_RE = re.compile(r"\[input_script\] sync t=(\d+) move_lock=(-?\d+) locked=(-?\d+) frozen=(-?\d+) boost=([-\d.]+) noclip=(-?\d+) "
@@ -2062,8 +1934,8 @@ def run_native_sync():
     probes show what it did with each; the stub's frames show what reached the wire."""
     label = "native-sync"
     probes = "".join("%d sync\n%d players\n" % (t, t + 10) for t in range(5000, 51000, 300))
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n5000 down W\n%s"
-              "14000 up W\n20000 down W\n32000 up W\n52000 quit\n" % (PASTE_TOKEN, probes))
+    script = ("0 boot\n3800 play\n5000 down W\n%s"
+              "14000 up W\n20000 down W\n32000 up W\n52000 quit\n" % (probes))
     # (input script events must be in time order: W's release slots in among the probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="sync")
@@ -2139,8 +2011,8 @@ def run_native_hq():
     label = "native-hq"
     sx, sy, sz = hq_spawn()
     probes = "".join("%d sync\n" % t for t in range(5000, 15000, 250))
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s9000 down W\n12000 up W\n15200 quit\n"
-              % (PASTE_TOKEN, probes))
+    script = ("0 boot\n3800 play\n%s9000 down W\n12000 up W\n15200 quit\n"
+              % (probes))
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="spawn", map_index=HQ_INDEX, spawn=(sx, sy, sz))
     lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -2265,7 +2137,7 @@ def run_native_hud():
     tab = ("33750 nodes @tabfirst .tabHeader:first-child\n33760 nodes @tabs2 .tabHeader:nth-child(1)\n"
            "33800 clicksel .tabHeader:first-child\n33900 text @endtab [id=endTable]\n"
            "33950 text @tabs [id=tabHolder]\n34100 text @endtab [id=endTable]\n")
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s%s34500 quit\n" % (PASTE_TOKEN, probes, tab)
+    script = "0 boot\n3800 play\n%s%s34500 quit\n" % (probes, tab)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="hud")
     lines = finish_native(label, stub, p, out, log, timeout=240)
@@ -2323,7 +2195,7 @@ def run_native_rounds():
     dense = ["text @medal [id=knMedal]", "text @chal [id=knChalName]", "jugg", "players"]
     probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 500) for k, kind in enumerate(dense))
     tab = ("29800 clicksel .tabHeader:first-child\n29900 text @endtab [id=endTable]\n30500 text @endtab [id=endTable]\n")
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s%s31000 quit\n" % (PASTE_TOKEN, probes, tab)
+    script = "0 boot\n3800 play\n%s%s31000 quit\n" % (probes, tab)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="rounds")
     lines = finish_native(label, stub, p, out, log, timeout=240)
@@ -2373,8 +2245,8 @@ def run_native_lobbyui():
     late = ["text @endtimer [id=endTimer]", "nodes @srv [style*='00ff00']", "nodes @nc [style*='ffd700']",
             "grep @gold gold [id=chatList]", "grep @green green [id=chatList]", "vis @end endUI"]
     probes += "".join("%d %s\n" % (t + k, kind) for t in range(10000, 23000, 500) for k, kind in enumerate(late))
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n"
-              "4400 clickid codeInput\n4500 type %s\n4700 clickid confirmBtn\n8000 play\n%s23500 quit\n") % (PASTE_TOKEN, LOBBY_CODE, probes)
+    script = ("0 boot\n"
+              "4400 clickid codeInput\n4500 type %s\n4700 clickid confirmBtn\n8000 play\n%s23500 quit\n") % (LOBBY_CODE, probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     store = os.path.join(WORK, label + "-cfg", "krunknative")  # Show Player Messages on (v10's default off)
     os.makedirs(store, exist_ok=True)
@@ -2421,7 +2293,7 @@ def run_native_popups():
     label = "native-popups"
     probes = "".join("%d text @info [id=knInfoText]\n%d text @sub [id=knInfoSub]\n%d text @timer [id=knTimerText]\n"
                      "%d vis @vis knInfoText knInfoSub knTimerText\n" % (t, t + 1, t + 2, t + 3) for t in range(5000, 20000, 250))
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s20500 quit\n" % (PASTE_TOKEN, probes)
+    script = "0 boot\n3800 play\n%s20500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {"KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="popups")
     lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -2465,7 +2337,7 @@ def run_native_ingame():
               "grep @dkill AceBot [id=deathUIHolder]", "grep @dname acctBot [id=deathUIHolder]", "vis @death deathUIHolder"]
     probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 22000, 600) for k, kind in enumerate(dense))
     probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 22000, 1500) for k, kind in enumerate(sparse))
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    script = "0 boot\n3800 play\n%s22500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     # Settings > Chat "Show Player Messages" (showMessages, v10's default off) on, as a player who reads chat
     store = os.path.join(WORK, label + "-cfg", "krunknative")
@@ -2522,7 +2394,7 @@ def run_native_world():
     sparse = ["text @chat [id=chatList]"]
     probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 500) for k, kind in enumerate(dense))
     probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 2000) for k, kind in enumerate(sparse))
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s30500 quit\n" % (PASTE_TOKEN, probes)
+    script = "0 boot\n3800 play\n%s30500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="world", map_index=KANJI_INDEX, spawn=KANJI_SPAWN)
     lines = finish_native(label, stub, p, out, log, timeout=240)
@@ -2578,8 +2450,8 @@ def run_native_voice():
     """official-ingame-voice (krunker_link.c "vc" both ways): our clips (KRUNKNATIVE_VOICE_INPUT tone, V held)
     reach the stub as v10's "vc" frames; the stub's "vc" clips play on channels -1 and 0, not on 1."""
     label = "native-voice"
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
-              "7000 down V\n9500 up V\n24000 quit\n") % PASTE_TOKEN
+    script = ("0 boot\n3800 play\n"
+              "7000 down V\n9500 up V\n24000 quit\n")
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VOICE_INPUT": "tone:440", "KRUNKNATIVE_VOICE_LOG": "1"},
                                       scenario="voice")
     lines = finish_native(label, stub, p, out, log, timeout=240)
@@ -2674,7 +2546,7 @@ def run_native_social():
     probes = ["text @vfinfo [id=voteForfeitInfo]", "text @vfnum [id=voteForfeitNum]", "vis @vf voteToForfeit",
               "grep @fe Full [id=chatList]", "grep @sub Submitted [id=chatList]", "grep @found found [id=chatList]",
               "nodes @card .skinRewCard", "vis @rew skinRewardHolder"]
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n" % PASTE_TOKEN
+    script = "0 boot\n3800 play\n"
     script += "".join("%d %s\n" % (t + k, kind) for t in range(4500, 26000, 700) for k, kind in enumerate(probes))
     script += "26500 quit\n"
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
@@ -2723,7 +2595,7 @@ def run_native_prophunt():
     The `prop` probe (input_script.c) shows each player's state."""
     label = "native-prophunt"
     probes = "".join("%d prop %d\n" % (t + k, sid) for t in range(5000, 22000, 500) for k, sid in enumerate((MY_SID, BOT_SID)))
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    script = "0 boot\n3800 play\n%s22500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="prophunt", map_index=KANJI_INDEX, spawn=KANJI_SPAWN)
     lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -2751,7 +2623,7 @@ def run_native_script():
     ("objmv"), the script's shooting lock ("plk")."""
     label = "native-script"
     probes = "".join("%d script 1\n" % t for t in range(5000, 22000, 300))
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    script = "0 boot\n3800 play\n%s22500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
     stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="script")
     lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -2789,10 +2661,10 @@ def run_native_join_lines(hidden):
     The stub (scenario "joinlines") sends ours after our spawn and a late joiner's (Quentin). Hidden (Settings >
     Game > Hide player names): ours reads Player, Quentin's Player_<n>, and no raw name shows."""
     label = "native-join-hidden" if hidden else "native-join-lines"
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+    script = ("0 boot\n3800 play\n"
               "9000 grep @jn joined [id^=chatMsg_]\n9000 grep @jme Guest_9 [id^=chatMsg_]\n9000 grep @jq Quentin [id^=chatMsg_]\n"
               "9000 grep @jplayer Player [id^=chatMsg_]\n9000 grep @jpn Player_ [id^=chatMsg_]\n"
-              "12000 grep @jn2 joined [id^=chatMsg_]\n12000 grep @jme2 Guest_9 [id^=chatMsg_]\n12500 quit\n") % PASTE_TOKEN
+              "12000 grep @jn2 joined [id^=chatMsg_]\n12000 grep @jme2 Guest_9 [id^=chatMsg_]\n12500 quit\n")
     store = os.path.join(WORK, label + "-cfg", "krunknative")
     os.makedirs(store, exist_ok=True)
     with open(os.path.join(store, "knClient.json"), "w") as f:
@@ -2817,23 +2689,21 @@ def run_native_join_lines(hidden):
 def run_native_lobby():
     """The default (no KRUNKNATIVE_KRUNKER_JOIN): a click on the official lobby in the server browser
     joins it in this client. From the offline game: the Servers window lists the stub's lobby, the
-    click seeks it, the Security Challenge modal asks; Cancel ends the join saying so; a second click
-    and a pasted token join the game."""
+    click seeks it and joins: the matchmaker lets the first seek through, so no challenge is asked."""
     label = "native-lobby"
     script = ("0 menu\n300 call showWindow 2\n350 call windows.1.switchTab 1\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
               # the KRUNKER.IO group (the last one) opened: its rows' titles
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
-              "3200 call krunkerJoin \"%s\"\n3300 text @loading [id=loadGamNm]\n3350 vis @curtain loadingBg\n"
-              "4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
-              "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n6200 text @toast1 [id=knNotify]\n"
-              "7000 vis @ask2 knCaptchaHolder\n"
-              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n12800 text @toast2 [id=knNotify]\n"
+              "3200 call krunkerJoin \"%s\"\n3210 vis @curtain loadingBg\n3230 vis @curtain loadingBg\n3260 vis @curtain loadingBg\n3300 text @loading [id=loadGamNm]\n"
+              "4500 vis @modal knCaptchaHolder\n"
+              "6200 text @toast1 [id=knNotify]\n"
+              "8000 play\n12800 text @toast2 [id=knNotify]\n"
               "12900 vis @curtain2 loadingBg\n13000 players\n"
               # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
               # label name the official lobby (its list row: region, map, mode, players)
               "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
-              % (MAP_NAME, GAME_ID, GAME_ID, PASTE_TOKEN))
+              % (MAP_NAME, GAME_ID))
     stub, p, out, log = launch_native(label, script, {}, args=("--offline",))
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -2853,15 +2723,12 @@ def run_native_lobby():
           grep.get("kioOld", 0) >= 1 and grep.get("kioMap", 0) >= 1 and grep.get("kio152", -1) == 0, grep)
     check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
           "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
-    check(f"{label}: the Security Challenge modal asks", "@ask1 knCaptchaHolder=1 knCaptchaManual=1" in text)
-    check(f"{label}: Cancel ends the join, saying the challenge was closed",
-          "@cancelled knCaptchaHolder=0" in text and "You closed krunker.io's security challenge, so no game was joined" in text)
-    check(f"{label}: the second click asks again", "@ask2 knCaptchaHolder=1" in text)
+    check(f"{label}: no Security Challenge modal comes up (the matchmaker lets the first seek through)",
+          re.search(r"@modal knCaptchaHolder=(0|-)", text) is not None and "@modal knCaptchaHolder=1" not in text)
     seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
     # /ping-list: the krunker.io list's own ping round (krunker_lobbies.c: the row pings), not a seek's step
     paths = [pth for pth, _, _ in stub.http_log if pth not in ("/game-list", "/ping-list")]
-    check(f"{label}: seek, (cancel), seek, generate-token, seek with the token", paths == ["/seek-game", "/seek-game", "/generate-token", "/seek-game"],
-          paths)
+    check(f"{label}: one seek, no generate-token", paths == ["/seek-game"], paths)
     check(f"{label}: every seek asks for the clicked lobby (game=, its region)", seeks and all(dict(q).get("game") == GAME_ID and
           dict(q).get("region") == "de-fra" for q in seeks), seeks[:1])
     check(f"{label}: the matchmaker let the token through", stub.captcha_ok.is_set())
@@ -3155,12 +3022,11 @@ def run_native_badmap():
     the game stops and v10's Lost Connection screen says which map; no toast, no game left running."""
     label = "native-badmap"
     # the player's path: the offline game, the server browser, a click on the official lobby
-    script = ("0 menu\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n4500 clickid knCaptchaToken\n4600 type %s\n"
-              "4700 clickid knCaptchaUse\n"
+    script = ("0 menu\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n"
               "9000 text @toast [id=knNotify]\n9100 nodes @box .instructionsHeader\n9200 text @screen [id=instructionsUpdate]\n"
               "9250 text @tab .instructionsTab\n9300 state\n12000 state\n12100 text @toast2 [id=knNotify]\n"
               # v10's Find Game (the first tab): a new official game, not the same one again
-              "12200 call knRetry\n13500 quit\n" % (GAME_ID, PASTE_TOKEN))
+              "12200 call knRetry\n13500 quit\n" % (GAME_ID))
     dead_api = kn_proto.free_ports(1)[0]  # nothing listens: GET /maps/<index> gets no response
     env = {"KRUNKNATIVE_KRUNKER_MAPS_API": "http://127.0.0.1:%d" % dead_api,
            "KRUNKNATIVE_KRUNKER_MAP_CACHE": os.path.join(WORK, label + "-maps")}
@@ -3180,8 +3046,12 @@ def run_native_badmap():
     toasts = re.findall(r"\[input_script\] text t=\d+ @toast2? n=\d+ .*?text=(.*)", text)
     check(f"{label}: no toast", len(toasts) == 2 and not any(t.strip() for t in toasts), toasts)
     st = re.findall(r"\[input_script\] state t=(\d+) .*", text)
+    # the error screen holds until the player's Find Game click (knRetry): before it, the bad lobby is the only socket
+    # (the stub has no captcha to hold the click's seek back, so the seek after the click may reach the same lobby)
+    click = next((i for i, l in enumerate(lines) if "[ui] handler knRetry()" in l), len(lines))
+    before = [i for i, l in enumerate(lines) if i < click and re.search(r"opening ws://", l)]
     check(f"{label}: the client stays on the error screen (it does not reconnect by itself)",
-          len(stub.ws_paths) >= 1 and GAME_ID in stub.ws_paths[0] and all(GAME_ID not in w for w in stub.ws_paths[1:]), stub.ws_paths)
+          len(stub.ws_paths) >= 1 and GAME_ID in stub.ws_paths[0] and len(before) == 1, (stub.ws_paths, len(before)))
     tab = re.search(r"\[input_script\] text t=\d+ @tab n=\d+ .*?text=(.*)", text)
     check(f"{label}: the box's first tab is v10's Find Game (not Retry: the official lobby is not tried again)",
           tab and tab.group(1).strip() == "Find Game", tab.group(1) if tab else None)
@@ -3202,7 +3072,7 @@ def run_native_actions():
     fields, "fpSp" [sid] / [] (spectating: "1", then F), "maVote" with the option's own mts string. In: the
     bot's spray decal, the ping markers, the spectator cam, the vote cards and their totals."""
     label = "native-actions"
-    script = ["0 boot", "1500 clickid knCaptchaToken", "1600 type %s" % PASTE_TOKEN, "1700 clickid knCaptchaUse", "3800 play",
+    script = ["0 boot", "3800 play",
               "7000 call switchChat", "7300 con say team hello", "7800 down 1", "7900 up 1", "8300 down F", "8400 up F",
               "8800 call selectClass 2"]
     script += ["%d pings" % t for t in range(6000, 10500, 500)]
@@ -3263,9 +3133,9 @@ def run_native_kick():
     closes the socket itself, the game stops, and v10's error screen says why (the server's text, v10's
     wording); no popup over it, no toast."""
     label = "native-kick"
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+    script = ("0 boot\n3800 play\n"
               "13000 text @toast [id=knNotify]\n13100 nodes @box .instructionsHeader\n13200 text @screen [id=instructionsUpdate]\n"
-              "13300 vis @pop genericPop\n13400 state\n13600 quit\n" % PASTE_TOKEN)
+              "13300 vis @pop genericPop\n13400 state\n13600 quit\n")
     stub, p, out, log = launch_native(label, script, {}, scenario="kick")
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -3304,8 +3174,8 @@ def run_native_frame_cap():
     frame (a stall: KRUNKNATIVE_FIXED_DELTA steps every frame 100 ms here) must go out as 33 ms, never as its
     full length: the official server never sees a "q" the v10 client could not send."""
     label = "native-frame-cap"
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
-              "5000 down W\n9000 up W\n10000 quit\n" % PASTE_TOKEN)
+    script = ("0 boot\n3800 play\n"
+              "5000 down W\n9000 up W\n10000 quit\n")
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_FIXED_DELTA": "100"}, scenario="spawn")
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -3323,7 +3193,7 @@ def run_native_fx():
     """Combat visuals / sounds (krunker_link.c fx): the stub (Stub.fx_phases) has its bot shoot, fire a
     rocket, explode and play sounds; the client's vfx / projectile / audio logs show what it made of them."""
     label = "native-fx"
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n15000 quit\n" % PASTE_TOKEN
+    script = "0 boot\n3800 play\n15000 quit\n"
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VFX_LOG": "1", "KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="fx")
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -3350,7 +3220,7 @@ def run_native_bomb():
     drops two bombs over us ("bmb"), sends a stored[2] "pr" bomb and lands one of them ("pre"); the client's
     projectile log shows each bomb falling at its speed and the landing, and the drop sound plays."""
     label = "native-bomb"
-    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n15000 quit\n" % PASTE_TOKEN
+    script = "0 boot\n3800 play\n15000 quit\n"
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VFX_LOG": "1", "KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="bomb")
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -3378,11 +3248,10 @@ def run_native_join_end():
     in the game) and "Next Round in"; the next round's init takes it down and we enter it (like a
     KrunkNative server's next round: the pointer locks again, client_enter_game)."""
     label = "native-join-end"
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+    script = ("0 boot\n3800 play\n"
               "9000 vis @end endUI endInfo endMidHolder menuHolder inGameUI instructionHolder\n9100 text @timer [id=endTimer]\n"
               "9200 grep @table StubBot [id=endTable]\n9300 state\n"
-              "22000 vis @next endUI menuHolder\n22500 play\n27000 vis @playing inGameUI endUI menuHolder\n27100 players\n27500 quit\n"
-              % PASTE_TOKEN)
+              "22000 vis @next endUI menuHolder\n22500 play\n27000 vis @playing inGameUI endUI menuHolder\n27100 players\n27500 quit\n")
     stub, p, out, log = launch_native(label, script, {}, scenario="joinend")
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -3408,8 +3277,8 @@ def run_native_leave_state():
     """Official -> KrunkNative -> official: leaving a game clears its state (client_leave_game; v10 leaves a
     game by loading a new page): the official lobby's chat line is gone on the KrunkNative server, the
     KrunkNative server's chat line is gone in the next official lobby. That second join starts from inside
-    the KrunkNative game with the menu closed: the security challenge must free the pointer and take the
-    clicks (it used to show while every click went to the game)."""
+    the KrunkNative game with the menu closed: the join's state (menu closed, pointer locked) holds until the
+    join is through, and the official lobby's game lifts it."""
     label = "native-leave-state"
     (port,) = kn_proto.free_ports(1)
     slog = open(os.path.join(WORK, label + "-server.log"), "w")
@@ -3419,17 +3288,18 @@ def run_native_leave_state():
     os.makedirs(cfg, exist_ok=True)
     with open(os.path.join(cfg, "knSettings.json"), "w") as f:
         f.write('{"showMessages":true}')  # player chat on (KrunkNative's default is off; v10's is on)
-    token2 = PASTE_TOKEN.replace("Pasted", "Second")
-    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+    script = ("0 boot\n3800 play\n"
               "8000 grep @official hello [id=chatList]\n"
               "8100 con connect 127.0.0.1:%d\n8300 grep @left-official hello [id=chatList]\n"
               "12000 play\n15000 grep @kn hello [id=chatList]\n15000 nodes @kn [id=chatList] .chatItem\n15100 con say zzknmark\n"
               "16500 grep @kn-said zzknmark [id=chatList]\n"
-              "16500 state\n17000 call krunkerJoin \"%s\"\n17300 grep @left-kn zzknmark [id=chatList]\n17300 nodes @left-kn [id=chatList] .chatItem\n"
+              "16500 state\n17000 call krunkerJoin \"%s\"\n"
               "18300 vis @challenge knCaptchaHolder menuHolder :cursor\n18400 state\n"
-              "18500 clickid knCaptchaToken\n18600 type %s\n18700 clickid knCaptchaUse\n21000 play\n"
+              # the KrunkNative chat is gone once the official game has loaded (no challenge holds the join back)
+              "19000 grep @left-kn zzknmark [id=chatList]\n19000 nodes @left-kn [id=chatList] .chatItem\n"
+              "21000 play\n"
               "25000 grep @official2 zzknmark [id=chatList]\n25100 grep @official2-stub hello [id=chatList]\n25200 state\n25500 quit\n"
-              % (PASTE_TOKEN, port, GAME_ID, token2))
+              % (port, GAME_ID))
     try:
         stub, p, out, log = launch_native(label, script, {})
         lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -3448,22 +3318,19 @@ def run_native_leave_state():
     check(f"{label}: official -> KrunkNative: it is gone as the game is left", hits.get("left-official") == 0, hits)
     check(f"{label}: and on the KrunkNative server (only its own join lines)", hits.get("kn") == 0 and 1 <= rows.get("kn", 0) <= 3, (hits, rows))
     check(f"{label}: the KrunkNative server's chat line showed", hits.get("kn-said") == 1, hits)
-    check(f"{label}: KrunkNative -> official: it is gone as the game is left", hits.get("left-kn") == 0 and rows.get("left-kn") == 0, (hits, rows))
+    # (the text is what matters: by the probe the official game's own join line may be the one chat row left, so no row count)
+    check(f"{label}: KrunkNative -> official: it is gone as the game is left", hits.get("left-kn") == 0, (hits, rows))
     check(f"{label}: and in the next official lobby, which shows its own", hits.get("official2") == 0 and hits.get("official2-stub") == 1, hits)
-    # the second join starts in a game with the menu closed (pointer locked): the security challenge
-    # frees the pointer and takes the clicks and the typing (v10 exits the lock for its modals), the
-    # game locks it again once the join is through
+    # the second join starts in a game with the menu closed (pointer locked); no challenge is asked (the
+    # matchmaker lets the seek through), so the pointer stays with the game until the join is through
     states = {m.group(1): m.group(0) for m in re.finditer(r"\[input_script\] state t=(\d+) .*", text)}
     ordered = [states[k] for k in sorted(states, key=int)]
     check(f"{label}: the second join starts in the game (menu closed, pointer locked)",
           len(ordered) == 3 and " menu=0 locked=1 " in ordered[0], ordered[:1])
     chal = re.search(r"\[input_script\] vis t=\d+ @challenge (.*)", text)
-    check(f"{label}: the challenge over the game: shown, no menu, the cursor free",
-          chal and chal.group(1).split() == ["knCaptchaHolder=1", "menuHolder=0", ":cursor=1"], chal.group(1) if chal else None)
-    check(f"{label}: and the pointer released (no controls, cursor normal)", len(ordered) == 3 and " locked=0 " in ordered[1] and
-          "cursor=normal" in ordered[1], ordered[1:2])
-    check(f"{label}: the pasted token went through (clicks and typing reached the modal)",
-          text.count("[krunker] captcha: a pasted token") == 2, text.count("[krunker] captcha: a pasted token"))
+    check(f"{label}: no challenge over the game (the menu closed, no modal)",
+          chal and chal.group(1).split()[:2] in (["knCaptchaHolder=0", "menuHolder=0"], ["knCaptchaHolder=-", "menuHolder=0"]),
+          chal.group(1) if chal else None)
     check(f"{label}: back in the game afterwards: pointer locked, no menu", len(ordered) == 3 and " menu=0 locked=1 " in ordered[2]
           and "cursor=disabled" in ordered[2], ordered[2:])
 
@@ -3930,7 +3797,11 @@ def webview_session(label, script, page, used_first, stub_setup=None):
     url = "http://127.0.0.1:%d/robots.txt" % page.port
     p = None
     try:
-        stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url}, display=xvfb.display, stub_setup=stub_setup)
+        def setup(st):  # the matchmaker asks for the Turnstile: the challenge is the webview's to answer
+            st.captcha_free = False
+            if stub_setup:
+                stub_setup(st)
+        stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url}, display=xvfb.display, stub_setup=setup)
         if used_first:
             stub.used_captchas.add(webview_token(1))  # the matchmaker refuses the first one (used / expired)
         lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -3963,7 +3834,7 @@ def run_native_webview():
     # shows no card either (the player sees only the loading state). Every 400 ms: a card would stay
     # longer than that.
     probe_t = list(range(800, 15601, 400))
-    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaSolve knCaptchaManual knCaptchaCancel\n" % t for t in probe_t)
+    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaSolve knCaptchaCancel\n" % t for t in probe_t)
     script = "0 boot\n" + probes + "16000 play\n21000 players\n21200 quit\n"
     stub, lines, log, left, maps, moves = webview_session(label, script, page, True)
     text = "\n".join(lines)
@@ -3975,7 +3846,7 @@ def run_native_webview():
           [l for l in lines if "[webview]" in l][:12])
     silent = re.findall(r"\[input_script\] vis t=\d+ @silent (.*)", text)
     check(f"{label}: silent first: the security-challenge modal stayed hidden at every probe (no modal, no popup)",
-          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaSolve=1|knCaptchaManual=1", s) for s in silent),
+          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaSolve=1", s) for s in silent),
           [s for s in silent if "=1" in s][:4] or len(silent))
     probe_lines = [i for i, l in enumerate(lines) if "@silent " in l and "[input_script] vis" in l]
     pow_ok = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
@@ -4164,7 +4035,6 @@ class StaticHandler(SimpleHTTPRequestHandler):
 
 
 WEB_TOKEN = "0.e2eWidgetToken_" + "w" * 300 + ".sig-GhI_789"
-WEB_PASTE_TOKEN = "0.e2eWebPastedToken_" + "v" * 250 + ".sig-JkL_012"
 TURNSTILE_URL = "https://challenges.cloudflare.com/turnstile/"
 
 
@@ -4179,10 +4049,11 @@ def turnstile_stub(mode):
 
 def run_web(mode):
     """mode "ok": the widget's token, then the whole game (the original web run); "110200": the
-    domain error, the fallback text, a pasted token."""
+    domain error: the modal says why (no paste box, no button to open krunker.io), Cancel ends the join."""
     label = "web" if mode == "ok" else "web-domain"
     mm, wsp, web, cdpp = kn_proto.free_ports(4)
     stub = Stub(mm, wsp)
+    stub.captcha_free = False  # the widget answers the matchmaker's CaptchaRequired
     stub.start_http()
     stub.start_ws()
     httpd = ThreadingHTTPServer(("127.0.0.1", web), StaticHandler)
@@ -4192,7 +4063,6 @@ def run_web(mode):
                                "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
                                "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     lines = []
-    token = WEB_TOKEN if mode == "ok" else WEB_PASTE_TOKEN
     statuses = set()
     try:
         cdp = Cdp(cdpp)
@@ -4206,7 +4076,7 @@ def run_web(mode):
                     " const t = id => { const e = document.getElementById(id); return e ? e.textContent : null; };"
                     " const vis = id => { const e = document.getElementById(id); return !!(e && e.offsetParent !== null && getComputedStyle(e).display !== 'none'); };"
                     " return {shown: getComputedStyle(h).display !== 'none', text: t('knCaptchaText'), status: t('knCaptchaStatus'),"
-                    " manual: vis('knCaptchaManual'), widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile'),"
+                    " widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile'), paste: !!document.getElementById('knCaptchaToken'),"
                     " passive: h.classList.contains('kn-captcha-passive')}; })()")
         seen_modal = None
         end = time.time() + 120
@@ -4215,30 +4085,25 @@ def run_web(mode):
             st = cdp.eval(modal_js)
             if st and st.get("shown") and not st.get("passive"):
                 seen_modal = seen_modal or dict(st)
-                if mode != "ok" and st.get("manual"):
+                if mode != "ok" and "only work on the sites" in (st.get("status") or ""):
                     seen_modal = dict(st)
                     break
         check(f"{label}: the Security Challenge modal showed for CaptchaRequired", seen_modal is not None, "\n".join(cdp.console[-25:]))
         check(f"{label}: Turnstile's api.js was requested (and stubbed)", any(u.startswith(TURNSTILE_URL + "v0/api.js") for u in cdp.intercepted),
               cdp.intercepted[:3])
         if mode != "ok":
-            text = (seen_modal or {}).get("text") or ""
-            check(f"{label}: 110200 is explained (Turnstile keys are bound to their sites) and the paste box offered",
-                  bool(seen_modal) and seen_modal.get("manual") and "110200" in text and "only work on the sites" in text, text)
-            box = cdp.eval("(() => { const e = document.getElementById('knCaptchaToken'); const b = e.getBoundingClientRect();"
-                           " return [b.x + b.width / 2, b.y + b.height / 2]; })()")
-            if box:
-                cdp.click(box[0], box[1])
-                time.sleep(0.3)
-                cdp.send("Input.insertText", {"text": token})
-                time.sleep(0.3)
-                use = cdp.eval("(() => { const b = document.getElementById('knCaptchaUse').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
-                cdp.click(use[0], use[1])
-            stub.captcha_ok.wait(30)
+            status = (seen_modal or {}).get("status") or ""
+            check(f"{label}: 110200 is explained (Turnstile keys are bound to their sites), with no paste box",
+                  bool(seen_modal) and "110200" in status and "only work on the sites" in status and not seen_modal.get("paste"), seen_modal)
+            cancel = cdp.eval("(() => { const b = document.getElementById('knCaptchaCancel').getBoundingClientRect();"
+                              " return [b.x + b.width / 2, b.y + b.height / 2]; })()")
+            if cancel:
+                cdp.click(cancel[0], cancel[1])
             time.sleep(1.0)
             st = cdp.eval(modal_js) or {}
-            # (the "cpt" proof of work may show the passive state by now: no input parts left)
-            check(f"{label}: the modal closed after the pasted token", not st.get("shown") or (st.get("passive") and not st.get("manual")), st)
+            check(f"{label}: Cancel closes the modal", not st.get("shown") or st.get("passive"), st)
+            seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
+            check(f"{label}: the join ends with Cancel: one seek, no token", len(seeks) == 1 and not stub.captcha_ok.is_set(), len(seeks))
         else:
             check(f"{label}: the stub widget rendered inside the modal", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
             # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en";
@@ -4301,9 +4166,10 @@ def run_web(mode):
     with open(os.path.join(WORK, f"{label}-console.log"), "w") as f:
         f.write("\n".join(lines))
     text = "\n".join(lines)
-    check_matchmaker(label, stub, [token], text)
+    if mode == "ok":  # the domain run never gets a token: the matchmaker's order is the widget run's
+        check_matchmaker(label, stub, [WEB_TOKEN], text)
     if mode != "ok":
-        check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text or stub.ws_paths, stub.ws_paths)
+        check(f"{label}: no game socket: the join ended at Cancel", not stub.ws_paths and f"joined as sid {MY_SID}" not in text, stub.ws_paths)
         return
     check("web: the \"cpt\" was answered with no card on screen (the player sees only the loading state)",
           not statuses and "security challenge answered" in text and "proof of work failed" not in text, statuses)
@@ -4398,7 +4264,7 @@ def main():
     ran = True
     if ONLY in ("", "native") and os.path.isfile(f"{BUILD}/client_bin"):
         run_native()
-        run_native_paste()
+        run_native_unavailable()
         run_native_sync()
         run_native_hq()
         run_native_hud()
@@ -4432,10 +4298,7 @@ def main():
         run_native_live_refused()
         run_native_live_stale()
         run_native_live_fallback()
-        run_native_token("refused")
-        run_native_token("refused-twice")
-        run_native_token("reuse")
-        run_native_token("socket-error")
+        run_native_token_socket_error()
         ran = True
     if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
         run_native_hud()
@@ -4451,10 +4314,7 @@ def main():
     if ONLY == "actions" and os.path.isfile(f"{BUILD}/client_bin"):  # just the player actions' run
         run_native_actions()
     if ONLY == "token" and os.path.isfile(f"{BUILD}/client_bin"):  # just the validation token runs (refused, refused-twice, reuse, socket-error)
-        run_native_token("refused")
-        run_native_token("refused-twice")
-        run_native_token("reuse")
-        run_native_token("socket-error")
+        run_native_token_socket_error()
     if ONLY == "live" and os.path.isfile(f"{BUILD}/client_bin"):  # just the live Krunker build's runs
         run_native_live()
         run_native_live_refused()

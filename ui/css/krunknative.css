@@ -863,18 +863,6 @@ html.kn-bare-window #instructions {
   font-size: 20px;
   margin-bottom: 10px;
 }
-/* the manual path (native, or the web after a domain error): more to say, in less height */
-.kn-captcha-modal.kn-captcha-wide {
-  width: 540px;
-}
-.kn-captcha-wide .kn-captcha-title {
-  font-size: 26px;
-  margin-bottom: 6px;
-}
-.kn-captcha-wide .kn-captcha-text {
-  font-size: 16px;
-  margin-bottom: 6px;
-}
 .kn-captcha-status {
   color: rgba(0, 0, 0, 0.8);
   font-size: 16px;
@@ -889,36 +877,12 @@ html.kn-bare-window #instructions {
   display: block;
   margin: 4px auto 6px;
 }
-.kn-captcha-manual,
-.kn-captcha-block {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-}
 .kn-captcha-row {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   width: 100%;
-}
-.kn-captcha-small {
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 14px;
-  margin: 8px 0 4px 0;
-}
-.kn-captcha-input {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  font-size: 14px;
-  padding: 5px 8px;
-  border: 2px solid #bdbdbd;
-  border-radius: 4px;
-  background: #f5f5f5;
-  color: black;
-  pointer-events: all;
 }
 .kn-captcha-btn {
   display: inline-block;
@@ -935,11 +899,6 @@ html.kn-bare-window #instructions {
 }
 .kn-captcha-btn:hover {
   background-color: #42a5f5;
-}
-.kn-captcha-row .kn-captcha-btn-small {
-  font-size: 14px;
-  padding: 5px 10px;
-  margin: 0 0 0 6px;
 }
 .kn-captcha-actions {
   margin-top: 8px;

@@ -11,21 +11,22 @@
 // Web: the real Turnstile widget (the script loads on demand, like the live getCaptchaToken, :115623,
 // with the current build's site key (krunker_build_live.h) and appearance "interaction-only"). Its sitekey only works on the
 // domains Cloudflare has for it: elsewhere (krunk.io) it answers 110200 (or another 1101xx / 1102xx
-// code), which the modal says plainly before offering the manual path. Native with a webview
-// (kn_webview.h, KN_WEBVIEW): silent first. The challenge runs hidden on a real krunker.io page (a GTK
+// code), which the modal says. Retry renders the widget again; Cancel ends the request.
+// Native with a webview (kn_webview.h, KN_WEBVIEW): silent first. The challenge runs hidden on a real krunker.io page (a GTK
 // offscreen host, no window); the modal stays hidden while it passes by itself. Only when the player is
 // needed (Cloudflare asks for it, a widget error / timeout, or no token in time) does the modal come up
 // with the challenge drawn in it (the game UI: the webview's frames in a canvas, the pointer and keys
 // forwarded to it, no OS window) and Cancel; its token comes back here. The challenge's own window is
-// the fallback when the game UI cannot draw it, and a window-only run (KRUNKNATIVE_CAPTCHA_WINDOW=1) shows
-// "Solve the challenge" instead; closing that window brings the modal back the same way. Native without one (or when the window cannot start /
-// load): the manual path at once (open krunker.io; paste a token; the localhost callback of
-// krunker_captcha_cb.h), because then the player is needed.
+// the fallback when the game UI cannot draw it, and a window-only run (KRUNKNATIVE_CAPTCHA_WINDOW=1)
+// shows "Solve the challenge" instead; closing that window brings the modal back the same way.
+// Native without a webview, or when the webview cannot start or load: no challenge can be shown, so the
+// modal never comes up. The request ends with unavailable = 1 and krunker_net.c retries its seek without
+// a token (the matchmaker often lets that through); if it refuses again, the join fails with a one-line
+// sentence on the error screen.
 //
-// Tokens: read from the paste box / the callback / the widget / the webview, checked for shape, handed
-// to the requester once, then wiped; never logged, never stored.
+// Tokens: read from the widget / the webview, checked for shape, handed to the requester once, then
+// wiped; never logged, never stored.
 #include <krunker_captcha.h>
-#include <krunker_captcha_cb.h>
 #include <krunker_build_live.h> // the current build's Turnstile site key
 #include <kn_webview.h>
 #ifndef __EMSCRIPTEN__
@@ -54,13 +55,9 @@
 #define POW_FAILED_MS 4500.0                // a failed proof of work stays on screen this long
 
 enum { // knCaptcha(n)
-    ACT_OPEN = 1,   // open krunker.io in the browser (native: with the callback in the fragment)
-    ACT_PASTE = 2,  // the clipboard into the token box
-    ACT_USE = 3,    // use the token in the box
-    ACT_CANCEL = 4,
-    ACT_COPY = 5,   // the callback URL to the clipboard
-    ACT_RETRY = 6,  // web: render the widget again
-    ACT_SOLVE = 7,  // native: open (or raise) the webview with krunker.io's challenge
+    ACT_CANCEL = 1,
+    ACT_RETRY = 2, // web: render the widget again
+    ACT_SOLVE = 3, // native: open (or raise) the webview with krunker.io's challenge
 };
 
 static struct {
@@ -69,7 +66,7 @@ static struct {
     KrunkerCaptchaDone done;
     void *user;
     unsigned gen;      // per request: late widget events of an older one are ignored
-    int widget;        // web: the Turnstile widget is the path (not fallen back)
+    int widget;        // web: the Turnstile widget is the path
     int webview;       // native: the challenge window (kn_webview.h) is the path
     int widget_timer;  // html_timer id of the widget's 120 s limit
     int handler_set;
@@ -77,7 +74,6 @@ static struct {
     int pow_shown, pow_timer;
     int needs_player;  // the modal is up with something to click or type (not the passive notice)
     int inline_press;  // native: a press of the pointer went to the webview in the game UI (its release does too)
-    char cb_url[96];   // the callback (has the secret: shown in the box, never logged)
 } C;
 
 static void wipe(void *p, size_t n) {
@@ -99,38 +95,16 @@ static char *markup(void) {
                "<div id=\"knCaptchaText\" class=\"kn-captcha-text\">%s</div>" CAPTCHA_CANVAS
                "<div id=\"knTurnstileHolder\" class=\"kn-captcha-widget\"></div>"
                "<div id=\"knCaptchaStatus\" class=\"kn-captcha-status\"></div>"
-               "<div id=\"knCaptchaRetry\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(6)\" style=\"display:none\">%s</div>"
-               "<div id=\"knCaptchaManual\" class=\"kn-captcha-manual\" style=\"display:none\">"
-               "<div id=\"knCaptchaCbRow\" class=\"kn-captcha-block\" style=\"display:none\">"
-               "<div class=\"kn-captcha-small\">%s</div>"
-               "<div class=\"kn-captcha-row\">"
-               "<input id=\"knCaptchaCallback\" class=\"kn-captcha-input\" type=\"text\" readonly autocomplete=\"off\" spellcheck=\"false\">"
-               "<div id=\"knCaptchaCopy\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(5)\">%s</div>"
-               "</div></div>"
-               "<div class=\"kn-captcha-small\">%s</div>"
-               "<div class=\"kn-captcha-row\">",
+               "<div id=\"knCaptchaRetry\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(2)\" style=\"display:none\">%s</div>"
+               "<div class=\"kn-captcha-row kn-captcha-actions\">"
+               "<div id=\"knCaptchaSolve\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(3)\" style=\"display:none\">%s</div>"
+               "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(1)\">%s</div>"
+               "</div>"
+               "</div></div>",
                I18N("kn.captcha.title", "Security Challenge"),
                I18N("kn.captcha.text", "Please complete the security challenge to continue."),
                I18N("kn.captcha.retry", "Try again"),
-               I18N("kn.captcha.userscript", "Your own userscript on krunker.io can send the token here (once, 5 min):"),
-               I18N("kn.captcha.copy", "Copy"),
-               I18N("kn.captcha.pasteFrom", "Or paste a token from krunker.io:"));
-    sb_appendf(&sb,
-               "<input id=\"knCaptchaToken\" class=\"kn-captcha-input\" type=\"text\" placeholder=\"%s\" autocomplete=\"off\""
-               " spellcheck=\"false\">"
-               "<div id=\"knCaptchaPaste\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(2)\">%s</div>"
-               "<div id=\"knCaptchaUse\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(3)\">%s</div>"
-               "</div>"
-               "</div>"
-               "<div class=\"kn-captcha-row kn-captcha-actions\">"
-               "<div id=\"knCaptchaSolve\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(7)\" style=\"display:none\">%s</div>"
-               "<div id=\"knCaptchaOpen\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(1)\" style=\"display:none\">%s</div>"
-               "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(4)\">%s</div>"
-               "</div>"
-               "</div></div>",
-               I18N("kn.captcha.tokenPlaceholder", "Turnstile token"), I18N("kn.captcha.paste", "Paste"),
-               I18N("kn.captcha.use", "Use"),
-               I18N("kn.captcha.solve", "Solve the challenge"), I18N("kn.captcha.openSite", "Open krunker.io"),
+               I18N("kn.captcha.solve", "Solve the challenge"),
                I18N("generic.cancel", "Cancel"));
     return sb_finish(&sb);
 }
@@ -164,17 +138,9 @@ static void set_text(const char *id, const char *text) {
     if (e) html_dom_set_text(e, text ? text : "");
 }
 
-static void clear_token_box(void) {
-    const HtmlElem e = html_dom_by_id("knCaptchaToken");
-    if (e) html_dom_set_value(e, "");
-}
-
 static void hide_modal(void) {
     const HtmlElem h = html_dom_by_id("knCaptchaHolder");
     if (!h) return;
-    clear_token_box();
-    const HtmlElem cb = html_dom_by_id("knCaptchaCallback");
-    if (cb) html_dom_set_value(cb, "");
     html_dom_set_display(h, "none");
     html_dom_set_class(h, "kn-captcha-passive", 0);
     show("knCaptchaWebview", 0);
@@ -248,13 +214,16 @@ static void widget_remove(void) {
 #ifdef __EMSCRIPTEN__
     kn_js_turnstile_remove();
 #endif
+    C.widget = 0;
     C.webview = 0;
     kn_webview_captcha_close(); // the challenge window, natively (no-op elsewhere)
 }
 
 // ---------------------------------------------------------------- the request
 
-static void finish(const char *token) {
+// The request ends: the modal closes and done runs once. token: the Turnstile response (NULL: none);
+// unavailable: no challenge could be shown here (finish_with(NULL, 1)), else the player cancelled.
+static void finish_with(const char *token, const int unavailable) {
     if (!C.asking) return;
     const KrunkerCaptchaDone done = C.done;
     void *user = C.user;
@@ -262,41 +231,11 @@ static void finish(const char *token) {
     C.done = NULL;
     C.gen++;
     widget_remove();
-    krunker_captcha_cb_stop();
-    wipe(C.cb_url, sizeof(C.cb_url));
     hide_modal();
-    if (done) done(user, token);
+    if (done) done(user, token, unavailable);
 }
 
-static void start_callback(void) {
-    if (krunker_captcha_cb_start(C.cb_url, sizeof(C.cb_url))) {
-        const HtmlElem cb = html_dom_by_id("knCaptchaCallback");
-        if (cb) html_dom_set_value(cb, C.cb_url);
-        show("knCaptchaCbRow", 1);
-    } else {
-        C.cb_url[0] = 0;
-        show("knCaptchaCbRow", 0);
-    }
-}
-
-static void show_manual(const char *why) {
-    C.widget = 0;
-    widget_remove();
-    const HtmlElem h = holder(); // the player is needed now: the modal comes up (native: silent first, see present)
-    if (h) html_dom_set_display(h, "");
-    C.needs_player = h != 0;
-    show("knTurnstileHolder", 0);
-    show("knCaptchaManual", 1);
-    show("knCaptchaOpen", 1);
-    show("knCaptchaSolve", 0);
-    show("knCaptchaWebview", 0);
-    const HtmlElem m = html_dom_by_id("knCaptchaModal");
-    if (m) html_dom_set_class(m, "kn-captcha-wide", 1);
-    set_text("knCaptchaText", why);
-#ifndef __EMSCRIPTEN__
-    if (!krunker_captcha_cb_listening()) start_callback();
-#endif
-}
+static void finish(const char *token) { finish_with(token, 0); }
 
 #ifndef __EMSCRIPTEN__
 // The proxy the matchmaker's requests take (http_proxy.h: the client setting, else the environment) as
@@ -333,20 +272,14 @@ static void webview_proxy(char *out, const size_t n) {
 }
 
 // The modal once the player is needed in the challenge window: the window was shown (KN_WEBVIEW_SHOWN)
-// or the player closed it. "Solve the challenge" raises the window, Cancel ends the join; the paste box
-// and the userscript callback stay hidden (the window is the path). Native only.
+// or the player closed it. "Solve the challenge" raises the window, Cancel ends the join. Native only.
 static void show_window_prompt(const char *status) {
     const HtmlElem h = holder();
     if (!h) return;
     html_dom_set_class(h, "kn-captcha-passive", 0);
     html_dom_set_display(h, "");
     C.needs_player = 1;
-    const HtmlElem m = html_dom_by_id("knCaptchaModal");
-    if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
     show("knTurnstileHolder", 0);
-    show("knCaptchaManual", 0);
-    show("knCaptchaCbRow", 0);
-    show("knCaptchaOpen", 0);
     show("knCaptchaRetry", 0);
     show("knCaptchaSolve", 1);
     show("knCaptchaCancel", 1);
@@ -364,12 +297,7 @@ static void show_inline_prompt(const char *status) {
     html_dom_set_class(h, "kn-captcha-passive", 0);
     html_dom_set_display(h, "");
     C.needs_player = 1;
-    const HtmlElem m = html_dom_by_id("knCaptchaModal");
-    if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
     show("knTurnstileHolder", 0);
-    show("knCaptchaManual", 0);
-    show("knCaptchaCbRow", 0);
-    show("knCaptchaOpen", 0);
     show("knCaptchaRetry", 0);
     show("knCaptchaSolve", 0);
     show("knCaptchaCancel", 1);
@@ -380,24 +308,26 @@ static void show_inline_prompt(const char *status) {
 
 // Native: krunker.io's challenge in the webview (kn_webview.h), in the game UI (its frames in the modal) with
 // its own window as the fallback, run hidden unless show_now (the player's "Solve the challenge"). 1 = the
-// challenge runs; 0 = no webview here or it could not start (logged), the caller shows the manual path.
+// challenge runs; 0 = no webview here or it could not start (logged): the caller ends the request.
 // Shows nothing itself: the modal waits for KN_WEBVIEW_SHOWN.
 static int webview_start(const int show_now) {
-    if (!kn_webview_available()) return 0;
+    if (!kn_webview_available()) {
+        printf("[krunker] captcha: this build has no challenge webview: no security check can be shown here\n");
+        return 0;
+    }
     char err[200], proxy[1024];
     webview_proxy(proxy, sizeof(proxy));
     const int up = kn_webview_captcha_open(NULL, krunker_build()->turnstile_site_key, I18N("kn.captcha.title", "Security Challenge"), proxy,
                                            1 /* in_ui: the game UI, the window only as its fallback */, show_now, err, sizeof(err));
     wipe(proxy, sizeof(proxy));
     if (!up) {
-        printf("[krunker] captcha: no challenge window (%s): the browser / paste path\n", err);
+        printf("[krunker] captcha: no challenge window (%s): no security check can be shown here\n", err);
         C.webview = 0;
         return 0;
     }
     C.webview = 1;
     printf("[krunker] captcha: krunker.io's challenge runs in the webview (%s)\n",
            show_now ? "shown at once" : "hidden: shown only if it needs the player");
-    krunker_captcha_cb_stop(); // the window is the path: no callback is armed for it
     return 1;
 }
 
@@ -425,15 +355,10 @@ static void webview_tick(void) {
                 show_window_prompt(I18N("kn.captcha.notToken", "Cloudflare answered something that is not a token."));
             }
             break;
-        case KN_WEBVIEW_FAILED: { // did not load / refused: the manual path, the window can be tried again
+        case KN_WEBVIEW_FAILED: // did not load / refused: no challenge can be shown here, the request ends unavailable
             printf("[krunker] captcha: the challenge window failed: %s\n", msg);
-            char why[600];
-            I18N_F(why, "kn.captcha.windowFailed", "{0} Solve it on krunker.io in your browser, then paste the token here.", msg);
-            show_manual(why);
-            show("knCaptchaSolve", 1);
-            set_text("knCaptchaStatus", "");
+            finish_with(NULL, 1);
             break;
-        }
         case KN_WEBVIEW_SHOWN: // Cloudflare needs the player (or no token in time): the challenge is up now
             if (kn_webview_captcha_inline()) {
                 printf("[krunker] captcha: the challenge is up in the game UI: the player solves it\n");
@@ -463,8 +388,6 @@ static void widget_timeout(void *user) {
     kn_js_turnstile_remove();
     set_text("knCaptchaStatus", I18N("kn.captcha.timedOut", "The challenge timed out."));
     show("knCaptchaRetry", 1);
-    show("knCaptchaManual", 1);
-    show("knCaptchaOpen", 1);
 }
 
 static void widget_start(void) {
@@ -492,25 +415,25 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
         case 2: { // error: 1101xx / 1102xx = the sitekey is not valid on this domain
             const char *code = text ? text : "unknown";
             printf("[krunker] captcha: Turnstile error %s\n", code);
+            char err[17];
+            snprintf(err, sizeof(err), "%.16s", code);
             if (!strncmp(code, "1101", 4) || !strncmp(code, "1102", 4)) {
-                char origin[160], why[900], err[17];
+                // another domain's sitekey: the same refusal again on Retry, so the modal says why and offers Cancel only
+                char origin[160], why[900];
                 html_page_origin(origin, sizeof(origin));
-                snprintf(err, sizeof(err), "%.16s", code);
                 I18N_F(why, "kn.captcha.wrongSite",
                        "Cloudflare won't show krunker.io's challenge on {0}: Turnstile keys only work on the sites they were made for"
-                       " (error {1}). Solve it on krunker.io, then paste the token here, or play this game on krunker.io.",
+                       " (error {1}).",
                        origin, err);
-                show_manual(why);
-                set_text("knCaptchaStatus", "");
+                kn_js_turnstile_remove();
+                set_text("knCaptchaStatus", why);
+                show("knCaptchaRetry", 0);
             } else {
-                char status[320], err[17];
-                snprintf(err, sizeof(err), "%.16s", code);
+                char status[320];
                 I18N_F(status, "kn.captcha.failed", "The challenge failed (Cloudflare error {0}).", err);
                 kn_js_turnstile_remove();
                 set_text("knCaptchaStatus", status);
                 show("knCaptchaRetry", 1);
-                show("knCaptchaManual", 1);
-                show("knCaptchaOpen", 1);
             }
             break;
         }
@@ -525,9 +448,8 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
             break;
         default: // 6: api.js did not load (blocked, offline)
             printf("[krunker] captcha: the Turnstile script did not load\n");
-            show_manual(I18N("kn.captcha.noScript", "Cloudflare's challenge could not be loaded here (blocked or offline). Solve it on krunker.io, then paste"
-                                                    " the token here, or play this game on krunker.io."));
-            set_text("knCaptchaStatus", "");
+            set_text("knCaptchaStatus", I18N("kn.captcha.noScript", "Cloudflare's challenge could not be loaded here (blocked or offline)."));
+            show("knCaptchaRetry", 1);
             break;
     }
 }
@@ -553,7 +475,7 @@ void krunker_captcha_ask(const int attempt, const int rejected, const KrunkerCap
     printf("[krunker] captcha: asking the player (attempt %d%s)\n", attempt, rejected ? ", the last token was refused" : "");
     if (!html_ui_available()) { // no page (HTML_ENGINE=OFF): nothing can be shown
         printf("[krunker] captcha: no HTML UI in this build to show it\n");
-        finish(NULL);
+        finish_with(NULL, 1);
         return;
     }
     if (!holder()) { // the page is still loading (a --krunker join at startup)
@@ -569,30 +491,24 @@ static void present(void) {
     C.present_pending = 0;
     const int rejected = C.rejected;
     html_dom_set_class(h, "kn-captcha-passive", 0);
-    const HtmlElem m = html_dom_by_id("knCaptchaModal");
-    if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
     show("knCaptchaCancel", 1);
     show("knCaptchaRetry", 0);
-    clear_token_box();
+    show("knCaptchaSolve", 0);
     set_text("knCaptchaStatus", rejected ? I18N("kn.captcha.refused", "krunker.io refused that token (they work once, for 5 minutes): one more, please.") : "");
 #ifdef __EMSCRIPTEN__
     html_dom_set_display(h, "");
     C.needs_player = 1;
-    show("knCaptchaManual", 0);
-    show("knCaptchaOpen", 0);
     set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
     widget_start();
 #else
     // Silent first: the modal stays hidden while the challenge window runs hidden (Turnstile usually passes
-    // by itself). It appears when the window is shown (KN_WEBVIEW_SHOWN) or closed (show_window_prompt), or
-    // at once when there is no window to try (show_manual): then the player is needed.
+    // by itself). It appears when the window is shown (KN_WEBVIEW_SHOWN) or closed (show_window_prompt).
+    // With no window to try, the request ends unavailable at once (finish_with: nothing is shown).
     html_dom_set_display(h, "none");
     C.needs_player = 0;
     show("knCaptchaWebview", 0);
     C.inline_press = 0;
-    if (!webview_start(0)) {
-        show_manual(I18N("kn.captcha.needsBrowser", "krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io."));
-    }
+    if (!webview_start(0)) finish_with(NULL, 1);
 #endif
 }
 
@@ -607,8 +523,6 @@ void krunker_captcha_close(void) {
     C.done = NULL;
     C.gen++;
     widget_remove();
-    krunker_captcha_cb_stop();
-    wipe(C.cb_url, sizeof(C.cb_url));
     hide_modal();
 }
 
@@ -626,18 +540,6 @@ void krunker_captcha_tick(void) {
     if (!C.asking) return; // the window's token finished the request
     if (C.webview) webview_frame(); // the game UI's frames (none unless the challenge is shown in it)
 #endif
-    char token[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
-    const int rc = krunker_captcha_cb_poll(token, sizeof(token));
-    if (rc > 0) {
-        finish(token);
-        wipe(token, sizeof(token));
-    } else if (rc < 0) {
-        wipe(C.cb_url, sizeof(C.cb_url));
-        const HtmlElem cb = html_dom_by_id("knCaptchaCallback");
-        if (cb) html_dom_set_value(cb, "");
-        show("knCaptchaCbRow", 0);
-        set_text("knCaptchaStatus", "The address expired: \"Open krunker.io\" makes a new one.");
-    }
 }
 
 // ---------------------------------------------------------------- the game UI's input (native webview)
@@ -710,75 +612,15 @@ int krunker_captcha_inline_char(const unsigned codepoint) {
 
 // ---------------------------------------------------------------- buttons
 
-static void pasted(void *user, const char *text) {
-    (void) user;
-    if (!C.asking || !text) return;
-    const HtmlElem e = html_dom_by_id("knCaptchaToken");
-    if (!e) return;
-    // first non-blank run only: a token has no spaces
-    while (*text == ' ' || *text == '\n' || *text == '\r' || *text == '\t') text++;
-    char buf[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
-    const size_t n = strcspn(text, " \r\n\t");
-    snprintf(buf, sizeof(buf), "%.*s", (int) (n < sizeof(buf) ? n : sizeof(buf) - 1), text);
-    html_dom_set_value(e, buf);
-    wipe(buf, sizeof(buf));
-}
-
-static void use_pasted(void) {
-    const HtmlElem e = html_dom_by_id("knCaptchaToken");
-    char raw[KRUNKER_CAPTCHA_TOKEN_MAX + 64] = "";
-    if (e && html_dom_get_value(e, raw, sizeof(raw)) < 0) raw[0] = 0;
-    char *s = raw;
-    while (*s == ' ' || *s == '\n' || *s == '\r' || *s == '\t') s++;
-    size_t n = strlen(s);
-    while (n && (s[n - 1] == ' ' || s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == '\t')) s[--n] = 0;
-    if (!krunker_captcha_token_shape_ok(s)) {
-        printf("[krunker] captcha: the pasted text is not a token (%zu chars)\n", n);
-        set_text("knCaptchaStatus", n ? I18N("kn.captcha.badPaste", "That is not a Turnstile token.") : I18N("kn.captcha.pasteFirst", "Paste a token first."));
-        if (e) html_dom_focus(e); // back in the box, to fix it
-    } else {
-        printf("[krunker] captcha: a pasted token (%zu chars)\n", n);
-        finish(s);
-    }
-    wipe(raw, sizeof(raw));
-}
-
-static void open_krunker(void) {
-#ifdef __EMSCRIPTEN__
-    ui_open_browser("https://krunker.io/");
-#else
-    if (!krunker_captcha_cb_listening()) start_callback();
-    if (C.cb_url[0]) {
-        // the userscript reads the callback from the fragment (never sent to krunker.io's servers):
-        // #kn-captcha=<port>-<secret>
-        const char *port = C.cb_url + strlen("http://127.0.0.1:");
-        const char *slash = strchr(port, '/');
-        char url[160];
-        snprintf(url, sizeof(url), "https://krunker.io/#kn-captcha=%.*s-%s", slash ? (int) (slash - port) : 0, port, slash ? slash + 1 : "");
-        ui_open_browser(url);
-        wipe(url, sizeof(url));
-        set_text("knCaptchaStatus", "krunker.io opened in your browser. Waiting for a token...");
-    } else {
-        ui_open_browser("https://krunker.io/");
-    }
-#endif
-}
-
 static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user;
     (void) ev;
     const int act = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
     if (!C.asking) return 0;
     switch (act) {
-        case ACT_OPEN: open_krunker(); break;
-        case ACT_PASTE: html_clipboard_read(pasted, NULL); break;
-        case ACT_USE: use_pasted(); break;
         case ACT_CANCEL:
             printf("[krunker] captcha: cancelled by the player\n");
             finish(NULL);
-            break;
-        case ACT_COPY:
-            if (C.cb_url[0]) html_clipboard_write(C.cb_url);
             break;
         case ACT_RETRY:
 #ifdef __EMSCRIPTEN__
@@ -787,13 +629,8 @@ static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, co
             break;
         case ACT_SOLVE:
 #ifndef __EMSCRIPTEN__
-            if (!webview_start(1)) {
-                char err[200];
-                snprintf(err, sizeof(err), "%s", I18N("kn.captcha.noWindow", "The challenge window could not open here."));
-                show_manual(err);
-            } else {
-                set_text("knCaptchaStatus", ""); // the window is raised by the next event (KN_WEBVIEW_SHOWN)
-            }
+            if (!webview_start(1)) set_text("knCaptchaStatus", I18N("kn.captcha.noWindow", "The challenge window could not open here."));
+            else set_text("knCaptchaStatus", ""); // the window is raised by the next event (KN_WEBVIEW_SHOWN)
 #endif
             break;
         default: break;
@@ -833,17 +670,27 @@ void krunker_captcha_pow_end(const int solved) {
     C.pow_shown = 1;
     C.needs_player = 0; // the passive notice: nothing to click
     html_dom_set_class(h, "kn-captcha-passive", 1);
-    const HtmlElem m = html_dom_by_id("knCaptchaModal");
-    if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
     html_dom_set_display(h, "");
     show("knTurnstileHolder", 0);
-    show("knCaptchaManual", 0);
     show("knCaptchaRetry", 0);
     show("knCaptchaSolve", 0);
-    show("knCaptchaOpen", 0);
     show("knCaptchaCancel", 0);
     set_text("knCaptchaText", I18N("kn.captcha.pow", "The game server asked for a proof of work."));
     set_text("knCaptchaStatus", I18N("kn.captcha.powFailed", "This client could not answer it: the server may close the game."));
     printf("[krunker] captcha: the game server's proof of work failed: the card says so\n");
     C.pow_timer = html_timer_add(POW_FAILED_MS, pow_hide, NULL);
+}
+
+// The shape of a Turnstile response (krunker_captcha.h): 20..4096 characters of [A-Za-z0-9._~+/=-].
+int krunker_captcha_token_shape_ok(const char *token) {
+    if (!token) return 0;
+    const size_t n = strlen(token);
+    if (n < 20 || n > KRUNKER_CAPTCHA_TOKEN_MAX) return 0;
+    for (const char *p = token; *p; p++) {
+        const char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '~' ||
+              c == '+' || c == '/' || c == '='))
+            return 0;
+    }
+    return 1;
 }
