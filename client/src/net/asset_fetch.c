@@ -650,10 +650,13 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     } else if (stopping) {
         e->state = ENTRY_DEAD;
         F.busy--;
-    } else if (transport && outcome != TRY_LOCAL && e->attempts < ASSET_FETCH_ATTEMPTS) {
-        // an origin was unreachable: try again later (quietly; the final outcome is logged)
+    } else if (transport && outcome != TRY_LOCAL && e->attempts < (e->ua ? ASSET_FETCH_USER_ASSET_ATTEMPTS : ASSET_FETCH_ATTEMPTS)) {
+        // an origin was unreachable: try again later (quietly; the final outcome is logged). A user
+        // asset's model is what a map's walls are: its rounds outlast a mirror's outage, the wait capped
         e->state = ENTRY_WAIT;
-        e->next_ms = now_ms() + ((int64_t) F.backoff_ms << (e->attempts - 1));
+        int64_t wait = (int64_t) F.backoff_ms << (e->attempts - 1 < 20 ? e->attempts - 1 : 20);
+        if (e->ua && wait > ASSET_FETCH_ORIGIN_DOWN_MS) wait = ASSET_FETCH_ORIGIN_DOWN_MS;
+        e->next_ms = now_ms() + wait;
     } else {
         e->state = ENTRY_DEAD;
         F.stats.failed++;

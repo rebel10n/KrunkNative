@@ -550,6 +550,30 @@ static void test_user_assets(void) {
     asset_fetch_stop();
 }
 
+// A Krunker user asset (a map's model) whose hosts fail for longer than the content budget: both
+// origins answer transport errors for ASSET_FETCH_ATTEMPTS + 1 rounds, then the mirror answers. The
+// file still arrives (the user-asset budget is ASSET_FETCH_USER_ASSET_ATTEMPTS); before, it was given
+// up for the session after ASSET_FETCH_ATTEMPTS rounds, and every wall built from it stayed missing.
+static void test_user_asset_outage(void) {
+    printf("user asset outage: retried past the content budget...\n");
+    char dir[1100], why[1400], model[1200], body[64];
+    make_dir(dir, sizeof(dir), "uaoutage");
+    snprintf(model, sizeof(model), "%s/user-assets/4411/model.obj", dir);
+    snprintf(body, sizeof(body), "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    routes_reset();
+    route(UK "4411/model.obj", 200, body, ASSET_FETCH_ATTEMPTS + 1);
+    route(UM "4411/model.obj", 200, body, ASSET_FETCH_ATTEMPTS + 1);
+    AssetFetchConfig cfg = config(dir); // no manifest: user assets alone
+    cfg.user_assets = 1;
+    cfg.user_asset_origins = UK " " UM;
+    cfg.workers = 1;
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    CHECK(asset_fetch_request(model, 1) == 0, "queued");
+    CHECK(settle(model) == 1, "still arriving after %d failed rounds (requests %d)", ASSET_FETCH_ATTEMPTS + 1, T.requests);
+    CHECK(kn_fs_exists(model), "written");
+    asset_fetch_stop();
+}
+
 int main(void) {
     const char *base = getenv("XDG_CACHE_HOME");
     char tmpl[900];
@@ -565,6 +589,7 @@ int main(void) {
     test_objects_and_guard();
     test_split();
     test_user_assets();
+    test_user_asset_outage();
     kn_fs_rmtree(g_root);
     printf("asset_fetch_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

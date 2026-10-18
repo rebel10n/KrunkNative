@@ -25,7 +25,8 @@
 // a 404 / checksum mismatch moves on to the next one, a
 // transport failure also takes the origin out for a while. A file every origin answered with 404
 // or wrong content is given up for the session; transport failures are retried with backoff up to
-// ASSET_FETCH_ATTEMPTS times. One log line per path: when it arrived or when it was given up.
+// ASSET_FETCH_ATTEMPTS times (user assets: ASSET_FETCH_USER_ASSET_ATTEMPTS, waits capped at
+// ASSET_FETCH_ORIGIN_DOWN_MS). One log line per path: when it arrived or when it was given up.
 #include <kn_http.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -33,6 +34,8 @@
 #define ASSET_FETCH_WORKERS_DEFAULT 2  // downloads in flight
 #define ASSET_FETCH_WORKERS_MAX 4
 #define ASSET_FETCH_ATTEMPTS 4         // rounds over the origins before a file is given up
+// the same for a Krunker user asset (a map's model: its walls): ~8 min of outage, the waits capped
+#define ASSET_FETCH_USER_ASSET_ATTEMPTS 16
 #define ASSET_FETCH_BACKOFF_MS 1000    // before round r: ASSET_FETCH_BACKOFF_MS << (r - 1)
 #define ASSET_FETCH_ORIGIN_DOWN_MS 30000 // at most this long out after transport failures
 #define ASSET_FETCH_ORIGIN_REFUSED_MS 300000 // out this long after a 401 / 403 / 429
