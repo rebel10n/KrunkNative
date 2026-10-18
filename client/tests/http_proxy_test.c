@@ -7,6 +7,25 @@
 
 static int g_fail, g_count;
 
+// setenv / unsetenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+// An empty value removes the variable.
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
+static int test_unsetenv(const char *name) {
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
+}
+
 static void check(const char *name, const int ok) {
     g_count++;
     if (!ok) {
@@ -31,7 +50,7 @@ static int via(const char *host, const int tls, const char *label) {
 
 static void clear_env(void) {
     static const char *const VARS[] = {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY", "KN_FETCH_PROXY"};
-    for (size_t i = 0; i < sizeof(VARS) / sizeof(VARS[0]); i++) unsetenv(VARS[i]);
+    for (size_t i = 0; i < sizeof(VARS) / sizeof(VARS[0]); i++) test_unsetenv(VARS[i]);
 }
 
 int main(void) {
@@ -74,7 +93,7 @@ int main(void) {
     check("all: coordinator.krunk.io", via("coordinator.krunk.io", 1, "socks5h://127.0.0.1:1080"));
     check("all: plain http too", via("example.com", 0, "socks5h://127.0.0.1:1080"));
     check("all: never loopback", via("127.0.0.1", 1, NULL) && via("localhost", 0, NULL) && via("::1", 1, NULL));
-    setenv("HTTPS_PROXY", "http://env.example:1", 1);
+    test_setenv("HTTPS_PROXY", "http://env.example:1", 1);
     check("the setting wins over the environment", via("krunker.io", 1, "socks5h://127.0.0.1:1080"));
     http_proxy_configure("not a url", HTTP_PROXY_SCOPE_ALL);
     check("an invalid setting = none (the environment)", via("krunker.io", 1, "http://env.example:1"));
@@ -83,38 +102,38 @@ int main(void) {
     http_proxy_configure("", HTTP_PROXY_SCOPE_KRUNKER);
     clear_env();
     check("no setting, no environment: direct", via("krunker.io", 1, NULL));
-    setenv("HTTPS_PROXY", "http://env.example:3128", 1);
+    test_setenv("HTTPS_PROXY", "http://env.example:3128", 1);
     check("HTTPS_PROXY for https (any host)", via("coordinator.krunk.io", 1, "http://env.example:3128"));
     check("HTTPS_PROXY not for http", via("coordinator.krunk.io", 0, NULL));
-    setenv("https_proxy", "socks5://lower.example:1080", 1);
+    test_setenv("https_proxy", "socks5://lower.example:1080", 1);
     check("https_proxy before HTTPS_PROXY", via("krunker.io", 1, "socks5://lower.example:1080"));
-    setenv("HTTP_PROXY", "env2.example:8080", 1);
+    test_setenv("HTTP_PROXY", "env2.example:8080", 1);
     check("HTTP_PROXY for http (bare host:port)", via("krunker.io", 0, "http://env2.example:8080"));
     clear_env();
-    setenv("ALL_PROXY", "socks5h://all.example:9050", 1);
+    test_setenv("ALL_PROXY", "socks5h://all.example:9050", 1);
     check("ALL_PROXY for both", via("krunker.io", 1, "socks5h://all.example:9050") && via("krunker.io", 0, "socks5h://all.example:9050"));
-    setenv("NO_PROXY", "localhost, .krunk.io,example.com:443", 1);
+    test_setenv("NO_PROXY", "localhost, .krunk.io,example.com:443", 1);
     check("NO_PROXY .krunk.io covers its subdomains", via("coordinator.krunk.io", 1, NULL) && via("krunk.io", 1, NULL));
     check("NO_PROXY example.com:443 covers example.com and www", via("example.com", 1, NULL) && via("www.example.com", 1, NULL));
     check("NO_PROXY: others still proxied", via("krunker.io", 1, "socks5h://all.example:9050") && via("badexample.com", 1, "socks5h://all.example:9050"));
-    setenv("NO_PROXY", "*", 1);
+    test_setenv("NO_PROXY", "*", 1);
     check("NO_PROXY *", via("krunker.io", 1, NULL));
-    setenv("no_proxy", "*.krunker.io", 1);
+    test_setenv("no_proxy", "*.krunker.io", 1);
     check("no_proxy before NO_PROXY, *.domain", via("matchmaker.krunker.io", 1, NULL) && via("example.com", 1, "socks5h://all.example:9050"));
     clear_env();
-    setenv("HTTPS_PROXY", "ftp://nope", 1);
+    test_setenv("HTTPS_PROXY", "ftp://nope", 1);
     check("an invalid environment proxy is ignored", via("krunker.io", 1, NULL));
     clear_env();
     // KN_FETCH_PROXY (the dev tools' convention): krunker.io hosts only, before the standard variables
-    setenv("KN_FETCH_PROXY", "127.0.0.1:8888", 1);
-    setenv("HTTPS_PROXY", "http://env.example:3128", 1);
+    test_setenv("KN_FETCH_PROXY", "127.0.0.1:8888", 1);
+    test_setenv("HTTPS_PROXY", "http://env.example:3128", 1);
     check("KN_FETCH_PROXY: user-assets.krunker.io goes through it",
           via("user-assets.krunker.io", 1, "http://127.0.0.1:8888") && via("gapi.svc.krunker.io", 1, "http://127.0.0.1:8888"));
     check("KN_FETCH_PROXY: other hosts keep the standard variables", via("coordinator.krunk.io", 1, "http://env.example:3128"));
     http_proxy_configure("http://setting.example:8080", HTTP_PROXY_SCOPE_KRUNKER);
     check("KN_FETCH_PROXY: the client setting wins", via("user-assets.krunker.io", 1, "http://setting.example:8080"));
     http_proxy_configure("", HTTP_PROXY_SCOPE_KRUNKER);
-    setenv("KN_FETCH_PROXY", "ftp://nope", 1);
+    test_setenv("KN_FETCH_PROXY", "ftp://nope", 1);
     check("KN_FETCH_PROXY: an invalid value is ignored", via("user-assets.krunker.io", 1, "http://env.example:3128"));
     clear_env();
 

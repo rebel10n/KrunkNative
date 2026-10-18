@@ -22,6 +22,16 @@ int main(void) {
 
 static int failures;
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 static GLuint compile(const GLenum type, const char *src) {
     const GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, NULL);
@@ -79,7 +89,7 @@ static int reports(const char *path, const int line) {
 
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv);
-    setenv("KRUNKNATIVE_GL_FEEDBACK_CHECK", "warn", 1);
+    test_setenv("KRUNKNATIVE_GL_FEEDBACK_CHECK", "warn", 1);
     char log_path[] = "/tmp/kn-gl-feedback-test-XXXXXX";
     const int fd = mkstemp(log_path);
     if (fd < 0 || !freopen(log_path, "w", stderr)) return 1;

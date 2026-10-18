@@ -14,6 +14,16 @@
 #include <string.h>
 #include <unistd.h>
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 static int g_fail, g_pass;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
@@ -308,7 +318,7 @@ int main(void) {
         perror("mkdtemp");
         return 1;
     }
-    setenv("KRUNKNATIVE_KRUNKER_MAP_CACHE", cache, 1);
+    test_setenv("KRUNKNATIVE_KRUNKER_MAP_CACHE", cache, 1);
     CHECK(!strcmp(krunker_map_cache_dir(), cache), "cache dir %s", krunker_map_cache_dir());
     test_table();
     test_spawns();

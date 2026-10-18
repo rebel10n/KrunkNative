@@ -21,6 +21,16 @@
 #include <unistd.h>
 #define mkdir_p(p) mkdir(p, 0755)
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 static int g_failures, g_checks;
 #define CHECK(cond, ...) do { g_checks++; if (!(cond)) { g_failures++; printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
@@ -244,10 +254,10 @@ int main(int argc, char **argv) {
     snprintf(real, sizeof(real), "%s/assets/user-assets/md23677", realpath(root, root_abs) ? root_abs : root);
     snprintf(path, sizeof(path), "%s/user-assets/md23677", dir);
     if (symlink(real, path) != 0) printf("note: no md23677 link\n");
-    setenv("KRUNKNATIVE_ASSETS_DIR", dir, 1);
+    test_setenv("KRUNKNATIVE_ASSETS_DIR", dir, 1);
     char packs[600];
     snprintf(packs, sizeof(packs), "%s/packs", base);
-    setenv("TMPDIR", packs, 1);
+    test_setenv("TMPDIR", packs, 1);
     const ModPackHooks hooks = {hook_texture, hook_geometry, hook_gltf, hook_sound};
     mod_pack_set_hooks(&hooks);
 

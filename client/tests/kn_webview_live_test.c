@@ -24,6 +24,25 @@
 #include <time.h>
 #include <unistd.h>
 
+// setenv / unsetenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+// An empty value removes the variable.
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
+static int test_unsetenv(const char *name) {
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
+}
+
 #define STUB_TOKEN "0.STUBTOKEN.abcdefghijklmnopqrstuvwxyz0123456789"
 #define TOKEN_MAX 4096
 
@@ -226,13 +245,13 @@ int main(int argc, char **argv) {
     // 3. the window path (KRUNKNATIVE_CAPTCHA_WINDOW=1): shown in a window, never in the game UI
     char err[256] = "", token[TOKEN_MAX + 1] = "";
     printf("3. the window (KRUNKNATIVE_CAPTCHA_WINDOW=1):\n");
-    setenv("KRUNKNATIVE_CAPTCHA_WINDOW", "1", 1);
+    test_setenv("KRUNKNATIVE_CAPTCHA_WINDOW", "1", 1);
     CHECK(kn_webview_captcha_open(url, "stub_sitekey_1", "Security Challenge", NULL, 1, 1, err, sizeof(err)) == 1);
     CHECK(wait_event(KN_WEBVIEW_SHOWN, 30000, token, sizeof(token)) == KN_WEBVIEW_SHOWN);
     CHECK(kn_webview_captcha_windowed() == 1);
     CHECK(kn_webview_captcha_inline() == 0);
     kn_webview_captcha_close();
-    unsetenv("KRUNKNATIVE_CAPTCHA_WINDOW");
+    test_unsetenv("KRUNKNATIVE_CAPTCHA_WINDOW");
 
     // 4. the game UI takes no frame (the caller never asks): the stall watchdog hands it to the window
     printf("4. the game UI draws nothing (no frame taken): the window after the stall:\n");

@@ -22,6 +22,25 @@
 #include <time.h>
 #include <unistd.h>
 
+// setenv / unsetenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+// An empty value removes the variable.
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
+static int test_unsetenv(const char *name) {
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
+}
+
 static int g_failures, g_checks;
 #define CHECK(cond, ...) do { g_checks++; if (!(cond)) { g_failures++; printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
@@ -158,14 +177,14 @@ int main(int argc, char **argv) {
     // ---- 3. through the engine on the null backend, the mix captured
     char capture[1024];
     snprintf(capture, sizeof(capture), "/tmp/kn-nettspend-audio-%d.wav", (int) getpid());
-    setenv("KRUNKNATIVE_ASSETS_DIR", root, 1);
+    test_setenv("KRUNKNATIVE_ASSETS_DIR", root, 1);
     // KRUNKNATIVE_ASSETS_DIR wants the assets/ dir itself
     snprintf(probe, sizeof(probe), "%s/assets", root);
-    setenv("KRUNKNATIVE_ASSETS_DIR", probe, 1);
-    setenv("KRUNKNATIVE_AUDIO_BACKEND", "null", 1);
-    setenv("KRUNKNATIVE_AUDIO_CAPTURE", capture, 1);
-    setenv("KRUNKNATIVE_AUDIO_LOG", "1", 1);
-    unsetenv("KRUNKNATIVE_AUDIO");
+    test_setenv("KRUNKNATIVE_ASSETS_DIR", probe, 1);
+    test_setenv("KRUNKNATIVE_AUDIO_BACKEND", "null", 1);
+    test_setenv("KRUNKNATIVE_AUDIO_CAPTURE", capture, 1);
+    test_setenv("KRUNKNATIVE_AUDIO_LOG", "1", 1);
+    test_unsetenv("KRUNKNATIVE_AUDIO");
     if (!audio_init()) {
         printf("audio_init on the null backend failed: skip the engine checks\n");
         printf("%d checks, %d failures\n", g_checks, g_failures);

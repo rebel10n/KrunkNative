@@ -12,6 +12,16 @@
 #include <string.h>
 #include <unistd.h>
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 static int g_checks, g_failures;
 
 #define CHECK(cond, ...) do { \
@@ -101,7 +111,7 @@ static void test_cache_and_load(void) {
 int main(void) {
     char dir[256];
     snprintf(dir, sizeof(dir), "%s/kn-published-maps-test-%d", getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int) getpid());
-    setenv("XDG_CACHE_HOME", dir, 1);
+    test_setenv("XDG_CACHE_HOME", dir, 1);
     test_parse();
     test_verify();
     test_cache_and_load();

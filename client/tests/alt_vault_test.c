@@ -23,6 +23,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 static int g_pass;
 static int g_fail;
 
@@ -456,7 +466,7 @@ static void test_store(const char *dir) {
 }
 
 int main(void) {
-    setenv("KRUNKNATIVE_ALT_KEYSTORE", "file", 1);
+    test_setenv("KRUNKNATIVE_ALT_KEYSTORE", "file", 1);
     const char *tmp = getenv("TMPDIR");
     char templ[512];
     snprintf(templ, sizeof(templ), "%s/alt-vault-test.XXXXXX", tmp && *tmp ? tmp : "/tmp");

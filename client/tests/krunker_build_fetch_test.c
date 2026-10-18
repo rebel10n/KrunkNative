@@ -14,6 +14,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// setenv for MinGW, whose CRT has only _putenv_s (the same guard as client/src/headless.c).
+static int test_setenv(const char *name, const char *value, const int overwrite) {
+#ifdef _WIN32
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
+
 #ifndef KN_SOURCE_DIR
 #define KN_SOURCE_DIR "."
 #endif
@@ -123,7 +133,7 @@ static void publish(const char *doc, const char *build_version, const char *clie
 int main(void) {
     char cache[256];
     snprintf(cache, sizeof(cache), "/tmp/krunker_build_fetch_test.%d", (int) getpid());
-    setenv("KRUNKNATIVE_KRUNKER_BUILD_CACHE", cache, 1);
+    test_setenv("KRUNKNATIVE_KRUNKER_BUILD_CACHE", cache, 1);
     char cache_file[300];
     snprintf(cache_file, sizeof(cache_file), "%s/krunker-build.json", cache);
     krunker_build_fetch_set_http(fake_get);
