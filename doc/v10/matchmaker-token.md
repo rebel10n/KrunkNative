@@ -286,8 +286,10 @@ timer; the page would have navigated away on the site). "Couldnt find any" is v1
 `?play=<map>` (hub links, v10 playMap, v10.js:222040-222051) for one of v10's maps: a matchmaker seek in any
 region (an empty `region`), with v10's dataQuery `{"i": "<map>", "dsma": [<index>]}` (`i` is v10's; `dsma` is the
 brain's map index, the lobby's mapIndex), autoChangeGame false and no lobby named. When no lobby plays the map
-(`NoMatchingServers`, the brain's answer; v10 says NoServersMatchQuery) the plain seek runs in place (v10's
-retry), with the Quickplay lists. Any other failure is v10's error screen. Community maps keep the list search
+(`NoMatchingServers`, the brain's answer; v10 says NoServersMatchQuery) the game list is asked and, when no
+lobby runs the map, the offline game on it starts, leaving the lobby the client is joined to. This is a KN
+divergence: v10 plain-seeks and then hosts the map, but KN never hosts, and a plain seek would join another
+lobby and end the play there (b4aab2f01). Any other failure is v10's error screen. Community maps keep the list search
 (a lobby named after the map) and the offline practice of the published map.
 
 Server list (windows[1] loadData): a failed game list keeps the window on LOADING until the next opening

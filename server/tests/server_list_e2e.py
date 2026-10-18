@@ -202,19 +202,15 @@ def rows():
 
 
 def play():
-    """P1-P3: ?play=<map> (hub links, v10 playMap): a seek for that map in any region with v10's dataQuery
-    (i, the map's index), autoChangeGame false; no lobby plays it (NoMatchingServers): the plain seek, in place."""
+    """P1-P2: ?play=<map> (hub links, v10 playMap): a seek for that map in any region with v10's dataQuery
+    (i, the map's index), autoChangeGame false; no lobby plays it (NoMatchingServers): the game list, then the
+    offline game on the map (servers_ui.c on_play_list), not a plain seek (that would join another lobby)."""
     ports = kn_proto.free_ports(1)
-    state = {"play": 0}
 
     def answer(q):
-        # the startup seek (plain) gets GameIssue as the other tests do; the play seek finds no lobby; the
-        # plain seek after it (v10's retry) joins one
+        # the startup seek (plain) gets GameIssue as the other tests do; the play seek finds no lobby
         if q.get("autoChangeGame") == "false" and '"i"' in q.get("dataQuery", ""):
-            state["play"] += 1
             return 503, {"error": "NoMatchingServers"}
-        if state["play"]:
-            return 200, {"host": "127.0.0.1", "port": 9, "gameId": "KAN:ok001", "clientId": "cid-1", "region": "local"}
         return 400, {"error": "GameIssue"}
 
     mm = Matchmaker(ports[0], {}, [], prefix="/mm", seek_answer=answer)
@@ -229,11 +225,12 @@ def play():
           first.get("region", "x") == "" and '"i":"Kanji"' in dq and '"dsma":[' in dq, first)
     check("P1: the play seek names no lobby (no game, no excludeGame)", "game" not in first and "excludeGame" not in first, first)
     i = seeks.index(first) if first else -1
-    retry = seeks[i + 1] if 0 <= i < len(seeks) - 1 else {}
-    check("P2: no lobby plays it (NoMatchingServers): the plain seek, in place (v10's retry), with the Quickplay lists and autoChangeGame",
-          retry.get("autoChangeGame") == "true" and '"i"' not in retry.get("dataQuery", "") and retry.get("region", "") != "", seeks[i:i + 2])
-    check("P2: ... and the retry's answer joins its lobby", "KAN:ok001" in text, text[-300:])
-    check("P2: the retry is logged", "[mm] play: no lobby plays the map: a plain seek" in text, [l for l in text.splitlines() if "[mm] play" in l])
+    check("P2: no lobby plays it (NoMatchingServers): no plain seek follows the play seek (it would join another lobby); the game list is asked instead",
+          0 <= i == len(seeks) - 1 and "/game-list" in mm.paths(), (seeks[i:], mm.paths()))
+    check("P2: ... so the offline game on the map starts in place of a join (the play ends on the map, not in another lobby)",
+          "[sandbox] Loaded map Kanji" in text and "KAN:ok001" not in text, text[-300:])
+    check("P2: the fallback is logged", "[mm] play: no lobby plays the map: the offline game on it" in text,
+          [l for l in text.splitlines() if "[mm] play" in l])
 
 
 def list_failure():

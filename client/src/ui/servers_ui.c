@@ -616,7 +616,7 @@ typedef struct SeekReq {
     char *path;   // /mm/seek-game?... without the token
     void *quiet;  // quick join: try the next candidate instead of failing
     int retried;  // a refused token was replaced once
-    int play;     // v10's autoPlaySearch seek (?play=<map>): no match -> the plain seek again (on_seek)
+    int play;     // v10's autoPlaySearch seek (?play=<map>): no match -> the game list, then the offline game (on_seek)
 } SeekReq;
 
 static void seek_req_free(SeekReq *r) {
@@ -3884,7 +3884,8 @@ int servers_ui_play_map_mode(const char *name, const int catalogue, const int mo
     g_play_mode = mode;
     // v10 ?play=<map> (playMap, v10.js:222040-222051): a matchmaker seek for that map in any region, the
     // map as its dataQuery (`i`; the brain matches the map's index, dsma), autoChangeGame false. No lobby
-    // plays it: the plain seek (on_seek). Community maps (not one of v10's) keep the list search below.
+    // plays it: the game list, then the offline game on it (on_seek -> on_play_list). Community maps (not one of
+    // v10's) keep the list search below.
     // (a mode-specific play, the raid promo's Raid, keeps the list search below: the seek has no mode)
     const int index = official_map_index(name);
     if (mode < 0 && index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
