@@ -310,7 +310,9 @@ int object_manager_spawn_lookup(const char *query, int *tab, int *index, int *ma
 // ---- rules
 unsigned int object_manager_caps(const Game *game, const ObjectManagerPerms *perms); // OM_CAP_*
 // OM_ACTION_REMOVE_AIM: the spawned thing nearest along the crosshair (objects, AIs, bots,
-// spawnables, airdrops) goes when it is the player's own, or the player is a dev or the host.
+// spawnables, airdrops) goes when it is the player's own, or the player is a dev or the host. A dev
+// or the host also takes a bot no thing tracks (game_bots_add's: bot_add, the quota) that the
+// crosshair reaches first; human players are removed by the player list's Kick.
 const char *object_manager_status_text(int status); // the menu's message for a refusal
 
 // ---- authority

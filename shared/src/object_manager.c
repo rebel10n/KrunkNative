@@ -1778,17 +1778,46 @@ static int om_aim_thing_t(Game *game, const Player *player, const NetSpawnReqPac
     return best;
 }
 
+// The bot the crosshair reaches first before a wall (NULL none; *t_out its fraction of OM_AIM_RANGE,
+// 2 none). Only the bots no tracked thing stands for (bot_add, the console's, the server's quota):
+// the tracked ones are things (om_aim_thing_t), with their owner's rules.
+static GameBot *om_aim_bot(Game *game, const Player *player, const NetSpawnReqPacket *req, float *t_out) {
+    GameBots *bots = game->bots;
+    GameBot *best = NULL;
+    *t_out = 2.0f;
+    if (!bots) return NULL;
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    const vec3 dir = om_look(isfinite(req->pitch) ? player_clamp_pitch(req->pitch) : player->direction.x, isfinite(req->yaw) ? req->yaw : player->direction.y);
+    const vec3 segment = {dir.x * OM_AIM_RANGE, dir.y * OM_AIM_RANGE, dir.z * OM_AIM_RANGE};
+    float wall = 2.0f;
+    int wall_object = -1;
+    om_ray(game, eye, segment, &wall, &wall_object);
+    for (int i = 0; i < bots->count; i++) {
+        const Player *p = bots->list[i].player;
+        if (!p || !p->active || p == player) continue;
+        const vec3 size = {4.0f, p->height > 0.0f ? p->height : 10.0f, 4.0f}; // thing_box's bot box
+        const float t = line_in_rect(eye, segment, p->position, size);
+        if (t > 0.0f && t <= 1.0f && t <= wall + 0.001f && t < *t_out) {
+            *t_out = t;
+            best = &bots->list[i];
+        }
+    }
+    return best;
+}
+
 static int om_aim_thing(Game *game, const Player *player, const NetSpawnReqPacket *req) {
     float t;
     return om_aim_thing_t(game, player, req, &t);
 }
 
 // What a Tool Gun shot is on: a tracked thing (*thing, an index into om->things) or, with `map`,
-// one of the map's own objects (*map_uid) when that is nearer; -1 each when not
-static void om_aim_target(Game *game, const Player *player, const NetSpawnReqPacket *req, const int map, int *thing, int *map_uid) {
+// one of the map's own objects (*map_uid) when that is nearer; -1 each when not. *t_out its
+// fraction of OM_AIM_RANGE (2 none)
+static void om_aim_target(Game *game, const Player *player, const NetSpawnReqPacket *req, const int map, int *thing, int *map_uid, float *t_out) {
     float thing_t;
     *thing = om_aim_thing_t(game, player, req, &thing_t);
     *map_uid = -1;
+    *t_out = thing_t;
     if (!map) return;
     ObjectManagerAim aim;
     if (!object_manager_pick(game, player, req->pitch, req->yaw, &aim) || !object_manager_is_map_object(game, aim.object)) return;
@@ -1798,6 +1827,7 @@ static void om_aim_target(Game *game, const Player *player, const NetSpawnReqPac
     if (*thing >= 0 && thing_t <= t) return;
     *thing = -1;
     *map_uid = aim.object;
+    *t_out = t;
 }
 // Who may take back / change a tracked thing: its owner, devs and the host (Remove / Undo's rule)
 typedef struct {
@@ -1828,10 +1858,21 @@ static int om_map_delete(Game *game, ObjectManager *om, const int uid, const int
 
 // OM_ACTION_REMOVE_AIM (the Remove button, the Delete key) and the Tool Gun's Deleter: the nearest
 // tracked thing at the crosshair; the Deleter (`map`) also takes a map object in front of it for
-// those with OM_CAP_MAP (Remove and Delete never touch the map: a stray key costs no geometry)
+// those with OM_CAP_MAP (Remove and Delete never touch the map: a stray key costs no geometry).
+// A bot nobody tracks (bot_add, the console's) that the shot reaches first goes too, for devs and
+// the host (om_aim_bot). Human players are not things: the player list's Kick (ADMIN_ACTION) takes them.
 static int om_remove_aim(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, const int map) {
     int best, map_uid;
-    om_aim_target(game, player, req, map && (who->caps & OM_CAP_MAP), &best, &map_uid);
+    float reach;
+    om_aim_target(game, player, req, map && (who->caps & OM_CAP_MAP), &best, &map_uid, &reach);
+    if ((who->caps & OM_CAP_DEV) || who->host) {
+        float bot_t;
+        GameBot *bot = om_aim_bot(game, player, req, &bot_t);
+        if (bot && bot_t <= reach) {
+            game_bots_remove(game, bot);
+            return OM_STATUS_OK;
+        }
+    }
     if (map_uid >= 0) {
         const int status = om_map_target(game, map_uid, who);
         return status == OM_STATUS_OK ? om_map_delete(game, om_of(game), map_uid, player->uid) : status;
@@ -1853,7 +1894,8 @@ static int tool_deleter(Game *game, Player *player, const NetSpawnReqPacket *req
 // The aimed tracked thing when it is a spawned map object, else a status (*index -1); *map_uid a
 // map object when that is what the shot is on (status OK, *index -1)
 static int om_aim_object(Game *game, const Player *player, const NetSpawnReqPacket *req, const OmWho *who, int *index, int *map_uid) {
-    om_aim_target(game, player, req, (who->caps & OM_CAP_MAP) != 0, index, map_uid);
+    float reach;
+    om_aim_target(game, player, req, (who->caps & OM_CAP_MAP) != 0, index, map_uid, &reach);
     if (*map_uid >= 0) return om_map_target(game, *map_uid, who);
     if (*index < 0) return OM_STATUS_NOTHING;
     const OmThing *t = &((ObjectManager *) game->object_manager)->things[*index];
@@ -2015,7 +2057,8 @@ static int tool_info(Game *game, Player *player, const NetSpawnReqPacket *req, c
     memset(&notify, 0, sizeof(notify));
     char what[64] = "", owner[PLAYER_NAME_SIZE + 16];
     int index, map_uid;
-    om_aim_target(game, player, req, 1, &index, &map_uid); // (Info reads only: the map's objects for everyone)
+    float reach;
+    om_aim_target(game, player, req, 1, &index, &map_uid, &reach); // (Info reads only: the map's objects for everyone)
     if (map_uid >= 0) { // a map object (any object the pick ray takes, solid or not)
         const Object *o = game->map->objects[map_uid];
         om_title(prefab_name(o->prefab), what, sizeof(what));

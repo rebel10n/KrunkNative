@@ -72,8 +72,8 @@
 //                                (a pickup at the crosshair)
 //   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info, 4 Move,
 //                                5 Resize, 6 Properties): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
-//                                with `mdown left`); `om physgun 0` the Physics Gun tile, `om snap 2.5` (the step, 0 off) /
-//                                `om release 0|1` the pane's Snap / Release, `om object 10` an Objects tile,
+//                                with `mdown left`); `om physgun 0` the Physics Gun tile, `om snap 2.5` (the step, 0 off),
+//                                `om object 10` an Objects tile,
 //                                `om npc 1` an NPCs tile (1 the Ghost),
 //                                `om entity 14` an Entities tile (spawned at the crosshair floor point),
 //                                `om aim 1` turns the look onto handle 1 of the btools selection
@@ -859,7 +859,6 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 om_build_set_snap((float) atof(strstr(e->arg, what) + strlen(what)));
                 object_manager_ui_snap_changed();
             }
-            else if (!strcmp(what, "release")) om_build_set_drop(id);
             else if (!strcmp(what, "aim") && client->me) {
                 float pitch, yaw;
                 if (om_build_handle_look(client, id, &pitch, &yaw)) {

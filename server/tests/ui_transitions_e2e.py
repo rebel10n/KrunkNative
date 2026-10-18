@@ -1054,7 +1054,6 @@ def sc_om_tools():
         4210 scroll @t-picked knOmToolsList
         4210 rect @t-picked knOmToolsList knOmToolGun
         5200 scroll @t-pick knOmToolsList
-        5300 clickid knOmDrop1
         6300 scroll @t-drop knOmToolsList
         6400 clickid knOmTab1
         7100 scroll @t-tab knOmToolsList
@@ -1110,8 +1109,8 @@ def sc_om_tools():
     for label in ("t-pick", "t-drop", "t-tab"):
         record("om-tools", label, "knOmToolsList.scrollTop", "=t-picked", tops.get(label, "no probe"),
                top(label) is not None and top(label) == top("t-picked"))
-    handlers = [m.group(1) for m in (re.search(r"\[ui\] handler (knOm(?:Tool|PhysDrop|Tab)\(\d+\)) click", line) for line in lines) if m]
-    want = ["knOmTool(6)", "knOmPhysDrop(1)", "knOmTab(1)"]
+    handlers = [m.group(1) for m in (re.search(r"\[ui\] handler (knOm(?:Tool|Tab)\(\d+\)) click", line) for line in lines) if m]
+    want = ["knOmTool(6)", "knOmTab(1)"]
     record("om-tools", "clicks", "handlers", " ".join(want), " ".join(handlers), handlers == want)
 
 

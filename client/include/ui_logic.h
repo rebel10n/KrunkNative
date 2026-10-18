@@ -614,8 +614,7 @@ float om_build_snap(void);                       // the grid step (units), 0 off
 float om_build_set_snap(float step);             // clamped to OB_SNAP_MIN..OB_SNAP_MAX (<= 0: off); the step set
 float om_build_step_snap(int dir);               // the snap keys: the next common step up (1) / down (-1)
 void om_build_snap_text(char *out, size_t size); // "5", "0.25", "off"
-int  om_build_drop(void);                        // the Physics Gun lets go: 0 frozen in place, 1 down onto the surface
-void om_build_set_drop(int on);
+int  om_build_frozen(void);                       // the Physics Gun's carried object is frozen (right click): it stays on release
 int  om_build_grabbing(void);
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
 void om_build_reset(void);                       // a new map / connection

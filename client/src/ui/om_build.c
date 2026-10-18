@@ -16,8 +16,10 @@
 // mouse instead of the view: any angle for props and blocks (the record's yaw; the AABB collision is
 // the nearest quarter turn's), quarter turns for ramps and ladders (map.js "d"). The snap chord
 // (crouch + E, cont_omPhysSnapKey) held snaps the carry to 45 degrees and its feet to the Tool Gun's
-// grid step (tool_snap). Releasing fire leaves it where it is (frozen), or with "Drop" on lets it
-// down onto the surface below (OM_EDIT_DROP). Weapon swaps, reload and crouch are off while carrying.
+// grid step (tool_snap). A grab is unfrozen: releasing fire lets it down onto the surface below
+// (OM_EDIT_DROP). Right-click (the aim button) while carrying freezes it in place, so releasing
+// leaves it where it is; right-click again unfreezes it. Weapon swaps, reload, crouch and the zoom
+// are off while carrying.
 // A dev's Physics Gun on a player carries the player (OM_EDIT_PLAYER): the server holds it at the
 // carried feet until fire is let go.
 //
@@ -61,7 +63,6 @@
 #define OB_HOLD_REFRESH 0.25  // a carried player's hold is renewed this often while the pose stands still (OM_HOLD_TIMEOUT)
 #define OB_SNAP_STORAGE "kn_omSnapStep" // the step in units, "0" off (kn_omSnap held the old 1 / 2 / 5 / 10 index)
 #define OB_SNAP_OLD_STORAGE "kn_omSnap"
-#define OB_DROP_STORAGE "kn_omPhysDrop"
 #define OB_WHEEL_STEP 10.0f   // grab distance per wheel step (units)
 #define OB_ARROW 7.0f         // a Move arrow reaches this far past the face
 #define OB_HANDLE 2.6f        // a handle's box (units)
@@ -81,11 +82,12 @@ typedef struct {
 static struct {
     int loaded;
     float snap;           // the grid step (units), 0 off
-    int drop;             // the Physics Gun's release: 0 freeze in place, 1 down onto the surface below
     int was_shoot;
+    int was_aim;          // the aim button (right mouse) held last frame
     // the Physics Gun
     int grab;             // uid + 1, 0 none
     int grab_player;      // a carried player's uid + 1 (devs), 0 none
+    int frozen;           // the carried object is frozen (right click): on release it stays; else it drops
     float dist;
     vec3 offset;          // the object's feet from the grab point
     float turn;           // ramps / ladders: rotate-key mouse yaw not yet turned into a quarter turn
@@ -119,7 +121,6 @@ static void ob_load(void) {
     } else if (html_storage_get(OB_SNAP_OLD_STORAGE, value, sizeof(value)) >= 0 && atoi(value) >= 0 && atoi(value) < OB_SNAPS) {
         g_ob.snap = k_snaps[atoi(value)]; // the old 1 / 2 / 5 / 10 pick carries over
     }
-    if (html_storage_get(OB_DROP_STORAGE, value, sizeof(value)) >= 0) g_ob.drop = atoi(value) != 0;
 }
 
 float om_build_snap(void) {
@@ -158,16 +159,8 @@ void om_build_snap_text(char *out, const size_t size) {
     else snprintf(out, size, "%g", s);
 }
 
-int om_build_drop(void) {
-    ob_load();
-    return g_ob.drop;
-}
-
-void om_build_set_drop(const int on) {
-    ob_load();
-    g_ob.drop = on != 0;
-    html_storage_set(OB_DROP_STORAGE, g_ob.drop ? "1" : "0");
-}
+// The Physics Gun's frozen state: the carried object's (right click), unfrozen when nothing is carried
+int om_build_frozen(void) { return g_ob.frozen != 0 && (g_ob.grab != 0 || g_ob.grab_player != 0); }
 
 int om_build_grabbing(void) { return g_ob.grab != 0; }
 
@@ -406,9 +399,9 @@ static void ob_shape(void) {
 }
 
 static void ob_physgun(Client *client, Player *me, Input *input, const float prev_pitch, const float prev_yaw, const int pressed, const int shoot,
-                       const int sampled) {
-    if (g_ob.releasing) { // fire was let go: the last pose (and Drop) as soon as the pace allows
-        if (ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.drop ? OM_EDIT_DROP : 0)) g_ob.releasing = 0;
+                       const int aim_pressed, const int sampled) {
+    if (g_ob.releasing) { // fire was let go: the last pose (and the drop, unless frozen) as soon as the pace allows
+        if (ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.frozen ? 0 : OM_EDIT_DROP)) g_ob.releasing = 0;
         return;
     }
     if (!g_ob.grab && !g_ob.grab_player && pressed) {
@@ -429,6 +422,7 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
             g_ob.grabbed = g_ob.shown = g_ob.sent = g_ob.pose;
             g_ob.uid = puid;
             g_ob.grab_player = puid + 1;
+            g_ob.frozen = 0;
             g_ob.sent_at = 0.0;
         } else {
             if (uid < 0 || !object_manager_pose(&client->game, uid, &g_ob.pose)) return;
@@ -437,6 +431,7 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
             g_ob.offset = v_sub(g_ob.pose.position, v_add(eye, v_scale(ob_dir(me->direction.x, me->direction.y), g_ob.dist)));
             g_ob.uid = uid;
             g_ob.grab = uid + 1;
+            g_ob.frozen = 0; // a click unfreezes it
             g_ob.grabbed = g_ob.shown = g_ob.sent = g_ob.pose;
             g_ob.turn = 0.0f;
             g_ob.begin = 1;
@@ -452,6 +447,7 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
         g_ob.grab_player = 0;
         return;
     }
+    if (aim_pressed && g_ob.grab) g_ob.frozen = !g_ob.frozen; // right click: freeze (or unfreeze) the carried object in place
     input->swap = 0; // no weapon switching while carrying: the wheel and the rotate key are the gun's
     input->select_slot = 0;
     input->reload = 0; // (R turns the carry)
@@ -492,9 +488,9 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
         ob_send(client, OM_EDIT_SOURCE_PHYSGUN, OM_EDIT_PLAYER | OM_EDIT_RELEASE);
         return;
     }
-    g_ob.grab = 0; // released: frozen where it is, or dropped
+    g_ob.grab = 0; // released: frozen where it is, or dropped onto the surface below
     om_interp_released(client, g_ob.uid, &g_ob.shown); // shown there until the server's last echo
-    g_ob.releasing = !ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.drop ? OM_EDIT_DROP : 0);
+    g_ob.releasing = !ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.frozen ? 0 : OM_EDIT_DROP);
 }
 
 // ---------------------------------------------------------------- btools
@@ -585,9 +581,13 @@ void om_build_input(Client *client, Input *input, const float prev_pitch, const 
     const Weapon *w = me->weapon;
     const int tool = object_manager_ui_tool();
     const ObjectManagerToolInfo *info = object_manager_tool_info(tool);
+    const int aim = sampled ? input->scope != 0 : g_ob.was_aim; // the aim button (right mouse): the freeze with the Physics Gun
+    const int aim_pressed = aim && !g_ob.was_aim;
+    g_ob.was_aim = aim;
     if (w && w->kn_physgun) {
         g_ob.drag = 0;
-        ob_physgun(client, me, input, prev_pitch, prev_yaw, pressed, shoot, sampled);
+        input->scope = 0; // (no zoom: the aim button freezes the carry)
+        ob_physgun(client, me, input, prev_pitch, prev_yaw, pressed, shoot, aim_pressed, sampled);
     } else if (w && w->kn_tool && info && info->handles) {
         if (g_ob.grab) g_ob.grab = 0;
         g_ob.grab_player = 0;

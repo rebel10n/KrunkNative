@@ -2508,6 +2508,34 @@ static void test_physgun_player(TestClient *a, TestClient *b) {
     clean_up(a);
 }
 
+// A bot nobody tracks (game_bots_add, as bot_add's and the server's quota make them): the Delete key
+// takes it for a dev or the host and refuses a guest; the nearest thing the shot reaches goes first
+static void test_remove_bot(TestClient *a) {
+    printf("the Delete key on an untracked bot...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    clean_up(a);
+    const float yaw = p->direction.y;
+    const vec3 at = {p->position.x - sinf(yaw) * 30.0f, p->position.y, p->position.z - cosf(yaw) * 30.0f};
+    GameBot *bot = game_bots_add(&g_server->game, NULL, &at, yaw);
+    CHECK(bot && bot->player, "a bot 30 units ahead");
+    if (!bot || !bot->player) return;
+    pump(5);
+    float pitch, aim_yaw;
+    aim_at(p, (vec3) {bot->player->position.x, bot->player->position.y + bot->player->height * 0.5f, bot->player->position.z}, &pitch, &aim_yaw);
+    const int bots = game_bots_count(&g_server->game);
+    set_dev(a, 0);
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+    CHECK(r.status != OM_STATUS_OK && game_bots_count(&g_server->game) == bots, "a guest may not remove it (status %u)", r.status);
+    set_dev(a, 1);
+    r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+    CHECK(r.status == OM_STATUS_OK && game_bots_count(&g_server->game) == bots - 1, "a dev removes it at the crosshair (status %u, bots %d)", r.status,
+          game_bots_count(&g_server->game));
+    pump(5);
+    r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+    CHECK(r.status == OM_STATUS_NOTHING, "nothing left there (status %u)", r.status);
+}
+
 // The client's interpolation of other players' edits: 30 updates a second shown at 144 fps move
 // smoothly (no step bigger than the speed allows), reach each target, and turn the short way
 static void test_interp(void) {
@@ -2666,6 +2694,7 @@ int main(void) {
         test_objects(&g_clients[0], &g_clients[1]);
         test_give_drop(&g_clients[0], &g_clients[1]);
         test_tool_gun(&g_clients[0], &g_clients[1]);
+        test_remove_bot(&g_clients[0]);
         test_pose_math();
         test_edits(&g_clients[0], &g_clients[1]);
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);

@@ -19,8 +19,9 @@
 // Tool Gun (with the picked tool) or the Physics Gun in hand at once: its slot when carried, else
 // added as an extra slot and equipped when it lands, even with the window open. Move and Resize are
 // Tool Gun tools driven by handles (no OM_ACTION_TOOL shots); the Snap row takes any grid step
-// (OB_SNAP_MIN..OB_SNAP_MAX, Off; the PageDown / PageUp keys and the console's `tool_snap` too), the Release row
-// the Physics Gun's let-go (Freeze / Drop). Devs and the host (OM_CAP_MAP) change the map's own
+// (OB_SNAP_MIN..OB_SNAP_MAX, Off; the PageDown / PageUp keys and the console's `tool_snap` too). A
+// Physics Gun grab is unfrozen (it drops when let go); the aim button (right mouse) freezes it
+// in place (om_build.c). Devs and the host (OM_CAP_MAP) change the map's own
 // objects with both guns as well; the pane says so.
 //
 // Properties (the Tool Gun's Properties tool, or its key on the selection: om_build.c): the window
@@ -378,11 +379,6 @@ static void om_tools_html(char **buf, size_t *len, size_t *cap) {
               "<div class='knOmOpt'><span class='knOmOptName'>%s</span><input id='knOmSnapBox' class='knOmSnapBox' type='text' maxlength='6' "
               "value='%s' onchange='knOmSnapSet(this.value)'/><span id='knOmSnapOff' class='knOmOptBtn%s' onclick='knOmSnapSet(0)'>%s</span></div>",
               I18N("kn.om.snap", "Snap"), om_build_snap() > 0.0f ? snap : "", om_build_snap() > 0.0f ? "" : " knOmOptA", I18N("kn.om.off", "Off"));
-    om_append(buf, len, cap, "<div class='knOmOpt'><span class='knOmOptName'>%s</span>"
-                             "<span id='knOmDrop0' class='knOmOptBtn%s' onclick='knOmPhysDrop(0)'>%s</span>"
-                             "<span id='knOmDrop1' class='knOmOptBtn%s' onclick='knOmPhysDrop(1)'>%s</span></div>",
-              I18N("kn.om.release", "Release"), om_build_drop() ? "" : " knOmOptA", I18N("kn.om.freeze", "Freeze"),
-              om_build_drop() ? " knOmOptA" : "", I18N("kn.om.drop", "Drop"));
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     om_append(buf, len, cap, "<div id='knOmToolHint' class='knOmToolHint'>%s</div>", t ? t->hint : "");
     om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div></div></div>", om_tool_gun_line());
@@ -668,12 +664,8 @@ static void om_update_tools(void) {
         const HtmlElem row = html_dom_by_id(id);
         if (row && html_dom_has_class(row, "knOmToolA") != (i == g_om.tool)) html_dom_set_class(row, "knOmToolA", i == g_om.tool);
     }
-    for (int i = 0; i < 3; i++) {
-        static const char *const ids[3] = {"knOmSnapOff", "knOmDrop0", "knOmDrop1"};
-        const HtmlElem b = html_dom_by_id(ids[i]);
-        const int on = i == 0 ? om_build_snap() <= 0.0f : (i - 1) == om_build_drop();
-        if (b && html_dom_has_class(b, "knOmOptA") != on) html_dom_set_class(b, "knOmOptA", on);
-    }
+    const HtmlElem off = html_dom_by_id("knOmSnapOff");
+    if (off && html_dom_has_class(off, "knOmOptA") != (om_build_snap() <= 0.0f)) html_dom_set_class(off, "knOmOptA", om_build_snap() <= 0.0f);
     const HtmlElem tg = html_dom_by_id("knOmToolGunTile"), pg = html_dom_by_id("knOmPhysRow");
     if (tg && html_dom_has_class(tg, "knOmToolA") != om_holds(WEAPON_ID_TOOL_GUN)) html_dom_set_class(tg, "knOmToolA", om_holds(WEAPON_ID_TOOL_GUN));
     if (pg && html_dom_has_class(pg, "knOmToolA") != om_holds(WEAPON_ID_PHYS_GUN)) html_dom_set_class(pg, "knOmToolA", om_holds(WEAPON_ID_PHYS_GUN));
@@ -1128,11 +1120,6 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         om_pick_tool(g_om.tool);
         return 0;
     }
-    if (!strcmp(name, "knOmPhysDrop")) {
-        om_build_set_drop(arg_num(args, argc, 0, 0));
-        om_update_tools();
-        return 0;
-    }
     if (!strcmp(name, "knOmTool")) {
         om_pick_tool(arg_num(args, argc, 0, -1));
         return 0;
@@ -1331,7 +1318,7 @@ static void om_tool_shots(Client *client, const Player *me) {
 static void om_tool_hud(const Player *me) {
     char text[sizeof(g_om.hud_text)] = "";
     if (me && me->active && me->weapon && me->weapon->kn_physgun) {
-        I18N_F(text, "kn.om.hud.phys", "Physics Gun: {0}", om_build_drop() ? I18N("kn.om.drop", "Drop") : I18N("kn.om.freeze", "Freeze"));
+        I18N_F(text, "kn.om.hud.phys", "Physics Gun: {0}", om_build_frozen() ? I18N("kn.om.frozen", "Frozen") : I18N("kn.om.unfrozen", "Unfrozen"));
     } else if (me && me->active && me->weapon && me->weapon->kn_tool) {
         om_load_tool();
         const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
