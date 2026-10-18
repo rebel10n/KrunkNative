@@ -300,6 +300,7 @@ static void strike_shadow_free(Scene *scene) {
     g_strike_shadow = NULL;
     if (geometry) {
         glDeleteVertexArrays(1, &geometry->vao);
+        geometry_free_wire(geometry);
         glDeleteBuffers(1, &geometry->ebo);
         free(geometry);
     }

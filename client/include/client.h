@@ -32,6 +32,14 @@ typedef struct {
     // glDrawElements mode: 0 = GL_TRIANGLES; GL_LINES for line lists (LineMaterial: the
     // show_navmeshes overlay, nav_overlay.c). Lines are the GLES 3.0 way to draw wireframes.
     unsigned int draw_mode;
+    // Triangle edges as GL_LINES for wireframe materials (geometry_wire_ebo, loaders.c), built
+    // on the first wireframe draw from tri_indices; 0 until then.
+    unsigned int wire_ebo;
+    int wire_index_count;
+    // CPU copy of an OBJ model's triangle indices (load_obj_model); NULL for procedural geometry,
+    // which has no wireframe edges and keeps the desktop polygon-mode wireframe. Freed, with
+    // wire_ebo, by geometry_free_wire.
+    unsigned int *tri_indices;
 } Geometry;
 
 #define NAME geometry_cache_map
@@ -1015,6 +1023,13 @@ int geometry_cache_reload_all(void);
 // Fills geometry->bound_center/bound_radius from its local vertices (loaders.c); geometry
 // whose vertices move in the shader (liquid waves) must leave the radius at 0.
 void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count);
+// The GL_LINES edge buffer of an OBJ model (wireframe materials: weapon and other skins),
+// built from tri_indices on first use. Returns 0 when there is none. Does not change any VAO
+// state: the caller binds the returned buffer for its draw and rebinds geometry->ebo after.
+// geometry_free_wire releases it with tri_indices; call it wherever an OBJ model's ebo is deleted
+// (only load_obj_model geometry has tri_indices, so procedural geometry never needs it).
+unsigned int geometry_wire_ebo(Geometry*);
+void geometry_free_wire(Geometry*);
 
 Geometry *create_cube_geo();
 Geometry *create_plane_geo();

@@ -124,6 +124,7 @@ int geometry_cache_reload(const char *path) {
         return 0;
     }
     glDeleteVertexArrays(1, &old->vao);
+    geometry_free_wire(old);
     glDeleteBuffers(1, &old->ebo);
     *old = *fresh; // every mesh holding `old` now draws the new buffers
     geometry_cache_map_itr again = vt_get(&g_geometry_cache, key);
@@ -249,6 +250,47 @@ void geometry_set_bounds(Geometry *geometry, const vertex *vertices, const size_
     geometry->bound_center[1] = cy;
     geometry->bound_center[2] = cz;
     geometry->bound_radius = sqrtf(radius_sq) * 1.001f + 1e-4f; // float slack: never cull a touching mesh
+}
+
+// Wireframe = GL_LINES over every triangle's three edges, from the OBJ model's CPU triangle
+// list. Desktop GL could draw glPolygonMode(GL_LINE) instead, but that call does not exist on
+// GLES (web, ANGLE), where the same skin came out filled; one edge buffer draws the same lines
+// on every platform. glGetBufferSubData is not in GLES 3.0 either, hence the kept copy. The
+// copy-buffer target leaves the VAO's element binding alone.
+unsigned int geometry_wire_ebo(Geometry *geometry) {
+    if (!geometry || geometry->draw_mode || !geometry->tri_indices || geometry->index_count < 3) return 0;
+    if (geometry->wire_ebo) return geometry->wire_ebo;
+
+    const size_t tri_count = (size_t) geometry->index_count / 3;
+    unsigned int *edges = malloc(tri_count * 6 * sizeof(unsigned int));
+    if (!edges) return 0;
+    for (size_t t = 0; t < tri_count; t++) {
+        const unsigned int *v = &geometry->tri_indices[t * 3];
+        unsigned int *e = &edges[t * 6];
+        e[0] = v[0]; e[1] = v[1];
+        e[2] = v[1]; e[3] = v[2];
+        e[4] = v[2]; e[5] = v[0];
+    }
+
+    unsigned int ebo = 0;
+    glGenBuffers(1, &ebo);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, ebo);
+    glBufferData(GL_COPY_WRITE_BUFFER, (GLsizeiptr) (tri_count * 6 * sizeof(unsigned int)), edges, GL_STATIC_DRAW);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    free(edges);
+
+    geometry->wire_ebo = ebo;
+    geometry->wire_index_count = (int) (tri_count * 6);
+    return ebo;
+}
+
+void geometry_free_wire(Geometry *geometry) {
+    if (!geometry) return;
+    if (geometry->wire_ebo) glDeleteBuffers(1, &geometry->wire_ebo);
+    free(geometry->tri_indices);
+    geometry->wire_ebo = 0;
+    geometry->wire_index_count = 0;
+    geometry->tri_indices = NULL;
 }
 
 Geometry *load_obj_model(char *path, const int transform_y) {
@@ -412,6 +454,10 @@ Geometry *load_obj_model(char *path, const int transform_y) {
     glEnableVertexAttribArray(1);
 
     geometry->index_count = (int) alloc_index_count;
+    if (alloc_index_count) { // the wireframe edges come from this list (geometry_wire_ebo)
+        geometry->tri_indices = malloc(alloc_index_count * sizeof(unsigned int));
+        if (geometry->tri_indices) memcpy(geometry->tri_indices, indices, alloc_index_count * sizeof(unsigned int));
+    }
     fast_obj_destroy(mesh);
 
     const size_t path_length = strlen(path);

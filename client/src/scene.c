@@ -419,16 +419,30 @@ void scene_render(const Scene *scene, Camera *camera) {
             if (camera_program_count < 16) camera_programs[camera_program_count++] = program;
         }
 
+        // Wireframe materials (skin wireframe flag, editor wireframe). OBJ models draw their
+        // triangle edges as GL_LINES on every platform (geometry_wire_ebo). Procedural geometry
+        // has no triangle copy: desktop keeps glPolygonMode(GL_LINE) for it, and GLES, which has
+        // no polygon mode, draws it filled. The VAO's element binding is restored after the draw.
+        unsigned int draw_mode = mesh->geometry->draw_mode ? mesh->geometry->draw_mode : GL_TRIANGLES;
+        int index_count = mesh->geometry->index_count;
+        const unsigned int wire_ebo = mesh->material->wireframe ? geometry_wire_ebo(mesh->geometry) : 0;
+        int polygon_line = 0;
+        if (wire_ebo) {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, wire_ebo);
+            draw_mode = GL_LINES;
+            index_count = mesh->geometry->wire_index_count;
+        }
 #ifndef KN_GLES
-        // OpenGL ES (WebGL2, ANGLE) has no glPolygonMode; wireframe materials render filled there.
-        if (mesh->material->wireframe) {
+        else if (mesh->material->wireframe) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        } else {
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            polygon_line = 1;
         }
 #endif
-
-        glDrawElements(mesh->geometry->draw_mode ? mesh->geometry->draw_mode : GL_TRIANGLES, mesh->geometry->index_count, GL_UNSIGNED_INT, NULL);
+        glDrawElements(draw_mode, index_count, GL_UNSIGNED_INT, NULL);
+#ifndef KN_GLES
+        if (polygon_line) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
+        if (wire_ebo) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
     }
 
     if (last_transparent >= 0 && last_transparent != g_draw_current.blend) {

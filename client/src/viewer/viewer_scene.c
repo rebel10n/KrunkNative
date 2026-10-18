@@ -1343,6 +1343,7 @@ static int geometry_replace(const char *path, const char *obj_path) {
         Geometry *old = cached.data->val;
         if (old != fresh) {
             glDeleteVertexArrays(1, &old->vao);
+            geometry_free_wire(old);
             glDeleteBuffers(1, &old->ebo);
             *old = *fresh; // every mesh holding `old` now draws the new buffers
         }
@@ -1418,6 +1419,7 @@ void vscene_reset_overrides(void) {
                     Geometry *fresh = load_obj_model(temp, 0); // re-inserts under the same path
                     if (fresh) {
                         glDeleteVertexArrays(1, &old->vao);
+                        geometry_free_wire(old);
                         glDeleteBuffers(1, &old->ebo);
                         *old = *fresh;
                         geometry_cache_map_itr again = vt_get(&g_geometry_cache, temp);
