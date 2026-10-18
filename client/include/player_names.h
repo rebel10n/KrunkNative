@@ -12,14 +12,18 @@
 #include <stddef.h>
 
 // The name to show for a player. uid: its uid (-1: no uid, numbered by name). self: the local player.
-// Not hidden: `name` itself. Hidden: "Player" (self) or "Player_<n>", written to `out` (size bytes).
+// Not hidden: `name` itself. Hidden: "Player" (self) or "Player_<n>", written to `out` (size bytes) and returned.
 const char *player_names_shown(int uid, int self, const char *name, char *out, size_t size);
 // The account's own name (menu, account window, the local player's rows): "Player" when hidden.
 const char *player_names_account(const char *name);
 // The clan tag to show: "" when hidden (NULL too), else `clan`.
 const char *player_names_clan(const char *clan);
-// A player the client first sees in the match (SPAWN): numbered now, in that order. Repeats are no-ops.
-void player_names_see(int uid);
+// A player the client first sees in the match (SPAWN, with its name): numbered now, in that order. Repeats are
+// no-ops except that the name is kept as the newest one.
+void player_names_see(int uid, const char *name);
+// The i-th player numbered in this match, the ones who left too (the chat rewrite of their leave line): 1 with
+// its uid (-1: numbered by name) and name, 0 past the last.
+int player_names_entry(int index, int *uid, const char **name);
 // The match is left (client_leave_game): the numbers start again.
 void player_names_reset(void);
 // The setting (client_settings_hide_player_names): 1 while names are hidden.

@@ -50,13 +50,16 @@ def run(tag, hidden):
     with open(script, "w", encoding="utf-8") as f:
         f.write("\n".join([
             "0 play",
-            "300 con bot_add 3",
+            "300 con bot_add 3 leaveMessage=1",
             "5000 nodes @rows [class^=leaderItem]",
             "5000 grep @pn Player_ [class^=leaderName]",
             "5000 grep @me Player [class^=leaderNameM]",
             "5000 grep @jn joined [id^=chatMsg_]",
             "5000 grep @jp Player [id^=chatMsg_]",
-            "5100 quit",
+            "5200 con bot_kick all",
+            "5600 grep @lv left [id^=chatMsg_]",
+            "5600 grep @lp Player_ [id^=chatMsg_]",
+            "5700 quit",
         ]) + "\n")
     log = os.path.join(WORK, tag + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
@@ -85,16 +88,23 @@ def run(tag, hidden):
     join_pn = probe(lines, "grep", "@jp")
     n_join = int(join["hits"]) if join else -1
     n_join_pn = int(join_pn["hits"]) if join_pn else -1
+    leave = probe(lines, "grep", "@lv")
+    leave_pn = probe(lines, "grep", "@lp")
+    n_leave = int(leave["hits"]) if leave else -1
+    n_leave_pn = int(leave_pn["hits"]) if leave_pn else -1
     if hidden:
         check("on: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
         check("on: the bots read Player_<n> on the scoreboard", n_pn >= 3, f"Player_ rows {n_pn}")
         check("on: your own row reads Player", n_me == 1, f"Player rows {n_me}")
         check("on: your join line reads Player (the seeded line, no raw name)", n_join == 1 and n_join_pn == 1,
               f"join lines {n_join}, lines with Player {n_join_pn}")
+        # the bots leave after their LEAVE packet removed them from the players: their leave line is still hidden
+        check("on: a bot's leave line reads Player_<n>", n_leave == 3 and n_leave_pn == 3, f"leave lines {n_leave}, with Player_ {n_leave_pn}")
     else:
         check("off: the bots are not renamed (no Player_<n> on the scoreboard)", n_pn == 0, f"Player_ rows {n_pn}")
         check("off: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
         check("off: your join line keeps your own name (no Player)", n_join == 1 and n_join_pn == 0, f"join lines {n_join}, lines with Player {n_join_pn}")
+        check("off: a bot's leave line keeps its name", n_leave == 3 and n_leave_pn == 0, f"leave lines {n_leave}, with Player_ {n_leave_pn}")
     return lines
 
 

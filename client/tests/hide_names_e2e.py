@@ -13,7 +13,8 @@ DOM each render writes (KRUNKNATIVE_SCENARIO_HTML) is checked for:
   in game (scoreboard: Zelda is you, Quentin and Rhea play; chat: Quentin says hi):
     on   the other players read Player_<n> (Quentin and Rhea are numbered in the order the scoreboard
          lists them; the chat line of Quentin gets the same number), you read Player, and no raw
-         name is left in the page
+         name is left in the page; the join, leave and ranked chat lines read the generic names, every
+         chat line is printable text
     off  the raw names are shown, and no Player_<n> appears
 Exit code 0 only when every check passed. Needs a headless GL device (KRUNKNATIVE_HEADLESS=1; set
 KRUNKNATIVE_EGL_DEVICE to pick one) and the checkout's assets (KRUNKNATIVE_ASSETS_DIR, default assets/; in a
@@ -79,7 +80,9 @@ def game_edit(st):
         {"rank": 3, "name": "Rhea", "score": 2},
     ]
     st["chat"] = [{"name": "Quentin", "msg": "gg, hi"},
+                  {"text": "Zelda joined the game", "color": "#fc03ec"},
                   {"text": "Quentin joined the game", "color": "#fc03ec"},
+                  {"text": "Rhea left the game", "color": "#fc03ec"},
                   {"text": "Quentin left for a ranked match", "color": "#fc03ec"}]
 
 
@@ -90,6 +93,18 @@ def death_edit(st):
     st["dead"] = True
     st["name"] = "Zelda"
     st["killcard"] = {"killer": "Quentin", "level": 57, "weapon": "Assault Rifle", "classIndex": 2, "score": 120}
+
+
+def chat_texts(doc):
+    """The text of every chat row's message span (the LRM marks dropped): what a player reads."""
+    out = []
+    for m in re.finditer(r'<span class="chatMsg"[^>]*>(.*?)</span>', doc, re.S):
+        out.append(m.group(1).replace("\u200e", "").replace("\u200f", ""))
+    return out
+
+
+def printable(text):
+    return all(0x20 <= ord(c) < 0x7f or c in "\u00a0" for c in text)
 
 
 def assets_root():
@@ -161,7 +176,15 @@ def main():
         check("game on: no raw name is left (Quentin, Rhea, Zelda)", not any(n in doc for n in ("Quentin", "Rhea", "Zelda")))
         check("game on: you read Player on the scoreboard", 'newLeaderNameM">Player</div>' in doc)
         check("game on: the join line names Player_1", "Player_1 joined the game" in doc and "Quentin joined" not in doc)
+        check("game on: your join line reads Player (not a garbled name)", "Player joined the game" in doc)
+        check("game on: the leave line names Player_2", "Player_2 left the game" in doc and "Rhea left" not in doc)
         check("game on: the ranked line names Player_1", "Player_1 left for a ranked match" in doc and "Quentin left" not in doc)
+        texts = chat_texts(doc)
+        bad = [t for t in texts if not printable(t)]
+        check("game on: every chat line is printable text", texts and not bad, f"lines {len(texts)}, odd {bad[:3]}")
+        check("game on: the chat lines read exactly", all(t in texts for t in (
+            "Player joined the game", "Player_1 joined the game", "Player_2 left the game", "Player_1 left for a ranked match")),
+              f"{texts}")
         check("game on: Quentin's premium badge is absent", ">beenhere</" not in doc, "")
         check("game on: Quentin's verified badge is absent", ">check_circle</" not in doc, "")
 
@@ -173,6 +196,7 @@ def main():
         check("game off: the chat sender is Quentin", "Quentin" in doc and "gg, hi" in doc)
         check("game off: no Player_<n> appears", not re.search(r"Player_\d", doc))
         check("game off: the join and ranked lines keep the names", "Quentin joined the game" in doc and "Quentin left for a ranked match" in doc)
+        check("game off: your join and the leave line keep the names", "Zelda joined the game" in doc and "Rhea left the game" in doc)
         check("game off: Quentin's premium badge shows", ">beenhere</" in doc)
         check("game off: Quentin's verified badge shows", ">check_circle</" in doc)
 

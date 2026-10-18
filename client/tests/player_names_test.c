@@ -23,6 +23,21 @@ static void shown_is(const int uid, const int self, const char *name, const char
     CHECK(want ? (got && !strcmp(got, want)) : got == NULL, "shown(uid %d, self %d, '%s') = '%s', want '%s'", uid, self, name ? name : "(null)", got ? got : "(null)", want ? want : "(null)");
 }
 
+// the name is written to `out` too (the callers that read the buffer, not the result, get it)
+static void written_is(const int uid, const int self, const char *name, const char *want) {
+    char out[64];
+    memset(out, 'X', sizeof(out));
+    const char *got = player_names_shown(uid, self, name, out, sizeof(out));
+    CHECK(got == out && !strcmp(out, want), "written(uid %d, self %d, '%s') = '%s' in out, want '%s'", uid, self, name, out, want);
+}
+
+static void entry_is(const int index, const int uid, const char *name) {
+    int got_uid = -2;
+    const char *got = NULL;
+    CHECK(player_names_entry(index, &got_uid, &got) == 1 && got_uid == uid && got && !strcmp(got, name),
+          "entry(%d) = uid %d '%s', want uid %d '%s'", index, got_uid, got ? got : "(null)", uid, name);
+}
+
 static void off_tests(void) {
     g_hide = 0;
     player_names_reset();
@@ -37,20 +52,26 @@ static void off_tests(void) {
 static void on_tests(void) {
     g_hide = 1;
     player_names_reset();
-    player_names_see(10); // SPAWN order: 10, 20, 30
-    player_names_see(20);
-    player_names_see(30);
-    player_names_see(20); // a repeat keeps its number
+    player_names_see(10, "Carol"); // SPAWN order: 10, 20, 30
+    player_names_see(20, "Bob");
+    player_names_see(30, "Dave");
+    player_names_see(20, "Bob"); // a repeat keeps its number
     shown_is(20, 0, "Bob", "Player_2");
     shown_is(10, 0, "Carol", "Player_1");
     shown_is(30, 0, "Dave", "Player_3");
     shown_is(10, 0, "Carol", "Player_1");     // stable for the match
     shown_is(40, 0, "Erin", "Player_4");      // first seen by a display: the next number
+    written_is(40, 0, "Erin", "Player_4");    // the buffer holds it, not only the result
     shown_is(20, 1, "Bob", "Player");          // the local player is Player, whatever its number
+    written_is(20, 1, "Bob", "Player");        // ... and the buffer reads Player too
+    written_is(-1, 0, "Guest", "Player_5");
     shown_is(-1, 0, "Guest", "Player_5");     // no uid: numbered by name
     shown_is(-1, 0, "Guest", "Player_5");
     shown_is(-1, 0, "Other", "Player_6");
     shown_is(50, 0, "", "");                   // a name-less line stays as it is
+    entry_is(0, 10, "Carol");                  // the numbered players, the leavers too, in SPAWN order
+    entry_is(1, 20, "Bob");
+    entry_is(2, 30, "Dave");
     shown_is(-1, 0, NULL, NULL);
     CHECK(player_names_clan("[KN]")[0] == 0, "clan tag removed while names are hidden");
     CHECK(player_names_clan(NULL)[0] == 0, "no clan while hidden");
@@ -60,7 +81,7 @@ static void on_tests(void) {
 static void reset_tests(void) {
     g_hide = 1;
     player_names_reset(); // leaving the game: the match's numbers start again
-    player_names_see(30);
+    player_names_see(30, "Dave");
     shown_is(30, 0, "Dave", "Player_1");
     shown_is(20, 0, "Bob", "Player_2");
     g_hide = 0;
@@ -72,9 +93,10 @@ static void reset_tests(void) {
 static void overflow_tests(void) {
     g_hide = 1;
     player_names_reset();
-    for (int uid = 0; uid < 256; uid++) player_names_see(uid);
+    for (int uid = 0; uid < 256; uid++) player_names_see(uid, "x");
     shown_is(255, 0, "x", "Player_256");
     shown_is(300, 0, "y", "Player"); // no room left: Player, never a raw name
+    written_is(300, 0, "y", "Player");
 }
 
 static void word_tests(void) {

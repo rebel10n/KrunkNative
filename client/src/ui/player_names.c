@@ -31,8 +31,12 @@ int player_names_hidden(void) {
 // The player's number, handed out on first sight. 0 when the table is full (shown as "Player").
 static int pn_number(const int uid, const char *name) {
     for (int i = 0; i < g_pn_count; i++) {
-        const PnEntry *e = &g_pn[i];
-        if (uid >= 0 ? e->uid == uid : (e->uid < 0 && !strcmp(e->name, name ? name : ""))) return e->number;
+        PnEntry *e = &g_pn[i];
+        if (uid >= 0 ? e->uid == uid : (e->uid < 0 && !strcmp(e->name, name ? name : ""))) {
+            // a reused uid: its newest name (never copied onto itself: the rewrite of a chat line passes e->name back in)
+            if (uid >= 0 && name && name[0] && strcmp(e->name, name)) snprintf(e->name, sizeof(e->name), "%s", name);
+            return e->number;
+        }
     }
     if (g_pn_count >= PN_MAX) return 0;
     PnEntry *e = &g_pn[g_pn_count++];
@@ -42,8 +46,15 @@ static int pn_number(const int uid, const char *name) {
     return e->number;
 }
 
-void player_names_see(const int uid) {
-    if (uid >= 0) pn_number(uid, NULL);
+void player_names_see(const int uid, const char *name) {
+    if (uid >= 0) pn_number(uid, name);
+}
+
+int player_names_entry(const int index, int *uid, const char **name) {
+    if (index < 0 || index >= g_pn_count) return 0;
+    *uid = g_pn[index].uid;
+    *name = g_pn[index].name;
+    return 1;
 }
 
 void player_names_reset(void) {
@@ -53,11 +64,11 @@ void player_names_reset(void) {
 
 const char *player_names_shown(const int uid, const int self, const char *name, char *out, const size_t size) {
     if (!player_names_hidden() || !name || !name[0]) return name; // no name, no one to hide (a kill without a killer)
-    if (self || !out || !size) return "Player";
-    const int n = pn_number(uid, name);
-    if (n <= 0) return "Player";
-    snprintf(out, size, "Player_%d", n);
-    return out;
+    if (!out || !size) return "Player";
+    const int n = self ? 0 : pn_number(uid, name); // 0: the local player, or no room left in the table
+    if (n > 0) snprintf(out, size, "Player_%d", n);
+    else snprintf(out, size, "Player");
+    return out; // always written: callers read `out` as well as the result
 }
 
 const char *player_names_account(const char *name) {

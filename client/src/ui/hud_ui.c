@@ -2374,6 +2374,12 @@ static void hud_chat_hide_names(const char *in, char *out, const size_t size) {
         if (p) hud_chat_add_name(names, &count, p->name, p->uid, p == client->me);
     }
     hud_chat_add_name(names, &count, client->me ? client->me->name : client->menu_name, client->me ? client->me->uid : -1, 1);
+    for (int i = 0; count < HUD_CHAT_NAMES_MAX; i++) { // every player numbered in this match by uid, the ones who left too (their leave line)
+        int uid = -1;
+        const char *raw = NULL;
+        if (!player_names_entry(i, &uid, &raw)) break;
+        if (uid >= 0) hud_chat_add_name(names, &count, raw, uid, client->me && uid == client->me->uid);
+    }
     if (cJSON_IsArray(g_hud_override.scoreboard)) { // a scenario's scoreboard stands for the game's players
         const cJSON *row;
         cJSON_ArrayForEach(row, g_hud_override.scoreboard) {
