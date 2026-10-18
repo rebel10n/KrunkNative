@@ -1090,6 +1090,18 @@ static int prefab_canvas_lines(Canvas2D *c, const char *text, const double max_w
     return count;
 }
 
+// The first max bytes of s as a new string (strndup is POSIX: MinGW's C11 headers do not declare it).
+static char *prefab_text_prefix(const char *s, size_t max) {
+    size_t n = 0;
+    while (n < max && s[n]) n++;
+    char *copy = malloc(n + 1);
+    if (copy) {
+        memcpy(copy, s, n);
+        copy[n] = 0;
+    }
+    return copy;
+}
+
 // utils.js createCanvasText(w, h, text, fontSize, fcolr, bcolr, noBVis, tAlign, ocolr, othick, noSCF)
 static unsigned int prefab_sign_texture(const Object *object, const cJSON *raw_obj) {
     const cJSON *raw_text = cJSON_GetObjectItem(raw_obj, "st");
@@ -1134,7 +1146,7 @@ static unsigned int prefab_sign_texture(const Object *object, const cJSON *raw_o
     const double step = m * 1.2;
 
     // text.substring(0, signTextLimit - 1).split("\\n") (a literal backslash-n)
-    char *copy = strndup(text, 1499);
+    char *copy = prefab_text_prefix(text, 1499);
     if (copy) {
         char *segment = copy;
         for (;;) {

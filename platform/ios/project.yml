@@ -25,6 +25,10 @@ targets:
     platform: iOS
     sources:
       - path: KrunkNative
+        # info.path below generates this Info.plist; copying it as a resource as well makes two
+        # commands produce the bundle's Info.plist
+        excludes:
+          - Info.plist
       # The web client (make web -> dist/web, copied by prepare.sh) as a folder
       # reference: it lands in the app bundle as web/ with its tree intact.
       - path: web
@@ -75,6 +79,9 @@ targets:
     platform: iOS
     sources:
       - path: KrunkNative
+        # the KrunkNative target's Info.plist (info.path there) is not this app's: never a resource here
+        excludes:
+          - Info.plist
       - path: web
         type: folder
         buildPhase: resources

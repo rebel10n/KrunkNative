@@ -1130,15 +1130,14 @@ else ()
     add_test(NAME krunker_sync_test COMMAND krunker_sync_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # krunker_maps_test: Krunker's official map table (shared/include/krunker_maps.h, generated) loads and
     # plays every map; an official game's map resolution (client/src/net/krunker_map_source.c): inline
-    # custom maps, the user cache, GET <API>/maps/<index> past the table
-    add_executable(krunker_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_maps_test.c
-                   client/src/net/krunker_map_source.c)
-    target_include_directories(krunker_maps_test PRIVATE client/include shared/include)
-    target_link_libraries(krunker_maps_test PRIVATE m)
-    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        target_link_libraries(krunker_maps_test PRIVATE ws2_32) # shared/src/net.c
+    # custom maps, the user cache, GET <API>/maps/<index> past the table. POSIX: mkdtemp, setenv, rmdir.
+    if (NOT WIN32)
+        add_executable(krunker_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_maps_test.c
+                       client/src/net/krunker_map_source.c)
+        target_include_directories(krunker_maps_test PRIVATE client/include shared/include)
+        target_link_libraries(krunker_maps_test PRIVATE m)
+        add_test(NAME krunker_maps_test COMMAND krunker_maps_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     endif ()
-    add_test(NAME krunker_maps_test COMMAND krunker_maps_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # seek_filter_test (client/src/ui/seek_filter.c, seek_prefs.h): with no mode picked a seek takes only the
     # public rotation (v10 rotationModes, the shared mode table), never Trade / Parkour / custom / password /
     # hosted lobbies; a picked mode is sought; v10's saved-list parsing and dataQuery dsma / dsmo
