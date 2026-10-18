@@ -212,7 +212,7 @@ static void header_update(const AccountInfo *acc) {
         html_dom_insert_html(out, HTML_INSERT_AFTER_END,
             "<div id=\"signedInHeaderBar\" class=\"svelte-da3zva\">"
             "<div class=\"ph-item svelte-da3zva\" id=\"knV10Profile\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
-            "<img class=\"ph-avatar svelte-da3zva\" id=\"knV10Avatar\" src=\"./img/player_pfp.png\"> <div class=\"ph-info svelte-da3zva\">"
+            "<img class=\"ph-avatar svelte-da3zva\" id=\"knV10Avatar\"> <div class=\"ph-info svelte-da3zva\">"
             "<div class=\"ph-name-row svelte-da3zva\"><span class=\"ph-name svelte-da3zva\" id=\"knV10Name\"> </span></div> "
             "<div class=\"ph-level-row svelte-da3zva\"><span class=\"ph-level-badge svelte-da3zva\" id=\"knV10Level\"> </span> "
             "<div class=\"ph-xp-bar svelte-da3zva\"><div class=\"ph-xp-fill svelte-da3zva\" id=\"knV10XpFill\"></div></div></div></div></div> "
@@ -256,6 +256,16 @@ static void header_update(const AccountInfo *acc) {
     HtmlElem el;
     // premiumT && settings.tmp.premiumBadge ? alias : name
     if ((el = by_id("knV10Name"))) html_dom_set_text(el, player_names_account(acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name));
+    // the picture (v10:209536 _70104, run at sign-in): the menu class's icon, textures/classes/icon_N.png
+    // (defaultSrc). KN has no profile.png upload, so a premium account's picture is the class icon too.
+    // Classes past Krunker's icons (KN's Nettspend, 16) keep the stock picture.
+    if ((el = by_id("knV10Avatar"))) {
+        char src[64];
+        const int cls = menu_ui()->client->menu_class_index;
+        if (cls >= 0 && cls <= 15) snprintf(src, sizeof(src), "textures/classes/icon_%d.png", cls);
+        else snprintf(src, sizeof(src), "./img/player_pfp.png");
+        html_dom_set_attr(el, "src", src);
+    }
     char text[48];
     snprintf(text, sizeof(text), "Lv %d", acc->level > 0 ? acc->level : 1);
     if ((el = by_id("knV10Level"))) html_dom_set_text(el, text);
