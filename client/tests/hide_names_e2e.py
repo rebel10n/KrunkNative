@@ -7,9 +7,9 @@ Two scenarios (client_bin --render-scenario, headless, no window) rendered twice
 Client > Hide player names on (knClient.json hidePlayerNames true) and off (the store without it). The
 DOM each render writes (KRUNKNATIVE_SCENARIO_HTML) is checked for:
   menu (signed in as Zelda, clan KN):
-    on   the account header reads Player, its clan tag is gone, the picture is the default
-         (./img/player_pfp.png), and the name Zelda is nowhere in the page
-    off  the header reads Zelda with [KN] and the same default picture
+    on   the account header reads Player, its clan tag is gone, the picture is the menu class's
+         icon (textures/classes/icon_0.png, the scenario's class 0), and the name Zelda is nowhere in the page
+    off  the header reads Zelda with [KN] and the same class icon
   in game (scoreboard: Zelda is you, Quentin and Rhea play; chat: Quentin says hi):
     on   the other players read Player_<n> (Quentin and Rhea are numbered in the order the scoreboard
          lists them; the chat line of Quentin gets the same number), you read Player, and no raw
@@ -36,7 +36,8 @@ SCENARIOS = os.path.join(REPO, "tools", "uidiff", "scenarios")
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-hide-names-", dir=CACHE if os.path.isdir(CACHE) else None)
 results = []
-DEFAULT_PICTURE = "./img/player_pfp.png"
+# the header picture: the menu class icon (v10:209536, menu_class_index 0 in the scenario), not the stock face
+CLASS_PICTURE = "textures/classes/icon_0.png"
 ASSETS = ""
 
 
@@ -156,7 +157,7 @@ def main():
         check("menu on: the header reads Player", 'id="knV10Name">Player</span>' in doc and 'menuClassPlayerName">Player</span>' in doc)
         check("menu on: Zelda is nowhere in the page", "Zelda" not in doc)
         check("menu on: the clan tag KN is gone", "[KN]" not in doc and "menuClassPlayerClan" not in doc)
-        check("menu on: the default picture", avatar_src(doc) == DEFAULT_PICTURE, f"src={avatar_src(doc)}")
+        check("menu on: the class icon picture", avatar_src(doc) == CLASS_PICTURE, f"src={avatar_src(doc)}")
 
     doc = render(menu_off, "menu-off")
     if doc is None:
@@ -164,7 +165,7 @@ def main():
     else:
         check("menu off: the header reads Zelda", "Zelda" in doc)
         check("menu off: the clan tag KN shows", "KN" in doc and "menuClassPlayerClan" in doc)
-        check("menu off: the default picture", avatar_src(doc) == DEFAULT_PICTURE, f"src={avatar_src(doc)}")
+        check("menu off: the class icon picture", avatar_src(doc) == CLASS_PICTURE, f"src={avatar_src(doc)}")
 
     doc = render(game_on, "game-on")
     if doc is None:
