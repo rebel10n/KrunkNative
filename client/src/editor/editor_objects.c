@@ -1224,6 +1224,7 @@ int ed_history_redo_undoable(void) {
 
 void ed_history_poll(void) {
     if (editor_setting_bool("disableHistory") || !editor_setting_num("historyLimit", 1000)) return;
+    if (ed_rotate_active()) return; // a turn is one step: its poll is the one that ends it (ed_rotate_end)
     for (size_t i = 0; i < g_ed.proj->count; i++) {
         EditorObject *o = g_ed.proj->objects[i];
         if (o->history && !cJSON_Compare(o->history, o->data, 1)) {

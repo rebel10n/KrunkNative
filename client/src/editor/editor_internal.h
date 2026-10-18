@@ -536,6 +536,10 @@ int  ed_gizmo_hit(double fb_x, double fb_y);       // axis mask under the cursor
 void ed_gizmo_begin(double fb_x, double fb_y, int axis);
 void ed_gizmo_drag(double fb_x, double fb_y);
 void ed_gizmo_end(void);
+int  ed_rotate_active(void);                       // an E turn is in progress (editor_render.c)
+void ed_rotate_begin(void);                        // E with a selection: start turning it
+void ed_rotate_drag(double fb_x);                  // the cursor's x sets the angle
+void ed_rotate_end(int cancel);                    // confirm (one undo step) or cancel
 void ed_obj_world_box(const EditorObject *o, float m[16]); // bounding box matrix (unit box -0.5..0.5)
 void ed_euler_matrix(vec3 r, float m[9]);          // three.js Euler XYZ rotation matrix (row major)
 

@@ -264,6 +264,7 @@ static void update_title(void) {
 void ed_project_activate(EditorProject *p) {
     if (!p) return;
     if (g_ed.shown == p && g_ed.proj == p) return;
+    ed_rotate_end(0); // a turn belongs to its map (confirmed before the switch)
     if (g_ed.shown && g_ed.proj == g_ed.shown) ed_history_poll(); // record the last second's edits where they happened
     // transient input / tool state belongs to the view, not the map
     g_ed.gizmo.active = 0;

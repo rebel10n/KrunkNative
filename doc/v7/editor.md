@@ -1124,6 +1124,13 @@ v3.1.1 instead redirected to `social.html`.
 | P | placeholder | | **T** | **texture/variant/spray/skin list** |
 | X | Quick Add | | **C / G / R** | **create cube / gate / trigger** |
 
+**KrunkNative: E turns the selection.** With an object selected, **E** starts a turn about Y: the
+selected object (or group placeholder, with its members) turns about its own centre as the cursor
+moves horizontally, 0.5 degrees per CSS px, rounded to `rotationSnapping` while snapping is on.
+E or a click confirms, Esc cancels; the turn is one undo step (`editor_render.c` `ed_rotate_*`).
+Differences: v7.1.4 has no E turn (its rotate mode is the gizmo on key 2) and E keeps its `upKey`
+fly-up while held; v10 has no editor in its client bundle.
+
 **Editor settings** (`initSettings`, E:1779-1883). Stored in `kro_editor`; "Reset All" restores them.
 
 | Area | Setting | Default / range |

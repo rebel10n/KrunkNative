@@ -1066,3 +1066,90 @@ void ed_gizmo_end(void) {
     g_ed.gizmo.active = 0;
     g_ed.dirty_panel = 1; // transformControl "mouseUp": updateObjConfigGUI
 }
+
+// ---------------------------------------------------------------------------
+// Turn (E with a selection, editor.c page_key): the selected object turns about Y, about its own
+// centre (a group placeholder carries its members with it, ed_groups_sync). The cursor's
+// horizontal movement sets the angle at 0.5 degrees per CSS px, rounded to rotationSnapping while
+// snapping is on (Ctrl turns it off, as for the gizmo). E or a click confirms, Esc cancels. The
+// turn is one undo step (the history batch "rotate object"). KrunkNative key: v7.1.4 has no E
+// turn (its rotate mode is the gizmo on key 2) and v10 has no editor.
+
+typedef struct {
+    int active;
+    EditorProject *proj;   // the map it turns (ed_rotate_end runs before a project switch)
+    uint32_t uuid;         // looked up again on each use: the object may be removed meanwhile
+    uint32_t batch;        // the history batch that makes the turn one step
+    double start_x;        // framebuffer x where the turn began
+    vec3 start_rot;        // r before the turn (a cancel restores it exactly)
+} EdRotate;
+
+static EdRotate g_rot;
+
+int ed_rotate_active(void) { return g_rot.active; }
+
+static EditorObject *rotate_object(void) {
+    if (!g_rot.active || g_rot.proj != g_ed.proj) return NULL;
+    return ed_obj_find(g_rot.uuid);
+}
+
+void ed_rotate_begin(void) {
+    EditorObject *o = g_ed.proj->selected;
+    if (!o || g_rot.active || g_ed.window_index > 0 || editor_prefab_has(o->prefab, EP_NOROTATION)) return;
+    // the changes made before the turn are their own steps: the poll sets each baseline
+    ed_history_poll();
+    g_rot.batch = ed_history_batch_begin("rotate object");
+    g_rot.proj = g_ed.proj;
+    g_rot.uuid = o->uuid;
+    g_rot.start_x = g_ed.mouse_x;
+    g_rot.start_rot = ed_obj_vec(o, "r", v3(0, 0, 0));
+    g_rot.active = 1;
+    g_ed.gizmo.active = 0;
+    editor_message("Rotate: move the mouse, click or press E to confirm, Esc to cancel");
+}
+
+void ed_rotate_drag(const double fb_x) {
+    EditorObject *o = rotate_object();
+    if (!o) return;
+    const float css = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
+    float angle = (float) ((fb_x - g_rot.start_x) / css * 0.5) * (float) M_PI / 180.0f;
+    if (g_ed.snapping && !(g_ed.mods & GLFW_MOD_CONTROL)) {
+        const float t = (float) editor_setting_num("rotationSnapping", 1) * (float) M_PI / 180.0f;
+        angle = snap(angle, t);
+    }
+    const vec3 r0 = g_rot.start_rot;
+    vec3 r = r0; // no turn yet: the start rotation, as it was
+    if (angle == 0) {
+        // nothing to do
+    } else if (fabsf(r0.x) < 1e-6f && fabsf(r0.z) < 1e-6f) {
+        // a pure yaw keeps its Euler form, Y in (-PI, PI] (editor_tools.c rotateAroundPoint)
+        r.y = atan2f(sinf(r0.y + angle), cosf(r0.y + angle));
+    } else {
+        // the gizmo's rotate handle about world Y (or about the local Y in local space)
+        float r0m[9], ra[9], out[9];
+        ed_euler_matrix(r0, r0m);
+        axis_angle(v3(0, 1, 0), angle, ra);
+        if (g_ed.transform_space == ED_SPACE_LOCAL) mat3_mul(r0m, ra, out);
+        else mat3_mul(ra, r0m, out);
+        r = euler_from_matrix(out);
+    }
+    ed_obj_set_vec(o, "r", r);
+    ed_obj_rebuild(o);
+    ed_mark_changed();
+}
+
+void ed_rotate_end(const int cancel) {
+    if (!g_rot.active) return;
+    EditorObject *o = rotate_object();
+    g_rot.active = 0;
+    if (cancel && o) {
+        ed_obj_set_vec(o, "r", g_rot.start_rot);
+        ed_obj_rebuild(o);
+    }
+    // the members turn back or on inside the step; the last changes join it before it closes
+    ed_groups_sync();
+    ed_history_poll();
+    ed_history_batch_end(g_rot.batch);
+    g_rot.batch = 0;
+    g_ed.dirty_panel = 1; // updateObjConfigGUI: the inspector shows the new rotation
+}

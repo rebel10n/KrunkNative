@@ -1016,6 +1016,7 @@ static void page_enter(Client *client, const char *query) {
 static void page_leave(Client *client) {
     (void) client;
     if (!g_ed.active) return;
+    ed_rotate_end(0); // a turn in progress is kept
     ed_script_close(); // the script window's edits into the map before it is stored
     ed_bus_stop();
     ed_views_fini();
@@ -1712,6 +1713,12 @@ static int page_mouse_button(Client *client, const int button, const int action,
         }
         return 0;
     }
+    if (ed_rotate_active()) {
+        // any press confirms the turn; on the 3D view it is only that (no select, no look)
+        const int on_view = over_canvas(x, y);
+        ed_rotate_end(0);
+        if (on_view) return 1;
+    }
     if (!over_canvas(x, y)) {
         const float ps = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
         if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS &&
@@ -1763,6 +1770,10 @@ static int page_cursor(Client *client, const double x, const double y) {
     if (g_resize_drag >= 0) {
         const float ps = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
         resize_drag((float) (x / ps));
+        return 1;
+    }
+    if (ed_rotate_active()) {
+        ed_rotate_drag(x); // the turn takes the mouse while it runs (no look)
         return 1;
     }
     if (g_ed.looking) {
@@ -1836,6 +1847,14 @@ static int key_is(const int key, const char *setting) {
     return (code && cp == code) || (key >= 32 && key < 127 && cp == key);
 }
 
+// the keys that move the camera (and Shift) do not end a turn; Ctrl combinations (undo, save) do
+static int rotate_keeps_key(const int key, const int mods) {
+    if (mods & GLFW_MOD_CONTROL) return 0;
+    return key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT || key == GLFW_KEY_UP || key == GLFW_KEY_DOWN ||
+           key == GLFW_KEY_LEFT || key == GLFW_KEY_RIGHT || key_is(key, "fowardKey") || key_is(key, "backwardKey") ||
+           key_is(key, "leftKey") || key_is(key, "rightKey") || key_is(key, "downKey");
+}
+
 static void set_move(const int key, const int mods, const int down) {
     if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) g_ed.move_sprint = down;
     if (key_is(key, "fowardKey") || key == GLFW_KEY_UP) g_ed.move_forward = down;
@@ -1876,6 +1895,19 @@ static int page_key(Client *client, const int key, const int scancode, const int
         set_move(key, mods, 0);
         return 0;
     }
+    // a turn (E, editor_render.c ed_rotate_*) runs until E or Esc; a key that edits the map
+    // confirms it first, so Ctrl+Z, Delete and the tool keys act on the turned object
+    if (action == GLFW_PRESS && ed_rotate_active() && !is_typing()) {
+        if (key == GLFW_KEY_ESCAPE) {
+            ed_rotate_end(1);
+            return 1;
+        }
+        if (key == GLFW_KEY_E) {
+            ed_rotate_end(0);
+            return 1;
+        }
+        if (!rotate_keeps_key(key, mods)) ed_rotate_end(0);
+    }
     // Ctrl+Tab, Ctrl+S, ... (editor_project.c); Ctrl+S in the script window validates it instead
     if (action == GLFW_PRESS && !(key == GLFW_KEY_S && ed_script_focused()) && ed_project_key(key, mods)) return 1;
     if (key == GLFW_KEY_ESCAPE) {
@@ -1914,6 +1946,7 @@ static int page_key(Client *client, const int key, const int scancode, const int
         case GLFW_KEY_BACKSPACE:
         case GLFW_KEY_DELETE: ed_obj_delete_selected(); break;
         case GLFW_KEY_R: if (shift) ed_obj_duplicate(); break;
+        case GLFW_KEY_E: if (!ctrl && !shift) ed_rotate_begin(); break; // turn the selection (E also flies up while held)
         case GLFW_KEY_C:
             if (ctrl) ed_obj_copy(0, 0);
             else if (shift) ed_obj_toggle_prop_group("collidable");
