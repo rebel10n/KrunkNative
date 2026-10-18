@@ -16,7 +16,7 @@
 //            Joins every server as a guest, direct connects and practice (--offline).
 //
 // Mode, first match wins: --mode online|offline, KRUNKNATIVE_MODE, web ?mode=, storage
-// `knMode` (Settings > Client > Account Mode), else online. The server finder list
+// `knMode` (Settings > Game > Gameplay > Account Mode), else online. The server finder list
 // (GET <finder>?...) comes from --finder <url>, KRUNKNATIVE_FINDER_URL, web ?finder=,
 // storage `knFinderUrl`, else ONLINE_DEFAULT_FINDER_URL (both modes; "" / "off" disables).
 // No client.h / shared.h here: backend_native.c includes this next to OpenSSL, whose

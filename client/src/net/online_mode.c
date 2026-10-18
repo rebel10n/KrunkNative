@@ -235,7 +235,7 @@ void online_mode_tick(void *client) {
     if (!bar) return;
     done = 1;
     html_dom_set_html(bar, "<div class=\"button buttonP lgn\" style=\"width:300px;margin-right:0px;padding-top:3px;padding-bottom:15px;\" "
-                           "onmouseenter=\"playTick()\" onclick=\"showWindow(1)\" title=\"Settings > Client > Account Mode\">Offline Mode <span class=\"material-icons\" "
+                           "onmouseenter=\"playTick()\" onclick=\"showWindow(1)\" title=\"Settings > Game > Gameplay > Account Mode\">Offline Mode <span class=\"material-icons\" "
                            "style=\"vertical-align:bottom;color:#fff;font-size:30px;margin-bottom:-1px;\">cloud_off</span></div>");
 }
 

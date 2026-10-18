@@ -187,7 +187,7 @@ int  servers_ui_official_find_game(void);    // the official error screen's Find
 // transport retries). error may be rewritten (a second refusal, quick drops). 1 = rejoining.
 // had_session: the session had been joined (a drain refuses new connections with 004004 too).
 // A live session's server stopping for an update (004004) restarts the client instead when
-// Settings > Client > Auto-restart is on (game_reload.h): the new process rejoins the lobby.
+// Settings > Game > Gameplay > Auto-restart is on (game_reload.h): the new process rejoins the lobby.
 int  servers_ui_connection_lost(char *error, size_t error_size, const char *code, int dropped, int had_session);
 // The transport gave up (the retry budget is spent, client_net_give_up): no rejoin any more.
 void servers_ui_gave_up(void);

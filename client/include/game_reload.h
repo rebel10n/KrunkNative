@@ -11,7 +11,7 @@
 // settings, another Game version's page) makes it re-execute itself like F4, then come back to
 // the same game. On the web F5 is the browser's reload (the address bar keeps the game).
 //
-// The same restart serves the updates (Settings > Client > "Auto-restart for updates", default
+// The same restart serves the updates (Settings > Game > Gameplay > "Auto-restart for updates", default
 // on; doc/backend.md 9.4 "rejoin", doc/console.md "F5: full reload"):
 //  * a server stopping for an update (its ERROR "GAME UPDATING", code 004004 on a live session:
 //    "restarting for an update, reconnect after") shows the Game Updating screen briefly, then

@@ -2244,7 +2244,7 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
     const double now = glfwGetTime();
     // The server of a live session stops for an update (004004: "restarting for an update,
     // reconnect after"; a drain refuses new connections with the same code, but those never had a
-    // session). Settings > Client > Auto-restart (default on): the client restarts itself and the
+    // session). Settings > Game > Gameplay > Auto-restart (default on): the client restarts itself and the
     // new process rejoins this lobby (the restart rejoin's backoff) or the direct server; no
     // in-place rejoin here, the screen keeps the server's message with "Restarting..." meanwhile.
     if (had_session && !strcmp(code, NET_ERROR_CODE_UPDATING)) {

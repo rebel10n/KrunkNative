@@ -8,7 +8,7 @@
 //               installs the update and starts the new client; offered only for self-updating
 //               installs (not deb/rpm, kn-install.json).
 //   Download    the platform's package (deb/rpm installs: their package), else the release page.
-// With Settings > Client > "Auto-restart for updates" (default on) a newer build that can be
+// With Settings > Game > Gameplay > "Auto-restart for updates" (default on) a newer build that can be
 // installed restarts the client by itself: in the menu right away, in a match at its end or the
 // next menu visit (game_reload.h, game_reload_update_available); the box says so meanwhile.
 // Console: `update` (status), `update check`, `update now`, `update download`.

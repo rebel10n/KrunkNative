@@ -1,5 +1,5 @@
 #pragma once
-// Hide player names (Client settings "Hide player names", knClient hidePlayerNames, default off):
+// Hide player names (Settings > Game > Gameplay Privacy "Hide player names", knClient hidePlayerNames, default off):
 // the one place a player's name, clan tag and profile picture are read for display
 // (client/src/ui/player_names.c). A surface shows these results instead of the raw value; the server's
 // data and what the client sends are never changed.

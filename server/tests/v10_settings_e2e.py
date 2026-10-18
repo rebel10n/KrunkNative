@@ -122,6 +122,7 @@ script1 = """
 1600 clicksel input[onclick*="showFPS"]
 1800 text @b1 input[onclick*="showFPS"]
 1900 call windows.0.changeTab 2
+2150 setscroll menuWindow 500
 2200 clicksel [id=slid_fov]
 2400 text @b2 [id=slid_input_fov]
 2500 call windows.0.changeTab 3
@@ -150,10 +151,13 @@ script1 = """
 6600 call windows.0.changeTab 5
 6900 clicksel [id=slid_gunsVolume]
 7100 text @a5 [id=slid_input_gunsVolume]
-7200 call windows.0.changeTab 6
-7450 setscroll menuWindow 100000
-7500 clicksel input[onclick*="autoSpec"]
-7700 text @a6 input[onclick*="autoSpec"]
+7200 call windows.0.changeTab 4
+7250 setscroll menuWindow 500
+7300 clicksel input[onclick*="autoSpec"]
+7500 text @a6 input[onclick*="autoSpec"]
+7550 setscroll menuWindow 0
+7600 clicksel input[onclick*="hidePlayerNames"]
+7700 text @hide input[onclick*="hidePlayerNames"]
 7750 setscroll menuWindow 0
 7800 clickid settSearch
 8000 type fps
@@ -212,7 +216,9 @@ check(nodes(log1, "webgpu") == 1, "advanced Render: the WebGPU row is hidden (GL
 check(probe(log1, "a3")["checked"] == 1 and "[render] setting lowSpec=true" in log1, "advanced Render: Low Spec on, applied")
 check(probe(log1, "a4")["checked"] == 0 and "handler setSetting killFx=false" in log1, "advanced Game: Particle Effect on Kill off")
 check(probe(log1, "a5")["value"] == "0.5" and "[ui] setting gunsVolume=0.5" in log1, "advanced Sound: Weapon Volume -> 0.5, applied")
-check(probe(log1, "a6")["checked"] == 1, "Client tab: Auto Spectate on")
+check(probe(log1, "a6")["checked"] == 1, "Game > Gameplay: Auto Spectate on")
+check(probe(log1, "hide")["checked"] == 1 and "client setting hidePlayerNames=true" in log1,
+      "Game > Gameplay Privacy: Hide player names on, applied")
 search = probe(log1, "search")["text"] or ""
 check("Show FPS" in search and "Default Region" not in search, f"search 'fps' lists Show FPS only ({search[:80]!r})")
 check("[ui] setting fov=110" in log1, "Pro preset applies its values (fov 110)")
@@ -240,6 +246,7 @@ check(all(saved.get(k) == v for k, v in want.items()), f"persisted in knSettings
 check(str(saved.get("fov")) == fov, f"FOV persisted ({saved.get('fov')})")
 client = json.loads(storage("knClient") or "{}")
 check(client.get("autoSpec") in (True, "true"), f"Auto Spectate persisted in knClient ({client.get('autoSpec')})")
+check(client.get("hidePlayerNames") in (True, "true"), f"Hide player names persisted in knClient ({client.get('hidePlayerNames')})")
 check((storage("cont_jumpKey") or "").strip().strip('"') == "75", f"Jump bind persisted (cont_jumpKey {storage('cont_jumpKey')!r})")
 
 # ---------------------------------------------------------------- run 2: read back, the bind in game
@@ -252,12 +259,13 @@ script2 = """
 1200 call windows.0.changeTab 4
 1450 setscroll menuWindow 100000
 1500 text @a4 input[onclick*="killFx"]
-1600 call windows.0.changeTab 6
-1900 setscroll menuWindow 100000
-2000 text @a6 input[onclick*="autoSpec"]
+1550 setscroll menuWindow 500
+1600 text @a6 input[onclick*="autoSpec"]
 2100 clicksel input[onclick*="autoSpec"]
 2300 text @a6off input[onclick*="autoSpec"]
-2400 quit
+2350 setscroll menuWindow 0
+2400 text @hide input[onclick*="hidePlayerNames"]
+2500 quit
 """
 # the bind in game: the clock starts when the player is in (`play` first)
 script2b = """
@@ -285,7 +293,8 @@ check((probe(log2, "view")["text"] or "").startswith("General Controls"), "the a
 check(probe(log2, "a4")["n"] == 1 and probe(log2, "a4")["checked"] == 0, "the window shows the saved Particle Effect on Kill (off)")
 check(probe(log2, "a6")["checked"] == 1 and probe(log2, "a6off")["checked"] == 0 and
       json.loads(storage("knClient") or "{}").get("autoSpec") in (False, "false"),
-      "the Client tab shows the saved Auto Spectate and switches it off again")
+      "the Game tab shows the saved Auto Spectate and switches it off again")
+check(probe(log2, "hide")["checked"] == 1, "the Game tab shows the saved Hide player names")
 # Godmode (Sandbox) bound to J as if picked in the Modes tab: in the offline sandbox it toggles god mode
 with open(os.path.join(CFG, "krunknative", "cont_sandboxGodMode.json"), "w") as f:
     f.write("74")

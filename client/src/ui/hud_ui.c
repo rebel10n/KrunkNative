@@ -79,7 +79,7 @@ void hud_ui_hit(Client*, int kill);
 #include <ruleset.h>
 #include <hud_v10.h>
 #include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
-#include <client_settings.h> // client_settings_game_time: Client > Game > Show Game Time
+#include <client_settings.h> // client_settings_game_time: Display > Interface > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
 #include <player_names.h>  // Hide player names: the names, clans and the local player shown (player_names.h)
 #include <strike_ui.h>   // strike_ui_active(): Krunker Strike's round end is its own banner and lean screen (strike_hud.c)
@@ -3908,7 +3908,7 @@ static void hud_minimap_layout(void) {
 }
 
 // The game time tile: the last stat tile of .topRightCounters (statIcon, like the kill / death / score
-// tiles). Opt-in: the Client tab's "Show Game Time" (default off, KrunkNative only: v10 has no such
+// tiles). Opt-in: the "Show Game Time" setting (default off, KrunkNative only: v10 has no such
 // setting, doc/v10/). It shows the time this device has spent in games (game_time.c), for guests and
 // signed-in accounts alike; nothing of it comes from or goes to the account. The total is counted whether
 // or not the tile is shown, and stored under "knGameTime" (html_storage: native files, web localStorage)

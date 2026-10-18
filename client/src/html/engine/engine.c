@@ -2387,7 +2387,7 @@ int html_ui_backend_add_stylesheet(const char *href)
     return 1;
 }
 
-/* The Client tab's custom CSS (html_ui_set_custom_css): one sheet named
+/* The custom CSS (Settings > Display > Interface; html_ui_set_custom_css): one sheet named
  * KN_CUSTOM_SHEET on the game page, kept last among its author sheets; replaced in
  * place, removed for NULL/"". Named under css/ so its url()s resolve like main.css's. */
 #define KN_CUSTOM_SHEET "css/kn-custom.css"

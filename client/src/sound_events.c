@@ -12,7 +12,7 @@
 // other players get positional footsteps (Krunker computes those client-side as well).
 #include <sound_events.h>
 #include <audio.h>
-#include <client_settings.h> // Settings > Client "Always Play HS Sound on Kill"
+#include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <cosmetics.h>
 #include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
 #include <nettspend_audio.h> // KrunkNative Nettspend: the Drank's pour up, Money Spread's throw, the laced loop
@@ -566,7 +566,7 @@ void sound_events_hitmarker(void) {
 
 void sound_events_kill(const int headshot, const Player *killer, const int weapon_index) {
     // getKillSnd: headshot_0, else the weapon skin's sound (none for default skins).
-    // glorp hsSound: every own kill plays headshot_0 when the Client tab asks for it
+    // glorp hsSound: every own kill plays headshot_0 when the setting asks for it
     if (headshot || client_settings_hs_sound_always()) {
         audio_play("headshot_0", 1.0f, 0, 1.0f);
         return;

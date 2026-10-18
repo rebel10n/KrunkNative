@@ -6,13 +6,13 @@
 // Rows here use the markup of v7.1.4's own settings generator (_html.settings.input:
 // .setHed / .setBodH setBod_ folders, .settName rows, label.switch with its grooves,
 // select.inputGrey2, sliderVal + sliderM, settingsBtn; "<span style='color: #eb5656'>*</span>"
-// = needsRestart), so the tab looks like Krunker's other tabs. The Client tab is native-only
-// (client_tab_shown): the web build shows no Client tab and generates none of its rows (the
-// Sound tab's Audio Output row, CS_SOUND_TAB, is still generated there). The native client
-// shows the rows of CS_NATIVE. A row the browser cannot do is shown
-// with the honest equivalent in its flags' comment; only the Resource Swapper (files from a
-// folder on the player's disk) and the Network folder (a page cannot route through a proxy:
-// the browser's own network settings apply) are native-only.
+// = needsRestart), so the tab looks like Krunker's other tabs.
+// The Client tab is native-only (client_tab_shown): it keeps the rows a browser cannot do
+// (Window Mode, Resolution, V-Sync, Audio Backend, Process Priority, Discord, the Resource
+// Swapper, the Proxy folder) and the web build shows no Client tab. Every other row works on
+// both platforms, so it lives in the game's own settings tabs and is generated there on web and
+// native alike (CS_FOLDERS): Display > Interface and Game > Gameplay / Gameplay Privacy, in both
+// views. The Sound tab's Audio Output row (CS_SOUND_TAB) is generated in the Sound tab.
 //
 // Exit: Krunker v7.1.4's #clientExit menu item -> clientExitPopup() ("Are you sure you
 // want to close krunker?" YES/NO, the #confPop popup natively) -> closeClient(), which
@@ -102,6 +102,7 @@ typedef struct {
     int option_count;
     const char *button;      // label of the row's button (CS_BUTTON, or next to a switch)
     const char *action;      // knClientAction(...) of that button
+    const char *folder;      // a row of the game's own tabs: its CS_FOLDERS name (NULL: the Client tab)
 } ClientSetting;
 
 static const CsOption WINDOW_MODES[] = {{"0", "Windowed"}, {"2", "Borderless"}, {"1", "Fullscreen"}};
@@ -148,32 +149,37 @@ static const ClientSetting SETTINGS[] = {
      "CPU scheduling priority of the client process", PRIORITIES, COUNT(PRIORITIES)},
     // ---- Client (glorp "Exit Button", "Discord Rich Presence", "Resource Swapper"; custom CSS)
     // Web: the Exit item and its confirmation close the tab (request_close).
-    {"exitButton", "Exit Button", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "The Exit item in the menu"},
+    {"exitButton", "Exit Button", "Interface", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "The Exit item in the menu",
+     NULL, 0, NULL, NULL, "interface"},
     // Web: no Discord IPC from a page; the switch is kept, as native shows it while Discord is not running (nothing).
     {"discordRPC", "Discord Rich Presence", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Show the mode and map you play on your Discord profile"},
     {"swapper", "Resource Swapper", "Client", CS_SWITCH, CS_NATIVE | CS_RESTART, "true",
      "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)",
      NULL, 0, "Open folder", "openSwapper"},
-    // Client > Hide player names: the names, clan tags and profile pictures other players and the account show
-    // (client/include/player_names.h); the label only, no description
-    {"hidePlayerNames", "Hide player names", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
-    {"autoRestart", "Auto-restart for updates", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
-     "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end"},
+    // Game > Gameplay Privacy: Hide player names, the names, clan tags and profile pictures other players and the
+    // account show (client/include/player_names.h); the label only, no description
+    {"hidePlayerNames", "Hide player names", "Gameplay Privacy", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "",
+     NULL, 0, NULL, NULL, "privacy"},
+    // Game > Gameplay: no v10 equivalent (the fallback folder)
+    {"autoRestart", "Auto-restart for updates", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
+     "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end",
+     NULL, 0, NULL, NULL, "gameplay"},
     // Web: the CSS is the text Edit saved in this browser (knCustomCSS, window.prompt), not a file.
-    {"customCSS", "Custom CSS", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Applies custom.css from the client folder over the menu and HUD",
-     NULL, 0, "Edit", "editCSS"},
-    // ---- Startup (--offline; auto join; the matchmaker)
+    {"customCSS", "Custom CSS", "Interface", CS_SWITCH, CS_NATIVE | CS_WEB, "true", "Applies custom.css from the client folder over the menu and HUD",
+     NULL, 0, "Edit", "editCSS", "interface"},
+    // ---- Game > Gameplay: start, join and the account service (--offline; auto join; the matchmaker)
     // Web: starts the in-process local game, as ?offline=1 does.
     {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB | CS_RESTART, "false",
-     "Start in an offline game on the built-in server (like --offline)"},
-    {"autoJoin", "Auto Join", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Enter the match as soon as the game has loaded"},
-    {"accountMode", "Account Mode", "Startup", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "online",
+     "Start in an offline game on the built-in server (like --offline)", NULL, 0, NULL, NULL, "gameplay"},
+    {"autoJoin", "Auto Join", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Enter the match as soon as the game has loaded",
+     NULL, 0, NULL, NULL, "gameplay"},
+    {"accountMode", "Account Mode", "Gameplay", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "online",
      "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved",
-     ACCOUNT_MODES, COUNT(ACCOUNT_MODES)},
-    {"brainUrl", "Account Service URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
-     "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io"},
-    {"finderUrl", "Server Finder URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
-     "Public server list; empty = https://matchmaker.krunk.io/servers, off = none"},
+     ACCOUNT_MODES, COUNT(ACCOUNT_MODES), NULL, NULL, "gameplay"},
+    {"brainUrl", "Account Service URL", "Gameplay", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
+     "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io", NULL, 0, NULL, NULL, "gameplay"},
+    {"finderUrl", "Server Finder URL", "Gameplay", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
+     "Public server list; empty = https://matchmaker.krunk.io/servers, off = none", NULL, 0, NULL, NULL, "gameplay"},
 #ifndef __EMSCRIPTEN__ // platform behaviour: the browser is the web build's network stack
     // ---- Network (http_proxy.h; applied at once: the next connection takes it)
     {"proxy", "Proxy", "Network", CS_TEXT, CS_NATIVE, "",
@@ -189,21 +195,24 @@ static const ClientSetting SETTINGS[] = {
      "krunker.io only: the krunker.io server list and account. All client traffic: also the account service, server finder, news and downloads",
      PROXY_SCOPES, COUNT(PROXY_SCOPES)},
 #endif
-    // ---- Game (glorp "Auto Spectate", "Always Play HS Sound on Kill")
-    {"autoSpec", "Auto Spectate", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads"},
-    {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
+    // ---- Game > Gameplay (glorp "Auto Spectate", "Always Play HS Sound on Kill")
+    {"autoSpec", "Auto Spectate", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads",
+     NULL, 0, NULL, NULL, "gameplay"},
+    {"hsSound", "Always Play HS Sound on Kill", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "",
+     NULL, 0, NULL, NULL, "gameplay"},
     // KrunkNative only (v10 has no game time): the top-right tile of the time this device has played (game_time.h)
-    {"gameTime", "Show Game Time", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false",
-     "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike"},
-    // ---- Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
+    {"gameTime", "Show Game Time", "Interface", CS_SWITCH, CS_NATIVE | CS_WEB, "false",
+     "Show the time you have played in games in the top right of the game screen. Counted on this device, for guests and accounts alike",
+     NULL, 0, NULL, NULL, "interface"},
+    // ---- Game > Gameplay: Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
     // Web: a page cannot open a folder; Open tells where the client's files are (the browser's storage).
-    {"openConfig", "Client Folder", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "", "Settings, swapper and custom.css",
-     NULL, 0, "Open", "openConfig"},
-    {"clearCache", "Clear Cache & Storage", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "",
+    {"openConfig", "Client Folder", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "", "Settings, swapper and custom.css",
+     NULL, 0, "Open", "openConfig", "gameplay"},
+    {"clearCache", "Clear Cache & Storage", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "",
      "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept",
-     NULL, 0, "Clear Now", "clearCache"},
-    {"resetClient", "Reset Client Settings", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "", "",
-     NULL, 0, "Reset", "resetClient"},
+     NULL, 0, "Clear Now", "clearCache", "gameplay"},
+    {"resetClient", "Reset Client Settings", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "", "",
+     NULL, 0, "Reset", "resetClient", "gameplay"},
 };
 
 // ---- localisation. The tab's strings are Krunker Box Office's own: kn.client.<row>.name / .info /
@@ -251,12 +260,26 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.openConfig.web", "The client folder is this browser's local storage: client settings and custom CSS are kept there.")
 //   I18N("kn.client.customCSS.prompt", "Custom CSS over the menu and HUD (one line; empty removes it)")
 //   I18N("settings.client.resetSettings", "Reset Client Settings")  I18N("settings.reset", "Reset")
-//   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")  I18N("kn.client.cat.startup", "Startup")
-//   I18N("settings.network.header", "Network")  I18N("kn.client.cat.game", "Game")  I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.sound", "Sound")
+//   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")
+//   I18N("settings.network.header", "Network")
+//   I18N("settings.interface.header", "Interface")  I18N("settings.gameplay.header", "Gameplay")  I18N("settings.gameprivacy.header", "Gameplay Privacy")
 //   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
 static const struct { const char *row, *key; } CS_V10_NAMES[] = {
     {"resolution", "settings.quality.res"}, {"hidePlayerNames", "kn.settings.hidePlayerNames"},
     {"swapper", "settings.client.resourceSwapper"}, {"resetClient", "settings.client.resetSettings"},
+};
+
+// The game's settings folders the moved rows join (a row's `folder`; ui/windows/settings-basic-*.html and
+// settings-advanced-*.html). The folder with the `join` id (setBod_<join>) gets the rows at its end, in the tab
+// that has it. A tab without it gets a new folder `id`, with the `key` title: before the `before` folder, else
+// after the tab's last folder. The `anchor` folder is one only that tab has (Controls has a Gameplay folder too,
+// so Game is found by its View Model folder), so the rows reach that tab and no other. The rows with no v10
+// equivalent are in Game > Gameplay: the advanced view's new Gameplay folder goes before View Model, so the folders
+// below it keep their place (the Game tab's bottom is Customization).
+static const struct { const char *folder, *anchor, *join, *id, *key, *english, *before; } CS_FOLDERS[] = {
+    {"interface", "interface", "interface", "knInterface", "settings.interface.header", "Interface", NULL},
+    {"gameplay", "viewmodel", "gameplay", "knGameplay", "settings.gameplay.header", "Gameplay", "viewmodel"},
+    {"privacy", "viewmodel", "gameprivacy", "knPrivacy", "settings.gameprivacy.header", "Gameplay Privacy", NULL},
 };
 
 // i18n_tr("kn.client.<id>.<field>", english); `field` may be "opt.<value>" (non-alphanumerics dropped)
@@ -284,6 +307,13 @@ static const char *cs_info(const ClientSetting *s) {
 
 static const char *cs_button(const ClientSetting *s) {
     return !strcmp(s->key, "resetClient") ? i18n_tr("settings.reset", s->button) : cs_kn(s->key, "button", s->button);
+}
+
+static const char *cs_folder_title(const char *folder) {
+    for (int i = 0; i < COUNT(CS_FOLDERS); i++) {
+        if (!strcmp(CS_FOLDERS[i].folder, folder)) return i18n_tr(CS_FOLDERS[i].key, CS_FOLDERS[i].english);
+    }
+    return folder;
 }
 
 static const char *cs_cat(const char *cat) {
@@ -977,7 +1007,7 @@ void client_settings_startup(Client *client, int *offline) {
 #endif
     if (offline && cs_bool("startOffline")) {
         *offline = 1;
-        printf("[client] start offline (Client tab)\n");
+        printf("[client] start offline (Settings > Game > Gameplay)\n");
     }
 }
 
@@ -1006,7 +1036,7 @@ static void auto_join(void) {
     if (!ui->dom_ready || !ui->connected || !ui->ready) return;
     g_cs.auto_joined = 1; // only the first time the game is ready
     if (!cs_bool("autoJoin") || !ui->menu_open || menu_window_is_open()) return;
-    menu_log("auto join (Client tab)");
+    menu_log("auto join (Settings > Game > Gameplay)");
     menu_play();
 }
 
@@ -1214,7 +1244,7 @@ char *ui_client_settings_tab_html(const int searching) {
     const char *cat = NULL;
     for (int i = 0; i < COUNT(SETTINGS); i++) {
         const ClientSetting *s = &SETTINGS[i];
-        if (!setting_shown(s) || (s->flags & CS_SOUND_TAB)) continue; // Sound tab rows: ui_client_settings_extend_tab
+        if (!setting_shown(s) || (s->flags & CS_SOUND_TAB) || s->folder) continue; // Sound tab rows and the game's folders: ui_client_settings_extend_tab
         if (searching && (s->flags & CS_GAME)) continue; // the game's own tab lists it (one id per page)
         if (!cat || strcmp(cat, s->cat)) {
             if (cat) sb_append(&sb, "</div>");
@@ -1250,6 +1280,95 @@ static char *extend_sound_tab(const char *tab) {
 
 static char *ui_client_settings_extend_tab_rest(const char *tab);
 
+// `text` (owned) with `html` inserted before `at` (a pointer into `text`); the new buffer is returned.
+static char *insert_at(char *text, const char *at, const char *html) {
+    StrBuf sb = {0};
+    sb_append_n(&sb, text, (size_t) (at - text));
+    sb_append(&sb, html);
+    sb_append(&sb, at);
+    free(text);
+    return sb_finish(&sb);
+}
+
+static int tab_has_folder(const char *tab, const char *id) {
+    char key[96];
+    snprintf(key, sizeof(key), "id=\"setBod_%s\"", id);
+    return strstr(tab, key) != NULL;
+}
+
+// The end of the <div> that starts at p (its balanced close tag's end), NULL when it does not close.
+static const char *div_close_end(const char *p) {
+    int depth = 0;
+    for (const char *q = strchr(p, '<'); q; q = strchr(q + 1, '<')) {
+        if (!strncmp(q, "<div", 4) && (q[4] == ' ' || q[4] == '>')) depth++;
+        else if (!strncmp(q, "</div>", 6) && --depth == 0) return q + 6;
+    }
+    return NULL;
+}
+
+// The moved rows (CS_FOLDERS) of one settings tab body. A row joins the end of its folder when the tab has it;
+// otherwise its folder is new, before the `before` folder or after the tab's last folder. The tab must have the
+// folder's anchor. NULL = the tab gets nothing (no chrome, or no row of it).
+static char *extend_folders(const char *tab) {
+    if (!chrome_visible()) return NULL;
+    char *text = NULL; // the tab with the rows added (owned); NULL until one is
+    StrBuf fresh = {0}; // the new folders after the tab's last folder, in CS_FOLDERS order
+    StrBuf before_fresh = {0}; // the new folders before the `before` folder (the same order)
+    const char *before = NULL; // that folder: the folders of one table share it (Game's View Model)
+    for (int f = 0; f < COUNT(CS_FOLDERS); f++) {
+        const char *src = text ? text : tab;
+        if (!tab_has_folder(src, CS_FOLDERS[f].anchor)) continue;
+        StrBuf rows = {0};
+        for (int i = 0; i < COUNT(SETTINGS); i++) {
+            const ClientSetting *s = &SETTINGS[i];
+            if (s->folder && !strcmp(s->folder, CS_FOLDERS[f].folder) && setting_shown(s)) append_row(&rows, s);
+        }
+        if (!rows.len) {
+            sb_free(&rows);
+            continue;
+        }
+        if (CS_FOLDERS[f].join && tab_has_folder(src, CS_FOLDERS[f].join)) {
+            char open[96];
+            snprintf(open, sizeof(open), "id=\"setBod_%s\"", CS_FOLDERS[f].join);
+            const char *tag = strstr(src, open);
+            while (tag > src && *tag != '<') tag--;
+            const char *close = div_close_end(tag); // the folder's </div>: its rows go just before it
+            if (!text) text = strdup(tab);
+            text = insert_at(text, text + (close - 6 - src), rows.data);
+        } else {
+            if (CS_FOLDERS[f].before && !before) before = CS_FOLDERS[f].before;
+            StrBuf *out = CS_FOLDERS[f].before ? &before_fresh : &fresh;
+            sb_appendf(out, "<div class=\"setHed\" id=\"setHed_%s\" onclick=\"window.windows[0].collapseFolder(this)\">"
+                            "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ", CS_FOLDERS[f].id);
+            sb_append_esc(out, cs_folder_title(CS_FOLDERS[f].folder));
+            sb_appendf(out, "</div><div class=\"setBodH\" id=\"setBod_%s\">", CS_FOLDERS[f].id);
+            sb_append(out, rows.data);
+            sb_append(out, "</div>");
+        }
+        sb_free(&rows);
+    }
+    if (before_fresh.len) { // before the `before` folder: its setHed's tag (the end of the body when it is absent)
+        if (!text) text = strdup(tab);
+        char key[96];
+        snprintf(key, sizeof(key), "id=\"setHed_%s\"", before);
+        const char *at = strstr(text, key);
+        while (at && at > text && *at != '<') at--;
+        if (!at) at = text + strlen(text);
+        text = insert_at(text, at, before_fresh.data);
+    }
+    if (fresh.len) { // after the tab's last folder (the last setBodH of the body)
+        if (!text) text = strdup(tab);
+        const char *last = NULL;
+        for (const char *p = strstr(text, "<div class=\"setBodH\""); p; p = strstr(p + 1, "<div class=\"setBodH\"")) last = p;
+        const char *after = last ? div_close_end(last) : NULL;
+        if (!after) after = text + strlen(text);
+        text = insert_at(text, after, fresh.data);
+    }
+    sb_free(&fresh);
+    sb_free(&before_fresh);
+    return text;
+}
+
 // A settings tab as shown: Localization > Default Region lists the matchmaker's regions (the
 // static capture only has "Local"; servers_ui_region_options), the Sound tab gains the
 // client's rows. NULL = `tab` unchanged.
@@ -1280,7 +1399,12 @@ static char *ui_client_settings_extend_tab_rest(const char *tab) {
     char *sound = extend_sound_tab(regions ? regions : tab);
     if (sound) {
         free(regions);
-        return sound;
+        regions = sound;
+    }
+    char *folders = extend_folders(regions ? regions : tab);
+    if (folders) {
+        free(regions);
+        regions = folders;
     }
     return regions;
 }
@@ -1501,7 +1625,7 @@ static void do_action(const char *action) {
         if (f) {
             fclose(f);
         } else if ((f = fopen(path, "wb"))) {
-            fputs("/* Krunker Box Office custom CSS: applied over the menu and HUD (Settings > Client > Custom CSS).\n"
+            fputs("/* Krunker Box Office custom CSS: applied over the menu and HUD (Settings > Display > Interface > Custom CSS).\n"
                   " * Toggle Custom CSS off and on to reload it after editing. */\n", f);
             fclose(f);
         }

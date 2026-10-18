@@ -90,7 +90,7 @@ unsigned html_ui_page_serial(void);
 // Returns 1 when the sheet is (now) part of the page.
 int  html_ui_add_stylesheet(const char *href);
 
-// The user's custom stylesheet (the Client tab's "Custom CSS", ui_client_settings.c):
+// The user's custom stylesheet (Settings > Display > Interface > "Custom CSS", ui_client_settings.c):
 // one sheet of CSS text appended after every author sheet of the game page, so it wins
 // ties; its url()s resolve like css/main.css's. Calling it again replaces the sheet,
 // NULL or "" removes it. Returns 1 when the page now has the given sheet (or none).

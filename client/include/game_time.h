@@ -7,7 +7,7 @@
 // What counts: every game the client is in, the local player's session (Box Office games, official
 // krunker.io games, spectating and dead included), while the game is on screen: not over the ESC menu
 // and not on the end screen (between rounds nothing is played). The count runs whether or not the tile
-// is shown (the Client tab's "Show Game Time" only shows it), so the total is complete when it is turned on.
+// is shown (the "Show Game Time" setting only shows it), so the total is complete when it is turned on.
 
 #include <stddef.h>
 

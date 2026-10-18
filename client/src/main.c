@@ -298,7 +298,7 @@ static void print_usage_to(FILE *out, const char *program) {
                  "                  page query (the page's ?query)\n"
                  "  --brain <url>   the account / matchmaking service (default https://coordinator.krunk.io)\n"
                  "  --connect <host[:port]>   join that dedicated server directly (no matchmaking)\n"
-                 "  --mode online|offline     account mode (Settings > Client > Account Mode): offline = no account\n"
+                 "  --mode online|offline     account mode (Settings > Game > Gameplay > Account Mode): offline = no account\n"
                  "                  service at all, every skin owned, nothing saved\n"
                  "  --finder <url>  the community server list (default https://matchmaker.krunk.io/servers; off = none)\n"
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
