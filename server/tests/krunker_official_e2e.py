@@ -3509,6 +3509,36 @@ def run_native_exclude_mm():
           "[krunker] seek: no lobby list" in text and "[krunker] game-list: FRA:bbbbb" in text, [l for l in lines if "[krunker]" in l][-12:])
 
 
+# Find New Game's full lobbies (krunker_net.c on_seek): the matchmaker answers the busiest game that is not
+# excludeGame, here the full ones first; the game list says they are full (8 of 8), so they are never joined
+FULL_TEST_LOBBIES = [("FRA:roomy", 3), ("FRA:fulla", 8), ("FRA:fullb", 8)]
+
+
+def run_native_full_answer():
+    """Find New Game (F4) in an official krunker.io game (--krunker) whose matchmaker answers a full game:
+    the game list (fetched for the seek) says it has no seat (players >= max), so the answer is not joined:
+    the seek goes again excluding it (v10's server browser refuses a full game the same way: fetchGameInfo,
+    players >= max), and with every answer full the join ends in "Game is full."."""
+    label = "native-f4-full-answer"
+
+    def setup(st):
+        st.lobbies = FULL_TEST_LOBBIES
+        st.list_fail = 1  # krunker_lobbies' request; krunker_net's own list is answered
+
+    stub, p, out, log = launch_native(label, find_new_game_script([3000], first="0 boot\n", quit_at=7000), {}, args=("--krunker",),
+                                      stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    joins = re.findall(r"\[krunker\] seek-game: game (\S+) on", text)
+    check(f"{label}: the boot join takes the roomy game", joins[:1] == ["FRA:roomy"], joins)
+    check(f"{label}: no full game is joined (no socket to fulla or fullb)",
+          not any(("FRA:fulla" in ws or "FRA:fullb" in ws) for ws in stub.ws_paths), stub.ws_paths)
+    check(f"{label}: the full answer is sought again without it",
+          "[krunker] seek-game: FRA:fulla is full (the game list): seeking again without it" in text, [l for l in lines if "[krunker] seek-game" in l][-8:])
+    check(f"{label}: with every answer full the join says Game is full",
+          "[krunker] seek-game: FRA:fulla is full too: no game with room" in text and "Game is full." in text, [l for l in lines if "[krunker]" in l][-8:])
+
+
 def run_native_f4_stays_official():
     """Find New Game (F4) in an official krunker.io game with Settings > Quickplay on KrunkNative: the
     player stays on krunker.io (krunker_net_seek_new: a seek-game on the krunker.io matchmaker, excluding
@@ -4312,6 +4342,7 @@ def main():
         run_native_optout()
         run_native_exclude()
         run_native_exclude_mm()
+        run_native_full_answer()
         run_native_f4_stays_official()
         run_native_seek_modes()
         run_native_reload(False)
@@ -4366,6 +4397,7 @@ def main():
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
+        run_native_full_answer()
         run_native_f4_stays_official()
         run_native_seek_modes()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run

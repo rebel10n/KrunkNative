@@ -62,6 +62,8 @@
 // excludeGame, so an answer that is another recent game is excluded in turn, at most this many
 // times more, before the best answer so far is taken (recent_lobbies.h)
 #define KRUNKER_SEEK_NEW_RETRIES 2
+// the full games of the last Find New Game list (on_game_list): an answer naming one is never joined
+#define KRUNKER_FULL_MAX 64
 #define KRUNKER_ACCESS_MAX 4100 // an access token (JWT) + NUL
 
 typedef enum {
@@ -102,6 +104,8 @@ static struct {
     int seek_new, seek_new_retries;
     char exclude[96], fallback[96];
     int fallback_rank;
+    char full[KRUNKER_FULL_MAX][RECENT_LOBBY_ID_MAX]; // the list's games at players >= max
+    int full_count;
     // a reload's join (krunker_net_reload_join): the game the player was in; gone or full -> one
     // seek without it (no excludeGame) and a notice
     int reload;
@@ -1237,12 +1241,21 @@ static void seek(void) {
     if (!queued) fail_unreachable();
 }
 
+// the game list of this join named the game full (players >= max; on_game_list)
+static int listed_full(const char *game_id) {
+    for (int i = 0; i < K.full_count; i++) {
+        if (!strcmp(K.full[i], game_id)) return 1;
+    }
+    return 0;
+}
+
 // Find New Game's lobby list (fetchGameList, game.deob.js :147591-147599): the busiest public game
 // with room in the region, for the seek preferences, that this client was not in lately. None (or
 // no list): the matchmaker picks, excluding the game the player leaves (seek(): excludeGame).
 static void on_game_list(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     if (stale(user) || K.state != KS_LIST) return;
+    K.full_count = 0;
     cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
     const cJSON *g, *best = NULL;
     double best_players = -1;
@@ -1254,6 +1267,8 @@ static void on_game_list(void *user, const int status, const char *body, const s
         const cJSON *players = cJSON_GetArrayItem(g, 2), *max = cJSON_GetArrayItem(g, 3), *data = cJSON_GetArrayItem(g, 4);
         if (!id || !id[0] || strlen(id) >= sizeof(K.game_id) || !cJSON_IsNumber(players) || !cJSON_IsNumber(max)) continue;
         listed++;
+        if (players->valuedouble >= max->valuedouble && K.full_count < KRUNKER_FULL_MAX && strlen(id) < RECENT_LOBBY_ID_MAX)
+            snprintf(K.full[K.full_count++], RECENT_LOBBY_ID_MAX, "%s", id);
         if (players->valuedouble >= max->valuedouble || !region || strcmp(region, K.region)) continue;
         // krunker.io's flags are 1 (or true): never a custom or password game; the lobby's mode and map must be
         // switched on in Settings > Quickplay, the public rotation by default (seek_prefs_lobby_ok)
@@ -1403,6 +1418,24 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         for (char *c = detail; *c; c++) if (*c == '\r' || *c == '\n' || *c == '\t') *c = ' ';
         printf("[krunker] seek-game refused (HTTP %d): %s\n", status, detail);
         join_error_text(error ? error : "GameIssue", text, sizeof(text));
+        fail("%s", text);
+    } else if (K.seek_new && game && listed_full(game)) {
+        // Find New Game: the answer names a game the list fetched for this join has full (players >= max). The
+        // answer carries no counts; v10's own browser refuses such a game the same way (fetchGameInfo, players >=
+        // max). Seek again excluding it, at most KRUNKER_SEEK_NEW_RETRIES times, then no game with room was found.
+        if (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES) {
+            K.seek_new_retries++;
+            K.game_id[0] = 0;
+            snprintf(K.exclude, sizeof(K.exclude), "%s", game);
+            printf("[krunker] seek-game: %s is full (the game list): seeking again without it\n", game);
+            cJSON_Delete(res);
+            seek();
+            return;
+        }
+        char text[300];
+        join_error_text("GameFull", text, sizeof(text));
+        printf("[krunker] seek-game: %s is full too: no game with room\n", game);
+        cJSON_Delete(res);
         fail("%s", text);
     } else if (K.seek_new && !K.game_id[0] && recent_lobbies_rank(&K.recent, game) &&
                (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES || (K.fallback[0] && strcmp(K.fallback, game) &&
@@ -1665,6 +1698,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     K.reload = reload && K.game_id[0];
     K.fallback[0] = 0;
     K.fallback_rank = 0;
+    K.full_count = 0;
     snprintf(K.exclude, sizeof(K.exclude), "%s", exclude ? exclude : "");
     char r[48];
     if (region && region[0]) snprintf(K.region, sizeof(K.region), "%s", region);
