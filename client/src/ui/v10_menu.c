@@ -190,15 +190,16 @@ static void comma(char *out, const size_t n, const double value) { // _8986: 123
 
 // KrunkNative's Account Manager (ALT_MANAGER_WINDOW, alt_manager_ui.c): a separator and the item,
 // with its neighbours' markup (v10 has no such button). The guest bar has it after Login or
-// Register, the signed-in bar after the profile item.
+// Register, the signed-in bar after the profile item. Icon only (no text label): the header has
+// to fit the centred logo at UI scale 1.0 (the Wallet and RP items sit under it otherwise); the
+// title keeps the button's name for hover and assistive tech.
 static void account_manager_markup(char *out, const size_t n, const char *id) {
     char action[64];
     snprintf(action, sizeof(action), "playSelect(0.1),showWindow(%d)", ALT_MANAGER_WINDOW);
     snprintf(out, n,
         "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
-        "<div class=\"ph-item svelte-da3zva\" id=\"%s\" onclick=\"%s\" onmouseenter=\"playTick()\">"
-        "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">switch_account</span> "
-        "<span class=\"ph-label svelte-da3zva\">Account Manager</span></div>", id, action);
+        "<div class=\"ph-item svelte-da3zva\" id=\"%s\" title=\"Account Manager\" onclick=\"%s\" onmouseenter=\"playTick()\">"
+        "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">switch_account</span></div>", id, action);
 }
 
 // #signedInHeaderBar (_52526) for an account, #signedOutHeaderBar (_52519) for a guest. Both live
@@ -227,8 +228,8 @@ static void header_update(const AccountInfo *acc) {
             "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#4caf50;margin-top:-4px\">emoji_events</span> <span class=\"ph-value svelte-da3zva\" id=\"menuRPCount\"> </span></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
             // Wallet (_52516: the inventory / currencies view): the Account window's inventory
-            "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
-            "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span> <span class=\"ph-label svelte-da3zva\">Wallet</span></div></div>");
+            "<div class=\"ph-item svelte-da3zva\" title=\"Wallet\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
+            "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span></div></div>");
         in = by_id("signedInHeaderBar");
         HtmlElem profile = by_id("knV10Profile");
         if (profile && !by_id("knV10AccountsSignedIn")) {
