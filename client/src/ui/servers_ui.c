@@ -1387,7 +1387,8 @@ static char g_finder_error[256];  // the last finder request's failure ("" = ok)
 // ---- v7.1.4 windows[1].getServers / searchMatches (src/index.js), over KrunkNative's
 // tuples [id, region, players, max, meta, timeLeft?]. KrunkNative lobby meta (server_bin
 // accounts.c): i (map, "alias_map" for customs), cs (custom), pr (password), earnKR, mode,
-// map, name, host, port, timeLeft; finder rows (rebuild_finder_rows): finder, n. Like
+// map, name, host, port, timeLeft; finder rows (rebuild_finder_rows): finder, i (the map), n (the server's
+// name: searched, never shown). Like
 // Krunker's list (v10 row badges: OFFICIAL, 24/7, 2XP, KR, star, lock) no row is marked
 // account-only: every server admits guests and accounts alike.
 // The v7 fields they stand for: c = cs, pw = pr (lock icon), kr = earnKR, g = mode,
@@ -1435,10 +1436,15 @@ static int row_official(const cJSON *t) { return meta_flag(t, "oc"); }
 static int row_dedicated(const cJSON *t) { return meta_flag(t, "ds") || meta_flag(t, "finder"); }
 static int row_players(const cJSON *t) { const int p = tuple_int(t, 2), m = tuple_int(t, 3); return p < m ? p : m; }
 
-// v7 h: the row's own name (custom game / dedicated server); "" = none
+// v7 h: the row's own name (custom game / dedicated server); "" = none. A finder row has none: its
+// server name (n) is not its title (row_title shows "<mode> - <map>" as for a brain lobby).
 static const char *row_h(const cJSON *t) {
-    if (meta_flag(t, "finder")) return meta_str(t, "n");
     return meta_str(t, "h");
+}
+
+// A finder row's server name (n): searched, never shown; "" for every other row
+static const char *row_server_name(const cJSON *t) {
+    return meta_flag(t, "finder") ? meta_str(t, "n") : "";
 }
 
 // v7 i: the map; KrunkNative customs carry "alias_map" in i and the map in `map`
@@ -1480,6 +1486,7 @@ static int search_matches(const cJSON *t) {
     if (!g_search[0]) return 1;
     const char *alias = row_alias(t);
     const char *h = row_h(t)[0] ? row_h(t) : row_i(t);
+    const char *server = row_server_name(t);
     char label[192], label2[200], node[96], short_node[KN_SHORT_NODE_MAX], proper[128];
     if (!row_official(t) && !row_custom(t) && !old_browser() && alias[0]) snprintf(label, sizeof(label), "%s_%s", alias, h);
     else snprintf(label, sizeof(label), "%s", h);
@@ -1491,7 +1498,7 @@ static int search_matches(const cJSON *t) {
     // KrunkNative: a server is also found by its short id (CH2) and its proper name (Chicago 2)
     kn_node_short_id(node, tuple_str(t, 1), short_node, sizeof(short_node));
     server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
-    return str_has_ci(h, g_search) || str_has_ci(node, g_search) || str_has_ci(label, g_search) || str_has_ci(alias, g_search) ||
+    return str_has_ci(h, g_search) || str_has_ci(server, g_search) || str_has_ci(node, g_search) || str_has_ci(label, g_search) || str_has_ci(alias, g_search) ||
            str_has_ci(label2, g_search) || str_has_ci(tuple_str(t, 1), g_search) || str_has_ci(region_full_name(tuple_str(t, 1)), g_search) ||
            str_has_ci(short_node, g_search) || str_has_ci(proper, g_search) ||
            (meta_flag(t, "krunker") && (str_has_ci("krunker.io", g_search) || str_has_ci(krunker_region_name(tuple_str(t, 1)), g_search)));
@@ -1596,7 +1603,9 @@ static void rebuild_finder_rows(void) {
         cJSON_AddItemToArray(t, cJSON_CreateNumber(players > 0 ? players : 0));
         cJSON_AddItemToArray(t, cJSON_CreateNumber(max > 0 ? max : 0));
         cJSON *meta = cJSON_CreateObject();
-        cJSON_AddStringToObject(meta, "i", map && map[0] ? map : name && name[0] ? name : host);
+        // the row's title is "<mode> - <map>" (row_title) like a brain lobby: the map is i; the server's
+        // own name (e.g. "Krunker Box Office NY #1") is n, searched but never shown
+        cJSON_AddStringToObject(meta, "i", map && map[0] ? map : "");
         cJSON_AddStringToObject(meta, "n", name && name[0] ? name : host);
         cJSON_AddStringToObject(meta, "host", host);
         cJSON_AddNumberToObject(meta, "port", port->valueint);
@@ -1794,7 +1803,8 @@ static const char *region_ping_color(const char *region, const int krunker) {
 // The row's title: a custom game's own name (h) as it is, else "<mode name> - <map name>": the
 // mode's display name (Team Deathmatch, not tdm) and the map's catalogue name (shipwrecked ->
 // Tortuga; an official krunker.io name such as Tortuga resolves too), the key when the catalogue
-// does not know the map. Dedicated servers (24/7, finder) show their map alone, as v10 does.
+// does not know the map. A 24/7 server shows its map alone, as v10 does; a finder row is titled like a
+// brain lobby (its server name is never the title).
 static void row_title(StrBuf *sb, const cJSON *t) {
     if (row_h(t)[0]) {
         sb_append(sb, row_h(t));
@@ -1809,7 +1819,7 @@ static void row_title(StrBuf *sb, const cJSON *t) {
     const MapCatalogEntry *entry = index >= 0 ? map_catalog_at((size_t) index) : NULL;
     snprintf(map, sizeof(map), "%s", entry && entry->name ? entry->name : key);
     const GameModeConfig *mode = row_mode(t);
-    if (mode && mode->name && !row_dedicated(t)) {
+    if (mode && mode->name && (!row_dedicated(t) || meta_flag(t, "finder"))) {
         sb_append(sb, mode->name);
         if (map[0]) sb_append(sb, " - ");
     }
