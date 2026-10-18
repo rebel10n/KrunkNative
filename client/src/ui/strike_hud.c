@@ -79,6 +79,7 @@ static struct {
     char kc_name[KILL_NAME_MAX], kc_weapon[96], kc_pfp[96], kc_color[64];
     char kc_flag[3];            // the killer's Country Flag, upper-case ISO code ("US"); "" none (img/flags/3x2)
     int kc_level, kc_score;
+    int kc_hide_level;          // another player's level is hidden (Hide player names): no LVL on the kill card
     // the mini scoreboard (Mt.showMiniScoreBoard): this tick's flag and the markup last written
     int board;
     char *last_board;
@@ -358,7 +359,8 @@ static void view_kill_card(StrBuf *sb) {
         sb_append_esc(sb, H.kc_name);
         sb_appendf(sb, "</div><div class=\"frvr-in-game-ui__kill-card-weapon\" style=\"color: %s;\">", H.kc_color);
         sb_append_esc(sb, H.kc_weapon);
-        sb_appendf(sb, "</div></div><div class=\"frvr-in-game-ui__kill-card-lvl-flag\"><div class=\"frvr-in-game-ui__kill-card-lvl\">LVL %d</div>", H.kc_level);
+        if (H.kc_hide_level) sb_append(sb, "</div></div><div class=\"frvr-in-game-ui__kill-card-lvl-flag\"><div class=\"frvr-in-game-ui__kill-card-lvl\"></div>");
+        else sb_appendf(sb, "</div></div><div class=\"frvr-in-game-ui__kill-card-lvl-flag\"><div class=\"frvr-in-game-ui__kill-card-lvl\">LVL %d</div>", H.kc_level);
         // FRVR's .frvr-in-game-ui__kill-card-flag beside the level (blank when the killer has no flag); ../img is ui/img
         if (H.kc_flag[0]) sb_appendf(sb, "<div class=\"frvr-in-game-ui__kill-card-flag\"><img src=\"../img/flags/3x2/%s.svg\"></div>", H.kc_flag);
         sb_append(sb, "</div>");
@@ -1437,6 +1439,7 @@ void strike_hud_death(Client *client, const HudKillCard *card, const Player *kil
             H.kc_flag[1] = (char) toupper((unsigned char) card->flag_code[1]);
         }
         H.kc_level = card->level > 0 ? card->level : 1;
+        H.kc_hide_level = card->hide_extras;
         H.kc_score = card->score;
     }
     H.kill_card = 1; // Mt.showKillCard (the controls go: strike_touch_tick sees the dead player)

@@ -54,6 +54,8 @@ def run(tag, hidden):
             "5000 nodes @rows [class^=leaderItem]",
             "5000 grep @pn Player_ [class^=leaderName]",
             "5000 grep @me Player [class^=leaderNameM]",
+            "5000 grep @jn joined [id^=chatMsg_]",
+            "5000 grep @jp Player [id^=chatMsg_]",
             "5100 quit",
         ]) + "\n")
     log = os.path.join(WORK, tag + ".log")
@@ -79,13 +81,20 @@ def run(tag, hidden):
     n_rows = int(rows["match"]) if rows else -1
     n_pn = int(pn["hits"]) if pn else -1
     n_me = int(me["hits"]) if me else -1
+    join = probe(lines, "grep", "@jn")
+    join_pn = probe(lines, "grep", "@jp")
+    n_join = int(join["hits"]) if join else -1
+    n_join_pn = int(join_pn["hits"]) if join_pn else -1
     if hidden:
         check("on: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
         check("on: the bots read Player_<n> on the scoreboard", n_pn >= 3, f"Player_ rows {n_pn}")
         check("on: your own row reads Player", n_me == 1, f"Player rows {n_me}")
+        check("on: your join line reads Player (the seeded line, no raw name)", n_join == 1 and n_join_pn == 1,
+              f"join lines {n_join}, lines with Player {n_join_pn}")
     else:
         check("off: the bots are not renamed (no Player_<n> on the scoreboard)", n_pn == 0, f"Player_ rows {n_pn}")
         check("off: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
+        check("off: your join line keeps your own name (no Player)", n_join == 1 and n_join_pn == 0, f"join lines {n_join}, lines with Player {n_join_pn}")
     return lines
 
 

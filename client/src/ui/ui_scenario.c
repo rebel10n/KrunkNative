@@ -976,7 +976,9 @@ static void apply_killcard(Client *client) {
     const cJSON *kc = st("killcard");
     HudKillCard card = {0};
     if (cJSON_IsObject(kc)) {
-        card.killer = obj_str(kc, "killer");
+        static char kill_shown[PLAYER_NAME_SIZE];
+        card.killer = player_names_shown(-1, 0, obj_str(kc, "killer"), kill_shown, sizeof(kill_shown)); // Hide player names
+        card.hide_extras = player_names_extras_hidden(0);
         card.weapon = obj_str(kc, "weapon");
         card.level = (int) obj_num(kc, "level", 1);
         card.score = (int) obj_num(kc, "score", 0);

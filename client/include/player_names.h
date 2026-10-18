@@ -24,3 +24,9 @@ void player_names_see(int uid);
 void player_names_reset(void);
 // The setting (client_settings_hide_player_names): 1 while names are hidden.
 int player_names_hidden(void);
+// Another player's extras (account level, verified / premium / creator / custom badges, the scoreboard stats,
+// the killed-by card's level and player card stat): hidden while names are hidden, except for the local player.
+int player_names_extras_hidden(int self);
+// Whole-word match of the raw name at text[pos] (no word character right before or after it, where the name's
+// own edge is a word character): the name's length, else 0. Used to rewrite the names in a chat line.
+size_t player_names_word_at(const char *text, size_t pos, const char *raw);

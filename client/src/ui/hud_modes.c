@@ -904,6 +904,7 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
                 char value[64];
                 if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
                 else hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
+                if (player_names_extras_hidden(player == client->me)) value[0] = 0; // Hide player names: the others' stats
                 len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'>%s</td>", value);
             }
         }

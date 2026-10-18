@@ -619,6 +619,11 @@ static void nt_info(const Player *player, TagInfo *info) {
         info->badge[NT_BADGE_PREMIUM] = 1;
         info->badge[NT_BADGE_FEATURED] = player->uid % 3 != 1;
     }
+    if (player_names_extras_hidden(player->is_you)) { // Hide player names: no level box and no badges for the others
+        info->level = 0;
+        memset(info->badge, 0, sizeof(info->badge));
+        info->custom_badge = -1;
+    }
 }
 
 // KRUNKNATIVE_NAMETAG_LOG set: the pass also records its line-of-sight result per tag (diagnosis).

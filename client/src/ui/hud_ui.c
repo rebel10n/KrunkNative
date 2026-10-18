@@ -544,12 +544,15 @@ typedef struct {
     int is_you, is_ally, team;
     int badge;                    // badgeIndex, -1 none
     const NetPlayerInfoPacket *acc;
+    int hide_stats;               // another player's stats are blank (Hide player names)
+    NetPlayerInfoPacket acc_buf;  // a scenario row's account (verified / premium flags), for acc
 } BoardRow;
 
 // f1984 (Old Scoreboard, #leaderContainer): one .leaderItem per player, at most LEADER_MAX.
 static void hud_old_board_row_html(char *out, const size_t size, size_t *len, const int rank, const BoardRow *r) {
     char num[32], shown[PLAYER_NAME_SIZE];
-    hud_format_num(r->stats[0], num, sizeof(num));
+    if (r->hide_stats) num[0] = 0; // Hide player names: the others' stats are not shown
+    else hud_format_num(r->stats[0], num, sizeof(num));
     hb_append(out, size, len, "<div class='leaderItem'><div class='leaderCounter'>%d.</div>", rank);
     hb_append_badges(out, size, len, r->acc, r->badge);
     hb_append(out, size, len, "<div class='leaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
@@ -569,7 +572,8 @@ static void hud_center_board_row_html(char *out, const size_t size, size_t *len,
     hb_append(out, size, len, "</div></div></td>");
     for (int i = 0; i < columns; i++) {
         char num[32];
-        hud_format_num(r->stats[i], num, sizeof(num));
+        if (r->hide_stats) num[0] = 0; // Hide player names: the others' stats are not shown
+        else hud_format_num(r->stats[i], num, sizeof(num));
         hb_append(out, size, len, "<td>%s</td>", num);
     }
     hb_append(out, size, len, "</tr>");
@@ -643,6 +647,11 @@ static void hud_board_fill(const Client *client, const Player *p, const int32_t 
     r->is_ally = hud_board_ally(client, r->is_you, r->team, my_team);
     r->acc = player_accounts_get(p->uid);
     r->badge = p->cosmetics_v7.badge;
+    r->hide_stats = player_names_extras_hidden(r->is_you); // Hide player names: no stats, badges or level of the others
+    if (r->hide_stats) {
+        r->acc = NULL;
+        r->badge = -1;
+    }
 }
 
 // The board rows: scenario rows [{rank?, name, score, kills?, deaths?, <leaderStat>?, me?, team?}]
@@ -671,6 +680,17 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
             for (int k = 0; k < columns; k++) r->stats[k] = ROW_INT(keys[k]);
             r->team = ROW_INT("team");
             r->badge = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "badge")) ? ROW_INT("badge") : -1;
+            if (ROW_INT("verified") || ROW_INT("premium") || ROW_INT("creator")) { // a scenario row's account flags
+                r->acc_buf.account_id = 1;
+                r->acc_buf.flags = (uint8_t) ((ROW_INT("premium") ? NET_PLAYER_INFO_PREMIUM : 0) | (ROW_INT("verified") ? NET_PLAYER_INFO_VERIFIED : 0) |
+                                              (ROW_INT("creator") ? NET_PLAYER_INFO_CREATOR : 0));
+                r->acc = &r->acc_buf;
+            }
+            r->hide_stats = player_names_extras_hidden(r->is_you); // Hide player names
+            if (r->hide_stats) {
+                r->acc = NULL;
+                r->badge = -1;
+            }
 #undef ROW_INT
             r->is_ally = hud_board_ally(client, r->is_you, r->team, my_team);
         }
@@ -2327,8 +2347,73 @@ static int hud_chat_line_channel(const Client *client, const int player_line) {
 // the oldest rows go first beyond config.chatListLength.
 // data-kind of a row: "human" (a human player's line: Show Player Messages hides it), "bot" (a bot
 // player's line: always shown), "line" (a system line). hud_ui_clear_player_chat removes "human" rows.
+// Hide player names (player_names.h): every known player's raw name in a chat line (the game's players, the local
+// player, a scenario's scoreboard) becomes its shown name, longest names first, whole words only, in one pass. So the
+// server's join and ranked lines and the messages themselves hide the names too.
+#define HUD_CHAT_NAMES_MAX 128
+typedef struct {
+    const char *raw;
+    char shown[PLAYER_NAME_SIZE];
+} HudChatName;
+
+static void hud_chat_add_name(HudChatName *names, int *count, const char *raw, const int uid, const int self) {
+    if (!raw || !raw[0] || *count >= HUD_CHAT_NAMES_MAX) return;
+    names[*count].raw = raw;
+    player_names_shown(uid, self, raw, names[*count].shown, sizeof(names[*count].shown));
+    (*count)++;
+}
+
+static void hud_chat_hide_names(const char *in, char *out, const size_t size) {
+    snprintf(out, size, "%s", in ? in : "");
+    const Client *client = menu_ui()->client;
+    if (!client || !in || !in[0] || !player_names_hidden()) return;
+    HudChatName names[HUD_CHAT_NAMES_MAX];
+    int count = 0;
+    for (size_t i = 0; i < client->game.player_count && count < HUD_CHAT_NAMES_MAX; i++) {
+        const Player *p = client->game.players[i];
+        if (p) hud_chat_add_name(names, &count, p->name, p->uid, p == client->me);
+    }
+    hud_chat_add_name(names, &count, client->me ? client->me->name : client->menu_name, client->me ? client->me->uid : -1, 1);
+    if (cJSON_IsArray(g_hud_override.scoreboard)) { // a scenario's scoreboard stands for the game's players
+        const cJSON *row;
+        cJSON_ArrayForEach(row, g_hud_override.scoreboard) {
+            const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name"), *me = cJSON_GetObjectItemCaseSensitive(row, "me");
+            if (cJSON_IsString(n)) hud_chat_add_name(names, &count, n->valuestring, -1, cJSON_IsTrue(me));
+        }
+    }
+    for (int i = 1; i < count; i++) { // longest first, so "Bob Smith" wins over "Bob"
+        HudChatName tmp = names[i];
+        int j = i - 1;
+        for (; j >= 0 && strlen(names[j].raw) < strlen(tmp.raw); j--) names[j + 1] = names[j];
+        names[j + 1] = tmp;
+    }
+    size_t o = 0, pos = 0;
+    const size_t len = strlen(in);
+    while (pos < len && o + 1 < size) {
+        size_t matched = 0;
+        for (int k = 0; k < count && !matched; k++) {
+            const size_t m = player_names_word_at(in, pos, names[k].raw);
+            if (!m) continue;
+            const char *shown = names[k].shown;
+            for (size_t s = 0; shown[s] && o + 1 < size; s++) out[o++] = shown[s];
+            matched = m;
+        }
+        if (matched) {
+            pos += matched;
+        } else {
+            out[o++] = in[pos++];
+        }
+    }
+    out[o] = 0;
+}
+
 static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
+    char shown_msg[NET_CHAT_TEXT_SIZE * 2];
+    if (msg) {
+        hud_chat_hide_names(msg, shown_msg, sizeof(shown_msg));
+        msg = shown_msg;
+    }
     if (!list || !msg || !msg[0]) return;
 
     hud_feed_evict(list, CHAT_LIST_LENGTH);
@@ -2965,10 +3050,12 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t",
               killer_img, h2h >= 0 ? g_h2h[h2h].they_killed_me : 0);
     hud_death_banner(out, size, &len, card->killer_card_url);
+    char killer_level[24] = ""; // the killer's level: none for another player while names are hidden (player_names.h)
+    if (!card->hide_extras) snprintf(killer_level, sizeof(killer_level), "lvl %d", card->level > 1 ? card->level : 1);
     hb_append(out, size, &len, "\n\t\t\t\t\t\t<div class=\"death-row-class\">\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">"
-                               "\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">"
+                               "\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">%s</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">"
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
-              card->class_index < 0 ? 0 : card->class_index, card->level > 1 ? card->level : 1);
+              card->class_index < 0 ? 0 : card->class_index, killer_level);
     hb_append_escaped(out, size, &len, streamer_name(card->killer, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
     hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t\t");
     if (card->pc_stat_name && card->pc_stat_name[0]) { // "3" [2]: [pcStatIndex, value]
@@ -3245,7 +3332,7 @@ static const char *hud_reward_html(const int reward, char *out, const size_t siz
 // pfp + profile link (local #fff, team mate rgba(255,255,255,0.6), else COLORS.teams[1]),
 // the stats and the empty actions cell (guests: no share / report buttons).
 static void hud_end_row_html(char *out, const size_t size, size_t *len, const int rank, const int last, const char *name,
-                             const char *color, const int score, const int kills, const int deaths, const int reward) {
+                             const char *color, const int score, const int kills, const int deaths, const int reward, const int blank) {
     char shown[PLAYER_NAME_SIZE];
     hb_append(out, size, len, "<tr style='%s'><td style='color:#fff'>%d.</td><td style='position: relative;'>", last ? "border-bottom:none" : "", rank);
     hb_append(out, size, len, "<img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>");
@@ -3253,9 +3340,14 @@ static void hud_end_row_html(char *out, const size_t size, size_t *len, const in
     hb_append_escaped(out, size, len, name);
     hb_append(out, size, len, "' target='_blank' style='color:%s'>", color);
     hb_append_escaped(out, size, len, streamer_name(name, shown, sizeof(shown))); // streamMode ? scrambleS(alias)
-    char cell[96];
-    hb_append(out, size, len, "</a></td><td style='position: relative;'>%d</td><td style='position: relative;'>%d</td><td style='position: relative;'>%d</td>"
-                              "<td style='position: relative;'>%s</td>", score, kills, deaths, hud_reward_html(reward, cell, sizeof(cell)));
+    char cell[96], stat[3][16]; // blank: another player's stats are not shown (Hide player names)
+    const char *reward_html = blank ? "" : hud_reward_html(reward, cell, sizeof(cell));
+    for (int k = 0; k < 3; k++) {
+        if (blank) stat[k][0] = 0;
+        else snprintf(stat[k], sizeof(stat[k]), "%d", k == 0 ? score : k == 1 ? kills : deaths);
+    }
+    hb_append(out, size, len, "</a></td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td><td style='position: relative;'>%s</td>"
+                              "<td style='position: relative;'>%s</td>", stat[0], stat[1], stat[2], reward_html);
     hb_append(out, size, len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
 }
 
@@ -3276,7 +3368,7 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
 #define ROW_INT(key) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, key)) ? cJSON_GetObjectItemCaseSensitive(row, key)->valueint : 0)
         index++;
         hud_end_row_html(out, size, len, index, index >= count, name, is_you ? "#fff" : FEED_COLOR_ENEMY,
-                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"));
+                         ROW_INT("score"), ROW_INT("kills"), ROW_INT("deaths"), ROW_INT("reward"), player_names_extras_hidden(is_you));
 #undef ROW_INT
     }
     return count;
@@ -3306,7 +3398,7 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
         const char *color = p == client->me ? "#fff" : p->team && p->team == local_team ? "rgba(255,255,255,0.6)" : FEED_COLOR_ENEMY;
         char pname[PLAYER_NAME_SIZE];
         hud_end_row_html(out, size, len, i + 1, i + 1 >= count, hud_player_name(client, p, pname, sizeof(pname)), color, p->score, (int) p->kills,
-                         (int) p->deaths, p->reward);
+                         (int) p->deaths, p->reward, player_names_extras_hidden(p == client->me));
     }
     hb_append(out, size, len, "</table>");
 }

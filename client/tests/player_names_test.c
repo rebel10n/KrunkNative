@@ -77,11 +77,28 @@ static void overflow_tests(void) {
     shown_is(300, 0, "y", "Player"); // no room left: Player, never a raw name
 }
 
+static void word_tests(void) {
+    g_hide = 1;
+    CHECK(player_names_word_at("Quentin joined", 0, "Quentin") == 7, "a name at the start of a line");
+    CHECK(player_names_word_at("Quentins", 0, "Quentin") == 0, "a name inside a longer word is not a match");
+    CHECK(player_names_word_at("xQuentin", 1, "Quentin") == 0, "no match after a word character");
+    CHECK(player_names_word_at("a Quentin!", 2, "Quentin") == 7, "a name between spaces and punctuation");
+    CHECK(player_names_word_at("Bob's", 0, "Bob") == 3, "an apostrophe ends a word");
+    CHECK(player_names_word_at("Hi", 0, "") == 0, "an empty name never matches");
+    CHECK(player_names_word_at("Hi", 0, NULL) == 0, "a NULL name never matches");
+    CHECK(player_names_extras_hidden(0) == 1, "another player's extras are hidden while names are hidden");
+    CHECK(player_names_extras_hidden(1) == 0, "the local player's extras stay");
+    g_hide = 0;
+    CHECK(player_names_extras_hidden(0) == 0, "extras shown with the setting off");
+    g_hide = 1;
+}
+
 int main(void) {
     off_tests();
     on_tests();
     reset_tests();
     overflow_tests();
+    word_tests();
     printf("player_names_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

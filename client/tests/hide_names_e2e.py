@@ -75,10 +75,21 @@ def game_edit(st):
     st["account"] = {"name": "Zelda", "clan": "KN", "score": 50000, "funds": 2500, "premium": 0, "badges": [], "stats": {}, "challenges": []}
     st["scoreboard"] = [
         {"rank": 1, "name": "Zelda", "score": 9, "me": True},
-        {"rank": 2, "name": "Quentin", "score": 5},
+        {"rank": 2, "name": "Quentin", "score": 5, "premium": 1, "verified": 1},
         {"rank": 3, "name": "Rhea", "score": 2},
     ]
-    st["chat"] = [{"name": "Quentin", "msg": "gg, hi"}]
+    st["chat"] = [{"name": "Quentin", "msg": "gg, hi"},
+                  {"text": "Quentin joined the game", "color": "#fc03ec"},
+                  {"text": "Quentin left for a ranked match", "color": "#fc03ec"}]
+
+
+def death_edit(st):
+    st["menu"] = False
+    st["window"] = None
+    st["inGame"] = True
+    st["dead"] = True
+    st["name"] = "Zelda"
+    st["killcard"] = {"killer": "Quentin", "level": 57, "weapon": "Assault Rifle", "classIndex": 2, "score": 120}
 
 
 def assets_root():
@@ -120,6 +131,8 @@ def main():
     menu_off = scenario("kn-account-native-default.json", menu_edit, False, "menu-off")
     game_on = scenario("ingame-scoreboard.json", game_edit, True, "game-on")
     game_off = scenario("ingame-scoreboard.json", game_edit, False, "game-off")
+    death_on = scenario("ingame-death.json", death_edit, True, "death-on")
+    death_off = scenario("ingame-death.json", death_edit, False, "death-off")
 
     doc = render(menu_on, "menu-on")
     if doc is None:
@@ -147,6 +160,10 @@ def main():
         check("game on: the chat line of Quentin is Player_1 too", doc.count("Player_1") >= 2, f"count={doc.count('Player_1')}")
         check("game on: no raw name is left (Quentin, Rhea, Zelda)", not any(n in doc for n in ("Quentin", "Rhea", "Zelda")))
         check("game on: you read Player on the scoreboard", 'newLeaderNameM">Player</div>' in doc)
+        check("game on: the join line names Player_1", "Player_1 joined the game" in doc and "Quentin joined" not in doc)
+        check("game on: the ranked line names Player_1", "Player_1 left for a ranked match" in doc and "Quentin left" not in doc)
+        check("game on: Quentin's premium badge is absent", ">beenhere</" not in doc, "")
+        check("game on: Quentin's verified badge is absent", ">check_circle</" not in doc, "")
 
     doc = render(game_off, "game-off")
     if doc is None:
@@ -155,6 +172,22 @@ def main():
         check("game off: the scoreboard shows Quentin and Rhea", "Quentin" in doc and "Rhea" in doc)
         check("game off: the chat sender is Quentin", "Quentin" in doc and "gg, hi" in doc)
         check("game off: no Player_<n> appears", not re.search(r"Player_\d", doc))
+        check("game off: the join and ranked lines keep the names", "Quentin joined the game" in doc and "Quentin left for a ranked match" in doc)
+        check("game off: Quentin's premium badge shows", ">beenhere</" in doc)
+        check("game off: Quentin's verified badge shows", ">check_circle</" in doc)
+
+    doc = render(death_on, "death-on")
+    if doc is None:
+        check("death on renders", False)
+    else:
+        check("death on: the killer's level is absent", "lvl 57" not in doc)
+        check("death on: the killer reads Player_<n>", re.search(r'death-row-user-text">Player_\d+<', doc) is not None and "Quentin" not in doc)
+    doc = render(death_off, "death-off")
+    if doc is None:
+        check("death off renders", False)
+    else:
+        check("death off: the killer's level shows", "lvl 57" in doc)
+        check("death off: the killer reads Quentin", "Quentin" in doc)
 
     shutil.rmtree(WORK, ignore_errors=True)
     failed = results.count(False)

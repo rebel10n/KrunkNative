@@ -266,6 +266,7 @@ typedef struct {
     const char *pc_stat_value;
     int report;                  // "[<playerList key>] to Report" (killer level <= 10, signed in, public game)
     const char *flag_code;       // the killer's Country Flag, ISO code ("us"): Strike's kill card flag (img/flags/3x2), NULL none
+    int hide_extras;             // another player's level and card stat are hidden (Hide player names, player_names.h)
 } HudKillCard;
 // v7 io_killPlayer for the local player: #deathUIHolder (f1975) + UI.toggleGameUI(false).
 void hud_ui_show_death(Client*, const HudKillCard *card);

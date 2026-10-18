@@ -270,12 +270,13 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
         const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(client, killer, killer_shown, sizeof(killer_shown));
+        card.hide_extras = player_names_extras_hidden(killer == client->me); // the killer's level and card stat
         card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, (packet->fists & NET_KILL_FISTS) || (death && death->fists), &card.weapon_color);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
         if (death) {
             card.level = player_card_class_level(death->class_stat); // f1975: the killer's class level from "3" [1]
             card.thrown = killer_weapon && killer_weapon->melee && death->thrown;
-            if (death->pc_stat_index >= 0 && player_card_stat_name(death->pc_stat_index)) {
+            if (!card.hide_extras && death->pc_stat_index >= 0 && player_card_stat_name(death->pc_stat_index)) {
                 card.pc_stat_name = player_card_stat_name(death->pc_stat_index);
                 snprintf(pc_value, sizeof(pc_value), "%.*s", (int) sizeof(death->pc_stat_value), death->pc_stat_value);
                 card.pc_stat_value = pc_value;

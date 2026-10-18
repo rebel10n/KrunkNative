@@ -67,8 +67,8 @@ static void player_slot(StrBuf *sb, const Game *game, const CompLobbyEntry *e, c
     char weapon[160] = "";
     const char *icon = e && e->class_index >= 0 && !hidden ? class_weapon_icon(game, e->class_index) : NULL;
     if (icon) snprintf(weapon, sizeof(weapon), "<img src='./textures/weapons/%s.png' class='compPlWpIcn' />", icon);
-    const char *verified = e && e->verified ? " <i class='material-icons' style='color:#40c4ff;margin-top:-8px;font-size:35px;vertical-align:middle;'>check_circle</i> "
-                         : e && e->level ? "<div style='display:inline-block;width:10px'></div>" : "";
+    const char *verified = e && e->verified && !player_names_extras_hidden(self) ? " <i class='material-icons' style='color:#40c4ff;margin-top:-8px;font-size:35px;vertical-align:middle;'>check_circle</i> "
+                         : e && e->level && !player_names_extras_hidden(self) ? "<div style='display:inline-block;width:10px'></div>" : "";
     const ClassConfig *cls = e && e->class_index >= 0 && !hidden ? class_at(game, e->class_index) : NULL;
     const char *class_name = cls ? cls->name : hidden ? "???" : "None";
     const int icon_index = e && !hidden && e->class_index >= 0 ? e->class_index : -1;
