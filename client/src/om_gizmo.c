@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const int k_hex[OM_GIZMO_COLORS] = {0xffffff, 0xffd23f, 0xff4d4d, 0x4dff70, 0x4d8bff, 0x46e6ff};
+static const int k_hex[OM_GIZMO_COLORS] = {0xffffff, 0xffd23f, 0xff4d4d, 0x4dff70, 0x4d8bff, 0x46e6ff, 0xff8af2};
 
 static struct {
     float *v;            // x y z per vertex, two per line

@@ -479,6 +479,9 @@ typedef struct {
     int object;   // map object uid, -1 terrain
 } ObjectManagerAim;
 int object_manager_aim(const Game *game, const Player *player, float pitch, float yaw, ObjectManagerAim *out);
+// The Duplicator's copy of `copy` placed on the surface `aim` hit: the feet where it lands (the authority
+// places it there; the client's ghost is drawn there). *size (may be NULL): the copy's size.
+vec3 object_manager_duplicate_place(const Game *game, const Object *copy, const ObjectManagerAim *aim, vec3 *size);
 // What the tools pick at the crosshair: the nearest object of any kind (solid or not: jump pads,
 // teleporters, zones, triggers, planes, at least a unit thick), terrain in the way; object -1 none
 // (normal is +y). 0: nothing in reach.

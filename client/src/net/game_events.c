@@ -1372,6 +1372,7 @@ void client_game_events_reset(Client *client) {
     billboard_ad_on_init(); // the server's ad for this map, before client_load_map builds it
     hud_modes_reset(client);
     hud_votekick_reset(); // a new round: no vote kick running, the K.P.D phone down
+    om_build_duplicate_reset(); // object_manager_round_start: the Duplicator's copy is gone
     hud_popups_on_init(); // "init": bN = 0
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
     hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)

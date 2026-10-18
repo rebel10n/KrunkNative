@@ -37,6 +37,10 @@
 // opens an undo step (OM_EDIT_BEGIN), so U takes a whole grab or drag back. Others see the result
 // through SPAWNED_OBJ OM_SPAWNED_UPDATE / MAP_EDIT.
 //
+// Duplicator (the Tool Gun's Tools pane, not a btool): after the first shot's COPIED answer a wireframe
+// box (OM_GIZMO_GHOST) shows where the next shot places the copy: the surface at the crosshair this
+// frame, by object_manager_duplicate_place (the authority's own rule). PASTED or a new round clears it.
+//
 // Properties (the Tool Gun's third btool): fire on an object selects it and opens its fields in the
 // Object Manager window (object_manager_ui_open_props); the Properties key (I, cont_omPropsKey) does
 // the same for the Move / Resize selection, else for the object at the crosshair.
@@ -98,6 +102,10 @@ static struct {
     ObjectManagerPose pose, shown, sent;
     double sent_at;
     int begin;            // the next edit opens an undo step
+    // the Duplicator (om_build_duplicate_*): the source uid + 1 the last shot aimed at (0 none), and
+    // the copy the authority holds for us (its source uid + 1; 0 = nothing copied, no ghost)
+    int dup_pick;
+    int dup_src;
 } g_ob;
 
 static void ob_load(void) {
@@ -334,6 +342,27 @@ void om_build_refused(const int status) {
 void om_build_reset(void) {
     g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = 0;
     om_interp_reset();
+}
+
+// A Duplicator shot goes out (object_manager_ui.c): the source is what the crosshair is on now, kept
+// until the authority answers (COPIED takes it, see om_build_duplicate_result)
+void om_build_duplicate_shot(Client *client, const Player *me) {
+    ObjectManagerAim aim;
+    const int hit = object_manager_pick(&client->game, me, me->direction.x, me->direction.y, &aim);
+    g_ob.dup_pick = hit && aim.object >= 0 && object_manager_editable(&client->game, aim.object) ? aim.object + 1 : 0;
+}
+
+// The authority's answer to a Duplicator shot (OK only): COPIED arms the ghost on the picked source,
+// PASTED (the copy placed) puts it away. A refused shot leaves the copy as the authority keeps it.
+void om_build_duplicate_result(const int limit) {
+    if (limit == OM_TOOL_COPIED) g_ob.dup_src = g_ob.dup_pick;
+    else if (limit == OM_TOOL_PASTED) g_ob.dup_src = 0;
+}
+
+// A new round or a new connection (client_game_events_reset): the authority's copies were of the
+// last round's objects, so the ghost goes until the next COPIED
+void om_build_duplicate_reset(void) {
+    g_ob.dup_pick = g_ob.dup_src = 0;
 }
 
 int om_build_carry(int *uid, ObjectManagerPose *pose) {
@@ -574,6 +603,18 @@ static void ob_draw_handle(const int color, const vec3 tip) {
     om_gizmo_box(color, (vec3) {tip.x, tip.y - OB_HANDLE * 0.5f, tip.z}, (vec3) {OB_HANDLE, OB_HANDLE, OB_HANDLE});
 }
 
+// The Duplicator's ghost: the box the next shot places the copy in, on the surface at the crosshair
+// now (object_manager_duplicate_place, the authority's own rule), so it follows the aim every frame.
+// Nothing while the source is gone (removed, a new round) or the crosshair reaches nothing.
+static void ob_draw_duplicate(Client *client, const Player *me) {
+    if (g_ob.dup_src <= 0 || !object_manager_editable(&client->game, g_ob.dup_src - 1)) return;
+    ObjectManagerAim aim;
+    if (!object_manager_aim(&client->game, me, me->direction.x, me->direction.y, &aim)) return;
+    vec3 size;
+    const vec3 at = object_manager_duplicate_place(&client->game, client->game.map->objects[g_ob.dup_src - 1], &aim, &size);
+    om_gizmo_box(OM_GIZMO_GHOST, at, size);
+}
+
 void om_build_render(Client *client) {
     om_gizmo_clear();
     const Player *me = client ? client->me : NULL;
@@ -610,6 +651,7 @@ void om_build_render(Client *client) {
             ob_draw_handle(color, handles[i].tip);
         }
     }
+    if (w && w->kn_tool && tool == OM_TOOL_DUPLICATOR) ob_draw_duplicate(client, me);
     if (client) {
         om_outline_render(&client->camera);
         om_gizmo_render(&client->camera);

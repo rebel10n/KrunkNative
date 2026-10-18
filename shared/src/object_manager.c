@@ -1916,6 +1916,18 @@ static int tool_rotator(Game *game, Player *player, const NetSpawnReqPacket *req
     return OM_STATUS_OK;
 }
 
+// The Duplicator's copy of `copy`: its size (the record's "s", else the object's scale) and where it
+// lands on the surface `aim` hit (a pickup stands 3 units off the face, anything else is placed by
+// om_place_box). The authority places the copy here and the client's ghost (om_build.c) draws the
+// same box, so the ghost shows where the copy goes.
+vec3 object_manager_duplicate_place(const Game *game, const Object *copy, const ObjectManagerAim *aim, vec3 *size) {
+    double s[3] = {copy->scale.x, copy->scale.y, copy->scale.z};
+    const cJSON *sz = copy->raw ? cJSON_GetObjectItem(copy->raw, "s") : NULL;
+    for (int k = 0; cJSON_IsArray(sz) && k < 3; k++) s[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(sz, k));
+    if (size) *size = (vec3) {(float) s[0], (float) s[1], (float) s[2]};
+    return copy->pickup ? om_floor_point(game, aim, 3.0f) : om_place_box(game, aim, s);
+}
+
 // Duplicator: a shot at a spawned object copies it (anyone's: copying changes nothing); the next
 // shot places the copy on the surface at the crosshair, facing as the original did, as the
 // shooter's own spawn (the object caps apply).
@@ -1958,10 +1970,7 @@ static int tool_duplicator(Game *game, Player *player, const NetSpawnReqPacket *
         cJSON_Delete(record);
         return OM_STATUS_UNSUPPORTED;
     }
-    double size[3] = {copy->scale.x, copy->scale.y, copy->scale.z};
-    const cJSON *sz = cJSON_GetObjectItem(record, "s");
-    for (int k = 0; cJSON_IsArray(sz) && k < 3; k++) size[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(sz, k));
-    const vec3 at = copy->pickup ? om_floor_point(game, &aim, 3.0f) : om_place_box(game, &aim, size);
+    const vec3 at = object_manager_duplicate_place(game, copy, &aim, NULL);
     const double pos[3] = {round(at.x * 10.0) / 10.0, round(at.y * 10.0) / 10.0, round(at.z * 10.0) / 10.0};
     cJSON_DeleteItemFromObject(record, "p");
     cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray(pos, 3));

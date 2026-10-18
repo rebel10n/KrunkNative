@@ -1190,6 +1190,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         }
         return;
     }
+    if (r->action == OM_ACTION_TOOL && r->item == OM_TOOL_DUPLICATOR && r->status == OM_STATUS_OK) om_build_duplicate_result(r->limit);
     if (r->status != OM_STATUS_OK) {
         if (r->action == OM_ACTION_ADD_WEAPON) g_om.pending_equip = -1;
         char text[160];
@@ -1315,7 +1316,10 @@ static void om_tool_shots(Client *client, const Player *me) {
     if (same && me->weapon && me->weapon->kn_tool && reload > g_om.shot_reload + 1e-4f && om_server_ok(client)) {
         om_load_tool();
         const ObjectManagerToolInfo *info = object_manager_tool_info(g_om.tool);
-        if (info && !info->handles) om_send(OM_ACTION_TOOL, g_om.tool); // Move / Resize: om_build.c drags instead
+        if (info && !info->handles) { // Move / Resize: om_build.c drags instead
+            if (g_om.tool == OM_TOOL_DUPLICATOR) om_build_duplicate_shot(client, me);
+            om_send(OM_ACTION_TOOL, g_om.tool);
+        }
     }
     g_om.shot_me = me;
     g_om.shot_slot = slot;

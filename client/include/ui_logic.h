@@ -619,6 +619,9 @@ void om_build_set_drop(int on);
 int  om_build_grabbing(void);
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
 void om_build_reset(void);                       // a new map / connection
+void om_build_duplicate_shot(Client*, const Player*); // a Duplicator shot goes out: its source (the crosshair's object)
+void om_build_duplicate_result(int limit);       // the answer to a Duplicator shot (OK): COPIED arms the ghost, PASTED clears it
+void om_build_duplicate_reset(void);             // a new round / connection: the copy is gone (the ghost too)
 int  om_build_handle_look(Client*, int index, float *pitch, float *yaw); // input scripts: the look onto a handle
 int  om_build_props_key(Client*);                // the Properties key: the selection's (or the crosshair's) fields; 1 opened
 int  om_build_selection(void);                   // the btools selection's uid, -1 none

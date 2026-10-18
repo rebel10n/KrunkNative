@@ -11,6 +11,7 @@ typedef enum {
     OM_GIZMO_GREEN,     // y
     OM_GIZMO_BLUE,      // z
     OM_GIZMO_CYAN,      // the Physics Gun's beam and the carried object
+    OM_GIZMO_GHOST,     // the Duplicator's copy where the next shot places it
     OM_GIZMO_COLORS
 } OmGizmoColor;
 
