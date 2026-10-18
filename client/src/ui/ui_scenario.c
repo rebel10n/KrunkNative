@@ -952,14 +952,17 @@ static void apply_chat(void) {
     cJSON_ArrayForEach(row, chat) {
         const char *name = obj_str(row, "name"), *msg = obj_str(row, "msg");
         const char *text = obj_str(row, "text"), *color = obj_str(row, "color");
+        // the dev console mirrors every chat line the game receives (events_chat); its names are hidden there too
         if (name && msg) {
             char pn[PLAYER_NAME_SIZE]; // the scenario's sender as the game's chat shows it (Hide player names)
             hud_ui_add_chat(player_names_shown(-1, 0, name, pn, sizeof(pn)), msg, NULL);
+            ui_console_on_chat(name, msg, NET_CHAT_PLAYER);
             continue;
         }
         // White rows are Krunker's plain game lines (type 1: .chatMsg default colour).
         const int plain = !color || !strcasecmp(color, "#ffffff") || !strcasecmp(color, "#fff");
         hud_ui_add_chat(NULL, text ? text : "", plain ? NULL : color);
+        ui_console_on_chat(NULL, text ? text : "", NET_CHAT_SERVER);
     }
 }
 

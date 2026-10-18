@@ -414,6 +414,8 @@ static int board_rows(const Client *client, BoardRow *out, const int max) {
         for (int i = 0; i < H.scn_row_count && n < max; i++) {
             out[n] = H.scn_rows[i];
             out[n].order = n;
+            char pn[PLAYER_NAME_SIZE]; // Hide player names: a scenario row is named as the live row is (player_names_shown)
+            snprintf(out[n].name, sizeof(out[n].name), "%s", player_names_shown(-1, out[n].is_you, H.scn_rows[i].name, pn, sizeof(pn)));
             n++;
         }
     } else if (client && client->game.players) {

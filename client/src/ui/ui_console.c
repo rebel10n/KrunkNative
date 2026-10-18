@@ -353,7 +353,8 @@ static void clear_lines(void) {
     g_con.line_head = g_con.line_count = 0;
 }
 
-// hookChat: `${name || "Server"}: ${text without tags}` for every "ch".
+// hookChat: `${name || "Server"}: ${text without tags}` for every "ch". Hide player names (player_names.h):
+// the sender and the names in the text read as the HUD chat shows them (hud_chat_hide_names).
 void ui_console_on_chat(const char *name, const char *text, const int kind) {
     (void) kind;
     char cleaned[CON_LINE_MAX];
@@ -365,7 +366,10 @@ void ui_console_on_chat(const char *name, const char *text, const int kind) {
         else if (!tag) cleaned[len++] = *p;
     }
     cleaned[len] = 0;
-    appendf(COL_REPLY, "%s: %s", name && *name ? name : "Server", cleaned);
+    char sender[CON_LINE_MAX], shown[CON_LINE_MAX * 2];
+    hud_chat_hide_names(name && *name ? name : "Server", sender, sizeof(sender));
+    hud_chat_hide_names(cleaned, shown, sizeof(shown));
+    appendf(COL_REPLY, "%s: %s", sender, shown);
 }
 
 // hookChat: "noc" / "unl" / "fh"

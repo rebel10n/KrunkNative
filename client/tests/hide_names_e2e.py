@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Hide player names on a headless client: the menu account, a scoreboard row and a chat line.
+"""Hide player names on a headless client: the menu account, a scoreboard row, a chat line, Strike's
+mini scoreboard and the developer console's chat log.
 
   python3 -I client/tests/hide_names_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -16,6 +17,10 @@ DOM each render writes (KRUNKNATIVE_SCENARIO_HTML) is checked for:
          name is left in the page; the join, leave and ranked chat lines read the generic names, every
          chat line is printable text
     off  the raw names are shown, and no Player_<n> appears
+  Krunker Strike (state.strike.board, the mini scoreboard Tab holds): on, the rows read Player_1, Player (you),
+    Player_2, Player_3 in score order and no raw name is left; off, the raw names are shown.
+  console (stdout "[console] " lines of the in-game scenario, the chat the game received): on, the sender
+    and the names in the text read Player_<n> / Player; off, the raw names.
 Exit code 0 only when every check passed. Needs a headless GL device (KRUNKNATIVE_HEADLESS=1; set
 KRUNKNATIVE_EGL_DEVICE to pick one) and the checkout's assets (KRUNKNATIVE_ASSETS_DIR, default assets/; in a
 worktree point it at the checkout, the font files are untracked).
@@ -39,6 +44,7 @@ results = []
 # the header picture: the menu class icon (v10:209536, menu_class_index 0 in the scenario), not the stock face
 CLASS_PICTURE = "textures/classes/icon_0.png"
 ASSETS = ""
+LAST_OUT = ""  # the stdout of the last render (the dev console's "[console] " lines)
 
 
 def check(name, ok, detail=""):
@@ -55,7 +61,7 @@ def scenario(base, edit, hidden, tag):
     edit(doc["state"])
     # the Client settings store (knClient, the stored settings): a scenario's storage is its own (never the user's)
     doc["state"]["storage"] = {"knClient": json.dumps({"hidePlayerNames": True} if hidden else {})}
-    path = os.path.join(WORK, tag + "-" + base)
+    path = os.path.join(WORK, tag + "-" + os.path.basename(base))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f)
     return path
@@ -81,6 +87,7 @@ def game_edit(st):
         {"rank": 3, "name": "Rhea", "score": 2},
     ]
     st["chat"] = [{"name": "Quentin", "msg": "gg, hi"},
+                  {"name": "Rhea", "msg": "Quentin, gg"},
                   {"text": "Zelda joined the game", "color": "#fc03ec"},
                   {"text": "Quentin joined the game", "color": "#fc03ec"},
                   {"text": "Rhea left the game", "color": "#fc03ec"},
@@ -125,11 +132,23 @@ def render(scenario_path, tag):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_SCENARIO_HTML": html, "KRUNKNATIVE_ASSETS_DIR": ASSETS})
     proc = subprocess.run([CLIENT, "--render-scenario", scenario_path, png], env=env, capture_output=True, text=True, timeout=600)
+    global LAST_OUT
+    LAST_OUT = proc.stdout
     if proc.returncode != 0 or not os.path.exists(html):
         print(proc.stdout[-2000:], proc.stderr[-2000:])
         return None
     with open(html, encoding="utf-8", errors="replace") as f:
         return f.read()
+
+
+def console_lines(out):
+    """The developer console's log lines (ui_console.c append prints each one as "[console] <text>")."""
+    return [line[len("[console] "):] for line in out.splitlines() if line.startswith("[console] ")]
+
+
+def mini_board_names(doc):
+    """The names of Strike's mini scoreboard rows, in the order the board shows them."""
+    return re.findall(r'mini-score-board__name">([^<]*)<', doc)
 
 
 def avatar_src(doc):
@@ -149,6 +168,8 @@ def main():
     game_off = scenario("ingame-scoreboard.json", game_edit, False, "game-off")
     death_on = scenario("ingame-death.json", death_edit, True, "death-on")
     death_off = scenario("ingame-death.json", death_edit, False, "death-off")
+    strike_on = scenario(os.path.join("strike", "ingame-scoreboard.json"), lambda st: None, True, "strike-on")
+    strike_off = scenario(os.path.join("strike", "ingame-scoreboard.json"), lambda st: None, False, "strike-off")
 
     doc = render(menu_on, "menu-on")
     if doc is None:
@@ -188,6 +209,12 @@ def main():
               f"{texts}")
         check("game on: Quentin's premium badge is absent", ">beenhere</" not in doc, "")
         check("game on: Quentin's verified badge is absent", ">check_circle</" not in doc, "")
+        console = console_lines(LAST_OUT)
+        check("game on: the console's sender reads Player_1", "Player_1: gg, hi" in console, f"{console[:6]}")
+        check("game on: the console's names in the text read Player_1 too", "Player_2: Player_1, gg" in console, f"{console[:6]}")
+        check("game on: the console's join line reads Player", "Server: Player joined the game" in console)
+        check("game on: no raw name is left in the console (Quentin, Rhea, Zelda)",
+              console and not any(n in line for line in console for n in ("Quentin", "Rhea", "Zelda")), f"{console[:6]}")
 
     doc = render(game_off, "game-off")
     if doc is None:
@@ -198,6 +225,9 @@ def main():
         check("game off: no Player_<n> appears", not re.search(r"Player_\d", doc))
         check("game off: the join and ranked lines keep the names", "Quentin joined the game" in doc and "Quentin left for a ranked match" in doc)
         check("game off: your join and the leave line keep the names", "Zelda joined the game" in doc and "Rhea left the game" in doc)
+        console = console_lines(LAST_OUT)
+        check("game off: the console keeps the sender and the text", "Quentin: gg, hi" in console and "Rhea: Quentin, gg" in console, f"{console[:6]}")
+        check("game off: the console has no Player_<n>", console and not any(re.search(r"Player_\d", line) for line in console))
         check("game off: Quentin's premium badge shows", ">beenhere</" in doc)
         check("game off: Quentin's verified badge shows", ">check_circle</" in doc)
 
@@ -213,6 +243,24 @@ def main():
     else:
         check("death off: the killer's level shows", "lvl 57" in doc)
         check("death off: the killer reads Quentin", "Quentin" in doc)
+
+    names = ["Krunky", "Guest_4821", "Botman", "Nova"]
+    doc = render(strike_on, "strike-on")
+    if doc is None:
+        check("strike on renders", False)
+    else:
+        rows = mini_board_names(doc)
+        check("strike on: the mini scoreboard rows read Player_1, Player (you), Player_2, Player_3 in score order",
+              rows == ["Player_1", "Player", "Player_2", "Player_3"], f"rows {rows}")
+        check("strike on: no raw name is left (Krunky, Botman, Nova, Guest_4821)", not any(n in doc for n in names))
+    doc = render(strike_off, "strike-off")
+    if doc is None:
+        check("strike off renders", False)
+    else:
+        rows = mini_board_names(doc)
+        check("strike off: the mini scoreboard shows the raw names in score order",
+              rows == ["Krunky", "Guest_4821", "Botman", "Nova"], f"rows {rows}")
+        check("strike off: no Player_<n> appears", not re.search(r"Player_\d", doc))
 
     shutil.rmtree(WORK, ignore_errors=True)
     failed = results.count(False)

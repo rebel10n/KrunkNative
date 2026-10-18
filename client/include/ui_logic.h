@@ -371,6 +371,9 @@ void hud_ui_damage_number(Client*, float x, float y, float z, double value, int 
 // One #chatList row (Krunker gB/gy): name+msg = player line, else color = server line
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
+// Hide player names (player_names.h): `in` with every player's name replaced by its shown name (Player_<n>,
+// Player for the local player); `out` holds `in` unchanged while names are shown. The HUD chat and the dev console.
+void hud_chat_hide_names(const char *in, char *out, size_t size);
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel, int human); // WP-E: a v7 "ch" line on its channel (-1 all); human: Show Player Messages may hide it
 // A game / server line (no sender) on a chat tab (0 global, 1 team; every tab outside team modes, -1 always),
 // in `color` (NULL: the plain style): an official lobby's addChat lines (game_events.c NET_EXT_KN_OFFICIAL_CHAT)

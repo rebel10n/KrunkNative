@@ -2363,7 +2363,7 @@ static void hud_chat_add_name(HudChatName *names, int *count, const char *raw, c
     (*count)++;
 }
 
-static void hud_chat_hide_names(const char *in, char *out, const size_t size) {
+void hud_chat_hide_names(const char *in, char *out, const size_t size) {
     snprintf(out, size, "%s", in ? in : "");
     const Client *client = menu_ui()->client;
     if (!client || !in || !in[0] || !player_names_hidden()) return;
