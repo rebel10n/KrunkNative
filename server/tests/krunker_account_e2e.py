@@ -491,6 +491,7 @@ def run():
         "850 nodes @nokiobar [id=knKioHeaderBar]",
         "900 nodes @nokiomodal [id=knKioAccountHolder]",
         "2500 call showWindow 2",
+        "2600 call windows.1.switchTab 1",  # the krunker.io tab (the krunk.io tab is the default until joined)
         "5000 nodes @noaccounts [id^=knAccounts]",
         "5050 text @status [id=kioStatus]",
         "5100 text @window [id=menuWindow]",
