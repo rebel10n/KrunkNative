@@ -844,7 +844,7 @@ static void player_look_colors(const PlayerLook *look, const int uid, int colors
 // ("<store.types[assetType || type]><id>.obj", textures/<...>[_<tex>].png) with its material options
 // (skin_material: colour, opacity, side, alphaTest, wire, tileS, frames, the glow).
 // TODO (WP-F part 2): pulsT / frames / movT / rAnim / rgb animation, env maps, shaderNum, video.
-static Mesh *generate_item_mesh(const ViewerSkin *item, const float y, const vec3 rotation, const float scale, MeshTransform *holder) {
+static Mesh *generate_item_mesh(const ViewerSkin *item, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
     Geometry *geometry = skin_model(model);
@@ -855,7 +855,7 @@ static Mesh *generate_item_mesh(const ViewerSkin *item, const float y, const vec
     BasicMaterial *material = basic_material_init();
     material->texture = texture_id;
     Mesh *mesh = mesh_init(geometry, (Material *) material);
-    mesh->transform.position = (vec3) {0.0f, y, 0.0f};
+    mesh->transform.position = at;
     mesh->transform.rotation = rotation;
     mesh->transform.scale = (vec3) {scale, scale, scale};
     mesh->transform.parent = holder;
@@ -868,7 +868,7 @@ static Mesh *generate_item_mesh(const ViewerSkin *item, const float y, const vec
 
 // RENDER.loadAnimMesh for hasAnim items: "<model>.<fileExt || gltf>" with the GLTF's own materials,
 // every clip playing (timeScale animS). TODO (WP-F part 2): colour / opacity / env on its materials.
-static struct GltfInstance *generate_item_model(const ViewerSkin *item, const float y, const vec3 rotation, const float scale, MeshTransform *holder) {
+static struct GltfInstance *generate_item_model(const ViewerSkin *item, const vec3 at, const vec3 rotation, const float scale, MeshTransform *holder) {
     if (!(item->flags & VS_HAS_ANIM)) return NULL;
     char model[128], texture[160];
     cosmetic_asset_keys(item, model, sizeof(model), texture, sizeof(texture));
@@ -878,7 +878,7 @@ static struct GltfInstance *generate_item_model(const ViewerSkin *item, const fl
     GltfInstance *instance = path ? gltf_instance_create(gltf_model_load(path), item->anim_s > 0.0f ? item->anim_s : 1.0f) : NULL;
     free(path);
     if (!instance) return NULL;
-    instance->root.position = (vec3) {0.0f, y, 0.0f};
+    instance->root.position = at;
     instance->root.rotation = rotation;
     instance->root.scale = (vec3) {scale, scale, scale};
     instance->root.parent = holder;
@@ -895,8 +895,9 @@ static void player_generate_cosmetic(PlayerMesh *player_mesh, const int slot, co
     holder->scale = (vec3) {1.0f, 1.0f, 1.0f};
     holder->parent = parent;
     const vec3 rotation = {0.0f, (float) M_PI * 0.5f, 0.0f};
-    player_mesh->cosmetic_models[slot] = generate_item_model(item, item_y, rotation, scale, holder);
-    if (!player_mesh->cosmetic_models[slot]) player_mesh->cosmetics[slot] = generate_item_mesh(item, item_y, rotation, scale, holder);
+    const vec3 at = {0.0f, item_y, 0.0f};
+    player_mesh->cosmetic_models[slot] = generate_item_model(item, at, rotation, scale, holder);
+    if (!player_mesh->cosmetic_models[slot]) player_mesh->cosmetics[slot] = generate_item_mesh(item, at, rotation, scale, holder);
 }
 
 static float item_scl(const ViewerSkin *item) { return item->scl_mlt != 0.0f ? item->scl_mlt : 1.0f; } // sclMlt || 1
@@ -932,31 +933,51 @@ static void player_generate_cosmetic_meshes(PlayerMesh *player_mesh, const Playe
     }
 }
 
-// The wrist item (players.js:1082-1089 / 1127-1130): on the left arm of the own model. Guns: a
-// holder at the centre of the left arm's wrist marker (genArm hasWrist: a 0.1 x 1 x 0.1 cube placed
-// like the lower arm, its centre 0.575 below the lower arm's centre) turned like it, the item at
-// rotation (-PI / 2, -PI / 2, 0). First-person melee: armMeshes[0] at (-1.55 - sitOffX, -1.4 - sitOff,
-// 1 - sitOffZ), rotation (sxRot, syRot, szRot). Scale sclMlt.
-static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, const int melee_pose) {
+// Euler angles (three.js 'XYZ', the MeshTransform default: R = Rx * Ry * Rz) of the rotation whose
+// columns are the axes x, y, z.
+static vec3 euler_xyz_from_axes(const vec3 x, const vec3 y, const vec3 z) {
+    const float sy = fmaxf(-1.0f, fminf(1.0f, z.x));
+    if (fabsf(z.x) < 0.9999999f) return (vec3) {atan2f(-z.y, z.z), asinf(sy), atan2f(-y.x, x.x)};
+    return (vec3) {atan2f(y.z, y.y), asinf(sy), 0.0f};
+}
+
+// The wrist item (v10 genArms' wrist frame, genWristFrame, and the wristMeshes loop in its player
+// build): on the left arm of the own and preview models, for every arm pose. The frame is a child of
+// the arm, at wristCuff * lowerArmLength (0.225 * 2.7) below the forearm's centre along the forearm: its
+// +Z is the forearm's down axis, its +Y is up made orthogonal to it. The frame's scale is wristScale *
+// the arm's width (genArm's 1.2, times 0.68 in the first person), `unit` is that width / 1.2, and the
+// item sits in the frame at -sitOff * unit, rotated (sxRot, -PI / 2 + syRot, szRot), scaled by
+static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, const int third_person) {
     PlayerArmMesh *arm = arms->left;
     if (!arm || !arm->lower) return;
+    const float unit = third_person ? 1.0f : 0.68f;
+    const float arm_width = game_constants.arm_scale * unit;
+
+    // the forearm's rotation is about x only: its down axis is (0, -cos, -sin), its centre is lower.position
+    const MeshTransform *lower = &arm->lower->transform;
+    const float c = cosf(lower->rotation.x), s = sinf(lower->rotation.x);
+    const float cuff = -game_constants.wrist_cuff * game_constants.lower_arm_length;
+
     MeshTransform *holder = &arms->wrist_holder;
+    holder->parent = &arm->anchor;
     holder->scale = (vec3) {1.0f, 1.0f, 1.0f};
-    vec3 rotation;
-    if (melee_pose) {
-        holder->parent = &arm->pivot;
-        holder->position = (vec3) {-1.55f - wrist->sit_off_x, -1.4f - wrist->sit_off, 1.0f - wrist->sit_off_z};
-        rotation = (vec3) {wrist->sx_rot, wrist->sy_rot, wrist->sz_rot};
-    } else {
-        const MeshTransform *lower = &arm->lower->transform;
-        const float rx = lower->rotation.x, d = -0.575f;
-        holder->parent = &arm->anchor;
-        holder->position = (vec3) {lower->position.x, lower->position.y + d * cosf(rx), lower->position.z + d * sinf(rx)};
-        holder->rotation = lower->rotation;
-        rotation = (vec3) {(float) -M_PI * 0.5f, (float) -M_PI * 0.5f, 0.0f};
-    }
-    arms->wrist_model = generate_item_model(wrist, 0.0f, rotation, item_scl(wrist), holder);
-    if (!arms->wrist_model) arms->wrist = generate_item_mesh(wrist, 0.0f, rotation, item_scl(wrist), holder);
+    holder->rotation_order = ROTATION_ORDER_INTRINSIC;
+    holder->position = (vec3) {lower->position.x, lower->position.y + cuff * c, lower->position.z + cuff * s};
+
+    // genWristFrame: Z = the forearm's down axis, Y = world up made orthogonal to Z, X = Y x Z
+    const vec3 z = {0.0f, -c, -s};
+    vec3 y = {0.0f, s * s, -c * s};
+    const float y_len = sqrtf(y.y * y.y + y.z * y.z);
+    y = y_len > 1e-6f ? (vec3) {0.0f, y.y / y_len, y.z / y_len} : (vec3) {0.0f, 0.0f, 1.0f};
+    const vec3 x = {y.y * z.z - y.z * z.y, y.z * z.x - y.x * z.z, y.x * z.y - y.y * z.x};
+    holder->rotation = euler_xyz_from_axes(x, y, z);
+
+    // the item inside the frame (players.js:1127-1130 / v10 loadMesh(item, -sitOffX, -sitOff, -sitOffZ) * unit)
+    const vec3 at = {-wrist->sit_off_x * unit, -wrist->sit_off * unit, -wrist->sit_off_z * unit};
+    const vec3 rotation = {wrist->sx_rot, (float) -M_PI * 0.5f + wrist->sy_rot, wrist->sz_rot};
+    const float scale = game_constants.wrist_scale * arm_width * item_scl(wrist);
+    arms->wrist_model = generate_item_model(wrist, at, rotation, scale, holder);
+    if (!arms->wrist_model) arms->wrist = generate_item_mesh(wrist, at, rotation, scale, holder);
 }
 
 // The weapon charm (players.js:1262-1291): charms/charm_mount_0 at the weapon's charmM{X,Y,Z}Off
@@ -977,7 +998,7 @@ static void player_generate_charm(PlayerArms *arms, const int weapon_id, const V
     arms->charm_mount->transform.parent = &arms->anchor;
 
     const vec3 rotation = {0.0f, (float) -M_PI, 0.0f};
-    arms->charm = generate_item_mesh(charm, 0.0f, rotation, mount->scl, &arms->charm_mount->transform);
+    arms->charm = generate_item_mesh(charm, (vec3) {0.0f, 0.0f, 0.0f}, rotation, mount->scl, &arms->charm_mount->transform);
     if (arms->charm) {
         arms->charm->transform.position = (vec3) {mount->offset[0], mount->offset[1] + 0.17f, mount->offset[2]};
         ((BasicMaterial *) arms->charm->material)->base.transparent = 1;
@@ -1425,7 +1446,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                 }
                 // v7 builds it for isYou only, so the viewer's preview never showed its Wrist pick: KrunkNative also
                 // dresses preview players (uid -1)
-                if (look.wrist && (player->is_you || player->uid == -1)) player_generate_wrist(arms, look.wrist, arms->melee_pose);
+                if (look.wrist && (player->is_you || player->uid == -1)) player_generate_wrist(arms, look.wrist, third_person);
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
                 // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.

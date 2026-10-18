@@ -81,6 +81,8 @@ typedef struct {
     float step_anim;
     float step_pull;
     float disk_spin;
+    float wrist_cuff;  // v10 wristCuff: the wrist frame sits wrist_cuff * lower_arm_length below the forearm's centre
+    float wrist_scale; // v10 wristScale: the wrist frame's scale is wrist_scale * the arm's width
 } GameConstants;
 
 // Krunker v10.0.2's physics and animation constants (shared/src/rules/v10/constants_v10.c).

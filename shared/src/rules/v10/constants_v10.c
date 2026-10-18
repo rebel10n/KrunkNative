@@ -89,4 +89,6 @@ const GameConstants game_constants = {
     .step_anim = 0.075f,
     .step_pull = 0.995f,
     .disk_spin = 0.2f,
+    .wrist_cuff = 0.225f,
+    .wrist_scale = 0.5f,
 };
