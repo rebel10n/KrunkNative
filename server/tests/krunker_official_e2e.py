@@ -127,7 +127,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
-        "--joinlines": "joinlines"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--joinlines": "joinlines", "--framecap": "framecap"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -3286,6 +3286,39 @@ def run_native_kick():
     check(f"{label}: no reconnect by itself", len(stub.ws_paths) == 1, stub.ws_paths)
 
 
+def q_dts(args):
+    """The dt values of one "q" (args[2]: one string of equal-width numbers, args[3] their width; or an array)."""
+    dts = args[2] if len(args) > 2 else None
+    if isinstance(dts, list):
+        return [int(v) for v in dts]
+    width = int(args[3]) if len(args) > 3 and isinstance(args[3], (int, float)) else 0
+    if not isinstance(dts, str) or width <= 0:
+        return []
+    return [int(dts[i:i + width]) for i in range(0, len(dts), width)]
+
+
+def run_native_frame_cap():
+    """v10's gameLoop caps the frame time at config.dltMx (33 ms) before it feeds the input frames
+    (game.deob's gameTimeDiff = min(frame, dltMx), v10.js:221340-221341; inputFrameDelta / the "q" window sum
+    the capped time). The server's procInputs clamps each input's dt to the same 33 ms (v10.js:169582). A long
+    frame (a stall: KRUNKNATIVE_FIXED_DELTA steps every frame 100 ms here) must go out as 33 ms, never as its
+    full length: the official server never sees a "q" the v10 client could not send."""
+    label = "native-frame-cap"
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "5000 down W\n9000 up W\n10000 quit\n" % PASTE_TOKEN)
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_FIXED_DELTA": "100"}, scenario="spawn")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    qs = [a for (n, a, _) in stub.frames if n == "q"]
+    dts = [d for a in qs for d in q_dts(a)]
+    check(f"{label}: the client sent \"q\" windows with input frames while W was held", len(qs) >= 3 and len(dts) >= 3, (len(qs), dts[:6]))
+    over = [d for d in dts if d > 33]
+    check(f"{label}: every input frame's dt is at most 33 ms (the frame time is capped, as v10's gameLoop does)", not over, over[:6])
+    check(f"{label}: a stalled frame is a 33 ms input frame, not its 100 ms", any(d == 33 for d in dts), sorted(set(dts))[:6])
+
+
 def run_native_fx():
     """Combat visuals / sounds (krunker_link.c fx): the stub (Stub.fx_phases) has its bot shoot, fire a
     rocket, explode and play sounds; the client's vfx / projectile / audio logs show what it made of them."""
@@ -4385,6 +4418,7 @@ def main():
         run_native_kio_list()
         run_native_badmap()
         run_native_kick()
+        run_native_frame_cap()
         run_native_fx()
         run_native_optout()
         run_native_exclude()
@@ -4450,6 +4484,8 @@ def main():
         run_native_full_answer()
         run_native_f4_stays_official()
         run_native_seek_modes()
+    if ONLY == "framecap" and os.path.isfile(f"{BUILD}/client_bin"):  # just the input frame cap run (a stalled frame's dt)
+        run_native_frame_cap()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
         run_native_fx()
     if ONLY == "bomb" and os.path.isfile(f"{BUILD}/client_bin"):  # just the Bombardment bombs run

@@ -2118,6 +2118,9 @@ void client_tick(Client *client, const float now, const float delta) {
     gpu_timer_frame_end();
 }
 
+// config.dltMx = Math.round(1000 / 30): the longest frame the game loop counts (gameTimeDiff, v10.js:221341)
+#define INPUT_FRAME_MAX_MS 33.0f
+
 static void client_tick_game(Client *client, const float now, const float frame_delta) {
     // deltaMs *= endAnimationTimeLeft / config.endAnim: the round-end slow motion (menu_view.c)
     const float delta = menu_view_world_delta(client, frame_delta);
@@ -2229,7 +2232,12 @@ static void client_tick_game(Client *client, const float now, const float frame_
         mouse_delta.x = look_x;
         mouse_delta.y = look_y;
 
-        const float input_delta = client_recon_sample(client, delta);
+        // v10's gameLoop caps the frame time at config.dltMx = 33 ms before anything reads it (v10.js:221340-221341:
+        // _69429 = min(frame, _7273)), so inputFrameDelta and the "q" window sum the capped time: a long frame
+        // (a hitch, an asset load) is one 33 ms input frame, the server's procInputs clamps to the same 33 ms
+        // (v10.js:169582). The cap follows the round-end slow motion like delta does (menu_view_camera's cap).
+        const float input_cap = (INPUT_FRAME_MAX_MS / 1000.0f) * menu_view_time_scale();
+        const float input_delta = client_recon_sample(client, MIN(delta, input_cap));
         input_sampled = input_delta >= 0.0f;
         input.move_dir = -1;
         input.delta = input_sampled ? input_delta : 0.0f;
