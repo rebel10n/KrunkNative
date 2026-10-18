@@ -942,34 +942,42 @@ static vec3 euler_xyz_from_axes(const vec3 x, const vec3 y, const vec3 z) {
 }
 
 // The wrist item (v10 genArms' wrist frame, genWristFrame, and the wristMeshes loop in its player
-// build): on the left arm of the own and preview models, for every arm pose. The frame is a child of
-// the arm, at wristCuff * lowerArmLength (0.225 * 2.7) below the forearm's centre along the forearm: its
-// +Z is the forearm's down axis, its +Y is up made orthogonal to it. The frame's scale is wristScale *
-// the arm's width (genArm's 1.2, times 0.68 in the first person), `unit` is that width / 1.2, and the
-// item sits in the frame at -sitOff * unit, rotated (sxRot, -PI / 2 + syRot, szRot), scaled by
+// build): on the left arm of the own and preview models, for every arm pose. The frame hangs off the arm's
+// group (v10 armMeshes[i], the arm's pivot here, which the first-person melee pose moves), and is built
+// there: genWristFrame's up axis is the group's, not the arm placement's, so the item stays upright in
+// the melee pose too. It sits at wristCuff * lowerArmLength (0.225 * 2.7) below the forearm's centre along
+// the forearm: its +Z is the forearm's down axis, its +Y is up made orthogonal to it. The frame's scale is
+// wristScale * the arm's width (genArm's 1.2, times 0.68 in the first person), `unit` is that width / 1.2,
+// and the item sits in the frame at -sitOff * unit, rotated (sxRot, -PI / 2 + syRot, szRot), scaled by
 static void player_generate_wrist(PlayerArms *arms, const ViewerSkin *wrist, const int third_person) {
     PlayerArmMesh *arm = arms->left;
     if (!arm || !arm->lower) return;
     const float unit = third_person ? 1.0f : 0.68f;
     const float arm_width = game_constants.arm_scale * unit;
 
-    // the forearm's rotation is about x only: its down axis is (0, -cos, -sin), its centre is lower.position
-    const MeshTransform *lower = &arm->lower->transform;
-    const float c = cosf(lower->rotation.x), s = sinf(lower->rotation.x);
+    // genWristFrame: the wrist point (0, -wristCuff * lowerArmLength, 0) of the forearm and the forearm's down
+    // axis, both in the arm group's space (the anchor's rotation included). The forearm is read without its
+    // cube scale: that is the geometry's size, and v10's forearm mesh is unscaled.
+    MeshTransform forearm = arm->lower->transform;
+    forearm.scale = (vec3) {1.0f, 1.0f, 1.0f};
+    MeshTransform *group = &arm->pivot;
     const float cuff = -game_constants.wrist_cuff * game_constants.lower_arm_length;
+    const vec3 origin = transform_point_to(&forearm, (vec3) {0.0f, 0.0f, 0.0f}, group);
+    const vec3 wrist_point = transform_point_to(&forearm, (vec3) {0.0f, cuff, 0.0f}, group);
+    const vec3 down = transform_point_to(&forearm, (vec3) {0.0f, -1.0f, 0.0f}, group);
+    const vec3 z = {down.x - origin.x, down.y - origin.y, down.z - origin.z};
+
+    // Z = the forearm's down axis, Y = world up made orthogonal to Z (v10 (0, 1, 0) in the group), X = Y x Z
+    vec3 y = {-z.y * z.x, 1.0f - z.y * z.y, -z.y * z.z}; // (0, 1, 0) minus its part along Z
+    const float y_len = sqrtf(y.x * y.x + y.y * y.y + y.z * y.z);
+    y = y_len > 1e-6f ? (vec3) {y.x / y_len, y.y / y_len, y.z / y_len} : (vec3) {0.0f, 0.0f, 1.0f};
+    const vec3 x = {y.y * z.z - y.z * z.y, y.z * z.x - y.x * z.z, y.x * z.y - y.y * z.x};
 
     MeshTransform *holder = &arms->wrist_holder;
-    holder->parent = &arm->anchor;
+    holder->parent = group;
     holder->scale = (vec3) {1.0f, 1.0f, 1.0f};
     holder->rotation_order = ROTATION_ORDER_INTRINSIC;
-    holder->position = (vec3) {lower->position.x, lower->position.y + cuff * c, lower->position.z + cuff * s};
-
-    // genWristFrame: Z = the forearm's down axis, Y = world up made orthogonal to Z, X = Y x Z
-    const vec3 z = {0.0f, -c, -s};
-    vec3 y = {0.0f, s * s, -c * s};
-    const float y_len = sqrtf(y.y * y.y + y.z * y.z);
-    y = y_len > 1e-6f ? (vec3) {0.0f, y.y / y_len, y.z / y_len} : (vec3) {0.0f, 0.0f, 1.0f};
-    const vec3 x = {y.y * z.z - y.z * z.y, y.z * z.x - y.x * z.z, y.x * z.y - y.y * z.x};
+    holder->position = wrist_point;
     holder->rotation = euler_xyz_from_axes(x, y, z);
 
     // the item inside the frame (players.js:1127-1130 / v10 loadMesh(item, -sitOffX, -sitOff, -sitOffZ) * unit)
