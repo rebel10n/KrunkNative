@@ -1,9 +1,13 @@
 // Bhop: the v3.1.1 offline build's client mod, ported 1:1 from
 // /home/user/jails/kru/src/Krunker_v3.1.1/mod/mods.ts (BhopMode, BHOP_MODE_ORDER,
-// BHOP_MODE_NAMES, localStorage "bhop", krk_bhop_mode_bind, toggleBhopMode, the
-// window.bhop / window.slideHold key state and patchInputs, which mods.ts runs on every
-// input frame pushed to CONTROLS.tmpInpts). It only rewrites the frame's jump/crouch
-// slots, so prediction and the server see ordinary inputs.
+// BHOP_MODE_NAMES, krk_bhop_mode_bind, toggleBhopMode, the window.bhop / window.slideHold key
+// state and patchInputs, which mods.ts runs on every input frame pushed to CONTROLS.tmpInpts).
+// It only rewrites the frame's jump/crouch slots, so prediction and the server see ordinary inputs.
+//
+// The mode is one setting: knSettings "bhopMode" (a number). The Settings window's Game >
+// Gameplay "Bhop Mode" row (ui_bhop_tick) and the bhop key (ui_bhop_toggle) and /bhop
+// (ui_console.c) all read and write it through ui_bhop_mode / ui_bhop_set_mode, and the row
+// follows it. A mode the v3.1.1 mod kept in localStorage "bhop" moves there once (migrate).
 //
 // KrunkNative mapping:
 //   - patchInputs(inputs) -> ui_bhop_fill_input(client, input), the tail of
@@ -30,8 +34,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BHOP_STORAGE_KEY "bhop"
+#define BHOP_STORAGE_KEY "bhop"       // the v3.1.1 mod's mode key: read once, migrated, removed
+#define BHOP_SETTING_KEY "bhopMode"   // knSettings: the mode (ui_bhop_mode)
 #define BHOP_BIND_KEY "krk_bhop_mode_bind"
+#define BHOP_ROW_ID "knBhopModeSelect"  // the Settings row's <select> (ui_bhop_tick)
+#define BHOP_ROW_SYNCED "data-kn-synced" // set once the row shows the mode (a fresh element lacks it)
 #define BHOP_BIND_DEFAULT "KeyB"
 #define BHOP_LEGACY_HOLD_JUMP_CROUCH 4
 #define BHOP_DOM_SPACE 32
@@ -66,7 +73,8 @@ static const char *bhop_shown_name(const int mode) {
 
 static struct {
     int loaded;
-    int mode;                // window.bhopMode
+    int migrated;            // the localStorage "bhop" mode moved to knSettings (migrate_legacy_mode)
+    int row_shown;           // the mode the Settings row's <select> shows (-1 none)
     char bind[32];           // window.bhopModeKey
     // patchInputs state
     double zero_some, next_zero_some;
@@ -95,46 +103,52 @@ static double pick_zero_some(void) {
     return bhop_random(-0.015, 0.005, 1);
 }
 
-static void store_mode(void) {
-    char text[16];
-    snprintf(text, sizeof(text), "%d", g_bhop.mode);
-    html_storage_set(BHOP_STORAGE_KEY, text);
-}
-
-// window.bhopMode = Number(localStorage.getItem("bhop")) (+ the legacy 4 migration and
-// the isBhopMode fallback); window.bhopModeKey = getSavedVal("krk_bhop_mode_bind") ?? "KeyB".
+// window.bhopModeKey = getSavedVal("krk_bhop_mode_bind") ?? "KeyB"; the zero_some draws.
 static void bhop_load(void) {
     if (g_bhop.loaded) return;
     g_bhop.loaded = 1;
     g_bhop.zero_some = pick_zero_some();
     g_bhop.next_zero_some = pick_zero_some();
+    g_bhop.row_shown = -1;
 
     char text[64];
-    g_bhop.mode = UI_BHOP_DISABLED;
-    if (html_storage_get(BHOP_STORAGE_KEY, text, sizeof(text)) >= 0) {
-        char *end;
-        const double v = strtod(text, &end);
-        const int number = end != text || !text[0]; // Number("") === 0
-        if (number && v == BHOP_LEGACY_HOLD_JUMP_CROUCH) {
-            g_bhop.mode = UI_BHOP_HOLD_JUMP_CROUCH;
-            store_mode();
-        } else if (number && v == floor(v) && order_index((int) v) >= 0) {
-            g_bhop.mode = (int) v;
-        }
-    }
     if (html_storage_get(BHOP_BIND_KEY, text, sizeof(text)) >= 0) snprintf(g_bhop.bind, sizeof(g_bhop.bind), "%s", text);
     else snprintf(g_bhop.bind, sizeof(g_bhop.bind), "%s", BHOP_BIND_DEFAULT);
 }
 
+// window.bhopMode: the knSettings "bhopMode" (a number, or the numeric string a select's
+// setSetting left). Absent, unknown or not a mode number = Disabled.
 int ui_bhop_mode(void) {
-    bhop_load();
-    return g_bhop.mode;
+    double v = 0.0;
+    if (!ui_setting_number(BHOP_SETTING_KEY, &v) || v < 0.0 || v >= 16.0 || v != floor(v) || order_index((int) v) < 0)
+        return UI_BHOP_DISABLED;
+    return (int) v;
 }
 
+// Stores the mode (setSetting("bhopMode", mode): the store, the saved file, the engine); the
+// Settings row follows in ui_bhop_tick.
 void ui_bhop_set_mode(const int mode) {
-    bhop_load();
-    g_bhop.mode = mode == BHOP_LEGACY_HOLD_JUMP_CROUCH ? UI_BHOP_HOLD_JUMP_CROUCH : order_index(mode) >= 0 ? mode : UI_BHOP_DISABLED;
-    store_mode();
+    const int stored = mode == BHOP_LEGACY_HOLD_JUMP_CROUCH ? UI_BHOP_HOLD_JUMP_CROUCH : order_index(mode) >= 0 ? mode : UI_BHOP_DISABLED;
+    const HtmlArg value = {HTML_ARG_NUM, (double) stored, NULL};
+    ui_settings_set(BHOP_SETTING_KEY, &value);
+}
+
+// The v3.1.1 mod's localStorage "bhop" (a number; 4 = the old Hold Jump/Crouch): once the
+// settings are loaded, a stored mode with no knSettings bhopMode moves there, and the old key
+// goes. Once per process.
+static void migrate_legacy_mode(void) {
+    if (g_bhop.migrated || !ui_settings_loaded()) return;
+    g_bhop.migrated = 1;
+    char text[64];
+    if (html_storage_get(BHOP_STORAGE_KEY, text, sizeof(text)) < 0) return;
+    if (!ui_setting_saved(BHOP_SETTING_KEY)) {
+        char *end;
+        const double v = strtod(text, &end);
+        const int number = end != text || !text[0]; // Number("") === 0
+        if (number && v == BHOP_LEGACY_HOLD_JUMP_CROUCH) ui_bhop_set_mode(UI_BHOP_HOLD_JUMP_CROUCH);
+        else if (number && v == floor(v) && order_index((int) v) >= 0) ui_bhop_set_mode((int) v);
+    }
+    html_storage_set(BHOP_STORAGE_KEY, NULL);
 }
 
 const char *ui_bhop_mode_name(const int mode) {
@@ -148,7 +162,7 @@ const char *ui_bhop_mode_name(const int mode) {
 void ui_bhop_announce(char *text, const size_t size) {
     bhop_load();
     char shown[192];
-    I18N_F(shown, "kn.bhop.notify", "Bhop - {0}", bhop_shown_name(g_bhop.mode));
+    I18N_F(shown, "kn.bhop.notify", "Bhop - {0}", bhop_shown_name(ui_bhop_mode()));
     snprintf(text, size, "%s", shown);
     bhop_toast_show(text);
 }
@@ -156,12 +170,11 @@ void ui_bhop_announce(char *text, const size_t size) {
 // toggleBhopMode()
 void ui_bhop_toggle(void) {
     bhop_load();
-    const int index = order_index(g_bhop.mode);
-    g_bhop.mode = BHOP_MODES[((index >= 0 ? index : 0) + 1) % BHOP_MODE_COUNT].mode;
-    store_mode();
+    const int index = order_index(ui_bhop_mode());
+    ui_bhop_set_mode(BHOP_MODES[((index >= 0 ? index : 0) + 1) % BHOP_MODE_COUNT].mode);
     char msg[192];
     ui_bhop_announce(msg, sizeof(msg));
-    printf("Bhop - %s\n", ui_bhop_mode_name(g_bhop.mode)); // console.log(msg): the English name
+    printf("Bhop - %s\n", ui_bhop_mode_name(ui_bhop_mode())); // console.log(msg): the English name
 }
 
 const char *ui_bhop_bind(void) {
@@ -174,6 +187,75 @@ void ui_bhop_set_bind(const char *code) {
     bhop_load();
     snprintf(g_bhop.bind, sizeof(g_bhop.bind), "%s", code ? code : "");
     html_storage_set(BHOP_BIND_KEY, g_bhop.bind);
+}
+
+/* ------------------------------------------------------------ Settings row */
+
+// The Settings window's Bhop Mode row, first in Game > Gameplay (setBod_gameplay: the basic and
+// the advanced view both have it). A <select> of the five modes in BHOP_MODES order; the row
+// shows the mode, a pick stores it (ui_bhop_set_mode), and a mode changed elsewhere (the bhop
+// key, /bhop) moves the row. The rows are inserted at run time like the mods rows (ui_mods.c):
+// the captured window templates are v10's and cannot carry a row v10 does not have.
+static void insert_row(void) {
+    const HtmlElem body = html_dom_by_id("setBod_gameplay");
+    if (!body || html_dom_by_id(BHOP_ROW_ID)) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"settName\" title=\"\" data-bhop-mode-setting=\"1\">");
+    sb_append_esc(&sb, I18N("kn.mods.bhopMode", "Bhop Mode"));
+    sb_append(&sb, " <select id=\"" BHOP_ROW_ID "\" class=\"inputGrey2\">");
+    for (int i = 0; i < BHOP_MODE_COUNT; i++) {
+        sb_appendf(&sb, "<option value=\"%d\">", BHOP_MODES[i].mode);
+        sb_append_esc(&sb, bhop_shown_name(BHOP_MODES[i].mode));
+        sb_append(&sb, "</option>");
+    }
+    sb_append(&sb, "</select></div>");
+    char *rows = sb_finish(&sb);
+    html_dom_insert_html(body, HTML_INSERT_AFTER_BEGIN, rows);
+    free(rows);
+}
+
+static void row_show(const HtmlElem sel, const int mode) {
+    char value[8];
+    snprintf(value, sizeof(value), "%d", mode);
+    html_dom_set_value(sel, value);
+    g_bhop.row_shown = mode;
+}
+
+// The mode the row's <select> holds, or -1 when it holds no mode number.
+static int row_picked(const HtmlElem sel) {
+    char text[8] = "";
+    if (html_dom_get_value(sel, text, sizeof(text)) < 0) return -1;
+    char *end;
+    const double v = strtod(text, &end);
+    return end != text && v == floor(v) && v >= 0.0 && v < 16.0 ? (int) v : -1;
+}
+
+// Per frame (ui_mods_tick, once the page is up): the legacy mode migration, and the Settings
+// row's sync. A fresh row shows the mode; a pick the row shows that the mode does not hold is
+// the player's (stored); otherwise a mode that moved (the bhop key, /bhop, a reset) moves the row.
+void ui_bhop_tick(void) {
+    bhop_load();
+    migrate_legacy_mode();
+    if (!menu_window_is_open()) return;
+    const HtmlElem sel = html_dom_by_id(BHOP_ROW_ID);
+    if (!sel) {
+        insert_row();
+        return;
+    }
+    const int mode = ui_bhop_mode();
+    char mark[4];
+    if (html_dom_get_attr(sel, BHOP_ROW_SYNCED, mark, sizeof(mark)) < 0) {
+        html_dom_set_attr(sel, BHOP_ROW_SYNCED, "1");
+        row_show(sel, mode);
+        return;
+    }
+    const int picked = row_picked(sel);
+    if (picked >= 0 && picked != g_bhop.row_shown) {
+        g_bhop.row_shown = picked;
+        if (picked != mode) ui_bhop_set_mode(picked);
+        return;
+    }
+    if (mode != g_bhop.row_shown) row_show(sel, mode);
 }
 
 /* ------------------------------------------------------------ patchInputs */
@@ -236,7 +318,7 @@ void ui_bhop_fill_input(Client *client, Input *input) {
         reset_ramp_bhop_timer();
         return;
     }
-    const int mode = g_bhop.mode;
+    const int mode = ui_bhop_mode();
     if (mode == UI_BHOP_DISABLED) {
         g_bhop.state = 0;
         reset_ramp_bhop_timer();

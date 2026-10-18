@@ -215,6 +215,7 @@ int         servers_ui_host_type(void);                   // GAME_HOST_CUSTOM un
 
 // ---- ui_settings.c
 void ui_settings_load(void);                     // loadSettings (knSettings)
+int  ui_settings_loaded(void);                   // 1 once ui_settings_load has run (the store exists)
 void ui_settings_collect_defaults(void);         // collectDefaults (scraped from the settings tabs)
 const cJSON *ui_setting_value(const char *key);  // settingValue: saved else default, NULL unknown
 const cJSON *ui_setting_saved(const char *key);  // settings[key] only
@@ -755,8 +756,9 @@ enum {
     UI_BHOP_DISABLED = 0, UI_BHOP_SLIDEHOP = 1, UI_BHOP_HOLD_JUMP_CROUCH = 2,
     UI_BHOP_ALWAYS_JUMP = 3, UI_BHOP_HOLD_JUMP = 5 // mods.ts BhopMode (4 = legacy HOLD_JUMP_CROUCH)
 };
-int  ui_bhop_mode(void);                         // window.bhopMode (BhopMode value)
-void ui_bhop_set_mode(int mode);                 // window.bhopMode/bhopEnabled + localStorage "bhop"; no toast
+int  ui_bhop_mode(void);                         // window.bhopMode (BhopMode value): knSettings "bhopMode", Disabled when unset
+void ui_bhop_set_mode(int mode);                 // setSetting("bhopMode", mode): stored; the Settings row follows (ui_bhop_tick); no toast
+void ui_bhop_tick(void);                         // per frame (ui_mods_tick): the legacy "bhop" key migration, the Settings Bhop Mode row
 const char *ui_bhop_mode_name(int mode);         // BHOP_MODE_NAMES ("Disabled", "Slidehop (while moving)", ...)
 void ui_bhop_toggle(void);                       // toggleBhopMode: next in BHOP_MODE_ORDER, store, bhop toast
 void ui_bhop_announce(char *text, size_t size);  // "Bhop - <current mode>" into text, and the bhop toast (toggle, /bhop)

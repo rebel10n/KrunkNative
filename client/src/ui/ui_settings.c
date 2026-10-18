@@ -309,6 +309,10 @@ void ui_settings_collect_defaults(void) {
 
 // ---------------------------------------------------------------- lookups
 
+int ui_settings_loaded(void) {
+    return g_settings != NULL;
+}
+
 const cJSON *ui_setting_saved(const char *key) {
     return g_settings ? cJSON_GetObjectItem(g_settings, key) : NULL;
 }

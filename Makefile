@@ -379,6 +379,9 @@ console-settings-test: build ## Dev console switch survives Settings opens / res
 raw-mouse-test: build ## Raw mouse motion has one switch (Controls > Raw Mouse Input): on by default, off and on by click, stored Raw Input migrates once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raw_mouse_e2e.py $(DEBUG_DIR)
 
+bhop-setting-test: build ## The bhop mode is one setting (Settings > Game > Gameplay > Bhop Mode): the row shows five modes, the movement follows it, the bhop key moves the row, it survives a restart, the v3.1.1 "bhop" key migrates (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1200 $(PYTHON) -I client/tests/bhop_setting_e2e.py $(DEBUG_DIR)
+
 fps-uncapped-test: build ## Launch paths run uncapped with V-Sync and Frame Cap off in the stored settings: make -n pacing, no display, windowed (xvfb-run), --flavor strike's store
 	timeout 900 $(PYTHON) -I client/tests/fps_uncapped_e2e.py $(DEBUG_DIR)
 

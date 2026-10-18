@@ -349,6 +349,7 @@ void ui_mods_tick(Client *client) {
     ensure_setting_rows();
     ensure_bind_rows();
     poll_switches();
+    ui_bhop_tick(); // the Settings' Bhop Mode row (ui_bhop.c)
 }
 
 // ---------------------------------------------------------------- pointer / capture
