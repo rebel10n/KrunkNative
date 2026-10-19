@@ -2,9 +2,10 @@
 // doc/v10/official-captcha.md): the matchmaker's Cloudflare Turnstile, solved by the player, and the
 // game socket's ALTCHA proof of work, solved by krunker_altcha.c and only shown here.
 //
-// The look is the live client's socket-captcha modal (game.deob.js showCaptcha, :98251: a dim
-// full-screen holder, a white 450 px box, "SECURITY CHALLENGE" 32 px uppercase, the grey 20 px line
-// "Please complete the security challenge to continue."), in ui/css/krunknative.css (.kn-captcha-*).
+// The look is v10's: the Turnstile widget centred on v10's black loading overlay (rgba(0, 0, 0, 0.7),
+// the spinner's place while the join loads: the #instructions ring is hidden meanwhile), v10's white
+// and grey type, the 15 px gap of its loading overlay, Cancel. The v3.1.1 white box is gone; the text
+// stays "Please complete the security challenge to continue.", in ui/css/krunknative.css (.kn-captcha-*).
 // The markup is built here on the page's <body> (outside #uiBase, so the closed-menu pointer rule does
 // not reach it), the same on both platforms; its buttons call the one page handler knCaptcha(n).
 //
@@ -133,6 +134,11 @@ static void show(const char *id, const int on) {
     if (e) html_dom_set_display(e, on ? "" : "none");
 }
 
+// The join's loading ring (#instructions: menu_update_instructions' spinner while the game is not yet
+// playable) is the captcha's place on the page: while the modal is up the Turnstile widget stands there
+// on v10's black loading overlay, and the ring comes back when the modal closes.
+static void loading_ring(const int on) { show("instructions", on); }
+
 static void set_text(const char *id, const char *text) {
     const HtmlElem e = html_dom_by_id(id);
     if (e) html_dom_set_text(e, text ? text : "");
@@ -142,6 +148,7 @@ static void hide_modal(void) {
     const HtmlElem h = html_dom_by_id("knCaptchaHolder");
     if (!h) return;
     html_dom_set_display(h, "none");
+    loading_ring(1);
     html_dom_set_class(h, "kn-captcha-passive", 0);
     show("knCaptchaWebview", 0);
     C.needs_player = 0;
@@ -278,6 +285,7 @@ static void show_window_prompt(const char *status) {
     if (!h) return;
     html_dom_set_class(h, "kn-captcha-passive", 0);
     html_dom_set_display(h, "");
+    loading_ring(0);
     C.needs_player = 1;
     show("knTurnstileHolder", 0);
     show("knCaptchaRetry", 0);
@@ -296,6 +304,7 @@ static void show_inline_prompt(const char *status) {
     if (!h) return;
     html_dom_set_class(h, "kn-captcha-passive", 0);
     html_dom_set_display(h, "");
+    loading_ring(0);
     C.needs_player = 1;
     show("knTurnstileHolder", 0);
     show("knCaptchaRetry", 0);
@@ -497,6 +506,7 @@ static void present(void) {
     set_text("knCaptchaStatus", rejected ? I18N("kn.captcha.refused", "krunker.io refused that token (they work once, for 5 minutes): one more, please.") : "");
 #ifdef __EMSCRIPTEN__
     html_dom_set_display(h, "");
+    loading_ring(0);
     C.needs_player = 1;
     set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
     widget_start();
@@ -505,6 +515,7 @@ static void present(void) {
     // by itself). It appears when the window is shown (KN_WEBVIEW_SHOWN) or closed (show_window_prompt).
     // With no window to try, the request ends unavailable at once (finish_with: nothing is shown).
     html_dom_set_display(h, "none");
+    loading_ring(1);
     C.needs_player = 0;
     show("knCaptchaWebview", 0);
     C.inline_press = 0;
@@ -671,6 +682,7 @@ void krunker_captcha_pow_end(const int solved) {
     C.needs_player = 0; // the passive notice: nothing to click
     html_dom_set_class(h, "kn-captcha-passive", 1);
     html_dom_set_display(h, "");
+    loading_ring(0);
     show("knTurnstileHolder", 0);
     show("knCaptchaRetry", 0);
     show("knCaptchaSolve", 0);

@@ -105,8 +105,9 @@ challenge". Cloudflare's interstitial alone is not a reason (it may pass by itse
   setting or the environment; `http://` and `socks5://` proxies; loopback direct), so the challenge is
   solved from the network the seek comes from.
 - **The challenge is drawn in the game UI (Linux, the default).** When the player is needed, the
-  modal shows the challenge where the live client shows its Turnstile holder: the dim backdrop, the
-  white box, "Security Challenge", the text and Cancel, with the widget centred in it. No OS window
+  modal shows the challenge where the live client shows its Turnstile holder: v10's black loading
+  backdrop (the join spinner's place, which is hidden meanwhile), "Security Challenge", the text and Cancel,
+  with the widget centred in it. No OS window
   opens. The view stays in its hidden GTK offscreen host; the page is only the widget on a transparent
   background (the robots.txt text is hidden, no card). Each paint of the host is converted
   (cairo ARGB32, premultiplied, to straight RGBA8) and put into a `<canvas>` of the modal

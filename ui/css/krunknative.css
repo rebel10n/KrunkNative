@@ -815,10 +815,10 @@ html.kn-bare-window #instructions {
 }
 
 /* The "Security Challenge" modal of official krunker.io games (client/src/ui/krunker_captcha_ui.c):
- * the live client's socket-captcha modal (game.deob.js showCaptcha): a dim full-screen holder, a
- * white 450 px box with a 9 px grey drop, "SECURITY CHALLENGE" 32 px uppercase, a grey 20 px line.
- * Centred with flex (no transform), above everything, scrolling when the window is too short.
- * Passive (the "cpt" proof of work): no input. */
+ * v10's look: the Turnstile widget centred on v10's black loading overlay (rgba(0, 0, 0, 0.7), the
+ * spinner's place while the join loads; the join ring is hidden meanwhile), no white box, the title in
+ * v10's uppercase white, the grey text line, v10's 15 px gap, Cancel. Centred with flex (no transform),
+ * above everything, scrolling when the window is too short. Passive (the "cpt" proof of work): no input. */
 .kn-captcha-holder {
   position: fixed;
   top: 0;
@@ -826,7 +826,7 @@ html.kn-bare-window #instructions {
   right: 0;
   bottom: 0;
   z-index: 2147483647; /* above v10's view stack (2147483646): a krunker.io sign-in's challenge shows over the login modal */
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.7); /* v10's loading overlay */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -837,12 +837,8 @@ html.kn-bare-window #instructions {
   pointer-events: none !important;
 }
 .kn-captcha-modal {
-  background-color: white;
-  color: black;
-  padding: 20px;
-  border-radius: 6px;
-  box-shadow: 0px 9px 0px 0px #a6a6a6;
-  width: 450px;
+  background-color: transparent;
+  color: #fff;
   max-width: calc(100% - 60px);
   max-height: calc(100% - 40px);
   overflow-y: auto;
@@ -850,26 +846,27 @@ html.kn-bare-window #instructions {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 15px; /* v10's loading overlay */
   text-align: center;
   pointer-events: all;
 }
 .kn-captcha-title {
-  font-size: 32px;
+  font-size: 22px;
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin: 0;
 }
 .kn-captcha-text {
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 20px;
-  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  margin: 0;
 }
 .kn-captcha-status {
-  color: rgba(0, 0, 0, 0.8);
-  font-size: 16px;
-  margin-bottom: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin: 0;
 }
 .kn-captcha-widget {
-  margin-bottom: 6px;
+  margin: 0;
 }
 /* The challenge drawn in the game UI (native webview, krunker_captcha_ui.c webview_frame): the page's
  * widget on its transparent background, centred where the widget sits (the bitmap is its own size). */
@@ -887,7 +884,7 @@ html.kn-bare-window #instructions {
 .kn-captcha-btn {
   display: inline-block;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
   color: white;
   background-color: #2196f3;
   padding: 6px 16px;
@@ -901,7 +898,7 @@ html.kn-bare-window #instructions {
   background-color: #42a5f5;
 }
 .kn-captcha-actions {
-  margin-top: 8px;
+  margin-top: 0;
 }
 .kn-captcha-cancel {
   background-color: #9e9e9e;
