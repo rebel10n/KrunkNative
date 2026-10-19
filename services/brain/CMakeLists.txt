@@ -502,6 +502,10 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_market_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_market_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_market_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e")
+    # the Junkyard's craft screen from the Store's tile: recipes listed, craft through the confirmation (materials taken, the skin granted), the result popup
+    add_test(NAME brain_junkyard_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/junkyard_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_junkyard_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;craft;e2e")
     add_test(NAME brain_economy_web_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_economy_web_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e;web")
