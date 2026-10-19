@@ -43,6 +43,9 @@ being let through (no challenge: the matchmaker lets it pass, see Stub.captcha_f
 "native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
 Server browser TLS run (--tls alone; part of --native): "native-kio-tls" (the ping list names a region whose host fails
 the TLS handshake: its official lobbies are left out of the list and its group is gone; the reachable region stays).
+Offline-leave run (--offline-leave alone; part of --native): "native-offline-from-official" (--krunker, FRA:bbbbb joined,
+the console's `offline`: the official session closes on purpose, the sandbox plays, nothing rejoins; before the fix the
+console said "offline failed: the offline game did not start").
 Reload runs (--reload alone): "native-reload" (--krunker, a lobby joined, F5: the relaunched client,
 whose command line alone would join the matchmaker's pick, rejoins that official game by its id) and
 "native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
@@ -126,7 +129,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
-        "--joinlines": "joinlines", "--framecap": "framecap"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -3541,6 +3544,48 @@ def run_native_reload(gone):
           "[mm] launch seek" not in after and "[mm] joining" not in after, "")
 
 
+def run_native_offline_leave():
+    """The console's `offline` from an official krunker.io game: the official session is left (an intended close: no
+    error screen, no rejoin), the in-process sandbox starts (\"offline: playing map\"), and the client plays it. Before
+    the fix the close left net_connected set (krunker_net has no net thread for stop_net to clear it), so the offline
+    start was skipped and the console said \"offline failed: the offline game did not start\"."""
+    label = "native-offline-from-official"
+    script = ('0 boot\n3000 call krunkerJoin "FRA:bbbbb"\n9000 state\n9100 players\n'
+              "9500 con offline\n12000 state\n12100 players\n12500 con status\n15000 quit\n")
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+
+    stub, p, out, log = launch_native(label, script, {}, args=("--krunker",), stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    i = next((n for n, l in enumerate(lines) if re.search(r"\[console\] \] offline$", l)), len(lines))
+    before, after = "\n".join(lines[:i]), "\n".join(lines[i:])
+    check(f"{label}: the client is in the official game when `offline` is typed (its lobby joined, the stub's players listed)",
+          "[krunker] official lobby FRA:bbbbb: joining in-client" in before and re.search(r"input_script\] players t=\d+ n=\d+ .*StubBot", before) is not None,
+          re.findall(r"input_script\] players .*", before)[-1:])
+    check(f"{label}: the offline game does not fail to start (no \"did not start\" text)",
+          "did not start" not in text and "offline failed" not in text, [l for l in lines if "did not start" in l][:2])
+    check(f"{label}: the official session is left (its socket closes on purpose, once)",
+          "[krunker] leaving the official game" in after and after.count("socket closed (code 1000: left)") == 1,
+          [l for l in lines if "[krunker] leaving" in l or "socket closed" in l][-2:])
+    check(f"{label}: the in-process sandbox starts the offline game",
+          "offline: playing map" in after and "[menu] started the offline game (in-process)" in after,
+          [l for l in lines if "offline:" in l][-2:])
+    check(f"{label}: nothing rejoins the official game after the switch (no seek, no join, no socket)",
+          "seek-game" not in after and "joined as sid" not in after and "opening ws://" not in after,
+          [l for l in after.splitlines() if "seek-game" in l or "opening ws" in l or "joined as sid" in l][:2])
+    st = re.findall(r"\[input_script\] state t=\d+ .*", after)
+    check(f"{label}: the player is in the offline game (no menu, locked, on the sandbox's map)",
+          st and " menu=0 locked=1 " in st[-1], st[-1:])
+    check(f"{label}: the status names the offline game (no official lobby, no socket)",
+          "[console] Connection: offline | socket -1" in after and "[console] Lobby: (none)" in after,
+          [l for l in lines if "[console] Connection" in l or "[console] Lobby" in l][-2:])
+    players = re.findall(r"\[input_script\] players t=\d+ .*", after)
+    check(f"{label}: the official game's players are gone (the sandbox's own players only)",
+          players and "StubBot" not in players[-1], players[-1:])
+
+
 # ---------------------------------------------------------------- native: the live Krunker build
 
 LIVE_SCRIPT = ("0 boot\n4000 play\n5000 text @timer0 [id=timerVal]\n5500 text @feed0 [id=killFeed]\n6500 text @feed1 [id=killFeed]\n"
@@ -4294,6 +4339,7 @@ def main():
         run_native_seek_modes()
         run_native_reload(False)
         run_native_reload(True)
+        run_native_offline_leave()
         run_native_live()
         run_native_live_refused()
         run_native_live_stale()
@@ -4353,6 +4399,8 @@ def main():
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs
         run_native_reload(False)
         run_native_reload(True)
+    if ONLY == "offline-leave" and os.path.isfile(f"{BUILD}/client_bin"):  # just `offline` from an official game
+        run_native_offline_leave()
     if ONLY in ("", "native", "state") and os.path.isfile(f"{BUILD}/client_bin"):  # joining mid end screen, leaving
         run_native_join_end()
         run_native_leave_state()

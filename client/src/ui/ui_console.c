@@ -1289,17 +1289,28 @@ static void clear_ping_counter(void) {
     if (icon) html_dom_set_style(icon, "color", "gray");
 }
 
+// Leaves the online session for the offline game. An official krunker.io game (krunker_net, no net
+// thread) closes as an intended switch: no error screen, no rejoin. A Box Office server's transport stops
+// (stop_net). Either way net_connected is false before menu_host_offline: menu_request_play starts the
+// offline game only when nothing is connected, and the transport's own status arrives too late for that.
+// The packets the old session queued are applied now, to that session, not to the offline game after it.
+static void leave_online(Client *client) {
+#ifndef __EMSCRIPTEN__
+    krunker_net_leave(client, NULL); // an official game: its socket closes on purpose (no-op when none)
+    stop_net(client);
+#else
+    if (client->net_connected) client_net_disconnect(client, "Offline", "000000"); // (an official game too: krunker_net_leave)
+#endif
+    client->net_connected = 0;
+    client_tick_net(client);
+}
+
 // playCustomMap() (the single player game) + clearPingCounter(): leave the server for the
 // in-process sandbox server. `catalog_index` (-1 none) is the map it starts on, or the one a
 // running offline game reloads on (local_game_pick_map).
 void ui_console_go_offline(Client *client, const int catalog_index, const char *command) {
     nav_overlay_map_switch(); // runOfflineSandbox: clearNavOverlayForMapSwitch + scheduleNavOverlayRebuild
-#ifndef __EMSCRIPTEN__
-    if (!client->offline) stop_net(client);
-#else
-    if (!client->offline && client->net_connected) client_net_disconnect(client, "Offline", "000000");
-    client->net_connected = 0;
-#endif
+    if (!client->offline) leave_online(client);
     if (catalog_index >= 0 && local_game_pick_map(client, catalog_index) < 0) {
         appendf(COL_ERROR, "%s failed: map %s could not be loaded", command, map_catalog_at((size_t) catalog_index)->key);
         return;

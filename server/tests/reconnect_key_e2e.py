@@ -9,7 +9,8 @@ cmd_offline, client/src/main.c --sandbox / --map).
 
   1. online: server_bin on a free port (kn_proto.free_ports); a headless client_bin joins it
      (--connect) and plays; `reload` reloads and rejoins the same server (the server sees a second
-     join) and the player is back in the game (input script `state`: menu closed, a weapon, a new spawn)
+     join) and the player is back in the game (input script `state`: menu closed, a weapon, a new spawn);
+     `offline` from that Box Office server starts the offline game (online_offline)
   2. offline: client_bin --offline --map kanji plays the catalogue's Kanji; `reload` restarts the
      local game on the same map; `sandbox` switches to the sandbox map (catalogue "Test"), `reload`
      restarts it there; after `disconnect` the console's `reconnect` starts the offline game again on
@@ -114,6 +115,7 @@ def in_game(state):
 def main():
     try:
         online()
+        online_offline()
         offline()
         sandbox_flag()
         f5_relaunch()
@@ -161,6 +163,30 @@ def online():
     spawned = [l for l in between(lines, r"\[reload\] rejoining the server") if "@spawn0" in l]
     check("online: still in the game after the reconnect (spawned again)",
           len(st) >= 2 and in_game(st[1]) and bool(spawned), f"states {st}; spawn lines {spawned[:1]}")
+
+
+def online_offline():
+    """A Box Office server (TCP, the net thread): the console's `offline` leaves it for the offline game and starts
+    that game (the transport stops, its status clears the connection before the start). Its message never shows."""
+    (port,) = free_ports(1)
+    server_log = os.path.join(WORK, "server-offline.log")
+    with open(server_log, "w") as out:
+        server = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", "none", "--port", str(port)], stdout=out,
+                                  stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    procs.append(server)
+    lines = run_client("online-offline", ["--connect", f"127.0.0.1:{port}"],
+                       "0 play\n3000 state\n5000 con offline\n9000 state\n12000 quit\n")
+    os.killpg(server.pid, signal.SIGTERM)
+    server.wait(timeout=10)
+    st = states(lines)
+    check("online-offline: the client plays on the Box Office server first", st and in_game(st[0]), f"states {st}")
+    after = between(lines, r"\] offline$")
+    check("online-offline: `offline` starts the offline game (the server is left)",
+          any("offline: playing map" in l for l in after) and any("[menu] started the offline game" in l for l in after),
+          "; ".join(after[:4]))
+    check("online-offline: no \"did not start\" text", not any("did not start" in l for l in lines),
+          [l for l in lines if "did not start" in l][:2])
+    check("online-offline: the player is in the offline game", len(st) >= 2 and in_game(st[-1]), f"states {st}")
 
 
 def offline():
