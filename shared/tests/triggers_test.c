@@ -663,6 +663,74 @@ static void test_events(void) {
     printf("events done\n");
 }
 
+// ---------------------------------------------------------------- Reward Junk (doc/v10/junk.md)
+
+// the scripted wallet (GameHooks.junk_credit): what the game asks kn_brain to credit
+static int g_junk_calls;
+static int g_junk_uid;
+static int64_t g_junk_hundredths;
+static char g_junk_reason[16];
+static void test_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {
+    (void) game;
+    g_junk_calls++;
+    g_junk_uid = player->uid;
+    g_junk_hundredths = hundredths;
+    snprintf(g_junk_reason, sizeof(g_junk_reason), "%s", reason ? reason : "");
+}
+
+// the pickup fires for p with the map's text (tct) as its amount
+static void junk_pickup(Game *game, Player *p, const char *text) {
+    TriggerActionData *act = &obj(game, 0)->trig->actions[0];
+    snprintf(act->text, sizeof(act->text), "%s", text);
+    act->has_text = 1;
+    g_junk_calls = 0;
+    clear_sent();
+    fire(game, p, 0);
+}
+
+static void test_reward_junk(void) {
+    Game g;
+    make_game(&g, "{\"name\":\"t\"," SPAWNS ",\"objects\":["
+        "{\"i\":29,\"p\":[0,0,0],\"s\":[10,10,10],\"te\":0,\"tas\":[{\"ta\":59,\"tct\":\"0.01\"}]}"
+        "]}");
+    g.hooks.junk_credit = test_junk_credit;
+    Player *a = add_player(&g, 1);
+    g_has_account = 1;
+    junk_pickup(&g, a, "0.01");
+    CHECK(g_junk_calls == 1 && g_junk_uid == 1 && g_junk_hundredths == 1 && !strcmp(g_junk_reason, "trigger"),
+          "Reward Junk 0.01, an account player: credited 1 hundredth (%d calls)", g_junk_calls);
+    CHECK(!count_sent(NET_PACKET_CHAT), "Reward Junk: no chat line from the game (the server prints it once the brain accepts)");
+    junk_pickup(&g, a, "2.5");
+    CHECK(g_junk_calls == 1 && g_junk_hundredths == 250, "Reward Junk 2.5: 250 hundredths (%lld)", (long long) g_junk_hundredths);
+    junk_pickup(&g, a, "99.99");
+    CHECK(g_junk_calls == 1 && g_junk_hundredths == 9999, "Reward Junk 99.99 (below 100): 9999 hundredths");
+    junk_pickup(&g, a, "100");
+    CHECK(g_junk_calls == 0, "Reward Junk 100: not below 100, nothing");
+    junk_pickup(&g, a, "0");
+    CHECK(g_junk_calls == 0, "Reward Junk 0: nothing");
+    junk_pickup(&g, a, "-1");
+    CHECK(g_junk_calls == 0, "Reward Junk -1: not credited (the wallet never goes below 0)");
+    junk_pickup(&g, a, "abc");
+    CHECK(g_junk_calls == 0, "Reward Junk 'abc' (parseFloat NaN): nothing");
+    junk_pickup(&g, a, "0x10");
+    CHECK(g_junk_calls == 0, "Reward Junk '0x10' (parseFloat 0): nothing");
+
+    g_has_account = 0;
+    junk_pickup(&g, a, "0.01");
+    CHECK(g_junk_calls == 0, "Reward Junk, a guest (no account): nothing");
+    g_has_account = 1;
+    a->is_bot = (unsigned char) 1;
+    junk_pickup(&g, a, "0.01");
+    CHECK(g_junk_calls == 0, "Reward Junk, a bot: nothing");
+    a->is_bot = (unsigned char) 0;
+    g.is_sandbox = 1;
+    junk_pickup(&g, a, "0.01");
+    CHECK(g_junk_calls == 0, "Reward Junk in the sandbox (!isSandbox): nothing");
+    g.is_sandbox = 0;
+    junk_pickup(&g, a, "0.01");
+    CHECK(g_junk_calls == 1, "Reward Junk back in a public game: credited again");
+}
+
 static void test_pickups(void) {
     Game g;
     // pickup 0: weapon 3 (pickupRep), pickup 1: weapon 4 with wr (no swap), price 20 (md 0)
@@ -951,6 +1019,7 @@ int main(void) {
     test_flow();
     test_events();
     test_pickups();
+    test_reward_junk();
     test_legacy();
     test_backend_actions();
     test_editor_goldens();

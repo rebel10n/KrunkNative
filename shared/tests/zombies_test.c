@@ -67,6 +67,19 @@ static void free_players(Game *game) {
     game->player_count = 0;
 }
 
+// the scripted wallet (GameHooks.junk_credit): what the game asks kn_brain to credit
+static int g_junk_calls;
+static int g_junk_uid;
+static int64_t g_junk_hundredths;
+static char g_junk_reason[16];
+static void test_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {
+    (void) game;
+    g_junk_calls++;
+    g_junk_uid = player->uid;
+    g_junk_hundredths = hundredths;
+    snprintf(g_junk_reason, sizeof(g_junk_reason), "%s", reason ? reason : "");
+}
+
 static void start(Game *game, const int mode_id, const int is_local) {
     free_players(game);
     int *modes = calloc(1, sizeof(int));
@@ -76,6 +89,7 @@ static void start(Game *game, const int mode_id, const int is_local) {
     game_configure(game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
     game->hooks.send = test_send;
     game->hooks.respawn = test_respawn;
+    game->hooks.junk_credit = test_junk_credit;
     reset_sent();
     game_init(game, 0, 0, (unsigned char) is_local);
     game->now = 0.0f;
@@ -560,18 +574,21 @@ static void test_airdrops(Game *game) {
     tick(game, 0.1f, 0.1f);
     CHECK(!game->zombies.drops[lost - 1].active, "a drop below deathY is removed");
 
-    // Junk Packages (airDropPackages.js:122-130): v7.1.4 gives every server player an account
-    // object (guests: createGuestAccount), so any human claimer gets "Junk Claimed" / "Junk Thief"
-    // and sendUserJunk's "You found [x] Junk"; a guest's claim was silent while KN gated it on a
-    // backend account. Bots: nothing to show.
+    // Junk Packages (airDropPackages.js:122-130, doc/v10/junk.md): every human claimer gets "Junk
+    // Claimed" / "Junk Thief"; an account claimer is credited (GameHooks.junk_credit, the scripted
+    // account below: 0.05 / 0.10 / 2.50 Junk = 5 / 10 / 250 hundredths, reason "airdrop"); a guest
+    // has no wallet, so no credit. The "You found [x] Junk" line is the server's, after the brain
+    // accepted the credit: nothing is printed here. Bots: nothing at all.
     static const struct {
         int guest, bot, own, index;
-        const char *popup, *line;
+        const char *popup;
+        int64_t credit; // hundredths the hook gets (0: no call)
     } junk_claims[] = {
-        {1, 0, 0, 7, "Junk Thief", "You found [0.05] Junk"},    // a guest takes a's Uncommon Junk Package
-        {0, 0, 1, 13, "Junk Claimed", "You found [2.50] Junk"}, // an account claims its own Unobtainable one
-        {1, 0, 1, 8, "Junk Claimed", "You found [0.10] Junk"},  // a guest's own package
-        {1, 1, 0, 9, NULL, NULL},                               // a bot: nothing
+        {1, 0, 0, 7, "Junk Thief", 0},        // a guest takes a's Uncommon Junk Package: popup only
+        {0, 0, 1, 13, "Junk Claimed", 250},   // an account claims its own Unobtainable one (2.50)
+        {1, 0, 1, 8, "Junk Claimed", 0},      // a guest's own package (0.10): popup only
+        {0, 0, 0, 7, "Junk Thief", 5},        // an account takes a's Uncommon package (0.05): credited, a thief
+        {1, 1, 0, 9, NULL, 0},                // a bot: nothing
     };
     for (size_t i = 0; i < sizeof(junk_claims) / sizeof(junk_claims[0]); i++) {
         Player *claimer = junk_claims[i].own ? a : b;
@@ -584,24 +601,27 @@ static void test_airdrops(Game *game) {
         claimer->position.y = jd->position.y;
         claimer->interact_progress = 0.0f;
         reset_sent();
+        g_junk_calls = 0;
         for (int f = 0; f < 200 && jd->active; f++) airdrop_player_collide(claimer, &input, 0.05f);
         NetPopupPacket popup;
-        NetChatPacket chat;
         memcpy(&popup, g_last[NET_PACKET_POPUP], sizeof(popup));
-        memcpy(&chat, g_last[NET_PACKET_CHAT], sizeof(chat));
         popup.text[sizeof(popup.text) - 1] = 0;
-        chat.text[sizeof(chat.text) - 1] = 0;
         if (junk_claims[i].popup) {
             CHECK(!jd->active && g_count[NET_PACKET_POPUP] == 1 && g_last_uid[NET_PACKET_POPUP] == claimer->uid && !strcmp(popup.text, junk_claims[i].popup),
                   "Junk Package %d (guest %d): the \"%s\" popup to the claimer (%d \"%s\")", junk_claims[i].index, junk_claims[i].guest,
                   junk_claims[i].popup, g_count[NET_PACKET_POPUP], popup.text);
-            CHECK(g_count[NET_PACKET_CHAT] == 1 && g_last_uid[NET_PACKET_CHAT] == claimer->uid && chat.kind == NET_CHAT_FOUND_JUNK &&
-                  !strcmp(chat.text, junk_claims[i].line),
-                  "Junk Package %d (guest %d): \"%s\" (%d \"%s\")", junk_claims[i].index, junk_claims[i].guest, junk_claims[i].line,
-                  g_count[NET_PACKET_CHAT], chat.text);
         } else {
             CHECK(!jd->active && g_count[NET_PACKET_AIRDROP_CLAIM] == 1 && !g_count[NET_PACKET_POPUP] && !g_count[NET_PACKET_CHAT],
                   "Junk Package: a bot claims it with no popup or line (%d %d)", g_count[NET_PACKET_POPUP], g_count[NET_PACKET_CHAT]);
+        }
+        CHECK(!g_count[NET_PACKET_CHAT], "Junk Package %d: no chat line from the game (the server prints it on the brain's credit)", junk_claims[i].index);
+        if (junk_claims[i].credit) {
+            CHECK(g_junk_calls == 1 && g_junk_uid == claimer->uid && g_junk_hundredths == junk_claims[i].credit && !strcmp(g_junk_reason, "airdrop"),
+                  "Junk Package %d: credited %lld hundredths to the claimer (%d calls, %lld)", junk_claims[i].index,
+                  (long long) junk_claims[i].credit, g_junk_calls, (long long) g_junk_hundredths);
+        } else {
+            CHECK(g_junk_calls == 0, "Junk Package %d (guest %d, bot %d): no credit (%d calls)", junk_claims[i].index, junk_claims[i].guest,
+                  junk_claims[i].bot, g_junk_calls);
         }
         claimer->has_account = (unsigned char) had_account;
         claimer->is_bot = 0;

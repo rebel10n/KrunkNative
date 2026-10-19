@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pickup feedback on a public server_bin: Junk in chat (v7 io_foundJunk) and the weapon pickup sound.
+"""Pickup feedback on a public server_bin: Junk pickups (Reward Junk, doc/v10/junk.md) and the weapon pickup sound.
 
   python3 -I server/tests/pickup_chat_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -9,18 +9,19 @@ Junk pickups spawn at 70 %) from a generated server.cfg with `perms 1` and the d
 connects over loopback (a DEV peer, so the Object Manager places things for it); the guests write
 a NET_PACKET_FORWARDED first (remote players: no DEV rights, no account).
   1. the host places the Object Manager's Junk (a TRIGGER, onInteractKey, Reward Junk "0.01") at its
-     feet and presses G ("int" 7): the host gets CHAT kind NET_CHAT_FOUND_JUNK
-     "You found [0.01] Junk", the guest gets no such line, and the Junk is gone (a second press:
-     no second line)
+     feet and presses G ("int" 7): the Junk is gone (a second press: nothing). The "You found [0.01]
+     Junk" line (CHAT kind NET_CHAT_FOUND_JUNK) follows a credit kn_brain accepted, and this
+     server has no brain and no account: no line for the host, none for the guest
   2. the host drops a Crossbow and takes it back ("int" 6): "pick_0" at 0.2 as a 2D sound
      (uid -2) to the host only (v7 io_playerInteractions)
   3. the non-dev guest: the Object Manager refuses it the Junk (prod caps), but a map Junk it is
      brought to (rcon bring) and an Object Manager Junk the console gives it (rcon give junk) are
-     its own: the line, the Junk's sound (asset 29736, 2D), the Junk destroyed for everyone, no
-     line for the host, nothing on a second press
+     its own: the Junk's sound (asset 29736, 2D), the Junk destroyed for everyone, no line (no
+     account), nothing on a second press
   4. a protocol 1.3.0 guest presses G the v3 way ("int" action 1, the server's own prompt scan) on
-     another map Junk: the same line (kind 3; an older client shows it as a plain game line)
-The airdrop Junk Packages (a held claim) are covered by shared/tests/zombies_test.c.
+     another map Junk: destroyed, no line (kind 3 would be the credit's line; see above)
+The airdrop Junk Packages (a held claim) and the Reward Junk gates with a scripted account are covered by
+shared/tests/zombies_test.c and shared/tests/triggers_test.c; the brain's credit by services/brain/tests/junk_test.py.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -50,7 +51,7 @@ OK, DENIED = 0, 1  # OM_STATUS_OK, OM_STATUS_DENIED
 ENTITY_JUNK = 17  # object_manager_entries(OM_TAB_ENTITIES): after KR Tag .. Airdrop (shared/src/object_manager.c k_entities)
 CROSSBOW = 13
 INTERACT_PICKUP, INTERACT_KEY = 6, 7
-CHAT_FOUND_JUNK = 3  # NET_CHAT_FOUND_JUNK
+CHAT_FOUND_JUNK = 3  # NET_CHAT_FOUND_JUNK (printed only after a brain credit)
 results = []
 procs = []
 
@@ -273,7 +274,7 @@ def run():
     mark_h = host.interact(INTERACT_KEY, junk_uid)
     guest.pump(0.3)
     lines = [c for c in chat_lines(host, mark_h) if "Junk" in c[2]]
-    check("the host: CHAT kind FOUND_JUNK \"You found [0.01] Junk\"", lines == [(-1, CHAT_FOUND_JUNK, "You found [0.01] Junk")], str(chat_lines(host, mark_h)))
+    check("the host (no brain account): no Junk line, the credit has no answer to print", lines == [], str(chat_lines(host, mark_h)))
     check("the guest hears no Junk line", not [c for c in chat_lines(guest, mark_g) if "Junk" in c[2]], str(chat_lines(guest, mark_g)))
     mark_h = host.interact(INTERACT_KEY, junk_uid)
     check("taken: a second press prints nothing", not [c for c in chat_lines(host, mark_h) if "Junk" in c[2]], str(chat_lines(host, mark_h)))
@@ -306,8 +307,7 @@ def run():
     mark_h = len(host.packets)
     mark_g = guest.interact(INTERACT_KEY, target)
     host.pump(0.2)
-    check("the guest: \"You found [0.01] Junk\" for the map Junk", junk_lines(guest, mark_g) == [(-1, CHAT_FOUND_JUNK, "You found [0.01] Junk")],
-          str(chat_lines(guest, mark_g)))
+    check("the guest (no brain account): no Junk line for the map Junk", junk_lines(guest, mark_g) == [], str(chat_lines(guest, mark_g)))
     check("the guest: the Junk's sound (asset 29736, 2D)", any(n == "asset:29736" and uid == -2 for n, uid, _v in sounds(guest, mark_g)),
           str(sounds(guest, mark_g)))
     check("the map Junk is destroyed for everyone", (target, OBJECT_DESTROY) in object_states(guest, mark_g) and
@@ -324,8 +324,8 @@ def run():
         mark_h = len(host.packets)
         mark_g = guest.interact(INTERACT_KEY, om[0][0])
         host.pump(0.2)
-        check("the guest: \"You found [0.01] Junk\" for the Object Manager Junk",
-              junk_lines(guest, mark_g) == [(-1, CHAT_FOUND_JUNK, "You found [0.01] Junk")], str(chat_lines(guest, mark_g)))
+        check("the guest (no brain account): no Junk line for the Object Manager Junk", junk_lines(guest, mark_g) == [],
+              str(chat_lines(guest, mark_g)))
         check("the Object Manager Junk is destroyed", (om[0][0], OBJECT_DESTROY) in object_states(host, mark_h), str(object_states(host, mark_h)))
         check("the host hears no line of it", not junk_lines(host, mark_h), str(chat_lines(host, mark_h)))
 
@@ -336,8 +336,7 @@ def run():
     check("rcon brings the 1.3.0 guest to another map Junk", "Brought" in brought, brought.strip()[-120:])
     old.pump(0.3)
     mark_o = old.interact_v3()
-    check("the 1.3.0 guest (v3 \"int\"): \"You found [0.01] Junk\", kind 3",
-          junk_lines(old, mark_o) == [(-1, CHAT_FOUND_JUNK, "You found [0.01] Junk")], str(chat_lines(old, mark_o)))
+    check("the 1.3.0 guest (v3 \"int\", no brain account): no Junk line", junk_lines(old, mark_o) == [], str(chat_lines(old, mark_o)))
     check("that Junk is destroyed", (target, OBJECT_DESTROY) in object_states(old, mark_o), str(object_states(old, mark_o)))
     for c in (host, guest, old):
         c.close()

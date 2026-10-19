@@ -671,6 +671,10 @@ else ()
     # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
     # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
     # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
+    # junk_test: the Junk wallet's amounts (hundredths, the two-place text, parseFloat's reading; doc/v10/junk.md)
+    add_executable(junk_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/junk_test.c)
+    target_link_libraries(junk_test PRIVATE m)
+    add_test(NAME junk_test COMMAND junk_test)
     add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
     target_link_libraries(zombies_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

@@ -258,6 +258,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/third_person_test
 	./$(DEBUG_DIR)/billboard_ad_test --headless
 	./$(DEBUG_DIR)/zombies_test
+	./$(DEBUG_DIR)/junk_test
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/comp_ranked_test
 	./$(DEBUG_DIR)/sandbox_config_test
@@ -675,9 +676,12 @@ v10-settings-e2e: build ## v10 Settings: one setting per tab applied + persisted
 settings-wiring-e2e: build ## v10 settings that used to do nothing: set each one, observe its effect in game (fpsRate, nametagScale, dmgType, custom hitmarker / damage, endMessage, ...; headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/settings_wiring_e2e.py $(DEBUG_DIR)
 
-.PHONY: pickup-chat-e2e
+.PHONY: pickup-chat-e2e junk-wallet-e2e
 pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G prints "You found [0.01] Junk" to the finder only, a weapon pickup plays pick_0
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
+
+junk-wallet-e2e: build ## The Junk counter on the v10 page (doc/v10/junk.md): signed in with 12.34 Junk it reads 12.34; a game server's credit reads 12.39 through the brain's push (kn_brain on sqlite, headless)
+	timeout 400 $(PYTHON) -I server/tests/junk_wallet_e2e.py $(DEBUG_DIR)
 
 .PHONY: v10-rewards-e2e
 v10-rewards-e2e: build ## v10 rewards: Get Signup Rewards -> register -> perks once, a challenge done on server_bin, a Battle Pass claim + gift (headless)
