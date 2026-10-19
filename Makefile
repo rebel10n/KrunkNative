@@ -450,6 +450,13 @@ branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-
 branding-check: ## The verbatim krunker.io icons in the tree match tools/branding/branding.lock (exit 1 otherwise)
 	$(PYTHON) -I tools/branding/fetch_branding.py check
 
+.PHONY: webview2 webview2-check
+webview2: ## Fetch the WebView2 SDK header and loader for the Windows captcha webview (tools/webview2/webview2.lock, sha256-pinned; KN_FETCH_PROXY=) into ~/.cache/krunknative/webview2
+	$(PYTHON) -I tools/webview2/fetch_webview2.py install
+
+webview2-check: ## The staged WebView2 SDK files match tools/webview2/webview2.lock (exit 1 otherwise)
+	$(PYTHON) -I tools/webview2/fetch_webview2.py check
+
 # Official Krunker servers: the build constants (AHKEY, clientVersion, buildVersion, packet name
 # tables, cheat-check keystream) are extracted statically from Krunker's client bundle into the
 # committed shared/include/krunker_build.h + tools/krunker/build.json (tools/krunker/extract_build.py).

@@ -118,21 +118,42 @@ if (EMSCRIPTEN)
 endif ()
 
 # Native captcha webview (client/include/kn_webview.h, client/src/ui/kn_webview.c): krunker.io's
-# Cloudflare Turnstile shown in a WebKitGTK window for the player to solve (doc/v10/official-captcha.md).
-# KN_WEBVIEW = AUTO (default: on when pkg-config finds webkit2gtk-4.1), ON (required) or OFF. Linux
-# only; client_bin only (never server/ or shared/). kn_webview.c is then built as its own library so
-# GTK's include paths stay out of the rest of the client; without it (macOS, Windows, the web build,
-# OFF, not found) the same file compiles to its stub inside the client and no security check is shown
-# (the join ends with its sentence).
-set(KN_WEBVIEW AUTO CACHE STRING "Native captcha webview (WebKitGTK): AUTO = on when webkit2gtk-4.1 is found, ON, OFF")
+# Cloudflare Turnstile shown in the game UI (or a window) for the player to solve (doc/v10/official-captcha.md).
+# KN_WEBVIEW = AUTO (default: on when the platform's backend is there), ON (required) or OFF. Linux: WebKitGTK
+# (pkg-config webkit2gtk-4.1). Windows: WebView2 (the Edge runtime; its SDK header and loader from
+# tools/webview2/fetch_webview2.py in KN_WEBVIEW2_DIR). Client_bin only (never server/ or shared/).
+# kn_webview.c is then built as its own library so the toolkit's include paths stay out of the rest of
+# the client; without a backend (macOS, the web build, OFF, not found) the same file compiles to its stub
+# inside the client and no security check is shown (the join ends with its sentence).
+set(KN_WEBVIEW AUTO CACHE STRING "Native captcha webview: AUTO = on when the platform's backend is found (WebKitGTK on Linux, WebView2 SDK on Windows), ON, OFF")
 set(KN_WEBVIEW_GTK OFF)
+set(KN_WEBVIEW_WV2 OFF)
 string(TOUPPER "${KN_WEBVIEW}" KN_WEBVIEW_MODE)
 if (KN_WEBVIEW_MODE MATCHES "^(OFF|0|FALSE|NO|N)$")
     message(STATUS "Webview: KN_WEBVIEW is OFF; the captcha has no challenge window")
-elseif (EMSCRIPTEN OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if (NOT EMSCRIPTEN)
-        message(STATUS "Webview: no backend on ${CMAKE_SYSTEM_NAME} yet; the captcha has no challenge window")
+elseif (EMSCRIPTEN)
+    # the web build has no webview (the browser's own page is the client)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # WebView2 (Edge's runtime) through its C interface: the SDK's WebView2.h and WebView2Loader.dll,
+    # pinned in tools/webview2/webview2.lock (make webview2 installs them; the default directory is
+    # ~/.cache/krunknative/webview2). The loader is loaded at run time; no runtime makes the backend unavailable.
+    if (DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
+        set(_kn_wv2_home "$ENV{HOME}")
+    else ()
+        set(_kn_wv2_home "$ENV{USERPROFILE}")
     endif ()
+    set(KN_WEBVIEW2_DIR "${_kn_wv2_home}/.cache/krunknative/webview2" CACHE PATH "WebView2 SDK for the captcha webview: include/WebView2.h and x64/WebView2Loader.dll (make webview2)")
+    if (EXISTS "${KN_WEBVIEW2_DIR}/include/WebView2.h" AND EXISTS "${KN_WEBVIEW2_DIR}/x64/WebView2Loader.dll" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(KN_WEBVIEW_WV2 ON)
+        list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/ui/kn_webview\\.c$")
+        message(STATUS "Webview: WebView2 SDK in ${KN_WEBVIEW2_DIR} (KN_WEBVIEW): krunker.io's captcha in the game UI")
+    elseif (KN_WEBVIEW_MODE MATCHES "^(ON|1|TRUE|YES|Y)$")
+        message(FATAL_ERROR "KN_WEBVIEW=ON needs the WebView2 SDK in ${KN_WEBVIEW2_DIR} (make webview2; 64-bit)")
+    else ()
+        message(STATUS "Webview: no WebView2 SDK in ${KN_WEBVIEW2_DIR} (make webview2): the captcha has no challenge window")
+    endif ()
+elseif (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(STATUS "Webview: no backend on ${CMAKE_SYSTEM_NAME} yet; the captcha has no challenge window")
 else ()
     find_package(PkgConfig QUIET)
     if (PKG_CONFIG_FOUND)
@@ -484,6 +505,12 @@ else ()
         add_executable(kn_webview_live_test client/tests/kn_webview_live_test.c)
         target_include_directories(kn_webview_live_test PRIVATE client/include)
         target_link_libraries(kn_webview_live_test PRIVATE kn_webview PkgConfig::KN_WEBKITGTK Threads::Threads)
+    elseif (KN_WEBVIEW_WV2) # the captcha webview on Windows (WebView2's C interface; the SDK's header, the EventToken shim)
+        add_library(kn_webview STATIC client/src/ui/kn_webview.c client/include/kn_webview.h)
+        target_include_directories(kn_webview PRIVATE client/include client/src/ui/kn_webview_compat "${KN_WEBVIEW2_DIR}/include")
+        target_compile_definitions(kn_webview PRIVATE KN_WEBVIEW=1)
+        target_link_libraries(kn_webview PRIVATE ole32 uuid shell32 user32)
+        target_link_libraries(${CLIENT_BINARY} PRIVATE kn_webview)
     endif ()
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().

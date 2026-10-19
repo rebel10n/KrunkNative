@@ -1,0 +1,5 @@
+# WebView2 SDK for the Windows captcha webview (tools/webview2/fetch_webview2.py).
+# name	source	sha256	size   (package: the .nupkg; the others: members inside it)
+package	https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4258.31/microsoft.web.webview2.1.0.4258.31.nupkg	56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9	9801922
+include/WebView2.h	build/native/include/WebView2.h	dff1e3181ec7ec203a34ef6efa966590e0ef0ba1a5c3fe3b69da6508c2f8a02e	2939599
+x64/WebView2Loader.dll	build/native/x64/WebView2Loader.dll	3426dcc55fdfb8b5e7ac623cf33b4ccf283fbf68a0c5a65bddfdb4d749a8abee	194912

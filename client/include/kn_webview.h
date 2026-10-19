@@ -11,7 +11,8 @@
 // posts its token to a script-message handler ("knCaptcha"), which takes ONE token, only while the
 // main frame is still on that origin. The token is never logged or stored; the view closes at once.
 //
-// Where the player solves it (Linux, WebKitGTK):
+// Where the player solves it (Linux, WebKitGTK; Windows, WebView2: the same, the frames and input through
+// the backend):
 //   - in the game UI (kn_webview_captcha_open in_ui = 1, the default; KRUNKNATIVE_CAPTCHA_WINDOW=1
 //     forces a window): the page is only the widget on a transparent background, the view stays in its
 //     hidden GTK offscreen host, and the caller draws kn_webview_captcha_frame()'s pixels in its own
@@ -19,9 +20,10 @@
 //   - in a window: the view moves into a real window (centred, above the game). This is the fallback
 //     when the game UI cannot draw the frames (kn_webview_captcha_inline() is 0 after the reveal), and
 //     the only mode when in_ui is 0.
-// Backends: Linux WebKitGTK (webkit2gtk-4.1) when built with KN_WEBVIEW (CMake -DKN_WEBVIEW=AUTO|ON|OFF,
-// AUTO = on when pkg-config finds it). Everywhere else (macOS, Windows, the web build, KN_WEBVIEW off)
-// kn_webview_available() is 0 and the callers end the request (no challenge is shown).
+// Backends: Linux WebKitGTK (webkit2gtk-4.1) and Windows WebView2 (the Edge runtime, through its C interface)
+// when built with KN_WEBVIEW (CMake -DKN_WEBVIEW=AUTO|ON|OFF; AUTO = on when pkg-config finds webkit2gtk-4.1
+// or the WebView2 SDK is in KN_WEBVIEW2_DIR). Everywhere else (macOS, the web build, KN_WEBVIEW off, no
+// WebView2 runtime) kn_webview_available() is 0 and the callers end the request (no challenge is shown).
 // Main thread only: kn_webview_pump() runs the toolkit's events, once per frame.
 #include <stddef.h>
 

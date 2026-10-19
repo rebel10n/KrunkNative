@@ -9,7 +9,7 @@
 //      web     the real widget in a "Security Challenge" modal (the live socket captcha's look, :98251).
 //              Turnstile keys are bound to their domains: on any other origin than krunker.io the
 //              widget refuses (error 110200 and friends), which the modal says.
-//      native  with a webview (kn_webview.h, KN_WEBVIEW: WebKitGTK on Linux) the challenge runs on a real
+//      native  with a webview (kn_webview.h, KN_WEBVIEW: WebKitGTK on Linux, WebView2 on Windows) the challenge runs on a real
 //              krunker.io page, hidden first: nothing is shown while Turnstile passes by itself. It comes
 //              up (in the game UI, or in its own window) only when the player is needed, and the widget's
 //              token comes back once. Without a webview, or when it fails to start or load, no challenge

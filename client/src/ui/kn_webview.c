@@ -1,38 +1,49 @@
-// The challenge window of kn_webview.h: WebKitGTK (webkit2gtk-4.1) on Linux when built with
-// KN_WEBVIEW, a stub everywhere else. CMake builds this file into its own library (kn_webview) with
-// WebKitGTK's include paths, so GTK's and FreeType's system headers never reach the rest of the client.
+// The challenge window of kn_webview.h: WebKitGTK (webkit2gtk-4.1) on Linux and WebView2 (the Edge
+// WebView2 runtime) on Windows, both when built with KN_WEBVIEW; a stub everywhere else. CMake builds
+// this file into its own library (kn_webview) with the toolkit's include paths, so GTK's, WebKit's and
+// WebView2's headers never reach the rest of the client.
 //
-// What the window does (and does not):
-//   - runs hidden first: the view lives in a GtkOffscreenWindow (no X / Wayland window at all, yet
-//     mapped and visible to WebKit, so the page and Cloudflare's widget run normally). A challenge that
-//     passes by itself (Turnstile's non-interactive / managed check) never shows anything. Only when
-//     the player is needed is the view moved into a real window, created centred on the work area of
-//     the monitor under the pointer and kept above the game (reveal()): Turnstile's
-//     before-interactive-callback (interactiveBegin), a widget error / expiry / timeout (the widget's
-//     own "Try again" is in the window), no token after KN_WEBVIEW_REVEAL_MS (KRUNKNATIVE_WEBVIEW_REVEAL_MS;
-//     Cloudflare's interstitial and an HTTP error page are not taken as "needs the player": they may
-//     pass by themselves), or the player asking for it (kn_webview_captcha_open with show_now);
+// What the window does (and does not), on both backends:
+//   - runs hidden first: the view lives in a hidden host (GTK: a GtkOffscreenWindow; WebView2: a popup
+//     parked off the desktop that holds the view's controller). The page and Cloudflare's widget run
+//     normally there. A challenge that passes by itself (Turnstile's non-interactive / managed check)
+//     never shows anything. Only when the player is needed is the view moved into a real window, created
+//     centred on the work area of the monitor under the pointer and kept above the game (reveal()):
+//     Turnstile's before-interactive-callback (interactive:), a widget error / expiry / timeout (the
+//     widget's own "Try again" is in the window), no token after KN_WEBVIEW_REVEAL_MS
+//     (KRUNKNATIVE_WEBVIEW_REVEAL_MS; Cloudflare's interstitial and an HTTP error page are not taken as
+//     "needs the player": they may pass by themselves), or the player asking for it (kn_webview_captcha_open
+//     with show_now);
 //   - navigates to a REAL krunker.io URL (https only; plain http only to a loopback host, for the
-//     tests' stub page) in an ephemeral web context (no cookies or storage on disk);
+//     tests' stub page) in an ephemeral profile: GTK an ephemeral web context, WebView2 a temporary user
+//     data folder removed at close. Nothing of it is kept;
 //   - injects one user script, which does nothing unless the top document's origin is that URL's; it
 //     draws a card over the page and renders Cloudflare's widget with krunker.io's sitekey, loading
 //     challenges.cloudflare.com's api.js like the live client (or using the page's own `turnstile`);
-//   - the widget's callbacks hand "kind:value" strings to a second user script in an isolated script
-//     world (BRIDGE_WORLD; through a DOM attribute + event on the top document), which alone can post to
-//     the "knCaptcha" script-message handler: frames of other origins (and the page's own scripts'
-//     window.webkit) cannot reach it. Only the first token is taken, only while the main frame is on
-//     the expected origin; it goes to the caller (krunker_captcha_ui.c) once and is wiped here. It is
-//     never logged;
+//   - the widget's callbacks post "kind:value" strings to the host. GTK: a second script in an isolated
+//     world (BRIDGE_WORLD) is the only one that can post to the "knCaptcha" handler, so frames of other
+//     origins and the page's own scripts cannot reach it. WebView2 has no isolated worlds: the widget posts
+//     with window.chrome.webview.postMessage, and the host takes a message only when its source is the
+//     expected origin (the page has no scripts of its own: Cloudflare's are the only ones that run there).
+//     Either way only the first token is taken, only while the page is on the expected origin, it goes to
+//     the caller (krunker_captcha_ui.c) once and is wiped here. It is never logged;
 //   - main-frame navigations away from the origin and every new window are refused;
 //   - it never clicks, types, solves, rewrites requests or touches the challenge's scripts or frames.
-//   - the game UI (in_ui, the default on Linux): the page is only the widget on a transparent page
-//     (no card: the game's modal has the heading and Cancel). The view never leaves its offscreen host:
-//     the caller takes its frames (kn_webview_captcha_frame: each paint, cairo's ARGB32 converted to RGBA)
-//     and forwards its pointer and keys (GDK events to the offscreen window, GTK routes them to the view).
-//     When the game UI draws no frame within INLINE_STALL_MS, the challenge's window is shown instead
-//     (the fallback; the window's background is dark, the widget centred). KRUNKNATIVE_CAPTCHA_WINDOW=1
+//   - the game UI (in_ui, the default): the page is only the widget on a transparent page (no card: the
+//     game's modal has the heading, the text and Cancel). The view never leaves its hidden host: the
+//     caller takes its frames (kn_webview_captcha_frame) and forwards its pointer and keys. GTK: the frames
+//     are the offscreen host's cairo surface, the input GDK events to the view. WebView2: the frames are
+//     ICoreWebView2::CapturePreview's PNG (decoded with WIC), taken about every 60 ms while shown; the input
+//     goes to the view's render window as window messages (the controller's own input API needs a
+//     composition host). When the game UI draws no frame within INLINE_STALL_MS, the challenge's window is
+//     shown instead (the fallback; its background is dark, the widget centred). KRUNKNATIVE_CAPTCHA_WINDOW=1
 //     keeps the window path only.
+// WebView2 (Windows): WebView2.h (the C interface, no C++; pinned by tools/webview2/webview2.lock) and
+// WebView2Loader.dll, loaded at run time. No loader, or no runtime (GetAvailableCoreWebView2BrowserVersionString
+// fails), makes the backend unavailable: the callers end the request as they do with no webview.
 #include <kn_webview.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,27 +80,138 @@ void kn_webview_rgba_from_argb32(const unsigned char *src, const int stride, con
     }
 }
 
+// Which backend this build has (the one place the platform is named; the rest is the same code).
 #if defined(KN_WEBVIEW) && defined(__linux__) && !defined(__EMSCRIPTEN__)
+#define KN_WV_GTK 1
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
+#elif defined(KN_WEBVIEW) && defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#define KN_WV_WV2 1
+#include <wchar.h>
+#include <windows.h>
+#include <objbase.h>
+#include <wincodec.h>
+#include <shellapi.h>
+#include <WebView2.h> // (its EventToken.h: client/src/ui/kn_webview_compat, this library's include dir)
+#endif
 
+#if defined(KN_WV_GTK) || defined(KN_WV_WV2)
+// ---------------------------------------------------------------- shared by the backends
 #define KN_WEBVIEW_TOKEN_MAX 4096 // KRUNKER_CAPTCHA_TOKEN_MAX
 #define TURNSTILE_API "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
 #define TURNSTILE_ORIGIN "https://challenges.cloudflare.com"
-#define BRIDGE_WORLD "knCaptcha"      // the isolated script world holding the message handler
-#define BRIDGE_ATTR "data-kn-captcha" // on <html>: the message, read and removed at once by the bridge
+#define BRIDGE_WORLD "knCaptcha"      // GTK: the isolated script world holding the message handler
+#define BRIDGE_ATTR "data-kn-captcha" // GTK: on <html>: the message, read and removed at once by the bridge
 #define BRIDGE_EVENT "kn-captcha"
 #define WINDOW_W 520
 #define WINDOW_H 600
 
+// A growing string: the scripts are built here (no GLib: the same code serves both backends).
+typedef struct {
+    char *s;
+    size_t n, cap;
+    int bad; // an allocation failed: sb_take() gives NULL
+} Sb;
+
+static void sb_add(Sb *b, const char *s, const size_t n) {
+    if (b->bad) return;
+    if (b->n + n + 1 > b->cap) {
+        size_t cap = b->cap ? b->cap : 256;
+        while (cap < b->n + n + 1) cap *= 2;
+        char *p = realloc(b->s, cap);
+        if (!p) {
+            b->bad = 1;
+            return;
+        }
+        b->s = p;
+        b->cap = cap;
+    }
+    memcpy(b->s + b->n, s, n);
+    b->n += n;
+    b->s[b->n] = 0;
+}
+
+static void sb_put(Sb *b, const char *s) { sb_add(b, s, strlen(s)); }
+
+static void sb_putc(Sb *b, const char c) { sb_add(b, &c, 1); }
+
+static void sb_printf(Sb *b, const char *fmt, ...) {
+    char tmp[64];
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        b->bad = 1;
+        return;
+    }
+    if ((size_t) n < sizeof(tmp)) {
+        sb_add(b, tmp, (size_t) n);
+        return;
+    }
+    char *big = malloc((size_t) n + 1);
+    if (!big) {
+        b->bad = 1;
+        return;
+    }
+    va_start(ap, fmt);
+    vsnprintf(big, (size_t) n + 1, fmt, ap);
+    va_end(ap);
+    sb_add(b, big, (size_t) n);
+    free(big);
+}
+
+// The text (the caller frees it), NULL when an allocation failed.
+static char *sb_take(Sb *b) {
+    if (b->bad) {
+        free(b->s);
+        return NULL;
+    }
+    return b->s ? b->s : strdup("");
+}
+
+static int ascii_alnum(const char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+static char ascii_lower(const char c) { return c >= 'A' && c <= 'Z' ? (char) (c + 32) : c; }
+
+// s starts with prefix (a lower-case literal), ignoring the case of s.
+static int ascii_prefix_ci(const char *s, const char *prefix) {
+    for (; *prefix; prefix++, s++) {
+        if (!*s || ascii_lower(*s) != *prefix) return 0;
+    }
+    return 1;
+}
+
+static int ascii_equal_ci(const char *a, const char *b) {
+    for (; *a && *b; a++, b++) {
+        if (ascii_lower(*a) != ascii_lower(*b)) return 0;
+    }
+    return *a == *b;
+}
+
 static struct {
-    int gtk;            // 0 not tried, 1 up, -1 failed
-    char gtk_err[160];
+    int toolkit;          // GTK: 0 not tried, 1 up, -1 failed (WebView2 keeps its own state: wv2_loader)
+    char toolkit_err[160];
+#if defined(KN_WV_GTK)
     GtkWidget *offscreen; // the hidden host of the view (GtkOffscreenWindow) until reveal(), else NULL
     GtkWidget *window;    // the real window, once revealed
     WebKitWebView *view;
+#elif defined(KN_WV_WV2)
+    HWND host;            // the hidden host of the controller until reveal(), else NULL
+    HWND window;          // the real window, once revealed
+    HWND target;          // the view's render window (the input goes there), found on first use
+    ICoreWebView2Environment *env;
+    ICoreWebView2Controller *controller;
+    ICoreWebView2 *view;
+    wchar_t *script;      // the widget's script (wide), added once the view exists
+    wchar_t *navigate;    // the challenge's URL (wide), navigated to once the view exists
+    int capturing;        // a CapturePreview is in flight
+    wchar_t session_dir[MAX_PATH]; // the temporary user data folder of this session
+#endif
     char title[200];      // the window's title, for reveal()
-    gint64 opened_us;     // g_get_monotonic_time() of the open: KN_WEBVIEW_REVEAL_MS counts from it
+    long long opened_ms;  // now_ms() of the open: KN_WEBVIEW_REVEAL_MS counts from it
+    long long shown_ms;   // now_ms() when it was shown in the game UI (the watchdog)
+    long long capture_ms; // now_ms() of the last frame request (WebView2)
     int reveal_ms;
     int closing;        // we are destroying the window (not the player)
     int taken;          // this window gave its token
@@ -100,18 +222,23 @@ static struct {
     const char *reveal; // a reason to show the window (static text), done by the next poll
     char token[KN_WEBVIEW_TOKEN_MAX + 1];
     char msg[300];
-    // the game UI (in_ui): the view stays in its offscreen host and the caller draws it
+    // the game UI (in_ui): the view stays in its hidden host and the caller draws it
     int in_ui;          // opened for the game UI
     int inline_shown;   // shown in the game UI (no window)
     int inline_failed;  // the game UI could not draw it: its window instead (the stall watchdog)
-    int dirty;          // the offscreen view was painted since the last frame taken
+    int dirty;          // a new frame is in px since the last one taken
     int frames;         // frames taken while shown in the game UI
-    gint64 shown_us;    // when it was shown in the game UI (the watchdog)
-    unsigned buttons;   // the GDK button masks the forwarded pointer holds down
+    unsigned buttons;   // the pointer buttons the forwarded pointer holds down (GTK: GDK masks; WebView2: 1 left, 2 middle, 4 right)
     unsigned char *px;  // the last frame: straight RGBA8, row 0 on top
     size_t px_cap;
     int px_w, px_h;
 } W;
+
+// The platform's clock (ms), the hidden host and the reveal are the backend's.
+static long long now_ms(void);
+static int hidden_host(void);
+static void reveal(const char *why);
+static void backend_tick(void);
 
 static void wipe(void *p, size_t n) {
     volatile unsigned char *v = p;
@@ -127,16 +254,16 @@ static const char *place(void) { return W.in_ui && !W.inline_failed ? "below" : 
 static int origin_of(const char *url, char *out, const size_t n) {
     if (!url) return 0;
     size_t skip;
-    if (!g_ascii_strncasecmp(url, "https://", 8)) skip = 8;
-    else if (!g_ascii_strncasecmp(url, "http://", 7)) skip = 7;
+    if (ascii_prefix_ci(url, "https://")) skip = 8;
+    else if (ascii_prefix_ci(url, "http://")) skip = 7;
     else return 0;
     size_t end = skip;
     while (url[end] && url[end] != '/' && url[end] != '?' && url[end] != '#') end++;
     if (end == skip || end >= n) return 0;
     for (size_t i = 0; i < end; i++) {
         const char c = url[i];
-        if (!(g_ascii_isalnum(c) || c == '.' || c == '-' || c == ':' || c == '/' || c == '[' || c == ']')) return 0;
-        out[i] = g_ascii_tolower(c);
+        if (!(ascii_alnum(c) || c == '.' || c == '-' || c == ':' || c == '/' || c == '[' || c == ']')) return 0;
+        out[i] = ascii_lower(c);
     }
     out[end] = 0;
     return !strchr(out + skip, '@'); // (the character test above already refuses userinfo)
@@ -155,152 +282,171 @@ static int same_origin(const char *url) {
 }
 
 // A JS string literal (double quotes) of s.
-static void js_string(GString *out, const char *s) {
-    g_string_append_c(out, '"');
+static void js_string(Sb *out, const char *s) {
+    sb_putc(out, '"');
     for (const unsigned char *p = (const unsigned char *) s; p && *p; p++) {
-        if (*p == '"' || *p == '\\') g_string_append_printf(out, "\\%c", *p);
-        else if (*p < 0x20 || *p == '<' || *p == '>') g_string_append_printf(out, "\\u%04x", *p);
+        if (*p == '"' || *p == '\\') sb_printf(out, "\\%c", *p);
+        else if (*p < 0x20 || *p == '<' || *p == '>') sb_printf(out, "\\u%04x", *p);
         else if (p[0] == 0xe2 && p[1] == 0x80 && (p[2] == 0xa8 || p[2] == 0xa9)) { // U+2028 / U+2029
-            g_string_append_printf(out, "\\u202%c", p[2] == 0xa8 ? '8' : '9');
+            sb_printf(out, "\\u202%c", p[2] == 0xa8 ? '8' : '9');
             p += 2;
-        } else g_string_append_c(out, (char) *p);
+        } else sb_putc(out, (char) *p);
     }
-    g_string_append_c(out, '"');
+    sb_putc(out, '"');
 }
+
+// How the widget reports to the host: GTK's bridge (an isolated world, see the top of this file) or
+// WebView2's postMessage (the host checks the source's origin there).
+#if defined(KN_WV_WV2)
+#define POST_JS "var post = function (m) { window.chrome.webview.postMessage(m); };\n"
+// The HTTP status of the page: WebView2 does not report it to the host, so the script does, once the page
+// is parsed ("http:" + status; the host shows the note for 400 and up, as GTK does).
+#define HTTP_JS                                                                                                              \
+    "if (window.top === window && location.origin === ORIGIN) { try { var nav = performance.getEntriesByType('navigation')[0];" \
+    " if (nav && nav.responseStatus >= 400) post('http:' + nav.responseStatus); } catch (e) {} }\n"
+#else
+#define POST_JS                                                                                                              \
+    "var post = function (m) { var d = document.documentElement; d.setAttribute('" BRIDGE_ATTR "', m);"                      \
+    " document.dispatchEvent(new Event('" BRIDGE_EVENT "')); d.removeAttribute('" BRIDGE_ATTR "'); };\n"
+#define HTTP_JS ""
+#endif
 
 // The user script: the widget on the krunker.io page. In a window (in_ui 0): a card over a dark page
 // with a heading, a hint and the widget. In the game UI (in_ui 1): only the widget, centred on the
 // transparent page (the page's own text hidden): the game's modal has the heading, the text and Cancel.
+// The caller frees the text (NULL when out of memory).
 static char *user_script(const char *sitekey, const char *title, const int in_ui) {
-    GString *s = g_string_new("(function () {\n'use strict';\nvar ORIGIN = ");
-    js_string(s, W.origin);
-    g_string_append(s, ", SITEKEY = ");
-    js_string(s, sitekey);
-    g_string_append(s, ", TITLE = ");
-    js_string(s, title);
-    g_string_append(s, ", API = ");
-    js_string(s, TURNSTILE_API);
-    g_string_append(
-        s,
-        ";\n"
-        "if (window.top !== window || location.origin !== ORIGIN || window.__knCaptcha) return;\n"
-        "window.__knCaptcha = 1;\n"
-        "var post = function (m) { var d = document.documentElement; d.setAttribute('" BRIDGE_ATTR "', m);"
-        " document.dispatchEvent(new Event('" BRIDGE_EVENT "')); d.removeAttribute('" BRIDGE_ATTR "'); };\n"
-        "var el = function (tag, css, text) { var e = document.createElement(tag); e.style.cssText = css;"
-        " if (text) e.textContent = text; return e; };\n"
-        "var shade, holder, status, retry;\n");
+    Sb s = {0};
+    sb_put(&s, "(function () {\n'use strict';\nvar ORIGIN = ");
+    js_string(&s, W.origin);
+    sb_put(&s, ", SITEKEY = ");
+    js_string(&s, sitekey);
+    sb_put(&s, ", TITLE = ");
+    js_string(&s, title);
+    sb_put(&s, ", API = ");
+    js_string(&s, TURNSTILE_API);
+    sb_put(&s,
+           ";\n"
+           "if (window.top !== window || location.origin !== ORIGIN || window.__knCaptcha) return;\n"
+           "window.__knCaptcha = 1;\n" POST_JS HTTP_JS
+           "var el = function (tag, css, text) { var e = document.createElement(tag); e.style.cssText = css;"
+           " if (text) e.textContent = text; return e; };\n"
+           "var shade, holder, status, retry;\n");
     if (in_ui) {
-        g_string_append(
-            s,
-            "shade = el('div', 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483646;width:340px;"
-            "display:flex;flex-direction:column;align-items:center;margin:0;background:transparent;font:15px/1.4 sans-serif;"
-            "color:#555');\n"
-            "holder = el('div', 'height:65px;width:100%;display:flex;align-items:center;justify-content:center');\n"
-            "status = el('div', 'color:#555;font-size:14px;min-height:18px;margin-top:6px');\n"
-            "retry = el('button', 'display:none;margin:8px auto 0;padding:6px 16px;font-size:14px;cursor:pointer', 'Try again');\n"
-            "shade.appendChild(holder); shade.appendChild(status); shade.appendChild(retry);\n");
+        sb_put(&s,
+               "shade = el('div', 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483646;width:340px;"
+               "display:flex;flex-direction:column;align-items:center;margin:0;background:transparent;font:15px/1.4 sans-serif;"
+               "color:#555');\n"
+               "holder = el('div', 'height:65px;width:100%;display:flex;align-items:center;justify-content:center');\n"
+               "status = el('div', 'color:#555;font-size:14px;min-height:18px;margin-top:6px');\n"
+               "retry = el('button', 'display:none;margin:8px auto 0;padding:6px 16px;font-size:14px;cursor:pointer', 'Try again');\n"
+               "shade.appendChild(holder); shade.appendChild(status); shade.appendChild(retry);\n");
     } else {
-        g_string_append(
-            s,
-            "shade = el('div', 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483646;background:#1b1b1b;"
-            "display:flex;align-items:center;justify-content:center;font:15px/1.4 sans-serif;margin:0');\n"
-            "var card = el('div', 'background:#fff;color:#222;padding:22px 24px;border-radius:6px;width:400px;max-width:90vw;"
-            "text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.5)');\n"
-            "var head = el('div', 'font-size:22px;font-weight:bold;text-transform:uppercase;margin-bottom:6px', TITLE);\n"
-            "var hint = el('div', 'color:#555;font-size:14px', 'Solve Cloudflare\\u2019s check for krunker.io below. Krunker Box Office"
-            " takes the result once and closes this window.');\n"
-            "holder = el('div', 'min-height:70px;display:flex;align-items:center;justify-content:center;margin:14px 0 6px');\n"
-            "status = el('div', 'color:#555;font-size:13px;min-height:18px');\n"
-            "retry = el('button', 'display:none;margin:10px auto 0;padding:6px 16px;font-size:14px;cursor:pointer', 'Try again');\n"
-            "var where = el('div', 'color:#999;font-size:12px;margin-top:10px', location.origin);\n"
-            "card.appendChild(head); card.appendChild(hint); card.appendChild(holder); card.appendChild(status);"
-            " card.appendChild(retry); card.appendChild(where); shade.appendChild(card);\n");
+        sb_put(&s,
+               "shade = el('div', 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483646;background:#1b1b1b;"
+               "display:flex;align-items:center;justify-content:center;font:15px/1.4 sans-serif;margin:0');\n"
+               "var card = el('div', 'background:#fff;color:#222;padding:22px 24px;border-radius:6px;width:400px;max-width:90vw;"
+               "text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.5)');\n"
+               "var head = el('div', 'font-size:22px;font-weight:bold;text-transform:uppercase;margin-bottom:6px', TITLE);\n"
+               "var hint = el('div', 'color:#555;font-size:14px', 'Solve Cloudflare\\u2019s check for krunker.io below. Krunker Box Office"
+               " takes the result once and closes this window.');\n"
+               "holder = el('div', 'min-height:70px;display:flex;align-items:center;justify-content:center;margin:14px 0 6px');\n"
+               "status = el('div', 'color:#555;font-size:13px;min-height:18px');\n"
+               "retry = el('button', 'display:none;margin:10px auto 0;padding:6px 16px;font-size:14px;cursor:pointer', 'Try again');\n"
+               "var where = el('div', 'color:#999;font-size:12px;margin-top:10px', location.origin);\n"
+               "card.appendChild(head); card.appendChild(hint); card.appendChild(holder); card.appendChild(status);"
+               " card.appendChild(retry); card.appendChild(where); shade.appendChild(card);\n");
     }
-    g_string_append(s, "if (window._cf_chl_opt) { post('interstitial:'); return; }\n"); // Cloudflare's own check of the visit: never covered
+    sb_put(&s, "if (window._cf_chl_opt) { post('interstitial:'); return; }\n"); // Cloudflare's own check of the visit: never covered
     if (in_ui) { // Cloudflare's own page (above) stays as it is; the robots.txt text does not show
-        g_string_append(s,
-                        "if (document.body) { document.body.style.display = 'none'; document.body.style.background = 'transparent'; }\n"
-                        "document.documentElement.style.background = 'transparent';\n"
-                        "document.documentElement.appendChild(shade);\n");
+        sb_put(&s,
+               "if (document.body) { document.body.style.display = 'none'; document.body.style.background = 'transparent'; }\n"
+               "document.documentElement.style.background = 'transparent';\n"
+               "document.documentElement.appendChild(shade);\n");
     } else {
-        g_string_append(s, "(document.body || document.documentElement).appendChild(shade);\n");
+        sb_put(&s, "(document.body || document.documentElement).appendChild(shade);\n");
     }
-    g_string_append(
-        s,
-        "var say = function (t) { status.textContent = t || ''; };\n"
-        "var widget = null, loading = null;\n"
-        "var load = function () {\n"
-        "  if (window.turnstile) return Promise.resolve();\n"
-        "  if (!loading) loading = new Promise(function (ok, fail) {\n"
-        "    var sc = document.createElement('script'); sc.src = API; sc.async = true;\n"
-        "    sc.onload = function () { ok(); }; sc.onerror = function () { loading = null; fail(new Error('load')); };\n"
-        "    (document.head || document.documentElement).appendChild(sc);\n"
-        "  });\n"
-        "  return loading;\n"
-        "};\n"
-        "var failed = function (t, m) { say(t); retry.style.display = ''; post(m); };\n"
-        "var render = function () {\n"
-        "  retry.style.display = 'none';\n"
-        "  say('Loading Cloudflare\\u2019s challenge\\u2026');\n"
-        "  load().then(function () {\n"
-        "    var ts = window.turnstile;\n"
-        "    if (!ts) { failed('Cloudflare\\u2019s challenge did not load.', 'error:noscript'); return; }\n"
-        "    try { if (widget != null) ts.remove(widget); } catch (e) {}\n"
-        "    widget = null;\n"
-        "    try {\n"
-        "      widget = ts.render(holder, {\n"
-        "        sitekey: SITEKEY, appearance: 'always',\n"
-        "        callback: function (t) { say('Done.'); post('token:' + t); },\n"
-        "        'error-callback': function (c) { c = c == null ? 'unknown' : String(c);"
-        " failed('Cloudflare error ' + c + '.', 'error:' + c); return true; },\n"
-        "        'expired-callback': function () { failed('The challenge expired.', 'expired:'); },\n"
-        "        'timeout-callback': function () { failed('The challenge timed out.', 'timeout:'); },\n"
-        "        'before-interactive-callback': function () { say(''); post('interactive:'); }\n"
-        "      });\n"
-        "      if (widget == null) failed('Cloudflare\\u2019s challenge could not be shown.', 'error:render');\n"
-        "      else { say(''); post('shown:'); }\n"
-        "    } catch (e) { failed('Cloudflare\\u2019s challenge could not be shown.', 'error:render'); }\n"
-        "  }, function () { failed('Cloudflare\\u2019s challenge did not load (blocked or offline).', 'error:noscript'); });\n"
-        "};\n"
-        "retry.onclick = render;\n"
-        "render();\n"
-        "})();\n");
-    return g_string_free(s, FALSE);
+    sb_put(&s,
+           "var say = function (t) { status.textContent = t || ''; };\n"
+           "var widget = null, loading = null;\n"
+           "var load = function () {\n"
+           "  if (window.turnstile) return Promise.resolve();\n"
+           "  if (!loading) loading = new Promise(function (ok, fail) {\n"
+           "    var sc = document.createElement('script'); sc.src = API; sc.async = true;\n"
+           "    sc.onload = function () { ok(); }; sc.onerror = function () { loading = null; fail(new Error('load')); };\n"
+           "    (document.head || document.documentElement).appendChild(sc);\n"
+           "  });\n"
+           "  return loading;\n"
+           "};\n"
+           "var failed = function (t, m) { say(t); retry.style.display = ''; post(m); };\n"
+           "var render = function () {\n"
+           "  retry.style.display = 'none';\n"
+           "  say('Loading Cloudflare\\u2019s challenge\\u2026');\n"
+           "  load().then(function () {\n"
+           "    var ts = window.turnstile;\n"
+           "    if (!ts) { failed('Cloudflare\\u2019s challenge did not load.', 'error:noscript'); return; }\n"
+           "    try { if (widget != null) ts.remove(widget); } catch (e) {}\n"
+           "    widget = null;\n"
+           "    try {\n"
+           "      widget = ts.render(holder, {\n"
+           "        sitekey: SITEKEY, appearance: 'always',\n"
+           "        callback: function (t) { say('Done.'); post('token:' + t); },\n"
+           "        'error-callback': function (c) { c = c == null ? 'unknown' : String(c);"
+           " failed('Cloudflare error ' + c + '.', 'error:' + c); return true; },\n"
+           "        'expired-callback': function () { failed('The challenge expired.', 'expired:'); },\n"
+           "        'timeout-callback': function () { failed('The challenge timed out.', 'timeout:'); },\n"
+           "        'before-interactive-callback': function () { say(''); post('interactive:'); }\n"
+           "      });\n"
+           "      if (widget == null) failed('Cloudflare\\u2019s challenge could not be shown.', 'error:render');\n"
+           "      else { say(''); post('shown:'); }\n"
+           "    } catch (e) { failed('Cloudflare\\u2019s challenge could not be shown.', 'error:render'); }\n"
+           "  }, function () { failed('Cloudflare\\u2019s challenge did not load (blocked or offline).', 'error:noscript'); });\n"
+           "};\n"
+           "retry.onclick = render;\n"
+           "render();\n"
+           "})();\n");
+    return sb_take(&s);
 }
 
-// The bridge, in the isolated world BRIDGE_WORLD of the top frame: the only script that can post to
-// the handler. It reads the main-world script's message off <html> (the DOM is shared between worlds).
-static char *bridge_script(void) {
-    GString *s = g_string_new("(function () {\n'use strict';\nvar ORIGIN = ");
-    js_string(s, W.origin);
-    g_string_append(s, ";\n"
-                       "if (window.top !== window || location.origin !== ORIGIN) return;\n"
-                       "var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;\n"
-                       "if (!h) return;\n"
-                       "document.addEventListener('" BRIDGE_EVENT "', function () {\n"
-                       "  var d = document.documentElement, m = d.getAttribute('" BRIDGE_ATTR "');\n"
-                       "  d.removeAttribute('" BRIDGE_ATTR "');\n"
-                       "  if (typeof m === 'string' && m.length <= 8192) h.postMessage(m);\n"
-                       "}, true);\n"
-                       "})();\n");
-    return g_string_free(s, FALSE);
+static int nav_allowed(const char *uri) {
+    if (!uri) return 0;
+    if (!strncmp(uri, "about:", 6) || !strncmp(uri, "data:", 5) || !strncmp(uri, "blob:", 5)) return 1;
+    char o[sizeof(W.origin)];
+    if (!origin_of(uri, o, sizeof(o))) return 0;
+    return !strcmp(o, W.origin) || !strcmp(o, TURNSTILE_ORIGIN);
 }
 
-// ---------------------------------------------------------------- signals
+// A navigation the page asks for: 1 = allowed (else it is refused and said here).
+static int navigation_ok(const char *uri) {
+    if (nav_allowed(uri)) return 1;
+    char o[sizeof(W.origin)];
+    printf("[webview] a navigation to %s was refused\n", origin_of(uri, o, sizeof(o)) ? o : "(another scheme)");
+    return 0;
+}
 
-static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer user) {
-    (void) m;
-    (void) user;
-    if (!W.view) return;
-    JSCValue *v = webkit_javascript_result_get_js_value(r);
-    if (!v || !jsc_value_is_string(v)) return;
-    char *s = jsc_value_to_string(v);
-    if (!s) return;
-    const size_t len = strlen(s);
-    if (!same_origin(webkit_web_view_get_uri(W.view))) {
+// krunker.io answers some networks with an error page ("ACCESS DENIED", 403): said in the modal (the
+// widget still works on it, the page being krunker.io's; the matchmaker decides).
+static void http_status(const unsigned status) {
+    if (status < 400) return;
+    W.http_err = status;
+    printf("[webview] %s answered HTTP %u\n", W.origin, status);
+    char text[300];
+    snprintf(text, sizeof(text), "krunker.io answered HTTP %u: it blocks some networks"
+                                 " (Settings > Client > Network > Proxy).",
+             status);
+    set_msg(text);
+    W.ev_status = 1;
+}
+
+// The widget's messages ("kind:value", from the user script). on_origin: the message came from the
+// expected origin's page (else it is ignored). One token at most; the states the modal shows.
+static void widget_message(const char *s, const int on_origin) {
+    if (!on_origin) {
         printf("[webview] a message while the page is not on %s: ignored\n", W.origin);
-    } else if (!strncmp(s, "token:", 6)) {
+        return;
+    }
+    const size_t len = strlen(s);
+    if (!strncmp(s, "token:", 6)) {
         const size_t n = len - 6;
         if (W.taken) {
             printf("[webview] a second token: ignored (one per window)\n");
@@ -318,7 +464,7 @@ static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, g
         char code[17];
         snprintf(code, sizeof(code), "%s", s + 6);
         for (char *c = code; *c; c++)
-            if (!g_ascii_isalnum(*c)) *c = '_';
+            if (!ascii_alnum(*c)) *c = '_';
         printf("[webview] the widget reported error %s\n", code);
         char text[200];
         if (!strncmp(code, "1101", 4) || !strncmp(code, "1102", 4)) {
@@ -362,18 +508,209 @@ static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, g
         char m[200];
         snprintf(m, sizeof(m), "Cloudflare wants you to tick the box %s.", place());
         set_msg(m);
+    } else if (!strncmp(s, "http:", 5)) {
+        http_status((unsigned) strtoul(s + 5, NULL, 10));
     }
-    wipe(s, len);
-    g_free(s);
-    // (the window is closed by the next kn_webview_captcha_poll, outside this signal)
 }
 
-static int nav_allowed(const char *uri) {
-    if (!uri) return 0;
-    if (!strncmp(uri, "about:", 6) || !strncmp(uri, "data:", 5) || !strncmp(uri, "blob:", 5)) return 1;
-    char o[sizeof(W.origin)];
-    if (!origin_of(uri, o, sizeof(o))) return 0;
-    return !strcmp(o, W.origin) || !strcmp(o, TURNSTILE_ORIGIN);
+// The page did not load (its own origin): the modal says so; the request ends.
+static void load_failed(const char *why) {
+    printf("[webview] %s did not load: %s\n", W.origin, why);
+    char text[300];
+    snprintf(text, sizeof(text), "%s did not load (%s).", W.origin, why);
+    set_msg(text);
+    W.ev_failed = 1;
+}
+
+// A certificate of krunker.io was refused: never bypassed (the toolkit's error stays, the request ends).
+static void tls_refused(const char *detail) {
+    printf("[webview] %s: the TLS certificate was refused (%s)\n", W.origin, detail);
+    set_msg("krunker.io's certificate was not valid for the challenge.");
+    W.ev_failed = 1;
+}
+
+// The web process of the view ended: the request ends.
+static void page_process_stopped(const char *detail) {
+    printf("[webview] the web process ended (%s)\n", detail);
+    set_msg("The challenge's web process stopped.");
+    W.ev_failed = 1;
+}
+
+static int env_off(void) {
+    const char *e = getenv("KRUNKNATIVE_WEBVIEW");
+    return e && (!strcmp(e, "0") || ascii_equal_ci(e, "off"));
+}
+
+// KRUNKNATIVE_CAPTCHA_WINDOW=1: the challenge's own window, never the game UI (a test, or a player's choice).
+static int window_forced(void) {
+    const char *e = getenv("KRUNKNATIVE_CAPTCHA_WINDOW");
+    return e && !strcmp(e, "1");
+}
+
+// The challenge's URL (NULL: the env override, else KN_WEBVIEW_CAPTCHA_URL) and sitekey are checked here;
+// origin receives the URL's origin, *resolved the URL. 0 = refused (err says why).
+static int captcha_check(const char *url, const char *sitekey, char *origin, const size_t n, const char **resolved, char *err,
+                         const size_t errn) {
+    if (!url || !url[0]) {
+        const char *e = getenv("KRUNKNATIVE_KRUNKER_CAPTCHA_URL");
+        url = e && e[0] ? e : KN_WEBVIEW_CAPTCHA_URL;
+    }
+    if (!origin_of(url, origin, n) || (strncmp(origin, "https://", 8) && !is_loopback_origin(origin))) {
+        if (err && errn) snprintf(err, errn, "the challenge URL must be https:// (or http:// on this computer)");
+        return 0;
+    }
+    for (const char *k = sitekey; k && *k; k++)
+        if (!ascii_alnum(*k) && *k != '_' && *k != '-') sitekey = NULL;
+    if (!sitekey || !sitekey[0]) {
+        if (err && errn) snprintf(err, errn, "no Turnstile sitekey");
+        return 0;
+    }
+    *resolved = url;
+    return 1;
+}
+
+// A new challenge session: the state the open starts from (the backend's objects are its own).
+static void session_reset(const int in_ui, const char *origin, const char *title) {
+    snprintf(W.origin, sizeof(W.origin), "%s", origin);
+    snprintf(W.title, sizeof(W.title), "%s - krunker.io", title && title[0] ? title : "Security Challenge");
+    W.in_ui = in_ui && !window_forced();
+    W.inline_shown = W.inline_failed = W.dirty = W.frames = 0;
+    W.buttons = 0;
+    W.taken = W.closing = 0;
+    W.http_err = 0;
+    W.ev_token = W.ev_failed = W.ev_closed = W.ev_status = 0;
+    W.reveal = NULL;
+    wipe(W.token, sizeof(W.token));
+    const char *rv = getenv("KRUNKNATIVE_WEBVIEW_REVEAL_MS");
+    W.reveal_ms = rv && rv[0] ? atoi(rv) : KN_WEBVIEW_REVEAL_DEFAULT_MS;
+    W.opened_ms = now_ms();
+}
+
+// The common end of a close: the game UI's frames and the token wiped (the backend's objects are gone).
+static void session_end(void) {
+    W.inline_shown = W.inline_failed = W.dirty = W.frames = 0;
+    W.buttons = 0;
+    free(W.px);
+    W.px = NULL;
+    W.px_cap = 0;
+    W.px_w = W.px_h = 0;
+    if (!W.ev_token) wipe(W.token, sizeof(W.token));
+}
+
+// The poll's reveal decisions, the same on both backends: the game UI's stall watchdog, then the reasons
+// to show the challenge (the widget's, the player's, the backstop). 1 = the challenge was shown by this poll.
+static int poll_reveal(void) {
+    if (W.inline_shown && kn_webview_inline_stalled(W.frames, now_ms() - W.shown_ms, INLINE_STALL_MS)) {
+        printf("[webview] the game UI drew no frame in %d s: the challenge window instead\n", INLINE_STALL_MS / 1000);
+        W.inline_shown = 0;
+        W.inline_failed = 1;
+        set_msg("The challenge is in its own window: the game UI could not draw it.");
+        W.reveal = "the game UI drew no frame";
+    }
+    if (!hidden_host() || W.ev_token || W.ev_failed) return 0;
+    if (!W.reveal && !W.inline_shown && W.reveal_ms >= 0 && now_ms() - W.opened_ms >= W.reveal_ms) W.reveal = "no token in time";
+    if (!W.reveal) return 0;
+    const int before = W.inline_shown || W.window != NULL;
+    const char *why = W.reveal;
+    W.reveal = NULL; // (a reveal that cannot happen yet sets it again: reveal() keeps the reason)
+    reveal(why);
+    return !before && (W.inline_shown || W.window != NULL);
+}
+
+// The events a poll reports, one per call, in order: the token (the challenge closes), the failure, the
+// window's closing, the widget's status line.
+static int poll_events(char *token, const size_t n, char *err, const size_t errn) {
+    if (W.ev_token) {
+        W.ev_token = 0;
+        const size_t len = strlen(W.token);
+        const int ok = token && len < n;
+        if (ok) memcpy(token, W.token, len + 1);
+        wipe(W.token, sizeof(W.token));
+        kn_webview_captcha_close(); // done: the window goes at once
+        if (ok) return KN_WEBVIEW_TOKEN;
+        if (err && errn) snprintf(err, errn, "the token did not fit");
+        return KN_WEBVIEW_FAILED;
+    }
+    if (W.ev_failed) {
+        W.ev_failed = W.ev_status = 0;
+        kn_webview_captcha_close();
+        if (err && errn) snprintf(err, errn, "%s", W.msg);
+        return KN_WEBVIEW_FAILED;
+    }
+    if (W.ev_closed) {
+        W.ev_closed = W.ev_status = 0;
+        return KN_WEBVIEW_CLOSED;
+    }
+    if (W.ev_status) {
+        W.ev_status = 0;
+        if (err && errn) snprintf(err, errn, "%s", W.msg);
+        return KN_WEBVIEW_STATUS;
+    }
+    return KN_WEBVIEW_NONE;
+}
+
+int kn_webview_captcha_poll(char *token, const size_t n, char *err, const size_t errn) {
+    kn_webview_pump();
+    if (err && errn) err[0] = 0;
+    backend_tick();
+    if (poll_reveal()) { // the player is needed now: the caller shows its prompt (the widget's line rides along)
+        if (err && errn) snprintf(err, errn, "%s", W.msg);
+        return KN_WEBVIEW_SHOWN;
+    }
+    return poll_events(token, n, err, errn);
+}
+
+int kn_webview_captcha_is_open(void) { return W.window != NULL || hidden_host(); }
+
+int kn_webview_captcha_inline(void) { return W.inline_shown; }
+
+int kn_webview_captcha_windowed(void) { return W.window != NULL; }
+
+#endif // KN_WV_GTK || KN_WV_WV2
+
+// ---------------------------------------------------------------- GTK (Linux)
+#if defined(KN_WV_GTK)
+
+static long long now_ms(void) { return (long long) (g_get_monotonic_time() / 1000); }
+
+static int hidden_host(void) { return W.offscreen != NULL; }
+
+static void backend_tick(void) {}
+
+// The bridge, in the isolated world BRIDGE_WORLD of the top frame: the only script that can post to
+// the handler. It reads the main-world script's message off <html> (the DOM is shared between worlds).
+// The caller frees the text (NULL when out of memory).
+static char *bridge_script(void) {
+    Sb s = {0};
+    sb_put(&s, "(function () {\n'use strict';\nvar ORIGIN = ");
+    js_string(&s, W.origin);
+    sb_put(&s, ";\n"
+               "if (window.top !== window || location.origin !== ORIGIN) return;\n"
+               "var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;\n"
+               "if (!h) return;\n"
+               "document.addEventListener('" BRIDGE_EVENT "', function () {\n"
+               "  var d = document.documentElement, m = d.getAttribute('" BRIDGE_ATTR "');\n"
+               "  d.removeAttribute('" BRIDGE_ATTR "');\n"
+               "  if (typeof m === 'string' && m.length <= 8192) h.postMessage(m);\n"
+               "}, true);\n"
+               "})();\n");
+    return sb_take(&s);
+}
+
+// ---------------------------------------------------------------- signals
+
+static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer user) {
+    (void) m;
+    (void) user;
+    if (!W.view) return;
+    JSCValue *v = webkit_javascript_result_get_js_value(r);
+    if (!v || !jsc_value_is_string(v)) return;
+    char *s = jsc_value_to_string(v);
+    if (!s) return;
+    widget_message(s, same_origin(webkit_web_view_get_uri(W.view)));
+    wipe(s, strlen(s));
+    g_free(s);
+    // (the window is closed by the next kn_webview_captcha_poll, outside this signal)
 }
 
 static gboolean on_policy(WebKitWebView *view, WebKitPolicyDecision *d, const WebKitPolicyDecisionType type, gpointer user) {
@@ -388,9 +725,7 @@ static gboolean on_policy(WebKitWebView *view, WebKitPolicyDecision *d, const We
         WebKitNavigationAction *a = webkit_navigation_policy_decision_get_navigation_action(WEBKIT_NAVIGATION_POLICY_DECISION(d));
         WebKitURIRequest *req = a ? webkit_navigation_action_get_request(a) : NULL;
         const char *uri = req ? webkit_uri_request_get_uri(req) : NULL;
-        if (!nav_allowed(uri)) {
-            char o[sizeof(W.origin)];
-            printf("[webview] a navigation to %s was refused\n", origin_of(uri, o, sizeof(o)) ? o : "(another scheme)");
+        if (!navigation_ok(uri)) {
             webkit_policy_decision_ignore(d);
             return TRUE;
         }
@@ -406,30 +741,16 @@ static gboolean on_load_failed(WebKitWebView *view, WebKitLoadEvent ev, gchar *u
                   error->domain == WEBKIT_POLICY_ERROR))
         return FALSE; // a navigation we refused / replaced
     if (!same_origin(uri)) return FALSE;
-    printf("[webview] %s did not load: %s\n", W.origin, error ? error->message : "?");
-    char text[300];
-    snprintf(text, sizeof(text), "%s did not load (%s).", W.origin, error ? error->message : "error");
-    set_msg(text);
-    W.ev_failed = 1;
+    load_failed(error ? error->message : "error");
     return FALSE;
 }
 
-// krunker.io answers some networks with an error page ("ACCESS DENIED", 403): said in the modal (the
-// widget still works on it, the page being krunker.io's; the matchmaker decides).
 static void on_load_changed(WebKitWebView *view, const WebKitLoadEvent ev, gpointer user) {
     (void) user;
     if (ev != WEBKIT_LOAD_FINISHED || !same_origin(webkit_web_view_get_uri(view))) return;
     WebKitWebResource *res = webkit_web_view_get_main_resource(view);
     WebKitURIResponse *resp = res ? webkit_web_resource_get_response(res) : NULL;
-    const unsigned status = resp ? webkit_uri_response_get_status_code(resp) : 0;
-    if (status < 400) return;
-    W.http_err = status;
-    printf("[webview] %s answered HTTP %u\n", W.origin, status);
-    char text[300];
-    snprintf(text, sizeof(text), "krunker.io answered HTTP %u: it blocks some networks"
-                                 " (Settings > Client > Network > Proxy).", status);
-    set_msg(text);
-    W.ev_status = 1;
+    http_status(resp ? webkit_uri_response_get_status_code(resp) : 0);
 }
 
 static gboolean on_tls_error(WebKitWebView *view, gchar *uri, GTlsCertificate *cert, GTlsCertificateFlags errors, gpointer user) {
@@ -437,18 +758,18 @@ static gboolean on_tls_error(WebKitWebView *view, gchar *uri, GTlsCertificate *c
     (void) uri;
     (void) cert;
     (void) user;
-    printf("[webview] %s: the TLS certificate was refused (flags 0x%x)\n", W.origin, (unsigned) errors);
-    set_msg("krunker.io's certificate was not valid for the challenge.");
-    W.ev_failed = 1;
+    char detail[32];
+    snprintf(detail, sizeof(detail), "flags 0x%x", (unsigned) errors);
+    tls_refused(detail);
     return FALSE; // never bypassed: WebKit shows its error
 }
 
 static void on_terminated(WebKitWebView *view, WebKitWebProcessTerminationReason reason, gpointer user) {
     (void) view;
     (void) user;
-    printf("[webview] the web process ended (reason %d)\n", (int) reason);
-    set_msg("The challenge's web process stopped.");
-    W.ev_failed = 1;
+    char detail[32];
+    snprintf(detail, sizeof(detail), "reason %d", (int) reason);
+    page_process_stopped(detail);
 }
 
 // the real window (after reveal()); the hidden host is only ever destroyed by us
@@ -660,7 +981,7 @@ static void reveal(const char *why) {
     if (W.inline_shown || W.window || !W.view || !W.offscreen) return;
     if (kn_webview_reveal_target(W.in_ui, W.inline_failed) == KN_WEBVIEW_VIEW_INLINE) {
         W.inline_shown = 1;
-        W.shown_us = g_get_monotonic_time();
+        W.shown_ms = now_ms();
         W.frames = 0;
         W.dirty = 1; // (the first frame is taken at once)
         printf("[webview] challenge shown in the game UI (%s): no window\n", why);
@@ -705,21 +1026,10 @@ static void reveal(const char *why) {
 
 // ---------------------------------------------------------------- API
 
-static int env_off(void) {
-    const char *e = getenv("KRUNKNATIVE_WEBVIEW");
-    return e && (!strcmp(e, "0") || !g_ascii_strcasecmp(e, "off"));
-}
-
-// KRUNKNATIVE_CAPTCHA_WINDOW=1: the challenge's own window, never the game UI (a test, or a player's choice).
-static int window_forced(void) {
-    const char *e = getenv("KRUNKNATIVE_CAPTCHA_WINDOW");
-    return e && !strcmp(e, "1");
-}
-
-int kn_webview_available(void) { return !env_off() && W.gtk >= 0; }
+int kn_webview_available(void) { return !env_off() && W.toolkit >= 0; }
 
 static int toolkit_up(void) {
-    if (W.gtk) return W.gtk > 0;
+    if (W.toolkit) return W.toolkit > 0;
     // GTK must not touch the process locale (the game parses and prints "C" numbers)
     gtk_disable_setlocale();
     // The challenge page needs no GPU. WebKit's web process (Skia GPU raster, DMA-BUF renderer)
@@ -728,12 +1038,12 @@ static int toolkit_up(void) {
     setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", 0);
     setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
     if (!gtk_init_check(NULL, NULL)) {
-        W.gtk = -1;
-        snprintf(W.gtk_err, sizeof(W.gtk_err), "GTK found no display for the challenge window");
-        printf("[webview] %s\n", W.gtk_err);
+        W.toolkit = -1;
+        snprintf(W.toolkit_err, sizeof(W.toolkit_err), "GTK found no display for the challenge window");
+        printf("[webview] %s\n", W.toolkit_err);
         return 0;
     }
-    W.gtk = 1;
+    W.toolkit = 1;
     printf("[webview] WebKitGTK %u.%u.%u\n", webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version());
     return 1;
 }
@@ -742,7 +1052,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
                             char *err, const size_t errn) {
     if (err && errn) err[0] = 0;
     if (env_off()) {
-        if (err) snprintf(err, errn, "the webview is turned off (KRUNKNATIVE_WEBVIEW=0)");
+        if (err && errn) snprintf(err, errn, "the webview is turned off (KRUNKNATIVE_WEBVIEW=0)");
         return 0;
     }
     if (W.window) { // already up: bring it forward
@@ -754,34 +1064,24 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
         W.reveal = "the player asked for it";
         return 1;
     }
-    if (!url || !url[0]) {
-        const char *e = getenv("KRUNKNATIVE_KRUNKER_CAPTCHA_URL");
-        url = e && e[0] ? e : KN_WEBVIEW_CAPTCHA_URL;
-    }
     char origin[sizeof(W.origin)];
-    if (!origin_of(url, origin, sizeof(origin)) || (strncmp(origin, "https://", 8) && !is_loopback_origin(origin))) {
-        if (err) snprintf(err, errn, "the challenge URL must be https:// (or http:// on this computer)");
-        return 0;
-    }
-    for (const char *k = sitekey; k && *k; k++)
-        if (!g_ascii_isalnum(*k) && *k != '_' && *k != '-') sitekey = NULL;
-    if (!sitekey || !sitekey[0]) {
-        if (err) snprintf(err, errn, "no Turnstile sitekey");
-        return 0;
-    }
+    const char *resolved = NULL;
+    if (!captcha_check(url, sitekey, origin, sizeof(origin), &resolved, err, errn)) return 0;
     if (!toolkit_up()) {
-        if (err) snprintf(err, errn, "%s", W.gtk_err);
+        if (err && errn) snprintf(err, errn, "%s", W.toolkit_err);
         return 0;
     }
-    snprintf(W.origin, sizeof(W.origin), "%s", origin);
-    W.in_ui = in_ui && !window_forced();
-    W.inline_shown = W.inline_failed = W.dirty = W.frames = 0;
-    W.buttons = 0;
-    W.taken = W.closing = 0;
-    W.http_err = 0;
-    W.ev_token = W.ev_failed = W.ev_closed = W.ev_status = 0;
-    W.reveal = NULL;
-    wipe(W.token, sizeof(W.token));
+    session_reset(in_ui, origin, title);
+    // the scripts first: nothing is created when they cannot be built
+    const char *shown_title = title && title[0] ? title : "Security Challenge";
+    char *bridge = bridge_script();
+    char *js = bridge ? user_script(sitekey, shown_title, W.in_ui) : NULL;
+    if (!bridge || !js) {
+        free(bridge);
+        free(js);
+        if (err && errn) snprintf(err, errn, "out of memory");
+        return 0;
+    }
 
     WebKitWebContext *ctx = webkit_web_context_new_ephemeral(); // nothing of it reaches the disk
     if (proxy && proxy[0]) { // the matchmaker's proxy (the player's setting / environment), loopback excluded
@@ -793,15 +1093,13 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     WebKitUserContentManager *ucm = webkit_user_content_manager_new();
     g_signal_connect(ucm, "script-message-received::knCaptcha", G_CALLBACK(on_message), NULL);
     webkit_user_content_manager_register_script_message_handler_in_world(ucm, "knCaptcha", BRIDGE_WORLD);
-    char *js = bridge_script();
-    WebKitUserScript *script = webkit_user_script_new_for_world(js, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+    WebKitUserScript *script = webkit_user_script_new_for_world(bridge, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
                                                                 BRIDGE_WORLD, NULL, NULL);
-    g_free(js);
+    free(bridge);
     webkit_user_content_manager_add_script(ucm, script);
     webkit_user_script_unref(script);
-    js = user_script(sitekey, title && title[0] ? title : "Security Challenge", W.in_ui); // the main world: Turnstile's
-    script = webkit_user_script_new(js, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, NULL, NULL);
-    g_free(js);
+    script = webkit_user_script_new(js, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, NULL, NULL); // the main world: Turnstile's
+    free(js);
     webkit_user_content_manager_add_script(ucm, script);
     webkit_user_script_unref(script);
 
@@ -823,26 +1121,20 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     g_signal_connect(W.view, "web-process-terminated", G_CALLBACK(on_terminated), NULL);
 
     // hidden first (see the top of this file): an offscreen toplevel, laid out at the window's size
-    snprintf(W.title, sizeof(W.title), "%s - krunker.io", title && title[0] ? title : "Security Challenge");
     W.offscreen = gtk_offscreen_window_new();
     g_signal_connect_after(W.offscreen, "draw", G_CALLBACK(on_draw), NULL); // a new frame for the game UI
     gtk_widget_set_size_request(GTK_WIDGET(W.view), W.in_ui ? KN_WEBVIEW_INLINE_W : WINDOW_W, W.in_ui ? KN_WEBVIEW_INLINE_H : WINDOW_H);
     gtk_container_add(GTK_CONTAINER(W.offscreen), GTK_WIDGET(W.view));
     gtk_widget_show_all(W.offscreen);
     gtk_window_set_focus(GTK_WINDOW(W.offscreen), GTK_WIDGET(W.view)); // the keys the game UI forwards go to the view
-    W.opened_us = g_get_monotonic_time();
-    const char *rv = getenv("KRUNKNATIVE_WEBVIEW_REVEAL_MS");
-    W.reveal_ms = rv && rv[0] ? atoi(rv) : KN_WEBVIEW_REVEAL_DEFAULT_MS;
     if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
 
-    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", url, W.origin,
+    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
            proxy && proxy[0] ? ", through the client's proxy" : "");
-    webkit_web_view_load_uri(W.view, url);
+    webkit_web_view_load_uri(W.view, resolved);
     kn_webview_pump();
     return 1;
 }
-
-int kn_webview_captcha_is_open(void) { return W.window != NULL || W.offscreen != NULL; }
 
 void kn_webview_captcha_close(void) {
     if (W.window || W.offscreen) {
@@ -858,81 +1150,878 @@ void kn_webview_captcha_close(void) {
         printf("[webview] challenge window closed%s\n", shown ? "" : " (it was never shown)");
     }
     if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
-    W.inline_shown = W.inline_failed = W.dirty = W.frames = 0;
-    W.buttons = 0;
-    free(W.px);
-    W.px = NULL;
-    W.px_cap = 0;
-    W.px_w = W.px_h = 0;
-    if (!W.ev_token) wipe(W.token, sizeof(W.token));
+    session_end();
 }
 
-int kn_webview_captcha_inline(void) { return W.inline_shown; }
-
-int kn_webview_captcha_windowed(void) { return W.window != NULL; }
-
 void kn_webview_pump(void) {
-    if (W.gtk <= 0) return;
+    if (W.toolkit <= 0) return;
     for (int i = 0; i < 256 && g_main_context_iteration(NULL, FALSE); i++) {
     }
 }
 
-int kn_webview_captcha_poll(char *token, const size_t n, char *err, const size_t errn) {
-    kn_webview_pump();
-    if (err && errn) err[0] = 0;
-    // the game UI drew nothing since it showed the challenge: the challenge's window instead
-    if (W.inline_shown && kn_webview_inline_stalled(W.frames, (g_get_monotonic_time() - W.shown_us) / 1000, INLINE_STALL_MS)) {
-        printf("[webview] the game UI drew no frame in %d s: the challenge window instead\n", INLINE_STALL_MS / 1000);
-        W.inline_shown = 0;
-        W.inline_failed = 1;
-        set_msg("The challenge is in its own window: the game UI could not draw it.");
-        W.reveal = "the game UI drew no frame";
-    }
-    int shown = 0;
-    if (W.offscreen && !W.ev_token && !W.ev_failed) {
-        if (!W.reveal && !W.inline_shown && W.reveal_ms >= 0 && g_get_monotonic_time() - W.opened_us >= (gint64) W.reveal_ms * 1000)
-            W.reveal = "no token in time";
-        if (W.reveal) {
-            const int before = W.inline_shown || W.window != NULL;
-            reveal(W.reveal);
-            W.reveal = NULL;
-            shown = !before && (W.inline_shown || W.window != NULL);
-        }
-    }
-    if (shown) { // the player is needed now: the caller shows its prompt (the widget's line rides along)
-        if (err) snprintf(err, errn, "%s", W.msg);
-        return KN_WEBVIEW_SHOWN;
-    }
-    if (W.ev_token) {
-        W.ev_token = 0;
-        const size_t len = strlen(W.token);
-        const int ok = token && len < n;
-        if (ok) memcpy(token, W.token, len + 1);
-        wipe(W.token, sizeof(W.token));
-        kn_webview_captcha_close(); // done: the window goes at once
-        if (ok) return KN_WEBVIEW_TOKEN;
-        if (err) snprintf(err, errn, "the token did not fit");
-        return KN_WEBVIEW_FAILED;
-    }
-    if (W.ev_failed) {
-        W.ev_failed = W.ev_status = 0;
-        kn_webview_captcha_close();
-        if (err) snprintf(err, errn, "%s", W.msg);
-        return KN_WEBVIEW_FAILED;
-    }
-    if (W.ev_closed) {
-        W.ev_closed = W.ev_status = 0;
-        return KN_WEBVIEW_CLOSED;
-    }
-    if (W.ev_status) {
-        W.ev_status = 0;
-        if (err) snprintf(err, errn, "%s", W.msg);
-        return KN_WEBVIEW_STATUS;
-    }
-    return KN_WEBVIEW_NONE;
+#endif // KN_WV_GTK
+
+// ---------------------------------------------------------------- WebView2 (Windows)
+#if defined(KN_WV_WV2)
+
+#define WV2_CLASS L"KrunkNativeWebView2" // the hidden host and the window share one window class
+#define WV2_RUNTIME_MISSING "The Microsoft Edge WebView2 Runtime is not installed, so krunker.io's challenge cannot be shown."
+#define WV2_OFF_DESKTOP (-32000)          // the hidden host sits here: nothing covers it, the player never sees it
+#define WV2_CAPTURE_MS 60                 // the game UI's frames: a PNG about this often while the widget is shown
+
+typedef HRESULT(STDAPICALLTYPE *PFN_CreateEnv)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions *,
+                                              ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
+typedef HRESULT(STDAPICALLTYPE *PFN_RuntimeVersion)(PCWSTR, LPWSTR *);
+
+// Process state: the loader, the runtime check, the window class, the WIC factory, the proxy variable.
+static struct {
+    int state;       // 0 not tried, 1 ready, -1 unavailable (err says why)
+    char err[200];
+    HMODULE lib;
+    PFN_CreateEnv create_env;
+    PFN_RuntimeVersion runtime_version;
+    ATOM atom;
+    IWICImagingFactory *wic;
+    int proxy_env;   // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS holds the session's proxy (cleared once created)
+} L;
+
+// A session counter: callbacks of a session that ended are ignored (their objects are released by WebView2).
+static int wv_gen;
+
+static long long now_ms(void) { return (long long) GetTickCount64(); }
+
+static int hidden_host(void) { return W.host != NULL; }
+
+// A WebView2 completion or event handler: a COM object of our own with the one Invoke each of them takes
+// (the arguments are pointers or HRESULTs: passed as intptr_t, which both are on x64).
+typedef struct WvHandler WvHandler;
+typedef HRESULT (*WvFn)(WvHandler *h, intptr_t a, intptr_t b);
+typedef struct {
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(WvHandler *h, REFIID riid, void **out);
+    ULONG(STDMETHODCALLTYPE *AddRef)(WvHandler *h);
+    ULONG(STDMETHODCALLTYPE *Release)(WvHandler *h);
+    HRESULT(STDMETHODCALLTYPE *Invoke)(WvHandler *h, intptr_t a, intptr_t b);
+} WvVtbl;
+struct WvHandler {
+    const WvVtbl *lpVtbl;
+    LONG refs;
+    const GUID *iid; // the handler's interface (QueryInterface accepts it, as IUnknown)
+    WvFn fn;
+    void *ctx;       // the callback's own state (a capture's stream)
+    int gen;         // wv_gen when it was made
+};
+
+static ULONG STDMETHODCALLTYPE wv_addref(WvHandler *h) { return (ULONG) InterlockedIncrement(&h->refs); }
+
+static ULONG STDMETHODCALLTYPE wv_rel(WvHandler *h) {
+    const LONG n = InterlockedDecrement(&h->refs);
+    if (n == 0) free(h);
+    return (ULONG) n;
 }
 
-#else // no webview backend in this build
+static HRESULT STDMETHODCALLTYPE wv_qi(WvHandler *h, REFIID riid, void **out) {
+    if (IsEqualIID(riid, &IID_IUnknown) || (h->iid && IsEqualIID(riid, h->iid))) {
+        *out = h;
+        wv_addref(h);
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static HRESULT STDMETHODCALLTYPE wv_invoke(WvHandler *h, intptr_t a, intptr_t b) { return h->fn(h, a, b); }
+
+static const WvVtbl wv_vtbl = {wv_qi, wv_addref, wv_rel, wv_invoke};
+
+static WvHandler *wv_handler(const GUID *iid, WvFn fn) {
+    WvHandler *h = calloc(1, sizeof(*h));
+    if (!h) return NULL;
+    h->lpVtbl = &wv_vtbl;
+    h->refs = 1;
+    h->iid = iid;
+    h->fn = fn;
+    h->gen = wv_gen;
+    return h;
+}
+
+// Our reference is given up after the call that took the handler (WebView2 keeps its own).
+static void wv_unref(WvHandler *h) {
+    if (h) wv_rel(h);
+}
+
+static HRESULT on_ignored(WvHandler *h, intptr_t a, intptr_t b) {
+    (void) h;
+    (void) a;
+    (void) b;
+    return S_OK;
+}
+
+// UTF-8 to a new wide string (the caller frees it), and back (CoTaskMemFree is the caller's for the latter).
+static wchar_t *wide_of(const char *s) {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    if (n <= 0) return NULL;
+    wchar_t *w = malloc((size_t) n * sizeof(wchar_t));
+    if (w && !MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n)) {
+        free(w);
+        return NULL;
+    }
+    return w;
+}
+
+static char *utf8_of(const wchar_t *w) {
+    if (!w) return NULL;
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    if (n <= 0) return NULL;
+    char *s = malloc((size_t) n);
+    if (s && !WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL)) {
+        free(s);
+        return NULL;
+    }
+    return s;
+}
+
+// The loader and the runtime, once: no loader or no runtime makes the backend unavailable (err says why).
+static int wv2_unavailable(const char *why) {
+    snprintf(L.err, sizeof(L.err), "%s", why);
+    printf("[webview] %s\n", why);
+    return 0;
+}
+
+static int wv2_load(void) {
+    // the loader next to the client, else the default search
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
+    const wchar_t *slash = n > 0 && n < MAX_PATH ? wcsrchr(path, L'\\') : NULL;
+    if (slash) {
+        wchar_t dll[MAX_PATH];
+        _snwprintf(dll, MAX_PATH, L"%.*s\\WebView2Loader.dll", (int) (slash - path), path);
+        dll[MAX_PATH - 1] = 0;
+        L.lib = LoadLibraryW(dll);
+    }
+    if (!L.lib) L.lib = LoadLibraryW(L"WebView2Loader.dll");
+    if (!L.lib) return wv2_unavailable("The WebView2 loader (WebView2Loader.dll) could not be loaded, so krunker.io's challenge cannot be shown.");
+    L.create_env = (PFN_CreateEnv) (void *) GetProcAddress(L.lib, "CreateCoreWebView2EnvironmentWithOptions");
+    L.runtime_version = (PFN_RuntimeVersion) (void *) GetProcAddress(L.lib, "GetAvailableCoreWebView2BrowserVersionString");
+    if (!L.create_env || !L.runtime_version)
+        return wv2_unavailable("The WebView2 loader is too old, so krunker.io's challenge cannot be shown.");
+    // the widget's objects live on the main thread: a single-threaded apartment
+    const HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(com)) return wv2_unavailable("This thread cannot host the WebView2 runtime, so krunker.io's challenge cannot be shown.");
+    // the runtime: Edge's WebView2 runtime is what the view is, and GetAvailable... fails without it
+    LPWSTR version = NULL;
+    const HRESULT hr = L.runtime_version(NULL, &version);
+    if (FAILED(hr) || !version) {
+        printf("[webview] no WebView2 runtime (0x%08lx)\n", (unsigned long) hr);
+        return wv2_unavailable(WV2_RUNTIME_MISSING);
+    }
+    CoTaskMemFree(version);
+    return 1;
+}
+
+static int wv2_loader(char *err, const size_t errn) {
+    if (!L.state) L.state = wv2_load() ? 1 : -1;
+    if (L.state < 0 && err && errn) snprintf(err, errn, "%s", L.err);
+    return L.state > 0;
+}
+
+// The windows' messages: the player closing the challenge's window ends it (the poll reports it).
+static LRESULT CALLBACK wv2_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_DESTROY) {
+        if (hwnd == W.window) {
+            W.window = NULL;
+            W.target = NULL;
+            if (!W.closing) {
+                printf("[webview] the player closed the challenge window\n");
+                W.ev_closed = 1;
+            }
+        } else if (hwnd == W.host) {
+            W.host = NULL;
+            W.target = NULL;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static int wv2_class(void) {
+    if (L.atom) return 1;
+    WNDCLASSEXW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = wv2_wndproc;
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.lpszClassName = WV2_CLASS;
+    wc.hCursor = LoadCursorW(NULL, (LPCWSTR) IDC_ARROW);
+    L.atom = RegisterClassExW(&wc);
+    return L.atom != 0;
+}
+
+// The hidden host: a popup parked off the desktop (nothing covers it, the player never sees it). WebView2
+// renders into it all the same, and the controller is created on it.
+static HWND wv2_host(const int w, const int h) {
+    return CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WV2_CLASS, L"", WS_POPUP, WV2_OFF_DESKTOP, WV2_OFF_DESKTOP, w, h, NULL,
+                           NULL, GetModuleHandleW(NULL), NULL);
+}
+
+// The session's proxy (the matchmaker's, the same as the game's requests): WebView2 takes the browser's
+// arguments from WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS when its environment is created. The address only:
+// Chromium's proxy switch takes no user name, so a proxy with one is refused (the request ends).
+static int wv2_proxy_env(const char *proxy, char *err, const size_t errn) {
+    if (!proxy || !proxy[0]) return 1;
+    if (strchr(proxy, '@') || strlen(proxy) > 300) {
+        if (err && errn) snprintf(err, errn, "the Windows webview cannot use this proxy (it takes an address, without a user name)");
+        return 0;
+    }
+    char uri[320];
+    if (strstr(proxy, "://")) snprintf(uri, sizeof(uri), "%s", proxy);
+    else snprintf(uri, sizeof(uri), "http://%s", proxy);
+    char args[400];
+    snprintf(args, sizeof(args), "--proxy-server=%s --proxy-bypass-list=localhost;127.0.0.1;[::1]", uri);
+    wchar_t *w = wide_of(args);
+    const BOOL ok = w && SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", w);
+    free(w);
+    if (!ok) {
+        if (err && errn) snprintf(err, errn, "the Windows webview could not take the proxy");
+        return 0;
+    }
+    L.proxy_env = 1;
+    return 1;
+}
+
+static void wv2_clear_proxy_env(void) {
+    if (!L.proxy_env) return;
+    SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", NULL);
+    L.proxy_env = 0;
+}
+
+// The session's temporary user data folder: the view keeps nothing (removed at close, best effort).
+static int wv2_session_dir(void) {
+    wchar_t tmp[MAX_PATH];
+    if (!GetTempPathW(MAX_PATH, tmp)) return 0;
+    _snwprintf(W.session_dir, MAX_PATH, L"%sKrunkNative-webview2-%lu-%d", tmp, (unsigned long) GetCurrentProcessId(), wv_gen);
+    W.session_dir[MAX_PATH - 1] = 0;
+    return CreateDirectoryW(W.session_dir, NULL) ? 1 : 0;
+}
+
+static void wv2_remove_session_dir(void) {
+    if (!W.session_dir[0]) return;
+    wchar_t from[MAX_PATH + 1];
+    memset(from, 0, sizeof(from)); // (the two NULs at the end close the list)
+    wcsncpy(from, W.session_dir, MAX_PATH);
+    SHFILEOPSTRUCTW op;
+    memset(&op, 0, sizeof(op));
+    op.wFunc = FO_DELETE;
+    op.pFrom = from;
+    op.fFlags = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    SHFileOperationW(&op);
+    W.session_dir[0] = 0;
+}
+
+// The widget's script, wrapped to run once the document has parsed (WebView2 injects it before the page's
+// own scripts; the widget needs the body). js is freed.
+static char *wv2_wrap(char *js) {
+    Sb b = {0};
+    sb_put(&b, "(function () {\nvar go = function () {\n");
+    if (js) sb_put(&b, js);
+    sb_put(&b, "};\nif (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();\n})();\n");
+    free(js);
+    return sb_take(&b);
+}
+
+// A PNG of the view (CapturePreview) to the straight RGBA8 frame the game UI draws (W.px, row 0 on top).
+static void decode_frame(IStream *s) {
+    if (!L.wic && FAILED(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (void **) &L.wic)))
+        return;
+    LARGE_INTEGER zero;
+    zero.QuadPart = 0;
+    s->lpVtbl->Seek(s, zero, STREAM_SEEK_SET, NULL);
+    IWICBitmapDecoder *dec = NULL;
+    IWICBitmapFrameDecode *frame = NULL;
+    IWICFormatConverter *conv = NULL;
+    UINT w = 0, h = 0;
+    HRESULT hr = L.wic->lpVtbl->CreateDecoderFromStream(L.wic, s, NULL, WICDecodeMetadataCacheOnDemand, &dec);
+    if (SUCCEEDED(hr)) hr = dec->lpVtbl->GetFrame(dec, 0, &frame);
+    if (SUCCEEDED(hr)) hr = frame->lpVtbl->GetSize(frame, &w, &h);
+    if (SUCCEEDED(hr) && (w == 0 || h == 0)) hr = E_FAIL;
+    if (SUCCEEDED(hr)) hr = L.wic->lpVtbl->CreateFormatConverter(L.wic, &conv);
+    if (SUCCEEDED(hr))
+        hr = conv->lpVtbl->Initialize(conv, (IWICBitmapSource *) frame, &GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, NULL, 0.0,
+                                      WICBitmapPaletteTypeCustom);
+    const size_t need = (size_t) w * (size_t) h * 4;
+    if (SUCCEEDED(hr) && need > W.px_cap) {
+        unsigned char *p = realloc(W.px, need);
+        if (p) {
+            W.px = p;
+            W.px_cap = need;
+        } else {
+            hr = E_OUTOFMEMORY;
+        }
+    }
+    if (SUCCEEDED(hr)) hr = conv->lpVtbl->CopyPixels(conv, NULL, w * 4, (UINT) need, W.px);
+    if (SUCCEEDED(hr)) {
+        W.px_w = (int) w;
+        W.px_h = (int) h;
+        W.dirty = 1;
+    }
+    if (conv) conv->lpVtbl->Release(conv);
+    if (frame) frame->lpVtbl->Release(frame);
+    if (dec) dec->lpVtbl->Release(dec);
+}
+
+// The capture's completion: the PNG is decoded into the frame (for this session only); the stream goes.
+static HRESULT on_capture_done(WvHandler *h, intptr_t hr, intptr_t unused) {
+    (void) unused;
+    IStream *s = (IStream *) h->ctx;
+    h->ctx = NULL;
+    if (h->gen == wv_gen) {
+        W.capturing = 0;
+        if (SUCCEEDED((HRESULT) hr) && s) decode_frame(s);
+    }
+    if (s) s->lpVtbl->Release(s);
+    return S_OK;
+}
+
+// One frame request while the game UI shows the widget (at most one in flight).
+static void wv2_request_capture(void) {
+    if (!W.view || W.capturing) return;
+    IStream *s = NULL;
+    if (FAILED(CreateStreamOnHGlobal(NULL, TRUE, &s)) || !s) return;
+    WvHandler *h = wv_handler(&IID_ICoreWebView2CapturePreviewCompletedHandler, on_capture_done);
+    if (!h) {
+        s->lpVtbl->Release(s);
+        return;
+    }
+    h->ctx = s;
+    W.capturing = 1;
+    W.capture_ms = now_ms();
+    const HRESULT hr = W.view->lpVtbl->CapturePreview(W.view, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, s,
+                                                     (ICoreWebView2CapturePreviewCompletedHandler *) h);
+    if (FAILED(hr)) { // no completion comes: the stream is still ours
+        W.capturing = 0;
+        h->ctx = NULL;
+        s->lpVtbl->Release(s);
+    }
+    wv_unref(h);
+}
+
+static void backend_tick(void) {
+    if (W.inline_shown && !W.capturing && W.view && now_ms() - W.capture_ms >= WV2_CAPTURE_MS) wv2_request_capture();
+}
+
+// The challenge did not start or broke (the runtime, the window): the request ends (the poll reports it).
+static void wv2_fail(const char *text) {
+    printf("[webview] %s\n", text);
+    set_msg(text);
+    W.ev_failed = 1;
+}
+
+static HRESULT on_nav_starting(WvHandler *h, intptr_t sender, intptr_t args_) {
+    (void) sender;
+    if (h->gen != wv_gen) return S_OK;
+    ICoreWebView2NavigationStartingEventArgs *args = (ICoreWebView2NavigationStartingEventArgs *) args_;
+    LPWSTR w = NULL;
+    char *uri = NULL;
+    if (SUCCEEDED(args->lpVtbl->get_Uri(args, &w))) uri = utf8_of(w);
+    CoTaskMemFree(w);
+    if (!navigation_ok(uri)) args->lpVtbl->put_Cancel(args, TRUE);
+    free(uri);
+    return S_OK;
+}
+
+static int wv2_is_tls(const COREWEBVIEW2_WEB_ERROR_STATUS st) {
+    return st == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_COMMON_NAME_IS_INCORRECT || st == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_EXPIRED ||
+           st == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_REVOKED || st == COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_IS_INVALID;
+}
+
+// A navigation that ended: a failure of krunker.io's own page is said (a certificate is never bypassed).
+static HRESULT on_nav_completed(WvHandler *h, intptr_t sender, intptr_t args_) {
+    (void) sender;
+    if (h->gen != wv_gen || !W.view) return S_OK;
+    ICoreWebView2NavigationCompletedEventArgs *args = (ICoreWebView2NavigationCompletedEventArgs *) args_;
+    BOOL ok = FALSE;
+    COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+    args->lpVtbl->get_IsSuccess(args, &ok);
+    args->lpVtbl->get_WebErrorStatus(args, &st);
+    if (ok || st == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED) return S_OK;
+    LPWSTR w = NULL;
+    char *uri = NULL;
+    if (SUCCEEDED(W.view->lpVtbl->get_Source(W.view, &w))) uri = utf8_of(w);
+    CoTaskMemFree(w);
+    if (same_origin(uri)) {
+        char detail[48];
+        snprintf(detail, sizeof(detail), "error %d", (int) st);
+        if (wv2_is_tls(st)) tls_refused(detail);
+        else load_failed(detail);
+    }
+    free(uri);
+    return S_OK;
+}
+
+static HRESULT on_new_window(WvHandler *h, intptr_t sender, intptr_t args_) {
+    (void) sender;
+    if (h->gen != wv_gen) return S_OK;
+    ICoreWebView2NewWindowRequestedEventArgs *args = (ICoreWebView2NewWindowRequestedEventArgs *) args_;
+    printf("[webview] a new window was refused\n");
+    args->lpVtbl->put_Handled(args, TRUE);
+    return S_OK;
+}
+
+// The widget's messages: the source's origin is checked here (WebView2 has no isolated world to post from).
+static HRESULT on_web_message(WvHandler *h, intptr_t sender, intptr_t args_) {
+    (void) sender;
+    if (h->gen != wv_gen) return S_OK;
+    ICoreWebView2WebMessageReceivedEventArgs *args = (ICoreWebView2WebMessageReceivedEventArgs *) args_;
+    LPWSTR src = NULL, msg = NULL;
+    args->lpVtbl->get_Source(args, &src);
+    args->lpVtbl->TryGetWebMessageAsString(args, &msg);
+    char *from = utf8_of(src);
+    char *text = utf8_of(msg);
+    char o[sizeof(W.origin)];
+    const int on_origin = from && origin_of(from, o, sizeof(o)) && !strcmp(o, W.origin);
+    if (text) {
+        widget_message(text, on_origin);
+        wipe(text, strlen(text));
+    }
+    free(text);
+    free(from);
+    CoTaskMemFree(src);
+    CoTaskMemFree(msg);
+    return S_OK;
+}
+
+static HRESULT on_process_failed(WvHandler *h, intptr_t sender, intptr_t args_) {
+    (void) sender;
+    if (h->gen != wv_gen) return S_OK;
+    ICoreWebView2ProcessFailedEventArgs *args = (ICoreWebView2ProcessFailedEventArgs *) args_;
+    COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+    args->lpVtbl->get_ProcessFailedKind(args, &kind);
+    if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED) {
+        char detail[32];
+        snprintf(detail, sizeof(detail), "kind %d", (int) kind);
+        page_process_stopped(detail);
+    }
+    return S_OK;
+}
+
+// The controller's background: alpha 0 is transparent (the game UI's page), else the colour.
+static void set_background(ICoreWebView2Controller *ctrl, const BYTE a, const BYTE r, const BYTE g, const BYTE b) {
+    ICoreWebView2Controller2 *c2 = NULL;
+    if (SUCCEEDED(ctrl->lpVtbl->QueryInterface(ctrl, &IID_ICoreWebView2Controller2, (void **) &c2)) && c2) {
+        COREWEBVIEW2_COLOR col;
+        col.A = a;
+        col.R = r;
+        col.G = g;
+        col.B = b;
+        c2->lpVtbl->put_DefaultBackgroundColor(c2, col);
+        c2->lpVtbl->Release(c2);
+    }
+}
+
+// The view exists: its settings, its size, the events the session watches, the widget's script, then the
+// challenge's page (in that order: the script runs in the page's first document).
+static HRESULT on_controller_created(WvHandler *h, intptr_t hr_, intptr_t ctrl_) {
+    if (h->gen != wv_gen) return S_OK;
+    const HRESULT hr = (HRESULT) hr_;
+    ICoreWebView2Controller *ctrl = (ICoreWebView2Controller *) ctrl_;
+    if (FAILED(hr) || !ctrl || !W.host) {
+        char text[160];
+        snprintf(text, sizeof(text), "The Microsoft Edge WebView2 Runtime could not attach the challenge (0x%08lx).", (unsigned long) hr);
+        wv2_fail(text);
+        return S_OK;
+    }
+    ctrl->lpVtbl->AddRef(ctrl);
+    W.controller = ctrl;
+    ICoreWebView2 *view = NULL;
+    if (FAILED(ctrl->lpVtbl->get_CoreWebView2(ctrl, &view)) || !view) {
+        wv2_fail("The Microsoft Edge WebView2 Runtime gave no view for the challenge.");
+        return S_OK;
+    }
+    W.view = view;
+    ICoreWebView2Settings *settings = NULL;
+    if (SUCCEEDED(view->lpVtbl->get_Settings(view, &settings)) && settings) {
+        settings->lpVtbl->put_AreDefaultContextMenusEnabled(settings, FALSE);
+        settings->lpVtbl->put_AreDevToolsEnabled(settings, FALSE);
+        settings->lpVtbl->put_IsStatusBarEnabled(settings, FALSE);
+        settings->lpVtbl->Release(settings);
+    }
+    RECT rc;
+    memset(&rc, 0, sizeof(rc));
+    GetClientRect(W.host, &rc);
+    ctrl->lpVtbl->put_Bounds(ctrl, rc);
+    ctrl->lpVtbl->put_IsVisible(ctrl, TRUE);
+    if (W.in_ui) set_background(ctrl, 0, 0, 0, 0); // transparent: the page is the widget only
+
+    EventRegistrationToken token;
+    WvHandler *e;
+    e = wv_handler(&IID_ICoreWebView2NavigationStartingEventHandler, on_nav_starting);
+    if (e) {
+        view->lpVtbl->add_NavigationStarting(view, (ICoreWebView2NavigationStartingEventHandler *) e, &token);
+        wv_unref(e);
+    }
+    e = wv_handler(&IID_ICoreWebView2NavigationCompletedEventHandler, on_nav_completed);
+    if (e) {
+        view->lpVtbl->add_NavigationCompleted(view, (ICoreWebView2NavigationCompletedEventHandler *) e, &token);
+        wv_unref(e);
+    }
+    e = wv_handler(&IID_ICoreWebView2NewWindowRequestedEventHandler, on_new_window);
+    if (e) {
+        view->lpVtbl->add_NewWindowRequested(view, (ICoreWebView2NewWindowRequestedEventHandler *) e, &token);
+        wv_unref(e);
+    }
+    e = wv_handler(&IID_ICoreWebView2WebMessageReceivedEventHandler, on_web_message);
+    if (e) {
+        view->lpVtbl->add_WebMessageReceived(view, (ICoreWebView2WebMessageReceivedEventHandler *) e, &token);
+        wv_unref(e);
+    }
+    e = wv_handler(&IID_ICoreWebView2ProcessFailedEventHandler, on_process_failed);
+    if (e) {
+        view->lpVtbl->add_ProcessFailed(view, (ICoreWebView2ProcessFailedEventHandler *) e, &token);
+        wv_unref(e);
+    }
+    if (W.script) {
+        WvHandler *a = wv_handler(&IID_ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler, on_ignored);
+        if (a) {
+            view->lpVtbl->AddScriptToExecuteOnDocumentCreated(view, W.script, (ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *) a);
+            wv_unref(a);
+        }
+        free(W.script);
+        W.script = NULL;
+    }
+    if (W.navigate) {
+        view->lpVtbl->Navigate(view, W.navigate);
+        free(W.navigate);
+        W.navigate = NULL;
+    }
+    ctrl->lpVtbl->MoveFocus(ctrl, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC); // the keys the game UI forwards go to the view
+    return S_OK;
+}
+
+// The environment exists: its controller on the hidden host (the browser's arguments were read by now).
+static HRESULT on_env_created(WvHandler *h, intptr_t hr_, intptr_t env_) {
+    if (h->gen != wv_gen) return S_OK;
+    wv2_clear_proxy_env();
+    const HRESULT hr = (HRESULT) hr_;
+    ICoreWebView2Environment *env = (ICoreWebView2Environment *) env_;
+    if (FAILED(hr) || !env || !W.host) {
+        char text[160];
+        snprintf(text, sizeof(text), "The Microsoft Edge WebView2 Runtime did not start (0x%08lx).", (unsigned long) hr);
+        wv2_fail(text);
+        return S_OK;
+    }
+    env->lpVtbl->AddRef(env);
+    W.env = env;
+    WvHandler *c = wv_handler(&IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, on_controller_created);
+    const HRESULT r = c ? env->lpVtbl->CreateCoreWebView2Controller(env, W.host, (ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *) c)
+                        : E_OUTOFMEMORY;
+    wv_unref(c);
+    if (FAILED(r)) {
+        char text[160];
+        snprintf(text, sizeof(text), "The Microsoft Edge WebView2 Runtime could not show the challenge (0x%08lx).", (unsigned long) r);
+        wv2_fail(text);
+    }
+    return S_OK;
+}
+
+// The view's render window: the one that takes the forwarded input (found on first use, again after a reveal).
+static BOOL CALLBACK wv2_find_render(HWND h, LPARAM p) {
+    wchar_t cls[64];
+    memset(cls, 0, sizeof(cls));
+    GetClassNameW(h, cls, 64);
+    if (!wcscmp(cls, L"Chrome_RenderWidgetHostHWND")) {
+        *(HWND *) p = h;
+        return FALSE;
+    }
+    EnumChildWindows(h, wv2_find_render, p);
+    return *(HWND *) p == NULL;
+}
+
+static HWND wv2_target(void) {
+    if (W.target && IsWindow(W.target)) return W.target;
+    HWND root = W.window ? W.window : W.host;
+    if (!root) return NULL;
+    HWND found = NULL;
+    EnumChildWindows(root, wv2_find_render, (LPARAM) &found);
+    W.target = found ? found : root;
+    return W.target;
+}
+
+static void wv2_release_objects(void) {
+    if (W.view) {
+        W.view->lpVtbl->Release(W.view);
+        W.view = NULL;
+    }
+    if (W.controller) {
+        W.controller->lpVtbl->Release(W.controller);
+        W.controller = NULL;
+    }
+    if (W.env) {
+        W.env->lpVtbl->Release(W.env);
+        W.env = NULL;
+    }
+    free(W.script);
+    W.script = NULL;
+    free(W.navigate);
+    W.navigate = NULL;
+}
+
+// A session that did not start: everything it made goes.
+static void wv2_abort(void) {
+    HWND host = W.host;
+    W.host = NULL;
+    if (host) DestroyWindow(host);
+    wv2_release_objects();
+    wv2_clear_proxy_env();
+    wv2_remove_session_dir();
+    W.target = NULL;
+    wv_gen++;
+    session_end();
+}
+
+// Shows the challenge: the view leaves its hidden host for a real window, created at its final place
+// (centred on the work area, on top of the game) before it is shown, so it never jumps. The game UI
+// (in_ui, not failed) takes it with no window: the caller draws its frames (inline_shown). Otherwise the
+// window; with in_ui its page is the widget only, so the window's background is set dark.
+static void reveal(const char *why) {
+    if (W.inline_shown || W.window || !W.host) return;
+    if (!W.controller) { // the view is not ready yet (the environment is still starting): the reason waits for it
+        W.reveal = why;
+        return;
+    }
+    if (kn_webview_reveal_target(W.in_ui, W.inline_failed) == KN_WEBVIEW_VIEW_INLINE) {
+        W.inline_shown = 1;
+        W.shown_ms = now_ms();
+        W.frames = 0;
+        W.dirty = 1; // (the first frame is taken at once)
+        printf("[webview] challenge shown in the game UI (%s): no window\n", why);
+        return;
+    }
+    RECT want = {0, 0, WINDOW_W, WINDOW_H};
+    AdjustWindowRect(&want, WS_OVERLAPPEDWINDOW, FALSE);
+    int w = want.right - want.left, h = want.bottom - want.top, x = 0, y = 0;
+    POINT pt = {0, 0};
+    GetCursorPos(&pt);
+    MONITORINFO mi;
+    memset(&mi, 0, sizeof(mi));
+    mi.cbSize = sizeof(mi);
+    const int placed = GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY), &mi);
+    if (placed) { // centred on the work area of the monitor under the pointer (the game's)
+        const int aw = mi.rcWork.right - mi.rcWork.left, ah = mi.rcWork.bottom - mi.rcWork.top;
+        if (w > aw) w = aw;
+        if (h > ah) h = ah;
+        x = mi.rcWork.left + (aw - w) / 2;
+        y = mi.rcWork.top + (ah - h) / 2;
+    }
+    wchar_t *title = wide_of(W.title);
+    HWND win = CreateWindowExW(WS_EX_TOPMOST, WV2_CLASS, title ? title : L"", WS_OVERLAPPEDWINDOW, placed ? x : CW_USEDEFAULT,
+                               placed ? y : CW_USEDEFAULT, w, h, NULL, NULL, GetModuleHandleW(NULL), NULL);
+    free(title);
+    if (!win) {
+        wv2_fail("The challenge's window could not be created.");
+        return;
+    }
+    W.window = win;
+    if (W.in_ui) set_background(W.controller, 255, 27, 27, 27); // the widget alone on the dark page
+    W.controller->lpVtbl->put_ParentWindow(W.controller, win);
+    RECT rc;
+    memset(&rc, 0, sizeof(rc));
+    GetClientRect(win, &rc);
+    W.controller->lpVtbl->put_Bounds(W.controller, rc);
+    HWND host = W.host;
+    W.host = NULL;
+    W.target = NULL;
+    if (host) DestroyWindow(host);
+    ShowWindow(win, SW_SHOW);
+    SetForegroundWindow(win);
+    printf("[webview] challenge window shown (%s) at %d,%d %dx%d%s\n", why, x, y, w, h, placed ? ", centred on the work area" : "");
+}
+
+// ---------------------------------------------------------------- API (WebView2)
+
+int kn_webview_available(void) { return !env_off() && wv2_loader(NULL, 0); }
+
+int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
+                            char *err, const size_t errn) {
+    if (err && errn) err[0] = 0;
+    if (env_off()) {
+        if (err && errn) snprintf(err, errn, "the webview is turned off (KRUNKNATIVE_WEBVIEW=0)");
+        return 0;
+    }
+    if (W.window) { // already up: bring it forward
+        ShowWindow(W.window, SW_SHOW);
+        SetForegroundWindow(W.window);
+        return 1;
+    }
+    if (W.inline_shown) return 1; // shown in the game UI already
+    if (W.host) { // running hidden: the player asks to see it (the modal's button)
+        W.reveal = "the player asked for it";
+        return 1;
+    }
+    char origin[sizeof(W.origin)];
+    const char *resolved = NULL;
+    if (!captcha_check(url, sitekey, origin, sizeof(origin), &resolved, err, errn)) return 0;
+    if (!wv2_loader(err, errn)) return 0; // no loader or no runtime: unavailable, as no webview
+    if (!wv2_class()) {
+        if (err && errn) snprintf(err, errn, "the challenge's window class could not be registered");
+        return 0;
+    }
+    if (!wv2_proxy_env(proxy, err, errn)) return 0;
+    session_reset(in_ui, origin, title);
+    wv_gen++;
+    char *js = user_script(sitekey, title && title[0] ? title : "Security Challenge", W.in_ui);
+    char *wrapped = js ? wv2_wrap(js) : NULL;
+    W.script = wrapped ? wide_of(wrapped) : NULL;
+    free(wrapped);
+    W.navigate = wide_of(resolved);
+    if (!W.script || !W.navigate || !wv2_session_dir()) {
+        wv2_abort();
+        if (err && errn) snprintf(err, errn, "the challenge could not be prepared (out of memory or no temporary folder)");
+        return 0;
+    }
+    W.host = wv2_host(W.in_ui ? KN_WEBVIEW_INLINE_W : WINDOW_W, W.in_ui ? KN_WEBVIEW_INLINE_H : WINDOW_H);
+    if (!W.host) {
+        wv2_abort();
+        if (err && errn) snprintf(err, errn, "the challenge's window could not be created");
+        return 0;
+    }
+    ShowWindow(W.host, SW_SHOWNOACTIVATE); // (off the desktop: WebView2 renders the view into it)
+    WvHandler *h = wv_handler(&IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, on_env_created);
+    const HRESULT hr = h ? L.create_env(NULL, W.session_dir, NULL, (ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *) h) : E_OUTOFMEMORY;
+    wv_unref(h);
+    if (FAILED(hr)) {
+        wv2_abort();
+        if (err && errn) snprintf(err, errn, "The Microsoft Edge WebView2 Runtime did not start (0x%08lx).", (unsigned long) hr);
+        return 0;
+    }
+    if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
+    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
+           proxy && proxy[0] ? ", through the client's proxy" : "");
+    kn_webview_pump();
+    return 1;
+}
+
+void kn_webview_captcha_close(void) {
+    if (W.window || W.host || W.controller || W.env) {
+        W.closing = 1;
+        const int shown = W.window != NULL;
+        if (W.view) W.view->lpVtbl->Stop(W.view);
+        if (W.controller) W.controller->lpVtbl->Close(W.controller);
+        wv2_release_objects();
+        HWND win = W.window, host = W.host;
+        W.window = NULL;
+        W.host = NULL;
+        W.target = NULL;
+        W.capturing = 0;
+        if (win) DestroyWindow(win);
+        if (host) DestroyWindow(host);
+        wv2_clear_proxy_env();
+        wv2_remove_session_dir();
+        wv_gen++;
+        W.closing = 0;
+        printf("[webview] challenge window closed%s\n", shown ? "" : " (it was never shown)");
+    }
+    if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
+    session_end();
+}
+
+// The window messages of this thread (the view's callbacks come through them), a few at a time.
+void kn_webview_pump(void) {
+    if (!W.host && !W.window && !W.env) return;
+    MSG m;
+    for (int i = 0; i < 256 && PeekMessageW(&m, NULL, 0, 0, PM_REMOVE); i++) {
+        if (m.message == WM_QUIT) {
+            PostQuitMessage((int) m.wParam);
+            break;
+        }
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+}
+
+// The game UI's view: the newest frame when the view has painted since the last one taken.
+int kn_webview_captcha_frame(const unsigned char **rgba, int *w, int *h) {
+    if (!W.inline_shown || !W.dirty || !W.px) return 0;
+    W.dirty = 0;
+    W.frames++;
+    *rgba = W.px;
+    *w = W.px_w;
+    *h = W.px_h;
+    return 1;
+}
+
+// The pointer over the view, in view px: the render window gets the mouse messages (its own coordinates).
+int kn_webview_captcha_pointer(const int kind, const double x, const double y, const int button) {
+    if (!W.inline_shown || !W.host) return 0;
+    HWND t = wv2_target();
+    if (!t) return 0;
+    if (kind == KN_WEBVIEW_POINTER_MOVE) {
+        // (no button change)
+    } else {
+        const unsigned bit = button == 1 ? 1u : button == 2 ? 2u : button == 3 ? 4u : 0u;
+        if (!bit) return 0;
+        if (kind == KN_WEBVIEW_POINTER_PRESS) W.buttons |= bit;
+        else W.buttons &= ~bit;
+    }
+    const WPARAM held = (W.buttons & 1 ? MK_LBUTTON : 0) | (W.buttons & 2 ? MK_MBUTTON : 0) | (W.buttons & 4 ? MK_RBUTTON : 0);
+    UINT msg = WM_MOUSEMOVE;
+    if (kind != KN_WEBVIEW_POINTER_MOVE) {
+        const int press = kind == KN_WEBVIEW_POINTER_PRESS;
+        if (button == 1) msg = press ? WM_LBUTTONDOWN : WM_LBUTTONUP;
+        else if (button == 2) msg = press ? WM_MBUTTONDOWN : WM_MBUTTONUP;
+        else msg = press ? WM_RBUTTONDOWN : WM_RBUTTONUP;
+    }
+    PostMessageW(t, msg, held, MAKELPARAM((int) x, (int) y));
+    return 1;
+}
+
+static UINT vk_of(const int key) {
+    switch (key) {
+        case KN_WEBVIEW_KEY_TAB: return VK_TAB;
+        case KN_WEBVIEW_KEY_ENTER: return VK_RETURN;
+        case KN_WEBVIEW_KEY_SPACE: return VK_SPACE;
+        case KN_WEBVIEW_KEY_BACKSPACE: return VK_BACK;
+        case KN_WEBVIEW_KEY_DELETE: return VK_DELETE;
+        case KN_WEBVIEW_KEY_LEFT: return VK_LEFT;
+        case KN_WEBVIEW_KEY_RIGHT: return VK_RIGHT;
+        case KN_WEBVIEW_KEY_UP: return VK_UP;
+        case KN_WEBVIEW_KEY_DOWN: return VK_DOWN;
+        case KN_WEBVIEW_KEY_HOME: return VK_HOME;
+        case KN_WEBVIEW_KEY_END: return VK_END;
+        default: return 0;
+    }
+}
+
+int kn_webview_captcha_key(const int key, const int pressed) {
+    if (!W.inline_shown || !W.host) return 0;
+    if (pressed == 2) return 1; // a repeat: taken, not sent (the widget takes the press)
+    const UINT vk = vk_of(key);
+    if (!vk) return 0;
+    HWND t = wv2_target();
+    if (!t) return 0;
+    const UINT sc = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    LPARAM lp = 1 | ((LPARAM) sc << 16); // repeat count 1, the scan code
+    if (!pressed) lp |= ((LPARAM) 1 << 30) | ((LPARAM) 1 << 31); // released: it was down, and it is up now
+    PostMessageW(t, pressed ? WM_KEYDOWN : WM_KEYUP, vk, lp);
+    return 1;
+}
+
+// The typed text: one WM_CHAR per UTF-16 unit (a code point above U+FFFF is a surrogate pair).
+int kn_webview_captcha_char(const unsigned codepoint) {
+    if (!W.inline_shown || !W.host || codepoint <= 0x20 || codepoint == 0x7f || codepoint > 0x10ffff) return 0; // (space is a key)
+    HWND t = wv2_target();
+    if (!t) return 0;
+    if (codepoint < 0x10000) {
+        PostMessageW(t, WM_CHAR, (WPARAM) codepoint, 1);
+    } else {
+        const unsigned v = codepoint - 0x10000;
+        PostMessageW(t, WM_CHAR, (WPARAM) (0xd800 + (v >> 10)), 1);
+        PostMessageW(t, WM_CHAR, (WPARAM) (0xdc00 + (v & 0x3ff)), 1);
+    }
+    return 1;
+}
+
+#endif // KN_WV_WV2
+
+// ---------------------------------------------------------------- no backend in this build
+#if !defined(KN_WV_GTK) && !defined(KN_WV_WV2)
 
 int kn_webview_available(void) { return 0; }
 

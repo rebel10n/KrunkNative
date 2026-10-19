@@ -169,8 +169,14 @@ any map exists, for these runs.
 
 ## Gaps
 
-- The challenge window is Linux (WebKitGTK) only. macOS (WKWebView) and Windows (WebView2) are not
-  wired: they get no challenge (the join says so). `kn_webview.h` is the seam for them.
+- The challenge is Linux (WebKitGTK) and Windows (WebView2, `client/src/ui/kn_webview.c`, built when the
+  pinned SDK is in `KN_WEBVIEW2_DIR`: `make webview2`). The Windows backend loads `WebView2Loader.dll` at
+  run time and makes the challenge unavailable when the Edge WebView2 Runtime is missing (the join says
+  so); the frames are `CapturePreview` PNGs and the input window messages, so the widget on Windows is
+  not yet verified on a real runtime. macOS (WKWebView) is not wired: it gets no challenge (the join says
+  so). `kn_webview.h` is the seam for them.
+- Windows packages must ship `WebView2Loader.dll` next to `client.exe` for the challenge to run there (not
+  yet in tools/release/package-client.sh); without it the challenge is unavailable, as without the runtime.
 - The release packages are built with `KN_WEBVIEW=OFF` (tools/release/build-client-linux.sh): linking
   WebKitGTK would make it a hard dependency of the portable client. Loading it at run time (dlopen)
   would lift that.

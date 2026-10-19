@@ -1423,7 +1423,11 @@ static void captcha_done(void *user, const char *token, const int unavailable) {
                 seek();
                 return;
             }
+#if defined(_WIN32)
+            fail("%s", I18N("kn.kio.captchaNeedsWebView2", "Could not join: krunker.io requires a security check that needs the Microsoft Edge WebView2 Runtime installed."));
+#else
             fail("%s", I18N("kn.kio.captchaNeedsWebview", "Could not join: krunker.io requires a security check that needs WebKitGTK installed."));
+#endif
             return;
         }
         // the player cancelled: KN's sentence says what they did (krunker_net.c's e2e pins it; v10's CaptchaRequired
