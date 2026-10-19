@@ -28,6 +28,7 @@
 #include <seek_prefs.h> // seek_prefs_migrate_servers: the one-time Server Type reset at startup
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
+#include <crash_report.h> // crash handlers, the freeze watchdog, the crash notice (crash_report.c)
 #include <install_root.h> // startup chdir of packaged installs
 #include <map_post.h>
 #include <sky.h>
@@ -666,6 +667,7 @@ int main(int argc, char **argv) {
     printf("%s (KrunkNative client) %s\n", flavor_display_name(flavor_get()), kn_build_string());
     install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
+    crash_report_init();     // crash handlers: a native crash leaves a report in <config>/krunknative/crash
     game_reload_startup();   // F5: files changed from now on are new; the session an F5 restart hands over
 
     char *rand_memory = malloc(1);

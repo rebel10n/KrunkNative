@@ -16,6 +16,7 @@
 // offline map / mode / cycle versions (offlineServerCommands, below) stay local because
 // they are the sandbox host's controls (local_game_host).
 #include <console.h>
+#include <crash_report.h> // the console log is the report's log part (crash_report.c)
 #include <krunker_net.h> // the official session's game and region (serverinfo, status)
 #include <krunker_lobbies.h> // serverinfo of an official game: its list row (region, players, map, mode)
 #include <ruleset.h>     // class / secondary completion and the class table (rules_classes, rules_weapons)
@@ -290,6 +291,7 @@ static void append(const char *text, const char *color) {
 #ifndef __EMSCRIPTEN__
     printf("[console] %s\n", text ? text : ""); // headless runs and logs see the console too
 #endif
+    crash_report_log_line(text);
     char *kept = strdup(html);
     if (kept) {
         if (g_con.line_count == CON_LOG_MAX) { // the oldest goes
