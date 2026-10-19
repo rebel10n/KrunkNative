@@ -177,6 +177,17 @@ static char g_search[64];        // windows[1].serverSearch
 enum { SERVER_TAB_KRUNK = 0, SERVER_TAB_KRUNKER = 1, SERVER_TAB_COUNT = 2 };
 static int g_server_tab = SERVER_TAB_KRUNK;
 static int g_server_tab_backend = -1; // the backend the default tab last followed (server_tab_follow)
+
+// The one place the tab changes. The web build plays krunk.io only (its list is Box Office's, and
+// krunker_lobbies_enabled() is 0 there): it has no krunker.io tab, so the tab stays krunk.io's.
+static void set_server_tab(const int tab) {
+#ifdef __EMSCRIPTEN__
+    (void) tab;
+    g_server_tab = SERVER_TAB_KRUNK;
+#else
+    g_server_tab = tab;
+#endif
+}
 static double g_list_start_ms;   // windows[1].startTime (the list's arrival: time-left base)
 static double g_timer_tick_ms;   // updateTimers: the last 1 s step
 static int g_hide_full = -1;     // dK (krk_hideFull), -1 = not read yet
@@ -1679,7 +1690,7 @@ static void server_tab_follow(void) {
     const int backend = krunker_net_active() ? 1 : 0;
     if (backend == g_server_tab_backend) return;
     g_server_tab_backend = backend;
-    g_server_tab = backend ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK;
+    set_server_tab(backend ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK);
 }
 
 typedef struct {
@@ -2878,12 +2889,17 @@ static char *gen_list(void) {
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     append_finder_error(&sb);
     char *servers = get_servers();
+#ifdef __EMSCRIPTEN__
+    // the web build lists krunk.io only: no tab strip (the krunker.io tab is the native client's)
+    sb_append(&sb, "<div style='height:30px'></div>");
+#else
     // the two tabs, one per backend (krunk.io, krunker.io); each shows the map carousel and the groups of its list
     const char *tabs[SERVER_TAB_COUNT] = {I18N("kn.servers.tabKrunk", "krunk.io"), I18N("kn.servers.tabKrunker", "krunker.io")};
     // srvTabs (krunknative.css) sets the tabs' padding and line-height: the label sits in the middle of each tab
     sb_append(&sb, "<div class='bigMenTabs srvTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
     for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div>");
+#endif
     carousel_html(&sb); // the tab's custom games' carousel (customsInfo.length >= 3)
     sb_append(&sb, "<div style='font-size:20px'><div id='serverHolder'>");
     sb_append(&sb, servers);
@@ -3235,7 +3251,7 @@ static void open_server_window(const int which) {
     if (which == 0 || which == 1) {
         menu_show_window(2, 0);
         if (which == 1) { // Customs: the active backend's tab (its customs are in its groups)
-            g_server_tab = krunker_net_active() ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK;
+            set_server_tab(krunker_net_active() ? SERVER_TAB_KRUNKER : SERVER_TAB_KRUNK);
             g_expanded = -1;
             menu_rerender_if_open(2);
         }
@@ -3293,7 +3309,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "windows.1.switchTab")) {
         const int tab = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-        g_server_tab = tab >= 0 && tab < SERVER_TAB_COUNT ? tab : SERVER_TAB_KRUNK;
+        set_server_tab(tab >= 0 && tab < SERVER_TAB_COUNT ? tab : SERVER_TAB_KRUNK);
         g_expanded = -1;
         menu_rerender_if_open(2); // updateWindow(2)
         return 1;

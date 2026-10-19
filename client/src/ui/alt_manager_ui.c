@@ -126,6 +126,9 @@ static int build_rows(Row *rows) {
     if (!v) return 0;
     for (int i = 0; i < v->count && n < ROWS_MAX; i++) {
         const AltProfile *p = &v->profiles[i];
+#ifdef __EMSCRIPTEN__
+        if (p->kind == ALT_KIND_KRUNKER) continue; // the web plays krunk.io only: no krunker.io rows
+#endif
         Row *r = &rows[n++];
         memset(r, 0, sizeof(*r));
         snprintf(r->id, sizeof(r->id), "%s", p->id);
@@ -407,12 +410,14 @@ static void append_row(StrBuf *sb, const Row *r) {
     sb_append(sb, "</div></div>");
 }
 
+#ifndef __EMSCRIPTEN__ // the backend chips of the Add form (native only: the web's Accounts are krunk.io's)
 static void append_chip(StrBuf *sb, const int kind, const char *text) {
     sb_append(sb, kind == g_form_kind ? "<div class='knAltChip knAltChipOn' " : "<div class='knAltChip' ");
     sb_appendf(sb, "onclick='knAltBackend(%d)'>", kind == ALT_KIND_KN ? 0 : 1);
     sb_append_esc(sb, text);
     sb_append(sb, "</div>");
 }
+#endif
 
 char *alt_manager_window_gen(const int id, const char **header) {
     if (id != ALT_MANAGER_WINDOW) return NULL;
@@ -451,10 +456,14 @@ char *alt_manager_window_gen(const int id, const char **header) {
             sb_append_esc(&sb, I18N("kn.alt.submit", "Submit"));
             sb_append(&sb, "</div></div>");
         } else {
-            sb_append(&sb, "<div class='knAltAdd'><div class='knAltChips'>");
+            sb_append(&sb, "<div class='knAltAdd'>");
+#ifndef __EMSCRIPTEN__ // the web's Accounts are krunk.io's only: no backend chips
+            sb_append(&sb, "<div class='knAltChips'>");
             append_chip(&sb, ALT_KIND_KN, "krunk.io");
             append_chip(&sb, ALT_KIND_KRUNKER, "krunker.io");
-            sb_append(&sb, "</div><input id='knAltUser' type='text' class='accountInput' placeholder='");
+            sb_append(&sb, "</div>");
+#endif
+            sb_append(&sb, "<input id='knAltUser' type='text' class='accountInput' placeholder='");
             sb_append_esc(&sb, I18N("generic.username", "Username"));
             sb_append(&sb, "' value='");
             sb_append_esc(&sb, g_form_user);
@@ -489,7 +498,10 @@ int alt_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
         char typed[ALT_LABEL_MAX];
         read_input("knAltUser", typed, sizeof(typed)); // the login typed so far stays
         snprintf(g_form_user, sizeof(g_form_user), "%s", typed);
-        g_form_kind = argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num != 0 ? ALT_KIND_KRUNKER : ALT_KIND_KN;
+        g_form_kind = ALT_KIND_KN; // the web's Accounts are krunk.io's only (no chip picks krunker.io there)
+#ifndef __EMSCRIPTEN__
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num != 0) g_form_kind = ALT_KIND_KRUNKER;
+#endif
     } else if (!strcmp(name, "knAltCodeSubmit")) {
         char code[32];
         read_input("knAltCode", code, sizeof(code));

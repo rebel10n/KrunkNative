@@ -9,6 +9,10 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   password (Sign in fills the form) -> Add signs in again -> Remove forgets the account (and signs it
   out), a restart lists nothing.
 
+  The krunker.io half (the krunker.io chip, its rows, Use / Remove of a krunker.io row) is native only: the web
+  build plays krunk.io only and its Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
+  __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
+
   python3 -I client/tests/account_manager_e2e.py BUILD_DIR      (repository root)
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, private XDG dirs) under xvfb-run's private Xvfb (the
 krunker.io challenge webview needs a display; the game stays headless): its Security Challenge passes by itself on

@@ -20,9 +20,8 @@
 //
 // Plus the server type of the native client: Box Office servers, the official krunker.io lobbies
 // (krunker_lobbies.h) or both, ours first. The server type only picks what Quick Match / F4 seek
-// into: the native server browser always lists both. The web build has the same Server Type row (the
-// saved choice, knSeekServers, and krunker.io's state from the bridge's relay flag, krunker_relay.h), but
-// its seeks stay on Box Office servers until the krunker.io join over the relay is built.
+// into: the native server browser always lists both. The web build plays krunk.io only: it has no
+// Server Type row and its seeks are Box Office's (seek_prefs_servers), whatever knSeekServers says.
 #include <html_dom.h> // HtmlEvent / HtmlArg (seek_prefs_handle)
 #include <stddef.h>
 
