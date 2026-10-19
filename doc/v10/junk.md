@@ -91,16 +91,28 @@ follows a credit that the brain accepted.
 
 ## 6. Where Junk is spent
 
-v10 spends Junk in its market (a listing priced in Junk, `currency_id` 2), its black market, and its
-shop purchases priced in Junk (`currency_id` 2, `_38982`, `v10:114013-114028`), the black market and
-lottery entries (`lottery_entry`, `v10:125525-125540`), and in crafting (the Junkyard). KN's store sells
-no Junk-priced item, its market has no Junk currency and KN runs no lottery, so the only KN spend is:
+v10 spends Junk in its market (a listing priced in Junk, `currency_id` 2), in its shop purchases priced
+in Junk (`currency_id` 2, `_38982`, `v10:114013-114028`), in its lottery entries (`lottery_entry`,
+`v10:125525-125540`: a currency cost with `cost_ref` 2), and in crafting (the Junkyard). The black
+market is priced in KR (`funds`, `v10:136000` on), not Junk, so KN's black market (KR, doc/v7/economy.md)
+has no Junk spend. KN's spends:
 
-- `junk_spend` (C and the `junk_spend` op) with reason `craft` (the craft owner) or any other reason
-  an owner adds. A spend that is not affordable returns `JUNK_INSUFFICIENT` and writes nothing.
+- `lottery` (reason `lottery`): a lottery entry whose cost is currency 2 (services/brain/db_lottery.c,
+  migration 0348_lottery). A bundle costs `cost_quantity` hundredths and gives `num_entries` entries. The
+  three seeded lotteries (the captured v10 API: 1, 2, 3) cost skins only, so Junk entries wait for a
+  currency cost that staff add.
+- `shop` (reason `shop`): a Junk-priced shop product (services/brain/db_shop.c, shop.c, migration
+  0349_shop_junk): the price times the quantity, spent through `junk_spend`, and its skins granted in the
+  same transaction (`POST /api/shop/purchase`). The product table starts empty: v10's live "limited"
+  display (public, read as a guest) had no Junk-priced product on 2026-10-19, so nothing is sold until
+  staff publish one.
+- `craft` (the craft owner) or any other reason an owner adds.
 
-A Junk-priced market listing, a Junk black-market item or a lottery entry would call `junk_spend`
-with its own reason; they are not built.
+A spend that is not affordable returns `JUNK_INSUFFICIENT` and writes nothing: the lottery entry or the
+purchase is refused "Not enough Junk".
+
+A Junk-priced market listing and a Junk black-market item are not built (v10 has neither a Junk listing
+price in this catalogue nor a Junk black-market price).
 
 ## 7. What the player sees
 
@@ -137,6 +149,18 @@ with its own reason; they are not built.
   for an account (0.05 / 2.50 / 0.05 hundredths), nothing for a guest or a bot, and no chat line.
 - `server/tests/pickup_chat_e2e.py` (`make pickup-chat-e2e`): a standalone server has no brain: the
   pickups are destroyed and print no line.
+- `services/brain/tests/lottery_test.py` (ctest `brain_lottery`, `brain_lottery_sqlite`): the guest view of
+  lottery 3 (the closed event, "lottery not found"), the refusals (a token, zero bundles, an unknown cost,
+  "Not enough Junk" with nothing written), a skin, a Junk and an RP entry, the view with a token, and the
+  timer's draw of a window moved into the past: the seeded pools' 10 prizes, each a skin of its pool, one
+  grant per prize, drawn once.
+- `services/brain/tests/shop_test.py` (ctest `brain_shop`, `brain_shop_sqlite`): the display in v10's
+  shape (Junk as hundredths in a "virtual" price), a purchase without a token, "Not enough Junk" with
+  nothing written, the spend (reason `shop`) and the skin grants, the per-account limit, an inactive
+  product, a bad quantity and the ledger sum.
+- `client/tests/junk_shop_e2e.py`: a headless client signed in to the brain: the Eterno Shop's Junk card
+  (the screenshot), BUY (2.50 Junk spent, two skins granted, one purchase row), the Anniversary raffle's
+  ticket entry (one entry, the ticket spent).
 - `server/tests/junk_wallet_e2e.py`: a headless client on the v10 page, signed in to a brain account
   with 12.34 Junk: the navbar's Junk counter reads "12.34" (the login info), then a scripted game
   server's credit of 0.05 makes it read "12.39" through the `uj` push, without signing in again.
