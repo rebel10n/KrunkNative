@@ -1,32 +1,35 @@
 // Krunker Strike's map pool (shared/include/strike_maps.h, doc/v10/krunker-strike-maps.md).
 //
-// Source: FRVR Krunker Strike build 1.37.2 (/home/user/src/KrunkerStrike_v1.37.2/, text only): the
-// map table `xh` in public/assets/index-Cz2uYXJQ.deob.js ({name, fileName}, Krunker v7's maps.js
-// order) and its round setup, which fills config.maps from gameConfig.remoteFeatures.mapPool by
-// mapName and mapWeight. The pool's names are the seven maps FRVR ships for Strike; the weights are
-// server data we do not have, so every map weighs 1.
+// The seven pool maps are Krunker v10.0.2's own official maps: each entry names its v10 file under
+// assets/maps/official/ (krunker_maps.h, pinned in tools/krunker/maps.lock.json), which is also the file
+// the base catalogue loads for that index. Krunker has one v10 file per map name, so each pool map's
+// latest version is that file. The names and the rotation order are FRVR Krunker Strike's (build 1.37.2
+// mapPool: config.maps gets mapWeight copies of each map, then a uniform pick). The weights are server
+// data we do not have, so every map weighs 1.
 
 #include <strike_maps.h>
 
 #include <ctype.h>
 #include <string.h>
 
-#define STRIKE_MAP(key_, name_, file_, index_) {key_, name_, file_, "maps/strike/" key_ ".json", index_, 1}
+#define STRIKE_MAP(key_, name_, file_, index_) {key_, name_, file_, "maps/official/" file_ ".json", index_, 1}
 
 static const StrikeMap k_pool[] = {
-    STRIKE_MAP("burg", "Burg", "burg_new", 0),
-    STRIKE_MAP("sandstorm", "Sandstorm", "sandstorm_v3", 2),
-    STRIKE_MAP("subzero", "Subzero", "subzero_new", 3),
-    STRIKE_MAP("lostworld", "Lostworld", "lostworld_s6", 7),
-    STRIKE_MAP("oasis", "Oasis", "oasis_v3", 9),
-    STRIKE_MAP("skytemple", "SkyTemple", "skytemple", 15),
-    STRIKE_MAP("habitat", "Habitat", "habitat", 22),
+    STRIKE_MAP("burg", "Burg", "00_burg", 0),
+    STRIKE_MAP("sandstorm", "Sandstorm", "02_sandstorm", 2),
+    STRIKE_MAP("subzero", "Subzero", "03_subzero", 3),
+    STRIKE_MAP("lostworld", "Lostworld", "07_lostworld", 7),
+    STRIKE_MAP("oasis", "Oasis", "09_oasis", 9),
+    STRIKE_MAP("skytemple", "SkyTemple", "15_skytemple", 15),
+    STRIKE_MAP("habitat", "Habitat", "22_habitat", 22),
 };
 
 #define POOL_COUNT (sizeof(k_pool) / sizeof(k_pool[0]))
 
-// FRVR's own copy of the controls tutorial's sandbox (build 1.37.2 maps/bot_ftue_v2.json, the same file the
-// build manifest pins): outside the pool, so no rotation (weight 0) and no catalogue index.
+// Krunker Strike's copy of the controls tutorial's sandbox (FRVR 1.37.2's maps/bot_ftue_v2.json, the file
+// the build manifest pins). Krunker v10.0.2 has no official file for it (its bundle names it only in an
+// isBotFTUE branch and is not in the official map list), so it stays under assets/maps/strike/. Outside
+// the pool: no rotation (weight 0) and no catalogue index.
 static const StrikeMap k_ftue_map = {"bot_ftue_v2", "Mini Industry Tutorial", "bot_ftue_v2", "maps/strike/bot_ftue_v2.json", -1, 0};
 
 const StrikeMap *strike_ftue_map(void) { return &k_ftue_map; }

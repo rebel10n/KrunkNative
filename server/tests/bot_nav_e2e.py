@@ -4,9 +4,9 @@
   python3 -I server/tests/bot_nav_e2e.py BUILD_DIR [seconds]   (run from the repository root)
 
 A standalone server_bin (rcon only, no coordinator) runs 8 NextBots that roam and fight on
-Kanji, Sandstorm, Industry and v7's SkyTemple (skytemple_v2) in turn (rcon `map`); a second one
-with --flavor strike runs them on FRVR Strike's SkyTemple (assets/maps/strike/skytemple.json, a
-floating island: main lost 227 bots off its ledge in 30 s). On every map, after `seconds`
+Kanji, Sandstorm, Industry and SkyTemple (skytemple_v2, v10's file) in turn (rcon `map`); a second one
+with --flavor strike runs them on Strike's SkyTemple (the same v10 file, a floating island: main
+lost 227 bots off its ledge in 30 s before bot_path_guard). On every map, after `seconds`
 (default 60) the `bot_nav` counters must show the bots reaching their randomly chosen walkable
 goals without wall-stuck events: goals reached >= 1 per bot-minute (they fight too), stuck recoveries <= 3,
 replans below a storm (<= 4 per bot-second), no unreachable goals on the closed maps (the
@@ -30,7 +30,7 @@ import kn_proto  # noqa: E402
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 SECONDS = float(sys.argv[2]) if len(sys.argv) > 2 else 60.0
 BOTS = 8
-# (server flavor, maps in turn): base plays skytemple_v2 as "SkyTemple", strike FRVR's own file
+# (server flavor, maps in turn): base plays skytemple_v2 as "SkyTemple", strike its pool's SkyTemple (the same file)
 RUNS = [("base", ["Kanji", "Sandstorm", "Industry", "SkyTemple"]), ("strike", ["SkyTemple"])]
 ISLANDS = {"SkyTemple"}
 WORK = tempfile.mkdtemp(prefix="kn-bot-nav-e2e-")

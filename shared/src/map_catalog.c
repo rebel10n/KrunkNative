@@ -525,8 +525,8 @@ int map_sanitize_json(cJSON *map) {
 }
 
 static char *catalog_path(const size_t index) {
-    // Krunker Strike plays FRVR's own copies of its pool maps and of the controls tutorial's sandbox (strike_maps.h);
-    // base is unchanged
+    // Krunker Strike's pool maps are v10's files (strike_maps.h: the same paths as the base entries) and its
+    // controls tutorial's sandbox is its own copy (strike_maps.h); base is unchanged
     const StrikeMap *strike = NULL;
     if (flavor_get() == FLAVOR_STRIKE) {
         strike = strike_map_for_catalog(index);

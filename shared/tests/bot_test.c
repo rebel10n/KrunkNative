@@ -1494,26 +1494,19 @@ int main(void) {
         printf("Failed to load the maps (run from the repository root)\n");
         return 1;
     }
-    // the v10 official ones, then v7's SkyTemple and FRVR Strike's (a floating island: falls)
-    static const char *const k_nav_maps[] = {"kanji", "sandstorm_v3", "industry", "skytemple_v2", "strike/skytemple"};
-    enum { NAV_MAPS = 5 };
+    // the v10 official ones; skytemple_v2 is v10's SkyTemple, the floating island Strike plays too (falls)
+    static const char *const k_nav_maps[] = {"kanji", "sandstorm_v3", "industry", "skytemple_v2"};
+    enum { NAV_MAPS = 4 };
     static const cJSON *maps[3 + NAV_MAPS];
     maps[0] = arena;
     maps[1] = sandstorm;
-    cJSON *strike_skytemple = load_json("assets/maps/strike/skytemple.json"); // not in the base catalogue
-    if (strike_skytemple) map_sanitize_json(strike_skytemple);
-    maps[2 + 4] = strike_skytemple;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < NAV_MAPS; i++) {
         const int key = map_catalog_index_of_key(k_nav_maps[i]);
         maps[2 + i] = key >= 0 ? map_catalog_json((size_t) key) : NULL;
         if (!maps[2 + i]) {
             printf("Failed to load %s\n", k_nav_maps[i]);
             return 1;
         }
-    }
-    if (!strike_skytemple) {
-        printf("Failed to load assets/maps/strike/skytemple.json\n");
-        return 1;
     }
     static int modes[3 + NAV_MAPS];
     cJSON *sense_arena = cJSON_Parse(k_sense_arena); // the last map: test_sense
@@ -1551,12 +1544,11 @@ int main(void) {
     test_nav(&game, 1);
     const float nav_seconds = getenv("KN_BOT_NAV_SECONDS") ? (float) atof(getenv("KN_BOT_NAV_SECONDS")) : 45.0f;
     for (int i = 0; i < NAV_MAPS; i++) test_nav_follow(&game, 2 + i, k_nav_maps[i], nav_seconds, 0, 0);
-    // fighting on the islands: Attack's movement keeps to the ground too (main had 227 falls in
-    // 30 s with 6 bots on FRVR's SkyTemple, 17 on skytemple_v2)
+    // fighting on the islands: Attack's movement keeps to the ground too (SkyTemple had 227 falls in
+    // 30 s with 6 bots before bot_path_guard, 17 on v7's skytemple_v2)
     for (int i = 3; i < NAV_MAPS; i++) test_nav_follow(&game, 2 + i, k_nav_maps[i], nav_seconds, 1, 1);
     test_cost(&game, 1);
     test_map_bots();
-    cJSON_Delete(strike_skytemple);
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

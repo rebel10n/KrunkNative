@@ -71,7 +71,7 @@ kn_gameserver_secret_host: "{{ groups['central'] | first }}"
 
 # ---- Krunker Strike instances (tasks/strike.yml) ---------------------------------------------
 # Official Krunker Strike lobbies: server_bin --flavor strike with the Strike rotation (the modes
-# its menu offers, over FRVR's pool maps in assets/maps/strike/), linked to the same coordinator
+# its menu offers, over the Strike pool's v10 maps in assets/maps/official/), linked to the same coordinator
 # as the Box Office instances and listed / sought / hosted in its Strike flavor pool only
 # (doc/backend.md "Flavor pools"), so the Strike app and Box Office share accounts, never a lobby.
 # Their own units (kn-strike@<n>), configs (strike-<n>.cfg), state, stop-reason file and restart

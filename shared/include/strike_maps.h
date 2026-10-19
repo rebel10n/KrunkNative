@@ -1,31 +1,29 @@
 #ifndef KRUNKNATIVE_STRIKE_MAPS_H
 #define KRUNKNATIVE_STRIKE_MAPS_H
 
-// Krunker Strike's map pool (doc/v10/krunker-strike-maps.md): the seven maps FRVR's Krunker Strike
-// rotates, with the map files it plays them from. Pure C, no engine / net / GL dependency.
+// Krunker Strike's map pool (doc/v10/krunker-strike-maps.md): the seven maps Krunker Strike rotates.
+// Pure C, no engine / net / GL dependency.
 //
-// FRVR's Strike client (build 1.37.2, /home/user/src/KrunkerStrike_v1.37.2/, read as text only)
-// keeps Krunker v7's map table (src/data/maps.js order) and picks each round's map from its server's
-// gameConfig.remoteFeatures.mapPool.prod ({mapName, mapWeight}, looked up by name in that table),
-// fetching "maps/<fileName>.json". The pool is Burg, Sandstorm, Subzero, Lostworld, Oasis, SkyTemple
-// and Habitat; their table index is the v7 mapIndex, which is also our catalogue index
-// (map_catalog.h). The files are FRVR's own copies, shipped unmodified as assets/maps/strike/<key>.json:
-// Habitat and SkyTemple are the first versions of those maps (not v7's habitat_v2 / skytemple_v2),
-// the other five are v7 maps as FRVR last exported them.
+// The pool is Burg, Sandstorm, Subzero, Lostworld, Oasis, SkyTemple and Habitat, in FRVR's Strike
+// table order (the names of FRVR 1.37.2's mapPool; it picks each round's map from
+// gameConfig.remoteFeatures.mapPool.prod, {mapName, mapWeight}). Each pool map is Krunker v10.0.2's own
+// official map of that name, and its catalogue index is that map's position in the v10 official list
+// (krunker_maps.h, mapIndex 0, 2, 3, 7, 9, 15, 22). The files are the v10 files under
+// assets/maps/official/, unmodified, so Strike plays the same map data as v10 (the base catalogue loads
+// the same files). FRVR's client shows no map images, so the pool carries no thumbnails.
 //
-// Under FLAVOR_STRIKE the catalogue loads a pool map from `path` instead of its own file and its
-// public rotation is this pool (shared/src/map_catalog.c); FLAVOR_BASE is unchanged. FRVR's
-// client shows no map images, so the pool carries no thumbnails.
+// Under FLAVOR_STRIKE the catalogue loads a pool map from `path` and its public rotation is this pool
+// (shared/src/map_catalog.c); FLAVOR_BASE is unchanged.
 
 #include <stddef.h>
 
 typedef struct {
-    const char *key;       // "burg": the Strike map id and the file stem of assets/maps/strike/<key>.json
-    const char *name;      // FRVR's map name, the mapPool mapName: "Burg", "Lostworld", "SkyTemple", ...
-    const char *frvr_file; // FRVR 1.37.2's fileName ("burg_new"), provenance only
-    const char *path;      // "maps/strike/burg.json", relative to the assets directory (MapCatalogEntry.path)
-    int catalog_index;     // the base catalogue map it stands in for (v7 mapIndex == FRVR's table index)
-    int weight;            // mapPool mapWeight; 1 each until FRVR's /v1/game-config values are known
+    const char *key;   // "burg": the Strike map id
+    const char *name;  // the map name, the mapPool mapName: "Burg", "Lostworld", "SkyTemple", ...
+    const char *file;  // the v10.0.2 file stem under assets/maps/official/ ("00_burg"); FTUE: "bot_ftue_v2"
+    const char *path;  // "maps/official/00_burg.json", relative to the assets directory (MapCatalogEntry.path)
+    int catalog_index; // the catalogue map it is (the v10.0.2 mapIndex for these seven); -1 none
+    int weight;        // mapPool mapWeight; 1 each until FRVR's /v1/game-config values are known
 } StrikeMap;
 
 // The pool, in FRVR's table order (catalogue indices 0, 2, 3, 7, 9, 15, 22). Returns the count;

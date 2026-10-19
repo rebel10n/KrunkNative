@@ -1,9 +1,9 @@
 // Krunker Strike's map pool (shared/include/strike_maps.h, shared/src/rules/strike/maps_strike.c):
-// the seven maps in FRVR's table order, each standing in for the catalogue map of its name; every
-// assets/maps/strike/<key>.json loads, passes v7.1.4's validateMap, builds with map_init (objects,
-// spawns, prefab ids kept) and plays one game_init(). The catalogue hooks (shared/src/map_catalog.c)
-// leave FLAVOR_BASE unchanged and, under FLAVOR_STRIKE, load the pool maps from FRVR's files and
-// rotate the pool.
+// the seven maps in FRVR's table order, each one Krunker v10.0.2's official map of its name; every
+// pool file (assets/maps/official/NN_<name>.json, the same file the base catalogue loads) passes
+// v7.1.4's validateMap, builds with map_init (objects, spawns, prefab ids kept) and plays one
+// game_init(). The catalogue hooks (shared/src/map_catalog.c) leave FLAVOR_BASE unchanged and, under
+// FLAVOR_STRIKE, load the pool maps from their pool path and rotate the pool.
 // Run from the repository root: ./<build>/strike_maps_test [-v]
 #include <flavor.h>
 #include <map_catalog.h>
@@ -30,21 +30,21 @@ static int g_checks;
         }                                                 \
     } while (0)
 
-// FRVR 1.37.2's pool in its map-table order: key, mapName, fileName, catalogue (v7 mapIndex), the
-// base catalogue key of that index, and the shipped file's object / spawn counts
+// The pool in its map-table order: key, mapName, the v10.0.2 file stem, catalogue index (the v10 mapIndex),
+// the base catalogue key of that index, and the v10 file's object / spawn counts (krunker_maps.h)
 static const struct {
-    const char *key, *name, *frvr_file;
+    const char *key, *name, *file;
     int index;
     const char *base_key;
     int objects, spawns;
 } k_want[] = {
-    {"burg", "Burg", "burg_new", 0, "burg_new", 1604, 9},
-    {"sandstorm", "Sandstorm", "sandstorm_v3", 2, "sandstorm_v3", 1339, 9},
-    {"subzero", "Subzero", "subzero_new", 3, "subzero_new", 1272, 12},
-    {"lostworld", "Lostworld", "lostworld_s6", 7, "lostworld_s6", 1328, 14},
-    {"oasis", "Oasis", "oasis_v3", 9, "oasis_v3", 1333, 8},
-    {"skytemple", "SkyTemple", "skytemple", 15, "skytemple_v2", 1192, 8},
-    {"habitat", "Habitat", "habitat", 22, "habitat_v2", 1261, 8},
+    {"burg", "Burg", "00_burg", 0, "burg_new", 1627, 9},
+    {"sandstorm", "Sandstorm", "02_sandstorm", 2, "sandstorm_v3", 1362, 9},
+    {"subzero", "Subzero", "03_subzero", 3, "subzero_new", 1288, 12},
+    {"lostworld", "Lostworld", "07_lostworld", 7, "lostworld_s6", 1336, 14},
+    {"oasis", "Oasis", "09_oasis", 9, "oasis_v3", 1338, 8},
+    {"skytemple", "SkyTemple", "15_skytemple", 15, "skytemple_v2", 1351, 8},
+    {"habitat", "Habitat", "22_habitat", 22, "habitat_v2", 1374, 8},
 };
 #define WANT_COUNT (sizeof(k_want) / sizeof(k_want[0]))
 
@@ -60,17 +60,19 @@ static void test_table(void) {
     for (size_t i = 0; pool && i < n && i < WANT_COUNT; i++) {
         const StrikeMap *m = &pool[i];
         char path[64];
-        snprintf(path, sizeof(path), "maps/strike/%s.json", k_want[i].key);
-        CHECK(!strcmp(m->key, k_want[i].key) && !strcmp(m->name, k_want[i].name) && !strcmp(m->frvr_file, k_want[i].frvr_file),
-              "pool[%zu] = %s/%s/%s", i, m->key, m->name, m->frvr_file);
+        snprintf(path, sizeof(path), "maps/official/%s.json", k_want[i].file);
+        CHECK(!strcmp(m->key, k_want[i].key) && !strcmp(m->name, k_want[i].name) && !strcmp(m->file, k_want[i].file),
+              "pool[%zu] = %s/%s/%s", i, m->key, m->name, m->file);
         CHECK(!strcmp(m->path, path), "%s path %s", m->key, m->path);
         CHECK(m->catalog_index == k_want[i].index && m->weight == 1, "%s index %d weight %d", m->key, m->catalog_index, m->weight);
         const MapCatalogEntry *e = map_catalog_at((size_t) m->catalog_index);
         CHECK(e && !strcmp(e->key, k_want[i].base_key) && !strcmp(e->name, m->name) && e->source == MAP_SOURCE_OFFICIAL,
               "%s stands in for %s (%s)", m->key, e ? e->key : "?", e ? e->name : "?");
+        // identical to v10: the pool path is the catalogue's own v10 file, so both flavors load the same map
+        CHECK(e && !strcmp(e->path, m->path), "%s: pool path %s is the catalogue's %s", m->key, m->path, e ? e->path : "?");
         CHECK(strike_map_for_catalog((size_t) m->catalog_index) == m, "%s: for_catalog(%d)", m->key, m->catalog_index);
         CHECK(strike_map_by_key(m->key) == m && strike_map_by_key(m->name) == m, "%s: by_key", m->key);
-        // a file path names its catalogue map ("maps/strike/burg.json" -> Burg), like the 311_ files
+        // a file path names its catalogue map ("maps/official/00_burg.json" -> Burg), like the 311_ files
         CHECK(map_catalog_index_of_file(m->path) == m->catalog_index, "%s: index_of_file(%s)", m->key, m->path);
     }
     CHECK(strike_map_by_key("SKYTEMPLE") && strike_map_by_key("lostWorld"), "by_key is case-insensitive");
@@ -113,8 +115,8 @@ static void test_files(const int verbose) {
             CHECK((int) map->spawn_count == k_want[i].spawns, "%s: %zu spawns built", path, map->spawn_count);
             CHECK((int) map->object_count == kept, "%s: %zu of %d objects built", path, map->object_count, kept);
             CHECK(remapped == 0, "%s: %d objects lose their prefab id", path, remapped);
-            if (verbose) printf("  %-10s %-9s objects %4zu spawns %2zu (FRVR %s.json, stands in for %s)\n", pool[i].key,
-                                pool[i].name, map->object_count, map->spawn_count, pool[i].frvr_file, k_want[i].base_key);
+            if (verbose) printf("  %-10s %-9s objects %4zu spawns %2zu (v10 %s.json)\n", pool[i].key,
+                                pool[i].name, map->object_count, map->spawn_count, pool[i].file);
             map_fini(map);
             free(map);
         }
@@ -147,7 +149,7 @@ static void test_strike(void) {
         if (k_want[i].index == 22) continue; // cached by test_base
         const cJSON *json = map_catalog_json((size_t) k_want[i].index);
         CHECK(json && raw_count(json, "objects") == k_want[i].objects && raw_count(json, "spawns") == k_want[i].spawns,
-              "Strike %s loads FRVR's file (%d objects)", k_want[i].key, json ? raw_count(json, "objects") : -1);
+              "Strike %s loads the v10 file (%d objects)", k_want[i].key, json ? raw_count(json, "objects") : -1);
         const char *name = json ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "name")) : NULL;
         CHECK(name && !strcmp(name, k_want[i].name), "Strike %s: name %s", k_want[i].key, name ? name : "?");
     }

@@ -123,7 +123,7 @@ int map_catalog_map_index(size_t index);
 int map_catalog_map_index_of_json(const cJSON *json);
 
 // The public rotation (src/data/map.js rotationMaps): catalogue indices, returns the count. Under
-// Krunker Strike: FRVR's pool, each map listed by its weight (strike_maps.h strike_map_rotation).
+// Krunker Strike: its pool (the seven v10 maps), each map listed by its weight (strike_maps.h strike_map_rotation).
 size_t map_catalog_rotation(int *out, size_t max);
 
 // calloc'd array of the catalogue maps at `indices` (loaded on demand; missing ones are

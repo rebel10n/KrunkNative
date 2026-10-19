@@ -399,7 +399,7 @@ Every edge also runs official Krunker Strike lobbies (role `kn_gameserver`, `tas
 next to the Box Office instances, whose units, `server-<n>.cfg` and ports stay exactly as they
 were (`deploy/ansible/tests/render_test.py` renders both). Each is `server_bin --headless --no-cli
 --flavor strike --cfg /etc/krunknative/strike-<n>.cfg` (unit `kn-strike@<n>`), playing the Strike
-rotation over FRVR's pool maps (`assets/maps/strike/`, shipped with `assets/maps`), linked to the
+rotation over the Strike pool's v10 maps (`assets/maps/official/`, shipped with `assets/maps`), linked to the
 same coordinator (`wss://coordinator.krunk.io/mm/internal/ws`, the same secrets) and heartbeating to
 the same finder. The coordinator keeps it in the Strike flavor pool (doc/backend.md "Flavor pools"):
 the Strike app seeks, lists and joins only these, Box Office never sees them.
