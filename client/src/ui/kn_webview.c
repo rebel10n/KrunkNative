@@ -1238,7 +1238,7 @@ static struct {
     PFN_RuntimeVersion runtime_version;
     ATOM atom;
     IWICImagingFactory *wic;
-    int proxy_env;   // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS holds the session's proxy (cleared once created)
+    wchar_t *proxy_args; // the browser's arguments with the session's proxy (ICoreWebView2EnvironmentOptions; freed once created)
 } L;
 
 // A session counter: callbacks of a session that ended are ignored (their objects are released by WebView2).
@@ -1421,9 +1421,66 @@ static HWND wv2_host(const int w, const int h) {
                            NULL, GetModuleHandleW(NULL), NULL);
 }
 
-// The session's proxy (the matchmaker's, the same as the game's requests): WebView2 takes the browser's
-// arguments from WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS when its environment is created. The address only:
-// Chromium's proxy switch takes no user name, so a proxy with one is refused (the request ends).
+// ICoreWebView2EnvironmentOptions, implemented here: the browser's arguments carry the session's proxy. The environment
+// reads them when it is created (CreateCoreWebView2EnvironmentWithOptions), so the object only has to live until then.
+// Its AdditionalBrowserArguments is the proxy; the other options keep WebView2's defaults. (The environment variable
+// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS is not used: it did not reach the browser on the Windows test VM.)
+static HRESULT STDMETHODCALLTYPE opt_qi(ICoreWebView2EnvironmentOptions *self, REFIID riid, void **out) {
+    if (!out) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ICoreWebView2EnvironmentOptions)) {
+        *out = self;
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE opt_ref(ICoreWebView2EnvironmentOptions *self) { (void) self; return 1; }
+static ULONG STDMETHODCALLTYPE opt_rel(ICoreWebView2EnvironmentOptions *self) { (void) self; return 1; }
+static HRESULT STDMETHODCALLTYPE opt_get_args(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
+    (void) self;
+    if (!value) return E_POINTER;
+    *value = NULL;
+    if (!L.proxy_args) return S_OK;
+    const size_t bytes = (wcslen(L.proxy_args) + 1) * sizeof(wchar_t);
+    *value = CoTaskMemAlloc(bytes);
+    if (!*value) return E_OUTOFMEMORY;
+    memcpy(*value, L.proxy_args, bytes);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE opt_put_args(ICoreWebView2EnvironmentOptions *self, LPCWSTR value) { (void) self; (void) value; return S_OK; }
+static HRESULT STDMETHODCALLTYPE opt_get_str(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
+    (void) self;
+    if (!value) return E_POINTER;
+    *value = NULL;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE opt_put_str(ICoreWebView2EnvironmentOptions *self, LPCWSTR value) { (void) self; (void) value; return S_OK; }
+static HRESULT STDMETHODCALLTYPE opt_get_bool(ICoreWebView2EnvironmentOptions *self, BOOL *value) {
+    (void) self;
+    if (!value) return E_POINTER;
+    *value = FALSE;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE opt_put_bool(ICoreWebView2EnvironmentOptions *self, BOOL value) { (void) self; (void) value; return S_OK; }
+
+static ICoreWebView2EnvironmentOptionsVtbl g_opt_vtbl = {
+    .QueryInterface = opt_qi,
+    .AddRef = opt_ref,
+    .Release = opt_rel,
+    .get_AdditionalBrowserArguments = opt_get_args,
+    .put_AdditionalBrowserArguments = opt_put_args,
+    .get_Language = opt_get_str,
+    .put_Language = opt_put_str,
+    .get_TargetCompatibleBrowserVersion = opt_get_str,
+    .put_TargetCompatibleBrowserVersion = opt_put_str,
+    .get_AllowSingleSignOnUsingOSPrimaryAccount = opt_get_bool,
+    .put_AllowSingleSignOnUsingOSPrimaryAccount = opt_put_bool,
+};
+static ICoreWebView2EnvironmentOptions g_opt = {&g_opt_vtbl};
+
+// The session's proxy (the matchmaker's, the same as the game's requests): the browser's --proxy-server, given to the
+// environment through g_opt. The address only: Chromium's proxy switch takes no user name, so a proxy with one is
+// refused (the request ends).
 static int wv2_proxy_env(const char *proxy, char *err, const size_t errn) {
     if (!proxy || !proxy[0]) return 1;
     if (strchr(proxy, '@') || strlen(proxy) > 300) {
@@ -1435,21 +1492,19 @@ static int wv2_proxy_env(const char *proxy, char *err, const size_t errn) {
     else snprintf(uri, sizeof(uri), "http://%s", proxy);
     char args[400];
     snprintf(args, sizeof(args), "--proxy-server=%s --proxy-bypass-list=localhost;127.0.0.1;[::1]", uri);
-    wchar_t *w = wide_of(args);
-    const BOOL ok = w && SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", w);
-    free(w);
-    if (!ok) {
+    free(L.proxy_args);
+    L.proxy_args = wide_of(args);
+    if (!L.proxy_args) {
         if (err && errn) snprintf(err, errn, "the Windows webview could not take the proxy");
         return 0;
     }
-    L.proxy_env = 1;
     return 1;
 }
 
+// The environment exists (or failed): its options are no longer needed.
 static void wv2_clear_proxy_env(void) {
-    if (!L.proxy_env) return;
-    SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", NULL);
-    L.proxy_env = 0;
+    free(L.proxy_args);
+    L.proxy_args = NULL;
 }
 
 // The session's temporary user data folder: the view keeps nothing (removed at close, best effort).
@@ -1950,7 +2005,9 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     }
     ShowWindow(W.host, SW_SHOWNOACTIVATE); // (off the desktop: WebView2 renders the view into it)
     WvHandler *h = wv_handler(&IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, on_env_created);
-    const HRESULT hr = h ? L.create_env(NULL, W.session_dir, NULL, (ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *) h) : E_OUTOFMEMORY;
+    const HRESULT hr = h ? L.create_env(NULL, W.session_dir, L.proxy_args ? &g_opt : NULL,
+                                        (ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *) h)
+                         : E_OUTOFMEMORY;
     wv_unref(h);
     if (FAILED(hr)) {
         wv2_abort();
