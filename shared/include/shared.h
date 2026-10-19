@@ -1890,6 +1890,10 @@ typedef struct {
     // gives the skin; the server then tallies "find" {item} and sends NET_PACKET_SKIN_FOUND).
     // NULL = nothing (offline, servers without rewards).
     void (*give_skin)(struct Game_t*, const Player*, int skin, const char *reason);
+    // Junk wallet (doc/v10/junk.md): v7 game.sendUserJunk(reason, player, junk) for an account player.
+    // The amount is in hundredths (junk_hundredths); the server asks kn_brain to credit it and prints
+    // the finder's "You found [x.xx] Junk" line when the brain accepts. NULL = nothing (offline).
+    void (*junk_credit)(struct Game_t*, const Player*, int64_t hundredths, const char *reason);
     // v10 Turf Wars (territorialWars.onPlayerDeath): a player died, killer NULL / the victim for
     // a suicide. The server tallies clan kills (server/src/accounts.c); NULL = nothing.
     void (*kill)(struct Game_t*, const Player *victim, const Player *killer);
@@ -2228,6 +2232,9 @@ void game_challenge(Game*, const Player*, const char *key, int value, int weapon
 void game_challenge_item(Game*, const Player*, const char *key, int value, int item);
 // game.giveSkin(player, skin, reason): an account's found skin (GameHooks.give_skin), public games
 void game_give_skin(Game*, const Player*, int skin, const char *reason);
+// game.sendUserJunk(reason, player, junk) (GameHooks.junk_credit): the callers gate the mode
+// (Reward Junk: public, not the sandbox; the airdrop: public lobbies). Bots and no hook do nothing.
+void game_junk_credit(Game*, const Player*, int64_t hundredths, const char *reason);
 void game_inc_medal(Game*, Player*, const char *name);
 Player *game_find_player(Game*, int uid);
 void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_ALL)
@@ -2331,6 +2338,8 @@ int  game_spawn_at_checkpoint(Game*, Player*);          // respawn at the player
 void game_play_sound(Game*, const char *name, int uid, vec3 position, float volume, float rate);
 // game.sendUserJunk's "jnk" reply (io_foundJunk): "You found [x.xx] Junk" to the finder only
 // (NET_CHAT_FOUND_JUNK). KN has no junk wallet: nothing is credited (doc/v7/decisions.md).
+// The finder's "You found [x.xx] Junk" line (v7 io_foundJunk). Called by the server once kn_brain
+// accepted the credit (server/src/accounts.c), so nothing prints for a player without an account.
 void game_found_junk(Game*, const Player*, double amount);
 void game_set_endless(Game*, int on);   // /endless: pause the round clock (TIMER keeps the frozen value) / resume it from there
 void game_send_round_state(Game*, int uid); // TIMER (+ END while the end screen is up) for a joiner

@@ -336,6 +336,11 @@ void game_give_skin(Game *game, const Player *player, const int skin, const char
     game->hooks.give_skin(game, player, skin, reason ? reason : "raid");
 }
 
+void game_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {
+    if (!game || !player || player->is_bot || hundredths <= 0 || !game->hooks.junk_credit || !game_is_authority(game)) return;
+    game->hooks.junk_credit(game, player, hundredths, reason ? reason : "trigger");
+}
+
 void game_challenge_item(Game *game, const Player *player, const char *key, const int value, const int item) {
     if (!game || !player || player->is_bot || !game->hooks.progress || !game_is_authority(game) || !game_is_pub_type(game)) return;
     game->hooks.progress(game, player, 0, key, value, -1, -1, item);

@@ -157,7 +157,8 @@ void game_play_sound(Game *game, const char *name, const int uid, const vec3 pos
 }
 
 // io_foundJunk (index.js:1563-1576): io_addChat(-1, null, "<span style='color:#fff'>You</span>
-// found <span style='color:#cc51f8'>[" + parseFloat(junk).toFixed(2) + "]</span> Junk", 1).
+// found <span style='color:#cc51f8'>[" + parseFloat(junk).toFixed(2) + "]</span> Junk", 1). Called
+// by the server when kn_brain accepted the credit (doc/v10/junk.md).
 void game_found_junk(Game *game, const Player *player, const double amount) {
     if (!game_is_authority(game) || !player) return;
     char text[64];

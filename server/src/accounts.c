@@ -33,6 +33,7 @@
 #include <strings.h>
 #include <time.h>
 #include <flavor.h>         // Krunker Strike: auth / commit frames carry the flavor
+#include <junk.h>           // the Junk wallet's amounts (doc/v10/junk.md)
 
 // Krunker Strike: the brain answers a Strike server's auth with the account's Strike inventory,
 // krunkies and level, and files its commits as Strike progress (services/brain/strike_econ.c).
@@ -638,6 +639,65 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
     g_skin_pending[slot].rid = rid;
     g_skin_pending[slot].account_id = client->acct.account_id;
     g_skin_pending[slot].skin = skin;
+}
+
+// ------------------------------------------------------------------ the Junk wallet (doc/v10/junk.md)
+
+// v7 game.sendUserJunk(reason, player, junk) -> kn_brain's junk_credit op (hundredths). The brain's
+// reply prints the finder's "You found [x.xx] Junk" line (game_found_junk); a refused or lost credit
+// prints nothing. Like give_skin, the frame is not reliable: a lost link loses the credit, it never
+// doubles it. Guests and hack-flagged accounts have no wallet to credit.
+#define ACC_JUNK_PENDING 16
+static struct {
+    uint32_t rid;
+    int account_id;
+    int64_t hundredths;
+} g_junk_pending[ACC_JUNK_PENDING];
+
+void accounts_junk_credit(const Player *player, const int64_t hundredths, const char *reason) {
+    const ClientConnection *client = player ? acc_client_by_id(player->uid) : NULL;
+    if (!g_acc.brain || !brain_linked() || g_acc.custom || !client || client->acct.account_id <= 0 || client->acct.hack ||
+        hundredths <= 0)
+        return;
+    int slot = -1;
+    for (int i = 0; i < ACC_JUNK_PENDING && slot < 0; i++)
+        if (!g_junk_pending[i].rid) slot = i;
+    if (slot < 0) return;
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "junk_credit");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddNumberToObject(args, "id", client->acct.account_id);
+    cJSON_AddNumberToObject(args, "amount", (double) hundredths);
+    cJSON_AddStringToObject(args, "reason", reason ? reason : "trigger");
+    if (brain_post(frame, 0) != 0) return; // brain_post consumed the frame
+    g_junk_pending[slot].rid = rid;
+    g_junk_pending[slot].account_id = client->acct.account_id;
+    g_junk_pending[slot].hundredths = hundredths;
+}
+
+// The junk_credit reply: the finder's line once the brain accepted the credit. -> 1 when it was ours.
+static int acc_handle_junk_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_JUNK_PENDING; i++) {
+        if (!g_junk_pending[i].rid || g_junk_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        const int account_id = g_junk_pending[i].account_id;
+        const int64_t hundredths = g_junk_pending[i].hundredths;
+        g_junk_pending[i].rid = 0;
+        const cJSON *err = cJSON_GetObjectItem(frame, "err");
+        if (cJSON_IsString(err) && err->valuestring[0]) {
+            server_log("[accounts] junk %lld for account %d refused: %s", (long long) hundredths, account_id, err->valuestring);
+            return 1;
+        }
+        const ClientConnection *client = acc_client_by_account(account_id);
+        const Player *player = client ? client->player : NULL;
+        if (player) game_found_junk(&g_server->game, player, junk_value(hundredths)); // io_foundJunk
+        return 1;
+    }
+    return 0;
 }
 
 // ------------------------------------------------------------------ the K.P.D call (server_votekick.h)
@@ -3220,6 +3280,8 @@ static void acc_handle_frame(cJSON *frame) {
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
     } else if (!strcmp(type, "acct-r") && acc_handle_skin_reply(frame)) {
         // season-system: give_skin replies (found skins)
+    } else if (!strcmp(type, "acct-r") && acc_handle_junk_reply(frame)) {
+        // the Junk wallet: junk_credit replies (the finder's line, doc/v10/junk.md)
     } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
         // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") && acc_handle_kpd_reply(frame)) {

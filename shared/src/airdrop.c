@@ -14,9 +14,9 @@
 //   past the cap (accounts.c acc_reward, game.js:191329 reward += additionalReward), so it goes
 //   through the account backend (kn_brain), not the client, and credits backend accounts only.
 // - A Junk Package shows the "Junk Claimed" / "Junk Thief" popup and sendUserJunk's "You found
-//   [x] Junk" line to any human claimer, guests included, but KN has no junk wallet so nothing is
-//   credited (decisions.md "Reward Junk"). A Skin Package has no store grant in KN (nothing).
-//   All three show to any human claimer (guests included); bots get nothing to show.
+//   [x] Junk" line to any human claimer, guests included. The credit goes to the claimer's brain
+//   account (doc/v10/junk.md); a guest has none, so a guest gets the popup and nothing else.
+//   A Skin Package has no store grant in KN (nothing). Bots get nothing to show.
 // - The trapped explosion goes through game_explosion, which hurts its source by a fifth; v7
 //   skips the source of a streak explosion (data.stk). The source is the drop's owner, who sees
 //   the real package and so normally doesn't claim it.
@@ -24,6 +24,8 @@
 //   it once to everyone when the drop starts and to joiners in their join sync.
 #include <zombies.h>
 #include <account.h>
+#include <junk.h>
+#include "triggers_internal.h"
 #include <ai.h>
 #include <world.h>
 #include <game_config.h>
@@ -276,14 +278,16 @@ static void package_claim(Game *game, AirDrop *d, Player *claimer) {
                 net_packet_chat(&chat, 0, NET_CHAT_SERVER, NULL, line); // ADD_CHAT [0, null, text, 2]
                 game_send(game, claimer->uid, NET_PACKET_CHAT, &chat, sizeof(chat));
             } else if (p->icon == 3) { // Junk Package (airDropPackages.js:122-130): send("am",
-                // [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1]) and sendUserJunk,
-                // whose "jnk" reply prints "You found [x] Junk" (KN has no junk wallet: not credited).
+                // [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1]) and sendUserJunk
+                // ("airdrop"): the account is credited (doc/v10/junk.md) and the "jnk" reply prints
+                // "You found [x] Junk" once the brain accepts it (a guest has no account: no credit, no line).
                 static const double k_junk[7] = {0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5};
                 NetPopupPacket popup;
                 memset(&popup, 0, sizeof(popup));
                 snprintf(popup.text, sizeof(popup.text), "%s", thief ? "Junk Thief" : "Junk Claimed");
                 game_send(game, claimer->uid, NET_PACKET_POPUP, &popup, sizeof(popup));
-                game_found_junk(game, claimer, k_junk[p->rarity]);
+                AccountInfo account; // a guest has no wallet: the popup only
+                if (trigger_account(game, claimer, &account)) game_junk_credit(game, claimer, junk_hundredths(k_junk[p->rarity]), "airdrop");
             }
             break;
         }

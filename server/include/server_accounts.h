@@ -51,6 +51,9 @@ int accounts_reward(const Player*);
 void accounts_progress(const Player*, int stat, const char *key, int value, int weapon, int streak, int item);
 // season-system: GameHooks.give_skin (v7 game.giveSkin -> sendUserSkin through kn_brain)
 void accounts_give_skin(const Player*, int skin, const char *reason);
+// Junk wallet (doc/v10/junk.md): GameHooks.junk_credit -> kn_brain's junk_credit (hundredths); the
+// finder's "You found" line follows the brain's answer.
+void accounts_junk_credit(const Player*, int64_t hundredths, const char *reason);
 void accounts_on_kill(const Player *victim, const Player *killer); // GameHooks.kill: v10 Turf Wars clan kills
 
 // Ranked lobbies (brain queue): the account's team (1 / 2) from the roster, 0 = mode picks.

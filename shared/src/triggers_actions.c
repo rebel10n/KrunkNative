@@ -28,6 +28,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <bots.h>
+#include <junk.h>
 
 #define CHAIN_OK(game, chain) trigger_chain_left(game, chain)
 
@@ -88,12 +89,13 @@ static void send_popup(Game *game, const int target, const char *text) {
     game_send(game, target, NET_PACKET_POPUP, &packet, sizeof(packet));
 }
 
+static int has_account(const Game *game, const Player *player);
+
 // 59 Reward Junk (triggers.js:1392-1404): (!isSandbox && isPubType() && h.account) and v =
-// parseFloat(trigConstTx || 0) with !!v && !(v >= 100) -> game.sendUserJunk("trigger", h, v), whose
-// "jnk" reply prints "You found [v] Junk" for the finder (game_found_junk).
-// [KN] KrunkNative has no junk wallet (doc/v7/decisions.md "Reward Junk"): nothing is credited and
-// the line is the whole reward, so it shows in every game (sandbox and offline too) for any human
-// player; bots (never an account in v7) get nothing.
+// parseFloat(trigConstTx || 0) with !!v && !(v >= 100) -> game.sendUserJunk("trigger", h, v): the
+// account is credited (doc/v10/junk.md) and the finder's "You found [v] Junk" line follows the
+// brain's acceptance (server, accounts.c). [KN] A negative v is not credited (v7 would subtract it;
+// the wallet never goes below 0). Bots (never an account in v7) get nothing.
 static void reward_junk(Game *game, const Player *h, const TriggerActionData *a) {
     if (!h || game_player_is_bot(game, h)) return;
     const char *text = action_text(a);
@@ -105,7 +107,8 @@ static void reward_junk(Game *game, const Player *h, const TriggerActionData *a)
         if (!(digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))) v = strtod(text, NULL);
     }
     if (isnan(v) || v == 0.0 || v >= 100.0) return;
-    game_found_junk(game, h, v);
+    if (game->is_sandbox || !game_is_pub_type(game) || !has_account(game, h)) return; // !isSandbox && isPubType() && account
+    game_junk_credit(game, h, junk_hundredths(v), "trigger");
 }
 
 static int has_account(const Game *game, const Player *player) {

@@ -322,6 +322,12 @@ static void net_game_progress(Game *game, const Player *player, const int stat, 
     accounts_progress(player, stat, key, value, weapon, streak, item);
 }
 
+// GameHooks.junk_credit (Junk wallet): v7 game.sendUserJunk of an account player (accounts.c).
+static void net_game_junk_credit(Game *game, const Player *player, const int64_t hundredths, const char *reason) {
+    (void) game;
+    accounts_junk_credit(player, hundredths, reason);
+}
+
 // GameHooks.give_skin (season-system): v7 game.giveSkin of an account player (accounts.c).
 static void net_game_give_skin(Game *game, const Player *player, const int skin, const char *reason) {
     (void) game;
@@ -2041,6 +2047,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
     g_server->game.hooks.progress = net_game_progress; // WP-E part 2c: stats / challenge tallies (accounts.c)
     g_server->game.hooks.give_skin = net_game_give_skin; // season-system: found skins (accounts.c)
+    g_server->game.hooks.junk_credit = net_game_junk_credit; // Junk wallet: Reward Junk and Junk Packages (accounts.c)
     g_server->game.hooks.kill = net_game_kill;           // v10 Turf Wars clan kills (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
     g_server->game.hooks.bot_banter = bot_banter_request;  // bot chat through kn_brain's AI (server/src/bot_banter.c)
