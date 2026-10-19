@@ -56,8 +56,11 @@ void http_proxy_label(const HttpProxy *p, char *out, size_t n);
 void http_proxy_basic_auth(const HttpProxy *p, char *out, size_t n);
 
 #ifdef _WIN32
-// WinHTTP: sets the request's proxy (+ Basic credentials) when host goes through an http://
-// proxy; otherwise leaves the session's (system) proxy. request is a HINTERNET. 1 = proxied.
-int http_proxy_winhttp_apply(void *request, const char *host, int tls);
+// WinHTTP: the http:// proxy of host as "host:port" for WinHttpOpen's named proxy (taken when the session is opened:
+// WINHTTP_OPTION_PROXY is refused on any handle, error 12011). 1 = proxied; 0 = direct, or no http:// proxy (the
+// system proxy applies).
+int http_proxy_winhttp_spec(const char *host, int tls, char *spec, size_t n);
+// WinHTTP: the Basic credentials of host's proxy, sent up front on request, when that proxy has any.
+void http_proxy_winhttp_auth(void *request, const char *host, int tls);
 #endif
 #endif

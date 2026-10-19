@@ -42,6 +42,9 @@
 // 1 = this build has a webview backend and KRUNKNATIVE_WEBVIEW is not "0" (the toolkit may still fail
 // to start: kn_webview_captcha_open says so).
 int kn_webview_available(void);
+// Windows: the main thread takes the single-threaded apartment WebView2 needs, before the audio starts (miniaudio's
+// multithreaded request is the one refused). Every other platform: nothing. main() calls it first.
+void kn_webview_apartment_init(void);
 
 // Starts the challenge on url (NULL: the env override, else KN_WEBVIEW_CAPTCHA_URL) with this sitekey,
 // HIDDEN: nothing is shown while Turnstile passes by itself. The challenge is shown only when the player

@@ -27,8 +27,18 @@ static wchar_t *widen(const char *s) {
     return w;
 }
 
-static HINTERNET open_session(const int timeout_ms) {
-    HINTERNET s = WinHttpOpen(L"KrunkNative", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+// host8 (the request's host) decides the session's proxy: the client's proxy for it (Settings > Client > Proxy,
+// HTTPS_PROXY ...: http_proxy.h) is a named proxy of the session, which WinHTTP takes when the session opens.
+// Without one, the system proxy, as before.
+static HINTERNET open_session(const int timeout_ms, const char *host8, const int tls) {
+    HINTERNET s = NULL;
+    char spec[160];
+    if (http_proxy_winhttp_spec(host8, tls, spec, sizeof(spec))) {
+        wchar_t *wspec = widen(spec);
+        if (wspec) s = WinHttpOpen(L"KrunkNative", WINHTTP_ACCESS_TYPE_NAMED_PROXY, wspec, WINHTTP_NO_PROXY_BYPASS, 0);
+        free(wspec);
+    }
+    if (!s) s = WinHttpOpen(L"KrunkNative", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) // before Windows 8.1: no automatic proxy
         s = WinHttpOpen(L"KrunkNative", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (s) WinHttpSetTimeouts(s, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
@@ -77,7 +87,10 @@ static int open_request(Handles *h, const char *method, const char *url, const i
     }
     if (plen) memcpy(path, uc.lpszUrlPath ? uc.lpszUrlPath : uc.lpszExtraInfo, plen * sizeof(wchar_t));
     path[plen] = 0;
-    h->session = open_session(timeout_ms);
+    char host8[256] = ""; // the request's host (the proxy is chosen by it)
+    WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL);
+    const int tls = uc.nScheme == INTERNET_SCHEME_HTTPS;
+    h->session = open_session(timeout_ms, host8, tls);
     if (!h->session) {
         set_err(err, errn, "WinHttpOpen failed", GetLastError());
         goto out;
@@ -94,9 +107,7 @@ static int open_request(Handles *h, const char *method, const char *url, const i
         set_err(err, errn, "cannot open the request", GetLastError());
         goto out;
     }
-    char host8[256]; // Settings > Client > Proxy / HTTPS_PROXY ... (http_proxy.h): this request's proxy
-    if (WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL))
-        http_proxy_winhttp_apply(h->request, host8, uc.nScheme == INTERNET_SCHEME_HTTPS);
+    http_proxy_winhttp_auth(h->request, host8, tls); // the proxy's Basic credentials, if it has any
     ok = 1;
 out:
     free(wurl);

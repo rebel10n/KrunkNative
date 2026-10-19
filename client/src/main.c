@@ -633,6 +633,8 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
 #endif
+    // The captcha's WebView2 runs on this thread and needs a single-threaded apartment: before the audio (kn_webview.h)
+    kn_webview_apartment_init();
     // NVIDIA's GL driver reads __GL_SYNC_TO_VBLANK when it loads, so V-Sync off on NVIDIA re-executes the client
     // once with it set (gl_driver_env.h). The relaunch reads the stored V-Sync of the flavor it will run as (each
     // flavor has its own knSettings), so the flavor is resolved first. The re-exec needs argv as typed, so the

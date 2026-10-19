@@ -1059,6 +1059,7 @@ static void reveal(const char *why) {
 // ---------------------------------------------------------------- API
 
 int kn_webview_available(void) { return !env_off() && W.toolkit >= 0; }
+void kn_webview_apartment_init(void) {} // (no WebView2 apartment: kn_webview.h)
 
 // The packaged client's bundled TLS module (tools/release/bundle-webkit.sh: lib/gio/modules next to
 // client_bin). WebKit's network process needs glib-networking's TLS backend for https (krunker.io's
@@ -1361,7 +1362,10 @@ static int wv2_load(void) {
         return wv2_unavailable("The WebView2 loader is too old, so krunker.io's challenge cannot be shown.");
     // the widget's objects live on the main thread: a single-threaded apartment
     const HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(com)) return wv2_unavailable("This thread cannot host the WebView2 runtime, so krunker.io's challenge cannot be shown.");
+    if (FAILED(com)) {
+        printf("[webview] CoInitializeEx (single-threaded apartment) failed: 0x%08lx\n", (unsigned long) com);
+        return wv2_unavailable("This thread cannot host the WebView2 runtime, so krunker.io's challenge cannot be shown.");
+    }
     // the runtime: Edge's WebView2 runtime is what the view is, and GetAvailable... fails without it
     LPWSTR version = NULL;
     const HRESULT hr = L.runtime_version(NULL, &version);
@@ -1893,6 +1897,13 @@ static void reveal(const char *why) {
 
 int kn_webview_available(void) { return !env_off() && wv2_loader(NULL, 0); }
 
+// The main thread's single-threaded apartment (kn_webview.h): before the audio, whose multithreaded request is refused
+// quietly (RPC_E_CHANGED_MODE, miniaudio.h). Failing here is logged; the challenge then says WebView2 cannot start.
+void kn_webview_apartment_init(void) {
+    const HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(com)) printf("[webview] the main thread's apartment: CoInitializeEx 0x%08lx\n", (unsigned long) com);
+}
+
 int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
                             char *err, const size_t errn) {
     if (err && errn) err[0] = 0;
@@ -2356,6 +2367,7 @@ static void reveal(const char *why) {
 }
 
 int kn_webview_available(void) { return !env_off(); }
+void kn_webview_apartment_init(void) {} // (no WebView2 apartment: kn_webview.h)
 
 int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
                             char *err, const size_t errn) {
@@ -2600,6 +2612,7 @@ int kn_webview_captcha_char(const unsigned codepoint) {
 #if !defined(KN_WV_GTK) && !defined(KN_WV_WV2) && !defined(KN_WV_WK)
 
 int kn_webview_available(void) { return 0; }
+void kn_webview_apartment_init(void) {} // (no WebView2 apartment: kn_webview.h)
 
 int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
                             char *err, const size_t errn) {

@@ -182,8 +182,10 @@ int kn_http_get(KnHttp *h, const char *url, KnHttpSink *sink, char *err, const s
     HINTERNET req = WinHttpOpenRequest(conn, L"GET", path[0] ? path : L"/", NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     char host8[256] = "";
-    if (req && WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL))
-        http_proxy_winhttp_apply(req, host8, uc.nScheme == INTERNET_SCHEME_HTTPS);
+    if (req && WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL)) {
+        // (no client proxy here: this session is shared by every host of the launcher, and the proxy is a session
+        // setting; the system proxy applies, as before. backend_winhttp.c opens a session per request and applies it.)
+    }
     int status = 0;
     wchar_t range[64] = L"";
     if (sink && sink->range_from > 0) swprintf(range, 64, L"Range: bytes=%lld-\r\n", (long long) sink->range_from);

@@ -251,9 +251,12 @@ int http_proxy_for(const char *host, const int tls, HttpProxy *out) {
 #include <windows.h>
 #include <winhttp.h>
 
-int http_proxy_winhttp_apply(void *request, const char *host, const int tls) {
+// The http:// proxy of host as "host:port" (IPv6 in brackets) for WinHttpOpen's named proxy: 1 = proxied. 0 = none
+// (direct, or a proxy WinHTTP cannot take: the session keeps the system proxy). WinHTTP takes the proxy when the
+// session is opened: WINHTTP_OPTION_PROXY is refused on a session or request handle (error 12011).
+int http_proxy_winhttp_spec(const char *host, const int tls, char *spec, const size_t n) {
     HttpProxy p;
-    if (!request || !http_proxy_for(host, tls, &p)) return 0;
+    if (!host || !http_proxy_for(host, tls, &p)) return 0;
     if (p.kind != HTTP_PROXY_HTTP) {
         static int warned;
         char label[160];
@@ -262,26 +265,18 @@ int http_proxy_winhttp_apply(void *request, const char *host, const int tls) {
             fprintf(stderr, "[http] WinHTTP takes http:// proxies only: %s skipped (the system proxy applies)\n", label);
         return 0;
     }
-    char spec[160];
     const int v6 = strchr(p.host, ':') != NULL;
-    snprintf(spec, sizeof(spec), "%s%s%s:%s", v6 ? "[" : "", p.host, v6 ? "]" : "", p.port);
-    wchar_t wspec[160];
-    if (!MultiByteToWideChar(CP_UTF8, 0, spec, -1, wspec, 160)) return 0;
-    WINHTTP_PROXY_INFO info;
-    memset(&info, 0, sizeof(info));
-    info.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
-    info.lpszProxy = wspec;
-    info.lpszProxyBypass = WINHTTP_NO_PROXY_BYPASS;
-    if (!WinHttpSetOption((HINTERNET) request, WINHTTP_OPTION_PROXY, &info, sizeof(info))) {
-        fprintf(stderr, "[http] WinHTTP proxy %s: error %lu\n", spec, (unsigned long) GetLastError());
-        return 0;
-    }
-    if (p.user[0]) { // Basic, sent up front
-        wchar_t wuser[128], wpass[128];
-        if (MultiByteToWideChar(CP_UTF8, 0, p.user, -1, wuser, 128) && MultiByteToWideChar(CP_UTF8, 0, p.pass, -1, wpass, 128))
-            WinHttpSetCredentials((HINTERNET) request, WINHTTP_AUTH_TARGET_PROXY, WINHTTP_AUTH_SCHEME_BASIC, wuser, wpass, NULL);
-    }
+    snprintf(spec, n, "%s%s%s:%s", v6 ? "[" : "", p.host, v6 ? "]" : "", p.port);
     return 1;
+}
+
+// The Basic credentials of host's proxy on a request (sent up front), when that proxy has any.
+void http_proxy_winhttp_auth(void *request, const char *host, const int tls) {
+    HttpProxy p;
+    if (!request || !host || !http_proxy_for(host, tls, &p) || p.kind != HTTP_PROXY_HTTP || !p.user[0]) return;
+    wchar_t wuser[128], wpass[128];
+    if (MultiByteToWideChar(CP_UTF8, 0, p.user, -1, wuser, 128) && MultiByteToWideChar(CP_UTF8, 0, p.pass, -1, wpass, 128))
+        WinHttpSetCredentials((HINTERNET) request, WINHTTP_AUTH_TARGET_PROXY, WINHTTP_AUTH_SCHEME_BASIC, wuser, wpass, NULL);
 }
 #endif
 #endif
