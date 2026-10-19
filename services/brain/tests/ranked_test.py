@@ -240,8 +240,8 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     check(code == 200 and info.get("season") == SEASON and len(info.get("maps", [])) == 5 and
           any(m["id"] == 2 for m in info.get("maps", [])), "info: season %d, Sandstorm + 4 maps (%s)" % (SEASON, [m["id"] for m in info.get("maps", [])]))
     check([r["code"] for r in info.get("regions", [])] == ["as", "eu", "na"] and info.get("minLevel") == 1, "info: regions as/eu/na, min level")
-    # Q-MAP: the catalogue has the official maps 0..31 only; Eterno Simulator (39) and Frontier (42) are in
-    # the rotation but not playable, so the list says so and the matcher never hosts them
+    # Q-MAP: KN plays the pool's maps 0..31 only; Eterno Simulator (39) and Frontier (42) are in the
+    # rotation but not playable (catalogue entries now, not hosted), so the list says so and the matcher never hosts them
     unplayable = sorted(m["id"] for m in info.get("maps", []) if not m["available"])
     check(all(m["available"] == (m["id"] < 32) for m in info.get("maps", [])) and all(i in (39, 42) for i in unplayable),
           "maps: the playable ones are listed available, 39 / 42 unavailable (%s)" % unplayable)

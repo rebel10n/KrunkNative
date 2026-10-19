@@ -224,9 +224,10 @@ static cJSON *acc_lobby_tuple(void) {
     cJSON *meta = cJSON_CreateObject();
     const char *map = acc_map_name();
     const int mode_id = game_mode_id(game);
-    const int catalogue = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
-                              ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
-    const int custom_map = catalogue < 0 || catalogue >= MAP_CATALOG_OFFICIAL_COUNT;
+    // Krunker's mapIndex (map_catalog.h): -1 for a community map, which no official seek lists
+    const int map_index = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                              ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1;
+    const int custom_map = map_index < 0;
 
     if (g_acc.custom) {
         char label[96];
@@ -257,9 +258,9 @@ static cJSON *acc_lobby_tuple(void) {
     cJSON_AddNumberToObject(meta, "mode", mode_id);
     cJSON_AddStringToObject(meta, "modeName", mode_name(mode_id));
     cJSON_AddStringToObject(meta, "map", map);
-    // the map catalogue index (map_catalog.h; 0..31 = Krunker's mapIndex): the matchmaker's
-    // seek_maps filter (v10 dataQuery dsma, doc/v10/matchmaker-token.md)
-    if (catalogue >= 0) cJSON_AddNumberToObject(meta, "mapIndex", catalogue);
+    // Krunker's mapIndex of an official map (map_catalog.h): the matchmaker's seek_maps filter (v10
+    // dataQuery dsma, doc/v10/matchmaker-token.md). A community map has none, so no seek lists it.
+    if (map_index >= 0) cJSON_AddNumberToObject(meta, "mapIndex", map_index);
     cJSON_AddStringToObject(meta, "name", g_gs_config.name);
     cJSON_AddStringToObject(meta, "host", g_gs_config.public_host);
     cJSON_AddNumberToObject(meta, "port", g_gs_config.public_port ? g_gs_config.public_port : g_server->config.listen_port);
@@ -1096,8 +1097,8 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
         cJSON_AddNumberToObject(p, "bpp", bp_match_points(player ? player->score : 0, mlt, played >= elapsed / 2.0f));
         // endGame: a 1 in 100 chance of the official map's current-season reward skin
         const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
-                                  ? map_catalog_index_of_json(g->maps[g->current_map_index]) : -1;
-        const int reward_skin = map_index >= 0 && map_index < MAP_CATALOG_OFFICIAL_COUNT ? season_map_reward(SEASON_CURRENT, map_index) : 0;
+                                  ? map_catalog_map_index_of_json(g->maps[g->current_map_index]) : -1;
+        const int reward_skin = map_index >= 0 ? season_map_reward(SEASON_CURRENT, map_index) : 0;
         // (never in a Krunker Strike match: these are Box Office store skins; Strike's items are its own)
         if (reward_skin && player && flavor_get() == FLAVOR_BASE && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
             accounts_give_skin(player, reward_skin, "mapreward");
@@ -1106,9 +1107,8 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
     for (int i = 0; player && i < PLAYER_MEDAL_SLOTS && i < PROGRESSION_MEDAL_COUNT; i++)
         if (player->medal_counts[i]) cJSON_AddNumberToObject(medals, g_progression_medals[i], player->medal_counts[i]);
     const Game *game = &g_server->game;
-    const int catalogue = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
-                              ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
-    cJSON_AddNumberToObject(p, "mapIndex", catalogue >= 0 && catalogue < MAP_CATALOG_OFFICIAL_COUNT ? catalogue : -1);
+    cJSON_AddNumberToObject(p, "mapIndex", game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                                              ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1);
     cJSON_AddBoolToObject(p, "ranked", game->config.comp); // checkChallenge: T "ranked" needs game.isComp
 }
 
@@ -1179,7 +1179,7 @@ static void acc_turf_round_start(void) {
     const Game *game = &g_server->game;
     memset(&g_turf, 0, sizeof(g_turf));
     const int map = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
-                        ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
+                        ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1; // turf_wars.h: mapIndex
     // isEligibleGame (game.isPubType(): no host, or mimicPubs) + isEligibleMap: a round on Burg /
     // Sandstorm / Subzero in FFA / TDM. A published map (v10 isCustom && customMapData) and ranked
     // never count. A hosted game counts when its request (a player's Host Game config, the operator's preset)
@@ -3027,8 +3027,8 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     GameConfig game_config = *flavor_default_game_config(); // base: g_default_game_config
     game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
 
-    // maps: catalogue indices, or names (this server's own maps first: custom dirs / the
-    // command line map), else the public rotation
+    // maps: Krunker mapIndexes (the Host Game window's official maps, host_flow_ui.c), or names (this
+    // server's own maps first: custom dirs / the command line map), else the public rotation
     const cJSON *chosen[GS_MAX_LIST];
     size_t map_count = 0;
     cJSON *map_names = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "maps"), 1);
@@ -3043,8 +3043,9 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         if (map_count >= GS_MAX_LIST) break;
         const cJSON *json = NULL;
         if (cJSON_IsString(entry)) json = acc_public_map_by_name(entry->valuestring);
-        if (!json) {
-            const int index = cJSON_IsNumber(entry) ? entry->valueint : cJSON_IsString(entry) ? map_catalog_find(entry->valuestring) : -1;
+        if (!json && cJSON_IsNumber(entry)) json = map_catalog_official_json(entry->valueint);
+        if (!json && cJSON_IsString(entry)) {
+            const int index = map_catalog_find(entry->valuestring);
             json = index >= 0 ? map_catalog_json((size_t) index) : NULL;
         }
         if (json) chosen[map_count++] = json;

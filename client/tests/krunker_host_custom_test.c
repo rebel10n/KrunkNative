@@ -33,7 +33,7 @@ void client_net_queue_packet(Client *c, const NetPacket *packet) { (void) c; (vo
 void client_net_release(Client *c) { (void) c; NOT_REACHED(); }
 void client_net_set_drop(Client *c, const char *tag, int close_code, const char *fmt, ...) { (void) c; (void) tag; (void) close_code; (void) fmt; NOT_REACHED(); }
 void client_set_custom_game_id(Client *c, const cJSON *map, const char *id) { (void) c; (void) map; (void) id; NOT_REACHED(); }
-const cJSON *g_maps[32];
+const cJSON *g_maps[46];
 int html_ui_available(void) { NOT_REACHED(); }
 void http_conn_close(HttpConn *c) { (void) c; NOT_REACHED(); }
 int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms) { (void) c; (void) a; (void) timeout_ms; NOT_REACHED(); }

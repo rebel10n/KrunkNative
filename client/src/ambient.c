@@ -725,9 +725,9 @@ void ambient_load_map(Scene *scene, const Map *map) {
     // baked lightmaps and get none unless they set oldAO (freight, lagoon); the v3.1.1 maps,
     // now community maps, keep them. (map-logic.md decision 11 predates the v7 catalogue:
     // KN's official maps are v7's now, so the v7 gate applies as is.)
-    const int index = map_catalog_index_of_json(map->raw_data);
+    const int index = map_catalog_map_index_of_json(map->raw_data);
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(map->raw_data, "name"));
-    const int custom = index < 0 || index >= MAP_CATALOG_OFFICIAL_COUNT || (index == 0 && (!name || strcmp(name, "Burg")));
+    const int custom = index < 0 || (index == 0 && (!name || strcmp(name, "Burg")));
     const int official_key = cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, "official"));
     if (!map->old_ao && !official_key && !(!map->has_lightmaps && custom)) return;
 

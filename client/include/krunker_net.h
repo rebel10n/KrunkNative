@@ -73,7 +73,7 @@
 //     tracers ("9"), explosions ("ex"); scores, leaderboard ("5", "7"), timers ("t"), end of round
 //     ("end"), modes / objectives / teams ("tm", "ts", "obj", ...), map votes, streaks, sprays,
 //     voice, sounds, every KrunkScript packet, "00" names, "uid" reconnect ids
-//   - maps beyond Krunker v7.1.4's 32 official ones (init's mapIndex >= 32; custom / community
+//   - maps beyond the v10.0.2 official list's 46 (init's mapIndex >= 46; custom / community
 //     maps the API serves by index), the mode's own rules for the Krunker mode id
 //   - cosmetics, skins: everyone is shown with default cosmetics ("0"'s cosmetic slots are not read);
 //     the account (krunker_account.h) is the player's own when signed in, a guest's otherwise

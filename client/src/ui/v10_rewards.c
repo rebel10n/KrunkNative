@@ -322,7 +322,8 @@ static char *gen_challenges(const AccountInfo *acc) {
         fprintf(stderr, "[challenges] window %s%s: %d active, %d completed\n", g_chal_typ[0] ? g_chal_typ : "home", g_chal_typ[0] ? "" : "", all, completed);
     }
     if (!strcmp(g_chal_typ, "map")) {
-        const MapCatalogEntry *m = g_chal_ind >= 0 && g_chal_ind < MAP_CATALOG_OFFICIAL_COUNT ? map_catalog_at((size_t) g_chal_ind) : NULL;
+        const int catalog = g_chal_ind >= 0 && g_chal_ind < MAP_CATALOG_OFFICIAL_COUNT ? map_catalog_official_index(g_chal_ind) : -1;
+        const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         snprintf(title, sizeof(title), "%s Challenges", m ? m->name : "");
         count("map", "mp", g_chal_ind, &done, &total);
         header(&sb, NULL, "hed_1", 0, title, done, total, 1, 0, NULL);
@@ -343,8 +344,9 @@ static char *gen_challenges(const AccountInfo *acc) {
     count("map", NULL, 0, &done, &total);
     header(&sb, NULL, "hed_1", 0, "Map Challenges", done, total, 0, done >= total, NULL);
     sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
-    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
-        const MapCatalogEntry *m = map_catalog_at((size_t) i);
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) { // i: Krunker's mapIndex (the challenge's id)
+        const int catalog = map_catalog_official_index(i);
+        const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         int d, t;
         count("map", "mp", i, &d, &t);
         if (!m || !t) continue;

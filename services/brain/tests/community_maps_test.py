@@ -46,7 +46,7 @@ if not DB and DRIVER == "postgres":
     sys.exit(77)
 SCHEMA = "kn_test_cm_%d" % os.getpid()
 FAILS = []
-OFFICIAL_COUNT = 32  # map_catalog.h MAP_CATALOG_OFFICIAL_COUNT
+OFFICIAL_COUNT = 46  # map_catalog.h MAP_CATALOG_OFFICIAL_COUNT (Krunker's official list)
 CATEGORY_PARKOUR = 1  # map_catalog.c map_category_name: "Parkour"
 
 
@@ -192,7 +192,7 @@ async def scenario(port):
     test_rows = get(base, "/api/search?type=map&val=test&source=community")["data"]
     check(test_rows and all(r["official"] is False for r in test_rows) and any(r["map_name"] == "Test" for r in test_rows),
           "source=community keeps the bundled community maps (Test) and no official one")
-    official_tab = get(base, "/api/maps?index=0&pos=0&source=official")["data"]
+    official_tab = get(base, "/api/maps?index=0&pos=0&source=official")["data"] + get(base, "/api/maps?index=0&pos=1&source=official")["data"]
     check(len(official_tab) == OFFICIAL_COUNT and all(r["official"] is True for r in official_tab),
           "Popular with source=official: the %d official maps" % OFFICIAL_COUNT)
     community_tab = get(base, "/api/maps?index=0&pos=0&source=community")["data"]

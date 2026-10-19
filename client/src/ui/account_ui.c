@@ -2630,8 +2630,9 @@ static char *gen_challenges(void) {
         chal_count("map", NULL, 0, &done, &total);
         chal_header(&sb, "hed_1", margin, "Map Challenges", done, total, 0, NULL);
         sb_append(&sb, "<div style='margin-top:10px;text-align:center;'>");
-        for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
-            const MapCatalogEntry *m = map_catalog_at((size_t) i);
+        for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) { // i: Krunker's mapIndex (the challenge's id)
+            const int catalog = map_catalog_official_index(i);
+            const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
             int d, t;
             chal_count("map", "mp", i, &d, &t);
             if (!m || !t) continue;
@@ -2662,7 +2663,8 @@ static char *gen_challenges(void) {
         chal_header(&sb, "hed_4", 30, "Nightmare Challenges", done, total, 0, NULL);
         chal_cards(&sb, "nightmare", NULL, 0, "Check back later for new nightmare challanges!"); // sic (v7)
     } else if (!strcmp(g_chal_typ, "map")) {
-        const MapCatalogEntry *m = g_chal_ind >= 0 && g_chal_ind < MAP_CATALOG_OFFICIAL_COUNT ? map_catalog_at((size_t) g_chal_ind) : NULL;
+        const int catalog = g_chal_ind >= 0 && g_chal_ind < MAP_CATALOG_OFFICIAL_COUNT ? map_catalog_official_index(g_chal_ind) : -1;
+        const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         char title[96];
         snprintf(title, sizeof(title), "%s Challenges", m ? m->name : "");
         chal_count("map", "mp", g_chal_ind, &done, &total);

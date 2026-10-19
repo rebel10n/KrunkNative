@@ -209,6 +209,20 @@ slide_moonlight Corrade, FortniteTiltedT DjDankMeister, Test v e c t o r (2018).
 | `laboratory` (v7 29) | Laboratory | `img/maps/map_29.png` | v7 `public/img/maps/map_29.png` | present |
 | `shipyard` (v7 30) | Shipyard | `img/maps/map_30.png` | v7 `public/img/maps/map_30.png` | present |
 | `sanctum` (v7 31) | Soul Sanctum | `img/maps/map_31.png` | v7 `public/img/maps/map_31.png` | present |
+| `bazaar` (v10 32) | Bazaar | none | none: the v10.0.2 list has no picture of it in the references | missing |
+| `erupt` (v10 33) | Erupt | none | none in the references | missing |
+| `hq` (v10 34) | HQ | none | none in the references | missing |
+| `khepri` (v10 35) | Khepri | none | none in the references | missing |
+| `lush` (v10 36) | Lush | none | none in the references | missing |
+| `vivo` (v10 37) | Vivo | none | none in the references | missing |
+| `slide_moonlight_v10` (v10 38) | Slide Moonlight | `img/maps/community/slide_moonlight.png` | the community `slide_moonlight` picture: the same map (1068 objects in both files) | present |
+| `eterno_simulator` (v10 39) | Eterno Simulator | `img/maps/map_39.png` | the ranked pool's picture (see below) | present |
+| `stalk_factory` (v10 40) | Stalk Factory | none | none in the references | missing |
+| `eterno_jump_v10` (v10 41) | eterno_jump | none | none: the community `eterno_jump` has none either | missing |
+| `frontier` (v10 42) | Frontier | `img/maps/map_42.png` | the ranked pool's picture (see below) | present |
+| `bastion` (v10 43) | Bastion | none | none in the references | missing |
+| `piazza` (v10 44) | Piazza | none | none in the references | missing |
+| `barnyard` (v10 45) | Barnyard | none | none in the references | missing |
 | `311_burg` | Burg (3.1.1) | `img/maps/v311/map_0.png` | v3.1.1 `public/img/maps/map_0.png` | present |
 | `311_littletown` | Littletown (3.1.1) | `img/maps/v311/map_1.png` | v3.1.1 `public/img/maps/map_1.png` | present |
 | `311_sandstorm` | Sandstorm (3.1.1) | `img/maps/v311/map_2.png` | v3.1.1 `public/img/maps/map_2.png` | present |
@@ -250,8 +264,8 @@ slide_moonlight Corrade, FortniteTiltedT DjDankMeister, Test v e c t o r (2018).
 Ranked pool (`shared/src/ranked.c`): `map_2`, `map_4`, `map_11`, `map_14`, `map_17` are v7 (present); `map_39`
 (Eterno Simulator) is v7's file, `map_42` (Frontier) is the live asset host's `img/maps/map_42.png` (both present).
 
-Missing after this change: 14 of the 69 catalogue maps (the 9 `152_` maps and 5 community maps). Before, 37
-community maps showed `img/noimg.png`. The `152_` maps are v3.1.1's old_* copies of the v1.5.2 maps; the
+Missing: 25 of the 83 catalogue maps (the 9 `152_` maps, 5 community maps and 11 v10 additions above). Before the
+v10 additions, 14 of the 69 were missing (the 9 `152_` maps and 5 community maps). The `152_` maps are v3.1.1's old_* copies of the v1.5.2 maps; the
 references hold no picture of them and only the current maps of those names. `Krunk_Plaza`'s picture is byte-identical to the v7
 official `Krunk_Plaza` (map 20). `Test` (creator v e c t o r on gapi) and `FortniteTiltedT` have no thumb on the host.
 

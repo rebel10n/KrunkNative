@@ -25,7 +25,7 @@ static int g_fail, g_pass;
 #define CHECK(cond, ...) do { if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 // ---- test double: the official map table social.c's service reads (linked for the voice chunking only)
-const cJSON *g_maps[32];
+const cJSON *g_maps[46];
 
 // ---- test doubles: the cheat evaluator (the link takes io.cheat; this satisfies its fallback symbol)
 int krunker_cheat_answer(const char *nonce, const char *ciphertext_b64, KrunkerCcr *out) {

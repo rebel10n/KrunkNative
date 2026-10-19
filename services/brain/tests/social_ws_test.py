@@ -453,20 +453,22 @@ async def scenario(base, internal_url, secret):
         check(r[1] == "Map name taken", "catalogue names reserved")
         r = await a.call("upMp", "uploadM", json.dumps({"name": "Burg", "objects": [], "spawns": [[0, 1, 0], [4, 1, 0]]}), None, "", "", 0)
         check(r[1] == "Missing objects.", "publish checks run before the name: %r" % r)
-        # catalogue (shared/include/map_catalog.h, since 83d680d): v7.1.4's 32 official maps at their
-        # v7 indices (0 = Burg), then 13 community maps (the bundled custom_maps/ and the v10 FTUE
-        # map), its 15 official maps as 311_* ("Burg (3.1.1)") and its 9 old_* maps as 152_*
-        # ("Burg (1.5.2)") = 69 (map_catalog.c). Popular / New list the 32 officials first, then the
-        # rest in the v3.1.1 tab order; 42 rows per page (TAB_PAGE_SIZE)
+        # catalogue (shared/include/map_catalog.h): Krunker's 46 official maps (0 = Burg, the v7 set first),
+        # then 13 community maps (the bundled custom_maps/ and the v10 FTUE map), its 15 official maps as
+        # 311_* ("Burg (3.1.1)"), its 9 old_* maps as 152_* ("Burg (1.5.2)") and the 14 v10 additions
+        # = 83 (map_catalog.c). Popular / New list the 46 officials first, then the rest in the v3.1.1
+        # tab order; 42 rows per page (TAB_PAGE_SIZE)
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=0").read())
         page1 = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=1").read())
         rows = page["data"] + page1["data"]
         check(rows[0]["map_name"] == mapname and rows[0]["creatorname"] == alice and rows[1]["map_name"] == "Burg"
-              and len(page["data"]) == 42 and len(rows) == 1 + 69,
-              "/api/maps New tab: published map first + 69 catalogue maps (%d)" % len(rows))
+              and len(page["data"]) == 42 and len(rows) == 1 + 83,
+              "/api/maps New tab: published map first + 83 catalogue maps (%d)" % len(rows))
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=0&pos=0").read())
-        check(page["data"][0]["map_name"] == "Burg" and page["data"][32]["map_name"] == "Soul Sanctum (3.1.1)"
-              and page["error"] is None, "/api/maps Popular = v7 official maps, then the v3.1.1 order")
+        page1 = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=0&pos=1").read())
+        popular = page["data"] + page1["data"]
+        check(popular[0]["map_name"] == "Burg" and popular[46]["map_name"] == "Soul Sanctum (3.1.1)"
+              and page["error"] is None, "/api/maps Popular = the official maps, then the v3.1.1 order")
         found = json.loads(urllib.request.urlopen(http_base + "/api/search?type=map&val=arena_" + stamp).read())
         check(len(found["data"]) == 1, "/api/search finds the published map")
         data = urllib.request.urlopen(http_base + "/api/map-data?name=" + mapname).read()

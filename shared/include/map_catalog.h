@@ -4,14 +4,23 @@
 // The KrunkNative map catalogue: every map the game ships, in its order, with the ids and names
 // its UI, rotation, host window, Games window and `map` command use.
 //
-//   index 0..31   Krunker's official maps, so a catalogue index here IS the official mapIndex (the v10.0.2
-//                 list, krunker_maps.h, whose first 32 are v7.1.4's data/maps.js): the file is the v10.0.2
-//                 file assets/maps/official/<NN>_<name>.json, unmodified (thumbnails ui/img/maps/map_<index>.png)
-//   index 32..    the community maps: Krunker_v3.1.1/custom_maps/ (assets/maps/custom/<key>.json,
+// A catalogue index is a position in the table below. It is what the lobby list, the Games window
+// and the console name a map by, and it never moves: maps are only appended.
+//   index 0..31   Krunker's v7.1.4 official maps, in data/maps.js order
+//   index 32..68  the community maps: Krunker_v3.1.1/custom_maps/ (assets/maps/custom/<key>.json,
 //                 ASCII filename order), then the v3.1.1 official maps as "311_<key>"
 //                 (assets/maps/311_<key>.json, their v3.1.1 MAPS order, shown as "Burg (3.1.1)"),
 //                 then v3.1.1's own custom_maps/old_<key>.json (the v1.5.2 era maps) as
 //                 "152_<key>" (assets/maps/152_<key>.json, "Burg (1.5.2)")
+//   index 69..82  the v10.0.2 official maps that are not in the v7 set (appended, KrunkNative)
+//
+// The official maps are Krunker's own: each one's mapIndex (MapCatalogEntry.index) is its position in
+// the v10.0.2 official list (shared/include/krunker_maps.h, KRUNKER_OFFICIAL_MAPS), 0..45. That is the
+// number the matchmaker's seek_maps filter, the lobby list's mapIndex, the challenges, the season
+// rewards and Host Game's maps use, so it is the same for every version of the table. Krunker's
+// mapIndex and the catalogue index agree for 0..31 only; use map_catalog_official_index /
+// map_catalog_map_index to convert. The v10.0.2 files are assets/maps/official/<NN>_<name>.json,
+// unmodified; a map's picture is ui/img/maps/map_<mapIndex>.png where one exists.
 //
 // The JSON files are reference data, copied unmodified (the 311_ / 152_ display names are set on
 // the loaded JSON, see map_catalog_json). `key` is the unique id and the file stem. The keys
@@ -31,7 +40,7 @@ typedef enum {
 typedef struct {
     const char *key;     // unique id: the file stem ("burg_new", "Bhop_VIP", "311_burg", "152_burg")
     const char *name;    // the display name (map_name): the JSON "name", + " (3.1.1)" / " (1.5.2)"
-    int index;           // v7.1.4 mapIndex (data/maps.js) for official maps, -1 for community maps
+    int index;           // Krunker's mapIndex (the v10.0.2 official list) for official maps, -1 for community maps
     MapSource source;
     unsigned char rotation; // in v7 src/data/map.js rotationMaps (public round rotation)
     unsigned char hostable; // in the Host Game window (the official maps)
@@ -43,7 +52,9 @@ typedef struct {
     const char *thumb;      // the card's picture under ui/ ("img/maps/v311/map_10.png"), NULL none
 } MapCatalogEntry;
 
-#define MAP_CATALOG_OFFICIAL_COUNT 32
+// Krunker's official maps: mapIndex 0..MAP_CATALOG_OFFICIAL_COUNT-1 (= KRUNKER_OFFICIAL_MAP_COUNT, krunker_maps.h).
+// The catalogue has one entry for each of them; their catalogue indices are not contiguous.
+#define MAP_CATALOG_OFFICIAL_COUNT 46
 
 size_t map_catalog_count(void);
 const MapCatalogEntry *map_catalog_at(size_t index); // NULL out of range
@@ -82,9 +93,9 @@ int map_catalog_resolve(const char *query, int *candidates, size_t max, size_t *
 // publicRoutes.ts map_id: fnv1a(name.toLowerCase()) of the display name (the 311_ / 152_ maps'
 // differ from v3.1.1's, where old_burg shared Burg's id)
 uint32_t map_catalog_map_id(const MapCatalogEntry *entry);
-// The card's picture under ui/: "img/maps/map_<index>.png" for the official maps (public/img/maps),
-// the entry's own `thumb` for the v3.1.1 and community maps that have one, NULL otherwise (the card
-// keeps img/noimg.png). ui/README.md "Map thumbnails" lists each one's source.
+// The card's picture under ui/: the entry's own `thumb` when it has one; else "img/maps/map_<index>.png" for
+// the v7 official maps (index 0..31, public/img/maps); NULL otherwise (the card keeps img/noimg.png). The v10
+// additions (mapIndex 32..45) carry their own `thumb` or none. ui/README.md "Map thumbnails" lists each one's source.
 const char *map_catalog_thumb(const MapCatalogEntry *entry, char *out, size_t size);
 
 // v3.1.1 server/game.ts sanitizeCustomMapJson, in place: an object without "s" but with
@@ -101,6 +112,15 @@ const cJSON *map_catalog_json(size_t index);
 size_t map_catalog_load_official(void);
 // Catalogue index of a JSON returned by map_catalog_json, -1 when it is not one of them.
 int map_catalog_index_of_json(const cJSON *json);
+
+// Krunker's mapIndex <-> the catalogue. An official map's entry is the one whose index is mapIndex
+// (-1 when there is none); map_catalog_official_json is its JSON (NULL when there is none). A
+// catalogue index's mapIndex is the entry's index for an official map, -1 for a community map
+// (a community map has no mapIndex: it is no Krunker official map on any list).
+int map_catalog_official_index(int map_index);
+const cJSON *map_catalog_official_json(int map_index);
+int map_catalog_map_index(size_t index);
+int map_catalog_map_index_of_json(const cJSON *json);
 
 // The public rotation (src/data/map.js rotationMaps): catalogue indices, returns the count. Under
 // Krunker Strike: FRVR's pool, each map listed by its weight (strike_maps.h strike_map_rotation).

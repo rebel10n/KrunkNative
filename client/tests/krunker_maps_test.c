@@ -81,10 +81,11 @@ static void test_table(void) {
           krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT - 1));
     CHECK(!krunker_official_map_name(KRUNKER_OFFICIAL_MAP_COUNT) && !krunker_official_map_name(-1) && !krunker_official_map_file(-1),
           "outside the table: NULL");
-    // our catalogue's 32 official maps are Krunker's first 32, in order (v7.1.4's data/maps.js)
+    // our catalogue's official maps are Krunker's 46, by mapIndex (the v10.0.2 list; 0..31 are v7.1.4's)
     for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
-        CHECK(!strcmp(map_catalog_at((size_t) i)->name, krunker_official_map_name(i)), "map %d: catalogue %s, Krunker %s", i,
-              map_catalog_at((size_t) i)->name, krunker_official_map_name(i));
+        const int at = map_catalog_official_index(i);
+        CHECK(at >= 0 && !strcmp(map_catalog_at((size_t) at)->name, krunker_official_map_name(i)), "map %d: catalogue %s, Krunker %s", i,
+              at >= 0 ? map_catalog_at((size_t) at)->name : "none", krunker_official_map_name(i));
     }
     const cJSON *maps[KRUNKER_OFFICIAL_MAP_COUNT];
     for (int i = 0; i < KRUNKER_OFFICIAL_MAP_COUNT; i++) {
@@ -189,7 +190,7 @@ static void test_spawns(void) {
                   "HQ spawn 4 (%.0f,%.0f,%.0f): 3 s of W walks on the floor to %.1f,%.1f,%.1f", at.x, at.y, at.z, player->position.x,
                   player->position.y, player->position.z);
         }
-        if (i == 18 || i == 20 || i == 29 || i == 31 || i >= MAP_CATALOG_OFFICIAL_COUNT) {
+        if (i == 18 || i == 20 || i == 29 || i == 31 || i >= 32) { // 32..45: the v10.0.2 additions
             printf("  spawns %2d %-18s objects %4d (v10 list %4d), %zu/%zu spawns stand on solid ground (largest settle %.2f)\n", i,
                    krunker_official_map_name(i), objects, k_table_objects[i], (size_t) landed, game.map->spawn_count, worst);
         }

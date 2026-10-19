@@ -134,6 +134,10 @@ static const char *query_region(kn_http_req *req, const char *def) {
     return index >= 0 ? ranked_region_code(index) : NULL;
 }
 
+// KrunkNative plays the ranked pool's maps below mapIndex 32 (Q-MAP, shared/include/ranked.h): Eterno
+// Simulator (39) and Frontier (42) have catalogue entries now, but the matcher does not host them yet.
+static int ranked_map_playable(const int map) { return map >= 0 && map < 32 && map_catalog_official_index(map) >= 0; }
+
 static void add_season_maps(cJSON *o, const int season) {
     int maps[RANKED_SEASON_MAPS];
     ranked_season_maps(season, maps);
@@ -143,8 +147,8 @@ static void add_season_maps(cJSON *o, const int season) {
         cJSON_AddNumberToObject(m, "id", maps[i]);
         const char *name = ranked_pool_map_name(maps[i]);
         cJSON_AddStringToObject(m, "name", name ? name : "");
-        /* KrunkNative's catalogue lacks some v10 maps (Eterno Simulator 39, Frontier 42) */
-        cJSON_AddBoolToObject(m, "available", maps[i] < MAP_CATALOG_OFFICIAL_COUNT && map_catalog_at((size_t) maps[i]) != NULL);
+        /* Q-MAP: Eterno Simulator (39) and Frontier (42) are listed, not playable yet */
+        cJSON_AddBoolToObject(m, "available", ranked_map_playable(maps[i]));
         cJSON_AddItemToArray(a, m);
     }
 }
@@ -692,7 +696,8 @@ static void on_history(kn_db_result *res, void *ud) {
     for (int i = 0; i < kn_db_rows(res); i++) {
         cJSON *row = kn_db_row_to_json(res, i);
         const int map = (int) kn_json_num(row, "map", -1);
-        const MapCatalogEntry *m = map >= 0 ? map_catalog_at((size_t) map) : NULL;
+        const int catalog = map >= 0 ? map_catalog_official_index(map) : -1; // a mapIndex
+        const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         const char *pool = ranked_pool_map_name(map);
         cJSON_AddStringToObject(row, "map_name", pool ? pool : m ? m->name : "");
         const double before = kn_json_num(row, "rating_before", 0), after = kn_json_num(row, "rating_after", before);
@@ -1084,8 +1089,8 @@ static void tick(kn_loop *loop, void *ud) {
     ranked_season_maps(season, maps);
     char list[96] = "";
     for (int i = 0; i < RANKED_SEASON_MAPS; i++) {
-        /* KrunkNative's catalogue lacks some v10 pool maps: only playable ones are picked */
-        if (maps[i] >= MAP_CATALOG_OFFICIAL_COUNT || !map_catalog_at((size_t) maps[i])) continue;
+        /* Q-MAP: only the playable pool maps are picked */
+        if (!ranked_map_playable(maps[i])) continue;
         const size_t len = strlen(list);
         snprintf(list + len, sizeof list - len, "%s%d", len ? "," : "", maps[i]);
     }

@@ -11,7 +11,7 @@
  *   GET /api/streams?index=                    -> v3.1.1 placeholder (no streams)
  *   GET /api/prices[?id=]                      -> {} / 0 (v3.1.1 placeholder)
  *
- * Maps = the map catalogue (shared/include/map_catalog.h: v7.1.4's 32 official maps, then 12
+ * Maps = the map catalogue (shared/include/map_catalog.h: Krunker's 46 official maps, then 12
  * community maps and the v3.1.1 311_* / 152_* maps in the v3.1.1 offline server's tab orders)
  * followed by the maps
  * players published (published_maps). Tabs (publicRoutes.ts sortMaps):

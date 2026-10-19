@@ -1,16 +1,18 @@
-// The KrunkNative map catalogue (shared/include/map_catalog.h): Krunker's 32 official maps (the v10.0.2
-// files under assets/maps/official/, the same indices as v7.1.4's mapIndex) plus the community maps, among
-// them the v3.1.1 official maps as "311_<key>" and v3.1.1's old_* maps (the v1.5.2 era) as "152_<key>".
+// The KrunkNative map catalogue (shared/include/map_catalog.h): Krunker's 46 official maps (the v10.0.2
+// files under assets/maps/official/, mapIndex 0..45) plus the community maps, among them the v3.1.1 official
+// maps as "311_<key>" and v3.1.1's old_* maps (the v1.5.2 era) as "152_<key>".
 //
-// Sources: Krunker_v7.1.4/src/data/maps.js (the official list: name, fileName; the index is the
-// v7 mapIndex) and data/map.js rotationMaps; the v10.0.2 official list (krunker_maps.h, generated) for the
-// official files; Krunker_v3.1.1 matchmaker/publicRoutes.ts (loadMaps,
-// map_id = fnv1a(name.toLowerCase()), creatorname, map_featured), server/packetHandlers.ts
+// Sources: Krunker_v7.1.4/src/data/maps.js (the first 32 official maps: name, fileName; the index is the
+// v7 mapIndex, the same as v10's) and data/map.js rotationMaps; the v10.0.2 official list (krunker_maps.h,
+// generated) for the official files and the mapIndex of the 14 maps v7 does not have; Krunker_v3.1.1
+// matchmaker/publicRoutes.ts (loadMaps, map_id = fnv1a(name.toLowerCase()), creatorname, map_featured),
+// server/packetHandlers.ts
 // (cmd_map / listCustomMaps), and the v3.1.1 Games window capture (doc/ref/krunker-v3.1.1/windows/).
 // tools/maps/import_v7_maps.py imports the v7 map thumbnails (ui/img/maps).
 
 #include <map_catalog.h>
 #include <flavor.h>
+#include <krunker_maps.h>
 #include <shared.h>
 #include <strike_maps.h>
 
@@ -22,8 +24,9 @@
 
 // file_: the v10.0.2 file's stem under assets/maps/official/ (krunker_maps.h, the official list's index)
 // thumb: the card's picture (ui/img/maps/...), NULL none; an official map's is map_<index>.png
-#define OFFICIAL(key_, name_, idx, rot, file_) \
-    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/official/" file_ ".json", NULL}
+#define OFFICIAL_PIC(key_, name_, idx, rot, file_, thumb_) \
+    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/official/" file_ ".json", thumb_}
+#define OFFICIAL(key_, name_, idx, rot, file_) OFFICIAL_PIC(key_, name_, idx, rot, file_, NULL)
 #define CUSTOM(key_, name_, creator_, mod, thumb_) \
     {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", "", "maps/custom/" key_ ".json", thumb_}
 // a v3.1.1 official map, kept playable as a community map (v3.1.1 Host Game card labels kept:
@@ -114,9 +117,32 @@ static const MapCatalogEntry k_catalog[] = {
     V152("shipyard", "Shipyard"),
     V152("subzero", "Subzero"),
     V152("undergrowth", "Undergrowth"),
+    // the v10.0.2 official maps the v7 set does not have (krunker_maps.h mapIndex 32..45), appended so the
+    // catalogue indices above do not move. Not in the rotation (rotation 0), hostable (Host Game). Their
+    // pictures: map_39 and map_42 are the ranked pool's (ui/img/maps), 38 is the picture of the same map as
+    // the community slide_moonlight; the others have none yet (ui/README.md "Map thumbnails").
+    OFFICIAL("bazaar", "Bazaar", 32, 0, "32_bazaar"),
+    OFFICIAL("erupt", "Erupt", 33, 0, "33_erupt"),
+    OFFICIAL("hq", "HQ", 34, 0, "34_hq"),
+    OFFICIAL("khepri", "Khepri", 35, 0, "35_khepri"),
+    OFFICIAL("lush", "Lush", 36, 0, "36_lush"),
+    OFFICIAL("vivo", "Vivo", 37, 0, "37_vivo"),
+    // the same map as the community "slide_moonlight" (same objects): the official one keeps its own key
+    OFFICIAL_PIC("slide_moonlight_v10", "Slide Moonlight", 38, 0, "38_slide_moonlight", "img/maps/community/slide_moonlight.png"),
+    OFFICIAL_PIC("eterno_simulator", "Eterno Simulator", 39, 0, "39_eterno_simulator", "img/maps/map_39.png"),
+    OFFICIAL("stalk_factory", "Stalk Factory", 40, 0, "40_stalk_factory"),
+    // the same map as the community "eterno_jump" (same objects): the official one keeps its own key
+    OFFICIAL("eterno_jump_v10", "eterno_jump", 41, 0, "41_eterno_jump"),
+    OFFICIAL_PIC("frontier", "Frontier", 42, 0, "42_frontier", "img/maps/map_42.png"),
+    OFFICIAL("bastion", "Bastion", 43, 0, "43_bastion"),
+    OFFICIAL("piazza", "Piazza", 44, 0, "44_piazza"),
+    OFFICIAL("barnyard", "Barnyard", 45, 0, "45_barnyard"),
 };
 
 #define CATALOG_COUNT (sizeof(k_catalog) / sizeof(k_catalog[0]))
+
+// the official maps, by mapIndex (the v10.0.2 list): one entry each
+_Static_assert(MAP_CATALOG_OFFICIAL_COUNT == KRUNKER_OFFICIAL_MAP_COUNT, "MAP_CATALOG_OFFICIAL_COUNT is the v10.0.2 official list");
 
 static cJSON *g_catalog_json[CATALOG_COUNT];
 static unsigned char g_catalog_failed[CATALOG_COUNT];
@@ -172,6 +198,18 @@ static int strcasecmp_ascii(const char *a, const char *b) {
 
 size_t map_catalog_count(void) { return CATALOG_COUNT; }
 
+int map_catalog_official_index(const int map_index) {
+    if (map_index < 0 || map_index >= MAP_CATALOG_OFFICIAL_COUNT) return -1;
+    for (size_t i = 0; i < CATALOG_COUNT; i++) {
+        if (k_catalog[i].source == MAP_SOURCE_OFFICIAL && k_catalog[i].index == map_index) return (int) i;
+    }
+    return -1;
+}
+
+int map_catalog_map_index(const size_t index) {
+    return index < CATALOG_COUNT && k_catalog[index].source == MAP_SOURCE_OFFICIAL ? k_catalog[index].index : -1;
+}
+
 const MapCatalogEntry *map_catalog_at(const size_t index) {
     return index < CATALOG_COUNT ? &k_catalog[index] : NULL;
 }
@@ -221,7 +259,8 @@ int map_catalog_index_of_file(const char *path) {
     // a v3.1.1 stem: the official map of that name ("burg", "soul_sanctum" -> Burg, Soul Sanctum)
     char wanted[64], norm[64];
     resolve_normalize(stem, wanted, sizeof(wanted));
-    for (size_t i = 0; wanted[0] && i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+    for (size_t i = 0; wanted[0] && i < CATALOG_COUNT; i++) {
+        if (k_catalog[i].source != MAP_SOURCE_OFFICIAL) continue;
         resolve_normalize(k_catalog[i].name, norm, sizeof(norm));
         if (!strcmp(norm, wanted)) return (int) i;
     }
@@ -392,13 +431,17 @@ uint32_t map_catalog_map_id(const MapCatalogEntry *entry) {
     return h;
 }
 
+// the official maps 0..31 (v7.1.4's set) have img/maps/map_<index>.png; the v10.0.2 additions carry
+// their own `thumb` (NULL: none yet)
+#define OFFICIAL_V7_COUNT 32
+
 const char *map_catalog_thumb(const MapCatalogEntry *entry, char *out, const size_t size) {
     if (!entry || !out || !size) return NULL;
     if (entry->thumb) {
         snprintf(out, size, "%s", entry->thumb);
         return out;
     }
-    if (entry->source != MAP_SOURCE_OFFICIAL) return NULL;
+    if (entry->source != MAP_SOURCE_OFFICIAL || entry->index < 0 || entry->index >= OFFICIAL_V7_COUNT) return NULL;
     snprintf(out, size, "img/maps/map_%d.png", entry->index);
     return out;
 }
@@ -543,11 +586,15 @@ static void catalog_prefetch(const int *indices, const size_t count) {
 
 size_t map_catalog_load_official(void) {
     int indices[MAP_CATALOG_OFFICIAL_COUNT];
-    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) indices[i] = i;
-    catalog_prefetch(indices, MAP_CATALOG_OFFICIAL_COUNT);
+    size_t n = 0;
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+        const int index = map_catalog_official_index(i);
+        if (index >= 0) indices[n++] = index;
+    }
+    catalog_prefetch(indices, n);
 
     size_t loaded = 0;
-    for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) loaded += map_catalog_json(i) != NULL;
+    for (size_t i = 0; i < n; i++) loaded += map_catalog_json((size_t) indices[i]) != NULL;
     return loaded;
 }
 
@@ -557,6 +604,16 @@ int map_catalog_index_of_json(const cJSON *json) {
         if (g_catalog_json[i] == json) return (int) i;
     }
     return -1;
+}
+
+const cJSON *map_catalog_official_json(const int map_index) {
+    const int index = map_catalog_official_index(map_index);
+    return index >= 0 ? map_catalog_json((size_t) index) : NULL;
+}
+
+int map_catalog_map_index_of_json(const cJSON *json) {
+    const int index = map_catalog_index_of_json(json);
+    return index >= 0 ? map_catalog_map_index((size_t) index) : -1;
 }
 
 size_t map_catalog_rotation(int *out, const size_t max) {
@@ -645,11 +702,17 @@ size_t map_catalog_games_tab(const int tab, int *out, const size_t max) {
     if (!out) return 0;
     size_t n = 0;
     switch (tab) {
-        case 1: // Featured: the official maps (data/maps.js order)
-            for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) out[n++] = (int) i;
+        case 1: // Featured: the official maps (mapIndex order)
+            for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) {
+                const int index = map_catalog_official_index(i);
+                if (index >= 0) out[n++] = index;
+            }
             return n;
         case 0: case 2: // Popular / New: the official maps, then the community maps' recorded order
-            for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) out[n++] = (int) i;
+            for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && n < max; i++) {
+                const int index = map_catalog_official_index(i);
+                if (index >= 0) out[n++] = index;
+            }
             if (tab == 2) return n + games_from_keys(k_games_new, sizeof(k_games_new) / sizeof(k_games_new[0]), out + n, max - n);
             return n + games_from_keys(k_games_popular, sizeof(k_games_popular) / sizeof(k_games_popular[0]), out + n, max - n);
         case 3: return 0; // Favorites: nothing favourited

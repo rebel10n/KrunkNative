@@ -136,7 +136,7 @@ static int mm_custom_map(const Client *client) {
     if (g_mm.custom_override >= 0) return g_mm.custom_override;
     const Map *map = client->game.map;
     if (!map || !map->name) return 0;
-    for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT && i < map_catalog_count(); i++) {
+    for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (e && e->source == MAP_SOURCE_OFFICIAL && e->name && !strcasecmp(e->name, map->name)) return 0;
     }

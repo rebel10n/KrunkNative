@@ -98,10 +98,10 @@ RankedSkill ranked_season_seed(const RankedSkill *previous, int v7_elo);
 int ranked_season_at(int64_t unix_s);
 // getRankedMaps(season): Sandstorm + 4 of the pool (seeded LCG, partial Fisher-Yates), ascending.
 void ranked_season_maps(int season, int out[RANKED_SEASON_MAPS]);
-// rankedMapPoolInfo keys. KrunkNative plays 2, 4, 11, 14, 17 only: Eterno Simulator (39) and Frontier (42)
-// are official Krunker maps (krunker_maps.h, assets/maps/official/) but not catalogue maps. The catalogue's
-// indices 32.. are community maps, so map 39 would load the wrong map; the season still lists them and
-// the brain reports them unavailable (ranked.c add_season_maps), and the matcher never hosts them (KN choice, Q-MAP).
+// rankedMapPoolInfo keys. KrunkNative plays 2, 4, 11, 14, 17 only (KN choice, Q-MAP). Eterno Simulator (39)
+// and Frontier (42) are official Krunker maps with catalogue entries (map_catalog.h: their mapIndex is their
+// index), so they load; the season still lists them and the brain reports them unavailable (ranked.c
+// add_season_maps), and the matcher never hosts them.
 extern const int g_ranked_map_pool[RANKED_POOL_COUNT];
 const char *ranked_pool_map_name(int map_index);       // rankedMapPoolInfo name, NULL when not in it
 

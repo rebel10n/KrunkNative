@@ -757,7 +757,7 @@ brain draining).
 | `draining` | bool | the server is shutting down (not joinable) |
 | `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
 | `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
-| `mapIndex` | int | the map catalogue index (`shared/include/map_catalog.h`; 0..31 = Krunker's mapIndex): seek-game `dataQuery.dsma` ([v10/matchmaker-token.md](v10/matchmaker-token.md)) |
+| `mapIndex` | int | Krunker's official mapIndex (the v10.0.2 list, `shared/include/map_catalog.h` `map_catalog_map_index`; a community map sends none): seek-game `dataQuery.dsma` ([v10/matchmaker-token.md](v10/matchmaker-token.md)) |
 | `flavor` | string | product flavor pool (`shared/include/flavor.h` key): `"strike"` from a Krunker Strike `server_bin` (or stamped from its node's hello); absent = the base game. See "Flavor pools" (6.2) |
 
 ### Routes

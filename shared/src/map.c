@@ -31,7 +31,8 @@ const MapConfig g_default_map_config = {
     .infinite_jump = 0,
 };
 
-// The official maps (catalogue indices 0..31 = v7.1.4 mapIndex, shared/src/map_catalog.c)
+// The official maps by Krunker's mapIndex (the v10.0.2 list: a catalogue index is a position, not a mapIndex;
+// shared/src/map_catalog.c). g_rotation_maps and the strike pool are mapIndex lists.
 const cJSON *g_maps[MAP_CATALOG_OFFICIAL_COUNT];
 // v7.1.4 data/map.js rotationMaps
 const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28};
@@ -105,7 +106,7 @@ static int map_int(const cJSON *obj, const char *key) { return map_item_int(cJSO
 
 void load_default_maps() {
     map_catalog_load_official();
-    for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) g_maps[i] = map_catalog_json(i);
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) g_maps[i] = map_catalog_official_json(i);
 }
 
 const cJSON **map_list_with_custom(const cJSON *custom_map, size_t *map_count) {

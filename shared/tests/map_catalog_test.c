@@ -1,5 +1,5 @@
-// The map catalogue (shared/src/map_catalog.c): v7.1.4's 32 official maps (index = v7 mapIndex)
-// and the community maps (v3.1.1 custom_maps, the v3.1.1 official maps as "311_<key>" and its
+// The map catalogue (shared/src/map_catalog.c): Krunker's 46 official maps (the v10.0.2 files; their
+// mapIndex is the entry's index: 0..31 at the v7 positions, 32..45 appended at 69..82) and the community maps (v3.1.1 custom_maps, the v3.1.1 official maps as "311_<key>" and its
 // old_* maps as "152_<key>"). Every map file loads, its JSON "name" is the catalogue name (the
 // 311_ / 152_ files' own name + " (3.1.1)" / " (1.5.2)"), old keys and file stems resolve, map_init() builds it (objects, spawns,
 // v7 prefabs, pooled "si" sizes), ids / rotation / Games-window lists match, and cmd_map style
@@ -35,7 +35,8 @@ static int png_loads(const char *path) {
 // user-assets thumb, or none was found (152_* maps). Any other map must have one.
 static int thumb_missing_on_purpose(const MapCatalogEntry *e) {
     static const char *const keys[] = {"ESP_Parkour", "FortniteTiltedT", "Test", "bot_ftue_v2", "eterno_jump"};
-    if (e->source == MAP_SOURCE_OFFICIAL) return 0;
+    // the v10.0.2 additions (mapIndex 32..45) have a picture only where ui/img/maps has one (ranked 39, 42)
+    if (e->source == MAP_SOURCE_OFFICIAL) return e->index >= 32 && !e->thumb;
     if (!strncmp(e->key, "152_", 4)) return 1;
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(e->key, keys[i])) return 1;
@@ -97,6 +98,7 @@ static int count_prefab(const Map *map, const int prefab) {
 
 static void test_entry(const size_t index, const int verbose) {
     const MapCatalogEntry *e = map_catalog_at(index);
+    if (e->source == MAP_SOURCE_OFFICIAL) CHECK(map_catalog_official_index(e->index) == (int) index, "%s: mapIndex %d", e->key, e->index);
     const cJSON *json = map_catalog_json(index);
     CHECK(json != NULL, "%s: JSON did not load", e->key);
     if (!json) return;
@@ -159,7 +161,7 @@ static void test_entry(const size_t index, const int verbose) {
 // One round of the shared game on every catalogue map (the list map_catalog_list builds).
 static void test_game_init_all(void) {
     const size_t count = map_catalog_count();
-    int all[256]; // 68 maps since the v7 catalogue (was int[64]: a stack overflow past 64)
+    int all[256]; // 83 maps: the v7 catalogue, the 14 v10.0.2 additions (was int[64]: a stack overflow past 64)
     CHECK(count <= sizeof(all) / sizeof(all[0]), "catalogue fits the test's index array: %zu", count);
     if (count > sizeof(all) / sizeof(all[0])) return;
     for (size_t i = 0; i < count; i++) all[i] = (int) i;
@@ -179,25 +181,37 @@ static void test_game_init_all(void) {
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     const size_t count = map_catalog_count();
-    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 13 + 15 + 9,
-          "catalogue has %zu maps: v7.1.4's 32 + 13 community + 15 311_ + 9 152_", count);
+    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 46 && count == 46 + 13 + 15 + 9,
+          "catalogue has %zu maps: 46 official + 13 community + 15 311_ + 9 152_", count);
 
-    // official maps: catalogue index == v7.1.4 mapIndex; keys unique; community maps in readdir
-    // order, then the v3.1.1 official maps (311_), then its old_* maps (152_)
+    // official maps: one entry per mapIndex 0..45 (the v10.0.2 list), at the v7 positions 0..31 and
+    // appended at 69..82; keys unique; community maps in readdir order, then the v3.1.1 official maps
+    // (311_), then its old_* maps (152_): the community block is 32..68
+    int official_seen[MAP_CATALOG_OFFICIAL_COUNT] = {0};
     for (size_t i = 0; i < count; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (i < MAP_CATALOG_OFFICIAL_COUNT) CHECK(e->source == MAP_SOURCE_OFFICIAL && e->index == (int) i && e->hostable, "%s index", e->key);
-        else CHECK(e->source == MAP_SOURCE_CUSTOM && e->index == -1 && !e->rotation && !e->hostable, "%s custom flags", e->key);
+        const int official_pos = i < 32 || (i >= 69 && i < 83);
+        CHECK(official_pos == (e->source == MAP_SOURCE_OFFICIAL), "%s: position %zu of the wrong source", e->key, i);
+        if (e->source == MAP_SOURCE_OFFICIAL) {
+            CHECK(e->index >= 0 && e->index < MAP_CATALOG_OFFICIAL_COUNT && e->hostable, "%s mapIndex %d", e->key, e->index);
+            if (e->index >= 0 && e->index < MAP_CATALOG_OFFICIAL_COUNT) official_seen[e->index]++;
+            CHECK(e->index >= 0 && e->index < MAP_CATALOG_OFFICIAL_COUNT && e->path && !strcmp(e->path, official_path[e->index]) &&
+                  !strcmp(e->name, official_name[e->index]),
+                  "%s: %s (%s) is not the v10 mapIndex %d file", e->key, e->path ? e->path : "?", e->name, e->index);
+            CHECK(!e->rotation || e->index < 32, "%s: rotation outside the v7 set", e->key);
+        } else {
+            CHECK(e->index == -1 && !e->rotation && !e->hostable, "%s custom flags", e->key);
+        }
         CHECK(map_catalog_index_of_key(e->key) == (int) i, "%s key not unique", e->key);
         const int legacy = legacy_key(e->key);
-        if (i > MAP_CATALOG_OFFICIAL_COUNT && !legacy && !legacy_key(map_catalog_at(i - 1)->key))
+        if (i > 32 && e->source == MAP_SOURCE_CUSTOM && !legacy && map_catalog_at(i - 1)->source == MAP_SOURCE_CUSTOM && !legacy_key(map_catalog_at(i - 1)->key))
             CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
-        if (i > 0 && legacy_key(map_catalog_at(i - 1)->key)) CHECK(legacy, "%s after the 311_ / 152_ maps", e->key);
+        if (e->source == MAP_SOURCE_CUSTOM && i > 32 && map_catalog_at(i - 1)->source == MAP_SOURCE_CUSTOM && legacy_key(map_catalog_at(i - 1)->key))
+            CHECK(legacy, "%s after the 311_ / 152_ maps", e->key);
         // the official maps are the v10.0.2 files (krunker_maps.h); the file stem is the key for the
         // 311_ / 152_ maps (maps/<key>.json) and the community maps (maps/custom/<key>.json)
-        if (i < MAP_CATALOG_OFFICIAL_COUNT) {
-            CHECK(e->path && !strcmp(e->path, official_path[i]) && !strcmp(e->name, official_name[i]),
-                  "%s: %s (%s) is not the v10 file %s (%s)", e->key, e->path ? e->path : "?", e->name, official_path[i], official_name[i]);
+        if (e->source == MAP_SOURCE_OFFICIAL) {
+            // checked above (path and name by mapIndex)
         } else {
             char want[96];
             snprintf(want, sizeof(want), legacy ? "maps/%s.json" : "maps/custom/%s.json", e->key);
@@ -208,6 +222,18 @@ int main(const int argc, char **argv) {
     }
     CHECK(!strcmp(map_catalog_at(0)->key, "burg_new") && !strcmp(map_catalog_at(10)->name, "Kanji") &&
           !strcmp(map_catalog_at(18)->name, "Tortuga") && !strcmp(map_catalog_at(31)->name, "Soul Sanctum"), "v7 data/maps.js order");
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(official_seen[i] == 1, "mapIndex %d has %d entries", i, official_seen[i]);
+    // mapIndex <-> catalogue index: the same for the v7 set, appended for the rest
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
+        const int at = map_catalog_official_index(i);
+        CHECK(at >= 0 && map_catalog_map_index((size_t) at) == i && map_catalog_official_json(i) == map_catalog_json((size_t) at), "official %d", i);
+    }
+    CHECK(map_catalog_official_index(32) == 69 && map_catalog_official_index(45) == 82 && map_catalog_official_index(46) == -1 &&
+          map_catalog_official_index(-1) == -1 && map_catalog_map_index(32) == -1 && map_catalog_map_index(69) == 32 &&
+          map_catalog_map_index(31) == 31 && map_catalog_map_index(33) == -1, "official mapIndex <-> catalogue index");
+    CHECK(map_catalog_map_index_of_json(map_catalog_official_json(38)) == 38 && map_catalog_map_index_of_json(map_catalog_json(43)) == -1,
+          "mapIndex of a JSON");
+    CHECK(!strcmp(map_catalog_at(69)->name, "Bazaar") && !strcmp(map_catalog_at(82)->name, "Barnyard"), "appended official names");
 
     if (verbose) printf("catalogue:\n");
     for (size_t i = 0; i < count; i++) test_entry(i, verbose);
@@ -222,7 +248,7 @@ int main(const int argc, char **argv) {
         CHECK(rotation[i] == g_rotation_maps[i] && rotation[i] == k_v7_rotation[i], "rotation[%zu] = %d", i, rotation[i]);
     }
     load_default_maps();
-    for (size_t i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(g_maps[i] == map_catalog_json(i), "g_maps[%zu]", i);
+    for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(g_maps[i] && g_maps[i] == map_catalog_official_json(i), "g_maps[%d]", i);
 
     // publicRoutes map_id
     for (size_t i = 0; i < sizeof(k_ids) / sizeof(k_ids[0]); i++) {
@@ -318,17 +344,24 @@ int main(const int argc, char **argv) {
     CHECK(map_catalog_resolve("trop", NULL, 0, NULL) == 19, "resolve trop");
     int cands[8];
     size_t cand_n = 0;
-    CHECK(map_catalog_resolve("slide", cands, 8, &cand_n) == -2 && cand_n == 2 &&
-          cands[0] == map_catalog_index_of_key("Slide_Neon_Stage") && cands[1] == map_catalog_index_of_key("slide_moonlight"),
-          "resolve slide candidates");
+    // "Slide Moonlight" is both the official map (v10 mapIndex 38) and the community "slide_moonlight"
+    CHECK(map_catalog_resolve("slide", cands, 8, &cand_n) == -2 && cand_n == 3 &&
+          cands[0] == map_catalog_index_of_key("Slide_Neon_Stage") && cands[1] == map_catalog_index_of_key("slide_moonlight") &&
+          cands[2] == map_catalog_index_of_key("slide_moonlight_v10"), "resolve slide candidates");
+    // the v10.0.2 additions by name and key (console `map`, the Games window's picks)
+    CHECK(map_catalog_resolve("Bazaar", NULL, 0, NULL) == map_catalog_index_of_key("bazaar") && map_catalog_find("erupt") == map_catalog_index_of_key("erupt") &&
+          map_catalog_resolve("Eterno Simulator", NULL, 0, NULL) == map_catalog_index_of_key("eterno_simulator") &&
+          map_catalog_resolve("Stalk Factory", NULL, 0, NULL) == map_catalog_index_of_key("stalk_factory") &&
+          map_catalog_resolve("hq", NULL, 0, NULL) == map_catalog_index_of_key("hq") && map_catalog_find("Frontier") == map_catalog_index_of_key("frontier") &&
+          map_catalog_resolve("eterno_jump", NULL, 0, NULL) == map_catalog_index_of_key("eterno_jump"), "resolve the v10 additions");
     CHECK(map_catalog_resolve("nosuchmap", cands, 8, &cand_n) == -1 && cand_n == 0, "resolve nosuchmap");
     CHECK(map_catalog_resolve("\"\"", NULL, 0, NULL) == -1, "resolve empty quotes");
 
-    // Games window tabs: Featured = the 32 official maps; Popular / New = those, then the rest
+    // Games window tabs: Featured = the 46 official maps (mapIndex order); Popular / New = those, then the rest
     int tab[128];
-    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[32] == map_catalog_index_of_key("311_soul_sanctum"), "popular");
-    CHECK(map_catalog_games_tab(1, tab, 128) == 32 && tab[0] == 0 && tab[31] == 31, "featured");
-    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[32] == map_catalog_index_of_key("311_subzero"), "new");
+    CHECK(map_catalog_games_tab(0, tab, 128) == count && tab[0] == 0 && tab[46] == map_catalog_index_of_key("311_soul_sanctum"), "popular");
+    CHECK(map_catalog_games_tab(1, tab, 128) == 46 && tab[0] == 0 && tab[31] == 31 && tab[45] == map_catalog_index_of_key("barnyard"), "featured");
+    CHECK(map_catalog_games_tab(2, tab, 128) == count && tab[46] == map_catalog_index_of_key("311_subzero"), "new");
     CHECK(map_catalog_games_tab(3, tab, 128) == 0, "favorites");
     CHECK(map_catalog_games_tab(4, tab, 128) == count, "mine");
     // every map the menu lists has a thumbnail file that loads (the Games / Host / Ranked / challenge
