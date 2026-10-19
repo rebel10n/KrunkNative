@@ -741,6 +741,8 @@ static const SocialRoute k_routes[] = {
     {"dsp", sh_daily_spin},             /* v10 Daily Spin progress (daily_spin.c) */
     {"dsl", sh_daily_spin_claim},       /* v10 DAILY_SPIN_CLAIM -> "dslr" */
     {"vr", sh_redeem_voucher},          /* v10 REDEEM_VOUCHER -> "vr" (redeem.c) */
+    {"recps", sh_craft_recipes},        /* v10 CRAFT_DATA_REQUEST -> "recps" (craft.c, the Junkyard) */
+    {"crft", sh_craft},                 /* v10 CRAFT_REQUEST -> "crftr" (craft.c) */
     {"wo", sh_wild_offer},              /* v10 shop.getWildOffer (wild_offer.c) */
     {"wob", sh_wild_offer_buy},         /* v10 shop.purchaseWildOffer */
     {"wor", sh_wild_offer_refresh},     /* v10 shop.refreshWildOffer */

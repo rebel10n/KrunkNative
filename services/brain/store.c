@@ -181,6 +181,7 @@ static void skins_load(void) {
                 k->limited_spin = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "limitedSpin"));
                 k->tradable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "tradable"));
                 k->premium_spin = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "premiumSpin"));
+                k->craftable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "craftable"));
                 k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
                 k->funds = kn_json_int(it, "funds", 0);
                 const cJSON *rq = cJSON_GetObjectItemCaseSensitive(it, "req"), *ra = cJSON_GetObjectItemCaseSensitive(it, "reqAmount");

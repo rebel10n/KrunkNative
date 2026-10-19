@@ -1,0 +1,4 @@
+{
+  "_note": "Junkyard recipes (services/brain/craft.c), in v10's recps row shape: SID, SOUT (result skin, a craftable store index), SIN (materials 'skin,count,...', up to 5 pairs), JUNK (junk price), DUR (craft time, s, shown only), CNT (copies in the world, -1 unlimited), DAT (added, ms). Empty until v10's table is copied in: the recipes are server data (recps), not in the client bundle.",
+  "recipes": []
+}

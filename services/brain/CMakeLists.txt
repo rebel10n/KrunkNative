@@ -33,6 +33,7 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/store_spins_table.c  # generated: gapi /data/spins (tools/ui-import/gen_viewer_store.js)
     daily_spin.c                    # v10 Daily Spin ("dsp" / "dsl")
     redeem.c                        # v10 voucher codes ("vr": accounts.redeem_codes)
+    craft.c                         # the Junkyard: recipes ("recps"), crafting ("crft"), assets/junkyard_recipes.json
     wild_offer.c                    # v10 Wild Offers ("wo" / "wob" / "wor")
     # v10 double XP: the end-screen 2x XP claim ("rqdxp"), the weekend schedules and the offer (0341_double_xp)
     db_double_xp.c                  # the pure rules: ../../shared/src/double_xp.c (every shared/src/*.c is in the brain)
@@ -441,6 +442,11 @@ if (Python3_FOUND)
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_junk PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;junk")
     set_tests_properties(brain_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
+    # the Junkyard (craft.c): the recipe list, crafting (materials, the world limit, junk refusals, a non-craftable result)
+    add_test(NAME brain_craft
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/craft_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_craft PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;craft")
     # v10.0.2 clan window backend: cln 6/9, clnRA, s7, MOTD / banner / logo / transfer (clan_v10.c, 0113)
     add_test(NAME brain_clan_v10
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/clan_v10_test.py

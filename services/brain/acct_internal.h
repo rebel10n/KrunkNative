@@ -133,6 +133,7 @@ typedef struct SkinInfo {
     char spin_wheel_name[32];                    /* v10 TICKET items: the wheel of that name ("Premium") */
     char spin_tag[24];                           /* v10 spinTag: a wheel with this tag draws it whatever its season / limT */
     unsigned char limited_spin, tradable, premium_spin; /* v10 limitedSpin (noSpin, still in wheels), tradable, premiumSpin */
+    unsigned char craftable;                     /* v10 craftable: the result of a Junkyard recipe (craft.c) */
     char lim_t[24];
     char lim_g[32];                              /* limG */
     char name[48];
@@ -306,6 +307,8 @@ void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account tit
 void sh_daily_spin(SocialSession *s, const cJSON *f);  /* "dsp" (v10 Daily Spin progress, daily_spin.c) */
 void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_SPIN_CLAIM) */
 void sh_redeem_voucher(SocialSession *s, const cJSON *f);   /* "vr" (v10 REDEEM_VOUCHER, redeem.c) */
+void sh_craft_recipes(SocialSession *s, const cJSON *f);    /* "recps" (v10 CRAFT_DATA_REQUEST, craft.c) */
+void sh_craft(SocialSession *s, const cJSON *f);            /* "crft" (v10 CRAFT_REQUEST -> "crftr", craft.c) */
 void sh_wild_offer(SocialSession *s, const cJSON *f);         /* "wo" (v10 Wild Offer, wild_offer.c) */
 void sh_wild_offer_buy(SocialSession *s, const cJSON *f);     /* "wob" (purchase) */
 void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh) */
