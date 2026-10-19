@@ -16,6 +16,8 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      tile the server list with both lobbies, and no frame from the click to the list takes over
      500 ms (`ft`: the main thread never freezes); Custom Games opens the Custom Games window with its
      map cards; Host Game opens v10's host chooser; More Krunker opens its popup;
+     the header's Wallet opens the Wallet and Inventory modal (not the Account window): KR / Junk / RP
+     cards and the empty grid; Escape closes it; its Catalog closes it and opens the exchange's Catalog
      Quick Match seeks again with excludeGame and joins the OTHER lobby; a second one sends the first
      lobby as excludeRecent too and, the two being the only ones, goes back to it (never the current)
   2. a guest: the header has Login or Register, KrunkNative's Account Manager, then Get Signup
@@ -174,34 +176,45 @@ SIGNED_IN_SCRIPT = """0 menu
 1500 vis @settings windowHolder settHolder
 1600 down ESC
 1620 up ESC
-1900 ft @find start
-2000 clickid menuBtnBrowser
-3000 nodes @chooser .serverHostOp
-3100 call openServerWindow 0
-5000 call setExpandedRegion 0
-6000 nodes @servers .settNameIn
-6100 frames {shots}/servers 1
-6400 ft @find stop
-6500 down ESC
-6520 up ESC
-7000 clickid menuBtnCustomGames
-8000 frames {shots}/games 1
-11000 nodes @games .mapListItem
-11100 frames {shots}/games2 1
-11500 down ESC
-11520 up ESC
-12000 clickid menuBtnHost
-13000 nodes @host .serverHostOp
-13100 down ESC
-13120 up ESC
-13500 clickid knV10MoreKrunker
-14500 nodes @more .moreKrunkerOption
-14550 grep @more Accounts .moreKrunkerOption
-14600 call clearPops
-15000 clickid menuBtnQuickMatch
-21000 vis @after menuBtnQuickMatch :preview
-21500 clickid menuBtnQuickMatch
-27000 quit
+1700 clicksel [title="Wallet"]
+1800 vis @wallet knV10WalletRoot windowHolder knV10WalletKR knV10WalletJunk knV10WalletRP knV10WalletEmpty
+1850 frames {shots}/wallet-open 1
+1860 down ESC
+1880 up ESC
+1890 vis @walletclosed knV10WalletRoot windowHolder
+1900 clicksel [title="Wallet"]
+2000 vis @walletagain knV10WalletRoot knV10WalletCatalogBtn
+2050 clicksel .wallet-catalog-btn
+2150 vis @catalog v10mkRoot knV10WalletRoot windowHolder
+2200 call clearPops
+2400 ft @find start
+2500 clickid menuBtnBrowser
+3500 nodes @chooser .serverHostOp
+3600 call openServerWindow 0
+5500 call setExpandedRegion 0
+6500 nodes @servers .settNameIn
+6600 frames {shots}/servers 1
+6900 ft @find stop
+7000 down ESC
+7020 up ESC
+7500 clickid menuBtnCustomGames
+8500 frames {shots}/games 1
+11500 nodes @games .mapListItem
+11600 frames {shots}/games2 1
+12000 down ESC
+12020 up ESC
+12500 clickid menuBtnHost
+13500 nodes @host .serverHostOp
+13600 down ESC
+13620 up ESC
+14000 clickid knV10MoreKrunker
+15000 nodes @more .moreKrunkerOption
+15050 grep @more Accounts .moreKrunkerOption
+15100 call clearPops
+15500 clickid menuBtnQuickMatch
+21500 vis @after menuBtnQuickMatch :preview
+22000 clickid menuBtnQuickMatch
+27500 quit
 """
 
 GUEST_SCRIPT = """0 menu
@@ -318,6 +331,18 @@ def signed_in_case(brain_port, games):
           and n.get("knV10GuideItem") == "1" and n.get("menuBtnGuide") == "0", str(n))
     s = vis(text, "settings")
     check("1: Settings opens Game Settings", s.get("windowHolder") == "1" and s.get("settHolder") == "1", str(s))
+    # the header's Wallet (v10's Wallet and Inventory modal, v10_wallet.c), not the Account window (windowHolder)
+    w = vis(text, "wallet")
+    check("1: the header Wallet opens the Wallet and Inventory modal, not the Account window",
+          w.get("knV10WalletRoot") == "1" and w.get("windowHolder") in ("0", "-"), str(w))
+    check("1: the modal shows the KR, Junk and RP cards and, with no skins, its empty grid",
+          w.get("knV10WalletKR") == "1" and w.get("knV10WalletJunk") == "1" and w.get("knV10WalletRP") == "1"
+          and w.get("knV10WalletEmpty") == "1", str(w))
+    wc = vis(text, "walletclosed")
+    check("1: Escape closes the Wallet modal", wc.get("knV10WalletRoot") in ("-", "0"), str(wc))
+    cat = vis(text, "catalog")
+    check("1: the modal's Catalog closes it and opens the exchange (openItems: the Catalog tab)",
+          cat.get("v10mkRoot") == "1" and cat.get("knV10WalletRoot") in ("-", "0") and cat.get("windowHolder") in ("0", "-"), str(cat))
     check("1: Find Game opens the Select a Server chooser", nodes(text, "chooser") == 5, str(nodes(text, "chooser")))
     rows = nodes(text, "servers")
     check("1: its Public list shows both lobbies", rows >= 2, "%d rows" % rows)

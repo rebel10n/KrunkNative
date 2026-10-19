@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-wallet-skins",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "modal",
+      "rect": [
+        176,
+        110,
+        927,
+        500
+      ],
+      "kind": "mixed",
+      "note": "the Wallet and Inventory modal (v10_wallet.c) over the menu: header, currency cards and the owned tiles"
+    }
+  ]
+}

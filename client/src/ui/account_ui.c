@@ -2871,6 +2871,8 @@ void account_ui_scenario(const cJSON *account) {
     copy_str(g_acc.clan, sizeof(g_acc.clan), clan);
     g_acc.score = cnum(account, "score");
     g_acc.funds = cnum(account, "funds");
+    g_acc.junk = cnum(account, "junk");                // the Wallet's Junk card (player_jnk: the krunker.io account's)
+    g_acc.ranked_points = cnum(account, "rankedPoints"); // the Wallet's Ranked Points card
     g_acc.games = cnum(account, "games"); // the per-match Double XP offer (games % 3, double_xp_offer.c)
     g_acc.premium = cnum(account, "premium") != 0.0;
     g_acc.is_dev = cnum(account, "dev") != 0.0; // the player list's Kick / Ban (punishPopup) need DEV rights

@@ -2406,9 +2406,12 @@ static void render_content(void) {
 // follow the state: views_sync() pushes, replaces or pops ours to match it.
 enum { VIEW_NONE, VIEW_QS, VIEW_TRADE_CONFIRM, VIEW_ITEM };
 static int g_view; // ours on the shared stack (VIEW_NONE: none)
+// the Wallet and Inventory's sell and item views (v10_wallet.c) are up with the exchange closed:
+// v10 pushes its Quick Sell and item view over the wallet, not over an exchange
+static int g_standalone;
 
 static int view_wanted(void) {
-    if (!M.open) return VIEW_NONE;
+    if (!M.open && !g_standalone) return VIEW_NONE;
     if (M.modal == MODAL_QS) return VIEW_QS;
     if (M.modal == MODAL_TRADE_CONFIRM) return VIEW_TRADE_CONFIRM;
     if (M.cdetail >= 0) return VIEW_ITEM;
@@ -2438,7 +2441,7 @@ static void view_closed(const int accepted, void *user) {
 }
 
 static void views_sync(void) {
-    const int want = is_open() ? view_wanted() : VIEW_NONE;
+    const int want = (is_open() || g_standalone) ? view_wanted() : VIEW_NONE;
     if (g_view != want && g_view != VIEW_NONE) {
         g_view = VIEW_NONE;
         v10_view_pop(0);
@@ -2603,6 +2606,7 @@ void v10_market_open(int tab, const int item) {
     html_dom_set_attr(pop, "class", "exchangeModal");
     html_dom_set_attr(pop, "style", "");
     html_dom_set_display(pop, "block");
+    g_standalone = 0;
     M.open = 1;
     M.mtab = MT_BROWSE;
     snprintf(M.bsort, sizeof(M.bsort), "latest");
@@ -3169,6 +3173,43 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     return 1;
 }
 
+// ------------------------------------------------------------------ the Wallet and Inventory (v10_wallet.c)
+
+// The wallet's Quick Sell (v10's _46234 pushed over the wallet): the market's own view, with the
+// exchange closed. Its values are the market inventory's (loaded here when it is not yet).
+void v10_market_wallet_sell(const int index) {
+    if (!skin(index)) return;
+    if (!logged_in()) return;
+    g_standalone = 1;
+    inventory_load();
+    M.sel_skin = index;
+    M.sel_count = inv_count(index);
+    M.qs_mode = 0;
+    M.qs_err[0] = 0;
+    econ_new_op(M.op, sizeof(M.op), "qs");
+    M.modal = MODAL_QS;
+    render_modal();
+}
+
+// The wallet's item tap: the item detail page (the Catalog's, catalog_detail), pushed over the wallet.
+void v10_market_wallet_item(const int index) {
+    if (!skin(index)) return;
+    g_standalone = 1;
+    open_cdetail(index);
+    render_modal();
+}
+
+// The wallet closed: its views (the Quick Sell or the item page over it) go with it. The exchange
+// is not open (v10_market_open clears g_standalone when it opens).
+void v10_market_wallet_release(void) {
+    g_standalone = 0;
+    if (!M.open) {
+        if (M.modal == MODAL_QS && !M.busy) M.modal = MODAL_NONE;
+        M.cdetail = -1;
+    }
+    render_modal();
+}
+
 int v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
     if (!strcmp(name, "openExchange")) { // window.openExchange(tab = 0, itemIndex = -1)
@@ -3180,7 +3221,7 @@ int v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (strncmp(name, "v10mk.", 6) != 0) return -1;
-    if (!is_open()) return 1;
+    if (!is_open() && !g_standalone) return 1;
     return handle(name, ev, args, argc);
 }
 

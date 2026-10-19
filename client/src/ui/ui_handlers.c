@@ -10,6 +10,7 @@
 #include <v10_studios.h>  // v10 Studios (v10_studios.c)
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
+#include <v10_wallet.h> // v10 Wallet and Inventory (v10_wallet.c)
 #include <seek_prefs.h> // seek_prefs_handle
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
@@ -613,6 +614,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_customize_handle,      // v10_customize.c: the v10 page's Change Loadout tabs, Title window
     v10_daily_spin_handle,     // v10_daily_spin.c: the sidebar's Daily Spin
     v10_wild_offer_handle,     // v10_wild_offer.c: v10 Wild Offers (knWo*)
+    v10_wallet_handle,         // v10_wallet.c: v10 Wallet and Inventory (knV10Wallet*)
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
@@ -763,6 +765,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     if (html_key_is_escape(ev->key)) {
         if (v10_menu_login_escape()) return 0; // the v10 login / register modal goes first
         if (v10_social_key(ev->key)) return 0; // v10's view stack (profile, clan view, post): Escape pops it
+        if (v10_wallet_key(ev->key)) return 0; // the Wallet and Inventory modal (and the Quick Sell / item page over it)
         if (v10_studios_key(ev->key)) return 0; // the Studios window, a studio, its dialog and prompts
         if (ui->menu_open && menu_window_is_open()) {
             if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it

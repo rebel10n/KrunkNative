@@ -1,0 +1,20 @@
+{
+  "scenario": "kn-wallet-empty",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "modal",
+      "rect": [
+        176,
+        110,
+        927,
+        500
+      ],
+      "kind": "mixed",
+      "note": "the Wallet and Inventory modal over the menu with no skins: header, currency cards and the empty state"
+    }
+  ]
+}

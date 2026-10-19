@@ -1,0 +1,34 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunknative/v10-wallet/empty.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Trader",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Trader",
+      "score": 2000000,
+      "funds": 5000,
+      "junk": 1234.5,
+      "rankedPoints": 320,
+      "skins": []
+    },
+    "wallet": {
+      "open": true
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative regression baseline (llvmpipe render of this scenario): the Wallet and Inventory modal over the signed-in menu with an empty inventory (the empty state text). No v10 reference exists: the offline v10 sandbox cannot log in."
+}

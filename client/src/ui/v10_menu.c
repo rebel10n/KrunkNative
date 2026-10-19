@@ -52,6 +52,7 @@
 #include <krunker_account.h>
 #include <krunker_net.h>
 #include <krunker_lobbies.h> // Popular Now: krunker.io's custom games
+#include <v10_wallet.h>       // the header's Wallet: the Wallet and Inventory modal (v10_wallet.c)
 #include <v10_social.h>       // v10_gapi_http: the official account's streams (gapi getTopStreams)
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -227,8 +228,8 @@ static void header_update(const AccountInfo *acc) {
             "<div class=\"ph-item svelte-da3zva\" onclick=\"playSelect(0.1),openRankedMenu()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#4caf50;margin-top:-4px\">emoji_events</span> <span class=\"ph-value svelte-da3zva\" id=\"menuRPCount\"> </span></div> "
             "<div class=\"verticalSeparator svelte-da3zva\" style=\"height:35px;\"></div> "
-            // Wallet (_52516: the inventory / currencies view): the Account window's inventory
-            "<div class=\"ph-item svelte-da3zva\" title=\"Wallet\" onclick=\"playSelect(0.1),showWindow(5)\" onmouseenter=\"playTick()\">"
+            // Wallet (_52516: the Wallet and Inventory modal, v10_wallet.c)
+            "<div class=\"ph-item svelte-da3zva\" id=\"knV10WalletBtn\" title=\"Wallet\" onclick=\"playSelect(0.1),knV10Wallet()\" onmouseenter=\"playTick()\">"
             "<span class=\"material-icons ph-icon svelte-da3zva\">backpack</span></div></div>");
         in = by_id("signedInHeaderBar");
         HtmlElem profile = by_id("knV10Profile");
@@ -331,6 +332,7 @@ void v10_menu_account_changed(void) {
     ranked_ui_account_changed(); // v10's $account effect on the ranked popup (v10:111598-111600)
     V.active_gen = account_active_generation();
     v10_login_account_changed(); // a login closes the modal (v10: $account set -> the modal leaves the stack)
+    v10_wallet_account_changed(); // the Wallet and Inventory modal leaves the stack with its account
 }
 
 // ---------------------------------------------------------------- the idle state
@@ -821,6 +823,7 @@ void v10_menu_tick(void) {
 void v10_menu_account_tick(void) {
     if (!V.wired || !v10_menu_page()) return;
     v10_login_tick();
+    v10_wallet_tick(); // the Wallet and Inventory modal follows its account (funds, skins)
     if (account_active_generation() == V.active_gen) return;
     v10_menu_account_changed();
 }

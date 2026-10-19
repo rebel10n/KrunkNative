@@ -523,5 +523,15 @@
  "kn.update.restartAfterMatch": "Restarts after this match",
  "kn.update.restarting": "Restarting...",
  "kn.update.restartingNotice": "Restarting for an update...",
- "kn.update.thisClient": "This client: {0}"
+ "kn.update.thisClient": "This client: {0}",
+ "kn.wallet.catalog": "Catalog",
+ "kn.wallet.dialog": "Wallet and Inventory",
+ "kn.wallet.empty": "No items match your current filters.",
+ "kn.wallet.junk": "Junk",
+ "kn.wallet.krunkies": "Krunkies",
+ "kn.wallet.loadMore": "Load More",
+ "kn.wallet.quickSell": "Quick sell",
+ "kn.wallet.rankedPoints": "Ranked Points",
+ "kn.wallet.redeem": "Redeem",
+ "kn.wallet.title": "Inventory"
 }

@@ -47,6 +47,7 @@
 #include <remote_images.h> // state.remoteImages
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
+#include <v10_wallet.h> // state.wallet (v10_wallet.c)
 #include <ui_mobile.h> // state.mobile (ui_mobile_force)
 #include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
@@ -349,6 +350,7 @@ static void warn_unknown_keys(void) {
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
         "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
+        "wallet",     // the Wallet and Inventory modal: {open: true} over the menu (v10_wallet.c)
         "windowScroll", // {id or .selector: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
         "updateArt",  // the img/menu-bg/<id>.png the Game Updating screen shows (default its first, id 0)
@@ -1180,6 +1182,7 @@ static int ui_scenario_apply(Client *client) {
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
+    if (menu_open) v10_wallet_scenario(st("wallet")); // the Wallet and Inventory modal (v10_wallet.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
     if (menu_open) apply_window(client);

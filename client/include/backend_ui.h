@@ -140,6 +140,9 @@ int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
 // v10 Market & Trading (v10_market.c): window.openExchange(tab, itemIndex) -> the exchangeModal popup
 void v10_market_open(int tab, int item);
+void v10_market_wallet_sell(int index);       // the Wallet and Inventory's Quick Sell view (v10_wallet.c), exchange closed
+void v10_market_wallet_item(int index);       // the Wallet's item page (the Catalog's detail view), exchange closed
+void v10_market_wallet_release(void);         // the Wallet closed: its market views go with it
 int  v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void v10_market_menu_setup(void);           // the v10 page's #menuBtnMarket item + the social listener
 void v10_market_scenario(const cJSON *state); // --render-scenario: state.market
