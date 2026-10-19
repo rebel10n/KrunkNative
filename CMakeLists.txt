@@ -780,6 +780,11 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(bot_stuck_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # map_drop_test: every catalogue map keeps every object its JSON lists (a wall the loader
+    # drops is a missing wall); shared/tests/map_drop_test.c. Run from the source root (assets/).
+    add_executable(map_drop_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_drop_test.c)
+    target_link_libraries(map_drop_test PRIVATE m)
+    add_test(NAME map_drop_test COMMAND map_drop_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # nav_overlay_test (KrunkNative spectate overlay): the NET_EXT_KN_BOT_PATH body
     # (shared/src/bot_path_net.c fill / decode) and the GL-free overlay geometry
     # (client/src/nav_overlay_geom.c: route polyline, goal / target / last-known markers)
