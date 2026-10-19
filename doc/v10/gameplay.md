@@ -183,6 +183,88 @@ Table post-processing is unchanged except `onlyWeapons` also skips `noDmg` (v10:
 new `mysteryBoxRarities = [35, 30, 20, 10, 5]` (v10:101948) for zombies' mystery box tiers (the matching weapon
 fields `magReserve`, `mysteryBoxR`, `canUpgrade` already exist in v7).
 
+### Nettspend balance (KrunkNative, not v10.0.2)
+
+The Nettspend (class 16) and its weapons are KrunkNative additions (doc/v7/decisions.md "Nettspend class"), so
+v10.0.2 has no value to compare with. This is a KN balance change, made from the bot bench (below) and written in
+the weapon entry (`shared/src/weapons/kn_money_spread.c`, with the class note in `classes_v10.c`). Only the Money
+Spread's own entry changed. The Drank (`kn_drank.c`), the class table and the shared weapon table are untouched.
+The balance went through three versions: "first" (the KN values before 2026-10-18), "second" (the first tune
+of this change, a flat falloff, not in main) and "now" (this one).
+
+Bench: the bots play Kanji FFA with 2 bots per class (14 classes), 6 seeds x 300 s for the field; each
+Nettspend-vs-class duel gets 3 seeds x 180 s (13 classes, the Nettspend mirror left out). The harness is a scratch
+file (not in the repo).
+
+Money Spread values (the other fields are unchanged: the 8 bills a throw, `no_auto`, the 180 ms swap, the 1.2 s
+reload, the fan's pitch, no knockback, and every Drank value: 40 sips, 4 a sip, 60 ms, 1.4 s pour-up, puddles at
+2.5 a 250 ms tick):
+
+| Money Spread field | first | second | now |
+|---|---|---|---|
+| `damage` (a bill) | 7 | 18 | **14** |
+| `damage_drop` (fall over `range`) | 7 | 4 | **8** |
+| `range` (units) | 60 | 120 | 120 |
+| `ammo` (throws a magazine) | 5 | 8 | 8 |
+| `rate` (ms between throws) | 420 | 250 | 250 |
+| `custom_spread` yaw (pattern x) | +-1.1 .. +-0.12 (about +-20 degrees) | x0.4: +-0.44 .. +-0.048 (about +-8) | x0.24 of first: +-0.264 .. +-0.0288 (about +-5) |
+| point blank, all 8 bills in (8 units) | 56 | 144 | **112** |
+| one bill at 8 / 47 / 120 units | 6.1 / 1.5 / 0 | 17.7 / 16.4 / 14 | 13.5 / 10.9 / 6 |
+
+Field results, Nettspend (class 16), 6 seeds x 300 s (seeds 7-12 for the second and now):
+
+| field | first | second | now |
+|---|---|---|---|
+| kills / deaths | 18 / 534 | 473 / 491 | 446 / 489 |
+| KDR | 0.03 | 0.96 | 0.91 |
+| KDR, seeds 7-12 | not run | 0.94 | 0.93 |
+| damage per death | 6.6 | 99.8 | 91.8 |
+| rank of the 14 classes by KDR | 14th | 9th | 9th |
+
+Duels, Nettspend vs each of 13 classes, 3 seeds x 180 s:
+
+| duels | first | second | now |
+|---|---|---|---|
+| Nettspend kills / other side's kills | 7 / 50 | 176 / 177 | 173 / 181 |
+| runs where Nettspend got 0 kills (of 39) | 35 | 0 | 0 |
+| classes where one side got 0 kills in all 3 runs | 10 (Nettspend) | 0 | 0 |
+
+What the bench showed. The Drank's cup was not the limit: bots pour about 2.6 sips a life, so a 60-sip cup gave the
+same results to the unit, and so did a 0.8 s Money Spread reload. Most of the output was the Money Spread, and most
+of its hits came from 60 units or more (a bot engages a weapon inside its `range`, here up to 120). The second
+version's flat falloff kept about 15 a bill at 60+ units, so its reach did the work. A full fan of 144 at point blank
+and the flat falloff were the two faults. The now-values cut the bill to 14 and steepen the fall to 8 over 120: a bill
+at 60+ units averages 8.6 in the bench (15.2 before), and a bill at 8 units keeps 13.5.
+
+Why the fan narrowed. With the falloff steepened, the fan at the second version's width gave a field KDR under the
+band, and raising the bill to hold KDR pushed the point-blank total past the cap. Narrowing the yaw brings more bills
+onto a target at range (Money Spread hits in the six field runs rose from 3025 to 4350 on about the same throws, 1222 and 1261), so the KDR comes back at the same damage
+numbers. Variants tried (field KDR, 6 seeds; "yaw" is the fan width against the second version, 1.0 = +-8 degrees):
+
+| bill / drop over 120 | yaw | field KDR | point blank |
+|---|---|---|---|
+| 13 / 9 | 1.0 | 0.47 | 104 |
+| 14 / 6 | 1.0 | 0.68 | 112 |
+| 14 / 8 | 1.0 | 0.64 | 112 |
+| 15 / 6 | 1.0 | 0.71 | 120 |
+| 15 / 8 | 1.0 | 0.74 | 120 |
+| 16 / 8 | 1.0 | 0.78 | 128 |
+| 16 / 9 | 1.0 | 0.77 | 128 |
+| 14 / 8 | 0.8 | 0.67 | 112 |
+| 14 / 9 | 0.7 | 0.82 | 112 |
+| 14 / 9 | 0.6 | 0.84 | 112 |
+| **14 / 8** | **0.6** | **0.91** (seeds 7-12: 0.93) | **112** |
+| 15 / 9 | 0.6 | 0.89 | 120 |
+| 15 / 8 | 0.6 | 0.96 | 120 |
+| 14 / 8 | 0.5 | 0.92 | 112 |
+| 16 / 8 | 0.5 | 1.04 | 128 |
+| 14 / 8, rate 200 ms | 0.6 | 0.93 | 112 |
+
+Risk to check in play. The bench has no human players: a human's aim lands bills differently from a bot's, and the
+hit rate is the lever that set the fan width. Check the point-blank full fan (112, down from 144) and the 60+ unit
+bills (about 8.6, down from 15) in a real match. The client's bill burst (`VFX_BILL_CONE` in `client/src/vfx.c`) is
+its own cone and was not changed.
+
 ### Attachments, streaks, effects
 
 | table | v10 | result |

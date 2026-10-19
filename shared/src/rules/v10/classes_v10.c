@@ -311,6 +311,9 @@ static const ClassConfig infiltrator = {
 // KrunkNative lobby (public, custom, comp, the offline sandbox) and the bots (user, 2026-10-14: "THE
 // NETtspend class should be available to all"); not in an official krunker.io game (game_class_allowed).
 // icon_index 16 = textures/classes/icon_16.png (client asset); no face store item, no speech lines.
+// Balance (KrunkNative, not v10.0.2): the class's table values are unchanged; the Money Spread's
+// weapon entry was rebalanced (kn_money_spread.c; doc/v10/gameplay.md "Nettspend balance"). The Drank
+// (kn_drank.c) is unchanged.
 static const ClassConfig nettspend = {
     .name = "Nettspend",
     .icon_index = 16,

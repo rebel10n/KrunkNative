@@ -120,8 +120,8 @@ static void test_tables(const Game *game) {
     CHECK(d && d->ammo == 40 && fabsf(d->rate - 0.06f) < 1e-6f && fabsf(d->reload_time - 1.4f) < 1e-6f && d->damage == 4.0f, "40 sips, 60 ms, a 1.4 s pour-up, 4 a sip");
     CHECK(d && d->stream->puddle_dps == 10.0f && d->stream->puddle_life == 6000.0f && d->stream->puddle_radius == 3.0f, "puddles 10 dps, 6 s, radius 3");
     CHECK(m && !strcmp(m->name, "Money Spread") && m->secondary && m->type == 1 && m->custom_only && m->no_comp && !m->stream, "the Money Spread: a customOnly / noComp secondary");
-    CHECK(m && m->shots == 8 && m->custom_spread_count == 8 && m->damage == 7.0f && m->damage_drop == 7.0f && m->range == 60.0f && m->ammo == 5,
-          "8 bills of 7, fading to 0 at 60, 5 a magazine");
+    CHECK(m && m->shots == 8 && m->custom_spread_count == 8 && m->damage == 14.0f && m->damage_drop == 8.0f && m->range == 120.0f && m->ammo == 8 && fabsf(m->rate - 0.25f) < 1e-6f,
+          "8 bills of 14, falling 8 over 120, 8 a magazine, 250 ms a throw");
     CHECK(d && m && !d->src && !m->src && !d->tint && !m->tint, "no stand-in models or tints (the client draws the cup and the cash)");
     CHECK(!rules_weapon(WEAPON_ID_PISS)->stream->puddle_slow && !rules_weapon(WEAPON_ID_PISS)->stream->laced_chance, "the Piss neither slows nor laces");
     CHECK(object_manager_weapon_listed(WEAPON_ID_DRANK) && object_manager_weapon_listed(WEAPON_ID_MONEY_SPREAD) &&
@@ -280,7 +280,7 @@ static void test_class_spawn(Game *custom, Game *pub) {
     p->secondary_index = 15; // a Sawed Off pick changes nothing
     player_spawn(p);
     CHECK(nettspend_loadout_ok(p), "custom: %d weapons (%d %d %d)", p->loadout_size, p->loadout[0], p->loadout[1], p->loadout[2]);
-    CHECK(p->weapon == &g_drank && p->ammo[0] == 40 && p->ammo[1] == 5 && p->max_health == 100, "holds the Drank (40), the Money Spread (5), 100 health");
+    CHECK(p->weapon == &g_drank && p->ammo[0] == 40 && p->ammo[1] == 8 && p->max_health == 100, "holds the Drank (40), the Money Spread (8), 100 health");
 
     custom->config.comp = 1; // comp: the class and its bound Money Spread stay (noComp gates picks, not the class's own)
     player_spawn(p);
@@ -400,9 +400,9 @@ static void test_puddle_slow(Game *game, Player *p, Player *target, Player *thir
 }
 
 static void test_money_spread(Game *game, Player *p, Player *target) {
-    printf("Money Spread: 8 bills a throw, 7 each fading with distance...\n");
+    printf("Money Spread: 8 bills a throw, 14 each fading with distance...\n");
     hold(p, WEAPON_ID_MONEY_SPREAD);
-    CHECK(p->weapon == &g_money_spread && p->ammo[p->loadout_index] == 5, "holds the Money Spread (5 throws)");
+    CHECK(p->weapon == &g_money_spread && p->ammo[p->loadout_index] == 8, "holds the Money Spread (8 throws)");
     stand(p, 0.0f, 0.0f, 0.0f);
     stand(target, 0.0f, -8.0f, 0.0f);
     for (int i = 0; i < 20; i++) player_store_state(target);
@@ -414,17 +414,30 @@ static void test_money_spread(Game *game, Player *p, Player *target) {
     printf("  %d throw: %d bills, %d hit at 8 units for %.2f (%.2f a bill)\n", throws, bills, hits, dealt, hits ? dealt / (float) hits : 0.0f);
     CHECK(throws == 1 && bills == 8, "one throw of 8 bills (%d, %d)", throws, bills);
     CHECK(hits >= 2 && hits <= 8, "a fan: some of them hit a player 8 units away (%d)", hits);
-    CHECK(hits && dealt / (float) hits > 5.6f && dealt / (float) hits < 6.6f, "7 less the drop at 8 of 60 units (%.2f a bill)", hits ? dealt / (float) hits : 0.0f);
-    CHECK(p->ammo[p->loadout_index] == 4 && fabsf(p->reloads[p->loadout_index] - 0.42f) < 1e-3f, "a throw of ammo, the next in 420 ms");
+    CHECK(hits && dealt / (float) hits > 13.3f && dealt / (float) hits < 14.0f, "14 less the drop at 8 of 120 units (%.2f a bill)", hits ? dealt / (float) hits : 0.0f);
+    CHECK(p->ammo[p->loadout_index] == 7 && fabsf(p->reloads[p->loadout_index] - 0.25f) < 1e-3f, "a throw of ammo, the next in 250 ms");
     frames(p, 2, 1, -1);
-    CHECK(p->ammo[p->loadout_index] == 4, "noAuto: holding fire throws once");
+    CHECK(p->ammo[p->loadout_index] == 7, "noAuto: holding fire throws once");
     frames(p, 50, 0, -1);
 
-    stand(target, 0.0f, -70.0f, 0.0f);
+    // the curve: a bill at 47 units keeps about 10.9 (14 less 8 of 120 x 47), clearly less than at 8 units
+    stand(target, 0.0f, -47.0f, 0.0f);
+    for (int i = 0; i < 20; i++) player_store_state(target);
+    const float mid_health = target->health;
+    const int mid_hits_before = p->life_hits;
+    frames(p, 1, 1, -1);
+    const int mid_hits = p->life_hits - mid_hits_before;
+    const float mid_dealt = mid_health - target->health;
+    printf("  a throw at 47 units: %d hit for %.2f (%.2f a bill)\n", mid_hits, mid_dealt, mid_hits ? mid_dealt / (float) mid_hits : 0.0f);
+    CHECK(mid_hits && mid_dealt / (float) mid_hits > 10.5f && mid_dealt / (float) mid_hits < 11.3f,
+          "10.9 a bill at 47 units (%.2f a bill, %d hits)", mid_hits ? mid_dealt / (float) mid_hits : 0.0f, mid_hits);
+    frames(p, 50, 0, -1);
+
+    stand(target, 0.0f, -130.0f, 0.0f);
     for (int i = 0; i < 20; i++) player_store_state(target);
     const float far = target->health;
     frames(p, 1, 1, -1);
-    CHECK(target->health == far, "nothing past 60 units");
+    CHECK(target->health == far, "nothing past 120 units");
     frames(p, 50, 0, -1);
 }
 
