@@ -1239,6 +1239,7 @@ static struct {
     ATOM atom;
     IWICImagingFactory *wic;
     wchar_t *proxy_args; // the browser's arguments with the session's proxy (ICoreWebView2EnvironmentOptions; freed once created)
+    wchar_t *target_version; // the installed runtime's version (TargetCompatibleBrowserVersion; kept for the process)
 } L;
 
 // A session counter: callbacks of a session that ended are ignored (their objects are released by WebView2).
@@ -1373,7 +1374,7 @@ static int wv2_load(void) {
         printf("[webview] no WebView2 runtime (0x%08lx)\n", (unsigned long) hr);
         return wv2_unavailable(WV2_RUNTIME_MISSING);
     }
-    CoTaskMemFree(version);
+    L.target_version = version; // the options name it: the runtime refuses an empty target version
     return 1;
 }
 
@@ -1436,23 +1437,37 @@ static HRESULT STDMETHODCALLTYPE opt_qi(ICoreWebView2EnvironmentOptions *self, R
 }
 static ULONG STDMETHODCALLTYPE opt_ref(ICoreWebView2EnvironmentOptions *self) { (void) self; return 1; }
 static ULONG STDMETHODCALLTYPE opt_rel(ICoreWebView2EnvironmentOptions *self) { (void) self; return 1; }
+// The runtime's own strings: a copy the runtime frees with CoTaskMemFree.
+static HRESULT opt_copy_str(const wchar_t *s, LPWSTR *value) {
+    const size_t bytes = (wcslen(s) + 1) * sizeof(wchar_t);
+    *value = CoTaskMemAlloc(bytes);
+    if (!*value) return E_OUTOFMEMORY;
+    memcpy(*value, s, bytes);
+    return S_OK;
+}
 static HRESULT STDMETHODCALLTYPE opt_get_args(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
     (void) self;
     if (!value) return E_POINTER;
     *value = NULL;
     if (!L.proxy_args) return S_OK;
-    const size_t bytes = (wcslen(L.proxy_args) + 1) * sizeof(wchar_t);
-    *value = CoTaskMemAlloc(bytes);
-    if (!*value) return E_OUTOFMEMORY;
-    memcpy(*value, L.proxy_args, bytes);
-    return S_OK;
+    return opt_copy_str(L.proxy_args, value);
 }
 static HRESULT STDMETHODCALLTYPE opt_put_args(ICoreWebView2EnvironmentOptions *self, LPCWSTR value) { (void) self; (void) value; return S_OK; }
-static HRESULT STDMETHODCALLTYPE opt_get_str(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
+// Language: the OS locale as a BCP 47 tag (WebView2's default is the system language).
+static HRESULT STDMETHODCALLTYPE opt_get_lang(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
     (void) self;
     if (!value) return E_POINTER;
-    *value = NULL;
-    return S_OK;
+    wchar_t locale[LOCALE_NAME_MAX_LENGTH];
+    if (!GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH)) wcscpy(locale, L"en-US");
+    return opt_copy_str(locale, value);
+}
+// TargetCompatibleBrowserVersion: the installed runtime's version (the SDK default is the runtime for the SDK; the
+// runtime refuses an empty version with E_INVALIDARG, which is what failed before).
+static HRESULT STDMETHODCALLTYPE opt_get_target(ICoreWebView2EnvironmentOptions *self, LPWSTR *value) {
+    (void) self;
+    if (!value) return E_POINTER;
+    if (!L.target_version) return E_FAIL;
+    return opt_copy_str(L.target_version, value);
 }
 static HRESULT STDMETHODCALLTYPE opt_put_str(ICoreWebView2EnvironmentOptions *self, LPCWSTR value) { (void) self; (void) value; return S_OK; }
 static HRESULT STDMETHODCALLTYPE opt_get_bool(ICoreWebView2EnvironmentOptions *self, BOOL *value) {
@@ -1469,9 +1484,9 @@ static ICoreWebView2EnvironmentOptionsVtbl g_opt_vtbl = {
     .Release = opt_rel,
     .get_AdditionalBrowserArguments = opt_get_args,
     .put_AdditionalBrowserArguments = opt_put_args,
-    .get_Language = opt_get_str,
+    .get_Language = opt_get_lang,
     .put_Language = opt_put_str,
-    .get_TargetCompatibleBrowserVersion = opt_get_str,
+    .get_TargetCompatibleBrowserVersion = opt_get_target,
     .put_TargetCompatibleBrowserVersion = opt_put_str,
     .get_AllowSingleSignOnUsingOSPrimaryAccount = opt_get_bool,
     .put_AllowSingleSignOnUsingOSPrimaryAccount = opt_put_bool,
