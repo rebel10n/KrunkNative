@@ -4207,11 +4207,23 @@ static int quick_match_seek(void) {
     return 1;
 }
 
+static int find_new_game_seek(void);
+
 // The Lost Connection screen's Find Game after an official krunker.io failure (v10: a fresh page, a new
-// game): the busiest other lobby of the list (krunker_lobbies_seek: the krunker.io Region first, the
-// recent ones last), or without a list krunker.io's own Find New Game. 0 = neither could start.
+// game). The Server Type decides, as F4 does (find_new_game_seek). Box Office answers 1 (a seek started, or
+// the player is told there is no matchmaker), so the official game is not reconnected behind its back. Official:
+// the busiest other lobby of the list (krunker_lobbies_seek: the krunker.io Region first, the recent ones last),
+// or without a list krunker.io's own Find New Game. 0 = nothing could start (Both, Official): the caller
+// reconnects the official game (menu_retry_connect).
 int servers_ui_official_find_game(void) {
     qp_begin();
+    const SeekServers type = seek_prefs_servers();
+    if (type != SEEK_SERVERS_OFFICIAL) {
+        if (qp_started(find_new_game_seek())) return 1;
+        if (type != SEEK_SERVERS_KN) return 0;
+        ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
+        return 1;
+    }
     if (krunker_lobbies_enabled()) return qp_started(krunker_lobbies_seek());
     return qp_started(g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0);
 }
@@ -4227,18 +4239,27 @@ int servers_ui_quick_match(void) {
 // browser with the opt-out); Both = ours when one
 // matches, else an official one. A seek that finds nothing leaves the player in this game with a
 // toast. 0 = nothing to do (offline / direct server with KrunkNative only).
+// The Server Type decides in an official krunker.io game (or on its error screen) too. Official keeps krunker.io's
+// lobby list (krunker_lobbies_seek). Box Office and Both seek here: the brain is not reachable while krunker.io is
+// the session (account_backend gates its requests), so that game gives way once the seek starts. Box Office never
+// falls back to krunker.io; Both does, to its lobby list, when no Box Office lobby matches.
 static int find_new_game_seek(void) {
     const SeekServers type = seek_prefs_servers();
-    // in an official game (krunker.io's Find New Game, a matchmaker seek excluding this game) the
-    // player stays on krunker.io whatever the Quickplay server type: only the official list, with the
-    // native lobby list, stays the krunker.io lobby browser's own seek (krunker_lobbies_seek)
-    if (krunker_net_active() && !(type == SEEK_SERVERS_OFFICIAL && krunker_lobbies_enabled())) return krunker_net_seek_new(g_client, NULL, 1);
-    if (type == SEEK_SERVERS_OFFICIAL) return krunker_lobbies_seek();
+    const int official = krunker_net_active();
+    if (type == SEEK_SERVERS_OFFICIAL) {
+        // the native lobby list; without one, krunker.io's own Find New Game in its game (krunker_net_seek_new)
+        if (official && !krunker_lobbies_enabled()) return krunker_net_seek_new(g_client, NULL, 1);
+        return krunker_lobbies_seek();
+    }
     if ((!g_brain_mode && !g_director_mode) || g_pin == PIN_DIRECT || g_seek_inflight) {
         return type == SEEK_SERVERS_BOTH && !g_seek_inflight ? krunker_lobbies_seek() : g_seek_inflight;
     }
     g_find_seek = 1;
     g_find_both = type == SEEK_SERVERS_BOTH;
+    if (official) { // the official game gives way: its lobby is no Box Office lobby to leave or exclude
+        krunker_net_leave(g_client, NULL);
+        g_game_id[0] = 0;
+    }
     snprintf(g_find_prev_game, sizeof(g_find_prev_game), "%s", g_game_id);
     return quick_match_seek();
 }

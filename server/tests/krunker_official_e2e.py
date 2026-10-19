@@ -37,6 +37,10 @@ Find New Game runs (--exclude alone): "native-exclude" (Quick Match with Server 
 list: never the game it leaves, no bouncing between two, the least recent once all are recent) and
 "native-exclude-mm" (no list from krunker_lobbies: krunker_net's own list pick, then the live client's
 excludeGame seeks around the recent games); the stub then has three lobbies and no captcha.
+Server Type runs (--f4, also in --exclude; run_native_f4_server_type): a brain session (the stub's /brain) with
+Server Type Box Office, F4 in an official game ("native-f4-kn-official": the game gives way, the brain seeks, no
+krunker.io seek), Quick Match after a failed krunker.io join ("native-quickmatch-kn-after-kio-failure"), Both
+("native-f4-both-official": Box Office first) and krunker.io's own F4 as the control ("native-f4-official-control").
 Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the stub's official lobby
 (GET /game-list) in the server browser from the offline game: it is joined in-client, the first seek
 being let through (no challenge: the matchmaker lets it pass, see Stub.captcha_free);
@@ -129,7 +133,8 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
-        "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose",
+        "--f4": "f4"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -496,6 +501,9 @@ class Stub:
         # lobbies (GET /brain/mm/game-list: the brain URL is <stub>/brain, so the finder URL is not under it)
         self.finder_servers = None
         self.brain_games = None
+        # the Find New Game runs with Server Type Box Office (run_native_f4_server_type): the brain's own seek
+        # (<stub>/brain/mm/seek-game, its ping list too): a function(query) -> (status, answer), None = not served
+        self.brain_seek = None
 
     def speak(self, live):
         self.live = live
@@ -527,6 +535,11 @@ class Stub:
                     body, ctype = json.dumps({"servers": stub.finder_servers}).encode(), "application/json"
                 elif u.path == "/brain/mm/game-list" and stub.brain_games is not None:  # the brain's lobbies (the brain URL)
                     body, ctype = json.dumps({"success": True, "totalPlayerCount": 4, "games": stub.brain_games}).encode(), "application/json"
+                elif u.path == "/brain/mm/ping-list" and stub.brain_seek is not None:  # the brain's region (no ping race: defaultRegion)
+                    body, ctype = json.dumps({"local": "127.0.0.1:%d" % stub.mm_port}).encode(), "application/json"
+                elif u.path == "/brain/mm/seek-game" and stub.brain_seek is not None:  # the brain's own Box Office seek
+                    status, answer = stub.brain_seek(dict(q))
+                    body, ctype = json.dumps(answer).encode(), "application/json"
                 elif u.path == "/game-list" and stub.lobbies is not None:  # the exclude runs' lobbies
                     stub.list_requests += 1
                     if stub.list_fail < 0 or stub.list_requests <= stub.list_fail:
@@ -3622,21 +3635,125 @@ def run_native_full_answer():
           and "Game is full." not in text, [l for l in lines if "[krunker]" in l or "quick play" in l][-8:])
 
 
-def run_native_f4_stays_official():
-    """Find New Game (F4) in an official krunker.io game with Settings > Quickplay on KrunkNative: the
-    player stays on krunker.io (krunker_net_seek_new: a seek-game on the krunker.io matchmaker, excluding
-    the lobby list picks a game the player was not in lately), never a KrunkNative seek (no [mm] line)."""
-    label = "native-f4-kn-setting"
-    script = '0 boot\n100 call setSetting "knSeekServers" "kn"\n3000 call backToOrigin\n9000 quit\n'
-    stub, p, out, log = launch_native(label, script, {}, args=("--krunker",), stub_setup=lambda st: setattr(st, "lobbies", EXCLUDE_LOBBIES))
+BOX_OFFICE_LOBBY = "LOCAL:ccccc"  # the lobby the brain answers with: its port is one nothing listens on (the join fails there)
+
+
+def write_saved_settings(label, settings):
+    """knSettings.json of the run's profile (launch_native's XDG_CONFIG_HOME), written before the launch"""
+    cfg = os.path.join(WORK, label + "-cfg", "krunknative")
+    os.makedirs(cfg, exist_ok=True)
+    with open(os.path.join(cfg, "knSettings.json"), "w") as f:
+        json.dump(settings, f)
+
+
+def brain_box_office_room(stub, dead_port, seeks):
+    """The brain's seeks (<stub>/brain/mm/seek-game): a Box Office lobby with room. A brain session's startup seek
+    comes before any krunker.io seek and answers LOCAL:boot0 (not counted); the seeks after the first krunker.io
+    seek-game are the Find New Game / Quick Match ones: they answer BOX_OFFICE_LOBBY and land in seeks."""
+    def answer(q):
+        after_kio = any(pth == "/seek-game" for pth, _, _ in stub.http_log)
+        if after_kio:
+            seeks.append(q)
+        game = BOX_OFFICE_LOBBY if after_kio else "LOCAL:boot0"
+        return 200, {"success": True, "host": "127.0.0.1", "port": dead_port, "gameId": game, "clientId": "k",
+                     "region": "local", "players": 2, "maxPlayers": 8}
+    stub.brain_seek = answer
+
+
+def run_native_f4_server_type():
+    """Find New Game (F4) and Quick Match with Settings > Quickplay > Server Type (knSeekServers) in a brain session
+    (KRUNKNATIVE_BRAIN_URL: the stub's /brain), the player on a krunker.io game or its error screen:
+    - "native-f4-kn-official": Server Type Box Office, F4 in an official game: the game gives way, the brain seeks a
+      Box Office lobby and the client joins it; krunker.io is not asked for another game;
+    - "native-quickmatch-kn-after-kio-failure": Box Office, the krunker.io join failed (the error screen, no challenge
+      can be shown here): Quick Match goes to the brain, not krunker.io's matchmaker;
+    - "native-f4-official-control": Server Type krunker.io: F4 in an official game still seeks krunker.io (the brain
+      is not asked), and joins another official game."""
+    dead_port = kn_proto.free_ports(1)[0]
+    join_line = "[mm] joining %s at" % BOX_OFFICE_LOBBY
+
+    def brain_settings(server_type):
+        # knSeekServersMigrated: the one-time reset (seek_prefs_migrate_servers) would turn a saved "official" into "kn"
+        return {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": server_type, "knSeekServersMigrated": 1}
+
+    # the brain session (a start without --krunker: the matchmaker's mode), the official game joined by krunkerJoin
+    label = "native-f4-kn-official"
+    seeks = []
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, brain_settings("official"))
+    script = ('0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n9000 call setSetting "knSeekServers" "kn"\n'
+              "9500 down F4\n9550 up F4\n16000 quit\n")
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup)
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
-    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
-    check(f"{label}: F4 asks krunker.io's matchmaker for another game (two seek-game requests)", len(seeks) >= 2, len(seeks))
+    k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: the official game is joined (its socket opened)", any("gameId=FRA:bbbbb" in w for w in stub.ws_paths), stub.ws_paths[:2])
+    check(f"{label}: F4 seeks Box Office's brain once (Server Type Box Office)", len(seeks) == 1, (len(seeks), [l for l in lines if "[mm]" in l][:4]))
+    check(f"{label}: F4 seeks no krunker.io game (the matchmaker's only seek-game is the join's)", len(k_seeks) == 1, k_seeks)
+    check(f"{label}: the official game gives way before the Box Office seek", "[krunker] leaving the official game" in text,
+          [l for l in lines if "[krunker]" in l][-4:])
+    check(f"{label}: the client joins the Box Office lobby the brain answered", join_line in text, [l for l in lines if "[mm]" in l][-4:])
+
+    # the krunker.io join fails (error screen; no challenge here), then Quick Match with Server Type Box Office
+    label = "native-quickmatch-kn-after-kio-failure"
+    seeks = []
+
+    def setup_failed(st):
+        st.captcha_free = False  # the join is refused on the Security Challenge: the error screen stays up
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, brain_settings("official"))
+    script = ('0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n12000 call setSetting "knSeekServers" "kn"\n'
+              "12500 call backToOrigin\n20000 quit\n")
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup_failed)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: the krunker.io join failed (no game socket)", not any("gameId=" in w for w in stub.ws_paths), stub.ws_paths[:2])
+    check(f"{label}: Quick Match seeks Box Office's brain once", len(seeks) == 1, (len(seeks), [l for l in lines if "[mm]" in l][:4]))
+    check(f"{label}: Quick Match seeks no krunker.io game (the failed join's two seek-game requests only)", len(k_seeks) == 2, k_seeks)
+    check(f"{label}: the client joins the Box Office lobby the brain answered", join_line in text, [l for l in lines if "[mm]" in l][-4:])
+
+    # Both (ours when one matches, else an official one): the Box Office lobby is asked first, in an official game too
+    label = "native-f4-both-official"
+    seeks = []
+
+    def setup_both(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, brain_settings("official"))
+    script = ('0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n9000 call setSetting "knSeekServers" "both"\n'
+              "9500 down F4\n9550 up F4\n16000 quit\n")
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup_both)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: Both: F4 seeks Box Office's brain first (one seek)", len(seeks) == 1, (len(seeks), [l for l in lines if "[mm]" in l][-3:]))
+    check(f"{label}: Both: the Box Office lobby the brain answered is joined, no krunker.io seek", join_line in text and len(k_seeks) == 1, k_seeks)
+
+    # the control: Server Type krunker.io, F4 in an official game: krunker.io's own Find New Game, the brain not asked
+    label = "native-f4-official-control"
+    seeks = []
+
+    def setup_control(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, brain_settings("official"))
+    script = '0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n9000 down F4\n9050 up F4\n16000 quit\n'
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup_control)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
     joins = re.findall(r"\[krunker\] seek-game: game (\S+) on", text)
+    check(f"{label}: krunker.io selected: F4 asks krunker.io's matchmaker for another game (two seek-game requests)", len(k_seeks) >= 2, k_seeks)
     check(f"{label}: F4 joins another official game than the one it is in", len(joins) >= 2 and joins[1] != joins[0], joins)
-    check(f"{label}: no KrunkNative seek for F4 (the brain is not asked)", "[mm] quick match" not in text and "[mm] seek" not in text,
-          [l for l in lines if "[mm]" in l][:4])
+    check(f"{label}: krunker.io selected: the brain is not asked", not seeks, len(seeks))
 
 
 def run_native_reload(gone):
@@ -4471,7 +4588,7 @@ def main():
         run_native_exclude()
         run_native_exclude_mm()
         run_native_full_answer()
-        run_native_f4_stays_official()
+        run_native_f4_server_type()
         run_native_seek_modes()
         run_native_reload(False)
         run_native_reload(True)
@@ -4526,8 +4643,10 @@ def main():
         run_native_exclude()
         run_native_exclude_mm()
         run_native_full_answer()
-        run_native_f4_stays_official()
+        run_native_f4_server_type()
         run_native_seek_modes()
+    if ONLY == "f4" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game with Server Type Box Office (official games, failed joins)
+        run_native_f4_server_type()
     if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)
         run_native_kick_close()
     if ONLY == "framecap" and os.path.isfile(f"{BUILD}/client_bin"):  # just the input frame cap run (a stalled frame's dt)
