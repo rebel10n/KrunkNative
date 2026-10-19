@@ -438,8 +438,12 @@ static struct {
     double frozen_left;
 } LT;
 
+// the lottery's brain route, with the account's session token in the URL (v10's ?token=, as its API client sends it;
+// a guest's is empty and the brain answers the guest's view)
 static char *lot_path(char *out, const size_t n, const char *suffix) {
-    snprintf(out, n, "/api/lottery/%d%s", LT.id, suffix);
+    char t[256];
+    v10_url_token(t, sizeof t);
+    snprintf(out, n, "/api/lottery/%d%s%s%s", LT.id, suffix, t[0] ? "?token=" : "", t);
     return out;
 }
 
@@ -508,7 +512,7 @@ static void lot_decoration(StrBuf *sb, const char *kind, const int salt) {
 }
 
 static const cJSON *lot_data(const V10Req **req_out) {
-    char path[64];
+    char path[512];
     const V10Req *r = v10_get(lot_path(path, sizeof(path), ""), 30000);
     if (req_out) *req_out = r;
     if (!r || r->status != 200 || !r->json) return NULL;
@@ -708,7 +712,7 @@ static void lot_done(void *user, const int status, const cJSON *json) {
     if (status == 200) {
         memset(LT.qty, 0, sizeof(LT.qty));
         LT.error[0] = 0;
-        char path[64];
+        char path[512];
         v10_forget(lot_path(path, sizeof(path), ""));
     } else {
         const char *e = json ? v10_str(json, "error") : "";
@@ -730,7 +734,7 @@ static void lot_enter(void) {
     const cJSON *cost;
     cJSON_ArrayForEach(cost, costs) {
         if (i < LOT_MAX_COSTS && LT.qty[i] > 0) {
-            char path[64], body[160], ref[16];
+            char path[512], body[160], ref[16];
             const char *r = v10_str(cost, "cost_ref");
             if (!r[0]) {
                 snprintf(ref, sizeof(ref), "%d", (int) v10_num(cost, "cost_ref", 0));
@@ -1255,7 +1259,7 @@ void v10_misc_popups_scenario(const cJSON *p) {
         LT.frozen = cJSON_IsNumber(cJSON_GetObjectItem(p, "lotterySecondsLeft"));
         LT.frozen_left = v10_num(p, "lotterySecondsLeft", 0);
         const int id = (int) v10_num(lot, "id", 3);
-        char path[64];
+        char path[512];
         snprintf(path, sizeof(path), "/api/lottery/%d", id);
         v10_scenario_answer(path, lot);
     }

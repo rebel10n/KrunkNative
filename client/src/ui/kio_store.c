@@ -23,6 +23,7 @@
 // shop/purchase (v10 _38968 / the gift's purchaseProduct) or showPurchase's payment; they give v10's
 // guest behaviour (loginOrRegister) or the read-only notice.
 #include <kio_store.h>
+#include <junk_shop_ui.h>
 #include <krunker_account.h>
 #include <backend_ui.h>
 #include <v10_ui.h>
@@ -57,6 +58,7 @@ typedef struct {
 
 static Slot g_slot[SLOTS];
 static unsigned g_ids, g_gen;
+static int g_brain_display; // kio_store_display_html: the brain's Junk shop (no gifts there)
 static struct { int display, qty; } g_qty[QTY_MAX]; // the dynamic cards' quantity sliders
 
 int kio_store_active(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
@@ -372,6 +374,7 @@ static void card_rows(StrBuf *sb, const ShopItem *it) {
 }
 
 static void gift_button(StrBuf *sb, const ShopItem *it, const char *hash) {
+    if (g_brain_display) return; // Box Office's Junk shop has no gifts (shop.c)
     sb_appendf(sb, "<button class=\"gift-button svelte-%s\" type=\"button\" title=\"%s\" onclick=\"knKioShopGift(%d,%d)\"%s><span class=\"material-icons%s%s\">card_giftcard</span></button>",
                hash, I18N("windows.store.gift", "Gift"), it->display_id, it->product_id, it->gift_disabled ? " disabled" : "", strcmp(hash, "rew7ag") ? " svelte-" : "",
                strcmp(hash, "rew7ag") ? hash : "");
@@ -608,6 +611,13 @@ void kio_store_eterno(StrBuf *sb) {
     }
 }
 
+// The brain's Junk-priced display (junk_shop_ui.c): the same cards; their BUY is junk_shop_buy on Box Office.
+void kio_store_display_html(StrBuf *sb, const cJSON *display) {
+    g_brain_display = 1;
+    display_html(sb, display, cJSON_GetObjectItem(display, "products"), 0);
+    g_brain_display = 0;
+}
+
 // ------------------------------------------------------------------ the item view (_39616)
 
 static const cJSON *find_display(const cJSON *d, const int id, const int depth) {
@@ -721,7 +731,8 @@ int kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     const char *h = name + 9;
     if (!strcmp(h, "Buy")) { // _39604 / the dynamic card's _39732 / _39737: shop/purchase or showPurchase: never sent
         html_ui_stop_propagation();
-        kio_store_read_only("shop/purchase");
+        if (kio_store_active()) kio_store_read_only("shop/purchase");
+        else junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product (knKioShopBuy(display, product))
     } else if (!strcmp(h, "Gift")) { // _39563: shop/purchase {gift_to} or giftProduct: never sent
         html_ui_stop_propagation();
         kio_store_read_only("shop/purchase (gift)");

@@ -324,6 +324,7 @@
  "kn.hostflow.server.publicPort": "Public port",
  "kn.hostflow.start": "Start Game",
  "kn.join.notLink": "Not a game link: paste a krunker.io or Box Office game link, or a lobby code such as CH2:kz862",
+ "kn.junkshop.failedTitle": "Purchase failed",
  "kn.kio.account.ask2fa": "Enter the 6-digit code from your authenticator app.",
  "kn.kio.account.askEmailCode": "Enter the code krunker.io sent to your email.",
  "kn.kio.account.badCode": "Enter the code (digits only).",

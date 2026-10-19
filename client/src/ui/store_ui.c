@@ -18,6 +18,7 @@
 #include <backend_ui.h>
 #include <app_mode.h>
 #include <ui_logic.h>
+#include <junk_shop_ui.h>
 #include <audio.h>
 #include <spin_wheel.h>
 #include "../viewer/viewer_store.h"
@@ -1339,9 +1340,11 @@ static void v10_store_eterno(StrBuf *sb) {
 #endif
     sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\"%s class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> ",
                poster, vid);
-    // the shop front (svelte-1nzacef): the account's wild offer (v10_wild_offer.c), else the empty state
+    // the shop front (svelte-1nzacef): the account's wild offer (v10_wild_offer.c) and the Junk-priced products
+    // (junk_shop_ui.c, the brain's display), else the empty state
     const size_t before = sb->len;
     v10_wild_offer_shop(sb);
+    junk_shop_render(sb);
     if (sb->len == before)
         sb_append(sb, "<div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>");
 }

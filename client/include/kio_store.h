@@ -24,6 +24,9 @@ void kio_store_eterno(StrBuf *sb);
 // ranked.getShop()'s data ({skins: [...]}, each row's expires_at as epoch ms) in the shape of the
 // brain's /mm/ranked/shop answer, for ranked_ui.c's Shop tab. Never NULL.
 const struct V10Req *kio_store_ranked_shop(void);
+// The brain's Junk-priced display (junk_shop_ui.c) in the shop's markup: the display's "products" map is read
+// from it. Gift buttons are left out; a card's BUY is junk_shop_buy on Box Office.
+void kio_store_display_html(StrBuf *sb, const cJSON *display);
 // A krunker.io purchase / spin / redeem / trade button in krunker.io mode: v10's own guest behaviour
 // (loginOrRegister) for a guest, else the read-only notice (v10's error io-popup). Nothing is sent.
 void kio_store_read_only(const char *what); // what: the request it stands for (logged)

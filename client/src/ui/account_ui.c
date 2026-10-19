@@ -802,6 +802,14 @@ static void set_junk_text(const char *text) {
     g_acc.junk = junk_value(junk_parse(text));
 }
 
+// junk_shop_ui.c: a Junk-priced purchase's reply balance, set as the "uj" push sets it
+void account_ui_set_junk(const char *text) {
+    if (!g_logged_in || !text) return;
+    set_junk_text(text);
+    mark_header();
+    rerender_windows();
+}
+
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
 // creatorBadge (~~creator_badge, v10:112770) comes with it
 static void set_badges(const cJSON *info) {
