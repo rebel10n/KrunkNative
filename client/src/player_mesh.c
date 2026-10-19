@@ -946,10 +946,10 @@ static vec3 euler_xyz_from_axes(const vec3 x, const vec3 y, const vec3 z) {
 }
 
 // The wrist item (v10 genArms' wrist frame, genWristFrame, and the wristMeshes loop in its player
-// build): on the left arm of the own and preview models, for every arm pose. The frame hangs off the arm's
-// group (v10 armMeshes[i], the arm's pivot here, which the first-person melee pose moves), and is built
-// there: genWristFrame's up axis is the group's, not the arm placement's, so the item stays upright in
-// the melee pose too. It sits at wristCuff * lowerArmLength (0.225 * 2.7) below the forearm's centre along
+// build): on the left arm of every player's model (own, preview and remote), for every arm pose. The frame
+// hangs off the arm's group (v10 armMeshes[i], the arm's pivot here, which the first-person melee pose
+// moves), and is built there: genWristFrame's up axis is the group's, not the arm placement's, so the item
+// stays upright in the melee pose too. It sits at wristCuff * lowerArmLength (0.225 * 2.7) below the forearm's centre along
 // the forearm: its +Z is the forearm's down axis, its +Y is up made orthogonal to it. The frame's scale is
 // wristScale * the arm's width (genArm's 1.2, times 0.68 in the first person), `unit` is that width / 1.2,
 // and the item sits in the frame at -sitOff * unit, rotated (sxRot, -PI / 2 + syRot, szRot), scaled by
@@ -1461,9 +1461,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const ViewerSkin *charm = player->game->config.no_cosmetics ? NULL : cosmetic_item(player->cosmetics_v7.charms[i], ITEM_CHARM);
                     player_generate_charm(arms, player->loadout[i], player_slot_skin(player, i, weapon), charm);
                 }
-                // v7 builds it for isYou only, so the viewer's preview never showed its Wrist pick: KrunkNative also
-                // dresses preview players (uid -1)
-                if (look.wrist && (player->is_you || player->uid == -1)) player_generate_wrist(arms, look.wrist, third_person);
+                // v10 generateMeshes builds it on every visible player's left arm (no isYou test: wristMeshes
+                // on each client-side model), so other players wear their wrist item too
+                if (look.wrist) player_generate_wrist(arms, look.wrist, third_person);
 
                 // Sight attachment: only on the first-person (U) and preview (V) models, like jLrR6.
                 // v7.1.4: the player's pick (Reflex / Acog), the Acog's per-weapon yOff and its zOff.
