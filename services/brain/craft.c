@@ -15,11 +15,11 @@
  * gives an inline array). A row is kept only when its result skin is craftable in skins.json
  * (store.c craftable), every material is a known skin, and the pairs and prices are sane.
  *
- * A craft: the recipe and the result skin are checked; a recipe that costs junk spends it through
- * junk_spend (one call site below); one transaction (P_CRAFT) then checks the world limit and the
- * materials, takes the materials and grants the result (skin_transactions source "craft", ref
- * "craft:<SID>"; the result is the only delta > 0 row of that ref, which is what CNT counts). A
- * failed craft refunds its junk through junk_credit. There is no crafting timer: the skin is granted
+ * A craft: the recipe and the result skin are checked; then one transaction (P_CRAFT) checks the world
+ * limit, spends the recipe's junk through junk_spend (the wallet's ledger row is in the same transaction),
+ * checks and takes the materials and grants the result (skin_transactions source "craft", ref
+ * "craft:<SID>"; the result is the only delta > 0 row of that ref, which is what CNT counts). A refused
+ * craft spends no junk, so there is no refund. There is no crafting timer: the skin is granted
  * at the request (DUR is shown, not waited for). Owner: svc-accounts.
  */
 #include "acct_internal.h"
@@ -39,29 +39,8 @@
 
 /* ------------------------------------------------------------------ the junk wallet call site */
 
-/* The wallet (doc/v10/junk.md) owns these; amounts are hundredths of a junk. The weak definitions
- * below answer "no junk" until the wallet links in: a recipe that costs junk is refused, a free one
- * still crafts. Keep every junk call in this block. */
-typedef enum { JUNK_SPEND_OK = 0, JUNK_SPEND_INSUFFICIENT = 1 } JunkSpendResult;
-int64_t junk_balance(int64_t account_id);
-JunkSpendResult junk_spend(int64_t account_id, int64_t amount_hundredths, const char *reason);
-void junk_credit(int64_t account_id, int64_t amount_hundredths, const char *reason);
-
-__attribute__((weak)) int64_t junk_balance(int64_t account_id) {
-    (void) account_id;
-    return 0;
-}
-__attribute__((weak)) JunkSpendResult junk_spend(int64_t account_id, int64_t amount_hundredths, const char *reason) {
-    (void) account_id;
-    (void) amount_hundredths;
-    (void) reason;
-    return JUNK_SPEND_INSUFFICIENT;
-}
-__attribute__((weak)) void junk_credit(int64_t account_id, int64_t amount_hundredths, const char *reason) {
-    (void) account_id;
-    (void) amount_hundredths;
-    (void) reason;
-}
+/* A recipe that costs junk spends it inside P_CRAFT's transaction, through db_procs.h's junk_spend (the
+ * wallet's API, amounts in hundredths): a refused craft spends nothing, so there is no refund. */
 
 /* ------------------------------------------------------------------ the recipe table */
 
@@ -176,13 +155,13 @@ static const CraftRecipe *recipe_of(const int64_t sid) {
 
 /* ------------------------------------------------------------------ the database */
 
-/* (account, ref "craft:<SID>", result skin, materials "skin,count,...", limit) -> {skin}: the
- * world limit and the materials are checked, then taken, and the result granted. One transaction:
- * a refusal leaves no material taken. */
+/* (account, ref "craft:<SID>", result skin, materials "skin,count,...", limit, junk in hundredths) -> {skin}:
+ * the world limit is checked, the junk spent (junk_spend), the materials checked and taken, and the result
+ * granted. One transaction: a refusal leaves no junk spent and no material taken. */
 static kn_db_result *run_craft(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
-    const char *acc_s = P(0), *ref = P(1), *sout_s = P(2), *mats_s = P(3), *limit_s = P(4);
-    if (!acc_s || !ref || !sout_s || !mats_s || !limit_s) {
+    const char *acc_s = P(0), *ref = P(1), *sout_s = P(2), *mats_s = P(3), *limit_s = P(4), *junk_s = P(5);
+    if (!acc_s || !ref || !sout_s || !mats_s || !limit_s || !junk_s) {
         dbx_refuse(&x, "Error");
         return dbx_finish(&x, NULL);
     }
@@ -194,6 +173,12 @@ static kn_db_result *run_craft(kn_dbconn *c, int n, const char *const *p) {
     if (limit >= 0 && dbx_int(&x, SQL(.any = "SELECT COUNT(*) FROM skin_transactions WHERE source = 'craft' AND ref = $1 AND delta > 0"),
                               KN_DB_ARGS(ref), 0) >= limit)
         dbx_refuse(&x, "Sold out");
+    const int64_t junk_h = strtoll(junk_s, NULL, 10);
+    if (junk_h > 0 && !dbx_failed(&x)) {
+        int64_t balance = 0;
+        // JUNK_INSUFFICIENT writes nothing and is not an error of the wallet: the craft is refused here
+        if (junk_spend(&x, acc, junk_h, "craft", &balance) == JUNK_INSUFFICIENT) dbx_refuse(&x, "Not enough Junk");
+    }
     char mats[160], *save = NULL;
     snprintf(mats, sizeof mats, "%s", mats_s);
     for (char *tok = strtok_r(mats, ",", &save); tok && !dbx_failed(&x); tok = strtok_r(NULL, ",", &save)) {
@@ -214,14 +199,18 @@ static kn_db_result *run_craft(kn_dbconn *c, int n, const char *const *p) {
 }
 static const kn_proc P_CRAFT = {"craft", NULL, run_craft};
 
-/* the copies crafted so far, per recipe ref: [{ref, n}] */
+/* $0 account -> {counts, junk}: counts = the copies crafted so far per recipe ref ([{ref, n}]), junk = the
+ * account's balance in hundredths */
 static kn_db_result *run_craft_counts(kn_dbconn *c, int n, const char *const *p) {
-    (void) n;
-    (void) p;
     Dbx x = {c, NULL};
+    const char *acc_s = P(0);
+    const int64_t acc = acc_s ? strtoll(acc_s, NULL, 10) : 0;
     cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT ref, COUNT(*) AS n FROM skin_transactions WHERE source = 'craft' AND delta > 0 GROUP BY ref"),
                            0, NULL);
-    return dbx_json(&x, "craft_counts", rows ? rows : cJSON_CreateArray());
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "counts", rows ? rows : cJSON_CreateArray());
+    cJSON_AddNumberToObject(o, "junk", (double) junk_balance(&x, acc));
+    return dbx_json(&x, "craft_counts", o);
 }
 static const kn_proc P_CRAFT_COUNTS = {"craft_counts", NULL, run_craft_counts};
 
@@ -233,19 +222,13 @@ static void push_account_cb(void *ud, const char *err, const cJSON *data) {
 }
 
 typedef struct {
-    int64_t sid, account, junk_h;
-    int junk_spent;
+    int64_t sid;
 } CraftCtx;
-
-static void craft_refund(const CraftCtx *k) {
-    if (k->junk_spent) junk_credit(k->account, k->junk_h, "craft_refund");
-}
 
 static void craft_done(SocialSession *s, kn_db_result *res, void *extra) {
     CraftCtx *k = extra;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
     if (!v) {
-        craft_refund(k);
         social_send_n(s, "crftr", 3, cJSON_CreateNumber((double) k->sid), cJSON_CreateNumber(0),
                       cJSON_CreateString(acct_db_error(res, "craft")));
         return;
@@ -272,19 +255,13 @@ void sh_craft(SocialSession *s, const cJSON *f) {
         refuse(s, sid, "Not craftable.");
         return;
     }
-    CraftCtx k = {.sid = sid, .account = s->account_id, .junk_h = r->junk_h, .junk_spent = 0};
-    if (r->junk_h > 0) {
-        if (junk_spend(s->account_id, r->junk_h, "craft") != JUNK_SPEND_OK) {
-            refuse(s, sid, "Not enough Junk");
-            return;
-        }
-        k.junk_spent = 1;
-    }
-    char acc[24], ref[32], sout[24], limit[24], mats[160];
+    CraftCtx k = {.sid = sid};
+    char acc[24], ref[32], sout[24], limit[24], junk[24], mats[160];
     acct_itoa(acc, s->account_id);
     snprintf(ref, sizeof ref, "craft:%lld", (long long) sid);
     snprintf(sout, sizeof sout, "%lld", (long long) r->sout);
     snprintf(limit, sizeof limit, "%lld", (long long) r->cnt);
+    snprintf(junk, sizeof junk, "%lld", (long long) r->junk_h);
     mats[0] = 0;
     for (int i = 0; i < r->n_mats; i++) {
         char pair[48];
@@ -293,22 +270,21 @@ void sh_craft(SocialSession *s, const cJSON *f) {
     }
     CraftCtx *ctx = malloc(sizeof *ctx); /* social_query frees it after the reply */
     if (!ctx) {
-        craft_refund(&k);
         refuse(s, sid, "Error");
         return;
     }
     *ctx = k;
     /* a refused submit frees ctx itself (social_db) */
-    if (social_call(s, &P_CRAFT, KN_DB_ARGS(acc, ref, sout, mats, limit), craft_done, ctx) < 0) {
-        craft_refund(&k);
-        refuse(s, sid, "Error");
-    }
+    if (social_call(s, &P_CRAFT, KN_DB_ARGS(acc, ref, sout, mats, limit, junk), craft_done, ctx) < 0) refuse(s, sid, "Error");
 }
 
 /* ["recps"]: CRAFT_DATA_REQUEST */
 static void recps_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
-    cJSON *counts = res && kn_db_ok(res) ? acct_db_json(res) : NULL;
+    cJSON *doc = res && kn_db_ok(res) ? acct_db_json(res) : NULL;
+    const cJSON *counts = doc ? cJSON_GetObjectItemCaseSensitive(doc, "counts") : NULL;
+    const cJSON *junk_j = doc ? cJSON_GetObjectItemCaseSensitive(doc, "junk") : NULL;
+    const int64_t junk = cJSON_IsNumber(junk_j) ? (int64_t) junk_j->valuedouble : 0;
     cJSON *rows = cJSON_CreateArray();
     for (int i = 0; i < s_recipe_count; i++) {
         const CraftRecipe *r = &s_recipes[i];
@@ -333,8 +309,7 @@ static void recps_done(SocialSession *s, kn_db_result *res, void *extra) {
         cJSON_AddNumberToObject(o, "DAT", (double) r->dat);
         cJSON_AddItemToArray(rows, o);
     }
-    cJSON_Delete(counts);
-    const int64_t junk = junk_balance(s->account_id);
+    cJSON_Delete(doc);
     social_send_n(s, "recps", 2, rows, cJSON_CreateNumber((double) junk / 100.0));
 }
 
@@ -345,11 +320,7 @@ void sh_craft_recipes(SocialSession *s, const cJSON *f) {
         return;
     }
     recipes_load();
-    int limited = 0;
-    for (int i = 0; i < s_recipe_count; i++) limited += s_recipes[i].cnt >= 0;
-    if (!limited) {
-        recps_done(s, NULL, NULL);
-        return;
-    }
-    if (social_call(s, &P_CRAFT_COUNTS, 0, NULL, recps_done, NULL) < 0) recps_done(s, NULL, NULL);
+    char acc[24];
+    acct_itoa(acc, s->account_id);
+    if (social_call(s, &P_CRAFT_COUNTS, KN_DB_ARGS(acc), recps_done, NULL) < 0) recps_done(s, NULL, NULL);
 }
