@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "junk.h"
 #include "knsvc/loop.h"
 
 /* ------------------------------------------------------------------ Dbx */
@@ -312,6 +313,10 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     /* 0210_creator_badge: v10's creator badge (players.creator_badge; not in player_rows) */
     cJSON_AddNumberToObject(o, "creator_badge",
         (double) dbx_int(x, SQL(.any = "SELECT creator_badge FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
+    /* 0347_junk_wallet: the Junk balance (hundredths in players.player_junk), as the decimal text "12.34" */
+    char junk_text[24];
+    junk_format(junk_balance(x, id), junk_text, sizeof junk_text);
+    cJSON_AddStringToObject(o, "junk", junk_text);
     cJSON_AddItemToObject(o, "elo", num_item(r, "player_elo"));
     cJSON_AddItemToObject(o, "elo2", num_item(r, "player_elo2"));
     cJSON_AddItemToObject(o, "elo4", num_item(r, "player_elo4"));

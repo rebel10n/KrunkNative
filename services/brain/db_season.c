@@ -33,6 +33,7 @@
 #include "badges.h"
 #include "knsvc/json.h"
 #include "progression.h"
+#include "junk.h"
 #include "season.h"
 
 #define P(i) (n > (i) ? p[i] : NULL)
@@ -388,6 +389,7 @@ static cJSON *claim_cards(Dbx *x, const int64_t id, const BattlePass *bp, cJSON 
         snprintf(ref, sizeof ref, "bp:%d:%d", bp->id, it->id);
         if (it->skin > 0) db_add_skin(x, id, it->skin, 1, "battlepass", ref, NULL);
         if (it->kr > 0) db_add_funds(x, id, it->kr, "battlepass", ref, NULL);
+        if (it->jnk > 0) junk_credit(x, id, junk_hundredths(it->jnk), "battlepass", NULL); /* v10 jnkdata card */
         cJSON *c = cJSON_CreateObject();
         cJSON_AddNumberToObject(c, "id", it->id);
         cJSON_AddNumberToObject(c, "tier", it->tier);

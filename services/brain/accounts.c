@@ -819,6 +819,22 @@ static void op_json_done(kn_db_result *res, void *ud) {
     cJSON_Delete(data);
 }
 
+/* junk_credit / junk_spend (db_junk.c): the reply, and the balance pushed to the account's social
+ * sockets, so the navbar follows a credit the game server asked for (doc/v10/junk.md). */
+static void junk_op_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *data = acct_db_json(res);
+    if (!data) data = cJSON_CreateObject();
+    const cJSON *junk = cJSON_GetObjectItemCaseSensitive(data, "junk");
+    if (cJSON_IsString(junk)) social_push_junk(o->id, junk->valuestring);
+    op_reply(o, NULL, data);
+    cJSON_Delete(data);
+}
+
 static void op_empty_done(kn_db_result *res, void *ud) {
     OpCtx *o = ud;
     if (!kn_db_ok(res)) {
@@ -1246,6 +1262,25 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         kn_db_call(g_acct_brain->db, &P_GIVE_SKIN,
                     KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, skin), kn_json_str(args, "source", "spin")),
                     op_json_done, o);
+        return 0;
+    }
+    /* the Junk wallet (db_junk.c, doc/v10/junk.md): amounts in hundredths; the game servers' credits
+     * (Reward Junk, Junk Packages) and spends. junk_spend refuses "Not enough Junk". */
+    if (!strcmp(op, "junk_balance")) {
+        OpCtx *o = op_new(cb, ud, "junk_balance");
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_JUNK_BALANCE, KN_DB_ARGS(acct_itoa(ids, id)), op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "junk_credit") || !strcmp(op, "junk_spend")) {
+        const int credit = !strcmp(op, "junk_credit");
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        o->id = id;
+        kn_db_call(g_acct_brain->db, credit ? &P_JUNK_CREDIT : &P_JUNK_SPEND,
+                   KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "amount", 0)),
+                              kn_json_str(args, "reason", "game")),
+                   junk_op_done, o);
         return 0;
     }
     if (!strcmp(op, "elo") && cJSON_HasObjectItem(args, "delta")) {

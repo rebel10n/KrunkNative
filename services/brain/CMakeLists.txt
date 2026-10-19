@@ -52,6 +52,8 @@ set(KN_BRAIN_SOURCES
     db_accounts.c
     db_social.c
     db_economy.c
+    db_junk.c                       # the Junk wallet (0347_junk_wallet; rules ../../shared/src/junk.c, doc/v10/junk.md)
+    ../../shared/src/junk.c
     db_mm.c
     db_ranked.c
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
@@ -433,6 +435,11 @@ if (Python3_FOUND)
     add_test(NAME brain_economy
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    # the Junk wallet (doc/v10/junk.md): credit, spend, "Not enough Junk", the social "uj" push, parallel spends
+    add_test(NAME brain_junk
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/junk_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_junk PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;junk")
     set_tests_properties(brain_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
     # v10.0.2 clan window backend: cln 6/9, clnRA, s7, MOTD / banner / logo / transfer (clan_v10.c, 0113)
     add_test(NAME brain_clan_v10
@@ -535,6 +542,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_junk_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/junk_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_junk_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;junk;${drv}")
         add_test(NAME brain_strike_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})

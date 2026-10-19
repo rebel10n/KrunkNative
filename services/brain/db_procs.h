@@ -102,6 +102,17 @@ extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUI
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
     P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY;
 
+/* ---- the Junk wallet (db_junk.c, 0347_junk_wallet; doc/v10/junk.md). Amounts are hundredths. The C
+ * API runs inside the caller's transaction: junk_credit / junk_spend write their ledger row with it. */
+#define JUNK_OK 0            /* junk_spend: spent */
+#define JUNK_INSUFFICIENT 1  /* junk_spend: the balance is below the amount; nothing written */
+int64_t junk_balance(Dbx *x, int64_t account_id);
+int junk_spend(Dbx *x, int64_t account_id, int64_t amount, const char *reason, int64_t *balance);
+int junk_credit(Dbx *x, int64_t account_id, int64_t amount, const char *reason, int64_t *balance);
+/* {junk: "12.34"}: a new object the caller owns (the op replies and the proc results) */
+cJSON *junk_json(int64_t balance);
+extern const kn_proc P_JUNK_CREDIT, P_JUNK_SPEND, P_JUNK_BALANCE;
+
 /* ---- KrunkScript storage and map KR rewards for game servers (db_storage.c) */
 extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
 

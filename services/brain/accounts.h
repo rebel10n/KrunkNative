@@ -22,6 +22,9 @@
  *                                        -> account + {kr_awarded, duplicate}
  *   rewards  {items:[[id,kr],...]}       -> {funds:[...]}
  *   give_skin {id, skin, source?}        -> {skin, count}
+ *   junk_balance {id}                    -> {junk: "12.34"}
+ *   junk_credit {id, amount, reason?}    -> {junk, credited}   (amount in hundredths; pushes "uj")
+ *   junk_spend {id, amount, reason?}     -> {junk}  | "Not enough Junk"   (pushes "uj")
  *   elo      {id, mode:1|2|4, elo}       -> {}
  *   challenge {id, chal, kr}             -> {chal, funds}
  *   ban_check {ip, id?}                  -> {banned, reason, expires}

@@ -358,12 +358,20 @@ cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
     const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",
                           "creator_badge", /* v10's creatorBadge (0210_creator_badge) */
-                          "dxp"};          /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
+                          "dxp",           /* v10 double XP: the 2x XP offer and the weekend schedules (0341_double_xp) */
+                          "junk"};         /* the Junk wallet's balance, "12.34" (0347_junk_wallet, doc/v10/junk.md) */
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));
     }
     return info;
+}
+
+void social_push_junk(const int64_t account_id, const char *junk) {
+    if (account_id <= 0) return;
+    cJSON *f = social_frame("uj");
+    cJSON_AddItemToArray(f, cJSON_CreateString(junk && *junk ? junk : "0.00"));
+    social_push_account(account_id, f);
 }
 
 void social_push_account_update(const cJSON *account) {

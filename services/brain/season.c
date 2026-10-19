@@ -122,10 +122,14 @@ static void bp_claim_done(SocialSession *s, kn_db_result *res, void *extra) {
     const cJSON *pr = cJSON_GetObjectItemCaseSensitive(v, "progress");
     if (pr) social_send_n(s, "bppd", 1, cJSON_Duplicate(pr, 1));
     /* a KR card (v10 krdata) changed the wallet: the header's KR */
-    int kr = 0;
+    int kr = 0, jnk = 0;
     const cJSON *it;
-    cJSON_ArrayForEach(it, items) kr += (int) kn_json_int(it, "kr", 0);
-    if (kr > 0) {
+    cJSON_ArrayForEach(it, items) {
+        kr += (int) kn_json_int(it, "kr", 0);
+        const cJSON *j = cJSON_GetObjectItemCaseSensitive(it, "jnk"); /* a junk card: the wallet changed */
+        if (cJSON_IsNumber(j) && j->valuedouble > 0) jnk = 1;
+    }
+    if (kr > 0 || jnk > 0) { /* the wallet changed: the account is pushed again (its "ua" carries the junk) */
         char id[24];
         kn_db_call(g_acct_brain->db, &P_ACCOUNT_JSON, KN_DB_ARGS(acct_itoa(id, s->account_id)), account_pushed, NULL);
     }

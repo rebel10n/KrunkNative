@@ -19,6 +19,10 @@ void social_ws_shutdown(Brain *b);
  * (consumes frame). For other modules that want realtime notifications. */
 void social_push_account(int64_t account_id, cJSON *frame);
 
+/* The Junk balance changed (db_junk.c): ["uj", "12.34"] to the account's social sockets, so the navbar
+ * and the Account window show it without a reply (doc/v10/junk.md). */
+void social_push_junk(int64_t account_id, const char *junk);
+
 /* Every signed-in JSON social socket of this brain gets the frame (consumed). */
 void social_push_all_json(cJSON *frame);
 
