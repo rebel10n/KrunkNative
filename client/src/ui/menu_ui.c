@@ -583,23 +583,22 @@ void menu_scale_base(void) {
         snprintf(value, sizeof(value), "%.3fpx", sy < sx ? dh : h / sx);
         html_dom_set_style(body, "--ui-height", value);
     }
-    if (sy < sx) {
-        snprintf(value, sizeof(value), "scale(%.3f)", sy);
-        html_dom_set_style(base, "transform", value);
-        snprintf(value, sizeof(value), "%.3fpx", w / sy);
-        html_dom_set_style(base, "width", value);
-        fmt_number(num, sizeof(num), dh);
-        snprintf(value, sizeof(value), "%spx", num);
-        html_dom_set_style(base, "height", value);
-    } else {
-        snprintf(value, sizeof(value), "scale(%.3f)", sx);
-        html_dom_set_style(base, "transform", value);
-        fmt_number(num, sizeof(num), dw);
-        snprintf(value, sizeof(value), "%spx", num);
-        html_dom_set_style(base, "width", value);
-        snprintf(value, sizeof(value), "%.3fpx", h / sx);
-        html_dom_set_style(base, "height", value);
-    }
+    // The fit scale is printed to 3 decimals, as window.scaleBase() writes it, but that rounding
+    // can sit a fraction below the exact fit (0.627 for 0.62745). The scaled box is a transformed
+    // layer, and the engine clips everything inside it to its box (box-shadow rings included), so
+    // the box must cover the window at the printed scale: whole CSS px, rounded up. Only what the
+    // box anchors to its far edges moves, by a pixel (the 3D scene showed through the window's
+    // right and bottom strip otherwise).
+    const double fit = sy < sx ? sy : sx;
+    const double scale = round(fit * 1000.0) / 1000.0;
+    fmt_number(num, sizeof(num), ceil(w / scale));
+    snprintf(value, sizeof(value), "%spx", num);
+    html_dom_set_style(base, "width", value);
+    fmt_number(num, sizeof(num), ceil(h / scale));
+    snprintf(value, sizeof(value), "%spx", num);
+    html_dom_set_style(base, "height", value);
+    snprintf(value, sizeof(value), "scale(%.3f)", scale);
+    html_dom_set_style(base, "transform", value);
     menu_send_preview_rect();
 }
 
