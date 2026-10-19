@@ -595,6 +595,22 @@ static vec3 player_off_hand_away(const PlayerArmMesh *arm, const vec3 rest) {
     return (vec3) {sh.x + ax * reach, sh.y + ay * reach, sh.z + az * reach};
 }
 
+// Nettspend Drank, third person, not pouring: the trigger hand held out to its own side, so the cup sits beside
+// the torso and the arm is not hidden in it. The rest direction from the shoulder (the pistol's hold, straight
+// forward past the chest) plus NETTSPEND_TP_HOLD_OUT of the side's unit x, renormalized, at the rest reach: the
+// arm turns about its shoulder without a slide (the shoulder stays), mostly about the vertical, so the cup, which
+// turns with the hand, stays upright. `side` is +1 / -1 for the arm's own side (the body's right / left).
+static vec3 player_trigger_hold_out(const PlayerArmMesh *arm, const vec3 rest, const float side) {
+    const vec3 sh = arm->anchor.position;
+    const float dx = rest.x - sh.x, dy = rest.y - sh.y, dz = rest.z - sh.z, reach = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (reach < 1e-4f) return rest;
+    float ax = dx / reach + side * NETTSPEND_TP_HOLD_OUT, ay = dy / reach, az = dz / reach;
+    const float l = sqrtf(ax * ax + ay * ay + az * az);
+    if (l < 1e-4f) return rest;
+    ax /= l, ay /= l, az /= l;
+    return (vec3) {sh.x + ax * reach, sh.y + ay * reach, sh.z + az * reach};
+}
+
 static void player_arm_mesh_set_visible(const PlayerArmMesh *arm, const int visible) {
     if (!arm) return;
     if (arm->extender) arm->extender->visible = visible;
@@ -1235,6 +1251,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const Weapon *pistol = player->game->weapons[WEAPON_ID_PISTOL];
                     drank_grip = *weapon;
                     drank_grip.offset = pistol->offset;
+                    // generate_arm moves each shoulder by -offset.x: the pistol's 1.2 pushed the trigger shoulder into the
+                    // torso and the off one out, so the shoulders stay symmetric (x 0); y and z keep the pistol's
+                    drank_grip.offset.x = 0.0f;
                     drank_grip.right_hold = pistol->right_hold;
                     drank_grip.right_hold.x += NETTSPEND_TP_HAND_SIDE;
                     arms_weapon = &drank_grip;
@@ -1815,6 +1834,13 @@ void player_update_meshes(Player *player, const int is_preview) {
         nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, trigger_rest, off_away, left_hand_mlt, held_arms->hose->transform.scale.x, progress,
                             &cup_hand, &bottle_hand);
         if (pouring) player_arm_reach(trigger_arm, trigger_rest, cup_hand);
+        else if (trigger_arm && trigger_arm->upper && off_arm) { // third person (the arms have an upper arm): the cup out to its side
+            // the cup hangs off the weapon anchor, not the arm's pivot, so it is posed at the held hand like the pour does
+            const float trigger_side = trigger_arm->anchor.position.x < off_arm->anchor.position.x ? -1.0f : 1.0f;
+            const vec3 hold = player_trigger_hold_out(trigger_arm, trigger_rest, trigger_side);
+            player_arm_reach(trigger_arm, trigger_rest, hold);
+            nettspend_pose_cup_rest(held_arms->hose, hold, left_hand_mlt);
+        }
         player_arm_reach(off_arm, off_rest, bottle_hand); // away, or carrying the bottle
         // first person: the off arm shows only for the refill (showHands above already decided the arms)
         if (player->render_you && !third_person && !pouring) player_arm_mesh_set_visible(off_arm, 0);
