@@ -167,7 +167,9 @@ listed as missing in `thumb_missing_on_purpose()` (the "missing" rows). Communit
 `tools/ui-import/live_assets.lock` (root `ui`) and fetched with `make assets-import-live` (through
 `KN_FETCH_PROXY` when the asset hosts need it).
 
-Source column: `v7` = Krunker v7.1.4 `public/img/maps/` (byte-identical copy), `v3.1.1` = Krunker v3.1.1
+Source column: `v10` = `https://assets.krunker.io/img/maps/map_<mapIndex>.png`, the picture v10.0.2's Host Game and
+Games cards load for an official map (`/img/maps/map_" + mapIndex + ".png"` in the v10 client), pinned in
+`tools/ui-import/live_assets_v10.lock`. `v7` = Krunker v7.1.4 `public/img/maps/` (byte-identical copy), `v3.1.1` = Krunker v3.1.1
 `public/img/maps/map_<n>.png`, where `n` is v3.1.1's MAPS index (`main/maps.js`: the same order as the `311_`
 entries), `user-assets` = `https://user-assets.krunker.io/m<map id>/thumb.png`, the picture Krunker's own menu
 shows for a community map; its map id comes from `https://gapi.svc.krunker.io/maps/by-name/<name>` (fetched
@@ -209,20 +211,20 @@ slide_moonlight Corrade, FortniteTiltedT DjDankMeister, Test v e c t o r (2018).
 | `laboratory` (v7 29) | Laboratory | `img/maps/map_29.png` | v7 `public/img/maps/map_29.png` | present |
 | `shipyard` (v7 30) | Shipyard | `img/maps/map_30.png` | v7 `public/img/maps/map_30.png` | present |
 | `sanctum` (v7 31) | Soul Sanctum | `img/maps/map_31.png` | v7 `public/img/maps/map_31.png` | present |
-| `bazaar` (v10 32) | Bazaar | none | none: the v10.0.2 list has no picture of it in the references | missing |
-| `erupt` (v10 33) | Erupt | none | none in the references | missing |
-| `hq` (v10 34) | HQ | none | none in the references | missing |
-| `khepri` (v10 35) | Khepri | none | none in the references | missing |
-| `lush` (v10 36) | Lush | none | none in the references | missing |
-| `vivo` (v10 37) | Vivo | none | none in the references | missing |
+| `bazaar` (v10 32) | Bazaar | `img/maps/map_32.png` | v10 `assets.krunker.io/img/maps/map_32.png` (live, 2026-10-19 through the proxy) | present |
+| `erupt` (v10 33) | Erupt | `img/maps/map_33.png` | v10 `assets.krunker.io/img/maps/map_33.png` | present |
+| `hq` (v10 34) | HQ | `img/maps/map_34.png` | v10 `assets.krunker.io/img/maps/map_34.png` | present |
+| `khepri` (v10 35) | Khepri | `img/maps/map_35.png` | v10 `assets.krunker.io/img/maps/map_35.png` | present |
+| `lush` (v10 36) | Lush | `img/maps/map_36.png` | v10 `assets.krunker.io/img/maps/map_36.png` | present |
+| `vivo` (v10 37) | Vivo | `img/maps/map_37.png` | v10 `assets.krunker.io/img/maps/map_37.png` | present |
 | `slide_moonlight_v10` (v10 38) | Slide Moonlight | `img/maps/community/slide_moonlight.png` | the community `slide_moonlight` picture: the same map (1068 objects in both files) | present |
 | `eterno_simulator` (v10 39) | Eterno Simulator | `img/maps/map_39.png` | the ranked pool's picture (see below) | present |
-| `stalk_factory` (v10 40) | Stalk Factory | none | none in the references | missing |
-| `eterno_jump_v10` (v10 41) | eterno_jump | none | none: the community `eterno_jump` has none either | missing |
+| `stalk_factory` (v10 40) | Stalk Factory | `img/maps/map_40.png` | v10 `assets.krunker.io/img/maps/map_40.png` | present |
+| `eterno_jump_v10` (v10 41) | eterno_jump | `img/maps/map_41.png` | v10 `assets.krunker.io/img/maps/map_41.png` (the community `eterno_jump` has none) | present |
 | `frontier` (v10 42) | Frontier | `img/maps/map_42.png` | the ranked pool's picture (see below) | present |
-| `bastion` (v10 43) | Bastion | none | none in the references | missing |
-| `piazza` (v10 44) | Piazza | none | none in the references | missing |
-| `barnyard` (v10 45) | Barnyard | none | none in the references | missing |
+| `bastion` (v10 43) | Bastion | `img/maps/map_43.png` | v10 `assets.krunker.io/img/maps/map_43.png` | present |
+| `piazza` (v10 44) | Piazza | `img/maps/map_44.png` | v10 `assets.krunker.io/img/maps/map_44.png` | present |
+| `barnyard` (v10 45) | Barnyard | `img/maps/map_45.png` | v10 `assets.krunker.io/img/maps/map_45.png` | present |
 | `311_burg` | Burg (3.1.1) | `img/maps/v311/map_0.png` | v3.1.1 `public/img/maps/map_0.png` | present |
 | `311_littletown` | Littletown (3.1.1) | `img/maps/v311/map_1.png` | v3.1.1 `public/img/maps/map_1.png` | present |
 | `311_sandstorm` | Sandstorm (3.1.1) | `img/maps/v311/map_2.png` | v3.1.1 `public/img/maps/map_2.png` | present |

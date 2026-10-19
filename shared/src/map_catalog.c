@@ -119,24 +119,24 @@ static const MapCatalogEntry k_catalog[] = {
     V152("undergrowth", "Undergrowth"),
     // the v10.0.2 official maps the v7 set does not have (krunker_maps.h mapIndex 32..45), appended so the
     // catalogue indices above do not move. Not in the rotation (rotation 0), hostable (Host Game). Their
-    // pictures: map_39 and map_42 are the ranked pool's (ui/img/maps), 38 is the picture of the same map as
-    // the community slide_moonlight; the others have none yet (ui/README.md "Map thumbnails").
-    OFFICIAL("bazaar", "Bazaar", 32, 0, "32_bazaar"),
-    OFFICIAL("erupt", "Erupt", 33, 0, "33_erupt"),
-    OFFICIAL("hq", "HQ", 34, 0, "34_hq"),
-    OFFICIAL("khepri", "Khepri", 35, 0, "35_khepri"),
-    OFFICIAL("lush", "Lush", 36, 0, "36_lush"),
-    OFFICIAL("vivo", "Vivo", 37, 0, "37_vivo"),
+    // pictures: each one is v10's img/maps/map_<mapIndex>.png (ui/README.md "Map thumbnails"), except 38, which is
+    // the picture of the same map as the community slide_moonlight, and 39 and 42, the ranked pool's files
+    OFFICIAL_PIC("bazaar", "Bazaar", 32, 0, "32_bazaar", "img/maps/map_32.png"),
+    OFFICIAL_PIC("erupt", "Erupt", 33, 0, "33_erupt", "img/maps/map_33.png"),
+    OFFICIAL_PIC("hq", "HQ", 34, 0, "34_hq", "img/maps/map_34.png"),
+    OFFICIAL_PIC("khepri", "Khepri", 35, 0, "35_khepri", "img/maps/map_35.png"),
+    OFFICIAL_PIC("lush", "Lush", 36, 0, "36_lush", "img/maps/map_36.png"),
+    OFFICIAL_PIC("vivo", "Vivo", 37, 0, "37_vivo", "img/maps/map_37.png"),
     // the same map as the community "slide_moonlight" (same objects): the official one keeps its own key
     OFFICIAL_PIC("slide_moonlight_v10", "Slide Moonlight", 38, 0, "38_slide_moonlight", "img/maps/community/slide_moonlight.png"),
     OFFICIAL_PIC("eterno_simulator", "Eterno Simulator", 39, 0, "39_eterno_simulator", "img/maps/map_39.png"),
-    OFFICIAL("stalk_factory", "Stalk Factory", 40, 0, "40_stalk_factory"),
+    OFFICIAL_PIC("stalk_factory", "Stalk Factory", 40, 0, "40_stalk_factory", "img/maps/map_40.png"),
     // the same map as the community "eterno_jump" (same objects): the official one keeps its own key
-    OFFICIAL("eterno_jump_v10", "eterno_jump", 41, 0, "41_eterno_jump"),
+    OFFICIAL_PIC("eterno_jump_v10", "eterno_jump", 41, 0, "41_eterno_jump", "img/maps/map_41.png"),
     OFFICIAL_PIC("frontier", "Frontier", 42, 0, "42_frontier", "img/maps/map_42.png"),
-    OFFICIAL("bastion", "Bastion", 43, 0, "43_bastion"),
-    OFFICIAL("piazza", "Piazza", 44, 0, "44_piazza"),
-    OFFICIAL("barnyard", "Barnyard", 45, 0, "45_barnyard"),
+    OFFICIAL_PIC("bastion", "Bastion", 43, 0, "43_bastion", "img/maps/map_43.png"),
+    OFFICIAL_PIC("piazza", "Piazza", 44, 0, "44_piazza", "img/maps/map_44.png"),
+    OFFICIAL_PIC("barnyard", "Barnyard", 45, 0, "45_barnyard", "img/maps/map_45.png"),
 };
 
 #define CATALOG_COUNT (sizeof(k_catalog) / sizeof(k_catalog[0]))

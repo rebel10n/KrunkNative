@@ -35,8 +35,8 @@ static int png_loads(const char *path) {
 // user-assets thumb, or none was found (152_* maps). Any other map must have one.
 static int thumb_missing_on_purpose(const MapCatalogEntry *e) {
     static const char *const keys[] = {"ESP_Parkour", "FortniteTiltedT", "Test", "bot_ftue_v2", "eterno_jump"};
-    // the v10.0.2 additions (mapIndex 32..45) have a picture only where ui/img/maps has one (ranked 39, 42)
-    if (e->source == MAP_SOURCE_OFFICIAL) return e->index >= 32 && !e->thumb;
+    // every official map has a picture (the v10.0.2 additions, mapIndex 32..45, have v10's map_<n>.png each)
+    if (e->source == MAP_SOURCE_OFFICIAL) return 0;
     if (!strncmp(e->key, "152_", 4)) return 1;
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(e->key, keys[i])) return 1;
