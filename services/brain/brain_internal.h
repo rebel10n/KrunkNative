@@ -106,6 +106,10 @@ void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 /* internal WS "ranked-cancel" {matchId}: a lobby that never filled (no rating, no RP, players unqueued) */
 void ranked_cancel(Brain *b, const cJSON *frame);
 
+/* ---- v10 lottery (lottery.c, 0348_lottery; db_lottery.c) */
+int lottery_init(Brain *b);
+void lottery_shutdown(Brain *b);
+
 /* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
 int turf_init(Brain *b);
 /* v10's HTTP leaderboards (leaderboards.c: /api/leaderboards/..., the v10 Leaderboards popup) */

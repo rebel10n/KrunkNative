@@ -123,6 +123,9 @@ extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_
 extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MATCH_READY,
     P_RK_MATCH_FAILED, P_RK_MATCH_FINISH, P_RK_CLAIM, P_RK_SEASON_CLOSE, P_RK_PURCHASE, P_RK_MATCH_CANCEL;
 
+/* ---- the v10 lottery (db_lottery.c, 0348_lottery; lottery.c): the view, an entry, the settlement */
+extern const kn_proc P_LOTTERY_VIEW, P_LOTTERY_PARTICIPATE, P_LOTTERY_SETTLE;
+
 /* ---- Krunker v10.0.2 Turf Wars (db_turf.c, 0206_turf_wars) */
 extern const kn_proc P_TURF_RECORD, P_TURF_SETTLE, P_TURF_LOOT_SET, P_TURF_VIEW, P_TURF_RECRUIT_SET, P_TURF_RECRUIT_DEL, P_TURF_APPLY;
 
