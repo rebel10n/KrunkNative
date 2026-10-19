@@ -1145,6 +1145,16 @@ static void fmt(char *buf, const size_t n, const char *format, const double v) {
     snprintf(buf, n, format, v);
 }
 
+// How far each scope bar reaches under the picture, in px (see apply_dom's scopeWidth note).
+#define SCOPE_BAR_OVERLAP 2
+
+// The bars' inset for a half size e (floor(v / 2)): made even (stepped down when odd), then
+// overlapping the picture by SCOPE_BAR_OVERLAP. A zero-size picture has no edge to hide.
+static int scope_bar_offset(const int e) {
+    const int even = abs(e) % 2 == 1 && e > 0 ? e - 1 : e;
+    return even > 0 ? even - SCOPE_BAR_OVERLAP : even;
+}
+
 // bundleFilters(1): "saturate(v*100%) hue-rotate(v*3.6deg)" on #uiBase.
 static void apply_menu_filter(void) {
     char filter[96] = "";
@@ -1203,16 +1213,20 @@ static int apply_dom(void) {
     // scopeWidth / scopeHeight.set (v10.js:207255): v *= 100; recticleImg width / height = v px; the bars
     // meet it at calc(50% + e px), e = floor(v / 2) made even (stepped down when odd). scopeOpac
     // (aimRecticle.opacMlt) fades the scope image only: the bars keep scopeBorderOpac.
+    // The bars reach SCOPE_BAR_OVERLAP px under the picture (v10 draws its bars 2 px past the image
+    // edge, v10.js:207255): the picture's edge is anti-aliased, and where it coincides with the bar's
+    // edge the scene shows through as a faint outline round the square.
     const double sw = g_rs.scope_width * 100.0, sh = g_rs.scope_height * 100.0;
     const int ew = (int) floor(sw / 2.0), eh = (int) floor(sh / 2.0);
+    const int bw = scope_bar_offset(ew), bh = scope_bar_offset(eh);
     snprintf(buf, sizeof(buf), "%gpx", sw);
     style_if("recticleImg", "width", buf);
     snprintf(buf, sizeof(buf), "%gpx", sh);
     style_if("recticleImg", "height", buf);
-    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", abs(ew) % 2 == 1 && ew > 0 ? ew - 1 : ew);
+    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", bw);
     style_if("leftBox", "right", buf);
     style_if("rightBox", "left", buf);
-    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", abs(eh) % 2 == 1 && eh > 0 ? eh - 1 : eh);
+    snprintf(buf, sizeof(buf), "calc(50%% + %dpx)", bh);
     style_if("topBox", "top", buf);
     style_if("bottomBox", "bottom", buf);
     snprintf(buf, sizeof(buf), "%g", g_rs.scope_opacity);
