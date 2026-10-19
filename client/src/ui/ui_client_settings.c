@@ -9,10 +9,13 @@
 // = needsRestart), so the tab looks like Krunker's other tabs.
 // The Client tab is native-only (client_tab_shown): it keeps the rows a browser cannot do
 // (Window Mode, Resolution, V-Sync, Audio Backend, Process Priority, Discord, the Resource
-// Swapper, the Proxy folder) and the web build shows no Client tab. Every other row works on
+// Swapper, the Proxy folder) and the plain web build shows no Client tab. Every other row works on
 // both platforms, so it lives in the game's own settings tabs and is generated there on web and
 // native alike (CS_FOLDERS): Display > Interface and Game > Gameplay / Gameplay Privacy, in both
 // views. The Sound tab's Audio Output row (CS_SOUND_TAB) is generated in the Sound tab.
+// The Box Office apps (iOS and Android wrappers of the web build, user agent KrunkNativeApp) get a
+// Client tab of their own (app_shell): the CS_APP rows that work on a phone move there from their
+// game folders, and the desktop-only rows stay out. Phone browsers and the plain web keep no tab.
 //
 // Exit: Krunker v7.1.4's #clientExit menu item -> clientExitPopup() ("Are you sure you
 // want to close krunker?" YES/NO, the #confPop popup natively) -> closeClient(), which
@@ -82,6 +85,7 @@ enum {
     CS_RESTART = 4,     // needsRestart: red "*", applied on the next launch (restart offered)
     CS_GAME = 8,        // a game setting (knSettings, setSetting) surfaced here
     CS_SOUND_TAB = 16,  // generated in the game's Sound tab (ui_client_settings_extend_tab), not in Client
+    CS_APP = 32,        // in the app's Client tab (app_shell) instead of its game folder; the folder elsewhere
 };
 
 typedef enum { CS_SWITCH, CS_SELECT, CS_TEXT, CS_BUTTON } CsKind;
@@ -158,7 +162,7 @@ static const ClientSetting SETTINGS[] = {
      NULL, 0, "Open folder", "openSwapper"},
     // Game > Gameplay Privacy: Hide player names, the names, clan tags and profile pictures other players and the
     // account show (client/include/player_names.h); the label only, no description
-    {"hidePlayerNames", "Hide player names", "Gameplay Privacy", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "",
+    {"hidePlayerNames", "Hide player names", "Privacy", CS_SWITCH, CS_NATIVE | CS_WEB | CS_APP, "false", "",
      NULL, 0, NULL, NULL, "privacy"},
     // Game > Gameplay: no v10 equivalent (the fallback folder)
     {"autoRestart", "Auto-restart for updates", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
@@ -169,16 +173,16 @@ static const ClientSetting SETTINGS[] = {
      NULL, 0, "Edit", "editCSS", "interface"},
     // ---- Game > Gameplay: start, join and the account service (--offline; auto join; the matchmaker)
     // Web: starts the in-process local game, as ?offline=1 does.
-    {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB | CS_RESTART, "false",
+    {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB | CS_RESTART | CS_APP, "false",
      "Start in an offline game on the built-in server (like --offline)", NULL, 0, NULL, NULL, "gameplay"},
-    {"autoJoin", "Auto Join", "Gameplay", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Enter the match as soon as the game has loaded",
+    {"autoJoin", "Auto Join", "Startup", CS_SWITCH, CS_NATIVE | CS_WEB | CS_APP, "false", "Enter the match as soon as the game has loaded",
      NULL, 0, NULL, NULL, "gameplay"},
-    {"accountMode", "Account Mode", "Gameplay", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART, "online",
+    {"accountMode", "Account Mode", "Account", CS_SELECT, CS_NATIVE | CS_WEB | CS_RESTART | CS_APP, "online",
      "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved",
      ACCOUNT_MODES, COUNT(ACCOUNT_MODES), NULL, NULL, "gameplay"},
-    {"brainUrl", "Account Service URL", "Gameplay", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
+    {"brainUrl", "Account Service URL", "Account", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART | CS_APP, "",
      "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io", NULL, 0, NULL, NULL, "gameplay"},
-    {"finderUrl", "Server Finder URL", "Gameplay", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
+    {"finderUrl", "Server Finder URL", "Account", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART | CS_APP, "",
      "Public server list; empty = https://matchmaker.krunk.io/servers, off = none", NULL, 0, NULL, NULL, "gameplay"},
 #ifndef __EMSCRIPTEN__ // platform behaviour: the browser is the web build's network stack
     // ---- Network (http_proxy.h; applied at once: the next connection takes it)
@@ -208,10 +212,10 @@ static const ClientSetting SETTINGS[] = {
     // Web: a page cannot open a folder; Open tells where the client's files are (the browser's storage).
     {"openConfig", "Client Folder", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "", "Settings, swapper and custom.css",
      NULL, 0, "Open", "openConfig", "gameplay"},
-    {"clearCache", "Clear Cache & Storage", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "",
+    {"clearCache", "Clear Cache & Storage", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB | CS_APP, "",
      "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept",
      NULL, 0, "Clear Now", "clearCache", "gameplay"},
-    {"resetClient", "Reset Client Settings", "Gameplay", CS_BUTTON, CS_NATIVE | CS_WEB, "", "",
+    {"resetClient", "Reset Client Settings", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB | CS_APP, "", "",
      NULL, 0, "Reset", "resetClient", "gameplay"},
 };
 
@@ -261,6 +265,8 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.customCSS.prompt", "Custom CSS over the menu and HUD (one line; empty removes it)")
 //   I18N("settings.client.resetSettings", "Reset Client Settings")  I18N("settings.reset", "Reset")
 //   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")
+//   I18N("kn.client.cat.startup", "Startup")  I18N("kn.client.cat.account", "Account")  I18N("kn.client.cat.privacy", "Privacy")
+//   I18N("kn.client.cat.storage", "Storage")
 //   I18N("settings.network.header", "Network")
 //   I18N("settings.interface.header", "Interface")  I18N("settings.gameplay.header", "Gameplay")  I18N("settings.gameprivacy.header", "Gameplay Privacy")
 //   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
@@ -622,16 +628,39 @@ static int chrome_visible(void) {
     return 1;
 }
 
+// The Box Office apps: the iOS and Android wrappers load the web build with " KrunkNativeApp" in the user
+// agent (platform/ios GameViewController.swift, platform/android MainActivity.java). Only the web build asks.
+#ifdef __EMSCRIPTEN__
+EM_JS(int, kn_cs_app_shell, (void), {
+    try {
+        return /KrunkNativeApp/.test(String(navigator.userAgent || "")) ? 1 : 0;
+    } catch (e) {
+        return 0;
+    }
+});
+#endif
+static int app_shell(void) {
+#ifdef __EMSCRIPTEN__
+    return kn_cs_app_shell();
+#else
+    return 0; // the native client is the desktop client (or a phone layout on a desktop build)
+#endif
+}
+
 // The Client tab and its rows are native-only: V-Sync, the frame cap, the window and launcher
-// options and the Resource Swapper do nothing in a browser, so the web build has no Client tab.
-// The settings keep their storage (knClient) and the apply / startup code reads them as before.
+// options and the Resource Swapper do nothing in a browser, so the plain web build has no Client tab.
+// The app's Client tab (app_shell) holds the CS_APP rows that work on a phone. The settings keep their
+// storage (knClient) and the apply / startup code reads them as before.
 static int client_tab_shown(void) {
 #ifdef __EMSCRIPTEN__
-    return 0;
+    return app_shell() && chrome_visible();
 #else
     return chrome_visible();
 #endif
 }
+
+// A row that the app's Client tab holds: it leaves its game folder there (extend_folders, tab html).
+static int app_row(const ClientSetting *s) { return (s->flags & CS_APP) && app_shell(); }
 
 static void apply_exit_button(void) {
     HtmlElem el = html_dom_by_id("clientExit");
@@ -1244,7 +1273,9 @@ char *ui_client_settings_tab_html(const int searching) {
     const char *cat = NULL;
     for (int i = 0; i < COUNT(SETTINGS); i++) {
         const ClientSetting *s = &SETTINGS[i];
-        if (!setting_shown(s) || (s->flags & CS_SOUND_TAB) || s->folder) continue; // Sound tab rows and the game's folders: ui_client_settings_extend_tab
+        // the desktop tab holds the rows without a game folder; the app's tab the CS_APP rows (app_row)
+        const int in_tab = app_shell() ? (s->flags & CS_APP) != 0 : !s->folder;
+        if (!setting_shown(s) || (s->flags & CS_SOUND_TAB) || !in_tab) continue; // Sound tab rows and the game's folders: ui_client_settings_extend_tab
         if (searching && (s->flags & CS_GAME)) continue; // the game's own tab lists it (one id per page)
         if (!cat || strcmp(cat, s->cat)) {
             if (cat) sb_append(&sb, "</div>");
@@ -1321,7 +1352,7 @@ static char *extend_folders(const char *tab) {
         StrBuf rows = {0};
         for (int i = 0; i < COUNT(SETTINGS); i++) {
             const ClientSetting *s = &SETTINGS[i];
-            if (s->folder && !strcmp(s->folder, CS_FOLDERS[f].folder) && setting_shown(s)) append_row(&rows, s);
+            if (s->folder && !strcmp(s->folder, CS_FOLDERS[f].folder) && setting_shown(s) && !app_row(s)) append_row(&rows, s);
         }
         if (!rows.len) {
             sb_free(&rows);
