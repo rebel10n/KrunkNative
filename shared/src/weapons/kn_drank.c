@@ -50,7 +50,10 @@ const Weapon g_drank = {
     .reload_time = 1.4f, // the pour-up
     .aim_speed = 0.1f,
     .speed_mlt = 1.0f,
-    .damage = 4.0f, // a sip: like the Piss, no head / leg zones
+    // KrunkNative balance (doc/v10/gameplay.md "Nettspend balance", round 2): a sip is 5, up from the Piss's 4.
+    // The bench (Kanji FFA, arc-aware bot aim, seeds 1-6): Nettspend field KDR 0.83 -> 0.88, Drank damage +10%,
+    // duels even; the Money Spread, reach, rate, puddles and pour-up are unchanged. No head / leg zones.
+    .damage = 5.0f,
     .headshot_mlt = 1.0f,
     .leg_mlt = 1.0f,
     .range = 47.0f, // the stream's reach (speed x life)

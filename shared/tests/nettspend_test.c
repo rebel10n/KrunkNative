@@ -117,7 +117,7 @@ static void test_tables(const Game *game) {
     CHECK(d && !strcmp(d->name, "Purple Drank") && d->stream && d->custom_only && d->no_comp && !d->secondary && d->type == 0, "the Drank: a customOnly / noComp primary with a stream");
     CHECK(d && d->stream->color == 0x7b2cbf && d->stream->puddle_slow == 0.55f && d->stream->laced_chance == 0.04f && d->stream->laced_ms == 8000.0f,
           "purple, puddle slow x0.55, laced 4%% for 8 s");
-    CHECK(d && d->ammo == 40 && fabsf(d->rate - 0.06f) < 1e-6f && fabsf(d->reload_time - 1.4f) < 1e-6f && d->damage == 4.0f, "40 sips, 60 ms, a 1.4 s pour-up, 4 a sip");
+    CHECK(d && d->ammo == 40 && fabsf(d->rate - 0.06f) < 1e-6f && fabsf(d->reload_time - 1.4f) < 1e-6f && d->damage == 5.0f, "40 sips, 60 ms, a 1.4 s pour-up, 5 a sip");
     CHECK(d && d->stream->puddle_dps == 10.0f && d->stream->puddle_life == 6000.0f && d->stream->puddle_radius == 3.0f, "puddles 10 dps, 6 s, radius 3");
     CHECK(m && !strcmp(m->name, "Money Spread") && m->secondary && m->type == 1 && m->custom_only && m->no_comp && !m->stream, "the Money Spread: a customOnly / noComp secondary");
     CHECK(m && m->shots == 8 && m->custom_spread_count == 8 && m->damage == 14.0f && m->damage_drop == 8.0f && m->range == 120.0f && m->ammo == 8 && fabsf(m->rate - 0.25f) < 1e-6f,
@@ -327,7 +327,7 @@ static void test_drank_stream(Game *game, Player *p, Player *target) {
     const float dealt = health - target->health;
     printf("  %d sips in 1 s, %.1f damage, %d SHOT packets, %d puddles\n", shots, dealt, g_drank_shots, game->puddles.count);
     CHECK(shots >= 15 && shots <= 18, "a sip every 60 ms (%d in a second)", shots);
-    CHECK(fabsf(dealt - 4.0f * (float) shots) < 1e-3f, "4 a sip (%.1f for %d)", dealt, shots);
+    CHECK(fabsf(dealt - 5.0f * (float) shots) < 1e-3f, "5 a sip (%.1f for %d)", dealt, shots);
     CHECK(g_drank_shots == shots && ammo - p->ammo[p->loadout_index] == (unsigned int) shots, "a SHOT each, a sip of ammo each");
     CHECK(game->puddles.count == 0, "a player hit leaves no puddle");
     frames(p, 20, 0, -1);

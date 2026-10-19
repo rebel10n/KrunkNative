@@ -188,7 +188,7 @@ fields `magReserve`, `mysteryBoxR`, `canUpgrade` already exist in v7).
 The Nettspend (class 16) and its weapons are KrunkNative additions (doc/v7/decisions.md "Nettspend class"), so
 v10.0.2 has no value to compare with. This is a KN balance change, made from the bot bench (below) and written in
 the weapon entry (`shared/src/weapons/kn_money_spread.c`, with the class note in `classes_v10.c`). Only the Money
-Spread's own entry changed. The Drank (`kn_drank.c`), the class table and the shared weapon table are untouched.
+Spread's own entry changed in round 1; round 2 (below) changed the Drank's sip damage (`kn_drank.c`). The class table and the shared weapon table are untouched.
 The balance went through three versions: "first" (the KN values before 2026-10-18), "second" (the first tune
 of this change, a flat falloff, not in main) and "now" (this one).
 
@@ -264,6 +264,43 @@ Risk to check in play. The bench has no human players: a human's aim lands bills
 hit rate is the lever that set the fan width. Check the point-blank full fan (112, down from 144) and the 60+ unit
 bills (about 8.6, down from 15) in a real match. The client's bill burst (`VFX_BILL_CONE` in `client/src/vfx.c`) is
 its own cone and was not changed.
+
+Round 2: the Purple Drank's sip, 4 -> 5 (2026-10-19). The Drank was judged underpowered in play (user: "the drank
+being underpowered"), and Money Spread stays as it is. Measured on the same bench (Kanji FFA, 2 bots/class, arc-aware
+bot aim in the bench only: `bench_arc_pitch`, not in the shipped bots.c, since the flat aim lands the stream on the
+floor and undercounts the Drank; the arc-aware numbers are the ones trusted here):
+
+| Drank field | before (4) | after (5) |
+|---|---|---|
+| `damage` (a sip) | 4 | **5** |
+| `rate`, `ammo`, `reload_time`, `range`, `puddle_*`, `laced_*` | unchanged | unchanged |
+
+| measure, arc-aware bench | before | after |
+|---|---|---|
+| Nettspend field KDR, seeds 1-6 | 0.83 (415 / 503) | 0.88 (425 / 485) |
+| Nettspend field KDR, seeds 7-12 | 0.87 | 0.85 |
+| Drank damage, seeds 1-6 (direct sips + puddle ticks) | 4246 (1006 sips, 222 puddle) | 4453 |
+| Money Spread damage, seeds 1-6 | 38290 | 39644 |
+| Vince KDR, seeds 1-6 (class 4) | 0.85 | 0.92 |
+| Vince KDR, seeds 7-12 | 0.76 | 0.80 |
+| duels vs the 13 classes, 3 seeds x 180 s: runs where Nettspend got 0 kills | 0 of 39 | 0 of 39 |
+| duels: classes where one side got 0 kills in every run | none | none |
+
+Read the numbers with the spread in mind. Per-seed Nettspend KDR runs about +-0.1 around the mean (before, seeds 1-6:
+0.64-0.95; after: 0.71-0.99). Over 12 seeds the change is inside that noise (0.85 before, 0.87 after, nearly the same
+average), so the bench does not show a KDR gain. What it does show: the sip is a real +25% per hit, the Drank's damage
+is about +10%, Money Spread and the duels are unchanged in kind, and no class goes to zero against the Drank.
+
+Why the Drank is small in the bench, and why the other levers were not taken (all runs seeds 1-6 unless marked, arc-aware
+aim): bots pour about 2.4 sips a life (about 2% of their time), and most of the class's damage is Money Spread (about
+90%). A bot swaps from the Drank to the Money Spread past the Drank's 47-unit reach and then holds about 72 units out
+(0.6 x the Money Spread's 120), so the Drank rarely fires. Tried and not taken: sip 3 (Nettspend 0.84), sip 8 with the
+bench's no-swap Drank bots (bench only: 0.13, the bots die before they pour), puddle life 12 s (0.79), puddle dps 20
+(0.83), puddle slow 0.35 (0.85), rate 40 ms (0.83), pour-up 0.8 s and 32 puddles a player (no change: the bots never
+reach them), reach 61 (stream life 1100, range 61: 0.65, bots pour more and the sips do less than Money Spread), and a
+bench-only spill of a puddle at each sip's victim (0.90 on seeds 1-6, 0.78 on 7-12; the 12-seed mean unchanged).
+The Drank's distinct strength (close-range pressure, area denial) is therefore not measurable with this bench: it needs
+bots that close in on the Drank, or human play. The 0.8-1.2 KDR band is met by Nettspend before and after.
 
 ### Attachments, streaks, effects
 
