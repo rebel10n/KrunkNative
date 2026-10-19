@@ -95,8 +95,10 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
         icon = icon < 0 ? 0 : icon > 101 ? 101 : icon;
         double w0 = over ? (double) ((int) prog % 100) : prog - gained, w1 = over ? 0.0 : gained;
         if (w0 < 0) w0 = 0;
+        // The row's wrapper is not #endBPLayout: that id is the Battle Pass grid (80% | 20% columns, the
+        // battlepass_ui.c markup and v10's main.css), which would leave this row 80% wide on the card.
         ap(out, size, len, "<div class=\"endSection\" style=\"margin-top:10px\"><div class='endTitle'>Account Level</div>"
-                           "<div id='endBPLayout'><div id='lvlLayout'><img src='./img/levels/%d.png' class='xpRnk'><div class='xpLvl'>%d</div>"
+                           "<div id='endLvlLayout'><div id='lvlLayout'><img src='./img/levels/%d.png' class='xpRnk'><div class='xpLvl'>%d</div>"
                            "<div class='xpEndBar'><div class='xpEndBarB' style='width: %.2f%%;%s'></div>"
                            "<div class='xpEndBarB' style='width: %.2f%%;background-color: #fff;margin-left: -7px;'></div>"
                            "<span class='xpEndBarV blackShad'>%d / %d</span></div>"
