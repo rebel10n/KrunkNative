@@ -60,6 +60,8 @@ set(KN_BRAIN_SOURCES
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
     db_lottery.c                    # v10 lottery windows, entries, draws (0348_lottery; lottery.c)
     lottery.c
+    db_shop.c                       # the Junk-priced shop: display, purchase (0349_shop_junk; shop.c, doc/v10/junk.md)
+    shop.c
     db_kpd.c                        # the player list's K.P.D distress calls (0209_kpd_calls)
     db_studios.c                    # v10 Studios: members, games, currencies, monetization (0330_studios)
     turf.c
@@ -448,6 +450,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_lottery PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;lottery")
+    # the Junk-priced shop (shop.c, 0349_shop_junk): the display, a purchase with Junk, the limits, the ledgers
+    add_test(NAME brain_shop
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shop_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_shop PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;shop")
     set_tests_properties(brain_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
     # the Junkyard (craft.c): the recipe list, crafting (materials, the world limit, junk refusals, a non-craftable result)
     add_test(NAME brain_craft
@@ -569,6 +576,11 @@ foreach (drv IN ITEMS sqlite mysql)
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_lottery_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;lottery;${drv}")
+        add_test(NAME brain_shop_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shop_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_shop_${drv} PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+            ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;shop;${drv}")
         add_test(NAME brain_strike_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})

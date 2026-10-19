@@ -109,6 +109,9 @@ void ranked_cancel(Brain *b, const cJSON *frame);
 /* ---- v10 lottery (lottery.c, 0348_lottery; db_lottery.c) */
 int lottery_init(Brain *b);
 void lottery_shutdown(Brain *b);
+/* ---- the Junk-priced shop (shop.c, 0349_shop_junk; db_shop.c) */
+int shop_init(Brain *b);
+void shop_shutdown(Brain *b);
 
 /* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
 int turf_init(Brain *b);
