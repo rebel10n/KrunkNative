@@ -259,6 +259,111 @@ static void test_transport(void) {
     CHECK(down.status == 0 && down.body[0], "status 0 with the reason, got %d '%s'", down.status, down.body);
 }
 
+// ------------------------------------------------------------------ the retry (backend_native.c http_retry)
+// A scripted loopback brain: one action per connection, in order. 'd' closes the connection before it
+// answers (a try that got no answer); 'f' answers 403 (a real refusal); anything else (and every
+// connection after the script) answers 200. Its own listening socket, so the tests stay apart.
+#ifndef _WIN32 // POSIX loopback (the retry is shared; WinHTTP's own retries are not what this checks)
+typedef struct {
+    Sock listen;
+    const char *script;
+    volatile int conns; // connections accepted (the server thread writes, the test reads after the answer)
+} Brain;
+
+static void *brain_thread(void *arg) {
+    Brain *b = arg;
+    for (;;) {
+        Sock c = accept(b->listen, NULL, NULL);
+        if (c == SOCK_BAD) break;
+        const int i = b->conns;
+        b->conns = i + 1;
+        const size_t len = strlen(b->script);
+        const char act = (size_t) i < len ? b->script[i] : 'o';
+        if (act == 'd') {
+            sock_close(c);
+            continue;
+        }
+        char req[2048];
+        int n = 0;
+        while (n < (int) sizeof(req) - 1) {
+            const int r = (int) recv(c, req + n, (int) sizeof(req) - 1 - n, 0);
+            if (r <= 0) break;
+            n += r;
+            req[n] = 0;
+            if (strstr(req, "\r\n\r\n")) break;
+        }
+        const int refused = act == 'f';
+        const char *body = refused ? "{\"error\":\"refused\"}" : "{\"ok\":\"answered\"}";
+        char resp[512];
+        const int out = snprintf(resp, sizeof(resp), "HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                 refused ? "403 Forbidden" : "200 OK", (int) strlen(body), body);
+        send(c, resp, out, 0);
+        sock_close(c);
+    }
+    return NULL;
+}
+
+static int start_brain(Brain *b, const char *script, int *port) {
+    b->script = script;
+    b->conns = 0;
+    b->listen = socket(AF_INET, SOCK_STREAM, 0);
+    if (b->listen == SOCK_BAD) return 0;
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t al = sizeof(a);
+    if (bind(b->listen, (struct sockaddr *) &a, sizeof(a)) != 0 || listen(b->listen, 4) != 0 ||
+        getsockname(b->listen, (struct sockaddr *) &a, &al) != 0)
+        return 0;
+    *port = ntohs(a.sin_port);
+    pthread_t t;
+    if (pthread_create(&t, NULL, brain_thread, b) != 0) return 0;
+    pthread_detach(t);
+    return 1;
+}
+
+static void test_retry(void) {
+    char url[128];
+    Brain b;
+    int port = 0;
+
+    // the first try got no answer (a lost connection): the second answers, and no error is shown
+    CHECK(start_brain(&b, "dok", &port), "retry: loopback brain");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mm/seek-game", port);
+    Result once = {0};
+    CHECK(backend_http_request("GET", url, NULL, on_done, &once), "retry: the GET is queued");
+    CHECK(wait_for(&once), "retry: the GET completes");
+    CHECK(once.status == 200 && strstr(once.body, "answered"), "retry: the second try answers 200, got %d '%s'", once.status, once.body);
+    CHECK(b.conns == 2, "retry: exactly two connections (one retry), got %d", b.conns);
+
+    // both tries get no answer: the error is the callback's (status 0, the reason), after exactly two
+    CHECK(start_brain(&b, "dd", &port), "retry: loopback brain for two failures");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mm/seek-game", port);
+    Result none = {0};
+    backend_http_request("GET", url, NULL, on_done, &none);
+    CHECK(wait_for(&none), "retry: two failed tries complete");
+    CHECK(none.status == 0 && none.body[0], "retry: still status 0 with the reason, got %d '%s'", none.status, none.body);
+    CHECK(b.conns == 2, "retry: two tries and no third, got %d", b.conns);
+
+    // a real answer is final: a 403 is shown as it is, never retried
+    CHECK(start_brain(&b, "f", &port), "retry: loopback brain for a refusal");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mm/seek-game?validationToken=x", port);
+    Result refused = {0};
+    backend_http_request("GET", url, NULL, on_done, &refused);
+    CHECK(wait_for(&refused), "retry: the refusal completes");
+    CHECK(refused.status == 403 && strstr(refused.body, "refused"), "retry: 403 is final, got %d '%s'", refused.status, refused.body);
+
+    // a POST is never retried (it may have taken effect): one connection, status 0
+    CHECK(start_brain(&b, "dok", &port), "retry: loopback brain for a POST");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/account/write", port);
+    Result post = {0};
+    backend_http_request("POST", url, "{}", on_done, &post);
+    CHECK(wait_for(&post), "retry: the POST completes");
+    CHECK(post.status == 0 && b.conns == 1, "retry: a POST is not retried, got status %d after %d connections", post.status, b.conns);
+}
+#endif
+
 // ------------------------------------------------------------------ the brain gate (backend.h)
 // While the gate answers 1 (krunker.io is the active backend) the brain takes no request: a path on it and
 // a URL under it fail at once, and no connection is made. Other hosts (krunker.io, its lists) are not gated.
@@ -306,6 +411,9 @@ int main(void) {
     test_mode_defaults();
     test_backend_url();
     test_transport();
+#ifndef _WIN32
+    test_retry();
+#endif
     test_brain_gate();
     printf("backend_online_test: %d/%d checks passed\n", checks - failures, checks);
     return failures ? 1 : 0;

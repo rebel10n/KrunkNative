@@ -42,6 +42,7 @@
 #define WS_MAX_MESSAGE (2u * 1024u * 1024u)
 #define WS_BACKOFF_MIN_MS 1000
 #define WS_BACKOFF_MAX_MS 10000
+#define HTTP_RETRY_DELAY_MS 500 // a brain GET that got no answer is tried once more after this
 
 // ------------------------------------------------------------------ small helpers
 
@@ -292,6 +293,24 @@ static void http_run(HttpJob *job) {
 }
 #endif
 
+static char *redacted_url(const char *url); // the main thread's log helper (below)
+
+// A brain GET that got no HTTP answer at all (status 0: a connect that timed out or was refused, a
+// DNS or TLS failure, a send that failed, no reply before the timeout) is tried once more,
+// HTTP_RETRY_DELAY_MS later. Those failures are usually transient: a lost SYN past the connect timeout,
+// a reset, a peer that closed before it answered, a DNS entry gone stale. The retry is a new connection: a
+// failed connect dropped its DNS entry (http_conn.c), and the TLS ticket the failed try took is spent,
+// so the next handshake is a full one. Only GETs: a POST may already have taken effect. A real answer,
+// whatever its status (a refused seek token, a 403, a 404), is final and never retried here.
+static void http_retry(HttpJob *job) {
+    char *shown = redacted_url(job->url);
+    fprintf(stderr, "[http] GET %s failed: %s; trying once more\n", shown ? shown : "(url)", job->err);
+    free(shown);
+    job->err[0] = 0;
+    sleep_ms(HTTP_RETRY_DELAY_MS);
+    http_run(job);
+}
+
 static void *http_thread(void *arg) {
     const int lane = (int) (intptr_t) arg;
     for (;;) {
@@ -302,7 +321,10 @@ static void *http_thread(void *arg) {
         job->next = NULL;
         pthread_mutex_unlock(&g_lock);
 
+        // the brain's GETs only: a POST may already have taken effect, and http_run takes its body
+        const int retry = lane == HTTP_LANE_BRAIN && !strcmp(job->method, "GET") && !job->body;
         http_run(job);
+        if (retry && !job->status) http_retry(job);
 
         pthread_mutex_lock(&g_lock);
         QUEUE_PUSH(g_http_done, job);
