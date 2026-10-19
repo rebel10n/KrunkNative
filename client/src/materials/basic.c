@@ -144,6 +144,17 @@ U(u_env_map_intensity, "env_map_intensity");
 U(u_projection_uv, "projection_uv");
 #undef U
 
+// glTF PBR maps (gltf.c): metallicRoughness (texture unit 5) and normal (unit 6) textures
+#define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
+U(u_use_metal_rough_map, "use_metal_rough_map");
+U(u_metal_rough_map, "metal_rough_map");
+U(u_metalness_factor, "metalness_factor");
+U(u_roughness_factor, "roughness_factor");
+U(u_use_normal_map, "use_normal_map");
+U(u_normal_map, "normal_map");
+U(u_normal_scale, "normal_scale");
+#undef U
+
 // basic.frag light arrays (MAX_LIGHTS): lt_type 0 point, 1 spot, 2 directional, 3 rect
 enum { LU_TYPE, LU_POSITION, LU_DIRECTION, LU_COLOR, LU_PARAMS, LU_HALF_WIDTH, LU_HALF_HEIGHT, LU_COUNT };
 static GlUniform u_lights[LU_COUNT][BASIC_MAX_LIGHTS];
@@ -384,6 +395,25 @@ void basic_material_update_uniforms(Material *base) {
         glActiveTexture(GL_TEXTURE0);
     }
     gl_uniform_1i(&u_projection_uv, program, material->projection_uv);
+
+    // glTF PBR maps: a material without them is lit by the lighting setting, as before
+    gl_uniform_1i(&u_use_metal_rough_map, program, material->metal_rough_texture != 0);
+    if (material->metal_rough_texture) {
+        gl_uniform_1i(&u_metal_rough_map, program, BASIC_METAL_ROUGHNESS_TEXTURE_UNIT);
+        gl_uniform_1f(&u_metalness_factor, program, material->metalness_factor);
+        gl_uniform_1f(&u_roughness_factor, program, material->roughness_factor);
+        glActiveTexture(GL_TEXTURE0 + BASIC_METAL_ROUGHNESS_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->metal_rough_texture);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    gl_uniform_1i(&u_use_normal_map, program, material->normal_texture != 0);
+    if (material->normal_texture) {
+        gl_uniform_1i(&u_normal_map, program, BASIC_NORMAL_TEXTURE_UNIT);
+        gl_uniform_1f(&u_normal_scale, program, material->normal_scale);
+        glActiveTexture(GL_TEXTURE0 + BASIC_NORMAL_TEXTURE_UNIT);
+        glBindTexture(GL_TEXTURE_2D, material->normal_texture);
+        glActiveTexture(GL_TEXTURE0);
+    }
 
     if (material->texture && g_active_texture == material->texture || !material->texture && g_blank_texture && g_active_texture == g_blank_texture) return;
 

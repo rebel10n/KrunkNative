@@ -106,6 +106,21 @@ uniform sampler2D env_map;
 uniform float env_map_intensity;
 uniform bool projection_uv;
 
+// glTF PBR maps (gltf.c, BasicMaterial.metal_rough_texture / normal_texture): metallicRoughness (texture
+// unit 5: G = roughness, B = metalness, times the factors) and the tangent-space normal map (unit 6,
+// normalScale). A material with the metal-roughness map is shaded as three.js MeshStandardMaterial (pbr_*
+// below, in any lit mode); the normal map perturbs the lit normal of every lit material that has it.
+uniform bool use_metal_rough_map;
+uniform sampler2D metal_rough_map;
+uniform float metalness_factor;
+uniform float roughness_factor;
+uniform bool use_normal_map;
+uniform sampler2D normal_map;
+uniform float normal_scale;
+bool pbr_active;  // the material's PBR shading (set in main, lit materials only)
+float pbr_alpha;  // GGX alpha = roughness^2
+vec3 pbr_f0;      // specular F0 = mix(0.04, albedo, metalness)
+
 const float PI = 3.141592653589793;
 const float RECIPROCAL_PI = 0.3183098861837907;
 
@@ -144,22 +159,50 @@ vec3 brdf_blinn_phong(vec3 light_dir, vec3 normal, vec3 view_dir) {
     return f * (0.25 * RECIPROCAL_PI * (30.0 * 0.5 + 1.0) * pow(dot_nh, 30.0));
 }
 
-// three.js r150 BRDF_GGX (MeshStandardMaterial: specularColor 0.04, specularF90 1, roughness 1)
-vec3 brdf_ggx(vec3 light_dir, vec3 normal, vec3 view_dir) {
-    float alpha = 1.0;
+// three.js r150 BRDF_GGX with its alpha (roughness^2) and specular F0 (MeshStandardMaterial's specularColor)
+vec3 brdf_ggx_alpha(vec3 light_dir, vec3 normal, vec3 view_dir, float alpha, vec3 f0) {
     float a2 = alpha * alpha;
     vec3 half_dir = normalize(light_dir + view_dir);
     float dot_nl = clamp(dot(normal, light_dir), 0.0, 1.0);
     float dot_nv = clamp(dot(normal, view_dir), 0.0, 1.0);
     float dot_nh = clamp(dot(normal, half_dir), 0.0, 1.0);
     float dot_vh = clamp(dot(view_dir, half_dir), 0.0, 1.0);
-    vec3 f = f_schlick(vec3(0.04), 1.0, dot_vh);
+    vec3 f = f_schlick(f0, 1.0, dot_vh);
     float gv = dot_nl * sqrt(a2 + (1.0 - a2) * dot_nv * dot_nv);
     float gl = dot_nv * sqrt(a2 + (1.0 - a2) * dot_nl * dot_nl);
     float v = 0.5 / max(gv + gl, 1e-6);
     float denom = dot_nh * dot_nh * (a2 - 1.0) + 1.0;
     float d = RECIPROCAL_PI * a2 / (denom * denom);
     return f * (v * d);
+}
+
+// three.js r150 BRDF_GGX (MeshStandardMaterial: specularColor 0.04, specularF90 1, roughness 1)
+vec3 brdf_ggx(vec3 light_dir, vec3 normal, vec3 view_dir) {
+    return brdf_ggx_alpha(light_dir, normal, view_dir, 1.0, vec3(0.04));
+}
+
+// three.js r150 perturbNormal2Arb (a MeshStandardMaterial normalMap without tangents): the tangent frame from the
+// screen-space derivatives of the world position and of the texture coordinates. World space stands in for
+// three's view space (the same frame, rotated), so the lighting below is unchanged.
+vec3 krunker_perturb_normal(vec3 n, vec2 uv, vec3 map_n) {
+    vec3 q0 = dFdx(world_pos);
+    vec3 q1 = dFdy(world_pos);
+    vec2 st0 = dFdx(uv);
+    vec2 st1 = dFdy(uv);
+    vec3 q1perp = cross(q1, n);
+    vec3 q0perp = cross(n, q0);
+    vec3 t = q1perp * st0.x + q0perp * st1.x;
+    vec3 b = q1perp * st0.y + q0perp * st1.y;
+    float det = max(dot(t, t), dot(b, b));
+    float scale = det == 0.0 ? 0.0 : inversesqrt(det);
+    return normalize(t * (map_n.x * scale) + b * (map_n.y * scale) + n * map_n.z);
+}
+
+// The normal map's tangent-space normal (normalScale on x / y), for krunker_perturb_normal
+vec3 krunker_normal_map_sample(vec2 uv) {
+    vec3 map_n = texture(normal_map, uv).xyz * 2.0 - 1.0;
+    map_n.xy *= normal_scale;
+    return map_n;
 }
 
 // three.js r150 getDistanceAttenuation
@@ -212,7 +255,8 @@ vec3 krunker_direct(vec3 c, vec3 l, vec3 diffuse, vec3 normal, vec3 view_dir) {
     float dot_nl = clamp(dot(normal, l), 0.0, 1.0);
     vec3 irradiance = c * dot_nl;
     vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI;
-    if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir);
+    if (pbr_active) outgoing += irradiance * brdf_ggx_alpha(l, normal, view_dir, pbr_alpha, pbr_f0);
+    else if (lighting_mode == 2) outgoing += irradiance * brdf_blinn_phong(l, normal, view_dir);
     else if (lighting_mode == 3) outgoing += irradiance * brdf_ggx(l, normal, view_dir);
     return outgoing;
 }
@@ -395,6 +439,7 @@ void main() {
 
     vec3 albedo = base_color.rgb;
     bool basic_material = lighting_mode == 0 || (lighting_mode == 1 && unlit) || sprite;
+    pbr_active = false;
     if (lighting_enabled && !basic_material) {
         vec3 normal;
 
@@ -409,11 +454,27 @@ void main() {
             normal = normalize(cross(dx, dy));
         }
 
-        base_color.rgb = krunker_lambert(base_color.rgb, normal);
+        vec3 diffuse = albedo;
+        if (use_normal_map) normal = krunker_perturb_normal(normal, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
+        if (use_metal_rough_map) {
+            // MeshStandardMaterial: diffuse = albedo * (1 - metalness), specular F0 = mix(0.04, albedo, metalness),
+            // alpha = roughness^2; roughness is clamped as three.js does (0.04 minimum)
+            vec3 mr = texture(metal_rough_map, t_tex_coord.xy).rgb;
+            float roughness = clamp(roughness_factor * mr.g, 0.04, 1.0);
+            float metalness = clamp(metalness_factor * mr.b, 0.0, 1.0);
+            pbr_active = true;
+            pbr_alpha = roughness * roughness;
+            pbr_f0 = mix(vec3(0.04), albedo, metalness);
+            diffuse = albedo * (1.0 - metalness);
+        }
+
+        base_color.rgb = krunker_lambert(diffuse, normal);
     }
 
     if (use_env_map) {
         vec3 n = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+        // the reflection follows the normal map too (three.js: normal_fragment_maps before envmap_fragment)
+        if (use_normal_map) n = krunker_perturb_normal(n, t_tex_coord.xy, krunker_normal_map_sample(t_tex_coord.xy));
         vec3 r = reflect(normalize(world_pos - camera_position), n);
         vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
         base_color.rgb = albedo * texture(env_map, env_uv).rgb * env_map_intensity + emissive_radiance;

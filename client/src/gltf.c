@@ -24,6 +24,13 @@ typedef struct {
     float alpha_test;         // alphaMode MASK: alphaCutoff
     int blend;                // alphaMode BLEND
     int double_sided;
+    int mr_image;             // metallicRoughnessTexture (G roughness, B metalness; linear), -1 = none
+    int mr_sampler;
+    int normal_image;         // normalTexture (tangent space; linear), -1 = none
+    int normal_sampler;
+    float metallic;           // metallicFactor (glTF default 1)
+    float roughness;          // roughnessFactor (glTF default 1)
+    float normal_scale;       // normalTexture.scale
 } GltfMaterial;
 
 typedef struct {
@@ -365,12 +372,16 @@ static void load_materials(GltfModel *model) {
         const cgltf_material *src = &data->materials[i];
         GltfMaterial *m = &model->materials[i];
         m->color = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
-        m->base_image = m->emissive_image = -1;
-        m->base_sampler = m->emissive_sampler = -1;
+        m->base_image = m->emissive_image = m->mr_image = m->normal_image = -1;
+        m->base_sampler = m->emissive_sampler = m->mr_sampler = m->normal_sampler = -1;
+        m->metallic = m->roughness = m->normal_scale = 1.0f;
         if (src->has_pbr_metallic_roughness) {
             const float *f = src->pbr_metallic_roughness.base_color_factor;
             m->color = (vec4) {f[0], f[1], f[2], f[3]};
             m->base_image = texture_view_image(&src->pbr_metallic_roughness.base_color_texture, data, &m->base_sampler);
+            m->metallic = src->pbr_metallic_roughness.metallic_factor;
+            m->roughness = src->pbr_metallic_roughness.roughness_factor;
+            m->mr_image = texture_view_image(&src->pbr_metallic_roughness.metallic_roughness_texture, data, &m->mr_sampler);
         } else if (src->has_pbr_specular_glossiness) {
             const float *f = src->pbr_specular_glossiness.diffuse_factor;
             m->color = (vec4) {f[0], f[1], f[2], f[3]};
@@ -379,6 +390,8 @@ static void load_materials(GltfModel *model) {
         const float *e = src->emissive_factor;
         float strength = src->has_emissive_strength ? src->emissive_strength.emissive_strength : 1.0f;
         m->emissive_image = texture_view_image(&src->emissive_texture, data, &m->emissive_sampler);
+        m->normal_image = texture_view_image(&src->normal_texture, data, &m->normal_sampler);
+        if (m->normal_image >= 0) m->normal_scale = src->normal_texture.scale;
         if (e[0] > 0.0f || e[1] > 0.0f || e[2] > 0.0f) m->emissive = (vec4) {e[0], e[1], e[2], strength};
         if (src->alpha_mode == cgltf_alpha_mode_mask) m->alpha_test = src->alpha_cutoff;
         m->blend = src->alpha_mode == cgltf_alpha_mode_blend;
@@ -782,6 +795,12 @@ static Mesh *instance_mesh(const GltfModel *model, const GltfPrimitive *prim, Ge
             material->emissive_texture = gltf_texture((GltfModel *) model, m->emissive_image, m->emissive_sampler);
             if (material->emissive.w == 0.0f) material->emissive = (vec4) {1.0f, 1.0f, 1.0f, 1.0f};
         }
+        // PBR maps (basic.frag's PBR path): a map that fails to load leaves 0 and the material unchanged
+        material->metal_rough_texture = gltf_texture((GltfModel *) model, m->mr_image, m->mr_sampler);
+        material->normal_texture = gltf_texture((GltfModel *) model, m->normal_image, m->normal_sampler);
+        material->metalness_factor = m->metallic;
+        material->roughness_factor = m->roughness;
+        material->normal_scale = m->normal_scale;
         material->alpha_test = m->alpha_test;
         material->base.transparent = m->blend;
         // render.js loadAnimMesh: depthWrite = !transparent for gltf/glb

@@ -17,9 +17,11 @@
 // EXT_meshopt_compression (v7's AI / map .glb user assets) is decoded at load
 // (client/src/gltf_meshopt.c). Not supported (the model loads without them, with a warning): other
 // required compression extensions (KHR_draco_mesh_compression: the model fails to load), EXT_texture_webp images,
-// non-triangle primitives, PBR metal/roughness/normal/occlusion maps (BasicMaterial is
-// Lambert/Phong like the rest of the scene), KHR_materials_* extensions. Env maps (skin `env`)
-// are a BasicMaterial feature still to come.
+// non-triangle primitives, occlusion maps, KHR_materials_* extensions. The metallicRoughness and normal
+// maps are read onto BasicMaterial (basic.frag's PBR path: GGX with the metal / roughness of the map, the
+// normal map perturbing the lit normal; metallicFactor / roughnessFactor / normalScale). A material with
+// no such map is lit by the lighting setting like the rest of the scene (Lambert / Phong / Standard).
+// Env maps (skin `env`) are a BasicMaterial feature still to come.
 #include <client.h>
 
 typedef struct GltfModel GltfModel;

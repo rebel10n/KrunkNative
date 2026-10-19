@@ -280,6 +280,15 @@ typedef struct {
     unsigned int env_map;     // envMap "<tex>_env" (EquirectangularReflectionMapping), texture unit 4, 0 = none
     float env_map_intensity;  // envMapIntensity (skin env || 3)
     int projection_uv;        // skin `projection`: screen-space texture coordinates (render.js vTexCoords)
+
+    // glTF PBR maps (gltf.c, three.js MeshStandardMaterial): metallicRoughnessTexture (G = roughness,
+    // B = metalness, times the factors; unit 5) and normalTexture (tangent space, normalScale; unit 6).
+    // 0 = none: the material keeps the lighting setting's own model (basic.frag)
+    unsigned int metal_rough_texture;
+    unsigned int normal_texture;
+    float metalness_factor;   // metallicFactor (1 by glTF default)
+    float roughness_factor;   // roughnessFactor (1 by glTF default)
+    float normal_scale;       // normalTexture.scale (1 by glTF default)
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -289,6 +298,8 @@ BasicMaterial *basic_material_init();
 #define BASIC_EMISSIVE_TEXTURE_UNIT 2
 #define BASIC_LIGHT_MAP_TEXTURE_UNIT 3 // BasicMaterial.light_map (map-G)
 #define BASIC_ENV_MAP_TEXTURE_UNIT 4   // BasicMaterial.env_map (WP-F skin env)
+#define BASIC_METAL_ROUGHNESS_TEXTURE_UNIT 5 // BasicMaterial.metal_rough_texture (glTF metallicRoughnessTexture)
+#define BASIC_NORMAL_TEXTURE_UNIT 6          // BasicMaterial.normal_texture (glTF normalTexture)
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the
