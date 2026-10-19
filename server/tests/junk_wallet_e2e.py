@@ -176,7 +176,7 @@ def main():
         user = "jwe%d" % (os.getpid() % 100000)
         st, reg = http(port, "/auth/register", {"username": user, "password": "pw-junk-e2e-%d" % os.getpid()})
         token = reg.get("token", "") if isinstance(reg, dict) else ""
-        check("an account registers and signs in with a session token", st == 200 and token, str(reg)[:200])
+        check("an account registers and signs in with a session token", st == 200 and token, "HTTP %d" % st) # (no reply: it holds the token)
         if not token:
             return 1
         rows = db_exec(cfg, "SELECT id FROM accounts WHERE username = ?", (user,))
