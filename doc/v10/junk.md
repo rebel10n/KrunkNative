@@ -54,10 +54,10 @@ Accounts ops (services/brain/accounts.c, doc/backend.md section 5) with `args.id
 | `junk_credit` | `{id, amount, reason}` (amount in hundredths) | `{junk: "12.34", credited: 5}` | "Account not found.", "Invalid amount." |
 | `junk_spend` | `{id, amount, reason}` | `{junk: "12.29"}` | "Not enough Junk", "Account not found." |
 
-Every reply's `junk` is the balance after the call, as a decimal string. A successful credit or spend
-that the game server did not ask for in a reply (a `junk_credit` from a game) also pushes the new
-balance to the account's social sockets: `["uj", "12.34"]` (v10's UPDATE_FUNDS, junk part; `uf` is the
-profile activity frame and stays).
+Every reply's `junk` is the balance after the call, as a decimal string. Every successful credit or
+spend also pushes the new balance to the account's social sockets: `["uj", "12.34"]` (v10's
+UPDATE_FUNDS, junk part; `uf` is the profile activity frame and stays), so a game's credit reaches the
+navbar while the player is signed in.
 
 Game servers send `junk_credit` with `reason` one of `trigger` (Reward Junk) and `airdrop` (Junk
 Package); the ops above accept any reason of at most 32 characters.
@@ -69,7 +69,7 @@ Package); the ops above accept any reason of at most 32 characters.
 - The social socket's account info (`social_account_info`, the info object of the `a` frame and of
   `ua`): `junk` is copied with the other keys. The client reads it into `AccountInfo.junk` (the same
   field the navbar and the Account window already show, `client/src/ui/v10_menu.c`,
-  `account_ui.c`). Missing or non-numeric reads as 0.00.
+  `account_ui.c`). An info without the key keeps the value it had; non-numeric text reads as 0.00.
 - The client never computes a balance. It only displays the brain's value.
 
 ## 5. Where Junk is earned
@@ -78,14 +78,16 @@ Package); the ops above accept any reason of at most 32 characters.
 |---|---|---|
 | Reward Junk trigger (action 59, `triggers.js:1392-1404`, `v10:163451-163455`) | `(!isSandbox && isPubType() && account)` and `v = parseFloat(trigConstTx || 0)`, `!!v && !(v >= 100)` -> `sendUserJunk("trigger", player, v)`. devOnly in the editor. | Credits `llround(v*100)` hundredths with reason `trigger`. Only for a player with a brain account in a public, non-sandbox game (triggers_actions.c `reward_junk`). Bots never. |
 | Junk Package (airdrop, `airDropPackages.js:122-130`, `v10:178614-178676`) | Rarity 0..6 = 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2.5 Junk. `send("am", [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1])`, then `sendUserJunk("airdrop", claimer, amount)`. | The same amounts (shared/src/airdrop.c). The popup goes to every human claimer, guests included (v10 gives guests an account object). The credit needs a brain account; a guest has none, so a guest gets the popup only. |
-| Battle Pass junk cards (`bpclm`, `v10:` claimItemRes junk, `jnkdata`) | Each claimed card pays its `jnk`. | Credited with reason `battlepass` when the card is claimed (db_season.c `claim_cards`). |
-| Quick sell, junk mode (`qsi` mode 1, v10 `canJunk`) | Junk per item = the rarity's `scrap` (Contraband 5, Unobtainable 50; the item's `minQuickSell` gives 0.01 when it has a scrap value; `noQuickSell` and skins without a scrap value cannot). v10's per-skin `qsJunk` is not in the data bundle. | Credited with reason `quicksell` (economy.c, db_economy.c `run_quick_sell`). |
+| Battle Pass junk cards (`bpclm`, `v10:` claimItemRes junk, `jnkdata`) | Each claimed card pays its `jnk`. | Credited with reason `battlepass` when the card is claimed (db_season.c `claim_cards`); the account is pushed again (`ua`, which carries the junk). KN's Season 7 pass has an empty `jnkdata` (no junk card yet), so nothing pays until a pass has one. |
+| Quick sell, junk mode (`qsi` mode 1, v10 `canJunk`) | Junk per item = the rarity's `scrap` (Contraband 5, Unobtainable 50; the item's `minQuickSell` gives 0.01 when it has a scrap value; `noQuickSell` and skins without a scrap value cannot). v10's per-skin `qsJunk` is not in the data bundle. | **Not built**: the quick sell window has no Junk button and the brain still refuses mode 1 (economy.c). The rule above is the one to build: reason `quicksell`, in `run_quick_sell`. |
 | Challenge rewards (`chall`) | v7 / v10 challenge data carries no Junk in KN's catalogue. | Nothing. |
 | Shop purchases with a Junk reward (`currency` "jnk", `_38968`, `v10:113972-113976`) | A store item that grants Junk (the amount is hundredths). | Nothing: KN's store sells no Junk packs. |
 | Map rotation junk and the other v10 `item_flow` sources | Not in KN's maps or market. | Nothing. |
 
 Shared rule for every source: a credit is written when the amount is positive; a credit below half a
-hundredth (0.005) rounds to nothing. The chat line below follows a credit that the brain accepted.
+hundredth (0.005) rounds to nothing. A negative Reward Junk amount is not credited: v7 would subtract it,
+but the wallet never goes below 0 (KN deviation, triggers_actions.c `reward_junk`). The chat line below
+follows a credit that the brain accepted.
 
 ## 6. Where Junk is spent
 
@@ -122,10 +124,22 @@ with its own reason; they are not built.
 
 ## 9. Tests
 
-- `services/brain/tests/junk_test.py` (ctest `brain_junk`, PostgreSQL and SQLite): credit, spend,
-  insufficient (no write), the ledger sum, a credit push to the social socket, the account JSON
-  string, bad amounts, and a Battle Pass junk card.
-- `shared/tests/junk_test.c` (ctest `shared_junk`): the amount helpers, and a scripted account (a
-  GameHooks stub) through the Reward Junk gates (public, non-sandbox, human, account, amount < 100)
-  and the airdrop packages' amounts and popups.
-- `client/tests` (ctest `client_junk_counter`): the navbar's text and the account info parse.
+- `services/brain/tests/junk_test.py` (ctest `brain_junk`, `brain_junk_sqlite`, `brain_junk_postgres`):
+  credit, spend, "Not enough Junk" (no write), the ledger sum, the `uj` push to the social socket, the
+  account JSON and login info text, bad amounts, unknown accounts, and six parallel spends at one balance.
+  The Battle Pass junk card is not in this test (KN's seeded pass has none).
+- `shared/tests/junk_test.c` (`make test`, `junk_test`): the amount helpers (hundredths, the two-place
+  text, parseFloat's reading, non-finite values).
+- `shared/tests/triggers_test.c` (`test_reward_junk`): a scripted account (the test's account hook) and
+  a scripted wallet (`GameHooks.junk_credit`): Reward Junk 0.01 / 2.5 / 99.99 credits, 100, 0, -1, 'abc',
+  '0x10', a guest, a bot and the sandbox do not, and no chat line leaves the game.
+- `shared/tests/zombies_test.c` (the Junk Packages): the popup to every human claimer, the credit only
+  for an account (0.05 / 2.50 / 0.05 hundredths), nothing for a guest or a bot, and no chat line.
+- `server/tests/pickup_chat_e2e.py` (`make pickup-chat-e2e`): a standalone server has no brain: the
+  pickups are destroyed and print no line.
+- `server/tests/junk_wallet_e2e.py`: a headless client on the v10 page, signed in to a brain account
+  with 12.34 Junk: the navbar's Junk counter reads "12.34" (the login info), then a scripted game
+  server's credit of 0.05 makes it read "12.39" through the `uj` push, without signing in again.
+
+Not covered by a test: the server printing "You found [x] Junk" after the brain's reply (the reply
+routing in server/src/accounts.c `acc_handle_junk_reply`), and the Battle Pass junk card.
