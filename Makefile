@@ -378,6 +378,9 @@ user-assets-test: build ## A community map's Krunker user assets (texture, OBJ m
 console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)
 
+crash-capture-test: build ## Crash capture: a forced NULL dereference writes a report with a frame list, the next start names it once, a forced 6 s stall writes a freeze dump and the client keeps running (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/crash_capture_e2e.py $(DEBUG_DIR)
+
 raw-mouse-test: build ## Raw mouse motion has one switch (Controls > Raw Mouse Input): on by default, off and on by click, stored Raw Input migrates once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raw_mouse_e2e.py $(DEBUG_DIR)
 
@@ -405,7 +408,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test account-manager-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
+.PHONY: mod-keys-f6-test store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test account-manager-test asset-fetch-test console-settings-test crash-capture-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
