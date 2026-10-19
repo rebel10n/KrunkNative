@@ -634,15 +634,48 @@ static void socket_opened(void) {
     on_client_socket_connect(client);
 }
 
+// "none" or the text in quotes (the disconnect line's tail)
+static void tail_text(char *out, const size_t n, const char *text) {
+    if (text && text[0]) snprintf(out, n, "\"%s\"", text);
+    else snprintf(out, n, "none");
+}
+
+// The disconnect line's tail: the age of the last "q" window sent, the last frame type sent and received, the
+// server's error text and its Close reason (names and server text only: no ids, no tokens). K.lock.
+static void socket_tail(char *out, const size_t n, const char *server_reason) {
+    char sent[sizeof(K.link.last_sent)], recv[sizeof(K.link.last_recv)], error[sizeof(K.link.error_text)];
+    int error_seen;
+    double input_ms;
+    pthread_mutex_lock(&K.lock);
+    snprintf(sent, sizeof(sent), "%s", K.link.last_sent);
+    snprintf(recv, sizeof(recv), "%s", K.link.last_recv);
+    snprintf(error, sizeof(error), "%s", K.link.error_text);
+    error_seen = K.link.error_seen;
+    input_ms = K.link.last_input_ms;
+    pthread_mutex_unlock(&K.lock);
+    char input[48], sent_q[24], recv_q[24], error_q[160], close_q[160];
+    if (input_ms < 0) snprintf(input, sizeof(input), "last input never");
+    else snprintf(input, sizeof(input), "last input %.1f s ago", (link_now_ms(NULL) - input_ms) / 1000.0);
+    tail_text(sent_q, sizeof(sent_q), sent);
+    tail_text(recv_q, sizeof(recv_q), recv);
+    if (error_seen) snprintf(error_q, sizeof(error_q), "\"%s\"", error);
+    else snprintf(error_q, sizeof(error_q), "none");
+    tail_text(close_q, sizeof(close_q), server_reason);
+    snprintf(out, n, ", %s, last sent %s, last received %s, server error %s, close reason %s", input, sent_q, recv_q, error_q, close_q);
+}
+
 // The socket ended (any thread). reason: the close reason (logs, the drop text); message: the
-// player's sentence for a connect that never opened (NULL: K.tpl's, from reason).
-static void socket_closed(const int code, const char *reason, const char *failed) {
+// player's sentence for a connect that never opened (NULL: K.tpl's, from reason). server_reason: the Close
+// frame's reason text as the server sent it (NULL or "": none).
+static void socket_closed(const int code, const char *reason, const char *failed, const char *server_reason) {
     Client *client = K.client;
     pthread_mutex_lock(&client->net_lock);
     if (client->net_socket == KRUNKER_FAKE_FD) client->net_socket = -1; // (another transport may own it by now)
     pthread_mutex_unlock(&client->net_lock);
-    printf("[krunker] socket closed (code %d%s%s): %u frames in, %u out, %u cheat checks answered, %u unanswered\n", code,
-           reason && reason[0] ? ": " : "", reason ? reason : "", K.link.frames_in, K.link.frames_out, K.link.cc_answered, K.link.cc_failed);
+    char tail[512];
+    socket_tail(tail, sizeof(tail), server_reason);
+    printf("[krunker] socket closed (code %d%s%s): %u frames in, %u out, %u cheat checks answered, %u unanswered%s\n", code,
+           reason && reason[0] ? ": " : "", reason ? reason : "", K.link.frames_in, K.link.frames_out, K.link.cc_answered, K.link.cc_failed, tail);
     if (K.connected) {
         K.connected = 0;
         client_net_set_drop(client, "closed", code, "krunker.io closed the connection (code %d%s%s)", code, reason && reason[0] ? ": " : "",
@@ -711,7 +744,7 @@ static bool ws_on_close(int type, const EmscriptenWebSocketCloseEvent *e, void *
     if (e->socket != K.ws) return true; // an older socket
     K.ws = 0;
     if ((unsigned) (uintptr_t) user == K.generation && K.state != KS_OFF) K.state = KS_CLOSED;
-    socket_closed(e->code, e->reason, NULL);
+    socket_closed(e->code, e->reason, NULL, e->reason);
     return true;
 }
 
@@ -740,7 +773,7 @@ static void ws_close(void) {
     const EMSCRIPTEN_WEBSOCKET_T old = K.ws;
     K.ws = 0;
     emscripten_websocket_close(old, 1000, "leave");
-    if (K.connected) socket_closed(1000, "left", NULL);
+    if (K.connected) socket_closed(1000, "left", NULL, NULL);
 }
 
 // ---------------------------------------------------------------- native socket
@@ -897,6 +930,7 @@ static void *ws_thread(void *arg) {
     int code = 1006, status = 0;
     const char *why = "";
     char failed[300] = ""; // the player's sentence (K.tpl: looked up on the main thread)
+    char server_reason[128] = ""; // the Close frame's reason text (the server's; logs only)
     if (!ws_url_split(K.ws_url, &a, target, sizeof(target))) {
         why = "bad WebSocket URL";
         i18n_replace(failed, sizeof(failed), K.tpl.ws_failed, 1, I18N_ARGV(why));
@@ -956,6 +990,7 @@ static void *ws_thread(void *arg) {
             if (head[1] & 0x80) for (uint64_t i = 0; i < len; i++) payload[i] ^= mask[i & 3];
             if (opcode == 8) { // close: status code + reason
                 code = len >= 2 ? payload[0] << 8 | payload[1] : 1005;
+                krunker_link_log_text(server_reason, sizeof(server_reason), len > 2 ? (const char *) payload + 2 : "", len > 2 ? (size_t) (len - 2) : 0);
                 free(payload);
                 why = "closed by the server";
                 break;
@@ -998,7 +1033,7 @@ static void *ws_thread(void *arg) {
     if (c.fd >= 0) http_conn_close(&c);
     if (generation == K.generation && K.state != KS_OFF) K.state = KS_CLOSED;
     if (K.quit && !K.connected) return NULL; // left while connecting: nothing to report
-    socket_closed(code, why, failed);
+    socket_closed(code, why, failed, server_reason);
     return NULL;
 }
 

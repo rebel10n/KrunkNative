@@ -318,7 +318,18 @@ typedef struct {
     unsigned q_sent, q_frames;
     int last_isn_sent, last_ack;
     float sync_pos[3];
+    // the disconnect line's tail (krunker_net.c socket_closed): the io clock (ms) of the last "q" window that
+    // left (-1 none yet), the wire names of the last frame sent and of the last received, and the text of the
+    // last "error" packet as the server sent it (error_seen: one came). Names and server text only, no ids.
+    double last_input_ms;
+    char last_sent[16], last_recv[16];
+    char error_text[128];
+    int error_seen;
 } KrunkerLink;
+
+// Copies `len` bytes of server or wire text into dst (NUL-terminated, at most dst_len - 1 bytes), with every byte
+// outside printable ASCII shown as '?' (logs only: a Close reason or an error text is not trusted to be clean).
+void krunker_link_log_text(char *dst, size_t dst_len, const char *src, size_t len);
 
 // Whether our client builds input frames now. v10's gameLoop builds, predicts and sends none while
 // window.locked ("lock") or while it has no player of its own (`you && you.active && !locked`,

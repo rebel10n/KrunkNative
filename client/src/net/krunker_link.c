@@ -113,6 +113,16 @@ static void player_remove(KrunkerLink *l, const int sid) {
     }
 }
 
+void krunker_link_log_text(char *dst, const size_t dst_len, const char *src, const size_t len) {
+    if (!dst_len) return;
+    size_t i = 0;
+    for (; src && i < len && i + 1 < dst_len; i++) {
+        const unsigned char c = (unsigned char) src[i];
+        dst[i] = c >= 0x20 && c < 0x7f ? (char) c : '?';
+    }
+    dst[i] = 0;
+}
+
 int krunker_link_send(KrunkerLink *l, const char *wire, const KrunkerValue *args, const size_t argc) {
     KrunkerBuf buf = {0};
     if (!wire || krunker_proto_encode(&l->codec, wire, args, argc, &buf) != KRUNKER_PROTO_OK) {
@@ -121,6 +131,7 @@ int krunker_link_send(KrunkerLink *l, const char *wire, const KrunkerValue *args
     }
     if (l->io.send) l->io.send(l->io.user, buf.data, buf.len);
     l->frames_out++;
+    krunker_link_log_text(l->last_sent, sizeof(l->last_sent), wire, strlen(wire));
     krunker_buf_free(&buf);
     return 1;
 }
@@ -152,6 +163,7 @@ void krunker_link_reset(KrunkerLink *l) {
     l->tick_hz = 30;
     l->sync_hz = 1;
     l->last_isn_sent = l->last_ack = -1;
+    l->last_input_ms = -1.0;
     l->pc_stat = -1;
     l->team_pick = 1; // toggleTeam's default (iïíiîiì = 1, :210435)
 }
@@ -1625,6 +1637,8 @@ static void on_error(KrunkerLink *l, const KrunkerFrame *f) {
     memset(&e, 0, sizeof(e));
     const char *msg = krunker_str(arg(f, 0));
     snprintf(e.message, sizeof(e.message), "%s", msg && msg[0] ? msg : "Disconnected by krunker.io");
+    krunker_link_log_text(l->error_text, sizeof(l->error_text), msg ? msg : "", msg ? strlen(msg) : 0);
+    l->error_seen = 1;
     char code[16];
     id_string(arg(f, 1), code, sizeof(code));
     snprintf(e.code, sizeof(e.code), "%s", code[0] ? code : "000000");
@@ -2533,6 +2547,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         return 0;
     }
     l->frames_in++;
+    krunker_link_log_text(l->last_recv, sizeof(l->last_recv), f.name, f.name_len);
     account_frame(l, &f);
     switch (krunker_s2c_lookup(f.name, f.name_len)) {
         case KRUNKER_S2C_IO_INIT:
@@ -2995,6 +3010,7 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
         l->q_sent++;
         l->q_frames += (unsigned) n;
         l->last_isn_sent = (int) last_isn;
+        l->last_input_ms = link_now_ms(l);
     }
     memcpy(l->prev_angles, angles, sizeof(double) * (size_t) angle_count);
     l->prev_angle_count = angle_count;

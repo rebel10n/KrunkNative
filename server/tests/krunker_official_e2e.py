@@ -129,7 +129,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
-        "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -803,6 +803,21 @@ class Stub:
                 await asyncio.sleep(3.0)
                 self.sent["error"] = time.monotonic()
                 await send("error", KICK_TEXT, KICK_CODE)
+                for _ in range(150):
+                    if stop.is_set():
+                        break
+                    await asyncio.sleep(0.1)
+            elif self.got_en.is_set() and self.scenario == "kickclose":
+                # run_native_kick_close: the server's kick (v10: send(ERROR, text) then socket.close()): an "error"
+                # with its text, then a Close frame with a status code and a reason (the client logs both)
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await asyncio.sleep(3.0)
+                self.sent["error"] = time.monotonic()
+                await send("error", KICK_CLOSE_TEXT)
+                self.sent["close"] = time.monotonic()
+                close_body = bytes([KICK_CLOSE_CODE >> 8, KICK_CLOSE_CODE & 0xFF]) + KICK_CLOSE_REASON.encode()
+                ws.transport.write(bytes([0x88, len(close_body)]) + close_body)  # FIN + Close: code and reason
                 for _ in range(150):
                     if stop.is_set():
                         break
@@ -3066,6 +3081,8 @@ def run_native_badmap():
 
 
 KICK_TEXT, KICK_CODE = "Kicked for inactivity", "000005"
+KICK_CLOSE_TEXT = "Connection Error"  # the official server's "error" text in the live "Connection Error" kick (no code)
+KICK_CLOSE_CODE, KICK_CLOSE_REASON = 4001, "server test close reason"  # the Close frame's status code and reason
 
 
 def run_native_actions():
@@ -3157,6 +3174,50 @@ def run_native_kick():
     st = re.findall(r"\[input_script\] state t=\d+ .*", text)
     check(f"{label}: the game stopped: the menu is back, the pointer free", st and " menu=1 locked=0 " in st[-1], st[-1:])
     check(f"{label}: no reconnect by itself", len(stub.ws_paths) == 1, stub.ws_paths)
+
+
+def run_native_kick_close():
+    """The official server ends a session the way its kick does (v10: send(ERROR, text) then socket.close()): an
+    "error" with its text, then a Close frame with a status code and a reason. The client logs the close as that
+    code "closed by the server", with the close line's tail (the age of the last "q", the last frames, the server's
+    error text and close reason), shows the server's text on v10's error screen, leaves the game itself, does not
+    reconnect by itself, and does not read it as a cheat kick (no cheat-check wording in the leave or the screen)."""
+    label = "native-kick-close"
+    script = ("0 boot\n3800 play\n13000 text @screen [id=instructionsUpdate]\n13300 vis @pop genericPop\n13400 state\n13600 quit\n")
+    stub, p, out, log = launch_native(label, script, {}, scenario="kickclose")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: the stub sent its \"error\" and then the Close frame", "error" in stub.sent and "close" in stub.sent, sorted(stub.sent))
+    closed = stub.client_closed_t is not None and "error" in stub.sent and stub.client_closed_t - stub.sent["error"] < 5
+    check(f"{label}: the client closed the socket itself after the server's Close", closed, (stub.client_closed_t, stub.sent.get("error")))
+    socket_closed = [l for l in lines if l.startswith("[krunker] socket closed")]
+    check(f"{label}: the close is read as the server's code, closed by the server", any(f"(code {KICK_CLOSE_CODE}: closed by the server)" in l for l in socket_closed), socket_closed[:2])
+    # the close line's tail: the seconds since the last "q" window, the last frame sent and received, the server's error text and close reason
+    tail = [re.search(r", last input (never|[\d.]+ s ago), last sent (\S+), last received (\S+), server error \"([^\"]*)\", close reason \"([^\"]*)\"$", l)
+            for l in socket_closed]
+    tail = next((m for m in tail if m), None)
+    check(f"{label}: the close line has the input age, the last frames, the server's error and close reason", tail is not None, socket_closed[:2])
+    if tail:
+        age = tail.group(1)
+        check(f"{label}: the last input is a few seconds old at most (the client was playing)", age != "never" and float(age.split()[0]) < 10, age)
+        check(f"{label}: the last frame received is the server's error", tail.group(3) == '"error"', tail.group(3))
+        check(f"{label}: the last frame sent is the client's input", tail.group(2) == '"q"', tail.group(2))
+        check(f"{label}: the close line logs the server's error text", tail.group(4) == KICK_CLOSE_TEXT, tail.group(4))
+        check(f"{label}: the close line logs the server's close reason", tail.group(5) == KICK_CLOSE_REASON, tail.group(5))
+    check(f"{label}: the server's error text is the drop reason", any(f"disconnected from server: {KICK_CLOSE_TEXT} (000000)" in l for l in lines),
+          [l for l in lines if "disconnected from server" in l][:2])
+    screen = [l for l in lines if "[ui log] error screen" in l]
+    check(f"{label}: the error screen takes the server's text", any(KICK_CLOSE_TEXT in l for l in screen), screen[:2])
+    leave = [l for l in lines if "[krunker] leaving the official game" in l]
+    check(f"{label}: the official game is left with that text", any(KICK_CLOSE_TEXT in l for l in leave), leave[:2])
+    first_close = next((i for i, l in enumerate(lines) if l.startswith("[krunker] socket closed")), len(lines))
+    # (the socket-closed line's "cheat checks answered" counts are stats, not a verdict: the client has no cheat kick of its own)
+    cheat = [l for l in lines[first_close + 1:] if "cheat check" in l.lower()] + [l for l in screen if "cheat" in l.lower()]
+    check(f"{label}: no cheat-check wording after the close or on the error screen", not cheat, cheat[:3])
+    check(f"{label}: no reconnect by itself", len(stub.ws_paths) == 1, stub.ws_paths)
+    st = re.findall(r"\[input_script\] state t=\d+ .*", text)
+    check(f"{label}: the game stopped: the menu is back", st and " menu=1 locked=0 " in st[-1], st[-1:])
 
 
 def q_dts(args):
@@ -4332,6 +4393,7 @@ def main():
         run_native_kio_list()
         run_native_badmap()
         run_native_kick()
+        run_native_kick_close()
         run_native_frame_cap()
         run_native_fx()
         run_native_optout()
@@ -4393,6 +4455,8 @@ def main():
         run_native_full_answer()
         run_native_f4_stays_official()
         run_native_seek_modes()
+    if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)
+        run_native_kick_close()
     if ONLY == "framecap" and os.path.isfile(f"{BUILD}/client_bin"):  # just the input frame cap run (a stalled frame's dt)
         run_native_frame_cap()
     if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
