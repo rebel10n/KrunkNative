@@ -159,7 +159,7 @@ def main():
     check("--ruleset is not an option (exit 2)", rc == 2 and "--ruleset" not in read_log(log2).split("Usage", 1)[-1], f"rc {rc}")
 
     # 3. the client: no picker, no console command, plays offline and online
-    text, stale = run_client("offline", ["--offline", "assets/maps/kanji.json"],
+    text, stale = run_client("offline", ["--offline", "assets/maps/official/10_kanji.json"],
                              "0 play\n1500 state\n1600 con help ruleset\n1650 con help official_sync\n2500 quit\n")
     check("client: logs Krunker v10.0.2", "[client] Krunker v10.0.2" in text)
     check("client: the stale knRuleset entry is removed", not stale)

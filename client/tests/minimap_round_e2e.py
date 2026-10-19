@@ -70,7 +70,7 @@ def run(name, script, size="1280x720", settings=None, fixed=True, timeout=300):
     if fixed:
         env["KRUNKNATIVE_FIXED_DELTA"] = "16.667"
     with open(log, "w") as f:
-        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"],
+        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"],
                              stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
                              start_new_session=True)
         try:

@@ -1222,7 +1222,7 @@ static void test_interact_hold(Game *game) {
     CHECK(a->interact_progress == 0.0f && !a->making_progress && !a->doing_interact, "spawn: interProg / makingProg / doingInter reset");
     tm_restore(game, &tm);
 
-    // Freight's "pickup Junk" (assets/maps/freight.json; its "si" 586 size written out as the
+    // Freight's "pickup Junk" (assets/maps/official/06_freight.json; its "si" 586 size written out as the
     // Object Manager's Junk "s"), placed at the origin: an
     // onInteractKey trigger without Event Value, so no hold; one "int" 7 takes it (selfDestruct).
     const char *json =

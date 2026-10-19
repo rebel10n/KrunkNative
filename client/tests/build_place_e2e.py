@@ -38,7 +38,7 @@ BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-build-place-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 ASSETS = os.environ.get("KRUNKNATIVE_ASSETS_DIR", os.path.abspath("assets"))
-MAP = os.path.join(ASSETS, "maps", "lostworld_s6.json")
+MAP = os.path.join(ASSETS, "maps", "official", "07_lostworld.json")
 SPOT = "-19 50.5 140"  # Lostworld's first spawn: the floor ahead along +x (yaw -PI/2)
 DELAY_MS = "150"
 results = []

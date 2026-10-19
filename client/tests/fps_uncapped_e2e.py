@@ -68,7 +68,7 @@ def run_client(name, args, stores=None, windowed=True, extra=None, timeout=120):
     with open(script, "w") as f:
         f.write("0 play\n4000 quit\n")
     env = clean_env(name, {"KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": "16.667", **(extra or {})})
-    cmd = [f"{BUILD}/client_bin", *args, "assets/maps/kanji.json"]
+    cmd = [f"{BUILD}/client_bin", *args, "assets/maps/official/10_kanji.json"]
     if windowed:
         cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24"] + cmd
     log = os.path.join(base, "client.log")

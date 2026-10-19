@@ -695,7 +695,7 @@ static float stop_x(Player *p, const Object *o, const float y, const float half_
 // hbw = hbh = 0.1) blocked the whole canopy AABB before.
 static void test_prop_collision(void) {
     printf("Running prop collision (Lumber, v7 GameObject boxes) test...\n");
-    cJSON *json = load_map("assets/maps/lumber.json");
+    cJSON *json = load_map("assets/maps/official/12_lumber.json");
     Game game;
     game_on(&game, json, 0);
     CHECK(game.ready, "Lumber loaded");

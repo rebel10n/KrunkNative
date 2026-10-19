@@ -893,8 +893,8 @@ int main(void) {
     test_chall_mode(&game);
     test_knife_ends();
     test_knife_zones();
-    test_knife_map_zones("assets/maps/kanji.json");
-    test_knife_map_zones("assets/maps/sandstorm_v3.json");
+    test_knife_map_zones("assets/maps/official/10_kanji.json");
+    test_knife_map_zones("assets/maps/official/02_sandstorm.json");
 
     if (g_failures) {
         printf("combat_test: %d of %d checks failed\n", g_failures, g_checks);

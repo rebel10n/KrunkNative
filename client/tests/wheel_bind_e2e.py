@@ -70,7 +70,7 @@ def run(name, script, seed_settings=None, timeout=240):
                 "KRUNKNATIVE_INPUT_SCRIPT": script_path, "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS),
                 "KRUNKNATIVE_INPUT_LOG": csv_path, "KRUNKNATIVE_WINDOW_SIZE": "640x360"})
     with open(log, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
+        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)

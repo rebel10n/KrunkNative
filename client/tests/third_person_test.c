@@ -401,9 +401,9 @@ static void test_permission(void) {
 int main(void) {
     test_synthetic();
     test_pitch();
-    test_map("assets/maps/kanji.json");
-    test_map("assets/maps/sandstorm_v3.json");
-    test_map("assets/maps/krunk_plaza_v2.json"); // baked "cpx" triangles
+    test_map("assets/maps/official/10_kanji.json");
+    test_map("assets/maps/official/02_sandstorm.json");
+    test_map("assets/maps/official/20_krunk_plaza.json"); // baked "cpx" triangles
     test_permission();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

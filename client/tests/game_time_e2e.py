@@ -137,7 +137,7 @@ def client_run(tag, script, token=None, extra_env=None, timeout=240):
     if token:
         env["KRUNKNATIVE_BRAIN_URL"] = "http://127.0.0.1:%d" % BRAIN_PORT[0]
     with open(log_path, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--offline", "assets/maps/kanji.json"], stdout=out,
+        p = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)
         try:
             p.wait(timeout=timeout)

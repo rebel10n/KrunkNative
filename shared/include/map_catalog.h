@@ -4,9 +4,9 @@
 // The KrunkNative map catalogue: every map the game ships, in its order, with the ids and names
 // its UI, rotation, host window, Games window and `map` command use.
 //
-//   index 0..31   Krunker v7.1.4's official maps (src/data/maps.js), so a catalogue index here
-//                 IS the v7.1.4 mapIndex (assets/maps/<fileName>.json, imported unmodified by
-//                 tools/maps/import_v7_maps.py; thumbnails ui/img/maps/map_<index>.png)
+//   index 0..31   Krunker's official maps, so a catalogue index here IS the official mapIndex (the v10.0.2
+//                 list, krunker_maps.h, whose first 32 are v7.1.4's data/maps.js): the file is the v10.0.2
+//                 file assets/maps/official/<NN>_<name>.json, unmodified (thumbnails ui/img/maps/map_<index>.png)
 //   index 32..    the community maps: Krunker_v3.1.1/custom_maps/ (assets/maps/custom/<key>.json,
 //                 ASCII filename order), then the v3.1.1 official maps as "311_<key>"
 //                 (assets/maps/311_<key>.json, their v3.1.1 MAPS order, shown as "Burg (3.1.1)"),
@@ -39,7 +39,7 @@ typedef struct {
     const char *mod_url;    // body.modURL || ""
     // Host Game card (windows[7] genHost): "by", year and version labels, "" = none
     const char *host_by, *host_year, *host_version;
-    const char *path;       // the JSON file, relative to the assets directory ("maps/kanji.json")
+    const char *path;       // the JSON file, relative to the assets directory ("maps/official/10_kanji.json")
     const char *thumb;      // the card's picture under ui/ ("img/maps/v311/map_10.png"), NULL none
 } MapCatalogEntry;
 

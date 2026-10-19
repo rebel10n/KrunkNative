@@ -151,7 +151,7 @@ def run(tag, script_text, timeout=240):
                 "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS), "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_AUDIO_LOG": "1",
                 "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_HTML_IMAGE_LOG": "1"})
     with open(log, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
+        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)

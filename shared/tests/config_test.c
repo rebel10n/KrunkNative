@@ -496,7 +496,7 @@ static const NetMatchVoteStatePacket *votes_to(const int uid) {
 static void test_votes(void) {
     printf("endData.mts / maVote / init tally...\n");
     cJSON *maps_json[4];
-    const char *names[4] = {"assets/maps/kanji.json", "assets/maps/burg_new.json", "assets/maps/lumber.json", "assets/maps/arena.json"};
+    const char *names[4] = {"assets/maps/official/10_kanji.json", "assets/maps/official/00_burg.json", "assets/maps/official/12_lumber.json", "assets/maps/official/21_arena.json"};
     for (int i = 0; i < 4; i++) {
         maps_json[i] = load(names[i]);
         CHECK(maps_json[i] != NULL, "%s", names[i]);

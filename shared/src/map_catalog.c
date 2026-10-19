@@ -1,13 +1,13 @@
-// The KrunkNative map catalogue (shared/include/map_catalog.h): Krunker v7.1.4's 32 official maps
-// plus the community maps, among them the v3.1.1 official maps as "311_<key>" and v3.1.1's
-// old_* maps (the v1.5.2 era) as "152_<key>".
+// The KrunkNative map catalogue (shared/include/map_catalog.h): Krunker's 32 official maps (the v10.0.2
+// files under assets/maps/official/, the same indices as v7.1.4's mapIndex) plus the community maps, among
+// them the v3.1.1 official maps as "311_<key>" and v3.1.1's old_* maps (the v1.5.2 era) as "152_<key>".
 //
 // Sources: Krunker_v7.1.4/src/data/maps.js (the official list: name, fileName; the index is the
-// v7 mapIndex) and data/map.js rotationMaps; Krunker_v3.1.1 matchmaker/publicRoutes.ts (loadMaps,
+// v7 mapIndex) and data/map.js rotationMaps; the v10.0.2 official list (krunker_maps.h, generated) for the
+// official files; Krunker_v3.1.1 matchmaker/publicRoutes.ts (loadMaps,
 // map_id = fnv1a(name.toLowerCase()), creatorname, map_featured), server/packetHandlers.ts
 // (cmd_map / listCustomMaps), and the v3.1.1 Games window capture (doc/ref/krunker-v3.1.1/windows/).
-// tools/maps/import_v7_maps.py imports the v7 map files (assets/maps/<fileName>.json) and their
-// thumbnails.
+// tools/maps/import_v7_maps.py imports the v7 map thumbnails (ui/img/maps).
 
 #include <map_catalog.h>
 #include <flavor.h>
@@ -20,9 +20,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// file_: the v10.0.2 file's stem under assets/maps/official/ (krunker_maps.h, the official list's index)
 // thumb: the card's picture (ui/img/maps/...), NULL none; an official map's is map_<index>.png
-#define OFFICIAL(key_, name_, idx, rot) \
-    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/" key_ ".json", NULL}
+#define OFFICIAL(key_, name_, idx, rot, file_) \
+    {key_, name_, idx, MAP_SOURCE_OFFICIAL, rot, 1, "Krunker", "", "", "", "", "maps/official/" file_ ".json", NULL}
 #define CUSTOM(key_, name_, creator_, mod, thumb_) \
     {key_, name_, -1, MAP_SOURCE_CUSTOM, 0, 0, creator_, mod, "", "", "", "maps/custom/" key_ ".json", thumb_}
 // a v3.1.1 official map, kept playable as a community map (v3.1.1 Host Game card labels kept:
@@ -39,38 +40,38 @@
 static const MapCatalogEntry k_catalog[] = {
     // v7.1.4 data/maps.js, in mapIndex order; rotation = map.js rotationMaps
     // [0,1,2,3,4,6,7,8,9,10,11,12,13,14,15,16,19,21,22,23,24,25,26,28]
-    OFFICIAL("burg_new", "Burg", 0, 1),
-    OFFICIAL("littletown", "Littletown", 1, 1),
-    OFFICIAL("sandstorm_v3", "Sandstorm", 2, 1),
-    OFFICIAL("subzero_new", "Subzero", 3, 1),
-    OFFICIAL("undergrowth", "Undergrowth", 4, 1),
-    OFFICIAL("shipment", "Shipment", 5, 0),
-    OFFICIAL("freight", "Freight", 6, 1),
-    OFFICIAL("lostworld_s6", "Lostworld", 7, 1),
-    OFFICIAL("citadel", "Citadel", 8, 1),
-    OFFICIAL("oasis_v3", "Oasis", 9, 1),
-    OFFICIAL("kanji", "Kanji", 10, 1),
-    OFFICIAL("industry", "Industry", 11, 1),
-    OFFICIAL("lumber", "Lumber", 12, 1),
-    OFFICIAL("evacuation", "Evacuation", 13, 1),
-    OFFICIAL("site", "Site", 14, 1),
-    OFFICIAL("skytemple_v2", "SkyTemple", 15, 1),
-    OFFICIAL("lagoon", "Lagoon", 16, 1),
-    OFFICIAL("bureau", "Bureau", 17, 0),
-    OFFICIAL("shipwrecked", "Tortuga", 18, 0),
-    OFFICIAL("tropicano", "Tropicano", 19, 1),
-    OFFICIAL("krunk_plaza_v2", "Krunk_Plaza", 20, 0),
-    OFFICIAL("arena", "Arena", 21, 1),
-    OFFICIAL("habitat_v2", "Habitat", 22, 1),
-    OFFICIAL("atomic", "Atomic", 23, 1),
-    OFFICIAL("burg_2018", "Old_Burg", 24, 1),
-    OFFICIAL("throwback_2018", "Throwback", 25, 1),
-    OFFICIAL("stockade_2018", "Stockade", 26, 1),
-    OFFICIAL("facility", "Facility", 27, 0),
-    OFFICIAL("clockwork", "Clockwork", 28, 1),
-    OFFICIAL("laboratory", "Laboratory", 29, 0),
-    OFFICIAL("shipyard", "Shipyard", 30, 0),
-    OFFICIAL("sanctum", "Soul Sanctum", 31, 0),
+    OFFICIAL("burg_new", "Burg", 0, 1, "00_burg"),
+    OFFICIAL("littletown", "Littletown", 1, 1, "01_littletown"),
+    OFFICIAL("sandstorm_v3", "Sandstorm", 2, 1, "02_sandstorm"),
+    OFFICIAL("subzero_new", "Subzero", 3, 1, "03_subzero"),
+    OFFICIAL("undergrowth", "Undergrowth", 4, 1, "04_undergrowth"),
+    OFFICIAL("shipment", "Shipment", 5, 0, "05_shipment"),
+    OFFICIAL("freight", "Freight", 6, 1, "06_freight"),
+    OFFICIAL("lostworld_s6", "Lostworld", 7, 1, "07_lostworld"),
+    OFFICIAL("citadel", "Citadel", 8, 1, "08_citadel"),
+    OFFICIAL("oasis_v3", "Oasis", 9, 1, "09_oasis"),
+    OFFICIAL("kanji", "Kanji", 10, 1, "10_kanji"),
+    OFFICIAL("industry", "Industry", 11, 1, "11_industry"),
+    OFFICIAL("lumber", "Lumber", 12, 1, "12_lumber"),
+    OFFICIAL("evacuation", "Evacuation", 13, 1, "13_evacuation"),
+    OFFICIAL("site", "Site", 14, 1, "14_site"),
+    OFFICIAL("skytemple_v2", "SkyTemple", 15, 1, "15_skytemple"),
+    OFFICIAL("lagoon", "Lagoon", 16, 1, "16_lagoon"),
+    OFFICIAL("bureau", "Bureau", 17, 0, "17_bureau"),
+    OFFICIAL("shipwrecked", "Tortuga", 18, 0, "18_tortuga"),
+    OFFICIAL("tropicano", "Tropicano", 19, 1, "19_tropicano"),
+    OFFICIAL("krunk_plaza_v2", "Krunk_Plaza", 20, 0, "20_krunk_plaza"),
+    OFFICIAL("arena", "Arena", 21, 1, "21_arena"),
+    OFFICIAL("habitat_v2", "Habitat", 22, 1, "22_habitat"),
+    OFFICIAL("atomic", "Atomic", 23, 1, "23_atomic"),
+    OFFICIAL("burg_2018", "Old_Burg", 24, 1, "24_old_burg"),
+    OFFICIAL("throwback_2018", "Throwback", 25, 1, "25_throwback"),
+    OFFICIAL("stockade_2018", "Stockade", 26, 1, "26_stockade"),
+    OFFICIAL("facility", "Facility", 27, 0, "27_facility"),
+    OFFICIAL("clockwork", "Clockwork", 28, 1, "28_clockwork"),
+    OFFICIAL("laboratory", "Laboratory", 29, 0, "29_laboratory"),
+    OFFICIAL("shipyard", "Shipyard", 30, 0, "30_shipyard"),
+    OFFICIAL("sanctum", "Soul Sanctum", 31, 0, "31_soul_sanctum"),
     // assets/maps/custom/ (ASCII filename order); creator = body.creator, mod = body.modURL
     CUSTOM("Bhop_VIP", "Bhop_VIP", "eskrr", "", "img/maps/community/Bhop_VIP.png"),
     CUSTOM("ClashRoyale", "ClashRoyale", "Community", "", "img/maps/community/ClashRoyale.png"),
@@ -201,6 +202,12 @@ int map_catalog_index_of_alias(const char *name) {
 
 int map_catalog_index_of_file(const char *path) {
     if (!path) return -1;
+    // a catalogue map's own file under any assets directory ("assets/maps/official/10_kanji.json")
+    const size_t plen = strlen(path);
+    for (size_t i = 0; i < CATALOG_COUNT; i++) {
+        const size_t len = strlen(k_catalog[i].path);
+        if (plen >= len && !strcmp(path + plen - len, k_catalog[i].path) && (plen == len || path[plen - len - 1] == '/')) return (int) i;
+    }
     const char *base = strrchr(path, '/');
     base = base ? base + 1 : path;
     char stem[64];

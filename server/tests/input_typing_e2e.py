@@ -207,7 +207,7 @@ def overlaps(log):
 script = "0 play\n300 con end\n"
 script += "".join(f"{t} vis @a{t} {END_IDS}\n" for t in (1000, 4000, 9000, 14000))
 script += press(14100, "ESC") + f"14500 vis @esc {END_IDS}\n14600 clickid instructionHolder\n15000 vis @back {END_IDS}\n15100 quit\n"
-log6 = run("end-alive", script, args=("--offline", "assets/maps/kanji.json"))
+log6 = run("end-alive", script, args=("--offline", "assets/maps/official/10_kanji.json"))
 check(vis(log6, "a4000").get("endUI") == "1", "control: the end screen shows")
 check(vis(log6, "esc").get("instructions") == "1" and vis(log6, "esc").get("endUI") == "0", "ESC: the menu over the results (toggleEndScreen)")
 check(vis(log6, "back").get("endUI") == "1", "Click to Play over the results brings them back")
@@ -218,7 +218,7 @@ script += "".join(f"{t} vis @m{t} {END_IDS}\n" for t in (2000, 5000, 9000))
 # a window over the results (v10 showWindow -> toggleMenu(true)), closed, then Click to Play: toggleEndScreen
 script += f"9100 call showWindow 1\n9300 vis @w9300 {END_IDS}\n9500 call closWind\n9700 vis @w9700 {END_IDS}\n"
 script += f"9800 clickid instructionHolder\n10200 vis @w10200 {END_IDS}\n13000 vis @w13000 {END_IDS}\n13100 quit\n"
-log7 = run("end-menu", script, args=("--offline", "assets/maps/kanji.json"))
+log7 = run("end-menu", script, args=("--offline", "assets/maps/official/10_kanji.json"))
 check(vis(log7, "m5000").get("endUI") == "1", "the END over an open menu shows the end screen")
 check(vis(log7, "w9300").get("endUI") == "0" and vis(log7, "w9700").get("instructions") == "1",
       "a window over the results: the menu (CLICK TO PLAY) takes their place, as v10's toggleMenu(true)")

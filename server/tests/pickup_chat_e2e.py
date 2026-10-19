@@ -39,7 +39,7 @@ import kn_proto  # noqa: E402
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 PORT, RCON_PORT = kn_proto.free_ports(2)
 RCON_PASSWORD = "pickup-chat-e2e-rcon"
-MAP_FILE = "assets/maps/laboratory.json"  # mapcycle Laboratory: six "pickup Junk" at rsc 70
+MAP_FILE = "assets/maps/official/29_laboratory.json"  # mapcycle Laboratory: six "pickup Junk" at rsc 70
 WORK = tempfile.mkdtemp(prefix="kn-pickup-chat-e2e-", dir=os.path.expanduser("~/.cache"))
 SPAWN, CHAT, INTERACT, FORWARDED, OBJECT_STATE, SOUND, PICKUP = 4, 9, 61, 85, 100, 102, 128
 OBJECT_DESTROY, OBJECT_RESPAWN = 0, 1

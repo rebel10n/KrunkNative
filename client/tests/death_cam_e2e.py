@@ -112,7 +112,7 @@ def main():
     if not os.path.exists(os.path.join(BUILD, "client_bin")):
         print(f"no client_bin in {BUILD}")
         return 2
-    lines, rows = run_client(["--offline", "assets/maps/kanji.json"], script_lines())
+    lines, rows = run_client(["--offline", "assets/maps/official/10_kanji.json"], script_lines())
 
     kill = [l for l in lines if "[input_script] killed" in l]
     killer = None

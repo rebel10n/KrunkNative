@@ -121,7 +121,7 @@ def welcome():
               "14000 text @m2 [id=mapWelcome]", "14000 text @k2 [id=mapInfo]",
               "14000 grep @w2 Welcome [id^=chatMsg_]",
               "14100 quit"]
-    lines = run_client("welcome", ["--offline", "assets/maps/krunk_plaza_v2.json"], script)
+    lines = run_client("welcome", ["--offline", "assets/maps/official/20_krunk_plaza.json"], script)
     rows = [l for l in lines if "[input_script] grep" in l]
     m0, m1, m2 = menu_text(lines, "@m0"), menu_text(lines, "@m1"), menu_text(lines, "@m2")
     check("welcome: the map's welMsg shows in the menu (Krunk Plaza)",
@@ -146,7 +146,7 @@ def deaths(tag, mobile):
               "3000 grep @k1 committed [id^=chatMsg_]",
               "3000 vis @n1 knNotify",
               "3100 quit"]
-    lines = run_client(tag, ["--offline", "assets/maps/kanji.json"], script, {"KRUNKNATIVE_MOBILE": "1"} if mobile else None)
+    lines = run_client(tag, ["--offline", "assets/maps/official/10_kanji.json"], script, {"KRUNKNATIVE_MOBILE": "1"} if mobile else None)
     f0, f1, c0, c1 = match(lines, "@f0"), match(lines, "@f1"), match(lines, "@c0"), match(lines, "@c1")
     vis = probe(lines, "vis", "@n1") or {}
     toast = vis.get("knNotify", "-")
@@ -165,7 +165,7 @@ def reload():
     for t in range(1500, 3600, 17):
         script += [f"{t} state", f"{t} style @r ammoHolder:background-size"]
     script.append("3700 quit")
-    lines = run_client("reload", ["--offline", "assets/maps/kanji.json"], script)
+    lines = run_client("reload", ["--offline", "assets/maps/official/10_kanji.json"], script)
     reload_at, size_at = {}, {}
     for l in lines:
         m = re.match(r"\[input_script\] state t=(\d+) .* reload=([\d.]+)", l)
@@ -237,7 +237,7 @@ def chat_menu():
                "5100 call setSetting \"showUI\" 1", "5200 vis @h5200 chatUI chatList",
                "5210 scroll @h1 chatList", "5220 setscroll chatList 99999", "5230 scroll @h2 chatList",
                "5300 quit"]
-    lines = run_client("chat-menu", ["--offline", "assets/maps/kanji.json"], script)
+    lines = run_client("chat-menu", ["--offline", "assets/maps/official/10_kanji.json"], script)
     v = vis_samples(lines, "b")
     idle = [v[k] for k in v]
     check("chat menu: the chat is up on the idle menu at boot (every frame)",

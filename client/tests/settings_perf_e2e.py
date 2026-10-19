@@ -83,7 +83,7 @@ def start(name, script=None, extra=None, windowed=False):
     log = os.path.join(WORK, name, "client.log")
     out = open(log, "w")
     # windowed: a window on a private Xvfb (xvfb-run -a), never the desktop's display
-    cmd = [f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"]
+    cmd = [f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"]
     if windowed:
         cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24"] + cmd
     p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,

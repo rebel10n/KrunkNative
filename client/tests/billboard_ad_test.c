@@ -5,7 +5,7 @@
 // 1. NET_PACKET_BILLBOARD / _IMAGE -> INIT: an INIT applies what arrived since the previous one
 //    (map change, late join), an INIT without any (another server, offline) clears the ad, bad
 //    image paths are refused.
-// 2. Maps with different billboard kinds (v7 Kanji: random + fixed posters, v7 Burg: random,
+// 2. Maps with different billboard kinds (official Kanji: random + fixed posters, official Burg: random,
 //    Krunk Plaza: bb 7 clamped to 6, Lagoon: v3 "sad" ad billboards, the v3.1.1 Sandstorm):
 //    every BILLBOARD object gets the ad, nothing else does (SIGN, PLANE, ...), and without an
 //    ad every BILLBOARD keeps its poster.
@@ -115,10 +115,10 @@ static void test_maps(void) {
         const char *file;
         int billboards; // BILLBOARD objects ("i": 11)
     } maps[] = {
-        {"assets/maps/kanji.json", 6},          // v7: 2 random, 4 fixed posters (bb 1 / 6)
-        {"assets/maps/burg_new.json", 2},       // v7 Burg: random posters
-        {"assets/maps/krunk_plaza_v2.json", 5}, // bb 7 (clamped to 6), next to SIGNs and poster PLANEs
-        {"assets/maps/lagoon.json", 6},         // the v3 "sad" ad billboards
+        {"assets/maps/official/10_kanji.json", 6},          // official Kanji: 2 random, 4 fixed posters (bb 1 / 6)
+        {"assets/maps/official/00_burg.json", 2},       // official Burg: random posters
+        {"assets/maps/official/20_krunk_plaza.json", 5}, // bb 7 (clamped to 6), next to SIGNs and poster PLANEs
+        {"assets/maps/official/16_lagoon.json", 6},         // the v3 "sad" ad billboards
         {"assets/maps/311_sandstorm.json", 9},  // the v3.1.1 format (size index "si")
     };
     printf("Running billboard surfaces on maps...\n");

@@ -569,6 +569,7 @@ int main(void) {
     // the v7.1.4 official maps (tools/maps/import_v7_maps.py) and the v3.1.1 311_ / 152_ maps
     for_each_json("assets/maps", load_one);
     for_each_json("assets/maps/custom", load_one);
+    for_each_json("assets/maps/official", load_one); // the v10.0.2 official files (krunker_maps.h)
     for_each_json("shared/tests/maps", load_one);
     check_custom_v7_prefabs();
     const int shipped = g_maps_loaded;

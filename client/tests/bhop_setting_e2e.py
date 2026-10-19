@@ -113,7 +113,7 @@ def run(name, script, timeout=240):
     if os.path.exists(csv):
         os.remove(csv)
     with open(log, "w") as out:
-        p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
+        p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)

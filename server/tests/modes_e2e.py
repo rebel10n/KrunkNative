@@ -248,7 +248,7 @@ def sc_ctf_cycle_online():
     log = os.path.join(WORK, "ctf-cycle-online-server.log")
     with open(log, "w") as out:
         server = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", "none", "--port", str(port), "--mode", "ctf",
-                                   "--open-cheats", "assets/maps/kanji.json"], stdout=out, stderr=subprocess.STDOUT,
+                                   "--open-cheats", "assets/maps/official/10_kanji.json"], stdout=out, stderr=subprocess.STDOUT,
                                   stdin=subprocess.DEVNULL, start_new_session=True)
     try:
         time.sleep(1.5)

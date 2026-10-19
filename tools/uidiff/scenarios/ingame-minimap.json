@@ -12,7 +12,7 @@
     "ready": true,
     "inGame": true,
     "mapName": "Kanji",
-    "mapFile": "maps/kanji.json",
+    "mapFile": "maps/official/10_kanji.json",
     "modeName": "Free for All",
     "name": "Local User",
     "region": "...",

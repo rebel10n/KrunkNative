@@ -130,7 +130,7 @@ def chrome(rc, w=1280, h=720, dimmed=False):
 
 
 # the local server's map: the v3.1.1 Kanji these scenarios have always run on (its file is
-# assets/maps/311_kanji.json; "maps/kanji.json" is v7's Kanji, which ingame-minimap loads)
+# assets/maps/311_kanji.json; "maps/official/10_kanji.json" is the official Kanji, which ingame-minimap loads)
 V3_KANJI = "maps/311_kanji.json"
 
 rc = rects("menu/menu-1280")
@@ -624,14 +624,14 @@ game("ingame-spectate",
      "Spectating the sandbox (Spectate toggle on): free cam, v7's #spectateUI.")
 rc = rects("ingame/ingame-minimap")
 game("ingame-minimap",
-     game_state(hud(), customMap=False, mapFile="maps/kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
+     game_state(hud(), customMap=False, mapFile="maps/official/10_kanji.json", pose=[144, -139, -182, -1.5707963267948966, 0]),
      hud_regions(rc, [R("minimap", pad(rc["miniMapOverlay"], 2), "text",
                         "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow")]),
      "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose.")
 # the same on other maps (capture-v7.js minimapScenario: the pose v7's sandbox spawned at)
 for mm_name, mm_map, mm_file, mm_pose, mm_what in (
-        ("ingame-minimap-sandstorm", "Sandstorm", "maps/sandstorm_v3.json", [-39, 33, -210, 0, 0], "Sandstorm's mmId image"),
-        ("ingame-minimap-burg", "Burg", "maps/burg_new.json", [246, 0, -210, -3.141592653589793, 0], "Burg's mmId image"),
+        ("ingame-minimap-sandstorm", "Sandstorm", "maps/official/02_sandstorm.json", [-39, 33, -210, 0, 0], "Sandstorm's mmId image"),
+        ("ingame-minimap-burg", "Burg", "maps/official/00_burg.json", [246, 0, -210, -3.141592653589793, 0], "Burg's mmId image"),
         ("ingame-minimap-311-burg", "Burg", "maps/311_burg.json", [102, 0, -365, -1.5707963267948966, 0],
          "v3.1.1 Burg (no mmId): its blocks, darker the higher")):
     rc = rects("ingame/" + mm_name)

@@ -43,8 +43,8 @@ procs = []
 
 # Backed against a wall, facing away from it (feet x y z, yaw, pitch): third_person_test prints them
 MAPS = {
-    "kanji": ("assets/maps/kanji.json", "-331.33 -143.00 -16.33 0.7854 0"),
-    "sandstorm": ("assets/maps/sandstorm_v3.json", "13.08 13.00 10.08 0.7854 0"),
+    "kanji": ("assets/maps/official/10_kanji.json", "-331.33 -143.00 -16.33 0.7854 0"),
+    "sandstorm": ("assets/maps/official/02_sandstorm.json", "13.08 13.00 10.08 0.7854 0"),
 }
 
 

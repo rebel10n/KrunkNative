@@ -74,7 +74,7 @@ results = []
 
 def map_volumes(name):
     """The objective / domination zone / bomb site boxes of a map: (prefab, cx, y0, cz, hx, sy, hz)."""
-    path = {"Sandstorm": "assets/maps/sandstorm_v3.json", "Kanji": "assets/maps/kanji.json"}[name]
+    path = {"Sandstorm": "assets/maps/official/02_sandstorm.json", "Kanji": "assets/maps/official/10_kanji.json"}[name]
     with open(path) as f:
         data = json.load(f)
     xyz = data.get("xyz") or []  # v7 pooled sizes: "si" indexes a triple

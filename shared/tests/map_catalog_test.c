@@ -7,10 +7,17 @@
 // Run from the repository root: ./<build>/map_catalog_test [-v]
 #include <shared.h>
 #include <map_catalog.h>
+#include <krunker_maps.h>
 #include <prefabs.h>
 #include <ranked.h>
 #include <stdio.h>
 #include <string.h>
+
+// the v10.0.2 official list (krunker_maps.h): the catalogue's first 32 entries are these files, index for index
+#define OFFICIAL_PATH(index_, name_, file_, objects_) file_,
+#define OFFICIAL_NAME(index_, name_, file_, objects_) name_,
+static const char *const official_path[] = {KRUNKER_OFFICIAL_MAPS(OFFICIAL_PATH)};
+static const char *const official_name[] = {KRUNKER_OFFICIAL_MAPS(OFFICIAL_NAME)};
 
 // A thumbnail file that loads: a PNG (signature and IHDR at their places, the way stb_image reads it).
 // Paths are relative to the repository root (the test's working directory), the ui/ tree.
@@ -186,10 +193,16 @@ int main(const int argc, char **argv) {
         if (i > MAP_CATALOG_OFFICIAL_COUNT && !legacy && !legacy_key(map_catalog_at(i - 1)->key))
             CHECK(strcmp(map_catalog_at(i - 1)->key, e->key) < 0, "%s not in readdir order", e->key);
         if (i > 0 && legacy_key(map_catalog_at(i - 1)->key)) CHECK(legacy, "%s after the 311_ / 152_ maps", e->key);
-        // the file stem is the key: maps/<key>.json (v7, 311_, 152_), maps/custom/<key>.json (community)
-        char want[96];
-        snprintf(want, sizeof(want), i < MAP_CATALOG_OFFICIAL_COUNT || legacy ? "maps/%s.json" : "maps/custom/%s.json", e->key);
-        CHECK(e->path && !strcmp(e->path, want), "%s path %s", e->key, e->path ? e->path : "?");
+        // the official maps are the v10.0.2 files (krunker_maps.h); the file stem is the key for the
+        // 311_ / 152_ maps (maps/<key>.json) and the community maps (maps/custom/<key>.json)
+        if (i < MAP_CATALOG_OFFICIAL_COUNT) {
+            CHECK(e->path && !strcmp(e->path, official_path[i]) && !strcmp(e->name, official_name[i]),
+                  "%s: %s (%s) is not the v10 file %s (%s)", e->key, e->path ? e->path : "?", e->name, official_path[i], official_name[i]);
+        } else {
+            char want[96];
+            snprintf(want, sizeof(want), legacy ? "maps/%s.json" : "maps/custom/%s.json", e->key);
+            CHECK(e->path && !strcmp(e->path, want), "%s path %s", e->key, e->path ? e->path : "?");
+        }
         CHECK(map_catalog_index_of_file(e->path) == (int) i, "%s: index_of_file(%s)", e->key, e->path);
         if (legacy) check_file_name(e);
     }
@@ -266,7 +279,7 @@ int main(const int argc, char **argv) {
           "v3 plane flag on a 311_ map loaded by path");
     cJSON_Delete(moved);
     moved = NULL;
-    CHECK(!map_catalog_load_file("assets/maps/kanji.json", &moved) && !cJSON_GetObjectItem(moved, MAP_KEY_V3_PLANES),
+    CHECK(!map_catalog_load_file("assets/maps/official/10_kanji.json", &moved) && !cJSON_GetObjectItem(moved, MAP_KEY_V3_PLANES),
           "no v3 plane flag on a v7 map loaded by path");
     cJSON_Delete(moved);
     moved = NULL;

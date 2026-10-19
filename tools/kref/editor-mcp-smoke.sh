@@ -1,6 +1,6 @@
 #!/bin/bash
 # Editor bus + kn_editor_mcp smoke test, headless (no window on any display):
-#   1. client_bin --editor --mcp-bus --mcp-auto-accept kanji.json burg.json   (EGL pbuffer)
+#   1. client_bin --editor --mcp-bus --mcp-auto-accept 311_kanji.json 311_burg.json   (EGL pbuffer)
 #   2. kn_editor_mcp --live on that bus, driven over MCP JSON-RPC on stdio:
 #      projects_list, objects_query in both maps, objects_copy_between_projects Kanji -> Burg,
 #      undo, render_multiview from the live editor, map_save to a temp path, map_validate
@@ -41,7 +41,7 @@ wait_bus() { # log file, seconds
     return 1
 }
 
-echo "== editor: --editor --mcp-bus --mcp-auto-accept kanji.json burg.json (headless)"
+echo "== editor: --editor --mcp-bus --mcp-auto-accept 311_kanji.json 311_burg.json (headless)"
 "${HEADLESS[@]}" "$CLIENT" --editor --mcp-bus --bus-dir "$TMP/bus" --mcp-auto-accept \
     assets/maps/311_kanji.json assets/maps/311_burg.json > "$TMP/editor.log" 2>&1 &
 EDITOR_PID=$!

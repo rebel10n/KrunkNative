@@ -320,8 +320,8 @@ int main(void) {
     test_turn_to_killer();
     test_mouse_while_dead();
     test_look_speed_by_chase();
-    test_map("assets/maps/kanji.json");
-    test_map("assets/maps/sandstorm_v3.json");
+    test_map("assets/maps/official/10_kanji.json");
+    test_map("assets/maps/official/02_sandstorm.json");
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

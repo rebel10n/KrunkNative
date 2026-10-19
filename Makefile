@@ -77,9 +77,9 @@ EMSDK_ACTIVATE = if ! command -v emcc >/dev/null 2>&1; then \
 	  source "$(EMSDK)/emsdk_env.sh" >/dev/null 2>&1; \
 	fi; export EMSDK="$${EMSDK:-$(EMSDK)}"
 
-# Map argument for run targets: MAP=kanji -> assets/maps/kanji.json (v7's maps under their v7
-# file names: burg_new, sandstorm_v3, ...; the v3.1.1 maps are 311_<name>, its old_* maps 152_<name>;
-# a name with no file, such as MAP=burg, is looked up in the map catalogue: v7's Burg)
+# Map argument for run targets: MAP=kanji -> assets/maps/kanji.json. The official maps are the v10.0.2 files
+# under assets/maps/official/ (NN_<name>.json); a catalogue name whose file is gone (kanji, burg_new, ...) loads
+# its catalogue file (map_catalog_load_file, a stderr line says so). The v3.1.1 maps are 311_<name>, its old_* maps 152_<name>.
 MAP_ARG = $(if $(MAP),assets/maps/$(MAP).json,)
 
 # --------------------------------------------------------------------------- native
@@ -458,10 +458,10 @@ krunker-build-test: ## Extractor regression test: every local Krunker bundle (de
 	$(PYTHON) -I tools/krunker/test_extract.py
 
 .PHONY: maps-import-v7 maps-check-v7
-maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)
+maps-import-v7: ## Import Krunker v7.1.4's 32 official map thumbnails into ui/img/maps (the map JSON is v10's: assets/maps/official/)
 	$(PYTHON) -I tools/maps/import_v7_maps.py
 
-maps-check-v7: ## Drift check of the v7 maps in assets/maps/ and the map thumbnails against Krunker v7.1.4
+maps-check-v7: ## Drift check of the map thumbnails in ui/img/maps against Krunker v7.1.4
 	$(PYTHON) -I tools/maps/import_v7_maps.py --check
 
 

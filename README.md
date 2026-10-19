@@ -70,7 +70,7 @@ To exercise the ANGLE path on Linux, point `ANGLE_DIR` at an ANGLE build. That c
 ```sh
 cmake -S . -B /tmp/kn-angle -G Ninja -DKRUNKNATIVE_GL_BACKEND=angle -DANGLE_DIR=$HOME/.cache/krunknative/angle
 cmake --build /tmp/kn-angle --target client_bin
-env -u DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_SCREENSHOT=/tmp/angle.png /tmp/kn-angle/client_bin --offline assets/maps/kanji.json
+env -u DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_SCREENSHOT=/tmp/angle.png /tmp/kn-angle/client_bin --offline assets/maps/official/10_kanji.json
 ```
 
 # Running

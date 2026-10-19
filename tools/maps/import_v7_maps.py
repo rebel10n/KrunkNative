@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Imports the Krunker v7.1.4 official maps (doc/v7/map-logic.md §4.6, WP-A step A6).
+"""Imports the Krunker v7.1.4 official map thumbnails (doc/v7/map-logic.md §4.6, WP-A step A6).
 
     python3 -I tools/maps/import_v7_maps.py [--check]
 
 Reads the official list of v7 src/data/maps.js (name, fileName; the index is the v7 mapIndex) and
 copies, unmodified:
 
-- public/maps/<fileName>.json  -> assets/maps/<fileName>.json  (32 maps, reference data)
-- public/img/maps/map_<i>.png  -> ui/img/maps/map_<i>.png         (the Host Game / Games window
-                                                                   thumbnails, by v7 mapIndex)
+- public/img/maps/map_<i>.png  -> ui/img/maps/map_<i>.png  (the Host Game / Games window
+                                                             thumbnails, by v7 mapIndex)
 
-The v3.1.1 official maps stay where they are (assets/maps/<key>.json); the catalogue lists them as
-"v3_<key>" community maps (shared/src/map_catalog.c). --check only verifies the copies are current.
+The map JSON is not imported here: the official maps are the v10.0.2 files under
+assets/maps/official/ (tools/krunker/fetch_maps.py, pinned in tools/krunker/maps.lock.json), and the
+catalogue (shared/src/map_catalog.c) names them. --check only verifies the thumbnails are current.
 """
 
 import filecmp
@@ -39,8 +39,6 @@ def main():
         return 1
     copies = []
     for index, (name, file_name) in enumerate(maps):
-        copies.append((os.path.join(V7, "public", "maps", file_name + ".json"),
-                       os.path.join(REPO, "assets", "maps", file_name + ".json")))
         thumb = os.path.join(V7, "public", "img", "maps", "map_%d.png" % index)
         if os.path.exists(thumb):
             copies.append((thumb, os.path.join(REPO, "ui", "img", "maps", "map_%d.png" % index)))
@@ -54,7 +52,7 @@ def main():
             continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
-    print("%s %d of %d files (%d maps)" % ("stale" if check else "copied", stale, len(copies), len(maps)))
+    print("%s %d of %d thumbnails (%d maps)" % ("stale" if check else "copied", stale, len(copies), len(maps)))
     return 1 if check and stale else 0
 
 

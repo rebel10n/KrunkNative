@@ -70,7 +70,7 @@ def main():
     check("three generated lines", len(lines) == 3, str(len(lines)))
 
     commands = [shlex.split(line) for line in lines]
-    map_file = os.path.join(ASSETS, "maps", "kanji.json")
+    map_file = os.path.join(ASSETS, "maps", "official", "10_kanji.json")
     commands.append(["server_bin", map_file, "--set", "gameserver.game.gameTime=7", "--set", "gameserver.game.maxPlayers=6", "--headless"])
     ports = kn_proto.free_ports(len(commands))
     env = dict(os.environ, KRUNKNATIVE_ASSETS_DIR=ASSETS, KRUNKNATIVE_HEADLESS="1", KRUNKNATIVE_AUDIO_BACKEND="null")

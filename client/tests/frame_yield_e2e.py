@@ -63,7 +63,7 @@ def run(name, frame_target, timeout=120):
                 "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_YIELD_CHECK": "1",
                 "KRUNKNATIVE_FRAME_TARGET": "1" if frame_target else "0"})
     with open(log, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
+        p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)

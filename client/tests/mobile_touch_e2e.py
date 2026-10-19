@@ -137,7 +137,7 @@ def main():
         "4700 state",
         "4800 quit",
     ]
-    lines = run_client("touch", ["--offline", "assets/maps/kanji.json"], script)
+    lines = run_client("touch", ["--offline", "assets/maps/official/10_kanji.json"], script)
     st = states(lines)
     check("tap: TAP TO PLAY enters the game with a finger tap", at(st, 1400) and at(st, 1400)["menu"] == 0,
           f"menu at 1400 ms = {at(st, 1400) and at(st, 1400)['menu']}")

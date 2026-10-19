@@ -37,8 +37,8 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MAP = os.path.join("assets", "maps", "littletown.json")
-SECOND = os.path.join("assets", "maps", "shipyard.json")  # no user-asset references (see all_maps_round_trip)
+MAP = os.path.join("assets", "maps", "official", "01_littletown.json")
+SECOND = os.path.join("assets", "maps", "official", "30_shipyard.json")  # no user-asset references (see all_maps_round_trip)
 V10_FILE_MENU = ["Import Project", "New Project", "Save Project", "Load Backup", "-",
                  "Export", "Copy Export", "-", "Export GLTF", "Export MTL"]
 
@@ -246,7 +246,8 @@ def all_maps_round_trip(c):
     # the maps that place Krunker user assets (an "aid") fetch them over the network on load, which
     # takes minutes offline; their model-level round trips are in editor_serialize_test
     maps = []
-    for m in sorted(glob.glob(os.path.join(c.root, "assets", "maps", "*.json"))):
+    for m in sorted(glob.glob(os.path.join(c.root, "assets", "maps", "*.json")) +
+                    glob.glob(os.path.join(c.root, "assets", "maps", "official", "*.json"))):
         if '"aid"' not in read(m):
             maps.append(m)
     check(len(maps) >= 30, "only %d maps without user assets" % len(maps))

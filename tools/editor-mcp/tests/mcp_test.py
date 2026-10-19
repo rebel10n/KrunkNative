@@ -157,7 +157,7 @@ def protocol(c):
     one = json.loads(m.request("resources/read", {"uri": "krunker://prefabs/TRIGGER"})["result"]["contents"][0]["text"])
     check(any(p["key"] == "te" for p in one["properties"]), "TRIGGER schema has te")
     cat = json.loads(m.request("resources/read", {"uri": "krunker://catalog"})["result"]["contents"][0]["text"])
-    check(any(e["key"] == "burg_new" and e["path"] == "assets/maps/burg_new.json" for e in cat), "catalog lists v7 Burg")
+    check(any(e["key"] == "burg_new" and e["path"] == "assets/maps/official/00_burg.json" for e in cat), "catalog lists the official Burg")
     check(any(e["key"] == "311_burg" and e["path"] == "assets/maps/311_burg.json" for e in cat), "catalog keeps v3 Burg")
     check("error" in m.request("resources/read", {"uri": "krunker://nope"}), "unknown resource errors")
     check(len(m.request("resources/templates/list")["result"]["resourceTemplates"]) >= 2, "resource templates")
@@ -611,7 +611,7 @@ def compile_map(c):
     bad = m.sc("map_new", {"name": "x", "template": "empty"})["id"]
     m.call("map_compile", {"project": bad}, ok=False)  # no spawns -> validation error blocks
     # complex collision: the bake reproduces the triangles v7.1.4 exported with the map
-    path = os.path.join(c.root, "assets", "maps", "shipment.json")
+    path = os.path.join(c.root, "assets", "maps", "official", "05_shipment.json")
     src = json.load(open(path))
     sp = m.sc("map_open", {"path": path})["id"]
     t = m.sc("map_compile", {"project": sp, "inline": True, "force": True})
