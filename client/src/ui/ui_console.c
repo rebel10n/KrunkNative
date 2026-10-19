@@ -40,6 +40,7 @@
 #include <win_geom.h>   // the console box stays in the window (win_geom.h)
 #include <game_reload.h> // `reload`: F5's full reload
 #include <strike_ui.h>   // strike_reward: a sample Krunker Strike reward (strike_reward.c)
+#include <spectate.h>    // pos while spectating: the followed player or the free camera
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -1409,8 +1410,17 @@ static void cmd_status(const int argc, char **argv, const char *rest) {
 static void cmd_pos(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
     const Player *p = con_player();
-    if (!p) return;
-    appendf(COL_INFO, "position: %.6f %.6f %.6f", p->position.x, p->position.y, p->position.z);
+    if (p) {
+        appendf(COL_INFO, "position: %.6f %.6f %.6f", p->position.x, p->position.y, p->position.z);
+        return;
+    }
+    // spectating has no local player: report the followed player, or the free camera
+    const Client *client = con_client();
+    if (!client || !spectate_active()) return;
+    const int uid = spectate_target_uid();
+    const Player *target = uid >= 0 ? client_find_player((Client *) client, uid) : NULL;
+    const vec3 at = target ? target->position : client->camera.position;
+    appendf(COL_INFO, "position: %.6f %.6f %.6f%s", at.x, at.y, at.z, target ? " (spectating)" : " (free camera)");
 }
 
 static void cmd_rot(const int argc, char **argv, const char *rest) {
