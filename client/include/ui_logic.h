@@ -131,6 +131,7 @@ void menu_retry_connect(void);                   // retryConnect
 void menu_show_connecting(void);                 // the loading spinner for a reconnect / retry (the page's map)
 void menu_show_connecting_map(const char *map);  // the spinner for a server switch to the game on `map` ("" / NULL: not known)
 int  menu_connecting(void);                     // the spinner is up (a connect under way)
+void menu_connect_stopped(void);                // a Quick Play search was stopped by the player: the spinner goes, no error (quick_play_retry.h)
 int  menu_loading(void);                        // the game is loading (a connect, the boot curtain, Strike's loading screen): Escape does nothing
 // v10.0.2 boot curtain (#instructionsFadeBG until the first INIT, then its 0.7 s fade), #loadGamNm
 // and the auto-respawn countdown (menu_ui.c)

@@ -39,6 +39,7 @@
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
 #include <strike_ui.h>       // Krunker Strike's own server password prompt (strike_menu.c)
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
+#include <quick_play_retry.h> // a Quick Play search answered "full" is tried again (quick_play_retry.c)
 #include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
 #include <strings.h>
@@ -96,6 +97,15 @@ static char g_find_prev_game[160];
 // full lobbies the seek answers named in a row (never joined): at most SEEK_FULL_SKIPS_MAX, then GameFull
 #define SEEK_FULL_SKIPS_MAX 3
 static int g_full_skips;
+// Quick Play (quick_play_retry.h): a new-game search answered full is tried again, never the error. The
+// lobbies it was answered full by are left out of its next tries (g_full_ids, excludeRecent) until the brain
+// has no other lobby (NoAvailableServers): then they are asked again. g_saw_full: a full answer came in this
+// search, so "nothing with room" is a wait, not "no lobbies at all". g_quick_join_full: a Quick Join candidate
+// was full in this sweep, so the sweep is tried again when it runs out. g_seek_serial: the seeks issued.
+#define QP_FULL_MAX 4
+static char g_full_ids[QP_FULL_MAX][RECENT_LOBBY_ID_MAX];
+static int g_full_count, g_saw_full, g_quick_join_full;
+static unsigned g_seek_serial;
 // Reload (F5's relaunch, the console's `reload`; game_reload.c): the lobby the player was in, sought
 // by its id (no Quickplay launch seek, no excludeGame). Gone or full: one plain seek, and a notice
 // says why (reload_fallback). g_reload_game: the new process's lobby, taken by the startup seek;
@@ -322,6 +332,7 @@ static const char *game_map(const char *id) {
 static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url,
                         const char *region) {
     Client *client = g_client;
+    quick_play_retry_end(); // a lobby took the player: the Quick Play search is over
     g_pin = PIN_NONE; // a matchmade (or server-redirected) session
     g_last_direct = 0;
     g_server_gone = 0;
@@ -606,6 +617,7 @@ void servers_ui_invite_link(char *out, const size_t n) {
 
 // fatalError(message): the connection error screen (retry link = seek again)
 static void fatal_error(const char *message) {
+    quick_play_retry_end(); // the error is shown for good: a Quick Play search ends with it
     g_client->net_hold_retry = 1; // a seek that failed: no transport retry, the page shows the error (final)
     on_client_socket_failed(g_client, message);
 }
@@ -617,6 +629,10 @@ typedef struct SeekReq {
     void *quiet;  // quick join: try the next candidate instead of failing
     int retried;  // a refused token was replaced once
     int play;     // v10's autoPlaySearch seek (?play=<map>): no match -> the game list, then the offline game (on_seek)
+    int any_game; // no lobby named: a new-game seek (Quick Match, F4, Find Game, the launch seek, a quick join's none)
+    int qp;       // a Quick Play search's seek (quick_play_retry.h): its answer is retried, and dropped once stopped
+    unsigned qp_gen;  // quick_play_retry_generation() when it was sent
+    unsigned serial;  // g_seek_serial when it was sent: the last seek issued clears g_seek_inflight
 } SeekReq;
 
 static void seek_req_free(SeekReq *r) {
@@ -647,14 +663,81 @@ static int seek_request_token(SeekReq *r) {
     return backend_http_get("/mm/generate-token", on_token, r);
 }
 
-static void start_seek(const char *game_id);
+static int start_seek(const char *game_id);
 static void on_play_list(void *user, int status, const char *body, size_t length);
+
+// ---- Quick Play retry (quick_play_retry.h). A new-game search answered full is tried again after the
+// backoff: the same search (Quick Match / F4 / Find Game / the launch seek: brain_seek_again) or the same
+// quick join sweep (quick_join_again). The lobbies answered full are left out of the next tries.
+
+static void qp_begin(void) { // a Quick Play search starts: its full lobbies and answers are its own
+    quick_play_retry_begin();
+    g_full_count = 0;
+    g_saw_full = 0;
+    g_quick_join_full = 0;
+}
+
+static void qp_full_clear(void) { g_full_count = 0; }
+
+// a Quick Play entry point's result: nothing went out, so the search is over (its status goes with it)
+static int qp_started(const int started) {
+    if (!started) quick_play_retry_end();
+    return started;
+}
+
+static void qp_full_add(const char *id) {
+    g_saw_full = 1;
+    if (!id || !id[0] || strlen(id) >= RECENT_LOBBY_ID_MAX) return;
+    for (int i = 0; i < g_full_count; i++) {
+        if (!strcmp(g_full_ids[i], id)) return;
+    }
+    if (g_full_count == QP_FULL_MAX) { // the oldest drops out
+        memmove(g_full_ids[0], g_full_ids[1], sizeof(g_full_ids[0]) * (QP_FULL_MAX - 1));
+        g_full_count--;
+    }
+    snprintf(g_full_ids[g_full_count++], RECENT_LOBBY_ID_MAX, "%s", id);
+}
+
+static void brain_seek_again(void *user);
+
+// the new-game seek's next try (Find New Game / Quick Match keep their flags: g_find_seek, g_find_prev_game)
+static void brain_retry_later(const int find, const int find_both) {
+    g_find_seek = find;
+    g_find_both = find_both;
+    quick_play_retry_schedule(brain_seek_again, NULL);
+}
+
+static void brain_seek_again(void *user) {
+    (void) user;
+    if (g_find_seek && g_find_prev_game[0]) snprintf(g_exclude_game, sizeof(g_exclude_game), "%s", g_find_prev_game); // the lobby it leaves stays out
+    (void) qp_started(start_seek(NULL));
+}
+
+static void quick_join_again(void *user) {
+    (void) user;
+    g_quick_join_full = 0;
+    if (g_quick_join_count <= 0) return;
+    g_quick_join_next = 0; // the sweep again: a candidate that was full may have room now
+    g_quick_join_left = 10; // as quick_join_region's sweep
+    servers_quick_join_next();
+}
 
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     SeekReq *req = user;
     const int quiet = req && req->quiet != NULL;
     const int play = req && req->play;
+    const int qp = req && req->qp;
+    const int any_game = req && req->any_game;
+    if (qp && quick_play_retry_stale(req->qp_gen)) {
+        // the search was stopped (F4 / Quick Match again, Escape, leaving the menu) or replaced while this
+        // answer was on its way: dropped, and the spinner stays as the stop left it
+        printf("[mm] quick play: a late answer is ignored (the search was stopped)\n");
+        if (req->serial == g_seek_serial) g_seek_inflight = 0;
+        seek_req_free(req);
+        return;
+    }
+    quick_play_retry_answered();
     const int rejoin = g_rejoin_seek;
     const int find = g_find_seek, find_both = g_find_both;
     const int reload = g_reload_seek;
@@ -676,6 +759,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         printf("[mm] validation token refused (%s): seeking again with a fresh one\n", refused);
         req->retried = 1;
         g_seek_inflight = 1;
+        if (qp) quick_play_retry_out();
         g_rejoin_seek = rejoin;
         g_reload_seek = reload;
         g_find_seek = find;
@@ -700,15 +784,23 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         printf("[mm] find new game: no other lobby has room, staying in %s\n", g_find_prev_game);
     } else if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port) && seek_answer_full(res)) {
         // the lobby the answer names has no seat left (the brain's count may be stale): never joined.
-        // A quick join goes on to its next candidate; a seek asks for another lobby, excluding this one,
-        // SEEK_FULL_SKIPS_MAX times at most, then the game is full.
+        // A quick join goes on to its next candidate. A Quick Play search asks again after its backoff, the
+        // lobby left out (quick_play_retry.h), never the full error. A named lobby (a join by hand) asks for
+        // another one, excluding it, SEEK_FULL_SKIPS_MAX times at most, then the game is full.
         const cJSON *game = cJSON_GetObjectItem(res, "gameId");
         const char *id = cJSON_IsString(game) ? game->valuestring : "";
         printf("[mm] seek answer %s is full (%d/%d): not joining it\n", id,
                (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "players")), (int) cJSON_GetNumberValue(cJSON_GetObjectItem(res, "maxPlayers")));
-        if (quiet && g_quick_join_left > 0) {
+        if (quiet) {
+            g_quick_join_full = 1;
             cJSON_Delete(res);
-            servers_quick_join_next();
+            servers_quick_join_next(); // the next candidate, or the sweep's retry when it runs out
+            return;
+        }
+        if (qp && any_game && id[0]) {
+            qp_full_add(id);
+            brain_retry_later(find, find_both);
+            cJSON_Delete(res);
             return;
         }
         if (!quiet && id[0] && g_full_skips < SEEK_FULL_SKIPS_MAX) {
@@ -737,6 +829,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
                     cJSON_IsString(region) ? region->valuestring : NULL);
     } else if (quiet && g_quick_join_left > 0) {
+        const cJSON *full = cJSON_GetObjectItem(res, "error");
+        if (cJSON_IsString(full) && !strcmp(full->valuestring, "GameFull")) g_quick_join_full = 1; // the sweep is tried again when it runs out
         servers_quick_join_next();
     } else {
         const cJSON *err = cJSON_GetObjectItem(res, "error");
@@ -756,6 +850,20 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (reload && cJSON_IsString(err) && (!strcmp(err->valuestring, "InvalidGameId") || !strcmp(err->valuestring, "GameFull"))) {
             reload_fallback(g_seek_game, !strcmp(err->valuestring, "GameFull"));
             cJSON_Delete(res);
+            return;
+        }
+        // Quick Play: the lobby named is full (GameFull), or no lobby has room once the full ones answered this
+        // search (NoAvailableServers): another try after the backoff, not the error (quick_play_retry.h). A search
+        // that never saw a full lobby keeps the error: there are no lobbies at all.
+        if (qp && cJSON_IsString(err) && (!strcmp(err->valuestring, "GameFull") || (g_saw_full && !quiet && !strcmp(err->valuestring, "NoAvailableServers")))) {
+            if (!strcmp(err->valuestring, "GameFull")) {
+                if (quiet) g_quick_join_full = 1;
+            } else {
+                qp_full_clear(); // no other lobby has room: the full ones are asked again on the next try
+            }
+            cJSON_Delete(res);
+            if (quiet) servers_quick_join_next(); // the next candidate, or the sweep's retry when it runs out
+            else brain_retry_later(find, find_both);
             return;
         }
         const int nothing = cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") ||
@@ -799,7 +907,14 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 // ---- Krunker Strike (strike_director.h): the director allocates a game server and a ticket; when
 // it cannot (unreachable, no capacity), the finder's Strike pool (?flavor=strike) is the fallback.
 
+static void strike_seek_again(void *user) {
+    (void) user;
+    seek(NULL, 1, NULL); // the director's allocation again (the find flags are kept for it)
+}
+
 static void strike_seek_failed(const char *error) {
+    // Find New Game / Quick Match: a full Strike lobby is tried again after the backoff (quick_play_retry.h)
+    if (g_find_seek && error && !strcmp(error, "GameFull") && quick_play_retry_schedule(strike_seek_again, NULL)) return;
     if (g_find_seek && g_client->net_connected) { // Find New Game found nothing: stay in this lobby
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
         // only this lobby has room: v10 lands back in the same game silently (no notice, the log says it);
@@ -817,6 +932,7 @@ static void on_strike_finder(void *user, const int status, const char *body, con
     (void) length;
     char *error = user;
     g_seek_inflight = 0;
+    quick_play_retry_answered();
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *best = NULL, *srv;
     int best_players = -1, best_rank = 0;
@@ -881,6 +997,7 @@ static int strike_finder_seek(const char *error) {
 static void on_strike_allocation(void *user, const StrikeAllocation *a) {
     (void) user;
     g_seek_inflight = 0;
+    quick_play_retry_answered();
     g_rejoin_seek = 0;
     if (g_pin != PIN_NONE) {
         printf("[strike] allocation ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
@@ -929,11 +1046,30 @@ static int strike_seek(const int priv, const char *code) {
 static int g_play_seek;          // the next seek is v10's autoPlaySearch (servers_ui_play_map), taken by seek()
 static char g_play_query[160];   // its dataQuery: {"i":"<map>","dsma":[<index>]}
 
+// The lobbies a new-game seek leaves out besides excludeGame, most recent first: the recent ones
+// (recent_lobbies.h), then a Quick Play search's full lobbies (quick_play_retry.h). Comma-separated, "" when none.
+static void seek_recent_list(char *out, const size_t n) {
+    recent_lobbies_join(&g_recent_games, g_exclude_game, out, n);
+    size_t len = strlen(out);
+    for (int i = 0; i < g_full_count; i++) {
+        const char *id = g_full_ids[i];
+        const size_t id_len = strlen(id);
+        if (!id_len || (g_exclude_game[0] && !strcmp(id, g_exclude_game))) continue;
+        if (len + (len ? 1 : 0) + id_len + 1 > n) break;
+        if (len) out[len++] = ',';
+        memcpy(out + len, id, id_len + 1);
+        len += id_len;
+    }
+}
+
 static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     char path[6144], enc[3400]; // enc: also the dataQuery with every mode and map picked, URL-encoded
     const int play = g_play_seek; // v10's play seek: region "any", the map only, autoChangeGame false
     g_play_seek = 0;
     const int auto_change = play ? 0 : auto_change_in;
+    // a lobby picked by hand (a game id; not a quick join's candidate, a rejoin or a reload) replaces a Quick Play search
+    if (game_id && game_id[0] && !quiet && !g_rejoin_next && !g_reload_next) quick_play_retry_cancel();
+    const int qp_seek = quiet != NULL || quick_play_retry_running(); // a Quick Play search's seek (quick_play_retry.h)
     g_pin = PIN_NONE;
     // a Box Office seek replaces the error screen on the screen: an earlier official krunker.io failure
     // (krunker_net_failure_shown) must not make this seek's own error (a refused token: "Socket Error")
@@ -955,6 +1091,7 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         (void) auto_change;
         (void) quiet;
         g_exclude_game[0] = 0;
+        if (qp_seek) quick_play_retry_out(); // a Strike Quick Play search: its allocation is out (quick_play_retry.h)
         if (!strike_seek(same_private, same_private ? g_strike_code : NULL)) seek_unreachable();
         return;
     }
@@ -970,17 +1107,21 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
-    } else if (g_exclude_game[0]) { // v10 matchmakerSeek(..., excludeGame, ...): any lobby but that one
-        backend_url_encode(enc, sizeof(enc), g_exclude_game);
-        n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeGame=%s", enc);
+    } else if (g_exclude_game[0] || (qp_seek && g_full_count)) { // v10 matchmakerSeek(..., excludeGame, ...): any lobby but that one
+        if (g_exclude_game[0]) {
+            backend_url_encode(enc, sizeof(enc), g_exclude_game);
+            n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeGame=%s", enc);
+        }
         // KrunkNative: the lobbies before it too (the brain tries them before excludeGame's, after
-        // every other one: no bouncing between the last two; older brains ignore it)
-        char recent[RECENT_LOBBIES_MAX * RECENT_LOBBY_ID_MAX], recent_enc[sizeof(recent) * 3];
-        recent_lobbies_join(&g_recent_games, g_exclude_game, recent, sizeof(recent));
+        // every other one: no bouncing between the last two; older brains ignore it), and a Quick Play
+        // search's full lobbies (quick_play_retry.h)
+        char recent[(RECENT_LOBBIES_MAX + QP_FULL_MAX) * RECENT_LOBBY_ID_MAX], recent_enc[sizeof(recent) * 3];
+        seek_recent_list(recent, sizeof(recent));
         if (recent[0]) {
             backend_url_encode(recent_enc, sizeof(recent_enc), recent);
             n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeRecent=%s", recent_enc);
-            printf("[mm] seek: excluding %s, then the recent %s\n", g_exclude_game, recent);
+            if (g_exclude_game[0]) printf("[mm] seek: excluding %s, then the recent %s\n", g_exclude_game, recent);
+            else printf("[mm] quick play: leaving out the lobbies that were full: %s\n", recent);
         }
     }
     g_exclude_game[0] = 0;
@@ -1003,6 +1144,13 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     if (req) req->path = strdup(path);
     if (req) req->quiet = quiet;
     if (req) req->play = play;
+    if (req) {
+        req->any_game = !(game_id && game_id[0]);
+        req->qp = qp_seek;
+        req->qp_gen = quick_play_retry_generation();
+        req->serial = ++g_seek_serial;
+        if (req->qp) quick_play_retry_out();
+    }
     if (!req || !req->path || !seek_request_token(req)) {
         seek_req_free(req);
         seek_unreachable();
@@ -1141,7 +1289,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     free(requested_game);
 }
 
-static void start_seek(const char *game_id);
+static int start_seek(const char *game_id);
 
 // Auto Seek on Launch (seek_prefs.h): the launch's one seek, the one F4 runs for the same Quickplay
 // settings. Official (or Both without a matchmaker) is krunker.io's list; ours is the startup seek
@@ -1150,14 +1298,14 @@ static void start_seek(const char *game_id);
 static int launch_seek(void) {
     const SeekServers type = seek_prefs_servers();
     printf("[mm] launch seek: Quickplay %s\n", type == SEEK_SERVERS_OFFICIAL ? "official krunker.io" : type == SEEK_SERVERS_BOTH ? "both" : "KrunkNative");
-    if (type == SEEK_SERVERS_OFFICIAL || (type == SEEK_SERVERS_BOTH && !g_brain_mode)) return krunker_lobbies_seek();
-    if (!g_brain_mode) return 0;
+    qp_begin(); // the launch seek is a Quick Play search: its full lobbies are tried again (quick_play_retry.h)
+    if (type == SEEK_SERVERS_OFFICIAL || (type == SEEK_SERVERS_BOTH && !g_brain_mode)) return qp_started(krunker_lobbies_seek());
+    if (!g_brain_mode) return qp_started(0);
     if (type == SEEK_SERVERS_BOTH) {
         g_find_seek = g_find_both = 1;
         g_find_prev_game[0] = 0;
     }
-    start_seek(NULL);
-    return 1;
+    return qp_started(start_seek(NULL)) ? 1 : 0;
 }
 
 // The menu is up (its page and setup ran): the launch seek waits for it (seek_prefs_on_launch)
@@ -1185,12 +1333,14 @@ static void official_label_tick(void) {
     menu_set_region_label(krunker_region_name(region && region[0] ? region : krunker_net_region()));
 }
 
-static void start_seek(const char *game_id) {
-    if (g_seek_inflight || g_region_racing) return;
+// 1 = the seek was started (or its ping list asked), 0 = nothing was (a seek in flight, or the matchmaker
+// could not be asked: the error is shown then)
+static int start_seek(const char *game_id) {
+    if (g_seek_inflight || g_region_racing) return 0;
     g_full_skips = 0;
     if (strike_director_enabled() && !g_brain_mode) { // Krunker Strike without a brain: the director only
         seek(game_id, !game_id, NULL);
-        return;
+        return 1;
     }
     char *copy = game_id && game_id[0] ? strdup(game_id) : NULL;
     if (!mm_get("/mm/ping-list", on_ping_list, copy)) {
@@ -1198,7 +1348,9 @@ static void start_seek(const char *game_id) {
         g_find_seek = g_find_both = 0;
         g_reload_next = 0;
         fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
+        return 0;
     }
+    return 1;
 }
 
 // switchServer(id): the web reloads the page on ?game=id (v3.1.1 generateHref); the
@@ -2913,7 +3065,9 @@ void servers_quick_join_next(void) {
             const char *playing = krunker_net_game();
             if (playing[0] && !strcmp(id, playing)) continue; // the lobby it is in: no rejoin
             g_quick_join_left = 0;
+            quick_play_retry_arm(quick_join_again, NULL); // full when it is joined: the sweep goes on (quick_play_retry.h)
             krunker_lobbies_open(id);
+            quick_play_retry_disarm();
             return;
         }
         if (g_game_id[0] && !strcmp(id, g_game_id)) continue;
@@ -2926,6 +3080,9 @@ void servers_quick_join_next(void) {
 #endif
     }
     g_quick_join_left = 0;
+    // every candidate answered full: the sweep is tried again after the backoff, not the "No Joinable Games" popup
+    if (g_quick_join_full && quick_play_retry_schedule(quick_join_again, NULL)) return;
+    quick_play_retry_end();
     if (g_quick_join_kio_group) ui_error_popup(I18N("windows.servers.none", "No Joinable Games Found..."));
 }
 
@@ -2998,6 +3155,7 @@ static void quick_join_region(const int index) {
             return;
         }
         g_quick_join_left = 10;
+        qp_begin(); // a Quick Play search: a full lobby is tried again (quick_play_retry.h)
         menu_show_window(MENU_WINDOW_NONE, 0);
         servers_quick_join_next();
         return;
@@ -3012,10 +3170,12 @@ static void quick_join_region(const int index) {
         // no populated public lobby: seek the region (the brain picks or spawns one)
         snprintf(g_region, sizeof(g_region), "%s", g->key);
         menu_show_window(MENU_WINDOW_NONE, 0);
+        qp_begin();
         seek(NULL, 1, NULL);
         return;
     }
     g_quick_join_left = 10;
+    qp_begin(); // a Quick Play search: a full lobby is tried again (quick_play_retry.h)
     menu_show_window(MENU_WINDOW_NONE, 0);
     servers_quick_join_next();
 }
@@ -4016,15 +4176,20 @@ void servers_ui_set_director_mode(const int on) { g_director_mode = on != 0; }
 int servers_ui_retry(void) {
     // an official krunker.io session (its failure's error screen included): its own seek, the player
     // stays on krunker.io (krunker_net_seek_new); never a KrunkNative lobby
-    if (krunker_net_active()) return krunker_net_seek_new(g_client, NULL, 1);
+    if (krunker_net_active()) {
+        qp_begin();
+        return qp_started(krunker_net_seek_new(g_client, NULL, 1));
+    }
     // pinned: the link retries that server (menu_retry_connect -> client_net_request_reconnect)
     if (g_pin == PIN_DIRECT) return 0;
     if (g_pin == PIN_IDLE && !g_brain_mode && !g_director_mode) return servers_ui_reconnect(); // the transport is stopped
     if (!g_brain_mode && !g_director_mode) return 0;
-    // "Try seeking a new game": a fresh seek in the same region (v3.1.1 reloads the page)
+    // "Try seeking a new game": a fresh seek in the same region (v3.1.1 reloads the page). Find Game is a
+    // Quick Play search: a full lobby is tried again (quick_play_retry.h)
     g_pin = PIN_NONE; // the user asked for matchmaking (also after a console `disconnect`)
     g_game_id[0] = 0;
-    start_seek(NULL);
+    qp_begin();
+    (void) qp_started(start_seek(NULL));
     return 1;
 }
 
@@ -4038,7 +4203,7 @@ static int quick_match_seek(void) {
     printf("[mm] quick match: seeking a lobby other than %s\n", g_exclude_game[0] ? g_exclude_game : "(none)");
     g_pin = PIN_NONE;
     g_game_id[0] = 0;
-    start_seek(NULL); // /mm/ping-list, then the seek with excludeGame
+    (void) qp_started(start_seek(NULL)); // /mm/ping-list, then the seek with excludeGame
     return 1;
 }
 
@@ -4046,8 +4211,9 @@ static int quick_match_seek(void) {
 // game): the busiest other lobby of the list (krunker_lobbies_seek: the krunker.io Region first, the
 // recent ones last), or without a list krunker.io's own Find New Game. 0 = neither could start.
 int servers_ui_official_find_game(void) {
-    if (krunker_lobbies_enabled()) return krunker_lobbies_seek();
-    return g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0;
+    qp_begin();
+    if (krunker_lobbies_enabled()) return qp_started(krunker_lobbies_seek());
+    return qp_started(g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0);
 }
 
 int servers_ui_quick_match(void) {
@@ -4061,7 +4227,7 @@ int servers_ui_quick_match(void) {
 // browser with the opt-out); Both = ours when one
 // matches, else an official one. A seek that finds nothing leaves the player in this game with a
 // toast. 0 = nothing to do (offline / direct server with KrunkNative only).
-int servers_ui_find_new_game(void) {
+static int find_new_game_seek(void) {
     const SeekServers type = seek_prefs_servers();
     // in an official game (krunker.io's Find New Game, a matchmaker seek excluding this game) the
     // player stays on krunker.io whatever the Quickplay server type: only the official list, with the
@@ -4075,6 +4241,17 @@ int servers_ui_find_new_game(void) {
     g_find_both = type == SEEK_SERVERS_BOTH;
     snprintf(g_find_prev_game, sizeof(g_find_prev_game), "%s", g_game_id);
     return quick_match_seek();
+}
+
+// F4 (Find New Game) and Quick Match: a Quick Play search. Pressed while one runs (a retry waits, or its seek
+// is out), it stops and no new one starts (quick_play_retry.h); 1 = handled.
+int servers_ui_find_new_game(void) {
+    if (quick_play_retry_running()) {
+        quick_play_retry_cancel();
+        return 1;
+    }
+    qp_begin();
+    return qp_started(find_new_game_seek());
 }
 
 // --connect with a brain: the session reaches the direct server through JOIN, so an
@@ -4093,6 +4270,7 @@ static void direct_account_tick(Client *client, const int direct) {
 
 void servers_ui_tick(Client *client) {
     link_tick(client);
+    quick_play_retry_tick(); // a Quick Play search's full lobby is tried again when its backoff is due
     rejoin_tick(client); // after a server restart / a refused join key: a fresh ticket
     servers_timer_tick(); // windows[1] "Ends in" countdown
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
@@ -4191,7 +4369,9 @@ void servers_ui_tick(Client *client) {
             g_reload_next = 1;
         }
 #endif
-        start_seek(game);
+        // no lobby named: a new-game seek (Auto Seek on Launch off), so a full lobby is tried again (quick_play_retry.h)
+        if (!game) qp_begin();
+        (void) qp_started(start_seek(game));
         free(game);
         return;
     }

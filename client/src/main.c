@@ -24,6 +24,7 @@
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
+#include <quick_play_retry.h> // Escape stops a Quick Play search (quick_play_retry.h)
 #include <seek_prefs.h> // seek_prefs_migrate_servers: the one-time Server Type reset at startup
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
@@ -1919,6 +1920,7 @@ static void key_callback(GLFWwindow *window, const int key, const int scancode, 
     // the menu is open, and the browser drops pointer lock (detected in
     // client_menu_tick) while in game, so toggling here would double up.
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && html_ui_available() && client) {
+        quick_play_retry_cancel(); // Escape stops a Quick Play search (a retry waiting, or its seek out)
         // Escape does nothing while the game loads: Krunker Strike's loading screen covers the page
         // (its menu too), and a join waits for its INIT, before there is a round for the in-game menu
         // (menu_loading). The normal menu keeps its Escape. Only the game page loads a game.

@@ -8,6 +8,7 @@
 #include <seek_filter.h> // SEEK_LOBBY_* (the lobby flags of seek_prefs_lobby_ok)
 #include <server_names.h>
 #include <ui_logic.h>
+#include <quick_play_retry.h> // a Quick Play search's full official lobby is picked again (official_pick_again)
 #include <html_dom.h> // html_timer_add (the finder's "Took to long" timer)
 #include <v10_menu.h> // v10_menu_popular_changed
 #include <backend.h>
@@ -617,6 +618,12 @@ void krunker_lobbies_find_custom(const int mode) {
     if (!finder_open(mode)) finder_none();
 }
 
+// a Quick Play search's official lobby was full when it was joined: the list is picked again (after the backoff)
+static void official_pick_again(void *user) {
+    (void) user;
+    krunker_lobbies_seek();
+}
+
 static void on_seek_region(void *user, const char *region) {
     (void) user;
     (void) region;
@@ -677,7 +684,9 @@ int krunker_lobbies_seek(void) {
             return 1;
         }
         printf("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");
+        quick_play_retry_arm(official_pick_again, NULL); // full when it is joined: the list is picked again (quick_play_retry.h)
         krunker_lobbies_open(id);
+        quick_play_retry_disarm();
     } else {
         // v10's text for a search that matched no game (matchmaker.NoMatchingServers), as a failure
         seek_prefs_describe(want, sizeof(want));
@@ -717,6 +726,7 @@ void krunker_lobbies_open(const char *id) {
         krunker_net_join(g_lobbies_client, id, lobby_region(id));
         return;
     }
+    quick_play_retry_end(); // the lobby goes to the browser: no join of ours is out, so a Quick Play search is over
     const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
     char url[256], text[256];
     snprintf(url, sizeof(url), "%s/?game=%s", site && site[0] ? site : KRUNKER_DEFAULT_SITE, id);

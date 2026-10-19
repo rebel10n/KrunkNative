@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <quick_play_retry.h> // leaving the menu stops a Quick Play search
 #include <player_names.h> // Hide player names (player_names.h)
 #include <v10_wild_offer.h>
 #include <krunker_net.h> // the official error screen's Find Game
@@ -660,6 +661,7 @@ void menu_apply_open(const int open) {
 }
 
 void menu_request_open(const int open) {
+    if (!open) quick_play_retry_cancel(); // leaving the menu stops a Quick Play search (quick_play_retry.h)
 #ifdef __EMSCRIPTEN__
     // Leaving the menu waits for the pointer lock (menu_lock_ready, client_menu_tick); over an open
     // console there is no lock to wait for (the pointer stays free for it).
@@ -1449,6 +1451,13 @@ static char g_connect_map[96];    // its target's map, for "Loading <map> ..."
 
 int menu_connecting(void) {
     return g_connecting;
+}
+
+// A Quick Play search this client was running is stopped (quick_play_retry.h): its spinner goes, with
+// no error: the menu is as the player left it
+void menu_connect_stopped(void) {
+    g_connecting = 0;
+    menu_update_instructions();
 }
 
 // The game is still loading: a connect under way (the spinner), the v10 boot curtain waiting for its INIT,

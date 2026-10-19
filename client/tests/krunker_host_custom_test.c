@@ -74,6 +74,9 @@ const char *krunker_seek_region(void) { NOT_REACHED(); }
 void krunker_seek_region_resolve(KrunkerRegionFn fn, void *user) { (void) fn; (void) user; NOT_REACHED(); }
 int menu_connecting(void) { NOT_REACHED(); }
 void menu_show_connecting_map(const char *map) { (void) map; NOT_REACHED(); }
+void menu_connect_stopped(void) {} // quick_play_retry.c's cancel (no Quick Play search runs here)
+void ui_loading_popup(const char *text) { (void) text; NOT_REACHED(); }
+void ui_loadout_clear_pops(void) {} // quick_play_retry.c's end (its popup is never up here)
 const GameModeConfig *mode_config(int id) { (void) id; NOT_REACHED(); }
 void on_client_socket_connect(Client *c) { (void) c; NOT_REACHED(); }
 void on_client_socket_disconnect(Client *c) { (void) c; NOT_REACHED(); }

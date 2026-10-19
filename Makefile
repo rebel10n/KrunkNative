@@ -699,6 +699,10 @@ server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each 
 seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_region_e2e.py $(DEBUG_DIR)
 
+.PHONY: quickplay-retry-e2e
+quickplay-retry-e2e: build ## Quick Play retries a full lobby until the player is in one (Find Game, Quick Match, Auto Seek on Launch: full, full, then a lobby with room; a stub brain; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/quickplay_retry_e2e.py $(DEBUG_DIR)
+
 .PHONY: seek-servers-migrate-e2e
 seek-servers-migrate-e2e: build ## Server Type reset once per profile (knSeekServersMigrated): a saved krunker.io choice from the old popup becomes Box Office once; a later pick is kept (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_servers_migrate_e2e.py $(DEBUG_DIR)

@@ -1053,6 +1053,7 @@ else ()
         add_executable(krunker_host_custom_test client/tests/krunker_host_custom_test.c
                        client/src/net/krunker_link.c client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c
                        client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c client/src/ui/player_names.c
+                       client/src/ui/quick_play_retry.c
                        shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                        shared/src/season.c shared/src/voice.c shared/src/social.c)
         # the headers krunker_net.c includes (client.h: freetype; GLFW for glfwGetTime, which the test defines itself)

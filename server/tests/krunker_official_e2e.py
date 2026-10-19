@@ -3483,8 +3483,11 @@ def run_native_full_answer():
           not any(("FRA:fulla" in ws or "FRA:fullb" in ws) for ws in stub.ws_paths), stub.ws_paths)
     check(f"{label}: the full answer is sought again without it",
           "[krunker] seek-game: FRA:fulla is full (the game list): seeking again without it" in text, [l for l in lines if "[krunker] seek-game" in l][-8:])
-    check(f"{label}: with every answer full the join says Game is full",
-          "[krunker] seek-game: FRA:fulla is full too: no game with room" in text and "Game is full." in text, [l for l in lines if "[krunker]" in l][-8:])
+    # Quick Play (quick_play_retry.h): with every answer full the search is tried again after its backoff, not the
+    # error: "Game is full." is never shown, the next try is logged (quick_play_retry.c)
+    check(f"{label}: with every answer full the search goes on: tried again after its backoff, never Game is full.",
+          "[krunker] seek-game: FRA:fulla is full too: no game with room" in text and "trying again in" in text
+          and "Game is full." not in text, [l for l in lines if "[krunker]" in l or "quick play" in l][-8:])
 
 
 def run_native_f4_stays_official():

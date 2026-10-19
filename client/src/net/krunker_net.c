@@ -24,6 +24,7 @@
 #include <ui_logic.h>
 #include <i18n.h> // i18n_trf
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
+#include <quick_play_retry.h> // a Quick Play search's full official game is tried again (kio_retry)
 #include <cJSON.h>
 #include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
 #include <ctype.h>
@@ -102,6 +103,9 @@ static struct {
     // Find New Game (krunker_net_seek_new): the seek's excludeGame, the answers re-sought so far, and
     // the best of them (the least recent, rank as recent_lobbies_rank) to fall back on
     int seek_new, seek_new_retries;
+    QuickPlayRetryFn qp_fn; // Quick Play's retry of this join's full answer (quick_play_retry.h): Find New Game's seek, or the join a search armed
+    void *qp_user;
+    unsigned qp_gen;        // quick_play_retry_generation() when the join began: a stop since drops its answer
     char exclude[96], fallback[96];
     int fallback_rank;
     char full[KRUNKER_FULL_MAX][RECENT_LOBBY_ID_MAX]; // the list's games at players >= max
@@ -625,6 +629,7 @@ static void socket_opened(void) {
     client->net_socket = KRUNKER_FAKE_FD;
     pthread_mutex_unlock(&client->net_lock);
     K.connected = 1;
+    quick_play_retry_end(); // the game took the player: a Quick Play search is over
     printf("[krunker] connected to %s\n", K.ws_log);
     on_client_socket_connect(client);
 }
@@ -660,6 +665,7 @@ static void fail(const char *fmt, ...) {
     vsnprintf(message, sizeof(message), fmt, ap);
     va_end(ap);
     fprintf(stderr, "[krunker] %s\n", message);
+    quick_play_retry_end(); // the error is shown for good: a Quick Play search ends with it
     K.state = KS_CLOSED;
     present_failure(message);
 }
@@ -1361,9 +1367,31 @@ static int token_refusal(const char *error) {
 }
 
 // {host, port, gameId, clientId, data} -> the WebSocket URL (game.deob.js:222360-222371)
+// Quick Play's retry of this join (quick_play_retry.h): a full answer is tried again after the backoff,
+// never the error. kio_retry: 1 = scheduled (the caller must not fail), 0 = this join is no Quick Play join.
+static void kio_seek_again(void *user) {
+    (void) user;
+    if (K.client) krunker_net_seek_new(K.client, NULL, 1); // Find New Game again: the list, excluding nothing
+}
+
+static int kio_retry(void) {
+    if (!K.qp_fn) return 0;
+    K.state = KS_CLOSED; // no seek is out: the search waits (the spinner and "Searching..." stay up)
+    return quick_play_retry_schedule(K.qp_fn, K.qp_user);
+}
+
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     if (stale(user) || K.state != KS_SEEK) return;
+    quick_play_retry_answered();
+    if (K.qp_fn && quick_play_retry_stale(K.qp_gen)) {
+        // Quick Play was stopped (F4 / Quick Match again, Escape, leaving the menu) while this seek was out:
+        // the answer is dropped and the join ends quietly, the menu as the stop left it
+        printf("[krunker] quick play: a late answer is ignored (the search was stopped)\n");
+        krunker_net_leave(K.client, NULL);
+        menu_connect_stopped();
+        return;
+    }
     cJSON *res = body ? cJSON_Parse(body) : NULL;
     const char *error = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(res, "error"));
     const char *host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(res, "host"));
@@ -1421,6 +1449,11 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         cJSON_Delete(res);
         fetch_token();
         return;
+    } else if (error && !strcmp(error, "GameFull") && kio_retry()) {
+        // a Quick Play join's game is full (the list was stale, or Find New Game's answer): tried again after the backoff
+        printf("[krunker] seek-game: %s is full: Quick Play tries again\n", K.game_id[0] ? K.game_id : "(any)");
+        cJSON_Delete(res);
+        return;
     } else if (status != 200 || error || !host || !game || !client_id) {
         char detail[200], text[300];
         // the matchmaker's own error word, else the start of its body on one line (the log)
@@ -1442,9 +1475,13 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             seek();
             return;
         }
+        printf("[krunker] seek-game: %s is full too: no game with room\n", game);
+        if (kio_retry()) { // Quick Play: no game with room yet, the search tries again after the backoff
+            cJSON_Delete(res);
+            return;
+        }
         char text[300];
         join_error_text("GameFull", text, sizeof(text));
-        printf("[krunker] seek-game: %s is full too: no game with room\n", game);
         cJSON_Delete(res);
         fail("%s", text);
     } else if (K.seek_new && !K.game_id[0] && recent_lobbies_rank(&K.recent, game) &&
@@ -1706,6 +1743,13 @@ static int join(Client *client, const char *game_id, const char *region, const i
     snprintf(K.match, sizeof(K.match), "%s", connection ? connection : "");
     K.seek_new = seek_new;
     K.seek_new_retries = 0;
+    // Quick Play's retry (quick_play_retry.h): a Find New Game join tries again after a full answer, and so does a
+    // join a Quick Play search armed (krunker_lobbies, Quick Join). Any other join keeps its answer.
+    K.qp_fn = NULL;
+    K.qp_user = NULL;
+    if (seek_new) K.qp_fn = kio_seek_again;
+    else quick_play_retry_take(&K.qp_fn, &K.qp_user);
+    K.qp_gen = quick_play_retry_generation();
     K.reload = reload && K.game_id[0];
     K.fallback[0] = 0;
     K.fallback_rank = 0;
