@@ -177,6 +177,8 @@
  "kn.controls.omUndo": "Object Manager Undo",
  "kn.controls.reconnect": "Reconnect",
  "kn.controls.thirdPerson": "Third Person",
+ "kn.crash.saved": "A crash report was saved to {0}",
+ "kn.crash.title": "Crash report",
  "kn.dialog.no": "NO",
  "kn.dialog.yes": "YES",
  "kn.download.allPlatforms": "All platforms",

@@ -20,6 +20,10 @@
 // filter on Windows) and reads the latest report. Call once on the main thread, after the flavor
 // and XDG_CONFIG_HOME are settled (debug_capture_startup), before the first frame.
 void crash_report_init(void);
+// Once per client frame (main.c), until shown: the notice that a report an earlier run saved exists,
+// "A crash report was saved to <path>", in the notification centre (v10_notify.h). 1 when it shows
+// now. Each report is named once.
+int crash_report_notice_tick(void);
 // One in-game console line (ui_console.c append): kept for the report's log part. Newlines and
 // control characters become spaces; a line that may hold a credential is replaced by a note.
 void crash_report_log_line(const char *text);

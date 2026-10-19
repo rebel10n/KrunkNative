@@ -1120,6 +1120,7 @@ int main(int argc, char **argv) {
 // steps inside the frame, net/offline.c), present and poll input.
 void client_frame(Client *client) {
     crash_report_tick(); // the freeze watchdog: the loop is alive (crash_report.c); before any frame-cap sleep
+    crash_report_notice_tick(); // the notice of a report an earlier run saved (once, when the page is up)
     // updateRate on the web: Krunker skips whole animation frames (index.js gP); the
     // canvas keeps the last frame. Natively the cap sleeps in client_render_frame_end.
     if (!client_render_frame_due()) {

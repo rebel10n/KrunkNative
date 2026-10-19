@@ -9,6 +9,9 @@
 
 #include <build_info.h>
 #include <flavor.h>
+#include <html_dom.h>
+#include <i18n.h>
+#include <v10_notify.h> // the notification centre (the notice stays for CRASH_NOTICE_MS)
 
 #ifdef __EMSCRIPTEN__
 
@@ -16,6 +19,7 @@ void crash_report_init(void) {}
 void crash_report_log_line(const char *text) { (void) text; }
 void crash_report_tick(void) {}
 void crash_report_shutdown(void) {}
+int crash_report_notice_tick(void) { return 0; }
 
 #else
 
@@ -58,13 +62,15 @@ void crash_report_shutdown(void) {}
 #define CRASH_WATCH_TICK_MS 250       // the watchdog's poll interval
 #define CRASH_DUMP_WAIT_MS 1000       // how long a thread may take to answer a dump request
 #define CRASH_TEST_STALL_MS 6000      // KRUNKNATIVE_TEST_STALL_AFTER_FRAMES: the stall's length
+#define CRASH_NOTICE_MS 15000.0       // the next start's notice: how long the centre keeps it
 
 // ---------------------------------------------------------------- state (written at startup)
 
 static struct {
     char dir[CRASH_PATH_MAX];        // <config root>/crash
     char crash_path[CRASH_PATH_MAX]; // <dir>/crash-<stamp>-<pid>.txt, created by a crash
-    char latest_path[CRASH_PATH_MAX]; // <dir>/latest.txt
+    char latest_path[CRASH_PATH_MAX]; // <dir>/latest.txt: the newest report's path
+    char seen_path[CRASH_PATH_MAX];   // <dir>/seen.txt: the report the notice last named
     char freeze_path[CRASH_PATH_MAX]; // <dir>/freeze-<stamp>-<pid>.txt, appended by each freeze
     char pid_line[32];               // "pid: N\n"
     const char *build;               // kn_build_string(), static
@@ -652,6 +658,53 @@ void crash_report_shutdown(void) {
 
 // ---------------------------------------------------------------- startup
 
+static char g_notice_path[CRASH_PATH_MAX]; // a report an earlier run saved and no notice named yet ("" none)
+
+// The first line of a small text file (the trailing newline removed). 0 when it cannot be read.
+static int read_line(const char *path, char *out, const size_t n) {
+    out[0] = 0;
+    FILE *file = fopen(path, "rb");
+    if (!file) return 0;
+    size_t len = fread(out, 1, n - 1, file);
+    fclose(file);
+    out[len] = 0;
+    while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r')) out[--len] = 0;
+    return 1;
+}
+
+static void write_line(const char *path, const char *text) {
+    FILE *file = fopen(path, "wb");
+    if (!file) return;
+    fprintf(file, "%s\n", text);
+    fclose(file);
+}
+
+// The next start: the newest report, unless the last notice already named it.
+static void find_notice(void) {
+    char latest[CRASH_PATH_MAX];
+    char seen[CRASH_PATH_MAX];
+    if (!read_line(g_report.latest_path, latest, sizeof(latest)) || !latest[0]) return;
+    read_line(g_report.seen_path, seen, sizeof(seen));
+    if (strcmp(latest, seen) == 0) return;
+    FILE *report = fopen(latest, "rb"); // the report must still be there
+    if (!report) return;
+    fclose(report);
+    snprintf(g_notice_path, sizeof(g_notice_path), "%s", latest);
+}
+
+// Once per client frame (main.c), until it has shown: the notice, once the page has its body (the
+// notification centre lives in it). The report's name is then remembered, so it is shown once.
+int crash_report_notice_tick(void) {
+    if (!g_notice_path[0] || !html_dom_body()) return 0;
+    char text[CRASH_PATH_MAX + 128];
+    I18N_F(text, "kn.crash.saved", "A crash report was saved to {0}", g_notice_path);
+    v10_notify_push(I18N("kn.crash.title", "Crash report"), text, CRASH_NOTICE_MS);
+    printf("[crash] A crash report was saved to %s\n", g_notice_path);
+    write_line(g_report.seen_path, g_notice_path);
+    g_notice_path[0] = 0;
+    return 1;
+}
+
 // $XDG_CONFIG_HOME/<flavor's storage dir> or ~/.config/<...>: the settings store's directory
 // (html_dom_core.c storage_dir).
 static int config_root(char *out, const size_t n) {
@@ -720,8 +773,10 @@ void crash_report_init(void) {
     snprintf(g_report.crash_path, sizeof(g_report.crash_path), "%s/crash-%s-%ld.txt", g_report.dir, stamp, pid);
     snprintf(g_report.freeze_path, sizeof(g_report.freeze_path), "%s/freeze-%s-%ld.txt", g_report.dir, stamp, pid);
     snprintf(g_report.latest_path, sizeof(g_report.latest_path), "%s/latest.txt", g_report.dir);
+    snprintf(g_report.seen_path, sizeof(g_report.seen_path), "%s/seen.txt", g_report.dir);
     snprintf(g_report.pid_line, sizeof(g_report.pid_line), "pid: %ld\n", pid);
     g_report.build = kn_build_string();
+    find_notice();
 
 #ifndef _WIN32
     // Warm backtrace() up now: its first call loads the unwinder, which must not happen in a handler.
