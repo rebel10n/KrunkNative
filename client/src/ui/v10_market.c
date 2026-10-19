@@ -59,6 +59,7 @@
 
 #include "../viewer/viewer_store.h"
 #include "v10_market_guide.h"
+#include "v10_junkyard.h"
 
 #define UNUSED (void) ev; (void) args; (void) argc
 #define PAGE 60          // the inventory / catalog grids' page (v10: 60, then 60 more per scroll)
@@ -2091,15 +2092,8 @@ static void bm_modal(StrBuf *sb) {
 
 // ------------------------------------------------------------------ Junkyard (svelte-1vqzycn)
 
-// Junk and crafting do not exist here (doc/v7/economy.md "Not done"): the page with no recipes
-static void view_junkyard(StrBuf *sb) {
-    sb_append(sb, "<div class=\"junkyard-tab svelte-1vqzycn\"><div class=\"jy-scroll svelte-1vqzycn\"><div class=\"craft-header-img svelte-1vqzycn\" style=\"background-image: linear-gradient(rgb(10 10 10 / 37%), #0000003b), url(./img/backgrounds/junkyrd_0.png);\">"
-                  "<div class=\"craft-header-name svelte-1vqzycn\">Welcome to the Junkyard</div> <div class=\"craft-header-desc svelte-1vqzycn\">Craft brand new skins &amp; items by using Junk and other Materials, which can be found scattered\n      around every map in the game or earned from challenges.</div></div> "
-                  " <div class=\"craft-grid svelte-1vqzycn\">");
-    if (logged_in()) sb_append(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px;\">No Recipes Found</div>");
-    else sb_append(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px; cursor: pointer;\" role=\"button\" tabindex=\"0\" onclick=\"showWindow(5)\"><span style=\"color: #31caec\">Register</span> to craft!</div>");
-    sb_append(sb, "</div></div></div>");
-}
+// The crafting page (v10_junkyard.c): the recipes, the craft confirmation and its result
+static void view_junkyard(StrBuf *sb) { v10_junkyard_render(sb); }
 
 // ------------------------------------------------------------------ Catalog (_46722 svelte-19zccg6, _45008 svelte-dmu4q2)
 
@@ -2589,6 +2583,8 @@ static void switch_tab(const int t) {
         trades_load();
     } else if (t == TAB_BLACKM && !g_scenario) {
         inventory_load();
+    } else if (t == TAB_JUNKYARD && !g_scenario) {
+        v10_junkyard_enter();
     }
     render();
 }
@@ -3220,9 +3216,15 @@ int v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         v10_market_open(TAB_CATALOG, -1);
         return 1;
     }
+    if (strncmp(name, "v10jy.", 6) == 0) return is_open() ? v10_junkyard_handle(name, ev, args, argc) : 1;
     if (strncmp(name, "v10mk.", 6) != 0) return -1;
     if (!is_open() && !g_standalone) return 1;
     return handle(name, ev, args, argc);
+}
+
+// v10_junkyard.c: the Junkyard's replies and popups re-render the exchange's content
+void v10_market_junkyard_refresh(void) {
+    if (is_open() && M.tab == TAB_JUNKYARD) render_content();
 }
 
 // ------------------------------------------------------------------ social frames

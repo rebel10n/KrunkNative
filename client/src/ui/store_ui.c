@@ -1122,16 +1122,6 @@ static void store_purchase(StrBuf *sb) {
                I18N("windows.store.currency", "* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank"), agree);
 }
 
-static void store_junkyard(StrBuf *sb, const AccountInfo *acc) {
-    char url[256];
-    store_asset_url("img/backgrounds/junkyrd_0.png", url, sizeof(url));
-    sb_appendf(sb, "<div id='crftHeaderImg' style='background-image:linear-gradient(rgb(10 10 10 / 37%%),#0000003b),url(%s);'><div id='crftHeaderName'>Welcome to the Junkyard</div><div id='crftHeaderDesc'>Craft brand new skins &amp; items by using Junk and other Materials, which can be found scattered around every map in the game or earned from challenges.</div></div><div style='margin-top:0px;'>", url);
-    // crafting is out of scope (doc/v7/decisions.md: the store economy): no recipes to load
-    sb_append(sb, acc ? "<div style='color:#fff;text-align:center;margin-top:20px;'>No Recipes Found</div>"
-                      : "<div style='color:#fff;text-align:center;margin-top:20px;cursor: pointer;' onclick='showWindow(5)'><span style='color:#31caec'>Register</span> to craft! </div>");
-    sb_append(sb, "</div>");
-}
-
 // ---------------------------------------------------------------- the v10 page's Store
 // v10.js windows[13].gen() mounts the Svelte store _44131 (store-window-mount): the store-tabs row
 // (config.shopTabs: home, Prize Wheels, Premium, Purchase KR, Redeem Keys, Eterno Shop) over the
