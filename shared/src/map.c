@@ -956,11 +956,22 @@ void map_object_rotation(const Object *object, float out[9]) {
     memcpy(out, m, sizeof(m));
 }
 
+// Render-only fix for Atomic (assets/maps/official/23_atomic.json, mmId 52269, unique among the
+// official files). Its ground slabs are CUBEs with the top-only face mask "8" (Krunker face 2), so
+// geos.js omits the bottom face: a collidable slab is invisible from below and players bump into it.
+// With this flag prefab.c also draws the bottom ("c") of each collidable CUBE whose mask is top-only
+// and whose height is at most MAP_SLAB_UNDERSIDE_MAX_HEIGHT (Atomic's 14 slabs are 0.01 to 3 units
+// high; its other top-only cubes are non-collidable or 77 units tall, and stay as they are).
+// Collision, the top face and every other map are unchanged. The map's own mmId picks the map, so
+// no coordinates are needed.
+#define MAP_SLAB_UNDERSIDE_MMID 52269
+#define MAP_SLAB_UNDERSIDE_MAX_HEIGHT 4.0f
+
 // One kept map object record -> a new Object, not yet in any map (map_init_ex's loop, and the
 // KrunkNative Object Manager's run-time records through map_object_from_json). `position` /
 // `scale` get the record's rounded p / s (before the ladder offsets). NULL: out of memory.
-static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors, const int map_no_ambient, const int v3_planes, const int build_meshes,
-                                vec3 *out_position, vec3 *out_scale) {
+static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors, const int map_no_ambient, const int v3_planes, const int slab_undersides,
+                                const int build_meshes, vec3 *out_position, vec3 *out_scale) {
     (void) parsed_colors;
     (void) build_meshes;
     const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
@@ -1069,6 +1080,10 @@ static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors,
             break;
     }
 
+    // the slab underside fix (MAP_SLAB_UNDERSIDE_MMID): a collidable thin CUBE; prefab.c checks its mask
+    object->slab_underside = slab_undersides && prefab_id == PREFAB_CUBE && object->collision_type == COLLISION_TYPE_BOX &&
+                             object->scale.y <= MAP_SLAB_UNDERSIDE_MAX_HEIGHT;
+
     // notWallJ: wj != null; the non-solid prefabs and the own-branch ones never wall-jump
     object->wall_jumpable = info && !(info->roles & PREFAB_R_NO_WALL_JUMP) && !map_has(raw_obj, "wj");
 
@@ -1168,6 +1183,7 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
     map->config = g_default_map_config; // v3.1.1 map.game is ignored, as by the v7 runtime (§1.9)
     map->death_y = cJSON_IsNumber(death_y) ? (float) cJSON_GetNumberValue(death_y) : game_constants.death_y;
     map_parse_top_level(map, raw_data);
+    const int slab_undersides = map->minimap_asset == MAP_SLAB_UNDERSIDE_MMID;
 
     if (cJSON_IsArray(cam_pos) && cJSON_GetArraySize(cam_pos) >= 3) {
         map->camera_position.x = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(cam_pos, 0));
@@ -1247,7 +1263,7 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
         if (!map_raw_object_kept(raw_obj)) continue;
 
         vec3 position, scale;
-        Object *object = map_parse_object(raw_obj, parsed_colors, map_no_ambient, v3_planes, build_meshes, &position, &scale);
+        Object *object = map_parse_object(raw_obj, parsed_colors, map_no_ambient, v3_planes, slab_undersides, build_meshes, &position, &scale);
         if (!object) continue;
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
@@ -1316,8 +1332,9 @@ Object *map_object_from_json(const Map *map, const cJSON *raw_obj, const int bui
     if (!cJSON_IsObject(raw_obj) || !map_raw_object_kept(raw_obj)) return NULL;
     const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
     const int v3_planes = map && cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, MAP_KEY_V3_PLANES));
+    const int slab_undersides = map && map->minimap_asset == MAP_SLAB_UNDERSIDE_MMID;
     vec3 position, scale;
-    return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, build_meshes, &position, &scale);
+    return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, slab_undersides, build_meshes, &position, &scale);
 }
 
 void map_object_free(Object *object) {

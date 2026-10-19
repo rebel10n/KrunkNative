@@ -82,6 +82,14 @@ L162140) are identical to `libs/Terrain.js:606` and `libs/Zone.js:178`. Ocean
 (`CONFIG_PROPS` L192277) is identical. The terrain class gained exportState/importState and
 raycast helpers (runtime only, no new JSON keys).
 
+KrunkNative render fix (not a v10 rule, render only): the top-only face mask `"f": "8"` omits the
+bottom face, so a collidable CUBE with that mask is invisible from below. On Atomic (`mmId` 52269,
+`assets/maps/official/23_atomic.json`) the 14 collidable CUBEs of at most 4 units high with the mask
+`"8"` also draw their bottom face (the mask becomes `"c"` in the client only). Collision, the top face
+and every other map are unchanged; the rule is `shared/src/map.c` (`MAP_SLAB_UNDERSIDE_MMID`) and
+`client/src/prefab.c`. The other 55 maps with top-only cubes (`assets/maps/`) have a different `mmId`
+and render as before.
+
 ## 4. Entities (new subsystem)
 
 Entities are server-authoritative, scriptable rigid groups of cubes/assets. Archetypes are stored

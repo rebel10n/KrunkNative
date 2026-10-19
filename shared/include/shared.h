@@ -265,6 +265,7 @@ typedef struct {
     unsigned char stop_momentum:1;      // teleporter "m": telStopMo
     unsigned char force_dir:1;          // teleporter "fd": the receiver sets the view direction
     unsigned char no_vis:1;             // noVis ("v", every build; the client also sets it for meshes created hidden): not rendered, no spray, interface state never shows it
+    unsigned char slab_underside:1;     // a collidable thin CUBE of a map with the slab underside fix (map.c MAP_SLAB_UNDERSIDE_MMID): prefab.c draws its bottom face when the mask is top-only
 
     // "d" (ladders, ramps, check points, teleporters 0..3; v7 BOOST_PAD 0..5: 0 up, 1 down, 2-5 sideways)
     unsigned char direction:3;

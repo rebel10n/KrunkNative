@@ -2261,7 +2261,11 @@ Mesh *prefab_init(Object *object, const vec4 *colors, const cJSON *raw_obj) {
 
     PrefabStyle st;
     prefab_style_init(&st, object, colors, raw_obj);
-    const int faces = prefab_face_mask(cJSON_GetObjectItem(raw_obj, "f"));
+    int faces = prefab_face_mask(cJSON_GetObjectItem(raw_obj, "f"));
+    // slab underside fix (shared map.c MAP_SLAB_UNDERSIDE_MMID): a top-only collidable ground slab
+    // also draws its bottom face. Internal mask 0x04 is Krunker face 2 (top, JSON "8"), 0x08 is
+    // face 3 (bottom, JSON "4"), so the JSON mask becomes "c". No other mask changes.
+    if (object->slab_underside && faces == 0x04) faces |= 0x08;
     const int stretch = prefab_json_present(cJSON_GetObjectItem(raw_obj, "tsr"));
 
     switch (prefab) {
