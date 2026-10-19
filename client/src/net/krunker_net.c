@@ -266,6 +266,63 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
     krunker_frame_free(&f);
 }
 
+// KRUNKNATIVE_DUMP_RECPS=<path> (a capture of v10's recipe table for the Junkyard, not a player's
+// feature): the game server's "recps" answer (CRAFT_DATA_RESPONSE: the rows and the junk balance) is
+// written to <path> as its raw JSON args, once it is an array (logged out it is null: asked again).
+// recps_probe_tick sends the Junkyard's CRAFT_DATA_REQUEST (no args) on the open game socket, up to 8
+// times 3 s apart, until that answer has been written.
+static const char *recps_dump_path(void) {
+    const char *p = getenv("KRUNKNATIVE_DUMP_RECPS");
+    return p && *p ? p : NULL;
+}
+
+static int g_recps_tries, g_recps_done, g_recps_armed;
+static double g_recps_next;
+
+static void recps_dump_frame(const uint8_t *data, const size_t len) {
+    const char *path = recps_dump_path();
+    if (!path || g_recps_done) return;
+    KrunkerFrame f;
+    if (krunker_proto_decode(data, len, 0, &f) != KRUNKER_PROTO_OK) return;
+    if (strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_CRAFT_DATA_RESPONSE)) == 0 && f.argc > 0 && f.args[0].type == KRUNKER_ARRAY) {
+        KrunkerBuf json = {0};
+        const KrunkerValue args = KRUNKER_V_ARRAY(f.args, f.argc);
+        krunker_value_to_json(&args, &json);
+        FILE *out = json.data ? fopen(path, "w") : NULL;
+        if (out) {
+            fwrite(json.data, 1, json.len, out);
+            fputc('\n', out);
+            fclose(out);
+            g_recps_done = 1;
+        }
+        printf("[krunker] recps: %zu bytes of args %s %s\n", json.len, out ? "written to" : "NOT written to", path);
+        krunker_buf_free(&json);
+    } else if (strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_CRAFT_DATA_RESPONSE)) == 0) {
+        printf("[krunker] recps: no rows yet (logged out or no table), asked again\n");
+    }
+    krunker_frame_free(&f);
+}
+
+// Asked only once "en" is out (the player is in the game: the live server refuses recps before it with
+// "Socket error" 000008), 2 s after it so the spawn is in.
+static void recps_probe_tick(void) {
+    if (!recps_dump_path() || K.state != KS_OPEN) return;
+    const double now = glfwGetTime();
+    pthread_mutex_lock(&K.lock);
+    const int joined = K.link.joined;
+    if (joined && !g_recps_armed) {
+        g_recps_armed = 1;
+        g_recps_next = now + 2.0;
+    }
+    if (joined && g_recps_armed && !g_recps_done && g_recps_tries < 8 && now >= g_recps_next) {
+        g_recps_next = now + 3.0;
+        g_recps_tries++;
+        const int sent = krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_CRAFT_DATA_REQUEST), NULL, 0);
+        printf("[krunker] recps: request %d %s\n", g_recps_tries, sent ? "sent" : "not sent");
+    }
+    pthread_mutex_unlock(&K.lock);
+}
+
 // The main thread shows the pending notice in krunker_net_tick: an error popup the player stays in
 // the game past. A failure that ends the join is not a notice: present_failure shows it on the Lost
 // Connection screen. A join that works shows nothing (no toast): the loading screen and the game do.
@@ -1017,6 +1074,7 @@ static void *ws_thread(void *arg) {
             if (fin && message_len) {
                 trace_frame("<=", message, message_len);
                 pthread_mutex_lock(&K.lock);
+                recps_dump_frame(message, message_len); // (under K.lock: recps_probe_tick reads its state there)
                 if (generation == K.generation) krunker_link_on_frame(&K.link, message, message_len);
                 pthread_mutex_unlock(&K.lock);
                 message_len = 0;
@@ -2182,6 +2240,7 @@ void krunker_net_tick(Client *client) {
     }
     if (K.state != KS_OFF) kmap_tick(client ? client : K.client);
     trace_sync_tick(client ? client : K.client);
+    recps_probe_tick();
     if (K.leave_unsupported && K.state != KS_OFF) {
         // init's map cannot be shown (not in krunker_maps.h's table, the cache or the API; or no map at all):
         // the session ends on the error screen saying which map and why, instead of a loading screen forever
