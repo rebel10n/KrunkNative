@@ -101,7 +101,7 @@ void color_cube_fini(ColorCube *cube) {
     free(cube);
 }
 
-PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, const int is_left, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed) {
+PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, const int is_left, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve) {
     PlayerArmMesh *arm = calloc(1, sizeof(PlayerArmMesh));
     if (!arm) return NULL;
 
@@ -165,9 +165,13 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         arm->extender->transform.position.z = -game_constants.upper_arm_length;
     }
 
+    // genArm: a noLeftSleeve wrist (VS2_NO_LEFT_SLEEVE, the wrist item's flag) takes the left sleeve away: that
+    // band is the shirt colour at scale 1 instead of the sleeve colour at 1.1. v10 also sets noAmb on the
+    // forearm (its vertex ambient shading, which this renderer's colour cubes do not draw)
+    const int bare_left_sleeve = is_left && no_left_sleeve;
     const ColorCubeSegment lower_segments[] = {
         {shirt_color, 0.65f, 1.0f},
-        {sleeve_color, 0.15f, 1.1f},
+        {bare_left_sleeve ? shirt_color : sleeve_color, 0.15f, bare_left_sleeve ? 1.0f : 1.1f},
         {skin_color, 0.2f, 1.0f},
     };
 
@@ -194,14 +198,14 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     return arm;
 }
 
-PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed) {
+PlayerArms *generate_arms(const Weapon *weapon, const int shirt_color, const int sleeve_color, const int skin_color, const int third_person, const int left_handed, const int no_left_sleeve) {
     PlayerArms *arms = calloc(1, sizeof(PlayerArms));
     if (!arms) return NULL;
 
     const float offset = (-game_constants.chest_width + game_constants.arm_scale * 0.5f - game_constants.arm_inset) * (third_person ? 1.0f : weapon->hold_width ? weapon->hold_width : 0.4f);
 
-    arms->left = generate_arm(offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
-    arms->right = generate_arm(-offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed);
+    arms->left = generate_arm(offset, game_constants.arm_offset, weapon, !left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve);
+    arms->right = generate_arm(-offset, game_constants.arm_offset, weapon,  left_handed, shirt_color, sleeve_color, skin_color, third_person, left_handed, no_left_sleeve);
 
     if (!arms->left || !arms->right) {
         free(arms->left);
@@ -1243,7 +1247,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                     arms_weapon = &drank_grip;
                 }
 
-                PlayerArms *arms = generate_arms(arms_weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
+                // the wrist item's noLeftSleeve (genArms' options: the arms are built with the wrist's flag)
+                const int no_left_sleeve = look.wrist && (look.wrist->flags2 & VS2_NO_LEFT_SLEEVE);
+                PlayerArms *arms = generate_arms(arms_weapon, colors[1], colors[5], colors[0], third_person, player->left_handed, no_left_sleeve);
                 if (!arms) continue;
 
                 arms->anchor.parent = player_mesh->upper_body_anchor;
