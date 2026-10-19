@@ -61,8 +61,9 @@ lifetime are not visible from the client; the rule above is what the client does
 ## Native client: the challenge window (KN_WEBVIEW)
 
 Built with a webview (CMake `-DKN_WEBVIEW=AUTO|ON|OFF`; AUTO, the default, is on when pkg-config finds
-`webkit2gtk-4.1`; Linux only for now), `CaptchaRequired` runs the challenge **silently first**: a
-WebKitGTK view (a GTK offscreen window, never drawn into the GL scene) on a **real krunker.io page**,
+`webkit2gtk-4.1` on Linux, always on macOS, and on Windows when the WebView2 SDK is in `KN_WEBVIEW2_DIR`),
+`CaptchaRequired` runs the challenge **silently first**: a WebKitGTK view (a GTK offscreen window, never drawn
+into the GL scene; on macOS a WKWebView in an invisible host window, see below) on a **real krunker.io page**,
 with no window and no modal on screen, so a check that passes by itself (Turnstile's managed check)
 only ever shows the player the loading state. The view moves into a real OS window and the modal
 comes up only when the player is needed: Turnstile's `before-interactive-callback`, a widget error /
@@ -115,8 +116,15 @@ challenge". Cloudflare's interstitial alone is not a reason (it may pass by itse
   press that starts on the widget keeps its release). Escape is not forwarded: it stays the menu's.
   The view's own window is the fallback: when the game UI draws no frame within 5 s of showing it
   (`INLINE_STALL_MS`), the challenge moves into a window (dark background, the widget centred), and
-  `KRUNKNATIVE_CAPTCHA_WINDOW=1` keeps the window path only. macOS and Windows have no webview backend
-  (their paths are unchanged).
+  `KRUNKNATIVE_CAPTCHA_WINDOW=1` keeps the window path only.
+- **macOS (WKWebView, a section of `client/src/ui/kn_webview.c`, compiled as Objective-C with ARC):** the same
+  flow, scripts, messages and policies as the other backends. The game UI's frames are `WKWebView` snapshots
+  (`takeSnapshotWithConfiguration:`, about ten a second while shown, a frame only when the page changed)
+  converted to the 340 x 170 RGBA frame; the pointer and keys are synthetic `NSEvent`s sent to the view. The
+  window path is an `NSWindow` (titled, above the game, centred on the screen under the pointer). The data
+  store is non-persistent; the matchmaker's proxy is set on it (`WKWebsiteDataStore.proxyConfigurations`,
+  macOS 14+). Keys: WebKit takes them only in a key window, and the game window keeps key status, so the
+  widget does not act on the keys in the game UI (the mouse does); the window path has the key window.
 - **The window path, for the fallback and the env override:** the view moves into a real window,
   centred on the work area of the monitor under the pointer and kept above the game. There the modal has
   only "Solve the challenge" (raises the window) **and Cancel**; closing the window says so ("Solve the
@@ -173,8 +181,8 @@ any map exists, for these runs.
   pinned SDK is in `KN_WEBVIEW2_DIR`: `make webview2`). The Windows backend loads `WebView2Loader.dll` at
   run time and makes the challenge unavailable when the Edge WebView2 Runtime is missing (the join says
   so); the frames are `CapturePreview` PNGs and the input window messages, so the widget on Windows is
-  not yet verified on a real runtime. macOS (WKWebView) is not wired: it gets no challenge (the join says
-  so). `kn_webview.h` is the seam for them.
+  not yet verified on a real runtime. The macOS backend is verified against the stub page, not the live
+  challenge; its keyboard path in the game UI is the gap above.
 - Windows packages must ship `WebView2Loader.dll` next to `client.exe` for the challenge to run there (not
   yet in tools/release/package-client.sh); without it the challenge is unavailable, as without the runtime.
 - The dynamic Linux packages bundle WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so

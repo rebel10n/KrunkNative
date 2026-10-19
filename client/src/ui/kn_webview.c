@@ -1,5 +1,5 @@
-// The challenge window of kn_webview.h: WebKitGTK (webkit2gtk-4.1) on Linux and WebView2 (the Edge
-// WebView2 runtime) on Windows, both when built with KN_WEBVIEW; a stub everywhere else. CMake builds
+// The challenge window of kn_webview.h: WebKitGTK (webkit2gtk-4.1) on Linux, WKWebView on macOS and WebView2
+// (the Edge WebView2 runtime) on Windows, when built with KN_WEBVIEW; a stub everywhere else. CMake builds
 // this file into its own library (kn_webview) with the toolkit's include paths, so GTK's, WebKit's and
 // WebView2's headers never reach the rest of the client.
 //
@@ -94,9 +94,26 @@ void kn_webview_rgba_from_argb32(const unsigned char *src, const int stride, con
 #include <wincodec.h>
 #include <shellapi.h>
 #include <WebView2.h> // (its EventToken.h: client/src/ui/kn_webview_compat, this library's include dir)
+#elif defined(KN_WEBVIEW) && defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+// WKWebView (macOS): this file is compiled as Objective-C on Apple (CMake: LANGUAGE OBJC, -fobjc-arc).
+#if !defined(__OBJC__) || !__has_feature(objc_arc)
+#error "kn_webview.c on macOS is compiled as Objective-C with ARC (CMake sets LANGUAGE OBJC and -fobjc-arc)"
+#endif
+#define KN_WV_WK 1
+#include <time.h>
+#import <Cocoa/Cocoa.h>
+#import <Network/Network.h>
+#import <WebKit/WebKit.h>
+@class KNCaptchaWebDelegate;
+// The navigation, UI and script-message delegate of the view (one per challenge: W.session tells a late callback).
+@interface KNCaptchaWebDelegate : NSObject <WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate> {
+@public
+    int session; // W.session when this delegate was made
+}
+@end
 #endif
 
-#if defined(KN_WV_GTK) || defined(KN_WV_WV2)
+#if defined(KN_WV_GTK) || defined(KN_WV_WV2) || defined(KN_WV_WK)
 // ---------------------------------------------------------------- shared by the backends
 #define KN_WEBVIEW_TOKEN_MAX 4096 // KRUNKER_CAPTCHA_TOKEN_MAX
 #define TURNSTILE_API "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
@@ -208,6 +225,18 @@ static struct {
     wchar_t *navigate;    // the challenge's URL (wide), navigated to once the view exists
     int capturing;        // a CapturePreview is in flight
     wchar_t session_dir[MAX_PATH]; // the temporary user data folder of this session
+#elif defined(KN_WV_WK)
+    WKWebView *view;      // the challenge's view, nil when no challenge is up
+    WKUserContentController *ucc;
+    WKContentWorld *world;
+    KNCaptchaWebDelegate *delegate;
+    NSWindow *host;       // the hidden host of the view until reveal(), else nil
+    NSWindow *window;     // the real window, once revealed
+    int session;          // bumped at every teardown: a late callback of an older challenge is ignored
+    unsigned main_status; // the main frame's last HTTP status (its navigation response)
+    int snap_inflight;    // a snapshot of the view is in flight
+    unsigned snap_gen;    // the latest snapshot's number (an older one's completion is dropped)
+    long long snap_started_ms, snap_last_ms;
 #endif
     char title[200];      // the window's title, for reveal()
     long long opened_ms;  // now_ms() of the open: KN_WEBVIEW_REVEAL_MS counts from it
@@ -229,7 +258,7 @@ static struct {
     int inline_failed;  // the game UI could not draw it: its window instead (the stall watchdog)
     int dirty;          // a new frame is in px since the last one taken
     int frames;         // frames taken while shown in the game UI
-    unsigned buttons;   // the pointer buttons the forwarded pointer holds down (GTK: GDK masks; WebView2: 1 left, 2 middle, 4 right)
+    unsigned buttons;   // the pointer buttons the forwarded pointer holds down (GTK: GDK masks; WebView2 and WKWebView: 1 left, 2 middle, 4 right)
     unsigned char *px;  // the last frame: straight RGBA8, row 0 on top
     size_t px_cap;
     int px_w, px_h;
@@ -295,6 +324,28 @@ static void js_string(Sb *out, const char *s) {
     }
     sb_putc(out, '"');
 }
+
+#if defined(KN_WV_GTK) || defined(KN_WV_WK)
+// The bridge, in the isolated world BRIDGE_WORLD of the top frame: the only script that can post to
+// the handler. It reads the main-world script's message off <html> (the DOM is shared between worlds).
+// The caller frees the text (NULL when out of memory).
+static char *bridge_script(void) {
+    Sb s = {0};
+    sb_put(&s, "(function () {\n'use strict';\nvar ORIGIN = ");
+    js_string(&s, W.origin);
+    sb_put(&s, ";\n"
+               "if (window.top !== window || location.origin !== ORIGIN) return;\n"
+               "var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;\n"
+               "if (!h) return;\n"
+               "document.addEventListener('" BRIDGE_EVENT "', function () {\n"
+               "  var d = document.documentElement, m = d.getAttribute('" BRIDGE_ATTR "');\n"
+               "  d.removeAttribute('" BRIDGE_ATTR "');\n"
+               "  if (typeof m === 'string' && m.length <= 8192) h.postMessage(m);\n"
+               "}, true);\n"
+               "})();\n");
+    return sb_take(&s);
+}
+#endif
 
 // How the widget reports to the host: GTK's bridge (an isolated world, see the top of this file) or
 // WebView2's postMessage (the host checks the source's origin there).
@@ -667,7 +718,7 @@ int kn_webview_captcha_inline(void) { return W.inline_shown; }
 
 int kn_webview_captcha_windowed(void) { return W.window != NULL; }
 
-#endif // KN_WV_GTK || KN_WV_WV2
+#endif // KN_WV_GTK || KN_WV_WV2 || KN_WV_WK
 
 // ---------------------------------------------------------------- GTK (Linux)
 #if defined(KN_WV_GTK)
@@ -677,26 +728,6 @@ static long long now_ms(void) { return (long long) (g_get_monotonic_time() / 100
 static int hidden_host(void) { return W.offscreen != NULL; }
 
 static void backend_tick(void) {}
-
-// The bridge, in the isolated world BRIDGE_WORLD of the top frame: the only script that can post to
-// the handler. It reads the main-world script's message off <html> (the DOM is shared between worlds).
-// The caller frees the text (NULL when out of memory).
-static char *bridge_script(void) {
-    Sb s = {0};
-    sb_put(&s, "(function () {\n'use strict';\nvar ORIGIN = ");
-    js_string(&s, W.origin);
-    sb_put(&s, ";\n"
-               "if (window.top !== window || location.origin !== ORIGIN) return;\n"
-               "var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;\n"
-               "if (!h) return;\n"
-               "document.addEventListener('" BRIDGE_EVENT "', function () {\n"
-               "  var d = document.documentElement, m = d.getAttribute('" BRIDGE_ATTR "');\n"
-               "  d.removeAttribute('" BRIDGE_ATTR "');\n"
-               "  if (typeof m === 'string' && m.length <= 8192) h.postMessage(m);\n"
-               "}, true);\n"
-               "})();\n");
-    return sb_take(&s);
-}
 
 // ---------------------------------------------------------------- signals
 
@@ -2044,8 +2075,529 @@ int kn_webview_captcha_char(const unsigned codepoint) {
 
 #endif // KN_WV_WV2
 
+// ---------------------------------------------------------------- WKWebView (macOS)
+// The same contract as the GTK and WebView2 backends, on WKWebView (ARC; this file is compiled as Objective-C
+// on Apple: CMake). The view lives in an invisible host window (alpha 0, never key, ignores the mouse) until
+// reveal(). The game UI's frames are WKWebView snapshots (takeSnapshotWithConfiguration:), about ten a second
+// while the challenge is shown in the game UI, each converted to the KN_WEBVIEW_INLINE_W x H RGBA frame and
+// handed over only when the page has changed. The pointer and keys are NSEvents sent straight to the view.
+// The window is an NSWindow above the game, centred on the screen under the pointer. The matchmaker's proxy
+// is the data store's (macOS 14+, loopback excluded); the data store is non-persistent.
+#if defined(KN_WV_WK)
+
+#define SNAPSHOT_EVERY_MS 100  // the game UI's frame rate while it shows the challenge (about ten a second)
+#define SNAPSHOT_STALE_MS 2000 // a snapshot not back by then is given up (the next one replaces it)
+#define BRIDGE_HANDLER "knCaptcha" // the script message handler (in the bridge's world)
+
+static long long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int hidden_host(void) { return W.host != nil; }
+
+static void backend_tick(void) {}
+
+static void wk_activate(void) {
+    if (@available(macOS 14.0, *)) [NSApp activate];
+    else [NSApp activateIgnoringOtherApps:YES];
+}
+
+static NSScreen *wk_screen_under_pointer(void) {
+    const NSPoint m = [NSEvent mouseLocation];
+    for (NSScreen *s in [NSScreen screens])
+        if (NSPointInRect(m, s.frame)) return s;
+    return [NSScreen mainScreen];
+}
+
+// A snapshot (any size) to the game UI's frame: ARGB32 premultiplied (cairo's layout, little endian) at
+// KN_WEBVIEW_INLINE_W x H, then straight RGBA8. The frame is new only when the page changed.
+static void wk_frame_from_image(NSImage *image) {
+    CGImageRef cg = [image CGImageForProposedRect:NULL context:nil hints:nil];
+    if (!cg) return;
+    const size_t need = (size_t) KN_WEBVIEW_INLINE_W * KN_WEBVIEW_INLINE_H * 4;
+    unsigned char *argb = malloc(need), *next = malloc(need);
+    if (!argb || !next) {
+        free(argb);
+        free(next);
+        return;
+    }
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(argb, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H, 8, KN_WEBVIEW_INLINE_W * 4, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    CGColorSpaceRelease(cs);
+    if (ctx) {
+        const CGRect r = CGRectMake(0, 0, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H);
+        CGContextClearRect(ctx, r);
+        CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+        CGContextDrawImage(ctx, r, cg); // (the image's top row goes to row 0 of the bitmap)
+        CGContextRelease(ctx);
+        kn_webview_rgba_from_argb32(argb, KN_WEBVIEW_INLINE_W * 4, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H, next);
+        if (!W.px || W.px_cap != need || memcmp(next, W.px, need) != 0) {
+            free(W.px);
+            W.px = next;
+            next = NULL;
+            W.px_cap = need;
+            W.px_w = KN_WEBVIEW_INLINE_W;
+            W.px_h = KN_WEBVIEW_INLINE_H;
+            W.dirty = 1;
+        }
+    }
+    free(argb);
+    free(next);
+}
+
+static void wk_snapshot_now(void) {
+    if (!W.view) return;
+    const long long t = now_ms();
+    W.snap_last_ms = t;
+    W.snap_started_ms = t;
+    W.snap_inflight = 1;
+    const unsigned gen = ++W.snap_gen;
+    const int session = W.session;
+    WKSnapshotConfiguration *c = [[WKSnapshotConfiguration alloc] init];
+    c.snapshotWidth = @(KN_WEBVIEW_INLINE_W); // points: the frame is downscaled to the contract size
+    [W.view takeSnapshotWithConfiguration:c
+                        completionHandler:^(NSImage *image, NSError *error) {
+                            if (session != W.session || gen != W.snap_gen) return; // an older one: dropped
+                            W.snap_inflight = 0;
+                            if (image) wk_frame_from_image(image);
+                            else if (error) printf("[webview] a frame could not be taken: %s\n", error.localizedDescription.UTF8String);
+                        }];
+}
+
+// The view and its handlers go; the host and the window are the caller's to drop (see below).
+static void wk_drop_view(void) {
+    W.session++; // late callbacks of this challenge are ignored from now on
+    WKWebView *v = W.view;
+    WKUserContentController *ucc = W.ucc;
+    W.view = nil;
+    W.ucc = nil;
+    W.delegate = nil;
+    if (v) {
+        [v stopLoading];
+        v.navigationDelegate = nil;
+        v.UIDelegate = nil;
+        [v removeFromSuperview];
+    }
+    if (ucc) {
+        [ucc removeScriptMessageHandlerForName:[NSString stringWithUTF8String:BRIDGE_HANDLER] contentWorld:W.world];
+        [ucc removeAllUserScripts];
+    }
+    W.world = nil;
+    W.snap_inflight = 0;
+}
+
+static void wk_drop_host(void) {
+    NSWindow *h = W.host;
+    W.host = nil;
+    if (h) {
+        h.contentView = nil;
+        [h orderOut:nil];
+        [h close];
+    }
+}
+
+static void wk_drop_window(void) {
+    NSWindow *w = W.window;
+    W.window = nil;
+    if (w) {
+        w.delegate = nil;
+        [w orderOut:nil];
+        [w close];
+    }
+}
+
+// A load that failed: the navigation we refused is not one, and only the krunker.io origin's failures count.
+static void wk_failed(WKWebView *v, NSError *error) {
+    if (!error) return;
+    if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) return;
+    if ([error.domain isEqualToString:@"WebKitErrorDomain"] && error.code == 102) return; // refused by policy
+    NSURL *failing = error.userInfo[NSURLErrorFailingURLErrorKey];
+    if (!same_origin((failing ? failing.absoluteString : v.URL.absoluteString).UTF8String)) return;
+    if ([error.domain isEqualToString:NSURLErrorDomain] && error.code <= -1200 && error.code >= -1204) { // the certificate
+        char detail[48];
+        snprintf(detail, sizeof(detail), "NSURLError %ld", (long) error.code);
+        tls_refused(detail);
+        return;
+    }
+    load_failed(error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "error");
+}
+
+static void wk_set_proxy(WKWebsiteDataStore *ds, const char *proxy) {
+    if (@available(macOS 14.0, *)) {
+        NSURLComponents *c = [NSURLComponents componentsWithString:[NSString stringWithUTF8String:proxy]];
+        const BOOL http = [c.scheme isEqualToString:@"http"], socks = [c.scheme isEqualToString:@"socks5"];
+        if (!c || !c.host || !c.port || (!http && !socks)) {
+            printf("[webview] the proxy is not an http or socks5 proxy with a port: the challenge goes direct\n");
+            return;
+        }
+        NSString *port = [NSString stringWithFormat:@"%@", c.port];
+        nw_endpoint_t endpoint = nw_endpoint_create_host(c.host.UTF8String, port.UTF8String);
+        nw_proxy_config_t config = http ? nw_proxy_config_create_http_connect(endpoint, NULL) : nw_proxy_config_create_socksv5(endpoint);
+        if (c.user) nw_proxy_config_set_username_and_password(config, c.user.UTF8String, c.password ? c.password.UTF8String : NULL);
+        nw_proxy_config_add_excluded_domain(config, "localhost");
+        nw_proxy_config_add_excluded_domain(config, "127.0.0.1");
+        ds.proxyConfigurations = @[ config ];
+    } else {
+        printf("[webview] the challenge's proxy needs macOS 14: the challenge goes direct\n");
+    }
+}
+
+@implementation KNCaptchaWebDelegate
+
+- (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+    (void) controller;
+    if (self->session != W.session || !W.view || ![message.body isKindOfClass:[NSString class]]) return;
+    widget_message(((NSString *) message.body).UTF8String, same_origin(W.view.URL.absoluteString.UTF8String));
+}
+
+- (void)webView:(WKWebView *)webView
+    decidePolicyForNavigationAction:(WKNavigationAction *)action
+                    decisionHandler:(void (^)(WKNavigationActionPolicy))handler {
+    (void) webView;
+    const int ok = self->session == W.session && navigation_ok(action.request.URL.absoluteString.UTF8String);
+    handler(ok ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
+}
+
+- (void)webView:(WKWebView *)webView
+    decidePolicyForNavigationResponse:(WKNavigationResponse *)response
+                      decisionHandler:(void (^)(WKNavigationResponsePolicy))handler {
+    (void) webView;
+    if (self->session == W.session && response.isForMainFrame && [response.response isKindOfClass:[NSHTTPURLResponse class]])
+        W.main_status = (unsigned) ((NSHTTPURLResponse *) response.response).statusCode;
+    handler(WKNavigationResponsePolicyAllow);
+}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    (void) navigation;
+    if (self->session == W.session && same_origin(webView.URL.absoluteString.UTF8String)) http_status(W.main_status);
+}
+
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    (void) navigation;
+    if (self->session == W.session) wk_failed(webView, error);
+}
+
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    (void) navigation;
+    if (self->session == W.session) wk_failed(webView, error);
+}
+
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    (void) webView;
+    if (self->session == W.session) page_process_stopped("the web content process");
+}
+
+// Cloudflare's "Privacy" / "Help" links open windows: refused.
+- (WKWebView *)webView:(WKWebView *)webView
+    createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
+               forNavigationAction:(WKNavigationAction *)navigationAction
+                    windowFeatures:(WKWindowFeatures *)windowFeatures {
+    (void) webView;
+    (void) configuration;
+    (void) navigationAction;
+    (void) windowFeatures;
+    printf("[webview] a new window was refused\n");
+    return nil;
+}
+
+// The window closed by the player (not by us): the poll reports it, the view goes with it.
+- (void)windowWillClose:(NSNotification *)note {
+    if (self->session != W.session || W.window == nil || note.object != W.window) return;
+    W.window.delegate = nil;
+    W.window = nil;
+    if (!W.closing) {
+        printf("[webview] the player closed the challenge window\n");
+        W.ev_closed = 1;
+    }
+    wk_drop_view();
+}
+
+@end
+
+// The challenge's view in the game UI (in_ui) or its window: the same reveal decision as the other backends.
+static void reveal(const char *why) {
+    if (W.inline_shown || W.window || !W.view || !W.host) return;
+    if (kn_webview_reveal_target(W.in_ui, W.inline_failed) == KN_WEBVIEW_VIEW_INLINE) {
+        W.inline_shown = 1;
+        W.shown_ms = now_ms();
+        W.frames = 0;
+        W.dirty = 0;
+        printf("[webview] challenge shown in the game UI (%s): no window\n", why);
+        wk_snapshot_now(); // the first frame at once
+        return;
+    }
+    NSRect wa = [wk_screen_under_pointer() visibleFrame];
+    const CGFloat w = WINDOW_W < wa.size.width ? WINDOW_W : wa.size.width;
+    const CGFloat h = WINDOW_H < wa.size.height ? WINDOW_H : wa.size.height;
+    const NSRect r = NSMakeRect(wa.origin.x + (wa.size.width - w) / 2, wa.origin.y + (wa.size.height - h) / 2, w, h);
+    NSWindow *win = [[NSWindow alloc] initWithContentRect:r
+                                                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+    win.title = [NSString stringWithUTF8String:W.title];
+    win.releasedWhenClosed = NO;
+    win.delegate = W.delegate;
+    win.level = NSFloatingWindowLevel; // above the game window
+    if (W.in_ui) // the widget alone on the dark page (its transparent background shows this)
+        win.backgroundColor = [NSColor colorWithSRGBRed:0.106 green:0.106 blue:0.106 alpha:1.0];
+    [W.view removeFromSuperview];
+    W.view.frame = win.contentView.bounds;
+    W.view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [win.contentView addSubview:W.view];
+    wk_drop_host();
+    W.window = win;
+    wk_activate();
+    [win makeKeyAndOrderFront:nil];
+    [win makeFirstResponder:W.view];
+    printf("[webview] challenge window shown (%s) at %d,%d %dx%d\n", why, (int) r.origin.x, (int) r.origin.y, (int) w, (int) h);
+}
+
+int kn_webview_available(void) { return !env_off(); }
+
+int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int in_ui, const int show_now,
+                            char *err, const size_t errn) {
+    if (err && errn) err[0] = 0;
+    if (env_off()) {
+        if (err && errn) snprintf(err, errn, "the webview is turned off (KRUNKNATIVE_WEBVIEW=0)");
+        return 0;
+    }
+    if (W.window) { // already up: bring it forward
+        wk_activate();
+        [W.window makeKeyAndOrderFront:nil];
+        return 1;
+    }
+    if (W.inline_shown) return 1; // shown in the game UI already
+    if (W.host) { // running hidden: the player asks to see it (the modal's button)
+        W.reveal = "the player asked for it";
+        return 1;
+    }
+    char origin[sizeof(W.origin)];
+    const char *resolved = NULL;
+    if (!captcha_check(url, sitekey, origin, sizeof(origin), &resolved, err, errn)) return 0;
+    NSURL *nsurl = [NSURL URLWithString:[NSString stringWithUTF8String:resolved]];
+    if (!nsurl) {
+        if (err && errn) snprintf(err, errn, "the challenge URL is not valid");
+        return 0;
+    }
+    [NSApplication sharedApplication]; // (GLFW has made it for the game; a test may not have)
+    session_reset(in_ui, origin, title);
+    // the scripts first: nothing is created when they cannot be built
+    const char *shown_title = title && title[0] ? title : "Security Challenge";
+    char *bridge = bridge_script();
+    char *js = bridge ? user_script(sitekey, shown_title, W.in_ui) : NULL;
+    if (!bridge || !js) {
+        free(bridge);
+        free(js);
+        if (err && errn) snprintf(err, errn, "out of memory");
+        return 0;
+    }
+
+    wk_drop_view();
+    wk_drop_host();
+    wk_drop_window();
+    WKWebsiteDataStore *ds = [WKWebsiteDataStore nonPersistentDataStore]; // nothing of it reaches the disk
+    if (proxy && proxy[0]) wk_set_proxy(ds, proxy);
+    WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
+    cfg.websiteDataStore = ds;
+    cfg.preferences.javaScriptCanOpenWindowsAutomatically = NO;
+    W.ucc = [[WKUserContentController alloc] init];
+    cfg.userContentController = W.ucc;
+    W.world = [WKContentWorld worldWithName:[NSString stringWithUTF8String:BRIDGE_WORLD]];
+    W.delegate = [[KNCaptchaWebDelegate alloc] init];
+    W.delegate->session = W.session;
+    [W.ucc addScriptMessageHandler:W.delegate contentWorld:W.world name:[NSString stringWithUTF8String:BRIDGE_HANDLER]];
+    WKUserScript *bridge_js = [[WKUserScript alloc] initWithSource:[NSString stringWithUTF8String:bridge]
+                                                     injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                  forMainFrameOnly:YES
+                                                    inContentWorld:W.world];
+    free(bridge);
+    [W.ucc addUserScript:bridge_js];
+    WKUserScript *page_js = [[WKUserScript alloc] initWithSource:[NSString stringWithUTF8String:js]
+                                                   injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+                                                forMainFrameOnly:YES
+                                                  inContentWorld:[WKContentWorld pageWorld]]; // the main world: Turnstile's
+    free(js);
+    [W.ucc addUserScript:page_js];
+
+    W.view = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H) configuration:cfg];
+    W.view.navigationDelegate = W.delegate;
+    W.view.UIDelegate = W.delegate;
+    if (W.in_ui) { // the page is drawn over the game's modal: nothing behind the widget but the transparent page
+        W.view.underPageBackgroundColor = [NSColor clearColor];
+        @try {
+            [W.view setValue:@NO forKey:@"drawsBackground"];
+        } @catch (NSException *e) {
+            (void) e;
+        }
+    }
+    // hidden first (see the top of this file): an invisible host window, never key, that ignores the mouse
+    W.host = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H)
+                                         styleMask:NSWindowStyleMaskBorderless
+                                           backing:NSBackingStoreBuffered
+                                             defer:NO];
+    W.host.releasedWhenClosed = NO;
+    W.host.backgroundColor = [NSColor clearColor];
+    W.host.opaque = NO;
+    W.host.hasShadow = NO;
+    W.host.alphaValue = 0.0;
+    W.host.ignoresMouseEvents = YES;
+    W.host.level = NSNormalWindowLevel - 1;
+    [W.host setContentView:W.view];
+    [W.host orderBack:nil];
+    [W.host makeFirstResponder:W.view];
+    if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
+
+    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", resolved, W.origin,
+           proxy && proxy[0] ? ", through the client's proxy" : "");
+    [W.view loadRequest:[NSURLRequest requestWithURL:nsurl]];
+    kn_webview_pump();
+    return 1;
+}
+
+void kn_webview_captcha_close(void) {
+    if (W.window || W.host || W.view) {
+        const int shown = W.window != nil;
+        W.closing = 1;
+        wk_drop_view();
+        wk_drop_host();
+        wk_drop_window();
+        W.closing = 0;
+        W.reveal = NULL;
+        printf("[webview] challenge window closed%s\n", shown ? "" : " (it was never shown)");
+    }
+    if (W.inline_shown) printf("[webview] challenge closed (shown in the game UI)\n");
+    session_end();
+}
+
+// The toolkit's events (the snapshots' completions and WebKit's callbacks) and, while the challenge is shown in
+// the game UI, the next snapshot once the last one came back (or was given up).
+void kn_webview_pump(void) {
+    if (!W.view) return;
+    for (int i = 0; i < 256; i++)
+        if (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) != kCFRunLoopRunHandledSource) break;
+    if (!W.view || !W.inline_shown) return;
+    const long long t = now_ms();
+    if (W.snap_inflight && t - W.snap_started_ms >= SNAPSHOT_STALE_MS) W.snap_inflight = 0;
+    if (!W.snap_inflight && t - W.snap_last_ms >= SNAPSHOT_EVERY_MS) wk_snapshot_now();
+}
+
+int kn_webview_captcha_frame(const unsigned char **rgba, int *w, int *h) {
+    if (!W.inline_shown || !W.dirty || !W.px) return 0;
+    W.dirty = 0;
+    W.frames++;
+    *rgba = W.px;
+    *w = W.px_w;
+    *h = W.px_h;
+    return 1;
+}
+
+// A mouse event straight to the view (its window is the host's: the event's window number). kind: the NSEvent type.
+static void wk_send_mouse(const NSEventType type, const NSPoint at) {
+    const int down = type == NSEventTypeLeftMouseDown || type == NSEventTypeRightMouseDown || type == NSEventTypeOtherMouseDown;
+    NSEvent *ev = [NSEvent mouseEventWithType:type
+                                     location:at
+                                modifierFlags:0
+                                    timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                 windowNumber:W.host.windowNumber
+                                      context:nil
+                                  eventNumber:0
+                                   clickCount:1
+                                     pressure:down ? 1.0 : 0.0];
+    switch (type) {
+        case NSEventTypeLeftMouseDown: [W.view mouseDown:ev]; break;
+        case NSEventTypeLeftMouseUp: [W.view mouseUp:ev]; break;
+        case NSEventTypeLeftMouseDragged: [W.view mouseDragged:ev]; break;
+        case NSEventTypeRightMouseDown: [W.view rightMouseDown:ev]; break;
+        case NSEventTypeRightMouseUp: [W.view rightMouseUp:ev]; break;
+        case NSEventTypeRightMouseDragged: [W.view rightMouseDragged:ev]; break;
+        case NSEventTypeOtherMouseDown: [W.view otherMouseDown:ev]; break;
+        case NSEventTypeOtherMouseUp: [W.view otherMouseUp:ev]; break;
+        case NSEventTypeOtherMouseDragged: [W.view otherMouseDragged:ev]; break;
+        default: [W.view mouseMoved:ev]; break;
+    }
+}
+
+// A key press or release straight to the view (chars: the characters it types, press only).
+static void wk_send_key(NSString *chars, const unsigned short code, const int pressed) {
+    NSEvent *ev = [NSEvent keyEventWithType:pressed ? NSEventTypeKeyDown : NSEventTypeKeyUp
+                                   location:NSZeroPoint
+                              modifierFlags:0
+                                  timestamp:[[NSProcessInfo processInfo] systemUptime]
+                               windowNumber:W.host.windowNumber
+                                    context:nil
+                                 characters:chars
+                charactersIgnoringModifiers:chars
+                                  isARepeat:NO
+                                    keyCode:code];
+    if (!ev) return;
+    if (pressed) [W.view keyDown:ev];
+    else [W.view keyUp:ev];
+}
+
+// The view's own coordinates (flipped: top-left), as the caller gives them. The buttons are W.buttons' masks.
+int kn_webview_captcha_pointer(const int kind, const double x, const double y, const int button) {
+    if (!W.inline_shown || !W.view || !W.host) return 0;
+    const int bit = button >= 1 && button <= 3 ? 1 << (button - 1) : 0;
+    const NSPoint at = [W.view convertPoint:NSMakePoint((CGFloat) x, (CGFloat) y) toView:nil];
+    if (kind == KN_WEBVIEW_POINTER_MOVE) {
+        NSEventType t = NSEventTypeMouseMoved;
+        if (W.buttons & 1) t = NSEventTypeLeftMouseDragged;
+        else if (W.buttons & 4) t = NSEventTypeRightMouseDragged;
+        else if (W.buttons & 2) t = NSEventTypeOtherMouseDragged;
+        wk_send_mouse(t, at);
+        return 1;
+    }
+    const int press = kind == KN_WEBVIEW_POINTER_PRESS;
+    NSEventType t;
+    if (button == 3) t = press ? NSEventTypeRightMouseDown : NSEventTypeRightMouseUp;
+    else if (button == 2) t = press ? NSEventTypeOtherMouseDown : NSEventTypeOtherMouseUp;
+    else t = press ? NSEventTypeLeftMouseDown : NSEventTypeLeftMouseUp;
+    if (press) W.buttons |= bit;
+    else W.buttons &= ~bit;
+    wk_send_mouse(t, at);
+    return 1;
+}
+
+int kn_webview_captcha_key(const int key, const int pressed) {
+    if (!W.inline_shown || !W.view || !W.host) return 0;
+    if (pressed == 2) return 1; // a repeat: taken, not sent (the widget takes the press)
+    NSString *chars = nil;
+    unsigned short code = 0;
+    switch (key) {
+        case KN_WEBVIEW_KEY_TAB: chars = @"\t"; code = 48; break;
+        case KN_WEBVIEW_KEY_ENTER: chars = @"\r"; code = 36; break;
+        case KN_WEBVIEW_KEY_SPACE: chars = @" "; code = 49; break;
+        case KN_WEBVIEW_KEY_BACKSPACE: chars = @"\x7f"; code = 51; break;
+        case KN_WEBVIEW_KEY_DELETE: chars = [NSString stringWithFormat:@"%C", (unichar) NSDeleteFunctionKey]; code = 117; break;
+        case KN_WEBVIEW_KEY_LEFT: chars = [NSString stringWithFormat:@"%C", (unichar) NSLeftArrowFunctionKey]; code = 123; break;
+        case KN_WEBVIEW_KEY_RIGHT: chars = [NSString stringWithFormat:@"%C", (unichar) NSRightArrowFunctionKey]; code = 124; break;
+        case KN_WEBVIEW_KEY_UP: chars = [NSString stringWithFormat:@"%C", (unichar) NSUpArrowFunctionKey]; code = 126; break;
+        case KN_WEBVIEW_KEY_DOWN: chars = [NSString stringWithFormat:@"%C", (unichar) NSDownArrowFunctionKey]; code = 125; break;
+        case KN_WEBVIEW_KEY_HOME: chars = [NSString stringWithFormat:@"%C", (unichar) NSHomeFunctionKey]; code = 115; break;
+        case KN_WEBVIEW_KEY_END: chars = [NSString stringWithFormat:@"%C", (unichar) NSEndFunctionKey]; code = 119; break;
+        default: return 0;
+    }
+    wk_send_key(chars, code, pressed == 1);
+    return 1;
+}
+
+int kn_webview_captcha_char(const unsigned codepoint) {
+    if (!W.inline_shown || !W.view || !W.host || codepoint <= 0x20 || codepoint == 0x7f) return 0; // (space is a key)
+    const uint32_t cp = codepoint;
+    NSString *s = [[NSString alloc] initWithBytes:&cp length:4 encoding:NSUTF32LittleEndianStringEncoding];
+    if (!s || s.length == 0) return 0;
+    wk_send_key(s, 0, 1); // the press types the text; the release carries none
+    wk_send_key(@"", 0, 0);
+    return 1;
+}
+
+#endif // KN_WV_WK
+
 // ---------------------------------------------------------------- no backend in this build
-#if !defined(KN_WV_GTK) && !defined(KN_WV_WV2)
+#if !defined(KN_WV_GTK) && !defined(KN_WV_WV2) && !defined(KN_WV_WK)
 
 int kn_webview_available(void) { return 0; }
 

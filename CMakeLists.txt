@@ -120,17 +120,26 @@ endif ()
 # Native captcha webview (client/include/kn_webview.h, client/src/ui/kn_webview.c): krunker.io's
 # Cloudflare Turnstile shown in the game UI (or a window) for the player to solve (doc/v10/official-captcha.md).
 # KN_WEBVIEW = AUTO (default: on when the platform's backend is there), ON (required) or OFF. Linux: WebKitGTK
-# (pkg-config webkit2gtk-4.1). Windows: WebView2 (the Edge runtime; its SDK header and loader from
+# (pkg-config webkit2gtk-4.1). macOS: WKWebView (client/src/ui/kn_webview_macos.m, ARC; kn_webview.c joins the
+# client for its pure helpers). Windows: WebView2 (the Edge runtime; its SDK header and loader from
 # tools/webview2/fetch_webview2.py in KN_WEBVIEW2_DIR). Client_bin only (never server/ or shared/).
 # kn_webview.c is then built as its own library so the toolkit's include paths stay out of the rest of
-# the client; without a backend (macOS, the web build, OFF, not found) the same file compiles to its stub
+# the client; without a backend (the web build, OFF, not found) the same file compiles to its stub
 # inside the client and no security check is shown (the join ends with its sentence).
 set(KN_WEBVIEW AUTO CACHE STRING "Native captcha webview: AUTO = on when the platform's backend is found (WebKitGTK on Linux, WebView2 SDK on Windows), ON, OFF")
 set(KN_WEBVIEW_GTK OFF)
+set(KN_WEBVIEW_WK OFF)
 set(KN_WEBVIEW_WV2 OFF)
 string(TOUPPER "${KN_WEBVIEW}" KN_WEBVIEW_MODE)
 if (KN_WEBVIEW_MODE MATCHES "^(OFF|0|FALSE|NO|N)$")
     message(STATUS "Webview: KN_WEBVIEW is OFF; the captcha has no challenge window")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT EMSCRIPTEN)
+    # macOS: WKWebView needs no toolkit to find; the Objective-C file is compiled with ARC.
+    enable_language(OBJC)
+    set(KN_WEBVIEW_WK ON)
+    # the WKWebView backend is a section of kn_webview.c (KN_WV_WK): that file is Objective-C with ARC here
+    set_source_files_properties(client/src/ui/kn_webview.c PROPERTIES LANGUAGE OBJC COMPILE_OPTIONS "-fobjc-arc")
+    message(STATUS "Webview: WKWebView (KN_WEBVIEW): krunker.io's captcha in the game UI")
 elseif (EMSCRIPTEN)
     # the web build has no webview (the browser's own page is the client)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -511,6 +520,15 @@ else ()
         target_compile_definitions(kn_webview PRIVATE KN_WEBVIEW=1)
         target_link_libraries(kn_webview PRIVATE ole32 uuid shell32 user32)
         target_link_libraries(${CLIENT_BINARY} PRIVATE kn_webview)
+    endif ()
+    if (KN_WEBVIEW_WK) # the captcha webview on macOS (KN_WEBVIEW above): kn_webview.c's WKWebView section, in client_bin
+        target_compile_definitions(${CLIENT_BINARY} PRIVATE KN_WEBVIEW=1)
+        target_link_libraries(${CLIENT_BINARY} PRIVATE "-framework WebKit" "-framework Network" "-framework Cocoa")
+        # kn_webview_live_test on macOS: the same run as on Linux (client/tests/kn_webview_live_test.c, no display needed)
+        add_executable(kn_webview_live_test client/tests/kn_webview_live_test.c client/src/ui/kn_webview.c)
+        target_include_directories(kn_webview_live_test PRIVATE client/include)
+        target_compile_definitions(kn_webview_live_test PRIVATE KN_WEBVIEW=1)
+        target_link_libraries(kn_webview_live_test PRIVATE "-framework WebKit" "-framework Network" "-framework Cocoa" Threads::Threads)
     endif ()
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
