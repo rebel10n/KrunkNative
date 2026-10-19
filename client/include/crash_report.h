@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #define CRASH_LOG_LINES 50 // the in-game console log lines a report keeps
+#define CRASH_FREEZE_SECONDS 5 // the main loop has not ticked for this long: a freeze report
 
 // Installs the crash handlers (SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGFPE; the unhandled-exception
 // filter on Windows) and reads the latest report. Call once on the main thread, after the flavor
@@ -22,3 +23,8 @@ void crash_report_init(void);
 // One in-game console line (ui_console.c append): kept for the report's log part. Newlines and
 // control characters become spaces; a line that may hold a credential is replaced by a note.
 void crash_report_log_line(const char *text);
+// Once per client frame, first thing (before any frame-cap sleep). The first call arms the
+// watchdog, so startup and the page loads are not a freeze.
+void crash_report_tick(void);
+// Clean shutdown, last thing before main returns: stops the watchdog. The handlers stay.
+void crash_report_shutdown(void);

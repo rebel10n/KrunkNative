@@ -14,6 +14,8 @@
 
 void crash_report_init(void) {}
 void crash_report_log_line(const char *text) { (void) text; }
+void crash_report_tick(void) {}
+void crash_report_shutdown(void) {}
 
 #else
 
@@ -34,10 +36,13 @@ void crash_report_log_line(const char *text) { (void) text; }
 #include <sys/stat.h>
 #include <windows.h>
 #else
+#include <dirent.h>
 #include <dlfcn.h>
 #include <execinfo.h>
 #if defined(__linux__)
+#include <dirent.h>
 #include <link.h>
+#include <sys/syscall.h>
 #endif
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -49,6 +54,10 @@ void crash_report_log_line(const char *text) { (void) text; }
 #define CRASH_LINE_MAX 240   // one log line kept (cut at this length)
 #define CRASH_FRAMES_MAX 48  // stack frames per thread
 #define CRASH_STACK_BYTES (64 * 1024) // the alternate signal stack (a stack overflow still reports)
+#define CRASH_DUMP_SIGNAL SIGUSR2     // POSIX: asks a thread for its stack (the watchdog's dump)
+#define CRASH_WATCH_TICK_MS 250       // the watchdog's poll interval
+#define CRASH_DUMP_WAIT_MS 1000       // how long a thread may take to answer a dump request
+#define CRASH_TEST_STALL_MS 6000      // KRUNKNATIVE_TEST_STALL_AFTER_FRAMES: the stall's length
 
 // ---------------------------------------------------------------- state (written at startup)
 
@@ -56,9 +65,30 @@ static struct {
     char dir[CRASH_PATH_MAX];        // <config root>/crash
     char crash_path[CRASH_PATH_MAX]; // <dir>/crash-<stamp>-<pid>.txt, created by a crash
     char latest_path[CRASH_PATH_MAX]; // <dir>/latest.txt
+    char freeze_path[CRASH_PATH_MAX]; // <dir>/freeze-<stamp>-<pid>.txt, appended by each freeze
     char pid_line[32];               // "pid: N\n"
     const char *build;               // kn_build_string(), static
 } g_report;
+
+// The freeze watchdog: crash_report_tick stores the monotonic time of each main-loop tick. The
+// watchdog thread reports a freeze once when that time is CRASH_FREEZE_SECONDS old, and again only
+// after the loop ticked: a freeze that ends and another that starts are two reports.
+static uint64_t g_last_tick_ms;
+static int g_armed;        // the first tick: the loop runs (startup, loads and the page are not a freeze)
+static int g_watch_stop;
+static int g_watch_running;
+// Test knobs (client/tests/crash_capture_e2e.py): KRUNKNATIVE_TEST_CRASH_AFTER_FRAMES=N dereferences
+// NULL on frame N; KRUNKNATIVE_TEST_STALL_AFTER_FRAMES=N stalls the main loop for 6 s on frame N.
+static unsigned long g_frames;
+static long g_test_crash_frame = -1;
+static long g_test_stall_frame = -1;
+static pthread_t g_watchdog;
+static pthread_t g_main_thread;
+static int g_freeze_fd = -1; // where the dump handlers write (the open freeze report)
+#if defined(__linux__)
+static volatile int g_dump_target; // the tid the dump request is for: a late answer finds another target
+#endif
+static volatile int g_dump_ack;    // the target thread wrote its stack
 
 // The in-game console log: the last CRASH_LOG_LINES lines, oldest first from the head.
 static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -374,6 +404,24 @@ static void crash_signal_handler(const int signo, siginfo_t *info, void *context
     _exit(128 + signo);
 }
 
+// The watchdog's request: this thread writes its stack into the open freeze report. On Linux the
+// request names one thread (tgkill), so only that thread answers.
+static void dump_signal_handler(const int signo, siginfo_t *info, void *context) {
+    (void) signo;
+    (void) info;
+    (void) context;
+    const int saved_errno = errno;
+#if defined(__linux__)
+    if (syscall(SYS_gettid) != __atomic_load_n(&g_dump_target, __ATOMIC_ACQUIRE)) {
+        errno = saved_errno;
+        return;
+    }
+#endif
+    if (g_freeze_fd >= 0) write_frames(g_freeze_fd);
+    __atomic_store_n(&g_dump_ack, 1, __ATOMIC_RELEASE);
+    errno = saved_errno;
+}
+
 static void install_crash_handlers(void) {
     // A stack overflow leaves no room for the handler: it runs on its own stack.
     stack_t stack;
@@ -392,6 +440,13 @@ static void install_crash_handlers(void) {
     sigaction(SIGILL, &action, NULL);
     sigaction(SIGABRT, &action, NULL);
     sigaction(SIGFPE, &action, NULL);
+
+    struct sigaction dump;
+    memset(&dump, 0, sizeof(dump));
+    dump.sa_sigaction = dump_signal_handler;
+    sigemptyset(&dump.sa_mask);
+    dump.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
+    sigaction(CRASH_DUMP_SIGNAL, &dump, NULL);
 }
 
 #else
@@ -429,6 +484,171 @@ static void install_crash_handlers(void) {
 }
 
 #endif
+
+// ---------------------------------------------------------------- the freeze watchdog
+
+static uint64_t mono_ms(void) {
+#ifdef _WIN32
+    return (uint64_t) GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t) ts.tv_sec * 1000u + (uint64_t) ts.tv_nsec / 1000000u;
+#endif
+}
+
+static void sleep_ms(const unsigned ms) {
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    struct timespec ts = {(time_t) (ms / 1000), (long) (ms % 1000) * 1000000L};
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
+    }
+#endif
+}
+
+#ifndef _WIN32
+// Asks one thread for its stack and waits for its answer (the handler above).
+static void ask_thread(const int fd, const int tid, const char *name) {
+    put(fd, "--- thread ");
+    put_uint(fd, (unsigned long) tid);
+    put(fd, " (");
+    put(fd, name);
+    put(fd, ")\n");
+    __atomic_store_n(&g_dump_ack, 0, __ATOMIC_RELEASE);
+#if defined(__linux__)
+    __atomic_store_n(&g_dump_target, tid, __ATOMIC_RELEASE);
+    const int sent = syscall(SYS_tgkill, (int) getpid(), tid, CRASH_DUMP_SIGNAL) == 0;
+#else
+    const int sent = pthread_kill(g_main_thread, CRASH_DUMP_SIGNAL) == 0;
+#endif
+    if (!sent) {
+        put(fd, "  (the thread has exited)\n");
+        return;
+    }
+    for (unsigned waited = 0; waited < CRASH_DUMP_WAIT_MS; waited++) {
+        if (__atomic_load_n(&g_dump_ack, __ATOMIC_ACQUIRE)) return;
+        sleep_ms(1);
+    }
+    put(fd, "  (no answer within 1 s: the thread blocks the signal, or is exiting)\n");
+}
+#endif
+
+// Every thread of the process, the main thread first. Linux names them from /proc/self/task; the
+// watchdog's own stack is written directly. Elsewhere (macOS, other POSIX) only the main thread
+// can be asked, which is what the report says.
+static void write_threads(const int fd) {
+#ifdef _WIN32
+    put(fd, "threads: the stacks of the other threads are not captured on Windows (only the stall is\n"
+            "recorded; a stack needs DbgHelp on the suspended thread).\n");
+#else
+    ask_thread(fd, (int) getpid(), "main thread");
+#if defined(__linux__)
+    const int self = (int) syscall(SYS_gettid);
+    DIR *tasks = opendir("/proc/self/task");
+    if (!tasks) {
+        put(fd, "(/proc/self/task is not readable: the main thread only)\n");
+        return;
+    }
+    for (const struct dirent *entry = readdir(tasks); entry; entry = readdir(tasks)) {
+        if (entry->d_name[0] < '1' || entry->d_name[0] > '9') continue;
+        const int tid = atoi(entry->d_name);
+        if (tid == (int) getpid()) continue;
+        if (tid == self) {
+            put(fd, "--- thread ");
+            put_uint(fd, (unsigned long) tid);
+            put(fd, " (watchdog)\n");
+            write_frames(fd);
+            continue;
+        }
+        char name[64] = "?";
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/self/task/%d/comm", tid);
+        const int comm = open(path, O_RDONLY);
+        if (comm >= 0) {
+            const ssize_t got = read(comm, name, sizeof(name) - 1);
+            close(comm);
+            if (got > 0) {
+                name[got] = 0;
+                if (name[got - 1] == '\n') name[got - 1] = 0;
+            }
+        }
+        ask_thread(fd, tid, name);
+    }
+    closedir(tasks);
+#else
+    put(fd, "(other threads are not listed on this platform: the main thread only)\n");
+#endif
+#endif
+}
+
+static void report_freeze(const uint64_t stalled_ms) {
+    if (!g_report.freeze_path[0]) return;
+    const int fd = open_report(g_report.freeze_path, 0);
+    if (fd < 0) return;
+    g_freeze_fd = fd;
+    put(fd, "KrunkNative freeze report\n");
+    put(fd, "build: ");
+    put(fd, g_report.build);
+    put(fd, "\n");
+    put(fd, g_report.pid_line);
+    put(fd, "the main loop did not tick for ");
+    put_uint(fd, (unsigned long) (stalled_ms / 1000));
+    put(fd, " s (at least ");
+    put_uint(fd, CRASH_FREEZE_SECONDS);
+    put(fd, " s counts as a freeze); the report was written while it lasted.\n\n");
+    write_log(fd);
+    put(fd, "\nstacks (the main thread first):\n");
+    write_threads(fd);
+    put(fd, "\nend of the freeze report\n");
+    g_freeze_fd = -1;
+    close_report(fd);
+    set_latest(g_report.freeze_path);
+}
+
+static void *watchdog_main(void *unused) {
+    (void) unused;
+    int frozen = 0;
+    while (!__atomic_load_n(&g_watch_stop, __ATOMIC_ACQUIRE)) {
+        sleep_ms(CRASH_WATCH_TICK_MS);
+        if (!__atomic_load_n(&g_armed, __ATOMIC_ACQUIRE)) continue;
+        const uint64_t now = mono_ms();
+        const uint64_t last = __atomic_load_n(&g_last_tick_ms, __ATOMIC_ACQUIRE);
+        if (now - last < (uint64_t) CRASH_FREEZE_SECONDS * 1000u) {
+            frozen = 0;
+            continue;
+        }
+        if (frozen) continue;
+        frozen = 1;
+        report_freeze(now - last);
+    }
+    return NULL;
+}
+
+void crash_report_tick(void) {
+    __atomic_store_n(&g_last_tick_ms, mono_ms(), __ATOMIC_RELEASE);
+    __atomic_store_n(&g_armed, 1, __ATOMIC_RELEASE);
+    const unsigned long frame = ++g_frames; // the main loop only
+    if (g_test_crash_frame >= 0 && frame == (unsigned long) g_test_crash_frame) {
+        fprintf(stderr, "[crash] KRUNKNATIVE_TEST_CRASH_AFTER_FRAMES: dereferencing NULL on frame %lu\n", frame);
+        fflush(stderr);
+        volatile int *null_pointer = NULL;
+        *null_pointer = 1;
+    }
+    if (g_test_stall_frame >= 0 && frame == (unsigned long) g_test_stall_frame) {
+        printf("[crash] KRUNKNATIVE_TEST_STALL_AFTER_FRAMES: the main loop stalls for %d ms on frame %lu\n",
+               CRASH_TEST_STALL_MS, frame);
+        fflush(stdout);
+        sleep_ms(CRASH_TEST_STALL_MS);
+    }
+}
+
+void crash_report_shutdown(void) {
+    if (!g_watch_running) return;
+    __atomic_store_n(&g_watch_stop, 1, __ATOMIC_RELEASE);
+    pthread_join(g_watchdog, NULL);
+    g_watch_running = 0;
+}
 
 // ---------------------------------------------------------------- startup
 
@@ -474,7 +694,14 @@ static void make_dirs(const char *path) {
 #endif
 }
 
+static long test_frame_env(const char *name) {
+    const char *value = getenv(name);
+    return value && *value ? atol(value) : -1;
+}
+
 void crash_report_init(void) {
+    g_test_crash_frame = test_frame_env("KRUNKNATIVE_TEST_CRASH_AFTER_FRAMES");
+    g_test_stall_frame = test_frame_env("KRUNKNATIVE_TEST_STALL_AFTER_FRAMES");
     char root[CRASH_PATH_MAX];
     if (!config_root(root, sizeof(root))) return;
     if (snprintf(g_report.dir, sizeof(g_report.dir), "%s/crash", root) <= 0) return;
@@ -491,6 +718,7 @@ void crash_report_init(void) {
         (long) getpid();
 #endif
     snprintf(g_report.crash_path, sizeof(g_report.crash_path), "%s/crash-%s-%ld.txt", g_report.dir, stamp, pid);
+    snprintf(g_report.freeze_path, sizeof(g_report.freeze_path), "%s/freeze-%s-%ld.txt", g_report.dir, stamp, pid);
     snprintf(g_report.latest_path, sizeof(g_report.latest_path), "%s/latest.txt", g_report.dir);
     snprintf(g_report.pid_line, sizeof(g_report.pid_line), "pid: %ld\n", pid);
     g_report.build = kn_build_string();
@@ -501,6 +729,9 @@ void crash_report_init(void) {
     backtrace(warm, 1);
 #endif
     install_crash_handlers();
+
+    g_main_thread = pthread_self();
+    if (pthread_create(&g_watchdog, NULL, watchdog_main, NULL) == 0) g_watch_running = 1;
 }
 
 #endif // __EMSCRIPTEN__

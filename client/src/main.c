@@ -1109,6 +1109,7 @@ int main(int argc, char **argv) {
     audio_fini();
     headless_shutdown();
     client_settings_exit(); // Discord RPC close; relaunch when a "*" setting asked for a restart
+    crash_report_shutdown(); // the watchdog ends with the process (a hang in the teardown above is still a freeze)
 
     return 0;
 #endif
@@ -1118,6 +1119,7 @@ int main(int argc, char **argv) {
 // main loop callback: advance time, tick/render (offline included: the sandbox server
 // steps inside the frame, net/offline.c), present and poll input.
 void client_frame(Client *client) {
+    crash_report_tick(); // the freeze watchdog: the loop is alive (crash_report.c); before any frame-cap sleep
     // updateRate on the web: Krunker skips whole animation frames (index.js gP); the
     // canvas keeps the last frame. Natively the cap sleeps in client_render_frame_end.
     if (!client_render_frame_due()) {
