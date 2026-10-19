@@ -730,7 +730,7 @@ void krunker_lobbies_open(const char *id) {
     const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
     char url[256], text[256];
     snprintf(url, sizeof(url), "%s/?game=%s", site && site[0] ? site : KRUNKER_DEFAULT_SITE, id);
-    printf("[krunker] official lobby %s: opening %s (in the browser: KRUNKNATIVE_KRUNKER_JOIN=browser or Windows)\n", id, url);
+    printf("[krunker] official lobby %s: opening %s (in the browser: KRUNKNATIVE_KRUNKER_JOIN=browser)\n", id, url);
     // the opt-out: krunker.io's own page joins it (ui_open_browser, never the in-client routing of
     // krunker.io links)
     ui_open_browser(url);

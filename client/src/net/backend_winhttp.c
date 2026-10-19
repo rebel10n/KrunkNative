@@ -269,22 +269,32 @@ struct KnWinWs {
 };
 
 KnWinWs *kn_winws_open(const char *url, const int timeout_ms, char *err, const size_t errn) {
+    return kn_winws_open_as(url, NULL, timeout_ms, NULL, err, errn);
+}
+
+KnWinWs *kn_winws_open_as(const char *url, const char *headers, const int timeout_ms, int *status_out, char *err, const size_t errn) {
+    if (status_out) *status_out = 0;
     if (!ws_api()) {
         set_err(err, errn, "WinHTTP has no WebSocket support (Windows 8 or newer needed)", 0);
         return NULL;
     }
     Handles h;
     if (!open_request(&h, "GET", url, timeout_ms, err, errn)) return NULL;
+    wchar_t *wheaders = headers ? widen(headers) : NULL;
+    const wchar_t *hdr = wheaders ? wheaders : L"User-Agent: KrunkNative\r\n";
     if (!WinHttpSetOption(h.request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0) ||
-        !WinHttpSendRequest(h.request, L"User-Agent: KrunkNative\r\n", (DWORD) -1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpSendRequest(h.request, hdr, (DWORD) -1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(h.request, NULL)) {
         request_error(err, errn, GetLastError());
+        free(wheaders);
         close_handles(&h);
         return NULL;
     }
+    free(wheaders);
     DWORD code = 0, size = sizeof(code);
     WinHttpQueryHeaders(h.request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size,
                         WINHTTP_NO_HEADER_INDEX);
+    if (status_out) *status_out = (int) code;
     HINTERNET socket = code == 101 ? g_ws_api.upgrade(h.request, 0) : NULL;
     if (!socket) {
         char what[64];
@@ -313,6 +323,11 @@ KnWinWs *kn_winws_open(const char *url, const int timeout_ms, char *err, const s
 int kn_winws_send_text(KnWinWs *ws, const char *text, const size_t len) {
     if (!ws || ws->aborted) return 0;
     return g_ws_api.send(ws->socket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, (PVOID) text, (DWORD) len) == NO_ERROR;
+}
+
+int kn_winws_send_binary(KnWinWs *ws, const void *data, const size_t len) {
+    if (!ws || ws->aborted) return 0;
+    return g_ws_api.send(ws->socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (PVOID) data, (DWORD) len) == NO_ERROR;
 }
 
 int kn_winws_recv(KnWinWs *ws, char **out, size_t *len, int *is_text) {

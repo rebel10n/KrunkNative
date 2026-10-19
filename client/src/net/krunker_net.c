@@ -45,6 +45,10 @@
 #include <poll.h>
 #include <unistd.h>
 #define KRUNKER_NATIVE_WS 1
+#else // Windows: the game socket over WinHTTP's WebSocket (backend_winhttp.c: the Windows certificate store, the client's proxy)
+#include <http_proxy.h>
+#include "backend_winhttp.h"
+#define KRUNKER_NATIVE_WS 1
 #endif
 
 #if KRUNKER_BUILD_SCHEMA != 1
@@ -173,10 +177,19 @@ static struct {
     volatile int quit;
     int wake[2];
     OutFrame *out_head, *out_tail;
+#ifdef _WIN32
+    pthread_t sender;            // the socket's send side (ws_send_thread): frames wait on out_cv
+    pthread_cond_t out_cv;
+    KnWinWs *win;                // the open socket (K.lock)
+    int win_done;                // the receive side ended: the sender drains and exits
+#endif
 #endif
 } K = {.lock = PTHREAD_MUTEX_INITIALIZER
 #ifdef KRUNKER_NATIVE_WS
        , .wake = {-1, -1}
+#endif
+#ifdef _WIN32
+       , .out_cv = PTHREAD_COND_INITIALIZER
 #endif
 };
 
@@ -214,18 +227,10 @@ static int option(const char *env, const char *param, char *out, const size_t n)
 }
 
 // In-client unless the opt-out (krunker_net.h): KRUNKNATIVE_KRUNKER_JOIN / ?krunkerJoin = browser
-// ("0" / "off" too); "client", "1" or unset = in-client.
-// Windows has no native WebSocket client for this mode yet (KRUNKER_NATIVE_WS): the browser stays its
-// default there, "client" still asks for the in-client path (which then says why it cannot start).
+// ("0" / "off" too); "client", "1" or unset = in-client (every native build has the game socket).
 int krunker_net_in_client(void) {
     char v[32];
-    if (!option("KRUNKNATIVE_KRUNKER_JOIN", "krunkerJoin", v, sizeof(v))) {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
-        return 0;
-#else
-        return 1;
-#endif
-    }
+    if (!option("KRUNKNATIVE_KRUNKER_JOIN", "krunkerJoin", v, sizeof(v))) return 1;
     return strcmp(v, "browser") != 0 && strcmp(v, "0") != 0 && strcmp(v, "off") != 0;
 }
 
@@ -848,12 +853,17 @@ static void link_send(void *user, const uint8_t *frame, const size_t len) {
     if (K.out_tail) K.out_tail->next = f;
     else K.out_head = f;
     K.out_tail = f;
+#ifdef _WIN32
+    pthread_cond_signal(&K.out_cv);
+#else
     if (K.wake[1] >= 0) {
         const char b = 1;
         if (write(K.wake[1], &b, 1) < 0) { /* the pipe is full: the thread wakes anyway */ }
     }
+#endif
 }
 
+#ifndef _WIN32 // the Linux socket (http_conn.c: its own TLS)
 static int ws_send_frame(HttpConn *c, const int opcode, const uint8_t *data, const size_t len) {
     uint8_t head[14];
     size_t n = 0;
@@ -1127,16 +1137,134 @@ static void ws_close(void) {
     pthread_mutex_unlock(&K.lock);
 }
 
-#else // Windows: no native WebSocket client for this mode yet
-static void link_send(void *user, const uint8_t *frame, const size_t len) {
-    (void) user;
-    (void) frame;
-    (void) len;
+#else // Windows: WinHTTP's WebSocket (backend_winhttp.c). ws_thread reads the messages, ws_send_thread writes the
+// queued frames, so a send never waits for a read and K.lock is never held across a socket call.
+static void *ws_send_thread(void *arg) {
+    KnWinWs *ws = arg;
+    pthread_mutex_lock(&K.lock);
+    for (;;) {
+        while (!K.out_head && !K.win_done) pthread_cond_wait(&K.out_cv, &K.lock);
+        OutFrame *f = K.out_head;
+        K.out_head = K.out_tail = NULL;
+        const int done = K.win_done;
+        pthread_mutex_unlock(&K.lock);
+        int ok = 1;
+        while (f) {
+            OutFrame *next = f->next;
+            if (ok) ok = kn_winws_send_binary(ws, f->data, f->len);
+            free(f);
+            f = next;
+        }
+        pthread_mutex_lock(&K.lock);
+        if (done && !K.out_head) break;
+    }
+    pthread_mutex_unlock(&K.lock);
+    return NULL;
 }
+
+// The Origin is the page Krunker's game servers serve (a browser sends its page origin), as on the Linux socket.
+static void *ws_thread(void *arg) {
+    const unsigned generation = (unsigned) (uintptr_t) arg;
+    int code = 1006, status = 0;
+    const char *why = "";
+    char failed[300] = ""; // the player's sentence (K.tpl: looked up on the main thread)
+    char server_reason[128] = "";
+    char err[256] = "";
+    int sender_up = 0; // ws_send_thread started (K.sender is joined only then)
+    KnWinWs *ws = kn_winws_open_as(K.ws_url, "User-Agent: KrunkNative\r\nOrigin: https://krunker.io\r\n", KRUNKER_HTTP_TIMEOUT_MS,
+                                   &status, err, sizeof(err));
+    if (!ws) {
+        if (err[0]) fprintf(stderr, "[krunker] websocket: %s\n", err);
+        if (status == 403) { // krunker.io's block of this network, as on the lobby list (krunker_lobbies.c)
+            why = "the WebSocket upgrade failed";
+            snprintf(failed, sizeof(failed), "%s", K.tpl.ws_denied);
+        } else if (status) {
+            why = "the WebSocket upgrade failed";
+            char detail[64];
+            snprintf(detail, sizeof(detail), "HTTP %d", status);
+            i18n_replace(failed, sizeof(failed), K.tpl.ws_failed, 1, I18N_ARGV(detail));
+        } else {
+            why = "cannot reach the game server";
+            snprintf(failed, sizeof(failed), "%s", K.tpl.ws_unreachable);
+        }
+    } else if (K.quit || generation != K.generation) {
+        kn_winws_free(ws); // left while connecting: nothing to report
+        ws = NULL;
+    } else {
+        pthread_mutex_lock(&K.lock);
+        K.win = ws;
+        K.win_done = 0;
+        pthread_mutex_unlock(&K.lock);
+        K.state = KS_OPEN;
+        socket_opened();
+        if (pthread_create(&K.sender, NULL, ws_send_thread, ws) != 0) {
+            why = "cannot start the send side";
+            snprintf(failed, sizeof(failed), "%s", K.tpl.ws_unreachable);
+        } else {
+            sender_up = 1;
+            char *msg = NULL;
+            size_t len = 0;
+            int is_text = 0;
+            while (!K.quit && kn_winws_recv(ws, &msg, &len, &is_text)) {
+                if (!is_text) { // Krunker's frames are binary (text ones are not Krunker's)
+                    trace_frame("<=", (const uint8_t *) msg, len);
+                    pthread_mutex_lock(&K.lock);
+                    recps_dump_frame((uint8_t *) msg, len); // (under K.lock: recps_probe_tick reads its state there)
+                    if (generation == K.generation) krunker_link_on_frame(&K.link, (const uint8_t *) msg, len);
+                    pthread_mutex_unlock(&K.lock);
+                }
+                free(msg);
+                msg = NULL;
+            }
+            if (K.quit) {
+                code = 1000;
+                why = "left";
+            } else {
+                why = "closed by the server";
+            }
+        }
+        pthread_mutex_lock(&K.lock);
+        K.win = NULL;
+        K.win_done = 1;
+        pthread_cond_broadcast(&K.out_cv);
+        pthread_mutex_unlock(&K.lock);
+        if (sender_up) pthread_join(K.sender, NULL);
+        kn_winws_free(ws);
+    }
+    if (generation == K.generation && K.state != KS_OFF) K.state = KS_CLOSED;
+    if (K.quit && !K.connected) return NULL; // left while connecting: nothing to report
+    socket_closed(code, why, failed, server_reason);
+    return NULL;
+}
+
 static void ws_open(void) {
-    fail("%s", I18N("kn.kio.noWindowsSocket", "This Windows build has no WebSocket client for krunker.io's game servers yet: pick a Box Office server."));
+    K.quit = 0;
+    if (pthread_create(&K.thread, NULL, ws_thread, (void *) (uintptr_t) K.generation) != 0) {
+        fail("Failed to start the krunker.io network thread");
+        return;
+    }
+    K.thread_running = 1;
 }
-static void ws_close(void) {}
+
+static void ws_close(void) {
+    if (!K.thread_running) return;
+    pthread_mutex_lock(&K.lock);
+    K.quit = 1;
+    if (K.win) kn_winws_abort(K.win); // unblocks the receive side (the close handshake is short)
+    pthread_cond_broadcast(&K.out_cv);
+    pthread_mutex_unlock(&K.lock);
+    pthread_join(K.thread, NULL);
+    K.thread_running = 0;
+    pthread_mutex_lock(&K.lock);
+    while (K.out_head) {
+        OutFrame *next = K.out_head->next;
+        free(K.out_head);
+        K.out_head = next;
+    }
+    K.out_tail = NULL;
+    pthread_mutex_unlock(&K.lock);
+}
+#endif // _WIN32
 #endif
 
 // ---------------------------------------------------------------- matchmaker

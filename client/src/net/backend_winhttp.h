@@ -22,7 +22,11 @@ int kn_winhttp_stream(const char *method, const char *url, const char *headers, 
 typedef struct KnWinWs KnWinWs;
 // ws:// / wss:// (http(s):// accepted): connect + upgrade. NULL on failure (`err` says why).
 KnWinWs *kn_winws_open(const char *url, int timeout_ms, char *err, size_t errn);
+// The same with extra request headers ("Name: value\r\n" lines, NULL: User-Agent only) and the HTTP status of a
+// refused upgrade (*status_out: 0 when no answer came; status_out may be NULL). The proxy is the client's (http_proxy.h).
+KnWinWs *kn_winws_open_as(const char *url, const char *headers, int timeout_ms, int *status_out, char *err, size_t errn);
 int kn_winws_send_text(KnWinWs *ws, const char *text, size_t len); // 1 = sent (any thread, one sender)
+int kn_winws_send_binary(KnWinWs *ws, const void *data, size_t len); // 1 = sent (one sender: the socket's send side)
 // Blocks for the next whole message: 1 = *out (malloc'd, NUL-terminated), *is_text; 0 = closed / error.
 int kn_winws_recv(KnWinWs *ws, char **out, size_t *len, int *is_text);
 void kn_winws_abort(KnWinWs *ws); // unblocks a kn_winws_recv in another thread
