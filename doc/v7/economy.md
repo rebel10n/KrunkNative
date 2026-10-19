@@ -166,7 +166,7 @@ foreign key is `NOT VALID`: no scan of the existing ledger), `trades.sender_kr` 
 - Live trading inside a match (Trade mode): v7.1.4 has only the client half; it needs a game
   server trade session and a brain settlement op.
 - Premium gifting (`prm`): a real-money store item, not KR.
-- Junk (`qsi` mode 1, `jnk`): v7.1.4's second currency does not exist here.
+- Junk (`qsi` mode 1, `jnk`): the Junk wallet (doc/v10/junk.md) is the second currency now; see that file for what earns and spends it.
 
 ## 8. The v10 Market & Trading popup
 
