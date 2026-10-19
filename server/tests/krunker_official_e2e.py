@@ -124,7 +124,7 @@ BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
         "--fx": "fx", "--bomb": "bomb", "--world": "world", "--actions": "actions", "--live": "live",
-        "--social": "social", "--rounds": "rounds", "--hud": "hud",
+        "--social": "social", "--rounds": "rounds", "--hud": "hud", "--death": "death", "--deathalive": "deathalive",
         "--voice": "voice", "--popups": "popups", "--state": "state",
         "--webvoice": "webvoice",
         "--lobbyui": "lobbyui", "--groups": "groups",
@@ -750,6 +750,9 @@ class Stub:
             elif rounds:  # Hardpoint (2), arg 14 isOfficial: the end table's "reward" column
                 await send("init", self.map_index, 2, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
+            elif self.scenario in ("death", "deathalive"):  # TDM (1): our team 1 against the bot's team 2
+                await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
+                           None, False, True, False, None, None, 0)
             elif self.scenario == "popups":  # TDM (1): "rds" names the leading team
                 await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], None, {}, None, 0, None, None, {"gor": True},
                            None, False, True, False, None, None, 0)
@@ -871,6 +874,11 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
                 await self.hud_phases(send, stop, player)
+            elif self.got_en.is_set() and self.scenario in ("death", "deathalive"):
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
+                await send("0", player("sockBOT", BOT_SID, "StubBot", 8.0, 8.0, team=2))
+                await self.death_phases(send, stop, self.scenario == "death")
             elif self.got_en.is_set() and self.scenario == "joinlines":
                 # run_native_join_lines: krunker.io's join line (server.message.join, ADD_CHATI18N kind 2) at each
                 # first spawn, the joiner's own included (a lone player's chat shows his own "joined the game"):
@@ -1066,6 +1074,31 @@ class Stub:
                                            BOT_SID, ["StubBot", "StubBot"], 40, 0, 1, 0, "NONE"],
                                     "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 3}, 1, 3, 12, None, {})
         await hold(12.0)
+        self.sent["done"] = time.monotonic()
+
+    async def death_phases(self, send, stop, dead):
+        """official-death (run_native_death): the bot kills us (KILL_PLAYER, victim = us; dead=True), then the
+        round ends with a defeat (END_GAME type 0, didWin false, winTeam 2). v10 shows the end title only for a
+        player who is playing (`2 != a0 && (player.active || spectating)`, v10.js:219683): a dead player gets no
+        end screen from that END (its death card, then the death menu, stays). A live player gets the defeat at once."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(2.0)
+        self.sent["death"] = time.monotonic()
+        if dead:
+            await send("3", MY_SID, 1, BOT_SID, [1, 1234, None, [61000, 40, "37.5%", 4, 350]], {"wId": 1}, False)  # KILL_PLAYER: us, by the bot
+        await hold(3.0)
+        self.sent["end"] = time.monotonic()
+        self.ended = True
+        await send("end", 0, False, {"ed": [MY_SID, ["Guest_9", "Guest_9"], 120, 1, 2, 0, "NONE", BOT_SID, ["StubBot", "StubBot"], 340, 4, 1, 0, "NONE"],
+                                     "tms": [[1, 1, None], [2, 3, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 1}, 2, 3, 0, None, {})
+        await hold(10.0)
         self.sent["done"] = time.monotonic()
 
     async def rounds_phases(self, send, stop, player):
@@ -2204,6 +2237,44 @@ def run_native_hud():
     endtab = [clean(t) for t in probe("endtab")]
     check(f"{label}: END_GAME: the results list both players with our reward", any("Guest_9" in t and "StubBot" in t and "12" in t
                                                                                      for t in endtab), endtab[-1:])
+
+
+def run_native_death(alive):
+    """official-death: a round defeat on the official page (Stub.death_phases). dead: the bot kills us, then the round
+    ends while we are dead: v10 gives a dead player no end screen from that END, so #endUI never shows (the death
+    menu takes over the death card). alive: the same END while we are alive (the round's end): the defeat title and
+    #endUI show at once."""
+    label = "native-death-alive" if alive else "native-death"
+    probes = ""
+    for t in range(3000, 24000, 500):
+        probes += "%d vis @end endUI\n%d vis @death deathUIHolder\n%d attr @vic src [id=victorySub]\n" % (t, t + 100, t + 200)
+    # a frame of the screen at the round end's probe time (the PNG lands in the run's work dir)
+    shot = os.path.join(WORK, label + "-round-end.png")
+    script = "0 boot\n3800 play\n%s12000 shot %s\n24500 quit\n" % (probes, shot)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="deathalive" if alive else "death")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("death", "end", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" step", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    ends = [(int(t), v) for t, v in re.findall(r"\[input_script\] vis t=(\d+) @end endUI=(\d)", text)]
+    deaths = [(int(t), v) for t, v in re.findall(r"\[input_script\] vis t=(\d+) @death deathUIHolder=(\d)", text)]
+    vics = [(int(t), v) for t, v in re.findall(r"\[input_script\] attr t=(\d+) @vic n=\d+ src=(\S+)", text)]
+    shown = [t for t, v in ends if v == "1"]
+    death_shown = [t for t, v in deaths if v == "1"]
+    print(f"{label}: timeline (script ms): death card first {death_shown[:1]}, #endUI first {shown[:1]}, "
+          f"defeat title first {[t for t, v in vics if v == './img/def.png'][:1]}", flush=True)
+    if alive:
+        check(f"{label}: a live player gets the round end at once: #endUI shows", bool(shown), str(ends[-3:]))
+        check(f"{label}: the defeat title (#victorySub def.png)", any(v == "./img/def.png" for _, v in vics), str(sorted(set(v for _, v in vics))))
+    else:
+        check(f"{label}: the death card comes up (we are dead)", bool(death_shown), str(deaths[-3:]))
+        check(f"{label}: a dead player gets no end screen from the round end: #endUI never shows (v10.js:219683)", not shown,
+              f"endUI shown at {shown[:3]}, death card at {death_shown[:1]}")
+        check(f"{label}: no defeat title while dead (#victorySub never def.png)", not any(v == "./img/def.png" for _, v in vics),
+              str(sorted(set(v for _, v in vics))))
 
 
 def run_native_rounds():
@@ -4413,6 +4484,8 @@ def main():
         ran = True
     if ONLY == "hud" and os.path.isfile(f"{BUILD}/client_bin"):  # just the score / objective / end HUD run
         run_native_hud()
+    if ONLY in ("death", "deathalive") and os.path.isfile(f"{BUILD}/client_bin"):  # just the round defeat runs
+        run_native_death(ONLY == "deathalive")
     if ONLY == "joinlines" and os.path.isfile(f"{BUILD}/client_bin"):  # just the join lines (server.message.join) runs
         run_native_join_lines(False)
         run_native_join_lines(True)
