@@ -177,9 +177,11 @@ any map exists, for these runs.
   so). `kn_webview.h` is the seam for them.
 - Windows packages must ship `WebView2Loader.dll` next to `client.exe` for the challenge to run there (not
   yet in tools/release/package-client.sh); without it the challenge is unavailable, as without the runtime.
-- The release packages are built with `KN_WEBVIEW=OFF` (tools/release/build-client-linux.sh): linking
-  WebKitGTK would make it a hard dependency of the portable client. Loading it at run time (dlopen)
-  would lift that.
+- The dynamic Linux packages bundle WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so
+  the captcha needs no system package there. The polyfilled packages are built with `KN_WEBVIEW=OFF`:
+  there is no webkit2gtk-4.1 for their glibc 2.17 floor. WebKit 2.52 compiles in the directory of its
+  helper processes and has no setting for it, so the bundle's copy of libwebkit2gtk gets that string
+  replaced by a relative one: the packaged client runs from its install root (`install_root_chdir`).
 - The window's own texts (card, statuses from the widget) are English; the modal's are localised.
 - No window manager under the tests' Xvfb: the window's placement, `keep_above` over a fullscreen
   game and focus were not checked on a real desktop (Wayland / X11, NVIDIA). WebKitGTK on some NVIDIA

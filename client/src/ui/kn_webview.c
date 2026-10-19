@@ -84,6 +84,7 @@ void kn_webview_rgba_from_argb32(const unsigned char *src, const int stride, con
 #if defined(KN_WEBVIEW) && defined(__linux__) && !defined(__EMSCRIPTEN__)
 #define KN_WV_GTK 1
 #include <gtk/gtk.h>
+#include <unistd.h>
 #include <webkit2/webkit2.h>
 #elif defined(KN_WEBVIEW) && defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #define KN_WV_WV2 1
@@ -1028,6 +1029,28 @@ static void reveal(const char *why) {
 
 int kn_webview_available(void) { return !env_off() && W.toolkit >= 0; }
 
+// The packaged client's bundled TLS module (tools/release/bundle-webkit.sh: lib/gio/modules next to
+// client_bin). WebKit's network process needs glib-networking's TLS backend for https (krunker.io's
+// page). GIO_EXTRA_MODULES adds the bundle's directory to the host's own modules (its proxy
+// modules stay); nothing is set when the directory is not there (a development build).
+static void add_bundled_gio_modules(void) {
+    char exe[4096];
+    const ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0) return;
+    exe[n] = 0;
+    char *slash = strrchr(exe, '/');
+    if (!slash) return;
+    *slash = 0; // the install root
+    char dir[4200];
+    snprintf(dir, sizeof(dir), "%s/lib/gio/modules", exe);
+    if (!g_file_test(dir, G_FILE_TEST_IS_DIR)) return;
+    const char *old = getenv("GIO_EXTRA_MODULES");
+    char joined[8400];
+    if (old && *old) snprintf(joined, sizeof(joined), "%s:%s", old, dir);
+    else snprintf(joined, sizeof(joined), "%s", dir);
+    setenv("GIO_EXTRA_MODULES", joined, 1);
+}
+
 static int toolkit_up(void) {
     if (W.toolkit) return W.toolkit > 0;
     // GTK must not touch the process locale (the game parses and prints "C" numbers)
@@ -1037,6 +1060,7 @@ static int toolkit_up(void) {
     // so render it on the CPU. Inherited by the web processes; an explicit user value wins.
     setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", 0);
     setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+    add_bundled_gio_modules();
     if (!gtk_init_check(NULL, NULL)) {
         W.toolkit = -1;
         snprintf(W.toolkit_err, sizeof(W.toolkit_err), "GTK found no display for the challenge window");

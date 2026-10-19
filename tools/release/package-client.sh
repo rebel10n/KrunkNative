@@ -12,7 +12,8 @@
 #   macos-aarch64 macos-amd64                       .tar.gz .zip            (KrunkNative.app, ANGLE/Metal)
 #
 # Layout: krunknative-client-<platform>/ holding client_bin (client.exe), server_bin (server.exe),
-# the bundled libraries (Windows DLLs; macOS ANGLE + non-system dylibs), ui/, the code-coupled
+# the bundled libraries (Windows DLLs; macOS ANGLE + non-system dylibs; the dynamic Linux packages'
+# WebKitGTK for the captcha window: lib/, libexec/, from tools/release/bundle-webkit.sh), ui/, the code-coupled
 # part of assets/ that is in git (every tracked file: shaders, maps, img, editor, skins.json,
 # previews.json, titles.json, the KN-only sounds; the
 # rest of the game content comes separately, see --assets and package-assets.sh), kn-install.json
@@ -104,6 +105,29 @@ fi
 entry="$client"
 [ -n "$launcher" ] && entry="$launcher_name"
 
+# the glibc floor of the package: the newest GLIBC_ symbol version the binaries ask for, and the
+# bundled libraries' (dynamic Linux packages: lib/, libexec/) too. deb Depends: libc6 >= it
+glibc_min=""
+if [ "$os" = linux ] && command -v readelf > /dev/null; then
+    glibc_min="$({ readelf -V "$bindir/$client" "$bindir/$server" ${launcher:+"$launcher"}
+        find "$bindir/lib" "$bindir/libexec" -type f -print0 2> /dev/null | xargs -0 -r readelf -V; } \
+        | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1 || true)"
+fi
+# dynamic Linux packages (the bundled WebKitGTK, tools/release/bundle-webkit.sh): rpm's ELF scan would
+# require the bundle's own sonames (libwebkit2gtk-4.1, libgtk-3, ...) from the system, so AutoReq is off
+# there and the rpm requires the glibc floor and the system's share of the bundle's closure instead
+# (host-libs.txt: the sonames the bundle leaves to the player's system, from the same ldd closure)
+rpm_req=""
+if [ -f "$bindir/host-libs.txt" ]; then
+    rpm_req="AutoReq: 0"$'\n'"Requires: glibc >= ${glibc_min:-2.34}"$'\n'
+    while read -r so; do
+        case "$so" in
+            ld-linux*|linux-vdso*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|libutil.so.*|libresolv.so.*|libmvec.so.*|libanl.so.*|libnss_*) continue ;;
+        esac
+        rpm_req+="Requires: $so()(64bit)"$'\n'
+    done < "$bindir/host-libs.txt"
+fi
+
 # ---------------------------------------------------------------- the install tree
 # tracked_assets: the git-tracked files under assets/ (paths relative to it), without its README;
 # outside a git checkout (a source tarball) the code-coupled directories
@@ -187,13 +211,29 @@ the GCC runtime library exception). macOS packages bundle ANGLE (libEGL, libGLES
 BSD 3-Clause, https://chromium.googlesource.com/angle/angle/+/HEAD/LICENSE) and may bundle
 Homebrew's OpenSSL (Apache License 2.0).
 EOF
+    if [ -d "$bindir/lib" ]; then
+        # the dynamic Linux packages' WebKitGTK (lib/, libexec/; tools/release/bundle-webkit.sh)
+        cp "$bindir/webkit-bundle.txt" "$root/licenses/webkitgtk-bundle.txt"
+        cat >> "$root/LICENSE-NOTICE.txt" << 'EOF'
+
+WebKitGTK (webkit2gtk-4.1, the captcha window) and the libraries bundled with it (lib/, libexec/;
+the list is licenses/webkitgtk-bundle.txt) are free software under their own licences: WebKitGTK
+under the GNU Lesser General Public License, version 2.1 or later (WebKit also BSD-2-Clause in
+parts), GTK, GLib and libsoup under the LGPL too, the others mostly LGPL, MIT, BSD or zlib
+(their licence texts come with their source). The source of WebKitGTK and the bundled libraries:
+https://webkitgtk.org/ and the source packages of the distribution this bundle was built on.
+The libraries are dynamically linked: the files in lib/ can be replaced by another build of the
+same libraries. The bundled libwebkit2gtk-4.1 differs from the distribution's in one string only,
+its helper process directory (tools/release/bundle-webkit.sh, which writes that change).
+EOF
+    fi
 }
 
 readme() {
     local file="$1" package="$2" runtime run
     case "$platform" in
         linux-*-polyfilled) runtime="any x86_64/aarch64 Linux with glibc 2.17+ (CentOS 7, Debian 9, Ubuntu 18.04 and newer) and OpenGL 4.5 drivers (Mesa 20.3+, NVIDIA, AMD)" ;;
-        linux-*) runtime="Linux with glibc 2.34+ and OpenSSL 3 (Debian 12+, Ubuntu 22.04+, Fedora 36+, Arch) and OpenGL 4.5 drivers. Older distros: the -polyfilled package" ;;
+        linux-*) runtime="Linux with glibc ${glibc_min:-2.34}+ and OpenSSL 3 (Debian 12+, Ubuntu 22.04+, Fedora 36+, Arch) and OpenGL 4.5 drivers. Older distros: the -polyfilled package" ;;
         windows-*) runtime="Windows 10+ x64 with OpenGL 4.5 drivers" ;;
         macos-*) runtime="macOS 11+ ($arch), rendering through Metal (ANGLE)" ;;
     esac
@@ -212,6 +252,7 @@ readme() {
         echo "Built:     ${KN_BUILD_TIME:-unknown}"
         echo "Protocol:  ${KN_PROTOCOL:-unknown} (NET_PROTOCOL major.minor)"
         echo "Runs on:   $runtime"
+        if [ -d "$bindir/lib" ]; then echo "Bundled:   WebKitGTK for the captcha window (lib/, libexec/; see LICENSE-NOTICE.txt)"; fi
         echo
         echo "$run"
         echo
@@ -250,6 +291,12 @@ put_bins() {
     case "$os" in
         windows)
             find "$bindir" -maxdepth 1 -type f -iname '*.dll' -exec cp {} "$dir/" \;
+            ;;
+        linux)
+            # the dynamic packages' WebKitGTK for the captcha window (tools/release/bundle-webkit.sh)
+            for d in lib libexec; do
+                if [ -d "$bindir/$d" ]; then cp -R "$bindir/$d" "$dir/"; fi
+            done
             ;;
         macos)
             for lib in libEGL.dylib libGLESv2.dylib; do
@@ -383,11 +430,6 @@ EOF
 pkg_base="$(echo "$describe" | sed -n 's/^[a-z-]*v\([0-9][0-9.]*\).*/\1/p')"
 pkg_rest="$(echo "$describe" | sed -n 's/^[a-z-]*v[0-9][0-9.]*-\([0-9]*\)-\(g[0-9a-f]*\)$/\1.\2/p')"
 [ -n "$pkg_base" ] || { pkg_base=0; pkg_rest="$(echo "$describe" | tr -c 'A-Za-z0-9.\n' .)"; }
-# deb Depends: libc6 >= the newest GLIBC_ symbol version the binaries ask for
-glibc_min=""
-if [ "$os" = linux ] && command -v readelf > /dev/null; then
-    glibc_min="$(readelf -V "$bindir/$client" "$bindir/$server" ${launcher:+"$launcher"} | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)"
-fi
 summary="Native C port of the Krunker first-person shooter"
 description="Krunker Box Office client ($describe, protocol ${KN_PROTOCOL:-?}): the game, its HTML menu and the dedicated server. The game content (models, textures, sounds, about 1.7 GB) is not in this package: the first start downloads it."
 
@@ -424,12 +466,15 @@ EOF
             top="$work/rpmbuild"
             mkdir -p "$top"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
             # prebuilt files: no strip / debuginfo / build-id links; gzip payload so rpm 4.11
-            # (CentOS 7) reads the polyfilled package. Requires come from rpm's ELF scan.
+            # (CentOS 7) reads the polyfilled package. Requires come from rpm's ELF scan (dynamic packages
+            # with the bundle: $rpm_req above). The bundle's libraries (lib/, libexec/) provide no sonames.
             cat > "$top/SPECS/krunknative.spec" << EOF
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 %define _build_id_links none
 %define _binary_payload w9.gzdio
+%global __provides_exclude_from ^/opt/krunknative/(lib|libexec)/
+$rpm_req
 Name: krunknative
 Version: $pkg_base
 Release: ${pkg_rest:-1}

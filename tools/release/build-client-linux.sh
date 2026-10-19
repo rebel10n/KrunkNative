@@ -4,7 +4,8 @@
 # ubuntu-22.04 / ubuntu-22.04-arm) or in an ubuntu:22.04 container (--docker), amd64 or aarch64:
 #
 #   dynamic     the distro build: links the system OpenSSL 3 (libssl3: security updates come from
-#               the distro) and needs glibc >= 2.35. Packages: linux-<arch>.
+#               the distro) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha window
+#               (tools/release/bundle-webkit.sh: lib/, libexec/). Packages: linux-<arch>.
 #   polyfilled  for old and new distros alike (fastfetch's "-polyfilled"): OpenSSL static too
 #               (libssl.a), then polyfill-glibc --target-glibc=2.17 rewrites the newer glibc symbol
 #               versions to 2.17 ones or links in polyfills. Packages: linux-<arch>-polyfilled.
@@ -80,6 +81,9 @@ if [ "$deps" = 1 ]; then
     pkgs=(build-essential cmake ninja-build pkg-config ca-certificates file
         libwayland-dev wayland-protocols libx11-dev libxcursor-dev libxinerama-dev libxrandr-dev
         libxi-dev libgl1-mesa-dev libxkbcommon-dev libxcb-present-dev libegl-dev libssl-dev libcrypt-dev git)
+    # the dynamic build bundles WebKitGTK (tools/release/bundle-webkit.sh): its -dev package, the TLS
+    # module of glib-networking (https in WebKit's network process) and patchelf (RUNPATH of the bundle)
+    if [ "$variant" = dynamic ]; then pkgs+=(libwebkit2gtk-4.1-dev glib-networking patchelf); fi
     $sudo apt-get update -qq > /dev/null
     $sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" > /dev/null
 fi
@@ -93,9 +97,10 @@ flags=(-DCMAKE_BUILD_TYPE=Release -DKRUNKNATIVE_HTML_ENGINE=ON
 # versions Fedora's lacks; public servers use the server packages), libgcc/libstdc++ (replxx) and
 # crypt(3) static (libxcrypt's libcrypt.a: libcrypt.so.1 is a compat package on Fedora/Arch)
 flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++")
-# no captcha webview (client/include/kn_webview.h) in packages: it links WebKitGTK, which players'
-# systems need not have (the packaged client keeps the system-browser / paste-box captcha paths)
-flags+=(-DKN_WEBVIEW=OFF)
+# the captcha webview (client/include/kn_webview.h, WebKitGTK) is bundled with the dynamic packages
+# (bundle-webkit.sh, below). The polyfilled ones keep it out: a webkit2gtk-4.1 for their glibc 2.17
+# floor does not exist, and a load-time link would make it a hard dependency of the portable client
+if [ "$variant" = dynamic ]; then flags+=(-DKN_WEBVIEW=ON); else flags+=(-DKN_WEBVIEW=OFF); fi
 libcrypt_a="$(gcc -print-file-name=libcrypt.a)"
 if [ -f "$libcrypt_a" ]; then flags+=("-DKN_LIBCRYPT=$libcrypt_a"); else flags+=(-DKN_LIBCRYPT=KN_LIBCRYPT-NOTFOUND); fi
 if [ "$variant" = polyfilled ]; then
@@ -105,7 +110,7 @@ if [ "$variant" = polyfilled ]; then
 fi
 # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
 cmake -S "$repo" -B "$build" -G Ninja "${flags[@]}" ${KN_CMAKE_ARGS:-} > "$build/configure.log" || { cat "$build/configure.log" >&2; exit 1; }
-grep -E 'GL backend|OpenSSL|libssl|Headless' "$build/configure.log" || true
+grep -E 'GL backend|OpenSSL|libssl|Headless|Webview' "$build/configure.log" || true
 # the launcher (target kn_launcher, output krunknative; agent client-updates) when the tree has it
 targets=(client_bin server_bin)
 bins=(client_bin server_bin)
@@ -120,6 +125,11 @@ if [[ " ${targets[*]} " == *" kn_launcher "* ]]; then
     bins+=(krunknative)
 fi
 for f in "${bins[@]}"; do strip --strip-unneeded "$out/$f"; done
+if [ "$variant" = dynamic ]; then
+    # WebKitGTK for the captcha window, beside the binaries: lib/, libexec/, webkit-bundle.txt. It
+    # links client_bin to the bundle (RUNPATH) and checks that it does
+    "$repo/tools/release/bundle-webkit.sh" "$out"
+fi
 
 if [ "$variant" = polyfilled ]; then
     tool="${POLYFILL_GLIBC:-}"
@@ -139,8 +149,9 @@ if [ "$variant" = polyfilled ]; then
     for f in "${bins[@]}"; do "$tool" --target-glibc=2.17 "$out/$f"; done
 fi
 
-# Only OS libraries may be NEEDED (polyfilled: glibc's and libEGL only); report the newest glibc
-# symbol version each binary asks for.
+# Only OS libraries may be NEEDED (polyfilled: glibc's and libEGL only; dynamic: also the bundle's
+# lib/, which bundle-webkit.sh filled from the same host); report the newest glibc symbol version
+# each binary asks for.
 allowed='^(libc|libm|libdl|libpthread|librt|libEGL|ld-linux-x86-64|ld-linux-aarch64)\.so'
 [ "$variant" = dynamic ] && allowed='^(libc|libm|libdl|libpthread|librt|libEGL|ld-linux-x86-64|ld-linux-aarch64|libssl|libcrypto)\.so'
 {
@@ -150,9 +161,13 @@ allowed='^(libc|libm|libdl|libpthread|librt|libEGL|ld-linux-x86-64|ld-linux-aarc
         glibc="$(readelf -V "$out/$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
         echo "$f: NEEDED $needed; max $glibc"
         for lib in $needed; do
-            [[ "$lib" =~ $allowed ]] || { echo "$f links $lib, which is not an OS library" >&2; exit 1; }
+            [[ "$lib" =~ $allowed || -e "$out/lib/$lib" ]] || { echo "$f links $lib, which is neither an OS library nor in lib/" >&2; exit 1; }
         done
     done
+    if [ -d "$out/lib" ]; then
+        glibc="$(find "$out/lib" "$out/libexec" -type f -print0 | xargs -0 readelf -V 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 || true)"
+        echo "bundled lib/ and libexec/: max $glibc"
+    fi
 } | tee "$out/build-info.txt"
 "$out/client_bin" --version
 "$out/client_bin" --voice-info | grep -q '^opus=libopus ' # voice chat's codec is linked in
