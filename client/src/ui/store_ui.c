@@ -28,6 +28,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <store_spins.h> // v10 store.wheels / itemPools
+#include <junk.h>          // the Junk wallet's amounts (doc/v10/junk.md)
 #include <v10_wild_offer.h>
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
 #include <time.h>
@@ -1171,8 +1172,11 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
             sb_appendf(sb, "<div class=\"sub-tab-dot svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"event.stopPropagation();windows[13].subTabT=5000;windows[13].subTab=%d;updateWindow(14);\" style=\"background: %s\"></div>",
                        d, d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
         sb_appendf(sb, "</div> <div class=\"sub-tab-nav svelte-lri212\">%s</div> ", PANELS[i].nav);
-        if (i == 2) // acc.junk: KrunkNative has no crafting (doc/v7/decisions.md), so no Junk either
-            sb_append(sb, "<div class=\"junkyard-display svelte-lri212\">0.00 <span class=\"material-icons svelte-lri212\" style=\"color: #cc51f8; font-size: 38px; margin-left: 8px; vertical-align: top; margin-right: -9px;\">plumbing</span></div> ");
+        if (i == 2) { // acc.junk: the Junk wallet's balance (doc/v10/junk.md); the crafting itself is another owner's
+            char junk[24];
+            junk_format(junk_hundredths(acc ? acc->junk : 0.0), junk, sizeof(junk));
+            sb_appendf(sb, "<div class=\"junkyard-display svelte-lri212\">%s <span class=\"material-icons svelte-lri212\" style=\"color: #cc51f8; font-size: 38px; margin-left: 8px; vertical-align: top; margin-right: -9px;\">plumbing</span></div> ", junk);
+        }
         sb_appendf(sb, "<div class=\"sub-tab-header svelte-lri212\"><div class=\"sub-tab-subtitle svelte-lri212\"%s%s%s>%s</div> %s</div></div> ",
                    PANELS[i].sub_style ? " style=\"" : "", PANELS[i].sub_style ? PANELS[i].sub_style : "", PANELS[i].sub_style ? "\"" : "", PANELS[i].sub, PANELS[i].head);
     }

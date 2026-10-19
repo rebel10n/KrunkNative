@@ -39,6 +39,7 @@
 #endif
 #include "account_flags.h"
 #include <progression.h> // WP-E part 2c: v7 level progress, challenge names
+#include <junk.h>        // the Junk wallet's amounts (doc/v10/junk.md)
 #include <badges.h>      // WP-E part 2c: badges.js
 #include <map_catalog.h> // WP-E part 2c: the Map Challenges cards
 #include <weapons.h>
@@ -788,6 +789,19 @@ void account_double_xp_claimed(const double player_score) {
     rerender_windows();
 }
 
+// acc.junk from kn_brain's account info ("junk": the wallet's balance as text, "12.34", doc/v10/junk.md);
+// a number is read too, and an info without the key keeps the value it had
+static void set_junk(const cJSON *info) {
+    const cJSON *junk = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "junk") : NULL;
+    if (!junk) return;
+    g_acc.junk = junk_value(cJSON_IsString(junk) ? junk_parse(junk->valuestring) : junk_hundredths(junk->valuedouble));
+}
+
+// the "uj" push (social_push_junk): the balance changed while the account is signed in
+static void set_junk_text(const char *text) {
+    g_acc.junk = junk_value(junk_parse(text));
+}
+
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
 // creatorBadge (~~creator_badge, v10:112770) comes with it
 static void set_badges(const cJSON *info) {
@@ -875,6 +889,7 @@ static void account_response(const cJSON *frame) {
         if (cJSON_IsNumber(mail)) g_acc.mail_unread = mail->valueint;
         set_badges(info);
         set_dxp(info);
+        set_junk(info);
     }
 
     const char *token = str_at(frame, 5);
@@ -1020,6 +1035,11 @@ static void on_social(void *user, const cJSON *frame) {
         set_data(cJSON_GetArrayItem(frame, 1));
         set_badges(cJSON_GetArrayItem(frame, 2)); // WP-E part 2c: the info's "badges"
         set_dxp(cJSON_GetArrayItem(frame, 2)); // the info's dxp.offer (double_xp_offer.c)
+        set_junk(cJSON_GetArrayItem(frame, 2)); // the info's "junk" (doc/v10/junk.md)
+        mark_header();
+        rerender_windows();
+    } else if (!strcmp(label, "uj") && g_logged_in) { // social_push_junk: ["uj", "12.34"], the wallet's new balance
+        set_junk_text(str_at(frame, 1));
         mark_header();
         rerender_windows();
     } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
