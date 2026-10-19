@@ -60,17 +60,15 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_DRANK_COLOR 0x7b2cbf // the lean (#7b2cbf): the cup's liquid; the stream / puddles use WeaponStream.color
 #define NETTSPEND_CASH_COLOR 0x2f9e5b  // a bill's face
 #define NETTSPEND_CASH_BAND_COLOR 0xf1e6b8 // the stack's paper band / a bill's edge
-// Third person: the trigger hand's hold point is moved this far out (the arm frame's x) from the pistol's
-// (negative: the model's right), so the cup in the hand clears the torso from the over-the-shoulder camera.
-#define NETTSPEND_TP_HAND_SIDE (-1.2f)
+// Third person: the trigger hand's hold point is moved this far in the arm frame's x from the pistol's. The arm
+// solver reads the hand's x as -hold.x, and the trigger shoulder sits at x = +1.9 (generate_arms), so a negative
+// shift takes the hand out past the shoulder: -6.0 puts it ~4 units out (the arm is 5.4 long), so the arm
+// extends out to its side like a pistol held out, the elbow nearly straight, and the cup clears the torso.
+#define NETTSPEND_TP_HAND_SIDE (-6.0f)
 // The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
 // shoulder, this far out to its own side and forward per unit down (only the trigger arm holds the cup)
 #define NETTSPEND_OFF_HAND_AWAY_OUT 0.12f
 #define NETTSPEND_OFF_HAND_AWAY_FWD 0.15f
-// Third person, not pouring: the trigger arm turns out to its own side about its shoulder (player_mesh.c
-// player_trigger_hold_out): the unit rest direction plus this much of the side's unit x, renormalized, the
-// reach kept, so the cup is held out beside the torso instead of straight forward past it.
-#define NETTSPEND_TP_HOLD_OUT 1.0f
 // The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);
