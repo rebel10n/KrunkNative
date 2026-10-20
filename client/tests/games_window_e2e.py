@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The Custom Games window (window 10: Home / Popular / Featured / New / Favorites / My Games / Search / Editor / Sandbox)
-opens on the tab a click names, keeps it, and its tab row sits inside the window (games_window_gen, servers_ui.c).
+opens on the tab a click names, keeps it, and its tab row sits inside the window (games_window_gen, servers_ui.c). The
+social hub's Maps tab (client_bin --hub p=maps, social_ui.c) has the same Popular Categories tiles and is checked too.
 
   python3 -I client/tests/games_window_e2e.py BUILD_DIR      (from the repository root)
 
-Two runs of a headless client_bin, each with a stub brain (KRUNKNATIVE_BRAIN_URL: /api/maps per tab, /api/search) and a
+Three runs of a headless client_bin. A and B have a stub brain (KRUNKNATIVE_BRAIN_URL: /api/maps per tab, /api/search) and a
 stub krunker.io data API (KRUNKNATIVE_KRUNKER_DATA_API: /webhooks/general/maps/list per tab):
   A (Box Office):
     - a Popular Categories tile on Home opens the Search tab on its category: the tab row shows Search, the search
@@ -17,6 +18,12 @@ stub krunker.io data API (KRUNKNATIVE_KRUNKER_DATA_API: /webhooks/general/maps/l
       refused): the tab shows "No Games found!" and no bundled catalogue (commit 820e14f4); Featured's answer shows its list;
     - Popular, shown again, asks krunker.io again and shows its list (before the fix a refused tab stayed empty);
     - back on Box Office, Popular shows Box Office's list, not krunker.io's (before the fix the tabs kept one source's rows).
+  C (the social hub, --hub p=maps: the page's socket is a stub that answers its page requests, /api/maps and /api/search
+  are the brain stub's; /api/search filters its rows by name and category):
+    - a Popular Categories tile (Action) opens the Search tab with the category selected: the brain is asked
+      /api/search?type=map&val=&cat=19 (before the fix the tile sent no category, so every map came back), and the Search
+      tab lists Action's map only;
+    - the Search tab's box still searches by its text (Rooftop, with the select on All: cat=-1).
 Set KN_GAMES_WINDOW_SHOTS=DIR to write the window's frames there (before / after PNGs). Exit code 0 when every check
 passed; the input-script log is kept in ~/.cache/kn-games-window-e2e-* on failure.
 """
@@ -25,6 +32,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -66,25 +74,75 @@ BRAIN_TABS = {
 }
 # krunker.io's lists (index 0 Popular, 1 Featured); index 0 is refused twice first (Stub.refuse)
 KIO_TABS = {0: [map_row("Krunk Plaza", 300, "Action", 6001)], 1: [map_row("Skyline Lounge", 200, "Action", 6002)]}
+# config.mapCats (k_map_cats in social_ui.c): a Popular Categories tile searches its name's index (Raid: 13)
+MAP_CATS = ["Other", "Parkour", "Puzzle", "Trading", "Training", "Social", "Horror", "Adventure", "Battle Royale", "Realism",
+            "Roleplay", "Rotation", "Racing", "Raid", "Remake", "NCR", "Zombies", "Simulation", "Relaxation", "Action", "Tycoon",
+            "Mini-Games", "Single-player", "Education"]
+# the hub's search answers: one map in each of two categories (the test clicks Action's tile)
+HUB_SEARCH_ROWS = [map_row("Rooftop Parkour", 900, "Parkour", 1001), map_row("Mini Burg", 700, "Action", 1002)]
 
 
 class Stub(BaseHTTPRequestHandler):
     """One route table per stub; `refuse` counts the first requests of each tab index that get a 403 (Home shares
-    Popular's list, index 0: its request, then Popular's own)."""
+    Popular's list, index 0: its request, then Popular's own). `searches` keeps every /api/search path asked."""
     tabs = {}
     refuse = {}
     seen = {}
+    search_rows = None  # None: /api/search answers Popular's list for any search (the Games window's stub)
+    searches = []
     lock = threading.Lock()
+
+    def social_frames(self):
+        """The hub's socket, the minimal WebSocket the native client speaks: a page request ["r", view, key, ...] is answered
+        ["0", view, key, []] (io_0: the view shows, and its list loads from /api/maps); other frames are read and not answered."""
+        try:
+            while True:
+                head = self.rfile.read(2)
+                if len(head) < 2 or (head[0] & 0x0F) == 0x8:  # closed
+                    return
+                length = head[1] & 0x7F
+                if length == 126:
+                    length = struct.unpack(">H", self.rfile.read(2))[0]
+                elif length == 127:
+                    length = struct.unpack(">Q", self.rfile.read(8))[0]
+                mask = self.rfile.read(4) if head[1] & 0x80 else b"\0\0\0\0"
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length)))
+                frame = json.loads(payload) if (head[0] & 0x0F) == 0x1 and payload else []
+                if frame and frame[0] == "r":
+                    reply = json.dumps(["0", frame[1], frame[2], []]).encode()
+                    self.wfile.write(bytes([0x81, len(reply)]) if len(reply) < 126 else bytes([0x81, 126]) + struct.pack(">H", len(reply)))
+                    self.wfile.write(reply)
+                    self.wfile.flush()
+        except (OSError, ValueError):
+            return
+
+    def search_answer(self, query):
+        """The Search tab's rows: with search_rows, the name (val) and the category (cat, an index into MAP_CATS; none or
+        -1 = every category) filter them; a search with neither answers every row."""
+        if self.search_rows is None:
+            return self.tabs.get(0, [])
+        val = (query.get("val") or [""])[0].lower()
+        cat = int((query.get("cat") or ["-1"])[0] or -1)
+        return [r for r in self.search_rows if val in r["map_name"].lower() and (cat < 0 or r["category"] == MAP_CATS[cat])]
 
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
         query = parse_qs(url.query)
         index = int((query.get("index") or ["0"])[0])
         body = None
+        if url.path.startswith("/social/ws"):  # the hub's social socket (backend_native.c): the 101, then its frames
+            self.send_response(101, "Switching Protocols")
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.end_headers()
+            self.social_frames()
+            return
         if url.path.startswith("/api/maps"):
-            body = {"success": True, "data": self.tabs.get(index, [])}
+            body = {"success": True, "index": index, "data": self.tabs.get(index, [])}
         elif url.path.startswith("/api/search"):
-            body = {"success": True, "data": self.tabs.get(0, [])}
+            with self.lock:
+                self.searches.append(self.path)
+            body = {"success": True, "data": self.search_answer(query)}
         elif url.path.startswith("/webhooks/general/maps/list"):  # krunker_kio_webhook_url: the data API's Games list
             with self.lock:
                 self.seen[index] = self.seen.get(index, 0) + 1
@@ -122,7 +180,7 @@ def shot(name, t):
     return f"{t} frames {os.path.join(SHOTS, name)} 1\n" if SHOTS else ""
 
 
-def run_native(script, brain_port, kio_port, tag, timeout=240):
+def run_native(script, brain_port, kio_port, tag, timeout=240, args=("--offline", "--map", "kanji")):
     server_list = os.path.join(WORK, f"servers-{tag}.json")
     with open(server_list, "w") as f:
         json.dump(OURS, f)
@@ -141,7 +199,7 @@ def run_native(script, brain_port, kio_port, tag, timeout=240):
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % kio_port,
                 "KRUNKNATIVE_KRUNKER_DATA_API": "http://127.0.0.1:%d" % kio_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
     with open(log, "w") as out:
-        p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "--map", "kanji"], stdout=out, stderr=subprocess.STDOUT,
+        p = subprocess.Popen([f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
         try:
             p.wait(timeout=timeout)
@@ -163,6 +221,12 @@ def text(log, label):
     """The first match's text (icon ligatures included: the Search tab reads "search")."""
     m = re.search(r"\[input_script\] text t=\d+ " + re.escape(label) + r" n=(\d+) checked=\d value=.*? text=(.*)", log)
     return (int(m.group(1)), fold(m.group(2))) if m else (-1, None)
+
+
+def value_of(log, label):
+    """The first match's value (a select's selected option value, an input's text); None when not logged."""
+    m = re.search(r"\[input_script\] text t=\d+ " + re.escape(label) + r" n=(\d+) checked=\d value=(.*?) text=", log)
+    return m.group(2) if m and int(m.group(1)) > 0 else None
 
 
 def grep_hits(log, label):
@@ -255,18 +319,48 @@ def box_b(t):
             f'{t + 5300} quit\n')
 
 
+def box_c(t):
+    """Box Office's social hub (--hub p=maps): the first Popular Categories tile (Action; the row scrolls sideways, the
+    rest are off the window) opens the Search tab on its category; the Search box then searches by its text (the tab is
+    shown again from Home, so its select is on All). The tile's centre is at window point 226,409 (the 1280x720 window)."""
+    return ('0 menu\n'
+            f'{t} waitfor .mapLICat\n'
+            f'{t + 100} click 226 409\n'
+            f'{t + 1500} text @h_tab [id=mapsHolder] .bigMenTabA\n'
+            f'{t + 1510} text @h_cat [id=mpCat]\n'
+            f'{t + 1520} grep @h_burg Burg [id=searchResultsMA]\n'
+            f'{t + 1530} grep @h_rooftop Rooftop [id=searchResultsMA]\n'
+            + shot("hub-category", t + 1540) +
+            f'{t + 2000} call windows.0.switchTab 0\n'
+            f'{t + 2050} call windows.0.switchTab 6\n'
+            f'{t + 2100} clickid mpSrch\n'
+            f'{t + 2200} type Rooftop\n'
+            f'{t + 2300} clicksel .searchListBtn\n'
+            f'{t + 3300} text @t_cat [id=mpCat]\n'
+            f'{t + 3310} grep @t_rooftop Rooftop [id=searchResultsMA]\n'
+            f'{t + 3320} grep @t_burg Burg [id=searchResultsMA]\n'
+            + shot("hub-search-box", t + 3330) +
+            f'{t + 3400} quit\n')
+
+
 def main():
     if SHOTS:
         os.makedirs(SHOTS, exist_ok=True)
     brain = ThreadingHTTPServer(("127.0.0.1", 0), type("BrainStub", (Stub,), {"tabs": BRAIN_TABS}))
+    hub_brain = ThreadingHTTPServer(("127.0.0.1", 0), type("HubBrainStub", (Stub,), {
+        "tabs": BRAIN_TABS, "search_rows": HUB_SEARCH_ROWS, "searches": []}))
     kio = ThreadingHTTPServer(("127.0.0.1", 0), type("KioStub", (Stub,), {"tabs": KIO_TABS, "refuse": {0: 2}, "seen": {}}))
     kio_seen = kio.RequestHandlerClass.seen
-    for s in (brain, kio):
+    hub_searches = hub_brain.RequestHandlerClass.searches
+    for s in (brain, hub_brain, kio):
         threading.Thread(target=s.serve_forever, daemon=True).start()
 
     log_a = run_native(box_a(2000), brain.server_address[1], kio.server_address[1], "a")
     log_b = run_native(box_b(2000), brain.server_address[1], kio.server_address[1], "b")
+    log_c = run_native(box_c(2000), hub_brain.server_address[1], kio.server_address[1], "c",
+                       args=("--offline", "--hub", "p=maps"))
     brain.shutdown()
+    hub_brain.shutdown()
     kio.shutdown()
 
     # A: the Popular Categories tile opens Search on its category (not Editor, which index 7 was)
@@ -294,6 +388,20 @@ def main():
           f"krunker.io: Popular, shown again, asks krunker.io again and shows its list (asked {kio_seen.get(0, 0)}x)")
     check(grep_hits(log_b, "@bo_popular") == 1, "Box Office again: Popular shows Box Office's list")
     check(grep_hits(log_b, "@bo_stale") == 0, "Box Office again: none of krunker.io's rows are kept in the tab")
+
+    # C: the hub's Popular Categories tile asks the brain for its category (before the fix: no cat, every map)
+    asked = [parse_qs(urlparse(p).query, keep_blank_values=True) for p in hub_searches]
+    _, h_tab = text(log_c, "@h_tab")
+    check(h_tab is not None and "search" in h_tab, f"hub: a category tile opens the Search tab ({h_tab!r})")
+    check(any(q.get("type") == ["map"] and q.get("val") == [""] and q.get("cat") == ["19"] for q in asked),
+          f"hub: the tile's search asks the brain for its category (Action, cat=19), no name (searches: {hub_searches})")
+    check(value_of(log_c, "@h_cat") == "19", f"hub: the category select shows Action ({value_of(log_c, '@h_cat')!r})")
+    check(grep_hits(log_c, "@h_burg") >= 1, "hub: the Search tab lists the category's map (Mini Burg)")
+    check(grep_hits(log_c, "@h_rooftop") == 0, "hub: the other categories' maps are not listed (Rooftop Parkour)")
+    check(any(q.get("val") == ["Rooftop"] and q.get("cat") == ["-1"] for q in asked),
+          "hub: the Search box still searches by its text (cat -1: the select is All)")
+    check(value_of(log_c, "@t_cat") == "-1" and grep_hits(log_c, "@t_rooftop") >= 1 and grep_hits(log_c, "@t_burg") == 0,
+          "hub: the text search lists Rooftop Parkour and not Mini Burg")
 
     if failures:
         print(f"games_window_e2e: {len(failures)} failed (logs in {WORK})")

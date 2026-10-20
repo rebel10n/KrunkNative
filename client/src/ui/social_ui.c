@@ -745,11 +745,15 @@ static const HubTab *list_tab(const int is_mods, const int tab) {
 
 static int list_search_id(const int is_mods) { return 6; } // config.mapTabs/modTabs.findIndex(t => t.search)
 
-static void api_request(const char *path, const int index, const int pos, const char *search_type, const char *val) {
+// api_request's `category` for a search: cat= (-1 = every category, what v10's searchMap sends for mpCat's All);
+// NO_CATEGORY leaves cat= out (the lists, the mods search)
+#define NO_CATEGORY (-2)
+static void api_request(const char *path, const int index, const int pos, const char *search_type, const char *val, const int category) {
     cJSON *params = cJSON_CreateObject();
     if (search_type) {
         cJSON_AddStringToObject(params, "type", search_type);
         cJSON_AddStringToObject(params, "val", val ? val : "");
+        if (category != NO_CATEGORY) cJSON_AddNumberToObject(params, "cat", category);
     } else {
         cJSON_AddNumberToObject(params, "index", index);
         cJSON_AddNumberToObject(params, "pos", pos);
@@ -764,7 +768,7 @@ static void api_request(const char *path, const int index, const int pos, const 
 // API_CLIENT.listMaps(tab, pos, ...) / listMods
 static void list_request(const int is_mods, const int tab, const int pos) {
     const HubTab *t = list_tab(is_mods, tab);
-    if (t && t->api >= 0) api_request(is_mods ? "/mods" : "/maps", t->api, pos, NULL, NULL);
+    if (t && t->api >= 0) api_request(is_mods ? "/mods" : "/maps", t->api, pos, NULL, NULL, NO_CATEGORY);
 }
 
 // UTILS.formatNumYT(n)
@@ -835,11 +839,14 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
         shuffle_rows(rows);
         sb_append(sb, "<div class='mapListCat'>Popular Categories</div>");
         StrBuf cats = {0};
+        // A tile opens the Search tab on its category: v10 runs switchTab(7); mpCat.selectedIndex = idx + 1; searchMaps().
+        // Here the Search tab is named (index 6 in this table) and the category is searchMaps' argument (mpCat's option
+        // value, idx): mpCat.selectedIndex= has no handler, so the category was never sent.
         for (size_t i = 0; i < sizeof(k_map_cats_p) / sizeof(k_map_cats_p[0]); ++i) {
             int idx = 0;
             for (int c = 0; c < MAP_CAT_COUNT; c++) if (!strcmp(k_map_cats[c], k_map_cats_p[i].n)) idx = c;
-            sb_appendf(&cats, "<div class='mapListItem' style='width:450px;height:130px;'><div class='mapLICat' onclick='windows[0].switchTab(%d);mpCat.selectedIndex=%d;windows[0].searchMaps();' style='background:url(./img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
-                       map_tab_index("Search"), idx + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
+            sb_appendf(&cats, "<div class='mapListItem' style='width:450px;height:130px;'><div class='mapLICat' onclick='windows[0].switchTab(%d);windows[0].searchMaps(\"\",%d);' style='background:url(./img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
+                       map_tab_index("Search"), idx, k_map_cats_p[i].i, k_map_cats_p[i].n);
         }
         char *c = sb_finish(&cats);
         sb_appendf(sb, "<div class='mapCatScrl'>%s</div>", c);
@@ -5635,13 +5642,24 @@ H(h_mods_switch_tab) { UNUSED; list_switch_tab(1, (int) arg_n(args, argc, 0, 0),
 H(h_maps_load_more) { (void) user; (void) args; (void) argc; list_load_more(0, ev ? ev->target : 0); return 1; }
 H(h_mods_load_more) { (void) user; (void) args; (void) argc; list_load_more(1, ev ? ev->target : 0); return 1; }
 
+// windows[0].searchMaps([text, category]) (v10 searchMaps: mpSrch's value and mpCat's option). A Popular Categories tile
+// passes "" and its category, which fill the box and the select first; the box's button and Enter pass nothing.
 H(h_maps_search) {
     UNUSED;
     char value[128] = "";
-    const HtmlElem input = el("mpSrch");
+    const HtmlElem input = el("mpSrch"), cat = el("mpCat");
+    const char *text = arg_s(ev, args, argc, 0);
+    if (text && input) html_dom_set_value(input, text);
+    if (argc > 1 && cat) {
+        char pick[16];
+        snprintf(pick, sizeof(pick), "%d", (int) arg_n(args, argc, 1, -1));
+        html_dom_set_value(cat, pick);
+    }
     if (input) html_dom_get_value(input, value, sizeof(value));
+    char selected[16] = "-1";
+    if (cat) html_dom_get_value(cat, selected, sizeof(selected));
     set_html("searchResultsMA", "Loading...");
-    api_request("/search", 0, 0, "map", value); // API_CLIENT.searchMap(value, category): the server matches names
+    api_request("/search", 0, 0, "map", value, atoi(selected)); // API_CLIENT.searchMap(value, category): the server matches names and the category
     return 1;
 }
 
@@ -5651,7 +5669,7 @@ H(h_mods_search) {
     const HtmlElem input = el("mdSrch");
     if (input) html_dom_get_value(input, value, sizeof(value));
     set_html("searchResultsMO", "Loading...");
-    api_request("/search", 3, 0, "mod", value);
+    api_request("/search", 3, 0, "mod", value, NO_CATEGORY);
     return 1;
 }
 
@@ -6416,7 +6434,7 @@ static void hub_connected(void) {
     }
     // API_CLIENT.listMaps(2, 0): the featured games of the maps Home card (v3540); KN's /maps
     // index 1 is Featured
-    api_request("/maps", 1, 0, NULL, NULL);
+    api_request("/maps", 1, 0, NULL, NULL, NO_CATEGORY);
     request_page(); // Xa(v, b, K, q, k, V, x)
 }
 
