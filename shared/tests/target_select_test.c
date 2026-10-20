@@ -260,6 +260,18 @@ static void test_commands(void) {
     char want[64];
     snprintf(want, sizeof(want), "God mode ON: %d players", total);
     CHECK(!strcmp(say(1, "/god *"), want), "god * (%s)", g_reply);
+    // /map reads a quoted name as one argument (the console completes "Soul Sanctum" with its quotes): not "Unknown map".
+    // /map may add a map to the game's list (map_catalog_slot reallocs it), so the list is heap memory here.
+    const cJSON **heap_maps = malloc(sizeof(*heap_maps));
+    heap_maps[0] = arena;
+    game.maps = heap_maps;
+    game.map_count = 1;
+    CHECK(!strstr(say(CHAT_CMD_CONSOLE, "/map \"Soul Sanctum\""), "Unknown map"), "/map \"Soul Sanctum\" names a map (%s)", g_reply);
+    CHECK(!strstr(say(CHAT_CMD_CONSOLE, "/map Soul"), "Unknown map"), "/map Soul names a map (%s)", g_reply);
+    CHECK(strstr(say(CHAT_CMD_CONSOLE, "/map \"No Such Map\""), "Unknown map") != NULL, "/map of an unknown name is refused (%s)", g_reply);
+    free((void *) game.maps);
+    game.maps = NULL;
+    game.map_count = 0;
     CHECK(count_god(&game) == total, "god * covers everyone (%d)", count_god(&game));
     snprintf(want, sizeof(want), "God mode OFF: %d players", total);
     CHECK(!strcmp(say(1, "/ungod *"), want), "ungod * (%s)", g_reply);

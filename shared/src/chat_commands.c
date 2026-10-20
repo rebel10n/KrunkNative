@@ -945,6 +945,8 @@ static void cmd_game(ChatCtx *c) {
     reply(c, "Game command received: %s", text);
 }
 
+static int split_quoted(const char *rest, char *work, size_t n, char **argv, int max);
+
 static void cmd_map(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV)) return;
     Game *game = c->host->game;
@@ -958,8 +960,11 @@ static void cmd_map(ChatCtx *c) {
         else reply(c, "Current map: %d", game->current_map_index);
         return;
     }
+    // the first word, or a quoted name as one ("Soul Sanctum": the console completes a name with spaces quoted)
+    char work[NET_CHAT_TEXT_SIZE], *argv[CHAT_ARGS_MAX];
+    const int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
     char arg[64];
-    snprintf(arg, sizeof(arg), "%s", c->argv[0]);
+    snprintf(arg, sizeof(arg), "%s", argc ? argv[0] : "");
     for (char *p = arg; *p; p++) *p = (char) tolower((unsigned char) *p);
 
     // MAPS (first word / prefix), then custom_maps by name: the catalogue (map_catalog.c)
