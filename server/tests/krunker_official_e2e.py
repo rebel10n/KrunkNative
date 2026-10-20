@@ -550,7 +550,7 @@ class Stub:
                         status, body, ctype = 503, b"unavailable", "text/plain"
                     else:
                         body, ctype = json.dumps({"success": True, "totalPlayerCount": 9, "games": [
-                            [g[0], "de-fra", g[1], 8, g[2] if len(g) > 2 else {"i": "Kanji", "g": 0}, 240] for g in stub.lobbies]}).encode(), "application/json"
+                            [g[0], g[3] if len(g) > 3 else "de-fra", g[1], 8, g[2] if len(g) > 2 else {"i": "Kanji", "g": 0}, 240] for g in stub.lobbies]}).encode(), "application/json"
                 elif u.path == "/game-list":  # the server browser's official lobbies (krunker_lobbies.c)
                     body, ctype = json.dumps({"success": True, "totalPlayerCount": 5, "games": [
                         [GAME_ID, "de-fra", 3, 8, {"i": MAP_NAME, "g": 0}, 240],
@@ -3925,6 +3925,35 @@ def run_native_play_in_kio():
           any(pth == "/brain/mm/game-list" for pth, _, _ in stub.http_log), [l for l in after if "[mm]" in l][:4])
 
 
+def run_native_kio_region_only():
+    """Server Type krunker.io, F4, with the player's krunker.io region chosen (Settings > Quickplay > krunker.io Region): the
+    lobby is picked in that region only, as v10's seek (matchmakerSeek sends the one region; the matchmaker finds nothing
+    elsewhere). A: the region has no lobby with room but another region has an empty one: F4 says "No Games Found" and joins
+    no lobby of the other region ("native-kio-region-only": the far region's empty lobby was the "LA with no players" join).
+    B: the region has a lobby with room and another region is busier: the region's lobby is joined."""
+    meta = {"i": "Kanji", "g": 0}
+    cases = (
+        ("native-kio-region-only", [("NJ:full", 8, meta, "us-nj"), ("FRA:room", 0, meta, "de-fra")], "FRA:room", None),
+        ("native-kio-region-room", [("NJ:room", 2, meta, "us-nj"), ("FRA:busy", 6, meta, "de-fra")], "NJ:room", "FRA:busy"),
+    )
+    for label, lobbies, want, other in cases:
+        def setup(st, lobbies=lobbies):
+            st.lobbies = lobbies
+        write_saved_settings(label, {"knSeekOnLaunch": False, "knSeekServers": "official", "knSeekServersMigrated": 1,
+                                     "knKrunkerRegion": "us-nj"})
+        script = "0 boot\n2000 down F4\n2050 up F4\n9000 quit\n"
+        stub, p, out, log = launch_native(label, script, {}, args=(), stub_setup=setup)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        text = "\n".join(lines)
+        picked = [l for l in lines if "[krunker] seek: official lobby" in l or "No official krunker.io lobby has room" in l]
+        if other is None:
+            check(f"{label}: the far region's empty lobby is not joined (no lobby of another region)",
+                  "official lobby FRA:room" not in text and "No official krunker.io lobby has room" in text, picked[:3])
+        else:
+            check(f"{label}: the chosen region's lobby is joined, the busier other region's is not",
+                  f"official lobby {want}" in text and f"official lobby {other}" not in text, picked[:3])
+
+
 def run_native_f4_setting_race():
     """The user's sequence on a fresh profile (no saved settings: Auto Seek on Launch is on, Server Type Box Office): the launch's
     Box Office search is still racing the regions' pings (a slow ping: the fresh profile's race) when the player sets Server
@@ -3975,6 +4004,7 @@ def run_native_f4_drops():
     run_native_kio_retry()
     run_native_bo_f4_in_kio()
     run_native_f4_setting_race()
+    run_native_kio_region_only()
 
 
 def run_native_reload(gone):

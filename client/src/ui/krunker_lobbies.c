@@ -488,20 +488,22 @@ void krunker_seek_region_resolve(const KrunkerRegionFn fn, void *user) {
 }
 
 int krunker_lobbies_pick(char *id, const size_t n) {
-    // the busiest match this client was not in lately; else the least recent of those it was in, the
-    // game it is in last (recent_lobbies.h, krunker_net_recent_rank): Find New Game never lands back
-    // in the game it leaves, nor bounces between the last two, while anything else has room
-    // the seek's region first (krunker_seek_region: Settings > Quickplay > krunker.io Region, else the
-    // ping race's, like v10's seek in its getRegion), never the busiest region the world over; any
-    // region only when that one has nothing with room
+    // the player's region only, as v10's seek: matchmakerSeek sends the one region getRegion chose (krunker_seek_region:
+    // Settings > Quickplay > krunker.io Region, else the ping race's) and the matchmaker finds no lobby elsewhere. A region
+    // with no lobby with room is no match ("No Games Found"), never another region's lobby: that picked an empty lobby of a
+    // far region (Los Angeles) whenever the player's own had no room, and the player was put in a server with no players.
+    // Within the region: the busiest match this client was not in lately; else the least recent of those it was in, the
+    // game it is in last (recent_lobbies.h, krunker_net_recent_rank): Find New Game never lands back in the game it
+    // leaves, nor bounces between the last two, while anything else has room
     const char *want_region = krunker_seek_region();
     const cJSON *t, *best = NULL;
     int best_rank = 0;
     int best_players = -1;
-    for (int pass = want_region[0] ? 0 : 1; pass < 2 && !best; pass++) cJSON_ArrayForEach(t, krunker_lobbies_list()) { // krunker.io's order
+    if (!want_region[0]) return 0; // no region chosen yet (the caller resolves it first): nothing to pick from
+    cJSON_ArrayForEach(t, krunker_lobbies_list()) { // krunker.io's order
         const cJSON *meta = cJSON_GetArrayItem(t, 4);
         const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
-        if (!pass && (!region || strcmp(want_region, region))) continue;
+        if (!region || strcmp(want_region, region)) continue;
         const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
         const int max = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3));
         // krunker.io sends its flags as 1 (c: 403 of 403 custom games in a live list): a custom game or a
