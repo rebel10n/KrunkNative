@@ -12,6 +12,9 @@ void v10_menu_scenario_official(int on);
 int  v10_menu_official_session(void);     // in a krunker.io server (krunker_net_active), or a scenario's officialSession   // --render-scenario state.officialSession: the header as in a krunker.io server
 void v10_menu_account_tick(void);
 void v10_menu_popular_changed(void);      // a game list changed (krunker.io's): Popular Now asks fetchMatches again        // per frame (backend_frame): a krunker.io server joined / left, its account changed
+// The Server Type changed (Settings > Quickplay, seek_prefs.h): Popular Now and the Live Streams overlay read the
+// new type's lists / host at once (menu_sources.h) instead of at their next 60 s / 30 s interval.
+void v10_menu_sources_changed(void);
 int  v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 int  v10_menu_login_open(void);          // the login / register modal is up (Enter in its fields is its own)
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up

@@ -23,7 +23,7 @@
 
 #define SEEK_MODES_KEY "seek_modes"
 #define SEEK_MAPS_KEY "seek_maps"
-#define SEEK_SERVERS_KEY "knSeekServers"
+// SEEK_SERVERS_KEY ("knSeekServers"): seek_prefs.h
 #define SEEK_SERVERS_MIGRATED_KEY "knSeekServersMigrated" // 1 once seek_prefs_migrate_servers has run
 #define SEEK_ON_LAUNCH_KEY "knSeekOnLaunch"
 #define KRUNKER_REGION_KEY "knKrunkerRegion"

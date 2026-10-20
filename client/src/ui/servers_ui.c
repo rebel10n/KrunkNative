@@ -31,6 +31,7 @@
 #include <join_errors.h>   // a failed join's text and place (join_errors.c)
 #include <region_ping.h>   // the seek region's ping race (v10 getRegion)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
+#include <menu_sources.h>  // Popular Now counts the Server Type's lists (menu_popular_sources)
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <seek_claim.h>    // which matchmaking answer may enter a lobby (a host or a join by hand overtakes a seek)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
@@ -3740,13 +3741,21 @@ static void matches_add(cJSON *out, const cJSON *games) {
     }
 }
 
+// The lists Popular Now counts (menu_sources.h): the Server Type's. Box Office = the brain's custom games only,
+// krunker.io = krunker.io's only, Both = both; an official krunker.io game being the session = krunker.io's (the
+// brain is gated).
+static unsigned popular_sources(void) {
+    return menu_popular_sources(seek_prefs_servers(), account_backend() == ACCOUNT_BACKEND_KRUNKER);
+}
+
 // v10 fetchMatches (v10:215632): the custom games of the game list by map (i), their players summed
-// (min(players, max)). KrunkNative: ours, then krunker.io's official custom games (krunker_lobbies.h,
-// native), the list v10 itself reads; a name on both sums both.
-static cJSON *matches_of(const cJSON *games) {
+// (min(players, max)). KrunkNative: the Server Type's lists (popular_sources): ours (`games`, the brain's) and /
+// or krunker.io's official custom games (krunker_lobbies.h, native), the list v10 itself reads; with Both a name
+// on both sums both.
+static cJSON *matches_of(const cJSON *games, const unsigned sources) {
     cJSON *out = cJSON_CreateObject();
-    matches_add(out, games);
-    matches_add(out, krunker_lobbies_list());
+    if (sources & MENU_SRC_KN) matches_add(out, games);
+    if (sources & MENU_SRC_KIO) matches_add(out, krunker_lobbies_list());
     return out;
 }
 
@@ -3754,7 +3763,7 @@ static void on_matches(void *user, const int status, const char *body, const siz
     (void) length;
     MatchesReq *req = user;
     cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
-    cJSON *matches = matches_of(cJSON_GetObjectItem(res, "games"));
+    cJSON *matches = matches_of(cJSON_GetObjectItem(res, "games"), popular_sources());
     req->fn(req->user, matches);
     cJSON_Delete(matches);
     cJSON_Delete(res);
@@ -3763,8 +3772,10 @@ static void on_matches(void *user, const int status, const char *body, const siz
 
 void servers_ui_fetch_matches(const ServersMatchesFn fn, void *user) {
     if (!fn) return;
-    if (g_games_override || backend_available() != 1) {
-        cJSON *matches = matches_of(g_games_override ? g_games : NULL);
+    const unsigned sources = popular_sources();
+    // no brain list wanted (the krunker.io Server Type), a fixed list, or no brain: answered at once
+    if (!(sources & MENU_SRC_KN) || g_games_override || backend_available() != 1) {
+        cJSON *matches = matches_of(g_games_override ? g_games : NULL, sources);
         fn(user, matches);
         cJSON_Delete(matches);
         return;
@@ -4177,10 +4188,14 @@ int servers_ui_host_type(void) {
 
 // A Popular Now card (v10: openURL("/?play=" + name)): one of our custom games on that map is playMap's;
 // a map only krunker.io's custom games run joins the busiest of them that has room (an official lobby,
-// krunker_lobbies_open), what krunker.io's own /?play= finds. 1 = an official lobby was opened.
+// krunker_lobbies_open), what krunker.io's own /?play= finds. 1 = an official lobby was opened. The card
+// counted the Server Type's lists (popular_sources): a Box Office card is never krunker.io's game, a krunker.io
+// card never one of ours.
 int servers_ui_popular_official(const char *map) {
+    const unsigned sources = popular_sources();
+    if (!(sources & MENU_SRC_KIO)) return 0;
     const cJSON *t;
-    cJSON_ArrayForEach(t, brain_games()) {
+    if (sources & MENU_SRC_KN) cJSON_ArrayForEach(t, brain_games()) {
         if (row_custom(t) && !strcmp(row_i(t), map ? map : "")) return 0;
     }
     char id[80];

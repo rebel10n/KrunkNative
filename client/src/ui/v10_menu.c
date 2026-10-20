@@ -22,12 +22,14 @@
 //     Wallet; Notifications, Settings (showWindow(1)),
 //     More Krunker (showMoreKrunker(): the moreKrunkerPopup, v10:196675)
 //   - the class preview container shown at boot (menuClassContainer.style.display = '', v10:222888)
-//   - the Live Streams overlay (.streams-overlay in #tlInfHold, v10:145187 / 146035): the brain's
-//     /streams/top (Twitch's live Krunker streams, streams.c), the small view's three cards, a click
+//   - the Live Streams overlay (.streams-overlay in #tlInfHold, v10:145187 / 146035): /streams/top
+//     (Twitch's live Krunker streams) from the Server Type's host (menu_sources.h: the brain's, streams.c,
+//     for Box Office; api.krunker.io's, v10's own, for krunker.io), the small view's three cards, a click
 //     opens twitch.tv/<name> in the browser; no answer hides it, no live streams shows v10's text;
 //     the cards' Twitch previews come through the brain's /streams/thumb (stream_thumbs.c)
 //   - the menu's idle state (v10_menu_tick): Popular Now (_52548 v10:147200, svelte-6ewa5r: the top 3
-//     custom maps of the game list by players, asked again every 60 s), the match-info bar's
+//     custom maps of the Server Type's game list by players (menu_sources.h: Box Office's lobbies for Box
+//     Office, krunker.io's for krunker.io, never the other's), asked again every 60 s), the match-info bar's
 //     #activeBuffs (svelte-1we2ubc: 2x XP / 2x Class XP / 2x Raid Drops, set at every INIT as
 //     v10:219599-219601 does, #buffSepStart shown with any of them, v10:147300), the Store item's
 //     shop badge (limited spins on now, rotating every 4 s) and KR DISCOUNT countdown (KR sale
@@ -51,8 +53,10 @@
 #include <i18n.h>
 #include <krunker_account.h>
 #include <krunker_net.h>
-#include <krunker_lobbies.h> // Popular Now: krunker.io's custom games
+#include <krunker_lobbies.h> // Popular Now: krunker.io's custom games (the krunker.io Server Type)
 #include <krunker_kio_routes.h> // the streams' krunker.io URL (krunker_kio_routes.c)
+#include <menu_sources.h>    // Popular Now's lists and the streams' host follow the Server Type
+#include <seek_prefs.h>      // seek_prefs_servers: the Server Type
 #include <v10_wallet.h>       // the header's Wallet: the Wallet and Inventory modal (v10_wallet.c)
 #include <v10_social.h>       // the Social hub's gapi reads (v10_gapi.c)
 #include <html_ui.h>
@@ -340,9 +344,12 @@ void v10_menu_account_changed(void) {
 
 // Popular Now (_52548): fetchMatches -> the entries with players > 0, sorted by players
 // (descending, stable), the first 3; rendered as the first child of #subLogoButtons while there is
-// one. onMount fetches once, then every 60 s unless the rail is hidden (offsetParent === null).
-// KrunkNative: the first fetch waits for the brain probe (backend_available) instead of answering
-// {} while it runs, which would leave the rail empty for the first minute.
+// one (none: no rail, what v10 shows for an empty fetchMatches). onMount fetches once, then every 60 s
+// unless the rail is hidden (offsetParent === null).
+// KrunkNative: fetchMatches counts the Server Type's game list (servers_ui_fetch_matches, menu_sources.h):
+// Box Office's lobbies on Box Office servers, krunker.io's custom games on krunker.io servers, never the
+// other's; the first fetch waits for the brain probe (backend_available) instead of answering {} while it
+// runs, which would leave the rail empty for the first minute.
 #define POPULAR_MAX 3
 #define POPULAR_POOL 64
 #define POPULAR_REFRESH_MS 60000.0
@@ -427,14 +434,21 @@ static void popular_matches(void *user, const cJSON *matches) {
 
 static void popular_fetch(void) { servers_ui_fetch_matches(popular_matches, NULL); }
 
-// krunker.io's lobby list for Popular Now (its custom games, v10 fetchMatches): asked a few seconds after the
-// menu's first draw rather than with it, so a proxy the player sets right after the start (Settings >
-// Client) carries it; then with every 60 s refresh. Its answer asks Popular Now again
-// (v10_menu_popular_changed); cached, never more often than krunker_lobbies.h allows.
+// krunker.io is the active backend: an official krunker.io game is the session (the brain is gated)
+static int krunker_active(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// Popular Now counts krunker.io's custom games (menu_sources.h): the krunker.io Server Type, Both, or an
+// official game being the session. Box Office servers never ask krunker.io for it.
+static int popular_wants_kio(void) { return (menu_popular_sources(seek_prefs_servers(), krunker_active()) & MENU_SRC_KIO) != 0; }
+
+// krunker.io's lobby list for Popular Now (its custom games, v10 fetchMatches) when the Server Type counts it
+// (popular_wants_kio): asked a few seconds after the menu's first draw rather than with it, so a proxy the
+// player sets right after the start (Settings > Client) carries it; then with every 60 s refresh. Its answer
+// asks Popular Now again (v10_menu_popular_changed); cached, never more often than krunker_lobbies.h allows.
 #define POPULAR_KIO_DELAY_MS 3000.0
 static void popular_kio_refresh(void *user) {
     (void) user;
-    krunker_lobbies_refresh(0);
+    if (popular_wants_kio()) krunker_lobbies_refresh(0);
 }
 
 void v10_menu_popular_changed(void) {
@@ -446,20 +460,24 @@ static void popular_interval(void *user) {
     P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
     HtmlElem rail = popular_rail();
     if (rail && !html_dom_is_shown(rail)) return; // offsetParent === null
-    krunker_lobbies_refresh(0);
+    popular_kio_refresh(NULL);
     popular_fetch();
 }
 
 // ---------------------------------------------------------------- Live Streams (.streams-overlay)
 
 // The Live Streams overlay (_52196 / _52549, v10:145187, 146035): the top right panel's card list.
-// fetchTopStreams (_52138, v10:145037) asks /streams/top, then every 30 s (v10:146178). KrunkNative's
-// brain answers it from Twitch's live streams of the Krunker category (streams.c), in v10's
-// {streams, promo, dropCampaigns} shape. The small view (v10's default, _52546) shows the first three
+// fetchTopStreams (_52138, v10:145037) asks the data client's getTopStreams (v10:25991: API_URI,
+// https://api.krunker.io/streams/top?cb=2) once the menu mounts, then every 30 s unless the view is closed
+// (v10:146178), whoever is signed in (the fetch and the overlay's visibility read no account). KrunkNative asks
+// the Server Type's host (menu_sources.h menu_streams_source): Box Office = the brain's /streams/top, which
+// answers from Twitch's live streams of the Krunker category (streams.c) in v10's {streams, promo,
+// dropCampaigns} shape; krunker.io (the Server Type, or an official game being the session: the brain is
+// gated) = v10's own host (krunker_kio_routes.h). The small view (v10's default, _52546) shows the first three
 // cards: a red live dot with the viewer count (formatViewerCount: "1.2K"), the title, the streamer's
 // name, and a click that opens twitch.tv/<name> (openStream, v10:145133). An answer with no live
-// streams shows v10's text (streamers.none, "No active streams!"). No answer (no brain, the feature
-// off) hides the overlay.
+// streams shows v10's text (streamers.none, "No active streams!"). No answer (no brain on Box Office, the
+// brain's feature off (503), krunker.io unreachable) hides the overlay, as v10's error state does.
 #define STREAMS_SHOWN 3
 #define STREAMS_REFRESH_MS 30000.0
 #define STREAMS_NAME_MAX 25
@@ -651,14 +669,15 @@ static void streams_body(void *user, const int status, const char *body, size_t 
 
 static void streams_fetch(void) {
     if (L.override) return;
-    int sent;
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
-        // the official account: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there)
+    int sent = 0;
+    const unsigned source = menu_streams_source(seek_prefs_servers(), krunker_active(), backend_available());
+    if (source == MENU_SRC_KIO) {
+        // krunker.io: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there)
         char base[256], url[320];
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
         sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
-    } else {
-        sent = backend_available() == 1 && backend_http_get("/streams/top?cb=2", streams_body, NULL);
+    } else if (source == MENU_SRC_KN) {
+        sent = backend_http_get("/streams/top?cb=2", streams_body, NULL); // Box Office: the brain's (streams.c)
     }
     if (!sent) streams_apply(NULL);
 }
@@ -666,6 +685,17 @@ static void streams_fetch(void) {
 static void streams_interval(void *user) {
     (void) user;
     L.timer = html_timer_add(STREAMS_REFRESH_MS, streams_interval, NULL);
+    streams_fetch();
+}
+
+// The Server Type changed (Settings > Quickplay, ui_settings.c store_setting): Popular Now and the Live
+// Streams follow it at once (menu_sources.h) rather than at their next interval. Popular Now's answer
+// comes from the lists it now counts: krunker.io's is asked when it is one of them (then
+// v10_menu_popular_changed re-counts), and the last rail goes until a list answers.
+void v10_menu_sources_changed(void) {
+    if (!P.first_done || !v10_menu_page()) return;
+    popular_kio_refresh(NULL);
+    popular_fetch();
     streams_fetch();
 }
 

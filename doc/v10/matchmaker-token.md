@@ -241,8 +241,11 @@ so uidiff still compares v10's tab):
   only for a mode switched on; krunker.io sends those flags as `1` (or `true`): both count
   (`seek_filter.c`, unit test `seek_filter_test`).
 * **Server Type**, native only: Box Office servers (the default), krunker.io servers or Both, stored as
-  `knSeekServers`. It only picks what Quick Match / F4 seek into: the server browser lists both.
-  The web build has no row and always seeks our servers.
+  `knSeekServers`. It picks what Quick Match / F4 seek into, whose custom games the menu's Popular Now
+  counts (Box Office's lobbies for Box Office servers, krunker.io's for krunker.io servers, both for Both;
+  never the other's) and whose host the menu's Live Streams come from (the brain's `/streams/top` for Box
+  Office, `api.krunker.io`'s, v10's own, for krunker.io; `client/include/menu_sources.h`): the server
+  browser lists both. The web build has no row and always seeks our servers.
 
 Seeks send `dataQuery` `dsma` / `dsmo` arrays in v10's order, except when the seek names a game: always
 both lists, the switched-on ones or the rotation (never empty), to krunker.io and to our brain. v10 sends

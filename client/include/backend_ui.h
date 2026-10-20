@@ -236,12 +236,14 @@ const char *servers_ui_auto_region(void);
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
 void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
-// v10 window.fetchMatches: {map: players} of the custom games in the game list (v10 Popular Now);
-// fn runs once (at once for a fixed list or without a brain), the object is only valid during the call
+// v10 window.fetchMatches: {map: players} of the custom games in the Server Type's game list (v10 Popular Now;
+// menu_sources.h: Box Office's lobbies for Box Office servers, krunker.io's for krunker.io servers, both for Both);
+// fn runs once (at once for a fixed list, without a brain, or when the brain's list is not counted), the object is
+// only valid during the call
 typedef void (*ServersMatchesFn)(void *user, const cJSON *matches);
 void servers_ui_fetch_matches(ServersMatchesFn fn, void *user);
-// A Popular Now card's map run only by krunker.io's custom games: the busiest one with room is joined
-// (krunker_lobbies_open); 0 = ours or none (the caller's playMap).
+// A Popular Now card's map run only by krunker.io's custom games (of the lists the card counted): the busiest one
+// with room is joined (krunker_lobbies_open); 0 = ours or none (the caller's playMap).
 int  servers_ui_popular_official(const char *map);
 // KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
 // showWindow id of KrunkNative's Connect window: above every Krunker page's windows[] (it was 53,

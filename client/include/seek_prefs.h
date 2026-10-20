@@ -19,13 +19,15 @@
 // above it (SeekPreset, seek_filter.h): each saves the lists its switches would save, then shows them.
 //
 // Plus the server type of the native client: Box Office servers, the official krunker.io lobbies
-// (krunker_lobbies.h) or both, ours first. The server type only picks what Quick Match / F4 seek
-// into: the native server browser always lists both. The web build plays krunk.io only: it has no
+// (krunker_lobbies.h) or both, ours first. The server type picks what Quick Match / F4 seek into and
+// whose games the menu's Popular Now counts and whose host its Live Streams come from (menu_sources.h):
+// the native server browser always lists both. The web build plays krunk.io only: it has no
 // Server Type row and its seeks are Box Office's (seek_prefs_servers), whatever knSeekServers says.
 #include <html_dom.h> // HtmlEvent / HtmlArg (seek_prefs_handle)
 #include <stddef.h>
 
 #define SEEK_PREFS_MAX 64 // entries kept of a saved list
+#define SEEK_SERVERS_KEY "knSeekServers" // the Server Type's setting (ui_settings.c tells v10_menu.c when it changes)
 
 typedef enum {
     SEEK_SERVERS_KN = 0,       // Box Office servers (the only choice on the web)

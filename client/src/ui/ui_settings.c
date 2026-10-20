@@ -20,6 +20,8 @@
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
 #include <ruleset.h>         // per-weapon settings: the weapon list (rules_weapon)
 #include <gamepad.h>         // disableCons: gamepad_set_disabled
+#include <seek_prefs.h>      // SEEK_SERVERS_KEY: the Server Type's key
+#include <v10_menu.h>        // v10_menu_sources_changed: the menu follows a changed Server Type
 #define UI_HAVE_RENDER_SETTINGS 1
 #endif
 #endif
@@ -501,6 +503,7 @@ static void store_setting(const char *key, cJSON *value) {
     sync_controls(key, text);
     if (!strcmp(key, "scaleUI") || !strcmp(key, "uiScaling")) menu_scale_base();
     if (!strcmp(key, "vmSetts") || !strcmp(key, "gpSetts")) menu_rerender_if_open(1); // set(): updateWindow(1)
+    if (!strcmp(key, SEEK_SERVERS_KEY)) v10_menu_sources_changed(); // Server Type: Popular Now / Live Streams follow it at once
 }
 
 // coerce(): numeric strings become numbers when the default is a number.

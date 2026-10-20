@@ -1186,6 +1186,11 @@ else ()
     add_executable(host_route_test client/tests/host_route_test.c)
     target_include_directories(host_route_test PRIVATE client/include shared/include)
     add_test(NAME host_route_test COMMAND host_route_test)
+    # menu_sources_test (client/include/menu_sources.h): the menu's Popular Now counts the Server Type's games and its Live
+    # Streams come from the Server Type's host (Box Office's brain / krunker.io's api), never the other's
+    add_executable(menu_sources_test client/tests/menu_sources_test.c)
+    target_include_directories(menu_sources_test PRIVATE client/include shared/include)
+    add_test(NAME menu_sources_test COMMAND menu_sources_test)
     # game_time_test (client/src/ui/game_time.c): the in-game game time counter's text (v7.1.4's
     # getReadableTime) and its count against the account's total (commits re-anchor, guests and official games count nothing)
     add_executable(game_time_test client/tests/game_time_test.c client/src/ui/game_time.c)

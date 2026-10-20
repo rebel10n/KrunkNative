@@ -226,6 +226,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/krunker_sync_test
 	./$(DEBUG_DIR)/krunker_host_test
 	./$(DEBUG_DIR)/krunker_kio_routes_test
+	./$(DEBUG_DIR)/menu_sources_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
@@ -723,6 +724,10 @@ mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join tic
 .PHONY: server-tabs-e2e
 server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each its own list, v10's layout) and the tab's + Host Game: the backend it hosts on, the session's kept (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/server_tabs_e2e.py $(DEBUG_DIR)
+
+.PHONY: menu-sources-e2e
+menu-sources-e2e: build ## The menu's Popular Now counts the Server Type's games (Box Office's / krunker.io's, never the other's) and its Live Streams come from that type's host (brain / api.krunker.io stubs; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/menu_sources_e2e.py $(DEBUG_DIR)
 
 .PHONY: seek-region-e2e
 seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
