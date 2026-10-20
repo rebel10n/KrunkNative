@@ -59,9 +59,14 @@ static HtmlElem notify_element(void) {
     return el;
 }
 
+static int g_notify_issued; // toasts issued (the input script's `toast` probe counts them)
+
+int ui_notify_issued(void) { return g_notify_issued; }
+
 void ui_notify(const char *html) {
     snprintf(g_notify.html, sizeof(g_notify.html), "%s", html ? html : "");
     g_notify.pending = 1;
+    g_notify_issued++;
 }
 
 // translateX(calc(100% + 20px)) at progress p of `slide` (0..1), as a fraction of the

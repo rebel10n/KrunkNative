@@ -622,6 +622,7 @@ float om_build_step_snap(int dir);               // the snap keys: the next comm
 void om_build_snap_text(char *out, size_t size); // "5", "0.25", "off"
 int  om_build_frozen(void);                       // the Physics Gun's carried object is frozen (right click): it stays on release
 int  om_build_grabbing(void);
+void om_build_probe(int out[6]);                  // the input script's `pg` probe (om_build.c)
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
 void om_build_stop(void);                   // the local player died: the grab, drag and selection end, nothing sent
 void om_build_reset(void);                       // a new map / connection
@@ -774,6 +775,7 @@ void ui_bhop_announce(char *text, size_t size);  // "Bhop - <current mode>" into
 const char *ui_bhop_bind(void);                  // window.bhopModeKey: KeyboardEvent.code ("KeyB"), "" = unbound
 void ui_bhop_set_bind(const char *code);         // setBhopModeBind: stores krk_bhop_mode_bind
 void ui_bhop_fill_input(Client*, Input*);        // patchInputs on this input frame (ui_controls_fill_input tail)
+int ui_notify_issued(void);                     // toasts issued so far (the input script's `toast` probe)
 void ui_notify(const char *html);                // a system message: the generic toast (ui_notify.c, knNotify); never the centre or the bhop toast
 void ui_notify_tick(double now_ms);              // hud_ui.c per frame: the generic toast + v10_notify_tick
 // client/src/ui/ui_mod_keys.c: the rest of mods.ts' keys. ui_mods.c calls the keydown

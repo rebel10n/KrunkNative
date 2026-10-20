@@ -1776,6 +1776,77 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
 // ---------------------------------------------------------------- the Properties tool (field patches)
 
 // The editor's own read of a field (editor_model.c ed_model_prop_get) equals the game's
+// The Physics Gun on a map prop (a dev's), again and again: grab, drop, and the crosshair picks it up again
+// (the map's own object: its overlay replaces it, so the pick must follow the stand-in)
+static void test_physgun_map_cycles(TestClient *a) {
+    printf("Physics Gun: a map prop, grab, drop and pick again, several cycles...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    Game *game = &g_server->game;
+    p->god_mode = 1;
+    set_dev(a, 1);
+    clean_up(a);
+    pump(200);
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    const int prop = map_object_of(game, PREFAB_CRATE, 0);
+    CHECK(prop >= 0 && object_manager_physgun_takes(game, prop, 1), "a map crate the Physics Gun takes (%d)", prop);
+    if (prop < 0) return;
+    stand_near(p, game->map->objects[prop]);
+    pump(10);
+    // the client's copy of the map: it hears every SPAWNED_OBJ the edits send, and picks on its own objects
+    Game mirror;
+    memset(&mirror, 0, sizeof(mirror));
+    const cJSON *maps[1] = {game->map->raw_data};
+    int modes[1] = {MODE_ID_FFA};
+    game_configure(&mirror, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&mirror, 0, 0, 0);
+    CHECK(mirror.ready, "a client copy of the map for the crate's picks");
+    for (int cycle = 0; cycle < 4; cycle++) {
+        const Object *o = game->map->objects[prop];
+        float pitch, yaw;
+        ObjectManagerAim aim;
+        aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+        const int hit = object_manager_pick(game, p, pitch, yaw, &aim) && aim.object == prop;
+        CHECK(hit && object_manager_editable(game, prop) && object_manager_physgun_takes(game, prop, 1),
+              "cycle %d: the crosshair picks the map crate (object %d)", cycle, aim.object);
+        if (mirror.ready) {
+            const int mhit = object_manager_pick(&mirror, p, pitch, yaw, &aim) && aim.object == prop;
+            CHECK(mhit && object_manager_editable(&mirror, prop) && object_manager_physgun_takes(&mirror, prop, 1),
+                  "cycle %d: the client's copy picks it too (object %d)", cycle, aim.object);
+        }
+        ObjectManagerPose from, to;
+        object_manager_pose(game, prop, &from);
+        to = from;
+        to.position.y += 3.0f;
+        pump(10);
+        NetSpawnResultPacket r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, prop, &to, OM_EDIT_BEGIN);
+        CHECK(r.status == OM_STATUS_OK, "cycle %d: the grab (status %u)", cycle, r.status);
+        pump(10);
+        to.position.x += 3.0f;
+        r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, prop, &to, 0);
+        pump(10);
+        to.position.x += 2.0f;
+        r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, prop, &to, OM_EDIT_DROP);
+        CHECK(r.status == OM_STATUS_OK, "cycle %d: the drop (status %u)", cycle, r.status);
+        mirror_apply(&mirror, a);
+        pump(10);
+        o = game->map->objects[prop];
+        CHECK(o->active && o->collision_type != COLLISION_TYPE_NONE && o->position.y < 0.2f, "cycle %d: solid, on the floor (y %.2f)", cycle, o->position.y);
+        aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+        const int again = object_manager_pick(game, p, pitch, yaw, &aim) && aim.object == prop;
+        CHECK(again && object_manager_editable(game, prop) && object_manager_physgun_takes(game, prop, 1),
+              "cycle %d: picked again after the drop (object %d)", cycle, aim.object);
+        if (mirror.ready) {
+            const int mhit = object_manager_pick(&mirror, p, pitch, yaw, &aim) && aim.object == prop;
+            CHECK(mhit && object_manager_editable(&mirror, prop), "cycle %d: the client's copy picks it after the drop (object %d)", cycle, aim.object);
+        }
+    }
+    p->god_mode = 1;
+    clean_up(a);
+}
+
 static int same_value(const cJSON *a, const cJSON *b) {
     if (!a || !b) return 0;
     if (cJSON_IsNumber(a) && cJSON_IsNumber(b)) return fabs(a->valuedouble - b->valuedouble) < 1e-6;
@@ -2911,6 +2982,7 @@ int main(void) {
         join(&g_clients[0], 1);
         join(&g_clients[1], 1);
         test_map_edits(&g_clients[0], &g_clients[1], &g_clients[2]);
+        test_physgun_map_cycles(&g_clients[0]);
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox (kanji)");

@@ -166,6 +166,16 @@ int om_build_frozen(void) { return g_ob.frozen != 0 && (g_ob.grab != 0 || g_ob.g
 
 int om_build_grabbing(void) { return g_ob.grab != 0; }
 
+// The input script's `pg` probe: [grabbing, the carried uid (-1 none), frozen, releasing, drag, selected uid]
+void om_build_probe(int out[6]) {
+    out[0] = g_ob.grab != 0 || g_ob.grab_player != 0;
+    out[1] = g_ob.grab ? g_ob.grab - 1 : -1;
+    out[2] = g_ob.frozen;
+    out[3] = g_ob.releasing;
+    out[4] = g_ob.drag != 0;
+    out[5] = g_ob.sel - 1;
+}
+
 // ---------------------------------------------------------------- geometry
 
 static vec3 ob_eye(const Player *me) {

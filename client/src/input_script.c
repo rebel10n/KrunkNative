@@ -111,6 +111,16 @@
 //                                each of our own spawns log the same as "@spawn0".."@spawn4" (client/tests/spawn_camera_e2e.py)
 //   100 players                  log every player of the session: "[input_script] players t=100 n=2 5:Name@x,y,z
 //                                9:Guest@x,y,z*" (* us, - inactive)
+//   100 aimlast                  turn the look onto the centre of the newest object (the crate the Object Manager
+//                                spawned last), as `tp` sets the look: the crosshair is on it for a grab or a pick
+//   100 pg @label                log the Physics Gun's grab (om_build.c): "[input_script] pg t=100 @label grab=1
+//                                uid=5 frozen=0 releasing=0 drag=0 sel=-1 aim=5 aimfeet=x,y,z hold=x,y,z edit=1
+//                                takes=1 gun=1 caps=15 shoot=1" (aim: the object under the crosshair, edit / takes:
+//                                whether the Physics Gun may edit and take it, gun: in hand, shoot: alive), then
+//                                "... @label last=5 spawned=1 at=x,y,z" for the newest object
+//   100 omres 7                  an Object Manager answer to a Physics Gun edit (SPAWN_RESULT, action EDIT, status 7 =
+//                                Spawn in first) through the client's packet handler, as an edit on its way when we died
+//   100 toast @label             the toasts issued so far (ui_notify): "[input_script] toast t=100 @label n=3"
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
@@ -321,7 +331,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") ||
-            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -841,6 +851,58 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] builds t=%.0f %s n=%d predicted=%d meshes=%d visible=%d last=%s spawned=%d draws=%d spawned_predicted=%d\n",
                 g_script.time, e->arg[0] ? e->arg : "-", n, predicted, meshes, visible, at, map_post_spawned_meshes(), map_post_build_draws(),
                 spawned_predicted);
+    } else if (!strcmp(e->cmd, "aimlast")) {
+        // aimlast: the look turns onto the centre of the newest object (the crate the Object Manager spawned last),
+        // as `tp` sets the look: the crosshair is on it for the Physics Gun's grab and pick
+        const Player *me = client->me;
+        const Map *map = client->game.map;
+        if (me && map && map->object_count) {
+            const Object *o = map->objects[map->object_count - 1];
+            const float eye = me->position.y + me->height - game_constants.camera_height;
+            const float dx = o->position.x - me->position.x, dy = o->position.y + o->scale.y * 0.5f - eye, dz = o->position.z - me->position.z;
+            client->me->direction = (vec2) {atan2f(dy, sqrtf(dx * dx + dz * dz)), atan2f(-dx, -dz)};
+        }
+    } else if (!strcmp(e->cmd, "toast")) {
+        // toast @label: the toasts issued so far (ui_notify): "[input_script] toast t=100 @label n=3"
+        fprintf(stderr, "[input_script] toast t=%.0f %s n=%d\n", g_script.time, e->arg[0] ? e->arg : "-", ui_notify_issued());
+    } else if (!strcmp(e->cmd, "omres")) {
+        // omres <status>: an Object Manager answer to a Physics Gun edit (a SPAWN_RESULT with action EDIT) through
+        // the client's packet handler, as the server sends one to an edit that was on its way when we died
+        // (status 7 = Spawn in first): "[input_script] omres t=100 status=7"
+        NetSpawnResultPacket res;
+        memset(&res, 0, sizeof(res));
+        res.action = OM_ACTION_EDIT;
+        res.item = OM_EDIT_SOURCE_PHYSGUN;
+        res.status = (uint8_t) e->v[0];
+        res.caps = (uint8_t) object_manager_ui_caps();
+        client_handle_game_event(client, NET_PACKET_SPAWN_RESULT, &res, (uint16_t) sizeof(res));
+        fprintf(stderr, "[input_script] omres t=%.0f status=%d\n", g_script.time, (int) res.status);
+    } else if (!strcmp(e->cmd, "pg")) {
+        // pg @label: the Physics Gun's carry (om_build.c) and the object under the crosshair (the pick the
+        // gun takes on fire): "[input_script] pg t=100 @label grab=1 uid=5 frozen=0 releasing=0 drag=0 sel=-1
+        // aim=5 aimfeet=x,y,z hold=x,y,z" (uid -1 none; aimfeet the crosshair's object's feet)
+        int st[6];
+        om_build_probe(st);
+        ObjectManagerAim aim;
+        const int hit = client->me && object_manager_pick(&client->game, client->me, client->me->direction.x, client->me->direction.y, &aim);
+        const Object *ao = hit && aim.object >= 0 ? client->game.map->objects[aim.object] : NULL;
+        const Object *ho = st[1] >= 0 ? client->game.map->objects[st[1]] : NULL;
+        char af[80] = "-", hf[80] = "-";
+        if (ao) snprintf(af, sizeof(af), "%.2f,%.2f,%.2f", ao->position.x, ao->position.y, ao->position.z);
+        if (ho) snprintf(hf, sizeof(hf), "%.2f,%.2f,%.2f", ho->position.x, ho->position.y, ho->position.z);
+        const int ai = hit ? aim.object : -1;
+        const int dev = (object_manager_ui_caps() & OM_CAP_DEV) != 0;
+        fprintf(stderr, "[input_script] pg t=%.0f %s grab=%d uid=%d frozen=%d releasing=%d drag=%d sel=%d aim=%d aimfeet=%s hold=%s "
+                "edit=%d takes=%d gun=%d caps=%d shoot=%d\n",
+                g_script.time, e->arg[0] ? e->arg : "-", st[0], st[1], st[2], st[3], st[4], st[5], ai, af, hf,
+                ai >= 0 && object_manager_editable(&client->game, ai), ai >= 0 && object_manager_physgun_takes(&client->game, ai, dev),
+                client->me && client->me->weapon ? client->me->weapon->kn_physgun : -1, object_manager_ui_caps(),
+                client->me ? (int) client->me->active : -1);
+        if (client->game.map && client->game.map->object_count) {
+            const Object *lo = client->game.map->objects[client->game.map->object_count - 1];
+            fprintf(stderr, "[input_script] pg t=%.0f %s last=%zu spawned=%d at=%.2f,%.2f,%.2f\n", g_script.time, e->arg[0] ? e->arg : "-",
+                    client->game.map->object_count - 1, lo->spawned, lo->position.x, lo->position.y, lo->position.z);
+        }
     } else if (!strcmp(e->cmd, "placewatch")) {
         snprintf(g_script.pw_label, sizeof(g_script.pw_label), "%s", e->arg[0] ? e->arg : "-");
         map_post_build_meshes(&g_script.pw_base);
