@@ -134,7 +134,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
         "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose",
         "--kiodrop": "kiodrop",
-        "--f4": "f4"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--f4": "f4", "--play": "play"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -3884,6 +3884,47 @@ def run_native_bo_f4_in_kio():
           [l for l in after if "[mm]" in l][:3])
 
 
+def run_native_play_in_kio():
+    """Play on a map (the Games window's Play, playMap) in an official krunker.io game with Server Type Box Office: the
+    brain is not reachable while krunker.io is the session (account_backend gates its requests), so the play seek was
+    refused at once and read "Could not reach the matchmaker" (servers_ui.c seek_unreachable). Find New Game's rule
+    applies: the game gives way first (find_new_game_seek), then the brain's play seek goes out. "native-play-in-kio"."""
+    label = "native-play-in-kio"
+    dead_port = kn_proto.free_ports(1)[0]
+    seeks = []
+    plays = []
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+        room = st.brain_seek
+
+        def answer(q):
+            if q.get("autoChangeGame") == "false" and '"i"' in q.get("dataQuery", ""):
+                plays.append(q)
+                return 503, {"error": "NoMatchingServers"}  # no lobby plays the map: the game list, then the offline map
+            return room(q)
+        st.brain_seek = answer
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+    # a community map (not in the catalogue) is played from the game list: the same give-way, then the list is asked
+    script = ('0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n4000 play\n9000 call playMap "Kanji"\n'
+              '11000 call playMap "CommunityPlay"\n14000 quit\n')
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup, scenario="default")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    start = next((i for i, l in enumerate(lines) if "playMap" in l or "[mm] play" in l), len(lines))
+    after = lines[start:]
+    check(f"{label}: the player is in the krunker.io game before Play", any("FRA:bbbbb" in l for l in lines[:start]),
+          [l for l in lines[:start] if "[krunker]" in l][-2:])
+    check(f"{label}: Play gets no matchmaker refusal (no 'Could not reach the matchmaker', shown or logged)",
+          not any("could not reach the matchmaker" in l.lower() for l in after), [l for l in after if "could not reach" in l.lower()][:2])
+    check(f"{label}: the brain gets Play's seek for Kanji (dataQuery i, autoChangeGame false)",
+          any('"i":"Kanji"' in q.get("dataQuery", "") for q in plays), [l for l in after if "[mm]" in l][:4])
+    check(f"{label}: Play of a community map asks the brain's game list (the give-way and the list both reach the brain)",
+          any(pth == "/brain/mm/game-list" for pth, _, _ in stub.http_log), [l for l in after if "[mm]" in l][:4])
+
+
 def run_native_f4_setting_race():
     """The user's sequence on a fresh profile (no saved settings: Auto Seek on Launch is on, Server Type Box Office): the launch's
     Box Office search is still racing the regions' pings (a slow ping: the fresh profile's race) when the player sets Server
@@ -4802,6 +4843,8 @@ def main():
     if ONLY == "f4" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game with Server Type Box Office (official games, failed joins)
         run_native_f4_server_type()
         run_native_f4_drops()
+    if ONLY == "play" and os.path.isfile(f"{BUILD}/client_bin"):  # just Play on a map in an official game (Server Type Box Office)
+        run_native_play_in_kio()
     if ONLY == "kiodrop" and os.path.isfile(f"{BUILD}/client_bin"):  # just the krunker.io drop / Find Game runs (Server Type krunker.io)
         run_native_f4_drops()
     if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)

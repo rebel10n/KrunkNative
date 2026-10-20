@@ -4205,6 +4205,13 @@ int servers_ui_play_map_mode(const char *name, const int catalogue, const int mo
     // plays it: the game list, then the offline game on it (on_seek -> on_play_list). Community maps (not one of
     // v10's) keep the list search below.
     // (a mode-specific play, the raid promo's Raid, keeps the list search below: the seek has no mode)
+    // the brain is refused while krunker.io is the session (account_backend gates its requests): an official game
+    // gives way first, as Find New Game does (find_new_game_seek), so the Box Office play seek can go out
+    if (g_brain_mode && !g_client->offline && krunker_net_active()) {
+        printf("[mm] play %s: the krunker.io game gives way to the Box Office play\n", name);
+        krunker_net_leave(g_client, NULL);
+        g_game_id[0] = 0;
+    }
     const int index = official_map_index(name);
     if (mode < 0 && index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
         snprintf(g_play_query, sizeof(g_play_query), "{\"i\":\"%s\",\"dsma\":[%d]}", name, index);
@@ -4214,10 +4221,8 @@ int servers_ui_play_map_mode(const char *name, const int catalogue, const int mo
         seek(NULL, 0, NULL);
         return 1;
     }
-    if (g_brain_mode && !g_client->offline) {
-        mm_get("/mm/game-list?hostname=krunknative", on_play_list, (void *) (uintptr_t) seek_claim_start(&g_claims));
-        return 1;
-    }
+    // the game list asked; when the brain refuses the request at once, the map is played without it (below), not silently dropped
+    if (g_brain_mode && !g_client->offline && mm_get("/mm/game-list?hostname=krunknative", on_play_list, (void *) (uintptr_t) seek_claim_start(&g_claims))) return 1;
     if (catalogue) return 0; // the offline game hosts catalogue maps itself
     fetch_map_data(name);
     return 1;
