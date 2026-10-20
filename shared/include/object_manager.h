@@ -370,6 +370,11 @@ void object_manager_hold_release(Game *game, Player *player); // let `player` go
 // `dev` (OM_CAP_DEV): a dev's gun also takes every spawned object, blocks included (and players:
 // OM_EDIT_PLAYER).
 int object_manager_physgun_takes(const Game *game, int uid, int dev);
+// The Physics Gun's carry, swept against the world (object_manager_edit applies it to every Physics Gun
+// edit, a Drop goes down by it, and the client predicts with it): the box `size` with its feet at `from`,
+// moved toward `to`, stops just short of the first solid on the way (solid boxes, map triangles, terrain)
+// and never goes below the map's death plane (dthY). Object `uid` is not in its way. Returns the feet.
+vec3 object_manager_carry_feet(Game *game, int uid, vec3 from, vec3 to, vec3 size);
 uint16_t object_manager_yaw_pack(float yaw);     // [0, 2 pi) in 65536 steps
 float object_manager_yaw_unpack(uint16_t packed);
 int object_manager_yaw_quarter(float yaw);       // the nearest quarter turn, 0..3

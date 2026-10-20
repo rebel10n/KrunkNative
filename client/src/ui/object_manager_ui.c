@@ -1183,6 +1183,10 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         return;
     }
     if (r->action == OM_ACTION_EDIT) { // a drag's edits: only refusals speak (a rate answer is the pace)
+        if (r->status == OM_STATUS_DEAD) { // an edit that was on its way when we died: the grab ends, quietly
+            om_build_refused(r->status);
+            return;
+        }
         if (r->status != OM_STATUS_OK && r->status != OM_STATUS_RATE) {
             om_build_refused(r->status);
             om_set_status(object_manager_status_text(r->status), 1);
@@ -1364,6 +1368,7 @@ void object_manager_ui_tick(Client *client) {
     Player *me = client ? client->me : NULL;
     om_tool_hud(me);
     if (!me) return;
+    if (!me->active) om_build_stop(); // dead: the gun lets go (no edit goes out, so none answers "Spawn in first")
     om_tool_shots(client, me);
     if (g_om.caps < 0) {
         me->build_free = 0;

@@ -623,6 +623,7 @@ void om_build_snap_text(char *out, size_t size); // "5", "0.25", "off"
 int  om_build_frozen(void);                       // the Physics Gun's carried object is frozen (right click): it stays on release
 int  om_build_grabbing(void);
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
+void om_build_stop(void);                   // the local player died: the grab, drag and selection end, nothing sent
 void om_build_reset(void);                       // a new map / connection
 void om_build_duplicate_shot(Client*, const Player*); // a Duplicator shot goes out: its source (the crosshair's object)
 void om_build_duplicate_result(int limit);       // the answer to a Duplicator shot (OK): COPIED arms the ghost, PASTED clears it

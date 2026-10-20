@@ -2172,6 +2172,64 @@ static int om_pose_allowed(const Game *game, const Player *player, const Object 
     return OM_STATUS_OK;
 }
 
+// ---------------------------------------------------------------- the Physics Gun's carry, swept
+
+// A carried box stops this far short of the first solid it meets (units): it never sits in one
+#define OM_CARRY_GAP 0.05f
+
+// The fraction (0, 1] of the carry's segment `seg` (the box `size` with its feet at `from`) at which the
+// box first meets a solid, 1 clear. Solid boxes count as their box grown by the carried one: the feet
+// against that is exact for boxes (line_in_rect, the same test the pick uses). Map triangles and the
+// terrain count where the box's corners and centre meet them (world_solid_fraction, the camera's rule),
+// with the carried object's own collision off for the probes (as the drop had it).
+static float om_carry_fraction(Game *game, const int uid, const vec3 from, const vec3 seg, const vec3 size) {
+    float t = 1.0f;
+    const vec3 dir = {seg.x != 0.0f ? seg.x : 1e-6f, seg.y != 0.0f ? seg.y : 1e-6f, seg.z != 0.0f ? seg.z : 1e-6f}; // (line_in_rect divides)
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if ((int) i == uid || o->complex_coll || !bot_object_blocks_player(o)) continue;
+        const vec3 s = object_box_size(o);
+        if (s.x <= 0.0f || s.y <= 0.0f || s.z <= 0.0f) continue;
+        const vec3 at = {o->position.x, o->position.y - size.y, o->position.z}, grown = {s.x + size.x, s.y + size.y, s.z + size.z};
+        const float hit = line_in_rect(from, dir, at, grown);
+        if (hit > 0.0f && hit < t) t = hit;
+    }
+    Object *self = uid >= 0 && (size_t) uid < game->map->object_count ? game->map->objects[uid] : NULL;
+    const CollisionType was_collision = self ? self->collision_type : COLLISION_TYPE_NONE;
+    const int was_forced = self ? self->force_col : 0;
+    if (self) {
+        self->collision_type = COLLISION_TYPE_NONE;
+        self->force_col = 0;
+    }
+    const float hx = size.x * 0.5f, hz = size.z * 0.5f;
+    for (int c = 0; c < 9; c++) {
+        const vec3 p = c < 8 ? (vec3) {from.x + (c & 1 ? hx : -hx), from.y + (c & 2 ? size.y : 0.0f), from.z + (c & 4 ? hz : -hz)}
+                             : (vec3) {from.x, from.y + size.y * 0.5f, from.z};
+        const float hit = world_solid_fraction(game, p, seg);
+        if (hit > 0.0f && hit < t) t = hit;
+    }
+    if (self) {
+        self->collision_type = was_collision;
+        self->force_col = (unsigned char) was_forced;
+    }
+    // the play area's floor: the map's death plane (dthY), below which the game takes a thing out of the map
+    if (seg.y < 0.0f && from.y >= game->map->death_y) {
+        const float f = (from.y - game->map->death_y) / -seg.y;
+        if (f < t) t = f;
+    }
+    return t;
+}
+
+vec3 object_manager_carry_feet(Game *game, const int uid, const vec3 from, const vec3 to, const vec3 size) {
+    const vec3 seg = {to.x - from.x, to.y - from.y, to.z - from.z};
+    const float len = sqrtf(seg.x * seg.x + seg.y * seg.y + seg.z * seg.z);
+    if (!game || !game->map || !(len > 0.0f) || !isfinite(len)) return from;
+    const float t = om_carry_fraction(game, uid, from, seg, size);
+    if (t >= 1.0f) return to;
+    const float stop = fmaxf(0.0f, t - OM_CARRY_GAP / len); // back off the contact along the path: never into it
+    return (vec3) {from.x + seg.x * stop, from.y + seg.y * stop, from.z + seg.z * stop};
+}
+
 // ---------------------------------------------------------------- the Physics Gun on players (devs)
 
 static Player *om_player_by_uid(Game *game, const int uid) {
@@ -2336,14 +2394,11 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         return;
     }
     Object *o = game->map->objects[uid];
-    if (edit->flags & OM_EDIT_DROP) { // down onto whatever is below (itself out of the way)
-        const int collision = o->collision_type;
-        o->collision_type = COLLISION_TYPE_NONE;
-        const vec3 down = {0.0f, -OM_AIM_RANGE, 0.0f};
-        float hit;
-        int object;
-        if (om_ray(game, (vec3) {to.position.x, to.position.y + 0.1f, to.position.z}, down, &hit, &object)) to.position.y = to.position.y + 0.1f + down.y * hit;
-        o->collision_type = (unsigned char) collision;
+    // the Physics Gun's carry is swept against the world (object_manager_carry_feet); a Drop goes straight down the same way
+    if (edit->req.item == OM_EDIT_SOURCE_PHYSGUN) to.position = object_manager_carry_feet(game, uid, from.position, to.position, to.size);
+    if (edit->flags & OM_EDIT_DROP) {
+        const vec3 at = to.position;
+        to.position = object_manager_carry_feet(game, uid, at, (vec3) {at.x, at.y - OM_AIM_RANGE, at.z}, to.size);
     }
     const int where = om_pose_allowed(game, player, o, &from, &to, dev);
     if (where != OM_STATUS_OK) {

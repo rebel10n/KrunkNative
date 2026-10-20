@@ -2341,6 +2341,178 @@ static void test_physgun_props(TestClient *a) {
     clean_up(a);
 }
 
+// Whether the box of object `uid` overlaps a solid one (any solid box, the walls and floors too)
+static int box_in_solid(const Game *game, const int uid) {
+    const Object *a = game->map->objects[uid];
+    const vec3 sa = object_box_size(a);
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *b = game->map->objects[i];
+        if ((int) i == uid || b->complex_coll || !bot_object_blocks_player(b)) continue;
+        const vec3 sb = object_box_size(b);
+        const float eps = 0.02f;
+        if (fabsf(a->position.x - b->position.x) < (sa.x + sb.x) * 0.5f - eps && fabsf(a->position.z - b->position.z) < (sa.z + sb.z) * 0.5f - eps &&
+            a->position.y < b->position.y + sb.y - eps && b->position.y < a->position.y + sa.y - eps)
+            return 1;
+    }
+    return 0;
+}
+
+// The near face (min x) of the solid box the crate meets first going +x, -1 none
+static float wall_face_ahead(const Game *game, const Object *crate) {
+    float best = -1.0f;
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if (o == crate || o->complex_coll || !bot_object_blocks_player(o)) continue;
+        const vec3 s = object_box_size(o);
+        if (s.x < 10.0f || s.y < 20.0f || s.z < 20.0f) continue; // a wall, not a crate
+        const float face = o->position.x - s.x * 0.5f;
+        if (face <= crate->position.x + crate->scale.x * 0.5f) continue;
+        if (fabsf(o->position.z - crate->position.z) > s.z * 0.5f) continue;
+        if (o->position.y > crate->position.y + crate->scale.y || o->position.y + s.y < crate->position.y) continue;
+        if (best < 0.0f || face < best) best = face;
+    }
+    return best;
+}
+
+// The Physics Gun cycle, again and again, in a round of its own: the crosshair picks a crate, the grab
+// carries it (into the wall, then back), Drop lets it go, and the crate is solid, out of every box, and
+// picked again. Pushing it through the wall stops it at the wall's near face.
+static void test_physgun_cycles(TestClient *a) {
+    printf("Physics Gun: carry into a wall and back, drop, pick again, several cycles...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    Game *game = &g_server->game;
+    p->god_mode = 1;
+    clean_up(a);
+    pump(200);
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    set_dev(a, 0);
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Crate"), -0.6f, p->direction.y);
+    const int uid = (int) game->map->object_count - 1;
+    pump(20);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[uid]->active, "a crate to carry (status %u)", r.status);
+    if (r.status != OM_STATUS_OK) return;
+    const float ahead = wall_face_ahead(game, game->map->objects[uid]);
+    CHECK(ahead > game->map->objects[uid]->position.x, "a wall ahead of the crate (near face %.2f)", ahead);
+    if (ahead <= 0.0f) return;
+    const float stop = ahead - game->map->objects[uid]->scale.x * 0.5f - 0.05f; // against the wall, a gap short
+    for (int cycle = 0; cycle < 4; cycle++) {
+        const int push = cycle % 2 == 0; // even: into the wall; odd: back toward us
+        const Object *o = game->map->objects[uid];
+        float pitch, yaw;
+        ObjectManagerAim aim;
+        aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+        const int hit = object_manager_pick(game, p, pitch, yaw, &aim) && aim.object == uid;
+        CHECK(hit && object_manager_editable(game, uid) && object_manager_physgun_takes(game, uid, 0),
+              "cycle %d: the crosshair picks the crate (object %d)", cycle, aim.object);
+        ObjectManagerPose from, to;
+        object_manager_pose(game, uid, &from);
+        to = from;
+        to.position.y += 3.0f;
+        pump(10);
+        r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+        CHECK(r.status == OM_STATUS_OK, "cycle %d: the grab (status %u)", cycle, r.status);
+        pump(10);
+        // one edit, the whole way: through the wall (it stops at the face) or back to open ground
+        to.position.x = push ? ahead + 40.0f : 112.0f;
+        r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, 0);
+        pump(4);
+        o = game->map->objects[uid];
+        const float want = push ? stop : 112.0f - o->scale.x * 0.5f + o->scale.x * 0.5f;
+        CHECK((r.status == OM_STATUS_OK || r.status == OM_STATUS_RATE) && fabsf(o->position.x - want) < 0.06f && o->position.x < ahead,
+              "cycle %d: the carry %s (status %u, x %.2f, want %.2f, face %.2f)", cycle, push ? "stops at the wall" : "comes back", r.status,
+              o->position.x, want, ahead);
+        CHECK(!box_in_solid(game, uid), "cycle %d: the crate is in no solid box", cycle);
+        // Drop where it is: it lands on the floor (the drop is swept down too)
+        pump(10);
+        to = from;
+        to.position.x = o->position.x;
+        to.position.z = o->position.z;
+        to.position.y = o->position.y;
+        r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_DROP);
+        pump(10);
+        o = game->map->objects[uid];
+        CHECK(r.status == OM_STATUS_OK && o->active && o->collision_type != COLLISION_TYPE_NONE && o->position.y < 0.2f && o->position.y >= game->map->death_y,
+              "cycle %d: dropped onto the floor (status %u, y %.2f)", cycle, r.status, o->position.y);
+        CHECK(!box_in_solid(game, uid), "cycle %d: after the drop, in no solid box", cycle);
+        aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+        const int again = object_manager_pick(game, p, pitch, yaw, &aim) && aim.object == uid;
+        CHECK(again && object_manager_editable(game, uid) && object_manager_physgun_takes(game, uid, 0),
+              "cycle %d: picked again after the drop (object %d)", cycle, aim.object);
+    }
+    // a carry below the play area's floor (the death plane) stops at it, wherever it is
+    const Object *o = game->map->objects[uid];
+    const ObjectManagerPose here = {.position = {o->position.x, o->position.y, o->position.z}, .size = o->scale};
+    const float vx = o->position.x + 2000.0f, vz = o->position.z + 2000.0f; // open void: no solid, no floor
+    const vec3 below = object_manager_carry_feet(game, uid, (vec3) {vx, o->position.y + 20.0f, vz}, (vec3) {vx, game->map->death_y - 500.0f, vz}, here.size);
+    CHECK(below.y >= game->map->death_y && below.y < game->map->death_y + 1.0f && fabsf(below.x - vx) < 1e-3f, "in the void, a carry below the death plane stops at it (%.2f, dthY %.2f)", below.y, game->map->death_y);
+    p->god_mode = 1;
+    clean_up(a);
+}
+
+// The Physics Gun on a dead player: the grab goes with the death; the next life grabs and drops again
+static void test_physgun_death(TestClient *a) {
+    printf("Physics Gun: grab, die, respawn, then grab and drop again...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    Game *game = &g_server->game;
+    p->god_mode = 1;
+    clean_up(a);
+    pump(200);
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    set_dev(a, 0);
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Crate"), -0.6f, p->direction.y);
+    const int uid = (int) game->map->object_count - 1;
+    pump(20);
+    CHECK(r.status == OM_STATUS_OK, "a crate to carry (status %u)", r.status);
+    if (r.status != OM_STATUS_OK) return;
+    ObjectManagerPose from, to;
+    object_manager_pose(game, uid, &from);
+    to = from;
+    to.position.y += 3.0f;
+    pump(10);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK, "grabbed (status %u)", r.status);
+    pump(10);
+    // dies in the middle of the carry: the next edit of the dead player is refused
+    player_kill(p, NULL, NULL, 0);
+    pump(4);
+    CHECK(!p->active, "dead");
+    to.position.y += 2.0f;
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, 0);
+    CHECK(r.status == OM_STATUS_DEAD, "a dead player's edit: Spawn in first (status %u)", r.status);
+    // the next life: back in reach of the crate, grab again and drop
+    p->death_time = game->now - 10.0f;
+    NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    send_to(a, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump(6);
+    p = player_of(a);
+    CHECK(p && p->active, "respawned");
+    if (!p) return;
+    const Object *o = game->map->objects[uid];
+    p->position = (vec3) {o->position.x + 10.0f, o->position.y, o->position.z};
+    p->velocity = (vec3) {0};
+    pump(10);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    object_manager_pose(game, uid, &from);
+    to = from;
+    to.position.y += 3.0f;
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK, "the next life grabs again (status %u)", r.status);
+    pump(10);
+    to.position.x -= 6.0f;
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_DROP);
+    pump(10);
+    o = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && o->position.y < 0.2f && !box_in_solid(game, uid), "and drops it (status %u, y %.2f)", r.status, o->position.y);
+    p->god_mode = 1;
+    clean_up(a);
+}
+
 // A connection in the menu (no Player yet): the cheats, give, spawn and tp land in its kept state and
 // the first spawn applies them; Object Manager requests run from its view (devs)
 static void join_menu(TestClient *c) {
@@ -2709,6 +2881,14 @@ int main(void) {
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox");
+    // the Physics Gun cycles in a round of their own: grab, drop, pick again
+    if (burg && start(burg, MODE_ID_FFA)) {
+        join(&g_clients[0], 1);
+        test_physgun_cycles(&g_clients[0]);
+        test_physgun_death(&g_clients[0]);
+        for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
+        sandbox_stop();
+    } else CHECK(0, "sandbox (Physics Gun cycles)");
     // the map's own objects: Kanji has jump pads (Burg has none)
     const cJSON *kanji = map_catalog_json((size_t) map_catalog_index_of_key("311_kanji"));
     CHECK(kanji != NULL, "kanji");

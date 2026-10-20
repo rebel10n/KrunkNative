@@ -19,7 +19,9 @@
 // grid step (tool_snap). A grab is unfrozen: releasing fire lets it down onto the surface below
 // (OM_EDIT_DROP). Right-click (the aim button) while carrying freezes it in place, so releasing
 // leaves it where it is; right-click again unfreezes it. Weapon swaps, reload, crouch and the zoom
-// are off while carrying.
+// are off while carrying. The carry is swept against the world (object_manager_carry_feet, the
+// authority's rule): it stops at the first solid, a gap short of it, and never goes below the map's
+// death plane; a Drop goes down the same way. A dead player's grab ends (object_manager_ui_tick).
 // A dev's Physics Gun on a player carries the player (OM_EDIT_PLAYER): the server holds it at the
 // carried feet until fire is let go.
 //
@@ -332,8 +334,14 @@ void om_build_refused(const int status) {
     g_ob.releasing = 0;
 }
 
+// The gun lets go of everything (the local player died, or a new connection): the grab, the drag, the
+// release still to send and the btools selection end where they are; nothing is sent
+void om_build_stop(void) {
+    g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = g_ob.frozen = 0;
+}
+
 void om_build_reset(void) {
-    g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = 0;
+    om_build_stop();
     om_interp_reset();
 }
 
@@ -378,8 +386,9 @@ int om_build_carry(int *uid, ObjectManagerPose *pose) {
 static int ob_snap_chord(void) { return ui_controls_down(UI_CONTROL_OM_PHYS_SNAP) && ui_controls_down(UI_CONTROL_CROUCH); }
 
 // `pose` as shown and sent: the free yaw's size (the nearest quarter turn's, from the grab's), and
-// with the snap chord 45 degree steps and the feet on the grid
-static void ob_shape(void) {
+// with the snap chord 45 degree steps and the feet on the grid; then swept against the world from where
+// it was shown last frame (object_manager_carry_feet, the authority's rule): it stops at the first solid
+static void ob_shape(Game *game) {
     ObjectManagerPose s = g_ob.pose;
     if (!s.directed) {
         if (ob_snap_chord()) s.yaw = roundf(s.yaw / ((float) M_PI / 4.0f)) * ((float) M_PI / 4.0f);
@@ -395,6 +404,7 @@ static void ob_shape(void) {
         s.position.y = object_manager_snap(s.position.y, step);
         s.position.z = object_manager_snap(s.position.z, step);
     }
+    if (g_ob.grab) s.position = object_manager_carry_feet(game, g_ob.uid, g_ob.shown.position, s.position, s.size); // (a player is held by the server)
     g_ob.shown = s;
 }
 
@@ -477,7 +487,7 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
     const vec3 eye = ob_eye(me);
     const vec3 point = v_add(eye, v_scale(ob_dir(input->x_dir, input->y_dir), g_ob.dist));
     g_ob.pose.position = v_add(point, g_ob.offset);
-    ob_shape();
+    ob_shape(&client->game);
     const int flags = g_ob.grab_player ? OM_EDIT_PLAYER : 0;
     if (shoot) {
         ob_send_live(client, OM_EDIT_SOURCE_PHYSGUN, flags);
