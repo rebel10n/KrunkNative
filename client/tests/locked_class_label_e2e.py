@@ -15,6 +15,10 @@ KRUNKNATIVE_UI_DIR=<copy of ui/ without the .lockedClassText text-wrap line> ren
 for comparison (the check then fails). A second render without state.official (a KrunkNative lobby) must show
 no lock on the Nettspend's card. Exit 0 when the label fits and the lock is official-only, 1 otherwise.
 
+An official game's class list (state.officialClasses: the GAME_CONFIG "classes" krunker.io sends once the game
+loads, which never names the Nettspend) must keep the Nettspend's card in the class tab, locked: it is listed
+whenever the server's list is applied, not removed when the list arrives (menu_class_listed).
+
 The class level req (ui_loadout.c class_unlocked, v10.0.2 _34270) is checked on the whole class tab through
 KRUNKNATIVE_SCENARIO_HTML (the captured DOM): a guest in an official krunker.io game (state.official) sees each
 class with minRec locked ("Register to unlock", "Req lvl N") and the classes without one open; a guest in a
@@ -37,6 +41,10 @@ CLIENT = os.path.join(BUILD, "client_bin")
 BOX = re.compile(r"local\(([-\d.]+),([-\d.]+) ([\d.]+)x([\d.]+)\)")
 WORK = tempfile.mkdtemp(prefix="kn-class-label-", dir=os.path.expanduser("~/.cache") if os.path.isdir(os.path.expanduser("~/.cache")) else None)
 results = []
+# the class list an official krunker.io game sends (GAME_CONFIG "classes"): Krunker's 16 classes less the two
+# hidden ones (Deagler 10, Survivor 14), as resetClasses builds it (v10 _64265). KrunkNative's Nettspend (16) is
+# never in it, so it is the list the Nettspend's card must survive (menu_class_listed).
+OFFICIAL_CLASSES = [i for i in range(16) if i not in (10, 14)]
 
 
 def check(name, ok, detail=""):
@@ -44,7 +52,7 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
 
 
-def scenario(name, official):
+def scenario(name, official, classes=None):
     path = os.path.join(WORK, name + ".json")
     state = {
         "menu": True, "connected": True, "ready": True, "inGame": False, "name": "Guest", "classIndex": 0,
@@ -53,6 +61,8 @@ def scenario(name, official):
     }
     if official:
         state["official"] = True
+    if classes is not None:
+        state["officialClasses"] = classes
     with open(path, "w") as f:
         json.dump({"size": [1280, 720], "background": "#000000", "state": state, "frames": 3}, f)
     return path
@@ -127,9 +137,9 @@ class CardParser(HTMLParser):
             self.cur["text"] += data
 
 
-def class_cards(name, official):
+def class_cards(name, official, classes=None):
     """The class tab's cards (CardParser) of one render, or None when the render failed."""
-    scen = scenario(name, official)
+    scen = scenario(name, official, classes)
     out = os.path.join(WORK, name + ".png")
     html = os.path.join(WORK, name + ".html")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
@@ -145,6 +155,24 @@ def class_cards(name, official):
     with open(html, encoding="utf-8", errors="replace") as f:
         parser.feed(f.read())
     return parser.cards
+
+
+def check_official_list():
+    """The official game's class list (GAME_CONFIG "classes", applied once the game loads) never names the
+    Nettspend. Its card must stay in the class tab, locked, as it is before that list arrives: the card
+    vanished when the list did (menu_class_listed filtered by the server's list)."""
+    listed = class_cards("official-list", True, OFFICIAL_CLASSES)
+    check("official server's class list: the class tab renders", listed is not None and len(listed) > 1,
+          "" if listed is not None else "client_bin --render-scenario failed")
+    if listed is None:
+        return
+    nett = listed[-1] if listed else None
+    names = " | ".join(" ".join(c["text"].split())[:16] for c in listed)
+    check("official server's class list: the Nettspend's card is still in the class tab",
+          len(listed) == len(OFFICIAL_CLASSES) + 1 and nett is not None and "Nettspend" in nett["text"],
+          f"{len(listed)} cards: {names}")
+    check("official server's class list: the Nettspend is locked for not being on official servers",
+          nett is not None and nett["locked"] and "Not on official servers" in nett["text"])
 
 
 def check_class_gate():
@@ -200,6 +228,7 @@ def main():
     if got is not None:
         check("krunknative: the Nettspend's card is not locked", got[0] is None, f"label width {got[0]}")
     check_class_gate()
+    check_official_list()
     shutil.rmtree(WORK, ignore_errors=True)
     failed = len(results) - sum(results)
     print(f"locked_class_label_e2e: {len(results) - failed}/{len(results)}")

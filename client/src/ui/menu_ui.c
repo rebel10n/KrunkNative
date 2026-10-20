@@ -400,7 +400,11 @@ static const char *client_mode_name(const Client *client) {
 // windows[2] tab 0 lists the classes in Game.config.classes; without a list, resetClasses():
 // every class but the hidden ones (Deagler, Survivor), all of them in a sandbox / custom game.
 static int menu_class_listed(const Game *game, const ClassConfig *classes, const int index) {
-    if (game->config.class_list_count > 0) {
+    // KrunkNative's own classes (past CLASS_COUNT: the Nettspend) are never in an official krunker.io game's
+    // list, which krunker.io sends once the game loads. They keep the default rule there, so the card stays
+    // (locked by gen_tab_class through game_class_allowed) rather than vanishing when that list arrives.
+    const int kn_only_official = game->is_official && index >= CLASS_COUNT;
+    if (game->config.class_list_count > 0 && !kn_only_official) {
         for (int i = 0; i < game->config.class_list_count; i++) {
             if (game->config.class_list[i] == index) return 1;
         }
@@ -409,9 +413,9 @@ static int menu_class_listed(const Game *game, const ClassConfig *classes, const
     return !classes[index].hide || game_config_is_custom(game);
 }
 
-// What menu_class_listed reads, to rebuild the list when it changes (GAME_CONFIG).
+// What menu_class_listed reads, to rebuild the list when it changes (GAME_CONFIG, Game.is_official on join/leave).
 static unsigned menu_class_filter_key(const Game *game) {
-    unsigned key = 2166136261u ^ (unsigned) game_config_is_custom(game);
+    unsigned key = 2166136261u ^ (unsigned) game_config_is_custom(game) ^ ((unsigned) game->is_official << 1);
     for (int i = 0; i < game->config.class_list_count; i++) key = (key ^ (unsigned) game->config.class_list[i]) * 16777619u;
     return key * 16777619u + (unsigned) game->config.class_list_count;
 }

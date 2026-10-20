@@ -75,6 +75,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <player_names.h> // Hide player names: the scenario's names as the game shows them
+#include <game_config.h> // state.officialClasses: game_config_apply (the official game's class list)
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -319,6 +320,7 @@ static void warn_unknown_keys(void) {
         "gameName", "classIndex", "anim_time", "anim_seek", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
+        "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "altAccounts", // the Account Manager's rows [{name, backend: "krunk.io" | "krunker.io", active}] (alt_manager_ui.c)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
@@ -1132,6 +1134,16 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("classIndex")) menu_set_class_index(st_int("classIndex", 0), 1);
     // official: a krunker.io lobby (krunker_net.c sets Game.is_official on join): the KrunkNative-only classes are locked
     client->game.is_official = (unsigned char) st_bool("official", 0);
+    // officialClasses: the class list an official krunker.io game sends once it has loaded (its GAME_CONFIG "classes",
+    // which krunker.io never fills with KrunkNative's own classes). Applied the way gc_apply_received applies it on join.
+    if (cJSON_IsArray(st("officialClasses"))) {
+        cJSON *cfg = cJSON_CreateObject();
+        if (cfg) {
+            cJSON_AddItemToObject(cfg, "classes", cJSON_Duplicate(st("officialClasses"), 1));
+            game_config_apply(&client->game, cfg, GAME_CONFIG_CLAMP_DEDICATED, GAME_HOST_CUSTOM);
+            cJSON_Delete(cfg);
+        }
+    }
     menu_set_region_label(st_str("region"));
 
     // state.settings {key: value}: setSetting(key, value) first (a capture that changed a setting,
