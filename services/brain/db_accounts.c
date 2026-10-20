@@ -479,8 +479,14 @@ static kn_db_result *staff(kn_dbconn *c, int n, const char *const *p, const kn_s
     cJSON_Delete(names);
     return dbx_finish(&x, kn_db_result_command(0));
 }
+/* A developer's startup grant (every brain start, so a rebuild or restore keeps it): developer and
+ * moderator, the verified tick (player_featured), lifetime VIP (player_premium, ms: the value the
+ * developers already hold; 315360000000 fits BIGINT / INTEGER64, see migration 0110) and the
+ * creator badge. Moderators get only the moderator flag (P_STAFF_MOD). */
+#define STAFF_DEV_SET "player_developer = 1, player_moderator = 1, player_featured = 1," \
+                      " player_premium = 315360000000, creator_badge = 1"
 static kn_db_result *run_staff_dev(kn_dbconn *c, int n, const char *const *p) {
-    return staff(c, n, p, SQL(.any = "UPDATE players SET player_developer = 1, player_moderator = 1"
+    return staff(c, n, p, SQL(.any = "UPDATE players SET " STAFF_DEV_SET
                                      " WHERE player_id IN (SELECT id FROM accounts WHERE lower(username) = lower($1))"));
 }
 static kn_db_result *run_staff_mod(kn_dbconn *c, int n, const char *const *p) {
@@ -489,7 +495,7 @@ static kn_db_result *run_staff_mod(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_STAFF_DEV = {
     "staff_dev",
-    "UPDATE players SET player_developer = 1, player_moderator = 1 FROM accounts a "
+    "UPDATE players SET " STAFF_DEV_SET " FROM accounts a "
     "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)",
     run_staff_dev};
 const kn_proc P_STAFF_MOD = {

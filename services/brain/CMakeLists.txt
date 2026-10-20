@@ -494,6 +494,12 @@ if (Python3_FOUND)
     add_test(NAME brain_creator
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/creator_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_creator PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # the startup staff grant (accounts.developers / moderators -> db_accounts.c staff_dev): developer,
+    # moderator, verified, lifetime premium and the creator badge, reapplied at every start
+    add_test(NAME brain_staff_grant
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/staff_grant_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_staff_grant PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the same in headless client_bin runs: the hub's Creator button, a map's YouTube link, the menu's
     # creator mark and the Live Streams previews through /streams/thumb (stub Twitch + stub CDN)
     add_test(NAME brain_creator_e2e
