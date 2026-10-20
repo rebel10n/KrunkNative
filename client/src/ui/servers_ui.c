@@ -3472,9 +3472,9 @@ static const GamesTab k_games_tabs[] = {
     {"Favorites", NULL, NULL, 0, 0, 1, 0, 0, 3},
     {"My Games", NULL, NULL, 0, 0, 0, 1, 0, 4},
     {"Search", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>search</span>", NULL, 0, 1, 0, 0, 0, -1},
-    {"Editor", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>construction</span>Editor", "openURL(`./editor.html`)", 0, 0, 0, 0, 0, -1},
+    {"Editor", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>construction</span>Editor", "openURL(`./editor.html`)", 0, 0, 0, 0, 0, -1},
     // v7: openURL(`./?sandbox`) reloads into its in-browser sandbox; KrunkNative's is the offline game
-    {"Sandbox", "<span class='material-icons' style='color:#ffffff;font-size:44px;vertical-align:bottom'>castle</span>Sandbox", "knHostOffline()", 0, 0, 0, 0, 0, -1},
+    {"Sandbox", "<span class='material-icons' style='color:#ffffff;font-size:42px;vertical-align:bottom'>castle</span>Sandbox", "knHostOffline()", 0, 0, 0, 0, 0, -1},
 };
 #define GAMES_TAB_COUNT ((int) (sizeof(k_games_tabs) / sizeof(k_games_tabs[0])))
 
