@@ -598,9 +598,12 @@ else ()
     target_include_directories(${SERVER_BINARY} PRIVATE server/include)
     # https:// for the finder heartbeat and central auth hasJoined (server/src/http_client.c);
     # without libcurl server_bin only speaks plain http:// to them.
+    # KN_CURL_DEPS: what a static libcurl.a needs at link time (the polyfilled server: its static libssl,
+    # libcrypto, libz, -ldl -lpthread; tools/release/build-client-linux.sh). Empty for a shared libcurl.
+    set(KN_CURL_DEPS "" CACHE STRING "libraries libcurl needs when it is linked statically")
     find_package(CURL QUIET)
     if (CURL_FOUND)
-        target_link_libraries(${SERVER_BINARY} PRIVATE CURL::libcurl)
+        target_link_libraries(${SERVER_BINARY} PRIVATE CURL::libcurl ${KN_CURL_DEPS})
         target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_HAVE_CURL=1)
     endif ()
 

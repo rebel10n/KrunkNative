@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packages a dedicated-server build as one release asset per platform (.github/workflows/release.yml):
 #   <out>/BoxOffice-server-linux-x64.tar.gz           Debian 12+, Ubuntu 22.04+ (OpenSSL 3)
-#   <out>/BoxOffice-server-linux-x64-polyfilled.tar.gz  any x86_64 distro (glibc 2.17+, static OpenSSL, no libcurl)
+#   <out>/BoxOffice-server-linux-x64-polyfilled.tar.gz  any x86_64 distro (glibc 2.17+, static OpenSSL and libcurl)
 #   <out>/BoxOffice-server-windows-x64.zip
 #   <out>/BoxOffice-server-macos-arm64.zip
 # The archive is flat, with no folder around it: unpack it into a folder of its own. The server is
@@ -109,7 +109,7 @@ https://packages.msys2.org); macOS packages may bundle Homebrew's OpenSSL libcry
 EOF
 
 case "$platform" in
-    linux-x64-polyfilled) runtime="Any x86_64 Linux with glibc 2.17+ (OpenSSL static). No libcurl: it cannot reach an https:// finder (matchmaker), so it serves LAN or http:// players" ;;
+    linux-x64-polyfilled) runtime="Any x86_64 Linux with glibc 2.17+. OpenSSL and libcurl are static: nothing to install" ;;
     linux-*) runtime="Debian 12+/Ubuntu 22.04+ (glibc 2.36, OpenSSL 3): apt install libcurl4 libssl3 libcrypt1 (Debian 13: libcurl4t64 libssl3t64)" ;;
     windows-*) runtime="Windows 10+ x64: the DLLs next to server_bin.exe are all it needs" ;;
     macos-*)

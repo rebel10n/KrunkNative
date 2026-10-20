@@ -37,7 +37,7 @@ typedef struct {
 // release.yml's release-notes rows, in its order
 static const DsPkg PKGS[] = {
     {"linux-x64", DS_OS_LINUX, "tar.gz", "Linux x86_64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS"},
-    {"linux-x64-polyfilled", DS_OS_LINUX, "tar.gz", "Linux x86_64 (any distro)", "glibc 2.17+ (Debian 11, Ubuntu 20.04, CentOS 7 and newer). No libcurl: no https:// finder, so it serves LAN or http:// players"},
+    {"linux-x64-polyfilled", DS_OS_LINUX, "tar.gz", "Linux x86_64 (any distro)", "glibc 2.17+ (Debian 11, Ubuntu 20.04, CentOS 7 and newer): OpenSSL and libcurl static, nothing to install"},
     {"windows-x64", DS_OS_WINDOWS, "zip", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip"},
     {"macos-arm64", DS_OS_MAC, "zip", "macOS (Apple silicon)", "macOS on M1 and later"},
 };
@@ -45,7 +45,7 @@ static const DsPkg PKGS[] = {
 
 // A package's requirements in the page's language (dynamic keys, listed for i18n_lint.py):
 //   I18N("kn.dserver.pkg.linux-x64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS")
-//   I18N("kn.dserver.pkg.linux-x64-polyfilled", "Any x86_64 Linux (glibc 2.17+). No libcurl: no https:// finder, so it serves LAN or http:// players")
+//   I18N("kn.dserver.pkg.linux-x64-polyfilled", "Any x86_64 Linux (glibc 2.17+): OpenSSL and libcurl static, nothing to install")
 //   I18N("kn.dserver.pkg.windows-x64", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip")
 //   I18N("kn.dserver.pkg.macos-arm64", "macOS on M1 and later")
 static const char *pkg_desc(const DsPkg *p) {

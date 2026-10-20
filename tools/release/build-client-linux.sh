@@ -12,7 +12,7 @@
 #
 # Both variants: FreeType without zlib/bzip2/png/harfbuzz/brotli (the vendored tree, as the web
 # build), GLFW/lexbor/glad/cJSON compiled in, libgcc/libstdc++/libcrypt static, stripped, server_bin
-# without libcurl (http:// finder/auth only: public servers use the server packages). What stays
+# (dynamic variant: no libcurl; polyfilled: a static libcurl). What stays
 # dynamic is the OS's: libc, libm, libdl, libpthread, libEGL.so.1 (libglvnd/Mesa; headless mode) and the libraries loaded at run time
 # with dlopen (libGL/libEGL/libGLESv2, X11/Wayland/xkbcommon by GLFW, ALSA/PulseAudio/JACK by
 # miniaudio; libopus is compiled in: client/lib/opus). The NEEDED list is checked at the end.
@@ -62,7 +62,11 @@ if [ -n "$image" ]; then
     if [ "$variant" = polyfilled ] && [ -n "${POLYFILL_GLIBC:-}" ]; then
         extra=(-v "$(cd "$(dirname "$POLYFILL_GLIBC")" && pwd)/$(basename "$POLYFILL_GLIBC"):/polyfill-glibc:ro" -e POLYFILL_GLIBC=/polyfill-glibc)
     fi
-    exec "${DOCKER:-docker}" run --rm -v "$repo:/src:ro" -v "$build:/build" -v "$out:/out" \
+    # KN_DOCKER_PLATFORM=linux/arm64: the container's architecture (an arm64 build on an x86_64 host needs
+    # binfmt emulation registered; CI builds arm64 natively on ubuntu-22.04-arm, client.yml)
+    platform=()
+    [ -n "${KN_DOCKER_PLATFORM:-}" ] && platform=(--platform "$KN_DOCKER_PLATFORM")
+    exec "${DOCKER:-docker}" run --rm "${platform[@]}" -v "$repo:/src:ro" -v "$build:/build" -v "$out:/out" \
         -e KN_CMAKE_ARGS="${KN_CMAKE_ARGS:-}" -e KN_BUILD_DIR=/build -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
         "${extra[@]}" "$image" bash -c '
             set -e
@@ -84,6 +88,8 @@ if [ "$deps" = 1 ]; then
     # the dynamic build bundles WebKitGTK (tools/release/bundle-webkit.sh): its -dev package, the TLS
     # module of glib-networking (https in WebKit's network process) and patchelf (RUNPATH of the bundle)
     if [ "$variant" = dynamic ]; then pkgs+=(libwebkit2gtk-4.1-dev glib-networking patchelf); fi
+    # the polyfilled server's libcurl (build_static_curl): static zlib, the tarball's xz, curl for the download
+    if [ "$variant" = polyfilled ]; then pkgs+=(zlib1g-dev xz-utils curl); fi
     $sudo apt-get update -qq > /dev/null
     $sudo apt-get install -y -qq --no-install-recommends "${pkgs[@]}" > /dev/null
 fi
@@ -91,12 +97,52 @@ fi
 build="${KN_BUILD_DIR:-$(dirname "$out")/build-$variant}"
 mkdir -p "$build"
 
+# libcurl for the polyfilled server (https:// for the finder heartbeat and the central auth): built here,
+# static, against the static libssl.a / libcrypto.a / libz.a of the same host (the polyfilled client links
+# its OpenSSL static the same way), so the binary keeps its glibc 2.17 floor and needs no shared library.
+CURL_VERSION=8.18.0
+CURL_SHA256=40df79166e74aa20149365e11ee4c798a46ad57c34e4f68fd13100e2c9a91946 # curl.se and the GitHub release agree
+build_static_curl() { # build_static_curl <build dir>: libcurl.a under <build>/static-curl (idempotent)
+    local build="$1" prefix="$1/static-curl" sd="$1/static-libs" lib f tar src
+    if [ -f "$prefix/lib/libcurl.a" ]; then return 0; fi
+    mkdir -p "$sd" "$build/dl"
+    for lib in libssl.a libcrypto.a libz.a; do
+        f="$(gcc -print-file-name="$lib")"
+        [ -f "$f" ] || { echo "build-client-linux: no static $lib (libssl-dev, zlib1g-dev) for libcurl" >&2; exit 1; }
+        ln -sf "$f" "$sd/$lib"
+    done
+    tar="$build/dl/curl-$CURL_VERSION.tar.xz"
+    if ! echo "$CURL_SHA256  $tar" | sha256sum -c - > /dev/null 2>&1; then
+        curl -sSfL -o "$tar.part" "https://curl.se/download/curl-$CURL_VERSION.tar.xz"
+        mv "$tar.part" "$tar"
+        echo "$CURL_SHA256  $tar" | sha256sum -c - > /dev/null || { echo "build-client-linux: curl-$CURL_VERSION.tar.xz checksum mismatch" >&2; exit 1; }
+    fi
+    src="$build/curl-$CURL_VERSION"
+    rm -rf "$src" && tar -C "$build" -xJf "$tar"
+    # LDFLAGS: the static directory first, so -lssl / -lcrypto / -lz resolve to the .a files
+    (cd "$src" && LDFLAGS="-L$sd" ./configure --prefix="$prefix" --disable-shared --enable-static \
+        --with-openssl --with-zlib --without-libpsl --without-brotli --without-zstd --without-nghttp2 \
+        --without-libidn2 --without-libssh2 --without-librtmp --without-gssapi --disable-ldap --disable-ldaps \
+        --disable-docs --disable-manual --disable-unix-sockets > "$build/curl-configure.log" 2>&1 \
+        && make -j"$(nproc)" > "$build/curl-make.log" 2>&1 && make install > "$build/curl-install.log" 2>&1) \
+        || { tail -30 "$build/curl-configure.log" >&2; echo "build-client-linux: libcurl $CURL_VERSION failed (logs in $build)" >&2; exit 1; }
+}
+
 flags=(-DCMAKE_BUILD_TYPE=Release -DKRUNKNATIVE_HTML_ENGINE=ON
     -DFT_DISABLE_ZLIB=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE)
-# server_bin here is for LAN/sandbox hosting: no libcurl (Debian's libcurl.so.4 carries symbol
-# versions Fedora's lacks; public servers use the server packages), libgcc/libstdc++ (replxx) and
-# crypt(3) static (libxcrypt's libcrypt.a: libcrypt.so.1 is a compat package on Fedora/Arch)
-flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++")
+if [ "$variant" = polyfilled ]; then
+    # the static libcurl above: the server gets https://; the dynamic build below keeps libcurl out (see next)
+    build_static_curl "$build"
+    flags+=("-DCURL_INCLUDE_DIR=$build/static-curl/include"
+        "-DCURL_LIBRARY=$build/static-curl/lib/libcurl.a"
+        "-DKN_CURL_DEPS=$build/static-libs/libssl.a;$build/static-libs/libcrypto.a;$build/static-libs/libz.a;-ldl;-lpthread")
+fi
+# the dynamic server_bin is for LAN/sandbox hosting: no libcurl here (Debian's libcurl.so.4 carries symbol
+# versions Fedora's lacks; the release's dynamic server is built in a Debian container, deploy/ansible/build.sh).
+# The polyfilled server links the static libcurl above (https:// for the finder and auth).
+# libgcc/libstdc++ (replxx) and crypt(3) static (libxcrypt's libcrypt.a: libcrypt.so.1 is a compat package on Fedora/Arch)
+if [ "$variant" = dynamic ]; then flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE); fi
+flags+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++")
 # the captcha webview (client/include/kn_webview.h, WebKitGTK) is bundled with the dynamic packages
 # (bundle-webkit.sh, below). The polyfilled ones keep it out: a webkit2gtk-4.1 for their glibc 2.17
 # floor does not exist, and a load-time link would make it a hard dependency of the portable client

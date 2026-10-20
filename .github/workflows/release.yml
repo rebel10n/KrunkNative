@@ -5,7 +5,7 @@ name: Release
 #   push of a tag server-v*       -> release <tag>, kept
 # Assets: BoxOffice-server-<platform>.{tar.gz,zip} for linux-x64 (Debian 12 container,
 # deploy/ansible/build.sh: distro OpenSSL 3 and libcurl), linux-x64-polyfilled (any x86_64 distro,
-# glibc 2.17+, build-client-linux.sh polyfilled: no libcurl), windows-x64 (MinGW) and macos-arm64
+# glibc 2.17+, build-client-linux.sh polyfilled: static OpenSSL and libcurl), windows-x64 (MinGW) and macos-arm64
 # (tools/release/package-server.sh), each archive flat (server_bin at the top), plus one SHA256SUMS
 # for the release. The release notes carry the commit, the
 # protocol (NET_PROTOCOL_MAJOR.MINOR) and the build time, plus one machine-readable line
@@ -119,7 +119,7 @@ jobs:
 
   # The polyfilled server for any x86_64 distro (glibc 2.17+): the same build as the client's dynamic one
   # but polyfilled (tools/release/build-client-linux.sh polyfilled: OpenSSL static, polyfill-glibc 2.17).
-  # No libcurl: it cannot reach an https:// finder, so it serves LAN or http:// players.
+  # Static libcurl (built from its pinned tarball) and OpenSSL: https:// for the matchmaker and auth, no system library.
   linux-polyfilled:
     name: Linux x64 (polyfilled, glibc 2.17+)
     needs: meta
@@ -364,7 +364,7 @@ jobs:
             echo "| Platform | Package |"
             echo "|---|---|"
             row "Linux x64 (Debian 12+, Ubuntu 22.04+)" BoxOffice-server-linux-x64.tar.gz
-            row "Linux x64, any distro (glibc 2.17+, no libcurl)" BoxOffice-server-linux-x64-polyfilled.tar.gz
+            row "Linux x64, any distro (glibc 2.17+, static libcurl)" BoxOffice-server-linux-x64-polyfilled.tar.gz
             row "Windows x64" BoxOffice-server-windows-x64.zip
             row "macOS arm64" BoxOffice-server-macos-arm64.zip
             echo
