@@ -126,8 +126,11 @@ tail -5 /out/client.log
 RC=1 result install=ok version=ok render=fail "(exit $rc; ${renderer:-no GL context}: $(grep -m1 -iE "error|failed|unsupported|cannot" /out/client.log | cut -c1-120))"
 EOF
 
+# KN_DOCKER_PLATFORM=linux/arm64: test an arm64 package under binfmt emulation (or on an arm64 host)
+platform=()
+[ -n "${KN_DOCKER_PLATFORM:-}" ] && platform=(--platform "$KN_DOCKER_PLATFORM")
 rc=0
-"${DOCKER:-docker}" run --rm "${mounts[@]}" -e PKG="$pkgfile" -e BRAIN="$brain" -e HAVE_CONTENT="${content:+1}" -e HOST_UID="$(id -u)" \
+"${DOCKER:-docker}" run --rm "${platform[@]}" "${mounts[@]}" -e PKG="$pkgfile" -e BRAIN="$brain" -e HAVE_CONTENT="${content:+1}" -e HOST_UID="$(id -u)" \
     "$image" bash -c "$inner" || rc=$?
 if ! grep -q '^RESULT ' "$out/test.log" 2> /dev/null; then
     [ "$rc" != 0 ] || rc=1
