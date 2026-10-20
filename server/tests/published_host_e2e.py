@@ -10,7 +10,7 @@ Fresh server_bin processes then host it by name, one at a time (every port from 
   A  the command line's map argument published:<creator>/<GOOD> (brain-linked): fetched, checked,
      cached on disk, played; a headless client_bin seeks, joins A and plays GOOD, then opens the Host
      Game flow from the Games window's Host button: the flow's map step lists GOOD and its server
-     command names it (gameserver.maps=published:<creator>/<GOOD>);
+     command (the Server tab) names it (gameserver.maps=published:<creator>/<GOOD>);
   B  that command's --set gameserver.maps=published:<creator>/<GOOD>; then the brain's host request
      (/mm/host-game, customMap): a missing map is refused with the brain's answer; SECOND (another
      published map) is fetched, checked, cached and hosted;
@@ -166,7 +166,7 @@ CLIENT_SCRIPT = """0 menu
 4100 call knHostFlow "go" 0
 5500 grep @card {good} [id=hostCMapPickr]
 5600 call knHostFlow "map" "kanji"
-6000 call knHostFlow "go" 4
+6000 call knHostFlow "go" 3
 6500 grep @cmd2 published:{account}/ [id=hostFlowCommand]
 6600 grep @cmd3 gameserver.maps=kanji [id=hostFlowCommand]
 6700 quit

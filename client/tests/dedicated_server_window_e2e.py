@@ -4,10 +4,11 @@
   python3 -I client/tests/dedicated_server_window_e2e.py BUILD_DIR      (from the repository root)
   KN_WEB_DIST=<web dist dir> also runs the web build in headless Chromium (else that part is skipped)
 
-The Host Game flow's last step has "Get the dedicated server". It used to open a krunk.io web page
-(a 404); now it opens a window in the client, built like the Download window (showWindow(25)):
+The Dedicated Server window is opened by the Host window's download action (knHostFlow 'download'), built like
+the Download window (showWindow(25)). The Host window has no button for it: v10's layout shows the one server command
+on the Server tab, and the window is reached through that action. It used to open a krunk.io web page (a 404):
   - native: a headless offline client_bin driven by an input script goes Host Game (window 42) ->
-    the Host window (openHostWindow) -> a map -> the last step (Start Game: the choice), clicks the button, and the window
+    the Host window (openHostWindow) -> a map -> the Server tab (the command), runs the download action, and the window
     shows: its head, this computer's package with its .sha256, every server_bin release asset of
     `server-latest` (release.yml's platforms), quick start, server.cfg, port forwarding (TCP and UDP
     21015), the coordinator listing (finder_url) and the dated VPS prices; Back returns to the flow's
@@ -113,10 +114,11 @@ script = [
     "300 call showWindow 42",
     "800 call openHostWindow 0 0",
     '1200 call knHostFlow "map" "kanji"',
-    '1500 call knHostFlow "go" 4',
-    "2000 vis @flow hostFlowCommand hostFlowGetServer knDsHead",
-    "2050 setscroll menuWindow 100000", # the last step is taller than the window: its button is at the bottom
-    "2300 clickid hostFlowGetServer",
+    '1500 call knHostFlow "go" 3',
+    "2000 vis @flow hostFlowCommand knDsHead",
+    "2010 grep @nogs Get [id=hostFlowCommandBlock]",
+    "2050 setscroll menuWindow 100000",
+    '2300 call knHostFlow "download"',
     "3000 vis @ds knDsHead knDsRec knDsOther knDsBack knDsQuick knDsCfg knDsPorts knDsList knDsVps knDsPrices hostFlowCommand",
     "3000 text @head [id=knDsHead]",
     "3000 nodes @sha a[href$='.sha256']",
@@ -131,10 +133,11 @@ script += ["3100 clickid knDsBack", "3700 vis @back hostFlowCommand knDsHead", "
 log = run_native("\n".join(script))
 
 flow = vis(log, "@flow")
-check(flow.get("hostFlowCommand") == "1", f"native: the Host Game window's last step (Start Game: the choice) is up ({flow})")
+check(flow.get("hostFlowCommand") == "1", f"native: the Host Game window's Server tab (the command) is up ({flow})")
+check(grep(log, "@nogs") == 0, "native: the command block has no Get the dedicated server button")
 ds = vis(log, "@ds")
 for key in ("knDsHead", "knDsRec", "knDsOther", "knDsBack", "knDsQuick", "knDsCfg", "knDsPorts", "knDsList", "knDsVps", "knDsPrices"):
-    check(ds.get(key) == "1", f"native: Get the dedicated server -> the window shows #{key} ({ds.get(key)})")
+    check(ds.get(key) == "1", f"native: the download action -> the window shows #{key} ({ds.get(key)})")
 check(ds.get("hostFlowCommand") in ("0", "-"), f"native: the flow's window was replaced ({ds.get('hostFlowCommand')})")
 check(fold(text(log, "@head")) == "Dedicated Server", f"native: the head says Dedicated Server ({text(log, '@head')!r})")
 check(nodes(log, "@sha") == len(ASSETS), f"native: one .sha256 link per package ({nodes(log, '@sha')})")
@@ -146,7 +149,7 @@ for i, n in enumerate(NEEDLES):
         check(grep(log, f"@n{i}") >= 1, f"native: the window mentions {n!r}")
 back = vis(log, "@back")
 check(back.get("hostFlowCommand") == "1" and back.get("knDsHead") in ("0", "-"),
-      f"native: Back to Host Game returns to the choice step ({back})")
+      f"native: Back to Host Game returns to the Server tab ({back})")
 
 
 # ---------------------------------------------------------------- web build (KN_WEB_DIST)
@@ -238,11 +241,9 @@ def web_part():
                 await until("!!document.querySelector('#menuWindow [onclick*=\"knHostFlow\"]')", 20)
                 await evaluate("knHostFlow('map', 'kanji'), 1")
                 await asyncio.sleep(0.5)
-                await evaluate("knHostFlow('go', 4), 1")  # the Start Game step: the self-host choice
+                await evaluate("knHostFlow('go', 3), 1")  # the Server tab: the one server command
                 result["flow"] = await until("!!document.getElementById('hostFlowCommand')", 20)
-                # the button itself, as a player clicks it
-                await evaluate("(b => { if (b) b.click(); return !!b; })"
-                               "(document.getElementById('hostFlowGetServer'))")
+                await evaluate("knHostFlow('download'), 1")  # the window's download action (no button in the Host window)
                 await until("!!document.getElementById('knDsHead')", 20)
                 result["ds"] = json.loads(await evaluate(snap_js) or "{}")
                 await evaluate("(b => { if (b) b.click(); return !!b; })(document.getElementById('knDsBack'))")
@@ -265,7 +266,7 @@ def web_part():
     check(result.get("flow") is True, "web: the Host Game flow's Server & command step is up")
     ds = result.get("ds", {})
     check(fold(ds.get("head")) == "Dedicated Server" and not ds.get("flow") and ds.get("back"),
-          f"web: Get the dedicated server -> the window, with Back ({ds.get('head')!r})")
+          f"web: the download action -> the window, with Back ({ds.get('head')!r})")
     check(len(ds.get("sections", [])) == 8, f"web: every section is there ({ds.get('sections')})")
     hrefs = ds.get("hrefs", [])
     for a in ASSETS:

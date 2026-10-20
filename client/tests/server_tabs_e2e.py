@@ -129,12 +129,11 @@ def grep(log, label):
 
 
 def host_steps(t, tab):
-    """From the tab's "+ Host Game": the Host Game window, its Start Game step, the choice read back, Start Game,
-    the message read back, and the Servers window again. Returns the time after the last step."""
-    script = ("%d clickid hostGameBtn\n%d call knHostFlow \"map\" \"kanji\"\n%d call windows.7.switchTab 4\n%d text @%s_choice [id=hostFlowChoice]\n"
-              "%d clickid hostFlowStart\n%d text @%s_msg [id=hostGameMsg]\n%d call showWindow 2\n"
-              % (t, t + 300, t + 400, t + 600, tab, t + 800, t + 1000, tab, t + 1200))
-    return script, t + 1400
+    """From the tab's "+ Host Game": the Host Game window, the map, Start Game (v10's button in the tab row), the
+    message read back, and the Servers window again. Returns the time after the last step."""
+    script = ("%d clickid hostGameBtn\n%d call knHostFlow \"map\" \"kanji\"\n%d clickid startServBtn\n%d text @%s_msg [id=hostGameMsg]\n"
+              "%d call showWindow 2\n" % (t, t + 300, t + 400, t + 600, tab, t + 800))
+    return script, t + 1000
 
 
 def main():
@@ -185,14 +184,10 @@ def main():
     check(grep(log, "@kio_chi") == 0, "krunker.io: none of our (Chicago) rows")
 
     # + Host Game: the window's backend is the tab's
-    _, choice_k = text(log, "@krunk_choice")
-    check("Box Office servers" in fold(choice_k or ""), f"krunk.io's Host Game chooses Box Office servers ({fold(choice_k)[:80]!r})")
     _, msg_k = text(log, "@krunk_msg")
     # no brain here: the brain's refusal (the request went to Box Office, not to krunker.io)
     check(any(s in fold(msg_k or "") for s in ("Box Office servers are unavailable", "Could not reach the matchmaker", "Creating Game")),
           f"krunk.io's Start Game goes to the brain ({fold(msg_k)!r})")
-    _, choice_o = text(log, "@kio_choice")
-    check("krunker.io servers" in fold(choice_o or ""), f"krunker.io's Host Game chooses krunker.io servers ({fold(choice_o)[:80]!r})")
     _, msg_o = text(log, "@kio_msg")
     check("Join a krunker.io game first" in fold(msg_o or ""),
           f"krunker.io's Start Game says it needs a krunker.io game first, not a silent failure ({fold(msg_o)!r})")

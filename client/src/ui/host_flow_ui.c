@@ -35,6 +35,7 @@
 
 #define FLOW_STEP_COUNT 5       // 0 Select, 1 Game Settings, 2 Advanced, 3 Server, 4 Start Game (the choice)
 #define FLOW_STEP_START 4
+#define FLOW_STEP_SERVER 3      // the Server tab: the dedicated server command
 #define FLOW_DEFAULT_PORT 21015 // NET_DEFAULT_PORT
 #define FLOW_MAP_MAX MAP_CATALOG_OFFICIAL_COUNT
 
@@ -523,7 +524,7 @@ char *host_flow_window_gen(void) {
     // the dedicated-server command (Server tab), before the sticky Server Cost line
     {
         const char *anchor = "<div style=\"margin-top:40px\"></div><div id=\"stickyHostH\">";
-        char *choice = command_html(g_flow.step == 3); // the Server tab
+        char *choice = command_html(g_flow.step == FLOW_STEP_SERVER);
         StrBuf with = {0};
         sb_append(&with, choice ? choice : "");
         sb_append(&with, anchor);
@@ -663,7 +664,7 @@ static void check_map(const char *key) {
 static void open_dedicated(void) {
     char err[160] = "";
     sync_page(err, sizeof(err));
-    g_flow.step = FLOW_STEP_START; // its Back returns to this step
+    g_flow.step = FLOW_STEP_SERVER; // the Server tab, where the command is: its Back returns there
     dedicated_server_ui_open(1);
 }
 
