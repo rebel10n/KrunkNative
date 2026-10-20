@@ -60,11 +60,13 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_DRANK_COLOR 0x7b2cbf // the lean (#7b2cbf): the cup's liquid; the stream / puddles use WeaponStream.color
 #define NETTSPEND_CASH_COLOR 0x2f9e5b  // a bill's face
 #define NETTSPEND_CASH_BAND_COLOR 0xf1e6b8 // the stack's paper band / a bill's edge
-// Third person: the trigger hand's hold point is moved this far in the arm frame's x from the pistol's. The arm
-// solver reads the hand's x as -hold.x, and the trigger shoulder sits at x = +1.9 (generate_arms), so a negative
-// shift takes the hand out past the shoulder: -6.0 puts it ~4 units out (the arm is 5.4 long), so the arm
-// extends out to its side like a pistol held out, the elbow nearly straight, and the cup clears the torso.
-#define NETTSPEND_TP_HAND_SIDE (-6.0f)
+// Third person: the trigger hand reaches straight out in front of its shoulder (the shoulder stays on the torso at
+// x = +1.9, generate_arms). The pistol's hold aims the arm about 14 degrees in from the shoulder; the Drank's hand is
+// held NETTSPEND_TP_HAND_REACH units in front (the arm is 5.4 long, so the elbow is nearly straight), at the pistol's
+// height and NETTSPEND_TP_HAND_X across (the same aim). The arm solver reads the hand's forward distance as
+// hold.z - offset.z and its x as -hold.x, so the hold is offset.z + reach and -x.
+#define NETTSPEND_TP_HAND_REACH 5.0f
+#define NETTSPEND_TP_HAND_X 0.65f
 // The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
 // shoulder, this far out to its own side and forward per unit down (only the trigger arm holds the cup)
 #define NETTSPEND_OFF_HAND_AWAY_OUT 0.12f

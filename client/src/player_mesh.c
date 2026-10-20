@@ -1228,11 +1228,12 @@ void player_generate_meshes(Player *player, const int render_you) {
         if (player_mesh->arms) {
             for (int i = 0; i < player->loadout_size; i++) {
                 const Weapon *weapon = player->game->weapons[player->loadout[i]];
-                // Nettspend Purple Drank in third person: the trigger hand takes the pistol's grip (offset and
-                // right hold), not the table's: the Drank's grip is the Piss hose's, low at the belly, so the cup
-                // sat at the belt line. The hand is moved out to the trigger side (NETTSPEND_TP_HAND_SIDE) so the
-                // cup clears the torso from the over-the-shoulder camera. The free (left) hand keeps the Drank's own
-                // hold. First person keeps the table's grip.
+                // Nettspend Purple Drank in third person: the trigger hand takes the pistol's grip (its offset and
+                // hold height; the reach is set below), not the table's: the Drank's grip is the Piss hose's, low at
+                // the belly, so the cup sat at the belt line. The hand is held out in front of the shoulder
+                // (NETTSPEND_TP_HAND_REACH, the arm nearly straight), not out to the side: the arm points forward
+                // like a pistol's hold. The free (left) hand keeps the Drank's own hold. First person keeps the
+                // table's grip.
                 Weapon drank_grip;
                 const Weapon *arms_weapon = weapon;
                 if (third_person && nettspend_weapon_kind(player->loadout[i]) == NETTSPEND_WEAPON_DRANK) {
@@ -1243,7 +1244,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // torso and the off one out, so the shoulders stay symmetric (x 0); y and z keep the pistol's
                     drank_grip.offset.x = 0.0f;
                     drank_grip.right_hold = pistol->right_hold;
-                    drank_grip.right_hold.x += NETTSPEND_TP_HAND_SIDE;
+                    drank_grip.right_hold.x = -NETTSPEND_TP_HAND_X;
+                    drank_grip.right_hold.z = drank_grip.offset.z + NETTSPEND_TP_HAND_REACH;
                     arms_weapon = &drank_grip;
                 }
 
@@ -1825,9 +1827,9 @@ void player_update_meshes(Player *player, const int is_preview) {
                             &cup_hand, &bottle_hand);
         if (pouring) player_arm_reach(trigger_arm, trigger_rest, cup_hand);
         else if (trigger_arm && trigger_arm->upper) {
-            // third person, not pouring: the arm keeps its generated rest (the pistol's hold with the hand moved out to
-            // the trigger side, NETTSPEND_TP_HAND_SIDE in player_generate_meshes), so it reaches out to its side like a
-            // pistol held out; the cup sits in the hand
+            // third person, not pouring: the arm keeps its generated rest (the pistol's hold with the hand reaching
+            // NETTSPEND_TP_HAND_REACH out in front, player_generate_meshes), so it points forward like a pistol held
+            // out; the cup sits in the hand
             nettspend_pose_cup_rest(held_arms->hose, trigger_rest, left_hand_mlt);
         }
         player_arm_reach(off_arm, off_rest, bottle_hand); // away, or carrying the bottle
