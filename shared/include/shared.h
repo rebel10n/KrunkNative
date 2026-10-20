@@ -1448,6 +1448,8 @@ typedef struct Player_t {
     int streak_weapon;            // currentStreakWeapon, -1 none
     unsigned char has_account:1;  // player.account (server: a backend account or the host's own machine,
                                   // which covers the offline sandbox, decisions.md): reqAccount streaks
+    unsigned char dev:1;          // player.account.isDev (server: net_client_is_dev at every spawn; a client's copy and
+                                  // bots 0): the spawn's weapon req lets a dev's customOnly / noComp secondary through
     // ---- end WP-B combat state ----
     // ---- map-logic WP-B: v7.1.4 world state of the player (shared/src/world.c)
     unsigned char no_pvp:1;            // noPVP: inside a NOPVP_ZONE this tick (no damage given or taken)

@@ -1,7 +1,8 @@
 // The weapon req of the game mode (game_weapon_req, shared/src/game_config.c; v10.0.2 v10.js:98979, _34256) and
 // the random pickups' pool (interact.c random_weapon, v10 onlyWeapons, v10.js:101956). A customOnly weapon (the
-// Grappler) is taken only in a custom game that is not comp, or by a dev; a noComp weapon is not taken in comp; a
-// random pickup is never a melee, equipment, customOnly or noDmg weapon (the Compressor).
+// Grappler) is taken only in a custom game that is not comp, or by a dev (the picker and the spawn, Player.dev);
+// a noComp weapon is not taken in comp; a random pickup is never a melee, equipment, customOnly or noDmg weapon
+// (the Compressor).
 //   cmake-build-debug/weapon_req_test   (run from the repository root)
 #include <shared.h>
 #include <game_config.h>
@@ -20,7 +21,8 @@ static void test_send(Game *game, int uid, int type, const void *payload, uint16
     (void) game; (void) uid; (void) type; (void) payload; (void) length;
 }
 
-static void configure(Game *game, const cJSON *map) {
+// is_local 1: the local game, its own authority (random pickups roll here); 0: a client's copy of a server's game
+static void configure(Game *game, const cJSON *map, const unsigned char is_local) {
     memset(game, 0, sizeof(*game));
     int *modes = calloc(1, sizeof(int));
     const cJSON **maps = calloc(1, sizeof(cJSON *));
@@ -28,7 +30,7 @@ static void configure(Game *game, const cJSON *map) {
     maps[0] = map;
     game_configure(game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
     game->hooks.send = test_send;
-    game_init(game, 0, 0, 1); // the local game: its own authority (random pickups roll here)
+    game_init(game, 0, 0, is_local);
     game->now = 0.0f;
 }
 
@@ -51,7 +53,7 @@ static void test_random_pool(const cJSON *base) {
         cJSON_AddItemToArray(objects, c);
     }
     Game game;
-    configure(&game, map);
+    configure(&game, map, 1);
     int pickups = 0, compressor = 0, grappler = 0, distinct[256] = {0}, rounds = 30;
     for (int r = 0; r < rounds; r++) {
         game_start_round(&game);
@@ -83,7 +85,7 @@ static void test_req(const cJSON *base) {
     const Weapon *alien = rules_weapon(11); // the Alien Blaster: noComp
     CHECK(grappler && grappler->custom_only && pistol && alien && alien->no_comp, "the table: the Grappler customOnly, the Alien Blaster noComp");
 
-    configure(&game, base); // official krunker.io: not hosted, not comp
+    configure(&game, base, 1); // official krunker.io: not hosted, not comp
     CHECK(!game_weapon_req(&game, grappler, 0), "official, not dev: the Grappler is refused");
     CHECK(game_weapon_req(&game, grappler, 1), "official, dev: the Grappler is allowed");
     CHECK(game_weapon_req(&game, pistol, 0), "official: the Pistol is allowed");
@@ -100,26 +102,38 @@ static void test_req(const cJSON *base) {
     CHECK(game_weapon_req(&game, grappler, 1), "custom comp, dev: the Grappler is allowed");
 }
 
-// ---- the spawn's secondary (player_build_loadout): the Grappler only in a custom game
+// ---- the spawn's secondary (player_build_loadout): the Grappler only in a custom game, or a dev's (v10 req's first
+// clause, account.isDev: the picker lets a dev pick it in any lobby and the spawn keeps it; Player.dev, the server's
+// net_client_is_dev). The spawn settles the player's secIndex (updateSecIndex: the pick, or 2 when refused) for the
+// SPAWN packet, and a client's copy of the player (no authority) builds what the SPAWN says, gate or not.
 static void test_spawn(const cJSON *base) {
-    printf("spawn secondary...\n");
-    Game official, custom;
-    configure(&official, base);
-    configure(&custom, base);
+    printf("spawn secondary (official, dev, custom, a client's copy)...\n");
+    Game official, custom, copy;
+    configure(&official, base, 1);
+    configure(&custom, base, 1);
     game_config_host(&custom, NULL, GAME_HOST_CUSTOM);
-    for (int k = 0; k < 2; k++) {
-        Game *game = k ? &custom : &official;
-        Player *p = player_init(game);
-        p->uid = 1;
+    configure(&copy, base, 0); // a client's copy of a server's game: not the authority
+    CHECK(game_is_authority(&official) && game_is_authority(&custom) && !game_is_authority(&copy), "the test games: two authorities and a copy");
+    const struct { Game *game; int dev; int grappler; const char *what; } cases[] = {
+        {&official, 0, 0, "official, not dev: the Pistol"},
+        {&official, 1, 1, "official, dev: the Grappler"},
+        {&custom, 0, 1, "custom, not dev: the Grappler"},
+        {&copy, 0, 1, "a client's copy, not dev: the SPAWN's Grappler as is"},
+    };
+    for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+        Player *p = player_init(cases[k].game);
+        p->uid = (int) k + 1;
         p->class_index = 0;
         p->has_account = 1;
+        p->dev = (unsigned char) cases[k].dev;
         p->secondary_index = WEAPON_ID_GRAPPLER;
-        game_players_add(game, p);
+        game_players_add(cases[k].game, p);
         player_spawn(p);
         int has = 0;
         for (int i = 0; i < p->loadout_size; i++) has |= p->loadout[i] == WEAPON_ID_GRAPPLER;
-        if (k == 0) CHECK(!has, "official spawn: the Grappler is not the secondary");
-        else CHECK(has, "custom spawn: the Grappler is the secondary");
+        CHECK(has == cases[k].grappler, "%s (the loadout has the Grappler: %d)", cases[k].what, has);
+        const int settled = cases[k].grappler ? WEAPON_ID_GRAPPLER : WEAPON_ID_PISTOL;
+        CHECK(p->secondary_index == settled, "%s: the settled secIndex is %d, not %d", cases[k].what, settled, p->secondary_index);
     }
 }
 

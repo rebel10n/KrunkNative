@@ -121,14 +121,21 @@ static int player_build_loadout(Player *player) {
     // KrunkNative: a class with kn_secondary (the Nettspend's Money Spread) always carries that one.
     const int fixed_secondary = class_config->kn_secondary > 0 ? class_config->kn_secondary - 1 : -1;
     const int picked_secondary = fixed_secondary >= 0 && fixed_secondary < (int) weapon_count && weapons[fixed_secondary] ? fixed_secondary : player->secondary_index;
-    // v7.1.4 weapons.js req (game_weapon_req): customOnly secondaries (Grappler) only in a custom game that
-    // is not comp; noComp ones stay out of comp lobbies. The isDev bypass is per account (the picker only).
-    // A class-bound secondary (the Nettspend's Money Spread) is the class's, not a pick: no gate, so
-    // the class plays the same in every lobby (doc/v7/decisions.md "Nettspend class").
+    // v10 updateSecIndex (v10.js:169364) with weapons.js req (game_weapon_req): a secondary the req refuses is the
+    // Pistol. req's first clause lets a dev through (account.isDev: player->dev, the server's net_client_is_dev at
+    // the spawn, as the picker's acc->is_dev); otherwise customOnly secondaries (the Grappler) only in a custom
+    // game that is not comp, noComp ones out of comp lobbies. A class-bound secondary (the Nettspend's Money
+    // Spread) is the class's, not a pick: no gate, so the class plays the same in every lobby (doc/v7/decisions.md
+    // "Nettspend class"). A client's copy of a player (not the authority) takes the SPAWN's secondary as is, like
+    // setClass pushes the secIndex the server sent: the server settled it (it knows who is a dev, the copy not).
     const int bound = fixed_secondary >= 0 && picked_secondary == fixed_secondary;
+    const int settled = !game_is_authority(player->game);
     const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
-        (bound || game_weapon_req(player->game, weapons[picked_secondary], 0))
+        (bound || settled || game_weapon_req(player->game, weapons[picked_secondary], player->dev))
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
+    // updateSecIndex settles the player's secIndex (the pick, or 2 when refused): the SPAWN carries that one, so
+    // every copy of this player builds the loadout the authority did. The connection keeps the pick itself.
+    if (class_config->secondary && !bound && secondary_index >= 0) player->secondary_index = secondary_index;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 
     if (primary != primary_index) {

@@ -859,6 +859,9 @@ static void net_spawn_client(ClientConnection *client) {
     // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
     player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
     client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
+    // account.isDev for the spawn's weapon req (player_spawn: a dev's Grappler in any lobby, v10 updateSecIndex):
+    // a DEV account, an op or the server's own machine, read at every spawn (a live account switch counts next)
+    client->player->dev = (unsigned char) !!net_client_is_dev(client);
     // KrunkNative Object Manager: the connection's extra weapons, while this game allows them
     const ObjectManagerPerms om_perms = net_om_perms(client);
     // the Build Tool's cost waiver follows the Object Manager's spawn right (shared.h build_free)
