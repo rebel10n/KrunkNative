@@ -2119,7 +2119,10 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     if (!official && !custom && !dedicated && show_timer()) {
         const cJSON *tl = cJSON_GetArrayItem(t, 5);
         if (!cJSON_IsNumber(tl)) tl = cJSON_GetObjectItem(meta_of(t), "timeLeft");
-        double left = (cJSON_IsNumber(tl) ? tl->valuedouble : 0.0) - (now - g_list_start_ms) / 1000.0;
+        // the base is the list the row came in: krunker.io's own answer for its rows (v10 has one list and one
+        // startTime), the brain's arrival for ours
+        const double started = krunker ? krunker_lobbies_started_ms() : g_list_start_ms;
+        double left = (cJSON_IsNumber(tl) ? tl->valuedouble : 0.0) - (now - started) / 1000.0;
         if (left < 0) left = 0;
         char text[96];
         time_left_text(text, sizeof(text), left);

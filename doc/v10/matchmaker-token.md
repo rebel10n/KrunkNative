@@ -340,7 +340,8 @@ Server list (windows[1] loadData): a failed game list keeps the window on LOADIN
   * the region cell as v10 has it: only on custom / official-custom rows and in the mode-grouped
     browser, reading the id's prefix ("NY")
   * ping icon
-  * "Ends in" (the tuple's seconds left)
+  * "Ends in" (the tuple's seconds left, counted down from when krunker.io's list answered: v10's
+    startTime; "Starting" at zero; no timer on official, custom or 24/7 rows, as v10's `!oc && !c && !ds`)
 
   krunker.io's official customs and custom games sit in their own groups after ours, "krunker.io -
   Official Customs" and "krunker.io - Custom Games" (their `oc` and `c` rows), never in Box Office's

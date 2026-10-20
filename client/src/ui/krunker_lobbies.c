@@ -374,6 +374,9 @@ void krunker_lobbies_network_changed(void) {
 
 const cJSON *krunker_lobbies_list(void) { return krunker_lobbies_enabled() ? K.list : NULL; }
 
+// v10 loadData: startTime = Date.now() when the list arrived; the official rows' timeLeft counts down from it.
+double krunker_lobbies_started_ms(void) { return K.answered_ms; }
+
 const cJSON *krunker_lobbies_find(const char *id) {
     const cJSON *t;
     if (!id || !krunker_lobbies_enabled()) return NULL;
@@ -755,6 +758,7 @@ int krunker_lobbies_region_ping_ms(const char *region, double *ms) {
 }
 void krunker_lobbies_refresh(const int force) { (void) force; }
 const cJSON *krunker_lobbies_list(void) { return NULL; }
+double krunker_lobbies_started_ms(void) { return 0; }
 const cJSON *krunker_lobbies_find(const char *id) {
     (void) id;
     return NULL;

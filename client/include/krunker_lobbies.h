@@ -35,6 +35,9 @@ int krunker_lobbies_enabled(void);              // 0 on the web, with the matchm
 // window (menu_rerender_if_open(2)) and runs a pending seek (krunker_lobbies_seek).
 void krunker_lobbies_refresh(int force);
 const cJSON *krunker_lobbies_list(void);        // tuples in krunker.io's order (v10's serverListData); NULL = none yet
+// When krunker.io's list last answered (glfwGetTime * 1000, the Servers window's clock): the base of its rows'
+// "Ends in" (v10's startTime for the list). -1e18 = never answered.
+double krunker_lobbies_started_ms(void);
 // The tuple of lobby <id> in the current list ([id, region, players, max, meta, timeLeft]); NULL = not listed
 const cJSON *krunker_lobbies_find(const char *id);
 int krunker_lobbies_loading(void);

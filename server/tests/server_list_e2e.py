@@ -4,6 +4,7 @@ openServerWindow; v10.js:211155-211460, 218373-218417, 216625).
 
   python3 -I server/tests/server_list_e2e.py BUILD_DIR      (run from the repository root)
 
+  C1 a krunker.io row's "Ends in" counts down from the list's own answer (v10 startTime), not the brain's
   R1 a row's ping icon is the region's measured ping (v10's pingData, getRegionPing with every list load):
      a slow region (1.5 s) shows red on Box Office's rows and on krunker.io's rows, not the low green
   R2 the list is asked again only when it is older than 10 s (v10's serverBrowserRate): a re-render inside
@@ -201,6 +202,24 @@ def rows():
           loads == 2, "loads=%d brain=%s" % (loads, brain.paths()))
 
 
+def countdown():
+    """C1: a krunker.io row's "Ends in" counts down from krunker.io's own answer (v10 loadData's startTime), not
+    from the brain list's arrival: with no brain, the Servers window's krunker.io rows read Starting once the client
+    has run longer than the lobby's timeLeft (the count was from process start)."""
+    port = kn_proto.free_ports(1)[0]
+    kio = Matchmaker(port, {}, [["NY:cdown1", "us-nj", 3, 8, {"i": "Kanji", "g": 0}, 8]])
+    env = {"KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % port, "KRUNKNATIVE_KRUNKER_JOIN": "browser",
+           "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:9/servers"}
+    cfg = os.path.join(WORK, "countdown-cfg")
+    # the window opens 20 s after the boot: the list is asked then (older than 10 s) and the 8 s lobby reads its count
+    script = ("0 boot\n20000 call showWindow 2\n20200 call windows.1.switchTab 1\n21000 call setExpandedRegion 0\n"
+              "22500 text @cd .serverTimeLeft\n23000 quit\n")
+    text = run_client("C1", script, env, (), cfg, timeout=120)
+    line = next((l for l in text.splitlines() if "[input_script] text" in l and " @cd " in l), "")
+    check("C1: a krunker.io row counts down from the list's answer (an 8 s lobby, read 20 s after the boot: Ends in, not Starting)",
+          "Ends in" in line and "text=Starting" not in line, (line, kio.paths()))
+
+
 def play():
     """P1-P2: ?play=<map> (hub links, v10 playMap): a seek for that map in any region with v10's dataQuery
     (i, the map's index), autoChangeGame false; no lobby plays it (NoMatchingServers): the game list, then the
@@ -277,6 +296,7 @@ def main():
         print("server_list_e2e: no client_bin: skipped")
         return 77
     rows()
+    countdown()
     finder()
     list_failure()
     play()
