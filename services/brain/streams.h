@@ -38,10 +38,10 @@ int streams_parse_game_id(const char *body, char *id, size_t cap);
 
 /* ---- stream thumbnails (stream_thumbs.c: GET /streams/thumb?url=)
  *
- * The native client's HTML engine loads page and asset images only, so a card's Twitch preview
- * (thumbnailUrl) reaches it through the brain: the brain fetches the image from an allow-listed
- * Twitch CDN host (https only, no redirects, size-capped, cached) and answers it as a data: URL.
- * Pure checks below (tests/test_streams.c). */
+ * No client asks this route now: a card's Twitch preview (thumbnailUrl) is its <img src>, as v10 sets it,
+ * and the native engine fetches it itself (client/src/ui/remote_images.c). The route fetches an image from
+ * an allow-listed Twitch CDN host (https only, no redirects, size-capped, cached) and answers it as a data:
+ * URL. Pure checks below (tests/test_streams.c). */
 
 int stream_thumbs_init(struct Brain *b);
 void stream_thumbs_shutdown(struct Brain *b);

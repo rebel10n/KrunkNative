@@ -16,9 +16,16 @@ KRUNKNATIVE_KRUNKER_MATCHMAKER /game-list with three custom games, and its data 
   - Both: Popular Now is hidden too; the overlay shows the brain's stream;
   - back to Box Office with krunker.io's list now cached: Box Office's games again, the brain's stream.
 Before the fix the Box Office menu summed in krunker.io's custom games ("41 playing" counts), the krunker.io and Both
-types showed them in Popular Now, and the streams were the brain's for every Server Type. Exit code 0 when every check
-passed; the input-script log is kept in ~/.cache/kn-menu-sources-e2e-* on failure.
+types showed them in Popular Now, and the streams were the brain's for every Server Type.
+
+Each card's picture: the answer's thumbnailUrl is a JPEG on a third stub (the CDN: /previews/<name>-440x248.jpg). The
+first card's <img src> is that URL, as v10's markup sets it (v10.js:146254) on every Server Type, the CDN is asked for
+it, and the picture is drawn in a frame of the page. The cache is cold (KRUNKNATIVE_REMOTE_IMAGE_CACHE): the picture
+arrives after the page's first paint, and the page must repaint to show it.
+
+Exit code 0 when every check passed; the input-script log is kept in ~/.cache/kn-menu-sources-e2e-* on failure.
 """
+import base64
 import json
 import os
 import re
@@ -29,6 +36,9 @@ import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server", "tests"))
+from kn_png import read_rgba  # noqa: E402  (the frames client_bin writes: stdlib PNG)
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,9 +70,22 @@ KRUNKER = {"success": True, "totalPlayerCount": 137, "games": [
 ]}
 
 
-def streams_answer(username):
+# a real 88x50 JPEG (streams_test.py's stub CDN preview): every card's picture
+THUMB = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/"
+    "2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAyAFgDASIAAhEBAxEB/8QAFwAB"
+    "AQEBAAAAAAAAAAAAAAAAAAMCBf/EABUQAQEAAAAAAAAAAAAAAAAAAAAS/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAUE/8QAFREBAQAAAAAAAAAAAAAAAAAAABP/"
+    "2gAMAwEAAhEDEQA/AOBJKkkrVVKKckqSSVIpySpJJUinJKkklSKckqSSVIpyKSFSKskqSSl1V4pySpJJUinJKkklSKckqSSVIpySpJJUinIpIVIqSSpJKXVX"
+    "inJKkklSKckqSSVIpySpJJUinJKkklSKcikhUi2AxtgAAAAAAAAAD//Z")
+
+
+def picture(cdn_port, name):
+    return "http://127.0.0.1:%d/previews/%s-440x248.jpg" % (cdn_port, name)
+
+
+def streams_answer(username, thumbnail):
     return {"success": True, "data": {"streams": [
-        {"username": username, "title": "Live from " + username, "viewerCount": 1250, "thumbnailUrl": "", "languageCode": "en"}],
+        {"username": username, "title": "Live from " + username, "viewerCount": 1250, "thumbnailUrl": thumbnail, "languageCode": "en"}],
         "promo": False, "dropCampaigns": []}}
 
 
@@ -90,13 +113,34 @@ class Counting(BaseHTTPRequestHandler):
         pass
 
 
+class Cdn(BaseHTTPRequestHandler):
+    """The stub CDN: the cards' pictures (/previews/<name>-440x248.jpg). Counts every request by path."""
+    hits = {}
+    lock = threading.Lock()
+
+    def do_GET(self):  # noqa: N802
+        if not (self.path.startswith("/previews/") and self.path.endswith("-440x248.jpg")):
+            self.send_error(404)
+            return
+        with self.lock:
+            self.hits[self.path] = self.hits.get(self.path, 0) + 1
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(THUMB)))
+        self.end_headers()
+        self.wfile.write(THUMB)
+
+    def log_message(self, *args):
+        pass
+
+
 class Brain(Counting):
-    routes = {"/streams/top": streams_answer("box_office_live")}
+    routes = {}  # main() sets them (the answers name the CDN's port)
     hits = {}
 
 
 class Krunker(Counting):
-    routes = {"/game-list": KRUNKER, "/streams/top": streams_answer("kio_live")}
+    routes = {}
     hits = {}
 
 
@@ -127,7 +171,9 @@ def run_native(script, brain_port, kio_port, timeout=240):
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_SERVER_LIST": server_list,
                 # krunker.io's stub: its matchmaker (the lobby list) and its data API (the streams)
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % kio_port,
-                "KRUNKNATIVE_KRUNKER_DATA_API": "http://127.0.0.1:%d" % kio_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
+                "KRUNKNATIVE_KRUNKER_DATA_API": "http://127.0.0.1:%d" % kio_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io",
+                # the pictures are fetched afresh every run (a cached file would skip the CDN stub)
+                "KRUNKNATIVE_REMOTE_IMAGE_CACHE": os.path.join(WORK, "remote-images")})
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "--map", "kanji"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -165,21 +211,58 @@ def vis(log, label):
     return dict(kv.split("=", 1) for kv in m.group(1).split()) if m else {}
 
 
+def attr_src(log, label):
+    """The first card's picture (its <img src>; "-" when there is none)."""
+    m = re.search(r"\[input_script\] attr t=\d+ " + re.escape(label) + r" n=\d+ src=(\S*)", log)
+    return m.group(1) if m else None
+
+
 def phase(t, tag):
-    """The checks of one Server Type at time t: the rail's text and card count, which list's names it holds, the overlay."""
+    """The checks of one Server Type at time t: the rail's text and card count, which list's names it holds, the overlay,
+    the first card's picture (its src, its box, and a frame of the page: the picture is drawn)."""
     return ("%d text @%s_rail [id=subLogoButtons] .popRailCards\n"
             "%d nodes @%s_cards .popRailCard\n"
             "%d grep @%s_ours Rooftop [id=subLogoButtons] .popRailName\n"
             "%d grep @%s_kio Krunk_Plaza [id=subLogoButtons] .popRailName\n"
             "%d vis @%s_overlay knStreams\n"
             "%d text @%s_stream [id=knStreams] .stream-username\n"
-            % (t, tag, t + 5, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag))
+            "%d attr @%s_thumb src [id=knStreamThumb0]\n"
+            "%d rect @%s_box knStreamThumb0\n"
+            "%d frames %s 1\n"
+            % (t, tag, t + 5, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag, t + 45, tag,
+               t + 46, tag, t + 47, os.path.join(WORK, tag)))
+
+
+def picture_drawn(log, tag):
+    """The first card's picture is on the page: in the frame at its box, the upper part (above the viewer badge) is not
+    the flat placeholder. A card with no picture, or one whose picture never repaints, reads as one flat colour."""
+    m = re.search(r"\[input_script\] rect t=\d+ @%s_box knStreamThumb0=([\d.]+),([\d.]+),([\d.]+),([\d.]+)" % tag, log)
+    frames = sorted(f for f in os.listdir(WORK) if f.startswith(tag + "_") and f.endswith(".png")) if os.path.isdir(WORK) else []
+    if not m or not frames:
+        return False
+    x, y, bw, bh = (float(v) for v in m.groups())
+    w, h, channels, rows = read_rgba(os.path.join(WORK, frames[0]))
+    x0, x1 = max(0, int(x + 0.1 * bw)), min(w, int(x + 0.9 * bw))
+    y0, y1 = max(0, int(y + 0.05 * bh)), min(h, int(y + 0.45 * bh))
+    values = []
+    for py in range(y0, y1, 2):
+        row = rows[py]
+        for px in range(x0, x1, 2):
+            values.extend(row[px * channels:px * channels + 3])
+    if len(values) < 30:
+        return False
+    mean = sum(values) / len(values)
+    return (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 > 8.0
 
 
 def main():
+    cdn = ThreadingHTTPServer(("127.0.0.1", 0), Cdn)
+    cdn_port = cdn.server_address[1]
+    Brain.routes = {"/streams/top": streams_answer("box_office_live", picture(cdn_port, "box_office_live"))}
+    Krunker.routes = {"/game-list": KRUNKER, "/streams/top": streams_answer("kio_live", picture(cdn_port, "kio_live"))}
     brain = ThreadingHTTPServer(("127.0.0.1", 0), Brain)
     kio = ThreadingHTTPServer(("127.0.0.1", 0), Krunker)
-    for s in (brain, kio):
+    for s in (cdn, brain, kio):
         threading.Thread(target=s.serve_forever, daemon=True).start()
 
     # Box Office servers (the default Server Type) first; then each other type through the settings handler
@@ -191,6 +274,7 @@ def main():
     log = run_native(script, brain.server_address[1], kio.server_address[1])
     brain.shutdown()
     kio.shutdown()
+    cdn.shutdown()
 
     # Box Office servers: Box Office's three maps by players, none of krunker.io's
     n, rail = text(log, "@bo_rail")
@@ -227,6 +311,18 @@ def main():
     check(grep(log, "@bo2_kio") == 0, "Box Office servers again: none of krunker.io's maps")
     _, stream = text(log, "@bo2_stream")
     check(stream == "box_office_live", f"Box Office servers again: the brain's streams ({stream!r})")
+
+    # The first card's picture on every Server Type: its <img src> is the answer's thumbnailUrl (v10's markup), the CDN
+    # serves it, and the engine has it ("[image] <url>: arrived" is the picture reaching the page: it draws)
+    bo_pic, kio_pic = picture(cdn_port, "box_office_live"), picture(cdn_port, "kio_live")
+    for tag, want, name in (("bo", bo_pic, "Box Office servers"), ("kio", kio_pic, "krunker.io servers"),
+                            ("both", bo_pic, "Both"), ("bo2", bo_pic, "Box Office servers again")):
+        src = attr_src(log, "@%s_thumb" % tag)
+        check(src == want, f"{name}: the first card's picture is its thumbnailUrl ({src!r})")
+        path = want[want.index("/previews/"):]
+        check(Cdn.hits.get(path, 0) >= 1, f"{name}: the CDN's picture was fetched")
+        check(("[image] %s: arrived" % want) in log, f"{name}: the picture reached the engine")
+        check(picture_drawn(log, tag), f"{name}: the picture is drawn on the card (a frame of the page)")
 
     if failures:
         print(f"menu_sources_e2e: {len(failures)} failed (logs in {WORK})")

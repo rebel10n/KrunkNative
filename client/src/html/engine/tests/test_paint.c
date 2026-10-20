@@ -77,6 +77,14 @@ unsigned image_texture(const ImageEntry *entry, int nearest)
     return entry->tex;
 }
 
+static unsigned g_image_loads;   /* the stub cache's load count (image_cache_loads) */
+
+unsigned image_cache_loads(const ImageCache *cache)
+{
+    (void) cache;
+    return g_image_loads;
+}
+
 /* ---- tiny test framework ---------------------------------------------------- */
 
 static int g_fail, g_pass;
@@ -992,6 +1000,13 @@ static void test_caching(void)
     g_atlas_gen++;
     build(root);
     CHECK(g_ctx.stats_rebuilt == 3);
+
+    /* an image loaded since the last paint: every context is re-recorded (the placeholder it drew is stale) */
+    g_image_loads++;
+    build(root);
+    CHECK(g_ctx.stats_rebuilt == 3);
+    build(root);
+    CHECK(g_ctx.stats_rebuilt == 0);
 
     /* removing a context evicts its cache; invalidate_all rebuilds */
     root->first_child = b;

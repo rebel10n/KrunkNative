@@ -2986,6 +2986,16 @@ static int paint_build_once(PaintCtx *ctx, Box *root, DisplayList *out)
         }
     }
 
+    /* an image loaded after the lists were built (a remote picture that arrived, an asset that came in): the
+     * contexts that drew its placeholder keep it, since the geometry did not move (an absolutely sized <img>) */
+    if (ctx->images) {
+        const unsigned loads = image_cache_loads(ctx->images);
+        if (loads != ctx->image_loads) {
+            ctx->image_loads = loads;
+            paint_invalidate_all(ctx);
+        }
+    }
+
     PaintCache *rc_cache = table_get_or_create(ctx->caches, root);
     if (!rc_cache) return -1;
     DirtyWalk w = {ctx, KN_FNV64_INIT, 0};

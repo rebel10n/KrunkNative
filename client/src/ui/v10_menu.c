@@ -26,7 +26,7 @@
 //     (Twitch's live Krunker streams) on every Server Type and account: the brain's (streams.c) on Box Office,
 //     api.krunker.io's (v10's own, menu_sources.h) otherwise; the small view's three cards, a click
 //     opens twitch.tv/<name> in the browser; no answer hides it, no live streams shows v10's text;
-//     the cards' Twitch previews come through the brain's /streams/thumb (stream_thumbs.c)
+//     each card's picture is the answer's thumbnailUrl, its <img src> as v10's (remote_images.c loads it)
 //   - the menu's idle state (v10_menu_tick): Popular Now (_52548 v10:147200, svelte-6ewa5r: the top 3
 //     custom maps of Box Office's game list by players, on the Box Office Server Type only (menu_sources.h),
 //     asked again every 60 s), the match-info bar's
@@ -68,6 +68,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 int  v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // v10_login.c
@@ -475,82 +476,16 @@ static struct {
     int override;             // tests: knV10Streams gave the list, the brain is not asked
 } L;
 
+// The card's picture: v10 sets its <img src> to the answer's thumbnailUrl as it is (v10.js:146254). The engine loads an
+// http(s) image itself (remote_images.c: the media lane, a disk cache, drawn once it arrives), so the card asks nobody
+// for it. Any other value, or one too long for the card's buffer, shows no picture: the card's grey box, as v10's
+// while an image loads.
+static int streams_picture_ok(const char *url) {
+    if (strlen(url) >= sizeof L.thumb[0]) return 0;
+    return !strncasecmp(url, "https://", 8) || !strncasecmp(url, "http://", 7);
+}
+
 // a Twitch login: letters, digits and '_' (the card's link is twitch.tv/<name>)
-// The cards' previews. The engine loads page and asset images only, so a thumbnailUrl
-// (https://static-cdn.jtvnw.net/...) is asked of the brain's /streams/thumb (stream_thumbs.c:
-// allow-listed Twitch CDN hosts, size-capped, cached), which answers it as a data: URL; the card
-// shows it once it arrives (blank until then, or when the brain cannot fetch it). Kept for
-// STREAMS_THUMB_TTL_MS per URL; a failed URL is asked again after STREAMS_THUMB_RETRY_MS.
-#define STREAMS_THUMB_SLOTS 8
-#define STREAMS_THUMB_TTL_MS 300000.0
-#define STREAMS_THUMB_RETRY_MS 60000.0
-static struct {
-    char url[320];
-    char *image;    // the data: URL (owned), NULL = none (yet)
-    double at;      // menu_now_ms() of the request
-    double used;
-    unsigned gen;   // bumped at every reuse: a late answer for the old URL is dropped
-    int pending;
-} T[STREAMS_THUMB_SLOTS];
-
-static const char *streams_thumb_image(const char *url) {
-    for (int i = 0; url[0] && i < STREAMS_THUMB_SLOTS; i++)
-        if (T[i].image && !strcmp(T[i].url, url)) return T[i].image;
-    return "";
-}
-
-static void streams_render(void);
-
-static void streams_thumb_body(void *user, const int status, const char *body, size_t length) {
-    (void) length;
-    const uintptr_t tag = (uintptr_t) user;
-    const int i = (int) (tag & 0xff);
-    if (i < 0 || i >= STREAMS_THUMB_SLOTS || T[i].gen != (unsigned) (tag >> 8)) return;
-    T[i].pending = 0;
-    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
-    const char *img = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(res, "data"), "image"));
-    if (img && (!strncmp(img, "data:image/jpeg;base64,", 23) || !strncmp(img, "data:image/png;base64,", 22))) {
-        free(T[i].image);
-        T[i].image = strdup(img);
-        if (v10_menu_page()) streams_render();
-    }
-    cJSON_Delete(res);
-}
-
-// asks the brain for url's preview unless it is cached, fresh or on its way
-static void streams_thumb_want(const char *url) {
-    if (!url[0] || backend_available() != 1) return;
-    const double now = menu_now_ms();
-    int slot = -1;
-    for (int i = 0; i < STREAMS_THUMB_SLOTS; i++)
-        if (T[i].url[0] && !strcmp(T[i].url, url)) slot = i;
-    if (slot >= 0) {
-        T[slot].used = now;
-        const double age = now - T[slot].at;
-        if (T[slot].pending || age < (T[slot].image ? STREAMS_THUMB_TTL_MS : STREAMS_THUMB_RETRY_MS)) return;
-    } else {
-        slot = 0; // a free slot, else the least recently used one
-        for (int i = 0; i < STREAMS_THUMB_SLOTS; i++) {
-            if (!T[i].url[0]) {
-                slot = i;
-                break;
-            }
-            if (T[i].used < T[slot].used) slot = i;
-        }
-        free(T[slot].image);
-        T[slot].image = NULL;
-        T[slot].gen++;
-        T[slot].pending = 0;
-        snprintf(T[slot].url, sizeof T[slot].url, "%s", url);
-        T[slot].used = now;
-    }
-    char enc[960], path[1024];
-    backend_url_encode(enc, sizeof enc, url);
-    snprintf(path, sizeof path, "/streams/thumb?url=%s", enc);
-    T[slot].at = now;
-    T[slot].pending = backend_http_get(path, streams_thumb_body, (void *) (uintptr_t) ((uintptr_t) slot | ((uintptr_t) T[slot].gen << 8)));
-}
-
 static int streams_login_ok(const char *s) {
     const size_t n = strlen(s);
     if (!n || n > STREAMS_NAME_MAX) return 0;
@@ -592,7 +527,7 @@ static void streams_render(void) {
             sb_append_esc(&sb, L.title[i]);
             sb_appendf(&sb, "\" onclick=\"knV10Stream(%d)\"><div class=\"thumbnail svelte-60shhe\">"
                             "<img loading=\"lazy\" decoding=\"async\" class=\"svelte-60shhe\" id=\"knStreamThumb%d\" src=\"", i, i);
-            sb_append_esc(&sb, streams_thumb_image(L.thumb[i])); // the brain's data: URL of thumbnailUrl
+            sb_append_esc(&sb, L.thumb[i]); // the answer's thumbnailUrl (streams_picture_ok), v10's src
             sb_append(&sb, "\" alt=\"");
             sb_append_esc(&sb, L.title[i]);
             sb_append(&sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
@@ -631,10 +566,9 @@ static void streams_apply(const cJSON *streams) {
         const cJSON *th = cJSON_GetObjectItemCaseSensitive(s, "thumbnailUrl");
         snprintf(L.user[L.n], sizeof L.user[0], "%s", u->valuestring);
         snprintf(L.title[L.n], sizeof L.title[0], "%s", cJSON_IsString(t) ? t->valuestring : "");
-        const int https = cJSON_IsString(th) && !strncmp(th->valuestring, "https://", 8);
-        snprintf(L.thumb[L.n], sizeof L.thumb[0], "%s", https ? th->valuestring : "");
+        const char *picture = cJSON_IsString(th) ? th->valuestring : "";
+        snprintf(L.thumb[L.n], sizeof L.thumb[0], "%s", streams_picture_ok(picture) ? picture : "");
         L.viewers[L.n] = cJSON_IsNumber(v) && v->valuedouble > 0 ? (int) v->valuedouble : 0;
-        streams_thumb_want(L.thumb[L.n]);
         L.n++;
     }
     if (v10_menu_page()) streams_render();

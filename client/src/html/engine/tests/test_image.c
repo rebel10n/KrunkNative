@@ -582,8 +582,10 @@ static void test_remote(ImageCache *cache, const char *ui_dir) {
     /* the download lands: the fetcher writes the file and bumps the arrival generation */
     CHECK(copy_file(timer, g_remote_pending_path), "copy %s", timer);
     asset_arrival_bump();
+    const unsigned loads = image_cache_loads(cache);
     CHECK(image_cache_retry_missing(cache) >= 1, "the arrived remote image is loaded");
     CHECK(!pending->failed && pending->w == 32, "after arrival: failed %d, w %d", pending->failed, pending->w);
+    CHECK(image_cache_loads(cache) > loads, "a load moves the cache's load count (paint re-records the page: paint.c)");
     remove(g_remote_pending_path);
     image_set_remote_fetcher(NULL);
     CHECK(image_get(cache, "https://example.com/other.png", "index.html")->failed, "no fetcher: remote URLs fail");

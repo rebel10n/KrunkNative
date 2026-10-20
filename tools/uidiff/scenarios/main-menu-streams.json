@@ -24,5 +24,5 @@
     ]
   },
   "frames": 3,
-  "note": "KrunkNative: the Live Streams overlay (v10 .streams-overlay, v10:145187) in the small view with a stubbed /streams/top answer (three live streams, the first with 1.2K viewers). Thumbnails are empty here: the native engine loads only page and asset images."
+  "note": "KrunkNative: the Live Streams overlay (v10 .streams-overlay, v10:145187) in the small view with a stubbed /streams/top answer (three live streams, the first with 1.2K viewers). Thumbnails are empty here: the stub's thumbnailUrl is empty (a card with a thumbnailUrl loads it, as v10's <img src>)."
 }

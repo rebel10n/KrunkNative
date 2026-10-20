@@ -93,6 +93,7 @@ struct ImageCache {
     size_t bytes;          /* GL bytes of the resident lazy entries              */
     int decodes;           /* lazy decodes so far (profile)                      */
     unsigned arrivals;     /* asset_arrival_generation() last seen               */
+    unsigned loads;        /* images image_cache_retry_missing() loaded (image_cache_loads) */
     double clock_ms;       /* image_cache_set_clock(): the animated GIFs' clock    */
     int clock_set;
 };
@@ -988,8 +989,11 @@ int image_cache_retry_missing(ImageCache *cache) {
             loaded++;
         }
     }
+    cache->loads += (unsigned) loaded;
     return loaded;
 }
+
+unsigned image_cache_loads(const ImageCache *cache) { return cache ? cache->loads : 0; }
 
 void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, int *decodes) {
     int r = 0;

@@ -2,10 +2,9 @@
  * services/brain/stream_thumbs.c - GET /streams/thumb?url= (and /api/streams/thumb): the Live
  * Streams cards' Twitch previews for the native client (streams.h).
  *
- * The native HTML engine loads page and asset images only (client/src/html/engine/image.c), so a
- * card's thumbnailUrl stayed blank. The client asks the brain instead: the brain fetches the image
- * and answers {success, data: {url, image: "data:image/jpeg;base64,..."}}, which the engine draws
- * like any data: URL (the web build's fetch() reads it the same way).
+ * No client asks this route now: a card's <img src> is its thumbnailUrl, as v10 sets it, and the
+ * native engine fetches http(s) images itself (client/src/ui/remote_images.c). The route answers
+ * {success, data: {url, image: "data:image/jpeg;base64,..."}}, the image as a data: URL.
  *
  * It is not an open proxy: the URL must be https on an allow-listed Twitch CDN host
  * (streams.thumbs.hosts, default static-cdn.jtvnw.net) with a plain image path

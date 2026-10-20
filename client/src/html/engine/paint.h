@@ -132,6 +132,7 @@ struct PaintCtx {
     struct PaintCacheTable *caches;
     uint32_t frame;
     uint32_t atlas_generation;
+    unsigned image_loads;      /* image_cache_loads() when the lists were last built */
     int last_hide_scrollbars;
     int stats_rebuilt;         /* contexts re-recorded in the last build */
     int stats_contexts;        /* contexts visited in the last build */

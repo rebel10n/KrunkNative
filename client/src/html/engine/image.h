@@ -167,6 +167,9 @@ void image_cache_set_clock(ImageCache *cache, double now_ms);
  * failed with "file not found" and whose asset file exists now are probed again. Returns how many
  * load now (the caller relayouts / repaints). */
 int  image_cache_retry_missing(ImageCache *cache);
+/* How many images image_cache_retry_missing() has loaded so far. A paint that drew one before it loaded (a
+ * placeholder, a pending remote picture) is stale: paint.c re-records the page when this moves. */
+unsigned image_cache_loads(const ImageCache *cache);
 
 /* ---- remote images -------------------------------------------------------- */
 
