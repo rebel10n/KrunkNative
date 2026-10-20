@@ -35,7 +35,9 @@ const MapConfig g_default_map_config = {
 // shared/src/map_catalog.c). g_rotation_maps and the strike pool are mapIndex lists.
 const cJSON *g_maps[MAP_CATALOG_OFFICIAL_COUNT];
 // v7.1.4 data/map.js rotationMaps
-const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28};
+// v10.0.2 rotationMaps (v10.js:167210): the public rotation, as official mapIndexes.
+const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28,
+    32, 33, 34, 36, 37, 39, 40, 42, 44, 45};
 
 // prefabs.prefabs[i || id || 0] || prefabs.prefabs[0] (v7 map.js generate): a JS array index
 // is a number or its canonical string; anything else (a prefab *name*, 5.5, true) is undefined.

@@ -618,7 +618,7 @@ static void test_rotation(void) {
     memcpy(modes, g_rotation_modes, rotation_count * sizeof(int));
     game_configure(&game, NULL, NULL, 0, modes, rotation_count, NULL, 0, NULL, 0); // Krunker's rotation maps
     game.hooks.send = test_send;
-    CHECK(game.map_count == 24, "24 rotation maps (%zu)", game.map_count);
+    CHECK(game.map_count == 34, "34 rotation maps (%zu)", game.map_count);
 
     // the first round: a random playable pair, every mode of the rotation comes up
     int seen_mode[MODE_COUNT] = {0}, seen_map[64] = {0}, bad = 0;

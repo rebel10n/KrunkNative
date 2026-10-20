@@ -124,13 +124,16 @@ static void test_files(const int verbose) {
     }
 }
 
-// FLAVOR_BASE: v7's rotation and files. Loads only Habitat (index 22) through the catalogue, which
+// FLAVOR_BASE: v10's rotation and files. Loads only Habitat (index 22) through the catalogue, which
 // caches it for the process: the Strike checks below use the other six.
 static void test_base(void) {
     CHECK(flavor_get() == FLAVOR_BASE, "the test starts on the base flavor");
     int rotation[64];
     const size_t n = map_catalog_rotation(rotation, 64);
-    CHECK(n == 24 && rotation[0] == 0 && rotation[23] == 28, "base rotation: %zu maps (v7 rotationMaps)", n);
+    // map_catalog_rotation returns catalogue positions; the maps are v10 mapIndexes (g_rotation_maps)
+    CHECK(n == 34 && map_catalog_map_index((size_t) rotation[0]) == 0 && map_catalog_map_index((size_t) rotation[23]) == 28 &&
+          map_catalog_map_index((size_t) rotation[24]) == 32 && map_catalog_map_index((size_t) rotation[33]) == 45,
+          "base rotation: %zu maps (v10 rotationMaps)", n);
     const cJSON *habitat = map_catalog_json(22);
     CHECK(habitat && raw_count(habitat, "objects") == 1374, "base Habitat is habitat_v2 (%d objects)", habitat ? raw_count(habitat, "objects") : -1);
 }

@@ -121,22 +121,22 @@ static const MapCatalogEntry k_catalog[] = {
     // catalogue indices above do not move. Not in the rotation (rotation 0), hostable (Host Game). Their
     // pictures: each one is v10's img/maps/map_<mapIndex>.png (ui/README.md "Map thumbnails"), except 38, which is
     // the picture of the same map as the community slide_moonlight, and 39 and 42, the ranked pool's files
-    OFFICIAL_PIC("bazaar", "Bazaar", 32, 0, "32_bazaar", "img/maps/map_32.png"),
-    OFFICIAL_PIC("erupt", "Erupt", 33, 0, "33_erupt", "img/maps/map_33.png"),
-    OFFICIAL_PIC("hq", "HQ", 34, 0, "34_hq", "img/maps/map_34.png"),
+    OFFICIAL_PIC("bazaar", "Bazaar", 32, 1, "32_bazaar", "img/maps/map_32.png"),
+    OFFICIAL_PIC("erupt", "Erupt", 33, 1, "33_erupt", "img/maps/map_33.png"),
+    OFFICIAL_PIC("hq", "HQ", 34, 1, "34_hq", "img/maps/map_34.png"),
     OFFICIAL_PIC("khepri", "Khepri", 35, 0, "35_khepri", "img/maps/map_35.png"),
-    OFFICIAL_PIC("lush", "Lush", 36, 0, "36_lush", "img/maps/map_36.png"),
-    OFFICIAL_PIC("vivo", "Vivo", 37, 0, "37_vivo", "img/maps/map_37.png"),
+    OFFICIAL_PIC("lush", "Lush", 36, 1, "36_lush", "img/maps/map_36.png"),
+    OFFICIAL_PIC("vivo", "Vivo", 37, 1, "37_vivo", "img/maps/map_37.png"),
     // the same map as the community "slide_moonlight" (same objects): the official one keeps its own key
     OFFICIAL_PIC("slide_moonlight_v10", "Slide Moonlight", 38, 0, "38_slide_moonlight", "img/maps/community/slide_moonlight.png"),
-    OFFICIAL_PIC("eterno_simulator", "Eterno Simulator", 39, 0, "39_eterno_simulator", "img/maps/map_39.png"),
-    OFFICIAL_PIC("stalk_factory", "Stalk Factory", 40, 0, "40_stalk_factory", "img/maps/map_40.png"),
+    OFFICIAL_PIC("eterno_simulator", "Eterno Simulator", 39, 1, "39_eterno_simulator", "img/maps/map_39.png"),
+    OFFICIAL_PIC("stalk_factory", "Stalk Factory", 40, 1, "40_stalk_factory", "img/maps/map_40.png"),
     // the same map as the community "eterno_jump" (same objects): the official one keeps its own key
     OFFICIAL_PIC("eterno_jump_v10", "eterno_jump", 41, 0, "41_eterno_jump", "img/maps/map_41.png"),
-    OFFICIAL_PIC("frontier", "Frontier", 42, 0, "42_frontier", "img/maps/map_42.png"),
+    OFFICIAL_PIC("frontier", "Frontier", 42, 1, "42_frontier", "img/maps/map_42.png"),
     OFFICIAL_PIC("bastion", "Bastion", 43, 0, "43_bastion", "img/maps/map_43.png"),
-    OFFICIAL_PIC("piazza", "Piazza", 44, 0, "44_piazza", "img/maps/map_44.png"),
-    OFFICIAL_PIC("barnyard", "Barnyard", 45, 0, "45_barnyard", "img/maps/map_45.png"),
+    OFFICIAL_PIC("piazza", "Piazza", 44, 1, "44_piazza", "img/maps/map_44.png"),
+    OFFICIAL_PIC("barnyard", "Barnyard", 45, 1, "45_barnyard", "img/maps/map_45.png"),
 };
 
 #define CATALOG_COUNT (sizeof(k_catalog) / sizeof(k_catalog[0]))

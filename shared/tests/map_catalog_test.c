@@ -198,7 +198,7 @@ int main(const int argc, char **argv) {
             CHECK(e->index >= 0 && e->index < MAP_CATALOG_OFFICIAL_COUNT && e->path && !strcmp(e->path, official_path[e->index]) &&
                   !strcmp(e->name, official_name[e->index]),
                   "%s: %s (%s) is not the v10 mapIndex %d file", e->key, e->path ? e->path : "?", e->name, e->index);
-            CHECK(!e->rotation || e->index < 32, "%s: rotation outside the v7 set", e->key);
+            CHECK(!e->rotation || e->index < MAP_CATALOG_OFFICIAL_COUNT, "%s: rotation outside the official set", e->key);
         } else {
             CHECK(e->index == -1 && !e->rotation && !e->hostable, "%s custom flags", e->key);
         }
@@ -238,14 +238,16 @@ int main(const int argc, char **argv) {
     if (verbose) printf("catalogue:\n");
     for (size_t i = 0; i < count; i++) test_entry(i, verbose);
 
-    // rotation == v7 src/data/map.js rotationMaps == g_rotation_maps
-    static const int k_v7_rotation[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28};
+    // rotation == v10.0.2 rotationMaps (v10.js:167210) == g_rotation_maps
+    static const int k_v10_rotation[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28,
+    32, 33, 34, 36, 37, 39, 40, 42, 44, 45};
     int rotation[64];
     const size_t rotation_count = map_catalog_rotation(rotation, 64);
-    CHECK(rotation_count == sizeof(k_v7_rotation) / sizeof(k_v7_rotation[0]) &&
+    CHECK(rotation_count == sizeof(k_v10_rotation) / sizeof(k_v10_rotation[0]) &&
           rotation_count == sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]), "rotation size %zu", rotation_count);
     for (size_t i = 0; i < rotation_count; i++) {
-        CHECK(rotation[i] == g_rotation_maps[i] && rotation[i] == k_v7_rotation[i], "rotation[%zu] = %d", i, rotation[i]);
+        const int map = map_catalog_map_index((size_t) rotation[i]); // catalogue position -> mapIndex
+        CHECK(map == g_rotation_maps[i] && map == k_v10_rotation[i], "rotation[%zu] = map %d", i, map);
     }
     load_default_maps();
     for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) CHECK(g_maps[i] && g_maps[i] == map_catalog_official_json(i), "g_maps[%d]", i);

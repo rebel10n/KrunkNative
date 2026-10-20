@@ -3,6 +3,7 @@
 #include <krunker_maps.h> // KRUNKER_OFFICIAL_MAP_COUNT: the official maps a preset can switch on
 #include <modes.h>        // MODE_ID_*, MODE_COUNT
 #include <ranked.h>       // g_ranked_map_pool: the Ranked map pool
+#include <shared.h>       // g_rotation_maps: the public rotation
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,14 +56,10 @@ static int list_has(const int *list, const int count, const int v) {
     return 0;
 }
 
-// v10.0.2 rotationMaps (v10.js:167210): the maps of the public rotation, as official mapIndexes
-// (krunker_maps.h). It adds 32-45 to v7's rotationMaps (g_rotation_maps, the game's own rotation).
-static const int k_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21, 22, 23, 24, 25, 26, 28,
-                                      32, 33, 34, 36, 37, 39, 40, 42, 44, 45};
-
+// The public rotation (g_rotation_maps, v10.0.2 rotationMaps): the same list the game rotates through.
 size_t seek_filter_rotation_maps(const int **out) {
-    if (out) *out = k_rotation_maps;
-    return sizeof(k_rotation_maps) / sizeof(k_rotation_maps[0]);
+    if (out) *out = g_rotation_maps;
+    return sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
 }
 
 int seek_filter_effective(const int *on, const int on_count, const int *defaults, const int default_count, int *out, const int max) {
