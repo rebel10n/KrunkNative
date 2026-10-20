@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""A guest's Unclaimed Rewards box (client/src/ui/v10_rewards.c: Krunker v10.0.2's _39368, svelte-1hb83uo)
+renders where v10 mounts it, with its amounts and its green glow (box-shadow: 0 0 15px rgba(158, 235, 86, 0.25)).
+
+  python3 -I client/tests/guest_earned_e2e.py BUILD_DIR      (run from the repository root)
+
+Four headless renders (client_bin --render-scenario, no window), state.guestEarned standing in for the ledger:
+  1. the signed-out end screen with 12 KR / 800 score (tools/uidiff/scenarios/kn-guest-earned-end.json): the box
+     is in the signup rewards' right slot (.signup-rewards-guest-earned-collect) with "Unclaimed Rewards", the KR
+     count-up at 12 with the angled coin, the XP one at 800, no REGISTER NOW (origin match_end), and the glow:
+     the same frame rendered from a copy of ui/ whose svelte.css has no box-shadow on .guest-earned-collect
+     differs from it only outside the box (the 1..15 px ring), never inside it;
+  2. the main menu with both amounts capped (kn-guest-earned-menu.json): the box in the right panel (#tlInfHold)
+     with CAPPED on both, "Register to earn more rewards" and REGISTER NOW / Claim your rewards;
+  3. the end screen of a stand-in account with the same balance: no box (v10 renders it for a guest only);
+  4. the end screen of a guest with nothing earned: the slot is empty (as the v10 sandbox capture shows).
+KRUNKNATIVE_SCENARIO_DUMP prints the box tree under the slot after the capture: the texts and the box's
+viewport rect come from it. Exit 0 when every check passes, 1 otherwise.
+"""
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import zlib
+
+ROOT = os.getcwd()
+ASSETS = os.environ.get("KRUNKNATIVE_ASSETS_DIR") or os.path.join(ROOT, "assets")
+BUILD = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug")
+CLIENT = os.path.join(BUILD, "client_bin")
+SCENARIOS = os.path.join(ROOT, "tools", "uidiff", "scenarios")
+VP = re.compile(r"vp\(([-\d.]+),([-\d.]+) ([\d.]+)x([\d.]+)\)")
+TEXT = re.compile(r'text "([^"]*)"')
+SHADOW = "box-shadow:0 0 15px rgba(158, 235, 86, 0.25);"
+WORK = tempfile.mkdtemp(prefix="kn-guest-earned-", dir=os.path.expanduser("~/.cache") if os.path.isdir(os.path.expanduser("~/.cache")) else None)
+results = []
+
+
+def check(name, ok, detail=""):
+    results.append(bool(ok))
+    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
+
+
+def scenario(name, base, patch):
+    with open(os.path.join(SCENARIOS, base), encoding="utf-8") as f:
+        doc = json.load(f)
+    doc["state"].update(patch)
+    for key in [k for k, v in patch.items() if v is None]:
+        del doc["state"][key]
+    path = os.path.join(WORK, name + ".json")
+    with open(path, "w") as f:
+        json.dump(doc, f)
+    return path
+
+
+def render(name, scen, dump, ui_dir=None):
+    """The capture's PNG path, the dump's lines (texts, boxes) and the dumped root's viewport rect."""
+    out = os.path.join(WORK, name + ".png")
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update({
+        "KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg-" + name),
+        "XDG_STATE_HOME": os.path.join(WORK, "state-" + name), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
+        "KRUNKNATIVE_SCENARIO_DUMP": dump, "KRUNKNATIVE_ASSETS_DIR": ASSETS,
+    })
+    if ui_dir:
+        env["KRUNKNATIVE_UI_DIR"] = ui_dir
+    proc = subprocess.run([CLIENT, "--render-scenario", scen, out], env=env, cwd=ROOT, capture_output=True, text=True, timeout=300)
+    lines = proc.stderr.splitlines()
+    if proc.returncode != 0 or not os.path.exists(out):
+        print("\n".join(lines[-20:]))
+        return None, lines, None
+    rect = None
+    for line in lines: # the dumped root's own line: the first box line (its element matched the selector)
+        if line.startswith(("block <", "flex <", "grid <", "inline <")) and dump.split()[-1].lstrip("#.") in line:
+            m = VP.search(line)
+            if m:
+                rect = tuple(float(m.group(i)) for i in range(1, 5))
+            break
+    return out, lines, rect
+
+
+def texts(lines):
+    return [m.group(1).strip() for line in lines for m in [TEXT.search(line)] if m]
+
+
+def read_png(path):
+    """(width, height, rows of RGBA bytes) of an 8-bit RGB(A) PNG, no external module."""
+    with open(path, "rb") as f:
+        data = f.read()
+    pos, chunks, w = 8, [], 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, color = struct.unpack(">IIBB", body[:10])
+            assert depth == 8 and color in (2, 6), (depth, color)
+            bpp = 3 if color == 2 else 4
+        elif kind == b"IDAT":
+            chunks.append(body)
+        pos += 12 + n
+    raw = zlib.decompress(b"".join(chunks))
+    stride = w * bpp
+    rows, prev = [], bytearray(stride)
+    for y in range(h):
+        ft = raw[y * (stride + 1)]
+        cur = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = cur[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if ft == 1:
+                cur[i] = (cur[i] + a) & 255
+            elif ft == 2:
+                cur[i] = (cur[i] + b) & 255
+            elif ft == 3:
+                cur[i] = (cur[i] + ((a + b) >> 1)) & 255
+            elif ft == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                cur[i] = (cur[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(bytes(cur))
+        prev = cur
+    return w, h, bpp, rows
+
+
+def pixel_diff(a, b, rect, ring):
+    """(changed inside the rect shrunk by 2 px, changed in the ring 1..ring px outside it)."""
+    wa, ha, bpp, ra = read_png(a)
+    wb, hb, bpp2, rb = read_png(b)
+    assert (wa, ha, bpp) == (wb, hb, bpp2), ((wa, ha, bpp), (wb, hb, bpp2))
+    x0, y0, w, h = rect
+    x1, y1 = x0 + w, y0 + h
+    inside = outside = 0
+    for y in range(max(0, int(y0 - ring)), min(ha, int(y1 + ring) + 1)):
+        for x in range(max(0, int(x0 - ring)), min(wa, int(x1 + ring) + 1)):
+            if ra[y][x * bpp:x * bpp + 3] == rb[y][x * bpp:x * bpp + 3]:
+                continue
+            if x0 + 2 <= x < x1 - 2 and y0 + 2 <= y < y1 - 2:
+                inside += 1
+            elif x < x0 - 1 or x > x1 or y < y0 - 1 or y > y1:
+                outside += 1
+    return inside, outside
+
+
+def ui_without_shadow():
+    """A copy of ui/ (its other trees linked) whose svelte.css lacks the box's box-shadow."""
+    src = os.path.join(ROOT, "ui")
+    dst = os.path.join(WORK, "ui-noshadow")
+    os.makedirs(os.path.join(dst, "css"))
+    for entry in os.listdir(src):
+        if entry != "css":
+            os.symlink(os.path.join(src, entry), os.path.join(dst, entry))
+    for entry in os.listdir(os.path.join(src, "css")): # css/fonts/ stays a link
+        if os.path.isdir(os.path.join(src, "css", entry)):
+            os.symlink(os.path.join(src, "css", entry), os.path.join(dst, "css", entry))
+        else:
+            shutil.copy(os.path.join(src, "css", entry), os.path.join(dst, "css", entry))
+    path = os.path.join(dst, "css", "svelte.css")
+    with open(path, encoding="utf-8") as f:
+        css = f.read()
+    assert css.count(SHADOW) == 1, css.count(SHADOW)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(css.replace(SHADOW, ""))
+    return dst
+
+
+END_BOX = "#matchEndSignupIncentives .guest-earned-collect" # not the menu's (#knGuestEarned, hidden with the menu in game)
+
+
+def check_end_screen():
+    scen = os.path.join(SCENARIOS, "kn-guest-earned-end.json")
+    png, lines, rect = render("end", scen, END_BOX)
+    check("end screen: a guest with 12 KR / 800 score renders", png is not None)
+    if png is None:
+        return
+    t = texts(lines)
+    check("end screen: the Unclaimed Rewards box is in the signup rewards' right slot", rect is not None and "Unclaimed Rewards" in t,
+          " | ".join(t))
+    check("end screen: the KR count-up ends at 12 and the XP one at 800", "12" in t and "800" in t and "XP" in t, " | ".join(t))
+    check("end screen: the angled coin (an <img>) is the KR item's icon", # the img box follows its .coin-icon line
+          any(lines[i + 1].strip().startswith("img <img") for i, line in enumerate(lines[:-1]) if "coin-icon" in line), "")
+    check("end screen: no REGISTER NOW at the match end (showRegister false)", "REGISTER NOW" not in t and "CAPPED" not in t, " | ".join(t))
+    if rect is None:
+        return
+    x, y, w, h = rect
+    check("end screen: the box is v10's 350 px wide slot at the UI scale (the right 316 px slot's)", 150 < w < 360 and 60 < h < 200,
+          f"{w:.0f}x{h:.0f} at {x:.0f},{y:.0f}")
+    flat, _, rect2 = render("end-noshadow", scen, END_BOX, ui_without_shadow())
+    check("end screen: the same frame renders without the box's box-shadow", flat is not None and rect2 == rect)
+    if flat is None:
+        return
+    inside, outside = pixel_diff(png, flat, rect, 15)
+    check("end screen: the glow paints outside the box (box-shadow: 0 0 15px rgba(158, 235, 86, 0.25))", outside >= 200,
+          f"{outside} pixels differ in the 15 px ring")
+    check("end screen: the glow leaves the box's inside as it is", inside == 0, f"{inside} pixels differ inside")
+
+
+def check_menu():
+    scen = os.path.join(SCENARIOS, "kn-guest-earned-menu.json")
+    png, lines, rect = render("menu", scen, "#knGuestEarned")
+    check("menu: a guest with 20 KR / 2500 score (both caps) renders", png is not None)
+    if png is None:
+        return
+    t = texts(lines)
+    check("menu: the box is in the right panel with both amounts", rect is not None and "Unclaimed Rewards" in t and "20" in t and "2500" in t,
+          " | ".join(t))
+    check("menu: CAPPED on both, the warning and REGISTER NOW / Claim your rewards",
+          t.count("CAPPED") == 2 and any("Register to earn more rewards" in s for s in t) and "REGISTER NOW" in t and "Claim your rewards" in t,
+          " | ".join(t))
+    if rect:
+        x, y, w, h = rect
+        check("menu: the box hangs at the panel's top right (top 80 px, right 20 px at the UI scale)", x > 900 and y < 80,
+              f"{w:.0f}x{h:.0f} at {x:.0f},{y:.0f}")
+
+
+def check_account_and_empty():
+    account = {"name": "Player", "score": 50000, "funds": 100}
+    scen = scenario("end-account", "kn-guest-earned-end.json", {"account": account})
+    png, lines, rect = render("end-account", scen, ".guest-earned-collect") # neither the end screen's nor the menu's
+    check("end screen, an account: renders", png is not None)
+    check("end screen, an account: no box (v10 renders it for a guest only)", png is not None and rect is None
+          and any("no match" in line for line in lines), " | ".join(texts(lines))[:200])
+    scen = scenario("end-empty", "kn-guest-earned-end.json", {"guestEarned": None})
+    png, lines, rect = render("end-empty", scen, ".signup-rewards-guest-earned-collect")
+    check("end screen, nothing earned: renders", png is not None)
+    check("end screen, nothing earned: the slot is empty", png is not None and rect is not None and rect[3] == 0
+          and "Unclaimed Rewards" not in texts(lines), f"{rect}")
+
+
+def main():
+    if not os.path.exists(CLIENT):
+        print(f"client_bin not found: {CLIENT}")
+        return 1
+    check_end_screen()
+    check_menu()
+    check_account_and_empty()
+    print(f"{sum(results)}/{len(results)} checks passed  (work dir {WORK})")
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

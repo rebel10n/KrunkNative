@@ -2062,6 +2062,14 @@ static void dump_display_list(const DisplayList *dl)
                                             it->u.glyphs.quads[0].w, it->u.glyphs.quads[0].h, it->u.glyphs.quads[0].tex);
                 break;
             }
+            case DL_BOX_SHADOW: {
+                const DlRect r = it->u.box_shadow.rect;
+                const CssColor c = it->u.box_shadow.color;
+                fprintf(stderr, " %.1f,%.1f %.1fx%.1f d %.1f,%.1f blur %.1f spread %.1f%s rgba(%d,%d,%d,%d)", r.x, r.y, r.w, r.h,
+                        it->u.box_shadow.dx, it->u.box_shadow.dy, it->u.box_shadow.blur, it->u.box_shadow.spread,
+                        it->u.box_shadow.inset ? " inset" : "", c.r, c.g, c.b, c.a);
+                break;
+            }
             case DL_PUSH_CLIP_RECT: {
                 const DlRect r = it->u.clip_rect.rect;
                 fprintf(stderr, " %.1f,%.1f %.1fx%.1f", r.x, r.y, r.w, r.h);

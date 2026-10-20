@@ -1,0 +1,84 @@
+{
+  "ref": "doc/ref/krunknative/kn-guest-earned-end.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "anim_time": 2.0,
+    "hud": {
+      "health": 100,
+      "maxHealth": 100,
+      "healthSegments": 6,
+      "ammo": 30,
+      "ammoMax": 30,
+      "ammoLimit": false,
+      "melee": false,
+      "reloading": false,
+      "reloadPercent": 0,
+      "timerText": "03:45",
+      "kills": 0,
+      "deaths": 0,
+      "score": 0,
+      "weaponName": "Assault Rifle",
+      "weaponIcon": "icon_2",
+      "classIndex": 0,
+      "scoped": false,
+      "fps": 0,
+      "aim": 0,
+      "spread": 100,
+      "scoreboard": false,
+      "ping": 0,
+      "loadout": [
+        {
+          "name": "Assault Rifle",
+          "icon": "icon_2",
+          "melee": false
+        },
+        {
+          "name": "Pistol",
+          "icon": "icon_3",
+          "melee": false
+        },
+        {
+          "name": "Combat Knife",
+          "icon": "icon_0",
+          "melee": true
+        }
+      ],
+      "loadoutIndex": 0
+    },
+    "chat": [],
+    "endscreen": {
+      "place": 1,
+      "result": 1,
+      "text": "#1 VICTORY",
+      "nextRound": "00:17",
+      "results": 1
+    },
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
+    ],
+    "guestEarned": {
+      "kr": 12,
+      "score": 800
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: a guest's results (ingame-endscreen-late's state) with an unclaimed balance (state.guestEarned, v10_rewards.c): v10's Unclaimed Rewards box (_39368, svelte-1hb83uo: 12 KR with the angled coin, 800 XP, the green glow box-shadow) in the signup rewards' right slot (.signup-rewards-guest-earned-collect), no REGISTER NOW there (origin match_end mounts it with showRegister false). At 2.0 s both count-ups (1 s after 200 / 400 ms, _6910) are done. KN baseline (the v10 captures are of a sandbox guest with no balance): checked by hand against headless Chrome drawing v10's markup and svelte.css (ui/README.md)."
+}

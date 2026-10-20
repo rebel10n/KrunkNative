@@ -182,6 +182,7 @@ int  html_ui_dispatch_listener(const char *elem_id, const HtmlEvent *ev);
 // ---- timers (setTimeout equivalent; fired from html_ui_update on both platforms)
 int  html_timer_add(double ms, void (*fn)(void *user), void *user);   // returns id > 0
 void html_timer_cancel(int id);
+double html_timer_now_ms(void);                                       // the timers' clock at the last tick (-1 before the first)
 void html_timers_tick(double now_ms);                                 // called by html_ui_update
 
 // ---- game content URLs

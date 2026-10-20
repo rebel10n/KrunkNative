@@ -5,9 +5,10 @@
 //   _39408  the Signup Rewards popup (window.showSignupRewards: genericPopup(_, "signupRewardsPop"),
 //           #signupRewardsButton in #signedOutHeaderBar; REGISTER = clearPops + loginOrRegister(true))
 //           and the end screen's #matchEndSignupIncentives (props.origin "match_end")
-//   _39370  its "Unclaimed Rewards" box: a guest's $krAccumulated / $scoreAccumulated (GET
-//           /guest/profile); KrunkNative has no guest profiles, so the box stays empty (as v10
-//           shows it to a guest who earned nothing)
+//   _39370  its "Unclaimed Rewards" box (_39368, svelte-1hb83uo): a guest's $krAccumulated /
+//           $scoreAccumulated, mounted with showRegister false there and with REGISTER NOW in
+//           the menu's right panel (#tlInfHold after the top ad row, v10:145962); the guest
+//           ledger below says where KrunkNative's amounts come from
 //   _66775  "Welcome to the Family!" (POPUP_REGISTER_REWARDS "prr" skinRewards, premiumRewards:
 //           genericPopup(_, "registerRewardsPop"); Customize -> clearPops, showWindow(53)); kn_brain
 //           sends "prr" once per account after the registration (services/brain/rewards.c)
@@ -28,6 +29,7 @@
 #include <weapons.h>
 #include <v10_menu.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +41,176 @@
 static char g_chal_typ[12]; // windows[32].openChallenge.typ ("" = home)
 static int g_chal_ind;      // windows[32].openChallenge.ind
 static char g_bp_item_key[160]; // what the sidebar item shows (redrawn when it changes)
+
+/* ------------------------------------------------------------------ a guest's unclaimed rewards */
+
+// v10's $krAccumulated / $scoreAccumulated (_38456 / _38457): GET /guest/profile's profile.funds
+// and profile.score, read once when an anonymous player loads the page (v10:117250, 222902) and
+// zeroed by a login (v10:209787). The KR a guest earns in a match (the END's reward column, the
+// server's endGame reward) and the score bank there up to config.guestKRCap (20) /
+// guestScoreCap (2500), the CAPPED badges of the box.
+//
+// KrunkNative's kn_brain keeps no guest profiles, so the ledger is the guest's own client's
+// (html_storage "guestEarned"), credited from the local guest's END row as each match ends
+// (game_events.c events_end: v10 would show the new balance after a reload) and reset by a
+// sign-in like v10's stores. Nothing is banked for the account made: the brain's signup perks
+// (services/brain/rewards.c) are the registration's grant. --render-scenario's state.guestEarned
+// {kr, score} stands in for the ledger (not stored).
+#define GUEST_KR_CAP 20      // config.guestKRCap (_7338)
+#define GUEST_SCORE_CAP 2500 // config.guestScoreCap (_7339)
+#define GUEST_STORAGE "guestEarned"
+#define GUEST_TWEEN_STEP_MS (1000.0 / 60.0)
+
+static struct {
+    int kr, score;
+    int loaded;   // the storage was read
+    int scenario; // state.guestEarned: never stored
+} G;
+
+static void guest_load(void) {
+    if (G.loaded) return;
+    G.loaded = 1;
+    char buf[96];
+    if (html_storage_get(GUEST_STORAGE, buf, sizeof buf) < 0) return;
+    cJSON *j = cJSON_Parse(buf);
+    const cJSON *kr = cJSON_GetObjectItem(j, "kr"), *score = cJSON_GetObjectItem(j, "score");
+    G.kr = cJSON_IsNumber(kr) ? kr->valueint : 0;
+    G.score = cJSON_IsNumber(score) ? score->valueint : 0;
+    cJSON_Delete(j);
+}
+
+static void guest_save(void) {
+    if (G.scenario) return;
+    char buf[96];
+    snprintf(buf, sizeof buf, "{\"kr\":%d,\"score\":%d}", G.kr, G.score);
+    html_storage_set(GUEST_STORAGE, buf);
+}
+
+// The local guest's END row (game_events.c): v10's server banks it in the guest profile.
+void v10_rewards_guest_earned_add(const int kr, const int score) {
+    if (active_account() || !v10_menu_page() || (kr <= 0 && score <= 0)) return;
+    guest_load();
+    G.kr = G.kr + (kr > 0 ? kr : 0) > GUEST_KR_CAP ? GUEST_KR_CAP : G.kr + (kr > 0 ? kr : 0);
+    G.score = G.score + (score > 0 ? score : 0) > GUEST_SCORE_CAP ? GUEST_SCORE_CAP : G.score + (score > 0 ? score : 0);
+    guest_save();
+    fprintf(stderr, "[rewards] guest earned +%d KR +%d score: %d KR, %d score unclaimed\n", kr, score, G.kr, G.score);
+}
+
+// --render-scenario: state.guestEarned = {kr, score}
+void v10_rewards_guest_earned_scenario(const cJSON *state) {
+    if (!cJSON_IsObject(state)) return;
+    const cJSON *kr = cJSON_GetObjectItem(state, "kr"), *score = cJSON_GetObjectItem(state, "score");
+    G.loaded = G.scenario = 1;
+    G.kr = cJSON_IsNumber(kr) ? kr->valueint : 0;
+    G.score = cJSON_IsNumber(score) ? score->valueint : 0;
+}
+
+// _6910: each amount counts up from 0 to its value over 1000 ms (ease-out cubic, floored) after
+// its delay (200 ms the KR, 400 ms the score), a frame timer on the page's clock (a scenario's
+// jumps to its capture); one runner per mount (the spans' id suffix).
+typedef struct {
+    const char *suffix; // "Pop" | "End" | "Menu"
+    int kr, score;
+    double start_ms; // the mount's time on the timers' clock (-1: the first step takes it)
+    int timer;
+} GuestTween;
+static GuestTween g_tween[3] = {{"Pop"}, {"End"}, {"Menu"}};
+enum { TW_POP, TW_END, TW_MENU };
+
+static void guest_tween_step(void *user) {
+    GuestTween *tw = user;
+    tw->timer = 0;
+    const double now = html_timer_now_ms();
+    if (tw->start_ms < 0.0) tw->start_ms = now;
+    static const double delay[2] = {200.0, 400.0};
+    static const char *const ids[2] = {"knGuestKr", "knGuestXp"};
+    const int target[2] = {tw->kr, tw->score};
+    int done = 1;
+    for (int i = 0; i < 2; i++) {
+        if (target[i] <= 0) continue;
+        char id[32], text[16];
+        snprintf(id, sizeof id, "%s%s", ids[i], tw->suffix);
+        const HtmlElem el = html_dom_by_id(id);
+        if (!el) continue; // the mount is gone
+        double p = (now - tw->start_ms - delay[i]) / 1000.0;
+        p = p < 0.0 ? 0.0 : p > 1.0 ? 1.0 : p;
+        const double eased = 1.0 - (1.0 - p) * (1.0 - p) * (1.0 - p);
+        snprintf(text, sizeof text, "%d", p >= 1.0 ? target[i] : (int) floor(target[i] * eased));
+        html_dom_set_text(el, text);
+        if (p < 1.0) done = 0;
+    }
+    if (!done) tw->timer = html_timer_add(GUEST_TWEEN_STEP_MS, guest_tween_step, tw);
+}
+
+static void guest_tween_start(const int which) {
+    GuestTween *tw = &g_tween[which];
+    if (tw->timer) html_timer_cancel(tw->timer);
+    tw->kr = G.kr;
+    tw->score = G.score;
+    tw->start_ms = html_timer_now_ms();
+    tw->timer = html_timer_add(GUEST_TWEEN_STEP_MS, guest_tween_step, tw);
+}
+
+#define CAPPED_BADGE "<span class=\"capped-badge svelte-1hb83uo\">CAPPED</span>"
+
+// _39368 for a guest with a balance (nothing otherwise): the header, the KR item (_39363: the
+// value, img/kr_icon_angled.svg, CAPPED at the cap) and the XP item (_39365), the warning
+// (_39366) once either is capped, and REGISTER NOW (_39367) when show_register. id: the box's.
+static void guest_earned_html(StrBuf *sb, const int show_register, const char *id, const char *suffix) {
+    guest_load();
+    if (active_account() || (G.kr <= 0 && G.score <= 0)) return;
+    const int kr_capped = G.kr >= GUEST_KR_CAP, score_capped = G.score >= GUEST_SCORE_CAP;
+    sb_appendf(sb, "<div %s%s%sclass=\"guest-earned-collect svelte-1hb83uo\"><div class=\"guest-earned-collect__header svelte-1hb83uo\">"
+                   "<span class=\"svelte-1hb83uo\">Unclaimed Rewards</span></div> <div class=\"guest-earned-collect__rewards svelte-1hb83uo\">"
+                   "<div class=\"guest-earned-collect__reward-items svelte-1hb83uo\">",
+               id ? "id=\"" : "", id ? id : "", id ? "\" " : "");
+    if (G.kr > 0) {
+        char url[256];
+        ui_img_url("img/kr_icon_angled.svg", url, sizeof url);
+        sb_appendf(sb, "<div class=\"guest-earned-collect__reward-item svelte-1hb83uo%s\"><span class=\"guest-earned-collect__reward-value svelte-1hb83uo\" "
+                       "id=\"knGuestKr%s\">0</span> <div class=\"guest-earned-collect__coin-icon svelte-1hb83uo\"><img src=\"%s\" alt=\"KR Coin\" "
+                       "class=\"svelte-1hb83uo\"></div> %s</div>",
+                   kr_capped ? " capped" : "", suffix, url, kr_capped ? CAPPED_BADGE : "");
+    }
+    if (G.score > 0) {
+        sb_appendf(sb, " <div class=\"guest-earned-collect__reward-item svelte-1hb83uo%s\"><span class=\"guest-earned-collect__reward-value svelte-1hb83uo\" "
+                       "id=\"knGuestXp%s\">0</span> <div class=\"guest-earned-collect__xp-icon svelte-1hb83uo\"><div class=\"xp-icon svelte-1hb83uo\">"
+                       "<span class=\"svelte-1hb83uo\">XP</span></div></div> %s</div>",
+                   score_capped ? " capped" : "", suffix, score_capped ? CAPPED_BADGE : "");
+    }
+    sb_append(sb, "</div> ");
+    if (kr_capped || score_capped)
+        sb_append(sb, "<div class=\"warning-text svelte-1hb83uo\"><span class=\"material-icons svelte-1hb83uo\">warning</span> Register to earn more rewards</div> ");
+    if (show_register) // _39361: the login modal on its Register side
+        sb_append(sb, "<button type=\"button\" class=\"guest-earned-collect__register-btn svelte-1hb83uo\" onclick=\"knGuestRegister()\">"
+                      "<div class=\"button-text svelte-1hb83uo\">REGISTER NOW</div> <div class=\"button-subtext svelte-1hb83uo\">Claim your rewards</div></button>");
+    sb_append(sb, "</div></div>");
+}
+
+// The menu's box (v10:145962, _39370(_, {}) after #topLeftAdHolder in #tlInfHold): kept while a
+// guest has a balance, redrawn when it changes, gone for an account (v10 unmounts it).
+static char g_guest_box_key[32];
+
+static void guest_box_update(void) {
+    const HtmlElem panel = html_dom_by_id("tlInfHold");
+    if (!panel) return;
+    guest_load();
+    const int on = !active_account() && (G.kr > 0 || G.score > 0);
+    char key[sizeof g_guest_box_key];
+    snprintf(key, sizeof key, "%d|%d", on ? G.kr : -1, on ? G.score : -1);
+    HtmlElem box = html_dom_by_id("knGuestEarned");
+    if (!strcmp(key, g_guest_box_key) && (box != 0) == on) return;
+    snprintf(g_guest_box_key, sizeof g_guest_box_key, "%s", key);
+    if (box) html_dom_remove(box);
+    if (!on) return;
+    StrBuf sb = {0};
+    guest_earned_html(&sb, 1, "knGuestEarned", "Menu");
+    char *html = sb_finish(&sb);
+    const HtmlElem ads = html_dom_by_id("topLeftAdHolder");
+    html_dom_insert_html(ads ? ads : panel, ads ? HTML_INSERT_AFTER_END : HTML_INSERT_AFTER_BEGIN, html);
+    free(html);
+    guest_tween_start(TW_MENU);
+}
 
 
 /* ------------------------------------------------------------------ popups */
@@ -55,7 +227,8 @@ static void pop_show(const char *html, const char *cls) {
     html_dom_set_display(pop, "block");
 }
 
-// _39408 (origin "button" | "match_end")
+// _39408 (origin "button" | "match_end"): the Unclaimed Rewards box (_39370, showRegister false)
+// sits in .signup-rewards-guest-earned-collect, right of the 1-time signup perks panel.
 static char *signup_html(const int match_end) {
     StrBuf sb = {0};
     sb_appendf(&sb,
@@ -71,9 +244,10 @@ static char *signup_html(const int match_end) {
               "<div class=\"rewards-side-panel svelte-1v6b0qm\"><div class=\"rewards-side-panel-title svelte-1v6b0qm\">"
               "<p class=\"svelte-1v6b0qm\">1-time signup perks:</p></div> <div class=\"rewards-side-panel-description svelte-1v6b0qm\">"
               "<p class=\"svelte-1v6b0qm\">Gain 14 Cosmetics +</p> <p style=\"margin-top: 0px;\" class=\"svelte-1v6b0qm\">1 Day premium for free!</p>"
-              "</div></div> <div class=\"signup-rewards-guest-earned-collect svelte-1v6b0qm\"></div> "
-              "<div id=\"knSignupRegister\" class=\"button bp-generic-btn signup-rewards-register-button svelte-1v6b0qm\" onmouseenter=\"playTick(0.1)\" "
-              "onclick=\"playSelect(0.1);knSignupRegister()\">REGISTER</div></div></div>");
+              "</div></div> <div class=\"signup-rewards-guest-earned-collect svelte-1v6b0qm\">");
+    guest_earned_html(&sb, 0, NULL, match_end ? "End" : "Pop");
+    sb_append(&sb, "</div> <div id=\"knSignupRegister\" class=\"button bp-generic-btn signup-rewards-register-button svelte-1v6b0qm\" "
+                   "onmouseenter=\"playTick(0.1)\" onclick=\"playSelect(0.1);knSignupRegister()\">REGISTER</div></div></div>");
     return sb_finish(&sb);
 }
 
@@ -83,23 +257,22 @@ void v10_show_signup_rewards(void) {
     char *html = signup_html(0);
     pop_show(html, "signupRewardsPop");
     free(html);
+    guest_tween_start(TW_POP);
     fprintf(stderr, "[rewards] signup rewards popup\n");
 }
 
-// The end screen (endScreen.init's 12th callback): mounts _39408 into #matchEndSignupIncentives
-// and shows it; it stays empty for an account.
-void v10_rewards_end_screen(void) {
-    HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
+// The end screen (endScreen.init's 12th callback, v10:219663): _39408 with origin match_end into
+// #matchEndSignupIncentives (hud_v10.c places it); empty for an account.
+void v10_rewards_signup_mount(const HtmlElem el) {
     if (!el) return;
     if (active_account()) {
         html_dom_set_html(el, "");
-        html_dom_set_display(el, "none");
         return;
     }
     char *html = signup_html(1);
     html_dom_set_html(el, html);
     free(html);
-    html_dom_set_display(el, "block");
+    guest_tween_start(TW_END);
 }
 
 // _66775 for the "prr" push
@@ -490,6 +663,12 @@ int v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
         fprintf(stderr, "[rewards] register from the signup rewards\n");
         return 1;
     }
+    if (!strcmp(name, "knGuestRegister")) { // REGISTER NOW (_39361): the login modal on Register
+        static const HtmlArg yes = {.kind = HTML_ARG_BOOL, .num = 1};
+        html_ui_dispatch("loginOrRegister", ev, &yes, 1);
+        fprintf(stderr, "[rewards] register from the unclaimed rewards\n");
+        return 1;
+    }
     if (!strcmp(name, "windows.32.openHome")) { // account ? showWindow(33) : loginOrRegister()
         g_chal_typ[0] = 0;
         if (active_account()) menu_show_window(CHAL_WINDOW, 0);
@@ -520,11 +699,18 @@ int v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
 // windows[32].openHome(), are wired by v10_menu.c; the handlers are here.)
 void v10_rewards_dom_init(void) {
     g_bp_item_key[0] = 0;
+    g_guest_box_key[0] = 0;
     g_chal_typ[0] = 0;
+    for (int i = 0; i < 3; i++) g_tween[i].timer = 0; // the page's timers went with it
 }
 
 void v10_rewards_tick(void) {
     if (!html_ui_available()) return;
     bp_item_update();
+    if (active_account() && G.loaded && (G.kr || G.score)) { // v10:209787: a login zeroes the stores
+        G.kr = G.score = 0;
+        guest_save();
+    }
+    guest_box_update();
     v10_menu_tick(); // the menu's idle state (v10_menu.c)
 }

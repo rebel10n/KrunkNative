@@ -1,0 +1,27 @@
+{
+  "ref": "doc/ref/krunknative/kn-guest-earned-menu.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 2.0,
+    "guestEarned": {
+      "kr": 20,
+      "score": 2500
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: a guest with both unclaimed rewards at their cap (guestKRCap 20, guestScoreCap 2500): the main menu's right panel (#tlInfHold, under the ad row v10 hides without ads) shows v10's Unclaimed Rewards box (_39370(_, {}), v10:145962), both amounts red with CAPPED badges, the warning and REGISTER NOW / Claim your rewards. The balance is the render scenario's (state.guestEarned); in play it is the client's own ledger (v10_rewards.c). KN baseline (no v10 capture of a guest balance): checked by hand against headless Chrome drawing v10's markup and svelte.css (ui/README.md)."
+}

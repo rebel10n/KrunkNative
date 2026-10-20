@@ -1,0 +1,25 @@
+{
+  "scenario": "kn-guest-earned-menu",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "unclaimed",
+      "rect": [1046, 28, 234, 198],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knGuestEarned (.guest-earned-collect) at the right panel's top with its glow: Unclaimed Rewards, 20 and 2500 red with CAPPED badges, the warning, REGISTER NOW / Claim your rewards"
+    },
+    {
+      "name": "header-guest",
+      "rect": [0, 0, 340, 60],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#signedOutHeaderBar: Login or Register, Get Signup Rewards and the tooltip, unchanged by the box"
+    }
+  ]
+}

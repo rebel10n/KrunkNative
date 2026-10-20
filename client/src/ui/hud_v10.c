@@ -123,32 +123,20 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
     ap(out, size, len, "</div></div></div>");
 }
 
-// The signup rewards component (v10:115204, _39408) with origin "match_end": its markup with the
-// svelte-1v6b0qm classes (ui/css/svelte.css), REGISTER -> loginOrRegister (knEndRegister).
-static const char SIGNUP_HTML[] =
-    "<div class=\"signup-rewards-container signup-rewards-container--match-end svelte-1v6b0qm\" style=\"position:relative;top:auto;left:auto;transform:none;margin:0 auto;\">"
-    "<div class=\"signup-rewards-header svelte-1v6b0qm\">Join Krunker today!</div> "
-    "<div class=\"signup-rewards-content svelte-1v6b0qm\"><div class=\"signup-rewards-list signup-rewards-list--match-end svelte-1v6b0qm\">"
-    "<div class=\"signup-reward svelte-1v6b0qm\"><i class=\"material-icons\" style=\"color:#3be354; font-size: 29px; margin-right: 18px;\">done</i> Complete challenges</div> "
-    "<div class=\"signup-reward svelte-1v6b0qm\"><i class=\"material-icons\" style=\"color:#3be354; font-size: 29px; margin-right: 18px;\">done</i> Spend KR on cosmetics</div> "
-    "<div class=\"signup-reward svelte-1v6b0qm\"><i class=\"material-icons\" style=\"color:#3be354; font-size: 29px; margin-right: 18px;\">done</i> Customize your avatar</div> "
-    "<div class=\"signup-reward svelte-1v6b0qm\" style=\"margin-left: 88px;\">And much more!</div></div> "
-    "<div class=\"rewards-side-panel svelte-1v6b0qm\"><div class=\"rewards-side-panel-title svelte-1v6b0qm\"><p class=\"svelte-1v6b0qm\">1-time signup perks:</p></div> "
-    "<div class=\"rewards-side-panel-description svelte-1v6b0qm\"><p class=\"svelte-1v6b0qm\">Gain 14 Cosmetics +</p> "
-    "<p style=\"margin-top: 0px;\" class=\"svelte-1v6b0qm\">1 Day premium for free!</p></div></div> "
-    "<div class=\"signup-rewards-guest-earned-collect svelte-1v6b0qm\"></div> "
-    "<div class=\"button bp-generic-btn signup-rewards-register-button svelte-1v6b0qm\" onmouseenter=\"playTick()\" "
-    "onclick=\"knEndRegister()\">REGISTER</div></div></div>";
-
+// The signup rewards component (v10:115204, _39408) with origin "match_end" (v10_rewards.c: its
+// markup, a guest's Unclaimed Rewards box, REGISTER -> knSignupRegister).
 // KrunkNative: the guest banner flows under the results instead of v10's fixed `top: 850px`
-// (#matchEndSignupIncentives, main.css), so it starts below the last table row. It moves into
-// #endMidHolder after the results (the card renders rewrite only #endTabbedView).
+// (#matchEndSignupIncentives, main.css), so it starts below the last table row. v10 centres the
+// component on that point (.signup-rewards-container: absolute, top / left 50%, translate(-50%,
+// -50%)); here the container is in flow and centred by `margin: 0 auto`. It moves into #endMidHolder
+// after the results (the card renders rewrite only #endTabbedView).
 void hud_v10_end_signup(const int show) {
     if (!hud_v10_page()) return;
     const HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
     if (!el) return;
     const int on = show && !active_account(); // the component renders nothing for an $account
-    html_dom_set_html(el, on ? SIGNUP_HTML : "");
+    if (on) v10_rewards_signup_mount(el);
+    else html_dom_set_html(el, "");
     html_dom_set_display(el, on ? "block" : "none");
     if (!on) return;
     html_dom_set_style(el, "position", "relative");
@@ -156,19 +144,14 @@ void hud_v10_end_signup(const int show) {
     html_dom_set_style(el, "left", "auto");
     html_dom_set_style(el, "z-index", "auto");
     html_dom_set_style(el, "margin-top", "10px");
+    const HtmlElem box = html_dom_query(el, ".signup-rewards-container");
+    if (box) {
+        html_dom_set_style(box, "position", "relative");
+        html_dom_set_style(box, "top", "auto");
+        html_dom_set_style(box, "left", "auto");
+        html_dom_set_style(box, "transform", "none");
+        html_dom_set_style(box, "margin", "0 auto");
+    }
     const HtmlElem mid = html_dom_by_id("endMidHolder");
     if (mid) html_dom_append(mid, el);
-}
-
-int hud_v10_handle(const char *name) {
-    if (!name) return -1;
-    if (!strcmp(name, "knEndRegister")) {
-        // _39403: clearPops(); loginOrRegister(true): the v10 login modal on its Register side
-        // (v10_login.c, backed by kn_brain)
-        static const HtmlArg reg = {HTML_ARG_BOOL, 1, NULL};
-        html_ui_dispatch("clearPops", NULL, NULL, 0);
-        html_ui_dispatch("loginOrRegister", NULL, &reg, 1);
-        return 1;
-    }
-    return -1;
 }

@@ -347,6 +347,9 @@ nettspend-loadout-test: build ## Nettspend is a class card, its Loadout tab show
 locked-class-test: build ## The Nettspend's card in the class tab: locked with "Not on official servers" in an official lobby, and kept when the official class list arrives (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/locked_class_label_e2e.py $(DEBUG_DIR)
 
+guest-earned-test: build ## A guest's Unclaimed Rewards box (v10_rewards.c): the end screen's and the menu's, its KR / XP amounts and its glow (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/guest_earned_e2e.py $(DEBUG_DIR)
+
 secondary-req-test: build ## The Select Secondary picker applies v10's weapon req: the Grappler's card is not clickable in an official game, and is in a custom one (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/secondary_req_e2e.py $(DEBUG_DIR)
 

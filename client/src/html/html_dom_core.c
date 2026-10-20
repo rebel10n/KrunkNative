@@ -323,6 +323,10 @@ void html_timer_cancel(const int id) {
     }
 }
 
+double html_timer_now_ms(void) {
+    return g_timer_now_valid ? g_timer_now_ms : -1.0;
+}
+
 void html_timers_tick(const double now_ms) {
     if (!g_timer_now_valid) {
         // Rebase timers created before the first tick onto the real clock.

@@ -1,0 +1,33 @@
+{
+  "scenario": "kn-guest-earned-end",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "signup-banner",
+      "rect": [350, 312, 583, 216],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#matchEndSignupIncentives under the Performance cards: Join Krunker today!, the perks list, 1-time signup perks, REGISTER"
+    },
+    {
+      "name": "unclaimed",
+      "rect": [728, 425, 220, 118],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": ".guest-earned-collect in the banner's right slot with its 15 px glow: Unclaimed Rewards, 12 + the angled coin, 800 XP"
+    },
+    {
+      "name": "end-tabs",
+      "rect": [351, 128, 583, 180],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#endTabbedView as in ingame-endscreen-late: the tabs, Combat Earnings, Combat Record"
+    }
+  ]
+}

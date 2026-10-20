@@ -542,12 +542,14 @@ void accounts_send_billboard(ClientConnection *client) {
 // ------------------------------------------------------------------ stats commits
 
 // game.js endGame: reward = min(premiumT ? 40 : 30, floor(score * rewardMlt / 100)) for
-// accounts that are not hack-flagged, none in hosted (custom) games or noReward modes.
+// accounts that are not hack-flagged, none in hosted (custom) games or noReward modes. A guest
+// earns the same (v10's guest profile, config.guestKRCap: the END's reward column is what the
+// guest's client banks as Unclaimed Rewards, client/src/ui/v10_rewards.c); the server keeps none.
 static int acc_reward(const ClientConnection *client, const Player *player) {
     const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
     // a ranked match is hosted (custom) but pays KR like a public game: v10 endGame's reward x2
     // (v10:191171) is the ranked branch, so only the custom gate is lifted for it
-    if (!g_gs_config.earn_kr || (g_acc.custom && !g_rk.active) || !client->acct.account_id || client->acct.hack) return 0;
+    if (!g_gs_config.earn_kr || (g_acc.custom && !g_rk.active) || client->acct.hack) return 0;
     if (mode && mode->no_reward) return 0;
     const double mlt = (mode && mode->reward_mlt ? mode->reward_mlt : 1) * (double) g_gs_config.kr_multiplier;
     const int cap = client->acct.premium ? g_gs_config.kr_cap_premium : g_gs_config.kr_cap;

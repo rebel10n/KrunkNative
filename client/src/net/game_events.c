@@ -398,7 +398,12 @@ static void events_end(Client *client, const NetEndPacket *packet) {
     for (int i = 0; i < packet->board.count && i < GAME_LEADERBOARD_MAX; i++) {
         Player *player = events_find_player(client, packet->board.entries[i].uid);
         if (player) player->reward = packet->rewards[i];
-        if (client->me && !client->net_end_rank && packet->board.entries[i].uid == client->me->uid) client->net_end_rank = i + 1;
+        if (client->me && !client->net_end_rank && packet->board.entries[i].uid == client->me->uid) {
+            client->net_end_rank = i + 1;
+            // v10's guest profile banks a guest's reward and score (the Unclaimed Rewards box,
+            // v10_rewards.c); not the sandbox's, which v10 keeps local too
+            if (!client->offline) v10_rewards_guest_earned_add(packet->rewards[i], packet->board.entries[i].score);
+        }
     }
     const int playing = (client->me && client->me->active) || spectate_active();
     // v10's end handler (v10.js:219715): a playing or spectating player gets the title, then the

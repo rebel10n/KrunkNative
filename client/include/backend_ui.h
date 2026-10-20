@@ -124,7 +124,9 @@ void battlepass_ui_claim(int id);           // bpclm: claim one card (Strike's R
 
 // ---- v10_rewards.c (Krunker v10.0.2: signup rewards, windows[32], the sidebar's Battle Pass item)
 void v10_show_signup_rewards(void);         // window.showSignupRewards
-void v10_rewards_end_screen(void);          // endScreen.init: #matchEndSignupIncentives (guests)
+void v10_rewards_signup_mount(HtmlElem el); // endScreen.init: the signup rewards into #matchEndSignupIncentives (guests)
+void v10_rewards_guest_earned_add(int kr, int score); // the local guest's END row: v10's guest profile (Unclaimed Rewards)
+void v10_rewards_guest_earned_scenario(const cJSON *state); // --render-scenario state.guestEarned {kr, score}
 int  v10_rewards_frame(const char *label, const cJSON *frame); // "prr"; 1 = handled
 char *v10_rewards_window_gen(int id);       // window 33 on the v10 page; NULL otherwise
 int  v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

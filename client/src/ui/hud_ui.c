@@ -3621,7 +3621,6 @@ void hud_ui_end_screen_tab(const char *tab) {
 static void hud_end_results(const Client *client) {
     dom_display("endInfo", "block");
     dom_display("infoHolder", ""); // the results' footer: #infoHolder style="" in the v10 results capture (ingame-endscreen-late)
-    v10_rewards_end_screen(); // v10.0.2 endScreen.init: a guest's #matchEndSignupIncentives (v10_rewards.c)
     dom_style("endUI", "background-color", "transparent");
     dom_display("victorySub", "");              // f1913
     hud_end_title_hide();                       // overlay.vicTitle.show = false
@@ -4872,9 +4871,5 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         ui_confirm(q, plist_ban_answered, NULL);
         return 1;
     }
-    {
-        const int r = hud_votekick_handle(menu_ui()->client, name, ev, args, argc); // kickVote, confirmPolice, callPolice, copyUser
-        if (r >= 0) return r;
-    }
-    return hud_v10_handle(name); // the v10 page's own HUD handlers (hud_v10.c), -1 when not one
+    return hud_votekick_handle(menu_ui()->client, name, ev, args, argc); // kickVote, confirmPolice, callPolice, copyUser; -1 when not one
 }

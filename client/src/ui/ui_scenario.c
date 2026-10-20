@@ -322,6 +322,7 @@ static void warn_unknown_keys(void) {
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "guestEarned", // {kr, score}: a guest's unclaimed rewards (v10_rewards.c: the menu's box, the signup rewards')
         "altAccounts", // the Account Manager's rows [{name, backend: "krunk.io" | "krunker.io", active}] (alt_manager_ui.c)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
         "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
@@ -1202,6 +1203,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("krunkerLobbies")) krunker_lobbies_set_fixed(st("krunkerLobbies"));
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    v10_rewards_guest_earned_scenario(st("guestEarned")); // a guest's unclaimed KR / score (v10_rewards.c)
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts
     kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io
     v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)

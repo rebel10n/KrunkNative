@@ -20,10 +20,7 @@ void hud_v10_end_performance_html(char *out, size_t size, size_t *len, const cha
                                   int deaths, int rank);
 
 // The match-end signup incentive (#matchEndSignupIncentives, v10's signup rewards component with
-// origin match_end) for a guest; hidden for an account. Called when the results come up.
+// origin match_end, v10_rewards.c) for a guest; hidden for an account. Called when the results come up.
 void hud_v10_end_signup(int show);
-
-// Page handlers of this module (hud_ui_handle forwards unknown names here): 1 when handled.
-int hud_v10_handle(const char *name);
 
 #endif

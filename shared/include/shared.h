@@ -2838,7 +2838,8 @@ typedef struct {
     int32_t winner_uid;    // -1 none
     NetLeaderboardPacket board;
     // endData.ed "reward" column (config.endStats): KR of board.entries[i], 0 = "NONE"
-    // (guests, hosted games, noReward modes). Optional: a NET_END_PACKET_V1_SIZE END has none.
+    // (hosted games, noReward modes; a guest's is its Unclaimed Rewards, v10_rewards.c).
+    // Optional: a NET_END_PACKET_V1_SIZE END has none.
     int32_t rewards[GAME_LEADERBOARD_MAX];
 } NetEndPacket;
 

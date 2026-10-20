@@ -10,6 +10,9 @@
 .rewards-side-panel-title.svelte-1v6b0qm p.svelte-1v6b0qm { color: #fff; font-size: 11px; }
 .rewards-side-panel-description.svelte-1v6b0qm p.svelte-1v6b0qm { color: #fff; line-height: 22px; } /* the reference's line box */
 .signupRewardsPop p { margin: 0; }
+/* the Unclaimed Rewards' warning icon: svelte.css nests `> .material-icons {...}` inside .warning-text
+ * (svelte-1hb83uo), which the engine drops; flattened so the icon is 16 px as v10's */
+.warning-text.svelte-1hb83uo > .material-icons.svelte-1hb83uo { font-size: 16px; margin-right: 4px; color: #f44336; }
 
 .io-popup-container { background-color: #242424; box-shadow: 0 0 8px rgba(0, 0, 0, 0.7); color: #fff; overflow: hidden; border-radius: 4px; }
 .io-popup-container p { color: #fff; }

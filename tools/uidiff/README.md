@@ -16,7 +16,10 @@ from the same scenario): a regression baseline, not a parity reference. The v10 
 cannot open without running Krunker's JS keep KN baselines too, checked by hand against Chrome: the
 emoji and symbol scenarios `kn-lb-grid` (the Leaderboards category cards), `kn-turf` (Overview),
 `kn-turf-boards`, `kn-turf-howto`, `kn-turf-history` (the KD ∞), `kn-ranked-sort` (the sort arrow),
-`kn-ranked-error` (❌) and `kn-ranked-found` (✨). Each icon was compared with headless Chrome 152 drawing
+`kn-ranked-error` (❌) and `kn-ranked-found` (✨), and a guest's Unclaimed Rewards box `kn-guest-earned-end` /
+`kn-guest-earned-menu` (the v10 sandbox captures are of a guest with no balance; `state.guestEarned` stands in
+for the ledger of `client/src/ui/v10_rewards.c`, checked the same way: `client/tests/guest_earned_e2e.py` also
+checks its amounts and its glow). Each icon was compared with headless Chrome 152 drawing
 v10's own markup and svelte.css at the box KN's layout gives it (`KRUNKNATIVE_SCENARIO_DUMP`), and the
 font Chrome uses per glyph read with CDP `CSS.getPlatformFontsForNode` (ui/README.md, the emoji row). The counters' parity
 references are `ingame-counters[-ds][-wide]` (capture-v10.js turns them on through v10's settings
