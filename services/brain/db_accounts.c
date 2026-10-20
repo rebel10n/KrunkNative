@@ -8,6 +8,8 @@
 #include "double_xp.h"
 #include "knsvc/loop.h"
 
+#include "badges.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -498,6 +500,33 @@ const kn_proc P_STAFF_DEV = {
     "UPDATE players SET " STAFF_DEV_SET " FROM accounts a "
     "WHERE a.id = player_id AND lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)",
     run_staff_dev};
+
+/* A developer also owns every progression badge (shared/include/badges.h, indices 0..BADGE_COUNT-1),
+ * one player_badges row each, kept once (the key is account_id, badge). A separate proc from the
+ * flags: PostgreSQL runs one statement per proc. */
+#define KN_STR_(x) #x
+#define KN_STR(x) KN_STR_(x)
+static kn_db_result *run_staff_dev_badges(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *names = P(0) ? cJSON_Parse(P(0)) : NULL;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, names) {
+        if (!cJSON_IsString(it)) continue;
+        for (int b = 0; b < BADGE_COUNT && !dbx_failed(&x); b++)
+            dbx_exec(&x, SQL(.any = "{insert_ignore} INTO player_badges (account_id, badge)"
+                                    " SELECT id, {int:$2} FROM accounts WHERE lower(username) = lower($1) {ignore_conflicts}"),
+                     KN_DB_ARGS(it->valuestring, I64S(b)));
+    }
+    cJSON_Delete(names);
+    return dbx_finish(&x, kn_db_result_command(0));
+}
+const kn_proc P_STAFF_DEV_BADGES = {
+    "staff_dev_badges",
+    "INSERT INTO player_badges (account_id, badge) SELECT a.id, b.badge FROM accounts a"
+    " CROSS JOIN generate_series(0, " KN_STR(BADGE_COUNT - 1) ") AS b(badge)"
+    " WHERE lower(a.username) IN (SELECT lower(x) FROM jsonb_array_elements_text($1::jsonb) x)"
+    " ON CONFLICT DO NOTHING",
+    run_staff_dev_badges};
 const kn_proc P_STAFF_MOD = {
     "staff_mod",
     "UPDATE players SET player_moderator = 1 FROM accounts a "

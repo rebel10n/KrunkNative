@@ -1438,6 +1438,7 @@ static void staff_flags_apply(void) {
         cJSON_Delete(names);
         if (n && text) {
             kn_db_call(g_acct_brain->db, dev ? &P_STAFF_DEV : &P_STAFF_MOD, KN_DB_ARGS(text), cleanup_cb, NULL);
+            if (dev) kn_db_call(g_acct_brain->db, &P_STAFF_DEV_BADGES, KN_DB_ARGS(text), cleanup_cb, NULL);
         }
         free(text);
     }

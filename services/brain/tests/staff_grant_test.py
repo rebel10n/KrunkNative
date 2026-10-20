@@ -5,8 +5,8 @@
 
 At every brain start a developer named in accounts.developers gets player_developer and
 player_moderator, the verified tick (player_featured), lifetime VIP (player_premium 315360000000 ms)
-and the creator badge (creator_badge). A moderator gets player_moderator only; a plain account
-gets none of them. The grant runs at each start, so a restart after the flags were wiped (a
+the creator badge (creator_badge) and every progression badge (player_badges, indices 0..BADGE_COUNT-1).
+A moderator gets player_moderator only; a plain account gets none of them. The grant runs at each start, so a restart after the flags were wiped (a
 database restore from an older copy) grants them again.
 
 KN_TEST_DB_DRIVER=postgres runs the same on a scratch schema of the local PostgreSQL
@@ -38,6 +38,10 @@ from kn_proto import free_ports  # noqa: E402
 
 LIFETIME_PREMIUM = 315360000000  # the developers' premium (ms, ten years); migration 0110 widens it on PostgreSQL
 PASSWORD = "social_pass_1"
+# every progression badge (shared/include/badges.h BADGE_COUNT): a developer owns indices 0..BADGE_COUNT-1
+with open(os.path.join(ROOT, "shared", "include", "badges.h")) as _fp:
+    BADGE_COUNT = int(re.search(r"#define BADGE_COUNT (\d+)", _fp.read()).group(1))
+ALL_BADGES = list(range(BADGE_COUNT))
 FAILS = []
 WORK = tempfile.mkdtemp(prefix="kn-staff-grant.", dir=os.path.expanduser("~/.cache"))
 DB = os.path.join(WORK, "coordinator.db")
@@ -111,6 +115,17 @@ def wipe(name):
     pid = player_id(name)
     q("UPDATE players SET player_developer = 0, player_moderator = 0, player_featured = 0, player_premium = 0,"
       " creator_badge = 0 WHERE player_id = ?", pid)
+
+
+def badges(name):
+    """The progression badge indices the account owns (player_badges), sorted."""
+    rows = q("SELECT pb.badge FROM player_badges pb JOIN accounts a ON a.id = pb.account_id "
+             "WHERE lower(a.username) = ? ORDER BY pb.badge", name.lower())
+    return [r[0] for r in rows]
+
+
+def wipe_badges(name):
+    q("DELETE FROM player_badges WHERE account_id = ?", player_id(name))
 
 
 def start_brain(tag, developers, moderators, migrate):
@@ -189,6 +204,7 @@ def main():
         for n in (dev_n, mod_n, plain_n):
             check(asyncio.run(register(n)) is None, "registered %s" % n)
         check(flags(dev_n) == (0, 0, 0, 0, 0), "a new account has no staff flags, featured, premium or creator badge")
+        check(badges(dev_n) == [], "a new account owns no progression badges")
         stop_brain(brain)
 
         print("startup grant (developers and moderators named in the config):")
@@ -196,18 +212,32 @@ def main():
         check(brain.poll() is None, "kn_brain restarts with the staff lists")
         check(flags(dev_n) == (1, 1, 1, LIFETIME_PREMIUM, 1),
               "developer: developer, moderator, featured, lifetime premium, creator badge (%r)" % (flags(dev_n),))
+        check(badges(dev_n) == ALL_BADGES, "developer owns every progression badge, 0..%d (%r)" % (BADGE_COUNT - 1, badges(dev_n)))
         check(flags(mod_n) == (0, 1, 0, 0, 0), "moderator: moderator flag only (%r)" % (flags(mod_n),))
+        check(badges(mod_n) == [], "moderator owns no progression badges")
         check(flags(plain_n) == (0, 0, 0, 0, 0), "a plain account gets no staff grant (%r)" % (flags(plain_n),))
+        check(badges(plain_n) == [], "a plain account owns no progression badges")
         stop_brain(brain)
 
-        print("restore (flags wiped, then a start):")
+        print("restore (flags wiped, then a start: the badges already held are kept, none doubled):")
         wipe(dev_n)
         check(flags(dev_n) == (0, 0, 0, 0, 0), "the developer's flags are wiped")
         brain = start_brain("3", [dev_n], [mod_n], migrate=False)
         check(brain.poll() is None, "kn_brain restarts again")
         check(flags(dev_n) == (1, 1, 1, LIFETIME_PREMIUM, 1),
               "the next start grants the developer again (%r)" % (flags(dev_n),))
+        check(badges(dev_n) == ALL_BADGES, "the badges are still exactly 0..%d (%r)" % (BADGE_COUNT - 1, badges(dev_n)))
         check(flags(mod_n) == (0, 1, 0, 0, 0), "the moderator is unchanged (%r)" % (flags(mod_n),))
+        stop_brain(brain)
+
+        print("restore (badges wiped too, then a start):")
+        wipe_badges(dev_n)
+        check(badges(dev_n) == [], "the developer's badges are wiped")
+        brain = start_brain("4", [dev_n], [mod_n], migrate=False)
+        check(brain.poll() is None, "kn_brain restarts once more")
+        check(badges(dev_n) == ALL_BADGES, "the next start gives the developer every badge again (%r)" % (badges(dev_n),))
+        check(flags(dev_n) == (1, 1, 1, LIFETIME_PREMIUM, 1), "and the flags are unchanged")
+        check(badges(mod_n) == [], "the moderator still owns no badges")
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
