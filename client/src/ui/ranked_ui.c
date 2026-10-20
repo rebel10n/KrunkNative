@@ -46,7 +46,7 @@
 #include <time.h>
 #include "../viewer/viewer_store.h"
 
-#define POLL_WAIT_S 6           // long poll: under backend_native.c HTTP_TIMEOUT_MS (8 s), so an idle poll answers instead of timing out
+#define POLL_WAIT_S 6           // long poll: under the brain's request timeout (backend_internal.h BACKEND_HTTP_TIMEOUT_MS, 8 s), so an idle poll answers instead of timing out
 #define DATA_TTL_MS 0           // v10 keeps no ranked answers (getOrFetch TTL 0, v10:98587, 98620, 98639): see open_popup
 #define ACCEPT_DELAY_MS 1000    // MATCHED: wait 1 s, then acceptMatch()
 #define POPUP_CLASS "rankedMenuModal"

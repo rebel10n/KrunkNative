@@ -3,6 +3,10 @@
 // backend_web.c). Main thread only.
 #include <stddef.h>
 
+// A brain request (backend_http_get, backend_http_request) with no answer by then has failed: status 0, the reason as
+// its body (backend.h). Native: the socket's connect and receive timeout. Web: fetch() is aborted (backend_web.c).
+#define BACKEND_HTTP_TIMEOUT_MS 8000
+
 void backend_store_url(const char *url);
 void backend_social_ws_url(char *out, size_t n);   // ws(s)://.../social/ws?enc=json
 void backend_dispatch_text(const char *text);       // one received JSON frame

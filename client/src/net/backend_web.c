@@ -88,11 +88,23 @@ typedef struct {
     BackendHttpFn fn;
     void *user;
     char *remote; // a krunker.io read (backend_http_request_remote): its path, logged when it is not answered 200
+    char *call;   // a request with the brain timeout (backend_http_request): "GET <url without its query>", logged when no answer
 } WebReq;
 
+// "GET https://host/mm/host-game" for the log: the URL without its query, where a token may be (never printed)
+static char *call_label(const char *method, const char *url) {
+    const char *query = strchr(url, '?');
+    const size_t path = query ? (size_t) (query - url) : strlen(url);
+    const size_t n = strlen(method) + 1 + path + 1;
+    char *label = malloc(n);
+    if (label) snprintf(label, n, "%s %.*s", method, (int) path, url);
+    return label;
+}
+
 // Any URL / method with a JSON body (auth service, server finder): the browser fetch()
-// (wget2 cannot send a body). The completion comes back through backend_web_fetch_done.
+// (wget2 cannot send a body). The completion comes back through backend_web_fetch_done, exactly once: it frees req.
 EMSCRIPTEN_KEEPALIVE void backend_web_fetch_done(WebReq *req, const int status, char *body, const int length) {
+    if (req->call && status == 0) fprintf(stderr, "[http] %s failed: %s\n", req->call, body ? body : "");
     WebItem *item = calloc(1, sizeof(*item));
     if (item) {
         item->fn = req->fn;
@@ -111,21 +123,37 @@ EMSCRIPTEN_KEEPALIVE void backend_web_fetch_done(WebReq *req, const int status, 
         else if (status != 200) fprintf(stderr, "[backend] krunker.io read %s: status %d\n", req->remote, status);
         free(req->remote);
     }
+    free(req->call);
     free(req);
 }
 
-EM_JS(void, backend_web_fetch, (const char *method, const char *url, const char *body, void *req), {
+// timeout_ms > 0 (a brain request): no answer by then is a status 0 whose body is the reason, as on native (the socket's
+// timeout, backend_native.c). fetch() has no timeout of its own, so the request is aborted (which also closes the
+// connection) from a browser timer, whatever the frame rate. 0 = no timeout. Exactly one completion per request.
+EM_JS(void, backend_web_fetch, (const char *method, const char *url, const char *body, void *req, int timeout_ms), {
     var opts = { method: UTF8ToString(method), headers: { 'Accept': 'application/json' } };
     if (body) {
         opts.body = UTF8ToString(body);
         opts.headers['Content-Type'] = 'application/json';
     }
+    var ctl = timeout_ms > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timedOut = false, settled = false, timer = 0;
+    if (ctl) {
+        opts.signal = ctl.signal;
+        timer = setTimeout(function () { timedOut = true; ctl.abort(); }, timeout_ms);
+    }
+    var finish = function (status, text) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        _backend_web_fetch_done(req, status, text === null ? 0 : stringToNewUTF8(text), 0);
+    };
     fetch(UTF8ToString(url), opts).then(function (r) {
-        return r.text().then(function (t) {
-            var p = stringToNewUTF8(t);
-            _backend_web_fetch_done(req, r.status, p, 0);
-        });
-    }).catch(function () { _backend_web_fetch_done(req, 0, 0, 0); });
+        return r.text().then(function (t) { finish(r.status, t); });
+    }).catch(function () {
+        finish(0, timedOut ? 'no answer within ' + Math.round(timeout_ms / 1000) + ' s (timed out)'
+                           : 'no answer (the browser refused it, CORS or the network)');
+    });
 });
 
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {
@@ -134,7 +162,9 @@ int backend_http_request(const char *method, const char *url, const char *json_b
     if (!req) return 0;
     req->fn = fn;
     req->user = user;
-    backend_web_fetch(method && method[0] ? method : "GET", url, json_body, req);
+    const char *verb = method && method[0] ? method : "GET";
+    req->call = call_label(verb, url);
+    backend_web_fetch(verb, url, json_body, req, BACKEND_HTTP_TIMEOUT_MS);
     return 1;
 }
 
@@ -149,7 +179,7 @@ int backend_http_request_remote(const char *url, const BackendHttpFn fn, void *u
     const size_t n = query ? (size_t) (query - url) : strlen(url);
     req->remote = calloc(n + 1, 1);
     if (req->remote) memcpy(req->remote, url, n);
-    backend_web_fetch("GET", url, NULL, req);
+    backend_web_fetch("GET", url, NULL, req, 0);
     return 1;
 }
 

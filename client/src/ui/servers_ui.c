@@ -4422,6 +4422,13 @@ static void on_host(void *user, const int status, const char *body, const size_t
         host_not_created(msg);
         return;
     }
+    // no answer at all (the brain timeout, a refused connection, a network failure): v10's custom.tryagain, as the
+    // krunker.io custom host shows it (krunker_net.c KRUNKER_CUSTOM_TRYAGAIN). The spinner never outlives the request
+    if (status == 0) {
+        cJSON_Delete(res);
+        host_not_created(msg);
+        return;
+    }
     if (status == 200 && cJSON_IsString(host)) {
         // a later action (a join by hand, a seek that was started after this request) entered a lobby while the
         // game was created: that lobby stays, and the new game is not joined (it is left empty on the brain)

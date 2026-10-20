@@ -37,7 +37,6 @@
 #include <http_conn.h>
 #endif
 
-#define HTTP_TIMEOUT_MS 8000
 #define HTTP_MAX_BODY (4u * 1024u * 1024u)
 #define WS_MAX_MESSAGE (2u * 1024u * 1024u)
 #define WS_BACKOFF_MIN_MS 1000
@@ -345,7 +344,7 @@ static int http_queue_lane(const int lane, const int timeout_ms, const char *met
     if (!url || !url[0]) return 0;
     HttpJob *job = calloc(1, sizeof(*job));
     if (!job) return 0;
-    job->timeout_ms = timeout_ms > 0 ? timeout_ms : HTTP_TIMEOUT_MS;
+    job->timeout_ms = timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS;
     snprintf(job->method, sizeof(job->method), "%s", method);
     job->url = strdup(url);
     job->body = body ? strdup(body) : NULL;
@@ -373,7 +372,7 @@ static int http_queue_lane(const int lane, const int timeout_ms, const char *met
 }
 
 static int http_queue(const char *method, const char *url, const char *body, const BackendHttpFn fn, void *user) {
-    return http_queue_lane(HTTP_LANE_BRAIN, HTTP_TIMEOUT_MS, method, url, body, fn, user);
+    return http_queue_lane(HTTP_LANE_BRAIN, BACKEND_HTTP_TIMEOUT_MS, method, url, body, fn, user);
 }
 
 int backend_http_get_external(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
@@ -400,7 +399,7 @@ int backend_http_get_parallel(const char *url, const int timeout_ms, const Backe
     if (!url || !url[0] || backend_brain_refuses_url(url)) return 0;
     HttpJob *job = calloc(1, sizeof(*job));
     if (!job) return 0;
-    job->timeout_ms = timeout_ms > 0 ? timeout_ms : HTTP_TIMEOUT_MS;
+    job->timeout_ms = timeout_ms > 0 ? timeout_ms : BACKEND_HTTP_TIMEOUT_MS;
     snprintf(job->method, sizeof(job->method), "GET");
     job->url = strdup(url);
     job->fn = fn;

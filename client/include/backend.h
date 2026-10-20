@@ -30,7 +30,9 @@
 // status 0 = transport error; body is then the reason as plain text ("cannot connect to ...",
 // "host not found (WinHTTP error 12007)"), never JSON, and the failure is already logged as
 // "[http] <method> <url> failed: <reason>". A brain GET that got no answer is tried once more before
-// this is reported (backend_native.c http_retry); a POST and any real answer are not.
+// this is reported (backend_native.c http_retry; the web does not retry). A brain request with no answer
+// within 8 s fails this way on both transports (a socket timeout native, an aborted fetch() on the web).
+// A POST and any real answer are not retried.
 // BACKEND_HTTP_TLS_FAILED (-2): the target's TLS handshake failed (its certificate or name did not
 // verify). Only backend_http_get_parallel reports it; every other request sees 0 for it.
 #define BACKEND_HTTP_TLS_FAILED (-2)

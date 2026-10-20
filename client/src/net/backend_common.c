@@ -69,7 +69,7 @@ int backend_brain_refuses_url(const char *url) {
 // wait that grows to PROBE_RETRY_MAX_S, so one bad answer at page load does not leave the page a guest
 // until the next reload. Meanwhile g_avail is 0, as for a page with no brain, so the matchmaker and the
 // account windows do not wait on it. A definitive answer (200 without the brain, 404, ...) is final.
-#define PROBE_TIMEOUT_S 12   // fetch() has no timeout of its own: a probe with no answer by then has failed
+#define PROBE_TIMEOUT_S 12   // a probe with no answer by then has failed (the request's own timeout, BACKEND_HTTP_TIMEOUT_MS, is first)
 #define PROBE_RETRY_MAX_S 10 // the longest wait between probes after a failure (1, 2, 4, 8, then this)
 
 static int g_avail = 1;        // backend_available()
