@@ -954,7 +954,8 @@ static char *hud_plist_rows(void) {
     const Client *client = menu_ui()->client;
     const size_t count = client && client->game.players ? client->game.player_count : 0;
     StrBuf sb = {0};
-    sb_append(&sb, "<table class='pListTable' style='margin-top: 8px;overflow-y: scroll;height: calc(100% - 75px);'><tbody>");
+    // overflow-y: auto, not scroll: the bar shows only while the rows overflow the list
+    sb_append(&sb, "<table class='pListTable' style='margin-top: 8px;overflow-y: auto;height: calc(100% - 75px);'><tbody>");
     // isLobbyHost: this client runs the game (offline / hosted), like menu_ui.c's idle kick
     const int remote = client && client->net_connected && !client->offline && !client->game.is_local;
     const char *host = client ? client->net_address : "";
