@@ -433,6 +433,46 @@ pkg_rest="$(echo "$describe" | sed -n 's/^[a-z-]*v[0-9][0-9.]*-\([0-9]*\)-\(g[0-
 summary="Native C port of the Krunker first-person shooter"
 description="Krunker Box Office client ($describe, protocol ${KN_PROTOCOL:-?}): the game, its HTML menu and the dedicated server. The game content (models, textures, sounds, about 1.7 GB) is not in this package: the first start downloads it."
 
+# deb_package_for <soname>: the Debian/Ubuntu package that provides a host-libs.txt soname, "" when the
+# control file already declares it (libc6, libegl1, libssl3). Exit 1 for a soname not named here: a
+# library the bundle needs from the system must have its package, not be left to the player's distro.
+# The names are the ones test-client-linux.sh installs on Debian and Ubuntu.
+deb_package_for() {
+    case "$1" in
+        ld-linux*|linux-vdso*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|libutil.so.*|libresolv.so.*|libmvec.so.*|libanl.so.*|libnss_*) echo "" ;;
+        libgcc_s.so.1) echo libgcc-s1 ;;
+        libstdc++.so.6) echo libstdc++6 ;;
+        libEGL.so.1|libcrypto.so.3|libssl.so.3) echo "" ;;
+        libGL.so.1) echo libgl1 ;;
+        libX11.so.6) echo libx11-6 ;;
+        libX11-xcb.so.1) echo libx11-xcb1 ;;
+        libXcomposite.so.1) echo libxcomposite1 ;;
+        libXcursor.so.1) echo libxcursor1 ;;
+        libXdamage.so.1) echo libxdamage1 ;;
+        libXext.so.6) echo libxext6 ;;
+        libXfixes.so.3) echo libxfixes3 ;;
+        libXi.so.6) echo libxi6 ;;
+        libXinerama.so.1) echo libxinerama1 ;;
+        libXrandr.so.2) echo libxrandr2 ;;
+        libXrender.so.1) echo libxrender1 ;;
+        libdbus-1.so.3) echo libdbus-1-3 ;;
+        libdrm.so.2) echo libdrm2 ;;
+        libgbm.so.1) echo libgbm1 ;;
+        libsystemd.so.0) echo libsystemd0 ;;
+        libudev.so.1) echo libudev1 ;;
+        libwayland-client.so.0) echo libwayland-client0 ;;
+        libwayland-cursor.so.0) echo libwayland-cursor0 ;;
+        libwayland-egl.so.1) echo libwayland-egl1 ;;
+        libwayland-server.so.0) echo libwayland-server0 ;;
+        libxcb.so.1) echo libxcb1 ;;
+        libxcb-render.so.0) echo libxcb-render0 ;;
+        libxcb-shm.so.0) echo libxcb-shm0 ;;
+        libxkbcommon.so.0) echo libxkbcommon0 ;;
+        libz.so.1) echo zlib1g ;;
+        *) return 1 ;;
+    esac
+}
+
 for f in $formats; do
     case "$f" in
         deb)
@@ -441,6 +481,19 @@ for f in $formats; do
             darch="$arch"; [ "$arch" = aarch64 ] && darch=arm64
             depends="libc6 (>= ${glibc_min:-2.17}), libegl1 | libegl1-mesa"
             case "$platform" in *-polyfilled) ;; *) depends+=", libssl3 | libssl3t64" ;; esac
+            # dynamic packages: the bundle's system sonames (host-libs.txt, the same list rpm's Requires come
+            # from) need their Debian packages declared, or apt leaves them out (libXi6 under the bundled GTK)
+            extra=""
+            if [ -f "$bindir/host-libs.txt" ]; then
+                while read -r so; do
+                    if p="$(deb_package_for "$so")"; then
+                        if [ -n "$p" ]; then extra+=" $p"; fi
+                    else
+                        echo "host-libs.txt: no Debian package named for $so (deb_package_for)" >&2; exit 1
+                    fi
+                done < "$bindir/host-libs.txt"
+                for p in $(printf '%s\n' $extra | sort -u); do depends+=", $p"; done
+            fi
             mkdir -p "$root/DEBIAN"
             cat > "$root/DEBIAN/control" << EOF
 Package: krunknative
