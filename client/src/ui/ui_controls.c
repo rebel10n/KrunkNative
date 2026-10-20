@@ -1147,13 +1147,16 @@ void ui_controls_chat_focus(const int focused) {
     if (g_ctl.settings.shw_chat == 1) ui_controls_apply_chat_visibility();
 }
 
-int ui_text_input_focused(void) {
+// The focused control takes the keyboard: the chat, a TEXTAREA, a typed INPUT, a contenteditable, and
+// (select_too) a SELECT, whose type-ahead and arrows take the keys while its popup is closed.
+static int editable_focused(const int select_too) {
     if (g_ctl.chat_focused) return 1;
     const HtmlElem el = html_dom_active_element();
     if (!el) return 0;
     char tag[16] = "", editable[16] = "";
     html_dom_tag(el, tag, sizeof(tag));
-    if (!strcmp(tag, "textarea") || !strcmp(tag, "select")) return 1;
+    if (!strcmp(tag, "textarea")) return 1;
+    if (!strcmp(tag, "select")) return select_too;
     if (!strcmp(tag, "input")) {
         // Only fields that take typing. v7 checks tagName == "INPUT", but in the browser a click
         // into the game blurs the menu's switches and sliders; here a focused checkbox / range /
@@ -1170,6 +1173,12 @@ int ui_text_input_focused(void) {
     }
     return html_dom_get_attr(el, "contenteditable", editable, sizeof(editable)) >= 0 && strcmp(editable, "false");
 }
+
+int ui_text_input_focused(void) { return editable_focused(1); }
+
+// mods.ts's `input` (target.tagName === "INPUT" || "TEXTAREA"): a focused <select> is no text field, so
+// F4 (Find New Game) pressed right after picking Settings > Quickplay > Server Type still seeks.
+int ui_text_field_focused(void) { return editable_focused(0); }
 
 // Typing in #chatInput or in the developer console (main.c: no hotkeys, chars to the page).
 int ui_controls_chat_focused(void) {

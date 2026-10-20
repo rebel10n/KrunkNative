@@ -523,6 +523,8 @@ void ui_controls_chat_focus(int focused);        // focusChat(on)
 // document.activeElement is an INPUT / TEXTAREA / SELECT / contenteditable (any page), or the
 // chat / terminal input owns the keyboard: no hotkey may fire (mods.ts isEditableTarget).
 int  ui_text_input_focused(void);
+// ... an INPUT / TEXTAREA / contenteditable only (mods.ts's `input`): a focused SELECT keeps F1 / F4 / T
+int  ui_text_field_focused(void);
 int  ui_controls_chat_focused(void);
 int  ui_controls_chat_enter(Client*);            // Enter seen by the page in #chatInput
 void ui_controls_apply_chat_visibility(void);    // shwChat

@@ -3707,7 +3707,11 @@ def run_native_f4_server_type():
     - "native-quickmatch-kn-after-kio-failure": Box Office, the krunker.io join failed (the error screen, no challenge
       can be shown here): Quick Match goes to the brain, not krunker.io's matchmaker;
     - "native-f4-official-control": Server Type krunker.io: F4 in an official game still seeks krunker.io (the brain
-      is not asked), and joins another official game."""
+      is not asked), and joins another official game;
+    - "native-f4-after-select": Server Type picked in the Settings window's own select (its onchange, not a setSetting
+      call), then F4 at once with the window still up: the pick takes effect without a relaunch. The focused select
+      took F4 before (ui_text_input_focused counted a select as typing, so mods.ts's F4 never ran, and the page
+      engine's select opened its popup on F4): nothing seeked, whatever Server Type said."""
     dead_port = kn_proto.free_ports(1)[0]
     join_line = "[mm] joining %s at" % BOX_OFFICE_LOBBY
 
@@ -3793,6 +3797,37 @@ def run_native_f4_server_type():
     check(f"{label}: krunker.io selected: F4 asks krunker.io's matchmaker for another game (two seek-game requests)", len(k_seeks) >= 2, k_seeks)
     check(f"{label}: F4 joins another official game than the one it is in", len(joins) >= 2 and joins[1] != joins[0], joins)
     check(f"{label}: krunker.io selected: the brain is not asked", not seeks, len(seeks))
+
+    # Server Type picked in the Settings window itself: the select's popup (clickid), the type-ahead to "krunker.io
+    # servers", Enter picks it (the page's onchange -> setSetting), then F4 with the window still up and the select
+    # focused. Box Office saved, so the brain session's startup seek is Box Office's (LOCAL:boot0, before the pick).
+    label = "native-f4-after-select"
+    seeks = []
+
+    def setup_select(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, brain_settings("kn"))
+    script = ("0 boot\n3000 call showWindow 1\n3600 clickid knSeekServers\n4000 type k\n4400 down ENTER\n4450 up ENTER\n"
+              "4800 text @type [id=knSeekServers]\n5000 down F4\n5050 up F4\n14000 quit\n")
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup_select)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
+    bo_seeks = [pth for pth, _, _ in stub.http_log if pth == "/brain/mm/seek-game"]
+    check(f"{label}: the select's own change reached the setting (its onchange: setSetting knSeekServers=official)",
+          "setSetting('knSeekServers', this.value) change" in text and "setSetting knSeekServers=official" in text,
+          [l for l in lines if "knSeekServers" in l][:3])
+    check(f"{label}: the select shows the pick", any("@type" in l and "value=official" in l for l in lines),
+          [l for l in lines if "@type" in l][:1])
+    check(f"{label}: F4 with the select still focused runs Find New Game", "[controls] F4: find new game" in text,
+          [l for l in lines if "[controls]" in l or "[input_script] down" in l][:3])
+    check(f"{label}: F4 seeks krunker.io, the Server Type as just picked (no relaunch)",
+          len(k_seeks) >= 1 and any("gameId=" in w for w in stub.ws_paths) and "[krunker] seek: official lobby" in text,
+          (k_seeks, stub.ws_paths[:2], [l for l in lines if "[krunker] seek" in l][:3]))
+    check(f"{label}: no Box Office seek after the pick (the startup seek only)", len(bo_seeks) <= 1 and not seeks,
+          (len(bo_seeks), len(seeks), [l for l in lines if "[mm]" in l][-3:]))
 
 
 def run_native_kio_drop(f4=False):

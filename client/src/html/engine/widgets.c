@@ -65,7 +65,6 @@
 #define WK_PAGE_DOWN 267
 #define WK_HOME 268
 #define WK_END 269
-#define WK_F4 293
 
 /* Editing modifiers: Ctrl everywhere except macOS, where Cmd edits and
  * Option jumps by words (Chrome's platform conventions). */
@@ -3578,10 +3577,8 @@ static int key_select(Widgets *w, WidgetState *s, int key, int mods)
         select_move_to(w, s, cur + (key == WK_PAGE_UP ? -page : page));
         return 1;
     }
-    case WK_F4:
-        if (open) widgets_close_popup(w);
-        else open_popup(w, s->elem);
-        return 1;
+    /* No F4: Chrome opens a focused select with it on Windows only, and Krunker's F4 (Find New Game,
+     * a document keydown) must reach the page from a select that was just picked. */
     case WK_SPACE:
         if (typeahead_active(w, s)) return 1;   /* the ' ' char extends the type-ahead */
         if (!open) open_popup(w, s->elem);
