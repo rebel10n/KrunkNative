@@ -32,6 +32,7 @@ void hud_modes_scenario(Client*, const struct cJSON *mode_hud); // --render-scen
 const char *const *hud_modes_end_stats(const Client*);
 int  hud_modes_end_rows(int *uids, int max);
 void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
+int  hud_modes_end_table_html(const Client*, char *html, size_t size); // the live #endTable rows (hud_modes.c); 0 without MODE_END
 int  hud_modes_end_team_score(int team);
 // An official "end" row (net_ext.h NET_EXT_KN_OFFICIAL_END_ROW, before its END): #endTable prints it
 // even when its player already left (its name cell), and its "dmg" cell.

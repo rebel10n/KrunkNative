@@ -810,6 +810,84 @@ int hud_modes_end_team_score(const int team) {
     return g_modes.end_valid && (team == 1 || team == 2) ? g_modes.end.team_scores[team - 1] : 0;
 }
 
+// The live #endTable's markup (f1917 / v10 showTable with the mode's endStats): the header row and the
+// rows of g_modes.end in the server's endSort order, without the <table> tag (html: size bytes). 0 when
+// there is no MODE_END packet. The end screen writes it into #endTable (hud_modes_end_screen) and the
+// Leaderboard tab (hud_ui.c hud_end_leaderboard_html) wraps the same markup, so both show one table.
+int hud_modes_end_table_html(const Client *client, char *html, const size_t size) {
+    if (!g_modes.end_valid || !client || !html || size < 2048) return 0;
+    html[0] = 0;
+    const GameModeConfig *config = hud_mode_config(client);
+    const char *const *stats = config && config->end_stats ? config->end_stats : k_default_end_stats;
+    int stat_count = 0;
+    while (stats[stat_count]) stat_count++;
+
+    size_t len = 0;
+    // v7 f1917: <th id='endlb_<stat>'> headers and a 20px spacer row
+    len += (size_t) snprintf(html + len, size - len, "<tr><th id='endlb_rank'>#</th>"); // v10:219618 endlb_rank "#"
+    for (int i = 1; i < stat_count; i++) {
+        char id[32];
+        size_t k = 0;
+        for (const char *c = stats[i]; *c && k + 1 < sizeof(id); c++) id[k++] = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+        id[k] = 0;
+        len += (size_t) snprintf(html + len, size - len, "<th id='endlb_%s'>%s</th>", id, hud_modes_end_header(stats[i]));
+    }
+    len += (size_t) snprintf(html + len, size - len, "<th></th></tr><tr height='20px;'></tr>");
+
+    // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
+    // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.
+    const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
+    for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len + 1400 < size; r++) {
+        const NetModeEndEntry *entry = &g_modes.end.entries[r];
+        const Player *player = client_find_player((Client *) client, entry->uid);
+        // an official row prints its player even after it left (v10 :219871-219890: the row's own
+        // [name, alias] cell and values); our own server's rows are all of present players
+        const NetOfficialEndRowPacket *row = end_row(entry->uid);
+        static Player ghost;
+        if (!player && row) {
+            memset(&ghost, 0, sizeof(ghost));
+            ghost.uid = row->uid;
+            snprintf(ghost.name, sizeof(ghost.name), "%s", row->name);
+            ghost.score = row->score;
+            ghost.kills = (unsigned int) (row->kills > 0 ? row->kills : 0);
+            ghost.deaths = (unsigned int) (row->deaths > 0 ? row->deaths : 0);
+            ghost.reward = row->reward;
+        }
+        const int left = !player;
+        if (left && !row) continue;
+        if (left) player = &ghost;
+
+        // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
+        char name[PLAYER_NAME_SIZE * 6], shown_name[PLAYER_NAME_SIZE * 6], shown[PLAYER_NAME_SIZE];
+        char pn[PLAYER_NAME_SIZE];
+        const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
+        html_escape(raw_name, name, sizeof(name));
+        html_escape(streamer_name(raw_name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
+        const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
+
+        len += (size_t) snprintf(html + len, size - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
+                                 r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
+        for (int i = 1; i < stat_count; i++) {
+            if (!strcmp(stats[i], "name") && player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
+                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
+                                         "<span class='endTableN' style='color:%s'>%s</span></td>", color, shown_name);
+            } else if (!strcmp(stats[i], "name")) {
+                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
+                                         "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
+            } else {
+                char value[64];
+                if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
+                else hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
+                if (player_names_extras_hidden(player == client->me)) value[0] = 0; // Hide player names: the others' stats
+                len += (size_t) snprintf(html + len, size - len, "<td style='position: relative;'>%s</td>", value);
+            }
+        }
+        len += (size_t) snprintf(html + len, size - len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
+    }
+
+    return 1;
+}
+
 // endGame's #endTable with the mode's endStats (rows in the server's endSort order,
 // your row white, your team 60% white, the enemy COLORS.teams[1]) and teamTotal0/1.
 static void hud_modes_end_screen(const Client *client, const GameModeConfig *config) {
@@ -844,75 +922,9 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
         }
     }
 
-    const char *const *stats = config->end_stats ? config->end_stats : k_default_end_stats;
-    int stat_count = 0;
-    while (stats[stat_count]) stat_count++;
-
     char *html = malloc(16384);
     if (!html) return;
-    size_t len = 0;
-    // v7 f1917: <th id='endlb_<stat>'> headers and a 20px spacer row
-    len += (size_t) snprintf(html + len, 16384 - len, "<tr><th id='endlb_rank'>#</th>"); // v10:219618 endlb_rank "#"
-    for (int i = 1; i < stat_count; i++) {
-        char id[32];
-        size_t k = 0;
-        for (const char *c = stats[i]; *c && k + 1 < sizeof(id); c++) id[k++] = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
-        id[k] = 0;
-        len += (size_t) snprintf(html + len, 16384 - len, "<th id='endlb_%s'>%s</th>", id, hud_modes_end_header(stats[i]));
-    }
-    len += (size_t) snprintf(html + len, 16384 - len, "<th></th></tr><tr height='20px;'></tr>");
-
-    // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
-    // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.
-    const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
-    for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len < 15000; r++) {
-        const NetModeEndEntry *entry = &g_modes.end.entries[r];
-        const Player *player = client_find_player((Client *) client, entry->uid);
-        // an official row prints its player even after it left (v10 :219871-219890: the row's own
-        // [name, alias] cell and values); our own server's rows are all of present players
-        const NetOfficialEndRowPacket *row = end_row(entry->uid);
-        static Player ghost;
-        if (!player && row) {
-            memset(&ghost, 0, sizeof(ghost));
-            ghost.uid = row->uid;
-            snprintf(ghost.name, sizeof(ghost.name), "%s", row->name);
-            ghost.score = row->score;
-            ghost.kills = (unsigned int) (row->kills > 0 ? row->kills : 0);
-            ghost.deaths = (unsigned int) (row->deaths > 0 ? row->deaths : 0);
-            ghost.reward = row->reward;
-        }
-        const int left = !player;
-        if (left && !row) continue;
-        if (left) player = &ghost;
-
-        // showEndTable: the link keeps the real name, the text is scrambleS(alias) in streamer mode
-        char name[PLAYER_NAME_SIZE * 6], shown_name[PLAYER_NAME_SIZE * 6], shown[PLAYER_NAME_SIZE];
-        char pn[PLAYER_NAME_SIZE];
-        const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
-        html_escape(raw_name, name, sizeof(name));
-        html_escape(streamer_name(raw_name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
-        const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
-
-        len += (size_t) snprintf(html + len, 16384 - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
-                                 r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
-        for (int i = 1; i < stat_count; i++) {
-            if (!strcmp(stats[i], "name") && player_names_hidden()) { // no profile link while names are hidden (it is the real account's)
-                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
-                                         "<span class='endTableN' style='color:%s'>%s</span></td>", color, shown_name);
-            } else if (!strcmp(stats[i], "name")) {
-                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'><img class='endTablePfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png'>"
-                                         "<a class='endTableN' href='./social.html?p=profile&q=%s' target='_blank' style='color:%s'>%s</a></td>", name, color, shown_name);
-            } else {
-                char value[64];
-                if (!strcmp(stats[i], "dmg") && row && row->dmg >= 0) snprintf(value, sizeof(value), "%d", (int) row->dmg); // endForm.dmg
-                else hud_modes_end_value(player, hud_modes_end_entry(entry->uid), stats[i], value, sizeof(value));
-                if (player_names_extras_hidden(player == client->me)) value[0] = 0; // Hide player names: the others' stats
-                len += (size_t) snprintf(html + len, 16384 - len, "<td style='position: relative;'>%s</td>", value);
-            }
-        }
-        len += (size_t) snprintf(html + len, 16384 - len, "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr>");
-    }
-
+    hud_modes_end_table_html(client, html, 16384);
     html_dom_set_html(table, html);
     free(html);
 }

@@ -78,6 +78,7 @@ void hud_ui_hit(Client*, int kill);
 #include <string.h>
 #include <ruleset.h>
 #include <hud_v10.h>
+#include <hud_modes.h> // hud_modes_end_table_html: the live #endTable rows (hud_end_leaderboard_html)
 #include <game_time.h>   // the top-right game time tile (hud_gametime_step): the device's own total
 #include <client_settings.h> // client_settings_game_time: Display > Interface > Show Game Time
 #include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
@@ -3391,6 +3392,15 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
 // tabs.leaderboard: <table id="endTable"> filled like f1917 (endStats sid, name, score,
 // kills, deaths, reward).
 static void hud_end_leaderboard_html(const Client *client, char *out, const size_t size, size_t *len) {
+    // The live table: the mode's endStats columns, the same rows the end screen writes into #endTable
+    // (hud_modes_end_screen). Without the mode's end packet the default columns below.
+    char *live = malloc(16384);
+    if (live && hud_modes_end_table_html(client, live, 16384)) {
+        hb_append(out, size, len, "<table id=\"endTable\">%s</table>", live);
+        free(live);
+        return;
+    }
+    free(live);
     hb_append(out, size, len, "<table id=\"endTable\"><tr><th id='endlb_rank'>#</th><th id='endlb_name'>Name</th><th id='endlb_score'>Score</th>"
                               "<th id='endlb_kills'>Kills</th><th id='endlb_deaths'>Deaths</th><th id='endlb_reward'>Reward</th><th></th></tr><tr height='20px;'></tr>");
     if (cJSON_IsArray(g_hud_override.scoreboard) && hud_end_scenario_rows_html(client, g_hud_override.scoreboard, out, size, len)) {
