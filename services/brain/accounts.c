@@ -1205,6 +1205,32 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
     char ids[24], v1[24], v2[24];
     const int64_t id = kn_json_int(args, "id", 0);
 
+    /* the signed-out guest's balance (db_guest.c, 0350_guest_profiles): a guest has no account id, so these
+     * come before the account ops. guest_credit {guest, match, kr, xp} -> {funds, score, duplicate} (a match
+     * pays once); guest_claim {guest} -> {funds: 0, score: 0} (a login). The guest id is checked, never logged. */
+    if (!strcmp(op, "guest_credit") || !strcmp(op, "guest_claim")) {
+        const int credit = !strcmp(op, "guest_credit");
+        const char *guest = kn_json_str(args, "guest", NULL);
+        if (!guest_id_valid(guest)) {
+            cb(ud, "Bad guest id.", NULL);
+            return 0;
+        }
+        const char *match = kn_json_str(args, "match", NULL);
+        if (credit && !guest_match_valid(match)) {
+            cb(ud, "Bad match.", NULL);
+            return 0;
+        }
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        if (credit)
+            kn_db_call(g_acct_brain->db, &P_GUEST_CREDIT,
+                       KN_DB_ARGS(guest, match, acct_itoa(v1, kn_json_int(args, "kr", 0)), acct_itoa(v2, kn_json_int(args, "xp", 0))),
+                       op_json_done, o);
+        else
+            kn_db_call(g_acct_brain->db, &P_GUEST_CLAIM, KN_DB_ARGS(guest), op_json_done, o);
+        return 0;
+    }
+
     if (!strcmp(op, "login")) {
         internal_auth(1, args, cb, ud);
         return 0;

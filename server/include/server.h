@@ -71,6 +71,7 @@ typedef struct {
     unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
     unsigned char premium:1;
     int funds;
+    char guest_id[33];         // NET_EXT_KN_GUEST_ID: the menu's guest id (32 lowercase hex), "" none; its unclaimed rewards
 
     unsigned char join_state;  // ServerJoinState
     unsigned char spawn_deferred:1;    // an ENT arrived before the identity was settled

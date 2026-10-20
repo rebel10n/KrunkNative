@@ -772,9 +772,10 @@ int backend_social_send_raw(const char *json) {
 // ------------------------------------------------------------------ main thread
 
 // The URL for a log line: the values of query parameters that carry secrets (krunker.io's seek-game:
-// captchaToken, accessToken, validationToken; a socket's at=; any token=) shown as "(redacted)".
+// captchaToken, accessToken, validationToken; a socket's at=; any token=; the brain's guest= (a guest id, a
+// bearer identifier) shown as "(redacted)".
 static char *redacted_url(const char *url) {
-    static const char *const secret[] = {"captchaToken", "accessToken", "validationToken", "at", "token"};
+    static const char *const secret[] = {"captchaToken", "accessToken", "validationToken", "at", "token", "guest"};
     static const char MARK[] = "(redacted)";
     size_t parts = 1;
     for (const char *c = url; *c; c++) parts += *c == '&';

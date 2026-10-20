@@ -144,7 +144,21 @@ typedef enum {
     NET_EXT_KN_CHAT_NAMES = 0x8122,   // S -> C NetChatNamesPacket: a bot's chat line naming another player (its kill and round comments)
     // 0x8131 Krunker Strike kill card flag (the first id after 0x8130 no queued patch takes)
     NET_EXT_KN_STRIKE_KILL_FLAG = 0x8131, // S -> C NetStrikeKillFlagPacket, right before the victim's NET_PACKET_KILL
+    // 0x8140 a guest's Unclaimed Rewards (v10's guest profile: GET /guest/profile, the "ger" push; kn_brain
+    // services/brain/guest.c, the server's round credit accounts.c acc_guest_*, client/src/ui/v10_rewards.c)
+    NET_EXT_KN_GUEST_ID = 0x8140,     // C -> S NetGuestIdPacket: the menu's guest id, sent while signed out, once per connection
+    NET_EXT_KN_GUEST_EARNED = 0x8141, // S -> C, no body: v10's "ger" (GUEST_EARNED_REWARDS): this guest's balance changed, fetch it again
 } NetExtSubtype;
+
+// NET_EXT_KN_GUEST_ID (C -> S): the guest id the menu keeps in its own storage: 32 lowercase hex digits
+// (16 random bytes), NUL-terminated. It is the guest's identity for the brain's guest_profiles table, as
+// v10's cookie is its guest profile: the server keeps it on the connection, credits the guest's END
+// reward and score under it, and a live sign-in claims it (zeroes the balance). Never trusted as an
+// account: the brain only ever answers for the balance under it.
+typedef struct {
+    char id[33];
+} NetGuestIdPacket;
+_Static_assert(sizeof(NetGuestIdPacket) == 33, "NetGuestIdPacket: the wire body is 33 bytes");
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
 // it exactly as a JOIN's (a session token through the coordinator's token auth, a "hj1:" through

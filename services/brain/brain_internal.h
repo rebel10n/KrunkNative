@@ -112,6 +112,9 @@ void lottery_shutdown(Brain *b);
 /* ---- the Junk-priced shop (shop.c, 0349_shop_junk; db_shop.c) */
 int shop_init(Brain *b);
 void shop_shutdown(Brain *b);
+/* ---- the signed-out guest's balance (guest.c, 0350_guest_profiles; db_guest.c) */
+int guest_init(Brain *b);
+void guest_shutdown(Brain *b);
 
 /* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
 int turf_init(Brain *b);

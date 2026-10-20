@@ -400,9 +400,6 @@ static void events_end(Client *client, const NetEndPacket *packet) {
         if (player) player->reward = packet->rewards[i];
         if (client->me && !client->net_end_rank && packet->board.entries[i].uid == client->me->uid) {
             client->net_end_rank = i + 1;
-            // v10's guest profile banks a guest's reward and score (the Unclaimed Rewards box,
-            // v10_rewards.c); not the sandbox's, which v10 keeps local too
-            if (!client->offline) v10_rewards_guest_earned_add(packet->rewards[i], packet->board.entries[i].score);
         }
     }
     const int playing = (client->me && client->me->active) || spectate_active();
@@ -1394,6 +1391,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&round, body, sizeof(round));
                 strike_hud_round_progress(client, &round);
             }
+            else if (subtype == NET_EXT_KN_GUEST_EARNED) v10_rewards_guest_earned_push(); // "ger": a guest's balance changed (v10_rewards.c)
             else if (subtype == NET_EXT_KN_OFFICIAL_ROUND_SWITCH) events_round_switch(client);
             else if (subtype == NET_EXT_KN_OFFICIAL_TEXT_POPUP && body_length > sizeof(NetOfficialTextPopupHeader)) { // textPopup
                 NetOfficialTextPopupHeader h;

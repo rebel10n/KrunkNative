@@ -256,6 +256,8 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x8120 | `NET_EXT_KN_SERVER_LINE` | (KN: a join / leave / vote kick chat line about one player, the name apart from the text so Hide player names formats it; `NetServerLinePacket`) | S to C |
 | 0x8121 | `NET_EXT_KN_SERVER_NAMES` | (KN: a chat line naming up to 8 players: the lists (`/players`, `/teams`, `/kill`, `/bots`), a finish line, a two-name line; each name by uid, the template's `$`s take them in order; `NetServerNamesPacket`) | S to C |
 | 0x8122 | `NET_EXT_KN_CHAT_NAMES` | (KN: a bot's chat line naming the other player by uid, the kill and round comments ("{o}" is a `$`); the line is the bot's own (sender by uid), one name; `NetChatNamesPacket`) | S to C |
+| 0x8140 | `NET_EXT_KN_GUEST_ID` | (KN: a signed-out guest's id for its Unclaimed Rewards, `NetGuestIdPacket`; the server credits the END's reward and score to it through kn_brain's `guest_credit`, a live sign-in claims it) | C to S |
+| 0x8141 | `NET_EXT_KN_GUEST_EARNED` | (KN: v10's `ger`, no body: the guest's balance changed, GET `/guest/profile` again) | S to C |
 
 Each range belongs to the feature that implements it; body layouts are documented next to their
 structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have no subtype.

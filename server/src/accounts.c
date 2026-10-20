@@ -1310,6 +1310,8 @@ static void acc_turf_flush(void) {
     g_turf.count = 0;
 }
 
+static void acc_guest_round_credits(void);
+
 // Round end (first tick after the END packets): every account that played this round.
 static void acc_commit_round(void) {
     ClientConnection *list[64];
@@ -1319,8 +1321,131 @@ static void acc_commit_round(void) {
         if (acc_should_commit(client) && client->player) list[count++] = client;
     }
     acc_commit(list, count, 1, g_acc.match_id);
+    acc_guest_round_credits();
     g_acc.round_committed = 1;
     acc_turf_flush();
+}
+
+// ------------------------------------------------------------------ guests' unclaimed rewards
+
+// v10's guest profile (the end card's Unclaimed Rewards; kn_brain services/brain/guest.c). A guest
+// banks the END's reward and, in a counted match, its score under the guest id its menu sent
+// (NET_EXT_KN_GUEST_ID), through kn_brain's "guest_credit" op: the same rules an account's stats
+// commit follows (acc_player_stats: KR is the END's reward, XP the score in a counted match). The
+// brain's answer sends NET_EXT_KN_GUEST_EARNED ("ger") to the connection, which asks the brain for
+// its balance again. A live sign-in claims the id: "guest_claim" zeroes the balance, as v10's login
+// does (v10.js:209787).
+#define ACC_GUEST_PENDING 128
+
+typedef struct {
+    uint32_t rid;      // the "acct" frame's rid, 0 = free
+    int connection_id; // ClientConnection.id of the guest
+    char guest_id[33];
+} GuestCreditPending;
+
+static GuestCreditPending g_guest_pending[ACC_GUEST_PENDING];
+
+static int acc_guest_id_valid(const char *id) {
+    if (!id || strlen(id) != 32) return 0;
+    for (int i = 0; i < 32; i++) {
+        if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) return 0;
+    }
+    return 1;
+}
+
+// NET_EXT_KN_GUEST_ID (C -> S): kept on a guest connection only; an account never has a guest id.
+void accounts_handle_guest_id(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    NetGuestIdPacket packet;
+    if (!client || !body || length < sizeof(packet)) return;
+    memcpy(&packet, body, sizeof(packet));
+    if (memchr(packet.id, 0, sizeof(packet.id)) == NULL || client->acct.account_id > 0 || !acc_guest_id_valid(packet.id)) return;
+    snprintf(client->acct.guest_id, sizeof(client->acct.guest_id), "%s", packet.id);
+}
+
+// NET_EXT_KN_GUEST_EARNED to the guest's connection, when it is still the same guest there.
+static void acc_guest_send_earned(const int connection_id, const char *guest_id) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (client->id != connection_id || client->acct.account_id > 0 || strcmp(client->acct.guest_id, guest_id) != 0) continue;
+        uint8_t buf[NET_EXT_HEADER_SIZE];
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_GUEST_EARNED, NULL, 0);
+        if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+        return;
+    }
+}
+
+// One reliable "guest_credit" frame for a guest connection (kn_brain's round credit, idempotent per
+// match: a resent frame credits once).
+static void acc_guest_post_credit(const ClientConnection *client, const int kr, const int xp) {
+    if (!g_acc.brain) return;
+    const uint32_t rid = brain_next_rid();
+    if (!rid) return;
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "guest_credit");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddStringToObject(args, "guest", client->acct.guest_id);
+    cJSON_AddStringToObject(args, "match", g_acc.match_id);
+    cJSON_AddNumberToObject(args, "kr", kr);
+    cJSON_AddNumberToObject(args, "xp", xp);
+    if (brain_post(frame, 1) != 0) return; // brain_post consumed the frame
+    for (int i = 0; i < ACC_GUEST_PENDING; i++) {
+        if (g_guest_pending[i].rid) continue;
+        g_guest_pending[i].rid = rid;
+        g_guest_pending[i].connection_id = client->id;
+        snprintf(g_guest_pending[i].guest_id, sizeof(g_guest_pending[i].guest_id), "%s", client->acct.guest_id);
+        return;
+    }
+}
+
+// The round's guest credits (acc_commit_round, after the accounts' commit): every guest that played
+// the round and earned KR (the END's reward column: 0 where accounts earn none, see acc_reward) or
+// XP (the score, only in a counted match: acc_player_stats' "xp"). Nothing for a round with neither.
+static void acc_guest_round_credits(void) {
+    const GameModeConfig *mode = mode_config(game_mode_id(&g_server->game));
+    const int counts = !g_acc.custom && !(mode && mode->no_reward);
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        const ClientConnection *client = &g_server->clients[i];
+        if (!client->player || client->acct.account_id > 0 || !client->acct.guest_id[0] || client->acct.match_since <= 0.0f) continue;
+        const int kr = client->player->reward > 0 ? client->player->reward : 0;
+        const int xp = counts && client->player->score > 0 ? client->player->score : 0;
+        if (kr || xp) acc_guest_post_credit(client, kr, xp);
+    }
+}
+
+// The guest_credit reply (acct-r): a credit the brain took tells its connection to ask again ("ger").
+static int acc_handle_guest_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_GUEST_PENDING; i++) {
+        if (!g_guest_pending[i].rid || g_guest_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        const GuestCreditPending done = g_guest_pending[i];
+        g_guest_pending[i].rid = 0;
+        const cJSON *err = cJSON_GetObjectItem(frame, "err");
+        if (cJSON_IsString(err) && err->valuestring[0]) {
+            server_log_error("[guest] credit refused: %s", err->valuestring);
+            return 1;
+        }
+        acc_guest_send_earned(done.connection_id, done.guest_id);
+        return 1;
+    }
+    return 0;
+}
+
+// A live sign-in (acc_live_apply): the connection's guest id is claimed, its balance zeroed. The id
+// stays on the connection: a sign-out makes it a guest again with the same balance.
+static void acc_guest_claim(const ClientConnection *client) {
+    if (!g_acc.brain || !client->acct.guest_id[0]) return;
+    const uint32_t rid = brain_next_rid();
+    if (!rid) return;
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "guest_claim");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddStringToObject(args, "guest", client->acct.guest_id);
+    brain_post(frame, 1); // consumed; its reply needs no answer (no rid is kept for it)
 }
 
 // A leaving player, or players still in a round that is abandoned (map change): partial.
@@ -2735,6 +2860,7 @@ static void acc_live_apply(ClientConnection *client, const cJSON *account, const
             brain_post(join, 0);
         }
     }
+    acc_guest_claim(client); // the guest's unclaimed rewards are zeroed by this login (v10.js:209787)
     acc_live_settled(client, seq, old_rights, old_account, via);
 }
 
@@ -3279,6 +3405,8 @@ static void acc_handle_frame(cJSON *frame) {
         // season-system: give_skin replies (found skins)
     } else if (!strcmp(type, "acct-r") && acc_handle_junk_reply(frame)) {
         // the Junk wallet: junk_credit replies (the finder's line, doc/v10/junk.md)
+    } else if (!strcmp(type, "acct-r") && acc_handle_guest_reply(frame)) {
+        // a guest's round credit (guest_credit): the connection asks for its balance again ("ger")
     } else if (!strcmp(type, "acct-r") && ks_storage_on_brain_frame(frame)) {
         // WP6: GAME.STORAGE / Save / Load Data / KR rewards (server/src/ks_storage.c)
     } else if (!strcmp(type, "acct-r") && acc_handle_kpd_reply(frame)) {

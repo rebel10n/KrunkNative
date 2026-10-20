@@ -3,7 +3,8 @@
 #include <shared.h>
 #include <online_mode.h>
 #include <auth_join.h>
-#include <net_ext.h> // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in
+#include <net_ext.h> // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in; NET_EXT_KN_GUEST_ID
+#include <krunker_net.h> // krunker_net_active(): an official krunker.io game owns the connection
 #include <i18n.h>
 #include <ui_logic.h> // ui_notify, object_manager_ui_rights_changed
 #include <backend.h>
@@ -216,6 +217,7 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
 }
 
 static void live_tick(Client *client);
+static void guest_id_tick(Client *client);
 
 void online_mode_tick(void *client) {
     if (g_join.has_deferred && (active_account() || glfwGetTime() - g_join.deferred_at > DEFER_SECONDS)) {
@@ -227,6 +229,7 @@ void online_mode_tick(void *client) {
         return;
     }
     live_tick(client);
+    guest_id_tick(client);
     if (g_online) return;
     // offline: no account, so the Login / Register bar becomes the mode notice (once)
     static int done;
@@ -308,6 +311,31 @@ static void live_send_auth(Client *client, const int kind, const char *name, con
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(req)];
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_ACCOUNT_AUTH, &req, sizeof(req));
     if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+}
+
+// ------------------------------------------------------------------ the guest id (NET_EXT_KN_GUEST_ID)
+// A Box Office server credits a guest's round reward under the guest id the menu keeps (kn_brain's
+// guest_profiles: services/brain/guest.c; the id is v10_rewards.c's). It goes out once per connection,
+// as soon as the server has joined us (its RIGHTS push: online_mode_live_ok, so a connection that is
+// up and a KrunkNative server), while nobody is signed in and no official krunker.io game owns the
+// connection. A new connection (its first RIGHTS, or a drop) sends it again.
+static int g_guest_id_sent;
+
+static void guest_id_tick(Client *client) {
+    if (!client || client->offline || !client->net_connected) {
+        g_guest_id_sent = 0;
+        return;
+    }
+    if (g_guest_id_sent || !online_mode_live_ok(client) || active_account() || krunker_net_active()) return;
+    const char *id = v10_rewards_guest_id();
+    if (!id[0]) return;
+    NetGuestIdPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    snprintf(pkt.id, sizeof(pkt.id), "%s", id);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(pkt)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_GUEST_ID, &pkt, sizeof(pkt));
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+    g_guest_id_sent = 1; // one id per connection: never logged (a bearer identifier)
 }
 
 static void on_live_join_done(void *user, const int status, const char *body, const size_t length) {
@@ -408,6 +436,7 @@ void online_mode_on_rights(void *client_ptr, const void *body, const unsigned le
     r.name[sizeof(r.name) - 1] = 0;
     r.message[sizeof(r.message) - 1] = 0;
     const int first = !g_live.have || g_live.conn_id != r.conn_id;
+    if (first) g_guest_id_sent = 0; // a new connection: its guest id goes out again
     const unsigned old_rights = first ? 0u : g_live.rights;
     const int old_account = first ? 0 : g_live.account_id;
     const int answer = !first && g_live.pending && r.seq == g_live.seq && r.status != NET_ACCOUNT_RIGHTS_STATE;

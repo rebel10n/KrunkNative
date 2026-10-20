@@ -60,6 +60,8 @@ set(KN_BRAIN_SOURCES
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
     db_lottery.c                    # v10 lottery windows, entries, draws (0348_lottery; lottery.c)
     lottery.c
+    db_guest.c                      # the signed-out guest's balance (0350_guest_profiles; guest.c, accounts.c guest ops)
+    guest.c                         # GET /guest/profile, POST /guest/claim
     db_shop.c                       # the Junk-priced shop: display, purchase (0349_shop_junk; shop.c, doc/v10/junk.md)
     shop.c
     db_kpd.c                        # the player list's K.P.D distress calls (0209_kpd_calls)
@@ -450,6 +452,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/lottery_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_lottery PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;lottery")
+    # the signed-out guest's balance (guest.c, db_guest.c, 0350_guest_profiles): the two routes, the credit and claim ops
+    add_test(NAME brain_guest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_guest PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;guest")
     # the Junk-priced shop (shop.c, 0349_shop_junk): the display, a purchase with Junk, the limits, the ledgers
     add_test(NAME brain_shop
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shop_test.py

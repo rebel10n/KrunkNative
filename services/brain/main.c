@@ -66,6 +66,7 @@ static const BrainModule k_brain_modules[] = {
     {"turf", turf_init, turf_shutdown},
     {"lottery", lottery_init, lottery_shutdown}, /* v10 lottery windows and draws (lottery.c) */
     {"shop", shop_init, shop_shutdown},          /* the Junk-priced shop (shop.c) */
+    {"guest", guest_init, guest_shutdown},       /* the signed-out guest's balance: /guest/profile, /guest/claim (guest.c) */
     {"community", community_init, community_shutdown}, /* v10 events / news feed (community.c) */
     {"leaderboards-http", leaderboards_http_init, NULL}, /* v10's /api/leaderboards/... (leaderboards.c) */
     {"internal-ws", internal_ws_init, internal_ws_shutdown},

@@ -2419,6 +2419,13 @@ banned, 429 rate limit):
 | `GET /auth/me` | Bearer / `?token=` | `{ok, account}` |
 | `POST /auth/join` | `{token, serverHash}` | `{ok, ttl: 30}` |
 | `GET /auth/hasJoined` | `?username=&serverHash=[&ip=]` | `{id, username, profile}` or 204 |
+| `GET /guest/profile` | `?guest=<id>` (32 lowercase hex, the menu's guest id) | `{data: {profile: {funds, score}}}`: a signed-out guest's Unclaimed Rewards (zeros for an unknown id; creates nothing) |
+| `POST /guest/claim` | `{guest: <id>}` | `{data: {profile: {funds: 0, score: 0}}}`: a login zeroes the balance (the credit rows stay) |
+
+The guest balance (services/brain/guest.c, db_guest.c, migration 0350_guest_profiles) is credited by the
+game servers' round end through the internal socket's `acct` ops `guest_credit` (`{guest, match, kr, xp}`,
+one credit per match; KR and score capped at 20 and 2500, v10's guestKRCap / guestScoreCap) and zeroed by
+`guest_claim` on a live sign-in (accounts.c).
 
 `account`/`profile` = `{id, username, alias, premium, dev, mod, banned, ban_reason}`. Join
 records live in memory for 30 s, keyed by serverHash. `auth.*`: `login_per_min` (10),

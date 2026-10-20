@@ -8,7 +8,7 @@
 //   _39370  its "Unclaimed Rewards" box (_39368, svelte-1hb83uo): a guest's $krAccumulated /
 //           $scoreAccumulated, mounted with showRegister false there and with REGISTER NOW in
 //           the menu's right panel (#tlInfHold after the top ad row, v10:145962); the guest
-//           ledger below says where KrunkNative's amounts come from
+//           balance below says where KrunkNative's amounts come from
 //   _66775  "Welcome to the Family!" (POPUP_REGISTER_REWARDS "prr" skinRewards, premiumRewards:
 //           genericPopup(_, "registerRewardsPop"); Customize -> clearPops, showWindow(53)); kn_brain
 //           sends "prr" once per account after the registration (services/brain/rewards.c)
@@ -19,6 +19,9 @@
 //           the pass name, "LVL n" and its bar (_52111), or MAX; click = openBattlePass()
 //
 // The Battle Pass window itself (windows[5], showWindow(6)) is battlepass_ui.c's.
+#ifdef _WIN32
+#define _CRT_RAND_S // rand_s (the guest id's random bytes, MinGW-w64 / MSVC) before any CRT header
+#endif
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -30,10 +33,14 @@
 #include <v10_menu.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../viewer/viewer_store.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h> // the guest id's random bytes on the web (crypto.getRandomValues)
+#endif
 
 #define CHAL_WINDOW 33
 #define MIN_CHAL_LEVEL 1 // config.minChalLevel
@@ -50,50 +57,176 @@ static char g_bp_item_key[160]; // what the sidebar item shows (redrawn when it 
 // server's endGame reward) and the score bank there up to config.guestKRCap (20) /
 // guestScoreCap (2500), the CAPPED badges of the box.
 //
-// KrunkNative's kn_brain keeps no guest profiles, so the ledger is the guest's own client's
-// (html_storage "guestEarned"), credited from the local guest's END row as each match ends
-// (game_events.c events_end: v10 would show the new balance after a reload) and reset by a
-// sign-in like v10's stores. Nothing is banked for the account made: the brain's signup perks
-// (services/brain/rewards.c) are the registration's grant. --render-scenario's state.guestEarned
-// {kr, score} stands in for the ledger (not stored).
+// KrunkNative's amounts are kn_brain's (services/brain/guest.c, table guest_profiles), keyed by the
+// guest id this device keeps (html_storage "guestId": 32 lowercase hex, created on first use). The
+// server credits a guest's round reward under that id at round end (the game server's END, sent
+// with NET_EXT_KN_GUEST_ID by net/online_mode.c). The menu shows only what the brain answers: the
+// balance is fetched when the page is ready and nobody is signed in (once per page load), again on
+// the server's NET_EXT_KN_GUEST_EARNED push ("ger"), and after a sign-out. A sign-in (the account goes
+// from none to present, a saved session's restore included) zeroes both amounts at once and POSTs
+// /guest/claim once for the device's guest id. The old browser ledger ("guestEarned") is no longer
+// read: the page removes it on its first load and its value is not moved. --render-scenario's
+// state.guestEarned {kr, score} stands in for the balance (never fetched, never stored).
 #define GUEST_KR_CAP 20      // config.guestKRCap (_7338)
 #define GUEST_SCORE_CAP 2500 // config.guestScoreCap (_7339)
-#define GUEST_STORAGE "guestEarned"
+#define GUEST_ID_KEY "guestId"
+#define GUEST_ID_LEN 32
+#define GUEST_OLD_KEY "guestEarned" // the browser ledger of the earlier builds: removed, never read
 #define GUEST_TWEEN_STEP_MS (1000.0 / 60.0)
 
 static struct {
     int kr, score;
-    int loaded;   // the storage was read
-    int scenario; // state.guestEarned: never stored
+    int loaded;     // the brain has answered this page's balance
+    int scenario;   // state.guestEarned: never fetched, never stored
+    unsigned gen;   // bumped on each account change: an answer for an older state is dropped
+    int page_fetch; // the page is ready: fetch the balance once the brain is available
+    int signed_in;  // the account state the last tick saw
 } G;
 
-static void guest_load(void) {
-    if (G.loaded) return;
-    G.loaded = 1;
-    char buf[96];
-    if (html_storage_get(GUEST_STORAGE, buf, sizeof buf) < 0) return;
-    cJSON *j = cJSON_Parse(buf);
-    const cJSON *kr = cJSON_GetObjectItem(j, "kr"), *score = cJSON_GetObjectItem(j, "score");
-    G.kr = cJSON_IsNumber(kr) ? kr->valueint : 0;
-    G.score = cJSON_IsNumber(score) ? score->valueint : 0;
-    cJSON_Delete(j);
+static char g_guest_id[GUEST_ID_LEN + 1]; // this device's guest id ("" until known); never printed
+
+static int guest_id_ok(const char *s) {
+    if (!s || strlen(s) != GUEST_ID_LEN) return 0;
+    for (int i = 0; i < GUEST_ID_LEN; i++)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) return 0;
+    return 1;
 }
 
-static void guest_save(void) {
+// n random bytes from the OS, never a weaker fallback: rand_s on Windows (the CSPRNG behind it), /dev/urandom
+// on Linux and macOS, crypto.getRandomValues on the web (the same source as online_mode.c's nonce).
+static int guest_random(unsigned char *out, const size_t n) {
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({
+        var a = new Uint8Array($1);
+        crypto.getRandomValues(a);
+        HEAPU8.set(a, $0);
+    }, out, (int) n);
+    return 0;
+#elif defined(_WIN32)
+    for (size_t i = 0; i < n; i += sizeof(unsigned int)) {
+        unsigned int v = 0;
+        if (rand_s(&v) != 0) return -1;
+        memcpy(out + i, &v, n - i < sizeof v ? n - i : sizeof v);
+    }
+    return 0;
+#else
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f) return -1;
+    const size_t got = fread(out, 1, n, f);
+    fclose(f);
+    return got == n ? 0 : -1;
+#endif
+}
+
+// The device's guest id: the stored "guestId" when it is 32 lowercase hex (any other stored value is replaced),
+// else a new one, stored at once. create 0 only reads. "" = none (no id yet, or no random bytes).
+static const char *guest_id_get(const int create) {
+    if (g_guest_id[0]) return g_guest_id;
+    char buf[80];
+    if (html_storage_get(GUEST_ID_KEY, buf, sizeof buf) >= 0 && guest_id_ok(buf)) {
+        snprintf(g_guest_id, sizeof g_guest_id, "%s", buf);
+        return g_guest_id;
+    }
+    if (!create) return "";
+    unsigned char raw[GUEST_ID_LEN / 2];
+    if (guest_random(raw, sizeof raw) != 0) {
+        fprintf(stderr, "[rewards] no random bytes for a guest id\n");
+        return "";
+    }
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < sizeof raw; i++) {
+        g_guest_id[i * 2] = hex[raw[i] >> 4];
+        g_guest_id[i * 2 + 1] = hex[raw[i] & 15];
+    }
+    g_guest_id[GUEST_ID_LEN] = 0;
+    html_storage_set(GUEST_ID_KEY, g_guest_id);
+    return g_guest_id;
+}
+
+// GET /guest/profile?guest=<id>: {"data":{"profile":{"funds":N,"score":M}}}. A non-200 or a bad answer keeps the
+// values the page has. An answer for an older account state (a sign-in or sign-out since the request) is dropped.
+static void on_guest_profile(void *user, const int status, const char *body, const size_t length) {
+    const unsigned gen = (unsigned) (uintptr_t) user;
+    if (gen != G.gen || G.scenario || active_account()) return;
+    if (status != 200 || !body || !length) {
+        fprintf(stderr, "[rewards] guest balance not loaded (HTTP %d)\n", status);
+        return;
+    }
+    cJSON *o = cJSON_ParseWithLength(body, length);
+    const cJSON *data = o ? cJSON_GetObjectItem(o, "data") : NULL;
+    const cJSON *profile = data ? cJSON_GetObjectItem(data, "profile") : NULL;
+    const cJSON *funds = profile ? cJSON_GetObjectItem(profile, "funds") : NULL;
+    const cJSON *score = profile ? cJSON_GetObjectItem(profile, "score") : NULL;
+    if (cJSON_IsNumber(funds) && cJSON_IsNumber(score)) {
+        G.kr = funds->valueint < 0 ? 0 : funds->valueint;
+        G.score = score->valueint < 0 ? 0 : score->valueint;
+        G.loaded = 1;
+    } else {
+        fprintf(stderr, "[rewards] guest balance: the answer has no profile\n");
+    }
+    cJSON_Delete(o);
+}
+
+// The balance of this device's guest. create: the id is made when there is none (the page's first fetch).
+static void guest_fetch(const int create) {
+    if (G.scenario || active_account() || !backend_enabled()) return;
+    const char *id = guest_id_get(create);
+    if (!id[0]) return;
+    char path[96];
+    snprintf(path, sizeof path, "/guest/profile?guest=%s", id);
+    backend_http_get(path, on_guest_profile, (void *) (uintptr_t) G.gen);
+}
+
+// POST /guest/claim {"guest": "<id>"}: the balance moves to the account the player signed in to. A failure is one
+// line without the id.
+static void on_guest_claim(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    (void) body;
+    (void) length;
+    if (status < 200 || status > 299) fprintf(stderr, "[rewards] guest rewards not claimed (HTTP %d)\n", status);
+}
+
+static void guest_claim(void) {
+    const char *id = guest_id_get(0);
+    if (G.scenario || !id[0] || !backend_enabled()) return;
+    char url[320], json[96];
+    snprintf(url, sizeof url, "%s/guest/claim", backend_url());
+    snprintf(json, sizeof json, "{\"guest\":\"%s\"}", id);
+    if (!backend_http_request("POST", url, json, on_guest_claim, NULL)) fprintf(stderr, "[rewards] guest rewards claim not sent\n");
+}
+
+// The account goes from none to present: v10 zeroes its stores on a login (v10:209787), so the balance
+// is zeroed at once and claimed once. From present to none (a sign-out): the balance is fetched again.
+static void guest_account_tick(void) {
     if (G.scenario) return;
-    char buf[96];
-    snprintf(buf, sizeof buf, "{\"kr\":%d,\"score\":%d}", G.kr, G.score);
-    html_storage_set(GUEST_STORAGE, buf);
+    const int signed_in = active_account() != NULL;
+    if (signed_in == G.signed_in) return;
+    G.signed_in = signed_in;
+    G.gen++;
+    if (signed_in) {
+        G.kr = G.score = 0;
+        guest_claim();
+    } else {
+        guest_fetch(0);
+    }
 }
 
-// The local guest's END row (game_events.c): v10's server banks it in the guest profile.
-void v10_rewards_guest_earned_add(const int kr, const int score) {
-    if (active_account() || !v10_menu_page() || (kr <= 0 && score <= 0)) return;
-    guest_load();
-    G.kr = G.kr + (kr > 0 ? kr : 0) > GUEST_KR_CAP ? GUEST_KR_CAP : G.kr + (kr > 0 ? kr : 0);
-    G.score = G.score + (score > 0 ? score : 0) > GUEST_SCORE_CAP ? GUEST_SCORE_CAP : G.score + (score > 0 ? score : 0);
-    guest_save();
-    fprintf(stderr, "[rewards] guest earned +%d KR +%d score: %d KR, %d score unclaimed\n", kr, score, G.kr, G.score);
+// (a) the page is ready and nobody is signed in: the balance, once per page load (v10:222902). Waits until the
+// brain has answered its probe (backend_available() == 1; an explicit URL is one at once).
+static void guest_page_tick(void) {
+    if (!G.page_fetch || G.scenario || backend_available() != 1) return;
+    G.page_fetch = 0;
+    if (!active_account()) guest_fetch(1);
+}
+
+// This device's guest id for the game server's identity packet (online_mode.c NET_EXT_KN_GUEST_ID). "" = none.
+const char *v10_rewards_guest_id(void) { return guest_id_get(1); }
+
+// NET_EXT_KN_GUEST_EARNED (S -> C, no body): the brain's balance for this device's guest changed (v10's "ger"),
+// so it is fetched again.
+void v10_rewards_guest_earned_push(void) {
+    if (G.scenario || active_account()) return;
+    guest_fetch(0);
 }
 
 // --render-scenario: state.guestEarned = {kr, score}
@@ -157,7 +290,6 @@ static void guest_tween_start(const int which) {
 // value, img/kr_icon_angled.svg, CAPPED at the cap) and the XP item (_39365), the warning
 // (_39366) once either is capped, and REGISTER NOW (_39367) when show_register. id: the box's.
 static void guest_earned_html(StrBuf *sb, const int show_register, const char *id, const char *suffix) {
-    guest_load();
     if (active_account() || (G.kr <= 0 && G.score <= 0)) return;
     const int kr_capped = G.kr >= GUEST_KR_CAP, score_capped = G.score >= GUEST_SCORE_CAP;
     sb_appendf(sb, "<div %s%s%sclass=\"guest-earned-collect svelte-1hb83uo\"><div class=\"guest-earned-collect__header svelte-1hb83uo\">"
@@ -194,7 +326,6 @@ static char g_guest_box_key[32];
 static void guest_box_update(void) {
     const HtmlElem panel = html_dom_by_id("tlInfHold");
     if (!panel) return;
-    guest_load();
     const int on = !active_account() && (G.kr > 0 || G.score > 0);
     char key[sizeof g_guest_box_key];
     snprintf(key, sizeof key, "%d|%d", on ? G.kr : -1, on ? G.score : -1);
@@ -702,15 +833,18 @@ void v10_rewards_dom_init(void) {
     g_guest_box_key[0] = 0;
     g_chal_typ[0] = 0;
     for (int i = 0; i < 3; i++) g_tween[i].timer = 0; // the page's timers went with it
+    if (G.scenario) return;
+    G.kr = G.score = 0; // a fresh page: the balance comes from the brain again
+    G.loaded = 0;
+    G.page_fetch = 1;
+    html_storage_set(GUEST_OLD_KEY, NULL); // the old browser ledger: removed, its value is not moved to the brain
 }
 
 void v10_rewards_tick(void) {
     if (!html_ui_available()) return;
     bp_item_update();
-    if (active_account() && G.loaded && (G.kr || G.score)) { // v10:209787: a login zeroes the stores
-        G.kr = G.score = 0;
-        guest_save();
-    }
+    guest_account_tick(); // v10:209787: a sign-in zeroes the balance and claims it; a sign-out fetches it
+    guest_page_tick();
     guest_box_update();
     v10_menu_tick(); // the menu's idle state (v10_menu.c)
 }

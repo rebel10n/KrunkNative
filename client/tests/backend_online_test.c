@@ -77,6 +77,9 @@ double glfwGetTime(void) { return 0.0; }
 const void *active_account(void) { return NULL; }
 const char *account_session_token(void) { return ""; }
 void client_net_send(void *client, int type, const void *data, unsigned short len) { (void) client; (void) type; (void) data; (void) len; }
+// the guest id send (online_mode.c guest_id_tick): no official game, no guest id in this test
+int krunker_net_active(void) { return 0; }
+const char *v10_rewards_guest_id(void) { return ""; }
 int kn_auth_is_hex(const char *s, size_t max_len) { (void) s; (void) max_len; return 1; }
 // the live sign-in's (online_mode.c): the toast, the strings, the spawn menu
 const char *i18n_tr(const char *key, const char *english) { (void) key; return english; }

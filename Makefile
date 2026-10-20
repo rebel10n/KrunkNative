@@ -351,6 +351,12 @@ locked-class-test: build ## The Nettspend's card in the class tab: locked with "
 guest-earned-test: build ## A guest's Unclaimed Rewards box (v10_rewards.c): the end screen's and the menu's, its KR / XP amounts and its glow (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/guest_earned_e2e.py $(DEBUG_DIR)
 
+guest-ledger-e2e: build ## A guest's Unclaimed Rewards come from kn_brain's guest profile: the brain's 12 KR / 800 XP show, the browser's stale 3 / 3 do not (kn_brain on sqlite, headless)
+	timeout 600 $(PYTHON) -I client/tests/guest_ledger_e2e.py $(DEBUG_DIR)
+
+guest-ledger-server-e2e: build ## A guest's round on server_bin credits its balance in kn_brain, the "ger" push follows, a live sign-in zeroes it (kn_brain on sqlite)
+	timeout 400 $(PYTHON) -I server/tests/guest_ledger_server_e2e.py $(DEBUG_DIR)
+
 secondary-req-test: build ## The Select Secondary picker applies v10's weapon req: the Grappler's card is not clickable in an official game, and is in a custom one (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/secondary_req_e2e.py $(DEBUG_DIR)
 
