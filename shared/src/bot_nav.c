@@ -42,6 +42,9 @@
 #define NAV_EDGE_MARGIN 2.0f     // a node needs ground this far around it (no standing on the lip)
 #define NAV_SUB_OFFSET 2.5f      // a cell whose centre is no good tries these offsets (narrow walkways, lips)
 #define NAV_BLOCK_COST 60.0f     // per step through a node a bot got stuck at lately (bot_nav_penalize)
+#define NAV_CLIMB_MAX 2          // ladder links per node (a ladder's base and top; a node beside two ladders)
+#define NAV_CLIMB_BASE 8.0f      // a ladder's base node: within this far of the ground in front of it
+#define NAV_CLIMB_TOP 10.0f      // a ladder's top node: within this far of the ladder, at its top height
 #define NAV_TRAP_COST 400.0f     // a drop into an area with no walk or jump back out (a pit, a pool): only when the goal is in it
 
 typedef struct {
@@ -57,6 +60,8 @@ typedef struct {
     float x, y, z;               // the sample point (feet): the cell centre, or an offset inside the cell
     int32_t link[8];             // node per direction, -1 none
     uint8_t kind[8];             // 0 walk, 1 jump, 2 drop
+    int32_t climb[NAV_CLIMB_MAX]; // ladder climbs: the node at the other end (base <-> ledge), -1 none
+    uint8_t climbs;              // climb links in use
     int32_t component;
     uint8_t void_edge;           // an orthogonal neighbour cell has nothing to land on
     float penalty_until;         // game time (ms) until which the node costs NAV_BLOCK_COST extra (0 none)
@@ -325,6 +330,48 @@ static int nav_slope_walk(const BotNav *nav, const vec3 a, const vec3 b) {
     return fabsf(y - b.y) <= 1.0f;
 }
 
+// Connected pieces of the grid over walk, jump and climb links (drops are one-way: not merged):
+// nodes get their piece index, and *largest is the biggest. 0 when out of memory.
+static int nav_components(BotNav *nav, int *components_out, int *largest_out, int *largest_size_out) {
+    for (int n = 0; n < nav->node_count; n++) nav->nodes[n].component = -1;
+    int components = 0, largest = 0, largest_size = 0;
+    int32_t *stack = malloc((size_t) nav->node_count * sizeof(int32_t));
+    if (!stack) return 0;
+    for (int s = 0; s < nav->node_count; s++) {
+        if (nav->nodes[s].component >= 0) continue;
+        int top = 0, size = 0;
+        stack[top++] = s;
+        nav->nodes[s].component = components;
+        while (top) {
+            const int n = stack[--top];
+            size++;
+            for (int d = 0; d < 8; d++) {
+                const int m = nav->nodes[n].link[d];
+                if (m < 0 || nav->nodes[n].kind[d] == 2 || nav->nodes[m].component >= 0) continue;
+                nav->nodes[m].component = components;
+                stack[top++] = m;
+            }
+            for (int c = 0; c < nav->nodes[n].climbs; c++) {
+                const int m = nav->nodes[n].climb[c];
+                if (nav->nodes[m].component >= 0) continue;
+                nav->nodes[m].component = components;
+                stack[top++] = m;
+            }
+        }
+        if (size > largest_size) {
+            largest_size = size;
+            largest = components;
+        }
+        components++;
+    }
+    free(stack);
+    *components_out = components;
+    *largest_out = largest;
+    *largest_size_out = largest_size;
+
+    return 1;
+}
+
 static BotNav *nav_build(const Map *map, const float border_h) {
     BotNav *nav = calloc(1, sizeof(BotNav));
     if (!nav) return NULL;
@@ -474,6 +521,8 @@ static BotNav *nav_build(const Map *map, const float border_h) {
             node->z = nz;
             node->component = -1;
             for (int d = 0; d < 8; d++) node->link[d] = -1;
+            for (int d = 0; d < NAV_CLIMB_MAX; d++) node->climb[d] = -1;
+            node->climbs = 0;
             last = y;
             layers++;
         }
@@ -570,32 +619,38 @@ static BotNav *nav_build(const Map *map, const float border_h) {
         }
     }
 
-    // components over walk / jump links both ways (drops are one-way: not merged)
-    int32_t *stack = malloc((size_t) nav->node_count * sizeof(int32_t));
-    if (!stack) goto fail;
+    // components over walk / jump / climb links both ways (drops are one-way: not merged)
     int components = 0, largest = 0, largest_size = 0;
-    for (int s = 0; s < nav->node_count; s++) {
-        if (nav->nodes[s].component >= 0) continue;
-        int top = 0, size = 0;
-        stack[top++] = s;
-        nav->nodes[s].component = components;
-        while (top) {
-            const int n = stack[--top];
-            size++;
-            for (int d = 0; d < 8; d++) {
-                const int m = nav->nodes[n].link[d];
-                if (m < 0 || nav->nodes[n].kind[d] == 2 || nav->nodes[m].component >= 0) continue;
-                nav->nodes[m].component = components;
-                stack[top++] = m;
-            }
+    if (!nav_components(nav, &components, &largest, &largest_size)) goto fail;
+    // ladder climbs join only what the grid could not reach otherwise: a ledge or roof with no walk,
+    // jump or drop route in (bazaar's roof spawns). A climb between two areas already joined would be a
+    // shortcut up a ladder a bot can walk past, and bots did get stuck on those (oasis)
+    int climbed = 0;
+    for (int i = 0; i < map->object_count; i++) {
+        const Object *o = map->objects[i];
+        if (!o->active || !o->ladder || o->direction > 3) continue;
+        // the front faces (cos d, 0, sin d) (map.c: the ladder body sits ladder_scale out along it)
+        const float fx = cosf(o->direction * (float) M_PI * 0.5f), fz = sinf(o->direction * (float) M_PI * 0.5f);
+        const float half = fabsf(fx) * o->scale.x * 0.5f + fabsf(fz) * o->scale.z * 0.5f;
+        const float sx = o->position.x + fx * (half + NAV_RADIUS + 0.5f), sz = o->position.z + fz * (half + NAV_RADIUS + 0.5f);
+        const float base_y = o->position.y, top_y = o->position.y + o->scale.y;
+        int base = -1, top = -1;
+        float best_base = NAV_CLIMB_BASE, best_top = NAV_CLIMB_TOP;
+        for (int n = 0; n < nav->node_count; n++) {
+            const NavNode *nd = &nav->nodes[n];
+            const float hb = hypotf(nd->x - sx, nd->z - sz);
+            if (hb < best_base && fabsf(nd->y - base_y) <= NAV_STEP + 1.5f) { best_base = hb; base = n; }
+            const float ht = hypotf(nd->x - o->position.x, nd->z - o->position.z);
+            if (ht < best_top && nd->y >= top_y - NAV_JUMP && nd->y <= top_y + 1.5f) { best_top = ht; top = n; }
         }
-        if (size > largest_size) {
-            largest_size = size;
-            largest = components;
-        }
-        components++;
+        if (base < 0 || top < 0 || base == top || nav->nodes[base].component == nav->nodes[top].component) continue;
+        NavNode *nb = &nav->nodes[base], *nt = &nav->nodes[top];
+        if (nb->climbs >= NAV_CLIMB_MAX || nt->climbs >= NAV_CLIMB_MAX) continue;
+        nb->climb[nb->climbs++] = top;
+        nt->climb[nt->climbs++] = base;
+        climbed++;
     }
-    free(stack);
+    if (climbed && !nav_components(nav, &components, &largest, &largest_size)) goto fail;
     nav->largest_component = largest;
 
     nav->g = malloc((size_t) nav->node_count * sizeof(float));
@@ -807,13 +862,16 @@ int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) 
             found = 1;
             break;
         }
-        for (int d = 0; d < 8; d++) {
-            const int m = nav->nodes[n].link[d];
+        for (int d = 0; d < 8 + NAV_CLIMB_MAX; d++) {
+            const int climb = d >= 8;
+            if (climb && d - 8 >= nav->nodes[n].climbs) break;
+            const int m = climb ? nav->nodes[n].climb[d - 8] : nav->nodes[n].link[d];
             if (m < 0) continue;
-            const float step = d < 4 ? NAV_CELL : NAV_CELL * 1.41421356f;
-            const float cost = nav->g[n] + step + (nav->nodes[n].kind[d] == 1 ? NAV_JUMP_COST : nav->nodes[n].kind[d] == 2 ? NAV_DROP_COST : 0.0f) +
+            const uint8_t kind = climb ? 1 : nav->nodes[n].kind[d];
+            const float step = climb ? NAV_CELL : d < 4 ? NAV_CELL : NAV_CELL * 1.41421356f;
+            const float cost = nav->g[n] + step + (kind == 1 ? NAV_JUMP_COST : kind == 2 ? NAV_DROP_COST : 0.0f) +
                                (nav->nodes[m].void_edge ? NAV_VOID_COST : 0.0f) + (nav->nodes[m].penalty_until > now_ms ? NAV_BLOCK_COST : 0.0f) +
-                               (nav->nodes[n].kind[d] == 2 && nav->nodes[m].component != nav->nodes[n].component ? NAV_TRAP_COST : 0.0f);
+                               (kind == 2 && nav->nodes[m].component != nav->nodes[n].component ? NAV_TRAP_COST : 0.0f);
             if (nav->stamp[m] == gen && nav->g[m] <= cost) continue;
             nav->stamp[m] = gen;
             nav->g[m] = cost;
@@ -835,6 +893,9 @@ int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) 
         if (p >= 0) {
             for (int d = 0; d < 8; d++) {
                 if (nav->nodes[p].link[d] == at) raw_kind[n] = nav->nodes[p].kind[d];
+            }
+            for (int c = 0; c < nav->nodes[p].climbs; c++) {
+                if (nav->nodes[p].climb[c] == at) raw_kind[n] = 1;
             }
         }
         n++;
