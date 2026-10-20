@@ -21,6 +21,8 @@
 #include <html_ui.h>
 #include <i18n.h>
 #include <krunker_net.h>         // the krunker.io branch: the official connection and its hosting
+#include <host_route.h>         // which backend Start Game hosts on (the Server Type setting, the tab, an official game)
+#include <seek_prefs.h>         // the Server Type setting (seek_prefs_servers)
 #include <backend_ui.h>       // servers_ui_host_game: Start Game on Box Office servers; account_backend (one backend per session)
 #include <map_catalog.h>
 #include <shared.h>
@@ -59,9 +61,12 @@ static int official_hostable(const MapCatalogEntry *e) {
     return e && e->source == MAP_SOURCE_OFFICIAL && e->hostable && e->index >= 0 && e->index < FLOW_MAP_MAX;
 }
 
-// The last step's backend: the window's (the Servers tab it opened from), else krunker.io's hosting while the
-// official connection is active (krunker_net.h)
-static int krunker_backend(void) { return g_flow.backend < 0 ? krunker_net_active() : g_flow.backend; }
+// The last step's backend: the window's (the Servers tab it opened from), else the Server Type setting (krunker.io's
+// hosting for krunker.io, Box Office's brain otherwise), or krunker.io's while an official game is the session
+// (host_route.h: the rule, tested by host_route_test)
+static int krunker_backend(void) {
+    return host_route_krunker(g_flow.backend, seek_prefs_servers() == SEEK_SERVERS_OFFICIAL, krunker_net_active());
+}
 
 // ------------------------------------------------------------------ the page's values
 

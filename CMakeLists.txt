@@ -1164,6 +1164,10 @@ else ()
     add_executable(seek_claim_test client/tests/seek_claim_test.c client/src/ui/seek_claim.c)
     target_include_directories(seek_claim_test PRIVATE client/include shared/include)
     add_test(NAME seek_claim_test COMMAND seek_claim_test)
+    # host_route_test (client/include/host_route.h): Start Game hosts on krunker.io for the Server Type krunker.io, else on Box Office
+    add_executable(host_route_test client/tests/host_route_test.c)
+    target_include_directories(host_route_test PRIVATE client/include shared/include)
+    add_test(NAME host_route_test COMMAND host_route_test)
     # game_time_test (client/src/ui/game_time.c): the in-game game time counter's text (v7.1.4's
     # getReadableTime) and its count against the account's total (commits re-anchor, guests and official games count nothing)
     add_executable(game_time_test client/tests/game_time_test.c client/src/ui/game_time.c)
