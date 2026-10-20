@@ -23,7 +23,7 @@ const char *player_names_clan(const char *clan);
 // A player the client first sees in the match (SPAWN, with its name): numbered now, in that order. Repeats are
 // no-ops except that the name is kept as the newest one.
 void player_names_see(int uid, const char *name);
-// The i-th player numbered in this match, the ones who left too (the chat rewrite of their leave line): 1 with
+// The i-th player numbered in this match, the ones who left too (an official line's name is matched to its uid): 1 with
 // its uid (-1: numbered by name) and name, 0 past the last.
 int player_names_entry(int index, int *uid, const char **name);
 // The match is left (client_leave_game): the numbers start again.
@@ -33,6 +33,3 @@ int player_names_hidden(void);
 // Another player's extras (account level, verified / premium / creator / custom badges, the scoreboard stats,
 // the killed-by card's level and player card stat): hidden while names are hidden, except for the local player.
 int player_names_extras_hidden(int self);
-// Whole-word match of the raw name at text[pos] (no word character right before or after it, where the name's
-// own edge is a word character): the name's length, else 0. Used to rewrite the names in a chat line.
-size_t player_names_word_at(const char *text, size_t pos, const char *raw);

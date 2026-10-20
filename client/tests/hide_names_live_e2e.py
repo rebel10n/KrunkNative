@@ -6,11 +6,13 @@ join and leave chat lines read each row exactly: Player_<n> (you: Player) with t
   python3 -I client/tests/hide_names_live_e2e.py BUILD_DIR      (run from the repository root)
 
 An offline Kanji game (headless client_bin, the sandbox server in-process, fixed 60 fps step) with three bots
-(random names) and two named bots with join and leave messages: "game" (a word of the server's own lines, so a
-name matched in the text would be rewritten inside "joined the game") and "Zorbo". The scoreboard rows
-(#leaderContainer, .leaderItem) are read through the input script's DOM probes; the chat rows ([id^=chatMsg_]) are
-read whole by the "rows" probe. Run twice: the Client switch hidePlayerNames on (knClient.json in a private
-XDG_CONFIG_HOME) and off.
+(random names) and three named bots with join and leave messages: "game" (a word of the server's own lines, so a
+name matched in the text would be rewritten inside "joined the game"), "Zorbo" and "Players" (a word of the list
+header "Players (N): ..."). The scoreboard rows (#leaderContainer, .leaderItem) are read through the input script's
+DOM probes; the chat rows ([id^=chatMsg_]) are read whole by the "rows" probe. Also: /players while all of them are in
+(the list line is built from the uids: no name is searched in its text), and a chat line from a player (netchat, uid 2)
+whose words are a bot's name and a template word ("game says Players are here"). Run twice: the Client switch
+hidePlayerNames on (knClient.json in a private XDG_CONFIG_HOME) and off.
 Needs a headless GL device (KRUNKNATIVE_EGL_DEVICE picks it) and the checkout's assets (KRUNKNATIVE_ASSETS_DIR).
 Exit code 0 only when every check passed.
 """
@@ -69,16 +71,23 @@ def run(tag, hidden):
             "300 con bot_add 3 leaveMessage=1",
             "300 con bot_add 1 joinMessage=1 leaveMessage=1 name=game",
             "300 con bot_add 1 joinMessage=1 leaveMessage=1 name=Zorbo",
+            # Chat is limited to 3 a real second (the client's and the server's burst limit, a dropped or closed chat): the
+            # commands below are at least 1500 frames apart (about a second), so no window holds more than 3
+            "2000 con bot_add 1 joinMessage=1 leaveMessage=1 name=Players",
+            "4000 con say /players",  # the list of every player in the match, while all of them are in
+            "4100 rows @lists [id^=chatMsg_]",
+            "4110 netchat 0 game says Players are here",  # a player's line: its words are a bot's name and a template word
+            "4120 rows @says [id^=chatMsg_]",
             "5000 nodes @rows [class^=leaderItem]",
             "5000 grep @pn Player_ [class^=leaderName]",
             "5000 grep @me Player [class^=leaderNameM]",
             "5000 rows @joins [id^=chatMsg_]",
-            "5200 con bot_kick all",
-            "5210 con bot_add 1 name=ping",  # after the kick, alone: a fourth add in the seeding frame was dropped
-            "5350 con say /ping ping",
-            "5450 rows @pings [id^=chatMsg_]",
-            "5600 rows @leaves [id^=chatMsg_]",
-            "5700 quit",
+            "7000 con bot_kick all",
+            "7010 con bot_add 1 name=ping",  # after the kick, alone
+            "7150 con say /ping ping",
+            "7250 rows @pings [id^=chatMsg_]",
+            "7400 rows @leaves [id^=chatMsg_]",
+            "7500 quit",
         ]) + "\n")
     log = os.path.join(WORK, tag + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
@@ -112,24 +121,43 @@ def run(tag, hidden):
     ping_line = r"Player_\d+'s ping: (calculating|\d+ ms)" if hidden else r"ping's ping: (calculating|\d+ ms)"
     check(f"{'on' if hidden else 'off'}: the ping reply about the bot named ping reads exactly",
           len(pings) == 1 and re.fullmatch(ping_line, pings[0]) is not None, f"ping lines {pings} rows {rows(lines, '@pings')}")
+    # the list of every player (/players): "Players (N): a, b, ..." with N the number of names, one line
+    lists = [t for t in rows(lines, "@lists") if t.startswith("Players (")]
+    names_part = re.fullmatch(r"Players \((\d+)\): (.*)", lists[0]) if len(lists) == 1 else None
+    listed = names_part.group(2).split(", ") if names_part else []
+    check(f"{'on' if hidden else 'off'}: /players lists every player once, its count matching its names",
+          names_part is not None and int(names_part.group(1)) == len(listed) >= 6, f"list rows {lists}")
+    # the chat line of the player whose words are "game" and "Players" (netchat: uid 2, a guest): the words stay as typed
+    says = [t for t in rows(lines, "@says") if "game says Players are here" in t]
     if hidden:
-        check("on: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
-        check("on: the bots read Player_<n> on the scoreboard", n_pn >= 3, f"Player_ rows {n_pn}")
+        check("on: the list names every player as Player or Player_<n> (the bot named Players too)",
+              names_part is not None and all(re.fullmatch(r"Player|Player_\d+", n) for n in listed), f"list {lists}")
+        check("on: a line's text is as typed: the sender reads Player_<n>, its words are kept",
+              len(says) == 1 and re.fullmatch(r"Player_\d+: game says Players are here", says[0]) is not None, f"says {says}")
+    else:
+        check("off: the list keeps the names (game, Zorbo and Players included)",
+              names_part is not None and all(n in listed for n in ("game", "Zorbo", "Players")) and not any("Player_" in n for n in listed),
+              f"list {lists}")
+        check("off: the line keeps the sender's name and its words",
+              len(says) == 1 and not re.search(r"Player_\d", says[0]) and says[0].endswith(": game says Players are here"), f"says {says}")
+    if hidden:
+        check("on: the scoreboard lists you and the four bots", n_rows >= 5, f"rows {n_rows}")
+        check("on: the bots read Player_<n> on the scoreboard", n_pn >= 4, f"Player_ rows {n_pn}")
         check("on: your own row reads Player", n_me == 1, f"Player rows {n_me}")
-        check("on: every join line names you Player or the bot Player_<n> (game and Zorbo too)",
-              len(join_lines) == 3 and all(JOIN_HIDDEN.fullmatch(t) for t in join_lines)
+        check("on: every join line names you Player or the bot Player_<n> (game, Zorbo and Players too)",
+              len(join_lines) == 4 and all(JOIN_HIDDEN.fullmatch(t) for t in join_lines)
               and sum(t == "Player joined the game" for t in join_lines) == 1, f"join lines {join_lines}")
         # the bots leave after their LEAVE packet removed them from the players: their leave lines are still hidden
-        check("on: every leave line reads Player_<n> left the game (the three seeded bots and the two named ones)",
-              len(leave_lines) == 5 and all(LEAVE_HIDDEN.fullmatch(t) for t in leave_lines), f"leave lines {leave_lines}")
+        check("on: every leave line reads Player_<n> left the game (the three seeded bots and the three named ones)",
+              len(leave_lines) == 6 and all(LEAVE_HIDDEN.fullmatch(t) for t in leave_lines), f"leave lines {leave_lines}")
     else:
         check("off: the bots are not renamed (no Player_<n> on the scoreboard)", n_pn == 0, f"Player_ rows {n_pn}")
-        check("off: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
-        check("off: the join lines keep the names (game and Zorbo included)",
-              "game joined the game" in join_lines and "Zorbo joined the game" in join_lines
+        check("off: the scoreboard lists you and the four bots", n_rows >= 5, f"rows {n_rows}")
+        check("off: the join lines keep the names (game, Zorbo and Players included)",
+              "game joined the game" in join_lines and "Zorbo joined the game" in join_lines and "Players joined the game" in join_lines
               and not any("Player_" in t for t in join_lines), f"join lines {join_lines}")
-        check("off: the leave lines keep the names (game and Zorbo included)",
-              "game left the game" in leave_lines and "Zorbo left the game" in leave_lines
+        check("off: the leave lines keep the names (game, Zorbo and Players included)",
+              "game left the game" in leave_lines and "Zorbo left the game" in leave_lines and "Players left the game" in leave_lines
               and not any("Player_" in t for t in leave_lines), f"leave lines {leave_lines}")
     return lines
 

@@ -37,6 +37,9 @@
 #include <desktop_notify.h> // the same items on the desktop, when the Notifications switch is on
 #include <krunker_account.h> // the krunker.io account: the event bus's fresh token, its URL
 #include <krunker_eb.h>      // krunker.io's friends event bus socket
+#include <client.h>          // the match's players (dm_chat_name)
+#include <player_accounts.h> // a player's account (dm_chat_name)
+#include <player_names.h>    // Hide player names (dm_chat_name)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -388,6 +391,22 @@ static const char *friend_name(const int64_t id) {
     return f ? jstr(f, "name") : "";
 }
 
+// A friend's name in the in-game chat (Hide player names): a friend playing in this match reads as its player does
+// (Player_<n> by its uid, never the text), anyone else keeps the friend's name.
+static const char *dm_chat_name(const int64_t account, const char *name, char *out, const size_t size) {
+    const Client *client = menu_ui() ? menu_ui()->client : NULL;
+    if (!player_names_hidden() || !client) return name;
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (!p) continue;
+        const NetPlayerInfoPacket *info = player_accounts_get(p->uid);
+        if (!info || info->account_id != account) continue;
+        const char *shown = player_names_shown(p->uid, p == client->me, p->name[0] ? p->name : name, out, size);
+        return shown ? shown : name;
+    }
+    return name;
+}
+
 static Conv *conv_get(const int64_t peer, const int create) {
     for (int i = 0; i < S.nconv; i++)
         if (S.convs[i].peer == peer) return &S.convs[i];
@@ -642,7 +661,8 @@ static void eb_on_recv(const cJSON *o) {
     set_unread(from, unread_of(from) + 1);
     char line[MSG_TEXT + 96];
     const char *name = friend_name(from);
-    snprintf(line, sizeof(line), "[DM from %s]: %s", name[0] ? name : "Unknown", jstr(o, "text"));
+    char shown[PLAYER_NAME_SIZE];
+    snprintf(line, sizeof(line), "[DM from %s]: %s", dm_chat_name(from, name[0] ? name : "Unknown", shown, sizeof(shown)), jstr(o, "text"));
     dm_chat_line(line); // v10 _49706 listeners: every new message, on any page (the chat list keeps it for the game)
     if (!(S.open && S.tab == TAB_FRIENDS && S.selected == from)) { // KrunkNative: not on screen: the OS notification
         char title[96];
@@ -687,7 +707,9 @@ static void eb_on_unread_summary(const cJSON *o) {
         }
         char line[160];
         const char *name = jstr(e, "name");
-        snprintf(line, sizeof(line), "[DM] %d new %s from %s", n, n == 1 ? "message" : "messages", name[0] ? name : "a friend");
+        char shown[PLAYER_NAME_SIZE];
+        const char *who = dm_chat_name(id, name[0] ? name : "a friend", shown, sizeof(shown));
+        snprintf(line, sizeof(line), "[DM] %d new %s from %s", n, n == 1 ? "message" : "messages", who);
         dm_chat_line(line); // v10 _49707 listeners: each friend with unread messages at sign-in
     }
 }

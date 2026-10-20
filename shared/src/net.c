@@ -431,9 +431,28 @@ void net_format_server_line(char *out, const size_t size, const char *template, 
     if (dollar) snprintf(out, size, "%.*s%s%s", (int) (dollar - template), template, name && name[0] ? name : "unknown", dollar + 1);
     else snprintf(out, size, "%s", template);
 }
+
+// NET_EXT_KN_SERVER_NAMES composed: a single pass over the template, so a name is copied in and never scanned.
+void net_format_server_names(char *out, const size_t size, const char *template, const char *const *names, const int count) {
+    if (!out || !size) return;
+    size_t len = 0;
+    int next = 0;
+    for (const char *p = template ? template : ""; *p && len + 1 < size; p++) {
+        if (*p == '$' && next < count) {
+            const char *name = names && names[next] && names[next][0] ? names[next] : "unknown";
+            next++;
+            for (const char *s = name; *s && len + 1 < size; s++) out[len++] = *s;
+        } else {
+            out[len++] = *p;
+        }
+    }
+    out[len] = 0;
+}
 // net_ext.h spells NetServerLinePacket's sizes out (it does not include shared.h): keep them the shared constants'
 _Static_assert(sizeof(((NetServerLinePacket *) 0)->name) == PLAYER_NAME_SIZE, "NetServerLinePacket.name is PLAYER_NAME_SIZE");
 _Static_assert(sizeof(((NetServerLinePacket *) 0)->text) == NET_CHAT_TEXT_SIZE, "NetServerLinePacket.text is NET_CHAT_TEXT_SIZE");
+_Static_assert(sizeof(((NetServerNameEntry *) 0)->name) == PLAYER_NAME_SIZE, "NetServerNameEntry.name is PLAYER_NAME_SIZE");
+_Static_assert(sizeof(((NetServerNamesPacket *) 0)->text) == NET_SERVER_NAMES_TEXT, "NetServerNamesPacket.text is NET_SERVER_NAMES_TEXT");
 
 // io_po: one RTT sample folded into the published ping (EWMA, alpha 0.35).
 int net_ping_update(const int previous_ms, const float rtt_seconds) {

@@ -2523,13 +2523,8 @@ void accounts_on_spawn(ClientConnection *client, const int first_spawn) {
     acc_broadcast_info(client);
     if (!first_spawn) return;
     accounts_send_infos_to(client);
-    for (int i = 0; i < g_gs_config.motd_count; i++) {
-        char text[NET_CHAT_TEXT_SIZE];
-        const char *line = g_gs_config.motd[i];
-        const char *dollar = strchr(line, '$');
-        if (dollar) snprintf(text, sizeof(text), "%.*s%s%s", (int) (dollar - line), line, client->name, dollar + 1);
-        else snprintf(text, sizeof(text), "%s", line);
-        acc_chat_to(client, text);
+    for (int i = 0; i < g_gs_config.motd_count; i++) { // the first "$" is the player's own name: a line about that player, not a text rewrite
+        net_server_line_to(client, client->id, client->name, g_gs_config.motd[i]);
     }
 }
 

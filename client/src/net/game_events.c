@@ -481,6 +481,38 @@ static void events_server_line(Client *client, const NetServerLinePacket *packet
     hud_ui_add_server_line(line, SERVER_CHAT_COLOR);
 }
 
+// NET_EXT_KN_SERVER_NAMES (net_ext.h): a server line that names players (a list, a finish line). Each name is shown as
+// Hide player names shows its uid (player_names_shown; -1 numbered by its name, -2 not a player: as it is), then the
+// names go into the template's "$"s in order. The text is never searched for a name.
+static void events_server_names(Client *client, const NetServerNamesPacket *packet) {
+    const int count = packet->count < NET_SERVER_NAMES_MAX ? packet->count : NET_SERVER_NAMES_MAX;
+    char shown[NET_SERVER_NAMES_MAX][PLAYER_NAME_SIZE];
+    const char *texts[NET_SERVER_NAMES_MAX];
+    char text[NET_SERVER_NAMES_TEXT];
+    memcpy(text, packet->text, sizeof(text));
+    text[sizeof(text) - 1] = 0;
+    for (int i = 0; i < count; i++) {
+        char name[PLAYER_NAME_SIZE];
+        memcpy(name, packet->names[i].name, sizeof(name));
+        name[sizeof(name) - 1] = 0;
+        const int uid = packet->names[i].uid;
+        const char *raw = name[0] ? name : "unknown";
+        if (uid == NET_SERVER_NAME_RAW) {
+            snprintf(shown[i], sizeof(shown[i]), "%s", raw);
+        } else {
+            const int self = uid >= 0 && client && client->me && uid == client->me->uid;
+            const char *who = player_names_shown(uid, self, raw, shown[i], sizeof(shown[i])); // written to shown[i] while hidden
+            if (who && who != shown[i]) snprintf(shown[i], sizeof(shown[i]), "%s", who);
+            else if (!who) snprintf(shown[i], sizeof(shown[i]), "%s", raw);
+        }
+        texts[i] = shown[i];
+    }
+    char line[NET_CHAT_TEXT_SIZE];
+    net_format_server_names(line, sizeof(line), text, texts, count);
+    ui_console_on_server_line(line);
+    hud_ui_add_server_line(line, SERVER_CHAT_COLOR);
+}
+
 // updateNoclip / updateUnlimitedAmmo / updateForceHide ("noc" / "unl" / "fh": the line is
 // addChat(null, ..., 2)) and the "borders" / "forcecol" broadcasts of the chat commands.
 static void events_cheat(Client *client, const NetCheatPacket *packet) {
@@ -1317,6 +1349,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetServerLinePacket line;
                 memcpy(&line, body, sizeof(line));
                 events_server_line(client, &line);
+            }
+            else if (subtype == NET_EXT_KN_SERVER_NAMES && body_length == sizeof(NetServerNamesPacket)) { // a chat list / finish line naming players
+                NetServerNamesPacket names;
+                memcpy(&names, body, sizeof(names));
+                events_server_names(client, &names);
             }
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;

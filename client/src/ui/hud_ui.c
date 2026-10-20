@@ -2347,76 +2347,6 @@ static int hud_chat_line_channel(const Client *client, const int player_line) {
     return hud_chat_teams(client) && player_line ? 0 : -1;
 }
 
-// f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds) on `channel`;
-// the oldest rows go first beyond config.chatListLength.
-// data-kind of a row: "human" (a human player's line: Show Player Messages hides it), "bot" (a bot
-// player's line: always shown), "line" (a system line). hud_ui_clear_player_chat removes "human" rows.
-// Hide player names (player_names.h): every known player's raw name in a chat line (the game's players, the local
-// player, a scenario's scoreboard) becomes its shown name, longest names first, whole words only, in one pass. So the
-// server's join and ranked lines and the messages themselves hide the names too.
-#define HUD_CHAT_NAMES_MAX 128
-typedef struct {
-    const char *raw;
-    char shown[PLAYER_NAME_SIZE];
-} HudChatName;
-
-static void hud_chat_add_name(HudChatName *names, int *count, const char *raw, const int uid, const int self) {
-    if (!raw || !raw[0] || *count >= HUD_CHAT_NAMES_MAX) return;
-    names[*count].raw = raw;
-    player_names_shown(uid, self, raw, names[*count].shown, sizeof(names[*count].shown));
-    (*count)++;
-}
-
-void hud_chat_hide_names(const char *in, char *out, const size_t size) {
-    snprintf(out, size, "%s", in ? in : "");
-    const Client *client = menu_ui()->client;
-    if (!client || !in || !in[0] || !player_names_hidden()) return;
-    HudChatName names[HUD_CHAT_NAMES_MAX];
-    int count = 0;
-    for (size_t i = 0; i < client->game.player_count && count < HUD_CHAT_NAMES_MAX; i++) {
-        const Player *p = client->game.players[i];
-        if (p) hud_chat_add_name(names, &count, p->name, p->uid, p == client->me);
-    }
-    hud_chat_add_name(names, &count, client->me ? client->me->name : client->menu_name, client->me ? client->me->uid : -1, 1);
-    for (int i = 0; count < HUD_CHAT_NAMES_MAX; i++) { // every player numbered in this match by uid, the ones who left too (their leave line)
-        int uid = -1;
-        const char *raw = NULL;
-        if (!player_names_entry(i, &uid, &raw)) break;
-        if (uid >= 0) hud_chat_add_name(names, &count, raw, uid, client->me && uid == client->me->uid);
-    }
-    if (cJSON_IsArray(g_hud_override.scoreboard)) { // a scenario's scoreboard stands for the game's players
-        const cJSON *row;
-        cJSON_ArrayForEach(row, g_hud_override.scoreboard) {
-            const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name"), *me = cJSON_GetObjectItemCaseSensitive(row, "me");
-            if (cJSON_IsString(n)) hud_chat_add_name(names, &count, n->valuestring, -1, cJSON_IsTrue(me));
-        }
-    }
-    for (int i = 1; i < count; i++) { // longest first, so "Bob Smith" wins over "Bob"
-        HudChatName tmp = names[i];
-        int j = i - 1;
-        for (; j >= 0 && strlen(names[j].raw) < strlen(tmp.raw); j--) names[j + 1] = names[j];
-        names[j + 1] = tmp;
-    }
-    size_t o = 0, pos = 0;
-    const size_t len = strlen(in);
-    while (pos < len && o + 1 < size) {
-        size_t matched = 0;
-        for (int k = 0; k < count && !matched; k++) {
-            const size_t m = player_names_word_at(in, pos, names[k].raw);
-            if (!m) continue;
-            const char *shown = names[k].shown;
-            for (size_t s = 0; shown[s] && o + 1 < size; s++) out[o++] = shown[s];
-            matched = m;
-        }
-        if (matched) {
-            pos += matched;
-        } else {
-            out[o++] = in[pos++];
-        }
-    }
-    out[o] = 0;
-}
-
 // The uid of the player whose stored name is `name` among the players this match knows (the players, the numbered
 // players who left); -1 when none. The players are numbered by uid (player_names.h), so a uid is the key.
 static int hud_chat_uid_of_name(const Client *client, const char *name) {
@@ -2482,7 +2412,11 @@ static void hud_chat_shown_player_name(const char *field, char *out, const size_
     snprintf(out, size, "%s", name ? name : "");
 }
 
-// The row of `msg` as it is: a line whose names are already shown (hud_ui_add_server_line) takes no name rewrite.
+// f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds) on `channel`; the oldest rows go first
+// beyond config.chatListLength. data-kind of a row: "human" (a human player's line: Show Player Messages hides it), "bot"
+// (a bot player's line: always shown), "line" (a system line). hud_ui_clear_player_chat removes "human" rows.
+// The row is written as it is: `name` and every name in `msg` are already shown (Hide player names, player_names.h), by
+// uid, never rewritten by their text here.
 static void hud_add_chat_row_shown(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list || !msg || !msg[0]) return;
@@ -2500,17 +2434,8 @@ static void hud_add_chat_row_shown(const char *name, const char *msg, const char
     html_dom_scroll_to_bottom(list);
 }
 
-static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
-    char shown_msg[NET_CHAT_TEXT_SIZE * 2];
-    if (msg) {
-        hud_chat_hide_names(msg, shown_msg, sizeof(shown_msg));
-        msg = shown_msg;
-    }
-    hud_add_chat_row_shown(name, msg, color, channel, kind);
-}
-
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
-    hud_add_chat_row_on(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]), "line");
+    hud_add_chat_row_shown(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]), "line");
 }
 
 // A server line whose names are already shown (hud_ui_add_official_name_line): the row as it is, on the channel
@@ -2525,9 +2450,11 @@ static void hud_ui_add_chat_line_shown(const char *msg, const char *color, const
 // template translated (i18n_format), and the row shown as it is, in the chat and the developer console. 0 for any
 // other key: the caller shows that line as it did.
 int hud_ui_add_official_name_line(const char *key, const char *const *args, const int argc, const char *color, const int channel) {
+    // the keys whose first argument is a player's name: the join, leave, kick, ban, vote kick, arrest and ranked lines,
+    // and the Egg hunt's found / completed lines (v10 "chi" ["event.easter.found.new", name, n, total], :190368)
     static const char *const named[] = {"server.message.join", "server.message.left", "server.message.kicked",
                                         "server.message.banned", "server.message.votekicked", "server.message.arrested",
-                                        "server.message.ranked"};
+                                        "server.message.ranked", "event.easter.found.new", "event.easter.completed"};
     if (!key || !args || argc < 1 || !args[0]) return 0;
     int is_named = 0;
     for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) is_named |= !strcmp(key, named[i]);
@@ -2564,19 +2491,19 @@ void hud_ui_clear_player_chat(void) {
 void hud_ui_add_player_chat(const char *name, const char *msg, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     if (human && !client_render_settings()->show_messages) return;
-    hud_add_chat_row_on(name, msg, NULL, hud_chat_line_channel(menu_ui()->client, 1), human ? "human" : "bot");
+    hud_add_chat_row_shown(name, msg, NULL, hud_chat_line_channel(menu_ui()->client, 1), human ? "human" : "bot");
 }
 
 // io_addChat(channel, ...) of a v7 "ch": the channel is forced to -1 outside team modes.
 void hud_ui_add_chat_line_on(const char *msg, const char *color, const int channel) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
-    hud_add_chat_row_on(NULL, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, "line");
+    hud_add_chat_row_shown(NULL, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, "line");
 }
 
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     if (human && !client_render_settings()->show_messages) return;
-    hud_add_chat_row_on(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, human ? "human" : "bot");
+    hud_add_chat_row_shown(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, human ? "human" : "bot");
 }
 
 // index.js (per menu update): the team channel switches back to global when the mode has no teams
@@ -2632,8 +2559,8 @@ void hud_ui_add_chat(const char *name, const char *msg, const char *color) {
     hud_add_chat_row(name, msg, color); // a system line (name NULL) or a scenario's named line: never gated
 }
 
-// A server line whose player names are already shown (events_server_line: the name by uid, Player_<n> while hidden):
-// the row as it is. hud_ui_add_chat would rewrite the names again by their text.
+// A server line whose player names are already shown (events_server_line, events_server_names: the name by uid, Player_<n>
+// while hidden): the row as it is.
 void hud_ui_add_server_line(const char *msg, const char *color) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     hud_add_chat_row_shown(NULL, msg, color, hud_chat_line_channel(menu_ui()->client, 0), "line");

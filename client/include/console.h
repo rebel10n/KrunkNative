@@ -42,7 +42,7 @@ int  ui_console_mouse(int action, double x, double y, int css);
 int  ui_console_chat_command(Client*, const char *text);
 // hookChat: every "ch" line, and the "noc" / "unl" / "fh" packets (NetCheatFlag).
 void ui_console_on_chat(const char *name, const char *text, int kind);
-void ui_console_on_server_line(const char *text); // a server line already shown (Hide player names): no name rewrite
+void ui_console_on_server_line(const char *text); // a server line already shown (Hide player names, by uid): echoed as it is
 void ui_console_on_cheat(int flag, int on);
 // The offline game on catalogue map `catalog_index` (-1 keeps the running one), leaving the lobby
 // this client is joined to first: the console's `offline <map>` / `sandbox`, and the Games window's

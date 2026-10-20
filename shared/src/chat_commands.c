@@ -13,6 +13,7 @@
 #include <map_catalog.h>
 #include <object_manager.h> // give / drop (KrunkNative Object Manager)
 #include <target_select.h>
+#include <net_ext.h> // NET_EXT_KN_SERVER_NAMES: the named lines (nameline_*)
 #include <weapons.h>
 #include <world.h> // build_fill: game_build_object
 #include <ctype.h>
@@ -179,19 +180,106 @@ static const char *player_label(const Player *player, char *buf, const size_t n)
     return buf;
 }
 
-// A reply about one player: the template's first "$" stands for the player's name, and the name travels apart from the
-// text (a server line about the player, game_send_server_line: NET_EXT_KN_SERVER_LINE to an EXT peer, which shows the
-// name as Hide player names shows it, so a name equal to a word of the template is never rewritten inside it). The
-// console has no connection: it gets the composed text.
-static void reply_about(ChatCtx *c, const Player *target, const char *template) {
-    char name[PLAYER_NAME_SIZE + 16], text[CHAT_TEXT_MAX];
-    player_label(target, name, sizeof(name));
+// A reply about one player by its uid and name: the template's first "$" stands for the name, and the name travels apart
+// from the text (a server line about the player, game_send_server_line: NET_EXT_KN_SERVER_LINE to an EXT peer, which shows
+// the name as Hide player names shows it, so a name equal to a word of the template is never rewritten inside it). The
+// console has no connection: it gets the composed text. The caller takes the uid and name before the player may go.
+static void reply_about_named(ChatCtx *c, const int uid, const char *name, const char *template) {
+    char text[CHAT_TEXT_MAX];
     if (c->sender == CHAT_CMD_CONSOLE) {
         net_format_server_line(text, sizeof(text), template, name);
         send_split(c, c->sender, text);
         return;
     }
-    game_send_server_line(c->host->game, c->sender, target->uid, name, template);
+    game_send_server_line(c->host->game, c->sender, uid, name, template);
+}
+
+static void reply_about(ChatCtx *c, const Player *target, const char *template) {
+    char name[PLAYER_NAME_SIZE + 16];
+    player_label(target, name, sizeof(name));
+    reply_about_named(c, target->uid, name, template);
+}
+
+// ---------------------------------------------------------------- named lines (KrunkNative, Hide player names)
+// A server line that names players goes out as NET_EXT_KN_SERVER_NAMES: the template is built piece by piece, and each
+// name is its own "$" with its uid (net_ext.h), so the client formats the names and searches no text for them. A list
+// longer than one line goes out as several lines, cut between two names. The console gets the composed text. No reply
+// rewrites its text by a name: a player named "Players" or "game" is numbered by its uid like any other.
+#define NAMELINE_SHOWN_MIN 12                                  // a name shown as Player_<n> (or Player) takes this room at least
+#define NAMELINE_RENDER_ROOM (NET_CHAT_TEXT_SIZE - 1 - 16)     // a rendered line, with room for the tail
+#define NAMELINE_TEMPLATE_ROOM (NET_SERVER_NAMES_TEXT - 1 - 16) // the template, with room for the tail
+typedef struct {
+    ChatCtx *c;
+    char text[NET_SERVER_NAMES_TEXT];                   // the template so far
+    size_t rendered;                                    // the line's length with its names at their room
+    int count;
+    ServerName names[NET_SERVER_NAMES_MAX];
+    char store[NET_SERVER_NAMES_MAX][PLAYER_NAME_SIZE]; // the names copied here: a player may be gone by the flush
+} NameLine;
+
+static void nameline_begin(NameLine *l, ChatCtx *c) {
+    memset(l, 0, sizeof(*l));
+    l->c = c;
+}
+
+// The line so far goes out (a list's line, or the whole line at its end).
+static void nameline_flush(NameLine *l) {
+    if (!l->count && !l->text[0]) return;
+    if (l->c->sender == CHAT_CMD_CONSOLE) {
+        const char *texts[NET_SERVER_NAMES_MAX];
+        char composed[CHAT_TEXT_MAX];
+        for (int i = 0; i < l->count; i++) texts[i] = l->names[i].name;
+        net_format_server_names(composed, sizeof(composed), l->text, texts, l->count);
+        send_split(l->c, CHAT_CMD_CONSOLE, composed);
+    } else {
+        game_send_server_names(l->c->host->game, l->c->sender, l->count, l->names, l->text);
+    }
+    l->text[0] = 0;
+    l->rendered = 0;
+    l->count = 0;
+}
+
+// Fixed text of the template (never a name: a "$" in it would stand for one, so it is dropped).
+static void nameline_text(NameLine *l, const char *fixed) {
+    size_t len = strlen(l->text);
+    for (const char *p = fixed ? fixed : ""; *p && len + 1 < sizeof(l->text); p++) {
+        if (*p == '$') continue;
+        l->text[len++] = *p;
+        l->text[len] = 0;
+        l->rendered++;
+    }
+}
+
+// One name: `sep` before it (dropped at the top of a line), `pre` and `post` around its "$". uid: the player's uid,
+// NET_SERVER_NAME_NONE (a bot not spawned, numbered by its name) or NET_SERVER_NAME_RAW (not a player: an AI).
+// A name that does not fit starts the next line.
+static void nameline_item(NameLine *l, const char *sep, const char *pre, const int uid, const char *name, const char *post) {
+    const size_t len = name ? strlen(name) : 0;
+    const size_t shown = len > NAMELINE_SHOWN_MIN ? len : NAMELINE_SHOWN_MIN;
+    const size_t template_add = strlen(sep ? sep : "") + strlen(pre ? pre : "") + 1 + strlen(post ? post : "");
+    if (l->count && (l->count >= NET_SERVER_NAMES_MAX || strlen(l->text) + template_add > NAMELINE_TEMPLATE_ROOM ||
+                     l->rendered + template_add + shown > NAMELINE_RENDER_ROOM)) {
+        nameline_flush(l);
+        sep = "";
+    }
+    nameline_text(l, sep);
+    nameline_text(l, pre);
+    const size_t at = strlen(l->text);
+    if (at + 1 < sizeof(l->text)) {
+        l->text[at] = '$';
+        l->text[at + 1] = 0;
+    }
+    l->rendered += shown;
+    snprintf(l->store[l->count], sizeof(l->store[0]), "%s", name ? name : "");
+    l->names[l->count] = (ServerName) {.uid = uid, .name = l->store[l->count]};
+    l->count++;
+    nameline_text(l, post);
+}
+
+// The line's last fixed text ("." or ")"), then it goes out.
+static void nameline_end(NameLine *l, const char *tail) {
+    nameline_text(l, tail);
+    nameline_flush(l);
 }
 
 // fields [name, alias, id] normalised
@@ -470,12 +558,13 @@ static void cmd_c(ChatCtx *c) {
 static int kick_or_ban_one(ChatCtx *c, Player *target, const int ban, const int quiet) {
     char label[PLAYER_NAME_SIZE + 16];
     player_label(target, label, sizeof(label));
+    const int uid = target->uid; // the reply names the player by it: a bot's Player is freed by game_bots_remove
     GameBot *bot = game_bot_of(c->host->game, target);
     if (bot) { // a v7.1.4 bot player leaves like a kicked guest (BotManager.remove)
         game_bots_remove(c->host->game, bot);
         if (quiet) return 1;
-        if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label);
-        else reply(c, "Kicked %s.", label);
+        if (ban) reply_about_named(c, uid, label, "Disconnected $, but no account id was available to persist a ban.");
+        else reply_about_named(c, uid, label, "Kicked $.");
         return 1;
     }
     if (!peer_by_id(c->host, target->uid, NULL) || !c->host->disconnect) {
@@ -488,9 +577,12 @@ static int kick_or_ban_one(ChatCtx *c, Player *target, const int ban, const int 
     if (account) c->host->ban_account(c->host->user, account, label); // pnhBannedAccountIds.add(accountId)
     c->host->disconnect(c->host->user, target->uid, ban ? "Banned" : "Kicked", ban ? "004003" : "004002");
     if (quiet) return 1;
-    if (ban && account) reply(c, "Banned %s (account %d).", label, account);
-    else if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label); // a guest
-    else reply(c, "Kicked %s.", label);
+    if (ban && account) {
+        char template[PLAYER_NAME_SIZE + 48];
+        snprintf(template, sizeof(template), "Banned $ (account %d).", account);
+        reply_about_named(c, uid, label, template);
+    } else if (ban) reply_about_named(c, uid, label, "Disconnected $, but no account id was available to persist a ban."); // a guest
+    else reply_about_named(c, uid, label, "Kicked $.");
     return 1;
 }
 
@@ -1169,15 +1261,19 @@ static void cmd_kill(ChatCtx *c) {
     if (target_is_selector(c->rest)) {
         ChatTargets t;
         if (!select_or_reply(c, c->rest, 1, &t)) return;
-        char names[CHAT_TEXT_MAX] = "";
-        size_t len = 0;
+        char head[48];
+        snprintf(head, sizeof(head), "Killed %d %s: ", t.count, players_word(t.count));
+        NameLine line;
+        nameline_begin(&line, c);
+        nameline_text(&line, head);
         for (int i = 0; i < t.count; i++) {
             char label[PLAYER_NAME_SIZE + 16];
             player_label(t.players[i], label, sizeof(label));
+            const int uid = t.players[i]->uid;
             kill_player(t.players[i], player);
-            if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", i ? ", " : "", label);
+            nameline_item(&line, i ? ", " : "", "", uid, label, "");
         }
-        reply(c, "Killed %d %s: %s.", t.count, players_word(t.count), names);
+        nameline_end(&line, ".");
         return;
     }
 
@@ -1223,23 +1319,27 @@ static void cmd_kill(ChatCtx *c) {
         reply(c, "Kill target '%s' not found.", c->rest);
         return;
     }
-    char names[CHAT_TEXT_MAX] = "";
-    size_t len = 0;
-    for (int i = 0; i < n; i++) {
-        char label[PLAYER_NAME_SIZE + 16];
-        player_label(targets[i], label, sizeof(label));
-        kill_player(targets[i], player);
-        if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", i ? ", " : "", label);
-    }
-    for (int i = 0; i < ai_n; i++) { // killTargetAI: ai.kill(source), then AI.sync()
-        game_ai_kill(game, ai_targets[i], player);
-        game_ai_sync(game);
-        if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", n || i ? ", " : "", ai_targets[i]->name);
-    }
     char parts[64] = "";
     if (n) snprintf(parts, sizeof(parts), "%d player%s", n, n == 1 ? "" : "s");
     if (ai_n) snprintf(parts + strlen(parts), sizeof(parts) - strlen(parts), "%s%d AI%s", n ? " + " : "", ai_n, ai_n == 1 ? "" : "s");
-    reply(c, "Killed %s: %s.", parts, names);
+    char head[96];
+    snprintf(head, sizeof(head), "Killed %s: ", parts);
+    NameLine line;
+    nameline_begin(&line, c);
+    nameline_text(&line, head);
+    for (int i = 0; i < n; i++) {
+        char label[PLAYER_NAME_SIZE + 16];
+        player_label(targets[i], label, sizeof(label));
+        const int uid = targets[i]->uid;
+        kill_player(targets[i], player);
+        nameline_item(&line, i ? ", " : "", "", uid, label, "");
+    }
+    for (int i = 0; i < ai_n; i++) { // killTargetAI: ai.kill(source), then AI.sync(); an AI is not a player: its name as it is
+        game_ai_kill(game, ai_targets[i], player);
+        game_ai_sync(game);
+        nameline_item(&line, n || i ? ", " : "", "", NET_SERVER_NAME_RAW, ai_targets[i]->name, "");
+    }
+    nameline_end(&line, ".");
 }
 
 static void cmd_team(ChatCtx *c) {
@@ -1284,21 +1384,29 @@ static void cmd_teams(ChatCtx *c) {
     }
     int shown = 0;
     for (int team = 0; team < MODE_TEAMS; team++) {
-        char names[CHAT_TEXT_MAX] = "";
-        size_t len = 0;
         int count = 0;
+        for (size_t i = 0; i < game->player_count; i++) {
+            const Player *p = game->players[i];
+            if (p && p->team == team) count++;
+        }
+        if (!count) continue;
+        char head[48];
+        if (team == 1) snprintf(head, sizeof(head), "Red (%d): ", count);
+        else if (team == 2) snprintf(head, sizeof(head), "Blue (%d): ", count);
+        else snprintf(head, sizeof(head), "Team %d (%d): ", team, count);
+        NameLine line;
+        nameline_begin(&line, c);
+        nameline_text(&line, head);
+        int n = 0;
         for (size_t i = 0; i < game->player_count; i++) {
             const Player *p = game->players[i];
             if (!p || p->team != team) continue;
             char label[PLAYER_NAME_SIZE + 16];
             player_label(p, label, sizeof(label));
-            if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", count ? ", " : "", label);
-            count++;
+            nameline_item(&line, n ? ", " : "", "", p->uid, label, "");
+            n++;
         }
-        if (!count) continue;
-        if (team == 1) reply(c, "Red (%d): %s", count, names);
-        else if (team == 2) reply(c, "Blue (%d): %s", count, names);
-        else reply(c, "Team %d (%d): %s", team, count, names);
+        nameline_end(&line, "");
         shown++;
     }
     if (!shown) reply(c, "No active players.");
@@ -1383,19 +1491,29 @@ static void cmd_summon(ChatCtx *c) {
 
 static void cmd_players(ChatCtx *c) {
     const Game *game = c->host->game;
-    char names[CHAT_TEXT_MAX] = "";
-    size_t len = 0;
     int count = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i]) count++;
+    }
+    if (!count) {
+        reply(c, "No players.");
+        return;
+    }
+    char head[32];
+    snprintf(head, sizeof(head), "Players (%d): ", count);
+    NameLine line;
+    nameline_begin(&line, c);
+    nameline_text(&line, head);
+    int n = 0;
     for (size_t i = 0; i < game->player_count; i++) {
         const Player *p = game->players[i];
         if (!p) continue;
         char label[PLAYER_NAME_SIZE + 16];
         player_label(p, label, sizeof(label));
-        if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", count ? ", " : "", label);
-        count++;
+        nameline_item(&line, n ? ", " : "", "", p->uid, label, "");
+        n++;
     }
-    if (!count) reply(c, "No players.");
-    else reply(c, "Players (%d): %s", count, names);
+    nameline_end(&line, "");
 }
 
 // cmd_ais: every listed AI (dead ones too), name or "(unnamed)"
@@ -1503,17 +1621,22 @@ static void cmd_bot_list(ChatCtx *c) {
         reply(c, "No bots.");
         return;
     }
-    char label[CHAT_TEXT_MAX] = "";
-    size_t len = 0;
-    for (int i = 0; i < bots->count && len < sizeof(label); i++) {
+    char head[32];
+    snprintf(head, sizeof(head), "Bots (%d): ", bots->count);
+    NameLine line;
+    nameline_begin(&line, c);
+    nameline_text(&line, head);
+    for (int i = 0; i < bots->count; i++) {
         const GameBot *bot = &bots->list[i];
-        char sid[24];
+        char pre[48], post[64], sid[24];
         if (bot->player) snprintf(sid, sizeof(sid), "#%d", bot->uid);
         else snprintf(sid, sizeof(sid), "(unspawned)");
-        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%s:%d:%s%s bhop:%s", i ? ", " : "", bot_type_name(bot->type), bot->id, bot->name, sid,
-                                 bot_hop_label(bot));
+        snprintf(pre, sizeof(pre), "%s:%d:", bot_type_name(bot->type), bot->id);
+        snprintf(post, sizeof(post), "%s bhop:%s", sid, bot_hop_label(bot));
+        // a spawned bot is its player (its uid); one not spawned has no uid yet, numbered by its name
+        nameline_item(&line, i ? ", " : "", pre, bot->player ? bot->uid : NET_SERVER_NAME_NONE, bot->name, post);
     }
-    reply(c, "Bots (%d): %s", bots->count, label);
+    nameline_end(&line, "");
 }
 
 // KrunkNative: the navigation counters and every bot's route (shared/src/bot_path.c), for the
@@ -1617,13 +1740,19 @@ static void cmd_bot_config(ChatCtx *c) {
     reply(c, "Bot config updated (%s); %d live bot%s updated.", text, updated, plural(updated));
 }
 
-// The name of the dev in connection `uid` (the peer's name, else the player's, else "another dev").
-static void mimic_name(ChatCtx *c, const int uid, char *out, const size_t size) {
+// The name of the dev in connection `uid` (the peer's name, else the player's, else "another dev"), and the uid it is named
+// by in a named line: the dev's player (numbered by its uid), a dev in the menu (no player: numbered by its name), or
+// NET_SERVER_NAME_RAW for "another dev".
+static int mimic_name(ChatCtx *c, const int uid, char *out, const size_t size) {
     ChatPeer peer;
     const Player *player = game_find_player(c->host->game, uid);
     if (peer_by_id(c->host, uid, &peer) && peer.name && peer.name[0]) snprintf(out, size, "%s", peer.name);
     else if (player && player->name[0]) snprintf(out, size, "%s", player->name);
-    else snprintf(out, size, "another dev");
+    else {
+        snprintf(out, size, "another dev");
+        return NET_SERVER_NAME_RAW;
+    }
+    return player ? uid : NET_SERVER_NAME_NONE;
 }
 
 // bot_mimic [on|off]: mimicTarget (the devConsole's toggle) with v7 server's follow config, and ONE
@@ -1642,20 +1771,33 @@ static void cmd_bot_mimic(ChatCtx *c) {
             return;
         }
         const int took = holder >= 0 && holder != c->sender;
-        if (took) mimic_name(c, holder, previous, sizeof(previous));
+        const int previous_uid = took ? mimic_name(c, holder, previous, sizeof(previous)) : NET_SERVER_NAME_RAW;
         game_bots_mimic_take(game, c->sender);
         char *argv_on[] = {"mimicTarget=on", "attackTarget=off", "followTarget=on", "watchTarget=on", "roam=off"};
         BotAssignments a;
         bot_parse_assignments(5, argv_on, &a);
         const int updated = game_bots_configure(game, &a);
-        mimic_name(c, c->sender, name, sizeof(name));
-        if (took) reply(c, "Mimic-style follow mode set (%d live bot%s updated); %s took control from %s.", updated, plural(updated), name, previous);
-        else reply(c, "Mimic-style follow mode set (%d live bot%s updated); %s controls them.", updated, plural(updated), name);
+        const int name_uid = mimic_name(c, c->sender, name, sizeof(name));
+        char head[96];
+        snprintf(head, sizeof(head), "Mimic-style follow mode set (%d live bot%s updated); ", updated, plural(updated));
+        NameLine line;
+        nameline_begin(&line, c);
+        nameline_text(&line, head);
+        if (took) {
+            nameline_item(&line, "", "", name_uid, name, " took control from ");
+            nameline_item(&line, "", "", previous_uid, previous, ".");
+        } else {
+            nameline_item(&line, "", "", name_uid, name, " controls them.");
+        }
+        nameline_end(&line, "");
         return;
     }
     if (c->sender != CHAT_CMD_CONSOLE && holder >= 0 && holder != c->sender) {
-        mimic_name(c, holder, name, sizeof(name));
-        reply(c, "%s controls the bots' mimic: only they can turn it off, or run bot_mimic on to take control.", name);
+        const int holder_uid = mimic_name(c, holder, name, sizeof(name));
+        NameLine line;
+        nameline_begin(&line, c);
+        nameline_item(&line, "", "", holder_uid, name, " controls the bots' mimic: only they can turn it off, or run bot_mimic on to take control.");
+        nameline_end(&line, "");
         return;
     }
     const int updated = game_bots_mimic_release(game);
@@ -2115,7 +2257,8 @@ static void cmd_give(ChatCtx *c) {
             return;
         }
         if (!target->active) {
-            reply(c, "%s is not spawned.", target == c->player ? "You are" : who);
+            if (target == c->player) reply(c, "You are is not spawned.");
+            else reply_about_named(c, target->uid, who, "$ is not spawned.");
             return;
         }
         // an item lands at the receiver's feet: the crosshair straight down
@@ -2125,7 +2268,15 @@ static void cmd_give(ChatCtx *c) {
             return;
         }
         if (target == c->player) reply(c, weapon ? "%s added to your loadout." : "%s dropped at your feet.", name);
-        else reply(c, "Gave %s to %s.", name, who);
+        else { // the receiver is named by its uid; the item's name is the server's own text
+            NameLine line;
+            nameline_begin(&line, c);
+            nameline_text(&line, "Gave ");
+            nameline_text(&line, name);
+            nameline_text(&line, " to ");
+            nameline_item(&line, "", "", target->uid, who, "");
+            nameline_end(&line, ".");
+        }
         return;
     }
     int given = 0, spawned = 0;

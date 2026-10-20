@@ -106,18 +106,22 @@ static void overflow_tests(void) {
     written_is(300, 0, "y", "Player");
 }
 
+// A name equal to a word of a server line ("game", "Players", "joined") is numbered like any other name: a line names its
+// player by uid, never by searching its text, so the number is the player's and the words of the line stay as they are.
 static void word_tests(void) {
     g_hide = 1;
-    CHECK(player_names_word_at("Quentin joined", 0, "Quentin") == 7, "a name at the start of a line");
-    CHECK(player_names_word_at("Quentins", 0, "Quentin") == 0, "a name inside a longer word is not a match");
-    CHECK(player_names_word_at("xQuentin", 1, "Quentin") == 0, "no match after a word character");
-    CHECK(player_names_word_at("a Quentin!", 2, "Quentin") == 7, "a name between spaces and punctuation");
-    CHECK(player_names_word_at("Bob's", 0, "Bob") == 3, "an apostrophe ends a word");
-    CHECK(player_names_word_at("Hi", 0, "") == 0, "an empty name never matches");
-    CHECK(player_names_word_at("Hi", 0, NULL) == 0, "a NULL name never matches");
+    player_names_reset();
+    shown_is(1, 0, "game", "Player_1");
+    shown_is(2, 0, "Players", "Player_2");
+    shown_is(3, 0, "joined", "Player_3");
+    shown_is(1, 0, "game", "Player_1");     // the same uid, the same number
+    shown_is(-1, 0, "Players", "Player_2"); // a uid-less player of a numbered name is that player
+    shown_is(4, 1, "game", "Player");       // the local player is Player whatever its name, and takes no number
+    shown_is(5, 0, "Player_1", "Player_4"); // a name that looks like a shown name is numbered by its uid
     CHECK(player_names_extras_hidden(0) == 1, "another player's extras are hidden while names are hidden");
     CHECK(player_names_extras_hidden(1) == 0, "the local player's extras stay");
     g_hide = 0;
+    shown_is(1, 0, "game", "game");          // off: the name as it is, the words too
     CHECK(player_names_extras_hidden(0) == 0, "extras shown with the setting off");
     g_hide = 1;
 }

@@ -15,6 +15,7 @@
 #include <voice_chat.h>
 #include <hud_social.h>      // social_server_v7, mute_voice
 #include <player_accounts.h> // the account id of an older server's speaker (mute_voice)
+#include <player_names.h>    // the speaker's name as the notice shows it (Hide player names)
 #include <streamer.h>
 #include <voice.h>
 #include <audio.h>
@@ -998,8 +999,17 @@ static int voice_volume_off(const char *name) {
     return 1;
 }
 
+// The speaker's name as the chat shows it (Hide player names, by its sid's uid; the local player is "Player")
+static const char *voice_shown_name(const Client *client, const int sid, const char *name, char *out, const size_t size) {
+    const int self = sid >= 0 && client && client->me && sid == client->me->uid;
+    const char *raw = name && name[0] ? name : "unknown";
+    const char *shown = player_names_shown(sid, self, raw, out, size);
+    return shown ? shown : raw;
+}
+
 static void voice_chat(Client *client, const char *audio, const char *name, const int sid) {
-    if (voice_volume_off(name)) return; // if (SOUND.volumes[1])
+    char shown[PLAYER_NAME_SIZE];
+    if (voice_volume_off(voice_shown_name(client, sid, name, shown, sizeof(shown)))) return; // if (SOUND.volumes[1])
     char scrambled[VOICE_NAME_MAX];
     name = streamer_name(name, scrambled, sizeof(scrambled)); // streamerModeEnabled && Filter: UTILS.scrambleS(hk)
     const Player *player = client && sid >= 0 ? game_find_player(&client->game, sid) : NULL;
@@ -1012,7 +1022,8 @@ static void voice_chat(Client *client, const char *audio, const char *name, cons
 // v7 io_voiceChat(audio, name, sid, channel, volume, isFinal, accountId): SOUND.volumes[1] * volume
 // must be > 0 and the channel -1 or ours (vLN02023). isFinal (never set by v7's server) is ignored.
 static void voice_chat_v7(Client *client, const char *audio, const char *name, const int sid, const VoiceV7Meta *meta) {
-    if (voice_volume_off(name) || !(meta->volume > 0.0f)) return; // SOUND.volumes[1] * volume > 0
+    char shown[PLAYER_NAME_SIZE];
+    if (voice_volume_off(voice_shown_name(client, sid, name, shown, sizeof(shown))) || !(meta->volume > 0.0f)) return; // SOUND.volumes[1] * volume > 0
     if (meta->channel != CHAT_CHANNEL_ALL && meta->channel != hud_ui_chat_channel()) return;
     char scrambled[VOICE_NAME_MAX];
     name = streamer_name(name, scrambled, sizeof(scrambled));

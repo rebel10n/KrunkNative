@@ -11,16 +11,18 @@ DOM each render writes (KRUNKNATIVE_SCENARIO_HTML) is checked for:
     on   the account header reads Player, its clan tag is gone, the picture is the menu class's
          icon (textures/classes/icon_0.png, the scenario's class 0), and the name Zelda is nowhere in the page
     off  the header reads Zelda with [KN] and the same class icon
-  in game (scoreboard: Zelda is you, Quentin and Rhea play; chat: Quentin says hi):
+  in game (scoreboard: Zelda is you, Quentin, Rhea, game and Players play; chat: Quentin says hi):
     on   the other players read Player_<n> (Quentin and Rhea are numbered in the order the scoreboard
          lists them; the chat line of Quentin gets the same number), you read Player, and no raw
-         name is left in the page; the join, leave and ranked chat lines read the generic names, every
-         chat line is printable text
+         name is left in the page outside the text a player typed; the join, leave and ranked chat lines
+         read the generic names, every chat line is printable text. A line's text is never rewritten: a
+         player named "game" or "Players" says "Players joined the game, game hi" and the words stay
+         (Player_3: ..., Player_4: ...), and Rhea's "Quentin, gg" keeps Quentin as typed
     off  the raw names are shown, and no Player_<n> appears
   Krunker Strike (state.strike.board, the mini scoreboard Tab holds): on, the rows read Player_1, Player (you),
     Player_2, Player_3 in score order and no raw name is left; off, the raw names are shown.
   console (stdout "[console] " lines of the in-game scenario, the chat the game received): on, the sender
-    and the names in the text read Player_<n> / Player; off, the raw names.
+    reads Player_<n> / Player and the text is echoed as typed; off, the raw names.
 Exit code 0 only when every check passed. Needs a headless GL device (KRUNKNATIVE_HEADLESS=1; set
 KRUNKNATIVE_EGL_DEVICE to pick one) and the checkout's assets (KRUNKNATIVE_ASSETS_DIR, default assets/; in a
 worktree point it at the checkout, the font files are untracked).
@@ -86,9 +88,14 @@ def game_edit(st):
         {"rank": 2, "name": "Quentin", "score": 5, "premium": 1, "verified": 1},
         {"rank": 3, "name": "Rhea", "score": 2},
         {"rank": 4, "name": "game", "score": 1},  # a template word: "joined the game" is the server's own line
+        {"rank": 5, "name": "Players", "score": 0},  # a template word: "Players (N): ..." is the server's own list header
     ]
     st["chat"] = [{"name": "Quentin", "msg": "gg, hi"},
                   {"name": "Rhea", "msg": "Quentin, gg"},
+                  # a player named after a word of a line says that line's words: the sender is numbered by its uid, and
+                  # the text is never searched for a name (the words stay as typed, nothing is rewritten)
+                  {"name": "game", "msg": "Players joined the game, game hi"},
+                  {"name": "Players", "msg": "game joined Players"},
                   # the official server's lines ("chi" [key, name]): the name is the argument, the template is never
                   # searched, so a player named "game" reads Player_3 joined the game, not a rewrite inside the words
                   {"official": "server.message.join", "args": ["Zelda"]},
@@ -150,6 +157,11 @@ def console_lines(out):
     return [line[len("[console] "):] for line in out.splitlines() if line.startswith("[console] ")]
 
 
+def console_senders(lines):
+    """The sender of each console line (the text after its first ": " is what was typed, not a name); a server line whole."""
+    return [line if line.startswith("Server: ") else line.split(": ", 1)[0] for line in lines]
+
+
 def mini_board_names(doc):
     """The names of Strike's mini scoreboard rows, in the order the board shows them."""
     return re.findall(r'mini-score-board__name">([^<]*)<', doc)
@@ -199,7 +211,12 @@ def main():
         check("game on: Quentin reads Player_1 on the scoreboard", "Player_1" in doc)
         check("game on: Rhea reads Player_2 on the scoreboard", "Player_2" in doc)
         check("game on: the chat line of Quentin is Player_1 too", doc.count("Player_1") >= 2, f"count={doc.count('Player_1')}")
-        check("game on: no raw name is left (Quentin, Rhea, Zelda)", not any(n in doc for n in ("Quentin", "Rhea", "Zelda")))
+        # the text a player typed is not a name: the chat rows' messages and the developer console's log (its own text) aside
+        outside = re.sub(r'<span class="chatMsg"[^>]*>.*?</span>', "", doc, flags=re.S)
+        outside = re.sub(r'<div class="logs".*?</div></div></div>', "", outside, count=1, flags=re.S)
+        check("game on: no raw name is left outside a typed message (Quentin, Rhea, Zelda, game, Players)",
+              not any(re.search(r"\b" + n + r"\b", outside) for n in ("Quentin", "Rhea", "Zelda")),
+              f"raw names outside messages: {[n for n in ('Quentin', 'Rhea', 'Zelda') if n in outside]}")
         check("game on: you read Player on the scoreboard", 'newLeaderNameM">Player</div>' in doc)
         check("game on: the join line names Player_1", "Player_1 joined the game" in doc and "Quentin joined" not in doc)
         check("game on: your join line reads Player (not a garbled name)", "Player joined the game" in doc)
@@ -209,20 +226,27 @@ def main():
         bad = [t for t in texts if not printable(t)]
         check("game on: every chat line is printable text", texts and not bad, f"lines {len(texts)}, odd {bad[:3]}")
         check("game on: the chat lines read exactly", all(t in texts for t in (
-            "Player joined the game", "Player_1 joined the game", "Player_2 left the game", "Player_1 left for a ranked match")),
+            "Player joined the game", "Player_1 joined the game", "Player_2 left the game", "Player_1 left for a ranked match",
+            "gg, hi", "Quentin, gg", "Players joined the game, game hi", "game joined Players")),
               f"{texts}")
+        check("game on: a player named game says its words as typed (no rewrite inside them)",
+              "Player_3" in doc and "Players joined the game, game hi" in texts and "game joined Players" in texts, f"{texts}")
         check("game on: Quentin's premium badge is absent", ">beenhere</" not in doc, "")
         check("game on: Quentin's verified badge is absent", ">check_circle</" not in doc, "")
         console = console_lines(LAST_OUT)
         check("game on: the console's sender reads Player_1", "Player_1: gg, hi" in console, f"{console[:6]}")
-        check("game on: the console's names in the text read Player_1 too", "Player_2: Player_1, gg" in console, f"{console[:6]}")
+        check("game on: the console keeps the text as typed (Rhea's line keeps Quentin)", "Player_2: Quentin, gg" in console, f"{console[:6]}")
+        check("game on: the console's sender game reads Player_3, its words as typed",
+              "Player_3: Players joined the game, game hi" in console, f"{console[:6]}")
+        check("game on: the console's sender Players reads Player_4, its words as typed",
+              "Player_4: game joined Players" in console, f"{console[:6]}")
         check("game on: the console's join line reads Player", "Server: Player joined the game" in console)
         check("game on: the official join line of game reads Player_3 in the chat and the console (no garbled template)",
               "Player_3 joined the game" in texts and "Server: Player_3 joined the game" in console
-              and not any("Player_3 joined the Player" in t or "game joined" in t for t in texts + console),
+              and not any("Player_3 joined the Player" in t or t.startswith("game joined the game") for t in texts + console),
               f"{texts} | {console[:6]}")
-        check("game on: no raw name is left in the console (Quentin, Rhea, Zelda)",
-              console and not any(n in line for line in console for n in ("Quentin", "Rhea", "Zelda")), f"{console[:6]}")
+        check("game on: no raw name is left in the console's senders (Quentin, Rhea, Zelda)",
+              console and not any(n in s for s in console_senders(console) for n in ("Quentin", "Rhea", "Zelda")), f"{console[:6]}")
 
     doc = render(game_off, "game-off")
     if doc is None:
@@ -236,6 +260,8 @@ def main():
         check("game off: the official join line keeps the name game", "game joined the game" in doc)
         console = console_lines(LAST_OUT)
         check("game off: the console keeps the sender and the text", "Quentin: gg, hi" in console and "Rhea: Quentin, gg" in console, f"{console[:6]}")
+        check("game off: the player named game says its words, the console too",
+              "game: Players joined the game, game hi" in console and "Players: game joined Players" in console, f"{console[:6]}")
         check("game off: the console has no Player_<n>", console and not any(re.search(r"Player_\d", line) for line in console))
         check("game off: Quentin's premium badge shows", ">beenhere</" in doc)
         check("game off: Quentin's verified badge shows", ">check_circle</" in doc)

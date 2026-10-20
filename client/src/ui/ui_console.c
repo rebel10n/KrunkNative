@@ -373,8 +373,8 @@ static void clear_lines(void) {
     g_con.line_head = g_con.line_count = 0;
 }
 
-// hookChat: `${name || "Server"}: ${text without tags}` for every "ch". Hide player names (player_names.h):
-// the sender and the names in the text read as the HUD chat shows them (hud_chat_hide_names).
+// hookChat: `${name || "Server"}: ${text without tags}` for every "ch". Hide player names (player_names.h): `name` is
+// the sender as the HUD chat shows it (its uid's name, already shown); the text is echoed as it is, never rewritten.
 // The text of a chat line without its <tags>.
 static void console_chat_text(const char *text, char *cleaned, const size_t size) {
     size_t len = 0;
@@ -391,13 +391,10 @@ void ui_console_on_chat(const char *name, const char *text, const int kind) {
     (void) kind;
     char cleaned[CON_LINE_MAX];
     console_chat_text(text, cleaned, sizeof(cleaned));
-    char sender[CON_LINE_MAX], shown[CON_LINE_MAX * 2];
-    hud_chat_hide_names(name && *name ? name : "Server", sender, sizeof(sender));
-    hud_chat_hide_names(cleaned, shown, sizeof(shown));
-    appendf(COL_REPLY, "%s: %s", sender, shown);
+    appendf(COL_REPLY, "%s: %s", name && *name ? name : "Server", cleaned);
 }
 
-// A server line whose player names are already shown (events_server_line): echoed as it is, no name rewrite.
+// A server line whose player names are already shown (events_server_line, events_server_names): echoed as it is.
 void ui_console_on_server_line(const char *text) {
     char cleaned[CON_LINE_MAX];
     console_chat_text(text, cleaned, sizeof(cleaned));

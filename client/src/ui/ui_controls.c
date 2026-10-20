@@ -18,6 +18,7 @@
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
 #include <prop_hunt_client.h> // Prop Hunt keys
 #include <ui_logic.h>
+#include <player_names.h> // the local echo's own name (Hide player names)
 #include <render_settings.h> // showMessages (ui_controls_chat_text_allowed)
 #include <v10_notify.h> // the chat's emoji panel keys
 #include <html_ui.h>
@@ -1218,8 +1219,11 @@ static void chat_send(Client *client, const char *text) {
         return;
     }
 #endif
-    // No chat transport: echo the line locally.
-    hud_ui_add_player_chat(client && client->menu_name[0] ? client->menu_name : "Guest", text, 1); // our own line: a human's
+    // No chat transport: echo the line locally, under our own name as the chat shows it (Player while names are hidden).
+    char pn[PLAYER_NAME_SIZE];
+    const char *raw = client && client->menu_name[0] ? client->menu_name : "Guest";
+    const char *me = player_names_shown(-1, 1, raw, pn, sizeof(pn));
+    hud_ui_add_player_chat(me ? me : raw, text, 1); // our own line: a human's
     printf("[controls] chat (local echo): %s\n", text);
 }
 

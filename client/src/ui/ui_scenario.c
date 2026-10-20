@@ -982,11 +982,12 @@ static void apply_chat(void) {
             hud_ui_add_official_name_line(official, args, argc, NULL, -1);
             continue;
         }
-        // the dev console mirrors every chat line the game receives (events_chat); its names are hidden there too
+        // the dev console mirrors every chat line the game receives (events_chat): the sender as the chat shows it
         if (name && msg) {
             char pn[PLAYER_NAME_SIZE]; // the scenario's sender as the game's chat shows it (Hide player names)
-            hud_ui_add_chat(player_names_shown(-1, 0, name, pn, sizeof(pn)), msg, NULL);
-            ui_console_on_chat(name, msg, NET_CHAT_PLAYER);
+            const char *shown = player_names_shown(-1, 0, name, pn, sizeof(pn));
+            hud_ui_add_chat(shown, msg, NULL);
+            ui_console_on_chat(shown, msg, NET_CHAT_PLAYER);
             continue;
         }
         // White rows are Krunker's plain game lines (type 1: .chatMsg default colour).

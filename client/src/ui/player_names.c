@@ -7,7 +7,6 @@ __attribute__((weak)) int client_settings_hide_player_names(void) {
     return 0;
 }
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -38,7 +37,7 @@ static int pn_number(const int uid, const char *name) {
         for (int i = 0; i < g_pn_count; i++) {
             PnEntry *e = &g_pn[i];
             if (e->uid != uid) continue;
-            // a reused uid: its newest name (never copied onto itself: the rewrite of a chat line passes e->name back in)
+            // a reused uid: its newest name
             if (name && name[0] && strcmp(e->name, name)) snprintf(e->name, sizeof(e->name), "%s", name);
             return e->number;
         }
@@ -97,18 +96,4 @@ const char *player_names_clan(const char *clan) {
 
 int player_names_extras_hidden(const int self) {
     return player_names_hidden() && !self;
-}
-
-static int pn_word_char(const unsigned char c) {
-    return isalnum(c) || c == '_';
-}
-
-size_t player_names_word_at(const char *text, const size_t pos, const char *raw) {
-    if (!text || !raw || !raw[0]) return 0;
-    const size_t n = strlen(raw);
-    if (strncmp(text + pos, raw, n) != 0) return 0;
-    if (pos > 0 && pn_word_char((unsigned char) text[pos - 1]) && pn_word_char((unsigned char) raw[0])) return 0;
-    const unsigned char after = (unsigned char) text[pos + n];
-    if (after && pn_word_char(after) && pn_word_char((unsigned char) raw[n - 1])) return 0;
-    return n;
 }

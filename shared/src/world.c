@@ -6,6 +6,7 @@
 // teleportFromNode, "mo" / "mf"), object animations ("ana") and the world part of the join sync.
 // Runs on the authority (server / offline sandbox server) and, for prediction, on the client.
 #include <world.h>
+#include <net_ext.h> // NET_SERVER_NAMES_TEXT (world_send_finish_chat)
 #include <object_manager.h>
 #include <account.h>
 #include <triggers_v7.h>
@@ -193,9 +194,10 @@ static void world_send_finish_chat(Game *game, const Player *player, const float
     char time[32];
     if (hours) snprintf(time, sizeof(time), "%02d:%02d:%02d.%02d", hours, minutes, seconds, ms / 10);
     else snprintf(time, sizeof(time), "%02d:%02d.%02d", minutes, seconds, ms / 10);
-    NetChatPacket packet = {.uid = -1, .kind = NET_CHAT_SERVER};
-    snprintf(packet.text, sizeof(packet.text), "%s finished in %s", player->name, time);
-    game_send(game, NET_TARGET_ALL, NET_PACKET_CHAT, &packet, sizeof(packet));
+    char finished[NET_SERVER_NAMES_TEXT];
+    snprintf(finished, sizeof(finished), "$ finished in %s", time);
+    const ServerName who = {.uid = player->uid, .name = player->name}; // the name by its uid (Hide player names), not in the text
+    game_send_server_names(game, NET_TARGET_ALL, 1, &who, finished);
 }
 
 static size_t world_score_zone_count(const Game *game) {

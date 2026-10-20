@@ -1835,6 +1835,12 @@ typedef struct {
 
 struct AccountInfo_t; // shared/include/account.h (GameHooks.account_info)
 struct BotChatRequest_t; // shared/include/bot_chat.h (GameHooks.bot_banter)
+// A player named in a server line (game_send_server_names): its uid (NET_SERVER_NAME_NONE / NET_SERVER_NAME_RAW, net_ext.h,
+// when it has none or is not a player) and its name as the server knows it.
+typedef struct {
+    int uid;
+    const char *name;
+} ServerName;
 typedef struct {
     void *user;
     // Send one framed packet to the connection owning player `uid`, or to every
@@ -1920,6 +1926,10 @@ typedef struct {
     // NET_EXT_KN_SERVER_LINE (the name apart, the client formats it: Hide player names) or the composed
     // NET_CHAT_SERVER line. NULL: game_send_server_line composes the line for everyone.
     void (*server_line)(struct Game_t*, int target, int uid, const char *name, const char *template);
+    // A server chat line naming `count` players (`names`, the template's "$" in order) to `target` as `send` takes it:
+    // NET_EXT_KN_SERVER_NAMES to an EXT peer (the names by uid, the client formats them: Hide player names) or the
+    // composed NET_CHAT_SERVER line. NULL: game_send_server_names composes the line for everyone.
+    void (*server_names)(struct Game_t*, int target, int count, const ServerName *names, const char *template);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2228,6 +2238,10 @@ void game_send(Game*, int uid, int type, const void*, uint16_t); // through hook
 // game_send takes them: hooks.server_line when set (the server sends each peer the form it reads, net_ext.h
 // NET_EXT_KN_SERVER_LINE or the composed NET_CHAT_SERVER line), else the composed line to everyone the same.
 void game_send_server_line(Game*, int target, int uid, const char *name, const char *template);
+// A server line naming `count` players (ServerName; the template's "$"s stand for them in order) to `target` as
+// game_send takes it: hooks.server_names when set (the form each peer reads, net_ext.h NET_EXT_KN_SERVER_NAMES), else
+// the composed line to everyone. `count` is at most NET_SERVER_NAMES_MAX (8); a longer list is several calls.
+void game_send_server_names(Game*, int target, int count, const ServerName *names, const char *template);
 // v10 setGameState: a change sends "gsc" (NET_EXT_GAME_STATE, to every EXT peer) and calls
 // hooks.state_changed. game_names_masked: a ranked match before IN_PROGRESS shows Player_<n> names.
 void game_set_state(Game*, GameState);
@@ -3747,6 +3761,9 @@ void net_packet_chat(NetChatPacket*, int uid, NetChatKind, const char *name, con
 // empty), config.serverMessages style ("$ joined the game"). The composed form of NET_EXT_KN_SERVER_LINE (net_ext.h),
 // what a pre-EXT peer gets; an EXT peer formats the template itself (client/src/net/game_events.c events_server_line).
 void net_format_server_line(char *out, size_t size, const char *template, const char *name);
+// The composed form of NET_EXT_KN_SERVER_NAMES: each "$" of `template`, in order, replaced by names[i] ("unknown" when
+// empty; a "$" past `count` stays). The names are never searched for in the template.
+void net_format_server_names(char *out, size_t size, const char *template, const char *const *names, int count);
 int net_ping_update(int previous_ms, float rtt_seconds); // EWMA smoothing, previous < 0 = first sample
 int net_packet_read_ent(NetEntPacket*, const NetPacket*); // 4-byte (class only), 8-byte (no cosmetics) or full ENT; 0 = malformed
 int net_packet_read_spawn(NetSpawnPacket*, const NetPacket*); // 78-byte (no cosmetics), V2, V3 or longer SPAWN; 0 = malformed
