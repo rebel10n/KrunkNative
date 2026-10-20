@@ -121,17 +121,13 @@ static int player_build_loadout(Player *player) {
     // KrunkNative: a class with kn_secondary (the Nettspend's Money Spread) always carries that one.
     const int fixed_secondary = class_config->kn_secondary > 0 ? class_config->kn_secondary - 1 : -1;
     const int picked_secondary = fixed_secondary >= 0 && fixed_secondary < (int) weapon_count && weapons[fixed_secondary] ? fixed_secondary : player->secondary_index;
-    // v7.1.4 weapons.js req: customOnly secondaries (Grappler) only in a custom game that is not
-    // comp (`game.isCustom && !game.isComp`; KN's hosted games and the offline sandbox are custom,
-    // game_config_is_custom; official restrictSecs has no KN equivalent, the isDev bypass is
-    // per account) and noComp ones stay out of comp lobbies (`!this.noComp || !game.isComp`).
-    const int ranked = player->game->config.comp;
-    const int custom = game_config_is_custom(player->game) && !ranked;
+    // v7.1.4 weapons.js req (game_weapon_req): customOnly secondaries (Grappler) only in a custom game that
+    // is not comp; noComp ones stay out of comp lobbies. The isDev bypass is per account (the picker only).
     // A class-bound secondary (the Nettspend's Money Spread) is the class's, not a pick: no gate, so
     // the class plays the same in every lobby (doc/v7/decisions.md "Nettspend class").
     const int bound = fixed_secondary >= 0 && picked_secondary == fixed_secondary;
     const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
-        (bound || ((!weapons[picked_secondary]->custom_only || custom) && !(ranked && weapons[picked_secondary]->no_comp)))
+        (bound || game_weapon_req(player->game, weapons[picked_secondary], 0))
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 

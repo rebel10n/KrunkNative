@@ -145,7 +145,7 @@ static int random_weapon(const Game *game) { // UTILS.getRandom(weapons.onlyWeap
     int pool[128], n = 0;
     for (int i = 0; i < (int) weapon_total(game) && n < 128; i++) {
         const Weapon *w = weapon_at(game, i);
-        if (w && !w->melee && !w->equipment && !w->custom_only) pool[n++] = i;
+        if (w && !w->melee && !w->equipment && !w->custom_only && !w->no_dmg) pool[n++] = i; // onlyWeapons: not noDmg (the Compressor)
     }
     return n ? pool[pcg32_boundedrand((uint32_t) n)] : 0;
 }

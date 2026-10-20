@@ -1134,6 +1134,9 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("classIndex")) menu_set_class_index(st_int("classIndex", 0), 1);
     // official: a krunker.io lobby (krunker_net.c sets Game.is_official on join): the KrunkNative-only classes are locked
     client->game.is_official = (unsigned char) st_bool("official", 0);
+    // an official game is never hosted (its class and weapon rules are krunker.io's, game_weapon_req): the
+    // scenario's offline sandbox hosting is dropped, as a krunker.io join starts with no host state
+    if (client->game.is_official) game_config_free(&client->game);
     // officialClasses: the class list an official krunker.io game sends once it has loaded (its GAME_CONFIG "classes",
     // which krunker.io never fills with KrunkNative's own classes). Applied the way gc_apply_received applies it on join.
     if (cJSON_IsArray(st("officialClasses"))) {

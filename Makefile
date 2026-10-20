@@ -260,6 +260,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/third_person_test
 	./$(DEBUG_DIR)/billboard_ad_test --headless
 	./$(DEBUG_DIR)/zombies_test
+	./$(DEBUG_DIR)/weapon_req_test
 	./$(DEBUG_DIR)/junk_test
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/comp_ranked_test
@@ -344,6 +345,9 @@ nettspend-loadout-test: build ## Nettspend is a class card, its Loadout tab show
 
 locked-class-test: build ## The Nettspend's card in the class tab: locked with "Not on official servers" in an official lobby, and kept when the official class list arrives (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/locked_class_label_e2e.py $(DEBUG_DIR)
+
+secondary-req-test: build ## The Select Secondary picker applies v10's weapon req: the Grappler's card is not clickable in an official game, and is in a custom one (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/secondary_req_e2e.py $(DEBUG_DIR)
 
 nettspend-vfx-test: build ## Nettspend: the Drank's cup + pour-up, the Money Spread's bills and the laced post-effect, headless frames (EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/nettspend_vfx_e2e.py $(DEBUG_DIR)

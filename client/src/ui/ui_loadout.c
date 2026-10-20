@@ -361,8 +361,13 @@ int ui_loadout_secondary(const int class_index) {
     if (!class_at(class_index).secondary) return -1;
     const int bound = class_bound_secondary(class_index); // KrunkNative Nettspend: Money Spread
     if (bound >= 0) return bound;
-    const LoadoutWeapon *w = weapon_at(sel(SEL_SECONDARY));
-    return w && w->secondary ? sel(SEL_SECONDARY) : 2;
+    const int id = sel(SEL_SECONDARY);
+    const LoadoutWeapon *w = weapon_at(id);
+    if (!w || !w->secondary) return 2;
+    // v10 updateSecIndex (v10.js:169364): a secondary its req refuses is the Pistol (2), as the spawn keeps it
+    const AccountInfo *acc = active_account();
+    if (!game_weapon_req(&menu_ui()->client->game, rules_weapon(id), acc && acc->is_dev)) return 2;
+    return id;
 }
 
 // streakIndex1..3 (the streak loadout, one per slot): -1 none.
@@ -1265,6 +1270,8 @@ static char *gen_skins(void) {
 // level (unlocked offline and in v7's sandbox).
 static char *gen_secondary(void) {
     const AccountInfo *acc = active_account();
+    const Client *client = menu_ui()->client;
+    const int dev = acc && acc->is_dev;
     StrBuf out = {0};
     sb_append(&out, "<div class='winBackH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(44)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><div class='winSelH'>Select Secondary</div><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>");
     sb_append(&out, "<div id='skinList'>");
@@ -1272,7 +1279,10 @@ static char *gen_secondary(void) {
         for (int i = 0; i < rules_krunker_weapon_count(); i++) {
             const LoadoutWeapon *w = weapon_at(i);
             if (!w || !w->secondary || w->min_rec != rec) continue;
-            const int unlocked = !w->min_rec || all_skins_unlocked() || (acc && acc->level >= w->min_rec);
+            // v10's card (v10.js:214015-214020): a secondary whose req refuses it has no click (customOnly: a custom
+            // game that is not comp, or a dev; noComp: not in comp)
+            const int unlocked = (!w->min_rec || all_skins_unlocked() || (acc && acc->level >= w->min_rec)) &&
+                                 game_weapon_req(&client->game, rules_weapon(i), dev);
             const int skin = has_inventory() ? weapon_skin(i) : -1;
             char img[256];
             if (skin >= 0 && store_skin(skin)) skin_thumb(skin, img, sizeof(img));

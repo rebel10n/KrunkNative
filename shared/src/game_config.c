@@ -1536,6 +1536,14 @@ int game_config_is_custom(const Game *game) {
     return game && game->config_state && (game->config_state->hosted || game->config_state->remote_custom);
 }
 
+int game_weapon_req(const Game *game, const Weapon *weapon, const int dev) {
+    if (dev || !weapon) return dev;
+    const int comp = game && game->config.comp;
+    const int custom_ok = !weapon->custom_only || (game_config_is_custom(game) && !comp); // !customOnly || (isCustom && !isComp)
+    const int comp_ok = !(weapon->no_comp && comp); // !(noComp && isComp)
+    return custom_ok && comp_ok;
+}
+
 int game_apply_map_config(Game *game, const Map *map) {
     GameConfigState *st = game ? game->config_state : NULL;
     if (!st || !st->hosted) return 0;

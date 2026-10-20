@@ -123,6 +123,11 @@ int game_config_apply(Game*, const cJSON *cfg, int clamp, int host_index);
 // game->config_state stays a public game.
 void game_config_host(Game*, const cJSON *request, int host_index);
 int game_config_is_custom(const Game*);  // hosted / sandbox (isCustom): mts are random config pairs
+// v10.0.2 weapon req for the game mode (v10.js:98979, _34256): 1 when `weapon` may be taken in this game. A dev (`dev`:
+// the account's isDev) takes any; a customOnly weapon only in a custom game that is not comp (game_config_is_custom);
+// a noComp weapon not in comp. The Loadout's secondary picker (ui_loadout.c), its secondary fallback and the spawn's
+// secondary (player.c player_build_loadout) read it. The level / premium tail of v10's req stays with the caller.
+int game_weapon_req(const Game*, const Weapon*, int dev);
 void game_config_free(Game*);            // drops the state, the game back on the base tables
 
 // The one class gate of KrunkNative (doc/v7/decisions.md "Nettspend class"): 1 when `class_index` may be

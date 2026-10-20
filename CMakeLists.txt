@@ -719,6 +719,12 @@ else ()
 
     # weapons_v7_test / combat_test (WP-B): v7.1.4 class / weapon / effect / streak tables against
     # shared/tests/data/v7 (tools/kref/v7-dump.js), and the charge / hitbox / streak / effect maths
+    # weapon_req_test (shared/src/game_config.c game_weapon_req, interact.c random_weapon): the game mode's weapon req
+    # (customOnly: a custom game that is not comp or a dev; noComp), the spawn's Grappler and the random pickups' pool
+    add_executable(weapon_req_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/weapon_req_test.c)
+    target_link_libraries(weapon_req_test PRIVATE m)
+    add_test(NAME weapon_req_test COMMAND weapon_req_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
     # junk_test: the Junk wallet's amounts (hundredths, the two-place text, parseFloat's reading; doc/v10/junk.md)
     add_executable(junk_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/junk_test.c)
