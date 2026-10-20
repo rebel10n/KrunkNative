@@ -13,7 +13,10 @@ Four headless renders (client_bin --render-scenario, no window), state.guestEarn
   2. the main menu with both amounts capped (kn-guest-earned-menu.json): the box in the right panel (#tlInfHold)
      with CAPPED on both, "Register to earn more rewards" and REGISTER NOW / Claim your rewards;
   3. the end screen of a stand-in account with the same balance: no box (v10 renders it for a guest only);
-  4. the end screen of a guest with nothing earned: the slot is empty (as the v10 sandbox capture shows).
+  4. the end screen of a guest with nothing earned: the slot is empty (as the v10 sandbox capture shows);
+  5. the end card of a guest with no balance, v10's own capture state (ingame-endscreen-late.json,
+     doc/ref/krunker-v10/ingame/ingame-endscreen-late.png): the Double XP button under the results card at
+     v10's place (514, 312, 246 x 48) and the signup banner below it, its top at v10's 385.
 KRUNKNATIVE_SCENARIO_DUMP prints the box tree under the slot after the capture: the texts and the box's
 viewport rect come from it. Exit 0 when every check passes, 1 otherwise.
 """
@@ -198,6 +201,33 @@ def check_end_screen():
     check("end screen: the glow leaves the box's inside as it is", inside == 0, f"{inside} pixels differ inside")
 
 
+V10_GUEST_CAPTURE = os.path.join(SCENARIOS, "ingame-endscreen-late.json") # v10's guest end card, no balance (1280x720)
+DOUBLE_XP_AT = (514, 312, 246, 48) # v10's #doubleXPButton in ingame-endscreen-late.png
+SIGNUP_BANNER_TOP = 385            # v10's signup banner container (absolute top 850 px at the UI scale, centred)
+
+
+def check_double_xp_and_banner():
+    """The end card of a guest with no balance renders v10's Double XP button under the results card, and the
+    signup banner below it, both where v10's own capture draws them."""
+    png, lines, button = render("zero-button", V10_GUEST_CAPTURE, "#doubleXPButton")
+    check("end card, a guest: renders", png is not None)
+    if png is None:
+        return
+    t = texts(lines)
+    check("end card, a guest: the Double XP button is shown (v10's #doubleXPButton, not a comp match)",
+          button is not None and "Double XP" in t, " | ".join(t))
+    if button is not None:
+        bx, by, bw, bh = button
+        check("end card, a guest: the Double XP button is where v10 draws it (514, 312, 246 x 48)",
+              all(abs(a - b) <= 3 for a, b in zip((bx, by, bw, bh), DOUBLE_XP_AT)), f"{bx:.0f},{by:.0f} {bw:.0f}x{bh:.0f}")
+    _, _, banner = render("zero-banner", V10_GUEST_CAPTURE, "#matchEndSignupIncentives .signup-rewards-container")
+    check("end card, a guest: the signup banner is at v10's place (top 385)",
+          banner is not None and abs(banner[1] - SIGNUP_BANNER_TOP) <= 3, f"banner top {banner[1]:.0f}" if banner else "no banner")
+    if button is not None and banner is not None:
+        check("end card, a guest: the signup banner is below the Double XP button",
+              banner[1] >= button[1] + button[3], f"button bottom {button[1] + button[3]:.0f}, banner top {banner[1]:.0f}")
+
+
 def check_menu():
     scen = os.path.join(SCENARIOS, "kn-guest-earned-menu.json")
     png, lines, rect = render("menu", scen, "#knGuestEarned")
@@ -235,6 +265,7 @@ def main():
         print(f"client_bin not found: {CLIENT}")
         return 1
     check_end_screen()
+    check_double_xp_and_banner()
     check_menu()
     check_account_and_empty()
     print(f"{sum(results)}/{len(results)} checks passed  (work dir {WORK})")

@@ -28,6 +28,22 @@
       "fuzz": 12,
       "max_pct": 15.0,
       "note": "#endTimer Next Round in 00:17 (its box is 9 px high; the italic text overflows it). The engine's synthetic oblique antialiases the slanted stems differently"
+    },
+    {
+      "name": "double-xp",
+      "rect": [512, 310, 250, 52],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 8.0,
+      "note": "#doubleXPButton under the results card (v10's ad icon and Double XP). Residual: glyph antialiasing (Chrome vs the engine); the layout is the same"
+    },
+    {
+      "name": "signup-banner",
+      "rect": [350, 383, 583, 218],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "#matchEndSignupIncentives at v10's place (top 385): Join Krunker today!, the perks, REGISTER; a guest with no balance, so no box. Residual: the photo scaling of the background"
     }
   ]
 }

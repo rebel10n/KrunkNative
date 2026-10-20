@@ -125,11 +125,10 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
 
 // The signup rewards component (v10:115204, _39408) with origin "match_end" (v10_rewards.c: its
 // markup, a guest's Unclaimed Rewards box, REGISTER -> knSignupRegister).
-// KrunkNative: the guest banner flows under the results instead of v10's fixed `top: 850px`
-// (#matchEndSignupIncentives, main.css), so it starts below the last table row. v10 centres the
-// component on that point (.signup-rewards-container: absolute, top / left 50%, translate(-50%,
-// -50%)); here the container is in flow and centred by `margin: 0 auto`. It moves into #endMidHolder
-// after the results (the card renders rewrite only #endTabbedView).
+// Placed as v10 places it: #matchEndSignupIncentives is a child of #endUI (ui/index.html, as in v10's DOM),
+// absolute at main.css's `top: 850px`, and its container is translate(-50%, -50%): the banner sits below
+// the card's Double XP button (the v10 sandbox capture ingame-endscreen-late). Nothing re-parents it: the
+// card renders rewrite only #endTabbedView.
 void hud_v10_end_signup(const int show) {
     if (!hud_v10_page()) return;
     const HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
@@ -138,20 +137,4 @@ void hud_v10_end_signup(const int show) {
     if (on) v10_rewards_signup_mount(el);
     else html_dom_set_html(el, "");
     html_dom_set_display(el, on ? "block" : "none");
-    if (!on) return;
-    html_dom_set_style(el, "position", "relative");
-    html_dom_set_style(el, "top", "auto");
-    html_dom_set_style(el, "left", "auto");
-    html_dom_set_style(el, "z-index", "auto");
-    html_dom_set_style(el, "margin-top", "10px");
-    const HtmlElem box = html_dom_query(el, ".signup-rewards-container");
-    if (box) {
-        html_dom_set_style(box, "position", "relative");
-        html_dom_set_style(box, "top", "auto");
-        html_dom_set_style(box, "left", "auto");
-        html_dom_set_style(box, "transform", "none");
-        html_dom_set_style(box, "margin", "0 auto");
-    }
-    const HtmlElem mid = html_dom_by_id("endMidHolder");
-    if (mid) html_dom_append(mid, el);
 }

@@ -7,15 +7,15 @@
   "regions": [
     {
       "name": "signup-banner",
-      "rect": [350, 312, 583, 216],
+      "rect": [350, 385, 583, 216],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#matchEndSignupIncentives under the Performance cards: Join Krunker today!, the perks list, 1-time signup perks, REGISTER"
+      "note": "#matchEndSignupIncentives at v10's place, below the Double XP button (ingame-endscreen-late: top 385): Join Krunker today!, the perks list, 1-time signup perks, REGISTER"
     },
     {
       "name": "unclaimed",
-      "rect": [728, 425, 220, 118],
+      "rect": [728, 498, 220, 118],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,

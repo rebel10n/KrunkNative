@@ -299,15 +299,26 @@ static void double_xp_done(void *user, const DoubleXpResult result) {
     if (result == DOUBLE_XP_GRANTED) xp_doubled_pop();
 }
 
-// The button is shown only while the account's offer is claimable (dxp.offer.claimable: games % 3 == 0,
-// once per match). Written when it changes (the end card re-renders the button).
+// Whether the card shows the button. v10's show() puts #doubleXPButton in #endButtonsHolder for every match
+// but a comp one (isComp shows Return to Krunker there, not built here): a signed-out guest sees it too,
+// above the signup banner (the v10 sandbox capture ingame-endscreen-late). The guest's click claims nothing:
+// v10's showDoubleXPRewardedAd runs the rewarded ad, then _74098 needs an account id (games % 3 on it).
+// An account keeps the offer's own rule (dxp.offer.claimable, double_xp_offer.c).
+static int double_xp_wanted(void) {
+    if (active_account()) return double_xp_offer_open();
+    const MenuUi *menu = menu_ui();
+    const Client *client = menu ? menu->client : NULL;
+    return !(client && client->game.config.comp);
+}
+
+// Written when it changes (the end card re-renders the button).
 static HtmlElem g_dxp_button;
 static int g_dxp_shown = -1;
 
 static void double_xp_sync(void) {
     const HtmlElem button = html_dom_by_id("doubleXPButton");
     if (!button) return;
-    const int shown = double_xp_offer_open();
+    const int shown = double_xp_wanted();
     if (button == g_dxp_button && shown == g_dxp_shown) return;
     g_dxp_button = button;
     g_dxp_shown = shown;
