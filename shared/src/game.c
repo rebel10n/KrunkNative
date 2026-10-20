@@ -301,6 +301,18 @@ void game_send(Game *game, const int uid, const int type, const void *payload, c
     if (game->hooks.send) game->hooks.send(game, uid, type, payload, length);
 }
 
+void game_send_server_line(Game *game, const int target, const int uid, const char *name, const char *template) {
+    if (game->hooks.server_line) {
+        game->hooks.server_line(game, target, uid, name, template);
+        return;
+    }
+    char text[NET_CHAT_TEXT_SIZE]; // no server behind the game (tests): the composed line, like a pre-EXT peer's
+    net_format_server_line(text, sizeof(text), template, name);
+    NetChatPacket chat;
+    net_packet_chat(&chat, -1, NET_CHAT_SERVER, NULL, text);
+    game_send(game, target, NET_PACKET_CHAT, &chat, sizeof(chat));
+}
+
 void game_send_hit(Game *game, const int uid, const NetHitPacket *hit, const float damage) {
     const int32_t tenths = (int32_t) lroundf(damage * 10.0f);
     if (hit->damage && tenths % 10) { // the fraction the whole-number HIT loses (dmgType "Float", net_ext.h)

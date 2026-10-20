@@ -826,13 +826,10 @@ static void bot_broadcast_spawn(Game *game, const Player *p) {
     game_prop_send(game, p, NET_TARGET_ALL); // Prop Hunt: a Prop-team bot's disguise
 }
 
-// config.serverMessages[0 / 1] ("$ joined the game" / "$ left the game")
-static void bot_server_message(Game *game, const char *name, const int join) {
-    char text[NET_CHAT_TEXT_SIZE];
-    snprintf(text, sizeof(text), "%s %s the game", name, join ? "joined" : "left");
-    NetChatPacket chat;
-    net_packet_chat(&chat, -1, NET_CHAT_SERVER, NULL, text);
-    game_send(game, NET_TARGET_ALL, NET_PACKET_CHAT, &chat, sizeof(chat));
+// config.serverMessages[0 / 1] ("$ joined the game" / "$ left the game"): the bot's uid and name apart from the
+// template (game_send_server_line), so a client that hides names shows the bot as it shows it everywhere else
+static void bot_server_message(Game *game, const int uid, const char *name, const int join) {
+    game_send_server_line(game, NET_TARGET_ALL, uid, name, join ? "$ joined the game" : "$ left the game");
 }
 
 // ---------------------------------------------------------------- spawn / remove
@@ -948,7 +945,7 @@ static int bot_spawn(Game *game, GameBot *bot) {
     bot_broadcast_spawn(game, p);
     bot_send_info(game, bot, NET_TARGET_ALL);
     if (game->hooks.bot_spawning) game->hooks.bot_spawning(game, p, 1);
-    if (first && !bot->joined && bot->config.join_message) bot_server_message(game, bot->name, 1);
+    if (first && !bot->joined && bot->config.join_message) bot_server_message(game, p->uid, bot->name, 1);
     bot->joined = 1;
     game->leaders_dirty = 1; // syncLeaders(true)
     return 1;
@@ -977,13 +974,14 @@ void game_bots_remove(Game *game, GameBot *bot) {
     GameBots *bots = game ? game->bots : NULL;
     if (!bots || bot < bots->list || bot >= bots->list + bots->count) return;
     const int leave_message = bot->config.leave_message && bot->player;
+    const int uid = bot->player ? bot->player->uid : -1;
     char name[PLAYER_NAME_SIZE];
     snprintf(name, sizeof(name), "%s", bot->name);
     if (bot->player) bot_free_player(game, bot->player);
     const int index = (int) (bot - bots->list);
     memmove(&bots->list[index], &bots->list[index + 1], (size_t) (bots->count - index - 1) * sizeof(GameBot));
     bots->count--;
-    if (leave_message) bot_server_message(game, name, 0);
+    if (leave_message) bot_server_message(game, uid, name, 0); // after its LEAVE, like a player's (server/src/net.c)
 }
 
 int game_bots_remove_all(Game *game) {

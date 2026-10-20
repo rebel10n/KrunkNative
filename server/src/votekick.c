@@ -292,8 +292,7 @@ void votekick_handle(ClientConnection *client, const uint8_t *body, const uint16
                 vk_ban(target);
                 net_kick_client(target->id, "Vote Kicked", "004002");
             }
-            snprintf(text, sizeof(text), "%s was vote kicked", vote->target);
-            net_broadcast_chat(NULL, text);
+            net_broadcast_player_line(vote->target_uid, vote->target, "$ was vote kicked"); // the target's name, as Hide player names shows it
             vk_end(game, 1);
             return;
         }

@@ -459,6 +459,23 @@ static void events_chat(Client *client, const NetChatPacket *packet) {
     }
 }
 
+// NET_EXT_KN_SERVER_LINE (net_ext.h): a server line about one player (its join / leave, a vote kick). The player's
+// name is shown as Hide player names shows it (player_names_shown by uid, the same Player_<n> as its scoreboard row)
+// and put in the template's "$": the line is never matched against its text (a name like "game" is not rewritten
+// inside "joined the game"), and the console echoes it the same way.
+static void events_server_line(Client *client, const NetServerLinePacket *packet) {
+    char name[PLAYER_NAME_SIZE], text[NET_CHAT_TEXT_SIZE], shown[PLAYER_NAME_SIZE], line[NET_CHAT_TEXT_SIZE];
+    memcpy(name, packet->name, sizeof(name));
+    memcpy(text, packet->text, sizeof(text));
+    name[sizeof(name) - 1] = 0;
+    text[sizeof(text) - 1] = 0;
+    const int self = packet->uid >= 0 && client && client->me && packet->uid == client->me->uid;
+    const char *who = player_names_shown(packet->uid, self, name[0] ? name : "unknown", shown, sizeof(shown));
+    net_format_server_line(line, sizeof(line), text, who);
+    ui_console_on_server_line(line);
+    hud_ui_add_server_line(line, SERVER_CHAT_COLOR);
+}
+
 // updateNoclip / updateUnlimitedAmmo / updateForceHide ("noc" / "unl" / "fh": the line is
 // addChat(null, ..., 2)) and the "borders" / "forcecol" broadcasts of the chat commands.
 static void events_cheat(Client *client, const NetCheatPacket *packet) {
@@ -1288,6 +1305,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_PROP_UPDATE || subtype == NET_EXT_PROP_ROTATION) prop_hunt_on_ext(client, subtype, body, body_length); // "up" / "prpR"
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
+            else if (subtype == NET_EXT_KN_SERVER_LINE && body_length == sizeof(NetServerLinePacket)) { // a join / leave / vote kick line (events_server_line)
+                NetServerLinePacket line;
+                memcpy(&line, body, sizeof(line));
+                events_server_line(client, &line);
+            }
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;
                 memcpy(&ping, body, sizeof(ping));

@@ -274,6 +274,9 @@ void net_change_map(int map_index, int mode_index);
 // Caller holds g_server->lock.
 #define SERVER_HAVE_NET_CHAT 1
 void net_broadcast_chat(const char *from, const char *msg);
+// A server line about player `uid` (its real name `real`; "$" in `template` = the name, each recipient's view of it):
+// the form each peer reads (NET_EXT_KN_SERVER_LINE or the composed NET_CHAT_SERVER line). net.c
+void net_broadcast_player_line(int uid, const char *real, const char *template);
 void net_broadcast_ranked_notice(const char *msg); // the brain's "ranked-notice" line (NET_CHAT_RANKED)
 
 // v10's game announcement banner (NET_EXT_GAME_ANNOUNCEMENT, shared/include/net_ext.h): the CLI's

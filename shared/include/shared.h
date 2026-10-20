@@ -1915,6 +1915,11 @@ typedef struct {
     // The game state changed (game_set_state, after the "gsc" packet went out): the server
     // (server/src/net.c) pushes the names a ranked match now shows. NULL = nothing.
     void (*state_changed)(struct Game_t*, GameState state);
+    // A server chat line about player `uid` (its join / leave, config.serverMessages: "$" in `template` is
+    // `name`) to `target` as `send` takes it. The server (server/src/net.c) sends each peer the form it reads:
+    // NET_EXT_KN_SERVER_LINE (the name apart, the client formats it: Hide player names) or the composed
+    // NET_CHAT_SERVER line. NULL: game_send_server_line composes the line for everyone.
+    void (*server_line)(struct Game_t*, int target, int uid, const char *name, const char *template);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2219,6 +2224,10 @@ int game_end_late_spawn(const Game*, const Player*); // ENT while the round is o
 void game_send_end_late(Game*, int uid);              // then the "end" with didWin -1 for that uid
 void game_player_changing(const Game*, Player*, int done); // GameHooks.player_changing, when set
 void game_send(Game*, int uid, int type, const void*, uint16_t); // through hooks.send
+// A server line about player `uid` (config.serverMessages: "$" in `template` = `name`) to `uid`'s targets as
+// game_send takes them: hooks.server_line when set (the server sends each peer the form it reads, net_ext.h
+// NET_EXT_KN_SERVER_LINE or the composed NET_CHAT_SERVER line), else the composed line to everyone the same.
+void game_send_server_line(Game*, int target, int uid, const char *name, const char *template);
 // v10 setGameState: a change sends "gsc" (NET_EXT_GAME_STATE, to every EXT peer) and calls
 // hooks.state_changed. game_names_masked: a ranked match before IN_PROGRESS shows Player_<n> names.
 void game_set_state(Game*, GameState);
@@ -3733,6 +3742,10 @@ typedef struct {
 } NetChatLimiter;
 int net_chat_allow(NetChatLimiter*, float now); // 0 = burst exceeded (Krunker closes the socket)
 void net_packet_chat(NetChatPacket*, int uid, NetChatKind, const char *name, const char *text);
+// A server line about a player as one string: `template` with its first "$" replaced by `name` ("unknown" when
+// empty), config.serverMessages style ("$ joined the game"). The composed form of NET_EXT_KN_SERVER_LINE (net_ext.h),
+// what a pre-EXT peer gets; an EXT peer formats the template itself (client/src/net/game_events.c events_server_line).
+void net_format_server_line(char *out, size_t size, const char *template, const char *name);
 int net_ping_update(int previous_ms, float rtt_seconds); // EWMA smoothing, previous < 0 = first sample
 int net_packet_read_ent(NetEntPacket*, const NetPacket*); // 4-byte (class only), 8-byte (no cosmetics) or full ENT; 0 = malformed
 int net_packet_read_spawn(NetSpawnPacket*, const NetPacket*); // 78-byte (no cosmetics), V2, V3 or longer SPAWN; 0 = malformed

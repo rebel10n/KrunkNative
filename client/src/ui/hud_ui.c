@@ -2415,13 +2415,9 @@ void hud_chat_hide_names(const char *in, char *out, const size_t size) {
     out[o] = 0;
 }
 
-static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
+// The row of `msg` as it is: a line whose names are already shown (hud_ui_add_server_line) takes no name rewrite.
+static void hud_add_chat_row_shown(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
-    char shown_msg[NET_CHAT_TEXT_SIZE * 2];
-    if (msg) {
-        hud_chat_hide_names(msg, shown_msg, sizeof(shown_msg));
-        msg = shown_msg;
-    }
     if (!list || !msg || !msg[0]) return;
 
     hud_feed_evict(list, CHAT_LIST_LENGTH);
@@ -2435,6 +2431,15 @@ static void hud_add_chat_row_on(const char *name, const char *msg, const char *c
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
+}
+
+static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
+    char shown_msg[NET_CHAT_TEXT_SIZE * 2];
+    if (msg) {
+        hud_chat_hide_names(msg, shown_msg, sizeof(shown_msg));
+        msg = shown_msg;
+    }
+    hud_add_chat_row_shown(name, msg, color, channel, kind);
 }
 
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
@@ -2527,6 +2532,13 @@ static void hud_add_server_chat(const char *msg, const char *color) {
 void hud_ui_add_chat(const char *name, const char *msg, const char *color) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     hud_add_chat_row(name, msg, color); // a system line (name NULL) or a scenario's named line: never gated
+}
+
+// A server line whose player names are already shown (events_server_line: the name by uid, Player_<n> while hidden):
+// the row as it is. hud_ui_add_chat would rewrite the names again by their text.
+void hud_ui_add_server_line(const char *msg, const char *color) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    hud_add_chat_row_shown(NULL, msg, color, hud_chat_line_channel(menu_ui()->client, 0), "line");
 }
 
 // io_addChat(-1, null, html, 1): a system line whose message is markup (UTILS.fixStr only wraps it)

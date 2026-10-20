@@ -253,6 +253,7 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x8000 | `NET_EXT_KN_ACCOUNT_AUTH` | (KN live sign-in: session token / hasJoined / guest) | C to S |
 | 0x8001 | `NET_EXT_KN_ACCOUNT_RIGHTS` | (KN: account and rights, push + answer) | S to C |
 | 0x8110 | `NET_EXT_KN_SWAP_TEAM` | (KN Krunker Strike: Tap-to-Play Switch Teams, between lives; `NetSwapTeamPacket`) | C to S |
+| 0x8120 | `NET_EXT_KN_SERVER_LINE` | (KN: a join / leave / vote kick chat line about one player, the name apart from the text so Hide player names formats it; `NetServerLinePacket`) | S to C |
 
 Each range belongs to the feature that implements it; body layouts are documented next to their
 structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have no subtype.

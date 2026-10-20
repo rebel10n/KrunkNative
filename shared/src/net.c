@@ -2,7 +2,9 @@
 #include <flavor.h> // the process product flavor: carried in the HELLO rulesets byte (shared.h)
 #include <knet.h> // virtual (UDP) descriptors
 #include <math.h>
+#include <net_ext.h> // NetServerLinePacket (the static asserts after net_format_server_line)
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 // Optional trailing fields: older peers send the prefix, the readers below fill the rest with defaults.
@@ -420,6 +422,18 @@ void net_packet_chat(NetChatPacket *packet, const int uid, const NetChatKind kin
     if (name) strncpy(packet->name, name, sizeof(packet->name) - 1);
     if (text) strncpy(packet->text, text, sizeof(packet->text) - 1);
 }
+
+// config.serverMessages[type] with "$" replaced by the player's name (broadcastServerMessage in the v3.1.1 server).
+void net_format_server_line(char *out, const size_t size, const char *template, const char *name) {
+    if (!out || !size) return;
+    if (!template) template = "";
+    const char *dollar = strchr(template, '$');
+    if (dollar) snprintf(out, size, "%.*s%s%s", (int) (dollar - template), template, name && name[0] ? name : "unknown", dollar + 1);
+    else snprintf(out, size, "%s", template);
+}
+// net_ext.h spells NetServerLinePacket's sizes out (it does not include shared.h): keep them the shared constants'
+_Static_assert(sizeof(((NetServerLinePacket *) 0)->name) == PLAYER_NAME_SIZE, "NetServerLinePacket.name is PLAYER_NAME_SIZE");
+_Static_assert(sizeof(((NetServerLinePacket *) 0)->text) == NET_CHAT_TEXT_SIZE, "NetServerLinePacket.text is NET_CHAT_TEXT_SIZE");
 
 // io_po: one RTT sample folded into the published ping (EWMA, alpha 0.35).
 int net_ping_update(const int previous_ms, const float rtt_seconds) {

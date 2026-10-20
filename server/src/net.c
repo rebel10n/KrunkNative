@@ -101,16 +101,67 @@ static void net_broadcast_chat_except(const ClientConnection *skip, const int ui
     }
 }
 
-// config.serverMessages[type] with "$" replaced by the player's name, as a server
-// chat line (broadcastServerMessage in the v3.1.1 server).
-static void net_broadcast_server_message(const ClientConnection *skip, const char *template, const char *name) {
+// A server line about player `uid` (config.serverMessages: "$" in `template` = `name`) to one connection, in
+// the form it reads: an EXT peer gets NET_EXT_KN_SERVER_LINE (the name apart from the template; its client
+// formats the line and shows the name as it shows that player everywhere else, Hide player names), an older
+// peer the composed NET_CHAT_SERVER line (uid -1, no name: what every peer got before).
+static void net_send_server_line_to(ClientConnection *to, const int uid, const char *name, const char *template) {
+    if (to->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
+        NetServerLinePacket body;
+        memset(&body, 0, sizeof(body));
+        body.uid = uid;
+        snprintf(body.name, sizeof(body.name), "%s", name ? name : "");
+        snprintf(body.text, sizeof(body.text), "%s", template ? template : "");
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SERVER_LINE, &body, sizeof(body));
+        if (n) net_send_packet(to->fd, NET_PACKET_EXT, buf, n);
+        return;
+    }
     char text[NET_CHAT_TEXT_SIZE];
-    const char *dollar = strchr(template, '$');
+    net_format_server_line(text, sizeof(text), template, name);
+    net_send_chat_to(to, -1, NET_CHAT_SERVER, NULL, text);
+}
 
-    if (dollar) snprintf(text, sizeof(text), "%.*s%s%s", (int) (dollar - template), template, name && name[0] ? name : "unknown", dollar + 1);
-    else snprintf(text, sizeof(text), "%s", template);
+static void net_shown_name(const ClientConnection *to, const ClientConnection *subject, const char *real, char *out, size_t size);
 
-    net_broadcast_chat_except(skip, -1, NET_CHAT_SERVER, NULL, text);
+// A server line about the player `uid` (real name `real`, its connection `subject`, NULL once it has left) to
+// everyone, or to everyone but the subject: each recipient gets the name as it may see it (a ranked warmup masks
+// the others' names, net_shown_name) and the form its protocol reads (net_send_server_line_to).
+static void net_broadcast_about(const ClientConnection *subject, const int uid, const char *real, const char *template, const int skip_subject) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (skip_subject && client == subject) continue;
+        char name[PLAYER_NAME_SIZE];
+        net_shown_name(client, subject, real, name, sizeof(name));
+        net_send_server_line_to(client, uid, name, template);
+    }
+}
+
+// config.serverMessages[type] about `subject` to everyone else (broadcastServerMessage in the v3.1.1 server).
+// subject->id is its player's uid (GameHooks.send).
+static void net_broadcast_server_message(const ClientConnection *subject, const char *template) {
+    net_broadcast_about(subject, subject->id, subject->name, template, 1);
+}
+
+void net_broadcast_player_line(const int uid, const char *real, const char *template) {
+    net_broadcast_about(net_client_by_id(uid), uid, real, template, 0);
+}
+
+// GameHooks.server_line: a bot's join / leave line (shared/src/bots.c), `target` as net_game_send takes it.
+static void net_game_server_line(Game *game, const int target, const int uid, const char *name, const char *template) {
+    (void) game;
+    if (target <= NET_TARGET_ALL) {
+        const int skip = target <= NET_TARGET_EXCEPT(0) ? NET_TARGET_EXCEPT_UID(target) : -1;
+        for (size_t i = 0; i < g_server->client_count; i++) {
+            ClientConnection *client = &g_server->clients[i];
+            if (target == NET_TARGET_NON_PLAYERS && client->player) continue;
+            if (skip >= 0 && client->id == skip) continue;
+            net_send_server_line_to(client, uid, name, template);
+        }
+        return;
+    }
+    ClientConnection *client = net_client_by_id(target);
+    if (client) net_send_server_line_to(client, uid, name, template);
 }
 
 void net_broadcast_chat(const char *from, const char *msg) {
@@ -902,7 +953,7 @@ static void net_spawn_client(ClientConnection *client) {
 
         if (!client->announced) {
             client->announced = 1;
-            if (accounts_join_message()[0]) net_broadcast_server_message(client, accounts_join_message(), client->name);
+            if (accounts_join_message()[0]) net_broadcast_server_message(client, accounts_join_message());
         }
     }
 
@@ -1361,7 +1412,7 @@ void net_remove_client(ClientConnection *client) {
     }
     if (client->announced) {
         client->announced = 0;
-        if (accounts_leave_message()[0]) net_broadcast_server_message(client, accounts_leave_message(), client->name); // serverMessages[1]
+        if (accounts_leave_message()[0]) net_broadcast_server_message(client, accounts_leave_message()); // serverMessages[1]
     }
     net_release_player_number(client);
     social_assembly_free(&client->social);
@@ -2048,6 +2099,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.state_changed = net_game_state_changed; // v10 setGameState: ranked names
     votekick_init(&g_server->game); // hooks.vote_kick_expired, fresh ban / cooldown lists
     g_server->game.hooks.send = net_game_send;
+    g_server->game.hooks.server_line = net_game_server_line; // a bot's join / leave (bots.c): the form each peer reads
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)

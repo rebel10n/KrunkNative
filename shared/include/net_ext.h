@@ -138,6 +138,8 @@ typedef enum {
 
     // 0x8110 Krunker Strike's Tap-to-Play "Switch Teams" (client/src/ui/strike_menu.c, mode_swap_team)
     NET_EXT_KN_SWAP_TEAM = 0x8110, // C -> S NetSwapTeamPacket: the team this player takes between lives (FRVR SWAP_TEAM "swpt")
+    // 0x8120 a server line about a player (KrunkNative server and bots -> client/src/net/game_events.c events_server_line)
+    NET_EXT_KN_SERVER_LINE = 0x8120, // S -> C NetServerLinePacket: config.serverMessages' join / leave line, the player apart from the text
     // 0x8131 Krunker Strike kill card flag (the first id after 0x8130 no queued patch takes)
     NET_EXT_KN_STRIKE_KILL_FLAG = 0x8131, // S -> C NetStrikeKillFlagPacket, right before the victim's NET_PACKET_KILL
 } NetExtSubtype;
@@ -556,6 +558,19 @@ typedef struct {
     uint8_t ranked; // 1 in a ranked match
 } NetRankedMatchPacket;
 
+// NET_EXT_KN_SERVER_LINE (S -> C, EXT peers): a server chat line about one player, config.serverMessages[0 / 1]
+// ("$ joined the game" / "$ left the game": a player's first spawn and its leave, bots included) with the player apart
+// from the template, so the client formats the line itself and shows the name the way it shows that player
+// everywhere else (Hide player names, client/include/player_names.h: Player_<n> by uid). Krunker v10.0.2 sends these
+// as "chi" [i18n key, name] for the same reason (its client formats i18n.t(key, name)). The first "$" of `text`
+// stands for `name`; a template without one shows as it is. A pre-EXT peer gets the composed NET_CHAT_SERVER line
+// (NET_PACKET_CHAT, uid -1, no name) as before: the server picks per peer (server/src/net.c net_send_server_line_to).
+typedef struct {
+    int32_t uid;          // the player the line is about (its SPAWN uid), -1 unknown
+    char name[32];        // PLAYER_NAME_SIZE: its name as this recipient may see it (a ranked warmup masks the others' names)
+    char text[288];       // NET_CHAT_TEXT_SIZE: the template, "$" = the name; NUL-terminated
+} NetServerLinePacket;
+
 // NET_EXT_LATEST_RANKED_MMR_CHANGE (S -> C, to each roster player when the brain's rating reply arrives; v10 lrmr
 // LATEST_RANKED_MMR_CHANGE [mmrChange, latestRank], g:218186 sets $latestMMRChange / $latestRank, the end screen's
 // rank card reads them): mmr_change = the new rating - the old (the TrueSkill display rating, 0 when it did not move),
@@ -579,6 +594,7 @@ typedef struct {
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
+_Static_assert(sizeof(NetServerLinePacket) <= NET_EXT_BODY_MAX, "NetServerLinePacket exceeds NET_EXT_BODY_MAX");
 
 #pragma pack(push, 1)
 // The JSON-bodied subtypes (entities 0x0100-0x0105, live objects 0x8080-0x8081): one UTF-8 JSON

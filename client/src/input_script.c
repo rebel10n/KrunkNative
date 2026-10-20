@@ -331,7 +331,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
@@ -762,6 +762,29 @@ static void script_run(Client *client, const ScriptEvent *e) {
         folded[k] = 0;
         fprintf(stderr, "[input_script] text t=%.0f %s n=%d checked=%d value=%s text=%s\n", g_script.time, label, n,
                 el ? html_dom_get_checked(el) : 0, value, folded);
+    } else if (!strcmp(e->cmd, "rows")) {
+        // rows @label <selector>: one "[input_script] row" line per match (the first 96, document order), its
+        // textContent folded as `text` does: the whole text of each row, so a test can read every chat line exactly
+        char label[64] = "", sel[192] = "";
+        sscanf(e->arg, "%63s %191[^\n]", label, sel);
+        HtmlElem els[96];
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, els, 96) : 0;
+        fprintf(stderr, "[input_script] rows t=%.0f %s n=%d\n", g_script.time, label, n);
+        char *text = malloc(65536);
+        for (int i = 0; text && i < n && i < 96; i++) {
+            html_dom_get_text(els[i], text, 65536);
+            char folded[256];
+            size_t k = 0;
+            for (const char *s = text; *s && k + 1 < sizeof(folded); s++) {
+                const int space = *s == ' ' || *s == '\n' || *s == '\t' || *s == '\r';
+                if (space && (!k || folded[k - 1] == ' ')) continue;
+                folded[k++] = space ? ' ' : *s;
+            }
+            while (k && folded[k - 1] == ' ') k--;
+            folded[k] = 0;
+            fprintf(stderr, "[input_script] row t=%.0f %s text=%s\n", g_script.time, label, folded);
+        }
+        free(text);
     } else if (!strcmp(e->cmd, "grep")) {
         // grep @label <needle> <selector>: how many matches' textContent contains the needle
         // (case-insensitive; "Unknown" labels on the KN weapons' tiles and feed rows)
