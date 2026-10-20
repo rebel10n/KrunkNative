@@ -4394,7 +4394,7 @@ void servers_ui_query(const char *query) {
 // ------------------------------------------------------------------ Host Game
 
 // A host the brain did not create a game for, as the Host window says it: v10's failure text (createPrivateRoom's
-// customRoomResponse(custom.tryagain), v10.js:197942 and 198131, when the hosting cannot start). Every answer that is
+// customRoomResponse(custom.tryagain), v10.js:197942 and 198130, when the hosting cannot start). Every answer that is
 // not joined ends here, so "Creating Game..." never outlives its request. A Host window already closed (the player is
 // in a lobby or a krunker.io game) has no #hostGameMsg, and nothing is shown.
 static void host_not_created(const HtmlElem msg) {
