@@ -142,13 +142,13 @@ void mode_rand_objective(Game *game, const float overflow, const int initial, co
     mode_next_objective(game, overflow, initial, push, uid);
 }
 
-// weapons.onlyGoodWeapons: neither melee, equipment nor customOnly, and not weapon 15.
+// weapons.onlyGoodWeapons (v10.js:101956): neither melee, equipment, customOnly nor noDmg, and not weapon 15.
 static int mode_random_weapon(const Game *game) {
     int ids[64];
     int count = 0;
     for (size_t i = 0; i < game->weapon_count && count < 64; i++) {
         const Weapon *weapon = game->weapons[i];
-        if (!weapon || weapon->melee || weapon->equipment || i == 15) continue;
+        if (!weapon || weapon->melee || weapon->equipment || weapon->no_dmg || i == 15) continue;
 #ifdef PLAYER_EFFECTS_V7 // player-viewer WP-B weapons table: customOnly
         if (weapon->custom_only) continue;
 #endif

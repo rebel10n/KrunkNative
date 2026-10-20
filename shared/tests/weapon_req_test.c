@@ -8,6 +8,7 @@
 #include <weapons.h>
 #include <ruleset.h>
 #include <pcg_basic.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -122,6 +123,37 @@ static void test_spawn(const cJSON *base) {
     }
 }
 
+// ---- the Sharp Shooter's weapon (mode_random_weapon, v10 onlyGoodWeapons: not melee, equipment, customOnly, noDmg)
+static void test_sharp_shooter(const cJSON *base) {
+    printf("Sharp Shooter weapon (onlyGoodWeapons)...\n");
+    const int seeds = 400;
+    int compressor = 0, grappler = 0, kinds[256] = {0}, rolled = 0;
+    static Game game;
+    for (int k = 0; k < seeds; k++) {
+        pcg32_srandom((uint64_t) (k + 1), 54u);
+        int *modes = calloc(1, sizeof(int));
+        const cJSON **maps = calloc(1, sizeof(cJSON *));
+        modes[0] = MODE_ID_SHRP;
+        maps[0] = base;
+        memset(&game, 0, sizeof(game));
+        game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+        game.hooks.send = test_send;
+        game_init(&game, 0, 0, 1);
+        if (!game.mode) continue;
+        const int weapon = game.mode->active_objective;
+        rolled++;
+        if (weapon == WEAPON_ID_COMPRESSOR) compressor++;
+        if (weapon == WEAPON_ID_GRAPPLER) grappler++;
+        if (weapon >= 0 && weapon < 256) kinds[weapon] = 1;
+    }
+    int distinct = 0;
+    for (int w = 0; w < 256; w++) distinct += kinds[w];
+    CHECK(rolled >= seeds / 2, "Sharp Shooter games rolled (%d of %d)", rolled, seeds);
+    CHECK(compressor == 0, "the Sharp Shooter's weapon is never the Compressor (noDmg is out of onlyGoodWeapons): %d of %d", compressor, rolled);
+    CHECK(grappler == 0, "the Sharp Shooter's weapon is never the Grappler (customOnly): %d of %d", grappler, rolled);
+    CHECK(distinct >= 8, "the Sharp Shooter's weapon still varies (%d weapons seen)", distinct);
+}
+
 int main(void) {
     cJSON *map = NULL;
     if (load_json_file("shared/tests/maps/v7_all_prefabs.json", &map) && load_json_file("../shared/tests/maps/v7_all_prefabs.json", &map)) {
@@ -131,6 +163,7 @@ int main(void) {
     test_req(map);
     test_spawn(map);
     test_random_pool(map);
+    test_sharp_shooter(map);
     if (g_failures) {
         printf("weapon_req_test: %d of %d checks failed\n", g_failures, g_checks);
         return 1;
