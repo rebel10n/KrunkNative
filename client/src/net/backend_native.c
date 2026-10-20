@@ -295,6 +295,13 @@ static void http_run(HttpJob *job) {
 
 static char *redacted_url(const char *url); // the main thread's log helper (below)
 
+// A GET that creates a game on a server (/mm/host-game): its first try may have created the game already,
+// and a second try would create another one (an orphan lobby) and join that. Never retried.
+static int creates_game(const char *url) {
+    const char *p = strstr(url, "/mm/host-game");
+    return p && (!p[13] || p[13] == '?'); // "/mm/host-game" is 13 characters
+}
+
 // A brain GET that got no HTTP answer at all (status 0: a connect that timed out or was refused, a
 // DNS or TLS failure, a send that failed, no reply before the timeout) is tried once more,
 // HTTP_RETRY_DELAY_MS later. Those failures are usually transient: a lost SYN past the connect timeout,
@@ -322,7 +329,7 @@ static void *http_thread(void *arg) {
         pthread_mutex_unlock(&g_lock);
 
         // the brain's GETs only: a POST may already have taken effect, and http_run takes its body
-        const int retry = lane == HTTP_LANE_BRAIN && !strcmp(job->method, "GET") && !job->body;
+        const int retry = lane == HTTP_LANE_BRAIN && !strcmp(job->method, "GET") && !job->body && !creates_game(job->url);
         http_run(job);
         if (retry && !job->status) http_retry(job);
 

@@ -361,6 +361,15 @@ static void test_retry(void) {
     backend_http_request("POST", url, "{}", on_done, &post);
     CHECK(wait_for(&post), "retry: the POST completes");
     CHECK(post.status == 0 && b.conns == 1, "retry: a POST is not retried, got status %d after %d connections", post.status, b.conns);
+
+    // a GET that creates a game (/mm/host-game) is not retried: the first try may have created it, and a second
+    // would create another (an orphan lobby) and join that. One connection; no answer is the error at once.
+    CHECK(start_brain(&b, "dok", &port), "retry: loopback brain for a host request");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mm/host-game?region=local&config=%%7B%%7D", port);
+    Result hosted = {0};
+    backend_http_request("GET", url, NULL, on_done, &hosted);
+    CHECK(wait_for(&hosted), "retry: the host request completes");
+    CHECK(hosted.status == 0 && b.conns == 1, "retry: a host request is not retried, got status %d after %d connections", hosted.status, b.conns);
 }
 #endif
 

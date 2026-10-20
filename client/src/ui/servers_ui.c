@@ -32,6 +32,7 @@
 #include <region_ping.h>   // the seek region's ping race (v10 getRegion)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
+#include <seek_claim.h>    // which matchmaking answer may enter a lobby (a host or a join by hand overtakes a seek)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <krunker_map_source.h> // the official map list: v10 playMap / dsma indices
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
@@ -85,6 +86,9 @@ static RecentLobbies g_recent_games, g_recent_servers;
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
 static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
+static SeekClaims g_claims;      // the matchmaking actions and the newest one whose answer entered a lobby (seek_claim.h)
+static unsigned g_carry_action;  // the action a continuation's seek belongs to (0 = a new action; seek() takes it)
+static unsigned g_answer_action; // the action of the host answer on_seek is handed (no SeekReq; on_host)
 static int g_director_mode;      // Krunker Strike: the director matchmakes at startup (no brain needed)
 static char g_strike_code[16];   // the private lobby code of this session ("" = public)
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
@@ -124,6 +128,7 @@ static int g_pin;
 static int g_last_direct;        // the last session was a direct one: `reconnect` reuses net_address
 static int g_left_offline;       // `disconnect` left the offline game: `reconnect` starts it again
 static int g_quick_join_left;    // quickJoinRegion: remaining candidates
+static unsigned g_quick_join_action; // the quick join's matchmaking action: every candidate's seek belongs to it (seek_claim.h)
 static char **g_quick_join;      // candidate game ids
 static int *g_quick_join_kio;    // per candidate: an official krunker.io lobby (krunker_lobbies_open)
 static int g_quick_join_kio_group; // the group quick-joined is a krunker.io group (no seek fallback)
@@ -341,8 +346,9 @@ static const char *game_map(const char *id) {
 // joinServer(host, port, gameId, clientKey): point the transport at the game server.
 // region: the lobby's (a seek answer's; NULL = unknown, looked up in the game list).
 static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url,
-                        const char *region) {
+                        const char *region, const unsigned action) {
     Client *client = g_client;
+    seek_claim_enter(&g_claims, action); // the request this lobby answers (0: a server's own redirect or ticket)
     quick_play_retry_end(); // a lobby took the player: the Quick Play search is over
     g_pin = PIN_NONE; // a matchmade (or server-redirected) session
     g_last_direct = 0;
@@ -404,13 +410,13 @@ void servers_ui_redirect(const char *game_id, const char *host, const int port, 
     }
     if (host && host[0] && port > 0) {
         if (g_pin != PIN_NONE) direct_join(host, port); // a direct server sends us on: still direct
-        else join_server(host, port, game_id, NULL, NULL, NULL);
+        else join_server(host, port, game_id, NULL, NULL, NULL, 0);
     }
 }
 
 void servers_ui_join_ticket(const char *host, const int port, const char *game_id, const char *ticket, const char *web_url) {
     if (!g_client || !host) return;
-    join_server(host, port, game_id, ticket, web_url, NULL);
+    join_server(host, port, game_id, ticket, web_url, NULL, 0);
     page_game_url(NULL, NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
 }
 
@@ -644,6 +650,7 @@ typedef struct SeekReq {
     int qp;       // a Quick Play search's seek (quick_play_retry.h): its answer is retried, and dropped once stopped
     unsigned qp_gen;  // quick_play_retry_generation() when it was sent
     unsigned serial;  // g_seek_serial when it was sent: the last seek issued clears g_seek_inflight
+    unsigned action;  // the matchmaking action it belongs to (seek_claim.h): an answer of an overtaken one is dropped
 } SeekReq;
 
 static void seek_req_free(SeekReq *r) {
@@ -652,7 +659,24 @@ static void seek_req_free(SeekReq *r) {
     free(r);
 }
 
-static void seek_unreachable(void);
+// A seek's answer (or its token's) that comes after the player entered a lobby by a later action (a community
+// map's host, a join by hand, a redirect): dropped, with no error, and it moves the player nowhere. Returns 1
+// when dropped (the request is freed).
+static int seek_overtaken(SeekReq *req) {
+    if (!req || !seek_claim_overtaken(&g_claims, req->action)) return 0;
+    printf("[mm] late seek answer ignored: the player entered a lobby after this seek was sent\n");
+    if (req->serial == g_seek_serial) { // the last seek issued: nothing of this request is in flight any more
+        g_seek_inflight = 0;
+        g_rejoin_seek = 0;
+        g_reload_seek = 0;
+        g_find_seek = g_find_both = 0;
+    }
+    seek_req_free(req);
+    return 1;
+}
+
+static void seek_unreachable(unsigned action);
+static void unreachable_error(unsigned action);
 static void on_token(void *user, int status, const char *body, size_t length);
 static void seek(const char *game_id, int auto_change, void *quiet);
 void servers_quick_join_next(void);
@@ -736,6 +760,8 @@ static void quick_join_again(void *user) {
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
     SeekReq *req = user;
+    if (seek_overtaken(req)) return; // a later action entered a lobby: this answer is nothing to the player
+    const unsigned action = req ? req->action : g_answer_action; // the matchmaking action it answers (seek_claim.h)
     const int quiet = req && req->quiet != NULL;
     const int play = req && req->play;
     const int qp = req && req->qp;
@@ -778,7 +804,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         cJSON_Delete(res);
         if (!seek_request_token(req)) {
             seek_req_free(req);
-            seek_unreachable();
+            seek_unreachable(action);
         }
         return;
     }
@@ -820,6 +846,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             g_find_seek = find; // Find New Game keeps its fallback: the player stays in its lobby when none is left
             g_find_both = find_both;
             cJSON_Delete(res);
+            g_carry_action = action; // the same search, the next lobby: its action
             seek(NULL, 1, NULL);
             return;
         }
@@ -838,7 +865,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (rejoin) printf("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
         join_server(host->valuestring, port->valueint, cJSON_IsString(game) ? game->valuestring : "",
                     cJSON_IsString(key) ? key->valuestring : "", cJSON_IsString(web) ? web->valuestring : NULL,
-                    cJSON_IsString(region) ? region->valuestring : NULL);
+                    cJSON_IsString(region) ? region->valuestring : NULL, action);
     } else if (quiet && g_quick_join_left > 0) {
         const cJSON *full = cJSON_GetObjectItem(res, "error");
         if (cJSON_IsString(full) && !strcmp(full->valuestring, "GameFull")) g_quick_join_full = 1; // the sweep is tried again when it runs out
@@ -859,6 +886,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                          !strcmp(err->valuestring, "NoAvailableServers");
         if (rejoin) rejoin_cancel(); // gave up: the seek's error below
         if (reload && cJSON_IsString(err) && (!strcmp(err->valuestring, "InvalidGameId") || !strcmp(err->valuestring, "GameFull"))) {
+            g_carry_action = action; // the reload's own search goes on: its action
             reload_fallback(g_seek_game, !strcmp(err->valuestring, "GameFull"));
             cJSON_Delete(res);
             return;
@@ -887,7 +915,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             // plain seek would join some other lobby, and the play would end there, not on the map.
             printf("[mm] play: no lobby plays the map: the offline game on it\n");
             cJSON_Delete(res);
-            mm_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
+            mm_get("/mm/game-list?hostname=krunknative", on_play_list, (void *) (uintptr_t) action); // the play's action
             return;
         }
         if (find && (nothing || g_client->net_connected)) {
@@ -902,7 +930,9 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
                 // v10's error screen, in the game too (v10.js:222076-222090: the menu with its message)
-                fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
+                const char *code = cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL;
+                if (code) fatal_error(seek_error_text(code));
+                else unreachable_error(action); // no answer at all: "Could not reach the matchmaker", rules below
             }
             cJSON_Delete(res);
             return;
@@ -910,7 +940,9 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
             snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
         }
-        fatal_error(seek_error_text(gone ? "ServerUnreachable" : cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
+        const char *code = gone ? "ServerUnreachable" : cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL;
+        if (code) fatal_error(seek_error_text(code));
+        else unreachable_error(action); // no answer at all: "Could not reach the matchmaker", rules as above
     }
     cJSON_Delete(res);
 }
@@ -974,7 +1006,7 @@ static void on_strike_finder(void *user, const int status, const char *body, con
         printf("[strike] finder pool: %s:%d (%d players)\n", host, port, best_players);
         g_find_seek = g_find_both = 0;
         g_strike_code[0] = 0;
-        join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")));
+        join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")), 0);
     } else {
         fprintf(stderr, "[strike] finder pool: no Strike server with room (HTTP %d)\n", status);
         // Find New Game / Quick Match: the finder lists nothing it leaves, so from a lobby the answer is
@@ -1028,7 +1060,7 @@ static void on_strike_allocation(void *user, const StrikeAllocation *a) {
     if (a->ok) {
         g_find_seek = g_find_both = 0;
         snprintf(g_strike_code, sizeof(g_strike_code), "%s", a->code);
-        join_server(a->host, a->port, a->game_id, a->ticket, NULL, a->region);
+        join_server(a->host, a->port, a->game_id, a->ticket, NULL, a->region, 0);
         return;
     }
     // an outdated client cannot play anywhere this director serves: no fallback
@@ -1075,6 +1107,9 @@ static void seek_recent_list(char *out, const size_t n) {
 
 static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     char path[6144], enc[3400]; // enc: also the dataQuery with every mode and map picked, URL-encoded
+    // the matchmaking action this seek belongs to: a continuation's (g_carry_action), else a new one
+    const unsigned action = g_carry_action ? g_carry_action : seek_claim_start(&g_claims);
+    g_carry_action = 0;
     const int play = g_play_seek; // v10's play seek: region "any", the map only, autoChangeGame false
     g_play_seek = 0;
     const int auto_change = play ? 0 : auto_change_in;
@@ -1103,7 +1138,7 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         (void) quiet;
         g_exclude_game[0] = 0;
         if (qp_seek) quick_play_retry_out(); // a Strike Quick Play search: its allocation is out (quick_play_retry.h)
-        if (!strike_seek(same_private, same_private ? g_strike_code : NULL)) seek_unreachable();
+        if (!strike_seek(same_private, same_private ? g_strike_code : NULL)) seek_unreachable(action);
         return;
     }
     backend_url_encode(enc, sizeof(enc), play ? "" : g_region); // regionId 'any' (v10 playMap): no region
@@ -1160,17 +1195,30 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
         req->qp = qp_seek;
         req->qp_gen = quick_play_retry_generation();
         req->serial = ++g_seek_serial;
+        req->action = action;
         if (req->qp) quick_play_retry_out();
     }
     if (!req || !req->path || !seek_request_token(req)) {
         seek_req_free(req);
-        seek_unreachable();
+        seek_unreachable(action);
     }
 }
 
+// "Could not reach the matchmaker" (the error screen) for a failed attempt of action: only the player's current
+// action while outside a lobby (seek_claim_error_shown). Otherwise the attempt is only logged: the player is in a
+// lobby, or a later action has taken over. The state the attempt held is cleared by the caller.
+static void unreachable_error(const unsigned action) {
+    const int in_lobby = g_client && g_client->net_connected;
+    if (!seek_claim_error_shown(&g_claims, action, in_lobby)) {
+        printf("[mm] could not reach the matchmaker: not shown (%s)\n", in_lobby ? "in a lobby" : "not the current request");
+        return;
+    }
+    fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
+}
+
 // The matchmaker cannot be asked (no brain URL, out of memory): a restart rejoin tries again,
-// anything else shows the error.
-static void seek_unreachable(void) {
+// anything else shows the error (unreachable_error).
+static void seek_unreachable(const unsigned action) {
     g_seek_inflight = 0;
     g_find_seek = g_find_both = 0;
     if (g_rejoin_seek && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
@@ -1180,7 +1228,7 @@ static void seek_unreachable(void) {
     }
     g_rejoin_seek = 0;
     rejoin_cancel();
-    fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
+    unreachable_error(action);
 }
 
 // /mm/generate-token answered: plain text (Krunker's matchmaker too). A brain from before the
@@ -1189,6 +1237,7 @@ static void seek_unreachable(void) {
 // error: the seek itself reports the unreachable matchmaker the same way.
 static void on_token(void *user, const int status, const char *body, const size_t length) {
     SeekReq *req = user;
+    if (seek_overtaken(req)) return; // the seek is not sent: a later action already entered a lobby
     char *path = req->path;
     char *full = NULL;
     if (status == 200 && body && length > 0 && length < 1024) {
@@ -1206,8 +1255,9 @@ static void on_token(void *user, const int status, const char *body, const size_
         printf("[mm] no validation token (generate-token HTTP %d): seeking without one\n", status);
     }
     if (!backend_http_get(full ? full : path, on_seek, req)) {
+        const unsigned action = req->action;
         seek_req_free(req);
-        seek_unreachable();
+        seek_unreachable(action);
     }
     free(full);
 }
@@ -1232,6 +1282,7 @@ typedef struct PingSeek {
     char *game;   // the game id asked for (NULL: any)
     unsigned gen; // quick_play_retry_generation() when the seek started
     int qp;       // a Quick Play search's seek (0: none)
+    unsigned action; // the matchmaking action (seek_claim.h): the seek it leads to belongs to it
 } PingSeek;
 
 static void ping_seek_free(PingSeek *ps) {
@@ -1271,6 +1322,13 @@ static void seek_in_region(const char *requested_game) {
     else seek(requested_game, !requested_game, NULL);
 }
 
+// seek_in_region for a search that started with its ping list (PingSeek.action): the seek it leads to belongs to it
+static void start_seek_region(const PingSeek *ps) {
+    g_carry_action = ps->action; // the seek seek_in_region sends (none when it is not sent) belongs to the search
+    seek_in_region(ps->game);
+    g_carry_action = 0;
+}
+
 static void on_region_race(void *user, const char *region) {
     PingSeek *ps = user;
     g_region_racing = 0;
@@ -1289,7 +1347,7 @@ static void on_region_race(void *user, const char *region) {
         html_storage_set("pingRegion7", g_region);
         printf("[mm] seek region: every ping failed: %s, the list's first\n", g_region);
     }
-    seek_in_region(ps->game);
+    start_seek_region(ps);
     ping_seek_free(ps);
 }
 
@@ -1299,6 +1357,11 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     if (g_ping_pending > 0) g_ping_pending--;
     if (ping_seek_stale(ps)) { // the search was stopped while the list was out: no seek of it, no region race
         printf("[mm] quick play: a late ping list is ignored (the search was stopped)\n");
+        ping_seek_free(ps);
+        return;
+    }
+    if (seek_claim_overtaken(&g_claims, ps->action)) { // a later action entered a lobby: no seek for this search
+        printf("[mm] seek not sent: the player entered a lobby after it was asked for\n");
         ping_seek_free(ps);
         return;
     }
@@ -1330,7 +1393,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
         g_region_racing = 1;
         return;
     }
-    seek_in_region(ps->game);
+    start_seek_region(ps);
     ping_seek_free(ps);
 }
 
@@ -1387,19 +1450,21 @@ static int start_seek(const char *game_id) {
         seek(game_id, !game_id, NULL);
         return 1;
     }
+    const unsigned action = seek_claim_start(&g_claims); // the search: its ping list, its region race and its seek
     PingSeek *ps = calloc(1, sizeof(*ps));
     if (ps) {
         ps->game = game_id && game_id[0] ? strdup(game_id) : NULL;
         ps->qp = quick_play_retry_running(); // a Quick Play search's: stopped or replaced, its answers are dropped
         ps->gen = quick_play_retry_generation();
+        ps->action = action;
     }
     g_ping_pending++;
-    if (!ps || !mm_get("/mm/ping-list", on_ping_list, ps)) {
+    if (!ps || (game_id && game_id[0] && !ps->game) || !mm_get("/mm/ping-list", on_ping_list, ps)) {
         g_ping_pending--;
         ping_seek_free(ps);
         g_find_seek = g_find_both = 0;
         g_reload_next = 0;
-        fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
+        unreachable_error(action);
         return 0;
     }
     return 1;
@@ -1453,7 +1518,7 @@ static int strike_join_code(const char *text) {
     printf("[strike] joining private lobby %s\n", code);
     menu_show_window(MENU_WINDOW_NONE, 0);
     g_pin = PIN_NONE;
-    if (!strike_seek(1, code)) seek_unreachable();
+    if (!strike_seek(1, code)) seek_unreachable(seek_claim_start(&g_claims));
     return 1;
 }
 
@@ -1527,7 +1592,7 @@ int servers_ui_private_match(void) {
     printf("[strike] opening a private lobby\n");
     menu_show_window(MENU_WINDOW_NONE, 0);
     g_pin = PIN_NONE;
-    if (!strike_seek(1, NULL)) seek_unreachable();
+    if (!strike_seek(1, NULL)) seek_unreachable(seek_claim_start(&g_claims));
     return 1;
 }
 
@@ -3143,6 +3208,7 @@ void servers_quick_join_next(void) {
         switch_server(id); // reloads the page: only the first candidate matters
         return;
 #else
+        g_carry_action = g_quick_join_action; // a candidate of the sweep: the sweep's action
         seek(id, 0, (void *) 1);
         return;
 #endif
@@ -3163,6 +3229,7 @@ static void quick_join_region(const int index) {
     g_quick_join = NULL;
     g_quick_join_kio = NULL;
     g_quick_join_count = g_quick_join_next = 0;
+    g_quick_join_action = seek_claim_start(&g_claims);
     if (index < 0 || index >= count) return;
     const ServerGroup *g = &groups[index];
     g_quick_join_kio_group = !strncmp(g->key, "kio:", 4);
@@ -4068,8 +4135,12 @@ static int official_map_index(const char *name) {
 }
 
 static void on_play_list(void *user, const int status, const char *body, const size_t length) {
-    (void) user;
+    const unsigned action = (unsigned) (uintptr_t) user; // the play's matchmaking action (seek_claim.h)
     (void) length;
+    if (seek_claim_overtaken(&g_claims, action)) { // a later action entered a lobby: the play is not carried out
+        printf("[mm] play ignored: the player entered a lobby after it was asked for\n");
+        return;
+    }
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *t;
     const char *found = NULL;
@@ -4086,7 +4157,9 @@ static void on_play_list(void *user, const int status, const char *body, const s
     }
     if (found) {
         menu_show_window(MENU_WINDOW_NONE, 0);
+        g_carry_action = action; // the seek to the lobby it names is the play's
         switch_server(found);
+        g_carry_action = 0;
     } else if (g_play_catalogue) {
         // no server runs it: practice it offline (the client never hosts; doc/backend.md 8.7). The
         // lobby this client is joined to is left first (the console's `offline <map>`): v10's Play
@@ -4138,7 +4211,7 @@ int servers_ui_play_map_mode(const char *name, const int catalogue, const int mo
         return 1;
     }
     if (g_brain_mode && !g_client->offline) {
-        mm_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
+        mm_get("/mm/game-list?hostname=krunknative", on_play_list, (void *) (uintptr_t) seek_claim_start(&g_claims));
         return 1;
     }
     if (catalogue) return 0; // the offline game hosts catalogue maps itself
@@ -4175,17 +4248,26 @@ void servers_ui_query(const char *query) {
 // ------------------------------------------------------------------ Host Game
 
 static void on_host(void *user, const int status, const char *body, const size_t length) {
-    (void) user;
+    const unsigned action = (unsigned) (uintptr_t) user; // the host request's matchmaking action (seek_claim.h)
     HtmlElem msg = html_dom_by_id("hostGameMsg");
     cJSON *res = cJSON_Parse(body);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
     if (status == 200 && cJSON_IsString(host)) {
+        // a later action (a join by hand, a seek that was started after this request) entered a lobby while the
+        // game was created: that lobby stays, and the new game is not joined (it is left empty on the brain)
+        if (seek_claim_overtaken(&g_claims, action)) {
+            printf("[mm] host answer not joined: the player entered a lobby after the host request\n");
+            cJSON_Delete(res);
+            return;
+        }
         if (msg) html_dom_set_text(msg, I18N("kn.host.created", "Game Created")); // customRoomResponse(message, gameId)
         g_last_load_ms = -1e18; // windows[1].lastLoadTime = 0
         cJSON_Delete(res);
         menu_show_window(MENU_WINDOW_NONE, 0);
         g_pin = PIN_NONE; // our own hosted game
+        g_answer_action = action; // on_seek joins it under the host request's action
         on_seek(NULL, status, body, length);
+        g_answer_action = 0;
         return;
     }
     const cJSON *err = cJSON_GetObjectItem(res, "error");
@@ -4228,7 +4310,14 @@ int servers_ui_host_game(const char *config_json) {
     }
     HtmlElem msg = html_dom_by_id("hostGameMsg");
     if (msg) html_dom_set_text(msg, I18N("kn.host.creating", "Creating Game..."));
-    const int ok = backend_http_get(path, on_host, NULL);
+    // a matchmaking action of its own (seek_claim.h): a seek still in flight is overtaken by its lobby. A Quick
+    // Play search goes on no more: the player chose a game (the startup seek is not needed either)
+    const unsigned action = seek_claim_start(&g_claims);
+    const int ok = backend_http_get(path, on_host, (void *) (uintptr_t) action);
+    if (ok) {
+        g_started = 1;
+        quick_play_retry_cancel();
+    }
     free(path);
     free(enc);
     return ok;

@@ -55,8 +55,9 @@ static const Row ROWS[] = {
     {"no_lobbies", "Servers are at Max Capacity", 1},
     {"NoMatchingServers", "No Games Found. Try changing Quickplay options", 1},
     {"ServerUnreachable", "DISCONNECTED", 1}, // KN's rejoin give-up: v10's player.disconnect (Lost Connection)
-    {"CaptchaRequired", "Security check failed. Complete the security check and try again", 1},
-    {"RecaptchaFailed", "Security check failed. Refresh the page and try again", 1},
+    // the challenge is the widget in the game (9234f121): a refusal fails the join with the generic text, no wording of the check
+    {"CaptchaRequired", "Failed", 1},
+    {"RecaptchaFailed", "Failed", 1},
     {"TooManyAccountSessions", "Too many active sessions. Your account has too many games in progress. Close them and try again", 1},
     {"GameIssue", "Unknown Join Issue", 1},
     {"AccountAlreadyPlaying", "Connected Elsewhere. Your account started a game on another device or tab, so this session was closed", 1},
