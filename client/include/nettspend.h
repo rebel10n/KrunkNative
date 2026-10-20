@@ -67,10 +67,17 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // hold.z - offset.z and its x as -hold.x, so the hold is offset.z + reach and -x.
 #define NETTSPEND_TP_HAND_REACH 5.0f
 #define NETTSPEND_TP_HAND_X 0.65f
+// Third person: the trigger hand is raised this far above the pistol's hold height (the pistol's fist sits at the
+// shoulder to chest; the reach points the hand at the camera, which hangs it lower on screen than the pistol's)
+#define NETTSPEND_TP_HAND_RAISE 0.8f
+// Third person: the off hand hangs straight down from its shoulder, this long (the arm is 5.4 long, so the elbow
+// is slightly bent, a relaxed arm), its hand at mid-thigh (player_mesh.c player_generate_meshes)
+#define NETTSPEND_TP_OFF_HAND_REACH 5.3f
 // The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
-// shoulder, this far out to its own side and forward per unit down (only the trigger arm holds the cup)
-#define NETTSPEND_OFF_HAND_AWAY_OUT 0.12f
-#define NETTSPEND_OFF_HAND_AWAY_FWD 0.15f
+// shoulder, this far out to its own side and forward per unit down. Zero: the third-person rest already hangs
+// straight down (NETTSPEND_TP_OFF_HAND_REACH), so the arm stays straight and continuous from the shoulder.
+#define NETTSPEND_OFF_HAND_AWAY_OUT 0.0f
+#define NETTSPEND_OFF_HAND_AWAY_FWD 0.0f
 // The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);
