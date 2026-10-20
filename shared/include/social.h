@@ -66,6 +66,10 @@ typedef struct {
     const char *creator;      // map JSON "creator", else "Krunker"
     const char *description;  // map JSON "description", else ""
     int featured;             // Krunker's own maps (assets/maps), 0 for custom maps
+    // the map's category (map_catalog.h index, -1 none) and its name ("" none): the brain's map_category and
+    // category. The catalogue keeps no categories (services/brain/creations.c catalog_row), so the server's maps have none
+    int category;
+    const char *category_name;
 } SocialMapInfo;
 
 typedef struct {

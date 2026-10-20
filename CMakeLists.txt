@@ -996,6 +996,13 @@ else ()
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # social_hub_test: the in-process hub's map search with no brain (social.c api_search): cat= as the brain's /api/search
+    add_executable(social_hub_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/social_hub_test.c)
+    target_link_libraries(social_hub_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(social_hub_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     add_test(NAME strike_economy_test COMMAND strike_economy_test)
 
     # strike_maps_test: the Krunker Strike map pool (strike_maps.h): FRVR's seven map files load,

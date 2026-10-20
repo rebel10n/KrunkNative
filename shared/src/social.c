@@ -2,6 +2,7 @@
 // v3.1.1's social page sends the way its offline server does (matchmaker/socialWs.ts,
 // matchmaker/publicRoutes.ts), for a server without accounts.
 #include <social.h>
+#include <map_catalog.h> // MAP_CATEGORY_COUNT
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,6 +99,8 @@ size_t social_maps_from_game(const Game *game, SocialMapInfo *out, const size_t 
         out[count].creator = cJSON_IsString(creator) && creator->valuestring[0] ? creator->valuestring : (featured ? "Krunker" : "Community");
         out[count].description = cJSON_IsString(description) ? description->valuestring : "";
         out[count].featured = featured;
+        out[count].category = -1; // the catalogue keeps no categories (creations.c catalog_row: category "", map_category -1)
+        out[count].category_name = "";
         count++;
     }
     return count;
@@ -114,6 +117,11 @@ static uint32_t map_id_of(const char *name) {
 }
 
 #define SOCIAL_TAB_PAGE_SIZE 42 // publicRoutes.ts TAB_PAGE_SIZE
+
+// The category a map row carries and cat= matches (-1 none): the brain's map_row_fields / catalog_row rule
+static int row_category(const SocialMapInfo *m) {
+    return m->category >= 0 && m->category < MAP_CATEGORY_COUNT && m->category_name ? m->category : -1;
+}
 
 static cJSON *map_row(const SocialMapInfo *m) {
     cJSON *row = cJSON_CreateObject();
@@ -136,6 +144,9 @@ static cJSON *map_row(const SocialMapInfo *m) {
     cJSON_AddNumberToObject(row, "fav", 0);
     cJSON_AddStringToObject(row, "mod_url", "");
     cJSON_AddStringToObject(row, "mod_id", "");
+    const int category = row_category(m);
+    cJSON_AddStringToObject(row, "category", category >= 0 ? m->category_name : "");
+    cJSON_AddNumberToObject(row, "map_category", category);
     return row;
 }
 
@@ -192,14 +203,28 @@ static cJSON *api_maps(const SocialHost *host, const cJSON *params) {
     return res;
 }
 
-// /api/search?type=map&val= (all matches), anything else empty.
+// cat= (creations.c api_req): a category index, anything else is every category (-1)
+static int param_category(const cJSON *params) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(params, "cat");
+    const int category = cJSON_IsNumber(v) ? v->valueint : -1;
+    return category >= 0 && category < MAP_CATEGORY_COUNT ? category : -1;
+}
+
+// /api/search?type=map&val=&cat= (creations.c h_search, run, catalog_wanted): a name search (All, or the name's maps of
+// cat=), or with no name a category's maps (v10's Popular Categories tiles); no name and All finds nothing; anything but
+// maps finds nothing. cat= keeps the category's maps only, so a server map with no category never answers it.
 static cJSON *api_search(const SocialHost *host, const cJSON *params) {
     const char *type = param_str(params, "type");
     const char *val = param_str(params, "val");
+    const int category = param_category(params);
+    const int by_name = val && *val;
     cJSON *data = cJSON_CreateArray();
-    if (type && !strcmp(type, "map") && val && *val) {
+    if (type && !strcmp(type, "map") && (by_name || category >= 0)) {
         for (size_t i = 0; host && i < host->map_count; i++) {
-            if (contains_ci(host->maps[i].name, val)) cJSON_AddItemToArray(data, map_row(&host->maps[i]));
+            const SocialMapInfo *m = &host->maps[i];
+            if (category >= 0 && row_category(m) != category) continue;
+            if (by_name && !contains_ci(m->name, val)) continue;
+            cJSON_AddItemToArray(data, map_row(m));
         }
     }
     cJSON *res = cJSON_CreateObject();
