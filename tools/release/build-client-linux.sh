@@ -142,7 +142,11 @@ fi
 # The polyfilled server links the static libcurl above (https:// for the finder and auth).
 # libgcc/libstdc++ (replxx) and crypt(3) static (libxcrypt's libcrypt.a: libcrypt.so.1 is a compat package on Fedora/Arch)
 if [ "$variant" = dynamic ]; then flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE); fi
-flags+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++")
+# libgcc always static. libstdc++ static only in the polyfilled build (its glibc 2.17 floor needs no libstdc++.so);
+# the dynamic build leaves libstdc++ to the distribution (host-libs.txt lists it): with -static-libstdc++, CMake's
+# FindX11 failed on arm64 under emulation (intermittently: KN_DOCKER_PLATFORM=linux/arm64 in an ubuntu:22.04 image)
+if [ "$variant" = polyfilled ]; then linker="-static-libgcc -static-libstdc++"; else linker="-static-libgcc"; fi
+flags+=("-DCMAKE_EXE_LINKER_FLAGS=$linker")
 # the captcha webview (client/include/kn_webview.h, WebKitGTK) is bundled with the dynamic packages
 # (bundle-webkit.sh, below). The polyfilled ones keep it out: a webkit2gtk-4.1 for their glibc 2.17
 # floor does not exist, and a load-time link would make it a hard dependency of the portable client
