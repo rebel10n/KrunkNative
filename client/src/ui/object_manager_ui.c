@@ -953,6 +953,17 @@ static void om_expect_equip(const int weapon_id) {
     g_om.pending_at = glfwGetTime();
 }
 
+// The Tools pane's gun tiles put their gun away when it is in hand: its extra slot is taken out, as
+// the Weapons tab's second click takes an extra out (OM_ACTION_REMOVE_WEAPON, no spawn right needed).
+// Returns 1 when it did; a gun carried but not in hand is equipped by the tile as before.
+static int om_gun_put_away(const int weapon_id) {
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    if (!me || !om_holds(weapon_id) || !om_has_extra(me, weapon_id)) return 0;
+    om_send(OM_ACTION_REMOVE_WEAPON, weapon_id);
+    return 1;
+}
+
 // A KN gun in hand at once: its slot when carried (picked with the next input frame, also while the
 // window is open), else added as an extra slot and equipped when its LOADOUT_EXTRA lands
 static void om_equip_gun(const Player *me, const int weapon_id, const char *text) {
@@ -992,8 +1003,9 @@ static void om_pick_tool(const int tool) {
     om_equip_gun(me, WEAPON_ID_TOOL_GUN, text);
 }
 
-// The Tools pane's Physics Gun row
+// The Tools pane's Physics Gun row: in hand, a second click puts it away (om_gun_put_away)
 void object_manager_ui_pick_physgun(void) {
+    if (om_gun_put_away(WEAPON_ID_PHYS_GUN)) return;
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     if (!me) {
@@ -1116,8 +1128,8 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         object_manager_ui_snap_changed();
         return 0;
     }
-    if (!strcmp(name, "knOmToolGunPick")) { // the Tool Gun tile: in hand with the tool picked
-        om_pick_tool(g_om.tool);
+    if (!strcmp(name, "knOmToolGunPick")) { // the Tool Gun tile: in hand with the tool picked; in hand already, put away
+        if (!om_gun_put_away(WEAPON_ID_TOOL_GUN)) om_pick_tool(g_om.tool);
         return 0;
     }
     if (!strcmp(name, "knOmTool")) {
@@ -1190,7 +1202,10 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     char text[160] = "";
     switch (r->action) {
         case OM_ACTION_ADD_WEAPON: I18N_F(text, "kn.om.added", "{0} added to your loadout", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
-        case OM_ACTION_REMOVE_WEAPON: I18N_F(text, "kn.om.takenOut", "{0} taken out of your loadout", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
+        case OM_ACTION_REMOVE_WEAPON:
+            if (r->item == WEAPON_ID_TOOL_GUN || r->item == WEAPON_ID_PHYS_GUN) I18N_F(text, "kn.om.gunAway", "{0} put away", w ? w->name : I18N("kn.om.weapon", "Weapon"));
+            else I18N_F(text, "kn.om.takenOut", "{0} taken out of your loadout", w ? w->name : I18N("kn.om.weapon", "Weapon"));
+            break;
         case OM_ACTION_CLEAR_WEAPONS: snprintf(text, sizeof(text), "%s", I18N("kn.om.cleared", "Extra weapons cleared")); break;
         case OM_ACTION_DROP_WEAPON: I18N_F(text, "kn.om.droppedAim", "{0} dropped at your crosshair", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
         case OM_ACTION_UNDO: snprintf(text, sizeof(text), "%s", I18N("kn.om.undone", "Undone")); break;

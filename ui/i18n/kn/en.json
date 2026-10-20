@@ -391,6 +391,7 @@
  "kn.om.gun.toolHand": "Tool Gun in hand: shoot to use",
  "kn.om.gun.toolLoadout": "Tool Gun in your loadout",
  "kn.om.gun.toolMap": "Tool Gun in hand: works on the map too",
+ "kn.om.gunAway": "{0} put away",
  "kn.om.hint.entities": "Left click: spawn at your crosshair (power-ups despawn on their own timer)",
  "kn.om.hint.npcs": "Left click: spawn at your crosshair | U: undo, Delete: remove at the crosshair",
  "kn.om.hint.objects": "Left click: place it on the surface at your crosshair, facing you | U: undo, Delete: remove at the crosshair",
