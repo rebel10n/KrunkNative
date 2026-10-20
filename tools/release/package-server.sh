@@ -161,7 +161,7 @@ mv "$work/SHA256SUMS" "$stage/SHA256SUMS"
 entries=()
 while IFS= read -r f; do entries+=("$f"); done < <(cd "$stage" && ls -A | LC_ALL=C sort)
 case "$platform" in
-    windows-*)
+    windows-*|macos-*)
         archive="$name.zip"; rm -f "$out/$archive"
         (cd "$stage" && zip -qr9 "$out/$archive" "${entries[@]}")
         ;;
