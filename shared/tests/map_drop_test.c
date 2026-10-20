@@ -107,7 +107,7 @@ static int check_map_file(const char *key, const char *file, const int records) 
             printf("FAIL %s: %zu map objects, %d expected\n", key, map->object_count, expected);
             failures++;
         }
-        int missing = 0, missing_cubes = 0, unsolid = 0, resized = 0;
+        int missing = 0, missing_cubes = 0, unsolid = 0, resized = 0, solid_without_body = 0;
         // the file's own records, in step with the kept copies when the loader dropped none (aligned)
         const cJSON *source = raw_objects ? raw_objects->child : NULL;
         const cJSON *pool = cJSON_GetObjectItem(root, "xyz");
@@ -130,6 +130,19 @@ static int check_map_file(const char *key, const char *file, const int records) 
                 }
                 continue;
             }
+            // v10 builds no collision body for a SHOWCASE (addShowcase: a model only) and none for a RAMP the record
+            // switches off (addRamp: `noCol || new GameObject`, L165176). Both load walk-through (COLLISION_TYPE_NONE);
+            // a solid one blocks a player that v10 lets through.
+            const int prefab = map_raw_object_prefab(raw);
+            const int ramp_off = prefab == PREFAB_RAMP && (record_flag(cJSON_GetObjectItem(raw, "l")) || record_flag(cJSON_GetObjectItem(raw, "col")));
+            if ((prefab == PREFAB_SHOWCASE || ramp_off) && object->collision_type != COLLISION_TYPE_NONE) {
+                if (solid_without_body++ < 3) {
+                    printf("FAIL %s: %s at p=[%g, %g, %g] is solid (collision type %d); v10 has no collision body for it\n", key,
+                           prefab == PREFAB_RAMP ? "RAMP" : "SHOWCASE", cJSON_GetArrayItem(p, 0)->valuedouble,
+                           cJSON_GetArrayItem(p, 1)->valuedouble, cJSON_GetArrayItem(p, 2)->valuedouble, (int) object->collision_type);
+                }
+            }
+            if (map_raw_object_prefab(raw) != PREFAB_CUBE) continue;
             // a CUBE the record does not switch off (l / col) is a solid box at its record's size. A wall that
             // loads walk-through, or at another entry's size from the pool, is a wrong wall (Undergrowth's wall at
             // p=[84, 80, 44] reads pool entry 410)
@@ -160,6 +173,10 @@ static int check_map_file(const char *key, const char *file, const int records) 
         }
         if (resized) {
             printf("FAIL %s: %d CUBE(s) loaded at the wrong size\n", key, resized);
+            failures++;
+        }
+        if (solid_without_body) {
+            printf("FAIL %s: %d RAMP / SHOWCASE object(s) solid where v10 makes no collision body\n", key, solid_without_body);
             failures++;
         }
         map_fini(map);

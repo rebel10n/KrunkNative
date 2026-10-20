@@ -41,7 +41,8 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     [PREFAB_CAMERA_POSITION] = {G(NONE), C(OPTIONAL), EDITOR},
     [PREFAB_VEHICLE] = MODEL_PROP,
     [PREFAB_STACK] = MODEL_PROP,
-    [PREFAB_RAMP] = {G(RAMP), C(FORCED), NOSHOOT | NOWJ},
+    // v10 addRamp (L165176): `noCol || new GameObject`, so a RAMP with l / col has no collision body (optional, like CUBE)
+    [PREFAB_RAMP] = {G(RAMP), C(OPTIONAL), NOSHOOT | NOWJ},
     [PREFAB_SCORE_ZONE] = {G(NONE), C(FORCED), NOSHOOT | NOWJ | ZONE},
     [PREFAB_BILLBOARD] = {G(PLANE), C(OPTIONAL), HP | IN},
     [PREFAB_DEATH_ZONE] = {G(NONE), C(FORCED), NOSHOOT | NOWJ | ZONE | HP | INC},
@@ -87,7 +88,8 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     [PREFAB_POLICE] = MODEL_PROP,
     [PREFAB_CAGE] = MODEL_PROP,
     [PREFAB_E_BARREL] = MODEL_PROP,
-    [PREFAB_SHOWCASE] = {G(SPECIAL), C(FORCED), NOWJ},
+    // v10 addShowcase (L164331): a model only, no GameObject, so a showcase never blocks a player
+    [PREFAB_SHOWCASE] = {G(SPECIAL), C(NONE), NOWJ},
     [PREFAB_POINT_LIGHT] = {G(LIGHT), C(NONE), RENDER | LIGHT | NOWJ},
     [PREFAB_GHOST] = MODEL_PROP,
     // map.js addAI: a pending AI (shared/src/ai.c spawns it at game init), not a map object
