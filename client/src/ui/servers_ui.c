@@ -34,6 +34,8 @@
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <seek_claim.h>    // which matchmaking answer may enter a lobby (a host or a join by hand overtakes a seek)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
+#include <krunker_account.h> // krunker_host_url / krunker_service_url: the krunker.io reads of the Games window and footer
+#include <krunker_kio_routes.h> // the krunker.io URLs of those reads (krunker_kio_routes.c)
 #include <krunker_map_source.h> // the official map list: v10 playMap / dsma indices
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
@@ -3150,7 +3152,13 @@ char *servers_window_gen(const int id, const char **header) {
     }
     g_last_load_ms = now_ms();
     mm_get("/mm/ping-list", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
-    backend_http_get("/api/player-count", on_player_count, NULL);
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // v10 loadData (v10:211170): social.krunker.io's count
+        char social[256], url[320];
+        krunker_service_url(KRUNKER_SVC_SOCIAL, "", social, sizeof(social));
+        if (krunker_kio_player_count_url(url, sizeof(url), social)) backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, NULL);
+    } else {
+        backend_http_get("/api/player-count", on_player_count, NULL);
+    }
     return loading_html();
 }
 
@@ -3544,18 +3552,30 @@ static void on_maps(void *user, const int status, const char *body, const size_t
 // 1 when the page was asked for; 0 when the request was refused at once (the brain gate while a
 // krunker.io session is the active backend, or no queue): no answer will ever come for it
 static int games_request(const int tab) {
-    char path[160];
+    char query[96], path[160], base[256], url[512];
     const AccountInfo *acc = active_account();
-    int n = snprintf(path, sizeof(path), "/api/maps?index=%d&pos=%d", tab, g_games_tabs[tab].pos);
-    if (acc) snprintf(path + n, sizeof(path) - (size_t) n, "&accountId=%d", acc->id);
+    const int n = snprintf(query, sizeof(query), "index=%d&pos=%d", tab, g_games_tabs[tab].pos);
     g_games_tabs[tab].waiting = 1;
-    if (backend_http_get(path, on_maps, (void *) (intptr_t) tab)) return 1;
+    int sent;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // v10 listMaps (v10:131895): the krunker.io tab list from the data client (api.krunker.io); the account's id
+        // only once the game server has given it (0 outside a game)
+        if (acc && acc->id > 0) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
+        krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+        sent = krunker_kio_webhook_url(url, sizeof(url), base, "maps/list", query) != 0 &&
+               backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_maps, (void *) (intptr_t) tab);
+    } else {
+        if (acc) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
+        snprintf(path, sizeof(path), "/api/maps?%s", query);
+        sent = backend_http_get(path, on_maps, (void *) (intptr_t) tab);
+    }
+    if (sent) return 1;
     g_games_tabs[tab].waiting = 0;
     return 0;
 }
 
 int servers_games_tab_rows(const int tab, const cJSON **rows) {
-    if (backend_available() != 1 || tab < 0 || tab >= GAMES_TABS || g_games_tabs[tab].failed) return -1;
+    if ((backend_available() != 1 && account_backend() != ACCOUNT_BACKEND_KRUNKER) || tab < 0 || tab >= GAMES_TABS || g_games_tabs[tab].failed) return -1;
     if (!g_games_tabs[tab].requested) {
         g_games_tabs[tab].requested = 1;
         g_games_tabs[tab].pos = 0;
@@ -4024,7 +4044,19 @@ static void games_search(const HtmlArg *args, const int argc) {
     const int source = community_source_of(c); // "official" / "community": no category
     g_games_search_cat = source == COMMUNITY_SOURCE_ALL ? atoi(c) : -1;
     g_search_gen++;
-    if (backend_available() == 1) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // v10 searchMap (v10:131908): krunker.io's own search (api.krunker.io, the players' games) answers Community
+        // and All here; Official is the catalogue's, below. When not sent, the catalogue answers as without a brain.
+        if (source != COMMUNITY_SOURCE_OFFICIAL) {
+            char base[256], query[320], url[640];
+            krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+            if (krunker_kio_search_query(query, sizeof(query), q, g_games_search_cat) &&
+                krunker_kio_webhook_url(url, sizeof(url), base, "maps/search", query)) {
+                html_dom_set_html(out, "Loading...");
+                if (backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_search, (void *) (uintptr_t) g_search_gen)) return;
+            }
+        }
+    } else if (backend_available() == 1) {
         char path[512];
         if (community_search_path(path, sizeof(path), q, g_games_search_cat, source)) {
             html_dom_set_html(out, "Loading...");

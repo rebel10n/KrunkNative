@@ -1108,6 +1108,15 @@ else ()
         target_link_libraries(krunker_host_test PRIVATE cJSON freetype m pthread)
         add_test(NAME krunker_host_test COMMAND krunker_host_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     endif ()
+    # krunker_kio_routes_test (client/src/net/krunker_kio_routes.c): the URL of each krunker.io read a krunker.io account
+    # makes in place of kn_brain (the Games window's search and tabs, the hub's maps / mods / search, the streams, the footer's
+    # count, the leaderboards), built by its caller's bases: the hosts are api.krunker.io, social.krunker.io and gapi
+    if (NOT WIN32)
+        add_executable(krunker_kio_routes_test client/tests/krunker_kio_routes_test.c)
+        target_include_directories(krunker_kio_routes_test PRIVATE client/include shared/include client/lib/glfw/include)
+        target_link_libraries(krunker_kio_routes_test PRIVATE cJSON freetype m pthread)
+        add_test(NAME krunker_kio_routes_test COMMAND krunker_kio_routes_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
     # krunker_host_custom_test (client/src/net/krunker_net.c, krunker_net_host_custom): a custom game hosted on
     # krunker.io's official servers (CUSTOM_SERVER, the "cust" reply, the timeout). krunker_net.c is included
     # whole, with doubles for its client, account and map callers; no socket is opened

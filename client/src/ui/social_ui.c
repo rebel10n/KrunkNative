@@ -19,6 +19,8 @@
 #include <audio.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <krunker_account.h> // krunker_host_url: the data client's webhooks (the hub's maps, mods and search)
+#include <krunker_kio_routes.h> // the webhook groups and URL of those requests (krunker_kio_routes.c)
 #include <weapons.h>
 #include <cJSON.h>
 #include <html_dom.h>
@@ -3658,18 +3660,33 @@ static void hub_brain_api(const cJSON *frame) {
     const char *path = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
     const cJSON *params = cJSON_GetArrayItem(frame, 2);
     if (!path) return;
-    char url[512], enc[256];
-    int n = snprintf(url, sizeof(url), "/api%s?", path);
+    const int kio = account_backend() == ACCOUNT_BACKEND_KRUNKER;
+    char query[480], enc[256];
+    int n = 0;
     const cJSON *p;
     cJSON_ArrayForEach(p, params) {
         if (cJSON_IsString(p)) backend_url_encode(enc, sizeof(enc), p->valuestring);
         else js_num(enc, sizeof(enc), cJSON_GetNumberValue(p));
-        n += snprintf(url + n, sizeof(url) - (size_t) n, "%s=%s&", p->string, enc);
-        if ((size_t) n >= sizeof(url)) return;
+        n += snprintf(query + n, sizeof(query) - (size_t) n, "%s=%s&", p->string, enc);
+        if ((size_t) n >= sizeof(query)) return;
     }
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
-    if (acc) snprintf(url + n, sizeof(url) - (size_t) n, "accountId=%d", acc->id);
+    if (acc && (!kio || acc->id > 0)) snprintf(query + n, sizeof(query) - (size_t) n, "accountId=%d", acc->id);
+    char url[640];
     char *copy = strdup(path);
+    if (kio) {
+        // v10's listMaps / searchMap / listMods (v10:131895-131941) are the data client's webhooks (api.krunker.io);
+        // a path with no webhook is a brain-only route and is not asked of krunker.io
+        const char *group = krunker_kio_webhook_group(path, cJSON_GetStringValue(cJSON_GetObjectItem(params, "type")));
+        char base[256];
+        krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+        int sent = 0;
+        if (group && copy && krunker_kio_webhook_url(url, sizeof(url), base, group, query))
+            sent = backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, hub_brain_api_done, copy) != 0;
+        if (!sent) free(copy);
+        return;
+    }
+    snprintf(url, sizeof(url), "/api%s?%s", path, query);
     if (copy && !backend_http_get(url, hub_brain_api_done, copy)) free(copy);
 }
 

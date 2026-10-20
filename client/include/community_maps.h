@@ -2,6 +2,8 @@
 // Community maps for the Games window (windows[9]) and the Host Game flow: Krunker v10.0.2's
 // searchMap(val, cat), selectHostMap(name, modURL, id, creator) and playMap / "/?play=<name>",
 // served by kn_brain (/api/maps, /api/search, /api/map-data: services/brain/creations.c).
+// While krunker.io is the active account backend (the brain gate), the Search tab's Community and All and the tab
+// lists come from krunker.io's data client instead (api.krunker.io webhooks: krunker_kio_routes.h); Official stays the catalogue.
 //
 // The Host Game flow picks its map through community_host.h (community_pick / community_host_slot).
 // client/src/ui/community_maps.c has the HTTP and the session cache; community_maps_core.c the

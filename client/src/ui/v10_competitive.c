@@ -21,6 +21,8 @@
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <ranked.h>
+#include <v10_social.h>      // v10_gapi_http: the official account's leaderboards (gapi, v10_gapi.c)
+#include <krunker_kio_routes.h> // the gapi path of a leaderboard (krunker_kio_routes.c)
 #include <ruleset.h>
 #include <math.h>
 #include <stdio.h>
@@ -154,7 +156,10 @@ const V10Req *v10_get(const char *path, const int ttl_ms) {
     ReqSlot *s = req_find(path);
     const double now = now_ms();
     if (s && (s->inflight || !s->at_ms || ttl_ms <= 0 || now - s->at_ms < ttl_ms)) return &s->req;
-    if (backend_available() != 1) {
+    // the official account reads its leaderboards from gapi (v10's leaderboards client, v10:26987): the brain is not
+    // asked then, and a path with no gapi route is not sent at all
+    const int kio = account_backend() == ACCOUNT_BACKEND_KRUNKER;
+    if (!kio && backend_available() != 1) {
         static const V10Req offline = {-1, NULL};
         return s ? &s->req : &offline;
     }
@@ -167,7 +172,14 @@ const V10Req *v10_get(const char *path, const int ttl_ms) {
     s->gen = g_req_gen;
     char *key = strdup(path);
     s->inflight = 1;
-    if (!key || !backend_http_get(path, on_req, key)) {
+    int sent;
+    if (kio) {
+        char gpath[320];
+        sent = key && krunker_kio_gapi_leaderboard_path(gpath, sizeof(gpath), path) != 0 && v10_gapi_http(gpath, on_req, key);
+    } else {
+        sent = key && backend_http_get(path, on_req, key);
+    }
+    if (!sent) {
         free(key);
         s->inflight = 0;
         s->req.status = -1;

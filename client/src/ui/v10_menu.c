@@ -52,8 +52,9 @@
 #include <krunker_account.h>
 #include <krunker_net.h>
 #include <krunker_lobbies.h> // Popular Now: krunker.io's custom games
+#include <krunker_kio_routes.h> // the streams' krunker.io URL (krunker_kio_routes.c)
 #include <v10_wallet.h>       // the header's Wallet: the Wallet and Inventory modal (v10_wallet.c)
-#include <v10_social.h>       // v10_gapi_http: the official account's streams (gapi getTopStreams)
+#include <v10_social.h>       // the Social hub's gapi reads (v10_gapi.c)
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <store_spins.h>
@@ -650,9 +651,15 @@ static void streams_body(void *user, const int status, const char *body, size_t 
 
 static void streams_fetch(void) {
     if (L.override) return;
-    // the official account: krunker.io's gapi (v10 getTopStreams); otherwise kn_brain's route
-    const int sent = account_backend() == ACCOUNT_BACKEND_KRUNKER ? v10_gapi_http("/streams/top?cb=2", streams_body, NULL)
-                                                                  : backend_available() == 1 && backend_http_get("/streams/top?cb=2", streams_body, NULL);
+    int sent;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // the official account: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there)
+        char base[256], url[320];
+        krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+        sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
+    } else {
+        sent = backend_available() == 1 && backend_http_get("/streams/top?cb=2", streams_body, NULL);
+    }
     if (!sent) streams_apply(NULL);
 }
 
