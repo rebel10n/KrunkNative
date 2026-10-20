@@ -32,6 +32,7 @@
 #include <object_manager.h> // give: weapon / item names
 #include <target_select.h>  // give: a leading or trailing selector (target_is_selector)
 #include <player_accounts.h> // bot_kick / bot_kill: a bot is a player the server sent NET_PLAYER_INFO_BOT for
+#include <online_mode.h>     // con_dev: the rights the server pushed for this connection (NET_RIGHTS_DEV)
 #include <weapons.h>
 #include <ctype.h>
 #include <math.h>
@@ -219,10 +220,17 @@ static int con_offline(void) {           // Game.singlePlayer
 }
 
 // The server's is_dev for this client (chat_commands is_dev, net_client_is_dev): the offline sandbox's local peer,
-// or the account's DEV flag.
+// the DEV right the server pushed for this connection (NET_RIGHTS_DEV: a DEV account, an op, or a connection from
+// the server's own machine), or the account's DEV flag.
 static int con_dev(void) {
     const AccountInfo *acc = active_account();
-    return con_offline() || (acc && acc->is_dev);
+    const Client *client = con_client();
+    // the rights of this connection only: a server joined before (the rights outlive it) is not this one's
+    const int pushed = client && online_mode_live_ok(client) && (online_mode_server_rights() & NET_RIGHTS_DEV) != 0;
+    // a connection from this machine: the server reads it as local (net_server_client_is_local: 127.x), and local is dev
+    const char *addr = client ? client->net_address : "";
+    const int loopback = client && client->net_connected && (!strncmp(addr, "127.", 4) || !strcmp(addr, "::1") || !strcmp(addr, "localhost"));
+    return con_offline() || pushed || loopback || (acc && acc->is_dev);
 }
 
 static void lower(char *s) {

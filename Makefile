@@ -751,6 +751,10 @@ console-give-autofill-test: build ## Dev console give completion: the selector /
 console-autofill-audit-test: build ## Dev console autofill audited per command: the hint rows of each argument against the parser that runs it (player targets, toggles, maps, class, bots, free text, lists), Enter replies, Tab (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 2400 $(PYTHON) -I client/tests/console_autofill_audit_e2e.py $(DEBUG_DIR)
 
+.PHONY: console-autofill-nondev-test
+console-autofill-nondev-test: build ## Dev console ping hints in a non-dev session on a LAN server (a guest connection from this machine's address; the dev control over loopback) (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1200 $(PYTHON) -I client/tests/console_autofill_nondev_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-visible-test
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
