@@ -894,6 +894,9 @@ static void events_official_hud(Client *client, const uint16_t subtype, const ui
         const char *str[2 + 16];
         const int n = official_strings(body + sizeof(h), length - sizeof(h), str, 2 + (h.argc < 16 ? h.argc : 16));
         if (n < 2) return;
+        // a join / leave / kick / ranked line of an official server: its name is the first argument, shown by the
+        // player it names and never matched in the text (hud_ui_add_official_name_line; the packet has no uid)
+        if (h.kind == NET_CHAT_SERVER && n >= 3 && hud_ui_add_official_name_line(str[1], str + 2, n - 2, h.color[0] ? h.color : SERVER_CHAT_COLOR, h.channel)) return;
         char text[NET_CHAT_TEXT_SIZE];
         i18n_format(text, sizeof(text), str[1], n - 2, str + 2);
         events_official_line(h.kind, h.channel, 0, str[0], text, h.color, h.name_color);

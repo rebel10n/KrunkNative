@@ -76,6 +76,13 @@ static void on_tests(void) {
     CHECK(player_names_clan("[KN]")[0] == 0, "clan tag removed while names are hidden");
     CHECK(player_names_clan(NULL)[0] == 0, "no clan while hidden");
     CHECK(!strcmp(player_names_account("Alice"), "Player"), "the account reads Player while hidden");
+    // one player, one number: an official join line names Frank before its uid is known; the uid's SPAWN keeps the number
+    shown_is(-1, 0, "Frank", "Player_7");
+    player_names_see(70, "Frank");
+    shown_is(70, 0, "Frank", "Player_7");
+    shown_is(-1, 0, "Frank", "Player_7");     // a name with no uid finds its player
+    player_names_see(80, "Grace");
+    shown_is(80, 0, "Grace", "Player_8");     // a new player: the next number
 }
 
 static void reset_tests(void) {

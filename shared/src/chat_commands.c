@@ -179,6 +179,21 @@ static const char *player_label(const Player *player, char *buf, const size_t n)
     return buf;
 }
 
+// A reply about one player: the template's first "$" stands for the player's name, and the name travels apart from the
+// text (a server line about the player, game_send_server_line: NET_EXT_KN_SERVER_LINE to an EXT peer, which shows the
+// name as Hide player names shows it, so a name equal to a word of the template is never rewritten inside it). The
+// console has no connection: it gets the composed text.
+static void reply_about(ChatCtx *c, const Player *target, const char *template) {
+    char name[PLAYER_NAME_SIZE + 16], text[CHAT_TEXT_MAX];
+    player_label(target, name, sizeof(name));
+    if (c->sender == CHAT_CMD_CONSOLE) {
+        net_format_server_line(text, sizeof(text), template, name);
+        send_split(c, c->sender, text);
+        return;
+    }
+    game_send_server_line(c->host->game, c->sender, target->uid, name, template);
+}
+
 // fields [name, alias, id] normalised
 static int player_fields(const Player *player, char fields[2][64]) {
     char id[16];
@@ -415,8 +430,9 @@ static void run_toggle(ChatCtx *c, const char *label, const ToggleGet get, const
     for (int i = 0; i < t.targets.count; i++) set(c, t.targets.players[i], t.targets.players[i]->uid, next);
     if (t.is_self) reply(c, "%s %s", label, next ? "ON" : "OFF");
     else if (!t.targets.selector) {
-        char name[PLAYER_NAME_SIZE + 16];
-        reply(c, "%s %s on %s", label, next ? "ON" : "OFF", player_label(t.targets.players[0], name, sizeof(name)));
+        char template[PLAYER_NAME_SIZE + 64];
+        snprintf(template, sizeof(template), "%s %s on $", label, next ? "ON" : "OFF");
+        reply_about(c, t.targets.players[0], template);
     } else {
         reply(c, "%s %s: %d %s", label, next ? "ON" : "OFF", t.targets.count, players_word(t.targets.count));
     }
@@ -629,9 +645,10 @@ static void cmd_ip(ChatCtx *c) {
     }
     Player *target = resolve_or_reply(c, c->rest);
     if (!target) return;
-    char label[PLAYER_NAME_SIZE + 16];
+    char template[PLAYER_NAME_SIZE + 64];
     const char *address = peer_address(c, target);
-    reply(c, "%s: %s", player_label(target, label, sizeof(label)), address ? address : "(no address)");
+    snprintf(template, sizeof(template), "$: %s", address ? address : "(no address)");
+    reply_about(c, target, template);
 }
 
 // isLikelyIpLiteral
@@ -762,9 +779,10 @@ static void cmd_ping(ChatCtx *c) {
     if (!target) return;
     ChatPeer peer;
     const int ping = peer_by_id(c->host, target->uid, &peer) ? peer.ping_ms : -1;
-    char label[PLAYER_NAME_SIZE + 32], name[PLAYER_NAME_SIZE + 16];
-    snprintf(label, sizeof(label), "%s's ping", player_label(target, name, sizeof(name)));
-    ping_report(c, label, ping);
+    char template[64]; // the name apart from the text (reply_about): "$" is the player's name
+    if (ping < 0) snprintf(template, sizeof(template), "$'s ping: calculating");
+    else snprintf(template, sizeof(template), "$'s ping: %d ms", ping);
+    reply_about(c, target, template);
 }
 
 static void cmd_end(ChatCtx *c) {
@@ -1741,8 +1759,7 @@ static void tp_move(Game *game, Player *player, const vec3 feet) {
 static Player *tp_spawned_target(ChatCtx *c, const char *query) {
     Player *target = resolve_or_reply(c, query);
     if (target && !target->active) {
-        char label[PLAYER_NAME_SIZE + 16];
-        reply(c, "%s is not spawned.", player_label(target, label, sizeof(label)));
+        reply_about(c, target, "$ is not spawned.");
         return NULL;
     }
     return target;
@@ -1881,8 +1898,9 @@ static void cmd_bring(ChatCtx *c) {
         return;
     }
     tp_move(game, target, to);
-    char label[PLAYER_NAME_SIZE + 16];
-    reply(c, "Brought %s to %s.", player_label(target, label, sizeof(label)), where);
+    char template[PLAYER_NAME_SIZE + 128];
+    snprintf(template, sizeof(template), "Brought $ to %s.", where);
+    reply_about(c, target, template);
 }
 
 // autofill [on|off|<players>] (KrunkNative): the server.cfg bot_quota fill turned on / off at run

@@ -65,6 +65,8 @@ void hud_ui_hit(Client*, int kill);
 #include <net_ext.h>     // NET_RIGHTS_*
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
+#include <i18n.h>        // hud_ui_add_official_name_line: the official line's template
+#include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
 #include <cJSON.h>
@@ -2415,6 +2417,71 @@ void hud_chat_hide_names(const char *in, char *out, const size_t size) {
     out[o] = 0;
 }
 
+// The uid of the player whose stored name is `name` among the players this match knows (the players, the numbered
+// players who left); -1 when none. The players are numbered by uid (player_names.h), so a uid is the key.
+static int hud_chat_uid_of_name(const Client *client, const char *name) {
+    for (size_t i = 0; client && i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (p && !strcmp(p->name, name)) return p->uid;
+    }
+    for (int i = 0;; i++) {
+        int uid = -1;
+        const char *entry = NULL;
+        if (!player_names_entry(i, &uid, &entry)) break;
+        if (uid >= 0 && entry && !strcmp(entry, name)) return uid;
+    }
+    return -1;
+}
+
+// The name a player shows in an official server's named line (hud_ui_add_official_name_line). The line carries the
+// name only, no uid: the argument is matched whole against the players this match knows (the local player, the players,
+// the numbered players who left, a scenario's scoreboard), and the player is shown as its uid is. v10's hidden form
+// "Player_<sid>" (getName with no viewer account) names the sid, which is the uid on an official server
+// (client/src/net/krunker_link.c). Any other name is numbered by itself. The template is never searched: a name equal to
+// one of its words cannot garble it, and the name is never shown raw while names are hidden.
+static void hud_chat_shown_player_name(const char *field, char *out, const size_t size) {
+    const char *raw = field ? field : "";
+    const Client *client = menu_ui()->client;
+    int uid = -1, self = 0;
+    char real[PLAYER_NAME_SIZE];
+    snprintf(real, sizeof(real), "%s", raw);
+    if (client && raw[0]) {
+        if (client->me && !strcmp(client->me->name, raw)) {
+            uid = client->me->uid;
+            self = 1;
+        }
+        if (uid < 0) uid = hud_chat_uid_of_name(client, raw);
+        if (uid < 0 && cJSON_IsArray(g_hud_override.scoreboard)) { // a scenario's scoreboard: its row named `raw` (me: you)
+            const cJSON *row;
+            cJSON_ArrayForEach(row, g_hud_override.scoreboard) {
+                const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name"), *me = cJSON_GetObjectItemCaseSensitive(row, "me");
+                if (cJSON_IsString(n) && !strcmp(n->valuestring, raw) && cJSON_IsTrue(me)) self = 1;
+            }
+        }
+        const size_t len = strlen(raw);
+        if (uid < 0 && !self && len > 7 && len <= 16 && !strncmp(raw, "Player_", 7) && raw[7] >= '0' && raw[7] <= '9') {
+            char *end = NULL;
+            const long sid = strtol(raw + 7, &end, 10);
+            if (end && !*end && sid >= 0 && sid <= INT_MAX) uid = (int) sid;
+            if (uid >= 0 && client->me && uid == client->me->uid) self = 1;
+            // the stored name of that uid (player_names_shown keeps its newest name): the sid is never stored over it
+            for (size_t i = 0; uid >= 0 && i < client->game.player_count; i++) {
+                const Player *p = client->game.players[i];
+                if (p && p->uid == uid && p->name[0]) snprintf(real, sizeof(real), "%s", p->name);
+            }
+            for (int i = 0; uid >= 0; i++) {
+                int entry_uid = -1;
+                const char *entry = NULL;
+                if (!player_names_entry(i, &entry_uid, &entry)) break;
+                if (entry_uid == uid && entry && entry[0]) snprintf(real, sizeof(real), "%s", entry);
+            }
+        }
+    }
+    char shown[PLAYER_NAME_SIZE];
+    const char *name = player_names_shown(uid, self, real, shown, sizeof(shown));
+    snprintf(out, size, "%s", name ? name : "");
+}
+
 // The row of `msg` as it is: a line whose names are already shown (hud_ui_add_server_line) takes no name rewrite.
 static void hud_add_chat_row_shown(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
@@ -2444,6 +2511,37 @@ static void hud_add_chat_row_on(const char *name, const char *msg, const char *c
 
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
     hud_add_chat_row_on(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]), "line");
+}
+
+// A server line whose names are already shown (hud_ui_add_official_name_line): the row as it is, on the channel
+// hud_ui_add_chat_line_on would give it.
+static void hud_ui_add_chat_line_shown(const char *msg, const char *color, const int channel) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    hud_add_chat_row_shown(NULL, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, "line");
+}
+
+// An official server's named line ("chi" [key, name, ...] of a join, leave, kick, ban, vote kick, arrest or ranked
+// leave: the player's name is the first argument): the name as its player shows it (hud_chat_shown_player_name), the
+// template translated (i18n_format), and the row shown as it is, in the chat and the developer console. 0 for any
+// other key: the caller shows that line as it did.
+int hud_ui_add_official_name_line(const char *key, const char *const *args, const int argc, const char *color, const int channel) {
+    static const char *const named[] = {"server.message.join", "server.message.left", "server.message.kicked",
+                                        "server.message.banned", "server.message.votekicked", "server.message.arrested",
+                                        "server.message.ranked"};
+    if (!key || !args || argc < 1 || !args[0]) return 0;
+    int is_named = 0;
+    for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) is_named |= !strcmp(key, named[i]);
+    if (!is_named) return 0;
+    const int n = argc < 16 ? argc : 16;
+    const char *argv[16];
+    char shown[PLAYER_NAME_SIZE], text[NET_CHAT_TEXT_SIZE];
+    hud_chat_shown_player_name(args[0], shown, sizeof(shown));
+    argv[0] = shown;
+    for (int i = 1; i < n; i++) argv[i] = args[i];
+    i18n_format(text, sizeof(text), key, n, argv);
+    ui_console_on_server_line(text);
+    hud_ui_add_chat_line_shown(text, color, channel);
+    return 1;
 }
 
 // Settings > Chat "Show Player Messages" (showMessages) off: the human rows already in #chatList go.

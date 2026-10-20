@@ -85,13 +85,17 @@ def game_edit(st):
         {"rank": 1, "name": "Zelda", "score": 9, "me": True},
         {"rank": 2, "name": "Quentin", "score": 5, "premium": 1, "verified": 1},
         {"rank": 3, "name": "Rhea", "score": 2},
+        {"rank": 4, "name": "game", "score": 1},  # a template word: "joined the game" is the server's own line
     ]
     st["chat"] = [{"name": "Quentin", "msg": "gg, hi"},
                   {"name": "Rhea", "msg": "Quentin, gg"},
-                  {"text": "Zelda joined the game", "color": "#fc03ec"},
-                  {"text": "Quentin joined the game", "color": "#fc03ec"},
-                  {"text": "Rhea left the game", "color": "#fc03ec"},
-                  {"text": "Quentin left for a ranked match", "color": "#fc03ec"}]
+                  # the official server's lines ("chi" [key, name]): the name is the argument, the template is never
+                  # searched, so a player named "game" reads Player_3 joined the game, not a rewrite inside the words
+                  {"official": "server.message.join", "args": ["Zelda"]},
+                  {"official": "server.message.join", "args": ["Quentin"]},
+                  {"official": "server.message.left", "args": ["Rhea"]},
+                  {"official": "server.message.ranked", "args": ["Quentin"]},
+                  {"official": "server.message.join", "args": ["game"]}]
 
 
 def death_edit(st):
@@ -213,6 +217,10 @@ def main():
         check("game on: the console's sender reads Player_1", "Player_1: gg, hi" in console, f"{console[:6]}")
         check("game on: the console's names in the text read Player_1 too", "Player_2: Player_1, gg" in console, f"{console[:6]}")
         check("game on: the console's join line reads Player", "Server: Player joined the game" in console)
+        check("game on: the official join line of game reads Player_3 in the chat and the console (no garbled template)",
+              "Player_3 joined the game" in texts and "Server: Player_3 joined the game" in console
+              and not any("Player_3 joined the Player" in t or "game joined" in t for t in texts + console),
+              f"{texts} | {console[:6]}")
         check("game on: no raw name is left in the console (Quentin, Rhea, Zelda)",
               console and not any(n in line for line in console for n in ("Quentin", "Rhea", "Zelda")), f"{console[:6]}")
 
@@ -225,6 +233,7 @@ def main():
         check("game off: no Player_<n> appears", not re.search(r"Player_\d", doc))
         check("game off: the join and ranked lines keep the names", "Quentin joined the game" in doc and "Quentin left for a ranked match" in doc)
         check("game off: your join and the leave line keep the names", "Zelda joined the game" in doc and "Rhea left the game" in doc)
+        check("game off: the official join line keeps the name game", "game joined the game" in doc)
         console = console_lines(LAST_OUT)
         check("game off: the console keeps the sender and the text", "Quentin: gg, hi" in console and "Rhea: Quentin, gg" in console, f"{console[:6]}")
         check("game off: the console has no Player_<n>", console and not any(re.search(r"Player_\d", line) for line in console))

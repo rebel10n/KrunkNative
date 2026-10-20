@@ -11,7 +11,9 @@
 // (streamer mode's scrambling is still applied by the caller, and it passes through a hidden name).
 #include <stddef.h>
 
-// The name to show for a player. uid: its uid (-1: no uid, numbered by name). self: the local player.
+// The name to show for a player. uid: its uid (-1: no uid, numbered by the player of that name: one player, one number,
+// so a name first seen with no uid, an official server's join line, keeps its number when its uid comes). self: the
+// local player.
 // Not hidden: `name` itself. Hidden: "Player" (self) or "Player_<n>", written to `out` (size bytes) and returned.
 const char *player_names_shown(int uid, int self, const char *name, char *out, size_t size);
 // The account's own name (menu, account window, the local player's rows): "Player" when hidden.

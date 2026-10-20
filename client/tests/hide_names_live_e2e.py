@@ -74,6 +74,9 @@ def run(tag, hidden):
             "5000 grep @me Player [class^=leaderNameM]",
             "5000 rows @joins [id^=chatMsg_]",
             "5200 con bot_kick all",
+            "5210 con bot_add 1 name=ping",  # after the kick, alone: a fourth add in the seeding frame was dropped
+            "5350 con say /ping ping",
+            "5450 rows @pings [id^=chatMsg_]",
             "5600 rows @leaves [id^=chatMsg_]",
             "5700 quit",
         ]) + "\n")
@@ -103,6 +106,12 @@ def run(tag, hidden):
     # every row that is a join or a leave (by its verb), so a garbled one is checked too, not dropped
     join_lines = [t for t in rows(lines, "@joins") if " joined " in t]
     leave_lines = [t for t in rows(lines, "@leaves") if " left " in t]
+    # the reply to /ping about the bot named ping (a word of the reply's own template): the name is the one the
+    # reply's name stands for (Player_<n> with the setting on), the template is never rewritten inside itself
+    pings = [t for t in rows(lines, "@pings") if "'s ping: " in t]
+    ping_line = r"Player_\d+'s ping: (calculating|\d+ ms)" if hidden else r"ping's ping: (calculating|\d+ ms)"
+    check(f"{'on' if hidden else 'off'}: the ping reply about the bot named ping reads exactly",
+          len(pings) == 1 and re.fullmatch(ping_line, pings[0]) is not None, f"ping lines {pings} rows {rows(lines, '@pings')}")
     if hidden:
         check("on: the scoreboard lists you and the three bots", n_rows >= 4, f"rows {n_rows}")
         check("on: the bots read Player_<n> on the scoreboard", n_pn >= 3, f"Player_ rows {n_pn}")

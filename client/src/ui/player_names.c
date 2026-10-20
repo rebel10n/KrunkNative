@@ -29,13 +29,29 @@ int player_names_hidden(void) {
 }
 
 // The player's number, handed out on first sight. 0 when the table is full (shown as "Player").
+// One player, one number: a uid finds its entry, and a player first named with no uid (an official server's join line,
+// which names the player before its uid is known) is adopted by that uid when it comes. A name with no uid finds the
+// player who has that name.
 static int pn_number(const int uid, const char *name) {
-    for (int i = 0; i < g_pn_count; i++) {
-        PnEntry *e = &g_pn[i];
-        if (uid >= 0 ? e->uid == uid : (e->uid < 0 && !strcmp(e->name, name ? name : ""))) {
+    const char *who = name ? name : "";
+    if (uid >= 0) {
+        for (int i = 0; i < g_pn_count; i++) {
+            PnEntry *e = &g_pn[i];
+            if (e->uid != uid) continue;
             // a reused uid: its newest name (never copied onto itself: the rewrite of a chat line passes e->name back in)
-            if (uid >= 0 && name && name[0] && strcmp(e->name, name)) snprintf(e->name, sizeof(e->name), "%s", name);
+            if (name && name[0] && strcmp(e->name, name)) snprintf(e->name, sizeof(e->name), "%s", name);
             return e->number;
+        }
+        for (int i = 0; name && name[0] && i < g_pn_count; i++) {
+            PnEntry *e = &g_pn[i];
+            if (e->uid < 0 && !strcmp(e->name, name)) {
+                e->uid = uid;
+                return e->number;
+            }
+        }
+    } else {
+        for (int i = 0; i < g_pn_count; i++) {
+            if (!strcmp(g_pn[i].name, who)) return g_pn[i].number;
         }
     }
     if (g_pn_count >= PN_MAX) return 0;

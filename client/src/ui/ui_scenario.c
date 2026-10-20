@@ -970,6 +970,18 @@ static void apply_chat(void) {
     cJSON_ArrayForEach(row, chat) {
         const char *name = obj_str(row, "name"), *msg = obj_str(row, "msg");
         const char *text = obj_str(row, "text"), *color = obj_str(row, "color");
+        // an official server's named line ("chi" key [name, ...]): the game's own path (hud_ui_add_official_name_line)
+        const char *official = obj_str(row, "official");
+        if (official) {
+            const char *args[16];
+            int argc = 0;
+            const cJSON *arg;
+            cJSON_ArrayForEach(arg, cJSON_GetObjectItemCaseSensitive(row, "args")) {
+                if (argc < 16 && cJSON_IsString(arg)) args[argc++] = arg->valuestring;
+            }
+            hud_ui_add_official_name_line(official, args, argc, NULL, -1);
+            continue;
+        }
         // the dev console mirrors every chat line the game receives (events_chat); its names are hidden there too
         if (name && msg) {
             char pn[PLAYER_NAME_SIZE]; // the scenario's sender as the game's chat shows it (Hide player names)

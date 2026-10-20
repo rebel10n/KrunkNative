@@ -382,6 +382,10 @@ void hud_ui_add_chat_channel(const char *name, const char *msg, const char *colo
 // A game / server line (no sender) on a chat tab (0 global, 1 team; every tab outside team modes, -1 always),
 // in `color` (NULL: the plain style): an official lobby's addChat lines (game_events.c NET_EXT_KN_OFFICIAL_CHAT)
 void hud_ui_add_chat_line_on(const char *msg, const char *color, int channel);
+// An official server's named line (join / leave / kick / ranked: "chi" key [name, ...]; the name is args[0]): shown by
+// the name's player identity and the template translated, the row and the console echo with no text rewrite. 0 when
+// `key` is no such line (the caller shows it as before).
+int hud_ui_add_official_name_line(const char *key, const char *const *args, int argc, const char *color, int channel);
 void hud_ui_add_player_chat(const char *name, const char *msg, int human); // a NET_CHAT_PLAYER line: human hidden by Show Player Messages off, a bot's always shown
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
 void hud_ui_clear_player_chat(void);             // showMessages off: the human rows of #chatList go; bot and system rows stay
