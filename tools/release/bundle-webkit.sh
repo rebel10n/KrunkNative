@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # the loader's $ORIGIN is single-quoted on purpose (RUNPATH)
-# Bundles WebKitGTK (webkit2gtk-4.1) into a dynamic Linux client build, for the captcha window
+# Bundles WebKitGTK (webkit2gtk-4.1) into a dynamic Linux client build, for the captcha webview
 # (client/src/ui/kn_webview.c, KN_WEBVIEW=ON): a packaged client then shows krunker.io's security
 # check with no system package installed. Run by build-client-linux.sh (dynamic) after client_bin is
 # linked, on the same host, so the bundled libraries are the ones client_bin was linked against.

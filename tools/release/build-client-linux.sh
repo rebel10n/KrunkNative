@@ -4,7 +4,7 @@
 # ubuntu-22.04 / ubuntu-22.04-arm) or in an ubuntu:22.04 container (--docker), amd64 or aarch64:
 #
 #   dynamic     the distro build: links the system OpenSSL 3 (libssl3: security updates come from
-#               the distro) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha window
+#               the distro) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha webview
 #               (tools/release/bundle-webkit.sh: lib/, libexec/). Packages: linux-<arch>.
 #   polyfilled  for old and new distros alike (fastfetch's "-polyfilled"): OpenSSL static too
 #               (libssl.a), then polyfill-glibc --target-glibc=2.17 rewrites the newer glibc symbol
@@ -126,7 +126,7 @@ if [[ " ${targets[*]} " == *" kn_launcher "* ]]; then
 fi
 for f in "${bins[@]}"; do strip --strip-unneeded "$out/$f"; done
 if [ "$variant" = dynamic ]; then
-    # WebKitGTK for the captcha window, beside the binaries: lib/, libexec/, webkit-bundle.txt. It
+    # WebKitGTK for the captcha webview, beside the binaries: lib/, libexec/, webkit-bundle.txt. It
     # links client_bin to the bundle (RUNPATH) and checks that it does
     "$repo/tools/release/bundle-webkit.sh" "$out"
 fi

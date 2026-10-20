@@ -1,29 +1,17 @@
-// The "Security Challenge" modal of official krunker.io games (client/include/krunker_captcha.h,
-// doc/v10/official-captcha.md): the matchmaker's Cloudflare Turnstile, solved by the player, and the
-// game socket's ALTCHA proof of work, solved by krunker_altcha.c and only shown here.
+// The Security Challenge of official krunker.io games (client/include/krunker_captcha.h,
+// doc/v10/official-captcha.md): the matchmaker's Cloudflare Turnstile, solved by the player, and the game
+// socket's ALTCHA proof of work, solved by krunker_altcha.c (nothing is shown for it).
 //
-// The look is v10's: the Turnstile widget centred on v10's black loading overlay (rgba(0, 0, 0, 0.7),
-// the spinner's place while the join loads: the #instructions ring is hidden meanwhile), v10's white
-// and grey type, the 15 px gap of its loading overlay, Cancel. The v3.1.1 white box is gone; the text
-// stays "Please complete the security challenge to continue.", in ui/css/krunknative.css (.kn-captcha-*).
-// The markup is built here on the page's <body> (outside #uiBase, so the closed-menu pointer rule does
-// not reach it), the same on both platforms; its buttons call the one page handler knCaptcha(n).
-//
-// Web: the real Turnstile widget (the script loads on demand, like the live getCaptchaToken, :115623,
-// with the current build's site key (krunker_build_live.h) and appearance "interaction-only"). Its sitekey only works on the
-// domains Cloudflare has for it: elsewhere (krunk.io) it answers 110200 (or another 1101xx / 1102xx
-// code), which the modal says. Retry renders the widget again; Cancel ends the request.
-// Native with a webview (kn_webview.h, KN_WEBVIEW): silent first. The challenge runs hidden on a real krunker.io page (a GTK
-// offscreen host, no window); the modal stays hidden while it passes by itself. Only when the player is
-// needed (Cloudflare asks for it, a widget error / timeout, or no token in time) does the modal come up
-// with the challenge drawn in it (the game UI: the webview's frames in a canvas, the pointer and keys
-// forwarded to it, no OS window) and Cancel; its token comes back here. The challenge's own window is
-// the fallback when the game UI cannot draw it, and a window-only run (KRUNKNATIVE_CAPTCHA_WINDOW=1)
-// shows "Solve the challenge" instead; closing that window brings the modal back the same way.
-// Native without a webview, or when the webview cannot start or load: no challenge can be shown, so the
-// modal never comes up. The request ends with unavailable = 1 and krunker_net.c retries its seek without
-// a token (the matchmaker often lets that through); if it refuses again, the join fails with a one-line
-// sentence on the error screen.
+// What is shown is the Turnstile widget and nothing else: no box, no text, no button, the way krunker.io does
+// it (game.deob.js getCaptchaToken: appearance "interaction-only", rendered into a holder centred on the screen).
+// It takes the place of the join's loading spinner (#instructions, hidden while the widget is up, back when the
+// request ends). Web: the widget is Cloudflare's own (the script loads on demand). Native with a webview
+// (kn_webview.h, KN_WEBVIEW): the challenge runs hidden on a real krunker.io page and the spinner stays while it
+// passes by itself; when the player is needed the view's frames are drawn in the same spot (a canvas, the pointer
+// and keys forwarded to it). The challenge is never in an OS window.
+// A challenge that cannot be completed (no webview, a load, widget or token error, expiry, a timeout) ends the
+// request unavailable: the join goes on once without a token, as the live client does, and a refusal then fails
+// the join with the generic error. Nothing is shown for a failure, and no text of this file reaches the page.
 //
 // Tokens: read from the widget / the webview, checked for shape, handed to the requester once, then
 // wiped; never logged, never stored.
@@ -45,36 +33,29 @@
 #include <emscripten.h>
 #endif
 
-#define CAPTCHA_HANDLER "knCaptcha"
 #define CAPTCHA_WIDGET_TIMEOUT_MS 120000.0 // the live getCaptchaToken gives up after 120 s (0x1d4c0)
-// Native: the challenge drawn by the webview in the game UI (kn_webview.h), its frames put here
+// The holder's content: the Turnstile widget (web), the webview's canvas (native: its frames, see webview_frame)
 #ifdef __EMSCRIPTEN__
-#define CAPTCHA_CANVAS ""
+#define CAPTCHA_CONTENT "<div id=\"knTurnstileHolder\" class=\"kn-captcha-widget\"></div>"
 #else
-#define CAPTCHA_CANVAS "<canvas id=\"knCaptchaWebview\" class=\"kn-captcha-webview\" style=\"display:none\"></canvas>"
+#define CAPTCHA_CONTENT "<canvas id=\"knCaptchaWebview\" class=\"kn-captcha-webview\" style=\"display:none\"></canvas>"
 #endif
-#define POW_FAILED_MS 4500.0                // a failed proof of work stays on screen this long
-
-enum { // knCaptcha(n)
-    ACT_CANCEL = 1,
-    ACT_RETRY = 2, // web: render the widget again
-    ACT_SOLVE = 3, // native: open (or raise) the webview with krunker.io's challenge
-};
 
 static struct {
     int asking;
     int attempt, rejected;
     KrunkerCaptchaDone done;
     void *user;
-    unsigned gen;      // per request: late widget events of an older one are ignored
-    int widget;        // web: the Turnstile widget is the path
-    int webview;       // native: the challenge window (kn_webview.h) is the path
-    int widget_timer;  // html_timer id of the widget's 120 s limit
-    int handler_set;
+    unsigned gen;        // per request: late widget events of an older one are ignored
+    int widget;          // web: the Turnstile widget is the path
+    int webview;         // native: the challenge webview (kn_webview.h) is the path
+    int frame_seen;      // native: the first frame is drawn (the spinner stays up until then: the loading state)
+    int spinner_hidden;  // the join's spinner is hidden by this file, and comes back with it
+    int widget_timer;    // html_timer id of the widget's 120 s limit
     int present_pending; // asked before the page was up: shown once it is (krunker_captcha_tick)
-    int pow_shown, pow_timer;
-    int needs_player;  // the modal is up with something to click or type (not the passive notice)
-    int inline_press;  // native: a press of the pointer went to the webview in the game UI (its release does too)
+    int needs_player;    // the widget is up and waits for the player (the menu's clicks and typing go to it)
+    int inline_press;    // native: a press of the pointer went to the webview (its release does too)
+    int pow_failed;      // the failed "cpt" is logged once (the socket's outcome and its notice both end here)
 } C;
 
 static void wipe(void *p, size_t n) {
@@ -82,35 +63,16 @@ static void wipe(void *p, size_t n) {
     while (n--) *v++ = 0;
 }
 
-// ---------------------------------------------------------------- markup
+// ---------------------------------------------------------------- the holder
 
-static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
-
-// The modal's markup in the page's language (kn.captcha.*: strings v10 does not have).
+// The holder on <body>, made on first use (the page may have been rebuilt: look it up every time). It is the
+// challenge's one element: centred on the screen where the join's spinner is, hidden until the widget is shown.
 static char *markup(void) {
     StrBuf sb = {0};
-    sb_appendf(&sb,
-               "<div id=\"knCaptchaHolder\" class=\"kn-captcha-holder\" style=\"display:none\">"
-               "<div id=\"knCaptchaModal\" class=\"kn-captcha-modal\">"
-               "<div class=\"kn-captcha-title\">%s</div>"
-               "<div id=\"knCaptchaText\" class=\"kn-captcha-text\">%s</div>" CAPTCHA_CANVAS
-               "<div id=\"knTurnstileHolder\" class=\"kn-captcha-widget\"></div>"
-               "<div id=\"knCaptchaStatus\" class=\"kn-captcha-status\"></div>"
-               "<div id=\"knCaptchaRetry\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(2)\" style=\"display:none\">%s</div>"
-               "<div class=\"kn-captcha-row kn-captcha-actions\">"
-               "<div id=\"knCaptchaSolve\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(3)\" style=\"display:none\">%s</div>"
-               "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(1)\">%s</div>"
-               "</div>"
-               "</div></div>",
-               I18N("kn.captcha.title", "Security Challenge"),
-               I18N("kn.captcha.text", "Please complete the security challenge to continue."),
-               I18N("kn.captcha.retry", "Try again"),
-               I18N("kn.captcha.solve", "Solve the challenge"),
-               I18N("generic.cancel", "Cancel"));
+    sb_appendf(&sb, "<div id=\"knCaptchaHolder\" class=\"kn-captcha-holder\" style=\"display:none\">" CAPTCHA_CONTENT "</div>");
     return sb_finish(&sb);
 }
 
-// The holder on <body>, made on first use (the page may have been rebuilt: look it up every time).
 static HtmlElem holder(void) {
     if (!html_ui_available() || !html_ui_is_ready()) return 0;
     HtmlElem h = html_dom_by_id("knCaptchaHolder");
@@ -122,10 +84,6 @@ static HtmlElem holder(void) {
         free(html);
         h = html_dom_by_id("knCaptchaHolder");
     }
-    if (!C.handler_set) {
-        html_ui_add_handler(CAPTCHA_HANDLER, handle_click);
-        C.handler_set = 1;
-    }
     return h;
 }
 
@@ -134,31 +92,35 @@ static void show(const char *id, const int on) {
     if (e) html_dom_set_display(e, on ? "" : "none");
 }
 
-// The join's loading ring (#instructions: menu_update_instructions' spinner while the game is not yet
-// playable) is the captcha's place on the page: while the modal is up the Turnstile widget stands there
-// on v10's black loading overlay, and the ring comes back when the modal closes.
-static void loading_ring(const int on) { show("instructions", on); }
-
-static void set_text(const char *id, const char *text) {
-    const HtmlElem e = html_dom_by_id(id);
-    if (e) html_dom_set_text(e, text ? text : "");
+// The holder (the widget or the webview's canvas) is shown, or hidden.
+static void holder_show(const int on) {
+    const HtmlElem h = html_dom_by_id("knCaptchaHolder");
+    if (h) html_dom_set_display(h, on ? "" : "none");
 }
 
+// The join's loading spinner (#instructions: the ring while the game is not yet playable) is the widget's place:
+// hidden while the widget is up, back when the request ends (only when this file hid it).
+static void loading_ring(const int on) {
+    if (!on && !C.spinner_hidden) {
+        C.spinner_hidden = 1;
+        show("instructions", 0);
+    } else if (on && C.spinner_hidden) {
+        C.spinner_hidden = 0;
+        show("instructions", 1);
+    }
+}
+
+// The challenge is over on the page: the widget (or the canvas) goes and the spinner comes back.
 static void hide_modal(void) {
-    const HtmlElem h = html_dom_by_id("knCaptchaHolder");
-    if (!h) return;
-    html_dom_set_display(h, "none");
-    loading_ring(1);
-    html_dom_set_class(h, "kn-captcha-passive", 0);
+    holder_show(0);
     show("knCaptchaWebview", 0);
+    loading_ring(1);
     C.needs_player = 0;
     C.inline_press = 0;
 }
 
-// The modal is up and waits for the player (krunker_captcha_needs_player). v10 frees the pointer for
-// its modals (the charge-consent one: `CONTROLS.hasPointerlock && CONTROLS.toggle(false)`, v10.js:
-// 219744) and they take the clicks: menu_ui.c client_pointer_update / main.c html_pointer_input do so
-// while this is set, also from inside a game with the menu closed.
+// The widget is up and waits for the player (krunker_captcha_needs_player): the menu's clicks and typing are left
+// to it (v10 frees the pointer for its modals, v10.js:219744; menu_ui.c and main.c ask this).
 int krunker_captcha_needs_player(void) { return C.asking && C.needs_player; }
 
 // ---------------------------------------------------------------- web: the Turnstile widget
@@ -223,13 +185,13 @@ static void widget_remove(void) {
 #endif
     C.widget = 0;
     C.webview = 0;
-    kn_webview_captcha_close(); // the challenge window, natively (no-op elsewhere)
+    kn_webview_captcha_close(); // the challenge webview, natively (no-op elsewhere)
 }
 
 // ---------------------------------------------------------------- the request
 
-// The request ends: the modal closes and done runs once. token: the Turnstile response (NULL: none);
-// unavailable: no challenge could be shown here (finish_with(NULL, 1)), else the player cancelled.
+// The request ends: the widget goes and done runs once. token: the Turnstile response (NULL: none);
+// unavailable: no challenge could be completed here (finish_with(NULL, 1)), else a token.
 static void finish_with(const char *token, const int unavailable) {
     if (!C.asking) return;
     const KrunkerCaptchaDone done = C.done;
@@ -246,7 +208,7 @@ static void finish(const char *token) { finish_with(token, 0); }
 
 #ifndef __EMSCRIPTEN__
 // The proxy the matchmaker's requests take (http_proxy.h: the client setting, else the environment) as
-// a URI for the challenge window, so the player solves it from the network the seek comes from.
+// a URI for the challenge webview, so the player solves it from the network the seek comes from.
 // "" = direct. Has the credentials: never logged, wiped by the caller.
 static void webview_proxy(char *out, const size_t n) {
     out[0] = 0;
@@ -256,7 +218,7 @@ static void webview_proxy(char *out, const size_t n) {
     char label[200];
     http_proxy_label(&px, label, sizeof(label));
     if (!scheme) {
-        printf("[krunker] captcha: the challenge window cannot use the proxy %s (https:// proxies): it goes direct\n", label);
+        printf("[krunker] captcha: the challenge cannot use the proxy %s (https:// proxies): it goes direct\n", label);
     } else {
         char user[3 * sizeof(px.user)] = "", pass[3 * sizeof(px.pass)] = "";
         for (int k = 0; k < 2; k++) { // percent-encode the credentials
@@ -271,66 +233,28 @@ static void webview_proxy(char *out, const size_t n) {
         const int v6 = strchr(px.host, ':') != NULL; // an IPv6 literal goes in brackets
         snprintf(out, n, "%s://%s%s%s%s%s%s%s:%s", scheme, user, pass[0] ? ":" : "", pass, user[0] ? "@" : "", v6 ? "[" : "", px.host,
                  v6 ? "]" : "", px.port);
-        printf("[krunker] captcha: the challenge window goes through the proxy %s\n", label);
+        printf("[krunker] captcha: the challenge goes through the proxy %s\n", label);
         wipe(user, sizeof(user));
         wipe(pass, sizeof(pass));
     }
     wipe(&px, sizeof(px));
 }
 
-// The modal once the player is needed in the challenge window: the window was shown (KN_WEBVIEW_SHOWN)
-// or the player closed it. "Solve the challenge" raises the window, Cancel ends the join. Native only.
-static void show_window_prompt(const char *status) {
-    const HtmlElem h = holder();
-    if (!h) return;
-    html_dom_set_class(h, "kn-captcha-passive", 0);
-    html_dom_set_display(h, "");
-    loading_ring(0);
-    C.needs_player = 1;
-    show("knTurnstileHolder", 0);
-    show("knCaptchaRetry", 0);
-    show("knCaptchaSolve", 1);
-    show("knCaptchaCancel", 1);
-    show("knCaptchaWebview", 0);
-    set_text("knCaptchaText", I18N("kn.captcha.text", "Please complete the security challenge to continue."));
-    set_text("knCaptchaStatus", status ? status : "");
-}
-
-// The challenge drawn in the game UI (kn_webview_captcha_inline): the modal with its heading, the text and
-// Cancel, and the widget's canvas where the "Solve the challenge" box would be. No button: the widget is
-// what the player clicks (its pointer and keys reach the webview, krunker_captcha_inline_pointer).
-static void show_inline_prompt(const char *status) {
-    const HtmlElem h = holder();
-    if (!h) return;
-    html_dom_set_class(h, "kn-captcha-passive", 0);
-    html_dom_set_display(h, "");
-    loading_ring(0);
-    C.needs_player = 1;
-    show("knTurnstileHolder", 0);
-    show("knCaptchaRetry", 0);
-    show("knCaptchaSolve", 0);
-    show("knCaptchaCancel", 1);
-    show("knCaptchaWebview", 1);
-    set_text("knCaptchaText", I18N("kn.captcha.text", "Please complete the security challenge to continue."));
-    set_text("knCaptchaStatus", status ? status : "");
-}
-
-// Native: krunker.io's challenge in the webview (kn_webview.h), in the game UI (its frames in the modal) with
-// its own window as the fallback, run hidden unless show_now (the player's "Solve the challenge"). 1 = the
-// challenge runs; 0 = no webview here or it could not start (logged): the caller ends the request.
-// Shows nothing itself: the modal waits for KN_WEBVIEW_SHOWN.
+// Native: krunker.io's challenge in the webview (kn_webview.h), run hidden unless show_now. 1 = the challenge
+// runs; 0 = no webview here or it could not start (logged): the caller ends the request. Shows nothing itself:
+// the widget comes up when KN_WEBVIEW_SHOWN arrives.
 static int webview_start(const int show_now) {
     if (!kn_webview_available()) {
-        printf("[krunker] captcha: this build has no challenge webview: no security check can be shown here\n");
+        printf("[krunker] captcha: this build has no challenge webview: no challenge can be shown here\n");
         return 0;
     }
     char err[200], proxy[1024];
     webview_proxy(proxy, sizeof(proxy));
-    const int up = kn_webview_captcha_open(NULL, krunker_build()->turnstile_site_key, I18N("kn.captcha.title", "Security Challenge"), proxy,
-                                           1 /* in_ui: the game UI, the window only as its fallback */, show_now, err, sizeof(err));
+    const int up = kn_webview_captcha_open(NULL, krunker_build()->turnstile_site_key, NULL, proxy, 1 /* in_ui: the game, the only place */,
+                                           show_now, err, sizeof(err));
     wipe(proxy, sizeof(proxy));
     if (!up) {
-        printf("[krunker] captcha: no challenge window (%s): no security check can be shown here\n", err);
+        printf("[krunker] captcha: no challenge webview (%s): no challenge can be shown here\n", err);
         C.webview = 0;
         return 0;
     }
@@ -340,49 +264,44 @@ static int webview_start(const int show_now) {
     return 1;
 }
 
-// The game UI's canvas gets the webview's newest frame (only when the page has painted since the last one).
+// The webview's newest frame goes to the canvas, where the spinner was. The first frame takes the spinner's place
+// (until then the spinner is the loading state).
 static void webview_frame(void) {
     const unsigned char *px = NULL;
     int w = 0, h = 0;
     if (!kn_webview_captcha_frame(&px, &w, &h)) return;
     const HtmlElem c = html_dom_by_id("knCaptchaWebview");
     if (c) html_dom_canvas_put(c, px, w, h);
+    if (!C.frame_seen) {
+        C.frame_seen = 1;
+        show("knCaptchaWebview", 1);
+        holder_show(1);
+        loading_ring(0);
+    }
 }
 
-// One event of the challenge window per frame.
+// One event of the challenge webview per frame.
 static void webview_tick(void) {
     char token[KRUNKER_CAPTCHA_TOKEN_MAX + 1], msg[320];
     const int rc = kn_webview_captcha_poll(token, sizeof(token), msg, sizeof(msg));
     switch (rc) {
         case KN_WEBVIEW_TOKEN:
             if (krunker_captcha_token_shape_ok(token)) {
-                printf("[krunker] captcha: solved in the challenge window (%zu chars)\n", strlen(token));
+                printf("[krunker] captcha: solved in the webview (%zu chars)\n", strlen(token));
                 finish(token);
             } else {
-                printf("[krunker] captcha: the challenge window answered something that is not a token\n");
+                printf("[krunker] captcha: the webview answered something that is not a token\n");
                 C.webview = 0;
-                show_window_prompt(I18N("kn.captcha.notToken", "Cloudflare answered something that is not a token."));
+                finish_with(NULL, 1);
             }
             break;
-        case KN_WEBVIEW_FAILED: // did not load / refused: no challenge can be shown here, the request ends unavailable
-            printf("[krunker] captcha: the challenge window failed: %s\n", msg);
+        case KN_WEBVIEW_FAILED: // did not load / refused / failed: the challenge cannot be completed here
+            printf("[krunker] captcha: the webview failed: %s\n", msg);
             finish_with(NULL, 1);
             break;
-        case KN_WEBVIEW_SHOWN: // Cloudflare needs the player (or no token in time): the challenge is up now
-            if (kn_webview_captcha_inline()) {
-                printf("[krunker] captcha: the challenge is up in the game UI: the player solves it\n");
-                show_inline_prompt(msg);
-            } else {
-                printf("[krunker] captcha: the challenge window is up: the player solves it\n");
-                show_window_prompt(msg);
-            }
-            break;
-        case KN_WEBVIEW_CLOSED:
-            C.webview = 0;
-            show_window_prompt(I18N("kn.captcha.windowClosed", "The challenge window was closed: \"Solve the challenge\" opens it again."));
-            break;
-        case KN_WEBVIEW_STATUS:
-            set_text("knCaptchaStatus", msg);
+        case KN_WEBVIEW_SHOWN: // the player is needed: the widget comes up in the game (its frames once drawn)
+            printf("[krunker] captcha: the player is needed: the widget is shown in the game\n");
+            C.needs_player = 1;
             break;
         default: break;
     }
@@ -394,21 +313,21 @@ static void webview_tick(void) {
 static void widget_timeout(void *user) {
     if ((unsigned) (uintptr_t) user != C.gen || !C.asking || !C.widget) return;
     C.widget_timer = 0;
-    kn_js_turnstile_remove();
-    set_text("knCaptchaStatus", I18N("kn.captcha.timedOut", "The challenge timed out."));
-    show("knCaptchaRetry", 1);
+    printf("[krunker] captcha: the widget timed out\n");
+    finish_with(NULL, 1);
 }
 
 static void widget_start(void) {
     C.widget = 1;
-    show("knTurnstileHolder", 1);
-    show("knCaptchaRetry", 0);
-    set_text("knCaptchaStatus", I18N("kn.captcha.loading", "Loading Cloudflare's challenge..."));
+    holder_show(1);
+    loading_ring(0);
     if (C.widget_timer) html_timer_cancel(C.widget_timer);
     C.widget_timer = html_timer_add(CAPTCHA_WIDGET_TIMEOUT_MS, widget_timeout, (void *) (uintptr_t) C.gen);
     kn_js_turnstile_render((int) C.gen, krunker_build()->turnstile_site_key);
 }
 
+// The widget's events: a token ends the request; an error, an expiry or a timeout ends it without one (the
+// request's unavailable path: the join goes on once without a token, as the live client's null does).
 static void widget_event(const unsigned gen, const int kind, const char *text) {
     if (gen != C.gen || !C.asking || !C.widget) return;
     switch (kind) {
@@ -417,48 +336,24 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
                 printf("[krunker] captcha: Turnstile solved (%zu chars)\n", strlen(text));
                 finish(text);
             } else {
-                set_text("knCaptchaStatus", I18N("kn.captcha.notToken", "Cloudflare answered something that is not a token."));
-                show("knCaptchaRetry", 1);
+                printf("[krunker] captcha: Turnstile answered something that is not a token\n");
+                finish_with(NULL, 1);
             }
             break;
-        case 2: { // error: 1101xx / 1102xx = the sitekey is not valid on this domain
-            const char *code = text ? text : "unknown";
-            printf("[krunker] captcha: Turnstile error %s\n", code);
-            char err[17];
-            snprintf(err, sizeof(err), "%.16s", code);
-            if (!strncmp(code, "1101", 4) || !strncmp(code, "1102", 4)) {
-                // another domain's sitekey: the same refusal again on Retry, so the modal says why and offers Cancel only
-                char origin[160], why[900];
-                html_page_origin(origin, sizeof(origin));
-                I18N_F(why, "kn.captcha.wrongSite",
-                       "Cloudflare won't show krunker.io's challenge on {0}: Turnstile keys only work on the sites they were made for"
-                       " (error {1}).",
-                       origin, err);
-                kn_js_turnstile_remove();
-                set_text("knCaptchaStatus", why);
-                show("knCaptchaRetry", 0);
-            } else {
-                char status[320];
-                I18N_F(status, "kn.captcha.failed", "The challenge failed (Cloudflare error {0}).", err);
-                kn_js_turnstile_remove();
-                set_text("knCaptchaStatus", status);
-                show("knCaptchaRetry", 1);
-            }
+        case 2: // error: 1101xx / 1102xx = the sitekey is not valid on this domain
+            printf("[krunker] captcha: Turnstile error %s\n", text ? text : "unknown");
+            finish_with(NULL, 1);
             break;
-        }
-        case 3: // expired before we used it (it is used at once: rare): a fresh one
+        case 3: // expired before we used it (it is used at once: rare)
         case 4:
-            set_text("knCaptchaStatus", kind == 3 ? I18N("kn.captcha.expired", "The challenge expired.")
-                                                  : I18N("kn.captcha.timedOut", "The challenge timed out."));
-            show("knCaptchaRetry", 1);
+            printf("[krunker] captcha: Turnstile %s\n", kind == 3 ? "expired" : "timed out");
+            finish_with(NULL, 1);
             break;
-        case 5:
-            set_text("knCaptchaStatus", "");
+        case 5: // needs the player: the widget is up and shows what to do
             break;
         default: // 6: api.js did not load (blocked, offline)
             printf("[krunker] captcha: the Turnstile script did not load\n");
-            set_text("knCaptchaStatus", I18N("kn.captcha.noScript", "Cloudflare's challenge could not be loaded here (blocked or offline)."));
-            show("knCaptchaRetry", 1);
+            finish_with(NULL, 1);
             break;
     }
 }
@@ -472,9 +367,6 @@ void krunker_captcha_ask(const int attempt, const int rejected, const KrunkerCap
         widget_remove();
     }
     C.gen++;
-    if (C.pow_timer) html_timer_cancel(C.pow_timer);
-    C.pow_timer = 0;
-    C.pow_shown = 0;
     C.asking = 1;
     C.attempt = attempt;
     C.rejected = rejected;
@@ -498,37 +390,25 @@ static void present(void) {
     const HtmlElem h = holder();
     if (!h) return;
     C.present_pending = 0;
-    const int rejected = C.rejected;
-    html_dom_set_class(h, "kn-captcha-passive", 0);
-    show("knCaptchaCancel", 1);
-    show("knCaptchaRetry", 0);
-    show("knCaptchaSolve", 0);
-    set_text("knCaptchaStatus", rejected ? I18N("kn.captcha.refused", "krunker.io refused that token (they work once, for 5 minutes): one more, please.") : "");
+    if (C.rejected) printf("[krunker] captcha: krunker.io refused the last token: one more\n");
 #ifdef __EMSCRIPTEN__
-    html_dom_set_display(h, "");
-    loading_ring(0);
     C.needs_player = 1;
-    set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
     widget_start();
 #else
-    // Silent first: the modal stays hidden while the challenge window runs hidden (Turnstile usually passes
-    // by itself). It appears when the window is shown (KN_WEBVIEW_SHOWN) or closed (show_window_prompt).
-    // With no window to try, the request ends unavailable at once (finish_with: nothing is shown).
-    html_dom_set_display(h, "none");
-    loading_ring(1);
+    // Silent first: the widget stays hidden while the challenge runs hidden (Turnstile usually passes by itself)
+    // and the spinner stays up. The widget comes up (KN_WEBVIEW_SHOWN) only when the player is needed. With no
+    // webview to try, the request ends unavailable at once (finish_with: nothing is shown).
+    C.frame_seen = 0;
     C.needs_player = 0;
+    holder_show(0);
     show("knCaptchaWebview", 0);
+    loading_ring(1);
     C.inline_press = 0;
     if (!webview_start(0)) finish_with(NULL, 1);
 #endif
 }
 
 void krunker_captcha_close(void) {
-    if (C.pow_shown) { // the proof-of-work state of a session that ended
-        if (C.pow_timer) html_timer_cancel(C.pow_timer);
-        C.pow_timer = C.pow_shown = 0;
-        if (!C.asking) hide_modal();
-    }
     if (!C.asking) return;
     C.asking = 0;
     C.done = NULL;
@@ -540,7 +420,7 @@ void krunker_captcha_close(void) {
 int krunker_captcha_asking(void) { return C.asking; }
 
 void krunker_captcha_tick(void) {
-    kn_webview_pump(); // the challenge window's toolkit (a closed one finishes its teardown)
+    kn_webview_pump(); // the challenge webview's toolkit (a closed one finishes its teardown)
     if (!C.asking) return;
     if (C.present_pending) {
         if (holder()) present();
@@ -548,14 +428,14 @@ void krunker_captcha_tick(void) {
     }
 #ifndef __EMSCRIPTEN__
     if (C.webview) webview_tick();
-    if (!C.asking) return; // the window's token finished the request
-    if (C.webview) webview_frame(); // the game UI's frames (none unless the challenge is shown in it)
+    if (!C.asking) return; // the webview's token finished the request
+    if (C.webview) webview_frame(); // the widget's frames (none unless the challenge is shown in the game)
 #endif
 }
 
 // ---------------------------------------------------------------- the game UI's input (native webview)
 // While the challenge is drawn in the game UI (kn_webview_captcha_inline), the pointer over its canvas and
-// the widget's keys go to the webview; the rest stays with the modal and the page. main.c asks first.
+// the widget's keys go to the webview; the rest stays with the game. main.c asks first.
 // The canvas's box (CSS px, the pointer's space) maps onto the view's px.
 #ifndef __EMSCRIPTEN__
 static int inline_point(const double x, const double y, double *vx, double *vy, int *inside) {
@@ -589,11 +469,11 @@ int krunker_captcha_inline_pointer(const int kind, const double x, const double 
     }
     if (!placed) return 0;
     if (kind == KN_WEBVIEW_POINTER_PRESS) {
-        if (!inside) return 0; // outside the widget: the modal's own buttons
+        if (!inside) return 0; // outside the widget: the page's own controls
         C.inline_press = 1;
         return kn_webview_captcha_pointer(kind, vx, vy, button);
     }
-    if (!inside && !C.inline_press) return 0; // a move over the rest of the modal: the page's hover
+    if (!inside && !C.inline_press) return 0; // a move over the rest of the page: the page's hover
     return kn_webview_captcha_pointer(KN_WEBVIEW_POINTER_MOVE, vx, vy, 0);
 #endif
 }
@@ -621,50 +501,13 @@ int krunker_captcha_inline_char(const unsigned codepoint) {
 #endif
 }
 
-// ---------------------------------------------------------------- buttons
-
-static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) user;
-    (void) ev;
-    const int act = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
-    if (!C.asking) return 0;
-    switch (act) {
-        case ACT_CANCEL:
-            printf("[krunker] captcha: cancelled by the player\n");
-            finish(NULL);
-            break;
-        case ACT_RETRY:
-#ifdef __EMSCRIPTEN__
-            widget_start();
-#endif
-            break;
-        case ACT_SOLVE:
-#ifndef __EMSCRIPTEN__
-            if (!webview_start(1)) set_text("knCaptchaStatus", I18N("kn.captcha.noWindow", "The challenge window could not open here."));
-            else set_text("knCaptchaStatus", ""); // the window is raised by the next event (KN_WEBVIEW_SHOWN)
-#endif
-            break;
-        default: break;
-    }
-    return 0;
-}
-
 // ---------------------------------------------------------------- the socket's proof of work
-// The client answers the game socket's "cpt" itself (krunker_altcha.c): there is nothing for the
-// player to do, so nothing is shown while it is computed or when it passes (the player sees only the
-// loading state). The passive card (the same holder, no input) comes up only when it
-// failed, saying so, then hides by itself.
-
-static void pow_hide(void *user) {
-    (void) user;
-    C.pow_timer = 0;
-    if (C.asking || !C.pow_shown) return;
-    C.pow_shown = 0;
-    hide_modal();
-}
+// The client answers the game socket's "cpt" itself (krunker_altcha.c): nothing is shown, neither while it is
+// computed nor when it fails (the server's own close says so). The log says what happened.
 
 void krunker_captcha_pow_begin(void) {
-    if (C.asking) return; // the matchmaker's modal has the screen
+    if (C.asking) return; // the matchmaker's challenge has the screen
+    C.pow_failed = 0;
     printf("[krunker] captcha: the game server's proof of work: solving it (nothing shown)\n");
 }
 
@@ -674,23 +517,9 @@ void krunker_captcha_pow_end(const int solved) {
         printf("[krunker] captcha: the game server's proof of work passed (nothing shown)\n");
         return;
     }
-    if (C.pow_shown) return; // already says so (natively the socket's outcome and its notice both end here)
-    const HtmlElem h = holder();
-    if (!h) return;
-    if (C.pow_timer) html_timer_cancel(C.pow_timer);
-    C.pow_shown = 1;
-    C.needs_player = 0; // the passive notice: nothing to click
-    html_dom_set_class(h, "kn-captcha-passive", 1);
-    html_dom_set_display(h, "");
-    loading_ring(0);
-    show("knTurnstileHolder", 0);
-    show("knCaptchaRetry", 0);
-    show("knCaptchaSolve", 0);
-    show("knCaptchaCancel", 0);
-    set_text("knCaptchaText", I18N("kn.captcha.pow", "The game server asked for a proof of work."));
-    set_text("knCaptchaStatus", I18N("kn.captcha.powFailed", "This client could not answer it: the server may close the game."));
-    printf("[krunker] captcha: the game server's proof of work failed: the card says so\n");
-    C.pow_timer = html_timer_add(POW_FAILED_MS, pow_hide, NULL);
+    if (C.pow_failed) return;
+    C.pow_failed = 1;
+    printf("[krunker] captcha: the game server's proof of work failed (nothing shown)\n");
 }
 
 // The shape of a Turnstile response (krunker_captcha.h): 20..4096 characters of [A-Za-z0-9._~+/=-].

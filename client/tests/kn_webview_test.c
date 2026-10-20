@@ -1,7 +1,7 @@
-// kn_webview_test: the captcha webview's pure decisions (client/src/ui/kn_webview.c, built here without
-// GTK, so it runs in every build): where a reveal puts the challenge (the game UI, or its window: the
-// state after a reveal), the game UI's stall watchdog, and cairo's premultiplied ARGB32 frames converted
-// to the straight RGBA8 the canvas takes. The live run (WebKitGTK, a display) is kn_webview_live_test.
+// kn_webview_test: the captcha webview's pure conversions (client/src/ui/kn_webview.c, built here without
+// GTK, so it runs in every build): cairo's premultiplied ARGB32 frames converted to the straight RGBA8 the
+// widget's canvas takes, and the challenge's place: never a window (no backend opens one). The live run
+// (WebKitGTK, a display) is kn_webview_live_test.
 #include <kn_webview.h>
 #include <stdio.h>
 
@@ -21,18 +21,10 @@ static int px_is(const unsigned char *out, const int r, const int g, const int b
 }
 
 int main(void) {
-    // the reveal: the game UI, unless the run is a window run or the game UI failed to draw it
-    CHECK(kn_webview_reveal_target(1, 0) == KN_WEBVIEW_VIEW_INLINE);
-    CHECK(kn_webview_reveal_target(1, 1) == KN_WEBVIEW_VIEW_WINDOW); // the watchdog's fallback
-    CHECK(kn_webview_reveal_target(0, 0) == KN_WEBVIEW_VIEW_WINDOW); // a window run (KRUNKNATIVE_CAPTCHA_WINDOW=1)
-    CHECK(kn_webview_reveal_target(0, 1) == KN_WEBVIEW_VIEW_WINDOW);
-
-    // the watchdog: the game UI that drew no frame within the limit hands the challenge to its window
-    CHECK(!kn_webview_inline_stalled(0, 4999, 5000));
-    CHECK(kn_webview_inline_stalled(0, 5000, 5000));
-    CHECK(kn_webview_inline_stalled(0, 60000, 5000));
-    CHECK(!kn_webview_inline_stalled(1, 60000, 5000)); // it drew: no fallback, however long it has been up
-    CHECK(!kn_webview_inline_stalled(3, 0, 5000));
+    // the challenge is the widget in the game, on every build: no window, whatever the run asked for
+    CHECK(kn_webview_captcha_inline() == 0);    // nothing shown before a challenge
+    CHECK(kn_webview_captcha_windowed() == 0);  // never a window
+    CHECK(kn_webview_captcha_is_open() == 0);
 
     // premultiplied -> straight: 0x80402010 is alpha 128 with premultiplied (64, 32, 16): straight (128, 64, 32)
     unsigned char out[4 * 8] = {0};

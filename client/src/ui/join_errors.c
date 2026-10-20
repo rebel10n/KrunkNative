@@ -50,10 +50,8 @@ void join_error_text(const char *code, char *out, const size_t n) {
     // KrunkNative: the only lobby with room is the one a seek leaves (excludeGame): never sent back to
     // it; Find New Game / Quick Match keeps the player in that lobby (servers_ui.c on_seek)
     else if (!strcmp(code, "NoOtherLobby")) snprintf(out, n, "%s", I18N("kn.mm.noOtherLobby", "No other lobby has room: you stay in this one"));
-    else if (!strcmp(code, "CaptchaRequired"))
-        plain(I18N("matchmaker.CaptchaRequired", "Security check failed<br><small>Complete the security check and try again</small>"), out, n);
-    else if (!strcmp(code, "RecaptchaFailed"))
-        plain(I18N("matchmaker.RecaptchaFailed", "Security check failed<br><small>Refresh the page and try again</small>"), out, n);
+    // the matchmaker's check (CaptchaRequired, RecaptchaFailed): the generic failure of any join, with no wording of the check
+    else if (!strcmp(code, "CaptchaRequired") || !strcmp(code, "RecaptchaFailed")) snprintf(out, n, "%s", I18N("generic.failed", "Failed"));
     else if (!strcmp(code, "TooManyAccountSessions"))
         plain(I18N("matchmaker.TooManyAccountSessions", "Too many active sessions<br><small>Your account has too many games in progress. Close them and try again</small>"), out, n);
     else if (!strcmp(code, "GameIssue")) snprintf(out, n, "%s", I18N("matchmaker.GameIssue", "Unknown Join Issue"));

@@ -10,7 +10,7 @@
 // game, HUD and menu run unchanged.
 //
 // Failures say what went wrong, never a generic "can't be joined" (krunker_net.c fail_*): the player
-// cancelled the security challenge, krunker.io refused its token twice, the matchmaker / game server
+// krunker.io refused its token twice (the generic "Failed"), the matchmaker / game server
 // is unreachable (natively: the proxy of Settings > Client named), krunker.io refused this network
 // (ACCESS DENIED: points at Settings > Client > Proxy), or the game plays a map this client's catalogue
 // does not have (the session is left; the error screen names the map index).
@@ -38,7 +38,7 @@
 //      (tests, mirrors): its own scheme (http -> ws, https -> wss) and the port seek-game returned
 //   4. io-init, load / init (map + mode), our "en" when the player presses Play, then the game.
 // Two captchas exist: the matchmaker's CaptchaRequired is Cloudflare Turnstile (a human solves it),
-// the socket's "cpt" is an ALTCHA proof of work, answered in C (krunker_altcha.h) with the modal's
+// the socket's "cpt" is an ALTCHA proof of work, answered in C (krunker_altcha.h) with its
 // "verifying…" state. The live client also sends `accept-language: en-US,en;q=0.6;` on matchmaker
 // requests; this one does not (a browser adds its own on the web).
 //

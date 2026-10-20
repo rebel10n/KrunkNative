@@ -230,7 +230,7 @@ static void server_type_html(StrBuf *sb) {
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
     sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. krunker.io servers are joined in this client with your "
-                                                                       "krunker.io account (krunker.io may ask for a security check first). Both prefers a Box Office server when one matches.")
+                                                                       "krunker.io account. Both prefers a Box Office server when one matches.")
                            : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. krunker.io servers open in your browser. "
                                                                           "Both prefers a Box Office server when one matches."));
     sb_append(sb, "</div>");

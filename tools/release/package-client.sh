@@ -13,7 +13,7 @@
 #
 # Layout: krunknative-client-<platform>/ holding client_bin (client.exe), server_bin (server.exe),
 # the bundled libraries (Windows DLLs; macOS ANGLE + non-system dylibs; the dynamic Linux packages'
-# WebKitGTK for the captcha window: lib/, libexec/, from tools/release/bundle-webkit.sh), ui/, the code-coupled
+# WebKitGTK for the captcha webview: lib/, libexec/, from tools/release/bundle-webkit.sh), ui/, the code-coupled
 # part of assets/ that is in git (every tracked file: shaders, maps, img, editor, skins.json,
 # previews.json, titles.json, the KN-only sounds; the
 # rest of the game content comes separately, see --assets and package-assets.sh), kn-install.json
@@ -216,7 +216,7 @@ EOF
         cp "$bindir/webkit-bundle.txt" "$root/licenses/webkitgtk-bundle.txt"
         cat >> "$root/LICENSE-NOTICE.txt" << 'EOF'
 
-WebKitGTK (webkit2gtk-4.1, the captcha window) and the libraries bundled with it (lib/, libexec/;
+WebKitGTK (webkit2gtk-4.1, the captcha webview) and the libraries bundled with it (lib/, libexec/;
 the list is licenses/webkitgtk-bundle.txt) are free software under their own licences: WebKitGTK
 under the GNU Lesser General Public License, version 2.1 or later (WebKit also BSD-2-Clause in
 parts), GTK, GLib and libsoup under the LGPL too, the others mostly LGPL, MIT, BSD or zlib
@@ -252,7 +252,7 @@ readme() {
         echo "Built:     ${KN_BUILD_TIME:-unknown}"
         echo "Protocol:  ${KN_PROTOCOL:-unknown} (NET_PROTOCOL major.minor)"
         echo "Runs on:   $runtime"
-        if [ -d "$bindir/lib" ]; then echo "Bundled:   WebKitGTK for the captcha window (lib/, libexec/; see LICENSE-NOTICE.txt)"; fi
+        if [ -d "$bindir/lib" ]; then echo "Bundled:   WebKitGTK for the captcha webview (lib/, libexec/; see LICENSE-NOTICE.txt)"; fi
         echo
         echo "$run"
         echo
@@ -293,7 +293,7 @@ put_bins() {
             find "$bindir" -maxdepth 1 -type f -iname '*.dll' -exec cp {} "$dir/" \;
             ;;
         linux)
-            # the dynamic packages' WebKitGTK for the captcha window (tools/release/bundle-webkit.sh)
+            # the dynamic packages' WebKitGTK for the captcha webview (tools/release/bundle-webkit.sh)
             for d in lib libexec; do
                 if [ -d "$bindir/$d" ]; then cp -R "$bindir/$d" "$dir/"; fi
             done

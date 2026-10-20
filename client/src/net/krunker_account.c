@@ -638,15 +638,9 @@ static void post_login(const char *turnstile) {
 static void turnstile_done(void *user, const char *token, const int unavailable) {
     if ((unsigned) (uintptr_t) user != A.attempt || A.state != KRUNKER_ACCOUNT_BUSY) return;
     A.captcha_open = 0;
-    if (!token) {
-        if (unavailable) { // no challenge can be shown here: a login without the Turnstile token is refused, so say why
-#if defined(_WIN32)
-            fail_sign_in(I18N("kn.kio.account.captchaNeedsWebView2", "Could not sign in: krunker.io requires a security check that needs the Microsoft Edge WebView2 Runtime installed."));
-#else
-            fail_sign_in(I18N("kn.kio.account.captchaNeedsWebview", "Could not sign in: krunker.io requires a security check that needs WebKitGTK installed."));
-#endif
-        } else
-            fail_sign_in(I18N("kn.kio.account.captchaCancelled", "The security challenge was closed, so you were not signed in."));
+    if (!token) { // the challenge could not be completed: a login without its token is refused (the generic failure)
+        (void) unavailable;
+        fail_sign_in(I18N("kn.kio.account.failed", "krunker.io did not accept the sign-in."));
         return;
     }
     post_login(token);
@@ -947,7 +941,7 @@ void krunker_account_tick(void) {
         // a join's challenge took the modal over (krunker_captcha_ask replaces a request), or it closed
         A.captcha_open = 0;
         if (A.state == KRUNKER_ACCOUNT_BUSY && A.auth.kind == REQ_NONE)
-            fail_sign_in(I18N("kn.kio.account.captchaCancelled", "The security challenge was closed, so you were not signed in."));
+            fail_sign_in(I18N("kn.kio.account.failed", "krunker.io did not accept the sign-in."));
     }
     const double now = now_s();
     Req *reqs[] = {&A.auth, &A.refresh_req, &A.recover_req};

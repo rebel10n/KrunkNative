@@ -138,7 +138,7 @@ static struct {
     KrunkerAltcha altcha; // web: the "cpt" being solved in slices
     int altcha_pending;
     int pow_shown;           // web: krunker_captcha_pow_begin was told of the "cpt" being solved
-    volatile int pow_result; // native: the socket thread's "cpt" outcome for the modal (1 solved, 2 not)
+    volatile int pow_result; // native: the socket thread's "cpt" outcome (1 solved, 2 not)
     // the matchmaker's Turnstile (game.deob.js seek, :147445-147467): prompts so far this join (the live
     // client gives up after 2), the player's token until the retry's seek-game takes it (then wiped),
     // and whether the last seek carried one (a CaptchaRequired after it = the token was refused)
@@ -1542,24 +1542,18 @@ static void fetch_token(void) {
 static void captcha_done(void *user, const char *token, const int unavailable) {
     if (stale(user) || K.state != KS_CAPTCHA) return;
     if (!token) {
-        if (unavailable) {
-            // no challenge can be shown here (no webview, or it failed to start or load): the seek goes again
-            // without a captcha token, which the matchmaker often lets through; a refusal then ends the join
-            if (!K.captcha_unavailable_retry) {
-                K.captcha_unavailable_retry = 1;
-                printf("[krunker] captcha: no challenge can be shown here: seeking again without one\n");
-                seek();
-                return;
-            }
-#if defined(_WIN32)
-            fail("%s", I18N("kn.kio.captchaNeedsWebView2", "Could not join: krunker.io requires a security check that needs the Microsoft Edge WebView2 Runtime installed."));
-#else
-            fail("%s", I18N("kn.kio.captchaNeedsWebview", "Could not join: krunker.io requires a security check that needs WebKitGTK installed."));
-#endif
+        // no challenge could be completed here (no webview, or it failed to start, load or pass): the seek goes
+        // again without a captcha token, which the matchmaker often lets through; a refusal then ends the join
+        (void) unavailable; // (every challenge that gave no token is the same here)
+        if (!K.captcha_unavailable_retry) {
+            K.captcha_unavailable_retry = 1;
+            printf("[krunker] captcha: no challenge could be completed here: seeking again without one\n");
+            seek();
             return;
         }
-        // the player cancelled: KN's sentence says what they did (krunker_net.c's e2e pins it; v10's CaptchaRequired
-        fail("%s", I18N("kn.kio.captchaCancelled", "You closed krunker.io's security challenge, so no game was joined. Pick the lobby again to retry."));
+        char text[300];
+        join_error_text("Failed", text, sizeof(text)); // the generic join failure (no wording of the check)
+        fail("%s", text);
         return;
     }
     snprintf(K.captcha, sizeof(K.captcha), "%s", token);
@@ -2348,7 +2342,7 @@ void krunker_net_account_signed_in(void) {
 }
 
 void krunker_net_tick(Client *client) {
-    krunker_captcha_tick(); // the matchmaker's Turnstile modal (the challenge window natively)
+    krunker_captcha_tick(); // the matchmaker's Turnstile widget (the challenge webview natively)
     host_custom_tick(glfwGetTime()); // a custom game's answer or its timeout (krunker_net_host_custom)
     account_frames_tick();
     if (K.account_event || K.points_event) { // the game server's "a" (name, level) and "ua" (rankedPoints): the account

@@ -55,22 +55,21 @@ whose command line alone would join the matchmaker's pick, rejoins that official
 "native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
 Validation token runs (--token alone; part of --native): "native-token-socket-error" (the live run 1: the first seek, with
 no token, is refused "Socket Error"; a fresh token's seek is let through, joined). The captcha-refusal runs (a refused
-captcha token, refused twice, a build refused after the captcha) need a token from the challenge window: the webview run
+captcha token, refused twice, a build refused after the captcha) need a token from the challenge webview: the webview run
 ("native-webview") covers the first refusal; the others were paste-box / callback runs and are gone.
 Captcha runs (krunker_captcha.h): with no display and no webview, "native-unavailable" (captcha_free off): the
 matchmaker's CaptchaRequired is answered by no challenge at all; the client retries the seek once without a token,
-the matchmaker refuses it, and the error screen says the security check needs WebKitGTK. The modal never comes up
-and there is no paste box or callback. Native "webview" (alone: `--webview`; the challenge window of kn_webview.h,
+the matchmaker refuses it, and the error screen says "Failed" (the generic join failure: no wording of the check).
+Nothing is shown and there is no paste box or callback. Native "webview" (alone: `--webview`; the challenge webview of kn_webview.h,
 WebKitGTK on a private Xvfb of the run's own whose top-level windows x11_watch.py records: it loads the test's stub
 krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose
 stub `turnstile` widget "is solved" by firing its own callback; silent first: it passes by itself, so
-the challenge runs hidden, nothing is ever mapped and the security-challenge modal stays hidden at every
+the challenge runs hidden, nothing is ever mapped and the widget stays hidden at every
 probe of the run; the first token is refused by the matchmaker, the challenge runs again hidden, the
 second joins; a frame of another origin tries to post a forged token), native
-"webview-interactive" (the stub widget calls before-interactive-callback first: only then is the window
-created, mapped once already centred on the work area, never moved, and the modal comes up with it), web "widget"
-(the stub widget's token) and web "domain" (110200: the modal says why, offers Cancel and no paste box; Cancel
-ends the join with one seek). Each
+"webview-interactive" (the stub widget calls before-interactive-callback first: only then is the widget
+shown in the game (no OS window is ever mapped), web "widget"
+(the stub widget's token) and web "domain" (110200: no text on the page; the join fails with the generic error after one retry without a token). Each
 checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
 seek-game with validationToken + captchaToken, and that no token reaches the log.
 Checks: the seek query, the WebSocket URL, every client frame's ahNum trailer ((prev + AHKEY) & 0xff,
@@ -1760,7 +1759,7 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
                 "KRUNKNATIVE_WINDOW_SIZE": "960x540", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % mm,
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
     if display:
-        env["DISPLAY"] = display  # a private Xvfb of the test's own (the challenge window runs; the game stays headless)
+        env["DISPLAY"] = display  # a private Xvfb of the test's own (the challenge webview runs; the game stays headless)
     # the live Krunker build's cache stays in the run (krunker_build_fetch.h); a stub publishing a build names it
     env["KRUNKNATIVE_KRUNKER_BUILD_CACHE"] = os.path.join(WORK, label + "-build-cache")
     if stub.published:
@@ -1815,7 +1814,7 @@ def run_native():
         lines = finish_native(label, stub, p, out, log)
     text = "\n".join(lines)
     vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
-    check(f"{label}: the Security Challenge modal never comes up (the matchmaker let the first seek through)", len(vis) >= 3 and set(vis) <= {"0", "-"}, vis)
+    check(f"{label}: nothing is drawn (the matchmaker let the first seek through)", len(vis) >= 3 and set(vis) <= {"0", "-"}, vis)
     check_seek_once_without_captcha(label, stub)
     check(f"{label}: the browser link is never offered (no paste box, no callback)", "knCaptchaCallback" not in text and "#kn-captcha=" not in text)
     text = check_run(label, stub, lines, True)  # client_bin evaluates cc with QuickJS (krunker_cheat_qjs.c)
@@ -1942,16 +1941,16 @@ def run_native_unavailable():
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
     vis = [m.group(1) for m in (re.search(r"\[input_script\] vis t=\d+ @modal knCaptchaHolder=(\d|-)", l) for l in lines) if m]
-    check(f"{label}: the Security Challenge modal never comes up", len(vis) >= 3 and set(vis) == {"0"}, vis)
+    check(f"{label}: nothing is drawn (the widget holder stays hidden)", len(vis) >= 3 and set(vis) == {"0"}, vis)
     seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
     gen = [pth for pth, _, _ in stub.http_log if pth == "/generate-token"]
     check(f"{label}: seek-game, CaptchaRequired, one retry without a token, CaptchaRequired (no generate-token, no third seek)",
           len(seeks) == 2 and not gen and not any("captchaToken" in s or "validationToken" in s for s in seeks), [sorted(s) for s in seeks])
-    check(f"{label}: the log says why it seeks again without a token", "no challenge can be shown here: seeking again without one" in text)
+    check(f"{label}: the log says why it seeks again without a token", "no challenge could be completed here: seeking again without one" in text)
     check(f"{label}: the join did not go through", f"joined as sid {MY_SID}" not in text)
     inst = re.search(r"\[input_script\] text t=\d+ @inst n=\d+ checked=\d+ value=[^ ]* text=(.*)", text)
-    check(f"{label}: the error screen says the security check needs WebKitGTK",
-          inst and "Could not join: krunker.io requires a security check that needs WebKitGTK installed." in inst.group(1),
+    check(f"{label}: the error screen says Failed (the generic join failure, no wording of the check)",
+          inst and "Failed" in inst.group(1) and not re.search(r"security|captcha|check", inst.group(1), re.I),
           inst.group(1) if inst else None)
 
 
@@ -2825,7 +2824,7 @@ def run_native_lobby():
           grep.get("kioOld", 0) >= 1 and grep.get("kioMap", 0) >= 1 and grep.get("kio152", -1) == 0, grep)
     check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
           "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
-    check(f"{label}: no Security Challenge modal comes up (the matchmaker lets the first seek through)",
+    check(f"{label}: nothing is drawn (the matchmaker lets the first seek through)",
           re.search(r"@modal knCaptchaHolder=(0|-)", text) is not None and "@modal knCaptchaHolder=1" not in text)
     seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
     # /ping-list: the krunker.io list's own ping round (krunker_lobbies.c: the row pings), not a seek's step
@@ -3953,7 +3952,7 @@ def run_native_live_fallback():
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
 
 
-# ---------------------------------------------------------------- native: the challenge window (kn_webview.h)
+# ---------------------------------------------------------------- native: the challenge webview (kn_webview.h)
 
 WEBVIEW_SOLVE_MS = 1500  # the stub widget's "player" solves it this long after it is shown
 
@@ -4069,7 +4068,7 @@ def webview_skip_reason():
     if not os.path.isfile(os.path.join(BUILD, "libkn_webview.a")):
         return "this client_bin was built without a webview (KN_WEBVIEW off, or webkit2gtk-4.1 not found)"
     if not shutil.which("Xvfb"):
-        return "Xvfb is missing (the challenge window needs an X display of its own)"
+        return "Xvfb is missing (the challenge webview needs an X display of its own)"
     return None
 
 
@@ -4087,7 +4086,7 @@ XVFB_W, XVFB_H = 1280, 800
 
 
 def webview_session(label, script, page, used_first, stub_setup=None):
-    """client_bin (headless game) with the challenge window on a private Xvfb whose top-level windows a
+    """client_bin (headless game) with the challenge webview on a private Xvfb whose top-level windows a
     watcher records (x11_watch.py: no window manager, so a window maps where the client put it)."""
     xvfb = PrivateXvfb("%dx%dx24" % (XVFB_W, XVFB_H))
     watch = X11Watch(xvfb.display)
@@ -4119,50 +4118,50 @@ def webview_session(label, script, page, used_first, stub_setup=None):
 
 
 def run_native_webview():
-    """The challenge window when Turnstile passes by itself: it runs hidden and is never mapped; a
+    """The challenge when Turnstile passes by itself: it runs hidden and is never shown; a
     refused first token starts it again (hidden too), the second joins."""
     label = "native-webview"
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port)
     page.start()
-    # the modal's probes from the first seek until the game is in: both attempts of the matchmaker's
+    # the widget's probes from the first seek until the game is in: both attempts of the matchmaker's
     # challenge (the stub solves each 1.5 s after it renders, the second starts after the first token is
     # refused), the join, then the game socket's own ALTCHA "cpt", which the client answers itself: it
     # shows no card either (the player sees only the loading state). Every 400 ms: a card would stay
     # longer than that.
     probe_t = list(range(800, 15601, 400))
-    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaSolve knCaptchaCancel\n" % t for t in probe_t)
+    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaWebview\n" % t for t in probe_t)
     script = "0 boot\n" + probes + "16000 play\n21000 players\n21200 quit\n"
     stub, lines, log, left, maps, moves = webview_session(label, script, page, True)
     text = "\n".join(lines)
     check(f"{label}: the challenge passed by itself: no window was ever mapped on the display", not maps,
           [(m["name"], m["x"], m["y"]) for m in maps])
     check(f"{label}: ... it ran hidden both times and was never shown",
-          text.count("[webview] challenge running hidden") == 2 and "[webview] challenge window shown" not in text and
-          text.count("[webview] challenge window closed (it was never shown)") == 2,
+          text.count("[webview] challenge running hidden") == 2 and "[webview] challenge shown" not in text and
+          text.count("[webview] challenge closed (it was never shown)") == 2,
           [l for l in lines if "[webview]" in l][:12])
     silent = re.findall(r"\[input_script\] vis t=\d+ @silent (.*)", text)
-    check(f"{label}: silent first: the security-challenge modal stayed hidden at every probe (no modal, no popup)",
-          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaSolve=1", s) for s in silent),
+    check(f"{label}: silent first: the widget stayed hidden at every probe (the spinner stays, nothing is drawn)",
+          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaWebview=1", s) for s in silent),
           [s for s in silent if "=1" in s][:4] or len(silent))
     probe_lines = [i for i, l in enumerate(lines) if "@silent " in l and "[input_script] vis" in l]
     pow_ok = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
     check(f"{label}: the game socket's \"cpt\" was answered inside the probed window, with no card",
           pow_ok and probe_lines and pow_ok[0] < probe_lines[-1] and "security challenge answered" in text and
           "proof of work failed" not in text, [l for l in lines if "proof of work" in l][:4])
-    check(f"{label}: the modal was never asked to come up (no 'window is up' prompt)",
-          "[krunker] captcha: the challenge window is up" not in text)
+    check(f"{label}: the widget was never asked for (no player-needed line)",
+          "[krunker] captcha: the player is needed" not in text)
     vis = [q.get("visibility") for q in page.probes if q.get("render")]
     check(f"{label}: hidden, the page still runs as a visible one (Turnstile is not throttled)", vis and all(v == "visible" for v in vis), vis)
     client_text = "\n".join(l for l in lines if "[input_script] type" not in l)
     check(f"{label}: WebKitGTK came up on the run's own X display", "[webview] WebKitGTK " in text,
           next((l for l in lines if "[webview]" in l), log.path))
-    check(f"{label}: the window loaded the challenge page twice (once per attempt), as WebKit",
+    check(f"{label}: the challenge page loaded twice (once per attempt), as WebKit",
           len(page.loads) == 2 and all("AppleWebKit" in ua for ua in page.loads), page.loads)
     renders = [q for q in page.probes if q.get("render")]
     check(f"{label}: the widget was rendered with krunker.io's sitekey and the widget's own callback",
           len(renders) == 2 and all(q.get("sitekey") == header_value("KRUNKER_TURNSTILE_SITE_KEY") and q.get("callback") == "function"
-                                    for q in renders), renders)
+                                    and q.get("appearance") == "interaction-only" for q in renders), renders)
     pages = [q for q in page.probes if q.get("page")]
     check(f"{label}: the page's own scripts cannot reach the client's message handler",
           pages and all(q.get("main_handler") == "0" for q in pages), pages)
@@ -4172,8 +4171,8 @@ def run_native_webview():
           refused or (forges and not any(q.get("handler") == "1" or q.get("top") == "reached" for q in forges)),
           "refused by the window" if refused else forges)
     check(f"{label}: the forged token never reached the matchmaker", not any(FORGED_TOKEN in r for _, _, r in stub.http_log))
-    check(f"{label}: a token per attempt, solved in the window, then the window closed",
-          text.count("[krunker] captcha: solved in the challenge window") == 2 and text.count("[webview] challenge window closed") >= 2,
+    check(f"{label}: a token per attempt, solved in the webview, then the webview closed",
+          text.count("[krunker] captcha: solved in the webview") == 2 and text.count("[webview] challenge closed") >= 2,
           [l for l in lines if "[webview]" in l or "captcha:" in l][:16])
     check(f"{label}: the refused token started a second silent run (attempt 2), not a popup", "attempt 2, the last token was refused" in text)
     check(f"{label}: the challenge page never saw a token", not any("e2eWebviewToken" in pth or "e2eForged" in pth for pth in page.paths))
@@ -4183,61 +4182,46 @@ def run_native_webview():
 
 
 def run_native_webview_interactive():
-    """Turnstile needs the player (before-interactive-callback): only then is the window created,
-    mapped once, already centred on the work area and above the game, never moved after; the
-    player's token joins."""
+    """Turnstile needs the player (before-interactive-callback): only then is the widget shown, in the game (its frames on
+    the canvas where the spinner was). No OS window is ever mapped; the player's token joins."""
     label = "native-webview-interactive"
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port, interactive=True)
     page.start()
-    # the stub's game server sends a "cpt" this client cannot answer: only that failure shows the
-    # modal's passive card (a solved one shows nothing: native-webview)
-    probes = "".join("%d vis @pow knCaptchaHolder knCaptchaSolve knCaptchaCancel\n%d text @powst [id=knCaptchaStatus]\n" % (t, t + 50)
-                     for t in range(1000, 9801, 400))
+    # the stub's game server sends a "cpt" this client cannot answer: that failure is said in the log and shows nothing
+    probes = "".join("%d vis @pow knCaptchaHolder knCaptchaWebview instructions\n" % t for t in range(1000, 9801, 400))
     script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
 
     def unsolvable(stub):
         stub.cpt = ALTCHA_UNSOLVABLE
     stub, lines, log, left, maps, moves = webview_session(label, script, page, False, stub_setup=unsolvable)
     text = "\n".join(lines)
-    wins = [m for m in maps if "krunker.io" in m["name"]]
-    check(f"{label}: one window, the challenge's, was mapped", len(maps) == 1 and len(wins) == 1,
-          [(m["name"], m["x"], m["y"], m["w"], m["h"]) for m in maps] or [l for l in lines if "[webview]" in l][:12])
-    want = ((XVFB_W - 520) // 2, (XVFB_H - 600) // 2, 520, 600)
-    if wins:
-        w = wins[0]
-        check(f"{label}: its first mapped position is centred on the work area {want}", (w["x"], w["y"], w["w"], w["h"]) == want,
-              (w["x"], w["y"], w["w"], w["h"]))
-        check(f"{label}: never moved after it was mapped", not moves[w["window"]], moves[w["window"]])
+    check(f"{label}: no OS window was mapped (the challenge is the widget in the game)", not maps,
+          [(m["name"], m["x"], m["y"], m["w"], m["h"]) for m in maps])
     check(f"{label}: shown because Turnstile needs the player (it ran hidden until then)",
           "[webview] challenge running hidden" in text and
-          "[webview] challenge window shown (Turnstile needs the player) at %d,%d %dx%d" % want in text,
+          "[webview] challenge shown (Turnstile needs the player): in the game UI, no window" in text,
           [l for l in lines if "[webview]" in l][:12])
-    up = [i for i, l in enumerate(lines) if "[krunker] captcha: the challenge window is up: the player solves it" in l]
-    solved = [i for i, l in enumerate(lines) if "[krunker] captcha: solved in the challenge window" in l]
-    check(f"{label}: the modal came up with the window, once, before the token (the player's turn)",
+    up = [i for i, l in enumerate(lines) if "[krunker] captcha: the player is needed" in l]
+    solved = [i for i, l in enumerate(lines) if "[krunker] captcha: solved in the webview" in l]
+    check(f"{label}: the widget came up in the game once, before the token (the player's turn)",
           len(up) == 1 and solved and up[0] < solved[0], [l for l in lines if "captcha:" in l][:8])
-    check(f"{label}: the token joins (one attempt), the window closes",
-          text.count("[krunker] captcha: solved in the challenge window") == 1 and "[webview] challenge window closed\n" in text + "\n",
+    check(f"{label}: the token joins (one attempt), the webview closes",
+          text.count("[krunker] captcha: solved in the webview") == 1 and "[webview] challenge closed" in text,
           [l for l in lines if "[webview]" in l or "captcha:" in l][:12])
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
-    fail_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work failed: the card says so" in l]
-    check(f"{label}: a \"cpt\" this client cannot answer is said, after the token (not before it)",
+    fail_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work failed (nothing shown)" in l]
+    check(f"{label}: a \"cpt\" this client cannot answer is said in the log, after the token, and shows nothing",
           len(fail_i) == 1 and solved and fail_i[0] > solved[0] and "proof of work passed" not in text, [l for l in lines if "proof of work" in l][:4])
-    # each @pow vis line is followed by its @powst text line: the card is the holder shown with the
-    # failure line and no Solve / Cancel
-    pairs, last_vis = [], None
-    for l in lines:
-        m = re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)
-        if m:
-            last_vis = m.group(1)
-        m = re.search(r"\[input_script\] text t=\d+ @powst n=\d+ checked=\d+ value=\S* text=(.*)", l)
-        if m and last_vis is not None:
-            pairs.append((last_vis, m.group(1)))
-            last_vis = None
-    card = [v for v, st in pairs if "knCaptchaHolder=1" in v and "could not answer it" in st]
-    check(f"{label}: the failed \"cpt\" shows the passive card (no Solve, no Cancel) while it is said",
-          card and all("knCaptchaSolve=0" in v and "knCaptchaCancel=0" in v for v in card), pairs[-6:])
+    after = [m.group(1) for i, l in enumerate(lines) if fail_i and i > fail_i[0]
+             for m in [re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)] if m]
+    check(f"{label}: no card is drawn after the failed \"cpt\" (the widget holder stays hidden)",
+          after and not any("knCaptchaHolder=1" in v for v in after), after[:4])
+    # the widget takes the spinner's place: while it is drawn the join's spinner (#instructions) is hidden
+    drawn = [v for v in (re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l) for l in lines) if v]
+    drawn = [v.group(1) for v in drawn if "knCaptchaWebview=1" in v.group(1)]
+    check(f"{label}: while the widget is drawn, the join's spinner is hidden (instructions=0)",
+          drawn and all("instructions=0" in v for v in drawn), drawn[:3])
     check(f"{label}: nothing of the run is left (client_bin, WebKit's processes)", not left)
 
 
@@ -4346,7 +4330,7 @@ def turnstile_stub(mode):
 
 def run_web(mode):
     """mode "ok": the widget's token, then the whole game (the original web run); "110200": the
-    domain error: the modal says why (no paste box, no button to open krunker.io), Cancel ends the join."""
+    domain error: no text on the page; the join fails with the generic error after one retry without a token."""
     label = "web" if mode == "ok" else "web-domain"
     mm, wsp, web, cdpp = kn_proto.free_ports(4)
     stub = Stub(mm, wsp)
@@ -4360,7 +4344,6 @@ def run_web(mode):
                                "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
                                "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     lines = []
-    statuses = set()
     try:
         cdp = Cdp(cdpp)
         cdp.send("Runtime.enable")
@@ -4370,47 +4353,35 @@ def run_web(mode):
         url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
         cdp.send("Page.navigate", {"url": url})
         modal_js = ("(() => { const h = document.getElementById('knCaptchaHolder'); if (!h) return null;"
-                    " const t = id => { const e = document.getElementById(id); return e ? e.textContent : null; };"
-                    " const vis = id => { const e = document.getElementById(id); return !!(e && e.offsetParent !== null && getComputedStyle(e).display !== 'none'); };"
-                    " return {shown: getComputedStyle(h).display !== 'none', text: t('knCaptchaText'), status: t('knCaptchaStatus'),"
-                    " widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile'), paste: !!document.getElementById('knCaptchaToken'),"
-                    " passive: h.classList.contains('kn-captcha-passive')}; })()")
+                    " const w = document.getElementById('knTurnstileHolder');"
+                    " return {shown: getComputedStyle(h).display !== 'none', text: h.textContent.replace(w ? w.textContent : '', ''),"
+                    " widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile')}; })()")
         seen_modal = None
         end = time.time() + 120
         while time.time() < end and not stub.captcha_ok.is_set():
             time.sleep(0.25)
             st = cdp.eval(modal_js)
-            if st and st.get("shown") and not st.get("passive"):
+            if st and st.get("shown"):
                 seen_modal = seen_modal or dict(st)
-                if mode != "ok" and "only work on the sites" in (st.get("status") or ""):
-                    seen_modal = dict(st)
-                    break
-        check(f"{label}: the Security Challenge modal showed for CaptchaRequired", seen_modal is not None, "\n".join(cdp.console[-25:]))
+            if mode != "ok" and seen_modal and not (st or {}).get("shown") and sum(1 for pth, _, _ in stub.http_log if pth == "/seek-game") >= 2:
+                time.sleep(2.0)  # the second refusal ends the join: its failure is on the error screen
+                break
+        check(f"{label}: the Turnstile widget showed in the game for CaptchaRequired", seen_modal is not None, "\n".join(cdp.console[-25:]))
         check(f"{label}: Turnstile's api.js was requested (and stubbed)", any(u.startswith(TURNSTILE_URL + "v0/api.js") for u in cdp.intercepted),
               cdp.intercepted[:3])
         if mode != "ok":
-            status = (seen_modal or {}).get("status") or ""
-            check(f"{label}: 110200 is explained (Turnstile keys are bound to their sites), with no paste box",
-                  bool(seen_modal) and "110200" in status and "only work on the sites" in status and not seen_modal.get("paste"), seen_modal)
-            cancel = cdp.eval("(() => { const b = document.getElementById('knCaptchaCancel').getBoundingClientRect();"
-                              " return [b.x + b.width / 2, b.y + b.height / 2]; })()")
-            if cancel:
-                cdp.click(cancel[0], cancel[1])
-            time.sleep(1.0)
-            st = cdp.eval(modal_js) or {}
-            check(f"{label}: Cancel closes the modal", not st.get("shown") or st.get("passive"), st)
+            check(f"{label}: the domain error (110200) puts no text on the page: the holder is the widget alone",
+                  bool(seen_modal) and seen_modal.get("text") == "" and not seen_modal.get("paste"), seen_modal)
             seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game"]
-            check(f"{label}: the join ends with Cancel: one seek, no token", len(seeks) == 1 and not stub.captcha_ok.is_set(), len(seeks))
+            check(f"{label}: the refused challenge ends in the generic failure: two seeks, no token",
+                  len(seeks) == 2 and not stub.captcha_ok.is_set(), len(seeks))
         else:
-            check(f"{label}: the stub widget rendered inside the modal", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
+            check(f"{label}: the stub widget rendered in the game", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
             # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en";
-            # meanwhile the passive "cpt" card is watched for: solved by the client, it must never show
+            # meanwhile the page is watched for anything drawn: the "cpt" is solved by the client and shows nothing
             end = time.time() + 150
             while time.time() < end and not stub.got_en.is_set():
                 time.sleep(0.3)
-                st = cdp.eval(modal_js)
-                if st and st.get("shown") and st.get("passive"):
-                    statuses.add(st.get("status"))
                 box = cdp.eval("(() => { const e = document.getElementById('instructions'); if (!e || !/CLICK TO PLAY/.test(e.textContent)) return null;"
                                " const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
                 if box:
@@ -4466,10 +4437,10 @@ def run_web(mode):
     if mode == "ok":  # the domain run never gets a token: the matchmaker's order is the widget run's
         check_matchmaker(label, stub, [WEB_TOKEN], text)
     if mode != "ok":
-        check(f"{label}: no game socket: the join ended at Cancel", not stub.ws_paths and f"joined as sid {MY_SID}" not in text, stub.ws_paths)
+        check(f"{label}: no game socket: the join ended with the generic failure", not stub.ws_paths and f"joined as sid {MY_SID}" not in text, stub.ws_paths)
         return
-    check("web: the \"cpt\" was answered with no card on screen (the player sees only the loading state)",
-          not statuses and "security challenge answered" in text and "proof of work failed" not in text, statuses)
+    check("web: the \"cpt\" was answered with nothing shown",
+          "security challenge answered" in text and "proof of work failed" not in text)
     check_run("web", stub, lines, True)
     k = [l for l in lines if "[krunker] <= k " in l]
     check("web: the stub player's \"k\" updates arrived", len(k) >= 5, len(k))

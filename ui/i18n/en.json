@@ -1155,8 +1155,6 @@
  "matchmaker.NoAvailableServers": "Servers are at Max Capacity",
  "matchmaker.NoMatchingServers": "No Games Found<br><small>Try changing Quickplay options</small>",
  "matchmaker.GameIssue": "Unknown Join Issue",
- "matchmaker.RecaptchaFailed": "Security check failed<br><small>Refresh the page and try again</small>",
- "matchmaker.CaptchaRequired": "Security check failed<br><small>Complete the security check and try again</small>",
  "matchmaker.TooManyAccountSessions": "Too many active sessions<br><small>Your account has too many games in progress. Close them and try again</small>",
  "adblocker": "Disable your ad blocker to receive free Krunkies.",
  "ad-failed": "Ad Failed to Load. Try again.",

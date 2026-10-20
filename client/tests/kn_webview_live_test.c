@@ -7,8 +7,8 @@
 //      forwarded through kn_webview_captcha_pointer reaches the page, and the token comes back (KN_WEBVIEW_TOKEN);
 //   2. the same in the game UI with the keys only: Tab moves the focus to the widget's button, Enter
 //      presses it (kn_webview_captcha_key), and the token comes back;
-//   3. KRUNKNATIVE_CAPTCHA_WINDOW=1: the same challenge in its window (the fallback path still works);
-//   4. the game UI takes no frame: the stall watchdog hands the challenge to its window (after 5 s).
+//   3. KRUNKNATIVE_CAPTCHA_WINDOW=1 (the window the challenge had before): ignored, the same challenge in the game;
+//   4. the game UI takes no frame for 15 s: the challenge stays in the game (no window, no second prompt).
 // Not part of ctest: it needs a display. Run it on a private one, never the desktop's:
 //   xvfb-run -a ./kn_webview_live_test            (no argument: the test serves its own page)
 //   xvfb-run -a ./kn_webview_live_test <url>      (a page of yours, same contract)
@@ -167,7 +167,7 @@ static int wait_event(const int want, const int timeout_ms, char *token, const s
     char msg[320];
     while (now_ms() < end) {
         const int rc = kn_webview_captcha_poll(token, tokn, msg, sizeof(msg));
-        if (rc == KN_WEBVIEW_NONE || rc == KN_WEBVIEW_STATUS) {
+        if (rc == KN_WEBVIEW_NONE) {
             sleep_ms(5);
             continue;
         }
@@ -266,25 +266,28 @@ int main(int argc, char **argv) {
     game_ui_run(url, 0, "1. the game UI, the pointer:");
     game_ui_run(url, 1, "2. the game UI, the keys (Tab, Enter):");
 
-    // 3. the window path (KRUNKNATIVE_CAPTCHA_WINDOW=1): shown in a window, never in the game UI
+    // 3. KRUNKNATIVE_CAPTCHA_WINDOW=1 (the window the challenge had before) is ignored: the challenge is the widget
+    //    in the game, drawn in its frames, and never a window
     char err[256] = "", token[TOKEN_MAX + 1] = "";
-    printf("3. the window (KRUNKNATIVE_CAPTCHA_WINDOW=1):\n");
+    printf("3. KRUNKNATIVE_CAPTCHA_WINDOW=1 (no window any more):\n");
     test_setenv("KRUNKNATIVE_CAPTCHA_WINDOW", "1", 1);
-    CHECK(kn_webview_captcha_open(url, "stub_sitekey_1", "Security Challenge", NULL, 1, 1, err, sizeof(err)) == 1);
+    CHECK(kn_webview_captcha_open(url, "stub_sitekey_1", NULL, NULL, 1, 1, err, sizeof(err)) == 1);
     CHECK(wait_event(KN_WEBVIEW_SHOWN, 30000, token, sizeof(token)) == KN_WEBVIEW_SHOWN);
-    CHECK(kn_webview_captcha_windowed() == 1);
-    CHECK(kn_webview_captcha_inline() == 0);
+    CHECK(kn_webview_captcha_inline() == 1);
+    CHECK(kn_webview_captcha_windowed() == 0); // never a window, whatever the environment says
+    int w = 0, h = 0;
+    CHECK(wait_frame(&w, &h) > 0); // the widget is drawn in the game's frames
     kn_webview_captcha_close();
     test_unsetenv("KRUNKNATIVE_CAPTCHA_WINDOW");
 
-    // 4. the game UI takes no frame (the caller never asks): the stall watchdog hands it to the window
-    printf("4. the game UI draws nothing (no frame taken): the window after the stall:\n");
-    CHECK(kn_webview_captcha_open(url, "stub_sitekey_1", "Security Challenge", NULL, 1, 1, err, sizeof(err)) == 1);
+    // 4. the game UI draws nothing for 15 s (slow frames are a lower frame rate, not a window): the challenge stays
+    //    in the game, with no window and no second prompt
+    printf("4. the game UI draws nothing for 15 s: still the game UI, no window:\n");
+    CHECK(kn_webview_captcha_open(url, "stub_sitekey_1", NULL, NULL, 1, 1, err, sizeof(err)) == 1);
     CHECK(wait_event(KN_WEBVIEW_SHOWN, 30000, token, sizeof(token)) == KN_WEBVIEW_SHOWN);
     CHECK(kn_webview_captcha_inline() == 1 && kn_webview_captcha_windowed() == 0);
-    CHECK(wait_event(KN_WEBVIEW_SHOWN, 15000, token, sizeof(token)) == KN_WEBVIEW_SHOWN); // the watchdog's, 5 s on
-    CHECK(kn_webview_captcha_windowed() == 1);
-    CHECK(kn_webview_captcha_inline() == 0);
+    CHECK(wait_event(KN_WEBVIEW_SHOWN, 15000, token, sizeof(token)) == KN_WEBVIEW_NONE); // no second prompt, no fallback
+    CHECK(kn_webview_captcha_inline() == 1 && kn_webview_captcha_windowed() == 0);
     kn_webview_captcha_close();
 
     if (own_server) stub_stop_now(th);
