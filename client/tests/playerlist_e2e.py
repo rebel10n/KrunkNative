@@ -316,8 +316,21 @@ class Client:
         return bool(m) and "no box" not in m.group(0)
 
     def open_list(self):
+        # Alt is a game key: before our player has spawned, the script's own "play" still enters the
+        # game and closes the menu (input_script.c input_script_tick), which closes the list at once.
+        # The script logs the camera with active=1 once we are in.
+        wait_for(lambda: re.search(r"\[input_script\] cam .*active=1", self.text()), 40)
         self.cmd("key 342")  # Alt: pListKey frees the pointer (the page takes clicks), then showWindow(23)
-        return wait_for(lambda: (self.count("#playerListH tr") or 0) > 0, 8)
+        # The list is drawn from the players the client has at that moment, and only a kick vote or
+        # K.P.D call redraws it (updateWindow(23), hud_votekick.c refresh_player_list). The peers can
+        # still be arriving after the join, so re-render the open list until its rows are there.
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if (self.count("#playerListH tr") or 0) > 0:
+                return True
+            time.sleep(1.0)
+            self.cmd("ui updateWindow(23)")
+        return False
 
     def rows(self):
         """{name: row number (1-based nth-child)} of the list's rows after alice's own (the first)."""
