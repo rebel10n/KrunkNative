@@ -16,7 +16,7 @@ stub brain (KRUNKNATIVE_BRAIN_URL: /mm/ping-list, /mm/seek-game), every port fro
        cached and the krunker.io Region row shows it; a second Find New Game pings nothing
     O2 the next run reuses the cached region: no ping list, no pings
     O3 an explicit krunker.io Region (de-fra) wins over the cached one
-    O4 the near region's only lobby is full: the seek widens to the other regions
+    O4 the near region's only lobby is full: the seek does not widen (no other region's lobby: v10 seeks one region)
     O5 every ping fails: the list's first region (de-fra), nothing cached
   ours (the brain's seek, Auto Seek on Launch):
     B1 the fastest of VA / MB / FR (VA) is the seek's region, cached; Settings > Default Region shows it
@@ -230,7 +230,8 @@ def official():
     run_client("O4", "0 menu\n" + seek + "500 call backToOrigin\n4000 quit\n", {"KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % ports[2]},
                ("--offline",), os.path.join(WORK, "widen-cfg"))
     got = [(q.get("game"), q.get("region")) for q in mm.seeks()]
-    check("O4: the near region's only lobby is full: the seek widens to another region's", got[:1] == [("MB:mmmmm", "as-mb")], got)
+    check("O4: the near region's only lobby is full: no lobby of another region is joined (v10 seeks the one region)",
+          ("MB:mmmmm", "as-mb") not in got, got)
     for s in (near, far, mm):
         s.httpd.shutdown()
 
@@ -283,12 +284,33 @@ def brain():
         s.httpd.shutdown()
 
 
+def unraced():
+    """A fresh profile whose ping race has not answered yet: the brain's list's first region (MB) is no ping result, so it is
+    not cached (pingRegion7). Host Game and Settings > Default Region read only a race's confirmed answer."""
+    ports = kn_proto.free_ports(4)
+    va, mb, fr = Pinger(ports[0], 3.0), Pinger(ports[1], 3.0), Pinger(ports[2], 3.0)
+    pingers = [va, mb, fr]
+    brain = Matchmaker(ports[3], {"MB": "127.0.0.1:%d" % mb.port, "FR": "127.0.0.1:%d" % fr.port, "VA": "127.0.0.1:%d" % va.port}, prefix="/mm")
+    env = {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % ports[3]}
+    cfg = os.path.join(WORK, "unraced-cfg")
+    text = run_client("F1", "0 boot\n2000 quit\n", env, (), cfg)  # quits before any ping answers
+    check("F1: the race started (three regions pinged) and had not answered when the client quit",
+          "[mm] ping race: 3 regions" in text and "answered first" not in text, text[-300:])
+    cached = os.path.join(cfg, "krunknative", "pingRegion7.json")
+    check("F1: no pingRegion7.json before a race answers: the list's first region (MB) is not cached", not os.path.exists(cached),
+          open(cached).read() if os.path.exists(cached) else "")
+    for p in pingers:
+        p.httpd.shutdown()
+    brain.httpd.shutdown()
+
+
 def main():
     if not os.path.isfile(f"{BUILD}/client_bin"):
         print("seek_region_e2e: no client_bin: skipped")
         return 77
     official()
     brain()
+    unraced()
     if all(results):
         shutil.rmtree(WORK, ignore_errors=True)
     else:

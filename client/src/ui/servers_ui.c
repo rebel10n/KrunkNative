@@ -1386,8 +1386,9 @@ static void on_ping_list(void *user, const int status, const char *body, const s
         list = NULL;
     }
     cJSON_Delete(list);
-    // ClientManager.setDefaultRegion: an unlisted Default Region's fallback is not a ping result, so it is not cached
-    if (how != SEEK_REGION_UNLISTED) html_storage_set("pingRegion7", g_region);
+    // the cache holds ping results only (on_region_race writes the race's winner, v10's setDefaultRegion): the list's first
+    // region, an unlisted Default Region's fallback or a saved one is no ping result, so it is not cached (a fresh profile
+    // whose race has not answered has no pingRegion7, and Host Game reads none of the list's first region as its own)
     // v10 getRegion: no Default Region and no confirmed cache (the list's first region, or none): the ping
     // race decides, and seeks in its winner (on_region_race). An unlisted Default Region races the same way
     if ((how == SEEK_REGION_FIRST || how == SEEK_REGION_NONE || how == SEEK_REGION_UNLISTED) && have_list &&
@@ -4334,10 +4335,7 @@ static void on_host(void *user, const int status, const char *body, const size_t
 // the brain is not available or the request cannot be sent.
 int servers_ui_host_game(const char *config_json) {
     if (backend_available() != 1 || !config_json) return 0;
-    if (!g_region[0]) {
-        char cached[32] = "";
-        if (html_storage_get("pingRegion7", cached, sizeof(cached)) >= 0) snprintf(g_region, sizeof(g_region), "%s", cached);
-    }
+    if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", servers_ui_auto_region()); // a confirmed race result only
     const size_t n = strlen(config_json) * 3 + 512;
     char *path = malloc(n), *enc = malloc(strlen(config_json) * 3 + 1), region[96];
     if (!path || !enc) {
