@@ -832,7 +832,8 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
         id[k] = 0;
         len += (size_t) snprintf(html + len, size - len, "<th id='endlb_%s'>%s</th>", id, hud_modes_end_header(stats[i]));
     }
-    len += (size_t) snprintf(html + len, size - len, "<th></th></tr><tr height='20px;'></tr>");
+    // the spacer row draws no rule: v10's `th, tr { border-bottom }` would give it one in any engine that paints row borders
+    len += (size_t) snprintf(html + len, size - len, "<th></th></tr><tr height='20px;' style='border-bottom:0'></tr>");
 
     // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
     // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.

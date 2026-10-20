@@ -3402,7 +3402,7 @@ static void hud_end_leaderboard_html(const Client *client, char *out, const size
     }
     free(live);
     hb_append(out, size, len, "<table id=\"endTable\"><tr><th id='endlb_rank'>#</th><th id='endlb_name'>Name</th><th id='endlb_score'>Score</th>"
-                              "<th id='endlb_kills'>Kills</th><th id='endlb_deaths'>Deaths</th><th id='endlb_reward'>Reward</th><th></th></tr><tr height='20px;'></tr>");
+                              "<th id='endlb_kills'>Kills</th><th id='endlb_deaths'>Deaths</th><th id='endlb_reward'>Reward</th><th></th></tr><tr height='20px;' style='border-bottom:0'></tr>");
     if (cJSON_IsArray(g_hud_override.scoreboard) && hud_end_scenario_rows_html(client, g_hud_override.scoreboard, out, size, len)) {
         hb_append(out, size, len, "</table>");
         return;
