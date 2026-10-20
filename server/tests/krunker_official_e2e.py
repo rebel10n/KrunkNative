@@ -506,6 +506,8 @@ class Stub:
         self.brain_seek = None
         # seconds a loopback region's /ping takes (the fresh-profile ping race of a seek answers late: F4 may come first)
         self.ping_delay = 0.0
+        # seconds krunker.io's /game-list takes (the official lobby list still loading while the player's F4 waits for it)
+        self.game_list_delay = 0.0
         # the game server signs the krunker.io account in right after init ("a" ACCOUNT_RESPONSE, as the live server
         # does for a signed-in player): the brain gate runs (run_native_kio_account_seek)
         self.signin = False
@@ -529,6 +531,8 @@ class Stub:
                 status = 200
                 if u.path == "/ping" and stub.ping_delay:
                     time.sleep(stub.ping_delay)
+                if u.path == "/game-list" and stub.game_list_delay:
+                    time.sleep(stub.game_list_delay)
                 if u.path in stub.published:  # the published Krunker build (tools/krunker/publish_build.py)
                     status, body = stub.published[u.path]
                     ctype = "application/json"
@@ -4198,6 +4202,58 @@ def run_native_f4_setting_race():
               [l for l in lines if "knSeekServers" in l][:2])
 
 
+def run_native_f4_hand_seek():
+    """Find New Game while a Box Office seek the player asked for by hand is out and is no Quick Play search (so the
+    search's generation does not cover it): the Maps window's Play sends a Box Office map seek (playMap), the brain is
+    slow to answer, then the player sets Server Type krunker.io and presses F4 while krunker.io's lobby list loads.
+    - "native-f4-hand-seek-noanswer": the brain gives no answer. Its failure must not show "Could not reach the
+      matchmaker" (the krunker.io join that follows would then be a match right after that error);
+    - "native-f4-hand-seek-answer": the brain answers a Box Office lobby after krunker.io's join has started. That
+      answer must not join it: the player stays on krunker.io.
+    The brain's first seek (the boot's) is answered at once."""
+    for label, answer in (("native-f4-hand-seek-noanswer", "none"), ("native-f4-hand-seek-answer", "lobby")):
+        dead_port = kn_proto.free_ports(1)[0]
+        seeks = []
+
+        def setup(st, answer=answer, dead_port=dead_port, seeks=seeks):
+            st.lobbies = EXCLUDE_LOBBIES
+            if answer == "none":
+                # krunker.io's list still loads when the brain's failure comes: the client retries a seek that got no answer
+                # once (backend's GET retry), so each of the two attempts waits 2 s and both fail inside this 6 s list
+                st.game_list_delay = 6.0
+
+            def brain(q):
+                seeks.append(dict(q))
+                if len(seeks) == 1:  # the boot's seek: answered at once (as brain_box_office_room's LOCAL:boot0)
+                    return 200, {"success": True, "host": "127.0.0.1", "port": dead_port, "gameId": "LOCAL:boot0", "clientId": "k",
+                                 "region": "local", "players": 2, "maxPlayers": 8}
+                time.sleep(2.0 if answer == "none" else 3.0)  # the map play's seek: its answer comes after F4
+                if answer == "none":
+                    return 0, {}  # no answer at all (the client's status 0)
+                return 200, {"success": True, "host": "127.0.0.1", "port": dead_port, "gameId": BOX_OFFICE_LOBBY, "clientId": "k",
+                             "region": "local", "players": 2, "maxPlayers": 8}
+            st.brain_seek = brain
+        write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+        script = '0 boot\n2000 call playMap "Bastion"\n2400 call setSetting "knSeekServers" "official"\n2600 down F4\n2650 up F4\n12000 quit\n'
+        stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                          args=(), stub_setup=setup)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        f4 = next((i for i, l in enumerate(lines) if "[controls] F4" in l), len(lines))
+        after = lines[f4:]
+        text_after = "\n".join(after)
+        check(f"{label}: the map play's Box Office seek is out when F4 comes (not a Quick Play search)",
+              f4 < len(lines) and any("[mm] play Bastion" in l for l in lines[:f4]) and len(seeks) >= 2,
+              [l for l in lines[:f4] if "[mm]" in l][-3:])
+        check(f"{label}: F4 runs Find New Game with the Server Type just set", "[controls] F4: find new game" in text_after,
+              [l for l in after if "[controls]" in l][:2])
+        check(f"{label}: no 'Could not reach the matchmaker' after F4 (the Box Office seek's failure is not the player's error)",
+              "Could not reach the matchmaker" not in text_after, [l for l in after if "Could not reach" in l][:2])
+        check(f"{label}: F4 joins krunker.io, the Server Type as just set", any("[krunker] seek: official lobby" in l for l in after)
+              and any("gameId=FRA:" in w for w in stub.ws_paths), (stub.ws_paths[:3], [l for l in after if "[krunker]" in l][:3]))
+        check(f"{label}: no Box Office join after F4 (the map play's answer is dropped)", not any(l.startswith("[mm] joining") for l in after),
+              [l for l in after if "[mm] joining" in l][:2])
+
+
 def run_native_f4_drops():
     """Server Type runs around krunker.io's own failures (the Box Office recovery must not take them): a krunker.io game
     that drops (no rejoin through Box Office, "native-kio-drop"; F4 after it joins krunker.io, "native-kio-drop-f4"), Find
@@ -4212,6 +4268,7 @@ def run_native_f4_drops():
     run_native_kio_connect()
     run_native_host_gate()
     run_native_f4_setting_race()
+    run_native_f4_hand_seek()
     run_native_kio_region_only()
 
 

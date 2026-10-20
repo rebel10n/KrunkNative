@@ -667,7 +667,7 @@ static void seek_req_free(SeekReq *r) {
 // when dropped (the request is freed).
 static int seek_overtaken(SeekReq *req) {
     if (!req || !seek_claim_overtaken(&g_claims, req->action)) return 0;
-    printf("[mm] late seek answer ignored: the player entered a lobby after this seek was sent\n");
+    printf("[mm] late seek answer ignored: a later action took over (a lobby was entered, or krunker.io was asked for)\n");
     if (req->serial == g_seek_serial) { // the last seek issued: nothing of this request is in flight any more
         g_seek_inflight = 0;
         g_rejoin_seek = 0;
@@ -4556,6 +4556,16 @@ static int quick_match_seek(void) {
 
 static int find_new_game_seek(void);
 
+// A krunker.io game is what the player asks for now (Find New Game on Server Type krunker.io, the Lost Connection
+// screen's Find Game): the Box Office matchmaking asked for before (a seek by hand, a map play, a rejoin) is over. Its
+// answers come later, and its no-answer failure is no longer the player's error. seek_claim_enter with no lobby claims
+// a new action, which overtakes every older one (seek_claim.h): seek_overtaken drops those answers, and
+// seek_claim_error_shown shows nothing for them. A Quick Play search is stopped by its generation (quick_play_retry.h).
+static void official_takes_over(void) {
+    rejoin_cancel(); // a Box Office rejoin of a lost game is no longer wanted
+    seek_claim_enter(&g_claims, 0);
+}
+
 // The Lost Connection screen's Find Game after an official krunker.io failure (v10: a fresh page, a new
 // game). The Server Type decides, as F4 does (find_new_game_seek). Box Office answers 1 (a seek started, or
 // the player is told there is no matchmaker), so the official game is not reconnected behind its back. Official:
@@ -4571,7 +4581,7 @@ int servers_ui_official_find_game(void) {
         ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
         return 1;
     }
-    rejoin_cancel(); // a Box Office rejoin armed by a lost game gives way to the player's krunker.io game
+    official_takes_over(); // a Box Office rejoin armed by a lost game, or a Box Office seek out, gives way to the krunker.io game
     if (krunker_lobbies_enabled()) return qp_started(krunker_lobbies_seek());
     return qp_started(g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0);
 }
@@ -4601,7 +4611,7 @@ static int find_new_game_seek(void) {
     const SeekServers type = seek_prefs_servers();
     const int official = krunker_net_active();
     if (type == SEEK_SERVERS_OFFICIAL) {
-        rejoin_cancel(); // F4 asks krunker.io for a game: a Box Office rejoin of a lost game is no longer wanted
+        official_takes_over(); // F4 asks krunker.io for a game: the Box Office matchmaking out gives way (official_takes_over)
         // the native lobby list; without one, krunker.io's own Find New Game in its game (krunker_net_seek_new)
         if (official && !krunker_lobbies_enabled()) return krunker_net_seek_new(g_client, NULL, 1);
         return krunker_lobbies_seek();
