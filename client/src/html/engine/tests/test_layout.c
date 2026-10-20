@@ -1215,8 +1215,9 @@ static void t_end_table(void)
     char *css = read_file("ui/css/main.css", &len);
     Fx *fx = fx_html("<div id='endTabbedView'><div class='endCard'><div id='tabHolder'><div class='tabHeader selected'>Leaderboard</div>"
                      "<div class='tabHeader '>Performance</div></div><div class='tabBody'><table id='endTable'>"
-                     "<tr><th id=h0>Rank</th><th id=h1>Name</th><th id=h2>Score</th><th>Kills</th><th>Deaths</th><th id=h5>Reward</th><th></th></tr>"
-                     "<tr style='border-bottom:none'><td id=d0 style='color:#fff'>1.</td><td id=d1><a class='endTableN' style='color:#fff'>Guest_1</a></td>"
+                     "<tr id=hr><th id=h0>#</th><th id=h1>Name</th><th id=h2>Score</th><th>Kills</th><th>Deaths</th><th id=h5>Reward</th><th></th></tr>"
+                     "<tr id=sp height='20px;'></tr>"
+                     "<tr id=r1 style='border-bottom:none'><td id=d0 style='color:#fff'>1.</td><td id=d1><a class='endTableN' style='color:#fff'>Guest_1</a></td>"
                      "<td id=d2>350</td><td>0</td><td>0</td><td id=d5>0</td>"
                      "<td style='width: 1px;white-space: nowrap;padding-right: 0px;padding-left: 0px;'></td></tr></table></div></div></div>", css);
     free(css);
@@ -1228,6 +1229,23 @@ static void t_end_table(void)
     /* th's UA text-align (-internal-center) yields to #endTable's text-align:left */
     Box *th = bx(fx, "h2");
     CHECK(th && th->style->text_align == CSS_TEXT_ALIGN_LEFT, "#endTable th inherits text-align:left (%d)", th ? th->style->text_align : -1);
+    /* One rule under the header (the end-of-match double line): `.endCard { border-collapse: collapse }`
+     * is inherited, but the UA's `table { border-collapse: separate }` stops it at the table, as in
+     * Chrome (computed: separate). In the separated model only the <th> cells draw main.css's 3px
+     * border-bottom; the header row, v10's empty 20px spacer row (`th, tr { border-bottom }` would give
+     * it a rule 20px under the header's) and the data rows draw none. Chrome: header row 55px (th
+     * 50px + the UA's 1px paddings + the 3px border), spacer 20px, row 1 right after it. */
+    Box *et = bx(fx, "endTable"), *hdr = bx(fx, "hr"), *spc = bx(fx, "sp"), *row1 = bx(fx, "r1"), *h0b = bx(fx, "h0");
+    CHECK(et && et->style->border_collapse == CSS_BORDER_COLLAPSE_SEPARATE,
+          "#endTable stays separated under .endCard's border-collapse:collapse (%d)", et ? et->style->border_collapse : -1);
+    CHECK(h0b && NEAR(h0b->border[CSS_BOTTOM], 3.0f, 0.01), "the header cells draw the 3px rule (%.1f)", h0b ? h0b->border[CSS_BOTTOM] : -1.0f);
+    CHECK(hdr && spc && row1 && hdr->border[CSS_BOTTOM] == 0 && spc->border[CSS_BOTTOM] == 0 && row1->border[CSS_BOTTOM] == 0,
+          "no row draws a rule: header row %.1f, spacer %.1f, row 1 %.1f",
+          hdr ? hdr->border[CSS_BOTTOM] : -1.0f, spc ? spc->border[CSS_BOTTOM] : -1.0f, row1 ? row1->border[CSS_BOTTOM] : -1.0f);
+    HtmlRect hdr_r = rc(fx, "hr"), spc_r = rc(fx, "sp"), row1_r = rc(fx, "r1");
+    CHECK(NEAR(hdr_r.h, 55.0f, 0.01) && NEAR(spc_r.h, 20.0f, 0.01) && NEAR(spc_r.y, hdr_r.y + hdr_r.h, 0.01) && NEAR(row1_r.y, spc_r.y + spc_r.h, 0.01),
+          "header row 55px, the spacer 20px under it, row 1 right after (rows y/h %.1f/%.1f %.1f/%.1f %.1f)",
+          hdr_r.y, hdr_r.h, spc_r.y, spc_r.h, row1_r.y);
     fx_free(fx);
     /* main.css's `th, tr { border-bottom: 3px }`: the separated-borders table draws the header cells'
      * rule only (browsers ignore a row's border there); rows take no border width */
