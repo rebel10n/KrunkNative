@@ -4,6 +4,7 @@
 #include <remote_images.h>
 #include <v10_social.h>
 #include <backend.h>
+#include "backend_internal.h" // backend_probe_tick (backend_common.c)
 #include <backend_ui.h>
 #include <strike_director.h> // Krunker Strike: the director matchmakes
 #include <strike_econ.h>     // Krunker Strike: the account's Strike economy state
@@ -115,6 +116,7 @@ int backend_startup(Client *client, const int offline, const int scenario) {
 
 void backend_frame(Client *client) {
     backend_poll();
+    backend_probe_tick(); // the brain probe: a timed-out one counts as failed, a due retry starts
     online_mode_tick(client);
     account_ui_tick(client);
     v10_rewards_tick(); // v10.0.2: the sidebar's Battle Pass item (v10_rewards.c)

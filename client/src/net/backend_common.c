@@ -4,9 +4,11 @@
 // main thread.
 #include <backend.h>
 #include "backend_internal.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static char g_url[256];
 
@@ -59,21 +61,63 @@ int backend_brain_refuses_url(const char *url) {
 }
 
 // ---- brain probe (default URLs)
+// The probe decides whether the brain is there: the social socket (and with it the saved session's
+// restore, account_ui.c) opens only once it answers 1. A probe that fails for a while (no answer by
+// PROBE_TIMEOUT_S, a network error, 408 / 425 / 429 / 5xx) is asked again in the background, with a
+// wait that grows to PROBE_RETRY_MAX_S, so one bad answer at page load does not leave the page a guest
+// until the next reload. Meanwhile g_avail is 0, as for a page with no brain, so the matchmaker and the
+// account windows do not wait on it. A definitive answer (200 without the brain, 404, ...) is final.
+#define PROBE_TIMEOUT_S 12   // fetch() has no timeout of its own: a probe with no answer by then has failed
+#define PROBE_RETRY_MAX_S 10 // the longest wait between probes after a failure (1, 2, 4, 8, then this)
+
 static int g_avail = 1;        // backend_available()
 static int g_probing;
 static int g_social_wanted;    // something asked for the social socket while the probe ran
+static unsigned g_probe_seq;   // the probe in flight: only its own answer counts (a timed-out one is dropped)
+static time_t g_probe_started; // when the probe in flight was sent
+static time_t g_retry_at;      // 0 = no background probe pending; else when the next one is due
+static int g_retry_wait_s = 1; // the wait after the next failure
+
+static int probe_transient(const int status) {
+    return status == 0 || status == 408 || status == 425 || status == 429 || status >= 500;
+}
+
+// A probe failed for now: the page is a guest until a later probe finds the brain. The first failure of a
+// run says so in the log; the ones after it are retried quietly.
+static void probe_retry_later(const int status) {
+    g_avail = 0;
+    if (g_retry_wait_s == 1) {
+        printf("[backend] no account server at %s (GET /mm/status: HTTP %d): social features are off for now, "
+               "playing as a guest; asking again in %d s (run kn_brain, e.g. make backend-up, or pass ?brain=<url>)\n",
+               backend_url(), status, g_retry_wait_s);
+    }
+    g_retry_at = time(NULL) + g_retry_wait_s;
+    g_retry_wait_s = g_retry_wait_s * 2 > PROBE_RETRY_MAX_S ? PROBE_RETRY_MAX_S : g_retry_wait_s * 2;
+}
 
 static void probe_done(void *user, const int status, const char *body, const size_t length) {
-    (void) user;
     (void) length;
+    if ((unsigned) (uintptr_t) user != g_probe_seq) return; // a probe that timed out: its late answer is dropped
     g_probing = 0;
-    g_avail = status == 200 && strstr(body, "\"brain\"") ? 1 : 0;
-    if (g_avail) printf("[backend] brain found at %s\n", backend_url());
+    if (status == 200 && body && strstr(body, "\"brain\"")) {
+        g_avail = 1;
+        g_retry_at = 0;
+        g_retry_wait_s = 1;
+        printf("[backend] brain found at %s\n", backend_url());
+        if (g_social_wanted) backend_social_open();
+        return;
+    }
+    if (probe_transient(status)) {
+        probe_retry_later(status);
+        return;
+    }
+    g_avail = 0;
+    g_retry_at = 0;
+    g_retry_wait_s = 1;
     // e.g. `make web-serve`, or `make bridge` with no kn_brain behind it: say what that means rather
     // than leave it to a failing /social/ws (none is attempted) or a silent guest menu
-    else printf("[backend] no account server at %s (GET /mm/status: HTTP %d): social features are off, playing as a guest "
-                "(run kn_brain, e.g. make backend-up, or pass ?brain=<url>)\n", backend_url(), status);
-    if (g_avail && g_social_wanted) backend_social_open();
+    printf("[backend] no account server at %s (GET /mm/status: HTTP %d): social features are off, playing as a guest "
+           "(run kn_brain, e.g. make backend-up, or pass ?brain=<url>)\n", backend_url(), status);
 }
 
 void backend_probe_start(void) {
@@ -82,11 +126,28 @@ void backend_probe_start(void) {
     // probe that runs after the player leaves the official server is a real one (not "no account server")
     if (backend_brain_refuses_path()) return;
     g_probing = 1;
+    g_retry_at = 0;
     if (g_avail == 1) g_avail = -1;
-    if (!backend_http_get("/mm/status", probe_done, NULL)) {
+    g_probe_seq++;
+    g_probe_started = time(NULL);
+    if (!backend_http_get("/mm/status", probe_done, (void *) (uintptr_t) g_probe_seq)) {
         g_probing = 0;
         g_avail = 0;
     }
+}
+
+// Every frame (backend_frame): a probe with no answer by PROBE_TIMEOUT_S has failed, and the background
+// probe after a failure starts once its wait is over.
+void backend_probe_tick(void) {
+    if (!backend_enabled() || !backend_url_is_default()) return;
+    const time_t now = time(NULL);
+    if (g_probing && now - g_probe_started >= PROBE_TIMEOUT_S) {
+        g_probe_seq++; // the answer, if one ever comes, is dropped
+        g_probing = 0;
+        probe_retry_later(0);
+        return;
+    }
+    if (!g_probing && g_retry_at && now >= g_retry_at) backend_probe_start();
 }
 
 int backend_available(void) {

@@ -63,6 +63,15 @@ static AccountInfo g_acc;
 static int g_logged_in;
 static int g_header_dirty = 1;   // cK() pending (page not up yet / offsetWidth not laid out)
 static int g_restore_sent;       // a token restore is in flight
+// The saved session's asks (try_restore). The brain keeps a session's token as it is (auth.c: sliding expiry),
+// so a refused one is asked once more, after RESTORE_RETRY_S, before the saved session is forgotten (refresh
+// and retry); an ask with no answer after RESTORE_ANSWER_S is sent again. RESTORE_ASKS bounds both, per socket.
+#define RESTORE_ASKS 2
+#define RESTORE_RETRY_S 2.0
+#define RESTORE_ANSWER_S 10.0
+static int g_restore_asks;        // asks sent on this socket
+static double g_restore_at;       // glfwGetTime() of the last ask (0 none)
+static double g_restore_retry_at; // a refused ask is asked again at this glfwGetTime() (0 none)
 static int g_tab_index;          // windows[4].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
@@ -704,6 +713,7 @@ static void clear_session(void) {
 static void forget_saved_session(void) {
     alt_store_kn_forget(g_session_user);
     clear_session();
+    g_restore_retry_at = 0;
 }
 
 // Startup: the vault's active listed account becomes the session. The plain keys of older builds
@@ -736,6 +746,8 @@ static void try_restore(void) {
         return;
     }
     g_restore_sent = 1;
+    g_restore_asks++;
+    g_restore_at = glfwGetTime();
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("a"));
     cJSON_AddItemToArray(frame, cJSON_CreateNumber(1));
@@ -868,6 +880,15 @@ static void account_response(const cJSON *frame) {
     g_restore_sent = 0;
     g_auth_sent_at = 0;
     if (cJSON_IsString(err) && err->valuestring[0]) {
+        if (was_restore && !g_logged_in && g_restore_asks < RESTORE_ASKS && g_token[0]) {
+            // a refused saved session is asked once more (account_ui_tick), before anything is shown or
+            // forgotten; the Account Manager's switch keeps waiting for that answer
+            printf("[account] the saved session was refused (%s): asking once more\n", err->valuestring);
+            g_am_request = am;
+            if (am) g_auth_sent_at = glfwGetTime();
+            g_restore_retry_at = glfwGetTime() + RESTORE_RETRY_S;
+            return;
+        }
         show_acc_resp(err->valuestring);
         if (was_restore && !g_logged_in) {
             // a stale saved token: nothing would ever log in with it again, so it is forgotten
@@ -887,6 +908,8 @@ static void account_response(const cJSON *frame) {
     const int had = g_logged_in;
     clear_account();
     g_logged_in = 1;
+    g_restore_asks = 0;
+    g_restore_retry_at = 0;
     g_acc.id = id->valueint;
     copy_str(g_acc.name, sizeof(g_acc.name), username);
     copy_str(g_acc.alias, sizeof(g_acc.alias), username);
@@ -948,6 +971,8 @@ int account_ui_use_session(const char *username, const char *token) {
     copy_str(g_am_name, sizeof(g_am_name), username);
     g_auth_sent_at = glfwGetTime(); // a switch that never answers says so (auth_unreachable)
     g_restore_sent = 0;
+    g_restore_asks = 0;
+    g_restore_retry_at = 0;
     try_restore(); // the answer ("a", a token refresh included) comes back to account_response
     return 0;
 }
@@ -1030,6 +1055,8 @@ static void on_social(void *user, const cJSON *frame) {
     const char *label = str_at(frame, 0);
     if (!label) return;
     if (!strcmp(label, "__open")) {
+        g_restore_asks = 0; // a new socket: the saved session gets its asks again
+        g_restore_retry_at = 0;
         if (g_logged_in && g_token[0]) {
             // the socket dropped and came back: authenticate this socket again
             g_restore_sent = 0;
@@ -1616,6 +1643,20 @@ void account_ui_tick(Client *client) {
     reward_end = end_now;
     reward_tick(0);
     if (g_auth_sent_at > 0 && glfwGetTime() - g_auth_sent_at > AUTH_TIMEOUT_SECONDS) auth_unreachable();
+    // the saved session's asks: a refused one is asked again (account_response), an unanswered one after a while
+    if (g_restore_retry_at > 0 && glfwGetTime() >= g_restore_retry_at) {
+        g_restore_retry_at = 0;
+        if (!g_logged_in && g_token[0] && backend_social_is_open()) {
+            g_restore_sent = 0;
+            try_restore();
+        }
+    }
+    if (g_restore_sent && !g_logged_in && g_token[0] && g_restore_asks < RESTORE_ASKS && backend_social_is_open() &&
+        glfwGetTime() - g_restore_at > RESTORE_ANSWER_S) {
+        printf("[account] the saved session has no answer yet: asking again\n");
+        g_restore_sent = 0;
+        try_restore();
+    }
     if (g_header_dirty) update_header();
     // A round ended: the game server reported the match to the brain. Refresh the
     // account (KR, score, level) with a token login a moment later, like v3.1.1's
