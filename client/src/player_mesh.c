@@ -1245,7 +1245,6 @@ void player_generate_meshes(Player *player, const int render_you) {
                     drank_grip.offset.x = 0.0f;
                     drank_grip.right_hold = pistol->right_hold;
                     drank_grip.right_hold.x = -NETTSPEND_TP_HAND_X;
-                    drank_grip.right_hold.y += NETTSPEND_TP_HAND_RAISE;
                     drank_grip.right_hold.z = drank_grip.offset.z + NETTSPEND_TP_HAND_REACH;
                     // the off hand hangs straight down from its shoulder (the arm solver: the hand's x is -hold.x, its
                     // y is hold.y and its forward distance hold.z - offset.z, in the arm frame; the left shoulder is at

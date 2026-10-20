@@ -67,9 +67,6 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // hold.z - offset.z and its x as -hold.x, so the hold is offset.z + reach and -x.
 #define NETTSPEND_TP_HAND_REACH 5.0f
 #define NETTSPEND_TP_HAND_X 0.65f
-// Third person: the trigger hand is raised this far above the pistol's hold height (the pistol's fist sits at the
-// shoulder to chest; the reach points the hand at the camera, which hangs it lower on screen than the pistol's)
-#define NETTSPEND_TP_HAND_RAISE 0.8f
 // Third person: the off hand hangs straight down from its shoulder, this long (the arm is 5.4 long, so the elbow
 // is slightly bent, a relaxed arm), its hand at mid-thigh (player_mesh.c player_generate_meshes)
 #define NETTSPEND_TP_OFF_HAND_REACH 5.3f
