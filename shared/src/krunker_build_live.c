@@ -141,6 +141,9 @@ static const int OPTIONAL_C2S[] = {
     // hosting a custom game on krunker.io's servers (the Host Game window's krunker.io hosting): a build without it sends
     // no request ("the request was not sent") and every other packet works as before
     KRUNKER_C2S_CUSTOM_SERVER,
+    // the Junkyard's recipe table, asked only by the KRUNKNATIVE_DUMP_RECPS capture (krunker_net.c; not a player feature).
+    // A build without it: the capture asks nothing ("the request was not sent"), the game is unchanged
+    KRUNKER_C2S_CRAFT_DATA_REQUEST,
     -1,
 };
 static const int OPTIONAL_S2C[] = {
@@ -177,6 +180,8 @@ static const int OPTIONAL_S2C[] = {
     // the answer to CUSTOM_SERVER (its game id, or the refusal): only read after a custom request. A build without it
     // loses that reply, so the hosting attempt times out ("Please try again.")
     KRUNKER_S2C_CUSTOM_RESPONSE,
+    // the answer to CRAFT_DATA_REQUEST (the same capture): the recipe rows and the junk balance
+    KRUNKER_S2C_CRAFT_DATA_RESPONSE,
     -1,
 };
 static const int REQUIRED_ADD[] = {
