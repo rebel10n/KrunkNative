@@ -45,9 +45,12 @@
 // ?krunkerAuth=. Natively the requests go through the client's proxy (http_proxy.h: its krunker.io
 // scope covers *.krunker.io and crucible.frvr.com).
 
-// v10's API client is `new _10077(_7284)` (v10:27600), _7284 = GAPI_URI = https://gapi.svc.krunker.io
-// (v10:16439): sign-in (/auth/...), /player, /shop, /ranked. (api.krunker.io answers
-// {"status":"Unauthorized"} to every one of them.)
+// v10 has two API clients (v10:16439, 27594, 27600). The data client `_10444 = new _9997(_7283)`, _7283 = API_URI =
+// https://api.krunker.io: playerProfile (/player-profile), matchHistory, leaderboards, ranked/me/connection and
+// the claim-milestone (doc/v10/ranked.md). The gapi client `_10449 = new _10077(_7284)`, _7284 = GAPI_URI =
+// https://gapi.svc.krunker.io: the account services and ranked shop / purchase. KRUNKER_HOST_API below is the
+// data client; KRUNKER_ACCOUNT_DEFAULT_API is the gapi one (krunker_service_url, KRUNKER_SVC_API).
+#define KRUNKER_ACCOUNT_DEFAULT_DATA_API "https://api.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_API "https://gapi.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_GAPI "https://gapi.svc.krunker.io"
 #define KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND "https://gamefrontend.svc.krunker.io"
@@ -57,11 +60,12 @@
 #define KRUNKER_ACCOUNT_REFRESH_MARGIN_S 60
 
 // The krunker.io hosts v10.0.2's client talks to (_7283 api, _7284 gapi, _7287 gamefrontend). Tests and
-// mirrors override each: KRUNKNATIVE_KRUNKER_API / _GAPI / _GAMEFRONTEND (on the web ?krunkerApi= /
-// ?krunkerGapi= / ?krunkerGamefrontend=). krunker_host_url writes the host's base + path (path starts
-// with '/'); the base has no trailing slash.
+// mirrors override each: KRUNKNATIVE_KRUNKER_DATA_API (the data client, on the web ?krunkerDataApi=) /
+// KRUNKNATIVE_KRUNKER_API (the gapi-side API base; the data client follows it when its own is not set) /
+// _GAPI / _GAMEFRONTEND. krunker_host_url writes the host's base + path (path starts with '/'); the base
+// has no trailing slash.
 typedef enum {
-    KRUNKER_HOST_API = 0,
+    KRUNKER_HOST_API = 0, // the data client (v10 API_URI): ranked profile, boards, history, connection, claim
     KRUNKER_HOST_GAPI,
     KRUNKER_HOST_GAMEFRONTEND,
 } KrunkerHost;

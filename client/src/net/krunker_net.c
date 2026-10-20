@@ -1874,7 +1874,7 @@ static void on_build(void *user, const KrunkerBuildSource src, const char *clien
 static void open_match(void) {
     char api[256];
     krunker_host_url(KRUNKER_HOST_API, "", api, sizeof(api));
-    const int production = !strcmp(api, KRUNKER_ACCOUNT_DEFAULT_API);
+    const int production = !strcmp(api, KRUNKER_ACCOUNT_DEFAULT_DATA_API);
     if (!ranked_match_host(K.match, K.host, sizeof(K.host)) ||
         !ranked_match_url(K.match, production, !strncmp(api, "https:", 6), K.access, K.ws_url, sizeof(K.ws_url), K.ws_log, sizeof(K.ws_log))) {
         char text[300];

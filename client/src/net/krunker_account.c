@@ -179,16 +179,19 @@ static void auth_url(char *out, const size_t n, const char *path) {
 }
 
 void krunker_host_url(const KrunkerHost host, const char *path, char *out, const size_t n) {
-    static const struct {
-        const char *env, *param, *fallback;
-    } hosts[] = {
-        {"KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API},
-        {"KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi", KRUNKER_ACCOUNT_DEFAULT_GAPI},
-        {"KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND},
-    };
     char base[256];
-    const size_t i = (size_t) host < sizeof(hosts) / sizeof(hosts[0]) ? (size_t) host : 0;
-    endpoint(hosts[i].env, hosts[i].param, hosts[i].fallback, base, sizeof(base));
+    switch (host) {
+        case KRUNKER_HOST_GAPI: endpoint("KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi", KRUNKER_ACCOUNT_DEFAULT_GAPI, base, sizeof(base)); break;
+        case KRUNKER_HOST_GAMEFRONTEND:
+            endpoint("KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND, base, sizeof(base));
+            break;
+        default: { // the data client (v10 API_URI, not gapi): a mirror that sets only KRUNKNATIVE_KRUNKER_API serves it there too
+            char api[256];
+            endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_DATA_API, api, sizeof(api));
+            endpoint("KRUNKNATIVE_KRUNKER_DATA_API", "krunkerDataApi", api, base, sizeof(base));
+            break;
+        }
+    }
     snprintf(out, n, "%s%s", base, path);
 }
 

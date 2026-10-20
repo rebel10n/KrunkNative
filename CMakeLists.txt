@@ -1099,6 +1099,15 @@ else ()
     add_executable(kn_webview_test client/tests/kn_webview_test.c client/src/ui/kn_webview.c)
     target_include_directories(kn_webview_test PRIVATE client/include)
     add_test(NAME kn_webview_test COMMAND kn_webview_test)
+    # krunker_host_test (client/src/net/krunker_account.c, krunker_host_url): the data client (v10's api.krunker.io, the
+    # ranked profile) and the gapi client resolve to their own hosts by default; the env overrides follow. krunker_account.c
+    # is included whole, with doubles for its storage, transfers and captcha; nothing is requested
+    if (NOT WIN32)
+        add_executable(krunker_host_test client/tests/krunker_host_test.c)
+        target_include_directories(krunker_host_test PRIVATE client/include shared/include client/lib/glfw/include)
+        target_link_libraries(krunker_host_test PRIVATE cJSON freetype m pthread)
+        add_test(NAME krunker_host_test COMMAND krunker_host_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
     # krunker_host_custom_test (client/src/net/krunker_net.c, krunker_net_host_custom): a custom game hosted on
     # krunker.io's official servers (CUSTOM_SERVER, the "cust" reply, the timeout). krunker_net.c is included
     # whole, with doubles for its client, account and map callers; no socket is opened
