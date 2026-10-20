@@ -64,6 +64,9 @@ int backend_http_request(const char *method, const char *url, const char *json_b
 // media hosts) are not affected. NULL = no gate (the brain is always the backend, as before).
 typedef int (*BackendBrainGateFn)(void);
 void backend_set_brain_gate(BackendBrainGateFn fn);
+// 1 while the gate refuses brain requests (what backend_http_get would answer 0 to right now, without the
+// refusal log): a caller choosing where a request goes (servers_ui.c's seeks) reads the gate's own state.
+int backend_brain_gated(void);
 #ifndef __EMSCRIPTEN__
 // Native: GET of a URL on another host (krunker.io's game list, krunker_lobbies.c) on its own
 // worker, with its own connect / receive timeout, so it never queues behind (or delays) the

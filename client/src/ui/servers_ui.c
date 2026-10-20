@@ -1107,6 +1107,42 @@ static void seek_recent_list(char *out, const size_t n) {
     }
 }
 
+// The one rule of the brain seeks. The brain gate (backend.h backend_set_brain_gate; account_ui.c: no brain request
+// while krunker.io is the active backend, this window's official game or another window's) refuses every brain
+// request at once, and the refusal used to come back through seek_unreachable as "Could not reach the matchmaker":
+// the brain's own failure, shown over a krunker.io game the player was plainly connected to. So the route reads the
+// gate's own state (backend_brain_gated) before a seek is built: a seek goes to the brain only when the gate lets it
+// through; one it would refuse is not sent, and the search, rejoin or reload it belonged to ends there (seek_dropped),
+// with a log line and nothing on the screen. v10 has one matchmaker and leaves the game it is in for the next one
+// (location.href): the explicit Box Office actions in this window's krunker.io game give way first
+// (krunker_gives_way), so their seek passes the gate.
+static int brain_seek_allowed(const char *what) {
+    if (!backend_brain_gated()) return 1;
+    printf("[mm] %s not sent: krunker.io is the active backend (the brain gate), nothing shown\n", what);
+    return 0;
+}
+
+// The seek the gate refused: nothing was asked of the brain, and what the seek was for is over.
+static void seek_dropped(void) {
+    g_rejoin_next = g_reload_next = 0;
+    g_find_seek = g_find_both = 0;
+    g_exclude_game[0] = 0;
+    g_carry_action = 0;
+    rejoin_cancel();
+    quick_play_retry_end();
+}
+
+// An explicit Box Office action in this window's krunker.io game (live, or on its error screen, still the session):
+// Find New Game, Play on a map, a lobby joined by hand (a row, a Box Office id or link, a friend's game). The game
+// gives way before the brain is asked, as v10 leaves its game for the next one; its lobby is no Box Office lobby to
+// leave, exclude or rejoin.
+static void krunker_gives_way(const char *what) {
+    if (!g_client || !krunker_net_active()) return;
+    printf("[mm] %s: the krunker.io game gives way to Box Office\n", what);
+    krunker_net_leave(g_client, NULL);
+    g_game_id[0] = 0;
+}
+
 static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     char path[6144], enc[3400]; // enc: also the dataQuery with every mode and map picked, URL-encoded
     // the matchmaking action this seek belongs to: a continuation's (g_carry_action), else a new one
@@ -1115,6 +1151,11 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     const int play = g_play_seek; // v10's play seek: region "any", the map only, autoChangeGame false
     g_play_seek = 0;
     const int auto_change = play ? 0 : auto_change_in;
+    // the brain gate (brain_seek_allowed): a seek it would refuse is not sent (the director's needs no brain)
+    if (!strike_via_director() && !brain_seek_allowed(game_id && game_id[0] ? game_id : play ? "the play seek" : "the seek")) {
+        seek_dropped();
+        return;
+    }
     // a lobby picked by hand (a game id; not a quick join's candidate, a rejoin or a reload) replaces a Quick Play search
     if (game_id && game_id[0] && !quiet && !g_rejoin_next && !g_reload_next) quick_play_retry_cancel();
     const int qp_seek = quiet != NULL || quick_play_retry_running(); // a Quick Play search's seek (quick_play_retry.h)
@@ -1210,6 +1251,12 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
 // action while outside a lobby (seek_claim_error_shown). Otherwise the attempt is only logged: the player is in a
 // lobby, or a later action has taken over. The state the attempt held is cleared by the caller.
 static void unreachable_error(const unsigned action) {
+    if (backend_brain_gated()) {
+        // the request fell at the brain gate (krunker.io is the active backend: brain_seek_allowed, or the gate closed
+        // while it was out), the brain was never asked: not its failure, never this error
+        printf("[mm] could not reach the matchmaker: not shown (the brain gate refused the request)\n");
+        return;
+    }
     const int in_lobby = g_client && g_client->net_connected;
     if (!seek_claim_error_shown(&g_claims, action, in_lobby)) {
         printf("[mm] could not reach the matchmaker: not shown (%s)\n", in_lobby ? "in a lobby" : "not the current request");
@@ -1453,6 +1500,10 @@ static int start_seek(const char *game_id) {
         seek(game_id, !game_id, NULL);
         return 1;
     }
+    if (!brain_seek_allowed(game_id && game_id[0] ? game_id : "the new-game search")) { // the brain gate: not sent, 0 = nothing went out
+        seek_dropped();
+        return 0;
+    }
     const unsigned action = seek_claim_start(&g_claims); // the search: its ping list, its region race and its seek
     PingSeek *ps = calloc(1, sizeof(*ps));
     if (ps) {
@@ -1496,6 +1547,7 @@ static void switch_server(const char *id) {
         location.search = "?game=" + UTF8ToString($0) + (rest ? "&" + rest : "");
     }, esc);
 #else
+    krunker_gives_way("join by hand"); // a Box Office lobby asked for by hand: this window's krunker.io game gives way first
     seek(id, 0, NULL);
 #endif
 }
@@ -2413,6 +2465,11 @@ int servers_ui_reconnect_offline(void) {
 // with its old ticket: without a lobby id it seeks the region's best lobby.
 int servers_ui_reconnect(void) {
     if (!g_client) return 0;
+    if (krunker_net_active()) { // an official krunker.io session: that game again (client_net_request_reconnect), never a Box Office seek
+        printf("[mm] reconnect: the official krunker.io game again\n");
+        krunker_net_reconnect(g_client);
+        return 1;
+    }
     if (!g_last_direct && g_brain_mode && g_pin != PIN_DIRECT && (g_game_id[0] || g_client->net_join.client_key[0])) {
         char id[sizeof(g_game_id)];
         snprintf(id, sizeof(id), "%s", g_game_id);
@@ -4243,12 +4300,12 @@ int servers_ui_play_map_mode(const char *name, const int catalogue, const int mo
     // plays it: the game list, then the offline game on it (on_seek -> on_play_list). Community maps (not one of
     // v10's) keep the list search below.
     // (a mode-specific play, the raid promo's Raid, keeps the list search below: the seek has no mode)
-    // the brain is refused while krunker.io is the session (account_backend gates its requests): an official game
-    // gives way first, as Find New Game does (find_new_game_seek), so the Box Office play seek can go out
-    if (g_brain_mode && !g_client->offline && krunker_net_active()) {
-        printf("[mm] play %s: the krunker.io game gives way to the Box Office play\n", name);
-        krunker_net_leave(g_client, NULL);
-        g_game_id[0] = 0;
+    // the brain is refused while krunker.io is the session (brain_seek_allowed): an official game gives way first, as
+    // Find New Game does (find_new_game_seek), so the Box Office play seek can go out
+    if (g_brain_mode && !g_client->offline) {
+        char what[sizeof("play ") + 160];
+        snprintf(what, sizeof(what), "play %s", name);
+        krunker_gives_way(what);
     }
     const int index = official_map_index(name);
     if (mode < 0 && index >= 0 && g_brain_mode && !g_client->offline && g_pin == PIN_NONE) {
@@ -4478,10 +4535,7 @@ static int find_new_game_seek(void) {
     }
     g_find_seek = 1;
     g_find_both = type == SEEK_SERVERS_BOTH;
-    if (official) { // the official game gives way: its lobby is no Box Office lobby to leave or exclude
-        krunker_net_leave(g_client, NULL);
-        g_game_id[0] = 0;
-    }
+    krunker_gives_way("find new game"); // the official game gives way: its lobby is no Box Office lobby to leave or exclude
     snprintf(g_find_prev_game, sizeof(g_find_prev_game), "%s", g_game_id);
     return quick_match_seek();
 }
@@ -4631,12 +4685,15 @@ void servers_ui_tick(Client *client) {
         snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
         mm_get(path, on_game_info, NULL);
     }
-    // the account changed while sitting in the menu of a lobby. A server that takes live sign-ins
+    // the Box Office account changed while sitting in the menu of a lobby. A server that takes live sign-ins
     // (it pushed NET_EXT_KN_ACCOUNT_RIGHTS on this connection) re-verifies the connection in place
     // (online_mode.c, like v3.1.1 logging in on the game socket itself); an older one is rejoined
-    // so it attaches (or drops) the account
+    // so it attaches (or drops) the account. The account watched is the Box Office one (krunkio_account: the
+    // brain's tickets carry it), never the active one: the krunker.io account an official game's server signs in
+    // (active_account while that game is the backend) is nothing to the Box Office lobby the player was in
+    // before, and its sign-in used to seek that lobby again through the brain, which the brain gate refused.
     static int last_account = -1;
-    const AccountInfo *acc = active_account();
+    const AccountInfo *acc = krunkio_account();
     const int account_id = acc ? acc->id : 0;
     if (last_account < 0) last_account = account_id;
     if (account_id != last_account) {
@@ -4651,6 +4708,7 @@ void servers_ui_tick(Client *client) {
             menu_show_window(MENU_WINDOW_NONE, 0);
             seek(id, 0, NULL);
         } else if (g_pin == PIN_NONE && g_game_id[0] && !client->in_game && !g_seek_inflight) {
+            printf("[mm] account changed: joining %s again so its server attaches it\n", g_game_id);
             seek(g_game_id, 1, NULL);
         }
     }

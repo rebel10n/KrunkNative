@@ -133,7 +133,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
         "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose",
-        "--kiodrop": "kiodrop",
+        "--kiodrop": "kiodrop", "--gate": "gate",
         "--f4": "f4", "--play": "play"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
@@ -506,6 +506,9 @@ class Stub:
         self.brain_seek = None
         # seconds a loopback region's /ping takes (the fresh-profile ping race of a seek answers late: F4 may come first)
         self.ping_delay = 0.0
+        # the game server signs the krunker.io account in right after init ("a" ACCOUNT_RESPONSE, as the live server
+        # does for a signed-in player): the brain gate runs (run_native_kio_account_seek)
+        self.signin = False
 
     def speak(self, live):
         self.live = live
@@ -790,6 +793,8 @@ class Stub:
                 await send("0", bot)
             else:
                 await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions or rounds or prophunt else 0))
+            if self.signin:  # the player's krunker.io account, signed in by the game server while the player sits in the menu
+                await send("a", None, 4242, "StubAcct", {"player_score": 100})
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -3925,6 +3930,103 @@ def run_native_play_in_kio():
           any(pth == "/brain/mm/game-list" for pth, _, _ in stub.http_log), [l for l in after if "[mm]" in l][:4])
 
 
+def write_storage(label, values):
+    """html_storage entries of the run's profile (launch_native's XDG_CONFIG_HOME): <key>.json holds the raw value"""
+    cfg = os.path.join(WORK, label + "-cfg", "krunknative")
+    os.makedirs(cfg, exist_ok=True)
+    for key, value in values.items():
+        with open(os.path.join(cfg, key + ".json"), "w") as f:
+            f.write(value)
+
+
+def fake_kio_jwt(username):
+    """a krunker.io access token the client takes as fresh (its exp claim an hour away; the signature is never checked)"""
+    def b64u(b):
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    now = int(time.time())
+    return "%s.%s.e2e" % (b64u(json.dumps({"alg": "none", "typ": "JWT"}).encode()),
+                          b64u(json.dumps({"username": username, "exp": now + 3600, "iat": now}).encode()))
+
+
+def kio_signed_in_env(st):
+    """a brain session with the krunker.io account's services on the stub (404 there: the sign-in stays, nothing leaves the box)"""
+    return {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port,
+            "KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % st.mm_port,
+            "KRUNKNATIVE_KRUNKER_GAPI": "http://127.0.0.1:%d/gapi" % st.mm_port}
+
+
+def run_native_kio_account_seek():
+    """The report "im obviously connected, its just lying": a Box Office lobby first (the brain session's startup seek: the
+    lobby id stays in servers_ui as the player's lobby), then a krunker.io game joined from the server browser with the
+    krunker.io account signed in. Its game server signs the account in ("a"), so the active account changes (it follows the
+    game: the krunker.io account now), and servers_ui_tick's account-change rejoin ("the account changed while sitting in
+    the menu of a lobby") sought the old Box Office lobby through the brain, which the brain gate refused: "Could not reach
+    the matchmaker" (seek_unreachable) over a krunker.io game that was still connected. That rejoin is the Box Office
+    lobby's (its krunk.io account): the krunker.io account's sign-in is nothing to it; and a seek the gate refuses is
+    never sent, so it is never the brain being unreachable ("native-kio-account-seek")."""
+    label = "native-kio-account-seek"
+    dead_port = kn_proto.free_ports(1)[0]
+    seeks = []
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        st.signin = True
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+    write_storage(label, {"kio_access_token": fake_kio_jwt("StubAcct"), "kio_username": "StubAcct", "kio_level": "20"})
+    # no `play`: the player sits in the menu of the krunker.io game (not in play) when its server signs the account in
+    script = '0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n12000 quit\n'
+    stub, p, out, log = launch_native(label, script, kio_signed_in_env, args=(), stub_setup=setup, scenario="default")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    kio_join = next((i for i, l in enumerate(lines) if "joining official game" in l or "joining in-client" in l), len(lines))
+    after = lines[kio_join:]
+    check(f"{label}: the krunker.io game server signs the account in while the player is in its menu",
+          any("signed in the krunker.io account" in l for l in after), [l for l in after if "[krunker]" in l][:4])
+    check(f"{label}: no 'Could not reach the matchmaker' over the connected krunker.io game (shown or logged)",
+          not any("could not reach the matchmaker" in l.lower() for l in after), [l for l in after if "could not reach" in l.lower()][:2])
+    check(f"{label}: the krunker.io game is not left for an error screen", not any("error screen:" in l for l in after),
+          [l for l in after if "error screen:" in l or "left the game" in l][:3])
+    bo_seeks = [pth for pth, _, _ in stub.http_log if pth == "/brain/mm/seek-game"]
+    check(f"{label}: Box Office's brain is asked once (the startup seek), not again for the krunker.io account's sign-in",
+          len(bo_seeks) <= 1, (len(bo_seeks), [l for l in after if "[mm]" in l][:4]))
+    check(f"{label}: no Box Office rejoin of the old lobby is sought", not any("[mm] rejoin" in l or "[mm] joining" in l for l in after),
+          [l for l in after if "[mm]" in l][:4])
+
+
+def run_native_kio_connect():
+    """A Box Office lobby id joined by hand while a krunker.io game is the session: the console's `connect CH2:kz862` (the
+    Join field, a friend's game and a pasted link take the same path, switch_server). Its seek went to the brain while
+    krunker.io was the session, the brain gate refused it and the player read "Could not reach the matchmaker": in a live
+    krunker.io game ("native-kio-connect-live"), and on the Lost Connection screen of one that dropped, still the session
+    ("native-kio-connect-drop"). The krunker.io game gives way first, as Play and Find New Game do, and the brain's seek
+    goes out for the lobby asked."""
+    dead_port = kn_proto.free_ports(1)[0]
+    for label, scenario in (("native-kio-connect-live", "default"), ("native-kio-connect-drop", "dropclose")):
+        seeks = []
+
+        def setup(st, seeks=seeks):
+            st.lobbies = EXCLUDE_LOBBIES
+            brain_box_office_room(st, dead_port, seeks)
+        write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+        script = '0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n4000 play\n9000 con connect CH2:kz862\n15000 quit\n'
+        stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                          args=(), stub_setup=setup, scenario=scenario)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        if scenario == "dropclose":
+            check(f"{label}: the stub dropped the krunker.io socket before the connect", "drop" in stub.sent, sorted(stub.sent))
+        at = next((i for i, l in enumerate(lines) if "[mm] connect: game CH2:kz862" in l), len(lines))
+        after = lines[at:]
+        check(f"{label}: the connect reached the matchmaking (connect: game CH2:kz862)", at < len(lines), [l for l in lines if "connect" in l][-3:])
+        check(f"{label}: the krunker.io game gives way before the Box Office seek", any("leaving the official game" in l for l in after),
+              [l for l in after if "[krunker]" in l or "[mm]" in l][:4])
+        check(f"{label}: the brain gets the connect's seek for CH2:kz862", any(q.get("game") == "CH2:kz862" for q in seeks),
+              [l for l in after if "[mm]" in l][:4])
+        check(f"{label}: no 'Could not reach the matchmaker' (shown or logged)",
+              not any("could not reach the matchmaker" in l.lower() for l in after), [l for l in after if "could not reach" in l.lower()][:2])
+        check(f"{label}: the Box Office lobby the brain answered is joined", any(l.startswith("[mm] joining %s at" % BOX_OFFICE_LOBBY) for l in after),
+              [l for l in after if "[mm]" in l][-3:])
+
+
 def run_native_kio_region_only():
     """Server Type krunker.io, F4, with the player's krunker.io region chosen (Settings > Quickplay > krunker.io Region): the
     lobby is picked in that region only, as v10's seek (matchmakerSeek sends the one region; the matchmaker finds nothing
@@ -4003,6 +4105,8 @@ def run_native_f4_drops():
     run_native_kio_drop(f4=True)
     run_native_kio_retry()
     run_native_bo_f4_in_kio()
+    run_native_kio_account_seek()
+    run_native_kio_connect()
     run_native_f4_setting_race()
     run_native_kio_region_only()
 
@@ -4875,6 +4979,9 @@ def main():
         run_native_f4_drops()
     if ONLY == "play" and os.path.isfile(f"{BUILD}/client_bin"):  # just Play on a map in an official game (Server Type Box Office)
         run_native_play_in_kio()
+    if ONLY == "gate" and os.path.isfile(f"{BUILD}/client_bin"):  # just the brain gate runs (a Box Office seek while krunker.io is the session)
+        run_native_kio_account_seek()
+        run_native_kio_connect()
     if ONLY == "kiodrop" and os.path.isfile(f"{BUILD}/client_bin"):  # just the krunker.io drop / Find Game runs (Server Type krunker.io)
         run_native_f4_drops()
     if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)

@@ -49,8 +49,10 @@ static int refused(const char *what) {
     return 1;
 }
 
+int backend_brain_gated(void) { return g_brain_gate && g_url[0] && g_brain_gate(); }
+
 int backend_brain_refuses_path(void) {
-    return g_brain_gate && g_url[0] && g_brain_gate() ? refused("brain request") : 0;
+    return backend_brain_gated() ? refused("brain request") : 0;
 }
 
 int backend_brain_refuses_url(const char *url) {
