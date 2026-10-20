@@ -1619,6 +1619,10 @@ static void connecting_spinner(void) {
     menu_show_connecting_map(map);
 }
 
+// A player in the match was lost (FAILED) and its rejoin (servers_ui.c) is under way: the rejoined
+// session is entered at once, as Play enters one (menu_play), instead of waiting at the menu.
+static int g_play_on_rejoin;
+
 // Main-thread half of the connection events: consume the NetStatus the transport left
 // under net_lock (events.c), keep net_connected truthful and update the page.
 // What the page shows for each event (v10 loads every server change like a game load):
@@ -1647,8 +1651,18 @@ static void menu_poll_connection(Client *client) {
     // opposed to a connect the server refused (a drain answers that with 004004 too)
     const int had_session = status == NET_STATUS_FAILED && !client->offline &&
                             (g_ui.ready || client->me != NULL || client->game.player_count > 0);
+    // a player in the match (not spectating) when its session is lost: its rejoin enters the game again
+    const int in_play = client->in_game && client->me && !spectate_active();
     if (status == NET_STATUS_CONNECTED) {
         client->net_connected = 1;
+        if (g_play_on_rejoin) {
+            g_play_on_rejoin = 0;
+            // the rejoin's session (not one a player picked since, which rejoin_cancel ended): entered as Play enters one
+            if (servers_ui_rejoin_active()) {
+                client->menu_play_pending = 1; // menu_try_play enters once the map is ready
+                client_set_menu_open(client, 0);
+            }
+        }
     } else if (status == NET_STATUS_CONNECTING) {
         client->net_connected = 0; // a switch closed the session on purpose: the next one follows (spinner below)
         if (!client->offline) client_leave_game(client); // that game's chat, feed, players and end screen go now
@@ -1677,6 +1691,9 @@ static void menu_poll_connection(Client *client) {
     if (status == NET_STATUS_FAILED) {
         if (gave_up) servers_ui_gave_up();
         else rejoining = servers_ui_connection_lost(error, sizeof(error), code, dropped, had_session);
+        // kept while the rejoin runs (each failed attempt ends the session the first one lost)
+        if (!rejoining) g_play_on_rejoin = 0;
+        else if (in_play) g_play_on_rejoin = 1;
     }
 
     if (!html_ui_available() || !g_ui.dom_ready) return;

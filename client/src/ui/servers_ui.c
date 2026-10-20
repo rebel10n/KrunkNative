@@ -2579,6 +2579,10 @@ int servers_ui_rejoining(void) {
     return g_rejoin != REJOIN_NONE && (g_rejoin_at > 0.0 || g_rejoin_seek || g_rejoin == REJOIN_DIRECT);
 }
 
+// A rejoin is still wanted: not ended by the player's own matchmaking action (rejoin_cancel). Unlike
+// servers_ui_rejoining, it holds once the rejoin's seek has answered and the session connects.
+int servers_ui_rejoin_active(void) { return g_rejoin != REJOIN_NONE; }
+
 // The error screen's line while rejoining: the same lobby again after a lost connection or on a
 // direct server, else a (possibly other) game through the matchmaker; "Restarting..." while the
 // client restarts for an update.

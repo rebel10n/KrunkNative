@@ -16,6 +16,9 @@ startup seek lands in RLA; the console's `connect <RLB id>` moves it to RLB.
       back to a seek (lands in RLA) and says so ("[mm] reload: ... is gone")
   R3: in RLB, F5; while the new process starts, RLB fills up: the reload falls back to a seek
       (lands in RLA) and says so ("[mm] reload: ... is full")
+  R4: a lost session mid-match (the lobby's server is killed, then comes back): the client rejoins
+      the lobby through the matchmaker and is in the game again with no Play press (the HUD up, the
+      camera on the player), as a fresh join from Play is (menu_ui.c menu_resume_play)
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
 """
@@ -40,7 +43,7 @@ ROOT = os.getcwd()
 DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "sqlite")
 NAME = "kn_test_reload_%d" % os.getpid()
 SECRET = "kn-reload-e2e-secret-%d" % os.getpid()
-PORT_A, PORT_B, PORT_B2, PORT_B3 = kn_proto.free_ports(4)
+PORT_A, PORT_B, PORT_B2, PORT_B3, PORT_D = kn_proto.free_ports(5)
 MAX_PLAYERS = 4
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-reload-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -269,6 +272,58 @@ def run_fallback(brain_port, game_a, node_b, label, why):
     check(f"{label}: and plays", in_game(states(after)), str(states(after)))
 
 
+VIS = "@hud inGameUI gameUI chatHolder killFeed uiBase ammoHolder"
+CAM_RE = re.compile(r"active=(\d+).*? pos=([-\d.]+),([-\d.]+),([-\d.]+) eye=([-\d.]+),([-\d.]+),([-\d.]+)")
+
+
+def probes(start, stop):
+    """state, the HUD's elements (vis) and the camera (cam) every 5 s from `start` to `stop` ms."""
+    return "".join("%d state\n%d vis %s\n%d cam drop\n" % (t, t + 1, VIS, t + 2) for t in range(start, stop + 1, 5000))
+
+
+def run_drop(brain_port):
+    """R4: the lobby's server is killed mid-match (a lost session, no server ERROR) and comes back on the same
+    port: the client rejoins through the matchmaker, and it is in the game again with no Play press."""
+    p_d, game_d = start_node(brain_port, "RLD", PORT_D, "ffa", "Burg")
+    check("RLD (the lobby that drops) up", game_d is not None, "")
+    if not game_d:
+        return
+    # the startup seek takes RLD (the only lobby listed: RLA and RLC are stopped), `play` enters it; no
+    # command after the drop (a `connect` would replace the rejoin: "any other matchmaking action")
+    script = "0 play\n" + probes(3000, 60000) + "65000 quit\n"
+    p, log = client("drop", brain_port, script, "0 quit\n", game_d[4]["mode"])
+    entered = wait_for(lambda: in_game(states(read_log(log))), 60)
+    check("R4: in RLD's game before the drop", entered, str(states(read_log(log))[-2:]))
+    if not entered:
+        os.killpg(p.pid, signal.SIGKILL)
+        return
+    os.killpg(p_d.pid, signal.SIGKILL)  # a lost session: no server ERROR, the transport drops
+    p_d.wait()
+    time.sleep(2)
+    _, game_d2 = start_node(brain_port, "RLD", PORT_D, "ffa", "Burg")  # the lobby comes back (a new game id)
+    check("R4: RLD is back up", game_d2 is not None, "")
+    finish(p, 150)
+    text = read_log(log)
+    i = text.find("connection lost")
+    after = text[i:] if i >= 0 else ""
+    check("R4: the lost session is rejoined through the matchmaker", "rejoining" in after, after[:300])
+    rjs = joined(after)
+    print("R4: lobbies joined after the drop: %s" % rjs, flush=True)
+    check("R4: the rejoin joined a lobby again", len(rjs) >= 1, str(rjs))
+    check("R4: and is in the game again with no Play press", in_game(states(after)), str(states(after)[-3:]))
+    vis = re.findall(r"\[input_script\] vis t=\d+ @hud (.*)", after)
+    hud = vis[-1] if vis else ""
+    check("R4: the HUD is up (inGameUI and the ammo holder shown)", "inGameUI=1" in hud and "ammoHolder=1" in hud, hud)
+    cams = [m for m in CAM_RE.findall(after)]
+    ok = bool(cams) and cams[-1][0] == "1"
+    if ok:
+        pos = [float(v) for v in cams[-1][1:4]]
+        eye = [float(v) for v in cams[-1][4:7]]
+        ok = max(abs(a - b) for a, b in zip(pos, eye)) < 1.5
+    check("R4: the camera follows the player (the local player active, the camera at its eye)", ok,
+          str(cams[-1]) if cams else "no cam line")
+
+
 def main():
     if not os.access(f"{BUILD}/client_bin", os.X_OK):
         print("reload_rejoin_e2e: no client_bin in %s: skipped" % BUILD)
@@ -287,7 +342,7 @@ def main():
         check("kn_brain starts", port, read_log(os.path.join(WORK, "brain.log"))[-300:])
         if not port:
             return 1
-        _, game_a = start_node(port, "RLA", PORT_A, "ffa", "Burg")
+        p_a, game_a = start_node(port, "RLA", PORT_A, "ffa", "Burg")
         node_b = start_node(port, "RLB", PORT_B, "tdm", "Sandstorm")
         check("two lobbies up", game_a and node_b[1], "%s %s" % (game_a, node_b[1]))
         if not (game_a and node_b[1]):
@@ -298,6 +353,11 @@ def main():
         check("RLC (the next B) up", node_b3[1], "")
         if node_b3[1]:
             run_fallback(port, game_a, node_b3, "R3", "full")
+        # R4 has the matchmaker list no other lobby: a dropped lobby's old id then answers "no lobby" (the rejoin
+        # retries until the restarted one is listed) instead of "invalid game id" (the rejoin gives up, by design)
+        stop_node(p_a)
+        stop_node(node_b3[0])
+        run_drop(port)
     finally:
         for p in procs:
             if p.poll() is None:

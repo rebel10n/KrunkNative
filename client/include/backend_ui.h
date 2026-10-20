@@ -196,6 +196,7 @@ int  servers_ui_connection_lost(char *error, size_t error_size, const char *code
 // The transport gave up (the retry budget is spent, client_net_give_up): no rejoin any more.
 void servers_ui_gave_up(void);
 int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking, or the client restarts (the error screen says so)
+int  servers_ui_rejoin_active(void);         // 1 = a rejoin is wanted (not cancelled by a player's own seek): its session is entered (menu_ui.c)
 const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." / "Restarting..." for that line
 // A restart's resume (game_reload.c): hold the startup seek, then rejoin the lobby the old
 // process was in with the restart rejoin's backoff (REJOIN_RESTART; the screen says Game Updating).
