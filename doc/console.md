@@ -173,7 +173,7 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 |---|---|---|
 | bot, bot_add | [count] [tfue\|autoRespawn\|key=value] | "Spawned N nextbot bots." (count capped at 32; `tfue` = dmgMlt 0.01 like the sandbox Spawn Bot key; errors "Expected key=value, got 'x'", "Unknown bot option 'k'", "Invalid boolean for 'k'") |
 | bot_place | [tfue\|autoRespawn\|key=value] | at the caller's feet: "Spawned 1 nextbot bot at your position." (v7's server ignores the position; the console: at a spawn) |
-| bot_type | [nextbot\|tfue] | "Bot type: nextbot (use bot_type nextbot\|tfue)" / "Bot type set to tfue; removed N nextbot bots." |
+| bot_type | [nextbot\|tfue] | "Bot type: nextbot, the default AI is nextbot. Switch with bot_type nextbot\|tfue (a switch removes every bot)." / "Bot type set to tfue; removed N nextbot bots." The AI is the default nextbot (Idle / Hunt / Attack / Hide with BotProfile presets) or tfue (bots.js). Switching removes every bot; re-add with bot_add. |
 | bot_list | – | "Bots (N): nextbot:1:Name#uid bhop:clean, …" / "No bots." (bhop: the bot's hop skill none / learning / clean, off without slideHop) |
 | bot_nav | – | Krunker Box Office: "Bot nav: stuck N, replans N (forced N), goals N, unreachable N, falls N; grid N nodes." + "Routes (id:state:waypoint/count): 1:Hunt:3/12 bhop:clean, …" (bhop as in bot_list) (`id:dead` while a bot respawns) (`shared/src/bot_path.c` counters since the manager was created; `server/tests/bot_nav_e2e.py`) |
 | bot_kick | [all\|index\|name] | "Removing N bots." / "No bots matched 'x'." / "No bots." (LEAVE to everyone) |

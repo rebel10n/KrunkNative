@@ -1442,7 +1442,7 @@ static void cmd_bot_type(ChatCtx *c) {
     Game *game = c->host->game;
     BotType next;
     if (!c->argc || !bot_parse_type(c->argv[0], &next)) {
-        reply(c, "Bot type: %s (use bot_type nextbot|tfue)", bot_type_name(game->bots->type));
+        reply(c, "Bot type: %s, the default AI is nextbot. Switch with bot_type nextbot|tfue (a switch removes every bot).", bot_type_name(game->bots->type));
         return;
     }
     const BotType previous = game->bots->type;
@@ -1684,7 +1684,7 @@ static void cmd_bot_difficulty(ChatCtx *c) {
     }
     float difficulty;
     if (!bot_parse_difficulty(c->argv[0], &difficulty)) {
-        reply(c, "Usage: bot_difficulty <easy|normal|hard|max|number>");
+        reply(c, "Usage: bot_difficulty easy|normal|hard|max|<number>. Presets: easy 0.65, normal 1.0, hard 1.8, max (accuracy 100, sees 5000 units).");
         return;
     }
     BotAssignments a;
@@ -2470,7 +2470,7 @@ static const ChatCommand COMMANDS[] = {
     // Krunker v7.1.4 bots (mod/devConsole.ts registrations, server/index.ts handlers)
     {{"bot", NULL, "[count] [tfue|autoRespawn|key=value]", "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)", CHAT_PERM_HOST_DEV}, cmd_bot},
     {{"bot_add", "bot", "[count] [tfue|autoRespawn|key=value]", "alias for bot", CHAT_PERM_HOST_DEV}, cmd_bot},
-    {{"bot_type", NULL, "[nextbot|tfue]", "show or switch bot manager type (switching removes old bots)", CHAT_PERM_HOST_DEV}, cmd_bot_type},
+    {{"bot_type", NULL, "[nextbot|tfue]", "show or switch the bot AI: nextbot (the default) or tfue; a switch removes every bot", CHAT_PERM_HOST_DEV}, cmd_bot_type},
     {{"bot_place", NULL, "[tfue|autoRespawn|key=value]", "spawn a bot at your current position", CHAT_PERM_HOST_DEV}, cmd_bot_place},
     {{"bot_kick", NULL, "[all|index|name]", "remove bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kick},
     {{"bot_kill", NULL, "[all|index|name]", "kill bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kill},
@@ -2481,7 +2481,7 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_stop", NULL, "[on|off]", "toggle bot movement and attacking", CHAT_PERM_HOST_DEV}, cmd_bot_stop},
     {{"bot_start", NULL, "", "resume bots after bot_stop", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},
-    {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
+    {{"bot_difficulty", NULL, "<value>", "set the bot difficulty: easy (0.65), normal (1.0), hard (1.8), max, or a number; applies to live bots and future bot_add", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"autofill", NULL, "[on|off|<players>]", "bots fill the lobby (server.cfg bot_quota) on / off for this server", CHAT_PERM_HOST_DEV,
       "Only the host or a developer can turn autofill on or off."}, cmd_autofill},

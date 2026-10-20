@@ -1632,7 +1632,7 @@ static void register_commands(void) {
     register_server("game", ARGS(A_GAME), "send a game command");
     register_server("bot", ARGS(A_BOT_ADD), "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)");
     register_server("bot_add", ARGS(A_BOT_ADD), "alias for bot");
-    register_server("bot_type", ARGS(A_BOT_TYPE), "show or switch bot manager type (switching removes old bots)");
+    register_server("bot_type", ARGS(A_BOT_TYPE), "show or switch the bot AI: nextbot (the default) or tfue; a switch removes every bot");
     register_server("bot_place", ARGS(A_BOT_PLACE), "spawn a bot at your current position");
     register_server("bot_kick", ARGS(A_BOT_QUERY), "remove bots by name/index or all bots");
     register_server("bot_kill", ARGS(A_BOT_QUERY), "kill bots by name/index or all bots");
@@ -1643,7 +1643,7 @@ static void register_commands(void) {
     register_server("bot_stop", ARGS(A_ON_OFF), "toggle bot movement and attacking");
     register_server("bot_start", NO_ARGS, "resume bots after bot_stop");
     register_server("bot_resume", NO_ARGS, "alias for bot_start");
-    register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
+    register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set the bot difficulty: easy (0.65), normal (1.0), hard (1.8), max, or a number; applies to live bots and future bot_add");
     register_local("autofill", ARGS(A_AUTOFILL), "bots fill the lobby on / off, or to <players>, for this server (the host and developers)", cmd_autofill);
     register_server("tp", ARGS(A_TP), "teleport yourself to x y z (feet, as pos prints) or to a player");
     register_server("bring", ARGS(A_BRING), "bring a player (or all) to you, or to x y z");
