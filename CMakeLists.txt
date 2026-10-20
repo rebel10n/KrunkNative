@@ -608,6 +608,10 @@ else ()
         target_link_libraries(${CLIENT_BINARY} PRIVATE ws2_32 winhttp)
         target_link_libraries(${SERVER_BINARY} PRIVATE ws2_32)
         target_link_libraries(kn_server_core PUBLIC ws2_32)
+        # client.exe is a GUI-subsystem program (-mwindows): started by the launcher or double-clicked it
+        # opens no console window. Its output goes to the terminal it was started from, or to a log file
+        # (kn_console_init, launcher/src/install.c). server.exe stays a console program.
+        set_property(TARGET ${CLIENT_BINARY} PROPERTY WIN32_EXECUTABLE ON)
     endif ()
 
     # LAUNCHER (launcher/, doc/backend.md "Client updates"): what players start. It updates the

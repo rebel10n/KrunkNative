@@ -49,6 +49,9 @@
 #include <audio.h>
 #include <gltf.h>     // gltf_model_forget (mod_pack.c hooks)
 #include <mod_pack.h> // map resource packs (mod_pack.c)
+#ifndef __EMSCRIPTEN__
+#include <kn_install.h> // kn_console_init: client.exe's output on Windows (launcher/src/install.c)
+#endif
 #include <sound_events.h>
 #include <voice_chat.h> // voice chat: recorder interval, clips, playback (voice.c)
 #include <render_settings.h> // render/display/game settings, frame pacing, scene target (ui_render_settings.c, render_target.c)
@@ -632,6 +635,8 @@ static void client_resolve_flavor(int *argc, char **argv) {
 int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     web_resolve_flavor(); // the web build has no command line: the page picks the flavor
+#else
+    kn_console_init("client.log"); // client.exe is a GUI-subsystem exe on Windows: the terminal, or a log file
 #endif
     // The captcha's WebView2 runs on this thread and needs a single-threaded apartment: before the audio (kn_webview.h)
     kn_webview_apartment_init();

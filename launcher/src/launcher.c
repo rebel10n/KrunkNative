@@ -612,6 +612,7 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
+    kn_console_init("launcher.log"); // a GUI-subsystem exe on Windows: the terminal it was started from, or a log file
     pthread_mutex_init(&L.lock, NULL);
     L.view.progress = -1;
     L.client_args = calloc((size_t) argc + 2, sizeof(char *));
@@ -640,18 +641,6 @@ int main(int argc, char **argv) {
             return 0;
         } else L.client_args[L.client_argc++] = argv[i];
     }
-#ifdef _WIN32
-    // a GUI-subsystem exe: --cli prints to the console it was started from, if any, unless the
-    // output already goes somewhere (`KrunkNative.exe --cli > log.txt`, a pipe in CI)
-    if (L.cli) {
-        const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-        const int redirected = out && out != INVALID_HANDLE_VALUE && GetFileType(out) != FILE_TYPE_UNKNOWN;
-        if (!redirected && AttachConsole(ATTACH_PARENT_PROCESS)) {
-            freopen("CONOUT$", "w", stdout);
-            freopen("CONOUT$", "w", stderr);
-        }
-    }
-#endif
     if (!L.assets_override[0]) {
         const char *env = getenv("KRUNKNATIVE_ASSETS_DIR");
         if (env && *env) snprintf(L.assets_override, sizeof(L.assets_override), "%s", env);

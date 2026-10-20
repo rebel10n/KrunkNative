@@ -8,7 +8,9 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <io.h>
 #include <windows.h>
+#include <tlhelp32.h>
 #define CLIENT_EXE_NAME "client.exe"
 #else
 #include <fcntl.h>
@@ -508,7 +510,36 @@ int kn_proc_run(const char *exe, char *const argv[], const int timeout_ms, char 
     return (int) code;
 }
 
-static int start(const char *exe, char *const argv[], const char *cwd, const char *const env[], const DWORD flags) {
+// This process's standard output or error when it has one (a console, a log file, a redirect), else NULL.
+static HANDLE valid_std(const DWORD which) {
+    HANDLE h = GetStdHandle(which);
+    return h && h != INVALID_HANDLE_VALUE && GetFileType(h) != FILE_TYPE_UNKNOWN ? h : NULL;
+}
+
+// A proc-thread attribute list that lets a child inherit exactly these handles (NULL: not possible).
+static LPPROC_THREAD_ATTRIBUTE_LIST handle_list(HANDLE *handles, const DWORD count) {
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size); // fails by design: it sets the size it needs
+    LPPROC_THREAD_ATTRIBUTE_LIST list = size ? malloc(size) : NULL;
+    if (!list) return NULL;
+    if (!InitializeProcThreadAttributeList(list, 1, 0, &size)) {
+        free(list);
+        return NULL;
+    }
+    if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, count * sizeof(HANDLE), NULL, NULL)) {
+        DeleteProcThreadAttributeList(list);
+        free(list);
+        return NULL;
+    }
+    return list;
+}
+
+// Starts a child of the launcher (the client, the update relaunch). Out of a terminal the child is left to
+// attach to that terminal itself (kn_console_init): a console program inherits it, a GUI one attaches to it.
+// Out of a log file (or nothing) the child gets that file as its standard output and error, only those handles
+// are inherited, and it runs with CREATE_NO_WINDOW, so no CMD window opens. DETACHED_PROCESS has no console.
+// wait: return when the child has exited.
+static int start(const char *exe, char *const argv[], const char *cwd, const char *const env[], const DWORD flags, const int wait) {
     for (int i = 0; env && env[i]; i++) {
         wchar_t *kv = wide(env[i]);
         wchar_t *eq = kv ? wcschr(kv, L'=') : NULL;
@@ -518,23 +549,53 @@ static int start(const char *exe, char *const argv[], const char *cwd, const cha
         }
         free(kv);
     }
-    STARTUPINFOW si;
+    HANDLE handles[2] = {valid_std(STD_OUTPUT_HANDLE), valid_std(STD_ERROR_HANDLE)};
+    if (!handles[0]) handles[0] = handles[1];
+    if (!handles[1]) handles[1] = handles[0];
+    // a console handle is not passed on: a child that is not attached to this console gets no output from it
+    // (measured on Windows 10: the client printed nothing), so a terminal's child attaches to it itself
+    const int terminal = handles[0] && GetFileType(handles[0]) == FILE_TYPE_CHAR;
+    const DWORD count = !handles[0] || terminal ? 0 : handles[0] == handles[1] ? 1 : 2;
+    LPPROC_THREAD_ATTRIBUTE_LIST list = NULL;
+    if (count) {
+        for (DWORD i = 0; i < count; i++) SetHandleInformation(handles[i], HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+        list = handle_list(handles, count);
+    }
+    STARTUPINFOEXW si;
     memset(&si, 0, sizeof(si));
-    si.cb = sizeof(si);
+    si.StartupInfo.cb = sizeof(si.StartupInfo);
+    DWORD create = flags;
+    if (list) {
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdOutput = handles[0];
+        si.StartupInfo.hStdError = handles[1];
+        si.StartupInfo.cb = sizeof(si);
+        si.lpAttributeList = list;
+        create |= EXTENDED_STARTUPINFO_PRESENT;
+    }
+    if (!terminal && !(create & DETACHED_PROCESS)) create |= CREATE_NO_WINDOW;
     PROCESS_INFORMATION pi;
     wchar_t *wexe = wide(exe), *cmd = command_line(argv), *wcwd = cwd ? wide(cwd) : NULL;
-    const BOOL ok = wexe && cmd && CreateProcessW(wexe, cmd, NULL, NULL, FALSE, flags, NULL, wcwd, &si, &pi);
+    const BOOL ok = wexe && cmd && CreateProcessW(wexe, cmd, NULL, NULL, list != NULL, create, NULL, wcwd, &si.StartupInfo, &pi);
     free(wexe);
     free(cmd);
     free(wcwd);
+    if (list) {
+        DeleteProcThreadAttributeList(list);
+        free(list);
+    }
     if (!ok) return 0;
+    if (wait) WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return 1;
 }
 
 int kn_proc_start_client(const char *exe, char *const argv[], const char *cwd, const char *const env[], char *err, const size_t errn) {
-    if (start(exe, argv, cwd, env, 0)) return 1;
+    // started from a terminal, the launcher waits for the client as a console program would: the client attaches
+    // to the terminal through this process's ancestors, and it is the terminal's shell that keeps the console alive
+    const HANDLE out = valid_std(STD_OUTPUT_HANDLE);
+    if (start(exe, argv, cwd, env, 0, out && GetFileType(out) == FILE_TYPE_CHAR)) return 1;
     char msg[64];
     snprintf(msg, sizeof(msg), "CreateProcess error %lu", (unsigned long) GetLastError());
     set_err(err, errn, msg, exe);
@@ -542,7 +603,60 @@ int kn_proc_start_client(const char *exe, char *const argv[], const char *cwd, c
 }
 
 int kn_proc_spawn_detached(const char *exe, char *const argv[], const char *cwd) {
-    return start(exe, argv, cwd, NULL, DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    return start(exe, argv, cwd, NULL, DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, 0);
+}
+
+// AttachConsole to the nearest ancestor that has a console. The launcher exits as soon as it has started the
+// client, so the client's own parent may be gone by the time it looks; the terminal it was started from is not.
+static int attach_ancestor_console(void) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    DWORD pid = GetCurrentProcessId();
+    int attached = 0;
+    for (int depth = 0; depth < 8 && !attached; depth++) {
+        DWORD parent = 0;
+        PROCESSENTRY32W entry;
+        memset(&entry, 0, sizeof(entry));
+        entry.dwSize = sizeof(entry);
+        for (BOOL more = Process32FirstW(snap, &entry); more; more = Process32NextW(snap, &entry)) {
+            if (entry.th32ProcessID == pid) {
+                parent = entry.th32ParentProcessID;
+                break;
+            }
+        }
+        if (!parent || parent == pid) break;
+        attached = AttachConsole(parent) != 0;
+        pid = parent;
+    }
+    CloseHandle(snap);
+    return attached;
+}
+
+// The launcher and client.exe are GUI-subsystem programs: no console of their own. Started from a terminal
+// their output goes to that terminal (attach_ancestor_console). Started any other way (double-clicked,
+// Explorer) it goes to <user data>/logs/<log_name>, replaced on each start. Output that is already set up
+// (a redirect, or the log file the launcher passed on) is kept.
+int kn_console_init(const char *log_name) {
+    if (valid_std(STD_OUTPUT_HANDLE)) return 0;
+    if (AttachConsole(ATTACH_PARENT_PROCESS) || attach_ancestor_console()) {
+        if (!freopen("CONOUT$", "w", stdout) || !freopen("CONOUT$", "w", stderr)) return 0;
+        SetStdHandle(STD_OUTPUT_HANDLE, (HANDLE) _get_osfhandle(_fileno(stdout)));
+        SetStdHandle(STD_ERROR_HANDLE, (HANDLE) _get_osfhandle(_fileno(stderr)));
+        return 1;
+    }
+    char dir[KN_PATH_MAX], logs[KN_PATH_MAX], path[KN_PATH_MAX];
+    if (!kn_install_user_data_dir(dir, sizeof(dir))) return 0;
+    kn_fs_join(logs, sizeof(logs), dir, "logs");
+    if (!kn_fs_mkdirs(logs)) return 0;
+    kn_fs_join(path, sizeof(path), logs, log_name);
+    wchar_t *wpath = wide(path);
+    FILE *file = wpath ? _wfreopen(wpath, L"w", stdout) : NULL;
+    free(wpath);
+    if (!file) return 0;
+    _dup2(_fileno(stdout), _fileno(stderr)); // stderr shares stdout's file and its offset
+    SetStdHandle(STD_OUTPUT_HANDLE, (HANDLE) _get_osfhandle(_fileno(stdout)));
+    SetStdHandle(STD_ERROR_HANDLE, (HANDLE) _get_osfhandle(_fileno(stderr)));
+    return 2;
 }
 
 #else
@@ -631,5 +745,10 @@ int kn_proc_spawn_detached(const char *exe, char *const argv[], const char *cwd)
     if (old[0] && chdir(old) != 0) {}
     posix_spawnattr_destroy(&attr);
     return rc == 0;
+}
+
+int kn_console_init(const char *log_name) {
+    (void) log_name; // Windows only: a POSIX process keeps the terminal or the redirect it was started with
+    return 0;
 }
 #endif

@@ -62,7 +62,14 @@ int kn_install_package_assets(const KnInstall *in, const char *assets_dir, char 
 // code, -1 when it could not run or timed out.
 int kn_proc_run(const char *exe, char *const argv[], int timeout_ms, char *out, size_t outn);
 // Starts the client (cwd, extra environment "KEY=VALUE" pairs, NULL-terminated): POSIX execv
-// (does not return on success: same pid), Windows CreateProcess (returns 1; the caller exits).
+// (does not return on success: same pid), Windows CreateProcess (returns 1; the caller exits). On
+// Windows the client's output goes where this process's does (kn_console_init) and it opens no window; started
+// from a terminal, it returns when the client has exited, as for a console program.
 int kn_proc_start_client(const char *exe, char *const argv[], const char *cwd, const char *const env[], char *err, size_t errn);
 // Starts a detached process (the client's "Update now" relaunching the launcher). 1 ok.
 int kn_proc_spawn_detached(const char *exe, char *const argv[], const char *cwd);
+// Where a GUI-subsystem program's output goes (Windows; no-op elsewhere): started from a terminal, the
+// terminal (AttachConsole); otherwise <user data>/logs/<log_name>, replaced on each start. Output that is
+// already set up (a redirect, the handles the launcher passed on) is kept. 1 = the console, 2 = the log
+// file, 0 = unchanged.
+int kn_console_init(const char *log_name);
