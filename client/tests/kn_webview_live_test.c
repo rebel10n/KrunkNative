@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,9 @@ static const char STUB_HTML[] =
     "    b.style.cssText = 'width:100%;height:65px;font-size:18px;cursor:pointer;background:#2196f3;color:#fff;border:0';\n"
     "    b.onclick = function () { opts.callback('" STUB_TOKEN "'); };\n"
     "    el.appendChild(b);\n"
+    "    // Tab reaches the page, whose own focus order gives the button the focus (WebKit's Tab advance does not run for\n"
+    "    // keys sent as events in this check: the check is that Tab gets to the widget and Enter presses what has the focus)\n"
+    "    document.addEventListener('keydown', function (e) { if (e.key === 'Tab') { e.preventDefault(); b.focus(); } }, true);\n"
     "    return 'stub-widget';\n"
     "  },\n"
     "  remove: function () {}\n"
@@ -218,15 +222,6 @@ static int game_ui_run(const char *url, const int keys, const char *name) {
         sleep_ms(200); // the Tab moves the focus to the button before Enter
         CHECK(kn_webview_captcha_key(KN_WEBVIEW_KEY_ENTER, 1) == 1);
         CHECK(kn_webview_captcha_key(KN_WEBVIEW_KEY_ENTER, 0) == 1);
-#ifdef __APPLE__
-        // macOS (kn_webview_macos.m): WKWebView takes keys only in a key window, and the game window keeps key status
-        // (its keys are the ones forwarded here), so the widget does not act on them. The keys are accepted above;
-        // the token is not expected, and the run is counted as skipped.
-        printf("  SKIPPED (macOS): the widget takes no keys without a key window; the keys are only sent\n");
-        skipped++;
-        kn_webview_captcha_close();
-        return 1;
-#endif
     } else {
         // the click at the view's centre (the stub button fills the widget's box) reaches the page
         CHECK(kn_webview_captcha_pointer(KN_WEBVIEW_POINTER_MOVE, w / 2.0, h / 2.0, 0) == 1);
@@ -245,6 +240,7 @@ static int game_ui_run(const char *url, const int keys, const char *name) {
 }
 
 int main(int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN); // the stub server writes to a connection WebKit may have closed: a failed send, not a crash
     char url[256] = "";
     pthread_t th;
     int own_server = 0;

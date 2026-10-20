@@ -97,6 +97,14 @@ void kn_webview_rgba_from_argb32(const unsigned char *src, const int stride, con
     int session; // W.session when this delegate was made
 }
 @end
+// The invisible host of the view (kn_webview_captcha_open): a borderless window can be key only when it says so, and the
+// widget takes keys only while its host is the key window (wk_focus_widget).
+@interface KNCaptchaHost : NSWindow
+@end
+@implementation KNCaptchaHost
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
 #endif
 
 #if defined(KN_WV_GTK) || defined(KN_WV_WV2) || defined(KN_WV_WK)
@@ -2099,12 +2107,27 @@ static void wk_set_proxy(WKWebsiteDataStore *ds, const char *proxy) {
 
 @end
 
+// The widget takes the keys only when its host is the key window and the view its first responder. Done on every show
+// (reveal) and again when a key or a press reaches a host that is not key (the game window may have taken it). A process
+// with no bundle (the test, a headless run) is Prohibited and may not activate: Accessory keeps it out of the Dock and
+// lets it be active (the game's own window already runs as a regular app: GLFW). The window server grants key status
+// asynchronously, so the toolkit's events run for a bounded time until it is.
+static void wk_focus_widget(void) {
+    if (!W.host || !W.view) return;
+    if (NSApp.activationPolicy == NSApplicationActivationPolicyProhibited) [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    if (!NSApp.active) [NSApp activateIgnoringOtherApps:YES];
+    [W.host makeKeyAndOrderFront:nil];
+    [W.host makeFirstResponder:W.view];
+    for (int i = 0; i < 100 && ![W.host isKeyWindow]; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+}
+
 // The widget in the game: the view stays in its invisible host and the caller draws its frames (the snapshots).
 // No OS window. The first snapshot is taken at once.
 static void reveal(const char *why) {
     if (W.inline_shown || !W.view || !W.host) return;
     W.inline_shown = 1;
     W.dirty = 0;
+    wk_focus_widget(); // every show takes the keys
     printf("[webview] challenge shown (%s): in the game UI, no window\n", why);
     wk_snapshot_now(); // the first frame at once
 }
@@ -2182,8 +2205,8 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     } @catch (NSException *e) {
         (void) e;
     }
-    // hidden first (see the top of this file): an invisible host window, never key, that ignores the mouse
-    W.host = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H)
+    // hidden first (see the top of this file): an invisible host window that ignores the mouse; key only while shown
+    W.host = [[KNCaptchaHost alloc] initWithContentRect:NSMakeRect(0, 0, KN_WEBVIEW_INLINE_W, KN_WEBVIEW_INLINE_H)
                                          styleMask:NSWindowStyleMaskBorderless
                                            backing:NSBackingStoreBuffered
                                              defer:NO];
@@ -2277,8 +2300,7 @@ static void wk_send_key(NSString *chars, const unsigned short code, const int pr
                                   isARepeat:NO
                                     keyCode:code];
     if (!ev) return;
-    if (pressed) [W.view keyDown:ev];
-    else [W.view keyUp:ev];
+    [NSApp sendEvent:ev]; // as a real key: through the app, so the host's first responder (the view) gets it
 }
 
 // The view's own coordinates (flipped: top-left), as the caller gives them. The buttons are W.buttons' masks.
@@ -2295,6 +2317,7 @@ int kn_webview_captcha_pointer(const int kind, const double x, const double y, c
         return 1;
     }
     const int press = kind == KN_WEBVIEW_POINTER_PRESS;
+    if (press && ![W.host isKeyWindow]) wk_focus_widget(); // a click takes the keys too
     NSEventType t;
     if (button == 3) t = press ? NSEventTypeRightMouseDown : NSEventTypeRightMouseUp;
     else if (button == 2) t = press ? NSEventTypeOtherMouseDown : NSEventTypeOtherMouseUp;
@@ -2308,6 +2331,7 @@ int kn_webview_captcha_pointer(const int kind, const double x, const double y, c
 int kn_webview_captcha_key(const int key, const int pressed) {
     if (!W.inline_shown || !W.view || !W.host) return 0;
     if (pressed == 2) return 1; // a repeat: taken, not sent (the widget takes the press)
+    if (pressed == 1 && ![W.host isKeyWindow]) wk_focus_widget();
     NSString *chars = nil;
     unsigned short code = 0;
     switch (key) {
