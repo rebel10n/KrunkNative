@@ -743,6 +743,10 @@ connect-ux-e2e: build ## Server switch / reconnect shows the loading spinner, no
 console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)
 
+.PHONY: console-give-autofill-test
+console-give-autofill-test: build ## Dev console give completion: the selector / item / receiver hints of each line, a selector's item list = the no-selector list, Tab on one match (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/console_give_autofill_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-visible-test
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)

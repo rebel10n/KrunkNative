@@ -2026,23 +2026,21 @@ static void cmd_give(ChatCtx *c) {
     int id = -1, matches = 0, kind = OM_GIVE_NONE;
     ChatTargets targets = {.count = 0};
     const char *query = NULL;
-    // KrunkNative: give <selector> <weapon|item> too (give * sniper): only a selector leads, so
-    // "give tool gun" never reads "tool" as a player
-    if (argc >= 2 && target_is_selector(argv[0])) {
-        join_words(argv + 1, argc - 1, item, sizeof(item));
+    // KrunkNative: give <selector> <weapon|item> too (give * sniper): a selector leads, so "give tool
+    // gun" never reads "tool" as a player. The item is the words after it, unless the last word is a
+    // selector (give sniper *): that word is the receiver, never part of the item's name.
+    const int first = argc >= 2 && target_is_selector(argv[0]);
+    if (argc - first < 2 || !target_is_selector(argv[argc - 1])) {
+        join_words(argv + first, argc - first, item, sizeof(item));
         kind = object_manager_give_lookup(item, &id, &matches);
-        if (kind != OM_GIVE_NONE) query = argv[0];
-    }
-    if (kind == OM_GIVE_NONE) {
-        join_words(argv, argc, item, sizeof(item));
-        kind = object_manager_give_lookup(item, &id, &matches);
+        if (kind != OM_GIVE_NONE && first) query = argv[0];
     }
     if (kind == OM_GIVE_NONE && argc >= 2) { // the last word names the receiver(s)
         TargetResult r;
         ChatTargets found;
         const int any = select_players(c, argv[argc - 1], 0, &found, &r);
         char head[NET_CHAT_TEXT_SIZE];
-        join_words(argv, argc - 1, head, sizeof(head));
+        join_words(argv + first, argc - first - 1, head, sizeof(head));
         int head_id = -1, head_matches = 0;
         const int head_kind = object_manager_give_lookup(head, &head_id, &head_matches);
         if (head_kind != OM_GIVE_NONE && (any || r.selector)) {

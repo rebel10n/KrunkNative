@@ -907,6 +907,21 @@ static void test_give_drop(TestClient *a, TestClient *b) {
     clean_up(b);
     pump(200);
 
+    // a selector after the item receives it, as one before the item does (give sniper * = give * sniper). The
+    // round's clock is kept as test_entity_touch keeps it: the pumps here must not end the round for the rest.
+    const float round_timer = g_server->game.round_timer;
+    g_server->game.round_timer = 600.0f;
+    int sniper = -1;
+    CHECK(object_manager_give_lookup("sniper", &sniper, NULL) == OM_GIVE_WEAPON, "sniper resolves (%d)", sniper);
+    say(a, "/give sniper *");
+    CHECK(strstr(server_line(a), "Gave Sniper Rifle: 2 players") != NULL, "give sniper *: '%s'", server_line(a));
+    CHECK(slot_of(p, sniper) >= 0 && slot_of(q, sniper) >= 0, "both players got the Sniper Rifle");
+    request(a, OM_ACTION_REMOVE_WEAPON, sniper, 0.0f); // take them back: no clean_up, so the sections after keep their timing
+    request(b, OM_ACTION_REMOVE_WEAPON, sniper, 0.0f);
+    pump(4);
+    CHECK(slot_of(p, sniper) < 0 && slot_of(q, sniper) < 0, "and back out of both loadouts");
+    g_server->game.round_timer = round_timer;
+
     // lookups (shared): names normalised, exact > prefix > substring, ids, entities, ambiguity
     int id = -1, matches = 0;
     CHECK(object_manager_give_lookup("crossbow", &id, NULL) == OM_GIVE_WEAPON && id == 13, "crossbow -> 13 (%d)", id);

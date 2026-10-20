@@ -30,6 +30,7 @@
 #include <app_mode.h> // editor: app_route_url_target
 #include <nav_overlay.h>
 #include <object_manager.h> // give: weapon / item names
+#include <target_select.h>  // give: a leading or trailing selector (target_is_selector)
 #include <weapons.h>
 #include <ctype.h>
 #include <math.h>
@@ -1857,13 +1858,18 @@ static void con_map_candidates(ConCands *c, const char *prefix) {
     }
 }
 
-// The player names, then the target selectors (shared/include/target_select.h) once one is typed
-static void con_player_candidates(ConCands *c, const char *prefix) {
-    const Client *client = con_client();
+// The target selectors (shared/include/target_select.h), once one is typed: wherever a selector is valid.
+static void con_selector_candidates(ConCands *c, const char *prefix) {
     if (prefix[0] == '*' || prefix[0] == '@' || prefix[0] == '!') {
         static const char *const SELECTORS[] = {"*", "@me", "@others", "@bots", "@humans", "@team", "@enemies", "@alive", "@dead"};
         for (size_t i = 0; i < sizeof(SELECTORS) / sizeof(SELECTORS[0]); i++) cand_add(c, SELECTORS[i], prefix);
     }
+}
+
+// The target selectors, then the player names (a receiver: the selectors once one is typed)
+static void con_player_candidates(ConCands *c, const char *prefix) {
+    const Client *client = con_client();
+    con_selector_candidates(c, prefix);
     if (!client) return;
     for (size_t i = 0; i < client->game.player_count; i++) {
         const Player *p = client->game.players[i];
@@ -1903,6 +1909,120 @@ static void con_command_candidates(ConCands *c, const char *prefix) {
 
 static void con_words(ConCands *c, const char *prefix, const char *const *words) {
     for (; *words; words++) cand_add(c, *words, prefix);
+}
+
+// ---- give (cmd_give, shared/src/chat_commands.c): [selector] <weapon|item> [player|selector]. The item is
+// the words up to the receiver, so "tool g" completes Tool Gun as one name: the base ends before the
+// item's first word and a pick replaces all of it. The same item list follows a selector and none.
+
+typedef struct {
+    size_t start;             // where the word starts in the line
+    char text[CON_TEXT_MAX];  // its text, quotes stripped
+} GiveWord;
+#define GIVE_WORDS_MAX 32
+
+// lowercase letters and digits only: how object_manager's give lookup reads a name ("KR Tag" -> "krtag")
+static void give_key(const char *in, char *out, const size_t n) {
+    size_t len = 0;
+    for (; in && *in && len + 1 < n; in++) {
+        if (isalnum((unsigned char) *in)) out[len++] = (char) tolower((unsigned char) *in);
+    }
+    out[len] = 0;
+}
+
+// The words after the command, as parse_line splits them (quotes group a word): the last one is the
+// caret's and may be empty. 0 when the line has more than GIVE_WORDS_MAX words.
+static int give_words(const char *v, GiveWord *w) {
+    const char *p = strchr(v, ' ');
+    int n = 0;
+    if (!p) return 0;
+    for (;;) {
+        while (*p == ' ') p++;
+        const char *start = p, *a, *b;
+        if (*p == '"') {
+            const char *close = strchr(p + 1, '"');
+            a = p + 1;
+            b = close ? close : p + strlen(p);
+            p = close ? close + 1 : b;
+        } else {
+            a = p;
+            while (*p && *p != ' ') p++;
+            b = p;
+        }
+        if (n == GIVE_WORDS_MAX) return 0;
+        w[n].start = (size_t) (start - v);
+        snprintf(w[n].text, sizeof(w[n].text), "%.*s", (int) (b - a), a);
+        n++;
+        if (!*p) return n;
+    }
+}
+
+// The words first..last joined with single spaces (cmd_give joins its words the same way).
+static void give_join(const GiveWord *w, const int first, const int last, char *out, const size_t n) {
+    out[0] = 0;
+    for (int i = first; i <= last; i++) {
+        const size_t len = strlen(out);
+        snprintf(out + len, n - len, "%s%s", i > first ? " " : "", w[i].text);
+    }
+}
+
+// The items in the order cmd_give's lookup reads them: the Object Manager's weapons (the Tool Gun too),
+// then its Entities. `query` filters them by a prefix of their key (give_key), so "krt" is KR Tag and
+// "toolg" is Tool Gun. Adds them to c when given; returns how many match. "*" matches none.
+static int give_items(ConCands *c, const char *query) {
+    char q[CON_TEXT_MAX];
+    give_key(query, q, sizeof(q));
+    if (!q[0] && query[0]) return 0; // symbols only: no item name starts with them
+    int entity_count = 0;
+    object_manager_entries(OM_TAB_ENTITIES, &entity_count);
+    int hits = 0;
+    for (int i = 0; i < WEAPON_TABLE_COUNT + entity_count; i++) {
+        const char *name = i < WEAPON_TABLE_COUNT ? object_manager_give_name(OM_GIVE_WEAPON, i)
+                                                   : object_manager_give_name(OM_GIVE_ENTITY, i - WEAPON_TABLE_COUNT);
+        char key[CON_TEXT_MAX];
+        if (!name) continue;
+        give_key(name, key, sizeof(key));
+        if (strncmp(key, q, strlen(q))) continue;
+        hits++;
+        if (c) cand_add(c, name, "");
+    }
+    return hits;
+}
+
+// The give line's candidates for the word under the caret. A selector leads when the first word is one
+// (target_is_selector, as cmd_give reads it); the item follows, and the words after it name the receiver
+// (a player or a selector). The item's words so far name the item when they resolve as cmd_give resolves
+// them, and the receiver list then replaces the item list once the item is complete (a trailing space, or
+// a selector typed); the item list only while the item is still being typed.
+static void give_candidates(const char *v, ConCands *c, char *base, const size_t n) {
+    static GiveWord w[GIVE_WORDS_MAX];
+    static char head[CON_TEXT_MAX], item[CON_TEXT_MAX];
+    const int m = give_words(v, w);
+    if (!m) return;
+    const int k = m - 1; // the word under the caret
+    const char *cur = w[k].text;
+    if (k == 0) { // the first word: a selector, or the item's first word
+        snprintf(base, n, "%.*s", (int) w[0].start, v);
+        con_selector_candidates(c, cur);
+        give_items(c, cur);
+        return;
+    }
+    const int first = target_is_selector(w[0].text) ? 1 : 0; // the item's first word: after a leading selector
+    if (k == first) {
+        snprintf(base, n, "%.*s", (int) w[k].start, v);
+        give_items(c, cur);
+        return;
+    }
+    give_join(w, first, k - 1, head, sizeof(head));
+    give_join(w, first, k, item, sizeof(item));
+    const int complete = cur[0] == 0 || target_is_selector(cur) || !give_items(NULL, item);
+    if (complete && object_manager_give_lookup(head, NULL, NULL) != OM_GIVE_NONE) {
+        snprintf(base, n, "%.*s", (int) w[k].start, v);
+        con_player_candidates(c, cur); // the receiver: players, and the selectors once one is typed
+        return;
+    }
+    snprintf(base, n, "%.*s", (int) w[first].start, v);
+    give_items(c, item);
 }
 
 // The class table's names (Game.classes, else the ruleset's): "Spray N Pray" and the like insert quoted (quote_into).
@@ -1973,12 +2093,6 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
     } else if (cmd_is(cmd, WORDS("tp", "bring"))) {
         if (arg == 0 && !strcmp(cmd, "bring")) cand_add(c, "all", prefix);
         if (arg == 0) con_player_candidates(c, prefix); // bots included: they are players
-    } else if (!strcmp(cmd, "give")) { // the Object Manager's weapons (the Tool Gun too) and items
-        for (int w = 0; arg == 0 && w < WEAPON_TABLE_COUNT; w++) cand_add(c, object_manager_give_name(OM_GIVE_WEAPON, w), prefix);
-        int count = 0;
-        object_manager_entries(OM_TAB_ENTITIES, &count);
-        for (int e = 0; arg == 0 && e < count; e++) cand_add(c, object_manager_give_name(OM_GIVE_ENTITY, e), prefix);
-        if (arg == 1) con_player_candidates(c, prefix);
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
     } else if (!strcmp(cmd, "show_navmeshes")) {
@@ -2027,7 +2141,10 @@ static void line_candidates(const char *v, ConCands *c, char *base, const size_t
     c->count = 0;
     snprintf(base, n, "%.*s", (int) ctx.token_start, v);
     if (ctx.is_command) con_command_candidates(c, ctx.prefix);
-    else arg_candidates(ctx.cmd, ctx.arg, ctx.prefix, c);
+    else if (!strcmp(ctx.cmd, "give")) {
+        const ConCommand *dev = find_cmd(ctx.cmd);
+        if (!dev || cmd_visible(dev)) give_candidates(v, c, base, n); // its words set the base (the item's start)
+    } else arg_candidates(ctx.cmd, ctx.arg, ctx.prefix, c);
 }
 
 static void quote_into(char *out, const size_t n, const char *base, const char *value, const int space_after) {
