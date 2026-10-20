@@ -852,7 +852,7 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
     if (!html) return;
     size_t len = 0;
     // v7 f1917: <th id='endlb_<stat>'> headers and a 20px spacer row
-    len += (size_t) snprintf(html + len, 16384 - len, "<tr><th id='endlb_rank'>Rank</th>");
+    len += (size_t) snprintf(html + len, 16384 - len, "<tr><th id='endlb_rank'>#</th>"); // v10:219618 endlb_rank "#"
     for (int i = 1; i < stat_count; i++) {
         char id[32];
         size_t k = 0;
@@ -862,7 +862,9 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
     }
     len += (size_t) snprintf(html + len, 16384 - len, "<th></th></tr><tr height='20px;'></tr>");
 
-    const int local_team = hud_local_team(client);
+    // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
+    // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.
+    const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
     for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len < 15000; r++) {
         const NetModeEndEntry *entry = &g_modes.end.entries[r];
         const Player *player = client_find_player((Client *) client, entry->uid);
@@ -889,7 +891,7 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
         const char *raw_name = player_names_shown(player->uid, player == client->me, player->name, pn, sizeof(pn)); // Hide player names
         html_escape(raw_name, name, sizeof(name));
         html_escape(streamer_name(raw_name, shown, sizeof(shown)), shown_name, sizeof(shown_name));
-        const char *color = player == client->me ? "#fff" : !left && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
+        const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, 16384 - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
                                  r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);

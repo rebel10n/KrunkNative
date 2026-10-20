@@ -7,6 +7,7 @@
 #include <game_config.h>
 #include <map_catalog.h>
 #include <modes.h>
+#include <turf_wars.h> // v10 TURF WARS modifier: turf maps (g_turf_maps)
 #include <html_ui.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,43 @@ static void escape(char *out, const size_t size, const char *in) {
     out[n] = 0;
 }
 
+// v10.0.2's mode tags (the `tag` of a mode in v10's mode list, v10:104365-105942): the badge on a
+// vote tile's modifier line and its border (endScreen matchVote, non-official branch, v10:219577).
+// Keyed by the mode key (GameModeConfig.key == v10's mode id). {label, badge colour, border colour}.
+typedef struct {
+    const char *key;
+    const char *label;
+    const char *fill;
+    const char *edge;
+} VoteModeTag;
+static const VoteModeTag k_vote_mode_tags[] = {
+    {"stalk", "Event", "#d95487", "#e86b9b"},  {"raid", "Event", "#d95487", "#e86b9b"},
+    {"aon", "Event", "#d95487", "#e86b9b"},    {"md", "Event", "#d95487", "#e86b9b"},
+    {"oinc", "Party", "#ffac00", "#ffb600"},   {"depoffa", "Party", "#ffac00", "#ffb600"},
+    {"bhffa", "Party", "#ffac00", "#ffb600"},  {"gun", "Party", "#ffac00", "#ffb600"},
+    {"clas", "Party", "#ffac00", "#ffb600"},   {"shrp", "Party", "#ffac00", "#ffb600"},
+    {"chs", "Party", "#ffac00", "#ffb600"},    {"imp", "Party", "#ffac00", "#ffb600"},
+};
+#define VOTE_TURF_COLOR "#4a7c3f" // v10: TURF WARS badge and border
+
+static const VoteModeTag *vote_mode_tag(const char *key) {
+    if (!key) return NULL;
+    for (size_t i = 0; i < sizeof(k_vote_mode_tags) / sizeof(k_vote_mode_tags[0]); i++) {
+        if (!strcmp(k_vote_mode_tags[i].key, key)) return &k_vote_mode_tags[i];
+    }
+    return NULL;
+}
+
+// v10's turf maps (Burg, Sandstorm, Subzero: turf_wars.h g_turf_maps), by name: the vote's map index is
+// the server's own, not v10's map list.
+static int vote_turf_map(const char *name) {
+    for (int i = 0; i < TURF_MAP_COUNT; i++) {
+        const char *turf = turf_map_name(g_turf_maps[i]);
+        if (turf && !strcmp(turf, name)) return 1;
+    }
+    return 0;
+}
+
 char *lobby_vote_cards_html(void) {
     if (g_votes.count < 2) return NULL; // v7 shows the cards only for more than one pick
     const size_t size = 2048 * NET_MATCH_PICKS;
@@ -78,11 +116,23 @@ char *lobby_vote_cards_html(void) {
         if (entry && map_catalog_thumb(entry, path, sizeof(path))) snprintf(thumb, sizeof(thumb), "%s", path);
         snprintf(upper, sizeof(upper), "%s", mode->name);
         for (char *c = upper; *c; c++) if (*c >= 'a' && *c <= 'z') *c = (char) (*c - 'a' + 'A');
+        // endScreen.show, v10:219577 (non-official): TURF WARS for FFA / TDM on a turf map, else the mode's
+        // tag, as the tile's border and its modifier badge
+        const int turf = (e->mode_id == 0 || e->mode_id == 1) && vote_turf_map(name);
+        const VoteModeTag *tag = turf ? NULL : vote_mode_tag(mode->key);
+        char border[96] = "", badge[160] = "";
+        if (turf) {
+            snprintf(border, sizeof(border), " style='border: 4px solid %s;box-shadow: 0 0 20px %s9c;'", VOTE_TURF_COLOR, VOTE_TURF_COLOR);
+            snprintf(badge, sizeof(badge), "<div class='matchVoteModifier' style='background:%s'>TURF WARS</div>", VOTE_TURF_COLOR);
+        } else if (tag) {
+            snprintf(border, sizeof(border), " style='border: 4px solid %s;box-shadow: 0 0 20px %s9c;'", tag->edge, tag->edge);
+            snprintf(badge, sizeof(badge), "<div class='matchVoteModifier' style='background:%s'>%s</div>", tag->fill, tag->label);
+        }
         const int w = snprintf(html + n, size - n,
-            "<label class='matchVote' onclick='voteOnMatch(\"%d,%d\")'><img src='%s' class='matchVoteThumb' draggable='false'>"
-            "<div class='matchVoteMap'>%s</div><div class='matchVoteMode'>%s</div>"
+            "<label class='matchVote'%s onclick='voteOnMatch(\"%d,%d\")'><img src='%s' class='matchVoteThumb' draggable='false'>"
+            "<div class='matchVoteMap'>%s</div><div class='matchVoteMode'>%s</div>%s"
             "<div class='matchVoteTotal' id='voteT%d,%d'>%u</div></label>",
-            e->mode_id, e->map_index, thumb, esc, upper, e->mode_id, e->map_index, (unsigned int) e->votes);
+            border, e->mode_id, e->map_index, thumb, esc, upper, badge, e->mode_id, e->map_index, (unsigned int) e->votes);
         if (w < 0 || (size_t) w >= size - n) break;
         n += (size_t) w;
     }

@@ -215,6 +215,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `wildOffer` | `{offer, now, notify, view}` | the account's v10 Wild Offer without a brain (the brain's `wo` reply, v10_wild_offer.c): `offer` in the Store's shop front (Eterno Shop tab), `now` pins Date.now() (epoch ms) for its countdowns, `notify` pushes its notification, `view` opens its item view |
 | `spinHistory` | array of `{ind, dte, fds}` | with `spin`: a `spinH` reply, the Spin History popup opens |
 | `matchVotes` | array of `{mode, map, name, votes}` | the end screen's vote cards (a `MATCH_VOTE_STATE` packet through `lobby_events_handle`), with `endscreen` |
+| `endTab` | `"leaderboard"` / `"performance"` / `"medals"` / `"rewards"` | the end screen's tab once its results show (`GUI.endScreen.changeTab`): the Leaderboard table with `console` `["bot 3", "end"]` and an `anim_origin` `"end"` sequence |
 | `charge` | number or `{prog, over}` | in game: the weapon charge bar (interactMProg) at this interMProg, or the overCharged cross (`build_ui_scenario`) |
 | `interact` | string | in game: `#interactMsg`'s innerHTML, shown through `ui_interact_tick` as if the player stood at an interactable (`ui_interact_scenario`) |
 | `console` | array of `"cmd"` / `{at_ms, cmd}` | developer console commands (`ui_console_exec`) once the state is applied, or `at_ms` of virtual time later: `kill`, `end`, `bot 1` + `{"at_ms": 1500, "cmd": "kill @bots"}` (the sandbox server's own packets drive what follows) |

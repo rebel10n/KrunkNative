@@ -364,6 +364,7 @@ static void warn_unknown_keys(void) {
     };
     static const char *const known_seq[] = {
         "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
+        "endTab",  // the end screen's tab once its results show: "leaderboard" | "performance" | "medals" | "rewards"
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -763,11 +764,23 @@ static int seq_origin_reached(const Client *c) {
     }
 }
 
+// state.endTab "leaderboard" | "performance" | "medals" | "rewards": the end screen's tab once its results
+// show (GUI.endScreen.changeTab, the tab headers' onclick). The results open on the Performance tab
+// (hud_end_results), so the tab is set on the first frame the results are interactive.
+static void apply_end_tab(void) {
+    static int done;
+    const char *tab = st_str("endTab");
+    if (done || !tab || !tab[0] || !hud_ui_end_screen_interactive()) return;
+    done = 1;
+    hud_ui_end_screen_tab(tab);
+}
+
 // One 60 Hz frame. With a sequence, a frame lands exactly on the next capture time when that
 // comes first, and every capture due at this clock is read back before the buffers swap.
 static void scenario_step(Client *client) {
     double next = g_sc.clock_ms + SCENARIO_FRAME_MS;
     run_console(g_sc.clock_ms);
+    apply_end_tab();
     apply_kpd_case(client);
     if (!g_sc.seq_count) {
         scenario_frame(client, next, 1);

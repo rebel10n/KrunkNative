@@ -66,6 +66,15 @@ void layout_resolve_edges(LayoutTree *t, Box *b, float cb_w)
         && b->parent->parent->style->border_collapse == CSS_BORDER_COLLAPSE_COLLAPSE) {
         for (int i = 0; i < 4; i++) b->border[i] *= 0.5f;
     }
+    /* Separated borders (the default, and the browsers' model): a row or row group draws no border and
+     * takes no space for one (CSS 2.1 17.6.1). v10's `th, tr { border-bottom: 3px }` (main.css) therefore
+     * leaves only the header cells' rule under #endTable. Collapsed tables keep the row's border. */
+    if (b->type == BOX_TABLE_ROW) {
+        const Box *table = b->parent;
+        while (table && table->type == BOX_TABLE_ROW) table = table->parent;
+        if (table && table->type == BOX_TABLE && table->style->border_collapse != CSS_BORDER_COLLAPSE_COLLAPSE)
+            memset(b->border, 0, sizeof(b->border));
+    }
 }
 
 void layout_apply_min_max_w(const Box *b, float cb_w, float *border_w)

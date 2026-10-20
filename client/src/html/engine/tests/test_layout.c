@@ -1229,6 +1229,18 @@ static void t_end_table(void)
     Box *th = bx(fx, "h2");
     CHECK(th && th->style->text_align == CSS_TEXT_ALIGN_LEFT, "#endTable th inherits text-align:left (%d)", th ? th->style->text_align : -1);
     fx_free(fx);
+    /* main.css's `th, tr { border-bottom: 3px }`: the separated-borders table draws the header cells'
+     * rule only (browsers ignore a row's border there); rows take no border width */
+    css = read_file("ui/css/main.css", &len);
+    fx = fx_html("<table id=et><tr id=sp height='20px'></tr><tr id=hr><th id=hh>#</th></tr>"
+                 "<tr id=rw><td id=rd>1.</td></tr></table>", css);
+    free(css);
+    Box *sp = bx(fx, "sp"), *hr = bx(fx, "hr"), *hh = bx(fx, "hh"), *rw = bx(fx, "rw");
+    CHECK(sp && hr && hh && rw && sp->border[CSS_BOTTOM] == 0 && hr->border[CSS_BOTTOM] == 0 && rw->border[CSS_BOTTOM] == 0,
+          "separated table: row borders are not drawn (spacer %.1f, header row %.1f, row %.1f)",
+          sp ? sp->border[CSS_BOTTOM] : -1.0f, hr ? hr->border[CSS_BOTTOM] : -1.0f, rw ? rw->border[CSS_BOTTOM] : -1.0f);
+    CHECK(hh && NEAR(hh->border[CSS_BOTTOM], 3.0f, 0.01), "header cell keeps its 3px rule (%.1f)", hh ? hh->border[CSS_BOTTOM] : -1.0f);
+    fx_free(fx);
     fx = fx_html("<table><tr><th id=tc>A</th></tr></table>", NULL);
     th = bx(fx, "tc");
     CHECK(th && th->style->text_align == CSS_TEXT_ALIGN_CENTER, "th centers by default (%d)", th ? th->style->text_align : -1);
