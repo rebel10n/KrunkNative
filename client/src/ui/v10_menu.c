@@ -1108,5 +1108,9 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         popular_fetch();
         return 1;
     }
+    if (!strcmp(name, "knV10OfficialSession")) { // tests: the krunker.io account is the session (1) or Box Office's again (0): the Games tabs' source
+        v10_menu_scenario_official(argc > 0 && args[0].num != 0.0);
+        return 1;
+    }
     return -1;
 }

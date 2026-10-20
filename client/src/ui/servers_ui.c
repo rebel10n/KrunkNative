@@ -3582,10 +3582,38 @@ static struct {
     int failed;       // the first page did not arrive (brain unreachable): the catalogue instead
 } g_games_tabs[GAMES_TABS];
 
+// The tabs' cache belongs to one source: Box Office's brain or krunker.io's data API (account_backend), and the
+// account in it (My Games, Favorites). A change clears every tab, and an answer still in flight for the old source
+// is dropped (its request's tag carries the generation it was asked in).
+static struct {
+    int backend;
+    int account;
+} g_games_key = {-1, -1};
+static unsigned g_games_gen;
+#define GAMES_TAG(gen, tab) ((void *) (uintptr_t) (((uintptr_t) (gen) << 8) | (uintptr_t) (tab)))
+
+static void games_tabs_clear(void) {
+    for (int i = 0; i < GAMES_TABS; i++) {
+        cJSON_Delete(g_games_tabs[i].rows);
+        memset(&g_games_tabs[i], 0, sizeof(g_games_tabs[i]));
+    }
+}
+
+static void games_source_sync(void) {
+    const AccountInfo *acc = active_account();
+    const int backend = account_backend();
+    const int account = acc ? acc->id : 0;
+    if (backend == g_games_key.backend && account == g_games_key.account) return;
+    games_tabs_clear();
+    g_games_gen++;
+    g_games_key.backend = backend;
+    g_games_key.account = account;
+}
+
 static void on_maps(void *user, const int status, const char *body, const size_t length) {
     (void) length;
-    const int tab = (int) (intptr_t) user;
-    if (tab < 0 || tab >= GAMES_TABS) return;
+    const int tab = (int) ((uintptr_t) user & 0xff);
+    if (tab < 0 || tab >= GAMES_TABS || (unsigned) ((uintptr_t) user >> 8) != g_games_gen) return; // another source's answer
     g_games_tabs[tab].waiting = 0;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *data = cJSON_GetObjectItem(res, "data");
@@ -3622,11 +3650,11 @@ static int games_request(const int tab) {
         if (acc && acc->id > 0) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
         sent = krunker_kio_webhook_url(url, sizeof(url), base, "maps/list", query) != 0 &&
-               backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_maps, (void *) (intptr_t) tab);
+               backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_maps, GAMES_TAG(g_games_gen, tab));
     } else {
         if (acc) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
         snprintf(path, sizeof(path), "/api/maps?%s", query);
-        sent = backend_http_get(path, on_maps, (void *) (intptr_t) tab);
+        sent = backend_http_get(path, on_maps, GAMES_TAG(g_games_gen, tab));
     }
     if (sent) return 1;
     g_games_tabs[tab].waiting = 0;
@@ -3634,6 +3662,7 @@ static int games_request(const int tab) {
 }
 
 int servers_games_tab_rows(const int tab, const cJSON **rows) {
+    games_source_sync();
     if ((backend_available() != 1 && account_backend() != ACCOUNT_BACKEND_KRUNKER) || tab < 0 || tab >= GAMES_TABS || g_games_tabs[tab].failed) return -1;
     if (!g_games_tabs[tab].requested) {
         g_games_tabs[tab].requested = 1;
@@ -3691,10 +3720,28 @@ static int g_games_tab;           // windows[9].tabIndex (v7 index)
 static char g_games_search[96];   // the Search tab's last query ("" = none yet)
 static int g_games_search_cat = -1;
 
+// A tab's index by its name in k_games_tabs (the category tiles name Search: v10's index 7 is a hidden tab there)
+static int games_tab_index(const char *name) {
+    for (int i = 0; i < GAMES_TAB_COUNT; i++) {
+        if (!strcmp(k_games_tabs[i].n, name)) return i;
+    }
+    return -1;
+}
+
 void ui_games_switch_tab(const int tab) {
     if (tab < 0 || tab >= GAMES_TAB_COUNT || tab == g_games_tab) return; // switchTab: only a different tab
     g_games_tab = tab;
+    // a list that did not arrive is asked again when its tab is shown (it stayed "No Games found!" for the session)
+    const int data = k_games_tabs[tab].data;
+    if (data >= 0 && g_games_tabs[data].failed) {
+        g_games_tabs[data].failed = 0;
+        g_games_tabs[data].requested = 0;
+    }
     menu_rerender_if_open(10);
+    // the new tab's list starts at its top: #menuWindow (the scroller) kept the old list's offset, which pushed the
+    // tab row above the window's top edge when a short list replaced a scrolled one
+    HtmlElem mw = html_dom_by_id("menuWindow");
+    if (mw) html_dom_set_scroll(mw, 0, 0);
 }
 
 static void games_load_more(const HtmlEvent *ev) {
@@ -3980,19 +4027,24 @@ static int games_cards(StrBuf *sb, const int tab) {
 }
 
 // Home: "Popular Categories" after the cards
+// A tile opens the Search tab on its category: v10 runs switchTab(7); mpCat.selectedIndex = cat + 1; searchMaps(). Here
+// the Search tab is named (index 7 is Editor in k_games_tabs) and the category is searchMaps' argument (mpCat's option
+// value, k_map_cats' index): mpCat.selectedIndex= has no handler, so the category was never selected.
 static void games_popular_categories(StrBuf *sb) {
     sb_append(sb, "<div class='mapListCat'>Popular Categories</div>");
+    const int search = games_tab_index("Search");
     for (size_t i = 0; i < sizeof(k_map_cats_p) / sizeof(k_map_cats_p[0]); i++) {
         int cat = 0;
         for (size_t k = 0; k < sizeof(k_map_cats) / sizeof(k_map_cats[0]); k++) {
             if (!strcmp(k_map_cats[k], k_map_cats_p[i].n)) cat = (int) k;
         }
-        sb_appendf(sb, "<div class='mapListItem' style='width:624px;height:130px;'><div class='mapLICat' onclick='windows[9].switchTab(7);mpCat.selectedIndex=%d;windows[9].searchMaps();' style='background:url(img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
-                   cat + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
+        sb_appendf(sb, "<div class='mapListItem' style='width:624px;height:130px;'><div class='mapLICat' onclick='windows[9].switchTab(%d);windows[9].searchMaps(\"\",%d);' style='background:url(img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
+                   search, cat, k_map_cats_p[i].i, k_map_cats_p[i].n);
     }
 }
 
 static char *games_window_gen(void) {
+    games_source_sync();
     const GamesTab *tab = &k_games_tabs[g_games_tab];
     StrBuf sb = {0};
     sb_append(&sb, "<div style='margin-top:15px;margin-bottom:15px'><div class='bigMenTabs' style='margin-top:0px'>");
@@ -4093,6 +4145,7 @@ static void on_search(void *user, const int status, const char *body, const size
 }
 
 static void games_search(const HtmlArg *args, const int argc) {
+    games_source_sync();
     HtmlElem input = html_dom_by_id("mpSrch"), cat = html_dom_by_id("mpCat"), out = html_dom_by_id("searchResultsMA");
     if (!out) return;
     if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && input) html_dom_set_value(input, args[0].str);

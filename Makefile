@@ -732,6 +732,10 @@ server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each 
 menu-sources-e2e: build ## The menu's Popular Now is Box Office's only (hidden on krunker.io and Both) and its Live Streams come from the brain or api.krunker.io (brain / krunker.io stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/menu_sources_e2e.py $(DEBUG_DIR)
 
+.PHONY: games-window-e2e
+games-window-e2e: build ## The Custom Games window: a Popular Categories tile opens Search on its category, its tab row stays inside the window, a Popular card keeps the tab, krunker.io's lists fill (brain / krunker.io stubs; headless; EGL_DEVICE=...; KN_GAMES_WINDOW_SHOTS=dir for the frames)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/games_window_e2e.py $(DEBUG_DIR)
+
 .PHONY: seek-region-e2e
 seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_region_e2e.py $(DEBUG_DIR)

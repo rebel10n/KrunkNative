@@ -709,6 +709,14 @@ static const HubTab k_map_tabs[] = {
 };
 #define MAP_TAB_COUNT ((int) (sizeof(k_map_tabs) / sizeof(k_map_tabs[0])))
 
+// a maps tab's index by its name (the category tiles name Search: index 7 is Editor in this table)
+static int map_tab_index(const char *name) {
+    for (int i = 0; i < MAP_TAB_COUNT; i++) {
+        if (!strcmp(k_map_tabs[i].n, name)) return i;
+    }
+    return -1;
+}
+
 static const HubTab k_mod_tabs[] = {
     {"Home", "<span class='material-icons-outlined' style='color:#fbc02d;font-size:42px;vertical-align:bottom'>home</span>", NULL, 1, 0, 0, 1, 0, 0, 0, 0, 1},
     {"Popular", NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -830,8 +838,8 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
         for (size_t i = 0; i < sizeof(k_map_cats_p) / sizeof(k_map_cats_p[0]); ++i) {
             int idx = 0;
             for (int c = 0; c < MAP_CAT_COUNT; c++) if (!strcmp(k_map_cats[c], k_map_cats_p[i].n)) idx = c;
-            sb_appendf(&cats, "<div class='mapListItem' style='width:450px;height:130px;'><div class='mapLICat' onclick='windows[0].switchTab(7);mpCat.selectedIndex=%d;windows[0].searchMaps();' style='background:url(./img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
-                       idx + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
+            sb_appendf(&cats, "<div class='mapListItem' style='width:450px;height:130px;'><div class='mapLICat' onclick='windows[0].switchTab(%d);mpCat.selectedIndex=%d;windows[0].searchMaps();' style='background:url(./img/backgrounds/gamecats/c_%d.png)'>%s</div></div>",
+                       map_tab_index("Search"), idx + 1, k_map_cats_p[i].i, k_map_cats_p[i].n);
         }
         char *c = sb_finish(&cats);
         sb_appendf(sb, "<div class='mapCatScrl'>%s</div>", c);
