@@ -4027,6 +4027,74 @@ def run_native_kio_connect():
               [l for l in after if "[mm]" in l][-3:])
 
 
+def run_native_host_gate():
+    """Start Game on Box Office while the brain's answer is still out, then a krunker.io game joined: the brain gate closes
+    while the host request is in flight ("native-host-gate"). The late answer is not joined (its lobby would take the player
+    out of the krunker.io game) and it leaves no spinner: "Creating Game..." is shown only while the request is out, and the
+    answer is dropped with v10's failure text in #hostGameMsg (an open Host window; the krunker.io join closes it). Before the
+    fix the answer joined the Box Office game and "[krunker] leaving the official game" followed."""
+    label = "native-host-gate"
+    hold = 3.0  # the brain holds the host answer this long (the krunker.io join comes in between)
+    dead_port = kn_proto.free_ports(1)[0]
+    hosts = []
+
+    class HostBrain(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if urllib.parse.urlsplit(self.path).path != "/mm/host-game":
+                self.send_response(404)
+                self.end_headers()
+                return
+            hosts.append(time.time())
+            time.sleep(hold)
+            body = json.dumps({"host": "127.0.0.1", "port": dead_port, "gameId": "CH2:late1", "region": "local",
+                               "clientId": "k"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    brain = ThreadingHTTPServer(("127.0.0.1", 0), HostBrain)
+    threading.Thread(target=brain.serve_forever, daemon=True).start()
+    brain_url = "http://127.0.0.1:%d" % brain.server_address[1]  # the brain's routes are /mm/... under the URL
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        st.signin = True
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+    write_storage(label, {"kio_access_token": fake_kio_jwt("StubAcct"), "kio_username": "StubAcct", "kio_level": "20"})
+    script = ('0 boot\n300 call showWindow 42\n800 call openHostWindow 0 0\n1300 call knHostFlow "map" "kanji"\n'
+              '1400 clickid startServBtn\n1500 text @sent [id=hostGameMsg]\n'
+              '2200 call krunkerJoin "FRA:bbbbb"\n6500 text @late [id=hostGameMsg]\n9000 quit\n')
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": brain_url}, args=(), stub_setup=setup,
+                                      scenario="default")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    brain.shutdown()
+    brain.server_close()
+    text = "\n".join(lines)
+    sent = re.search(r"\[input_script\] text t=\d+ @sent n=\d+ checked=\d value=.*? text=(.*)", text)
+    late = re.search(r"\[input_script\] text t=\d+ @late n=\d+ checked=\d value=.*? text=(.*)", text)
+    check(f"{label}: the Start Game request went out and showed 'Creating Game...' while it was out",
+          len(hosts) == 1 and sent and sent.group(1).strip() == "Creating Game...", (len(hosts), sent and sent.group(1)))
+    joined_kio = next((i for i, l in enumerate(lines) if "[krunker] joining official game FRA:bbbbb" in l), None)
+    # the answer's disposition: dropped (the fix) or joined (before it), whichever the log names
+    answer = next((i for i, l in enumerate(lines) if "[mm] host answer not joined" in l or "[mm] joining CH2:late1" in l), None)
+    check(f"{label}: the krunker.io game was joined before the brain's answer came back",
+          joined_kio is not None and answer is not None and joined_kio < answer, (joined_kio, answer))
+    check(f"{label}: the late answer is dropped as the gate's (krunker.io is the session)",
+          any("[mm] host answer not joined: krunker.io is the session" in l for l in lines), [l for l in lines if "[mm]" in l][:4])
+    check(f"{label}: the late answer is not joined (its Box Office game is not entered)",
+          not any("[mm] joining CH2:late1" in l for l in lines), [l for l in lines if "[mm] joining" in l][:2])
+    check(f"{label}: the krunker.io game is not left for the late answer",
+          answer is not None and not any("[krunker] leaving the official game" in l for l in lines[answer:]),
+          [l for l in lines[answer or 0:] if "leaving" in l][:2])
+    check(f"{label}: no 'Creating Game...' outlives the answer (the Host window shows none)",
+          not (late and late.group(1).strip() == "Creating Game..."), late and late.group(1))
+
+
 def run_native_kio_region_only():
     """Server Type krunker.io, F4, with the player's krunker.io region chosen (Settings > Quickplay > krunker.io Region): the
     lobby is picked in that region only, as v10's seek (matchmakerSeek sends the one region; the matchmaker finds nothing
@@ -4107,6 +4175,7 @@ def run_native_f4_drops():
     run_native_bo_f4_in_kio()
     run_native_kio_account_seek()
     run_native_kio_connect()
+    run_native_host_gate()
     run_native_f4_setting_race()
     run_native_kio_region_only()
 
@@ -4982,6 +5051,7 @@ def main():
     if ONLY == "gate" and os.path.isfile(f"{BUILD}/client_bin"):  # just the brain gate runs (a Box Office seek while krunker.io is the session)
         run_native_kio_account_seek()
         run_native_kio_connect()
+        run_native_host_gate()
     if ONLY == "kiodrop" and os.path.isfile(f"{BUILD}/client_bin"):  # just the krunker.io drop / Find Game runs (Server Type krunker.io)
         run_native_f4_drops()
     if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)

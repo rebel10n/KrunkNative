@@ -4393,17 +4393,42 @@ void servers_ui_query(const char *query) {
 
 // ------------------------------------------------------------------ Host Game
 
+// A host the brain did not create a game for, as the Host window says it: v10's failure text (createPrivateRoom's
+// customRoomResponse(custom.tryagain), v10.js:197942 and 198131, when the hosting cannot start). Every answer that is
+// not joined ends here, so "Creating Game..." never outlives its request. A Host window already closed (the player is
+// in a lobby or a krunker.io game) has no #hostGameMsg, and nothing is shown.
+static void host_not_created(const HtmlElem msg) {
+    if (!msg) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<span class='error'>");
+    sb_append_esc(&sb, I18N("custom.tryagain", "Please try again."));
+    sb_append(&sb, "</span>");
+    char *html = sb_finish(&sb);
+    if (html) html_dom_set_html(msg, html);
+    free(html);
+}
+
 static void on_host(void *user, const int status, const char *body, const size_t length) {
     const unsigned action = (unsigned) (uintptr_t) user; // the host request's matchmaking action (seek_claim.h)
     HtmlElem msg = html_dom_by_id("hostGameMsg");
     cJSON *res = cJSON_Parse(body);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
+    // the brain gate closed while the request was out (krunker.io became the session: brain_seek_allowed's rule). The
+    // answer is neither joined (a Box Office lobby would leave the krunker.io game) nor shown as the brain's own failure
+    // (the game it made is left empty on the brain)
+    if (backend_brain_gated()) {
+        printf("[mm] host answer not joined: krunker.io is the session (the brain gate)\n");
+        cJSON_Delete(res);
+        host_not_created(msg);
+        return;
+    }
     if (status == 200 && cJSON_IsString(host)) {
         // a later action (a join by hand, a seek that was started after this request) entered a lobby while the
         // game was created: that lobby stays, and the new game is not joined (it is left empty on the brain)
         if (seek_claim_overtaken(&g_claims, action)) {
             printf("[mm] host answer not joined: the player entered a lobby after the host request\n");
             cJSON_Delete(res);
+            host_not_created(msg);
             return;
         }
         if (msg) html_dom_set_text(msg, I18N("kn.host.created", "Game Created")); // customRoomResponse(message, gameId)
@@ -4451,13 +4476,15 @@ int servers_ui_host_game(const char *config_json) {
         backend_url_encode(tok, sizeof(tok), account_session_token());
         snprintf(path + len, n - (size_t) len, "&token=%s", tok);
     }
-    HtmlElem msg = html_dom_by_id("hostGameMsg");
-    if (msg) html_dom_set_text(msg, I18N("kn.host.creating", "Creating Game..."));
     // a matchmaking action of its own (seek_claim.h): a seek still in flight is overtaken by its lobby. A Quick
     // Play search goes on no more: the player chose a game (the startup seek is not needed either)
     const unsigned action = seek_claim_start(&g_claims);
     const int ok = backend_http_get(path, on_host, (void *) (uintptr_t) action);
     if (ok) {
+        // "Creating Game..." only while the request is out: on_host's answer or failure replaces it. A request the
+        // brain gate refused (0 here) shows nothing: host_flow_start says why, so no spinner is left behind
+        HtmlElem msg = html_dom_by_id("hostGameMsg");
+        if (msg) html_dom_set_text(msg, I18N("kn.host.creating", "Creating Game..."));
         g_started = 1;
         quick_play_retry_cancel();
     }
