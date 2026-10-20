@@ -218,6 +218,13 @@ static int con_offline(void) {           // Game.singlePlayer
     return client && client->offline;
 }
 
+// The server's is_dev for this client (chat_commands is_dev, net_client_is_dev): the offline sandbox's local peer,
+// or the account's DEV flag.
+static int con_dev(void) {
+    const AccountInfo *acc = active_account();
+    return con_offline() || (acc && acc->is_dev);
+}
+
 static void lower(char *s) {
     for (; *s; s++) *s = (char) tolower((unsigned char) *s);
 }
@@ -1384,14 +1391,14 @@ static void cmd_version(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Version: %s", CON_VERSION);
 }
 
+// toggle <var> [args]: the variable's own command with everything after it (the server reads the arguments)
 static void cmd_toggle(const int argc, char **argv, const char *rest) {
-    (void) rest;
     if (!argc || !argv[0][0]) {
         append("toggle <var>", COL_ERROR);
         return;
     }
     char line[CON_TEXT_MAX];
-    snprintf(line, sizeof(line), "/%s", argv[0]);
+    snprintf(line, sizeof(line), "/%s", rest ? rest : argv[0]);
     send_server(line);
 }
 
@@ -1852,10 +1859,26 @@ static void cand_add(ConCands *c, const char *value, const char *prefix) {
 
 // The v3.1.1 map catalogue (shared/src/map_catalog.c): official maps by name, community
 // maps by file stem, which is what cmd_map resolves and cmd_maps prints.
-static void con_map_candidates(ConCands *c, const char *prefix) {
+static void name_key(const char *in, char *out, const size_t n);                   // the name helpers, below
+static void cand_add_key(ConCands *c, const char *value, const char *query);
+
+// keyed: the query is matched as the offline resolver matches it (name_key); else as the first-word list is (raw prefix).
+// An official map is listed by its name and, when the key reads differently, by its key too (map and offline accept it).
+static void con_map_candidates(ConCands *c, const char *query, const int keyed) {
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (e) cand_add(c, e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key, prefix);
+        if (!e) continue;
+        const char *label = e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key;
+        if (keyed) cand_add_key(c, label, query);
+        else cand_add(c, label, query);
+        if (e->source != MAP_SOURCE_OFFICIAL) continue;
+        char a[CON_TEXT_MAX], b[CON_TEXT_MAX];
+        name_key(e->name, a, sizeof(a));
+        name_key(e->key, b, sizeof(b));
+        if (strcmp(a, b)) {
+            if (keyed) cand_add_key(c, e->key, query);
+            else cand_add(c, e->key, query);
+        }
     }
 }
 
@@ -2090,18 +2113,21 @@ static void con_selector_candidates_for(ConCands *c, const char *prefix, const i
 #define PT_ALL      4  // "all" leads (bring, bot_kick, bot_kill)
 #define PT_AI       8  // kill: the active AIs as well (collectKillTargets)
 #define PT_BOTS    16  // the bots only, no selectors (bot_kick, bot_kill)
+#define PT_OWN     32  // a non-dev sees only its own name (ping: cmd_ping's own-ping check)
 
 // A player target (kick, ban, unban, ip, banip, ping, tp, bring, kill, bot_kick, bot_kill): the names it
 // resolves (name_key, or contains for kill), the "all" word and the selectors, by the rest-of-line query.
 static void player_target_candidates(const char *v, const LineCtx *ctx, const int flags, ConCands *c, char *base, const size_t n) {
     char query[CON_LINE_MAX];
     if (!rest_query(v, ctx, base, n, query, sizeof(query))) return;
-    if (ctx->arg == 0 && !(flags & PT_BOTS)) con_selector_candidates_for(c, ctx->prefix, flags & PT_SINGLE);
+    // a non-dev's ping takes its own name only (cmd_ping): no selector either
+    if (ctx->arg == 0 && !(flags & PT_BOTS) && !((flags & PT_OWN) && !con_dev())) con_selector_candidates_for(c, ctx->prefix, flags & PT_SINGLE);
     if (flags & PT_ALL) cand_add_key(c, "all", query);
     const Client *client = con_client();
     for (size_t i = 0; client && i < client->game.player_count; i++) {
         const Player *p = client->game.players[i];
         if (!p || !p->name[0] || ((flags & PT_BOTS) && !player_accounts_is_bot(p->uid))) continue; // the client never sets Player.is_bot
+        if ((flags & PT_OWN) && !con_dev() && p != con_player()) continue;
         if (flags & PT_CONTAINS) cand_add_contains(c, p->name, query);
         else cand_add_key(c, p->name, query);
     }
@@ -2174,7 +2200,7 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
             cand_add_key(c, *w, prefix); // bot_canonical_key: "target_b" finds targetBots=
         }
     } else if (!strcmp(cmd, "map")) { // cmd_map reads its first word (a name's prefix, or a key)
-        if (arg == 0) con_map_candidates(c, prefix);
+        if (arg == 0) con_map_candidates(c, prefix, 0);
     } else if (!strcmp(cmd, "mode")) {
         if (arg == 0) con_mode_candidates(c, prefix);
     } else if (!strcmp(cmd, "team")) {
@@ -2191,10 +2217,12 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         }
     } else if (!strcmp(cmd, "score")) {
         if (arg == 0) con_words(c, prefix, WORDS("100", "250", "500", "1000", "-100"));
+    } else if (!strcmp(cmd, "strike_reward")) { // strike_reward_sample: battlepass
+        if (arg == 0) con_words(c, prefix, WORDS("battlepass"));
     } else if (!strcmp(cmd, "autofill")) { // cmd_autofill: on | off | a player count
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "update")) { // update_ui_console handles check and now
-        if (arg == 0) con_words(c, prefix, WORDS("check", "now"));
+        if (arg == 0) con_words(c, prefix, WORDS("check", "now", "download"));
     } else if (!strcmp(cmd, "class")) {
         if (arg == 0) con_class_candidates(c, prefix);
         else if (arg == 1) con_secondary_candidates(c, prefix);
@@ -2209,7 +2237,7 @@ static int is_toggle_cmd(const char *cmd) {
 // The player-target commands and their PT_* flags (player_target_candidates); 0 with no flags for the rest.
 static int target_flags(const char *cmd, int *flags) {
     static const struct { const char *cmd; int flags; } TARGETS[] = {
-        {"kick", 0}, {"ban", 0}, {"unban", PT_SINGLE}, {"ip", PT_SINGLE}, {"banip", PT_SINGLE}, {"ping", PT_SINGLE},
+        {"kick", 0}, {"ban", 0}, {"unban", PT_SINGLE}, {"ip", PT_SINGLE}, {"banip", PT_SINGLE}, {"ping", PT_SINGLE | PT_OWN},
         {"tp", PT_SINGLE}, {"bring", PT_ALL}, {"kill", PT_CONTAINS | PT_AI},
         {"bot_kick", PT_BOTS | PT_ALL}, {"bot_kill", PT_BOTS | PT_ALL},
     };
@@ -2262,10 +2290,7 @@ static void toggle_candidates(const char *cmd, const char *v, const LineCtx *ctx
 static void offline_candidates(const char *v, const LineCtx *ctx, ConCands *c, char *base, const size_t n) {
     char query[CON_LINE_MAX];
     if (!rest_query(v, ctx, base, n, query, sizeof(query))) return;
-    for (size_t i = 0; i < map_catalog_count(); i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (e) cand_add_key(c, e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key, query);
-    }
+    con_map_candidates(c, query, 1);
 }
 
 // summon <name> (game_ai_resolve_template, the whole text): the template names, normalised
@@ -2275,6 +2300,7 @@ static void summon_candidates(const char *v, const LineCtx *ctx, ConCands *c, ch
     int count = 0;
     const GameAITemplate *templates = game_ai_templates(&count);
     for (int i = 0; i < count; i++) cand_add_key(c, templates[i].name, query);
+    for (size_t i = 0; i < game_ai_summon_alias_count(); i++) cand_add_key(c, game_ai_summon_alias(i), query); // weep, wander, ...
 }
 
 // exec's text is commands separated by ';' (cmd_exec): a command word leads the text and follows each ';'
@@ -2299,6 +2325,18 @@ static void kpd_candidates(const char *v, const LineCtx *ctx, ConCands *c, char 
     con_words(c, ctx->prefix, ON_OFF);
 }
 
+static void line_candidates(const char *v, ConCands *c, char *base, const size_t n);
+
+// toggle <var> <args> (cmd_toggle sends the whole text to the variable's command): the candidates of that command,
+// read as if the line began with it. The base is the text up to the variable's arguments, as typed.
+static void toggle_var_candidates(const char *v, ConCands *c, char *base, const size_t n) {
+    const size_t first = first_arg_start(v);
+    char sub[CON_LINE_MAX], sub_base[CON_LINE_MAX];
+    snprintf(sub, sizeof(sub), "/%s", v + first);
+    line_candidates(sub, c, sub_base, sizeof(sub_base)); // sub_base starts with the "/" it was given
+    snprintf(base, n, "%.*s%s", (int) first, v, sub_base + 1);
+}
+
 // The candidates for the token under the caret, and the line up to it.
 static void line_candidates(const char *v, ConCands *c, char *base, const size_t n) {
     LineCtx ctx;
@@ -2313,7 +2351,8 @@ static void line_candidates(const char *v, ConCands *c, char *base, const size_t
         const ConCommand *dev = find_cmd(ctx.cmd);
         if (dev && !cmd_visible(dev)) return; // a dev command's arguments are offered only with the dev console on
         int flags = 0;
-        if (is_toggle_cmd(ctx.cmd)) toggle_candidates(ctx.cmd, v, &ctx, c, base, n);
+        if (!strcmp(ctx.cmd, "toggle") && ctx.arg >= 1) toggle_var_candidates(v, c, base, n);
+        else if (is_toggle_cmd(ctx.cmd)) toggle_candidates(ctx.cmd, v, &ctx, c, base, n);
         else if (target_flags(ctx.cmd, &flags)) player_target_candidates(v, &ctx, flags, c, base, n);
         else if (!strcmp(ctx.cmd, "offline")) offline_candidates(v, &ctx, c, base, n);
         else if (!strcmp(ctx.cmd, "summon")) summon_candidates(v, &ctx, c, base, n);
@@ -2503,6 +2542,7 @@ static void submit(void) {
     html_dom_get_value(g_con.input, line, sizeof(line));
     set_input("");
     clear_hints();
+    g_con.hint_sel = -1; // a selection made before the line was sent is not carried over
     char check[CON_LINE_MAX];
     snprintf(check, sizeof(check), "%s", line);
     trim(check);
@@ -2627,8 +2667,8 @@ static int key_event(Client *client, const int key, const int scancode, const in
     if (game ? ui_mods_key_event(client, key, action, mods, typing) : ui_mods_toggle_key_event(key, action, typing)) return 1;
 
     if (g_con.visible) {
-        if (press && (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER)) { // form submit
-            if (!hint_sel_accept()) submit(); // a selected hint is accepted first, Enter again runs it
+        if (press && (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER)) { // form submit: the typed line is sent
+            submit();                                                         // (Tab accepts a selected hint)
             return 1;
         }
         html_ui_key(key, scancode, action, mods); // the input line edits itself
@@ -2668,8 +2708,8 @@ int ui_console_page_key(const HtmlEvent *ev) {
         ui_console_toggle(1);
         return 1;
     }
-    if (html_key_is_enter(ev->key)) {
-        if (!hint_sel_accept()) submit();
+    if (html_key_is_enter(ev->key)) { // the typed line is sent; a selected hint is Tab's to accept
+        submit();
         return 1;
     }
 #ifdef __EMSCRIPTEN__

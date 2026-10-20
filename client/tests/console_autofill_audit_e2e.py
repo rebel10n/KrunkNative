@@ -62,7 +62,9 @@ TOGGLE_CASES = [
 MAP_CASES = [
     ("map-so", "/map so", ["Soul Sanctum"]),
     ("map-soulsa", "/map soulsa", "empty"),
-    ("map-burg-underscore", "/map burg_", "empty"),
+    ("map-burg-underscore", "/map burg_", ["burg_new", "burg_2018"]),  # official and community keys by prefix
+    ("map-sanc", "/map sanc", ["sanctum"]),
+    ("offline-sanc", "/offline sanc", ["sanctum"]),
     ("offline-soulsa", "/offline soulsa", ["Soul Sanctum"]),
     ("offline-soul-space-sanctum", "/offline soul sanctum", ["Soul Sanctum"]),
 ]
@@ -77,6 +79,7 @@ BOT_CASES = [
     ("botconfig-target-underscore", "/bot_config target_b", ["targetBots="]),
     ("botconfig-targetb", "/bot_config targetb", ["targetBots="]),
     ("bot-diff", "/bot diff", ["difficulty="]),
+    ("summon-weep", "/summon weep", ("has", ["weep", "weeping"])),
     ("botdiff-blank", "/bot_difficulty ", ["easy", "normal", "hard", "max"]),
 ]
 FREE_TEXT_CASES = [
@@ -91,9 +94,14 @@ FREE_TEXT_CASES = [
 LIST_CASES = [
     ("autofill-blank", "/autofill ", ["on", "off"]),
     ("autofill-o", "/autofill o", ["on", "off"]),
-    ("update-blank", "/update ", ["check", "now"]),
+    ("update-blank", "/update ", ["check", "now", "download"]),
+    ("strike-blank", "/strike_reward ", ["battlepass"]),
     ("kpd-blank", "/kpd ", ["apps"]),
     ("kpd-x-blank", "/kpd apps ", "empty"),
+    ("toggle-god-blank", "/toggle god ", ["Guest_1", "on", "off"]),
+    ("toggle-god-gu", "/toggle god gu", ["Guest_1"]),
+    ("toggle-god-blue-bot-space", "/toggle god blue bot ", ["on", "off"]),
+    ("toggle-ungod-blank", "/toggle ungod ", ["Guest_1"]),
 ]
 LINES = PLAYER_CASES + TOGGLE_CASES + MAP_CASES + CLASS_CASES + BOT_CASES + FREE_TEXT_CASES + LIST_CASES
 
@@ -102,6 +110,9 @@ ENTER_CASES = [
     ("enter-ip-guest1", "/ip guest1", "[console] Server: Guest_1: "),
     ("enter-ip-guest-space-1", "/ip guest 1", "[console] Server: Guest_1: "),
     ("enter-ungod-guest-space-1", "/ungod guest 1", "[console] Server: God mode OFF"),
+    ("enter-ungod-guest-1-on", "/ungod guest 1 on", "[console] Server: God mode OFF"),  # Enter over the "on" hint sends the line
+    ("enter-toggle-god-guest-1-on", "/toggle god guest 1 on", "[console] Server: God mode ON"),  # toggle keeps its arguments
+    ("enter-update-download", "/update download", "[console] opening the client download"),
 ]
 TAB_CASES = [
     ("tab-map-soul", "/map so", '/map "Soul Sanctum" '),
@@ -141,8 +152,8 @@ def build_script(lines, enters, tabs, bots):
     if bots:  # the bots the cases name: spawned by the sandbox's bot command (a dev's line)
         for bot in ("/bot 1 name=Blue_Bot", "/bot 1 name=Red_Bot"):
             t = typed_line(out, t, bot)
-            out.append(f"{t} down ENTER"); out.append(f"{t + 10} up ENTER"); t += 600
-    t += 600
+            out.append(f"{t} down ENTER"); out.append(f"{t + 10} up ENTER"); t += 1500
+    t += 1500  # the chat limiter allows 3 lines a second (net_chat_allow): the sends are spaced
     for key, text, _ in lines:
         t = typed_line(out, t, text)
         t += 250  # the hint rows update a few frames after the last key (a debug client: ~0.5 s a frame)
@@ -151,10 +162,7 @@ def build_script(lines, enters, tabs, bots):
         t += 20
     for key, text, _ in enters:
         t = typed_line(out, t, text)
-        # a first Enter over an open hint list can pick its entry instead of sending the line; the second sends it
-        # (on an empty line it does nothing)
-        out.append(f"{t} down ENTER"); out.append(f"{t + 10} up ENTER"); t += 200
-        out.append(f"{t} down ENTER"); out.append(f"{t + 10} up ENTER"); t += 200
+        out.append(f"{t} down ENTER"); out.append(f"{t + 10} up ENTER"); t += 1500
     for key, text, _ in tabs:
         t = typed_line(out, t, text)
         t += 40
@@ -249,13 +257,27 @@ GROUPS = [
 ]
 
 
+def enter_reply(log_lines, typed, want):
+    """Whether the reply `want` came after the console echoed `typed` (up to the next echo), and those lines."""
+    echo = "[console] ] " + typed
+    starts = [i for i, line in enumerate(log_lines) if line.endswith(echo) or line == echo]
+    if not starts:
+        return False, []
+    i = starts[0] + 1
+    j = i
+    while j < len(log_lines) and "[console] ] " not in log_lines[j]:
+        j += 1
+    block = log_lines[i:j]
+    return any(want in line for line in block), block
+
+
 def batch_started(text, lines, enters):
     """The client ran the batch's script, its first hint line read rows and each Enter line was echoed."""
     if "[input_script] " not in text or "events from" not in text:
         return False
     if lines and lines[0][0] not in read_rows(text)[0]:
         return False
-    return all("] " + typed in text for _, typed, _ in enters)
+    return all("[console] ] " + typed in text for _, typed, _ in enters)
 
 
 def main():
@@ -283,9 +305,8 @@ def main():
             check(f"{typed!r} gives {describe(expect)}", matches(names, expect), f"got {names}")
         log_lines = text.splitlines()
         for key, typed, want in enters:
-            ok = any(want in line for line in log_lines)
-            got = [line.split("[console] ", 1)[1] for line in log_lines if "[console] Server:" in line][-4:]
-            check(f"Enter {typed!r} -> the parser replies {want!r}", ok, f"server replies (last few): {got}")
+            ok, block = enter_reply(log_lines, typed, want)
+            check(f"Enter {typed!r} -> the reply {want!r}", ok, f"lines after the echo: {block[:6]}")
         for key, typed, want in tabs:
             shown = tab_values.get(key)
             check(f"Tab completes {typed!r} to {want!r}", shown == want, f"value {shown!r}")
