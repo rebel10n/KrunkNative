@@ -68,6 +68,7 @@ if [ -n "$image" ]; then
     [ -n "${KN_DOCKER_PLATFORM:-}" ] && platform=(--platform "$KN_DOCKER_PLATFORM")
     exec "${DOCKER:-docker}" run --rm "${platform[@]}" -v "$repo:/src:ro" -v "$build:/build" -v "$out:/out" \
         -e KN_CMAKE_ARGS="${KN_CMAKE_ARGS:-}" -e KN_BUILD_DIR=/build -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+        -e KN_CONFIGURE_ONLY="${KN_CONFIGURE_ONLY:-}" \
         "${extra[@]}" "$image" bash -c '
             set -e
             trap "chown -R \"$HOST_UID:$HOST_GID\" /out /build" EXIT
@@ -147,6 +148,12 @@ if [ "$variant" = dynamic ]; then flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE
 # FindX11 failed on arm64 under emulation (intermittently: KN_DOCKER_PLATFORM=linux/arm64 in an ubuntu:22.04 image)
 if [ "$variant" = polyfilled ]; then linker="-static-libgcc -static-libstdc++"; else linker="-static-libgcc"; fi
 flags+=("-DCMAKE_EXE_LINKER_FLAGS=$linker")
+if [ "$arch" = aarch64 ]; then
+    # FindX11 missed the multiarch libX11.so at random in the arm64 build under qemu emulation (the file is there);
+    # the compiler's resolution of libX11.so is that same file, so it is preset (FindX11 honours the cache entry)
+    x11="$(gcc -print-file-name=libX11.so)"
+    [ -f "$x11" ] && flags+=("-DX11_X11_LIB=$x11")
+fi
 # the captcha webview (client/include/kn_webview.h, WebKitGTK) is bundled with the dynamic packages
 # (bundle-webkit.sh, below). The polyfilled ones keep it out: a webkit2gtk-4.1 for their glibc 2.17
 # floor does not exist, and a load-time link would make it a hard dependency of the portable client
@@ -161,6 +168,8 @@ fi
 # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
 cmake -S "$repo" -B "$build" -G Ninja "${flags[@]}" ${KN_CMAKE_ARGS:-} > "$build/configure.log" || { cat "$build/configure.log" >&2; exit 1; }
 grep -E 'GL backend|OpenSSL|libssl|Headless|Webview' "$build/configure.log" || true
+# KN_CONFIGURE_ONLY=1: stop after configure (the arm64 emulation check: tools/release/build-client-linux.sh callers)
+[ -n "${KN_CONFIGURE_ONLY:-}" ] && exit 0
 # the launcher (target kn_launcher, output BoxOffice; agent client-updates) when the tree has it
 targets=(client_bin server_bin)
 bins=(client_bin server_bin)
