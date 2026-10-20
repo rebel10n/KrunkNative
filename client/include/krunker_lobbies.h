@@ -15,7 +15,7 @@
 //
 // The Servers window lists them on every native client in their own KRUNKER.IO section after
 // ours, whatever Settings > Quickplay > Server Type says (that one picks what Quick Match / F4 seek
-// into, and whether the menu's Popular Now counts these games: menu_sources.h). krunker.io refuses
+// into; the menu's Popular Now never counts these games, menu_sources.h). krunker.io refuses
 // some networks outright (a 403 "ACCESS DENIED" HTML page):
 // the section then says so and points at Settings > Client > Proxy (http_proxy.h), which by
 // default carries krunker.io's requests only.
@@ -70,9 +70,6 @@ void krunker_seek_region_resolve(KrunkerRegionFn fn, void *user);
 // first (krunker_net_recent_rank), else the least recent of those, the one it is in last. 1 = found
 // (id written).
 int krunker_lobbies_pick(char *id, size_t n);
-// The busiest custom game on map `map` (Krunker's map name, the list's i) that has room and no password;
-// 1 = found (id written). Popular Now's cards (servers_ui_popular_official).
-int krunker_lobbies_pick_custom(const char *map, char *id, size_t n);
 // Seek an official lobby: pick one now (a fresh enough list), or once the list arrives, and
 // open it (krunker_lobbies_open); none matching = a toast, only the one the player is in = a toast
 // (it stays). No list at all (krunker.io refused it) and joining in-client: the matchmaker picks

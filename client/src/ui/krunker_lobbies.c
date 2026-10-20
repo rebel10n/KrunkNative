@@ -10,7 +10,6 @@
 #include <ui_logic.h>
 #include <quick_play_retry.h> // a Quick Play search's full official lobby is picked again (official_pick_again)
 #include <html_dom.h> // html_timer_add (the finder's "Took to long" timer)
-#include <v10_menu.h> // v10_menu_popular_changed
 #include <backend.h>
 #include <flavor.h> // Krunker Strike lists and joins no official krunker.io lobby
 #include <krunker_build.h> // KRUNKER_REGIONS / KRUNKER_DEDICATED_ONLY_REGIONS: v10's availableRegions / dedicatedOnlyRegions
@@ -329,7 +328,6 @@ static void on_list(void *user, const int status, const char *body, const size_t
     cJSON_Delete(res);
     if (!K.pinging) run_waiting(); // else on_pings (or the ping list's failure) runs them on the settled list
     menu_rerender_if_open(2); // the Servers window shows the section
-    v10_menu_popular_changed(); // Popular Now counts krunker.io's custom games (v10 fetchMatches)
 }
 
 void krunker_lobbies_refresh(const int force) {
@@ -521,26 +519,6 @@ int krunker_lobbies_pick(char *id, const size_t n) {
         best = t;
         best_rank = rank;
         best_players = players;
-    }
-    if (!best) return 0;
-    snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
-    return 1;
-}
-
-int krunker_lobbies_pick_custom(const char *map, char *id, const size_t n) {
-    const cJSON *t, *best = NULL;
-    int best_players = -1;
-    cJSON_ArrayForEach(t, krunker_lobbies_list()) {
-        const cJSON *meta = cJSON_GetArrayItem(t, 4);
-        const char *i = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i"));
-        const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
-        const int max = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3));
-        if (!map || !i || strcmp(i, map) || !meta_on(meta, "cs")) continue; // a custom game on that map
-        if (players >= max || meta_on(meta, "pw")) continue;
-        if (players > best_players) {
-            best = t;
-            best_players = players;
-        }
     }
     if (!best) return 0;
     snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
@@ -770,12 +748,6 @@ const char *krunker_lobbies_error(void) { return ""; }
 void krunker_lobbies_network_changed(void) {}
 void krunker_lobbies_set_fixed(const cJSON *answer) { (void) answer; }
 double krunker_lobbies_players(void) { return 0; }
-int krunker_lobbies_pick_custom(const char *map, char *id, const size_t n) {
-    (void) map;
-    (void) id;
-    (void) n;
-    return 0;
-}
 int krunker_lobbies_pick(char *id, const size_t n) {
     (void) id;
     (void) n;

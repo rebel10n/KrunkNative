@@ -11,12 +11,13 @@ KRUNKNATIVE_KRUNKER_MATCHMAKER /game-list with three custom games, and its data 
 (setSetting knSeekServers, what Settings > Quickplay's row calls):
   - Box Office servers (the default): Popular Now shows Box Office's three maps by players and none of krunker.io's;
     the Live Streams overlay shows the brain's stream;
-  - krunker.io servers: Popular Now shows krunker.io's three maps and none of ours; the overlay shows krunker.io's;
-  - Both: both lists summed (krunker.io's two busiest, then our busiest); the brain's stream;
-  - back to Box Office with krunker.io's list now cached: ours only again.
-Before the fix the Box Office menu summed both lists (krunker.io's "41 playing" counts on a Box Office menu) and the
-streams were the brain's for every Server Type. Exit code 0 when every check passed; the input-script log is kept in
-~/.cache/kn-menu-sources-e2e-* on failure.
+  - krunker.io servers: Popular Now is hidden (krunker.io's custom games are never in it); the overlay shows
+    krunker.io's stream;
+  - Both: Popular Now is hidden too; the overlay shows the brain's stream;
+  - back to Box Office with krunker.io's list now cached: Box Office's games again, the brain's stream.
+Before the fix the Box Office menu summed in krunker.io's custom games ("41 playing" counts), the krunker.io and Both
+types showed them in Popular Now, and the streams were the brain's for every Server Type. Exit code 0 when every check
+passed; the input-script log is kept in ~/.cache/kn-menu-sources-e2e-* on failure.
 """
 import json
 import os
@@ -148,6 +149,12 @@ def text(log, label):
     return (int(m.group(1)), fold(re.sub(r"play_arrow", " ", m.group(2)))) if m else (-1, None)
 
 
+def nodes(log, label):
+    """How many elements the selector matches (-1 when the command did not run)."""
+    m = re.search(r"\[input_script\] nodes t=\d+ " + re.escape(label) + r" elements=\d+ match=(\d+)", log)
+    return int(m.group(1)) if m else -1
+
+
 def grep(log, label):
     m = re.search(r"\[input_script\] grep t=\d+ " + re.escape(label) + r" needle=\S+ n=(\d+) hits=(\d+)", log)
     return int(m.group(2)) if m else -1
@@ -159,13 +166,14 @@ def vis(log, label):
 
 
 def phase(t, tag):
-    """The checks of one Server Type at time t: the rail's text, which list's names it holds, the overlay."""
+    """The checks of one Server Type at time t: the rail's text and card count, which list's names it holds, the overlay."""
     return ("%d text @%s_rail [id=subLogoButtons] .popRailCards\n"
+            "%d nodes @%s_cards .popRailCard\n"
             "%d grep @%s_ours Rooftop [id=subLogoButtons] .popRailName\n"
             "%d grep @%s_kio Krunk_Plaza [id=subLogoButtons] .popRailName\n"
             "%d vis @%s_overlay knStreams\n"
             "%d text @%s_stream [id=knStreams] .stream-username\n"
-            % (t, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag))
+            % (t, tag, t + 5, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag))
 
 
 def main():
@@ -174,8 +182,7 @@ def main():
     for s in (brain, kio):
         threading.Thread(target=s.serve_forever, daemon=True).start()
 
-    # Box Office servers (the default Server Type): checked after the 3 s at which Popular Now would ask krunker.io's
-    # list (POPULAR_KIO_DELAY_MS) had it counted it; then each other type through the settings handler
+    # Box Office servers (the default Server Type) first; then each other type through the settings handler
     script = "0 menu\n" + phase(5000, "bo")
     script += "5200 call setSetting \"knSeekServers\" \"official\"\n" + phase(8000, "kio")
     script += "8200 call setSetting \"knSeekServers\" \"both\"\n" + phase(11000, "both")
@@ -185,38 +192,38 @@ def main():
     brain.shutdown()
     kio.shutdown()
 
-    # Box Office servers: Box Office's three maps by players, none of krunker.io's, and krunker.io not asked for them
+    # Box Office servers: Box Office's three maps by players, none of krunker.io's
     n, rail = text(log, "@bo_rail")
     check(n == 1 and rail == "Rooftop Parkour 23 playing Mini Burg 14 playing 1v1 Arena 7 playing",
           f"Box Office servers: Popular Now is Box Office's games by players ({rail!r})")
+    check(nodes(log, "@bo_cards") == 3, "Box Office servers: Popular Now has three cards")
     check(grep(log, "@bo_kio") == 0, "Box Office servers: none of krunker.io's maps in Popular Now")
     check(grep(log, "@bo_ours") == 1, "Box Office servers: Box Office's busiest map is a card")
     check(vis(log, "@bo_overlay").get("knStreams") == "1", "Box Office servers: the Live Streams overlay shows")
     _, stream = text(log, "@bo_stream")
     check(stream == "box_office_live", f"Box Office servers: the streams are the brain's ({stream!r})")
+    check(Brain.hits.get("/streams/top", 0) >= 1, "Box Office servers: the brain's /streams/top was asked")
 
-    # krunker.io servers: krunker.io's three maps, none of ours, krunker.io's streams
-    n, rail = text(log, "@kio_rail")
-    check(n == 1 and rail == "Krunk_Plaza 41 playing TowerWar_3 31 playing Littletown 21 playing",
-          f"krunker.io servers: Popular Now is krunker.io's custom games by players ({rail!r})")
+    # krunker.io servers: Popular Now is hidden (no card, none of either list's maps); the overlay shows krunker.io's streams
+    check(nodes(log, "@kio_cards") == 0, "krunker.io servers: Popular Now is hidden, no card")
+    check(grep(log, "@kio_kio") == 0, "krunker.io servers: krunker.io's custom games are not in Popular Now")
     check(grep(log, "@kio_ours") == 0, "krunker.io servers: none of Box Office's maps in Popular Now")
     check(vis(log, "@kio_overlay").get("knStreams") == "1", "krunker.io servers: the Live Streams overlay shows")
     _, stream = text(log, "@kio_stream")
     check(stream == "kio_live", f"krunker.io servers: the streams are krunker.io's, v10's host ({stream!r})")
     check(Krunker.hits.get("/streams/top", 0) >= 1, "krunker.io servers: krunker.io's /streams/top was asked")
-    check(Brain.hits.get("/streams/top", 0) >= 1, "Box Office servers: the brain's /streams/top was asked")
 
-    # Both: the two lists summed (krunker.io's two busiest, then our busiest); the brain's streams
-    n, rail = text(log, "@both_rail")
-    check(n == 1 and rail == "Krunk_Plaza 41 playing TowerWar_3 31 playing Rooftop Parkour 23 playing",
-          f"Both: Popular Now sums both lists ({rail!r})")
+    # Both: Popular Now hidden too; the overlay shows the brain's streams while there is one
+    check(nodes(log, "@both_cards") == 0, "Both: Popular Now is hidden, no card")
+    check(grep(log, "@both_kio") == 0, "Both: krunker.io's custom games are not in Popular Now")
+    check(vis(log, "@both_overlay").get("knStreams") == "1", "Both: the Live Streams overlay shows")
     _, stream = text(log, "@both_stream")
     check(stream == "box_office_live", f"Both: the streams are the brain's while there is one ({stream!r})")
 
-    # Box Office again, krunker.io's list now cached: ours only
+    # Box Office again, krunker.io's list cached: Box Office's games only, the brain's streams
     n, rail = text(log, "@bo2_rail")
     check(n == 1 and rail == "Rooftop Parkour 23 playing Mini Burg 14 playing 1v1 Arena 7 playing",
-          f"Box Office servers again: Box Office's games only, krunker.io's cached list not counted ({rail!r})")
+          f"Box Office servers again: Box Office's games only ({rail!r})")
     check(grep(log, "@bo2_kio") == 0, "Box Office servers again: none of krunker.io's maps")
     _, stream = text(log, "@bo2_stream")
     check(stream == "box_office_live", f"Box Office servers again: the brain's streams ({stream!r})")

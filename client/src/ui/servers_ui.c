@@ -31,7 +31,7 @@
 #include <join_errors.h>   // a failed join's text and place (join_errors.c)
 #include <region_ping.h>   // the seek region's ping race (v10 getRegion)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
-#include <menu_sources.h>  // Popular Now counts the Server Type's lists (menu_popular_sources)
+#include <menu_sources.h>  // Popular Now is Box Office's only (menu_popular_on)
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <seek_claim.h>    // which matchmaking answer may enter a lobby (a host or a join by hand overtakes a seek)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
@@ -3741,21 +3741,13 @@ static void matches_add(cJSON *out, const cJSON *games) {
     }
 }
 
-// The lists Popular Now counts (menu_sources.h): the Server Type's. Box Office = the brain's custom games only,
-// krunker.io = krunker.io's only, Both = both; an official krunker.io game being the session = krunker.io's (the
-// brain is gated).
-static unsigned popular_sources(void) {
-    return menu_popular_sources(seek_prefs_servers(), account_backend() == ACCOUNT_BACKEND_KRUNKER);
-}
-
 // v10 fetchMatches (v10:215632): the custom games of the game list by map (i), their players summed
-// (min(players, max)). KrunkNative: the Server Type's lists (popular_sources): ours (`games`, the brain's) and /
-// or krunker.io's official custom games (krunker_lobbies.h, native), the list v10 itself reads; with Both a name
-// on both sums both.
-static cJSON *matches_of(const cJSON *games, const unsigned sources) {
+// (min(players, max)). KrunkNative: ours (`games`, the brain's custom games), the list v10 itself reads. Popular Now
+// is Box Office's only (menu_sources.h): on any other Server Type the list is empty and the rail is hidden. krunker.io's
+// custom games are never counted here.
+static cJSON *matches_of(const cJSON *games) {
     cJSON *out = cJSON_CreateObject();
-    if (sources & MENU_SRC_KN) matches_add(out, games);
-    if (sources & MENU_SRC_KIO) matches_add(out, krunker_lobbies_list());
+    matches_add(out, games);
     return out;
 }
 
@@ -3763,7 +3755,8 @@ static void on_matches(void *user, const int status, const char *body, const siz
     (void) length;
     MatchesReq *req = user;
     cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
-    cJSON *matches = matches_of(cJSON_GetObjectItem(res, "games"), popular_sources());
+    // the Server Type may have changed while the list was on its way: Popular Now is Box Office's only
+    cJSON *matches = matches_of(menu_popular_on(seek_prefs_servers()) ? cJSON_GetObjectItem(res, "games") : NULL);
     req->fn(req->user, matches);
     cJSON_Delete(matches);
     cJSON_Delete(res);
@@ -3772,10 +3765,10 @@ static void on_matches(void *user, const int status, const char *body, const siz
 
 void servers_ui_fetch_matches(const ServersMatchesFn fn, void *user) {
     if (!fn) return;
-    const unsigned sources = popular_sources();
-    // no brain list wanted (the krunker.io Server Type), a fixed list, or no brain: answered at once
-    if (!(sources & MENU_SRC_KN) || g_games_override || backend_available() != 1) {
-        cJSON *matches = matches_of(g_games_override ? g_games : NULL, sources);
+    const int ours = menu_popular_on(seek_prefs_servers());
+    // not the Box Office Server Type (no Popular Now), a fixed list, or no brain: answered at once
+    if (!ours || g_games_override || backend_available() != 1) {
+        cJSON *matches = matches_of(ours && g_games_override ? g_games : NULL);
         fn(user, matches);
         cJSON_Delete(matches);
         return;
@@ -4184,25 +4177,6 @@ void servers_ui_set_host_type(const int host_type) {
 
 int servers_ui_host_type(void) {
     return g_host_type;
-}
-
-// A Popular Now card (v10: openURL("/?play=" + name)): one of our custom games on that map is playMap's;
-// a map only krunker.io's custom games run joins the busiest of them that has room (an official lobby,
-// krunker_lobbies_open), what krunker.io's own /?play= finds. 1 = an official lobby was opened. The card
-// counted the Server Type's lists (popular_sources): a Box Office card is never krunker.io's game, a krunker.io
-// card never one of ours.
-int servers_ui_popular_official(const char *map) {
-    const unsigned sources = popular_sources();
-    if (!(sources & MENU_SRC_KIO)) return 0;
-    const cJSON *t;
-    if (sources & MENU_SRC_KN) cJSON_ArrayForEach(t, brain_games()) {
-        if (row_custom(t) && !strcmp(row_i(t), map ? map : "")) return 0;
-    }
-    char id[80];
-    if (!krunker_lobbies_pick_custom(map, id, sizeof(id))) return 0;
-    printf("[mm] Popular Now %s: krunker.io's custom game %s\n", map, id);
-    krunker_lobbies_open(id);
-    return 1;
 }
 
 // ------------------------------------------------------------------ playMap / ?play= / ?game=

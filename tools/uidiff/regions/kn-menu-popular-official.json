@@ -16,7 +16,7 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 8.0,
-      "note": "Popular Now with krunker.io's custom games: the header and three cards (name, 'N playing', play_arrow), top 3 by players (v10_menu.c popular_render over servers_ui_fetch_matches)"
+      "note": "Popular Now on the krunker.io Server Type: KN shows no rail (menu_sources.h: Popular Now is Box Office's only), so this region is empty here by design; v10 with the same list shows krunker.io's three cards, which is the intended difference"
     }
   ]
 }

@@ -1186,8 +1186,8 @@ else ()
     add_executable(host_route_test client/tests/host_route_test.c)
     target_include_directories(host_route_test PRIVATE client/include shared/include)
     add_test(NAME host_route_test COMMAND host_route_test)
-    # menu_sources_test (client/include/menu_sources.h): the menu's Popular Now counts the Server Type's games and its Live
-    # Streams come from the Server Type's host (Box Office's brain / krunker.io's api), never the other's
+    # menu_sources_test (client/include/menu_sources.h): the menu's Popular Now is Box Office's only, and its Live Streams
+    # come from the brain or from api.krunker.io (krunker.io's Server Type, a krunker.io account, or no brain)
     add_executable(menu_sources_test client/tests/menu_sources_test.c)
     target_include_directories(menu_sources_test PRIVATE client/include shared/include)
     add_test(NAME menu_sources_test COMMAND menu_sources_test)

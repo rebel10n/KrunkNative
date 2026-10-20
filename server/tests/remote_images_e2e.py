@@ -17,8 +17,8 @@ KRUNKNATIVE_KRUNKER_MATCHMAKER / KRUNKNATIVE_KRUNKER_USER_ASSETS = the stub: not
   2 warm cache, a new process: the thumbnails come from the disk cache, no request reaches the stub for
     them, and none waits for an arrival
   3 a slide's click searches the list for its game (windows[1].searchList(name))
-  4 the main menu's Popular Now (v10 fetchMatches): krunker.io's custom games (their list asked 3 s after the
-    menu's first draw), top 3 maps by players, and a card joins the busiest custom game on its map with room (servers_ui_popular_official)
+  4 the main menu's Popular Now (v10 fetchMatches) is Box Office's custom games only (menu_sources.h): on the default
+    Box Office Server Type with no brain (this offline client) there is no rail, and krunker.io's custom maps never show in it
 
 Each run is one headless offline client_bin (KRUNKNATIVE_HEADLESS=1, KRUNKNATIVE_AUDIO_BACKEND=null) driven
 by an input script. Exit 0 when every check passed; logs stay in ~/.cache/kn-remote-images-e2e-* on failure.
@@ -208,20 +208,14 @@ def main():
         check("3: searchList(name) fills the search field", s["value"] == "TowerWar_3", s)
         check("3: ... and opens the Custom Games group with that game", nodes(log, "rows") >= 1, nodes(log, "rows"))
 
-        # ---- 4: Popular Now
+        # ---- 4: Popular Now is Box Office's only
         log = run("popular", """
 0 menu
 6000 nodes @cards .popRailCard
-6050 text @top .popRailCard .popRailName
-6100 call knV10PopularPlay 0
 7500 quit
 """, cache_dir)
-        top = probe(log, "top")["text"]
-        check("4: Popular Now lists krunker.io's custom maps, three of them, the busiest first", nodes(log, "cards") == 3 and top == "Zombie_Bulwark",
-              (nodes(log, "cards"), top))
-        check("4: a card joins the busiest custom game on that map (an official lobby, in-client)",
-              "[mm] Popular Now Zombie_Bulwark: krunker.io's custom game FRA:uezfe" in log
-              and "[krunker] official lobby FRA:uezfe: joining in-client" in log, re.findall(r"\[(?:mm|krunker)\] (?:Popular|official lobby).*", log)[:3])
+        check("4: Popular Now shows no card on the default Box Office Server Type with no brain: krunker.io's Zombie_Bulwark is not in it",
+              nodes(log, "cards") == 0, nodes(log, "cards"))
     finally:
         httpd.shutdown()
     ok = all(results)

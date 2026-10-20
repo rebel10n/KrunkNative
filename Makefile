@@ -726,7 +726,7 @@ server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each 
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/server_tabs_e2e.py $(DEBUG_DIR)
 
 .PHONY: menu-sources-e2e
-menu-sources-e2e: build ## The menu's Popular Now counts the Server Type's games (Box Office's / krunker.io's, never the other's) and its Live Streams come from that type's host (brain / api.krunker.io stubs; headless; EGL_DEVICE=...)
+menu-sources-e2e: build ## The menu's Popular Now is Box Office's only (hidden on krunker.io and Both) and its Live Streams come from the brain or api.krunker.io (brain / krunker.io stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/menu_sources_e2e.py $(DEBUG_DIR)
 
 .PHONY: seek-region-e2e
