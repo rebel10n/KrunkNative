@@ -123,6 +123,41 @@ void krunker_link_log_text(char *dst, const size_t dst_len, const char *src, con
     dst[i] = 0;
 }
 
+static double link_now_ms(const KrunkerLink *l);
+
+// The disconnect log's frame ring (KRUNKER_LINK_RECENT, krunker_link.h): one frame sent ('S') or received ('R'), its
+// arguments as JSON. Each argument is written whole before the cut, so a long one costs its JSON once; the ring holds
+// no more than the text above.
+static void record_frame(KrunkerLink *l, const char dir, const char *name, const size_t name_len, const KrunkerValue *args, const size_t argc) {
+    KrunkerLinkRecent *r = &l->recent[l->recent_total % KRUNKER_LINK_RECENT];
+    l->recent_total++;
+    r->dir = dir;
+    krunker_link_log_text(r->type, sizeof(r->type), name, name_len);
+    r->t_ms = link_now_ms(l);
+    size_t used = 0, i = 0;
+    int cut = 0;
+    const size_t cap = sizeof(r->args) - 1; // the NUL
+    r->args[0] = 0;
+    for (; args && i < argc && !cut; i++) {
+        KrunkerBuf buf = {0};
+        if (krunker_value_to_json(&args[i], &buf) == KRUNKER_PROTO_OK && buf.data) {
+            if (i && used < cap) { // ", " between the arguments
+                const size_t sep = cap - used < 2 ? cap - used : 2;
+                memcpy(r->args + used, ", ", sep);
+                used += sep;
+            }
+            const size_t put = cap - used < buf.len ? cap - used : buf.len;
+            memcpy(r->args + used, buf.data, put);
+            used += put;
+            cut = put < buf.len; // this argument (or the rest) did not fit
+        }
+        krunker_buf_free(&buf);
+    }
+    r->args[used] = 0;
+    // arguments left out (the buffer ran out) say so: the last three characters become "..."
+    if ((cut || (args && i < argc)) && used >= 3) memcpy(r->args + used - 3, "...", 3);
+}
+
 int krunker_link_send(KrunkerLink *l, const char *wire, const KrunkerValue *args, const size_t argc) {
     KrunkerBuf buf = {0};
     if (!wire || krunker_proto_encode(&l->codec, wire, args, argc, &buf) != KRUNKER_PROTO_OK) {
@@ -132,6 +167,7 @@ int krunker_link_send(KrunkerLink *l, const char *wire, const KrunkerValue *args
     if (l->io.send) l->io.send(l->io.user, buf.data, buf.len);
     l->frames_out++;
     krunker_link_log_text(l->last_sent, sizeof(l->last_sent), wire, strlen(wire));
+    record_frame(l, 'S', wire, strlen(wire), args, argc);
     krunker_buf_free(&buf);
     return 1;
 }
@@ -269,6 +305,7 @@ static cJSON *custom_map(const KrunkerValue *custom, char *id, const size_t id_s
 // does not have it, :219292; this client ships the list, krunker_maps.h); a custom game sends its map
 // in arg 9. io.map turns either into one of the client's maps (krunker_net.c, krunker_map_source.h).
 static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
+    l->round_ended = 0;
     const int map = krunker_is(arg(f, 0), KRUNKER_NUM) ? (int) num(arg(f, 0), -1) : -1, mode = (int) num(arg(f, 1), 0);
     KrunkerLinkInit info;
     memset(&info, 0, sizeof(info));
@@ -1362,6 +1399,7 @@ static int16_t clamp16(const double v) {
 // indexes; the medals tab stays empty).
 static void on_match_vote(KrunkerLink *l, const KrunkerValue *vo, const KrunkerValue *mts); // below
 static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
+    l->round_ended = 1; // the disconnect log's gate state (KrunkerLink.round_ended); "init" clears it
     const KrunkerValue *data = arg(f, 2);
     // the vote cards (:219805-219826, updMatchVote(vo, mts)) ahead of the END that shows them
     if (krunker_is(krunker_get(data, "mts"), KRUNKER_ARRAY)) on_match_vote(l, krunker_get(data, "vo"), krunker_get(data, "mts"));
@@ -2548,6 +2586,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
     }
     l->frames_in++;
     krunker_link_log_text(l->last_recv, sizeof(l->last_recv), f.name, f.name_len);
+    record_frame(l, 'R', f.name, f.name_len, f.args, f.argc);
     account_frame(l, &f);
     switch (krunker_s2c_lookup(f.name, f.name_len)) {
         case KRUNKER_S2C_IO_INIT:

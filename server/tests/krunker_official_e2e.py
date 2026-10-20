@@ -3294,7 +3294,7 @@ def run_native_kick_close():
     socket_closed = [l for l in lines if l.startswith("[krunker] socket closed")]
     check(f"{label}: the close is read as the server's code, closed by the server", any(f"(code {KICK_CLOSE_CODE}: closed by the server)" in l for l in socket_closed), socket_closed[:2])
     # the close line's tail: the seconds since the last "q" window, the last frame sent and received, the server's error text and close reason
-    tail = [re.search(r", last input (never|[\d.]+ s ago), last sent (\S+), last received (\S+), server error \"([^\"]*)\", close reason \"([^\"]*)\"$", l)
+    tail = [re.search(r", last input (never|[\d.]+ s ago), last sent (\S+), last received (\S+), server error \"([^\"]*)\", close reason \"([^\"]*)\", gate you_gone=([01]) locked=([01]) round_ended=([01]) own_player=([01])$", l)
             for l in socket_closed]
     tail = next((m for m in tail if m), None)
     check(f"{label}: the close line has the input age, the last frames, the server's error and close reason", tail is not None, socket_closed[:2])
@@ -3305,6 +3305,24 @@ def run_native_kick_close():
         check(f"{label}: the last frame sent is the client's input", tail.group(2) == '"q"', tail.group(2))
         check(f"{label}: the close line logs the server's error text", tail.group(4) == KICK_CLOSE_TEXT, tail.group(4))
         check(f"{label}: the close line logs the server's close reason", tail.group(5) == KICK_CLOSE_REASON, tail.group(5))
+        gates = [tail.group(6), tail.group(7), tail.group(8), tail.group(9)]
+        check(f"{label}: the close line has the gate state (you_gone, locked, round_ended, own_player)", all(g in "01" for g in gates) and len(gates) == 4, gates)
+    # the last frames (krunker_net.c socket_recent): min(50, frames in + out) lines, oldest first, each with its direction,
+    # wire name, age, dt and arguments; the last one is the server's "error" (received) with its text among the arguments
+    counted = re.search(r"\): (\d+) frames in, (\d+) out,", socket_closed[0]) if socket_closed else None
+    total = int(counted.group(1)) + int(counted.group(2)) if counted else -1
+    head = [l for l in lines if l.startswith("[krunker] last ") and "frames before the close" in l]
+    rows = [l for l in lines if l.startswith("[krunker]   ")]
+    row_re = re.compile(r"^\[krunker\]   ([SR]) (\S+)\s+age\s+(-?[\d.]+) s\s+dt\s+(?:-|-?[\d.]+ ms)\s+args (.*)$")
+    parsed = [row_re.match(l) for l in rows]
+    want = min(50, total) if total >= 0 else -1
+    check(f"{label}: the last-frames block has a header and min(50, frames in + out) = {want} frame lines", len(head) == 1 and len(parsed) == want and all(parsed),
+          (len(head), len(rows), want, rows[:2]))
+    if parsed and all(parsed):
+        check(f"{label}: the last frame in the block is the server's error, received, with its text", parsed[-1].group(1) == "R" and parsed[-1].group(2) == "error" and KICK_CLOSE_TEXT in parsed[-1].group(4),
+              parsed[-1].group(0)[:160])
+        check(f"{label}: the frames' ages are non-negative and run oldest first", all(float(m.group(3)) >= 0 for m in parsed) and all(float(a.group(3)) >= float(b.group(3)) for a, b in zip(parsed, parsed[1:])),
+              [m.group(3) for m in parsed[:4]])
     check(f"{label}: the server's error text is the drop reason", any(f"disconnected from server: {KICK_CLOSE_TEXT} (000000)" in l for l in lines),
           [l for l in lines if "disconnected from server" in l][:2])
     screen = [l for l in lines if "[ui log] error screen" in l]

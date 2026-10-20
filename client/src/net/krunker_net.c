@@ -706,7 +706,7 @@ static void tail_text(char *out, const size_t n, const char *text) {
 // server's error text and its Close reason (names and server text only: no ids, no tokens). K.lock.
 static void socket_tail(char *out, const size_t n, const char *server_reason) {
     char sent[sizeof(K.link.last_sent)], recv[sizeof(K.link.last_recv)], error[sizeof(K.link.error_text)];
-    int error_seen;
+    int error_seen, you_gone, locked, round_ended, own_player;
     double input_ms;
     pthread_mutex_lock(&K.lock);
     snprintf(sent, sizeof(sent), "%s", K.link.last_sent);
@@ -714,6 +714,13 @@ static void socket_tail(char *out, const size_t n, const char *server_reason) {
     snprintf(error, sizeof(error), "%s", K.link.error_text);
     error_seen = K.link.error_seen;
     input_ms = K.link.last_input_ms;
+    // the gates that silence our "q" windows (krunker_link_inputs_paused, recon.c client_recon_sending): our
+    // player is gone since the last init / switch (you_gone), the lock (locked), the round is over (round_ended),
+    // and whether we have an own player at all (my_sid: our "0" arrived)
+    you_gone = K.link.you_gone;
+    locked = K.link.locked;
+    round_ended = K.link.round_ended;
+    own_player = K.link.my_sid >= 0;
     pthread_mutex_unlock(&K.lock);
     char input[48], sent_q[24], recv_q[24], error_q[160], close_q[160];
     if (input_ms < 0) snprintf(input, sizeof(input), "last input never");
@@ -723,7 +730,30 @@ static void socket_tail(char *out, const size_t n, const char *server_reason) {
     if (error_seen) snprintf(error_q, sizeof(error_q), "\"%s\"", error);
     else snprintf(error_q, sizeof(error_q), "none");
     tail_text(close_q, sizeof(close_q), server_reason);
-    snprintf(out, n, ", %s, last sent %s, last received %s, server error %s, close reason %s", input, sent_q, recv_q, error_q, close_q);
+    snprintf(out, n, ", %s, last sent %s, last received %s, server error %s, close reason %s, gate you_gone=%d locked=%d round_ended=%d own_player=%d",
+             input, sent_q, recv_q, error_q, close_q, you_gone, locked, round_ended, own_player);
+}
+
+// The last frames of the link (KrunkerLinkRecent, krunker_link.h), oldest first, one line each after the close line: the
+// age (s) before the close and the time since the frame before (dt, ms), then the frame's direction, wire name and
+// arguments. Copied under K.lock. Console logs only.
+static void socket_recent(void) {
+    KrunkerLinkRecent frames[KRUNKER_LINK_RECENT];
+    unsigned total, first;
+    pthread_mutex_lock(&K.lock);
+    total = K.link.recent_total;
+    first = total > KRUNKER_LINK_RECENT ? total - KRUNKER_LINK_RECENT : 0;
+    for (unsigned k = first; k < total; k++) frames[k - first] = K.link.recent[k % KRUNKER_LINK_RECENT];
+    pthread_mutex_unlock(&K.lock);
+    const double now = link_now_ms(NULL);
+    printf("[krunker] last %u frames before the close (oldest first; age: s before the close; dt: ms since the frame before):\n",
+           total - first);
+    for (unsigned k = first; k < total; k++) {
+        const KrunkerLinkRecent *r = &frames[k - first];
+        if (k == first) printf("[krunker]   %c %-8s age %7.3f s  dt      -  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0, r->args);
+        else printf("[krunker]   %c %-8s age %7.3f s  dt %6.1f ms  args %s\n", r->dir, r->type, (now - r->t_ms) / 1000.0,
+                    r->t_ms - frames[k - first - 1].t_ms, r->args);
+    }
 }
 
 // The socket ended (any thread). reason: the close reason (logs, the drop text); message: the
@@ -738,6 +768,7 @@ static void socket_closed(const int code, const char *reason, const char *failed
     socket_tail(tail, sizeof(tail), server_reason);
     printf("[krunker] socket closed (code %d%s%s): %u frames in, %u out, %u cheat checks answered, %u unanswered%s\n", code,
            reason && reason[0] ? ": " : "", reason ? reason : "", K.link.frames_in, K.link.frames_out, K.link.cc_answered, K.link.cc_failed, tail);
+    socket_recent();
     if (K.connected) {
         K.connected = 0;
         client_net_set_drop(client, "closed", code, "krunker.io closed the connection (code %d%s%s)", code, reason && reason[0] ? ": " : "",

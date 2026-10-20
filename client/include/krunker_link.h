@@ -231,6 +231,17 @@ typedef struct {
     int carrier; // sid, 0 none
 } KrunkerLinkFlag;
 
+// The last frames of the link, for the disconnect log (krunker_net.c socket_closed): every frame sent ("S") and received
+// ("R") with its wire name, its arguments as JSON (cut at the end) and the io clock it left or arrived at. Logs only: it
+// records nothing that changes what we send. KRUNKER_LINK_RECENT frames are kept, the oldest dropped.
+#define KRUNKER_LINK_RECENT 50
+typedef struct {
+    char dir;        // 'S' sent, 'R' received
+    char type[16];   // the wire name
+    char args[96];   // the arguments as JSON ("" none), cut with "..." when longer
+    double t_ms;     // the io clock (ms) when it left or arrived
+} KrunkerLinkRecent;
+
 typedef struct {
     KrunkerLinkIO io;
     KrunkerSession codec;           // ahNum (krunker_proto.h)
@@ -325,6 +336,13 @@ typedef struct {
     char last_sent[16], last_recv[16];
     char error_text[128];
     int error_seen;
+    // the disconnect log's gate state (krunker_net.c socket_closed) and the last frames: round_ended is the round over
+    // since the last "END" (cleared by "init"); the gates that silence our input are you_gone, locked and no own player
+    // (my_sid < 0). recent: a ring of KRUNKER_LINK_RECENT frames, recent_total counts every one (the newest is
+    // (recent_total - 1) % KRUNKER_LINK_RECENT)
+    int round_ended;
+    KrunkerLinkRecent recent[KRUNKER_LINK_RECENT];
+    unsigned recent_total;
 } KrunkerLink;
 
 // Copies `len` bytes of server or wire text into dst (NUL-terminated, at most dst_len - 1 bytes), with every byte
