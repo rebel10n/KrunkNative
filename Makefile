@@ -138,13 +138,13 @@ run: build-client ## Run the debug client (ARGS="--offline" MAP=<name>; VSYNC=1 
 	fi
 	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) $(RUN_PERF) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
-# The launcher (launcher/, doc/backend.md 9.8): updates check + game content sync, then client_bin.
+# The launcher (BoxOffice, launcher/, doc/backend.md 9.8): updates check + game content sync, then client_bin.
 # The dev build has no kn-install.json, so it never replaces the build; content syncs into ./assets.
 launcher: build ## Run the debug launcher (ARGS="--cli --no-update -- --offline"; UPDATES_URL=off skips the server)
-	cd $(DEBUG_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./krunknative $(ARGS)
+	cd $(DEBUG_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./BoxOffice $(ARGS)
 
 launcher-release: release ## Run the release launcher (ARGS=...)
-	cd $(RELEASE_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./krunknative $(ARGS)
+	cd $(RELEASE_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./BoxOffice $(ARGS)
 
 run-release: release ## Run the release client
 	cd $(RELEASE_DIR) && $(RUN_PERF) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)

@@ -78,13 +78,6 @@ int install_root_chdir(void) {
     if (!slash) return 0;
     *slash = 0;
 
-#ifdef __APPLE__
-    // <name>.app/Contents/MacOS/<exe>: ui/ (and kn-install.json) live in Contents/Resources
-    if (ends_with(root, "/Contents/MacOS") && strlen(root) + 16 < sizeof(root)) {
-        strcpy(root + strlen(root) - strlen("MacOS"), "Resources");
-    }
-#endif
-
     char ui[PATH_MAX + 4];
     snprintf(ui, sizeof(ui), "%s/ui", root);
     if (!is_dir(ui) || chdir(root) != 0) return 0;

@@ -27,7 +27,7 @@
 typedef enum { DS_OS_LINUX, DS_OS_WINDOWS, DS_OS_MAC } DsOs;
 
 typedef struct {
-    const char *id;   // krunknative-server-<id>.<ext> (package-server.sh platforms)
+    const char *id;   // BoxOffice-server-<id>.<ext> (package-server.sh platforms)
     DsOs os;
     const char *ext;  // tar.gz | zip
     const char *name; // the row / box title
@@ -36,17 +36,17 @@ typedef struct {
 
 // release.yml's release-notes rows, in its order
 static const DsPkg PKGS[] = {
-    {"linux-x86_64", DS_OS_LINUX, "tar.gz", "Linux x86_64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS"},
-    {"linux-x86_64-bullseye", DS_OS_LINUX, "tar.gz", "Linux x86_64 (Debian 11)", "Debian 11 and other glibc 2.31 systems (OpenSSL 1.1)"},
-    {"windows-x86_64", DS_OS_WINDOWS, "zip", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip"},
-    {"macos-arm64", DS_OS_MAC, "tar.gz", "macOS (Apple silicon)", "macOS on M1 and later"},
+    {"linux-x64", DS_OS_LINUX, "tar.gz", "Linux x86_64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS"},
+    {"linux-x64-polyfilled", DS_OS_LINUX, "tar.gz", "Linux x86_64 (any distro)", "glibc 2.17+ (Debian 11, Ubuntu 20.04, CentOS 7 and newer). No libcurl: no https:// finder, so it serves LAN or http:// players"},
+    {"windows-x64", DS_OS_WINDOWS, "zip", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip"},
+    {"macos-arm64", DS_OS_MAC, "zip", "macOS (Apple silicon)", "macOS on M1 and later"},
 };
 #define PKG_COUNT ((int) (sizeof(PKGS) / sizeof(PKGS[0])))
 
 // A package's requirements in the page's language (dynamic keys, listed for i18n_lint.py):
-//   I18N("kn.dserver.pkg.linux-x86_64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS")
-//   I18N("kn.dserver.pkg.linux-x86_64-bullseye", "Debian 11 and other glibc 2.31 systems (OpenSSL 1.1)")
-//   I18N("kn.dserver.pkg.windows-x86_64", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip")
+//   I18N("kn.dserver.pkg.linux-x64", "Debian 12+, Ubuntu 22.04+ (OpenSSL 3): the one for a VPS")
+//   I18N("kn.dserver.pkg.linux-x64-polyfilled", "Any x86_64 Linux (glibc 2.17+). No libcurl: no https:// finder, so it serves LAN or http:// players")
+//   I18N("kn.dserver.pkg.windows-x64", "Windows 10 and 11, 64-bit: the DLLs it needs are in the zip")
 //   I18N("kn.dserver.pkg.macos-arm64", "macOS on M1 and later")
 static const char *pkg_desc(const DsPkg *p) {
     char key[64];
@@ -92,7 +92,7 @@ static void ds_link(StrBuf *sb, const char *cls, const char *url, const char *la
 }
 
 static void pkg_url(const DsPkg *p, const char *suffix, char *out, const size_t n) {
-    snprintf(out, n, DS_BASE "krunknative-server-%s.%s%s", p->id, p->ext, suffix);
+    snprintf(out, n, DS_BASE "BoxOffice-server-%s.%s%s", p->id, p->ext, suffix);
 }
 
 static const char *os_icon(const DsOs os) {
@@ -186,17 +186,17 @@ static void downloads(StrBuf *sb) {
         snprintf(ext, sizeof(ext), ".%s", rec->ext);
         i18n_trf(label, sizeof(label), "kn.download.button", "Download {0}", 1, I18N_ARGV(ext));
         ds_link(sb, "knDlBtn", url, label);
-        pkg_url(rec, ".sha256", url, sizeof(url));
-        ds_link(sb, "knDlBtn knDlAlt", url, ".sha256");
+        snprintf(url, sizeof(url), DS_BASE "SHA256SUMS"); // one checksum file for the whole release
+        ds_link(sb, "knDlBtn knDlAlt", url, "SHA256SUMS");
         sb_append(sb, "</div><div class=\"knDlHow\">");
         if (rec->os == DS_OS_WINDOWS) {
-            text(sb, I18N("kn.dserver.howWindows", "Unzip it anywhere, edit {2}cfg\\server.cfg{3} and run {0}server_bin.exe{1}. "
+            text(sb, I18N("kn.dserver.howWindows", "Unzip it into a folder of its own, edit {2}cfg\\server.cfg{3} and run {0}server_bin.exe{1}. "
                                                    "Allow it when Windows Firewall asks (private and public networks)."));
         } else if (rec->os == DS_OS_MAC) {
-            text(sb, I18N("kn.dserver.howMac", "Unpack it, edit {2}cfg/server.cfg{3} and run {2}./server_bin{3} in Terminal. "
+            text(sb, I18N("kn.dserver.howMac", "Unpack it into a folder of its own, edit {2}cfg/server.cfg{3} and run {2}./server_bin{3} in Terminal. "
                                                "It is not notarized: the first time, run {2}xattr -d com.apple.quarantine server_bin *.dylib{3} in its folder."));
         } else {
-            text(sb, I18N("kn.dserver.howLinux", "Unpack it, edit {2}cfg/server.cfg{3} and run {2}./server_bin{3}. It needs libcurl and OpenSSL: "
+            text(sb, I18N("kn.dserver.howLinux", "Unpack it into a folder of its own, edit {2}cfg/server.cfg{3} and run {2}./server_bin{3}. It needs libcurl and OpenSSL: "
                                                  "{2}sudo apt install libcurl4 libssl3 libcrypt1{3}."));
         }
         sb_append(sb, "</div>");
@@ -219,8 +219,6 @@ static void downloads(StrBuf *sb) {
         pkg_url(p, "", url, sizeof(url));
         snprintf(label, sizeof(label), ".%s", p->ext);
         ds_link(sb, "knDlLink", url, label);
-        pkg_url(p, ".sha256", url, sizeof(url));
-        ds_link(sb, "knDlLink", url, ".sha256");
         sb_append(sb, "</div></div>");
     }
     sb_appendf(sb, "<div class=\"knDlRow%s\">%s<div class=\"knDlRowName\">%s</div>"
@@ -236,15 +234,15 @@ static void downloads(StrBuf *sb) {
 
 static void quick_start(StrBuf *sb) {
     heading(sb, "knDsQuick", I18N("kn.dserver.quick", "Quick start"));
-    step(sb, 1, I18N("kn.dserver.quick1", "Download your platform's package above and unpack it anywhere."));
+    step(sb, 1, I18N("kn.dserver.quick1", "Download your platform's package above and unpack it into a folder of its own."));
     step(sb, 2, I18N("kn.dserver.quick2", "Open {2}cfg/server.cfg{3} and set at least {2}hostname{3} and, on a public server, "
                                           "{2}public_ip{3} (the address players connect to). Every key is explained in {2}server.cfg.example{3}."));
     step(sb, 3, I18N("kn.dserver.quick3", "Run {2}./server_bin{3} in that folder ({2}server_bin.exe{3} on Windows). Or paste the command from "
                                           "Host Game's last step: it carries the map, mode and rules you picked."));
     step(sb, 4, I18N("kn.dserver.quick4", "Open port {0}21015{1} for TCP and UDP (below), then join from another network: "
                                           "Servers, Direct Connect, {2}your-ip:" DS_PORT "{3}."));
-    code(sb, "tar -xzf krunknative-server-linux-x86_64.tar.gz\n"
-             "cd krunknative-server-linux-x86_64\n"
+    code(sb, "mkdir boxoffice-server && tar -xzf BoxOffice-server-linux-x64.tar.gz -C boxoffice-server\n"
+             "cd boxoffice-server\n"
              "nano cfg/server.cfg      # hostname, public_ip, mapcycle, mode\n"
              "./server_bin             # ./server_bin --help lists every flag");
     para(sb, I18N("kn.dserver.console", "The window it runs in is its console: {2}status{3}, {2}players{3}, {2}kick{3}, {2}map{3}, {2}say{3}, "
@@ -341,8 +339,8 @@ static void vps(StrBuf *sb) {
     sb_append(sb, "</div>");
     para(sb, I18N("kn.dserver.vpsSetup", "On the VPS (Ubuntu or Debian), as a normal user:"));
     code(sb, "sudo apt install -y libcurl4 libssl3 libcrypt1 tmux\n"
-             "curl -LO " DS_BASE "krunknative-server-linux-x86_64.tar.gz\n"
-             "tar -xzf krunknative-server-linux-x86_64.tar.gz && cd krunknative-server-linux-x86_64\n"
+             "curl -LO " DS_BASE "BoxOffice-server-linux-x64.tar.gz\n"
+             "mkdir boxoffice-server && tar -xzf BoxOffice-server-linux-x64.tar.gz -C boxoffice-server && cd boxoffice-server\n"
              "nano cfg/server.cfg      # hostname, public_ip = the VPS address, finder_url\n"
              "sudo ufw allow " DS_PORT "\n"
              "tmux new -s krunker ./server_bin      # detach: Ctrl+B then D; back: tmux attach -t krunker");

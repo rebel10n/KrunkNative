@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The game content bundle for the native client packages (tools/release/package-client.sh):
-#   <out>/krunknative-assets-<version>.tar.gz (+ .sha256)   members assets/..., unpack into an install root
-#   <out>/krunknative-assets-<version>.manifest            sha256sum list of every file (also inside, as
+#   <out>/BoxOffice-assets-<version>.tar.gz (+ .sha256)     members assets/..., unpack into an install root
+#   <out>/BoxOffice-assets-<version>.manifest              sha256sum list of every file (also inside, as
 #                                                          assets/kn-assets.sha256)
 # <version> = the first 16 hex digits of the manifest's sha256: it changes exactly when the content does.
 # The archive is reproducible: the same files give the same bytes (GNU tar: sorted, owner 0, fixed
@@ -73,7 +73,7 @@ trap 'rm -rf "$work"' EXIT
 manifest > "$work/manifest"
 [ -s "$work/manifest" ] || { echo "no files in $src" >&2; exit 1; }
 version="$(version_of "$work/manifest")"
-name="krunknative-assets-$version"
+name="BoxOffice-assets-$version"
 files="$(wc -l < "$work/manifest")"
 stat_size=(stat -L -c %s)
 stat -L -c %s / > /dev/null 2>&1 || stat_size=(stat -L -f %z) # BSD stat

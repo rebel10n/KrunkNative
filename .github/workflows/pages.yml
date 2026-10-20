@@ -44,7 +44,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: KrunkNative-web-deployed
+          name: BoxOffice-web-deployed
           path: dist/web
           run-id: ${{ steps.run.outputs.id }}
           github-token: ${{ github.token }}

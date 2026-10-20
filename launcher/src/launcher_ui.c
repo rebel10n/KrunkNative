@@ -254,7 +254,7 @@ static void set_window_icon(GLFWwindow *window, const char *ui_dir) {
 
 LauncherUi *launcher_ui_open(const char *ui_dir) {
     int argc = 1;
-    char *argv[] = {"krunknative", NULL};
+    char *argv[] = {"BoxOffice", NULL};
     headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1: EGL pbuffer (tests, captures)
     if (!headless_glfw_init()) return NULL;
 #if defined(KRUNKNATIVE_GL_ANGLE)

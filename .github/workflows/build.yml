@@ -106,7 +106,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-linux-x86_64
+          name: BoxOffice-linux-x64
           path: dist/**
           if-no-files-found: error
 
@@ -208,7 +208,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-windows-x86_64-mingw
+          name: BoxOffice-windows-x64-mingw
           path: dist/**
           if-no-files-found: error
 
@@ -323,7 +323,7 @@ jobs:
         if: matrix.gl == 'desktop' || steps.angle.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
+          name: BoxOffice-macos-${{ matrix.arch }}${{ matrix.gl == 'desktop' && '-desktop-gl' || '' }}
           path: dist/**
           if-no-files-found: error
 
@@ -400,7 +400,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-web
+          name: BoxOffice-web
           path: stage/web/**
           if-no-files-found: error
 
@@ -416,7 +416,7 @@ jobs:
       - name: Download web build
         uses: actions/download-artifact@v8
         with:
-          name: KrunkNative-web
+          name: BoxOffice-web
           path: dist/web
 
       - uses: actions/setup-java@v5
@@ -453,7 +453,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-android-debug
+          name: BoxOffice-android-debug
           path: |
             platform/android/apk/app-debug.apk
             platform/android/apk/app-strike-debug.apk
@@ -470,7 +470,7 @@ jobs:
       - name: Download web build
         uses: actions/download-artifact@v8
         with:
-          name: KrunkNative-web
+          name: BoxOffice-web
           path: dist/web
 
       - name: Install XcodeGen
@@ -497,7 +497,7 @@ jobs:
       - name: Upload simulator app
         uses: actions/upload-artifact@v7
         with:
-          name: KrunkNative-ios-simulator
+          name: BoxOffice-ios-simulator
           path: |
             platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkNative.app
             platform/ios/build/Build/Products/Debug-iphonesimulator/KrunkStrike.app

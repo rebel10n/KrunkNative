@@ -3,7 +3,7 @@
 
     python3 -I launcher/tests/launcher_online_e2e.py <build dir> [--keep]
 
-A fresh install (client_bin + the launcher + kn-install.json, ui/ linked, game content as
+A fresh install (BoxOffice, runtime/client_bin + runtime/kn-install.json, runtime/ui linked, game content as
 read-only symlinks in a scratch dir) is started through the launcher, headless, with no updates
 (KRUNKNATIVE_UPDATES_URL=off). One stub HTTP server on a free port (kn_proto.free_ports) plays
 the server finder (GET /servers) and the matchmaker (/mm/status, /mm/ping-list, /mm/seek-game,
@@ -129,13 +129,15 @@ def run(cmd, env, cwd, timeout=150):
 
 
 def make_install(tmp, build):
+    # the installed layout (package-client.sh): <inst>/BoxOffice and <inst>/runtime/{client_bin, ui/, kn-install.json}
     inst = os.path.join(tmp, "install")
-    os.makedirs(inst)
-    for exe in ("client_bin", "krunknative"):
-        shutil.copy2(os.path.join(build, exe), os.path.join(inst, exe))
-    os.symlink(os.path.join(REPO, "ui"), os.path.join(inst, "ui"))
-    with open(os.path.join(inst, "kn-install.json"), "w") as f:
-        json.dump({"format": 1, "platform": "linux-amd64", "package": "tar.gz", "channel": "latest", "root": "."}, f)
+    rt = os.path.join(inst, "runtime")
+    os.makedirs(rt)
+    shutil.copy2(os.path.join(build, "BoxOffice"), os.path.join(inst, "BoxOffice"))
+    shutil.copy2(os.path.join(build, "client_bin"), os.path.join(rt, "client_bin"))
+    os.symlink(os.path.join(REPO, "ui"), os.path.join(rt, "ui"))
+    with open(os.path.join(rt, "kn-install.json"), "w") as f:
+        json.dump({"format": 1, "platform": "linux-x64", "package": "tar.gz", "channel": "latest", "root": ".."}, f)
     # the game content: read-only symlinks into the repository's tree, in a scratch dir (never
     # the checkout itself: a content sync rewrites and deletes files there)
     content = os.path.join(tmp, "content")
@@ -151,7 +153,7 @@ def main():
     ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     build = os.path.abspath(a.build)
-    for b in ("client_bin", "krunknative"):
+    for b in ("client_bin", "BoxOffice"):
         if not os.path.exists(os.path.join(build, b)):
             sys.exit(f"missing {build}/{b} (build the client_bin and kn_launcher targets)")
     if not os.path.exists(os.path.join(REPO, "assets", "css", "fonts", "font2.ttf")):
@@ -189,7 +191,7 @@ def main():
         with open(script, "w") as f:
             f.write("\n".join(lines) + "\n")
         env1 = dict(env, KRUNKNATIVE_INPUT_SCRIPT=script)
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--assets-dir", content], env1, tmp)
+        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--assets-dir", content], env1, tmp)
         reqs = stub.take()
         paths = [p for p, _, _ in reqs]
         for line in out.splitlines():
@@ -214,7 +216,7 @@ def main():
         stub.finder_status = 503
         with open(script, "w") as f:
             f.write("0 menu\n3000 call showWindow 2\n6000 vis @err finderError\n7000 quit\n")
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--assets-dir", content], env1, tmp)
+        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--assets-dir", content], env1, tmp)
         stub.take()
         check(re.search(r"vis t=\d+ @err finderError=1", out) is not None, "the browser shows the finder error")
         check(f"[finder] {finder_url} failed: HTTP 503" in out, "the log names the URL and the reason")
@@ -225,9 +227,9 @@ def main():
         fake_repo = os.path.join(tmp, "repo")
         os.makedirs(os.path.join(fake_repo, ".git"))
         os.makedirs(os.path.join(fake_repo, "assets"))
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--no-launch", "--assets-dir", os.path.join(fake_repo, "assets")], env, tmp)
+        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--no-launch", "--assets-dir", os.path.join(fake_repo, "assets")], env, tmp)
         check(code != 0 and "inside the git checkout" in out, "refused without --allow-checkout-assets")
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--no-launch", "--allow-checkout-assets", "--assets-dir",
+        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--no-launch", "--allow-checkout-assets", "--assets-dir",
                          os.path.join(fake_repo, "assets")], env, tmp)
         check("inside the git checkout" not in out, "allowed with --allow-checkout-assets")
     finally:

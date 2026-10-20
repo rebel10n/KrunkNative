@@ -119,12 +119,11 @@ static const char *MANIFEST =
     "\"build\":{\"describe\":\"v1.0.0-90-gABCDEF1\",\"commit\":\"ABCDEF1234567890abcdef1234567890abcdef12\","
     "\"commit_time\":1760000000,\"build_time\":\"2026-10-12T00:00:00Z\",\"protocol\":\"1.3\"},"
     "\"platforms\":{"
-    "\"linux-amd64\":{\"update\":{\"url\":\"builds/abcdef123456/krunknative-client-linux-amd64.tar.gz\","
+    "\"linux-x64\":{\"update\":{\"url\":\"builds/abcdef123456/BoxOffice-linux-x64.tar.gz\","
     "\"sha256\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"size\":1234},"
-    "\"downloads\":{\"tar.gz\":\"https://github.com/rebel10n/KrunkNative/releases/download/client-latest/krunknative-client-linux-amd64.tar.gz\","
-    "\"deb\":\"https://github.com/rebel10n/KrunkNative/releases/download/client-latest/krunknative-client-linux-amd64.deb\"}},"
-    "\"windows-amd64\":{\"update\":{\"url\":\"builds/abcdef123456/krunknative-client-windows-amd64.zip\",\"sha256\":\"short\",\"size\":5},"
-    "\"downloads\":{\"zip\":\"builds/abcdef123456/krunknative-client-windows-amd64.zip\"}}},"
+    "\"downloads\":{\"tar.gz\":\"https://github.com/rebel10n/KrunkNative/releases/download/client-latest/BoxOffice-linux-x64.tar.gz\"}},"
+    "\"windows-x64\":{\"update\":{\"url\":\"builds/abcdef123456/BoxOffice-windows-x64.zip\",\"sha256\":\"short\",\"size\":5},"
+    "\"downloads\":{\"zip\":\"builds/abcdef123456/BoxOffice-windows-x64.zip\"}}},"
     "\"assets\":{\"version\":\"0123456789abcdef\",\"manifest\":\"../assets/0123456789abcdef.json\","
     "\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size\":99,"
     "\"objects\":\"../assets/objects\",\"files\":3,\"bytes\":300,\"packaged\":[\"shaders/b.frag\",\"maps/a.json\",\"../x\"]}}";
@@ -140,24 +139,24 @@ static void test_manifest(void) {
     CHECK(m.build.proto_major == 1 && m.build.proto_minor == 3);
     CHECK(m.grace_s == 24 * 3600);
     CHECK(m.platform_count == 2);
-    const KnUpdatePlatform *p = kn_update_manifest_platform(&m, "linux-amd64");
+    const KnUpdatePlatform *p = kn_update_manifest_platform(&m, "linux-x64");
     CHECK(p && p->has_update);
     if (p) {
-        CHECK_STR(p->update.url, "https://assets.krunk.io/updates/client/builds/abcdef123456/krunknative-client-linux-amd64.tar.gz");
+        CHECK_STR(p->update.url, "https://assets.krunk.io/updates/client/builds/abcdef123456/BoxOffice-linux-x64.tar.gz");
         CHECK_STR(p->update.sha256, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         CHECK(p->update.size == 1234);
-        CHECK(p->link_count == 2);
+        CHECK(p->link_count == 1); // the tar.gz only: Linux ships no .deb
     }
-    const KnUpdatePlatform *w = kn_update_manifest_platform(&m, "windows-amd64");
+    const KnUpdatePlatform *w = kn_update_manifest_platform(&m, "windows-x64");
     CHECK(w && !w->has_update); // a bad sha256 is no update
-    CHECK(!kn_update_manifest_platform(&m, "macos-aarch64"));
-    CHECK_STR(kn_update_download_url(&m, "linux-amd64", "deb"),
-              "https://github.com/rebel10n/KrunkNative/releases/download/client-latest/krunknative-client-linux-amd64.deb");
-    CHECK_STR(kn_update_download_url(&m, "linux-amd64", "rpm"), // no rpm: the archive
-              "https://github.com/rebel10n/KrunkNative/releases/download/client-latest/krunknative-client-linux-amd64.tar.gz");
-    CHECK_STR(kn_update_download_url(&m, "windows-amd64", NULL),
-              "https://assets.krunk.io/updates/client/builds/abcdef123456/krunknative-client-windows-amd64.zip");
-    CHECK_STR(kn_update_download_url(&m, "macos-aarch64", NULL), "https://github.com/rebel10n/KrunkNative/releases/tag/client-latest");
+    CHECK(!kn_update_manifest_platform(&m, "macos-arm64"));
+    CHECK_STR(kn_update_download_url(&m, "linux-x64", "tar.gz"),
+              "https://github.com/rebel10n/KrunkNative/releases/download/client-latest/BoxOffice-linux-x64.tar.gz");
+    CHECK_STR(kn_update_download_url(&m, "linux-x64", "zip"), // no zip for Linux: the archive
+              "https://github.com/rebel10n/KrunkNative/releases/download/client-latest/BoxOffice-linux-x64.tar.gz");
+    CHECK_STR(kn_update_download_url(&m, "windows-x64", NULL),
+              "https://assets.krunk.io/updates/client/builds/abcdef123456/BoxOffice-windows-x64.zip");
+    CHECK_STR(kn_update_download_url(&m, "macos-arm64", NULL), "https://github.com/rebel10n/KrunkNative/releases/tag/client-latest");
     CHECK_STR(m.assets.version, "0123456789abcdef");
     CHECK_STR(m.assets.manifest.url, "https://assets.krunk.io/updates/assets/0123456789abcdef.json");
     CHECK_STR(m.assets.objects, "https://assets.krunk.io/updates/assets/objects/");
@@ -352,23 +351,24 @@ static void test_assets(void) {
 
 static void test_marker(void) {
     KnInstallMarker m;
-    const char *tgz = "{\"format\":1,\"platform\":\"linux-amd64\",\"package\":\"tar.gz\",\"channel\":\"latest\",\"root\":\".\"}";
+    const char *tgz = "{\"format\":1,\"platform\":\"linux-x64\",\"package\":\"tar.gz\",\"channel\":\"latest\",\"root\":\"..\"}";
     CHECK(kn_install_marker_parse(tgz, strlen(tgz), &m) && kn_install_self_updatable(&m));
-    CHECK_STR(m.platform, "linux-amd64");
-    const char *deb = "{\"format\":1,\"platform\":\"linux-amd64\",\"package\":\"deb\"}";
+    CHECK_STR(m.platform, "linux-x64");
+    const char *deb = "{\"format\":1,\"platform\":\"linux-x64\",\"package\":\"deb\"}";
     CHECK(kn_install_marker_parse(deb, strlen(deb), &m) && !kn_install_self_updatable(&m));
-    CHECK_STR(m.root, ".");
+    CHECK_STR(m.root, "."); // no "root" in that marker: the default, its own directory
     CHECK_STR(m.channel, "latest");
-    const char *app = "{\"format\":1,\"platform\":\"macos-aarch64\",\"package\":\"app\",\"root\":\"../..\"}";
-    CHECK(kn_install_marker_parse(app, strlen(app), &m) && !strcmp(m.root, "../.."));
+    const char *app = "{\"format\":1,\"platform\":\"macos-arm64\",\"package\":\"zip\",\"root\":\"../../..\"}";
+    CHECK(kn_install_marker_parse(app, strlen(app), &m) && !strcmp(m.root, "../../.."));
     const char *evil = "{\"format\":1,\"root\":\"/etc\"}";
     CHECK(!kn_install_marker_parse(evil, strlen(evil), &m));
     const char *evil2 = "{\"format\":1,\"channel\":\"../x\"}";
     CHECK(!kn_install_marker_parse(evil2, strlen(evil2), &m));
     CHECK(!kn_install_marker_parse("{}", 2, &m));
     CHECK(kn_update_platform_default()[0]);
-    CHECK_STR(kn_update_archive_kind("windows-amd64"), "zip");
-    CHECK_STR(kn_update_archive_kind("macos-aarch64"), "tar.gz");
+    CHECK_STR(kn_update_archive_kind("windows-x64"), "zip");
+    CHECK_STR(kn_update_archive_kind("macos-arm64"), "zip");
+    CHECK_STR(kn_update_archive_kind("linux-x64"), "tar.gz");
 }
 
 // ------------------------------------------------------------------ archives
@@ -524,11 +524,13 @@ static void write_file(const char *path, const char *content) {
 static void test_archives(void) {
     char dest[1200], p[1400];
     Buf tar = {0};
-    tar_entry(&tar, "krunknative-client-linux-amd64/", '5', 0755, NULL, NULL);
-    tar_entry(&tar, "krunknative-client-linux-amd64/client_bin", '0', 0755, "#!new client", NULL);
-    tar_entry(&tar, "krunknative-client-linux-amd64/ui/index.html", '0', 0644, "<html>", NULL);
-    tar_entry(&tar, "krunknative-client-linux-amd64/assets/shaders/a.vert", '0', 0644, "void main(){}", NULL);
-    tar_entry(&tar, "krunknative-client-linux-amd64/libx.so", '2', 0777, NULL, "libx.so.1");
+    // a package is flat: BoxOffice and runtime/ at the top, no wrapping folder
+    tar_entry(&tar, "BoxOffice", '0', 0755, "#!launcher", NULL);
+    tar_entry(&tar, "runtime/", '5', 0755, NULL, NULL);
+    tar_entry(&tar, "runtime/client_bin", '0', 0755, "#!new client", NULL);
+    tar_entry(&tar, "runtime/ui/index.html", '0', 0644, "<html>", NULL);
+    tar_entry(&tar, "runtime/assets/shaders/a.vert", '0', 0644, "void main(){}", NULL);
+    tar_entry(&tar, "runtime/libx.so", '2', 0777, NULL, "libx.so.1");
     static const unsigned char end[1024] = {0};
     put(&tar, end, 1024);
     Buf gz = gzip_stored(&tar);
@@ -536,8 +538,10 @@ static void test_archives(void) {
     char err[256] = "";
     CHECK(kn_archive_extract_mem(gz.d, gz.n, dest, err, sizeof(err)));
     if (err[0]) fprintf(stderr, "  tar.gz: %s\n", err);
-    snprintf(p, sizeof(p), "%s/client_bin", dest);
+    snprintf(p, sizeof(p), "%s/runtime/client_bin", dest);
     CHECK(file_is(p, "#!new client"));
+    snprintf(p, sizeof(p), "%s/BoxOffice", dest);
+    CHECK(file_is(p, "#!launcher"));
 #ifndef _WIN32
     char out[64];
     char *argv[] = {"/bin/sh", "-c", "", NULL};
@@ -545,12 +549,12 @@ static void test_archives(void) {
     snprintf(cmd, sizeof(cmd), "test -x '%s'", p);
     argv[2] = cmd;
     CHECK(kn_proc_run("/bin/sh", argv, 5000, out, sizeof(out)) == 0); // executable bit kept
-    snprintf(p, sizeof(p), "%s/libx.so", dest);
+    snprintf(p, sizeof(p), "%s/runtime/libx.so", dest);
     CHECK(kn_fs_is_symlink(p));
 #endif
-    snprintf(p, sizeof(p), "%s/ui/index.html", dest);
+    snprintf(p, sizeof(p), "%s/runtime/ui/index.html", dest);
     CHECK(file_is(p, "<html>"));
-    snprintf(p, sizeof(p), "%s/assets/shaders/a.vert", dest);
+    snprintf(p, sizeof(p), "%s/runtime/assets/shaders/a.vert", dest);
     CHECK(file_is(p, "void main(){}"));
     free(gz.d);
     free(tar.d);
@@ -603,7 +607,8 @@ static void test_archives(void) {
 static void make_install(KnInstall *in, const char *name) {
     memset(in, 0, sizeof(*in));
     path_in(in->root, sizeof(in->root), name);
-    snprintf(in->marker_dir, sizeof(in->marker_dir), "%s", in->root);
+    snprintf(in->marker_dir, sizeof(in->marker_dir), "%s/runtime", in->root); // the package's runtime/
+    kn_fs_mkdirs(in->marker_dir);
     snprintf(in->exe_dir, sizeof(in->exe_dir), "%s", in->root);
     snprintf(in->state_dir, sizeof(in->state_dir), "%s/.kn-update", in->root);
     kn_fs_mkdirs(in->state_dir);
@@ -618,18 +623,18 @@ static void test_swap(void) {
     KnInstall in;
     make_install(&in, "install");
     char p[KN_PATH_MAX], staged[KN_PATH_MAX];
-    const char *old_files[][2] = {{"krunknative", "old launcher"}, {"client_bin", "old client"}, {"ui/index.html", "old ui"},
-                                  {"ui/gone.html", "removed upstream"}, {"assets/textures/t.png", "content"},
-                                  {"assets/shaders/a.vert", "old shader"}, {"assets/.kn-assets.json", "{}"},
+    const char *old_files[][2] = {{"BoxOffice", "old launcher"}, {"runtime/client_bin", "old client"}, {"runtime/ui/index.html", "old ui"},
+                                  {"runtime/ui/gone.html", "removed upstream"}, {"runtime/assets/textures/t.png", "content"},
+                                  {"runtime/assets/shaders/a.vert", "old shader"}, {"runtime/assets/.kn-assets.json", "{}"},
                                   {"user.cfg", "mine"}};
     for (size_t i = 0; i < sizeof(old_files) / sizeof(old_files[0]); i++) {
         at(p, sizeof(p), &in, old_files[i][0]);
         write_file(p, old_files[i][1]);
     }
     snprintf(staged, sizeof(staged), "%s/staged", in.state_dir);
-    const char *new_files[][2] = {{"krunknative", "new launcher"}, {"client_bin", "new client"}, {"ui/index.html", "new ui"},
-                                  {"ui/added.html", "added"}, {"kn-install.json", "{\"format\":1}"},
-                                  {"assets/shaders/a.vert", "new shader"}, {"server_bin", "new server"}};
+    const char *new_files[][2] = {{"BoxOffice", "new launcher"}, {"runtime/client_bin", "new client"}, {"runtime/ui/index.html", "new ui"},
+                                  {"runtime/ui/added.html", "added"}, {"runtime/kn-install.json", "{\"format\":1}"},
+                                  {"runtime/assets/shaders/a.vert", "new shader"}, {"runtime/server_bin", "new server"}};
     for (size_t i = 0; i < sizeof(new_files) / sizeof(new_files[0]); i++) {
         snprintf(p, sizeof(p), "%s/%s", staged, new_files[i][0]);
         write_file(p, new_files[i][1]);
@@ -637,23 +642,23 @@ static void test_swap(void) {
     char err[256] = "";
     CHECK(kn_install_swap(&in, staged, err, sizeof(err)));
     if (err[0]) fprintf(stderr, "  swap: %s\n", err);
-    at(p, sizeof(p), &in, "client_bin");
+    at(p, sizeof(p), &in, "runtime/client_bin");
     CHECK(file_is(p, "new client"));
-    at(p, sizeof(p), &in, "krunknative");
+    at(p, sizeof(p), &in, "BoxOffice");
     CHECK(file_is(p, "new launcher"));
-    at(p, sizeof(p), &in, "server_bin");
+    at(p, sizeof(p), &in, "runtime/server_bin");
     CHECK(file_is(p, "new server"));
-    at(p, sizeof(p), &in, "ui/index.html");
+    at(p, sizeof(p), &in, "runtime/ui/index.html");
     CHECK(file_is(p, "new ui"));
-    at(p, sizeof(p), &in, "ui/added.html");
+    at(p, sizeof(p), &in, "runtime/ui/added.html");
     CHECK(file_is(p, "added"));
-    at(p, sizeof(p), &in, "ui/gone.html"); // ui/ is replaced as a whole
+    at(p, sizeof(p), &in, "runtime/ui/gone.html"); // ui/ is replaced as a whole
     CHECK(!kn_fs_exists(p));
-    at(p, sizeof(p), &in, "assets/shaders/a.vert"); // the package's own asset file
+    at(p, sizeof(p), &in, "runtime/assets/shaders/a.vert"); // the package's own asset file
     CHECK(file_is(p, "new shader"));
-    at(p, sizeof(p), &in, "assets/textures/t.png"); // game content: untouched
+    at(p, sizeof(p), &in, "runtime/assets/textures/t.png"); // game content: untouched
     CHECK(file_is(p, "content"));
-    at(p, sizeof(p), &in, "assets/.kn-assets.json");
+    at(p, sizeof(p), &in, "runtime/assets/.kn-assets.json");
     CHECK(file_is(p, "{}"));
     at(p, sizeof(p), &in, "user.cfg");
     CHECK(file_is(p, "mine"));
@@ -661,43 +666,43 @@ static void test_swap(void) {
     kn_install_cleanup(&in);
     CHECK(!kn_fs_exists(in.state_dir));
 
-    // a failing swap rolls everything back: "lib" is a file in the root, the package wants lib/x.so
+    // a failing swap rolls everything back: "runtime/lib" is a file, the package wants runtime/lib/x.so
     KnInstall bad;
     make_install(&bad, "install2");
-    at(p, sizeof(p), &bad, "client_bin");
+    at(p, sizeof(p), &bad, "runtime/client_bin");
     write_file(p, "old client");
-    at(p, sizeof(p), &bad, "lib");
+    at(p, sizeof(p), &bad, "runtime/lib");
     write_file(p, "a file");
-    at(p, sizeof(p), &bad, "ui/index.html");
+    at(p, sizeof(p), &bad, "runtime/ui/index.html");
     write_file(p, "old ui");
     snprintf(staged, sizeof(staged), "%s/staged", bad.state_dir);
-    snprintf(p, sizeof(p), "%s/client_bin", staged);
+    snprintf(p, sizeof(p), "%s/runtime/client_bin", staged);
     write_file(p, "new client");
-    snprintf(p, sizeof(p), "%s/ui/index.html", staged);
+    snprintf(p, sizeof(p), "%s/runtime/ui/index.html", staged);
     write_file(p, "new ui");
-    snprintf(p, sizeof(p), "%s/kn-install.json", staged);
+    snprintf(p, sizeof(p), "%s/runtime/kn-install.json", staged);
     write_file(p, "{}");
-    snprintf(p, sizeof(p), "%s/lib/x.so", staged);
+    snprintf(p, sizeof(p), "%s/runtime/lib/x.so", staged);
     write_file(p, "lib");
     err[0] = 0;
     CHECK(!kn_install_swap(&bad, staged, err, sizeof(err)));
     CHECK(err[0] != 0);
-    at(p, sizeof(p), &bad, "client_bin");
+    at(p, sizeof(p), &bad, "runtime/client_bin");
     CHECK(file_is(p, "old client"));
-    at(p, sizeof(p), &bad, "ui/index.html");
+    at(p, sizeof(p), &bad, "runtime/ui/index.html");
     CHECK(file_is(p, "old ui"));
-    at(p, sizeof(p), &bad, "lib");
+    at(p, sizeof(p), &bad, "runtime/lib");
     CHECK(file_is(p, "a file"));
 
     // crash recovery: a journal without its commit line is rolled back at the next start
     KnInstall crash;
     make_install(&crash, "install3");
-    at(p, sizeof(p), &crash, "client_bin");
+    at(p, sizeof(p), &crash, "runtime/client_bin");
     write_file(p, "old client");
     snprintf(staged, sizeof(staged), "%s/staged", crash.state_dir);
     char bak[KN_PATH_MAX], neu[KN_PATH_MAX];
-    snprintf(bak, sizeof(bak), "%s/backup/client_bin", crash.state_dir);
-    snprintf(neu, sizeof(neu), "%s/client_bin", staged);
+    snprintf(bak, sizeof(bak), "%s/backup/runtime/client_bin", crash.state_dir);
+    snprintf(neu, sizeof(neu), "%s/runtime/client_bin", staged);
     write_file(neu, "new client");
     kn_fs_mkdirs_parent(bak);
     kn_fs_rename(p, bak); // B done
@@ -705,7 +710,7 @@ static void test_swap(void) {
     char journal[KN_PATH_MAX];
     snprintf(journal, sizeof(journal), "%s/journal", crash.state_dir);
     char text[KN_PATH_MAX + 64];
-    snprintf(text, sizeof(text), "S %s\nB client_bin\nN client_bin\n", staged);
+    snprintf(text, sizeof(text), "S %s\nB runtime/client_bin\nN runtime/client_bin\n", staged);
     write_file(journal, text);
     CHECK(kn_install_recover(&crash));
     CHECK(file_is(p, "old client"));
@@ -714,9 +719,9 @@ static void test_swap(void) {
     // package assets mirrored into a separate content dir, only where they differ
     KnInstall pk;
     make_install(&pk, "install4");
-    at(p, sizeof(p), &pk, "assets/shaders/a.vert");
+    at(p, sizeof(p), &pk, "runtime/assets/shaders/a.vert");
     write_file(p, "shader v2");
-    at(p, sizeof(p), &pk, "assets/maps/m.json");
+    at(p, sizeof(p), &pk, "runtime/assets/maps/m.json");
     write_file(p, "{}");
     char data[KN_PATH_MAX];
     path_in(data, sizeof(data), "data-assets");
@@ -728,7 +733,7 @@ static void test_swap(void) {
     snprintf(p, sizeof(p), "%s/shaders/a.vert", data);
     CHECK(file_is(p, "shader v2"));
     CHECK(kn_install_package_assets(&pk, data, err, sizeof(err)) == 0); // nothing differs now
-    at(p, sizeof(p), &pk, "assets");
+    at(p, sizeof(p), &pk, "runtime/assets");
     CHECK(kn_install_package_assets(&pk, p, err, sizeof(err)) == 0);    // same dir: nothing
 }
 

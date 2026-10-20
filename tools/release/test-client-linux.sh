@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Runs a Linux client package in a distro container (.github/workflows/client.yml compat matrix,
-# and locally): installs it the way a user would (.tar.gz/.zip unpacked; .deb/.rpm through
-# apt/dnf/yum, which also checks the package's dependencies), runs client_bin/server_bin --version
-# and, with a content dir, a headless offline start on Mesa's llvmpipe (EGL, no display), the
-# `make smoke-native` check: the C UI logic applied its settings and a screenshot was written.
+# and locally): installs it the way a user would (BoxOffice-linux-<arch>.tar.gz unpacked into an empty
+# folder), runs runtime/client_bin and runtime/server_bin --version and BoxOffice --version and, with a
+# content dir, a headless offline start on Mesa's llvmpipe (EGL, no display), the `make smoke-native`
+# check: the C UI logic applied its settings and a screenshot was written.
 #
 # Usage: tools/release/test-client-linux.sh <image> <package> [<content dir>] [--out <dir>]
 #   <image>        debian:buster|bullseye|bookworm|trixie, ubuntu:*, centos:7, almalinux:8|9,
 #                  rockylinux:*, fedora:*, archlinux:latest
-#   <package>      krunknative-client-linux-*.{tar.gz,zip,deb,rpm}
-#   <content dir>  the game content to add (an unpacked krunknative-assets bundle: <dir>/assets/...,
+#   <package>      BoxOffice-linux-<arch>.tar.gz
+#   <content dir>  the game content to add (an unpacked BoxOffice-assets bundle: <dir>/assets/...,
 #                  or an assets/ tree); without it only --version runs (CI has no game content)
 #   --out <dir>    where the screenshot and log go (default: a temp dir, printed)
 #   --brain <url>  KRUNKNATIVE_BRAIN_URL for the headless run (https:// checks TLS + the CA bundle;
@@ -66,9 +66,10 @@ case "$ID" in
                 echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive ;;
         esac
         apt-get update -qq
-        pkgs="ca-certificates"
+        # the desktop libraries of runtime/host-libs.txt (a desktop install has them; a container does not)
+        pkgs="ca-certificates libegl1 libgl1 libglx0 libopengl0 libgbm1 libdrm2 libx11-6 libx11-xcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2 libxrender1 libxcb1 libxcb-render0 libxcb-shm0 libxkbcommon0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libwayland-server0 libpulse0 libdbus-1-3 libudev1 libsystemd0 zlib1g libstdc++6 libgcc-s1"
+        if apt-cache show libssl3t64 > /dev/null 2>&1; then pkgs="$pkgs libssl3t64"; else pkgs="$pkgs libssl3"; fi
         [[ "$PKG" == *.zip ]] && pkgs="$pkgs unzip"
-        [[ "$PKG" == *.deb ]] || pkgs="$pkgs libegl1"
         [ -n "$gl" ] && pkgs="$pkgs libegl-mesa0 libgl1-mesa-dri"
         apt-get install -y -qq --no-install-recommends $pkgs || apt-get install -y -qq --no-install-recommends ${pkgs/libegl1/libegl1-mesa} ;;
     centos|rhel|almalinux|rocky|fedora)
@@ -76,45 +77,41 @@ case "$ID" in
         if [ "$ID" = centos ] && [ "${VERSION_ID%%.*}" = 7 ]; then
             sed -i -e "s|^mirrorlist=|#mirrorlist=|" -e "s|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|" /etc/yum.repos.d/CentOS-*.repo
         fi
-        pkgs="ca-certificates"
+        pkgs="ca-certificates mesa-libEGL libglvnd-opengl libglvnd-glx mesa-libgbm libdrm libX11 libX11-xcb libXcomposite libXcursor libXdamage libXext libXfixes libXi libXinerama libXrandr libXrender libxcb libxkbcommon libwayland-client libwayland-cursor libwayland-egl libwayland-server pulseaudio-libs dbus-libs systemd-libs openssl-libs zlib libstdc++ libgcc"
         [[ "$PKG" == *.zip ]] && pkgs="$pkgs unzip"
-        [[ "$PKG" == *.rpm ]] || pkgs="$pkgs mesa-libEGL"
-        [ -n "$gl" ] && pkgs="$pkgs mesa-libEGL mesa-dri-drivers"
+        [ -n "$gl" ] && pkgs="$pkgs mesa-dri-drivers"
         $pm install -y -q $pkgs ;;
     arch)
-        pacman -Syu --noconfirm --needed libglvnd ${gl:+mesa} unzip ;; # -Syu: no partial upgrades
+        pacman -Syu --noconfirm --needed libglvnd openssl ${gl:+mesa} unzip ;; # -Syu: no partial upgrades
     *) echo "unsupported distro $ID"; RC=1; result install=fail "(distro $ID)" ;;
 esac
 
-root=/opt/krunknative
+# the package is flat: BoxOffice and runtime/ go into an empty folder of their own
+root=/opt/t
+mkdir -p "$root"
 case "$PKG" in
-    *.deb) apt-get install -y -qq --no-install-recommends "/pkg/$PKG" || { RC=1; result install=fail "(apt)"; } ;;
-    *.rpm) $pm install -y -q "/pkg/$PKG" || { RC=1; result install=fail "($pm)"; } ;;
-    *.tar.gz|*.zip)
-        mkdir -p /opt/t
-        case "$PKG" in *.zip) unzip -q "/pkg/$PKG" -d /opt/t ;; *) tar -xzf "/pkg/$PKG" -C /opt/t ;; esac || { RC=1; result install=fail "(unpack)"; }
-        root="$(ls -d /opt/t/*)" ;;
+    *.zip) unzip -q "/pkg/$PKG" -d "$root" || { RC=1; result install=fail "(unpack)"; } ;;
+    *.tar.gz) tar -xzf "/pkg/$PKG" -C "$root" || { RC=1; result install=fail "(unpack)"; } ;;
+    *) RC=1; result install=fail "(not a BoxOffice package)" ;;
 esac
-[ -x "$root/client_bin" ] || { RC=1; result install=fail "(no $root/client_bin)"; }
+[ -x "$root/runtime/client_bin" ] || { RC=1; result install=fail "(no $root/runtime/client_bin)"; }
 
-v="$("$root/client_bin" --version)" && "$root/server_bin" --version || { RC=1; result install=ok version=fail; }
-"$root/client_bin" --voice-info | grep -q '^opus=libopus ' || { RC=1; result install=ok version=fail "(no Opus: voice chat)"; }
-# the launcher (entry point when the package has one): --version needs no display or network
-if [ -x "$root/krunknative" ]; then
-    lv="$("$root/krunknative" --version)" || { RC=1; result install=ok version=fail "(launcher)"; }
-    v="$v; $lv"
-fi
+v="$("$root/runtime/client_bin" --version)" && "$root/runtime/server_bin" --version || { RC=1; result install=ok version=fail; }
+"$root/runtime/client_bin" --voice-info | grep -q '^opus=libopus ' || { RC=1; result install=ok version=fail "(no Opus: voice chat)"; }
+# the launcher (the entry point): --version needs no display or network
+lv="$("$root/BoxOffice" --version)" || { RC=1; result install=ok version=fail "(launcher)"; }
+v="$v; $lv"
 echo "$v"
 if [ -z "$HAVE_CONTENT" ]; then result install=ok version=ok render=skipped "($v)"; fi
 
 # the content next to the package's own (git-tracked) assets/
-for d in /content/*; do [ -e "$root/assets/$(basename "$d")" ] || ln -s "$d" "$root/assets/"; done
+for d in /content/*; do [ -e "$root/runtime/assets/$(basename "$d")" ] || ln -s "$d" "$root/runtime/assets/"; done
 mkdir -p /tmp/cfg
 cd / # client_bin must find its install root by itself (install_root.c); the launcher would
      # sync the game content from the updates server first, so it is not started here
 [ -n "$BRAIN" ] && export KRUNKNATIVE_BRAIN_URL="$BRAIN"
 env -u DISPLAY -u WAYLAND_DISPLAY XDG_CONFIG_HOME=/tmp/cfg KRUNKNATIVE_HEADLESS=1 \
-    KRUNKNATIVE_SCREENSHOT=/out/menu.png KRUNKNATIVE_CAPTURE_FRAMES=60 timeout 300 "$root/client_bin" --offline > /out/client.log 2>&1
+    KRUNKNATIVE_SCREENSHOT=/out/menu.png KRUNKNATIVE_CAPTURE_FRAMES=60 timeout 300 "$root/runtime/client_bin" --offline > /out/client.log 2>&1
 rc=$?
 renderer="$(grep -m1 "GL_RENDERER" /out/client.log | sed "s/.*GL_RENDERER *//")"
 tls=""

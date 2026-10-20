@@ -5,10 +5,10 @@
 #
 #   dynamic     the distro build: links the system OpenSSL 3 (libssl3: security updates come from
 #               the distro) and needs glibc >= 2.35. Bundles WebKitGTK for the captcha webview
-#               (tools/release/bundle-webkit.sh: lib/, libexec/). Packages: linux-<arch>.
+#               (tools/release/bundle-webkit.sh: lib/, libexec/). Client packages: BoxOffice-linux-<arch>.
 #   polyfilled  for old and new distros alike (fastfetch's "-polyfilled"): OpenSSL static too
 #               (libssl.a), then polyfill-glibc --target-glibc=2.17 rewrites the newer glibc symbol
-#               versions to 2.17 ones or links in polyfills. Packages: linux-<arch>-polyfilled.
+#               versions to 2.17 ones or links in polyfills. Server packages: linux-x64-polyfilled.
 #
 # Both variants: FreeType without zlib/bzip2/png/harfbuzz/brotli (the vendored tree, as the web
 # build), GLFW/lexbor/glad/cJSON compiled in, libgcc/libstdc++/libcrypt static, stripped, server_bin
@@ -20,7 +20,7 @@
 # Usage: tools/release/build-client-linux.sh [--deps] [--docker <image>] <dynamic|polyfilled> <out dir>
 #   --deps            apt-get install the build dependencies first (sudo when not root)
 #   --docker <image>  run this script inside <image> (e.g. ubuntu:22.04), repo mounted read-only
-# Out: <out>/client_bin, <out>/server_bin (+ <out>/krunknative, the launcher, when the tree has
+# Out: <out>/client_bin, <out>/server_bin (+ <out>/BoxOffice, the launcher, when the tree has
 #      target kn_launcher), <out>/build-info.txt (NEEDED + max GLIBC version)
 # Env: KN_CMAKE_ARGS   extra -D flags (CI: version-meta.sh cmake_flags; the container has no git)
 #      KN_BUILD_DIR    build tree (default <out>/../build-<variant>)
@@ -111,7 +111,7 @@ fi
 # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
 cmake -S "$repo" -B "$build" -G Ninja "${flags[@]}" ${KN_CMAKE_ARGS:-} > "$build/configure.log" || { cat "$build/configure.log" >&2; exit 1; }
 grep -E 'GL backend|OpenSSL|libssl|Headless|Webview' "$build/configure.log" || true
-# the launcher (target kn_launcher, output krunknative; agent client-updates) when the tree has it
+# the launcher (target kn_launcher, output BoxOffice; agent client-updates) when the tree has it
 targets=(client_bin server_bin)
 bins=(client_bin server_bin)
 if cmake --build "$build" --target help 2> /dev/null | grep '^kn_launcher:' > /dev/null; then targets+=(kn_launcher); fi
@@ -119,10 +119,10 @@ cmake --build "$build" --target "${targets[@]}"
 
 install -m 0755 "$build/client_bin" "$build/server_bin" "$out/"
 if [[ " ${targets[*]} " == *" kn_launcher "* ]]; then
-    launcher="$(find "$build" -maxdepth 3 -type f -name krunknative -perm -u+x | head -1)"
-    [ -n "$launcher" ] || { echo "kn_launcher built no krunknative binary" >&2; exit 1; }
-    install -m 0755 "$launcher" "$out/krunknative"
-    bins+=(krunknative)
+    launcher="$(find "$build" -maxdepth 3 -type f -name BoxOffice -perm -u+x | head -1)"
+    [ -n "$launcher" ] || { echo "kn_launcher built no BoxOffice binary" >&2; exit 1; }
+    install -m 0755 "$launcher" "$out/BoxOffice"
+    bins+=(BoxOffice)
 fi
 for f in "${bins[@]}"; do strip --strip-unneeded "$out/$f"; done
 if [ "$variant" = dynamic ]; then
@@ -161,7 +161,10 @@ allowed='^(libc|libm|libdl|libpthread|librt|libEGL|ld-linux-x86-64|ld-linux-aarc
         glibc="$(readelf -V "$out/$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
         echo "$f: NEEDED $needed; max $glibc"
         for lib in $needed; do
-            [[ "$lib" =~ $allowed || -e "$out/lib/$lib" ]] || { echo "$f links $lib, which is neither an OS library nor in lib/" >&2; exit 1; }
+            # host-libs.txt: the sonames bundle-webkit.sh leaves to the player's system (needed by the bundle)
+            host=0
+            [ -f "$out/host-libs.txt" ] && grep -qxF "$lib" "$out/host-libs.txt" && host=1
+            [[ "$lib" =~ $allowed || -e "$out/lib/$lib" || $host = 1 ]] || { echo "$f links $lib, which is neither an OS library, in lib/ nor in host-libs.txt" >&2; exit 1; }
         done
     done
     if [ -d "$out/lib" ]; then

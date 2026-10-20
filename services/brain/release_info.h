@@ -7,8 +7,8 @@
  * and `server-v*` releases whose body carries one line
  *   <!-- kn-build {"describe":"...","commit":"<40 hex>","commit_time":<unix s>,
  *                  "build_time":"<ISO-8601>","protocol":"M.m"} -->
- * and the assets krunknative-server-{linux-x86_64.tar.gz, linux-x86_64-bullseye.tar.gz,
- * windows-x86_64.zip, macos-arm64.tar.gz}.
+ * and the assets BoxOffice-server-{linux-x64.tar.gz, linux-x64-polyfilled.tar.gz,
+ * windows-x64.zip, macos-arm64.zip} plus one release-level SHA256SUMS.
  *
  * Outdated rule (release_server_outdated):
  *   (a) the server's protocol major.minor is lower than this coordinator's own
@@ -44,7 +44,7 @@ typedef struct ReleaseInfo {
     char build_time[32];
     int proto_major, proto_minor;  /* -1 unknown */
     char html_url[256];            /* release page */
-    char dl_linux[320], dl_linux_bullseye[320], dl_windows[320], dl_macos[320];
+    char dl_linux[320], dl_linux_polyfilled[320], dl_windows[320], dl_macos[320];
 } ReleaseInfo;
 
 typedef struct ServerBuild {
@@ -79,7 +79,7 @@ void release_server_build_from_finder(const cJSON *entry, ServerBuild *out);
 void release_server_build_from_meta(const cJSON *meta, ServerBuild *out);
 
 /* Adds "latest" {version, commit, commit_time, build_time, protocol, tag}, "download_url"
- * (release page) and "downloads" {linux, linux_bullseye, windows, macos} to o. */
+ * (release page) and "downloads" {linux, linux_polyfilled, windows, macos} to o. */
 void release_add_json(const ReleaseInfo *r, cJSON *o);
 
 #endif

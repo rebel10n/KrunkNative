@@ -3,9 +3,11 @@ name: Release
 # Dedicated-server builds as public GitHub release assets (CI artifacts need a GitHub login):
 #   push to main, dispatch       -> rolling prerelease `server-latest`, assets replaced
 #   push of a tag server-v*       -> release <tag>, kept
-# Assets: krunknative-server-<platform>.{tar.gz,zip} + .sha256 for linux-x86_64 (Debian 12
-# container, deploy/ansible/build.sh), linux-x86_64-bullseye (Debian 11), windows-x86_64 (MinGW)
-# and macos-arm64 (tools/release/package-server.sh). The release notes carry the commit, the
+# Assets: BoxOffice-server-<platform>.{tar.gz,zip} for linux-x64 (Debian 12 container,
+# deploy/ansible/build.sh: distro OpenSSL 3 and libcurl), linux-x64-polyfilled (any x86_64 distro,
+# glibc 2.17+, build-client-linux.sh polyfilled: no libcurl), windows-x64 (MinGW) and macos-arm64
+# (tools/release/package-server.sh), each archive flat (server_bin at the top), plus one SHA256SUMS
+# for the release. The release notes carry the commit, the
 # protocol (NET_PROTOCOL_MAJOR.MINOR) and the build time, plus one machine-readable line
 #   <!-- kn-build {"describe":..,"commit":..,"commit_time":..,"build_time":..,"protocol":..} -->
 # that kn_brain polls to flag outdated servers (doc/backend.md).
@@ -67,7 +69,7 @@ jobs:
           echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
 
   linux:
-    name: Linux x86_64 (Debian ${{ matrix.codename }})
+    name: Linux x64 (Debian ${{ matrix.codename }})
     needs: meta
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -76,9 +78,7 @@ jobs:
       matrix:
         include:
           - codename: bookworm
-            platform: linux-x86_64
-          - codename: bullseye
-            platform: linux-x86_64-bullseye
+            platform: linux-x64
     steps:
       - uses: actions/checkout@v7
         with:
@@ -96,15 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD/dist/deploy/${{ matrix.codename }}/bin:/b:ro" "debian:${{ matrix.codename }}" bash -c '
-            if grep -q bullseye /etc/os-release; then
-              # deb.debian.org as a second source: archive.debian.org 404s files mid-sync (deploy/ansible/build.sh)
-              printf "%s\n" "deb http://archive.debian.org/debian bullseye main" "deb http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list
-              rm -f /etc/apt/sources.list.d/*
-              echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
-              ssl=libssl1.1
-            else
-              ssl=libssl3
-            fi
+            ssl=libssl3
             echo "Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80retries
             apt-get update -qq > /dev/null
             apt-get install -y -qq --no-install-recommends libcurl4 "$ssl" libcrypt1 ca-certificates > /dev/null
@@ -125,8 +117,44 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The polyfilled server for any x86_64 distro (glibc 2.17+): the same build as the client's dynamic one
+  # but polyfilled (tools/release/build-client-linux.sh polyfilled: OpenSSL static, polyfill-glibc 2.17).
+  # No libcurl: it cannot reach an https:// finder, so it serves LAN or http:// players.
+  linux-polyfilled:
+    name: Linux x64 (polyfilled, glibc 2.17+)
+    needs: meta
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build (polyfilled)
+        env:
+          KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
+        run: tools/release/build-client-linux.sh --deps polyfilled "$RUNNER_TEMP/bin/polyfilled"
+
+      - name: Smoke test
+        run: "\"$RUNNER_TEMP/bin/polyfilled/server_bin\" --version"
+
+      - name: Package
+        env:
+          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+          KN_COMMIT: ${{ needs.meta.outputs.commit }}
+          KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
+          KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
+        run: tools/release/package-server.sh linux-x64-polyfilled "$RUNNER_TEMP/bin/polyfilled/server_bin" out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-linux-x64-polyfilled
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
   windows:
-    name: Windows x86_64 (MinGW-w64)
+    name: Windows x64 (MinGW-w64)
     needs: meta
     runs-on: windows-latest
     timeout-minutes: 40
@@ -188,11 +216,11 @@ jobs:
           KN_COMMIT: ${{ needs.meta.outputs.commit }}
           KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
           KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
-        run: tools/release/package-server.sh windows-x86_64 build/server.exe out --libs dlls
+        run: tools/release/package-server.sh windows-x64 build/server.exe out --libs dlls
 
       - uses: actions/upload-artifact@v7
         with:
-          name: server-windows-x86_64
+          name: server-windows-x64
           path: out/*
           if-no-files-found: error
           retention-days: 7
@@ -250,8 +278,8 @@ jobs:
           set -euo pipefail
           tools/release/package-server.sh macos-arm64 build/server_bin out
           # the packaged binary must run from its own directory with the bundled dylibs only
-          mkdir t && tar -xzf out/krunknative-server-macos-arm64.tar.gz -C t
-          t/krunknative-server-macos-arm64/server_bin --version
+          mkdir t && unzip -q out/BoxOffice-server-macos-arm64.zip -d t
+          t/server_bin --version
 
       - uses: actions/upload-artifact@v7
         with:
@@ -265,7 +293,7 @@ jobs:
   # server-v* releases need every platform.
   publish:
     name: Publish ${{ needs.meta.outputs.tag }}
-    needs: [meta, linux, windows, macos]
+    needs: [meta, linux, linux-polyfilled, windows, macos]
     if: >-
       !cancelled() && needs.meta.result == 'success' && needs.linux.result == 'success' &&
       (needs.meta.outputs.tag == 'server-latest' || (needs.windows.result == 'success' && needs.macos.result == 'success'))
@@ -298,19 +326,26 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Check downloads
+      # One SHA256SUMS for the release, over every asset of this run (sha256sum format, names only).
+      - name: Checksums
         run: |
           set -euo pipefail
           ls -la release-assets
-          (cd release-assets && sha256sum -c ./*.sha256)
+          cd release-assets
+          files=()
+          for f in *; do [ "$f" = SHA256SUMS ] || files+=("$f"); done
+          sha256sum "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          cd ..
+
 
       - name: Release notes
         run: |
           set -euo pipefail
           base="https://github.com/$GH_REPO/releases/download/$TAG"
           row() {
-            if [ -f "release-assets/$2" ]; then echo "| $1 | [$2]($base/$2) | [sha256]($base/$2.sha256) |"
-            else echo "| $1 | not built in this run ([build failed]($RUN_URL)) | |"; fi
+            if [ -f "release-assets/$2" ]; then echo "| $1 | [$2]($base/$2) |"
+            else echo "| $1 | not built in this run ([build failed]($RUN_URL)) |"; fi
           }
           {
             if [ "$TAG" = server-latest ]; then
@@ -326,14 +361,14 @@ jobs:
             echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
             echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
             echo
-            echo "| Platform | Package | Checksum |"
-            echo "|---|---|---|"
-            row "Linux x86_64 (Debian 12+, Ubuntu 22.04+)" krunknative-server-linux-x86_64.tar.gz
-            row "Linux x86_64 (Debian 11, glibc 2.31)" krunknative-server-linux-x86_64-bullseye.tar.gz
-            row "Windows x86_64" krunknative-server-windows-x86_64.zip
-            row "macOS arm64" krunknative-server-macos-arm64.tar.gz
+            echo "| Platform | Package |"
+            echo "|---|---|"
+            row "Linux x64 (Debian 12+, Ubuntu 22.04+)" BoxOffice-server-linux-x64.tar.gz
+            row "Linux x64, any distro (glibc 2.17+, no libcurl)" BoxOffice-server-linux-x64-polyfilled.tar.gz
+            row "Windows x64" BoxOffice-server-windows-x64.zip
+            row "macOS arm64" BoxOffice-server-macos-arm64.zip
             echo
-            echo "Unpack, edit \`cfg/server.cfg\` and run \`./server_bin\` (README.txt in the package). Check a download with \`sha256sum -c <package>.sha256\`."
+            echo "Unpack into a folder of its own, edit \`cfg/server.cfg\` and run \`./server_bin\` (README.txt in the package). Checksums: [SHA256SUMS]($base/SHA256SUMS), \`sha256sum -c SHA256SUMS --ignore-missing\`."
             echo
             echo "<!-- kn-build $KN_BUILD -->"
           } > notes.md

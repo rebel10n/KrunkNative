@@ -1,18 +1,18 @@
-// KrunkNative launcher (doc/backend.md "Client updates"): what users start. Before the game it
+// BoxOffice, the Krunker Box Office launcher (doc/backend.md "Client updates"): what users start.
+// Before the game it
 //   1. checks the updates manifest (KN_UPDATE_DEFAULT_URL, --updates-url, KRUNKNATIVE_UPDATES_URL),
-//   2. installs a newer executable-only package (sha256-verified; launcher, client_bin,
-//      server_bin, libs and ui/ swapped with a journal; deb/rpm installs defer to the package
-//      manager), never touching the game content,
+//   2. installs a newer executable-only package (sha256-verified; BoxOffice, runtime/ swapped with
+//      a journal; deb/rpm installs defer to the package manager), never touching the game content,
 //   3. syncs the game content when the manifest's assets version differs from the local one:
 //      the first run downloads the menu set only (sync's menu_only; the client fetches the rest
 //      when a game first uses it, client/src/net/asset_fetch.c), --full-assets the whole list,
 //      later runs only the files whose hash changed,
-// then starts client_bin with KRUNKNATIVE_ASSETS_DIR and KRUNKNATIVE_LAUNCHER set, in the
-// directory that holds ui/ (POSIX: exec, same pid; Windows: a new process).
+// then starts runtime/client_bin with KRUNKNATIVE_ASSETS_DIR and KRUNKNATIVE_LAUNCHER set, in the
+// runtime/ directory that holds ui/ (POSIX: exec, same pid; Windows: a new process).
 //
-//   krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--updates-url URL]
-//               [--assets-dir DIR] [--allow-checkout-assets] [--full-assets] [--threads N]
-//               [--asset-mirrors URLS|off] [--] [client args...]
+//   BoxOffice [--cli|--headless] [--no-update] [--check] [--no-launch] [--updates-url URL]
+//             [--assets-dir DIR] [--allow-checkout-assets] [--full-assets] [--threads N]
+//             [--asset-mirrors URLS|off] [--] [client args...]
 // Unknown arguments go to client_bin. Exit codes: 0 ok, 1 usage, 2 failed with nothing
 // playable, 3 --check found a newer build.
 #include "launcher_ui.h"
@@ -451,7 +451,7 @@ static void *work(void *arg) {
     L.can_play = 0;
     L.have_install = kn_install_locate(&L.in, L.root_override);
     if (!L.have_install) {
-        fail(0, L.in.client, "client_bin is missing next to the launcher");
+        fail(0, L.in.client, "runtime/client_bin is missing next to BoxOffice");
         goto out;
     }
     if (kn_install_recover(&L.in)) status(-1, NULL, "Rolled back an interrupted update");
@@ -602,7 +602,7 @@ static void wait_for_pid(const long pid) {
 
 static void usage(void) {
     printf(KN_PRODUCT_NAME " launcher (updates the game, then starts it)\n"
-           "Usage: krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--wait-pid PID]\n"
+           "Usage: BoxOffice [--cli|--headless] [--no-update] [--check] [--no-launch] [--wait-pid PID]\n"
            "                   [--updates-url URL|off] [--assets-dir DIR] [--threads N] [--asset-mirrors URLS|off]\n"
            "                   [--] [client args...]\n"
            "  --cli, --headless  no window: progress on stdout\n"
@@ -688,7 +688,7 @@ int main(int argc, char **argv) {
     if (!phase) return 2;
     if (L.no_launch) return 0;
 
-    // client_bin: cwd = the directory with ui/, the game content dir and this launcher's path
+    // runtime/client_bin: cwd = the directory with ui/, the game content dir and this launcher's path
     char **cargv = calloc((size_t) L.client_argc + 2, sizeof(char *));
     if (!cargv) return 2;
     cargv[0] = L.in.client;

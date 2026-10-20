@@ -1,4 +1,4 @@
-// Windows resources of client.exe and the launcher (KrunkNative.exe): the icon (krunker.io's
+// Windows resources of client.exe and the launcher (BoxOffice.exe): the icon (krunker.io's
 // app icon, tools/branding/fetch_branding.py) and the version information Explorer and Task
 // Manager show ("Krunker Box Office"; the file names keep the project's old name, KrunkNative).
 // No version numbers here: the build identity is `--version` (shared/include/build_info.h).

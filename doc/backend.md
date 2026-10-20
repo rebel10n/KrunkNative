@@ -2235,7 +2235,7 @@ clients without it count as the coordinator's major). Minors interoperate.
 Exposed per entry as `outdated` / `incompatible` (finder `GET /servers`, `meta` of `/mm/game-list`
 tuples) plus top-level `latest` `{version, commit, commit_time, build_time, protocol, tag}`,
 `download_url` (release page, default `https://github.com/rebel10n/KrunkNative/releases/tag/server-latest`)
-and `downloads` `{linux, linux_bullseye, windows, macos}` (asset URLs). Matchmaking
+and `downloads` `{linux, linux_polyfilled, windows, macos}` (asset URLs). Matchmaking
 (`/mm/seek-game`, the client sends `proto`): never a lobby of another protocol major (requested by
 id: `IncompatibleVersion` 409 with `autoChangeGame=false`, else moved); up-to-date lobbies with
 room win over outdated ones, which are still used when nothing else has room. The client's
@@ -2494,17 +2494,18 @@ the same while that name is the edge origin and 302s there once it is the Pages 
 | path | content | cache |
 | --- | --- | --- |
 | `client/<channel>.json` (`latest`) | channel manifest, written last | `no-cache` |
-| `client/builds/<commit12>/krunknative-client-<plat>.{tar.gz,zip}` | executable-only update packages (last 3 builds) | immutable |
+| `client/builds/<commit12>/BoxOffice-<plat>.{tar.gz,zip}` | update packages, the whole flat package (last 3 builds) | immutable |
 | `assets/<version>.json` | game content list `{"format":1,"version","files":[[path,sha256,size],...]}` | immutable |
 | `assets/objects/<aa>/<sha256>` | content-addressed files: hardlinks into the web asset tree `/opt/krunknative-web/assets` (no extra disk) | immutable |
 
 Channel manifest (`format` 1; relative URLs resolve against the manifest's URL):
 `{"format":1,"channel":"latest","published","build":{kn-build: describe, commit, commit_time,
 build_time, protocol},"outdated_grace_h":48,"page":<release page>,"platforms":{"<plat>":{"update":
-{"url","sha256","size"},"downloads":{"tar.gz"|"zip"|"deb"|"rpm": url}}},"assets":{"version",
-"manifest","sha256","size","objects","files","bytes","packaged":[paths the packages ship]}}`. Platforms: `linux-amd64`,
-`linux-amd64-polyfilled`, `linux-aarch64`, `linux-aarch64-polyfilled`, `windows-amd64`,
-`macos-aarch64`, `macos-amd64`; the update package is the `.zip` on Windows, else the `.tar.gz`.
+{"url","sha256","size"},"downloads":{"tar.gz"|"zip": url}}},"assets":{"version",
+"manifest","sha256","size","objects","files","bytes","packaged":[paths the packages ship]}}`. Platforms: `linux-x64`,
+`linux-arm64`, `windows-x64`, `macos-arm64`, `macos-x64` (the package's name is `BoxOffice-<platform>`);
+the update package is the `.tar.gz` on Linux, else the `.zip` (Windows, macOS). Each package is flat:
+`BoxOffice` (the launcher) and `runtime/` at its top, so the install root is the folder above `runtime/`.
 Full packages (with the game content) are not hosted: the launcher downloads the content.
 
 **Content split**. The packages ship the code-coupled, git-tracked part of `assets/` (every tracked
@@ -2521,7 +2522,7 @@ commit; the untracked rest only moves with a `--tags web_assets` run from a full
 
 **Publishing** (CI, `client.yml` job `updates`, off until the repository variable
 `KN_UPDATES_UPLOAD` is `1`): `kn-updates stage` picks each platform's update package from the
-`client-pkg-*` artifacts, checks their `.sha256` and writes `build.json` (kn-build line, sha256 and size
+`client-pkg-*` artifacts, checks them against the release's `SHA256SUMS` when it is there and writes `build.json` (kn-build line, sha256 and size
 per package, GitHub download links); rsync to `kru:/opt/krunknative-updates/incoming/<commit12>/`;
 `ssh kru kn-updates publish <dir>` verifies the packages, moves them to `builds/`, indexes the content
 (hash cache; objects hardlinked), writes the content list, then the channel manifest, and prunes builds
@@ -2530,9 +2531,8 @@ per package, GitHub download links); rsync to `kru:/opt/krunknative-updates/inco
 `--tags web_assets`); `kn-updates status` prints what is live. The web asset tree must be updated by
 replacing files (rsync's default temp + rename), never in place: objects share its inodes.
 
-**Launcher** (`launcher/`, target `kn_launcher`, binary `krunknative` / `KrunkNative.exe` (GUI
-subsystem) / the `.app`'s `Contents/MacOS/KrunkNative`, next to `client_bin`): what players start
-(deb/rpm `/usr/bin/krunknative`, the `.desktop` entry, the Windows shortcut, the `.app`). A small GLFW
+**Launcher** (`launcher/`, target `kn_launcher`, binary `BoxOffice` / `BoxOffice.exe` (GUI
+subsystem) / the `BoxOffice.app`'s `Contents/MacOS/BoxOffice`, next to `runtime/client_bin`): what players start. A small GLFW
 window (title, status, progress bar, Retry / Play / Quit after an error; FreeType with
 `ui/css/fonts`, same GL backend as the client) or `--cli` / `--headless` (progress lines on stdout).
 Before the game it:
@@ -2633,8 +2633,8 @@ newer deploy is "Update available" and the same automatic restart, as `location.
 
 **Download window** (`client/src/ui/download_ui.c`, the header's "Download Our Client" = v7's
 `showWindow(25)`; `/?download` opens it, the hub's app badges link there): every package of the
-GitHub release `client-latest` (`krunknative-client-<plat>.<ext>`, `krunknative-android.apk`,
-`krunknative-ios-unsigned.ipa`), the visitor's platform first and highlighted (web:
+GitHub release `client-latest` (`BoxOffice-<plat>.<ext>`, `BoxOffice-android.apk`,
+`BoxOffice-ios-unsigned.ipa`), the visitor's platform first and highlighted (web:
 `navigator.userAgent` / `userAgentData` / the WebGL renderer for Mac CPUs; native: `kn-install.json`,
 else the build's platform), every other platform listed under it. iPhone / iPad: Add to Home Screen
 (the web build's PWA, `platform/web`). The importer keeps v7's header and description only
