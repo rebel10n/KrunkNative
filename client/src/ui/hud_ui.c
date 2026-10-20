@@ -3788,6 +3788,12 @@ void hud_ui_hide_end_screen(Client *client) {
     hud_dmg_clear();
     if (html_ui_is_menu_open()) {
         menu_apply_open(1);      // toggleMenu(true): #menuHolder, instructions, chat at 20px
+    } else if (!ui->dead && client && !spectate_active()) {
+        // toggleMenu(true): a player out of the game when the round restarts (a map change does not respawn
+        // the players who were out at its end) gets the spawn prompt, not an empty world with no way in but
+        // Esc: the console open over it kept client_tick from entering the game (pointer_lock.c: play needs
+        // no console). The spawn's toggleMenu(false) (client_player_spawned) takes the menu down again.
+        client_set_menu_open(client, 1);
     } else if (!ui->dead) {
         hud_toggle_game_ui(1);   // toggleGameUI(true) (chat back at 148px)
     }
