@@ -3678,7 +3678,7 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
     // v10's #endButtonsHolder (GUI.endScreen.show, g:203333-203342): after .endCard, in #endTabbedView
     hb_append(out, size, &len, "<div id=\"endButtonsHolder\" class=\"endButtonsHolder\">%s"
               "<div id=\"collectRewardsButtonContainer\" class=\"collectRewardsButtonContainer\" style=\"position: relative;\"></div></div>",
-              hud_endscreen_v10_double_xp_html());
+              hud_endscreen_v10_end_button_html(client));
 }
 
 static void hud_end_card_render(const Client *client) {

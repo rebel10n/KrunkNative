@@ -42,7 +42,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#endButtonsHolder: v10 shows the Double XP button (the ad icon) to a guest; Krunker Box Office shows it only while the account's 2x XP offer is claimable (dxp.offer.claimable, the brain's rule: games % 3 == 0, once per match), so a guest's row has COLLECT alone and centred. Reported, not failed, by design (double_xp_offer.c). The COLLECT button is unchanged.",
+      "note": "#endButtonsHolder: v10 shows the Double XP button (the ad icon) after every non-comp match, to a guest as to an account (v10.js 203200, hud_endscreen_v10.c); a guest's click claims nothing (no account id). The row is Double XP then COLLECT. The COLLECT button is unchanged.",
       "skip": true
     }
   ]

@@ -40,9 +40,10 @@ int hud_endscreen_v10_offer_skin(int skin);
 // GUI.endScreen.show() ran (hud_end_card_render): mount the components onto the card.
 void hud_endscreen_v10_shown(void);
 
-// v10's #doubleXPButton markup: the card builder (hud_ui.c) puts it in #endButtonsHolder, a sibling
-// of .endCard in #endTabbedView, before the Collect container (hud_endscreen_v10_shown fills that).
-const char *hud_endscreen_v10_double_xp_html(void);
+// v10's end-card button (v10.js 203200): #doubleXPButton (Double XP) after every match but a comp one, and
+// #returnButton (Return to Krunker) on a comp one. The card builder (hud_ui.c) puts it in #endButtonsHolder, a
+// sibling of .endCard in #endTabbedView, before the Collect container (hud_endscreen_v10_shown fills that).
+const char *hud_endscreen_v10_end_button_html(const Client *client);
 
 // Every frame (client_hud_html_tick); now_ms is the HUD clock. Drives the countdown, the
 // auto-collect and the overlay's schedule.

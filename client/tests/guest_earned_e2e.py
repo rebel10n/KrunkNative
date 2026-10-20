@@ -4,7 +4,7 @@ renders where v10 mounts it, with its amounts and its green glow (box-shadow: 0 
 
   python3 -I client/tests/guest_earned_e2e.py BUILD_DIR      (run from the repository root)
 
-Four headless renders (client_bin --render-scenario, no window), state.guestEarned standing in for the ledger:
+Headless renders (client_bin --render-scenario, no window), state.guestEarned standing in for the ledger:
   1. the signed-out end screen with 12 KR / 800 score (tools/uidiff/scenarios/kn-guest-earned-end.json): the box
      is in the signup rewards' right slot (.signup-rewards-guest-earned-collect) with "Unclaimed Rewards", the KR
      count-up at 12 with the angled coin, the XP one at 800, no REGISTER NOW (origin match_end), and the glow:
@@ -16,7 +16,10 @@ Four headless renders (client_bin --render-scenario, no window), state.guestEarn
   4. the end screen of a guest with nothing earned: the slot is empty (as the v10 sandbox capture shows);
   5. the end card of a guest with no balance, v10's own capture state (ingame-endscreen-late.json,
      doc/ref/krunker-v10/ingame/ingame-endscreen-late.png): the Double XP button under the results card at
-     v10's place (514, 312, 246 x 48) and the signup banner below it, its top at v10's 385.
+     v10's place (514, 312, 246 x 48) and the signup banner below it, its top at v10's 385;
+  6. the end card's offer (check_end_card_offer): an account on games 4 without an offer still sees the Double XP
+     button; the click claims (rqdxp) on games % 3 only, whatever the offer says, and a guest's click claims nothing;
+     a comp match shows "Return to Krunker" (#returnButton) and no Double XP, signed in or not.
 KRUNKNATIVE_SCENARIO_DUMP prints the box tree under the slot after the capture: the texts and the box's
 viewport rect come from it. Exit 0 when every check passes, 1 otherwise.
 """
@@ -71,7 +74,7 @@ def render(name, scen, dump, ui_dir=None):
     if ui_dir:
         env["KRUNKNATIVE_UI_DIR"] = ui_dir
     proc = subprocess.run([CLIENT, "--render-scenario", scen, out], env=env, cwd=ROOT, capture_output=True, text=True, timeout=300)
-    lines = proc.stderr.splitlines()
+    lines = proc.stderr.splitlines() + proc.stdout.splitlines() # the client's [double_xp] log is on stdout
     if proc.returncode != 0 or not os.path.exists(out):
         print("\n".join(lines[-20:]))
         return None, lines, None
@@ -228,6 +231,69 @@ def check_double_xp_and_banner():
               banner[1] >= button[1] + button[3], f"button bottom {button[1] + button[3]:.0f}, banner top {banner[1]:.0f}")
 
 
+END_CARD = os.path.join(SCENARIOS, "ingame-endscreen-late.json") # a match's end card (results, no balance)
+
+
+def end_card_scenario(name, account=None, comp=False, claim=False):
+    """The end card's capture state with a stand-in account, a comp match (endscreen.comp) and/or the Double XP
+    button clicked when the card shows (endscreen.doubleXP "claim")."""
+    with open(END_CARD, encoding="utf-8") as f:
+        doc = json.load(f)
+    if account is not None:
+        doc["state"]["account"] = account
+    if comp:
+        doc["state"]["endscreen"]["comp"] = 1
+    if claim:
+        doc["state"]["endscreen"]["doubleXP"] = "claim"
+    path = os.path.join(WORK, name + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    return path
+
+
+def account_at(games, claimable):
+    """A stand-in account after `games` matches, with the brain's offer state (dxp.offer)."""
+    return {"name": "Player", "score": 50000, "funds": 100, "games": games,
+            "dxp": {"offer": {"games": games, "xp": 120, "claimable": claimable}}}
+
+
+def check_end_card_offer():
+    """v10's end card (GUI.endScreen.show, v10.js 203200): #doubleXPButton after every match but a comp one, for a
+    signed-in player as for a guest; #returnButton ("Return to Krunker", backToOrigin()) in its place on a comp
+    match. The click (showDoubleXPRewardedAd, v10.js 222690) claims only on games % 3 (_74098, v10.js 222668), with
+    an account id: a guest's click claims nothing."""
+    png, lines, rect = render("offer-shown", end_card_scenario("offer-shown", account=account_at(4, False)), "#doubleXPButton")
+    t = texts(lines)
+    check("end card, an account on games 4 (no offer): the Double XP button is shown (every non-comp match)",
+          png is not None and rect is not None and "Double XP" in t, " | ".join(t))
+
+    def sent(name, account):
+        png, lines, _ = render(name, end_card_scenario(name, account=account, claim=True), "#endButtonsHolder")
+        return png, [line for line in lines if "rqdxp" in line]
+
+    png, lines = sent("claim-games3", account_at(3, True))
+    check("end card, an account on games 3: the Double XP click sends the claim (rqdxp at games 3)",
+          png is not None and any("rqdxp at games 3" in s for s in lines), " | ".join(lines))
+    png, lines = sent("claim-games4", account_at(4, False))
+    check("end card, an account on games 4: the click sends nothing (v10 claims on games % 3 only)",
+          png is not None and not lines, " | ".join(lines))
+    png, lines = sent("claim-games4-offer", account_at(4, True))
+    check("end card, an account on games 4 whose offer is claimable: still nothing sent (the rule is games % 3)",
+          png is not None and not lines, " | ".join(lines))
+    png, lines = sent("claim-guest", None)
+    check("end card, a guest's click: nothing sent (v10's _74098 needs an account id)", png is not None and not lines, " | ".join(lines))
+
+    png, lines, rect = render("comp-guest", end_card_scenario("comp-guest", comp=True), "#returnButton")
+    t = texts(lines)
+    check("end card, a comp match, a guest: Return to Krunker in place of the Double XP button",
+          rect is not None and "Return to Krunker" in t and "Double XP" not in t, " | ".join(t))
+    png, lines, rect = render("comp-account", end_card_scenario("comp-account", account=account_at(3, True), comp=True),
+                              "#endButtonsHolder")
+    t = texts(lines)
+    check("end card, a comp match, an account on games 3 (claimable): Return to Krunker, no Double XP",
+          png is not None and "Return to Krunker" in t and "Double XP" not in t, " | ".join(t))
+
+
 def check_menu():
     scen = os.path.join(SCENARIOS, "kn-guest-earned-menu.json")
     png, lines, rect = render("menu", scen, "#knGuestEarned")
@@ -266,6 +332,7 @@ def main():
         return 1
     check_end_screen()
     check_double_xp_and_banner()
+    check_end_card_offer()
     check_menu()
     check_account_and_empty()
     print(f"{sum(results)}/{len(results)} checks passed  (work dir {WORK})")

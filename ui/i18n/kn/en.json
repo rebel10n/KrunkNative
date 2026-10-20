@@ -267,6 +267,7 @@
  "kn.dserver.vpsSetup": "On the VPS (Ubuntu or Debian), as a normal user:",
  "kn.dxp.badge": "2x XP",
  "kn.dxp.collected": "Collected",
+ "kn.endgame.returnToKrunker": "Return to Krunker",
  "kn.error.connectFailed": "Could not connect to the game server",
  "kn.error.loginToJoin": "{0}Log in{1} to join it.",
  "kn.error.playOffline": "Play Offline",

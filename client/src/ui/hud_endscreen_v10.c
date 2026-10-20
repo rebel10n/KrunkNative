@@ -36,12 +36,16 @@
 #define END_EVENTS_MAX 512
 #define AUTO_COLLECT_MS 10000.0 // autoCollectTime = now + 0x2710
 #define RAID_MODE_INDEX 23      // showRaidPromo: 0x17 !== modeIndex
-// #doubleXPButton (v10 g:203332, not a comp game): the ad icon and the Double XP label. The click claims the
-// offer ("rqdxp", double_xp_offer.c); the button is shown only while the offer is claimable (double_xp_sync).
+// #doubleXPButton (v10.js 203200, every match but a comp one, signed in or not): the ad icon and the label
+// (window.endgame.player.doubleGainedXP, %s). The click claims at games % 3 (double_xp_end_claim, double_xp_offer.c).
 // v10's whitespace kept: the newline + tabs between the inline icon and #returnText lay out as one space.
-#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" style=\"display:none\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
+#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
     "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">\n\t\t\t\t\t\t" \
-    "<div id=\"returnText\">Double XP</div>\n\t\t\t\t\t</div>"
+    "<div id=\"returnText\">%s</div>\n\t\t\t\t\t</div>"
+// #returnButton (v10.js 203200, a comp match, isComp): "Return to Krunker" (%s) leaves the match for the menu:
+// v10's backToOrigin(), here h_return_to_krunker (see there for the disconnect notice that differs).
+#define RETURN_HTML "<div id=\"returnButton\" onclick=\"knReturnToKrunker()\">\n\t\t\t\t\t\t" \
+    "<div id=\"returnText\">%s</div>\n\t\t\t\t\t</div>"
 
 typedef struct {
     int skin;
@@ -79,6 +83,7 @@ static struct {
     int css_added, handler_added;
     // --render-scenario: start the overlay / auto-collect when the card first shows
     int scn_collect; // 0 none, 1 overlay, 2 auto
+    int scn_claim;   // state.endscreen.doubleXP "claim": the Double XP button clicked when the card shows
     int force_raid;     // state.raidPromo (0 / 1) for a console `end` in a scenario, -1: roll
     double scn_elapsed; // state.endscreen.autoCollectElapsed: ms from endScreen.init to the button's mount
 } E = {.force_raid = -1};
@@ -299,45 +304,42 @@ static void double_xp_done(void *user, const DoubleXpResult result) {
     if (result == DOUBLE_XP_GRANTED) xp_doubled_pop();
 }
 
-// Whether the card shows the button. v10's show() puts #doubleXPButton in #endButtonsHolder for every match
-// but a comp one (isComp shows Return to Krunker there, not built here): a signed-out guest sees it too,
-// above the signup banner (the v10 sandbox capture ingame-endscreen-late). The guest's click claims nothing:
-// v10's showDoubleXPRewardedAd runs the rewarded ad, then _74098 needs an account id (games % 3 on it).
-// An account keeps the offer's own rule (dxp.offer.claimable, double_xp_offer.c).
-static int double_xp_wanted(void) {
-    if (active_account()) return double_xp_offer_open();
-    const MenuUi *menu = menu_ui();
-    const Client *client = menu ? menu->client : NULL;
-    return !(client && client->game.config.comp);
+// The card's button (v10.js 203200): #returnButton ("Return to Krunker") on a comp match, #doubleXPButton (Double XP)
+// on every other match, signed in or not (a signed-out player sees it too, above the signup banner, the v10 sandbox
+// capture ingame-endscreen-late). The card is built with the match's comp flag (Game.isComp = game.config.comp):
+// no per-frame state decides which one shows. Called by the card builder (hud_ui.c).
+const char *hud_endscreen_v10_end_button_html(const Client *client) {
+    static char html[512]; // the builder copies it at once
+    if (client && client->game.config.comp) {
+        snprintf(html, sizeof(html), RETURN_HTML, I18N("kn.endgame.returnToKrunker", "Return to Krunker"));
+    } else {
+        snprintf(html, sizeof(html), DOUBLE_XP_HTML, I18N("window.endgame.player.doubleGainedXP", "Double XP"));
+    }
+    return html;
 }
 
-// Written when it changes (the end card re-renders the button).
-static HtmlElem g_dxp_button;
-static int g_dxp_shown = -1;
-
-static void double_xp_sync(void) {
-    const HtmlElem button = html_dom_by_id("doubleXPButton");
-    if (!button) return;
-    const int shown = double_xp_wanted();
-    if (button == g_dxp_button && shown == g_dxp_shown) return;
-    g_dxp_button = button;
-    g_dxp_shown = shown;
-    html_dom_set_display(button, shown ? "" : "none");
-}
-
+// The Double XP click: v10's showDoubleXPRewardedAd -> claimDoubleXpReward (games % 3, with an account)
 static int h_double_xp(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) ev; (void) args; (void) argc;
-    double_xp_claim(double_xp_done, NULL);
+    double_xp_end_claim(double_xp_done, NULL);
     return 1;
 }
 
-const char *hud_endscreen_v10_double_xp_html(void) { return DOUBLE_XP_HTML; }
+// The Return click. v10's backToOrigin() reloads the page at the origin (the menu, no seek). The nearest KrunkNative
+// action is the console's disconnect (servers_ui_disconnect: the page to "/", no auto-seek), which reports
+// "Disconnected" on the menu where v10's reload shows nothing; a silent leave needs ui_console.c's stop_net.
+static int h_return_to_krunker(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) ev; (void) args; (void) argc;
+    servers_ui_disconnect();
+    return 1;
+}
 
 static void ensure_handler(void) {
     if (E.handler_added) return;
     E.handler_added = 1;
     html_ui_add_handler("knCollectRewards", h_collect);
     html_ui_add_handler("knDoubleXP", h_double_xp);
+    html_ui_add_handler("knReturnToKrunker", h_return_to_krunker);
 }
 
 static void update_label(void) {
@@ -642,11 +644,14 @@ void hud_endscreen_v10_shown(void) {
         E.scn_collect = 0;
         collect(mode == 2, E.now);
     }
+    if (E.scn_claim) { // the scenario's click on the Double XP button (its handler, as a click runs it)
+        E.scn_claim = 0;
+        h_double_xp(NULL, NULL, NULL, 0);
+    }
 }
 
 void hud_endscreen_v10_tick(const double now_ms) {
     E.now = now_ms;
-    double_xp_sync();
     if (E.btn_mounted && !E.collected && by_id("collectRewardsButtonContainer")) {
         while (E.btn_mounted && now_ms >= E.next_tick) {
             E.next_tick += 1000.0;
@@ -694,6 +699,8 @@ void hud_endscreen_v10_scenario(const cJSON *end) {
     const cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(end, "autoCollectElapsed");
     E.scn_elapsed = cJSON_IsNumber(elapsed) ? elapsed->valuedouble : 0.0;
     if (cJSON_IsString(collect_mode)) E.scn_collect = !strcmp(collect_mode->valuestring, "auto") ? 2 : !strcmp(collect_mode->valuestring, "overlay") ? 1 : 0;
+    const cJSON *dxp_click = cJSON_GetObjectItemCaseSensitive(end, "doubleXP");
+    E.scn_claim = cJSON_IsString(dxp_click) && !strcmp(dxp_click->valuestring, "claim");
 }
 
 int hud_endscreen_v10_overlay_active(void) { return E.ov_active; }

@@ -10,9 +10,10 @@ contacted. A headless client_bin (--offline, one input script, the account signe
 session) then:
   1. plays a match in All or Nothing (KRUNKNATIVE_MODE=aon, a doubleXP mode) on the base page, so the
      in-game "2x XP" badge (#dxpHudBadge) shows; the end screen's Double XP button (v10 #doubleXPButton)
-     is shown because the offer is claimable;
-  2. presses it: no ad is shown, the client sends ["rqdxp"] once, the brain answers ["rrqdxp",
-     {playerScore, xp, games}] and the XP Doubled! pop comes up; the offer is spent, the button goes.
+     is shown (v10: after every non-comp match);
+  2. presses it: no ad is shown, the client sends ["rqdxp"] once (games % 3 == 0), the brain answers ["rrqdxp",
+     {playerScore, xp, games}] and the XP Doubled! pop comes up; the offer is spent, and the button stays
+     (v10 hides nothing after the claim).
 The strike flavor runs the same account and offer with Krunker Strike's own markup: the lean end
 screen's Double XP button (.lean-end-screen__double-reward, "Collected" once spent) and the "2x XP"
 badge (.booster-time-left, FRVR's booster layout) in the doubleXP mode.
@@ -193,7 +194,7 @@ BASE_SCRIPT = """
 15100 clickid doubleXPButton
 16000 nodes @popup .dxp-header
 16000 text @popup-head .dxp-header
-16000 check @claimed doubleXPButton=0
+16000 check @claimed doubleXPButton=1
 17000 quit
 """
 
@@ -233,9 +234,10 @@ def expand(script):
 
 def run_client(brain_port, script_text):
     cfg = os.path.join(WORK, "cfg")
-    os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
+    store = "krunknative-strike" if FLAVOR == "strike" else "krunknative" # the flavour's settings dir (flavor.c)
+    os.makedirs(os.path.join(cfg, store), exist_ok=True)
     for k, v in (("krunker_username", USER), ("krunker_token", TOKEN)):
-        with open(os.path.join(cfg, "krunknative", k + ".json"), "w") as f:
+        with open(os.path.join(cfg, store, k + ".json"), "w") as f:
             f.write(v)
     path = os.path.join(WORK, "double_xp.script")
     with open(path, "w") as f:
@@ -309,7 +311,7 @@ def run():
         check(f"{label}: " + " ".join(f"{k}={v}" for k, v in want.items()), not bad, f"got {bad}" if bad else "")
 
     if FLAVOR == "base":
-        check("the Double XP button is on the end screen (claimable)", nodes.get("button") == 1, f"{nodes.get('button')}")
+        check("the Double XP button is on the end screen (v10: every non-comp match)", nodes.get("button") == 1, f"{nodes.get('button')}")
         label = texts.get("label", (0, ""))[1]
         check("its label is Double XP (v10 window.endgame.player.doubleGainedXP)", label == "Double XP", repr(label))
         head = texts.get("popup-head", (0, ""))[1]

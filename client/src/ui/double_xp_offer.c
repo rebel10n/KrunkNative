@@ -90,12 +90,9 @@ static void send_claim(void) {
     if (g_pending) g_pending->timer = html_timer_add(CLAIM_TIMEOUT_MS, on_timeout, NULL);
 }
 
-void double_xp_claim(DoubleXpDoneFn done, void *user) {
-    if (!done) return;
-    if (!double_xp_offer_open()) {
-        done(user, DOUBLE_XP_NOT_OFFERED);
-        return;
-    }
+// The claim of either button. done runs once, when rrqdxp is answered, or at once when nothing is sent.
+static void start_claim(DoubleXpDoneFn done, void *user, const double games) {
+    printf("[double_xp] rqdxp at games %.0f\n", games);
     if (backend_available() != 1) {
         done(user, DOUBLE_XP_ERROR);
         return;
@@ -109,4 +106,28 @@ void double_xp_claim(DoubleXpDoneFn done, void *user) {
     c->user = user;
     g_pending = c;
     send_claim();
+}
+
+// Krunker Strike's banner: claimed while the account's offer is claimable
+void double_xp_claim(DoubleXpDoneFn done, void *user) {
+    if (!done) return;
+    const AccountInfo *a = active_account();
+    if (!double_xp_offer_open()) {
+        done(user, DOUBLE_XP_NOT_OFFERED);
+        return;
+    }
+    start_claim(done, user, a->games);
+}
+
+// Box Office's end card: v10's claimDoubleXpReward (v10.js 222668) claims when the account's games is a multiple of
+// 3 above zero, with an account id (a guest's click claims nothing); the offer's state does not decide it. The
+// brain still refuses a match it has doubled already (dxp_offer_claimable: claimed_games != games).
+void double_xp_end_claim(DoubleXpDoneFn done, void *user) {
+    if (!done) return;
+    const AccountInfo *a = active_account();
+    if (!a || g_pending || a->games <= 0 || (long long) a->games % 3 != 0) {
+        done(user, DOUBLE_XP_NOT_OFFERED);
+        return;
+    }
+    start_claim(done, user, a->games);
 }

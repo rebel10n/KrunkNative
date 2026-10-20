@@ -1069,6 +1069,7 @@ static void apply_endscreen(Client *client) {
     // animation (aV.vicTitle), not page markup: the reference background carries it.
     const int place = (int) obj_num(end, "place", 1);
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(end, "result");
+    if (obj_num(end, "comp", 0)) client->game.config.comp = 1; // a comp match (Game.isComp): v10's "Return to Krunker"
     hud_ui_show_end_screen(client, cJSON_IsNumber(result) ? result->valueint : place == 1, obj_str(end, "nextRound"));
     hud_endscreen_v10_scenario(end); // rank / rp / items / raid / collect (hud_endscreen_v10.c)
     if (obj_num(end, "results", 0)) hud_ui_end_results_now(client); // the GUI.endScreen tabs (performance)
