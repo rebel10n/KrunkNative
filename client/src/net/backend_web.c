@@ -87,6 +87,7 @@ void backend_set_url(const char *url) {
 typedef struct {
     BackendHttpFn fn;
     void *user;
+    char *remote; // a krunker.io read (backend_http_request_remote): its path, logged when it is not answered 200
 } WebReq;
 
 // Any URL / method with a JSON body (auth service, server finder): the browser fetch()
@@ -103,6 +104,12 @@ EMSCRIPTEN_KEEPALIVE void backend_web_fetch_done(WebReq *req, const int status, 
         ready_push(item);
     } else {
         free(body);
+    }
+    if (req->remote) {
+        // status 0: the browser refused the read (CORS, or no answer), so the panel that asked stays empty
+        if (status == 0) fprintf(stderr, "[backend] krunker.io read %s: no answer (the browser refused it, CORS or the network)\n", req->remote);
+        else if (status != 200) fprintf(stderr, "[backend] krunker.io read %s: status %d\n", req->remote, status);
+        free(req->remote);
     }
     free(req);
 }
@@ -128,6 +135,21 @@ int backend_http_request(const char *method, const char *url, const char *json_b
     req->fn = fn;
     req->user = user;
     backend_web_fetch(method && method[0] ? method : "GET", url, json_body, req);
+    return 1;
+}
+
+// A krunker.io read (backend.h backend_http_get_remote): the same fetch, its path kept for the log line
+int backend_http_request_remote(const char *url, const BackendHttpFn fn, void *user) {
+    if (!url || !url[0]) return 0;
+    WebReq *req = calloc(1, sizeof(*req));
+    if (!req) return 0;
+    req->fn = fn;
+    req->user = user;
+    const char *query = strchr(url, '?');
+    const size_t n = query ? (size_t) (query - url) : strlen(url);
+    req->remote = calloc(n + 1, 1);
+    if (req->remote) memcpy(req->remote, url, n);
+    backend_web_fetch("GET", url, NULL, req);
     return 1;
 }
 
