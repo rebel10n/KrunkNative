@@ -1028,6 +1028,9 @@ static ChatCommandHost g_chat_host;
 // alone is not enough: net-bridge connects from 127.0.0.1 for every browser, so a bridged
 // connection counts by the address it forwards (NET_PACKET_FORWARDED, net_handle_forwarded).
 int net_client_is_dev(const ClientConnection *client) {
+    // KRUNKNATIVE_GUEST_LOCAL (tests): the offline sandbox's own connection is a guest for the Object Manager, as a
+    // player on a server is (client/tests/physgun_cycle_e2e.py runs the Physics Gun's non-dev pace this way)
+    if (client->local && getenv("KRUNKNATIVE_GUEST_LOCAL")) return 0;
     return client->op || client->local || (client->acct.flags & NET_PLAYER_INFO_DEV);
 }
 

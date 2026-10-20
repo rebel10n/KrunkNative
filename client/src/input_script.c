@@ -113,10 +113,12 @@
 //                                9:Guest@x,y,z*" (* us, - inactive)
 //   100 aimlast                  turn the look onto the centre of the newest object (the crate the Object Manager
 //                                spawned last), as `tp` sets the look: the crosshair is on it for a grab or a pick
-//   100 pg @label                log the Physics Gun's grab (om_build.c): "[input_script] pg t=100 @label grab=1
-//                                uid=5 frozen=0 releasing=0 drag=0 sel=-1 aim=5 aimfeet=x,y,z hold=x,y,z edit=1
-//                                takes=1 gun=1 caps=15 shoot=1" (aim: the object under the crosshair, edit / takes:
-//                                whether the Physics Gun may edit and take it, gun: in hand, shoot: alive), then
+//   100 pg @label                log the Physics Gun's grab (om_build.c): "[input_script] pg t=100 @label shown=x,y,z
+//                                sent=x,y,z target=x,y,z grab=1 uid=5 frozen=0 releasing=0 drag=0 sel=-1 aim=5
+//                                aimfeet=x,y,z hold=x,y,z edit=1 takes=1 gun=1 caps=15 shoot=1 map=0" (shown: the
+//                                carry as swept, sent: the last pose sent, target: the aim's own pose, hold: the
+//                                object in the client's copy; aim: the object under the crosshair; edit / takes: the
+//                                Physics Gun may edit and take it; gun: in hand; shoot: alive; map: a map object), then
 //                                "... @label last=5 spawned=1 at=x,y,z" for the newest object
 //   100 omres 7                  an Object Manager answer to a Physics Gun edit (SPAWN_RESULT, action EDIT, status 7 =
 //                                Spawn in first) through the client's packet handler, as an edit on its way when we died
@@ -882,7 +884,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // gun takes on fire): "[input_script] pg t=100 @label grab=1 uid=5 frozen=0 releasing=0 drag=0 sel=-1
         // aim=5 aimfeet=x,y,z hold=x,y,z" (uid -1 none; aimfeet the crosshair's object's feet)
         int st[6];
-        om_build_probe(st);
+        float shown[3], sent[3], target[3];
+        om_build_probe(st, shown, sent, target);
         ObjectManagerAim aim;
         const int hit = client->me && object_manager_pick(&client->game, client->me, client->me->direction.x, client->me->direction.y, &aim);
         const Object *ao = hit && aim.object >= 0 ? client->game.map->objects[aim.object] : NULL;
@@ -892,12 +895,12 @@ static void script_run(Client *client, const ScriptEvent *e) {
         if (ho) snprintf(hf, sizeof(hf), "%.2f,%.2f,%.2f", ho->position.x, ho->position.y, ho->position.z);
         const int ai = hit ? aim.object : -1;
         const int dev = (object_manager_ui_caps() & OM_CAP_DEV) != 0;
-        fprintf(stderr, "[input_script] pg t=%.0f %s grab=%d uid=%d frozen=%d releasing=%d drag=%d sel=%d aim=%d aimfeet=%s hold=%s "
-                "edit=%d takes=%d gun=%d caps=%d shoot=%d\n",
-                g_script.time, e->arg[0] ? e->arg : "-", st[0], st[1], st[2], st[3], st[4], st[5], ai, af, hf,
+        fprintf(stderr, "[input_script] pg t=%.0f %s shown=%.2f,%.2f,%.2f sent=%.2f,%.2f,%.2f target=%.2f,%.2f,%.2f grab=%d uid=%d frozen=%d releasing=%d drag=%d sel=%d aim=%d aimfeet=%s hold=%s "
+                "edit=%d takes=%d gun=%d caps=%d shoot=%d map=%d\n",
+                g_script.time, e->arg[0] ? e->arg : "-", shown[0], shown[1], shown[2], sent[0], sent[1], sent[2], target[0], target[1], target[2], st[0], st[1], st[2], st[3], st[4], st[5], ai, af, hf,
                 ai >= 0 && object_manager_editable(&client->game, ai), ai >= 0 && object_manager_physgun_takes(&client->game, ai, dev),
                 client->me && client->me->weapon ? client->me->weapon->kn_physgun : -1, object_manager_ui_caps(),
-                client->me ? (int) client->me->active : -1);
+                client->me ? (int) client->me->active : -1, ai >= 0 && object_manager_is_map_object(&client->game, ai));
         if (client->game.map && client->game.map->object_count) {
             const Object *lo = client->game.map->objects[client->game.map->object_count - 1];
             fprintf(stderr, "[input_script] pg t=%.0f %s last=%zu spawned=%d at=%.2f,%.2f,%.2f\n", g_script.time, e->arg[0] ? e->arg : "-",

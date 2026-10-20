@@ -3,7 +3,8 @@
 
   python3 -I client/tests/physgun_cycle_e2e.py BUILD_DIR      (run from the repository root)
 
-One offline Kanji game (headless client_bin, input script, fixed 60 fps step; the local player is a dev).
+One offline Kanji game (headless client_bin, input script, fixed 60 fps step; the local player is a dev). The player
+is put at a fixed spot (tp) before each spawn, so the scene is the same run to run.
   1. Grab a spawned crate, carry it, drop it, pick it up again and drag it (the probe `pg` logs the gun's
      grab, the object under the crosshair, and the carried object's feet; `aimlast` turns the look onto the
      newest object, the crate, before each grab).
@@ -11,6 +12,8 @@ One offline Kanji game (headless client_bin, input script, fixed 60 fps step; th
      status 7 for an edit that was on its way: `omres 7`). The grab ends, and no toast is issued (`toast`
      counts ui_notify's toasts).
   3. Respawn, equip the Physics Gun again, spawn a crate and grab, drop and pick it up again.
+  4. A non-dev connection (KRUNKNATIVE_GUEST_LOCAL): a press 30 ms after the drop grabs the crate again, and the drag
+     moves it (the drop's pace window used to swallow that press). Real mdown / mup / look input only.
 The setup (a crate under the crosshair after each spawn) depends on the random spawn point, so a run whose
 spawn does not put a takeable crate under the crosshair is retried (up to six times); a gun failure is not.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
@@ -34,6 +37,7 @@ SCRIPT = """
 0 menu
 300 play
 500 con god
+550 tp 187 -139 -300 -4.712 0
 600 om physgun 0
 650 look 0 0.5
 900 om object 10
@@ -67,6 +71,7 @@ SCRIPT = """
 3050 mup left
 3100 respawn
 6000 state
+6040 tp 187 -139 -300 -4.712 0
 6050 om physgun 0
 6070 look 0 0.5
 6100 om object 10
@@ -82,8 +87,35 @@ SCRIPT = """
 6800 mup left
 6900 quit
 """
-PG_RE = re.compile(r"\[input_script\] pg t=\d+ @(\S+) grab=(\d) uid=(-?\d+) frozen=\d releasing=(\d) drag=\d sel=-?\d+ aim=(-?\d+) "
-                   r"aimfeet=(\S+) hold=(\S+) edit=(\d) takes=(\d) gun=(-?\d) caps=\d+ shoot=(-?\d)")
+# A non-dev connection (KRUNKNATIVE_GUEST_LOCAL: the Physics Gun paces its edits): the drop goes out at the
+# pace, and a press made before it has gone is kept, not dropped. Real button and look input only (mdown,
+# mup, look); the tp only places the player at a fixed spot in front of a fixed floor
+GUEST_SCRIPT = """
+0 menu
+300 play
+500 con god
+550 tp 187 -139 -300 -4.712 0
+600 om physgun 0
+900 om object 10
+1000 pg @spawned
+1100 mdown left
+1150 pg @grab
+1200 look 0.1 0
+1250 look -0.1 0
+1300 mup left
+1305 look 0 -0.05
+1310 pg @released
+1330 mdown left
+1400 pg @regrab
+1450 look 0.1 0
+1500 pg @regrab-drag
+1520 mup left
+1600 pg @end
+1650 quit
+"""
+
+PG_RE = re.compile(r"\[input_script\] pg t=\d+ @(\S+) shown=\S+ sent=\S+ target=\S+ grab=(\d) uid=(-?\d+) frozen=\d releasing=(\d) "
+                   r"drag=\d sel=-?\d+ aim=(-?\d+) aimfeet=(\S+) hold=(\S+) edit=(\d) takes=(\d) gun=(-?\d) caps=\d+ shoot=(-?\d) map=\d")
 TOAST_RE = re.compile(r"\[input_script\] toast t=\d+ @(\S+) n=(\d+)")
 
 
@@ -93,17 +125,19 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
 
 
-def run_once(attempt):
-    cfg = os.path.join(WORK, f"cfg{attempt}")
+def run_once(attempt, text=SCRIPT, name="physgun-cycle", guest=False):
+    cfg = os.path.join(WORK, f"cfg{name}{attempt}")
     os.makedirs(cfg, exist_ok=True)
-    script = os.path.join(WORK, f"physgun-cycle-{attempt}.script")
+    script = os.path.join(WORK, f"{name}-{attempt}.script")
     with open(script, "w") as f:
-        f.write(SCRIPT.strip() + "\n")
-    log = os.path.join(WORK, f"client-{attempt}.log")
+        f.write(text.strip() + "\n")
+    log = os.path.join(WORK, f"client-{name}-{attempt}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, f"state{attempt}"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, f"state{name}{attempt}"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS),
                 "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+    if guest:
+        env["KRUNKNATIVE_GUEST_LOCAL"] = "1"
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -172,6 +206,16 @@ def main():
     check("respawn: the grab works after a respawn", rg and rg["grab"] == 1, str(rg))
     check("respawn: the drop releases it", rd and rd["grab"] == 0, str(rd))
     check("respawn: the next grab picks it up again", rp and rp["grab"] == 1, str(rp))
+    # 4. a non-dev connection: a press 30 ms after the drop grabs (the pace window is not a dead time)
+    gtext = run_once(1, GUEST_SCRIPT, "guest-regrab", guest=True)
+    gpg, _ = parse(gtext)
+    gs = gpg.get
+    g_spawn, g_grab, g_rel, g_re, g_drag = gs("spawned"), gs("grab"), gs("released"), gs("regrab"), gs("regrab-drag")
+    check("guest: the crate is takeable", g_spawn and g_spawn["takes"] == 1 and g_spawn["edit"] == 1, str(g_spawn))
+    check("guest: the first grab takes it", g_grab and g_grab["grab"] == 1, str(g_grab))
+    check("guest: the drop releases it", g_rel and g_rel["grab"] == 0, str(g_rel))
+    check("guest: a press 30 ms after the drop grabs it again", g_re and g_re["grab"] == 1 and g_re["uid"] == g_grab["uid"], str(g_re))
+    check("guest: and the drag moves it", g_drag and g_re and g_drag["hold"] != g_re["hold"], f"{g_re and g_re['hold']} -> {g_drag and g_drag['hold']}")
     return 0 if all(results) else 1
 
 

@@ -17,7 +17,8 @@
 // the nearest quarter turn's), quarter turns for ramps and ladders (map.js "d"). The snap chord
 // (crouch + E, cont_omPhysSnapKey) held snaps the carry to 45 degrees and its feet to the Tool Gun's
 // grid step (tool_snap). A grab is unfrozen: releasing fire lets it down onto the surface below
-// (OM_EDIT_DROP). Right-click (the aim button) while carrying freezes it in place, so releasing
+// (OM_EDIT_DROP); a press during the drop's pace window (a non-dev waits up to OM_EDIT_INTERVAL for it) is
+// kept and grabs once the drop has gone, not lost. Right-click (the aim button) while carrying freezes it in place, so releasing
 // leaves it where it is; right-click again unfreezes it. Weapon swaps, reload, crouch and the zoom
 // are off while carrying. The carry is swept against the world (object_manager_carry_feet, the
 // authority's rule): it stops at the first solid, a gap short of it, and never goes below the map's
@@ -95,6 +96,7 @@ static struct {
     float turn;           // ramps / ladders: rotate-key mouse yaw not yet turned into a quarter turn
     ObjectManagerPose grabbed; // the pose at the grab (the free yaw's size: the nearest quarter turn's)
     int releasing;        // fire let go: the last edit waits for the server's pace
+    int press_held;       // a press came while releasing (the pace window): it grabs once the drop has gone
     // btools
     int sel;              // uid + 1, 0 none
     int drag;             // handle index + 1, 0 none
@@ -166,14 +168,18 @@ int om_build_frozen(void) { return g_ob.frozen != 0 && (g_ob.grab != 0 || g_ob.g
 
 int om_build_grabbing(void) { return g_ob.grab != 0; }
 
-// The input script's `pg` probe: [grabbing, the carried uid (-1 none), frozen, releasing, drag, selected uid]
-void om_build_probe(int out[6]) {
+// The input script's `pg` probe: [grabbing, the carried uid (-1 none), frozen, releasing, drag, selected uid], the
+// carry's shown, sent and target (the un-swept aim) feet
+void om_build_probe(int out[6], float shown[3], float sent[3], float target[3]) {
     out[0] = g_ob.grab != 0 || g_ob.grab_player != 0;
     out[1] = g_ob.grab ? g_ob.grab - 1 : -1;
     out[2] = g_ob.frozen;
     out[3] = g_ob.releasing;
     out[4] = g_ob.drag != 0;
     out[5] = g_ob.sel - 1;
+    shown[0] = g_ob.shown.position.x, shown[1] = g_ob.shown.position.y, shown[2] = g_ob.shown.position.z;
+    target[0] = g_ob.pose.position.x, target[1] = g_ob.pose.position.y, target[2] = g_ob.pose.position.z;
+    sent[0] = g_ob.sent.position.x, sent[1] = g_ob.sent.position.y, sent[2] = g_ob.sent.position.z;
 }
 
 // ---------------------------------------------------------------- geometry
@@ -342,12 +348,13 @@ void om_build_refused(const int status) {
     g_ob.grab_player = 0;
     g_ob.drag = 0;
     g_ob.releasing = 0;
+    g_ob.press_held = 0;
 }
 
 // The gun lets go of everything (the local player died, or a new connection): the grab, the drag, the
 // release still to send and the btools selection end where they are; nothing is sent
 void om_build_stop(void) {
-    g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = g_ob.frozen = 0;
+    g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = g_ob.frozen = g_ob.press_held = 0;
 }
 
 void om_build_reset(void) {
@@ -421,10 +428,12 @@ static void ob_shape(Game *game) {
 static void ob_physgun(Client *client, Player *me, Input *input, const float prev_pitch, const float prev_yaw, const int pressed, const int shoot,
                        const int aim_pressed, const int sampled) {
     if (g_ob.releasing) { // fire was let go: the last pose (and the drop, unless frozen) as soon as the pace allows
+        if (pressed) g_ob.press_held = 1; // a press in that window is not lost: it grabs once the drop has gone
         if (ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.frozen ? 0 : OM_EDIT_DROP)) g_ob.releasing = 0;
         return;
     }
-    if (!g_ob.grab && !g_ob.grab_player && pressed) {
+    if (!g_ob.grab && !g_ob.grab_player && (pressed || g_ob.press_held)) {
+        g_ob.press_held = 0;
         vec3 point, player_point;
         float player_t;
         const int uid = ob_pick_object(client, me, 1, &point);

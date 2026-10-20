@@ -622,7 +622,7 @@ float om_build_step_snap(int dir);               // the snap keys: the next comm
 void om_build_snap_text(char *out, size_t size); // "5", "0.25", "off"
 int  om_build_frozen(void);                       // the Physics Gun's carried object is frozen (right click): it stays on release
 int  om_build_grabbing(void);
-void om_build_probe(int out[6]);                  // the input script's `pg` probe (om_build.c)
+void om_build_probe(int out[6], float shown[3], float sent[3], float target[3]); // the input script's `pg` probe (om_build.c)
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
 void om_build_stop(void);                   // the local player died: the grab, drag and selection end, nothing sent
 void om_build_reset(void);                       // a new map / connection
