@@ -1221,6 +1221,29 @@ static void on_token(void *user, const int status, const char *body, const size_
 // wrote the list's first region to pingRegion7 unpinged: only a value knPingRegionPinged confirms counts.
 #define PINGED_KEY "knPingRegionPinged"
 static int g_region_racing;      // the ping race runs: a second seek waits for it (start_seek)
+static int g_ping_pending;       // start_seek's /mm/ping-list requests out (their answers not back yet)
+
+// The brain seek a ping list (start_seek) starts, carried to its answers: the game it asks for, and the Quick Play search it
+// belongs to (quick_play_retry.h). Once that search is stopped or replaced (F4, Quick Match again, Escape), its ping list
+// and region race answer late and are dropped, never a seek: seek() takes "a Quick Play search" from the search running at
+// that moment, so a late answer sent a plain Box Office seek after F4 had turned to krunker.io ("Could not reach the
+// matchmaker", then a Box Office lobby).
+typedef struct PingSeek {
+    char *game;   // the game id asked for (NULL: any)
+    unsigned gen; // quick_play_retry_generation() when the seek started
+    int qp;       // a Quick Play search's seek (0: none)
+} PingSeek;
+
+static void ping_seek_free(PingSeek *ps) {
+    if (!ps) return;
+    free(ps->game);
+    free(ps);
+}
+
+static int ping_seek_stale(const PingSeek *ps) { return ps && ps->qp && quick_play_retry_stale(ps->gen); }
+
+// A Box Office seek is out (its ping list, its race or its seek-game): F4 on Server Type krunker.io stops it and goes on to krunker.io
+static int brain_search_out(void) { return g_seek_inflight || g_region_racing || g_ping_pending; }
 
 static int region_listed(const char *region) {
     return region && region[0] && cJSON_GetObjectItemCaseSensitive(g_ping_regions, region) != NULL;
@@ -1249,8 +1272,13 @@ static void seek_in_region(const char *requested_game) {
 }
 
 static void on_region_race(void *user, const char *region) {
-    char *requested_game = user;
+    PingSeek *ps = user;
     g_region_racing = 0;
+    if (ping_seek_stale(ps)) { // the search was stopped while the pings ran: no seek of it
+        printf("[mm] quick play: a late ping race is ignored (the search was stopped)\n");
+        ping_seek_free(ps);
+        return;
+    }
     if (region && region_listed(region)) {
         snprintf(g_region, sizeof(g_region), "%s", region);
         html_storage_set("pingRegion7", g_region); // ClientManager.setDefaultRegion
@@ -1261,13 +1289,19 @@ static void on_region_race(void *user, const char *region) {
         html_storage_set("pingRegion7", g_region);
         printf("[mm] seek region: every ping failed: %s, the list's first\n", g_region);
     }
-    seek_in_region(requested_game);
-    free(requested_game);
+    seek_in_region(ps->game);
+    ping_seek_free(ps);
 }
 
 static void on_ping_list(void *user, const int status, const char *body, const size_t length) {
     (void) length;
-    char *requested_game = user;
+    PingSeek *ps = user;
+    if (g_ping_pending > 0) g_ping_pending--;
+    if (ping_seek_stale(ps)) { // the search was stopped while the list was out: no seek of it, no region race
+        printf("[mm] quick play: a late ping list is ignored (the search was stopped)\n");
+        ping_seek_free(ps);
+        return;
+    }
     cJSON *list = status == 200 ? cJSON_Parse(body) : NULL;
     char cached[32] = "", saved[32] = "";
     if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0) cached[0] = 0;
@@ -1292,12 +1326,12 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     // v10 getRegion: no Default Region and no confirmed cache (the list's first region, or none): the ping
     // race decides, and seeks in its winner (on_region_race). An unlisted Default Region races the same way
     if ((how == SEEK_REGION_FIRST || how == SEEK_REGION_NONE || how == SEEK_REGION_UNLISTED) && have_list &&
-        region_ping_race(g_ping_regions, NULL, on_region_race, requested_game)) {
+        region_ping_race(g_ping_regions, NULL, on_region_race, ps)) {
         g_region_racing = 1;
         return;
     }
-    seek_in_region(requested_game);
-    free(requested_game);
+    seek_in_region(ps->game);
+    ping_seek_free(ps);
 }
 
 static int start_seek(const char *game_id);
@@ -1353,9 +1387,16 @@ static int start_seek(const char *game_id) {
         seek(game_id, !game_id, NULL);
         return 1;
     }
-    char *copy = game_id && game_id[0] ? strdup(game_id) : NULL;
-    if (!mm_get("/mm/ping-list", on_ping_list, copy)) {
-        free(copy);
+    PingSeek *ps = calloc(1, sizeof(*ps));
+    if (ps) {
+        ps->game = game_id && game_id[0] ? strdup(game_id) : NULL;
+        ps->qp = quick_play_retry_running(); // a Quick Play search's: stopped or replaced, its answers are dropped
+        ps->gen = quick_play_retry_generation();
+    }
+    g_ping_pending++;
+    if (!ps || !mm_get("/mm/ping-list", on_ping_list, ps)) {
+        g_ping_pending--;
+        ping_seek_free(ps);
         g_find_seek = g_find_both = 0;
         g_reload_next = 0;
         fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
@@ -4313,8 +4354,12 @@ static int find_new_game_seek(void) {
 // is out), it stops and no new one starts (quick_play_retry.h); 1 = handled.
 int servers_ui_find_new_game(void) {
     if (quick_play_retry_running()) {
+        // a press stops the search out; with Server Type krunker.io a stopped Box Office search (the launch's, a
+        // Box Office F4's) gives way to krunker.io's Find New Game instead: its late answers are dropped (PingSeek)
+        const int box_office = brain_search_out();
         quick_play_retry_cancel();
-        return 1;
+        if (seek_prefs_servers() != SEEK_SERVERS_OFFICIAL || !box_office) return 1;
+        printf("[mm] find new game: the Box Office search is stopped, Server Type krunker.io\n");
     }
     qp_begin();
     return qp_started(find_new_game_seek());

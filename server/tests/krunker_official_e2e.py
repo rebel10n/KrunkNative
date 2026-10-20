@@ -504,6 +504,8 @@ class Stub:
         # the Find New Game runs with Server Type Box Office (run_native_f4_server_type): the brain's own seek
         # (<stub>/brain/mm/seek-game, its ping list too): a function(query) -> (status, answer), None = not served
         self.brain_seek = None
+        # seconds a loopback region's /ping takes (the fresh-profile ping race of a seek answers late: F4 may come first)
+        self.ping_delay = 0.0
 
     def speak(self, live):
         self.live = live
@@ -522,6 +524,8 @@ class Stub:
                 q = urllib.parse.parse_qsl(u.query, keep_blank_values=True)
                 stub.http_log.append((u.path, q, u.query))
                 status = 200
+                if u.path == "/ping" and stub.ping_delay:
+                    time.sleep(stub.ping_delay)
                 if u.path in stub.published:  # the published Krunker build (tools/krunker/publish_build.py)
                     status, body = stub.published[u.path]
                     ctype = "application/json"
@@ -3862,15 +3866,56 @@ def run_native_bo_f4_in_kio():
           [l for l in after if "[mm]" in l][:3])
 
 
+def run_native_f4_setting_race():
+    """The user's sequence on a fresh profile (no saved settings: Auto Seek on Launch is on, Server Type Box Office): the launch's
+    Box Office search is still racing the regions' pings (a slow ping: the fresh profile's race) when the player sets Server
+    Type krunker.io and presses F4. F4 stops that search; its late ping race must not seek Box Office, neither a join nor the
+    "Could not reach the matchmaker" of a Box Office seek that gets no answer ("native-f4-setting-race": the brain answers with a
+    lobby; "native-f4-setting-race-noanswer": the brain gives no answer). F4 answers with krunker.io's own result instead."""
+    for label, answer in (("native-f4-setting-race", "lobby"), ("native-f4-setting-race-noanswer", "none")):
+        dead_port = kn_proto.free_ports(1)[0]
+        seeks = []
+
+        def setup(st, answer=answer, dead_port=dead_port, seeks=seeks):
+            st.ping_delay = 4.0  # the region's ping answers after F4 has come and gone
+            st.lobbies = []  # krunker.io's list: no lobby with room
+            brain_box_office_room(st, dead_port, seeks)
+            if answer == "none":
+                st.brain_seek = lambda q: (0, {})  # no answer at all: the client's status 0 (a Box Office seek nothing answers)
+        script = '0 boot\n1000 call setSetting "knSeekServers" "official"\n1500 down F4\n1550 up F4\n9000 quit\n'
+        stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                          args=(), stub_setup=setup)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        text = "\n".join(lines)
+        f4 = next((i for i, l in enumerate(lines) if "[controls] F4" in l), len(lines))
+        after = lines[f4:]
+        check(f"{label}: the Box Office launch search was racing the pings when F4 came",
+              f4 < len(lines) and any("[mm] ping race: 1 region" in l for l in lines[:f4]), [l for l in lines if "[mm]" in l][:4])
+        check(f"{label}: no Box Office seek-game request (the late ping race is dropped)", not any(
+            pth == "/brain/mm/seek-game" for pth, _, _ in stub.http_log), [pth for pth, _, _ in stub.http_log][-6:])
+        check(f"{label}: F4 joins no Box Office lobby", not any(l.startswith("[mm] joining") for l in lines),
+              [l for l in lines if "[mm] joining" in l][:2])
+        check(f"{label}: no 'Could not reach the matchmaker' after F4", not any("Could not reach the matchmaker" in l for l in after),
+              [l for l in after if "Could not reach" in l][:2])
+        check(f"{label}: the late ping race was dropped (the search was stopped)", any("a late ping race is ignored" in l for l in after),
+              [l for l in after if "[mm]" in l][-4:])
+        check(f"{label}: F4 shows krunker.io's own answer (no lobby with room)", any("No official krunker.io lobby has room" in l for l in after),
+              [l for l in after if "[krunker]" in l][-3:])
+        check(f"{label}: the setting reached Server Type krunker.io", "setSetting knSeekServers=official" in text,
+              [l for l in lines if "knSeekServers" in l][:2])
+
+
 def run_native_f4_drops():
     """Server Type runs around krunker.io's own failures (the Box Office recovery must not take them): a krunker.io game
     that drops (no rejoin through Box Office, "native-kio-drop"; F4 after it joins krunker.io, "native-kio-drop-f4"), Find
     Game on krunker.io's "no room" error (never a Box Office seek, "native-kio-retry") and F4 in a krunker.io game with
-    Server Type Box Office (the Box Office seek once the game gives way, "native-bo-f4-in-kio")."""
+    Server Type Box Office (the Box Office seek once the game gives way, "native-bo-f4-in-kio"). The setting change then
+    F4 on a fresh profile, while the launch's Box Office search races (run_native_f4_setting_race)."""
     run_native_kio_drop()
     run_native_kio_drop(f4=True)
     run_native_kio_retry()
     run_native_bo_f4_in_kio()
+    run_native_f4_setting_race()
 
 
 def run_native_reload(gone):
