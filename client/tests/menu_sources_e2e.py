@@ -21,7 +21,12 @@ types showed them in Popular Now, and the streams were the brain's for every Ser
 Each card's picture: the answer's thumbnailUrl is a JPEG on a third stub (the CDN: /previews/<name>-440x248.jpg). The
 first card's <img src> is that URL, as v10's markup sets it (v10.js:146254) on every Server Type, the CDN is asked for
 it, and the picture is drawn in a frame of the page. The cache is cold (KRUNKNATIVE_REMOTE_IMAGE_CACHE): the picture
-arrives after the page's first paint, and the page must repaint to show it.
+arrives after the page's first paint, and the page must repaint to show it. The client never asks the brain's
+/streams/thumb for a picture (the stub counts such requests).
+
+Each answer has three streams, so the overlay has three cards: they sit in one row inside the grid's content box and
+the grid is no taller than them, on every Server Type. A horizontal scrollbar under the cards would make the grid
+taller, and v10's overlay has none (its width is its cards', v10.js:146254).
 
 Exit code 0 when every check passed; the input-script log is kept in ~/.cache/kn-menu-sources-e2e-* on failure.
 """
@@ -83,9 +88,12 @@ def picture(cdn_port, name):
     return "http://127.0.0.1:%d/previews/%s-440x248.jpg" % (cdn_port, name)
 
 
-def streams_answer(username, thumbnail):
+def streams_answer(username, cdn_port):
+    """Three live streams (the overlay's three cards), each with its picture on the stub CDN; the first is `username`."""
+    names = [username, username + "_2", username + "_3"]
     return {"success": True, "data": {"streams": [
-        {"username": username, "title": "Live from " + username, "viewerCount": 1250, "thumbnailUrl": thumbnail, "languageCode": "en"}],
+        {"username": name, "title": "Live from " + name, "viewerCount": views, "thumbnailUrl": picture(cdn_port, name),
+         "languageCode": "en"} for name, views in zip(names, (1250, 12, 7))],
         "promo": False, "dropCampaigns": []}}
 
 
@@ -229,8 +237,43 @@ def phase(t, tag):
             "%d attr @%s_thumb src [id=knStreamThumb0]\n"
             "%d rect @%s_box knStreamThumb0\n"
             "%d frames %s 1\n"
+            "%d rects @%s_grid [id=knStreams] .streams-grid\n"
+            "%d rects @%s_cards [id=knStreams] .stream-card\n"
+            "%d rect @%s_ovbox knStreams\n"
             % (t, tag, t + 5, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag, t + 45, tag,
-               t + 46, tag, t + 47, os.path.join(WORK, tag)))
+               t + 46, tag, t + 47, os.path.join(WORK, tag),
+               t + 100, tag, t + 100, tag, t + 100, tag))
+
+
+def boxes(log, label):
+    """A rects probe: (match count, [(x, y, w, h)]) in window pixels, or None when the command did not run."""
+    m = re.search(r"\[input_script\] rects t=\d+ " + re.escape(label) + r" n=(\d+)((?: \S+@\S+)*)", log)
+    if not m:
+        return None
+    return int(m.group(1)), [tuple(float(v) for v in tok.split("@", 1)[1].split(",")) for tok in m.group(2).split()]
+
+
+def rect_box(log, label):
+    """A rect probe (label, then the page id): (x, y, w, h, offsetWidth, offsetHeight), the box in window pixels then the
+    layout size; or None."""
+    m = re.search(r"\[input_script\] rect t=\d+ " + re.escape(label) + r" [^=\s]+=([\d.]+),([\d.]+),([\d.]+),([\d.]+),([\d.]+),([\d.]+)", log)
+    return tuple(float(v) for v in m.groups()) if m else None
+
+
+def overlay_fits(log, tag):
+    """(ok, detail): the three cards sit in one row inside the grid's content box (the grid's 4 px padding-right is not
+    card space), and the grid is no taller than its cards. A horizontal scrollbar under the cards is a strip that makes
+    the grid taller, and cards past the content box are what makes one appear."""
+    g, c, ov = boxes(log, "@%s_grid" % tag), boxes(log, "@%s_cards" % tag), rect_box(log, "@%s_ovbox" % tag)
+    if not g or not c or not ov or g[0] != 1 or c[0] != 3 or len(g[1]) != 1 or len(c[1]) != 3 or not ov[4]:
+        return False, f"the probes did not run (grid {g}, cards {c}, overlay {ov})"
+    gx, _, gw, gh = g[1][0]
+    k = ov[2] / ov[4]  # window pixels per layout pixel (the page is scaled to the window)
+    one_row = all(abs(y - c[1][0][1]) < 0.6 for _, y, _, _ in c[1])
+    inside = all(x + w <= gx + gw - 4 * k + 0.6 for x, _, w, _ in c[1])
+    no_strip = gh <= c[1][0][3] + 0.6
+    return one_row and inside and no_strip, (f"one row {one_row}, inside the content box {inside}, "
+                                             f"grid {gh:.1f} px for cards {c[1][0][3]:.1f} px")
 
 
 def picture_drawn(log, tag):
@@ -258,8 +301,10 @@ def picture_drawn(log, tag):
 def main():
     cdn = ThreadingHTTPServer(("127.0.0.1", 0), Cdn)
     cdn_port = cdn.server_address[1]
-    Brain.routes = {"/streams/top": streams_answer("box_office_live", picture(cdn_port, "box_office_live"))}
-    Krunker.routes = {"/game-list": KRUNKER, "/streams/top": streams_answer("kio_live", picture(cdn_port, "kio_live"))}
+    # /streams/thumb is answered too, so a request for it is counted (the client asks for pictures from their thumbnailUrl)
+    Brain.routes = {"/streams/top": streams_answer("box_office_live", cdn_port),
+                    "/streams/thumb": {"success": True, "data": {"url": "", "image": ""}}}
+    Krunker.routes = {"/game-list": KRUNKER, "/streams/top": streams_answer("kio_live", cdn_port)}
     brain = ThreadingHTTPServer(("127.0.0.1", 0), Brain)
     kio = ThreadingHTTPServer(("127.0.0.1", 0), Krunker)
     for s in (cdn, brain, kio):
@@ -323,6 +368,12 @@ def main():
         check(Cdn.hits.get(path, 0) >= 1, f"{name}: the CDN's picture was fetched")
         check(("[image] %s: arrived" % want) in log, f"{name}: the picture reached the engine")
         check(picture_drawn(log, tag), f"{name}: the picture is drawn on the card (a frame of the page)")
+
+    # The three cards fit the overlay on every Server Type: no horizontal scrollbar under them
+    for tag, name in (("bo", "Box Office servers"), ("kio", "krunker.io servers"), ("both", "Both"), ("bo2", "Box Office servers again")):
+        ok, detail = overlay_fits(log, tag)
+        check(ok, f"{name}: the three cards fit the Live Streams overlay, no horizontal scrollbar ({detail})")
+    check(Brain.hits.get("/streams/thumb", 0) == 0, "the client never asks the brain's /streams/thumb for a picture")
 
     if failures:
         print(f"menu_sources_e2e: {len(failures)} failed (logs in {WORK})")

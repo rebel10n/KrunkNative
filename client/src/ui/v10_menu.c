@@ -501,6 +501,17 @@ static void streams_viewers(char *out, const size_t n, const int v) {
     else snprintf(out, n, "%d", v);
 }
 
+// v10 sizes the overlay to its cards in the small view (v10.js:146254: 180 px a card, 16 px between, 32 px more for the
+// padding and border). The auto-fill grid then holds exactly those columns, and a card's 1 px border (182 px) has room
+// in the grid's content box. Left at its content's width, the grid is exactly the three 180 px tracks, the cards run
+// past them and the grid's overflow-y: auto (.regular-grid) draws a horizontal scrollbar under the cards. Closed, or
+// with no cards, the overlay is as wide as its content (v10's closed view: width auto).
+static void streams_width(HtmlElem ov) {
+    char px[32] = "";
+    if (!L.closed && L.n > 0) snprintf(px, sizeof px, "%dpx", 180 * L.n + 16 * (L.n - 1) + 32);
+    html_dom_set_style(ov, "width", px);
+}
+
 // The overlay is the page's own (ui/index.html #knStreams: v10's header with the Hide button); its
 // body (the cards, or the empty text) is rebuilt at every answer. No answer: the overlay is hidden.
 static void streams_render(void) {
@@ -518,7 +529,8 @@ static void streams_render(void) {
         sb_append_esc(&sb, I18N("streamers.none", "No active streams!"));
         sb_append(&sb, "</div>");
     } else {
-        sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", L.n);
+        // v10's markup: no inline columns, the grid's auto-fill 180 px tracks (.regular-grid, svelte.css) fill the overlay
+        sb_append(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\">");
         for (int i = 0; i < L.n; i++) {
             char count[24], views[64];
             streams_viewers(count, sizeof count, L.viewers[i]);
@@ -547,6 +559,7 @@ static void streams_render(void) {
     if (html) html_dom_insert_html(ov, HTML_INSERT_BEFORE_END, html);
     free(html);
     set_display(by_id("knStreamsBody"), L.closed ? "none" : "");
+    streams_width(ov);
     HtmlElem hide = by_id("knStreamsHide");
     if (hide) html_dom_set_text(hide, L.closed ? "Show" : "Hide");
 }
