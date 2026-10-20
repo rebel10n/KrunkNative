@@ -3418,13 +3418,17 @@ static void on_maps(void *user, const int status, const char *body, const size_t
     menu_rerender_if_open(10); // mapsLoaded -> updateWindow(10)
 }
 
-static void games_request(const int tab) {
+// 1 when the page was asked for; 0 when the request was refused at once (the brain gate while a
+// krunker.io session is the active backend, or no queue): no answer will ever come for it
+static int games_request(const int tab) {
     char path[160];
     const AccountInfo *acc = active_account();
     int n = snprintf(path, sizeof(path), "/api/maps?index=%d&pos=%d", tab, g_games_tabs[tab].pos);
     if (acc) snprintf(path + n, sizeof(path) - (size_t) n, "&accountId=%d", acc->id);
     g_games_tabs[tab].waiting = 1;
-    if (!backend_http_get(path, on_maps, (void *) (intptr_t) tab)) g_games_tabs[tab].waiting = 0;
+    if (backend_http_get(path, on_maps, (void *) (intptr_t) tab)) return 1;
+    g_games_tabs[tab].waiting = 0;
+    return 0;
 }
 
 int servers_games_tab_rows(const int tab, const cJSON **rows) {
@@ -3432,7 +3436,12 @@ int servers_games_tab_rows(const int tab, const cJSON **rows) {
     if (!g_games_tabs[tab].requested) {
         g_games_tabs[tab].requested = 1;
         g_games_tabs[tab].pos = 0;
-        games_request(tab);
+        if (!games_request(tab)) {
+            // refused at once, so "Loading..." would never clear: the catalogue shows now and the
+            // next render asks again (not failed: a brain that refuses only for a while is not gone)
+            g_games_tabs[tab].requested = 0;
+            return -1;
+        }
     }
     if (!g_games_tabs[tab].rows) return 0;
     *rows = g_games_tabs[tab].rows;
@@ -3494,7 +3503,11 @@ static void games_load_more(const HtmlEvent *ev) {
         html_dom_set_html(ev->target, "Loading...");
     }
     g_games_tabs[data].pos++;
-    games_request(data);
+    if (!games_request(data)) {
+        // refused at once: the page number is not used up, and the Load More control comes back
+        g_games_tabs[data].pos--;
+        menu_rerender_if_open(10);
+    }
 }
 
 // windows[9].playerData[map]: players on that map in the brain's game list
