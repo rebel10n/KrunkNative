@@ -4,7 +4,6 @@
 #include <quick_play_retry.h>
 
 #include <GLFW/glfw3.h>
-#include <i18n.h>
 #include <stdio.h>
 #include <ui_logic.h>
 
@@ -16,7 +15,6 @@ static struct {
     int running;              // a search is out (busy) or a retry waits (pending)
     int busy;                 // a seek or a join of the search is in flight
     int pending;              // a retry is due at `at`
-    int shown;                // "Searching..." is up (cleared with the search)
     int tries;                // retries scheduled in this search (the backoff's step)
     double at;                // glfwGetTime() of the waiting retry
     QuickPlayRetryFn fn;      // the waiting retry
@@ -29,12 +27,6 @@ static struct {
 static double backoff(const int tries) {
     const double s = QP_RETRY_FIRST_S + tries;
     return s < QP_RETRY_CAP_S ? s : QP_RETRY_CAP_S;
-}
-
-static void hide_searching(void) {
-    if (!Q.shown) return;
-    Q.shown = 0;
-    ui_loadout_clear_pops(); // the search's popup only: closed as the outcome is shown
 }
 
 void quick_play_retry_begin(void) {
@@ -66,10 +58,6 @@ int quick_play_retry_schedule(QuickPlayRetryFn fn, void *user) {
     Q.at = glfwGetTime() + backoff(Q.tries);
     printf("[mm] quick play: the lobby is full: trying again in %.0f s\n", backoff(Q.tries));
     Q.tries++;
-    if (!Q.shown) { // a waiting search says so; the text is the loading one the finder shows
-        Q.shown = 1;
-        ui_loading_popup(I18N("kn.finder.searching", "Searching..."));
-    }
     return 1;
 }
 
@@ -97,7 +85,6 @@ void quick_play_retry_cancel(void) {
     Q.fn = NULL;
     Q.user = NULL;
     Q.tries = 0;
-    hide_searching();
 }
 
 void quick_play_retry_end(void) {
@@ -107,7 +94,6 @@ void quick_play_retry_end(void) {
     Q.fn = NULL;
     Q.user = NULL;
     Q.tries = 0;
-    hide_searching();
 }
 
 unsigned quick_play_retry_generation(void) { return Q.gen; }

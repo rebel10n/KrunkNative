@@ -16,7 +16,8 @@ drive it; Q1 drives the error screen's Find Game (knRetry -> servers_ui_retry).
 
   Q1 Find Game (the error screen's, after the startup seek failed with NoAvailableServers): two full lobbies,
      then a lobby with room: the client joins that lobby, the seeks after the full ones leave them out
-     (excludeRecent), and no error is shown
+     (excludeRecent), no error is shown, and no popup shows while the search runs (v10's Quick Match seek
+     shows none: the probes of with_popup_probes)
   Q2 Quick Match (the menu's button, backToOrigin): the same answers, the same joined lobby
   Q3 Auto Seek on Launch: the launch's seek retries the same way
   Q4 Quick Match pressed again stops the search: the retry waiting after the first full answer is dropped
@@ -172,6 +173,23 @@ def exclude_recent(q):
     return [x for x in q.get("excludeRecent", "").split(",") if x]
 
 
+POPUP_CLASS = re.compile(r"\[input_script\] attr t=\S+ @pop n=(\d+) class=(.*)$", re.M)
+POPUP_TEXT = re.compile(r"\[input_script\] grep t=\S+ @pop needle=searching n=(\d+) hits=(\d+)")
+
+
+def with_popup_probes(script, start, end, step=250):
+    """The script with popup probes every `step` ms from start to end: the class of the generic popup element
+    (input_script's attr: no loadingPop while a search runs) and whether it says Searching (its grep). The
+    probes take the attribute selector [id=genericPop]: a #id selector matches nothing in the page engine's
+    query. v10's Quick Match seek shows no popup (v10.js:222040-222090), so a search must leave both clear."""
+    timed = [line for line in script.splitlines() if line.strip()]
+    for t in range(start, end + 1, step):
+        timed.append(f"{t} attr @pop class [id=genericPop]")
+        timed.append(f"{t + 1} grep @pop searching [id=genericPop]")
+    timed.sort(key=lambda line: int(line.split()[0]))  # stable: the script's own order for equal times
+    return "\n".join(timed) + "\n"
+
+
 def retried_twice(text):
     return sum("[mm] quick play: the lobby is full" in line for line in text.splitlines()) == 2
 
@@ -192,6 +210,13 @@ def check_retries(label, text, run):
           len(run) >= 3 and {LOBBY_FULL_A, LOBBY_FULL_B} <= set(exclude_recent(run[2])), run[2:3])
     check(f"{label}: no error is shown (no find new game failure, no GameFull)", not find_failed(text),
           [line for line in lines if "failed" in line][:4])
+    classes = POPUP_CLASS.findall(text)
+    texts = [(int(n), int(h)) for n, h in POPUP_TEXT.findall(text)]
+    check(f"{label}: no popup while the search runs (#genericPop has no loadingPop class, no Searching text)",
+          len(classes) >= 10 and len(texts) == len(classes)
+          and all(n == "1" and "loadingPop" not in cls for n, cls in classes)
+          and all(n == 1 and h == 0 for n, h in texts),
+          (len(classes), [c for c in classes if "loadingPop" in c[1] or c[0] != "1"][:3], texts[:3]))
 
 
 def main():
@@ -223,21 +248,21 @@ def main():
 
     # Q1: the error screen's Find Game (knRetry) after the startup seek failed
     brain.begin(startup_error_then_full_full_room)
-    text = run_client("Q1", "0 boot\n4000 call knRetry\n40000 quit\n", brain_port, saved)
+    text = run_client("Q1", with_popup_probes("0 boot\n4000 call knRetry\n40000 quit\n", 4000, 20000), brain_port, saved)
     run = brain.run_seeks()[1:]
     check("Q1: Find Game seeks a new game after the startup seek failed", len(run) >= 1, len(run))
     check_retries("Q1", text, run)
 
     # Q2: Quick Match (the menu's button, backToOrigin): the entry point F4 uses too
     brain.begin(startup_error_then_full_full_room)
-    text = run_client("Q2", "0 boot\n4000 call backToOrigin\n40000 quit\n", brain_port, saved)
+    text = run_client("Q2", with_popup_probes("0 boot\n4000 call backToOrigin\n40000 quit\n", 4000, 20000), brain_port, saved)
     run = brain.run_seeks()[1:]
     check("Q2: Quick Match seeks a new game", "[mm] quick match: seeking a lobby other than" in text, len(run))
     check_retries("Q2", text, run)
 
     # Q3: Auto Seek on Launch: the launch seek is the search itself
     brain.begin(launch_full_full_room)
-    text = run_client("Q3", "0 boot\n40000 quit\n", brain_port, launch)
+    text = run_client("Q3", with_popup_probes("0 boot\n40000 quit\n", 0, 20000), brain_port, launch)
     run = brain.run_seeks()
     check("Q3: the launch seeks", "[mm] launch seek" in text, len(run))
     check_retries("Q3", text, run)

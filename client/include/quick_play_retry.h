@@ -2,8 +2,9 @@
 // Quick Play retry: a Quick Play search (Quick Match and F4 Find New Game, Find Game, the launch's
 // Auto Seek, Quick Join, and the krunker.io ones) that is answered "full" is not the end of it. The
 // same seek is made again after a short backoff (1 s, then 2, 3, 4 and 5 s, the cap), until a lobby
-// takes the player. "Searching..." shows while it waits. A cancel (F4 or Quick Match again, Escape,
-// leaving the menu, a manual join) stops it, and an answer that was on its way is then ignored.
+// takes the player. Nothing is shown while it waits (v10's Quick Match seek shows no popup, v10.js:222040).
+// A cancel (F4 or Quick Match again, Escape, leaving the menu, a manual join) stops it, and an answer that
+// was on its way is then ignored.
 //
 // The matchmaking code keeps its own state (which lobbies were full, the find flags); this module
 // only owns the timer, the run's busy / waiting state and the generation that tells a stale answer.
@@ -21,7 +22,7 @@ int quick_play_retry_running(void);
 void quick_play_retry_out(void);
 // The answer of the seek in flight arrived: the search is out no more (a retry may be scheduled after).
 void quick_play_retry_answered(void);
-// Schedules fn(user) after the backoff and shows "Searching...". Returns 1: the caller must not show
+// Schedules fn(user) after the backoff, with no popup. Returns 1: the caller must not show
 // the full error. A waiting retry is replaced by the new one.
 int quick_play_retry_schedule(QuickPlayRetryFn fn, void *user);
 // Fires the retry that is due (servers_ui_tick, once per frame). Nothing happens when none is due.
