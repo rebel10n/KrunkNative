@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """KrunkNative updates server (doc/backend.md "Client updates"): static files the launcher reads.
 
-    stage    CI (client.yml job `updates`): picks each platform's update package (the BoxOffice-<platform>
-             archive: tar.gz on Linux, zip on Windows and macOS) out of the client packages, writes
-             build.json (kn-build line, sha256/size per package, human download links, the assets/ files
-             the packages ship).
+    stage    CI (client.yml job `updates`): picks each platform's executable-only update package
+             (.tar.gz, Windows .zip) out of the client packages, writes build.json (kn-build line,
+             sha256/size per package, human download links, the assets/ files the packages ship).
     publish  kru (over ssh after the CI rsync): moves a staged build into public/client/builds/,
              indexes the game content (the web asset tree, minus the files the packages ship)
              into content-addressed objects (hardlinks: no extra disk), writes the asset list and,
@@ -40,7 +39,7 @@ import tempfile
 import zipfile
 
 FORMAT = 1
-PKG_RE = re.compile(r"^BoxOffice-(?P<plat>(?:linux|windows|macos)-[a-z0-9]+)\.(?P<ext>tar\.gz|zip)$")
+PKG_RE = re.compile(r"^krunknative-client-(?P<plat>[a-z0-9]+(?:-[a-z0-9_]+)*?)\.(?P<ext>tar\.gz|zip|deb|rpm)$")
 HEX_RE = re.compile(r"^[0-9a-f]+$")
 PLAT_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9_]+)*$")
 DEFAULT_ROOT = "/opt/krunknative-updates"
@@ -139,15 +138,7 @@ def cmd_stage(a):
             continue
         found.setdefault(m.group("plat"), {})[m.group("ext")] = os.path.join(a.packages, name)
     if not found:
-        die(f"no BoxOffice-<platform>.<ext> packages in {a.packages}")
-    summed = {}  # name -> sha256 from the release's SHA256SUMS, when the packages dir has one
-    sums_path = os.path.join(a.packages, "SHA256SUMS")
-    if os.path.exists(sums_path):
-        with open(sums_path) as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) == 2:
-                    summed[parts[1].lstrip("*")] = parts[0].lower()
+        die(f"no krunknative-client-<platform>.<ext> packages in {a.packages}")
     page = a.page
     if not page and a.download_base:
         page = re.sub(r"/releases/download/([^/]+)/?$", r"/releases/tag/\1", a.download_base.rstrip("/"))
@@ -155,14 +146,17 @@ def cmd_stage(a):
     for plat, exts in sorted(found.items()):
         if not PLAT_RE.match(plat):
             die(f"bad platform id {plat}")
-        kind = "tar.gz" if plat.startswith("linux-") else "zip"
+        kind = "zip" if plat.startswith("windows-") else "tar.gz"
         entry = {"downloads": {}}
         for ext, path in sorted(exts.items()):
             name = os.path.basename(path)
             digest = sha256_file(path)
-            # the release's SHA256SUMS (client.yml publish) names every package: a mismatch is a broken upload
-            if summed and name in summed and summed[name] != digest:
-                die(f"{name}: does not match SHA256SUMS")
+            side = path + ".sha256"
+            if os.path.exists(side):
+                with open(side) as f:
+                    want = f.read().split()
+                if not want or want[0].lower() != digest:
+                    die(f"{name}: does not match {os.path.basename(side)}")
             if a.download_base:
                 entry["downloads"][ext] = f"{a.download_base.rstrip('/')}/{name}"
             if ext == kind:
@@ -464,7 +458,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("stage", help="CI: stage this run's update packages + build.json")
     s.add_argument("--kn-build", required=True, help="the kn_build JSON line (tools/release/version-meta.sh)")
-    s.add_argument("--packages", required=True, help="directory with BoxOffice-<platform>.<ext> (+ SHA256SUMS)")
+    s.add_argument("--packages", required=True, help="directory with krunknative-client-<plat>.<ext> (+ .sha256)")
     s.add_argument("--out", required=True)
     s.add_argument("--channel", default="latest")
     s.add_argument("--download-base", default="", help="human download links: <base>/<package> (e.g. the GitHub release)")

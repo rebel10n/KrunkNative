@@ -12,7 +12,6 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #define CLIENT_EXE_NAME "client.exe"
-#define LAUNCHER_EXE_NAME "BoxOffice.exe"
 #else
 #include <fcntl.h>
 #include <poll.h>
@@ -22,7 +21,6 @@
 #include <time.h>
 #include <unistd.h>
 #define CLIENT_EXE_NAME "client_bin"
-#define LAUNCHER_EXE_NAME "BoxOffice"
 extern char **environ;
 #endif
 
@@ -46,35 +44,28 @@ int kn_install_locate(KnInstall *in, const char *root_override) {
     memset(in, 0, sizeof(*in));
     if (root_override && *root_override) {
         if (!kn_fs_absolute(root_override, in->exe_dir, sizeof(in->exe_dir))) return 0;
-        kn_fs_join(in->exe, sizeof(in->exe), in->exe_dir, LAUNCHER_EXE_NAME);
+        kn_fs_join(in->exe, sizeof(in->exe), in->exe_dir, "krunknative");
     } else {
         if (!kn_fs_self_exe(in->exe, sizeof(in->exe))) return 0;
         snprintf(in->exe_dir, sizeof(in->exe_dir), "%s", in->exe);
         kn_fs_dirname(in->exe_dir);
     }
-    // the package's runtime/: next to the launcher, or (macOS) next to BoxOffice.app, which is
-    // Contents/MacOS/BoxOffice. A dev tree has no runtime/: the client sits next to the launcher.
-    char candidates[2][KN_PATH_MAX], runtime[KN_PATH_MAX];
-    kn_fs_join(candidates[0], KN_PATH_MAX, in->exe_dir, KN_RUNTIME_DIR);
-    kn_fs_join(candidates[1], KN_PATH_MAX, in->exe_dir, "../../../" KN_RUNTIME_DIR);
-    snprintf(runtime, sizeof(runtime), "%s", in->exe_dir);
-    for (int i = 0; i < 2; i++) {
-        char probe[KN_PATH_MAX];
-        kn_fs_join(probe, sizeof(probe), candidates[i], CLIENT_EXE_NAME);
-        if (!kn_fs_exists(probe)) continue;
-        kn_fs_absolute(candidates[i], runtime, sizeof(runtime));
-        break;
-    }
-    kn_fs_join(in->client, sizeof(in->client), runtime, CLIENT_EXE_NAME);
-    // kn-install.json sits in the runtime/ directory, and its "root" names the install root
-    if (read_marker(runtime, &in->marker)) {
+    kn_fs_join(in->client, sizeof(in->client), in->exe_dir, CLIENT_EXE_NAME);
+    // kn-install.json: next to the launcher, or in ../Resources of a macOS bundle
+    char candidates[2][KN_PATH_MAX];
+    snprintf(candidates[0], KN_PATH_MAX, "%s", in->exe_dir);
+    kn_fs_join(candidates[1], KN_PATH_MAX, in->exe_dir, "../Resources");
+    for (int i = 0; i < 2 && !in->has_marker; i++) {
+        if (!read_marker(candidates[i], &in->marker)) continue;
         in->has_marker = 1;
-        snprintf(in->marker_dir, sizeof(in->marker_dir), "%s", runtime);
+        kn_fs_absolute(candidates[i], in->marker_dir, sizeof(in->marker_dir));
+    }
+    if (in->has_marker) {
         char root[KN_PATH_MAX];
-        kn_fs_join(root, sizeof(root), runtime, in->marker.root);
+        kn_fs_join(root, sizeof(root), in->marker_dir, in->marker.root);
         kn_fs_absolute(root, in->root, sizeof(in->root));
     } else {
-        snprintf(in->marker_dir, sizeof(in->marker_dir), "%s", runtime);
+        snprintf(in->marker_dir, sizeof(in->marker_dir), "%s", in->exe_dir);
         snprintf(in->root, sizeof(in->root), "%s", in->exe_dir);
     }
     snprintf(in->platform, sizeof(in->platform), "%s",

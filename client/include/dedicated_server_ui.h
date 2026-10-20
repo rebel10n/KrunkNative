@@ -5,7 +5,7 @@
 // Download window (download_ui.c, showWindow(25)) with its .knDl* look (ui/css/krunknative.css):
 //   - the server_bin packages of the rolling GitHub release `server-latest` (.github/workflows/
 //     release.yml, tools/release/package-server.sh): this computer's first, every other platform
-//     below, with the release's SHA256SUMS; Linux on ARM builds from source;
+//     below, each with its .sha256; Linux on ARM builds from source;
 //   - quick start, the main server.cfg keys (config/server.cfg.example), port forwarding (TCP and
 //     UDP 21015: net_tcp.c and net_udp.c / info_query.c bind the same number), getting listed by the
 //     coordinator's finder (finder_url, doc/backend.md 8.8) and accounts (online_mode, 8.9);

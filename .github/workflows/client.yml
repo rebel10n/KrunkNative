@@ -1,30 +1,27 @@
 name: Client
 
-# Native client packages as public release assets (tools/release/package-client.sh): one archive per
-# platform, flat (the launcher BoxOffice at the top, everything else in runtime/), and one SHA256SUMS
-# for the whole release:
+# Native client packages as public release assets, named like fastfetch's
+# (krunknative-client-<os>-<arch>[-polyfilled].<ext> + .sha256, tools/release/package-client.sh):
 #   push to main, dispatch       -> rolling prerelease `client-latest`, assets replaced
 #   push of a tag client-v*       -> release <tag>, kept
 #
-#   BoxOffice-linux-x64.tar.gz, BoxOffice-linux-arm64.tar.gz  Ubuntu 22.04 build, dynamic: distro OpenSSL 3,
-#                                                             glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+),
-#                                                             WebKitGTK bundled for the captcha webview
-#   BoxOffice-windows-x64.zip                                 MinGW-w64, fully static
-#   BoxOffice-macos-arm64.zip, BoxOffice-macos-x64.zip        BoxOffice.app, ANGLE (Metal), static OpenSSL, macOS 11+
+#   linux-amd64 linux-aarch64      .tar.gz .zip .deb .rpm  Ubuntu 22.04 build, distro OpenSSL 3 (glibc 2.35+)
+#   linux-*-polyfilled             .tar.gz .zip .deb .rpm  static deps + polyfill-glibc: glibc 2.17+
+#   windows-amd64                  .zip                    MinGW-w64, fully static
+#   macos-aarch64 macos-amd64      .tar.gz .zip            KrunkNative.app, ANGLE (Metal), static OpenSSL, macOS 11+
 # plus the mobile apps (platform/README.md), WebViews over https://krunk.io/ (the web client is
 # the mobile client; the native C client has no Android / iOS build):
-#   BoxOffice-android.apk          release-signed with the repository key (secrets ANDROID_*,
+#   krunknative-android.apk        release-signed with the repository key (secrets ANDROID_*,
 #                                  tools/release/android-keystore.sh); skipped without the key
-#   BoxOffice-ios-unsigned.ipa     unsigned: AltStore / Sideloadly sign it with the player's Apple ID
-#   BoxOffice-strike-android.apk, BoxOffice-strike-ios-unsigned.ipa
+#   krunknative-ios-unsigned.ipa   unsigned: AltStore / Sideloadly sign it with the player's Apple ID
+#   krunknative-strike-android.apk, krunknative-strike-ios-unsigned.ipa
 #                                  the Krunker Strike apps over https://krunk.io/strike/: their own app
 #                                  id (io.krunknative.strike), name and icon, installed next to Box Office
-#   SHA256SUMS                     the checksums of every file above (the publish job writes it)
-# The download window links all of them (client/src/ui/download_ui.c).
-# The package holds the launcher (BoxOffice, BoxOffice.exe or BoxOffice.app: the entry point) and runtime/
-# (client_bin, server_bin, ui/, the git-tracked part of assets/); the launcher downloads the rest of the
-# game content on the first start. Each Linux job also unpacks its package in distro containers and
-# runs --version (tools/release/test-client-linux.sh).
+# The menu's Download window links all of them (client/src/ui/download_ui.c).
+# The packages hold the launcher (krunknative / KrunkNative.exe, the entry point), client_bin,
+# server_bin, ui/ and the git-tracked part of assets/ (shaders, maps, ...); the launcher downloads
+# the rest of the game content on the first start. Each Linux job also installs its packages in
+# old and new distro containers and runs --version (tools/release/test-client-linux.sh).
 # The release notes carry the same machine-readable line as the server releases (release.yml):
 #   <!-- kn-build {"describe":..,"commit":..,"commit_time":..,"build_time":..,"protocol":..} -->
 # client-latest only moves forward and is never marked "Latest" (tools/release/publish.sh).
@@ -80,20 +77,18 @@ jobs:
           if [ "$REF_TYPE" = tag ]; then tag="$REF_NAME"; else tag=client-latest; fi
           echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
 
-  # The Linux client per arch on Ubuntu 22.04 (tools/release/build-client-linux.sh dynamic), natively on an
-  # x86_64 and an arm64 runner: distro OpenSSL 3 (libssl3), glibc 2.35+, and WebKitGTK bundled (lib/,
-  # libexec/, tools/release/bundle-webkit.sh) so the captcha webview works with no install. Every Linux
-  # client archive is this build; there is no polyfilled client (the server has one: release.yml).
+  # Both Linux variants per arch on Ubuntu 22.04 (tools/release/build-client-linux.sh), natively
+  # on an x86_64 and an arm64 runner.
   linux:
-    name: Linux ${{ matrix.platform }}
+    name: Linux ${{ matrix.arch }}
     needs: meta
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: linux-x64
+          - arch: amd64
             runner: ubuntu-22.04
-          - platform: linux-arm64
+          - arch: aarch64
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -108,42 +103,50 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build (dynamic, WebKitGTK bundled)
+      - name: Build (dynamic)
         run: tools/release/build-client-linux.sh --deps dynamic "$RUNNER_TEMP/bin/dynamic"
+
+      - name: Build (polyfilled)
+        run: tools/release/build-client-linux.sh polyfilled "$RUNNER_TEMP/bin/polyfilled"
 
       - name: Package
         run: |
           set -euo pipefail
-          tools/release/package-client.sh "${{ matrix.platform }}" "$RUNNER_TEMP/bin/dynamic" out --channel "$CHANNEL"
+          sudo apt-get install -y -qq --no-install-recommends rpm zip > /dev/null
+          tools/release/package-client.sh "linux-${{ matrix.arch }}" "$RUNNER_TEMP/bin/dynamic" "out/linux-${{ matrix.arch }}" --channel "$CHANNEL"
+          tools/release/package-client.sh "linux-${{ matrix.arch }}-polyfilled" "$RUNNER_TEMP/bin/polyfilled" "out/linux-${{ matrix.arch }}-polyfilled" --channel "$CHANNEL"
           cat "$RUNNER_TEMP"/bin/*/build-info.txt
-          # the captcha webview works with no install: every Linux client carries WebKitGTK
-          test -f "$RUNNER_TEMP/bin/dynamic/webkit-bundle.txt" || { echo "::error title=Package::no WebKitGTK bundle (bundle-webkit.sh)"; exit 1; }
-          ls -la out
+          ls -la out/*
           # every git-tracked assets/ file ships (the launcher's content index leaves them out, so a
           # tracked file missing here reaches no native player: titles.json, sounds/kn_*.mp3 did)
+          top="krunknative-client-linux-${{ matrix.arch }}"
           missing="$(comm -23 <(git ls-files assets | grep -vx assets/README.md | sort) \
-            <(tar -tzf "out/BoxOffice-${{ matrix.platform }}.tar.gz" | sed -n 's|^runtime/||p' | grep '^assets/' | sort))"
+            <(tar -tzf "out/linux-${{ matrix.arch }}/$top.tar.gz" | sed -n "s|^$top/||p" | grep '^assets/' | sort))"
           [ -z "$missing" ] || { echo "::error title=Package::tracked assets missing from the package: $missing"; exit 1; }
 
-      # Unpack the package the way users do, in distro containers, and run --version (no game content
-      # in CI, so no render: tools/release/test-client-linux.sh with a content dir does that locally).
-      # glibc 2.35 and OpenSSL 3 are the floor: the build host is Ubuntu 22.04.
+      # Install each package the way users do, in old and new distros, and run --version (no
+      # game content in CI, so no render: tools/release/test-client-linux.sh with a content dir
+      # does that locally). The polyfilled build has to load on glibc 2.28.
       - name: Distro compatibility
         run: |
           set -euo pipefail
-          a="${{ matrix.platform }}"
+          a="${{ matrix.arch }}"
           {
-            echo "ubuntu:22.04 out/BoxOffice-$a.tar.gz"
-            echo "debian:bookworm out/BoxOffice-$a.tar.gz"
-            echo "debian:trixie out/BoxOffice-$a.tar.gz"
-            echo "fedora:latest out/BoxOffice-$a.tar.gz"
+            echo "debian:bullseye out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.tar.gz"
+            echo "ubuntu:20.04 out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.deb"
+            echo "almalinux:8 out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.rpm"
+            echo "fedora:latest out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.rpm"
+            echo "debian:trixie out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.zip"
+            echo "ubuntu:22.04 out/linux-$a/krunknative-client-linux-$a.deb"
+            echo "debian:trixie out/linux-$a/krunknative-client-linux-$a.deb"
+            echo "fedora:latest out/linux-$a/krunknative-client-linux-$a.rpm"
           } > compat.txt
           # xargs runs them 4 at a time; any failed install or --version fails the job. A failing
           # distro prints its RESULT line and the tail of its test.log (prefixed "[<image> <package>]")
           # into this log, and gets an error annotation.
           rc=0
           xargs -P 4 -L 1 tools/release/test-client-linux.sh < compat.txt | tee compat-results.txt || rc=$?
-          { echo "### Linux $a package"; echo '```'; cat "$RUNNER_TEMP"/bin/*/build-info.txt compat-results.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### Linux ${{ matrix.arch }} packages"; echo '```'; cat "$RUNNER_TEMP"/bin/*/build-info.txt compat-results.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           grep -v 'version=ok' compat-results.txt | sed 's/^/::error title=Distro compatibility::/' || true
           [ "$rc" = 0 ] && [ "$(grep -c 'version=ok' compat-results.txt)" = "$(wc -l < compat.txt)" ]
 
@@ -155,13 +158,23 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          tools/release/check-launcher.sh "out/BoxOffice-${{ matrix.platform }}.tar.gz" --old-url \
-            || { echo "::error title=Updates server::the ${{ matrix.platform }} launcher could not read the updates manifest"; exit 1; }
+          a="${{ matrix.arch }}"
+          tools/release/check-launcher.sh "out/linux-$a/krunknative-client-linux-$a.tar.gz" --old-url \
+            || { echo "::error title=Updates server::the linux-$a launcher could not read the updates manifest"; exit 1; }
+          tools/release/check-launcher.sh "out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.tar.gz" \
+            || { echo "::error title=Updates server::the linux-$a-polyfilled launcher could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: client-pkg-${{ matrix.platform }}
-          path: out/*
+          name: client-pkg-linux-${{ matrix.arch }}
+          path: out/linux-${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-pkg-linux-${{ matrix.arch }}-polyfilled
+          path: out/linux-${{ matrix.arch }}-polyfilled/*
           if-no-files-found: error
           retention-days: 7
 
@@ -217,13 +230,12 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          tools/release/package-client.sh windows-x64 win-bin out --channel "$CHANNEL"
-          mkdir t && unzip -q out/BoxOffice-windows-x64.zip -d t
-          ldd t/runtime/client.exe
-          t/runtime/client.exe --version
-          t/runtime/client.exe --voice-info | grep '^opus=libopus ' # voice chat's codec
-          t/runtime/server.exe --version
-          t/BoxOffice.exe --version
+          tools/release/package-client.sh windows-amd64 win-bin out --channel "$CHANNEL"
+          mkdir t && unzip -q out/krunknative-client-windows-amd64.zip -d t
+          ldd t/krunknative-client-windows-amd64/client.exe
+          t/krunknative-client-windows-amd64/client.exe --version
+          t/krunknative-client-windows-amd64/client.exe --voice-info | grep '^opus=libopus ' # voice chat's codec
+          t/krunknative-client-windows-amd64/server.exe --version
 
       # The packaged launcher reaches the live updates server (dl.krunk.io) and reads its manifest:
       # its own DNS lookup, TLS and redirects on this platform (tools/release/check-launcher.sh;
@@ -232,28 +244,28 @@ jobs:
       - name: Launcher reaches the updates server
         continue-on-error: true
         run: |
-          tools/release/check-launcher.sh out/BoxOffice-windows-x64.zip --old-url \
+          tools/release/check-launcher.sh out/krunknative-client-windows-amd64.zip --old-url \
             || { echo "::error title=Updates server::the Windows launcher (WinHTTP) could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: client-pkg-windows-x64
+          name: client-pkg-windows-amd64
           path: out/*
           if-no-files-found: error
           retention-days: 7
 
   macos:
-    name: macOS ${{ matrix.platform }} (ANGLE/Metal)
+    name: macOS ${{ matrix.arch }} (ANGLE/Metal)
     needs: meta
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-arm64
+          - arch: aarch64
             angle: macos-arm64
             runner: macos-latest
           # macos-15-intel is the supported x86_64 label until ~Aug 2027
-          - platform: macos-x64
+          - arch: amd64
             angle: macos-x86_64
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
@@ -283,7 +295,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.KN_OPENSSL_PREFIX }}
-          key: openssl-${{ hashFiles('tools/release/build-openssl.sh') }}-${{ matrix.platform }}
+          key: openssl-${{ hashFiles('tools/release/build-openssl.sh') }}-macos-${{ matrix.arch }}
 
       # The runner images ship cmake, ninja and pkg-config: install only what is missing and
       # never `brew update`/upgrade (build.yml).
@@ -304,13 +316,13 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          tools/release/package-client.sh "${{ matrix.platform }}" "$RUNNER_TEMP/bin" out --channel "$CHANNEL"
+          tools/release/package-client.sh "macos-${{ matrix.arch }}" "$RUNNER_TEMP/bin" out --channel "$CHANNEL"
           # the packaged app runs from anywhere with its bundled dylibs only
-          mkdir t && unzip -q "out/BoxOffice-${{ matrix.platform }}.zip" -d t
-          codesign --verify --deep --strict t/BoxOffice.app
-          (cd / && "$GITHUB_WORKSPACE/t/runtime/client_bin" --version)
-          (cd / && "$GITHUB_WORKSPACE/t/runtime/client_bin" --voice-info) | grep '^opus=libopus '
-          otool -L t/runtime/client_bin
+          mkdir t && tar -xzf "out/krunknative-client-macos-${{ matrix.arch }}.tar.gz" -C t
+          codesign --verify --deep --strict t/KrunkNative.app
+          (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --version)
+          (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --voice-info) | grep '^opus=libopus '
+          otool -L t/KrunkNative.app/Contents/MacOS/client_bin
 
       # The packaged launcher reaches the live updates server (dl.krunk.io) and reads its manifest:
       # its own DNS lookup, TLS and redirects on this platform (tools/release/check-launcher.sh;
@@ -319,12 +331,12 @@ jobs:
       - name: Launcher reaches the updates server
         continue-on-error: true
         run: |
-          tools/release/check-launcher.sh "out/BoxOffice-${{ matrix.platform }}.zip" --old-url \
-            || { echo "::error title=Updates server::the ${{ matrix.platform }} launcher could not read the updates manifest"; exit 1; }
+          tools/release/check-launcher.sh "out/krunknative-client-macos-${{ matrix.arch }}.tar.gz" --old-url \
+            || { echo "::error title=Updates server::the macos-${{ matrix.arch }} launcher could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: client-pkg-${{ matrix.platform }}
+          name: client-pkg-macos-${{ matrix.arch }}
           path: out/*
           if-no-files-found: error
           retention-days: 7
@@ -383,11 +395,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/apk"
           ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=https://krunk.io/ \
             -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apk/BoxOffice-android.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apk/krunknative-android.apk"
           # Krunker Strike (io.krunknative.strike) over its own page
           ./gradlew --no-daemon assembleRelease -Pkrunknative.app=strike -Pkrunknative.serverUrl=https://krunk.io/strike/ \
             -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
-          cp app/build/outputs/apk/release/app-strike-release.apk "$RUNNER_TEMP/apk/BoxOffice-strike-android.apk"
+          cp app/build/outputs/apk/release/app-strike-release.apk "$RUNNER_TEMP/apk/krunknative-strike-android.apk"
 
       - name: Check the signature
         if: steps.key.outputs.signed == 'true'
@@ -395,9 +407,10 @@ jobs:
           set -euo pipefail
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
           mkdir -p out
-          for name in BoxOffice-android BoxOffice-strike-android; do
+          for name in krunknative-android krunknative-strike-android; do
             "$apksigner" verify --print-certs "$RUNNER_TEMP/apk/$name.apk"
             cp "$RUNNER_TEMP/apk/$name.apk" out/
+            (cd out && sha256sum "$name.apk" > "$name.apk.sha256")
           done
 
       - uses: actions/upload-artifact@v7
@@ -457,12 +470,13 @@ jobs:
           set -euo pipefail
           mkdir -p out
           # <app>:<ipa name>:<KNServerURL>
-          for t in KrunkNative:BoxOffice-ios-unsigned:https://krunk.io/ KrunkStrike:BoxOffice-strike-ios-unsigned:https://krunk.io/strike/; do
+          for t in KrunkNative:krunknative-ios-unsigned:https://krunk.io/ KrunkStrike:krunknative-strike-ios-unsigned:https://krunk.io/strike/; do
             app=${t%%:*}; rest=${t#*:}; ipa=${rest%%:*}; url=${rest#*:}
             rm -rf ipa && mkdir -p ipa/Payload
             cp -R "platform/ios/build/Build/Products/Release-iphoneos/$app.app" ipa/Payload/
             /usr/libexec/PlistBuddy -c 'Print :KNServerURL' "ipa/Payload/$app.app/Info.plist" | grep -qx "$url"
             (cd ipa && zip -qr9y "../out/$ipa.ipa" Payload)
+            (cd out && shasum -a 256 "$ipa.ipa" > "$ipa.ipa.sha256")
           done
           ls -la out
 
@@ -510,31 +524,28 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      # One SHA256SUMS for the release, over every asset of this run (sha256sum format, names only).
-      - name: Checksums
+      - name: Check downloads
         run: |
           set -euo pipefail
           ls -la release-assets
-          cd release-assets
-          files=()
-          for f in *; do [ "$f" = SHA256SUMS ] || files+=("$f"); done
-          sha256sum "${files[@]}" > SHA256SUMS
-          cat SHA256SUMS
-          cd ..
-
+          (cd release-assets && sha256sum -c ./*.sha256)
 
       - name: Release notes
         run: |
           set -euo pipefail
           base="https://github.com/$GH_REPO/releases/download/$TAG"
-          row() { # row <label> <platform> <ext>: the platform's archive
-            local label="$1" plat="$2" ext="$3" f
-            f="BoxOffice-$plat.$ext"
-            if [ -f "release-assets/$f" ]; then echo "| $label | [$ext]($base/$f) |"
+          row() { # row <label> <platform> <ext>...
+            local label="$1" plat="$2" links="" ext f
+            shift 2
+            for ext in "$@"; do
+              f="krunknative-client-$plat.$ext"
+              [ -f "release-assets/$f" ] && links+="[$ext]($base/$f) ([sha256]($base/$f.sha256)) "
+            done
+            if [ -n "$links" ]; then echo "| $label | $links|"
             else echo "| $label | not built in this run ([build failed]($RUN_URL)) |"; fi
           }
           app_row() { # app_row <label> <file> <note>: the mobile apps
-            if [ -f "release-assets/$2" ]; then echo "| $1 | [${2##*.}]($base/$2) $3 |"
+            if [ -f "release-assets/$2" ]; then echo "| $1 | [${2##*.}]($base/$2) ([sha256]($base/$2.sha256)) $3 |"
             else echo "| $1 | not in this run ([run]($RUN_URL)) |"; fi
           }
           {
@@ -553,17 +564,19 @@ jobs:
             echo
             echo "| Platform | Downloads |"
             echo "|---|---|"
-            row "Linux x64 (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-x64 tar.gz
-            row "Linux arm64 (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-arm64 tar.gz
-            row "Windows 10+ x64" windows-x64 zip
-            row "macOS 11+ Apple silicon" macos-arm64 zip
-            row "macOS 11+ Intel" macos-x64 zip
-            app_row "Android 7.0+" BoxOffice-android.apk "the app plays krunk.io fullscreen"
-            app_row "iPhone / iPad (sideload)" BoxOffice-ios-unsigned.ipa "unsigned: AltStore / Sideloadly sign it; or open krunk.io in Safari, Share > Add to Home Screen"
-            app_row "Krunker Strike, Android 7.0+" BoxOffice-strike-android.apk "its own app (io.krunknative.strike), next to Box Office: plays krunk.io/strike fullscreen"
-            app_row "Krunker Strike, iPhone / iPad (sideload)" BoxOffice-strike-ios-unsigned.ipa "unsigned; or open krunk.io/strike in Safari, Share > Add to Home Screen"
+            row "Linux x86_64 (any distro, glibc 2.17+)" linux-amd64-polyfilled tar.gz zip deb rpm
+            row "Linux x86_64 (glibc 2.35+, OpenSSL 3: Ubuntu 22.04+, Debian 12+, Fedora 36+)" linux-amd64 tar.gz zip deb rpm
+            row "Linux aarch64 (any distro, glibc 2.17+)" linux-aarch64-polyfilled tar.gz zip deb rpm
+            row "Linux aarch64 (glibc 2.35+, OpenSSL 3)" linux-aarch64 tar.gz zip deb rpm
+            row "Windows 10+ x64" windows-amd64 zip
+            row "macOS 11+ Apple silicon" macos-aarch64 tar.gz zip
+            row "macOS 11+ Intel" macos-amd64 tar.gz zip
+            app_row "Android 7.0+" krunknative-android.apk "the app plays krunk.io fullscreen"
+            app_row "iPhone / iPad (sideload)" krunknative-ios-unsigned.ipa "unsigned: AltStore / Sideloadly sign it; or open krunk.io in Safari, Share > Add to Home Screen"
+            app_row "Krunker Strike, Android 7.0+" krunknative-strike-android.apk "its own app (io.krunknative.strike), next to Box Office: plays krunk.io/strike fullscreen"
+            app_row "Krunker Strike, iPhone / iPad (sideload)" krunknative-strike-ios-unsigned.ipa "unsigned; or open krunk.io/strike in Safari, Share > Add to Home Screen"
             echo
-            echo "Unpack the archive into a folder of its own, then run \`./BoxOffice\` (Linux), double-click \`BoxOffice.exe\` (Windows) or open \`BoxOffice.app\` (macOS, unsigned: right-click > Open the first time). The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Check a download with \`sha256sum -c SHA256SUMS --ignore-missing\` against [SHA256SUMS]($base/SHA256SUMS)."
+            echo "Unpack and run \`krunknative\` (Windows: \`KrunkNative.exe\`; macOS: open \`KrunkNative.app\`, unsigned: right-click > Open the first time), or install the .deb/.rpm and start Krunker Box Office from the applications menu. The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Not sure which Linux package? Take the polyfilled one. Check a download with \`sha256sum -c <file>.sha256\`."
             echo
             echo "Phones and tablets play the web client: Android, install the APK (allow your browser to install apps when asked); iPhone / iPad, open https://krunk.io in Safari and tap Share > Add to Home Screen (the .ipa is for sideloading tools only). Krunker Strike is its own app the same way (the strike APK, or https://krunk.io/strike/ > Add to Home Screen) and installs next to Krunker Box Office."
             echo
@@ -608,8 +621,8 @@ jobs:
           path: client-pkg
           merge-multiple: true
 
-      # BoxOffice-<platform>.{tar.gz,zip}: the archive of each platform is its update package; every file
-      # is linked from the manifest on the GitHub release.
+      # krunknative-client-<plat>.{tar.gz,zip,deb,rpm} (+ .sha256): the .tar.gz (.zip on Windows) of each
+      # platform is its update package; every file is linked from the manifest on the GitHub release.
       - name: Stage (update packages + build.json)
         run: >-
           python3 -I tools/release/kn-updates.py stage --kn-build "$KN_BUILD" --packages client-pkg

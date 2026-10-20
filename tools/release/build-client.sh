@@ -10,7 +10,7 @@
 #            (-static: no libgcc/libstdc++/winpthread DLLs); <out> gets client.exe, server.exe
 #            and any MinGW DLL they still import (normally none)
 # Both: FreeType without zlib/bzip2/png/harfbuzz/brotli, stripped, plus the launcher (target
-# kn_launcher: BoxOffice / BoxOffice.exe) when the tree has it.
+# kn_launcher: krunknative / KrunkNative.exe) when the tree has it.
 #
 # Usage: tools/release/build-client.sh <macos|windows> <out dir>
 # Env: KN_CMAKE_ARGS  extra -D flags (CI: version-meta.sh cmake_flags)
@@ -41,10 +41,10 @@ case "$os" in
         else
             flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE)
         fi
-        client=client_bin server=server_bin launcher=BoxOffice ;;
+        client=client_bin server=server_bin launcher=krunknative ;;
     windows)
         flags+=(-DBUILD_SHARED_LIBS=OFF -DCMAKE_EXE_LINKER_FLAGS=-static)
-        client=client.exe server=server.exe launcher=BoxOffice.exe ;;
+        client=client.exe server=server.exe launcher=KrunkNative.exe ;;
 esac
 # shellcheck disable=SC2086 # KN_CMAKE_ARGS is a list of -D flags
 "$cmake_cmd" -S "$repo" -B "$build" "${flags[@]}" ${KN_CMAKE_ARGS:-} > "$build.configure.log" 2>&1 || { cat "$build.configure.log" >&2; exit 1; }

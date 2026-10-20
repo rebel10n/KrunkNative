@@ -175,9 +175,9 @@ these runs.
   is verified against the stub page, not the live challenge; its keyboard path in the game is the gap above.
 - Windows packages must ship `WebView2Loader.dll` next to `client.exe` for the challenge to run there (not yet in
   tools/release/package-client.sh); without it the challenge is unavailable, as without the runtime.
-- Every Linux client package bundles WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so the captcha
-  needs no system package there. The client's Linux build is the dynamic one (glibc 2.35, built on Ubuntu 22.04):
-  there is no webkit2gtk-4.1 for the glibc 2.17 floor of the polyfilled build, which is the server's only. WebKit 2.52 compiles in the directory of its helper processes and has
+- The dynamic Linux packages bundle WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so the captcha
+  needs no system package there. The polyfilled packages are built with `KN_WEBVIEW=OFF`: there is no
+  webkit2gtk-4.1 for their glibc 2.17 floor. WebKit 2.52 compiles in the directory of its helper processes and has
   no setting for it, so the bundle's copy of libwebkit2gtk gets that string replaced by a relative one: the
   packaged client runs from its install root (`install_root_chdir`).
 - The widget is drawn only through the HTML UI's holder: an `HTML_ENGINE=OFF` client still gives up on the challenge.

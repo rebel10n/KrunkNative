@@ -82,11 +82,11 @@ int release_parse_release(const cJSON *rel, ReleaseInfo *out) {
     cJSON_ArrayForEach(a, cJSON_GetObjectItemCaseSensitive(rel, "assets")) {
         const char *name = kn_json_str(a, "name", ""), *url = kn_json_str(a, "browser_download_url", "");
         if (strncmp(url, "https://", 8) != 0) continue;
-        if (!strcmp(name, "BoxOffice-server-linux-x64.tar.gz")) copy_s(out->dl_linux, sizeof(out->dl_linux), url);
-        else if (!strcmp(name, "BoxOffice-server-linux-x64-polyfilled.tar.gz"))
-            copy_s(out->dl_linux_polyfilled, sizeof(out->dl_linux_polyfilled), url);
-        else if (!strcmp(name, "BoxOffice-server-windows-x64.zip")) copy_s(out->dl_windows, sizeof(out->dl_windows), url);
-        else if (!strncmp(name, "BoxOffice-server-macos-", 23) && ends_with(name, ".zip"))
+        if (!strcmp(name, "krunknative-server-linux-x86_64.tar.gz")) copy_s(out->dl_linux, sizeof(out->dl_linux), url);
+        else if (!strcmp(name, "krunknative-server-linux-x86_64-bullseye.tar.gz"))
+            copy_s(out->dl_linux_bullseye, sizeof(out->dl_linux_bullseye), url);
+        else if (!strcmp(name, "krunknative-server-windows-x86_64.zip")) copy_s(out->dl_windows, sizeof(out->dl_windows), url);
+        else if (!strncmp(name, "krunknative-server-macos-", 25) && ends_with(name, ".tar.gz"))
             copy_s(out->dl_macos, sizeof(out->dl_macos), url);
     }
     out->known = 1;
@@ -193,7 +193,7 @@ void release_add_json(const ReleaseInfo *r, cJSON *o) {
     cJSON_AddStringToObject(o, "download_url", r && r->html_url[0] ? r->html_url : RELEASE_PAGE_DEFAULT);
     cJSON *d = cJSON_AddObjectToObject(o, "downloads");
     if (r && r->dl_linux[0]) cJSON_AddStringToObject(d, "linux", r->dl_linux);
-    if (r && r->dl_linux_polyfilled[0]) cJSON_AddStringToObject(d, "linux_polyfilled", r->dl_linux_polyfilled);
+    if (r && r->dl_linux_bullseye[0]) cJSON_AddStringToObject(d, "linux_bullseye", r->dl_linux_bullseye);
     if (r && r->dl_windows[0]) cJSON_AddStringToObject(d, "windows", r->dl_windows);
     if (r && r->dl_macos[0]) cJSON_AddStringToObject(d, "macos", r->dl_macos);
 }

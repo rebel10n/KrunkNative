@@ -63,7 +63,7 @@ typedef struct {
 
 #define KN_UPDATE_MAX_LINKS 8
 typedef struct {
-    char id[48];                  // "linux-x64" (kn_update_platform_default)
+    char id[48];                  // "linux-amd64" (kn_update_platform_default)
     int has_update;
     KnUpdateFile update;          // the executable-only package the launcher installs
     KnUpdateLink links[KN_UPDATE_MAX_LINKS]; // human downloads
@@ -187,21 +187,21 @@ void kn_asset_diff_free(KnAssetDiff *d);
 
 // ---------------------------------------------------------------- install marker
 
-// kn-install.json in the package's runtime/ directory (packages, tools/release): where the launcher
-// and its updater find their install. Without it (dev builds) nothing self-updates.
+// kn-install.json at the install root (packages, tools/release): where the launcher and its
+// updater find their install. Without it (dev builds) nothing self-updates.
 typedef struct {
     int format;
-    char platform[48];   // "linux-x64", "windows-x64", "macos-arm64", ... (the BoxOffice-<platform>.<ext> name)
-    char package[16];    // "tar.gz", "zip", "deb", "rpm" (old installs)
+    char platform[48];   // "linux-amd64", ...
+    char package[16];    // "tar.gz", "zip", "deb", "rpm", "app"
     char channel[32];    // "latest"
-    char root[128];      // the install root relative to the marker's directory (".." = above runtime/)
+    char root[128];      // the install root relative to the marker's directory ("." / "../..")
 } KnInstallMarker;
 
 int kn_install_marker_parse(const char *json, size_t len, KnInstallMarker *out);
 // deb/rpm installs belong to the package manager: no self-update, show the download instead.
 int kn_install_self_updatable(const KnInstallMarker *m);
-// Compile-time platform id ("linux-x64", "windows-x64", "macos-arm64", ...);
-// -DKRUNKNATIVE_PLATFORM_ID=... overrides it.
+// Compile-time platform id ("linux-amd64", "windows-amd64", "macos-aarch64", ...);
+// -DKRUNKNATIVE_PLATFORM_ID=... overrides it (polyfilled builds).
 const char *kn_update_platform_default(void);
 // The package kind a platform installs from: "zip" on windows, else "tar.gz".
 const char *kn_update_archive_kind(const char *platform);

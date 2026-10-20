@@ -3,26 +3,25 @@
 // content goes, the journaled executable swap and process helpers.
 //
 // Layout (packages, tools/release/package-client.sh):
-//   <root>/BoxOffice (BoxOffice.exe), <root>/runtime/{client_bin (client.exe), server_bin, libs,
-//   ui/, assets/, kn-install.json}; macOS: <root>/BoxOffice.app/Contents/MacOS/BoxOffice and the
-//   same <root>/runtime/. The marker's "root" is ".." (the directory above runtime/).
+//   <root>/krunknative (KrunkNative.exe), client_bin (client.exe), server_bin, libs, ui/,
+//   kn-install.json; macOS: KrunkNative.app/Contents/MacOS/{KrunkNative,client_bin,...} and
+//   Contents/Resources/{ui/,kn-install.json} with "root": "../..".
 // State: <root>/.kn-update/ (staged package, backup of the replaced files, journal); removed
 // again once an update is complete.
 #include <kn_update.h>
 #include <stddef.h>
 
 #define KN_PATH_MAX 4096
-#define KN_RUNTIME_DIR "runtime" // the package's folder beside the launcher (the game, the server, ui/)
 
 typedef struct {
     char exe[KN_PATH_MAX];        // this launcher (symlinks resolved)
     char exe_dir[KN_PATH_MAX];
     int has_marker;
     KnInstallMarker marker;
-    char marker_dir[KN_PATH_MAX]; // runtime/: the directory with kn-install.json and ui/ (client cwd)
+    char marker_dir[KN_PATH_MAX]; // the directory with kn-install.json and ui/ (client cwd)
     char root[KN_PATH_MAX];       // the install root (marker "root" resolved)
     char platform[48];            // marker platform, else kn_update_platform_default()
-    char client[KN_PATH_MAX];     // runtime/client_bin
+    char client[KN_PATH_MAX];     // client_bin next to the launcher
     char state_dir[KN_PATH_MAX];  // <root>/.kn-update
     int root_writable;
     int self_updatable;           // marker, not deb/rpm, root writable

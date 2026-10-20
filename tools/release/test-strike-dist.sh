@@ -4,7 +4,7 @@
 #   2. the dedicated server and the client in the dist report Krunker Strike on --version, headless
 #      (KN_FLAVOR default strike, the compile-time default -- no --flavor / KN_FLAVOR needed);
 #   3. the server advertises flavor strike, the client wordmark is "Krunker Strike";
-#   4. every archive name stays BoxOffice (only the DISPLAY name is Strike);
+#   4. every archive / directory name stays krunknative (only the DISPLAY name is Strike);
 #   5. the base build is unaffected: the default (base) server_bin still reports Krunker Box Office.
 #
 #   tools/release/test-strike-dist.sh [BASE_BUILD_DIR]   (run from the repository root)
@@ -41,25 +41,25 @@ if [ "${SKIP_BUILD:-0}" != 1 ]; then
     [ "$rc" = 0 ] || { echo "0/${#results[@]} passed  (logs: $WORK)"; exit 1; }
 fi
 
-srv_tar="$(ls "$STRIKE_DIST"/BoxOffice-server-*.tar.gz 2> /dev/null | head -1)"
-cli_tar="$(ls "$STRIKE_DIST"/BoxOffice-linux-*.tar.gz 2> /dev/null | head -1)"
+srv_tar="$(ls "$STRIKE_DIST"/krunknative-server-*.tar.gz 2> /dev/null | head -1)"
+cli_tar="$(ls "$STRIKE_DIST"/krunknative-client-*.tar.gz 2> /dev/null | head -1)"
 check "server package produced" "$([ -f "$srv_tar" ] && echo 0 || echo 1)" "$srv_tar"
 check "client package produced" "$([ -f "$cli_tar" ] && echo 0 || echo 1)" "$cli_tar"
 # identifiers stay krunknative; the archive names never say strike
-check "packages named BoxOffice, not strike" \
+check "packages named krunknative, not strike" \
     "$([ -n "$srv_tar$cli_tar" ] && ! ls "$STRIKE_DIST"/*strike* 2> /dev/null | grep -q . && echo 0 || echo 1)"
 
 if [ -f "$srv_tar" ]; then
-    mkdir -p "$WORK/srv" && tar -xzf "$srv_tar" -C "$WORK/srv"
-    sdir="$WORK/srv"
+    tar -xzf "$srv_tar" -C "$WORK"
+    sdir="$(ls -d "$WORK"/krunknative-server-* 2> /dev/null | head -1)"
     out="$(version "$sdir/server_bin")"
     check "dist server_bin --version: Krunker Strike" \
         "$(echo "$out" | grep -q 'flavor strike (Krunker Strike)' && echo 0 || echo 1)" "$(echo "$out" | tr '\n' ' ')"
 fi
 
 if [ -f "$cli_tar" ]; then
-    mkdir -p "$WORK/cli" && tar -xzf "$cli_tar" -C "$WORK/cli"
-    cdir="$WORK/cli/runtime"
+    tar -xzf "$cli_tar" -C "$WORK"
+    cdir="$(ls -d "$WORK"/krunknative-client-* 2> /dev/null | head -1)"
     out="$(version "$cdir/client_bin")"
     check "dist client_bin --version: Krunker Strike wordmark" \
         "$(echo "$out" | grep -q 'Krunker Strike (KrunkNative client)' && echo 0 || echo 1)" "$(echo "$out" | head -1)"

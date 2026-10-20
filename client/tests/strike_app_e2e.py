@@ -204,8 +204,8 @@ async def browser_checks(origin, cdp_port):
                 return
             links = dl.get("links", [])
             check(f"{label}: Strike APK, .ipa and page links",
-                  any(u.endswith("/BoxOffice-strike-android.apk") for u in links)
-                  and any(u.endswith("/BoxOffice-strike-ios-unsigned.ipa") for u in links)
+                  any(u.endswith("/krunknative-strike-android.apk") for u in links)
+                  and any(u.endswith("/krunknative-strike-ios-unsigned.ipa") for u in links)
                   and origin + "/strike/" in links, links)
             check(f"{label}: the Strike logo shows", dl.get("logo") is True)
             check(f"{label}: the Strike section {'first' if first else 'after Box Office'}",

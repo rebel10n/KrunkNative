@@ -7,7 +7,7 @@ and R25 ("the sawed off is missing its preview image ... what other images we're
 ## Method
 
 The content set players get is the launcher's: a fresh `krunknative --cli --no-launch` from the
-`client-latest` linux-x64 package against `https://dl.krunk.io/updates/client/latest.json`
+`client-latest` linux-amd64 package against `https://dl.krunk.io/updates/client/latest.json`
 synced content `442d6fc77b68be68` (22,039 files, 2.5 GB, every file sha256-checked), plus the
 package's own `assets/` files. The git-tracked `assets/` files of `main` were laid over it (what
 the next package ships, see "Tracked files" below). Then, with `KRUNKNATIVE_ASSET_FETCH=0` and

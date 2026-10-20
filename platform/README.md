@@ -70,7 +70,7 @@ make android-install        # adb install -r .../app-debug.apk
 
 Output: `platform/android/app/build/outputs/apk/debug/app-debug.apk`.
 
-**Published APK** (`BoxOffice-android.apk` on the GitHub release `client-latest`, linked by the
+**Published APK** (`krunknative-android.apk` on the GitHub release `client-latest`, linked by the
 menu's Download window, client/src/ui/download_ui.c): `assembleRelease` with
 `-Pkrunknative.serverUrl=https://krunk.io/`, so the app is a thin fullscreen WebView over the live
 site (no bundled client: `krunknative.bundleWeb` defaults to false with a server URL), always the
@@ -120,7 +120,7 @@ xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Deb
 
 For a device build open the generated project in Xcode and pick a signing team.
 
-**Published .ipa** (`BoxOffice-ios-unsigned.ipa` on `client-latest`): an unsigned Release build
+**Published .ipa** (`krunknative-ios-unsigned.ipa` on `client-latest`): an unsigned Release build
 for devices with `KN_SERVER_URL=https://krunk.io/` (the `KNServerURL` build setting). iOS only
 installs signed apps, so it is for sideloading tools (AltStore, Sideloadly), which sign it with
 the player's Apple ID. The Download window sends iPhone / iPad players to Add to Home Screen
@@ -136,8 +136,8 @@ Krunker Box Office, on every route a phone has:
 | | Krunker Box Office | Krunker Strike |
 | --- | --- | --- |
 | web app (PWA) | `/`: `manifest.webmanifest` (id / scope `/`), `img/pwa/` | `/strike/`: `strike/manifest.webmanifest` (id / scope `/strike/`), `strike/img/pwa/`, gold theme colour |
-| Android | `io.krunknative.app`, `BoxOffice-android.apk` | `io.krunknative.strike` (`-Pkrunknative.app=strike`, `make android-only ANDROID_APP=strike`), `BoxOffice-strike-android.apk` over `https://krunk.io/strike/` |
-| iOS | target `KrunkNative`, `io.krunknative.app` | target / scheme `KrunkStrike`, `io.krunknative.strike`, icon `AppIconStrike`, `KNStartPage` `strike/index.html`; `BoxOffice-strike-ios-unsigned.ipa` |
+| Android | `io.krunknative.app`, `krunknative-android.apk` | `io.krunknative.strike` (`-Pkrunknative.app=strike`, `make android-only ANDROID_APP=strike`), `krunknative-strike-android.apk` over `https://krunk.io/strike/` |
+| iOS | target `KrunkNative`, `io.krunknative.app` | target / scheme `KrunkStrike`, `io.krunknative.strike`, icon `AppIconStrike`, `KNStartPage` `strike/index.html`; `krunknative-strike-ios-unsigned.ipa` |
 
 One web build and one `client.wasm` serve both. `platform/web/pwa.py` assembles `dist/web/strike/`:
 the Strike manifest and icons (`platform/web/strike/`, made from the Strike logo by

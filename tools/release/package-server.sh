@@ -1,41 +1,35 @@
 #!/usr/bin/env bash
-# Packages a dedicated-server build as one release asset per platform (.github/workflows/release.yml):
-#   <out>/BoxOffice-server-linux-x64.tar.gz           Debian 12+, Ubuntu 22.04+ (OpenSSL 3)
-#   <out>/BoxOffice-server-linux-x64-polyfilled.tar.gz  any x86_64 distro (glibc 2.17+, static OpenSSL, no libcurl)
-#   <out>/BoxOffice-server-windows-x64.zip
-#   <out>/BoxOffice-server-macos-arm64.zip
-# The archive is flat, with no folder around it: unpack it into a folder of its own. The server is
-# the program (server_bin, server_bin.exe): it reads assets/ and cfg/ from the folder it runs in.
-# Contents: server_bin, assets/maps + assets/skins.json, cfg/server.cfg (from the example) +
-# server.cfg.example, kn-query.py, README.txt, LICENSE-NOTICE.txt, licenses/, SHA256SUMS, and the
-# runtime libraries that are not part of the OS:
+# Packages a dedicated-server build as a release asset (.github/workflows/release.yml):
+#   <out>/krunknative-server-<platform>.tar.gz   (windows-*: .zip)
+#   <out>/krunknative-server-<platform>.tar.gz.sha256   (sha256sum format)
+# Layout (the `make server-dist` bundle): server_bin, assets/maps + assets/skins.json,
+# cfg/server.cfg (from the example) + server.cfg.example, kn-query.py, README.txt,
+# LICENSE-NOTICE.txt + licenses/, SHA256SUMS, and runtime libraries that are not part of the OS:
 #   windows-*  the MinGW DLLs passed with --libs <dir>
 #   macos-*    non-system dylibs (Homebrew libcrypto) copied next to server_bin and relinked
 #              to @executable_path, then ad-hoc re-signed
 #
 # Usage: tools/release/package-server.sh <platform> <server binary> <out dir> [--libs <dir>]
-#   <platform>  linux-x64 (the release's dynamic Linux build; any other linux-<arch> is for a local dist),
-#               linux-x64-polyfilled, windows-x64, macos-arm64
 # Env (README text, from tools/release/version-meta.sh): KN_DESCRIBE KN_COMMIT KN_BUILD_TIME KN_PROTOCOL
 set -euo pipefail
 
-[ $# -ge 3 ] || { sed -n '2,20p' "$0" >&2; exit 2; }
+[ $# -ge 3 ] || { sed -n '2,14p' "$0" >&2; exit 2; }
 platform="$1" bin="$2" out="$3"
 shift 3
 libs=""
 while [ $# -gt 0 ]; do
     case "$1" in --libs) libs="$2"; shift 2 ;; *) echo "unknown option $1" >&2; exit 2 ;; esac
 done
-case "$platform" in linux-*|windows-x64|macos-arm64) ;; *) echo "unknown platform $platform" >&2; exit 2 ;; esac
+case "$platform" in linux-*|windows-*|macos-*) ;; *) echo "unknown platform $platform" >&2; exit 2 ;; esac
 [ -f "$bin" ] || { echo "no server binary at $bin" >&2; exit 1; }
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-name="BoxOffice-server-$platform"
+name="krunknative-server-$platform"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-stage="$work/package"   # the archive's top level: no folder around it
+stage="$work/$name"
 mkdir -p "$stage/assets" "$stage/cfg" "$stage/licenses"
 
 exe="server_bin"
@@ -109,7 +103,7 @@ https://packages.msys2.org); macOS packages may bundle Homebrew's OpenSSL libcry
 EOF
 
 case "$platform" in
-    linux-x64-polyfilled) runtime="Any x86_64 Linux with glibc 2.17+ (OpenSSL static). No libcurl: it cannot reach an https:// finder (matchmaker), so it serves LAN or http:// players" ;;
+    linux-x86_64-bullseye) runtime="Debian 11 (glibc 2.31, OpenSSL 1.1): apt install libcurl4 libssl1.1 libcrypt1" ;;
     linux-*) runtime="Debian 12+/Ubuntu 22.04+ (glibc 2.36, OpenSSL 3): apt install libcurl4 libssl3 libcrypt1 (Debian 13: libcurl4t64 libssl3t64)" ;;
     windows-*) runtime="Windows 10+ x64: the DLLs next to server_bin.exe are all it needs" ;;
     macos-*)
@@ -129,11 +123,10 @@ Runtime:   $runtime
 
 Run
 ---
-  1. Unpack the archive into a folder of its own: it holds server_bin and the files below.
-  2. Edit cfg/server.cfg (a copy of server.cfg.example): hostname, region, port,
+  1. Edit cfg/server.cfg (a copy of server.cfg.example): hostname, region, port,
      public_ip, mapcycle, mode. Every key is documented in server.cfg.example.
-  3. Start it from that folder:  ./$exe        (./$exe --help, ./$exe --version)
-  4. Open the game port (default 21015) for TCP and UDP. The server-info query
+  2. Start it from this directory:  ./$exe        (./$exe --help, ./$exe --version)
+  3. Open the game port (default 21015) for TCP and UDP. The server-info query
      answers on UDP of the same port:  python3 kn-query.py <host> 21015
 
 To be listed in the Krunker Box Office server browser set finder_url in cfg/server.cfg
@@ -143,31 +136,25 @@ https://github.com/rebel10n/KrunkNative/releases/tag/server-latest
 
 Files
 -----
-  $exe                 the server (the program)
+  $exe                 the server
   cfg/server.cfg       your config (kept by upgrades: copy only the binary over)
   server.cfg.example   the documented defaults
   assets/maps          map catalogue the server loads
   kn-query.py          server-info query client (python3)
-  SHA256SUMS           checksums of every other file in this package
+  SHA256SUMS           checksums of every file in this package
   LICENSE-NOTICE.txt   license notice; licenses/ third-party license texts
 
 Docs: https://github.com/rebel10n/KrunkNative/blob/main/doc/backend.md
 EOF
 
-(cd "$stage" && find . -type f ! -name SHA256SUMS | LC_ALL=C sort | sed 's|^\./||' | while read -r f; do sha256 "$f"; done) > "$work/SHA256SUMS"
+(cd "$stage" && find . -type f | LC_ALL=C sort | sed 's|^\./||' | while read -r f; do sha256 "$f"; done) > "$work/SHA256SUMS"
 mv "$work/SHA256SUMS" "$stage/SHA256SUMS"
 
-# the archive: every top-level entry of the stage, by name (no "./" entries, no wrapping folder)
-entries=()
-while IFS= read -r f; do entries+=("$f"); done < <(cd "$stage" && ls -A | LC_ALL=C sort)
+cd "$work"
 case "$platform" in
-    windows-*)
-        archive="$name.zip"; rm -f "$out/$archive"
-        (cd "$stage" && zip -qr9 "$out/$archive" "${entries[@]}")
-        ;;
-    *)
-        archive="$name.tar.gz"
-        (cd "$stage" && tar -czf "$out/$archive" "${entries[@]}")
-        ;;
+    windows-*) archive="$name.zip"; rm -f "$out/$archive"; zip -qr9 "$out/$archive" "$name" ;;
+    *) archive="$name.tar.gz"; tar -czf "$out/$archive" "$name" ;;
 esac
+(cd "$out" && sha256 "$archive" > "$archive.sha256")
 echo "packaged $out/$archive" >&2
+cat "$out/$archive.sha256" >&2

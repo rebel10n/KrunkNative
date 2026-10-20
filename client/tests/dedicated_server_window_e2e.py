@@ -8,7 +8,7 @@ The Host Game flow's last step has "Get the dedicated server". It used to open a
 (a 404); now it opens a window in the client, built like the Download window (showWindow(25)):
   - native: a headless offline client_bin driven by an input script goes Host Game (window 42) ->
     the Host window (openHostWindow) -> a map -> the last step (Start Game: the choice), clicks the button, and the window
-    shows: its head, this computer's package with the release's SHA256SUMS, every server_bin release asset of
+    shows: its head, this computer's package with its .sha256, every server_bin release asset of
     `server-latest` (release.yml's platforms), quick start, server.cfg, port forwarding (TCP and UDP
     21015), the coordinator listing (finder_url) and the dated VPS prices; Back returns to the flow's
     Server step;
@@ -32,8 +32,8 @@ failures = []
 
 RELEASE = "https://github.com/rebel10n/KrunkNative/releases/download/server-latest/"
 # .github/workflows/release.yml's release-notes rows (tools/release/package-server.sh names)
-ASSETS = ["BoxOffice-server-linux-x64.tar.gz", "BoxOffice-server-linux-x64-polyfilled.tar.gz",
-          "BoxOffice-server-windows-x64.zip", "BoxOffice-server-macos-arm64.zip"]
+ASSETS = ["krunknative-server-linux-x86_64.tar.gz", "krunknative-server-linux-x86_64-bullseye.tar.gz",
+          "krunknative-server-windows-x86_64.zip", "krunknative-server-macos-arm64.tar.gz"]
 # what each section must say (case-insensitive, whitespace folded)
 NEEDLES = ["21015", "TCP", "UDP", "TCP and UDP", "Port forwarding", "server.cfg", "public_ip", "finder_url",
            "matchmaker.krunk.io", "Get listed", "Host on a VPS", "DigitalOcean", "Hetzner", "Gcore",
@@ -119,7 +119,7 @@ script = [
     "2300 clickid hostFlowGetServer",
     "3000 vis @ds knDsHead knDsRec knDsOther knDsBack knDsQuick knDsCfg knDsPorts knDsList knDsVps knDsPrices hostFlowCommand",
     "3000 text @head [id=knDsHead]",
-    "3000 nodes @sha a[href$='/SHA256SUMS']",
+    "3000 nodes @sha a[href$='.sha256']",
     "3000 nodes @release a[href^='" + RELEASE + "']",
 ]
 for i, a in enumerate(ASSETS):
@@ -137,8 +137,8 @@ for key in ("knDsHead", "knDsRec", "knDsOther", "knDsBack", "knDsQuick", "knDsCf
     check(ds.get(key) == "1", f"native: Get the dedicated server -> the window shows #{key} ({ds.get(key)})")
 check(ds.get("hostFlowCommand") in ("0", "-"), f"native: the flow's window was replaced ({ds.get('hostFlowCommand')})")
 check(fold(text(log, "@head")) == "Dedicated Server", f"native: the head says Dedicated Server ({text(log, '@head')!r})")
-check(nodes(log, "@sha") == 1, f"native: one SHA256SUMS link, the release's checksums ({nodes(log, '@sha')})")
-check(nodes(log, "@release") == len(ASSETS) + 1, f"native: every download is a server-latest release asset: this computer's package and SHA256SUMS, one for each other package ({nodes(log, '@release')})")
+check(nodes(log, "@sha") == len(ASSETS), f"native: one .sha256 link per package ({nodes(log, '@sha')})")
+check(nodes(log, "@release") == 2 * len(ASSETS), f"native: every download is a server-latest release asset ({nodes(log, '@release')})")
 for i, a in enumerate(ASSETS):
     check(nodes(log, f"@asset{i}") >= 1, f"native: {a} linked ({nodes(log, f'@asset{i}')})")
 for i, n in enumerate(NEEDLES):
@@ -269,8 +269,7 @@ def web_part():
     check(len(ds.get("sections", [])) == 8, f"web: every section is there ({ds.get('sections')})")
     hrefs = ds.get("hrefs", [])
     for a in ASSETS:
-        check(RELEASE + a in hrefs, f"web: {a} linked")
-    check(RELEASE + "SHA256SUMS" in hrefs, "web: the release's SHA256SUMS linked")
+        check(RELEASE + a in hrefs and RELEASE + a + ".sha256" in hrefs, f"web: {a} and its .sha256 linked")
     check(not any("krunk.io/host" in h for h in hrefs), "web: no krunk.io page link")
     body = fold(ds.get("text", "")).lower()
     for n in NEEDLES:

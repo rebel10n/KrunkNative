@@ -6,7 +6,7 @@
 The updates store is made by the real tools/release/kn-updates.py (stage + publish + assets) from a
 fake package and a fake game-content tree, and served by a local HTTP server on a free port
 (kn_proto.free_ports) that logs every request. The "new" build is this build's client_bin and
-BoxOffice with their embedded commit id patched (same length), so they report another commit.
+launcher with their embedded commit id patched (same length), so they report another commit.
 
   1  fresh portable install, old build, partial content: the launcher detects the newer build,
      downloads + verifies + swaps the executables and ui/, installs the package's own assets/
@@ -148,11 +148,10 @@ def patch_commit(src, dst, old12, new12):
     return n
 
 
-def make_package(path, files):
-    """The package's flat layout (package-client.sh): BoxOffice, runtime/..., no wrapping folder."""
+def make_package(path, top, files):
     with tarfile.open(path, "w:gz") as t:
         for rel, (data, mode) in sorted(files.items()):
-            info = tarfile.TarInfo(rel)
+            info = tarfile.TarInfo(f"{top}/{rel}")
             info.size = len(data)
             info.mode = mode
             info.mtime = int(time.time())
@@ -222,16 +221,16 @@ def private_assets(tmp):
 
 def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_build, new12, old12, client_bin, launcher_bin):
     store = os.path.join(srv_root, "auto", "client")
-    pkg_name = f"BoxOffice-{plat}.tar.gz"
+    pkg_name = f"krunknative-client-{plat}.tar.gz"
     pkg_files = {
-        "runtime/client_bin": (read(os.path.join(new_bins, "client_bin")), 0o755),
-        "BoxOffice": (read(os.path.join(new_bins, "BoxOffice")), 0o755),
-        "runtime/ui/index.html": (b"<html>new</html>", 0o644),
-        "runtime/kn-install.json": (json.dumps(marker).encode(), 0o644),
+        "client_bin": (read(os.path.join(new_bins, "client_bin")), 0o755),
+        "krunknative": (read(os.path.join(new_bins, "krunknative")), 0o755),
+        "ui/index.html": (b"<html>new</html>", 0o644),
+        "kn-install.json": (json.dumps(marker).encode(), 0o644),
     }
     os.makedirs(os.path.join(store, "builds", new12))
     pkg = os.path.join(store, "builds", new12, pkg_name)
-    make_package(pkg, pkg_files)
+    make_package(pkg, f"krunknative-client-{plat}", pkg_files)
     good = read(pkg)
     manifest = {"format": 1, "channel": "latest", "build": json.loads(kn_build),
                 "platforms": {plat: {"update": {"url": f"builds/{new12}/{pkg_name}", "sha256": sha256(good), "size": len(good)}}}}
@@ -241,16 +240,16 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
 
     def run_auto(name, args, script, relaunch, gate_on=None, timeout=180):
         inst = os.path.join(tmp, name)
-        os.makedirs(os.path.join(inst, "runtime"))
-        shutil.copy2(client_bin, os.path.join(inst, "runtime", "client_bin"))  # the old build (no assets/: see private_assets)
-        shutil.copy2(launcher_bin, os.path.join(inst, "BoxOffice"))
-        write(os.path.join(inst, "runtime", "ui", "index.html"), "<html>old</html>")
-        write(os.path.join(inst, "runtime", "kn-install.json"), json.dumps(dict(marker, package="tar.gz")))
+        os.makedirs(inst)
+        shutil.copy2(client_bin, os.path.join(inst, "client_bin"))  # the old build (no assets/: see private_assets)
+        shutil.copy2(launcher_bin, os.path.join(inst, "krunknative"))
+        write(os.path.join(inst, "ui", "index.html"), "<html>old</html>")
+        write(os.path.join(inst, "kn-install.json"), json.dumps(dict(marker, package="tar.gz")))
         write(os.path.join(tmp, name + ".script"), script)
         write(os.path.join(tmp, name + "-relaunch.script"), relaunch)
         cenv = dict(env)
         cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": assets, "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"),
-                     "KRUNKNATIVE_LAUNCHER": os.path.join(inst, "BoxOffice"), "KRUNKNATIVE_UPDATES_URL": url,
+                     "KRUNKNATIVE_LAUNCHER": os.path.join(inst, "krunknative"), "KRUNKNATIVE_UPDATES_URL": url,
                      "KRUNKNATIVE_INPUT_SCRIPT": os.path.join(tmp, name + ".script"),
                      "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": os.path.join(tmp, name + "-relaunch.script"),
                      "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_WINDOW_SIZE": "640x360",
@@ -259,7 +258,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
         log = os.path.join(tmp, name + ".log")
         if gate_on:
             AUTO_GATE.clear()
-        p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(inst, "runtime", "client_bin")] + args, cwd=os.path.join(inst, "runtime"), env=cenv,
+        p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(inst, "client_bin")] + args, cwd=inst, env=cenv,
                              stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
         AUTO_PIDS.add(p.pid)
         end = time.time() + timeout
@@ -292,7 +291,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     check(found >= 0 and "(Update now: via the launcher)" in out, "7a: the client finds the newer build (mid-match)")
     check(found >= 0 and restart > found and "the match ended, restarting" in out[found:restart] and len(st) >= 2 and st[1] == "0",
           "7a: no restart while playing (still in game after the check), only once the match ended")
-    check(f"updated to v9.9.9-1-g{new12[:7]}" in out and read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0],
+    check(f"updated to v9.9.9-1-g{new12[:7]}" in out and read(os.path.join(inst, "client_bin")) == pkg_files["client_bin"][0],
           "7a: the launcher installed the update (sha256 + staged client check) after the restart")
     after = out[restart:] if restart >= 0 else ""
     check(f"({new12}," in after and re.search(r"\[update\] latest \S+ \(\S+\): current", after) is not None,
@@ -305,7 +304,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     inst, out = run_auto("auto-menu", ["--offline"], "0 menu\n40000 quit\n", "0 menu\n6000 quit\n")
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("in the menu, restarting" in out and "[update] restarting through" in out, "7b: in the menu the newer build restarts the client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0] and f"({new12}," in out.split("restarting through")[-1],
+    check(read(os.path.join(inst, "client_bin")) == pkg_files["client_bin"][0] and f"({new12}," in out.split("restarting through")[-1],
           "7b: the update is installed and the new client runs")
     check(out.count("restarting through") == 1, "7b: one restart (the new client is current)")
 
@@ -316,15 +315,15 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     write(pkg, good)
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("corrupt" in out and "the update failed: starting the installed client" in out, "7c: the launcher refused it and started the installed client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) != pkg_files["runtime/client_bin"][0] and f"({old12}," in out.split("starting the installed client")[-1],
+    check(read(os.path.join(inst, "client_bin")) != pkg_files["client_bin"][0] and f"({old12}," in out.split("starting the installed client")[-1],
           "7c: the install is unchanged, the old client runs again")
     check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7c: no second restart for that build (no loop)")
 
     # 7d: the staged client does not run here (launcher.c staged_client_runs): never installed, one
     # restart, the installed client runs again and does not restart for that build a second time
     print("7d auto-restart: a staged client that does not run here")
-    broken = dict(pkg_files, **{"runtime/client_bin": (b"#!/bin/sh\necho 'needs a newer system' >&2\nexit 3\n", 0o755)})
-    make_package(pkg, broken)
+    broken = dict(pkg_files, client_bin=(b"#!/bin/sh\necho 'needs a newer system' >&2\nexit 3\n", 0o755))
+    make_package(pkg, f"krunknative-client-{plat}", broken)
     bad = read(pkg)
     write(os.path.join(store, "latest.json"), json.dumps(dict(manifest, platforms={plat: {"update": {
         "url": f"builds/{new12}/{pkg_name}", "sha256": sha256(bad), "size": len(bad)}}})))
@@ -334,7 +333,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("does not start here" in out and "the update failed: starting the installed client" in out,
           "7d: the launcher's staged client check refused it and started the installed client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) == read(client_bin) and f"({old12}," in out.split("starting the installed client")[-1],
+    check(read(os.path.join(inst, "client_bin")) == read(client_bin) and f"({old12}," in out.split("starting the installed client")[-1],
           "7d: the install is unchanged (the staged client never replaced it), the old client runs again")
     check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7d: no second restart for that build (no loop)")
 
@@ -346,7 +345,7 @@ def main():
     ap.add_argument("--no-client", action="store_true", help="skip step 6 (needs the game content + headless GL)")
     a = ap.parse_args()
     build = os.path.abspath(a.build)
-    client_bin, launcher_bin = os.path.join(build, "client_bin"), os.path.join(build, "BoxOffice")
+    client_bin, launcher_bin = os.path.join(build, "client_bin"), os.path.join(build, "krunknative")
     for b in (client_bin, launcher_bin):
         if not os.path.exists(b):
             sys.exit(f"missing {b} (build the client_bin and kn_launcher targets)")
@@ -366,27 +365,27 @@ def main():
     old_time = int(time.time())
     new_commit = new12 + "ab" * 14
     proto = re.search(r"protocol (\d+\.\d+)", ver).group(1)
-    plat = "linux-x64" if os.uname().machine in ("x86_64", "amd64") else "linux-arm64"
+    plat = "linux-amd64" if os.uname().machine in ("x86_64", "amd64") else "linux-aarch64"
 
     # ---------------------------------------------------------------- the store
     new_bins = os.path.join(tmp, "newbins")
     n1 = patch_commit(client_bin, os.path.join(new_bins, "client_bin"), old12, new12)
-    n2 = patch_commit(launcher_bin, os.path.join(new_bins, "BoxOffice"), old12, new12)
+    n2 = patch_commit(launcher_bin, os.path.join(new_bins, "krunknative"), old12, new12)
     check(n1 > 0 and n2 > 0, f"patched the commit {old12} -> {new12} into the new build ({n1}, {n2} places)")
-    marker = {"format": 1, "platform": plat, "package": "tar.gz", "channel": "latest", "root": ".."}
+    marker = {"format": 1, "platform": plat, "package": "tar.gz", "channel": "latest", "root": "."}
     pkg_files = {
-        "runtime/client_bin": (read(os.path.join(new_bins, "client_bin")), 0o755),
-        "BoxOffice": (read(os.path.join(new_bins, "BoxOffice")), 0o755),
-        "runtime/ui/index.html": (b"<html>new</html>", 0o644),
-        "runtime/ui/NEW": (b"new ui file", 0o644),
-        "runtime/kn-install.json": (json.dumps(marker).encode(), 0o644),
-        "runtime/assets/shaders/x.vert": (b"new shader", 0o644),
+        "client_bin": (read(os.path.join(new_bins, "client_bin")), 0o755),
+        "krunknative": (read(os.path.join(new_bins, "krunknative")), 0o755),
+        "ui/index.html": (b"<html>new</html>", 0o644),
+        "ui/NEW": (b"new ui file", 0o644),
+        "kn-install.json": (json.dumps(marker).encode(), 0o644),
+        "assets/shaders/x.vert": (b"new shader", 0o644),
     }
     pkgs = os.path.join(tmp, "packages")
     os.makedirs(pkgs)
-    pkg_name = f"BoxOffice-{plat}.tar.gz"
-    make_package(os.path.join(pkgs, pkg_name), pkg_files)
-    write(os.path.join(pkgs, "SHA256SUMS"), f"{sha256(read(os.path.join(pkgs, pkg_name)))}  {pkg_name}\n")
+    pkg_name = f"krunknative-client-{plat}.tar.gz"
+    make_package(os.path.join(pkgs, pkg_name), f"krunknative-client-{plat}", pkg_files)
+    write(os.path.join(pkgs, pkg_name + ".sha256"), f"{sha256(read(os.path.join(pkgs, pkg_name)))}  {pkg_name}\n")
     web = os.path.join(tmp, "web-assets")  # stands in for /opt/krunknative-web/assets on kru
     for rel, data in {"textures/a.png": "A1", "sound/b.ogg": "B1", "css/fonts/font2.ttf": "FONT", "css/fonts/copy.ttf": "FONT",
                       "shaders/x.vert": "stale web copy", "version.txt": "x"}.items():
@@ -429,38 +428,36 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "xdg-config")
 
     def make_install(name, package):
-        # the installed layout: <inst>/BoxOffice and <inst>/runtime/{client_bin, ui/, assets/, kn-install.json}
         inst = os.path.join(tmp, name)
-        rt = os.path.join(inst, "runtime")
-        os.makedirs(rt)
-        shutil.copy2(client_bin, os.path.join(rt, "client_bin"))
-        shutil.copy2(launcher_bin, os.path.join(inst, "BoxOffice"))
-        write(os.path.join(rt, "ui", "index.html"), "<html>old</html>")
-        write(os.path.join(rt, "ui", "OLD_ONLY"), "removed by the update")
-        write(os.path.join(rt, "kn-install.json"), json.dumps(dict(marker, package=package)))
-        write(os.path.join(rt, "assets", "shaders", "x.vert"), "old shader")
+        os.makedirs(inst)
+        shutil.copy2(client_bin, os.path.join(inst, "client_bin"))
+        shutil.copy2(launcher_bin, os.path.join(inst, "krunknative"))
+        write(os.path.join(inst, "ui", "index.html"), "<html>old</html>")
+        write(os.path.join(inst, "ui", "OLD_ONLY"), "removed by the update")
+        write(os.path.join(inst, "kn-install.json"), json.dumps(dict(marker, package=package)))
+        write(os.path.join(inst, "assets", "shaders", "x.vert"), "old shader")
         return inst
 
     try:
         # ------------------------------------------------------------ 1 update + first sync
         print("1  portable install: executables + content")
         inst = make_install("install", "tar.gz")
-        assets = os.path.join(inst, "runtime", "assets")
+        assets = os.path.join(inst, "assets")
         write(os.path.join(assets, "textures", "a.png"), "A1")    # already right: adopted by hash
         write(os.path.join(assets, "sound", "b.ogg"), "B0")       # stale: fetched
         write(os.path.join(assets, "user-added.txt"), "mine")      # not managed: never touched
         before = tree_state(assets)
         log.take()
-        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
         print("\n".join("     " + line for line in out.strip().splitlines()))
         paths = log.take()
         check(code == 0, "launcher exit 0")
         check(any(p.endswith(pkg_name) for p in paths), "downloaded the update package")
-        check(read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0], "client_bin swapped")
-        check(read(os.path.join(inst, "BoxOffice")) == pkg_files["BoxOffice"][0], "launcher swapped (self-update)")
-        check(os.access(os.path.join(inst, "runtime", "client_bin"), os.X_OK), "client_bin still executable")
-        check(read(os.path.join(inst, "runtime", "ui", "index.html")) == b"<html>new</html>" and os.path.exists(os.path.join(inst, "runtime", "ui", "NEW"))
-              and not os.path.exists(os.path.join(inst, "runtime", "ui", "OLD_ONLY")), "ui/ replaced as a whole")
+        check(read(os.path.join(inst, "client_bin")) == pkg_files["client_bin"][0], "client_bin swapped")
+        check(read(os.path.join(inst, "krunknative")) == pkg_files["krunknative"][0], "launcher swapped (self-update)")
+        check(os.access(os.path.join(inst, "client_bin"), os.X_OK), "client_bin still executable")
+        check(read(os.path.join(inst, "ui", "index.html")) == b"<html>new</html>" and os.path.exists(os.path.join(inst, "ui", "NEW"))
+              and not os.path.exists(os.path.join(inst, "ui", "OLD_ONLY")), "ui/ replaced as a whole")
         check(read(os.path.join(assets, "shaders", "x.vert")) == b"new shader", "the package's own assets file installed")
         after = tree_state(assets)
         check(after["textures/a.png"] == before["textures/a.png"], "matching content file untouched (same inode, mtime)")
@@ -477,7 +474,7 @@ def main():
         # ------------------------------------------------------------ 2 nothing to do
         print("2  second start")
         exe_before = tree_state(inst)
-        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
         paths = log.take()
         check(code == 0 and "current" in out, "up to date")
         check(paths == ["/updates/client/latest.json"], f"only the manifest was fetched ({len(paths)} requests)")
@@ -493,8 +490,8 @@ def main():
         print(out.strip())
         manifest2 = json.loads(read(os.path.join(store, "public", "client", "latest.json")))
         check(code == 0 and manifest2["assets"]["version"] != manifest["assets"]["version"], "kn-updates assets: new content version")
-        exe_files = {k: v for k, v in tree_state(inst).items() if not k.startswith("runtime/assets/")}
-        code, out = run([os.path.join(inst, "BoxOffice"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        exe_files = {k: v for k, v in tree_state(inst).items() if not k.startswith("assets/")}
+        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
         print("\n".join("     " + line for line in out.strip().splitlines() if "game content" in line))
         paths = log.take()
         check(code == 0, "launcher exit 0")
@@ -504,18 +501,18 @@ def main():
               "changed + added files in place")
         check(not os.path.exists(os.path.join(assets, "sound", "b.ogg")), "the removed file is deleted")
         check(read(os.path.join(assets, "user-added.txt")) == b"mine", "the user's own file kept")
-        check({k: v for k, v in tree_state(inst).items() if not k.startswith("runtime/assets/")} == exe_files, "executables untouched")
+        check({k: v for k, v in tree_state(inst).items() if not k.startswith("assets/")} == exe_files, "executables untouched")
 
         # ------------------------------------------------------------ 4 deb: package manager
         print("4  deb install")
         deb = make_install("install-deb", "deb")
         os.chmod(deb, 0o555)  # /opt/krunknative is not the user's
-        deb_client = read(os.path.join(deb, "runtime", "client_bin"))
-        code, out = run([os.path.join(deb, "BoxOffice"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        deb_client = read(os.path.join(deb, "client_bin"))
+        code, out = run([os.path.join(deb, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
         paths = log.take()
         data_assets = os.path.join(tmp, "xdg-data", "krunknative", "assets")
         check(code == 0 and "package manager" in out, "update deferred to the package manager")
-        check(read(os.path.join(deb, "runtime", "client_bin")) == deb_client and not any("/builds/" in p for p in paths), "executables untouched")
+        check(read(os.path.join(deb, "client_bin")) == deb_client and not any("/builds/" in p for p in paths), "executables untouched")
         check(read(os.path.join(data_assets, "css", "fonts", "font2.ttf")) == b"FONT", "content synced into $XDG_DATA_HOME/krunknative/assets")
         check(read(os.path.join(data_assets, "shaders", "x.vert")) == b"old shader", "the installed package's own assets/ file mirrored")
         check(f"({old12}," in out, "the installed (old) client started")
@@ -528,18 +525,18 @@ def main():
         good = read(pkg_path)
         write(pkg_path, good[:-10] + b"0123456789")
         before = tree_state(bad)
-        code, out = run([os.path.join(bad, "BoxOffice"), "--cli", "--no-launch"], env=env, cwd=tmp)
+        code, out = run([os.path.join(bad, "krunknative"), "--cli", "--no-launch"], env=env, cwd=tmp)
         log.take()
         check("corrupt" in out, "sha256 mismatch detected")
-        after = {k: v for k, v in tree_state(bad).items() if not k.startswith("runtime/assets/")}
-        check(after == {k: v for k, v in before.items() if not k.startswith("runtime/assets/")}, "install unchanged")
+        after = {k: v for k, v in tree_state(bad).items() if not k.startswith("assets/")}
+        check(after == {k: v for k, v in before.items() if not k.startswith("assets/")}, "install unchanged")
         write(pkg_path, good)
 
         # ------------------------------------------------------------ 5b unreachable server
         print("5b unreachable updates server")
         un = make_install("install-unreachable", "tar.gz")  # no game content yet: nothing playable
         uenv = dict(env, KRUNKNATIVE_UPDATES_URL="https://nohost.invalid/updates/client/latest.json")  # RFC 6761: never resolves
-        code, out = run([os.path.join(un, "BoxOffice"), "--cli", "--no-launch"], env=uenv, cwd=tmp)
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--no-launch"], env=uenv, cwd=tmp)
         print("\n".join("     " + line for line in out.strip().splitlines() if "launcher]" in line and "Checking" not in line)[-600:])
         check(code == 2, f"no manifest and no content: exit 2 ({code})")
         check("cannot resolve nohost.invalid (DNS" in out, "the reason names the DNS lookup and the host")
@@ -547,13 +544,13 @@ def main():
               "the window's error line carries the reason, not the content dir")
         check("try 3 of 3" in out, "a failed lookup is tried 3 times")
         log.take()
-        code, out = run([os.path.join(un, "BoxOffice"), "--cli", "--check"],
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--check"],
                         env=dict(env, KRUNKNATIVE_UPDATES_URL=f"http://127.0.0.1:{port}/updates/client/missing.json"), cwd=tmp)
         paths = log.take()
         check(code == 2 and f"HTTP 404 from http://127.0.0.1:{port}/updates/client/missing.json" in out, "a 404 says HTTP 404 and the URL")
         check(paths == ["/updates/client/missing.json"], f"a 404 is not retried ({len(paths)} requests)")
         FLAKY["left"] = 1
-        code, out = run([os.path.join(un, "BoxOffice"), "--cli", "--check"],
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--check"],
                         env=dict(env, KRUNKNATIVE_UPDATES_URL=f"http://127.0.0.1:{port}/flaky/client/latest.json"), cwd=tmp)
         paths = log.take()
         check(code == 3 and "reached the server on try 2" in out, f"a 503 then 200: the second try finds the update (exit {code})")
@@ -575,7 +572,7 @@ def main():
                          "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_NO_BROWSER": "1",
                          "KRUNKNATIVE_LOCAL_BUILD": "0"})  # a published build: a dev build's flag would hide the box
             t0 = time.time()
-            code, out = run(["timeout", "120", os.path.join(cl, "runtime", "client_bin"), "--offline"], env=cenv, cwd=os.path.join(cl, "runtime"), timeout=150)
+            code, out = run(["timeout", "120", os.path.join(cl, "client_bin"), "--offline"], env=cenv, cwd=cl, timeout=150)
             took = time.time() - t0
             lines = [line for line in out.splitlines() if line.startswith("[update]")]
             print("\n".join("     " + line for line in lines))

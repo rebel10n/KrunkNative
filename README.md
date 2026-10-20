@@ -2,7 +2,7 @@
 
 Krunker.io - except it's awesome. A rewrite of the game in native C using minimal libraries, focused on freedom and performance.
 
-Krunker Box Office was formerly called KrunkNative. The repository, the binaries' file names (`client_bin`, `server_bin`), the `KRUNKNATIVE_*` environment variables and the `kn_*` targets keep that name. The client's launcher is `BoxOffice` and its release packages are `BoxOffice-<platform>.tar.gz` / `.zip` (flat: the launcher at the top, the game in `runtime/`). The app icons are krunker.io's current ones, pinned in `tools/branding/branding.lock` (`make branding`).
+Krunker Box Office was formerly called KrunkNative. The repository, the binaries' file names (`client_bin`, `server_bin`, the `krunknative` launcher, the `krunknative-*` packages), the `KRUNKNATIVE_*` environment variables and the `kn_*` targets keep that name. The app icons are krunker.io's current ones, pinned in `tools/branding/branding.lock` (`make branding`).
 
 ![Krunker Box Office: the menu over Kanji](/doc/screenshots/menu.jpg)
 

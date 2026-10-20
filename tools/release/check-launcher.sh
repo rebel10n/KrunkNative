@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# The packaged launcher reaches the updates server: unpacks a client package (BoxOffice-<platform>) and runs its launcher's
+# The packaged launcher reaches the updates server: unpacks a client package and runs its launcher's
 # update check (`--cli --check`) against the live channel manifest (default
 # https://dl.krunk.io/updates/client/latest.json; KRUNKNATIVE_UPDATES_URL overrides it). That is
 # the launcher's own DNS lookup, TLS (system CA store / WinHTTP's), redirects and manifest parse
 # end to end, on the platform that built the package. 2026-10-13: "the box office updater fails to
 # connect to the server" (assets.krunk.io had no DNS record after the move to Spaceship).
 #
-#   tools/release/check-launcher.sh <BoxOffice-<platform>.tar.gz|.zip> [--old-url]
+#   tools/release/check-launcher.sh <package.tar.gz|package.zip> [--old-url]
 #
 # Exit 0 = the launcher read the manifest (its build is current or a newer one is published),
 # 1 = it could not. --old-url also checks the URL launchers before 8a010d82 have built in
 # (https://assets.krunk.io/updates/client/latest.json, now a 302 to dl.krunk.io).
 # Windows packages run natively under MSYS2/Cygwin, else through wine (WINEPREFIX kept private).
-# The package is flat (BoxOffice and runtime/ at the top), so the launcher runs from the unpacked folder.
 set -euo pipefail
 
 pkg="${1:?usage: check-launcher.sh <package.tar.gz|package.zip> [--old-url]}"
@@ -28,21 +27,23 @@ case "$pkg" in
   *) echo "check-launcher: not a package: $pkg" >&2; exit 1 ;;
 esac
 
-[ -f "$work/runtime/kn-install.json" ] || { echo "check-launcher: $pkg is not a Krunker Box Office client package (no runtime/kn-install.json)" >&2; exit 1; }
 run=()
-if [ -d "$work/BoxOffice.app" ]; then
-  run=("$work/BoxOffice.app/Contents/MacOS/BoxOffice")
-elif [ -f "$work/BoxOffice.exe" ]; then
-  case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN*) run=("$work/BoxOffice.exe") ;;
-    *)
-      command -v wine > /dev/null || { echo "check-launcher: a Windows package needs Windows or wine" >&2; exit 1; }
-      export WINEPREFIX="${WINEPREFIX:-$work/wineprefix}" WINEDEBUG=-all
-      run=(wine "$work/BoxOffice.exe")
-      ;;
-  esac
+if [ -d "$work/KrunkNative.app" ]; then
+  run=("$work/KrunkNative.app/Contents/MacOS/KrunkNative")
 else
-  run=("$work/BoxOffice")
+  top="$(find "$work" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  if [ -f "$top/KrunkNative.exe" ]; then
+    case "$(uname -s)" in
+      MINGW* | MSYS* | CYGWIN*) run=("$top/KrunkNative.exe") ;;
+      *)
+        command -v wine > /dev/null || { echo "check-launcher: a Windows package needs Windows or wine" >&2; exit 1; }
+        export WINEPREFIX="${WINEPREFIX:-$work/wineprefix}" WINEDEBUG=-all
+        run=(wine "$top/KrunkNative.exe")
+        ;;
+    esac
+  else
+    run=("$top/krunknative")
+  fi
 fi
 
 check() { # <label> [extra args]

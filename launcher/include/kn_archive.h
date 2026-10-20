@@ -3,10 +3,9 @@
 // deflate), inflated with stb_image's zlib decoder (client/src/stb_image.c). The archive is
 // read into memory (executable packages are tens of MB).
 //
-// A single top-level directory shared by every entry (a wrapped package from before the flat
-// BoxOffice layout) is stripped; a flat package (BoxOffice, runtime/) has none. Unsafe entries
-// (absolute, "..", '\\', ':') fail the whole extraction; symlinks are kept only when relative and
-// inside the tree (.app frameworks).
+// A single top-level directory shared by every entry (krunknative-client-<plat>/,
+// KrunkNative.app/) is stripped. Unsafe entries (absolute, "..", '\\', ':') fail the whole
+// extraction; symlinks are kept only when relative and inside the tree (.app frameworks).
 // The executable bit (tar mode, zip Unix attributes) is kept on POSIX.
 #include <stddef.h>
 

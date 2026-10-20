@@ -615,8 +615,8 @@ else ()
     endif ()
 
     # LAUNCHER (launcher/, doc/backend.md "Client updates"): what players start. It updates the
-    # executables + ui/ and syncs the game content from the updates server, then runs runtime/client_bin.
-    # Output: BoxOffice (BoxOffice.exe, a GUI-subsystem exe), next to runtime/ in packages.
+    # executables + ui/ and syncs the game content from the updates server, then runs client_bin.
+    # Output: krunknative (KrunkNative.exe, a GUI-subsystem exe), next to client_bin in packages.
     # Same GL backend, FreeType and OpenSSL as client_bin, no other runtime dependency.
     set(LAUNCHER_SOURCES
         launcher/src/launcher.c launcher/src/launcher_ui.c launcher/src/launcher_ui.h
@@ -629,10 +629,10 @@ else ()
     endif ()
     add_executable(kn_launcher WIN32 ${LAUNCHER_SOURCES})
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME BoxOffice)
+        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME KrunkNative)
         target_link_libraries(kn_launcher PRIVATE winhttp)
     else ()
-        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME BoxOffice)
+        set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME krunknative)
     endif ()
     target_include_directories(kn_launcher PRIVATE launcher/include client/include shared/include)
     target_link_libraries(kn_launcher PRIVATE glfw freetype kn_build_info Threads::Threads m)
