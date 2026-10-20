@@ -43,7 +43,7 @@ LOCK = threading.Lock()
 results = []  # (scenario, check, ok, detail)
 
 FLAG_RE = re.compile(r"\[input_script\] flag t=(\d+) i=(\d+) team=(-?\d+) carrier=(-?\d+) pos=([-\d.]+),([-\d.]+),([-\d.]+) "
-                     r"mesh=(\d) crystal=([-\d.]+),([-\d.]+),([-\d.]+) vis=(\d) stand=[-\d.,]+ svis=\d info=(.*)$")
+                     r"mesh=(\d) crystal=([-\d.]+),([-\d.]+),([-\d.]+) vis=(\d) stand=([-\d.]+),([-\d.]+),([-\d.]+) svis=(\d) info=(.*)$")
 VIS_RE = re.compile(r"\[input_script\] vis t=\d+ @(\S+)(.*)")
 
 
@@ -103,7 +103,8 @@ def flags(lines):
         g = m.groups()
         out.setdefault(int(g[0]), []).append({
             "i": int(g[1]), "team": int(g[2]), "carrier": int(g[3]), "pos": tuple(map(float, g[4:7])), "mesh": int(g[7]),
-            "crystal": tuple(map(float, g[8:11])), "vis": int(g[11]), "info": g[12].strip()})
+            "crystal": tuple(map(float, g[8:11])), "vis": int(g[11]), "stand": tuple(map(float, g[12:15])),
+            "svis": int(g[15]), "info": g[16].strip()})
     return [out[t] for t in sorted(out)]
 
 
@@ -181,6 +182,7 @@ def flag_cycle_script(pose):
     return f"""
         0 play
         200 con team red
+        3500 flags
         4000 respawn
         8000 {pose} {ex} {ey} {ez} 0 -0.25
         9000 flags
@@ -206,14 +208,41 @@ def flag_cycle_script(pose):
     """
 
 
+START = "at the start (the map's FLAG objects)"
+# kanji's FLAG objects (assets/maps/311_kanji.json, prefab 23: p and tm): the mirror team is tm + 1.
+# addFlag (objects.js): the crystal rides y + 6 + 6 (flagOff), the stand (zone) sits on the object's y.
+MAP_FLAGS = [((179.0, -139.0, -468.0), 1), ((-317.0, -143.0, -74.0), 2)]
+FLAG_CRYSTAL_UP = 12.0
+CRYSTAL_BOB = 1.05  # cos(bob) in [-1, 1] plus the first frame's step
+
+
+def check_start_flags(name, probe):
+    """Before anyone touches a flag: one crystal + stand per map FLAG object, where the object is."""
+    # the mirror may list a mesh-less slot too (a neutral entry in CTF, mesh 0): only drawn flags count
+    drawn = [f for f in probe if f["mesh"]]
+    record(name, f"{START}: one drawn flag per map FLAG object", sorted(f["team"] for f in drawn) == sorted(t for _, t in MAP_FLAGS),
+           f"teams {sorted(f['team'] for f in drawn)}")
+    for (x, y, z), team in MAP_FLAGS:
+        f = next((f for f in probe if f["team"] == team), None)
+        if f is None:
+            record(name, f"{START}: team {team} flag", False, "missing")
+            continue
+        at = abs(f["crystal"][0] - x) < 0.5 and abs(f["crystal"][2] - z) < 0.5 and abs(f["crystal"][1] - (y + FLAG_CRYSTAL_UP)) <= CRYSTAL_BOB
+        stand = abs(f["stand"][0] - x) < 0.5 and abs(f["stand"][1] - y) < 0.5 and abs(f["stand"][2] - z) < 0.5
+        record(name, f"{START}: team {team} crystal + stand at the FLAG object", f["mesh"] == 1 and f["carrier"] < 0 and f["vis"] == 1
+               and f["svis"] == 1 and at and stand,
+               f"crystal {f['crystal']} stand {f['stand']} object {(x, y, z)} vis {f['vis']} svis {f['svis']}")
+
+
 def check_flag_cycle(name, lines):
     probes = flags(lines)
-    steps = ["picked up", "dropped", "returned by touch", "picked up again", "dropped again", "still away (idle timer)",
-             "home after flagIdle"]
+    steps = [START, "picked up", "dropped", "returned by touch", "picked up again", "dropped again",
+             "still away (idle timer)", "home after flagIdle"]
     if len(probes) != len(steps):
         record(name, f"{len(steps)} flag probes", False, f"got {len(probes)}")
         return
-    for step, probe in zip(steps, probes):
+    check_start_flags(name, probes[0])
+    for step, probe in zip(steps[1:], probes[1:]):
         active = [f for f in probe if f["mesh"]]
         per_team = sorted(f["team"] for f in active)
         record(name, f"{step}: one flag per team", per_team == [1, 2], f"teams {per_team}")
