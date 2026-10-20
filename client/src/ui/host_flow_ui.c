@@ -81,14 +81,6 @@ static int read_field(const char *id, char *out, const size_t size) {
     return 1;
 }
 
-static int read_int(const char *id, const int fallback) {
-    char text[32];
-    if (!read_field(id, text, sizeof(text)) || !text[0]) return fallback;
-    char *end = NULL;
-    const long v = strtol(text, &end, 10);
-    return end && !*end && v >= 0 && v <= 65535 ? (int) v : fallback;
-}
-
 // The page's values into the state (the window open only): the Select tab's checkboxes, the self-host
 // fields, the password and the rows (ui_host_config_collect). Returns 0 with `err` set when the rows are
 // not valid (no mode, no class, a long password); the state then keeps the rows it had.
@@ -103,13 +95,7 @@ static int sync_page(char *err, const size_t err_size) {
         const HtmlElem box = html_dom_by_id(id);
         if (box) g_flow.maps[e->index] = html_dom_get_checked(box) ? 1 : 0;
     }
-    read_field("hostFlowName", g_flow.name, sizeof(g_flow.name));
     read_field("passCode", g_flow.password, sizeof(g_flow.password));
-    g_flow.port = read_int("hostFlowPort", FLOW_DEFAULT_PORT);
-    read_field("hostFlowPublicHost", g_flow.public_host, sizeof(g_flow.public_host));
-    g_flow.public_port = read_int("hostFlowPublicPort", 0);
-    const HtmlElem headless = html_dom_by_id("hostFlowHeadless");
-    if (headless) g_flow.headless = html_dom_get_checked(headless) ? 1 : 0;
     cJSON *request = ui_host_config_collect(g_flow.host_type, err, err_size);
     if (!request) return 0;
     cJSON_Delete(g_flow.request);
@@ -361,24 +347,6 @@ static void practice(void) {
 
 // ------------------------------------------------------------------ the markup
 
-static void append_button(StrBuf *sb, const char *id, const char *label, const char *onclick, const int primary) {
-    sb_appendf(sb, "<div %s%s%s class='%s' style='display:inline-block;margin:6px 8px 0 0;cursor:pointer;padding:8px 14px;border-radius:6px;background:%s;color:#fff' onmouseenter='playTick()' onclick=\"playSelect(0.1);%s\">",
-               id ? "id='" : "", id ? id : "", id ? "'" : "", primary ? "joinBtn" : "button small", primary ? "#2a7ae2" : "rgba(255,255,255,0.12)", onclick);
-    sb_append_esc(sb, label);
-    sb_append(sb, "</div>");
-}
-
-static void append_text_field(StrBuf *sb, const char *label, const char *id, const char *value, const char *placeholder, const char *type) {
-    sb_append(sb, "<div class='settNameSmall'>");
-    sb_append_esc(sb, label);
-    sb_appendf(sb, "<input id='%s' type='%s' value='", id, type);
-    sb_append_esc(sb, value ? value : "");
-    sb_append(sb, "' placeholder='");
-    sb_append_esc(sb, placeholder ? placeholder : "");
-    sb_append(sb, "' autocomplete='off' spellcheck='false' "
-                  "style='border-radius:6px;border:none;background:#eee;padding:6px;float:right;margin-top:5px;margin-bottom:5px;width:220px'></div>");
-}
-
 // The Select tab's map checkboxes: v10's labels (hostMap, gameMap<mapIndex>), the checked state kept
 static void append_map_cards(StrBuf *sb) {
     for (size_t i = 0; i < map_catalog_count(); i++) {
@@ -394,52 +362,23 @@ static void append_map_cards(StrBuf *sb) {
     }
 }
 
-// The Start Game step: the choice. By the active backend, the first option is krunker.io's hosting or Box
-// Office servers (one Start Game button, hostFlowStart); the second is hosting it yourself (the command and
-// the Dedicated Server window). The step is hidden unless it is the active tab.
-static char *choice_html(const int shown) {
+// The dedicated-server command, the one addition to v10's host window: the server_bin line the client builds
+// (host_command.c) on the Server tab (hostTb3, shown by switchTab with that tab), with a Copy button in v10's own
+// small-button style (.hostPresetBtn). No fields, no hint line, no other buttons.
+static char *command_html(const int shown) {
     StrBuf sb = {0};
-    const int krunker = krunker_backend();
-    sb_appendf(&sb, "<div class='hostTb4%s' id='hostFlowChoice' style='margin-top:-10px;'>", shown ? "" : " hide");
-    sb_append(&sb, "<div class='setHed' style='margin-bottom:15px'>");
-    sb_append(&sb, krunker ? I18N("kn.hostflow.kio.heading", "krunker.io servers") : I18N("kn.hostflow.box.heading", "Box Office servers"));
-    sb_append(&sb, "</div><div class='setBodH' style='padding-top:10px;padding-bottom:12px'><div style='font-size:16px;margin-bottom:6px'>");
-    sb_append(&sb, krunker ? I18N("kn.hostflow.kio.body", "krunker.io runs the game on its official servers, with your krunker.io account. Start Game creates it there and you join it.")
-                           : I18N("kn.hostflow.box.body", "Box Office runs the game on our servers. Start Game creates it there and you join it."));
-    sb_append(&sb, "</div><div id='hostFlowStart' class='bigMenTab' style='display:inline-block;background:#4582d1!important;border-radius:6px;cursor:pointer' "
-                   "onmouseenter='playTick(0.1);' onclick='playSelect(0.1);createPrivateRoom();'>");
-    sb_append(&sb, I18N("kn.hostflow.start", "Start Game"));
-    sb_append(&sb, "</div></div>");
-
-    sb_append(&sb, "<div class='setHed' style='margin:25px 0 15px'>");
-    sb_append(&sb, I18N("kn.hostflow.self.heading", "Host it yourself"));
-    sb_append(&sb, "</div><div class='setBodH' style='padding-top:10px;padding-bottom:12px'><div style='font-size:16px;margin-bottom:6px'>");
-    sb_append(&sb, I18N("kn.hostflow.self.body", "Download the dedicated server and run the command below in its folder. The game runs on your own computer or server."));
-    sb_append(&sb, "</div>");
-    char port[16], public_port[16];
-    snprintf(port, sizeof(port), "%d", g_flow.port);
-    snprintf(public_port, sizeof(public_port), "%d", g_flow.public_port);
-    append_text_field(&sb, I18N("kn.hostflow.server.name", "Server name"), "hostFlowName", g_flow.name, I18N("kn.hostflow.server.name.hint", "Krunker Box Office server"), "text");
-    append_text_field(&sb, I18N("kn.hostflow.server.port", "Port"), "hostFlowPort", port, "21015", "number");
-    append_text_field(&sb, I18N("kn.hostflow.server.publicHost", "Public address"), "hostFlowPublicHost", g_flow.public_host, I18N("kn.hostflow.server.publicHost.hint", "for players outside your network"), "text");
-    append_text_field(&sb, I18N("kn.hostflow.server.publicPort", "Public port"), "hostFlowPublicPort", public_port, "", "number");
-    sb_appendf(&sb, "<div class='settNameSmall'>%s <label class='switch'><input id='hostFlowHeadless' type='checkbox' %s><span class='slider'></span></label></div>",
-               I18N("kn.hostflow.server.headless", "No console (headless)"), g_flow.headless ? "checked" : "");
-    sb_append(&sb, "<div class='setHed' style='margin:18px 0 10px'>");
-    sb_append(&sb, I18N("kn.hostflow.command.heading", "Command for the dedicated server"));
-    sb_append(&sb, "</div>");
-    sb_append(&sb, "<div id='hostFlowCommand' style='font-family:monospace;font-size:14px;white-space:pre-wrap;word-break:break-all;"
-                   "user-select:text;background:rgba(0,0,0,0.45);color:#eee;padding:12px;border-radius:6px'>");
+    sb_appendf(&sb, "<div class=\"hostTb3%s\" id=\"hostFlowCommandBlock\">", shown ? "" : " hide");
+    sb_append(&sb, "<div class=\"setHed\" style=\"margin-bottom:15px\">");
+    sb_append(&sb, I18N("kn.hostflow.command.heading", "Dedicated server command"));
+    sb_append(&sb, "</div><div class=\"setBodH\">");
+    sb_append(&sb, "<div id=\"hostFlowCommand\" style=\"font-family:monospace;font-size:14px;white-space:pre-wrap;word-break:break-all;"
+                   "user-select:text;background:rgba(0,0,0,0.45);color:#eee;padding:12px;border-radius:6px\">");
     char line[HOST_COMMAND_WORD_MAX + 1024];
     const int built = command_line(line, sizeof(line));
     sb_append_esc(&sb, built >= 0 ? line : I18N("kn.hostflow.command.error", "Too many settings for one command: remove some overrides."));
-    sb_append(&sb, "</div><div style='margin-top:10px;font-size:14px;opacity:0.8'>");
-    sb_append(&sb, I18N("kn.hostflow.command.hint", "Run it in the folder with server_bin. The map, mode and settings are in the command."));
-    sb_append(&sb, "</div><div style='margin-top:6px'>");
-    append_button(&sb, NULL, I18N("kn.hostflow.copy", "Copy command"), "knHostFlow('copy')", 1);
-    append_button(&sb, NULL, I18N("kn.hostflow.practice", "Play this map offline"), "knHostFlow('practice')", 0); // its message says when no map is chosen
-    // the Dedicated Server window (dedicated_server_ui.c)
-    append_button(&sb, "hostFlowGetServer", I18N("kn.hostflow.download", "Get the dedicated server"), "knHostFlow('download')", 0);
+    sb_append(&sb, "</div><div class=\"hostPresetBtn\" style=\"width:auto;margin-top:12px;padding:6px 12px\" onmouseenter=\"playTick()\" "
+                   "onclick=\"playSelect(0.1);knHostFlow('copy')\">");
+    sb_append_esc(&sb, I18N("kn.hostflow.copy", "Copy command"));
     sb_append(&sb, "</div></div></div>");
     return sb_finish(&sb);
 }
@@ -452,9 +391,9 @@ static void append_tabs(StrBuf *sb, const int active) {
         sb_appendf(sb, "<div id=\"hstTab%d\" class=\"bigMenTab%s\" onclick=\"playSelect();windows[7].switchTab(%d)\" onmouseenter=\"playTick(0.1);\">%s</div>",
                    t, t == active ? " bigMenTabA" : "", t, names[t]);
     }
-    sb_appendf(sb, "<div class=\"bigMenTab%s\" id=\"startServBtn\" style=\"background:#4582d1!important;border-top-right-radius:6px;border-bottom-right-radius:6px;\" "
-                   "onclick=\"playSelect(0.1);windows[7].switchTab(%d)\" onmouseenter=\"playTick(0.1);\">%s</div></div>",
-               active == FLOW_STEP_START ? " bigMenTabA" : "", FLOW_STEP_START, I18N("kn.hostflow.start", "Start Game"));
+    // v10.0.2's startServBtn (captured host window): a button of the tab row, no tab of its own
+    sb_appendf(sb, "<div class=\"bigMenTab\" id=\"startServBtn\" style=\"background:#4582d1!important;border-top-right-radius:6px;border-bottom-right-radius:6px;\" "
+                   "onclick=\"playSelect(0.1);createPrivateRoom();\">%s</div></div>", I18N("kn.hostflow.start", "Start Game"));
 }
 
 // ------------------------------------------------------------------ the template splices (ui/windows/8.html)
@@ -581,10 +520,10 @@ char *host_flow_window_gen(void) {
     if (g_flow.step != 0) html = replace_once(html, "<div class=\"hostTb0\">", "<div class=\"hostTb0 hide\">");
     html = config_bodies(html, g_flow.step, preset, g_flow.host_type);
     cJSON_Delete(preset);
-    // the choice: the last step, before the sticky Server Cost line
+    // the dedicated-server command (Server tab), before the sticky Server Cost line
     {
         const char *anchor = "<div style=\"margin-top:40px\"></div><div id=\"stickyHostH\">";
-        char *choice = choice_html(g_flow.step == FLOW_STEP_START);
+        char *choice = command_html(g_flow.step == 3); // the Server tab
         StrBuf with = {0};
         sb_append(&with, choice ? choice : "");
         sb_append(&with, anchor);
