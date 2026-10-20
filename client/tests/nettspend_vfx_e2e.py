@@ -80,7 +80,13 @@ BOTTLE_FROM_HAND = 0.05      # units: the bottle's grip (where it is held) from 
 OFF_HAND_RISE = 0.5          # units the off hand at least lifts the bottle above its rest (over the cup) during the pour-up
 TP_SCALE = 1.8               # NETTSPEND_TP_SCALE: third person's cup and bottle (the mouth's reach over the rim scales too)
 HAND_BELOW = 0.12            # window fraction a fist's centre may sit below the bottom edge (the view cuts the arms there)
-TP_OFF_HAND_DROP = 3.0       # third person, outside the pour-up: the off hand hangs at least this far below the cup hand
+# third person, outside the pour-up: the off hand hangs in a band of heights, measured from the cup hand. Its low edge is
+# the thigh's top (the hip joint, game_constants.leg_height above the feet): a hand hung in the thigh falls below it. Its high
+# edge is the pelvis (the Drank's pelvis_height, hosePelvisHeight 4.55 above the feet) plus a small margin.
+TP_FEET_Y = -143.0           # the feet's height in the third-person script's pose (tp_script)
+TP_THIGH_TOP = 4.2           # the thigh's top above the feet (game_constants.leg_height, the hip joint the legs hang from)
+TP_PELVIS_HEIGHT = 4.55      # the Drank's pelvis above the feet (shared/src/weapons/kn_drank.c pelvis_height)
+TP_BAND_MARGIN = 0.3         # the band's high edge: the pelvis plus this
 POUR_TIPPED = (0.3, 0.75)    # reload progress where the bottle is over the cup (both hands up, in the frame)
 
 
@@ -154,7 +160,7 @@ def money_script(work, weapon):
 def tp_script(work, drank, money):
     shot = lambda name: f"{os.path.join(work, 'tp_' + name)}.png"
     # the Drank in third person, then its pour-up (a reload after a sip) from the third-person camera, then the cash
-    lines = ["0 play", f"300 om add {drank}", "700 con thirdperson", "1000 pose -343 -143 -28 0 0", "1500 wsel @tpdrank",
+    lines = ["0 play", f"300 om add {drank}", "700 con thirdperson", f"1000 pose -343 {TP_FEET_Y:g} -28 0 0", "1500 wsel @tpdrank",
              f"1500 shot {shot('drank')}", "1500 hands", "1550 mdown left", "1700 mup left", "2300 down R", f"{2300 + 2 * FRAME_MS:.3f} up R",
              f"{2300 + RELOAD_MS * 0.5:.0f} shot {shot('pour')}", f"{2300 + RELOAD_MS + 300:.0f} om add {money}",
              f"{2300 + RELOAD_MS + 1100:.0f} wsel @tpmoney", f"{2300 + RELOAD_MS + 1100:.0f} shot {shot('money')}", f"{2300 + RELOAD_MS + 1200:.0f} quit"]
@@ -416,10 +422,19 @@ def verify_tp(events):
     hands = [e for kind, e in events if kind == "hands"]
     verify_off_hand_pour(tag, hands)
     # one arm holds the cup out: outside the pour-up the off hand hangs at the side, holding nothing
+    # the band, per probe, as the off hand's height relative to the cup hand: no lower than the thigh's top, no higher
+    # than the pelvis plus TP_BAND_MARGIN (a hand hung in the thigh is below the band; the pelvis rest is inside it)
     idle = [h for h in hands if not h["visible"]]
-    drop = min((h["trigger"][1] - h["off"][1] for h in idle), default=0.0)
-    check(f"{tag}: outside the pour-up the off hand hangs at the side, empty (at least {TP_OFF_HAND_DROP} below the cup hand)",
-          len(idle) >= 2 and drop >= TP_OFF_HAND_DROP, f"{len(idle)} probes, the smallest drop {drop:.2f} units")
+    rel = [h["off"][1] - h["trigger"][1] for h in idle]
+    inside = [
+        TP_FEET_Y + TP_THIGH_TOP - h["trigger"][1] <= r <= TP_FEET_Y + TP_PELVIS_HEIGHT + TP_BAND_MARGIN - h["trigger"][1]
+        for h, r in zip(idle, rel)
+    ]
+    check(f"{tag}: outside the pour-up the off hand hangs at the side, empty, at the pelvis (between the thigh's top and the pelvis "
+          f"+{TP_BAND_MARGIN} from the cup hand)",
+          len(idle) >= 2 and all(inside),
+          f"{len(idle)} probes, the off hand {min(rel, default=0.0):.2f}..{max(rel, default=0.0):.2f} units from the cup hand, "
+          f"{sum(inside)} of {len(idle)} inside the band")
     tipped = [h for h in hands if h["visible"] and POUR_TIPPED[0] <= (h["t"] - 2300.0) / RELOAD_MS <= POUR_TIPPED[1]]
     check(f"{tag}: during the pour-up the off hand is up with the bottle (drawn, at the cup's height)",
           len(tipped) >= 5 and all(h["off_visible"] and h["off"][1] >= h["trigger"][1] - 1.0 for h in tipped), f"{len(tipped)} frames")
