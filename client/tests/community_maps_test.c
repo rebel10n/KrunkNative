@@ -99,12 +99,25 @@ static void test_slot_of(void) {
     cJSON_Delete(b);
 }
 
+static void test_catalogue_fills(void) {
+    // Box Office: the bundled catalogue fills every source, as before
+    CHECK(community_catalogue_fills(0, COMMUNITY_SOURCE_ALL) && community_catalogue_fills(0, COMMUNITY_SOURCE_COMMUNITY) &&
+              community_catalogue_fills(0, COMMUNITY_SOURCE_OFFICIAL),
+          "a Box Office list is filled by the catalogue for every source");
+    // krunker.io: its Community, All and tab lists are its own answers; the catalogue fills Official only
+    CHECK(!community_catalogue_fills(1, COMMUNITY_SOURCE_COMMUNITY), "a krunker.io Community list is never filled by the catalogue");
+    CHECK(!community_catalogue_fills(1, COMMUNITY_SOURCE_ALL), "a krunker.io All list (and the tabs, which use All) is never filled by the catalogue");
+    CHECK(!community_catalogue_fills(1, COMMUNITY_SOURCE_PUBLISHED), "a krunker.io published list is never filled by the catalogue");
+    CHECK(community_catalogue_fills(1, COMMUNITY_SOURCE_OFFICIAL), "a krunker.io Official list keeps Krunker's own catalogue");
+}
+
 int main(void) {
     test_search_path();
     test_mode_names();
     test_catalogue_index();
     test_published_spec();
     test_slot_of();
+    test_catalogue_fills();
     printf("community_maps_test: %d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

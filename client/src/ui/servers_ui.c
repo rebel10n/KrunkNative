@@ -3900,6 +3900,9 @@ static int games_cards(StrBuf *sb, const int tab) {
         }
         return count;
     }
+    // a krunker.io account's tab is krunker.io's answer alone: no bundled maps while it loads (-1) or when it failed (0)
+    if (!community_catalogue_fills(account_backend() == ACCOUNT_BACKEND_KRUNKER, COMMUNITY_SOURCE_ALL))
+        return data >= 0 && !g_games_tabs[data].failed ? -1 : 0;
     int order[96];
     size_t n = map_catalog_games_tab(data, order, sizeof(order) / sizeof(order[0]));
     if (k_games_tabs[tab].home && n > (size_t) limit) n = (size_t) limit;
@@ -4068,7 +4071,9 @@ static void games_search(const HtmlArg *args, const int argc) {
     int count = 0;
     const char *seen[256];
     int seen_n = 0;
-    for (int data = 0; data < GAMES_TABS && source != COMMUNITY_SOURCE_OFFICIAL; data++) {
+    // the bundled catalogue fills this list only where community_catalogue_fills says so (never a krunker.io Community / All)
+    const int fills = community_catalogue_fills(account_backend() == ACCOUNT_BACKEND_KRUNKER, source);
+    for (int data = 0; fills && data < GAMES_TABS && source != COMMUNITY_SOURCE_OFFICIAL; data++) {
         const cJSON *r;
         cJSON_ArrayForEach(r, g_games_tabs[data].rows) {
             GameCard card;
@@ -4082,7 +4087,7 @@ static void games_search(const HtmlArg *args, const int argc) {
             count++;
         }
     }
-    for (size_t i = 0; !want_cat && i < map_catalog_count(); i++) {
+    for (size_t i = 0; fills && !want_cat && i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         const int official = map_catalog_is_official(e);
         if (!str_has_ci(e->name, q) || (source == COMMUNITY_SOURCE_OFFICIAL && !official) || (source == COMMUNITY_SOURCE_COMMUNITY && official)) continue;

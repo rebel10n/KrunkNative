@@ -49,6 +49,11 @@ int community_source_of(const char *value) {
     return COMMUNITY_SOURCE_ALL;
 }
 
+int community_catalogue_fills(const int krunker_account, const int source) {
+    if (!krunker_account) return 1;
+    return source == COMMUNITY_SOURCE_OFFICIAL;
+}
+
 size_t community_mode_names(char *out, const size_t size, const cJSON *modes) {
     if (!out || !size) return 0;
     out[0] = 0;

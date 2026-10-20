@@ -35,6 +35,12 @@ size_t community_search_path(char *out, size_t size, const char *query, int cate
 // COMMUNITY_SOURCE_* of a select value ("official", "community", anything else: all)
 int community_source_of(const char *value);
 
+// Whether the bundled catalogue may fill the Games window's list for a source (COMMUNITY_SOURCE_*): a tab or a search,
+// as the local fallback when kn_brain has no answer. Box Office (krunker_account 0): always, the catalogue is its
+// own. A krunker.io account (krunker_account 1): only Official, Krunker's own map list. Its Community, All and tab
+// lists are krunker.io's answers alone, so a refused or failed request shows nothing, never the bundled maps.
+int community_catalogue_fills(int krunker_account, int source);
+
 // The map's game modes as text ("Free for All, Team Deathmatch") from a row's "modes" ids
 // (mode_name, shared/include/modes.h); "" when the array is empty or missing. Returns the length.
 size_t community_mode_names(char *out, size_t size, const cJSON *modes);
