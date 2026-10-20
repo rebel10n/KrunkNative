@@ -35,8 +35,10 @@ typedef struct {
     int round;                       // the round it was queued in
     float due;                       // game->now the line may go out
     float deadline;                  // AI: the template goes out at max(due, deadline) without an answer
-    unsigned char ai:1, answered:1, from_ai:1;
+    unsigned char ai:1, answered:1, from_ai:1, named:1; // named: text stands "$" for the other player (other_uid, other_name)
     char text[NET_CHAT_TEXT_SIZE];   // the line (the template until the AI answers)
+    int other_uid;                   // named: the other player, sent apart from text by its uid
+    char other_name[PLAYER_NAME_SIZE];
 } BotChatPending;
 
 typedef struct {
@@ -422,15 +424,29 @@ static void send_line(Game *game, const int uid, const char *text) {
     game_send(game, NET_TARGET_ALL, NET_PACKET_CHAT, &chat, sizeof(chat));
 }
 
+// The line of a template for a speaker, filtered (false when the template or the filter rejects it). `other` is the name the
+// template reads: the other player's name, or "$" for a line that names that player by its uid (send_named_line).
+static int filtered_line(const int personality, const BotChatEvent event, const unsigned pick, const char *other, const char *map,
+                         const char *self, char *out, const size_t size) {
+    char text[NET_CHAT_TEXT_SIZE];
+    if (!bot_chat_template(personality, event, pick, other, map, text, sizeof(text))) return 0;
+    return bot_chat_filter(text, self, out, size) != 0;
+}
+
 // Queue a line of `bot`: the template now, the AI's answer later when the hook takes the request.
-static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeaker *speaker, const BotChatEvent event, const char *other,
+static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeaker *speaker, const BotChatEvent event, const Player *other,
                        const float delay, const int try_ai, Player *const *sorted, const size_t count) {
     if (bc->pending_count >= BOT_CHAT_MAX_PENDING) return;
-    char text[NET_CHAT_TEXT_SIZE];
     const char *map = game_map_label(game);
-    if (!bot_chat_template(speaker->personality, event, pcg32_random_r(&bc->rng), other, map, text, sizeof(text))) return;
-    char clean[NET_CHAT_TEXT_SIZE];
-    if (!bot_chat_filter(text, bot->name, clean, sizeof(clean))) return;
+    const unsigned pick = pcg32_random_r(&bc->rng);
+    const char *other_name = other ? other->name : NULL;
+    // the filter reads the line with the other player's name in it (a name it rejects drops the line), as it always has
+    char clean[NET_CHAT_TEXT_SIZE], uid_text[NET_CHAT_TEXT_SIZE];
+    if (!filtered_line(speaker->personality, event, pick, other_name, map, bot->name, clean, sizeof(clean))) return;
+    // the line the peers get names the other player by its uid: "$" stands for the name (send_named_line)
+    const int names_other = other_name && other_name[0];
+    if (names_other && !filtered_line(speaker->personality, event, pick, "$", map, bot->name, uid_text, sizeof(uid_text))) return;
+    const int by_uid = names_other && strchr(uid_text, '$') != NULL;
 
     BotChatPending *pd = &bc->pending[bc->pending_count++];
     memset(pd, 0, sizeof(*pd));
@@ -438,7 +454,12 @@ static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeake
     pd->bot_uid = bot->uid;
     pd->round = bc->round;
     pd->due = game->now + delay;
-    snprintf(pd->text, sizeof(pd->text), "%s", clean);
+    snprintf(pd->text, sizeof(pd->text), "%s", names_other ? uid_text : clean);
+    pd->named = by_uid;
+    if (by_uid) {
+        pd->other_uid = other->uid;
+        snprintf(pd->other_name, sizeof(pd->other_name), "%s", other->name);
+    }
     speaker->lines_round++;
 
     static const char *const k_events[] = {"win", "lose", "draw", "kill", "death", "gg"};
@@ -450,7 +471,7 @@ static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeake
         snprintf(req.bot_name, sizeof(req.bot_name), "%s", bot->name);
         req.personality = bot_chat_personality_name(speaker->personality);
         req.event = k_events[event];
-        snprintf(req.other, sizeof(req.other), "%s", other ? other : "");
+        snprintf(req.other, sizeof(req.other), "%s", other_name ? other_name : "");
         req.mode = game_mode_label(game);
         req.map = map;
         req.kills = (int) bot->kills + (event == BOT_CHAT_KILL); // on_kill runs before killer->kills++
@@ -526,7 +547,7 @@ void bot_chat_on_match_end(Game *game, const ModeWinner *winner, Player *const *
     if (want > 1 && fabsf(delay[1] - delay[0]) < BOT_CHAT_END_DELAY_GAP)
         delay[1] = delay[0] - BOT_CHAT_END_DELAY_GAP >= BOT_CHAT_END_DELAY_MIN ? delay[0] - BOT_CHAT_END_DELAY_GAP : delay[0] + BOT_CHAT_END_DELAY_GAP;
 
-    const char *winner_name = winner && winner->player ? winner->player->name : "";
+    const Player *winner_player = winner && winner->player ? winner->player : NULL;
     for (int s = 0; s < want; s++) {
         const Player *bot = speakers[s];
         if (!bot) continue;
@@ -539,7 +560,7 @@ void bot_chat_on_match_end(Game *game, const ModeWinner *winner, Player *const *
             const int did_win = winner && ((bot->team && bot->team == winner->team) || bot == winner->player);
             event = !has_winner ? BOT_CHAT_DRAW : did_win ? BOT_CHAT_WIN : BOT_CHAT_LOSE;
         }
-        queue_line(game, bc, bot, sp, event, winner_name, delay[s], banter, sorted, count);
+        queue_line(game, bc, bot, sp, event, winner_player, delay[s], banter, sorted, count);
     }
 }
 
@@ -583,7 +604,7 @@ void bot_chat_on_kill(Game *game, const Player *victim, const Player *killer) {
         sorted[j] = p;
     }
     const int before = bc->pending_count;
-    queue_line(game, bc, bot, sp, event, other->name, frange(bc, BOT_CHAT_KILL_DELAY_MIN, BOT_CHAT_KILL_DELAY_MAX), 1, sorted, count);
+    queue_line(game, bc, bot, sp, event, other, frange(bc, BOT_CHAT_KILL_DELAY_MIN, BOT_CHAT_KILL_DELAY_MAX), 1, sorted, count);
     if (bc->pending_count > before) { // the cooldowns start when the line is decided, not sent
         bc->last_global_line = game->now;
         sp->last_line = game->now;
@@ -606,10 +627,20 @@ int bot_chat_deliver(Game *game, const int id, const char *text) {
         if (bot_chat_filter(text, p ? p->name : NULL, clean, sizeof(clean))) {
             snprintf(pd->text, sizeof(pd->text), "%s", clean);
             pd->from_ai = 1;
+            pd->named = 0; // the AI's line is free text, as a player's typed line is: no name goes out by uid
         } else bc->stats.ai_rejected++;
         return 1;
     }
     return 0;
+}
+
+// A line naming another player (the kill and round comments): the bot's line, the other player's name by its uid
+// (game_send_chat_names: NET_EXT_KN_CHAT_NAMES to an EXT peer, the composed line to the rest).
+static void send_named_line(Game *game, const BotChatPending *pd) {
+    const Player *p = game_find_player(game, pd->bot_uid);
+    if (!p || !p->is_bot) return; // it left meanwhile
+    const ServerName other = {.uid = pd->other_uid, .name = pd->other_name};
+    game_send_chat_names(game, p->uid, p->name, 1, &other, pd->text);
 }
 
 void bot_chat_tick(Game *game, const float delta_s) {
@@ -627,7 +658,8 @@ void bot_chat_tick(Game *game, const float delta_s) {
             }
         }
         if (ready) {
-            send_line(game, pd->bot_uid, pd->text);
+            if (pd->named) send_named_line(game, pd);
+            else send_line(game, pd->bot_uid, pd->text);
             bc->stats.lines++;
             if (pd->from_ai) bc->stats.ai_lines++;
         }

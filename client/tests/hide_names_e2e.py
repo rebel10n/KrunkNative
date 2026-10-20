@@ -102,7 +102,10 @@ def game_edit(st):
                   {"official": "server.message.join", "args": ["Quentin"]},
                   {"official": "server.message.left", "args": ["Rhea"]},
                   {"official": "server.message.ranked", "args": ["Quentin"]},
-                  {"official": "server.message.join", "args": ["game"]}]
+                  {"official": "server.message.join", "args": ["game"]},
+                  # the hosted and queued lines name their player too ("{0} hosted a custom game", "{0} queued for ranked")
+                  {"official": "server.message.hosted", "args": ["Rhea"]},
+                  {"official": "server.message.queued", "args": ["Quentin"]}]
 
 
 def death_edit(st):
@@ -245,6 +248,9 @@ def main():
               "Player_3 joined the game" in texts and "Server: Player_3 joined the game" in console
               and not any("Player_3 joined the Player" in t or t.startswith("game joined the game") for t in texts + console),
               f"{texts} | {console[:6]}")
+        check("game on: the hosted and queued lines read Player_<n> (the names are never left raw)",
+              any(re.fullmatch(r"Player_\d hosted a custom game", t) for t in texts)
+              and any(re.fullmatch(r"Player_\d queued for ranked", t) for t in texts), f"{texts[:8]}")
         check("game on: no raw name is left in the console's senders (Quentin, Rhea, Zelda)",
               console and not any(n in s for s in console_senders(console) for n in ("Quentin", "Rhea", "Zelda")), f"{console[:6]}")
 
@@ -258,6 +264,7 @@ def main():
         check("game off: the join and ranked lines keep the names", "Quentin joined the game" in doc and "Quentin left for a ranked match" in doc)
         check("game off: your join and the leave line keep the names", "Zelda joined the game" in doc and "Rhea left the game" in doc)
         check("game off: the official join line keeps the name game", "game joined the game" in doc)
+        check("game off: the hosted and queued lines keep the names", "Rhea hosted a custom game" in doc and "Quentin queued for ranked" in doc)
         console = console_lines(LAST_OUT)
         check("game off: the console keeps the sender and the text", "Quentin: gg, hi" in console and "Rhea: Quentin, gg" in console, f"{console[:6]}")
         check("game off: the player named game says its words, the console too",

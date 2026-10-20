@@ -218,6 +218,51 @@ static void net_game_server_names(Game *game, const int target, const int count,
     if (client) net_send_server_names_to(client, count, names, template);
 }
 
+// A bot's line naming other players (game_send_chat_names) to one connection, in the form it reads. An EXT peer gets
+// NET_EXT_KN_CHAT_NAMES: the bot by its uid and name, and the names by uid as this recipient may see them (net_shown_name,
+// as net_send_server_names_to does); the client formats the template. An older peer gets the bot's composed NET_PACKET_CHAT line.
+static void net_send_chat_names_to(ClientConnection *to, const int speaker, const char *speaker_name, const int count,
+                                   const ServerName *names, const char *template) {
+    const int n = count < 0 ? 0 : count > NET_CHAT_NAMES_MAX ? NET_CHAT_NAMES_MAX : count;
+    char shown[NET_SERVER_NAMES_MAX][PLAYER_NAME_SIZE];
+    for (int i = 0; i < n; i++) {
+        const int uid = names[i].uid;
+        const ClientConnection *subject = uid >= 0 ? net_client_by_id(uid) : NULL;
+        net_shown_name(to, subject, names[i].name, shown[i], sizeof(shown[i]));
+    }
+    if (to->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
+        NetChatNamesPacket body;
+        memset(&body, 0, sizeof(body));
+        body.sender.uid = speaker;
+        snprintf(body.sender.name, sizeof(body.sender.name), "%s", speaker_name ? speaker_name : "");
+        body.count = (uint8_t) n;
+        for (int i = 0; i < n; i++) {
+            body.names[i].uid = names[i].uid >= 0 || names[i].uid == NET_SERVER_NAME_RAW ? names[i].uid : NET_SERVER_NAME_NONE;
+            snprintf(body.names[i].name, sizeof(body.names[i].name), "%s", shown[i]);
+        }
+        snprintf(body.text, sizeof(body.text), "%s", template ? template : "");
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+        const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_CHAT_NAMES, &body, sizeof(body));
+        if (len) net_send_packet(to->fd, NET_PACKET_EXT, buf, len);
+        return;
+    }
+    const char *texts[NET_SERVER_NAMES_MAX];
+    for (int i = 0; i < n; i++) texts[i] = shown[i];
+    char text[NET_CHAT_TEXT_SIZE];
+    net_format_server_names(text, sizeof(text), template, texts, n);
+    NetChatPacket chat;
+    net_packet_chat(&chat, speaker, NET_CHAT_PLAYER, speaker_name, text);
+    net_send_packet(to->fd, NET_PACKET_CHAT, &chat, sizeof(chat));
+}
+
+// GameHooks.chat_names: a bot's line naming other players, to every connection (a bot's chat goes to everyone, as game_send does).
+static void net_game_chat_names(Game *game, const int speaker, const char *speaker_name, const int count, const ServerName *names,
+                                const char *template) {
+    (void) game;
+    for (size_t i = 0; i < g_server->client_count; i++)
+        net_send_chat_names_to(&g_server->clients[i], speaker, speaker_name, count, names, template);
+}
+
 void net_broadcast_chat(const char *from, const char *msg) {
     char text[NET_CHAT_TEXT_SIZE];
     if (!net_chat_sanitize(text, sizeof(text), msg, msg ? strlen(msg) : 0)) return;
@@ -2155,6 +2200,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.send = net_game_send;
     g_server->game.hooks.server_line = net_game_server_line; // a bot's join / leave (bots.c): the form each peer reads
     g_server->game.hooks.server_names = net_game_server_names; // a line naming players (chat lists, finish lines): the same
+    g_server->game.hooks.chat_names = net_game_chat_names; // a bot's line naming another player (its kill and round comments)
     g_server->game.hooks.next_round = net_game_next_round;
     g_server->game.hooks.respawn = net_game_respawn;
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)

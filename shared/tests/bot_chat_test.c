@@ -380,6 +380,41 @@ static void test_default_off(Game *game) {
     game->hooks.bot_banter = NULL;
 }
 
+// The kill comments name the other player by its uid (game_send_chat_names): one "$" in the template, the name in names[0].
+static int g_named_calls, g_named_bad;
+static void test_chat_names(Game *game, const int speaker, const char *speaker_name, const int count, const ServerName *names, const char *template) {
+    const Player *bot = game_find_player(game, speaker);
+    int dollars = 0;
+    for (const char *s = template; s && *s; s++) dollars += *s == '$';
+    g_named_calls++;
+    if (!bot || !bot->is_bot || !speaker_name || strcmp(speaker_name, bot->name) || count != 1 || dollars != 1 ||
+        names[0].uid < 0 || !game_find_player(game, names[0].uid))
+        g_named_bad++;
+}
+
+static void test_named_comments(Game *game) {
+    printf("Running named comment test...\n");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+    tick(game, 1.0f, 30.0f);
+    Player *bots[8];
+    int n = 0;
+    for (size_t i = 0; i < game->player_count && n < 8; i++)
+        if (game->players[i]->is_bot) bots[n++] = game->players[i];
+    CHECK(n >= 2, "bots present (%d)", n);
+    game->hooks.chat_names = test_chat_names;
+    g_named_calls = g_named_bad = 0;
+    for (int k = 0; k < 300; k++) {
+        bot_chat_on_kill(game, bots[k % n], bots[(k + 1) % n]);
+        tick(game, 0.2f, 30.0f);
+    }
+    tick(game, 5.0f, 30.0f);
+    game->hooks.chat_names = NULL;
+    printf("  %d named comment(s)\n", g_named_calls);
+    CHECK(g_named_calls >= 1, "some comments name the other player by uid (%d)", g_named_calls);
+    CHECK(g_named_bad == 0, "every named comment: one name by uid and one \"$\" (%d bad)", g_named_bad);
+}
+
 static void test_off(Game *game) {
     printf("Running off switch test...\n");
     bot_chat_set_enabled(game, 0);
@@ -439,6 +474,7 @@ int main(void) {
     test_match_end(&game);
     test_ai(&game);
     test_kills(&game);
+    test_named_comments(&game);
     test_off(&game);
 
     game_bots_remove_all(&game);

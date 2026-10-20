@@ -141,6 +141,7 @@ typedef enum {
     // 0x8120 a server line about a player (KrunkNative server and bots -> client/src/net/game_events.c events_server_line)
     NET_EXT_KN_SERVER_LINE = 0x8120, // S -> C NetServerLinePacket: config.serverMessages' join / leave line, the player apart from the text
     NET_EXT_KN_SERVER_NAMES = 0x8121, // S -> C NetServerNamesPacket: a server line naming several players (the chat lists, a finish line)
+    NET_EXT_KN_CHAT_NAMES = 0x8122,   // S -> C NetChatNamesPacket: a bot's chat line naming another player (its kill and round comments)
     // 0x8131 Krunker Strike kill card flag (the first id after 0x8130 no queued patch takes)
     NET_EXT_KN_STRIKE_KILL_FLAG = 0x8131, // S -> C NetStrikeKillFlagPacket, right before the victim's NET_PACKET_KILL
 } NetExtSubtype;
@@ -594,6 +595,18 @@ typedef struct {
     char text[NET_SERVER_NAMES_TEXT];             // the template, NUL-terminated; "$" = names[i] in order
 } NetServerNamesPacket;
 
+// NET_EXT_KN_CHAT_NAMES (S -> C, EXT peers): a bot's chat line naming another player (the kill and round comments, "{o}"
+// -> "$"). The line is the bot's own, shown by its uid as any chat line is (sender); the other player's name travels apart
+// from `text` by its uid, and the client formats the template as NET_EXT_KN_SERVER_NAMES does (the i-th "$" is names[i]).
+// A pre-EXT peer gets the bot's composed NET_PACKET_CHAT line (server/src/net.c net_send_chat_names_to).
+#define NET_CHAT_NAMES_MAX 1 // names in a bot's line: its one "{o}" (the body limit NET_EXT_BODY_MAX holds one)
+typedef struct {
+    NetServerNameEntry sender;                    // the bot: its uid and its name
+    uint8_t count;                                // names used, 0..NET_CHAT_NAMES_MAX
+    NetServerNameEntry names[NET_CHAT_NAMES_MAX];
+    char text[NET_SERVER_NAMES_TEXT];             // the template, NUL-terminated; "$" = names[i] in order
+} NetChatNamesPacket;
+
 // NET_EXT_LATEST_RANKED_MMR_CHANGE (S -> C, to each roster player when the brain's rating reply arrives; v10 lrmr
 // LATEST_RANKED_MMR_CHANGE [mmrChange, latestRank], g:218186 sets $latestMMRChange / $latestRank, the end screen's
 // rank card reads them): mmr_change = the new rating - the old (the TrueSkill display rating, 0 when it did not move),
@@ -619,6 +632,7 @@ typedef struct {
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
 _Static_assert(sizeof(NetServerLinePacket) <= NET_EXT_BODY_MAX, "NetServerLinePacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetServerNamesPacket) <= NET_EXT_BODY_MAX, "NetServerNamesPacket exceeds NET_EXT_BODY_MAX");
+_Static_assert(sizeof(NetChatNamesPacket) <= NET_EXT_BODY_MAX, "NetChatNamesPacket exceeds NET_EXT_BODY_MAX");
 
 #pragma pack(push, 1)
 // The JSON-bodied subtypes (entities 0x0100-0x0105, live objects 0x8080-0x8081): one UTF-8 JSON

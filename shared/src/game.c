@@ -328,6 +328,21 @@ void game_send_server_names(Game *game, const int target, const int count, const
     game_send(game, target, NET_PACKET_CHAT, &chat, sizeof(chat));
 }
 
+void game_send_chat_names(Game *game, const int speaker, const char *speaker_name, const int count, const ServerName *names, const char *template) {
+    const int n = count < 0 ? 0 : count > NET_CHAT_NAMES_MAX ? NET_CHAT_NAMES_MAX : count;
+    if (game->hooks.chat_names) {
+        game->hooks.chat_names(game, speaker, speaker_name, n, names, template);
+        return;
+    }
+    const char *texts[NET_SERVER_NAMES_MAX];
+    for (int i = 0; i < n; i++) texts[i] = names[i].name ? names[i].name : "";
+    char text[NET_CHAT_TEXT_SIZE]; // no server behind the game (tests): the composed line, as a pre-EXT peer reads it
+    net_format_server_names(text, sizeof(text), template, texts, n);
+    NetChatPacket chat;
+    net_packet_chat(&chat, speaker, NET_CHAT_PLAYER, speaker_name, text);
+    game_send(game, NET_TARGET_ALL, NET_PACKET_CHAT, &chat, sizeof(chat));
+}
+
 void game_send_hit(Game *game, const int uid, const NetHitPacket *hit, const float damage) {
     const int32_t tenths = (int32_t) lroundf(damage * 10.0f);
     if (hit->damage && tenths % 10) { // the fraction the whole-number HIT loses (dmgType "Float", net_ext.h)

@@ -2450,11 +2450,12 @@ static void hud_ui_add_chat_line_shown(const char *msg, const char *color, const
 // template translated (i18n_format), and the row shown as it is, in the chat and the developer console. 0 for any
 // other key: the caller shows that line as it did.
 int hud_ui_add_official_name_line(const char *key, const char *const *args, const int argc, const char *color, const int channel) {
-    // the keys whose first argument is a player's name: the join, leave, kick, ban, vote kick, arrest and ranked lines,
-    // and the Egg hunt's found / completed lines (v10 "chi" ["event.easter.found.new", name, n, total], :190368)
+    // the keys whose first argument is a player's name: the join, leave, kick, ban, vote kick, arrest, ranked, hosted and
+    // queued lines, and the Egg hunt's found / completed lines (v10 "chi" ["event.easter.found.new", name, n, total], :190368)
     static const char *const named[] = {"server.message.join", "server.message.left", "server.message.kicked",
                                         "server.message.banned", "server.message.votekicked", "server.message.arrested",
-                                        "server.message.ranked", "event.easter.found.new", "event.easter.completed"};
+                                        "server.message.ranked", "server.message.hosted", "server.message.queued",
+                                        "event.easter.found.new", "event.easter.completed"};
     if (!key || !args || argc < 1 || !args[0]) return 0;
     int is_named = 0;
     for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) is_named |= !strcmp(key, named[i]);

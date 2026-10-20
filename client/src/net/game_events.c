@@ -484,18 +484,15 @@ static void events_server_line(Client *client, const NetServerLinePacket *packet
 // NET_EXT_KN_SERVER_NAMES (net_ext.h): a server line that names players (a list, a finish line). Each name is shown as
 // Hide player names shows its uid (player_names_shown; -1 numbered by its name, -2 not a player: as it is), then the
 // names go into the template's "$"s in order. The text is never searched for a name.
-static void events_server_names(Client *client, const NetServerNamesPacket *packet) {
-    const int count = packet->count < NET_SERVER_NAMES_MAX ? packet->count : NET_SERVER_NAMES_MAX;
+static void events_names_line(const Client *client, const char *template, const int count, const NetServerNameEntry *names, char *line,
+                              const size_t size) {
     char shown[NET_SERVER_NAMES_MAX][PLAYER_NAME_SIZE];
     const char *texts[NET_SERVER_NAMES_MAX];
-    char text[NET_SERVER_NAMES_TEXT];
-    memcpy(text, packet->text, sizeof(text));
-    text[sizeof(text) - 1] = 0;
     for (int i = 0; i < count; i++) {
         char name[PLAYER_NAME_SIZE];
-        memcpy(name, packet->names[i].name, sizeof(name));
+        memcpy(name, names[i].name, sizeof(name));
         name[sizeof(name) - 1] = 0;
-        const int uid = packet->names[i].uid;
+        const int uid = names[i].uid;
         const char *raw = name[0] ? name : "unknown";
         if (uid == NET_SERVER_NAME_RAW) {
             snprintf(shown[i], sizeof(shown[i]), "%s", raw);
@@ -507,10 +504,34 @@ static void events_server_names(Client *client, const NetServerNamesPacket *pack
         }
         texts[i] = shown[i];
     }
+    net_format_server_names(line, size, template, texts, count);
+}
+
+static void events_server_names(Client *client, const NetServerNamesPacket *packet) {
+    const int count = packet->count < NET_SERVER_NAMES_MAX ? packet->count : NET_SERVER_NAMES_MAX;
+    char text[NET_SERVER_NAMES_TEXT];
+    memcpy(text, packet->text, sizeof(text));
+    text[sizeof(text) - 1] = 0;
     char line[NET_CHAT_TEXT_SIZE];
-    net_format_server_names(line, sizeof(line), text, texts, count);
+    events_names_line(client, text, count, packet->names, line, sizeof(line));
     ui_console_on_server_line(line);
     hud_ui_add_server_line(line, SERVER_CHAT_COLOR);
+}
+
+// NET_EXT_KN_CHAT_NAMES (net_ext.h): a bot's chat line naming another player. It goes through events_chat as the bot's own
+// line, its text formatted from the names by their uids.
+static void events_chat_names(Client *client, const NetChatNamesPacket *packet) {
+    const int count = packet->count < NET_CHAT_NAMES_MAX ? packet->count : NET_CHAT_NAMES_MAX;
+    char text[NET_SERVER_NAMES_TEXT];
+    memcpy(text, packet->text, sizeof(text));
+    text[sizeof(text) - 1] = 0;
+    NetChatPacket chat;
+    memset(&chat, 0, sizeof(chat));
+    chat.uid = packet->sender.uid;
+    chat.kind = NET_CHAT_PLAYER;
+    snprintf(chat.name, sizeof(chat.name), "%s", packet->sender.name);
+    events_names_line(client, text, count, packet->names, chat.text, sizeof(chat.text));
+    events_chat(client, &chat);
 }
 
 // updateNoclip / updateUnlimitedAmmo / updateForceHide ("noc" / "unl" / "fh": the line is
@@ -1354,6 +1375,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetServerNamesPacket names;
                 memcpy(&names, body, sizeof(names));
                 events_server_names(client, &names);
+            }
+            else if (subtype == NET_EXT_KN_CHAT_NAMES && body_length == sizeof(NetChatNamesPacket)) { // a bot's line naming another player
+                NetChatNamesPacket chat;
+                memcpy(&chat, body, sizeof(chat));
+                events_chat_names(client, &chat);
             }
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;

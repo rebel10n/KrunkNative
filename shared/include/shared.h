@@ -1930,6 +1930,9 @@ typedef struct {
     // NET_EXT_KN_SERVER_NAMES to an EXT peer (the names by uid, the client formats them: Hide player names) or the
     // composed NET_CHAT_SERVER line. NULL: game_send_server_names composes the line for everyone.
     void (*server_names)(struct Game_t*, int target, int count, const ServerName *names, const char *template);
+    // A bot's chat line naming other players (`names`, the template's "$"s in order), from `speaker` (uid, name) to every
+    // player: NET_EXT_KN_CHAT_NAMES to an EXT peer, else the composed NET_PACKET_CHAT line. NULL: game_send_chat_names composes it.
+    void (*chat_names)(struct Game_t*, int speaker, const char *speaker_name, int count, const ServerName *names, const char *template);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2242,6 +2245,9 @@ void game_send_server_line(Game*, int target, int uid, const char *name, const c
 // game_send takes it: hooks.server_names when set (the form each peer reads, net_ext.h NET_EXT_KN_SERVER_NAMES), else
 // the composed line to everyone. `count` is at most NET_SERVER_NAMES_MAX (8); a longer list is several calls.
 void game_send_server_names(Game*, int target, int count, const ServerName *names, const char *template);
+// A bot's chat line naming `count` other players (ServerName; the template's "$"s in order) from `speaker` to every player:
+// hooks.chat_names when set (NET_EXT_KN_CHAT_NAMES to EXT peers), else the composed NET_PACKET_CHAT line. At most NET_CHAT_NAMES_MAX.
+void game_send_chat_names(Game*, int speaker, const char *speaker_name, int count, const ServerName *names, const char *template);
 // v10 setGameState: a change sends "gsc" (NET_EXT_GAME_STATE, to every EXT peer) and calls
 // hooks.state_changed. game_names_masked: a ranked match before IN_PROGRESS shows Player_<n> names.
 void game_set_state(Game*, GameState);
