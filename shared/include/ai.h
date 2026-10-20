@@ -439,6 +439,8 @@ void game_ai_projectile_hit_player(Game*, const GameProjectile*, Player *target)
 // Soul Sanctum templates for /summon.
 const GameAITemplate *game_ai_templates(int *count);
 const GameAITemplate *game_ai_resolve_template(const char *name_or_alias); // normalised name or game.ts alias
+size_t game_ai_summon_alias_count(void);     // the aliases game_ai_resolve_template takes (the console completes them)
+const char *game_ai_summon_alias(size_t i);  // alias i, NULL past the end
 // game.ts spawnSoulSanctumAI: at the player + (sin yaw, cos yaw) * max(48, mSize * 4), y + max(2, mSize / 2).
 GameAI *game_ai_summon(Game*, const GameAITemplate*, const Player *origin);
 

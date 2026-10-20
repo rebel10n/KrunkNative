@@ -196,6 +196,11 @@ int update_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 
 void update_ui_console(const int argc, char **argv) {
     const char *sub = argc > 0 && argv[0] ? argv[0] : "";
+    if (!strcmp(sub, "download")) { // the card's Download link: the page reloads to the latest build
+        app_reload(NULL);
+        ui_console_printf(NULL, "reloading the page to the latest client");
+        return;
+    }
     if (!strcmp(sub, "now")) {
         app_reload(NULL);
         return;
@@ -549,6 +554,11 @@ int update_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 void update_ui_console(const int argc, char **argv) {
     init_once();
     const char *sub = argc > 0 && argv[0] ? argv[0] : "";
+    if (!strcmp(sub, "download")) { // the card's Download link (open_download)
+        open_download();
+        ui_console_printf(NULL, "opening the client download");
+        return;
+    }
     if (!strcmp(sub, "check")) {
         if (!strcmp(g_up.url, "off")) {
             ui_console_printf("#ff6b6b", "update checks are off (KRUNKNATIVE_UPDATES_URL=off)");

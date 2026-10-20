@@ -2422,17 +2422,27 @@ const GameAITemplate *game_ai_templates(int *count) {
     return g_templates;
 }
 
+// buildSoulSanctumAIAliases: the words summon takes for a template besides its name (alias, template key)
+static const char *const k_summon_aliases[][2] = {
+    {"weep", "weepingsoul"}, {"weeping", "weepingsoul"}, {"wander", "wanderingsoul"}, {"wandering", "wanderingsoul"},
+    {"fiend", "soulfiend"}, {"soulfiend", "soulfiend"}, {"angered", "angeredsoul"}, {"angeredsoul", "angeredsoul"},
+    {"gate", "gatekeeper"}, {"gatekeeper", "gatekeeper"}, {"lord", "lordofsouls"}, {"lordofsouls", "lordofsouls"},
+};
+
+size_t game_ai_summon_alias_count(void) {
+    return sizeof(k_summon_aliases) / sizeof(k_summon_aliases[0]);
+}
+
+const char *game_ai_summon_alias(const size_t i) {
+    return i < game_ai_summon_alias_count() ? k_summon_aliases[i][0] : NULL;
+}
+
 const GameAITemplate *game_ai_resolve_template(const char *name_or_alias) {
-    static const char *const aliases[][2] = { // buildSoulSanctumAIAliases
-        {"weep", "weepingsoul"}, {"weeping", "weepingsoul"}, {"wander", "wanderingsoul"}, {"wandering", "wanderingsoul"},
-        {"fiend", "soulfiend"}, {"soulfiend", "soulfiend"}, {"angered", "angeredsoul"}, {"angeredsoul", "angeredsoul"},
-        {"gate", "gatekeeper"}, {"gatekeeper", "gatekeeper"}, {"lord", "lordofsouls"}, {"lordofsouls", "lordofsouls"},
-    };
     char key[64], other[GAME_AI_NAME_SIZE];
     ai_normalise(name_or_alias ? name_or_alias : "", key, sizeof(key));
-    for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++) {
-        if (!strcmp(key, aliases[i][0])) {
-            ai_copy(key, sizeof(key), aliases[i][1]);
+    for (size_t i = 0; i < sizeof(k_summon_aliases) / sizeof(k_summon_aliases[0]); i++) {
+        if (!strcmp(key, k_summon_aliases[i][0])) {
+            ai_copy(key, sizeof(key), k_summon_aliases[i][1]);
             break;
         }
     }
