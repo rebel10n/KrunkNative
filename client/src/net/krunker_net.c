@@ -286,10 +286,11 @@ static double g_recps_next;
 
 static void recps_dump_frame(const uint8_t *data, const size_t len) {
     const char *path = recps_dump_path();
-    if (!path || g_recps_done) return;
+    const char *const wire = krunker_s2c_wire(KRUNKER_S2C_CRAFT_DATA_RESPONSE); // NULL in a build without it (OPTIONAL_S2C)
+    if (!path || !wire || g_recps_done) return;
     KrunkerFrame f;
     if (krunker_proto_decode(data, len, 0, &f) != KRUNKER_PROTO_OK) return;
-    if (strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_CRAFT_DATA_RESPONSE)) == 0 && f.argc > 0 && f.args[0].type == KRUNKER_ARRAY) {
+    if (strcmp(f.name, wire) == 0 && f.argc > 0 && f.args[0].type == KRUNKER_ARRAY) {
         KrunkerBuf json = {0};
         const KrunkerValue args = KRUNKER_V_ARRAY(f.args, f.argc);
         krunker_value_to_json(&args, &json);
@@ -302,7 +303,7 @@ static void recps_dump_frame(const uint8_t *data, const size_t len) {
         }
         printf("[krunker] recps: %zu bytes of args %s %s\n", json.len, out ? "written to" : "NOT written to", path);
         krunker_buf_free(&json);
-    } else if (strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_CRAFT_DATA_RESPONSE)) == 0) {
+    } else if (strcmp(f.name, wire) == 0) {
         printf("[krunker] recps: no rows yet (logged out or no table), asked again\n");
     }
     krunker_frame_free(&f);
