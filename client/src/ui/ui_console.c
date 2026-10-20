@@ -31,6 +31,7 @@
 #include <nav_overlay.h>
 #include <object_manager.h> // give: weapon / item names
 #include <target_select.h>  // give: a leading or trailing selector (target_is_selector)
+#include <player_accounts.h> // bot_kick / bot_kill: a bot is a player the server sent NET_PLAYER_INFO_BOT for
 #include <weapons.h>
 #include <ctype.h>
 #include <math.h>
@@ -1921,8 +1922,9 @@ typedef struct {
 } GiveWord;
 #define GIVE_WORDS_MAX 32
 
-// lowercase letters and digits only: how object_manager's give lookup reads a name ("KR Tag" -> "krtag")
-static void give_key(const char *in, char *out, const size_t n) {
+// lowercase letters and digits only: how the parsers read a name ("KR Tag" -> "krtag", "Guest_1" -> "guest1"):
+// object_manager's give lookup, target_select (players), the bot matcher and the class / weapon lookups.
+static void name_key(const char *in, char *out, const size_t n) {
     size_t len = 0;
     for (; in && *in && len + 1 < n; in++) {
         if (isalnum((unsigned char) *in)) out[len++] = (char) tolower((unsigned char) *in);
@@ -1971,7 +1973,7 @@ static void give_join(const GiveWord *w, const int first, const int last, char *
 // "toolg" is Tool Gun. Adds them to c when given; returns how many match. "*" matches none.
 static int give_items(ConCands *c, const char *query) {
     char q[CON_TEXT_MAX];
-    give_key(query, q, sizeof(q));
+    name_key(query, q, sizeof(q));
     if (!q[0] && query[0]) return 0; // symbols only: no item name starts with them
     int entity_count = 0;
     object_manager_entries(OM_TAB_ENTITIES, &entity_count);
@@ -1981,7 +1983,7 @@ static int give_items(ConCands *c, const char *query) {
                                                    : object_manager_give_name(OM_GIVE_ENTITY, i - WEAPON_TABLE_COUNT);
         char key[CON_TEXT_MAX];
         if (!name) continue;
-        give_key(name, key, sizeof(key));
+        name_key(name, key, sizeof(key));
         if (strncmp(key, q, strlen(q))) continue;
         hits++;
         if (c) cand_add(c, name, "");
@@ -2025,13 +2027,98 @@ static void give_candidates(const char *v, ConCands *c, char *base, const size_t
     give_items(c, item);
 }
 
+// ---- names as the parsers match them (name_key), and the targets that take the rest of the line
+
+// cand_add for a name matched as its parser matches it: "guest1", "Guest 1" and "GUEST_1" all find Guest_1.
+// Symbols only match nothing; an empty query matches every name.
+static void cand_add_key(ConCands *c, const char *value, const char *query) {
+    char key[CON_TEXT_MAX], q[CON_TEXT_MAX];
+    name_key(query, q, sizeof(q));
+    if (!q[0] && query[0]) return;
+    name_key(value, key, sizeof(key));
+    if (strncmp(key, q, strlen(q))) return;
+    cand_add(c, value, "");
+}
+
+// kill's match: a name that contains the query (its exact name first, then the containing ones)
+static void cand_add_contains(ConCands *c, const char *value, const char *query) {
+    char key[CON_TEXT_MAX], q[CON_TEXT_MAX];
+    name_key(query, q, sizeof(q));
+    if (!q[0] && query[0]) return;
+    name_key(value, key, sizeof(key));
+    if (!q[0] || strstr(key, q)) cand_add(c, value, "");
+}
+
+// Where the line's first argument starts (after the command word and its spaces); the end of the line when none.
+static size_t first_arg_start(const char *v) {
+    const char *p = strchr(v, ' ');
+    if (!p) return strlen(v);
+    while (*p == ' ') p++;
+    return (size_t) (p - v);
+}
+
+// The query of an argument that is the rest of the line (a name with spaces, typed or quoted): the caret's word
+// when it is the first argument, else the whole text so far (name_key drops the spaces and quotes). base is
+// the text the candidate replaces. 0 when nothing is offered: after a complete target (a space after it), a
+// further word would be a second name.
+static int rest_query(const char *v, const LineCtx *ctx, char *base, const size_t n, char *query, const size_t qn) {
+    if (ctx->arg == 0) {
+        snprintf(base, n, "%.*s", (int) ctx->token_start, v);
+        snprintf(query, qn, "%s", ctx->prefix);
+        return 1;
+    }
+    if (!ctx->prefix[0]) return 0;
+    const size_t first = first_arg_start(v);
+    snprintf(base, n, "%.*s", (int) first, v);
+    snprintf(query, qn, "%s", v + first);
+    return 1;
+}
+
+// The target selectors once a selector is typed; a command that names one player (tp, ip, ping, banip, unban)
+// offers @me alone, as its resolver refuses a selector that matches several.
+static void con_selector_candidates_for(ConCands *c, const char *prefix, const int single) {
+    static const char *const SELECTORS[] = {"*", "@me", "@others", "@bots", "@humans", "@team", "@enemies", "@alive", "@dead"};
+    if (prefix[0] != '*' && prefix[0] != '@' && prefix[0] != '!') return;
+    for (size_t i = 0; i < sizeof(SELECTORS) / sizeof(SELECTORS[0]); i++) {
+        if (!single || !strcmp(SELECTORS[i], "@me")) cand_add(c, SELECTORS[i], prefix);
+    }
+}
+
+// PT_* flags of a target command (player_target_candidates)
+#define PT_SINGLE   1  // one player: only @me as a selector (tp, ip, ping, banip, unban)
+#define PT_CONTAINS 2  // kill: a name matches when it contains the query
+#define PT_ALL      4  // "all" leads (bring, bot_kick, bot_kill)
+#define PT_AI       8  // kill: the active AIs as well (collectKillTargets)
+#define PT_BOTS    16  // the bots only, no selectors (bot_kick, bot_kill)
+
+// A player target (kick, ban, unban, ip, banip, ping, tp, bring, kill, bot_kick, bot_kill): the names it
+// resolves (name_key, or contains for kill), the "all" word and the selectors, by the rest-of-line query.
+static void player_target_candidates(const char *v, const LineCtx *ctx, const int flags, ConCands *c, char *base, const size_t n) {
+    char query[CON_LINE_MAX];
+    if (!rest_query(v, ctx, base, n, query, sizeof(query))) return;
+    if (ctx->arg == 0 && !(flags & PT_BOTS)) con_selector_candidates_for(c, ctx->prefix, flags & PT_SINGLE);
+    if (flags & PT_ALL) cand_add_key(c, "all", query);
+    const Client *client = con_client();
+    for (size_t i = 0; client && i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (!p || !p->name[0] || ((flags & PT_BOTS) && !player_accounts_is_bot(p->uid))) continue; // the client never sets Player.is_bot
+        if (flags & PT_CONTAINS) cand_add_contains(c, p->name, query);
+        else cand_add_key(c, p->name, query);
+    }
+    if (flags & PT_AI) { // the active AIs (collectKillTargets also matches them)
+        for (int i = 0; client && client->game.ai && i < client->game.ai->count; i++) {
+            if (client->game.ai->ais[i].active) cand_add_contains(c, client->game.ai->ais[i].name, query);
+        }
+    }
+}
+
 // The class table's names (Game.classes, else the ruleset's): "Spray N Pray" and the like insert quoted (quote_into).
 static void con_class_candidates(ConCands *c, const char *prefix) {
     const Client *client = con_client();
     const ClassConfig *classes = client && client->game.classes ? client->game.classes : rules_classes();
     const size_t count = client && client->game.class_count ? client->game.class_count : rules_class_count();
     for (size_t i = 0; i < count; i++) {
-        if (classes[i].name) cand_add(c, classes[i].name, prefix);
+        if (classes[i].name) cand_add_key(c, classes[i].name, prefix);
     }
 }
 
@@ -2041,7 +2128,7 @@ static void con_secondary_candidates(ConCands *c, const char *prefix) {
     const Weapon *const *weapons = client && client->game.weapons ? (const Weapon *const *) client->game.weapons : rules_weapons();
     const size_t count = client && client->game.weapon_count ? client->game.weapon_count : rules_weapon_count();
     for (size_t i = 0; i < count; i++) {
-        if (weapons[i] && weapons[i]->secondary && weapons[i]->name) cand_add(c, weapons[i]->name, prefix);
+        if (weapons[i] && weapons[i]->secondary && weapons[i]->name) cand_add_key(c, weapons[i]->name, prefix);
     }
 }
 
@@ -2057,42 +2144,22 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
     static const char *const ON_OFF[] = {"on", "off", NULL};
     const ConCommand *dev = find_cmd(cmd);
     if (dev && !cmd_visible(dev)) return; // a dev command's arguments are offered only with the dev console on
-    if (cmd_is(cmd, WORDS("help", "exec"))) con_command_candidates(c, prefix);
-    else if (cmd_is(cmd, WORDS("alias"))) {
+    if (!strcmp(cmd, "help")) { // one word; exec's command positions are in line_candidates
+        if (arg == 0) con_command_candidates(c, prefix);
+    } else if (cmd_is(cmd, WORDS("alias"))) {
         if (arg == 0) for (int i = 0; i < g_con.alias_count; i++) cand_add(c, g_con.aliases[i].key, prefix);
-        else con_command_candidates(c, prefix);
+        else if (arg == 1) con_command_candidates(c, prefix); // the rest is the alias's command line
     } else if (!strcmp(cmd, "bind")) {
         if (arg == 0) con_key_candidates(c, prefix);
-        else con_command_candidates(c, prefix);
+        else if (arg == 1) con_command_candidates(c, prefix); // the bound command; its arguments are its own
     } else if (!strcmp(cmd, "unbind")) {
         if (arg == 0) for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
     } else if (!strcmp(cmd, "toggle")) {
-        if (arg == 0) con_words(c, prefix, WORDS("god", "noclip", "smite", "forcehide", "unlimitedammo", "borders", "forcecol", "endless", "bhop"));
-    } else if (cmd_is(cmd, WORDS("god", "ungod", "noclip", "smite", "notarget", "forcehide", "unlimitedammo"))) {
-        if (arg == 0) con_player_candidates(c, prefix); // resolveDevToggleTarget: [target] [on|off]
-        if (arg <= 1) con_words(c, prefix, ON_OFF);
+        if (arg == 0) con_words(c, prefix, WORDS("god", "noclip", "smite", "notarget", "forcehide", "unlimitedammo", "borders", "forcecol", "endless", "bhop"));
     } else if (cmd_is(cmd, WORDS("borders", "forcecol"))) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "bhop")) {
         if (arg == 0) con_words(c, prefix, WORDS("on", "off", "held"));
-    } else if (!strcmp(cmd, "kill")) {
-        if (arg == 0) {
-            con_player_candidates(c, prefix);
-            const Client *client = con_client(); // the active AIs (collectKillTargets also matches them)
-            for (int i = 0; client && client->game.ai && i < client->game.ai->count; i++) {
-                if (client->game.ai->ais[i].active) cand_add(c, client->game.ai->ais[i].name, prefix);
-            }
-        }
-    } else if (cmd_is(cmd, WORDS("bot_kick", "bot_kill"))) {
-        const Client *client = con_client(); // the bots of the in-process game (servers: names from the scoreboard)
-        if (arg == 0) cand_add(c, "all", prefix);
-        for (size_t i = 0; client && arg == 0 && i < client->game.player_count; i++) {
-            const Player *p = client->game.players[i];
-            if (p && p->is_bot) cand_add(c, p->name, prefix);
-        }
-    } else if (cmd_is(cmd, WORDS("tp", "bring"))) {
-        if (arg == 0 && !strcmp(cmd, "bring")) cand_add(c, "all", prefix);
-        if (arg == 0) con_player_candidates(c, prefix); // bots included: they are players
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
     } else if (!strcmp(cmd, "show_navmeshes")) {
@@ -2102,15 +2169,11 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
     } else if (!strcmp(cmd, "bot_difficulty")) {
         if (arg == 0) con_words(c, prefix, WORDS("easy", "normal", "hard", "max"));
     } else if (cmd_is(cmd, WORDS("bot", "bot_add", "bot_place", "bot_config"))) {
-        con_words(c, prefix, WORDS("tfue", "autoRespawn", "difficulty=", "accuracy=", "name=", "class=", "team=", "level=", "clan=",
-                                   "dmgMlt=", "targetBots=", "randomCosmetics=", "persistent="));
-    } else if (!strcmp(cmd, "summon")) {
-        int count = 0;
-        const GameAITemplate *templates = game_ai_templates(&count);
-        for (int i = 0; arg == 0 && i < count; i++) cand_add(c, templates[i].name, prefix);
-    } else if (cmd_is(cmd, WORDS("ping", "kick", "ban", "unban", "ip", "banip"))) {
-        if (arg == 0) con_player_candidates(c, prefix);
-    } else if (cmd_is(cmd, WORDS("map", "offline"))) {
+        for (const char *const *w = WORDS("tfue", "autoRespawn", "difficulty=", "accuracy=", "name=", "class=", "team=", "level=",
+                                          "clan=", "dmgMlt=", "targetBots=", "randomCosmetics=", "persistent="); *w; w++) {
+            cand_add_key(c, *w, prefix); // bot_canonical_key: "target_b" finds targetBots=
+        }
+    } else if (!strcmp(cmd, "map")) { // cmd_map reads its first word (a name's prefix, or a key)
         if (arg == 0) con_map_candidates(c, prefix);
     } else if (!strcmp(cmd, "mode")) {
         if (arg == 0) con_mode_candidates(c, prefix);
@@ -2128,10 +2191,112 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         }
     } else if (!strcmp(cmd, "score")) {
         if (arg == 0) con_words(c, prefix, WORDS("100", "250", "500", "1000", "-100"));
+    } else if (!strcmp(cmd, "autofill")) { // cmd_autofill: on | off | a player count
+        if (arg == 0) con_words(c, prefix, ON_OFF);
+    } else if (!strcmp(cmd, "update")) { // update_ui_console handles check and now
+        if (arg == 0) con_words(c, prefix, WORDS("check", "now"));
     } else if (!strcmp(cmd, "class")) {
         if (arg == 0) con_class_candidates(c, prefix);
         else if (arg == 1) con_secondary_candidates(c, prefix);
     }
+}
+
+// The toggle cheats (toggle_candidates)
+static int is_toggle_cmd(const char *cmd) {
+    return cmd_is(cmd, WORDS("god", "ungod", "noclip", "smite", "notarget", "forcehide", "unlimitedammo"));
+}
+
+// The player-target commands and their PT_* flags (player_target_candidates); 0 with no flags for the rest.
+static int target_flags(const char *cmd, int *flags) {
+    static const struct { const char *cmd; int flags; } TARGETS[] = {
+        {"kick", 0}, {"ban", 0}, {"unban", PT_SINGLE}, {"ip", PT_SINGLE}, {"banip", PT_SINGLE}, {"ping", PT_SINGLE},
+        {"tp", PT_SINGLE}, {"bring", PT_ALL}, {"kill", PT_CONTAINS | PT_AI},
+        {"bot_kick", PT_BOTS | PT_ALL}, {"bot_kill", PT_BOTS | PT_ALL},
+    };
+    for (size_t i = 0; i < sizeof(TARGETS) / sizeof(TARGETS[0]); i++) {
+        if (!strcmp(cmd, TARGETS[i].cmd)) {
+            *flags = TARGETS[i].flags;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The word just before the caret's word, quotes and spaces dropped; "" when none.
+static void previous_word(const char *v, const size_t token_start, char *out, const size_t n) {
+    size_t end = token_start;
+    while (end > 0 && v[end - 1] == ' ') end--;
+    size_t start = end;
+    while (start > 0 && v[start - 1] != ' ') start--;
+    snprintf(out, n, "%.*s", (int) (end - start), v + start);
+}
+
+// A word that reads as a toggle's mode (is_toggle_literal in chat_commands.c)
+static int is_mode_word(const char *w) {
+    return !strcasecmp(w, "on") || !strcasecmp(w, "off") || !strcmp(w, "1") || !strcmp(w, "0") || !strcasecmp(w, "true") ||
+           !strcasecmp(w, "false");
+}
+
+// The toggle cheats: [target] [on|off] (resolveDevToggleTarget). The target may be several words (name_key). The
+// mode follows the target; ungod takes none (it always turns the cheat off), and nothing follows a mode.
+static void toggle_candidates(const char *cmd, const char *v, const LineCtx *ctx, ConCands *c, char *base, const size_t n) {
+    static const char *const ON_OFF[] = {"on", "off", NULL};
+    const int mode_ok = strcmp(cmd, "ungod") != 0;
+    if (ctx->arg == 0) {
+        player_target_candidates(v, ctx, 0, c, base, n);
+        if (mode_ok) con_words(c, ctx->prefix, ON_OFF);
+        return;
+    }
+    char last[CON_NAME_MAX];
+    previous_word(v, ctx->token_start, last, sizeof(last));
+    if (is_mode_word(last)) return;
+    if (mode_ok && (!ctx->prefix[0] || ci_starts_with("on", ctx->prefix) || ci_starts_with("off", ctx->prefix))) {
+        snprintf(base, n, "%.*s", (int) ctx->token_start, v);
+        con_words(c, ctx->prefix, ON_OFF);
+        return;
+    }
+    player_target_candidates(v, ctx, 0, c, base, n); // the rest of a multi-word target
+}
+
+// offline <map> (resolve_catalog_map, the whole text): the catalogue's names and community keys, normalised
+static void offline_candidates(const char *v, const LineCtx *ctx, ConCands *c, char *base, const size_t n) {
+    char query[CON_LINE_MAX];
+    if (!rest_query(v, ctx, base, n, query, sizeof(query))) return;
+    for (size_t i = 0; i < map_catalog_count(); i++) {
+        const MapCatalogEntry *e = map_catalog_at(i);
+        if (e) cand_add_key(c, e->source == MAP_SOURCE_OFFICIAL ? e->name : e->key, query);
+    }
+}
+
+// summon <name> (game_ai_resolve_template, the whole text): the template names, normalised
+static void summon_candidates(const char *v, const LineCtx *ctx, ConCands *c, char *base, const size_t n) {
+    char query[CON_LINE_MAX];
+    if (!rest_query(v, ctx, base, n, query, sizeof(query))) return;
+    int count = 0;
+    const GameAITemplate *templates = game_ai_templates(&count);
+    for (int i = 0; i < count; i++) cand_add_key(c, templates[i].name, query);
+}
+
+// exec's text is commands separated by ';' (cmd_exec): a command word leads the text and follows each ';'
+static int exec_command_start(const char *v, const LineCtx *ctx) {
+    if (ctx->arg == 0) return 1;
+    size_t p = ctx->token_start;
+    while (p > 0 && v[p - 1] == ' ') p--;
+    return p > 0 && v[p - 1] == ';';
+}
+
+// kpd <account> on|off, or kpd apps: the mode follows an account, and apps takes none
+static void kpd_candidates(const char *v, const LineCtx *ctx, ConCands *c, char *base, const size_t n) {
+    static const char *const ON_OFF[] = {"on", "off", NULL};
+    if (ctx->arg == 0) {
+        con_words(c, ctx->prefix, WORDS("apps"));
+        return;
+    }
+    char first[CON_NAME_MAX];
+    snprintf(first, sizeof(first), "%.*s", (int) (strcspn(v + first_arg_start(v), " ")), v + first_arg_start(v));
+    if (!strcasecmp(first, "apps")) return;
+    snprintf(base, n, "%.*s", (int) ctx->token_start, v);
+    con_words(c, ctx->prefix, ON_OFF);
 }
 
 // The candidates for the token under the caret, and the line up to it.
@@ -2144,7 +2309,18 @@ static void line_candidates(const char *v, ConCands *c, char *base, const size_t
     else if (!strcmp(ctx.cmd, "give")) {
         const ConCommand *dev = find_cmd(ctx.cmd);
         if (!dev || cmd_visible(dev)) give_candidates(v, c, base, n); // its words set the base (the item's start)
-    } else arg_candidates(ctx.cmd, ctx.arg, ctx.prefix, c);
+    } else {
+        const ConCommand *dev = find_cmd(ctx.cmd);
+        if (dev && !cmd_visible(dev)) return; // a dev command's arguments are offered only with the dev console on
+        int flags = 0;
+        if (is_toggle_cmd(ctx.cmd)) toggle_candidates(ctx.cmd, v, &ctx, c, base, n);
+        else if (target_flags(ctx.cmd, &flags)) player_target_candidates(v, &ctx, flags, c, base, n);
+        else if (!strcmp(ctx.cmd, "offline")) offline_candidates(v, &ctx, c, base, n);
+        else if (!strcmp(ctx.cmd, "summon")) summon_candidates(v, &ctx, c, base, n);
+        else if (!strcmp(ctx.cmd, "exec")) { if (exec_command_start(v, &ctx)) con_command_candidates(c, ctx.prefix); }
+        else if (!strcmp(ctx.cmd, "kpd")) kpd_candidates(v, &ctx, c, base, n);
+        else arg_candidates(ctx.cmd, ctx.arg, ctx.prefix, c);
+    }
 }
 
 static void quote_into(char *out, const size_t n, const char *base, const char *value, const int space_after) {

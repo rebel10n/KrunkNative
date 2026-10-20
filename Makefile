@@ -747,6 +747,10 @@ console-reload-test: build ## Dev console kept in the window (off-screen save, r
 console-give-autofill-test: build ## Dev console give completion: the selector / item / receiver hints of each line, a selector's item list = the no-selector list, Tab on one match (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/console_give_autofill_e2e.py $(DEBUG_DIR)
 
+.PHONY: console-autofill-audit-test
+console-autofill-audit-test: build ## Dev console autofill audited per command: the hint rows of each argument against the parser that runs it (player targets, toggles, maps, class, bots, free text, lists), Enter replies, Tab (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 2400 $(PYTHON) -I client/tests/console_autofill_audit_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-visible-test
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
