@@ -27,6 +27,12 @@
 // or wrong content is given up for the session; transport failures are retried with backoff up to
 // ASSET_FETCH_ATTEMPTS times (user assets: ASSET_FETCH_USER_ASSET_ATTEMPTS, waits capped at
 // ASSET_FETCH_ORIGIN_DOWN_MS). One log line per path: when it arrived or when it was given up.
+//
+// Content-addressed cache: every verified download of a manifest file is also hard-linked to
+// <assets>/.kn-objects/<aa>/<sha256> (KN_ASSETS_OBJECTS, launcher/include/kn_assets.h). A file that
+// is missing when it is needed (deleted, removed by a sync, or the same bytes as another path) is
+// linked back from there with no request. Each object is hashed before every use; one that does
+// not match is removed and the file is downloaded again. Filesystems without hard links cache nothing.
 #include <kn_http.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -90,7 +96,8 @@ int asset_fetch_wait_idle(int timeout_ms);
 
 typedef struct {
     size_t queued;      // paths ever queued
-    size_t fetched;     // written into the assets dir
+    size_t fetched;     // written into the assets dir (from the cache or an origin)
+    size_t cached;      // of those: linked from the content-addressed cache, no request
     size_t failed;      // given up
     size_t refused;     // downloads whose size / sha256 did not match (per origin)
     size_t requests;    // HTTP requests

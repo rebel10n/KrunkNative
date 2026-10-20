@@ -2,6 +2,7 @@
 #ifndef __EMSCRIPTEN__
 #include <asset_fetch.h>
 
+#include <kn_assets.h>  // KN_ASSETS_OBJECTS: the content-addressed cache
 #include <kn_fs.h>
 #include <kn_install.h> // kn_install_dir_in_checkout: the launcher's guard
 #include <kn_update.h>  // KnAssetList, kn_update_path_ok, KN_ASSETS_STATE
@@ -18,6 +19,7 @@
 #include <windows.h>
 #else
 #include <sys/stat.h>
+#include <unistd.h> // link(): the cache's hard links
 #endif
 
 #define FETCH_LIST_MAX (64u * 1024u * 1024u)
@@ -484,6 +486,72 @@ typedef enum {
     TRY_LOCAL,    // cannot write here: no point asking another origin
 } TryResult;
 
+// ------------------------------------------------------------------ the content-addressed cache
+// <assets>/.kn-objects/<aa>/<sha256> (KN_ASSETS_OBJECTS): the verified bytes of a manifest file,
+// hard-linked to every path that has them. The links make a cache entry cost no space; a cached
+// object is hashed before every use, so a damaged or edited one is never linked into place.
+
+#ifndef _WIN32
+static volatile int cache_serial;
+
+static void object_path(const char *sha256, char *out, const size_t n) {
+    snprintf(out, n, "%s%s/%.2s/%s", F.dir, KN_ASSETS_OBJECTS, sha256, sha256); // F.dir ends with '/'
+}
+
+// The file at target (a download that was just verified) becomes the object of its content.
+static void cache_store(const Entry *e, const char *target) {
+    if (!e->want || !e->want->sha256[0]) return;
+    char obj[KN_PATH_MAX + 128], dir[KN_PATH_MAX + 128], tmp[KN_PATH_MAX + 128];
+    object_path(e->want->sha256, obj, sizeof(obj));
+    snprintf(dir, sizeof(dir), "%s", obj);
+    kn_fs_dirname(dir);
+    if (!make_dirs(dir)) return;
+    snprintf(tmp, sizeof(tmp), "%s.kn-link-%d.part", obj, __atomic_add_fetch(&cache_serial, 1, __ATOMIC_RELAXED));
+    // a rename replaces an object a concurrent worker stored (the same verified bytes)
+    if (link(target, tmp) == 0 && kn_fs_rename(tmp, obj)) return;
+    kn_fs_remove(tmp); // no hard links here (or no room): no cache, the file is still fine
+}
+
+// Links the entry's cached object to target. TRY_OK = written from the cache; TRY_MISSING = no
+// usable object (none, or one whose size or sha256 is wrong: that one is removed, and the file is
+// then downloaded again).
+static TryResult cache_try(const Entry *e, const char *target, char *msg, const size_t msgn) {
+    if (!e->want || !e->want->sha256[0]) return TRY_MISSING;
+    char obj[KN_PATH_MAX + 128], tmp[KN_PATH_MAX + 64];
+    object_path(e->want->sha256, obj, sizeof(obj));
+    const int64_t size = kn_fs_size(obj);
+    if (size < 0) return TRY_MISSING;
+    char hex[65] = "";
+    if (size != e->want->size || !kn_fs_sha256(obj, hex) || strcmp(hex, e->want->sha256) != 0) {
+        kn_fs_remove(obj);
+        fprintf(stderr, "[assets] cache: %s does not match its sha256 any more; fetching it again\n", e->rel);
+        return TRY_MISSING;
+    }
+    snprintf(tmp, sizeof(tmp), "%s.kn-link-%d.part", target, __atomic_add_fetch(&cache_serial, 1, __ATOMIC_RELAXED));
+    if (link(obj, tmp) != 0) return TRY_MISSING;
+    if (!kn_fs_rename(tmp, target)) {
+        kn_fs_remove(tmp);
+        return TRY_MISSING;
+    }
+    snprintf(msg, msgn, "the cache (%lld bytes, verified)", (long long) e->want->size);
+    return TRY_OK;
+}
+#else
+// no hard links on Windows here: the cache is off (every missing file is downloaded)
+static void cache_store(const Entry *e, const char *target) {
+    (void) e;
+    (void) target;
+}
+
+static TryResult cache_try(const Entry *e, const char *target, char *msg, const size_t msgn) {
+    (void) e;
+    (void) target;
+    (void) msg;
+    (void) msgn;
+    return TRY_MISSING;
+}
+#endif
+
 static TryResult try_origin(KnHttp *http, const Origin *o, const Entry *e, const char *target, char *msg, const size_t msgn) {
     char url[KN_UPDATE_URL_MAX + 512];
     if (o->ua) snprintf(url, sizeof(url), "%s%s", o->url, e->rel + sizeof(USER_ASSET_DIR) - 1);
@@ -575,7 +643,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     char target[KN_PATH_MAX];
     char msg[640] = "", why[KN_PATH_MAX + 64] = "", last[640] = "";
     TryResult outcome = TRY_MISSING;
-    int transport = 0, tried = 0;
+    int transport = 0, tried = 0, from_cache = 0;
     unsigned tried_mask = 0;
     if (!kn_fs_join(target, sizeof(target), F.dir, rel)) {
         snprintf(last, sizeof(last), "path too long");
@@ -583,6 +651,10 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     } else if (!dir_writable(target, snapshot.ua, why, sizeof(why))) {
         snprintf(last, sizeof(last), "refusing to write: %s", why);
         outcome = TRY_LOCAL;
+    } else if (cache_try(&snapshot, target, msg, sizeof(msg)) == TRY_OK) {
+        outcome = TRY_OK;
+        from_cache = 1;
+        snprintf(last, sizeof(last), "%s", msg);
     } else {
         for (int pass = 0; pass < 2 && outcome != TRY_OK && outcome != TRY_LOCAL; pass++) {
             // pass 0: the origins that are up, in order; pass 1: the ones taken out (last resort)
@@ -619,11 +691,9 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
                 if (r == TRY_OK || r == TRY_LOCAL) break;
             }
         }
-        if (!tried && outcome != TRY_LOCAL) {
-            snprintf(last, sizeof(last), "no origin can serve it");
-            outcome = TRY_MISSING;
-        }
+        if (!tried && outcome == TRY_MISSING) snprintf(last, sizeof(last), "no origin can serve it");
     }
+    if (outcome == TRY_OK && !from_cache) cache_store(&snapshot, target);
     const int stopping = __atomic_load_n(&F.stop, __ATOMIC_RELAXED);
 
     pthread_mutex_lock(&F.lock);
@@ -632,6 +702,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     if (outcome == TRY_OK) {
         e->state = ENTRY_ARRIVED;
         F.stats.fetched++;
+        if (from_cache) F.stats.cached++;
         F.busy--;
         char full[KN_PATH_MAX];
         snprintf(full, sizeof(full), "%s%s", F.dir, rel);

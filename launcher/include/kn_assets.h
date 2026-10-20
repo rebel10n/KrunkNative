@@ -27,8 +27,18 @@ typedef struct {
                          // replacing the manifest's / built-in mirrors
     // optional (assets_bench): only the entries this returns 1 for are part of the sync
     int (*select)(void *user, const KnAssetEntry *e);
+    // 1: the first run's download (the launcher's default). Only the menu set (assets_sync.c
+    // MENU_SET) is downloaded now; the rest of the list is recorded in the state, so the
+    // client's on-demand fetch (client/include/asset_fetch.h) gets each file when it is first used.
+    // A copy of a deferred file that is present (stale or partial) is removed, so that fetch
+    // replaces it, verified. 0 = the whole list (--full-assets: offline play, CI).
+    int menu_only;
 } KnAssetsSyncOpts;
 
+// The client's content-addressed cache in the assets dir: <assets>/.kn-objects/<aa>/<sha256>, the
+// verified downloads of the list's files, hard-linked to their paths (client/src/net/asset_fetch.c
+// writes and reads it; the sync removes the objects no entry of the list names).
+#define KN_ASSETS_OBJECTS ".kn-objects"
 #define KN_ASSETS_THREADS_DEFAULT 16
 #define KN_ASSETS_MAX_ORIGINS 5 // the objects + KN_UPDATE_MAX_MIRRORS
 // The built-in mirror of the default origin (deploy/pages/assets_cdn.py): used when a manifest
@@ -52,6 +62,8 @@ typedef struct {
     size_t unique, copied;   // objects downloaded, paths filled by copying a duplicate
     int64_t resumed;         // bytes of earlier partial downloads reused
     size_t retries;
+    size_t deferred;         // menu_only: list entries left to the client's on-demand fetch
+    int64_t deferred_bytes;
     KnAssetsOriginStat origins[KN_ASSETS_MAX_ORIGINS];
     int origin_count;
 } KnAssetsSyncResult;

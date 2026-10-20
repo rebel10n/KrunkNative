@@ -3,14 +3,16 @@
 //   2. installs a newer executable-only package (sha256-verified; launcher, client_bin,
 //      server_bin, libs and ui/ swapped with a journal; deb/rpm installs defer to the package
 //      manager), never touching the game content,
-//   3. syncs the game content when the manifest's assets version differs from the local one
-//      (first install = everything, later only the files whose hash changed),
+//   3. syncs the game content when the manifest's assets version differs from the local one:
+//      the first run downloads the menu set only (sync's menu_only; the client fetches the rest
+//      when a game first uses it, client/src/net/asset_fetch.c), --full-assets the whole list,
+//      later runs only the files whose hash changed,
 // then starts client_bin with KRUNKNATIVE_ASSETS_DIR and KRUNKNATIVE_LAUNCHER set, in the
 // directory that holds ui/ (POSIX: exec, same pid; Windows: a new process).
 //
 //   krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--updates-url URL]
-//               [--assets-dir DIR] [--allow-checkout-assets] [--threads N] [--asset-mirrors URLS|off]
-//               [--] [client args...]
+//               [--assets-dir DIR] [--allow-checkout-assets] [--full-assets] [--threads N]
+//               [--asset-mirrors URLS|off] [--] [client args...]
 // Unknown arguments go to client_bin. Exit codes: 0 ok, 1 usage, 2 failed with nothing
 // playable, 3 --check found a newer build.
 #include "launcher_ui.h"
@@ -46,6 +48,7 @@ typedef struct {
     // options
     int cli, no_update, check_only, no_launch;
     int allow_checkout_assets; // --allow-checkout-assets: sync into a git checkout's assets/ anyway
+    int full_assets;           // --full-assets: download the whole content list, not the menu set
     long wait_pid; // the client's "Update now": let it exit first
     char updates_url[KN_UPDATE_URL_MAX];
     char assets_override[KN_PATH_MAX];
@@ -413,11 +416,14 @@ static void note_origins(const KnUpdateManifest *m) {
 static int sync_assets(const KnUpdateManifest *m) {
     char local[64];
     kn_assets_local_version(L.assets_dir, local, sizeof(local));
-    if (!m->assets.version[0] || !strcmp(local, m->assets.version)) return 1;
-    status(-1, NULL, local[0] ? "Updating game content" : "Downloading game content");
+    // the menu set's first run is the whole job unless --full-assets: the rest is fetched on demand
+    // (the state records the whole list either way). --full-assets checks the list every run.
+    const int current = !strcmp(local, m->assets.version);
+    if (!m->assets.version[0] || (current && !L.full_assets)) return 1;
+    status(-1, NULL, current ? "Checking game content" : local[0] ? "Updating game content" : "Downloading game content");
     L.download_started = 0;
     KnAssetsSyncOpts opts = {.progress = assets_progress, .cancel = &L.cancel, .threads = L.threads,
-                             .mirrors = L.mirrors[0] ? L.mirrors : NULL};
+                             .mirrors = L.mirrors[0] ? L.mirrors : NULL, .menu_only = !L.full_assets};
     KnAssetsSyncResult r;
     char err[512] = "";
     if (!kn_assets_sync(L.assets_dir, m, &opts, &r, err, sizeof(err))) {
@@ -428,6 +434,9 @@ static int sync_assets(const KnUpdateManifest *m) {
     printf("[launcher] game content %s: %zu downloaded (%.1f MB%s%.0f s, %.1f MB/s), %zu removed, %zu unchanged, %zu verified\n",
            m->assets.version, r.fetched, (double) r.bytes / 1048576.0, secs > 0 ? " in " : "", secs > 0 ? secs : 0,
            secs > 0 ? (double) r.bytes / 1048576.0 / secs : 0, r.removed, r.kept, r.adopted);
+    if (r.deferred)
+        printf("[launcher] game content: %zu files (%.1f MB) left to the game's on-demand fetch (--full-assets: all now)\n",
+               r.deferred, (double) r.deferred_bytes / 1048576.0);
     for (int g = 0; g < r.origin_count && r.unique; g++)
         printf("[launcher]   %s: %zu files, %.1f MB%s\n", r.origins[g].url, r.origins[g].files,
                (double) r.origins[g].bytes / 1048576.0, r.origins[g].disabled ? " (stopped using it)" : "");
@@ -604,6 +613,8 @@ static void usage(void) {
            "  --assets-dir DIR   game content directory (env KRUNKNATIVE_ASSETS_DIR); refused inside a git\n"
            "                     checkout (the sync deletes files it does not list) unless\n"
            "  --allow-checkout-assets\n"
+           "  --full-assets      game content: the whole list now (offline play, CI); the default downloads\n"
+           "                     the menu's files and the game fetches the rest when it first uses them\n"
            "  --threads N        game content: connections per origin (default %d; env KRUNKNATIVE_ASSET_THREADS)\n"
            "  --asset-mirrors U  game content mirrors (by path) besides the objects, \"off\" = none\n"
            "                     (default: the manifest's; env KRUNKNATIVE_ASSET_MIRRORS)\n"
@@ -625,6 +636,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--cli") || !strcmp(a, "--headless")) L.cli = 1;
         else if (!strcmp(a, "--no-update")) L.no_update = 1;
         else if (!strcmp(a, "--allow-checkout-assets")) L.allow_checkout_assets = 1;
+        else if (!strcmp(a, "--full-assets")) L.full_assets = 1;
         else if (!strcmp(a, "--check")) L.check_only = L.cli = 1;
         else if (!strcmp(a, "--no-launch")) L.no_launch = 1;
         else if (!strcmp(a, "--updates-url") && i + 1 < argc) snprintf(L.updates_url, sizeof(L.updates_url), "%s", argv[++i]);

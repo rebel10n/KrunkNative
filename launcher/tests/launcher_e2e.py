@@ -448,7 +448,7 @@ def main():
         write(os.path.join(assets, "user-added.txt"), "mine")      # not managed: never touched
         before = tree_state(assets)
         log.take()
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--full-assets", "--", "--version"], env=env, cwd=tmp)
         print("\n".join("     " + line for line in out.strip().splitlines()))
         paths = log.take()
         check(code == 0, "launcher exit 0")
@@ -490,8 +490,13 @@ def main():
         print(out.strip())
         manifest2 = json.loads(read(os.path.join(store, "public", "client", "latest.json")))
         check(code == 0 and manifest2["assets"]["version"] != manifest["assets"]["version"], "kn-updates assets: new content version")
+        # the client's cache (KN_ASSETS_OBJECTS): an object of content the list no longer has goes, a listed one stays
+        old_obj = os.path.join(assets, ".kn-objects", sha256(b"A1")[:2], sha256(b"A1"))
+        kept_obj = os.path.join(assets, ".kn-objects", sha256(b"FONT")[:2], sha256(b"FONT"))
+        write(old_obj, "A1")
+        write(kept_obj, "FONT")
         exe_files = {k: v for k, v in tree_state(inst).items() if not k.startswith("assets/")}
-        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
+        code, out = run([os.path.join(inst, "krunknative"), "--cli", "--full-assets", "--", "--version"], env=env, cwd=tmp)
         print("\n".join("     " + line for line in out.strip().splitlines() if "game content" in line))
         paths = log.take()
         check(code == 0, "launcher exit 0")
@@ -500,6 +505,7 @@ def main():
         check(read(os.path.join(assets, "textures", "a.png")) == b"A2" and read(os.path.join(assets, "maps2", "new.bin")) == b"NEW",
               "changed + added files in place")
         check(not os.path.exists(os.path.join(assets, "sound", "b.ogg")), "the removed file is deleted")
+        check(not os.path.exists(old_obj) and read(kept_obj) == b"FONT", "the cache drops an object the list no longer names, keeps the others")
         check(read(os.path.join(assets, "user-added.txt")) == b"mine", "the user's own file kept")
         check({k: v for k, v in tree_state(inst).items() if not k.startswith("assets/")} == exe_files, "executables untouched")
 
@@ -508,6 +514,7 @@ def main():
         deb = make_install("install-deb", "deb")
         os.chmod(deb, 0o555)  # /opt/krunknative is not the user's
         deb_client = read(os.path.join(deb, "client_bin"))
+        write(os.path.join(tmp, "xdg-data", "krunknative", "assets", "textures", "a.png"), "OLD!")  # stale copy (wrong size)
         code, out = run([os.path.join(deb, "krunknative"), "--cli", "--", "--version"], env=env, cwd=tmp)
         paths = log.take()
         data_assets = os.path.join(tmp, "xdg-data", "krunknative", "assets")
@@ -515,6 +522,10 @@ def main():
         check(read(os.path.join(deb, "client_bin")) == deb_client and not any("/builds/" in p for p in paths), "executables untouched")
         check(read(os.path.join(data_assets, "css", "fonts", "font2.ttf")) == b"FONT", "content synced into $XDG_DATA_HOME/krunknative/assets")
         check(read(os.path.join(data_assets, "shaders", "x.vert")) == b"old shader", "the installed package's own assets/ file mirrored")
+        # the default first run: the menu set is downloaded, the rest only listed (the game fetches it on demand)
+        check(not os.path.exists(os.path.join(data_assets, "textures", "a.png")), "default run: the stale non-menu copy is removed, left to the game")
+        state_paths = {f[0] for f in json.loads(read(os.path.join(data_assets, ".kn-assets.json")))["files"]}
+        check("textures/a.png" in state_paths, "default run: the state still lists it (the whole list)")
         check(f"({old12}," in out, "the installed (old) client started")
         os.chmod(deb, 0o755)
 

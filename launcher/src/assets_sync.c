@@ -30,6 +30,30 @@
 #define ASSET_HASHES ".kn-hashes"    // hash cache: "<size> <mtime> <sha256> <path>" lines
 #define ASSET_SYNC_DIR ".kn-sync"    // partial downloads: <sha256>.part (resumed by the next run)
 
+// The content a first run downloads (opts->menu_only): the files the main menu's first render asks
+// for (tools/uidiff/scenarios/main-menu.json, its Kanji backdrop: client_bin --render-scenario into
+// an empty content dir, the on-demand fetch's log) and the font the client loads at startup, where
+// a placeholder is no answer. Everything else is fetched when the game first uses it. A name the
+// content set does not list downloads nothing.
+static const char *const MENU_SET[] = {
+    "css/fonts/font2.ttf",
+    "models/crate_0.obj", "models/grass_0.obj", "models/pad_0.obj", "models/stack_0.obj",
+    "models/teddy_0.obj", "models/tree_0.obj",
+    "textures/ambient_0.png", "textures/ambient_1.png", "textures/brick_0.png", "textures/crate_0.png",
+    "textures/floor_0.png", "textures/grain_0.png", "textures/grass_0.png", "textures/grass_1.png",
+    "textures/grey_0.png", "textures/grid_0.png", "textures/lightcone_0.png", "textures/lightcone_1.png",
+    "textures/lines_0.png", "textures/link_0.png", "textures/liquid_0.png", "textures/objective_4.png",
+    "textures/pad_0.png", "textures/roof_0.png", "textures/stack_0.png", "textures/teddy_0.png",
+    "textures/tile_0.png", "textures/tree_0.png", "textures/wall_0.png",
+};
+
+// 1 for a path of the menu set (kn_assets_sync's menu_only)
+static int menu_path(const char *path) {
+    for (size_t i = 0; i < sizeof(MENU_SET) / sizeof(MENU_SET[0]); i++)
+        if (!strcmp(path, MENU_SET[i])) return 1;
+    return 0;
+}
+
 static void set_err(char *err, const size_t errn, const char *msg, const char *arg) {
     if (err && errn) snprintf(err, errn, "%s%s%s", msg, arg ? ": " : "", arg ? arg : "");
 }
@@ -963,6 +987,84 @@ static char *fetch_list(const KnUpdateManifest *m, size_t *len, char *err, const
     return body;
 }
 
+// menu_only: the diff's downloads outside the menu set wait for the client's on-demand fetch. A
+// copy of one that is present is stale or partial (the diff wants it): it goes now, so that fetch
+// replaces it verified, instead of the client keeping stale bytes under the new list.
+static void defer_fetches(const char *dir, const KnAssetList *want, KnAssetDiff *diff, KnAssetsSyncResult *result) {
+    size_t n = 0;
+    for (size_t i = 0; i < diff->fetch_count; i++) {
+        const KnAssetEntry *w = &want->files[diff->fetch[i]];
+        if (menu_path(w->path)) {
+            diff->fetch[n++] = diff->fetch[i];
+            continue;
+        }
+        char full[4096];
+        if (kn_update_path_ok(w->path) && kn_fs_join(full, sizeof(full), dir, w->path)) kn_fs_remove(full); // 1 when missing too
+        result->deferred++;
+        result->deferred_bytes += w->size;
+        diff->fetch_bytes -= w->size;
+    }
+    diff->fetch_count = n;
+}
+
+static int sha_cmp(const void *a, const void *b) {
+    return strcmp(*(const char *const *) a, *(const char *const *) b);
+}
+
+static int sha_key_cmp(const void *key, const void *elem) {
+    return strcmp((const char *) key, *(const char *const *) elem);
+}
+
+// The client's cache (KN_ASSETS_OBJECTS): an object no entry of the list names is an older
+// version's content and goes. A path keeps its own bytes either way (hard links).
+typedef struct {
+    const char *const *shas; // the list's sha256s, sorted
+    size_t sha_count;
+    char **drop;             // objects to remove, relative to the cache dir
+    size_t drop_count;
+    int failed;
+} PruneCtx;
+
+static int prune_visit(const char *rel, const int is_dir, void *user) {
+    PruneCtx *c = user;
+    if (is_dir) return 1;
+    const char *name = strrchr(rel, '/');
+    name = name ? name + 1 : rel;
+    if (bsearch(name, c->shas, c->sha_count, sizeof(*c->shas), sha_key_cmp)) return 1;
+    char **grown = realloc(c->drop, (c->drop_count + 1) * sizeof(*grown));
+    if (!grown) {
+        c->failed = 1;
+        return 0;
+    }
+    c->drop = grown;
+    c->drop[c->drop_count] = strdup(rel);
+    if (!c->drop[c->drop_count]) {
+        c->failed = 1;
+        return 0;
+    }
+    c->drop_count++;
+    return 1;
+}
+
+static void prune_objects(const char *assets_dir, const KnAssetList *want) {
+    char dir[4096];
+    if (!kn_fs_join(dir, sizeof(dir), assets_dir, KN_ASSETS_OBJECTS) || !kn_fs_is_dir(dir)) return;
+    const char **shas = malloc((want->count ? want->count : 1) * sizeof(*shas));
+    if (!shas) return;
+    for (size_t i = 0; i < want->count; i++) shas[i] = want->files[i].sha256;
+    qsort(shas, want->count, sizeof(*shas), sha_cmp);
+    PruneCtx c = {.shas = shas, .sha_count = want->count};
+    kn_fs_walk(dir, prune_visit, &c);
+    // collected first: nothing is removed while the walk reads the directories
+    for (size_t i = 0; !c.failed && i < c.drop_count; i++) {
+        char full[4096];
+        if (kn_fs_join(full, sizeof(full), dir, c.drop[i])) kn_fs_remove(full);
+    }
+    for (size_t i = 0; i < c.drop_count; i++) free(c.drop[i]);
+    free(c.drop);
+    free(shas);
+}
+
 int kn_assets_sync(const char *assets_dir, const KnUpdateManifest *m, const KnAssetsSyncOpts *opts,
                    KnAssetsSyncResult *result, char *err, const size_t errn) {
     KnAssetsSyncResult local_result;
@@ -1034,6 +1136,7 @@ int kn_assets_sync(const char *assets_dir, const KnUpdateManifest *m, const KnAs
         set_err(err, errn, "cancelled", NULL);
         ok = 0;
     }
+    if (ok && opts && opts->menu_only) defer_fetches(assets_dir, &want, &diff, result);
 
     char tmpdir[4096];
     kn_fs_join(tmpdir, sizeof(tmpdir), assets_dir, ASSET_SYNC_DIR);
@@ -1092,6 +1195,7 @@ int kn_assets_sync(const char *assets_dir, const KnUpdateManifest *m, const KnAs
         }
         free(state);
         if (ok) hash_cache_save(assets_dir, &want);
+        if (ok) prune_objects(assets_dir, &want);
         kn_fs_rmtree(tmpdir);
     }
     if (ok && opts && opts->progress)

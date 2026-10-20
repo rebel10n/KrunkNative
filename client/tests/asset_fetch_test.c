@@ -4,7 +4,8 @@
 // failures retried with backoff, de-duplication, the concurrency cap, content-addressed origins, a
 // size mismatch of a present file refetched, the git checkout guard (root and per directory) and
 // stopping with a transfer in flight, the split CDN's only=/skip= origins, and Krunker user assets
-// (their own origins, user-assets-only mode, 403s, block pages, inside a checkout, beside a manifest).
+// (their own origins, user-assets-only mode, 403s, block pages, inside a checkout, beside a manifest),
+// and the content-addressed cache (a missing file restored without a request, damaged objects refetched).
 #include <asset_fetch.h>
 #include <kn_fs.h>
 #include <kn_update.h>
@@ -574,6 +575,63 @@ static void test_user_asset_outage(void) {
     asset_fetch_stop();
 }
 
+// the content-addressed cache (<assets>/.kn-objects): a missing file, or the same bytes under
+// another path, comes back from disk with no request; an object whose bytes are wrong is removed
+// and the file fetched again
+static void test_cache(void) {
+    printf("content-addressed cache: restored without a request, damaged objects refetched...\n");
+    char dir[1100], why[1400], p0[1200], p1[1200], obj[1400], h[65];
+    make_dir(dir, sizeof(dir), "cache");
+    const ManifestFile files[] = {
+        {"textures/c_0.png", "CACHE one"},
+        {"textures/c_1.png", "CACHE one"}, // the same bytes under another path: no route for it below
+    };
+    write_manifest(dir, files, 2);
+    snprintf(p0, sizeof(p0), "%s/textures/c_0.png", dir);
+    snprintf(p1, sizeof(p1), "%s/textures/c_1.png", dir);
+    sha_hex(files[0].content, h);
+    snprintf(obj, sizeof(obj), "%s/.kn-objects/%.2s/%s", dir, h, h);
+    routes_reset();
+    route(A "textures/c_0.png", 200, files[0].content, 0);
+    AssetFetchConfig cfg = config(dir);
+
+    // a session: the path is known to it once fetched, so a missing file is asked for by a new one
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    CHECK(asset_fetch_request(p0, 1) == 0 && settle(p0) == 1, "fetched from the origin");
+    CHECK(T.requests == 1 && kn_fs_exists(obj), "one request, and the object is cached (requests %d)", T.requests);
+    asset_fetch_stop();
+
+    kn_fs_remove(p0);
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    CHECK(asset_fetch_request(p0, 1) == 0 && settle(p0) == 1, "missing in a new session: restored");
+    char *got = read_text(p0);
+    CHECK(got && !strcmp(got, files[0].content), "restored content (%s)", got ? got : "(none)");
+    free(got);
+    CHECK(asset_fetch_request(p1, 1) == 0 && settle(p1) == 1, "the same bytes under another path: from the cache");
+    CHECK(T.requests == 1, "no request for either (requests %d)", T.requests);
+    AssetFetchStats st;
+    asset_fetch_stats(&st);
+    CHECK(st.cached == 2 && st.fetched == 2, "stats cached %zu fetched %zu", st.cached, st.fetched);
+    asset_fetch_stop();
+
+    write_file(obj, "CACHE onX"); // damaged: same size, other bytes (p0 is the same inode: damaged too)
+    kn_fs_remove(p0);
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    CHECK(asset_fetch_request(p0, 1) == 0 && settle(p0) == 1, "a damaged object: the file is fetched again");
+    CHECK(T.requests == 2, "one request for it (requests %d)", T.requests);
+    got = read_text(obj);
+    CHECK(got && !strcmp(got, files[0].content), "the object holds the verified bytes again (%s)", got ? got : "(none)");
+    free(got);
+    asset_fetch_stop();
+
+    write_file(obj, "CAC"); // truncated
+    kn_fs_remove(p0);
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    CHECK(asset_fetch_request(p0, 1) == 0 && settle(p0) == 1, "a truncated object: fetched again");
+    CHECK(T.requests == 3, "one request for it (requests %d)", T.requests);
+    asset_fetch_stop();
+}
+
 int main(void) {
     const char *base = getenv("XDG_CACHE_HOME");
     char tmpl[900];
@@ -590,6 +648,7 @@ int main(void) {
     test_split();
     test_user_assets();
     test_user_asset_outage();
+    test_cache();
     kn_fs_rmtree(g_root);
     printf("asset_fetch_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
