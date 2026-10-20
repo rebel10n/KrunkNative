@@ -1599,7 +1599,9 @@ void menu_retry_connect(void) {
         g_boot_any = 1; // nothing is left: the game still loaded lifts the curtain again
         return;
     }
-    if (krunker_net_active() || krunker_net_failure_shown(g_ui.connect_error)) { // the official error screen's Find Game: a new official game (v10)
+    // the official error screen's Find Game: a new official game (v10). Server Type krunker.io takes it for any failure:
+    // a krunker.io list with no room is no krunker session, and the brain seek below would join a Box Office game
+    if (krunker_net_active() || krunker_net_failure_shown(g_ui.connect_error) || servers_ui_official_type()) {
         if (!servers_ui_official_find_game()) client_net_request_reconnect(g_ui.client);
         return;
     }

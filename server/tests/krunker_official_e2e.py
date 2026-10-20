@@ -133,6 +133,7 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--lobbyui": "lobbyui", "--groups": "groups",
         "--script": "script", "--prophunt": "prophunt", "--token": "token", "--tls": "tls", "--list": "list",
         "--joinlines": "joinlines", "--framecap": "framecap", "--offline-leave": "offline-leave", "--kickclose": "kickclose",
+        "--kiodrop": "kiodrop",
         "--f4": "f4"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
@@ -833,6 +834,18 @@ class Stub:
                 self.sent["close"] = time.monotonic()
                 close_body = bytes([KICK_CLOSE_CODE >> 8, KICK_CLOSE_CODE & 0xFF]) + KICK_CLOSE_REASON.encode()
                 ws.transport.write(bytes([0x88, len(close_body)]) + close_body)  # FIN + Close: code and reason
+                for _ in range(150):
+                    if stop.is_set():
+                        break
+                    await asyncio.sleep(0.1)
+            elif self.got_en.is_set() and self.scenario == "dropclose":
+                # run_native_kio_drop: the official server's socket dies with no ERROR and no Close frame (the network
+                # drops): the client reads a lost session, with no server reason
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await asyncio.sleep(3.0)
+                self.sent["drop"] = time.monotonic()
+                ws.transport.abort()
                 for _ in range(150):
                     if stop.is_set():
                         break
@@ -3755,6 +3768,111 @@ def run_native_f4_server_type():
     check(f"{label}: krunker.io selected: the brain is not asked", not seeks, len(seeks))
 
 
+def run_native_kio_drop(f4=False):
+    """A krunker.io game the player is in drops: its socket dies with no server reason (no ERROR, no Close frame), with
+    Server Type krunker.io saved (f4: Find New Game is pressed after the drop). The client must not seek or join a Box
+    Office lobby on the krunker.io game's account of it: no rejoin through the matchmaker (the lost game's Box Office
+    lobby id, "connection lost ... rejoining ... through the matchmaker"), no Box Office seek, and F4 joins krunker.io's
+    lobbies (or says none is available), never Box Office's."""
+    label = "native-kio-drop-f4" if f4 else "native-kio-drop"
+    dead_port = kn_proto.free_ports(1)[0]
+    seeks = []
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "official", "knSeekServersMigrated": 1})
+    script = '0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n4000 play\n'
+    if f4:
+        script += "9000 down F4\n9050 up F4\n"
+    script += "16000 quit\n"
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup, scenario="dropclose")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the official game is joined", any("gameId=FRA:bbbbb" in w for w in stub.ws_paths), stub.ws_paths[:2])
+    check(f"{label}: the stub dropped the socket (no ERROR, no Close frame)", "drop" in stub.sent and "error" not in stub.sent and "close" not in stub.sent,
+          sorted(stub.sent))
+    # the Box Office seeks after the krunker.io game's join (the startup seek of the brain session comes before it)
+    kio_join = next((i for i, l in enumerate(lines) if "joining official game" in l or "joining in-client" in l), len(lines))
+    after = lines[kio_join:]
+    bo_after = [l for l in after if l.startswith("[mm] joining") or "through the matchmaker" in l or "[mm] rejoin" in l]
+    check(f"{label}: no Box Office join or rejoin after the krunker.io game is joined", not bo_after, bo_after[:3])
+    bo_seeks = [pth for pth, _, _ in stub.http_log if pth == "/brain/mm/seek-game"]
+    check(f"{label}: Box Office's brain is asked once (the startup seek), never after the krunker.io game", len(bo_seeks) <= 1,
+          (len(bo_seeks), [l for l in lines if "[mm]" in l][-4:]))
+    if f4:
+        k_seeks = [pth for pth, _, _ in stub.http_log if pth == "/seek-game" or pth.startswith("/game-list")]
+        check(f"{label}: F4 asks krunker.io (its lobby list or matchmaker), not Box Office", len(k_seeks) >= 1, k_seeks[:4])
+
+
+def run_native_kio_retry():
+    """Server Type krunker.io (set in the Settings row, then F4): krunker.io's lobby list has no lobby with room, so F4
+    shows its "No Games Found" error screen (no krunker.io game was joined, so krunker_net has no failure of its own).
+    Its Find Game button (menu_retry_connect) must follow the Server Type as F4 does: krunker.io's lobby list again, never
+    a Box Office seek (servers_ui_retry's brain seek ignores the Server Type)."""
+    label = "native-kio-retry"
+    dead_port = kn_proto.free_ports(1)[0]
+    seeks = []
+
+    def setup(st):
+        st.lobbies = []  # no lobby with room: the list answers, nothing matches
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServersMigrated": 1})
+    script = ('0 boot\n2000 call setSetting "knSeekServers" "official"\n9000 down F4\n9050 up F4\n'
+              "14000 call knRetry\n16000 quit\n")
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the Server Type change reached the setting (the page's setSetting, knSeekServers=official)",
+          "setSetting knSeekServers=official" in text, [l for l in lines if "knSeekServers" in l][:2])
+    f4 = next((i for i, l in enumerate(lines) if "[controls] F4" in l), len(lines))
+    check(f"{label}: F4 with krunker.io shows the lobby list's answer (no room), no Box Office join", "[mm] joining" not in "\n".join(lines[f4:]),
+          [l for l in lines[f4:] if "[mm]" in l][:3])
+    retry = next((i for i, l in enumerate(lines) if "knRetry" in l or "retry" in l.lower() and "[krunker]" in l), len(lines))
+    bo_seeks = [pth for pth, _, _ in stub.http_log if pth == "/brain/mm/seek-game"]
+    check(f"{label}: Find Game after the error seeks krunker.io's list, not Box Office's brain", len(bo_seeks) <= 1,
+          (len(bo_seeks), [l for l in lines if "[mm]" in l or "[krunker] seek" in l][-5:]))
+    check(f"{label}: no Box Office join after the krunker.io error", not any(l.startswith("[mm] joining") for l in lines[f4:]),
+          [l for l in lines[f4:] if l.startswith("[mm] joining")][:2])
+
+
+def run_native_bo_f4_in_kio():
+    """Server Type Box Office, F4 pressed in a krunker.io game: the game gives way and the brain seeks (run_native_f4_server_type
+    "native-f4-kn-official"). The brain's ping list must not be refused by the krunker.io gate: the error would read
+    "Could not reach the matchmaker" and a Box Office join would follow only by luck."""
+    label = "native-bo-f4-in-kio"
+    dead_port = kn_proto.free_ports(1)[0]
+    seeks = []
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        brain_box_office_room(st, dead_port, seeks)
+    write_saved_settings(label, {"knSeekOnLaunch": False, "defaultRegion": "local", "knSeekServers": "kn", "knSeekServersMigrated": 1})
+    script = '0 boot\n2000 call krunkerJoin "FRA:bbbbb"\n4000 play\n9000 down F4\n9050 up F4\n16000 quit\n'
+    stub, p, out, log = launch_native(label, script, lambda st: {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d/brain" % st.mm_port},
+                                      args=(), stub_setup=setup, scenario="default")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    f4 = next((i for i, l in enumerate(lines) if "[controls] F4" in l), len(lines))
+    after = lines[f4:]
+    check(f"{label}: F4 gets no matchmaker refusal (no 'Could not reach the matchmaker' error)",
+          not any("Could not reach the matchmaker" in l for l in after), [l for l in after if "Could not reach" in l][:2])
+    check(f"{label}: F4 joins a Box Office lobby (the brain answered)", any(l.startswith("[mm] joining") for l in after),
+          [l for l in after if "[mm]" in l][:3])
+
+
+def run_native_f4_drops():
+    """Server Type runs around krunker.io's own failures (the Box Office recovery must not take them): a krunker.io game
+    that drops (no rejoin through Box Office, "native-kio-drop"; F4 after it joins krunker.io, "native-kio-drop-f4"), Find
+    Game on krunker.io's "no room" error (never a Box Office seek, "native-kio-retry") and F4 in a krunker.io game with
+    Server Type Box Office (the Box Office seek once the game gives way, "native-bo-f4-in-kio")."""
+    run_native_kio_drop()
+    run_native_kio_drop(f4=True)
+    run_native_kio_retry()
+    run_native_bo_f4_in_kio()
+
+
 def run_native_reload(gone):
     """Reload (F5) in an official game: the client relaunches with the same command line (--krunker, which
     alone joins whatever game the matchmaker picks) and comes back into the official game it was in, by
@@ -4560,6 +4678,7 @@ def main():
         run_native_exclude_mm()
         run_native_full_answer()
         run_native_f4_server_type()
+        run_native_f4_drops()
         run_native_seek_modes()
         run_native_reload(False)
         run_native_reload(True)
@@ -4615,9 +4734,13 @@ def main():
         run_native_exclude_mm()
         run_native_full_answer()
         run_native_f4_server_type()
+        run_native_f4_drops()
         run_native_seek_modes()
     if ONLY == "f4" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game with Server Type Box Office (official games, failed joins)
         run_native_f4_server_type()
+        run_native_f4_drops()
+    if ONLY == "kiodrop" and os.path.isfile(f"{BUILD}/client_bin"):  # just the krunker.io drop / Find Game runs (Server Type krunker.io)
+        run_native_f4_drops()
     if ONLY == "kickclose" and os.path.isfile(f"{BUILD}/client_bin"):  # just the server kick (an error, then a coded Close)
         run_native_kick_close()
     if ONLY == "framecap" and os.path.isfile(f"{BUILD}/client_bin"):  # just the input frame cap run (a stalled frame's dt)

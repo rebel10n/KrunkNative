@@ -2400,6 +2400,14 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
         if (strike_ui_active()) strike_menu_server_password(); // Krunker Strike's prompt (SERVER_PASSWORD)
         else v10_party_password_prompt();
     }
+    // A krunker.io game's lost session or server error is krunker.io's: the Lost Connection screen, whose Find Game asks
+    // krunker.io (servers_ui_official_find_game, by the Server Type). Never a Box Office rejoin: it would seek the Box
+    // Office lobby the player left before (the krunker.io drop has no lobby of ours), and the brain is not asked while
+    // krunker.io is the session (the brain gate), so it fails and then joins a Box Office lobby once the gate opens.
+    if (krunker_net_active()) {
+        rejoin_cancel();
+        return 0;
+    }
     if (dropped) return g_pin == PIN_IDLE ? servers_ui_rejoining() : connection_dropped(error, error_size);
     const int restart = !strcmp(code, NET_ERROR_CODE_UPDATING) || !strcmp(code, NET_ERROR_CODE_SHUTDOWN);
     const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");
@@ -4253,9 +4261,16 @@ int servers_ui_official_find_game(void) {
         ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
         return 1;
     }
+    rejoin_cancel(); // a Box Office rejoin armed by a lost game gives way to the player's krunker.io game
     if (krunker_lobbies_enabled()) return qp_started(krunker_lobbies_seek());
     return qp_started(g_client ? krunker_net_seek_new(g_client, NULL, 1) : 0);
 }
+
+// 1 when Settings > Quickplay's Server Type is krunker.io. menu_retry_connect (menu_ui.c) then sends the Lost Connection
+// screen's Find Game to servers_ui_official_find_game whatever failed: krunker.io's lobby list can fail or have no room
+// without any krunker session, and the brain seek of servers_ui_retry would be a Box Office game for a krunker.io choice.
+// (A pinned direct server keeps its Reconnect: servers_ui_retry's PIN_DIRECT answer.)
+int servers_ui_official_type(void) { return seek_prefs_servers() == SEEK_SERVERS_OFFICIAL && g_pin != PIN_DIRECT; }
 
 int servers_ui_quick_match(void) {
     return servers_ui_find_new_game();
@@ -4276,6 +4291,7 @@ static int find_new_game_seek(void) {
     const SeekServers type = seek_prefs_servers();
     const int official = krunker_net_active();
     if (type == SEEK_SERVERS_OFFICIAL) {
+        rejoin_cancel(); // F4 asks krunker.io for a game: a Box Office rejoin of a lost game is no longer wanted
         // the native lobby list; without one, krunker.io's own Find New Game in its game (krunker_net_seek_new)
         if (official && !krunker_lobbies_enabled()) return krunker_net_seek_new(g_client, NULL, 1);
         return krunker_lobbies_seek();
