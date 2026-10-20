@@ -23,11 +23,11 @@ static const char *k_releases =
     " {\"tag_name\":\"server-latest\",\"draft\":false,\"prerelease\":true,\"html_url\":\"https://github.com/rebel10n/KrunkNative/releases/tag/server-latest\","
     "  \"body\":\"Rolling\\n\\n<!-- kn-build {\\\"describe\\\":\\\"v1.0.0-60-gbbbbbbb\\\",\\\"commit\\\":\\\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\\\",\\\"commit_time\\\":1791259200,\\\"build_time\\\":\\\"2026-10-04T00:00:00Z\\\",\\\"protocol\\\":\\\"1.3\\\"} -->\\n\","
     "  \"assets\":["
-    "   {\"name\":\"krunknative-server-linux-x86_64.tar.gz\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/krunknative-server-linux-x86_64.tar.gz\"},"
-    "   {\"name\":\"krunknative-server-linux-x86_64.tar.gz.sha256\",\"browser_download_url\":\"https://github.com/x.sha256\"},"
-    "   {\"name\":\"krunknative-server-windows-x86_64.zip\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/krunknative-server-windows-x86_64.zip\"},"
-    "   {\"name\":\"krunknative-server-macos-arm64.tar.gz\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/krunknative-server-macos-arm64.tar.gz\"},"
-    "   {\"name\":\"krunknative-server-linux-x86_64-bullseye.tar.gz\",\"browser_download_url\":\"http://insecure/x\"}"
+    "   {\"name\":\"BoxOffice-server-linux-x64.tar.gz\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/BoxOffice-server-linux-x64.tar.gz\"},"
+    "   {\"name\":\"SHA256SUMS\",\"browser_download_url\":\"https://github.com/x/SHA256SUMS\"},"
+    "   {\"name\":\"BoxOffice-server-windows-x64.zip\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/BoxOffice-server-windows-x64.zip\"},"
+    "   {\"name\":\"BoxOffice-server-macos-arm64.zip\",\"browser_download_url\":\"https://github.com/rebel10n/KrunkNative/releases/download/server-latest/BoxOffice-server-macos-arm64.zip\"},"
+    "   {\"name\":\"BoxOffice-server-linux-x64-polyfilled.tar.gz\",\"browser_download_url\":\"http://insecure/x\"}"
     "  ]},"
     " {\"tag_name\":\"server-v9.9.9\",\"draft\":true,\"body\":\"<!-- kn-build {\\\"commit\\\":\\\"cccccccccccccccccccccccccccccccccccccccc\\\",\\\"commit_time\\\":1899000000,\\\"protocol\\\":\\\"1.3\\\"} -->\",\"assets\":[]}"
     "]";
@@ -64,10 +64,10 @@ static void test_pick(void) {
     CHECK(!strcmp(r.commit, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
     CHECK(r.commit_time == 1791259200LL);
     CHECK(!strcmp(r.html_url, "https://github.com/rebel10n/KrunkNative/releases/tag/server-latest"));
-    CHECK(strstr(r.dl_linux, "linux-x86_64.tar.gz") && !strstr(r.dl_linux, "sha256"));
-    CHECK(strstr(r.dl_windows, ".zip") != NULL);
-    CHECK(strstr(r.dl_macos, "macos-arm64") != NULL);
-    CHECK(r.dl_linux_bullseye[0] == 0); /* http:// is never offered */
+    CHECK(strstr(r.dl_linux, "linux-x64.tar.gz") && !strstr(r.dl_linux, "SHA256SUMS"));
+    CHECK(strstr(r.dl_windows, "windows-x64.zip") != NULL);
+    CHECK(strstr(r.dl_macos, "macos-arm64.zip") != NULL);
+    CHECK(r.dl_linux_polyfilled[0] == 0); /* http:// is never offered */
 
     cJSON *o = cJSON_CreateObject();
     release_add_json(&r, o);

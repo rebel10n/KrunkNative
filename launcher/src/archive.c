@@ -337,7 +337,7 @@ static int extract_entries(Entries *ents, const char *dest, char *err, const siz
             return 0;
         }
     }
-    // the single top-level directory every entry shares (krunknative-client-<plat>/, X.app/)
+    // the single top-level directory every entry shares (an old wrapped package: flat ones have none)
     size_t strip = 0;
     if (ents->n) {
         const char *first = ents->v[0].name;

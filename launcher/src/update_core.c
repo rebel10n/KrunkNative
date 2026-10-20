@@ -654,23 +654,24 @@ const char *kn_update_platform_default(void) {
     return KN_STR(KRUNKNATIVE_PLATFORM_ID);
 #elif defined(_WIN32)
 #if defined(__aarch64__) || defined(_M_ARM64)
-    return "windows-aarch64";
+    return "windows-arm64";
 #else
-    return "windows-amd64";
+    return "windows-x64";
 #endif
 #elif defined(__APPLE__)
 #if defined(__aarch64__) || defined(__arm64__)
-    return "macos-aarch64";
+    return "macos-arm64";
 #else
-    return "macos-amd64";
+    return "macos-x64";
 #endif
 #elif defined(__aarch64__)
-    return "linux-aarch64";
+    return "linux-arm64";
 #else
-    return "linux-amd64";
+    return "linux-x64";
 #endif
 }
 
+// The package format of a platform: Linux is a tar.gz, Windows and macOS a zip (BoxOffice-<id>.<ext>).
 const char *kn_update_archive_kind(const char *platform) {
-    return platform && !strncmp(platform, "windows-", 8) ? "zip" : "tar.gz";
+    return platform && (!strncmp(platform, "windows-", 8) || !strncmp(platform, "macos-", 6)) ? "zip" : "tar.gz";
 }

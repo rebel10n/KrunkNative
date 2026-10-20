@@ -4,17 +4,17 @@
 // installers; KrunkNative keeps its header and description (ui/windows/25.html, made by
 // tools/ui-import/windows_v7.py) and fills #knDownloads with its own packages, all assets of
 // the rolling GitHub release `client-latest` (.github/workflows/client.yml):
-//   krunknative-client-<platform>.<ext>   the launcher packages (tools/release/package-client.sh)
-//   krunknative-android.apk               the Android app (platform/android, signed release)
-//   krunknative-ios-unsigned.ipa          the iOS app, unsigned (AltStore / Sideloadly re-sign it)
+//   BoxOffice-<platform>.<ext>            the launcher packages (tools/release/package-client.sh)
+//   BoxOffice-android.apk                 the Android app (platform/android, signed release)
+//   BoxOffice-ios-unsigned.ipa            the iOS app, unsigned (AltStore / Sideloadly re-sign it)
 // iPhone / iPad players are pointed at Add to Home Screen first: the web build's PWA manifest
 // (platform/web) makes krunk.io a fullscreen home screen app with no signing involved.
 //
 // Krunker Strike is its own app next to Krunker Box Office (its own app id, name, icon and page,
 // /strike/: platform/web/pwa.py, platform/README.md): the window lists it in its own section
 // (strike_section), its Android APK / unsigned .ipa from the same release
-//   krunknative-strike-android.apk        io.krunknative.strike over https://krunk.io/strike/
-//   krunknative-strike-ios-unsigned.ipa   the same for sideloading
+//   BoxOffice-strike-android.apk          io.krunknative.strike over https://krunk.io/strike/
+//   BoxOffice-strike-ios-unsigned.ipa     the same for sideloading
 // and its home screen web app. In the Strike app itself that section comes first.
 //
 // Layout: "Recommended for your device" (the detected platform's package, its download
@@ -51,21 +51,19 @@ typedef enum { DL_OS_UNKNOWN, DL_OS_WINDOWS, DL_OS_MAC, DL_OS_LINUX, DL_OS_ANDRO
 typedef struct {
     const char *id;               // platform id (kn_update_platform_default), "android", "ios"
     DlOs os;
-    const char *arch;             // "amd64" / "aarch64", NULL = any
+    const char *arch;             // "x64" / "arm64", NULL = any
     const char *name;             // "Other platforms" row
     const char *desc;             // under the platform name when recommended
     const char *exts[DL_EXT_MAX]; // formats on the release, preferred first
 } DlPkg;
 
-// The platforms of client.yml's release notes, with the same requirements.
+// The launcher packages of the release (tools/release/package-client.sh), one per platform id.
 static const DlPkg PKGS[] = {
-    {"windows-amd64", DL_OS_WINDOWS, "amd64", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit", {"zip"}},
-    {"macos-aarch64", DL_OS_MAC, "aarch64", "macOS (Apple silicon)", "macOS 11 or newer, Apple silicon (M1 and later)", {"zip", "tar.gz"}},
-    {"macos-amd64", DL_OS_MAC, "amd64", "macOS (Intel)", "macOS 11 or newer, Intel", {"zip", "tar.gz"}},
-    {"linux-amd64-polyfilled", DL_OS_LINUX, "amd64", "Linux x86_64 (any distro)", "x86_64, any distribution (glibc 2.17+)", {"deb", "rpm", "tar.gz", "zip"}},
-    {"linux-amd64", DL_OS_LINUX, "amd64", "Linux x86_64 (glibc 2.35+)", "x86_64 for current distros (glibc 2.35+, OpenSSL 3)", {"deb", "rpm", "tar.gz", "zip"}},
-    {"linux-aarch64-polyfilled", DL_OS_LINUX, "aarch64", "Linux aarch64 (any distro)", "aarch64, any distribution (glibc 2.17+)", {"deb", "rpm", "tar.gz", "zip"}},
-    {"linux-aarch64", DL_OS_LINUX, "aarch64", "Linux aarch64 (glibc 2.35+)", "aarch64 for current distros (glibc 2.35+, OpenSSL 3)", {"deb", "rpm", "tar.gz", "zip"}},
+    {"windows-x64", DL_OS_WINDOWS, "x64", "Windows 10 / 11 (x64)", "Windows 10 and 11, 64-bit", {"zip"}},
+    {"macos-arm64", DL_OS_MAC, "arm64", "macOS (Apple silicon)", "macOS 11 or newer, Apple silicon (M1 and later)", {"zip"}},
+    {"macos-x64", DL_OS_MAC, "x64", "macOS (Intel)", "macOS 11 or newer, Intel", {"zip"}},
+    {"linux-x64", DL_OS_LINUX, "x64", "Linux x86_64 (glibc 2.35+)", "x86_64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"tar.gz"}},
+    {"linux-arm64", DL_OS_LINUX, "arm64", "Linux arm64 (glibc 2.35+)", "arm64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)", {"tar.gz"}},
     {"android", DL_OS_ANDROID, NULL, "Android", "Android 7.0 or newer", {"apk"}},
     {"ios", DL_OS_IOS, NULL, "iPhone / iPad", "Add Krunker Box Office to your Home Screen", {"ipa"}},
 };
@@ -87,9 +85,9 @@ static struct {
 // ---------------------------------------------------------------- files and links
 
 static void pkg_file(const DlPkg *p, const char *ext, char *out, const size_t n) {
-    if (p->os == DL_OS_ANDROID) snprintf(out, n, "krunknative-android.apk");
-    else if (p->os == DL_OS_IOS) snprintf(out, n, "krunknative-ios-unsigned.ipa");
-    else snprintf(out, n, "krunknative-client-%s.%s", p->id, ext);
+    if (p->os == DL_OS_ANDROID) snprintf(out, n, "BoxOffice-android.apk");
+    else if (p->os == DL_OS_IOS) snprintf(out, n, "BoxOffice-ios-unsigned.ipa");
+    else snprintf(out, n, "BoxOffice-%s.%s", p->id, ext);
 }
 
 static void pkg_url(const DlPkg *p, const char *ext, char *out, const size_t n) {
@@ -147,7 +145,7 @@ EM_JS(void, kn_dl_probe_start, (void), {
         Module.knDlArch = "";
         uad.getHighEntropyValues(["architecture", "bitness"]).then(function (v) {
             var a = String(v.architecture || ""), b = String(v.bitness || "64");
-            Module.knDlArch = b === "64" ? (a === "arm" ? "aarch64" : a === "x86" ? "amd64" : "") : "";
+            Module.knDlArch = b === "64" ? (a === "arm" ? "arm64" : a === "x86" ? "x64" : "") : "";
         }, function () {});
     } catch (e) {}
 });
@@ -169,14 +167,14 @@ EM_JS(char *, kn_dl_probe, (void), {
         else if (/Linux|X11|CrOS/i.test(ua) || /Linux/i.test(plat)) os = "linux";
         var both = ua + " " + plat;
         if (Module.knDlArch) arch = Module.knDlArch;
-        else if (/aarch64|arm64|armv8/i.test(both)) arch = "aarch64";
+        else if (/aarch64|arm64|armv8/i.test(both)) arch = "arm64";
         else if (os === "macos") {
             var gl = (typeof GLctx !== "undefined" && GLctx) || document.createElement("canvas").getContext("webgl");
             var ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
             var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
-            if (/Apple M[0-9]/.test(r)) arch = "aarch64";
-            else if (/Intel|AMD|Radeon|NVIDIA|GeForce/i.test(r)) arch = "amd64";
-        } else if (/x86_64|x64|Win64|WOW64|amd64|i686/i.test(both)) arch = "amd64";
+            if (/Apple M[0-9]/.test(r)) arch = "arm64";
+            else if (/Intel|AMD|Radeon|NVIDIA|GeForce/i.test(r)) arch = "x64";
+        } else if (/x86_64|x64|Win64|WOW64|amd64|i686/i.test(both)) arch = "x64";
         standalone = navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ? 1 : 0;
     } catch (e) {}
     return stringToNewUTF8(os + " " + (arch || "-") + " " + app + " " + standalone);
@@ -211,7 +209,7 @@ static void detect(DlDevice *d) {
     snprintf(d->platform, sizeof(d->platform), "%s", has_marker && m.platform[0] ? m.platform : kn_update_platform_default());
     if (has_marker) snprintf(d->kind, sizeof(d->kind), "%s", m.package);
     d->os = os_of_platform(d->platform);
-    snprintf(d->arch, sizeof(d->arch), "%s", strstr(d->platform, "aarch64") ? "aarch64" : "amd64");
+    snprintf(d->arch, sizeof(d->arch), "%s", strstr(d->platform, "arm64") ? "arm64" : "x64");
 #endif
 }
 
@@ -222,17 +220,17 @@ static int recommend(const DlDevice *d, const DlPkg **out) {
         return 1;
     }
     switch (d->os) {
-        case DL_OS_WINDOWS: out[0] = pkg_find("windows-amd64"); return 1; // Windows on Arm runs x64
+        case DL_OS_WINDOWS: out[0] = pkg_find("windows-x64"); return 1; // Windows on Arm runs x64
         case DL_OS_MAC:
             if (d->arch[0]) {
-                out[0] = pkg_find(!strcmp(d->arch, "amd64") ? "macos-amd64" : "macos-aarch64");
+                out[0] = pkg_find(!strcmp(d->arch, "x64") ? "macos-x64" : "macos-arm64");
                 return 1;
             }
-            out[0] = pkg_find("macos-aarch64");
-            out[1] = pkg_find("macos-amd64");
+            out[0] = pkg_find("macos-arm64");
+            out[1] = pkg_find("macos-x64");
             return 2;
-        case DL_OS_LINUX: // a browser cannot tell the distro: the polyfilled build runs on all of them
-            out[0] = pkg_find(!strcmp(d->arch, "aarch64") ? "linux-aarch64-polyfilled" : "linux-amd64-polyfilled");
+        case DL_OS_LINUX: // a browser cannot tell the distro: the Linux archive needs glibc 2.35+ and OpenSSL 3
+            out[0] = pkg_find(!strcmp(d->arch, "arm64") ? "linux-arm64" : "linux-x64");
             return 1;
         case DL_OS_ANDROID: out[0] = pkg_find("android"); return 1;
         case DL_OS_IOS: out[0] = pkg_find("ios"); return 1;
@@ -244,13 +242,11 @@ static int recommend(const DlDevice *d, const DlPkg **out) {
 
 // A package's description in the page's language: kn.download.<id>.desc (dynamic keys, named
 // here for tools/i18n-import/i18n_lint.py, which reads the I18N(key, english) pairs anywhere):
-//   I18N("kn.download.windows-amd64.desc", "Windows 10 and 11, 64-bit")
-//   I18N("kn.download.macos-aarch64.desc", "macOS 11 or newer, Apple silicon (M1 and later)")
-//   I18N("kn.download.macos-amd64.desc", "macOS 11 or newer, Intel")
-//   I18N("kn.download.linux-amd64-polyfilled.desc", "x86_64, any distribution (glibc 2.17+)")
-//   I18N("kn.download.linux-amd64.desc", "x86_64 for current distros (glibc 2.35+, OpenSSL 3)")
-//   I18N("kn.download.linux-aarch64-polyfilled.desc", "aarch64, any distribution (glibc 2.17+)")
-//   I18N("kn.download.linux-aarch64.desc", "aarch64 for current distros (glibc 2.35+, OpenSSL 3)")
+//   I18N("kn.download.windows-x64.desc", "Windows 10 and 11, 64-bit")
+//   I18N("kn.download.macos-arm64.desc", "macOS 11 or newer, Apple silicon (M1 and later)")
+//   I18N("kn.download.macos-x64.desc", "macOS 11 or newer, Intel")
+//   I18N("kn.download.linux-x64.desc", "x86_64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)")
+//   I18N("kn.download.linux-arm64.desc", "arm64: Ubuntu 22.04+, Debian 12+, Fedora 36+ (OpenSSL 3)")
 //   I18N("kn.download.android.desc", "Android 7.0 or newer")
 //   I18N("kn.download.ios.desc", "Add Krunker Box Office to your Home Screen")
 static const char *pkg_desc(const DlPkg *p) {
@@ -260,9 +256,7 @@ static const char *pkg_desc(const DlPkg *p) {
 }
 
 static void ext_label(const DlPkg *p, const char *ext, char *out, const size_t n) {
-    if (!strcmp(ext, "deb")) snprintf(out, n, ".deb (Debian, Ubuntu)");
-    else if (!strcmp(ext, "rpm")) snprintf(out, n, ".rpm (Fedora, openSUSE)");
-    else if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.tarAnyDistro", ".tar.gz (any distro)"));
+    if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.tarAnyDistro", ".tar.gz (any distro)"));
     else snprintf(out, n, ".%s", ext);
 }
 
@@ -319,17 +313,16 @@ static void rec_howto(StrBuf *sb, const DlDevice *d, const DlOs os) {
     sb_append(sb, "<div class=\"knDlHow\">");
     switch (os) {
         case DL_OS_WINDOWS:
-            how(sb, I18N("kn.download.howWindows", "Unzip it anywhere and run {0}KrunkNative.exe{1}. The launcher downloads the game content "
+            how(sb, I18N("kn.download.howWindows", "Unzip it into a folder of its own and run {0}BoxOffice.exe{1}. The launcher downloads the game content "
                                                    "(about 1.7 GB) on the first start and keeps the client up to date."));
             break;
         case DL_OS_MAC:
-            how(sb, I18N("kn.download.howMac", "Open {0}KrunkNative.app{1}. It is not notarized yet: the first time, right-click it and "
+            how(sb, I18N("kn.download.howMac", "Open {0}BoxOffice.app{1}. It is not notarized yet: the first time, right-click it and "
                                                "choose Open. The launcher downloads the game content (about 1.7 GB) and keeps it up to date."));
             break;
         case DL_OS_LINUX:
-            how(sb, I18N("kn.download.howLinux", "Install the .deb / .rpm and start Krunker Box Office from the applications menu, or unpack the "
-                                                 ".tar.gz and run {0}./krunknative{1}. The launcher downloads the game content (about 1.7 GB) "
-                                                 "on the first start and keeps the client up to date."));
+            how(sb, I18N("kn.download.howLinux", "Unpack the .tar.gz into a folder of its own and run {0}./BoxOffice{1}. The launcher downloads the game content "
+                                                 "(about 1.7 GB) on the first start and keeps the client up to date."));
             break;
         case DL_OS_ANDROID:
             how(sb, d->app ? I18N("kn.download.howAndroidApp", "You are playing in the Krunker Box Office app: it always runs the latest game from krunk.io.")
@@ -396,10 +389,10 @@ static void strike_row(StrBuf *sb, const DlOs os, const int odd) {
                os == DL_OS_UNKNOWN ? I18N("kn.download.strike.browser", "Any browser") : os_name(os));
     if (os == DL_OS_ANDROID) {
         sb_appendf(sb, "<span class=\"knDlHint\">%s</span>", I18N("kn.download.strike.androidHint", "or Chrome: Install app"));
-        dl_link(sb, "knDlLink", DL_BASE "krunknative-strike-android.apk", ".apk");
+        dl_link(sb, "knDlLink", DL_BASE "BoxOffice-strike-android.apk", ".apk");
     } else if (os == DL_OS_IOS) {
         sb_appendf(sb, "<span class=\"knDlHint\">%s</span>", I18N("kn.download.iosHint", "Safari: Add to Home Screen"));
-        dl_link(sb, "knDlLink", DL_BASE "krunknative-strike-ios-unsigned.ipa", ".ipa");
+        dl_link(sb, "knDlLink", DL_BASE "BoxOffice-strike-ios-unsigned.ipa", ".ipa");
     } else {
         strike_page_url(url, sizeof(url));
         dl_link(sb, "knDlLink", url, I18N("kn.download.strike.play", "Play Krunker Strike"));
