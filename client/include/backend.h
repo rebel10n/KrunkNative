@@ -84,6 +84,20 @@ int backend_http_get_parallel(const char *url, int timeout_ms, BackendHttpFn fn,
 void backend_social_reconnect(void);
 #endif
 
+// A GET of a URL on another host with a read timeout (krunker.io's reads, krunker_kio_routes.h). Native: the external
+// worker above, with its timeout. Web: backend_http_request, i.e. fetch() with no timeout of its own; the browser's
+// CORS rules apply (these reads send no credentials and no custom header, so the host must answer
+// Access-Control-Allow-Origin for the page's origin), and a read the browser blocks fails with status 0, the caller's
+// failure path. Same callback rules as backend_http_get.
+static inline int backend_http_get_remote(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
+#ifdef __EMSCRIPTEN__
+    (void) timeout_ms;
+    return backend_http_request("GET", url, NULL, fn, user);
+#else
+    return backend_http_get_external(url, timeout_ms, fn, user);
+#endif
+}
+
 // Main thread, once per frame: delivers HTTP completions and social frames.
 void backend_poll(void);
 

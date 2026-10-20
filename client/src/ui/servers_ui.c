@@ -3214,7 +3214,7 @@ char *servers_window_gen(const int id, const char **header) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // v10 loadData (v10:211170): social.krunker.io's count
         char social[256], url[320];
         krunker_service_url(KRUNKER_SVC_SOCIAL, "", social, sizeof(social));
-        if (krunker_kio_player_count_url(url, sizeof(url), social)) backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, NULL);
+        if (krunker_kio_player_count_url(url, sizeof(url), social)) backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, NULL);
     } else {
         backend_http_get("/api/player-count", on_player_count, NULL);
     }
@@ -3622,7 +3622,7 @@ static int games_request(const int tab) {
         if (acc && acc->id > 0) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
         sent = krunker_kio_webhook_url(url, sizeof(url), base, "maps/list", query) != 0 &&
-               backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_maps, (void *) (intptr_t) tab);
+               backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_maps, (void *) (intptr_t) tab);
     } else {
         if (acc) snprintf(query + n, sizeof(query) - (size_t) n, "&accountId=%d", acc->id);
         snprintf(path, sizeof(path), "/api/maps?%s", query);
@@ -4118,7 +4118,7 @@ static void games_search(const HtmlArg *args, const int argc) {
             if (krunker_kio_search_query(query, sizeof(query), q, g_games_search_cat) &&
                 krunker_kio_webhook_url(url, sizeof(url), base, "maps/search", query)) {
                 html_dom_set_html(out, "Loading...");
-                if (backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_search, (void *) (uintptr_t) g_search_gen)) return;
+                if (backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_search, (void *) (uintptr_t) g_search_gen)) return;
             }
         }
     } else if (backend_available() == 1) {

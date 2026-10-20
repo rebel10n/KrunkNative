@@ -656,7 +656,7 @@ static void streams_fetch(void) {
         // krunker.io: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there)
         char base[256], url[320];
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
-        sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
+        sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
     } else if (source == MENU_SRC_KN) {
         sent = backend_http_get("/streams/top?cb=2", streams_body, NULL); // Box Office: the brain's (streams.c)
     }

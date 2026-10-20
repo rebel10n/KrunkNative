@@ -3682,7 +3682,7 @@ static void hub_brain_api(const cJSON *frame) {
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
         int sent = 0;
         if (group && copy && krunker_kio_webhook_url(url, sizeof(url), base, group, query))
-            sent = backend_http_get_external(url, KRUNKER_KIO_READ_TIMEOUT_MS, hub_brain_api_done, copy) != 0;
+            sent = backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, hub_brain_api_done, copy) != 0;
         if (!sent) free(copy);
         return;
     }
