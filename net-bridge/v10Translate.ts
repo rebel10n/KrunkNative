@@ -69,6 +69,7 @@ export const V10_IN = Object.freeze({
   UPDATE_TIMER: "t",
   GAME_STATE_CHANGED: "gsc",
   ADD_PLAYERS: "0",
+  UPDATE_LEADERS: "7",
   START_GAME: "start",
   GAME_ANNOUNCEMENT: "gameAnnouncement",
   UPDATE_FLAG: "ufl",
@@ -215,6 +216,12 @@ export const NATIVE_MORE = Object.freeze({
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
   SPAWN: 4, // NET_PACKET_SPAWN: a player's state at spawn (NetSpawnPacket, protocol 1.4.3 layout)
+  LEADERBOARD: 14, // NET_PACKET_LEADERBOARD: the top 16 rows, NetLeaderboardPacket
+  LEADER_STATS: 240, // NET_PACKET_LEADER_STATS: the same board right after LEADERBOARD, with the mode's leaderStats values
+  AI_ADD: 90, // NET_PACKET_AI_ADD: the v3 encoding of a bot; a protocol 1.3+ peer gets AI_ADD_V7 as well (ai.c 2124-2131)
+  AI_SYNC: 91, // NET_PACKET_AI_SYNC: the v3 encoding of the bots' positions; a 1.3+ peer gets AI_SYNC_V7 (161)
+  AI_SYNC_V7: 161, // NET_PACKET_AI_SYNC_V7: the v7 positions (stride 9, v10's "ai" entries)
+  AI_ADD_V7: 162, // NET_PACKET_AI_ADD_V7: the v7 record of a bot (AI.getData v7), the one v10's "aai" record is built from
   SKINS: 35, // NET_PACKET_SKINS: the weapon and melee skins, right before the SPAWN (NetSkinsPacket)
   SOCIAL_V7: 249, // NET_PACKET_SOCIAL_V7: the v7 chat / voice / spray ids this server takes (a capability notice)
   PING_RESULT: 19, // NET_PACKET_PING_RESULT: the smoothed ping, the answer to the bridge's PONG (v10 "pir" is a no-op)
@@ -535,6 +542,47 @@ export function buildPlayerAdd(spawn: NativeSpawn, skins: NativeSkins | undefine
 // handler reads (v10.js 218695): gameTimer, team, spectating, challMode, moveLock, 1, null, classIndex.
 export function buildStartGame(spawn: NativeSpawn, gameTimer: number, challMode: number): unknown[] {
   return [gameTimer, spawn.team, 0, challMode, 0, 1, null, spawn.classIndex];
+}
+
+// ---- LEADERBOARD and AI_ADD
+
+// NetLeaderboardPacket: uint8 count, then 16 rows of int32 uid, score, kills, deaths (257 bytes).
+// v10's "7" (UPDATE_LEADERS, v10.js 173566) is a flat list of [sid, ...mode.leaderStats] per row; the
+// client's handler reads rows of leaderStats.length + 1 (v10.js 220483). Free for All's leaderStats is
+// ["score", "kills", "deaths"] (v10.js 105417, mode id "ffa"), the same fields and order as the row, and the
+// v10 transforms ("downs", "points") are for other keys, so the values pass through. KN's FFA mode id is 0.
+const LEADERBOARD_SIZE = 1 + 16 * 16;
+const MODE_ID_FFA = 0;
+export function mapLeaderboard(p: Buffer, modeIndex: number): Mapped {
+  if (p.length !== LEADERBOARD_SIZE) return { messages: [], stop: "malformed" };
+  if (modeIndex !== MODE_ID_FFA) return { messages: [], stop: "leaderStats of this mode are not verified (only Free for All)" };
+  const rows: number[] = [];
+  const count = Math.min(p[0], 16);
+  for (let i = 0; i < count; i++) {
+    const at = 1 + i * 16;
+    rows.push(p.readInt32LE(at), p.readInt32LE(at + 4), p.readInt32LE(at + 8), p.readInt32LE(at + 12));
+  }
+  return { messages: [[V10_IN.UPDATE_LEADERS, [rows]]] };
+}
+
+// NetLeaderStatsPacket: uint8 count, uint8 stat_count, int32 uid[16], int32 values[16][4] (322 bytes). After a
+// LEADERBOARD it repeats the rows; for free for all (3 stats) the rows are the ones already sent as "7", so the
+// packet is consumed when they match, and stops when they differ.
+const LEADER_STATS_SIZE = 2 + 16 * 4 + 16 * 4 * 4;
+export function checkLeaderStats(p: Buffer, rows: number[] | null): string | null {
+  if (p.length !== LEADER_STATS_SIZE) return "malformed";
+  if (!rows) return "no LEADERBOARD before it";
+  const count = Math.min(p[0], 16);
+  if (p[1] !== 3) return "leaderStats of this mode are not verified (only Free for All)";
+  if (rows.length !== count * 4) return "the rows differ from the LEADERBOARD";
+  for (let i = 0; i < count; i++) {
+    const uid = p.readInt32LE(2 + i * 4);
+    if (uid !== rows[i * 4]) return "the rows differ from the LEADERBOARD";
+    for (let k = 0; k < 3; k++) {
+      if (p.readInt32LE(2 + 16 * 4 + (i * 4 + k) * 4) !== rows[i * 4 + 1 + k]) return "the values differ from the LEADERBOARD";
+    }
+  }
+  return null;
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };

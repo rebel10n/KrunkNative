@@ -210,6 +210,12 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.strictEqual(T.buildPlayerAdd(mine!, undefined, "SOCKET")[0], "SOCKET"); // our id is the socket id
   assert.deepStrictEqual(T.buildStartGame(mine!, 300, 1), [300, 0, 0, 1, 0, 1, null, 4]);
   assert.strictEqual(T.parseSpawn(Buffer.alloc(78)), null);
+  // LEADERBOARD: the free-for-all rows, and a stop for another mode
+  const board = Buffer.alloc(257);
+  board[0] = 2;
+  [1, 40, 3, 1, 2, 10, 0, 4].forEach((v, i) => board.writeInt32LE(v, 1 + i * 4));
+  assert.deepStrictEqual(T.mapLeaderboard(board, 0).messages, [["7", [[1, 40, 3, 1, 2, 10, 0, 4]]]]);
+  assert.match(T.mapLeaderboard(board, 1).stop || "", /Free for All/);
 }
 
 async function main(): Promise<void> {
@@ -306,7 +312,7 @@ async function main(): Promise<void> {
   init[1] = 4;
   init[2] = 2;
   init.writeInt32LE(3, 3); // map index
-  init.writeInt32LE(1, 7); // mode index
+  init.writeInt32LE(0, 7); // mode index: Free for All
   init.writeUInt16LE(30, 11); // tick rate
   init.writeInt32LE(1, 13); // client id
   init[17] = 3; // ruleset
@@ -337,7 +343,7 @@ async function main(): Promise<void> {
   const args = initMsg.args;
   assert.strictEqual(args.length, 20); // the v10 server's INIT_GAME list (v10.js 222270)
   assert.strictEqual(args[0], 3); // mapIndex
-  assert.strictEqual(args[1], 1); // modeIndex
+  assert.strictEqual(args[1], 0); // modeIndex
   assert.deepStrictEqual(args[6], settings); // config: the GAME_CONFIG settings
   assert.strictEqual(args[9] && (args[9] as { data: unknown }).data, mapJson); // customMapData.data: the map JSON text
   assert.deepStrictEqual(args[12], { snf: 10, tf: 30, sf: 1 }); // networkData
@@ -439,6 +445,35 @@ async function main(): Promise<void> {
   assert.strictEqual((addMine.args[0] as unknown[])[0], socketIo.args[0]); // our id is the io-init socket id
   const start = await waitFor(() => clientMessages.find((m) => m.label === "start"), "start");
   assert.deepStrictEqual(start.args, [300, 0, 0, 0, 0, 1, null, 4]); // gameTimer from the last t, our class
+
+  // the leaderboard (14, free for all: the rows are [sid, score, kills, deaths]) and a bot (AI_ADD 90 -> aai)
+  const board = Buffer.alloc(257);
+  board[0] = 1;
+  [1, 12, 2, 3].forEach((v, i) => board.writeInt32LE(v, 1 + i * 4));
+  native.write(nativeFrame(14, board));
+  const rows = await waitFor(() => clientMessages.find((m) => m.label === "7"), "7");
+  assert.deepStrictEqual(rows.args, [[1, 12, 2, 3]]);
+  // the LEADER_STATS that repeats the board (uid, then 3 values per row) is consumed
+  const stats = Buffer.alloc(322);
+  stats[0] = 1;
+  stats[1] = 3;
+  stats.writeInt32LE(1, 2);
+  [12, 2, 3].forEach((v, i) => stats.writeInt32LE(v, 66 + i * 4));
+  native.write(nativeFrame(240, stats));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("LEADER_STATS"), undefined);
+  // the v3 bot add (90) is consumed: no aai, and no stop (the v7 record, 162, is the one for a v7 peer)
+  const bot = Buffer.alloc(101);
+  bot.writeInt32LE(5, 0);
+  bot.writeInt32LE(0, 4);
+  bot.write("Bot", 8, "utf8");
+  native.write(nativeFrame(90, bot));
+  await sleep(50);
+  assert.strictEqual(clientMessages.some((m) => m.label === "aai"), false);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("AI_ADD"), undefined);
+  native.write(nativeFrame(91, Buffer.from([1, 0]))); // the v3 sync with no entries: consumed as well
+  await sleep(50);
+  assert.strictEqual(clientMessages.some((m) => m.label === "ai"), false);
 
   // the mode sync (149) is the next packet with no translation yet: the translation stops there
   native.write(nativeFrame(149, Buffer.alloc(4 * 4 + 4 + 1 + 4 * 4 + 4 + 4 + 4 + 4)));

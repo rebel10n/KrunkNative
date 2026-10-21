@@ -18,7 +18,9 @@
 //   native MODE_STATE (40), OBJECT_STATE (100)         -> ts, lv, lock, gmsg; do, ro, gte, bnk, mo, mf
 //   native MODE_STATE flags (in play)                  -> ufl (uid, x, y, z, carrier) and ufi (team lines)
 //   native SKINS (35), SPAWN (4)                        -> kept, then ADD_PLAYERS "0" (+ start for us)
-//   native LEADERBOARD (14), AI_ADD (90)               -> not translated yet: the session stops here
+//   native LEADERBOARD (14), LEADER_STATS (240)        -> "7" rows (free for all); the repeat is consumed
+//   native AI_ADD (90)                                  -> consumed: the v7 record (162) is the one for v7 peers
+//   native AI_ADD_V7 (162)                              -> not translated yet: the session stops here
 //   client sends en (ENTER_GAME)                       -> ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
@@ -56,6 +58,10 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.MODE_STATE]: "MODE_STATE",
   [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
   [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
+  [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
+  [T.NATIVE_MORE.LEADER_STATS]: "LEADER_STATS",
+  [T.NATIVE_MORE.AI_ADD_V7]: "AI_ADD_V7",
+  [T.NATIVE_MORE.AI_SYNC_V7]: "AI_SYNC_V7",
 });
 
 type V10Session = {
@@ -74,6 +80,8 @@ type V10Session = {
   config: Record<string, unknown>; // init argument 6
   configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
+  modeIndex: number; // the INIT's mode (0 Free for All)
+  leaderRows: number[] | null; // the rows of the last LEADERBOARD as sent ("7"), for the LEADER_STATS that repeats them
   socketId: string; // io-init's id: our own player's id in the add record
   skinsByUid: Map<number, T.NativeSkins>; // SKINS, kept for the SPAWN that follows
   gameTimer: number; // the last TIMER seconds (the start message's gameTimer)
@@ -200,6 +208,7 @@ function emitInit(session: V10Session): void {
   session.pendingInit = null;
   sendWs(session, T.V10_IN.INIT_GAME, ...T.buildInitArgs(init, session.mapText, session.config, session.networkData, session.ranked));
   session.initSent = true;
+  session.modeIndex = init.modeIndex;
   for (const held of session.queue.splice(0)) handleNativePacket(session, held.type, held.payload);
 }
 
@@ -254,6 +263,23 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   }
   if (session.initSent && type === T.NATIVE_MORE.PING_RESULT) return; // v10's "pir" handler does nothing
   if (session.initSent && type === T.NATIVE_MORE.SOCIAL_V7) return; // a v7 capability notice: the bridge sends chat as CHAT_SEND
+  if (session.initSent && type === T.NATIVE_MORE.LEADERBOARD) {
+    const mapped = T.mapLeaderboard(payload, session.modeIndex);
+    if (mapped.stop) return stopAt(session, "LEADERBOARD", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    session.leaderRows = mapped.messages.length ? (mapped.messages[0][1] as [number[]])[0] : null;
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.LEADER_STATS) {
+    const stop = T.checkLeaderStats(payload, session.leaderRows);
+    if (stop) return stopAt(session, "LEADER_STATS", stop);
+    return; // the rows it repeats were sent as "7"
+  }
+  // AI_ADD (90) is the v3 encoding of a bot. A protocol 1.3+ peer gets AI_ADD_V7 (162) as well, with the full
+  // record (server/src/ai.c 2124-2131 sends both; game_ai_packet_for_peer keeps one), so the v3 one is consumed:
+  // translating both would add every bot twice.
+  if (session.initSent && type === T.NATIVE_MORE.AI_ADD) return;
+  if (session.initSent && type === T.NATIVE_MORE.AI_SYNC) return; // the v3 sync: the v7 one (161) is the one for a v7 peer
   // SKINS come right before the SPAWN they belong to: kept for it, nothing sent
   if (session.initSent && type === T.NATIVE_MORE.SKINS) {
     const skins = T.parseSkins(payload);
@@ -427,6 +453,8 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     config: {},
     configText: null,
     networkReceived: false,
+    modeIndex: 0,
+    leaderRows: null,
     socketId: makeSocketId(12),
     skinsByUid: new Map(),
     gameTimer: 0,
