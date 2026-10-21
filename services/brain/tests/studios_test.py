@@ -145,7 +145,11 @@ async def scenario(port):
     stamp = str(int(time.time()) % 100000)
     anon = await Sock.open(port)
     st, data, err = await anon.gapi("GET", "/studios/mine")
-    check(st == 401 and code(err) == "UNAUTHORIZED", "a guest gets 401 UNAUTHORIZED", (st, err))
+    check(st == 200 and data == [] and err is None, "a guest gets the empty studio list (the Studios window's read)", (st, data, err))
+    st, data, err = await anon.gapi("GET", "/studios/invites")
+    check(st == 200 and data == [] and err is None, "a guest gets the empty invite list", (st, data, err))
+    st, data, err = await anon.gapi("POST", "/studios", {"name": "GuestStudio"})
+    check(st == 401 and code(err) == "UNAUTHORIZED", "a guest may not create a studio: 401 UNAUTHORIZED", (st, err))
     await anon.close()
 
     own, mem, out, ext = [await Sock.open(port) for _ in range(4)]
