@@ -96,6 +96,25 @@ case "$PKG" in
 esac
 [ -x "$root/runtime/client_bin" ] || { RC=1; result install=fail "(no $root/runtime/client_bin)"; }
 
+# the shared libraries: every soname the package leaves to the system (runtime/host-libs.txt) must be
+# provided by the packages installed above, and every library the bundle's binaries need must resolve.
+# 2026-10-20: a .deb whose package list lacked libxi6 failed with "libXi.so.6: cannot open shared object
+# file" at start on trixie and 22.04; this names the missing soname (and the bundle gap) instead
+[ -f "$root/runtime/host-libs.txt" ] || { RC=1; result install=ok version=fail "(no runtime/host-libs.txt)"; }
+provided="$(ldconfig -p | sed -n 's/^[[:space:]]*\([^[:space:]]*\) (.*/\1/p' | sort -u)"
+gaps=""
+while read -r so; do
+    [ -n "$so" ] || continue
+    case "$so" in ld-linux*) continue ;; esac # the loader is the image's own
+    grep -qxF "$so" <<< "$provided" || gaps="$gaps $so[host-libs.txt]"
+done < "$root/runtime/host-libs.txt"
+for b in "$root/runtime/client_bin" "$root/runtime/server_bin" "$root/runtime/libexec/webkit2gtk-4.1/WebKitWebProcess"; do
+    [ -f "$b" ] || continue
+    gaps="$gaps $(env -u LD_LIBRARY_PATH ldd "$b" | sed -n 's/^[[:space:]]*\([^[:space:]]*\) => not found.*/\1/p' | sed "s/\$/[$(basename "$b")]/")"
+done
+gaps="$(tr ' ' '\n' <<< "$gaps" | grep . | sort -u | paste -sd' ' -)"
+if [ -n "$gaps" ]; then RC=1; result install=ok version=fail "(missing shared libraries: $gaps)"; fi
+
 v="$("$root/runtime/client_bin" --version)" && "$root/runtime/server_bin" --version || { RC=1; result install=ok version=fail; }
 "$root/runtime/client_bin" --voice-info | grep -q '^opus=libopus ' || { RC=1; result install=ok version=fail "(no Opus: voice chat)"; }
 # the launcher (the entry point): --version needs no display or network
