@@ -61,6 +61,9 @@ sys.path.insert(0, os.path.join(REPO, "server", "tests"))
 import kn_proto  # noqa: E402  (free_ports)
 
 KN_UPDATES = os.path.join(REPO, "tools", "release", "kn-updates.py")
+# the game content the clients run with: a worktree without the ignored asset tree (css/, models/, ...)
+# points KRUNKNATIVE_ASSETS_DIR at a checkout that has it
+ASSETS_SRC = os.path.realpath(os.environ.get("KRUNKNATIVE_ASSETS_DIR") or os.path.join(REPO, "assets"))
 FAILS = []
 
 
@@ -214,7 +217,7 @@ def private_assets(tmp):
     root = os.path.join(tmp, "auto-assets")
     if not os.path.isdir(root):
         os.makedirs(root)
-        real = os.path.realpath(os.path.join(REPO, "assets"))
+        real = ASSETS_SRC
         for entry in os.listdir(real):
             os.symlink(os.path.realpath(os.path.join(real, entry)), os.path.join(root, entry))
     return root
@@ -581,7 +584,7 @@ def main():
             script = os.path.join(tmp, "update-now.script")
             write(script, "0 play\n2500 down ESC\n2550 up ESC\n6000 con update now\n20000 quit\n")
             cenv = dict(env)
-            cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": os.path.join(REPO, "assets"),
+            cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS_SRC,
                          "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"), "KRUNKNATIVE_LAUNCHER": fake,
                          "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_NO_BROWSER": "1",
                          "KRUNKNATIVE_LOCAL_BUILD": "0"})  # a published build: a dev build's flag would hide the box

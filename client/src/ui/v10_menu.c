@@ -54,6 +54,7 @@
 #include <krunker_account.h>
 #include <krunker_net.h>
 #include <krunker_kio_routes.h> // the streams' krunker.io URL (krunker_kio_routes.c)
+#include <krunker_ranked.h>     // the streams' Bearer on a signed-in krunker.io account (v10's API client interceptor)
 #include <menu_sources.h>    // Popular Now's Server Type gate and the streams' host
 #include <seek_prefs.h>      // seek_prefs_servers: the Server Type
 #include <v10_wallet.h>       // the header's Wallet: the Wallet and Inventory modal (v10_wallet.c)
@@ -595,15 +596,24 @@ static void streams_body(void *user, const int status, const char *body, size_t 
     cJSON_Delete(res);
 }
 
+// krunker.io's answer ({data: {streams}} parsed by krunker_ranked_request: the data client's envelope)
+static void streams_ranked_body(void *user, const int status, const cJSON *body) {
+    (void) user;
+    streams_apply(status == 200 ? cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(body, "data"), "streams") : NULL);
+}
+
 static void streams_fetch(void) {
     if (L.override) return;
     int sent = 0;
     const unsigned source = menu_streams_source(seek_prefs_servers(), krunker_active(), krunker_account_signed_in(), backend_available());
     if (source == MENU_SRC_KIO) {
-        // krunker.io: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there)
+        // krunker.io: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there). Its
+        // API client's interceptor sends the signed-in account's Bearer with every request (v10:27595 / krunker_account.c);
+        // a guest's goes without (a public read): krunker_ranked_request carries the token, the guest's read is plain
+        sent = krunker_account_signed_in() && krunker_ranked_request(KRUNKER_RANKED_API, "GET", "/streams/top?cb=2", NULL, streams_ranked_body, NULL);
         char base[256], url[320];
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
-        sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
+        if (!sent) sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);
     } else if (source == MENU_SRC_KN) {
         sent = backend_http_get("/streams/top?cb=2", streams_body, NULL); // Box Office: the brain's (streams.c)
     }

@@ -1553,7 +1553,11 @@ def sc_server_list():
 def sc_comp():
     """A comp lobby (server_bin gameserver.host_type comp): its menu (#mMenuHolComp, v7 f1904 at
     every INIT) instead of the default one, then offline (no comp: the default menu again)."""
-    server, port = start_server("comp", ["--gameserver.host_type=comp"])
+    # a server.cfg, not --gameserver.host_type=comp: with --cfg none (start_server) the CLI overrides are not merged
+    cfg = os.path.join(WORK, "comp-server.cfg")
+    with open(cfg, "w") as f:
+        json.dump({"gameserver": {"host_type": "comp"}}, f)
+    server, port = start_server("comp", ["--cfg", cfg])
     try:
         run_client("comp", ["--connect", f"127.0.0.1:{port}"], """
             0 menu
