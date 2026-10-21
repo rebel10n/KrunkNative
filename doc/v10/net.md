@@ -265,7 +265,7 @@ structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have
 The `SYNC_PLAYER` controlled-entity tail is not an EXT: it extends the existing state packet the
 usual way (a longer form for 1.4 peers).
 
-## 8. Protocol 1.4.3: the flag uid and the active bit (NetModeFlag)
+## 8. Protocol 1.4.3 and 1.4.4: the flag uid, the zone object id (NetModeFlag, NetDomZoneState)
 
 `NetModeFlag` (shared/include/shared.h) carries `int32 uid` (the flag's map object id, the index
 NET_OBJECT packets use; v10's `ufl` uid) and `uint8 active` (ModeFlag.active: in play for this
@@ -275,4 +275,10 @@ patch). A 1.4.2 peer reads the old layout, so a KN client and server must come f
 The server takes the uid from the flag's raw map record (Object.raw, the same record the mode
 loader reads), not from the record's position, and the official-server link (client/src/net/krunker_link.c)
 sends its own v10 uids with active set.
+
+Protocol 1.4.4 (NET_PROTOCOL_PATCH 4): `NetDomZoneState` (NET_PACKET_DOM_UPDATE, 142) carries `int32 object_id`,
+the zone's map object id, read from the zone's raw map record like the flag's. The zone's `uid` stays the
+dom_zones index the client mirrors. The same rules apply: the packet has no version field, and a KN client and
+server must come from one build. The bridge (`net-bridge/v10Translate.ts`) sends `uct` with each zone's object id as
+v10's uid (`updateDomZone` matches the zone by uid, `v10.js` 188544).
 

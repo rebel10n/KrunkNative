@@ -44,6 +44,7 @@ static void dom_entry(NetDomZoneState *z, const KrunkerValue *uid, const Krunker
                       const KrunkerValue *last, const KrunkerValue *on, const KrunkerValue *mlt) {
     memset(z, 0, sizeof(*z));
     z->uid = (int32_t) num(uid, -1);
+    z->object_id = z->uid; // the official link's zones are v10's uids (its own numbering, no KN map object)
     z->captured_by = (int32_t) num(by, 0);
     z->capture_t = (float) num(t, 0);
     z->last_team_on = (int32_t) num(last, 0);

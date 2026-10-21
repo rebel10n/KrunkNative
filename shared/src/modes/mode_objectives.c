@@ -91,6 +91,7 @@ void mode_load_objects(Game *game) {
                 if (mode->dom_zone_count < MODE_MAX_DOM_ZONES) {
                     ModeDomZone *zone = &mode->dom_zones[mode->dom_zone_count++];
                     memset(zone, 0, sizeof(*zone));
+                    zone->object_id = mode_object_id(game, object);
                     zone->position = (vec3) {position.x, position.y + scale.y * 0.5f, position.z};
                     zone->half = (vec3) {scale.x * 0.5f, scale.y * 0.5f, scale.z * 0.5f};
                     zone->mlt = 1.0f;

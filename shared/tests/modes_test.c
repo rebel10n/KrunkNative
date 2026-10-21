@@ -466,6 +466,34 @@ static void test_ctf(Game *game) {
     CHECK(end_result_for(red->uid) == 1 && end_result_for(blue->uid) == 0, "more captures win");
 }
 
+void mode_send_dom_update(Game *game, const int *zones, const int count, const int uid); // mode_net.c
+// Domination zones: each zone is its map object (the id NET_OBJECT packets use), and the DOM_UPDATE to a joiner
+// carries that id (protocol 1.4.4).
+static void test_dom_zone_objects(Game *game) {
+    printf("Running domination zone object id test...\n");
+    start_mode_on(game, MODE_ID_DOM, 1);
+    GameMode *mode = game->mode;
+    int ok = mode->dom_zone_count > 0;
+    for (int z = 0; z < mode->dom_zone_count; z++) {
+        const int id = mode->dom_zones[z].object_id;
+        ok = ok && id >= 0 && (size_t) id < game->map->object_count && game->map->objects[id] && game->map->objects[id]->prefab == PREFAB_DOMINATION_ZONE;
+    }
+    CHECK(ok, "each domination zone is its map object (%d zones)", mode->dom_zone_count);
+    int zones[MODE_MAX_DOM_ZONES];
+    for (int z = 0; z < mode->dom_zone_count && z < MODE_MAX_DOM_ZONES; z++) zones[z] = z;
+    g_sent_count = 0;
+    mode_send_dom_update(game, zones, mode->dom_zone_count, 1);
+    const SentPacket *sent = last_sent(NET_PACKET_DOM_UPDATE, 1);
+    CHECK(sent && sent->length == sizeof(NetDomUpdatePacket), "DOM_UPDATE to the joiner");
+    if (sent) {
+        NetDomUpdatePacket update;
+        memcpy(&update, sent->payload, sizeof(update));
+        int same = update.count == mode->dom_zone_count;
+        for (int z = 0; z < update.count && z < mode->dom_zone_count; z++) same = same && update.zones[z].object_id == mode->dom_zones[z].object_id;
+        CHECK(same, "the DOM_UPDATE carries each zone's map object id (%d zones)", update.count);
+    }
+}
+
 static void test_kc(Game *game) {
     printf("Running Kill Confirmed test...\n");
     start_mode(game, MODE_ID_KC);
@@ -1678,6 +1706,7 @@ int main(void) {
     test_point(&game);
     test_king(&game);
     test_ctf(&game);
+    test_dom_zone_objects(&game);
     test_kc(&game);
     test_hide(&game);
     test_infect(&game);

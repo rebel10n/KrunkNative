@@ -2599,7 +2599,9 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // A missing patch byte (2-byte HELLO) reads as 0.
 // Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
 // any non-zero fists as a fists kill.
-#define NET_PROTOCOL_PATCH 3
+#define NET_PROTOCOL_PATCH 4
+// Patch 4: NetDomZoneState carries the zone's map object id (NET_PACKET_DOM_UPDATE). Like patch 3 this is a
+// layout change for a KN client and server built together; the packet has no version field of its own.
 // Patch 3: NetModeFlag carries the flag's map object id and its active bit (NET_PACKET_MODE_STATE and
 // NET_PACKET_FLAG). The packets have no version field of their own: the HELLO / INIT patch marks it.
 #define NET_PROTOCOL_PATCH_KILL_NUKE 2
@@ -3508,6 +3510,7 @@ typedef struct {
     uint8_t teams_on_count;
     int8_t teams_on[MODE_TEAMS];
     float mlt;                  // capture speed
+    int32_t object_id;          // the zone's map object id (the NET_OBJECT uid; v10 updateDomZone's uid), -1 none (protocol 1.4.4)
 } NetDomZoneState;
 
 typedef struct {

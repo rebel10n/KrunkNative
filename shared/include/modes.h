@@ -384,6 +384,7 @@ typedef struct {
     int teams_on_count;
     int on_point;             // onPoint.length: players of the single team on it
     float mlt;                // capture speed
+    int object_id;            // the zone's map object id (the NET_OBJECT uid, v10's uid), -1 none
 } ModeDomZone;
 
 // game.map.manager.spawnables (medals.js getData)

@@ -61,6 +61,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
   [T.NATIVE_MORE.LEADER_STATS]: "LEADER_STATS",
   [T.NATIVE_MORE.AI_ADD_V7]: "AI_ADD_V7",
+  [T.NATIVE_MORE.DOM_UPDATE]: "DOM_UPDATE",
   [T.NATIVE_MORE.AI_SYNC_V7]: "AI_SYNC_V7",
 });
 
@@ -82,6 +83,7 @@ type V10Session = {
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
   modeIndex: number; // the INIT's mode (0 Free for All)
   objectiveWeapon: boolean; // MODE_STATE had a weapon objective (wep), so MODE_SYNC_V7 sends no obj
+  aiSync: unknown[] | null; // the bot positions of the sync being assembled (AI_SYNC_V7 chunks)
   leaderRows: number[] | null; // the rows of the last LEADERBOARD as sent ("7"), for the LEADER_STATS that repeats them
   socketId: string; // io-init's id: our own player's id in the add record
   skinsByUid: Map<number, T.NativeSkins>; // SKINS, kept for the SPAWN that follows
@@ -213,6 +215,14 @@ function emitInit(session: V10Session): void {
   for (const held of session.queue.splice(0)) handleNativePacket(session, held.type, held.payload);
 }
 
+// The bot sync: the v10 "ai" list of every bot in the sync (an empty sync is 0, as v10 sends it).
+function flushBotSync(session: V10Session): void {
+  if (!session.aiSync) return;
+  const list = session.aiSync;
+  session.aiSync = null;
+  sendWs(session, T.V10_IN.SYNC_ALL_AI, list.length ? list : 0);
+}
+
 function handleNativePacket(session: V10Session, type: number, payload: Buffer): void {
   if (type === T.NATIVE.PING) {
     writeNative(session, T.NATIVE.PONG, payload);
@@ -280,6 +290,26 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   // AI_ADD (90) is the v3 encoding of a bot. A protocol 1.3+ peer gets AI_ADD_V7 (162) as well, with the full
   // record (server/src/ai.c 2124-2131 sends both; game_ai_packet_for_peer keeps one), so the v3 one is consumed:
   // translating both would add every bot twice.
+  if (session.initSent && type === T.NATIVE_MORE.DOM_UPDATE) {
+    const mapped = T.mapDomUpdate(payload);
+    if (mapped.stop) return stopAt(session, "DOM_UPDATE", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.AI_SYNC_V7) {
+    const chunk = T.parseBotSyncChunk(payload);
+    if (!chunk) return stopAt(session, "AI_SYNC_V7", "malformed");
+    // a sync starts with first; the previous one is complete by then. It is sent when a chunk comes short
+    // (under 16 bots) or when the next sync starts: a full last chunk does not say it is the last.
+    if (chunk.first) flushBotSync(session);
+    if (!session.aiSync) {
+      if (!chunk.first) return stopAt(session, "AI_SYNC_V7", "a continuation without its first chunk");
+      session.aiSync = [];
+    }
+    session.aiSync.push(...chunk.entries);
+    if (chunk.count < 16) flushBotSync(session);
+    return;
+  }
   if (session.initSent && type === T.NATIVE_MORE.AI_ADD_V7) {
     const mapped = T.mapBotAdd(payload);
     if (mapped.stop) return stopAt(session, "AI_ADD_V7", mapped.stop);
@@ -469,6 +499,7 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     networkReceived: false,
     modeIndex: 0,
     leaderRows: null,
+    aiSync: null,
     objectiveWeapon: false,
     socketId: makeSocketId(12),
     skinsByUid: new Map(),

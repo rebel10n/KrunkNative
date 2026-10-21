@@ -232,6 +232,7 @@ void mode_send_dom_update(Game *game, const int *zones, const int count, const i
         out->teams_on_count = (uint8_t) zone->teams_on_count;
         for (int t = 0; t < zone->teams_on_count && t < MODE_TEAMS; t++) out->teams_on[t] = (int8_t) zone->teams_on[t];
         out->mlt = zone->mlt;
+        out->object_id = zone->object_id;
     }
     if (packet.count) game_send(game, uid, NET_PACKET_DOM_UPDATE, &packet, sizeof(packet));
 }

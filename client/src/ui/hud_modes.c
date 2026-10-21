@@ -296,6 +296,7 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
                 zone->captured_by = in->captured_by;
                 zone->capture_t = in->capture_t / 1000.0f;
                 zone->last_team_on = in->last_team_on;
+                zone->object_id = in->object_id; // the map object id, kept with the zone
                 zone->teams_on_count = in->teams_on_count < MODE_TEAMS ? in->teams_on_count : MODE_TEAMS;
                 for (int t = 0; t < zone->teams_on_count; t++) zone->teams_on[t] = in->teams_on[t];
                 zone->mlt = in->mlt > 0.0f ? in->mlt : 1.0f;

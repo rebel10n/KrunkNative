@@ -154,6 +154,23 @@ function spawnBuffer(o: TestSpawn): Buffer {
   [o.head, o.back, o.shoe, o.pet, o.wrist, o.charms[0], o.charms[1], o.playerCard, -1].forEach((v, i) => b.writeInt32LE(v, 114 + i * 4));
   return b;
 }
+// AI_SYNC_V7 (161): one chunk of bots, [sid, x, y, z, xD, yD, health, didMov, team] each (protocol 1.3 layout).
+function botSyncBuffer(first: boolean, bots: number[][]): Buffer {
+  const b = Buffer.alloc(2 + 31 * bots.length);
+  b[0] = first ? 1 : 0;
+  b[1] = bots.length;
+  bots.forEach((v, i) => {
+    const at = 2 + i * 31;
+    b.writeInt32LE(v[0], at);
+    [v[1], v[2], v[3]].forEach((x, k) => b.writeFloatLE(x, at + 4 + k * 4));
+    b.writeFloatLE(v[4], at + 16);
+    b.writeFloatLE(v[5], at + 20);
+    b.writeInt32LE(v[6], at + 24);
+    b[at + 28] = v[7];
+    b.writeInt16LE(v[8], at + 29);
+  });
+  return b;
+}
 function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   const b = Buffer.alloc(9);
   b.writeInt32LE(uid, 0);
@@ -240,6 +257,27 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], objective: 3, objectiveMs: 4000 }), false).messages, [["obj", [3, 4000, true]]]);
   assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], objective: 3, objectiveMs: 4000 }), true).messages, []); // the weapon: wep was sent
   assert.match(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], rounds: 2 }), false).stop || "", /rounds/);
+  // DOM_UPDATE (142): one flat uct list of [object id, capturedBy, captureT, lastTeamOn, teamsOn, mlt] per zone
+  const dom = Buffer.alloc(497);
+  dom[0] = 2;
+  dom.writeInt32LE(0, 1 + 0 * 31 + 0); // uid (the dom_zones index)
+  dom.writeInt32LE(1, 1 + 0 * 31 + 4); // captured_by
+  dom.writeFloatLE(250, 1 + 0 * 31 + 8); // capture_t, ms
+  dom.writeInt32LE(0, 1 + 0 * 31 + 12); // last_team_on: none
+  dom[1 + 0 * 31 + 16] = 1; // teams_on_count
+  dom.writeInt8(1, 1 + 0 * 31 + 17); // teams_on[0]
+  dom.writeFloatLE(1.5, 1 + 0 * 31 + 23); // mlt
+  dom.writeInt32LE(42, 1 + 0 * 31 + 27); // object_id
+  dom.writeInt32LE(57, 1 + 1 * 31 + 27); // object_id of zone 1 (mlt 0 -> 1, no teams)
+  assert.deepStrictEqual(T.mapDomUpdate(dom).messages, [["uct", [[42, 1, 250, null, [1], 1.5, 57, 0, 0, null, [], 1]]]]);
+  dom.writeInt32LE(-1, 1 + 1 * 31 + 27);
+  assert.match(T.mapDomUpdate(dom).stop || "", /map object id/);
+  // AI_SYNC_V7 (161): one chunk of bots -> the list of 9 values per bot; a short chunk ends the sync
+  const one = T.parseBotSyncChunk(botSyncBuffer(true, [[5, 1.26, 2.04, -3.5, 0.123, -0.5, 88, 1, 2]]));
+  assert.ok(one);
+  assert.strictEqual(one!.first, true);
+  assert.deepStrictEqual(one!.entries, [5, 1.3, 2, -3.5, 0.12, -0.5, 88, true, 2]);
+  assert.strictEqual(T.parseBotSyncChunk(botSyncBuffer(false, [])) !== null, true);
   assert.strictEqual(T.mapModeSync(Buffer.alloc(10), false).stop !== undefined, true);
 
   // AI_ADD_V7 (162): the v7 bot record -> aai [sid, index, name, x, y, z, dat]
@@ -350,7 +388,7 @@ async function main(): Promise<void> {
   // 3. LOAD -> HELLO: protocol 1.4.2, Krunker v10 ruleset bit
   sendV10("load");
   const hello = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.HELLO), "HELLO");
-  assert.deepStrictEqual([...hello.payload], [1, 4, 3, 4]);
+  assert.deepStrictEqual([...hello.payload], [1, 4, 4, 4]);
   sendV10("load"); // a second LOAD sends no second HELLO
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);
@@ -564,9 +602,26 @@ async function main(): Promise<void> {
   const aai7 = await waitFor(() => clientMessages.find((m) => m.label === "aai"), "aai (v7)");
   assert.deepStrictEqual(aai7.args, [5, 0, "Bot", 0, 0, 0, 0]);
 
-  // the next packet with no translation yet: the v7 bot sync (161) stops the translation
-  native.write(nativeFrame(161, Buffer.alloc(2)));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("AI_SYNC_V7"), "stop at AI_SYNC_V7");
+  // the domination zones (142): one uct list; the zone's map object id is its uid
+  const domFrame = Buffer.alloc(497);
+  domFrame[0] = 1;
+  domFrame.writeInt32LE(0, 1);
+  domFrame.writeInt32LE(1, 5);
+  domFrame.writeFloatLE(0, 9);
+  domFrame.writeInt32LE(0, 13);
+  domFrame.writeFloatLE(1, 24);
+  domFrame.writeInt32LE(42, 28);
+  native.write(nativeFrame(142, domFrame));
+  const uct = await waitFor(() => clientMessages.find((m) => m.label === "uct"), "uct");
+  assert.deepStrictEqual(uct.args, [[42, 1, 0, null, [], 1]]);
+  // the bot positions (161): one short chunk is one ai list with the bot in it
+  native.write(nativeFrame(161, botSyncBuffer(true, [[5, 1, 2, 3, 0, 0, 88, 0, 0]])));
+  const ai = await waitFor(() => clientMessages.find((m) => m.label === "ai"), "ai");
+  assert.deepStrictEqual(ai.args, [[5, 1, 2, 3, 0, 0, 88, false, 0]]);
+
+  // a packet with no translation yet (KrunkScript, 200) stops the translation
+  native.write(nativeFrame(200, Buffer.alloc(4)));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("native 200"), "stop at 200");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -597,7 +652,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("AI_SYNC_V7"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("native 200"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 

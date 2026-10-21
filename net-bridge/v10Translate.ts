@@ -73,6 +73,8 @@ export const V10_IN = Object.freeze({
   SET_OBJECTIVE: "obj",
   SET_WEAPON: "wep",
   C_SPAWN: "aai",
+  UPDATE_DOM_ZONE: "uct",
+  SYNC_ALL_AI: "ai",
   UPDATE_LEADERS: "7",
   START_GAME: "start",
   GAME_ANNOUNCEMENT: "gameAnnouncement",
@@ -90,9 +92,9 @@ export const V10_IN = Object.freeze({
   TELEPORT_FROM_NODE: "mf",
 } as const);
 
-// KN HELLO: this bridge speaks protocol 1.4.3 (NET_PROTOCOL_MAJOR/MINOR/PATCH, patch 3: the flag uid) and Krunker v10 only
+// KN HELLO: this bridge speaks protocol 1.4.4 (NET_PROTOCOL_MAJOR/MINOR/PATCH, patch 4: the zone object id) and Krunker v10 only
 // (NET_HELLO_RULESETS = 1 << 2), flavor nibble 0 (net_hello_make in shared/src/net.c).
-export const HELLO_PAYLOAD = Buffer.from([1, 4, 3, 1 << 2]);
+export const HELLO_PAYLOAD = Buffer.from([1, 4, 4, 1 << 2]);
 
 // The v10 ENTER_GAME ("en") array, positions as the client builds them (v10.js 208129, 35 entries).
 // Cosmetic positions are randomised through _69645(null, type): the type id is in the comment.
@@ -219,6 +221,7 @@ export const NATIVE_MORE = Object.freeze({
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
+  DOM_UPDATE: 142, // NET_PACKET_DOM_UPDATE: the domination zones' state (NetDomUpdatePacket, protocol 1.4.4)
   SPAWN: 4, // NET_PACKET_SPAWN: a player's state at spawn (NetSpawnPacket, protocol 1.4.3 layout)
   LEADERBOARD: 14, // NET_PACKET_LEADERBOARD: the top 16 rows, NetLeaderboardPacket
   LEADER_STATS: 240, // NET_PACKET_LEADER_STATS: the same board right after LEADERBOARD, with the mode's leaderStats values
@@ -668,6 +671,69 @@ export function mapBotAdd(p: Buffer): Mapped {
   return {
     messages: [[V10_IN.C_SPAWN, [p.readInt32LE(0), p.readInt32LE(4), str(8, 40), r1(p.readFloatLE(48)), r1(p.readFloatLE(52)), r1(p.readFloatLE(56)), dat]]],
   };
+}
+
+// ---- DOM_UPDATE (142) and AI_SYNC_V7 (161)
+
+// NetDomUpdatePacket (497 bytes): uint8 count, then 16 NetDomZoneState of 31 bytes: int32 uid @0 (the dom_zones
+// index, the client's), int32 captured_by @4, float capture_t @8 (ms), int32 last_team_on @12, uint8
+// teams_on_count @16, int8 teams_on[6] @17, float mlt @23, int32 object_id @27 (the map object id, protocol 1.4.4).
+// v10's "uct" (UPDATE_DOM_ZONE) is one flat list of [uid, capturedBy, captureT, lastTeamOn, teamsOn, mlt] per
+// zone (the sender at v10.js 188623; the one-list argument is inferred from it, the handler is not read here), and
+// updateDomZone matches the zone by uid
+// (v10.js 188544). The uid is the zone's map object id, so the zone is found by the same id as its object.
+// lastTeamOn is null with no team (v10 sends `lastTeamOn || null`), mlt is `mlt || 1`, and captureT is in ms
+// (inferred: KN's capture_t is the same ms, mode_net.c). capturedBy is the team (0 none), as v10 uses it.
+const DOM_ZONE_SIZE = 31;
+const DOM_MAX_ZONES = 16;
+const DOM_UPDATE_SIZE = 1 + DOM_MAX_ZONES * DOM_ZONE_SIZE;
+export function mapDomUpdate(p: Buffer): Mapped {
+  if (p.length !== DOM_UPDATE_SIZE) return { messages: [], stop: "malformed" };
+  const count = Math.min(p[0], DOM_MAX_ZONES);
+  if (count === 0) return { messages: [] };
+  const flat: unknown[] = [];
+  for (let z = 0; z < count; z++) {
+    const at = 1 + z * DOM_ZONE_SIZE;
+    const objectId = p.readInt32LE(at + 27);
+    if (objectId < 0) return { messages: [], stop: "a domination zone with no map object id" };
+    const teamsOn: number[] = [];
+    for (let t = 0; t < p[at + 16] && t < 6; t++) teamsOn.push(p.readInt8(at + 17 + t));
+    const lastTeamOn = p.readInt32LE(at + 12);
+    flat.push(objectId, p.readInt32LE(at + 4), p.readFloatLE(at + 8), lastTeamOn || null, teamsOn, p.readFloatLE(at + 23) || 1);
+  }
+  return { messages: [[V10_IN.UPDATE_DOM_ZONE, [flat]]] };
+}
+
+// NetAISyncV7Packet (498 bytes): uint8 first @0, uint8 count @1, then 16 NetAISyncV7Entry of 31 bytes: int32 sid @0,
+// float position[3] @4, x_dir @16, y_dir @20, int32 health @24, uint8 did_move @28, int16 team @29.
+// v10's "ai" (SYNC_ALL_AI) is one list of 9 values per bot, [sid, x, y, z, xD, yD, floor(health), didMov, team]
+// (v10.js 179929-179947 sender: x/y/z round(1), xD/yD round(2), floor(health), didMov, team; the handler syncAll
+// (v10.js 179929) hides every bot and shows the listed ones, so one call carries a whole sync).
+// The v7 sync comes in chunks of up to 16; `first` marks the first chunk of a sync (ai.c ai_send_sync_v7).
+const AI_SYNC_ENTRY_SIZE = 31;
+const AI_SYNC_MAX = 16;
+export function parseBotSyncChunk(p: Buffer): { first: boolean; count: number; entries: unknown[] } | null {
+  // the server sends a chunk at its own length: the header and count entries (ai.c ai_send_sync_v7)
+  const count = p.length >= 2 ? p[1] : -1;
+  if (count < 0 || count > AI_SYNC_MAX || p.length !== 2 + count * AI_SYNC_ENTRY_SIZE) return null;
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const entries: unknown[] = [];
+  for (let i = 0; i < count; i++) {
+    const at = 2 + i * AI_SYNC_ENTRY_SIZE;
+    entries.push(
+      p.readInt32LE(at),
+      r1(p.readFloatLE(at + 4)),
+      r1(p.readFloatLE(at + 8)),
+      r1(p.readFloatLE(at + 12)),
+      r2(p.readFloatLE(at + 16)),
+      r2(p.readFloatLE(at + 20)),
+      Math.floor(p.readInt32LE(at + 24)),
+      p[at + 28] !== 0,
+      p.readInt16LE(at + 29),
+    );
+  }
+  return { first: p[0] !== 0, count, entries };
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };
