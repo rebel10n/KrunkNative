@@ -89,6 +89,8 @@ export const V10_IN = Object.freeze({
   GAME_ANNOUNCEMENT: "gameAnnouncement",
   UPDATE_FLAG: "ufl",
   UPDATE_FLAG_INFO: "ufi",
+  PLAYER_INTERACTIONS: "inat", // with sid -1 and the pickup flag: updatePickup (the pickup half of inat, no player)
+  UPD_MATCH_VOTE: "mv", // [vo, mts]: the match vote cards (v10 UPD_MATCH_VOTE, the v7 broadcast "mv")
   TEAM_SCORE: "ts",
   UPDATE_LIVES: "lv",
   LOCK_PLAYER: "lock",
@@ -246,6 +248,8 @@ export const NATIVE_MORE = Object.freeze({
   OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
   MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
   CHEAT: 60, // NET_PACKET_CHEAT: one chat command's effect on this player (NetCheatPacket: flag, on)
+  PICKUP: 128, // NET_PACKET_PICKUP (TRIGGERS + 8): one pickup's state; joiners get each one (the v7 "pkups" list)
+  MATCH_VOTE_STATE: 181, // NET_PACKET_MATCH_VOTE_STATE (LOBBY + 1): the vote totals of the match cards, the v10 "mv"
   EXT: 254,
 } as const);
 export const EXT_GAME_STATE = 0x0901; // NET_EXT_GAME_STATE, v10 "gsc"
@@ -708,6 +712,51 @@ export function mapBotAdd(p: Buffer): Mapped {
 // yDire the pitch (direction[1] and direction[0], KN's own yaw / pitch naming in net.c). The handler's
 // players.hideAll() hides every player the list does not name, so the bridge sends one "k" per chunk of states.
 const STATE_SIZE = 79;
+// NetPickupPacket (packed, 26 bytes): uid int32 @0, weapon int32 @4 (-1 empty), active uint8 @8, moved uint8 @9,
+// position float[3] @10 (valid when moved), ammo int32 @22 (shared/src/interact.c pickup_send). v10 takes a pickup
+// change in "inat" with no player (sid -1, the pickup flag set): io_playerInteractions calls updatePickup(uid,
+// weapon, orgPickup, active, pos) (v7.1.4 index.js; v10 keeps it). updatePickup has no weapon for -1, so an empty
+// pickup goes as weapon 0 and inactive (it is hidden, and nothing can be picked from it). The ammo is not sent:
+// v10's inat does not carry it.
+const PICKUP_SIZE = 26;
+export function mapPickup(p: Buffer): Mapped {
+  if (p.length !== PICKUP_SIZE) return { messages: [], stop: "malformed" };
+  const uid = p.readInt32LE(0);
+  const weapon = p.readInt32LE(4);
+  const empty = weapon < 0;
+  const active = !empty && p[8] !== 0;
+  const pos = p[9] !== 0 ? [p.readFloatLE(10), p.readFloatLE(14), p.readFloatLE(18)] : null;
+  return { messages: [[V10_IN.PLAYER_INTERACTIONS, [-1, null, null, uid, empty ? 0 : weapon, true, active, pos]]] };
+}
+
+// NetMatchVoteStatePacket (packed, 170 bytes): count uint8 @0 (0: no vote, the cards clear), voted int8 @1 (our entry,
+// -1 none), entries[4] @2, 42 bytes each: mode_id int32, map_index int32, votes uint16 (the summed weights), map_name[32].
+// v10 "mv" is [vo, mts] (the v7 server's broadcast("mv", endData.vo, endData.mts), game.js 3354): mts lists the options
+// "mode,map", vo maps a voter to [option, weight]; a card's total is the weight of the voters naming its option, and
+// ours is the option under our socket id (the inverse is client/src/net/krunker_link.c on_match_vote). The packet has
+// no voter ids, so the other votes sit under one voter per card ("vote<i>"). A community map's name is not sent: the
+// option would need v10's community id too, which the packet does not carry.
+const MATCH_VOTE_STATE_SIZE = 170;
+const MATCH_VOTE_ENTRY_SIZE = 42;
+const NET_MATCH_PICKS = 4; // config.matchPicks (shared.h)
+export function mapMatchVoteState(p: Buffer, socketId: string): Mapped {
+  if (p.length !== MATCH_VOTE_STATE_SIZE || p[0] > NET_MATCH_PICKS) return { messages: [], stop: "malformed" };
+  const count = p[0];
+  const voted = p.readInt8(1);
+  const mts: string[] = [];
+  const vo: Record<string, [string, number]> = {};
+  for (let i = 0; i < count; i++) {
+    const at = 2 + i * MATCH_VOTE_ENTRY_SIZE;
+    const option = `${p.readInt32LE(at)},${p.readInt32LE(at + 4)}`;
+    const votes = p.readUInt16LE(at + 8);
+    const own = voted === i && votes > 0 ? 1 : 0;
+    mts.push(option);
+    if (own) vo[socketId] = [option, 1];
+    if (votes - own > 0) vo[`vote${i}`] = [option, votes - own];
+  }
+  return { messages: [[V10_IN.UPD_MATCH_VOTE, [vo, mts]]] };
+}
+
 export type StateRecord = { uid: number; record: unknown[] };
 export function mapState(p: Buffer): StateRecord | null {
   if (p.length !== STATE_SIZE) return null;

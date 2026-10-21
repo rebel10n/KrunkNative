@@ -32,6 +32,7 @@ function loadConfig() {
   cfg.knRepo = home(cfg.knRepo);
   cfg.wwwDir = home(cfg.wwwDir);
   cfg.runDir = home(cfg.runDir);
+  if (cfg.bridge && cfg.bridge.log) cfg.bridge.log = home(cfg.bridge.log);
   cfg.localHost = new URL(cfg.localUrl).hostname;
   return cfg;
 }
@@ -92,15 +93,28 @@ function sendCors(res) {
 
 // Forward to the brain. Matchmaker hosts map their path onto /mm/ (the official client's
 // matchmakerAddress is the bare host; our brain serves the same routes under /mm/).
-function proxy(req, res, pathname) {
+// transform (optional) gets the whole upstream body and the status, and returns the body to send.
+function proxy(req, res, pathname, transform = null) {
   const target = new URL(cfg.brainUrl + pathname + new URL(req.url, "http://x").search);
   const headers = { ...req.headers, host: target.host };
   delete headers.origin;
   delete headers.referer;
+  if (transform) delete headers["accept-encoding"]; // the transform reads the body as text
   const up = https.request(target, { method: req.method, headers }, (ur) => {
     const h = { ...ur.headers };
     delete h["access-control-allow-origin"];
     sendCors(res);
+    if (transform) {
+      const chunks = [];
+      ur.on("data", (c) => chunks.push(c));
+      ur.on("end", () => {
+        const body = transform(Buffer.concat(chunks), ur.statusCode || 502);
+        h["content-length"] = String(body.length);
+        res.writeHead(ur.statusCode || 502, h);
+        res.end(body);
+      });
+      return;
+    }
     res.writeHead(ur.statusCode || 502, h);
     ur.pipe(res);
   });
@@ -113,6 +127,41 @@ function proxy(req, res, pathname) {
   console.log(`[proxy] ${req.method} ${req.headers.host}${pathname} -> ${target.origin}${target.pathname}`);
 }
 
+// The seek answer names the game socket's host. The official client connects to wss://<host>/ws
+// (prod hosts drop the port), so the host becomes the bridge's test name, which Chromium maps to the
+// TLS listener; the upgrade is then forwarded to the bridge (tls.on("upgrade") in serve).
+function rewriteSeek(body, status) {
+  if (status !== 200) return body;
+  let seek;
+  try { seek = JSON.parse(body.toString("utf8")); } catch (e) { return body; }
+  if (!seek || typeof seek.host !== "string") return body;
+  console.log(`[bridge] seek-game ${seek.host}:${seek.port} -> ${cfg.bridge.host}:443 (bridge ${cfg.bridge.port})`);
+  seek.host = cfg.bridge.host;
+  seek.port = 443;
+  return Buffer.from(JSON.stringify(seek));
+}
+
+const EMPTY_MAPS = JSON.stringify(Object.fromEntries(["maps", "data", "items", "list", "result", "results", "names", "rows",
+  "mapList", "catalog", "catalogue", "all", "out"].map((k) => [k, []])));
+
+// The official index.html (the menu's DOM) with its loader module (static/index-*.js, the WASM loader)
+// removed, and loader.js inlined before </body>. The bundle then starts from the token path only.
+function sketchPage(res) {
+  try {
+    const html = fs.readFileSync(path.join(cfg.wwwDir, "index.html"), "utf8");
+    const module = /<script type="module" crossorigin src="\.\/static\/index-[^"]*"><\/script>/;
+    if (!module.test(html) || !html.includes("</body>")) throw new Error("index.html: the loader module is not where the harness expects it");
+    const loader = fs.readFileSync(path.join(HERE, "loader.js"), "utf8");
+    const page = html.replace(module, "").replace("</body>", `<script>\n${loader}</script></body>`);
+    res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-cache" });
+    res.end(page);
+  } catch (e) {
+    console.log(`[sketch] ${e.message}`);
+    res.writeHead(500, { "content-type": "text/plain" });
+    res.end(e.message);
+  }
+}
+
 // isMatchmakerHost is the official host name a request came in on, or "" for the page itself.
 function handle(req, res, isMatchmakerHost) {
   const url = new URL(req.url, "http://x");
@@ -123,10 +172,19 @@ function handle(req, res, isMatchmakerHost) {
     // "" for the account/data API, which the brain answers at its root).
     const prefix = cfg.hostRoutes[isMatchmakerHost];
     const p = url.pathname.startsWith(prefix + "/") ? url.pathname : prefix + url.pathname;
-    return proxy(req, res, p);
+    // The brain answers 404 for the map list: the menu's startup throws on it (forEach of undefined) and never
+    // pings or seeks. An empty list stands in for it here (the menu's own lists are not part of the join).
+    if (isMatchmakerHost.startsWith("gapi.") && url.pathname === "/maps") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(EMPTY_MAPS);
+    }
+    return proxy(req, res, p, cfg.bridge && p.endsWith("/seek-game") ? rewriteSeek : null);
   }
   if (url.pathname.startsWith("/mm/")) return proxy(req, res, url.pathname);
   let rel = decodeURIComponent(url.pathname);
+  // "/" is the official page with the sketch loader (loader.js) in place of its WASM loader module.
+  // cfg.loader "wasm" serves the official index.html unchanged.
+  if (rel === "/" && cfg.loader !== "wasm") return sketchPage(res);
   if (rel === "/") rel = "/index.html";
   const file = path.join(cfg.wwwDir, rel);
   if (!file.startsWith(cfg.wwwDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -149,6 +207,22 @@ function serve() {
   }, (req, res) => {
     const host = (req.headers.host || "").split(":")[0];
     handle(req, res, Object.hasOwn(cfg.hostRoutes, host) ? host : "");
+  });
+  // The bridge's host: a WebSocket upgrade is handed to net-bridge as a raw byte stream (its /ws).
+  tls.on("upgrade", (req, socket, head) => {
+    const host = (req.headers.host || "").split(":")[0];
+    if (!cfg.bridge || host !== cfg.bridge.host) { socket.destroy(); return; }
+    const up = net.connect(cfg.bridge.port, "127.0.0.1", () => {
+      let raw = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
+      for (let i = 0; i < req.rawHeaders.length; i += 2) raw += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`;
+      up.write(raw + "\r\n");
+      if (head && head.length) up.write(head);
+      socket.pipe(up);
+      up.pipe(socket);
+    });
+    up.on("error", (e) => { console.log(`[bridge] upstream ${e.message}`); socket.destroy(); });
+    socket.on("error", () => up.destroy());
+    console.log(`[bridge] ws ${req.url} -> 127.0.0.1:${cfg.bridge.port}`);
   });
   tls.listen(cfg.tlsPort, "127.0.0.1", () => {
     console.log(`krunker-local: https://127.0.0.1:${cfg.tlsPort}/ for ${Object.keys(cfg.hostRoutes).join(", ")} -> brain ${cfg.brainUrl}`);
@@ -191,6 +265,19 @@ function freePort() {
   });
 }
 
+// Chromium host rules: the page's .test name, the official matchmaker/API hosts and the bridge's host
+// all resolve to the local listeners (the port in a MAP rule is the listener's).
+function hostRules() {
+  return [`MAP ${cfg.localHost} 127.0.0.1:${cfg.port}`,
+    ...Object.keys(cfg.hostRoutes).map((h) => `MAP ${h} 127.0.0.1:${cfg.tlsPort}`),
+    ...(cfg.bridge ? [`MAP ${cfg.bridge.host} 127.0.0.1:${cfg.tlsPort}`] : [])];
+}
+
+// Query values that carry tokens or ids are not printed.
+function redact(u) {
+  return String(u).replace(/((?:clientKey|at|clientUID|bpt|validationToken|accessToken|dataQuery)=)[^&]*/g, "$1…");
+}
+
 // Headless load of the served client. Reports 404s, failed or >=400 requests, matchmaker calls,
 // console errors and exceptions as one JSON document on stdout, and writes a screenshot.
 async function check() {
@@ -201,8 +288,7 @@ async function check() {
   const profile = path.join(cfg.runDir, "chrome-profile");
   // The client decides its matchmaker from its hostname, so the page is served from a .test name.
   // The official matchmaker hostnames resolve to the HTTPS side of serve (port tlsPort).
-  const rules = [`MAP ${cfg.localHost} 127.0.0.1:${cfg.port}`,
-    ...Object.keys(cfg.hostRoutes).map((h) => `MAP ${h} 127.0.0.1:${cfg.tlsPort}`)];
+  const rules = hostRules();
   const child = spawn(chrome, [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
     "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
@@ -273,10 +359,137 @@ async function check() {
   }
 }
 
-function help() {
-  console.log(`usage: krunker-local.mjs prepare|serve|check   (config: ${cfg._file})`);
+// join: the official menu to a game on the bridge. Accepts consent, clicks Quick Play (or Play), then
+// watches the client's sockets and the screen until the game is on screen or joinWaitMs runs out.
+// Screenshots go to runDir/shots/join-<step>.png; the JSON report lists the sockets (tokens redacted),
+// the seek answers, frame counts, errors, and the bridge's log lines.
+// the accept control: the deepest element labelled "I Accept" (a button or a styled div), in the page
+const ACCEPT_JS = `(() => {
+  const re = /^\\s*I Accept\\s*$/i;
+  const hits = [...document.querySelectorAll("button, [role=button], div, span, a")].filter((x) => re.test(x.innerText || ""));
+  const b = hits.find((x) => ![...x.children].some((c) => re.test(c.innerText || ""))) || hits[0];
+  if (!b) return false;
+  b.click();
+  return b.tagName + "." + String(b.className).slice(0, 40);
+})()`;
+// consentBlock is position: fixed, so offsetParent is null for it: test the computed box instead
+const CONSENT_OPEN_JS = `(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
+const CLICK_PLAY_JS = `(() => {
+  const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
+    .filter((e) => e.offsetParent && e.innerText && e.innerText.trim().length < 40);
+  // v10's menu button is "QUICK MATCH" (the bolt icon is text too); the deepest element with the label is clicked
+  for (const re of [/quick\\s*match/i, /^\\s*play\\s*$/i]) {
+    const hits = els.filter((x) => re.test(x.innerText));
+    const e = hits.find((x) => ![...x.children].some((c) => re.test(c.innerText))) || hits[0];
+    if (e) { e.click(); return re.source + " -> " + e.tagName + "." + String(e.className).slice(0, 60); }
+  }
+  return "none: " + els.slice(0, 60).map((e) => e.innerText.trim()).join(" | ").slice(0, 400);
+})()`;
+const STATE_JS = `(() => ({
+  game: typeof window.Game, render: typeof window.RENDER,
+  canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","),
+  text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160),
+}))()`;
+
+function bridgeLines() {
+  if (!cfg.bridge.log || !fs.existsSync(cfg.bridge.log)) return [];
+  return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|net-bridge|\[bridge\]/.test(l)).slice(-40);
 }
 
-const cmds = { prepare, serve, check, help };
+async function join() {
+  if (!cfg.bridge) throw new Error('join needs the "bridge" config');
+  const shots = path.join(cfg.runDir, "shots");
+  fs.mkdirSync(shots, { recursive: true });
+  const cdpPort = await freePort();
+  const child = spawn(findChrome(), [
+    "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
+    `--user-data-dir=${path.join(cfg.runDir, "join-profile")}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
+  ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
+  const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
+    clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
+    failed: [], httpErrors: [], state: null, shots: [], bridgeLog: [] };
+  const reqUrl = new Map();
+  try {
+    let targets = [];
+    for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
+      try { targets = await getJSON(`http://127.0.0.1:${cdpPort}/json/list`); } catch (e) { /* not up yet */ }
+      await sleep(250);
+    }
+    const page = targets.find((t) => t.type === "page");
+    if (!page) throw new Error("no page target from Chromium");
+    const ws = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    let id = 0;
+    const pending = new Map();
+    const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); return; }
+      const p = msg.params || {};
+      switch (msg.method) {
+        case "Network.webSocketCreated": report.sockets.push(redact(p.url)); break;
+        case "Network.webSocketFrameSent": report.framesOut++; break;
+        case "Network.webSocketFrameReceived": report.framesIn++; report.bytesIn += Buffer.from(p.response.payloadData, "base64").length; break;
+        case "Network.requestWillBeSent": reqUrl.set(p.requestId, p.request.url); break;
+        case "Network.loadingFailed": report.failed.push(`${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
+        case "Network.responseReceived":
+          if (/seek-game/.test(p.response.url)) report.seek.push(`${p.response.status} ${redact(p.response.url)}`);
+          if (p.response.status >= 400) report.httpErrors.push(`${p.response.status} ${redact(p.response.url).slice(0, 120)}`);
+          break;
+        case "Runtime.exceptionThrown": report.exceptions.push(((p.exceptionDetails.exception || {}).description || p.exceptionDetails.text || "").split("\n")[0].slice(0, 200)); break;
+        case "Runtime.consoleAPICalled": if (p.type === "error") report.consoleErrors.push(p.args.map((a) => a.value ?? a.description).join(" ").slice(0, 200)); break;
+      }
+    };
+    const evalJS = async (expression) => {
+      const r = await send("Runtime.evaluate", { expression, returnByValue: true });
+      return r.result && r.result.result ? r.result.result.value : null;
+    };
+    const shot = async (step) => {
+      const r = await send("Page.captureScreenshot", { format: "png" });
+      const file = path.join(shots, `join-${step}.png`);
+      if (r.result && r.result.data) { fs.writeFileSync(file, Buffer.from(r.result.data, "base64")); report.shots.push(file); }
+    };
+    await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
+    await send("Page.navigate", { url: cfg.localUrl });
+    await sleep(cfg.loadWaitMs);
+    // the consent window can come back after an accept (its vendor check finishes late): accept until it stays hidden
+    for (let i = 0; i < 10 && (await evalJS(CONSENT_OPEN_JS)); i++) {
+      report.consentAccepted = !!(await evalJS(ACCEPT_JS)) || report.consentAccepted;
+      await sleep(2000);
+    }
+    report.consentOpenAfter = await evalJS(CONSENT_OPEN_JS);
+    report.consentDom = await evalJS(`(() => { const e = document.getElementById("consentBlock"); const s = e && getComputedStyle(e);
+      return { exists: !!e, display: s && s.display, visibility: s && s.visibility, z: s && s.zIndex, rect: e && JSON.stringify(e.getBoundingClientRect()),
+        html: e && e.outerHTML.slice(0, 160), iframes: document.querySelectorAll("iframe").length, dialogs: document.querySelectorAll("dialog").length }; })()`);
+    await sleep(cfg.afterAcceptMs);
+    await shot("1-menu");
+    report.clicked = await evalJS(CLICK_PLAY_JS);
+    await sleep(3000);
+    await shot("2-clicked");
+    const deadline = Date.now() + (cfg.joinWaitMs || 90000);
+    while (Date.now() < deadline) {
+      await sleep(3000);
+      report.state = await evalJS(STATE_JS);
+      if (report.state && report.state.inGame) break;
+    }
+    report.topAt = await evalJS(`(() => { const e = document.elementFromPoint(640, 240); return e ? e.tagName + "#" + e.id + "." + String(e.className).slice(0, 60) : null; })()`);
+    report.iframes = await evalJS(`[...document.querySelectorAll("iframe")].map((f) => (f.src || "").slice(0, 80) + " " + JSON.stringify(f.getBoundingClientRect()))`);
+    report.visibleButtons = await evalJS(`[...document.querySelectorAll("button,[role=button],.button,a")].filter((e) => e.getBoundingClientRect().width > 0 && getComputedStyle(e).display !== "none").map((e) => e.innerText.trim().slice(0, 30)).filter(Boolean).slice(0, 80)`);
+    await shot("3-final");
+    report.bridgeLog = bridgeLines();
+    ws.close();
+    console.log(JSON.stringify(report, null, 2));
+  } finally {
+    try { child.kill("SIGTERM"); } catch (e) { /* already gone */ }
+  }
+}
+
+function help() {
+  console.log(`usage: krunker-local.mjs prepare|serve|check|join   (config: ${cfg._file})`);
+}
+
+const cmds = { prepare, serve, check, join, help };
 if (!cmds[cmd]) { help(); process.exit(2); }
 Promise.resolve(cmds[cmd]()).catch((e) => { console.error("krunker-local:", e.message); process.exit(1); });

@@ -11,9 +11,13 @@
     "matchmaker.krunker.io": "/mm",
     "matchmaker.beta.krunker.io": "/mm",
     "gapi.svc.krunker.io": "",
-    "gapi.beta.krunker.io": ""
+    "gapi.beta.krunker.io": "",
+    "coordinator.krunk.io": ""
   },
   "brainUrl": "https://coordinator.krunk.io",
+  "loader": "sketch",
+  "bridge": { "host": "kn-bridge.krunker-local.test", "port": 8097, "log": "~/.cache/kn-krunker-local/bridge.log" },
+  "joinWaitMs": 90000,
   "loadWaitMs": 60000,
   "afterAcceptMs": 20000,
   "fillPaths": [

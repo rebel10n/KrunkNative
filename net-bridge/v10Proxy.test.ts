@@ -328,6 +328,47 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.strictEqual((T.mapBotAdd(bot).messages[0][1] as unknown[])[6], 0);
 }
 
+// ---- PICKUP (128, packed 26 bytes) as inat with no player, and MATCH_VOTE_STATE (181, 170 bytes) as mv [vo, mts]
+{
+  const pickup = (o: { uid: number; weapon: number; active: number; moved?: boolean; pos?: number[] }) => {
+    const b = Buffer.alloc(26);
+    b.writeInt32LE(o.uid, 0);
+    b.writeInt32LE(o.weapon, 4);
+    b[8] = o.active;
+    b[9] = o.moved ? 1 : 0;
+    (o.pos || [0, 0, 0]).forEach((v, i) => b.writeFloatLE(v, 10 + 4 * i));
+    return b;
+  };
+  assert.deepStrictEqual(T.mapPickup(pickup({ uid: 7, weapon: 12, active: 1 })).messages, [["inat", [-1, null, null, 7, 12, true, true, null]]]);
+  assert.deepStrictEqual(T.mapPickup(pickup({ uid: 7, weapon: 12, active: 0, moved: true, pos: [1, 2, 3] })).messages,
+    [["inat", [-1, null, null, 7, 12, true, false, [1, 2, 3]]]]);
+  // an empty pickup (weapon -1) goes as weapon 0 and inactive
+  assert.deepStrictEqual(T.mapPickup(pickup({ uid: 9, weapon: -1, active: 1 })).messages, [["inat", [-1, null, null, 9, 0, true, false, null]]]);
+  assert.match(T.mapPickup(Buffer.alloc(25)).stop || "", /malformed/);
+
+  const vote = (count: number, voted: number, entries: Array<[number, number, number]>) => {
+    const b = Buffer.alloc(170);
+    b[0] = count;
+    b.writeInt8(voted, 1);
+    entries.forEach(([mode, map, votes], i) => {
+      const at = 2 + 42 * i;
+      b.writeInt32LE(mode, at);
+      b.writeInt32LE(map, at + 4);
+      b.writeUInt16LE(votes, at + 8);
+    });
+    return b;
+  };
+  // card 0: two other votes; card 1: ours (under our socket id)
+  assert.deepStrictEqual(T.mapMatchVoteState(vote(2, 1, [[0, 5, 2], [1, 9, 1]]), "sock").messages,
+    [["mv", [{ vote0: ["0,5", 2], sock: ["1,9", 1] }, ["0,5", "1,9"]]]]);
+  // our vote on a card with other votes: ours is 1, the rest of its weight is the anonymous voter
+  assert.deepStrictEqual(T.mapMatchVoteState(vote(1, 0, [[2, 3, 4]]), "sock").messages, [["mv", [{ sock: ["2,3", 1], vote0: ["2,3", 3] }, ["2,3"]]]]);
+  // no vote (count 0) clears the cards
+  assert.deepStrictEqual(T.mapMatchVoteState(vote(0, -1, []), "sock").messages, [["mv", [{}, []]]]);
+  assert.match(T.mapMatchVoteState(vote(5, -1, []), "sock").stop || "", /malformed/);
+  assert.match(T.mapMatchVoteState(Buffer.alloc(169), "sock").stop || "", /malformed/);
+}
+
 async function main(): Promise<void> {
   // ---- the fake KrunkNative server: records every frame the bridge writes, sends what the test asks
   const nativeFrames: Array<{ type: number; payload: Buffer }> = [];
@@ -696,6 +737,26 @@ async function main(): Promise<void> {
     const msg = await waitFor(() => clientMessages.filter((m) => m.label === label)[before], `CHEAT ${flag} -> ${label}`);
     assert.deepStrictEqual(msg.args, [on === 1], `CHEAT ${flag} -> ${label} ${on}`);
   }
+  // the pickup (128): inat with no player (sid -1), the pickup flag, the state; the match vote state (181): mv [vo, mts]
+  const pickupFrame = Buffer.alloc(26);
+  pickupFrame.writeInt32LE(4, 0);
+  pickupFrame.writeInt32LE(17, 4);
+  pickupFrame[8] = 1;
+  native.write(nativeFrame(128, pickupFrame));
+  const inat = await waitFor(() => clientMessages.find((m) => m.label === "inat"), "inat");
+  assert.deepStrictEqual(inat.args, [-1, null, null, 4, 17, true, true, null]);
+  const voteFrame = Buffer.alloc(170);
+  voteFrame[0] = 1; // one card
+  voteFrame.writeInt8(0, 1); // ours
+  voteFrame.writeInt32LE(0, 2);
+  voteFrame.writeInt32LE(5, 6);
+  voteFrame.writeUInt16LE(1, 10);
+  native.write(nativeFrame(181, voteFrame));
+  const mv = await waitFor(() => clientMessages.find((m) => m.label === "mv"), "mv");
+  assert.deepStrictEqual(mv.args, [{ [socketIo.args[0] as string]: ["0,5", 1] }, ["0,5"]]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("PICKUP"), undefined);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("MATCH_VOTE_STATE"), undefined);
+
   // borders (3) has no v10 label: it still stops the translation, named CHEAT (NATIVE_NAMES)
   native.write(nativeFrame(60, Buffer.from([3, 1])));
   await waitFor(() => v10Proxy.untranslatedSeen.get("CHEAT"), "stop at CHEAT borders");

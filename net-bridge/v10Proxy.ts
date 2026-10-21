@@ -61,6 +61,8 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.MODE_STATE]: "MODE_STATE",
   [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
   [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
+  [T.NATIVE_MORE.PICKUP]: "PICKUP",
+  [T.NATIVE_MORE.MATCH_VOTE_STATE]: "MATCH_VOTE_STATE",
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
   [T.NATIVE_MORE.LEADER_STATS]: "LEADER_STATS",
   [T.NATIVE_MORE.AI_ADD_V7]: "AI_ADD_V7",
@@ -124,8 +126,12 @@ function isWsOpen(ws: WebSocket): boolean {
 
 // Server -> client frames. The v10 client ignores the trailer on incoming packets (v10.js 98121 reads
 // only label and args), so 0 is sent.
+// KRUNK_NATIVE_V10_TRACE=1 logs every label each way, per session (a debugging aid for the join).
+const TRACE = process.env.KRUNK_NATIVE_V10_TRACE === "1";
+
 function sendWs(session: V10Session, label: string, ...args: unknown[]): void {
   if (session.closed || !isWsOpen(session.ws)) return;
+  if (TRACE) console.info(`[v10-proxy] ${session.id} -> ${label}`);
   session.ws.send(UTILS.encodeNetworkMessage(UTILS.serializeNetworkMessage(label, ...args), 0));
 }
 
@@ -247,6 +253,7 @@ function flushBotSync(session: V10Session): void {
 }
 
 function handleNativePacket(session: V10Session, type: number, payload: Buffer): void {
+  if (TRACE) console.info(`[v10-proxy] ${session.id} native ${nativeName(type, payload)} (${payload.length} B)`);
   if (type === T.NATIVE.PING) {
     writeNative(session, T.NATIVE.PONG, payload);
     return;
@@ -359,6 +366,18 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   }
   if (session.initSent && type === T.NATIVE_MORE.AI_ADD) return;
   if (session.initSent && type === T.NATIVE_MORE.AI_SYNC) return; // the v3 sync: the v7 one (161) is the one for a v7 peer
+  if (session.initSent && type === T.NATIVE_MORE.PICKUP) {
+    const mapped = T.mapPickup(payload);
+    if (mapped.stop) return stopAt(session, "PICKUP", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.MATCH_VOTE_STATE) {
+    const mapped = T.mapMatchVoteState(payload, session.socketId);
+    if (mapped.stop) return stopAt(session, "MATCH_VOTE_STATE", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
   // SKINS come right before the SPAWN they belong to: kept for it, nothing sent
   if (session.initSent && type === T.NATIVE_MORE.SKINS) {
     const skins = T.parseSkins(payload);
@@ -587,6 +606,7 @@ function handleConnection(ws: WebSocket, request: IncomingMessage, options: Atta
       return;
     }
     const [, label, args] = decoded;
+    if (TRACE) console.info(`[v10-proxy] ${session.id} <- ${label}`);
     handleClientPacket(session, label, args);
   });
   ws.on("close", () => closeSession(session, 1000, "client closed"));
