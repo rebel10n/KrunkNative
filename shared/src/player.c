@@ -903,6 +903,29 @@ void player_reset_step(Player *player, const int recon) {
     }
 }
 
+// rampFix ("Solid Ramp Sides", v10.0.3 Player.blockRampSide): a walker that comes at a ramp from
+// beside, below its surface, is moved out to the side it came from (x / z faces of the ramp's box,
+// padded by collision_padding), and its x / z velocity is cleared. Returns 0 when no side applies.
+static int movement_block_ramp_side(Player *player, const MovementBox *box, const float s) {
+    const float pad = game_constants.collision_padding;
+    if (player->last_position.x - s >= box->x + box->w - pad) {
+        player->position.x = box->x + box->w + s;
+        player->velocity.x = 0.0f;
+    } else if (player->last_position.x + s <= box->x - box->w + pad) {
+        player->position.x = box->x - box->w - s;
+        player->velocity.x = 0.0f;
+    } else if (player->last_position.z - s >= box->z + box->l - pad) {
+        player->position.z = box->z + box->l + s;
+        player->velocity.z = 0.0f;
+    } else if (player->last_position.z + s <= box->z - box->l + pad) {
+        player->position.z = box->z - box->l - s;
+        player->velocity.z = 0.0f;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
 // The walls a ladder climb or wall jump can use (map.c wall_jumpable = !notWallJ) and the solid
 // objects of the v7 collision chain.
 void player_do_map_collisions(Player *player, const Input *input, const float move_dir, const int can_jump, const float delta, const int recon) {
@@ -1097,6 +1120,13 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
 
                 const float progress = MAX(0.0f, MIN(1.0f, progress_on_line(object->ramp->start, object->ramp->end, player_dir)));
                 const float collision_height = bottom + (object->scale.y + 0.01f) * progress;
+
+                // rampFix (v10.0.3 blockRampSide): a rise of more than 3 above the walker, from below the
+                // ramp's foot, is a side that blocks it; the config.rampFix game option is not ported
+                if (game->map->ramp_fix && collision_height - player->last_position.y > 3.0f &&
+                    player->last_position.y - bottom < 3.0f && movement_block_ramp_side(player, &box, s)) {
+                    continue;
+                }
 
                 if (!has_ramp_height) {
                     has_ramp_height = 1;

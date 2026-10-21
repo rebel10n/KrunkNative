@@ -762,6 +762,7 @@ static void map_parse_top_level(Map *map, const cJSON *raw) {
     map->name = cJSON_GetStringValue(cJSON_GetObjectItem(raw, "name"));
     map->welcome = map_text(raw, "welMsg", 70);
     map->no_ambient = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "nAmb"));
+    map->ramp_fix = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "rampFix")); // v10.0.3 Solid Ramp Sides: !!map.rampFix
     map->old_ao = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "oldAO"));
     map->has_lightmaps = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "hasLM"));
     map->minimap_asset = map_texture_id(cJSON_GetObjectItem(raw, "mmId"));

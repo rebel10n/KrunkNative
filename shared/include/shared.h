@@ -574,6 +574,7 @@ typedef struct {
     const char *welcome;                // "welMsg" when it passes the v7 charset check, else NULL
     unsigned char camera_static:1;      // camPos[3]
     unsigned char no_ambient:1;         // "nAmb"
+    unsigned char ramp_fix:1;           // "rampFix" (v10.0.3 "Solid Ramp Sides"): a ramp's high side blocks players
     unsigned char old_ao:1;             // "oldAO"
     unsigned char has_lightmaps:1;      // "hasLM"
     vec3 camera_rotation;               // camPos[4..6] (rx, ry, rz): rotateCam(p5, p4, p6)
