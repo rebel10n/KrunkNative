@@ -209,6 +209,10 @@ void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n);
 void v10_map_object_state(V10Out *o, const uint8_t *p, size_t n);
 /* MATCH_VOTE_STATE (NetMatchVoteStatePacket, 170 bytes): the match cards' votes as "mv" [vo, mts]. */
 void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socket_id);
+/* NET_PACKET_END (16, 330 bytes): result int8 @0, next_round int32 @1, winner int32 @5, board (257 bytes) @9, rewards[16] @266.
+ * As v10 "end" [endType, didWin, endData, winnerTeam, endIndex, reward, tmpBPData] (v7 game.js 4699). endData has an
+ * empty vo and mts: the client picks the next map from mts when it is not empty, and the join must not depend on it. */
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
 /* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and

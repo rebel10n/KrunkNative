@@ -1229,6 +1229,33 @@ int main(void) {
         }
     }
 
+    /* ---- NET_PACKET_END (16, 330 bytes): end [endType, didWin, endData, winner, endIndex, reward, tmpBPData];
+     * endData has an empty vo and mts (the client's map pick takes the fallback when mts is empty) */
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1; /* a victory */
+        V10Out o;
+        v10_out_init(&o);
+        v10_map_end(&o, endp, 330);
+        {
+            const KrunkerValue kv[8] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0)};
+            const KrunkerValue end_data = KRUNKER_V_MAP(kv, 4);
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
+            CHECK(msg_is(&o, 0, "end", want, 7), "END -> end [0, true, endData with an empty vo and mts, -1, 0, null, null]");
+        }
+        v10_out_free(&o);
+        endp[0] = 0xff; /* a draw */
+        v10_out_init(&o);
+        v10_map_end(&o, endp, 330);
+        CHECK(o.count == 1 && o.msgs[0].args[1].type == KRUNKER_NUM && o.msgs[0].args[1].u.num == -1, "END with result -1 is a draw (didWin -1)");
+        v10_out_free(&o);
+        v10_out_init(&o);
+        v10_map_end(&o, endp, 329);
+        CHECK(o.stop != NULL, "a short END stops the translation");
+        v10_out_free(&o);
+    }
+
     printf("v10_translate_test: %d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
