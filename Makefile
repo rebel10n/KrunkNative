@@ -222,6 +222,8 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/krunker_proto_test
+	./$(DEBUG_DIR)/v10_translate_test
+	./$(DEBUG_DIR)/v10_bridge_test
 	./$(DEBUG_DIR)/krunker_link_test
 	./$(DEBUG_DIR)/krunker_sync_test
 	./$(DEBUG_DIR)/krunker_host_test

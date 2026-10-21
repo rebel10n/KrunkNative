@@ -1831,4 +1831,34 @@ else ()
         target_sources(${SERVER_BINARY} PRIVATE services/strike/director_ticket.c)
         target_include_directories(${SERVER_BINARY} PRIVATE services/strike)
     endif ()
+
+    # v10_bridge (server/bridge/): the official Krunker v10 client's WebSocket (msgpack, v10 labels) <-> a
+    # KrunkerBox game server's TCP (knet frames). The C port of net-bridge/v10Proxy.ts and v10Translate.ts;
+    # knsvc serves the WebSocket and the codec is the official one (shared/src/krunker_proto.c). Only with knsvc.
+    if (TARGET knsvc)
+        set(V10_CODEC_SOURCES shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c)
+        add_executable(v10_bridge server/bridge/v10_bridge_main.c server/bridge/v10_bridge.c server/bridge/v10_translate.c
+            ${V10_CODEC_SOURCES})
+        target_include_directories(v10_bridge PRIVATE server/bridge shared/include)
+        target_link_libraries(v10_bridge PRIVATE knsvc cJSON m Threads::Threads)
+        target_compile_definitions(v10_bridge PRIVATE _GNU_SOURCE)
+        target_compile_options(v10_bridge PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+        # the translation's unit tests: the TS fixtures (net-bridge/v10Proxy.test.ts) and the TS codec's bytes
+        add_executable(v10_translate_test server/tests/v10_translate_test.c server/bridge/v10_translate.c ${V10_CODEC_SOURCES})
+        target_include_directories(v10_translate_test PRIVATE server/bridge shared/include)
+        target_link_libraries(v10_translate_test PRIVATE cJSON m)
+        target_compile_definitions(v10_translate_test PRIVATE _GNU_SOURCE)
+        target_compile_options(v10_translate_test PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        add_test(NAME v10_translate_test COMMAND v10_translate_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+        # the bridge over real loopback sockets: a fake KrunkerBox server, the bridge and the v10 client's WebSocket
+        add_executable(v10_bridge_test server/tests/v10_bridge_test.c server/bridge/v10_bridge.c server/bridge/v10_translate.c
+            ${V10_CODEC_SOURCES})
+        target_include_directories(v10_bridge_test PRIVATE server/bridge shared/include)
+        target_link_libraries(v10_bridge_test PRIVATE knsvc cJSON m Threads::Threads)
+        target_compile_definitions(v10_bridge_test PRIVATE _GNU_SOURCE)
+        target_compile_options(v10_bridge_test PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        add_test(NAME v10_bridge_test COMMAND v10_bridge_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
 endif ()
