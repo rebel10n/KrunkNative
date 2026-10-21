@@ -17,7 +17,7 @@
  *   friends:list {offset}                friends:list {friends:[...], offset, hasMore}
  *   presence:ping                        presence:pong
  *   msg:send {to, text}                  msg:sent {id, to, ts} (sender) + msg:recv {id, from, text, ts} (peer)
- *   msg:history {peer, before, limit}    msg:history:result {peer, requestBefore, messages, hasMore}
+ *   msg:history {peer, before, limit}    msg:history:result {peer, requestBefore (the before as sent; absent if none), messages, hasMore}
  *   msg:read {peer}                      -
  *   game:invite {to, gameId}             game:invite:sent {to, gameId} (sender) + game:invite {from, name,
  *                                        gameId} (peer; KrunkNative, Krunker Strike's invites)
@@ -547,6 +547,8 @@ static void game_invite(SocialSession *s, const cJSON *o) {
 
 typedef struct HistCtx {
     int64_t peer, before, limit;
+    int64_t requested;  /* the request's before as sent (what requestBefore echoes) */
+    int before_kind;    /* 0: no "before" in the request, 1: null, 2: a number (a string: its number) */
 } HistCtx;
 
 static void history_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -568,8 +570,10 @@ static void history_done(SocialSession *s, kn_db_result *res, void *extra) {
     }
     cJSON *o = eb_obj("msg:history:result");
     cJSON_AddNumberToObject(o, "peer", (double) x->peer);
-    if (x->before > 0) cJSON_AddNumberToObject(o, "requestBefore", (double) x->before);
-    else cJSON_AddNullToObject(o, "requestBefore");
+    /* v10 files its pending request under "<peer>:<requestBefore>": the echo is the request's own before
+     * (0 stays 0, an absent one stays absent: "<peer>:undefined"), so the reply finds that request */
+    if (x->before_kind == 1) cJSON_AddNullToObject(o, "requestBefore");
+    else if (x->before_kind == 2) cJSON_AddNumberToObject(o, "requestBefore", (double) x->requested);
     cJSON_AddItemToObject(o, "messages", msgs);
     cJSON_AddBoolToObject(o, "hasMore", rows > x->limit);
     eb_send(s, o);
@@ -580,6 +584,9 @@ static void msg_history(SocialSession *s, const cJSON *o) {
     if (!x) return;
     x->peer = obj_int(o, "peer", 0);
     x->before = obj_int(o, "before", 0);
+    x->requested = x->before;
+    const cJSON *b_item = cJSON_GetObjectItemCaseSensitive(o, "before");
+    x->before_kind = !b_item ? 0 : cJSON_IsNull(b_item) ? 1 : 2;
     x->limit = obj_int(o, "limit", 15);
     if (x->before < 0) x->before = 0;
     if (x->limit < 1) x->limit = 1;

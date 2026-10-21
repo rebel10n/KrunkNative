@@ -207,8 +207,15 @@ async def scenario(names):
         await B.eb("msg:sent")
     await A.send(["eb", {"type": "msg:history", "peer": b_id, "before": 0, "limit": 15}])
     h = await A.eb("msg:history:result")
-    check(h and h["peer"] == b_id and len(h["messages"]) == 15 and h["hasMore"] is True and h["requestBefore"] is None
-          and h["messages"][-1]["text"] == "m19" and h["messages"][0]["text"] == "m5", "history: newest 15, oldest first, hasMore")
+    check(h and h["peer"] == b_id and len(h["messages"]) == 15 and h["hasMore"] is True and h.get("requestBefore") == 0
+          and h["messages"][-1]["text"] == "m19" and h["messages"][0]["text"] == "m5",
+          "history: newest 15, oldest first, hasMore; requestBefore echoes before 0")
+    # v10 files the pending request under "<peer>:<requestBefore>" (10.0.3 msg:history:result), so the echo
+    # must match the request: no before sent -> no requestBefore (v10's key is "<peer>:undefined")
+    await A.send(["eb", {"type": "msg:history", "peer": b_id, "limit": 5}])
+    h0 = await A.eb("msg:history:result")
+    check(h0 and "requestBefore" not in h0 and len(h0["messages"]) == 5 and h0["messages"][-1]["text"] == "m19",
+          "history without before: no requestBefore, newest 5")
     await A.send(["eb", {"type": "msg:history", "peer": b_id, "before": h["messages"][0]["id"], "limit": 25}])
     h2 = await A.eb("msg:history:result")
     check(h2 and len(h2["messages"]) == 6 and h2["hasMore"] is False and h2["messages"][0]["text"] == "hello b"
