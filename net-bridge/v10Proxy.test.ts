@@ -101,19 +101,33 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
 
 // ---- MODE_STATE (40): the joiner's mode snapshot, and OBJECT_STATE (100): the join's object list.
 // Layouts from shared/include/shared.h (NetModeStatePacket, NetObjectStatePacket), little endian.
+type TestFlag = { x: number; y: number; z: number; carrier: number; team: number; uid: number; active: boolean };
 function modeStateBuffer(o: { teamScores: [number, number]; lives: number; locked: number; message: string;
-  objective: number; moveLock: number; flagCount: number }): Buffer {
-  const b = Buffer.alloc(347);
+  objective: number; moveLock: number; flags?: TestFlag[] }): Buffer {
+  const flags = o.flags ?? [];
+  const b = Buffer.alloc(387); // NetModeStatePacket, protocol 1.4.3 (flags of 25 bytes)
   b.writeInt32LE(0, 0); // mode_id
   b.writeInt32LE(o.teamScores[0], 4);
   b.writeInt32LE(o.teamScores[1], 8);
+  b.write("AT BASE", 12, "utf8"); // flag_info[0]
+  b.write("AT BASE", 44, "utf8"); // flag_info[1]
   b.writeInt32LE(o.objective, 76); // active_objective
   b.writeInt32LE(-1, 80); // objective_weapon
   b[84] = o.moveLock;
   b[85] = o.locked;
   b.writeInt32LE(o.lives, 86);
-  b[90] = o.flagCount; // flag_count; flags (8 x 20 bytes) follow at 91
-  b.write(o.message, 251, "utf8"); // message[96]
+  b[90] = flags.length; // flag_count
+  flags.forEach((fl, f) => {
+    const at = 91 + f * 25;
+    b.writeFloatLE(fl.x, at);
+    b.writeFloatLE(fl.y, at + 4);
+    b.writeFloatLE(fl.z, at + 8);
+    b.writeInt32LE(fl.carrier, at + 12);
+    b.writeInt32LE(fl.team, at + 16);
+    b.writeInt32LE(fl.uid, at + 20);
+    b[at + 24] = fl.active ? 1 : 0;
+  });
+  b.write(o.message, 291, "utf8"); // message[96]
   return b;
 }
 function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
@@ -124,14 +138,23 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   return b;
 }
 {
-  const ffa = T.mapModeState(modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 1, message: "wt", objective: -1, moveLock: 0, flagCount: 0 }));
+  const ffa = T.mapModeState(modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 1, message: "wt", objective: -1, moveLock: 0 }));
   assert.strictEqual(ffa.stop, undefined);
   assert.deepStrictEqual(ffa.messages, [["ts", [1, 5]], ["ts", [2, 7]], ["lv", [3]], ["lock", [true]], ["gmsg", ["wt"]]]);
-  const quiet = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 0 }));
+  const quiet = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: -1, moveLock: 0 }));
   assert.deepStrictEqual(quiet.messages, [["ts", [1, 0]], ["ts", [2, 0]]]); // no lives, not locked, no message
-  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 1 })).stop || "", /flag/);
-  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: 2, moveLock: 0, flagCount: 0 })).stop || "", /objective/);
-  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 1, flagCount: 0 })).stop || "", /lock/);
+  // flags in play are ufl(uid, x, y, z, carrier || 0), after the team lines; a flag not in play is skipped
+  const flagged = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: -1, moveLock: 0,
+    flags: [{ x: 1, y: 2, z: 3, carrier: -1, team: 1, uid: 7, active: true }, { x: 4, y: 5, z: 6, carrier: 42, team: 2, uid: 9, active: false }] }));
+  assert.strictEqual(flagged.stop, undefined);
+  assert.deepStrictEqual(flagged.messages, [["ts", [1, 0]], ["ts", [2, 0]], ["ufi", [1, "AT BASE"]], ["ufi", [2, "AT BASE"]], ["ufl", [7, 1, 2, 3, 0]]]);
+  const carried = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: -1, moveLock: 0,
+    flags: [{ x: 0.5, y: 2, z: 3, carrier: 42, team: 2, uid: 9, active: true }] }));
+  assert.deepStrictEqual(carried.messages.filter((m) => m[0] === "ufl"), [["ufl", [9, 0.5, 2, 3, 42]]]);
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 0,
+    flags: [{ x: 0, y: 0, z: 0, carrier: -1, team: 1, uid: -1, active: true }] })).stop || "", /map object id/);
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: 2, moveLock: 0 })).stop || "", /objective/);
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 1 })).stop || "", /lock/);
   assert.strictEqual(T.mapModeState(Buffer.alloc(10)).stop !== undefined, true);
 
   assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 0, 0)).messages, [["do", [7]]]);
@@ -204,7 +227,7 @@ async function main(): Promise<void> {
   // 3. LOAD -> HELLO: protocol 1.4.2, Krunker v10 ruleset bit
   sendV10("load");
   const hello = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.HELLO), "HELLO");
-  assert.deepStrictEqual([...hello.payload], [1, 4, 2, 4]);
+  assert.deepStrictEqual([...hello.payload], [1, 4, 3, 4]);
   sendV10("load"); // a second LOAD sends no second HELLO
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);
@@ -245,10 +268,11 @@ async function main(): Promise<void> {
   assert.ok(nativeSocket);
   const native = nativeSocket as net.Socket;
   native.write(nativeFrame(25, mapInfo)); // MAP_INFO
+  native.write(nativeFrame(T.NATIVE.INIT, init)); // INIT, before the map bytes and the config (the server's order)
   native.write(nativeFrame(183, configChunk(0, configBytes.subarray(0, cut)))); // GAME_CONFIG 1
   native.write(nativeFrame(183, configChunk(cut, configBytes.subarray(cut)))); // GAME_CONFIG 2
   native.write(nativeFrame(182, networkData)); // NETWORK_DATA
-  native.write(nativeFrame(T.NATIVE.INIT, init)); // INIT, before the map bytes
+  native.write(nativeFrame(254, Buffer.from([0x50, 0x80, 0]))); // EXT 0x8050: not a ranked match
   const request = await waitFor(() => nativeFrames.find((f) => f.type === 26), "MAP_REQUEST");
   assert.strictEqual(request.payload.readUInt32LE(0), mapHash);
   await sleep(100);
@@ -273,6 +297,7 @@ async function main(): Promise<void> {
   assert.strictEqual(args[9] && (args[9] as { data: unknown }).data, mapJson); // customMapData.data: the map JSON text
   assert.deepStrictEqual(args[12], { snf: 10, tf: 30, sf: 1 }); // networkData
   assert.strictEqual(args[13], true);
+  assert.strictEqual(args[16], false); // isRanked
 
   // a reset-only global value before any gv clears nothing the client holds: no message, no stop
   const reset = Buffer.alloc(80);
@@ -314,7 +339,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual(t.args, [300, 0]);
 
   // the joiner's mode snapshot: team scores, lives and the lock, then the object list
-  native.write(nativeFrame(40, modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 0 })));
+  native.write(nativeFrame(40, modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 0, message: "", objective: -1, moveLock: 0 })));
   await waitFor(() => clientMessages.filter((m) => m.label === "ts").length >= 2 ? true : undefined, "ts");
   const lv = await waitFor(() => clientMessages.find((m) => m.label === "lv"), "lv");
   assert.deepStrictEqual(lv.args, [3]);
@@ -324,6 +349,34 @@ async function main(): Promise<void> {
   await waitFor(() => clientMessages.find((m) => m.label === "gte"), "gte");
   assert.deepStrictEqual(clientMessages.find((m) => m.label === "do")?.args, [4]);
   assert.deepStrictEqual(clientMessages.find((m) => m.label === "gte")?.args, [9, true]);
+
+  // the ping result answers the bridge's PONG: v10's socket-ping result handler is empty, so it is consumed
+  native.write(nativeFrame(19, Buffer.from([0x40, 0, 0, 0])));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("PING_RESULT"), undefined);
+
+  // the v7 capability notice (249): the bridge sends chat as CHAT_SEND, so it needs nothing
+  native.write(nativeFrame(249, Buffer.from([1])));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("SOCIAL_V7"), undefined);
+
+  // the server repeats the config and the networking after the init (the HELLO path): the same values are no change
+  for (const chunk of [configChunk(0, configBytes.subarray(0, cut)), configChunk(cut, configBytes.subarray(cut))]) native.write(nativeFrame(183, chunk));
+  native.write(nativeFrame(182, networkData));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("GAME_CONFIG"), undefined);
+
+  // the match phase after the init is a gsc [state] (KN GameState 3 IN_PROGRESS = v10 gameState 3)
+  native.write(nativeFrame(254, Buffer.from([0x01, 0x09, 0x03])));
+  const gsc = await waitFor(() => clientMessages.find((m) => m.label === "gsc"), "gsc");
+  assert.deepStrictEqual(gsc.args, [3]);
+
+  // the game announcement card (EXT 0x0302): its message is a gameAnnouncement {message, actions}
+  const card = Buffer.alloc(321);
+  card.write("Welcome to the test", 0, "utf8");
+  native.write(nativeFrame(254, Buffer.concat([Buffer.from([0x02, 0x03]), card])));
+  const announce = await waitFor(() => clientMessages.find((m) => m.label === "gameAnnouncement"), "gameAnnouncement");
+  assert.deepStrictEqual(announce.args, [{ message: "Welcome to the test", actions: [] }]);
 
   // the mode sync (149) is the next packet with no translation yet: the translation stops there
   native.write(nativeFrame(149, Buffer.alloc(4 * 4 + 4 + 1 + 4 * 4 + 4 + 4 + 4 + 4)));

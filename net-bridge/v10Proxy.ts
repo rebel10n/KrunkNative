@@ -16,7 +16,8 @@
 //                                                         packets after it are queued meanwhile
 //   native GLOBAL_VALUE (121), PLAYER_SOUND (125), TIMER (15) -> gv, asnd / rsnd, t
 //   native MODE_STATE (40), OBJECT_STATE (100)         -> ts, lv, lock, gmsg; do, ro, gte, bnk, mo, mf
-//   native MODE_STATE with flags                       -> not translated yet: the session stops here
+//   native MODE_STATE flags (in play)                  -> ufl (uid, x, y, z, carrier) and ufi (team lines)
+//   native SKINS (35) before a SPAWN                   -> not translated yet: the session stops here
 //   client sends en (ENTER_GAME)                       -> ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
@@ -70,6 +71,10 @@ type V10Session = {
   mapText: string | null; // the map JSON, whole
   configAssembly: T.ChunkAssembly | null; // GAME_CONFIG chunks in progress
   config: Record<string, unknown>; // init argument 6
+  configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
+  networkReceived: boolean; // a NETWORK_DATA arrived for the init
+  rankedReceived: boolean; // the ranked-match flag arrived for the init (sent after the INIT, like the config)
+  ranked: boolean; // init argument 16, isRanked
   networkData: Record<string, number>; // init argument 12
   pendingInit: T.NativeInit | null; // the INIT, held until the map is whole
   queue: Array<{ type: number; payload: Buffer }>; // packets that arrive while the INIT is held
@@ -177,11 +182,18 @@ function stopAt(session: V10Session, name: string, reason: string): void {
 }
 
 // init (INIT_GAME): once the map JSON is whole. Then the packets held behind it run in order.
+// The init carries the map, the config and the networking: the server sends the config and the networking
+// after the INIT (its batched sender), so the init waits for all three.
+function tryEmitInit(session: V10Session): void {
+  if (!session.pendingInit || session.mapText === null || session.configText === null || !session.networkReceived || !session.rankedReceived) return;
+  emitInit(session);
+}
+
 function emitInit(session: V10Session): void {
   const init = session.pendingInit;
-  if (!init || session.mapText === null) return;
+  if (!init) return;
   session.pendingInit = null;
-  sendWs(session, T.V10_IN.INIT_GAME, ...T.buildInitArgs(init, session.mapText, session.config, session.networkData));
+  sendWs(session, T.V10_IN.INIT_GAME, ...T.buildInitArgs(init, session.mapText, session.config, session.networkData, session.ranked));
   session.initSent = true;
   for (const held of session.queue.splice(0)) handleNativePacket(session, held.type, held.payload);
 }
@@ -192,7 +204,10 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     return;
   }
   if (session.stopped) return;
-  if (session.pendingInit && type !== T.NATIVE_MORE.MAP_DATA) {
+  // the init's own parts (the map, the config, the networking) are taken while the init is held
+  const ranked = type === T.NATIVE_MORE.EXT && payload.length >= 3 && payload.readUInt16LE(0) === T.EXT_RANKED_MATCH;
+  const initPart = type === T.NATIVE_MORE.MAP_DATA || type === T.NATIVE_MORE.GAME_CONFIG || type === T.NATIVE_MORE.NETWORK_DATA || ranked;
+  if (session.pendingInit && !initPart) {
     session.queue.push({ type, payload });
     return;
   }
@@ -213,6 +228,27 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
+  if (ranked) {
+    const value = payload[2] !== 0;
+    if (session.initSent && value !== session.ranked) return stopAt(session, "EXT 0x8050 RANKED", "the ranked flag changed after the init: v10 takes it in the init only");
+    session.ranked = value;
+    session.rankedReceived = true;
+    tryEmitInit(session);
+    return;
+  }
+  // the match phase (0 INITIALIZING .. 5 ENDED, the same values as v10's enum): gsc [gameState] (v10.js 218899)
+  if (session.initSent && type === T.NATIVE_MORE.EXT && payload.length >= 3 && payload.readUInt16LE(0) === T.EXT_GAME_STATE) {
+    sendWs(session, T.V10_IN.GAME_STATE_CHANGED, payload[2]);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.EXT && payload.length >= 2 && payload.readUInt16LE(0) === T.EXT_GAME_ANNOUNCEMENT) {
+    const mapped = T.mapGameAnnouncement(payload.subarray(2));
+    if (mapped.stop) return stopAt(session, "EXT 0x0302 ANNOUNCEMENT", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.PING_RESULT) return; // v10's "pir" handler does nothing
+  if (session.initSent && type === T.NATIVE_MORE.SOCIAL_V7) return; // a v7 capability notice: the bridge sends chat as CHAT_SEND
   if (session.initSent && type === T.NATIVE_MORE.TIMER) {
     const timer = T.parseTimer(payload);
     if (!timer) return stopAt(session, "TIMER", "malformed");
@@ -227,6 +263,28 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     if (!sound.add) sendWs(session, T.V10_IN.REMOVE_PLAYER_SOUND, sound.uid, sound.name, sound.force);
     else sendWs(session, T.V10_IN.ADD_PLAYER_SOUND, sound.uid, sound.name, { loop: sound.loop, vol: sound.volume, rate: sound.rate });
     return;
+  }
+  // after the init, the server repeats the config for a peer whose HELLO came after its INIT
+  // (server/src/net.c HELLO path): the same text is no change. v10 has no message for a changed config.
+  if (session.initSent && type === T.NATIVE_MORE.GAME_CONFIG) {
+    const chunk = T.parseGameConfigChunk(payload);
+    if (!chunk || chunk.total === 0) return stopAt(session, "GAME_CONFIG", "malformed");
+    if (chunk.offset === 0) session.configAssembly = new T.ChunkAssembly(chunk.total);
+    if (!session.configAssembly || !session.configAssembly.add(chunk.offset, chunk.data)) {
+      return stopAt(session, "GAME_CONFIG", "out of order");
+    }
+    if (!session.configAssembly.complete) return;
+    const text = session.configAssembly.text();
+    session.configAssembly = null;
+    if (text === session.configText) return;
+    return stopAt(session, "GAME_CONFIG", "the config changed after the init: v10 has no message for it");
+  }
+  if (session.initSent && type === T.NATIVE_MORE.NETWORK_DATA) {
+    const network = T.parseNetworkData(payload);
+    if (!network) return stopAt(session, "NETWORK_DATA", "malformed");
+    const same = Object.keys(network).every((k) => session.networkData[k] === network[k]);
+    if (same) return;
+    return stopAt(session, "NETWORK_DATA", "the networking changed after the init: v10 has no message for it");
   }
   if (session.initSent) {
     stopAt(session, nativeName(type, payload), "after the init");
@@ -259,7 +317,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
         return stopAt(session, "MAP_DATA", "the map is not JSON");
       }
       session.mapText = text;
-      emitInit(session);
+      tryEmitInit(session);
       return;
     }
     case T.NATIVE_MORE.GAME_CONFIG: {
@@ -277,21 +335,25 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
       } catch (_err) {
         return stopAt(session, "GAME_CONFIG", "the config is not JSON");
       }
+      session.configText = text;
+      tryEmitInit(session);
       return;
     }
     case T.NATIVE_MORE.NETWORK_DATA: {
       const network = T.parseNetworkData(payload);
       if (!network) return stopAt(session, "NETWORK_DATA", "malformed");
       session.networkData = network;
+      session.networkReceived = true;
+      tryEmitInit(session);
       return;
     }
     case T.NATIVE.INIT: {
       const init = T.parseInit(payload);
       if (!init) return stopAt(session, "INIT", "malformed");
       if (!session.mapInfo) return stopAt(session, "INIT", "no MAP_INFO before it");
+      if (session.mapText === null && session.mapAssembly === null) return stopAt(session, "INIT", "the map was not requested");
       session.pendingInit = init;
-      if (session.mapText !== null) emitInit(session);
-      else if (session.mapAssembly === null) return stopAt(session, "INIT", "the map was not requested");
+      tryEmitInit(session);
       return;
     }
     default:
@@ -339,6 +401,10 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     mapText: null,
     configAssembly: null,
     config: {},
+    configText: null,
+    networkReceived: false,
+    rankedReceived: false,
+    ranked: false,
     networkData: {},
     pendingInit: null,
     queue: [],

@@ -366,6 +366,7 @@ typedef struct {
     vec3 ping;                // img: where the HUD shows it (carrier, refreshed every flagUpdate)
     int team;                 // 1 / 2, -1 neutral (tm -1)
     int carrier_uid;          // -1 none
+    int uid;                  // the flag's map object id: the index in game->map->objects (the NET_OBJECT uid), -1 none
     float ping_timer;
     float idle_timer;         // v7 idleTimer: a dropped flag goes home when it runs out (0 none)
     unsigned char neutral:1;  // tm -1: only oneflag modes use it, only oneflag modes ignore the others

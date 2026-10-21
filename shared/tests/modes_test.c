@@ -422,6 +422,12 @@ static void test_ctf(Game *game) {
     GameMode *mode = game->mode;
     CHECK(mode->flag_count == 2 && mode->flags[0].team == 1 && mode->flags[1].team == 2, "flags: team 1 (tm 0) and team 2 (tm \"1\")");
     CHECK(fabsf(mode->flags[0].origin.y - (33.0f + 12.0f)) < 0.01f, "the crystal floats flagScale / 2 + flagOff up");
+    // each flag's uid is its map object's id (the index NET_OBJECT packets use), and the flag is in play
+    for (int f = 0; f < mode->flag_count; f++) {
+        const int id = mode->flags[f].uid;
+        CHECK(id >= 0 && (size_t) id < game->map->object_count && game->map->objects[id] && game->map->objects[id]->raw &&
+              game->map->objects[id]->prefab == PREFAB_FLAG && mode->flags[f].active, "flag %d is map object %d, in play", f, id);
+    }
 
     Player *red = add_player(game, 1, 0);   // team 2
     Player *blue = add_player(game, 2, 0);  // team 1
@@ -1369,6 +1375,12 @@ static void test_net(Game *game) {
         NetModeStatePacket state;
         memcpy(&state, sent->payload, sizeof(state));
         CHECK(state.mode_id == MODE_ID_CTF && state.flag_count == 2 && !strcmp(state.flag_info[0], "AT BASE") && state.lives == -1, "snapshot");
+        // the snapshot's flags carry the uid and the active bit of the mode's flags (protocol 1.4.3)
+        int flags_match = 1;
+        for (int f = 0; f < state.flag_count; f++) {
+            flags_match = flags_match && state.flags[f].uid == game->mode->flags[f].uid && state.flags[f].active == game->mode->flags[f].active;
+        }
+        CHECK(flags_match && state.flags[0].uid >= 0, "snapshot flags carry the uid and active bit (uid %d)", state.flags[0].uid);
     }
     CHECK(sizeof(NetModeStatePacket) <= NET_MAX_PAYLOAD && sizeof(NetModeEndPacket) <= NET_MAX_PAYLOAD, "mode packets fit a frame (%zu / %zu)",
           sizeof(NetModeStatePacket), sizeof(NetModeEndPacket));

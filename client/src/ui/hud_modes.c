@@ -215,6 +215,8 @@ static void hud_modes_mirror_flag(Client *client, const int index) {
     const NetModeFlag *in = &g_modes.flags[index];
     ModeFlag *flag = &mode->flags[index];
     flag->carrier_uid = in->carrier_uid;
+    flag->uid = in->uid; // the map object id (NET_OBJECT uid), the flag's identity
+    flag->active = in->active ? 1 : 0; // an inactive flag is not in play for this mode
     if (in->carrier_uid < 0) flag->position = (vec3) {in->position[0], in->position[1], in->position[2]};
 }
 
@@ -671,7 +673,7 @@ static void hud_modes_message(const Client *client, const GameModeConfig *config
         int carrying = 0, enemy_has_ours = 0;
         for (int f = 0; f < g_modes.flag_count; f++) {
             const NetModeFlag *flag = &g_modes.flags[f];
-            if (flag->carrier_uid < 0) continue;
+            if (!flag->active || flag->carrier_uid < 0) continue;
             if (flag->team == client->me->team) enemy_has_ours = 1;
             if (flag->carrier_uid == client->me->uid) carrying = 1;
         }
@@ -954,6 +956,7 @@ int hud_modes_flag_count(void) {
 int hud_modes_flag(const int index, vec3 *position, int *team, int *carrier_uid) {
     if (index < 0 || index >= g_modes.flag_count) return 0;
     const NetModeFlag *flag = &g_modes.flags[index];
+    if (!flag->active) return 0; // not in play: the caller shows the flag at its map position
     if (position) *position = (vec3) {flag->position[0], flag->position[1], flag->position[2]};
     if (team) *team = flag->team;
     if (carrier_uid) *carrier_uid = flag->carrier_uid;

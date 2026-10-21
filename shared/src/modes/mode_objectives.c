@@ -44,6 +44,15 @@ static int objective_uid(const GameMode *mode, const int obi) {
     return jumped ? uid : mode->objective_count;
 }
 
+// The map object id of a raw map record: its index in game->map->objects, the uid NET_OBJECT packets
+// carry (world_object_index). Object.raw is the record it was built from (map.c). -1 when none.
+static int mode_object_id(const Game *game, const cJSON *raw) {
+    for (size_t i = 0; game->map && i < game->map->object_count; i++) {
+        if (game->map->objects[i] && game->map->objects[i]->raw == raw) return (int) i;
+    }
+    return -1;
+}
+
 void mode_load_objects(Game *game) {
     GameMode *mode = game->mode;
     mode->objective_count = 0;
@@ -98,6 +107,7 @@ void mode_load_objects(Game *game) {
                 flag->position = flag->origin;
                 flag->ping = flag->origin;
                 flag->team = tm == -1 ? -1 : tm + 1;
+                flag->uid = mode_object_id(game, object);
                 flag->neutral = tm == -1;
                 flag->carrier_uid = -1;
                 break;

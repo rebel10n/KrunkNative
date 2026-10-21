@@ -264,3 +264,15 @@ Each range belongs to the feature that implements it; body layouts are documente
 structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have no subtype.
 The `SYNC_PLAYER` controlled-entity tail is not an EXT: it extends the existing state packet the
 usual way (a longer form for 1.4 peers).
+
+## 8. Protocol 1.4.3: the flag uid and the active bit (NetModeFlag)
+
+`NetModeFlag` (shared/include/shared.h) carries `int32 uid` (the flag's map object id, the index
+NET_OBJECT packets use; v10's `ufl` uid) and `uint8 active` (ModeFlag.active: in play for this
+mode). It is in NET_PACKET_MODE_STATE (40, a flag list of 8 entries) and NET_PACKET_FLAG (44). The
+packets have no version field of their own: NET_PROTOCOL_PATCH 3 marks the layout (HELLO / INIT
+patch). A 1.4.2 peer reads the old layout, so a KN client and server must come from one build.
+The server takes the uid from the flag's raw map record (Object.raw, the same record the mode
+loader reads), not from the record's position, and the official-server link (client/src/net/krunker_link.c)
+sends its own v10 uids with active set.
+

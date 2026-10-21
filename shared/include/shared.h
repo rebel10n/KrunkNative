@@ -2599,7 +2599,9 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // A missing patch byte (2-byte HELLO) reads as 0.
 // Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
 // any non-zero fists as a fists kill.
-#define NET_PROTOCOL_PATCH 2
+#define NET_PROTOCOL_PATCH 3
+// Patch 3: NetModeFlag carries the flag's map object id and its active bit (NET_PACKET_MODE_STATE and
+// NET_PACKET_FLAG). The packets have no version field of their own: the HELLO / INIT patch marks it.
 #define NET_PROTOCOL_PATCH_KILL_NUKE 2
 int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes WP-C sizes
 
@@ -3202,6 +3204,8 @@ typedef struct {
     float position[3];          // crystal centre (the carrier's ping while carried)
     int32_t carrier_uid;        // -1 at base / dropped
     int32_t team;               // 1 / 2
+    int32_t uid;                // the flag's map object id (the NET_OBJECT uid; v10 ufl's uid), -1 none (protocol 1.4.3)
+    uint8_t active;             // in play for this mode (ModeFlag.active); an inactive flag stays at home (protocol 1.4.3)
 } NetModeFlag;
 
 typedef struct {

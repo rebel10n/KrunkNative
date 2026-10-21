@@ -18,6 +18,8 @@ static void mode_fill_flag(const GameMode *mode, const int index, NetModeFlag *o
     out->position[2] = where.z;
     out->carrier_uid = flag->carrier_uid;
     out->team = flag->team;
+    out->uid = flag->uid;
+    out->active = flag->active ? 1 : 0;
 }
 
 static void mode_fill_state(Game *game, const Player *recipient, NetModeStatePacket *packet) {

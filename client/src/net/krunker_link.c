@@ -1173,6 +1173,8 @@ static void emit_flag(KrunkerLink *l, const int slot) {
     p.index = slot;
     memcpy(p.flag.position, l->flags[slot].position, sizeof(p.flag.position));
     p.flag.carrier_uid = l->flags[slot].carrier > 0 ? l->flags[slot].carrier : -1;
+    p.flag.uid = l->flags[slot].uid; // v10's flag uid (the ufl uid); the flags it sends are in play
+    p.flag.active = 1;
     emit(l, NET_PACKET_FLAG, &p, sizeof(p));
 }
 
@@ -1210,6 +1212,7 @@ static void on_flag_info(KrunkerLink *l, const KrunkerFrame *f) {
     p.index = -1;
     p.flag.team = (int32_t) arg(f, 0)->u.num;
     p.flag.carrier_uid = -1;
+    p.flag.uid = -1;
     js_string(arg(f, 1), p.info, sizeof(p.info));
     if (is_nil(arg(f, 1))) p.info[0] = 0;
     emit(l, NET_PACKET_FLAG, &p, sizeof(p));
@@ -1537,6 +1540,7 @@ static void on_init_hud(KrunkerLink *l, const KrunkerFrame *f) {
             info.index = -1;
             info.flag.team = ts.team;
             info.flag.carrier_uid = -1;
+            info.flag.uid = -1;
             snprintf(info.info, sizeof(info.info), "%s", krunker_str(krunker_at(t, 2)));
             emit(l, NET_PACKET_FLAG, &info, sizeof(info));
         }

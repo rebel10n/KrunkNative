@@ -22,12 +22,19 @@
 //   native TIMER (15)     -> t (seconds, end)
 //   native MODE_STATE (40) with no flag and no objective -> ts (both teams), lv, lock, gmsg
 //   native OBJECT_STATE (100) -> do, ro, gte, bnk, mo, mf (one per object change)
+// After the init (the v10 server sends these in this order on a live join, see the report):
+//   native GLOBAL_VALUE (121) -> gv;  PLAYER_SOUND (125) -> asnd / rsnd;  TIMER (15) -> t
+//   native MODE_STATE (40), no objective and no move lock -> ts, ufi, ufl (flags in play), lv, lock, gmsg
+//   native OBJECT_STATE (100) -> do, ro, gte, bnk, mo, mf
+//   native EXT GAME_STATE (0x0901) -> gsc;  EXT GAME_ANNOUNCEMENT (0x0302, no ranked-queue action) -> gameAnnouncement
+//   native PING_RESULT (19), SOCIAL_V7 (249): consumed (v10 has no message for them)
+//   native GAME_CONFIG / NETWORK_DATA / EXT RANKED_MATCH (0x8050): the init's own parts, held for the INIT;
+//                           a repeat after the init with the same values is consumed, a change stops
 // Stop (first untranslated native packet after the init, reported by v10Proxy):
-//   native MODE_STATE (40) with flag_count > 0: the maps the server ran (Frontier, Habitat, Burg,
-//   Tropicano) all carry team flags (teams 1 and 2, active in free-for-all). v10 ufl and the flag
-//   pickers match a flag by uid (v10.js 188644), and NetModeFlag has no uid; v10's uid is the map
-//   objects index at addFlag (v10.js 164188), KN's is the world object index. Not derived here.
-//   Also stops: an active objective (its time is in MODE_SYNC_V7) and a move lock (lm needs a position).
+//   native SKINS (35), right before a SPAWN: the v10 spawn array (ADD_PLAYERS) is not mapped yet
+//   Also stops: MODE_STATE with an active objective (its time is in MODE_SYNC_V7) or a move lock (lm needs a
+//   position); EXT 0x0302 with a ranked-queue action (its v10 label key is not mapped yet).
+//   KN ids that have no translation at all still stop the session by name.
 
 import * as EV from "./nativeEvents";
 
@@ -57,6 +64,10 @@ export const V10_IN = Object.freeze({
   ADD_PLAYER_SOUND: "asnd",
   REMOVE_PLAYER_SOUND: "rsnd",
   UPDATE_TIMER: "t",
+  GAME_STATE_CHANGED: "gsc",
+  GAME_ANNOUNCEMENT: "gameAnnouncement",
+  UPDATE_FLAG: "ufl",
+  UPDATE_FLAG_INFO: "ufi",
   TEAM_SCORE: "ts",
   UPDATE_LIVES: "lv",
   LOCK_PLAYER: "lock",
@@ -69,9 +80,9 @@ export const V10_IN = Object.freeze({
   TELEPORT_FROM_NODE: "mf",
 } as const);
 
-// KN HELLO: this bridge speaks protocol 1.4.2 (NET_PROTOCOL_MAJOR/MINOR/PATCH) and Krunker v10 only
+// KN HELLO: this bridge speaks protocol 1.4.3 (NET_PROTOCOL_MAJOR/MINOR/PATCH, patch 3: the flag uid) and Krunker v10 only
 // (NET_HELLO_RULESETS = 1 << 2), flavor nibble 0 (net_hello_make in shared/src/net.c).
-export const HELLO_PAYLOAD = Buffer.from([1, 4, 2, 1 << 2]);
+export const HELLO_PAYLOAD = Buffer.from([1, 4, 3, 1 << 2]);
 
 // The v10 ENTER_GAME ("en") array, positions as the client builds them (v10.js 208129, 35 entries).
 // Cosmetic positions are randomised through _69645(null, type): the type id is in the comment.
@@ -198,12 +209,16 @@ export const NATIVE_MORE = Object.freeze({
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
+  SOCIAL_V7: 249, // NET_PACKET_SOCIAL_V7: the v7 chat / voice / spray ids this server takes (a capability notice)
+  PING_RESULT: 19, // NET_PACKET_PING_RESULT: the smoothed ping, the answer to the bridge's PONG (v10 "pir" is a no-op)
   MODE_STATE: 40, // NET_PACKET_MODE_STATE: the joiner's mode snapshot (NetModeStatePacket)
   OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
   MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
   EXT: 254,
 } as const);
 export const EXT_GAME_STATE = 0x0901; // NET_EXT_GAME_STATE, v10 "gsc"
+export const EXT_GAME_ANNOUNCEMENT = 0x0302; // NET_EXT_GAME_ANNOUNCEMENT: v10 gameAnnouncement {message, actions}
+export const EXT_RANKED_MATCH = 0x8050; // NET_EXT_KN_RANKED_MATCH: 1 in a ranked match; the init's isRanked (argument 16)
 
 const MAP_INFO_SIZE = 44; // NetMapInfoPacket: int32 map_index, uint32 hash, uint32 size, char name[32]
 const MAP_DATA_HEADER = 10; // NetMapDataPacket: uint32 hash, uint32 offset, uint16 length
@@ -289,7 +304,10 @@ export function parseTimer(p: Buffer): { seconds: number; end: boolean } | null 
 export type V10Message = [label: string, args: unknown[]];
 export type Mapped = { messages: V10Message[]; stop?: string };
 
-const MODE_STATE_SIZE = 347; // NetModeStatePacket with MODE_MAX_FLAGS 8 and NET_MODE_TEXT_SIZE 32
+const MODE_STATE_SIZE = 387; // NetModeStatePacket: MODE_MAX_FLAGS 8 x NetModeFlag (protocol 1.4.3), NET_MODE_TEXT_SIZE 32
+const MODE_FLAG_SIZE = 25; // NetModeFlag: float position[3], int32 carrier_uid, team, uid, uint8 active
+const MODE_FLAGS_AT = 91;
+const MODE_MESSAGE_AT = 291;
 const OBJECT_STATE_SIZE = 9; // NetObjectStatePacket: int32 uid, uint8 kind, int32 value
 
 function cText(b: Buffer): string {
@@ -299,10 +317,12 @@ function cText(b: Buffer): string {
 
 // NetModeStatePacket (little endian): mode_id @0, team_scores[2] @4, flag_info[2][32] @12,
 // active_objective @76, objective_weapon @80, move_lock @84, locked @85, lives @86, flag_count @90,
-// flags[8] (20 bytes each) @91, message[96] @251.
+// flags[8] (25 bytes each) @91, message[96] @291.
+// A flag in play (active) becomes ufl(uid, x, y, z, carrier || 0), the same arguments the v10 server
+// sends (v10.js 188667); the team lines go first as ufi(team, text) (v10.js 188698). Flags not in play
+// are not sent: v10 has no message for them, and the client keeps them at their map position.
 export function mapModeState(p: Buffer): Mapped {
   if (p.length !== MODE_STATE_SIZE) return { messages: [], stop: "malformed" };
-  if (p[90] > 0) return { messages: [], stop: "flags: NetModeFlag has no flag uid for the v10 ufl (flag_count > 0)" };
   if (p.readInt32LE(76) >= 0) return { messages: [], stop: "an active objective: v10 obj needs its time, which is in MODE_SYNC_V7" };
   if (p[84] !== 0) return { messages: [], stop: "move lock: v10 lm needs the player's position" };
 
@@ -310,10 +330,24 @@ export function mapModeState(p: Buffer): Mapped {
     [V10_IN.TEAM_SCORE, [1, p.readInt32LE(4)]], // team 1 (mode team_scores[0])
     [V10_IN.TEAM_SCORE, [2, p.readInt32LE(8)]], // team 2 (mode team_scores[1])
   ];
+  const flags: V10Message[] = [];
+  const count = Math.min(p[90], 8);
+  for (let f = 0; f < count; f++) {
+    const at = MODE_FLAGS_AT + f * MODE_FLAG_SIZE;
+    if (p[at + 24] === 0) continue; // not in play for this mode
+    const uid = p.readInt32LE(at + 20);
+    if (uid < 0) return { messages: [], stop: "an active flag with no map object id" };
+    const carrier = p.readInt32LE(at + 12);
+    flags.push([V10_IN.UPDATE_FLAG, [uid, p.readFloatLE(at), p.readFloatLE(at + 4), p.readFloatLE(at + 8), carrier >= 0 ? carrier : 0]]);
+  }
+  if (flags.length) {
+    messages.push([V10_IN.UPDATE_FLAG_INFO, [1, cText(p.subarray(12, 44))]], [V10_IN.UPDATE_FLAG_INFO, [2, cText(p.subarray(44, 76))]]);
+    messages.push(...flags);
+  }
   const lives = p.readInt32LE(86);
   if (lives >= 0) messages.push([V10_IN.UPDATE_LIVES, [lives]]);
   if (p[85] !== 0) messages.push([V10_IN.LOCK_PLAYER, [true]]);
-  const message = cText(p.subarray(251, 347));
+  const message = cText(p.subarray(MODE_MESSAGE_AT, MODE_MESSAGE_AT + 96));
   if (message.length) messages.push([V10_IN.UPDATE_GAME_MESSAGE, [message]]); // "wt" is the v10 waiting text too
   return { messages };
 }
@@ -340,6 +374,16 @@ export function mapObjectState(p: Buffer): Mapped {
     default:
       return { messages: [], stop: `object kind ${kind} is not mapped` };
   }
+}
+
+// NetGameAnnouncementPacket (the body after the EXT subtype): char message[256], uint8 ranked_queue,
+// char ranked_label[64]. v10's card reads message and actions; the ranked-queue action's label key is
+// not mapped yet, so a card with that action is not translated.
+export function mapGameAnnouncement(body: Buffer): Mapped {
+  if (body.length !== 256 + 1 + 64) return { messages: [], stop: "malformed" };
+  const message = cText(body.subarray(0, 256));
+  if (body[256] !== 0) return { messages: [], stop: "the ranked-queue action: its v10 label key is not mapped yet" };
+  return { messages: [[V10_IN.GAME_ANNOUNCEMENT, [{ message, actions: [] }]]] };
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };
@@ -404,6 +448,7 @@ export function buildInitArgs(
   mapText: string,
   config: Record<string, unknown>,
   networkData: Record<string, number>,
+  ranked: boolean,
 ): unknown[] {
   return [
     init.mapIndex,
@@ -422,7 +467,7 @@ export function buildInitArgs(
     true,
     false,
     false,
-    false,
+    ranked,
     null,
     null,
     null,
