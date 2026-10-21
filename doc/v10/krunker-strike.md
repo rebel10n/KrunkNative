@@ -6,7 +6,7 @@ Owner of this doc: coordinator. Date: 2026-10-14.
 ## What Krunker Strike is
 
 Krunker Strike is a **product flavor** of Krunker Box Office: the same C11 engine, the same
-`shared/` game core, the same renderer and the same Krunker v10.0.2 ruleset
+`shared/` game core, the same renderer and the same Krunker v10.0.3 ruleset
 (`shared/include/ruleset.h`), shipped under a distinct brand with a **small, bounded set of
 gameplay deltas** layered on top. It is not a fork and not a second engine: one codebase, one
 build system, one protocol. A player running "Krunker Strike" is running `client_bin`/`server_bin`
@@ -19,7 +19,7 @@ seed so the mechanism is real, not theoretical.
 
 ## Flavor vs ruleset (why a new axis)
 
-`Ruleset` answers "which Krunker *version* are we playing" (v10.0.2 is the only one). A flavor is
+`Ruleset` answers "which Krunker *version* are we playing" (v10.0.3 is the only one). A flavor is
 orthogonal: "which Krunker Box Office *product* is this". Both are **one-per-process**, chosen at
 startup; a Strike server and a base server never mix players (enforcement is a fan-out item, see
 flavor-net). Keeping them separate means Strike never has to touch ruleset tables, and a future

@@ -6,7 +6,7 @@ that changes per Krunker build, by pure static parsing (no Krunker JS is ever ex
 
   AHKEY          the 2nd operand of the `(ahNum + AHKEY) & 0xff` step guarding socket.send
                  (skipped for packet cptR)
-  clientVersion  e.g. '10.0.2' + 'r1' -> "10.0.2r1"
+  clientVersion  e.g. '10.0.3' + 'r1' -> "10.0.3r1"
   buildVersion   the 32-char `'buildVersion': "..."` literal of the constants object
   packet tables  client->server and server->client `{'NAME': 'wire', ...}` objects
   cheat check    the CHEAT_CHECK keystream function (verbatim source), its salt, its formula

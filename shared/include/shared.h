@@ -2536,7 +2536,7 @@ typedef struct {
     uint8_t major;
     uint8_t minor;
     uint8_t patch;
-    // low nibble: the Krunker versions this client plays (NET_HELLO_RULESETS, v10.0.2 only; kept for
+    // low nibble: the Krunker versions this client plays (NET_HELLO_RULESETS, v10 only, Krunker v10.0.3; kept for
     // wire compatibility with the version toggle's servers). High nibble: the client's product
     // flavor (NET_WIRE_FLAVOR; 0 = base / a HELLO without it). The server refuses a peer whose
     // flavor is non-base and differs from its own; a base / absent nibble is accepted.
@@ -2551,7 +2551,7 @@ typedef struct {
     int32_t mode_index;
     uint16_t tick_rate;
     int32_t client_id;
-    // low nibble: NET_INIT_RULESET (v10.0.2), kept for wire compatibility with the version toggle's
+    // low nibble: NET_INIT_RULESET (v10, Krunker v10.0.3), kept for wire compatibility with the version toggle's
     // clients. High nibble: the server's product flavor (NET_WIRE_FLAVOR; 0 = base). Optional: a
     // 17-byte INIT (a server from before the toggle) has no byte here; clients prefix-read it as 0
     // (base). A client whose flavor differs from this adopted server flavor refuses the server.
@@ -2560,7 +2560,7 @@ typedef struct {
 
 #define NET_INIT_PACKET_V1_SIZE (offsetof(NetInitPacket, ruleset)) // 17 bytes: before the ruleset
 // The version toggle's wire ids (doc/v7/decisions.md "Krunker v10.0.2 is the only version"): it
-// numbered v3.1.1 0, v7.1.4 1, v10.0.2 2. Only v10.0.2 is sent now: HELLO bit 2, INIT 2 + 1.
+// numbered v3.1.1 0, v7.1.4 1, v10.0.2 2. Only v10 (Krunker v10.0.3) is sent now: HELLO bit 2, INIT 2 + 1.
 #define NET_HELLO_RULESETS (1u << 2)
 #define NET_INIT_RULESET 3
 // Krunker Strike: the product flavor (shared/include/flavor.h) rides beside the ruleset id, in the

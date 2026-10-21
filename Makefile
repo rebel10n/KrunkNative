@@ -742,7 +742,7 @@ nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a h
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/nuke_e2e.py $(DEBUG_DIR)
 
 .PHONY: ruleset-e2e
-ruleset-e2e: build ## Krunker v10.0.2 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
+ruleset-e2e: build ## Krunker v10.0.3 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
 
 .PHONY: v10-settings-e2e

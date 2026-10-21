@@ -372,8 +372,8 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     }
 
     gs_read_str(s, "region", cfg->region, sizeof(cfg->region));
-    // the version toggle's key: Krunker v10.0.2 is the only version now (shared/include/ruleset.h)
-    if (cJSON_GetObjectItem(s, "ruleset")) server_log_error("config: gameserver.ruleset is ignored: the server plays Krunker v10.0.2, the only version");
+    // the version toggle's key: Krunker v10.0.3 is the only version now (shared/include/ruleset.h)
+    if (cJSON_GetObjectItem(s, "ruleset")) server_log_error("config: gameserver.ruleset is ignored: the server plays Krunker v10.0.3, the only version");
     // product flavor (flavor.h): "base" (default) or "strike"; --flavor overrides it (server/src/main.c)
     gs_read_str(s, "flavor", cfg->flavor, sizeof(cfg->flavor));
     if (cfg->flavor[0] && flavor_from_key(cfg->flavor, FLAVOR_COUNT) == FLAVOR_COUNT) {

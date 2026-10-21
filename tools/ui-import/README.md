@@ -7,7 +7,7 @@ inputs the native HTML engine consumes. The Makefile target `make ui-import` run
 python3 -I tools/ui-import/import.py --ui ui
 ```
 
-It imports Krunker v10.0.2, the only version (doc/v7/decisions.md), from the live site mirror
+It imports Krunker v10.0.2 (the bundle ui/ was built from; the target is Krunker v10.0.3, doc/v10/target.md), from the live site mirror
 into `ui/` (until 2026-10-14 the v10 page was the tree `ui/v10/` and `ui/` was imported from
 Krunker v7.1.4: git history has that importer's steps). The page has been edited by hand since
 (the v10 parity work), so a re-import overwrites those edits: run it into a scratch copy

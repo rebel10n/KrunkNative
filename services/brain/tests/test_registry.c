@@ -366,7 +366,7 @@ int main(void) {
         registry_free(v);
     }
 
-    /* Krunker v10.0.2 is the only version: quick join (?ruleset=v10 or none) skips a lobby that
+    /* Krunker v10.0.3 is the only version: quick join (?ruleset=v10 or none) skips a lobby that
      * announces another one (a version-toggle server on v7.1.4); one that announces none is fine;
      * by id any lobby joins */
     {

@@ -1,6 +1,6 @@
 """Krunker v10 (the live krunker.io client) menu page import: ``import.py --ref v10`` (loaded by import.py).
 
-Writes the menu page into ``ui/`` (Krunker v10.0.2 is the only version; the hub and editor pages
+Writes the menu page into ``ui/`` (the v10 page of Krunker v10.0.2 until a v10.0.3 import runs, doc/v10/target.md; the hub and editor pages
 are ``v10_hub_editor.py``'s), from two inputs:
 
 - the live site mirror (``fetch_live_site.py --stage S``; ``--public S/public``): ``index.html``,

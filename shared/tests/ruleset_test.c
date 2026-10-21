@@ -1,4 +1,4 @@
-// ruleset_test: the Krunker v10.0.2 ruleset (shared/include/ruleset.h; the only version), its
+// ruleset_test: the Krunker v10.0.3 ruleset (shared/include/ruleset.h; the only version), its
 // wire ids, KrunkNative's id ranges (weapons.h WEAPON_ID_KN_BASE, the legacy remap) and the
 // NET_PACKET_EXT envelope (net_ext.h).
 #include <math.h>
@@ -18,7 +18,7 @@ static int g_checks, g_failures;
 
 static void test_lookup(void) {
     const Ruleset *v10 = ruleset_current();
-    CHECK(v10 && !strcmp(v10->key, "v10") && !strcmp(v10->version, "10.0.2"), "the v10 ruleset");
+    CHECK(v10 && !strcmp(v10->key, "v10") && !strcmp(v10->version, "10.0.3"), "the v10 ruleset");
     CHECK(&game_constants == v10->constants, "game_constants is the ruleset's");
     CHECK(v10->trigger_action_limit == 8 && v10->entity_limit == 64 && v10->archetype_limit == 32, "trigger action / entity / archetype limits");
     CHECK(fabsf(v10->light_unit_factor - (float) M_PI) < 1e-6f, "light unit factor");
@@ -38,8 +38,8 @@ static void test_lookup(void) {
 static void test_wire(void) {
     const NetHelloPacket hello = net_hello_make();
     CHECK(hello.major == NET_PROTOCOL_MAJOR && hello.minor == NET_PROTOCOL_MINOR && hello.patch == NET_PROTOCOL_PATCH, "HELLO protocol");
-    CHECK(hello.rulesets == (1u << 2) && NET_HELLO_RULESETS == (1u << 2), "HELLO: the v10.0.2 bit (2) only");
-    CHECK(NET_INIT_RULESET == 3 && sizeof(NetInitPacket) == NET_INIT_PACKET_V1_SIZE + 1, "INIT: 18 bytes, ruleset 3 (v10.0.2 + 1)");
+    CHECK(hello.rulesets == (1u << 2) && NET_HELLO_RULESETS == (1u << 2), "HELLO: the v10.0.3 bit (2) only");
+    CHECK(NET_INIT_RULESET == 3 && sizeof(NetInitPacket) == NET_INIT_PACKET_V1_SIZE + 1, "INIT: 18 bytes, ruleset 3 (v10.0.3 + 1)");
 }
 
 static void test_weapon_ids(void) {

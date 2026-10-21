@@ -1,6 +1,6 @@
 # Map editor (`editor.html`) and Krunker Hub (`social.html`): Krunker v10 parity
 
-Krunker v10.0.2 is the only version. This file lists every feature of the live v10 editor and hub
+The target is Krunker v10.0.3 (doc/v10/target.md); this file describes the v10.0.2 editor and hub. It lists every feature of the live v10 editor and hub
 pages (krunker.io, fetched 2026-10-13), what Krunker Box Office had before this work, what it has
 after, and the evidence in the v10 code.
 

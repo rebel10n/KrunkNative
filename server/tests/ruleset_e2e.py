@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Krunker v10.0.2 is the only version (doc/v7/decisions.md, shared/include/ruleset.h): server_bin
+"""Krunker v10.0.3 is the only version (doc/v7/decisions.md, shared/include/ruleset.h): server_bin
 and client_bin play it with no choice.
 
   python3 -I server/tests/ruleset_e2e.py BUILD_DIR      (run from the repository root)
@@ -11,7 +11,7 @@ No database or coordinator: standalone server_bin processes from generated serve
      one with the v7 bit only both spawn.
   2. the version toggle's knobs are gone: server.cfg `ruleset v7` is ignored with an error line and
      the server still plays v10; `--ruleset` is not an option (exit 2).
-  3. client_bin (headless) with a stale knRuleset "v7" saved: it logs Krunker v10.0.2, removes the
+  3. client_bin (headless) with a stale knRuleset "v7" saved: it logs Krunker v10.0.3, removes the
      entry, has no `ruleset` console command, plays offline, and joins the server and plays there.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -133,7 +133,7 @@ def main():
     p, log = start_server(0, "")
     check("server up", wait_port(PORTS[0]))
     c, init = connect(PORTS[0], [1, 3, 1])  # no ruleset mask: net-bridge, builds before the toggle
-    check("INIT: 18 bytes, ruleset 3 (v10.0.2)", init is not None and len(init) == 18 and init[17] == 3, repr(init and init[:18]))
+    check("INIT: 18 bytes, ruleset 3 (v10.0.3)", init is not None and len(init) == 18 and init[17] == 3, repr(init and init[:18]))
     check("a HELLO without the mask plays", spawned(c))
     c.close()
     c, init = connect(PORTS[0], [1, 4, 1, MASK_V7])  # a version-toggle build set to v7.1.4
@@ -141,7 +141,7 @@ def main():
     c.close()
     info = query(PORTS[0])
     check("server-info ruleset v10", info.get("ruleset") == "v10", str(info.get("ruleset")))
-    check("the log says Krunker v10.0.2", "Plays Krunker v10.0.2" in read_log(log))
+    check("the log says Krunker v10.0.3", "Plays Krunker v10.0.3" in read_log(log))
 
     # 2. no choice: server.cfg `ruleset` is ignored, --ruleset is no option
     p1, log1 = start_server(1, "ruleset v7\n")
@@ -150,7 +150,7 @@ def main():
     check("server.cfg ruleset v7: still INIT ruleset 3", init is not None and len(init) == 18 and init[17] == 3, repr(init and init[:18]))
     c.close()
     text = read_log(log1)
-    check("server.cfg ruleset v7: ignored with an error line", "gameserver.ruleset is ignored" in text and "Plays Krunker v10.0.2" in text)
+    check("server.cfg ruleset v7: ignored with an error line", "gameserver.ruleset is ignored" in text and "Plays Krunker v10.0.3" in text)
     p2, log2 = start_server(2, "", ("--ruleset", "v10"))
     try:
         rc = p2.wait(timeout=10)
@@ -161,7 +161,7 @@ def main():
     # 3. the client: no picker, no console command, plays offline and online
     text, stale = run_client("offline", ["--offline", "assets/maps/official/10_kanji.json"],
                              "0 play\n1500 state\n1600 con help ruleset\n1650 con help official_sync\n2500 quit\n")
-    check("client: logs Krunker v10.0.2", "[client] Krunker v10.0.2" in text)
+    check("client: logs Krunker v10.0.3", "[client] Krunker v10.0.3" in text)
     check("client: the stale knRuleset entry is removed", not stale)
     check("client: no `ruleset` console command", "unknown command: ruleset" in text)
     check("client: no `official_sync` console command (removed)", "unknown command: official_sync" in text)

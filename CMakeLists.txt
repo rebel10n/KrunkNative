@@ -748,7 +748,7 @@ else ()
     # charge_grapple_test: the Charge Rifle charge / blast and the Grappler rope against v7.1.4
     # piss_test: the KrunkNative Piss's stream, puddles, caps and their SPAWNED_OBJ replication
     # nettspend_test: the KrunkNative Nettspend class, Purple Drank (puddle slow, the laced pour-up) and Money Spread
-    # ruleset_test: the Krunker v10.0.2 ruleset, KN id ranges and the NET_PACKET_EXT envelope
+    # ruleset_test: the Krunker v10.0.3 ruleset, KN id ranges and the NET_PACKET_EXT envelope
     # hitboxes_test: the v10.0.2 posed hit boxes (shared/src/hitboxes.c) at known poses
     # v10_gameplay_test: the v10.0.2-only gameplay (Boulder, Compressor, Stalker rework, ranked rules)
     # flavor_gameplay_test: the product-flavor gameplay (Krunker Strike plays FRVR's tables; base unchanged)

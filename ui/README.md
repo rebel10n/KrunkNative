@@ -1,7 +1,7 @@
 # ui/ — the Krunker v10.0.2 menu as HTML/CSS
 
 This is Krunker v10.0.2's menu page (krunker.io, mirrored 2026-10-13), the only page Krunker Box
-Office has (Krunker v10.0.2 is the only version: doc/v7/decisions.md), rendered by the in-house
+Office has. The target is Krunker v10.0.3 (doc/v10/target.md); this page is the 10.0.2 import until `make ui-import` runs on the 10.0.3 bundle. It is rendered by the in-house
 HTML/CSS engine in the native client and by the browser in the web build (see
 `doc/html-ui-engine.md`). Its behaviour is C (`client/src/ui/`: `v10_*.c`, `hud_v10.c` and the
 older modules), not JavaScript. Until 2026-10-14 it was the separate tree `ui/v10/` next to the

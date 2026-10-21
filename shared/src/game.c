@@ -100,7 +100,7 @@ void game_configure(
     Weapon **weapons, const size_t weapon_count,
     ClassConfig *classes, size_t class_count
 ) {
-    // the ruleset (ruleset.h, Krunker v10.0.2) supplies the default tables; the game keeps its pointer
+    // the ruleset (ruleset.h, Krunker v10.0.3) supplies the default tables; the game keeps its pointer
     const Ruleset *rules = ruleset_current();
     game->rules = rules;
     if (config) game->config = *config;

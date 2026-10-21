@@ -358,7 +358,7 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 
 ## 9. Port status (gameplay)
 
-Krunker v10.0.2 is the only version (doc/v7/decisions.md, user 2026-10-13): everything below is the
+The target is Krunker v10.0.3 (doc/v10/target.md). The values below are the v10.0.2 spec (doc/v7/decisions.md, user 2026-10-13): everything below is the
 game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are gone.
 
 | item | where | tests |
