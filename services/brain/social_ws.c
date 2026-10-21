@@ -866,7 +866,7 @@ static const LabelClass k_label_class[] = {
     {"sst", RC_READ, ANS_REPLY}, {"chg", RC_READ, ANS_REPLY}, {"mdl", RC_READ, ANS_REPLY},
     {"bpdl", RC_READ, ANS_REPLY}, {"ri", RC_READ, ANS_REPLY}, {"ecfg", RC_READ, ANS_REPLY},
     {"st", RC_READ, ANS_REPLY}, {"kml", RC_READ, ANS_REPLY}, {"fil", RC_READ, ANS_REPLY},
-    {"uml", RC_READ, ANS_REPLY},
+    {"uml", RC_READ, ANS_REPLY}, {"recps", RC_READ, ANS_REPLY}, /* v10 CRAFT_DATA_REQUEST (craft.c, the Junkyard) */
     {"f", RC_WRITE, ANS_REPLY}, {"ps", RC_WRITE, ANS_REPLY}, {"com", RC_WRITE, ANS_REPLY},
     {"lps", RC_WRITE, ANS_REPLY}, {"dps", RC_WRITE, ANS_REPLY}, {"ict", RC_WRITE, ANS_REPLY},
     {"kr", RC_WRITE, ANS_REPLY}, {"cln", RC_WRITE, ANS_REPLY}, {"clnR", RC_WRITE, ANS_REPLY},
@@ -883,6 +883,7 @@ static const LabelClass k_label_class[] = {
     {"bpclm", RC_WRITE, ANS_REPLY}, {"bpclmAll", RC_WRITE, ANS_REPLY}, {"xstbp", RC_WRITE, ANS_REPLY},
     {"xstbpl", RC_WRITE, ANS_REPLY}, {"dsl", RC_WRITE, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, {"rml", RC_WRITE, ANS_REPLY},
     {"vr", RC_WRITE, ANS_REPLY}, /* v10 REDEEM_VOUCHER (redeem.c): a refusal is answered "vr" with the error */
+    {"crft", RC_WRITE, ANS_REPLY}, /* v10 CRAFT_REQUEST (craft.c, the Junkyard): changes the inventory */
     {"raml", RC_WRITE, ANS_REPLY},
     {"rqdxp", RC_WRITE, ANS_REPLY}, /* v10 2x XP claim (it doubles the score: a write, answered "rrqdxp") */
     {"wo", RC_READ, ANS_REPLY}, {"wob", RC_WRITE, ANS_REPLY}, {"wor", RC_WRITE, ANS_REPLY}, /* v10 wild offers (wild_offer.c) */
