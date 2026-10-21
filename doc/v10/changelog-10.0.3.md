@@ -68,7 +68,7 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 | Official 10.0.3 line | Class | KN action |
 |---|---|---|
-| Recruitment minimum level and K/D now apply to every join request | Bug | **Not ported; applies to KN.** v10.0.2 gated the join button on level only. KN has the same gate: `client/src/ui/turf_ui.c` (`min_level > 0 && a->level < min_level`) and `services/brain/db_turf.c` `run_apply` (level only). v10.0.3 adds `(kills || 0) / max(deaths || 0, 1) < min_kd` to the client gate. The K/D source for a join request (lifetime kills and deaths on the account) must be chosen and enforced in the brain as well. Left for a decision. |
+| Recruitment minimum level and K/D now apply to every join request | Bug | **Ported.** The post's minimum K/D refuses every join request and approval: the Apply button (`client/src/ui/turf_ui.c`), the brain's `run_apply` (`services/brain/db_turf.c`, `recruit_kd_refused`), the join by name (`run_clan_request`) and the owner's approval (`run_clan_answer`, `services/brain/db_social.c`). K/D is the profile's: lifetime kills / max(deaths, 1) (`players.player_kills` / `player_deaths`; no row = 0). Refusal: "Requirements Not Met" (v10's disabled button). The minimum level is still checked on Apply only (KN's own gate). |
 | Fixed recruitment pages jumping back to page 1 | Bug | Not verified (`client/src/ui/clan_ui.c`). |
 
 ### KrunkScript and Editor

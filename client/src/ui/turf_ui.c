@@ -1189,7 +1189,7 @@ static void gen_recruit(StrBuf *sb) {
                 int applied = 0;
                 for (int i = 0; i < g_applied_count; i++) applied |= g_applied_ids[i] == clan_id;
                 if (applied) sb_append(sb, "<button class=\"main-button svelte-whnh40 main-button-accept main-button-disabled\" type=\"button\" disabled>Applied</button>");
-                else if (min_level > 0 && a->level < min_level)
+                else if ((min_level > 0 && a->level < min_level) || (min_kd > 0 && a->kills / (a->deaths > 1 ? a->deaths : 1) < min_kd)) // v10.0.3: K/D as the profile's KDR
                     sb_append(sb, "<button class=\"main-button svelte-whnh40 main-button-accept main-button-disabled\" type=\"button\" disabled>Requirements Not Met</button>");
                 else
                     sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-accept%s\" type=\"button\"%s onclick=\"playSelect();knTwRcApply(%d)\">%s</button>",

@@ -273,6 +273,10 @@ static kn_db_result *run_clan_request(kn_dbconn *c, int n, const char *const *p)
     cJSON_AddItemToObject(o, "leader", kn_db_isnull(r, 0, 1) ? cJSON_CreateNull()
                                                              : cJSON_CreateNumber((double)kn_db_get_int64(r, 0, 1, 0)));
     kn_db_result_free(r);
+    if (recruit_kd_refused(&x, clan, PI(0))) { /* v10.0.3: the clan's recruitment minimum K/D gates every join request */
+        cJSON_Delete(o);
+        return dbx_finish(&x, kn_db_result_user_error("Requirements Not Met"));
+    }
     dbx_exec(&x, SQL(.any = "{insert_ignore} INTO clan_requests (clan_id, account_id) VALUES ($1, $2) {ignore_conflicts}"),
              KN_DB_ARGS(I64S(clan), P(0)));
     return dbx_json(&x, "kn_clan_request", o);
@@ -379,6 +383,9 @@ static kn_db_result *run_clan_answer(kn_dbconn *c, int n, const char *const *p) 
     Dbx x = {c, NULL};
     int64_t clan = clan_of(&x, P(0));
     if (clan <= 0 || !clan_officer(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    /* v10.0.3: the recruitment minimum K/D gates the approval too (the join it makes); the request stays pending */
+    if (kn_store_parse_bool(P(2), 0) && recruit_kd_refused(&x, clan, PI(1)))
+        return dbx_finish(&x, kn_db_result_user_error("Requirements Not Met"));
     if (dbx_exec(&x, SQL(.any = "DELETE FROM clan_requests WHERE clan_id = $1 AND account_id = $2"),
                  KN_DB_ARGS(I64S(clan), P(1))) == 0)
         return dbx_finish(&x, kn_db_result_user_error("Request not found"));

@@ -823,7 +823,21 @@ static kn_db_result *run_recruit_del(kn_dbconn *c, int n, const char *const *p) 
 }
 const kn_proc P_TURF_RECRUIT_DEL = {"turf_recruit_del", NULL, run_recruit_del};
 
-/* (clan, account, level): a join request (clan_requests, the clan's Requests list) */
+/* recruit_kd_refused (db_procs.h): the active post's min_kd against the account's K/D as its profile shows it
+ * (kd_of: lifetime kills over deaths, a player with no deaths counts its kills). */
+int recruit_kd_refused(Dbx *x, int64_t clan, int64_t acc) {
+    cJSON *r = dbx_row(x, SQL(.any = "SELECT r.min_kd AS min_kd__f, p.player_kills AS kills__i, p.player_deaths AS deaths__i"
+                                     " FROM clan_recruitment r LEFT JOIN players p ON p.player_id = $2"
+                                     " WHERE r.clan_id = $1 AND r.is_active = {true}"),
+                       KN_DB_ARGS(I64S(clan), I64S(acc)));
+    if (!r) return 0;
+    const double min_kd = jnum(r, "min_kd"), kd = kd_of(jnum(r, "kills"), jnum(r, "deaths"));
+    cJSON_Delete(r);
+    return min_kd > 0 && kd < min_kd;
+}
+
+/* (clan, account, level): a join request (clan_requests, the clan's Requests list). The post's minimum level
+ * and minimum K/D (v10.0.3: every join request) refuse it as v10's disabled button does. */
 static kn_db_result *run_apply(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t acc = PI(1), level = PI(2);
@@ -838,6 +852,10 @@ static kn_db_result *run_apply(kn_dbconn *c, int n, const char *const *p) {
     }
     const int64_t min_level = dbx_int(&x, SQL(.any = "SELECT min_level FROM clan_recruitment WHERE clan_id = {int:$1} AND is_active = {true}"), KN_DB_ARGS(I64S(clan)), 0);
     if (min_level > 0 && level < min_level) {
+        dbx_refuse(&x, "Requirements Not Met");
+        return dbx_finish(&x, NULL);
+    }
+    if (recruit_kd_refused(&x, clan, acc)) {
         dbx_refuse(&x, "Requirements Not Met");
         return dbx_finish(&x, NULL);
     }

@@ -11,7 +11,8 @@ once (a second brain does not pay again), the controller in /api/territorial-war
 60 / 30 / 10 split, the loot configs (clan_bank -> the clan's funds; even / performance -> the
 members' KR), the clan / player / leaderboard routes in v10's {data: ...} shapes, PUT loot-config
 permissions, recruitment posts (1,000 KR from the clan bank on create, owner / Captain+ only,
-validation, the 30 s cooldown, apply, my-applications, delete), and clean logs.
+validation, the 30 s cooldown, apply, my-applications, the minimum K/D on apply, join by name and the
+owner's approval (below refused, at or above accepted), delete), and clean logs.
 """
 import asyncio
 import json
@@ -193,6 +194,34 @@ async def deposit(port, acc, amount):
         return await s.call("cln", "cln", 7, amount, {"wd": 0})
 
 
+async def add_stats(port, acc, kills, deaths):
+    """the account's lifetime kills and deaths (players.player_kills / player_deaths, the K/D its profile
+    shows) through the internal stats op: one match's counts, added to the account's. The error or None"""
+    async with websockets.connect("ws://127.0.0.1:%d/mm/internal/ws" % port, additional_headers={"Authorization": "Bearer " + SECRET}) as ws:
+        await ws.send(json.dumps({"type": "hello", "nodeId": "TRK", "region": "us-nj", "publicHost": "127.0.0.1", "publicPort": 23996,
+                                  "version": "test", "maxLobbies": 1}))
+        await ws.send(json.dumps({"type": "acct", "rid": 9, "op": "stats",
+                                  "args": {"id": acc["id"], "match": "kd-" + uuid.uuid4().hex, "kills": kills, "deaths": deaths, "games": 1}}))
+        while True:
+            m = json.loads(await asyncio.wait_for(ws.recv(), 10))
+            if m.get("type") == "acct-r" and m.get("rid") == 9:
+                return m.get("err")
+
+
+async def join_by_name(port, acc, tag):
+    """the clan window's join by name (["cln", tag]): "Request Sent", or the refusal's text"""
+    async with Social("ws://127.0.0.1:%d/social/ws" % port) as s:
+        await s.call("a", "a", 1, [acc["name"], None, acc["token"]])
+        return await s.call("cln", "cln", tag)
+
+
+async def answer(port, owner, applicant, accept):
+    """the owner's Requests list (["clnR", applicant, accept]): ["cln", error, ...] when refused"""
+    async with Social("ws://127.0.0.1:%d/social/ws" % port) as o:
+        await o.call("a", "a", 1, [owner["name"], None, owner["token"]])
+        return await o.call("cln", "clnR", applicant["id"], accept)
+
+
 def recruitment(port, accs, clan_a, clan_c):
     """v10's recruitment posts (0208_clan_recruitment): CCC's bank holds 125 KR after the settlement"""
     auth = lambda a: {"Authorization": "Bearer " + a["token"]}
@@ -229,10 +258,33 @@ def recruitment(port, accs, clan_a, clan_c):
     check(code == 200 and r["data"]["posts"] == [], "the list filtered by region")
     code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[0]))
     check(code == 400 and "already in a clan" in str(r.get("message", r)), "a clan member cannot apply (%s)" % r)
+    # v10.0.3: the post's minimum K/D (1.5) applies to every join request and to its approval. K/D is the
+    # profile's: lifetime kills / max(deaths, 1). accs[9] has no kills yet (K/D 0): refused by the Apply and by join by name
     code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
-    check(code == 200 and r["data"]["message"] == "Application sent!", "a clanless player applies (%s %s)" % (code, r))
+    check(code == 400 and r.get("message") == "Requirements Not Met", "K/D 0 under the post's 1.5: the Apply refused (%s)" % r)
+    r = asyncio.run(join_by_name(port, accs[9], "ccc"))
+    check(r[1] == "Requirements Not Met", "K/D 0: the join by name refused (%s)" % (r,))
+    check(asyncio.run(add_stats(port, accs[9], 2, 2)) is None, "2 kills, 2 deaths recorded (K/D 1.0)")
+    code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
+    check(code == 400 and r.get("message") == "Requirements Not Met", "K/D 1.0 below 1.5: the Apply refused (%s)" % r)
+    check(asyncio.run(add_stats(port, accs[9], 1, 0)) is None, "1 more kill recorded (K/D 1.5, the minimum)")
+    code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
+    check(code == 200 and r["data"]["message"] == "Application sent!", "K/D 1.5, the minimum: a clanless player applies (%s %s)" % (code, r))
     code, r = http(port, "/api/clans/my-applications", headers=auth(accs[9]))
     check(code == 200 and r["data"]["clan_ids"] == [clan_c], "my-applications lists CCC (%s)" % r)
+    r = asyncio.run(join_by_name(port, accs[9], "ccc"))
+    check(r[1] == "Request Sent", "K/D 1.5: the join by name is a request (%s)" % (r,))
+    # the owner's approval of that request: 3 kills / 10 deaths (0.3) refused and the request stays; 30 / 10 (3.0) accepted
+    check(asyncio.run(add_stats(port, accs[9], 0, 8)) is None, "8 more deaths recorded (K/D 0.3)")
+    r = asyncio.run(answer(port, accs[6], accs[9], 1))
+    check(r[1] == "Requirements Not Met", "K/D 0.3: the owner's approval refused (%s)" % (r,))
+    code, r = http(port, "/api/clans/my-applications", headers=auth(accs[9]))
+    check(code == 200 and r["data"]["clan_ids"] == [clan_c], "the refused request stays pending (%s)" % r)
+    check(asyncio.run(add_stats(port, accs[9], 27, 0)) is None, "27 more kills recorded (K/D 3.0)")
+    r = asyncio.run(answer(port, accs[6], accs[9], 1))
+    check(r[1] is None, "K/D 3.0: the owner's approval accepted (%s)" % (r,))
+    code, r = http(port, "/api/clans/my-applications", headers=auth(accs[9]))
+    check(code == 200 and r["data"]["clan_ids"] == [], "approved: the request is gone (%s)" % r)
     code, r = http(port, "/api/clans/%d/recruitment" % clan_a, method="DELETE", headers=auth(accs[6]))
     check(code == 400, "another clan's owner cannot remove AAA's post (%s)" % code)
     code, r = http(port, url, method="DELETE", headers=auth(accs[6]))
@@ -406,7 +458,7 @@ def main():
               and all(isinstance(r["player_clan"], str) for r in lb["data"]), "leaderboard player_funds (%d rows)" % len(vals))
         code, lb = http(port, "/api/leaderboards/player_clan", sort="members")
         mine = {r["clan_name"]: r["member_count"] for r in lb.get("data", [])} if code == 200 else {}
-        check(mine.get("AAA") == 3 and mine.get("BBB") == 3 and mine.get("CCC") == 3, "leaderboard clans by members (%s)" % mine)
+        check(mine.get("AAA") == 3 and mine.get("BBB") == 3 and mine.get("CCC") == 4, "leaderboard clans by members, CCC with accs[9] approved (%s)" % mine)
         code, lb = http(port, "/api/leaderboards/raids/0")
         check(code == 200 and lb["data"] == [], "raids: no data yet")
         code, lb = http(port, "/api/leaderboards/player_skinvalue")

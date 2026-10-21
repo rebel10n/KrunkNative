@@ -58,6 +58,11 @@ cJSON *dbx_rows(Dbx *x, const kn_sql *q, int n, const char *const *p);
 /* First row as a JSON object, NULL without rows / on failure. */
 cJSON *dbx_row(Dbx *x, const kn_sql *q, int n, const char *const *p);
 
+/* ---- v10.0.3 recruitment minimum K/D (db_turf.c recruit_kd_refused): every join request and approval of a clan */
+/* 1 when clan `clan` has an active post whose min_kd the account's K/D is below (the profile's: lifetime kills
+ * over max(deaths, 1)); 0 otherwise. Without a players row the account has 0 kills and 0 deaths. */
+int recruit_kd_refused(Dbx *x, int64_t clan, int64_t acc);
+
 /* ---- shared domain helpers (C versions of postgres/0103-0104 functions) */
 /* kn_html */
 char *db_html(const char *s);
