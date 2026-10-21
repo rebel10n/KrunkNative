@@ -1922,8 +1922,6 @@ int account_ui_twofa_handler(const char *name) {
     return name && (!strcmp(name, "sub2FA") || !strcmp(name, "onInput2FA") || !strcmp(name, "onKeyDown2FA"));
 }
 
-// The login card's Login names an account other than the signed-in one: a sign-in would switch the session (and
-// the reply's account replaces this one). The name typed decides; in Email mode the address does, when it is known.
 static int same_login_text(const char *a, const char *b) {
     for (; *a && *b; a++, b++) {
         if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) return 0;
@@ -1931,11 +1929,18 @@ static int same_login_text(const char *a, const char *b) {
     return *a == *b;
 }
 
+// The login card's Login names an account other than the signed-in one: a sign-in would switch the session (the
+// reply's account replaces this one). The identity held decides. A name is compared with the signed-in account's
+// name. An address (typed in either field: the brain signs in by it) is compared with the address on file, which the
+// brain pushes after every login (emailS). Until that address is known nothing shows the login is this account, so
+// it is refused (the fallback), and the card says whose session it is.
 static int names_other_account(const char *user, const char *mail) {
     if (!g_logged_in) return 0;
-    if (user[0]) return !same_login_text(user, g_acc.name);
-    if (!mail[0]) return 0;
-    return !(g_email.known && g_email.addr[0] && same_login_text(mail, g_email.addr));
+    const char *ident = user[0] ? user : mail;
+    if (!ident[0]) return 0;
+    if (!strchr(ident, '@')) return !same_login_text(ident, g_acc.name);
+    if (!g_email.known) return 1; // the fallback: no address held yet
+    return !(g_email.addr[0] && same_login_text(ident, g_email.addr));
 }
 
 // The card's message (accResp): the signed-in account stays, and the login typed is not signed in. Nothing is sent.

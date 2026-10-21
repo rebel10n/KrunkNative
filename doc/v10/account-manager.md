@@ -26,7 +26,9 @@ Remove. The window never signs anyone in: the player presses Login on the login 
    (whoever is signed in) and in an official game the card opens with the row's login all the same. Login is the
    player's press; the window shows no refusal text for Use.
    **Login on a card over a signed-in account** (either backend) signs in only when the login typed is the signed-in
-   account's (case-blind; a krunk.io card in Email mode matches its address when it is known). Any other login sends
+   account's: a name is compared with the signed-in account's name (case-blind), and an address, typed in either field,
+   with the address on file (the brain pushes it after every login, `emailS`). Until that address is known the Login
+   is refused, as a login that might be another account: nothing proves it is this one. Any other login sends
    nothing: the session is not switched and not signed out, and the card's message line says
    `Signed in as <name>. Log out to sign in as <login>.` (`kn.account.otherSignedIn`).
 5. **Logout** ends the session as before (the krunk.io server revokes it, the row keeps its login). **Startup**

@@ -346,6 +346,50 @@ def kio_login(brain_url, game_port, stub):
     check("the card closes after the krunker.io sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
 
 
+def same_account_login(brain_url, game_port, db):
+    """Signed in as NAME2: a Login for that same account signs in as before and the card closes. Typed in the Username
+    field (NAME, with a "b" typed on: NAME2), and typed as its address (a row listed under the address, whose Use fills
+    the Username field with it). The Username row is removed again at the end."""
+    before = sessions(db)
+    log = run_client("same_login", f"""0 menu
+500 call showWindow {WINDOW}
+1000 clicksel [onclick*="knAltUse"]
+2000 nodes @umodal [id="knV10Login"]
+2100 clickid accName
+2200 type b
+2300 nodes @uok [id="accName"][value="{NAME2}"]
+2400 clickid knV10LoginSubmit
+4000 nodes @uclosed [id="knV10Login"]
+4500 call showWindow {WINDOW}
+5000 clickid knAltUser
+5100 type {ADDR2}
+5200 clickid knAltPass
+5300 type {PASS}
+5400 clicksel [onclick*="knAltAdd"]
+5900 text @aadd [id="knAltMsg"]
+6200 clicksel [onclick*="knAltUse"]
+7200 nodes @amodal [id="knV10Login"]
+7300 nodes @auser [id="accName"][value="{ADDR2}"]
+7400 clickid knV10LoginSubmit
+9400 nodes @aclosed [id="knV10Login"]
+9800 call showWindow {WINDOW}
+10300 clicksel [onclick*="knAltRemove"]
+10800 text @arem [id="knAltMsg"]
+11200 text @act .knAltActive
+11500 quit
+""", brain_url, game_port)
+    check("Login typed as the signed-in account's name signs in as before (the card closes)",
+          match_of(log, "umodal") == 1 and match_of(log, "uok") == 1 and match_of(log, "uclosed") == 0,
+          f"card {match_of(log, 'umodal')} typed {match_of(log, 'uok')} closed-count {match_of(log, 'uclosed')}")
+    check("Login typed as the signed-in account's address opens the card with it", match_of(log, "amodal") == 1
+          and match_of(log, "auser") == 1, f"card {match_of(log, 'amodal')} user {match_of(log, 'auser')}")
+    check("Login typed as the signed-in account's address signs in as before (the card closes)",
+          match_of(log, "aclosed") == 0, str(match_of(log, "aclosed")))
+    check("both Logins reached the brain (a session each)", sessions(db) >= before + 2, f"sessions {before} -> {sessions(db)}")
+    check("the signed-in account stays the active row", NAME2 in text_of(log, "act"), text_of(log, "act")[-120:])
+    check("and the address's row is removed again", f"Removed {ADDR2}." in text_of(log, "arem"), text_of(log, "arem")[-120:])
+
+
 def login_while_signed_in(brain_url, game_port, db):
     """Signed in as NAME2: Use fills the card with the other listed login (NAME), and its Login sends no sign-in. The
     signed-in account stays the active row and nobody is signed out; the card says whose session it is."""
@@ -550,6 +594,7 @@ def main():
         sign_in_from_card(brain_url, game_port)
         use_while_signed_in(brain_url, game_port)
         login_while_signed_in(brain_url, game_port, db)
+        same_account_login(brain_url, game_port, db)
         restart_and_logout(brain_url, game_port)
         sign_in_from_card(brain_url, game_port)
         refused_token(brain_url, game_port, db)
