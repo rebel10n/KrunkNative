@@ -32,6 +32,7 @@
 #include <region_ping.h>   // the seek region's ping race (v10 getRegion)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <menu_sources.h>  // Popular Now is Box Office's only (menu_popular_on)
+#include <region_names.h>  // the edges (SV, CH...) and the v10 ids the pickers and seeks use
 #include <seek_choice.h>   // the seek's region (a saved Default Region is kept) and a full lobby answer
 #include <seek_claim.h>    // which matchmaking answer may enter a lobby (a host or a join by hand overtakes a seek)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
@@ -61,18 +62,11 @@
 #define SERVER_BROWSER_RATE_MS 10000.0 // config.serverBrowserRate
 #define RESTORE_WAIT_SECONDS 2.0       // startup seek waits this long for the saved session
 
-// config.regionNames. KrunkNative's regions are its edge locations; the id the game servers
-// announce (server.cfg `region`, deploy/ansible kn_gameserver_region) is the 2-letter code.
-// Links carry the short form (?game=CH2:kz862: the code + the node's instance number,
-// shared/include/server_names.h); the server browser, the region pickers and the menu's
-// region label show the long names (the region's place name, a server's "Chicago 2": the
+// KrunkNative's regions (region_names.h): a lobby row carries its edge's code (SV, CH: the id the game
+// servers announce, server.cfg `region`), the pickers and seeks use the v10 region id it is listed under
+// (us-ca-sv, us-nj). Links carry the short form (?game=CH2:kz862: the code + the node's instance number,
+// shared/include/server_names.h); the server browser shows the place name (a server's "Chicago 2": the
 // city + the instance number), the code / node id as the tooltip.
-static const struct {
-    const char *id, *code, *name, *city;
-} k_regions[] = {
-    {"SV", "SV", "Santa Clara", "Santa Clara"}, {"LA", "LA", "Los Angeles", "Los Angeles"}, {"CH", "CH", "Chicago", "Chicago"},
-    {"VA", "VA", "Ashburn, Virginia", "Ashburn"}, {"local", "LO", "Local", "Local"},
-};
 
 static Client *g_client;
 static int g_brain_mode;
@@ -241,21 +235,18 @@ static void comma_number(char *out, const size_t n, const double value) {
 
 // The region's display code ("SV"); an id the table does not know shows as itself.
 static const char *region_name(const char *id) {
-    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
-        if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].code;
-    }
+    const RegionEdge *e = region_edge(id);
+    if (e) return e->code;
     return id && id[0] ? id : "?";
 }
 
 // The place name ("" unknown).
 static const char *region_full_name(const char *id) {
-    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
-        if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].name;
-    }
-    return "";
+    const RegionEdge *e = region_edge(id);
+    return e ? e->name : "";
 }
 
-// The long name the browser groups and the region pickers show: the place name, else the id.
+// The long name the browser groups show: the place name, else the id.
 static const char *region_long_name(const char *id) {
     const char *name = region_full_name(id);
     return name[0] ? name : region_name(id);
@@ -263,10 +254,15 @@ static const char *region_long_name(const char *id) {
 
 // The region's city for server names ("" unknown).
 static const char *region_city(const char *id) {
-    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]); i++) {
-        if (id && !strcmp(k_regions[i].id, id)) return k_regions[i].city;
-    }
-    return "";
+    const RegionEdge *e = region_edge(id);
+    return e ? e->city : "";
+}
+
+// A saved or cached region as the client knows it: a KrunkNative code from an older build becomes its v10 id.
+static void canonical_region(char *buf, const size_t n) {
+    char raw[64];
+    snprintf(raw, sizeof(raw), "%s", buf);
+    snprintf(buf, n, "%s", region_id_of(raw));
 }
 
 // A server's proper name (browser rows, the menu's region label) from its game or node id:
@@ -292,24 +288,34 @@ static void server_display_name(const char *id, const char *region, char *out, c
 // region plus the ones the matchmaker lists, `selected` marked.
 static cJSON *g_ping_regions;    // the last /mm/ping-list answer (owned)
 static cJSON *g_row_pings;       // {region: ms} measured with the last list load (v10 pingData; -1 failed; owned)
+static void region_add_id(const char **seen, int *count, const char *id) {
+    if (!id || !id[0] || *count >= 64) return;
+    for (int i = 0; i < *count; i++) {
+        if (!strcmp(seen[i], id)) return;
+    }
+    seen[(*count)++] = id;
+}
+
+// <option>s of the region pickers (Settings > Default Region, the ranked queue): the v10 id of every
+// KrunkNative edge, then the ids the matchmaker lists, each once. The value is the v10 id (what the seek
+// sends); the label is its v10 name with the edge places it holds (region_picker_label).
 char *servers_ui_region_options(const char *selected) {
     StrBuf sb = {0};
     const char *seen[64];
     int count = 0;
-    for (size_t i = 0; i < sizeof(k_regions) / sizeof(k_regions[0]) && count < 64; i++) seen[count++] = k_regions[i].id;
+    for (size_t i = 0; i < region_edge_count(); i++) region_add_id(seen, &count, region_edge_at(i)->v10);
     const cJSON *r;
-    cJSON_ArrayForEach(r, g_ping_regions) {
-        int known = 0;
-        for (int i = 0; i < count; i++) known |= r->string && !strcmp(seen[i], r->string);
-        if (!known && r->string && count < 64) seen[count++] = r->string;
-    }
+    cJSON_ArrayForEach(r, g_ping_regions) region_add_id(seen, &count, r->string);
+    const char *sel = region_id_of(selected);
     for (int i = 0; i < count; i++) {
+        char label[160];
+        region_picker_label(seen[i], label, sizeof(label));
         sb_append(&sb, "<option value='");
         sb_append_esc(&sb, seen[i]);
         sb_append(&sb, "' title='");
-        sb_append_esc(&sb, region_name(seen[i]));
-        sb_appendf(&sb, "'%s>", selected && !strcmp(selected, seen[i]) ? " selected" : "");
-        sb_append_esc(&sb, region_long_name(seen[i]));
+        sb_append_esc(&sb, seen[i]);
+        sb_appendf(&sb, "'%s>", sel[0] && !strcmp(sel, seen[i]) ? " selected" : "");
+        sb_append_esc(&sb, label);
         sb_append(&sb, "</option>");
     }
     return sb_finish(&sb);
@@ -862,7 +868,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         const cJSON *web = cJSON_GetObjectItem(res, "webUrl");
         const cJSON *region = cJSON_GetObjectItem(res, "region");
         g_full_skips = 0;
-        if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
+        if (cJSON_IsString(region)) snprintf(g_region, sizeof(g_region), "%s", region_id_of(region->valuestring)); // the seek answer names its edge: its v10 id
         g_quick_join_left = 0;
         g_account_game[0] = 0;
         if (rejoin) printf("[mm] rejoin: %s with a fresh join ticket\n", cJSON_IsString(game) ? game->valuestring : "?");
@@ -1353,9 +1359,13 @@ static int region_listed(const char *region) {
 const char *servers_ui_auto_region(void) {
     static char cached[32];
     char pinged[32];
-    if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0 || html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0 ||
-        strcmp(cached, pinged))
+    if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0 || html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0) {
         cached[0] = 0;
+        return cached;
+    }
+    canonical_region(cached, sizeof(cached));
+    canonical_region(pinged, sizeof(pinged));
+    if (strcmp(cached, pinged)) cached[0] = 0;
     return cached;
 }
 
@@ -1418,10 +1428,16 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     cJSON *list = status == 200 ? cJSON_Parse(body) : NULL;
     char cached[32] = "", saved[32] = "";
     if (html_storage_get("pingRegion7", cached, sizeof(cached)) < 0) cached[0] = 0;
+    canonical_region(cached, sizeof(cached)); // a region saved by an older build (its KrunkNative code) is its v10 id
     char pinged[32] = "";
-    if (html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0 || strcmp(cached, pinged)) cached[0] = 0; // a race confirmed it
+    if (html_storage_get(PINGED_KEY, pinged, sizeof(pinged)) < 0) pinged[0] = 0;
+    canonical_region(pinged, sizeof(pinged));
+    if (strcmp(cached, pinged)) cached[0] = 0; // a race confirmed it
     const cJSON *setting = ui_setting_saved("defaultRegion");
-    if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(saved, sizeof(saved), "%s", setting->valuestring);
+    if (cJSON_IsString(setting) && setting->valuestring[0]) {
+        snprintf(saved, sizeof(saved), "%s", setting->valuestring);
+        canonical_region(saved, sizeof(saved));
+    }
     // a saved Default Region the ping list does not name is not an error: the seek goes on in an
     // available region (seek_region_choose: the first listed one, then the ping race below picks the
     // lowest measured one), logged here only
@@ -1687,7 +1703,7 @@ static void on_game_info(void *user, const int status, const char *body, const s
     const cJSON *region = cJSON_GetArrayItem(tuple, 1);
     if (cJSON_IsString(region)) {
         char name[128];
-        snprintf(g_region, sizeof(g_region), "%s", region->valuestring);
+        snprintf(g_region, sizeof(g_region), "%s", region_id_of(region->valuestring)); // the lobby row names its edge: its v10 id
         server_display_name(cJSON_GetStringValue(cJSON_GetArrayItem(tuple, 0)), region->valuestring, name, sizeof(name));
         menu_set_region_label(name);
     }
@@ -1803,6 +1819,7 @@ static void default_region(char *out, const size_t n) {
     const cJSON *setting = ui_setting_saved("defaultRegion");
     if (cJSON_IsString(setting) && setting->valuestring[0]) snprintf(out, n, "%s", setting->valuestring);
     else if (html_storage_get("pingRegion7", out, n) < 0) out[0] = 0;
+    canonical_region(out, n); // a v10 id (an older build saved the KrunkNative code)
 }
 
 // v7 searchMatches(tuple) against the search text (autoPlaySearch || serverSearch)
@@ -1965,7 +1982,7 @@ static int cmp_games_old(const void *a, const void *b) {
 // Custom Games / Official Customs with regionPriority (always on): default region first
 static int cmp_games_region(const void *a, const void *b) {
     const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
-    const int dx = !strcmp(tuple_str(x, 1), g_sort_region), dy = !strcmp(tuple_str(y, 1), g_sort_region);
+    const int dx = !strcmp(region_id_of(tuple_str(x, 1)), g_sort_region), dy = !strcmp(region_id_of(tuple_str(y, 1)), g_sort_region);
     return dy - dx;
 }
 static int cmp_groups_order(const void *a, const void *b) {
@@ -2016,7 +2033,7 @@ static int kio_group(ServerGroup *groups, int *count, const int max, const cJSON
         snprintf(g->name, sizeof(g->name), "%s", name);
         g->region_rank = 1000 + (kio_rank(key) < 2 ? kio_rank(key) : 2 + *count);
         default_region(def, sizeof(def));
-        if (!strcmp(key, "kio:official") || !strcmp(key, "kio:custom") || !strcmp(tuple_str(t, 1), def)) g->order = 1;
+        if (!strcmp(key, "kio:official") || !strcmp(key, "kio:custom") || !strcmp(region_id_of(tuple_str(t, 1)), def)) g->order = 1;
         gi = (*count)++;
     }
     return gi;
@@ -2053,16 +2070,16 @@ static int build_groups(ServerGroup *groups, const int max) {
                 if (gi >= 0) group_push(&groups[gi], t);
                 continue;
             }
-            if (only_default && strcmp(def, region)) continue;
+            if (only_default && strcmp(def, region_id_of(region))) continue;
             if (find_group(groups, count, region) < 0 && count < max) {
                 ServerGroup *g = &groups[count];
                 snprintf(g->key, sizeof(g->key), "%s", region);
                 if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_long_name(region));
                 else snprintf(g->name, sizeof(g->name), "%s",
-                                   !strcmp(def, region) ? I18N("settings.local.region", "Default Region")
-                                   : !strcmp(g_region, region) ? I18N("kn.servers.currentRegion", "Current Region")
+                                   !strcmp(def, region_id_of(region)) ? I18N("settings.local.region", "Default Region")
+                                   : !strcmp(g_region, region_id_of(region)) ? I18N("kn.servers.currentRegion", "Current Region")
                                    : I18N("kn.servers.hiddenRegion", "Hidden Region"));
-                if (!strcmp(def, region)) g->order = 1;
+                if (!strcmp(def, region_id_of(region))) g->order = 1;
                 g->region_rank = count;
                 count++;
             }
@@ -2119,7 +2136,7 @@ static const char *region_ping_color(const char *region, const int krunker) {
     double ping = 0;
     if (krunker) krunker_lobbies_region_ping_ms(region, &ping);
     else {
-        const cJSON *p = cJSON_GetObjectItemCaseSensitive(g_row_pings, region);
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(g_row_pings, region_id_of(region)); // the pings are keyed by v10 id
         if (cJSON_IsNumber(p)) ping = p->valuedouble;
     }
     return ping / 2 >= 150 ? "rgb(255, 75, 66)" : ping / 2 >= 50 ? "rgb(255, 213, 66)" : "rgb(158, 235, 86)";
@@ -2220,7 +2237,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append(sb, "<div class='serverRegion'");
         if (!show_region()) {
             sb_append(sb, ">");
-            sb_append(sb, !strcmp(def, tuple_str(t, 1)) ? "DEFAULT" : !strcmp(g_region, tuple_str(t, 1)) ? "CURRENT" : "HIDDEN");
+            sb_append(sb, !strcmp(def, region_id_of(tuple_str(t, 1))) ? "DEFAULT" : !strcmp(g_region, region_id_of(tuple_str(t, 1))) ? "CURRENT" : "HIDDEN");
         } else {
             char node[96], proper[128];
             snprintf(node, sizeof(node), "%s", id);
@@ -2301,7 +2318,7 @@ static char *get_servers(void) {
             const cJSON *t = g->games[i];
             if (hide && tuple_int(t, 2) >= tuple_int(t, 3)) continue; // hideFull: players != max
             kept++;
-            if (default_region_only() && strcmp(def, tuple_str(t, 1))) continue;
+            if (default_region_only() && strcmp(def, region_id_of(tuple_str(t, 1)))) continue;
             if (g_search[0] && !search_matches(t)) continue;
             shown++;
             append_row(&sb, t, now);
@@ -3374,7 +3391,7 @@ static void quick_join_region(const int index) {
     }
     if (!g_quick_join_count && strcmp(g->key, "custom") && strcmp(g->key, "official") && old_browser() && brain_rows && backend_available() == 1) {
         // no populated public lobby: seek the region (the brain picks or spawns one)
-        snprintf(g_region, sizeof(g_region), "%s", g->key);
+        snprintf(g_region, sizeof(g_region), "%s", region_id_of(g->key)); // a browser group is its edge code: seek its v10 id
         menu_show_window(MENU_WINDOW_NONE, 0);
         qp_begin();
         seek(NULL, 1, NULL);

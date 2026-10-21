@@ -19,9 +19,11 @@ stub brain (KRUNKNATIVE_BRAIN_URL: /mm/ping-list, /mm/seek-game), every port fro
     O4 the near region's only lobby is full: the seek does not widen (no other region's lobby: v10 seeks one region)
     O5 every ping fails: the list's first region (de-fra), nothing cached
   ours (the brain's seek, Auto Seek on Launch):
-    B1 the fastest of VA / MB / FR (VA) is the seek's region, cached; Settings > Default Region shows it
+    B1 the fastest of us-nj / as-mb / de-fra (us-nj) is the seek's region, cached; Settings > Default Region
+       shows it (the brain's ping list is keyed by v10 ids, doc/v10/regions.md)
     B2 the next run reuses it without pinging
-    B3 Settings > Default Region (FR) wins
+    B3 Settings > Default Region (de-fra) wins
+    B4 a Default Region saved by an older build as its KrunkNative code (VA) is us-nj: sought as us-nj
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL).
 """
@@ -254,9 +256,10 @@ def official():
 
 def brain():
     ports = kn_proto.free_ports(4)
-    va, mb, fr = Pinger(ports[0], 0.05), Pinger(ports[1], 1.5), Pinger(ports[2], 0.8)
-    pingers = [va, mb, fr]
-    brain = Matchmaker(ports[3], {"MB": "127.0.0.1:%d" % mb.port, "FR": "127.0.0.1:%d" % fr.port, "VA": "127.0.0.1:%d" % va.port}, prefix="/mm")
+    us_nj, as_mb, de_fra = Pinger(ports[0], 0.05), Pinger(ports[1], 1.5), Pinger(ports[2], 0.8)
+    pingers = [us_nj, as_mb, de_fra]
+    brain = Matchmaker(ports[3], {"us-nj": "127.0.0.1:%d" % us_nj.port, "de-fra": "127.0.0.1:%d" % de_fra.port,
+                                  "as-mb": "127.0.0.1:%d" % as_mb.port}, prefix="/mm")
     env = {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % ports[3]}
     cfg = os.path.join(WORK, "brain-cfg")
 
@@ -265,39 +268,44 @@ def brain():
 
     text = run_client("B1", "0 boot\n4000 call showWindow 1\n5000 text @def select[onchange*=defaultRegion]\n5500 quit\n", env, (), cfg)
     regions = [q.get("region") for q in brain.seeks()]
-    check("B1: Auto Seek on Launch seeks in the region that answered its ping first (VA), not the list's first (MB)",
-          regions[:1] == ["VA"], (regions, brain.paths()[:8]))
+    check("B1: Auto Seek on Launch seeks in the region that answered its ping first (us-nj), not the list's first (as-mb)",
+          regions[:1] == ["us-nj"], (regions, brain.paths()[:8]))
     check("B1: each listed region was pinged once", hits() == [1, 1, 1], hits())
-    check("B1: the race's winner is logged", "[mm] seek region: VA, the first to answer the ping race" in text,
+    check("B1: the race's winner is logged", "[mm] seek region: us-nj, the first to answer the ping race" in text,
           [l for l in text.splitlines() if "seek region" in l or "ping race" in l])
-    check("B1: Settings > Default Region shows the auto-picked region", text_value(text, "def") == "VA", text_value(text, "def"))
+    check("B1: Settings > Default Region shows the auto-picked region", text_value(text, "def") == "us-nj", text_value(text, "def"))
     before = len(brain.log)
     run_client("B2", "0 boot\n3500 quit\n", env, (), cfg)
     regions = [q.get("region") for p, q in brain.log[before:] if p == "/seek-game"]
-    check("B2: the next run reuses the cached region without pinging", regions[:1] == ["VA"] and hits() == [1, 1, 1], (regions, hits()))
+    check("B2: the next run reuses the cached region without pinging", regions[:1] == ["us-nj"] and hits() == [1, 1, 1], (regions, hits()))
     before = len(brain.log)
-    run_client("B3", '0 boot\n100 call setSetting "defaultRegion" "FR"\n2500 call backToOrigin\n5000 quit\n', env, (), cfg)
+    run_client("B3", '0 boot\n100 call setSetting "defaultRegion" "de-fra"\n2500 call backToOrigin\n5000 quit\n', env, (), cfg)
     regions = [q.get("region") for p, q in brain.log[before:] if p == "/seek-game"]
-    check("B3: Settings > Default Region (FR) wins over the cached ping region", regions and regions[-1] == "FR" and hits() == [1, 1, 1],
+    check("B3: Settings > Default Region (de-fra) wins over the cached ping region", regions and regions[-1] == "de-fra" and hits() == [1, 1, 1],
           (regions, hits()))
+    before = len(brain.log)
+    run_client("B4", '0 boot\n100 call setSetting "defaultRegion" "VA"\n2500 call backToOrigin\n5000 quit\n', env, (), cfg)
+    regions = [q.get("region") for p, q in brain.log[before:] if p == "/seek-game"]
+    check("B4: a Default Region saved as the old KrunkNative code (VA) is sought as its v10 id, us-nj",
+          regions and regions[-1] == "us-nj" and hits() == [1, 1, 1], (regions, hits()))
     for s in pingers + [brain]:
         s.httpd.shutdown()
 
 
 def unraced():
-    """A fresh profile whose ping race has not answered yet: the brain's list's first region (MB) is no ping result, so it is
+    """A fresh profile whose ping race has not answered yet: the brain's list's first region (as-mb) is no ping result, so it is
     not cached (pingRegion7). Host Game and Settings > Default Region read only a race's confirmed answer."""
     ports = kn_proto.free_ports(4)
     va, mb, fr = Pinger(ports[0], 3.0), Pinger(ports[1], 3.0), Pinger(ports[2], 3.0)
     pingers = [va, mb, fr]
-    brain = Matchmaker(ports[3], {"MB": "127.0.0.1:%d" % mb.port, "FR": "127.0.0.1:%d" % fr.port, "VA": "127.0.0.1:%d" % va.port}, prefix="/mm")
+    brain = Matchmaker(ports[3], {"as-mb": "127.0.0.1:%d" % mb.port, "de-fra": "127.0.0.1:%d" % fr.port, "us-nj": "127.0.0.1:%d" % va.port}, prefix="/mm")
     env = {"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % ports[3]}
     cfg = os.path.join(WORK, "unraced-cfg")
     text = run_client("F1", "0 boot\n2000 quit\n", env, (), cfg)  # quits before any ping answers
     check("F1: the race started (three regions pinged) and had not answered when the client quit",
           "[mm] ping race: 3 regions" in text and "answered first" not in text, text[-300:])
     cached = os.path.join(cfg, "krunknative", "pingRegion7.json")
-    check("F1: no pingRegion7.json before a race answers: the list's first region (MB) is not cached", not os.path.exists(cached),
+    check("F1: no pingRegion7.json before a race answers: the list's first region (as-mb) is not cached", not os.path.exists(cached),
           open(cached).read() if os.path.exists(cached) else "")
     for p in pingers:
         p.httpd.shutdown()

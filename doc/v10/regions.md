@@ -58,12 +58,14 @@ The table is in `services/brain/registry.c` (`k_v10_regions`) and `net-bridge/pu
   first live node in registry order gives the host (or `brain.regions[].ping_host`). Both
   nodes still take seeks in that region (see the next point).
 - **Only the ping list changed.** The node keeps its KN code in `MmNode.region`, and the lobby
-  tuples (`tuple[1]`), `/mm/regions`, host / seek filters and the admin views still use it.
-- **Seeks still compare KN codes.** The v10 client seeks with `region` set to the v10 id it
-  picked. The registry's region filter (`region_eq`, `services/brain/registry.c`) compares the
-  node's KN code, so the seek finds no node in that region and falls back to any node only when
-  `brain.matchmaking.cross_region` is on. It defaults to on (`services/brain/brain_util.c`), and
-  the deploy template does not turn it off. Mapping the seek region is a separate change.
+  tuples (`tuple[1]`), `/mm/regions` and the admin views still use it.
+- **A seek or a host names a region by either id.** `region_eq` (`services/brain/registry.c`)
+  matches a node by its KN code (`SV`) or by its v10 id (`us-ca-sv`). The official client asks
+  with the v10 id; the native client asks with the id its list gave it, and a Default Region an
+  older build saved as a KN code still finds its node. This holds whatever
+  `brain.matchmaking.cross_region` says: `server/tests/seek_cross_region_e2e.py` runs the real
+  brain with it off, and `services/brain/tests/test_registry.c` (`seek_region_checks`) has the
+  unit cases.
 - **`brain.regions[].ping_host`** is looked up by the v10 id first, then by the KN code, so an
   operator can point `us-nj` at a specific host.
 - **Ping host.** Without a `ping_host` the host is the owning brain's public URL (`/ping` is
@@ -72,11 +74,16 @@ The table is in `services/brain/registry.c` (`k_v10_regions`) and `net-bridge/pu
 ## Readers of the shape
 
 - Brain: `registry_ping_list` (`services/brain/registry.c`), `h_ping_list`
-  (`services/brain/public_routes.c`). Test: `services/brain/tests/test_registry.c`
-  (`ping_list_checks`): the keys are v10 ids, every node is under its id, KN codes are absent.
+  (`services/brain/public_routes.c`). Tests: `services/brain/tests/test_registry.c`
+  (`ping_list_checks`: the keys are v10 ids, every node is under its id, KN codes are absent;
+  `seek_region_checks`: each side finds its node with cross_region off).
 - net-bridge: `net-bridge/publicRoutes.ts` maps `KRUNK_NATIVE_REGION` the same way.
+- Native client (`client/src/ui/region_names.c`, `servers_ui.c`): the pickers' values are the v10
+  ids, labelled with the v10 name and the edge places in brackets (`Silicon Valley (Santa Clara,
+  Los Angeles)`, `New York (Chicago, Ashburn, Virginia)`, `Dallas`). The seek, the host and the
+  race use the id the list gave. The server browser still groups lobby rows by their edge code
+  (`SV`, `CH`, names from the edge table) and matches the default and current region by the
+  id. A saved Default Region or cached region holding an edge code is read as its id. Tests:
+  `client/tests/region_names_test.c`, `server/tests/seek_region_e2e.py` (B1-B4),
+  `server/tests/seek_unlisted_region_e2e.py`.
 - Launcher test stub: `launcher/tests/launcher_online_e2e.py` answers `us-nj`.
-- Native KrunkNative client (`client/src/ui/servers_ui.c`, `k_regions`: `SV`, `LA`, `CH`, `VA`,
-  `local`; the `seek_region` tests): it still reads the list as KN codes, so with v10 keys its
-  region picker shows the raw ids and it seeks in `us-nj` / `us-ca-sv`. Not changed here: the
-  client is out of this change and needs its own decision.

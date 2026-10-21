@@ -89,8 +89,49 @@ static void ping_list_checks(void) {
     registry_free(p);
 }
 
+/* A seek or a host names a region by either id: the KrunkNative code the node announces (SV) or the v10 id
+ * the client was given in /mm/ping-list (us-ca-sv). Both sides: the official client (v10 ids) and the native
+ * client (its list's ids, or a saved KN code). cross_region is OFF: the node must be found in its own region. */
+static void seek_region_checks(void) {
+    static const struct {
+        const char *region; /* what the seek asks for */
+        const char *node_a, *node_b; /* the nodes that may answer ("" = none) */
+    } seeks[] = {
+        {"SV", "CLARA1", ""},          {"us-ca-sv", "CLARA1", "ANGELES1"},
+        {"LA", "ANGELES1", ""},        {"CH", "CHITOWN1", ""},
+        {"us-nj", "CHITOWN1", "ASHBURN1"}, {"VA", "ASHBURN1", ""},
+        {"de-fra", "", ""},
+    };
+    MmPolicy p = {.cross_region = 0, .default_max_players = 8};
+    for (size_t i = 0; i < sizeof(seeks) / sizeof(seeks[0]); i++) {
+        Registry *s = registry_new();
+        MmNode *clara = add_node(s, "CLARA1", "SV", 0), *angeles = add_node(s, "ANGELES1", "LA", 0);
+        MmNode *chi = add_node(s, "CHITOWN1", "CH", 0), *ash = add_node(s, "ASHBURN1", "VA", 0);
+        add_lobby(s, clara, "aaaaa", 3, 8, 0, "1.0");
+        add_lobby(s, angeles, "bbbbb", 3, 8, 0, "1.0");
+        add_lobby(s, chi, "ccccc", 3, 8, 0, "1.0");
+        add_lobby(s, ash, "ddddd", 3, 8, 0, "1.0");
+        MmPick pick;
+        MmPickQuery q = {.region = seeks[i].region, .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        const MmPickError e = registry_pick(s, &p, &q, &pick);
+        const char *want_a = seeks[i].node_a, *want_b = seeks[i].node_b;
+        if (!want_a[0]) {
+            CHECK(e != MM_PICK_OK); /* no node of that region: nothing (cross_region off) */
+        } else {
+            CHECK(e == MM_PICK_OK && pick.node != NULL);
+            if (e == MM_PICK_OK && pick.node) {
+                const int ok = !strcmp(pick.node->node_id, want_a) || (want_b[0] && !strcmp(pick.node->node_id, want_b));
+                CHECK(ok);
+                if (!ok) fprintf(stderr, "  seek %s found %s\n", seeks[i].region, pick.node->node_id);
+            }
+        }
+        registry_free(s);
+    }
+}
+
 int main(void) {
     ping_list_checks();
+    seek_region_checks();
     Registry *r = registry_new();
     MmPolicy p = {.cross_region = 1, .default_max_players = 8};
     MmPick pick;

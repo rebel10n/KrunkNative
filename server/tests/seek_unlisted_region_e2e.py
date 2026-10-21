@@ -8,8 +8,8 @@ kn_brain on a scratch sqlite database with one brain-linked server_bin node in r
 brain's /mm/ping-list lists "local" only. Two headless clients, each started twice on one config
 dir (the first run sets Settings > Default Region, the second boots and seeks):
 
-  1. Default Region "VA" (Ashburn, not listed): no error text and no popup; the seek goes on in the
-     first listed region ("local") and joins the node
+  1. Default Region "VA" (Ashburn, saved by an older build as its KrunkNative code: us-nj, not listed):
+     no error text and no popup; the seek goes on in the first listed region ("local") and joins the node
   2. Default Region "local" (listed): the startup seek joins the node
 
 Exit 77 when sqlite scratch databases or the binaries are unavailable.
@@ -144,8 +144,8 @@ def main():
         cfg = os.path.join(WORK, "cfg-va")
         run_client("set-va", cfg, '0 call setSetting "defaultRegion" "VA"\n1500 quit\n', brain_port)
         log = run_client("boot-va", cfg, "0 boot\n6000 quit\n", brain_port)
-        check("unlisted default region VA is logged and the seek goes on in local",
-              "[mm] default region VA is not in the matchmaker's list: seeking in local instead" in log,
+        check("unlisted default region (VA, us-nj) is logged and the seek goes on in local",
+              "[mm] default region us-nj is not in the matchmaker's list: seeking in local instead" in log,
               [l for l in log.splitlines() if "[mm]" in l][:4])
         check("an unlisted default region shows no error text", "not available" not in log and "seek failed" not in log and
               "Could not reach" not in log, [l for l in log.splitlines() if "fail" in l.lower() or "error" in l.lower()][:4])

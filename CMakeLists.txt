@@ -1232,6 +1232,12 @@ else ()
     target_include_directories(seek_choice_test PRIVATE client/include client/lib shared/include)
     target_link_libraries(seek_choice_test PRIVATE cJSON)
     add_test(NAME seek_choice_test COMMAND seek_choice_test)
+
+    # region_names_test (client/src/ui/region_names.c): the v10 id of each KrunkNative edge (the seek and the saved
+    # Default Region are that id) and the picker labels (the v10 name, the edges' places in brackets)
+    add_executable(region_names_test client/tests/region_names_test.c client/src/ui/region_names.c)
+    target_include_directories(region_names_test PRIVATE client/include)
+    add_test(NAME region_names_test COMMAND region_names_test)
     # seek_claim_test (client/src/ui/seek_claim.c): which matchmaking answer may put the player in a lobby. A
     # community map's host (or a join by hand) overtakes a seek still in flight: its late answer is dropped
     add_executable(seek_claim_test client/tests/seek_claim_test.c client/src/ui/seek_claim.c)

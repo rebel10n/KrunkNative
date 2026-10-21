@@ -771,6 +771,10 @@ games-window-e2e: build ## The Custom Games window and the social hub's Maps: a 
 seek-region-e2e: build ## Ping-aware seeks (v10 getRegion): the fastest region's stub /ping wins, cached, an explicit region wins; never Mumbai for a New York player (krunker.io and brain stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_region_e2e.py $(DEBUG_DIR)
 
+.PHONY: seek-cross-region-e2e
+seek-cross-region-e2e: build ## A seek finds its region's node with brain.matchmaking.cross_region off: the official and the native client's v10 ids, a saved KrunkNative code (kn_brain + four edge nodes, sqlite)
+	timeout 300 $(PYTHON) -I server/tests/seek_cross_region_e2e.py $(DEBUG_DIR)
+
 .PHONY: quickplay-retry-e2e
 quickplay-retry-e2e: build ## Quick Play retries a full lobby until the player is in one (Find Game, Quick Match, Auto Seek on Launch: full, full, then a lobby with room; a stub brain; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/quickplay_retry_e2e.py $(DEBUG_DIR)

@@ -603,8 +603,13 @@ static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
     return q->outdated ? q->outdated(l, q->outdated_ud) != 0 : 0;
 }
 
+/* A region named by its KrunkNative code (SV) or by the v10 id the node is listed under (us-ca-sv): the
+ * official client seeks with the ids of /mm/ping-list, the native client with the ids it was given or a
+ * saved code. Either form finds the node, whatever brain.matchmaking.cross_region says. */
 static int region_eq(const MmNode *n, const char *region) {
-    return !region || !*region || !strcmp(n->region, region);
+    if (!region || !*region || !strcmp(n->region, region)) return 1;
+    const char *v10 = registry_v10_region(n->region);
+    return v10 && !strcmp(v10, region);
 }
 
 /* Taken seats over every lobby of a node (players + live reservations). */

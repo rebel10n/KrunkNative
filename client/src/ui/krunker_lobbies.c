@@ -14,29 +14,16 @@
 #include <flavor.h> // Krunker Strike lists and joins no official krunker.io lobby
 #include <krunker_build.h> // KRUNKER_REGIONS / KRUNKER_DEDICATED_ONLY_REGIONS: v10's availableRegions / dedicatedOnlyRegions
 #include <region_ping.h>
+#include <region_names.h> // region_v10_name: the v10 names of the regions
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
-// v10 _7517 (v10.js:18672-18701): the region names of Krunker's server browser
-static const struct {
-    const char *code, *name;
-} k_krunker_regions[] = {
-    {"us-nj", "New York"}, {"us-il", "Chicago"}, {"us-tx", "Dallas"}, {"us-wa", "Seattle"},
-    {"us-ca-la", "Los Angeles"}, {"us-ga", "Atlanta"}, {"nl-ams", "Amsterdam"}, {"gb-lon", "London"},
-    {"de-fra", "Frankfurt"}, {"us-ca-sv", "Silicon Valley"}, {"au-syd", "Sydney"}, {"fr-par", "Paris"},
-    {"jb-hnd", "Tokyo"}, {"us-fl", "Miami"}, {"sgp", "Singapore"}, {"blr", "India"}, {"as-mb", "Mumbai"},
-    {"brz", "Brazil"}, {"me-bhn", "Middle East"}, {"af-ct", "South Africa"}, {"as-seoul", "South Korea"},
-    {"mx-cmx", "Mexico"}, {"eu-stm", "Sweden"}, {"tor", "Toronto"}, {"pol", "Poland"}, {"us-hi", "Hawaii"},
-    {"sss", "EU Super Secret Servers"}, {"iow", "Iowa"},
-};
-
+// The v10 name of a region id (region_names.c: v10 _7517, the names of Krunker's server browser)
 const char *krunker_region_name(const char *code) {
-    for (size_t i = 0; code && i < sizeof(k_krunker_regions) / sizeof(k_krunker_regions[0]); i++) {
-        if (!strcmp(k_krunker_regions[i].code, code)) return k_krunker_regions[i].name;
-    }
-    return code ? code : "";
+    const char *name = region_v10_name(code);
+    return name ? name : code ? code : "";
 }
 
 #ifndef __EMSCRIPTEN__

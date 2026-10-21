@@ -31,6 +31,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ranked.h>
+#include <region_names.h> // region_id_of: a saved region is its v10 id
 #include <ranked_route.h>   // which backend: krunker.io first, then KrunkNative
 #include <krunker_account.h> // the krunker.io account (krunker_account_signed_in, its name and level)
 #include <krunker_ranked.h> // v10's ranked services at krunker.io
@@ -139,7 +140,8 @@ static const char *my_region(void) {
     char node[96] = "";
     if (cJSON_IsString(def) && def->valuestring[0]) snprintf(node, sizeof(node), "%s", def->valuestring);
     else html_storage_get("pingRegion7", node, sizeof(node));
-    int index = ranked_region_of_node(node);
+    const char *id = region_id_of(node); // a KrunkNative code saved by an older build is its v10 id (region_names.h)
+    int index = ranked_region_of_node(id);
     if (index < 0) {
         static const struct { const char *prefix; int index; } fold[] = {
             {"eu", 3}, {"de", 3}, {"fr", 3}, {"gb", 3}, {"uk", 3}, {"nl", 3}, {"pl", 3},
@@ -147,7 +149,7 @@ static const char *my_region(void) {
             {"na", 4}, {"us", 4}, {"ca", 4}, {"sa", 4}, {"br", 4}, {"mx", 4},
         };
         for (size_t i = 0; i < sizeof(fold) / sizeof(fold[0]); i++)
-            if (!strncmp(node, fold[i].prefix, strlen(fold[i].prefix))) {
+            if (!strncmp(id, fold[i].prefix, strlen(fold[i].prefix))) {
                 index = fold[i].index;
                 break;
             }
