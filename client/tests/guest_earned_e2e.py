@@ -21,7 +21,10 @@ Headless renders (client_bin --render-scenario, no window), state.guestEarned st
      button; the click claims (rqdxp) on games % 3 only, whatever the offer says, and a guest's click claims nothing;
      a comp match shows "Return to Krunker" (#returnButton) and no Double XP, signed in or not;
   7. the same end card with three vote maps (#endMidHolder moves down to top 310): the Double XP button and the
-     signup banner do not overlap, and the banner stays on the screen.
+     signup banner do not overlap, and the banner stays on the screen;
+  8. a long leaderboard (Defeat, 16 players, the three vote cards, the Leaderboard tab): the Leaderboard's list is capped
+     so the Double XP button ends above the banner, which and its REGISTER stay inside the window, and the button and the
+     banner do not intersect.
 KRUNKNATIVE_SCENARIO_DUMP prints the box tree under the slot after the capture: the texts and the box's
 viewport rect come from it. Exit 0 when every check passes, 1 otherwise.
 """
@@ -267,6 +270,47 @@ def check_vote_cards_and_banner():
           banner[1] + banner[3] <= 720.5, f"banner bottom {banner[1] + banner[3]:.0f}")
 
 
+WINDOW_H = 720.0                  # the scenario's window (1280x720)
+SIGNUP_MARGIN = 8.0               # the banner's bottom margin in the window (hud_v10.c V10_SIGNUP_MARGIN)
+LONG_BOARD = ["Local User", "Vortex", "NovaBlade", "KrunkLord", "Sniperino", "Ghostwire", "PixelPanda", "BoltKnight",
+              "Mavericks", "Quarry", "Hexagon", "Tundra", "RazorFox", "Lumen", "Ember", "Juniper"]
+
+
+def check_long_leaderboard():
+    """A guest's Defeat on the Leaderboard tab with 16 players and the three vote cards: the Leaderboard's list is capped
+    (it scrolls inside the cap) so the Double XP button ends above the signup banner; the banner, its REGISTER and the
+    button stay on the screen, and the button and the banner do not intersect."""
+    with open(END_CARD, encoding="utf-8") as f:
+        doc = json.load(f)
+    st = doc["state"]
+    st["endscreen"] = {"place": 9, "result": 0, "text": "#9 DEFEAT", "nextRound": "00:17", "results": 1}
+    st["endTab"] = "leaderboard"
+    st["scoreboard"] = [{"name": n, "score": 1200 - 60 * i, "kills": 14 - i % 9, "deaths": 9 + i % 5, **({"me": True} if i == 0 else {})}
+                        for i, n in enumerate(LONG_BOARD)]
+    st["matchVotes"] = VOTE_MAPS
+    path = os.path.join(WORK, "long-board.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    png, _, button = render("long-button", path, "#doubleXPButton")
+    check("end card, a guest, 16 players: renders with the Double XP button", png is not None and button is not None)
+    if png is None or button is None:
+        return
+    _, _, banner = render("long-banner", path, "#matchEndSignupIncentives .signup-rewards-container")
+    _, _, register = render("long-register", path, "#matchEndSignupIncentives .signup-rewards-register-button")
+    if banner is None or register is None:
+        check("end card, a guest, 16 players: the signup banner and its REGISTER render", False)
+        return
+    bx, by, bw, bh = banner
+    check("end card, a guest, 16 players: the signup banner is inside the window (bottom within 720 px less the margin)",
+          by >= 0 and by + bh <= WINDOW_H - SIGNUP_MARGIN + 0.5, f"banner {by:.0f}-{by + bh:.0f}")
+    rx, ry, rw, rh = register
+    check("end card, a guest, 16 players: REGISTER is inside the window",
+          ry >= 0 and ry + rh <= WINDOW_H, f"REGISTER {ry:.0f}-{ry + rh:.0f}")
+    check("end card, a guest, 16 players: the Double XP button and the signup banner do not intersect",
+          not boxes_intersect(button, banner), f"button {button[1]:.0f}-{button[1] + button[3]:.0f}, "
+          f"banner {by:.0f}-{by + bh:.0f}")
+
+
 END_CARD = os.path.join(SCENARIOS, "ingame-endscreen-late.json") # a match's end card (results, no balance)
 
 
@@ -369,6 +413,7 @@ def main():
     check_end_screen()
     check_double_xp_and_banner()
     check_vote_cards_and_banner()
+    check_long_leaderboard()
     check_end_card_offer()
     check_menu()
     check_account_and_empty()

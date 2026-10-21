@@ -151,22 +151,49 @@ void hud_v10_end_signup(const int show) {
 // banner is fixed at 850 px with a z-index above the card: it paints over the button. So the banner goes
 // under the button, with v10's gap, when that is needed (the one-map capture stays at 850 px). The rects
 // come from the layout (html_dom_get_rect flushes it), so a tab with a taller card moves it too.
+//
+// The banner's bottom stays in the window, V10_SIGNUP_MARGIN above its edge. The gap under the button shrinks
+// to fit; when even a zero gap does not fit (a long leaderboard), the Leaderboard's list (#endLayoutHolder,
+// .tabBody: overflow-y auto) is capped by the excess, so it scrolls inside the cap and the button moves up.
+// KrunkNative's addition: v10 has no such cap, and a short list (or a one-map card) is never capped.
+#define V10_SIGNUP_MARGIN 8.0    // the banner's bottom margin in the window (CSS px)
+#define V10_SIGNUP_LIST_MIN 60.0 // the least the list shrinks to (layout px); below it the card keeps its height
+
 void hud_v10_end_signup_place(void) {
     if (!hud_v10_page()) return;
     const HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
     const HtmlElem ui = html_dom_by_id("endUI");
     const HtmlElem btn = html_dom_by_id("endButtonsHolder");
     const HtmlElem box = el ? html_dom_query(el, ".signup-rewards-container") : 0;
+    const HtmlElem list = html_dom_by_id("endLayoutHolder");
     if (!box || !ui || !btn || !html_dom_is_shown(el)) return;
-    HtmlRect r_ui, r_btn;
-    if (!html_dom_get_rect(ui, &r_ui) || !html_dom_get_rect(btn, &r_btn)) return;
+    if (list) html_dom_set_style(list, "max-height", ""); // the previous cap: measured again below
+    HtmlRect r_ui, r_btn, r_box;
+    if (!html_dom_get_rect(ui, &r_ui) || !html_dom_get_rect(btn, &r_btn) || !html_dom_get_rect(box, &r_box)) return;
     const float ui_layout_h = html_dom_offset_height(ui); // layout px, without the uiBase scale
     if (ui_layout_h <= 0.0f || r_ui.h <= 0.0f) return;
     const double scale = r_ui.h / ui_layout_h; // page px per layout px (endUI is scaled with #uiBase)
-    const double button_bottom = (r_btn.y + r_btn.h - r_ui.y) / scale;
+    float vw, vh, dpr;
+    html_dom_viewport(&vw, &vh, &dpr);
+    // the banner's visual top (page px) at the lowest it may go: its bottom edge MARGIN above the window's
+    const double limit = vh - V10_SIGNUP_MARGIN - r_box.h;
+    double button_bottom = r_btn.y + r_btn.h;
+    HtmlRect r_list;
+    const double excess = button_bottom - limit;
+    if (list && excess > 0.5 && html_dom_get_rect(list, &r_list) && (r_list.h - excess) / scale >= V10_SIGNUP_LIST_MIN) {
+        char max_css[32];
+        snprintf(max_css, sizeof(max_css), "%.2fpx", (r_list.h - excess) / scale);
+        html_dom_set_style(list, "max-height", max_css);
+        if (html_dom_get_rect(btn, &r_btn)) button_bottom = r_btn.y + r_btn.h;
+    }
     const double half = html_dom_offset_height(box) / 2.0; // translate(-50%, -50%)
-    double top = button_bottom + V10_SIGNUP_GAP + half;
-    if (top < V10_SIGNUP_TOP) top = V10_SIGNUP_TOP;
+    // v10's gap under the button, shrunk to fit the window, and never above v10's place
+    double visual = button_bottom + V10_SIGNUP_GAP * scale;
+    if (visual > limit) visual = limit;
+    if (visual < button_bottom) visual = button_bottom;
+    const double v10_visual = r_ui.y + (V10_SIGNUP_TOP - half) * scale;
+    if (visual < v10_visual) visual = v10_visual;
+    const double top = (visual - r_ui.y) / scale + half; // the css top: the box's centre (layout px)
     char css[32];
     snprintf(css, sizeof(css), "%.2fpx", top);
     html_dom_set_style(el, "top", css);
