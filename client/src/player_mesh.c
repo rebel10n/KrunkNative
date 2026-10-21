@@ -622,7 +622,8 @@ static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 tar
 
 // Nettspend Drank: where the off hand is while it does not pour (the arms anchor frame): the arm turned
 // down about its shoulder (arm->anchor's origin) to hang at the side, its reach kept, a little out to
-// its own side and forward (NETTSPEND_OFF_HAND_AWAY_*). `rest` is the hand's centre at rest.
+// its own side and forward (NETTSPEND_OFF_HAND_AWAY_*). `rest` is the hand's centre at rest. First person only:
+// third person hangs at its rest (NETTSPEND_OFF_HAND_FWD).
 static vec3 player_off_hand_away(const PlayerArmMesh *arm, const vec3 rest) {
     if (!arm) return rest;
     const vec3 sh = arm->anchor.position;
@@ -1292,8 +1293,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                     drank_grip = *weapon;
                     drank_grip.offset = pistol->offset;
                     // generate_arm moves each shoulder by -offset.x: the pistol's 1.2 pushed the trigger shoulder into the
-                    // torso and the off one out, so the shoulders stay symmetric (x 0); y and z keep the pistol's
+                    // torso and the off one out, so the shoulders stay symmetric (x 0); z keeps the pistol's, y the pistol's
+                    // less the shoulder rise below
                     drank_grip.offset.x = 0.0f;
+                    drank_grip.offset.y -= NETTSPEND_TP_SHOULDER_RISE; // the shoulders up; the hands keep their holds (generate_arm: a hand sits at -hold)
                     drank_grip.right_hold = pistol->right_hold;
                     drank_grip.right_hold.x = -NETTSPEND_TP_HAND_X;
                     drank_grip.right_hold.z = drank_grip.offset.z + NETTSPEND_TP_HAND_REACH;
@@ -1301,13 +1304,13 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // the arms anchor sits at the held weapon's offset.y under the upper body, whose origin is player_height -
                     // camera_height above the feet, so the pelvis is pelvis_height - (player_height - camera_height) in the upper
                     // body's frame, and the hand's arm-frame y (the arm solver's hold.y) is that less weapon->offset.y. The hold
-                    // is the shoulder's own x and z, so the rest hangs straight down from the shoulder to the pelvis
-                    // (player_off_hand_away keeps the reach and swings it forward, NETTSPEND_OFF_HAND_AWAY_FWD)
+                    // is the shoulder's own x, and its z NETTSPEND_OFF_HAND_FWD ahead of the shoulder: the rest is the hand
+                    // hanging at the pelvis past the hip line (the stream's pelvis_forward ahead of the feet)
                     const float pelvis_height = weapon->stream ? weapon->stream->pelvis_height : game_constants.leg_height;
                     const float left_shoulder_x = -game_constants.chest_width + game_constants.arm_scale * 0.5f - game_constants.arm_inset;
                     drank_grip.left_hold.x = -left_shoulder_x;
                     drank_grip.left_hold.y = pelvis_height - (game_constants.player_height - game_constants.camera_height) - weapon->offset.y;
-                    drank_grip.left_hold.z = drank_grip.offset.z;
+                    drank_grip.left_hold.z = drank_grip.offset.z + NETTSPEND_OFF_HAND_FWD;
                     arms_weapon = &drank_grip;
                 }
 
@@ -1864,9 +1867,9 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     // Nettspend Purple Drank (nettspend.h): one arm holds the cup out, the other only comes up for the
     // refill (user, 2026-10-15: "hold out the cup with one arm (the right one) and only pull out the left
-    // arm in order to refill it"). Outside the pour-up the off arm is away (player_off_hand_away: turned
-    // down about its shoulder, the hand at the side; first person also hides it, out of view like a
-    // one-handed viewmodel's). The pour-up of the local player's reload, first and third person: the
+    // arm in order to refill it"). Outside the pour-up the off arm is away: third person at its rest (the hand at
+    // the pelvis, forward of the hip); first person player_off_hand_away (turned down about its shoulder, the hand at
+    // the side). First person also hides it, out of view like a one-handed viewmodel's. The pour-up of the local player's reload, first and third person: the
     // off hand brings the bottle up from there, over the cup, tips it and takes it back down, while the
     // trigger hand holds the cup up, both arms reaching where the cup and the bottle are
     // (player_arm_reach). Only the local player's reload_timer runs on the client (procInputs), like the
@@ -1880,7 +1883,9 @@ void player_update_meshes(Player *player, const int is_preview) {
             arm->pivot.position = arm->pivot.rotation = (vec3) {0.0f, 0.0f, 0.0f};
         }
         const vec3 trigger_rest = player_trigger_hand(held_arms, player->left_handed), off_rest = player_off_hand(held_arms, player->left_handed);
-        const vec3 off_away = player_off_hand_away(off_arm, off_rest);
+        // the off hand outside the pour-up: third person hangs at its rest (forward of the hip, the bend generated for it);
+        // first person keeps its away pose (player_off_hand_away)
+        const vec3 off_away = third_person ? off_rest : player_off_hand_away(off_arm, off_rest);
         const float reload_time = player->weapon->reload_time * reload_speed;
         const float progress = player->render_you && player->reload_timer > 0.0f && reload_time > 0.0f ? 1.0f - player->reload_timer / reload_time : -1.0f;
         const int pouring = progress >= 0.0f && progress <= 1.0f;

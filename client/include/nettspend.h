@@ -68,11 +68,17 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_TP_HAND_REACH 5.0f
 #define NETTSPEND_TP_HAND_X 0.65f
 // Third person: the off hand's rest is the pelvis joint (the Drank's stream pelvis_height above the feet, player_mesh.c
-// player_generate_meshes), so the hand hangs from the shoulder down to the pelvis, its reach the shoulder-to-pelvis distance.
-// The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
+// player_generate_meshes), NETTSPEND_OFF_HAND_FWD in front of the shoulder: it hangs there outside the pour-up, past the
+// hip line (the stream's pelvis_forward, 1.25, ahead of the feet; the away pose's 0.45 stopped 0.23 short of it). The rest
+// is the pose itself, so the arm's bend is generated for its real length.
+#define NETTSPEND_OFF_HAND_FWD 2.4f
+// The off hand outside the pour-up in first person (player_mesh.c player_off_hand_away): its arm hangs down from the
 // shoulder, this far out to its own side and forward per unit down (the forward reach as in af38340d).
 #define NETTSPEND_OFF_HAND_AWAY_OUT 0.0f
 #define NETTSPEND_OFF_HAND_AWAY_FWD 0.45f // 0.15 left the wrist inside the torso's depth (its front face is 0.65 ahead of the hip); 0.45 clears it
+// Third person: the shoulders sit this far higher than the generated arms (player_generate_meshes lowers the Drank's
+// offset.y by it); the hands stay where their holds put them, so the arms rise instead of hanging from the shoulder.
+#define NETTSPEND_TP_SHOULDER_RISE 0.5f
 // The off arm's elbow pole (third person, the arms frame: x 0, y up, z back; the body faces -z): the elbow bends down and
 // back, as a hanging arm's does, so the forearm swings forward to the hand. The arm solver bends the elbow on a fixed side
 // of the arm, which for an arm hanging straight down puts it forward (the forearm folded back toward the body);
