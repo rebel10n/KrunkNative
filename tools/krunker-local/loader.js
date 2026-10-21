@@ -16,7 +16,8 @@
     Object.keys(RENAMED).forEach(function (name) { window[name] = window[RENAMED[name]]; });
     var src = await (await fetch("/game.js")).text();
     log("game.js " + src.length + " chars");
-    var fn = new Function(PARAM_TOKEN, PARAM_CALLBACK, src + "\n//# sourceURL=https://krunker.io/js/app.js");
+    var expose = "\n;try{Object.defineProperty(window,\"__kn_game\",{configurable:true,get:function(){return typeof Game!==\"undefined\"?Game:undefined;}});}catch(e){}";
+    var fn = new Function(PARAM_TOKEN, PARAM_CALLBACK, src + expose + "\n//# sourceURL=https://krunker.io/js/app.js");
     log("executing");
     fn.apply(window, [token, undefined]);
     log("returned");

@@ -813,6 +813,8 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     }
     /* KN's account rights (EXT 0x8001): no v10 message, consumed (as the TS) */
     if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_ACCOUNT_RIGHTS) return;
+    /* KN's account record (level, clan, flags) for the nametags: no v10 message; the add record carries the player */
+    if (s->init_sent && type == NET_PACKET_PLAYER_INFO) return;
     if (s->init_sent && type == NET_PACKET_LEADERBOARD) {
         v10_out_init(&o);
         size_t rows = 0;

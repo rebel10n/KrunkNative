@@ -1014,6 +1014,10 @@ async function main(): Promise<void> {
   native.write(nativeFrame(254, rights));
   await sleep(50);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("EXT 0x8001"), undefined);
+  // PLAYER_INFO (34): KN's account record for the nametags, after SPAWN; no v10 message: consumed, no stop
+  native.write(nativeFrame(34, Buffer.alloc(21)));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("native 34"), undefined);
 
   // borders (3) has no v10 label: it still stops the translation, named CHEAT (NATIVE_NAMES)
   native.write(nativeFrame(60, Buffer.from([3, 1])));

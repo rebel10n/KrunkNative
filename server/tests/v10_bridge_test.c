@@ -763,6 +763,12 @@ int main(void) {
     pump(50);
     CHECK(v10_bridge_untranslated("EXT 0x8001") == 0 && client_count("mv") == 1, "account rights are consumed");
 
+    // PLAYER_INFO (34): KN's account record after SPAWN, no v10 message: consumed with no stop
+    uint8_t pinfo[21] = {0};
+    native_send(&g_native, NET_PACKET_PLAYER_INFO, pinfo, 21);
+    pump(50);
+    CHECK(v10_bridge_untranslated("native 34") == 0, "player info is consumed");
+
     // PICKUP (128): one pickup's state is the pickup half of "inat" (the v10 client's updatePickup): uid, weapon,
     // true, active, pos when moved; an empty pickup (weapon -1) has a null weapon and a null position
     uint8_t pk[26];
