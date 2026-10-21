@@ -122,6 +122,9 @@ typedef struct V10Session {
     int have_pending_init;
     V10Queued *queue;
     size_t queue_n, queue_cap;
+    V10Queued *held;             /* the vote state and END, held until START: the client picks its next map from the vote list */
+    size_t held_n, held_cap;
+    int started;                 /* START went out: our spawn is in */
     int init_sent;
     int global_values_sent;
     int stopped;
@@ -304,6 +307,8 @@ static void session_free(V10Session *s) {
     v10_input_free(&s->input);
     for (size_t i = 0; i < s->queue_n; i++) free(s->queue[i].payload);
     free(s->queue);
+    for (size_t i = 0; i < s->held_n; i++) free(s->held[i].payload);
+    free(s->held);
     free(s);
 }
 
@@ -735,6 +740,34 @@ static void emit_init(V10Session *s) {
     free(held);
 }
 
+static void hold_push(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
+    if (s->held_n == s->held_cap) {
+        const size_t cap = s->held_cap ? s->held_cap * 2 : 4;
+        V10Queued *q = realloc(s->held, cap * sizeof *q);
+        if (!q) { close_session(s, 1011, "out of memory", 0); return; }
+        s->held = q;
+        s->held_cap = cap;
+    }
+    uint8_t *copy = malloc(n ? n : 1);
+    if (!copy) { close_session(s, 1011, "out of memory", 0); return; }
+    memcpy(copy, p, n);
+    s->held[s->held_n++] = (V10Queued){.type = type, .payload = copy, .len = n};
+}
+
+/* the held packets run in order once START is out (they are the client's state after its spawn) */
+static void flush_held(V10Session *s) {
+    const size_t n = s->held_n;
+    V10Queued *held = s->held;
+    s->held = NULL;
+    s->held_n = 0;
+    s->held_cap = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (!s->closed) handle_native(s, held[i].type, held[i].payload, held[i].len);
+        free(held[i].payload);
+    }
+    free(held);
+}
+
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
     if (s->bridge->trace) {
@@ -840,6 +873,18 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         return;
     }
     /* MATCH_VOTE_STATE (181): the match cards' votes as "mv" [vo, mts] (mapMatchVoteState) */
+    /* the vote list (mts) and END are held until START: the client's init picks its next map from a non-empty vote list,
+     * and a list that arrives before its init runs breaks the pick (undefined map, "reading game") */
+    if (s->init_sent && !s->started && (type == NET_PACKET_MATCH_VOTE_STATE || type == NET_PACKET_END)) {
+        hold_push(s, type, p, n);
+        return;
+    }
+    if (s->init_sent && type == NET_PACKET_END) {
+        v10_out_init(&o);
+        v10_map_end(&o, p, n);
+        finish_out(s, &o, "END");
+        return;
+    }
     if (s->init_sent && type == NET_PACKET_MATCH_VOTE_STATE) {
         v10_out_init(&o);
         v10_map_match_vote(&o, p, n, s->socket_id);
@@ -919,8 +964,10 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             KrunkerValue start[8];
             v10_start_game(&spawn, s->game_timer, s->chall_mode, start);
             v10_push(&o, V10_IN_START_GAME, start, 8);
+            s->started = 1;
         }
         finish_out(s, &o, "SPAWN");
+        if (s->started) flush_held(s);
         return;
     }
     if (s->init_sent && type == NET_PACKET_TIMER) {

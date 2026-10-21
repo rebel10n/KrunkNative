@@ -1705,3 +1705,19 @@ void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socke
     const KrunkerValue args[2] = {KRUNKER_V_MAP(kv, (uint32_t)pairs), v10_arr(o, mts, (uint32_t)count)};
     v10_push(o, V10_IN_UPD_MATCH_VOTE, args, 2);
 }
+
+/* NET_PACKET_END: see v10_translate.h. didWin is the v7 "didWin": true for a victory, false for a defeat, -1 no winner. */
+#define END_SIZE 330
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != END_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    const int8_t result = (int8_t)p[0];
+    const KrunkerValue did_win = result == 1 ? KRUNKER_V_BOOL(1) : result == 0 ? KRUNKER_V_BOOL(0) : KRUNKER_V_NUM(-1);
+    const char *const keys[4] = {"vo", "mts", "tms", "ed"};
+    const KrunkerValue vals[4] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, v10_arr(o, NULL, 0)};
+    const KrunkerValue end_data = v10_obj(o, keys, vals, 4);
+    const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL};
+    v10_push(o, "end", args, 7);
+}
