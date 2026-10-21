@@ -158,7 +158,7 @@ def mail_token(msg):
     return link.group(1) if link else None
 
 
-def mails_to(msgs, addr):
+def mails_in(msgs, addr):
     return [m for m in msgs if addr.lower() in [r.lower() for r in m.get("rcpt", [])]]
 
 
@@ -642,7 +642,7 @@ def verify_checks(port, db_path, smtp):
     # ---- row 41: the verify mail again, to the account's address
     before = len(smtp.messages)
     st, body = http(port, "POST", "/auth/verification/resend/" + cid, {})
-    sent = mails_to(smtp.wait_messages(before + 1, timeout=10.0)[before:], u_mail)
+    sent = mails_in(smtp.wait_messages(before + 1, timeout=10.0)[before:], u_mail)
     check("POST /auth/verification/resend/:id -> 200 and one verify mail to the account's address (v10.js 113497: the reply is ignored, a refusal's text is shown)",
           st == 200 and isinstance(body, dict) and body.get("error") is None and len(sent) == 1,
           "HTTP %d %s, mails %d" % (st, json.dumps(body)[:160], len(sent)))
@@ -680,7 +680,7 @@ def verify_checks(port, db_path, smtp):
     new_r = "%s-new@example.test" % R.lower()
     before = len(smtp.messages)
     st, body = http(port, "POST", "/auth/verification/change-email/" + cid_r, {"newEmail": "  %s " % new_r.upper()})
-    sent = mails_to(smtp.wait_messages(before + 1, timeout=10.0)[before:], new_r)
+    sent = mails_in(smtp.wait_messages(before + 1, timeout=10.0)[before:], new_r)
     row = q("SELECT email, email_verified_at FROM accounts WHERE username = ?", (R,))
     check("POST /auth/verification/change-email/:id {newEmail} -> 200: the address is stored unverified and the verify mail goes there (v10.0.3 changeEmail body newEmail; v10.js 113570)",
           st == 200 and isinstance(body, dict) and body.get("error") is None and len(sent) == 1 and row == [(new_r, None)],
