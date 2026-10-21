@@ -23,6 +23,16 @@ Optional overrides go in `tools/krunker-local/config.json` (git-ignored); the de
 `config.example.json`: the source tree, the KrunkNative roots used to fill missing assets,
 ports, the brain URL and the official hosts to route.
 
+## Node driver (launch.mjs)
+
+`make krunker-node-smoke` (or `node tools/krunker-local/launch.mjs --smoke`) starts the local stack on free loopback
+ports (kn_brain on a sqlite scratch database, one server_bin, v10_bridge) and the harness page server with a config
+written for the run (`KN_KRUNKER_LOCAL_CONFIG`). It opens headless Chromium, accepts the consent dialog, clicks Quick
+Match, and records every WebSocket frame (CDP Network domain) to `~/.cache/kn-krunker-node/run/<pid>/frames.jsonl`
+(one JSON object per line; binary payloads base64). The result, with `window.Game` and `window.RENDER`, goes to `result.json`.
+Each child is recorded in `<run>/pids/` and stopped by its handle. The script refuses to start unless every host it binds
+or dials is 127.0.0.1 or `*.krunker-local.test`. It never reads `config/config.json`.
+
 ## The v10 bridge (the join path)
 
 The official client's WebSocket (msgpack, v10 labels) reaches a KrunkerBox game server through the
