@@ -594,6 +594,15 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
     return 1;
 }
 
+// The window's class (X11 WM_CLASS, Wayland app_id). Not its title: a taskbar looks a window up in the
+// installed .desktop entries by its class, a GIO search for "Krunker Box Office" finds the user's own
+// Brave shortcut of that name, and its Icon= is shown instead of the window's _NET_WM_ICON.
+#ifndef __EMSCRIPTEN__
+static const char *window_wm_class(void) {
+    return flavor_get() == FLAVOR_STRIKE ? "krunknative-strike" : "krunknative";
+}
+#endif
+
 // The product flavor (flavor.h): --flavor base|strike wins, then KN_FLAVOR, then the compile-time
 // default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build). The flavor brands the client and,
 // for Strike, swaps in FRVR's rules (ruleset_current(), strike_rules.h) before any game is configured.
@@ -876,6 +885,11 @@ int main(int argc, char **argv) {
     if (client_render_window_prepare(&window_width, &window_height, !SCENARIO_ACTIVE() && !headless_enabled()))
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 #endif
+#ifndef __EMSCRIPTEN__
+    glfwWindowHintString(GLFW_X11_CLASS_NAME, window_wm_class());
+    glfwWindowHintString(GLFW_X11_INSTANCE_NAME, window_wm_class());
+    glfwWindowHintString(GLFW_WAYLAND_APP_ID, window_wm_class());
+#endif
     headless_window_hints(); // headless: no GLFW context (headless_make_context_current creates it)
     INSTANCE.window = glfwCreateWindow(window_width, window_height, flavor_display_name(flavor_get()), NULL, NULL);
     if (!INSTANCE.window) {
@@ -902,8 +916,8 @@ int main(int argc, char **argv) {
 #endif
         stbi_image_free(icon.pixels);
     }
-    printf("[window] title \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(INSTANCE.window), icon.pixels ? icon_path : "none",
-           icon.width, icon.height);
+    printf("[window] title \"%s\", class \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(INSTANCE.window), window_wm_class(),
+           icon.pixels ? icon_path : "none", icon.width, icon.height);
 
     free(icon_path);
 #endif

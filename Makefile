@@ -476,6 +476,10 @@ branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-
 branding-check: ## The verbatim krunker.io icons in the tree match tools/branding/branding.lock (exit 1 otherwise)
 	$(PYTHON) -I tools/branding/fetch_branding.py check
 
+.PHONY: window-icon-test
+window-icon-test: build ## The window icon is the Box Office art (assets/img/icon.png) and the window class is not the title (headless; KRUNKNATIVE_ASSETS_DIR for a worktree)
+	timeout 300 $(PYTHON) -I client/tests/window_icon_test.py $(DEBUG_DIR); rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 77 ]
+
 .PHONY: webview2 webview2-check
 webview2: ## Fetch the WebView2 SDK header and loader for the Windows captcha webview (tools/webview2/webview2.lock, sha256-pinned; KN_FETCH_PROXY=) into ~/.cache/krunknative/webview2
 	$(PYTHON) -I tools/webview2/fetch_webview2.py install
