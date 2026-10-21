@@ -144,7 +144,8 @@ void comp_ui_refresh(Client *client) {
                 break;
             }
         }
-        player_slot(team == 1 ? &left : &right, game, e, team == 1, my_team, slot, e->uid == client->net_client_id);
+        // an empty slot (e NULL) has no player: the mine flag is for the filled ones only
+        player_slot(team == 1 ? &left : &right, game, e, team == 1, my_team, slot, e && e->uid == client->net_client_id);
     }
     if (game->config.select_team) { // selTeam: Join / Leave Team under each list
         sb_appendf(&left, "<div class='compSwpTmB' style='background-color:#eb4034' onmouseenter='playTick()' onclick='playSelect();toggleTeam(%d)'>%s</div>",

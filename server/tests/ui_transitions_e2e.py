@@ -119,13 +119,13 @@ def expand(script):
     return "\n".join(lines) + "\n", expects
 
 
-def run_client(name, args, script, timeout=150, on_line=None, env_extra=None, storage=None, require=None):
+def run_client(name, args, script, timeout=150, on_line=None, env_extra=None, storage=None, require=None, subdir="krunknative"):
     """client_bin headless with the expanded input script; returns its log lines. `storage`: saved
     page values (localStorage: XDG_CONFIG_HOME/krunknative/<key>.json) to start with. `require`:
     (label, element, value) the run needs to say anything (else its probes are skipped, not failed)."""
     text, expects = expand(script)
     if storage:
-        folder = os.path.join(WORK, f"{name}-cfg", "krunknative")
+        folder = os.path.join(WORK, f"{name}-cfg", subdir)  # flavor.c: "krunknative-strike" for Krunker Strike
         os.makedirs(folder, exist_ok=True)
         for key, value in storage.items():
             with open(os.path.join(folder, f"{key}.json"), "w") as f:
@@ -1359,6 +1359,10 @@ def silent_server():
     return srv, port
 
 
+# Krunker Strike's first-run store (strike_ftue.c FTUE_STORE_KEY, per account): a finished first run
+FTUE_DONE = {"knFtue": '{"guest": {"played": true}}'}
+
+
 def sc_esc_loading():
     """Esc does nothing while the game loads: Krunker Strike's loading screen (the static boot screen,
     then FRVR's loading screen after Play) and a join that has not got its INIT yet (the menu closed
@@ -1372,7 +1376,9 @@ def sc_esc_loading():
         4000 state @boot-later
         4100 quit
     """
-    lines = run_client("esc-boot", strike, script, timeout=90)
+    # the first run's quick connect (strike_ftue_first_run) starts the game at the page's ready, whenever that is:
+    # a finished first run keeps the page at its menu, so the boot Esc is a timed event and no race
+    lines = run_client("esc-boot", strike, script, timeout=90, storage=FTUE_DONE, subdir="krunknative-strike")
     check_states("esc-boot", lines, script, {
         "boot-esc": {"menu": "1", "locked": "0"},
         "boot-later": {"menu": "1", "locked": "0"},
@@ -1390,7 +1396,7 @@ def sc_esc_loading():
         6000 state @game-esc
         6100 quit
     """
-    lines = run_client("esc-loading-strike", strike, script, timeout=90)
+    lines = run_client("esc-loading-strike", strike, script, timeout=90, storage=FTUE_DONE, subdir="krunknative-strike")
     check_states("esc-loading-strike", lines, script, {
         "play": {"menu": "0", "locked": "1"},
         "loading-esc": {"menu": "0", "locked": "1"},
@@ -1542,7 +1548,10 @@ def sc_server_list():
             texts[m.group(1)] = m.group(2)
     rows = " | ".join(texts.get(k, "") for k in ("first", "last"))
     record("server-list", "rows", "count", "2", str(nodes.get("rows")), nodes.get("rows") == 2)
-    record("server-list", "rows", "both", "Burg+Finder", rows, "Burg" in rows and "Finder Online" in rows)
+    # servers_ui.c row_title: a brain lobby's row is "<mode> - <map>"; a finder row (ds: 24/7) shows the 24/7 badge and its
+    # map, never the server's own name (v10's row; the name is the finder's, not the title)
+    record("server-list", "rows", "both", "Burg + 24/7 Kanji (no name title)", rows,
+           "Burg" in rows and "24/7 Kanji" in rows and "Finder Online" not in rows)
     marked = "verified_user" in rows or "Account required" in rows or "LOG IN" in rows
     record("server-list", "rows", "account-only", "none", rows if marked else "none", not marked)
     record("server-list", "rows", "marker-spans", "0", str(nodes.get("marker")), nodes.get("marker") == 0)
@@ -1553,11 +1562,7 @@ def sc_server_list():
 def sc_comp():
     """A comp lobby (server_bin gameserver.host_type comp): its menu (#mMenuHolComp, v7 f1904 at
     every INIT) instead of the default one, then offline (no comp: the default menu again)."""
-    # a server.cfg, not --gameserver.host_type=comp: with --cfg none (start_server) the CLI overrides are not merged
-    cfg = os.path.join(WORK, "comp-server.cfg")
-    with open(cfg, "w") as f:
-        json.dump({"gameserver": {"host_type": "comp"}}, f)
-    server, port = start_server("comp", ["--cfg", cfg])
+    server, port = start_server("comp", ["--gameserver.host_type=comp"])
     try:
         run_client("comp", ["--connect", f"127.0.0.1:{port}"], """
             0 menu

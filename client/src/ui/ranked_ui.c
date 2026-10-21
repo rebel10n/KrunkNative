@@ -351,10 +351,14 @@ static const V10Req *get_shop(void) {
 
 // The RP balance. A krunker.io account's is its account row's rankedPoints (v10's Account.rankedPoints,
 // row[47], v10:112873): the game server sends the row ("a" / "ua") when a krunker.io game signs the account
-// in, so it is unknown until then (rp_balance returns 0: no balance); v10 never asks krunker.io for it.
-// KrunkNative's is the brain's profile.
+// in. Until then v10 shows 0: the balance is `rankedPoints || 0` (v10:111254, the shop's $rankedPointsBalance
+// v10:112354), and v10 never asks krunker.io for it. KrunkNative's is the brain's profile.
 static int rp_balance(double *out) {
-    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return krunker_account_ranked_points(out);
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) {
+        *out = 0; // v10's display until the account row arrives (krunker_account_ranked_points leaves it)
+        krunker_account_ranked_points(out);
+        return 1;
+    }
     *out = v10_num(get_profile(current_season())->json, "rankedPoints", 0);
     return 1;
 }
@@ -1761,10 +1765,8 @@ static void gen_shop(StrBuf *sb) {
     sb_append(sb, "<div class=\"shop-container svelte-1gtpoav\"><div class=\"shop-header svelte-1gtpoav\"><div class=\"header-top svelte-1gtpoav\">"
                   "<div class=\"header-subtitle svelte-1gtpoav\">Spend your Ranked Points on exclusive items.</div> <div class=\"rp-balance svelte-1gtpoav\">");
     double rp = 0;
-    if (rp_balance(&rp)) v10_currency(sb, rp, "RP", "large", 0);
-    else sb_append(sb, "<div class=\"currency-display svelte-1r6bdx8\" style=\"--text-size: 20px; --icon-size: 22px;\">"
-                       "<span class=\"currency-amount svelte-1r6bdx8\" style=\"color: #4caf50;\">--</span> "
-                       "<span class=\"material-icons currency-icon svelte-1r6bdx8\" style=\"color: #4caf50;\">emoji_events</span></div>"); // not known yet
+    rp_balance(&rp);
+    v10_currency(sb, rp, "RP", "large", 0);
     sb_append(sb, "</div></div></div> <div class=\"shop-grid svelte-1gtpoav\">");
     const cJSON *s;
     cJSON_ArrayForEach(s, cJSON_GetObjectItem(r->json, "skins")) {

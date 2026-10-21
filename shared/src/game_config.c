@@ -1533,6 +1533,17 @@ void game_config_host(Game *game, const cJSON *request, const int host_index) {
     cJSON_Delete(st->request);
     st->request = cJSON_IsObject(request) ? cJSON_Duplicate(request, 1) : NULL;
     st->base = game->config;
+    if (gc_host_comp(st->host_index)) {
+        // a comp host's defaults (the comp flag, test mode, host type): the base a round with no map config and
+        // no request restores (game_apply_map_config). Without them the public rotation of a comp server stayed a
+        // custom game (INIT host 0, no comp menu). The maps and modes stay.
+        const GameConfig keep = st->base;
+        game_config_defaults(&st->base, st->host_index);
+        st->base.maps = keep.maps;
+        st->base.map_count = keep.map_count;
+        st->base.modes = keep.modes;
+        st->base.mode_count = keep.mode_count;
+    }
 }
 
 int game_config_is_custom(const Game *game) {

@@ -663,6 +663,9 @@ img.knOmProp {
 }
 #menuWindow.dark div.knOmToolGun {
   margin-top: 6px;
+  /* two lines whatever the line says: the message changes with the pick and the hand-over, and a line
+   * that wraps differently would resize the tools list under its scroll position (om-tools) */
+  min-height: 2.6em;
   font-size: 12px;
   color: var(--yellow);
 }

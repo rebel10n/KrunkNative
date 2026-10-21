@@ -66,7 +66,7 @@ NAME = "kn_test_rkrunker_%d" % os.getpid()
 SECRET = "kn-rkrunker-%d" % os.getpid()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-rkrunker-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
-HTTP_PORT, WS_PORT, GAME_PORT, MATCH_PORT, DEAD_PORT = kn_proto.free_ports(5)  # DEAD_PORT: nothing listens on it
+HTTP_PORT, WS_PORT, GAME_PORT, MATCH_PORT, DEAD_PORT, OFFICIAL_PORT = kn_proto.free_ports(6)  # DEAD_PORT: nothing listens on it
 MAPS = "0,2,4,11,14,17,42"  # v10's preferredMaps (v10:98372)
 MODES = {"kio_match": "match", "kio_cooldown": "cooldown", "kio_both": "match", "kio_garbage": "garbage"}
 ACCOUNT_ID = 1234
@@ -253,6 +253,10 @@ class Fake(BaseHTTPRequestHandler):
         record(entry)
         if path.startswith("/brain/"):
             return self._send(404, {"error": "not in the fake brain"})
+        if path == "/mm/seek-game":  # krunker.io's matchmaker (KRUNKNATIVE_KRUNKER_MATCHMAKER): an official game for the join
+            game = (urllib.parse.parse_qs(parts.query).get("game") or ["TEST:kanji"])[0]
+            return self._send(200, {"host": "127.0.0.1", "port": OFFICIAL_PORT, "gameId": game, "clientId": "e2e-official",
+                                    "data": {"i": "Kanji", "g": 0}})
         if not (path.startswith("/api/") or path.startswith("/gapi/")):
             return self._send(404, {"error": "unknown route"})
         if account is None:
@@ -368,11 +372,32 @@ async def match_handler(ws):
     await rd
 
 
+async def official_handler(ws):
+    """the official krunker.io game the account joins from the menu (krunkerJoin: the seek's host and port, the game
+    socket with gameId, clientKey and at= the account's token): it records the upgrade and sends io-init; it stays
+    open for the whole run (the krunker.io backend is the connected server's while it is open, backend_ui.h). The
+    account row ("a") is not sent here: the RP balance stays v10's 0 until a game sends it (the match's socket)."""
+    url = urllib.parse.urlsplit(ws.request.path)
+    query = urllib.parse.parse_qs(url.query)
+    token = (query.get("at") or [""])[0]
+    user = username_of_jwt(token) if token in TOKENS else "?"
+    entry = {"ws": "official", "path": url.path, "query": sorted(query), "token_issued": token in TOKENS, "account": user,
+             "frames": []}
+    record(entry)
+    try:
+        await ws.send(frame("io-init", "sockME", ah=0x11))
+        async for msg in ws:
+            entry["frames"].append(frame_name(msg) if isinstance(msg, bytes) else "text")
+    except (websockets.ConnectionClosed, asyncio.CancelledError):
+        pass
+
+
 def start_ws():
     loop = asyncio.new_event_loop()
 
     async def serve():
-        async with ws_server.serve(queue_handler, "127.0.0.1", WS_PORT), ws_server.serve(match_handler, "127.0.0.1", MATCH_PORT):
+        async with ws_server.serve(queue_handler, "127.0.0.1", WS_PORT), ws_server.serve(match_handler, "127.0.0.1", MATCH_PORT), \
+                ws_server.serve(official_handler, "127.0.0.1", OFFICIAL_PORT):
             await asyncio.Future()
 
     def run():
@@ -444,6 +469,7 @@ def start_brain():
 SCRIPT_OFFSET_MS = 15000
 SCRIPTS = {
     "kio_match": """0 menu
+500 call krunkerJoin "TEST:kanji"  # the krunker.io account plays an official game: the connected server is krunker.io
 1000 call openRankedMenu
 3000 nodes @ranked .rankedMenuModal .start-button
 3100 text @region .rankedMenuModal .region-indicator
@@ -487,11 +513,12 @@ SCRIPTS = {
 28000 text @kiolevel [id=knV10Level]
 28100 text @menurpsess [id=menuRPCount]
 36000 call knRkBuy 7
+36300 text @neterr .error-popup-container
 36500 call knViewPop 1
-37000 text @neterr .text-error
 38000 quit
 """,
     "kio_cooldown": """0 menu
+500 call krunkerJoin "TEST:kanji"  # the krunker.io account plays an official game: the connected server is krunker.io
 1000 call openRankedMenu
 3000 nodes @ranked .rankedMenuModal .start-button
 4000 call knRkStart
@@ -516,6 +543,7 @@ SCRIPTS = {
 13000 quit
 """,
     "kio_garbage": """0 menu
+500 call krunkerJoin "TEST:kanji"  # the krunker.io account plays an official game: the connected server is krunker.io
 1000 call openRankedMenu
 3000 nodes @ranked .rankedMenuModal .start-button
 4000 call knRkStart
@@ -525,6 +553,7 @@ SCRIPTS = {
 8000 quit
 """,
     "kio_down": """0 menu
+500 call krunkerJoin "TEST:kanji"  # the krunker.io account plays an official game: the connected server is krunker.io
 1000 call openRankedMenu
 3000 nodes @ranked .rankedMenuModal .start-button
 4000 call knRkStart
@@ -587,9 +616,12 @@ def client(name, brain_url, storage, gamefrontend=None):
         "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
         "KRUNKNATIVE_BRAIN_URL": brain_url or "0", "KRUNKNATIVE_NET_TRANSPORT": "tcp",
         "KRUNKNATIVE_FINDER_URL": (brain_url or "http://127.0.0.1:%d/brain" % HTTP_PORT) + "/servers",
-        "KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % HTTP_PORT,
+        # the account services (krunker_account.h: ranked shop / purchase, /player/me) are gapi's; the data client is api's
+        "KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/gapi" % HTTP_PORT,
+        "KRUNKNATIVE_KRUNKER_DATA_API": "http://127.0.0.1:%d/api" % HTTP_PORT,
         "KRUNKNATIVE_KRUNKER_GAPI": "http://127.0.0.1:%d/gapi" % HTTP_PORT,
         "KRUNKNATIVE_KRUNKER_GAMEFRONTEND": gamefrontend or "http://127.0.0.1:%d" % WS_PORT,
+        "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d/mm" % HTTP_PORT,  # the official seek (/mm/seek-game)
     })
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -647,6 +679,19 @@ def run_kio_client(name, user, brain_url, storage, gamefrontend=None):
 
 # ---------------------------------------------------------------- the checks
 
+def official_check(entries, label):
+    """the routing's premise: the krunker.io account joined an official game (krunkerJoin: the matchmaker's seek, then
+    the game socket with gameId, clientKey and at= its token). While it is open the connected server is krunker.io
+    (krunker_net_active, backend_ui.h account_backend), so the Ranked popup is the krunker.io account's."""
+    seeks = [e for e in entries if e.get("p", "").startswith("/mm/seek-game")]
+    check("%s: krunkerJoin asks the matchmaker for an official game (the seek)" % label, bool(seeks), str([e["p"] for e in seeks])[:200])
+    official = [e for e in entries if e.get("ws") == "official"]
+    check("%s: the official game socket opens with gameId, clientKey and at= the account's token" % label,
+          bool(official) and official[0]["path"] == "/ws" and official[0]["query"] == ["at", "clientKey", "gameId"]
+          and official[0]["token_issued"] and official[0]["account"] == label,
+          str([(e.get("path"), e.get("query"), e.get("account")) for e in official])[:240])
+
+
 def check_kio_match(text, entries, token):
     api = [e for e in entries if e.get("p", "").startswith(("/api/", "/gapi/"))]
     paths = [e["p"] for e in api]
@@ -660,7 +705,6 @@ def check_kio_match(text, entries, token):
         ("rejoin lookup: v10's ranked/me/connection", r"^/api/ranked/me/connection$"),
         ("milestone claim: v10's claim-milestone path", None),
         ("shop: gapi /ranked/shop", r"^/gapi/ranked/shop$"),
-        ("purchase: gapi /ranked/purchase", r"^/gapi/ranked/purchase$"),
     ]
     for label, pattern in checks:
         if pattern is None:
@@ -668,9 +712,10 @@ def check_kio_match(text, entries, token):
             check("kio_match: " + label, bool(hit), str(paths)[:200])
         else:
             check("kio_match: " + label, any(re.search(pattern, p) for p in paths), str(paths)[:300])
-    buys = [e for e in api if e["p"] == "/gapi/ranked/purchase" and e["m"] == "POST"]
-    check("kio_match: the purchase body is v10's {skin_id: the shop row's id}", bool(buys) and json.loads(buys[0]["body"]) == {"skin_id": 7},
-          str([e["body"] for e in buys]))
+    # the krunker.io Store is read-only in Box Office (kio_store.c kio_store_read_only, the ranked buy: ranked_ui.c): a
+    # purchase is shown and never sent, so the fake's purchase route is not reached
+    sent = [e for e in api if e["p"] == "/gapi/ranked/purchase"]
+    check("kio_match: a purchase is never sent to krunker.io (read-only Store, kio_store.c)", not sent, str([(e["m"], e["body"]) for e in sent])[:200])
     season = str(current_season())
     seasons = {"profile": None, "leaderboard": None, "history": None}
     for e in api:
@@ -680,6 +725,7 @@ def check_kio_match(text, entries, token):
             seasons[key] = m.group(1)
     check("kio_match: profile, leaderboard and history read the current season (v10's _7307; v10 has no season picker: $selectedSeason is never written)",
           all(seasons[k] == season for k in seasons), str(seasons) + " current " + season)
+    official_check(entries, "kio_match")
     queues = [e for e in entries if e.get("ws") == "queue"]
     check("kio_match: FIND MATCH opens the queue socket for the krunker.io account", len(queues) >= 1 and queues[0]["account"] == "kio_match",
           str(queues)[:200])
@@ -705,16 +751,17 @@ def check_kio_match(text, entries, token):
     shown = [l for l in text.splitlines() if l.startswith("[input_script] text") and "not available" in l.lower()]
     check("kio_match: the match's join shows no Not Available popup and no not-available text",
           not shown and "Not Available" not in text_of(text, "overlaytitle"), (shown or [""])[0][:200])
-    check("kio_match: the RP balance is unknown (--) before a krunker.io game signs the account in",
-          text_of(text, "rpbefore").endswith("text=--"), text_of(text, "rpbefore")[:60])
+    # v10's display before a game: $rankedPointsBalance = account.rankedPoints || 0 (v10:112354, v10:111254): 0, not "--"
+    check("kio_match: the RP balance is v10's 0 before a krunker.io game signs the account in (rankedPoints || 0, v10:112354)",
+          text_of(text, "rpbefore").endswith("text=0"), text_of(text, "rpbefore")[:60])
     check("kio_match: the wallet packet's balance (ub, balances[3].amount = %d) replaces the account row's (v10:208200)" % WALLET_TEST,
           text_of(text, "rpafter").endswith("text=" + "{:,}".format(WALLET_TEST)), text_of(text, "rpafter")[:60])
     check("kio_match: a refused claim shows nothing (no .text-error popup, v10:98757-98764)", nodes(text, "claimerr") == 0,
           str(nodes(text, "claimerr")))
-    check("kio_match: a dropped purchase request shows v10's Network error (v10:111062)",
-          text_of(text, "neterr").endswith("text=Network error"), text_of(text, "neterr")[:80])
-    moved = WALLET_TEST + MILESTONE_REWARD - SKIN_PRICE
-    check("kio_match: a claim adds the milestone's reward and a purchase takes the price off the balance (v10:98744, 111042): %d"
+    check("kio_match: a purchase shows the read-only notice (krunker.io Store: never buys; kio_store_read_only_text)",
+          "never buys" in text_of(text, "neterr"), text_of(text, "neterr")[:120])
+    moved = WALLET_TEST + MILESTONE_REWARD  # the read-only purchase takes nothing off the balance (SKIN_PRICE stays on the shop row)
+    check("kio_match: a claim adds the milestone's reward and a purchase leaves the balance (read-only Store): %d"
           % moved, text_of(text, "rpmoved").endswith("text=" + "{:,}".format(moved)), text_of(text, "rpmoved")[:60])
     check("kio_match: the account row's level is row[6]'s score (level 20): the krunker.io account's header says Lv 20",
           text_of(text, "kiolevel").endswith("Lv 20"), text_of(text, "kiolevel")[:120])
@@ -749,6 +796,7 @@ def shop_times(entries):
 
 
 def check_kio_garbage(text, entries):
+    official_check(entries, "kio_garbage")
     check("kio_garbage: an unparseable queue frame sets the banner's message (v10:98489-98497)",
           text_of(text, "banner").endswith("text=Failed to parse server message"), text_of(text, "banner")[:120])
     check("kio_garbage: and the internal error popup (v10 INTERNAL_ERROR, v10:111556-111563)",
@@ -756,6 +804,7 @@ def check_kio_garbage(text, entries):
 
 
 def check_kio_down(text, entries):
+    official_check(entries, "kio_down")
     check("kio_down: a queue socket that never opens sets 'Failed to connect' in the banner (v10:98441-98452)",
           text_of(text, "banner").endswith("text=Failed to connect to matchmaking server"), text_of(text, "banner")[:120])
     check("kio_down: and the internal error popup, not a footer line", text_of(text, "overlaytitle").endswith("text=Internal Error"),
@@ -763,6 +812,7 @@ def check_kio_down(text, entries):
 
 
 def check_kio_cooldown(text, entries):
+    official_check(entries, "kio_cooldown")
     queues = [e for e in entries if e.get("ws") == "queue"]
     check("kio_cooldown: the queue socket opened for that account", bool(queues) and queues[0]["account"] == "kio_cooldown", str(queues)[:160])
     check("kio_cooldown: ERROR COOLDOWN shows the cooldown overlay", text_of(text, "overlaytitle").endswith("text=Cooldown"),
