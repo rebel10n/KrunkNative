@@ -373,10 +373,15 @@ static void h_assets(kn_http_req *req, void *ud) {
                 KN_DB_ARGS(pat, acct_itoa(cat, a->tab), user), db_rows_done, a);
 }
 
+/* the type a route names: the v10 webhooks /webhooks/general/{maps,mods}/search (v10.js 131908, 131928)
+ * have no ?type=; /api/search reads it from the query (ud NULL) */
+static const char k_search_map[] = "map";
+static const char k_search_mod[] = "mod";
+
 static void h_search(kn_http_req *req, void *ud) {
-    (void) ud;
     char type[16] = "";
-    kn_http_query_get(req, "type", type, sizeof type);
+    if (ud) snprintf(type, sizeof type, "%s", (const char *) ud);
+    else kn_http_query_get(req, "type", type, sizeof type);
     const int kind = !strcmp(type, "map") ? 3 : !strcmp(type, "mod") ? 4 : -1;
     ApiReq *a = api_req(req, kind < 0 ? 3 : kind);
     if (!a) return;
@@ -738,6 +743,15 @@ int creations_init(Brain *b) {
     kn_http_route(b->http, "GET", "/api/prices", h_prices, NULL);
     kn_http_route(b->http, "GET", "/api/map-data", h_map_data, NULL);
     kn_http_route(b->http, "GET", "/api/published-map", h_map_data, NULL);
+    /* the v10 legacy webhooks on the brain root (apiRequest, v10.js 131894-131950): the raw body the
+     * callers read ({data: rows}, the same page as the api routes; the params are the same names) */
+    kn_http_route(b->http, "GET", "/webhooks/general/maps/list", h_maps, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/maps/search", h_search, (void *) k_search_map);
+    kn_http_route(b->http, "GET", "/webhooks/general/mods/list", h_mods, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/mods/search", h_search, (void *) k_search_mod);
+    kn_http_route(b->http, "GET", "/webhooks/general/assets/list", h_assets, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/assets/search", h_assets, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/items/prices", h_prices, NULL);
     KN_INFO(MOD, "hub catalogue: %zu catalogue maps + published maps/mods/assets", map_catalog_count());
     return 0;
 }

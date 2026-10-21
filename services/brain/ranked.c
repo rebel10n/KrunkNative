@@ -54,6 +54,7 @@
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "social_ws.h"
+#include "v10_api.h"
 
 #define MOD "ranked"
 #define MAX_CAND 512
@@ -418,6 +419,7 @@ typedef struct ReqCtx {
     char shop_id[16];
     char name[64];
     int global;        /* leaderboard over every region (v10 "Global"): each player's best profile */
+    int v10;           /* a root v10 alias (/ranked/...): the gapi envelope of v10_api.h */
 } ReqCtx;
 
 static ReqCtx *req_ctx(kn_http_req *req) {
@@ -447,16 +449,39 @@ static ReqCtx *req_ctx(kn_http_req *req) {
     return c;
 }
 
+/* a refusal: KN's {success: 0, error} on the mm ranked routes, v10's {error: {code, message}} on the root aliases */
+static void refuse(kn_http_req *req, const int v10, const int status, const char *code) {
+    if (v10) v10_reply_error(req, status, code, code);
+    else reply_error(req, status, code);
+}
+
+/* the root alias of a login-only route, refused before any work: v10's LOGIN_REQUIRED (401) */
+static int v10_refuse_guest(kn_http_req *req) {
+    char token[512];
+    get_token(req, token, sizeof token);
+    if (token[0]) return 0;
+    v10_reply_error(req, 401, "LOGIN_REQUIRED", "You must be logged in to access Ranked Mode.");
+    return 1;
+}
+
 static void done_ctx(ReqCtx *c, const int status) {
     kn_http_set_header(c->req, "Cache-Control", "no-cache, no-store, must-revalidate");
-    brain_reply_json(c->req, status, c->out);
-    cJSON_Delete(c->out);
+    if (!c->v10) {
+        brain_reply_json(c->req, status, c->out);
+        cJSON_Delete(c->out);
+    } else if (status >= 400) {
+        const char *code = kn_json_str(c->out, "error", "internal");
+        v10_reply_error(c->req, status, code, code);
+        cJSON_Delete(c->out);
+    } else {
+        v10_reply_data(c->req, status, c->out); /* consumes c->out */
+    }
     free(c);
 }
 
 static void db_fail(ReqCtx *c, const char *what, kn_db_result *res) {
     log_err(what, res);
-    reply_error(c->req, 500, "internal");
+    refuse(c->req, c->v10, 500, "internal");
     cJSON_Delete(c->out);
     free(c);
 }
@@ -836,11 +861,23 @@ static void shop_account(void *ud, kn_http_req *req, const int64_t id, const int
     kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc, acc), on_shop, c);
 }
 
+static void shop_route(kn_http_req *req, const int v10) {
+    if (!db_ready()) return refuse(req, v10, 503, "RankedUnavailable");
+    ReqCtx *c = req_ctx(req);
+    if (!c) return;
+    c->v10 = v10;
+    with_account(req, 0, shop_account, c);
+}
+
 static void h_shop(kn_http_req *req, void *ud) {
     (void) ud;
-    if (!db_ready()) return reply_error(req, 503, "RankedUnavailable");
-    ReqCtx *c = req_ctx(req);
-    if (c) with_account(req, 0, shop_account, c);
+    shop_route(req, 0);
+}
+
+/* GET /ranked/shop (v10.js 26381): the root alias */
+static void h_shop_v10(kn_http_req *req, void *ud) {
+    (void) ud;
+    shop_route(req, 1);
 }
 
 static void purchase_account(void *ud, kn_http_req *req, const int64_t id, const int level, const char *name) {
@@ -854,17 +891,29 @@ static void purchase_account(void *ud, kn_http_req *req, const int64_t id, const
     kn_db_call(R.b->db, &P_RK_PURCHASE, KN_DB_ARGS(acc, c->shop_id, season), on_proc_reply, c);
 }
 
-static void h_purchase(kn_http_req *req, void *ud) {
-    (void) ud;
-    if (!db_ready()) return reply_error(req, 503, "RankedUnavailable");
+static void purchase_route(kn_http_req *req, const int v10) {
+    if (!db_ready()) return refuse(req, v10, 503, "RankedUnavailable");
+    if (v10 && v10_refuse_guest(req)) return;
     ReqCtx *c = req_ctx(req);
     if (!c) return;
+    c->v10 = v10;
     if (kn_http_query_get(req, "id", c->shop_id, sizeof c->shop_id) <= 0) {
         cJSON *body = kn_http_body_json(req); /* v10: POST {skin_id: id} */
         snprintf(c->shop_id, sizeof c->shop_id, "%lld", (long long) kn_json_int(body, "skin_id", kn_json_int(body, "id", 0)));
         cJSON_Delete(body);
     }
     with_account(req, 1, purchase_account, c);
+}
+
+static void h_purchase(kn_http_req *req, void *ud) {
+    (void) ud;
+    purchase_route(req, 0);
+}
+
+/* POST /ranked/purchase {skin_id} (v10.js 26386): the root alias */
+static void h_purchase_v10(kn_http_req *req, void *ud) {
+    (void) ud;
+    purchase_route(req, 1);
 }
 
 static void on_connection(kn_db_result *res, void *ud) {
@@ -898,11 +947,24 @@ static void connection_account(void *ud, kn_http_req *req, const int64_t id, con
     kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc), on_connection, c);
 }
 
+static void connection_route(kn_http_req *req, const int v10) {
+    if (!db_ready()) return refuse(req, v10, 503, "RankedUnavailable");
+    if (v10 && v10_refuse_guest(req)) return;
+    ReqCtx *c = req_ctx(req);
+    if (!c) return;
+    c->v10 = v10;
+    with_account(req, 1, connection_account, c);
+}
+
 static void h_connection(kn_http_req *req, void *ud) {
     (void) ud;
-    if (!db_ready()) return reply_error(req, 503, "RankedUnavailable");
-    ReqCtx *c = req_ctx(req);
-    if (c) with_account(req, 1, connection_account, c);
+    connection_route(req, 0);
+}
+
+/* GET /ranked/me/connection (v10.js 25985): the root alias */
+static void h_connection_v10(kn_http_req *req, void *ud) {
+    (void) ud;
+    connection_route(req, 1);
 }
 
 static void h_info(kn_http_req *req, void *ud) {
@@ -1211,6 +1273,10 @@ int ranked_init(Brain *b) {
     route(b, NULL, "purchase", h_purchase);
     kn_http_route(b->http, NULL, "/mm/queue/*", h_v7_queue, b);
     kn_http_route(b->http, NULL, "/queue/*", h_v7_queue, b);
+    /* the v10 root paths (v10.js gapi ranked client, doc/v10/ranked.md) */
+    kn_http_route(b->http, "GET", "/ranked/shop", h_shop_v10, b);
+    kn_http_route(b->http, "POST", "/ranked/purchase", h_purchase_v10, b);
+    kn_http_route(b->http, "GET", "/ranked/me/connection", h_connection_v10, b);
     if (!b->db || !R.enabled) {
         KN_INFO(MOD, "ranked disabled (%s)", b->db ? "brain.ranked.enabled=false" : "no database");
         return 0;

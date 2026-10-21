@@ -115,7 +115,11 @@ static void h_display(kn_http_req *req, void *ud) {
         return;
     }
     q->req = req;
-    if (kn_http_query_get(req, "tag", q->tag, sizeof q->tag) <= 0) snprintf(q->tag, sizeof q->tag, "limited");
+    /* v10's /shop/displays/:tag (v10.js 26520) names the tag in the path; ?tag= (v10.js 26525) and KN's
+     * /api/shop/displays in the query */
+    const char *seg = kn_http_param(req, "tag");
+    if (seg && seg[0]) snprintf(q->tag, sizeof q->tag, "%s", seg);
+    else if (kn_http_query_get(req, "tag", q->tag, sizeof q->tag) <= 0) snprintf(q->tag, sizeof q->tag, "limited");
     char token[512];
     if (!token_of(req, token, sizeof token)) {
         run_db(q);
@@ -163,6 +167,10 @@ int shop_init(Brain *b) {
     S.enabled = kn_config_bool(b->cfg, "brain.shop.enabled", 1);
     kn_http_route(b->http, "GET", "/api/shop/displays", h_display, b);
     kn_http_route(b->http, "POST", "/api/shop/purchase", h_purchase, b);
+    /* the v10 root paths (v10.js 26520-26535) */
+    kn_http_route(b->http, "GET", "/shop/displays/:tag", h_display, b);
+    kn_http_route(b->http, "GET", "/shop/displays", h_display, b);
+    kn_http_route(b->http, "POST", "/shop/purchase", h_purchase, b);
     if (b->db && S.enabled) KN_INFO(MOD, "Junk shop on /api/shop/*");
     return 0;
 }

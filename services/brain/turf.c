@@ -559,6 +559,18 @@ int turf_init(Brain *b) {
     route(b, "/api/territorial-wars/player/:id", h_player);
     route(b, "/api/territorial-wars/player/:id/contributions", h_player_contrib);
     route(b, "/api/territorial-wars/player/:id/earnings", h_player_earnings);
+    /* the v10 root paths (v10.js 26673-26750, 26764-26830): the same views and handlers */
+    route(b, "/territorial-wars/status", h_status);
+    route(b, "/territorial-wars/clan/:id", h_clan);
+    route(b, "/territorial-wars/clan/:id/players", h_clan_players);
+    route(b, "/territorial-wars/clan/:id/earnings", h_clan_earnings);
+    route(b, "/territorial-wars/clan/:id/payouts", h_clan_payouts);
+    route(b, "/territorial-wars/leaderboards/top-performing-clans", h_top_clans);
+    route(b, "/territorial-wars/leaderboards/top-grossing-clans", h_top_grossing);
+    route(b, "/territorial-wars/leaderboards/top-performing-players", h_top_players);
+    route(b, "/territorial-wars/player/:id", h_player);
+    route(b, "/territorial-wars/player/:id/contributions", h_player_contrib);
+    route(b, "/territorial-wars/player/:id/earnings", h_player_earnings);
     kn_http_route(b->http, "GET", "/api/clans/recruitment", h_recruitment_list, b);
     kn_http_route(b->http, "GET", "/api/clans/my-applications", h_my_applications, b);
     kn_http_route(b->http, "GET", "/api/clans/:id/recruitment", h_recruitment_get, b);
@@ -569,6 +581,14 @@ int turf_init(Brain *b) {
     kn_http_route(b->http, "GET", "/api/clans/:id/loot-config", h_loot_get, b);
     kn_http_route(b->http, "PUT", "/api/clans/:id/loot-config", h_loot_put, b);
     kn_http_route(b->http, "POST", "/api/clans/:id/loot-config", h_loot_put, b);
+    kn_http_route(b->http, "GET", "/clans/recruitment", h_recruitment_list, b);
+    kn_http_route(b->http, "GET", "/clans/my-applications", h_my_applications, b);
+    kn_http_route(b->http, "GET", "/clans/:id/recruitment", h_recruitment_get, b);
+    kn_http_route(b->http, "POST", "/clans/:id/recruitment", h_recruitment_set, b);
+    kn_http_route(b->http, "DELETE", "/clans/:id/recruitment", h_recruitment_del, b);
+    kn_http_route(b->http, "POST", "/clans/:id/apply", h_apply, b);
+    kn_http_route(b->http, "GET", "/clans/:id/loot-config", h_loot_get, b);
+    kn_http_route(b->http, "PUT", "/clans/:id/loot-config", h_loot_put, b);
     if (!b->db || !T.enabled) return 0;
     T.timer = kn_loop_add_timer(b->loop, 2000, (uint64_t) kn_config_int(b->cfg, "brain.turf.settle_check_ms", 60000), tick, NULL);
     KN_INFO(MOD, "Turf Wars on /api/territorial-wars/* (day %d, %d KR per kill)", current_day(), T.kr_per_kill);

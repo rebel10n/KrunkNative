@@ -220,6 +220,9 @@ int lottery_init(Brain *b) {
     L.enabled = kn_config_bool(b->cfg, "brain.lottery.enabled", 1);
     kn_http_route(b->http, "GET", "/api/lottery/:id", h_view, b);
     kn_http_route(b->http, "POST", "/api/lottery/:id/participate", h_participate, b);
+    /* the v10 root paths (v10.js 26566-26575) */
+    kn_http_route(b->http, "GET", "/lottery/:id", h_view, b);
+    kn_http_route(b->http, "POST", "/lottery/:id/participate", h_participate, b);
     if (!b->db || !L.enabled) return 0;
     L.timer = kn_loop_add_timer(b->loop, 2000, (uint64_t) kn_config_int(b->cfg, "brain.lottery.settle_check_ms", 60000), tick, NULL);
     KN_INFO(MOD, "lottery on /api/lottery/*");

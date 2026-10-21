@@ -445,5 +445,12 @@ int leaderboards_http_init(Brain *b) {
     kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/players", h_http_empty, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/:type", h_http_board, b);
+    /* the v10 root paths (v10.js 26995-27040): the stubs before the :type route, as above */
+    kn_http_route(b->http, "GET", "/leaderboards/raids/:map", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/raids/:map/monthly", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/players", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/:type", h_http_board, b);
     return 0;
 }

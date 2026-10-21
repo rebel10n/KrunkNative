@@ -13,6 +13,8 @@
 #include "releases.h"
 #include "auth_state.h" /* AuthLimiter: the generate-token rate limit */
 #include "hot.h"        /* hot_limit */
+#include "acct_internal.h" /* store_spins_json: the wheels /data/spins packs (store.c) */
+#include "v10_api.h"    /* v10_reply_data: the gapi envelope of the v10 root routes */
 #include "mm_token.h"   /* seek-game validation tokens (doc/v10/matchmaker-token.md) */
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -651,6 +653,16 @@ static void h_not_found(kn_http_req *req, void *ud) {
     cJSON_Delete(o);
 }
 
+/* GET /spins/wheels (v10.js 27294): the wheels this brain spins, the same {season, wheels, itemPools} as
+ * /api/data/spins (store.c) in v10's gapi envelope */
+static void h_spins_wheels(kn_http_req *req, void *ud) {
+    (void) ud;
+    const char *s = store_spins_json();
+    cJSON *wheels = s ? kn_json_parse(s, strlen(s)) : NULL;
+    if (!wheels) return v10_reply_error(req, 500, "internal", "no wheels");
+    v10_reply_data(req, 200, wheels);
+}
+
 int public_routes_init(Brain *b) {
     /* method NULL: publicRoutes.ts answers every method alike (doc/backend.md 4.1) */
     kn_http_route(b->http, NULL, "/ping", h_ping, b);
@@ -669,6 +681,8 @@ int public_routes_init(Brain *b) {
     kn_http_route(b->http, NULL, "/api/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/social/player-count", h_player_count, b);
     kn_http_route(b->http, NULL, "/mm/player-count", h_player_count, b);
+    kn_http_route(b->http, NULL, "/player-count", h_player_count, b); /* v10's social host (v10.js 211170) */
+    kn_http_route(b->http, "GET", "/spins/wheels", h_spins_wheels, b);
     kn_http_set_fallback(b->http, h_not_found, b);
     return 0;
 }
