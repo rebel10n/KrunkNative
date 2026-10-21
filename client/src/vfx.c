@@ -13,6 +13,7 @@
 // in world units, velocities per ms, gravity per ms^2, lifetimes in ms).
 #include <gl.h>
 #include <vfx.h>
+#include <vfx_debris.h> // the debris piece and its pool slot
 #include <third_person.h> // camera_offset_active: no viewmodel muzzle in third person
 #include <projectiles_render.h>
 #include <html_ui.h>
@@ -261,14 +262,6 @@ typedef struct {
     float scale;
 } VfxTrail;
 
-typedef struct {
-    unsigned char active;
-    vec3 position;
-    vec3 velocity;          // per second (ExplosionManager works in seconds)
-    float life;
-    float life_speed;
-    float size;
-} VfxDebris;
 
 typedef struct {
     vec3 position;          // x/z centre, y base
@@ -834,22 +827,20 @@ static void spawn_pour_drops(const vec3 mouth, const vec3 rim, const float stren
 // 88.js ExplosionManager.explodeAt(x, y, z, scale)
 static void spawn_debris(const vec3 position, const float seed, const float size_min, const float size_range,
                          const float velocity_min, const float velocity_range) {
-    for (int i = 0; i < VFX_MAX_DEBRIS; i++) {
-        VfxDebris *debris = &vfx.debris[i];
-        if (debris->active) continue;
+    // a full pool gives up its piece that disappears first: the explosion still shows (vfx_debris.h)
+    VfxDebris *debris = vfx_debris_slot(vfx.debris, VFX_MAX_DEBRIS);
+    if (!debris) return;
 
-        const float rank = powf(seed, 2.5f);
-        const float speed = (1.0f - rank) * velocity_range + velocity_min;
-        const vec3 direction = v3_normalize(v3(rand_unit() - 0.5f, rand_unit() - 0.5f, rand_unit() - 0.5f));
+    const float rank = powf(seed, 2.5f);
+    const float speed = (1.0f - rank) * velocity_range + velocity_min;
+    const vec3 direction = v3_normalize(v3(rand_unit() - 0.5f, rand_unit() - 0.5f, rand_unit() - 0.5f));
 
-        debris->active = 1;
-        debris->position = position;
-        debris->velocity = v3_scale(direction, speed);
-        debris->life = 0.0f;
-        debris->life_speed = rank * VFX_EXPLOSION_LIFE_RANGE + VFX_EXPLOSION_LIFE_MIN;
-        debris->size = rank * size_range + size_min;
-        return;
-    }
+    debris->active = 1;
+    debris->position = position;
+    debris->velocity = v3_scale(direction, speed);
+    debris->life = 0.0f;
+    debris->life_speed = rank * VFX_EXPLOSION_LIFE_RANGE + VFX_EXPLOSION_LIFE_MIN;
+    debris->size = rank * size_range + size_min;
 }
 
 void vfx_explosion(Client *client, const vec3 position, const float radius) {

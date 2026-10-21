@@ -1117,6 +1117,33 @@ else ()
     add_executable(app_backend_test client/tests/app_backend_test.c client/src/app_backend.c)
     target_include_directories(app_backend_test PRIVATE client/include shared/include)
     add_test(NAME app_backend_test COMMAND app_backend_test)
+
+    # app_url_test (client/include/app_url.h): the page URLs the hub, the game and the editor route
+    # ("/?play=<map>" keeps its query); no window, no GL
+    add_executable(app_url_test client/tests/app_url_test.c client/src/app_url.c)
+    target_include_directories(app_url_test PRIVATE client/include)
+    add_test(NAME app_url_test COMMAND app_url_test)
+
+    # vfx_debris_test (client/include/vfx_debris.h): a full explosion-debris pool gives a new explosion
+    # its slot (vfx.c spawn_debris); header-only, no renderer
+    add_executable(vfx_debris_test client/tests/vfx_debris_test.c)
+    target_include_directories(vfx_debris_test PRIVATE client/include shared/include)
+    target_link_libraries(vfx_debris_test PRIVATE m)
+    add_test(NAME vfx_debris_test COMMAND vfx_debris_test)
+
+    # market_stats_test (client/include/market_stats.h): the Market Stats tab keeps its rows when the
+    # brain answers a database error with null (v10_market.c)
+    add_executable(market_stats_test client/tests/market_stats_test.c)
+    target_include_directories(market_stats_test PRIVATE client/include shared/include)
+    target_link_libraries(market_stats_test PRIVATE cJSON m)
+    add_test(NAME market_stats_test COMMAND market_stats_test)
+
+    # follower_counts_test (client/include/follower_counts.h): a follow moves the author's count on
+    # their posts and profile (v10_social.c followers_moved)
+    add_executable(follower_counts_test client/tests/follower_counts_test.c)
+    target_include_directories(follower_counts_test PRIVATE client/include shared/include)
+    target_link_libraries(follower_counts_test PRIVATE cJSON m)
+    add_test(NAME follower_counts_test COMMAND follower_counts_test)
     # kn_webview_test (client/src/ui/kn_webview.c built without GTK): the captcha's game UI / window choice, the
     # game UI's stall watchdog and the frame conversion. The live run is kn_webview_live_test (a display: not ctest)
     add_executable(kn_webview_test client/tests/kn_webview_test.c client/src/ui/kn_webview.c)

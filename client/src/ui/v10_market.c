@@ -47,6 +47,7 @@
 #include <kio_store.h> // krunker.io active: the market's writes are read-only
 #include <app_mode.h>
 #include <cJSON.h>
+#include <market_stats.h> // the Stats reply keeps its rows on an error (market_stats_test)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -347,13 +348,16 @@ static void svg_data_url(StrBuf *sb, const char *svg) {
 
 // ------------------------------------------------------------------ transport
 
-static void send_frame(cJSON *f) {
-    if (f) backend_social_send(f);
+// 1 when the frame went out (0: no socket, so no reply will come)
+static int send_frame(cJSON *f) {
+    int sent = 0;
+    if (f) sent = backend_social_send(f);
     cJSON_Delete(f);
+    return sent;
 }
 
 // ["r", page, sub, K, q, s, region, item]: the brain's market pages
-static void request_page(const char *page, const char *sub, const int item) {
+static int request_page(const char *page, const char *sub, const int item) {
     const AccountInfo *a = acc();
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("r"));
@@ -364,7 +368,7 @@ static void request_page(const char *page, const char *sub, const int item) {
     cJSON_AddItemToArray(f, cJSON_CreateNull());
     cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(item));
-    send_frame(f);
+    return send_frame(f);
 }
 
 static void send_econ(const char *label, const int n, const double *v, const char *key) {
@@ -751,7 +755,8 @@ static void history_load(void) {
 static void stats_load(void) {
     if (!logged_in() || M.stats_loading) return;
     M.stats_loading = 1;
-    request_page("market", "stats", -1);
+    // no socket: no reply will clear the flag, so the next open of the tab asks again
+    if (!request_page("market", "stats", -1)) M.stats_loading = 0;
 }
 
 static int inv_count(const int index) {
@@ -3264,7 +3269,7 @@ static void on_social(void *user, const cJSON *frame) {
             if (!strcmp(sub, "inventory")) { M.inv_loading = 0; set_json(&M.inv, a3); }
             else if (!strcmp(sub, "sales")) { M.sales_loading = 0; set_json(&M.sales, a3); }
             else if (!strcmp(sub, "history")) { M.hist_loading = 0; set_json(&M.hist, a3); }
-            else if (!strcmp(sub, "stats")) { M.stats_loading = 0; set_json(&M.stats, a3); }
+            else if (!strcmp(sub, "stats")) { M.stats_loading = 0; market_stats_apply(&M.stats, a3); } // an error reply keeps the rows
             else if (!strcmp(sub, "prices")) social_set_estimates(a3); // the cards' "~ N KR" (social_estimate_value)
             else if (!strcmp(sub, "trades")) {
                 M.trades_loading = 0;

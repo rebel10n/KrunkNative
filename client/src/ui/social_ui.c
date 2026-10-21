@@ -5683,7 +5683,15 @@ static void open_hub_url(const char *prefix, const char *name, const int new_tab
 H(h_open_map) { UNUSED; open_hub_url("/social.html?p=map&q=", arg_s(ev, args, argc, 0), 1); return 1; }
 H(h_open_mod) { UNUSED; open_hub_url("/social.html?p=mod&q=", arg_s(ev, args, argc, 0), 1); return 1; }
 H(h_open_profile) { UNUSED; open_hub_url("/social.html?p=profile&q=", arg_s(ev, args, argc, 0), 1); return 1; }
-H(h_play_map) { UNUSED; open_hub_url("/?play=", arg_s(ev, args, argc, 0), 1); return 1; }
+// playMap: the name is percent-encoded, so a space or & # % + reaches the game's ?play= whole
+// (servers_ui_query decodes %XX and +; app_url.c keeps the game's query)
+H(h_play_map) {
+    UNUSED;
+    char enc[400];
+    backend_url_encode(enc, sizeof(enc), arg_s(ev, args, argc, 0));
+    open_hub_url("/?play=", enc, 1);
+    return 1;
+}
 H(h_play_mod) { UNUSED; open_hub_url("/?mod=", arg_s(ev, args, argc, 0), 1); return 1; }
 
 // updateMapTab(tab, canEdit): About / Servers / Leaderboard / Data on the map page

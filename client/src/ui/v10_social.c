@@ -29,6 +29,7 @@
 #include <ui_logic.h>
 #include <v10_social.h>
 #include <v10_ui.h>
+#include <follower_counts.h> // a follow moves the author's count on every copy (followers_moved)
 #include <ruleset.h>
 #include <weapons.h>
 #include <math.h>
@@ -2586,6 +2587,18 @@ static int post_copies(const int64_t pid, cJSON **out, const int max) {
     return n;
 }
 
+// A follow moved `name`'s follower count on the server: every copy here moves with it, the posts
+// by them and their profile views, so a post and the profile agree (follower_counts.h).
+static void followers_moved(const char *name, const int delta) {
+    if (!name || !name[0]) return;
+    for (int i = 0; i < FEED_TABS; i++) follower_count_bump_posts(S.feeds[i].posts, name, delta);
+    for (int i = 0; i < S.nviews; i++) {
+        follower_count_bump_posts(S.views[i].feed, name, delta);
+        follower_count_bump_profile(S.views[i].data, name, delta);
+        if (S.views[i].type == V_POST) follower_count_bump_post(cJSON_GetObjectItem(S.views[i].data, "post"), name, delta);
+    }
+}
+
 static void rerender_all(void) {
     if (S.open) render();
     render_views();
@@ -2637,6 +2650,7 @@ static void post_follow_done(const int status, const cJSON *data, const cJSON *e
         cJSON_DeleteItemFromObject(copies[i], "_following");
         if (ok(status, error)) cJSON_AddTrueToObject(copies[i], "_followed");
     }
+    if (n && ok(status, error)) followers_moved(jstr(copies[0], "pln"), 1); // the author gained a follower
     rerender_all();
 }
 
@@ -2662,6 +2676,7 @@ static void profile_follow_done(const int status, const cJSON *data, const cJSON
     if (!v || !v->data) return;
     v->follow_busy = 0;
     if (!ok(status, error)) set_num(v->data, "follow_state", jnum(v->data, "follow_state") > 0 ? 0 : 1); // revert
+    else followers_moved(jstr(v->data, "player_name"), jnum(v->data, "follow_state") > 0 ? 1 : -1); // their count, here too
     render_views();
 }
 

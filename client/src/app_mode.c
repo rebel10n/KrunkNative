@@ -3,6 +3,7 @@
 // GLFW callbacks while a page is shown. doc/html-ui-engine.md "Pages".
 #include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <app_mode.h>
+#include <app_url.h> // the page URL split (parse_page_url)
 #include <i18n.h> // the page markup in the chosen language
 #include <backend_ui.h>
 #include <download_ui.h> // ?download
@@ -118,38 +119,23 @@ void app_set_mode(Client *client, const AppMode mode, const char *query) {
 // ------------------------------------------------------------------ URLs
 
 // "<prefix>social.html[?query][#...]" -> mode + query.
+// The split is app_url.c (client/tests/app_url_test.c); the game keeps its query ("/?play=<map>").
 static int parse_page_url(const char *url, AppMode *mode, char *query, const size_t n) {
     static const struct { const char *file; AppMode mode; } files[] = {
         {"social.html", APP_MODE_HUB}, {"editor.html", APP_MODE_EDITOR}, {"viewer.html", APP_MODE_VIEWER},
     };
-    if (!url) return 0;
-    while (*url == ' ') url++;
-    static const char *const hosts[] = {"https://krunker.io/", "http://krunker.io/", "https://www.krunker.io/", "//krunker.io/"};
-    for (size_t i = 0; i < sizeof(hosts) / sizeof(hosts[0]); i++) {
-        const size_t len = strlen(hosts[i]);
-        if (!strncmp(url, hosts[i], len)) {
-            url += len;
-            break;
-        }
-    }
-    if (!strncmp(url, "./", 2)) url += 2;
-    while (*url == '/') url++;
-    // "/" (the hub's KRUNKER logo: openLink('/')) and index.html are the game.
-    if (!*url || *url == '?' || *url == '#' || !strncmp(url, "index.html", 10)) {
+    const char *page = NULL;
+    const int kind = app_url_split(url, &page, query, n);
+    if (kind == 1) {
         *mode = APP_MODE_GAME;
-        query[0] = 0;
         return 1;
     }
+    if (kind != 2) return 0;
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
-        const size_t len = strlen(files[i].file);
-        if (strncmp(url, files[i].file, len) != 0) continue;
-        const char *rest = url + len;
-        if (*rest && *rest != '?' && *rest != '#') continue;
-        *mode = files[i].mode;
-        const char *q = *rest == '?' ? rest + 1 : "";
-        const size_t qlen = strcspn(q, "#");
-        snprintf(query, n, "%.*s", (int) (qlen < n ? qlen : n - 1), q);
-        return 1;
+        if (!strcmp(page, files[i].file)) {
+            *mode = files[i].mode;
+            return 1;
+        }
     }
     return 0;
 }
