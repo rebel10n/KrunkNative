@@ -178,9 +178,9 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 155 | gapi | POST | `/trades/decline-all` | trades.declineAll (27068) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
 | 156 | gapi | GET | `/trades/inventory/{name}` | trades.getInventory (27073) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
 | 157 | gapi | GET | `/trades/player-search?name={name}` | trades.searchPlayer (27078) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 158 | gapi | GET | `/moderation/chat/{name}` | moderation.getChatBan (27087) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 159 | gapi | POST | `/moderation/chat` | moderation.chatBan (27092) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 160 | gapi | POST | `/moderation/flag` | moderation.flagUser (27098) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
+| 158 | gapi | GET | `/moderation/chat/{name}` | moderation.getChatBan (27087) | missing: not_found fallback (public_routes.c:677) | implemented | feature_bans (chat); v10_mods.c |
+| 159 | gapi | POST | `/moderation/chat` | moderation.chatBan (27092) | missing: not_found fallback (public_routes.c:677) | implemented | feature_bans (chat), moderation_log; v10_mods.c |
+| 160 | gapi | POST | `/moderation/flag` | moderation.flagUser (27098) | missing: not_found fallback (public_routes.c:677) | implemented | players.player_hack, moderation_log; v10_mods.c |
 | 161 | gapi | GET | `/creators/events` | creators.getUpcomingEvents (27108) | served: community.c:402 | served (featured maps and mods from the DB; polls from the operator file, empty without it) |  |
 | 162 | gapi | GET | `/players/{name}` | players.getProfile (27117) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 163 | gapi | GET | `/players/{name}/sales?range={r}` | players.getSales (27123) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
@@ -193,12 +193,12 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 170 | gapi | POST | `/players/{name}/report` | players.reportPlayer (27168) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 171 | gapi | GET | `/players/{name}/reports` | players.getReports (27177) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 172 | gapi | POST | `/players/{name}/gift` | players.giftKR (27182) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 173 | gapi | POST | `/mods/publish/key` | mods.publishKey (27195) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 174 | gapi | GET | `/mods/by-name/{name}` | mods.getModByName (27201) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 175 | gapi | POST | `/mods/{id}/vote` | mods.voteMod (27204) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 176 | gapi | POST | `/mods/{id}/feature` | mods.featureMod (27212) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 177 | gapi | DELETE | `/mods/{id}` | mods.deleteMod (27220) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 178 | gapi | POST | `/mods/publish` | mods.publishUpload (27229) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
+| 173 | gapi | POST | `/mods/publish/key` | mods.publishKey (27195) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none (no mod file storage); v10_mods.c |
+| 174 | gapi | GET | `/mods/by-name/{name}` | mods.getModByName (27201) | missing: not_found fallback (public_routes.c:677) | implemented | published_mods, accounts; v10_mods.c |
+| 175 | gapi | POST | `/mods/{id}/vote` | mods.voteMod (27204) | missing: not_found fallback (public_routes.c:677) | implemented | creation_votes, published_mods; v10_mods.c |
+| 176 | gapi | POST | `/mods/{id}/feature` | mods.featureMod (27212) | missing: not_found fallback (public_routes.c:677) | implemented | published_mods.mod_featured (developers); v10_mods.c |
+| 177 | gapi | DELETE | `/mods/{id}` | mods.deleteMod (27220) | missing: not_found fallback (public_routes.c:677) | implemented | published_mods.deleted_at (creator, developers, mod makers); v10_mods.c |
+| 178 | gapi | POST | `/mods/publish` | mods.publishUpload (27229) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none (no mod file storage); v10_mods.c |
 | 179 | gapi | GET | `/social/feed[?{q}]` | social.getFeed (27244) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 180 | gapi | GET | `/social/feed?player_id={id}` | social.getFeedByPlayer (27253) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 181 | gapi | GET | `/social/post/{id}` | social.getPost (27258) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
@@ -210,10 +210,10 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 187 | gapi | POST | `/spins/execute` | spins.execute (27299) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 188 | gapi | GET | `/krunkcup/wristband` | krunkcup.getWristbandStatus (27309) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 189 | gapi | POST | `/krunkcup/wristband/claim` | krunkcup.claimWristband (27314) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 190 | gapi | GET | `/kpd/demos[?{q}]` | kpd.listDemos (27329) | missing: not_found fallback (public_routes.c:677) | empty | v10_market.c |
-| 191 | gapi | GET | `/kpd/demos/{id}[?{q}]` | kpd.demoInfo (27335) | missing: not_found fallback (public_routes.c:677) | empty | v10_market.c |
-| 192 | gapi | POST | `/kpd/demos/{id}/vote` | kpd.vote (27345) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 193 | gapi | GET | `/kpd/reviewers` | kpd.reviewers (27354) | missing: not_found fallback (public_routes.c:677) | empty | v10_market.c |
+| 190 | gapi | GET | `/kpd/demos[?{q}]` | kpd.listDemos (27329) | missing: not_found fallback (public_routes.c:677) | implemented | kpd_demos, kpd_demo_votes (0351); v10_mods.c |
+| 191 | gapi | GET | `/kpd/demos/{id}[?{q}]` | kpd.demoInfo (27335) | missing: not_found fallback (public_routes.c:677) | implemented | kpd_demos, kpd_demo_votes (0351); v10_mods.c |
+| 192 | gapi | POST | `/kpd/demos/{id}/vote` | kpd.vote (27345) | missing: not_found fallback (public_routes.c:677) | implemented | kpd_demos, kpd_demo_votes (0351); v10_mods.c |
+| 193 | gapi | GET | `/kpd/reviewers` | kpd.reviewers (27354) | missing: not_found fallback (public_routes.c:677) | implemented | kpd_calls, accounts (P_KPD_REVIEWERS, db_kpd.c); v10_mods.c |
 | 194 | gapi | POST | `/studios` | studios.createStudio (27363) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 195 | gapi | GET | `/studios/mine` | studios.getMyStudios (27371) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 196 | gapi | GET | `/studios/{id}` | studios.getStudio (27377) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |

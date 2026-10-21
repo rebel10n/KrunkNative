@@ -54,25 +54,6 @@
  *     GET  /trades/player-search       REFUSAL  account lookup (the social tunnel's /players/search)
  *                                                                                 (108349)
  *
- *   moderation (27087-27098)
- *     GET  /moderation/chat/:name      REFUSAL  another account's chat ban       (110003, 217008)
- *     POST /moderation/chat            REFUSAL  write                             (109549)
- *     POST /moderation/flag            REFUSAL  write                             (109570)
- *
- *   mods (27195-27229)
- *     POST /mods/publish/key           REFUSAL  write                             (213947)
- *     GET  /mods/by-name/:name         REFUSAL  a published mod record is not on the v10 root (107663)
- *     POST /mods/:id/vote              REFUSAL  write                             (no v10 caller)
- *     POST /mods/:id/feature           REFUSAL  write                             (107604)
- *     DELETE /mods/:id                 REFUSAL  write                             (107616)
- *     POST /mods/publish               REFUSAL  write, the multipart upload       (no v10 caller)
- *
- *   KPD (27329-27354)
- *     GET  /kpd/demos                  EMPTY {rows: [], more: false} (policeRes code 4, 216006)
- *     GET  /kpd/demos/:id              REFUSAL  an officer's demo view (ct token, officer account; 222638)
- *     POST /kpd/demos/:id/vote         REFUSAL  write                             (no v10 caller)
- *     GET  /kpd/reviewers              EMPTY {month: [], all: []} (policeRes code 5, 216013)
- *
  *   players, HTTP only (27123-27182; the profile and /players/search are the social tunnel's)
  *     GET  /players/:name/sales        REFUSAL  another account's sales           (109908)
  *     GET  /players/:name/listings     REFUSAL  another account's listings        (110044)
@@ -94,14 +75,9 @@
 #define WHY_MARKET_WRITE "Market writes are not served over HTTP"
 #define WHY_ITEM_WRITE "Item paint and style are not served over HTTP"
 #define WHY_TRADE_WRITE "Trade writes are not served over HTTP"
-#define WHY_MOD_WRITE "Mod publishing, voting and removal are not served over HTTP"
-#define WHY_MOD_BY_NAME "Mod records are not served on the v10 root"
-#define WHY_KPD_WRITE "KPD votes are not served over HTTP"
-#define WHY_KPD_OFFICER "A KPD demo view needs an officer account, which HTTP does not map here"
 #define WHY_ACCOUNT_READ "Needs the caller's account, which HTTP does not map here"
 #define WHY_OTHER_ACCOUNT "Needs another account's data, which HTTP does not map here"
 #define WHY_PLAYER_WRITE "Player verify and gift are not served over HTTP"
-#define WHY_CHAT_BAN "Chat bans are not served over HTTP"
 
 static void h_refuse(kn_http_req *req, void *ud) {
     v10_reply_error(req, 403, "NOT_IMPLEMENTED", (const char *) ud);
@@ -167,22 +143,6 @@ static void h_item_view(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, o);
 }
 
-static void h_kpd_demos(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddItemToObject(o, "rows", cJSON_CreateArray());
-    cJSON_AddFalseToObject(o, "more");
-    v10_reply_data(req, 200, o);
-}
-
-static void h_kpd_reviewers(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddItemToObject(o, "month", cJSON_CreateArray());
-    cJSON_AddItemToObject(o, "all", cJSON_CreateArray());
-    v10_reply_data(req, 200, o);
-}
-
 int v10_market_init(Brain *b) {
     /* market */
     kn_http_route(b->http, "GET", "/market/listings", h_market_listings, b);
@@ -215,25 +175,6 @@ int v10_market_init(Brain *b) {
     kn_http_route(b->http, "POST", "/trades/decline-all", h_refuse, (void *) WHY_TRADE_WRITE);
     kn_http_route(b->http, "GET", "/trades/inventory/:name", h_refuse, (void *) WHY_OTHER_ACCOUNT);
     kn_http_route(b->http, "GET", "/trades/player-search", h_refuse, (void *) WHY_OTHER_ACCOUNT);
-
-    /* moderation */
-    kn_http_route(b->http, "GET", "/moderation/chat/:name", h_refuse, (void *) WHY_OTHER_ACCOUNT);
-    kn_http_route(b->http, "POST", "/moderation/chat", h_refuse, (void *) WHY_CHAT_BAN);
-    kn_http_route(b->http, "POST", "/moderation/flag", h_refuse, (void *) WHY_CHAT_BAN);
-
-    /* mods */
-    kn_http_route(b->http, "POST", "/mods/publish/key", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "GET", "/mods/by-name/:name", h_refuse, (void *) WHY_MOD_BY_NAME);
-    kn_http_route(b->http, "POST", "/mods/:id/vote", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "POST", "/mods/:id/feature", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "DELETE", "/mods/:id", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "POST", "/mods/publish", h_refuse, (void *) WHY_MOD_WRITE);
-
-    /* KPD */
-    kn_http_route(b->http, "GET", "/kpd/demos", h_kpd_demos, b);
-    kn_http_route(b->http, "GET", "/kpd/demos/:id", h_refuse, (void *) WHY_KPD_OFFICER);
-    kn_http_route(b->http, "POST", "/kpd/demos/:id/vote", h_refuse, (void *) WHY_KPD_WRITE);
-    kn_http_route(b->http, "GET", "/kpd/reviewers", h_kpd_reviewers, b);
 
     /* players, HTTP only */
     kn_http_route(b->http, "GET", "/players/:name/sales", h_refuse, (void *) WHY_OTHER_ACCOUNT);

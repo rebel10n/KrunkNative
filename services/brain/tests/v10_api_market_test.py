@@ -147,38 +147,6 @@ ROUTES = [
     ("GET", "/trades/player-search?name=%s" % PLAYER, None, "REFUSAL", None,
      "27078, read at 108349: an account lookup (the social tunnel's /players/search)"),
 
-    # ---- moderation (v10.js 27087-27098)
-    ("GET", "/moderation/chat/%s" % PLAYER, None, "REFUSAL", None,
-     "27087, read at 110003 and 217008: another account's chat ban"),
-    ("POST", "/moderation/chat", {"name": PLAYER, "chat_banned": 1}, "REFUSAL", None,
-     "27092, write, read at 109549"),
-    ("POST", "/moderation/flag", {"name": PLAYER, "reason": "x"}, "REFUSAL", None,
-     "27098, write, read at 109570"),
-
-    # ---- mods (v10.js 27195-27229)
-    ("POST", "/mods/publish/key", {"name": "mod", "assetSizes": {"mod": 1}}, "REFUSAL", None,
-     "27195, write, read at 213947"),
-    ("GET", "/mods/by-name/example", None, "REFUSAL", None,
-     "27201, read at 107663: a published mod record (community catalogue, not on the v10 root)"),
-    ("POST", "/mods/1/vote", {"vote": 1}, "REFUSAL", None,
-     "27204, write, no direct v10 caller"),
-    ("POST", "/mods/1/feature", {"featured": True}, "REFUSAL", None,
-     "27212, write, read at 107604"),
-    ("DELETE", "/mods/1", None, "REFUSAL", None,
-     "27220, write, read at 107616"),
-    ("POST", "/mods/publish", None, "REFUSAL", None,
-     "27229, write (multipart upload), no direct v10 caller"),
-
-    # ---- KPD (v10.js 27329-27354)
-    ("GET", "/kpd/demos?off=0&q=", None, "EMPTY",
-     eq({"rows": [], "more": False}), "27329, read at 216006 (policeRes code 4)"),
-    ("GET", "/kpd/demos/1", None, "REFUSAL", None,
-     "27335, read at 222638: an officer's demo view (needs the ct token and the officer account)"),
-    ("POST", "/kpd/demos/1/vote", {"ct": "x", "verdict": 1}, "REFUSAL", None,
-     "27345, write, no direct v10 caller"),
-    ("GET", "/kpd/reviewers", None, "EMPTY",
-     eq({"month": [], "all": []}), "27354, read at 216013 (policeRes code 5)"),
-
     # ---- players, HTTP only (v10.js 27123-27182)
     ("GET", "/players/%s/sales?range=0" % PLAYER, None, "REFUSAL", None,
      "27123, read at 109908: another account's sales"),
