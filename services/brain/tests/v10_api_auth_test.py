@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The v10 /auth, /account 2FA and usernames, /email, /discord routes (services/brain/v10_auth.c,
-account_security.c, v10_empty.c's leftovers). Family f1b of doc/v10/api-inventory.md, rows 32-49,
+account_security.c). Family f1b of doc/v10/api-inventory.md, rows 32-49,
 52-57, 65-70.
 
   v10_api_auth_test.py <kn_brain | build dir> [repo root]
