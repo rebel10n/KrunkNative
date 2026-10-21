@@ -17,7 +17,8 @@
 //   native GLOBAL_VALUE (121), PLAYER_SOUND (125), TIMER (15) -> gv, asnd / rsnd, t
 //   native MODE_STATE (40), OBJECT_STATE (100)         -> ts, lv, lock, gmsg; do, ro, gte, bnk, mo, mf
 //   native MODE_STATE flags (in play)                  -> ufl (uid, x, y, z, carrier) and ufi (team lines)
-//   native SKINS (35) before a SPAWN                   -> not translated yet: the session stops here
+//   native SKINS (35), SPAWN (4)                        -> kept, then ADD_PLAYERS "0" (+ start for us)
+//   native LEADERBOARD (14), AI_ADD (90)               -> not translated yet: the session stops here
 //   client sends en (ENTER_GAME)                       -> ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
@@ -73,6 +74,10 @@ type V10Session = {
   config: Record<string, unknown>; // init argument 6
   configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
+  socketId: string; // io-init's id: our own player's id in the add record
+  skinsByUid: Map<number, T.NativeSkins>; // SKINS, kept for the SPAWN that follows
+  gameTimer: number; // the last TIMER seconds (the start message's gameTimer)
+  challMode: number; // the join's challenge mode (ENTER_GAME argument 7)
   rankedReceived: boolean; // the ranked-match flag arrived for the init (sent after the INIT, like the config)
   ranked: boolean; // init argument 16, isRanked
   networkData: Record<string, number>; // init argument 12
@@ -249,9 +254,26 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   }
   if (session.initSent && type === T.NATIVE_MORE.PING_RESULT) return; // v10's "pir" handler does nothing
   if (session.initSent && type === T.NATIVE_MORE.SOCIAL_V7) return; // a v7 capability notice: the bridge sends chat as CHAT_SEND
+  // SKINS come right before the SPAWN they belong to: kept for it, nothing sent
+  if (session.initSent && type === T.NATIVE_MORE.SKINS) {
+    const skins = T.parseSkins(payload);
+    if (!skins) return stopAt(session, "SKINS", "malformed");
+    session.skinsByUid.set(skins.uid, skins);
+    return;
+  }
+  // SPAWN: a living player's add record (ADD_PLAYERS "0", one player) and, for our own spawn, the start
+  if (session.initSent && type === T.NATIVE_MORE.SPAWN) {
+    const spawn = T.parseSpawn(payload);
+    if (!spawn) return stopAt(session, "SPAWN", "malformed");
+    if (!spawn.active) return; // a player who is dead now: the v10 add is for players in play
+    sendWs(session, T.V10_IN.ADD_PLAYERS, T.buildPlayerAdd(spawn, session.skinsByUid.get(spawn.uid), session.socketId), 1);
+    if (spawn.isYou) sendWs(session, T.V10_IN.START_GAME, ...T.buildStartGame(spawn, session.gameTimer, session.challMode));
+    return;
+  }
   if (session.initSent && type === T.NATIVE_MORE.TIMER) {
     const timer = T.parseTimer(payload);
     if (!timer) return stopAt(session, "TIMER", "malformed");
+    session.gameTimer = timer.seconds;
     sendWs(session, T.V10_IN.UPDATE_TIMER, timer.seconds, timer.end ? 1 : 0);
     return;
   }
@@ -373,6 +395,8 @@ function handleClientPacket(session: V10Session, label: string, args: unknown[])
     case T.V10_OUT.ENTER_GAME: {
       const ent = T.encodeEnter(args[0]);
       if (ent) writeNative(session, T.NATIVE.ENT, ent);
+      const join = args[0];
+      session.challMode = Array.isArray(join) && join[T.EN.CHALLENGE] ? 1 : 0;
       break;
     }
     case T.V10_OUT.CHAT_MESSAGE: {
@@ -403,6 +427,10 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     config: {},
     configText: null,
     networkReceived: false,
+    socketId: makeSocketId(12),
+    skinsByUid: new Map(),
+    gameTimer: 0,
+    challMode: 0,
     rankedReceived: false,
     ranked: false,
     networkData: {},
@@ -422,7 +450,7 @@ function handleConnection(ws: WebSocket, request: IncomingMessage, options: Atta
   sessions.add(session);
 
   // What the v10 client needs before it answers: the socket id, the load request and the instance id.
-  const socketId = makeSocketId(12);
+  const socketId = session.socketId;
   sendWs(session, T.V10_IN.IO_INIT, socketId);
   sendWs(session, T.V10_IN.INIT_LOAD, INIT_LOAD_ARG, socketId);
   sendWs(session, T.V10_IN.GAME_INSTANCE_ID, LOBBY_ID);

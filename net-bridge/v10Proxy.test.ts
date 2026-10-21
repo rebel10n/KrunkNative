@@ -130,6 +130,30 @@ function modeStateBuffer(o: { teamScores: [number, number]; lives: number; locke
   b.write(o.message, 291, "utf8"); // message[96]
   return b;
 }
+type TestSpawn = { uid: number; isYou: boolean; active: boolean; classIndex: number; team: number; health: number; maxHealth: number;
+  position: [number, number, number]; direction: [number, number]; name: string; secondary: number; hat: number; body: number;
+  hair: number; skinColor: number; dye: number; waist: number; face: number; head: number; back: number; shoe: number; pet: number;
+  wrist: number; charms: [number, number]; playerCard: number; headMlt: number };
+// NetSpawnPacket, protocol 1.4.3 (150 bytes): see parseSpawn in v10Translate.ts for the offsets.
+function spawnBuffer(o: TestSpawn): Buffer {
+  const b = Buffer.alloc(150);
+  b.writeInt32LE(o.uid, 0);
+  b[4] = o.isYou ? 1 : 0;
+  b[5] = o.active ? 1 : 0;
+  b.writeInt32LE(o.classIndex, 6);
+  b.writeInt32LE(o.team, 10);
+  b.writeFloatLE(o.health, 14);
+  b.writeInt32LE(o.maxHealth, 18);
+  o.position.forEach((v, i) => b.writeFloatLE(v, 22 + i * 4));
+  o.direction.forEach((v, i) => b.writeFloatLE(v, 34 + i * 4));
+  b.write(o.name, 42, "utf8");
+  b.writeInt32LE(o.secondary, 74);
+  [o.skinColor, o.hair, o.hat, o.body, o.waist, o.face, o.dye].forEach((v, i) => b.writeInt32LE(v, 78 + i * 4));
+  b.writeInt32LE(-1, 106); // attach
+  b.writeFloatLE(o.headMlt, 110);
+  [o.head, o.back, o.shoe, o.pet, o.wrist, o.charms[0], o.charms[1], o.playerCard, -1].forEach((v, i) => b.writeInt32LE(v, 114 + i * 4));
+  return b;
+}
 function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   const b = Buffer.alloc(9);
   b.writeInt32LE(uid, 0);
@@ -165,6 +189,27 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 4, 4)).messages, [["mo", [7, 4]]]);
   assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 5, 0)).messages, [["mf", [7]]]);
   assert.match(T.mapObjectState(objectStateBuffer(7, 9, 0)).stop || "", /kind/);
+}
+
+{
+  // SKINS: uid, primary, secondary, melee. SPAWN -> the v10 add record (53 fields) and the start of our own spawn.
+  const sk = Buffer.alloc(16);
+  [2, 7, 8, 9].forEach((v, i) => sk.writeInt32LE(v, i * 4));
+  assert.deepStrictEqual(T.parseSkins(sk), { uid: 2, primary: 7, secondary: 8, melee: 9 });
+  const other = T.parseSpawn(spawnBuffer({ uid: 2, isYou: false, active: true, classIndex: 3, team: 1, health: 87.6, maxHealth: 100,
+    position: [10.4, 20.6, -5], direction: [1.5, 0.25], name: "Ada", secondary: 4, hat: 3, body: 5, hair: 0x112233, skinColor: -1,
+    dye: 8, waist: 6, face: 7, head: 15, back: 16, shoe: 17, pet: 18, wrist: 19, charms: [20, 21], playerCard: 22, headMlt: 1 }));
+  assert.ok(other);
+  const rec = T.buildPlayerAdd(other!, { uid: 2, primary: 7, secondary: 8, melee: 9 }, "SOCKET");
+  assert.strictEqual(rec.length, T.ADD_RECORD_FIELDS);
+  assert.deepStrictEqual(rec, ["2", 2, 10, 21, -5, "Ada", 3, 88, 100, 1, 0, 0, [7, 8], 3, 5, 4, 0, null, 0.25, 9, -1, -1, -1, -1, 8, 0, -1, 0, "Ada", 17, 6, 0,
+    "#112233", 7, 18, -1, 19, 0, 1, [20, 21], 0, 16, 15, 22, 0, 0, 0, 0, 0, 0, 0, 0, -1]);
+  const mine = T.parseSpawn(spawnBuffer({ uid: 1, isYou: true, active: true, classIndex: 4, team: 0, health: 100, maxHealth: 100,
+    position: [0, 0, 0], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+    face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 }));
+  assert.strictEqual(T.buildPlayerAdd(mine!, undefined, "SOCKET")[0], "SOCKET"); // our id is the socket id
+  assert.deepStrictEqual(T.buildStartGame(mine!, 300, 1), [300, 0, 0, 1, 0, 1, null, 4]);
+  assert.strictEqual(T.parseSpawn(Buffer.alloc(78)), null);
 }
 
 async function main(): Promise<void> {
@@ -377,6 +422,23 @@ async function main(): Promise<void> {
   native.write(nativeFrame(254, Buffer.concat([Buffer.from([0x02, 0x03]), card])));
   const announce = await waitFor(() => clientMessages.find((m) => m.label === "gameAnnouncement"), "gameAnnouncement");
   assert.deepStrictEqual(announce.args, [{ message: "Welcome to the test", actions: [] }]);
+
+  // SKINS, then the SPAWN of another player and of ours: the add record (ADD_PLAYERS "0") and our start
+  native.write(nativeFrame(35, Buffer.from(Buffer.concat([Buffer.from([0x02, 0, 0, 0]), Buffer.from([0x07, 0, 0, 0, 0x08, 0, 0, 0, 0x09, 0, 0, 0])]))));
+  native.write(nativeFrame(4, spawnBuffer({ uid: 2, isYou: false, active: true, classIndex: 3, team: 1, health: 90, maxHealth: 100,
+    position: [1, 2, 3], direction: [0, 0], name: "other", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+    face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
+  const addOther = await waitFor(() => clientMessages.find((m) => m.label === "0" && (m.args[0] as unknown[])[1] === 2), "ADD_PLAYERS (other)");
+  assert.deepStrictEqual((addOther.args[0] as unknown[]).slice(12, 13), [[7, 8]]); // the SKINS of uid 2
+  assert.strictEqual((addOther.args[0] as unknown[]).length, 53);
+  assert.strictEqual(addOther.args[1], 1);
+  native.write(nativeFrame(4, spawnBuffer({ uid: 1, isYou: true, active: true, classIndex: 4, team: 0, health: 100, maxHealth: 100,
+    position: [1, 2, 3], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+    face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
+  const addMine = await waitFor(() => clientMessages.find((m) => m.label === "0" && (m.args[0] as unknown[])[1] === 1), "ADD_PLAYERS (us)");
+  assert.strictEqual((addMine.args[0] as unknown[])[0], socketIo.args[0]); // our id is the io-init socket id
+  const start = await waitFor(() => clientMessages.find((m) => m.label === "start"), "start");
+  assert.deepStrictEqual(start.args, [300, 0, 0, 0, 0, 1, null, 4]); // gameTimer from the last t, our class
 
   // the mode sync (149) is the next packet with no translation yet: the translation stops there
   native.write(nativeFrame(149, Buffer.alloc(4 * 4 + 4 + 1 + 4 * 4 + 4 + 4 + 4 + 4)));
