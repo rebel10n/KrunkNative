@@ -114,6 +114,10 @@ set(KN_BRAIN_SOURCES
     streams_norm.c
     stream_thumbs.c                 # the Live Streams cards' Twitch previews: GET /streams/thumb (allow-listed, capped, cached)
     user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
+    v10_api.c                       # v10 REST at the root: /maps, /maps/:id, /titles, packed /data/skins and /data/spins
+    v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
+    v10_empty.c                     # v10 REST routes with no KrunkNative data: the empty shapes and refusals
+    v10_market.c                    # v10 REST market, items, trades, moderation, mods and KPD: the empty shapes and refusals
     ../../shared/src/user_asset_path.c # the user-asset paths and content rules (shared with the client's fetch)
     ../../shared/src/knv.c          # video.mp4.knv: the frame sidecar format (shared with the clients' players)
     ../../shared/src/youtube_link.c # map YouTube video ids (creations.c: uploadM stores the id)

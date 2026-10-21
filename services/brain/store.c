@@ -81,6 +81,10 @@ static void spins_tick(kn_loop *loop, void *ud) {
     if (g_acct_brain && g_acct_brain->db) kn_db_query_sql(g_acct_brain->db, &q, 0, NULL, spins_row_done, NULL);
 }
 
+const char *store_spins_json(void) {
+    return s_db_spins_set && s_db_spins_text ? s_db_spins_text : g_store_spins_json;
+}
+
 /* GET /api/data/spins: the wheels this brain spins ({season, wheels, itemPools}, gapi /data/spins) */
 static void h_data_spins(kn_http_req *req, void *ud) {
     (void) ud;

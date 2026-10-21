@@ -27,6 +27,9 @@
 #include "ai.h"
 #include "streams.h"
 #include "user_assets.h"
+#include "v10_api.h"
+#include "v10_empty.h"
+#include "v10_market.h"
 #include "avatar.h"
 #include "clan_logo.h"
 #include "push.h"
@@ -84,6 +87,9 @@ static const BrainModule k_brain_modules[] = {
     {"stream-thumbs", stream_thumbs_init, stream_thumbs_shutdown}, /* the cards' previews: /streams/thumb */
     {"strike-econ", strike_econ_init, strike_econ_shutdown}, /* Krunker Strike's economy (strike_econ.h) */
     {"user-assets", user_assets_init, user_assets_shutdown}, /* community maps' Krunker user assets (user_assets.c) */
+    {"v10-api", v10_api_init, NULL}, /* v10 REST at the root: maps, titles, packed skins and spins (v10_api.c) */
+    {"v10-empty", v10_empty_init, NULL}, /* v10 REST routes with no KrunkNative data (v10_empty.c) */
+    {"v10-market", v10_market_init, NULL}, /* v10 market, items, trades, moderation, mods, KPD (v10_market.c) */
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

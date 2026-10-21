@@ -142,6 +142,8 @@ const SkinInfo *acct_skin(int64_t index);   /* NULL when unknown / no skins file
 int acct_skin_count(void);
 /* v10 wheels (store.c): GET /api/data/spins, the store_spin_data reload timer */
 void store_init(Brain *b);
+/* the wheels JSON this brain serves (/api/data/spins; gapi /data/spins is its packed form) */
+const char *store_spins_json(void);
 void store_shutdown(Brain *b);
 
 /* ---- social socket sessions (social_ws.c) */
