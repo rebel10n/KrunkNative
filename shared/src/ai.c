@@ -1450,6 +1450,13 @@ static void ai_collide_map(Game *game, GameAI *ai, const float q, const float ml
         } else if (ai->old.z + s <= z - l + 0.00001f) {
             p->z = z - l - s;
             ai->velocity.z = 0.0f;
+        } else if (p->y < y + h && p->y > y - h && ai->old.y > y - h && ai->old.y < y + h) {
+            // embedded (fell into the object's footprint from below its top; the step-up above only
+            // lifts up to 3 units, and nothing else matched): the top is the way out, else the AI falls
+            // through the floor forever. KN fix for "walking AI falling through the floor" (v10.0.3)
+            p->y = y + h;
+            ai->velocity.y = 0.0f;
+            ai->on_ground = 1;
         }
     }
 }

@@ -79,13 +79,13 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 | player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | Not ported: KN has no `player.pose`. |
 | Added the Solid Ramp Sides map setting (rampFix) | Feature (map and physics) | **Ported:** map flag `rampFix` (`shared/src/map.c`, `shared/include/shared.h`) and the ramp side block in `shared/src/player.c` (`movement_block_ramp_side`, the check in the ramp branch of `player_do_map_collisions`). Regression test `shared/tests/ramp_fix_test.c` (fails without the port). The editor checkbox (Essential panel, next to Force Old AO, `client/src/editor/editor_gameconfig.c`) and the game option `config.rampFix` (`GameConfig.ramp_fix`, folder Other, `shared/src/game_config.c`) are ported too; `ramp_fix_test` checks the config path. |
 | Added preciseHits for AI (bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition, onAIPartDamage) | Feature (KrunkScript AI) | Not ported: KN's AI is one model with no named parts, and KN has no part hooks or `bodyDamage`. |
-| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: KN has `ai.playAnim` (clip only), and the official line gives no behaviour for either. |
+| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: neither exists in v10.0.2 (`~/.cache/kn-v10/v10.js` has no `solid` in JavaScript form and no options object on `ai.playAnim`), and the official line gives no behaviour. v10.0.2's `AI.sync` (`this["sync"]` in v10.js) skips any AI more than 800 from a non-spectating player, sent or not; `alwaysSync` is KN's exemption from that gate, and v10.js has no `alwaysSync`. |
 | Added opt-in environment reflections for GLB materials | Feature (rendering) | Not ported: KN has no GLB material reflections (env maps exist for skins only, `client/src/skin_fx.c`). |
 | Live assets with complex collision now stop shots | Feature (rules) | No change. Shots trace complex-collision objects by their box (`combat_trace`, `shared/src/player.c`), so KN already stops shots at them. Not compared with the v10.0.2 bundle (not on disk). |
-| GAME.CONFIG.getMatch().started is now false during the round countdown | Feature (KrunkScript) | Ported: `CONFIG.getMatch().started` (`shared/src/ks_game/ks_hostobj.c`) is false while a pre-match wait timer runs (the countdown) and true once the round has started. The official line does not define the exact state; this reads "countdown" as the non-contTime wait timers (`mode_match_starting`). |
+| GAME.CONFIG.getMatch().started is now false during the round countdown | Feature (KrunkScript) | Ported: `CONFIG.getMatch().started` (`shared/src/ks_game/ks_hostobj.c`) is false while a pre-match wait timer runs (the countdown) and true once the round has started. The official line does not define the exact state; this reads "countdown" as the non-contTime wait timers (`mode_match_starting`). v10.0.2's `getMatch` (v10.js) returns only `players`, `capacity` and `teams` (and `null` with no game), so `started` is 10.0.3-only and the reading is inferred. |
 | AI models now load once per game | Internal (performance) | Ignored. |
 | Fixed scene objects stacking up and looped sounds breaking at the next round | Bug (KrunkScript round restart) | Not applicable: the client unloads the script, with its scene objects and sounds, on every round (`ks_client_round` in `client/src/ks/ks_client_host.c`). |
-| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Not verified: no repro in this pass. |
+| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Fixed in KN (`shared/src/ai.c`, last branch of `ai_collide_map`): an AI already inside a box's height range, more than 3 units under its top, matched no branch and fell forever. Reproduced by `ai_floor_test` (walker spawned 2 and 6 units under a flat floor: y to -100 before). A walker on the floor never fell in five normal cases. v10.0.2's collision rule is the same as KN's before the fix (`collidesAcc` block in `~/.cache/kn-v10/v10.js`), so the fix is KN's own, not a v10.0.2 port. |
 
 ### Unlisted bundle items
 
@@ -110,9 +110,10 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 1. Video skins (a larger feature, KN has none): the Disable Video Skins toggle only makes sense with
    them.
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
-3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` (KN has the API; the official line gives
-   no behaviour, so a decision is needed). The AI parts (`preciseHits`, `setPartDamage`, ...) and `player.pose`
-   are not in KN at all.
+3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` exist in neither v10.0.2 (v10.js) nor the
+   official 10.0.3 line, and KN's AI bodies do not block players, so there is no behaviour to port. A spec from
+   Krunker is needed. KN's `ai.playAnim` also drops the `reps` argument that v10.0.2 accepts (v10.js). The AI
+   parts (`preciseHits`, `setPartDamage`, ...) and `player.pose` are not in KN at all.
 4. GLB environment reflections (KN has none).
 5. Done: the Solid Ramp Sides editor checkbox and the `config.rampFix` game option.
 

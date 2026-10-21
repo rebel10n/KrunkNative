@@ -239,6 +239,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/market_stats_test
 	./$(DEBUG_DIR)/follower_counts_test
 	./$(DEBUG_DIR)/ks_game_v1003_test
+	./$(DEBUG_DIR)/ai_floor_test
 	./$(DEBUG_DIR)/triggers_test
 	./$(DEBUG_DIR)/trigger_authority_test
 	./$(DEBUG_DIR)/editor_bus_test
