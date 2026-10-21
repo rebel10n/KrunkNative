@@ -2,19 +2,17 @@
 """The Account Manager (client/src/ui/alt_manager_ui.c, ALT_MANAGER_WINDOW = 104) end to end through the
 menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/fake_smtp.py:
 
-  register with the login popup (a plain sign-in stores nothing: no alt vault, a restart signs nobody in
-  and the login card asks for the password) -> the Account Manager's Add with a typed login and password
-  (an empty Add says so; the account is listed, Added, and nobody is signed in; the password is on no
-  disk) -> Use signs in from the stored token with no password; an Add of a listed account while another
-  is signed in saves it without switching, and the Use after it signs in from the token that Add saved ->
-  a restart resumes the Used account with no prompt -> the brain drops the account's sessions: the stored
-  password signs it in at start, silently -> the brain also forgets the account: the row stays listed and
-  says the saved login is no longer valid, its Sign in fills the form -> Remove -> krunker.io: Add stores
-  without signing in, Use resumes, a refused token signs in with the stored password (2FA code typed),
-  Remove signs out; a restart lists nothing.
+  register with the login popup (a plain sign-in stores nothing: no alt vault, a restart signs nobody in and
+  the login card asks for the password) -> Add with a typed login and password lists the account and stores
+  the password sealed: nothing is signed in, nothing is switched, no request reaches the account server (the
+  Add runs against a --brain nothing listens on) -> Use fills the login card's Username and Password with the
+  saved ones and stops there: no sign-in request, no password prompt -> the player presses Login: signed in,
+  the session is stored -> a restart resumes that account from its stored session -> Logout, then Use fills
+  the card again with no sign-in -> the player signs in again, the brain then refuses the stored session: it
+  is forgotten and nobody is signed in (no silent password sign-in); Use still fills the card -> Remove ->
+  krunker.io: Add stores its login with no request to krunker.io, Use fills the card with it, Remove.
 
-  The krunker.io half (the krunker.io chip, its rows, Use / Remove of a krunker.io row) is native only: the web
-  build plays krunk.io only and its Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
+  The web build's Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
   __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
 
   python3 -I client/tests/account_manager_e2e.py BUILD_DIR      (repository root)
@@ -54,7 +52,10 @@ STAMP = os.getpid() % 100000
 NAME, ADDR = "am%d" % STAMP, "am%d@example.org" % STAMP
 NAME2, ADDR2 = "am%db" % STAMP, "am%db@example.org" % STAMP
 PASS = "pass_word1"  # a fixture password, typed by the scripts only: it must never reach the disk
+# clicksel clicks the LAST row a selector matches (input_script.c): the Use and Remove clicks below reach the second
+# account, listed last. Both accounts share PASS, so the Username field is what tells which row was used.
 WINDOW = 104         # ALT_MANAGER_WINDOW = KN_WINDOW_BASE + 4
+DEAD_BRAIN = "http://127.0.0.1:9"  # nothing listens here: an Add must not need the account server
 VAULT = os.path.join(WORK, "cfg", "krunknative", "alt", "vault.bin")
 results = []
 procs = []
@@ -122,6 +123,33 @@ def secret_on_disk(needle):
     return hits
 
 
+def secret_in_logs(needle):
+    """The client's run logs (not the brain's) holding needle."""
+    return [f for f in os.listdir(WORK) if f.endswith(".log") and f != "brain.log"
+            and needle in open(os.path.join(WORK, f), errors="replace").read()]
+
+
+def sessions(db):
+    """The brain's session rows: a sign-in adds one, a logout or a refused token removes it."""
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    finally:
+        con.close()
+
+
+def forget_brain_sessions(db, name):
+    con = sqlite3.connect(db)
+    with con:
+        con.execute("DELETE FROM sessions WHERE account_id = (SELECT id FROM accounts WHERE username = ?)", (name,))
+    con.close()
+
+
+def auth_requests(stub):
+    """The krunker.io stub's auth requests so far (a sign-in or a token refresh)."""
+    return len([r for r in stub.requests if r[1].startswith("/frvr/v1/auth")])
+
+
 # the popup's login card by username (a guest keeps no saved name: the popup opens on Email)
 OPEN = "0 menu\n500 clickid knV10LoginBtn\n"
 BY_NAME = "800 clickid knV10LoginMode\n"
@@ -162,8 +190,10 @@ def plain_restart(brain_url, game_port):
     check("and the login card asks for the password", match_of(log, "pass") == 1, str(match_of(log, "pass")))
 
 
-def add_accounts(brain_url, game_port):
-    """Add stores an account and signs nobody in: both rows listed, none active, the vault written."""
+def add_accounts(db, game_port):
+    """Add stores the login and the password and lists the account. It signs nobody in, switches nothing, and needs no
+    account server: the run's --brain is one nothing listens on, and both accounts are still listed."""
+    sessions_before = sessions(db)
     log = run_client("add", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltAdd"]
@@ -183,157 +213,114 @@ def add_accounts(brain_url, game_port):
 8600 nodes @rows .knAltRow
 8700 nodes @active .knAltActive
 9000 quit
-""", brain_url, game_port)
+""", DEAD_BRAIN, game_port)
     check("an empty Add asks for the login and the password", "Enter the login and the password." in text_of(log, "empty"),
           text_of(log, "empty")[-120:])
-    check("Add says the account is added", f"Added {NAME}." in text_of(log, "added1"), text_of(log, "added1")[-120:])
+    check("Add lists the account (no account server needed)", f"Added {NAME}." in text_of(log, "added1"), text_of(log, "added1")[-120:])
     check("a second Add lists a second account", f"Added {NAME2}." in text_of(log, "added2"), text_of(log, "added2")[-120:])
-    check("Add signs nobody in (the current account is unchanged: none)", logins_as(log, NAME) + logins_as(log, NAME2) == 0
-          and "[account] logged in as" not in log and "Signed in as" not in text_of(log, "added1") + text_of(log, "added2"),
-          f"logins {logins_as(log, NAME)} {logins_as(log, NAME2)}")
+    check("Add signs nobody in and sends no sign-in request", logins_as(log, NAME) + logins_as(log, NAME2) == 0
+          and "[account] logged in as" not in log and "Signed in as" not in text_of(log, "added1") + text_of(log, "added2")
+          and sessions(db) == sessions_before, f"sessions {sessions_before} -> {sessions(db)}")
     check("both accounts are listed", match_of(log, "rows") == 2, str(match_of(log, "rows")))
     check("neither listed account is active after Add", match_of(log, "active") == 0, str(match_of(log, "active")))
     check("the Add stored an alt vault", os.path.exists(VAULT))
     check("the password is on no client file after Add", not secret_on_disk(PASS), repr(secret_on_disk(PASS)))
 
 
-def use_accounts(brain_url, game_port):
-    """Use signs in from the stored token, with no password. An Add of a listed account while another is signed in
-    lists it (its token and password) and leaves the signed-in account as it is; the Use of that row then signs in
-    from the token the Add saved."""
+def use_fills(brain_url, game_port, db):
+    """Use on a listed account opens the login card with its Username and its saved Password in the fields, and
+    stops: no sign-in request, no password prompt, nobody signed in."""
+    sessions_before = sessions(db)
     log = run_client("use", f"""0 menu
 3000 call showWindow {WINDOW}
 3400 clicksel [onclick*="knAltUse"]
-6500 text @switched [id="knAltMsg"]
-6600 clickid knAltUser
-6700 type {NAME}
-6800 clickid knAltPass
-6900 type {PASS}
-7000 clicksel [onclick*="knAltAdd"]
-9500 text @readded [id="knAltMsg"]
-9600 nodes @active .knAltActive
-9700 text @act .knAltActive
-9800 clicksel [onclick*="knAltUse"]
-13000 text @back [id="knAltMsg"]
-13500 quit
+4000 nodes @modal [id="knV10Login"]
+4100 nodes @user [id="accName"][value="{NAME2}"]
+4200 nodes @pass [id="accPass"][value="{PASS}"]
+4500 quit
 """, brain_url, game_port)
-    check("Use signs in with the stored token (no password)", f"Signed in as {NAME2}." in text_of(log, "switched"),
-          text_of(log, "switched")[-120:])
-    check("Add of a listed account while another is signed in lists it and does not switch",
-          f"Added {NAME}." in text_of(log, "readded") and NAME2 in text_of(log, "act") and match_of(log, "active") == 1,
-          text_of(log, "readded")[-120:] + " | " + text_of(log, "act")[-120:])
-    check("Use after that Add signs in from the token it saved (no password)", f"Signed in as {NAME}." in text_of(log, "back"),
-          text_of(log, "back")[-120:])
-    check("each Use signed its account in once; the Add signed nobody in",
-          logins_as(log, NAME) == 1 and logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME)} {logins_as(log, NAME2)}")
+    check("Use opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
+    check("Use fills the Username with the saved name", match_of(log, "user") == 1, str(match_of(log, "user")))
+    check("Use fills the Password with the saved password", match_of(log, "pass") == 1, str(match_of(log, "pass")))
+    check("Use sends no sign-in request and signs nobody in", "[account] logged in as" not in log and sessions(db) == sessions_before,
+          f"sessions {sessions_before} -> {sessions(db)}")
 
 
-def restart_resumes(brain_url, game_port):
-    """Add, Use, restart: the account Used resumes at start from its stored token, and the other one Used after the
-    restart signs in from its token. No password prompt anywhere; no password on a client file."""
-    log = run_client("restart", f"""0 menu
-2000 call showWindow {WINDOW}
-3000 text @rmsg [id="knAltMsg"]
+def sign_in_from_card(brain_url, game_port):
+    """Use fills the card; the player presses Login (the card's own sign-in): the account is signed in and its
+    session is stored under the listed account."""
+    log = run_client("signin", f"""0 menu
+3000 call showWindow {WINDOW}
 3400 clicksel [onclick*="knAltUse"]
-6500 text @rused [id="knAltMsg"]
-7000 quit
+4000 clickid knV10LoginSubmit
+6500 quit
 """, brain_url, game_port)
-    check("a restart resumes the Used account from its stored token", logins_as(log, NAME) >= 1, f"logins {logins_as(log, NAME)}")
-    check("and asks for no password", "no longer valid" not in text_of(log, "rmsg") and "Enter the password" not in text_of(log, "rmsg"),
-          text_of(log, "rmsg")[-120:])
-    check("Use after the restart signs in from the stored token (no password)", f"Signed in as {NAME2}." in text_of(log, "rused"),
-          text_of(log, "rused")[-120:])
-    check("the password is on no client file after a restart", not secret_on_disk(PASS), repr(secret_on_disk(PASS)))
+    check("Login from the filled card signs the account in (the player's press)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    return log
 
 
-def silent_password(brain_url, game_port, db):
-    """A refused saved token: the stored password signs the active account in again at start, with no prompt. (The
-    restart before left NAME2 active: its sessions are the ones the brain drops.)"""
-    con = sqlite3.connect(db)
-    with con:
-        con.execute("DELETE FROM sessions WHERE account_id = (SELECT id FROM accounts WHERE username = ?)", (NAME2,))
-    con.close()
-    log = run_client("silent", f"""0 menu
-2000 call showWindow {WINDOW}
-7000 text @smsg [id="knAltMsg"]
-7500 quit
+def restart_and_logout(brain_url, game_port):
+    """A restart resumes the account from its stored session (no prompt); Logout ends it, and Use then fills the card
+    again with no sign-in."""
+    log = run_client("restart", f"""0 menu
+2000 call logoutAcc
+3000 call knV10LoginClose
+3500 call showWindow {WINDOW}
+4000 clicksel [onclick*="knAltUse"]
+4500 nodes @user [id="accName"][value="{NAME2}"]
+4600 nodes @pass [id="accPass"][value="{PASS}"]
+5000 quit
 """, brain_url, game_port)
-    check("a refused token signs the account in with its stored password (no prompt)", logins_as(log, NAME2) >= 1,
-          f"logins {logins_as(log, NAME2)}")
-    check("... and says nothing is wrong", "no longer valid" not in text_of(log, "smsg") and "Enter the password" not in text_of(log, "smsg"),
-          text_of(log, "smsg")[-120:])
+    check("a restart resumes the account from its stored session", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    check("and asks for no password", "no longer valid" not in log and "Enter the password" not in log)
+    check("Logout signs the account out", "[account] logged out" in log)
+    check("after Logout, Use fills the card with the saved login (no password prompt)", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
+          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
+    check("and that Use signs nobody in", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
 
 
-def invalid_login(brain_url, game_port, db):
-    """A refused token and a refused password (the brain forgets the account): the row stays listed, says the saved
-    login is no longer valid, and its Sign in opens the form for that account (no password prompt)."""
-    con = sqlite3.connect(db)
-    with con:
-        con.execute("DELETE FROM sessions WHERE account_id = (SELECT id FROM accounts WHERE username = ?)", (NAME2,))
-        con.execute("DELETE FROM accounts WHERE username = ?", (NAME2,))
-    con.close()
-    log = run_client("invalid", f"""0 menu
-2000 call showWindow {WINDOW}
-7000 text @imsg [id="knAltMsg"]
-7100 nodes @signin [onclick*="knAltSignIn"]
-7200 clicksel [onclick*="knAltSignIn"]
-7500 text @iform [id="knAltUser"]
-8000 quit
+def refused_token(brain_url, game_port, db):
+    """The brain refuses the stored session: it is forgotten, nobody is signed in at start (no silent sign-in with
+    the stored password), and the row still fills the card."""
+    forget_brain_sessions(db, NAME2)
+    log = run_client("refused", f"""0 menu
+7000 call showWindow {WINDOW}
+7500 clicksel [onclick*="knAltUse"]
+8000 nodes @user [id="accName"][value="{NAME2}"]
+8100 nodes @pass [id="accPass"][value="{PASS}"]
+8500 quit
 """, brain_url, game_port)
-    check("a refused token and password say the saved login is no longer valid",
-          "Saved login is no longer valid. Sign in again to restore it." in text_of(log, "imsg"), text_of(log, "imsg")[-120:])
-    check("the row offers Sign in (one row)", match_of(log, "signin") == 1, str(match_of(log, "signin")))
-    check("Sign in opens the form for that account (no prompt)", f"value={NAME2}" in text_of(log, "iform")
-          and "Enter the password" not in log, text_of(log, "iform")[-80:])
+    check("a refused stored session signs nobody in (no silent password sign-in)", logins_as(log, NAME2) == 0, f"logins {logins_as(log, NAME2)}")
+    check("the listed account keeps its login: Use fills the card", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
+          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
 
 
-def dropped_on_restart(brain_url, game_port):
-    """The saved login the run before left with neither a session nor a password is dropped at the next start (the
-    vault keeps nothing it cannot sign in with): one row is left, NAME's."""
-    log = run_client("dropped", f"""0 menu
-2000 call showWindow {WINDOW}
-3000 nodes @rows .knAltRow
-3500 quit
-""", brain_url, game_port)
-    check("a restart drops the saved login with neither a session nor a password", match_of(log, "rows") == 1,
-          f"rows {match_of(log, 'rows')}")
-
-
-def remove_account(brain_url, game_port):
+def remove_accounts(brain_url, game_port):
     log = run_client("remove", f"""0 menu
 2000 call showWindow {WINDOW}
 2500 clicksel [onclick*="knAltRemove"]
 3000 text @removed [id="knAltMsg"]
-3500 nodes @rows .knAltRow
-4000 quit
+3500 clicksel [onclick*="knAltRemove"]
+4000 text @removed2 [id="knAltMsg"]
+4500 nodes @rows .knAltRow
+5000 quit
 """, brain_url, game_port)
-    check("Remove forgets the account", f"Removed {NAME}." in text_of(log, "removed"), text_of(log, "removed")[-120:])
+    check("Remove forgets the second account (the last row)", f"Removed {NAME2}." in text_of(log, "removed"), text_of(log, "removed")[-120:])
+    check("Remove forgets the first account", f"Removed {NAME}." in text_of(log, "removed2"), text_of(log, "removed2")[-120:])
     check("no rows after Remove", match_of(log, "rows") == 0, str(match_of(log, "rows")))
     restart = run_client("after_remove", f"""0 menu
 2000 call showWindow {WINDOW}
 3000 nodes @rows .knAltRow
 3500 quit
 """, brain_url, game_port)
-    check("a restart lists nothing and signs nobody in", logins_as(restart, NAME) == 0 and match_of(restart, "rows") == 0,
+    check("a restart lists nothing and signs nobody in", logins_as(restart, NAME2) == 0 and match_of(restart, "rows") == 0,
           f"rows {match_of(restart, 'rows')}")
-    check("the password is on no client file", not secret_on_disk(PASS), repr(secret_on_disk(PASS)))
-    check("the password is in no client log", not any(PASS in open(os.path.join(WORK, f), errors="replace").read()
-                                                      for f in os.listdir(WORK) if f.endswith(".log") and f != "brain.log"))
-
-
-def clear_kio_session():
-    """The krunker.io session the client keeps for itself (kio_*): gone, as on a fresh start with none."""
-    d = os.path.join(WORK, "cfg", "krunknative")
-    for fn in os.listdir(d) if os.path.isdir(d) else []:
-        if fn.startswith("kio_"):
-            os.remove(os.path.join(d, fn))
 
 
 def krunker_row(brain_url, game_port, stub):
-    """A krunker.io row: added with a typed login (the Security Challenge passes by itself in the webview; the code
-    step), used with its stored refresh token, refused (the session ended) so the stored password signs it in again
-    (the code step again), removed."""
-    kio_log = lambda log: log.count(f"[kio-account] signed in to krunker.io as {kae.LOGIN}")
+    """A krunker.io row: Add stores its login with no request to krunker.io, Use fills the card with it (no request),
+    Remove forgets it. The card's own sign-in (krunker.io's code step included) is not run here."""
+    before = auth_requests(stub)
     log = run_client("kio_add", f"""0 menu
 500 call showWindow {WINDOW}
 1000 call knAltBackend 1
@@ -342,73 +329,40 @@ def krunker_row(brain_url, game_port, stub):
 1400 clickid knAltPass
 1500 type {kae.PASSWORD}
 1600 clicksel [onclick*="knAltAdd"]
-5000 clickid knAltCode
-5100 type {kae.CODE}
-5200 clicksel [onclick*="knAltCodeSubmit"]
-7000 text @kadd [id="knAltMsg"]
-7100 nodes @krows .knAltRow
-7150 nodes @ktag .knAltTagKio
-7500 quit
+2500 text @kadd [id="knAltMsg"]
+2600 nodes @krows .knAltRow
+2700 nodes @ktag .knAltTagKio
+3000 quit
 """, brain_url, game_port)
-    check("krunker.io Add stores the account and signs nobody in (the game's session is unchanged)",
-          kio_log(log) == 0 and "signed in to krunker.io" not in log, f"sign-ins {kio_log(log)}")
     check("krunker.io Add says it is added", f"Added {kae.LOGIN}." in text_of(log, "kadd"), text_of(log, "kadd")[-120:])
-    check("the krunker.io row is listed with its krunker.io tag", match_of(log, "krows") == 2 and match_of(log, "ktag") == 1,
+    check("krunker.io Add signs nobody in and sends no request to krunker.io",
+          "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
+    check("the krunker.io row is listed with its krunker.io tag", match_of(log, "krows") == 1 and match_of(log, "ktag") == 1,
           f"rows {match_of(log, 'krows')} tags {match_of(log, 'ktag')}")
-    check("the password is on no client file after the krunker.io Add", not secret_on_disk(kae.PASSWORD), "")
 
-    # a fresh start with the krunker.io session gone: Use resumes the row with its stored refresh token
-    clear_kio_session()
-    n_refresh = len(stub.find("POST", "/frvr/v1/auth/refresh"))
+    before = auth_requests(stub)
     log = run_client("kio_use", f"""0 menu
 500 call showWindow {WINDOW}
-1000 nodes @krows .knAltRow
-1200 clicksel [onclick*="knAltUse"]
-4000 text @kuse [id="knAltMsg"]
-4500 quit
+1000 clicksel [onclick*="knAltUse"]
+2000 nodes @kmodal [id="knV10Login"]
+2100 nodes @kuser [id="accName"][value="{kae.LOGIN}"]
+2200 nodes @kpass [id="accPass"][value="{kae.PASSWORD}"]
+2500 quit
 """, brain_url, game_port)
-    check("Use on the krunker.io row resumes it with its stored refresh token",
-          len(stub.find("POST", "/frvr/v1/auth/refresh")) > n_refresh and f"Signed in as {kae.LOGIN}." in text_of(log, "kuse"),
-          text_of(log, "kuse")[-120:])
-
-    # the refresh token is refused: the stored password signs the krunker.io account in again (its 2FA code is typed
-    # in the code step; no password prompt)
-    clear_kio_session()
-    stub.refresh_ok = ()
-    try:
-        log = run_client("kio_silent", f"""0 menu
-500 call showWindow {WINDOW}
-1200 clicksel [onclick*="knAltUse"]
-9000 clickid knAltCode
-9100 type {kae.CODE}
-9200 clicksel [onclick*="knAltCodeSubmit"]
-13000 text @ksilent [id="knAltMsg"]
-13500 quit
-""", brain_url, game_port)
-    finally:
-        stub.refresh_ok = (kae.REFRESH1, kae.REFRESH2)
-    check("a refused krunker.io token signs in with the stored password (no password prompt)", kio_log(log) >= 1,
-          f"sign-ins {kio_log(log)}")
-    check("... and says it is signed in", f"Signed in as {kae.LOGIN}." in text_of(log, "ksilent"), text_of(log, "ksilent")[-120:])
-    check("... with no password prompt", "Enter the password" not in log and "no longer valid" not in text_of(log, "ksilent"), "")
+    check("Use on the krunker.io row fills the card with its login", match_of(log, "kmodal") == 1 and match_of(log, "kuser") == 1
+          and match_of(log, "kpass") == 1, f"card {match_of(log, 'kmodal')} user {match_of(log, 'kuser')} pass {match_of(log, 'kpass')}")
+    check("Use on the krunker.io row sends no request to krunker.io and signs nobody in",
+          "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
     log = run_client("kio_remove", f"""0 menu
 500 call showWindow {WINDOW}
-1200 clicksel [onclick*="knAltRemove"]
-3500 text @kremoved [id="knAltMsg"]
-4000 nodes @krows .knAltRow
-4100 nodes @ktag .knAltTagKio
-4500 quit
+1000 clicksel [onclick*="knAltRemove"]
+1500 text @kremoved [id="knAltMsg"]
+2000 nodes @krows .knAltRow
+2500 quit
 """, brain_url, game_port)
-    check("Remove forgets the krunker.io row and signs its account out",
-          f"Removed {kae.LOGIN}." in text_of(log, "kremoved") and "[kio-account] signed out of krunker.io" in log,
-          text_of(log, "kremoved")[-120:])
-    check("no krunker.io row after Remove", match_of(log, "ktag") == 0 and match_of(log, "krows") == 1,
-          f"rows {match_of(log, 'krows')} tags {match_of(log, 'ktag')}")
-    tokens = [kae.PASSWORD, kae.REFRESH1, kae.REFRESH2]
-    leaked = [t for t in tokens if secret_on_disk(t) or any(t in open(os.path.join(WORK, f), errors="replace").read()
-                                                             for f in os.listdir(WORK) if f.endswith(".log"))]
-    check("no krunker.io password or token on a client file or in a log", not leaked, repr(leaked))
+    check("Remove forgets the krunker.io row", f"Removed {kae.LOGIN}." in text_of(log, "kremoved") and match_of(log, "krows") == 0,
+          f"{text_of(log, 'kremoved')[-120:]} rows {match_of(log, 'krows')}")
 
 
 def main():
@@ -445,14 +399,18 @@ def main():
         register(brain_url, game_port, NAME, ADDR, "register")
         register(brain_url, game_port, NAME2, ADDR2, "register2")
         plain_restart(brain_url, game_port)
-        add_accounts(brain_url, game_port)
-        use_accounts(brain_url, game_port)
-        restart_resumes(brain_url, game_port)
-        silent_password(brain_url, game_port, db)
-        invalid_login(brain_url, game_port, db)
-        dropped_on_restart(brain_url, game_port)
+        add_accounts(db, game_port)
+        use_fills(brain_url, game_port, db)
+        sign_in_from_card(brain_url, game_port)
+        restart_and_logout(brain_url, game_port)
+        sign_in_from_card(brain_url, game_port)
+        refused_token(brain_url, game_port, db)
+        remove_accounts(brain_url, game_port)
         krunker_row(brain_url, game_port, stub)
-        remove_account(brain_url, game_port)
+        check("the password is on no client file", not secret_on_disk(PASS) and not secret_on_disk(kae.PASSWORD),
+              repr(secret_on_disk(PASS) + secret_on_disk(kae.PASSWORD)))
+        leaked = [t for t in (PASS, kae.PASSWORD, kae.REFRESH1, kae.REFRESH2) if secret_in_logs(t)]
+        check("no password or token in a client log", not leaked, repr(leaked))
     except Exception as e:  # noqa: BLE001
         check("exception", False, repr(e))
     finally:

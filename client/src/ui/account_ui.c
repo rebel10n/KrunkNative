@@ -76,16 +76,6 @@ static int g_tab_index;          // windows[4].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
 static char g_token[192];
 static char g_session_user[ALT_LABEL_MAX]; // the login name g_token belongs to ("" = no session)
-// The Account Manager's request in flight (alt_manager_ui.c): Add lists the account once it signs in,
-// a switch resumes a listed one and reports when its saved session is refused.
-enum { AM_NONE, AM_ADD, AM_SWITCH };
-static int g_am_request;
-static char g_am_name[ALT_LABEL_MAX];
-// The Add's typed password, kept until its answer (the listing stores it, sealed). A saved login whose session is
-// refused signs in with its stored password (g_pass_try: that attempt's login name in g_pass_name), silently.
-static char g_am_pass[ALT_SECRET_MAX];
-static int g_pass_try;
-static char g_pass_name[ALT_LABEL_MAX];
 static char g_guest_name[32];    // client->menu_name before the account took it over
 static int g_reward_played;      // dc: a match ended this session (canClaimReward)
 static char g_reward_text[16];   // d8: last #claimTimer text
@@ -738,7 +728,6 @@ static void load_session(void) {
     html_storage_set("krunker_id", NULL);
     char name[sizeof(g_session_user)], token[sizeof(g_token)];
     if (alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1) set_session(name, token);
-    else if (alt_store_kn_active_name(name, sizeof(name))) set_session(name, ""); // no session left: its stored password may sign it in
     alt_wipe(token, sizeof(token));
 }
 
@@ -759,43 +748,14 @@ static void send_restore(const char *name, const char *token) {
     cJSON_Delete(frame);
 }
 
-// The saved login is no longer valid: its session and its stored password are both refused. The account stays
-// listed in this run (its row offers a Sign in; a restart drops it); nothing asks for a password.
-static void saved_invalid(const char *name) {
-    show_acc_resp(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
-    alt_manager_ui_sign_in_done(ALT_SIGN_IN_EXPIRED, name, NULL);
-}
-
-// A listed account's stored password signs it in (a login request, silently). am: the Account Manager's request
-// that waits for the answer (AM_NONE for the startup resume). 1 started, 0 nothing to try.
-static int sign_in_with_password(const char *name, const int am) {
-    char pass[ALT_SECRET_MAX];
-    int started = 0;
-    if (name && name[0] && backend_enabled() && backend_available() != 0 && alt_store_password(ALT_KIND_KN, name, pass, sizeof(pass))) {
-        g_pass_try = 1;
-        copy_str(g_pass_name, sizeof(g_pass_name), name);
-        g_restore_sent = 0;
-        if (am) g_am_request = am;
-        g_auth_sent_at = glfwGetTime();
-        send_account_request(1, name, pass, NULL);
-        started = 1;
-    }
-    alt_wipe(pass, sizeof(pass));
-    return started;
-}
-
-// the session (g_session_user + g_token) is restored; with no session left, the stored password signs it in
+// The session (g_session_user + g_token) is restored at start and on a new socket. With no session left nothing is
+// signed in: a listed account's login is filled in on the Account Manager's request, and the player presses Login.
 static void try_restore(void) {
-    if (g_restore_sent || g_pass_try || !backend_enabled()) return;
+    if (g_restore_sent || !backend_enabled()) return;
     char name[sizeof(g_session_user)], token[sizeof(g_token)];
     copy_str(name, sizeof(name), g_session_user);
     copy_str(token, sizeof(token), g_token);
-    if (!name[0]) {
-        alt_wipe(token, sizeof(token));
-        return;
-    }
-    if (!token[0]) {
-        sign_in_with_password(name, AM_NONE);
+    if (!name[0] || !token[0]) {
         alt_wipe(token, sizeof(token));
         return;
     }
@@ -917,63 +877,31 @@ static void set_stat(const char *key, const double value) {
 static void account_response(const cJSON *frame) {
     const cJSON *err = cJSON_GetArrayItem(frame, 1);
     const int was_restore = g_restore_sent;
-    const int was_pass = g_pass_try;
-    const int am = g_am_request;
-    g_am_request = AM_NONE;
     g_restore_sent = 0;
-    g_pass_try = 0;
     g_auth_sent_at = 0;
-    if (am != AM_ADD) alt_wipe(g_am_pass, sizeof(g_am_pass)); // only the Add keeps its typed password
     if (cJSON_IsString(err) && err->valuestring[0]) {
         if (was_restore && !g_logged_in && g_restore_asks < RESTORE_ASKS && g_token[0]) {
-            // a refused saved session is asked once more (account_ui_tick), before anything is shown or
-            // forgotten; the Account Manager's switch keeps waiting for that answer
+            // a refused saved session is asked once more (account_ui_tick), before anything is shown or forgotten
             printf("[account] the saved session was refused (%s): asking once more\n", err->valuestring);
-            g_am_request = am;
-            if (am) g_auth_sent_at = glfwGetTime();
             g_restore_retry_at = glfwGetTime() + RESTORE_RETRY_S;
             return;
         }
-        if (am == AM_ADD) { // the Account Manager's Add: nothing is listed; the typed password is dropped
-            alt_wipe(g_am_pass, sizeof(g_am_pass));
-            show_acc_resp(err->valuestring);
-            alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, err->valuestring);
-            return;
-        }
-        if (was_pass) { // the stored password is refused too: the saved login is no longer valid
-            char name[ALT_LABEL_MAX];
-            copy_str(name, sizeof(name), g_pass_name);
-            alt_store_forget_password(ALT_KIND_KN, name);
-            saved_invalid(name);
-            return;
-        }
-        if (was_restore) { // a refused saved session is forgotten (the account stays listed); its password signs in silently
-            char name[ALT_LABEL_MAX];
-            copy_str(name, sizeof(name), am == AM_SWITCH ? g_am_name : g_session_user);
-            if (g_logged_in) alt_store_kn_forget(name); // a switch from a signed-in account: that session stays
-            else forget_saved_session();
-            if (!sign_in_with_password(name, am)) saved_invalid(name);
+        if (was_restore) { // a refused saved session is forgotten: the account stays listed with its login (Use fills it in)
+            if (g_logged_in) {
+                alt_store_kn_forget(g_session_user); // the account signed in here keeps its session in memory
+            } else {
+                forget_saved_session();
+                show_acc_resp(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
+            }
             return;
         }
         show_acc_resp(err->valuestring);
-        if (am) alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, err->valuestring);
         return;
     }
     const cJSON *id = cJSON_GetArrayItem(frame, 2);
     const char *username = str_at(frame, 3);
     const char *token = str_at(frame, 5);
-    if (!cJSON_IsNumber(id) || !username) {
-        alt_wipe(g_am_pass, sizeof(g_am_pass));
-        if (am) alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, NULL);
-        return;
-    }
-    if (am == AM_ADD) { // the Account Manager's Add lists the account (token and password); the signed-in account stays as it is
-        const int rc = alt_store_list(ALT_KIND_KN, username, token, g_am_pass, NULL);
-        alt_wipe(g_am_pass, sizeof(g_am_pass));
-        show_acc_resp(NULL);
-        alt_manager_ui_sign_in_done(rc == 0 ? ALT_SIGN_IN_ADDED : ALT_SIGN_IN_UNSAVED, username, NULL);
-        return;
-    }
+    if (!cJSON_IsNumber(id) || !username) return;
 
     const int had = g_logged_in;
     clear_account();
@@ -994,13 +922,14 @@ static void account_response(const cJSON *frame) {
     }
 
     const int have_token = token && token[0];
-    if (have_token) set_session(username, token);
-    const int stored = have_token ? persist_session(username, token) : -1;
-    if (am) alt_manager_ui_sign_in_done(stored == 0 ? ALT_SIGN_IN_OK : ALT_SIGN_IN_UNSAVED, username, NULL);
+    if (have_token) {
+        set_session(username, token);
+        persist_session(username, token); // a listed account keeps its new session
+    }
     apply_menu_name();
     mark_header();
     show_acc_resp(NULL);
-    if (!had || am == AM_SWITCH) printf("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
+    if (!had) printf("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
     // updateAccount -> updateWindow(5); updateWindow(null, true): the open window re-renders
     rerender_windows();
     menu_update_class_box(); // dJ()
@@ -1029,25 +958,6 @@ static void logout(void) {
     menu_update_class_box();
 }
 
-// The alt manager's switch (alt_manager_ui.c): a saved session is restored through the same request as a
-// saved login. The signed-in account is NOT logged out first: logoutAcc makes the brain revoke that
-// account's session, so the row it leaves would ask for its password the next time it is used. The
-// answer replaces the signed-in account (account_response); a refused switch leaves it signed in. A
-// guest's switch keeps its session as the restore's (a refused one is forgotten, as a saved login's).
-// 0 started, -1 when this build has no account server (nothing happens).
-int account_ui_use_session(const char *username, const char *token) {
-    if (!username || !username[0] || !token || !token[0] || !backend_enabled()) return -1;
-    if (!g_logged_in) set_session(username, token);
-    g_am_request = AM_SWITCH;
-    copy_str(g_am_name, sizeof(g_am_name), username);
-    g_auth_sent_at = glfwGetTime(); // a switch that never answers says so (auth_unreachable)
-    g_restore_sent = 0;
-    g_restore_asks = 0;
-    g_restore_retry_at = 0;
-    send_restore(username, token); // the answer ("a", a token refresh included) comes back to account_response
-    return 0;
-}
-
 // The Account Manager's Remove: the removed account is signed out first when it is the one signed in.
 int account_ui_sign_out_of(const char *username) {
     if (!g_logged_in || !username || strcmp(g_acc.name, username)) return 0;
@@ -1055,35 +965,6 @@ int account_ui_sign_out_of(const char *username) {
     printf("[account] logged out\n");
     menu_update_class_box();
     return 1;
-}
-
-// The Account Manager's Add: the typed login name and password sign in through the login's own request
-// (loginAcc: sendAccountRequest(1, [name, pass, null])); account_response lists the account when the
-// server accepts them. 0 started, -1 no account server to ask (the window says so).
-int account_ui_add_sign_in(const char *name, const char *pass) {
-    if (!name || !name[0] || !pass || !pass[0] || !backend_enabled() || backend_available() == 0) return -1;
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return -1;
-    g_am_request = AM_ADD;
-    copy_str(g_am_name, sizeof(g_am_name), name);
-    copy_str(g_am_pass, sizeof(g_am_pass), pass); // kept for the listing (sealed); dropped at the answer
-    send_account_request(1, name, pass, NULL);
-    g_auth_sent_at = glfwGetTime();
-    return 0;
-}
-
-// The Account Manager's Use of a listed account with no session left: its stored password signs it in, and
-// the answer is a switch's (account_ui_use_session). -1 when this build has no account server.
-int account_ui_use_password(const char *name, const char *pass) {
-    if (!name || !name[0] || !pass || !pass[0] || !backend_enabled() || backend_available() == 0) return -1;
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return -1;
-    g_am_request = AM_SWITCH;
-    copy_str(g_am_name, sizeof(g_am_name), name);
-    copy_str(g_pass_name, sizeof(g_pass_name), name);
-    g_pass_try = 1;
-    g_restore_sent = 0;
-    g_auth_sent_at = glfwGetTime();
-    send_account_request(1, name, pass, NULL);
-    return 0;
 }
 
 // The saved account the client resumes at start (the listed, active one with its session): 1 and its
@@ -1797,10 +1678,6 @@ static void auth_unreachable(void) {
     }
     show_acc_resp(msg);
     g_auth_sent_at = 0;
-    if (g_am_request) { // the Account Manager's request never answered
-        g_am_request = AM_NONE;
-        alt_manager_ui_sign_in_done(ALT_SIGN_IN_REFUSED, g_am_name, msg);
-    }
 }
 
 // ---- KrunkNative password reset (the login popup's recover card, v10_login.c recover())

@@ -18,6 +18,10 @@ int  v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 int  v10_menu_login_open(void);          // the login / register modal is up (Enter in its fields is its own)
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up
 int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal instead (1 = taken over)
+// The Account Manager's Use: the login card opens with a listed account's Username and its saved Password filled
+// in (kio_form: the card signs in to krunker.io, else to krunk.io). Nothing is signed in. 1 shown, 0 not here
+// (an account is signed in, or the menu page is not up).
+int  v10_login_fill(int kio_form, const char *name, const char *pass);
 void v10_menu_tick(void);                // per frame: the menu's idle state (Popular Now, #activeBuffs, the Store item's badges)
 // v10's INIT (g:219154-219156): the Invite button greyed (buttonD) in a ranked match; the Host card greyed for an
 // official game only (v10's second toggle of menuBtnHost overrides the ranked one, so ranked does not grey it).

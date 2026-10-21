@@ -497,15 +497,19 @@ static void test_passwords(const char *dir) {
     // a refused session is forgotten, the password stays and signs in next
     CHECK(alt_store_kn_forget("dave") == 0, "dave's session is forgotten");
     CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 1, "the password outlives the session");
-    CHECK(alt_store_forget_password(ALT_KIND_KN, "dave") == 0, "dave's refused password is forgotten");
-    CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 0 && alt_store_kn_listed("dave") == 1, "dave stays listed without a password");
+    CHECK(alt_store_kn_listed("dave") == 1, "dave stays listed with its password");
+    // dave's password is cleared as well: listed with neither a session nor a password (the restart drops it)
+    AltVault *av = alt_store_vault();
+    for (int i = 0; av && i < av->count; i++) {
+        if (!strcmp(av->profiles[i].label, "dave")) alt_vault_set_password(av, av->profiles[i].id, "");
+    }
+    CHECK(alt_store_save() == 0 && alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 0, "dave's password is cleared");
 
     // a restart drops what cannot sign in: dave (neither) goes; erin (a password) and carol (a session) stay
     alt_store_close();
     CHECK(alt_store_open(dir) == 0, "reopen the vault");
     CHECK(alt_store_kn_listed("dave") == 0, "a restart drops the entry with neither a session nor a password");
     CHECK(alt_store_kn_listed("erin") == 1 && alt_store_kn_listed("carol") == 1, "erin (a password) and carol (a session) stay");
-    CHECK(alt_store_kn_active_name(name, sizeof(name)) == 1 && !strcmp(name, "carol"), "carol is still the active one");
     CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1, "carol's session survives");
     alt_store_close();
     remove_store_files(dir);

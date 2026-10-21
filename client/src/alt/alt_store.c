@@ -209,23 +209,6 @@ int alt_store_password(const int kind, const char *label, char *out, const size_
     return 1;
 }
 
-int alt_store_forget_password(const int kind, const char *label) {
-    const AltProfile *p = profile_named(kind, label);
-    if (!p) return 0;
-    char id[ALT_ID_LEN];
-    snprintf(id, sizeof(id), "%s", p->id);
-    alt_vault_set_password(&g_vault, id, "");
-    return alt_store_save();
-}
-
-int alt_store_kn_active_name(char *name, const size_t namecap) {
-    if (!g_ready || !name || !namecap) return 0;
-    const AltProfile *p = alt_vault_active(&g_vault, ALT_KIND_KN);
-    if (!p) return 0;
-    snprintf(name, namecap, "%s", p->label);
-    return 1;
-}
-
 int alt_store_kn_sign_out(void) {
     if (!g_ready || !alt_vault_active(&g_vault, ALT_KIND_KN)) return 0;
     alt_vault_sign_out(&g_vault);

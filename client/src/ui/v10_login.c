@@ -55,10 +55,11 @@ static struct {
     int code;     // krunker.io: the code form (_6696) is up
     unsigned kio_gen; // krunker_account_generation() the modal last followed
     int backend;      // account_backend() the modal signs in to
+    int kio_form;     // the card signs in to krunker.io: an official game, or the Account Manager's krunker.io row
 } L;
 
-// The modal signs in to krunker.io (an official game is joined or played) instead of krunk.io
-static int kio(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+// The card signs in to krunker.io (an official game, or a krunker.io row's Use) instead of krunk.io
+static int kio(void) { return L.kio_form; }
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
 
@@ -288,12 +289,29 @@ static void open_modal(const int reg) {
     L.code = 0;
     L.kio_gen = krunker_account_generation();
     L.backend = (int) account_backend();
+    L.kio_form = account_backend() == ACCOUNT_BACKEND_KRUNKER;
     char saved[64] = ""; // _39221: Email first unless a username is saved (krunk.io's: never offered to krunker.io)
     if (kio() || !account_saved_name(saved, sizeof(saved))) saved[0] = 0;
     const char *t = saved;
     while (*t == ' ') t++;
     L.email = *t == 0;
     render();
+}
+
+// The Account Manager's Use (alt_manager_ui.c): the card opens with a listed login's Username and its saved Password
+// in the fields, and that is all: nothing is signed in and no request is sent. The player presses Login, which signs
+// in to the card's backend (kio_form: krunker.io, else krunk.io's account service).
+int v10_login_fill(const int kio_form, const char *name, const char *pass) {
+    if (active_account() || !v10_menu_page()) return 0; // (a signed-in account: the Account window shows instead)
+    open_modal(0);
+    if (!L.open) return 0;
+    L.kio_form = kio_form ? 1 : 0;
+    L.email = 0; // the Username field holds the saved login
+    L.use_pass = 1;
+    L.choice = 0;
+    L.kio_gen = krunker_account_generation();
+    render_with(name, name, pass);
+    return 1;
 }
 
 // windows[4].gen (v10:10399794): showWindow(5) for a guest pushes this modal (_5217(_39035)) and
@@ -447,6 +465,9 @@ void v10_login_tick(void) {
     else if (L.code) code_hide();
     const char *msg = krunker_account_message();
     if (st != KRUNKER_ACCOUNT_CODE && msg[0]) message(msg);
+    // v10 closes the modal once the account is set (a sign-in says nothing: an empty message). A krunker.io card
+    // filled in by the Account Manager in a krunk.io game sets no account here, so its sign-in closes it too.
+    if (st == KRUNKER_ACCOUNT_SIGNED_IN && !msg[0] && account_backend() != ACCOUNT_BACKEND_KRUNKER) close_modal();
 }
 
 static void submit(void) {

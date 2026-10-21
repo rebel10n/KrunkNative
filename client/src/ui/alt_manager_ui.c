@@ -1,11 +1,13 @@
 // The Account Manager window (client/include/alt_manager_ui.h): the accounts the player listed, both
 // backends in one list. Each row is one account: its name, a tag (krunk.io: a Box Office account; krunker.io:
-// an official account), and Use / Remove. A row keeps its session (a token) and its password, both sealed in
-// the alt vault. Add signs the typed login and password in to the backend the chips pick, lists the account
-// with them, and leaves the signed-in account as it is (no switch). Use signs the row in with its token, or with
-// its stored password when the token is gone or refused; a row with neither offers a Sign in (the form).
+// an official account), and Use / Remove. A row keeps its login (the name and the password, sealed in the alt
+// vault) and, once the player has signed it in, its session. Add stores the typed login and password under the
+// chosen backend and lists the account: nothing is signed in, nothing is switched, no request is sent. Use fills
+// the login card's Username and Password with the row's saved ones and stops there: the player presses Login
+// (the card's own sign-in, v10_login.c).
 //
-// Switching accounts (Use) is refused in an official game: the game plays on the krunker.io account.
+// Use does not open over a signed-in account (the card is not shown there: log out first), and in an official
+// game it is refused for a krunk.io row (the game's card signs in to the game's account).
 #include <alt_manager_ui.h>
 
 #include <alt_crypto.h>
@@ -13,6 +15,7 @@
 #include <backend_ui.h>
 #include <krunker_account.h>
 #include <ui_logic.h>
+#include <v10_menu.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -23,28 +26,17 @@
 
 // The last result, shown under the list. Never a token or a credential.
 static char g_msg[200];
-// The form: the login name (a row that needs its password fills it; a failed Add keeps what was typed) and
-// the backend its chips pick (ALT_KIND_KN or ALT_KIND_KRUNKER).
+// The Add form: the login name (kept when an Add fails) and the backend its chips pick (ALT_KIND_KN or ALT_KIND_KRUNKER).
 static char g_form_user[ALT_LABEL_MAX];
 static int g_form_kind = ALT_KIND_KN;
-// The krunker.io Add's password, kept until its answer (listed sealed, then wiped); a Use's stored one is read
-// from the vault when it is needed.
-static char g_pending_pass[ALT_SECRET_MAX];
-// The krunker.io request the window started (its outcome comes as a krunker.io event). krunk.io's comes
-// through alt_manager_ui_sign_in_done (account_ui.c).
-enum { PEND_NONE, PEND_ADD, PEND_USE };
-static int g_pending;
-static char g_pending_name[ALT_LABEL_MAX];
 // render scenarios: state.altAccounts stands in for the vault's rows (no vault, no actions)
 static cJSON *g_scenario;
 
 typedef struct {
     char id[ALT_ID_LEN];
     char label[ALT_LABEL_MAX];
-    int kind; // ALT_KIND_KN (krunk.io) | ALT_KIND_KRUNKER (krunker.io)
+    int kind;       // ALT_KIND_KN (krunk.io) | ALT_KIND_KRUNKER (krunker.io)
     int active;     // the account the client plays as now
-    int has_secret; // a stored session (krunk.io token / krunker.io refresh token)
-    int has_pass;   // a stored password (sealed): signs the account in when the session is gone or refused
 } Row;
 
 static void set_msg(const char *text) {
@@ -95,11 +87,6 @@ static const AltProfile *kio_profile(const char *name) {
     return NULL;
 }
 
-static void pending_end(void) {
-    g_pending = PEND_NONE;
-    alt_wipe(g_pending_pass, sizeof(g_pending_pass));
-}
-
 // ---------------------------------------------------------------- rows
 
 // The vault's profiles (both kinds), or the render scenario's stand-in rows.
@@ -119,8 +106,6 @@ static int build_rows(Row *rows) {
             snprintf(r->label, sizeof(r->label), "%s", name);
             r->kind = backend && !strcmp(backend, "krunker.io") ? ALT_KIND_KRUNKER : ALT_KIND_KN;
             r->active = cJSON_IsTrue(active);
-            r->has_secret = 1;
-            r->has_pass = 1;
         }
         return n;
     }
@@ -136,8 +121,6 @@ static int build_rows(Row *rows) {
         snprintf(r->id, sizeof(r->id), "%s", p->id);
         snprintf(r->label, sizeof(r->label), "%s", p->label);
         r->kind = p->kind;
-        r->has_secret = p->secret[0] != 0;
-        r->has_pass = p->pass[0] != 0;
         r->active = p->kind == ALT_KIND_KN ? krunkio_account() != NULL && !strcmp(v->active_kn, p->id) : kio_signed_as(p->label);
     }
     return n;
@@ -153,7 +136,7 @@ static int find_profile(const char *id, const AltProfile **out) {
 
 // ---------------------------------------------------------------- krunker.io (the vault's krunker rows)
 
-// Stores the krunker.io account's current refresh token under its row's label (added, or the same account's new one).
+// Stores the krunker.io account's current refresh token under its row's label (the same account's new one).
 static int store_kio(const char *name) {
     char token[ALT_SECRET_MAX];
     AltVault *v = alt_store_vault();
@@ -187,89 +170,25 @@ static void forget_kio(const char *name) {
     alt_store_save();
 }
 
-// krunker.io's sign-in and session events (krunker_account.h). Only a request the window started
-// (g_pending) reports to the player; the listed accounts' stored sessions follow the account in any case.
+// krunker.io's sign-in and session events (krunker_account.h). A listed account's stored session follows the
+// account; the login card (v10_login.c) reports its own sign-in.
 static void on_kio_event(void *user, const KrunkerAccountEvent ev) {
     (void) user;
-    const int mine = g_pending != PEND_NONE;
-    int finished = 1; // the window's request ends with this event (an expired Use's stored password answers later)
-    char msg[sizeof(g_msg)];
     switch (ev) {
-        case KRUNKER_EV_ADDED: // the Add: the account is listed with its refresh token and password; nothing is signed in
-            if (mine && g_pending == PEND_ADD) {
-                char token[ALT_SECRET_MAX];
-                const char *name = krunker_account_added_name();
-                const AltProfile *row = kio_profile(name);
-                const int got = krunker_account_added_refresh(token, sizeof(token));
-                const int rc = got ? alt_store_list(ALT_KIND_KRUNKER, row ? row->label : name, token, g_pending_pass, NULL) : -1;
-                alt_wipe(token, sizeof(token));
-                if (rc == 0) {
-                    I18N_F(msg, "kn.alt.added", "Added {0}.", name);
-                    set_msg(msg);
-                    if (!strcmp(g_form_user, g_pending_name)) g_form_user[0] = 0;
-                } else {
-                    set_msg(I18N("kn.alt.saveFailed", "Could not write the vault."));
-                }
-            }
-            break;
         case KRUNKER_EV_SIGNED_IN:
-            if (mine && g_pending == PEND_USE) { // a Use signed in with the stored password: the row takes the new session
-                if (store_kio(krunker_account_name()) == 0) {
-                    I18N_F(msg, "kn.alt.signedIn", "Signed in as {0}.", krunker_account_name());
-                    set_msg(msg);
-                } else {
-                    set_msg(I18N("kn.alt.saveFailed", "Could not write the vault."));
-                }
-            } else {
-                sync_kio(krunker_account_name());
-            }
-            break;
-        case KRUNKER_EV_SIGN_IN_FAILED:
-            if (mine && g_pending == PEND_ADD) set_msg(krunker_account_message()[0] ? krunker_account_message() : I18N("kn.alt.failed", "Could not sign in."));
-            else if (mine && g_pending == PEND_USE) set_msg(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
-            break;
         case KRUNKER_EV_RESUMED:
-            if (mine && g_pending == PEND_USE) {
-                if (store_kio(krunker_account_name()) == 0) {
-                    I18N_F(msg, "kn.alt.signedIn", "Signed in as {0}.", krunker_account_name());
-                    set_msg(msg);
-                } else {
-                    set_msg(I18N("kn.alt.saveFailed", "Could not write the vault."));
-                }
-            } else {
-                sync_kio(krunker_account_name());
-            }
-            break;
-        case KRUNKER_EV_RESUME_FAILED:
-            if (mine && g_pending == PEND_USE) set_msg(krunker_account_message()[0] ? krunker_account_message() : I18N("kn.alt.failed", "Could not sign in."));
-            break;
-        case KRUNKER_EV_EXPIRED: { // the stored session is refused: forgotten (the row keeps its password)
-            char name[ALT_LABEL_MAX];
-            snprintf(name, sizeof(name), "%s", krunker_account_name());
-            forget_kio(name);
-            if (mine && g_pending == PEND_USE) {
-                char pass[ALT_SECRET_MAX];
-                if (alt_store_password(ALT_KIND_KRUNKER, g_pending_name, pass, sizeof(pass))) {
-                    // the stored password signs in, silently: it starts once the expired session is forgotten
-                    krunker_account_sign_in_when_expired(g_pending_name, pass);
-                    alt_wipe(pass, sizeof(pass));
-                    finished = 0;
-                } else {
-                    set_msg(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
-                }
-            }
-            break;
-        }
         case KRUNKER_EV_REFRESHED:
             sync_kio(krunker_account_name());
             break;
-        case KRUNKER_EV_CODE_ASKED: // the code step: its instruction is krunker_account_message()
-            if (mine && (g_pending == PEND_ADD || g_pending == PEND_USE)) set_msg(krunker_account_message());
+        case KRUNKER_EV_EXPIRED: { // the stored session is refused: forgotten (the row keeps its login)
+            char name[ALT_LABEL_MAX];
+            snprintf(name, sizeof(name), "%s", krunker_account_name());
+            forget_kio(name);
+            break;
+        }
+        default:
             break;
     }
-    if (mine && finished && (ev == KRUNKER_EV_ADDED || ev == KRUNKER_EV_SIGNED_IN || ev == KRUNKER_EV_SIGN_IN_FAILED || ev == KRUNKER_EV_RESUMED ||
-                             ev == KRUNKER_EV_RESUME_FAILED || ev == KRUNKER_EV_EXPIRED))
-        pending_end();
     rerender();
 }
 
@@ -279,10 +198,9 @@ void alt_manager_ui_init(void) {
 
 // ---------------------------------------------------------------- actions
 
-// Use: a listed account signs in with its stored session (the service checks it); with none, or a refused one,
-// its stored password signs it in (silently). krunk.io: account_ui.c's switch (its answer comes to
-// alt_manager_ui_sign_in_done); krunker.io: krunker_account_resume / krunker_account_sign_in (its answer comes as
-// a krunker.io event). A row with neither says so, and offers a Sign in (the form).
+// Use: the login card opens over the window with the row's Username and its saved Password in the fields, and
+// nothing else happens: no sign-in, no session, no request. The player presses Login. A krunker.io row's card
+// signs in to krunker.io, a krunk.io row's to krunk.io's account service (v10_login.c).
 static void use_row(const char *id) {
     const AltProfile *p = NULL;
     if (!find_profile(id, &p)) {
@@ -295,40 +213,22 @@ static void use_row(const char *id) {
         set_msg(msg);
         return;
     }
-    if (in_official_game()) {
+    if (active_account()) { // the card does not open over a signed-in account: log out first
+        char msg[sizeof(g_msg)];
+        I18N_F(msg, "kn.alt.logoutFirst", "Log out to sign in as {0}.", p->label);
+        set_msg(msg);
+        return;
+    }
+    if (p->kind == ALT_KIND_KN && in_official_game()) {
         set_msg(I18N("kn.alt.inGame", "Leave the official game first."));
         return;
     }
-    if (!p->secret[0] && !p->pass[0]) {
-        set_msg(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
-        return;
-    }
-    char name[ALT_LABEL_MAX], token[ALT_SECRET_MAX], pass[ALT_SECRET_MAX];
+    char name[ALT_LABEL_MAX], pass[ALT_SECRET_MAX];
     snprintf(name, sizeof(name), "%s", p->label);
-    snprintf(token, sizeof(token), "%s", p->secret);
     snprintf(pass, sizeof(pass), "%s", p->pass);
-    char msg[sizeof(g_msg)];
-    if (p->kind == ALT_KIND_KN) {
-        const int started = token[0] ? account_ui_use_session(name, token) : account_ui_use_password(name, pass);
-        alt_wipe(token, sizeof(token));
-        alt_wipe(pass, sizeof(pass));
-        if (started != 0) {
-            set_msg(I18N("kn.alt.noServer", "Can't reach the account server."));
-            return;
-        }
-    } else {
-        const int started = token[0] ? krunker_account_resume(name, token) : krunker_account_sign_in(name, pass);
-        alt_wipe(token, sizeof(token));
-        alt_wipe(pass, sizeof(pass));
-        if (!started) {
-            set_msg(krunker_account_message()[0] ? krunker_account_message() : I18N("kn.alt.failed", "Could not sign in."));
-            return;
-        }
-        g_pending = PEND_USE;
-        snprintf(g_pending_name, sizeof(g_pending_name), "%s", name);
-    }
-    I18N_F(msg, "kn.alt.signingIn", "Signing in as {0}...", name);
-    set_msg(msg);
+    const int shown = v10_login_fill(p->kind == ALT_KIND_KRUNKER, name, pass);
+    alt_wipe(pass, sizeof(pass));
+    if (!shown) set_msg(I18N("kn.alt.noCard", "The login card is not open here."));
 }
 
 // Remove: forgets the account and its stored session. The account signed in is signed out first (krunk.io
@@ -362,71 +262,26 @@ static void remove_row(const char *id) {
     set_msg(msg);
 }
 
-// The code step's code (the 2FA app's or the email's): the same submit as v10's login modal.
-static void submit_code(const char *code) {
-    if (!code || !code[0]) return;
-    if (!krunker_account_submit_code(code)) set_msg(krunker_account_message()[0] ? krunker_account_message() : I18N("kn.alt.failed", "Could not sign in."));
-}
-
-// Add: the typed login and password sign in to the chosen backend, and the account is listed with them. The
-// signed-in account stays as it is (nothing is switched to). The password is wiped by the caller and kept here
-// only until the answer.
+// Add: the typed login and password are stored under the backend the chips pick, and the account is listed. Nothing
+// is signed in, no account is switched, and no request leaves the client. The password is sealed in the alt vault.
 static void add_account(const char *name, const char *pass) {
     snprintf(g_form_user, sizeof(g_form_user), "%s", name ? name : "");
     if (!name || !name[0] || !pass || !pass[0]) {
         set_msg(I18N("kn.alt.needCreds", "Enter the login and the password."));
         return;
     }
-    if (in_official_game()) {
-        set_msg(I18N("kn.alt.inGame", "Leave the official game first."));
+    // a krunker.io login is case-blind: the row it already has keeps its label
+    const AltProfile *row = g_form_kind == ALT_KIND_KRUNKER ? kio_profile(name) : NULL;
+    char label[ALT_LABEL_MAX];
+    snprintf(label, sizeof(label), "%s", row ? row->label : name);
+    if (alt_store_list(g_form_kind, label, NULL, pass, NULL) != 0) {
+        set_msg(I18N("kn.alt.saveFailed", "Could not write the vault."));
         return;
     }
     char msg[sizeof(g_msg)];
-    if (g_form_kind == ALT_KIND_KN) {
-        if (account_ui_add_sign_in(name, pass) != 0) {
-            set_msg(I18N("kn.alt.noServer", "Can't reach the account server."));
-            return;
-        }
-    } else {
-        snprintf(g_pending_pass, sizeof(g_pending_pass), "%s", pass);
-        if (!krunker_account_add(name, pass)) {
-            alt_wipe(g_pending_pass, sizeof(g_pending_pass));
-            set_msg(krunker_account_message()[0] ? krunker_account_message() : I18N("kn.alt.failed", "Could not sign in."));
-            return;
-        }
-        g_pending = PEND_ADD;
-        snprintf(g_pending_name, sizeof(g_pending_name), "%s", name);
-    }
-    I18N_F(msg, "kn.alt.signingIn", "Signing in as {0}...", name);
+    I18N_F(msg, "kn.alt.added", "Added {0}.", label);
     set_msg(msg);
-}
-
-// ---------------------------------------------------------------- answers from account_ui.c (krunk.io)
-
-void alt_manager_ui_sign_in_done(const AltSignIn result, const char *name, const char *error) {
-    char msg[sizeof(g_msg)];
-    switch (result) {
-        case ALT_SIGN_IN_ADDED:
-            if (name && !strcmp(g_form_user, name)) g_form_user[0] = 0;
-            I18N_F(msg, "kn.alt.added", "Added {0}.", name ? name : "");
-            set_msg(msg);
-            break;
-        case ALT_SIGN_IN_OK:
-            if (name && !strcmp(g_form_user, name)) g_form_user[0] = 0;
-            I18N_F(msg, "kn.alt.signedIn", "Signed in as {0}.", name ? name : "");
-            set_msg(msg);
-            break;
-        case ALT_SIGN_IN_REFUSED:
-            set_msg(error && error[0] ? error : I18N("kn.alt.failed", "Could not sign in."));
-            break;
-        case ALT_SIGN_IN_EXPIRED: // the session and the stored password are both refused: the row offers a Sign in
-            set_msg(I18N("kn.alt.invalid", "Saved login is no longer valid. Sign in again to restore it."));
-            break;
-        case ALT_SIGN_IN_UNSAVED:
-            set_msg(I18N("kn.alt.saveFailed", "Could not write the vault."));
-            break;
-    }
-    rerender();
+    g_form_user[0] = 0;
 }
 
 // ---------------------------------------------------------------- window
@@ -442,18 +297,11 @@ static void append_row(StrBuf *sb, const Row *r) {
         sb_append(sb, "<div class='knAltBtn knAltOn'>");
         sb_append_esc(sb, I18N("kn.alt.use", "Use"));
         sb_append(sb, "</div>");
-    } else if (r->has_secret || r->has_pass) {
+    } else {
         sb_append(sb, "<div class='knAltBtn knAltUseBtn' onclick='knAltUse(\"");
         sb_append_esc(sb, r->id);
         sb_append(sb, "\")'>");
         sb_append_esc(sb, I18N("kn.alt.use", "Use"));
-        sb_append(sb, "</div>");
-    }
-    if (!r->active && !r->has_secret && !r->has_pass) { // nothing left to sign in with: the row asks for a sign-in (the form)
-        sb_append(sb, "<div class='knAltBtn knAltUseBtn' onclick='knAltSignInRow(\"");
-        sb_append_esc(sb, r->id);
-        sb_append(sb, "\")'>");
-        sb_append_esc(sb, I18N("kn.alt.signIn", "Sign in"));
         sb_append(sb, "</div>");
     }
     sb_append(sb, "<div class='knAltBtn knAltDanger' onclick='knAltRemove(\"");
@@ -502,30 +350,22 @@ char *alt_manager_window_gen(const int id, const char **header) {
             sb_append_esc(&sb, I18N("generic.login", "Login"));
             sb_append(&sb, "</div>");
         }
-        if (krunker_account_state() == KRUNKER_ACCOUNT_CODE) { // the krunker.io code step (2FA or email)
-            sb_append(&sb, "<div class='knAltAdd'><input id='knAltCode' type='text' class='accountInput' autocomplete='one-time-code' placeholder='");
-            sb_append_esc(&sb, I18N("kn.alt.code", "Code"));
-            sb_append(&sb, "'><div class='joinBtn knAltWide' onclick='knAltCodeSubmit()'>");
-            sb_append_esc(&sb, I18N("kn.alt.submit", "Submit"));
-            sb_append(&sb, "</div></div>");
-        } else {
-            sb_append(&sb, "<div class='knAltAdd'>");
+        sb_append(&sb, "<div class='knAltAdd'>");
 #ifndef __EMSCRIPTEN__ // the web's Accounts are krunk.io's only: no backend chips
-            sb_append(&sb, "<div class='knAltChips'>");
-            append_chip(&sb, ALT_KIND_KN, "krunk.io");
-            append_chip(&sb, ALT_KIND_KRUNKER, "krunker.io");
-            sb_append(&sb, "</div>");
+        sb_append(&sb, "<div class='knAltChips'>");
+        append_chip(&sb, ALT_KIND_KN, "krunk.io");
+        append_chip(&sb, ALT_KIND_KRUNKER, "krunker.io");
+        sb_append(&sb, "</div>");
 #endif
-            sb_append(&sb, "<input id='knAltUser' type='text' class='accountInput' placeholder='");
-            sb_append_esc(&sb, I18N("generic.username", "Username"));
-            sb_append(&sb, "' value='");
-            sb_append_esc(&sb, g_form_user);
-            sb_append(&sb, "'><input id='knAltPass' type='password' class='accountInput' placeholder='");
-            sb_append_esc(&sb, I18N("generic.password", "Password"));
-            sb_append(&sb, "'><div class='joinBtn knAltWide' onclick='knAltAdd()'>");
-            sb_append_esc(&sb, I18N("kn.alt.add", "Add"));
-            sb_append(&sb, "</div></div>");
-        }
+        sb_append(&sb, "<input id='knAltUser' type='text' class='accountInput' placeholder='");
+        sb_append_esc(&sb, I18N("generic.username", "Username"));
+        sb_append(&sb, "' value='");
+        sb_append_esc(&sb, g_form_user);
+        sb_append(&sb, "'><input id='knAltPass' type='password' class='accountInput' placeholder='");
+        sb_append_esc(&sb, I18N("generic.password", "Password"));
+        sb_append(&sb, "'><div class='joinBtn knAltWide' onclick='knAltAdd()'>");
+        sb_append_esc(&sb, I18N("kn.alt.add", "Add"));
+        sb_append(&sb, "</div></div>");
     }
     sb_append(&sb, "<div id='knAltMsg' class='knAltMsg'>");
     sb_append_esc(&sb, g_msg);
@@ -544,14 +384,6 @@ int alt_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
     if (!strcmp(name, "knAltUse")) {
         const char *id = arg_text(args, argc, 0);
         if (id) use_row(id);
-    } else if (!strcmp(name, "knAltSignInRow")) { // a row with nothing left to sign in with: the form takes its login
-        const char *id = arg_text(args, argc, 0);
-        const AltProfile *p = NULL;
-        if (id && find_profile(id, &p)) {
-            snprintf(g_form_user, sizeof(g_form_user), "%s", p->label);
-            g_form_kind = p->kind;
-            set_msg("");
-        }
     } else if (!strcmp(name, "knAltRemove")) {
         const char *id = arg_text(args, argc, 0);
         if (id) remove_row(id);
@@ -563,11 +395,6 @@ int alt_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
 #ifndef __EMSCRIPTEN__
         if (argc > 0 && args[0].kind == HTML_ARG_NUM && args[0].num != 0) g_form_kind = ALT_KIND_KRUNKER;
 #endif
-    } else if (!strcmp(name, "knAltCodeSubmit")) {
-        char code[32];
-        read_input("knAltCode", code, sizeof(code));
-        submit_code(code);
-        alt_wipe(code, sizeof(code));
     } else if (!strcmp(name, "knAltAdd")) {
         char user[ALT_LABEL_MAX], pass[128];
         read_input("knAltUser", user, sizeof(user));

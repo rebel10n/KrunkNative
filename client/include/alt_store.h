@@ -36,8 +36,4 @@ int alt_store_kn_forget(const char *username);
 int alt_store_list(int kind, const char *label, const char *token, const char *pass, char *out_id);
 // The listed profile's stored password (copied into out): 1 found, 0 none (out is "").
 int alt_store_password(int kind, const char *label, char *out, size_t cap);
-// Drops the stored password of a listed profile (a refused one). 0 ok or not listed, -1 failure.
-int alt_store_forget_password(int kind, const char *label);
-// The active KrunkNative profile's login name: 1 and the name, 0 none (its token may be gone: see alt_store_kn_session).
-int alt_store_kn_active_name(char *name, size_t namecap);
 void alt_store_close(void); // wipes the vault and the key from memory

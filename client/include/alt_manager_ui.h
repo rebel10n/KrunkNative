@@ -1,24 +1,10 @@
 #pragma once
 // The Account Manager window (ALT_MANAGER_WINDOW = KN_WINDOW_BASE + 4, ui_logic.h): the accounts the player
 // listed, krunk.io (Box Office) and krunker.io in one list. Each row shows its name, a backend tag, Use and
-// Remove; Add signs in with a typed login and password. Opened from the header's Account Manager item (v10_menu.c).
+// Remove. Add stores a typed login and password; Use fills the login card with a row's saved ones (the player
+// presses Login). Opened from the header's Account Manager item (v10_menu.c).
 #include <cJSON.h>
 #include <html_dom.h>
-
-// What account_ui.c reports for an Add or a switch the window started:
-//   ADDED    the Add listed the account (its session and password stored); nothing was signed in
-//   OK       a switch signed in; the account is listed (its session stored)
-//   REFUSED  the server said no (the error text) or never answered
-//   EXPIRED  a saved login (its session and its stored password) is refused: the row offers a Sign in
-//   UNSAVED  the account was signed in or added, but the vault could not be written
-typedef enum {
-    ALT_SIGN_IN_ADDED,
-    ALT_SIGN_IN_OK,
-    ALT_SIGN_IN_REFUSED,
-    ALT_SIGN_IN_EXPIRED,
-    ALT_SIGN_IN_UNSAVED,
-} AltSignIn;
-void alt_manager_ui_sign_in_done(AltSignIn result, const char *name, const char *error); // error NULL = none
 
 // Once at startup (account_ui_init): the krunker.io account's events (krunker_account.h).
 void alt_manager_ui_init(void);
