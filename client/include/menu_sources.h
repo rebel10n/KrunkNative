@@ -7,7 +7,8 @@
 //   server_type:       seek_prefs_servers() (Settings > Quickplay > Server Type)
 //   krunker_active:    krunker.io is the active account backend (account_backend() == ACCOUNT_BACKEND_KRUNKER): an
 //                      official krunker.io game is the session. The brain is gated then (backend.h)
-//   krunker_signed_in: a krunker.io account is signed in (krunker_account_signed_in())
+//   krunker_signed_in: a krunker.io account is signed in AND an official game is the session (account_split_krunker_identity():
+//                      on a Box Office server a krunker.io sign-in chooses no host and supplies no Bearer)
 //   brain:             backend_available(): 1 = a brain answers, 0 = none, -1 = still probing
 #include <seek_prefs.h> // SeekServers
 

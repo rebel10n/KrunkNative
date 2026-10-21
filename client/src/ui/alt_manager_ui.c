@@ -6,10 +6,12 @@
 // the login card's Username and Password with the row's saved ones and stops there: the player presses Login
 // (the card's own sign-in, v10_login.c).
 //
-// Use never refuses: over a signed-in account, or in an official game, the card still opens with the row's login.
-// Login is the player's press, and the card signs in as it does for any login (v10_login.c).
+// Use opens the card for a row of the connected server's backend only (account_split.h): a krunker.io row in an official
+// game, a Box Office row on a Box Office server. Over a signed-in account the card still opens. Any other row says so
+// and opens nothing. Login is the player's press, and the card signs in as it does for any login (v10_login.c).
 #include <alt_manager_ui.h>
 
+#include <account_split.h>
 #include <alt_crypto.h>
 #include <alt_store.h>
 #include <backend_ui.h>
@@ -116,7 +118,9 @@ static int build_rows(Row *rows) {
         snprintf(r->id, sizeof(r->id), "%s", p->id);
         snprintf(r->label, sizeof(r->label), "%s", p->label);
         r->kind = p->kind;
-        r->active = p->kind == ALT_KIND_KN ? krunkio_account() != NULL && !strcmp(v->active_kn, p->id) : kio_signed_as(p->label);
+        // the account the client plays as now, on the connected server's side only (account_split.h)
+        r->active = p->kind == ALT_KIND_KN ? !in_official_game() && krunkio_account() != NULL && !strcmp(v->active_kn, p->id)
+                                           : account_split_krunker_identity() && kio_signed_as(p->label);
     }
     return n;
 }
@@ -193,19 +197,25 @@ void alt_manager_ui_init(void) {
 // ---------------------------------------------------------------- actions
 
 // Use: the login card opens over the window with the row's Username and its saved Password in the fields, and
-// nothing else happens: no sign-in, no session, no request, no refusal. Over a signed-in account, or in an official
-// game, the card opens too (v10_login_fill is the whole of it). The player presses Login. A krunker.io row's card
-// signs in to krunker.io, a krunk.io row's to krunk.io's account service (v10_login.c).
+// nothing else happens: no sign-in, no session, no request. Over a signed-in account the card opens too. A row of the
+// other backend (a krunker.io row on a Box Office server, a Box Office row in an official game) opens no card and
+// signs nobody in: the card would sign in to the connected server's backend, so the row says where it belongs.
+// The player presses Login (v10_login.c).
 static void use_row(const char *id) {
     const AltProfile *p = NULL;
     if (!find_profile(id, &p)) {
         set_msg(I18N("kn.alt.gone", "That account is no longer saved."));
         return;
     }
+    if (!account_split_row_usable(p->kind == ALT_KIND_KRUNKER)) {
+        set_msg(p->kind == ALT_KIND_KRUNKER ? I18N("kn.alt.useKrunkerIo", "krunker.io accounts are used in an official krunker.io game.")
+                                            : I18N("kn.alt.useBoxOffice", "Box Office accounts are used on a Box Office server."));
+        return;
+    }
     char name[ALT_LABEL_MAX], pass[ALT_SECRET_MAX];
     snprintf(name, sizeof(name), "%s", p->label);
     snprintf(pass, sizeof(pass), "%s", p->pass);
-    const int shown = v10_login_fill(p->kind == ALT_KIND_KRUNKER, name, pass);
+    const int shown = v10_login_fill(name, pass);
     alt_wipe(pass, sizeof(pass));
     if (!shown) set_msg(I18N("kn.alt.noCard", "The login card is not open here."));
 }

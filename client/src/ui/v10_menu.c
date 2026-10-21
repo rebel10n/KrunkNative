@@ -47,6 +47,7 @@
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
+#include <account_split.h> // the krunker.io identity a streams read may carry (account_split.h)
 #include <client_settings.h>
 #include <desktop_notify.h>
 #include <web_push.h> // the web build's Notifications switch (Web Push, web_push.c)
@@ -605,12 +606,15 @@ static void streams_ranked_body(void *user, const int status, const cJSON *body)
 static void streams_fetch(void) {
     if (L.override) return;
     int sent = 0;
-    const unsigned source = menu_streams_source(seek_prefs_servers(), krunker_active(), krunker_account_signed_in(), backend_available());
+    // A krunker.io account signed in on a Box Office server is nobody's here (account_split.h): it chooses no host and
+    // supplies no Bearer. Only an official krunker.io game makes its account the one a krunker.io request carries.
+    const int kio_identity = account_split_krunker_identity();
+    const unsigned source = menu_streams_source(seek_prefs_servers(), krunker_active(), kio_identity, backend_available());
     if (source == MENU_SRC_KIO) {
         // krunker.io: v10 getTopStreams (v10:25991) is the data client's, api.krunker.io (not gapi: 404 there). Its
         // API client's interceptor sends the signed-in account's Bearer with every request (v10:27595 / krunker_account.c);
         // a guest's goes without (a public read): krunker_ranked_request carries the token, the guest's read is plain
-        sent = krunker_account_signed_in() && krunker_ranked_request(KRUNKER_RANKED_API, "GET", "/streams/top?cb=2", NULL, streams_ranked_body, NULL);
+        sent = kio_identity && krunker_ranked_request(KRUNKER_RANKED_API, "GET", "/streams/top?cb=2", NULL, streams_ranked_body, NULL);
         char base[256], url[320];
         krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
         if (!sent) sent = krunker_kio_streams_url(url, sizeof(url), base) != 0 && backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, streams_body, NULL);

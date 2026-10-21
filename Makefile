@@ -402,7 +402,7 @@ native-auth-test: build ## Native client accounts e2e: register with email, veri
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/native_auth_e2e.py $(DEBUG_DIR)
 
 account-manager-test: build ## Native client Account Manager e2e: register, Add stores a typed login (no account server needed), Use fills the login card, Login, restart resumes, Logout, refused session forgotten, Remove, krunker.io row (local kn_brain + fake SMTP, headless)
-	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/account_manager_e2e.py $(DEBUG_DIR)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/account_manager_e2e.py $(DEBUG_DIR)
 
 resize-early-test: build ## Window resizes during startup / stale resize events reach the viewport and HTML layout (private Xvfb + xfwm4 + xdotool)
 	timeout 600 $(PYTHON) -I client/tests/resize_early_e2e.py $(DEBUG_DIR)

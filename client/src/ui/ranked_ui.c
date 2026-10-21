@@ -28,6 +28,7 @@
 #include <audio.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <account_split.h> // the krunker.io identity a krunker.io request may carry (kio_request)
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ranked.h>
@@ -240,6 +241,14 @@ static void on_kio(void *user, const int status, const cJSON *body) {
 }
 
 // The cached krunker.io answer of `key` (one per request), requested when it is due. Like v10_get.
+// A krunker.io ranked request carries the krunker.io account's Bearer: it goes out only on an official krunker.io game
+// (account_split.h). A krunker.io account signed in on a Box Office server sends nothing and is nobody's here.
+static int kio_request(const KrunkerRankedHost host, const char *method, const char *path, const char *json_body,
+                       const KrunkerRankedFn fn, void *user) {
+    if (!account_split_krunker_identity()) return 0;
+    return krunker_ranked_request(host, method, path, json_body, fn, user);
+}
+
 static const V10Req *kio_get(const char *key, const KrunkerRankedHost host, const char *path, const KioAdapt adapt, const int ttl_ms) {
     const double now = kio_now_ms();
     int index = -1, free_slot = -1, oldest = -1;
@@ -270,7 +279,7 @@ static const V10Req *kio_get(const char *key, const KrunkerRankedHost host, cons
     s->adapt = adapt;
     s->gen = g_kio_gen;
     s->inflight = 1;
-    if (!krunker_ranked_request(host, "GET", path, NULL, on_kio, (void *) (uintptr_t) index)) { // not sent: no krunker.io session
+    if (!kio_request(host, "GET", path, NULL, on_kio, (void *) (uintptr_t) index)) { // not sent: no krunker.io session
         s->inflight = 0;
         s->req.status = -1;
         s->at_ms = now;
@@ -727,6 +736,7 @@ static void start_kio_queue(void) {
         internal_error();
         return;
     }
+    if (!account_split_krunker_identity()) return; // the queue's socket carries the krunker.io Bearer (account_split.h)
     R.busy = 1;
     g_kio_queue = 1;
     g_banner_error[0] = 0; // (v10 updateGlobalStatus: error null, v10:98389)
@@ -754,7 +764,7 @@ static void on_kio_connection(void *user, const int status, const cJSON *body) {
 static void fetch_kio_connection(void) { // fetchIsPlayerInRankedMatch
     if (R.scenario) return;
     R.busy = 1;
-    if (!krunker_ranked_request(KRUNKER_RANKED_API, "GET", "/ranked/me/connection", NULL, on_kio_connection, NULL)) R.busy = 0;
+    if (!kio_request(KRUNKER_RANKED_API, "GET", "/ranked/me/connection", NULL, on_kio_connection, NULL)) R.busy = 0;
 }
 
 static void start_matchmaking(void) { // startMatchmaking(allRegions)
@@ -987,7 +997,7 @@ static void confirm_closed(const int accepted, void *user) {
         char body[48];
         snprintf(body, sizeof(body), "{\"skin_id\":%d}", g_buy.id);
         g_buy_kio = 1;
-        if (!krunker_ranked_request(KRUNKER_RANKED_GAPI, "POST", "/ranked/purchase", body, on_kio_purchase, NULL)) on_purchase(NULL, 0, NULL);
+        if (!kio_request(KRUNKER_RANKED_GAPI, "POST", "/ranked/purchase", body, on_kio_purchase, NULL)) on_purchase(NULL, 0, NULL);
         return;
     }
     g_buy_kio = 0;
@@ -1259,7 +1269,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         if (be == RANKED_BACKEND_KRUNKER) { // claimMilestone(index) (v10:25974): the region index
             char path[96];
             snprintf(path, sizeof(path), "/player-profile/me/claim-milestone/region/%d", ranked_region_index(my_region()));
-            if (!krunker_ranked_request(KRUNKER_RANKED_API, "POST", path, NULL, on_kio_claim, NULL)) on_claim(NULL, 0, NULL);
+            if (!kio_request(KRUNKER_RANKED_API, "POST", path, NULL, on_kio_claim, NULL)) on_claim(NULL, 0, NULL);
             return 1;
         }
         char t[256], path[400];

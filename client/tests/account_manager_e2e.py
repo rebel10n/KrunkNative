@@ -17,6 +17,13 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   another listed login does not switch the session: its Login sends nothing (krunk.io and krunker.io), the signed-in
   account stays the active one, and the card says whose session it is.
 
+  The account split (client/src/ui/account_split.c, doc/v10/account-split.md): on a Box Office server a krunker.io row's
+  Use opens no card and sends nothing, and a krunker.io login typed into the Box Office card (a fresh client home) is
+  refused with no sign-in request. In an official krunker.io game a krunker.io row's Use fills the card, its Login signs
+  in to krunker.io and another login's card sends nothing, a Box Office row's Use is refused, and a Box Office login typed
+  into the krunker.io card is refused with no sign-in request to krunker.io. A krunker.io sign-in kept from an official
+  game supplies no Bearer to krunker.io while Box Office is the server (the menu's Live Streams read).
+
   The web build's Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
   __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
 
@@ -62,6 +69,8 @@ PASS = "pass_word1"  # a fixture password, typed by the scripts only: it must ne
 WINDOW = 104         # ALT_MANAGER_WINDOW = KN_WINDOW_BASE + 4
 DEAD_BRAIN = "http://127.0.0.1:9"  # nothing listens here: an Add must not need the account server
 VAULT = os.path.join(WORK, "cfg", "krunknative", "alt", "vault.bin")
+# a fresh client home for the split refusals: no saved login name, so the login card opens in its Email field
+SPLIT_HOME = os.path.join(WORK, "split")
 results = []
 procs = []
 KIO_ENV = {}  # the krunker.io stub's endpoints for every client run (set in main)
@@ -72,15 +81,15 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
 
 
-def run_client(name, script, brain_url, game_port, timeout=150):
-    """One headless client_bin run of `script`; returns its log text."""
+def run_client(name, script, brain_url, game_port, timeout=150, home=WORK):
+    """One headless client_bin run of `script` (its config and state under `home`); returns its log text."""
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
         f.write(script)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
-                "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(home, "cfg"),
+                "XDG_STATE_HOME": os.path.join(home, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_FINDER_URL": "off",
                 "KRUNKNATIVE_ASSETS_DIR": kae.ASSETS})  # the full asset tree (a worktree has no models / fonts)
     env.update(KIO_ENV)
@@ -118,7 +127,7 @@ def match_of(log, label):
 def secret_on_disk(needle):
     """Files under the client's config and state dirs (never the input scripts or logs) holding needle."""
     hits = []
-    for base in (os.path.join(WORK, "cfg"), os.path.join(WORK, "state")):
+    for base in (os.path.join(WORK, "cfg"), os.path.join(WORK, "state"), SPLIT_HOME):
         for dirpath, _, files in os.walk(base):
             for fn in files:
                 p = os.path.join(dirpath, fn)
@@ -303,41 +312,37 @@ def official_use(brain_url, game_port, stub):
 9900 clicksel [onclick*="knAltAdd"]
 10500 text @oadd [id="knAltMsg"]
 11000 clicksel [onclick*="knAltUse"]
-12000 nodes @omodal [id="knV10Login"]
-12100 nodes @ouser [id="accName"][value="{NAME}"]
-12200 nodes @opass [id="accPass"][value="{PASS}"]
-12250 text @omsg [id="knAltMsg"]
-12300 call knV10LoginClose
-12400 call showWindow {WINDOW}
+12000 text @omsg [id="knAltMsg"]
+12100 nodes @omodal [id="knV10Login"]
 12500 clicksel [onclick*="knAltRemove"]
 13000 text @oremoved [id="knAltMsg"]
 13500 quit
 """, brain_url, game_port)
     check("the client joined an official krunker.io game (the stub's game socket)", len(stub.ws_paths) > joins, str(len(stub.ws_paths) - joins))
     check("in the official game, Add lists the krunk.io login", f"Added {NAME}." in text_of(log, "oadd"), text_of(log, "oadd")[-120:])
-    check("in the official game, Use fills the card with it (nothing refused)", match_of(log, "omodal") == 1
-          and match_of(log, "ouser") == 1 and match_of(log, "opass") == 1,
-          f"card {match_of(log, 'omodal')} user {match_of(log, 'ouser')} pass {match_of(log, 'opass')}")
-    check("and nothing is refused (no official-game message on the Use)", "Leave the official game" not in text_of(log, "omsg"),
-          text_of(log, "omsg")[-120:])
+    check("in the official game, Use of a Box Office row is refused (no card: the krunker.io card would sign in to krunker.io)",
+          "Box Office accounts are used on a Box Office server." in text_of(log, "omsg") and match_of(log, "omodal") == 0,
+          f"{text_of(log, 'omsg')[-120:]} card {match_of(log, 'omodal')}")
     check("and the row is removed again", f"Removed {NAME}." in text_of(log, "oremoved"), text_of(log, "oremoved")[-120:])
 
 
 def kio_login(brain_url, game_port, stub):
-    """The krunker.io row's card: Login signs in to krunker.io (the Security Challenge passes by itself on the stub's
-    captcha page; then the stub's 2FA code is typed), and the card closes."""
+    """The krunker.io row's card in an official krunker.io game (the split: only there does its Login sign in to krunker.io):
+    Login signs in to krunker.io (the Security Challenge passes by itself on the stub's captcha page; then the stub's 2FA
+    code is typed), and the card closes."""
     posts = len(stub.find("POST", "/api/auth/login/username"))
     script = "\n".join([
         "0 menu",
-        f"500 call showWindow {WINDOW}",
-        '1000 clicksel [onclick*="knAltUse"]',
-        '2000 nodes @kmodal [id="knV10Login"]',
-        '2100 clickid knV10LoginSubmit',
-        '5900 vis @code knV10Code knV10Code0 knV10CodeSubmit',
-    ] + [line for i, d in enumerate(kae.CODE) for line in (f"{6100 + i * 150} clickid knV10Code{i}",
-                                                           f"{6160 + i * 150} type {d}")] + [
-        '11000 nodes @modalgone [id="knV10Login"]',
-        "11500 quit",
+        f'1500 call krunkerJoin "{kae.GAME_PICK}"',
+        f"9000 call showWindow {WINDOW}",
+        '9500 clicksel [onclick*="knAltUse"]',
+        '10500 nodes @kmodal [id="knV10Login"]',
+        '10600 clickid knV10LoginSubmit',
+        '14400 vis @code knV10Code knV10Code0 knV10CodeSubmit',
+    ] + [line for i, d in enumerate(kae.CODE) for line in (f"{14600 + i * 150} clickid knV10Code{i}",
+                                                           f"{14660 + i * 150} type {d}")] + [
+        '19500 nodes @modalgone [id="knV10Login"]',
+        "20000 quit",
     ]) + "\n"
     log = run_client("kio_login", script, brain_url, game_port)
     check("krunker.io Login posts the login once", len(stub.find("POST", "/api/auth/login/username")) - posts == 1,
@@ -477,23 +482,24 @@ def kio_other_login(brain_url, game_port, stub):
     Login send nothing to krunker.io, and the card says whose session it is. OTHER is removed again."""
     posts = len(stub.find("POST", "/api/auth/login/username"))
     log = run_client("kio_other", f"""0 menu
-500 call showWindow {WINDOW}
-1000 call knAltBackend 1
-1200 clickid knAltUser
-1300 type {OTHER}
-1400 clickid knAltPass
-1500 type {kae.PASSWORD}
-1600 clicksel [onclick*="knAltAdd"]
-2500 text @oadd [id="knAltMsg"]
-3000 clicksel [onclick*="knAltUse"]
-4000 nodes @omodal [id="knV10Login"]
-4100 clickid knV10LoginSubmit
-6000 text @omsg [id="accResp"]
-6500 call knV10LoginClose
-7000 call showWindow {WINDOW}
-7500 clicksel [onclick*="knAltRemove"]
-8000 text @oremoved [id="knAltMsg"]
-8500 quit
+1500 call krunkerJoin "{kae.GAME_PICK}"
+9000 call showWindow {WINDOW}
+9500 call knAltBackend 1
+9700 clickid knAltUser
+9800 type {OTHER}
+10000 clickid knAltPass
+10100 type {kae.PASSWORD}
+10200 clicksel [onclick*="knAltAdd"]
+11000 text @oadd [id="knAltMsg"]
+11500 clicksel [onclick*="knAltUse"]
+12500 nodes @omodal [id="knV10Login"]
+12600 clickid knV10LoginSubmit
+14000 text @omsg [id="accResp"]
+14500 call knV10LoginClose
+15000 call showWindow {WINDOW}
+15500 clicksel [onclick*="knAltRemove"]
+16000 text @oremoved [id="knAltMsg"]
+16500 quit
 """, brain_url, game_port)
     check("krunker.io: the other login's card opens", match_of(log, "omodal") == 1, str(match_of(log, "omodal")))
     check("krunker.io: its Login sends no sign-in to krunker.io", len(stub.find("POST", "/api/auth/login/username")) == posts,
@@ -527,21 +533,37 @@ def krunker_row(brain_url, game_port, stub):
           f"rows {match_of(log, 'krows')} tags {match_of(log, 'ktag')}")
 
     before = auth_requests(stub)
-    log = run_client("kio_use", f"""0 menu
+    log = run_client("kio_use_box", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltUse"]
+1500 text @kref [id="knAltMsg"]
 2000 nodes @kmodal [id="knV10Login"]
-2100 nodes @kuser [id="accName"][value="{kae.LOGIN}"]
-2200 nodes @kpass [id="accPass"][value="{kae.PASSWORD}"]
 2500 quit
 """, brain_url, game_port)
-    check("Use on the krunker.io row fills the card with its login", match_of(log, "kmodal") == 1 and match_of(log, "kuser") == 1
-          and match_of(log, "kpass") == 1, f"card {match_of(log, 'kmodal')} user {match_of(log, 'kuser')} pass {match_of(log, 'kpass')}")
+    check("Use on a krunker.io row is refused on a Box Office server (no card)", "krunker.io accounts are used in an official krunker.io game."
+          in text_of(log, "kref") and match_of(log, "kmodal") == 0, f"{text_of(log, 'kref')[-120:]} card {match_of(log, 'kmodal')}")
+    check("the refused Use signs nobody in and sends no request to krunker.io",
+          "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
+
+    before = auth_requests(stub)
+    log = run_client("kio_use", f"""0 menu
+1500 call krunkerJoin "{kae.GAME_PICK}"
+9000 call showWindow {WINDOW}
+9500 clicksel [onclick*="knAltUse"]
+10500 nodes @kmodal [id="knV10Login"]
+10600 nodes @kuser [id="accName"][value="{kae.LOGIN}"]
+10700 nodes @kpass [id="accPass"][value="{kae.PASSWORD}"]
+11000 quit
+""", brain_url, game_port)
+    check("in an official game, Use on the krunker.io row fills the card with its login", match_of(log, "kmodal") == 1
+          and match_of(log, "kuser") == 1 and match_of(log, "kpass") == 1,
+          f"card {match_of(log, 'kmodal')} user {match_of(log, 'kuser')} pass {match_of(log, 'kpass')}")
     check("Use on the krunker.io row sends no request to krunker.io and signs nobody in",
           "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
     kio_login(brain_url, game_port, stub)
     kio_other_login(brain_url, game_port, stub)
+    kio_idle(brain_url, game_port, stub)
     log = run_client("kio_remove", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltRemove"]
@@ -551,6 +573,91 @@ def krunker_row(brain_url, game_port, stub):
 """, brain_url, game_port)
     check("Remove forgets the krunker.io row", f"Removed {kae.LOGIN}." in text_of(log, "kremoved") and match_of(log, "krows") == 0,
           f"{text_of(log, 'kremoved')[-120:]} rows {match_of(log, 'krows')}")
+
+
+def kio_idle(brain_url, game_port, stub):
+    """A Box Office server with the krunker.io account still signed in (its session kept from the official game): the
+    menu's Live Streams read sends no krunker.io Bearer, and the krunker.io row is not the active account here (the
+    split: a krunker.io identity is used only in an official krunker.io game)."""
+    start = len(stub.requests)
+    log = run_client("kio_idle", f"""0 menu
+500 call showWindow {WINDOW}
+1000 nodes @kidrows .knAltRow
+1500 nodes @kact .knAltActive
+9000 quit
+""", brain_url, game_port)
+    bearers = [r[1] for r in stub.requests[start:] if r[3].get("authorization")]
+    check("on a Box Office server the signed-in krunker.io account sends no Bearer to krunker.io", not bearers, repr(bearers[:3]))
+    check("the krunker.io row is listed (the window was up)", match_of(log, "kidrows") == 1, str(match_of(log, "kidrows")))
+    check("and the krunker.io row is not the active account on a Box Office server", match_of(log, "kact") == 0, str(match_of(log, "kact")))
+
+
+def split_box_office(brain_url, game_port, stub):
+    """A krunker.io row listed on a Box Office server, in a fresh client home (no saved login name: the card's Email field
+    comes first). The krunker.io login and its password typed into the Box Office card are refused (account_split.h): no
+    sign-in goes to kn_brain or to krunker.io, nobody is signed in, and the row is removed again."""
+    before = auth_requests(stub)
+    log = run_client("split_box", f"""0 menu
+500 call showWindow {WINDOW}
+1000 call knAltBackend 1
+1200 clickid knAltUser
+1300 type {kae.LOGIN}
+1400 clickid knAltPass
+1500 type {kae.PASSWORD}
+1600 clicksel [onclick*="knAltAdd"]
+2500 text @sadd [id="knAltMsg"]
+3000 call loginOrRegister
+3500 clickid accEmail
+3600 type {kae.LOGIN}
+4000 clickid knV10LoginSubmit
+4500 clickid accPass
+4600 type {kae.PASSWORD}
+5000 clickid knV10LoginSubmit
+6000 text @sref [id="accResp"]
+6500 call knV10LoginClose
+7000 call showWindow {WINDOW}
+7500 clicksel [onclick*="knAltRemove"]
+8000 text @sremoved [id="knAltMsg"]
+8500 quit
+""", brain_url, game_port, home=SPLIT_HOME)
+    check("the Box Office card refuses a krunker.io login", "krunker.io account" in text_of(log, "sref"), text_of(log, "sref")[-120:])
+    check("and sends it to no kn_brain login", "[account] logged in as" not in log and "Invalid login" not in text_of(log, "sref"))
+    check("and no sign-in request reaches krunker.io", auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
+    check("the krunker.io row is removed again", f"Removed {kae.LOGIN}." in text_of(log, "sremoved"), text_of(log, "sremoved")[-120:])
+
+
+def split_official(brain_url, game_port, stub):
+    """An official krunker.io game: a Box Office login (a listed krunk.io login) typed into the krunker.io card's Email
+    field with its password is refused (account_split.h): no sign-in request goes to krunker.io, and the row is removed."""
+    before = auth_requests(stub)
+    log = run_client("split_kio", f"""0 menu
+1500 call krunkerJoin "{kae.GAME_PICK}"
+9000 call showWindow {WINDOW}
+9500 clickid knAltUser
+9600 type {NAME}
+9700 clickid knAltPass
+9800 type {PASS}
+9900 clicksel [onclick*="knAltAdd"]
+10500 text @sadd [id="knAltMsg"]
+11000 call loginOrRegister
+11500 clickid accEmail
+11600 type {NAME}
+12000 clickid knV10LoginSubmit
+12500 clickid knV10UsePass
+13000 clickid accPass
+13100 type {PASS}
+13500 clickid knV10LoginSubmit
+14500 text @sref [id="accResp"]
+15000 call knV10LoginClose
+15500 call showWindow {WINDOW}
+16000 clicksel [onclick*="knAltRemove"]
+16500 text @sremoved [id="knAltMsg"]
+17000 quit
+""", brain_url, game_port)
+    check("the krunker.io card refuses a Box Office login", "Box Office account" in text_of(log, "sref"), text_of(log, "sref")[-120:])
+    check("and no sign-in request reaches krunker.io", auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
+    check("and nothing is signed in to krunker.io", "signed in to krunker.io" not in log)
+    check("the Box Office row is removed again", f"Removed {NAME}." in text_of(log, "sremoved"), text_of(log, "sremoved")[-120:])
 
 
 def main():
@@ -601,6 +708,8 @@ def main():
         remove_accounts(brain_url, game_port)
         official_use(brain_url, game_port, stub)
         krunker_row(brain_url, game_port, stub)
+        split_box_office(brain_url, game_port, stub)
+        split_official(brain_url, game_port, stub)
         check("the password is on no client file", not secret_on_disk(PASS) and not secret_on_disk(kae.PASSWORD),
               repr(secret_on_disk(PASS) + secret_on_disk(kae.PASSWORD)))
         leaked = [t for t in (PASS, kae.PASSWORD, kae.REFRESH1, kae.REFRESH2) if secret_in_logs(t)]

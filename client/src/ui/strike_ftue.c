@@ -12,6 +12,7 @@
 //                               the speech bubble eM)
 // The controls tutorial (FRVR nB, the view below: its tap blur, hands, ripple, arrows, reload highlight and
 // "Let's Go!") runs its steps in strike_ftue_controls.c.
+#include <account_split.h> // the krunker.io identity counts only on an official game (account_split.h)
 #include <strike_ui.h>
 #include <strike_ftue.h>
 #include <krunker_account.h>
@@ -30,7 +31,7 @@
 
 static const char *account_key(void) {
     const char *name = krunker_account_name();
-    return krunker_account_signed_in() && name && name[0] ? name : "guest";
+    return account_split_krunker_identity() && name && name[0] ? name : "guest";
 }
 
 static cJSON *load_store(void) {

@@ -36,6 +36,7 @@
 //   - "Forgot Password?" -> the recover card -> Submit continues in the Account window's reset
 //     steps (account_ui.c: code by email, new password) instead of v10's emailed link
 #include <v10_menu.h>
+#include <account_split.h>
 #include <backend_ui.h>
 #include <krunker_account.h>
 #include <html_ui.h>
@@ -306,14 +307,13 @@ static void open_modal(const int reg) {
 
 // The Account Manager's Use (alt_manager_ui.c): the card opens with a listed login's Username and its saved Password
 // in the fields, and that is all: nothing is signed in and no request is sent. The card opens over a signed-in account
-// too, and in an official game. The player presses Login, which signs in to the card's backend (kio_form: krunker.io,
-// else krunk.io's account service).
-int v10_login_fill(const int kio_form, const char *name, const char *pass) {
+// too, and in an official game. The card is the connected server's: its Login signs in to krunker.io in an official
+// game, else to krunk.io's account service (open_card). alt_manager_ui.c opens it only for a row of that side.
+int v10_login_fill(const char *name, const char *pass) {
     if (!v10_menu_page()) return 0;
     i18n_on_change(on_locale, NULL);
     open_card(0);
     if (!L.open) return 0;
-    L.kio_form = kio_form ? 1 : 0;
     L.email = 0; // the Username field holds the saved login
     L.use_pass = 1;
     L.choice = 0;
@@ -467,6 +467,10 @@ static void kio_submit(const char *mail, const char *name, const char *pass) {
         message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
         return;
     }
+    if (account_split_refuses(ident)) { // a Box Office login: this card signs in to krunker.io only (account_split.h)
+        message(I18N("kn.account.splitBoxOffice", "That is a Box Office account. Sign in to it on a Box Office server."));
+        return;
+    }
     if (names_other_kio(ident)) { // the session stays: the card says whose it is, and nothing is sent
         char text[300];
         I18N_F(text, "kn.account.otherSignedIn", "Signed in as {0}. Log out to sign in as {1}.", krunker_account_name(), ident);
@@ -582,7 +586,8 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     // a click inside the popup never reaches the overlay (its markup may be re-rendered by then)
     if (strcmp(name, "knV10LoginClose") != 0) html_ui_stop_propagation();
     if (!strcmp(name, "knV10LoginStay") || !strcmp(name, "knV10LoginCodeStay")) return 1; // (the code form is not dismissable)
-    if (!strcmp(name, "knV10LoginSendCode")) { // _39177: loginEmailCode
+    if (!strcmp(name, "knV10LoginSendCode")) { // _39177: loginEmailCode (a krunker.io card's only: account_split.h)
+        if (!kio()) return 1;
         char mail[256];
         read_value("accEmail", mail, sizeof(mail));
         if (!mail[0]) message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));

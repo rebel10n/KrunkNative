@@ -19,6 +19,7 @@
 #include <backend_ui.h>
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
 #include <alt_manager_ui.h> // the Account Manager's answers to its Add / switch requests
+#include <account_split.h>   // the account split: a krunker.io login is never sent to kn_brain (and the reverse)
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -1984,6 +1985,8 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         read_input("accName", user, sizeof(user));
         read_input("accPass", pass, sizeof(pass));
         read_input("accEmail", mail, sizeof(mail));
+        // a krunker.io login or name typed on this card (account_split.h): the Box Office card never sends it to kn_brain
+        const int split_refused = account_split_refuses(user[0] ? user : mail) || account_split_refuses(mail);
         if (!strcmp(name, "registerAcc")) {
             // Krunker v10 registers by email ("Please enter your email to register."), and the
             // forgot-password flow mails the account's address: a new account needs one
@@ -1994,9 +1997,18 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
                 memset(pass, 0, sizeof(pass));
                 return 1;
             }
+            if (split_refused) {
+                show_acc_resp(I18N("kn.account.splitRegister", "A krunker.io account has this name or email. Choose another for Box Office."));
+                memset(pass, 0, sizeof(pass));
+                return 1;
+            }
             send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
         } else if (names_other_account(user, mail)) { // the session stays: the card says whose it is, nothing is sent
             show_other_signed_in(user[0] ? user : mail);
+            memset(pass, 0, sizeof(pass));
+            return 1;
+        } else if (split_refused) {
+            show_acc_resp(I18N("kn.account.splitKrunkerIo", "That is a krunker.io account. Sign in to it on an official krunker.io game."));
             memset(pass, 0, sizeof(pass));
             return 1;
         } else {
