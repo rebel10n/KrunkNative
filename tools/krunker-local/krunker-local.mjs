@@ -629,6 +629,15 @@ async function join() {
     report.topAt = await evalJS(`(() => { const e = document.elementFromPoint(640, 240); return e ? e.tagName + "#" + e.id + "." + String(e.className).slice(0, 60) : null; })()`);
     report.iframes = await evalJS(`[...document.querySelectorAll("iframe")].map((f) => (f.src || "").slice(0, 80) + " " + JSON.stringify(f.getBoundingClientRect()))`);
     report.visibleButtons = await evalJS(`[...document.querySelectorAll("button,[role=button],.button,a")].filter((e) => e.getBoundingClientRect().width > 0 && getComputedStyle(e).display !== "none").map((e) => e.innerText.trim().slice(0, 30)).filter(Boolean).slice(0, 80)`);
+    report.oneTrustAccepted = await evalJS(ACCEPT_JS);
+    await sleep(4000);
+    report.game = await evalJS(`(() => { const g = window.__kn_game; return { exposed: !!g, keys: g ? Object.keys(g).slice(0, 25) : null, text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 120) }; })()`);
+    await shot("4-after-accept");
+    // the game's own "CLICK TO PLAY" prompt (the spawn after the ENT): the element holding that text, clicked as a user would
+    report.clickToPlay = await evalJS(`(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || "")); const e = hits.find((x) => ![...x.children].some((c) => /click to play/i.test(c.innerText || ""))) || hits[0]; if (!e) return null; e.click(); return e.tagName + "." + String(e.className).slice(0, 40); })()`);
+    await sleep(5000);
+    report.afterPlay = await evalJS(`(() => ({ canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","), text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160), gameExposed: !!window.__kn_game }))()`);
+    await shot("5-after-play");
     await shot("3-final");
     report.bridgeLog = bridgeLines();
     // every host the page asked for: the local ones only (the rest fail with NOTFOUND, see hostRules)

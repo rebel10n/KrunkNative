@@ -17,7 +17,7 @@
 #include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
 #include <html_dom.h> // html_storage_*: the version toggle's old knRuleset entry
-#include <ruleset.h>  // the startup log: Krunker v10.0.2
+#include <ruleset.h>  // the startup log: Krunker v10.0.3
 #include <flavor.h>   // --flavor / KN_FLAVOR: the product flavor (Krunker Strike branding)
 #include <strike_ui.h> // Krunker Strike: FRVR's mobile page ui/strike/ and its touch controls
 #include <strike_ftue.h> // Krunker Strike: the desktop tutorial hooks (the press, the keys and the look)
@@ -976,7 +976,7 @@ int main(int argc, char **argv) {
 
     if (!SCENARIO_ACTIVE()) audio_init();
 
-    // Krunker v10.0.2 is the only version (shared/include/ruleset.h): the version toggle's saved
+    // Krunker v10.0.3 is the only version (shared/include/ruleset.h): the version toggle's saved
     // choice (storage "knRuleset") means nothing any more and is removed
     if (html_storage_get("knRuleset", NULL, 0) >= 0) html_storage_set("knRuleset", NULL);
     printf("[client] Krunker v%s\n", ruleset_current()->version);

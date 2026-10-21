@@ -2,8 +2,8 @@
 """KrunkNative UI import tool.
 
 Run with ``python3 -I tools/ui-import/import.py --ui ui`` from the repository
-root (the Makefile target ``make ui-import`` does exactly that). It imports Krunker v10.0.2, the only
-version (doc/v7/decisions.md), from the live site mirror (``fetch_live_site.py``) into ``ui/``: the
+root (the Makefile target ``make ui-import`` does exactly that). It imports Krunker v10.0.2 (the bundle
+ui/ was built from; the target is v10.0.3, doc/v10/target.md), from the live site mirror (``fetch_live_site.py``) into ``ui/``: the
 menu page (``v10_page.py``, the Svelte mounts reconstructed by ``v10_bundle.js``), its window
 templates (``windows_v10.py``), the hub and editor pages (``v10_hub_editor.py``), Krunker v7.1.4's
 model viewer page (``viewer_page.py``), the fonts and ligature tables below, and every file the pages

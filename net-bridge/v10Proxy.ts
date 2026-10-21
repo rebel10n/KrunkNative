@@ -319,6 +319,8 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   if (session.initSent && type === T.NATIVE_MORE.PING_RESULT) return; // v10's "pir" handler does nothing
   if (session.initSent && type === T.NATIVE_MORE.SOCIAL_V7) return; // a v7 capability notice: the bridge sends chat as CHAT_SEND
   if (session.initSent && type === T.NATIVE_MORE.EXT && payload.length >= 2 && payload.readUInt16LE(0) === T.EXT_ACCOUNT_RIGHTS) return; // KN's rights: no v10 message
+  // KN's account record (level, clan, flags) for the nametags: v10 has no separate message; the add record carries the player
+  if (session.initSent && type === T.NATIVE_MORE.PLAYER_INFO) return;
   if (session.initSent && type === T.NATIVE_MORE.LEADERBOARD) {
     const mapped = T.mapLeaderboard(payload, session.modeIndex);
     if (mapped.stop) return stopAt(session, "LEADERBOARD", mapped.stop);

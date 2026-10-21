@@ -206,7 +206,7 @@ getter points to editor.krunker.io), so editor-only fields cannot be verified fr
 |---|---|---|
 | v7.1.4 maps | yes, unchanged | lights look the same (legacy x PI in v7 = physical x lightIntensityScaling PI in v10, checked on Sandstorm / Kanji, see the lighting note); point / spot falloff is physical; `outputEncoding 0` now means Linear; `correctLights` ignored |
 | v3.1.1 maps | yes (v7 already loaded them; v10 adds no removals) | id 41 builds nothing in all three versions |
-| v10 maps in KN | loaded (shared/src/map.c): prefabs 97 / 98, `dyn`, `mp`, `shadowNB`, `archetypes`, entity instances, `scripts.shared`, `botPaths` and triggers are read (section tables, "implemented"); Krunker v10.0.2 is the only version, so every map is read this way | entities do not run yet (entities package) |
+| v10 maps in KN | loaded (shared/src/map.c): prefabs 97 / 98, `dyn`, `mp`, `shadowNB`, `archetypes`, entity instances, `scripts.shared`, `botPaths` and triggers are read (section tables, "implemented"); Krunker v10.0.3 is the only version KN plays, so every map is read this way | entities do not run yet (entities package) |
 
 ## 9. Port checklist (map side, in order)
 

@@ -256,11 +256,16 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
     }
     char me[24], p[24];
     social_query(s,
+                 /* a staff chat ban (feature_bans 'chat', in force) refuses the line: no row, chf false */
                  SQL(.pg = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
                            "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > now() - interval '1 minute') < 30 "
+                           "AND NOT EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
+                           "AND (expires_at IS NULL OR expires_at > now())) "
                            "RETURNING id",
                      .any = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
-                            "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) < 30"),
+                            "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) < 30 "
+                            "AND NOT EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
+                            "AND (expires_at IS NULL OR expires_at > {now}))"),
                  KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), txt), chat_sent, ctx_new("ict", peer, 0));
 }
 

@@ -227,7 +227,7 @@ static Result run(const GameFlavor flavor) {
 static int approx(const float a, const float b, const float tol) { return fabsf(a - b) <= tol; }
 
 int main(void) {
-    printf("-- base (Krunker v10.0.2)\n");
+    printf("-- base (Krunker v10.0.3)\n");
     const Result base = run(FLAVOR_BASE);
     printf("-- strike (FRVR Krunker Strike 1.37.2)\n");
     const Result st = run(FLAVOR_STRIKE);

@@ -2,7 +2,7 @@
 
 What Krunker Strike plays by, item by item: FRVR's value with where it comes from in the bundle, what
 Krunker Box Office did before this pass and what it does now under `FLAVOR_STRIKE`. The base game
-(`FLAVOR_BASE`, Krunker v10.0.2) is unchanged by every row: each Strike value is reached through the
+(`FLAVOR_BASE`, Krunker v10.0.3) is unchanged by every row: each Strike value is reached through the
 flavor's rules (`shared/include/strike_rules.h` -> `strike_ruleset()`, `flavor_current()->rules`).
 
 Sources. The bundle is `~/src/KrunkerStrike_v1.37.2/public/assets/index-Cz2uYXJQ.js` (minified, build
@@ -13,7 +13,7 @@ that file. Every number below is extracted by `tools/strike/extract_strike.py` i
 by `strike_rules_test` (data <-> tables), `strike_assist_test` (aim assist / auto-fire) and
 `strike_sandbox_test` (the server core playing it, base vs Strike).
 
-Legend: "v10" = Krunker v10.0.2 (what KN plays as the base game). "= main" = already Strike's value
+Legend: "v10" = Krunker v10 (what KN plays as the base game; the target is v10.0.3, the values compared are v10.0.2's). "= main" = already Strike's value
 on main before this pass (8271e3e5 data-driven rules).
 
 ## 1. Inputs

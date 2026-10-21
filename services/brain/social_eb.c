@@ -369,6 +369,9 @@ static void send_checked(SocialSession *s, kn_db_result *res, void *extra) {
     SendCtx *x = extra;
     if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
         eb_error(s, "EB_MSG_INVALID", kn_db_ok(res) ? "The message could not be sent." : acct_db_error(res, "msg:send"));
+    } else if (kn_db_get_int64(res, 0, 2, 0)) {
+        /* a staff chat ban (feature_bans 'chat', in force): inline, so the bubble fails as v10 expects */
+        eb_error(s, "EB_MSG_INVALID", "You are banned from chat.");
     } else if (!kn_db_get_int64(res, 0, 0, 0)) {
         eb_error(s, "EB_NOT_FRIEND", "You can only message friends.");
     } else if (kn_db_get_int64(res, 0, 1, 0) >= EB_RATE_PER_MIN) {
@@ -423,10 +426,14 @@ static void msg_send(SocialSession *s, const cJSON *o) {
     social_query(s,
                  SQL(.pg = "SELECT (EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2) "
                            "AND EXISTS (SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1))::int AS friend__i, "
-                           "(SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > now() - interval '1 minute') AS recent__i",
+                           "(SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > now() - interval '1 minute') AS recent__i, "
+                           "(EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
+                           "AND (expires_at IS NULL OR expires_at > now())))::int AS banned__i",
                      .any = "SELECT CASE WHEN EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2) "
                             "AND EXISTS (SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1) THEN 1 ELSE 0 END AS friend__i, "
-                            "(SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) AS recent__i"),
+                            "(SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) AS recent__i, "
+                            "CASE WHEN EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
+                            "AND (expires_at IS NULL OR expires_at > {now})) THEN 1 ELSE 0 END AS banned__i"),
                  KN_DB_ARGS(social_viewer(s, me), acct_itoa(peer, to)), send_checked, x);
 }
 

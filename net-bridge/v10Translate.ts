@@ -256,6 +256,7 @@ export const NATIVE_MORE = Object.freeze({
   PING_RESULT: 19, // NET_PACKET_PING_RESULT: the smoothed ping, the answer to the bridge's PONG (v10 "pir" is a no-op)
   MODE_STATE: 40, // NET_PACKET_MODE_STATE: the joiner's mode snapshot (NetModeStatePacket)
   OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
+  PLAYER_INFO: 34, // NET_PACKET_PLAYER_INFO: KN's account record (level, clan, flags) for the nametags, after SPAWN
   MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
   CHEAT: 60, // NET_PACKET_CHEAT: one chat command's effect on this player (NetCheatPacket: flag, on)
   CHAT: 9, // NET_PACKET_CHAT: a v3 chat line (NetChatPacket), for the game, server and trigger lines a v7 peer still gets

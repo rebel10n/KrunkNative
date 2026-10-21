@@ -1,5 +1,5 @@
 #include <server_cli.h>
-#include <ruleset.h> // the startup log: Krunker v10.0.2
+#include <ruleset.h> // the startup log: Krunker v10.0.3
 #include <flavor.h>   // --flavor / server.cfg `flavor`: the product flavor (Krunker Strike)
 #include <flavor_rules.h> // the flavor's mode rotation (Krunker Strike)
 #include <server_accounts.h>

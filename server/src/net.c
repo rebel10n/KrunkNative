@@ -829,7 +829,7 @@ static void net_send_init(ClientConnection *client) {
         .major = NET_PROTOCOL_MAJOR,
         .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
         .patch = NET_PROTOCOL_PATCH, // 1.3.1: ENT V8 (WP-C)
-        // Krunker v10.0.2 in the low nibble (wire compatibility), this server's product flavor in
+        // Krunker v10.0.3 in the low nibble (wire compatibility), this server's product flavor in
         // the high nibble (shared.h). A base server's byte stays 3; a client of a different flavor
         // refuses us from this (client_apply_init path).
         .ruleset = NET_WIRE_RULESET_BYTE(NET_INIT_RULESET, flavor_get()),

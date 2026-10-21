@@ -551,7 +551,7 @@ int net_packet_read_init(NetInitPacket *init, const NetPacket *packet) {
 }
 
 NetHelloPacket net_hello_make(void) {
-    // The low nibble is the ruleset mask (v10.0.2); the high nibble is this process's product flavor
+    // The low nibble is the ruleset mask (v10, Krunker v10.0.3); the high nibble is this process's product flavor
     // (shared.h). FLAVOR_BASE is a zero nibble, so a base build's HELLO is byte-identical (0x04).
     return (NetHelloPacket) {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH,
                              NET_WIRE_RULESET_BYTE(NET_HELLO_RULESETS, flavor_get())};

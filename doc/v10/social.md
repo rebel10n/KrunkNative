@@ -40,6 +40,14 @@ authenticated social socket, so both ride on it:
   `chat_messages` rows (the hub chat's), online only like v10 (EB_TARGET_OFFLINE). Online = a
   signed-in social socket on any brain (Redis presence, `hot_presence_online`).
 * gift / report / sales / listings use the existing socket ops (`kr`, `rpt`, `pst`, `uml`).
+* the frame-by-frame check against v10.0.3 (every event-bus frame sent and handled, with the sites
+  on both sides): `doc/v10/social-socket-inventory.md`.
+* chat bans: a `feature_bans` row with feature `chat` in force (revoked_at NULL, expires_at NULL or
+  later) refuses the account's `msg:send` with `EB_MSG_INVALID` ("You are banned from chat."), an
+  inline code, so the bubble fails as v10.0.3 expects, and its social chat line `ict` with `chf` false.
+  No KrunkNative route writes that row: `POST /moderation/chat` is refused over HTTP
+  (`v10_market.c`), so staff set it in the database (the same way as the gift, market and trade bans).
+  The v10.0.3 consumer reads `chat_banned` on an account only for the staff button label.
 
 ## The krunker.io account (official games)
 

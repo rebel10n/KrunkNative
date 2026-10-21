@@ -1,6 +1,6 @@
 # Krunker v10.0.3: changelog and KrunkNative parity
 
-Date of this review: 2026-10-21. Base: Krunker v10.0.2 (`doc/v10/`, the only version KN plays).
+Date of this review: 2026-10-21. Base: Krunker v10.0.2 (`doc/v10/`, the reference KN's values were ported from; the target is v10.0.3, doc/v10/target.md).
 
 ## Sources
 

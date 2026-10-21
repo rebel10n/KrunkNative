@@ -60,7 +60,7 @@
 #define MAX_CAND 512
 #define POLL_WAIT_MAX_S 20
 
-/* the Krunker version ranked matches play, recorded per match and sent in the host config: v10.0.2,
+/* the Krunker version ranked matches play, recorded per match and sent in the host config: v10.0.3,
  * the only version (shared/include/ruleset.h) */
 #define RANKED_RULESET "v10"
 

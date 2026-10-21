@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A v10.0.2 match smoke on server_bin (Krunker v10.0.2, the only version; doc/v10/gameplay.md).
+"""A v10.0.3 match smoke on server_bin (Krunker v10.0.3, the only version; doc/v10/gameplay.md).
 
   python3 -I server/tests/v10_match_e2e.py BUILD_DIR [MODE...]      (run from the repository root)
 
@@ -120,7 +120,7 @@ def run_mode(alias, mode_id, port):
         with open(log_path, errors="replace") as f:
             text = f.read()
         bad = [line for line in text.splitlines() if "AddressSanitizer" in line or "Segmentation" in line or "assert" in line.lower()]
-        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.2" in text, bad[0][:200] if bad else "")
+        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.3" in text, bad[0][:200] if bad else "")
 
 
 def main():

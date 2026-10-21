@@ -110,5 +110,5 @@ WebGPU. It needs the light-unit change (PI factor) and, optionally, rect-area li
 
 ## Related documents
 
-map-format.md, gameplay.md, net.md, ranked.md, clans.md, ui.md (this directory). Krunker v10.0.2 is the
-only version (doc/v7/decisions.md); the version toggle (v3.1.1 / v7.1.4 / v10.0.2) was removed.
+map-format.md, gameplay.md, net.md, ranked.md, clans.md, ui.md (this directory). Krunker v10.0.3 is the
+only version KN plays (doc/v10/target.md); the specs here are the v10.0.2 bundle's; the version toggle (v3.1.1 / v7.1.4 / v10.0.2) was removed.
