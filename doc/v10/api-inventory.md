@@ -92,7 +92,7 @@ After this change (the v10 API completion, branch api-full-http): implemented 77
 | 69 | gapi | POST | `/discord/join` | discord.joinGuild (26452) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no Discord link) |
 | 70 | gapi | POST | `/discord/unlink` | discord.unlink (26457) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no Discord link) |
 | 71 | gapi | GET | `/skins` | skins.list (26474) | missing: not_found fallback (public_routes.c:677) | empty | none (v10_catalog.c: no custom-skin table; studios.c, db_studios.c) |
-| 72 | gapi | GET | `/skins/{id}` | skins.get (26479) | missing: not_found fallback (public_routes.c:677) | not found | none (v10_catalog.c: no custom-skin id) |
+| 72 | gapi | GET | `/skins/{id}` | skins.get (26479) | missing: not_found fallback (public_routes.c:677) | not found (404 NOT_FOUND: the consumer reads data.skin, a Skin Manager record; KN has none (row 71), and a store skin index in assets/skins.json is not one) | v10_catalog.c h_skin_not_found (kept; services/brain/tests/v10_api_catalog_test.py [72]) |
 | 73 | gapi | POST | `/skins` | skins.create (26484) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
 | 74 | gapi | PUT | `/skins/{id}` | skins.update (26490) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
 | 75 | gapi | DELETE | `/skins/{id}` | skins.delete (26496) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
