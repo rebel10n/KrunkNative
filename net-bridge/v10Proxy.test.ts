@@ -689,9 +689,16 @@ async function main(): Promise<void> {
   assert.deepStrictEqual((kMsg.args[0] as unknown[][])[0], [9, 1.26, 2, 3, 57, 29, 0.25, 1, 1, 2, 1, 0, 42]);
   assert.strictEqual(kMsg.args[1], 10);
 
-  // a packet with no translation yet (CHEAT, 60) stops the translation
-  native.write(nativeFrame(60, Buffer.alloc(4)));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("native 60"), "stop at 60");
+  // CHEAT (60): one chat command's flag and on / off is the v10 label's one argument (v10.js 220244-220264)
+  for (const [flag, label, on] of [[0, "noc", 1], [1, "unl", 1], [2, "fh", 1], [7, "frz", 1], [1, "unl", 0]] as [number, string, number][]) {
+    const before = clientMessages.filter((m) => m.label === label).length;
+    native.write(nativeFrame(60, Buffer.from([flag, on])));
+    const msg = await waitFor(() => clientMessages.filter((m) => m.label === label)[before], `CHEAT ${flag} -> ${label}`);
+    assert.deepStrictEqual(msg.args, [on === 1], `CHEAT ${flag} -> ${label} ${on}`);
+  }
+  // borders (3) has no v10 label: it still stops the translation, named CHEAT (NATIVE_NAMES)
+  native.write(nativeFrame(60, Buffer.from([3, 1])));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("CHEAT"), "stop at CHEAT borders");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -722,7 +729,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("native 60"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("CHEAT"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 

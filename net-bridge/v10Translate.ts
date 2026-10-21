@@ -22,6 +22,8 @@
 //   native TIMER (15)     -> t (seconds, end)
 //   native MODE_STATE (40) with no flag and no objective -> ts (both teams), lv, lock, gmsg
 //   native OBJECT_STATE (100) -> do, ro, gte, bnk, mo, mf (one per object change)
+//   native CHEAT (60) -> noc, unl, fh, frz (one chat command's flag, on / off); borders, forcecol, third person and
+//                           the physics gun have no v10 label and stay untranslated (the stop names them)
 // After the init (the v10 server sends these in this order on a live join, see the report):
 //   native GLOBAL_VALUE (121) -> gv;  PLAYER_SOUND (125) -> asnd / rsnd;  TIMER (15) -> t
 //   native MODE_STATE (40), no objective and no move lock -> ts, ufi, ufl (flags in play), lv, lock, gmsg
@@ -67,6 +69,10 @@ export const V10_IN = Object.freeze({
   UPDATE_GLOBAL_VALUE: "gv",
   ADD_PLAYER_SOUND: "asnd",
   REMOVE_PLAYER_SOUND: "rsnd",
+  NOCLIP: "noc", // v10.js 220244: one on/off argument, the "commands.noclip" message is the client's own
+  UNLIMITED_AMMO: "unl", // v10.js 220262
+  FORCE_HIDE: "fh", // v10.js 220264
+  FROZEN: "frz", // v10.js 220250
   UPDATE_TIMER: "t",
   GAME_STATE_CHANGED: "gsc",
   ADD_PLAYERS: "0",
@@ -239,6 +245,7 @@ export const NATIVE_MORE = Object.freeze({
   MODE_STATE: 40, // NET_PACKET_MODE_STATE: the joiner's mode snapshot (NetModeStatePacket)
   OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
   MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
+  CHEAT: 60, // NET_PACKET_CHEAT: one chat command's effect on this player (NetCheatPacket: flag, on)
   EXT: 254,
 } as const);
 export const EXT_GAME_STATE = 0x0901; // NET_EXT_GAME_STATE, v10 "gsc"
@@ -319,6 +326,21 @@ export function parsePlayerSound(p: Buffer): { uid: number; add: boolean; force:
 export function parseTimer(p: Buffer): { seconds: number; end: boolean } | null {
   if (p.length !== 5) return null;
   return { seconds: p.readInt32LE(0), end: p[4] !== 0 };
+}
+
+// NetCheatPacket: uint8 flag (NetCheatFlag, shared/include/shared.h), uint8 on. Each v10 handler below takes the
+// on / off value as its one argument (v10.js 220244 noc, 220262 unl, 220264 fh, 220250 frz) and prints its own line.
+// The other flags (borders 3, forcecol 4, third person 5, held 6) have no v10 label: they are left out, so the
+// stop names them.
+export const CHEAT_LABELS: Readonly<Record<number, string>> = Object.freeze({
+  0: V10_IN.NOCLIP,
+  1: V10_IN.UNLIMITED_AMMO,
+  2: V10_IN.FORCE_HIDE,
+  7: V10_IN.FROZEN,
+});
+export function parseCheat(p: Buffer): { flag: number; on: boolean } | null {
+  if (p.length !== 2 || p[1] > 1) return null;
+  return { flag: p[0], on: p[1] !== 0 };
 }
 
 // ---- MODE_STATE and OBJECT_STATE: the mode snapshot and the object list a joiner gets after the INIT.

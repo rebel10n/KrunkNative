@@ -57,6 +57,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.GLOBAL_VALUE]: "GLOBAL_VALUE",
   [T.NATIVE_MORE.PLAYER_SOUND]: "PLAYER_SOUND",
   [T.NATIVE_MORE.TIMER]: "TIMER",
+  [T.NATIVE_MORE.CHEAT]: "CHEAT",
   [T.NATIVE_MORE.MODE_STATE]: "MODE_STATE",
   [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
   [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
@@ -388,6 +389,15 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     // (v10.js 190131, 190145; the server's own broadcasts have these arguments).
     if (!sound.add) sendWs(session, T.V10_IN.REMOVE_PLAYER_SOUND, sound.uid, sound.name, sound.force);
     else sendWs(session, T.V10_IN.ADD_PLAYER_SOUND, sound.uid, sound.name, { loop: sound.loop, vol: sound.volume, rate: sound.rate });
+    return;
+  }
+  // CHEAT: one chat command's flag, on or off: the v10 handler for that label takes the value (v10.js 220244-220264)
+  if (session.initSent && type === T.NATIVE_MORE.CHEAT) {
+    const cheat = T.parseCheat(payload);
+    if (!cheat) return stopAt(session, "CHEAT", "malformed");
+    const label = T.CHEAT_LABELS[cheat.flag];
+    if (!label) return stopAt(session, "CHEAT", `flag ${cheat.flag} has no v10 label`);
+    sendWs(session, label, cheat.on);
     return;
   }
   // after the init, the server repeats the config for a peer whose HELLO came after its INIT
