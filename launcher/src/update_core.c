@@ -76,6 +76,12 @@ int kn_update_same_commit(const char *a, const char *b) {
     return 1;
 }
 
+void kn_update_build_label(char *out, const size_t n, const KnUpdateBuild *b) {
+    if (!n) return;
+    snprintf(out, n, "%s", b->commit[0] ? b->commit : "unknown");
+    if (b->commit[0] && strlen(out) > 7) out[7] = 0;
+}
+
 KnUpdateState kn_update_compare(const KnUpdateBuild *mine, const KnUpdateBuild *latest, const int64_t grace_s) {
     if (!latest || !latest->commit[0]) return KN_UPDATE_CURRENT; // nothing published
     if (kn_update_same_commit(mine->commit, latest->commit)) return KN_UPDATE_CURRENT;

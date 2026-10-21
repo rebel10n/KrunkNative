@@ -39,9 +39,9 @@ android {
         minSdk = 24
         targetSdk = 35
         // CI: versionCode = commit time in minutes (monotonic, so every build installs over the
-        // previous one), versionName = git describe
+        // previous one), versionName = Krunker's version (the changelog's newest update)
         versionCode = prop("krunknative.versionCode", "1").toInt()
-        versionName = prop("krunknative.versionName", "7.1.4-kn")
+        versionName = prop("krunknative.versionName", "10.0.2")
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
         buildConfigField("String", "WS_URL", quoted(prop("krunknative.wsUrl")))
         buildConfigField("String", "ASSET_BASE_URL", quoted(prop("krunknative.assetBaseUrl")))

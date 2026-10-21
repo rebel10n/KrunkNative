@@ -116,6 +116,9 @@ int kn_update_parse_build(const cJSON *o, KnUpdateBuild *out);
 int kn_update_parse_protocol(const char *s, int *major, int *minor);
 // 1 when both name the same commit (hex prefix of at least 7 digits, case-insensitive).
 int kn_update_same_commit(const char *a, const char *b);
+// The player-facing label of a build: its commit, 7 hex digits ("unknown" without one). Builds are
+// compared by commit (kn_update_compare); a describe string is never a label.
+void kn_update_build_label(char *out, size_t n, const KnUpdateBuild *b);
 
 typedef enum {
     KN_UPDATE_CURRENT = 0,   // same commit, unknown latest, or this build is newer

@@ -238,6 +238,17 @@ static void test_compare(void) {
     KnUpdateBuild none = {.proto_major = -1};
     CHECK(kn_update_compare(&mine, &none, grace) == KN_UPDATE_CURRENT);
     CHECK(kn_update_same_commit("ABCDEF1", "abcdef1234"));
+    // builds are compared by commit: the describe (a version string) never decides, and the player
+    // sees the commit's 7 digits, never a describe ("This client: 400f007")
+    KnUpdateBuild labelled = {.describe = "v10.0.3", .commit = "400f00792beede7b86158f1449384af407ac4783", .commit_time = 1000000,
+                              .proto_major = 1, .proto_minor = 3};
+    KnUpdateBuild same = {.describe = "v1.0.0-935-g400f007", .commit = "400f007", .commit_time = 1000000, .proto_major = 1, .proto_minor = 3};
+    CHECK(kn_update_compare(&same, &labelled, grace) == KN_UPDATE_CURRENT);
+    char label[16];
+    kn_update_build_label(label, sizeof(label), &labelled);
+    CHECK_STR(label, "400f007");
+    kn_update_build_label(label, sizeof(label), &none);
+    CHECK_STR(label, "unknown");
     CHECK(!kn_update_same_commit("abcdef", "abcdef1234")); // < 7 digits
     CHECK(!kn_update_same_commit("abcdef12", "abcdef13"));
     int ma, mi;

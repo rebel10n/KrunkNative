@@ -26,7 +26,7 @@
 #   --launcher <file>  the launcher (default <bin dir>/BoxOffice or BoxOffice.exe)
 #   --assets <dir>     full package: the whole game content as assets/ too (the name gets -full)
 #   --channel <name>   kn-install.json channel (default latest; client-v* tags: the tag)
-# Env: KN_DESCRIBE KN_COMMIT KN_COMMIT_TIME KN_BUILD_TIME KN_PROTOCOL (tools/release/version-meta.sh)
+# Env: KN_COMMIT KN_COMMIT_TIME KN_BUILD_TIME KN_PROTOCOL (tools/release/version-meta.sh); the version is Krunker's (ui/windows/kn-versions.txt)
 set -euo pipefail
 
 usage() { sed -n '2,36p' "$0" >&2; exit 2; }
@@ -78,7 +78,11 @@ if "$tar_bin" --version 2> /dev/null | grep -q 'GNU tar'; then
     [ -n "${KN_COMMIT_TIME:-}" ] && tar_flags+=("--mtime=@$KN_COMMIT_TIME")
 fi
 
-describe="${KN_DESCRIBE:-unknown}"
+# the player-visible version: Krunker's (the changelog's newest update), as version-meta.sh computes it
+krunker_version=unknown
+while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*==\ UPDATE\ ([0-9][0-9.]*)\ == ]]; then krunker_version="${BASH_REMATCH[1]}"; break; fi
+done < "$repo/ui/windows/kn-versions.txt"
 stage="$work/package"   # the archive's top level
 rt="$stage/runtime"     # everything but the launcher
 mkdir -p "$rt"
@@ -210,7 +214,7 @@ Unpack the zip into a folder of its own." ;;
         echo "Krunker Box Office client ($platform)"
         echo "========================================="
         echo
-        echo "Version:   $describe"
+        echo "Version:   $krunker_version"
         echo "Commit:    ${KN_COMMIT:-unknown}"
         echo "Built:     ${KN_BUILD_TIME:-unknown}"
         echo "Protocol:  ${KN_PROTOCOL:-unknown} (NET_PROTOCOL major.minor)"
@@ -334,7 +338,7 @@ if [ "$os" = macos ]; then
         iconutil -c icns "$iconset" -o "$app/Contents/Resources/BoxOffice.icns"
     fi
     minos="$(otool -l "$rt/$client" | awk '$1 == "minos" { print $2; exit }')"
-    short="$(echo "$describe" | sed -n 's/^[a-z-]*v\([0-9][0-9.]*\).*/\1/p')"
+    short="$krunker_version"
     cat > "$app/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -348,7 +352,7 @@ if [ "$os" = macos ]; then
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${short:-0.0.0}</string>
   <key>CFBundleVersion</key><string>${KN_COMMIT_TIME:-0}</string>
-  <key>CFBundleGetInfoString</key><string>Krunker Box Office $describe</string>
+  <key>CFBundleGetInfoString</key><string>Krunker Box Office $krunker_version</string>
   <key>LSMinimumSystemVersion</key><string>${minos:-11.0}</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.action-games</string>
   <key>NSHighResolutionCapable</key><true/>

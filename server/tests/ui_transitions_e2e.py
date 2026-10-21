@@ -1483,7 +1483,7 @@ def sc_local_build():
             6500 con update check
             7500 quit
         """, env_extra={"KRUNKNATIVE_UPDATES_URL": f"http://127.0.0.1:{port}/latest.json", "KRUNKNATIVE_LOCAL_BUILD": "1"})
-        checked = any(line.startswith("[update] latest v9.9.9") for line in lines)
+        checked = any(line.startswith("[update] latest feedbee") for line in lines) # the manifest commit's 7 digits, never its describe
         record("local-build", "menu", "update check ran", "yes", "yes" if checked else "no", checked)
         local = any("[update] this build is local" in line for line in lines)
         record("local-build", "menu", "log says local", "yes", "yes" if local else "no", local)

@@ -14,7 +14,7 @@
 #define KN_PRODUCT_NAME "Krunker Box Office"
 
 typedef struct {
-    const char *describe;     // "v1.0.0-51-g6f0cea9", "6f0cea9-dirty", "unknown"
+    const char *describe;     // git describe: internal only (the kn-build metadata, the updates server); never shown
     const char *commit;       // 12 hex digits, "" unknown
     int64_t commit_time;      // committer date of commit, unix seconds (0 unknown)
     int dirty;                // built from a tree with local changes
@@ -25,7 +25,11 @@ typedef struct {
 } KnBuildInfo;
 
 const KnBuildInfo *kn_build_info(void);
-// "v1.0.0-51-g6f0cea9 (6f0cea9e1234, built 2026-10-12T05:00:00Z, protocol 1.3)"
+// The build's identity for logs and --version: "6f0cea9e1234 (built 2026-10-12T05:00:00Z, protocol 1.3)".
+// Never a version: the player's version is Krunker's (client/src/ui/v10_news.c, v10_news_version).
 const char *kn_build_string(void);
+// The commit the build came from, 7 hex digits (the player-facing identity, e.g. "This client: 6f0cea9"),
+// "unknown" without one.
+const char *kn_build_commit_short(void);
 // "1.3"
 const char *kn_build_protocol(void);

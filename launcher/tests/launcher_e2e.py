@@ -292,10 +292,10 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     check(found >= 0 and "(Update now: via the launcher)" in out, "7a: the client finds the newer build (mid-match)")
     check(found >= 0 and restart > found and "the match ended, restarting" in out[found:restart] and len(st) >= 2 and st[1] == "0",
           "7a: no restart while playing (still in game after the check), only once the match ended")
-    check(f"updated to v9.9.9-1-g{new12[:7]}" in out and read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0],
+    check(f"updated to {new12}" in out and read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0],
           "7a: the launcher installed the update (sha256 + staged client check) after the restart")
     after = out[restart:] if restart >= 0 else ""
-    check(f"({new12}," in after and re.search(r"\[update\] latest \S+ \(\S+\): current", after) is not None,
+    check(f"{new12}, built" in after and re.search(r"\[update\] latest \S+: current", after) is not None,
           "7a: the new client came back (the patched commit, up to date)")
     check(re.search(r"\[input_script\] state t=\d+ slot=\S+ weapon=.+? menu=0", after.split("starting ")[-1]) is not None,
           "7a: the new client is back in the offline game (the same command line)")
@@ -305,7 +305,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     inst, out = run_auto("auto-menu", ["--offline"], "0 menu\n40000 quit\n", "0 menu\n6000 quit\n")
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("in the menu, restarting" in out and "[update] restarting through" in out, "7b: in the menu the newer build restarts the client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0] and f"({new12}," in out.split("restarting through")[-1],
+    check(read(os.path.join(inst, "runtime", "client_bin")) == pkg_files["runtime/client_bin"][0] and f"{new12}, built" in out.split("restarting through")[-1],
           "7b: the update is installed and the new client runs")
     check(out.count("restarting through") == 1, "7b: one restart (the new client is current)")
 
@@ -316,7 +316,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     write(pkg, good)
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("corrupt" in out and "the update failed: starting the installed client" in out, "7c: the launcher refused it and started the installed client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) != pkg_files["runtime/client_bin"][0] and f"({old12}," in out.split("starting the installed client")[-1],
+    check(read(os.path.join(inst, "runtime", "client_bin")) != pkg_files["runtime/client_bin"][0] and f"{old12}, built" in out.split("starting the installed client")[-1],
           "7c: the install is unchanged, the old client runs again")
     check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7c: no second restart for that build (no loop)")
 
@@ -334,7 +334,7 @@ def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_buil
     print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
     check("does not start here" in out and "the update failed: starting the installed client" in out,
           "7d: the launcher's staged client check refused it and started the installed client")
-    check(read(os.path.join(inst, "runtime", "client_bin")) == read(client_bin) and f"({old12}," in out.split("starting the installed client")[-1],
+    check(read(os.path.join(inst, "runtime", "client_bin")) == read(client_bin) and f"{old12}, built" in out.split("starting the installed client")[-1],
           "7d: the install is unchanged (the staged client never replaced it), the old client runs again")
     check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7d: no second restart for that build (no loop)")
 
@@ -356,7 +356,7 @@ def main():
     print(f"launcher e2e in {tmp}")
 
     _, ver = run([client_bin, "--version"])
-    m = re.search(r"\(([0-9a-f]{12}), built", ver)
+    m = re.search(r"KrunkNative client\) ([0-9a-f]{12}), built", ver)
     if not m:
         sys.exit(f"cannot read the commit from: {ver}")
     old12 = m.group(1)
@@ -469,7 +469,7 @@ def main():
               and read(os.path.join(assets, "css", "fonts", "copy.ttf")) == b"FONT", "stale + missing content fetched (two paths, one object)")
         # FONT once: two paths with one content are downloaded once and copied (assets_sync.c)
         check(objects_fetched(paths) == sorted([sha256(b"B1"), sha256(b"FONT")]), "only the needed objects were requested, each once")
-        check(f"({new12}," in out, "the launcher started the new client (it reports the patched commit)")
+        check(f"{new12}, built" in out, "the launcher started the new client (it reports the patched commit)")
         check(not os.path.exists(os.path.join(inst, ".kn-update")), "no update state left behind")
         state = json.loads(read(os.path.join(assets, ".kn-assets.json")))
         check(state["version"] == manifest["assets"]["version"], "content state recorded")
@@ -529,7 +529,7 @@ def main():
         check(not os.path.exists(os.path.join(data_assets, "textures", "a.png")), "default run: the stale non-menu copy is removed, left to the game")
         state_paths = {f[0] for f in json.loads(read(os.path.join(data_assets, ".kn-assets.json")))["files"]}
         check("textures/a.png" in state_paths, "default run: the state still lists it (the whole list)")
-        check(f"({old12}," in out, "the installed (old) client started")
+        check(f"{old12}, built" in out, "the installed (old) client started")
         os.chmod(deb, 0o755)
 
         # ------------------------------------------------------------ 5 corrupt package

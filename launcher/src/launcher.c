@@ -300,7 +300,9 @@ static int update_executables(const KnUpdateManifest *m) {
         fail(1, L.in.state_dir, "Cannot write to the install directory");
         return 0;
     }
-    status(0, NULL, "Downloading the update (%s)", m->build.describe);
+    char label[16];
+    kn_update_build_label(label, sizeof(label), &m->build);
+    status(0, NULL, "Downloading the update (%s)", label);
     PkgSink s = {.f = kn_fs_fopen(pkg, "wb"), .total = p->update.size};
     if (!s.f) {
         fail(1, pkg, "Cannot write the update");
@@ -347,7 +349,7 @@ static int update_executables(const KnUpdateManifest *m) {
     }
     kn_install_cleanup(&L.in);
     L.updated = 1;
-    printf("[launcher] updated to %s (%.12s)\n", m->build.describe, m->build.commit);
+    printf("[launcher] updated to %.12s\n", m->build.commit);
     return 1;
 }
 
@@ -476,9 +478,8 @@ static void *work(void *arg) {
     self_build(&mine);
     if (L.manifest_ok) {
         L.state = kn_update_compare(&mine, &m.build, m.grace_s);
-        snprintf(L.latest, sizeof(L.latest), "%s", m.build.describe);
-        printf("[launcher] this build %s (%s), latest %s (%.12s): %s\n", mine.describe, mine.commit, m.build.describe,
-               m.build.commit, kn_update_state_name(L.state));
+        kn_update_build_label(L.latest, sizeof(L.latest), &m.build);
+        printf("[launcher] this build %.12s, latest %.12s: %s\n", mine.commit, m.build.commit, kn_update_state_name(L.state));
     }
     if (L.check_only) {
         L.ok = 1;
@@ -489,7 +490,7 @@ static void *work(void *arg) {
             status(-1, NULL, "Development build: not updating");
         } else if (!kn_install_self_updatable(&L.in.marker)) {
             status(-1, kn_update_download_url(&m, L.in.platform, L.in.marker.package),
-                   "Update %s available: update " KN_PRODUCT_NAME " with your package manager", m.build.describe);
+                   "Update %s available: update " KN_PRODUCT_NAME " with your package manager", L.latest);
         } else if (!L.in.root_writable) {
             status(-1, L.in.root, "Update available, but the install directory is read-only");
         } else if (!update_executables(&m)) {
@@ -663,7 +664,7 @@ int main(int argc, char **argv) {
     printf(KN_PRODUCT_NAME " launcher %s\n", kn_build_string());
     if (L.wait_pid > 0) wait_for_pid(L.wait_pid);
     char ua[128];
-    snprintf(ua, sizeof(ua), "KrunkNative-launcher/%s (%s)", kn_build_info()->describe, kn_update_platform_default());
+    snprintf(ua, sizeof(ua), "KrunkNative-launcher/%s (%s)", kn_build_commit_short(), kn_update_platform_default());
     kn_http_set_user_agent(ua);
 
     char ui_dir[KN_PATH_MAX] = "";

@@ -14,7 +14,9 @@
 #   finder's outdated check (doc/backend.md 8.12) sees the edges as current. The binaries report
 #   that commit (server_bin --version, KNINFO).
 # Prints GITHUB_OUTPUT lines:
-#   describe     git describe (server-v* / vN tags, never v3.1.1-parity), e.g. v1.0.0-51-g6f0cea9
+#   krunker_version  Krunker's version the players see: the newest "== UPDATE x ==" of ui/windows/kn-versions.txt
+#                at that commit (v10_news_version, client/src/ui/v10_news.c); "unknown" when there is none
+#   describe     git describe (server-v* / vN tags, never v3.1.1-parity), e.g. v1.0.0-51-g6f0cea9: internal
 #   commit       full sha;  commit12  first 12 hex digits
 #   commit_time  committer date of the commit, unix seconds
 #   build_time   now (or SOURCE_DATE_EPOCH), ISO-8601 UTC
@@ -42,6 +44,12 @@ if [ "$server" = 1 ]; then
     commit="$source_commit"
 fi
 describe="$(git describe --tags --match 'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always "$commit")"
+# the player-visible version is Krunker's (the changelog's newest update), never describe
+krunker_version=unknown
+kn_versions="$(git show "$commit:ui/windows/kn-versions.txt" 2> /dev/null || true)"
+while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*==\ UPDATE\ ([0-9][0-9.]*)\ == ]]; then krunker_version="${BASH_REMATCH[1]}"; break; fi
+done <<< "$kn_versions"
 commit_time="$(git log -1 --format=%ct "$commit")"
 if [ "$server" = 1 ] && [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
     SOURCE_DATE_EPOCH="$commit_time" # reproducible: the same inputs, the same binary
@@ -58,6 +66,7 @@ minor="$(awk '$1 == "#define" && $2 == "NET_PROTOCOL_MINOR" { print $3 }' <<< "$
 # describe is [A-Za-z0-9.-] (tags we match + hex), safe unquoted in -D and JSON
 [[ "$describe" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "version-meta.sh: unexpected describe '$describe'" >&2; exit 1; }
 
+echo "krunker_version=$krunker_version"
 echo "describe=$describe"
 echo "commit=$commit"
 echo "commit12=${commit:0:12}"

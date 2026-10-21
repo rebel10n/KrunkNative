@@ -155,7 +155,7 @@ void update_ui_tick(Client *client) {
         g_web.checked = 1;
         if (newer && !g_web.newer && !g_web.local) {
             g_web.newer = 1;
-            render_box(1, 0, g_web.live, kn_build_info()->describe, 1);
+            render_box(1, 0, g_web.live, kn_build_commit_short(), 1);
             game_reload_update_available(g_web.live); // the automatic restart (Settings > Client)
         }
         return;
@@ -215,7 +215,7 @@ void update_ui_console(const int argc, char **argv) {
         return;
     }
     if (!g_web.enabled) ui_console_printf(NULL, "The web client is always the latest version (no build stamp on this page).");
-    else ui_console_printf(NULL, "this page: %s | live: %s | %s", kn_build_info()->describe, g_web.live[0] ? g_web.live : "(not checked yet)",
+    else ui_console_printf(NULL, "this page: %s | live: %s | %s", kn_build_string(), g_web.live[0] ? g_web.live : "(not checked yet)",
                            g_web.newer ? "a newer page is deployed: `update now` reloads" : "current");
 }
 
@@ -319,7 +319,7 @@ static void *check_thread(void *arg) {
     snprintf(url, sizeof(url), "%s", g_up.url);
     pthread_mutex_unlock(&g_up.lock);
     char ua[128];
-    snprintf(ua, sizeof(ua), "KrunkNative/%s (%s)", kn_build_info()->describe, kn_update_platform_default());
+    snprintf(ua, sizeof(ua), "KrunkNative/%s (%s)", kn_build_commit_short(), kn_update_platform_default());
     kn_http_set_user_agent(ua);
     KnHttp *http = kn_http_new(10000);
     char *body = NULL, err[256] = "";
@@ -335,7 +335,7 @@ static void *check_thread(void *arg) {
         KnUpdateBuild mine;
         self_build(&mine);
         g_up.state = g_up.local ? KN_UPDATE_CURRENT : kn_update_compare(&mine, &m.build, m.grace_s);
-        snprintf(g_up.latest, sizeof(g_up.latest), "%s", m.build.describe);
+        kn_update_build_label(g_up.latest, sizeof(g_up.latest), &m.build);
         snprintf(g_up.latest_commit, sizeof(g_up.latest_commit), "%s", m.build.commit);
         const char *platform = g_up.has_marker && g_up.marker.platform[0] ? g_up.marker.platform : kn_update_platform_default();
         const char *kind = g_up.has_marker && g_up.marker.package[0] && strcmp(g_up.marker.package, "app") != 0 ? g_up.marker.package : NULL;
@@ -382,7 +382,7 @@ static void render(void) {
         listening = 1;
         i18n_on_change(render_on_locale, NULL);
     }
-    render_box(g_up.ok && g_up.state != KN_UPDATE_CURRENT, g_up.state == KN_UPDATE_OUTDATED, g_up.latest, kn_build_info()->describe,
+    render_box(g_up.ok && g_up.state != KN_UPDATE_CURRENT, g_up.state == KN_UPDATE_OUTDATED, g_up.latest, kn_build_commit_short(),
                can_update_now());
 }
 
@@ -392,11 +392,10 @@ static void report_console(void) {
         return;
     }
     if (g_up.local) {
-        ui_console_printf(NULL, "this client: %s | latest: %s (%.12s) | a local build (not published): no update", kn_build_string(),
-                          g_up.latest, g_up.latest_commit);
+        ui_console_printf(NULL, "this client: %s | latest: %s | a local build (not published): no update", kn_build_string(), g_up.latest);
         return;
     }
-    ui_console_printf(NULL, "this client: %s | latest: %s (%.12s) | %s", kn_build_string(), g_up.latest, g_up.latest_commit,
+    ui_console_printf(NULL, "this client: %s | latest: %s | %s", kn_build_string(), g_up.latest,
                       g_up.state == KN_UPDATE_OUTDATED ? "OUTDATED" : g_up.state == KN_UPDATE_AVAILABLE ? "update available" : "up to date");
     if (g_up.state != KN_UPDATE_CURRENT)
         ui_console_printf(NULL, can_update_now() ? "run `update now` to update through the launcher, or `update download`"
@@ -420,7 +419,7 @@ void update_ui_tick(Client *client) {
     g_up.fresh = 0;
     pthread_mutex_unlock(&g_up.lock);
     if (fresh) {
-        if (g_up.ok) printf("[update] latest %s (%.12s): %s%s\n", g_up.latest, g_up.latest_commit,
+        if (g_up.ok) printf("[update] latest %s: %s%s\n", g_up.latest,
                             g_up.local ? "local build, no update" : kn_update_state_name(g_up.state),
                             g_up.state != KN_UPDATE_CURRENT && can_update_now() ? " (Update now: via the launcher)" : "");
         else printf("[update] check failed: %s\n", g_up.error);
@@ -610,7 +609,7 @@ void update_ui_scenario(const cJSON *update) {
     const char *latest = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(update, "latest"));
     g_up.ok = 1;
     g_up.state = state && !strcmp(state, "available") ? KN_UPDATE_AVAILABLE : KN_UPDATE_OUTDATED;
-    snprintf(g_up.latest, sizeof(g_up.latest), "%s", latest ? latest : "v1.0.0");
+    snprintf(g_up.latest, sizeof(g_up.latest), "%s", latest ? latest : "unknown");
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(update, "launcher"))) {
         snprintf(g_up.launcher, sizeof(g_up.launcher), "krunknative");
         g_up.has_marker = 1;

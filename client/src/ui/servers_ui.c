@@ -4863,8 +4863,6 @@ int servers_ui_entry_incompatible(const cJSON *entry) {
 // brain never matches it) wins over "Outdated" (older than the latest server release).
 char *servers_ui_entry_badge_html(const cJSON *entry) {
     const cJSON *f = entry_fields(entry);
-    const char *version = cJSON_GetStringValue(cJSON_GetObjectItem(f, "version"));
-    if (!version || !version[0]) version = cJSON_GetStringValue(cJSON_GetObjectItem(f, "build"));
     const char *proto = cJSON_GetStringValue(cJSON_GetObjectItem(f, "protocol"));
     if (!proto || !proto[0]) proto = cJSON_GetStringValue(cJSON_GetObjectItem(f, "proto"));
     StrBuf sb = {0};
@@ -4879,11 +4877,6 @@ char *servers_ui_entry_badge_html(const cJSON *entry) {
     } else if (servers_ui_entry_outdated(entry)) {
         sb_append(&sb, " <span class='serverBadge serverOutdated' style='color:#fff;background:#fb8c00;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='");
         sb_append_esc(&sb, I18N("kn.servers.outdatedTitle", "Older than the latest server release"));
-        if (version && version[0]) {
-            char runs[128];
-            I18N_F(runs, "kn.servers.outdatedRuns", " (runs {0})", version);
-            sb_append_esc(&sb, runs);
-        }
         sb_append(&sb, "'>");
         sb_append_esc(&sb, I18N("kn.servers.outdated", "Outdated"));
         sb_append(&sb, "</span>");

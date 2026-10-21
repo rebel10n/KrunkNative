@@ -81,7 +81,7 @@ commit it: an update signed with another key does not install over the old app) 
 `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`; `make android-release` builds the same APK locally.
 Gradle reads the key from `KN_ANDROID_KEYSTORE`, `KN_ANDROID_KEYSTORE_PASSWORD`,
 `KN_ANDROID_KEY_ALIAS`, `KN_ANDROID_KEY_PASSWORD` (none: an unsigned release APK);
-`-Pkrunknative.versionCode` / `versionName` (CI: commit time in minutes / git describe).
+`-Pkrunknative.versionCode` / `versionName` (CI: commit time in minutes / Krunker's version).
 
 Toolchain: JDK 17 or 21, Android SDK with `platforms;android-35` and
 `build-tools;35.0.0` (`sdkmanager`), Gradle 8.11.1 through the wrapper, AGP 8.7.3.

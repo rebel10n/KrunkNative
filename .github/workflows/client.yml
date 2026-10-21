@@ -50,6 +50,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/client-v') # CI runs on main only
     runs-on: ubuntu-latest
     outputs:
+      krunker_version: ${{ steps.meta.outputs.krunker_version }}
       describe: ${{ steps.meta.outputs.describe }}
       commit: ${{ steps.meta.outputs.commit }}
       commit12: ${{ steps.meta.outputs.commit12 }}
@@ -99,7 +100,6 @@ jobs:
     timeout-minutes: 45
     env:
       KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
-      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
       KN_COMMIT: ${{ needs.meta.outputs.commit }}
       KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
       KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
@@ -175,7 +175,6 @@ jobs:
         shell: msys2 {0}
     env:
       KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
-      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
       KN_COMMIT: ${{ needs.meta.outputs.commit }}
       KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
       KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
@@ -262,7 +261,6 @@ jobs:
       ANGLE_DIR: ${{ github.workspace }}/angle-dist
       KN_OPENSSL_PREFIX: ${{ github.workspace }}/openssl-dist
       KN_CMAKE_ARGS: ${{ needs.meta.outputs.cmake_flags }}
-      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
       KN_COMMIT: ${{ needs.meta.outputs.commit }}
       KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
       KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
@@ -339,7 +337,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
+      KN_KRUNKER_VERSION: ${{ needs.meta.outputs.krunker_version }}
       KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
     steps:
       - uses: actions/checkout@v7
@@ -382,11 +380,11 @@ jobs:
           # each build empties outputs/apk/release: keep every APK as it is built
           mkdir -p "$RUNNER_TEMP/apk"
           ./gradlew --no-daemon assembleRelease -Pkrunknative.serverUrl=https://krunk.io/ \
-            -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
+            -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_KRUNKER_VERSION"
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apk/BoxOffice-android.apk"
           # Krunker Strike (io.krunknative.strike) over its own page
           ./gradlew --no-daemon assembleRelease -Pkrunknative.app=strike -Pkrunknative.serverUrl=https://krunk.io/strike/ \
-            -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_DESCRIBE"
+            -Pkrunknative.versionCode=$((KN_COMMIT_TIME / 60)) -Pkrunknative.versionName="$KN_KRUNKER_VERSION"
           cp app/build/outputs/apk/release/app-strike-release.apk "$RUNNER_TEMP/apk/BoxOffice-strike-android.apk"
 
       - name: Check the signature
@@ -421,6 +419,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
+      KN_KRUNKER_VERSION: ${{ needs.meta.outputs.krunker_version }}
       KN_COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
     steps:
       - uses: actions/checkout@v7
@@ -445,12 +444,12 @@ jobs:
           xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            KN_SERVER_URL=https://krunk.io/ CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
+            KN_SERVER_URL=https://krunk.io/ MARKETING_VERSION=$KN_KRUNKER_VERSION CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
           # Krunker Strike (io.krunknative.strike) over its own page
           xcodebuild -project KrunkNative.xcodeproj -scheme KrunkStrike -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            KN_SERVER_URL=https://krunk.io/strike/ CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
+            KN_SERVER_URL=https://krunk.io/strike/ MARKETING_VERSION=$KN_KRUNKER_VERSION CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
 
       - name: Package (.ipa)
         run: |
@@ -496,7 +495,7 @@ jobs:
       COMMIT12: ${{ needs.meta.outputs.commit12 }}
       COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
       BUILD_TIME: ${{ needs.meta.outputs.build_time }}
-      DESCRIBE: ${{ needs.meta.outputs.describe }}
+      KRUNKER_VERSION: ${{ needs.meta.outputs.krunker_version }}
       PROTOCOL: ${{ needs.meta.outputs.protocol }}
       KN_BUILD: ${{ needs.meta.outputs.kn_build }}
       BRANCH: ${{ github.ref_name }}
@@ -547,7 +546,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
-            echo "| Version | \`$DESCRIBE\` |"
+            echo "| Version | Krunker $KRUNKER_VERSION |"
             echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
             echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
             echo
