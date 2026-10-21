@@ -17,7 +17,7 @@ Routes: 218 (api.krunker.io: 21, gapi.svc.krunker.io: 189, matchmaker.krunker.io
 
 Before this change: served 10, stubbed 0, tunnel only 46, missing 162.
 
-After this change: empty 20, refusal 92, alias 44, served 10, missing 0, implemented 6, not found 1, tunnel 45.
+After this change (the v10 API completion, branch api-full-http): implemented 77, alias 44, served 10, refusal 21, empty 7, not found 14, tunnel 45 (218 rows). Before: refusal 92, empty 20, implemented 6, alias 44, served 10, not found 1, tunnel 45.
 
 | # | host | method | path | v10 caller (v10.js line) | before | after | source (KN table / file) |
 |---|---|---|---|---|---|---|---|
@@ -262,9 +262,9 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 
 ## Still answered EMPTY or REFUSAL, and why
 
-- EMPTY (no KrunkNative source over HTTP): match history, the leaderboard rankings by season, the wild offer (`null`, the no-offer state), the skin list for an account, map versions, map player data, the map leaderboard, market listings, market stats, black-market list and rank, item views and sales and instances (404 for an id not in `assets/skins.json`), KPD demos and reviewers.
-- REFUSAL 403 (a write, a payment, an account read KrunkNative does not map over HTTP, or the v10 auth contract): every `/auth/*` route (KrunkNative's accounts use `/auth/login` with a different contract, `auth.c`), `/player/me`, `/player/wallet`, `/account/*`, the email and Discord routes, the payments (`/iap/*`, `/shop/cancel-subscription`, `/my-api/*`), the IP checker, the daily spin, the krunkcup wristband, the player profile and seasonal stats, the web push status and subscription change, all skin and map writes, the wild offer writes, `/spins/execute` (the spin is the social socket's `spin` op), market, items, trades, moderation, mods, KPD votes, player sales, listings, verify, gift.
-- `GET /webhooks/general/maps/config` (row 16): EMPTY `{}`. The legacy webhook's body is the preset `{da, fu}` at the top level; KrunkNative has no per-map preset data, and v10 reads an absent `da` as the menu's DEFAULT (presetLoaded, v10.js 212624).
+- REFUSAL 403 NOT_IMPLEMENTED (21 rows, each a write or a payment KrunkNative does not take): payments, rows 8-12 (no payment backend); username reserve, row 56; email preference write, row 66; Discord link, join and unlink, rows 68-70 (no Discord link); skin create, update, delete, upload and duplicate, rows 73-77 (no Skin Manager, no asset store); map version revert, row 94 (no versions); item paint and style, rows 143-144 (no per-copy state); mod publish and publish key, rows 173 and 178 (no mod file storage); wristband claim, row 189 (no wristband).
+- EMPTY (7 rows, source none): auth nonce (row 32, the v10 nonce is not used by the KN accounts), email preferences read (65), Discord status (67, not linked), skin list (71), map versions (93), item instances (142), krunkcup wristband read (188).
+- NOT FOUND 404 (14 rows, the v10 auth challenge and verification routes and the skin id): rows 35-38, 40-45, 47-49 and skin id 72. These are routes whose flows KrunkNative has no equivalent for, so the route answers 404 instead of a refusal body. Flagged for review: the consumer should not reach them in the v10.0.3 menu flows, but this is not confirmed for every route.
 
 ## No-source cases (the brief's examples)
 
