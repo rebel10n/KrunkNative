@@ -69,6 +69,10 @@ export const V10_IN = Object.freeze({
   UPDATE_TIMER: "t",
   GAME_STATE_CHANGED: "gsc",
   ADD_PLAYERS: "0",
+  UPDATE_LOCKOUT_TIM: "lkt",
+  SET_OBJECTIVE: "obj",
+  SET_WEAPON: "wep",
+  C_SPAWN: "aai",
   UPDATE_LEADERS: "7",
   START_GAME: "start",
   GAME_ANNOUNCEMENT: "gameAnnouncement",
@@ -337,13 +341,14 @@ function cText(b: Buffer): string {
 // are not sent: v10 has no message for them, and the client keeps them at their map position.
 export function mapModeState(p: Buffer): Mapped {
   if (p.length !== MODE_STATE_SIZE) return { messages: [], stop: "malformed" };
-  if (p.readInt32LE(76) >= 0) return { messages: [], stop: "an active objective: v10 obj needs its time, which is in MODE_SYNC_V7" };
+  // An active objective is sent by MODE_SYNC_V7 (obj needs its time); a weapon objective is wep here.
   if (p[84] !== 0) return { messages: [], stop: "move lock: v10 lm needs the player's position" };
 
   const messages: V10Message[] = [
     [V10_IN.TEAM_SCORE, [1, p.readInt32LE(4)]], // team 1 (mode team_scores[0])
     [V10_IN.TEAM_SCORE, [2, p.readInt32LE(8)]], // team 2 (mode team_scores[1])
   ];
+  if (p.readInt32LE(80) >= 0) messages.push([V10_IN.SET_WEAPON, [p.readInt32LE(80)]]); // objective_weapon: the weapon objective
   const flags: V10Message[] = [];
   const count = Math.min(p[90], 8);
   for (let f = 0; f < count; f++) {
@@ -583,6 +588,86 @@ export function checkLeaderStats(p: Buffer, rows: number[] | null): string | nul
     }
   }
   return null;
+}
+
+// NetModeSyncV7Packet (65 bytes): team_scores[6] @0, rounds_left @24, has_round_wins @28,
+// team_round_wins[6] @29, lockout_ms @53, objective_uid @57, objective_ms @61 (int32 each, uint8 has_round_wins).
+// It is the joiner's mode sync (mode_send_sync_v7, mode_net.c): the v10 sender's join values are ts per scored
+// team (v10 getTeamScores lists the teams that scored, see hud_modes.c), rds (only with rounds, v10.js 191060),
+// lkt (lockoutTimer, which v10 decrements in milliseconds, v10.js 191342), and obj [uid, ms, true] for the
+// objective (krunker_link.c cites v10.js 219395: setObjective(obj[0], obj[1], true)).
+const MODE_SYNC_SIZE = 65;
+export function mapModeSync(p: Buffer, objectiveWeapon: boolean): Mapped {
+  if (p.length !== MODE_SYNC_SIZE) return { messages: [], stop: "malformed" };
+  const messages: V10Message[] = [];
+  for (let t = 1; t <= 5; t++) {
+    const score = p.readInt32LE(t * 4);
+    if (score !== 0) messages.push([V10_IN.TEAM_SCORE, [t, score]]);
+  }
+  const roundsLeft = p.readInt32LE(24);
+  if (roundsLeft !== 0) {
+    return { messages: [], stop: "rounds: rds with the round flag false is the round switch (it deactivates every player, v10.js 218999); a join needs another flag, not verified" };
+  }
+  const lockout = p.readInt32LE(53);
+  if (lockout > 0) messages.push([V10_IN.UPDATE_LOCKOUT_TIM, [lockout]]);
+  const objective = p.readInt32LE(57);
+  if (objective >= 0 && !objectiveWeapon) messages.push([V10_IN.SET_OBJECTIVE, [objective, p.readInt32LE(61), true]]);
+  return { messages };
+}
+
+// The v7 bot record (NetAIAddV7Packet, packed, 237 bytes): sid @0, index @4, name[40] @8, position[3] @48, has_data
+// @60, has_anim @61, no_vis @62, no_fog @63, f_trans @64, no_smooth @65, team int16 @66, anim_speed @68,
+// sound_range @72, max_health @76, m_size @80, m_y_off @84, m_r_off @88, hbh @92, asset[16] @96, idle_sound @112,
+// src[24] @116, tag_scale @140, lvl int16 @144, side @146, opacity @147, alpha_test @151, tex_encode @155,
+// frames @156, frame_time @157, r_anim @161, r_anim_axis @165, bob_d @166, bob_s @170, start_anim[33] @174,
+// pj_asset[16] @207, pj_scale @223, pj_model_scale @227, pj_spin @231, pj_trans @235, pj_glow @236.
+// The v10 record is AI.getData (v10.js 179362-179395): [sid, index, name, x, y, z, dat], dat 0 without data.
+// Field names of dat are v10's, read from getData; the mapping of each v7 field to its v10 name is by the
+// names (see the report). v10's asset is coerced to a string (v10.js 179132), as the v7 asset is.
+const AI_ADD_V7_SIZE = 237;
+export function mapBotAdd(p: Buffer): Mapped {
+  if (p.length !== AI_ADD_V7_SIZE) return { messages: [], stop: "malformed" };
+  const str = (at: number, size: number) => {
+    const nul = p.indexOf(0, at);
+    return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
+  };
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const dat =
+    p[60] !== 0
+      ? {
+          hasAnim: p[61] ? 1 : 0,
+          animS: p.readFloatLE(68),
+          soundR: p.readFloatLE(72),
+          team: p.readInt16LE(66),
+          health: p.readFloatLE(76),
+          mSize: p.readFloatLE(80),
+          mYOff: p.readFloatLE(84),
+          mROff: p.readFloatLE(88),
+          hbh: r1(p.readFloatLE(92) || 1),
+          asset: str(96, 16),
+          idl: p.readInt32LE(112),
+          src: str(116, 24),
+          noVis: p[62] ? 1 : 0,
+          tagScale: p.readFloatLE(140) || 1,
+          lvl: p.readInt16LE(144),
+          side: p[146],
+          opacity: p.readFloatLE(147),
+          alphaTest: p.readFloatLE(151),
+          texEncode: p[155],
+          noSmooth: p[65] !== 0,
+          noFog: p[63] !== 0,
+          fTrans: p[64] !== 0,
+          frames: p[156],
+          frameT: p.readFloatLE(157),
+          rAnim: p.readFloatLE(161),
+          rAnimA: p[165],
+          bobD: p.readFloatLE(166),
+          bobS: p.readFloatLE(170),
+        }
+      : 0;
+  return {
+    messages: [[V10_IN.C_SPAWN, [p.readInt32LE(0), p.readInt32LE(4), str(8, 40), r1(p.readFloatLE(48)), r1(p.readFloatLE(52)), r1(p.readFloatLE(56)), dat]]],
+  };
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };

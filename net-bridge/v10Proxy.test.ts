@@ -103,7 +103,7 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
 // Layouts from shared/include/shared.h (NetModeStatePacket, NetObjectStatePacket), little endian.
 type TestFlag = { x: number; y: number; z: number; carrier: number; team: number; uid: number; active: boolean };
 function modeStateBuffer(o: { teamScores: [number, number]; lives: number; locked: number; message: string;
-  objective: number; moveLock: number; flags?: TestFlag[] }): Buffer {
+  objective: number; moveLock: number; flags?: TestFlag[]; objectiveWeapon?: number }): Buffer {
   const flags = o.flags ?? [];
   const b = Buffer.alloc(387); // NetModeStatePacket, protocol 1.4.3 (flags of 25 bytes)
   b.writeInt32LE(0, 0); // mode_id
@@ -112,7 +112,7 @@ function modeStateBuffer(o: { teamScores: [number, number]; lives: number; locke
   b.write("AT BASE", 12, "utf8"); // flag_info[0]
   b.write("AT BASE", 44, "utf8"); // flag_info[1]
   b.writeInt32LE(o.objective, 76); // active_objective
-  b.writeInt32LE(-1, 80); // objective_weapon
+  b.writeInt32LE(o.objectiveWeapon ?? -1, 80); // objective_weapon
   b[84] = o.moveLock;
   b[85] = o.locked;
   b.writeInt32LE(o.lives, 86);
@@ -177,7 +177,13 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.deepStrictEqual(carried.messages.filter((m) => m[0] === "ufl"), [["ufl", [9, 0.5, 2, 3, 42]]]);
   assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 0,
     flags: [{ x: 0, y: 0, z: 0, carrier: -1, team: 1, uid: -1, active: true }] })).stop || "", /map object id/);
-  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: 2, moveLock: 0 })).stop || "", /objective/);
+  // an active objective is sent by MODE_SYNC_V7 (with its time): MODE_STATE sends none of it
+  const objective = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: 2, moveLock: 0 }));
+  assert.strictEqual(objective.stop, undefined);
+  assert.deepStrictEqual(objective.messages, [["ts", [1, 0]], ["ts", [2, 0]], ["lv", [0]]]);
+  // a weapon objective is a wep (the objective weapon's uid)
+  const weapon = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: 2, moveLock: 0, objectiveWeapon: 2 }));
+  assert.deepStrictEqual(weapon.messages, [["ts", [1, 0]], ["ts", [2, 0]], ["wep", [2]]]);
   assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 1 })).stop || "", /lock/);
   assert.strictEqual(T.mapModeState(Buffer.alloc(10)).stop !== undefined, true);
 
@@ -216,6 +222,72 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   [1, 40, 3, 1, 2, 10, 0, 4].forEach((v, i) => board.writeInt32LE(v, 1 + i * 4));
   assert.deepStrictEqual(T.mapLeaderboard(board, 0).messages, [["7", [[1, 40, 3, 1, 2, 10, 0, 4]]]]);
   assert.match(T.mapLeaderboard(board, 1).stop || "", /Free for All/);
+}
+
+{
+  // MODE_SYNC_V7 (149): team scores (ts for scored teams), lockout (lkt, ms), objective (obj uid, ms, true)
+  const sync = (o: { scores: number[]; rounds?: number; lockout?: number; objective?: number; objectiveMs?: number }) => {
+    const b = Buffer.alloc(65);
+    o.scores.forEach((v, t) => b.writeInt32LE(v, t * 4));
+    b.writeInt32LE(o.rounds ?? 0, 24);
+    b.writeInt32LE(o.lockout ?? 0, 53);
+    b.writeInt32LE(o.objective ?? -1, 57);
+    b.writeInt32LE(o.objectiveMs ?? 0, 61);
+    return b;
+  };
+  assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 4, 0, 9, 0, 0] }), false).messages, [["ts", [1, 4]], ["ts", [3, 9]]]);
+  assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], lockout: 1500 }), false).messages, [["lkt", [1500]]]);
+  assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], objective: 3, objectiveMs: 4000 }), false).messages, [["obj", [3, 4000, true]]]);
+  assert.deepStrictEqual(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], objective: 3, objectiveMs: 4000 }), true).messages, []); // the weapon: wep was sent
+  assert.match(T.mapModeSync(sync({ scores: [0, 0, 0, 0, 0, 0], rounds: 2 }), false).stop || "", /rounds/);
+  assert.strictEqual(T.mapModeSync(Buffer.alloc(10), false).stop !== undefined, true);
+
+  // AI_ADD_V7 (162): the v7 bot record -> aai [sid, index, name, x, y, z, dat]
+  const bot = Buffer.alloc(237);
+  bot.writeInt32LE(9, 0);
+  bot.writeInt32LE(4, 4);
+  bot.write("Bot", 8, "utf8");
+  [1.5, 2, 3].forEach((v, i) => bot.writeFloatLE(v, 48 + i * 4));
+  bot[60] = 1; // has_data
+  bot[61] = 1; // has_anim
+  bot[62] = 1; // no_vis
+  bot.writeInt16LE(2, 66); // team
+  bot.writeFloatLE(0.5, 68); // anim_speed
+  bot.writeFloatLE(30, 72); // sound_range
+  bot.writeFloatLE(100, 76); // max_health
+  bot.writeFloatLE(1.5, 80); // m_size
+  bot.writeFloatLE(0.25, 84); // m_y_off
+  bot.writeFloatLE(0.5, 88); // m_r_off
+  bot.writeFloatLE(0, 92); // hbh 0 -> 1
+  bot.write("46544e", 96, "utf8"); // asset
+  bot.writeInt32LE(7, 112); // idle_sound
+  bot.write("a/b.glb", 116, "utf8"); // src
+  bot.writeFloatLE(1.25, 140); // tag_scale
+  bot.writeInt16LE(3, 144); // lvl
+  bot[146] = 1; // side
+  bot.writeFloatLE(0.5, 147); // opacity
+  bot.writeFloatLE(0.5, 151); // alpha_test
+  bot[155] = 2; // tex_encode
+  bot[156] = 4; // frames
+  bot.writeFloatLE(0.25, 157); // frame_time
+  bot.writeFloatLE(0.75, 161); // r_anim
+  bot[165] = 1; // r_anim_axis
+  bot.writeFloatLE(0.125, 166); // bob_d
+  bot.writeFloatLE(2, 170); // bob_s
+  bot[63] = 0; // no_fog
+  bot[64] = 1; // f_trans
+  bot[65] = 1; // no_smooth
+  const [botLabel, botArgs] = T.mapBotAdd(bot).messages[0];
+  assert.strictEqual(botLabel, "aai");
+  assert.deepStrictEqual((botArgs as unknown[]).slice(0, 6), [9, 4, "Bot", 1.5, 2, 3]);
+  assert.deepStrictEqual((botArgs as unknown[])[6], {
+    hasAnim: 1, animS: 0.5, soundR: 30, team: 2, health: 100, mSize: 1.5, mYOff: 0.25, mROff: 0.5, hbh: 1,
+    asset: "46544e", idl: 7, src: "a/b.glb", noVis: 1, tagScale: 1.25, lvl: 3, side: 1, opacity: 0.5, alphaTest: 0.5,
+    texEncode: 2, noSmooth: true, noFog: false, fTrans: true, frames: 4, frameT: 0.25, rAnim: 0.75, rAnimA: 1,
+    bobD: 0.125, bobS: 2,
+  });
+  bot[60] = 0;
+  assert.strictEqual((T.mapBotAdd(bot).messages[0][1] as unknown[])[6], 0);
 }
 
 async function main(): Promise<void> {
@@ -475,9 +547,26 @@ async function main(): Promise<void> {
   await sleep(50);
   assert.strictEqual(clientMessages.some((m) => m.label === "ai"), false);
 
-  // the mode sync (149) is the next packet with no translation yet: the translation stops there
-  native.write(nativeFrame(149, Buffer.alloc(4 * 4 + 4 + 1 + 4 * 4 + 4 + 4 + 4 + 4)));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("MODE_SYNC_V7"), "stop at MODE_SYNC_V7");
+  // the joiner's mode sync (149): the scored teams as ts, no rounds, the lockout and the objective
+  const modeSync = Buffer.alloc(65);
+  [0, 5, 7, 0, 0, 0].forEach((v, t) => modeSync.writeInt32LE(v, t * 4));
+  modeSync.writeInt32LE(-1, 57); // no objective
+  native.write(nativeFrame(149, modeSync));
+  const ts57 = await waitFor(() => clientMessages.filter((m) => m.label === "ts").length >= 4 ? clientMessages.filter((m) => m.label === "ts") : undefined, "ts (sync)");
+  assert.deepStrictEqual(ts57.slice(-2).map((m) => m.args), [[1, 5], [2, 7]]);
+  // a bot (162) reaches the client as aai
+  const bot7 = Buffer.alloc(237);
+  bot7.writeInt32LE(5, 0);
+  bot7.writeInt32LE(0, 4);
+  bot7.write("Bot", 8, "utf8");
+  bot7[60] = 0; // no data: dat 0
+  native.write(nativeFrame(162, bot7));
+  const aai7 = await waitFor(() => clientMessages.find((m) => m.label === "aai"), "aai (v7)");
+  assert.deepStrictEqual(aai7.args, [5, 0, "Bot", 0, 0, 0, 0]);
+
+  // the next packet with no translation yet: the v7 bot sync (161) stops the translation
+  native.write(nativeFrame(161, Buffer.alloc(2)));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("AI_SYNC_V7"), "stop at AI_SYNC_V7");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -508,7 +597,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("MODE_SYNC_V7"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("AI_SYNC_V7"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 

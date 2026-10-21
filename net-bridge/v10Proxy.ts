@@ -81,6 +81,7 @@ type V10Session = {
   configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
   modeIndex: number; // the INIT's mode (0 Free for All)
+  objectiveWeapon: boolean; // MODE_STATE had a weapon objective (wep), so MODE_SYNC_V7 sends no obj
   leaderRows: number[] | null; // the rows of the last LEADERBOARD as sent ("7"), for the LEADER_STATS that repeats them
   socketId: string; // io-init's id: our own player's id in the add record
   skinsByUid: Map<number, T.NativeSkins>; // SKINS, kept for the SPAWN that follows
@@ -239,6 +240,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   if (session.initSent && (type === T.NATIVE_MORE.MODE_STATE || type === T.NATIVE_MORE.OBJECT_STATE)) {
     const mapped = type === T.NATIVE_MORE.MODE_STATE ? T.mapModeState(payload) : T.mapObjectState(payload);
     if (mapped.stop) return stopAt(session, nativeName(type, payload), mapped.stop);
+    if (type === T.NATIVE_MORE.MODE_STATE) session.objectiveWeapon = payload.readInt32LE(80) >= 0;
     for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
@@ -278,6 +280,18 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   // AI_ADD (90) is the v3 encoding of a bot. A protocol 1.3+ peer gets AI_ADD_V7 (162) as well, with the full
   // record (server/src/ai.c 2124-2131 sends both; game_ai_packet_for_peer keeps one), so the v3 one is consumed:
   // translating both would add every bot twice.
+  if (session.initSent && type === T.NATIVE_MORE.AI_ADD_V7) {
+    const mapped = T.mapBotAdd(payload);
+    if (mapped.stop) return stopAt(session, "AI_ADD_V7", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.MODE_SYNC_V7) {
+    const mapped = T.mapModeSync(payload, session.objectiveWeapon);
+    if (mapped.stop) return stopAt(session, "MODE_SYNC_V7", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
   if (session.initSent && type === T.NATIVE_MORE.AI_ADD) return;
   if (session.initSent && type === T.NATIVE_MORE.AI_SYNC) return; // the v3 sync: the v7 one (161) is the one for a v7 peer
   // SKINS come right before the SPAWN they belong to: kept for it, nothing sent
@@ -455,6 +469,7 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     networkReceived: false,
     modeIndex: 0,
     leaderRows: null,
+    objectiveWeapon: false,
     socketId: makeSocketId(12),
     skinsByUid: new Map(),
     gameTimer: 0,
