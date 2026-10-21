@@ -169,12 +169,12 @@ async function startStack(kids, runDir, secret) {
 }
 
 // The harness config for this run: the example's routes, with this run's ports, directories and brain.
-function writeHarnessConfig(runDir, ports, { pagePort, tlsPort, brainUrl, bridgePort }) {
+function writeHarnessConfig(runDir, ports, { pagePort, tlsPort, brainUrl, bridgePort, query = "" }) {
   const cfg = JSON.parse(fs.readFileSync(EXAMPLE, "utf8"));
   cfg.runDir = path.join(runDir, "harness");
   cfg.port = pagePort;
   cfg.tlsPort = tlsPort;
-  cfg.localUrl = `http://${PAGE_HOST}:${pagePort}/`;
+  cfg.localUrl = `http://${PAGE_HOST}:${pagePort}/${query}`;
   cfg.brainUrl = brainUrl;
   cfg.bridge = { host: BRIDGE_NAME, port: bridgePort, log: path.join(runDir, "bridge.log") };
   cfg.joinWaitMs = Number(proc.env.KN_NODE_JOIN_MS || 90000);
@@ -530,7 +530,16 @@ async function runHarnessJoin(opts = {}) {
     const stack = await startStack(kids, runDir, secret);
     const pagePort = await freePort("tcp");
     const tlsPort = await freePort("tcp");
-    const { file, cfg: hcfg } = writeHarnessConfig(runDir, null, { pagePort, tlsPort, brainUrl: stack.brainUrl, bridgePort: stack.bridgePort });
+    // KN_NODE_GAME=auto opens the page with ?game=<id> for a game on this stack's brain (the working join opens that
+    // way: the live page is /?game=V10J:...). The id is read from this stack's own game list.
+    let query = "";
+    if (proc.env.KN_NODE_GAME === "auto") {
+      const list = await getJSON(stack.brainUrl + "/mm/game-list");
+      const game = (list.body && list.body.games || []).find((g) => g[0].startsWith(stack.nodeId + ":"));
+      if (!game) throw new Error("no game of this stack in its game list");
+      query = "?game=" + encodeURIComponent(game[0]);
+    }
+    const { file, cfg: hcfg } = writeHarnessConfig(runDir, null, { pagePort, tlsPort, brainUrl: stack.brainUrl, bridgePort: stack.bridgePort, query });
     if (persist) {
       hcfg.runDir = persist;
       fs.mkdirSync(persist, { recursive: true });
