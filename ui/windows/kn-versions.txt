@@ -3,6 +3,34 @@
  - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
  - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
 
+ == UPDATE 10.0.3 ==
+ * General
+ - Added a Disable Video Skins setting (Quality)
+ - Fixed paintable melees showing as the Combat Knife in the loadout
+ - Fixed explosions sometimes not showing
+ - Fixed a checkered texture appearing on some skies and map assets
+ - Fixed playing a map with spaces in its name from Social sending you to a public game
+ - Fixed follower counts on posts not matching the profile
+ - Fixed players sometimes staying in the game as a copy after trading
+ - Fixed a server crash that could end a game for everyone in it
+ * Market
+ - Fixed the item Stats tab showing no data at busy times
+ * Clans
+ - Recruitment minimum level and K/D now apply to every join request
+ - Fixed recruitment pages jumping back to page 1
+ * KrunkScript & Editor
+ - Added player.pose.holdL with a "handL" attach point, to hold an item in the left hand while keeping the weapon
+ - player.pose armL and armR now move only their own arm in third person
+ - Added the Solid Ramp Sides map setting (rampFix): a ramp's high side blocks players like a wall
+ - Added preciseHits for AI: shots hit the animated model, with bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition and onAIPartDamage
+ - Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI
+ - Added opt-in environment reflections for GLB materials
+ - Live assets with complex collision now stop shots
+ - GAME.CONFIG.getMatch().started is now false during the round countdown
+ - AI models now load once per game
+ - Fixed scene objects stacking up and looped sounds breaking when a map starts its next round
+ - Fixed walking AI falling through the floor
+
  == UPDATE 1.2.0 ==
  * Krunker v10.0.2
  - The v10 menu: Guide, What's New, Community & Events, Ranked and Turf Wars
