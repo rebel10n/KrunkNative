@@ -118,6 +118,10 @@ set(KN_BRAIN_SOURCES
     v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
     v10_empty.c                     # v10 REST routes with no KrunkNative data: the empty shapes and refusals
     v10_market.c                    # v10 REST market, items, trades, moderation, mods and KPD: the empty shapes and refusals
+    v10_account.c                   # v10 REST account and player routes: player/me, wallet, profile, ranked boards, match history, daily spin
+    v10_auth.c                      # v10 REST /auth/* routes mapped onto auth.c's accounts
+    v10_catalog.c                   # v10 REST skins, wild offer and map routes (versions, data, votes, feature, delete)
+    v10_mods.c                      # v10 REST mods, moderation and KPD routes (moved from v10_market.c)
     ../../shared/src/user_asset_path.c # the user-asset paths and content rules (shared with the client's fetch)
     ../../shared/src/knv.c          # video.mp4.knv: the frame sidecar format (shared with the clients' players)
     ../../shared/src/youtube_link.c # map YouTube video ids (creations.c: uploadM stores the id)
@@ -495,6 +499,26 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_alias_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_alias PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 account and player routes (v10_account.c): EMPTY, NOT_FOUND, REFUSAL 403 and the real answers (tests/v10_api_account_test.py)
+    add_test(NAME brain_v10_api_account
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_account_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_account PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 /auth/* routes (v10_auth.c): EMPTY, NOT_FOUND, REFUSAL 403 and the real answers (tests/v10_api_auth_test.py)
+    add_test(NAME brain_v10_api_auth
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_auth_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_auth PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 skins, wild offer and map routes (v10_catalog.c): EMPTY, NOT_FOUND, REFUSAL 403 and the real answers (tests/v10_api_catalog_test.py)
+    add_test(NAME brain_v10_api_catalog
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_catalog_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_catalog PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 mods, moderation and KPD routes (v10_mods.c): EMPTY, NOT_FOUND, REFUSAL 403 and the real answers (tests/v10_api_mods_test.py)
+    add_test(NAME brain_v10_api_mods
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_mods_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_mods PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # CORS for the official Krunker page (krunker.io) on /ping and /mm/ping, and the nginx include's origin list
     add_test(NAME brain_cors_origin
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/cors_origin_test.py

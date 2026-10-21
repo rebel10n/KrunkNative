@@ -19,7 +19,7 @@ Before this change: served 10, stubbed 0, tunnel only 46, missing 162.
 
 After this change: empty 20, refusal 92, alias 44, served 10, missing 0, implemented 6, not found 1, tunnel 45.
 
-| # | host | method | path | v10 caller (v10.js line) | before | after | where |
+| # | host | method | path | v10 caller (v10.js line) | before | after | source (KN table / file) |
 |---|---|---|---|---|---|---|---|
 | 1 | api | GET | `/match-history/me/season/{s}/gameMode/{m}/isRanked/{all|bool}[/region/{r}]` | matchHistory.getMatchHistory (25940) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
 | 2 | api | GET | `/player-profile/me/season/{s}[/region/{r}]` | playerProfile.getPlayerProfile (25959) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
