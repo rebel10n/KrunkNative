@@ -403,6 +403,10 @@ int acct_email_required(void);          /* accounts.email.required: registering 
 const char *acct_validate_email(const char *email, char *norm, size_t cap);
 /* Store a new account's email and mail the verification link (fire and forget). */
 void acct_email_after_register(int64_t account_id, const char *email, const char *ip);
+/* v10 POST /auth/verification/resend and change-email (v10_auth.c): the socket's "emailv" / "cemail" without a
+ * socket. email NULL = resend to the stored address. done(ud, err, msg) runs once: err is the user-facing text. */
+typedef void (*AcctEmailFn)(void *ud, const char *err, const char *msg);
+void acct_email_request_http(int64_t account_id, const char *email, const char *ip, AcctEmailFn done, void *ud);
 /* v10 POST /auth/recover-account (v10_auth.c): the mail of ["rpr", who] (username or email). done(ud, err, msg)
  * runs once: err is the user-facing refusal (NULL when the mail went out or was not due; msg the neutral text). */
 typedef void (*AcctRecoverFn)(void *ud, const char *err, const char *msg);
