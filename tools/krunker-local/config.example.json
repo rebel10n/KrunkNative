@@ -1,0 +1,23 @@
+{
+  "krunkerSrc": "/home/user/jails/kru/src/Krunker_v10.0.3",
+  "knRepo": "/home/user/src/KrunkNative",
+  "fillRoots": ["assets", "ui"],
+  "wwwDir": "~/.cache/kn-krunker-local/www",
+  "runDir": "~/.cache/kn-krunker-local/run",
+  "port": 8094,
+  "tlsPort": 8443,
+  "localUrl": "http://krunker-local.test:8094/",
+  "hostRoutes": {
+    "matchmaker.krunker.io": "/mm",
+    "matchmaker.beta.krunker.io": "/mm",
+    "gapi.svc.krunker.io": "",
+    "gapi.beta.krunker.io": ""
+  },
+  "brainUrl": "https://coordinator.krunk.io",
+  "loadWaitMs": 60000,
+  "afterAcceptMs": 20000,
+  "fillPaths": [
+    "img/app_0.png", "img/app_1.png", "img/btc_icn.png", "img/skull_0.png", "img/skull_1.png",
+    "img/skull_2.png", "img/skull_3.png", "img/blood.png", "img/timer.png", "img/pwa/icon32x32.png"
+  ]
+}

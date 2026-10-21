@@ -1,0 +1,21 @@
+# The harness copies Krunker's own files into ~/.cache/kn-krunker-local/www (never into git).
+# Anything from the official tree, or a local config, stays out of the repo.
+config.json
+*.jspck
+*.wasm
+*.mjs.map
+/www/
+/run/
+/js/
+/libs/
+/css/
+/img/
+/data/
+/pkg/
+/static/
+/models/
+/textures/
+/sound/
+/game.js
+/index.html
+/local.html
