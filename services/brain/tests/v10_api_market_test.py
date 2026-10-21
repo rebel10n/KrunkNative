@@ -10,7 +10,7 @@ One check per route, stdlib only. Each check names the method, the path, the kin
 v10.js line of the v10 caller that reads it:
 
   EMPTY      200, {"data": ..., "error": null} with exactly the shape v10 reads (its own default)
-  REFUSAL    501, {"error": {"code": "NOT_IMPLEMENTED", "message": ...}} (writes, and reads of an
+  REFUSAL    403, {"error": {"code": "NOT_IMPLEMENTED", "message": ...}} (writes, and reads of an
              account KrunkNative does not map over HTTP)
   NOT_FOUND  404, {"error": {"code": "NOT_FOUND", ...}} (a read of an item id that is not in skins.json)
 
@@ -212,7 +212,7 @@ def run_route(port, method, path, body, kind, pred, ref):
         check(name, ok, "HTTP %d %s" % (status, json.dumps(reply)[:160]))
     elif kind == "REFUSAL":
         err = reply.get("error") if isinstance(reply.get("error"), dict) else {}
-        ok = status == 501 and err.get("code") == "NOT_IMPLEMENTED" and bool(err.get("message")) and "data" not in reply
+        ok = status == 403 and err.get("code") == "NOT_IMPLEMENTED" and bool(err.get("message")) and "data" not in reply
         check(name, ok, "HTTP %d %s" % (status, json.dumps(reply)[:160]))
     else:  # NOT_FOUND
         err = reply.get("error") if isinstance(reply.get("error"), dict) else {}

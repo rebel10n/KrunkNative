@@ -9,7 +9,7 @@
  *   EMPTY      200, {"data": ...} with the shape v10's consumer reads when it has nothing (its own
  *              default; v10.js names the consumer). Nothing is invented: an empty list says "no records
  *              here", never a balance, price or owner.
- *   REFUSAL    501, {"error": {"code": "NOT_IMPLEMENTED", "message"}}: every write, and every read of an
+ *   REFUSAL    403, {"error": {"code": "NOT_IMPLEMENTED", "message"}}: every write, and every read of an
  *              account KrunkNative does not map over HTTP (the caller's own data needs a session the root
  *              API does not resolve; another player's data is not looked up here).
  *   NOT_FOUND  404, {"error": {"code": "NOT_FOUND"}}: an item route whose {id} is not an index of
@@ -30,7 +30,7 @@
  *     POST /market/quick-sell          REFUSAL  write                             (131580)
  *     GET  /market/black-market        EMPTY []                                   (128486)
  *     GET  /market/black-market/rank   EMPTY null: the caller's peak MMR is not mapped; v10 joins this
- *                                      with the black-market list in Promise.all, so a 501 here would
+ *                                      with the black-market list in Promise.all, so a 403 here would
  *                                      blank the whole popup (v10.js 136255). null is the consumer's
  *                                      "no rank" (128494).
  *     POST /market/black-market/purchase  REFUSAL write                           (136215)
@@ -79,7 +79,7 @@
  *     POST /players/:name/verify       REFUSAL  write                             (109590)
  *     POST /players/:name/gift         REFUSAL  write                             (109361)
  *
- * The 501 messages are short reasons for the API reader. v10's gapi wrapper (v10.js 26094) throws on
+ * The 403 messages are short reasons for the API reader. v10's gapi wrapper (v10.js 26094) throws on
  * any status >= 500, so v10 shows a generic "Server error" for these rather than the message.
  */
 #include "v10_market.h"
@@ -104,7 +104,7 @@
 #define WHY_CHAT_BAN "Chat bans are not served over HTTP"
 
 static void h_refuse(kn_http_req *req, void *ud) {
-    v10_reply_error(req, 501, "NOT_IMPLEMENTED", (const char *) ud);
+    v10_reply_error(req, 403, "NOT_IMPLEMENTED", (const char *) ud);
 }
 
 /* the {id} of an item route is an index of assets/skins.json; anything else is a 404 */

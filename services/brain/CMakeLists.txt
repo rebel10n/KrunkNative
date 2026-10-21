@@ -480,6 +480,16 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_data_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_data PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 REST routes with no KrunkNative data (v10_empty.c): EMPTY reads, NOT_FOUND, REFUSAL 403
+    add_test(NAME brain_v10_api_empty
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_empty_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_empty PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 market, items, trades, moderation, mods, KPD and players (v10_market.c): EMPTY, NOT_FOUND, REFUSAL 403
+    add_test(NAME brain_v10_api_market
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_market_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_market PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # CORS for the official Krunker page (krunker.io) on /ping and /mm/ping, and the nginx include's origin list
     add_test(NAME brain_cors_origin
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/cors_origin_test.py

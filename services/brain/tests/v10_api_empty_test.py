@@ -9,7 +9,7 @@ Each v10 route is one plain HTTP request on the brain root, checked against what
 expects:
 
   EMPTY     200, {"data": <the empty shape its consumer reads>, "error": null}, exactly that data
-  REFUSAL   501, {"error": {"code": "NOT_IMPLEMENTED", "message": ...}} (a write, or an account read)
+  REFUSAL   403, {"error": {"code": "NOT_IMPLEMENTED", "message": ...}} (a write, or an account read)
   NOT_FOUND 404, {"error": {"code": "NOT_FOUND", "message": ...}}
 
 Each check prints one PASS or FAIL line. Exit 0 when every check passes, 1 otherwise, 77 when kn_brain
@@ -191,8 +191,8 @@ def run_route(port, method, path, body, kind, expected, cite):
         check("%s -> 200 EMPTY %s (v10.js %s)" % (label, json.dumps(expected, separators=(",", ":")), line),
               st == 200 and got == want, "HTTP %d %s" % (st, json.dumps(got)[:160]))
     elif kind == "refuse":
-        ok = st == 501 and error_code(got) == "NOT_IMPLEMENTED" and "data" not in (got or {})
-        check("%s -> 501 REFUSAL NOT_IMPLEMENTED (v10.js %s)" % (label, line), ok,
+        ok = st == 403 and error_code(got) == "NOT_IMPLEMENTED" and "data" not in (got or {})
+        check("%s -> 403 REFUSAL NOT_IMPLEMENTED (v10.js %s)" % (label, line), ok,
               "HTTP %d %s" % (st, json.dumps(got)[:160]))
     elif kind == "notfound":
         ok = st == 404 and error_code(got) == "NOT_FOUND"

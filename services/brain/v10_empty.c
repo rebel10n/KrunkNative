@@ -16,7 +16,7 @@
  * NOT_FOUND (404 {"error": {"code": "NOT_FOUND"}}):
  *   GET /skins/:id                                     26479: no KrunkNative skin record has a v10 skin id.
  *
- * REFUSAL (501 {"error": {"code": "NOT_IMPLEMENTED", "message": ...}}; the v10 wrapper throws on 5xx,
+ * REFUSAL (403 {"error": {"code": "NOT_IMPLEMENTED", "message": ...}}; the v10 wrapper throws on 5xx,
  * and the consumers that need a reply catch it):
  *   payments, no payment backend: POST /shop/cancel-subscription 26006, /iap/checkout 26018,
  *       /iap/claim 26024, /my-api/create-payment/:id 209123, /my-api/execute-payment/:id 209131.
@@ -110,7 +110,7 @@ static void h_skin_not_found(kn_http_req *req, void *ud) {
 
 static void h_refuse(kn_http_req *req, void *ud) {
     const char *why = ud;
-    v10_reply_error(req, 501, "NOT_IMPLEMENTED", why);
+    v10_reply_error(req, 403, "NOT_IMPLEMENTED", why);
 }
 
 /* ---- the route table: method, pattern (kn_http_route), handler, ud */
