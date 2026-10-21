@@ -12,8 +12,6 @@
  *   GET /maps/:id/versions                             26626 (107087): data []
  *   GET /maps/:id/data?player=                         26655 (106987): data []
  *   GET /maps/by-name/:name/leaderboard                26602 (106970): data {entries: [], total: 0}
- *   GET /webhooks/general/maps/config?mn=:name         131917 (getMapPreset, read by presetLoaded 212624):
- *       the legacy body has no data envelope; {} carries no preset (da, fu), which the menu shows as DEFAULT.
  *
  * NOT_FOUND (404 {"error": {"code": "NOT_FOUND"}}):
  *   GET /skins/:id                                     26479: no KrunkNative skin record has a v10 skin id.
@@ -101,14 +99,6 @@ static void h_map_leaderboard(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, data);
 }
 
-/* the legacy webhook answers its body as {da, fu} at the top level (v10.js 131917): no preset is {} */
-static void h_map_preset(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *none = cJSON_CreateObject();
-    brain_reply_json(req, 200, none);
-    cJSON_Delete(none);
-}
-
 /* ---- NOT_FOUND */
 
 static void h_skin_not_found(kn_http_req *req, void *ud) {
@@ -134,7 +124,6 @@ typedef struct {
 
 static const EmptyRoute k_routes[] = {
     /* api.krunker.io */
-    {"GET", "/webhooks/general/maps/config", h_map_preset, NULL},
     {"GET", "/match-history/me/season/:s/gameMode/:m/isRanked/:x", h_match_history, NULL},
     {"GET", "/match-history/me/season/:s/gameMode/:m/isRanked/:x/region/:r", h_match_history, NULL},
     {"GET", "/player-profile/me/season/:s", h_refuse, (void *) WHY_ACCOUNT},
