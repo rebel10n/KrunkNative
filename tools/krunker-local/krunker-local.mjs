@@ -24,7 +24,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function loadConfig() {
   const local = path.join(HERE, "config.json");
-  const file = fs.existsSync(local) ? local : path.join(HERE, "config.example.json");
+  // KN_KRUNKER_LOCAL_CONFIG names an explicit config (the Node driver writes one with its own ports); else config.json, else the example
+  const override = process.env.KN_KRUNKER_LOCAL_CONFIG;
+  const file = override || (fs.existsSync(local) ? local : path.join(HERE, "config.example.json"));
   const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
   const home = (p) => path.resolve(p.replace(/^~/, os.homedir()));
   cfg._file = file;
