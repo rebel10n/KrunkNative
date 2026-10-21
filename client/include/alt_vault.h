@@ -37,7 +37,8 @@ typedef struct {
     char id[ALT_ID_LEN];
     int kind;                      // AltKind
     char label[ALT_LABEL_MAX];
-    char secret[ALT_SECRET_MAX];
+    char secret[ALT_SECRET_MAX];   // the session (a token); refused or forgotten -> ""
+    char pass[ALT_SECRET_MAX];     // the account's password, kept for a silent sign-in ("" = none); sealed like the rest
     int64_t added_ms;
 } AltProfile;
 
@@ -53,7 +54,7 @@ void alt_vault_init(AltVault *v);
 // Wipes every secret the vault holds (the whole struct: profiles, ids, active pointers).
 void alt_vault_wipe(AltVault *v);
 int alt_vault_find(const AltVault *v, const char *id);                // index, or -1
-// Adds a profile of kind, or replaces the secret of the one with the same kind and label.
+// Adds a profile of kind, or replaces the secret of the one with the same kind and label ("" = no session).
 // Returns its index (-1 when invalid or the vault is full); out_id (ALT_ID_LEN) gets the id.
 // Does not make it active: alt_vault_switch does that.
 int alt_vault_put(AltVault *v, int kind, const char *label, const char *secret, int64_t now_ms, char *out_id);
@@ -62,6 +63,10 @@ int alt_vault_remove(AltVault *v, const char *id);
 // Wipes a profile's secret (its session) and keeps the profile listed: the account asks for its
 // password at the next use. An active pointer that named it is cleared. 0 ok, -1 not found.
 int alt_vault_clear_secret(AltVault *v, const char *id);
+// Sets a profile's password (sealed with the vault). 0 ok, -1 not found or too long.
+int alt_vault_set_password(AltVault *v, const char *id, const char *pass);
+// Drops every profile with neither a session nor a password (nothing to sign in with). Returns how many.
+int alt_vault_prune(AltVault *v);
 // Makes a profile the active one for its kind (a KN profile is the signed-in account, a krunker.io
 // profile the chosen one). 0 ok, -1 not found.
 int alt_vault_switch(AltVault *v, const char *id);

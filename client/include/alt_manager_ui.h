@@ -6,11 +6,13 @@
 #include <html_dom.h>
 
 // What account_ui.c reports for an Add or a switch the window started:
-//   OK       signed in; the account is listed (its session stored)
+//   ADDED    the Add listed the account (its session and password stored); nothing was signed in
+//   OK       a switch signed in; the account is listed (its session stored)
 //   REFUSED  the server said no (the error text) or never answered
-//   EXPIRED  a switch's saved session was refused: the account asks for its password
-//   UNSAVED  signed in, but the vault could not be written
+//   EXPIRED  a saved login (its session and its stored password) is refused: the row offers a Sign in
+//   UNSAVED  the account was signed in or added, but the vault could not be written
 typedef enum {
+    ALT_SIGN_IN_ADDED,
     ALT_SIGN_IN_OK,
     ALT_SIGN_IN_REFUSED,
     ALT_SIGN_IN_EXPIRED,

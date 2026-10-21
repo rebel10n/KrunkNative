@@ -56,7 +56,7 @@ static int new_id(const AltVault *v, char out[ALT_ID_LEN]) {
 }
 
 int alt_vault_put(AltVault *v, const int kind, const char *label, const char *secret, const int64_t now_ms, char *out_id) {
-    if (!v || !valid_kind(kind) || !label || !*label || !secret || !*secret) return -1;
+    if (!v || !valid_kind(kind) || !label || !*label || !secret) return -1; // "" lists a profile with no session (a password only)
     if (strlen(label) >= ALT_LABEL_MAX || strlen(secret) >= ALT_SECRET_MAX) return -1;
     for (int i = 0; i < v->count; i++) {
         AltProfile *p = &v->profiles[i];
@@ -98,6 +98,32 @@ int alt_vault_clear_secret(AltVault *v, const char *id) {
     if (!strcmp(v->active_kn, id)) v->active_kn[0] = 0;
     if (!strcmp(v->active_krunker, id)) v->active_krunker[0] = 0;
     return 0;
+}
+
+int alt_vault_set_password(AltVault *v, const char *id, const char *pass) {
+    const int i = alt_vault_find(v, id);
+    if (i < 0 || !pass || strlen(pass) >= sizeof(v->profiles[i].pass)) return -1;
+    snprintf(v->profiles[i].pass, sizeof(v->profiles[i].pass), "%s", pass);
+    return 0;
+}
+
+int alt_vault_prune(AltVault *v) {
+    int dropped = 0;
+    for (int i = 0; i < v->count;) {
+        AltProfile *p = &v->profiles[i];
+        if (p->secret[0] || p->pass[0]) {
+            i++;
+            continue;
+        }
+        // nothing left to sign in with: the row is dropped (its active pointer clears with it)
+        if (!strcmp(v->active_kn, p->id)) v->active_kn[0] = 0;
+        if (!strcmp(v->active_krunker, p->id)) v->active_krunker[0] = 0;
+        for (int j = i; j + 1 < v->count; j++) v->profiles[j] = v->profiles[j + 1];
+        v->count--;
+        alt_wipe(&v->profiles[v->count], sizeof(v->profiles[v->count]));
+        dropped++;
+    }
+    return dropped;
 }
 
 int alt_vault_switch(AltVault *v, const char *id) {
@@ -150,6 +176,7 @@ static char *encode_json(const AltVault *v) {
         cJSON_AddNumberToObject(o, "kind", p->kind);
         cJSON_AddStringToObject(o, "label", p->label);
         cJSON_AddStringToObject(o, "secret", p->secret);
+        cJSON_AddStringToObject(o, "pass", p->pass);
         cJSON_AddNumberToObject(o, "added", (double) p->added_ms);
         cJSON_AddItemToArray(profiles, o);
     }
@@ -190,6 +217,10 @@ static int decode_json(AltVault *v, const char *text) {
             copy_field(p->id, sizeof(p->id), item, "id", &fine);
             copy_field(p->label, sizeof(p->label), item, "label", &fine);
             copy_field(p->secret, sizeof(p->secret), item, "secret", &fine);
+            // the password is optional (a row saved before passwords were kept has none)
+            const cJSON *pass = cJSON_GetObjectItemCaseSensitive(item, "pass");
+            if (cJSON_IsString(pass) && pass->valuestring && strlen(pass->valuestring) < sizeof(p->pass)) snprintf(p->pass, sizeof(p->pass), "%s", pass->valuestring);
+            else p->pass[0] = 0;
             const cJSON *kind = cJSON_GetObjectItemCaseSensitive(item, "kind");
             const cJSON *added = cJSON_GetObjectItemCaseSensitive(item, "added");
             if (!cJSON_IsNumber(kind) || !valid_kind(kind->valueint)) fine = 0;

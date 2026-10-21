@@ -429,8 +429,7 @@ static void test_store(const char *dir) {
     alt_store_close();
     CHECK(alt_store_open(dir) == 0, "reopen after forgetting");
     CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 0, "still nothing resumed after a restart");
-    CHECK(alt_store_vault() && alt_store_vault()->count == 1 && alt_store_vault()->profiles[0].secret[0] == 0,
-          "the forgotten token is gone from the vault");
+    CHECK(alt_store_vault() && alt_store_vault()->count == 0, "a restart drops the forgotten account (no session, no password)");
     uint8_t *raw2 = read_all(vault_path, &n);
     CHECK(raw2 && !contains(raw2, n, "tokA-store-444"), "no token in the vault file after forgetting");
     free(raw2);
@@ -465,6 +464,53 @@ static void test_store(const char *dir) {
     remove_store_files(dir);
 }
 
+// The Account Manager's Add lists an account without switching to it, keeps a stored password sealed next to the
+// token, a session forgotten keeps the password, and an entry with neither is dropped when the vault opens.
+static void test_passwords(const char *dir) {
+    char name[64] = "", token[256] = "", pass[256] = "";
+    char vault_path[700];
+    join(vault_path, sizeof(vault_path), dir, "alt/vault.bin");
+    remove_store_files(dir);
+    alt_store_close();
+    CHECK(alt_store_open(dir) == 0, "open for the password checks");
+
+    CHECK(alt_store_kn_save("carol", "tokC-pass-555") == 0, "carol is signed in (the current account)");
+    CHECK(alt_store_list(ALT_KIND_KN, "dave", "tokD-pass-666", "pwD-pass-777", NULL) == 0, "Add lists dave with a token and a password");
+    CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1 && !strcmp(name, "carol"),
+          "the Add did not switch: carol is still the active account");
+    CHECK(alt_store_kn_listed("dave") == 1, "dave is listed");
+    CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 1 && !strcmp(pass, "pwD-pass-777"), "dave's password is kept");
+    CHECK(alt_store_password(ALT_KIND_KN, "carol", pass, sizeof(pass)) == 0 && !pass[0], "carol has no password (none given)");
+
+    CHECK(alt_store_list(ALT_KIND_KN, "erin", NULL, "pwE-pass-888", NULL) == 0, "Add with a password only lists erin");
+    CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1 && !strcmp(name, "carol"), "still carol active");
+    CHECK(alt_store_password(ALT_KIND_KN, "erin", pass, sizeof(pass)) == 1 && !strcmp(pass, "pwE-pass-888"), "erin's password is kept");
+    CHECK(alt_store_list(ALT_KIND_KN, "dave", "", "", NULL) == 0, "an Add with nothing new keeps dave's token and password");
+    CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 1 && !strcmp(pass, "pwD-pass-777"), "dave's password still there");
+
+    // the password is sealed: no file under the store holds it
+    size_t n = 0;
+    uint8_t *raw = read_all(vault_path, &n);
+    CHECK(raw && !contains(raw, n, "pwD-pass-777") && !contains(raw, n, "pwE-pass-888"), "no password on the vault file");
+    free(raw);
+
+    // a refused session is forgotten, the password stays and signs in next
+    CHECK(alt_store_kn_forget("dave") == 0, "dave's session is forgotten");
+    CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 1, "the password outlives the session");
+    CHECK(alt_store_forget_password(ALT_KIND_KN, "dave") == 0, "dave's refused password is forgotten");
+    CHECK(alt_store_password(ALT_KIND_KN, "dave", pass, sizeof(pass)) == 0 && alt_store_kn_listed("dave") == 1, "dave stays listed without a password");
+
+    // a restart drops what cannot sign in: dave (neither) goes; erin (a password) and carol (a session) stay
+    alt_store_close();
+    CHECK(alt_store_open(dir) == 0, "reopen the vault");
+    CHECK(alt_store_kn_listed("dave") == 0, "a restart drops the entry with neither a session nor a password");
+    CHECK(alt_store_kn_listed("erin") == 1 && alt_store_kn_listed("carol") == 1, "erin (a password) and carol (a session) stay");
+    CHECK(alt_store_kn_active_name(name, sizeof(name)) == 1 && !strcmp(name, "carol"), "carol is still the active one");
+    CHECK(alt_store_kn_session(name, sizeof(name), token, sizeof(token)) == 1, "carol's session survives");
+    alt_store_close();
+    remove_store_files(dir);
+}
+
 int main(void) {
     test_setenv("KRUNKNATIVE_ALT_KEYSTORE", "file", 1);
     const char *tmp = getenv("TMPDIR");
@@ -484,6 +530,7 @@ int main(void) {
     test_switching();
     test_keystore(templ);
     test_store(templ);
+    test_passwords(templ);
 
     rmdir(alt);
     rmdir(templ);

@@ -70,6 +70,9 @@ int  account_ui_use_session(const char *username, const char *token);
 // (0 started, -1 no account server or no Box Office account here), Remove signs out when the removed
 // account is the one signed in (1 signed out), and the resumed account's login name (1 found, 0 none).
 int  account_ui_add_sign_in(const char *username, const char *pass);
+// The Account Manager's Use of a listed account with no session left: its stored password signs it in (a switch).
+// 0 started, -1 no account server in this build.
+int  account_ui_use_password(const char *username, const char *pass);
 int  account_ui_sign_out_of(const char *username);
 int  account_saved_name(char *out, size_t n);
 void account_ui_tick(Client*);              // per frame: header bar once the page exists

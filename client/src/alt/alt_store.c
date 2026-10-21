@@ -83,6 +83,7 @@ int alt_store_open(const char *config_dir) {
         return -1;
     }
     g_ready = 1;
+    if (alt_vault_prune(&g_vault) > 0) alt_store_save(); // an entry with no session and no password is dropped
     return 0;
 }
 
@@ -163,6 +164,66 @@ int alt_store_kn_save(const char *username, const char *token) {
     }
     alt_vault_switch(&g_vault, id);
     return alt_store_save();
+}
+
+static const AltProfile *profile_named(const int kind, const char *label) {
+    if (!g_ready || !label || !*label) return NULL;
+    for (int i = 0; i < g_vault.count; i++) {
+        const AltProfile *p = &g_vault.profiles[i];
+        if (p->kind == kind && !strcmp(p->label, label)) return p;
+    }
+    return NULL;
+}
+
+int alt_store_list(const int kind, const char *label, const char *token, const char *pass, char *out_id) {
+    if (!g_ready || !label || !*label || strlen(label) >= ALT_LABEL_MAX) return -1;
+    char id[ALT_ID_LEN];
+    const int64_t now = (int64_t) time(NULL) * 1000;
+    const AltProfile *old = profile_named(kind, label);
+    if (token && *token) { // a session: the profile keeps (or gets) this token
+        if (alt_vault_put(&g_vault, kind, label, token, now, id) < 0) {
+            set_error("the vault is full or the account name is too long");
+            return -1;
+        }
+    } else if (old) {
+        snprintf(id, sizeof(id), "%s", old->id);
+    } else { // a password only: the profile is listed without a session
+        if (alt_vault_put(&g_vault, kind, label, "", now, id) < 0) {
+            set_error("the vault is full or the account name is too long");
+            return -1;
+        }
+    }
+    if (pass && *pass && alt_vault_set_password(&g_vault, id, pass) != 0) {
+        set_error("the password is too long");
+        return -1;
+    }
+    if (out_id) snprintf(out_id, ALT_ID_LEN, "%s", id);
+    return alt_store_save(); // (listed, not switched to: the signed-in account stays as it is)
+}
+
+int alt_store_password(const int kind, const char *label, char *out, const size_t cap) {
+    if (out && cap) out[0] = 0;
+    const AltProfile *p = profile_named(kind, label);
+    if (!p || !p->pass[0] || !out || !cap) return 0;
+    snprintf(out, cap, "%s", p->pass);
+    return 1;
+}
+
+int alt_store_forget_password(const int kind, const char *label) {
+    const AltProfile *p = profile_named(kind, label);
+    if (!p) return 0;
+    char id[ALT_ID_LEN];
+    snprintf(id, sizeof(id), "%s", p->id);
+    alt_vault_set_password(&g_vault, id, "");
+    return alt_store_save();
+}
+
+int alt_store_kn_active_name(char *name, const size_t namecap) {
+    if (!g_ready || !name || !namecap) return 0;
+    const AltProfile *p = alt_vault_active(&g_vault, ALT_KIND_KN);
+    if (!p) return 0;
+    snprintf(name, namecap, "%s", p->label);
+    return 1;
 }
 
 int alt_store_kn_sign_out(void) {
