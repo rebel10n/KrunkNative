@@ -248,6 +248,7 @@ export const NATIVE_MORE = Object.freeze({
   OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
   MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
   CHEAT: 60, // NET_PACKET_CHEAT: one chat command's effect on this player (NetCheatPacket: flag, on)
+  CHAT: 9, // NET_PACKET_CHAT: a v3 chat line (NetChatPacket), for the game, server and trigger lines a v7 peer still gets
   PICKUP: 128, // NET_PACKET_PICKUP (TRIGGERS + 8): one pickup's state; joiners get each one (the v7 "pkups" list)
   MATCH_VOTE_STATE: 181, // NET_PACKET_MATCH_VOTE_STATE (LOBBY + 1): the vote totals of the match cards, the v10 "mv"
   EXT: 254,
@@ -870,6 +871,26 @@ export function mapChatV7(p: Buffer, escape: (s: string) => string): Mapped {
     return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
   };
   const raw = str(42, 288);
+  return chatLine(kind, raw, kind === 2 ? null : str(10, 32), p.readInt8(0), p.readInt32LE(1), escape);
+}
+
+// NetChatPacket (325 bytes, the v3 line): int32 uid @0 (-1 for server and game lines), uint8 kind @4, char name[32] @5,
+// char text[288] @37. A v7 peer still gets it for the game, server and trigger lines (the server's player lines take the
+// v7 packet). It has no channel and no account: channel -1 (all) and account null, as v10's own server lines send them.
+export const CHAT_SIZE = 325;
+export function mapChat(p: Buffer, escape: (s: string) => string): Mapped {
+  if (p.length !== CHAT_SIZE) return { messages: [], stop: "malformed" };
+  const kind = p[4];
+  const str = (at: number, size: number) => {
+    const nul = p.indexOf(0, at);
+    return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
+  };
+  return chatLine(kind, str(37, 288), kind === 2 ? null : str(5, 32), -1, null, escape);
+}
+
+// The "ch" line of one KN chat line: kinds 3 (found junk) and 4 (ranked) are lines v10 builds itself; 0 to 2 are the
+// player, game and server lines, with the channel and the account id the packet carried.
+function chatLine(kind: number, raw: string, name: string | null, channel: number, account: number | null, escape: (s: string) => string): Mapped {
   // KN kind 3 (NET_CHAT_FOUND_JUNK) is the finder's "You found [x.xx] Junk". v10 builds that line itself:
   // _69625(-1, null, "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[x.xx]</span> Junk", 1)
   // (v10.js, the handler of "jnk" 69722). The amount is the one KN wrote, already two decimals.
@@ -883,10 +904,9 @@ export function mapChatV7(p: Buffer, escape: (s: string) => string): Mapped {
   // same way: _69625(-1, null, text, 2, "#5ce05a") (v10.js, the DM line). A server line (kind 2) takes its colour.
   if (kind === 4) return { messages: [[V10_IN.ADD_CHAT, [-1, null, escape(raw), 2, "#5ce05a"]]] };
   if (kind > 2) return { messages: [], stop: `chat kind ${kind} has no v10 kind` };
-  const name = kind === 2 ? null : str(10, 32);
   const text = escape(raw);
   return {
-    messages: [[V10_IN.ADD_CHAT, [p.readInt8(0), name === null ? null : escape(name), text, kind, null, null, p.readInt32LE(1), null]]],
+    messages: [[V10_IN.ADD_CHAT, [channel, name === null ? null : escape(name), text, kind, null, null, account, null]]],
   };
 }
 

@@ -416,6 +416,7 @@ int main(void) {
               vequal(map_get(&a[12], "sf"), &KRUNKER_V_NUM(1)), "init arg 12: networkData {snf 10, tf 30, sf 1}");
         CHECK(vequal(&a[13], &KRUNKER_V_BOOL(1)), "init arg 13 is true");
         CHECK(vequal(&a[16], &KRUNKER_V_BOOL(0)), "init arg 16 is isRanked");
+        CHECK(a[11].type == KRUNKER_MAP && a[11].len == 1 && vequal(map_get(&a[11], "gor"), &KRUNKER_V_NUM(1)), "init arg 11 is the sync data {gor: 1}");
     } else {
         CHECK(0, "the init has 20 arguments");
     }
@@ -712,6 +713,51 @@ int main(void) {
     }
     krunker_frame_free(&kf);
 
+    // NET 9 (the v3 chat, game and server lines): a server line (kind 2) and a player line (kind 0), channel -1 (all)
+    uint8_t c9[325];
+    memset(c9, 0, sizeof c9);
+    c9[4] = 2;
+    w_str(c9, 37, "Round 2 starts");
+    native_send(&g_native, NET_PACKET_CHAT, c9, 325);
+    WAIT_FOR(client_count("ch") == 2);
+    KrunkerFrame ch9;
+    CHECK(client_get("ch", 1, &ch9) && ch9.argc == 8 && vequal(&ch9.args[0], &KRUNKER_V_NUM(-1)) && ch9.args[1].type == KRUNKER_NIL &&
+          is_str(&ch9.args[2], "Round 2 starts") && vequal(&ch9.args[3], &KRUNKER_V_NUM(2)) && ch9.args[6].type == KRUNKER_NIL,
+          "NET 9 server line: ch [-1, null, text, 2, null, null, null, null]");
+    krunker_frame_free(&ch9);
+    memset(c9, 0, sizeof c9);
+    w_i32(c9, 0, 3);
+    c9[4] = 0;
+    w_str(c9, 5, "Ada");
+    w_str(c9, 37, "hi <b>");
+    native_send(&g_native, NET_PACKET_CHAT, c9, 325);
+    WAIT_FOR(client_count("ch") == 3);
+    KrunkerFrame ch9p;
+    CHECK(client_get("ch", 2, &ch9p) && ch9p.argc == 8 && vequal(&ch9p.args[0], &KRUNKER_V_NUM(-1)) && is_str(&ch9p.args[1], "Ada") &&
+          is_str(&ch9p.args[2], "hi &lt;b&gt;") && ch9p.args[6].type == KRUNKER_NIL, "NET 9 player line: ch [-1, Ada, escaped, 0, ..., null]");
+    krunker_frame_free(&ch9p);
+
+    // MATCH_VOTE_STATE (181): the cards' votes as mv [vo, mts]; ours under our socket id (io-init)
+    uint8_t mvb[170];
+    memset(mvb, 0, sizeof mvb);
+    mvb[0] = 1; mvb[1] = 0;
+    w_i32(mvb, 2, 0); w_i32(mvb, 6, 5); w_u16(mvb, 10, 1);
+    native_send(&g_native, NET_PACKET_MATCH_VOTE_STATE, mvb, 170);
+    WAIT_FOR(client_count("mv") == 1);
+    KrunkerFrame mvf;
+    const int got_mv = client_get("mv", 0, &mvf);
+    const KrunkerValue *mine = got_mv ? map_get(&mvf.args[0], socket_id) : NULL;
+    CHECK(got_mv && mvf.argc == 2 && mine && mine->type == KRUNKER_ARRAY && mine->len == 2 && is_str(&mine->u.items[0], "0,5") &&
+          vequal(&mine->u.items[1], &KRUNKER_V_NUM(1)) && mvf.args[1].type == KRUNKER_ARRAY && mvf.args[1].len == 1,
+          "mv [{socket id: [\"0,5\", 1]}, [\"0,5\"]] (ours under the socket id, weight 1)");
+    krunker_frame_free(&mvf);
+
+    // EXT 0x8001 (KN's account rights): no v10 message, consumed with no stop
+    const uint8_t rights[6] = {0x01, 0x80, 0, 0, 0, 0};
+    native_send(&g_native, NET_PACKET_EXT, rights, 6);
+    pump(50);
+    CHECK(v10_bridge_untranslated("EXT 0x8001") == 0 && client_count("mv") == 1, "account rights are consumed");
+
     // PICKUP (128): one pickup's state is the pickup half of "inat" (the v10 client's updatePickup): uid, weapon,
     // true, active, pos when moved; an empty pickup (weapon -1) has a null weapon and a null position
     uint8_t pk[26];
@@ -732,8 +778,8 @@ int main(void) {
     native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
     WAIT_FOR(client_count("inat") == 2);
     KrunkerFrame inat2;
-    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && inat2.args[4].type == KRUNKER_NIL && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
-          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: null weapon, inactive, null position");
+    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && vequal(&inat2.args[4], &KRUNKER_V_NUM(0)) && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
+          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: weapon 0 (updatePickup), inactive, null position (mapPickup)");
     krunker_frame_free(&inat2);
 
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)

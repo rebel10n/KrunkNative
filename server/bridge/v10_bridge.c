@@ -132,6 +132,7 @@ struct V10Bridge {
     char native_host[256];
     int native_port;
     char lobby_id[64];
+    int trace;          /* KRUNK_NATIVE_V10_TRACE=1: every label each way (the TS trace, the same lines) */
     V10Session *head;
 };
 
@@ -191,6 +192,8 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_TIMER: return "TIMER";
     case NET_PACKET_CHEAT: return "CHEAT";
     case NET_PACKET_PICKUP: return "PICKUP";
+    case NET_PACKET_CHAT: return "CHAT";
+    case NET_PACKET_MATCH_VOTE_STATE: return "MATCH_VOTE_STATE";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
     case NET_PACKET_OBJECT_STATE: return "OBJECT_STATE";
     case NET_PACKET_MODE_SYNC_V7: return "MODE_SYNC_V7";
@@ -279,8 +282,11 @@ static void close_session(V10Session *s, int code, const char *reason, int force
 
 /* ---- the WebSocket side */
 
+#define TRACE(s, ...) do { if ((s)->bridge->trace) { fprintf(stderr, "[v10-proxy] "); fprintf(stderr, __VA_ARGS__); } } while (0)
+
 static void send_ws(V10Session *s, const char *label, const KrunkerValue *args, uint32_t argc) {
     if (s->closed || !s->ws) return;
+    TRACE(s, "%.5s -> %s\n", s->socket_id, label);
     KrunkerBuf buf = {0};
     if (krunker_proto_encode_ah(0, label, args, argc, &buf) == KRUNKER_PROTO_OK) kn_ws_send_binary(s->ws, buf.data, buf.len);
     krunker_buf_free(&buf);
@@ -375,6 +381,7 @@ static void tcp_read(V10Session *s) {
         }
         if (r == 0) {
             free(buf);
+            TRACE(s, "%.5s native socket closed\n", s->socket_id);
             close_session(s, 1011, "native server closed", 0);
             return;
         }
@@ -674,6 +681,14 @@ static void emit_init(V10Session *s) {
 
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
+    if (s->bridge->trace) {
+        char hex[24] = "";
+        if (n <= 8) {
+            for (size_t i = 0; i < n; i++) snprintf(hex + 1 + 2 * i, sizeof hex - 1 - 2 * i, "%02x", p[i]);
+            hex[0] = n ? ' ' : 0;
+        }
+        TRACE(s, "%.5s native %s (%zu B)%s\n", s->socket_id, native_name(type, p, n), n, hex);
+    }
     if (type == NET_PACKET_PING) {
         write_native(s, NET_PACKET_PONG, p, n);
         return;
@@ -733,6 +748,8 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     }
     if (s->init_sent && type == NET_PACKET_PING_RESULT) return; /* v10's "pir" handler does nothing */
     if (s->init_sent && type == NET_PACKET_SOCIAL_V7) return;   /* a v7 capability notice: chat goes as CHAT_SEND */
+    /* KN's account rights (EXT 0x8001): no v10 message, consumed (as the TS) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_ACCOUNT_RIGHTS) return;
     if (s->init_sent && type == NET_PACKET_LEADERBOARD) {
         v10_out_init(&o);
         size_t rows = 0;
@@ -754,6 +771,20 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         V10StateRec rec;
         if (!v10_map_state(p, n, &rec)) { stop_at(s, "STATE", "malformed"); return; }
         if (rec.uid != s->client_id && kbatch_push(s, &rec)) close_session(s, 1011, "out of memory", 0);
+        return;
+    }
+    /* MATCH_VOTE_STATE (181): the match cards' votes as "mv" [vo, mts] (mapMatchVoteState) */
+    if (s->init_sent && type == NET_PACKET_MATCH_VOTE_STATE) {
+        v10_out_init(&o);
+        v10_map_match_vote(&o, p, n, s->socket_id);
+        finish_out(s, &o, "MATCH_VOTE_STATE");
+        return;
+    }
+    /* NET 9: a v3 chat line (game, server and trigger lines; the player lines of a v7 peer take CHAT_V7) */
+    if (s->init_sent && type == NET_PACKET_CHAT) {
+        v10_out_init(&o);
+        v10_map_chat(&o, p, n);
+        finish_out(s, &o, "CHAT");
         return;
     }
     if (s->init_sent && type == NET_PACKET_CHAT_V7) {
@@ -1046,6 +1077,7 @@ static void on_ws_message(kn_ws *ws, const void *data, size_t len, int is_binary
         release(s);
         return;
     }
+    TRACE(s, "%.5s <- %s\n", s->socket_id, frame.name);
     handle_client(s, frame.name, frame.args, frame.argc);
     krunker_frame_free(&frame);
     release(s);
@@ -1056,6 +1088,7 @@ static void on_ws_close(kn_ws *ws, int code, const char *reason, void *ud) {
     (void)code;
     (void)reason;
     V10Session *s = ud;
+    TRACE(s, "%.5s client socket closed %d %.*s\n", s->socket_id, code, (int)strlen(reason ? reason : ""), reason ? reason : "");
     s->ws = NULL;
     close_session(s, 1000, "client closed", 0);
     s->dead = 1;
@@ -1103,6 +1136,8 @@ V10Bridge *v10_bridge_new(kn_loop *loop, const V10BridgeConfig *cfg) {
     snprintf(b->native_host, sizeof b->native_host, "%s", cfg->native_host ? cfg->native_host : "127.0.0.1");
     b->native_port = cfg->native_port > 0 ? cfg->native_port : V10_DEFAULT_NATIVE_PORT;
     snprintf(b->lobby_id, sizeof b->lobby_id, "%s", cfg->lobby_id ? cfg->lobby_id : V10_DEFAULT_LOBBY);
+    const char *trace = getenv("KRUNK_NATIVE_V10_TRACE");
+    b->trace = trace && !strcmp(trace, "1");
     kn_http_config hc;
     memset(&hc, 0, sizeof hc);
     kn_http_config_defaults(&hc);

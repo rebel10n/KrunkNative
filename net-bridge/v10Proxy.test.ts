@@ -369,6 +369,25 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.match(T.mapMatchVoteState(Buffer.alloc(169), "sock").stop || "", /malformed/);
 }
 
+// NET 9 (NetChatPacket, 325 bytes): the kinds are the v7 line's (found junk 3, ranked 4, player 0, game 1, server 2)
+{
+  const v3 = (kind: number, uid: number, name: string, text: string) => {
+    const b = Buffer.alloc(325);
+    b.writeInt32LE(uid, 0);
+    b[4] = kind;
+    b.write(name, 5, "utf8");
+    b.write(text, 37, "utf8");
+    return b;
+  };
+  assert.deepStrictEqual(T.mapChat(v3(3, -1, "", "You found [1.25] Junk"), EV.escapeHtml).messages,
+    [["ch", [-1, null, "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[1.25]</span> Junk", 1]]]);
+  assert.match(T.mapChat(v3(3, -1, "", "You found [1.2] Junk x"), EV.escapeHtml).stop || "", /found-junk/);
+  assert.deepStrictEqual(T.mapChat(v3(4, -1, "", "Queued for ranked"), EV.escapeHtml).messages, [["ch", [-1, null, "Queued for ranked", 2, "#5ce05a"]]]);
+  assert.match(T.mapChat(v3(7, -1, "", "x"), EV.escapeHtml).stop || "", /chat kind 7/);
+  assert.match(T.mapChat(Buffer.alloc(324), EV.escapeHtml).stop || "", /malformed/);
+  assert.deepStrictEqual(T.mapChat(v3(2, -1, "", "a <i>"), EV.escapeHtml).messages, [["ch", [-1, null, "a &lt;i&gt;", 2, null, null, null, null]]]);
+}
+
 async function main(): Promise<void> {
   // ---- the fake KrunkNative server: records every frame the bridge writes, sends what the test asks
   const nativeFrames: Array<{ type: number; payload: Buffer }> = [];
@@ -704,6 +723,24 @@ async function main(): Promise<void> {
   native.write(nativeFrame(245, chatLine));
   const ch = await waitFor(() => clientMessages.find((m) => m.label === "ch"), "ch");
   assert.deepStrictEqual(ch.args, [0, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, 7, null]);
+
+  // a v3 chat line (NET 9, NetChatPacket: uid, kind, name, text): the game, server and trigger lines a v7 peer still gets.
+  // It has no channel and no account: channel -1 (all), account null; a server line (kind 2) has no name
+  const serverLine = Buffer.alloc(325);
+  serverLine.writeInt32LE(-1, 0);
+  serverLine[4] = 2;
+  serverLine.write("Round 2 starts", 37, "utf8");
+  native.write(nativeFrame(9, serverLine));
+  const ch9 = await waitFor(() => clientMessages.filter((m) => m.label === "ch")[1], "ch (v3 server line)");
+  assert.deepStrictEqual(ch9.args, [-1, null, "Round 2 starts", 2, null, null, null, null]);
+  const playerLine = Buffer.alloc(325);
+  playerLine.writeInt32LE(3, 0);
+  playerLine[4] = 0;
+  playerLine.write("Ada", 5, "utf8");
+  playerLine.write("hi <b>", 37, "utf8");
+  native.write(nativeFrame(9, playerLine));
+  const ch9p = await waitFor(() => clientMessages.filter((m) => m.label === "ch")[2], "ch (v3 player line)");
+  assert.deepStrictEqual(ch9p.args, [-1, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, null, null]);
 
   // the per-tick player states (STATE, 6): our own is not sent back; another player's is a k with its 13-field record
   const stateOf = (uid: number, x: number) => {

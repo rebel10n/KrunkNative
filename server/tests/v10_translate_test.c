@@ -83,6 +83,13 @@ static int msg_is(const V10Out *o, size_t idx, const char *label, const KrunkerV
     CHECK(msg_is((o), (idx), (label), want_, sizeof want_ / sizeof want_[0]), "message %zu is %s with the TS arguments", (size_t)(idx), (label)); \
 } while (0)
 
+static const KrunkerValue *map_get_v(const KrunkerValue *m, const char *key) {
+    for (uint32_t i = 0; m && m->type == KRUNKER_MAP && i < m->len; i++) {
+        const KrunkerValue *k = &m->u.items[2 * i];
+        if (k->len == strlen(key) && !memcmp(k->u.str, key, k->len)) return &m->u.items[2 * i + 1];
+    }
+    return NULL;
+}
 static int stop_has(const V10Out *o, const char *part) { return o->stop && strstr(o->stop, part) != NULL; }
 
 // ---- the TS buffer builders (v10Proxy.test.ts): little endian, the layouts of shared.h
@@ -239,17 +246,99 @@ int main(void) {
             put_i32(pk, 4, -1); pk[8] = 0; pk[9] = 0;
             v10_out_init(&po);
             v10_map_pickup(&po, pk, 26);
-            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), NIL, B(1), B(0), NIL);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), N(0), B(1), B(0), NIL);
             v10_out_free(&po);
             v10_out_init(&po);
             v10_map_pickup(&po, pk, 25);
             CHECK(stop_has(&po, "malformed"), "a short pickup is malformed");
             v10_out_free(&po);
-            put_i32(pk, 0, -1);
+            put_i32(pk, 0, -1); /* mapPickup has no uid check: the message goes as it is */
             v10_out_init(&po);
             v10_map_pickup(&po, pk, 26);
-            CHECK(stop_has(&po, "map object id"), "a pickup with no map object id stops");
+            CHECK(!po.stop && po.count == 1, "a pickup with uid -1 is sent as the TS sends it");
             v10_out_free(&po);
+        }
+
+        // NET 9 (NetChatPacket, 325 bytes): the kinds of the v7 line, channel -1 and account null (mapChat)
+        {
+            uint8_t c9[325];
+            V10Out co;
+            memset(c9, 0, sizeof c9);
+            c9[4] = 2;
+            put_str(c9, 37, "Round 2 starts", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), NIL, S("Round 2 starts"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&co);
+            memset(c9, 0, sizeof c9);
+            put_i32(c9, 0, 3);
+            c9[4] = 0;
+            put_str(c9, 5, "Ada", 32);
+            put_str(c9, 37, "hi <b>", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), S("Ada"), S("hi &lt;b&gt;"), N(0), NIL, NIL, NIL, NIL);
+            v10_out_free(&co);
+            memset(c9, 0, sizeof c9);
+            c9[4] = 3;
+            put_str(c9, 37, "You found [1.25] Junk", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), NIL, S("<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[1.25]</span> Junk"), N(1));
+            v10_out_free(&co);
+            c9[4] = 7;
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            CHECK(stop_has(&co, "chat kind 7"), "an unknown NET 9 kind stops");
+            v10_out_free(&co);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 324);
+            CHECK(stop_has(&co, "malformed"), "a short NET 9 chat is malformed");
+            v10_out_free(&co);
+        }
+
+        // MATCH_VOTE_STATE (170 bytes): mv [vo, mts]; ours under the socket id, the others under vote<i> (mapMatchVoteState)
+        {
+            uint8_t mv[170];
+            V10Out mo;
+            memset(mv, 0, sizeof mv);
+            mv[0] = 2; mv[1] = 1;
+            put_i32(mv, 2, 0); put_i32(mv, 6, 5); put_u16(mv, 10, 2);
+            put_i32(mv, 44, 1); put_i32(mv, 48, 9); put_u16(mv, 52, 1);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(!mo.stop && mo.count == 1, "mv translates");
+            if (mo.count == 1) {
+                const KrunkerValue vote0 = ARR(S("0,5"), N(2));
+                const KrunkerValue sock = ARR(S("1,9"), N(1));
+                const KrunkerValue mts_want = ARR(S("0,5"), S("1,9"));
+                const KrunkerValue *vo = &mo.msgs[0].args[0];
+                CHECK(vo->len == 2 && vequal(map_get_v(vo, "vote0"), &vote0) && vequal(map_get_v(vo, "sock"), &sock), "mv: vote0 and sock");
+                CHECK(vequal(&mo.msgs[0].args[1], &mts_want), "mv: the option list mts");
+            }
+            v10_out_free(&mo);
+            memset(mv, 0, sizeof mv);
+            mv[0] = 1; mv[1] = 0;
+            put_i32(mv, 2, 2); put_i32(mv, 6, 3); put_u16(mv, 10, 4);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            if (mo.count == 1) {
+                const KrunkerValue ours = ARR(S("2,3"), N(1));
+                const KrunkerValue rest = ARR(S("2,3"), N(3));
+                const KrunkerValue *vo = &mo.msgs[0].args[0];
+                CHECK(vequal(map_get_v(vo, "sock"), &ours) && vequal(map_get_v(vo, "vote0"), &rest), "mv: ours is 1, the rest of the weight is vote0");
+            }
+            v10_out_free(&mo);
+            memset(mv, 0, sizeof mv);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(mo.count == 1 && mo.msgs[0].args[0].len == 0 && mo.msgs[0].args[1].len == 0, "no vote clears the cards: {} and []");
+            v10_out_free(&mo);
+            mv[0] = 5;
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(stop_has(&mo, "malformed"), "more than 4 cards is malformed");
+            v10_out_free(&mo);
         }
 
         // CHEAT (60): [flag, on], the on / off byte 0 or 1; the flags with a v10 label (noc, unl, fh, frz)
@@ -743,6 +832,8 @@ int main(void) {
             CHECK(m->args[12].type == KRUNKER_MAP, "init arg 12: the networking object");
             CHECK(vequal(&m->args[13], &KRUNKER_V_BOOL(1)), "init arg 13 is true");
             CHECK(vequal(&m->args[16], &KRUNKER_V_BOOL(0)), "init arg 16 is isRanked");
+            CHECK(m->args[11].type == KRUNKER_MAP && m->args[11].len == 1 && vequal(&m->args[11].u.items[1], &KRUNKER_V_NUM(1)),
+                  "init arg 11 is the sync data {gor: 1} (the v10 init reads it)");
         }
         v10_out_free(&o2);
     }

@@ -62,6 +62,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
   [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
   [T.NATIVE_MORE.PICKUP]: "PICKUP",
+  [T.NATIVE_MORE.CHAT]: "CHAT",
   [T.NATIVE_MORE.MATCH_VOTE_STATE]: "MATCH_VOTE_STATE",
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
   [T.NATIVE_MORE.LEADER_STATS]: "LEADER_STATS",
@@ -331,6 +332,13 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     const state = T.mapState(payload);
     if (!state) return stopAt(session, "STATE", "malformed");
     if (state.uid !== session.clientId) session.kBatch.push(state.record);
+    return;
+  }
+  // NET 9: a v3 chat line (game, server and trigger lines; the player lines of a v7 peer take CHAT_V7)
+  if (session.initSent && type === T.NATIVE_MORE.CHAT) {
+    const mapped = T.mapChat(payload, EV.escapeHtml);
+    if (mapped.stop) return stopAt(session, "CHAT", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
   if (session.initSent && type === T.NATIVE_MORE.CHAT_V7) {

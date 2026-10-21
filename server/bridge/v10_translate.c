@@ -652,13 +652,17 @@ int v10_parse_init(const uint8_t *p, size_t n, V10Init *out) {
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
                    KrunkerValue network, int ranked) {
     const KrunkerValue empty = v10_obj(o, NULL, NULL, 0);
+    /* the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress; the v10 init reads it */
+    const char *const sync_keys[1] = {"gor"};
+    const KrunkerValue sync_vals[1] = {KRUNKER_V_NUM(1)};
+    const KrunkerValue sync = v10_obj(o, sync_keys, sync_vals, 1);
     const char *const map_keys[5] = {"data", "id", "creator", "info", "accType"};
     const KrunkerValue map_vals[5] = {KRUNKER_V_STRN((const char *)map, map_len), KRUNKER_V_NIL, KRUNKER_V_STR(""), empty, KRUNKER_V_NUM(1)};
     const KrunkerValue map_obj = v10_obj(o, map_keys, map_vals, 5);
     const KrunkerValue args[V10_INIT_ARGS] = {
         KRUNKER_V_NUM(init->map_index), KRUNKER_V_NUM(init->mode_index), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
         KRUNKER_V_NIL,                  config,                            KRUNKER_V_NIL, KRUNKER_V_NUM(0), map_obj,
-        KRUNKER_V_NIL,                  empty,                             network,       KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(0),
+        KRUNKER_V_NIL,                  sync,                              network,       KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(0),
         KRUNKER_V_BOOL(0),              KRUNKER_V_BOOL(ranked),            KRUNKER_V_NIL, KRUNKER_V_NIL,     KRUNKER_V_NIL,
     };
     v10_push(o, V10_IN_INIT_GAME, args, V10_INIT_ARGS);
@@ -850,17 +854,15 @@ void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n) {
         o->stop = "malformed";
         return;
     }
+    /* mapPickup (v10Translate.ts): an empty pickup (weapon -1) goes as weapon 0 and inactive; the position only when moved */
     const int32_t uid = rd_i32(p, 0);
-    if (uid < 0) {
-        o->stop = "a pickup with no map object id";
-        return;
-    }
     const int32_t weapon = rd_i32(p, 4);
-    const int active = p[8] != 0;
+    const int empty = weapon < 0;
+    const int active = !empty && p[8] != 0;
     const int moved = p[9] != 0;
     const KrunkerValue pos[3] = {KRUNKER_V_NUM(rd_f32(p, 10)), KRUNKER_V_NUM(rd_f32(p, 14)), KRUNKER_V_NUM(rd_f32(p, 18))};
     const KrunkerValue args[8] = {
-        KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(uid), weapon >= 0 ? KRUNKER_V_NUM(weapon) : KRUNKER_V_NIL,
+        KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(uid), KRUNKER_V_NUM(empty ? 0 : weapon),
         KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(active), moved ? v10_arr(o, pos, 3) : KRUNKER_V_NIL,
     };
     v10_push(o, V10_IN_PLAYER_INTERACTION, args, 8);
@@ -1361,17 +1363,13 @@ static int junk_amount(const uint8_t *s, size_t n, const uint8_t **amount, size_
     return 1;
 }
 
-void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
-    if (n != CHAT_V7_SIZE) {
-        o->stop = "malformed";
-        return;
-    }
-    const uint8_t kind = p[9];
-    const size_t raw_len = field_len(p, n, 42, V10_CHAT_TEXT_SIZE);
-    /* KN kind 3 (NET_CHAT_FOUND_JUNK) is the finder's "You found [x.xx] Junk": v10 builds that line itself */
+/* chatLine (v10Translate.ts): kinds 3 (found junk) and 4 (ranked) are the lines v10 builds itself; 0 to 2 are the
+ * player, game and server lines, with the channel and the account id the packet carried (a v3 line has neither). */
+static void chat_line(V10Out *o, uint8_t kind, const uint8_t *raw, size_t raw_len, const uint8_t *name, size_t name_len,
+                      int32_t channel, int has_account, int32_t account) {
     if (kind == 3) {
         uint8_t clean[3 * V10_CHAT_TEXT_SIZE];
-        const size_t cn = utf8_sanitize(p + 42, raw_len, clean);
+        const size_t cn = utf8_sanitize(raw, raw_len, clean);
         const uint8_t *amount = NULL;
         size_t alen = 0;
         if (!junk_amount(clean, cn, &amount, &alen)) {
@@ -1389,9 +1387,8 @@ void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
         v10_push(o, V10_IN_ADD_CHAT, (KrunkerValue[]){KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_STRN((const char *)html, total), KRUNKER_V_NUM(1)}, 4);
         return;
     }
-    /* KN kind 4 (NET_CHAT_RANKED): the ranked queue's notice in the ranked green (v10's direct line) */
     if (kind == 4) {
-        const KrunkerValue text = v10_escape_html(o, p + 42, raw_len);
+        const KrunkerValue text = v10_escape_html(o, raw, raw_len);
         const KrunkerValue args[5] = {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, text, KRUNKER_V_NUM(2), KRUNKER_V_STR("#5ce05a")};
         v10_push(o, V10_IN_ADD_CHAT, args, 5);
         return;
@@ -1402,11 +1399,74 @@ void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
         o->stop = why ? why : "chat kind has no v10 kind";
         return;
     }
-    const KrunkerValue name = kind == 2 ? KRUNKER_V_NIL : v10_escape_html(o, p + 10, field_len(p, n, 10, 32));
-    const KrunkerValue text = v10_escape_html(o, p + 42, raw_len);
+    const KrunkerValue nm = kind == 2 ? KRUNKER_V_NIL : v10_escape_html(o, name, name_len);
+    const KrunkerValue text = v10_escape_html(o, raw, raw_len);
     const KrunkerValue args[8] = {
-        KRUNKER_V_NUM((int8_t)p[0]), name, text, KRUNKER_V_NUM(kind), KRUNKER_V_NIL, KRUNKER_V_NIL,
-        KRUNKER_V_NUM(rd_i32(p, 1)), KRUNKER_V_NIL,
+        KRUNKER_V_NUM(channel), nm, text, KRUNKER_V_NUM(kind), KRUNKER_V_NIL, KRUNKER_V_NIL,
+        has_account ? KRUNKER_V_NUM(account) : KRUNKER_V_NIL, KRUNKER_V_NIL,
     };
     v10_push(o, V10_IN_ADD_CHAT, args, 8);
+}
+
+/* CHAT_V7 (330 bytes): see the layout in v10Translate.ts (mapChatV7). */
+void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != CHAT_V7_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    chat_line(o, p[9], p + 42, field_len(p, n, 42, V10_CHAT_TEXT_SIZE), p + 10, field_len(p, n, 10, 32), (int8_t)p[0], 1, rd_i32(p, 1));
+}
+
+/* NetChatPacket (325 bytes, the v3 line): int32 uid @0, uint8 kind @4, name[32] @5, text[288] @37. A v7 peer still gets
+ * it for the game, server and trigger lines. No channel and no account: channel -1 (all), account null (mapChat). */
+#define CHAT_V3_SIZE 325
+
+void v10_map_chat(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != CHAT_V3_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    chat_line(o, p[4], p + 37, field_len(p, n, 37, V10_CHAT_TEXT_SIZE), p + 5, field_len(p, n, 5, 32), -1, 0, 0);
+}
+
+/* NetMatchVoteStatePacket (170 bytes): count uint8 @0 (0: no vote), voted int8 @1 (ours, -1 none), entries[4] @2, 42 bytes
+ * each: mode_id int32, map_index int32, votes uint16, map_name[32]. v10 "mv" is [vo, mts] (mapMatchVoteState). */
+#define MATCH_VOTE_STATE_SIZE 170
+#define MATCH_VOTE_ENTRY_SIZE 42
+#define NET_MATCH_PICKS 4
+
+void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socket_id) {
+    if (n != MATCH_VOTE_STATE_SIZE || p[0] > NET_MATCH_PICKS) {
+        o->stop = "malformed";
+        return;
+    }
+    const size_t count = p[0];
+    const int voted = (int8_t)p[1];
+    KrunkerValue *mts = count ? v10_arena(o, count * sizeof *mts) : NULL;
+    KrunkerValue *kv = v10_arena(o, 2 * (2 * count + 1) * sizeof *kv);
+    if (!kv || (count && !mts)) return;
+    size_t pairs = 0;
+    for (size_t i = 0; i < count; i++) {
+        const size_t at = 2 + i * MATCH_VOTE_ENTRY_SIZE;
+        char option[32];
+        snprintf(option, sizeof option, "%d,%d", (int)rd_i32(p, at), (int)rd_i32(p, at + 4));
+        const int votes = rd_u16(p, at + 8);
+        const int own = voted == (int)i && votes > 0;
+        const KrunkerValue opt = v10_text(o, (const uint8_t *)option, strlen(option));
+        mts[i] = opt;
+        if (own) {
+            kv[2 * pairs] = v10_text(o, (const uint8_t *)socket_id, strlen(socket_id));
+            kv[2 * pairs + 1] = v10_arr(o, (KrunkerValue[]){opt, KRUNKER_V_NUM(1)}, 2);
+            pairs++;
+        }
+        if (votes - own > 0) {
+            char key[24];
+            snprintf(key, sizeof key, "vote%zu", i);
+            kv[2 * pairs] = v10_text(o, (const uint8_t *)key, strlen(key));
+            kv[2 * pairs + 1] = v10_arr(o, (KrunkerValue[]){opt, KRUNKER_V_NUM(votes - own)}, 2);
+            pairs++;
+        }
+    }
+    const KrunkerValue args[2] = {KRUNKER_V_MAP(kv, (uint32_t)pairs), v10_arr(o, mts, (uint32_t)count)};
+    v10_push(o, V10_IN_UPD_MATCH_VOTE, args, 2);
 }
