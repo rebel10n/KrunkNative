@@ -304,9 +304,10 @@ static void h_queue(kn_http_req *req, void *ud) {
     char flavor[16] = "";
     kn_http_query_get(req, "flavor", flavor, sizeof flavor);
     if (!registry_flavor_match("", flavor))
-        return reply_mm_error(req, "FLAVOR_UNAVAILABLE", "Ranked is not available in this game", NULL);
-    if (!db_ready()) return reply_mm_error(req, "INTERNAL_ERROR", "Ranked is unavailable", NULL);
-    if (R.b->draining) return reply_mm_error(req, "INTERNAL_ERROR", "updating", NULL);
+        return reply_mm_error(req, "FLAVOR_UNAVAILABLE", "Unknown error", NULL); // v10's text for an ERROR with no message
+    /* the banner shows the message (v10 handleWebSocketMessage): v10's own texts, never invented ones */
+    if (!db_ready()) return reply_mm_error(req, "INTERNAL_ERROR", "Failed to connect to matchmaking server", NULL);
+    if (R.b->draining) return reply_mm_error(req, "INTERNAL_ERROR", "GAME UPDATING", NULL); // v10 matchmaker.NoServersMatchQuery
     JoinCtx *j = calloc(1, sizeof(*j));
     if (!j) return reply_error(req, 500, "internal");
     j->req = req;

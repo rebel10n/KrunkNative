@@ -355,6 +355,8 @@ def main():
         code, rq = http(port, "/mm/ranked/queue?regions=na&flavor=strike")
         check("ranked queue (Box Office's) for a Strike client: FLAVOR_UNAVAILABLE",
               code == 200 and rq.get("type") == "ERROR" and rq.get("payload", {}).get("code") == "FLAVOR_UNAVAILABLE", (code, rq))
+        check("... with v10's own text for an ERROR without a message: Unknown error (the banner shows it)",
+              rq.get("payload", {}).get("message") == "Unknown error", (code, rq))
         code, rq = http(port, "/mm/ranked/queue?regions=na")
         check("ranked queue for a Box Office guest: its usual answer (not FLAVOR_UNAVAILABLE)",
               code == 200 and rq.get("payload", {}).get("code") not in (None, "FLAVOR_UNAVAILABLE"), (code, rq))

@@ -12,8 +12,11 @@ The client's script (KRUNKNATIVE_INPUT_SCRIPT, text checks from the [input_scrip
   1. "Ranked Challenges" on the home (openRankedChallenges, v10:215670): the Challenges window
      opens at home, its Ranked block (#challRankedHeadr) is scrolled into the window
   2. Ranked (openRankedMenu): the popup with its start button
+  2b. FIND MATCH with the queue's answer held back (a byte relay in front of the brain, QUEUE_DELAY_S): the button
+     reads LOADING... and the footer Ready text until the QUEUED frame, then the search starts (v10:98459, 98420)
   3. the brain is killed by this harness while the popup is up; FIND MATCH then fails to reach the
-     matchmaking server: v10 shows the "Internal Error" popup (v10:98443-98450, 37958), not a line
+     matchmaking server: v10 shows the "Internal Error" popup (v10:98443-98450, 37958) and keeps the banner's
+     "Failed to connect to matchmaking server" text
 
   H. the Home tab's map carousel is v10's markup (ranked_ui.c gen_home, v10:111965-111969): every pool map
      is a plain .map-card with an unlabelled .map-image, none greyed, even one the brain marks unavailable.
@@ -30,9 +33,11 @@ import re
 import shutil
 import signal
 import sqlite3
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
@@ -136,8 +141,64 @@ SCRIPT = """0 menu
 22000 text @err .overlay-title
 22050 text @errtext .overlay-description
 22100 nodes @still .rankedMenuModal .start-button
+22200 text @banner .ranked-matchmaking-status
 23500 quit
 """
+
+# the queue answers late (QUEUE_DELAY_S, behind delayed_relay): v10 keeps the state Idle, LOADING... on the button and
+# no banner until the QUEUED frame (v10 handleQueueStatus, v10:98459); then the search starts
+QUEUE_DELAY_S = 3.0
+SLOW_SCRIPT = """0 menu
+12000 nodes @idle .rankedMenuModal
+13000 call openRankedMenu
+15000 nodes @rk .rankedMenuModal .start-button
+16000 call knRkStart
+17000 nodes @early .ranked-matchmaking-status.show
+17100 text @early_btn .start-button
+17200 text @early_foot .footer .status-text
+21000 nodes @late .ranked-matchmaking-status.show
+21100 text @late_foot .footer .status-text
+22000 quit
+"""
+
+
+def delayed_relay(upstream_port, relay_port):
+    """the brain behind a byte relay: a ranked queue request (its first bytes) is held for QUEUE_DELAY_S before it is
+    sent on; every other byte passes at once (the login's WebSocket included). Returns the listening socket: close()"""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", relay_port))
+    srv.listen(32)
+
+    def pump(src, dst, held):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                if held and data.startswith(b"GET /mm/ranked/queue"):
+                    time.sleep(QUEUE_DELAY_S)
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    def accept_loop():
+        while True:
+            try:
+                client, _ = srv.accept()
+            except OSError:
+                return
+            up = socket.create_connection(("127.0.0.1", upstream_port))
+            threading.Thread(target=pump, args=(client, up, True), daemon=True).start()
+            threading.Thread(target=pump, args=(up, client, False), daemon=True).start()
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+    return srv
 
 
 def node(brain_port, node_id, game_port):
@@ -157,10 +218,10 @@ def node(brain_port, node_id, game_port):
     return p, log
 
 
-def start_client(name, brain_port, storage):
+def start_client(name, brain_port, storage, script=None):
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
-        f.write(SCRIPT)
+        f.write(script or SCRIPT)
     cfg = os.path.join(WORK, name + "-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     for key, value in storage.items():
@@ -282,6 +343,31 @@ def main():
         sql(dbcfg, "UPDATE players SET player_score = $1 WHERE player_id = $2", int((20 / 0.03) ** 2) + 1, acc["id"])
         check("a level-20 account registered", bool(acc["token"]), str(acc))
 
+        # FIND MATCH with a slow matchmaker (the brain behind a relay that holds the queue's answer)
+        relay_port = kn_proto.free_ports(1)[0]
+        relay = delayed_relay(port, relay_port)
+        s, slog = start_client("slow", relay_port, {"krunker_username": acc["name"], "krunker_token": acc["token"]},
+                               script=SLOW_SCRIPT)
+        try:
+            s.wait(120)
+        except subprocess.TimeoutExpired:
+            os.killpg(s.pid, signal.SIGTERM)
+            s.wait(10)
+        relay.close()
+        stext = read_log(slog)
+        early_btn = text_of(stext, "early_btn")[1] or ""
+        early_foot = text_of(stext, "early_foot")[1] or ""
+        check("before QUEUED the start button reads LOADING... (v10 keeps the state Idle while it connects, v10:98420)",
+              early_btn == "LOADING...", repr(early_btn)[:80])
+        check("before QUEUED no search has started: no banner (v10 updateGlobalStatus only while Searching)",
+              nodes(stext, "early") == 0, str(nodes(stext, "early")))
+        check("before QUEUED the footer keeps v10's Ready text (no Looking for match yet)",
+              early_foot == "Ready to compete? Join the ranked queue!", repr(early_foot)[:80])
+        check("after QUEUED the banner shows the search (v10 handleQueueStatus QUEUED, v10:98459)",
+              nodes(stext, "late") == 1, str(nodes(stext, "late")))
+        check("after QUEUED the footer reads Looking for match...",
+              "Looking for match" in (text_of(stext, "late_foot")[1] or ""), repr(text_of(stext, "late_foot")[1])[:80])
+
         p, log = start_client("player", port, {"krunker_username": acc["name"], "krunker_token": acc["token"]})
         # the harness takes the brain away once the popup is up: FIND MATCH cannot reach the queue
         up = wait_for(lambda: re.search(r"@rk elements=\d+ match=1", read_log(log)), 90)
@@ -313,6 +399,9 @@ def main():
         desc = text_of(text, "errtext")[1]
         check("the Internal Error text is v10's", desc == "An internal error occurred. Please try again later.", repr(desc))
         check("the Ranked popup stays up behind the error", nodes(text, "still") == 1, str(nodes(text, "still")))
+        banner = text_of(text, "banner")[1] or ""
+        check("an unreachable queue keeps v10's banner text (v10 socket onerror: Failed to connect to matchmaking server)",
+              banner == "Failed to connect to matchmaking server", repr(banner)[:120])
     finally:
         for q in procs:
             if q.poll() is None:

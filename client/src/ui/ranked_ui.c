@@ -440,6 +440,7 @@ static void update_banner(void) {
 // ------------------------------------------------------------------ queue session (MatchmakingService)
 
 static void poll_fire(void *user);
+static void status_tick(void *user);
 
 static int g_kio_queue;          // the queue is krunker.io's socket (krunker_ranked_queue_start), not the brain's
 
@@ -550,6 +551,16 @@ static void queue_unparseable(void) {
     render();
 }
 
+// The queue could not be reached: v10's socket onerror (v10:98441-98452) sets the banner to "Failed to connect to
+// matchmaking server" with error INTERNAL_ERROR, so the banner keeps that text and the Internal Error popup opens.
+static void queue_unreachable(void) {
+    clear_state();
+    R.busy = 0;
+    banner_error("Failed to connect to matchmaking server");
+    internal_error();
+    render();
+}
+
 // handleWebSocketMessage({type, payload})
 static void handle_message(const cJSON *msg) {
     const char *type = v10_str(msg, "type");
@@ -566,8 +577,6 @@ static void handle_message(const cJSON *msg) {
             show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
         } else if (!strcmp(code, "LOGIN_REQUIRED"))
             show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
-        else if (!strcmp(code, "FLAVOR_UNAVAILABLE"))
-            show_overlay("Ranked Unavailable", "Ranked is not available in this game.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
         else if (!strcmp(code, "NO_RANK_DATA"))
             show_overlay("Rank Data Missing", "We could not retrieve your ranked data. Please try again later.", "OK", "#ff3939", "\xe2\x9d\x8c", 0);
         else if (!strcmp(code, "COOLDOWN")) {
@@ -592,9 +601,11 @@ static void handle_message(const cJSON *msg) {
     if (!strcmp(status, "QUEUED")) {
         const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(p, "clientKey"));
         if (key) snprintf(R.key, sizeof(R.key), "%s", key);
-        if (R.state != MM_SEARCHING) {
+        if (R.state != MM_SEARCHING) { // v10 handleQueueStatus QUEUED (v10:98459): Searching and its start time, only now
             R.state = MM_SEARCHING;
             R.queued_at = (double) time(NULL);
+            set_status("Looking for match... (0:00)", "\xf0\x9f\x94\x8d", "#5ce05a");
+            if (!R.tick_timer) R.tick_timer = html_timer_add(1000, status_tick, NULL);
         }
         R.busy = 0;
     } else if (!strcmp(status, "MATCHED")) {
@@ -632,10 +643,7 @@ static void on_poll(void *user, const int status, const char *body, const size_t
     R.poll_inflight = 0;
     if (!R.key[0] || R.state != MM_SEARCHING) return;
     if (status == 404) { // the brain forgot the key (it stopped polling for too long)
-        clear_state();
-        banner_error("Failed to connect to matchmaking server");
-        internal_error();
-        render();
+        queue_unreachable();
         return;
     }
     cJSON *msg = status == 200 ? cJSON_Parse(body) : NULL;
@@ -660,12 +668,7 @@ static void on_queue(void *user, const int status, const char *body, const size_
     cJSON *msg = status == 200 ? cJSON_Parse(body) : NULL;
     if (cJSON_IsObject(msg)) handle_message(msg);
     else if (status == 200) queue_unparseable(); // a brain frame that is not an object: v10's parse error
-    else { // the queue could not be reached (v10's socket onerror, v10:98443-98450): the Internal Error popup, no banner
-        clear_state();
-        R.busy = 0;
-        internal_error();
-        render();
-    }
+    else queue_unreachable(); // the queue could not be reached (v10's socket onerror, v10:98441-98452)
     cJSON_Delete(msg);
     if (R.state == MM_SEARCHING) poll_fire(NULL);
 }
@@ -707,26 +710,23 @@ static void kio_done(void *user, const int failed) {
     render();
 }
 
-// startMatchmaking(allRegions): connectWebSocket with the region (v10:98420); the queue's frames follow
+// startMatchmaking(allRegions): connectWebSocket with the region (v10:98420); the queue's frames follow. The
+// state stays Idle (LOADING...) until QUEUED, as v10's (handle_message starts the search then).
 static void start_kio_queue(void) {
-    if (flavor_get() != FLAVOR_BASE) { // another app's client never queues a Box Office ranked match (FLAVOR_UNAVAILABLE)
-        show_overlay("Ranked Unavailable", "Ranked is not available in this game.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
+    if (flavor_get() != FLAVOR_BASE) {
+        // another app's client never queues a Box Office ranked match. v10 has no such refusal: its ERROR for an
+        // unknown code reads "Unknown error" and opens the Internal Error popup (handleWebSocketMessage, v10:98444-98455)
+        banner_error("Unknown error");
+        internal_error();
         return;
     }
-    R.state = MM_SEARCHING;
     R.busy = 1;
-    R.queued_at = (double) time(NULL);
-    set_status("Looking for match... (0:00)", "\xf0\x9f\x94\x8d", "#5ce05a");
     g_kio_queue = 1;
     g_banner_error[0] = 0; // (v10 updateGlobalStatus: error null, v10:98389)
     if (!krunker_ranked_queue_start(R.all_regions ? "as,eu,na" : my_region(), kio_frame, kio_done, NULL)) {
         g_kio_queue = 0;
-        clear_state();
-        R.busy = 0;
-        banner_error("Failed to connect to matchmaking server");
-        internal_error();
+        queue_unreachable();
     }
-    if (!R.tick_timer) R.tick_timer = html_timer_add(1000, status_tick, NULL);
     update_banner();
 }
 
@@ -761,16 +761,8 @@ static void start_matchmaking(void) { // startMatchmaking(allRegions)
     // ranked match (FLAVOR_UNAVAILABLE), whose server would refuse it
     if (flavor_get() != FLAVOR_BASE && len > 0 && (size_t) len < sizeof(path))
         snprintf(path + len, sizeof(path) - (size_t) len, "&flavor=%s", flavor_current()->key);
-    R.state = MM_SEARCHING;
-    R.busy = 1;
-    R.queued_at = (double) time(NULL);
-    set_status("Looking for match... (0:00)", "\xf0\x9f\x94\x8d", "#5ce05a");
-    if (!backend_http_get(path, on_queue, NULL)) {
-        clear_state();
-        R.busy = 0;
-        internal_error();
-    }
-    if (!R.tick_timer) R.tick_timer = html_timer_add(1000, status_tick, NULL);
+    R.busy = 1; // LOADING... until the answer: its QUEUED frame starts the search (handle_message), as v10's
+    if (!backend_http_get(path, on_queue, NULL)) queue_unreachable();
     update_banner();
 }
 
