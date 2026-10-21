@@ -281,7 +281,9 @@ void net_broadcast_player_line(int uid, const char *real, const char *template);
 // A server line about player `uid` (name `name`, "$" = name) to one connection in the form it reads (net_ext.h
 // NET_EXT_KN_SERVER_LINE, or the composed line): the MOTD's line about the player who joined.
 void net_server_line_to(ClientConnection *to, int uid, const char *name, const char *template);
-void net_broadcast_ranked_notice(const char *msg); // the brain's "ranked-notice" line (NET_CHAT_RANKED)
+// the brain's "ranked-notice" line: the queued player's name apart from the template ("$" = name): NET_EXT_KN_RANKED_NOTICE to an
+// EXT peer, the composed NET_CHAT_RANKED line to an older one
+void net_broadcast_ranked_notice(const char *name, const char *template);
 
 // v10's game announcement banner (NET_EXT_GAME_ANNOUNCEMENT, shared/include/net_ext.h): the CLI's
 // `announce` sets the server's message ("" clears it) and sends it to every client; each client

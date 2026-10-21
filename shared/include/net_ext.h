@@ -148,6 +148,7 @@ typedef enum {
     // services/brain/guest.c, the server's round credit accounts.c acc_guest_*, client/src/ui/v10_rewards.c)
     NET_EXT_KN_GUEST_ID = 0x8140,     // C -> S NetGuestIdPacket: the menu's guest id, sent while signed out, once per connection
     NET_EXT_KN_GUEST_EARNED = 0x8141, // S -> C, no body: v10's "ger" (GUEST_EARNED_REWARDS): this guest's balance changed, fetch it again
+    NET_EXT_KN_RANKED_NOTICE = 0x8142, // S -> C NetRankedNoticePacket: the brain's "queued for ranked" line, the player apart from the text
 } NetExtSubtype;
 
 // NET_EXT_KN_GUEST_ID (C -> S): the guest id the menu keeps in its own storage: 32 lowercase hex digits
@@ -642,11 +643,22 @@ typedef struct {
     char message[NET_GAME_ANNOUNCEMENT_TEXT];
 } NetGameAnnouncementPacket;
 
+// NET_EXT_KN_RANKED_NOTICE (S -> C, EXT peers): the brain's "queued for ranked" line (NET_CHAT_RANKED's green), the queued
+// player apart from `text` ("$" = name, or no "$" for a line with no name). The brain knows the account, not the in-game uid
+// (a queue starts before any match), so the name has no uid: the client numbers it by name as an official line's name is
+// numbered (player_names_shown with uid -1), and never shows it raw while names are hidden. A pre-EXT peer gets the
+// composed NET_CHAT_RANKED line with the name (server/src/net.c net_broadcast_ranked_notice).
+typedef struct {
+    char name[32];   // PLAYER_NAME_SIZE: the queued player's name, NUL-terminated ("" for no name)
+    char text[288];  // NET_CHAT_TEXT_SIZE: the template, NUL-terminated
+} NetRankedNoticePacket;
+
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
 _Static_assert(sizeof(NetServerLinePacket) <= NET_EXT_BODY_MAX, "NetServerLinePacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetServerNamesPacket) <= NET_EXT_BODY_MAX, "NetServerNamesPacket exceeds NET_EXT_BODY_MAX");
 _Static_assert(sizeof(NetChatNamesPacket) <= NET_EXT_BODY_MAX, "NetChatNamesPacket exceeds NET_EXT_BODY_MAX");
+_Static_assert(sizeof(NetRankedNoticePacket) <= NET_EXT_BODY_MAX, "NetRankedNoticePacket exceeds NET_EXT_BODY_MAX");
 
 #pragma pack(push, 1)
 // The JSON-bodied subtypes (entities 0x0100-0x0105, live objects 0x8080-0x8081): one UTF-8 JSON

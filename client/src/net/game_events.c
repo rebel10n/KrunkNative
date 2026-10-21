@@ -461,6 +461,22 @@ static void events_chat(Client *client, const NetChatPacket *packet) {
     }
 }
 
+// NET_EXT_KN_RANKED_NOTICE (net_ext.h): the brain's "queued for ranked" line in the ranked green. The queued player has no
+// uid yet, so the name is numbered by name (player_names_shown with uid -1: the same Player_<n> as its row in this match);
+// the local player is "Player" as everywhere else. The line is never matched against its text.
+static void events_ranked_notice(Client *client, const NetRankedNoticePacket *packet) {
+    char name[PLAYER_NAME_SIZE], text[NET_CHAT_TEXT_SIZE], shown[PLAYER_NAME_SIZE], line[NET_CHAT_TEXT_SIZE];
+    memcpy(name, packet->name, sizeof(name));
+    memcpy(text, packet->text, sizeof(text));
+    name[sizeof(name) - 1] = 0;
+    text[sizeof(text) - 1] = 0;
+    const int self = client && client->me && name[0] && !strcmp(client->me->name, name);
+    const char *who = player_names_shown(-1, self, name, shown, sizeof(shown));
+    net_format_server_line(line, sizeof(line), text, who);
+    ui_console_on_chat(NULL, line, NET_CHAT_RANKED);
+    hud_ui_add_chat(NULL, line, RANKED_CHAT_COLOR);
+}
+
 // NET_EXT_KN_SERVER_LINE (net_ext.h): a server line about one player (its join / leave, a vote kick). The player's
 // name is shown as Hide player names shows it (player_names_shown by uid, the same Player_<n> as its scoreboard row)
 // and put in the template's "$": the line is never matched against its text (a name like "game" is not rewritten
@@ -1377,6 +1393,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetChatNamesPacket chat;
                 memcpy(&chat, body, sizeof(chat));
                 events_chat_names(client, &chat);
+            }
+            else if (subtype == NET_EXT_KN_RANKED_NOTICE && body_length == sizeof(NetRankedNoticePacket)) { // the brain's queued-for-ranked line
+                NetRankedNoticePacket notice;
+                memcpy(&notice, body, sizeof(notice));
+                events_ranked_notice(client, &notice);
             }
             else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
                 NetMarkPositionPacket ping;

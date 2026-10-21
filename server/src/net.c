@@ -270,12 +270,29 @@ void net_broadcast_chat(const char *from, const char *msg) {
     net_broadcast_chat_except(NULL, -1, NET_CHAT_SERVER, from, text);
 }
 
-// The brain's ranked notice ("ranked-notice"): a line for every player of this game server.
-void net_broadcast_ranked_notice(const char *msg) {
+// The brain's ranked notice ("ranked-notice"): a line for every player of this game server. An EXT peer gets
+// NET_EXT_KN_RANKED_NOTICE (the queued player apart from the template, so its client shows the name as Hide player names
+// does); an older peer the composed NET_CHAT_RANKED line with the name, as before.
+void net_broadcast_ranked_notice(const char *name, const char *template) {
+    NetRankedNoticePacket body;
+    memset(&body, 0, sizeof(body));
+    snprintf(body.name, sizeof(body.name), "%s", name ? name : "");
+    snprintf(body.text, sizeof(body.text), "%s", template ? template : "");
+    char composed[NET_CHAT_TEXT_SIZE];
+    net_format_server_line(composed, sizeof(composed), body.text, body.name);
     char text[NET_CHAT_TEXT_SIZE];
-    if (!net_chat_sanitize(text, sizeof(text), msg, msg ? strlen(msg) : 0)) return;
+    if (!net_chat_sanitize(text, sizeof(text), composed, strlen(composed))) return;
 
-    net_broadcast_chat_except(NULL, -1, NET_CHAT_RANKED, NULL, text);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_RANKED_NOTICE, &body, sizeof(body));
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
+            if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+        } else {
+            net_send_chat_to(client, -1, NET_CHAT_RANKED, NULL, text);
+        }
+    }
 }
 
 static char g_game_announcement[NET_GAME_ANNOUNCEMENT_TEXT];

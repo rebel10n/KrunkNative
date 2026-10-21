@@ -216,15 +216,18 @@ typedef struct JoinCtx {
 
 /* v10 server.message.queued "{0} queued for ranked" (the ranked queue start), to every player
  * this brain serves: each connected game node gets a "ranked-notice" (its players' chat, as
- * NET_CHAT_RANKED) and each signed-in JSON social socket an "eb" "ranked:queued" event (the menu's
+ * NET_EXT_KN_RANKED_NOTICE or NET_CHAT_RANKED) and each signed-in JSON social socket an "eb" "ranked:queued" event (the menu's
  * notification). The colour is the ranked UI's green (#5ce05a). Other brains' nodes and sockets
- * get nothing from this queue (federation pushes are per account). */
+ * get nothing from this queue (federation pushes are per account).
+ * The node gets the name apart from the template ("$" = name), so its players' clients hide the name when names are hidden. */
 static void queue_notice(const char *name) {
+    const int named = name && name[0];
     char text[96];
-    snprintf(text, sizeof text, "%s queued for ranked", name && name[0] ? name : "A player");
+    snprintf(text, sizeof text, "%s queued for ranked", named ? name : "A player");
     cJSON *node = cJSON_CreateObject();
     cJSON_AddStringToObject(node, "type", "ranked-notice");
-    cJSON_AddStringToObject(node, "text", text);
+    cJSON_AddStringToObject(node, "name", named ? name : "");
+    cJSON_AddStringToObject(node, "template", named ? "$ queued for ranked" : "A player queued for ranked");
     cJSON_AddStringToObject(node, "color", "#5ce05a");
     internal_ws_broadcast(R.b, node);
     cJSON_Delete(node);
