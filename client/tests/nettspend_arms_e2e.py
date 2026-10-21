@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""The Purple Drank's arms in third person: the off arm's elbow bends the same way as the trigger arm's
+"""The Purple Drank's arms: the off arm's rest beside the hip in third and first person, and the elbow bend
 (client/src/player_mesh.c player_arm_reach, the pole in nettspend.h NETTSPEND_OFF_ELBOW_POLE_*):
 
   python3 -I client/tests/nettspend_arms_e2e.py BUILD_DIR      (run from the repository root)
 
-An offline Kanji session (headless client_bin, input script, fixed 60 fps step): the local player holds the
-Drank in third person, faces -z (yaw 0) at the feet (-343, -143, -28), and the `arms` verb reads each arm's
-shoulder, elbow and wrist as drawn (world space). Checks:
+Two offline Kanji sessions (headless client_bin, input script, fixed 60 fps step): the local player holds the
+Drank, faces -z (yaw 0) at the feet (-343, -143, -28), and the `arms` verb reads each arm's shoulder, elbow and
+wrist as drawn (world space).
+
+Third person (the body's view):
   1. the trigger elbow bends down and back: the elbow's offset from its shoulder-to-wrist line points into
      the down-back half (perpendicular part dotted with (0, -1, +1) > 0);
   2. the off elbow bends the same way (down and back), not forward: a hanging arm's forearm swings forward;
@@ -19,6 +21,14 @@ shoulder, elbow and wrist as drawn (world space). Checks:
   7. the off elbow is no more than 2.0 below the off shoulder: the hand hangs beside the hip at hip height, and
      a bent arm of this length puts its elbow about half the wrist's drop below the shoulder (the user's
      "arms too low" / "sag", 2026-10-21).
+First person (the viewmodel, the arms the local player sees; the off arm is hidden except in the refill):
+  8. the refill runs: the pour-up reaches full strength (the off hand has the bottle over the cup);
+  9. the off hand at rest is beside the hip, as in third person: its wrist is within 0.3 of the third-person
+     rest's height above the feet, not ahead of the torso's front face, and its elbow is no more than 2.0 below
+     the shoulder (the first person's rest was 4.5 above the feet and 1.4 in front of the body, the forward swing);
+  10. the off elbow bends down and back at rest (the same pole as third person);
+  11. the refill ends where it started: the off wrist after the pour is within 0.1 of its rest on every axis, and
+     beside the hip by the same checks as 9 (the refill's end pose is the rest, not a forward swing).
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -41,6 +51,12 @@ TORSO_HALF_DEPTH = 0.65         # the body cube's half depth (chest_scale 1.3, c
 HIP_HEIGHT = 4.55               # the Drank's stream pelvis_height (kn_drank.c): the hip, above the feet
 OFF_WRIST_MIN = 5.3             # the off hand's rest: at hip height or a little above (above the feet)
 OFF_ELBOW_MAX_DROP = 2.0        # the off elbow: no more than this below the off shoulder
+REST_HEIGHT_TOL = 0.3           # the first-person rest's wrist height above the feet, against the third person's
+REFILL_TOL = 0.1                # the refill's end pose against its rest, per axis
+FP_REST_MS = 1400               # first person: the arms at rest (before the sip)
+FP_POUR_MS = 3000               # first person: the pour-up mid-way (progress 0.5 of the 1.4 s reload from 2300)
+FP_END_MS = 3850                # first person: after the pour-up (the reload ends at 3700)
+TP_REST_MS = 1500
 results = []
 
 
@@ -74,31 +90,36 @@ def bend(shoulder, elbow, wrist):
 POLE = unit((0.0, -1.0, 1.0))  # down and back: the body faces -z, so back is +z
 
 
-def parse_arms(text):
-    """{'trigger': (shoulder, elbow, wrist), 'off': ...} from the first `arms` line set (t = 1500)."""
+def parse_arms(text, at):
+    """{'trigger': (shoulder, elbow, wrist), 'off': ...} from the `arms` lines drawn at t = at (the first set from then on)."""
     out = {}
     for m in re.finditer(r"\[input_script\] arms t=(\d+) (trigger|off) shoulder=(\S+) elbow=(\S+) wrist=(\S+)", text):
-        if m.group(1) != "1500" or m.group(2) in out:
+        t = int(m.group(1))
+        if not (at <= t <= at + 20) or m.group(2) in out:
             continue
         vals = [tuple(float(v) for v in m.group(i).split(",")) for i in (3, 4, 5)]
         out[m.group(2)] = tuple(vals)
     return out
 
 
-def main():
-    if not os.path.isfile(f"{BUILD}/client_bin"):
-        print(f"no {BUILD}/client_bin", file=sys.stderr)
-        return 2
-    script = os.path.join(WORK, "arms.script")
+def parse_pour(text, at):
+    """The pour's strength (nettspend_pour_strength) at t = at, or None."""
+    for m in re.finditer(r"\[input_script\] pour t=(\d+) strength=(-?[\d.]+)", text):
+        if at <= int(m.group(1)) <= at + 20:
+            return float(m.group(2))
+    return None
+
+
+def run_client(tag, lines):
+    """One headless session of the Drank on the Kanji street; returns its log text."""
+    script = os.path.join(WORK, f"{tag}.script")
     with open(script, "w") as f:
-        f.write("0 play\n300 om add 67\n700 con thirdperson\n"
-                f"1000 pose {FEET[0]:g} {FEET[1]:g} {FEET[2]:g} 0 0\n"
-                "1500 arms\n1600 quit\n")
-    log = os.path.join(WORK, "client.log")
-    cfg = os.path.join(WORK, "cfg")
+        f.write("\n".join(lines) + "\n")
+    log = os.path.join(WORK, f"{tag}.log")
+    cfg = os.path.join(WORK, f"{tag}-cfg")
     os.makedirs(cfg, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, "state"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, f"{tag}-state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS),
                 "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_AUDIO_BACKEND": "null"})
     with open(log, "w") as out:
@@ -113,17 +134,45 @@ def main():
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
     with open(log, errors="replace") as f:
-        text = f.read()
-    arms = parse_arms(text)
-    check("the third-person arms are drawn (trigger and off)", {"trigger", "off"} <= set(arms), ", ".join(sorted(arms)) or "no arms line")
-    if {"trigger", "off"} <= set(arms):
+        return f.read()
+
+
+def fmt(p):
+    return tuple(round(v, 2) for v in p)
+
+
+def beside_hip(name, off, tp_height):
+    """The off hand at rest or at a refill's end: beside the hip, as in third person (checks 3, 6, 7 and the first-person 9)."""
+    shoulder, elbow, wrist = off
+    front = FEET[2] - TORSO_HALF_DEPTH
+    check(f"{name}: the off hand is not ahead of the torso's front face", wrist[2] >= front,
+          f"wrist z {wrist[2]:.2f}, torso front z {front:.2f}")
+    height = wrist[1] - FEET[1]
+    check(f"{name}: the off hand is at hip height, level with the third-person rest ({tp_height:.2f} above the feet, +-{REST_HEIGHT_TOL})",
+          abs(height - tp_height) <= REST_HEIGHT_TOL and height >= OFF_WRIST_MIN,
+          f"wrist {height:.2f} above the feet")
+    drop = shoulder[1] - elbow[1]
+    check(f"{name}: the off elbow is no more than {OFF_ELBOW_MAX_DROP} below its shoulder", drop <= OFF_ELBOW_MAX_DROP,
+          f"elbow {drop:.2f} below the shoulder")
+
+
+def main():
+    if not os.path.isfile(f"{BUILD}/client_bin"):
+        print(f"no {BUILD}/client_bin", file=sys.stderr)
+        return 2
+    pose = f"1000 pose {FEET[0]:g} {FEET[1]:g} {FEET[2]:g} 0 0"
+
+    # third person: the rest (the trigger elbow, the off hand, the cup's reach)
+    tp_text = run_client("tp", ["0 play", "300 om add 67", "700 con thirdperson", pose, f"{TP_REST_MS} arms", f"{TP_REST_MS + 100} quit"])
+    tp = parse_arms(tp_text, TP_REST_MS)
+    check("the third-person arms are drawn (trigger and off)", {"trigger", "off"} <= set(tp), ", ".join(sorted(tp)) or "no arms line")
+    if {"trigger", "off"} <= set(tp):
         for name in ("trigger", "off"):
-            s, e, w = arms[name]
-            b = bend(s, e, w)
-            side = dot(b, POLE)
+            s, e, w = tp[name]
+            side = dot(bend(s, e, w), POLE)
             check(f"{name} elbow bends down and back (the same way as the trigger's)", side > 0.0,
-                  f"elbow {tuple(round(v, 2) for v in e)}, wrist {tuple(round(v, 2) for v in w)}, bend side {side:+.2f}")
-        off_wrist = arms["off"][2]
+                  f"elbow {fmt(e)}, wrist {fmt(w)}, bend side {side:+.2f}")
+        off_wrist = tp["off"][2]
         front = FEET[2] - TORSO_HALF_DEPTH
         check("the off hand rests beside the hip, not ahead of the torso's front face", off_wrist[2] >= front,
               f"wrist z {off_wrist[2]:.2f}, torso front z {front:.2f}")
@@ -132,13 +181,37 @@ def main():
               f"wrist {hand_height:.2f} above the feet, pelvis {HIP_HEIGHT:.2f}")
         check("the off hand is at hip height or a little above (its wrist at least 5.3 above the feet)", hand_height >= OFF_WRIST_MIN,
               f"wrist {hand_height:.2f} above the feet")
-        off_shoulder, off_elbow, _ = arms["off"]
+        off_shoulder, off_elbow, _ = tp["off"]
         elbow_drop = off_shoulder[1] - off_elbow[1]
         check("the off elbow is no more than 2.0 below its shoulder (the hand hangs beside the hip, elbow bent)",
               elbow_drop <= OFF_ELBOW_MAX_DROP, f"elbow {elbow_drop:.2f} below the shoulder")
-        trig_wrist = arms["trigger"][2]
+        trig_wrist = tp["trigger"][2]
         check("the cup hand keeps its forward reach (over 3 units in front)", FEET[2] - trig_wrist[2] > 3.0,
               f"reach {FEET[2] - trig_wrist[2]:.2f}")
+    tp_height = (tp["off"][2][1] - FEET[1]) if "off" in tp else 0.0
+
+    # first person: the rest, the refill (a sip, then R: the pour-up), and the arms after it
+    fp_text = run_client("fp", ["0 play", "300 om add 67", pose, f"{FP_REST_MS} arms",
+                                "1500 mdown left", "1900 mup left", "2300 down R", "2333 up R",
+                                f"{FP_POUR_MS} pour", f"{FP_POUR_MS} arms", f"{FP_END_MS} arms", f"{FP_END_MS + 100} quit"])
+    fp = parse_arms(fp_text, FP_REST_MS)
+    fp_end = parse_arms(fp_text, FP_END_MS)
+    strength = parse_pour(fp_text, FP_POUR_MS)
+    check("the first-person arms are drawn at rest and after the refill", "off" in fp and "off" in fp_end,
+          f"rest {'off' in fp}, after {'off' in fp_end}")
+    check("the first-person refill pours (the bottle over the cup at mid-pour)", strength is not None and strength >= 0.9,
+          f"pour strength {strength}")
+    if "off" in fp and "off" in fp_end:
+        s, e, w = fp["off"]
+        side = dot(bend(s, e, w), POLE)
+        check("first person: the off elbow bends down and back at rest", side > 0.0,
+              f"elbow {fmt(e)}, wrist {fmt(w)}, bend side {side:+.2f}")
+        beside_hip("first person at rest", fp["off"], tp_height)
+        beside_hip("first person after the refill", fp_end["off"], tp_height)
+        spread = max(abs(a - b) for a, b in zip(fp["off"][2], fp_end["off"][2]))
+        check(f"the refill ends where it started (the off wrist within {REFILL_TOL} of its rest on every axis)", spread <= REFILL_TOL,
+              f"rest {fmt(fp['off'][2])}, after {fmt(fp_end['off'][2])}, largest step {spread:.3f}")
+
     print(f"{sum(results)}/{len(results)} passed")
     if results and all(results) and not os.environ.get("KN_TEST_KEEP"):
         shutil.rmtree(WORK, ignore_errors=True)

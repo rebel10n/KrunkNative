@@ -373,7 +373,7 @@ secondary-req-test: build ## The Select Secondary picker applies v10's weapon re
 nettspend-vfx-test: build ## Nettspend: the Drank's cup + pour-up, the Money Spread's bills and the laced post-effect, headless frames (EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/nettspend_vfx_e2e.py $(DEBUG_DIR)
 
-nettspend-arms-test: build ## Nettspend: the Drank's arms in third person, the off elbow bends down and back like the trigger's, the off hand forward of the hip (headless; EGL_DEVICE=)
+nettspend-arms-test: build ## Nettspend: the Drank's arms in third and first person, the off hand's rest beside the hip (and the refill's end), the off elbow bends down and back (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/nettspend_arms_e2e.py $(DEBUG_DIR)
 
 minimap-round-test: build ## The in-game minimap is round from its first visible frame after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
