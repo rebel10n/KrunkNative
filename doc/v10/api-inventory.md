@@ -52,32 +52,32 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 29 | editor | GET | `/player-count` | editor player count (_7286, v10.js 211178) (211178) | missing: KN has it at /mm/... or /social/player-count (public_routes.c:702-704) | alias | public_routes.c |
 | 30 | gapi | GET | `/data/skins` | skins XHR (v10.js 28035) (28035) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c |
 | 31 | gapi | GET | `/data/spins` | spins XHR (v10.js 102764) (102764) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c |
-| 32 | gapi | POST | `/auth/nonce` | auth.getAuthNonce (26172) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 33 | gapi | POST | `/auth/login/username` | auth.loginUsername (26177) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 34 | gapi | POST | `/auth/login/email` | auth.loginEmail (26190) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 35 | gapi | POST | `/auth/login/email-code` | auth.loginEmailCode (26201) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 36 | gapi | POST | `/auth/code-challenge/{id}` | auth.respondCodeChallenge (26209) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 37 | gapi | POST | `/auth/resend-code-challenge/{id}` | auth.resendCodeChallenge (26217) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 38 | gapi | POST | `/auth/migrate/{id}` | auth.migrateUser (26222) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 39 | gapi | POST | `/auth/2fa/challenge/{id}` | auth.respondTwoFactorChallenge (26230) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 40 | gapi | POST | `/auth/verification/check/{id}` | auth.checkVerification (26238) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 41 | gapi | POST | `/auth/verification/resend/{id}` | auth.resendVerification (26243) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 42 | gapi | POST | `/auth/verification/change-email/{id}` | auth.changeEmail (26248) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 43 | gapi | POST | `/auth/register/email-code` | auth.registerEmailCode (26256) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 44 | gapi | POST | `/auth/username-challenge/{id}` | auth.selectUsername (26264) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 45 | gapi | POST | `/auth/password-challenge/{id}` | auth.updatePassword (26272) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 46 | gapi | POST | `/auth/recover-account` | auth.recoverAccount (26280) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 47 | gapi | POST | `/auth/kid/age-challenge/{id}` | auth.respondKidAgeChallenge (26288) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 48 | gapi | POST | `/auth/kid/parental-email/{id}` | auth.submitKidParentalEmail (26296) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 49 | gapi | GET | `/auth/kid/consent-status/{id}` | auth.checkKidConsentStatus (26304) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 32 | gapi | POST | `/auth/nonce` | auth.getAuthNonce (26172) | missing: not_found fallback (public_routes.c:677) | empty (200, data null: no nonce) | none |
+| 33 | gapi | POST | `/auth/login/username` | auth.loginUsername (26177) | missing: not_found fallback (public_routes.c:677) | implemented | accounts.c acct_auth (auth.c's session token); v10_auth.c |
+| 34 | gapi | POST | `/auth/login/email` | auth.loginEmail (26190) | missing: not_found fallback (public_routes.c:677) | implemented | accounts.c acct_auth (an email signs in too); v10_auth.c |
+| 35 | gapi | POST | `/auth/login/email-code` | auth.loginEmailCode (26201) | missing: not_found fallback (public_routes.c:677) | not found (404: no email-code sign-in) | none |
+| 36 | gapi | POST | `/auth/code-challenge/{id}` | auth.respondCodeChallenge (26209) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 37 | gapi | POST | `/auth/resend-code-challenge/{id}` | auth.resendCodeChallenge (26217) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 38 | gapi | POST | `/auth/migrate/{id}` | auth.migrateUser (26222) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 39 | gapi | POST | `/auth/2fa/challenge/{id}` | auth.respondTwoFactorChallenge (26230) | missing: not_found fallback (public_routes.c:677) | implemented (the 2FA step of a password login) | accounts.c acct_auth + db_security.c P_TWOFA_LOGIN; v10_auth.c challenges |
+| 40 | gapi | POST | `/auth/verification/check/{id}` | auth.checkVerification (26238) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 41 | gapi | POST | `/auth/verification/resend/{id}` | auth.resendVerification (26243) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 42 | gapi | POST | `/auth/verification/change-email/{id}` | auth.changeEmail (26248) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 43 | gapi | POST | `/auth/register/email-code` | auth.registerEmailCode (26256) | missing: not_found fallback (public_routes.c:677) | not found (404: sign-up is username and password) | none |
+| 44 | gapi | POST | `/auth/username-challenge/{id}` | auth.selectUsername (26264) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 45 | gapi | POST | `/auth/password-challenge/{id}` | auth.updatePassword (26272) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 46 | gapi | POST | `/auth/recover-account` | auth.recoverAccount (26280) | missing: not_found fallback (public_routes.c:677) | implemented (the reset mail) | account_security.c acct_recover_request (the rpr mail, mail_log) |
+| 47 | gapi | POST | `/auth/kid/age-challenge/{id}` | auth.respondKidAgeChallenge (26288) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 48 | gapi | POST | `/auth/kid/parental-email/{id}` | auth.submitKidParentalEmail (26296) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
+| 49 | gapi | GET | `/auth/kid/consent-status/{id}` | auth.checkKidConsentStatus (26304) | missing: not_found fallback (public_routes.c:677) | not found (404: no such challenge or flow) | none |
 | 50 | gapi | GET | `/player/me` | player.getMe (26312) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 51 | gapi | GET | `/player/wallet` | player.getWallet (26317) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 52 | gapi | POST | `/account/2fa/enable/start` | account.enable2FAStart (26326) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 53 | gapi | POST | `/account/2fa/enable/verify` | account.enable2FAVerify (26331) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 54 | gapi | POST | `/account/2fa/disable` | account.disable2FA (26339) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 55 | gapi | GET | `/account/usernames` | account.listUsernames (26347) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 56 | gapi | POST | `/account/usernames/reserve` | account.reserveUsername (26352) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 57 | gapi | POST | `/account/usernames/swap` | account.swapUsername (26360) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 52 | gapi | POST | `/account/2fa/enable/start` | account.enable2FAStart (26326) | missing: not_found fallback (public_routes.c:677) | implemented | account_security.c (0109 twofa_pending, the otpauth URI); v10_auth.c |
+| 53 | gapi | POST | `/account/2fa/enable/verify` | account.enable2FAVerify (26331) | missing: not_found fallback (public_routes.c:677) | implemented | db_security.c P_TWOFA_CONFIRM (0109 twofa_secret); v10_auth.c |
+| 54 | gapi | POST | `/account/2fa/disable` | account.disable2FA (26339) | missing: not_found fallback (public_routes.c:677) | implemented | db_security.c P_TWOFA_DISABLE; v10_auth.c |
+| 55 | gapi | GET | `/account/usernames` | account.listUsernames (26347) | missing: not_found fallback (public_routes.c:677) | implemented (the one active name) | accounts.username (never expires); v10_auth.c |
+| 56 | gapi | POST | `/account/usernames/reserve` | account.reserveUsername (26352) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (Box Office sells no usernames) |
+| 57 | gapi | POST | `/account/usernames/swap` | account.swapUsername (26360) | missing: not_found fallback (public_routes.c:677) | implemented (the active name; another name refused, 403) | accounts.username; v10_auth.c |
 | 58 | gapi | GET | `/guest/profile` | guest.getProfile (26372) | served: guest.c:98 | served (unchanged) |  |
 | 59 | gapi | GET | `/ranked/shop` | ranked.getShop (26381) | missing: not_found fallback (public_routes.c:677) | alias | ranked.c |
 | 60 | gapi | POST | `/ranked/purchase` | ranked.purchaseSkin (26386) | missing: not_found fallback (public_routes.c:677) | alias | ranked.c |
@@ -85,12 +85,12 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 62 | gapi | POST | `/webpush/unsubscribe` | webpush.unsubscribe (26402) | missing: not_found fallback (public_routes.c:677) | alias | push.c |
 | 63 | gapi | POST | `/webpush/status` | webpush.getStatus (26408) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 64 | gapi | POST | `/webpush/subscription-change` | webpush.subscriptionChange (26414) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 65 | gapi | GET | `/email/preferences` | email.getPreference (26424) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 66 | gapi | POST | `/email/preferences` | email.setPreference (26429) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 67 | gapi | GET | `/discord/status` | discord.getStatus (26439) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 68 | gapi | POST | `/discord/link` | discord.link (26444) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 69 | gapi | POST | `/discord/join` | discord.joinGuild (26452) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 70 | gapi | POST | `/discord/unlink` | discord.unlink (26457) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 65 | gapi | GET | `/email/preferences` | email.getPreference (26424) | missing: not_found fallback (public_routes.c:677) | empty (200, data null: no preference stored) | none |
+| 66 | gapi | POST | `/email/preferences` | email.setPreference (26429) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no preference store) |
+| 67 | gapi | GET | `/discord/status` | discord.getStatus (26439) | missing: not_found fallback (public_routes.c:677) | empty (200, data {linked: false}) | none |
+| 68 | gapi | POST | `/discord/link` | discord.link (26444) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no Discord link) |
+| 69 | gapi | POST | `/discord/join` | discord.joinGuild (26452) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no Discord link) |
+| 70 | gapi | POST | `/discord/unlink` | discord.unlink (26457) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_auth.c (no Discord link) |
 | 71 | gapi | GET | `/skins` | skins.list (26474) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
 | 72 | gapi | GET | `/skins/{id}` | skins.get (26479) | missing: not_found fallback (public_routes.c:677) | not found | v10_empty.c |
 | 73 | gapi | POST | `/skins` | skins.create (26484) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |

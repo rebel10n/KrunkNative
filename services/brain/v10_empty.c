@@ -50,7 +50,6 @@
 #include "v10_api.h"
 
 #define WHY_PAYMENT "Box Office has no payment backend"
-#define WHY_AUTH "Box Office accounts use /auth/login, not the v10 auth flow"
 #define WHY_ACCOUNT "Box Office has no v10 account mapping for this read"
 #define WHY_WRITE "Box Office does not take this write"
 #define WHY_IPINFO "Box Office has no IP lookup in the v10 shape"
@@ -150,41 +149,9 @@ static const EmptyRoute k_routes[] = {
     {"POST", "/my-api/execute-payment/:id", h_refuse, (void *) WHY_PAYMENT},
     {"GET", "/ipinfo", h_refuse, (void *) WHY_IPINFO},
 
-    /* gapi.svc.krunker.io: auth (every route, 26172-26304) */
-    {"POST", "/auth/nonce", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/login/username", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/login/email", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/login/email-code", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/code-challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/resend-code-challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/migrate/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/2fa/challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/verification/check/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/verification/resend/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/verification/change-email/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/register/email-code", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/username-challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/password-challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/recover-account", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/kid/age-challenge/:id", h_refuse, (void *) WHY_AUTH},
-    {"POST", "/auth/kid/parental-email/:id", h_refuse, (void *) WHY_AUTH},
-    {"GET", "/auth/kid/consent-status/:id", h_refuse, (void *) WHY_AUTH},
-
     /* gapi: player, account, email, Discord, web push */
     {"GET", "/player/me", h_refuse, (void *) WHY_ACCOUNT},
     {"GET", "/player/wallet", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/account/2fa/enable/start", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/account/2fa/enable/verify", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/account/2fa/disable", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/account/usernames", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/account/usernames/reserve", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/account/usernames/swap", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/email/preferences", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/email/preferences", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/discord/status", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/discord/link", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/discord/join", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/discord/unlink", h_refuse, (void *) WHY_WRITE},
     {"POST", "/webpush/status", h_refuse, (void *) WHY_ACCOUNT},
     {"POST", "/webpush/subscription-change", h_refuse, (void *) WHY_WRITE},
 

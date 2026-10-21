@@ -106,6 +106,9 @@ static int limited(const Limit *l, kn_http_req *req) {
     return 1;
 }
 
+/* No limiter without the auth role (auth_init not run): the accounts' own throttles still apply. */
+int auth_login_limit(kn_http_req *req) { return !g_auth.login.l || !limited(&g_auth.login, req); }
+
 /* The public profile handed to game servers / coordinators (no token, no private data). */
 static cJSON *profile_of(const cJSON *account) {
     cJSON *p = cJSON_CreateObject();

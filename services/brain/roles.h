@@ -44,4 +44,8 @@ typedef void (*AuthHasJoinedCb)(void *ud, const char *err, const cJSON *profile)
 void auth_has_joined_async(Brain *b, const char *username, const char *server_hash, const char *ip,
                            AuthHasJoinedCb cb, void *ud);
 
+/* The per-IP login limit of POST /auth/login (auth.c), shared with the v10 login routes (v10_auth.c):
+ * 1 = go on; 0 = over the limit, the 429 is sent. */
+int auth_login_limit(struct kn_http_req *req);
+
 #endif
