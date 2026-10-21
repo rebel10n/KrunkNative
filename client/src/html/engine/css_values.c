@@ -1037,7 +1037,7 @@ static const CssKeyword kw_mask_mode[] = { { "match-source", CSS_MASK_MODE_MATCH
                                            { "luminance", CSS_MASK_MODE_LUMINANCE }, { NULL, 0 } };
 static const CssKeyword kw_box_orient[] = { { "horizontal", CSS_BOX_ORIENT_HORIZONTAL }, { "inline-axis", CSS_BOX_ORIENT_HORIZONTAL },
                                             { "vertical", CSS_BOX_ORIENT_VERTICAL }, { "block-axis", CSS_BOX_ORIENT_VERTICAL }, { NULL, 0 } };
-static const CssKeyword kw_pointer_events[] = { { "auto", CSS_POINTER_EVENTS_AUTO }, { "none", CSS_POINTER_EVENTS_NONE }, { "all", CSS_POINTER_EVENTS_ALL }, { "visible", CSS_POINTER_EVENTS_AUTO }, { "painted", CSS_POINTER_EVENTS_AUTO }, { NULL, 0 } };
+static const CssKeyword kw_pointer_events[] = { { "auto", CSS_POINTER_EVENTS_AUTO }, { "none", CSS_POINTER_EVENTS_NONE }, { "all", CSS_POINTER_EVENTS_ALL }, { "visible", CSS_POINTER_EVENTS_AUTO }, { "painted", CSS_POINTER_EVENTS_AUTO }, { "visiblePainted", CSS_POINTER_EVENTS_AUTO }, { NULL, 0 } }; // v10's item showcase buttons (svelte-2tp35a)
 static const CssKeyword kw_mix_blend_mode[] = {
     { "normal", CSS_BLEND_NORMAL }, { "multiply", CSS_BLEND_MULTIPLY }, { "screen", CSS_BLEND_SCREEN },
     { "overlay", CSS_BLEND_OVERLAY }, { "darken", CSS_BLEND_DARKEN }, { "lighten", CSS_BLEND_LIGHTEN },

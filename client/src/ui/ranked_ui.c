@@ -39,6 +39,7 @@
 #include <flavor.h> // the coordinator's flavor pool: ranked is Box Office's
 #include <math.h>
 #include <kio_store.h> // krunker.io's ranked shop while krunker.io is the active backend
+#include <i18n.h>       // I18N("generic.copied", "Copied!"): v10's key for the share button's copied state
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -839,6 +840,25 @@ void ranked_ui_account_changed(void) {
     R.overlay.intro = R.overlay.outro = 0;
     v10_refresh();
 }
+// The announcement card's ranked-queue action (v10 'ranked-queue', v10:116880-116888, 117007-117013): 1 In Queue
+// while the search runs ($inRankedQueue), 2 Requires Level 10 for a signed-in account under 10 ((level || 0) < 10),
+// else 0 (on; a guest's click is the login).
+int ranked_ui_queue_action_state(void) {
+    if (R.state == MM_SEARCHING) return 1;
+    if (ranked_active_backend() != RANKED_BACKEND_NONE && active_level() < 10) return 2;
+    return 0;
+}
+// the click (v10:116880-116882): a signed-in account that is not queued starts the search (startMatchmaking with
+// the region); a guest gets v10's login. KrunkNative starts one request at a time (R.busy); v10 has no such guard.
+void ranked_ui_queue_action(void) {
+    if (ranked_ui_queue_action_state() != 0) return;
+    if (ranked_active_backend() == RANKED_BACKEND_NONE) {
+        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        return;
+    }
+    if (!R.busy) start_matchmaking();
+}
+
 // quickJoinRankedMatch's JOINED_RANK: the match's INIT is applied, so the server has this client in
 // its ranked game. KrunkNative sends it as NET_EXT "joinedRank" (no body) once, for the joined match.
 void ranked_ui_on_init(Client *client) {
@@ -1056,7 +1076,7 @@ static void item_view(const cJSON *s) {
     }
     sb_appendf(&sb, "</div> <div class=\"item-status-badge svelte-2tp35a\" style=\"background-color: #41c300;\">Ranked</div></div> "
                     "<div class=\"item-showcase-btns svelte-2tp35a\"><button class=\"more-info-btn svelte-2tp35a\" onclick=\"openSales(%d)\">More info</button> "
-                    "<button class=\"share-btn svelte-1524ito\" type=\"button\" title=\"Copy link\" onclick=\"knRkShare(%d)\"><i class=\"material-icons svelte-1524ito\">share</i> "
+                    "<button class=\"share-btn svelte-1524ito\" type=\"button\" title=\"Copy link\" id=\"knRkShareBtn\" onclick=\"knRkShare(%d)\"><i class=\"material-icons svelte-1524ito\">share</i> "
                     "<span class=\"svelte-1524ito\">Share</span></button></div></div></div> ",
                skin, skin);
     if (sold) {
@@ -1133,6 +1153,29 @@ static void scroll_ranked_header_fire(void *user) {
         return;
     }
     scroll_to_ranked_challenges(mw, head);
+}
+
+// ShareButton's copied state (v10:103485-103520): the title "Copied!", the check icon, the label "Copied!", the
+// .share-copied class, all back to Copy link / share / Share after 1.5 s (a new copy restarts the 1.5 s).
+static int g_share_timer;
+static void share_copied_set(const int copied) {
+    const HtmlElem btn = html_dom_by_id("knRkShareBtn"); // the item view's Share button (gone with its view: no-op)
+    if (!btn) return;
+    html_dom_set_attr(btn, "title", copied ? I18N("generic.copied", "Copied!") : "Copy link");
+    html_dom_set_class(btn, "share-copied", copied);
+    const HtmlElem icon = html_dom_query(btn, "i"), label = html_dom_query(btn, "span");
+    if (icon) html_dom_set_text(icon, copied ? "check" : "share");
+    if (label) html_dom_set_text(label, copied ? I18N("generic.copied", "Copied!") : "Share");
+}
+static void share_copied_done(void *user) {
+    (void) user;
+    g_share_timer = 0;
+    share_copied_set(0);
+}
+static void share_copied_show(void) {
+    if (g_share_timer) html_timer_cancel(g_share_timer);
+    share_copied_set(1);
+    g_share_timer = html_timer_add(1500, share_copied_done, NULL);
 }
 
 int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -1257,11 +1300,13 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         if (kio_store_active()) kio_store_read_only("ranked/purchase"); // krunker.io: RP purchases are never sent
         else if (ranked_active_backend() != RANKED_BACKEND_NONE) buy(arg0);
         return 1;
-    } else if (!strcmp(name, "knRkShare")) {
+    } else if (!strcmp(name, "knRkShare")) { // ShareButton's click (v10:103485): the link, then "Copied!" for 1.5 s
+        html_ui_stop_propagation();
         char origin[256], url[320];
         html_page_origin(origin, sizeof(origin));
         snprintf(url, sizeof(url), "%s/?item=%d", origin, arg0);
         html_clipboard_write(url);
+        share_copied_show();
         return 1;
     } else {
         return -1;

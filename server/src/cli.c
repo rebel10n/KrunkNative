@@ -313,7 +313,7 @@ static const CliCommand g_cli_commands[] = {
 #ifdef SERVER_HAVE_NET_CHAT
     {CLI_NAMES("say"), "say <message>", "Send a chat message to every player", CLI_ARG_TEXT, cli_cmd_say},
 #endif
-    {CLI_NAMES("announce", "announcement"), "announce [message | clear]", "Show the game announcement banner to every player (and to each player who joins), clear it, or print the current one", CLI_ARG_TEXT, cli_cmd_announce},
+    {CLI_NAMES("announce", "announcement"), "announce [message | clear | ranked-queue <label> | ranked-queue clear]", "Show the game announcement banner to every player (and to each player who joins), clear it, or print the current one; ranked-queue <label> adds the banner's ranked queue action", CLI_ARG_TEXT, cli_cmd_announce},
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
     {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
     {CLI_NAMES("op"), "op <id|name|selector>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
@@ -611,7 +611,17 @@ static void cli_cmd_map(const char *args) {
 
 static void cli_cmd_announce(const char *args) {
     pthread_mutex_lock(&g_server->lock);
-    if (!*args) {
+    if (!strncmp(args, "ranked-queue", 12) && (!args[12] || args[12] == ' ')) {
+        // the card's ranked-queue action (v10 'ranked-queue'): `announce ranked-queue <label>`, `... clear`
+        const char *label = args[12] ? args + 13 : "";
+        if (!*label || !strcmp(label, "clear")) {
+            net_set_game_ranked_queue(NULL);
+            server_log("Ranked queue action cleared");
+        } else {
+            net_set_game_ranked_queue(label);
+            server_log("Ranked queue action: %s", label);
+        }
+    } else if (!*args) {
         const char *now = net_game_announcement();
         server_log(now[0] ? "Game announcement: %s" : "No game announcement (announce <message>)", now);
     } else {

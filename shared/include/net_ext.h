@@ -635,12 +635,17 @@ typedef struct {
 #pragma pack(pop)
 
 // NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,
-// trackId, bundleId, displayIds, actions}, g:210119) as KrunkNative sends it: the message only
-// (UTF-8, NUL-terminated; "" hides the banner). server_bin sends the current one to each player whose
-// join settles and to everyone when the console's `announce` changes it (server/src/net.c).
+// trackId, bundleId, displayIds, actions}, g:210119) as KrunkNative sends it: the message (UTF-8,
+// NUL-terminated; "" = no message) and, when ranked_queue is 1, v10's "ranked-queue" action with the
+// server's label (ranked_label, NUL-terminated). Nothing else of v10's announcement is sent (no bundle,
+// shop display, other action, target). server_bin sends the current one to each player whose join
+// settles and to everyone when the console's `announce` / `announce ranked-queue` changes it (server/src/net.c).
 #define NET_GAME_ANNOUNCEMENT_TEXT 256
+#define NET_GAME_RANKED_LABEL 64
 typedef struct {
     char message[NET_GAME_ANNOUNCEMENT_TEXT];
+    uint8_t ranked_queue;                    // 1: the card has the ranked-queue action
+    char ranked_label[NET_GAME_RANKED_LABEL];
 } NetGameAnnouncementPacket;
 
 // NET_EXT_KN_RANKED_NOTICE (S -> C, EXT peers): the brain's "queued for ranked" line (NET_CHAT_RANKED's green), the queued

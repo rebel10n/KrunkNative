@@ -23,6 +23,13 @@ The client's script (KRUNKNATIVE_INPUT_SCRIPT, text checks from the [input_scrip
      A --render-scenario run of tools/uidiff/scenarios/ranked-home.json (no brain) dumps the document
      (KRUNKNATIVE_SCENARIO_HTML) and checks it.
 
+  I. the Shop's item view (ranked_ui.c item_view, v10's ShareButton, v10:103485-103520): Share copies the
+     item's link and the button reads Copied! (title, the check icon, .share-copied) for 1.5 s, then
+     Copy link again
+  J. the game announcement card with a ranked-queue action (v10:116880-117013): the node's console
+     `announce ranked-queue <label>` shows the card to a joining player; the action starts the search
+     (the button reads In Queue while it runs); an account under level 10 sees Requires Level 10, disabled
+
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL) and python websockets. Exit 77 when the
 database or websockets is unavailable.
 """
@@ -162,6 +169,47 @@ SLOW_SCRIPT = """0 menu
 """
 
 
+# I: the Shop's item (its shop row is ITEM) opens its view; Share copies the link and the button reads Copied!
+# for 1.5 s (v10's ShareButton: copied = true, setTimeout 1500), then Copy link again
+SHARE_SCRIPT = """0 menu
+12000 call openRankedMenu
+13000 call knRkTab 4
+15000 call knRkItem ITEM
+16000 nodes @view .item-showcase-container
+16050 attr @before title .item-showcase-btns .share-btn
+16100 clickid knRkShareBtn
+16300 attr @copied title .item-showcase-btns .share-btn
+16350 text @copied_text .item-showcase-btns .share-btn
+16400 nodes @copied_cls .item-showcase-btns .share-btn.share-copied
+18000 attr @later title .item-showcase-btns .share-btn
+18050 text @later_text .item-showcase-btns .share-btn
+18100 nodes @later_cls .item-showcase-btns .share-btn.share-copied
+19000 quit
+"""
+
+# J: the card of the node's `announce ranked-queue` (the account is level 20): Join Ranked, the action starts the
+# search (In Queue, the banner shows); nothing happens before the click
+ANN_SCRIPT = """0 menu
+8000 nodes @shown .game-announcement.show
+8050 text @label .game-announcement .ga-action-btn
+8100 nodes @before .ranked-matchmaking-status.show
+8200 clicksel .game-announcement .ga-action-btn
+9500 text @queued .game-announcement .ga-action-btn
+9600 nodes @banner .ranked-matchmaking-status.show
+9700 quit
+"""
+
+# J: an account under level 10 (v10:116880, $account.level < 10): Requires Level 10, disabled, the click does nothing
+LOW_SCRIPT = """0 menu
+8000 nodes @shown .game-announcement.show
+8050 text @label .game-announcement .ga-action-btn
+8100 nodes @disabled .game-announcement .ga-action-btn.disabled
+8200 clicksel .game-announcement .ga-action-btn
+9000 nodes @banner .ranked-matchmaking-status.show
+9100 quit
+"""
+
+
 def delayed_relay(upstream_port, relay_port):
     """the brain behind a byte relay: a ranked queue request (its first bytes) is held for QUEUE_DELAY_S before it is
     sent on; every other byte passes at once (the login's WebSocket included). Returns the listening socket: close()"""
@@ -212,8 +260,8 @@ def node(brain_port, node_id, game_port):
     with open(gs, "w") as f:
         json.dump({"gameserver": cfg}, f)
     p = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--config", gs, "--cfg", "none"], cwd=ROOT,
-                         stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                         start_new_session=True)
+                         stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True,
+                         start_new_session=True)  # p.stdin: the node's console (announce)
     procs.append(p)
     return p, log
 
@@ -270,6 +318,23 @@ def scroll_of(text, element):
         if k == element and v != "-":
             return float(v)
     return None
+
+
+def attr_of(text, label, name):
+    """[input_script] attr t=N @label n=K name=value (the first match's attribute, "-" when absent)"""
+    m = re.search(r"\[input_script\] attr t=\d+ @%s n=(\d+) %s=(.*)" % (re.escape(label), re.escape(name)), text)
+    return (int(m.group(1)), m.group(2).strip()) if m else (-1, None)
+
+
+def run_client(name, port, storage, script):
+    """one headless client on the brain at port, its script run to the end; returns its log"""
+    p, log = start_client(name, port, storage, script=script)
+    try:
+        p.wait(120)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(10)
+    return read_log(log)
 
 
 def home_map_cards(build):
@@ -336,12 +401,55 @@ def main():
         if not m:
             return 1
         port = int(m.group(1))
-        _, node_log = node(port, "RKM", GAME_PORT)
+        node_proc, node_log = node(port, "RKM", GAME_PORT)
         check("the game node links to the brain", bool(wait_for(lambda: "welcomed" in read_log(node_log), 20)), read_log(node_log)[-300:])
         acc = asyncio.run(register(port, "rkmenu%d" % STAMP))
         # level 20 (the popup's own level check, v10:111566-111580): the player_score of that level
         sql(dbcfg, "UPDATE players SET player_score = $1 WHERE player_id = $2", int((20 / 0.03) ** 2) + 1, acc["id"])
         check("a level-20 account registered", bool(acc["token"]), str(acc))
+        low = asyncio.run(register(port, "rkmlow%d" % STAMP))
+        check("a level-0 account registered", bool(low["token"]), str(low))
+        login = {"krunker_username": acc["name"], "krunker_token": acc["token"]}
+
+        # I: a Shop item (skin 55, Blaze LMG, in the store table) for the item view's Share
+        con = sqlite3.connect(dbcfg["path"], timeout=30)
+        con.execute("INSERT INTO ranked_shop (skin_id, price, max_purchase) VALUES (55, 100, 1)")
+        con.commit()
+        item = con.execute("SELECT id FROM ranked_shop WHERE skin_id = 55").fetchone()[0]
+        con.close()
+        # J: the node's console sets the ranked-queue card; it goes to each player who joins from now on
+        node_proc.stdin.write("announce ranked-queue Join Ranked\n")
+        node_proc.stdin.flush()
+        check("the node's console sets the ranked-queue card", bool(wait_for(lambda: "Ranked queue action" in read_log(node_log), 10)),
+              read_log(node_log)[-200:])
+
+        stext = run_client("share", port, login, SHARE_SCRIPT.replace("ITEM", str(item)))
+        before = attr_of(stext, "before", "title")[1]
+        check("the item view opens from the Shop (v10 item view, its Share button)", nodes(stext, "view") == 1, str(nodes(stext, "view")))
+        check("before a copy the Share button reads Copy link (v10 ShareButton title)", before == "Copy link", repr(before))
+        copied = attr_of(stext, "copied", "title")[1]
+        check("after Share the button's title is Copied! (v10 ShareButton, v10:103485-103520)", copied == "Copied!", repr(copied))
+        ctext = text_of(stext, "copied_text")[1] or ""
+        check("after Share the button reads Copied! with the check icon (v10)", "Copied!" in ctext and "check" in ctext, repr(ctext)[:80])
+        check("after Share the button has .share-copied (v10's green state)", nodes(stext, "copied_cls") == 1, str(nodes(stext, "copied_cls")))
+        later = attr_of(stext, "later", "title")[1]
+        check("1.5 s after Share the button reads Copy link again (v10's setTimeout 1500)", later == "Copy link", repr(later))
+        check("1.5 s after Share the state is gone (v10 removes .share-copied)", nodes(stext, "later_cls") == 0, str(nodes(stext, "later_cls")))
+
+        ann = run_client("announce", port, login, ANN_SCRIPT)
+        check("the ranked-queue card shows in the joining client (v10 .game-announcement.show)", nodes(ann, "shown") == 1, str(nodes(ann, "shown")))
+        label = text_of(ann, "label")[1] or ""
+        check("the card's action reads the server's label before a search", label == "Join Ranked", repr(label)[:80])
+        check("nothing is queued before the action is clicked", nodes(ann, "before") == 0, str(nodes(ann, "before")))
+        queued = text_of(ann, "queued")[1] or ""
+        check("the action starts the ranked queue: the button reads In Queue (v10 inRankedQueue)", queued == "In Queue", repr(queued))
+        check("the action starts the ranked queue: the search banner shows", nodes(ann, "banner") == 1, str(nodes(ann, "banner")))
+
+        lows = run_client("lowlevel", port, {"krunker_username": low["name"], "krunker_token": low["token"]}, LOW_SCRIPT)
+        ltext = text_of(lows, "label")[1] or ""
+        check("an account under level 10 sees Requires Level 10 (v10 announcement action label)", ltext == "Requires Level 10", repr(ltext))
+        check("an account under level 10: the action is disabled (v10 .disabled)", nodes(lows, "disabled") == 1, str(nodes(lows, "disabled")))
+        check("an account under level 10: the action queues nothing", nodes(lows, "banner") == 0, str(nodes(lows, "banner")))
 
         # FIND MATCH with a slow matchmaker (the brain behind a relay that holds the queue's answer)
         relay_port = kn_proto.free_ports(1)[0]

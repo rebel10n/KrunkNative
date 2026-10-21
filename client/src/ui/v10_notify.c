@@ -14,9 +14,12 @@
 //   Times come from the HUD clock (ui_notify_tick: virtual in --render-scenario), the 100 ms
 //   interval is stepped per frame on that clock.
 // Game announcement (g:118340-118585, GAME_ANNOUNCEMENT g:210119): .game-announcement gets .show
-//   and the .ga-message line while a message is set. Bundles, shop displays, actions and the
-//   target filter are not ported: KrunkNative's announcements (server console `announce`) carry
-//   a message only.
+//   while a message or an action is set, then the .ga-message line and the .ga-actions. The one action
+//   is v10's ranked-queue (g:116880-117013): its label is "In Queue" while the search runs, "Requires
+//   Level 10" for a signed-in account under 10 (both .disabled), else the server's label; a click starts
+//   the search (ranked_ui_queue_action). Bundles, shop displays, other actions and the target filter are
+//   not ported: KrunkNative's announcements (server console `announce`, `announce ranked-queue <label>`)
+//   carry a message and the ranked-queue action only.
 // Emoji panel (g:197502-197556) and the chat's emoji (g:103080-103125, g:202884-202913,
 //   g:221099-221112, g:221347): the emoji map is every store item of type 17 (EMOJI) by its
 //   `text` name(s); typing ":<word>" in #chatInput (the text before the caret, emoji already
@@ -88,7 +91,9 @@ static struct {
     int handlers;          // knNotifyClick / selectEmoji added
     // game announcement
     char announce[NET_GAME_ANNOUNCEMENT_TEXT];
-    int announce_shown;    // as written into the page (-1 unknown)
+    int ranked_on;         // the store's ranked-queue action
+    char ranked_label[NET_GAME_RANKED_LABEL];
+    int announce_shown;    // the card as written into the page: show * 4 + the action's state (-1 unknown)
     // emoji
     Emoji map[EMOJI_MAX];
     int map_count, map_built;
@@ -314,39 +319,59 @@ static void tick_center(void) {
 
 // ------------------------------------------------------------------ game announcement
 
-void v10_announce_set(const char *message) {
+// v10's $gameAnnouncement is replaced by each push: the message, the ranked-queue action, or neither
+static void announce_store(const char *message, const int ranked, const char *label) {
     snprintf(N.announce, sizeof(N.announce), "%s", message ? message : "");
+    N.ranked_on = ranked != 0;
+    snprintf(N.ranked_label, sizeof(N.ranked_label), "%s", label ? label : "");
     N.announce_shown = -1;
-    printf("[notify] announcement %s%s%s\n", N.announce[0] ? "\"" : "cleared", N.announce, N.announce[0] ? "\"" : "");
+    if (N.announce[0]) printf("[notify] announcement \"%s\"%s\n", N.announce, N.ranked_on ? " + ranked-queue" : "");
+    else if (N.ranked_on) printf("[notify] announcement ranked-queue \"%s\"\n", N.ranked_label);
+    else printf("[notify] announcement cleared\n");
 }
+
+void v10_announce_set(const char *message) { announce_store(message, 0, NULL); }
 
 void v10_announce_on_packet(const uint8_t *body, const uint16_t length) {
     NetGameAnnouncementPacket p;
     memset(&p, 0, sizeof(p));
     memcpy(&p, body, length < sizeof(p) ? length : sizeof(p));
     p.message[sizeof(p.message) - 1] = 0;
-    v10_announce_set(p.message);
+    p.ranked_label[sizeof(p.ranked_label) - 1] = 0;
+    announce_store(p.message, p.ranked_queue, p.ranked_label);
 }
 
 static void tick_announcement(void) {
-    const int show = N.announce[0] != 0;
-    if (show == N.announce_shown) return;
+    // .game-announcement.show: a message or an action (v10 $gameAnnouncement.show); the action's state
+    // (ranked_ui.c: 1 In Queue, 2 Requires Level 10, 0 on) is read every frame, the card follows it
+    const int ranked = N.ranked_on;
+    const int state = ranked ? ranked_ui_queue_action_state() : 0;
+    const int show = N.announce[0] != 0 || ranked;
+    const int key = show * 4 + state;
+    if (key == N.announce_shown) return;
     const HtmlElem el = html_dom_query(0, "#gameAnnouncementEl > .game-announcement");
     if (!el) return;
     // iiìîïíi "<div class=game-announcement><!> <!> <!> <!></div>": the message line, then the
-    // (not ported) bundle, products and actions anchors
+    // (not ported) bundle and products anchors, then the actions
     StrBuf sb = {0};
-    if (show) {
+    if (N.announce[0]) {
         sb_append(&sb, "<div class=\"ga-message svelte-1m80xxc\">");
         esc_into(&sb, N.announce);
         sb_append(&sb, "</div>");
+    }
+    if (ranked) { // .ga-actions > .ga-action-btn: the label (v10:117007-117013), .disabled (v10:116888, 117004)
+        sb_appendf(&sb, "<div class=\"ga-actions svelte-1m80xxc\"><div class=\"ga-action-btn svelte-1m80xxc%s\" role=\"button\" tabindex=\"0\" "
+                        "id=\"knAnnounceQueue\" onclick=\"knAnnounceQueue()\" onkeydown='if(event.key==\"Enter\")knAnnounceQueue()'>",
+                   state ? " disabled" : "");
+        esc_into(&sb, state == 1 ? "In Queue" : state == 2 ? "Requires Level 10" : N.ranked_label);
+        sb_append(&sb, "</div></div>");
     }
     sb_append(&sb, "   ");
     char *html = sb_finish(&sb);
     html_dom_set_html(el, html);
     free(html);
     html_dom_set_class(el, "show", show);
-    N.announce_shown = show;
+    N.announce_shown = key;
 }
 
 // ------------------------------------------------------------------ emoji
@@ -701,10 +726,20 @@ static int h_select_emoji(void *user, const HtmlEvent *ev, const HtmlArg *args, 
     return 1;
 }
 
+static int h_announce_queue(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user;
+    (void) ev;
+    (void) args;
+    (void) argc;
+    ranked_ui_queue_action(); // v10's ranked-queue click: a disabled card's click does nothing there (ranked_ui.c)
+    return 1;
+}
+
 int v10_notify_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
     if (!strcmp(name, "knNotifyClick")) return h_notify_click(NULL, ev, args, argc);
     if (!strcmp(name, "selectEmoji")) return h_select_emoji(NULL, ev, args, argc);
+    if (!strcmp(name, "knAnnounceQueue")) return h_announce_queue(NULL, ev, args, argc);
     return -1;
 }
 
@@ -715,6 +750,7 @@ void v10_notify_tick(const double now_ms) {
         N.handlers = 1;
         html_ui_add_handler("knNotifyClick", h_notify_click);
         html_ui_add_handler("selectEmoji", h_select_emoji);
+        html_ui_add_handler("knAnnounceQueue", h_announce_queue);
     }
     page_check();
     tick_center();
@@ -738,6 +774,7 @@ void v10_notify_scenario(const cJSON *state) {
         N.handlers = 1;
         html_ui_add_handler("knNotifyClick", h_notify_click);
         html_ui_add_handler("selectEmoji", h_select_emoji);
+        html_ui_add_handler("knAnnounceQueue", h_announce_queue);
     }
     page_check();
     const cJSON *n;

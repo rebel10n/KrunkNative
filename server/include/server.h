@@ -292,6 +292,7 @@ void net_broadcast_ranked_notice(const char *name, const char *template);
 void net_set_game_announcement(const char *msg);
 const char *net_game_announcement(void);
 void net_send_game_announcement(ClientConnection *client);
+void net_set_game_ranked_queue(const char *label); // `announce ranked-queue <label>` (NULL / "" clears)
 
 // Krunker v3.1.1 chat "/" commands (shared/src/chat_commands.c) wired to the connections;
 // the CLI runs them as CHAT_CMD_CONSOLE. Caller holds g_server->lock.

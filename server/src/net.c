@@ -296,6 +296,8 @@ void net_broadcast_ranked_notice(const char *name, const char *template) {
 }
 
 static char g_game_announcement[NET_GAME_ANNOUNCEMENT_TEXT];
+static int g_game_ranked_queue;                    // the card's ranked-queue action (announce ranked-queue)
+static char g_game_ranked_label[NET_GAME_RANKED_LABEL];
 
 const char *net_game_announcement(void) { return g_game_announcement; }
 
@@ -304,8 +306,10 @@ void net_send_game_announcement(ClientConnection *client) {
     NetGameAnnouncementPacket body;
     memset(&body, 0, sizeof(body));
     snprintf(body.message, sizeof(body.message), "%s", g_game_announcement);
+    body.ranked_queue = g_game_ranked_queue != 0;
+    snprintf(body.ranked_label, sizeof(body.ranked_label), "%s", g_game_ranked_label);
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
-    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_GAME_ANNOUNCEMENT, &body, (uint16_t) (strlen(body.message) + 1));
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_GAME_ANNOUNCEMENT, &body, (uint16_t) sizeof(body));
     if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
 }
 
@@ -316,6 +320,16 @@ void net_set_game_announcement(const char *msg) {
         g_game_announcement[n++] = (unsigned char) *p < 0x20 || *p == 0x7f ? ' ' : *p;
     while (n > 0 && msg[n] && ((unsigned char) msg[n] & 0xC0) == 0x80) n--; // never half a character
     g_game_announcement[n] = 0;
+    for (size_t i = 0; i < g_server->client_count; i++) net_send_game_announcement(&g_server->clients[i]);
+}
+
+// announce ranked-queue <label> (NULL or "" clears it): the card's ranked-queue action, sent to everyone now
+void net_set_game_ranked_queue(const char *label) {
+    g_game_ranked_queue = label && *label;
+    size_t n = 0;
+    for (const char *p = label ? label : ""; *p && n + 1 < sizeof(g_game_ranked_label); p++)
+        g_game_ranked_label[n++] = (unsigned char) *p < 0x20 || *p == 0x7f ? ' ' : *p;
+    g_game_ranked_label[n] = 0;
     for (size_t i = 0; i < g_server->client_count; i++) net_send_game_announcement(&g_server->clients[i]);
 }
 
