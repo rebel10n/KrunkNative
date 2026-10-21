@@ -20,9 +20,14 @@
 //   native GLOBAL_VALUE (121) -> gv (key, value); a reset is a no-op before the first gv
 //   native PLAYER_SOUND (125) -> asnd (add) / rsnd (remove)
 //   native TIMER (15)     -> t (seconds, end)
+//   native MODE_STATE (40) with no flag and no objective -> ts (both teams), lv, lock, gmsg
+//   native OBJECT_STATE (100) -> do, ro, gte, bnk, mo, mf (one per object change)
 // Stop (first untranslated native packet after the init, reported by v10Proxy):
-//   native MODE_STATE (40), the full mode snapshot (NetModeStatePacket) -> the v10 mode labels;
-//   not mapped yet. See doc/v10/net.md and the report.
+//   native MODE_STATE (40) with flag_count > 0: the maps the server ran (Frontier, Habitat, Burg,
+//   Tropicano) all carry team flags (teams 1 and 2, active in free-for-all). v10 ufl and the flag
+//   pickers match a flag by uid (v10.js 188644), and NetModeFlag has no uid; v10's uid is the map
+//   objects index at addFlag (v10.js 164188), KN's is the world object index. Not derived here.
+//   Also stops: an active objective (its time is in MODE_SYNC_V7) and a move lock (lm needs a position).
 
 import * as EV from "./nativeEvents";
 
@@ -52,6 +57,16 @@ export const V10_IN = Object.freeze({
   ADD_PLAYER_SOUND: "asnd",
   REMOVE_PLAYER_SOUND: "rsnd",
   UPDATE_TIMER: "t",
+  TEAM_SCORE: "ts",
+  UPDATE_LIVES: "lv",
+  LOCK_PLAYER: "lock",
+  UPDATE_GAME_MESSAGE: "gmsg",
+  DESTROY_GAMEOBJECT: "do",
+  RESPAWN_OBJ: "ro",
+  UPDATE_GATE: "gte",
+  UPDATE_BANK: "bnk",
+  TELEPORT_TO_NODE: "mo",
+  TELEPORT_FROM_NODE: "mf",
 } as const);
 
 // KN HELLO: this bridge speaks protocol 1.4.2 (NET_PROTOCOL_MAJOR/MINOR/PATCH) and Krunker v10 only
@@ -183,6 +198,9 @@ export const NATIVE_MORE = Object.freeze({
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
+  MODE_STATE: 40, // NET_PACKET_MODE_STATE: the joiner's mode snapshot (NetModeStatePacket)
+  OBJECT_STATE: 100, // NET_PACKET_OBJECT_STATE: one map object's destroy / respawn / gate / bank / move
+  MODE_SYNC_V7: 149, // NET_PACKET_MODE_SYNC_V7: team scores, rounds, lockout, objective time (joiners)
   EXT: 254,
 } as const);
 export const EXT_GAME_STATE = 0x0901; // NET_EXT_GAME_STATE, v10 "gsc"
@@ -261,6 +279,67 @@ export function parsePlayerSound(p: Buffer): { uid: number; add: boolean; force:
 export function parseTimer(p: Buffer): { seconds: number; end: boolean } | null {
   if (p.length !== 5) return null;
   return { seconds: p.readInt32LE(0), end: p[4] !== 0 };
+}
+
+// ---- MODE_STATE and OBJECT_STATE: the mode snapshot and the object list a joiner gets after the INIT.
+// Each maps to the v10 messages the server sends for the same change (v10.js send sites: ts 191530,
+// lv 174052, lock 188300, gmsg 191369 / 191419, do 158238, ro 158290, gte 162647, bnk 162702,
+// mo 187867, mf 187937). The handler parameters are the same as the join's sync-data use (v10.js 219045).
+
+export type V10Message = [label: string, args: unknown[]];
+export type Mapped = { messages: V10Message[]; stop?: string };
+
+const MODE_STATE_SIZE = 347; // NetModeStatePacket with MODE_MAX_FLAGS 8 and NET_MODE_TEXT_SIZE 32
+const OBJECT_STATE_SIZE = 9; // NetObjectStatePacket: int32 uid, uint8 kind, int32 value
+
+function cText(b: Buffer): string {
+  const nul = b.indexOf(0);
+  return b.subarray(0, nul < 0 ? b.length : nul).toString("utf8");
+}
+
+// NetModeStatePacket (little endian): mode_id @0, team_scores[2] @4, flag_info[2][32] @12,
+// active_objective @76, objective_weapon @80, move_lock @84, locked @85, lives @86, flag_count @90,
+// flags[8] (20 bytes each) @91, message[96] @251.
+export function mapModeState(p: Buffer): Mapped {
+  if (p.length !== MODE_STATE_SIZE) return { messages: [], stop: "malformed" };
+  if (p[90] > 0) return { messages: [], stop: "flags: NetModeFlag has no flag uid for the v10 ufl (flag_count > 0)" };
+  if (p.readInt32LE(76) >= 0) return { messages: [], stop: "an active objective: v10 obj needs its time, which is in MODE_SYNC_V7" };
+  if (p[84] !== 0) return { messages: [], stop: "move lock: v10 lm needs the player's position" };
+
+  const messages: V10Message[] = [
+    [V10_IN.TEAM_SCORE, [1, p.readInt32LE(4)]], // team 1 (mode team_scores[0])
+    [V10_IN.TEAM_SCORE, [2, p.readInt32LE(8)]], // team 2 (mode team_scores[1])
+  ];
+  const lives = p.readInt32LE(86);
+  if (lives >= 0) messages.push([V10_IN.UPDATE_LIVES, [lives]]);
+  if (p[85] !== 0) messages.push([V10_IN.LOCK_PLAYER, [true]]);
+  const message = cText(p.subarray(251, 347));
+  if (message.length) messages.push([V10_IN.UPDATE_GAME_MESSAGE, [message]]); // "wt" is the v10 waiting text too
+  return { messages };
+}
+
+// NetObjectStatePacket kinds (shared.h NetObjectStateKind) -> the v10 label of the same change.
+export function mapObjectState(p: Buffer): Mapped {
+  if (p.length !== OBJECT_STATE_SIZE) return { messages: [], stop: "malformed" };
+  const uid = p.readInt32LE(0);
+  const kind = p[4];
+  const value = p.readInt32LE(5);
+  switch (kind) {
+    case 0:
+      return { messages: [[V10_IN.DESTROY_GAMEOBJECT, [uid]]] };
+    case 1:
+      return { messages: [[V10_IN.RESPAWN_OBJ, [uid]]] };
+    case 2:
+      return { messages: [[V10_IN.UPDATE_GATE, [uid, value !== 0]]] };
+    case 3:
+      return { messages: [[V10_IN.UPDATE_BANK, [uid, value]]] };
+    case 4:
+      return { messages: [[V10_IN.TELEPORT_TO_NODE, [uid, value]]] };
+    case 5:
+      return { messages: [[V10_IN.TELEPORT_FROM_NODE, [uid]]] };
+    default:
+      return { messages: [], stop: `object kind ${kind} is not mapped` };
+  }
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };

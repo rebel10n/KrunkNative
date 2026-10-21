@@ -99,6 +99,51 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   assert.strictEqual(T.encodeChat("   "), null);
 }
 
+// ---- MODE_STATE (40): the joiner's mode snapshot, and OBJECT_STATE (100): the join's object list.
+// Layouts from shared/include/shared.h (NetModeStatePacket, NetObjectStatePacket), little endian.
+function modeStateBuffer(o: { teamScores: [number, number]; lives: number; locked: number; message: string;
+  objective: number; moveLock: number; flagCount: number }): Buffer {
+  const b = Buffer.alloc(347);
+  b.writeInt32LE(0, 0); // mode_id
+  b.writeInt32LE(o.teamScores[0], 4);
+  b.writeInt32LE(o.teamScores[1], 8);
+  b.writeInt32LE(o.objective, 76); // active_objective
+  b.writeInt32LE(-1, 80); // objective_weapon
+  b[84] = o.moveLock;
+  b[85] = o.locked;
+  b.writeInt32LE(o.lives, 86);
+  b[90] = o.flagCount; // flag_count; flags (8 x 20 bytes) follow at 91
+  b.write(o.message, 251, "utf8"); // message[96]
+  return b;
+}
+function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
+  const b = Buffer.alloc(9);
+  b.writeInt32LE(uid, 0);
+  b[4] = kind;
+  b.writeInt32LE(value, 5);
+  return b;
+}
+{
+  const ffa = T.mapModeState(modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 1, message: "wt", objective: -1, moveLock: 0, flagCount: 0 }));
+  assert.strictEqual(ffa.stop, undefined);
+  assert.deepStrictEqual(ffa.messages, [["ts", [1, 5]], ["ts", [2, 7]], ["lv", [3]], ["lock", [true]], ["gmsg", ["wt"]]]);
+  const quiet = T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: -1, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 0 }));
+  assert.deepStrictEqual(quiet.messages, [["ts", [1, 0]], ["ts", [2, 0]]]); // no lives, not locked, no message
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 1 })).stop || "", /flag/);
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: 2, moveLock: 0, flagCount: 0 })).stop || "", /objective/);
+  assert.match(T.mapModeState(modeStateBuffer({ teamScores: [0, 0], lives: 0, locked: 0, message: "", objective: -1, moveLock: 1, flagCount: 0 })).stop || "", /lock/);
+  assert.strictEqual(T.mapModeState(Buffer.alloc(10)).stop !== undefined, true);
+
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 0, 0)).messages, [["do", [7]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 1, 0)).messages, [["ro", [7]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 2, 0)).messages, [["gte", [7, false]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 2, 1)).messages, [["gte", [7, true]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 3, 5)).messages, [["bnk", [7, 5]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 4, 4)).messages, [["mo", [7, 4]]]);
+  assert.deepStrictEqual(T.mapObjectState(objectStateBuffer(7, 5, 0)).messages, [["mf", [7]]]);
+  assert.match(T.mapObjectState(objectStateBuffer(7, 9, 0)).stop || "", /kind/);
+}
+
 async function main(): Promise<void> {
   // ---- the fake KrunkNative server: records every frame the bridge writes, sends what the test asks
   const nativeFrames: Array<{ type: number; payload: Buffer }> = [];
@@ -268,9 +313,21 @@ async function main(): Promise<void> {
   const t = await waitFor(() => clientMessages.find((m) => m.label === "t"), "t");
   assert.deepStrictEqual(t.args, [300, 0]);
 
-  // the game state EXT follows: the translation stops there and nothing more is sent to the client
-  native.write(nativeFrame(254, Buffer.from([0x01, 0x09, 0x01])));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("EXT 0x0901 GAME_STATE"), "stop at GAME_STATE");
+  // the joiner's mode snapshot: team scores, lives and the lock, then the object list
+  native.write(nativeFrame(40, modeStateBuffer({ teamScores: [5, 7], lives: 3, locked: 0, message: "", objective: -1, moveLock: 0, flagCount: 0 })));
+  await waitFor(() => clientMessages.filter((m) => m.label === "ts").length >= 2 ? true : undefined, "ts");
+  const lv = await waitFor(() => clientMessages.find((m) => m.label === "lv"), "lv");
+  assert.deepStrictEqual(lv.args, [3]);
+  assert.deepStrictEqual(clientMessages.filter((m) => m.label === "ts").map((m) => m.args), [[1, 5], [2, 7]]);
+  native.write(nativeFrame(100, objectStateBuffer(4, 0, 0))); // do 4
+  native.write(nativeFrame(100, objectStateBuffer(9, 2, 1))); // gte 9 open
+  await waitFor(() => clientMessages.find((m) => m.label === "gte"), "gte");
+  assert.deepStrictEqual(clientMessages.find((m) => m.label === "do")?.args, [4]);
+  assert.deepStrictEqual(clientMessages.find((m) => m.label === "gte")?.args, [9, true]);
+
+  // the mode sync (149) is the next packet with no translation yet: the translation stops there
+  native.write(nativeFrame(149, Buffer.alloc(4 * 4 + 4 + 1 + 4 * 4 + 4 + 4 + 4 + 4)));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("MODE_SYNC_V7"), "stop at MODE_SYNC_V7");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -301,7 +358,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("EXT 0x0901 GAME_STATE"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("MODE_SYNC_V7"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 

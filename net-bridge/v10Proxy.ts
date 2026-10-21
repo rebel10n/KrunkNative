@@ -15,7 +15,8 @@
 //   native INIT (2)                                    -> init (INIT_GAME), held until the map is whole;
 //                                                         packets after it are queued meanwhile
 //   native GLOBAL_VALUE (121), PLAYER_SOUND (125), TIMER (15) -> gv, asnd / rsnd, t
-//   native MODE_STATE (40)                             -> not translated yet: the session stops here
+//   native MODE_STATE (40), OBJECT_STATE (100)         -> ts, lv, lock, gmsg; do, ro, gte, bnk, mo, mf
+//   native MODE_STATE with flags                       -> not translated yet: the session stops here
 //   client sends en (ENTER_GAME)                       -> ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
@@ -50,6 +51,9 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.GLOBAL_VALUE]: "GLOBAL_VALUE",
   [T.NATIVE_MORE.PLAYER_SOUND]: "PLAYER_SOUND",
   [T.NATIVE_MORE.TIMER]: "TIMER",
+  [T.NATIVE_MORE.MODE_STATE]: "MODE_STATE",
+  [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
+  [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
 });
 
 type V10Session = {
@@ -201,6 +205,12 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     if (value.key.length === 0) return;
     session.globalValuesSent = true;
     sendWs(session, T.V10_IN.UPDATE_GLOBAL_VALUE, value.key, value.value);
+    return;
+  }
+  if (session.initSent && (type === T.NATIVE_MORE.MODE_STATE || type === T.NATIVE_MORE.OBJECT_STATE)) {
+    const mapped = type === T.NATIVE_MORE.MODE_STATE ? T.mapModeState(payload) : T.mapObjectState(payload);
+    if (mapped.stop) return stopAt(session, nativeName(type, payload), mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
   if (session.initSent && type === T.NATIVE_MORE.TIMER) {
