@@ -697,7 +697,10 @@ static KsValue ai_play_anim(KsScript *s, void *n, const KsValue *args, int argc)
 #ifdef GAME_AI_HAVE_V7_API
     char name[64];
     snprintf(name, sizeof(name), "%.*s", (int) (len < sizeof(name) ? len : sizeof(name) - 1), clip);
-    game_ai_play_anim(ks_native_game(n), a, name, 1);
+    // v10.0.2: AI.playAnim(ai, clip, reps, true) with reps = isNumber(reps) ? reps : 1 (a non-finite reps is 1)
+    const double reps_num = ARG(1).tag == KS_NUM ? ARG(1).as.num : 1.0;
+    const int reps = isfinite(reps_num) ? (int) fmax(-1000.0, fmin(1000.0, reps_num)) : 1;
+    game_ai_play_anim_reps(ks_native_game(n), a, name, reps, 1);
 #endif
     return ks_undef();
 }

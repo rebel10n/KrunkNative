@@ -1193,15 +1193,21 @@ static int ai_clip_index(const char *clip) {
 // AI.playAnim(ai, clip, reps, raw) on the server: "ana" sid, raw ? clip : clipNames index, raw to
 // players within 800 (spectators: all). Only hasAnim AIs.
 void game_ai_play_anim(Game *game, GameAI *ai, const char *clip, const int raw) {
+    game_ai_play_anim_reps(game, ai, clip, 1, raw);
+}
+
+void game_ai_play_anim_reps(Game *game, GameAI *ai, const char *clip, const int reps, const int raw) {
     if (!ai || !ai->data.has_anim || !clip || !clip[0]) return;
     if (!game_is_authority(game)) {
         ai_copy(ai->clip, sizeof(ai->clip), clip);
+        ai->clip_reps = reps;
         ai->clip_serial++;
         return;
     }
     if (!raw && ai_clip_index(clip) < 0) return;
-    if (game->is_local) { // the in-process client reads the list: play it there
+    if (game->is_local) { // the in-process client reads the list: play it there, reps times (v10.0.2 playClip(clip, reps))
         ai_copy(ai->clip, sizeof(ai->clip), clip);
+        ai->clip_reps = reps;
         ai->clip_serial++;
         return;
     }
@@ -2359,6 +2365,7 @@ void game_ai_apply_anim(Game *game, const NetAIAnimPacket *packet) { // servAnim
     memcpy(clip, packet->clip, sizeof(clip));
     clip[sizeof(clip) - 1] = 0;
     ai_copy(ai->clip, sizeof(ai->clip), clip);
+    ai->clip_reps = 1; // "ana" carries no reps: v10.0.2 servAnim plays it once
     ai->clip_serial++;
 }
 

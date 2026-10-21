@@ -112,7 +112,7 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
 3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` exist in neither v10.0.2 (v10.js) nor the
    official 10.0.3 line, and KN's AI bodies do not block players, so there is no behaviour to port. A spec from
-   Krunker is needed. KN's `ai.playAnim` also drops the `reps` argument that v10.0.2 accepts (v10.js). The AI
+   Krunker is needed. KN's `ai.playAnim` now passes `reps` as v10.0.2 does (`game_ai_play_anim_reps`): the local copy plays the clip reps times; the `ana` packet carries no reps and networked clients play once, as v10.0.2's servAnim does. The AI
    parts (`preciseHits`, `setPartDamage`, ...) and `player.pose` are not in KN at all.
 4. GLB environment reflections (KN has none).
 5. Done: the Solid Ramp Sides editor checkbox and the `config.rampFix` game option.

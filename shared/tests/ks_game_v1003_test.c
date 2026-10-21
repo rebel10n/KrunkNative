@@ -175,6 +175,39 @@ static void test_always_sync(Game *game) {
     game->server = NULL;
 }
 
+// ---------------------------------------------------------------- ai.playAnim reps (v10.0.2)
+
+// v10.0.2: AI.playAnim(ai, clip, reps, raw) gives reps to the local copy (mesh.playClip(clip, reps)); the
+// script's ai.playAnim(clip, reps) passes it, and reps defaults to 1 when it is not a number.
+static const char *k_anim_script =
+    "public action start() {\n"
+    "    obj[] list = GAME.AI.list();\n"
+    "    list[0].playAnim(\"Walk\", 3);\n"
+    "    list[1].playAnim(\"Walk\");\n"
+    "}\n";
+
+static void test_play_anim_reps(void) {
+    printf("Running ai.playAnim reps test...\n");
+    cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
+    static Game game;
+    game_on(&game, map, MODE_ID_FFA);
+    game.is_local = 1; // the in-process client reads the list: the local copy carries the clip
+    GameAIData d;
+    game_ai_data_defaults(&d);
+    d.has_anim = 1;
+    const vec3 three_at = {0.0f, 0.0f, 0.0f}, one_at = {10.0f, 0.0f, 0.0f};
+    game_ai_spawn(&game, 0, 0, "Reps3", three_at, &d);
+    game_ai_spawn(&game, 0, 0, "Reps1", one_at, &d);
+    run_script(&game, k_anim_script);
+    const GameAI *three = ai_named(&game, "Reps3");
+    const GameAI *one = ai_named(&game, "Reps1");
+    CHECK(three && !strcmp(three->clip, "Walk") && three->clip_reps == 3, "playAnim(\"Walk\", 3): the local clip plays 3 times (%d)",
+          three ? three->clip_reps : -1);
+    CHECK(one && !strcmp(one->clip, "Walk") && one->clip_reps == 1, "playAnim(\"Walk\"): no reps plays once (%d)", one ? one->clip_reps : -1);
+    ks_game_unload(&game);
+    cJSON_Delete(map);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     cJSON *map = load_map("shared/tests/maps/ramp_fix.json");
@@ -184,6 +217,7 @@ int main(void) {
 
     test_match_started(&game);
     test_always_sync(&game);
+    test_play_anim_reps();
 
     ks_game_unload(&game);
     printf("%d checks, %d failures\n", g_checks, g_failures);

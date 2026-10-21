@@ -265,10 +265,10 @@ static vec3 air_draw_position(const Client *client, const GameAI *ai) {
 
 static void air_clips(AIMesh *slot, GameAI *ai, const double now) {
     if (!slot->gltf || !ai->data.has_anim) return;
-    if (ai->clip_serial != slot->clip_serial) { // "ana" / playAnim(ai, clip, 1): once
+    if (ai->clip_serial != slot->clip_serial) { // "ana": once; a local playAnim(ai, clip, reps): reps times
         slot->clip_serial = ai->clip_serial;
         if (ai->clip[0]) {
-            gltf_instance_play_clip(slot->gltf, ai->clip, 1);
+            gltf_instance_play_clip(slot->gltf, ai->clip, ai->clip_reps);
             slot->oneshot_until = now + AI_ONESHOT_FALLBACK;
         }
     }

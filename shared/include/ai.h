@@ -224,6 +224,7 @@ typedef struct GameAI_t {
     unsigned char force_pos:1;
     char clip[GAME_AI_ANIM_SIZE]; // the last "ana" clip to play once ("" none)
     unsigned clip_serial;         // bumped per "ana"
+    int clip_reps;                // AI.playAnim reps (v10.0.2 mesh.playClip(clip, reps)): the local copy plays the clip this many times; "ana" plays once
 } GameAI;
 
 // An owned data record: a pending map AI (addAI) or a parsed key bag; trigger actions live here.
@@ -410,7 +411,10 @@ void game_ai_kill(Game*, GameAI*, Player *source);      // AI.kill (onAIDeath, m
 void game_ai_remove(Game*, GameAI*);                    // AI.removeFully: "rai" to every viewer, dropped
 void game_ai_force_team(Game*, GameAI*, int team, float ms, float chance); // AI.forceTeam
 void game_ai_give_effect(Game*, GameAI*, int effect, int count);           // AI.giveEffect
-void game_ai_play_anim(Game*, GameAI*, const char *clip, int raw);         // AI.playAnim (server: "ana")
+void game_ai_play_anim(Game*, GameAI*, const char *clip, int raw);         // AI.playAnim(clip, 1, raw) (server: "ana")
+// AI.playAnim(ai, clip, reps, raw) (v10.0.2): reps reaches the local copy (the in-process client plays the clip reps
+// times); the "ana" packet carries no reps, so networked clients play it once (v10.0.2 servAnim passes 1).
+void game_ai_play_anim_reps(Game*, GameAI*, const char *clip, int reps, int raw);
 // Hits on an AI by a player's bullet / melee / projectile / explosion (players.js shoot,
 // projectiles.js, game.explosion): invincible, changeHealth, pointsPerHit, killScore, "4".
 void game_ai_damage(Game*, GameAI*, Player *dealer, float damage, int force_target);
