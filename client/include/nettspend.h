@@ -68,14 +68,13 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_TP_HAND_REACH 5.0f
 #define NETTSPEND_TP_HAND_X 0.65f
 // Third person: the off hand's rest is the pelvis joint (the Drank's stream pelvis_height above the feet, player_mesh.c
-// player_generate_meshes) raised NETTSPEND_OFF_HAND_RISE, and NETTSPEND_OFF_HAND_FWD in front of the shoulder: it hangs
-// there outside the pour-up, at about hip height plus a little, past the hip line (the stream's pelvis_forward, 1.25,
-// ahead of the feet). The rest is the pose itself, so the arm's bend is generated for its real length. At the old rest
-// (the pelvis, 2.4 forward) the bent elbow sat 2.7 below the shoulder. At this rest the wrist is about 5.3 above the feet
-// and 4.4 ahead of the shoulder: the reach is nearly the arm's full length, so the elbow sits about 1.65 below the shoulder
-// (the bend the solver generates is small there; the pole barely moves it, so it is left as it was).
-#define NETTSPEND_OFF_HAND_RISE 0.5f
-#define NETTSPEND_OFF_HAND_FWD 4.3f
+// player_generate_meshes) raised NETTSPEND_OFF_HAND_RISE, and NETTSPEND_OFF_HAND_FWD from the shoulder's depth (0: beside
+// the hip, not in front of the body). The rest is the pose itself, so the arm's bend is generated for its real length.
+// At this rest the wrist is about 5.4 above the feet and level with the shoulder's depth, and the elbow sits about 1.95
+// below the shoulder (the test's limit is 2.0): a bent arm's elbow lies about half the wrist's drop below the shoulder
+// (the bend's side, the pole in player_arm_reach, decides the rest of it).
+#define NETTSPEND_OFF_HAND_RISE 1.0f
+#define NETTSPEND_OFF_HAND_FWD 0.0f
 // The off hand outside the pour-up in first person (player_mesh.c player_off_hand_away): its arm hangs down from the
 // shoulder, this far out to its own side and forward per unit down (the forward reach as in af38340d).
 #define NETTSPEND_OFF_HAND_AWAY_OUT 0.0f

@@ -10,15 +10,15 @@ shoulder, elbow and wrist as drawn (world space). Checks:
   1. the trigger elbow bends down and back: the elbow's offset from its shoulder-to-wrist line points into
      the down-back half (perpendicular part dotted with (0, -1, +1) > 0);
   2. the off elbow bends the same way (down and back), not forward: a hanging arm's forearm swings forward;
-  3. the off hand is forward of the hip: its wrist is ahead of the torso's front face (z less than the
-     feet's z minus the torso's half depth, 0.65: chest_scale 1.3 in constants_v10.c; -z is forward at yaw 0);
+  3. the off hand rests beside the hip, not in front of the body: its wrist is not ahead of the torso's front
+     face (z not less than the feet's z minus the torso's half depth, 0.65: chest_scale 1.3 in constants_v10.c;
+     -z is forward at yaw 0; the user's 2026-10-21 screenshot showed it swung across the front of the hip);
   4. the trigger hand keeps its forward reach (the cup arm, af38340d): its wrist is over 3 units in front.
-  5. the off hand is forward of the hip line (the Drank's stream pelvis_forward, 1.25, ahead of the feet: the
-     user's "left arm too far back", 2026-10-21) and not below the hip (its wrist at least 0.25 under the
-     pelvis height, 4.55 above the feet: the user's "arms too low").
-  6. the off hand is at hip height or a little above: its wrist at least 4.6 above the feet;
-  7. the off elbow is no more than 1.8 below the off shoulder (the arm reaches nearly straight, not hanging
-     from a bent elbow, which sat 2.7 below).
+  5. the off hand is not below the hip (its wrist at least 0.25 under the pelvis height, 4.55 above the feet);
+  6. the off hand is at hip height or a little above: its wrist at least 5.3 above the feet;
+  7. the off elbow is no more than 2.0 below the off shoulder: the hand hangs beside the hip at hip height, and
+     a bent arm of this length puts its elbow about half the wrist's drop below the shoulder (the user's
+     "arms too low" / "sag", 2026-10-21).
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -38,10 +38,9 @@ WORK = tempfile.mkdtemp(prefix="kn-nettspend-arms-", dir=CACHE if os.path.isdir(
 FRAME_MS = 16.667
 FEET = (-343.0, -143.0, -28.0)  # the pose: feet x / y / z (yaw 0 faces -z)
 TORSO_HALF_DEPTH = 0.65         # the body cube's half depth (chest_scale 1.3, constants_v10.c; the cube is centred on the body)
-HIP_FORWARD = 1.25              # the Drank's stream pelvis_forward (kn_drank.c): the hip line, ahead of the feet
 HIP_HEIGHT = 4.55               # the Drank's stream pelvis_height (kn_drank.c): the hip, above the feet
-OFF_WRIST_MIN = 4.6             # the off hand's rest: at hip height or a little above (above the feet)
-OFF_ELBOW_MAX_DROP = 1.8        # the off elbow: no more than this below the off shoulder
+OFF_WRIST_MIN = 5.3             # the off hand's rest: at hip height or a little above (above the feet)
+OFF_ELBOW_MAX_DROP = 2.0        # the off elbow: no more than this below the off shoulder
 results = []
 
 
@@ -126,20 +125,17 @@ def main():
                   f"elbow {tuple(round(v, 2) for v in e)}, wrist {tuple(round(v, 2) for v in w)}, bend side {side:+.2f}")
         off_wrist = arms["off"][2]
         front = FEET[2] - TORSO_HALF_DEPTH
-        check("the off hand is forward of the hip (ahead of the torso's front face)", off_wrist[2] < front,
+        check("the off hand rests beside the hip, not ahead of the torso's front face", off_wrist[2] >= front,
               f"wrist z {off_wrist[2]:.2f}, torso front z {front:.2f}")
-        hip_line = FEET[2] - HIP_FORWARD
-        check("the off hand is forward of the hip line (the stream's pelvis, 1.25 ahead of the feet)", off_wrist[2] < hip_line,
-              f"wrist z {off_wrist[2]:.2f}, hip line z {hip_line:.2f}")
         hand_height = off_wrist[1] - FEET[1]
         check("the off hand is not below the hip (about the pelvis height, 4.55 above the feet)", hand_height >= HIP_HEIGHT - 0.25,
               f"wrist {hand_height:.2f} above the feet, pelvis {HIP_HEIGHT:.2f}")
-        check("the off hand is at hip height or a little above (its wrist at least 4.6 above the feet)", hand_height >= OFF_WRIST_MIN,
+        check("the off hand is at hip height or a little above (its wrist at least 5.3 above the feet)", hand_height >= OFF_WRIST_MIN,
               f"wrist {hand_height:.2f} above the feet")
         off_shoulder, off_elbow, _ = arms["off"]
         elbow_drop = off_shoulder[1] - off_elbow[1]
-        check("the off elbow is no more than 1.8 below its shoulder (the arm reaches nearly straight)", elbow_drop <= OFF_ELBOW_MAX_DROP,
-              f"elbow {elbow_drop:.2f} below the shoulder")
+        check("the off elbow is no more than 2.0 below its shoulder (the hand hangs beside the hip, elbow bent)",
+              elbow_drop <= OFF_ELBOW_MAX_DROP, f"elbow {elbow_drop:.2f} below the shoulder")
         trig_wrist = arms["trigger"][2]
         check("the cup hand keeps its forward reach (over 3 units in front)", FEET[2] - trig_wrist[2] > 3.0,
               f"reach {FEET[2] - trig_wrist[2]:.2f}")

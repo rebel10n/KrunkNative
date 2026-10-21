@@ -1304,9 +1304,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // the arms anchor sits at the held weapon's offset.y under the upper body, whose origin is player_height -
                     // camera_height above the feet, so the pelvis is pelvis_height - (player_height - camera_height) in the upper
                     // body's frame, and the hand's arm-frame y (the arm solver's hold.y) is that less weapon->offset.y. The hold
-                    // is the shoulder's own x, its y NETTSPEND_OFF_HAND_RISE above the pelvis and its z NETTSPEND_OFF_HAND_FWD ahead
-                    // of the shoulder: the rest is the hand at about hip height plus a little, past the hip line (the stream's
-                    // pelvis_forward ahead of the feet)
+                    // is the shoulder's own x, its y NETTSPEND_OFF_HAND_RISE above the pelvis and its z NETTSPEND_OFF_HAND_FWD
+                    // (0: level with the shoulder, beside the hip, not in front of the body)
                     const float pelvis_height = weapon->stream ? weapon->stream->pelvis_height : game_constants.leg_height;
                     const float left_shoulder_x = -game_constants.chest_width + game_constants.arm_scale * 0.5f - game_constants.arm_inset;
                     drank_grip.left_hold.x = -left_shoulder_x;
