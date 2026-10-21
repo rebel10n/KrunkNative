@@ -62,6 +62,8 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.OBJECT_STATE]: "OBJECT_STATE",
   [T.NATIVE_MORE.MODE_SYNC_V7]: "MODE_SYNC_V7",
   [T.NATIVE_MORE.PICKUP]: "PICKUP",
+  [T.NATIVE_MORE.INPUT_BATCH]: "INPUT_BATCH",
+  [T.NATIVE_MORE.RECON]: "RECON",
   [T.NATIVE_MORE.CHAT]: "CHAT",
   [T.NATIVE_MORE.MATCH_VOTE_STATE]: "MATCH_VOTE_STATE",
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
@@ -90,6 +92,7 @@ type V10Session = {
   configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
   modeIndex: number; // the INIT's mode (0 Free for All)
+  input: T.InputState; // the input window's deltas, kept across q packets
   kBatch: unknown[]; // the player records of the states in this chunk: one "k" per chunk (the handler hides the rest)
   clientId: number; // our player's uid (the INIT's client id): its state is not sent back to us
   startedAt: number; // the clock the "k" server time counts from
@@ -381,6 +384,20 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   }
   if (session.initSent && type === T.NATIVE_MORE.AI_ADD) return;
   if (session.initSent && type === T.NATIVE_MORE.AI_SYNC) return; // the v3 sync: the v7 one (161) is the one for a v7 peer
+  // EXT 0x8120: a server line about a player (join, leave), formatted as a server line (see mapServerLine)
+  if (session.initSent && type === T.NATIVE_MORE.EXT && payload.length >= 2 && payload.readUInt16LE(0) === T.EXT_SERVER_LINE) {
+    const mapped = T.mapServerLine(payload.subarray(2), EV.escapeHtml);
+    if (mapped.stop) return stopAt(session, "EXT 0x8120 SERVER_LINE", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  // RECON: the owner's movement state (the v10 "l", one argument: see mapRecon)
+  if (session.initSent && type === T.NATIVE_MORE.RECON) {
+    const mapped = T.mapRecon(payload);
+    if (mapped.stop) return stopAt(session, "RECON", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
   if (session.initSent && type === T.NATIVE_MORE.PICKUP) {
     const mapped = T.mapPickup(payload);
     if (mapped.stop) return stopAt(session, "PICKUP", mapped.stop);
@@ -547,6 +564,15 @@ function handleClientPacket(session: V10Session, label: string, args: unknown[])
       session.challMode = Array.isArray(join) && join[T.EN.CHALLENGE] ? 1 : 0;
       break;
     }
+    case T.V10_OUT.INPUT: {
+      // the input window: every frame goes to the native server, NET_INPUT_BATCH_MAX to a packet (a malformed q is dropped)
+      const frames = T.decodeInputBatch(session.input, args);
+      if (!frames) break;
+      for (let i = 0; i < frames.length; i += T.NET_INPUT_BATCH_MAX) {
+        writeNative(session, T.NATIVE_MORE.INPUT_BATCH, T.encodeInputBatch(frames.slice(i, i + T.NET_INPUT_BATCH_MAX)));
+      }
+      break;
+    }
     case T.V10_OUT.CHAT_MESSAGE: {
       const chat = T.encodeChat(args[0]);
       if (chat) writeNative(session, T.NATIVE.CHAT_SEND, chat);
@@ -579,6 +605,7 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     leaderRows: null,
     aiSync: null,
     objectiveWeapon: false,
+    input: T.newInputState(),
     kBatch: [],
     clientId: -1,
     startedAt: Date.now(),

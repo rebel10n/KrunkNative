@@ -34,6 +34,10 @@ static kn_loop *g_loop;
 #define T_EN_LEN 35 // the v10 "en" array
 
 // ---- a value equality for the decoded frames (exact doubles, the TS deepStrictEqual)
+static int32_t rd_i32_test(const uint8_t *b, size_t at) {
+    return (int32_t)((uint32_t)b[at] | (uint32_t)b[at + 1] << 8 | (uint32_t)b[at + 2] << 16 | (uint32_t)b[at + 3] << 24);
+}
+
 static int vequal(const KrunkerValue *a, const KrunkerValue *b) {
     if (!a || !b) return a == b;
     if (a->type != b->type) return 0;
@@ -779,9 +783,24 @@ int main(void) {
     native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
     WAIT_FOR(client_count("inat") == 2);
     KrunkerFrame inat2;
-    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && vequal(&inat2.args[4], &KRUNKER_V_NUM(0)) && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
-          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: weapon 0 (updatePickup), inactive, null position (mapPickup)");
+    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && inat2.args[4].type == KRUNKER_NIL && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
+          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: null weapon (173166), inactive, null position (mapPickup)");
     krunker_frame_free(&inat2);
+
+    // RECON (110): the owner's state after an input goes to the v10 client as one "l" (the 26-slot array)
+    {
+        uint8_t rc[89];
+        memset(rc, 0, sizeof rc);
+        w_i32(rc, 0, 4);
+        w_f32(rc, 4, 7);
+        native_send(&g_native, NET_PACKET_RECON, rc, 89);
+        WAIT_FOR(client_count("l") == 1);
+        KrunkerFrame lf;
+        CHECK(client_get("l", 0, &lf) && lf.argc == 1 && lf.args[0].type == KRUNKER_ARRAY && lf.args[0].len == 26 &&
+              vequal(&lf.args[0].u.items[0], &KRUNKER_V_NUM(4)), "l carries the inputSN as slot 0 (one argument)");
+        CHECK(v10_bridge_untranslated("RECON") == 0, "RECON is translated");
+        krunker_frame_free(&lf);
+    }
 
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
@@ -827,6 +846,26 @@ int main(void) {
     NFrame *ent = native_nth(NET_PACKET_ENT, 0);
     CHECK(ent != NULL && ent->len == V10_ENT_SIZE && (int32_t)(ent->payload[0] | ent->payload[1] << 8 | ent->payload[2] << 16 | ent->payload[3] << 24) == 4,
           "ENT: 101 bytes, class 4");
+
+    // q (INPUT): the official client's window (seq 5 and 6, shoot) reaches the native input batch (111)
+    {
+        KrunkerValue ch_vals[11] = {KRUNKER_V_NUM(3), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                    KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)};
+        static const char *const ch_keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+        KrunkerValue *map_kv = malloc(sizeof(KrunkerValue) * 22);
+        for (int i = 0; i < 11; i++) { map_kv[2 * i] = KRUNKER_V_STR(ch_keys[i]); map_kv[2 * i + 1] = ch_vals[i]; }
+        KrunkerValue *angle_items = malloc(sizeof(KrunkerValue) * 4);
+        angle_items[0] = KRUNKER_V_NUM(100); angle_items[1] = KRUNKER_V_NUM(-200);
+        angle_items[2] = KRUNKER_V_NUM(5); angle_items[3] = KRUNKER_V_NUM(2);
+        KrunkerValue q_args[6] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(5), KRUNKER_V_STR("1616"), KRUNKER_V_NUM(2),
+                                  KRUNKER_V_ARRAY(angle_items, 4), KRUNKER_V_MAP(map_kv, 11)};
+        client_send("q", q_args, 6);
+        WAIT_FOR(native_count(NET_PACKET_INPUT_BATCH) == 1);
+        NFrame *in_batch = native_nth(NET_PACKET_INPUT_BATCH, 0);
+        CHECK(in_batch && in_batch->len == 1 + 24 * 2 && in_batch->payload[0] == 2, "q -> INPUT_BATCH with two frames");
+        CHECK(in_batch && rd_i32_test(in_batch->payload, 1) == 5 && rd_i32_test(in_batch->payload, 25) == 6, "the frames' seq 5 and 6");
+        CHECK(in_batch && in_batch->payload[1 + 20] == NET_INPUT_SHOOT, "frame 0 fires");
+    }
 
     // chat -> CHAT_SEND
     KrunkerValue hi = KRUNKER_V_STR("hello there");

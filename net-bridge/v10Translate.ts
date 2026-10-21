@@ -58,6 +58,7 @@ export const V10_OUT = Object.freeze({
   LOAD: "load",
   ENTER_GAME: "en",
   CHAT_MESSAGE: "ct",
+  INPUT: "q", // the per-tick input window (v10.js 97732 INPUT, sent at 221577)
   PING: "po",
   PONG: "v",
 } as const);
@@ -90,6 +91,7 @@ export const V10_IN = Object.freeze({
   UPDATE_FLAG: "ufl",
   UPDATE_FLAG_INFO: "ufi",
   PLAYER_INTERACTIONS: "inat", // with sid -1 and the pickup flag: updatePickup (the pickup half of inat, no player)
+  SYNC_PLAYER: "l", // v10.js 220091 (_73160): the owner's movement state, one argument: the 26-slot array
   UPD_MATCH_VOTE: "mv", // [vo, mts]: the match vote cards (v10 UPD_MATCH_VOTE, the v7 broadcast "mv")
   TEAM_SCORE: "ts",
   UPDATE_LIVES: "lv",
@@ -232,6 +234,8 @@ export const NATIVE_MORE = Object.freeze({
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
+  RECON: 110, // NET_PACKET_RECON: the owner's authoritative state after an input (NetReconPacket, the v10 "l")
+  INPUT_BATCH: 111, // NET_PACKET_INPUT_BATCH: the frames of one input window (NetInputBatchPacket, Krunker "q")
   CHAT_V7: 245, // NET_PACKET_CHAT_V7: a chat line for a v7 peer (NetChatV7Packet: channel, account id, NetChatPacket)
   DOM_UPDATE: 142, // NET_PACKET_DOM_UPDATE: the domination zones' state (NetDomUpdatePacket, protocol 1.4.4)
   SPAWN: 4, // NET_PACKET_SPAWN: a player's state at spawn (NetSpawnPacket, protocol 1.4.3 layout)
@@ -349,6 +353,194 @@ export const CHEAT_LABELS: Readonly<Record<number, string>> = Object.freeze({
 export function parseCheat(p: Buffer): { flag: number; on: boolean } | null {
   if (p.length !== 2 || p[1] > 1) return null;
   return { flag: p[0], on: p[1] !== 0 };
+}
+
+// ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). The q is the window's
+// [resync, firstIsn, dts, dtLen, angles?, changes?, syncTimes?] (v10.js 221577, the encoder in
+// client/src/net/krunker_link.c send_input_window, its inverse in client/tests/krunker_sync_test.c server_decode_q).
+// Frame j has 15 fields: sequence (firstIsn + j), dt (ms, dts[j]), pitch and yaw (milli-radians: the first frame's
+// angles, then each frame's delta), and fields 4..14 from the "j-k" changes, kept across windows: move index (-1 no
+// move, else 0..7 from v10's movDirs order), shoot (5), ADS (6), jump (7), reload (8), crouch (9), scroll (10), weapon
+// swap (11), the slowdown (1 - speedLmt, 0..1, 11 steps, KN keeps tenths) (12), reset (13: 1 start, 2 last), interact (14).
+// The NetInputPacket: x_dir is the pitch and y_dir the yaw (bots.c: in.x_dir = pitch, in.y_dir = yaw). A resync (1)
+// restarts the deltas (v10.js 220089 sets it when the client resets its input).
+export const NET_INPUT = Object.freeze({
+  SHOOT: 1 << 0,
+  SCOPE: 1 << 1,
+  JUMP: 1 << 2,
+  CROUCH: 1 << 3,
+  RELOAD: 1 << 4,
+  RESET_START: 1 << 5,
+  RESET_LAST: 1 << 6,
+  INTERACT: 1 << 7,
+} as const);
+export const NET_INPUT_BATCH_MAX = 20; // frames per NetInputBatchPacket (shared.h)
+const NET_INPUT_FRAME_SIZE = 24; // NetInputPacket (shared.h, packed)
+export type NativeInput = {
+  seq: number;
+  moveDir: number;
+  delta: number;
+  xDir: number;
+  yDir: number;
+  flags: number;
+  swap: number;
+  slowdown: number;
+  scroll: number;
+};
+// The window fields the next q is read against: the last angles and the last value of fields 4..14 (index = field).
+export type InputState = { angles: number[]; vals: number[] };
+function inputVals(): number[] {
+  const vals = new Array<number>(15).fill(0);
+  vals[4] = -1; // the server's reset of the move field (krunker_sync_test.c server_decode_q)
+  return vals;
+}
+export function newInputState(): InputState {
+  return { angles: [], vals: inputVals() };
+}
+
+export function decodeInputBatch(state: InputState, args: unknown[]): NativeInput[] | null {
+  const first = Number(args[1]);
+  if (!Number.isInteger(first)) return null;
+  const dtsRaw = args[2];
+  const dtLen = Number(args[3] ?? 0);
+  let dts: number[];
+  if (typeof dtsRaw === "string") {
+    dts = [];
+    if (dtLen > 0) for (let o = 0; o + dtLen <= dtsRaw.length; o += dtLen) dts.push(Number(dtsRaw.slice(o, o + dtLen)));
+  } else if (Array.isArray(dtsRaw)) {
+    dts = dtsRaw.map(Number);
+  } else {
+    return null;
+  }
+  if (args[0]) {
+    state.vals = inputVals(); // resync: the client restarted its deltas
+    state.angles = [];
+  }
+  if (Array.isArray(args[4])) state.angles = (args[4] as unknown[]).map(Number); // absent or 0: the window before's
+  const changes = args[5] && typeof args[5] === "object" && !Array.isArray(args[5]) ? (args[5] as Record<string, unknown>) : {};
+  const frames: NativeInput[] = [];
+  let pitch = 0;
+  let yaw = 0;
+  for (let j = 0; j < dts.length; j++) {
+    if (j === 0) {
+      pitch = state.angles.length >= 2 ? state.angles[0] : 0;
+      yaw = state.angles.length >= 2 ? state.angles[1] : 0;
+    } else if (state.angles.length > 2 * j + 1) {
+      pitch += state.angles[2 * j];
+      yaw += state.angles[2 * j + 1];
+    }
+    for (let k = 4; k <= 14; k++) {
+      const c = changes[`${j}-${k}`];
+      if (c !== undefined) state.vals[k] = Number(c);
+    }
+    const v = state.vals;
+    const reset = v[13] === 2 ? NET_INPUT.RESET_LAST : v[13] === 1 ? NET_INPUT.RESET_START : 0;
+    frames.push({
+      seq: first + j,
+      moveDir: v[4] >= 0 && v[4] <= 7 ? (v[4] + 7) % 8 : -1,
+      delta: dts[j] / 1000,
+      xDir: pitch / 1000,
+      yDir: yaw / 1000,
+      flags:
+        (v[5] ? NET_INPUT.SHOOT : 0) |
+        (v[6] ? NET_INPUT.SCOPE : 0) |
+        (v[7] ? NET_INPUT.JUMP : 0) |
+        (v[8] ? NET_INPUT.RELOAD : 0) |
+        (v[9] ? NET_INPUT.CROUCH : 0) |
+        reset |
+        (v[14] ? NET_INPUT.INTERACT : 0),
+      swap: v[11] ? 1 : 0,
+      slowdown: Math.min(10, Math.max(0, Math.round(v[12] * 10))),
+      scroll: Math.min(1, Math.max(-1, Math.trunc(v[10]))),
+    });
+  }
+  return frames;
+}
+
+// NET_PACKET_INPUT_BATCH: count (uint8), then the NetInputPacket of each frame (24 bytes, little endian).
+export function encodeInputBatch(frames: NativeInput[]): Buffer {
+  const out = Buffer.alloc(1 + NET_INPUT_FRAME_SIZE * frames.length);
+  out[0] = frames.length;
+  frames.forEach((f, i) => {
+    const at = 1 + NET_INPUT_FRAME_SIZE * i;
+    out.writeInt32LE(f.seq | 0, at);
+    out.writeInt32LE(f.moveDir | 0, at + 4);
+    out.writeFloatLE(f.delta, at + 8);
+    out.writeFloatLE(f.xDir, at + 12);
+    out.writeFloatLE(f.yDir, at + 16);
+    out[at + 20] = f.flags;
+    out[at + 21] = f.swap;
+    out[at + 22] = f.slowdown;
+    out.writeInt8(f.scroll, at + 23);
+  });
+  return out;
+}
+
+// ---- RECON (110): the owner's authoritative movement state -> v10 "l" (the SYNC_PLAYER handler, v10.js 220091-220140,
+// reads the array by index and replays the unacknowledged inputs). NetReconPacket (packed, 89 bytes, shared.h):
+// ack_seq @0, position[3] @4, velocity[3] @16 (x, y, z), yaw @28, aim_val @32, crouch_val @36, loadout_index @40,
+// slide_timer @44, x_vel_cylinder @48, z_vel_cylinder @52, on_wall @56, flags @57 (NET_RECON_*), wall_jump_count @58,
+// can_slide_timer @60 (s), slide_ms @64 (double), grapple_active @72, grapple[4] @73 (x, y, z, range). The inverse of the
+// native client's on_sync_player (client/src/net/krunker_link.c): the array's slots are inputSN, ping, x, y, z, velY, velX,
+// velZ, xDire (the yaw), onGround, didJump, didJumpW, wallJumpC, onWall, onLadder, aimVal (1 - aim_val), crouchVal,
+// weapon, slideTimer (ms), canSlide, onTerrain, xVelC, zVelC, grapple (or null), canSlideT (ms), protected (null).
+// The ping is not in the packet (0); the noclip flag has no slot.
+export const RECON_SIZE = 89;
+const RECON_ON_GROUND = 0x01;
+const RECON_DID_JUMP = 0x02;
+const RECON_DID_JUMP_W = 0x04;
+const RECON_ON_LADDER = 0x08;
+const RECON_CAN_SLIDE = 0x10;
+const RECON_ON_TERRAIN = 0x20;
+export function mapRecon(p: Buffer): Mapped {
+  if (p.length !== RECON_SIZE) return { messages: [], stop: "malformed (not the v3 NetReconPacket)" };
+  const flags = p[57];
+  const grapple = p[72] !== 0 ? [p.readFloatLE(73), p.readFloatLE(77), p.readFloatLE(81), p.readFloatLE(85)] : null;
+  const sync = [
+    p.readInt32LE(0), // inputSN (ack_seq)
+    0, // ping: not in the packet
+    p.readFloatLE(4), // x
+    p.readFloatLE(8), // y
+    p.readFloatLE(12), // z
+    p.readFloatLE(20), // velY
+    p.readFloatLE(16), // velX
+    p.readFloatLE(24), // velZ
+    p.readFloatLE(28), // xDire: the yaw
+    (flags & RECON_ON_GROUND) !== 0, // onGround
+    (flags & RECON_DID_JUMP) !== 0, // didJump
+    (flags & RECON_DID_JUMP_W) !== 0, // didJumpW
+    p.readUInt16LE(58), // wallJumpC
+    p[56], // onWall: the wall's side 1..4, 0 none
+    (flags & RECON_ON_LADDER) !== 0, // onLadder
+    1 - p.readFloatLE(32), // aimVal: Krunker 1 = hip, ours 0 (the native client's inverse)
+    p.readFloatLE(36), // crouchVal
+    p.readInt32LE(40), // weapon: the loadout index
+    p.readDoubleLE(64), // slideTimer, ms
+    (flags & RECON_CAN_SLIDE) !== 0, // canSlide
+    (flags & RECON_ON_TERRAIN) !== 0, // onTerrain
+    p.readFloatLE(48), // xVelC
+    p.readFloatLE(52), // zVelC
+    grapple, // grapple || null
+    p.readFloatLE(60) * 1000, // canSlideT, ms
+    null, // protected
+  ];
+  return { messages: [[V10_IN.SYNC_PLAYER, [sync]]] };
+}
+
+// ---- EXT 0x8120 (NetServerLinePacket, 324 bytes, net_ext.h): a server line about one player (the join and leave lines).
+// The client formats the template itself (its first "$" is the name, net_format_server_line); v10 has no template key for
+// it, so the formatted line goes as a server line (kind 2, no name), as the server's own lines do (v10.js 162788: ch -1 ...).
+export const EXT_SERVER_LINE = 0x8120; // NET_EXT_KN_SERVER_LINE
+const SERVER_LINE_SIZE = 324; // int32 uid, char name[32], char text[288]
+export function mapServerLine(body: Buffer, escape: (s: string) => string): Mapped {
+  if (body.length !== SERVER_LINE_SIZE) return { messages: [], stop: "malformed" };
+  const cstr = (at: number, size: number) => {
+    const nul = body.indexOf(0, at);
+    return body.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
+  };
+  const name = cstr(4, 32);
+  const template = cstr(36, 288);
+  return chatLine(2, template.replace("$", () => name), null, -1, null, escape);
 }
 
 // ---- MODE_STATE and OBJECT_STATE: the mode snapshot and the object list a joiner gets after the INIT.
@@ -720,18 +912,20 @@ const STATE_SIZE = 79;
 // NetPickupPacket (packed, 26 bytes): uid int32 @0, weapon int32 @4 (-1 empty), active uint8 @8, moved uint8 @9,
 // position float[3] @10 (valid when moved), ammo int32 @22 (shared/src/interact.c pickup_send). v10 takes a pickup
 // change in "inat" with no player (sid -1, the pickup flag set): io_playerInteractions calls updatePickup(uid,
-// weapon, orgPickup, active, pos) (v7.1.4 index.js; v10 keeps it). updatePickup has no weapon for -1, so an empty
-// pickup goes as weapon 0 and inactive (it is hidden, and nothing can be picked from it). The ammo is not sent:
-// v10's inat does not carry it.
+// weapon, orgPickup, active, pos) (v7.1.4 index.js; v10 keeps it). The ammo is not sent: v10's inat does not carry it.
+// An empty pickup (weapon -1): the server sets its weapon to undefined (v10.js 173166, `pickup = void 0` after a
+// replenishing take), which msgpack sends as nil, so the client gets null, and the client hides a pickup with a null
+// weapon (v10.js 189110, `visible = ... && null != weapon`). Its active flag is the server's own (v10.js 173186
+// `!!active`; the pkups list, 190079, sends the same flag), not forced off.
 const PICKUP_SIZE = 26;
 export function mapPickup(p: Buffer): Mapped {
   if (p.length !== PICKUP_SIZE) return { messages: [], stop: "malformed" };
   const uid = p.readInt32LE(0);
   const weapon = p.readInt32LE(4);
   const empty = weapon < 0;
-  const active = !empty && p[8] !== 0;
+  const active = p[8] !== 0;
   const pos = p[9] !== 0 ? [p.readFloatLE(10), p.readFloatLE(14), p.readFloatLE(18)] : null;
-  return { messages: [[V10_IN.PLAYER_INTERACTIONS, [-1, null, null, uid, empty ? 0 : weapon, true, active, pos]]] };
+  return { messages: [[V10_IN.PLAYER_INTERACTIONS, [-1, null, null, uid, empty ? null : weapon, true, active, pos]]] };
 }
 
 // NetMatchVoteStatePacket (packed, 170 bytes): count uint8 @0 (0: no vote, the cards clear), voted int8 @1 (our entry,

@@ -22,11 +22,13 @@
 
 #include "cJSON.h"
 #include "krunker_proto.h"
+#include "shared.h" /* NetInputPacket, NET_INPUT_* (the KN input frame) */
 
 /* ---- v10 labels (v10Translate.ts V10_OUT / V10_IN) */
 #define V10_OUT_LOAD "load"
 #define V10_OUT_ENTER_GAME "en"
 #define V10_OUT_CHAT_MESSAGE "ct"
+#define V10_OUT_INPUT "q"
 
 #define V10_IN_IO_INIT "io-init"
 #define V10_IN_INIT_LOAD "load"
@@ -34,7 +36,8 @@
 #define V10_IN_INIT_GAME "init"
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
 #define V10_IN_PLAYER_INTERACTION "inat"
-#define V10_IN_UPD_MATCH_VOTE "mv" /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
+#define V10_IN_UPD_MATCH_VOTE "mv"
+#define V10_IN_SYNC_PLAYER "l" /* v10.js 220091: the owner's movement state, one argument: the 26-slot array */ /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
 #define V10_IN_REMOVE_PLAYER_SOUND "rsnd"
 #define V10_IN_UPDATE_TIMER "t"
@@ -204,6 +207,25 @@ void v10_map_object_state(V10Out *o, const uint8_t *p, size_t n);
 void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socket_id);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
+/* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and
+ * encodeInputBatch in v10Translate.ts (the fields, the deltas, the resync; the NetInputPacket of shared.h). */
+typedef struct V10Input {
+    double *angles;     /* the last window's angles: pitch, yaw of the first frame, then each frame's delta */
+    size_t angle_count, angle_cap;
+    double vals[15];    /* fields 4..14 as the window last set them (index = field) */
+} V10Input;
+void v10_input_init(V10Input *in);
+void v10_input_free(V10Input *in);
+/* The frames of one q (args: resync, firstIsn, dts, dtLen, angles?, changes?, syncTimes?): a malloc'd array of
+ * *count frames (free it), NULL when the q is malformed. */
+NetInputPacket *v10_decode_input(V10Input *in, const KrunkerValue *args, uint32_t argc, size_t *count);
+/* The NET_PACKET_INPUT_BATCH payload of n frames (n <= NET_INPUT_BATCH_MAX): count, then the frames. Returns its length. */
+size_t v10_encode_input_batch(const NetInputPacket *frames, size_t n, uint8_t *out);
+
+/* EXT 0x8120 (NetServerLinePacket, 324 bytes): a join or leave line about a player, formatted as a server line (mapServerLine). */
+void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n);
+/* RECON (NetReconPacket, 89 bytes): the owner's movement state as the "l" sync array (mapRecon in v10Translate.ts). */
+void v10_map_recon(V10Out *o, const uint8_t *p, size_t n);
 /* PICKUP (NetPickupPacket, 26 bytes): one pickup's state as the "inat" message (mapPickup in v10Translate.ts). */
 void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n);
 /* CHEAT (NetCheatPacket: uint8 flag, uint8 on): 0 when malformed. */

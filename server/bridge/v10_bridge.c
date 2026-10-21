@@ -83,6 +83,7 @@ typedef struct V10Session {
     kn_buf in;       /* native bytes not yet framed */
 
     int hello_sent;
+    V10Input input;      /* the input window's deltas, kept across q packets */
     V10MapInfo map_info;
     int have_map_info;
     V10Chunks map_assembly;
@@ -192,6 +193,8 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_TIMER: return "TIMER";
     case NET_PACKET_CHEAT: return "CHEAT";
     case NET_PACKET_PICKUP: return "PICKUP";
+    case NET_PACKET_INPUT_BATCH: return "INPUT_BATCH";
+    case NET_PACKET_RECON: return "RECON";
     case NET_PACKET_CHAT: return "CHAT";
     case NET_PACKET_MATCH_VOTE_STATE: return "MATCH_VOTE_STATE";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
@@ -259,6 +262,7 @@ static void session_free(V10Session *s) {
     free(s->kbatch);
     free(s->ai_sync);
     free(s->skins);
+    v10_input_free(&s->input);
     for (size_t i = 0; i < s->queue_n; i++) free(s->queue[i].payload);
     free(s->queue);
     free(s);
@@ -554,6 +558,19 @@ static void handle_client(V10Session *s, const char *label, const KrunkerValue *
         if (v10_encode_enter(a0, ent)) write_native(s, NET_PACKET_ENT, ent, sizeof ent);
         /* challMode: the join's array item 7 (EN.CHALLENGE), truthy */
         s->chall_mode = a0 && a0->type == KRUNKER_ARRAY && a0->len > 7 && v10_truthy(&a0->u.items[7]) ? 1 : 0;
+    } else if (!strcmp(label, V10_OUT_INPUT)) {
+        /* the input window: every frame to the native server, NET_INPUT_BATCH_MAX to a packet (a malformed q is dropped) */
+        size_t count = 0;
+        NetInputPacket *frames = v10_decode_input(&s->input, args, argc, &count);
+        if (frames) {
+            for (size_t i = 0; i < count; i += NET_INPUT_BATCH_MAX) {
+                const size_t n = count - i < NET_INPUT_BATCH_MAX ? count - i : NET_INPUT_BATCH_MAX;
+                uint8_t payload[1 + NET_INPUT_BATCH_MAX * sizeof(NetInputPacket)];
+                const size_t len = v10_encode_input_batch(&frames[i], n, payload);
+                write_native(s, NET_PACKET_INPUT_BATCH, payload, len);
+            }
+            free(frames);
+        }
     } else if (!strcmp(label, V10_OUT_CHAT_MESSAGE)) {
         uint8_t text[V10_CHAT_TEXT_SIZE];
         const size_t n = v10_encode_chat(a0, text);
@@ -748,6 +765,13 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     }
     if (s->init_sent && type == NET_PACKET_PING_RESULT) return; /* v10's "pir" handler does nothing */
     if (s->init_sent && type == NET_PACKET_SOCIAL_V7) return;   /* a v7 capability notice: chat goes as CHAT_SEND */
+    /* EXT 0x8120: a join or leave line about a player, formatted as a server line (v10_map_server_line) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_SERVER_LINE) {
+        v10_out_init(&o);
+        v10_map_server_line(&o, p + 2, n - 2);
+        finish_out(s, &o, "EXT 0x8120 SERVER_LINE");
+        return;
+    }
     /* KN's account rights (EXT 0x8001): no v10 message, consumed (as the TS) */
     if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_ACCOUNT_RIGHTS) return;
     if (s->init_sent && type == NET_PACKET_LEADERBOARD) {
@@ -878,6 +902,13 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon) */
+    if (s->init_sent && type == NET_PACKET_RECON) {
+        v10_out_init(&o);
+        v10_map_recon(&o, p, n);
+        finish_out(s, &o, "RECON");
         return;
     }
     /* PICKUP: one pickup's state, the pickup half of v10's "inat" (see v10_map_pickup) */
@@ -1110,6 +1141,7 @@ static void route_ws(kn_http_req *req, void *ud) {
     }
     s->bridge = b;
     s->fd = -1;
+    v10_input_init(&s->input);
     session_link(s);
     kn_ws_options opts;
     memset(&opts, 0, sizeof opts);

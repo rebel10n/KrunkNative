@@ -138,8 +138,8 @@ typedef struct {
     float pos[3]; float dir[2]; const char *name; int32_t secondary;
     int32_t hat, body, hair, skin_color, dye, waist, face, head, back, shoe, pet, wrist, charm0, charm1, player_card;
     float head_mlt;
-} Spawn;
-static void spawn_buf(uint8_t *b, const Spawn *s) {
+} TSpawn;
+static void spawn_buf(uint8_t *b, const TSpawn *s) {
     memset(b, 0, 150);
     put_i32(b, 0, s->uid);
     b[4] = s->is_you; b[5] = s->active;
@@ -158,8 +158,8 @@ static void spawn_buf(uint8_t *b, const Spawn *s) {
     const int32_t v7[9] = {s->head, s->back, s->shoe, s->pet, s->wrist, s->charm0, s->charm1, s->player_card, -1};
     for (int i = 0; i < 9; i++) put_i32(b, 114 + 4 * (size_t)i, v7[i]);
 }
-static Spawn default_spawn(void) {
-    Spawn s;
+static TSpawn default_spawn(void) {
+    TSpawn s;
     memset(&s, 0, sizeof s);
     s.is_you = 0; s.active = 1; s.health = 100; s.max_health = 100; s.head_mlt = 1;
     s.hat = s.body = s.hair = s.skin_color = s.dye = s.waist = s.face = -1;
@@ -246,7 +246,7 @@ int main(void) {
             put_i32(pk, 4, -1); pk[8] = 0; pk[9] = 0;
             v10_out_init(&po);
             v10_map_pickup(&po, pk, 26);
-            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), N(0), B(1), B(0), NIL);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), NIL, B(1), B(0), NIL); /* an empty pickup: null weapon (173166) */
             v10_out_free(&po);
             v10_out_init(&po);
             v10_map_pickup(&po, pk, 25);
@@ -339,6 +339,164 @@ int main(void) {
             v10_map_match_vote(&mo, mv, 170, "sock");
             CHECK(stop_has(&mo, "malformed"), "more than 4 cards is malformed");
             v10_out_free(&mo);
+        }
+
+        // EXT 0x8120 (NetServerLinePacket, 324 bytes): the template's first "$" is the name, a server line (mapServerLine)
+        {
+            uint8_t sl[324];
+            V10Out so;
+            memset(sl, 0, sizeof sl);
+            put_i32(sl, 0, 3);
+            put_str(sl, 4, "Ada", 32);
+            put_str(sl, 36, "$ joined the game", 288);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 324);
+            MSG_IS(&so, 0, "ch", N(-1), NIL, S("Ada joined the game"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&so);
+            memset(sl + 36, 0, 288);
+            put_str(sl, 36, "Round starts", 288);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 324);
+            MSG_IS(&so, 0, "ch", N(-1), NIL, S("Round starts"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 323);
+            CHECK(stop_has(&so, "malformed"), "a short server line is malformed");
+            v10_out_free(&so);
+        }
+
+        // RECON (110, NetReconPacket, 89 bytes) -> l, one argument: the 26-slot sync array (mapRecon, v10Translate.ts)
+        {
+            uint8_t rc[89];
+            V10Out ro;
+            memset(rc, 0, sizeof rc);
+            put_i32(rc, 0, 12);
+            put_f32(rc, 4, 1.5f); put_f32(rc, 8, 2.25f); put_f32(rc, 12, -3);
+            put_f32(rc, 16, 0.5f); put_f32(rc, 20, -1); put_f32(rc, 24, 2);
+            put_f32(rc, 28, 0.75f);
+            put_f32(rc, 32, 0.25f);
+            put_f32(rc, 36, 0.5f);
+            put_i32(rc, 40, 2);
+            put_f32(rc, 44, 0.5f);
+            put_f32(rc, 48, 3); put_f32(rc, 52, 4);
+            rc[56] = 1;
+            rc[57] = 0x01 | 0x10 | 0x20;
+            put_u16(rc, 58, 3);
+            put_f32(rc, 60, 0.25f);
+            put_f64(rc, 64, 420);
+            rc[72] = 0;
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 89);
+            CHECK(!ro.stop && ro.count == 1 && !strcmp(ro.msgs[0].label, "l") && ro.msgs[0].argc == 1, "recon -> l, one argument");
+            const KrunkerValue want[26] = {N(12), N(0), N(1.5), N(2.25), N(-3), N(-1), N(0.5), N(2), N(0.75), B(1), B(0), B(0),
+                                           N(3), N(1), B(0), N(0.75), N(0.5), N(2), N(420), B(1), B(1), N(3), N(4), NIL, N(250), NIL};
+            if (ro.count == 1 && ro.msgs[0].argc == 1 && ro.msgs[0].args[0].type == KRUNKER_ARRAY && ro.msgs[0].args[0].len == 26) {
+                for (int i = 0; i < 26; i++) CHECK(vequal(&ro.msgs[0].args[0].u.items[i], &want[i]), "l slot %d", i);
+            } else {
+                CHECK(0, "the recon array has 26 slots");
+            }
+            v10_out_free(&ro);
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 58);
+            CHECK(stop_has(&ro, "malformed"), "a short recon is malformed");
+            v10_out_free(&ro);
+            rc[72] = 1;
+            put_f32(rc, 73, 10); put_f32(rc, 77, 11); put_f32(rc, 81, 12); put_f32(rc, 85, 13);
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 89);
+            CHECK(ro.count == 1 && ro.msgs[0].args[0].u.items[23].len == 4 && vequal(&ro.msgs[0].args[0].u.items[23].u.items[3], &KRUNKER_V_NUM(13)),
+                  "a grapple: its point and range");
+            v10_out_free(&ro);
+        }
+
+        // INPUT (q, v10.js 221577): the window's frames field by field (decodeInputBatch in v10Translate.ts)
+        {
+            static const char *const keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+            /* a window of one frame: field `field` set to `value`, the others 0 (move -> the move index, so 0 is direction 7) */
+            NetInputPacket f1;
+            #define INPUT_ONE(field, value) do { \
+                V10Input in_ = {0}; v10_input_init(&in_); \
+                KrunkerValue vals_[11]; for (int i_ = 0; i_ < 11; i_++) vals_[i_] = N(0); \
+                vals_[(field) - 4] = N(value); \
+                KrunkerValue ch_ = kv_map(11, keys, vals_); \
+                KrunkerValue args_[6] = {N(1), N(1), S("16"), N(2), ARR(N(0), N(0)), ch_}; \
+                size_t n_ = 0; NetInputPacket *fr_ = v10_decode_input(&in_, args_, 6, &n_); \
+                CHECK(fr_ && n_ == 1, "one frame for field %d", (field)); \
+                f1 = fr_ ? fr_[0] : f1; free(fr_); v10_input_free(&in_); \
+            } while (0)
+            INPUT_ONE(4, -1);
+            CHECK(f1.move_dir == -1, "move index -1: no move direction (moveLock)");
+            INPUT_ONE(4, 0);
+            CHECK(f1.move_dir == 7, "move index 0 is direction 7 (movDirs order)");
+            INPUT_ONE(4, 3);
+            CHECK(f1.move_dir == 2, "move index 3 is direction 2");
+            INPUT_ONE(4, 8);
+            CHECK(f1.move_dir == -1, "a move index past the eight directions is no direction");
+            INPUT_ONE(5, 1);
+            CHECK(f1.flags == NET_INPUT_SHOOT, "fire (shoot) is field 5");
+            INPUT_ONE(6, 1);
+            CHECK(f1.flags == NET_INPUT_SCOPE, "ADS (scope) is field 6");
+            INPUT_ONE(7, 1);
+            CHECK(f1.flags == NET_INPUT_JUMP, "jump is field 7");
+            INPUT_ONE(8, 1);
+            CHECK(f1.flags == NET_INPUT_RELOAD, "reload is field 8");
+            INPUT_ONE(9, 1);
+            CHECK(f1.flags == NET_INPUT_CROUCH, "crouch is field 9");
+            INPUT_ONE(10, -1);
+            CHECK(f1.scroll == -1, "scroll is field 10");
+            INPUT_ONE(11, 1);
+            CHECK(f1.swap == 1, "weapon swap is field 11");
+            INPUT_ONE(12, 0.5);
+            CHECK(f1.slowdown == 5, "the slowdown (1 - speedLmt, tenths) is field 12");
+            INPUT_ONE(13, 1);
+            CHECK(f1.flags == NET_INPUT_RESET_START, "reset 1 is reset to start");
+            INPUT_ONE(13, 2);
+            CHECK(f1.flags == NET_INPUT_RESET_LAST, "reset 2 is reset to last");
+            INPUT_ONE(14, 1);
+            CHECK(f1.flags == NET_INPUT_INTERACT, "interact is field 14");
+            #undef INPUT_ONE
+        }
+        {
+            /* the official window: seq 5 and 6, dt 16, pitch 0.1 and yaw -0.2 then the deltas 5 and 2, shoot on frame 0 */
+            static const char *const keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+            KrunkerValue vals[11] = {N(3), N(1), N(0), N(0), N(0), N(0), N(0), N(0), N(0), N(0), N(0)};
+            KrunkerValue args[6] = {N(0), N(5), S("1616"), N(2), ARR(N(100), N(-200), N(5), N(2)), kv_map(11, keys, vals)};
+            V10Input in;
+            v10_input_init(&in);
+            size_t n = 0;
+            NetInputPacket *fr = v10_decode_input(&in, args, 6, &n);
+            CHECK(fr && n == 2, "a two-frame window");
+            if (fr && n == 2) {
+                CHECK(fr[0].seq == 5 && fr[1].seq == 6, "sequence 5 and 6 (firstIsn + j)");
+                CHECK(fabs(fr[0].delta - 0.016) < 1e-6 && fabs(fr[1].delta - 0.016) < 1e-6, "dt 16 ms is 0.016 s");
+                CHECK(fabs(fr[0].x_dir - 0.1) < 1e-6 && fabs(fr[1].x_dir - 0.105) < 1e-6, "x_dir is the pitch, accumulated from the deltas");
+                CHECK(fabs(fr[0].y_dir + 0.2) < 1e-6 && fabs(fr[1].y_dir + 0.198) < 1e-6, "y_dir is the yaw, accumulated from the deltas");
+                CHECK(fr[0].flags == NET_INPUT_SHOOT && fr[1].flags == NET_INPUT_SHOOT, "shoot holds across the frames");
+            }
+            free(fr);
+            /* a window with no angles keeps the window before's; a resync restarts the fields */
+            KrunkerValue args2[6] = {N(0), N(7), S("16"), N(2), N(0), kv_map(0, NULL, NULL)};
+            fr = v10_decode_input(&in, args2, 6, &n);
+            CHECK(fr && n == 1 && fabs(fr[0].x_dir - 0.1) < 1e-6 && fr[0].flags == NET_INPUT_SHOOT, "no angles: the last ones, the shoot carries");
+            free(fr);
+            KrunkerValue args3[6] = {N(1), N(9), S("16"), N(2), N(0), kv_map(0, NULL, NULL)};
+            fr = v10_decode_input(&in, args3, 6, &n);
+            CHECK(fr && n == 1 && fr[0].flags == 0 && fr[0].move_dir == -1, "a resync restarts the fields: no shoot, no move");
+            free(fr);
+            KrunkerValue bad[6] = {N(0), N(1), N(0), N(0), N(0), N(0)};
+            CHECK(v10_decode_input(&in, bad, 6, &n) == NULL, "a number for the dt list is malformed");
+            KrunkerValue empty_w[6] = {N(0), N(1), S(""), N(0), N(0), N(0)};
+            fr = v10_decode_input(&in, empty_w, 6, &n);
+            CHECK(fr && n == 0, "an empty window has no frames");
+            free(fr);
+            v10_input_free(&in);
+            /* the payload: count, then 24 bytes per frame (NetInputPacket) */
+            NetInputPacket two[2];
+            memset(two, 0, sizeof two);
+            two[0].seq = 5; two[1].seq = 6; two[0].flags = NET_INPUT_SHOOT;
+            uint8_t payload[1 + 24 * 2];
+            CHECK(v10_encode_input_batch(two, 2, payload) == 1 + 24 * 2 && payload[0] == 2, "the batch: count 2, 1 + 24 bytes per frame");
+            CHECK(rd(payload, 1) == 5 && rd(payload, 1 + 24) == 6 && payload[1 + 20] == NET_INPUT_SHOOT, "the frames' seq and flags");
         }
 
         // CHEAT (60): [flag, on], the on / off byte 0 or 1; the flags with a v10 label (noc, unl, fh, frz)
@@ -492,7 +650,7 @@ int main(void) {
         CHECK(v10_parse_skins(sk, 16, &skins) && skins.uid == 2 && skins.primary == 7 && skins.secondary == 8 && skins.melee == 9,
               "SKINS parse");
 
-        Spawn other_s = default_spawn();
+        TSpawn other_s = default_spawn();
         other_s.uid = 2; other_s.is_you = 0; other_s.class_index = 3; other_s.team = 1; other_s.health = 87.6f; other_s.max_health = 100;
         other_s.pos[0] = 10.4f; other_s.pos[1] = 20.6f; other_s.pos[2] = -5; other_s.dir[0] = 1.5f; other_s.dir[1] = 0.25f;
         other_s.name = "Ada"; other_s.secondary = 4; other_s.hat = 3; other_s.body = 5; other_s.hair = 0x112233; other_s.skin_color = -1;
@@ -521,7 +679,7 @@ int main(void) {
         }
         v10_out_free(&o);
 
-        Spawn mine_s = default_spawn();
+        TSpawn mine_s = default_spawn();
         mine_s.uid = 1; mine_s.is_you = 1; mine_s.class_index = 4; mine_s.team = 0; mine_s.name = "me";
         uint8_t mbuf[150];
         spawn_buf(mbuf, &mine_s);
