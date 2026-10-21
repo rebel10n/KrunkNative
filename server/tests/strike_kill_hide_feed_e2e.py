@@ -82,8 +82,14 @@ def main():
         print("strike_kill_hide_feed_e2e: no client_bin in %s: skipped" % K.BUILD)
         return 77
     K.Stub = HideFeedStub  # launch_native builds its stub through the module's Stub name
-    run_strike_hide_feed()
-    return 0 if K.results and all(K.results) else 1
+    K.make_work()  # this run's scratch dir, created here rather than at import; finish_work removes it
+    rc = 1
+    try:
+        run_strike_hide_feed()
+        rc = 0 if K.results and all(K.results) else 1
+    finally:
+        K.finish_work(rc)
+    return rc
 
 
 if __name__ == "__main__":

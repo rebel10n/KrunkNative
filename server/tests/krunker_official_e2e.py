@@ -137,7 +137,8 @@ ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude
         "--f4": "f4", "--play": "play"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
-WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
+WORK = None  # this run's scratch dir: make_work() creates it, so importing this module creates nothing
+ASSETS = None  # the asset tree for the client, set by make_work()
 CHROME = shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
 
 
@@ -169,7 +170,14 @@ def asset_tree():
     return out
 
 
-ASSETS = asset_tree()
+def make_work():
+    """Create this run's scratch dir (WORK, under ~/.cache) and its asset tree (ASSETS) once. Called by main() and
+    by a test's own main() before it runs anything; the import never calls it, so importing creates nothing."""
+    global WORK, ASSETS
+    if WORK is None:
+        WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
+        ASSETS = asset_tree()
+    return WORK
 
 
 def header_value(name):
@@ -5041,6 +5049,7 @@ def run_web_voice():
 
 
 def main():
+    make_work()
     if websockets is None:
         print("krunker_official_e2e: needs the Python websockets package: skipped")
         return 77
@@ -5191,7 +5200,10 @@ def main():
 
 def finish_work(rc):
     """Remove this run's scratch directory (WORK, created by this process) when the run passed or was skipped (77).
-    A failed run keeps it, with its path printed, so its logs can be read; an exception escaping main() is a failure."""
+    A failed run keeps it, with its path printed, so its logs can be read; an exception escaping main() is a failure.
+    No WORK means make_work() never ran, so there is nothing to remove."""
+    if WORK is None:
+        return rc
     if rc in (0, 77):
         shutil.rmtree(WORK, ignore_errors=True)
     else:
