@@ -304,6 +304,7 @@ export async function run(opts = {}) {
     const errors = [];
     const eventCounts = {};
     const consoleLog = [];
+    const kwrites = [];
     const onEvent = (method, p) => {
       eventCounts[method] = (eventCounts[method] || 0) + 1;
       switch (method) {
@@ -312,6 +313,7 @@ export async function run(opts = {}) {
         case "Network.webSocketFrameReceived": frames.write("in", p.requestId, reqUrl.get(p.requestId), p.response); break;
         case "Network.loadingFailed": errors.push(`failed ${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
         case "Runtime.consoleAPICalled":
+          if (p.args && p.args.length && String(p.args[0].value || "").startsWith("[kwrite]")) kwrites.push(String(p.args[0].value).slice(0, 900));
           if (p.type === "error" || p.type === "warning" || /local|hook|FAIL/.test(JSON.stringify(p.args).slice(0, 300))) consoleLog.push(`${p.type} ${JSON.stringify(p.args).slice(0, 220)}`);
           break;
         case "Runtime.exceptionThrown": errors.push("exception " + String((p.exceptionDetails.exception || {}).description || p.exceptionDetails.text).split("\n")[0].slice(0, 200)); break;
@@ -321,6 +323,15 @@ export async function run(opts = {}) {
     page = cdpSession(target.webSocketDebuggerUrl, onEvent);
     await page.ready;
     for (const d of ["Page.enable", "Network.enable", "Runtime.enable"]) await page.send(d);
+    // Harness-only trace, loopback page: every write and removal of the four account keys, with the stack (the first
+    // one is the write that starts the account). Values are cut to 12 characters. Runs before the page's own scripts.
+    await page.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const S = Storage.prototype; const si = S.setItem, ri = S.removeItem;
+      const ACCOUNT = /^krunker_(id|haslogin|token|username)$/;
+      const log = (kind, k, v) => { if (!ACCOUNT.test(String(k))) return;
+        const stack = String(new Error().stack).split("\\n").slice(2, 9).map((l) => l.trim().slice(0, 120)).join(" | ");
+        console.log("[kwrite] " + kind + " " + k + " = " + String(v).slice(0, 12) + " @ " + stack); };
+      S.setItem = function (k, v) { log("set", k, v); return si.call(this, k, v); };
+      S.removeItem = function (k) { log("del", k, ""); return ri.call(this, k); }; })();` });
     await page.send("Page.navigate", { url: cfg.localUrl });
 
     // the consent dialog comes back until its vendor check settles: accept it as a user would
@@ -364,6 +375,7 @@ export async function run(opts = {}) {
     result.frames = frames.count();
     result.eventCounts = eventCounts;
     result.console = consoleLog.slice(0, 12);
+    result.kwrites = kwrites.slice(0, 40);
     result.errors = errors.slice(0, 10);
     result.bridgeLog = fs.existsSync(path.join(runDir, "bridge.log"))
       ? fs.readFileSync(path.join(runDir, "bridge.log"), "utf8").split("\n").filter((l) => /v10|bridge/.test(l)).slice(-6) : [];
