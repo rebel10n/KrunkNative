@@ -9,7 +9,7 @@ v10 wrapper {success, data: {streams, promo, dropCampaigns}}), one token request
 (the token is kept), the Client-Id and Bearer the upstream sees, the client secret only in the
 token request's body and never in an answer or the brain log, the last good list while the upstream
 fails, an empty list (the empty state), the cache (a second answer inside streams.cache_s makes no
-upstream call), and 503 StreamsUnavailable with no client secret configured.
+upstream call), and the empty list {success, data: {streams: []}} with no client secret configured (no source: not a 503).
 
 Thumbnails (stream_thumbs.c, GET /streams/thumb?url=) against a stub CDN (streams.thumbs.cdn_url):
 an allow-listed https://static-cdn.jtvnw.net/... preview comes back as its data: URL, byte for byte;
@@ -347,7 +347,8 @@ def scenario_thumbs(port, cdn):
 def scenario_unconfigured(port):
     st, body = http_get(port, "/streams/top?cb=2")
     ans = json.loads(body)
-    check(st == 503 and ans.get("error") == "StreamsUnavailable", "no client secret: 503 StreamsUnavailable (HTTP %d)" % st)
+    check(st == 200 and ans.get("success") is True and ans.get("data") == {"streams": []},
+          "no client secret: the empty list {success, data: {streams: []}} (HTTP %d)" % st)
 
 
 def main():

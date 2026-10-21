@@ -9,6 +9,8 @@
  * libcurl, like ai.c); its result comes back to the loop thread through kn_loop_post_threadsafe.
  * The answer is cached for streams.cache_s; while the upstream is down the last good list is
  * served. The client secret is sent only in the token request's body and is never logged.
+ * With no Twitch source (streams.enabled off, or no client id / secret) the answer is the empty
+ * list {success, data: {streams: []}}, not a 503 (reply_empty).
  */
 #include "streams.h"
 
@@ -295,10 +297,23 @@ static int start_job(void) {
     return 1;
 }
 
+/* No Twitch source on this server (streams.enabled off, or no client id / secret): the empty list the
+ * menu shows as "no live streams", the shape v10 reads (v10.js 145057: data.streams). Not a 503: v10
+ * would take a 5xx for an outage, and there is no outage to report here. */
+static void reply_empty(kn_http_req *req) {
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddItemToObject(data, "streams", cJSON_CreateArray());
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "success", 1);
+    cJSON_AddItemToObject(o, "data", data);
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
 static void h_top(kn_http_req *req, void *ud) {
     (void) ud;
     if (!configured()) {
-        reply_error(req, 503, "StreamsUnavailable", "the live streams are not configured on this server");
+        reply_empty(req);
         return;
     }
     if (S.data && (int64_t) (kn_now_ms() - S.fetched) < C.cache_ms) {

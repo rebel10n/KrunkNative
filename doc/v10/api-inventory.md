@@ -17,7 +17,7 @@ Routes: 218 (api.krunker.io: 21, gapi.svc.krunker.io: 189, matchmaker.krunker.io
 
 Before this change: served 10, stubbed 0, tunnel only 46, missing 162.
 
-After this change: empty 19, refusal 92, alias 44, served 10, missing 1, implemented 6, not 1, tunnel 45.
+After this change: empty 20, refusal 92, alias 44, served 10, missing 0, implemented 6, not found 1, tunnel 45.
 
 | # | host | method | path | v10 caller (v10.js line) | before | after | where |
 |---|---|---|---|---|---|---|---|
@@ -26,7 +26,7 @@ After this change: empty 19, refusal 92, alias 44, served 10, missing 1, impleme
 | 3 | api | GET | `/leaderboards/rankings/season/{s}[/region/{r}]` | playerProfile.getLeaderboard (25972) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
 | 4 | api | POST | `/player-profile/me/claim-milestone/region/{r}` | playerProfile.claimMilestone (25976) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 5 | api | GET | `/ranked/me/connection` | ranked.getMyConnection (25985) | missing: not_found fallback (public_routes.c:677) | alias | ranked.c |
-| 6 | api | GET | `/streams/top` | streams.getTopStreams (25992) | served: streams.c:326 (route2 "/streams/top") | served (unchanged) |  |
+| 6 | api | GET | `/streams/top` | streams.getTopStreams (25992) | served: streams.c:326 (route2 "/streams/top") | served; EMPTY `{success, data: {streams: []}}` with no Twitch source (was a 503) | streams.c (reply_empty) |
 | 7 | api | GET | `/daily-spin/progress` | dailySpin.getProgress (25999) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 8 | api | POST | `/shop/cancel-subscription` | shop.cancelSubscription (26006) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 9 | api | POST | `/iap/checkout` | iap.checkout (26018) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
@@ -36,7 +36,7 @@ After this change: empty 19, refusal 92, alias 44, served 10, missing 1, impleme
 | 13 | api | GET | `/ipinfo` | IP checker (_7290, v10.js 16440) (16440) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 14 | api | GET | `/webhooks/general/maps/list` | legacy apiRequest listMaps (v10.js 131960s) (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 15 | api | GET | `/webhooks/general/maps/search` | legacy apiRequest searchMap (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
-| 16 | api | GET | `/webhooks/general/maps/config` | legacy apiRequest getMapPreset (131960) | missing: not_found fallback (public_routes.c:677) | missing (no KN equivalent) |  |
+| 16 | api | GET | `/webhooks/general/maps/config` | legacy apiRequest getMapPreset (131960) | missing: not_found fallback (public_routes.c:677) | empty (`{}`: no preset, the menu shows DEFAULT) | v10_empty.c |
 | 17 | api | GET | `/webhooks/general/mods/list` | legacy apiRequest listMods (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 18 | api | GET | `/webhooks/general/mods/search` | legacy apiRequest searchMod (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 19 | api | GET | `/webhooks/general/assets/list` | legacy apiRequest listAssets (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
@@ -181,7 +181,7 @@ After this change: empty 19, refusal 92, alias 44, served 10, missing 1, impleme
 | 158 | gapi | GET | `/moderation/chat/{name}` | moderation.getChatBan (27087) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
 | 159 | gapi | POST | `/moderation/chat` | moderation.chatBan (27092) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
 | 160 | gapi | POST | `/moderation/flag` | moderation.flagUser (27098) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
-| 161 | gapi | GET | `/creators/events` | creators.getUpcomingEvents (27108) | served: community.c:402 | served (unchanged) |  |
+| 161 | gapi | GET | `/creators/events` | creators.getUpcomingEvents (27108) | served: community.c:402 | served (featured maps and mods from the DB; polls from the operator file, empty without it) |  |
 | 162 | gapi | GET | `/players/{name}` | players.getProfile (27117) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 163 | gapi | GET | `/players/{name}/sales?range={r}` | players.getSales (27123) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
 | 164 | gapi | GET | `/players/{name}/listings` | players.getListings (27128) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
@@ -205,7 +205,7 @@ After this change: empty 19, refusal 92, alias 44, served 10, missing 1, impleme
 | 182 | gapi | POST | `/social/post` | social.createPost (27263) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 183 | gapi | POST | `/social/post/{id}/vote` | social.votePost (27269) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 184 | gapi | POST | `/social/post/{id}/comment` | social.commentPost (27277) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
-| 185 | gapi | GET | `/social/news` | social.getNews (27285) | served: community.c:403 | served (unchanged) |  |
+| 185 | gapi | GET | `/social/news` | social.getNews (27285) | served: community.c:403 | served (EMPTY `{news: []}` until the operator file config/community.json exists) |  |
 | 186 | gapi | GET | `/spins/wheels` | spins.getWheels (27294) | missing: not_found fallback (public_routes.c:677) | alias | public_routes.c |
 | 187 | gapi | POST | `/spins/execute` | spins.execute (27299) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 188 | gapi | GET | `/krunkcup/wristband` | krunkcup.getWristbandStatus (27309) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
@@ -264,4 +264,11 @@ After this change: empty 19, refusal 92, alias 44, served 10, missing 1, impleme
 
 - EMPTY (no KrunkNative source over HTTP): match history, the leaderboard rankings by season, the wild offer (`null`, the no-offer state), the skin list for an account, map versions, map player data, the map leaderboard, market listings, market stats, black-market list and rank, item views and sales and instances (404 for an id not in `assets/skins.json`), KPD demos and reviewers.
 - REFUSAL 403 (a write, a payment, an account read KrunkNative does not map over HTTP, or the v10 auth contract): every `/auth/*` route (KrunkNative's accounts use `/auth/login` with a different contract, `auth.c`), `/player/me`, `/player/wallet`, `/account/*`, the email and Discord routes, the payments (`/iap/*`, `/shop/cancel-subscription`, `/my-api/*`), the IP checker, the daily spin, the krunkcup wristband, the player profile and seasonal stats, the web push status and subscription change, all skin and map writes, the wild offer writes, `/spins/execute` (the spin is the social socket's `spin` op), market, items, trades, moderation, mods, KPD votes, player sales, listings, verify, gift.
-- Not aliased: `GET /webhooks/general/maps/config` (no KrunkNative equivalent).
+- `GET /webhooks/general/maps/config` (row 16): EMPTY `{}`. The legacy webhook's body is the preset `{da, fu}` at the top level; KrunkNative has no per-map preset data, and v10 reads an absent `da` as the menu's DEFAULT (presetLoaded, v10.js 212624).
+
+## No-source cases (the brief's examples)
+
+- **Live streams** (row 6): KrunkNative takes the list from Twitch Helix, so with no Twitch source (`streams.enabled` off, or no client id / secret) `/streams/top` answers the empty list `{success: true, data: {streams: []}}` (streams.c reply_empty), not a 503. With a source it answers the real list. The native menu renders the empty list as zero streams, as v10 does for an empty `streams` array (v10.js 145057-145078).
+- **Social feed** (rows 179-184): KrunkNative DOES have a source: `feed_posts` (the tabs global, following, hot, giveaways, clan, and the player feed), in `social_gapi.c` (POST_COLS and `social_feed`, lines 242-310). It answers on the authenticated social socket (`["gapi", rid, ...]`, doc/v10/social.md "Transport (deviation)"), so the HTTP path stays 404 by design. Returning the empty feed over HTTP would hide real posts, so no empty stub is used for it.
+- **News** (row 185): the operator's file (`brain.community.feed`, default config/community.json), empty `{news: []}` until that file exists. Not invented.
+- **Creators events** (row 161): real DB rows (featured maps and mods) plus the operator's polls.

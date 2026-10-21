@@ -45,6 +45,8 @@ E_MAPLB = {"entries": [], "total": 0}                         # v10.js 106970: e
 # (method, path, body, kind, expected data, v10.js line and why)
 ROUTES = [
     # ---- api.krunker.io
+    ("GET", "/webhooks/general/maps/config?mn=Burg", None, "bare", {},
+     "131917, the legacy map preset: no da / fu is the menu's DEFAULT (presetLoaded 212624), no data envelope"),
     ("GET", "/match-history/me/season/1/gameMode/0/isRanked/all", None, "empty", E_MATCH,
      "25940, account match history; the consumer reads an empty history when signed out"),
     ("GET", "/match-history/me/season/1/gameMode/0/isRanked/all/region/us-ca-sv", None, "empty", E_MATCH,
@@ -190,6 +192,9 @@ def run_route(port, method, path, body, kind, expected, cite):
         want = {"data": expected, "error": None}
         check("%s -> 200 EMPTY %s (v10.js %s)" % (label, json.dumps(expected, separators=(",", ":")), line),
               st == 200 and got == want, "HTTP %d %s" % (st, json.dumps(got)[:160]))
+    elif kind == "bare":
+        check("%s -> 200 EMPTY bare %s (v10.js %s)" % (label, json.dumps(expected, separators=(",", ":")), line),
+              st == 200 and got == expected, "HTTP %d %s" % (st, json.dumps(got)[:160]))
     elif kind == "refuse":
         ok = st == 403 and error_code(got) == "NOT_IMPLEMENTED" and "data" not in (got or {})
         check("%s -> 403 REFUSAL NOT_IMPLEMENTED (v10.js %s)" % (label, line), ok,
