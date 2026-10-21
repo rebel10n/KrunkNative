@@ -699,6 +699,7 @@ async function join() {
     report.afterPlay = await evalJS(`(() => ({ canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","), text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160), gameExposed: !!window.__kn_game }))()`);
     await shot("5-after-play");
     await shot("3-final");
+    report.gameState = await evalJS(`(() => { const g = window.__kn_game; if (!g) return null; const q = g.initQueue; return { initInProgress: g.initInProgress, initQueue: Array.isArray(q) ? q.length : String(q), gameClosed: g.gameClosed, sid: g.sid, map: g.map ? Object.keys(g.map).slice(0, 12) : null }; })()`);
     report.bridgeLog = bridgeLines();
     // every host the page asked for: the local ones only (the rest fail with NOTFOUND, see hostRules)
     const local = new Set([cfg.localHost, "localhost", "127.0.0.1", cfg.bridge.host, ...Object.keys(cfg.hostRoutes)]);
