@@ -397,13 +397,16 @@ const TRACE_HOOK = `(() => {
     }
     return origTimeout.call(this, fn, ms, ...rest);
   };
+  window.addEventListener("error", (e) => console.log("[hook] error " + T() + "ms " + String(e.message).slice(0, 160) + " at " + String(e.filename).split("/").pop() + ":" + e.lineno + ":" + e.colno));
+  window.addEventListener("unhandledrejection", (e) => console.log("[hook] rejection " + T() + "ms " + String(e.reason && (e.reason.message || e.reason)).slice(0, 160)));
   const origFetch = window.fetch;
   window.fetch = function (...a) {
     try { const u = String(a[0] && a[0].url ? a[0].url : a[0]); if (/excludeGame/.test(u)) console.log("[hook] seek excludeGame " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 16).join(" | ")); } catch (e) {}
     return origFetch.apply(this, a); };
   const send = WebSocket.prototype.send;
   WebSocket.prototype.send = function (data) {
-    try { const b = new Uint8Array(data); const s = String.fromCharCode(...b.slice(0, 40)); if (s.indexOf("po") >= 0 && b.length < 40) console.log("[hook] ping po " + T() + "ms n=" + b.length); } catch (e) {}
+    try { const b = new Uint8Array(data); const s = String.fromCharCode(...b.slice(0, 40)); if (s.indexOf("po") >= 0 && b.length < 40) console.log("[hook] ping po " + T() + "ms n=" + b.length);
+    if (b.length > 2 && b[0] !== undefined && (b.indexOf(0xa2) >= 0 && b[b.indexOf(0xa2) + 1] === 0x65 && b[b.indexOf(0xa2) + 2] === 0x6e) && b.indexOf(0xa2) < 4) console.log("[hook] SEND en " + T() + "ms n=" + b.length + " " + String(new Error().stack).split("\\n").slice(1, 9).map((l) => l.trim().slice(0, 110)).join(" | ")); } catch (e) {}
     return send.call(this, data); };
   const Native = Object.getPrototypeOf(WebSocket.prototype).constructor;
   const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(WebSocket).prototype, "onmessage");
