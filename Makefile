@@ -638,6 +638,16 @@ V10_NATIVE ?= 127.0.0.1:21015
 v10-bridge: build ## Run the v10 client bridge (C): ws://V10_BIND:V10_LISTEN/ws -> native V10_NATIVE (defaults 127.0.0.1:8081 -> 127.0.0.1:21015)
 	./$(DEBUG_DIR)/v10_bridge --v10-listen=$(V10_LISTEN) --bind=$(V10_BIND) --native=$(V10_NATIVE) $(ARGS)
 
+# The official v10.0.3 client run in Node (tools/krunker-local/launch.mjs, node-env.mjs): starts kn_brain, server_bin and
+# v10_bridge on free loopback ports (pid-file tracked), boots the client's page and game.js in Node, logs every frame to
+# <run>/frames.jsonl. Loopback only. krunker-node stays up until ctrl-c; krunker-node-smoke exits 0 when the menu is reached.
+.PHONY: krunker-node krunker-node-smoke
+krunker-node: build ## Run the official Krunker v10.0.3 client in Node against the local stack (headless; ARGS= none; stays up until ctrl-c)
+	node tools/krunker-local/launch.mjs $(ARGS)
+
+krunker-node-smoke: build ## Smoke: the local stack, the official client booted in Node headless, the menu reached and the frame log written (exit 0 only then)
+	node tools/krunker-local/launch.mjs --smoke
+
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
 	cd $(BRIDGE_DIR) && npm run typecheck && npm test
 	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
