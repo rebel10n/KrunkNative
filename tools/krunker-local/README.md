@@ -50,6 +50,10 @@ first native packet it cannot translate stops that session and is named in its l
   answers them with 404 today).
 - Missing files are symlinks into KrunkNative `assets/` or `ui/` (first hit wins). Files no
   root has stay 404 and are listed in the report.
+- The game object is reachable from the page (harness-only, not in the bundle file or the shipped client).
+  The bundle keeps its Game in its closure; `loader.js` (`captureGame`) adds `window.__kn_game` and
+  `window.RENDER` to the bundle's text in memory, right after the bundle stores its Game (`<state>['Game']=<game>`).
+  The report's `globals.kn` says whether the capture happened; `inGame` is read from the game object.
 
 ## Status (v10.0.3, 2026-10-20)
 

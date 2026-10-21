@@ -340,7 +340,8 @@ async function check() {
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable"); await send("Log.enable");
     await send("Page.navigate", { url: cfg.localUrl });
     await sleep(Number(process.env.KN_KRUNKER_LOAD_MS) || cfg.loadWaitMs);
-    const globals = await send("Runtime.evaluate", { expression: `({ game: typeof window.Game, render: typeof window.RENDER, loader: typeof window.__wasm, spinners: document.querySelectorAll(".loader,.spinner,[class*=load]").length })`, returnByValue: true });
+    // kn: the game object the harness hook captured (window.__kn_game, see loader.js); knKeys: its own keys, for the hook's probes
+    const globals = await send("Runtime.evaluate", { expression: `({ game: typeof window.Game, render: typeof window.RENDER, loader: typeof window.__wasm, spinners: document.querySelectorAll(".loader,.spinner,[class*=load]").length, kn: window.__kn_game !== null && typeof window.__kn_game === "object" ? "object" : typeof window.__kn_game, knKeys: window.__kn_game && typeof window.__kn_game === "object" ? Object.keys(window.__kn_game).slice(0, 120) : null, inGame: ${IN_GAME_JS} })`, returnByValue: true });
     report.globals = globals.result && globals.result.result ? globals.result.result.value : null;
     // The official consent dialog sits over the menu until accepted; accept it as a user would.
     const acc = await send("Runtime.evaluate", { expression: `(() => { const b = [...document.querySelectorAll("button")].find(x => /^\\s*I Accept\\s*$/i.test(x.innerText)); if (!b) return false; b.click(); return true; })()`, returnByValue: true });
@@ -483,10 +484,17 @@ const CLICK_PLAY_JS = `(() => {
   }
   return "none: " + els.slice(0, 60).map((e) => e.innerText.trim()).join(" | ").slice(0, 400);
 })()`;
+// inGame, read from the game object (window.__kn_game, the harness-only hook in loader.js): a game instance is open
+// (not closed, destroyed or initialising) and the local player's entry (players.list, matched by sid to
+// players.currentSid) is active. The menu's list is empty, so this is false there. Not checked against a live join yet.
+const IN_GAME_JS = `(() => { const g = window.__kn_game; if (!g || typeof g !== "object" || !g.players) return false;
+  const p = (g.players.list || []).find((x) => x && x.sid === g.players.currentSid);
+  return !!(p && p.active && g.gameInstance && !g.gameClosed && !g.isDestroyed && !g.initInProgress); })()`;
 const STATE_JS = `(() => ({
   game: typeof window.Game, render: typeof window.RENDER,
   canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","),
   text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160),
+  inGame: ${IN_GAME_JS},
 }))()`;
 
 function bridgeLines() {
