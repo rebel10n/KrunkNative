@@ -992,6 +992,36 @@ void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n) {
     chat_line(o, 2, line, w, NULL, 0, -1, 0, 0);
 }
 
+/* SHOT: NetShotPacket (31 bytes, packed): int32 uid @0, int32 weapon @4, float hit[3] @8, has_normal @20, normal_yaw @21,
+ * normal_pitch @25, trail @29, first @30 (mapShot, v10Translate.ts). The tracer "9" is one array argument: [sid, hit x, y, z
+ * (0.1), normal yaw, pitch | nil (0.01), trail, shooter x, y, height, z (0.1), bulletType 0, impactType 0]. */
+#define SHOT_SIZE 31
+void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter) {
+    if (n != SHOT_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    const int32_t uid = rd_i32(p, 0);
+    const double hit[3] = {r1(rd_f32(p, 8)), r1(rd_f32(p, 12)), r1(rd_f32(p, 16))};
+    const int has_normal = p[20] != 0;
+    const double normal_yaw = has_normal ? r2(rd_f32(p, 21)) : 0;
+    const double normal_pitch = has_normal ? r2(rd_f32(p, 25)) : 0;
+    double origin[4] = {hit[0], hit[1], 0, hit[2]}; /* no state: the hit point at height 0 */
+    if (shooter) {
+        origin[0] = r1(shooter->x);
+        origin[1] = r1(shooter->y);
+        origin[2] = r1(shooter->height);
+        origin[3] = r1(shooter->z);
+    }
+    const KrunkerValue tracer[13] = {
+        KRUNKER_V_NUM(uid), KRUNKER_V_NUM(hit[0]), KRUNKER_V_NUM(hit[1]), KRUNKER_V_NUM(hit[2]),
+        has_normal ? KRUNKER_V_NUM(normal_yaw) : KRUNKER_V_NIL, has_normal ? KRUNKER_V_NUM(normal_pitch) : KRUNKER_V_NIL,
+        KRUNKER_V_NUM(p[29]), KRUNKER_V_NUM(origin[0]), KRUNKER_V_NUM(origin[1]), KRUNKER_V_NUM(origin[2]), KRUNKER_V_NUM(origin[3]),
+        KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+    };
+    v10_push(o, V10_IN_SHOW_TRACER, (KrunkerValue[]){v10_arr(o, tracer, 13)}, 1);
+}
+
 /* RECON: NetReconPacket (89 bytes, packed) -> the "l" sync array (mapRecon, v10Translate.ts). The inverse of the native
  * client's on_sync_player (krunker_link.c): the 26 slots, by index. */
 #define RECON_SIZE 89
@@ -1463,6 +1493,7 @@ int v10_map_state(const uint8_t *p, size_t n, V10StateRec *out) {
     out->grapple_on = p[62] != 0;
     for (int k = 0; k < 3; k++) out->grapple[k] = js_round(rd_f32(p, 63 + 4 * (size_t)k));
     out->ping = js_round(rd_f32(p, 75));
+    out->height = 11.0 - 3.0 * rd_f32(p, 53); /* constants_v10.c: player_height 11, crouch_distance 3 */
     return 1;
 }
 

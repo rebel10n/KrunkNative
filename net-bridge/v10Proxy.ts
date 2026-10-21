@@ -64,6 +64,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.PICKUP]: "PICKUP",
   [T.NATIVE_MORE.INPUT_BATCH]: "INPUT_BATCH",
   [T.NATIVE_MORE.RECON]: "RECON",
+  [T.NATIVE_MORE.SHOT]: "SHOT",
   [T.NATIVE_MORE.CHAT]: "CHAT",
   [T.NATIVE_MORE.MATCH_VOTE_STATE]: "MATCH_VOTE_STATE",
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
@@ -93,6 +94,7 @@ type V10Session = {
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
   modeIndex: number; // the INIT's mode (0 Free for All)
   input: T.InputState; // the input window's deltas, kept across q packets
+  shooters: Map<number, T.Shooter>; // each player's last position and height (the tracer's origin)
   kBatch: unknown[]; // the player records of the states in this chunk: one "k" per chunk (the handler hides the rest)
   clientId: number; // our player's uid (the INIT's client id): its state is not sent back to us
   startedAt: number; // the clock the "k" server time counts from
@@ -334,6 +336,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   if (session.initSent && type === T.NATIVE.STATE) {
     const state = T.mapState(payload);
     if (!state) return stopAt(session, "STATE", "malformed");
+    session.shooters.set(state.uid, state.shooter); // the origin of this player's shots (mapShot)
     if (state.uid !== session.clientId) session.kBatch.push(state.record);
     return;
   }
@@ -391,6 +394,13 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }
+  // SHOT: one hitscan ray of another player's shot, the tracer "9" (see mapShot)
+  if (session.initSent && type === T.NATIVE_MORE.SHOT) {
+    const mapped = T.mapShot(payload, session.shooters);
+    if (mapped.stop) return stopAt(session, "SHOT", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
   // RECON: the owner's movement state (the v10 "l", one argument: see mapRecon)
   if (session.initSent && type === T.NATIVE_MORE.RECON) {
     const mapped = T.mapRecon(payload);
@@ -422,6 +432,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     const spawn = T.parseSpawn(payload);
     if (!spawn) return stopAt(session, "SPAWN", "malformed");
     if (!spawn.active) return; // a player who is dead now: the v10 add is for players in play
+    session.shooters.set(spawn.uid, { x: spawn.position[0], y: spawn.position[1], z: spawn.position[2], height: 11 }); // standing: player_height
     sendWs(session, T.V10_IN.ADD_PLAYERS, T.buildPlayerAdd(spawn, session.skinsByUid.get(spawn.uid), session.socketId), 1);
     if (spawn.isYou) sendWs(session, T.V10_IN.START_GAME, ...T.buildStartGame(spawn, session.gameTimer, session.challMode));
     return;
@@ -606,6 +617,7 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     aiSync: null,
     objectiveWeapon: false,
     input: T.newInputState(),
+    shooters: new Map<number, T.Shooter>(),
     kBatch: [],
     clientId: -1,
     startedAt: Date.now(),

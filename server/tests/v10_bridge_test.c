@@ -802,6 +802,25 @@ int main(void) {
         krunker_frame_free(&lf);
     }
 
+    // SHOT (21): player 9 fires one ray: the tracer "9" for the observer, its origin is 9's state (1.26, 2, 3, height 9.2);
+    // the session stays up (no stop), so the chat below still goes through
+    {
+        uint8_t ray[31];
+        memset(ray, 0, sizeof ray);
+        w_i32(ray, 0, 9);
+        w_f32(ray, 8, 4); w_f32(ray, 12, 5); w_f32(ray, 16, 6);
+        ray[29] = 1;
+        native_send(&g_native, NET_PACKET_SHOT, ray, 31);
+        WAIT_FOR(client_count("9") == 1);
+        KrunkerFrame tr;
+        CHECK(client_get("9", 0, &tr) && tr.argc == 1 && tr.args[0].type == KRUNKER_ARRAY && tr.args[0].len == 13 &&
+              vequal(&tr.args[0].u.items[0], &KRUNKER_V_NUM(9)) && vequal(&tr.args[0].u.items[7], &KRUNKER_V_NUM(1.3)) &&
+              vequal(&tr.args[0].u.items[9], &KRUNKER_V_NUM(9.2)) && tr.args[0].u.items[4].type == KRUNKER_NIL,
+              "tracer 9: sid 9, the hit 4, 5, 6, the origin 1.3, 2, 9.2, 3");
+        krunker_frame_free(&tr);
+        CHECK(v10_bridge_untranslated("SHOT") == 0, "a shot does not stop the observer's session");
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},

@@ -510,6 +510,35 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.match(T.mapServerLine(Buffer.alloc(323), EV.escapeHtml).stop || "", /malformed/);
 }
 
+// ---- SHOT (21, NetShotPacket, 31 bytes): one hitscan ray of another player's shot -> the tracer "9" (v10.js 173392, the
+// handler _73392, and the server's broadcast at 173054-173066: [sid, hit x, y, z, normal yaw, pitch | nil, trail, shooter
+// x, y, height, z, bulletType, impactType], one array argument). The shooter's origin is its last state (the handler uses
+// the player object when it has one). KN has no bullet or impact type table: both 0 (the weapon's default, `|| 0`).
+{
+  const shot = (uid: number, hit: number[], normal: number[] | null, trail: number) => {
+    const b = Buffer.alloc(31);
+    b.writeInt32LE(uid, 0);
+    b.writeInt32LE(3, 4); // weapon index
+    hit.forEach((v, i) => b.writeFloatLE(v, 8 + 4 * i));
+    b[20] = normal ? 1 : 0;
+    if (normal) {
+      b.writeFloatLE(normal[0], 21);
+      b.writeFloatLE(normal[1], 25);
+    }
+    b[29] = trail;
+    return b;
+  };
+  const shooters = new Map([[9, { x: 1.26, y: 2, z: 3, height: 9.2 }]]);
+  assert.deepStrictEqual(T.mapShot(shot(9, [10.44, 2, -5.06], [0.5, 1.2], 1), shooters).messages,
+    [["9", [[9, 10.4, 2, -5.1, 0.5, 1.2, 1, 1.3, 2, 9.2, 3, 0, 0]]]], "a hit on a map object: its normal, the origin rounded to 0.1");
+  assert.deepStrictEqual(T.mapShot(shot(9, [4, 5, 6], null, 0), shooters).messages,
+    [["9", [[9, 4, 5, 6, null, null, 0, 1.3, 2, 9.2, 3, 0, 0]]]], "no normal: nil angles");
+  // a shooter the bridge has no state for: the origin is the hit point, height 0 (the handler draws nothing for it)
+  assert.deepStrictEqual(T.mapShot(shot(4, [1, 2, 3], null, 0), shooters).messages,
+    [["9", [[4, 1, 2, 3, null, null, 0, 1, 2, 0, 3, 0, 0]]]], "an unknown shooter: the hit point is the origin");
+  assert.match(T.mapShot(Buffer.alloc(30), shooters).stop || "", /malformed/);
+}
+
 async function main(): Promise<void> {
   // ---- the fake KrunkNative server: records every frame the bridge writes, sends what the test asks
   const nativeFrames: Array<{ type: number; payload: Buffer }> = [];
@@ -888,6 +917,16 @@ async function main(): Promise<void> {
   assert.strictEqual((kMsg.args[0] as unknown[][]).length, 1);
   assert.deepStrictEqual((kMsg.args[0] as unknown[][])[0], [9, 1.26, 2, 3, 57, 29, 0.25, 1, 1, 2, 1, 0, 42]);
   assert.strictEqual(kMsg.args[1], 10);
+
+  // SHOT (21): player 9 fires one ray: the observer's tracer "9" (its origin is 9's state: 1.26, 2, 3, height 11 - 3 * 0.6)
+  const rayFrame = Buffer.alloc(31);
+  rayFrame.writeInt32LE(9, 0);
+  [4, 5, 6].forEach((v, i) => rayFrame.writeFloatLE(v, 8 + 4 * i));
+  rayFrame[29] = 1; // trail
+  native.write(nativeFrame(21, rayFrame));
+  const tracer = await waitFor(() => clientMessages.find((m) => m.label === "9"), "9 (the tracer)");
+  assert.deepStrictEqual(tracer.args, [[9, 4, 5, 6, null, null, 1, 1.3, 2, 9.2, 3, 0, 0]]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("SHOT"), undefined, "the shot does not stop the session");
 
   // 6a. the owner's state (RECON 110) -> l, one argument (the array)
   const reconFrame = Buffer.alloc(89);

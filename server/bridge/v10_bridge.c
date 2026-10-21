@@ -83,6 +83,8 @@ typedef struct V10Session {
     kn_buf in;       /* native bytes not yet framed */
 
     int hello_sent;
+    V10Shooter *shooters; /* each player's last position and height: the origin of its shots */
+    size_t shooter_n, shooter_cap;
     V10Input input;      /* the input window's deltas, kept across q packets */
     V10MapInfo map_info;
     int have_map_info;
@@ -195,6 +197,7 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_PICKUP: return "PICKUP";
     case NET_PACKET_INPUT_BATCH: return "INPUT_BATCH";
     case NET_PACKET_RECON: return "RECON";
+    case NET_PACKET_SHOT: return "SHOT";
     case NET_PACKET_CHAT: return "CHAT";
     case NET_PACKET_MATCH_VOTE_STATE: return "MATCH_VOTE_STATE";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
@@ -240,6 +243,31 @@ static void session_unlink(V10Session *s) {
     s->prev = s->next = NULL;
 }
 
+/* The shooter table: a player's last state or spawn. */
+static const V10Shooter *shooter_find(const V10Session *s, int32_t uid) {
+    for (size_t i = 0; i < s->shooter_n; i++)
+        if (s->shooters[i].uid == uid) return &s->shooters[i];
+    return NULL;
+}
+
+static void shooter_set(V10Session *s, int32_t uid, double x, double y, double z, double height) {
+    V10Shooter v = {.uid = uid, .x = x, .y = y, .z = z, .height = height};
+    for (size_t i = 0; i < s->shooter_n; i++) {
+        if (s->shooters[i].uid == uid) {
+            s->shooters[i] = v;
+            return;
+        }
+    }
+    if (s->shooter_n == s->shooter_cap) {
+        const size_t cap = s->shooter_cap ? s->shooter_cap * 2 : 16;
+        V10Shooter *grown = realloc(s->shooters, cap * sizeof *grown);
+        if (!grown) return;
+        s->shooters = grown;
+        s->shooter_cap = cap;
+    }
+    s->shooters[s->shooter_n++] = v;
+}
+
 static void tcp_close(V10Session *s) {
     if (s->fd >= 0) {
         kn_loop_del_fd(s->bridge->loop, s->fd);
@@ -260,6 +288,7 @@ static void session_free(V10Session *s) {
     free(s->config_text);
     cJSON_Delete(s->config_root);
     free(s->kbatch);
+    free(s->shooters);
     free(s->ai_sync);
     free(s->skins);
     v10_input_free(&s->input);
@@ -794,6 +823,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_STATE) {
         V10StateRec rec;
         if (!v10_map_state(p, n, &rec)) { stop_at(s, "STATE", "malformed"); return; }
+        shooter_set(s, rec.uid, rec.x, rec.y, rec.z, rec.height); /* the origin of this player's shots */
         if (rec.uid != s->client_id && kbatch_push(s, &rec)) close_session(s, 1011, "out of memory", 0);
         return;
     }
@@ -862,6 +892,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_SPAWN) {
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
+        shooter_set(s, spawn.uid, spawn.position[0], spawn.position[1], spawn.position[2], 11.0); /* standing: player_height */
         if (!spawn.active) return; /* a player who is dead now: the v10 add is for players in play */
         const int at = skins_index(s, spawn.uid);
         v10_out_init(&o);
@@ -902,6 +933,14 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* SHOT: one hitscan ray of another player's shot, the tracer "9" (see v10_map_shot) */
+    if (s->init_sent && type == NET_PACKET_SHOT) {
+        const V10Shooter *shooter = n == 31 ? shooter_find(s, rd_i32(p, 0)) : NULL;
+        v10_out_init(&o);
+        v10_map_shot(&o, p, n, shooter);
+        finish_out(s, &o, "SHOT");
         return;
     }
     /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon) */

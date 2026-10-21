@@ -341,6 +341,52 @@ int main(void) {
             v10_out_free(&mo);
         }
 
+        // SHOT (21, NetShotPacket, 31 bytes) -> the tracer "9": [sid, hit (0.1), normal (0.01) | nil, trail, origin (0.1), 0, 0]
+        {
+            uint8_t sh[31];
+            V10Out so;
+            V10Shooter known = {9, 1.26, 2, 3, 9.2};
+            memset(sh, 0, sizeof sh);
+            put_i32(sh, 0, 9);
+            put_f32(sh, 8, 10.44f); put_f32(sh, 12, 2); put_f32(sh, 16, -5.06f);
+            sh[20] = 1;
+            put_f32(sh, 21, 0.5f); put_f32(sh, 25, 1.2f);
+            sh[29] = 1;
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, &known);
+            CHECK(!so.stop && so.count == 1 && !strcmp(so.msgs[0].label, "9") && so.msgs[0].argc == 1, "shot -> the tracer \"9\", one array argument");
+            const KrunkerValue want[13] = {N(9), N(10.4), N(2), N(-5.1), N(0.5), N(1.2), N(1), N(1.3), N(2), N(9.2), N(3), N(0), N(0)};
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY && so.msgs[0].args[0].len == 13) {
+                for (int i = 0; i < 13; i++) CHECK(vequal(&so.msgs[0].args[0].u.items[i], &want[i]), "tracer slot %d", i);
+            } else {
+                CHECK(0, "the tracer has 13 slots");
+            }
+            v10_out_free(&so);
+            memset(sh + 20, 0, 1);
+            sh[20] = 0;
+            put_f32(sh, 8, 4); put_f32(sh, 12, 5); put_f32(sh, 16, 6);
+            sh[29] = 0;
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, &known);
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY) {
+                CHECK(so.msgs[0].args[0].u.items[4].type == KRUNKER_NIL && so.msgs[0].args[0].u.items[5].type == KRUNKER_NIL,
+                      "no normal: nil angles");
+            }
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, NULL);
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY) {
+                const KrunkerValue *t = so.msgs[0].args[0].u.items;
+                CHECK(vequal(&t[7], &KRUNKER_V_NUM(4)) && vequal(&t[8], &KRUNKER_V_NUM(5)) && vequal(&t[9], &KRUNKER_V_NUM(0)) && vequal(&t[10], &KRUNKER_V_NUM(6)),
+                      "an unknown shooter: the hit point is the origin, height 0");
+            }
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 30, &known);
+            CHECK(stop_has(&so, "malformed"), "a short shot is malformed");
+            v10_out_free(&so);
+        }
+
         // EXT 0x8120 (NetServerLinePacket, 324 bytes): the template's first "$" is the name, a server line (mapServerLine)
         {
             uint8_t sl[324];

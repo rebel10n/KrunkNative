@@ -37,6 +37,7 @@
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
 #define V10_IN_PLAYER_INTERACTION "inat"
 #define V10_IN_UPD_MATCH_VOTE "mv"
+#define V10_IN_SHOW_TRACER "9" /* v10.js 97902 SHOW_TRACER, the handler 220548 (_73392) */
 #define V10_IN_SYNC_PLAYER "l" /* v10.js 220091: the owner's movement state, one argument: the 26-slot array */ /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
 #define V10_IN_REMOVE_PLAYER_SOUND "rsnd"
@@ -224,6 +225,15 @@ size_t v10_encode_input_batch(const NetInputPacket *frames, size_t n, uint8_t *o
 
 /* EXT 0x8120 (NetServerLinePacket, 324 bytes): a join or leave line about a player, formatted as a server line (mapServerLine). */
 void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n);
+/* A player's last position and height: the origin of its shots (mapShot). */
+typedef struct V10Shooter {
+    int32_t uid;
+    double x, y, z, height;
+} V10Shooter;
+
+/* SHOT (NetShotPacket, 31 bytes): one hitscan ray of another player's shot as the tracer "9" (mapShot, v10Translate.ts).
+ * shooter: that player's last state or spawn, NULL when the bridge has none (the origin is then the hit point at height 0). */
+void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter);
 /* RECON (NetReconPacket, 89 bytes): the owner's movement state as the "l" sync array (mapRecon in v10Translate.ts). */
 void v10_map_recon(V10Out *o, const uint8_t *p, size_t n);
 /* PICKUP (NetPickupPacket, 26 bytes): one pickup's state as the "inat" message (mapPickup in v10Translate.ts). */
@@ -304,7 +314,9 @@ typedef struct V10StateRec {
     int grapple_on;
     double grapple[3];
     double ping;
+    double height; /* the shooter's height: player_height - crouch_val * crouch_distance (the tracer's origin) */
 } V10StateRec;
+
 int v10_map_state(const uint8_t *p, size_t n, V10StateRec *out);
 /* The 13-field "k" record (V10_STATE_FIELDS values, arena). */
 KrunkerValue v10_state_record(V10Out *o, const V10StateRec *r);

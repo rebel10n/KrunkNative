@@ -91,6 +91,7 @@ export const V10_IN = Object.freeze({
   UPDATE_FLAG: "ufl",
   UPDATE_FLAG_INFO: "ufi",
   PLAYER_INTERACTIONS: "inat", // with sid -1 and the pickup flag: updatePickup (the pickup half of inat, no player)
+  SHOW_TRACER: "9", // v10.js 97902 SHOW_TRACER, the handler _73392 (220548): one hitscan ray's tracer
   SYNC_PLAYER: "l", // v10.js 220091 (_73160): the owner's movement state, one argument: the 26-slot array
   UPD_MATCH_VOTE: "mv", // [vo, mts]: the match vote cards (v10 UPD_MATCH_VOTE, the v7 broadcast "mv")
   TEAM_SCORE: "ts",
@@ -235,6 +236,7 @@ export const NATIVE_MORE = Object.freeze({
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
   RECON: 110, // NET_PACKET_RECON: the owner's authoritative state after an input (NetReconPacket, the v10 "l")
+  SHOT: 21, // NET_PACKET_SHOT: one hitscan ray of another player's shot (NetShotPacket): the tracer "9"
   INPUT_BATCH: 111, // NET_PACKET_INPUT_BATCH: the frames of one input window (NetInputBatchPacket, Krunker "q")
   CHAT_V7: 245, // NET_PACKET_CHAT_V7: a chat line for a v7 peer (NetChatV7Packet: channel, account id, NetChatPacket)
   DOM_UPDATE: 142, // NET_PACKET_DOM_UPDATE: the domination zones' state (NetDomUpdatePacket, protocol 1.4.4)
@@ -909,6 +911,11 @@ export function mapBotAdd(p: Buffer): Mapped {
 // yDire the pitch (direction[1] and direction[0], KN's own yaw / pitch naming in net.c). The handler's
 // players.hideAll() hides every player the list does not name, so the bridge sends one "k" per chunk of states.
 const STATE_SIZE = 79;
+// The player's height (constants_v10.c: player_height 11, crouch_distance 3; player.c height = player_height -
+// crouch_val * crouch_distance). The tracer's origin is the shooter's position and this height.
+const PLAYER_HEIGHT = 11;
+const CROUCH_DISTANCE = 3;
+export type Shooter = { x: number; y: number; z: number; height: number };
 // NetPickupPacket (packed, 26 bytes): uid int32 @0, weapon int32 @4 (-1 empty), active uint8 @8, moved uint8 @9,
 // position float[3] @10 (valid when moved), ammo int32 @22 (shared/src/interact.c pickup_send). v10 takes a pickup
 // change in "inat" with no player (sid -1, the pickup flag set): io_playerInteractions calls updatePickup(uid,
@@ -956,15 +963,17 @@ export function mapMatchVoteState(p: Buffer, socketId: string): Mapped {
   return { messages: [[V10_IN.UPD_MATCH_VOTE, [vo, mts]]] };
 }
 
-export type StateRecord = { uid: number; record: unknown[] };
+export type StateRecord = { uid: number; record: unknown[]; shooter: Shooter };
 export function mapState(p: Buffer): StateRecord | null {
   if (p.length !== STATE_SIZE) return null;
   const deg = (r: number) => Math.round(r * (180 / Math.PI));
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const grapple = p[62] !== 0 ? [Math.round(p.readFloatLE(63)), Math.round(p.readFloatLE(67)), Math.round(p.readFloatLE(71))] : 0;
   const uid = p.readInt32LE(0);
+  const crouch = p.readFloatLE(53);
   return {
     uid,
+    shooter: { x: r2(p.readFloatLE(13)), y: r2(p.readFloatLE(17)), z: r2(p.readFloatLE(21)), height: PLAYER_HEIGHT - CROUCH_DISTANCE * crouch },
     record: [
       uid,
       r2(p.readFloatLE(13)),
@@ -981,6 +990,28 @@ export function mapState(p: Buffer): StateRecord | null {
       Math.round(p.readFloatLE(75)), // ping
     ],
   };
+}
+
+// NetShotPacket (31 bytes, packed): int32 uid @0 (the shooter), int32 weapon @4, float hit[3] @8 (the impact point, or the
+// end of the range), has_normal uint8 @20, normal_yaw @21 and normal_pitch @25 (valid with has_normal), trail uint8 @29,
+// first uint8 @30 (the ray's first: a sound once per shot; the tracer has no such field). The tracer "9" is one array
+// argument (SHOW_TRACER's handler takes the array): [sid, hit x, y, z (0.1), normal yaw, pitch | nil (0.01), trail,
+// shooter x, y, height, z (0.1), bulletType, impactType]. The shooter is the one the bridge has a state for (the server's
+// own origin is the shooter's position: _60744 at v10.js 173054); KN has no bullet or impact table, so both are 0
+// (the weapon's `|| 0`). Without a state the origin is the hit point at height 0.
+export const SHOT_SIZE = 31;
+export function mapShot(p: Buffer, shooters: ReadonlyMap<number, Shooter>): Mapped {
+  if (p.length !== SHOT_SIZE) return { messages: [], stop: "malformed" };
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const uid = p.readInt32LE(0);
+  const hit = [r1(p.readFloatLE(8)), r1(p.readFloatLE(12)), r1(p.readFloatLE(16))];
+  const normal = p[20] !== 0 ? [r2(p.readFloatLE(21)), r2(p.readFloatLE(25))] : null;
+  const trail = p[29];
+  const s = shooters.get(uid);
+  const origin = s ? [r1(s.x), r1(s.y), r1(s.height), r1(s.z)] : [hit[0], hit[1], 0, hit[2]];
+  const tracer = [uid, hit[0], hit[1], hit[2], normal ? normal[0] : null, normal ? normal[1] : null, trail, origin[0], origin[1], origin[2], origin[3], 0, 0];
+  return { messages: [[V10_IN.SHOW_TRACER, [tracer]]] };
 }
 
 // ---- DOM_UPDATE (142) and AI_SYNC_V7 (161)
