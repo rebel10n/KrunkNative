@@ -411,6 +411,19 @@ void acct_email_request_http(int64_t account_id, const char *email, const char *
  * runs once: err is the user-facing refusal (NULL when the mail went out or was not due; msg the neutral text). */
 typedef void (*AcctRecoverFn)(void *ud, const char *err, const char *msg);
 void acct_recover_request(const char *who, const char *ip, AcctRecoverFn done, void *ud);
+/* v10 POST /auth/login/email-code (v10_auth.c, account_security.c): the sign-in code of the account that has
+ * `email`, bound to challenge chid. The code is mailed only when an account has the address, has no 2FA and no
+ * limit applies (silent: the caller answers the same). done(ud, err) runs once; err NULL = the request was taken. */
+typedef void (*AcctLoginCodeFn)(void *ud, const char *err);
+void acct_login_code_send(const char *email, const char *chid, const char *ip, AcctLoginCodeFn done, void *ud);
+/* done(ud, err, account_id): account_id > 0 for the right code of chid; err ACCT_ERR_LOGIN_CODE_BAD for a wrong,
+ * used or expired code (the caller counts it); err "Server error." otherwise. */
+#define ACCT_ERR_LOGIN_CODE_BAD "Invalid Code"
+typedef void (*AcctLoginCheckFn)(void *ud, const char *err, int64_t account_id);
+void acct_login_code_check(const char *chid, const char *code, AcctLoginCheckFn done, void *ud);
+/* A session for account_id that signed in by the emailed code: the same P_LOGIN_SUCCESS and account reply as a
+ * password login (accounts.c login_success, audit via "email_code"). cb gets the account with its "token". */
+void acct_session_issue(int64_t account_id, const char *ip, AcctReplyFn cb, void *ud);
 /* the otpauth:// URI of a base32 2FA secret (the authenticator app's QR code, v7.1.4 format) */
 void acct_twofa_otpauth(const char *username, const char *secret, char *out, size_t cap);
 /* 1 = go on; 0 = the frame needs a verified email (accounts.email.require_verified): error sent. */

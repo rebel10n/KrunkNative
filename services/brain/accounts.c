@@ -320,6 +320,8 @@ typedef struct AuthCtx {
     char ip[64];
     char origin[16];
     int account_id;
+    const char *via;    /* the login audit's method ("password" when NULL, "email_code" for acct_session_issue) */
+    int trim;           /* drop the oldest sessions past max_sessions (password logins do; acct_session_issue too) */
     char *twofa_hash;   /* the account's 2FA (TOTP) secret, NULL = no 2FA */
     char twofa[32];     /* code the client gave */
     uint64_t hot_t0;    /* session cache miss: Redis time of the lookup (hot.h) */
@@ -400,7 +402,7 @@ static void auth_done(kn_db_result *res, void *ud) {
         return;
     }
     if (c->token[0]) cJSON_AddStringToObject(account, "token", c->token);
-    if (c->action == 0 || c->pass) trim_sessions((int) kn_json_int(account, "id", 0));
+    if (c->action == 0 || c->pass || c->trim) trim_sessions((int) kn_json_int(account, "id", 0));
     c->cb(c->ud, NULL, account);
     cJSON_Delete(account);
     auth_ctx_free(c);
@@ -417,7 +419,7 @@ static void login_success(AuthCtx *c, const char *new_hash) {
         return;
     }
     kn_db_call(g_acct_brain->db, &P_LOGIN_SUCCESS,
-                KN_DB_ARGS(acct_itoa(id, c->account_id), ip_param(c), "password", c->token,
+                KN_DB_ARGS(acct_itoa(id, c->account_id), ip_param(c), c->via ? c->via : "password", c->token,
                            acct_itoa(ttl, g_acct.session_ttl_s), c->origin, new_hash),
                 auth_done, c);
 }
@@ -712,6 +714,29 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
         return;
     }
     auth_fail(c, rq->name ? "Invalid login." : "Invalid credentials.");
+}
+
+/* The session of an account that passed another sign-in step (the emailed code, v10_auth.c): login_success
+ * with the same audit and session rows as a password login, and the same account reply. */
+void acct_session_issue(int64_t account_id, const char *ip, AcctReplyFn cb, void *ud) {
+    if (!g_acct_brain || !g_acct_brain->db || account_id <= 0) {
+        cb(ud, "Accounts are unavailable.", NULL);
+        return;
+    }
+    AuthCtx *c = calloc(1, sizeof *c);
+    if (!c) {
+        cb(ud, "Server error.", NULL);
+        return;
+    }
+    c->action = 1;
+    c->account_id = (int) account_id;
+    c->via = "email_code";
+    c->trim = 1;
+    c->cb = cb;
+    c->ud = ud;
+    snprintf(c->ip, sizeof c->ip, "%s", ip ? ip : "");
+    snprintf(c->origin, sizeof c->origin, "%s", "http");
+    login_success(c, NULL);
 }
 
 typedef struct RevokeCtx {

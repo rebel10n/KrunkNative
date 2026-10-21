@@ -15,6 +15,7 @@
  *   P_TWOFA_CONFIRM (id, code, now_s)         -> {ok}   "a2FAc": the pending secret becomes active
  *   P_TWOFA_DISABLE (id, code, now_s)         -> {ok}   "d2FAc"
  *   P_TWOFA_LOGIN   (id, code, now_s)         -> {ok}   the "2fa" step of a password login
+ *   P_LOGIN_CODE_REQUEST / P_LOGIN_CODE_CHECK  the emailed sign-in code (v10 POST /auth/login/email-code)
  * The three 2FA procs refuse "Invalid Code" (wrong, reused or expired code; counted) and "Too many
  * attempts. Please Try Later" (10 wrong codes within 15 minutes).
  */
@@ -413,3 +414,107 @@ static kn_db_result *run_reset_apply(kn_dbconn *c, int n, const char *const *p) 
     return dbx_json(&x, "reset", o);
 }
 const kn_proc P_RESET_APPLY = {"reset_apply", NULL, run_reset_apply};
+
+/* ------------------------------------------------------------------ the emailed sign-in code (v10 login by email) */
+
+/* A sign-in code is mailed to the account's email (six digits, drawn by account_security.c). The email_tokens row
+ * (kind 'login') holds sha256 of "<challenge id>:<code>": the challenge id is random, held by the sign-in in
+ * memory and never stored, so the row cannot be tried against the six digits on its own. */
+
+/* (email, token, ip, ttl_s, cooldown_s, acct_day, addr_day, ip_hour, can_send, now_ms)
+ * -> {send, to, username, logId}. send = 1: the row and its mail_log row were written, the caller mails the code.
+ * No account with the address, a 2FA account (its sign-in is the password and the authenticator code), a limit
+ * or can_send 0 give send 0; the caller answers the same either way, and the limits are silent (no enumeration).
+ * A new code voids the account's older login codes. */
+static kn_db_result *run_login_code_request(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const char *email = P(0), *token = P(1), *ip = P(2);
+    const int64_t now_ms = PI(9), cooldown = PI(4);
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddNumberToObject(out, "send", 0);
+    if (!email || !*email || !token) return dbx_json(&x, "loginCode", out);
+    cJSON *row = dbx_row(&x, SQL(.any = "SELECT id AS id__i, username, email, (twofa_secret IS NOT NULL) AS twofa__b"
+                                        " FROM accounts WHERE lower(email) = lower($1)"
+                                        " ORDER BY (email_verified_at IS NULL), id LIMIT 1"),
+                         KN_DB_ARGS(email));
+    if (!row) return dbx_json(&x, "loginCode", out);
+    char id[24], addr[256], user[64];
+    const char *row_email = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "email"));
+    const char *row_user = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "username"));
+    snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
+    snprintf(addr, sizeof addr, "%s", row_email ? row_email : "");
+    snprintf(user, sizeof user, "%s", row_user ? row_user : "");
+    const int twofa = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "twofa"));
+    cJSON_Delete(row);
+    int limited = twofa || PI(8) == 0 || !addr[0];
+    if (!limited) {
+        const int64_t last = dbx_int(&x, SQL(.any = "SELECT {epoch_ms:created_at} FROM mail_log WHERE account_id = {int:$1}"
+                                                    " ORDER BY created_at DESC LIMIT 1"),
+                                     KN_DB_ARGS(id), 0);
+        limited = last > 0 && cooldown * 1000 - (now_ms - last) > 0;
+    }
+    if (!limited && PI(5) > 0)
+        limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE account_id = {int:$1} AND created_at > {ago:86400}"),
+                          KN_DB_ARGS(id), 0) >= PI(5);
+    if (!limited && PI(6) > 0)
+        limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE lower(to_addr) = lower($1) AND created_at > {ago:86400}"),
+                          KN_DB_ARGS(addr), 0) >= PI(6);
+    if (!limited && PI(7) > 0 && ip && *ip)
+        limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE ip = $1 AND created_at > {ago:3600}"), KN_DB_ARGS(ip), 0) >=
+                  PI(7);
+    if (limited) return dbx_json(&x, "loginCode", out);
+    dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'login' AND used_at IS NULL"),
+             KN_DB_ARGS(id));
+    dbx_exec(&x, SQL(.any = "INSERT INTO email_tokens (token_hash, account_id, kind, email, expires_at)"
+                            " VALUES ({hash:$1}, {int:$2}, 'login', $3, {later:$4})"),
+             KN_DB_ARGS(token, id, addr, P(3)));
+    int64_t log_id = 0;
+    if (dbx_is_pg(&x))
+        log_id = dbx_int(&x, SQL(.pg = "INSERT INTO mail_log (account_id, kind, to_addr, ip) VALUES ($1::int, 'login', $2, $3)"
+                                       " RETURNING id"),
+                         KN_DB_ARGS(id, addr, ip), 0);
+    else
+        log_id = dbx_insert_id(&x, SQL(.any = "INSERT INTO mail_log (account_id, kind, to_addr, ip) VALUES ($1, 'login', $2, $3)"),
+                               KN_DB_ARGS(id, addr, ip));
+    cJSON_ReplaceItemInObject(out, "send", cJSON_CreateNumber(1));
+    cJSON_AddStringToObject(out, "to", addr);
+    cJSON_AddStringToObject(out, "username", user);
+    cJSON_AddNumberToObject(out, "logId", (double) log_id);
+    return dbx_json(&x, "loginCode", out);
+}
+const kn_proc P_LOGIN_CODE_REQUEST = {"login_code_request", NULL, run_login_code_request};
+
+/* (token) -> {id, username}: the login code row of token is live (unused, unexpired, the address still the
+ * account's, no 2FA since). It is used up with the account's other login codes. Anything else is the refusal
+ * "Invalid Code" (nothing changes). */
+static kn_db_result *run_login_code_check(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const char *token = P(0);
+    if (!token || !*token) return dbx_finish(&x, kn_db_result_user_error("Invalid Code"));
+    cJSON *row = dbx_row(&x, SQL(.any = "SELECT t.account_id AS id__i, a.username, (t.used_at IS NOT NULL) AS used__b,"
+                                        " (t.expires_at <= {now}) AS expired__b, (lower(t.email) = lower(a.email)) AS same__b,"
+                                        " (a.twofa_secret IS NOT NULL) AS twofa__b"
+                                        " FROM email_tokens t JOIN accounts a ON a.id = t.account_id"
+                                        " WHERE t.token_hash = {hash:$1} AND t.kind = 'login' {for_update}"),
+                         KN_DB_ARGS(token));
+    if (!row) return dbx_finish(&x, dbx_failed(&x) ? NULL : kn_db_result_user_error("Invalid Code"));
+    const int dead = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "used")) ||
+                     cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "expired")) ||
+                     !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "same")) ||
+                     cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "twofa"));
+    if (dead) {
+        cJSON_Delete(row);
+        return dbx_finish(&x, kn_db_result_user_error("Invalid Code"));
+    }
+    char id[24];
+    snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
+    dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'login' AND used_at IS NULL"),
+             KN_DB_ARGS(id));
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "username"));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) pint(id));
+    cJSON_AddStringToObject(o, "username", name ? name : "");
+    cJSON_Delete(row);
+    return dbx_json(&x, "loginCode", o);
+}
+const kn_proc P_LOGIN_CODE_CHECK = {"login_code_check", NULL, run_login_code_check};

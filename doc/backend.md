@@ -1704,6 +1704,8 @@ It has no email flow at all: no email field, no verification, no reset by email,
 | `accounts.email.required` | false | register needs an email ("Email Required") |
 | `accounts.email.require_verified` | `[]` | gated features, list or `a,b` |
 | `accounts.login.require_verified` | `true` | the v10 sign-in gate: a password login of an account whose email is not verified answers `ensure_verified` (v10_auth.c); `false` = login as before |
+| `accounts.login.email_code` | `true` | v10 sign-in by emailed code (POST /auth/login/email-code, rows 35-37): a six-digit code to the account's email; `false`, or no mail server, answers the not-offered 404. Accounts with 2FA get no code. Assumed from v10.0.2's consumer (the enter_code step; the 10.0.3 bundle has the same routes) |
+| `accounts.login.code_ttl_min` | `10` | the emailed sign-in code's lifetime; it works once, and five wrong codes end its sign-in |
 | `accounts.twofa_issuer` | `Krunker Box Office` | the otpauth issuer |
 
 Deployment: `KN_SMTP_*` from `~/.config/kn-secrets/smtp.env` or the deploy-kru CI secrets become

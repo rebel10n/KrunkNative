@@ -11,6 +11,15 @@
  *       POST /auth/2fa/challenge/:id, which runs acct_auth again with it. The challenge holds the password of
  *       the first step in memory for CHALLENGE_TTL_MS (the social socket keeps its own pending password the same
  *       way). A wrong code asks again (the same check_2fa); a refusal (the lock) ends the challenge.
+ *   the emailed sign-in code (rows 35-37, accounts.login.email_code, default true): POST /auth/login/email-code
+ *       {email} -> {type: "enter_code", challenge_id}, the same answer whether or not an account has the address
+ *       (no enumeration); the six-digit code is mailed when one does (account_security.c, the mail of "login").
+ *       POST /auth/code-challenge/:id {code}: a wrong code asks again (enter_code); the right one signs in with
+ *       the session of a password login (acct_session_issue, accounts.c). A fifth wrong code ends the challenge
+ *       (429 "Please Try Later", the login throttle's answer). POST /auth/resend-code-challenge/:id mails a new
+ *       code for the same challenge and voids the old one. The challenge store is CODE_MAX entries for
+ *       CHALLENGE_TTL_MS, like the 2FA challenges. Box Office assumes v10.0.3 offers the code (the consumer's
+ *       enter_code step); a 2FA account gets no code (its sign-in is the password and the authenticator code).
  *   recover-account -> the reset mail of the socket's ["rpr"] (account_security.c): the consumer reads no field.
  *   the account's 2FA setup, verify and disable -> the 2FA procs of db_security.c (P_TWOFA_CONFIRM / _DISABLE).
  *   GET /account/usernames -> the account's own username: one name, active, never expires (accounts.username).
@@ -30,8 +39,9 @@
  *
  * Every /auth error body is {"data": null, "error": "<text>"} (the consumers throw the text); the refusals
  * are v10_reply_error's {"error": {"code": "NOT_IMPLEMENTED", ...}}. The flows Box Office does not have
- * (email-code sign-in, sign-up by email code, legacy migration, K-ID consent, the sign-up challenges) answer
- * 404 with no data: no challenge exists for those ids. An unknown verification challenge id is 404 too.
+ * (sign-up by email code, legacy migration, K-ID consent, and the username and password challenges) answer
+ * 404 with the expired-sign-in text the consumer throws: no challenge of those ids exists. The email-code
+ * sign-in (rows 35-37) and the verification challenges (rows 40-42) are served above.
  */
 #include "v10_auth.h"
 
@@ -55,11 +65,17 @@
 #define WHY_PREF "Box Office does not store email preferences"
 #define WHY_DISCORD "Box Office has no Discord link"
 #define WHY_UNOFFERED "This sign-in step is not offered on Box Office"
+#define WHY_EMAIL_CODE "Sign in with your username or email and password on Box Office"
+/* the consumer's text for a challenge id nobody issued (the sign-in is over): v10.js throws it */
+#define MSG_EXPIRED "This sign-in has expired. Sign in again."
 
 #define CHALLENGE_MAX 64
 #define CHALLENGE_TTL_MS (5 * 60 * 1000)
+#define CODE_MAX 64
+#define CODE_FAILS 5                /* wrong codes that end an emailed-code sign-in */
 
 static Brain *g_brain;
+static int g_email_code = 1;        /* accounts.login.email_code: the emailed sign-in code is offered */
 
 /* ---------------------------------------------------------------- replies */
 
@@ -463,6 +479,218 @@ static void h_recover(kn_http_req *req, void *ud) {
     acct_recover_request(who, ip, recover_done, req);
 }
 
+/* ---------------------------------------------------------------- the emailed sign-in code (rows 35-37) */
+
+typedef struct CodeChallenge {
+    int used;
+    char id[40];                /* kn_random_hex: 32 hex digits, a path segment */
+    char email[256];            /* the address typed, normalized: the mail goes there when an account has it */
+    int fails;                  /* wrong codes so far (CODE_FAILS ends the sign-in) */
+    uint64_t expires_ms;
+} CodeChallenge;
+
+static CodeChallenge g_codes[CODE_MAX];
+
+static void code_drop(CodeChallenge *c) {
+    if (c) memset(c, 0, sizeof *c);
+}
+
+static void codes_purge(uint64_t now) {
+    for (size_t i = 0; i < CODE_MAX; i++) {
+        if (g_codes[i].used && now >= g_codes[i].expires_ms) code_drop(&g_codes[i]);
+    }
+}
+
+static CodeChallenge *code_find(const char *id) {
+    if (!id || !*id) return NULL;
+    codes_purge(kn_now_ms());
+    for (size_t i = 0; i < CODE_MAX; i++) {
+        if (g_codes[i].used && !strcmp(g_codes[i].id, id)) return &g_codes[i];
+    }
+    return NULL;
+}
+
+static CodeChallenge *code_new(const char *email) {
+    const uint64_t now = kn_now_ms();
+    codes_purge(now);
+    for (size_t i = 0; i < CODE_MAX; i++) {
+        CodeChallenge *c = &g_codes[i];
+        if (c->used) continue;
+        if (kn_random_hex(c->id, sizeof c->id, 16) != 0) return NULL;
+        snprintf(c->email, sizeof c->email, "%s", email);
+        c->expires_ms = now + CHALLENGE_TTL_MS;
+        c->used = 1;
+        return c;
+    }
+    return NULL;
+}
+
+/* whether the emailed code is offered: the config, and a mail server to send it through */
+static int code_offered(void) { return g_email_code && acct_email_enabled(); }
+
+static void code_state(kn_http_req *req, const char *chid) {
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddStringToObject(d, "type", "enter_code");
+    cJSON_AddStringToObject(d, "challenge_id", chid);
+    auth_reply(req, 200, d, NULL);
+}
+
+typedef struct CodeSend {
+    kn_http_req *req;
+    char chid[40];
+    int fresh;                  /* a new challenge: dropped when its mail could not be taken */
+} CodeSend;
+
+static void code_sent(void *ud, const char *err) {
+    CodeSend *s = ud;
+    if (err) {
+        if (s->fresh) code_drop(code_find(s->chid));
+        auth_fail(s->req, 503, "Server error.");
+    } else {
+        code_state(s->req, s->chid);
+    }
+    free(s);
+}
+
+/* mail the code of chid to email (acct_login_code_send answers the same whether or not an account has it) */
+static void code_send(kn_http_req *req, const char *chid, const char *email, int fresh) {
+    CodeSend *s = calloc(1, sizeof *s);
+    if (!s) {
+        if (fresh) code_drop(code_find(chid));
+        auth_fail(req, 503, "Server error.");
+        return;
+    }
+    s->req = req;
+    s->fresh = fresh;
+    snprintf(s->chid, sizeof s->chid, "%s", chid);
+    char ip[64];
+    snprintf(ip, sizeof ip, "%s", req->remote_addr ? req->remote_addr : "");
+    acct_login_code_send(email, chid, ip, code_sent, s);
+}
+
+/* POST /auth/login/email-code {email}: a challenge and, for an account with the address, its code by mail */
+static void h_email_code(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!code_offered()) {
+        auth_fail(req, 404, WHY_EMAIL_CODE);
+        return;
+    }
+    if (!auth_login_limit(req)) return;
+    cJSON *body = kn_http_body_json(req);
+    const char *email = kn_json_str(body, "email", NULL);
+    char norm[256] = "";
+    const char *err = !email || !*email ? "Enter your email." : acct_validate_email(email, norm, sizeof norm);
+    if (err) {
+        cJSON_Delete(body);
+        auth_fail(req, 400, err);
+        return;
+    }
+    cJSON_Delete(body);
+    CodeChallenge *c = code_new(norm);
+    if (!c) {
+        auth_fail(req, 503, "Too many sign-ins are waiting. Please try again.");
+        return;
+    }
+    code_send(req, c->id, norm, 1);
+}
+
+/* a wrong code: the challenge asks again, and the CODE_FAILS-th ends it */
+static void code_wrong(kn_http_req *req, const char *chid) {
+    CodeChallenge *c = code_find(chid);
+    if (c && ++c->fails >= CODE_FAILS) {
+        code_drop(c);
+        auth_fail(req, 429, "Please Try Later");
+        return;
+    }
+    code_state(req, chid);
+}
+
+static void code_session(void *ud, const char *err, const cJSON *account) {
+    kn_http_req *req = ud;
+    const char *token = !err && account ? kn_json_str(account, "token", NULL) : NULL;
+    if (token && *token) auth_login_ok(req, token);
+    else if (err) auth_fail(req, err_status(err), err);
+    else auth_fail(req, 503, "Server error.");
+}
+
+typedef struct CodeCheck {
+    kn_http_req *req;
+    char chid[40];
+} CodeCheck;
+
+static void code_checked(void *ud, const char *err, int64_t account_id) {
+    CodeCheck *k = ud;
+    kn_http_req *req = k->req;
+    if (!err && account_id > 0) {
+        code_drop(code_find(k->chid)); /* the challenge is used up: the right code signs in once */
+        acct_session_issue(account_id, req->remote_addr, code_session, req);
+    } else if (err && !strcmp(err, ACCT_ERR_LOGIN_CODE_BAD)) {
+        code_wrong(req, k->chid);
+    } else {
+        auth_fail(req, 503, "Server error.");
+    }
+    free(k);
+}
+
+/* POST /auth/code-challenge/:id {code} (row 36) */
+static void h_code_challenge(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!code_offered()) {
+        auth_fail(req, 404, WHY_UNOFFERED);
+        return;
+    }
+    if (!auth_login_limit(req)) return;
+    CodeChallenge *c = code_find(kn_http_param(req, "id"));
+    cJSON *body = kn_http_body_json(req);
+    const char *code = kn_json_str(body, "code", NULL);
+    if (!c) {
+        cJSON_Delete(body);
+        auth_fail(req, 404, MSG_EXPIRED);
+        return;
+    }
+    if (!code || !*code) {
+        cJSON_Delete(body);
+        auth_fail(req, 400, "Invalid Code");
+        return;
+    }
+    char chid[40];
+    snprintf(chid, sizeof chid, "%s", c->id);
+    if (strlen(code) != 6 || strspn(code, "0123456789") != 6) { /* no code has that shape: a wrong one */
+        cJSON_Delete(body);
+        code_wrong(req, chid);
+        return;
+    }
+    CodeCheck *k = calloc(1, sizeof *k);
+    if (!k) {
+        cJSON_Delete(body);
+        auth_fail(req, 503, "Server error.");
+        return;
+    }
+    k->req = req;
+    snprintf(k->chid, sizeof k->chid, "%s", chid);
+    acct_login_code_check(chid, code, code_checked, k);
+    cJSON_Delete(body);
+}
+
+/* POST /auth/resend-code-challenge/:id (row 37): a new code for the same challenge */
+static void h_resend_code(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!code_offered()) {
+        auth_fail(req, 404, WHY_UNOFFERED);
+        return;
+    }
+    if (!auth_login_limit(req)) return;
+    CodeChallenge *c = code_find(kn_http_param(req, "id"));
+    if (!c) {
+        auth_fail(req, 404, MSG_EXPIRED);
+        return;
+    }
+    char chid[40], email[256];
+    snprintf(chid, sizeof chid, "%s", c->id);
+    snprintf(email, sizeof email, "%s", c->email);
+    code_send(req, chid, email, 0);
+}
+
 /* ---------------------------------------------------------------- the account of the Bearer token */
 
 typedef void (*WhoFn)(kn_http_req *req, int64_t id, const char *username, void *ud); /* id 0: not signed in */
@@ -748,28 +976,30 @@ static void h_discord_refuse(kn_http_req *req, void *ud) {
 
 /* ---------------------------------------------------------------- routes */
 
-/* the flows Box Office does not have: no challenge of these ids exists, the answer is 404 with no data */
+/* the flows Box Office does not have: no challenge of these ids exists, the answer is 404 with no data and the
+ * text the consumer throws (MSG_EXPIRED for a challenge id, the sign-up text for the sign-up route) */
 static const struct {
     const char *method, *pattern, *why;
 } k_not_offered[] = {
-    {"POST", "/auth/login/email-code", "Sign in with your username or email and password on Box Office"},
-    {"POST", "/auth/code-challenge/:id", WHY_UNOFFERED},
-    {"POST", "/auth/resend-code-challenge/:id", WHY_UNOFFERED},
-    {"POST", "/auth/migrate/:id", WHY_UNOFFERED},
+    {"POST", "/auth/migrate/:id", MSG_EXPIRED},
     {"POST", "/auth/register/email-code", "Sign up with a username and password on Box Office"},
-    {"POST", "/auth/username-challenge/:id", WHY_UNOFFERED},
-    {"POST", "/auth/password-challenge/:id", WHY_UNOFFERED},
-    {"POST", "/auth/kid/age-challenge/:id", WHY_UNOFFERED},
-    {"POST", "/auth/kid/parental-email/:id", WHY_UNOFFERED},
-    {"GET", "/auth/kid/consent-status/:id", WHY_UNOFFERED},
+    {"POST", "/auth/username-challenge/:id", MSG_EXPIRED},
+    {"POST", "/auth/password-challenge/:id", MSG_EXPIRED},
+    {"POST", "/auth/kid/age-challenge/:id", MSG_EXPIRED},
+    {"POST", "/auth/kid/parental-email/:id", MSG_EXPIRED},
+    {"GET", "/auth/kid/consent-status/:id", MSG_EXPIRED},
 };
 
 int v10_auth_init(Brain *b) {
     g_brain = b;
     g_require_verified = kn_config_bool(b->cfg, "accounts.login.require_verified", 1);
+    g_email_code = kn_config_bool(b->cfg, "accounts.login.email_code", 1);
     kn_http_route(b->http, "POST", "/auth/nonce", h_nonce, NULL);
     kn_http_route(b->http, "POST", "/auth/login/username", h_login_username, NULL);
     kn_http_route(b->http, "POST", "/auth/login/email", h_login_email, NULL);
+    kn_http_route(b->http, "POST", "/auth/login/email-code", h_email_code, NULL);
+    kn_http_route(b->http, "POST", "/auth/code-challenge/:id", h_code_challenge, NULL);
+    kn_http_route(b->http, "POST", "/auth/resend-code-challenge/:id", h_resend_code, NULL);
     kn_http_route(b->http, "POST", "/auth/2fa/challenge/:id", h_2fa_challenge, NULL);
     kn_http_route(b->http, "POST", "/auth/verification/check/:id", h_verify_check, NULL);
     kn_http_route(b->http, "POST", "/auth/verification/resend/:id", h_verify_resend, NULL);

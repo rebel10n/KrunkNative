@@ -17,6 +17,9 @@
  *  - KrunkNative password reset ("Forgot password?"): ["rpr"] mails a one-time code to the
  *    account's verified email, ["rpc"] checks it, ["rps"] sets the new password (below), or the
  *    mailed link's page GET/POST /auth/reset-password.
+ *  - The v10 emailed sign-in code (POST /auth/login/email-code, v10_auth.c): acct_login_code_send mails six digits
+ *    ("login" mail) for an account's email, acct_login_code_check reads them back (email_tokens kind 'login',
+ *    keyed by the challenge id and the code). HTTP-only: no socket session.
  *  - Outbound mail through knsvc/smtp.h's kn_mailer (config "smtp"): queued on a worker thread,
  *    every mail in mail_log (status, Message-ID, the server's error; never credentials or tokens).
  */
@@ -61,6 +64,7 @@ typedef struct SecConfig {
     int required;             /* registering needs an email */
     unsigned gate;            /* F_* features that need a verified email */
     int reset_ttl_s;          /* password reset code lifetime (accounts.email.reset_ttl_min, 30) */
+    int login_code_ttl_s;     /* emailed sign-in code lifetime (accounts.login.code_ttl_min, 10) */
     char link_base[256];
     char from[256];
     char reply_to[256];
@@ -80,6 +84,8 @@ static void load_config(Brain *b) {
     if (c->verify_ttl_s <= 0) c->verify_ttl_s = 24 * 3600;
     c->reset_ttl_s = (int) kn_config_int(cfg, "accounts.email.reset_ttl_min", 30) * 60;
     if (c->reset_ttl_s <= 0) c->reset_ttl_s = 30 * 60;
+    c->login_code_ttl_s = (int) kn_config_int(cfg, "accounts.login.code_ttl_min", 10) * 60;
+    if (c->login_code_ttl_s <= 0) c->login_code_ttl_s = 10 * 60;
     c->resend_cooldown_s = (int) kn_config_int(cfg, "accounts.email.resend_cooldown_s", 60);
     c->max_per_account_day = (int) kn_config_int(cfg, "accounts.email.max_per_account_day", 5);
     c->max_per_address_day = (int) kn_config_int(cfg, "accounts.email.max_per_address_day", 5);
@@ -991,6 +997,160 @@ void sh_twofa_disable(SocialSession *s, const cJSON *f) {
     char id[24];
     social_query(s, SQL(.any = "SELECT 1 FROM accounts WHERE id = {int:$1} AND twofa_secret IS NOT NULL"),
                  KN_DB_ARGS(acct_itoa(id, s->account_id)), twofa_on_done, NULL);
+}
+
+/* ------------------------------------------------------------------ the emailed sign-in code (v10 POST /auth/login/email-code) */
+
+/* six digits from 32 random bits (rejection keeps the draw uniform) */
+static int login_code_new(char code[7]) {
+    for (int tries = 0; tries < 16; tries++) {
+        uint8_t raw[4];
+        if (kn_random_bytes(raw, sizeof raw) != 0) return -1;
+        const uint32_t v = ((uint32_t) raw[0] << 24) | ((uint32_t) raw[1] << 16) | ((uint32_t) raw[2] << 8) | raw[3];
+        memset(raw, 0, sizeof raw);
+        if (v < 4294000000u) {
+            snprintf(code, 7, "%06u", (unsigned) (v % 1000000u));
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int send_login_code_mail(int64_t log_id, const char *username, const char *to, const char *code) {
+    if (!s_mailer) return -1;
+    const int minutes = s_cfg.login_code_ttl_s / 60;
+    kn_buf text, html;
+    kn_buf_init(&text);
+    kn_buf_init(&html);
+    kn_buf_appendf(&text,
+                   "Hi %s,\n\n"
+                   "Your sign-in code for Krunker Box Office is %s\n\n"
+                   "Enter it in the game to sign in. The code expires in %d minutes and works once. If you did not ask "
+                   "to sign in, ignore this email: nobody can sign in with it.\n\nKrunker Box Office\n",
+                   username, code, minutes);
+    kn_buf_append_str(&html, "<!DOCTYPE html><html><body style=\"margin:0;padding:24px;background:#f2f2f2;font-family:Arial,sans-serif\">"
+                             "<div style=\"max-width:520px;margin:0 auto;background:#fff;border-radius:6px;padding:24px;color:#333\">"
+                             "<h2 style=\"margin:0 0 16px;color:#222\">Sign in to Krunker Box Office</h2><p>Hi ");
+    html_escape(&html, username);
+    kn_buf_append_str(&html, ",</p><p>Your sign-in code:</p>"
+                             "<p style=\"text-align:center;font-size:28px;letter-spacing:4px;font-weight:bold;"
+                             "background:#f6f6f6;padding:12px;border-radius:4px;margin:0\">");
+    html_escape(&html, code);
+    kn_buf_appendf(&html, "</p><p style=\"font-size:13px;color:#777\">The code expires in %d minutes and works once. If you did "
+                          "not ask to sign in, ignore this email.</p></div></body></html>",
+                   minutes);
+    kn_mail m = {.from = s_cfg.from, .to = to, .reply_to = s_cfg.reply_to[0] ? s_cfg.reply_to : NULL,
+                 .subject = "Your Krunker Box Office sign-in code", .text = text.data, .html = html.data};
+    MailCtx *ctx = calloc(1, sizeof *ctx);
+    int rc = -1;
+    if (ctx) {
+        ctx->log_id = log_id;
+        ctx->kind = "login";
+        mask_addr(to, ctx->masked, sizeof ctx->masked);
+        rc = kn_mailer_send(s_mailer, &m, mail_done, ctx);
+        if (rc != 0) {
+            KN_WARN(MOD, "mail queue full: login mail #%lld to %s dropped", (long long) log_id, ctx->masked);
+            char id[24];
+            kn_db_query_sql(g_acct_brain->db, SQL(.any = "UPDATE mail_log SET status = 'failed', error = 'queue full' WHERE id = {int:$1}"),
+                            KN_DB_ARGS(acct_itoa(id, log_id)), log_update_done, NULL);
+            free(ctx);
+        }
+    }
+    /* the body held the code */
+    if (text.data) memset(text.data, 0, text.len);
+    if (html.data) memset(html.data, 0, html.len);
+    kn_buf_free(&text);
+    kn_buf_free(&html);
+    return rc;
+}
+
+typedef struct LoginCodeReq {
+    AcctLoginCodeFn done;
+    void *ud;
+    char code[7];
+} LoginCodeReq;
+
+/* the request row is written (or refused by a limit: send 0): mail the code when it was due */
+static void login_code_done(kn_db_result *res, void *ud) {
+    LoginCodeReq *r = ud;
+    if (!kn_db_ok(res)) {
+        r->done(r->ud, acct_db_error(res, "login code"));
+    } else {
+        cJSON *o = acct_db_json(res);
+        const char *to = o ? kn_json_str(o, "to", NULL) : NULL;
+        if (o && kn_json_int(o, "send", 0) && to && *to) {
+            if (send_login_code_mail(kn_json_int(o, "logId", 0), kn_json_str(o, "username", ""), to, r->code) != 0)
+                KN_WARN(MOD, "login code mail #%lld not queued", (long long) kn_json_int(o, "logId", 0));
+        }
+        cJSON_Delete(o);
+        r->done(r->ud, NULL);
+    }
+    memset(r->code, 0, sizeof r->code);
+    free(r);
+}
+
+void acct_login_code_send(const char *email, const char *chid, const char *ip, AcctLoginCodeFn done, void *ud) {
+    LoginCodeReq *r = calloc(1, sizeof *r);
+    if (!r || !chid || !*chid || login_code_new(r->code) != 0 || !g_acct_brain || !g_acct_brain->db) {
+        free(r);
+        done(ud, "Server error.");
+        return;
+    }
+    r->done = done;
+    r->ud = ud;
+    /* the stored key binds the code to its challenge (db_security.c P_LOGIN_CODE_REQUEST) */
+    char token[160], ttl[24], cool[24], d1[24], d2[24], d3[24], now[24];
+    snprintf(token, sizeof token, "%s:%s", chid, r->code);
+    const char *args[] = {email, token, ip && ip[0] ? ip : NULL, acct_itoa(ttl, s_cfg.login_code_ttl_s),
+                          acct_itoa(cool, s_cfg.resend_cooldown_s), acct_itoa(d1, s_cfg.max_per_account_day),
+                          acct_itoa(d2, s_cfg.max_per_address_day), acct_itoa(d3, s_cfg.max_per_ip_hour),
+                          acct_email_enabled() ? "1" : "0", acct_itoa(now, now_ms())};
+    const int rc = kn_db_call(g_acct_brain->db, &P_LOGIN_CODE_REQUEST, (int) (sizeof args / sizeof args[0]), args,
+                              login_code_done, r);
+    memset(token, 0, sizeof token);
+    if (rc != 0) { /* a refused submit calls back on no path */
+        memset(r->code, 0, sizeof r->code);
+        free(r);
+        done(ud, "Server error.");
+    }
+}
+
+typedef struct LoginCheckReq {
+    AcctLoginCheckFn done;
+    void *ud;
+} LoginCheckReq;
+
+static void login_check_done(kn_db_result *res, void *ud) {
+    LoginCheckReq *r = ud;
+    if (!kn_db_ok(res)) {
+        r->done(r->ud, acct_db_error(res, "login code"), 0);
+    } else {
+        cJSON *o = acct_db_json(res);
+        const int64_t id = o ? kn_json_int(o, "id", 0) : 0;
+        cJSON_Delete(o);
+        if (id > 0) r->done(r->ud, NULL, id);
+        else r->done(r->ud, ACCT_ERR_LOGIN_CODE_BAD, 0);
+    }
+    free(r);
+}
+
+void acct_login_code_check(const char *chid, const char *code, AcctLoginCheckFn done, void *ud) {
+    LoginCheckReq *r = calloc(1, sizeof *r);
+    if (!r || !chid || !code || !g_acct_brain || !g_acct_brain->db) {
+        free(r);
+        done(ud, "Server error.", 0);
+        return;
+    }
+    r->done = done;
+    r->ud = ud;
+    char token[160];
+    snprintf(token, sizeof token, "%s:%s", chid, code);
+    const int rc = kn_db_call(g_acct_brain->db, &P_LOGIN_CODE_CHECK, KN_DB_ARGS(token), login_check_done, r);
+    memset(token, 0, sizeof token);
+    if (rc != 0) { /* a refused submit calls back on no path */
+        free(r);
+        done(ud, "Server error.", 0);
+    }
 }
 
 /* ------------------------------------------------------------------ module */

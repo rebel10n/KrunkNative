@@ -134,6 +134,7 @@
     "developers": [],
     "moderators": [],
     "login_throttle_s": 5,
+    "login": {"email_code": true, "code_ttl_min": 10},
     "ip_block_failures": 100,
     "ip_block_days": 5,
     "register_per_ip_hour": 0,

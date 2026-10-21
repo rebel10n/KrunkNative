@@ -34,6 +34,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -232,10 +233,6 @@ def run_checks(port, db_path, smtp):
           st == 200 and isinstance(data, dict) and data.get("type") == "login_ok" and isinstance(data.get("access_token"), str),
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    st, body = http(port, "POST", "/auth/login/email-code", {"email": email})
-    check("POST /auth/login/email-code -> 404 NONE text: Box Office has no email-code sign-in (v10.0.3 decoded 3633, 5161; v10.js 26201, 114483)",
-          st == 404 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
-
     # ---- rows 36-38, 40-45, 47-49: no challenge of these ids exists (rows 40-42 with an unknown id; a live
     # verification challenge is checked in verify_checks)
     for label, method, path, req_body, cite in [
@@ -392,6 +389,200 @@ def run_checks(port, db_path, smtp):
         st, body = http(port, "POST", path, req_body, token=token_a)
         check("%s -> 403 REFUSAL (Box Office has no Discord link) (v10.0.3 decoded %s)" % (label, cite), is_refusal(st, body),
               "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    email_code_checks(port, smtp, db_path)
+    no_challenge_checks(port)
+
+
+# ---- rows 35-37 (the emailed sign-in code) and the 'no such challenge' text of the other challenge routes
+
+EXPIRED = "This sign-in has expired. Sign in again."
+SIGNUP = "Sign up with a username and password on Box Office"
+CODE_RE = re.compile(r"sign-in code for Krunker Box Office is (\d{6})")
+
+
+def db_exec(db_path, sql, args=()):
+    con = sqlite3.connect(db_path, timeout=10)
+    try:
+        con.execute(sql, args)
+        con.commit()
+    finally:
+        con.close()
+
+
+def enter_code_id(st, body):
+    """the challenge id of a 200 enter_code state ({data: {type, challenge_id}, error: null}), else None"""
+    data = body.get("data") if isinstance(body, dict) else None
+    cid = data.get("challenge_id") if isinstance(data, dict) else None
+    shape = st == 200 and body == {"data": {"type": "enter_code", "challenge_id": cid}, "error": None}
+    return cid if shape and isinstance(cid, str) and re.fullmatch(r"[0-9a-f]{32}", cid) else None
+
+
+def mails_to(smtp, addr, before):
+    """the fake SMTP's messages to addr, from message number `before` on"""
+    return [m for m in list(smtp.messages)[before:] if addr.lower() in [r.lower() for r in m.get("rcpt", [])]]
+
+
+def next_code(smtp, addr, before, timeout=10.0):
+    """the six-digit sign-in code of the first code mail to addr from message `before` on (None: no mail came)"""
+    end = time.time() + timeout
+    while True:
+        for m in mails_to(smtp, addr, before):
+            hit = CODE_RE.search(m["data"].decode("utf-8", "replace"))
+            if hit:
+                return hit.group(1)
+        if time.time() >= end:
+            return None
+        time.sleep(0.1)
+
+
+def email_code_checks(port, smtp, db_path):
+    """rows 35-37 on the default config (accounts.login.email_code true). The consumer (v10.js 114109-114200)
+    gets enter_code, asks for the code and sends respondCodeChallenge; a wrong code is enter_code again, the
+    right one login_ok. The mail is the fake SMTP's; the code is read from it."""
+    G = fresh_user("g")
+    st, body = http(port, "POST", "/auth/register", {"username": G, "password": PASSWORD})
+    check("setup: register %s for the email-code sign-in" % G, st == 200 and isinstance(body, dict) and body.get("ok"),
+          "HTTP %d" % st)
+    g_email = "%s@example.test" % G.lower()
+    db_exec(db_path, "UPDATE accounts SET email = ?, email_verified_at = ? WHERE username = ?", (g_email, sql_time(), G))
+    ghost = "ghost%d@example.test" % secrets.randbelow(10 ** 9)
+
+    # row 35: the state, the mail, and the same answer for an address with no account
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": g_email})
+    cid = enter_code_id(st, body)
+    check("[35] POST /auth/login/email-code for an account's email -> 200 {data: {type: enter_code, challenge_id}, error: null} (v10.0.3 decoded 3633, 5161; v10.js 26201, 114109 enter_code branch)",
+          cid is not None, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": ghost})
+    check("[35] POST /auth/login/email-code for an address with no account -> the same 200 enter_code shape (no account enumeration)",
+          enter_code_id(st, body) is not None, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    code1 = next_code(smtp, g_email, before) if cid else None
+    check("[35] the sign-in code is mailed to the account's email: six digits, through the fake SMTP",
+          code1 is not None and len(code1) == 6, "no code mail to %s" % g_email)
+    check("[35] no mail goes to an address with no account (the same answer, nothing sent)", not mails_to(smtp, ghost, before))
+
+    # row 36: a wrong code asks again, the right code signs in, and the used challenge is gone
+    wrong = "000000" if code1 != "000000" else "111111"
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid or HEX), {"code": wrong})
+    check("[36] POST /auth/code-challenge/:id with a wrong code -> 200 enter_code again, same challenge (v10.js 26209, 114161: the loop asks again)",
+          cid is not None and enter_code_id(st, body) == cid, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid or HEX), {"code": code1 or wrong})
+    data = body.get("data") if isinstance(body, dict) else None
+    token = data.get("access_token") if isinstance(data, dict) else None
+    check("[36] the right code -> 200 LOGIN {type: login_ok, access_token, refresh_token}, error null (v10.0.3 decoded 3633, 5161; v10.js 26209, 114161 ends the loop on login_ok)",
+          st == 200 and isinstance(data, dict) and data.get("type") == "login_ok" and isinstance(token, str) and token != ""
+          and isinstance(data.get("refresh_token"), str) and body.get("error") is None, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, me = http(port, "GET", "/account/usernames", token=token)
+    names = ((me or {}).get("data") or {}).get("names") if isinstance(me, dict) else None
+    check("[36] the email-code login token is a real session: GET /account/usernames answers the account",
+          st == 200 and isinstance(names, list) and len(names) == 1 and names[0].get("name") == G, "HTTP %d" % st)
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid or HEX), {"code": code1 or wrong})
+    check("[36] the used challenge again -> 404 with the expired text, data null (v10.js 114161 throws the text)",
+          st == 404 and is_text_error(body) and body["error"] == EXPIRED, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # row 37: a resend keeps the challenge, mails a new code and voids the old one
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": g_email})
+    cid2 = enter_code_id(st, body)
+    code2a = next_code(smtp, g_email, before) if cid2 else None
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/resend-code-challenge/" + (cid2 or HEX))
+    check("[37] POST /auth/resend-code-challenge/:id -> 200 enter_code for the same challenge (v10.js 26217)",
+          cid2 is not None and enter_code_id(st, body) == cid2, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    code2b = next_code(smtp, g_email, before) if cid2 else None
+    check("[37] the resend mails a new six-digit code to the account's email", code2b is not None and len(code2b) == 6,
+          "no code mail")
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid2 or HEX), {"code": code2a or "000000"})
+    check("[37] the code the resend replaced no longer signs in (the loop asks again)",
+          cid2 is not None and enter_code_id(st, body) == cid2, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid2 or HEX), {"code": code2b or "000000"})
+    data = body.get("data") if isinstance(body, dict) else None
+    check("[36] the resent code signs in: 200 login_ok", st == 200 and isinstance(data, dict) and data.get("type") == "login_ok",
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # row 36: five wrong codes end the sign-in (the login throttle's answer), so the right code is expired
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": g_email})
+    cid3 = enter_code_id(st, body)
+    code3 = next_code(smtp, g_email, before) if cid3 else None
+    bad = [c for c in ("123401", "123402", "123403", "123404", "123405", "123406") if c != code3][:5]
+    replies = [http(port, "POST", "/auth/code-challenge/" + (cid3 or HEX), {"code": c}) for c in bad[:4]]
+    check("[36] four wrong codes -> 200 enter_code each time (the challenge holds)",
+          cid3 is not None and all(enter_code_id(s, b) == cid3 for s, b in replies), "%s" % [s for s, _ in replies])
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid3 or HEX), {"code": bad[4]})
+    check("[36] the fifth wrong code ends the sign-in: 429 with the login throttle text 'Please Try Later'",
+          st == 429 and is_text_error(body) and body["error"] == "Please Try Later", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/code-challenge/" + (cid3 or HEX), {"code": code3 or "123400"})
+    check("[36] after the lock the right code is refused as expired (404)",
+          st == 404 and is_text_error(body) and body["error"] == EXPIRED, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # a 2FA account: the same answer, and no mail (its sign-in is the password and the authenticator code)
+    H = fresh_user("h")
+    st, body = http(port, "POST", "/auth/register", {"username": H, "password": PASSWORD})
+    h_email = "%s@example.test" % H.lower()
+    db_exec(db_path, "UPDATE accounts SET email = ?, email_verified_at = ?, twofa_secret = ? WHERE username = ?",
+            (h_email, sql_time(), b32_secret(), H))
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": h_email})
+    check("[35] POST /auth/login/email-code for a 2FA account -> the same 200 enter_code shape (v10.js 114109)",
+          enter_code_id(st, body) is not None, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    time.sleep(1.5)
+    check("[35] no sign-in mail goes to a 2FA account (the policy: such an account signs in with its password and code)",
+          not mails_to(smtp, h_email, before))
+
+
+def no_challenge_checks(port):
+    """rows 36-37 (unknown challenge), 38, 43-45, 47-49: the text each consumer throws. None of these
+    challenges is ever issued, so the answer is 404 with data null and the expired text (challenge ids),
+    or the sign-up text (row 43: sign-up is username and password). v10.js 114109-114440, 26209-26304."""
+    for label, method, path, req_body, want, row in [
+        ("POST /auth/code-challenge/:id", "POST", "/auth/code-challenge/" + HEX, {"code": "123456"}, EXPIRED, "36"),
+        ("POST /auth/resend-code-challenge/:id", "POST", "/auth/resend-code-challenge/" + HEX, {}, EXPIRED, "37"),
+        ("POST /auth/migrate/:id", "POST", "/auth/migrate/" + HEX, {"email": "x@example.test"}, EXPIRED, "38"),
+        ("POST /auth/register/email-code", "POST", "/auth/register/email-code", {"email": "x@example.test"}, SIGNUP, "43"),
+        ("POST /auth/username-challenge/:id", "POST", "/auth/username-challenge/" + HEX, {"username": "x"}, EXPIRED, "44"),
+        ("POST /auth/password-challenge/:id", "POST", "/auth/password-challenge/" + HEX, {"password": "x"}, EXPIRED, "45"),
+        ("POST /auth/kid/age-challenge/:id", "POST", "/auth/kid/age-challenge/" + HEX, {"age": 18}, EXPIRED, "47"),
+        ("POST /auth/kid/parental-email/:id", "POST", "/auth/kid/parental-email/" + HEX, {"email": "x@example.test"}, EXPIRED, "48"),
+        ("GET /auth/kid/consent-status/:id", "GET", "/auth/kid/consent-status/" + HEX, None, EXPIRED, "49"),
+    ]:
+        st, body = http(port, method, path, req_body)
+        check("[%s] %s -> 404 data null, error %r (v10.js consumer throws the text)" % (row, label, want),
+              st == 404 and is_text_error(body) and body["error"] == want, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+
+def email_code_off_checks(port):
+    """accounts.login.email_code false: rows 35-37 answer the not-offered reply, as before this change"""
+    st, body = http(port, "POST", "/auth/login/email-code", {"email": "off@example.test"})
+    check("POST /auth/login/email-code -> 404 NONE text: Box Office has no email-code sign-in when accounts.login.email_code is false (v10.0.3 decoded 3633, 5161; v10.js 26201, 114483)",
+          st == 404 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/code-challenge/" + HEX, {"code": "123456"})
+    check("POST /auth/code-challenge/:id -> 404 NONE text when accounts.login.email_code is false",
+          st == 404 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/resend-code-challenge/" + HEX, {})
+    check("POST /auth/resend-code-challenge/:id -> 404 NONE text when accounts.login.email_code is false",
+          st == 404 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+
+def start_brain(env, extra, log):
+    """kn_brain on an ephemeral port: (process, port), port None when it did not start"""
+    brain = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.region=local",
+                              "--brain.id=v10-auth-test-%d" % os.getpid(), "--finder.poll_interval_s=1"] + extra,
+                             cwd=ROOT, env=env, stdout=open(log, "w"), stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+    m = wait_for(lambda: re.search(r"listening on http://127\.0\.0\.1:(\d+) \(ws", read(log)), 20)
+    check("kn_brain starts on an ephemeral port", m is not None, read(log)[-300:])
+    return brain, (int(m.group(1)) if m else None)
+
+
+def stop_brain(brain):
+    if brain is not None:
+        brain.terminate()
+        try:
+            brain.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            brain.kill()
+    return None
 
 
 def verify_checks(port, db_path, smtp):
@@ -595,7 +786,6 @@ def main():
         extra = ["--smtp.host=127.0.0.1", "--smtp.port=%d" % smtp.port, "--smtp.tls=starttls",
                  "--smtp.user=" + SMTP_USER, "--smtp.ca_file=" + cert, "--smtp.retries=-1",
                  "--accounts.email.link_base=http://127.0.0.1:1",
-                 "--auth.login_per_min=100000", "--auth.register_per_hour=100000", "--auth.join_per_min=100000"]
         brain, port = start_brain(env, extra, log)
         brains.append(brain)
         check("kn_brain starts on an ephemeral port", port is not None, read(log)[-300:])
@@ -613,6 +803,14 @@ def main():
         if port is None:
             return 1
         gate_off_checks(port, db_path)
+        # the same database with accounts.login.email_code off: rows 35-37 answer the not-offered reply
+        stop_brain(brain)
+        brains.remove(brain)
+        brain, port = start_brain(env, extra + ["--accounts.login.email_code=false"], log + ".off")
+        brains.append(brain)
+        if port is None:
+            return 1
+        email_code_off_checks(port)
     except Exception as e:  # noqa: BLE001
         check("the scenario runs", False, "exception: %r" % e)
     finally:

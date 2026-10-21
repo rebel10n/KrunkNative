@@ -169,6 +169,19 @@ class Ctx:
         self.day = int(time.time() * 1000) // DAY_MS
 
 
+def catalogue_index():
+    """the index of a store skin of assets/skins.json (the catalogue the store and /data/skins read), or None"""
+    try:
+        with open(os.path.join(ROOT, "assets", "skins.json")) as f:
+            skins = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(skins, list) or not skins:
+        return None
+    entry = skins[len(skins) // 2]
+    return entry.get("index") if isinstance(entry, dict) and isinstance(entry.get("index"), int) else None
+
+
 def section_skins(c):
     """rows 71-77: the Skin Manager (custom skins); KrunkNative has none, so the reads are empty and the writes refused"""
     p = c.port
@@ -181,6 +194,17 @@ def section_skins(c):
     st, body = http(p, "GET", "/skins/1", token=c.tok_a)
     check("[72] GET /skins/1 -> 404 NOT_FOUND (wrapper L5161; consumer v10.js 122021 reads data.skin)",
           st == 404 and error_code(body) == "NOT_FOUND", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    # skins.get reads data.skin, a Skin Manager record (the list above is empty, so there are none). A store
+    # skin has an index in assets/skins.json (GET /data/skins) but is no Skin Manager record: same 404
+    idx = catalogue_index()
+    if idx is not None:
+        st, body = http(p, "GET", "/skins/%d" % idx, token=c.tok_a)
+        check("[72] GET /skins/<index %d of assets/skins.json> -> 404 NOT_FOUND: a store skin is not a Skin Manager record (v10.js 122021 reads data.skin)" % idx,
+              st == 404 and error_code(body) == "NOT_FOUND" and not (isinstance(body, dict) and body.get("data")),
+              "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "GET", "/skins/abc", token=c.tok_a)
+    check("[72] GET /skins/abc -> 404 NOT_FOUND (no skin has that id)", st == 404 and error_code(body) == "NOT_FOUND",
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
     for row, method, path, payload, label in (
             (73, "POST", "/skins", {"name": "x"}, "create (consumer v10.js 122040 reads data.skin)"),
             (74, "PUT", "/skins/1", {"name": "x"}, "update (consumer v10.js 122054 reads data.skin)"),
