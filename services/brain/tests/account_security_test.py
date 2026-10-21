@@ -269,9 +269,13 @@ async def scenario(port, smtp):
         key = re.search(r"secret=([A-Z2-7]+)", r[3]).group(1)
         r = await s3.call("c2fa", "a2FAc", totp(key, 0))
         check(r[1] == 2 and r[4] is True, "2FA on")
+        # the auth class (doc/social-rate-limit.md): a burst of 10 frames, then 0.5 a second per socket.
+        # Each code waits for its token, so the lock is reached through the limiter, not around it.
         for i in range(10):
+            await asyncio.sleep(2.1)
             r = await s3.call("c2fa", "d2FAc", "%06d" % ((int(totp(key, 0)) + 1 + i) % 1000000))
         check(r[5] == "Invalid Code", "wrong codes counted")
+        await asyncio.sleep(2.1)
         r = await s3.call("c2fa", "d2FAc", totp(key, 1))
         check(r[5] == "Too many attempts. Please Try Later", "locked after 10 wrong codes: %r" % r[1:])
         n = query("SELECT twofa_failures FROM accounts WHERE id = %d" % bid)
