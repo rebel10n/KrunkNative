@@ -337,6 +337,12 @@ export async function run(opts = {}) {
       if (result.lost) break;
       if (state && state.game === "object" && state.render === "object") break;
     }
+    if (!result.clicked) {
+      result.menuProbe = await evalJS(`[...document.querySelectorAll("*")].filter((e) => /quick\\s*match/i.test(e.innerText || "")).slice(0, 10).map((e) => [e.tagName, String(e.className).slice(0, 60), !!e.offsetParent, (e.innerText || "").length, (e.innerText || "").trim().slice(0, 60)])`);
+      result.newUser = await evalJS("String(window.isNewUser) + ' storage=' + localStorage.length");
+      result.hiddenBy = await evalJS(`(() => { const c = [...document.querySelectorAll("span.cardLabel, .actionCard")].find((e) => /quick\\s*match/i.test(e.innerText || "")); const out = []; for (let n = c; n && n !== document.body; n = n.parentElement) { const s = getComputedStyle(n); if (s.display === "none" || s.visibility === "hidden" || s.opacity === "0") out.push(n.tagName + "#" + n.id + "." + String(n.className).slice(0, 50) + " display=" + s.display + " visibility=" + s.visibility + " opacity=" + s.opacity); } return out.slice(0, 6); })()`);
+      result.consentOpen = await evalJS(`(() => { const e = document.getElementById("consentBlock"); return !!e && getComputedStyle(e).display !== "none"; })()`);
+    }
     result.game = await evalJS("typeof window.Game");
     result.render = await evalJS("typeof window.RENDER");
     result.text = (await evalJS(STATE_JS) || {}).text || result.text;
