@@ -1,7 +1,8 @@
 // Native on-demand game content fetch: the client's side (client/include/asset_fetch.h). Starts
 // the fetch for assets_path(), answers ensure_asset_file() / asset_prefetch() through the shared
 // hook, and once per frame hands the files that arrived to what loaded them while they were
-// missing: load_texture's placeholder is filled (texture_cache_reload: same GL texture), an OBJ
+// missing: load_texture's placeholder is filled (texture_cache_reload: same GL texture), or, when the
+// fetch gives the file up, becomes the missing-texture checker (texture_placeholders_check); an OBJ
 // placeholder is rebuilt in place (geometry_cache_reload: every mesh holding it draws the model),
 // GLTF models and sounds are read again on their next use, the HTML engine probes its missing
 // page images again (asset_arrival_bump). The same hooks as a map resource pack (mod_pack.c).
@@ -87,6 +88,7 @@ static void arrived(void *user, const char *path) {
 
 void asset_fetch_client_frame(void) {
     if (asset_fetch_running() && asset_fetch_poll(arrived, NULL) > 0) asset_arrival_bump();
+    texture_placeholders_check(); // a placeholder whose file the fetch gave up shows the checker (loaders.c)
 }
 
 void asset_fetch_client_shutdown(void) {

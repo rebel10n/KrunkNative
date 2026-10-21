@@ -27,6 +27,55 @@ static void cache_texture(const char *path, const unsigned int texture_id) {
     if (cache_path) vt_insert(&g_texture_cache, cache_path, texture_id);
 }
 
+// The missing-texture checker: the 2x2 magenta / black texture render.js's missingTexture draws for a
+// texture that fails to load (its loadTexture error path). One GL texture for the process lifetime,
+// built on first use. Every texture loader falls back to it: load_texture (so the map, user-asset,
+// sky, glTF, HUD and VFX textures), prefab.c's textures/<src>.png, sky.c, user_asset.c and gltf.c.
+// It is never cached under a path (texture_cache_reload would overwrite it), so a file that arrives
+// later still loads. KRUNKNATIVE_MISSING_TEXTURE=rrggbb paints it one flat colour (tools count its pixels).
+static const unsigned char *checker_pixels(void) {
+    static unsigned char pixels[16] = {0, 0, 0, 253, 255, 0, 219, 255, 255, 0, 219, 252, 0, 0, 0, 255};
+    static int painted;
+    if (painted) return pixels;
+    painted = 1;
+    // KRUNKNATIVE_MISSING_TEXTURE=rrggbb: one flat colour instead of the checker
+    const char *debug = getenv("KRUNKNATIVE_MISSING_TEXTURE");
+    unsigned int rgb;
+    if (debug && strlen(debug) == 6 && sscanf(debug, "%6x", &rgb) == 1) {
+        for (int i = 0; i < 4; i++) {
+            pixels[i * 4] = (unsigned char) (rgb >> 16);
+            pixels[i * 4 + 1] = (unsigned char) (rgb >> 8);
+            pixels[i * 4 + 2] = (unsigned char) rgb;
+            pixels[i * 4 + 3] = 255;
+        }
+    }
+    return pixels; // rows bottom-up (GL): the PNG's palette indices are magenta / black, black / magenta
+}
+
+unsigned int texture_checker(void) {
+    static unsigned int checker;
+    if (checker) return checker;
+    glGenTextures(1, &checker);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, checker);
+    g_active_texture = checker;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, checker_pixels());
+    return checker;
+}
+
+// The placeholders still waiting for their file (texture_placeholder), for texture_placeholders_check.
+typedef struct {
+    char *path;
+    unsigned int texture;
+} PendingTexture;
+static PendingTexture *g_pending_textures;
+static size_t g_pending_count;
+
 // A file still downloading (natively asset_fetch.h, asset_prefetch() == 0): a 1x1 (0, 0, 0, 0)
 // texture cached under its path, what three.js binds for a texture whose image has not loaded yet
 // (WebGLState emptyTextures: black for opaque materials, nothing for transparent ones);
@@ -45,7 +94,43 @@ static unsigned int texture_placeholder(const char *path) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black);
     glGenerateMipmap(GL_TEXTURE_2D);
     cache_texture(path, texture_id);
+    char *pending_path = strdup(path);
+    PendingTexture *grown = pending_path ? realloc(g_pending_textures, (g_pending_count + 1) * sizeof(PendingTexture)) : NULL;
+    if (grown) {
+        g_pending_textures = grown;
+        g_pending_textures[g_pending_count++] = (PendingTexture) {pending_path, texture_id};
+    } else {
+        free(pending_path); // untracked: a give-up leaves this one blank
+    }
     return texture_id;
+}
+
+// Each frame (asset_fetch_client.c): a placeholder whose file the fetch gave up (asset_prefetch() == -1)
+// becomes the checker, so a missing user asset shows it instead of staying blank. A placeholder still
+// downloading stays; one whose file arrived (texture_cache_reload filled it) or is present leaves the list.
+// Returns how many placeholders became the checker.
+int texture_placeholders_check(void) {
+    int given_up = 0;
+    size_t kept = 0;
+    for (size_t i = 0; i < g_pending_count; i++) {
+        PendingTexture pending = g_pending_textures[i];
+        const int state = asset_prefetch(pending.path);
+        if (state == 0) {
+            g_pending_textures[kept++] = pending;
+            continue;
+        }
+        if (state < 0) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, pending.texture);
+            g_active_texture = pending.texture;
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, checker_pixels());
+            given_up++;
+        }
+        free(pending.path);
+    }
+    g_pending_count = kept;
+    return given_up;
 }
 
 unsigned int load_texture(char *path) {
@@ -67,7 +152,7 @@ unsigned int load_texture(char *path) {
     if (!texture) {
         if (!available && asset_prefetch(path) == 0) return texture_placeholder(path); // downloading
         fprintf(stderr, "failed to load texture %s: %s\n", path, stbi_failure_reason());
-        return 0;
+        return texture_checker(); // missing or undecodable: the checker (not cached: a later call still tries the file)
     }
     unsigned int texture_id;
 

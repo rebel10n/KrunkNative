@@ -1021,6 +1021,10 @@ const char *client_custom_game_id_of(const Client*, int map_index);
 void client_animate_object_texture(Object*, float);
 
 unsigned int load_texture(char*);
+// The missing-texture checker (loaders.c): the shared magenta / black texture every loader shows for a texture that fails to load.
+unsigned int texture_checker(void);
+// Each frame: a downloading texture whose file the fetch gave up becomes the checker (loaders.c). Returns the count.
+int texture_placeholders_check(void);
 GlyphCacheEntry *load_glyph(char);
 Geometry *load_obj_model(char*, int);
 // The file behind a cached texture / OBJ model changed (a resource pack came or went,

@@ -307,11 +307,11 @@ static unsigned int asset_texture(const int asset) {
         for (int i = 0; i < failed_count; i++) {
             if (failed[i] == asset) {
                 free(path);
-                return 0;
+                return texture_checker(); // given up before: the checker again (load_texture does not cache failures)
             }
         }
-        tex = load_texture(path);
-        if (!tex && failed_count < 64) failed[failed_count++] = asset;
+        tex = load_texture(path); // the checker when the file does not load
+        if (tex == texture_checker() && failed_count < 64) failed[failed_count++] = asset;
         free(path);
     }
     return tex;

@@ -481,7 +481,7 @@ static unsigned int vfx_custom_damage_texture(void) {
         snprintf(loaded, sizeof(loaded), "%s", setting);
         char full[1024];
         texture = client_render_ui_file(setting, full, sizeof(full)) ? load_texture(full) : 0;
-        if (setting[0]) printf("[vfx] customDamage %s -> %s\n", setting, texture ? "loaded" : "failed");
+        if (setting[0]) printf("[vfx] customDamage %s -> %s\n", setting, texture && texture != texture_checker() ? "loaded" : "failed");
     }
     return texture;
 }

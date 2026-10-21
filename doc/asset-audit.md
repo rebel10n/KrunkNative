@@ -74,7 +74,7 @@ cd deploy/ansible && ansible-playbook central.yml --tags web_assets   # assets/ 
 ## Community maps' user assets (2026-10-15)
 
 Report: "missing textures / the purple-black box thingy in custom maps". The box is render.js's
-`missingTexture` checker (`client/src/prefab.c` `prefab_missing_texture`), drawn for a texture that
+`missingTexture` checker (`client/src/loaders.c` `texture_checker`, shared by every texture loader), drawn for a texture that
 does not load.
 
 Sample: 109 maps rendered headless, each from its first spawn (4 directions) and from above: the 46

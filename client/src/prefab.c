@@ -519,58 +519,28 @@ static Geometry *prefab_plane_grid_geo(int tiles_x, int tiles_z) {
 
 // ---- textures (render.js loadTexture / getMat)
 
-// render.js missingTexture: the 2x2 checker (#ff00db / black) shown for a texture that fails to
-// load (user assets KN does not ship, mostly). Owned here for the process lifetime.
-static unsigned int g_prefab_missing_texture;
-
-static unsigned int prefab_missing_texture(void) {
-    if (g_prefab_missing_texture) return g_prefab_missing_texture;
-    // rows bottom-up (GL): the PNG's palette indices are magenta / black, black / magenta
-    unsigned char pixels[16] = {0, 0, 0, 253, 255, 0, 219, 255, 255, 0, 219, 252, 0, 0, 0, 255};
-    // KRUNKNATIVE_MISSING_TEXTURE=rrggbb (tools: counting placeholder pixels in a capture): one
-    // flat colour instead of the checker
-    const char *debug = getenv("KRUNKNATIVE_MISSING_TEXTURE");
-    unsigned int rgb;
-    if (debug && strlen(debug) == 6 && sscanf(debug, "%6x", &rgb) == 1) {
-        for (int i = 0; i < 4; i++) {
-            pixels[i * 4] = (unsigned char) (rgb >> 16);
-            pixels[i * 4 + 1] = (unsigned char) (rgb >> 8);
-            pixels[i * 4 + 2] = (unsigned char) rgb;
-            pixels[i * 4 + 3] = 255;
-        }
-    }
-    glGenTextures(1, &g_prefab_missing_texture);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g_prefab_missing_texture);
-    g_active_texture = g_prefab_missing_texture;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    return g_prefab_missing_texture;
-}
+// The missing-texture checker is texture_checker() (loaders.c, render.js missingTexture), shared with
+// every other texture loader; the map textures keep its look.
 
 // A file under assets/ (textures/<src>.png, user-assets/<id>/texture.png): its cached texture,
 // the missing-texture checker when it does not load (render.js loadTexture error path).
 static unsigned int prefab_load_texture_file(const char *relative) {
     char *path = concat(assets_path(), relative);
-    if (!path) return prefab_missing_texture();
+    if (!path) return texture_checker();
     // load_texture caches successes only: remember failures so a missing file is tried once
     static char failed[64][128];
     static int failed_count;
     for (int i = 0; i < failed_count; i++) {
         if (!strcmp(failed[i], relative)) {
             free(path);
-            return prefab_missing_texture();
+            return texture_checker();
         }
     }
     const unsigned int texture = load_texture(path);
     free(path);
-    if (texture) return texture;
+    if (texture != texture_checker()) return texture;
     if (failed_count < 64) snprintf(failed[failed_count++], sizeof(failed[0]), "%s", relative);
-    return prefab_missing_texture();
+    return texture;
 }
 
 static unsigned int prefab_load_texture_src(const char *src) {

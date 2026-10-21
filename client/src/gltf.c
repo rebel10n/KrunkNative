@@ -280,7 +280,8 @@ static unsigned int gltf_texture(GltfModel *model, const int index, const int sa
     const char *mime = image->mime_type ? image->mime_type : "";
     if (strstr(mime, "webp") || (image->uri && strstr(image->uri, ".webp"))) {
         fprintf(stderr, "gltf: %s: image %d is WebP (EXT_texture_webp), not supported\n", model->path, index);
-        return 0;
+        model->textures[index] = texture_checker();
+        return model->textures[index];
     }
 
     unsigned char *pixels = NULL;
@@ -330,7 +331,8 @@ static unsigned int gltf_texture(GltfModel *model, const int index, const int sa
 
     if (!pixels) {
         fprintf(stderr, "gltf: %s: cannot decode image %d: %s\n", model->path, index, stbi_failure_reason());
-        return 0;
+        model->textures[index] = texture_checker(); // the checker, like an external image that does not load
+        return model->textures[index];
     }
 
     if (model->image_srgb[index]) srgb_to_linear(pixels, (size_t) width * (size_t) height);

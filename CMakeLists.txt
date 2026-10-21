@@ -1535,6 +1535,27 @@ else ()
     add_test(NAME gl_feedback_check_test COMMAND gl_feedback_check_test)
     set_tests_properties(gl_feedback_check_test PROPERTIES ENVIRONMENT "KRUNKNATIVE_HEADLESS=1" SKIP_RETURN_CODE 77)
 
+    # texture_checker_test: a missing sky texture (sky.c) and a missing map texture (load_texture) both
+    # show the shared missing-texture checker (loaders.c texture_checker); headless GL, run from the repo root
+    add_executable(texture_checker_test
+        client/tests/texture_checker_test.c
+        client/src/loaders.c
+        client/src/fast_obj.c
+        client/src/sky.c
+        client/src/shader.c
+        client/src/headless.c
+        client/src/stb_image.c
+        ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(texture_checker_test PRIVATE client/include client/lib)
+    target_link_libraries(texture_checker_test PRIVATE freetype glfw Threads::Threads m)
+    krunknative_link_gl(texture_checker_test)
+    krunknative_link_headless(texture_checker_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(texture_checker_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME texture_checker_test COMMAND texture_checker_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(texture_checker_test PROPERTIES ENVIRONMENT "KRUNKNATIVE_HEADLESS=1" SKIP_RETURN_CODE 77)
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

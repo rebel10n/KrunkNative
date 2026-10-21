@@ -176,9 +176,15 @@ static unsigned int sky_texture(const char *relative) {
         texture = load_texture(path); // cached by path; owned by the texture cache
     } else if (asset_prefetch(path) == 0) {
         texture = load_texture(path); // still downloading: its placeholder, filled when it arrives
+    } else {
+        texture = texture_checker(); // missing: the checker, as a map texture (not a flat sky)
     }
     free(path);
     return texture;
+}
+
+unsigned int sky_texture_id(void) {
+    return sky.textured ? sky.texture : 0;
 }
 
 void sky_load(const cJSON *map_raw) {

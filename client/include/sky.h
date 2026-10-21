@@ -16,3 +16,5 @@ void sky_tick(float delta);
 void sky_render(Camera *camera);
 // Frees the GL objects (program, VAO, buffers).
 void sky_fini(void);
+// The dome's texture: the missing-texture checker when its file does not load, 0 without one (tests).
+unsigned int sky_texture_id(void);

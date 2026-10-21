@@ -268,6 +268,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/death_cam_test
 	./$(DEBUG_DIR)/third_person_test
 	./$(DEBUG_DIR)/billboard_ad_test --headless
+	env -u DISPLAY -u WAYLAND_DISPLAY ./$(DEBUG_DIR)/texture_checker_test --headless
 	./$(DEBUG_DIR)/zombies_test
 	./$(DEBUG_DIR)/weapon_req_test
 	./$(DEBUG_DIR)/junk_test

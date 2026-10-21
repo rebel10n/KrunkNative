@@ -51,7 +51,8 @@ static char *user_asset_path(const UserAssetFlags *flags, const char *file) {
     return concat(assets_path(), relative);
 }
 
-// a texture of the asset, 0 when it does not ship (no missing-texture checker for the extra maps)
+// a texture of the asset: the missing-texture checker when it does not ship (as the map's user-asset
+// textures, prefab.c), its placeholder while it downloads (asset_fetch.h); 0 only when the path cannot be built
 static unsigned int user_asset_texture(const UserAssetFlags *flags, const char *file) {
     char *path = user_asset_path(flags, file);
     if (!path) return 0;
@@ -62,6 +63,8 @@ static unsigned int user_asset_texture(const UserAssetFlags *flags, const char *
         texture = load_texture(path);
     } else if (asset_prefetch(path) == 0) {
         texture = load_texture(path); // still downloading (asset_fetch.h): its placeholder, filled when it arrives
+    } else {
+        texture = texture_checker(); // not shipped and not downloading: the checker
     }
     free(path);
     return texture;
