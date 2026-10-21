@@ -365,6 +365,15 @@ int main(void) {
             v10_out_free(&dc);
         }
 
+        // then "frs" [true], the server's ENTER_GAME: the client's handler calls enterGame(true), which sends "en"
+        {
+            V10Out eg;
+            v10_out_init(&eg);
+            v10_map_enter_game(&eg);
+            MSG_IS(&eg, 0, "frs", B(1));
+            v10_out_free(&eg);
+        }
+
         // SHOT (21, NetShotPacket, 31 bytes) -> the tracer "9": [sid, hit (0.1), normal (0.01) | nil, trail, origin (0.1), 0, 0]
         {
             uint8_t sh[31];

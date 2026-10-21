@@ -912,6 +912,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         if (!spawn.active) {
             /* our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown */
             v10_map_death_countdown(&o, spawn.uid);
+            v10_map_enter_game(&o); /* frs [true]: enterGame(true) on the client, which sends "en" */
         } else if (spawn.is_you) {
             KrunkerValue start[8];
             v10_start_game(&spawn, s->game_timer, s->chall_mode, start);

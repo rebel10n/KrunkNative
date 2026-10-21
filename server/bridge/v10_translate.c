@@ -1007,6 +1007,10 @@ void v10_map_death_countdown(V10Out *o, int32_t uid) {
     v10_push(o, V10_IN_KILL_PLAYER, args, 6);
 }
 
+void v10_map_enter_game(V10Out *o) {
+    v10_push(o, V10_IN_ENTER_GAME, (KrunkerValue[]){KRUNKER_V_BOOL(1)}, 1);
+}
+
 /* SHOT: NetShotPacket (31 bytes, packed): int32 uid @0, int32 weapon @4, float hit[3] @8, has_normal @20, normal_yaw @21,
  * normal_pitch @25, trail @29, first @30 (mapShot, v10Translate.ts). The tracer "9" is one array argument: [sid, hit x, y, z
  * (0.1), normal yaw, pitch | nil (0.01), trail, shooter x, y, height, z (0.1), bulletType 0, impactType 0]. */

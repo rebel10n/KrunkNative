@@ -832,6 +832,12 @@ int main(void) {
         CHECK(client_get("3", 0, &dc) && dc.argc == 6 && vequal(&dc.args[0], &KRUNKER_V_NUM(1)) && dc.args[4].type == KRUNKER_NIL,
               "3 [1, 0, 0, [], nil, false]: the death for the countdown");
         krunker_frame_free(&dc);
+        /* then "frs" (ENTER_GAME): the client calls enterGame(true), which sends "en" (checked at ENTER_GAME -> ENT below) */
+        WAIT_FOR(client_count("frs") == 1);
+        KrunkerFrame frs;
+        CHECK(client_get("frs", 0, &frs) && frs.argc == 1 && frs.args[0].type == KRUNKER_BOOL && frs.args[0].u.boolean == 1,
+              "frs [true] right after the countdown");
+        krunker_frame_free(&frs);
         CHECK(v10_bridge_untranslated("SPAWN") == 0, "a waiting joiner's spawn does not stop the observer's session");
     }
 

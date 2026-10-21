@@ -554,6 +554,10 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
 // respawn countdown (forceSpawn + 1 seconds after 2.8 s, v10.js 220379). Its arguments: victim sid, deaths,
 // killer sid (0: none), assists [], weapon (nil), headshot.
 assert.deepStrictEqual(T.mapDeathCountdown(1).messages, [["3", [1, 0, 0, [], null, false]]]);
+
+// ... then "frs" (the server's ENTER_GAME label, v10.js 97956; the client's handler 222318 calls enterGame(true)), which
+// makes the client send "en" (enterGame sends it, v10.js 208129).
+assert.deepStrictEqual(T.mapEnterGame().messages, [["frs", [true]]]);
 }
 
 async function main(): Promise<void> {
@@ -952,6 +956,9 @@ async function main(): Promise<void> {
     face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
   const countdown = await waitFor(() => clientMessages.find((m) => m.label === "3"), "3 (the death for the countdown)");
   assert.deepStrictEqual(countdown.args, [1, 0, 0, [], null, false]);
+  // right after the countdown starts, "frs": the client calls enterGame(true) and then sends "en" (checked in section 5)
+  const frs = await waitFor(() => clientMessages.find((m) => m.label === "frs"), "frs (the enter game after the countdown)");
+  assert.deepStrictEqual(frs.args, [true]);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("SPAWN"), undefined, "a waiting joiner's spawn does not stop the session");
 
   // LEAVE (20): player 9 disconnects: the observer's "2" [9], and the session stays up (the next packets still go through)

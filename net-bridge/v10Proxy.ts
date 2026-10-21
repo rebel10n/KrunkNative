@@ -446,6 +446,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     if (!spawn.active) {
       // our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown
       for (const [label, args] of T.mapDeathCountdown(spawn.uid).messages) sendWs(session, label, ...args);
+      for (const [label, args] of T.mapEnterGame().messages) sendWs(session, label, ...args);
       return;
     }
     if (spawn.isYou) sendWs(session, T.V10_IN.START_GAME, ...T.buildStartGame(spawn, session.gameTimer, session.challMode));
