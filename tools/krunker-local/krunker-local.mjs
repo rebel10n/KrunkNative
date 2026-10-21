@@ -448,6 +448,22 @@ const EXC_PROBE_JS = `(() => {
   o.args = args && args.length !== undefined ? Array.from(args).slice(0, 12).map((a) => a === null ? "null" : typeof a === "object" ? (Array.isArray(a) ? "arr" + a.length : "obj") : typeof a + ":" + String(a).slice(0, 24)) : String(args);
   return JSON.stringify(o);
 })()`;
+// The init method's own state at the pick (the bundle's decoder IíIìîìi is in scope in init): the rotation the join
+// set, its index, the vote list (endData.mts) and the vote weights, and what the init's arguments were.
+const INIT_PROBE_JS = `(() => {
+  const d = IíIìîìi;
+  const get = (f) => { try { return f(); } catch (e) { return "err:" + e.message; } };
+  const rot = get(() => this[d(0x5c67)]);
+  return JSON.stringify({
+    rotation: rot === null ? "null" : rot === undefined ? "undefined" : Array.isArray(rot) ? "arr" + rot.length : typeof rot,
+    rotIndex: get(() => this[d(0x15b)]),
+    mts: get(() => this[d(0xb33)][d(0x4061)].length),
+    mtsSample: get(() => JSON.stringify(this[d(0xb33)][d(0x4061)]).slice(0, 160)),
+    vo: get(() => JSON.stringify(this[d(0xb33)].vo).slice(0, 120)),
+    mode: get(() => this.modeIndex), map: get(() => this.mapIndex),
+    mapData: get(() => typeof this[d(0x4733)]),
+  });
+})()`;
 const INIT_HANDLER_COLUMN = 10307050;
 // the disconnect routine (the window's "Lost Connection"): its entry, and its arguments (reason, code, error)
 const DISCONNECT_COLUMN = 10493103;
@@ -551,7 +567,8 @@ async function join() {
           if (p.reason === "exception") {
             (async () => {
               for (const f of p.callFrames.slice(0, 2)) {
-                const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: f.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
+                const probe = f.functionName === "init" ? INIT_PROBE_JS : EXC_PROBE_JS;
+                const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: f.callFrameId, expression: probe, returnByValue: true });
                 report.pauses.push({ exception: f.functionName, line: f.location && f.location.lineNumber, col: f.location && f.location.columnNumber, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
               }
               await send("Debugger.resume");
