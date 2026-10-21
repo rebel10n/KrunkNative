@@ -6,8 +6,8 @@
 // the login card's Username and Password with the row's saved ones and stops there: the player presses Login
 // (the card's own sign-in, v10_login.c).
 //
-// Use does not open over a signed-in account (the card is not shown there: log out first), and in an official
-// game it is refused for a krunk.io row (the game's card signs in to the game's account).
+// Use never refuses: over a signed-in account, or in an official game, the card still opens with the row's login.
+// Login is the player's press, and the card signs in as it does for any login (v10_login.c).
 #include <alt_manager_ui.h>
 
 #include <alt_crypto.h>
@@ -58,11 +58,6 @@ static void read_input(const char *id, char *out, const size_t n) {
 }
 
 static int in_official_game(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
-
-static int kn_signed_as(const char *name) {
-    const AccountInfo *acc = krunkio_account();
-    return acc && !strcmp(acc->name, name);
-}
 
 // krunker.io's logins are case-blind, and the name it reports after a restart can differ in case from the one
 // typed (the profile's answer): the rows match case-blind.
@@ -199,28 +194,13 @@ void alt_manager_ui_init(void) {
 // ---------------------------------------------------------------- actions
 
 // Use: the login card opens over the window with the row's Username and its saved Password in the fields, and
-// nothing else happens: no sign-in, no session, no request. The player presses Login. A krunker.io row's card
+// nothing else happens: no sign-in, no session, no request, no refusal. Over a signed-in account, or in an official
+// game, the card opens too (v10_login_fill is the whole of it). The player presses Login. A krunker.io row's card
 // signs in to krunker.io, a krunk.io row's to krunk.io's account service (v10_login.c).
 static void use_row(const char *id) {
     const AltProfile *p = NULL;
     if (!find_profile(id, &p)) {
         set_msg(I18N("kn.alt.gone", "That account is no longer saved."));
-        return;
-    }
-    if (p->kind == ALT_KIND_KN ? kn_signed_as(p->label) : kio_signed_as(p->label)) {
-        char msg[sizeof(g_msg)];
-        I18N_F(msg, "kn.alt.already", "You are already signed in as {0}.", p->label);
-        set_msg(msg);
-        return;
-    }
-    if (active_account()) { // the card does not open over a signed-in account: log out first
-        char msg[sizeof(g_msg)];
-        I18N_F(msg, "kn.alt.logoutFirst", "Log out to sign in as {0}.", p->label);
-        set_msg(msg);
-        return;
-    }
-    if (p->kind == ALT_KIND_KN && in_official_game()) {
-        set_msg(I18N("kn.alt.inGame", "Leave the official game first."));
         return;
     }
     char name[ALT_LABEL_MAX], pass[ALT_SECRET_MAX];

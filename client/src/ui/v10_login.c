@@ -266,13 +266,8 @@ static void on_locale(void *user) {
     if (L.open && by_id("knV10Login")) render();
 }
 
-// loginOrRegister(defaultToRegister)
-static void open_modal(const int reg) {
-    i18n_on_change(on_locale, NULL);
-    if (active_account()) { // signed in: showWindow(5)
-        menu_show_window(5, 0);
-        return;
-    }
+// The card over the page: the body of loginOrRegister, without its signed-in check (open_modal, v10_login_fill).
+static void open_card(const int reg) {
     menu_close_window(); // one login form on the page (#accName / #accPass)
     if (!by_id("knV10Login")) {
         HtmlElem body = html_dom_body();
@@ -298,12 +293,24 @@ static void open_modal(const int reg) {
     render();
 }
 
+// loginOrRegister(defaultToRegister)
+static void open_modal(const int reg) {
+    i18n_on_change(on_locale, NULL);
+    if (active_account()) { // signed in: showWindow(5)
+        menu_show_window(5, 0);
+        return;
+    }
+    open_card(reg);
+}
+
 // The Account Manager's Use (alt_manager_ui.c): the card opens with a listed login's Username and its saved Password
-// in the fields, and that is all: nothing is signed in and no request is sent. The player presses Login, which signs
-// in to the card's backend (kio_form: krunker.io, else krunk.io's account service).
+// in the fields, and that is all: nothing is signed in and no request is sent. The card opens over a signed-in account
+// too, and in an official game. The player presses Login, which signs in to the card's backend (kio_form: krunker.io,
+// else krunk.io's account service).
 int v10_login_fill(const int kio_form, const char *name, const char *pass) {
-    if (active_account() || !v10_menu_page()) return 0; // (a signed-in account: the Account window shows instead)
-    open_modal(0);
+    if (!v10_menu_page()) return 0;
+    i18n_on_change(on_locale, NULL);
+    open_card(0);
     if (!L.open) return 0;
     L.kio_form = kio_form ? 1 : 0;
     L.email = 0; // the Username field holds the saved login

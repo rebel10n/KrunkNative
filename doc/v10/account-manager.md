@@ -22,8 +22,9 @@ Remove. The window never signs anyone in: the player presses Login on the login 
 4. **Use** opens the login card (`v10_login_fill`, `client/src/ui/v10_login.c`) with the row's login in Username
    and its saved password in Password, and stops. No sign-in request, no session restore, no password prompt.
    The player presses Login, which signs in to the card's backend: a krunker.io row's card signs in to
-   krunker.io, a krunk.io row's to krunk.io's account service. Use does not open over a signed-in account (the
-   window says `Log out to sign in as <name>.`), and a krunk.io row is refused in an official game.
+   krunker.io, a krunk.io row's to krunk.io's account service. **Use never refuses**: over a signed-in account
+   (whoever is signed in) and in an official game the card opens with the row's login all the same. Login is the
+   player's press; the window shows no refusal text for Use.
 5. **Logout** ends the session as before (the krunk.io server revokes it, the row keeps its login). **Startup**
    resumes the listed active account from its stored session when the server accepts it. A refused session is
    forgotten and nothing is signed in: there is no silent sign-in with the stored password. The row stays, and
@@ -68,13 +69,14 @@ Remove (84 px). The active row shows its Use dimmed and an inset outline, which 
   popup; Add both with a --brain nothing listens on (listed, nothing signed in, no sign-in request); Use fills the
   card's login and password with no sign-in request; Use then Login signs in and stores the session; a restart
   resumes it with no prompt; Logout, then Use fills the card again with no sign-in; a refused stored session
-  signs nobody in and Use still fills; Remove; a krunker.io row: Add (no request to krunker.io), Use fills the
-  card, Remove. Checks that no password or token is on a client file or in a log.
+  signs nobody in and Use still fills; Remove; Use while signed in opens the card with the row's login and shows no
+  refusal; an official krunker.io game (a guest joined through the stub's matchmaker): Add a krunk.io login, Use
+  fills the card, Remove; a krunker.io row: Add (no request to krunker.io), Use fills the card, its Login signs in to
+  krunker.io (the Security Challenge and the stub's 2FA code) and the card closes, Remove. Checks that no password
+  or token is on a client file or in a log.
 - `client/tests/native_auth_e2e.py`, `server/tests/account_unify_e2e.py`: a plain sign-in is not listed; the
   krunker.io guest keeps the header's Login.
 
 ## Not done
 
 - Enter does not submit the Add form; the Add button does.
-- `krunker_account_add`, `krunker_account_resume` and `krunker_account_sign_in_when_expired` (and the events they
-  emit) are no longer called by the window; they remain in `krunker_account.c` for a follow-up cleanup.

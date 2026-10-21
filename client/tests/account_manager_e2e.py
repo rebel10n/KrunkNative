@@ -10,7 +10,10 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   the session is stored -> a restart resumes that account from its stored session -> Logout, then Use fills
   the card again with no sign-in -> the player signs in again, the brain then refuses the stored session: it
   is forgotten and nobody is signed in (no silent password sign-in); Use still fills the card -> Remove ->
-  krunker.io: Add stores its login with no request to krunker.io, Use fills the card with it, Remove.
+  Use while signed in fills the card and refuses nothing -> an official krunker.io game (a guest joined through the
+  stub's matchmaker): Add a krunk.io login, Use fills the card, Remove -> krunker.io: Add stores its login with no
+  request to krunker.io, Use fills the card with it, its Login signs in to krunker.io (the Security Challenge
+  passes by itself, the stub's 2FA code is typed) and the card closes, Remove.
 
   The web build's Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
   __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
@@ -259,6 +262,88 @@ def sign_in_from_card(brain_url, game_port):
     return log
 
 
+REFUSALS = ("Log out to sign in", "Leave the official game", "already signed in")
+
+
+def use_while_signed_in(brain_url, game_port):
+    """Signed in as NAME2 (its session restored at start), Use on the other listed row (NAME) still opens the login
+    card with NAME's login and its saved password: the card is not refused over a signed-in account, and Login stays
+    the player's press. (The active row's Use is dimmed and has no click, so clicksel reaches NAME's Use, listed first.)"""
+    log = run_client("signed_use", f"""0 menu
+3000 call showWindow {WINDOW}
+3400 clicksel [onclick*="knAltUse"]
+4000 nodes @modal [id="knV10Login"]
+4100 nodes @user [id="accName"][value="{NAME}"]
+4200 nodes @pass [id="accPass"][value="{PASS}"]
+4300 text @msg [id="knAltMsg"]
+4500 quit
+""", brain_url, game_port)
+    check("the account is signed in at start (the precondition)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    check("Use while signed in opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
+    check("and fills the other row's Username and Password (no refusal)", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
+          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
+    # a refusal keeps the window open with its text in knAltMsg; the card replaces the window, so the line is empty
+    refused = [r for r in REFUSALS if r in text_of(log, "msg")]
+    check("Use while signed in shows no refusal text", not refused, repr(text_of(log, "msg")[-120:]))
+
+
+def official_use(brain_url, game_port, stub):
+    """An official krunker.io game (a guest joined through the stub's matchmaker): the Account Manager lists a krunk.io
+    login, and Use fills the card with it. Nothing is refused for the official game; the card's Login is the player's."""
+    joins = len(stub.ws_paths)
+    log = run_client("official_use", f"""0 menu
+1500 call krunkerJoin "{kae.GAME_PICK}"
+9000 call showWindow {WINDOW}
+9500 clickid knAltUser
+9600 type {NAME}
+9700 clickid knAltPass
+9800 type {PASS}
+9900 clicksel [onclick*="knAltAdd"]
+10500 text @oadd [id="knAltMsg"]
+11000 clicksel [onclick*="knAltUse"]
+12000 nodes @omodal [id="knV10Login"]
+12100 nodes @ouser [id="accName"][value="{NAME}"]
+12200 nodes @opass [id="accPass"][value="{PASS}"]
+12250 text @omsg [id="knAltMsg"]
+12300 call knV10LoginClose
+12400 call showWindow {WINDOW}
+12500 clicksel [onclick*="knAltRemove"]
+13000 text @oremoved [id="knAltMsg"]
+13500 quit
+""", brain_url, game_port)
+    check("the client joined an official krunker.io game (the stub's game socket)", len(stub.ws_paths) > joins, str(len(stub.ws_paths) - joins))
+    check("in the official game, Add lists the krunk.io login", f"Added {NAME}." in text_of(log, "oadd"), text_of(log, "oadd")[-120:])
+    check("in the official game, Use fills the card with it (nothing refused)", match_of(log, "omodal") == 1
+          and match_of(log, "ouser") == 1 and match_of(log, "opass") == 1,
+          f"card {match_of(log, 'omodal')} user {match_of(log, 'ouser')} pass {match_of(log, 'opass')}")
+    check("and nothing is refused (no official-game message on the Use)", "Leave the official game" not in text_of(log, "omsg"),
+          text_of(log, "omsg")[-120:])
+    check("and the row is removed again", f"Removed {NAME}." in text_of(log, "oremoved"), text_of(log, "oremoved")[-120:])
+
+
+def kio_login(brain_url, game_port, stub):
+    """The krunker.io row's card: Login signs in to krunker.io (the Security Challenge passes by itself on the stub's
+    captcha page; then the stub's 2FA code is typed), and the card closes."""
+    posts = len(stub.find("POST", "/api/auth/login/username"))
+    script = "\n".join([
+        "0 menu",
+        f"500 call showWindow {WINDOW}",
+        '1000 clicksel [onclick*="knAltUse"]',
+        '2000 nodes @kmodal [id="knV10Login"]',
+        '2100 clickid knV10LoginSubmit',
+        '5900 vis @code knV10Code knV10Code0 knV10CodeSubmit',
+    ] + [line for i, d in enumerate(kae.CODE) for line in (f"{6100 + i * 150} clickid knV10Code{i}",
+                                                           f"{6160 + i * 150} type {d}")] + [
+        '11000 nodes @modalgone [id="knV10Login"]',
+        "11500 quit",
+    ]) + "\n"
+    log = run_client("kio_login", script, brain_url, game_port)
+    check("krunker.io Login posts the login once", len(stub.find("POST", "/api/auth/login/username")) - posts == 1,
+          f"posts {posts} -> {len(stub.find('POST', '/api/auth/login/username'))}")
+    check("krunker.io Login signs the row's account in to krunker.io", f"signed in to krunker.io as {kae.LOGIN}" in log)
+    check("the card closes after the krunker.io sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
+
+
 def restart_and_logout(brain_url, game_port):
     """A restart resumes the account from its stored session (no prompt); Logout ends it, and Use then fills the card
     again with no sign-in."""
@@ -354,6 +439,7 @@ def krunker_row(brain_url, game_port, stub):
     check("Use on the krunker.io row sends no request to krunker.io and signs nobody in",
           "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
+    kio_login(brain_url, game_port, stub)
     log = run_client("kio_remove", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltRemove"]
@@ -388,6 +474,8 @@ def main():
         stub.start()
         KIO_ENV.update({"KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % http_port,
                         "KRUNKNATIVE_KRUNKER_AUTH": "http://127.0.0.1:%d/frvr/v1/auth" % http_port,
+                        "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d/mm" % http_port,
+                        "KRUNKNATIVE_ASSET_FETCH": "off",  # (the official game's map is in the asset tree)
                         "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": "http://127.0.0.1:%d%s" % (http_port, kae.CAPTCHA_PATH)})
         for _ in range(100):
             try:
@@ -402,10 +490,12 @@ def main():
         add_accounts(db, game_port)
         use_fills(brain_url, game_port, db)
         sign_in_from_card(brain_url, game_port)
+        use_while_signed_in(brain_url, game_port)
         restart_and_logout(brain_url, game_port)
         sign_in_from_card(brain_url, game_port)
         refused_token(brain_url, game_port, db)
         remove_accounts(brain_url, game_port)
+        official_use(brain_url, game_port, stub)
         krunker_row(brain_url, game_port, stub)
         check("the password is on no client file", not secret_on_disk(PASS) and not secret_on_disk(kae.PASSWORD),
               repr(secret_on_disk(PASS) + secret_on_disk(kae.PASSWORD)))
