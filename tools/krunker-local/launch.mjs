@@ -333,12 +333,14 @@ export async function run(opts = {}) {
     const eventCounts = {};
     const consoleLog = [];
     const kwrites = [];
+    const ovl = [];
     const disconnects = [];
     const pauses = [];
     let appScript = null;
     const onEvent = (method, p) => {
       eventCounts[method] = (eventCounts[method] || 0) + 1;
       switch (method) {
+        case "Network.requestWillBeSent": reqUrl.set(p.requestId, p.request.url); break;
         case "Network.webSocketCreated": reqUrl.set(p.requestId, p.url); break;
         case "Network.webSocketFrameSent": frames.write("out", p.requestId, reqUrl.get(p.requestId), p.response); break;
         case "Network.webSocketFrameReceived": frames.write("in", p.requestId, reqUrl.get(p.requestId), p.response); break;
@@ -380,6 +382,7 @@ export async function run(opts = {}) {
         }
         case "Runtime.consoleAPICalled":
           if (p.args && p.args.length && String(p.args[0].value || "").startsWith("[kwrite]")) kwrites.push(String(p.args[0].value).slice(0, 900));
+          if (p.args && p.args.length && String(p.args[0].value || "").startsWith("[ovl]")) ovl.push(String(p.args[0].value).slice(0, 1400));
           if (p.type === "error" || p.type === "warning" || /local|hook|FAIL/.test(JSON.stringify(p.args).slice(0, 300))) consoleLog.push(`${p.type} ${JSON.stringify(p.args).slice(0, 220)}`);
           break;
         case "Runtime.exceptionThrown": errors.push("exception " + String((p.exceptionDetails.exception || {}).description || p.exceptionDetails.text).split("\n")[0].slice(0, 200)); break;
@@ -402,6 +405,8 @@ export async function run(opts = {}) {
     // recorded, then the page carries on.
     await page.send("Debugger.enable");
     await page.send("Debugger.setPauseOnExceptions", { state: "none" });
+    // The overlay trace (overlay-hook.js): the first writes of the disconnect overlay, before the page's own scripts.
+    await page.send("Page.addScriptToEvaluateOnNewDocument", { source: fs.readFileSync(path.join(HERE, "overlay-hook.js"), "utf8") });
     await page.send("Page.navigate", { url: cfg.localUrl });
 
     // the consent dialog comes back until its vendor check settles: accept it as a user would
@@ -449,6 +454,7 @@ export async function run(opts = {}) {
     result.kwrites = kwrites.slice(0, 40);
     result.disconnects = disconnects.slice(0, 5);
     result.pauses = pauses;
+    result.ovl = ovl.slice(0, 8);
     result.errors = errors.slice(0, 10);
     result.bridgeLog = fs.existsSync(path.join(runDir, "bridge.log"))
       ? fs.readFileSync(path.join(runDir, "bridge.log"), "utf8").split("\n").filter((l) => /v10|bridge/.test(l)).slice(-6) : [];
