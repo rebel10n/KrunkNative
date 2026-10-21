@@ -75,17 +75,17 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 | Official 10.0.3 line | Class | KN action |
 |---|---|---|
-| Added player.pose.holdL with a "handL" attach point | Feature (KrunkScript API) | Decision. KN has no `holdL` / `handL`. |
-| player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | Decision (depends on the pose API). |
-| Added the Solid Ramp Sides map setting (rampFix) | Feature (map and physics) | **Ported:** map flag `rampFix` (`shared/src/map.c`, `shared/include/shared.h`) and the ramp side block in `shared/src/player.c` (`movement_block_ramp_side`, the check in the ramp branch of `player_do_map_collisions`). Regression test `shared/tests/ramp_fix_test.c` (fails without the port). Not ported: the editor's checkbox (editor UI) and the game-config form `config.rampFix` (KrunkScript config). |
-| Added preciseHits for AI (bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition, onAIPartDamage) | Feature (KrunkScript AI) | Decision. |
-| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Decision. |
-| Added opt-in environment reflections for GLB materials | Feature (rendering) | Decision. KN has env maps for skins (`client/src/skin_fx.c`), not for GLB materials. |
-| Live assets with complex collision now stop shots | Feature (rules) | Decision. KN has `complex_coll` (`shared/src/ai.c`); the shot rule was not compared. |
-| GAME.CONFIG.getMatch().started is now false during the round countdown | Feature (KrunkScript) | Decision. |
+| Added player.pose.holdL with a "handL" attach point | Feature (KrunkScript API) | Not ported: KN has no `player.pose` (no hold or split-arm API). |
+| player.pose armL and armR now move only their own arm in third person | Bug (KrunkScript pose) | Not ported: KN has no `player.pose`. |
+| Added the Solid Ramp Sides map setting (rampFix) | Feature (map and physics) | **Ported:** map flag `rampFix` (`shared/src/map.c`, `shared/include/shared.h`) and the ramp side block in `shared/src/player.c` (`movement_block_ramp_side`, the check in the ramp branch of `player_do_map_collisions`). Regression test `shared/tests/ramp_fix_test.c` (fails without the port). The editor checkbox (Essential panel, next to Force Old AO, `client/src/editor/editor_gameconfig.c`) and the game option `config.rampFix` (`GameConfig.ramp_fix`, folder Other, `shared/src/game_config.c`) are ported too; `ramp_fix_test` checks the config path. |
+| Added preciseHits for AI (bodyDamage, setPartDamage, glowPart, setNodeVisible, getPartPosition, onAIPartDamage) | Feature (KrunkScript AI) | Not ported: KN's AI is one model with no named parts, and KN has no part hooks or `bodyDamage`. |
+| Added ai.solid, a hold option for ai.playAnim and an alwaysSync spawn option for AI | Feature (KrunkScript AI) | Ported: `AI.spawn` `alwaysSync` (`GameAIData.always_sync`); the AI skips the 800 range of `game_ai_sync` (`shared/src/ai.c`). The official line only names the option; "every player whatever its distance" is read from the name. `ai.solid` and the `hold` option of `ai.playAnim` are not ported: KN has `ai.playAnim` (clip only), and the official line gives no behaviour for either. |
+| Added opt-in environment reflections for GLB materials | Feature (rendering) | Not ported: KN has no GLB material reflections (env maps exist for skins only, `client/src/skin_fx.c`). |
+| Live assets with complex collision now stop shots | Feature (rules) | No change. Shots trace complex-collision objects by their box (`combat_trace`, `shared/src/player.c`), so KN already stops shots at them. Not compared with the v10.0.2 bundle (not on disk). |
+| GAME.CONFIG.getMatch().started is now false during the round countdown | Feature (KrunkScript) | Ported: `CONFIG.getMatch().started` (`shared/src/ks_game/ks_hostobj.c`) is false while a pre-match wait timer runs (the countdown) and true once the round has started. The official line does not define the exact state; this reads "countdown" as the non-contTime wait timers (`mode_match_starting`). |
 | AI models now load once per game | Internal (performance) | Ignored. |
-| Fixed scene objects stacking up and looped sounds breaking at the next round | Bug (KrunkScript round restart) | Not applicable to KN's round code (not verified). |
-| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Not verified. |
+| Fixed scene objects stacking up and looped sounds breaking at the next round | Bug (KrunkScript round restart) | Not applicable: the client unloads the script, with its scene objects and sounds, on every round (`ks_client_round` in `client/src/ks/ks_client_host.c`). |
+| Fixed walking AI falling through the floor | Bug (KrunkScript AI) | Not verified: no repro in this pass. |
 
 ### Unlisted bundle items
 
@@ -101,7 +101,7 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 
 - `rampFix` ("Solid Ramp Sides"): `shared/src/player.c`, `shared/src/map.c`, `shared/include/shared.h`.
   The behaviour is v10.0.3's `blockRampSide`, with `collision_padding` (1.1) as in v10. The
-  `config.rampFix` game option is not ported.
+  `config.rampFix` game option is ported too (`GameConfig.ramp_fix`, folder Other).
 - Changelog: the official 10.0.3 entry is the first update in `ui/windows/kn-versions.txt`, so
   What's New (`client/src/ui/v10_news.c`) shows 10.0.3. KN's 1.2.0 entry is kept below it.
 
@@ -110,10 +110,11 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
 1. Video skins (a larger feature, KN has none): the Disable Video Skins toggle only makes sense with
    them.
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
-3. KrunkScript and AI features: `holdL`, the pose split-arm fix, `preciseHits`, AI parts, `ai.solid`,
-   `alwaysSync`, `started`, complex-collision shots.
-4. GLB environment reflections.
-5. The editor checkbox for Solid Ramp Sides (editor UI).
+3. KrunkScript AI: `ai.solid` and the `hold` option of `ai.playAnim` (KN has the API; the official line gives
+   no behaviour, so a decision is needed). The AI parts (`preciseHits`, `setPartDamage`, ...) and `player.pose`
+   are not in KN at all.
+4. GLB environment reflections (KN has none).
+5. Done: the Solid Ramp Sides editor checkbox and the `config.rampFix` game option.
 
 ## Official text (verbatim)
 

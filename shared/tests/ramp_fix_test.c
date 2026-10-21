@@ -74,11 +74,13 @@ typedef struct {
 } Walk;
 
 // Walk +z from z -16 (the ramp's -z side is at z -10) at ground level, x fixed, for 90 frames.
-static Walk walk_into_side(const int flag, const float x) {
+// `flag`: the map's rampFix; `config`: the game config's rampFix ("Solid Ramp Sides" in the game options).
+static Walk walk_with(const int flag, const int config, const float x) {
     cJSON *json = load_map("shared/tests/maps/ramp_fix.json");
     if (flag) cJSON_AddTrueToObject(json, "rampFix");
     Game game;
     game_on(&game, json, MODE_ID_FFA);
+    game.config.ramp_fix = config != 0;
     CHECK(game.ready && game.map->object_count == 2, "ramp_fix map: 2 objects (%zu)", game.ready ? game.map->object_count : 0);
     Player *p = add_player(&game, 1, 0);
     place(p, x, 0.0f, -16.0f);
@@ -91,6 +93,8 @@ static Walk walk_into_side(const int flag, const float x) {
     walk.z = p->position.z;
     return walk;
 }
+
+static Walk walk_into_side(const int flag, const float x) { return walk_with(flag, 0, x); }
 
 int main(void) {
     printf("Running rampFix side-block test...\n");
@@ -107,6 +111,12 @@ int main(void) {
     // flag, near the ramp's other end (x 9): the same side block applies across its width
     const Walk wide = walk_into_side(1, 9.0f);
     CHECK(wide.top_y < 0.5f && wide.z < -10.0f, "rampFix: blocked across the width (top y %.3f, z %.3f)", wide.top_y, wide.z);
+
+    // the game config's rampFix alone (the map has no flag) blocks the same way
+    const Walk config = walk_with(0, 1, 5.0f);
+    CHECK(config.top_y < 0.5f && config.z < -10.0f, "config.rampFix: blocks without the map flag (top y %.3f, z %.3f)", config.top_y, config.z);
+    const Walk config_off = walk_with(0, 0, 5.0f);
+    CHECK(config_off.top_y > 2.0f, "config.rampFix off and no map flag: the ramp lifts the player (top y %.3f)", config_off.top_y);
 
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

@@ -1640,6 +1640,7 @@ void ed_model_map_init(EdMapState *s) {
     cJSON_AddNumberToObject(m, "fogD", 2000);
     cJSON_AddNumberToObject(m, "dthY", -100);
     cJSON_AddBoolToObject(m, "oldAO", 0);
+    cJSON_AddBoolToObject(m, "rampFix", 0);
     cJSON_AddBoolToObject(m, "correctLights", 0);
     cJSON_AddNumberToObject(m, "toneMapping", 0);
     cJSON_AddNumberToObject(m, "toneMappingExposure", 1);
@@ -1703,6 +1704,7 @@ static int map_key_exported(const cJSON *mc, const char *k, const cJSON *v) {
     if (!strcmp(k, "ambFadeTime") && n == 0) return 0; // v10 (E10:16568)
     if (!strcmp(k, "dthY") && n == -100) return 0;
     if (!strcmp(k, "oldAO") && !js_truthy(v)) return 0;
+    if (!strcmp(k, "rampFix") && !js_truthy(v)) return 0; // v10.0.3 Solid Ramp Sides: off is the default
     if (!strcmp(k, "lightD") && n == data_num("defaults", "lightDistance", 500)) return 0;
     if (!strcmp(k, "lightI") && n == data_num("defaults", "lightIntensity", 1.3)) return 0;
     if (!strcmp(k, "ambientI") && n == data_num("defaults", "ambIntensity", 1)) return 0;
@@ -2208,7 +2210,7 @@ static void validate_map_config(EdMapState *st) {
                                            "outputEncoding", "shadowR", "shadowD", "ambientI", "lightD", "lightI", "sunAngX", "sunAngY",
                                            "skyDomeTexA", "ocRefRes", "ocW", "ocL", NULL};
         static const char *const floats[] = {"zoneSpeed", "toneMappingExposure", "ocOpac", "ocDist", "ocSpd", "ocYOff", NULL};
-        static const char *const bools[] = {"oldAO", "correctLights", "skyDome", "skyDomeTex", "zone", "zoneRnd", "ocean", NULL};
+        static const char *const bools[] = {"oldAO", "rampFix", "correctLights", "skyDome", "skyDomeTex", "zone", "zoneRnd", "ocean", NULL};
         for (int i = 0; ints[i]; i++) if (!strcmp(k, ints[i]) && !is_number_value(v)) put_num(mc, k, js_parse_int(v));
         for (int i = 0; floats[i]; i++) if (!strcmp(k, floats[i]) && !is_number_value(v)) put_num(mc, k, js_parse_float(v));
         for (int i = 0; bools[i]; i++) if (!strcmp(k, bools[i])) put(mc, k, cJSON_CreateBool(js_truthy(v)));

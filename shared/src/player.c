@@ -1122,8 +1122,8 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
                 const float collision_height = bottom + (object->scale.y + 0.01f) * progress;
 
                 // rampFix (v10.0.3 blockRampSide): a rise of more than 3 above the walker, from below the
-                // ramp's foot, is a side that blocks it; the config.rampFix game option is not ported
-                if (game->map->ramp_fix && collision_height - player->last_position.y > 3.0f &&
+                // ramp's foot, is a side that blocks it. The map flag or the game config's rampFix turns it on.
+                if ((game->map->ramp_fix || game->config.ramp_fix) && collision_height - player->last_position.y > 3.0f &&
                     player->last_position.y - bottom < 3.0f && movement_block_ramp_side(player, &box, s)) {
                     continue;
                 }

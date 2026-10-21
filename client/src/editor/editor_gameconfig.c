@@ -470,6 +470,7 @@ void ed_panel_left_show(void) {
     ed_gui_button(&b, "Select Mod", ed_select_mod);
     edp_json_slider(&b, "Death Height", map, "dthY", -1000, 3000, 1, 0, on_death_height);
     edp_json_switch(&b, "Force Old AO", map, "oldAO", 0, NULL);
+    edp_json_switch(&b, "Solid Ramp Sides", map, "rampFix", 0, NULL); // v10.0.3 map setting (rampFix)
     edp_json_text(&b, "Minimap AssetId", map, "mmId", "", 0, NULL);
     ed_gui_rule(&b);
     build_modes(&b);

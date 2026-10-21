@@ -1043,6 +1043,13 @@ else ()
         target_link_libraries(ramp_fix_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # ks_game_v1003_test (v10.0.3 KrunkScript): getMatch().started during the countdown, AI.spawn alwaysSync
+    add_executable(ks_game_v1003_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ks_game_v1003_test.c)
+    target_link_libraries(ks_game_v1003_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ks_game_v1003_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # editor_serialize_test (doc/v7/editor.md WP1): the editor's GL-free data model
     # (client/src/editor/editor_model.c) against v7.1.4's own ObjectInstance serialization
     # (client/tests/data/editor_v7_golden.json) and import / export round trips over assets/maps

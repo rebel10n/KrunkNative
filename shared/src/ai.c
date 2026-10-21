@@ -2133,7 +2133,8 @@ void game_ai_sync(Game *game) {
         int count = 0;
         for (int i = 0; i < list->count; i++) {
             GameAI *ai = &list->ais[i];
-            if (!ai->active || ai->removed || ai_d3d(player->position, ai->position) > GAME_AI_SYNC_RANGE) continue;
+            // alwaysSync (AI.spawn, v10.0.3) skips the range: the AI is synced to every player
+            if (!ai->active || ai->removed || (!ai->data.always_sync && ai_d3d(player->position, ai->position) > GAME_AI_SYNC_RANGE)) continue;
             if (ai_sent_to(ai, player->uid)) {
                 ai_sync_entry(ai, &entries[count]);
                 ai_sync_entry_v7(ai, &entries7[count]);

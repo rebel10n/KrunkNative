@@ -74,6 +74,7 @@ typedef struct {
     unsigned char respawn_r:1;    // rr: random respawn time in [100, respawnT || 5000]
     unsigned char can_shoot:1;    // cs
     unsigned char can_hit:1;      // cnh (melee)
+    unsigned char always_sync:1;  // AI.spawn alwaysSync (v10.0.3): synced to every player whatever its distance
     unsigned char xray:1;         // xv: targets through walls (xrayVis)
     unsigned char targets_ai:1;   // tAi (targAI)
     unsigned char targets_players:1; // tPl == null (targPlr)

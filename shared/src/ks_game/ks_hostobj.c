@@ -893,6 +893,7 @@ static KsValue api_ai_spawn(KsScript *s, void *u, const KsValue *args, int argc)
     d.respawn_r = (unsigned char) opt_bool(s, data, "respawnR");
     d.can_shoot = (unsigned char) opt_bool(s, data, "canShoot");
     d.can_hit = (unsigned char) opt_bool(s, data, "canMelee");
+    d.always_sync = (unsigned char) opt_bool(s, data, "alwaysSync"); // v10.0.3: synced to every player, whatever its distance
     d.speed = (float) opt_num(s, data, "speed", 0, 10);
     d.turn_speed = (float) opt_num(s, data, "turnSpeed", 0, 10);
     d.gravity = (float) opt_num(s, data, "gravity", 0, 1);
@@ -1012,6 +1013,9 @@ static KsValue api_config_get_match(KsScript *s, void *u, const KsValue *args, i
     ks_obj_set(s, match, "players", ks_num(active));
     ks_obj_set(s, match, "capacity", ks_num(game ? game->config.max_players : 0));
     ks_obj_set(s, match, "teams", ks_num(game ? mode_team_count(game) : 0));
+    // v10.0.3: false during the round countdown (a pre-match wait timer), true once the round has started
+    const int started = game && game->mode && game->mode->started && !mode_match_starting(game);
+    ks_obj_set(s, match, "started", ks_bool(started));
     return match;
 }
 

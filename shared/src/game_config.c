@@ -47,7 +47,7 @@ enum { // GameConfig bitfields (not addressable through offsetof)
     GC_BIT_CAN_SLIDE, GC_BIT_AIR_STRAFE, GC_BIT_AUTO_JUMP, GC_BIT_BULLET_DROP, GC_BIT_HEALTH_REGEN,
     GC_BIT_KILL_REWARDS, GC_BIT_HEADSHOTS_ONLY, GC_BIT_NO_SECONDARIES, GC_BIT_NO_STREAKS,
     GC_BIT_DISABLE_BORDERS, GC_BIT_THROWABLE_MELEES, GC_BIT_NO_CHARGE_WEAPONS, GC_BIT_SELECT_TEAM,
-    GC_BIT_ALLOW_SPECTATE, GC_BIT_THIRD_PERSON, GC_BIT_HIDE_NAMETAGS,
+    GC_BIT_ALLOW_SPECTATE, GC_BIT_THIRD_PERSON, GC_BIT_HIDE_NAMETAGS, GC_BIT_RAMP_FIX,
 };
 enum { CB_SECONDARY, CB_WALL_JUMP, CB_BACK_SLIDE };
 enum { WB_BURST, WB_OVER_CHARGE, WB_SECONDARY, WB_EQUIPMENT, WB_AKIMBO, WB_NO_AUTO, WB_NO_SPREAD, WB_NO_AIM, WB_PROJECTILE_DISABLE };
@@ -125,6 +125,7 @@ static const GameConfigOption k_server_options[] = {
     {"allowSpect", "Spectating", "Other", "Other", GC_BOOL, GC_STORE_BIT, 0, GC_HT(0) | GC_HT(1), .def = 1.0f, .offset = 0, .bit = GC_BIT_ALLOW_SPECTATE},
     {"thirdPerson", "3rd Person", "Other", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_THIRD_PERSON},
     {"nameTags", "Hide Nametags (Enemies)", "Other", NULL, GC_BOOL, GC_STORE_BIT, 0, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_HIDE_NAMETAGS},
+    {"rampFix", "Solid Ramp Sides", "Other", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_RAMP_FIX},
     {"nameTagsFR", "Hide Nametags (Allies)", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, hide_nametags_allies)},
     {"kCams", "Kill Cams", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, kill_cams)},
     {"aAnon", "Allow Anonymous", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, allow_anonymous)},
@@ -536,6 +537,7 @@ static int gc_bit_get(const GameConfig *g, const int bit) {
         case GC_BIT_ALLOW_SPECTATE: return g->allow_spectate;
         case GC_BIT_THIRD_PERSON: return g->third_person;
         case GC_BIT_HIDE_NAMETAGS: return g->hide_nametags;
+        case GC_BIT_RAMP_FIX: return g->ramp_fix;
         default: return 0;
     }
 }
@@ -559,6 +561,7 @@ static void gc_bit_set(GameConfig *g, const int bit, const int on) {
         case GC_BIT_ALLOW_SPECTATE: g->allow_spectate = v; break;
         case GC_BIT_THIRD_PERSON: g->third_person = v; break;
         case GC_BIT_HIDE_NAMETAGS: g->hide_nametags = v; break;
+        case GC_BIT_RAMP_FIX: g->ramp_fix = v; break;
         default: break;
     }
 }

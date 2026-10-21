@@ -176,7 +176,7 @@ const char editor_data_text[] =
     ",{\"name\":\"No Secondaries\",\"varN\":\"noSecondary\",\"sub\":\"Gameplay Logic\",\"dontChange\":true,\"def\":false,"
     "\"bool\":true},{\"name\":\"Disable Streaks\",\"varN\":\"noStreaks\",\"sub\":\"Other\",\"dontChange\":true,\"def\":fals"
     "e,\"bool\":true},{\"name\":\"Disable Borders\",\"varN\":\"disableB\",\"sub\":\"Other\",\"dontChange\":true,\"def\":fal"
-    "se,\"bool\":true},{\"name\":\"Throwable Melees\",\"varN\":\"throwMel\",\"sub\":\"Gameplay Logic\",\"dontChange\":tru"
+    "se,\"bool\":true},{\"name\":\"Solid Ramp Sides\",\"varN\":\"rampFix\",\"sub\":\"Other\",\"dontChange\":true,\"def\":false,\"bool\":true},{\"name\":\"Throwable Melees\",\"varN\":\"throwMel\",\"sub\":\"Gameplay Logic\",\"dontChange\":tru"
     "e,\"def\":true,\"bool\":true},{\"name\":\"Chargable Weapons\",\"varN\":\"chrgWeps\",\"sub\":\"Gameplay Logic\",\"dont"
     "Change\":true,\"def\":true,\"bool\":true},{\"name\":\"Select Team\",\"head\":\"Teams\",\"varN\":\"selTeam\",\"sub\":\"Te"
     "ams\",\"dontChange\":true,\"def\":false,\"bool\":true},{\"name\":\"Friendly Fire\",\"sub\":\"Teams\",\"varN\":\"frFire"

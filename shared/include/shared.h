@@ -1691,6 +1691,7 @@ typedef struct {
     unsigned int allow_spectate:1;
     unsigned int third_person:1;
     unsigned int hide_nametags:1;
+    unsigned int ramp_fix:1;        // config.rampFix ("Solid Ramp Sides", v10.0.3): every ramp's high side blocks, as the map's rampFix
     char *team1_name;
     char *team2_name;
     float team1_damage;
