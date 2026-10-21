@@ -6,7 +6,7 @@
     "trust_proxy": true,
     "region": "us",
     "federation": false,
-    "cors_origins": {{ (kn_web_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }}
+    "cors_origins": {{ (kn_web_origins + kn_official_page_origins + ["https://coordinator." ~ kn_domain, "https://matchmaker." ~ kn_domain]) | to_json }}
   },
   "accounts": {
     "developers": {{ kn_brain_developers | to_json }},

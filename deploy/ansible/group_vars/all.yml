@@ -43,6 +43,12 @@ kn_web_origins:
   - "https://www.{{ kn_domain }}"
   - "https://rebel10n.github.io"
   - "https://krunker.party"
+# The official Krunker page (krunker.io) calls the coordinator and the matchmaker directly, so
+# its origin needs Access-Control-Allow-Origin on the brain's answers too. Only these two exact
+# origins; deploy/nginx/cors.conf lists the same two (a static include, it cannot read this file).
+kn_official_page_origins:
+  - "https://krunker.io"
+  - "https://www.krunker.io"
 
 # --- fail2ban: vendored fail2ban role (fail2ban-contract v1) ---
 # README.md "fail2ban". The same variables, in the same order, are set in
