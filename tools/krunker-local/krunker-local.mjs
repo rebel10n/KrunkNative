@@ -381,6 +381,38 @@ const WS_EVENTS_HOOK = `(() => { const Native = window.WebSocket;
       this.addEventListener("error", () => console.log("[hook] ws error " + a[0]));
       this.addEventListener("close", (e) => console.log("[hook] ws close " + e.code + " clean=" + e.wasClean + " reason=" + e.reason + " " + a[0].split("?")[0])); } };
   Object.setPrototypeOf(window.WebSocket, Native); })();`;
+// Traces for the re-seek: the stack of every seek that carries excludeGame (who asks to leave the game), the time of
+// each client "po" ping (msgpack fixstr "po" in the frame) and of each server label that arrives, from the frame's
+// first msgpack string. Only logs; the calls go on as they were.
+const TRACE_HOOK = `(() => {
+  const t0 = performance.now(); const T = () => (performance.now() - t0).toFixed(0);
+  // timers of two seconds or more: where they are set (the stack) and when they fire. The bundle's setTimeout
+  // alias is bound to window.setTimeout by the loader, so this wrapper is installed before the loader runs.
+  const origTimeout = window.setTimeout;
+  window.setTimeout = function (fn, ms, ...rest) {
+    if (ms >= 2000 && typeof fn === "function") {
+      const stack = String(new Error().stack).split("\\n").slice(2, 6).map((l) => l.trim().slice(0, 90)).join(" | ");
+      console.log("[hook] timer " + ms + "ms set " + T() + "ms at " + stack);
+      return origTimeout.call(this, function (...args) { console.log("[hook] timer " + ms + "ms fired " + T() + "ms"); return fn.apply(this, args); }, ms, ...rest);
+    }
+    return origTimeout.call(this, fn, ms, ...rest);
+  };
+  const origFetch = window.fetch;
+  window.fetch = function (...a) {
+    try { const u = String(a[0] && a[0].url ? a[0].url : a[0]); if (/excludeGame/.test(u)) console.log("[hook] seek excludeGame " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 16).join(" | ")); } catch (e) {}
+    return origFetch.apply(this, a); };
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    try { const b = new Uint8Array(data); const s = String.fromCharCode(...b.slice(0, 40)); if (s.indexOf("po") >= 0 && b.length < 40) console.log("[hook] ping po " + T() + "ms n=" + b.length); } catch (e) {}
+    return send.call(this, data); };
+  const Native = Object.getPrototypeOf(WebSocket.prototype).constructor;
+  const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(WebSocket).prototype, "onmessage");
+  Object.defineProperty(WebSocket.prototype, "onmessage", { configurable: true,
+    get() { return this.__om || null; },
+    set(fn) { this.__om = fn; desc.set.call(this, (ev) => {
+      try { const b = new Uint8Array(ev.data); const s = String.fromCharCode(...b.slice(0, 32)); const m = s.match(/(gsc|pir|pi|po|kick|ERR|er|\\bv\\b|sp|ch)/); console.log("[hook] recv " + T() + "ms n=" + b.length + " " + (m ? m[1] : "?")); } catch (e) {}
+      if (fn) fn.call(this, ev); }); } });
+})();`;
 const WS_CLOSE_HOOK = `(() => { const close = WebSocket.prototype.close; WebSocket.prototype.close = function (...a) {
   try { console.log("[hook] ws.close " + JSON.stringify(a) + " " + String(new Error().stack).split("\\n").slice(1, 7).join(" | ")); } catch (e) {}
   return close.apply(this, a); }; })();`;
@@ -456,7 +488,7 @@ async function join() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
   const reqUrl = new Map();
   let appScript = null;
   const hostsSeen = new Set();
@@ -488,6 +520,12 @@ async function join() {
         case "Network.loadingFailed": report.failed.push(`${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
         case "Network.responseReceived":
           if (/seek-game/.test(p.response.url)) report.seek.push(`${p.response.status} ${redact(p.response.url)}`);
+          if (/seek-game/.test(p.response.url)) {
+            send("Network.getResponseBody", { requestId: p.requestId }).then((b) => {
+              const body = String(b.result && b.result.body || "");
+              report.seekBodies.push(`${p.response.status} ${body.replace(/"(accessToken|clientId|clientKey|bypassToken|validationToken)":"[^"]*"/g, '"$1":"…"').slice(0, 500)}`);
+            });
+          }
           if (p.response.status >= 400) report.httpErrors.push(`${p.response.status} ${redact(p.response.url).slice(0, 120)}`);
           break;
         case "Runtime.exceptionThrown": {
@@ -538,7 +576,7 @@ async function join() {
         case "Runtime.consoleAPICalled": {
           const text = p.args.map((a) => a.value ?? a.description).join(" ");
           if (p.type === "error") report.consoleErrors.push(text.slice(0, 200));
-          if (text.startsWith("[hook] ")) report.hooks.push(text.slice(7, 600));
+          if (text.startsWith("[hook] ")) report.hooks.push(text.slice(7, 1800));
           break;
         }
       }
@@ -555,7 +593,9 @@ async function join() {
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_EVENTS_HOOK });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: TRACE_HOOK });
     await send("Debugger.enable");
+    await send("Debugger.setAsyncCallStackDepth", { maxDepth: 32 });
     await send("Debugger.setPauseOnExceptions", { state: "uncaught" });
     await send("Page.navigate", { url: cfg.localUrl });
     await sleep(cfg.loadWaitMs);
