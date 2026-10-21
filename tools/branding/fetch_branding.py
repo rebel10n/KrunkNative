@@ -83,14 +83,16 @@ OUTPUTS = (
     ("platform/web/icons/icon-512.png", "icon512x512.png", "copy"),
     ("platform/web/icons/apple-touch-icon.png", "icon1024x1024.png", ("png", 180)),
     ("platform/web/icons/og_1200x630.jpg", "og_1200x630.jpg", "copy"),
-    ("assets/img/icon.png", "icon256x256.png", "copy"),
-    ("client/icon.ico", "icon1024x1024.png", ("ico", (16, 24, 32, 48, 64, 128, 256))),
+    # The window and launcher icons are Krunker Box Office art, not krunker.io's (which is the
+    # Krunker brand). The source is tools/branding/box-office/icon-192.png (local: prefix).
+    ("assets/img/icon.png", "local:icon-192.png", ("png", 256)),
+    ("client/icon.ico", "local:icon-192.png", ("ico", (16, 24, 32, 48, 64, 128, 256))),
     (IOS_ICON, "icon1024x1024.png", ("png", 1024, "RGB")),
-    (ANDROID_RES + "/mipmap-mdpi/ic_launcher.png", "icon1024x1024.png", ("png", 48)),
-    (ANDROID_RES + "/mipmap-hdpi/ic_launcher.png", "icon1024x1024.png", ("png", 72)),
-    (ANDROID_RES + "/mipmap-xhdpi/ic_launcher.png", "icon1024x1024.png", ("png", 96)),
-    (ANDROID_RES + "/mipmap-xxhdpi/ic_launcher.png", "icon1024x1024.png", ("png", 144)),
-    (ANDROID_RES + "/mipmap-xxxhdpi/ic_launcher.png", "icon1024x1024.png", ("png", 192)),
+    (ANDROID_RES + "/mipmap-mdpi/ic_launcher.png", "local:icon-192.png", ("png", 48)),
+    (ANDROID_RES + "/mipmap-hdpi/ic_launcher.png", "local:icon-192.png", ("png", 72)),
+    (ANDROID_RES + "/mipmap-xhdpi/ic_launcher.png", "local:icon-192.png", ("png", 96)),
+    (ANDROID_RES + "/mipmap-xxhdpi/ic_launcher.png", "local:icon-192.png", ("png", 144)),
+    (ANDROID_RES + "/mipmap-xxxhdpi/ic_launcher.png", "local:icon-192.png", ("png", 192)),
 )
 
 
@@ -192,7 +194,12 @@ def render(data, how):
 def cmd_install(a):
     files = fetch_all(a.stage, read_lock())
     for dest, name, how in OUTPUTS:
-        data = files[name] if how == "copy" else render(files[name], how)
+        if name.startswith("local:"):
+            # Box Office art kept in the repo (see OUTPUTS): never fetched, always re-rendered.
+            with open(os.path.join(REPO, "tools", "branding", "box-office", name[len("local:"):]), "rb") as f:
+                data = render(f.read(), how)
+        else:
+            data = files[name] if how == "copy" else render(files[name], how)
         path = os.path.join(REPO, dest)
         if os.path.isfile(path):
             with open(path, "rb") as f:
