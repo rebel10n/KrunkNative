@@ -317,15 +317,17 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   bot[65] = 1; // no_smooth
   const [botLabel, botArgs] = T.mapBotAdd(bot).messages[0];
   assert.strictEqual(botLabel, "aai");
-  assert.deepStrictEqual((botArgs as unknown[]).slice(0, 6), [9, 4, "Bot", 1.5, 2, 3]);
-  assert.deepStrictEqual((botArgs as unknown[])[6], {
+  assert.strictEqual((botArgs as unknown[]).length, 1, "aai is one record argument");
+  const botRec = (botArgs as unknown[][])[0];
+  assert.deepStrictEqual(botRec.slice(0, 6), [9, 4, "Bot", 1.5, 2, 3]);
+  assert.deepStrictEqual(botRec[6], {
     hasAnim: 1, animS: 0.5, soundR: 30, team: 2, health: 100, mSize: 1.5, mYOff: 0.25, mROff: 0.5, hbh: 1,
     asset: "46544e", idl: 7, src: "a/b.glb", noVis: 1, tagScale: 1.25, lvl: 3, side: 1, opacity: 0.5, alphaTest: 0.5,
     texEncode: 2, noSmooth: true, noFog: false, fTrans: true, frames: 4, frameT: 0.25, rAnim: 0.75, rAnimA: 1,
     bobD: 0.125, bobS: 2,
   });
   bot[60] = 0;
-  assert.strictEqual((T.mapBotAdd(bot).messages[0][1] as unknown[])[6], 0);
+  assert.strictEqual(((T.mapBotAdd(bot).messages[0][1] as unknown[][])[0])[6], 0);
 }
 
 // ---- PICKUP (128, packed 26 bytes) as inat with no player, and MATCH_VOTE_STATE (181, 170 bytes) as mv [vo, mts]
@@ -693,7 +695,7 @@ async function main(): Promise<void> {
   bot7[60] = 0; // no data: dat 0
   native.write(nativeFrame(162, bot7));
   const aai7 = await waitFor(() => clientMessages.find((m) => m.label === "aai"), "aai (v7)");
-  assert.deepStrictEqual(aai7.args, [5, 0, "Bot", 0, 0, 0, 0]);
+  assert.deepStrictEqual(aai7.args, [[5, 0, "Bot", 0, 0, 0, 0]]); // one record argument
 
   // the domination zones (142): one uct list; the zone's map object id is its uid
   const domFrame = Buffer.alloc(497);

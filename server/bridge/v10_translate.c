@@ -1255,7 +1255,9 @@ void v10_map_bot_add(V10Out *o, const uint8_t *p, size_t n) {
         KRUNKER_V_NUM(r1(rd_f32(p, 56))),
         dat,
     };
-    v10_push(o, V10_IN_C_SPAWN, args, 7);
+    /* one record argument: the client's aai handler takes the AI.getData array (record[6] is dat) */
+    const KrunkerValue rec[1] = {v10_arr(o, args, 7)};
+    v10_push(o, V10_IN_C_SPAWN, rec, 1);
 }
 
 /* NetStatePacket (protocol 1.4.5, 79 bytes): see mapState in v10Translate.ts. */

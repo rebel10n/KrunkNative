@@ -662,9 +662,9 @@ int main(void) {
         bot[63] = 0; bot[64] = 1; bot[65] = 1;
         v10_out_init(&o);
         v10_map_bot_add(&o, bot, 237);
-        CHECK(o.count == 1 && !strcmp(o.msgs[0].label, "aai") && o.msgs[0].argc == 7, "bot add -> aai");
+        CHECK(o.count == 1 && !strcmp(o.msgs[0].label, "aai") && o.msgs[0].argc == 1, "bot add -> aai (one record argument)");
         const KrunkerValue head6[6] = {N(9), N(4), S("Bot"), N(1.5), N(2), N(3)};
-        for (int i = 0; i < 6 && o.count; i++) CHECK(vequal(&o.msgs[0].args[i], &head6[i]), "aai head field %d", i);
+        for (int i = 0; i < 6 && o.count; i++) CHECK(vequal(&o.msgs[0].args[0].u.items[i], &head6[i]), "aai head field %d", i);
         const char *dk[28] = {"hasAnim", "animS", "soundR", "team", "health", "mSize", "mYOff", "mROff", "hbh", "asset", "idl", "src",
                               "noVis", "tagScale", "lvl", "side", "opacity", "alphaTest", "texEncode", "noSmooth", "noFog", "fTrans",
                               "frames", "frameT", "rAnim", "rAnimA", "bobD", "bobS"};
@@ -672,11 +672,11 @@ int main(void) {
                                      N(1), N(1.25), N(3), N(1), N(0.5), N(0.5), N(2), B(1), B(0), B(1), N(4), N(0.25), N(0.75), N(1),
                                      N(0.125), N(2)};
         KrunkerValue want_dat = kv_map(28, dk, dv);
-        if (o.count) CHECK(vequal(&o.msgs[0].args[6], &want_dat), "aai dat: the TS object");
+        if (o.count) CHECK(vequal(&o.msgs[0].args[0].u.items[6], &want_dat), "aai dat: the TS object");
         v10_out_free(&o);
         bot[60] = 0;
         v10_out_init(&o); v10_map_bot_add(&o, bot, 237);
-        CHECK(o.count == 1 && vequal(&o.msgs[0].args[6], &KRUNKER_V_NUM(0)), "a bot with no data: dat 0");
+        CHECK(o.count == 1 && vequal(&o.msgs[0].args[0].u.items[6], &KRUNKER_V_NUM(0)), "a bot with no data: dat 0");
         v10_out_free(&o);
     }
 

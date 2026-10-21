@@ -638,8 +638,9 @@ int main(void) {
     native_send(&g_native, NET_PACKET_AI_ADD_V7, bot7, 237);
     WAIT_FOR(client_count("aai") == 1);
     KrunkerFrame aai;
-    CHECK(client_get("aai", 0, &aai) && aai.argc == 7 && vequal(&aai.args[0], &KRUNKER_V_NUM(5)) && is_str(&aai.args[2], "Bot") &&
-          vequal(&aai.args[6], &KRUNKER_V_NUM(0)), "aai [5, 0, Bot, 0, 0, 0, 0]");
+    CHECK(client_get("aai", 0, &aai) && aai.argc == 1 && aai.args[0].type == KRUNKER_ARRAY && aai.args[0].len == 7 &&
+          vequal(&aai.args[0].u.items[0], &KRUNKER_V_NUM(5)) && is_str(&aai.args[0].u.items[2], "Bot") &&
+          vequal(&aai.args[0].u.items[6], &KRUNKER_V_NUM(0)), "aai [[5, 0, Bot, 0, 0, 0, 0]] (one record argument)");
     krunker_frame_free(&aai);
 
     // the domination zones (142): one uct list; the zone's map object id is its uid

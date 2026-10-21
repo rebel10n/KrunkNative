@@ -422,7 +422,7 @@ const STATE_JS = `(() => ({
 
 function bridgeLines() {
   if (!cfg.bridge.log || !fs.existsSync(cfg.bridge.log)) return [];
-  return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|net-bridge|\[bridge\]/.test(l)).slice(-40);
+  return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|v10-bridge|net-bridge|\[bridge\]/.test(l)).slice(-40);
 }
 
 async function join() {

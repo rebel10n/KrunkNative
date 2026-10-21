@@ -703,7 +703,8 @@ export function mapBotAdd(p: Buffer): Mapped {
         }
       : 0;
   return {
-    messages: [[V10_IN.C_SPAWN, [p.readInt32LE(0), p.readInt32LE(4), str(8, 40), r1(p.readFloatLE(48)), r1(p.readFloatLE(52)), r1(p.readFloatLE(56)), dat]]],
+    // one record argument: the client's aai handler takes the AI.getData array (record[6] is dat); spread, dat is undefined there
+    messages: [[V10_IN.C_SPAWN, [[p.readInt32LE(0), p.readInt32LE(4), str(8, 40), r1(p.readFloatLE(48)), r1(p.readFloatLE(52)), r1(p.readFloatLE(56)), dat]]]],
   };
 }
 
