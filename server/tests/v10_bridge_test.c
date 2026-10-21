@@ -769,6 +769,12 @@ int main(void) {
     pump(50);
     CHECK(v10_bridge_untranslated("native 34") == 0, "player info is consumed");
 
+    // END_MEDALS (243, 169 bytes): the player's medals for its END, kept for it; no v10 message of its own, no stop
+    uint8_t medals[169] = {0};
+    native_send(&g_native, NET_PACKET_END_MEDALS, medals, 169);
+    pump(50);
+    CHECK(v10_bridge_untranslated("native 243") == 0, "end medals are kept, no stop");
+
     // PICKUP (128): one pickup's state is the pickup half of "inat" (the v10 client's updatePickup): uid, weapon,
     // true, active, pos when moved; an empty pickup (weapon -1) has a null weapon and a null position
     uint8_t pk[26];

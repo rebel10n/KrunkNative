@@ -45,7 +45,7 @@ start brain "$HOME_DIR/run/brain.pid" 5150 "$BUILD/services/brain/kn_brain" --br
   --database.driver=sqlite --database.path="$HOME_DIR/run/brain.db" --migrate --brain.region=local --brain.id=v10join \
   --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1
 start server "$HOME_DIR/run/server.pid" 21115 env KN_GAMESERVER_BRAIN_SECRET="$SECRET" "$BUILD/server_bin" --cfg none \
-  --config "$HOME_DIR/run/empty.json" --headless --no-cli --port 21115 --mode ffa --region local --node-id V10J \
+  --config "$HOME_DIR/run/empty.json" --headless --no-cli --port 21115 --mode ffa --round-seconds "${KN_ROUND_SECONDS:-30}" --region local --node-id V10J \
   --name "Krunker Box Office v10join" --public-host 127.0.0.1 --public-port 21115 \
   --brain ws://127.0.0.1:5150/mm/internal/ws --log "$HOME_DIR/run/server.log" "$REPO/assets/maps/official/00_burg.json"
 [ -s "$HOME_DIR/run/empty.json" ] || echo '{}' > "$HOME_DIR/run/empty.json"
