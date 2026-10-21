@@ -476,6 +476,10 @@ def email_code_checks(port, smtp, db_path):
     names = ((me or {}).get("data") or {}).get("names") if isinstance(me, dict) else None
     check("[36] the email-code login token is a real session: GET /account/usernames answers the account",
           st == 200 and isinstance(names, list) and len(names) == 1 and names[0].get("name") == G, "HTTP %d" % st)
+    st, body = http(port, "POST", "/auth/login/username", {"username": G, "password": PASSWORD})
+    data = body.get("data") if isinstance(body, dict) else None
+    check("[36] the emailed code proves the address: a password login of G is login_ok, not ensure_verified (the gate is met)",
+          st == 200 and isinstance(data, dict) and data.get("type") == "login_ok", "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(port, "POST", "/auth/code-challenge/" + (cid or HEX), {"code": code1 or wrong})
     check("[36] the used challenge again -> 404 with the expired text, data null (v10.js 114161 throws the text)",
           st == 404 and is_text_error(body) and body["error"] == EXPIRED, "HTTP %d %s" % (st, json.dumps(body)[:160]))

@@ -510,6 +510,10 @@ static kn_db_result *run_login_code_check(kn_dbconn *c, int n, const char *const
     snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
     dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'login' AND used_at IS NULL"),
              KN_DB_ARGS(id));
+    /* the code went to the account's own address (the same__b check above): that proves the address, as the
+     * verify link does, so the sign-in gate (accounts.login.require_verified) is met */
+    dbx_exec(&x, SQL(.any = "UPDATE accounts SET email_verified_at = COALESCE(email_verified_at, {now}) WHERE id = {int:$1}"),
+             KN_DB_ARGS(id));
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "username"));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "id", (double) pint(id));
