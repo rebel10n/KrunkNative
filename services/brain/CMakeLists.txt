@@ -474,6 +474,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_split_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_account_split PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;accounts")
+    # v10 REST data routes at the root (v10_api.c, v10_pack.c): /maps, /maps/:id, /maps/by-name, /titles,
+    # the packed /data/skins and /data/spins (decoded with a port of v10.js unpack)
+    add_test(NAME brain_v10_api_data
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_data_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_data PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # CORS for the official Krunker page (krunker.io) on /ping and /mm/ping, and the nginx include's origin list
     add_test(NAME brain_cors_origin
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/cors_origin_test.py
