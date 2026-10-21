@@ -490,6 +490,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_market_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_market PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
+    # v10 root aliases of KrunkNative handlers (ranked, leaderboards, territorial wars, clans, lottery, shop, webhooks, webpush, spins, player count)
+    add_test(NAME brain_v10_api_alias
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_alias_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_api_alias PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # CORS for the official Krunker page (krunker.io) on /ping and /mm/ping, and the nginx include's origin list
     add_test(NAME brain_cors_origin
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/cors_origin_test.py
