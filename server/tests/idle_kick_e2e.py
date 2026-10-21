@@ -71,7 +71,7 @@ def spawn_head(payload):
     if len(payload) < struct.calcsize(SPAWN_FMT):
         return None
     v = struct.unpack(SPAWN_FMT, payload[:struct.calcsize(SPAWN_FMT)])
-    return {"uid": v[0], "is_you": v[1], "pos": v[7:10], "name": kn_proto.uncstr(v[12])}
+    return {"uid": v[0], "is_you": v[1], "active": v[2], "pos": v[7:10], "name": kn_proto.uncstr(v[12])}
 
 
 class Peer(kn_proto.Conn):
@@ -115,7 +115,9 @@ class Peer(kn_proto.Conn):
             if t == SPAWN:
                 info = spawn_head(payload)
                 if info and info["is_you"]:
-                    self.me = (time.time(), info)
+                    # the join's own SPAWN is dead (active 0, waiting for the ENT): only an active one is a spawn
+                    if info["active"]:
+                        self.me = (time.time(), info)
                 elif info:
                     self.others[info["uid"]] = info
             elif t == HIT and len(payload) >= 8:
