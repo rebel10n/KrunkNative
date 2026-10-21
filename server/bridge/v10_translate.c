@@ -1758,7 +1758,35 @@ int v10_parse_end_medals(const uint8_t *p, size_t n, NetEndMedalsPacket *out) {
     return 1;
 }
 
-void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals) {
+#define END_BOARD_AT 9        /* NetEndPacket: the board (uint8 count, 16 x {uid, score, kills, deaths}) after result and next_round */
+#define END_REWARDS_AT 266     /* NetEndPacket: rewards[16] after the board */
+#define MODE_END_MODE_AT 0     /* NetModeEndPacket: mode_id int32 */
+
+int v10_mode_end_is_ffa(const uint8_t *p, size_t n) {
+    if (n < 4) return -1;
+    return (int32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24) == MODE_ID_FFA;
+}
+
+KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n) {
+    if (n != END_SIZE) return KRUNKER_V_ARRAY(NULL, 0);
+    const size_t rc = p[END_BOARD_AT] < LEADER_MAX ? p[END_BOARD_AT] : LEADER_MAX;
+    KrunkerValue *rows = rc ? v10_arena(o, rc * sizeof *rows) : NULL;
+    for (size_t i = 0; i < rc; i++) {
+        const size_t at = END_BOARD_AT + 1 + i * 16;
+        const int32_t uid = rd_i32(p, at);
+        const char *name = "";
+        for (size_t k = 0; k < name_n; k++)
+            if (names[k].uid == uid) { name = names[k].name; break; }
+        const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
+        const KrunkerValue cell_items[2] = {text, text};
+        const KrunkerValue row[6] = {KRUNKER_V_NUM(uid), v10_arr(o, cell_items, 2), KRUNKER_V_NUM(rd_i32(p, at + 4)),
+                                     KRUNKER_V_NUM(rd_i32(p, at + 8)), KRUNKER_V_NUM(rd_i32(p, at + 12)), KRUNKER_V_NUM(rd_i32(p, END_REWARDS_AT + 4 * i))};
+        rows[i] = v10_arr(o, row, 6);
+    }
+    return v10_arr(o, rows, (uint32_t)rc);
+}
+
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed) {
     if (n != END_SIZE) {
         o->stop = "malformed";
         return;
@@ -1772,7 +1800,7 @@ void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket
         mdls[mdls_n++] = KRUNKER_V_NUM(medals->medals[i].count);
     }
     const char *const keys[5] = {"vo", "mts", "tms", "ed", "mdls"};
-    const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, v10_arr(o, NULL, 0), v10_arr(o, mdls, mdls_n)};
+    const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, ed ? *ed : v10_arr(o, NULL, 0), v10_arr(o, mdls, mdls_n)};
     const KrunkerValue end_data = v10_obj(o, keys, vals, 5);
     const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL};
     v10_push(o, "end", args, 7);

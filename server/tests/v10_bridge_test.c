@@ -870,6 +870,32 @@ int main(void) {
         WAIT_FOR(client_count("k") >= 2);
     }
 
+    // the round's end (free-for-all): END (16) then MODE_END (51), which the client reads as one "end" with the table (endData.ed)
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;   /* a victory */
+        endp[9] = 1;   /* one board row: uid 1 (our spawn's name "me") */
+        w_i32(endp, 10, 1); w_i32(endp, 14, 9); w_i32(endp, 18, 2); w_i32(endp, 22, 3);
+        w_i32(endp, 266, 4);
+        native_send(&g_native, NET_PACKET_END, endp, sizeof endp);
+        NetModeEndPacket mend;
+        memset(&mend, 0, sizeof mend);
+        mend.mode_id = 0; /* Free for All */
+        mend.winner_team = -1;
+        native_send(&g_native, NET_PACKET_MODE_END, (const uint8_t *)&mend, sizeof mend);
+        WAIT_FOR(client_count("end") == 1);
+        KrunkerFrame ef;
+        CHECK(client_get("end", 0, &ef) && ef.argc == 7 && ef.args[2].type == KRUNKER_MAP, "one end [0, true, endData, ...] after END and MODE_END");
+        const KrunkerValue *ed = ef.argc == 7 ? map_get(&ef.args[2], "ed") : NULL;
+        CHECK(ed && ed->type == KRUNKER_ARRAY && ed->len == 1 && ed->u.items[0].type == KRUNKER_ARRAY && ed->u.items[0].len == 6 &&
+              vequal(&ed->u.items[0].u.items[0], &KRUNKER_V_NUM(1)) && vequal(&ed->u.items[0].u.items[2], &KRUNKER_V_NUM(9)) &&
+              is_str(&ed->u.items[0].u.items[1].u.items[0], "me") && vequal(&ed->u.items[0].u.items[5], &KRUNKER_V_NUM(4)),
+              "endData.ed: the row [uid, [name, name], score, kills, deaths, reward] with our name from the spawn");
+        if (ef.argc) krunker_frame_free(&ef);
+        CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0, "END and MODE_END are translated, the session goes on");
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},

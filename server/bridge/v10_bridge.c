@@ -125,6 +125,10 @@ typedef struct V10Session {
     V10Queued *held;             /* the vote state and END, held until START: the client picks its next map from the vote list */
     NetEndMedalsPacket end_medals; /* END_MEDALS (243): the player's medals, endData.mdls of the next END */
     int has_end_medals;
+    V10PlayerName names[64];     /* the SPAWN names of the uids seen: the end table's name cells */
+    size_t names_n;
+    uint8_t *pending_end;        /* END (16), held for its MODE_END, which carries the end table (ed) */
+    size_t pending_end_n;
     size_t held_n, held_cap;
     int started;                 /* START went out: our spawn is in */
     int init_sent;
@@ -312,6 +316,7 @@ static void session_free(V10Session *s) {
     free(s->queue);
     for (size_t i = 0; i < s->held_n; i++) free(s->held[i].payload);
     free(s->held);
+    free(s->pending_end);
     free(s);
 }
 
@@ -771,6 +776,31 @@ static void flush_held(V10Session *s) {
     free(held);
 }
 
+/* the name of a uid, from its SPAWN (the end table's name cell) */
+static void remember_name(V10Session *s, int32_t uid, const char *name) {
+    for (size_t i = 0; i < s->names_n; i++) {
+        if (s->names[i].uid == uid) { snprintf(s->names[i].name, sizeof s->names[i].name, "%s", name); return; }
+    }
+    if (s->names_n == sizeof s->names / sizeof s->names[0]) return; /* more players than the table: the end table names them ""*/
+    s->names[s->names_n].uid = uid;
+    snprintf(s->names[s->names_n].name, sizeof s->names[s->names_n].name, "%s", name);
+    s->names_n++;
+}
+
+/* an END with no MODE_END after it: it goes out without an end table */
+static void flush_pending_end(V10Session *s) {
+    uint8_t *end = s->pending_end;
+    const size_t n = s->pending_end_n;
+    s->pending_end = NULL;
+    s->pending_end_n = 0;
+    V10Out o;
+    v10_out_init(&o);
+    v10_map_end(&o, end, n, s->has_end_medals ? &s->end_medals : NULL, NULL);
+    s->has_end_medals = 0;
+    free(end);
+    finish_out(s, &o, "END");
+}
+
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
     if (s->bridge->trace) {
@@ -785,6 +815,9 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         write_native(s, NET_PACKET_PONG, p, n);
         return;
     }
+    if (s->stopped) return;
+    /* an END waits for the MODE_END that follows it: any other packet first ends it without an end table */
+    if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
     if (s->stopped) return;
     const int ranked = type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
     const int init_part = type == NET_PACKET_MAP_DATA || type == NET_PACKET_GAME_CONFIG || type == NET_PACKET_NETWORK_DATA || ranked;
@@ -878,7 +911,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     /* MATCH_VOTE_STATE (181): the match cards' votes as "mv" [vo, mts] (mapMatchVoteState) */
     /* the vote list (mts) and END are held until START: the client's init picks its next map from a non-empty vote list,
      * and a list that arrives before its init runs breaks the pick (undefined map, "reading game") */
-    if (s->init_sent && !s->started && (type == NET_PACKET_MATCH_VOTE_STATE || type == NET_PACKET_END)) {
+    if (s->init_sent && !s->started && (type == NET_PACKET_MATCH_VOTE_STATE || type == NET_PACKET_END || type == NET_PACKET_MODE_END)) {
         hold_push(s, type, p, n);
         return;
     }
@@ -889,10 +922,32 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         return;
     }
     if (s->init_sent && type == NET_PACKET_END) {
-        v10_out_init(&o);
-        v10_map_end(&o, p, n, s->has_end_medals ? &s->end_medals : NULL);
+        if (n != 330) { stop_at(s, "END", "malformed"); return; }
+        s->pending_end = malloc(n);
+        if (!s->pending_end) { close_session(s, 1011, "out of memory", 0); return; }
+        memcpy(s->pending_end, p, n);
+        s->pending_end_n = n;
+        return;
+    }
+    /* MODE_END (51) after the round's END (NetModeEndPacket): a free-for-all's end table goes into that END (endData.ed) */
+    if (s->init_sent && type == NET_PACKET_MODE_END) {
+        const int ffa = v10_mode_end_is_ffa(p, n);
+        if (ffa < 0) { stop_at(s, "MODE_END", "malformed"); return; }
+        if (!ffa) {
+            if (s->pending_end) flush_pending_end(s);
+            stop_at(s, "MODE_END", "the team scores and end table of this mode are not mapped yet");
+            return;
+        }
+        if (!s->pending_end) return; /* no END before it: nothing to end */
+        V10Out e;
+        v10_out_init(&e);
+        const KrunkerValue ed = v10_end_rows(&e, s->pending_end, s->pending_end_n, s->names, s->names_n);
+        v10_map_end(&e, s->pending_end, s->pending_end_n, s->has_end_medals ? &s->end_medals : NULL, &ed);
         s->has_end_medals = 0;
-        finish_out(s, &o, "END");
+        free(s->pending_end);
+        s->pending_end = NULL;
+        s->pending_end_n = 0;
+        finish_out(s, &e, "END");
         return;
     }
     if (s->init_sent && type == NET_PACKET_MATCH_VOTE_STATE) {
@@ -960,6 +1015,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
         shooter_set(s, spawn.uid, spawn.position[0], spawn.position[1], spawn.position[2], 11.0); /* standing: player_height */
+        remember_name(s, spawn.uid, spawn.name);
         if (!spawn.active && !spawn.is_you) return; /* a player who is dead now: the v10 add is for players in play */
         const int at = skins_index(s, spawn.uid);
         v10_out_init(&o);

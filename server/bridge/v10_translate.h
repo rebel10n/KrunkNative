@@ -225,7 +225,19 @@ void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socke
 int v10_parse_end_medals(const uint8_t *p, size_t n, NetEndMedalsPacket *out);
 /* END with the player's medals (NULL: none). endData.mdls is a flat [name, count, name, count, ...] in overlay.medalsList
  * order: the end screen reads it in pairs (v10.js 219, the mdls loop). */
-void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals);
+/* The name a uid's SPAWN gave (the end table's name cell). */
+typedef struct {
+    int32_t uid;
+    char name[100];
+} V10PlayerName;
+/* The end table (endData.ed) of a free-for-all round from its END (NetEndPacket: board rows and rewards): one row per board
+ * entry in the default endStats order (sid, name, score, kills, deaths, reward, game.deob.js:18307): [uid, [name, name], score,
+ * kills, deaths, reward]. names: the SPAWN names (an unknown uid gets ""). */
+KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n);
+/* NET 51 MODE_END (NetModeEndPacket): 1 when it is a free-for-all's, 0 another mode's, -1 malformed. */
+int v10_mode_end_is_ffa(const uint8_t *p, size_t n);
+/* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END). */
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
 /* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and

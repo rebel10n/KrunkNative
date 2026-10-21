@@ -1281,7 +1281,7 @@ int main(void) {
         endp[0] = 1; /* a victory */
         V10Out o;
         v10_out_init(&o);
-        v10_map_end(&o, endp, 330, NULL);
+        v10_map_end(&o, endp, 330, NULL, NULL);
         {
             const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
                                          S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
@@ -1292,11 +1292,11 @@ int main(void) {
         v10_out_free(&o);
         endp[0] = 0xff; /* a draw */
         v10_out_init(&o);
-        v10_map_end(&o, endp, 330, NULL);
+        v10_map_end(&o, endp, 330, NULL, NULL);
         CHECK(o.count == 1 && o.msgs[0].args[1].type == KRUNKER_NUM && o.msgs[0].args[1].u.num == -1, "END with result -1 is a draw (didWin -1)");
         v10_out_free(&o);
         v10_out_init(&o);
-        v10_map_end(&o, endp, 329, NULL);
+        v10_map_end(&o, endp, 329, NULL, NULL);
         CHECK(o.stop != NULL, "a short END stops the translation");
         v10_out_free(&o);
     }
@@ -1333,7 +1333,7 @@ int main(void) {
         endp[0] = 1;
         V10Out m;
         v10_out_init(&m);
-        v10_map_end(&m, endp, 330, &got);
+        v10_map_end(&m, endp, 330, &got, NULL);
         {
             const KrunkerValue mdls[4] = {S("First Blood"), N(1), S("Headshot"), N(300)};
             const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
@@ -1343,6 +1343,40 @@ int main(void) {
             CHECK(msg_is(&m, 0, "end", want, 7), "END after END_MEDALS: endData.mdls = [name, count, ...] in overlay.medalsList order");
         }
         v10_out_free(&m);
+    }
+
+    /* ---- NET 51 MODE_END after an END (a free-for-all): the end table is the END's endData.ed rows */
+    CHECK(v10_mode_end_is_ffa((const uint8_t[]){0, 0, 0, 0, 0}, 5) == 1 && v10_mode_end_is_ffa((const uint8_t[]){1, 0, 0, 0}, 4) == 0 &&
+          v10_mode_end_is_ffa((const uint8_t[]){0}, 1) == -1, "MODE_END: mode 0 is free-for-all, mode 1 is not, a short one is malformed");
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        endp[9] = 2; /* the board: two rows {uid, score, kills, deaths} */
+        put_i32(endp, 10, 3); put_i32(endp, 14, 40); put_i32(endp, 18, 5); put_i32(endp, 22, 1);
+        put_i32(endp, 26, 7); put_i32(endp, 30, 12); put_i32(endp, 34, 2); put_i32(endp, 38, 9);
+        put_i32(endp, 266, 25); put_i32(endp, 270, 0); /* rewards */
+        V10PlayerName names[1];
+        memset(names, 0, sizeof names);
+        names[0].uid = 3;
+        snprintf(names[0].name, sizeof names[0].name, "Ann");
+        V10Out e;
+        v10_out_init(&e);
+        const KrunkerValue ed = v10_end_rows(&e, endp, 330, names, 1);
+        v10_map_end(&e, endp, 330, NULL, &ed);
+        {
+            const KrunkerValue cell1[2] = {S("Ann"), S("Ann")};
+            const KrunkerValue cell2[2] = {S(""), S("")};
+            const KrunkerValue row1[6] = {N(3), KRUNKER_V_ARRAY(cell1, 2), N(40), N(5), N(1), N(25)};
+            const KrunkerValue row2[6] = {N(7), KRUNKER_V_ARRAY(cell2, 2), N(12), N(2), N(9), N(0)};
+            const KrunkerValue rows[2] = {KRUNKER_V_ARRAY(row1, 6), KRUNKER_V_ARRAY(row2, 6)};
+            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(rows, 2),
+                                         S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
+            const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
+            CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed = [uid, [name, name], score, kills, deaths, reward] rows");
+        }
+        v10_out_free(&e);
     }
 
     printf("v10_translate_test: %d checks, %d failed\n", g_checks, g_failures);

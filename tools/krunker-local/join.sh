@@ -55,6 +55,8 @@ start bridge "$HOME_DIR/run/bridge.pid" 8097 env KRUNK_NATIVE_V10_TRACE=1 "$BUIL
 cd "$REPO" && node tools/krunker-local/krunker-local.mjs prepare > /dev/null || { echo "prepare failed"; exit 1; }
 start harness "$HOME_DIR/run/serve.pid" 8194 node tools/krunker-local/krunker-local.mjs serve
 
+# the report of a join is tens of MB and the default V8 heap can end the process with no report: a larger heap unless set
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=12288}"
 KN_JOIN_PROFILE="$PROFILE" node tools/krunker-local/krunker-local.mjs join > "$HOME_DIR/run/join-$PROFILE.json" 2> "$HOME_DIR/run/join-$PROFILE.err"
 node -e '
 const r = require(process.argv[1]);
