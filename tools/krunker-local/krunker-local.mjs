@@ -375,6 +375,12 @@ const ACCEPT_JS = `(() => {
 // consentBlock is position: fixed, so offsetParent is null for it: test the computed box instead
 // Logs every WebSocket.close the page makes, with the call site (the bundle's own names, the source is game.js):
 // the report's "hooks" list says who closed the game socket. It only logs; the call goes on as it was.
+const WS_EVENTS_HOOK = `(() => { const Native = window.WebSocket;
+  window.WebSocket = class extends Native {
+    constructor(...a) { super(...a);
+      this.addEventListener("error", () => console.log("[hook] ws error " + a[0]));
+      this.addEventListener("close", (e) => console.log("[hook] ws close " + e.code + " clean=" + e.wasClean + " reason=" + e.reason + " " + a[0].split("?")[0])); } };
+  Object.setPrototypeOf(window.WebSocket, Native); })();`;
 const WS_CLOSE_HOOK = `(() => { const close = WebSocket.prototype.close; WebSocket.prototype.close = function (...a) {
   try { console.log("[hook] ws.close " + JSON.stringify(a) + " " + String(new Error().stack).split("\\n").slice(1, 7).join(" | ")); } catch (e) {}
   return close.apply(this, a); }; })();`;
@@ -396,12 +402,24 @@ const PAUSE_PROBE_JS = `(() => {
 // The exception probe: the frame that threw (the bundle's own names). The lookup that fails is modes[index].
 const EXC_PROBE_JS = `(() => {
   const o = {};
-  try { o.idx = [typeof IÌíiîïì === "undefined" ? "undef" : IÌíiîïì, typeof IIíïiíí === "undefined" ? "undef" : typeof IIíïiíí]; } catch (e) { o.e1 = e.message; }
-  try { o.modes = iìiiìíi.length; } catch (e) { o.e2 = e.message; }
-  try { o.self = this && typeof this === "object" ? [this.modeIndex, this.mapIndex, this.eventIndex] : String(this); } catch (e) { o.e3 = e.message; }
+  const get = (src) => { try { return eval(src); } catch (e) { return "missing"; } };
+  for (const n of ["IÌíiîïì", "IIíïiíí", "IIíìiîi", "IÎìiìíï", "IÏïïîìí", "iìiiìíi"]) {
+    const v = get(n);
+    o[n] = v === null ? "null" : typeof v === "object" && v ? "obj{" + Object.keys(v).slice(0, 8).join(",") + "}" : typeof v === "number" || typeof v === "string" ? typeof v + ":" + String(v).slice(0, 40) : typeof v;
+  }
+  const self = get("this");
+  o.self = self && typeof self === "object" ? [self.modeIndex, self.mapIndex, self.eventIndex, typeof self.map, typeof self.ais] : String(self);
+  const args = get("arguments");
+  o.args = args && args.length !== undefined ? Array.from(args).slice(0, 12).map((a) => a === null ? "null" : typeof a === "object" ? (Array.isArray(a) ? "arr" + a.length : "obj") : typeof a + ":" + String(a).slice(0, 24)) : String(args);
   return JSON.stringify(o);
 })()`;
-const INIT_HANDLER_COLUMN = 10307050; // the disconnect call in the init handler (game.js line 1, 0-based column)
+const INIT_HANDLER_COLUMN = 10307050;
+// the disconnect routine (the window's "Lost Connection"): its entry, and its arguments (reason, code, error)
+const DISCONNECT_COLUMN = 10493103;
+const DISCONNECT_PROBE_JS = `(() => {
+  const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
+  try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
+})()`; // the disconnect call in the init handler (game.js line 1, 0-based column)
 const CONSENT_OPEN_JS =`(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
 const CLICK_PLAY_JS = `(() => {
   const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
@@ -438,7 +456,7 @@ async function join() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], hooks: [], pauses: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
   const reqUrl = new Map();
   let appScript = null;
   const hostsSeen = new Set();
@@ -483,14 +501,27 @@ async function join() {
             appScript = p.scriptId;
             send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: INIT_HANDLER_COLUMN } })
               .then((r) => { report.breakpoint = r.result ? r.result.actualLocation : r; });
+            send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: DISCONNECT_COLUMN } })
+              .then((r) => { report.disconnectBreakpoint = r.result ? r.result.actualLocation : r; });
           }
           break;
         case "Debugger.paused": {
           const top = p.callFrames[0];
           if (p.reason === "exception") {
             (async () => {
-              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
-              report.pauses.push({ exception: top.functionName, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
+              for (const f of p.callFrames.slice(0, 2)) {
+                const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: f.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
+                report.pauses.push({ exception: f.functionName, line: f.location && f.location.lineNumber, col: f.location && f.location.columnNumber, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
+              }
+              await send("Debugger.resume");
+            })();
+            break;
+          }
+          if (top.functionName === "iïiìïîï") {
+            (async () => {
+              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: DISCONNECT_PROBE_JS, returnByValue: true });
+              const callers = p.callFrames.slice(1, 5).map((f) => `${f.functionName}@${f.location.columnNumber}`);
+              report.disconnects.push({ args: r.result && r.result.result ? r.result.result.value : r.error || r, callers });
               await send("Debugger.resume");
             })();
             break;
@@ -523,6 +554,7 @@ async function join() {
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_EVENTS_HOOK });
     await send("Debugger.enable");
     await send("Debugger.setPauseOnExceptions", { state: "uncaught" });
     await send("Page.navigate", { url: cfg.localUrl });
