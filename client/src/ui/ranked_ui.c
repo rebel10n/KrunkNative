@@ -1423,16 +1423,11 @@ static void gen_home(StrBuf *sb) {
     int maps[RANKED_SEASON_MAPS];
     ranked_season_maps(season, maps);
     sb_appendf(sb, "<div class=\"map-carousel-container svelte-17kea4i\" style=\"--total-maps: %d; --extended-maps: %d;\">", RANKED_SEASON_MAPS, 2 * RANKED_SEASON_MAPS);
-    const cJSON *pmaps = cJSON_GetObjectItem(r->json, "maps"); // the brain's season maps (available: the queue can play it)
-    for (int k = 0; k < 2 * RANKED_SEASON_MAPS; k++) { // [...maps, ...maps]: the carousel loops
+    for (int k = 0; k < 2 * RANKED_SEASON_MAPS; k++) { // [...maps, ...maps]: the carousel loops (v10:111965-111969)
+        // v10 lists every pool map alike (no greying, no alt text): the queue's own filter decides what plays
         const int id = maps[k % RANKED_SEASON_MAPS];
         const char *name = ranked_pool_map_name(id);
-        // a pool map the queue cannot play is greyed (KN choice: v10 lists every pool map as playable)
-        const int playable = !cJSON_IsFalse(cJSON_GetObjectItem(cJSON_GetArrayItem(pmaps, k % RANKED_SEASON_MAPS), "available"));
-        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"%s><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\" alt=\"",
-                   playable ? "" : " style=\"opacity: 0.35;\"", id);
-        sb_append_esc(sb, name ? name : "");
-        sb_append(sb, "\"> <div class=\"map-name svelte-17kea4i\">");
+        sb_appendf(sb, "<div class=\"map-card svelte-17kea4i\"><img class=\"map-image svelte-17kea4i\" src=\"./img/maps/map_%d.png\"> <div class=\"map-name svelte-17kea4i\">", id);
         sb_append_esc(sb, name ? name : "");
         sb_append(sb, "</div></div>");
     }

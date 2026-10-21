@@ -15,6 +15,11 @@ The client's script (KRUNKNATIVE_INPUT_SCRIPT, text checks from the [input_scrip
   3. the brain is killed by this harness while the popup is up; FIND MATCH then fails to reach the
      matchmaking server: v10 shows the "Internal Error" popup (v10:98443-98450, 37958), not a line
 
+  H. the Home tab's map carousel is v10's markup (ranked_ui.c gen_home, v10:111965-111969): every pool map
+     is a plain .map-card with an unlabelled .map-image, none greyed, even one the brain marks unavailable.
+     A --render-scenario run of tools/uidiff/scenarios/ranked-home.json (no brain) dumps the document
+     (KRUNKNATIVE_SCENARIO_HTML) and checks it.
+
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL) and python websockets. Exit 77 when the
 database or websockets is unavailable.
 """
@@ -206,10 +211,44 @@ def scroll_of(text, element):
     return None
 
 
+def home_map_cards(build):
+    """H: the Home tab's carousel from a scenario (no brain). The scenario's season maps say one map is
+    unavailable; v10 still lists it as a plain card (its carousel: _38145-_38147, v10:111965-111969)."""
+    with open(os.path.join(ROOT, "tools", "uidiff", "scenarios", "ranked-home.json"), encoding="utf-8") as f:
+        scenario = json.load(f)
+    profile = scenario["state"]["ranked"]["profile"]
+    profile["maps"] = [{"id": 2, "available": True}, {"id": 4, "available": True}, {"id": 11, "available": False},
+                       {"id": 14, "available": True}, {"id": 17, "available": True}]
+    work = tempfile.mkdtemp(prefix="kn-rkhome-", dir=CACHE if os.path.isdir(CACHE) else None)
+    scn, out, html = (os.path.join(work, n) for n in ("scenario.json", "home.png", "home.html"))
+    with open(scn, "w", encoding="utf-8") as f:
+        json.dump(scenario, f)
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(work, "cfg"),
+                "KRUNKNATIVE_SCENARIO_HTML": html})
+    r = subprocess.run([f"{BUILD}/client_bin", "--render-scenario", scn, out], cwd=ROOT, env=env, capture_output=True, text=True,
+                       timeout=240)
+    doc = read_log(html) if os.path.exists(html) else ""
+    check("the Home scenario renders the popup's document", r.returncode == 0 and "map-carousel-container" in doc,
+          (r.stdout + r.stderr)[-300:])
+    cards = re.findall(r'<div class="map-card[^"]*"([^>]*)><img class="map-image[^"]*"([^>]*)>', doc)
+    check("the carousel lists every pool map twice (10 cards, v10 [...maps, ...maps])", len(cards) == 10, str(len(cards)))
+    greyed = [c for c in cards if "style" in c[0]]
+    check("no map card is greyed, even the one the brain marks unavailable (v10 has no greying)", not greyed,
+          "%d greyed" % len(greyed))
+    labelled = [c for c in cards if "alt=" in c[1]]
+    check("the map images carry no alt text (v10's markup: a broken image shows nothing)", not labelled, "%d with alt" % len(labelled))
+    if all(results):
+        shutil.rmtree(work, ignore_errors=True)
+    else:
+        print("logs kept in " + work)
+
+
 def main():
     if not os.access(f"{BUILD}/client_bin", os.X_OK):
         print("ranked_menu_e2e: no client_bin in %s: skipped" % BUILD)
         return 77
+    home_map_cards(BUILD)
     scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
     r = subprocess.run(scratch + ["create", DRIVER, NAME], capture_output=True)
     if r.returncode:
