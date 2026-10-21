@@ -16,6 +16,7 @@ import path from "node:path";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import crypto from "node:crypto";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -402,7 +403,7 @@ const TRACE_HOOK = `(() => {
   window.addEventListener("unhandledrejection", (e) => console.log("[hook] rejection " + T() + "ms " + String(e.reason && (e.reason.message || e.reason)).slice(0, 160)));
   const origFetch = window.fetch;
   window.fetch = function (...a) {
-    try { const u = String(a[0] && a[0].url ? a[0].url : a[0]); if (/excludeGame/.test(u)) console.log("[hook] seek excludeGame " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 16).join(" | ")); } catch (e) {}
+    try { const u = String(a[0] && a[0].url ? a[0].url : a[0]); if (/guest\\/profile/.test(u)) console.log("[hook] guest profile " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 12).map((l) => l.trim().slice(0, 100)).join(" | ")); if (/excludeGame/.test(u)) console.log("[hook] seek excludeGame " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 16).join(" | ")); } catch (e) {}
     return origFetch.apply(this, a); };
   const send = WebSocket.prototype.send;
   WebSocket.prototype.send = function (data) {
@@ -468,10 +469,29 @@ const INIT_PROBE_JS = `(() => {
 const INIT_HANDLER_COLUMN = 10307050;
 // the disconnect routine (the window's "Lost Connection"): its entry, and its arguments (reason, code, error)
 const DISCONNECT_COLUMN = 10493103;
+// the matchmaker's seek method body: who calls it, and with which options (excludeGame or not)
+const SEEK_COLUMN = 6672857;
+const SEEK_PROBE_JS = `(() => {
+  const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 200) : String(x).slice(0, 100);
+  try { return JSON.stringify({ opts: s(IIìiiîï) }); } catch (e) { return "probe " + e.message; }
+})()`;
 const DISCONNECT_PROBE_JS = `(() => {
   const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
   try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
 })()`; // the disconnect call in the init handler (game.js line 1, 0-based column)
+// The localStorage the page expects on a warm profile: an anonymous session (unsigned placeholder JWTs, generated per
+// profile, never a real credential) and the page's preference keys. Only keys that are missing are written.
+function profileSeed() {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const id = crypto.randomUUID();
+  const jwt = (sub) => `${b64({ alg: "none", typ: "JWT" })}.${b64({ exp: now + 365 * 86400, iat: now, iss: "FRVR", sub, extra: { identifier: id.replace(/-/g, "").slice(0, 24), platform: "anonymous", verified: true } })}.`;
+  const keys = { __FRVR_auth_access_token: jwt(id), __FRVR_auth_refresh_token: jwt(id), __frvr_rfc_uuidv4: id,
+    canStore: "true", krk_lang: "en", krk_hideFull: "false", "krunker-display-mode": "none", pingRegion7: "us-nj",
+    krk_regionPriority: "us-nj", registerNotificationLastShown: String(Date.now()) };
+  return `(() => { try { for (const [k, v] of Object.entries(${JSON.stringify(keys)})) if (localStorage.getItem(k) === null) localStorage.setItem(k, v); } catch (e) {} })();`;
+}
+
 const CONSENT_OPEN_JS =`(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
 const CLICK_PLAY_JS = `(() => {
   const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
@@ -511,11 +531,11 @@ async function join() {
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
     "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
     `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
-    `--user-data-dir=${path.join(cfg.runDir, "join-profile")}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
+    `--user-data-dir=${path.join(cfg.runDir, process.env.KN_JOIN_PROFILE || "join-profile")}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekCalls: [], seekBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
   const reqUrl = new Map();
   let appScript = null;
   const hostsSeen = new Set();
@@ -566,6 +586,8 @@ async function join() {
             appScript = p.scriptId;
             send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: INIT_HANDLER_COLUMN } })
               .then((r) => { report.breakpoint = r.result ? r.result.actualLocation : r; });
+            send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: SEEK_COLUMN } })
+              .then((r) => { report.seekBreakpoint = r.result ? r.result.actualLocation : r; });
             send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: DISCONNECT_COLUMN } })
               .then((r) => { report.disconnectBreakpoint = r.result ? r.result.actualLocation : r; });
           }
@@ -579,6 +601,15 @@ async function join() {
                 const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: f.callFrameId, expression: probe, returnByValue: true });
                 report.pauses.push({ exception: f.functionName, line: f.location && f.location.lineNumber, col: f.location && f.location.columnNumber, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
               }
+              await send("Debugger.resume");
+            })();
+            break;
+          }
+          if (top.functionName === "value" && top.location.columnNumber >= SEEK_COLUMN && top.location.columnNumber <= SEEK_COLUMN + 60) {
+            (async () => {
+              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: SEEK_PROBE_JS, returnByValue: true });
+              const callers = p.callFrames.slice(1, 8).map((f) => `${f.functionName || "?"}@${f.location.columnNumber}`);
+              report.seekCalls.push({ opts: r.result && r.result.result ? r.result.result.value : r.error || r, callers, t: Date.now() });
               await send("Debugger.resume");
             })();
             break;
@@ -619,12 +650,16 @@ async function join() {
       if (r.result && r.result.data) { fs.writeFileSync(file, Buffer.from(r.result.data, "base64")); report.shots.push(file); }
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
+    // the page keeps its anonymous FRVR session and a few preferences in localStorage; a fresh profile has none of them
+    // (and the FRVR host is blocked here). profileSeed writes placeholders for the keys that are missing; nothing real.
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_EVENTS_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: TRACE_HOOK });
     await send("Debugger.enable");
     await send("Debugger.setAsyncCallStackDepth", { maxDepth: 32 });
-    await send("Debugger.setPauseOnExceptions", { state: "uncaught" });
+    // pausing on every uncaught exception stalls a page that throws in a loop: opt in with KN_JOIN_PAUSE_EXC=1
+    await send("Debugger.setPauseOnExceptions", { state: process.env.KN_JOIN_PAUSE_EXC ? "uncaught" : "none" });
     await send("Page.navigate", { url: cfg.localUrl });
     await sleep(cfg.loadWaitMs);
     // the consent window can come back after an accept (its vendor check finishes late): accept until it stays hidden
