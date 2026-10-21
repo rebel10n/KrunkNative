@@ -219,6 +219,15 @@ const STATE_JS = `(() => ({
   text: (document.body && document.body.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 200),
 }))()`;
 
+// The disconnect routine's breakpoint (the join owner's probe, tools/krunker-local/krunker-local.mjs): its column in
+// game.js (line 2 of the script as CDP numbers it) and the probe of its three arguments (reason, code, error).
+const DISCONNECT_COLUMN = 10493103;
+const DISCONNECT_FN = "iïiìïîï";
+const DISCONNECT_PROBE_JS = `(() => {
+  const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
+  try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
+})()`;
+
 // The DevTools session on one page target: request/response by id, events handed to the listener.
 function cdpSession(wsUrl, onEvent) {
   const ws = new WebSocket(wsUrl);
@@ -305,6 +314,9 @@ export async function run(opts = {}) {
     const eventCounts = {};
     const consoleLog = [];
     const kwrites = [];
+    const disconnects = [];
+    const pauses = [];
+    let appScript = null;
     const onEvent = (method, p) => {
       eventCounts[method] = (eventCounts[method] || 0) + 1;
       switch (method) {
@@ -312,6 +324,31 @@ export async function run(opts = {}) {
         case "Network.webSocketFrameSent": frames.write("out", p.requestId, reqUrl.get(p.requestId), p.response); break;
         case "Network.webSocketFrameReceived": frames.write("in", p.requestId, reqUrl.get(p.requestId), p.response); break;
         case "Network.loadingFailed": errors.push(`failed ${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
+        case "Debugger.scriptParsed":
+          if (/krunker\.io\/js\/app\.js$/.test(p.url || "") && !appScript) {
+            appScript = p.scriptId;
+            page.send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: DISCONNECT_COLUMN } })
+              .then((r) => { result.disconnectBreakpoint = r.result ? r.result.actualLocation : r.error; });
+          }
+          break;
+        case "Debugger.paused": {
+          const top = p.callFrames[0];
+          if (pauses.length < 10) pauses.push({ reason: p.reason, fn: top.functionName || "?", line: top.location.lineNumber, col: top.location.columnNumber, t: now() - t0 });
+          if (top.functionName === DISCONNECT_FN) {
+            (async () => {
+              const r = await page.send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: DISCONNECT_PROBE_JS, returnByValue: true });
+              disconnects.push({
+                args: r.result && r.result.result ? r.result.result.value : r.error || r,
+                stack: p.callFrames.slice(0, 10).map((f) => `${f.functionName || "?"}@${f.location.lineNumber}:${f.location.columnNumber}`),
+                t: now() - t0,
+              });
+              await page.send("Debugger.resume");
+            })();
+          } else {
+            page.send("Debugger.resume");
+          }
+          break;
+        }
         case "Runtime.consoleAPICalled":
           if (p.args && p.args.length && String(p.args[0].value || "").startsWith("[kwrite]")) kwrites.push(String(p.args[0].value).slice(0, 900));
           if (p.type === "error" || p.type === "warning" || /local|hook|FAIL/.test(JSON.stringify(p.args).slice(0, 300))) consoleLog.push(`${p.type} ${JSON.stringify(p.args).slice(0, 220)}`);
@@ -332,6 +369,10 @@ export async function run(opts = {}) {
         console.log("[kwrite] " + kind + " " + k + " = " + String(v).slice(0, 12) + " @ " + stack); };
       S.setItem = function (k, v) { log("set", k, v); return si.call(this, k, v); };
       S.removeItem = function (k) { log("del", k, ""); return ri.call(this, k); }; })();` });
+    // The disconnect breakpoint: set when the page's app script is parsed; the paused frame's arguments and callers are
+    // recorded, then the page carries on.
+    await page.send("Debugger.enable");
+    await page.send("Debugger.setPauseOnExceptions", { state: "none" });
     await page.send("Page.navigate", { url: cfg.localUrl });
 
     // the consent dialog comes back until its vendor check settles: accept it as a user would
@@ -376,6 +417,8 @@ export async function run(opts = {}) {
     result.eventCounts = eventCounts;
     result.console = consoleLog.slice(0, 12);
     result.kwrites = kwrites.slice(0, 40);
+    result.disconnects = disconnects.slice(0, 5);
+    result.pauses = pauses;
     result.errors = errors.slice(0, 10);
     result.bridgeLog = fs.existsSync(path.join(runDir, "bridge.log"))
       ? fs.readFileSync(path.join(runDir, "bridge.log"), "utf8").split("\n").filter((l) => /v10|bridge/.test(l)).slice(-6) : [];
