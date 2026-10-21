@@ -65,6 +65,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.INPUT_BATCH]: "INPUT_BATCH",
   [T.NATIVE_MORE.RECON]: "RECON",
   [T.NATIVE_MORE.SHOT]: "SHOT",
+  [T.NATIVE_MORE.LEAVE]: "LEAVE",
   [T.NATIVE_MORE.CHAT]: "CHAT",
   [T.NATIVE_MORE.MATCH_VOTE_STATE]: "MATCH_VOTE_STATE",
   [T.NATIVE_MORE.LEADERBOARD]: "LEADERBOARD",
@@ -398,6 +399,14 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   if (session.initSent && type === T.NATIVE_MORE.SHOT) {
     const mapped = T.mapShot(payload, session.shooters);
     if (mapped.stop) return stopAt(session, "SHOT", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
+  // LEAVE: another player disconnected: the v10 "2" (see mapLeave); its position is no longer a shot's origin
+  if (session.initSent && type === T.NATIVE_MORE.LEAVE) {
+    const mapped = T.mapLeave(payload);
+    if (mapped.stop) return stopAt(session, "LEAVE", mapped.stop);
+    session.shooters.delete(payload.readInt32LE(0));
     for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
     return;
   }

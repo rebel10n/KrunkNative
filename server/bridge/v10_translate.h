@@ -37,6 +37,7 @@
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
 #define V10_IN_PLAYER_INTERACTION "inat"
 #define V10_IN_UPD_MATCH_VOTE "mv"
+#define V10_IN_REMOVE_PLAYER "2" /* v10.js 97927 REMOVE_PLAYER, the handler _73270: one sid */
 #define V10_IN_SHOW_TRACER "9" /* v10.js 97902 SHOW_TRACER, the handler 220548 (_73392) */
 #define V10_IN_SYNC_PLAYER "l" /* v10.js 220091: the owner's movement state, one argument: the 26-slot array */ /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
@@ -231,6 +232,8 @@ typedef struct V10Shooter {
     double x, y, z, height;
 } V10Shooter;
 
+/* LEAVE (NetLeavePacket, 4 bytes): another player disconnected, the "2" (mapLeave, v10Translate.ts). */
+void v10_map_leave(V10Out *o, const uint8_t *p, size_t n);
 /* SHOT (NetShotPacket, 31 bytes): one hitscan ray of another player's shot as the tracer "9" (mapShot, v10Translate.ts).
  * shooter: that player's last state or spawn, NULL when the bridge has none (the origin is then the hit point at height 0). */
 void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter);

@@ -821,6 +821,25 @@ int main(void) {
         CHECK(v10_bridge_untranslated("SHOT") == 0, "a shot does not stop the observer's session");
     }
 
+    // LEAVE (20): player 9 disconnects: the observer's "2" [9]; the session stays up (the next state still comes through)
+    {
+        uint8_t lv[4];
+        w_i32(lv, 0, 9);
+        native_send(&g_native, NET_PACKET_LEAVE, lv, 4);
+        WAIT_FOR(client_count("2") == 1);
+        KrunkerFrame gone;
+        CHECK(client_get("2", 0, &gone) && gone.argc == 1 && vequal(&gone.args[0], &KRUNKER_V_NUM(9)), "2 [9]: the player left");
+        krunker_frame_free(&gone);
+        CHECK(v10_bridge_untranslated("LEAVE") == 0, "a leave does not stop the observer's session");
+        uint8_t st11[79];
+        memset(st11, 0, sizeof st11);
+        w_i32(st11, 0, 11);
+        w_f32(st11, 13, 2.5f); w_f32(st11, 17, 2); w_f32(st11, 21, 3);
+        w_f32(st11, 41, 1); w_f32(st11, 57, 0.25f); st11[61] = 1; w_f32(st11, 53, 0.6f); w_i32(st11, 9, 2); w_f32(st11, 49, 1);
+        native_send(&g_native, NET_PACKET_STATE, st11, 79);
+        WAIT_FOR(client_count("k") >= 2);
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},

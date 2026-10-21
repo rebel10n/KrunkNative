@@ -91,6 +91,7 @@ export const V10_IN = Object.freeze({
   UPDATE_FLAG: "ufl",
   UPDATE_FLAG_INFO: "ufi",
   PLAYER_INTERACTIONS: "inat", // with sid -1 and the pickup flag: updatePickup (the pickup half of inat, no player)
+  REMOVE_PLAYER: "2", // v10.js 97927 REMOVE_PLAYER, the handler _73270: one sid, the player left
   SHOW_TRACER: "9", // v10.js 97902 SHOW_TRACER, the handler _73392 (220548): one hitscan ray's tracer
   SYNC_PLAYER: "l", // v10.js 220091 (_73160): the owner's movement state, one argument: the 26-slot array
   UPD_MATCH_VOTE: "mv", // [vo, mts]: the match vote cards (v10 UPD_MATCH_VOTE, the v7 broadcast "mv")
@@ -236,6 +237,7 @@ export const NATIVE_MORE = Object.freeze({
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
   RECON: 110, // NET_PACKET_RECON: the owner's authoritative state after an input (NetReconPacket, the v10 "l")
+  LEAVE: 20, // NET_PACKET_LEAVE: another player disconnected (NetLeavePacket, Krunker "2")
   SHOT: 21, // NET_PACKET_SHOT: one hitscan ray of another player's shot (NetShotPacket): the tracer "9"
   INPUT_BATCH: 111, // NET_PACKET_INPUT_BATCH: the frames of one input window (NetInputBatchPacket, Krunker "q")
   CHAT_V7: 245, // NET_PACKET_CHAT_V7: a chat line for a v7 peer (NetChatV7Packet: channel, account id, NetChatPacket)
@@ -543,6 +545,12 @@ export function mapServerLine(body: Buffer, escape: (s: string) => string): Mapp
   const name = cstr(4, 32);
   const template = cstr(36, 288);
   return chatLine(2, template.replace("$", () => name), null, -1, null, escape);
+}
+
+// NetLeavePacket (4 bytes): int32 uid, the player who disconnected. It is the sid v10 knows the player by (ADD_PLAYERS' id).
+export function mapLeave(p: Buffer): Mapped {
+  if (p.length !== 4) return { messages: [], stop: "malformed" };
+  return { messages: [[V10_IN.REMOVE_PLAYER, [p.readInt32LE(0)]]] };
 }
 
 // ---- MODE_STATE and OBJECT_STATE: the mode snapshot and the object list a joiner gets after the INIT.

@@ -198,6 +198,7 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_INPUT_BATCH: return "INPUT_BATCH";
     case NET_PACKET_RECON: return "RECON";
     case NET_PACKET_SHOT: return "SHOT";
+    case NET_PACKET_LEAVE: return "LEAVE";
     case NET_PACKET_CHAT: return "CHAT";
     case NET_PACKET_MATCH_VOTE_STATE: return "MATCH_VOTE_STATE";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
@@ -266,6 +267,15 @@ static void shooter_set(V10Session *s, int32_t uid, double x, double y, double z
         s->shooter_cap = cap;
     }
     s->shooters[s->shooter_n++] = v;
+}
+
+static void shooter_remove(V10Session *s, int32_t uid) {
+    for (size_t i = 0; i < s->shooter_n; i++) {
+        if (s->shooters[i].uid == uid) {
+            s->shooters[i] = s->shooters[--s->shooter_n];
+            return;
+        }
+    }
 }
 
 static void tcp_close(V10Session *s) {
@@ -933,6 +943,14 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* LEAVE: another player disconnected: the v10 "2" (see v10_map_leave); its position is no longer a shot's origin */
+    if (s->init_sent && type == NET_PACKET_LEAVE) {
+        v10_out_init(&o);
+        v10_map_leave(&o, p, n);
+        if (!o.stop && n == 4) shooter_remove(s, rd_i32(p, 0));
+        finish_out(s, &o, "LEAVE");
         return;
     }
     /* SHOT: one hitscan ray of another player's shot, the tracer "9" (see v10_map_shot) */

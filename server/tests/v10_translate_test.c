@@ -341,6 +341,21 @@ int main(void) {
             v10_out_free(&mo);
         }
 
+        // LEAVE (20, NetLeavePacket, 4 bytes) -> "2" [uid] (REMOVE_PLAYER, one sid)
+        {
+            uint8_t lv[4];
+            V10Out lo;
+            put_i32(lv, 0, 9);
+            v10_out_init(&lo);
+            v10_map_leave(&lo, lv, 4);
+            MSG_IS(&lo, 0, "2", N(9));
+            v10_out_free(&lo);
+            v10_out_init(&lo);
+            v10_map_leave(&lo, lv, 3);
+            CHECK(stop_has(&lo, "malformed"), "a short leave is malformed");
+            v10_out_free(&lo);
+        }
+
         // SHOT (21, NetShotPacket, 31 bytes) -> the tracer "9": [sid, hit (0.1), normal (0.01) | nil, trail, origin (0.1), 0, 0]
         {
             uint8_t sh[31];

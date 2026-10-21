@@ -992,6 +992,15 @@ void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n) {
     chat_line(o, 2, line, w, NULL, 0, -1, 0, 0);
 }
 
+/* LEAVE: NetLeavePacket (4 bytes): int32 uid, the sid v10 knows the player by. */
+void v10_map_leave(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != 4) {
+        o->stop = "malformed";
+        return;
+    }
+    v10_push(o, V10_IN_REMOVE_PLAYER, (KrunkerValue[]){KRUNKER_V_NUM(rd_i32(p, 0))}, 1);
+}
+
 /* SHOT: NetShotPacket (31 bytes, packed): int32 uid @0, int32 weapon @4, float hit[3] @8, has_normal @20, normal_yaw @21,
  * normal_pitch @25, trail @29, first @30 (mapShot, v10Translate.ts). The tracer "9" is one array argument: [sid, hit x, y, z
  * (0.1), normal yaw, pitch | nil (0.01), trail, shooter x, y, height, z (0.1), bulletType 0, impactType 0]. */

@@ -539,6 +539,18 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.match(T.mapShot(Buffer.alloc(30), shooters).stop || "", /malformed/);
 }
 
+// ---- LEAVE (20, NetLeavePacket, 4 bytes: int32 uid): another player disconnected -> "2" (REMOVE_PLAYER, v10.js 97927; its
+// handler _73270 takes the one sid: it clears that player's entry). The uid is the sid.
+{
+  const leave = (uid: number) => {
+    const b = Buffer.alloc(4);
+    b.writeInt32LE(uid, 0);
+    return b;
+  };
+  assert.deepStrictEqual(T.mapLeave(leave(9)).messages, [["2", [9]]]);
+  assert.match(T.mapLeave(Buffer.alloc(3)).stop || "", /malformed/);
+}
+
 async function main(): Promise<void> {
   // ---- the fake KrunkNative server: records every frame the bridge writes, sends what the test asks
   const nativeFrames: Array<{ type: number; payload: Buffer }> = [];
@@ -927,6 +939,16 @@ async function main(): Promise<void> {
   const tracer = await waitFor(() => clientMessages.find((m) => m.label === "9"), "9 (the tracer)");
   assert.deepStrictEqual(tracer.args, [[9, 4, 5, 6, null, null, 1, 1.3, 2, 9.2, 3, 0, 0]]);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("SHOT"), undefined, "the shot does not stop the session");
+
+  // LEAVE (20): player 9 disconnects: the observer's "2" [9], and the session stays up (the next packets still go through)
+  const leaveFrame = Buffer.alloc(4);
+  leaveFrame.writeInt32LE(9, 0);
+  native.write(nativeFrame(20, leaveFrame));
+  const gone = await waitFor(() => clientMessages.find((m) => m.label === "2"), "2 (the leave)");
+  assert.deepStrictEqual(gone.args, [9]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("LEAVE"), undefined, "a leave does not stop the session");
+  native.write(nativeFrame(6, stateOf(11, 2.5))); // a player still in the game: its state still comes through
+  await waitFor(() => clientMessages.filter((m) => m.label === "k").length >= 2 ? true : undefined, "k after the leave");
 
   // 6a. the owner's state (RECON 110) -> l, one argument (the array)
   const reconFrame = Buffer.alloc(89);
