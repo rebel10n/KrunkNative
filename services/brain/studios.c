@@ -136,6 +136,12 @@ static int is_id(const char *s) {
 int studios_gapi(SocialSession *s, const GapiReq *r) {
     if (r->nseg < 1 || strcmp(r->seg[0], "studios")) return 0;
     if (s->account_id <= 0) {
+        /* the Studios window reads these on open: a guest has no studios and no invites, so the
+         * empty list (v10 reads data || []) and not an error the window would show */
+        if (gapi_is(r, "GET", "/studios/mine") || gapi_is(r, "GET", "/studios/invites")) {
+            gapi_reply(s, r->rid, cJSON_CreateArray());
+            return 1;
+        }
         gapi_error(s, r->rid, 401, "UNAUTHORIZED", "You must be signed in.");
         return 1;
     }

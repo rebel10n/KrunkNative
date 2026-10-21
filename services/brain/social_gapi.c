@@ -14,7 +14,7 @@
  *   GET  /social/feed?player_id=<id>[&limit]                           {posts}
  *   GET  /social/post/<id>                                              {post, comments}
  *   POST /social/post {type, text, funds?}                              {post_id, player_funds}
- *   POST /social/post/<id>/vote {value 0|1}                             {value, votes}
+ *   POST /social/post/<id>/vote {value 0|1}                             {value} (the value now held; 404 for a missing post)
  *   POST /social/post/<id>/comment {text}                               {comment_id}
  *   GET  /social/news                                                   {news: [html]}
  *   GET  /players/search?q&limit                                        {results}
@@ -382,19 +382,45 @@ static void social_create(SocialSession *s, const GapiReq *r) {
                 create_done, gctx(r, t, 0, NULL));
 }
 
+/* the vote's reply {value}: the value the viewer now has (1 liked, 0 not) */
 static void vote_done(SocialSession *s, kn_db_result *res, void *extra) {
     GCtx *c = extra;
     if (!kn_db_ok(res)) {
         gapi_error(s, c->rid, 400, "SOCIAL_VOTE_FAILED", acct_db_error(res, "vote"));
         return;
     }
-    if (c->b == 1 && kn_db_affected(res) < 1) { /* the insert matched no post */
-        gapi_error(s, c->rid, 404, "SOCIAL_POST_NOT_FOUND", "Post not found");
-        return;
-    }
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "value", (double) c->b);
     gapi_reply(s, c->rid, o);
+}
+
+/* a like checks the post first: a missing or deleted post is SOCIAL_POST_NOT_FOUND. The insert below
+ * matches no row when the viewer already likes the post, and that is not an error. */
+static void vote_post_done(SocialSession *s, kn_db_result *res, void *extra) {
+    GCtx *c = extra; /* a = the post id, b = 1 (the value) */
+    if (!kn_db_ok(res)) {
+        gapi_error(s, c->rid, 400, "SOCIAL_VOTE_FAILED", acct_db_error(res, "vote"));
+        return;
+    }
+    if (kn_db_rows(res) < 1) {
+        gapi_error(s, c->rid, 404, "SOCIAL_POST_NOT_FOUND", "Post not found");
+        return;
+    }
+    char me[24], pid[24];
+    GCtx *d = calloc(1, sizeof *d); /* social_query frees its extra after the callback: c is not reused */
+    if (!d) {
+        gapi_error(s, c->rid, 500, "SOCIAL_VOTE_FAILED", "Failed to vote");
+        return;
+    }
+    d->rid = c->rid;
+    d->a = c->a;
+    d->b = 1;
+    social_query(s,
+                 SQL(.pg = "INSERT INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
+                           "AND deleted_at IS NULL ON CONFLICT DO NOTHING",
+                     .any = "{insert_ignore} INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
+                            "AND deleted_at IS NULL {ignore_conflicts}"),
+                 KN_DB_ARGS(social_viewer(s, me), acct_itoa(pid, c->a)), vote_done, d);
 }
 
 static void social_vote(SocialSession *s, const GapiReq *r, int64_t id) {
@@ -406,12 +432,8 @@ static void social_vote(SocialSession *s, const GapiReq *r, int64_t id) {
     const int64_t value = body_int(r->body, "value", 1) ? 1 : 0;
     char me[24], pid[24];
     if (value)
-        social_query(s,
-                     SQL(.pg = "INSERT INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
-                               "AND deleted_at IS NULL ON CONFLICT DO NOTHING",
-                         .any = "{insert_ignore} INTO feed_likes (post_id, account_id) SELECT id, $1 FROM feed_posts WHERE id = $2 "
-                                "AND deleted_at IS NULL {ignore_conflicts}"),
-                     KN_DB_ARGS(social_viewer(s, me), acct_itoa(pid, id)), vote_done, gctx(r, id, 2, NULL));
+        social_query(s, SQL(.any = "SELECT id FROM feed_posts WHERE id = $1 AND deleted_at IS NULL"),
+                     KN_DB_ARGS(acct_itoa(pid, id)), vote_post_done, gctx(r, id, 1, NULL));
     else
         social_query(s, SQL(.any = "DELETE FROM feed_likes WHERE account_id = $1 AND post_id = $2"),
                      KN_DB_ARGS(social_viewer(s, me), acct_itoa(pid, id)), vote_done, gctx(r, id, 0, NULL));

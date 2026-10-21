@@ -539,6 +539,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/studios_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_studios PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.3 gapi over the social socket: the 45 "tunnel" routes of doc/v10/api-inventory.md, each with the reply its consumer reads
+    add_test(NAME brain_gapi_tunnel
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/gapi_tunnel_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_gapi_tunnel PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # v10 double XP (0341_double_xp): the end-screen 2x XP offer, the claim, the weekend schedules (Box Office commits)
     foreach (drv IN ITEMS postgres sqlite)
         string(TOUPPER ${drv} DRV)
