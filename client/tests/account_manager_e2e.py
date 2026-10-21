@@ -13,7 +13,9 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   Use while signed in fills the card and refuses nothing -> an official krunker.io game (a guest joined through the
   stub's matchmaker): Add a krunk.io login, Use fills the card, Remove -> krunker.io: Add stores its login with no
   request to krunker.io, Use fills the card with it, its Login signs in to krunker.io (the Security Challenge
-  passes by itself, the stub's 2FA code is typed) and the card closes, Remove.
+  passes by itself, the stub's 2FA code is typed) and the card closes, Remove. Signed in as one account, the card of
+  another listed login does not switch the session: its Login sends nothing (krunk.io and krunker.io), the signed-in
+  account stays the active one, and the card says whose session it is.
 
   The web build's Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
   __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
@@ -344,6 +346,27 @@ def kio_login(brain_url, game_port, stub):
     check("the card closes after the krunker.io sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
 
 
+def login_while_signed_in(brain_url, game_port, db):
+    """Signed in as NAME2: Use fills the card with the other listed login (NAME), and its Login sends no sign-in. The
+    signed-in account stays the active row and nobody is signed out; the card says whose session it is."""
+    before = sessions(db)
+    log = run_client("switch_try", f"""0 menu
+3000 call showWindow {WINDOW}
+3400 clicksel [onclick*="knAltUse"]
+4000 nodes @modal [id="knV10Login"]
+4100 clickid knV10LoginSubmit
+6000 text @cardmsg [id="accResp"]
+6500 call knV10LoginClose
+7000 call showWindow {WINDOW}
+7500 text @act .knAltActive
+8000 quit
+""", brain_url, game_port)
+    check("the other login's card opens", match_of(log, "modal") == 1, str(match_of(log, "modal")))
+    check("its Login says whose session it is, and sends no sign-in", f"Signed in as {NAME2}" in text_of(log, "cardmsg")
+          and sessions(db) == before, f"sessions {before} -> {sessions(db)}; {text_of(log, 'cardmsg')[-120:]}")
+    check("the signed-in account stays the active row (no switch)", NAME2 in text_of(log, "act"), text_of(log, "act")[-120:])
+
+
 def restart_and_logout(brain_url, game_port):
     """A restart resumes the account from its stored session (no prompt); Logout ends it, and Use then fills the card
     again with no sign-in."""
@@ -402,6 +425,40 @@ def remove_accounts(brain_url, game_port):
           f"rows {match_of(restart, 'rows')}")
 
 
+OTHER = "kioother"  # a second krunker.io login (the stub accepts only kae.LOGIN: any other is refused)
+
+
+def kio_other_login(brain_url, game_port, stub):
+    """krunker.io signed in as the row's account: the card of another krunker.io login (OTHER, listed here) and its
+    Login send nothing to krunker.io, and the card says whose session it is. OTHER is removed again."""
+    posts = len(stub.find("POST", "/api/auth/login/username"))
+    log = run_client("kio_other", f"""0 menu
+500 call showWindow {WINDOW}
+1000 call knAltBackend 1
+1200 clickid knAltUser
+1300 type {OTHER}
+1400 clickid knAltPass
+1500 type {kae.PASSWORD}
+1600 clicksel [onclick*="knAltAdd"]
+2500 text @oadd [id="knAltMsg"]
+3000 clicksel [onclick*="knAltUse"]
+4000 nodes @omodal [id="knV10Login"]
+4100 clickid knV10LoginSubmit
+6000 text @omsg [id="accResp"]
+6500 call knV10LoginClose
+7000 call showWindow {WINDOW}
+7500 clicksel [onclick*="knAltRemove"]
+8000 text @oremoved [id="knAltMsg"]
+8500 quit
+""", brain_url, game_port)
+    check("krunker.io: the other login's card opens", match_of(log, "omodal") == 1, str(match_of(log, "omodal")))
+    check("krunker.io: its Login sends no sign-in to krunker.io", len(stub.find("POST", "/api/auth/login/username")) == posts,
+          f"posts {posts} -> {len(stub.find('POST', '/api/auth/login/username'))}")
+    check("krunker.io: the card says whose session it is", kae.LOGIN.lower() in text_of(log, "omsg").lower()
+          and "signed in as" in text_of(log, "omsg").lower(), text_of(log, "omsg")[-120:])
+    check("and the other login is removed again", f"Removed {OTHER}." in text_of(log, "oremoved"), text_of(log, "oremoved")[-120:])
+
+
 def krunker_row(brain_url, game_port, stub):
     """A krunker.io row: Add stores its login with no request to krunker.io, Use fills the card with it (no request),
     Remove forgets it. The card's own sign-in (krunker.io's code step included) is not run here."""
@@ -440,6 +497,7 @@ def krunker_row(brain_url, game_port, stub):
           "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
     kio_login(brain_url, game_port, stub)
+    kio_other_login(brain_url, game_port, stub)
     log = run_client("kio_remove", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltRemove"]
@@ -491,6 +549,7 @@ def main():
         use_fills(brain_url, game_port, db)
         sign_in_from_card(brain_url, game_port)
         use_while_signed_in(brain_url, game_port)
+        login_while_signed_in(brain_url, game_port, db)
         restart_and_logout(brain_url, game_port)
         sign_in_from_card(brain_url, game_port)
         refused_token(brain_url, game_port, db)

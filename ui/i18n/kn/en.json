@@ -11,6 +11,7 @@
  "kn.account.noServer": "No account server is set. Check Settings &gt; Client &gt; Matchmaker URL.",
  "kn.account.notInBuild": "Accounts are not available in this build yet. Please try again after the next update.",
  "kn.account.offlineMode": "Accounts are off in Offline Mode. Switch Account Mode to Online in Settings &gt; Client and restart.",
+ "kn.account.otherSignedIn": "Signed in as {0}. Log out to sign in as {1}.",
  "kn.account.reset.askCode": "Enter the code from the email (XXXX-XXXX-XXXX). It works once and expires after 30 minutes.",
  "kn.account.reset.askWho": "Enter your username or the verified email of your account. We'll email you a reset code.",
  "kn.account.reset.checkInbox": "Check your inbox.",

@@ -40,6 +40,7 @@
 #include <krunker_account.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -431,6 +432,17 @@ static void code_input(const int i) {
 }
 
 // _39062 / _39177 (login): krunker.io's username or email + password, the email code choice
+// A krunker.io Login for a login other than the signed-in account's (case-blind; an address never matches a name, so
+// an email Login is refused the same way): a sign-in would switch the session, so the card sends nothing.
+static int names_other_kio(const char *ident) {
+    if (!krunker_account_signed_in()) return 0;
+    const char *a = ident, *b = krunker_account_name();
+    for (; *a && *b; a++, b++) {
+        if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) return 1;
+    }
+    return *a != *b;
+}
+
 static void kio_submit(const char *mail, const char *name, const char *pass) {
     if (L.reg) {
         if (!*mail) {
@@ -453,6 +465,12 @@ static void kio_submit(const char *mail, const char *name, const char *pass) {
             return;
         }
         message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
+        return;
+    }
+    if (names_other_kio(ident)) { // the session stays: the card says whose it is, and nothing is sent
+        char text[300];
+        I18N_F(text, "kn.account.otherSignedIn", "Signed in as {0}. Log out to sign in as {1}.", krunker_account_name(), ident);
+        message(text);
         return;
     }
     krunker_account_sign_in(ident, pass);

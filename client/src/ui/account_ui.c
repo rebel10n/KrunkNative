@@ -1922,6 +1922,33 @@ int account_ui_twofa_handler(const char *name) {
     return name && (!strcmp(name, "sub2FA") || !strcmp(name, "onInput2FA") || !strcmp(name, "onKeyDown2FA"));
 }
 
+// The login card's Login names an account other than the signed-in one: a sign-in would switch the session (and
+// the reply's account replaces this one). The name typed decides; in Email mode the address does, when it is known.
+static int same_login_text(const char *a, const char *b) {
+    for (; *a && *b; a++, b++) {
+        if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) return 0;
+    }
+    return *a == *b;
+}
+
+static int names_other_account(const char *user, const char *mail) {
+    if (!g_logged_in) return 0;
+    if (user[0]) return !same_login_text(user, g_acc.name);
+    if (!mail[0]) return 0;
+    return !(g_email.known && g_email.addr[0] && same_login_text(mail, g_email.addr));
+}
+
+// The card's message (accResp): the signed-in account stays, and the login typed is not signed in. Nothing is sent.
+static void show_other_signed_in(const char *typed) {
+    char text[300];
+    I18N_F(text, "kn.account.otherSignedIn", "Signed in as {0}. Log out to sign in as {1}.", g_acc.name, typed);
+    StrBuf sb = {0};
+    sb_append_esc(&sb, text);
+    char *html = sb_finish(&sb);
+    show_acc_resp(html);
+    free(html);
+}
+
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     // No account service, or the probe found none: say why at once. A socket that is still
@@ -1963,6 +1990,10 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
                 return 1;
             }
             send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
+        } else if (names_other_account(user, mail)) { // the session stays: the card says whose it is, nothing is sent
+            show_other_signed_in(user[0] ? user : mail);
+            memset(pass, 0, sizeof(pass));
+            return 1;
         } else {
             // the login field takes a username or an email (v10's "Email" / "Username" field: the
             // brain signs in to the account holding the address)
