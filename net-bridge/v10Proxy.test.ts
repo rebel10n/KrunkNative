@@ -549,6 +549,11 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   };
   assert.deepStrictEqual(T.mapLeave(leave(9)).messages, [["2", [9]]]);
   assert.match(T.mapLeave(Buffer.alloc(3)).stop || "", /malformed/);
+
+// ---- Joiner waiting to spawn: v10's KILL_PLAYER "3" (handler _73275, v10.js 220335) starts the death UI and the
+// respawn countdown (forceSpawn + 1 seconds after 2.8 s, v10.js 220379). Its arguments: victim sid, deaths,
+// killer sid (0: none), assists [], weapon (nil), headshot.
+assert.deepStrictEqual(T.mapDeathCountdown(1).messages, [["3", [1, 0, 0, [], null, false]]]);
 }
 
 async function main(): Promise<void> {
@@ -939,6 +944,15 @@ async function main(): Promise<void> {
   const tracer = await waitFor(() => clientMessages.find((m) => m.label === "9"), "9 (the tracer)");
   assert.deepStrictEqual(tracer.args, [[9, 4, 5, 6, null, null, 1, 1.3, 2, 9.2, 3, 0, 0]]);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("SHOT"), undefined, "the shot does not stop the session");
+
+  // our own SPAWN while we wait to join (not active): the add record for us, then v10's death for us (KILL_PLAYER "3"),
+  // which starts the respawn countdown on the client
+  native.write(nativeFrame(4, spawnBuffer({ uid: 1, isYou: true, active: false, classIndex: 4, team: 0, health: 100, maxHealth: 100,
+    position: [1, 2, 3], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+    face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
+  const countdown = await waitFor(() => clientMessages.find((m) => m.label === "3"), "3 (the death for the countdown)");
+  assert.deepStrictEqual(countdown.args, [1, 0, 0, [], null, false]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("SPAWN"), undefined, "a waiting joiner's spawn does not stop the session");
 
   // LEAVE (20): player 9 disconnects: the observer's "2" [9], and the session stays up (the next packets still go through)
   const leaveFrame = Buffer.alloc(4);

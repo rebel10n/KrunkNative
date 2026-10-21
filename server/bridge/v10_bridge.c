@@ -903,13 +903,16 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
         shooter_set(s, spawn.uid, spawn.position[0], spawn.position[1], spawn.position[2], 11.0); /* standing: player_height */
-        if (!spawn.active) return; /* a player who is dead now: the v10 add is for players in play */
+        if (!spawn.active && !spawn.is_you) return; /* a player who is dead now: the v10 add is for players in play */
         const int at = skins_index(s, spawn.uid);
         v10_out_init(&o);
         const KrunkerValue rec = v10_player_add_record(&o, &spawn, at >= 0 ? &s->skins[at].skins : NULL, at >= 0, s->socket_id);
         const KrunkerValue add_args[2] = {rec, KRUNKER_V_NUM(1)};
         v10_push(&o, V10_IN_ADD_PLAYERS, add_args, 2);
-        if (spawn.is_you) {
+        if (!spawn.active) {
+            /* our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown */
+            v10_map_death_countdown(&o, spawn.uid);
+        } else if (spawn.is_you) {
             KrunkerValue start[8];
             v10_start_game(&spawn, s->game_timer, s->chall_mode, start);
             v10_push(&o, V10_IN_START_GAME, start, 8);

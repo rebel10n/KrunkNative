@@ -821,6 +821,20 @@ int main(void) {
         CHECK(v10_bridge_untranslated("SHOT") == 0, "a shot does not stop the observer's session");
     }
 
+    // our own SPAWN while we wait to join (not active): the add for us, then v10's death for us, KILL_PLAYER "3",
+    // which starts the respawn countdown on the client
+    {
+        uint8_t sp_wait[150];
+        spawn_buf(sp_wait, 1, 1, 0, 4, 0, 100, 1, 2, 3, 0, 0, "me");
+        native_send(&g_native, NET_PACKET_SPAWN, sp_wait, 150);
+        WAIT_FOR(client_count("3") == 1);
+        KrunkerFrame dc;
+        CHECK(client_get("3", 0, &dc) && dc.argc == 6 && vequal(&dc.args[0], &KRUNKER_V_NUM(1)) && dc.args[4].type == KRUNKER_NIL,
+              "3 [1, 0, 0, [], nil, false]: the death for the countdown");
+        krunker_frame_free(&dc);
+        CHECK(v10_bridge_untranslated("SPAWN") == 0, "a waiting joiner's spawn does not stop the observer's session");
+    }
+
     // LEAVE (20): player 9 disconnects: the observer's "2" [9]; the session stays up (the next state still comes through)
     {
         uint8_t lv[4];

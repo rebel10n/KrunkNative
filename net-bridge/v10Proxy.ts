@@ -440,9 +440,14 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   if (session.initSent && type === T.NATIVE_MORE.SPAWN) {
     const spawn = T.parseSpawn(payload);
     if (!spawn) return stopAt(session, "SPAWN", "malformed");
-    if (!spawn.active) return; // a player who is dead now: the v10 add is for players in play
-    session.shooters.set(spawn.uid, { x: spawn.position[0], y: spawn.position[1], z: spawn.position[2], height: 11 }); // standing: player_height
+    if (!spawn.active && !spawn.isYou) return; // a player who is dead now: the v10 add is for players in play
+    if (spawn.active) session.shooters.set(spawn.uid, { x: spawn.position[0], y: spawn.position[1], z: spawn.position[2], height: 11 }); // standing: player_height
     sendWs(session, T.V10_IN.ADD_PLAYERS, T.buildPlayerAdd(spawn, session.skinsByUid.get(spawn.uid), session.socketId), 1);
+    if (!spawn.active) {
+      // our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown
+      for (const [label, args] of T.mapDeathCountdown(spawn.uid).messages) sendWs(session, label, ...args);
+      return;
+    }
     if (spawn.isYou) sendWs(session, T.V10_IN.START_GAME, ...T.buildStartGame(spawn, session.gameTimer, session.challMode));
     return;
   }

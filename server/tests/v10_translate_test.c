@@ -356,6 +356,15 @@ int main(void) {
             v10_out_free(&lo);
         }
 
+        // a joiner waiting to spawn: KILL_PLAYER "3" [uid, 0, 0, [], nil, false] (v10.js 220335, the respawn countdown)
+        {
+            V10Out dc;
+            v10_out_init(&dc);
+            v10_map_death_countdown(&dc, 1);
+            MSG_IS(&dc, 0, "3", N(1), N(0), N(0), ARR(), NIL, B(0));
+            v10_out_free(&dc);
+        }
+
         // SHOT (21, NetShotPacket, 31 bytes) -> the tracer "9": [sid, hit (0.1), normal (0.01) | nil, trail, origin (0.1), 0, 0]
         {
             uint8_t sh[31];

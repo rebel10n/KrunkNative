@@ -92,6 +92,7 @@ export const V10_IN = Object.freeze({
   UPDATE_FLAG_INFO: "ufi",
   PLAYER_INTERACTIONS: "inat", // with sid -1 and the pickup flag: updatePickup (the pickup half of inat, no player)
   REMOVE_PLAYER: "2", // v10.js 97927 REMOVE_PLAYER, the handler _73270: one sid, the player left
+  KILL_PLAYER: "3", // v10.js 97935 KILL_PLAYER, the handler _73275 (220335): the death UI and the respawn countdown
   SHOW_TRACER: "9", // v10.js 97902 SHOW_TRACER, the handler _73392 (220548): one hitscan ray's tracer
   SYNC_PLAYER: "l", // v10.js 220091 (_73160): the owner's movement state, one argument: the 26-slot array
   UPD_MATCH_VOTE: "mv", // [vo, mts]: the match vote cards (v10 UPD_MATCH_VOTE, the v7 broadcast "mv")
@@ -551,6 +552,13 @@ export function mapServerLine(body: Buffer, escape: (s: string) => string): Mapp
 export function mapLeave(p: Buffer): Mapped {
   if (p.length !== 4) return { messages: [], stop: "malformed" };
   return { messages: [[V10_IN.REMOVE_PLAYER, [p.readInt32LE(0)]]] };
+}
+
+// A joiner waiting to spawn (our own SPAWN, not active): v10's KILL_PLAYER for us, which starts the death UI and the
+// respawn countdown (v10.js 220335, 220379). Arguments: victim sid, deaths, killer sid (0: none), assists [], weapon
+// (nil), headshot. The countdown runs on the client only; it sends ENTER_GAME once its enterGame runs (not from here).
+export function mapDeathCountdown(uid: number): Mapped {
+  return { messages: [[V10_IN.KILL_PLAYER, [uid, 0, 0, [], null, false]]] };
 }
 
 // ---- MODE_STATE and OBJECT_STATE: the mode snapshot and the object list a joiner gets after the INIT.

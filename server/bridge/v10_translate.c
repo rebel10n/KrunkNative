@@ -1001,6 +1001,12 @@ void v10_map_leave(V10Out *o, const uint8_t *p, size_t n) {
     v10_push(o, V10_IN_REMOVE_PLAYER, (KrunkerValue[]){KRUNKER_V_NUM(rd_i32(p, 0))}, 1);
 }
 
+void v10_map_death_countdown(V10Out *o, int32_t uid) {
+    KrunkerValue args[6] = {KRUNKER_V_NUM(uid), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_NIL,
+                            KRUNKER_V_BOOL(0)};
+    v10_push(o, V10_IN_KILL_PLAYER, args, 6);
+}
+
 /* SHOT: NetShotPacket (31 bytes, packed): int32 uid @0, int32 weapon @4, float hit[3] @8, has_normal @20, normal_yaw @21,
  * normal_pitch @25, trail @29, first @30 (mapShot, v10Translate.ts). The tracer "9" is one array argument: [sid, hit x, y, z
  * (0.1), normal yaw, pitch | nil (0.01), trail, shooter x, y, height, z (0.1), bulletType 0, impactType 0]. */
