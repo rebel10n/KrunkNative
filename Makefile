@@ -733,6 +733,10 @@ billboard-e2e: build ## server.cfg billboard / billboard_image: packets before I
 idle-kick-e2e: build ## Server idle kick: shooting / strafing / looking / chatting / respawning players stay, AFK and menu idlers are kicked
 	timeout 120 $(PYTHON) -I server/tests/idle_kick_e2e.py $(DEBUG_DIR)
 
+.PHONY: join-spawn-e2e
+join-spawn-e2e: build ## A joiner gets its own dead SPAWN after INIT (the join waits for its ENT), then spawns after the ENT
+	timeout 120 $(PYTHON) -I server/tests/join_spawn_e2e.py $(DEBUG_DIR)
+
 .PHONY: nuke-e2e
 nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a headless client, "n" 0 / 1, every enemy dies (FFA + TDM), flash and kill feed (EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/nuke_e2e.py $(DEBUG_DIR)

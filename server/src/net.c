@@ -1429,6 +1429,20 @@ static void net_process_pending_kicks(void) {
     g_pending_kick_count = 0;
 }
 
+// The joiner's own SPAWN at join, dead (active = 0): the official server's join, where the player waits until its
+// ENT (the spawn after the ENT is net_spawn_client). The waiting player is not in the game yet, so it is a temporary
+// one, freed here; the client's spawn after its ENT is the first real player.
+static void net_send_join_spawn(ClientConnection *client) {
+    Player *waiting = player_init(&g_server->game);
+    if (!waiting) return;
+    waiting->uid = client->id;
+    waiting->team = accounts_assigned_team(client);
+    waiting->active = 0;
+    snprintf(waiting->name, sizeof(waiting->name), "%s", client->name);
+    net_send_spawn(client, waiting, 1);
+    net_free_player(waiting);
+}
+
 void net_add_client(ClientConnection *client) {
     if (g_server->config.max_players && g_server->client_count >= g_server->config.max_players) {
         server_log("Rejecting client: server full (%zu/%u)", g_server->client_count, (unsigned int) g_server->config.max_players);
@@ -1502,12 +1516,14 @@ void net_add_client(ClientConnection *client) {
     client->om_extra_count = 0; // Object Manager: no extra weapons yet
     memset(&client->keep, 0, sizeof(client->keep)); // KrunkNative: no kept player state yet
     client->missed_projectiles = 0;
+    client->join_spawn_due = 0;
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
     accounts_on_connect(stored_client);
     on_client_connect(stored_client);
     net_send_init(stored_client);
+    stored_client->join_spawn_due = 1; // sent with its HELLO (the peer's version sets the SPAWN's size)
     game_send_round_state(&g_server->game, stored_client->id);
 }
 
@@ -1963,6 +1979,10 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             // the game announcement: a gated join gets it when it settles (accounts.c acc_set_ready);
             // an ungated one is settled from its connect, before this HELLO named its protocol
             if (client->acct.join_state == SERVER_JOIN_READY) net_send_game_announcement(client);
+            if (client->join_spawn_due) { // the joiner's own dead SPAWN, now that its version is known
+                client->join_spawn_due = 0;
+                net_send_join_spawn(client);
+            }
             break;
         case NET_PACKET_MATCH_VOTE: { // WP-E "maVote" "mode,map" (end screen; players and spectators)
             NetMatchVotePacket vote;

@@ -143,6 +143,7 @@ typedef struct {
     unsigned char peer_minor;      // HELLO minor of a NET_PROTOCOL_MAJOR peer (0 before / other majors): per-peer packet gates
     unsigned char peer_patch;      // WP-C: its HELLO patch (0 for a 2-byte HELLO): net_peer_has_wpc(peer_minor, peer_patch)
     unsigned char peer_flavor;     // its HELLO flavor nibble (GameFlavor; FLAVOR_BASE for a base or absent nibble)
+    unsigned char join_spawn_due;  // the joiner's dead SPAWN (net_send_join_spawn) goes out with its HELLO: its size follows the peer's version
 
     float connected_at;
     float spawned_at;
