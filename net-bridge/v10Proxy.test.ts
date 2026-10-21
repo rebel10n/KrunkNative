@@ -426,10 +426,10 @@ async function main(): Promise<void> {
   assert.strictEqual(forwarded.payload.length, 9); // "127.0.0.1" (loopback peer, no forwarding header)
   assert.strictEqual(nativeFrames.length, 1); // nothing else until the client speaks
 
-  // 3. LOAD -> HELLO: protocol 1.4.2, Krunker v10 ruleset bit
+  // 3. LOAD -> HELLO: protocol 1.4.5 (NET_PROTOCOL_PATCH 5, the NetStatePacket layout), Krunker v10 ruleset bit
   sendV10("load");
   const hello = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.HELLO), "HELLO");
-  assert.deepStrictEqual([...hello.payload], [1, 4, 4, 4]);
+  assert.deepStrictEqual([...hello.payload], [1, 4, 5, 4]);
   sendV10("load"); // a second LOAD sends no second HELLO
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);

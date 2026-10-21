@@ -190,6 +190,7 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_PLAYER_SOUND: return "PLAYER_SOUND";
     case NET_PACKET_TIMER: return "TIMER";
     case NET_PACKET_CHEAT: return "CHEAT";
+    case NET_PACKET_PICKUP: return "PICKUP";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
     case NET_PACKET_OBJECT_STATE: return "OBJECT_STATE";
     case NET_PACKET_MODE_SYNC_V7: return "MODE_SYNC_V7";
@@ -846,6 +847,13 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* PICKUP: one pickup's state, the pickup half of v10's "inat" (see v10_map_pickup) */
+    if (s->init_sent && type == NET_PACKET_PICKUP) {
+        v10_out_init(&o);
+        v10_map_pickup(&o, p, n);
+        finish_out(s, &o, "PICKUP");
         return;
     }
     /* CHEAT: one chat command's flag, on or off: the v10 handler for that label takes the value (v10.js 220244-220264) */

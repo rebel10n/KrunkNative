@@ -103,9 +103,9 @@ export const V10_IN = Object.freeze({
   TELEPORT_FROM_NODE: "mf",
 } as const);
 
-// KN HELLO: this bridge speaks protocol 1.4.4 (NET_PROTOCOL_MAJOR/MINOR/PATCH, patch 4: the zone object id) and Krunker v10 only
-// (NET_HELLO_RULESETS = 1 << 2), flavor nibble 0 (net_hello_make in shared/src/net.c).
-export const HELLO_PAYLOAD = Buffer.from([1, 4, 4, 1 << 2]);
+// KN HELLO: this bridge speaks protocol 1.4.5 (NET_PROTOCOL_MAJOR/MINOR/PATCH; patch 5: NetStatePacket's v10 "k" record)
+// and Krunker v10 only (NET_HELLO_RULESETS = 1 << 2), flavor nibble 0 (net_hello_make in shared/src/net.c).
+export const HELLO_PAYLOAD = Buffer.from([1, 4, 5, 1 << 2]);
 
 // The v10 ENTER_GAME ("en") array, positions as the client builds them (v10.js 208129, 35 entries).
 // Cosmetic positions are randomised through _69645(null, type): the type id is in the comment.

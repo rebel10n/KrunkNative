@@ -13,6 +13,8 @@
  */
 #include "v10_translate.h"
 
+#include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
+
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -373,12 +375,11 @@ static void field_copy(const uint8_t *p, size_t n, size_t at, size_t size, char 
 }
 
 void v10_hello_payload(uint8_t out[V10_HELLO_PAYLOAD_SIZE]) {
-    /* NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH (the TS HELLO: 1.4.4), NET_HELLO_RULESETS
-     * (1 << 2, v10 only) with the flavor nibble 0. */
-    out[0] = 1;
-    out[1] = 4;
-    out[2] = 4;
-    out[3] = 1 << 2;
+    /* NET_PROTOCOL_MAJOR, MINOR, PATCH (1.4.5: the NetStatePacket layout), NET_HELLO_RULESETS (v10 only). */
+    out[0] = NET_PROTOCOL_MAJOR;
+    out[1] = NET_PROTOCOL_MINOR;
+    out[2] = NET_PROTOCOL_PATCH;
+    out[3] = NET_HELLO_RULESETS;
 }
 
 /* ---- client -> bridge */
@@ -840,6 +841,29 @@ void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n) {
     if (p[85] != 0) v10_push(o, V10_IN_LOCK_PLAYER, (KrunkerValue[]){KRUNKER_V_BOOL(1)}, 1);
     const size_t message_len = field_len(p, n, MODE_MESSAGE_AT, 96);
     if (message_len) v10_push(o, V10_IN_UPDATE_GAME_MESSAGE, (KrunkerValue[]){v10_text(o, p + MODE_MESSAGE_AT, message_len)}, 1);
+}
+
+/* PICKUP: NetPickupPacket (26 bytes, packed): int32 uid @0, int32 weapon @4 (-1 empty), uint8 active @8, uint8 moved @9,
+ * float position[3] @10, int32 ammo @22. The v10 client reads it as the "inat" pickup half (mapPickup, v10Translate.ts). */
+void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != 26) {
+        o->stop = "malformed";
+        return;
+    }
+    const int32_t uid = rd_i32(p, 0);
+    if (uid < 0) {
+        o->stop = "a pickup with no map object id";
+        return;
+    }
+    const int32_t weapon = rd_i32(p, 4);
+    const int active = p[8] != 0;
+    const int moved = p[9] != 0;
+    const KrunkerValue pos[3] = {KRUNKER_V_NUM(rd_f32(p, 10)), KRUNKER_V_NUM(rd_f32(p, 14)), KRUNKER_V_NUM(rd_f32(p, 18))};
+    const KrunkerValue args[8] = {
+        KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(uid), weapon >= 0 ? KRUNKER_V_NUM(weapon) : KRUNKER_V_NIL,
+        KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(active), moved ? v10_arr(o, pos, 3) : KRUNKER_V_NIL,
+    };
+    v10_push(o, V10_IN_PLAYER_INTERACTION, args, 8);
 }
 
 /* NetCheatPacket: uint8 flag (NetCheatFlag, shared/include/shared.h), uint8 on. v10 takes the on / off value as the

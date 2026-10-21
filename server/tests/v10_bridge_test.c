@@ -342,8 +342,8 @@ int main(void) {
     client_send("load", NULL, 0);
     WAIT_FOR(native_count(NET_PACKET_HELLO) == 1);
     NFrame *hello = native_nth(NET_PACKET_HELLO, 0);
-    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == 4 && hello->payload[3] == 4,
-          "HELLO is [1, 4, 4, 4]");
+    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == 5 && hello->payload[3] == 4,
+          "HELLO is [1, 4, 5, 4] (NET_PROTOCOL_PATCH 5)");
     client_send("load", NULL, 0); /* a second LOAD sends no second HELLO */
     pump(100);
     CHECK(native_count(NET_PACKET_HELLO) == 1, "a second LOAD sends no second HELLO");
@@ -711,6 +711,30 @@ int main(void) {
         CHECK(vequal(&kf.args[1], &KRUNKER_V_NUM(10)), "k sendRate 10");
     }
     krunker_frame_free(&kf);
+
+    // PICKUP (128): one pickup's state is the pickup half of "inat" (the v10 client's updatePickup): uid, weapon,
+    // true, active, pos when moved; an empty pickup (weapon -1) has a null weapon and a null position
+    uint8_t pk[26];
+    memset(pk, 0, sizeof pk);
+    w_i32(pk, 0, 7); w_i32(pk, 4, 3); pk[8] = 1; pk[9] = 1;
+    w_f32(pk, 10, 1.5f); w_f32(pk, 14, 2); w_f32(pk, 18, -3); w_i32(pk, 22, 12);
+    native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
+    WAIT_FOR(client_count("inat") == 1);
+    KrunkerFrame inat1;
+    CHECK(client_get("inat", 0, &inat1) && inat1.argc == 8 && vequal(&inat1.args[0], &KRUNKER_V_NUM(-1)) && inat1.args[1].type == KRUNKER_NIL &&
+          inat1.args[2].type == KRUNKER_NIL && vequal(&inat1.args[3], &KRUNKER_V_NUM(7)) && vequal(&inat1.args[4], &KRUNKER_V_NUM(3)) &&
+          vequal(&inat1.args[5], &KRUNKER_V_BOOL(1)) && vequal(&inat1.args[6], &KRUNKER_V_BOOL(1)) && inat1.args[7].type == KRUNKER_ARRAY &&
+          inat1.args[7].len == 3 && vequal(&inat1.args[7].u.items[0], &KRUNKER_V_NUM(1.5)) && vequal(&inat1.args[7].u.items[2], &KRUNKER_V_NUM(-3)),
+          "inat [-1, null, null, 7, 3, true, true, [1.5, 2, -3]]");
+    krunker_frame_free(&inat1);
+    pk[4] = 0xff; pk[5] = 0xff; pk[6] = 0xff; pk[7] = 0xff; /* weapon -1 */
+    pk[8] = 0; pk[9] = 0;
+    native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
+    WAIT_FOR(client_count("inat") == 2);
+    KrunkerFrame inat2;
+    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && inat2.args[4].type == KRUNKER_NIL && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
+          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: null weapon, inactive, null position");
+    krunker_frame_free(&inat2);
 
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {

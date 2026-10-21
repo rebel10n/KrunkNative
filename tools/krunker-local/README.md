@@ -23,6 +23,22 @@ Optional overrides go in `tools/krunker-local/config.json` (git-ignored); the de
 `config.example.json`: the source tree, the KrunkNative roots used to fill missing assets,
 ports, the brain URL and the official hosts to route.
 
+## The v10 bridge (the join path)
+
+The official client's WebSocket (msgpack, v10 labels) reaches a KrunkerBox game server through the
+bridge, a C program in `server/bridge` (`v10_bridge`, the port of `net-bridge/v10Proxy.ts`). Start it
+next to the game server:
+
+```sh
+make v10-bridge V10_LISTEN=8081 V10_NATIVE=127.0.0.1:21015   # ws://127.0.0.1:8081/ws -> the game server
+```
+
+`V10_BIND` (default 127.0.0.1) is the listen address, `ARGS=` adds flags (`--lobby=KN:local`; the
+`KRUNK_NATIVE_HOST`, `KRUNK_NATIVE_PORT` and `KRUNK_NATIVE_LOBBY_ID` variables work too). The
+client's URL is `ws://<bind>:<port>/ws?gameId=...`. The bridge answers the connect packets
+(`io-init`, `load`, `inst-id`), HELLO, the map and the INIT, and the joins' packets it knows; the
+first native packet it cannot translate stops that session and is named in its log.
+
 ## How it works
 
 - The page is served from `krunker-local.test`. The client picks its matchmaker from the

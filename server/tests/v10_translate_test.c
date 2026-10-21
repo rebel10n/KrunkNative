@@ -225,6 +225,33 @@ int main(void) {
         CHECK(rd(ent, 96) == -1, "ENT v7 badge");
         CHECK(ent[100] == 0x09, "ENT show badges: verified (bit 0) + custom (bit 3)");
 
+        // PICKUP (128): NetPickupPacket (26 bytes) -> inat [-1, null, null, uid, weapon|null, true, active, pos|null]
+        {
+            uint8_t pk[26];
+            memset(pk, 0, sizeof pk);
+            put_i32(pk, 0, 7); put_i32(pk, 4, 3); pk[8] = 1; pk[9] = 1;
+            put_f32(pk, 10, 1.5f); put_f32(pk, 14, 2); put_f32(pk, 18, -3); put_i32(pk, 22, 12);
+            V10Out po;
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), N(3), B(1), B(1), ARR(N(1.5), N(2), N(-3)));
+            v10_out_free(&po);
+            put_i32(pk, 4, -1); pk[8] = 0; pk[9] = 0;
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), NIL, B(1), B(0), NIL);
+            v10_out_free(&po);
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 25);
+            CHECK(stop_has(&po, "malformed"), "a short pickup is malformed");
+            v10_out_free(&po);
+            put_i32(pk, 0, -1);
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            CHECK(stop_has(&po, "map object id"), "a pickup with no map object id stops");
+            v10_out_free(&po);
+        }
+
         // CHEAT (60): [flag, on], the on / off byte 0 or 1; the flags with a v10 label (noc, unl, fh, frz)
         uint8_t cflag = 0;
         int con = 0;

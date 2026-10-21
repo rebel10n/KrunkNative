@@ -628,6 +628,16 @@ bridge-install: ## Install net-bridge dependencies
 bridge: $(BRIDGE_DIR)/node_modules ## Host dist/web/ and bridge /native WebSocket <-> native TCP server (port 8080)
 	cd $(BRIDGE_DIR) && npm run web
 
+# The v10 client's bridge in C (server/bridge, doc: tools/krunker-local/README.md): the official v10 client's
+# WebSocket (msgpack, v10 labels) on ws://V10_BIND:V10_LISTEN/ws, translated to a KrunkerBox game server's TCP
+# (V10_NATIVE). Foreground; ctrl-c closes the sessions. ARGS= adds flags (e.g. --lobby=KN:local).
+V10_LISTEN ?= 8081
+V10_BIND   ?= 127.0.0.1
+V10_NATIVE ?= 127.0.0.1:21015
+.PHONY: v10-bridge
+v10-bridge: build ## Run the v10 client bridge (C): ws://V10_BIND:V10_LISTEN/ws -> native V10_NATIVE (defaults 127.0.0.1:8081 -> 127.0.0.1:21015)
+	./$(DEBUG_DIR)/v10_bridge --v10-listen=$(V10_LISTEN) --bind=$(V10_BIND) --native=$(V10_NATIVE) $(ARGS)
+
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
 	cd $(BRIDGE_DIR) && npm run typecheck && npm test
 	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
@@ -1081,5 +1091,5 @@ distclean: clean ## clean + net-bridge/node_modules
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage: make <target> [VAR=value]\n\n"} \
 	  /^# -+ [a-z-]+$$/ {gsub(/^# -+ /, ""); printf "\n\033[1m%s\033[0m\n", $$0} \
-	  /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	  /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\nVariables: GENERATOR=%s JOBS=%s HTML_ENGINE=%s EMSDK=%s PORT=%s\n\n" "$(GENERATOR)" "$(JOBS)" "$(HTML_ENGINE)" "$(EMSDK)" "$(PORT)"

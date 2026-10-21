@@ -33,6 +33,7 @@
 #define V10_IN_GAME_INSTANCE_ID "inst-id"
 #define V10_IN_INIT_GAME "init"
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
+#define V10_IN_PLAYER_INTERACTION "inat" /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
 #define V10_IN_REMOVE_PLAYER_SOUND "rsnd"
 #define V10_IN_UPDATE_TIMER "t"
@@ -198,6 +199,8 @@ int v10_chunks_complete(const V10Chunks *c);
 
 void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n);
 void v10_map_object_state(V10Out *o, const uint8_t *p, size_t n);
+/* PICKUP (NetPickupPacket, 26 bytes): one pickup's state as the "inat" message (mapPickup in v10Translate.ts). */
+void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n);
 /* CHEAT (NetCheatPacket: uint8 flag, uint8 on): 0 when malformed. */
 int v10_parse_cheat(const uint8_t *p, size_t n, uint8_t *flag, int *on);
 /* The v10 label of a cheat flag (noc, unl, fh, frz), NULL when the flag has none (borders, forcecol, ...). */
