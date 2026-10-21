@@ -389,6 +389,12 @@ int acct_email_required(void);          /* accounts.email.required: registering 
 const char *acct_validate_email(const char *email, char *norm, size_t cap);
 /* Store a new account's email and mail the verification link (fire and forget). */
 void acct_email_after_register(int64_t account_id, const char *email, const char *ip);
+/* v10 POST /auth/recover-account (v10_auth.c): the mail of ["rpr", who] (username or email). done(ud, err, msg)
+ * runs once: err is the user-facing refusal (NULL when the mail went out or was not due; msg the neutral text). */
+typedef void (*AcctRecoverFn)(void *ud, const char *err, const char *msg);
+void acct_recover_request(const char *who, const char *ip, AcctRecoverFn done, void *ud);
+/* the otpauth:// URI of a base32 2FA secret (the authenticator app's QR code, v7.1.4 format) */
+void acct_twofa_otpauth(const char *username, const char *secret, char *out, size_t cap);
 /* 1 = go on; 0 = the frame needs a verified email (accounts.email.require_verified): error sent. */
 int social_email_gate(SocialSession *s, const char *label, const cJSON *f);
 /* ["emailS", state] to the account's JSON sockets except `except`; sets their email_verified. */

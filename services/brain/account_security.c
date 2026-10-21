@@ -572,8 +572,10 @@ static int send_reset_mail(int64_t log_id, const char *to, const cJSON *accounts
     return rc;
 }
 typedef struct ResetReq {
-    SocialSession *s;          /* held; NULL for the web page */
+    SocialSession *s;          /* held; NULL for the web page and the HTTP route */
     kn_http_req *req;          /* the web page's POST, NULL on the socket */
+    AcctRecoverFn done;        /* the HTTP route's answer (v10 POST /auth/recover-account); NULL on the socket */
+    void *ud;
     char code[RESET_CODE_CHARS + 1];
     char token[40];            /* the session issued by P_RESET_APPLY */
     char *pass;
@@ -597,6 +599,10 @@ static void reset_free(ResetReq *r) {
 }
 
 static void reset_reply(ResetReq *r, const char *label, const char *err, const char *msg) {
+    if (r->done) {
+        r->done(r->ud, err, err ? NULL : msg ? msg : "");
+        return;
+    }
     if (r->s && social_open(r->s)) {
         if (err) social_send_n(r->s, label, 1, cJSON_CreateString(err));
         else social_send_n(r->s, label, 2, cJSON_CreateNull(), cJSON_CreateString(msg ? msg : ""));
@@ -627,9 +633,14 @@ static void reset_request_done(kn_db_result *res, void *ud) {
     reset_free(r);
 }
 
-/* ["rpr", username or email] */
-void sh_reset_request(SocialSession *s, const cJSON *f) {
-    const char *who = fa_str(f, 1);
+/* A refused ["rpr"] (the socket's) or a refused recover-account (the HTTP route's answer). */
+static void reset_refuse(SocialSession *s, AcctRecoverFn done, void *ud, const char *err) {
+    if (done) done(ud, err, NULL);
+    else social_send_n(s, "rpr", 1, cJSON_CreateString(err));
+}
+
+/* ["rpr", username or email] (s) and POST /auth/recover-account (s NULL, done set): the same mail */
+static void reset_request_start(SocialSession *s, const char *who, const char *ip, AcctRecoverFn done, void *ud) {
     char norm[256];
     size_t n = 0;
     while (who && *who == ' ') who++;
@@ -637,15 +648,15 @@ void sh_reset_request(SocialSession *s, const cJSON *f) {
     while (n > 0 && norm[n - 1] == ' ') n--;
     norm[n] = 0;
     if (!norm[0]) {
-        social_send_n(s, "rpr", 1, cJSON_CreateString("Enter your username or email"));
+        reset_refuse(s, done, ud, "Enter your username or email");
         return;
     }
     if (strchr(norm, '@') && acct_validate_email(norm, norm, sizeof norm)) {
-        social_send_n(s, "rpr", 1, cJSON_CreateString("Invalid Email"));
+        reset_refuse(s, done, ud, "Invalid Email");
         return;
     }
     if (!s_mailer) {
-        social_send_n(s, "rpr", 1, cJSON_CreateString("Email is unavailable on this server"));
+        reset_refuse(s, done, ud, "Email is unavailable on this server");
         return;
     }
     ResetReq *r = calloc(1, sizeof *r);
@@ -655,17 +666,26 @@ void sh_reset_request(SocialSession *s, const cJSON *f) {
         r->codes[i] = malloc(RESET_CODE_CHARS + 1);
         if (!r->codes[i] || reset_code_new(r->codes[i], shown) != 0) {
             reset_free(r);
-            social_send_n(s, "rpr", 1, cJSON_CreateString("Server error."));
+            reset_refuse(s, done, ud, "Server error.");
             return;
         }
     }
-    r->s = social_hold(s);
+    r->s = s ? social_hold(s) : NULL;
+    r->done = done;
+    r->ud = ud;
     char ttl[24], cool[24], d1[24], d2[24], d3[24], now[24];
-    const char *args[] = {norm, s->ip[0] ? s->ip : NULL, r->codes[0], r->codes[1], r->codes[2],
+    const char *args[] = {norm, ip && ip[0] ? ip : NULL, r->codes[0], r->codes[1], r->codes[2],
                           acct_itoa(ttl, s_cfg.reset_ttl_s), acct_itoa(cool, s_cfg.resend_cooldown_s),
                           acct_itoa(d1, s_cfg.max_per_account_day), acct_itoa(d2, s_cfg.max_per_address_day),
                           acct_itoa(d3, s_cfg.max_per_ip_hour), "1", acct_itoa(now, now_ms())};
     kn_db_call(g_acct_brain->db, &P_RESET_REQUEST, (int) (sizeof args / sizeof args[0]), args, reset_request_done, r);
+}
+
+/* ["rpr", username or email] */
+void sh_reset_request(SocialSession *s, const cJSON *f) { reset_request_start(s, fa_str(f, 1), s->ip, NULL, NULL); }
+
+void acct_recover_request(const char *who, const char *ip, AcctRecoverFn done, void *ud) {
+    reset_request_start(NULL, who, ip, done, ud);
 }
 
 static void reset_check_done(kn_db_result *res, void *ud) {
@@ -841,6 +861,10 @@ static void otpauth_uri(const char *username, const char *secret, char *out, siz
     kn_url_encode(s_cfg.issuer, issuer, sizeof issuer);
     snprintf(out, cap, "otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=%d&period=%d", issuer, username, secret,
              issuer, KN_TOTP_DIGITS, KN_TOTP_PERIOD);
+}
+
+void acct_twofa_otpauth(const char *username, const char *secret, char *out, size_t cap) {
+    otpauth_uri(username, secret, out, cap);
 }
 
 typedef struct TwofaReq {

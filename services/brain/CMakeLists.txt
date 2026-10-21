@@ -116,7 +116,6 @@ set(KN_BRAIN_SOURCES
     user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
     v10_api.c                       # v10 REST at the root: /maps, /maps/:id, /titles, packed /data/skins and /data/spins
     v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
-    v10_empty.c                     # v10 REST routes with no KrunkNative data: the empty shapes and refusals
     v10_market.c                    # v10 REST market, items, trades, moderation, mods and KPD: the empty shapes and refusals
     v10_account.c                   # v10 REST account and player routes: player/me, wallet, profile, ranked boards, match history, daily spin
     v10_auth.c                      # v10 REST /auth/* routes mapped onto auth.c's accounts
@@ -484,11 +483,6 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_data_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_api_data PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
-    # v10 REST routes with no KrunkNative data (v10_empty.c): EMPTY reads, NOT_FOUND, REFUSAL 403
-    add_test(NAME brain_v10_api_empty
-        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_empty_test.py
-                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-    set_tests_properties(brain_v10_api_empty PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;v10")
     # v10 market, items, trades, moderation, mods, KPD and players (v10_market.c): EMPTY, NOT_FOUND, REFUSAL 403
     add_test(NAME brain_v10_api_market
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_api_market_test.py
