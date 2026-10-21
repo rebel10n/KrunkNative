@@ -536,6 +536,10 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
         return;
     }
     if (s->account_id != kn_json_int(account, "id", 0)) s->email_verified = s->email_state_known = 0;
+    /* the Account Manager's switch signs in another account on this socket with no logout first: the account
+     * left goes offline for its friends (v10: presence:offline when its event bus socket closes). Its session
+     * token stays good; only logout revokes it. */
+    if (s->account_id > 0 && s->account_id != kn_json_int(account, "id", 0)) presence_leave(s);
     s->account_id = kn_json_int(account, "id", 0);
     snprintf(s->username, sizeof s->username, "%s", kn_json_str(account, "username", ""));
     snprintf(s->token, sizeof s->token, "%s", kn_json_str(account, "token", ""));

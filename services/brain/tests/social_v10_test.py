@@ -7,7 +7,8 @@ kn_brain on sqlite with its own config, two (three) accounts over the social soc
 Friends event bus ["eb", {...}]: follow + follow back = friends (both get a fresh friends:list), a follow not
 followed back is a Followers entry (kml kind 0) and a gmc count,
 presence:online / offline, msg:send -> msg:sent + msg:recv, EB_NOT_FRIEND / EB_TARGET_OFFLINE /
-EB_TEXT_TOO_LONG, msg:history paging (oldest first, hasMore), msg:read + unread:summary on login.
+EB_TEXT_TOO_LONG, msg:history paging (oldest first, hasMore), msg:read + unread:summary on login, a switch
+on a signed-in socket (restore of another account, no logout) takes the account left offline for its friends.
 gapi tunnel ["gapi", rid, method, path, body]: /players/search, /players/<name> (follow_state,
 online), /players/<name>/follow, followers / following, /social/post (level gate, giveaway funds
 and fee, draw), /social/feed tabs, /social/post/<id> (+ comments), vote, comment, /social/news,
@@ -408,6 +409,45 @@ async def friends_extras(stamp):
     await X.close()
 
 
+async def switch_presence(stamp):
+    """The Account Manager's Use on a signed-in social socket: the restore frame of another account, with no
+    logout first. The socket becomes that account, and the account it leaves goes offline for its friends
+    (presence:offline, as a logout does) while its session token stays good (it signs in again with it). A
+    refused switch leaves the account signed in and online for its friends."""
+    L = await Sock().open()
+    lid, ltok = await L.register("swl" + stamp)
+    N = await Sock().open()
+    nid, ntok = await N.register("swn" + stamp)
+    F = await Sock().open()
+    fid, _ = await F.register("swf" + stamp)
+    await L.gapi("POST", "/players/swf%s/follow" % stamp, {"follow": True})
+    await F.gapi("POST", "/players/swl%s/follow" % stamp, {"follow": True})
+    await F.send(["eb", {"type": "friends:list", "offset": 0}])
+    f = await F.eb("friends:list", pred=lambda o: any(x["id"] == lid and x["online"] is True for x in o["friends"]))
+    check(f is not None, "switch: F's friends list shows L online")
+
+    await L.send(["a", 1, ["swn" + stamp, None, "not-a-session-token"]])
+    f = await L.recv_until(lambda f: f[0] == "a")
+    check(f and f[1] is not None, "a switch with a refused token is refused")
+    off = await F.eb("presence:offline", pred=lambda o: o["id"] == lid, timeout=2.0)
+    check(off is None, "a refused switch: L stays online for F (no presence:offline)")
+
+    await L.send(["a", 1, ["swn" + stamp, None, ntok]])
+    f = await L.recv_until(lambda f: f[0] == "a")
+    check(f and f[1] is None and f[2] == nid, "the switch: L's socket is signed in as N")
+    off = await F.eb("presence:offline", pred=lambda o: o["id"] == lid, timeout=4.0)
+    check(off is not None, "the switch: the account left (L) goes offline for F (presence:offline)")
+
+    Lx = await Sock().open()
+    await Lx.send(["a", 1, ["swl" + stamp, None, ltok]])
+    f = await Lx.recv_until(lambda f: f[0] == "a")
+    check(f and f[1] is None and f[2] == lid, "L's session token is kept: L signs in again with it")
+    on = await F.eb("presence:online", pred=lambda o: o["id"] == lid)
+    check(on is not None, "and F sees L online again")
+    for s in (L, N, F, Lx):
+        await s.close()
+
+
 def main():
     log = open(os.path.join(WORK, "brain.log"), "w")
     cfg = os.path.join(WORK, "brain.json")
@@ -445,6 +485,7 @@ def main():
         stamp = str(int(time.time()) % 100000)
         asyncio.run(scenario(["sva%s" % stamp, "svb%s" % stamp, "svc%s" % stamp]))
         asyncio.run(friends_extras(stamp))
+        asyncio.run(switch_presence(stamp))
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
