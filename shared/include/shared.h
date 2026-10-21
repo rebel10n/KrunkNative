@@ -1414,6 +1414,9 @@ typedef struct Player_t {
     LagCompClock lag_clock;       // the connection's input timeline (server; reset by player_spawn)
     // Bot players (shared/src/bots.c, v7.1.4 bots.js): players.add isBot, player.dmgMlt (0 = 1).
     unsigned char is_bot:1;
+    int name_no;                  // Hide player names: the game's join-order number (1, 2 ...), set by game_players_add; the AI's Player_<n>.
+                                  // The scoreboard numbers a player by its viewer's first sight (player_names.c), so for a viewer who
+                                  // joined after someone left the two can differ; the AI's line has one text for every viewer.
     float dmg_mlt;
     PlayerStoredState state_history[PLAYER_STATE_HISTORY_MAX]; // stateHistory ring, newest at state_history_head
     int state_history_head;
@@ -2196,6 +2199,7 @@ typedef struct Game_t {
     // per-player spawn lists. Allocated on first use, NULL none.
     struct ObjectManager_t *object_manager;
     GamePuddles puddles; // KrunkNative Piss (shared/include/piss.h): live puddles (authority; clients a copy)
+    int player_name_seq; // the last Player.name_no handed out (game_players_add); never reset within the game
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);

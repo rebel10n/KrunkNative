@@ -13,6 +13,7 @@ set(KN_BRAIN_SOURCES
     mm_token.c                      # mm-token: seek-game validation tokens (/generate-token)
     host.c
     ranked.c
+    ranked_notice.c                 # the queued-for-ranked notice's social frame (pure)
     # svc-accounts sources
     accounts.c
     social_ws.c
@@ -232,6 +233,13 @@ add_executable(kn_brain_releases_test tests/test_releases.c release_info.c)
 target_include_directories(kn_brain_releases_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(kn_brain_releases_test PRIVATE knsvc)
 add_test(NAME brain_releases COMMAND kn_brain_releases_test)
+
+# queued-for-ranked notice: the social frame carries identity + template, never a composed line (pure, no database)
+add_executable(kn_brain_ranked_notice_test tests/test_ranked_notice.c ranked_notice.c)
+target_include_directories(kn_brain_ranked_notice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_ranked_notice_test PRIVATE knsvc)
+add_test(NAME brain_ranked_notice COMMAND kn_brain_ranked_notice_test)
+set_tests_properties(brain_ranked_notice PROPERTIES LABELS "knsvc;brain")
 
 # v10 Live Streams: the pure normaliser and the token / game answers (streams_norm.c)
 add_executable(kn_brain_streams_test tests/test_streams.c streams_norm.c)

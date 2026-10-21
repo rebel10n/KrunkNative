@@ -955,6 +955,7 @@ void game_players_add(Game *game, Player *player) {
     }
 
     game->players[game->player_count++] = player;
+    if (!player->name_no) player->name_no = ++game->player_name_seq; // Hide player names: the join-order number the AI is given
     game->leaders_dirty = 1;
 
     mode_player_added(game, player); // players.add: setTeam + lives (authority only)

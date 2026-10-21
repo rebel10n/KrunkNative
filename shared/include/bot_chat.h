@@ -41,7 +41,7 @@ typedef struct BotChatRequest_t {
     char bot_name[PLAYER_NAME_SIZE];
     const char *personality;         // bot_chat_personality_name
     const char *event;               // "win" / "lose" / "draw" / "kill" / "death"
-    char other[PLAYER_NAME_SIZE];    // the match winner / the victim / the killer ("" none)
+    char other[PLAYER_NAME_SIZE];    // the match winner / the victim / the killer as Player_<n> (its Player.name_no, never its name; "" none)
     const char *mode;                // "Free for All"
     const char *map;                 // "Burg" ("" unknown)
     int kills, deaths;               // the bot's round so far

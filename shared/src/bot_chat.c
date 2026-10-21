@@ -471,7 +471,10 @@ static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeake
         snprintf(req.bot_name, sizeof(req.bot_name), "%s", bot->name);
         req.personality = bot_chat_personality_name(speaker->personality);
         req.event = k_events[event];
-        snprintf(req.other, sizeof(req.other), "%s", other_name ? other_name : "");
+        // Hide player names: the AI is given the other player's number as its scoreboard shows it (Player_<n>), never its name
+        if (!other) req.other[0] = 0;
+        else if (other->name_no > 0) snprintf(req.other, sizeof(req.other), "Player_%d", other->name_no);
+        else snprintf(req.other, sizeof(req.other), "Player");
         req.mode = game_mode_label(game);
         req.map = map;
         req.kills = (int) bot->kills + (event == BOT_CHAT_KILL); // on_kill runs before killer->kills++

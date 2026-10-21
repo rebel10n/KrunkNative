@@ -415,6 +415,52 @@ static void test_named_comments(Game *game) {
     CHECK(g_named_bad == 0, "every named comment: one name by uid and one \"$\" (%d bad)", g_named_bad);
 }
 
+// Hide player names: the AI is never given a player's name. A bot kills a human (Quentin); the request's `other` is the
+// human's Player_<n>, the number its scoreboard shows, and the name never reaches the hook.
+static int g_names_calls;
+static char g_names_other[PLAYER_NAME_SIZE];
+static int test_banter_names(Game *game, const BotChatRequest *req) {
+    if (strcmp(req->event, "kill") && strcmp(req->event, "death")) return 0;
+    for (size_t i = 0; i < game->player_count; i++) { // the bots fight each other in the tick: only the human's kills count
+        const Player *p = game->players[i];
+        if (p->is_bot && !strcmp(p->name, req->other)) return 0;
+    }
+    g_names_calls++;
+    snprintf(g_names_other, sizeof(g_names_other), "%s", req->other);
+    return 1;
+}
+
+static void test_ai_names(Game *game) {
+    printf("Running AI player names test...\n");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+    tick(game, 1.0f, 30.0f);
+    Player *bot = NULL;
+    for (size_t i = 0; i < game->player_count && !bot; i++)
+        if (game->players[i]->is_bot) bot = game->players[i];
+    CHECK(bot != NULL, "a bot present");
+    Player *human = player_init(game);
+    CHECK(human != NULL, "a human player");
+    if (!bot || !human) return;
+    human->uid = 9001;
+    snprintf(human->name, sizeof(human->name), "%s", "Quentin");
+    game_players_add(game, human);
+    game->hooks.bot_banter = test_banter_names;
+    g_names_calls = 0;
+    g_names_other[0] = 0;
+    for (int k = 0; k < 400 && !g_names_calls; k++) {
+        bot_chat_on_kill(game, bot, human);
+        tick(game, 0.2f, 30.0f);
+    }
+    CHECK(g_names_calls >= 1, "the AI was asked about the kill (%d)", g_names_calls);
+    CHECK(!strstr(g_names_other, "Quentin"), "the AI is not given the player's name: '%s'", g_names_other);
+    int digits = !strncmp(g_names_other, "Player_", 7) && g_names_other[7] != 0;
+    for (const char *d = g_names_other + 7; digits && *d; d++) digits = *d >= '0' && *d <= '9';
+    CHECK(digits, "the AI names the player Player_<n>: '%s'", g_names_other);
+    tick(game, BOT_CHAT_KILL_DELAY_MAX + BOT_CHAT_AI_TIMEOUT + 1.0f, 30.0f); // the unanswered request goes out as a template
+    game->hooks.bot_banter = NULL;
+}
+
 static void test_off(Game *game) {
     printf("Running off switch test...\n");
     bot_chat_set_enabled(game, 0);
@@ -475,6 +521,7 @@ int main(void) {
     test_ai(&game);
     test_kills(&game);
     test_named_comments(&game);
+    test_ai_names(&game);
     test_off(&game);
 
     game_bots_remove_all(&game);
