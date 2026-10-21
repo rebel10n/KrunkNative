@@ -220,8 +220,12 @@ def main():
                           {"uid": 4, "name": "Sable", "clan": "CMD", "ping": 162, "account": 9102, "level": 3, "hacker": True}])
     mw = rc["menuWindow"]
     regs = [R("player-list-header", pad(rc["playerSearchH"], 2), "text", "#playerSearchH: Player List [4] and the search box"),
+            # max_pct 6.0, not v10's 3.0: a deliberate parity break. The action buttons are centred on their row
+            # (kn-v10-menu.css .pListActions / .pListBtns); v10's own CSS lifts them ~4.5 px above the row's middle,
+            # so they differ from v10's capture by design (measured 5.8%). The margin lets other drift fail.
             R("player-list-rows", pad(rc["playerListH"], 2), "text",
-              "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player"),
+              "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player; "
+              "the buttons are centred on the row by design, not v10's lift (see max_pct)", max_pct=6.0),
             R("player-list-sandbox-tools", [mw[0], rc["playerListH"][1] + rc["playerListH"][3], mw[2],
                                             mw[1] + mw[3] - rc["playerListH"][1] - rc["playerListH"][3]], "text",
               "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list", skip=True)]

@@ -695,6 +695,10 @@ votekick-e2e: build ## The player list's vote kick + K.P.D call: vote / kick / v
 playerlist-ui-e2e: build ## The in-game Player List's controls on a headless client: mutes (saved, chat dropped), Votekick, Call K.P.D popup, the officer's suspect row (EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 400 $(PYTHON) -I client/tests/playerlist_e2e.py $(DEBUG_DIR)
 
+.PHONY: row-centre-e2e
+row-centre-e2e: build ## The action buttons of the Player List and Account Manager rows sit within 1 px of their row's middle (headless --render-scenario, the box dump)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/row_centre_e2e.py $(DEBUG_DIR)
+
 .PHONY: billboard-e2e
 billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none
 	timeout 300 $(PYTHON) -I server/tests/billboard_e2e.py $(DEBUG_DIR)
