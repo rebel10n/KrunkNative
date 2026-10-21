@@ -432,8 +432,12 @@ async def scenario(port):
             owned_skin = ["s10"]
         st, res = await a.gapi("POST", "/strike/v1/players/me/equip", {"itemId": owned_skin[0]})
         check(st == 200 and res["loadout"] == {"w1": owned_skin[0]}, "equip an owned AR skin: %s" % res)
-        unowned = query("SELECT d.id FROM strike_item_defs d WHERE d.item_type = 1 AND NOT EXISTS"
-                        " (SELECT 1 FROM strike_items i WHERE i.account_id = %d AND i.item_id = d.id) ORDER BY d.id LIMIT 1" % alice_id)[0]
+        unowned_q = ("SELECT d.id FROM strike_item_defs d WHERE d.item_type = 1 AND NOT EXISTS"
+                     " (SELECT 1 FROM strike_items i WHERE i.account_id = %d AND i.item_id = d.id) ORDER BY d.id LIMIT 1" % alice_id)
+        if not query(unowned_q):  # the random spins above can win every hat: take one back for the refusal
+            hat = query("SELECT d.id FROM strike_item_defs d WHERE d.item_type = 1 ORDER BY d.id LIMIT 1")[0]
+            query("DELETE FROM strike_items WHERE account_id = %d AND item_id = '%s'" % (alice_id, hat))
+        unowned = query(unowned_q)[0]
         st, err = await a.gapi("POST", "/strike/v1/players/me/equip", {"itemId": unowned})
         check(st == 400 and err["message"] == "You don't own this item", "an unowned hat is refused")
         st, err = await a.gapi("POST", "/strike/v1/players/me/equip", {"itemId": "c4"})
