@@ -36,12 +36,12 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 13 | api | GET | `/ipinfo` | IP checker (_7290, v10.js 16440) (16440) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 14 | api | GET | `/webhooks/general/maps/list` | legacy apiRequest listMaps (v10.js 131960s) (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 15 | api | GET | `/webhooks/general/maps/search` | legacy apiRequest searchMap (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
-| 16 | api | GET | `/webhooks/general/maps/config` | legacy apiRequest getMapPreset (131960) | missing: not_found fallback (public_routes.c:677) | empty (`{}`: no preset, the menu shows DEFAULT) | v10_empty.c |
+| 16 | api | GET | `/webhooks/general/maps/config` | legacy apiRequest getMapPreset (131960) | missing: not_found fallback (public_routes.c:677) | implemented (the map's config as `da` JSON, `fu` 0; `{}` for no catalogue map: the menu shows DEFAULT) | creations.c (catalogue map config via game_config_from_map) |
 | 17 | api | GET | `/webhooks/general/mods/list` | legacy apiRequest listMods (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 18 | api | GET | `/webhooks/general/mods/search` | legacy apiRequest searchMod (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 19 | api | GET | `/webhooks/general/assets/list` | legacy apiRequest listAssets (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 20 | api | GET | `/webhooks/general/assets/search` | legacy apiRequest (searchAsset) (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
-| 21 | api | GET | `/webhooks/general/items/prices` | legacy apiRequest getPrices (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
+| 21 | api | GET | `/webhooks/general/items/prices` | legacy apiRequest getPrices (131960) | missing: not_found fallback (public_routes.c:677) | implemented (the mean completed market sale per skin index; `{}` until a sale) | creations.c (market_listings, economy.c's prices query) |
 | 22 | matchmaker | GET | `/ping` | matchmaker pingFetch (v10.js 147377) (147377) | served: public_routes.c:689 | served (unchanged) |  |
 | 23 | matchmaker | GET | `/ping-list` | matchmaker fetchPingList (147377) | served: public_routes.c:691 | served (unchanged) |  |
 | 24 | matchmaker | GET | `/game-list` | matchmaker game list (v10.js 107131, 215633) (107131) | served: public_routes.c:693 | served (unchanged) |  |
@@ -98,7 +98,7 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 75 | gapi | DELETE | `/skins/{id}` | skins.delete (26496) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 76 | gapi | POST | `/skins/{id}/upload` | skins.uploadAsset (26505) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 77 | gapi | POST | `/skins/{id}/duplicate` | skins.duplicate (26511) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 78 | gapi | GET | `/shop/displays/{tag}` | shop.displays (v10.js 26520) (26520) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 78 | gapi | GET | `/shop/displays/{tag}` | shop.displays (v10.js 26520) (26520) | missing: not_found fallback (public_routes.c:677) | alias | shop.c |
 | 79 | gapi | GET | `/shop/displays?tag={tag}` | shop.displays (v10.js 26525) (26525) | missing: not_found fallback (public_routes.c:677) | alias | shop.c |
 | 80 | gapi | POST | `/shop/purchase` | shop.purchase (26530) | missing: not_found fallback (public_routes.c:677) | alias | shop.c |
 | 81 | gapi | GET | `/shop/wild-offer` | shop.getWildOffer (26539) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |

@@ -40,6 +40,7 @@
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
+#include "game_config.h"
 #include "map_catalog.h"
 #include "map_validate.h"
 #include "shared.h" // PREFAB_LEADERBOARD (a map object's "i")
@@ -422,6 +423,77 @@ static void h_prices(kn_http_req *req, void *ud) {
     cJSON_Delete(res);
 }
 
+static void reply_empty_object(kn_http_req *req) {
+    cJSON *none = cJSON_CreateObject();
+    brain_reply_json(req, 200, none);
+    cJSON_Delete(none);
+}
+
+/* GET /webhooks/general/items/prices (v10.js 131947, getPrices): the legacy body is the price map itself,
+ * keyed by skin index: the menu multiplies prices[index] by the count (v10.js 108359-108365). The figure is
+ * the rounded mean of this economy's completed market sales (economy.c's "prices" sub, the same query). A
+ * skin never sold here has no key, which the menu reads as no price. */
+static void prices_done(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, "prices");
+        reply_empty_object(req);
+        return;
+    }
+    cJSON *o = cJSON_CreateObject();
+    for (int i = 0; i < kn_db_rows(res); i++) {
+        if (kn_db_isnull(res, i, 0) || kn_db_isnull(res, i, 1)) continue;
+        cJSON_AddNumberToObject(o, kn_db_get(res, i, 0), atof(kn_db_get(res, i, 1)));
+    }
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
+static void h_prices_v10(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!g_acct_brain || !g_acct_brain->db) {
+        reply_empty_object(req);
+        return;
+    }
+    const int rc = kn_db_query_sql(g_acct_brain->db,
+                SQL(.pg = "SELECT skin_id AS ski, round(avg(price))::bigint AS est FROM market_listings"
+                          " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
+                    .sqlite = "SELECT skin_id AS ski, CAST(round(avg(price)) AS INTEGER) AS est FROM market_listings"
+                              " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
+                    .mysql = "SELECT skin_id AS ski, CAST(ROUND(AVG(price)) AS SIGNED) AS est FROM market_listings"
+                             " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id"),
+                0, NULL, prices_done, req);
+    if (rc != 0) reply_empty_object(req);
+}
+
+/* GET /webhooks/general/maps/config?mn=<name> (v10.js 131917, getMapPreset): the legacy body {da, fu}. da is
+ * the map's host preset as JSON text (presetLoaded parses it, v10.js 212624) and fu its funds. The preset is
+ * the catalogue map's own config block (its "modes"), built the way the host preset is (game_config_from_map,
+ * shared/src/game_config.c), so the menu offers the map's modes. KrunkNative has no server cost: fu is 0. A
+ * name with no catalogue map, or a map with no config, answers {}: no preset (the menu shows DEFAULT). */
+static void h_map_config(kn_http_req *req, void *ud) {
+    (void) ud;
+    char name[96] = "";
+    if (kn_http_query_get(req, "mn", name, sizeof name) <= 0) {
+        reply_empty_object(req);
+        return;
+    }
+    const int index = map_catalog_resolve(name, NULL, 0, NULL);
+    const cJSON *map = index >= 0 ? map_catalog_json((size_t) index) : NULL;
+    const cJSON *config = map ? cJSON_GetObjectItemCaseSensitive(map, "config") : NULL;
+    cJSON *preset = cJSON_IsObject(config) ? game_config_from_map(config) : NULL;
+    cJSON *o = cJSON_CreateObject();
+    char *text = preset && cJSON_GetArraySize(preset) > 0 ? cJSON_PrintUnformatted(preset) : NULL;
+    if (text) {
+        cJSON_AddStringToObject(o, "da", text);
+        cJSON_AddNumberToObject(o, "fu", 0);
+        free(text);
+    }
+    cJSON_Delete(preset);
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
 /* ------------------------------------------------------------------ social socket: publishing */
 
 #define MAP_DATA_MAX 500000   /* social.js uploadGameAsset limit */
@@ -751,7 +823,8 @@ int creations_init(Brain *b) {
     kn_http_route(b->http, "GET", "/webhooks/general/mods/search", h_search, (void *) k_search_mod);
     kn_http_route(b->http, "GET", "/webhooks/general/assets/list", h_assets, NULL);
     kn_http_route(b->http, "GET", "/webhooks/general/assets/search", h_assets, NULL);
-    kn_http_route(b->http, "GET", "/webhooks/general/items/prices", h_prices, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/maps/config", h_map_config, NULL);
+    kn_http_route(b->http, "GET", "/webhooks/general/items/prices", h_prices_v10, NULL);
     KN_INFO(MOD, "hub catalogue: %zu catalogue maps + published maps/mods/assets", map_catalog_count());
     return 0;
 }
