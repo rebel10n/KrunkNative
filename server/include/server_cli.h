@@ -43,7 +43,6 @@ typedef struct {
 // Caller holds g_server->lock.
 void net_remove_client(ClientConnection *client);
 
-extern const ServerVersion g_server_version;
 extern ServerTickStats g_server_tick_stats; // guarded by g_server->lock
 
 // Record why the server is stopping (first reason wins) and set should_quit.

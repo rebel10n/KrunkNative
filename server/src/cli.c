@@ -3,6 +3,7 @@
 #include <server_config.h>
 #include <brain.h>
 #include <build_info.h>
+#include <ruleset.h>
 #include <map_catalog.h>
 #include <target_select.h>
 #include <bots.h>
@@ -409,8 +410,7 @@ static void cli_cmd_status(const char *args) {
 
     const int mode_id = cli_current_mode_id();
 
-    server_log(KN_PRODUCT_NAME " server v%d.%d.%d, listening on port %u",
-               g_server_version.major, g_server_version.minor, g_server_version.patch,
+    server_log(KN_PRODUCT_NAME " server, Krunker v%s, listening on port %u", ruleset_current()->version,
                (unsigned int) g_server->config.listen_port);
     server_log("  build      %s", kn_build_string());
     server_log("  uptime     %s", uptime);

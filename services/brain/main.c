@@ -32,6 +32,7 @@
 #include "push.h"
 #include "strike_econ.h"
 #include "build_info.h"
+#include "ruleset.h"
 #include "knsvc/config.h"
 #include "knsvc/db.h"
 #include "knsvc/http.h"
@@ -171,7 +172,7 @@ int main(int argc, char **argv) {
             kn_config_free(cfg);
             return 0;
         } else if (!strcmp(argv[i], "--version")) {
-            printf("kn_brain %s, build %s\n", KN_BRAIN_VERSION, kn_build_string());
+            printf(KN_PRODUCT_NAME " kn_brain, Krunker v%s\nbuild %s\n", ruleset_current()->version, kn_build_string());
             kn_config_free(cfg);
             return 0;
         } else {
@@ -187,7 +188,7 @@ int main(int argc, char **argv) {
         kn_config_free(cfg);
         return 2;
     }
-    KN_INFO("brain", "kn_brain %s, config %s", KN_BRAIN_VERSION,
+    KN_INFO("brain", "kn_brain, Krunker v%s, build %s, config %s", ruleset_current()->version, kn_build_commit_id(),
             kn_config_path(cfg)[0] ? kn_config_path(cfg) : "(none, defaults)");
     /* database.auto_migrate (default: on for the zero-config sqlite file) applies
      * pending migrations at every start, like --migrate (coord-store) */
@@ -210,7 +211,7 @@ int main(int argc, char **argv) {
     Brain *b = &g_brain;
     b->cfg = cfg;
     b->started_ms = kn_wall_ms();
-    snprintf(b->version, sizeof(b->version), "%s", KN_BRAIN_VERSION);
+    snprintf(b->version, sizeof(b->version), "%s", kn_build_commit_id()); // the brain's build: its commit (status, brainVersion)
     snprintf(b->region, sizeof(b->region), "%s", kn_config_str(cfg, "brain.region", "local"));
     const char *host = kn_config_str(cfg, "brain.host", "127.0.0.1");
     int port = (int) kn_config_int(cfg, "brain.port", 5050);

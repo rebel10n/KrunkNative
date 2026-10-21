@@ -31,7 +31,6 @@
 #define SERVER_ISATTY(stream) isatty(fileno(stream))
 #endif
 
-const ServerVersion g_server_version = {1, 0, 0};
 ServerTickStats g_server_tick_stats;
 
 Replxx *g_replxx;
@@ -824,8 +823,7 @@ int main(int argc, char **argv) {
     if (cfg->log_file[0] && server_log_open_file(cfg->log_file))
         fprintf(stderr, "Cannot open log file %s: %s (logging to the console only)\n", cfg->log_file, strerror(errno));
 
-    server_log("Starting " KN_PRODUCT_NAME " server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
-               interactive ? "" : " (headless)");
+    server_log("Starting " KN_PRODUCT_NAME " server%s", interactive ? "" : " (headless)");
     server_log("Build %s", kn_build_string());
     server_log("Plays Krunker v%s", ruleset_current()->version);
     if (flavor_get() != FLAVOR_BASE) server_log("Flavor: %s (%s)", flavor_current()->display_name, flavor_current()->key);

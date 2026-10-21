@@ -552,7 +552,7 @@ static void h_live(kn_http_req *req, void *ud) {
     cJSON_AddNumberToObject(o, "open", open);
     cJSON_AddNumberToObject(o, "lobbies", (double) g_d.lobby_count);
     cJSON_AddStringToObject(o, "minVersion", g_d.min_version);
-    cJSON_AddStringToObject(o, "version", kn_build_info()->describe);
+    cJSON_AddStringToObject(o, "version", kn_build_commit_id());
     cJSON_Delete(servers);
     reply(req, 200, o);
 }

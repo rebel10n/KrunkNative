@@ -22,12 +22,6 @@
 #endif
 
 typedef struct {
-    const unsigned char major;
-    const unsigned char minor;
-    const unsigned char patch;
-} ServerVersion;
-
-typedef struct {
     unsigned short tick_rate;
     unsigned short listen_port;
     unsigned short max_players;

@@ -11,6 +11,7 @@
  * the Authorization header of those transfers.
  */
 #include "ai.h"
+#include "build_info.h"
 
 #include <ctype.h>
 #include <pthread.h>
@@ -1701,7 +1702,7 @@ static void config_load(const struct kn_config *cfg) {
     C.lim_daily = (int) kn_config_int(cfg, "ai.limit.daily", 3000);
     C.lim_daily_tokens = kn_config_int(cfg, "ai.limit.daily_tokens", 20000000);
     C.lim_concurrent = (int) kn_config_int(cfg, "ai.limit.concurrent", 3);
-    snprintf(C.ua, sizeof(C.ua), "KrunkNative-brain/%s", KN_BRAIN_VERSION);
+    snprintf(C.ua, sizeof(C.ua), "KrunkNative-brain/%s", kn_build_commit_id());
     C.banter_enabled = kn_config_bool(cfg, "ai.banter.enabled", 1);
     C.banter_rpm = (int) kn_config_int(cfg, "ai.banter.rpm", 120);
     C.banter_max_tokens = (int) kn_config_int(cfg, "ai.banter.max_tokens", 200);

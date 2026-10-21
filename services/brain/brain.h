@@ -37,7 +37,7 @@ typedef struct Brain {
 
     char id[64];                   /* brain id (config brain.id, default "<hostname>-<port>") */
     char region[64];               /* default region of this brain (brain.region) */
-    char version[32];              /* KN_BRAIN_VERSION */
+    char version[32];              /* the build's commit (kn_build_commit_id): status "version", brainVersion */
     int64_t started_ms;            /* wall clock */
     int draining;                  /* SIGTERM/SIGUSR1 received: stop accepting new work */
 
@@ -49,8 +49,6 @@ typedef struct BrainModule {
     int (*init)(Brain *b);         /* register routes, timers; 0 ok */
     void (*shutdown)(Brain *b);    /* may be NULL; called once, reverse order */
 } BrainModule;
-
-#define KN_BRAIN_VERSION "1.0.0"
 
 /* Process-wide brain (set by main.c before the first init). */
 Brain *brain_get(void);

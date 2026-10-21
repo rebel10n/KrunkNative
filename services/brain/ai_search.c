@@ -19,6 +19,8 @@
  * The child is restarted with a backoff when it exits; calls in flight fail with an error the
  * model sees. Tests use a stub MCP server (services/brain/tests/ai_stub.py mcp), never the web.
  */
+#include "build_info.h"
+
 #include <errno.h>
 #include <stdint.h>
 #include <fcntl.h>
@@ -464,7 +466,7 @@ static void child_start(kn_loop *loop, void *ud) {
     cJSON_AddObjectToObject(p, "capabilities");
     cJSON *ci = cJSON_AddObjectToObject(p, "clientInfo");
     cJSON_AddStringToObject(ci, "name", "kn_brain");
-    cJSON_AddStringToObject(ci, "version", KN_BRAIN_VERSION);
+    cJSON_AddStringToObject(ci, "version", kn_build_commit_id());
     send_msg(m);
     KN_INFO(MOD, "started the web search server (pid %d): %s", (int) pid, S.argv[0]);
 }
