@@ -726,12 +726,18 @@ else ()
     # (customOnly: a custom game that is not comp or a dev; noComp), the spawn's Grappler and the random pickups' pool
     add_executable(weapon_req_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/weapon_req_test.c)
     target_link_libraries(weapon_req_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(weapon_req_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
     add_test(NAME weapon_req_test COMMAND weapon_req_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # zombies_test (map-logic WP-H): waves, power-ups, machines, perks, finiteAmmo, airdrops
     # junk_test: the Junk wallet's amounts (hundredths, the two-place text, parseFloat's reading; doc/v10/junk.md)
     add_executable(junk_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/junk_test.c)
     target_link_libraries(junk_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(junk_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
     add_test(NAME junk_test COMMAND junk_test)
     add_executable(zombies_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/zombies_test.c)
     target_link_libraries(zombies_test PRIVATE m)
@@ -846,6 +852,9 @@ else ()
     # drops is a missing wall); shared/tests/map_drop_test.c. Run from the source root (assets/).
     add_executable(map_drop_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_drop_test.c)
     target_link_libraries(map_drop_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_drop_test PRIVATE ws2_32) # shared/src/net.c, editor_bus.c
+    endif ()
     add_test(NAME map_drop_test COMMAND map_drop_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # nav_overlay_test (KrunkNative spectate overlay): the NET_EXT_KN_BOT_PATH body
     # (shared/src/bot_path_net.c fill / decode) and the GL-free overlay geometry

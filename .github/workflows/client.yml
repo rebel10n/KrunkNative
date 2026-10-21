@@ -444,12 +444,12 @@ jobs:
           xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            KN_SERVER_URL=https://krunk.io/ MARKETING_VERSION=$KN_KRUNKER_VERSION CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
+            KN_SERVER_URL=https://krunk.io/ "MARKETING_VERSION=$KN_KRUNKER_VERSION" "CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60))" build
           # Krunker Strike (io.krunknative.strike) over its own page
           xcodebuild -project KrunkNative.xcodeproj -scheme KrunkStrike -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            KN_SERVER_URL=https://krunk.io/strike/ MARKETING_VERSION=$KN_KRUNKER_VERSION CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60)) build
+            KN_SERVER_URL=https://krunk.io/strike/ "MARKETING_VERSION=$KN_KRUNKER_VERSION" "CURRENT_PROJECT_VERSION=$((KN_COMMIT_TIME / 60))" build
 
       - name: Package (.ipa)
         run: |

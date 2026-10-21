@@ -170,8 +170,9 @@ jobs:
           KRU_PORT: ${{ secrets.KRU_PORT }}
         run: |
           set -euo pipefail
-          [ -n "$EDGES_SSH_KEY" ] && [ -n "$EDGES_KNOWN_HOSTS" ] && [ -n "$KRU_SSH_KEY" ] && [ -n "$KRU_HOST" ] \
-            || { echo "::error::missing EDGES_SSH_KEY / EDGES_KNOWN_HOSTS / KRU_SSH_KEY / KRU_HOST secret"; exit 1; }
+          if [ -z "$EDGES_SSH_KEY" ] || [ -z "$EDGES_KNOWN_HOSTS" ] || [ -z "$KRU_SSH_KEY" ] || [ -z "$KRU_HOST" ]; then
+            echo "::error::missing EDGES_SSH_KEY / EDGES_KNOWN_HOSTS / KRU_SSH_KEY / KRU_HOST secret"; exit 1
+          fi
           install -d -m 700 ~/.ssh
           (umask 077; printf '%s\n' "$EDGES_SSH_KEY" > ~/.ssh/id_edges; printf '%s\n' "$KRU_SSH_KEY" > ~/.ssh/id_kru)
           printf '%s\n%s\n' "$KRU_KNOWN_HOSTS" "$EDGES_KNOWN_HOSTS" > ~/.ssh/known_hosts

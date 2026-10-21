@@ -15,7 +15,7 @@
 set -uo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$repo"
+cd "$repo" || exit 1
 BASE_BUILD="${1:-cmake-build-debug}"
 STRIKE_DIST="${STRIKE_DIST:-dist/strike}"
 JOBS="${JOBS:-6}"
@@ -47,7 +47,7 @@ check "server package produced" "$([ -f "$srv_tar" ] && echo 0 || echo 1)" "$srv
 check "client package produced" "$([ -f "$cli_tar" ] && echo 0 || echo 1)" "$cli_tar"
 # identifiers stay krunknative; the archive names never say strike
 check "packages named BoxOffice, not strike" \
-    "$([ -n "$srv_tar$cli_tar" ] && ! ls "$STRIKE_DIST"/*strike* 2> /dev/null | grep -q . && echo 0 || echo 1)"
+    "$([ -n "$srv_tar$cli_tar" ] && ! compgen -G "$STRIKE_DIST/*strike*" > /dev/null && echo 0 || echo 1)"
 
 if [ -f "$srv_tar" ]; then
     mkdir -p "$WORK/srv" && tar -xzf "$srv_tar" -C "$WORK/srv"
