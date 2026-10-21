@@ -78,13 +78,6 @@ static struct {
         void *user;
     } waiters[TOKEN_WAITERS];
     int waiter_count;
-    int resuming;      // a krunker_account_resume's refresh is in flight
-    // the Account Manager's Add (krunker_account_add): its sign-in hands the new account to the listener and
-    // leaves the game's session as it was
-    int adding;
-    char add_name[64], add_refresh[TOKEN_MAX + 1];
-    // queued by krunker_account_sign_in_when_expired: a sign-in started once the expired session is forgotten
-    char next_login[256], next_pass[256];
 } A;
 
 static KrunkerAccountEventFn g_event_fn;
@@ -420,7 +413,6 @@ static void end_attempt(void) {
     wipe(A.password, sizeof(A.password));
     wipe(A.challenge, sizeof(A.challenge));
     A.code_kind[0] = 0;
-    A.adding = 0;
     A.attempt++;
     if (A.captcha_open) krunker_captcha_close(); // (never a join's challenge: krunker_net owns those)
     A.captcha_open = 0;
@@ -435,23 +427,6 @@ static void fail_sign_in(const char *text) {
 }
 
 static void signed_in(const char *access, const char *refresh) {
-    if (A.adding) { // the Account Manager's Add: the account goes to its listener; the game's session is not replaced
-        (void) access;
-        if (!A.email && A.login[0]) snprintf(A.add_name, sizeof(A.add_name), "%s", A.login);
-        else {
-            const char *at = strchr(A.login, '@');
-            snprintf(A.add_name, sizeof(A.add_name), "%.*s", at ? (int) (at - A.login) : (int) strlen(A.login), A.login);
-        }
-        snprintf(A.add_refresh, sizeof(A.add_refresh), "%s", refresh ? refresh : "");
-        end_attempt();
-        A.state = A.access[0] || A.refresh[0] ? KRUNKER_ACCOUNT_SIGNED_IN : KRUNKER_ACCOUNT_GUEST;
-        printf("[kio-account] added krunker.io account %s (the game's session is unchanged)\n", A.add_name);
-        emit(KRUNKER_EV_ADDED);
-        wipe(A.add_refresh, sizeof(A.add_refresh));
-        A.add_name[0] = 0;
-        changed();
-        return;
-    }
     A.rp_known = 0; // another balance until a game server says it (the account may differ)
     A.rp = 0;
     snprintf(A.access, sizeof(A.access), "%s", access);
@@ -558,29 +533,14 @@ static void on_profile(const int status, cJSON *res) {
 
 static void on_refresh(const int status, cJSON *res) {
     const char *access = json_str(res, "accessToken"), *refresh = json_str(res, "refreshToken");
-    const int resuming = A.resuming;
-    A.resuming = 0;
     if ((status == 200 || status == 201) && access && access[0] && strlen(access) <= TOKEN_MAX && (!refresh || strlen(refresh) <= TOKEN_MAX)) {
         snprintf(A.access, sizeof(A.access), "%s", access);
         if (refresh && refresh[0]) snprintf(A.refresh, sizeof(A.refresh), "%s", refresh);
         save();
-        if (resuming) {
-            A.state = KRUNKER_ACCOUNT_SIGNED_IN;
-            printf("[kio-account] resumed the krunker.io account %s\n", A.name);
-        } else {
-            printf("[kio-account] the krunker.io session was refreshed\n");
-        }
+        printf("[kio-account] the krunker.io session was refreshed\n");
         changed();
         serve_waiters(A.access);
-        emit(resuming ? KRUNKER_EV_RESUMED : KRUNKER_EV_REFRESHED);
-        return;
-    }
-    if (resuming && status != 401) { // unreachable / an odd answer: nothing is resumed
-        printf("[kio-account] resuming the krunker.io account failed (HTTP %d)\n", status);
-        forget();
-        set_message(1, "%s", I18N("kn.kio.account.unreachable", "Could not reach krunker.io's account service. Check your connection, or the proxy in Settings > Client."));
-        serve_waiters(NULL);
-        emit(KRUNKER_EV_RESUME_FAILED);
+        emit(KRUNKER_EV_REFRESHED);
         return;
     }
     if (status == 401) { // FRVR's INVALID_CREDENTIALS: the refresh token is no good any more
@@ -590,16 +550,6 @@ static void on_refresh(const int status, cJSON *res) {
         set_message(1, "%s", I18N("kn.kio.account.expired", "Your krunker.io session ended: sign in again. Joining krunker.io servers as a guest until then."));
         printf("[kio-account] %s\n", A.message); // logged only: the session end shows in the account header, not as a toast
         serve_waiters(NULL);
-        if (A.next_login[0]) { // the listener's queued sign-in (the stored password), started now that the session is gone
-            char login[sizeof(A.next_login)], pass[sizeof(A.next_pass)];
-            snprintf(login, sizeof(login), "%s", A.next_login);
-            snprintf(pass, sizeof(pass), "%s", A.next_pass);
-            wipe(A.next_login, sizeof(A.next_login));
-            wipe(A.next_pass, sizeof(A.next_pass));
-            krunker_account_sign_in(login, pass);
-            wipe(login, sizeof(login));
-            wipe(pass, sizeof(pass));
-        }
         return;
     }
     // unreachable / an odd answer: the session stays; this join goes on with what is left of it
@@ -683,8 +633,8 @@ static void turnstile_done(void *user, const char *token, const int unavailable)
     post_login(token);
 }
 
-// krunker_account_sign_in, and krunker_account_add (adding: the account is not signed in here; see signed_in)
-static int start_sign_in(const char *login, const char *password, const int adding) {
+// krunker_account_sign_in (the login card's Login)
+static int start_sign_in(const char *login, const char *password) {
     load();
     if (A.state == KRUNKER_ACCOUNT_BUSY) {
         set_message(1, "%s", I18N("kn.kio.account.busy", "A sign-in is already running."));
@@ -696,7 +646,6 @@ static int start_sign_in(const char *login, const char *password, const int addi
     }
     req_cancel(&A.auth);
     end_attempt();
-    A.adding = adding;
     snprintf(A.login, sizeof(A.login), "%s", login);
     snprintf(A.password, sizeof(A.password), "%s", password);
     A.email = strchr(login, '@') != NULL;
@@ -865,58 +814,7 @@ static int start_refresh(void) {
     return ok;
 }
 
-// The Account Manager's Add: the sign-in as krunker_account_sign_in, but the account is not signed in here: the
-// listener gets KRUNKER_EV_ADDED (krunker_account_added_name / _added_refresh) and the game's session stays.
-int krunker_account_sign_in(const char *login, const char *password) { return start_sign_in(login, password, 0); }
-
-int krunker_account_add(const char *login, const char *password) { return start_sign_in(login, password, 1); }
-
-const char *krunker_account_added_name(void) { return A.add_name; }
-
-int krunker_account_added_refresh(char *out, const size_t n) {
-    if (!out || !n) return 0;
-    out[0] = 0;
-    if (!A.add_refresh[0]) return 0;
-    snprintf(out, n, "%s", A.add_refresh);
-    return 1;
-}
-
-void krunker_account_sign_in_when_expired(const char *login, const char *password) {
-    if (!login || !login[0] || !password || !password[0] || strlen(login) >= sizeof(A.next_login) || strlen(password) >= sizeof(A.next_pass)) return;
-    snprintf(A.next_login, sizeof(A.next_login), "%s", login);
-    snprintf(A.next_pass, sizeof(A.next_pass), "%s", password);
-}
-
-int krunker_account_resume(const char *name, const char *refresh) {
-    load();
-    if (A.state == KRUNKER_ACCOUNT_BUSY) {
-        set_message(1, "%s", I18N("kn.kio.account.busy", "A sign-in is already running."));
-        return 0;
-    }
-    if (!name || !name[0] || strlen(name) >= sizeof(A.name) || !refresh || !refresh[0] || strlen(refresh) > TOKEN_MAX) return 0;
-    req_cancel(&A.auth);
-    if (A.refresh_req.kind == REQ_REFRESH) {
-        req_cancel(&A.refresh_req);
-        serve_waiters(NULL);
-    }
-    end_attempt();
-    wipe(A.access, sizeof(A.access));
-    snprintf(A.refresh, sizeof(A.refresh), "%s", refresh);
-    snprintf(A.name, sizeof(A.name), "%s", name);
-    A.level = 0;
-    A.rp_known = 0;
-    A.rp = 0;
-    A.resuming = 1;
-    A.state = KRUNKER_ACCOUNT_BUSY;
-    printf("[kio-account] resuming the krunker.io account %s\n", A.name);
-    changed();
-    if (!start_refresh()) {
-        A.resuming = 0;
-        forget();
-        emit(KRUNKER_EV_RESUME_FAILED);
-    }
-    return 1;
-}
+int krunker_account_sign_in(const char *login, const char *password) { return start_sign_in(login, password); }
 
 int krunker_account_refresh_token(char *out, const size_t n) {
     load();

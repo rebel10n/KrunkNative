@@ -171,7 +171,6 @@ static void on_kio_event(void *user, const KrunkerAccountEvent ev) {
     (void) user;
     switch (ev) {
         case KRUNKER_EV_SIGNED_IN:
-        case KRUNKER_EV_RESUMED:
         case KRUNKER_EV_REFRESHED:
             sync_kio(krunker_account_name());
             break;
