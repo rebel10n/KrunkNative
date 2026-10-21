@@ -498,9 +498,12 @@ export async function run(opts = {}) {
 // the join child are each a pid this process started; the join's JSON report is read from its stdout. The harness
 // sets no window.__kn_game and no state.inGame on origin/main, so the report is what is measured, not a game object.
 async function runHarnessJoin(opts = {}) {
+  // KN_NODE_PERSIST_PROFILE names a directory that outlives the run: the harness keeps its Chromium profile in
+  // <runDir>/join-profile, so a second run on the same directory starts from the first run's browser state.
   const runDir = path.join(os.homedir(), ".cache/kn-krunker-node/run", String(proc.pid) + "-harness");
   fs.mkdirSync(runDir, { recursive: true });
   const kids = new Children(runDir);
+  const persist = proc.env.KN_NODE_PERSIST_PROFILE;
   const secret = crypto.randomBytes(24).toString("base64url");
   fs.writeFileSync(path.join(runDir, "secret"), secret, { mode: 0o600 });
   let serve = null;
@@ -516,7 +519,14 @@ async function runHarnessJoin(opts = {}) {
     const stack = await startStack(kids, runDir, secret);
     const pagePort = await freePort("tcp");
     const tlsPort = await freePort("tcp");
-    const { file } = writeHarnessConfig(runDir, null, { pagePort, tlsPort, brainUrl: stack.brainUrl, bridgePort: stack.bridgePort });
+    const { file, cfg: hcfg } = writeHarnessConfig(runDir, null, { pagePort, tlsPort, brainUrl: stack.brainUrl, bridgePort: stack.bridgePort });
+    if (persist) {
+      hcfg.runDir = persist;
+      fs.mkdirSync(persist, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(hcfg, null, 2), { mode: 0o600 });
+      fs.copyFileSync(path.join(runDir, "harness", "tls-key.pem"), path.join(persist, "tls-key.pem"));
+      fs.copyFileSync(path.join(runDir, "harness", "tls-cert.pem"), path.join(persist, "tls-cert.pem"));
+    }
     const env = { ...proc.env, KN_KRUNKER_LOCAL_CONFIG: file };
     serve = kids.spawn("harness", proc.execPath, [HARNESS, "serve"], { env, log: "harness.log" });
     await waitFor(() => tcpOpen(pagePort, "127.0.0.1") && tcpOpen(tlsPort, "127.0.0.1"), 20000, "the harness page server");
