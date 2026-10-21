@@ -179,8 +179,16 @@ typedef struct V10Init {
 } V10Init;
 int v10_parse_init(const uint8_t *p, size_t n, V10Init *out);
 
+/* The Krunker mapIndex of a native map JSON when it is an official map, -1 for a community map. The
+ * native server numbers its own list (HQ is 26 there, 34 on Krunker's list), and 25 community maps share
+ * an official name, so a map is official when its name and object count are those of one entry of
+ * shared/include/krunker_maps.h. */
+int v10_official_map_index(const uint8_t *map, size_t map_len);
+
 /* The INIT_GAME message (v10 server's 20 arguments, buildInitArgs). `config` and `network` are
- * values from the caller's V10Out (v10_config_value / v10_network_value). */
+ * values from the caller's V10Out (v10_config_value / v10_network_value). An official map's INIT carries its
+ * Krunker mapIndex and no custom map (arg 9 nil): the client loads it by index from its catalogue (GET
+ * /maps/<index>). A community map's INIT carries the map JSON inline in arg 9 and the native index. */
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len,
                    KrunkerValue config, KrunkerValue network, int ranked);
 /* The networkData object of the init (snf, tf, sf). */

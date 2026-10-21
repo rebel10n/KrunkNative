@@ -46,8 +46,9 @@ first native packet it cannot translate stops that session and is named in its l
   production mode. Chromium resolves that name to 127.0.0.1 via `--host-resolver-rules`.
 - `matchmaker.krunker.io` and `matchmaker.beta.krunker.io` resolve to the local HTTPS
   listener. It forwards `/seek-game`, `/game-list`, `/generate-token` to `brainUrl/mm/...`.
-- `gapi.svc.krunker.io` and `gapi.beta.krunker.io` forward to the brain root (the brain
-  answers them with 404 today).
+- `gapi.svc.krunker.io` and `gapi.beta.krunker.io` forward to the brain root, where v10_api.c
+  answers `/maps` (the list the client fills its catalogue from), `/maps/<index>` (the map the
+  client loads by mapIndex), `/titles`, `/data/skins` and `/data/spins`.
 - Missing files are symlinks into KrunkNative `assets/` or `ui/` (first hit wins). Files no
   root has stay 404 and are listed in the report.
 - The game object is reachable from the page (harness-only, not in the bundle file or the shipped client).
@@ -63,16 +64,17 @@ official hostnames (`seek-game` answers too, with `angeles-8.krunk.io:21022`).
 
 Does not work yet: the client stays on its loading spinner after the token, even after 120 s.
 It never calls game-list from the menu, so Quick Play cannot be reached from the harness.
-Known 404s: `manifest.json`, `img/pwa/icon32x32.png` (not in KrunkNative). `gapi.*/data/skins`
-answers 404 from the brain. Blocked by design: `analytics.google.com`.
+Known 404s: `manifest.json`, `img/pwa/icon32x32.png` (not in KrunkNative). Blocked by design:
+`analytics.google.com`.
 
-A join to a krunk.io game server from the official client is not verified, and none is
-possible yet. `angeles-8.krunk.io:21022` answers a WebSocket upgrade with a raw binary frame,
-not HTTP 101, so it speaks KN's framing (`doc/transport.md`), not the official
-msgpack-over-WebSocket protocol. `play.krunk.io/native` (101) is KN's raw passthrough, and
-`play.krunk.io/ws` returns 502. The path to our servers is net-bridge's msgpack/ahNum codec
-(`net-bridge/utils.ts`, `krunkerProxy.ts`) adapted to v10.0.3's packets (Option B in the
-handoff). That translator is not written; `krunkerProxy.ts` still targets the v7 ENT layout.
+A join works against a local game (checked 2026-10-21, `join`: init completes, the map loads
+through `GET gapi.../maps/<index>`, the client reaches "CLICK TO PLAY"). Two settings are needed,
+or the client never seeks: the game's region must be an id the production client pings
+(`server_bin --region us-nj`, see doc/v10/regions.md; `local` is not pinged on this host name), and
+the brain's `--brain.public_url=https://matchmaker.beta.krunker.io`, so `/mm/ping-list` names a
+host the harness routes to `/mm/ping`. A `"Lost Connection"` box on the menu with no socket
+means one of them is missing. Packets after the init that the bridge cannot translate stop the
+session (named in the bridge log); the client's errors after the init are in the report.
 
 The localhost gate the handoff describes is avoided by the `.test` hostname, so the copy is
 not patched. The matchmaker calls above prove the gate does not block the client.

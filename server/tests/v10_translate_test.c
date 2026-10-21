@@ -1073,6 +1073,48 @@ int main(void) {
                   "init arg 11 is the sync data {gor: 1} (the v10 init reads it)");
         }
         v10_out_free(&o2);
+
+        // An official map (HQ is Krunker's mapIndex 34; the native list numbers it 26): the client has every
+        // official map by mapIndex (GET /maps/<index>), so its INIT carries that index and no custom map
+        // (arg 9 nil; a custom game's map is inline). A custom map with the same name and another object
+        // count keeps the native index and its inline map.
+        {
+            const size_t cap = 64 + 1465 * 4;
+            char *hq = malloc(cap);
+            CHECK(hq != NULL, "a buffer for the HQ map JSON");
+            if (hq) {
+                size_t len = (size_t) snprintf(hq, cap, "{\"name\":\"HQ\",\"objects\":[");
+                for (int i = 0; i < 1465; i++) len += (size_t) snprintf(hq + len, cap - len, i ? ",{}" : "{}");
+                len += (size_t) snprintf(hq + len, cap - len, "]}");
+                const V10Init hq_init = {26, 0, 30, 1, 3};
+                const KrunkerValue cfg3 = KRUNKER_V_MAP(NULL, 0);
+
+                V10Out o3;
+                v10_out_init(&o3);
+                const KrunkerValue nv3 = v10_network_value(&o3, &net);
+                v10_init_game(&o3, &hq_init, (const uint8_t *)hq, len, cfg3, nv3, 0);
+                CHECK(o3.count == 1 && o3.msgs[0].argc == 20, "the official map's INIT_GAME has 20 arguments");
+                if (o3.count) {
+                    CHECK(vequal(&o3.msgs[0].args[0], &KRUNKER_V_NUM(34)),
+                          "an official map's init arg 0 is its Krunker mapIndex (HQ 34, not the native list's 26)");
+                    CHECK(vequal(&o3.msgs[0].args[9], &KRUNKER_V_NIL),
+                          "an official map's init arg 9 is nil (no custom map: the client loads it from its catalogue)");
+                }
+                v10_out_free(&o3);
+
+                const char *named = "{\"name\":\"HQ\",\"objects\":[{}]}";
+                V10Out o4;
+                v10_out_init(&o4);
+                const KrunkerValue nv4 = v10_network_value(&o4, &net);
+                v10_init_game(&o4, &hq_init, (const uint8_t *)named, strlen(named), cfg3, nv4, 0);
+                if (o4.count) {
+                    CHECK(vequal(&o4.msgs[0].args[0], &KRUNKER_V_NUM(26)), "a custom map named HQ keeps the native mapIndex");
+                    CHECK(o4.msgs[0].args[9].type == KRUNKER_MAP, "a custom map named HQ keeps its inline map (arg 9)");
+                }
+                v10_out_free(&o4);
+                free(hq);
+            }
+        }
     }
 
     // ---- chunk assembly (ChunkAssembly): in order, refused out of order or overlong

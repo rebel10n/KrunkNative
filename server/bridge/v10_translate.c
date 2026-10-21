@@ -13,6 +13,7 @@
  */
 #include "v10_translate.h"
 
+#include "krunker_maps.h" /* KRUNKER_OFFICIAL_MAPS: the official list an official map's INIT is numbered by */
 #include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
 
 #include <ctype.h>
@@ -654,9 +655,46 @@ int v10_parse_init(const uint8_t *p, size_t n, V10Init *out) {
     return 1;
 }
 
+/* The official list (krunker_maps.h): the name and object count of each entry. */
+static const struct {
+    int index;
+    const char *name;
+    int objects;
+} k_official_maps[] = {
+#define V10_OFFICIAL_ROW(index, name, file, objects) {index, name, objects},
+    KRUNKER_OFFICIAL_MAPS(V10_OFFICIAL_ROW)
+#undef V10_OFFICIAL_ROW
+};
+
+int v10_official_map_index(const uint8_t *map, size_t map_len) {
+    if (!map || map_len == 0) return -1;
+    char *z = malloc(map_len + 1);
+    if (!z) return -1;
+    memcpy(z, map, map_len);
+    z[map_len] = 0;
+    cJSON *root = cJSON_ParseWithOpts(z, NULL, 0);
+    free(z);
+    int index = -1;
+    const cJSON *name = root ? cJSON_GetObjectItemCaseSensitive(root, "name") : NULL;
+    const cJSON *objects = root ? cJSON_GetObjectItemCaseSensitive(root, "objects") : NULL;
+    if (cJSON_IsString(name) && cJSON_IsArray(objects)) {
+        const int count = cJSON_GetArraySize(objects);
+        for (size_t i = 0; i < sizeof k_official_maps / sizeof k_official_maps[0]; i++) {
+            if (k_official_maps[i].objects == count && !strcmp(name->valuestring, k_official_maps[i].name)) {
+                index = k_official_maps[i].index;
+                break;
+            }
+        }
+    }
+    cJSON_Delete(root);
+    return index;
+}
+
 /* INIT_GAME arguments (buildInitArgs, v10.js 222270). */
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
                    KrunkerValue network, int ranked) {
+    const int official = v10_official_map_index(map, map_len);
+    const int32_t map_index = official >= 0 ? official : init->map_index;
     const KrunkerValue empty = v10_obj(o, NULL, NULL, 0);
     /* the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress; the v10 init reads it */
     const char *const sync_keys[1] = {"gor"};
@@ -666,8 +704,8 @@ void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t ma
     const KrunkerValue map_vals[5] = {KRUNKER_V_STRN((const char *)map, map_len), KRUNKER_V_NIL, KRUNKER_V_STR(""), empty, KRUNKER_V_NUM(1)};
     const KrunkerValue map_obj = v10_obj(o, map_keys, map_vals, 5);
     const KrunkerValue args[V10_INIT_ARGS] = {
-        KRUNKER_V_NUM(init->map_index), KRUNKER_V_NUM(init->mode_index), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
-        KRUNKER_V_NIL,                  config,                            KRUNKER_V_NIL, KRUNKER_V_NUM(0), map_obj,
+        KRUNKER_V_NUM(map_index), KRUNKER_V_NUM(init->mode_index), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
+        KRUNKER_V_NIL,            config,                          KRUNKER_V_NIL, KRUNKER_V_NUM(0), official >= 0 ? KRUNKER_V_NIL : map_obj,
         KRUNKER_V_NIL,                  sync,                              network,       KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(0),
         KRUNKER_V_BOOL(0),              KRUNKER_V_BOOL(ranked),            KRUNKER_V_NIL, KRUNKER_V_NIL,     KRUNKER_V_NIL,
     };
