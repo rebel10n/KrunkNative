@@ -1140,6 +1140,18 @@ static void script_run(Client *client, const ScriptEvent *e) {
         } else {
             fprintf(stderr, "[input_script] hands t=%.0f none\n", g_script.time);
         }
+    } else if (!strcmp(e->cmd, "arms")) {
+        // arms: the trigger arm's and the off arm's shoulder, elbow and wrist as drawn, world space (player_arm_joints;
+        // nettspend_arms_e2e.py checks the elbows' bend)
+        for (int off = 0; off < 2; off++) {
+            vec3 shoulder, elbow, wrist;
+            if (client->me && player_arm_joints(client->me, off, &shoulder, &elbow, &wrist)) {
+                fprintf(stderr, "[input_script] arms t=%.0f %s shoulder=%.4f,%.4f,%.4f elbow=%.4f,%.4f,%.4f wrist=%.4f,%.4f,%.4f\n",
+                        g_script.time, off ? "off" : "trigger", shoulder.x, shoulder.y, shoulder.z, elbow.x, elbow.y, elbow.z, wrist.x, wrist.y, wrist.z);
+            } else {
+                fprintf(stderr, "[input_script] arms t=%.0f %s none\n", g_script.time, off ? "off" : "trigger");
+            }
+        }
     } else if (!strcmp(e->cmd, "pour")) {
         // pour: the Drank's pour-up as drawn (nettspend.h): the bottle's mouth and the cup's rim (world and
         // window fraction) and the pour's strength (nettspend_vfx_e2e.py)

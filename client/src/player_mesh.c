@@ -546,13 +546,29 @@ static vec3 player_off_hand(const PlayerArms *arms, const int left_handed) {
     return player_arm_hand(arms, left_handed ? arms->right : arms->left);
 }
 
+// Rodrigues: m = I + sn K + (1 - cs) K^2, the rotation by the angle with sine sn and cosine cs about the unit axis k
+static void player_mat3_axis_rotation(float m[3][3], const float kx, const float ky, const float kz, const float sn, const float cs) {
+    const float t = 1.0f - cs;
+    m[0][0] = cs + kx * kx * t, m[0][1] = kx * ky * t - kz * sn, m[0][2] = kx * kz * t + ky * sn;
+    m[1][0] = ky * kx * t + kz * sn, m[1][1] = cs + ky * ky * t, m[1][2] = ky * kz * t - kx * sn;
+    m[2][0] = kz * kx * t - ky * sn, m[2][1] = kz * ky * t + kx * sn, m[2][2] = cs + kz * kz * t;
+}
+
+// The elbow at rest (the top of the forearm, where the upper arm ends) in the arms anchor frame, the pivot at identity
+static vec3 player_arm_elbow(const PlayerArms *arms, const PlayerArmMesh *arm) {
+    if (!arms || !arm || !arm->lower || !arm->lower->mesh_count) return (vec3) {0.0f, 0.0f, 0.0f};
+    return transform_point_to(&arm->lower->meshes[0]->transform, (vec3) {0.0f, 1.0f, 0.0f}, &arms->anchor); // the shirt segment's top
+}
+
 // Turns `arm` (its pivot, identity at rest outside melee) about its shoulder (arm->anchor's origin)
 // so the hand centre at `rest` (the arms anchor frame, the pivot at identity) lands on `target`: the
 // rotation takes the shoulder-to-hand direction onto the shoulder-to-target one, and the arm slides
 // along it for the difference in reach, so the shoulder stays put (on the body in third person; in
 // first person the long sleeve keeps passing below the camera). Nettspend's pour-up: the hands
-// follow the cup and the bottle.
-static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 target) {
+// follow the cup and the bottle. `pole` (may be NULL; the arms frame, with the rest `elbow`): the arm
+// then rolls about the shoulder-to-target line, the hand staying on it, until its elbow lies on the
+// pole's side of that line (NETTSPEND_OFF_ELBOW_POLE_*: the off arm's elbow bends down and back).
+static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 target, const vec3 elbow, const vec3 *pole) {
     if (!arm) return;
     const vec3 sh = arm->anchor.position;
     const float ax = rest.x - sh.x, ay = rest.y - sh.y, az = rest.z - sh.z;
@@ -562,13 +578,32 @@ static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 tar
     if (la > 1e-4f && lb > 1e-4f) {
         float kx = ay * bz - az * by, ky = az * bx - ax * bz, kz = ax * by - ay * bx;
         const float sn = sqrtf(kx * kx + ky * ky + kz * kz) / (la * lb), cs = (ax * bx + ay * by + az * bz) / (la * lb);
-        if (sn > 1e-5f) { // Rodrigues: R = I + sin K + (1 - cos) K^2 about the unit axis k
+        if (sn > 1e-5f) {
             const float kl = sqrtf(kx * kx + ky * ky + kz * kz);
             kx /= kl, ky /= kl, kz /= kl;
-            const float t = 1.0f - cs;
-            m[0][0] = cs + kx * kx * t, m[0][1] = kx * ky * t - kz * sn, m[0][2] = kx * kz * t + ky * sn;
-            m[1][0] = ky * kx * t + kz * sn, m[1][1] = cs + ky * ky * t, m[1][2] = ky * kz * t - kx * sn;
-            m[2][0] = kz * kx * t - ky * sn, m[2][1] = kz * ky * t + kx * sn, m[2][2] = cs + kz * kz * t;
+            player_mat3_axis_rotation(m, kx, ky, kz, sn, cs);
+        }
+    }
+    if (pole && la > 1e-4f && lb > 1e-4f) {
+        // the roll about the chord k (m takes the rest direction onto k, so the axis keeps the hand: R a = la k)
+        const float kx = bx / lb, ky = by / lb, kz = bz / lb;
+        const float ex = elbow.x - sh.x, ey = elbow.y - sh.y, ez = elbow.z - sh.z;
+        const float fx = m[0][0] * ex + m[0][1] * ey + m[0][2] * ez, fy = m[1][0] * ex + m[1][1] * ey + m[1][2] * ez,
+                    fz = m[2][0] * ex + m[2][1] * ey + m[2][2] * ez;                     // the elbow after m
+        const float fk = fx * kx + fy * ky + fz * kz;
+        const float px = fx - fk * kx, py = fy - fk * ky, pz = fz - fk * kz;             // its bend across the chord
+        const float qk = pole->x * kx + pole->y * ky + pole->z * kz;
+        const float qx = pole->x - qk * kx, qy = pole->y - qk * ky, qz = pole->z - qk * kz; // the pole's side of the chord
+        const float pl = sqrtf(px * px + py * py + pz * pz), ql = sqrtf(qx * qx + qy * qy + qz * qz);
+        if (pl > 1e-5f && ql > 1e-5f) {
+            const float sn = (kx * (py * qz - pz * qy) + ky * (pz * qx - px * qz) + kz * (px * qy - py * qx)) / (pl * ql); // k . (p x q)
+            const float cs = (px * qx + py * qy + pz * qz) / (pl * ql);                                                   // p . q
+            float roll[3][3], turned[3][3];
+            player_mat3_axis_rotation(roll, kx, ky, kz, sn, cs);
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) turned[i][j] = roll[i][0] * m[0][j] + roll[i][1] * m[1][j] + roll[i][2] * m[2][j];
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) m[i][j] = turned[i][j];
         }
     }
     // the pivot's rotation (intrinsic: Rx * Ry * Rz, three.js "XYZ"), from the matrix
@@ -648,6 +683,22 @@ int player_hands_points(const Player *player, vec3 *trigger, vec3 *off, vec3 *bo
         const PlayerArmMesh *arm = player->left_handed ? arms->right : arms->left;
         *off_visible = arm && arm->lower && arm->lower->mesh_count ? arm->lower->meshes[arm->lower->mesh_count - 1]->visible : 0;
     }
+    return 1;
+}
+
+// The joints of the trigger arm (off = 0) or the off arm (off = 1) as drawn, in world space: the shoulder (the arm's
+// anchor), the elbow (the top of the forearm, where the upper arm ends) and the wrist (the hand's centre). The
+// nettspend_arms_e2e.py bend check reads them (the verb `arms` in input_script.c). 0 without arms.
+int player_arm_joints(const Player *player, const int off, vec3 *shoulder, vec3 *elbow, vec3 *wrist) {
+    const PlayerMesh *mesh = player ? player->mesh : NULL;
+    if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
+    const PlayerArms *arms = mesh->arms[player->loadout_index];
+    if (!arms) return 0;
+    const PlayerArmMesh *arm = off ? (player->left_handed ? arms->right : arms->left) : (player->left_handed ? arms->left : arms->right);
+    if (!arm || !arm->lower || !arm->lower->mesh_count) return 0;
+    if (shoulder) *shoulder = transform_point_to(&arm->anchor, (vec3) {0.0f, 0.0f, 0.0f}, NULL);
+    if (elbow) *elbow = transform_point_to(&arm->lower->meshes[0]->transform, (vec3) {0.0f, 1.0f, 0.0f}, NULL); // the shirt segment's top
+    if (wrist) *wrist = transform_point_to(&arms->anchor, player_arm_hand(arms, arm), NULL);
     return 1;
 }
 
@@ -1836,14 +1887,16 @@ void player_update_meshes(Player *player, const int is_preview) {
         vec3 cup_hand, bottle_hand;
         nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, trigger_rest, off_away, left_hand_mlt, held_arms->hose->transform.scale.x, progress,
                             &cup_hand, &bottle_hand);
-        if (pouring) player_arm_reach(trigger_arm, trigger_rest, cup_hand);
+        if (pouring) player_arm_reach(trigger_arm, trigger_rest, cup_hand, player_arm_elbow(held_arms, trigger_arm), NULL);
         else if (trigger_arm && trigger_arm->upper) {
             // third person, not pouring: the arm keeps its generated rest (the pistol's hold with the hand reaching
             // NETTSPEND_TP_HAND_REACH out in front, player_generate_meshes), so it points forward like a pistol held
             // out; the cup sits in the hand
             nettspend_pose_cup_rest(held_arms->hose, trigger_rest, left_hand_mlt);
         }
-        player_arm_reach(off_arm, off_rest, bottle_hand); // away, or carrying the bottle
+        // away, or carrying the bottle: the elbow bends down and back (NETTSPEND_OFF_ELBOW_POLE_*)
+        const vec3 off_pole = {0.0f, NETTSPEND_OFF_ELBOW_POLE_Y, NETTSPEND_OFF_ELBOW_POLE_Z};
+        player_arm_reach(off_arm, off_rest, bottle_hand, player_arm_elbow(held_arms, off_arm), &off_pole);
         // first person: the off arm shows only for the refill (showHands above already decided the arms)
         if (player->render_you && !third_person && !pouring) player_arm_mesh_set_visible(off_arm, 0);
     }

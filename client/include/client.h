@@ -539,6 +539,7 @@ int player_pour_points(const Player*, vec3 *mouth, vec3 *rim);
 // and where the Drank's bottle is held (`bottle`, its grip; `bottle_visible` 0 when hidden), and
 // whether the off arm is drawn (`off_visible`); 0 without arms. Any may be NULL.
 int player_hands_points(const Player*, vec3 *trigger, vec3 *off, vec3 *bottle, int *bottle_visible, int *off_visible);
+int player_arm_joints(const Player*, int off, vec3 *shoulder, vec3 *elbow, vec3 *wrist);
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);

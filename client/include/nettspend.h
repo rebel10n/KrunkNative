@@ -72,7 +72,14 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // The off hand outside the pour-up (player_mesh.c player_off_hand_away): its arm hangs down from the
 // shoulder, this far out to its own side and forward per unit down (the forward reach as in af38340d).
 #define NETTSPEND_OFF_HAND_AWAY_OUT 0.0f
-#define NETTSPEND_OFF_HAND_AWAY_FWD 0.15f
+#define NETTSPEND_OFF_HAND_AWAY_FWD 0.45f // 0.15 left the wrist inside the torso's depth (its front face is 0.65 ahead of the hip); 0.45 clears it
+// The off arm's elbow pole (third person, the arms frame: x 0, y up, z back; the body faces -z): the elbow bends down and
+// back, as a hanging arm's does, so the forearm swings forward to the hand. The arm solver bends the elbow on a fixed side
+// of the arm, which for an arm hanging straight down puts it forward (the forearm folded back toward the body);
+// player_arm_reach rolls the arm about its shoulder-to-hand line until the elbow lies toward this pole. The trigger arm has
+// no pole (its elbow already bends down, the cup arm's reach is unchanged).
+#define NETTSPEND_OFF_ELBOW_POLE_Y (-1.0f)
+#define NETTSPEND_OFF_ELBOW_POLE_Z 1.0f
 // The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);
