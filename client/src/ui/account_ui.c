@@ -735,16 +735,8 @@ static void load_session(void) {
     alt_wipe(token, sizeof(token));
 }
 
-// readyLoad(): the session (g_session_user + g_token) -> sendAccountRequest(1, [name, null, token])
-static void try_restore(void) {
-    if (g_restore_sent || !backend_enabled()) return;
-    char name[sizeof(g_session_user)], token[sizeof(g_token)];
-    copy_str(name, sizeof(name), g_session_user);
-    copy_str(token, sizeof(token), g_token);
-    if (!name[0] || !token[0]) {
-        alt_wipe(token, sizeof(token));
-        return;
-    }
+// readyLoad(): sendAccountRequest(1, [name, null, token]) for a saved session (name and token given)
+static void send_restore(const char *name, const char *token) {
     g_restore_sent = 1;
     g_restore_asks++;
     g_restore_at = glfwGetTime();
@@ -758,6 +750,19 @@ static void try_restore(void) {
     cJSON_AddItemToArray(frame, payload);
     backend_social_send_session(frame); // the krunk.io session's upkeep: also while the socket is held
     cJSON_Delete(frame);
+}
+
+// the session (g_session_user + g_token) is restored
+static void try_restore(void) {
+    if (g_restore_sent || !backend_enabled()) return;
+    char name[sizeof(g_session_user)], token[sizeof(g_token)];
+    copy_str(name, sizeof(name), g_session_user);
+    copy_str(token, sizeof(token), g_token);
+    if (!name[0] || !token[0]) {
+        alt_wipe(token, sizeof(token));
+        return;
+    }
+    send_restore(name, token);
     alt_wipe(token, sizeof(token));
 }
 
@@ -931,7 +936,7 @@ static void account_response(const cJSON *frame) {
     apply_menu_name();
     mark_header();
     show_acc_resp(NULL);
-    if (!had) printf("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
+    if (!had || am == AM_SWITCH) printf("[account] logged in as %s (id %d, level %d, %.0f KR)\n", g_acc.name, g_acc.id, g_acc.level, g_acc.funds);
     // updateAccount -> updateWindow(5); updateWindow(null, true): the open window re-renders
     rerender_windows();
     menu_update_class_box(); // dJ()
@@ -960,20 +965,22 @@ static void logout(void) {
     menu_update_class_box();
 }
 
-// The alt manager's switch (alt_manager_ui.c): signs the current account out, then signs in with a
-// saved session through the same restore as a saved login. 0 started, -1 when this build has no
-// account server (nothing happens).
+// The alt manager's switch (alt_manager_ui.c): a saved session is restored through the same request as a
+// saved login. The signed-in account is NOT logged out first: logoutAcc makes the brain revoke that
+// account's session, so the row it leaves would ask for its password the next time it is used. The
+// answer replaces the signed-in account (account_response); a refused switch leaves it signed in. A
+// guest's switch keeps its session as the restore's (a refused one is forgotten, as a saved login's).
+// 0 started, -1 when this build has no account server (nothing happens).
 int account_ui_use_session(const char *username, const char *token) {
     if (!username || !username[0] || !token || !token[0] || !backend_enabled()) return -1;
-    if (g_logged_in) end_session();
-    set_session(username, token);
+    if (!g_logged_in) set_session(username, token);
     g_am_request = AM_SWITCH;
     copy_str(g_am_name, sizeof(g_am_name), username);
     g_auth_sent_at = glfwGetTime(); // a switch that never answers says so (auth_unreachable)
     g_restore_sent = 0;
     g_restore_asks = 0;
     g_restore_retry_at = 0;
-    try_restore(); // the answer ("a", a token refresh included) comes back to account_response
+    send_restore(username, token); // the answer ("a", a token refresh included) comes back to account_response
     return 0;
 }
 

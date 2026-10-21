@@ -2,10 +2,12 @@
 """The Account Manager (client/src/ui/alt_manager_ui.c, ALT_MANAGER_WINDOW = 104) end to end through the
 menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/fake_smtp.py:
 
-  register with the login popup (a plain sign-in stores nothing: no alt vault) -> the Account Manager's
-  Add with a typed login and password (an empty Add says so; the account is listed and signed in; the
-  password is on no disk) -> a restart resumes the listed account with its stored session -> log out,
-  then Use on the row signs in again -> the brain drops the account's sessions, a restart asks for the
+  register with the login popup (a plain sign-in stores nothing: no alt vault, a restart signs nobody in
+  and the login card asks for the password) -> the Account Manager's Add with a typed login and password
+  (an empty Add says so; the account is listed and signed in; the password is on no disk) -> a restart
+  resumes the listed account with its stored session -> Use on the other row switches to it with no
+  password, and Use back on the row left signs that account in with no password too (switching keeps the
+  session of the account left) -> the brain drops the account's sessions, a restart asks for the
   password (Sign in fills the form) -> Add signs in again -> Remove forgets the account (and signs it
   out), a restart lists nothing.
 
@@ -144,6 +146,20 @@ def register(brain_url, game_port, name, addr, run):
     return log
 
 
+def plain_restart(brain_url, game_port):
+    """Remember off: a plain sign-in (the login popup, not listed) stores nothing, so a restart signs nobody in
+    and the login card asks for the password."""
+    check("a plain sign-in stores no vault", not os.path.exists(VAULT))
+    log = run_client("plain_restart", """0 menu
+500 clickid knV10LoginBtn
+1000 nodes @pass [id="accPass"]
+1500 quit
+""", brain_url, game_port)
+    check("a restart after a plain sign-in signs nobody in", logins_as(log, NAME) + logins_as(log, NAME2) == 0,
+          f"logins {logins_as(log, NAME)} {logins_as(log, NAME2)}")
+    check("and the login card asks for the password", match_of(log, "pass") == 1, str(match_of(log, "pass")))
+
+
 def add_accounts(brain_url, game_port):
     log = run_client("add", f"""0 menu
 500 call showWindow {WINDOW}
@@ -175,17 +191,28 @@ def add_accounts(brain_url, game_port):
 
 
 def switch_account(brain_url, game_port):
+    # switching away from the signed-in account keeps its stored session: Use on it again (the row that
+    # was left) signs it in with no password, the same run
     log = run_client("switch", f"""0 menu
 3000 call showWindow {WINDOW}
 3400 nodes @use [onclick*="knAltUse"]
 3500 clicksel [onclick*="knAltUse"]
 6500 text @switched [id="knAltMsg"]
-7000 quit
+6600 clicksel [onclick*="knAltUse"]
+9600 text @back [id="knAltMsg"]
+9700 clicksel [onclick*="knAltUse"]
+12600 text @returned [id="knAltMsg"]
+13000 quit
 """, brain_url, game_port)
     check("a restart resumes the active listed account", logins_as(log, NAME2) >= 1)
     check("Use on the other row switches with its stored session (no password)", logins_as(log, NAME) >= 1,
           f"logins as {NAME}: {logins_as(log, NAME)}")
     check("Use says it is signed in", f"Signed in as {NAME}." in text_of(log, "switched"), text_of(log, "switched")[-120:])
+    check("switching back to the account left signs it in with no password (its session was kept)",
+          f"Signed in as {NAME2}." in text_of(log, "back") and f"Enter the password for {NAME2}." not in text_of(log, "back"),
+          text_of(log, "back")[-120:])
+    check("and back again to the first account, with no password", f"Signed in as {NAME}." in text_of(log, "returned"),
+          text_of(log, "returned")[-120:])
 
 
 def expired_session(brain_url, game_port, db):
@@ -363,6 +390,7 @@ def main():
                 time.sleep(0.1)
         register(brain_url, game_port, NAME, ADDR, "register")
         register(brain_url, game_port, NAME2, ADDR2, "register2")
+        plain_restart(brain_url, game_port)
         add_accounts(brain_url, game_port)
         switch_account(brain_url, game_port)
         expired_session(brain_url, game_port, db)
