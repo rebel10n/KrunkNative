@@ -358,6 +358,9 @@ locked-class-test: build ## The Nettspend's card in the class tab: locked with "
 guest-earned-test: build ## A guest's Unclaimed Rewards box (v10_rewards.c): the end screen's and the menu's, its KR / XP amounts and its glow (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/guest_earned_e2e.py $(DEBUG_DIR)
 
+leaderboard-scroll-test: build ## The capped Leaderboard list of a guest's end card scrolls under the wheel: three clicks move its first visible row (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/leaderboard_scroll_e2e.py $(DEBUG_DIR)
+
 version-menu-e2e: build ## Krunker Box Office shows Krunker's version only: --version and the Outdated box name the build by its commit, the What's New tile shows the newest changelog update on Krunker's line (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/version_menu_e2e.py $(DEBUG_DIR)
 
