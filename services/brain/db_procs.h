@@ -170,6 +170,8 @@ extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK,
 
 /* ---- v10 double XP: the end-screen 2x XP of the last match (db_double_xp.c, 0341_double_xp) */
 extern const kn_proc P_DXP_CLAIM;
+/* wild_offer.c: the shop wild offer procs (the social frames and v10_catalog.c's HTTP routes) */
+extern const kn_proc P_WILD_OFFER, P_WILD_OFFER_BUY, P_WILD_OFFER_REFRESH;
 /* The account's "dxp" object at now: {offer: {games, xp, claimable} | null, doubleClassXP, doubleRaidDrops}. */
 cJSON *db_dxp_state(Dbx *x, int64_t id, int64_t now);
 /* The commit's offer for the match just committed: offered (the match counted and was not competitive). */

@@ -314,6 +314,7 @@ void sh_craft(SocialSession *s, const cJSON *f);            /* "crft" (v10 CRAFT
 void sh_wild_offer(SocialSession *s, const cJSON *f);         /* "wo" (v10 Wild Offer, wild_offer.c) */
 void sh_wild_offer_buy(SocialSession *s, const cJSON *f);     /* "wob" (purchase) */
 void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh) */
+int wild_offer_refresh_cost(void);                             /* the refresh price in KR (wild_offer.c) */
 void sh_double_xp_claim(SocialSession *s, const cJSON *f); /* "rqdxp" (v10 2x XP claim, double_xp_social.c) */
 int store_wheel_ticket(const char *name);              /* a store wheel's ticketIndex, -1 none (store.c) */
 void sh_alias(SocialSession *s, const cJSON *f);       /* "nme" */

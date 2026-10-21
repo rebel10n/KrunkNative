@@ -7,16 +7,8 @@
  *   GET /match-history/me/season/:s/gameMode/:m/isRanked/:x[/region/:r]  25940 (98633): data.matchHistory
  *       {matches: [], totalPages: 0}. The consumer reads the object under data.matchHistory, not data.
  *   GET /leaderboards/rankings/season/:s[/region/:r]   25972 (98600): data {leaderboard: [], totalPages: 0}
- *   GET /skins                                         26474 (137427): data {skins: []}
- *   GET /shop/wild-offer                               26539 (126666): data {offer: null} (no offer)
- *   GET /maps/:id/versions                             26626 (107087): data []
- *   GET /maps/:id/data?player=                         26655 (106987): data []
- *   GET /maps/by-name/:name/leaderboard                26602 (106970): data {entries: [], total: 0}
  *   GET /webhooks/general/maps/config?mn=:name         131917 (getMapPreset, read by presetLoaded 212624):
  *       the legacy body has no data envelope; {} carries no preset (da, fu), which the menu shows as DEFAULT.
- *
- * NOT_FOUND (404 {"error": {"code": "NOT_FOUND"}}):
- *   GET /skins/:id                                     26479: no KrunkNative skin record has a v10 skin id.
  *
  * REFUSAL (403 {"error": {"code": "NOT_IMPLEMENTED", "message": ...}}; the v10 wrapper throws on 5xx,
  * and the consumers that need a reply catch it):
@@ -34,10 +26,7 @@
  *   writes: POST /player-profile/me/claim-milestone/region/:r 25976, POST /spins/execute 27299 (the
  *       spin is the social socket's op), /account/2fa routes 26326-26339, POST /account/usernames/reserve
  *       and /swap 26352-26360, POST /email/preferences 26429, /discord/link|join|unlink 26444-26457,
- *       POST /webpush/subscription-change 26414, skin writes 26484-26511, POST /shop/wild-offer/purchase
- *       and /refresh 26544-26553, POST /krunkcup/wristband/claim 27314, POST /maps/:id/vote 26605,
- *       /feature 26613, DELETE /maps/:id 26621, POST /maps/:id/funds 26637, POST /maps/:id/leaderboard
- *       26645, POST /maps/:id/versions/:v/revert 26632, DELETE /maps/:id/data 26664.
+ *       POST /webpush/subscription-change 26414, POST /krunkcup/wristband/claim 27314.
  *   reads of an unmapped account: GET /player/me and /player/wallet (signed-out or no mapping).
  *
  * Not registered here, on purpose: the social tunnel's routes (social_gapi.c, clan_v10.c, studios.c,
@@ -74,46 +63,12 @@ static void h_rankings(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, data);
 }
 
-static void h_skins_list(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddItemToObject(data, "skins", cJSON_CreateArray());
-    v10_reply_data(req, 200, data);
-}
-
-static void h_wild_offer(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddNullToObject(data, "offer");
-    v10_reply_data(req, 200, data);
-}
-
-static void h_empty_list(kn_http_req *req, void *ud) {
-    (void) ud;
-    v10_reply_data(req, 200, cJSON_CreateArray());
-}
-
-static void h_map_leaderboard(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddItemToObject(data, "entries", cJSON_CreateArray());
-    cJSON_AddNumberToObject(data, "total", 0);
-    v10_reply_data(req, 200, data);
-}
-
 /* the legacy webhook answers its body as {da, fu} at the top level (v10.js 131917): no preset is {} */
 static void h_map_preset(kn_http_req *req, void *ud) {
     (void) ud;
     cJSON *none = cJSON_CreateObject();
     brain_reply_json(req, 200, none);
     cJSON_Delete(none);
-}
-
-/* ---- NOT_FOUND */
-
-static void h_skin_not_found(kn_http_req *req, void *ud) {
-    (void) ud;
-    v10_reply_error(req, 404, "NOT_FOUND", "Skin not found");
 }
 
 /* ---- REFUSAL: ud is the reason (a string literal) */
@@ -188,36 +143,11 @@ static const EmptyRoute k_routes[] = {
     {"POST", "/webpush/status", h_refuse, (void *) WHY_ACCOUNT},
     {"POST", "/webpush/subscription-change", h_refuse, (void *) WHY_WRITE},
 
-    /* gapi: skins (the list is EMPTY; the one-skin and write routes are NOT_FOUND or REFUSAL) */
-    {"GET", "/skins", h_skins_list, NULL},
-    {"GET", "/skins/:id", h_skin_not_found, NULL},
-    {"POST", "/skins", h_refuse, (void *) WHY_WRITE},
-    {"PUT", "/skins/:id", h_refuse, (void *) WHY_WRITE},
-    {"DELETE", "/skins/:id", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/skins/:id/upload", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/skins/:id/duplicate", h_refuse, (void *) WHY_WRITE},
-
-    /* gapi: shop wild offer */
-    {"GET", "/shop/wild-offer", h_wild_offer, NULL},
-    {"POST", "/shop/wild-offer/purchase", h_refuse, (void *) WHY_PAYMENT},
-    {"POST", "/shop/wild-offer/refresh", h_refuse, (void *) WHY_WRITE},
-
     /* gapi: KrunkCup wristband, spins */
     {"GET", "/krunkcup/wristband", h_refuse, (void *) WHY_ACCOUNT},
     {"POST", "/krunkcup/wristband/claim", h_refuse, (void *) WHY_WRITE},
     {"POST", "/spins/execute", h_refuse, (void *) WHY_WRITE},
 
-    /* gapi: maps (GET /maps, /maps/:id and /maps/by-name/:name are v10_api.c's) */
-    {"GET", "/maps/:id/versions", h_empty_list, NULL},
-    {"POST", "/maps/:id/versions/:v/revert", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/maps/:id/funds", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/maps/:id/leaderboard", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/maps/:id/data", h_empty_list, NULL},
-    {"DELETE", "/maps/:id/data", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/maps/by-name/:name/leaderboard", h_map_leaderboard, NULL},
-    {"POST", "/maps/:id/vote", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/maps/:id/feature", h_refuse, (void *) WHY_WRITE},
-    {"DELETE", "/maps/:id", h_refuse, (void *) WHY_WRITE},
 };
 
 int v10_empty_init(Brain *b) {

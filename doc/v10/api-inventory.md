@@ -91,34 +91,34 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 68 | gapi | POST | `/discord/link` | discord.link (26444) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 69 | gapi | POST | `/discord/join` | discord.joinGuild (26452) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 70 | gapi | POST | `/discord/unlink` | discord.unlink (26457) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 71 | gapi | GET | `/skins` | skins.list (26474) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 72 | gapi | GET | `/skins/{id}` | skins.get (26479) | missing: not_found fallback (public_routes.c:677) | not found | v10_empty.c |
-| 73 | gapi | POST | `/skins` | skins.create (26484) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 74 | gapi | PUT | `/skins/{id}` | skins.update (26490) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 75 | gapi | DELETE | `/skins/{id}` | skins.delete (26496) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 76 | gapi | POST | `/skins/{id}/upload` | skins.uploadAsset (26505) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 77 | gapi | POST | `/skins/{id}/duplicate` | skins.duplicate (26511) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 71 | gapi | GET | `/skins` | skins.list (26474) | missing: not_found fallback (public_routes.c:677) | empty | none (v10_catalog.c: no custom-skin table; studios.c, db_studios.c) |
+| 72 | gapi | GET | `/skins/{id}` | skins.get (26479) | missing: not_found fallback (public_routes.c:677) | not found | none (v10_catalog.c: no custom-skin id) |
+| 73 | gapi | POST | `/skins` | skins.create (26484) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
+| 74 | gapi | PUT | `/skins/{id}` | skins.update (26490) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
+| 75 | gapi | DELETE | `/skins/{id}` | skins.delete (26496) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
+| 76 | gapi | POST | `/skins/{id}/upload` | skins.uploadAsset (26505) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no skin asset store) |
+| 77 | gapi | POST | `/skins/{id}/duplicate` | skins.duplicate (26511) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no Skin Manager) |
 | 78 | gapi | GET | `/shop/displays/{tag}` | shop.displays (v10.js 26520) (26520) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 79 | gapi | GET | `/shop/displays?tag={tag}` | shop.displays (v10.js 26525) (26525) | missing: not_found fallback (public_routes.c:677) | alias | shop.c |
 | 80 | gapi | POST | `/shop/purchase` | shop.purchase (26530) | missing: not_found fallback (public_routes.c:677) | alias | shop.c |
-| 81 | gapi | GET | `/shop/wild-offer` | shop.getWildOffer (26539) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 82 | gapi | POST | `/shop/wild-offer/purchase` | shop.purchaseWildOffer (26544) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 83 | gapi | POST | `/shop/wild-offer/refresh` | shop.refreshWildOffer (26553) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 81 | gapi | GET | `/shop/wild-offer` | shop.getWildOffer (26539) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER: kr_transactions, skin_transactions) |
+| 82 | gapi | POST | `/shop/wild-offer/purchase` | shop.purchaseWildOffer (26544) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER_BUY: players.player_funds, skin_transactions) |
+| 83 | gapi | POST | `/shop/wild-offer/refresh` | shop.refreshWildOffer (26553) | missing: not_found fallback (public_routes.c:677) | implemented | wild_offer.c (P_WILD_OFFER_REFRESH: kr_transactions) |
 | 84 | gapi | GET | `/lottery/{id}` | lottery.getLottery (26566) | missing: not_found fallback (public_routes.c:677) | alias | lottery.c |
 | 85 | gapi | POST | `/lottery/{id}/participate` | lottery.participateInLottery (26571) | missing: not_found fallback (public_routes.c:677) | alias | lottery.c |
 | 86 | gapi | GET | `/maps` | maps.getMaps (26581) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c |
 | 87 | gapi | GET | `/maps/{id}` | maps.getMap (26586) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c |
 | 88 | gapi | GET | `/maps/by-name/{name}` | maps.getMapByName (26592) | missing: not_found fallback (public_routes.c:677) | implemented | v10_api.c |
-| 89 | gapi | GET | `/maps/by-name/{name}/leaderboard` | maps.getMapLeaderboard (26602) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 90 | gapi | POST | `/maps/{id}/vote` | maps.voteMap (26605) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 91 | gapi | POST | `/maps/{id}/feature` | maps.featureMap (26613) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 92 | gapi | DELETE | `/maps/{id}` | maps.deleteMap (26621) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 93 | gapi | GET | `/maps/{id}/versions` | maps.getMapVersions (26626) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 94 | gapi | POST | `/maps/{id}/versions/{v}/revert` | maps.revertMapVersion (26632) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 95 | gapi | POST | `/maps/{id}/funds` | maps.updateMapFunds (26637) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 96 | gapi | POST | `/maps/{id}/leaderboard` | maps.updateMapLeaderboard (26645) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 97 | gapi | GET | `/maps/{id}/data?player={p}` | maps.getMapData (26655) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 98 | gapi | DELETE | `/maps/{id}/data?{q}` | maps.deleteMapData (26664) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 89 | gapi | GET | `/maps/by-name/{name}/leaderboard` | maps.getMapLeaderboard (26602) | missing: not_found fallback (public_routes.c:677) | implemented | match_results + published_maps.map_data (v10_catalog.c) |
+| 90 | gapi | POST | `/maps/{id}/vote` | maps.voteMap (26605) | missing: not_found fallback (public_routes.c:677) | implemented | creation_votes, published_maps.map_votes (v10_catalog.c) |
+| 91 | gapi | POST | `/maps/{id}/feature` | maps.featureMap (26613) | missing: not_found fallback (public_routes.c:677) | implemented | published_maps.map_featured, players.player_developer (v10_catalog.c) |
+| 92 | gapi | DELETE | `/maps/{id}` | maps.deleteMap (26621) | missing: not_found fallback (public_routes.c:677) | implemented | published_maps.deleted_at (v10_catalog.c, creations.c delC) |
+| 93 | gapi | GET | `/maps/{id}/versions` | maps.getMapVersions (26626) | missing: not_found fallback (public_routes.c:677) | empty | none (v10_catalog.c: published_maps keeps no versions) |
+| 94 | gapi | POST | `/maps/{id}/versions/{v}/revert` | maps.revertMapVersion (26632) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_catalog.c (no versions to revert to) |
+| 95 | gapi | POST | `/maps/{id}/funds` | maps.updateMapFunds (26637) | missing: not_found fallback (public_routes.c:677) | implemented | published_maps.map_funds, players.player_funds (v10_catalog.c) |
+| 96 | gapi | POST | `/maps/{id}/leaderboard` | maps.updateMapLeaderboard (26645) | missing: not_found fallback (public_routes.c:677) | implemented | published_maps.map_data LEADERBOARD (v10_catalog.c, creations.c ulb) |
+| 97 | gapi | GET | `/maps/{id}/data?player={p}` | maps.getMapData (26655) | missing: not_found fallback (public_routes.c:677) | implemented | ks_storage (v10_catalog.c) |
+| 98 | gapi | DELETE | `/maps/{id}/data?{q}` | maps.deleteMapData (26664) | missing: not_found fallback (public_routes.c:677) | implemented | ks_storage (v10_catalog.c) |
 | 99 | gapi | GET | `/territorial-wars/status` | territorialWars.getStatus (26673) | missing: not_found fallback (public_routes.c:677) | alias | turf.c |
 | 100 | gapi | GET | `/territorial-wars/clan/{id}` | territorialWars.getClanStats (26678) | missing: not_found fallback (public_routes.c:677) | alias | turf.c |
 | 101 | gapi | GET | `/territorial-wars/clan/{id}/players` | territorialWars.getClanPlayers (26688) | missing: not_found fallback (public_routes.c:677) | alias | turf.c |

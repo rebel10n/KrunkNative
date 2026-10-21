@@ -149,7 +149,7 @@ static kn_db_result *run_get(kn_dbconn *c, int n, const char *const *p) {
     else cJSON_AddNullToObject(v, "offer");
     return dbx_json(&x, "wild_offer", v);
 }
-static const kn_proc P_WILD_OFFER = {"wild_offer", NULL, run_get};
+const kn_proc P_WILD_OFFER = {"wild_offer", NULL, run_get}; /* v10_catalog.c runs it over HTTP too */
 
 /* (id, now_ms, offer_id) -> {success, rewards, funds}: the current offer only, once */
 static kn_db_result *run_buy(kn_dbconn *c, int n, const char *const *p) {
@@ -175,7 +175,7 @@ static kn_db_result *run_buy(kn_dbconn *c, int n, const char *const *p) {
     cJSON_AddNumberToObject(v, "funds", (double) funds);
     return dbx_json(&x, "wild_offer_buy", v);
 }
-static const kn_proc P_WILD_OFFER_BUY = {"wild_offer_buy", NULL, run_buy};
+const kn_proc P_WILD_OFFER_BUY = {"wild_offer_buy", NULL, run_buy};
 
 /* (id, now_ms, offer_id, cost) -> {success, refresh_cost, offer, funds} */
 static kn_db_result *run_refresh(kn_dbconn *c, int n, const char *const *p) {
@@ -202,7 +202,7 @@ static kn_db_result *run_refresh(kn_dbconn *c, int n, const char *const *p) {
     cJSON_AddNumberToObject(v, "funds", (double) funds);
     return dbx_json(&x, "wild_offer_refresh", v);
 }
-static const kn_proc P_WILD_OFFER_REFRESH = {"wild_offer_refresh", NULL, run_refresh};
+const kn_proc P_WILD_OFFER_REFRESH = {"wild_offer_refresh", NULL, run_refresh};
 
 static void get_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
@@ -256,3 +256,6 @@ void sh_wild_offer_buy(SocialSession *s, const cJSON *f) { call_with_offer(s, f,
 
 /* ["wor", offer_id]: shop.refreshWildOffer */
 void sh_wild_offer_refresh(SocialSession *s, const cJSON *f) { call_with_offer(s, f, &P_WILD_OFFER_REFRESH, "wor"); }
+
+/* the refresh price in KR (v10_catalog.c passes it to P_WILD_OFFER_REFRESH, as the social frame does) */
+int wild_offer_refresh_cost(void) { return refresh_cost(); }

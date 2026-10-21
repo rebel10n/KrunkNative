@@ -37,10 +37,6 @@ RESULTS = []
 # the EMPTY shapes (exact: no invented records)
 E_MATCH = {"matchHistory": {"matches": [], "totalPages": 0}}   # v10.js 98633: matchHistory.matches / totalPages
 E_RANK = {"leaderboard": [], "totalPages": 0}                 # v10.js 98600: leaderboard / totalPages
-E_SKINS = {"skins": []}                                       # v10.js 137427: skins
-E_OFFER = {"offer": None}                                     # v10.js 126666: offer (null = no offer)
-E_LIST = []                                                   # v10.js 107087, 106987: data || []
-E_MAPLB = {"entries": [], "total": 0}                         # v10.js 106970: entries / total
 
 # (method, path, body, kind, expected data, v10.js line and why)
 ROUTES = [
@@ -108,36 +104,11 @@ ROUTES = [
      "26408, needs the subscription (consumer 145259 reads is_subscribed; a false would drop the local one)"),
     ("POST", "/webpush/subscription-change", {"old_subscription": {}, "new_subscription": {}}, "refuse", None,
      "26414, needs a stored subscription (consumer 145274 reads success)"),
-    # ---- gapi: skins
-    ("GET", "/skins", None, "empty", E_SKINS, "26474, skin list (consumer 137427 reads skins)"),
-    ("GET", "/skins/1", None, "notfound", None, "26479, KN holds no skin record for this id"),
-    ("POST", "/skins", {}, "refuse", None, "26484, a write"),
-    ("PUT", "/skins/1", {}, "refuse", None, "26490, a write"),
-    ("DELETE", "/skins/1", None, "refuse", None, "26496, a write"),
-    ("POST", "/skins/1/upload", {}, "refuse", None, "26505, a write"),
-    ("POST", "/skins/1/duplicate", {}, "refuse", None, "26511, a write"),
-    # ---- gapi: shop wild offer
-    ("GET", "/shop/wild-offer", None, "empty", E_OFFER, "26539, no offer (consumer 126666 reads offer)"),
-    ("POST", "/shop/wild-offer/purchase", {}, "refuse", None, "26544, a write"),
-    ("POST", "/shop/wild-offer/refresh", {}, "refuse", None, "26553, a write"),
     # ---- gapi: KrunkCup wristband (no client call site reads it; account-scoped)
     ("GET", "/krunkcup/wristband", None, "refuse", None, "27309, the account's wristband"),
     ("POST", "/krunkcup/wristband/claim", {}, "refuse", None, "27314, a write"),
     # ---- gapi: spins (the spin itself is the social socket's op)
     ("POST", "/spins/execute", {}, "refuse", None, "27299, a spin is the social socket's op"),
-    # ---- gapi: maps (GET /maps, /maps/:id and /maps/by-name/:name are v10_api.c's)
-    ("GET", "/maps/1/versions", None, "empty", E_LIST, "26626, version list (consumer 107087 reads data || [])"),
-    ("POST", "/maps/1/versions/2/revert", {}, "refuse", None, "26632, a write"),
-    ("POST", "/maps/1/funds", {"amount": 1}, "refuse", None, "26637, a write"),
-    ("POST", "/maps/1/leaderboard", {"type": "score"}, "refuse", None, "26645, a write"),
-    ("GET", "/maps/1/data?player=someone", None, "empty", E_LIST,
-     "26655, the player's map data (consumer 106987 reads data || [])"),
-    ("DELETE", "/maps/1/data?key=k", None, "refuse", None, "26664, a write"),
-    ("GET", "/maps/by-name/Sandstorm/leaderboard?page=1", None, "empty", E_MAPLB,
-     "26602, map leaderboard (consumer 106970 reads entries / total)"),
-    ("POST", "/maps/1/vote", {"vote": 1}, "refuse", None, "26605, a write"),
-    ("POST", "/maps/1/feature", {}, "refuse", None, "26613, a write"),
-    ("DELETE", "/maps/1", None, "refuse", None, "26621, a write"),
 ]
 
 
