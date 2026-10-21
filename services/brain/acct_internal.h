@@ -166,8 +166,18 @@ typedef struct SocialOutItem {
     cJSON *frame;
 } SocialOutItem;
 
+/* An HTTP-bound session (v10_market.c runs a socket handler for one REST request): its frames go to
+ * emit (which takes them) instead of a socket, and idle runs each time its async work has finished
+ * (busy back to 0). Only the v10 REST routes build one; a socket session has no capture. */
+typedef struct SocialCapture {
+    void (*emit)(void *ud, cJSON *frame);
+    void (*idle)(void *ud);
+    void *ud;
+} SocialCapture;
+
 typedef struct SocialSession {
     struct kn_ws *ws;               /* NULL once the socket closed */
+    SocialCapture *cap;             /* HTTP-bound session (see SocialCapture); NULL for a socket */
     int refs;                       /* pending async work + 1 while open */
     int json;                       /* client speaks JSON text frames: answer in JSON */
     int64_t account_id;             /* 0 = guest */
@@ -196,6 +206,9 @@ typedef void (*SocialDbFn)(SocialSession *s, kn_db_result *res, void *extra);
 
 SocialSession *social_retain(SocialSession *s);
 void social_release(SocialSession *s);
+/* A session for one HTTP request (SocialCapture cap, the account's id and name): the caller owns the
+ * one reference it returns (social_release drops it; the session is freed with the last one). */
+SocialSession *social_capture_new(SocialCapture *cap, int64_t account_id, const char *username);
 /* Async work on behalf of the socket's current frame: frames that arrive meanwhile
  * wait, so each socket's requests run strictly in order (like v3.1.1's synchronous
  * SQLite). hold = retain + busy++; unhold = busy--, run queued frames, release. */
@@ -331,6 +344,7 @@ void sh_market_unlist(SocialSession *s, const cJSON *f); /* "uli" */
 void sh_market_buy(SocialSession *s, const cJSON *f);  /* "pi" */
 void sh_market_filter(SocialSession *s, const cJSON *f); /* "fil" */
 void sh_inventory_sort(SocialSession *s, const cJSON *f); /* "srt" */
+void sh_market_stats_http(SocialSession *s, const cJSON *f); /* v10 GET /market/stats (economy.c) */
 void sh_quick_sell(SocialSession *s, const cJSON *f);  /* "qsi" */
 void sh_item_stats(SocialSession *s, const cJSON *f);  /* "st" */
 void sh_trade_inv(SocialSession *s, const cJSON *f);   /* "ri" */

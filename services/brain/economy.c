@@ -482,6 +482,18 @@ void sh_inventory_sort(SocialSession *s, const cJSON *f) {
     market_query(s, c);
 }
 
+/* v10 REST GET /market/stats (v10_market.c): ["stats", token, text, rarities, weapons, types, season] ->
+ * ["0", "market", "stats", rows] with the same filters as the listings (the rows are per skin: ski). */
+void sh_market_stats_http(SocialSession *s, const cJSON *f) {
+    MarketCtx *c = calloc(1, sizeof *c);
+    if (!c) return;
+    snprintf(c->page, sizeof c->page, "market");
+    snprintf(c->sub, sizeof c->sub, "stats");
+    c->item = -1;
+    filter_args(c, f);
+    market_query(s, c);
+}
+
 static void rows_done(SocialSession *s, kn_db_result *res, void *extra) {
     Ctx *c = extra;
     cJSON *rows = kn_db_ok(res) ? kn_db_result_to_json(res) : NULL;

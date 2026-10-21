@@ -48,6 +48,16 @@ SocialSession *social_retain(SocialSession *s) {
     return s;
 }
 
+SocialSession *social_capture_new(SocialCapture *cap, int64_t account_id, const char *username) {
+    SocialSession *s = calloc(1, sizeof *s);
+    if (!s) return NULL;
+    s->refs = 1;
+    s->cap = cap;
+    s->account_id = account_id;
+    snprintf(s->username, sizeof s->username, "%s", username ? username : "");
+    return s;
+}
+
 /* what an inbound frame is, for the limiter and its answer (see the rate limits section) */
 typedef enum {
     KIND_CLASS,      /* a route: charged to its class */
@@ -132,12 +142,13 @@ SocialSession *social_hold(SocialSession *s) {
 void social_unhold(SocialSession *s) {
     s->busy--;
     social_retain(s);
+    if (s->busy == 0 && s->cap && s->cap->idle) s->cap->idle(s->cap->ud);
     if (s->busy == 0 && social_open(s)) drain(s);
     social_release(s); /* the drain guard */
     social_release(s); /* the hold */
 }
 
-int social_open(const SocialSession *s) { return s && s->ws != NULL; }
+int social_open(const SocialSession *s) { return s && (s->ws != NULL || s->cap != NULL); }
 
 static void presence_remove(SocialSession *s) {
     if (!s->prev && !s->next && s_online != s) return;
@@ -190,6 +201,10 @@ static size_t presence_ids(int64_t *ids, size_t max) {
 
 void social_send(SocialSession *s, cJSON *frame) {
     if (!frame) return;
+    if (s->cap) { /* HTTP-bound: the frame is the request's reply part (v10_market.c) */
+        s->cap->emit(s->cap->ud, frame);
+        return;
+    }
     if (social_open(s)) {
         if (s->json) {
             char *text = kn_json_print(frame);
