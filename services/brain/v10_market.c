@@ -72,12 +72,6 @@
 #include "v10_api.h"
 
 /* the refusals' reasons (the handler's ud) */
-#define WHY_MOD_WRITE "Mod publishing, voting and removal are not served over HTTP"
-#define WHY_MOD_BY_NAME "Mod records are not served on the v10 root"
-#define WHY_KPD_WRITE "KPD votes are not served over HTTP"
-#define WHY_KPD_OFFICER "A KPD demo view needs an officer account, which HTTP does not map here"
-#define WHY_OTHER_ACCOUNT "Needs another account's data, which HTTP does not map here"
-#define WHY_CHAT_BAN "Chat bans are not served over HTTP"
 #define WHY_ITEM_PAINT "Item paint is not served over HTTP: KrunkNative keeps no per-copy paint state"
 #define WHY_ITEM_STYLE "Item style is not served over HTTP: KrunkNative keeps no per-copy style state"
 #define WHY_JUNK "Junk quick sell is not built yet (doc/v10/junk.md): quick sell mode 1 is refused"
@@ -1502,24 +1496,6 @@ static void h_player_verify(kn_http_req *req, void *ud) {
     route_begin(req, 1, 0, step_verify, reply_verify, &a, body);
 }
 
-static void h_kpd_demos(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddItemToObject(o, "rows", cJSON_CreateArray());
-    cJSON_AddFalseToObject(o, "more");
-    v10_reply_data(req, 200, o);
-}
-
-static void h_kpd_reviewers(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *o = cJSON_CreateObject();
-    cJSON_AddItemToObject(o, "month", cJSON_CreateArray());
-    cJSON_AddItemToObject(o, "all", cJSON_CreateArray());
-    v10_reply_data(req, 200, o);
-}
-
-/* ---- routes */
-
 int v10_market_init(Brain *b) {
     s_brain = b;
     /* market */
@@ -1560,23 +1536,5 @@ int v10_market_init(Brain *b) {
     kn_http_route(b->http, "POST", "/players/:name/verify", h_player_verify, NULL);
     kn_http_route(b->http, "POST", "/players/:name/gift", h_player_gift, NULL);
 
-    /* moderation */
-    kn_http_route(b->http, "GET", "/moderation/chat/:name", h_refuse, (void *) WHY_OTHER_ACCOUNT);
-    kn_http_route(b->http, "POST", "/moderation/chat", h_refuse, (void *) WHY_CHAT_BAN);
-    kn_http_route(b->http, "POST", "/moderation/flag", h_refuse, (void *) WHY_CHAT_BAN);
-
-    /* mods */
-    kn_http_route(b->http, "POST", "/mods/publish/key", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "GET", "/mods/by-name/:name", h_refuse, (void *) WHY_MOD_BY_NAME);
-    kn_http_route(b->http, "POST", "/mods/:id/vote", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "POST", "/mods/:id/feature", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "DELETE", "/mods/:id", h_refuse, (void *) WHY_MOD_WRITE);
-    kn_http_route(b->http, "POST", "/mods/publish", h_refuse, (void *) WHY_MOD_WRITE);
-
-    /* KPD */
-    kn_http_route(b->http, "GET", "/kpd/demos", h_kpd_demos, b);
-    kn_http_route(b->http, "GET", "/kpd/demos/:id", h_refuse, (void *) WHY_KPD_OFFICER);
-    kn_http_route(b->http, "POST", "/kpd/demos/:id/vote", h_refuse, (void *) WHY_KPD_WRITE);
-    kn_http_route(b->http, "GET", "/kpd/reviewers", h_kpd_reviewers, b);
     return 0;
 }
