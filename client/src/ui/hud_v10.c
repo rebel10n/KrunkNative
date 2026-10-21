@@ -137,4 +137,37 @@ void hud_v10_end_signup(const int show) {
     if (on) v10_rewards_signup_mount(el);
     else html_dom_set_html(el, "");
     html_dom_set_display(el, on ? "block" : "none");
+    if (on) hud_v10_end_signup_place();
+}
+
+// v10's banner top (main.css #matchEndSignupIncentives, design px) and the gap v10's one-map capture
+// (ingame-endscreen-late) leaves between the Double XP button's bottom (623) and the banner's container top
+// (850 - 185 = 665, translate(-50%, -50%) of its 370 px): 42.
+#define V10_SIGNUP_TOP 850.0
+#define V10_SIGNUP_GAP 42.0
+
+// The banner stays at v10's place unless the stats block reaches it. The vote cards move #endMidHolder down
+// (hud_ui.c: top 310 px, v10:219592), which moves the card and its #endButtonsHolder down with it, while the
+// banner is fixed at 850 px with a z-index above the card: it paints over the button. So the banner goes
+// under the button, with v10's gap, when that is needed (the one-map capture stays at 850 px). The rects
+// come from the layout (html_dom_get_rect flushes it), so a tab with a taller card moves it too.
+void hud_v10_end_signup_place(void) {
+    if (!hud_v10_page()) return;
+    const HtmlElem el = html_dom_by_id("matchEndSignupIncentives");
+    const HtmlElem ui = html_dom_by_id("endUI");
+    const HtmlElem btn = html_dom_by_id("endButtonsHolder");
+    const HtmlElem box = el ? html_dom_query(el, ".signup-rewards-container") : 0;
+    if (!box || !ui || !btn || !html_dom_is_shown(el)) return;
+    HtmlRect r_ui, r_btn;
+    if (!html_dom_get_rect(ui, &r_ui) || !html_dom_get_rect(btn, &r_btn)) return;
+    const float ui_layout_h = html_dom_offset_height(ui); // layout px, without the uiBase scale
+    if (ui_layout_h <= 0.0f || r_ui.h <= 0.0f) return;
+    const double scale = r_ui.h / ui_layout_h; // page px per layout px (endUI is scaled with #uiBase)
+    const double button_bottom = (r_btn.y + r_btn.h - r_ui.y) / scale;
+    const double half = html_dom_offset_height(box) / 2.0; // translate(-50%, -50%)
+    double top = button_bottom + V10_SIGNUP_GAP + half;
+    if (top < V10_SIGNUP_TOP) top = V10_SIGNUP_TOP;
+    char css[32];
+    snprintf(css, sizeof(css), "%.2fpx", top);
+    html_dom_set_style(el, "top", css);
 }

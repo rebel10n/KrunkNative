@@ -3616,6 +3616,7 @@ static void hud_end_card_render(const Client *client) {
     const HtmlElem view = html_dom_by_id("endTabbedView");
     if (view) html_dom_set_html(view, html);
     hud_endscreen_v10_shown(); // v10 show(): the rank, earnings, raid promo and Collect Rewards mount
+    hud_v10_end_signup_place(); // the card's height sets the Double XP button's place: the banner follows it
     free(html);
 }
 

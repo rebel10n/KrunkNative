@@ -19,7 +19,9 @@ Headless renders (client_bin --render-scenario, no window), state.guestEarned st
      v10's place (514, 312, 246 x 48) and the signup banner below it, its top at v10's 385;
   6. the end card's offer (check_end_card_offer): an account on games 4 without an offer still sees the Double XP
      button; the click claims (rqdxp) on games % 3 only, whatever the offer says, and a guest's click claims nothing;
-     a comp match shows "Return to Krunker" (#returnButton) and no Double XP, signed in or not.
+     a comp match shows "Return to Krunker" (#returnButton) and no Double XP, signed in or not;
+  7. the same end card with three vote maps (#endMidHolder moves down to top 310): the Double XP button and the
+     signup banner do not overlap, and the banner stays on the screen.
 KRUNKNATIVE_SCENARIO_DUMP prints the box tree under the slot after the capture: the texts and the box's
 viewport rect come from it. Exit 0 when every check passes, 1 otherwise.
 """
@@ -231,6 +233,40 @@ def check_double_xp_and_banner():
               banner[1] >= button[1] + button[3], f"button bottom {button[1] + button[3]:.0f}, banner top {banner[1]:.0f}")
 
 
+VOTE_MAPS = [{"mode": 0, "map": 0, "votes": 0, "name": "Lagoon"}, {"mode": 0, "map": 1, "votes": 0, "name": "Tropicana"},
+             {"mode": 1, "map": 2, "votes": 0, "name": "Freight"}]
+
+
+def boxes_intersect(a, b):
+    (ax, ay, aw, ah), (bx, by, bw, bh) = a, b
+    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+def check_vote_cards_and_banner():
+    """With the vote cards (three maps: v10:219592 puts #endMidHolder at top 310, so the card and its Double XP button
+    move down), the signup banner must not cover the button: their boxes do not intersect, and the banner stays on the
+    screen (its top is v10's 385 when the button leaves room, below the button with v10's gap when it does not)."""
+    with open(V10_GUEST_CAPTURE, encoding="utf-8") as f:
+        doc = json.load(f)
+    doc["state"]["matchVotes"] = VOTE_MAPS
+    path = os.path.join(WORK, "votes-guest.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    png, lines, button = render("votes-button", path, "#doubleXPButton")
+    check("end card, a guest with vote cards: renders", png is not None and button is not None)
+    if png is None or button is None:
+        return
+    _, _, banner = render("votes-banner", path, "#matchEndSignupIncentives .signup-rewards-container")
+    if banner is None:
+        check("end card, a guest with vote cards: the signup banner renders", False)
+        return
+    check("end card, a guest with vote cards: the Double XP button and the signup banner do not overlap",
+          not boxes_intersect(button, banner), f"button {button[1]:.0f}-{button[1] + button[3]:.0f}, "
+          f"banner {banner[1]:.0f}-{banner[1] + banner[3]:.0f}")
+    check("end card, a guest with vote cards: the signup banner is on the screen (bottom within 720 px)",
+          banner[1] + banner[3] <= 720.5, f"banner bottom {banner[1] + banner[3]:.0f}")
+
+
 END_CARD = os.path.join(SCENARIOS, "ingame-endscreen-late.json") # a match's end card (results, no balance)
 
 
@@ -332,6 +368,7 @@ def main():
         return 1
     check_end_screen()
     check_double_xp_and_banner()
+    check_vote_cards_and_banner()
     check_end_card_offer()
     check_menu()
     check_account_and_empty()

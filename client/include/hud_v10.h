@@ -23,4 +23,8 @@ void hud_v10_end_performance_html(char *out, size_t size, size_t *len, const cha
 // origin match_end, v10_rewards.c) for a guest; hidden for an account. Called when the results come up.
 void hud_v10_end_signup(int show);
 
+// Places the banner under the Double XP button (or at v10's place when the stats block leaves room): the
+// end card's rects after a layout. Called when the card renders and when the banner shows.
+void hud_v10_end_signup_place(void);
+
 #endif
