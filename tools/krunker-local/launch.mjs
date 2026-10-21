@@ -163,7 +163,7 @@ async function startStack(kids, runDir, secret) {
   await waitFor(async () => (await getJSON(brainUrl + "/mm/game-list")).body?.games?.some((g) => g[0].startsWith(nodeId + ":")), 30000, "the game server in the brain's list");
 
   kids.spawn("bridge", path.join(BUILD, "v10_bridge"), [`--v10-listen=${bridgePort}`, `--bind=${HOSTS.bridge}`,
-    `--native=${HOSTS.game}:${gamePort}`], { env, log: "bridge.log" });
+    `--native=${HOSTS.game}:${gamePort}`], { env: { ...env, KRUNK_NATIVE_V10_TRACE: "1" }, log: "bridge.log" });
   await waitFor(() => tcpOpen(bridgePort, HOSTS.bridge), 15000, "v10_bridge");
   return { brainUrl, brainPort, bridgePort, gamePort, nodeId };
 }
