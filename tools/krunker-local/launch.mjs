@@ -31,7 +31,9 @@ const REPO = path.resolve(HERE, "../..");
 const BUILD = path.join(REPO, "cmake-build-debug");
 const HARNESS = path.join(HERE, "krunker-local.mjs");
 const EXAMPLE = path.join(HERE, "config.example.json");
-const PAGE_HOST = "krunker-local.test";
+// The page's name. Chromium resolves it to 127.0.0.1 (host-resolver MAP); Node never dials it. KN_NODE_PAGE_HOST picks an
+// alias for the client's host-based environment choice (the beta hosts); every other name stays unresolved.
+const PAGE_HOST = process.env.KN_NODE_PAGE_HOST || "krunker-local.test";
 const BRIDGE_NAME = "kn-bridge.krunker-local.test";
 
 // Every host this script binds or dials. Refused unless loopback.
@@ -44,7 +46,7 @@ const HOSTS = {
   brain: assertLoopback("brain", process.env.KN_NODE_BRAIN_HOST || "127.0.0.1"),
   bridge: assertLoopback("bridge", process.env.KN_NODE_BRIDGE_HOST || "127.0.0.1"),
   game: assertLoopback("game server", process.env.KN_NODE_GAME_HOST || "127.0.0.1"),
-  page: assertLoopback("page", PAGE_HOST),
+  page: "127.0.0.1", // the page name is only a MAP alias (never dialled); its target is checked by hostRules
   bridgeName: assertLoopback("bridge name", BRIDGE_NAME),
 };
 
@@ -184,7 +186,7 @@ function writeHarnessConfig(runDir, ports, { pagePort, tlsPort, brainUrl, bridge
 // Chromium's host rules, as the harness builds them: the page name, the official hosts and the bridge name map to the
 // local listeners; every other name is NOTFOUND.
 function hostRules(cfg) {
-  return [`MAP ${PAGE_HOST} 127.0.0.1:${cfg.port}`,
+  return [`MAP ${PAGE_HOST} ${assertLoopback("page map target", "127.0.0.1")}:${cfg.port}`,
     ...Object.keys(cfg.hostRoutes).map((h) => `MAP ${h} 127.0.0.1:${cfg.tlsPort}`),
     `MAP ${BRIDGE_NAME} 127.0.0.1:${cfg.tlsPort}`,
     "MAP * ~NOTFOUND"];
