@@ -786,6 +786,9 @@ def main():
         extra = ["--smtp.host=127.0.0.1", "--smtp.port=%d" % smtp.port, "--smtp.tls=starttls",
                  "--smtp.user=" + SMTP_USER, "--smtp.ca_file=" + cert, "--smtp.retries=-1",
                  "--accounts.email.link_base=http://127.0.0.1:1",
+                 "--auth.login_per_min=100000", "--auth.register_per_hour=100000", "--auth.join_per_min=100000",
+                 "--accounts.email.resend_cooldown_s=0", "--accounts.email.max_per_account_day=1000",
+                 "--accounts.email.max_per_address_day=1000", "--accounts.email.max_per_ip_hour=1000"]
         brain, port = start_brain(env, extra, log)
         brains.append(brain)
         check("kn_brain starts on an ephemeral port", port is not None, read(log)[-300:])
