@@ -281,6 +281,8 @@ typedef struct EmailReq {
     int64_t account_id;
     char label[8];            /* reply label: "cemail" / "emailv" */
     char token[64];
+    AcctEmailFn done;         /* the HTTP route's answer (acct_email_request_http); NULL on the socket */
+    void *ud;
 } EmailReq;
 
 static void email_req_done(kn_db_result *res, void *ud) {
@@ -306,7 +308,9 @@ static void email_req_done(kn_db_result *res, void *ud) {
     }
     memset(r->token, 0, sizeof r->token);
     cJSON *cs = st ? client_state(st) : NULL;
-    if (r->s && social_open(r->s)) {
+    if (r->done) {
+        r->done(r->ud, err, msg);
+    } else if (r->s && social_open(r->s)) {
         cJSON *f = social_frame(r->label);
         cJSON_AddItemToArray(f, err ? cJSON_CreateString(err) : cJSON_CreateNull());
         cJSON_AddItemToArray(f, msg ? cJSON_CreateString(msg) : cJSON_CreateNull());
@@ -320,15 +324,27 @@ static void email_req_done(kn_db_result *res, void *ud) {
     free(r);
 }
 
-/* email NULL = resend to the stored address. s (optional) gets the reply. */
-static void email_request(SocialSession *s, int64_t account_id, const char *email, const char *ip, const char *label) {
+/* A refused request: the HTTP route's done, or the socket's error reply (label). */
+static void email_refused(SocialSession *s, const char *label, AcctEmailFn done, void *ud, const char *err) {
+    if (done) done(ud, err, NULL);
+    else if (s) social_send_n(s, label, 1, cJSON_CreateString(err));
+}
+
+/* email NULL = resend to the stored address. s (optional) gets the reply; done (optional) the HTTP route's. */
+static void email_request(SocialSession *s, int64_t account_id, const char *email, const char *ip, const char *label,
+                          AcctEmailFn done, void *ud) {
     EmailReq *r = calloc(1, sizeof *r);
-    if (!r) return;
+    if (!r) {
+        if (done) done(ud, "Server error.", NULL);
+        return;
+    }
     r->account_id = account_id;
     snprintf(r->label, sizeof r->label, "%s", label);
+    r->done = done;
+    r->ud = ud;
     if (kn_random_token(r->token, sizeof r->token, 32) != 0) {
         free(r);
-        if (s) social_send_n(s, label, 1, cJSON_CreateString("Server error."));
+        email_refused(s, label, done, ud, "Server error.");
         return;
     }
     r->s = s ? social_hold(s) : NULL;
@@ -338,11 +354,25 @@ static void email_request(SocialSession *s, int64_t account_id, const char *emai
                           acct_itoa(d1, s_cfg.max_per_account_day), acct_itoa(d2, s_cfg.max_per_address_day),
                           acct_itoa(d3, s_cfg.max_per_ip_hour), s_mailer ? "1" : "0",
                           acct_itoa(now, now_ms())};
-    kn_db_call(g_acct_brain->db, &P_EMAIL_REQUEST, (int) (sizeof args / sizeof args[0]), args, email_req_done, r);
+    if (kn_db_call(g_acct_brain->db, &P_EMAIL_REQUEST, (int) (sizeof args / sizeof args[0]), args, email_req_done, r) != 0) {
+        /* a refused submit calls back on no path: answer the refusal here */
+        if (r->s) social_unhold(r->s);
+        memset(r->token, 0, sizeof r->token);
+        free(r);
+        email_refused(s, label, done, ud, "Server error.");
+    }
 }
 
 void acct_email_after_register(int64_t account_id, const char *email, const char *ip) {
-    if (account_id > 0 && email && *email && g_acct_brain && g_acct_brain->db) email_request(NULL, account_id, email, ip, "cemail");
+    if (account_id > 0 && email && *email && g_acct_brain && g_acct_brain->db)
+        email_request(NULL, account_id, email, ip, "cemail", NULL, NULL);
+}
+
+/* v10 POST /auth/verification/resend and change-email (v10_auth.c): the socket's "emailv" / "cemail" without a
+ * socket. email NULL = resend to the stored address; otherwise the address (validated by the caller) is stored
+ * unverified and mailed. done(ud, err, msg) runs once from the DB reply: err is the user-facing text. */
+void acct_email_request_http(int64_t account_id, const char *email, const char *ip, AcctEmailFn done, void *ud) {
+    email_request(NULL, account_id, email, ip, email ? "cemail" : "emailv", done, ud);
 }
 
 /* ["cemail", email] */
@@ -354,14 +384,14 @@ void sh_email_set(SocialSession *s, const cJSON *f) {
         social_send_n(s, "cemail", 1, cJSON_CreateString(err));
         return;
     }
-    email_request(s, s->account_id, norm, s->ip, "cemail");
+    email_request(s, s->account_id, norm, s->ip, "cemail", NULL, NULL);
 }
 
 /* ["emailv"] */
 void sh_email_resend(SocialSession *s, const cJSON *f) {
     (void) f;
     if (!social_require_auth(s)) return;
-    email_request(s, s->account_id, NULL, s->ip, "emailv");
+    email_request(s, s->account_id, NULL, s->ip, "emailv", NULL, NULL);
 }
 
 static void email_state_done(SocialSession *s, kn_db_result *res, void *extra) {

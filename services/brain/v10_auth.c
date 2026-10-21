@@ -18,11 +18,20 @@
  *       active name.
  *   GET /email/preferences -> data null (no preference stored: the consumer shows 'not chosen'); POST is refused.
  *   GET /discord/status -> {linked: false} (no Discord link); link, join and unlink are refused.
+ *   the email gate (accounts.login.require_verified, default on): a password login of an account whose email is
+ *       not verified -> {type: "ensure_verified", challenge_id}, no token (the session acct_auth issued is revoked).
+ *       The v10.0.3 consumer handles that state (its sign-in loop, v10.js 114131: the verify window, then
+ *       checkVerification). ASSUMPTION: v10.0.3 emits ensure_verified only for accounts with an unverified email,
+ *       which is what the gate sends; an account with no email is never gated.
+ *   POST /auth/verification/check/:id -> the login again with the challenge's password: login_ok once the address
+ *       is verified, else ensure_verified (a 2FA account: check_2fa) with the same id.
+ *   POST /auth/verification/resend/:id -> the verify mail to the address (account_security.c acct_email_request_http).
+ *   POST /auth/verification/change-email/:id {newEmail} -> the address, stored unverified, and its verify mail.
  *
  * Every /auth error body is {"data": null, "error": "<text>"} (the consumers throw the text); the refusals
  * are v10_reply_error's {"error": {"code": "NOT_IMPLEMENTED", ...}}. The flows Box Office does not have
- * (email-code sign-in, sign-up by email code, legacy migration, K-ID consent, the verification and sign-up
- * challenges) answer 404 with no data: no challenge exists for those ids.
+ * (email-code sign-in, sign-up by email code, legacy migration, K-ID consent, the sign-up challenges) answer
+ * 404 with no data: no challenge exists for those ids. An unknown verification challenge id is 404 too.
  */
 #include "v10_auth.h"
 
@@ -36,6 +45,7 @@
 #include "db_procs.h"
 #include "roles.h"
 #include "v10_api.h"
+#include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -86,6 +96,7 @@ typedef struct Challenge {
     char id[40];                /* kn_random_hex: 32 hex digits, a path segment */
     char name[256];             /* the login name as typed (a username or an email) */
     char *pass;                 /* the password of the first step; wiped when the challenge ends */
+    int64_t account_id;         /* the account of an ensure_verified challenge (the email gate); 0 before it */
     uint64_t expires_ms;
 } Challenge;
 
@@ -125,12 +136,16 @@ static Challenge *challenge_new(const char *name, const char *pass) {
         c->pass = strdup(pass);
         if (!c->pass) return NULL;
         snprintf(c->name, sizeof c->name, "%s", name);
+        c->account_id = 0;
         c->expires_ms = now + CHALLENGE_TTL_MS;
         c->used = 1;
         return c;
     }
     return NULL;
 }
+
+/* each use of a challenge keeps it for CHALLENGE_TTL_MS more */
+static void challenge_touch(Challenge *c) { c->expires_ms = kn_now_ms() + CHALLENGE_TTL_MS; }
 
 /* ---------------------------------------------------------------- sign-in */
 
@@ -145,6 +160,13 @@ static void auth_login_ok(kn_http_req *req, const char *token) {
 static void auth_check_2fa(kn_http_req *req, const char *id) {
     cJSON *d = cJSON_CreateObject();
     cJSON_AddStringToObject(d, "type", "check_2fa");
+    cJSON_AddStringToObject(d, "challenge_id", id);
+    auth_reply(req, 200, d, NULL);
+}
+
+static void auth_ensure_verified(kn_http_req *req, const char *id) {
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddStringToObject(d, "type", "ensure_verified");
     cJSON_AddStringToObject(d, "challenge_id", id);
     auth_reply(req, 200, d, NULL);
 }
@@ -166,11 +188,85 @@ static void login_free(LoginCtx *c) {
     free(c);
 }
 
+/* ---------------------------------------------------------------- the email gate */
+
+/* accounts.login.require_verified (default on): a password login whose account has an email that is not verified
+ * answers {type: "ensure_verified", challenge_id} instead of login_ok, and the session the login issued is revoked.
+ * The v10.0.3 consumer handles that state (its sign-in loop, v10.js 114131: the verify window, then
+ * checkVerification). v10 emits it only for unverified accounts: that is the assumption the gate rests on.
+ * 0 = the login stands as before. */
+static int g_require_verified = 1;
+
+typedef struct GateCtx {
+    LoginCtx *c;                /* owned: freed when the gate answers */
+    int64_t id;
+    char token[80];             /* the session the login issued */
+} GateCtx;
+
+static void gate_done(kn_db_result *res, void *ud) {
+    GateCtx *g = ud;
+    LoginCtx *c = g->c;
+    kn_http_req *req = c->req;
+    cJSON *st = kn_db_ok(res) ? acct_db_json(res) : NULL; /* P_EMAIL_STATE: {email, verified, ...} */
+    if (!st) {
+        acct_revoke_token(g->token);
+        auth_fail(req, 503, "Server error.");
+    } else {
+        const char *addr = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(st, "email"));
+        const int verified = (int) kn_json_int(st, "verified", 0);
+        if (!addr || !*addr || verified) { /* no email, or verified: the login stands */
+            challenge_drop(challenge_find(c->chid));
+            auth_login_ok(req, g->token);
+        } else {
+            acct_revoke_token(g->token);
+            /* a 2FA step's challenge carries on as the gate's (it holds the password too) */
+            Challenge *ch = c->chid[0] ? challenge_find(c->chid) : NULL;
+            if (!ch) ch = challenge_new(c->name, c->pass);
+            if (!ch) {
+                auth_fail(req, 503, "Too many sign-ins are waiting. Please try again.");
+            } else {
+                ch->account_id = g->id;
+                challenge_touch(ch);
+                auth_ensure_verified(req, ch->id);
+            }
+        }
+    }
+    cJSON_Delete(st);
+    login_free(c);
+    free(g);
+}
+
+/* the account's email state (P_EMAIL_STATE), then gate_done answers. Every path that does not log in revokes token. */
+static void gate_check(LoginCtx *c, int64_t id, const char *token) {
+    GateCtx *g = calloc(1, sizeof *g);
+    if (g) {
+        char idbuf[24], nowbuf[24];
+        g->c = c;
+        g->id = id;
+        snprintf(g->token, sizeof g->token, "%s", token);
+        /* cooldown 0: only the state is read (now in epoch ms, as mail_log's times are) */
+        if (kn_db_call(g_brain->db, &P_EMAIL_STATE,
+                       KN_DB_ARGS(acct_itoa(idbuf, id), "0", acct_itoa(nowbuf, (int64_t) time(NULL) * 1000)),
+                       gate_done, g) == 0)
+            return;
+        free(g);
+    }
+    /* no state to read: refuse the sign-in (a refused submit calls back on no path) */
+    acct_revoke_token(token);
+    auth_fail(c->req, 503, "Server error.");
+    login_free(c);
+}
+
 static void on_login(void *ud, const char *err, const cJSON *account) {
     LoginCtx *c = ud;
     kn_http_req *req = c->req;
     const char *token = !err && account ? kn_json_str(account, "token", NULL) : NULL;
     if (token && *token) {
+        const int64_t id = kn_json_int(account, "id", 0);
+        if (g_require_verified && id > 0) {
+            gate_check(c, id, token); /* owns c: login_ok or ensure_verified from gate_done */
+            return;
+        }
         challenge_drop(challenge_find(c->chid));
         auth_login_ok(req, token);
     } else if (!err && account) {
@@ -262,6 +358,72 @@ static void h_2fa_challenge(kn_http_req *req, void *ud) {
     start_login(req, name, pass_copy, chid, code);
     memset(pass_copy, 0, sizeof pass_copy);
     cJSON_Delete(body);
+}
+
+/* ---------------------------------------------------------------- the verification routes (rows 40-42) */
+
+/* the ensure_verified challenge of the URL's id (its account set by the gate); unknown or expired: 404 */
+static Challenge *verify_challenge(kn_http_req *req) {
+    Challenge *ch = challenge_find(kn_http_param(req, "id"));
+    if (!ch || ch->account_id <= 0) {
+        auth_fail(req, 404, "This sign-in has expired. Sign in again.");
+        return NULL;
+    }
+    challenge_touch(ch);
+    return ch;
+}
+
+/* POST /auth/verification/check/:id: the password login again, with the challenge's stored name and password (the
+ * gate answers: login_ok once the address is verified, else ensure_verified with the same id; a 2FA account asks its
+ * code: check_2fa with the same id). v10.js 26238, 114141. */
+static void h_verify_check(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!auth_login_limit(req)) return;
+    Challenge *ch = verify_challenge(req);
+    if (ch) start_login(req, ch->name, ch->pass, ch->id, NULL); /* start_login copies what it keeps */
+}
+
+/* the answer of an acct_email_request_http: {message} or the refusal text (the consumer ignores the reply) */
+static void verify_mail_done(void *ud, const char *err, const char *msg) {
+    kn_http_req *req = ud;
+    if (err) {
+        auth_fail(req, err_status(err), err);
+        return;
+    }
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddStringToObject(d, "message", msg ? msg : "");
+    auth_reply(req, 200, d, NULL);
+}
+
+/* POST /auth/verification/resend/:id: the verify mail again, to the challenge's address (v10.js 26243, 113497) */
+static void h_verify_resend(kn_http_req *req, void *ud) {
+    (void) ud;
+    Challenge *ch = verify_challenge(req);
+    if (!ch) return;
+    char ip[64];
+    snprintf(ip, sizeof ip, "%s", req->remote_addr ? req->remote_addr : "");
+    acct_email_request_http(ch->account_id, NULL, ip, verify_mail_done, req);
+}
+
+/* POST /auth/verification/change-email/:id {newEmail}: the address, checked as sh_email_set checks it, stored
+ * unverified and mailed (v10.js 26248, 113570; the v10.0.3 body is newEmail too). */
+static void h_verify_change(kn_http_req *req, void *ud) {
+    (void) ud;
+    Challenge *ch = verify_challenge(req);
+    if (!ch) return;
+    cJSON *body = kn_http_body_json(req);
+    const char *typed = kn_json_str(body, "newEmail", NULL);
+    if (!typed) typed = kn_json_str(body, "email", "");
+    char email[256], norm[256], ip[64];
+    snprintf(email, sizeof email, "%s", typed ? typed : "");
+    cJSON_Delete(body);
+    const char *err = acct_validate_email(email, norm, sizeof norm);
+    if (err) {
+        auth_fail(req, 400, err);
+        return;
+    }
+    snprintf(ip, sizeof ip, "%s", req->remote_addr ? req->remote_addr : "");
+    acct_email_request_http(ch->account_id, norm, ip, verify_mail_done, req);
 }
 
 static void h_nonce(kn_http_req *req, void *ud) {
@@ -594,9 +756,6 @@ static const struct {
     {"POST", "/auth/code-challenge/:id", WHY_UNOFFERED},
     {"POST", "/auth/resend-code-challenge/:id", WHY_UNOFFERED},
     {"POST", "/auth/migrate/:id", WHY_UNOFFERED},
-    {"POST", "/auth/verification/check/:id", WHY_UNOFFERED},
-    {"POST", "/auth/verification/resend/:id", WHY_UNOFFERED},
-    {"POST", "/auth/verification/change-email/:id", WHY_UNOFFERED},
     {"POST", "/auth/register/email-code", "Sign up with a username and password on Box Office"},
     {"POST", "/auth/username-challenge/:id", WHY_UNOFFERED},
     {"POST", "/auth/password-challenge/:id", WHY_UNOFFERED},
@@ -607,10 +766,14 @@ static const struct {
 
 int v10_auth_init(Brain *b) {
     g_brain = b;
+    g_require_verified = kn_config_bool(b->cfg, "accounts.login.require_verified", 1);
     kn_http_route(b->http, "POST", "/auth/nonce", h_nonce, NULL);
     kn_http_route(b->http, "POST", "/auth/login/username", h_login_username, NULL);
     kn_http_route(b->http, "POST", "/auth/login/email", h_login_email, NULL);
     kn_http_route(b->http, "POST", "/auth/2fa/challenge/:id", h_2fa_challenge, NULL);
+    kn_http_route(b->http, "POST", "/auth/verification/check/:id", h_verify_check, NULL);
+    kn_http_route(b->http, "POST", "/auth/verification/resend/:id", h_verify_resend, NULL);
+    kn_http_route(b->http, "POST", "/auth/verification/change-email/:id", h_verify_change, NULL);
     kn_http_route(b->http, "POST", "/auth/recover-account", h_recover, NULL);
     for (size_t i = 0; i < sizeof k_not_offered / sizeof k_not_offered[0]; i++) {
         kn_http_route(b->http, k_not_offered[i].method, k_not_offered[i].pattern, not_offered,

@@ -1703,6 +1703,7 @@ It has no email flow at all: no email field, no verification, no reset by email,
 | `accounts.email.resend_cooldown_s` / `max_per_account_day` / `max_per_address_day` / `max_per_ip_hour` | 60 / 5 / 5 / 10 | |
 | `accounts.email.required` | false | register needs an email ("Email Required") |
 | `accounts.email.require_verified` | `[]` | gated features, list or `a,b` |
+| `accounts.login.require_verified` | `true` | the v10 sign-in gate: a password login of an account whose email is not verified answers `ensure_verified` (v10_auth.c); `false` = login as before |
 | `accounts.twofa_issuer` | `Krunker Box Office` | the otpauth issuer |
 
 Deployment: `KN_SMTP_*` from `~/.config/kn-secrets/smtp.env` or the deploy-kru CI secrets become

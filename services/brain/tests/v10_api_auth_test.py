@@ -18,6 +18,10 @@ is one HTTP request on the brain root, checked against what the official v10.0.3
   NONE    404 {"data": null, "error": "<text>"}: a flow Box Office does not have (no challenge exists)
   EMPTY   200 with the empty shape the consumer reads
   REFUSAL 403 {"error": {"code": "NOT_IMPLEMENTED", ...}}: a write Box Office cannot do
+  ENSURE  200 {"data": {"type": "ensure_verified", "challenge_id"}, "error": null}: the password login of an
+          account whose email is not verified (accounts.login.require_verified, default on; v10.0.3 only
+          emits it for unverified accounts, the consumer's ensure_verified branch, v10.js 114131). No token:
+          the session the login issued is revoked. The verification routes (rows 40-42) re-run the login.
 
 Each check prints one PASS or FAIL line; the last line counts them. Exit 0 when every check passes,
 1 otherwise, 77 when kn_brain, the sqlite scratch database or openssl is unavailable (CTest's skip).
@@ -38,6 +42,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email import message_from_bytes
+from email.policy import default as email_policy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARG = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
@@ -134,6 +140,47 @@ def fresh_user(tag):
     return "f1b%s%04d" % (tag, secrets.randbelow(10000))
 
 
+def http_text(port, path):
+    """a GET answered with HTML (the verify link): (status, text)"""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d%s" % (port, path), timeout=15) as r:
+            return r.status, r.read().decode(errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace")
+
+
+def mail_token(msg):
+    """the verify-link token of a captured mail (the text part, as account_security_test.py reads it)"""
+    m = message_from_bytes(msg["data"], policy=email_policy)
+    text = m.get_body(("plain",)).get_content()
+    link = re.search(r"https?://\S+/auth/verify-email\?token=([A-Za-z0-9_-]+)", text)
+    return link.group(1) if link else None
+
+
+def mails_to(msgs, addr):
+    return [m for m in msgs if addr.lower() in [r.lower() for r in m.get("rcpt", [])]]
+
+
+def data_of(body):
+    return body.get("data") if isinstance(body, dict) else None
+
+
+def ensure_verified(body, cid=None):
+    """the gate's answer: 200, the ensure_verified state with a challenge id, and no token in it"""
+    data = data_of(body)
+    got = data.get("challenge_id") if isinstance(data, dict) else None
+    return (isinstance(body, dict) and body.get("error") is None and isinstance(data, dict)
+            and data.get("type") == "ensure_verified" and isinstance(got, str) and got != ""
+            and (cid is None or got == cid) and "access_token" not in json.dumps(body))
+
+
+def check_2fa_answer(body, cid=None):
+    data = data_of(body)
+    got = data.get("challenge_id") if isinstance(data, dict) else None
+    return (isinstance(data, dict) and data.get("type") == "check_2fa" and isinstance(got, str) and got != ""
+            and (cid is None or got == cid) and "access_token" not in json.dumps(body))
+
+
 # ---- the checks
 
 def run_checks(port, db_path, smtp):
@@ -189,7 +236,8 @@ def run_checks(port, db_path, smtp):
     check("POST /auth/login/email-code -> 404 NONE text: Box Office has no email-code sign-in (v10.0.3 decoded 3633, 5161; v10.js 26201, 114483)",
           st == 404 and is_text_error(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    # ---- rows 36-38, 40-45, 47-49: challenge flows Box Office never issues: no challenge exists
+    # ---- rows 36-38, 40-45, 47-49: no challenge of these ids exists (rows 40-42 with an unknown id; a live
+    # verification challenge is checked in verify_checks)
     for label, method, path, req_body, cite in [
         ("POST /auth/code-challenge/:id", "POST", "/auth/code-challenge/" + HEX, {"code": "123456"},
          "3921 / 5161; v10.js 26209, 114161 (enter_code: no email code)"),
@@ -198,11 +246,11 @@ def run_checks(port, db_path, smtp):
         ("POST /auth/migrate/:id", "POST", "/auth/migrate/" + HEX, {"email": email},
          "282 / 5161; v10.js 26222, 114182 (ensure_migrated: no legacy migration)"),
         ("POST /auth/verification/check/:id", "POST", "/auth/verification/check/" + HEX, {},
-         "2703 / 5161; v10.js 26238, 114141 (ensure_verified: login never asks)"),
+         "2703 / 5161; v10.js 26238, 114141 (unknown id: the sign-in expired)"),
         ("POST /auth/verification/resend/:id", "POST", "/auth/verification/resend/" + HEX, {},
-         "5161; v10.js 26243, 113497"),
+         "5161; v10.js 26243, 113497 (unknown id)"),
         ("POST /auth/verification/change-email/:id", "POST", "/auth/verification/change-email/" + HEX,
-         {"newEmail": "x@example.test"}, "4863 / 5161; v10.js 26248, 113570"),
+         {"newEmail": "x@example.test"}, "4863 / 5161; v10.js 26248, 113570 (unknown id)"),
         ("POST /auth/register/email-code", "POST", "/auth/register/email-code", {"email": email},
          "4652 / 5161; v10.js 26256, 114434 (sign-up is username and password)"),
         ("POST /auth/username-challenge/:id", "POST", "/auth/username-challenge/" + HEX, {"username": "x"},
@@ -346,6 +394,169 @@ def run_checks(port, db_path, smtp):
               "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
 
+def verify_checks(port, db_path, smtp):
+    """The sign-in gate (accounts.login.require_verified, on by default) and rows 40-42. A password login of an
+    account whose email is not verified answers ensure_verified; the consumer shows the verify window, then polls
+    POST /auth/verification/check/:id (the login re-run with the challenge's password), and may resend the mail
+    or change the address (v10.js 114131 ensure_verified branch, 113497 resend, 113570 change-email)."""
+    import sqlite3
+
+    def q(sql, args=()):
+        con = sqlite3.connect(db_path, timeout=10)
+        try:
+            return con.execute(sql, args).fetchall()
+        finally:
+            con.close()
+
+    def db(sql, args=()):
+        con = sqlite3.connect(db_path, timeout=10)
+        try:
+            con.execute(sql, args)
+            con.commit()
+        finally:
+            con.close()
+
+    def sessions(name):
+        return q("SELECT count(*) FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE a.username = ?", (name,))[0][0]
+
+    U, R, K, N = fresh_user("v"), fresh_user("w"), fresh_user("k"), fresh_user("n")
+    u_mail = "%s@example.test" % U.lower()
+    r_mail = "%s@example.test" % R.lower()
+    k_secret = b32_secret()
+    for name in (U, R, K, N):
+        st, body = http(port, "POST", "/auth/register", {"username": name, "password": PASSWORD})
+        check("setup: register %s over /auth/register (verification suite)" % name,
+              st == 200 and isinstance(body, dict) and body.get("ok"), "HTTP %d" % st)
+    db("UPDATE accounts SET email = ? WHERE username = ?", (u_mail, U))          # not verified
+    db("UPDATE accounts SET email = ? WHERE username = ?", (r_mail, R))          # not verified
+    db("UPDATE accounts SET email = ?, twofa_secret = ? WHERE username = ?", ("%s@example.test" % K.lower(), k_secret, K))
+    base_u = sessions(U)   # the session /auth/register issued: the gated logins must leave the count here
+
+    # ---- the gate: ensure_verified, no token, the session revoked
+    st, body = http(port, "POST", "/auth/login/username", {"username": U, "password": PASSWORD})
+    check("POST /auth/login/username, email not verified -> 200 ENSURE {type: ensure_verified, challenge_id}, no token (v10.js 114131; v10.0.3 emits it for unverified accounts)",
+          st == 200 and ensure_verified(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    cid = (data_of(body) or {}).get("challenge_id") or HEX
+    check("the gated login revokes the session it issued: the account keeps only its register session (acct_revoke_token)",
+          wait_for(lambda: sessions(U) == base_u, 5) is not None, "sessions %r, expected %r" % (sessions(U), base_u))
+
+    st, body = http(port, "POST", "/auth/login/email", {"email": u_mail.upper(), "password": PASSWORD})
+    check("POST /auth/login/email, email not verified -> 200 ENSURE too (the same gate for the email field)",
+          st == 200 and ensure_verified(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    st, body = http(port, "POST", "/auth/verification/check/" + cid, {})
+    check("POST /auth/verification/check/:id, still unverified -> 200 ENSURE with the same challenge_id (v10.js 26238, 114141)",
+          st == 200 and ensure_verified(body, cid), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # ---- row 41: the verify mail again, to the account's address
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/verification/resend/" + cid, {})
+    sent = mails_to(smtp.wait_messages(before + 1, timeout=10.0)[before:], u_mail)
+    check("POST /auth/verification/resend/:id -> 200 and one verify mail to the account's address (v10.js 113497: the reply is ignored, a refusal's text is shown)",
+          st == 200 and isinstance(body, dict) and body.get("error") is None and len(sent) == 1,
+          "HTTP %d %s, mails %d" % (st, json.dumps(body)[:160], len(sent)))
+    token = mail_token(sent[0]) if sent else None
+    st, html = http_text(port, "/auth/verify-email?token=" + (token or "none"))
+    check("the resent mail's link verifies the address: GET /auth/verify-email?token= -> 200 'Email verified' page",
+          token is not None and st == 200 and "Email verified" in html, "HTTP %d, token %s" % (st, token is not None))
+
+    # ---- verified: the check answers login_ok, the same shape as a password login
+    st, body = http(port, "POST", "/auth/verification/check/" + cid, {})
+    data = data_of(body)
+    token_u = data.get("access_token") if isinstance(data, dict) else None
+    check("POST /auth/verification/check/:id once verified -> 200 LOGIN {type: login_ok, access_token, refresh_token} (v10.js 26238, 114141)",
+          st == 200 and isinstance(data, dict) and data.get("type") == "login_ok" and isinstance(token_u, str) and token_u != ""
+          and isinstance(data.get("refresh_token"), str), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, me = http(port, "GET", "/auth/me", token=token_u)
+    check("the check's login token is a real session: GET /auth/me answers it",
+          st == 200 and ((me or {}).get("account") or {}).get("username") == U, "HTTP %d" % st)
+    st, body = http(port, "POST", "/auth/login/email", {"email": u_mail, "password": PASSWORD})
+    check("a password login after the verification -> 200 login_ok (the gate is open)",
+          st == 200 and isinstance(data_of(body), dict) and data_of(body).get("type") == "login_ok", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # ---- an account with no email is not gated
+    st, body = http(port, "POST", "/auth/login/username", {"username": N, "password": PASSWORD})
+    data = data_of(body)
+    check("an account with no email is not gated: POST /auth/login/username -> 200 login_ok",
+          st == 200 and isinstance(data, dict) and data.get("type") == "login_ok" and isinstance(data.get("access_token"), str),
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # ---- row 42: change the address; the new one is stored unverified and gets the mail
+    st, body = http(port, "POST", "/auth/login/username", {"username": R, "password": PASSWORD})
+    check("POST /auth/login/username for R (email not verified) -> 200 ENSURE", st == 200 and ensure_verified(body),
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    cid_r = (data_of(body) or {}).get("challenge_id") or HEX
+    new_r = "%s-new@example.test" % R.lower()
+    before = len(smtp.messages)
+    st, body = http(port, "POST", "/auth/verification/change-email/" + cid_r, {"newEmail": "  %s " % new_r.upper()})
+    sent = mails_to(smtp.wait_messages(before + 1, timeout=10.0)[before:], new_r)
+    row = q("SELECT email, email_verified_at FROM accounts WHERE username = ?", (R,))
+    check("POST /auth/verification/change-email/:id {newEmail} -> 200: the address is stored unverified and the verify mail goes there (v10.0.3 changeEmail body newEmail; v10.js 113570)",
+          st == 200 and isinstance(body, dict) and body.get("error") is None and len(sent) == 1 and row == [(new_r, None)],
+          "HTTP %d %s, mails %d, row %r" % (st, json.dumps(body)[:160], len(sent), row))
+    st, body = http(port, "POST", "/auth/verification/change-email/" + cid_r, {"newEmail": u_mail})
+    check("change-email to an address another account holds -> 400 'Email already in use' (sh_email_set's text)",
+          st == 400 and is_text_error(body) and body["error"] == "Email already in use", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/verification/change-email/" + cid_r, {"newEmail": "not-an-address"})
+    check("change-email with an invalid address -> 400 'Invalid Email' (sh_email_set's text)",
+          st == 400 and is_text_error(body) and body["error"] == "Invalid Email", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+    # ---- a 2FA account with an unverified address: the 2FA challenge becomes the gate's challenge
+    st, body = http(port, "POST", "/auth/login/username", {"username": K, "password": PASSWORD})
+    check("POST /auth/login/username on a 2FA account with an unverified email -> 200 CHECK (the 2FA step first)",
+          st == 200 and check_2fa_answer(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    cid_k = (data_of(body) or {}).get("challenge_id") or HEX
+    st, body = http(port, "POST", "/auth/2fa/challenge/" + cid_k, {"code": totp(k_secret, now_step())})
+    check("POST /auth/2fa/challenge/:id right code, email not verified -> 200 ENSURE with the same challenge_id",
+          st == 200 and ensure_verified(body, cid_k), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(port, "POST", "/auth/verification/check/" + cid_k, {})
+    check("POST /auth/verification/check/:id on a 2FA account -> 200 CHECK with the same challenge_id (the re-run asks the code again)",
+          st == 200 and check_2fa_answer(body, cid_k), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+
+
+def gate_off_checks(port, db_path):
+    """accounts.login.require_verified=0: the login of an unverified address is login_ok, as before the gate"""
+    import sqlite3
+
+    X = fresh_user("x")
+    st, body = http(port, "POST", "/auth/register", {"username": X, "password": PASSWORD})
+    check("setup: register %s on the gate-off brain" % X, st == 200 and isinstance(body, dict) and body.get("ok"), "HTTP %d" % st)
+    con = sqlite3.connect(db_path, timeout=10)
+    try:
+        con.execute("UPDATE accounts SET email = ? WHERE username = ?", ("%s@example.test" % X.lower(), X))
+        con.commit()
+    finally:
+        con.close()
+    st, body = http(port, "POST", "/auth/login/username", {"username": X, "password": PASSWORD})
+    data = data_of(body)
+    token = data.get("access_token") if isinstance(data, dict) else None
+    check("accounts.login.require_verified=0: an unverified email signs in -> 200 login_ok with the token (the gate off)",
+          st == 200 and isinstance(data, dict) and data.get("type") == "login_ok" and isinstance(token, str) and token != ""
+          and isinstance(data.get("refresh_token"), str), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, me = http(port, "GET", "/auth/me", token=token)
+    check("the gate-off token is a real session: GET /auth/me answers it",
+          st == 200 and ((me or {}).get("account") or {}).get("username") == X, "HTTP %d" % st)
+
+
+def start_brain(env, extra, log):
+    """kn_brain on an ephemeral port: (process, port), port None when it does not come up"""
+    proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.region=local",
+                             "--brain.id=v10-auth-test-%d" % os.getpid(), "--finder.poll_interval_s=1"] + extra,
+                            cwd=ROOT, env=env, stdout=open(log, "w"), stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, start_new_session=True)
+    m = wait_for(lambda: re.search(r"listening on http://127\.0\.0\.1:(\d+) \(ws", read(log)), 20)
+    return proc, (int(m.group(1)) if m else None)
+
+
+def stop_brain(proc):
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def scenario_env(work):
     """the fake SMTP server and its certificate (services/common/tests/fake_smtp.py)"""
     from fake_smtp import FakeSMTP, make_cert  # noqa: E402
@@ -372,7 +583,7 @@ def main():
     work = tempfile.mkdtemp(prefix="kn-v10-auth-test.")
     log = os.path.join(work, "brain.log")
     smtp = None
-    brain = None
+    brains = []
     try:
         smtp, cert = scenario_env(work)
         env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, KN_SMTP_PASSWORD=SMTP_PASS,
@@ -385,24 +596,28 @@ def main():
                  "--smtp.user=" + SMTP_USER, "--smtp.ca_file=" + cert, "--smtp.retries=-1",
                  "--accounts.email.link_base=http://127.0.0.1:1",
                  "--auth.login_per_min=100000", "--auth.register_per_hour=100000", "--auth.join_per_min=100000"]
-        brain = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.region=local",
-                                  "--brain.id=v10-auth-test-%d" % os.getpid(), "--finder.poll_interval_s=1"] + extra,
-                                 cwd=ROOT, env=env, stdout=open(log, "w"), stderr=subprocess.STDOUT,
-                                 stdin=subprocess.DEVNULL, start_new_session=True)
-        m = wait_for(lambda: re.search(r"listening on http://127\.0\.0\.1:(\d+) \(ws", read(log)), 20)
-        check("kn_brain starts on an ephemeral port", m is not None, read(log)[-300:])
-        if m is None:
+        brain, port = start_brain(env, extra, log)
+        brains.append(brain)
+        check("kn_brain starts on an ephemeral port", port is not None, read(log)[-300:])
+        if port is None:
             return 1
-        run_checks(int(m.group(1)), db_path, smtp)
+        run_checks(port, db_path, smtp)
+        verify_checks(port, db_path, smtp)
+        # the gate off: the same database, a second brain with accounts.login.require_verified=0
+        stop_brain(brain)
+        brains.remove(brain)
+        gate_log = os.path.join(work, "brain-gate-off.log")
+        brain, port = start_brain(env, extra + ["--accounts.login.require_verified=0"], gate_log)
+        brains.append(brain)
+        check("kn_brain starts with accounts.login.require_verified=0", port is not None, read(gate_log)[-300:])
+        if port is None:
+            return 1
+        gate_off_checks(port, db_path)
     except Exception as e:  # noqa: BLE001
         check("the scenario runs", False, "exception: %r" % e)
     finally:
-        if brain is not None:
-            brain.terminate()
-            try:
-                brain.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                brain.kill()
+        for brain in brains:
+            stop_brain(brain)
         if smtp is not None:
             smtp.stop()
         subprocess.run([sys.executable, "-I", os.path.join(HERE, "db_scratch.py"), ROOT, "drop", "sqlite", NAME],
