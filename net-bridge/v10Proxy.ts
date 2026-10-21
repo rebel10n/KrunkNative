@@ -175,7 +175,10 @@ function connectNative(session: V10Session): void {
       closeSession(session, 1011, "Native server protocol error");
     }
   });
-  tcp.on("close", () => closeSession(session, 1011, "native server closed"));
+  tcp.on("close", () => {
+    if (TRACE) console.info(`[v10-proxy] ${session.id} native socket closed`);
+    closeSession(session, 1011, "native server closed");
+  });
   tcp.on("error", (err: Error) => {
     console.error("[v10-proxy] native socket error:", err.message);
     closeSession(session, 1011, "native server unavailable");
@@ -253,7 +256,10 @@ function flushBotSync(session: V10Session): void {
 }
 
 function handleNativePacket(session: V10Session, type: number, payload: Buffer): void {
-  if (TRACE) console.info(`[v10-proxy] ${session.id} native ${nativeName(type, payload)} (${payload.length} B)`);
+  if (TRACE) {
+    const hex = payload.length <= 8 ? ` ${payload.toString("hex")}` : "";
+    console.info(`[v10-proxy] ${session.id} native ${nativeName(type, payload)} (${payload.length} B)${hex}`);
+  }
   if (type === T.NATIVE.PING) {
     writeNative(session, T.NATIVE.PONG, payload);
     return;
@@ -305,6 +311,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   }
   if (session.initSent && type === T.NATIVE_MORE.PING_RESULT) return; // v10's "pir" handler does nothing
   if (session.initSent && type === T.NATIVE_MORE.SOCIAL_V7) return; // a v7 capability notice: the bridge sends chat as CHAT_SEND
+  if (session.initSent && type === T.NATIVE_MORE.EXT && payload.length >= 2 && payload.readUInt16LE(0) === T.EXT_ACCOUNT_RIGHTS) return; // KN's rights: no v10 message
   if (session.initSent && type === T.NATIVE_MORE.LEADERBOARD) {
     const mapped = T.mapLeaderboard(payload, session.modeIndex);
     if (mapped.stop) return stopAt(session, "LEADERBOARD", mapped.stop);
@@ -609,7 +616,10 @@ function handleConnection(ws: WebSocket, request: IncomingMessage, options: Atta
     if (TRACE) console.info(`[v10-proxy] ${session.id} <- ${label}`);
     handleClientPacket(session, label, args);
   });
-  ws.on("close", () => closeSession(session, 1000, "client closed"));
+  ws.on("close", (code: number, reason: Buffer) => {
+    if (TRACE) console.info(`[v10-proxy] ${session.id} client socket closed ${code} ${reason.toString()}`);
+    closeSession(session, 1000, "client closed");
+  });
   ws.on("error", (err: Error) => {
     console.error("[v10-proxy] websocket error:", err.message);
     closeSession(session, 1011, "websocket error");

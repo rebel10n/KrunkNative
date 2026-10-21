@@ -33,6 +33,11 @@ function loadConfig() {
   cfg.wwwDir = home(cfg.wwwDir);
   cfg.runDir = home(cfg.runDir);
   if (cfg.bridge && cfg.bridge.log) cfg.bridge.log = home(cfg.bridge.log);
+  // Nothing leaves the machine for a production host: the brain the matchmaker and API hosts forward to is local.
+  const brainHost = new URL(cfg.brainUrl).hostname;
+  if (!["127.0.0.1", "localhost"].includes(brainHost)) {
+    throw new Error(`brainUrl must be a local kn_brain (127.0.0.1), not ${brainHost}`);
+  }
   cfg.localHost = new URL(cfg.localUrl).hostname;
   return cfg;
 }
@@ -100,7 +105,8 @@ function proxy(req, res, pathname, transform = null) {
   delete headers.origin;
   delete headers.referer;
   if (transform) delete headers["accept-encoding"]; // the transform reads the body as text
-  const up = https.request(target, { method: req.method, headers }, (ur) => {
+  const client = target.protocol === "http:" ? http : https; // brainUrl may be a local http brain
+  const up = client.request(target, { method: req.method, headers }, (ur) => {
     const h = { ...ur.headers };
     delete h["access-control-allow-origin"];
     sendCors(res);
@@ -141,9 +147,6 @@ function rewriteSeek(body, status) {
   return Buffer.from(JSON.stringify(seek));
 }
 
-const EMPTY_MAPS = JSON.stringify(Object.fromEntries(["maps", "data", "items", "list", "result", "results", "names", "rows",
-  "mapList", "catalog", "catalogue", "all", "out"].map((k) => [k, []])));
-
 // The official index.html (the menu's DOM) with its loader module (static/index-*.js, the WASM loader)
 // removed, and loader.js inlined before </body>. The bundle then starts from the token path only.
 function sketchPage(res) {
@@ -172,12 +175,6 @@ function handle(req, res, isMatchmakerHost) {
     // "" for the account/data API, which the brain answers at its root).
     const prefix = cfg.hostRoutes[isMatchmakerHost];
     const p = url.pathname.startsWith(prefix + "/") ? url.pathname : prefix + url.pathname;
-    // The brain answers 404 for the map list: the menu's startup throws on it (forEach of undefined) and never
-    // pings or seeks. An empty list stands in for it here (the menu's own lists are not part of the join).
-    if (isMatchmakerHost.startsWith("gapi.") && url.pathname === "/maps") {
-      res.writeHead(200, { "content-type": "application/json" });
-      return res.end(EMPTY_MAPS);
-    }
     return proxy(req, res, p, cfg.bridge && p.endsWith("/seek-game") ? rewriteSeek : null);
   }
   if (url.pathname.startsWith("/mm/")) return proxy(req, res, url.pathname);
@@ -270,7 +267,10 @@ function freePort() {
 function hostRules() {
   return [`MAP ${cfg.localHost} 127.0.0.1:${cfg.port}`,
     ...Object.keys(cfg.hostRoutes).map((h) => `MAP ${h} 127.0.0.1:${cfg.tlsPort}`),
-    ...(cfg.bridge ? [`MAP ${cfg.bridge.host} 127.0.0.1:${cfg.tlsPort}`] : [])];
+    ...(cfg.bridge ? [`MAP ${cfg.bridge.host} 127.0.0.1:${cfg.tlsPort}`] : []),
+    // every other host (the official CDNs, analytics, consent vendors, the real krunker.io hosts) does not resolve:
+    // the page cannot reach production, and a request for one fails in the report's "failed" list
+    "MAP * ~NOTFOUND"];
 }
 
 // Query values that carry tokens or ids are not printed.
@@ -373,7 +373,36 @@ const ACCEPT_JS = `(() => {
   return b.tagName + "." + String(b.className).slice(0, 40);
 })()`;
 // consentBlock is position: fixed, so offsetParent is null for it: test the computed box instead
-const CONSENT_OPEN_JS = `(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
+// Logs every WebSocket.close the page makes, with the call site (the bundle's own names, the source is game.js):
+// the report's "hooks" list says who closed the game socket. It only logs; the call goes on as it was.
+const WS_CLOSE_HOOK = `(() => { const close = WebSocket.prototype.close; WebSocket.prototype.close = function (...a) {
+  try { console.log("[hook] ws.close " + JSON.stringify(a) + " " + String(new Error().stack).split("\\n").slice(1, 7).join(" | ")); } catch (e) {}
+  return close.apply(this, a); }; })();`;
+// The breakpoint probe: runs inside the paused frame of the init handler (the bundle's own names, its decoder
+// IïIììíí maps the hex keys). Reports the keys and the values the disconnect test reads. Nothing is changed.
+const PAUSE_PROBE_JS = `(() => {
+  const out = {};
+  const k = (x) => { try { return IïIììíí(x); } catch (e) { return "k?" + e.message; } };
+  try {
+    out.fn = typeof IïIììíí; out.key1994 = k(0x1994); out.key1f6 = k(0x1f6);
+    out.cfgType = typeof iîÍiìïì;
+    out.cfgKeys = iîÍiìïì && typeof iîÍiìïì === "object" ? Object.keys(iîÍiìïì).slice(0, 40) : null;
+    out.v1994 = iîÍiìïì ? String(iîÍiìïì[k(0x1994)]) : null;
+    out.gameFlag = String(iiïìîii[k(0x1f6)]);
+    out.args = Array.from(arguments).map((a) => a === null ? "null" : typeof a + (Array.isArray(a) ? "[" + a.length + "]" : ""));
+  } catch (e) { out.err = String(e.message); }
+  return JSON.stringify(out);
+})()`;
+// The exception probe: the frame that threw (the bundle's own names). The lookup that fails is modes[index].
+const EXC_PROBE_JS = `(() => {
+  const o = {};
+  try { o.idx = [typeof IÌíiîïì === "undefined" ? "undef" : IÌíiîïì, typeof IIíïiíí === "undefined" ? "undef" : typeof IIíïiíí]; } catch (e) { o.e1 = e.message; }
+  try { o.modes = iìiiìíi.length; } catch (e) { o.e2 = e.message; }
+  try { o.self = this && typeof this === "object" ? [this.modeIndex, this.mapIndex, this.eventIndex] : String(this); } catch (e) { o.e3 = e.message; }
+  return JSON.stringify(o);
+})()`;
+const INIT_HANDLER_COLUMN = 10307050; // the disconnect call in the init handler (game.js line 1, 0-based column)
+const CONSENT_OPEN_JS =`(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
 const CLICK_PLAY_JS = `(() => {
   const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
     .filter((e) => e.offsetParent && e.innerText && e.innerText.trim().length < 40);
@@ -409,8 +438,10 @@ async function join() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
   const reqUrl = new Map();
+  let appScript = null;
+  const hostsSeen = new Set();
   try {
     let targets = [];
     for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
@@ -432,14 +463,53 @@ async function join() {
         case "Network.webSocketCreated": report.sockets.push(redact(p.url)); break;
         case "Network.webSocketFrameSent": report.framesOut++; break;
         case "Network.webSocketFrameReceived": report.framesIn++; report.bytesIn += Buffer.from(p.response.payloadData, "base64").length; break;
-        case "Network.requestWillBeSent": reqUrl.set(p.requestId, p.request.url); break;
+        case "Network.requestWillBeSent":
+          reqUrl.set(p.requestId, p.request.url);
+          hostsSeen.add(new URL(p.request.url).hostname);
+          break;
         case "Network.loadingFailed": report.failed.push(`${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
         case "Network.responseReceived":
           if (/seek-game/.test(p.response.url)) report.seek.push(`${p.response.status} ${redact(p.response.url)}`);
           if (p.response.status >= 400) report.httpErrors.push(`${p.response.status} ${redact(p.response.url).slice(0, 120)}`);
           break;
-        case "Runtime.exceptionThrown": report.exceptions.push(((p.exceptionDetails.exception || {}).description || p.exceptionDetails.text || "").split("\n")[0].slice(0, 200)); break;
-        case "Runtime.consoleAPICalled": if (p.type === "error") report.consoleErrors.push(p.args.map((a) => a.value ?? a.description).join(" ").slice(0, 200)); break;
+        case "Runtime.exceptionThrown": {
+          const d = p.exceptionDetails;
+          const frames = ((d.stackTrace && d.stackTrace.callFrames) || []).slice(0, 3).map((f) => `${f.functionName || "?"}@${f.lineNumber}:${f.columnNumber}`);
+          report.exceptions.push(`${((d.exception || {}).description || d.text || "").split("\n")[0].slice(0, 160)} [${frames.join(" < ")}]`);
+          break;
+        }
+        case "Debugger.scriptParsed":
+          if (/krunker\.io\/js\/app\.js$/.test(p.url || "") && !appScript) {
+            appScript = p.scriptId;
+            send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: INIT_HANDLER_COLUMN } })
+              .then((r) => { report.breakpoint = r.result ? r.result.actualLocation : r; });
+          }
+          break;
+        case "Debugger.paused": {
+          const top = p.callFrames[0];
+          if (p.reason === "exception") {
+            (async () => {
+              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
+              report.pauses.push({ exception: top.functionName, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
+              await send("Debugger.resume");
+            })();
+            break;
+          }
+          (async () => {
+            if (report.pauses.length < 6) {
+              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: PAUSE_PROBE_JS, returnByValue: true });
+              report.pauses.push({ fn: top.functionName, probe: r.result && r.result.result ? r.result.result.value : r });
+            }
+            await send("Debugger.resume");
+          })();
+          break;
+        }
+        case "Runtime.consoleAPICalled": {
+          const text = p.args.map((a) => a.value ?? a.description).join(" ");
+          if (p.type === "error") report.consoleErrors.push(text.slice(0, 200));
+          if (text.startsWith("[hook] ")) report.hooks.push(text.slice(7, 600));
+          break;
+        }
       }
     };
     const evalJS = async (expression) => {
@@ -452,6 +522,9 @@ async function join() {
       if (r.result && r.result.data) { fs.writeFileSync(file, Buffer.from(r.result.data, "base64")); report.shots.push(file); }
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
+    await send("Debugger.enable");
+    await send("Debugger.setPauseOnExceptions", { state: "uncaught" });
     await send("Page.navigate", { url: cfg.localUrl });
     await sleep(cfg.loadWaitMs);
     // the consent window can come back after an accept (its vendor check finishes late): accept until it stays hidden
@@ -468,10 +541,14 @@ async function join() {
     report.clicked = await evalJS(CLICK_PLAY_JS);
     await sleep(3000);
     await shot("2-clicked");
-    const deadline = Date.now() + (cfg.joinWaitMs || 90000);
+    // a timeline of the join: the page's text, the seeks and sockets so far, and the frames received
+    const t0 = Date.now();
+    const deadline = t0 + (cfg.joinWaitMs || 90000);
     while (Date.now() < deadline) {
       await sleep(3000);
       report.state = await evalJS(STATE_JS);
+      report.timeline.push([Math.round((Date.now() - t0) / 1000), report.state && report.state.text.slice(0, 48),
+        report.seek.length, report.sockets.length, report.framesIn]);
       if (report.state && report.state.inGame) break;
     }
     report.topAt = await evalJS(`(() => { const e = document.elementFromPoint(640, 240); return e ? e.tagName + "#" + e.id + "." + String(e.className).slice(0, 60) : null; })()`);
@@ -479,6 +556,10 @@ async function join() {
     report.visibleButtons = await evalJS(`[...document.querySelectorAll("button,[role=button],.button,a")].filter((e) => e.getBoundingClientRect().width > 0 && getComputedStyle(e).display !== "none").map((e) => e.innerText.trim().slice(0, 30)).filter(Boolean).slice(0, 80)`);
     await shot("3-final");
     report.bridgeLog = bridgeLines();
+    // every host the page asked for: the local ones only (the rest fail with NOTFOUND, see hostRules)
+    const local = new Set([cfg.localHost, "localhost", "127.0.0.1", cfg.bridge.host, ...Object.keys(cfg.hostRoutes)]);
+    report.hosts = [...hostsSeen].sort();
+    report.nonLocalHosts = report.hosts.filter((h) => !local.has(h));
     ws.close();
     console.log(JSON.stringify(report, null, 2));
   } finally {

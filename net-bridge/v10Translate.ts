@@ -254,6 +254,9 @@ export const NATIVE_MORE = Object.freeze({
 } as const);
 export const EXT_GAME_STATE = 0x0901; // NET_EXT_GAME_STATE, v10 "gsc"
 export const EXT_GAME_ANNOUNCEMENT = 0x0302; // NET_EXT_GAME_ANNOUNCEMENT: v10 gameAnnouncement {message, actions}
+// NET_EXT_KN_ACCOUNT_RIGHTS: KrunkNative's own rights for the account (Object Manager, DEV commands). v10 has no
+// message for them (its rights are krunker.io's account data), so the bridge consumes it, as it does SOCIAL_V7.
+export const EXT_ACCOUNT_RIGHTS = 0x8001;
 export const EXT_RANKED_MATCH = 0x8050; // NET_EXT_KN_RANKED_MATCH: 1 in a ranked match; the init's isRanked (argument 16)
 
 const MAP_INFO_SIZE = 44; // NetMapInfoPacket: int32 map_index, uint32 hash, uint32 size, char name[32]
@@ -963,7 +966,10 @@ export function buildInitArgs(
     0,
     { data: mapText, id: null, creator: "", info: {}, accType: 1 },
     null,
-    {},
+    // the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress. The v10 init handler
+    // disconnects without it (the breakpoint probe in tools/krunker-local, the handler's test of data.gor). The
+    // rest of the sync (lockT, roundC, obj, pkups, ...) follows as the live packets, which the bridge translates.
+    { gor: 1 },
     networkData,
     true,
     false,

@@ -1,7 +1,10 @@
 {
   "krunkerSrc": "/home/user/jails/kru/src/Krunker_v10.0.3",
   "knRepo": "/home/user/src/KrunkNative",
-  "fillRoots": ["assets", "ui"],
+  "fillRoots": [
+    "assets",
+    "ui"
+  ],
   "wwwDir": "~/.cache/kn-krunker-local/www",
   "runDir": "~/.cache/kn-krunker-local/run",
   "port": 8094,
@@ -12,16 +15,30 @@
     "matchmaker.beta.krunker.io": "/mm",
     "gapi.svc.krunker.io": "",
     "gapi.beta.krunker.io": "",
-    "coordinator.krunk.io": ""
+    "coordinator.krunk.io": "",
+    "api.beta.krunker.io": "",
+    "api.krunker.io": ""
   },
-  "brainUrl": "https://coordinator.krunk.io",
+  "brainUrl": "http://127.0.0.1:5150",
   "loader": "sketch",
-  "bridge": { "host": "kn-bridge.krunker-local.test", "port": 8097, "log": "~/.cache/kn-krunker-local/bridge.log" },
+  "bridge": {
+    "host": "kn-bridge.krunker-local.test",
+    "port": 8097,
+    "log": "~/.cache/kn-krunker-local/bridge.log"
+  },
   "joinWaitMs": 90000,
   "loadWaitMs": 60000,
   "afterAcceptMs": 20000,
   "fillPaths": [
-    "img/app_0.png", "img/app_1.png", "img/btc_icn.png", "img/skull_0.png", "img/skull_1.png",
-    "img/skull_2.png", "img/skull_3.png", "img/blood.png", "img/timer.png", "img/pwa/icon32x32.png"
+    "img/app_0.png",
+    "img/app_1.png",
+    "img/btc_icn.png",
+    "img/skull_0.png",
+    "img/skull_1.png",
+    "img/skull_2.png",
+    "img/skull_3.png",
+    "img/blood.png",
+    "img/timer.png",
+    "img/pwa/icon32x32.png"
   ]
 }

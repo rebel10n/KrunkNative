@@ -756,6 +756,12 @@ async function main(): Promise<void> {
   assert.deepStrictEqual(mv.args, [{ [socketIo.args[0] as string]: ["0,5", 1] }, ["0,5"]]);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("PICKUP"), undefined);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("MATCH_VOTE_STATE"), undefined);
+  // KrunkNative's account rights (EXT 0x8001) have no v10 message: consumed, nothing sent, no stop
+  const rights = Buffer.alloc(6);
+  rights.writeUInt16LE(T.EXT_ACCOUNT_RIGHTS, 0);
+  native.write(nativeFrame(254, rights));
+  await sleep(50);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("EXT 0x8001"), undefined);
 
   // borders (3) has no v10 label: it still stops the translation, named CHEAT (NATIVE_NAMES)
   native.write(nativeFrame(60, Buffer.from([3, 1])));
