@@ -282,3 +282,11 @@ dom_zones index the client mirrors. The same rules apply: the packet has no vers
 server must come from one build. The bridge (`net-bridge/v10Translate.ts`) sends `uct` with each zone's object id as
 v10's uid (`updateDomZone` matches the zone by uid, `v10.js` 188544).
 
+Protocol 1.4.5 (NET_PROTOCOL_PATCH 5): `NetStatePacket` (NET_PACKET_STATE, 6, the per-tick player state) carries the
+values the v10 "k" record needs and the state did not have: `float step_val` (player.step_val, v10 stepVal), `uint8
+on_ground`, `uint8 grapple_active` with `float grapple[3]` (player.grapple.point), and `float ping`. The server fills
+them from the player (shared/src/net.c net_packet_from_player) and the client applies them (net_packet_apply_player,
+from client_apply_state). The same single-build rule applies: the state packet grew from 57 to 79 bytes, so a KN client
+and server must come from one build. The bridge (`net-bridge/v10Translate.ts`) maps the record field by field
+(`v10.js` 191557 sender; 220285 handler).
+

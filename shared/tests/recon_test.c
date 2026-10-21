@@ -550,6 +550,23 @@ static void case_rotation_math(void) {
         net_packet_from_recon(&recon, &p, 0);
         CHECK(recon.yaw > -pi2 && recon.yaw < pi2, "l yaw %g from %g", recon.yaw, yaws[i]);
     }
+    // STATE carries the step value, on-ground, grapple and ping (protocol 1.4.5): the v10 "k" record's fields
+    {
+        Player p = {0};
+        p.step_val = 0.25f;
+        p.on_ground = 1;
+        p.grapple.active = 1;
+        p.grapple.point = (vec3) {1.0f, 2.0f, 3.0f};
+        p.ping = 42.0f;
+        NetStatePacket st = {0};
+        net_packet_from_player(&st, &p);
+        CHECK(st.step_val == 0.25f && st.on_ground == 1 && st.grapple_active == 1 && st.grapple[0] == 1.0f && st.grapple[2] == 3.0f && st.ping == 42.0f,
+              "STATE carries step, ground, grapple and ping");
+        Player q = {0};
+        net_packet_apply_player(&q, &st);
+        CHECK(q.step_val == 0.25f && q.on_ground && q.grapple.active && q.grapple.point.y == 2.0f && q.ping == 42.0f,
+              "the STATE fields apply to the player");
+    }
     const float bad[] = {NAN, INFINITY, -INFINITY};
     for (size_t i = 0; i < 3; i++) {
         CHECK(player_wrap_yaw(bad[i]) == 0.0f && player_clamp_pitch(bad[i]) == 0.0f, "non-finite look not zeroed");

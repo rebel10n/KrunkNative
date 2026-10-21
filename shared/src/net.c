@@ -175,6 +175,13 @@ void net_packet_from_player(NetStatePacket *packet, const Player *player) {
     packet->health = player->health;
     packet->aim_val = player->aim_val;
     packet->crouch_val = player->crouch_val;
+    packet->step_val = player->step_val;
+    packet->on_ground = player->on_ground ? 1 : 0;
+    packet->grapple_active = (uint8_t) !!player->grapple.active;
+    packet->grapple[0] = player->grapple.point.x;
+    packet->grapple[1] = player->grapple.point.y;
+    packet->grapple[2] = player->grapple.point.z;
+    packet->ping = player->ping;
 }
 
 // packetHandlers.ts io_tp: the fields its buildLPacket ack overrides (position, zero
@@ -213,6 +220,11 @@ void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
     player->health = packet->health;
     player->aim_val = packet->aim_val;
     player->crouch_val = packet->crouch_val;
+    player->step_val = packet->step_val;
+    player->on_ground = packet->on_ground ? 1 : 0;
+    player->grapple.active = packet->grapple_active ? 1 : 0;
+    player->grapple.point = (vec3) {packet->grapple[0], packet->grapple[1], packet->grapple[2]};
+    player->ping = packet->ping;
 
     if (packet->loadout_index >= 0 && packet->loadout_index < player->loadout_size && packet->loadout_index != player->loadout_index) {
         player_swap_weapon(player, packet->loadout_index, 0, 1, 1);

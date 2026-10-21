@@ -33,6 +33,7 @@ import * as EV from "./nativeEvents";
 import * as T from "./v10Translate";
 
 export const WS_PATH = "/ws";
+const STATE_SEND_HZ = 10; // NET_STATE_SEND_HZ: the "k" sendRate (shared/include/shared.h)
 const LOBBY_ID = process.env.KRUNK_NATIVE_LOBBY_ID || "KN:local";
 const INIT_LOAD_ARG = 20000; // the first INIT_LOAD argument, as proxy.ts sends it
 const NET_HEADER_SIZE = 3;
@@ -85,6 +86,9 @@ type V10Session = {
   configText: string | null; // the GAME_CONFIG text the init carries: a repeat of it is no change
   networkReceived: boolean; // a NETWORK_DATA arrived for the init
   modeIndex: number; // the INIT's mode (0 Free for All)
+  kBatch: unknown[]; // the player records of the states in this chunk: one "k" per chunk (the handler hides the rest)
+  clientId: number; // our player's uid (the INIT's client id): its state is not sent back to us
+  startedAt: number; // the clock the "k" server time counts from
   objectiveWeapon: boolean; // MODE_STATE had a weapon objective (wep), so MODE_SYNC_V7 sends no obj
   aiSync: unknown[] | null; // the bot positions of the sync being assembled (AI_SYNC_V7 chunks)
   leaderRows: number[] | null; // the rows of the last LEADERBOARD as sent ("7"), for the LEADER_STATS that repeats them
@@ -175,12 +179,26 @@ function handleNativeData(session: V10Session, chunk: Buffer): void {
   session.readBuffer = Buffer.concat([session.readBuffer, chunk]);
   while (session.readBuffer.length >= NET_HEADER_SIZE) {
     const size = session.readBuffer.readUInt16BE(1);
-    if (session.readBuffer.length < NET_HEADER_SIZE + size) return;
+    if (session.readBuffer.length < NET_HEADER_SIZE + size) break;
     const type = session.readBuffer[0];
     const payload = Buffer.from(session.readBuffer.subarray(NET_HEADER_SIZE, NET_HEADER_SIZE + size));
     session.readBuffer = session.readBuffer.subarray(NET_HEADER_SIZE + size);
     handleNativePacket(session, type, payload);
   }
+  flushPlayerStates(session);
+}
+
+// The player states of one chunk as one "k": [records, sendRate, serverTime] (v10.js 191576 sender; the handler
+// 220285 hides every player the list does not name). sendRate is KN's NET_STATE_SEND_HZ; serverTime counts from
+// the session start (inferred: the server's clock is not in the packet).
+function flushPlayerStates(session: V10Session): void {
+  if (session.kBatch.length === 0 || session.stopped) {
+    session.kBatch = [];
+    return;
+  }
+  const records = session.kBatch;
+  session.kBatch = [];
+  sendWs(session, T.V10_IN.UPDATE_PLAYERS, records, STATE_SEND_HZ, Date.now() - session.startedAt);
 }
 
 function nativeName(type: number, payload: Buffer): string {
@@ -215,6 +233,7 @@ function emitInit(session: V10Session): void {
   sendWs(session, T.V10_IN.INIT_GAME, ...T.buildInitArgs(init, session.mapText, session.config, session.networkData, session.ranked));
   session.initSent = true;
   session.modeIndex = init.modeIndex;
+  session.clientId = init.clientId;
   for (const held of session.queue.splice(0)) handleNativePacket(session, held.type, held.payload);
 }
 
@@ -294,8 +313,9 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   // record (server/src/ai.c 2124-2131 sends both; game_ai_packet_for_peer keeps one), so the v3 one is consumed:
   // translating both would add every bot twice.
   if (session.initSent && type === T.NATIVE.STATE) {
-    const mapped = T.mapState(payload);
-    if (mapped.stop) return stopAt(session, "STATE", mapped.stop);
+    const state = T.mapState(payload);
+    if (!state) return stopAt(session, "STATE", "malformed");
+    if (state.uid !== session.clientId) session.kBatch.push(state.record);
     return;
   }
   if (session.initSent && type === T.NATIVE_MORE.CHAT_V7) {
@@ -515,6 +535,9 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     leaderRows: null,
     aiSync: null,
     objectiveWeapon: false,
+    kBatch: [],
+    clientId: -1,
+    startedAt: Date.now(),
     socketId: makeSocketId(12),
     skinsByUid: new Map(),
     gameTimer: 0,

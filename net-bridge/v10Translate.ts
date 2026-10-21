@@ -75,6 +75,7 @@ export const V10_IN = Object.freeze({
   SET_WEAPON: "wep",
   C_SPAWN: "aai",
   UPDATE_DOM_ZONE: "uct",
+  UPDATE_PLAYERS: "k",
   ADD_CHAT: "ch",
   SYNC_ALL_AI: "ai",
   UPDATE_LEADERS: "7",
@@ -676,14 +677,40 @@ export function mapBotAdd(p: Buffer): Mapped {
   };
 }
 
-// ---- STATE (6): the per-tick player record. v10's "k" record (v10.js 191557 sender, 220285 handler) is 13 fields per
-// player: sid, x, y, z (round 2), xDire, yDire (degrees, round), stepVal, onGround, crouchVal, loadoutIndex, aimVal,
-// grapple, ping. KN's NetStatePacket has uid, ack_seq, active, loadout_index, position, velocity, direction, health,
-// aim_val and crouch_val. stepVal is field 6, before the rest, and KN has no such value (it is an animation value: a
-// lean and step chase, v10.js 170086-170087, synced from the server). The record is positional, so the translation
-// stops at that field: no record is sent without it.
-export function mapState(_p: Buffer): Mapped {
-  return { messages: [], stop: "the v10 record's field 6 (stepVal, the step animation value) is not in KN's state packet" };
+// ---- STATE (6): the per-tick player record. v10's "k" record (sender v10.js 191557, handler 220285) is 13 positional
+// fields per player: sid, x, y, z (round 2), xDire, yDire (degrees, round), stepVal, onGround (1/0), crouchVal (round),
+// loadoutIndex, aimVal (1/0), grapple ([x, y, z] round, or 0), ping (round). KN's NetStatePacket (protocol 1.4.5,
+// 79 bytes) carries the same values: uid @0, position @13, direction @37 (pitch [0], yaw [1]), crouch @53,
+// loadout @9, aim @49, step_val @57, on_ground @61, grapple_active @62, grapple @63, ping @75.
+// Verified against v10.js: the record's order and each field name (the sender). Inferred: xDire is the yaw and
+// yDire the pitch (direction[1] and direction[0], KN's own yaw / pitch naming in net.c). The handler's
+// players.hideAll() hides every player the list does not name, so the bridge sends one "k" per chunk of states.
+const STATE_SIZE = 79;
+export type StateRecord = { uid: number; record: unknown[] };
+export function mapState(p: Buffer): StateRecord | null {
+  if (p.length !== STATE_SIZE) return null;
+  const deg = (r: number) => Math.round(r * (180 / Math.PI));
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const grapple = p[62] !== 0 ? [Math.round(p.readFloatLE(63)), Math.round(p.readFloatLE(67)), Math.round(p.readFloatLE(71))] : 0;
+  const uid = p.readInt32LE(0);
+  return {
+    uid,
+    record: [
+      uid,
+      r2(p.readFloatLE(13)),
+      r2(p.readFloatLE(17)),
+      r2(p.readFloatLE(21)),
+      deg(p.readFloatLE(41)), // xDire: the yaw
+      deg(p.readFloatLE(37)), // yDire: the pitch
+      p.readFloatLE(57), // stepVal
+      p[61] !== 0 ? 1 : 0, // onGround
+      Math.round(p.readFloatLE(53)), // crouchVal
+      p.readInt32LE(9), // loadoutIndex
+      p.readFloatLE(49) !== 0 ? 1 : 0, // aimVal
+      grapple,
+      Math.round(p.readFloatLE(75)), // ping
+    ],
+  };
 }
 
 // ---- DOM_UPDATE (142) and AI_SYNC_V7 (161)

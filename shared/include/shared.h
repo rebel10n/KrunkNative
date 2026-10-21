@@ -2599,7 +2599,9 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // A missing patch byte (2-byte HELLO) reads as 0.
 // Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
 // any non-zero fists as a fists kill.
-#define NET_PROTOCOL_PATCH 4
+#define NET_PROTOCOL_PATCH 5
+// Patch 5: NetStatePacket carries the v10 "k" record's step value, on-ground flag, grapple and ping (see the struct).
+// The layout changed: a KN client and server come from one build (doc/v10/net.md, section 8).
 // Patch 4: NetDomZoneState carries the zone's map object id (NET_PACKET_DOM_UPDATE). Like patch 3 this is a
 // layout change for a KN client and server built together; the packet has no version field of its own.
 // Patch 3: NetModeFlag carries the flag's map object id and its active bit (NET_PACKET_MODE_STATE and
@@ -2721,6 +2723,12 @@ typedef struct {
     float health;
     float aim_val;
     float crouch_val;
+    // ---- protocol 1.4.5: the v10 "k" record's fields KN did not send (stepVal, onGround, grapple, ping)
+    float step_val;         // sV (stepVal): the step animation value (Player.step_val)
+    uint8_t on_ground;      // Player.on_ground
+    uint8_t grapple_active; // player.grapple: 1 hooked, 0 none
+    float grapple[3];       // the grapple point x, y, z (player.grapple.point)
+    float ping;             // player.ping: smoothed RTT in ms
 } NetStatePacket;
 
 // Krunker "l" (packetHandlers.ts buildLPacket, index.js reconcilePlayer): the owner's

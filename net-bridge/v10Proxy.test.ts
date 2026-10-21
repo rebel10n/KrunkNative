@@ -583,7 +583,27 @@ async function main(): Promise<void> {
   ranked[9] = 4;
   ranked.write("Queued for ranked", 42, "utf8");
   assert.deepStrictEqual(T.mapChatV7(ranked, EV.escapeHtml).messages, [["ch", [-1, null, "Queued for ranked", 2, "#5ce05a"]]]);
-  assert.match(T.mapState(Buffer.alloc(53)).stop || "", /stepVal/);
+  assert.strictEqual(T.mapState(Buffer.alloc(53)), null); // a short STATE is malformed
+
+  // the per-tick state record: the 13 fields of v10's "k" record, from KN's 79-byte state
+  const st = Buffer.alloc(79);
+  st.writeInt32LE(4, 0);
+  st.writeFloatLE(1.256, 13);
+  st.writeFloatLE(2, 17);
+  st.writeFloatLE(-3.5, 21);
+  st.writeFloatLE(0.5, 37);
+  st.writeFloatLE(1, 41);
+  st.writeFloatLE(0.25, 57);
+  st[61] = 1;
+  st.writeFloatLE(0.6, 53);
+  st.writeInt32LE(2, 9);
+  st.writeFloatLE(1, 49);
+  st[62] = 1;
+  [1, 2, 3].forEach((v, i) => st.writeFloatLE(v, 63 + i * 4));
+  st.writeFloatLE(42.4, 75);
+  const rec = T.mapState(st);
+  assert.ok(rec);
+  assert.deepStrictEqual(rec!.record, [4, 1.26, 2, -3.5, 57, 29, 0.25, 1, 1, 2, 1, [1, 2, 3], 42]);
 
   // the v3 bot add (90) is consumed: no aai, and no stop (the v7 record, 162, is the one for a v7 peer)
   const bot = Buffer.alloc(101);
@@ -644,9 +664,34 @@ async function main(): Promise<void> {
   const ch = await waitFor(() => clientMessages.find((m) => m.label === "ch"), "ch");
   assert.deepStrictEqual(ch.args, [0, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, 7, null]);
 
-  // the per-tick player record (STATE, 6) has no v10 record without field 6 (stepVal): the translation stops there
-  native.write(nativeFrame(6, Buffer.alloc(53)));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("STATE"), "stop at STATE");
+  // the per-tick player states (STATE, 6): our own is not sent back; another player's is a k with its 13-field record
+  const stateOf = (uid: number, x: number) => {
+    const b = Buffer.alloc(79);
+    b.writeInt32LE(uid, 0);
+    b.writeFloatLE(x, 13);
+    b.writeFloatLE(2, 17);
+    b.writeFloatLE(3, 21);
+    b.writeFloatLE(0.5, 37); // pitch
+    b.writeFloatLE(1, 41); // yaw
+    b.writeFloatLE(0.25, 57); // step_val
+    b[61] = 1; // on ground
+    b.writeFloatLE(0.6, 53); // crouch
+    b.writeInt32LE(2, 9); // loadout
+    b.writeFloatLE(1, 49); // aim
+    b[62] = 0; // no grapple
+    b.writeFloatLE(42.4, 75); // ping
+    return b;
+  };
+  native.write(nativeFrame(6, stateOf(1, 9))); // ours: not sent back
+  native.write(nativeFrame(6, stateOf(9, 1.256)));
+  const kMsg = await waitFor(() => clientMessages.find((m) => m.label === "k"), "k");
+  assert.strictEqual((kMsg.args[0] as unknown[][]).length, 1);
+  assert.deepStrictEqual((kMsg.args[0] as unknown[][])[0], [9, 1.26, 2, 3, 57, 29, 0.25, 1, 1, 2, 1, 0, 42]);
+  assert.strictEqual(kMsg.args[1], 10);
+
+  // a packet with no translation yet (CHEAT, 60) stops the translation
+  native.write(nativeFrame(60, Buffer.alloc(4)));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("native 60"), "stop at 60");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -677,7 +722,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("STATE"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("native 60"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 
