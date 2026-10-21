@@ -242,6 +242,13 @@ const DISCONNECT_FN = "iïiìïîï";
 // "Lost Connection" text. Its three call sites are the connected-elsewhere path and the disconnect routine.
 const OVERLAY_COLUMN = 10487158;
 const OVERLAY_FN = "iìïíïiì";
+// The matchmaker answer handler's call into the error screen (game.js column 10499149): the response it was given.
+const HANDLER_COLUMN = 10499149;
+const HANDLER_ARGS_JS = `(() => { const s = (x) => { try { return x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + Object.keys(x).join(",").slice(0, 200) : String(x).slice(0, 200); } catch (e) { return "?"; } };
+  const out = { message: s(iïÎììïì), code: s(iiÏîìïí), response: s(iïÎíïíì) };
+  try { const r = iïÎíïíì; out.status = s(r && r.status); out.url = s(r && r.config && r.config.url); out.method = s(r && r.config && r.config.method);
+    out.data = JSON.stringify(r && r.data).slice(0, 500); out.respData = JSON.stringify(r && r.response && r.response.data).slice(0, 500); } catch (e) { out.probeErr = String(e.message); }
+  return JSON.stringify(out); })()`;
 const DISCONNECT_PROBE_JS = `(() => {
   const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
   try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
@@ -336,6 +343,7 @@ export async function run(opts = {}) {
     const ovl = [];
     const disconnects = [];
     const pauses = [];
+    const handlers = [];
     let appScript = null;
     const onEvent = (method, p) => {
       eventCounts[method] = (eventCounts[method] || 0) + 1;
@@ -350,12 +358,24 @@ export async function run(opts = {}) {
             appScript = p.scriptId;
             page.send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: OVERLAY_COLUMN } })
               .then((r) => { result.overlayBreakpoint = r.result ? r.result.actualLocation : r.error; });
+            page.send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: HANDLER_COLUMN } })
+              .then((r) => { result.handlerBreakpoint = r.result ? r.result.actualLocation : r.error; });
           }
           break;
         case "Debugger.paused": {
           const top = p.callFrames[0];
           if (pauses.length < 10) pauses.push({ reason: p.reason, fn: top.functionName || "?", line: top.location.lineNumber, col: top.location.columnNumber, t: now() - t0 });
-          if (top.functionName === OVERLAY_FN) {
+          if (top.location.lineNumber === 2 && Math.abs(top.location.columnNumber - HANDLER_COLUMN) <= 16) {
+            (async () => {
+              const r = await page.send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: HANDLER_ARGS_JS, returnByValue: true });
+              handlers.push({
+                args: r.result && r.result.result ? r.result.result.value : r.error || r,
+                stack: p.callFrames.slice(0, 14).map((f) => `${f.functionName || "?"}@${f.location.lineNumber}:${f.location.columnNumber}`),
+                t: now() - t0,
+              });
+              await page.send("Debugger.resume");
+            })();
+          } else if (top.functionName === OVERLAY_FN) {
             (async () => {
               const r = await page.send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: OVERLAY_ARGS_JS, returnByValue: true });
               disconnects.push({
@@ -455,6 +475,7 @@ export async function run(opts = {}) {
     result.disconnects = disconnects.slice(0, 5);
     result.pauses = pauses;
     result.ovl = ovl.slice(0, 8);
+    result.handlers = handlers.slice(0, 4);
     result.errors = errors.slice(0, 10);
     result.bridgeLog = fs.existsSync(path.join(runDir, "bridge.log"))
       ? fs.readFileSync(path.join(runDir, "bridge.log"), "utf8").split("\n").filter((l) => /v10|bridge/.test(l)).slice(-6) : [];
