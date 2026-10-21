@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Settings > Chat "Show Player Messages" (showMessages), default OFF, end to end (client/src/ui/hud_ui.c,
-ui_controls.c, ui_render_settings.c, client/src/net/game_events.c).
+"""Settings > Chat "Show Player Messages" (showMessages), default ON, end to end (client/src/ui/hud_ui.c,
+ui_controls.c, ui_render_settings.c, client/src/net/game_events.c, ui/windows/settings-advanced-2.html).
 
   python3 -I client/tests/chat_switch_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -10,15 +10,18 @@ lines (kill feed, notices, errors) are always shown: the server decides whether 
 Headless client_bin runs (offline Kanji, input scripts, a private XDG_CONFIG_HOME kept across the runs).
 The `netchat` input-script command injects a server chat line: 0 a human's line (uid 2, a guest: no
 PLAYER_INFO), 3 a bot's line (uid 1, after the bot PLAYER_INFO the server sends), 1 game, 2 server.
-Rows in #chatList carry data-kind: "human", "bot", "line".
-  A. the default (nothing stored): the Settings switch is there and off; a human line is not shown, a
-     bot line and a system line are; plain text typed into the chat box and sent with Enter is not sent
-     (no echo, nothing in the server log); "/clear" still works from the chat box.
-  B. the switch clicked in the Settings window: stored "true", the human line and the typed line show
-     (positive control: the server log has the typed line, so the log probe is meaningful).
-  C. the stored value survives a restart (human line shown at once); then the switch is clicked off from
-     the in-game Settings: stored "false", the human rows already shown are removed, the bot rows stay,
-     and a later human line is not shown while a bot line and a system line are.
+Rows in #chatList carry data-kind: "human", "bot", "line". Every typed line goes through the same chat-box
+steps (down ENTER opens it, type, down ENTER sends), started a moment after `play` so the game accepts chat.
+  A. the default (nothing stored): the Settings switch is there and on; a human line is shown, a bot line
+     and a system line are; plain text typed into the chat box and sent with Enter is shown (echo) and is
+     in the server log (the positive control for the log probe); "/clear" still works from the chat box.
+  B. the switch clicked off in the Settings window (from the default): a human line shown before is removed,
+     the bot rows stay; stored "false"; a later human line is not shown, and plain text typed and sent with
+     Enter is neither shown nor sent (no echo, nothing in the server log). The same steps as A's send, so
+     the off checks are not vacuous: A's echo is the positive control.
+  C. the stored "false" survives a restart (no human line shown at once); then the switch is clicked on in
+     the Settings window: stored "true", a human line is shown, and plain text typed and sent is shown and
+     reaches the server again.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -117,7 +120,7 @@ def main():
 2700 nodes @a-l1 {LINE}
 2800 down ENTER
 2850 up ENTER
-2900 type typed-plain-off
+2900 type typed-plain-default
 3000 down ENTER
 3050 up ENTER
 3200 nodes @a-p2 {HUMAN}
@@ -132,69 +135,83 @@ def main():
 4000 quit
 """)
     check("A: the Settings switch is there (Display tab, Chat)", n.get("@a-switch-exists") == 1, str(n))
-    check("A: the Settings switch is off by default", n.get("@a-switch") == 0, str(n))
-    check("A: a human player's line is not shown", n.get("@a-p1") == n.get("@a-p0"), str(n))
+    check("A: the Settings switch is on by default", n.get("@a-switch") == 1, str(n))
+    check("A: a human player's line is shown", n.get("@a-p1", 0) == n.get("@a-p0", 0) + 1, str(n))
     check("A: a bot's line is shown", n.get("@a-b1", 0) == n.get("@a-b0", 0) + 1, str(n))
     check("A: a system line is shown", n.get("@a-l1", 0) == n.get("@a-l0", 0) + 1, str(n))
-    check("A: plain text sent from the chat box is not shown (no echo)", n.get("@a-p2") == n.get("@a-p0"), str(n))
-    check("A: plain text is not sent to the server", "typed-plain-off" not in log)
+    check("A: plain text sent from the chat box is shown (echo)", n.get("@a-p2", 0) == n.get("@a-p1", 0) + 1, str(n))
+    check("A: plain text sent by default reaches the server (positive control for the log probe)", "typed-plain-default" in log)
     check("A: the chat box still takes /clear (the command path)", n.get("@a-l2", 0) > 0 and n.get("@a-l3") == 0, str(n))
-    check("A: the switch is unchecked in the store", stored() in (None, "false"), f"stored {stored()!r}")
+    check("A: nothing stored, or on, in the store", stored() in (None, "true"), f"stored {stored()!r}")
 
-    # B. the switch on, from the Settings window
-    n, log = run("on", "0 menu\n" + open_settings(500, "@b-before") + f"""1400 clicksel {SWITCH}
-1700 nodes @b-on {CHECKED}
-1800 call closWind
-2000 play
-2400 nodes @b-p0 {HUMAN}
-2500 netchat 0 shown-human-line
-2600 nodes @b-p1 {HUMAN}
-2800 down ENTER
-2850 up ENTER
-2900 type typed-plain-on
-3000 down ENTER
-3050 up ENTER
-3200 nodes @b-p2 {HUMAN}
-3300 quit
-""")
-    check("B: the Settings switch starts unchecked", n.get("@b-before") == 0, str(n))
-    check("B: clicking the switch checks it and stores true", n.get("@b-on") == 1 and stored() == "true", f"{n} stored {stored()!r}")
-    check("B: a human player's line is shown", n.get("@b-p1", 0) == n.get("@b-p0", 0) + 1, str(n))
-    check("B: plain text from the chat box is shown (echo)", n.get("@b-p2", 0) == n.get("@b-p1", 0) + 1, str(n))
-    check("B: the typed line reached the server (positive control for the log probe)", "typed-plain-on" in log)
-
-    # C. persisted on, then off from the in-game Settings
-    n, log = run("off", f"""0 play
-1000 nodes @c-p0 {HUMAN}
-1000 nodes @c-b0 {BOT}
-1100 netchat 0 kept-from-on-run
-1200 nodes @c-p1 {HUMAN}
-1250 netchat 3 bot-kept-while-on
-1300 nodes @c-b1 {BOT}
-1400 down ESC
-1450 up ESC
-{open_settings(1500, "@c-on")}2400 clicksel {SWITCH}
-2700 nodes @c-off {CHECKED}
-2800 nodes @c-cleared {HUMAN}
-2810 nodes @c-bcleared {BOT}
+    # B. the switch clicked off in the Settings window, from the default; a human line shown before is removed
+    n, log = run("off", "0 menu\n300 netchat 0 shown-before-off\n350 netchat 3 bot-shown-before-off\n"
+                 f"{open_settings(500, '@b-on')}"
+                 f"""2400 clicksel {SWITCH}
+2700 nodes @b-off {CHECKED}
+2800 nodes @b-cleared {HUMAN}
+2810 nodes @b-bcleared {BOT}
 2900 call closWind
-3100 play
+3000 play
 3300 netchat 0 hidden-after-off
-3400 nodes @c-after {HUMAN}
+3400 nodes @b-after {HUMAN}
 3450 netchat 3 bot-after-off
-3500 nodes @c-bafter {BOT}
+3500 nodes @b-bafter {BOT}
 3600 netchat 2 system-after-off
-3700 nodes @c-sys {LINE}
-3900 quit
+3700 nodes @b-sys {LINE}
+3900 down ENTER
+3950 up ENTER
+4000 type typed-plain-off
+4200 down ENTER
+4250 up ENTER
+4400 nodes @b-typed {HUMAN}
+4500 quit
 """)
-    check("C: the stored true survives a restart (human line shown)", n.get("@c-p1", 0) == n.get("@c-p0", 0) + 1, str(n))
-    check("C: the in-game Settings switch is checked", n.get("@c-on") == 1, str(n))
-    check("C: clicking it off stores false", stored() == "false" and n.get("@c-off") == 0, f"{n} stored {stored()!r}")
-    check("C: turning it off removes the human lines already shown", n.get("@c-cleared") == 0, str(n))
-    check("C: turning it off keeps the bot lines already shown", n.get("@c-bcleared") == n.get("@c-b1", 0), str(n))
-    check("C: a human line after the switch is off is not shown", n.get("@c-after") == 0, str(n))
-    check("C: a bot line after the switch is off is shown", n.get("@c-bafter", 0) == n.get("@c-bcleared", 0) + 1, str(n))
-    check("C: a system line is still shown", n.get("@c-sys", 0) > 0, str(n))
+    check("B: a human line is shown before the switch is turned off", n.get("@b-on", 0) == 1 and "shown-before-off" in log, str(n))
+    check("B: the Settings switch starts on (the default)", n.get("@b-on") == 1, str(n))
+    check("B: clicking the switch unchecks it and stores false", n.get("@b-off") == 0 and stored() == "false", f"{n} stored {stored()!r}")
+    check("B: turning it off removes the human lines already shown", n.get("@b-cleared") == 0, str(n))
+    check("B: turning it off keeps the bot lines already shown", n.get("@b-bcleared") == 1, str(n))
+    check("B: a human line after the switch is off is not shown", n.get("@b-after") == 0, str(n))
+    check("B: a bot line after the switch is off is shown", n.get("@b-bafter", 0) == n.get("@b-bcleared", 0) + 1, str(n))
+    check("B: a system line is still shown", n.get("@b-sys", 0) > 0, str(n))
+    check("B: plain text sent while off is not shown (no echo)", n.get("@b-typed") == n.get("@b-after"), str(n))
+    check("B: plain text sent while off never reaches the server", "typed-plain-off" not in log)
+
+    # C1. the stored false survives a restart: in game, a human line is not shown
+    before = stored()
+    n, log = run("restart", """0 play
+1000 nodes @c-p0 """ + HUMAN + """
+1000 nodes @c-b0 """ + BOT + """
+1100 netchat 0 hidden-after-restart
+1200 nodes @c-p1 """ + HUMAN + """
+1250 netchat 3 bot-after-restart
+1300 nodes @c-b1 """ + BOT + """
+1400 quit
+""")
+    check("C: the stored false survives a restart (no human line shown)", before == "false" and n.get("@c-p1") == n.get("@c-p0"), f"{n} stored {before!r}")
+    check("C: a bot line is shown after the restart", n.get("@c-b1", 0) == n.get("@c-b0", 0) + 1, str(n))
+
+    # C2. the switch clicked on in the Settings window: a human line shows, and plain text is sent again
+    n, log = run("on", "0 menu\n" + open_settings(500, "@c-off") + f"""2400 clicksel {SWITCH}
+2700 nodes @c-on {CHECKED}
+2800 call closWind
+3000 play
+3300 netchat 0 shown-after-on
+3400 nodes @c-p2 {HUMAN}
+3900 down ENTER
+3950 up ENTER
+4000 type typed-plain-on
+4200 down ENTER
+4250 up ENTER
+4400 nodes @c-p3 {HUMAN}
+4500 quit
+""")
+    check("C: the Settings switch starts off after the restart", n.get("@c-off") == 0, str(n))
+    check("C: clicking the switch on checks it and stores true", n.get("@c-on") == 1 and stored() == "true", f"{n} stored {stored()!r}")
+    check("C: a human player's line is shown once it is on", n.get("@c-p2") == 1, str(n))
+    check("C: plain text from the chat box is shown (echo)", n.get("@c-p3", 0) == n.get("@c-p2", 0) + 1, str(n))
+    check("C: the typed line reached the server", "typed-plain-on" in log)
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)}")

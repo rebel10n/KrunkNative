@@ -57,8 +57,8 @@ static ClientRenderSettings g_rs = {
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_scale = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
     .kpd_vision = 1, .kpd_vision_col = "#00ffff", // v10 settings kpdVision (val true) / kpdVisionCol
-    // KrunkNative: player chat is off by default (v10's showMessages defaults on); see apply_show_messages
-    .chat_filter = 0, .show_messages = 0, .show_unboxings = 1, .chat_text_outline = 0,
+    // Player chat is on by default, as v7's and v10's showMessages are (doc/v7/player-viewer.md:1722); the switch hides it, see apply_show_messages
+    .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
     .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
     .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 1, // crosshairDot val true (v7.1.4 and v10)

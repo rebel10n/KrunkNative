@@ -2375,7 +2375,7 @@ def run_native_lobbyui():
     script = ("0 boot\n"
               "4400 clickid codeInput\n4500 type %s\n4700 clickid confirmBtn\n8000 play\n%s23500 quit\n") % (LOBBY_CODE, probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
-    store = os.path.join(WORK, label + "-cfg", "krunknative")  # Show Player Messages on (v10's default off)
+    store = os.path.join(WORK, label + "-cfg", "krunknative")  # Show Player Messages on (set here)
     os.makedirs(store, exist_ok=True)
     with open(os.path.join(store, "knSettings.json"), "w") as f:
         json.dump({"showMessages": True}, f)
@@ -2466,7 +2466,7 @@ def run_native_ingame():
     probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 22000, 1500) for k, kind in enumerate(sparse))
     script = "0 boot\n3800 play\n%s22500 quit\n" % (probes)
     events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
-    # Settings > Chat "Show Player Messages" (showMessages, v10's default off) on, as a player who reads chat
+    # Settings > Chat "Show Player Messages" (showMessages) on, as a player who reads chat
     store = os.path.join(WORK, label + "-cfg", "krunknative")
     os.makedirs(store, exist_ok=True)
     with open(os.path.join(store, "knSettings.json"), "w") as f:
@@ -3478,7 +3478,7 @@ def run_native_leave_state():
     cfg = os.path.join(WORK, label + "-cfg", "krunknative")
     os.makedirs(cfg, exist_ok=True)
     with open(os.path.join(cfg, "knSettings.json"), "w") as f:
-        f.write('{"showMessages":true}')  # player chat on (KrunkNative's default is off; v10's is on)
+        f.write('{"showMessages":true}')  # player chat on (set here)
     script = ("0 boot\n3800 play\n"
               "8000 grep @official hello [id=chatList]\n"
               "8100 con connect 127.0.0.1:%d\n8300 grep @left-official hello [id=chatList]\n"
@@ -4911,7 +4911,7 @@ def run_web(mode):
                 if isinstance(v, int):
                     timer_samples.append(v)
             if stub.got_en.is_set():
-                # Settings > Chat "Show Player Messages" is off by default: this check reads the player lines
+                # Settings > Chat "Show Player Messages" is set on here: this check reads the player lines
                 cdp.eval("window.setSetting && window.setSetting('showMessages', true)")
                 time.sleep(1.0)
                 sample_timer()

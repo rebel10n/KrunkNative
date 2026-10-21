@@ -256,7 +256,7 @@ def emoji_flow():
 5500 down ENTER
 5600 up ENTER
 8000 quit
-""", settings={"showMessages": True})  # Settings > Chat "Show Player Messages" (default off): the line is sent
+""", settings={"showMessages": True})  # Settings > Chat "Show Player Messages" on (set here): the line is sent
     check('[emoji] panel open "lo"' in log, "typing :lo opens the emoji panel", "")
     check("[emoji] selected :love:" in log, "Enter picks the selected emoji (:love:) into the chat")
     check("[emoji] chat :love:" in log, "the sent message shows :love: as the emoji's image")

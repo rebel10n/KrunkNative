@@ -1225,8 +1225,8 @@ def start_console_server(name, extra=(), commands=(), settle=1.0):
 
 
 # Leaving a game clears everything of it (client_leave_game): v10 leaves a game by loading a new
-# page (location.href, v10:218690 / v10:221895). Player chat is on (KrunkNative turns it off by
-# default; v10's showMessages is on) so the `say` line is seen.
+# page (location.href, v10:218690 / v10:221895). Player chat is on (set here; the default is on too)
+# so the `say` line is seen.
 CHAT_ON = {"knSettings": '{"showMessages":true}'}
 
 

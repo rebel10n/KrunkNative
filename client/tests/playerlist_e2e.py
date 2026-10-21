@@ -265,7 +265,7 @@ class Client:
         for k, v in (("krunker_username", name), ("krunker_token", token), ("knRuleset", "v10")):
             with open(os.path.join(self.cfg, "krunknative", k + ".json"), "w") as f:
                 f.write(v)
-        # Settings > Chat "Show Player Messages" on (default off): this test reads the player chat lines
+        # Settings > Chat "Show Player Messages" on (set here, as the default is on too): this test reads the player chat lines
         with open(os.path.join(self.cfg, "krunknative", "knSettings.json"), "w") as f:
             f.write('{"showMessages": true}')
         script_text = script
