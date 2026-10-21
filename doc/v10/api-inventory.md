@@ -17,7 +17,7 @@ Routes: 218 (api.krunker.io: 21, gapi.svc.krunker.io: 189, matchmaker.krunker.io
 
 Before this change: served 10, stubbed 0, tunnel only 46, missing 162.
 
-After this change (the v10 API completion, branch api-full-http): implemented 77, alias 44, served 10, refusal 21, empty 7, not found 14, tunnel 45 (218 rows). Before: refusal 92, empty 20, implemented 6, alias 44, served 10, not found 1, tunnel 45.
+After this change (the v10 API completion, branch api-full-http): implemented 83, alias 44, served 10, refusal 21, empty 8, not found 8, tunnel 44 (218 rows; 45 before the social owner moved rows 124-125 out of the tunnel count is not changed here). Before: refusal 92, empty 20, implemented 6, alias 44, served 10, not found 1, tunnel 45.
 
 | # | host | method | path | v10 caller (v10.js line) | before | after | source (KN table / file) |
 |---|---|---|---|---|---|---|---|
@@ -276,8 +276,8 @@ The other 42 routes already matched the consumer's reads.
 ## Still answered EMPTY or REFUSAL, and why
 
 - REFUSAL 403 NOT_IMPLEMENTED (21 rows, each a write or a payment KrunkNative does not take): payments, rows 8-12 (no payment backend); username reserve, row 56; email preference write, row 66; Discord link, join and unlink, rows 68-70 (no Discord link); skin create, update, delete, upload and duplicate, rows 73-77 (no Skin Manager, no asset store); map version revert, row 94 (no versions); item paint and style, rows 143-144 (no per-copy state); mod publish and publish key, rows 173 and 178 (no mod file storage); wristband claim, row 189 (no wristband).
-- EMPTY (7 rows, source none): auth nonce (row 32, the v10 nonce is not used by the KN accounts), email preferences read (65), Discord status (67, not linked), skin list (71), map versions (93), item instances (142), krunkcup wristband read (188).
-- NOT FOUND 404 (14 rows, the v10 auth challenge and verification routes and the skin id): rows 35-38, 40-45, 47-49 and skin id 72. These are routes whose flows KrunkNative has no equivalent for, so the route answers 404 instead of a refusal body. Flagged for review: the consumer should not reach them in the v10.0.3 menu flows, but this is not confirmed for every route.
+- EMPTY (8 rows, source none): auth nonce (row 32, KN signs in without an attestation nonce), email preferences read (65), Discord status (67, not linked), skin list (71), map versions (93), item instances (142), krunkcup wristband read (188). (The summary above counts 8.)
+- NOT FOUND 404 (8 rows): the "no such challenge" replies, each with the v10 expired-sign-in text or the sign-up text: migration (38, KN has no legacy accounts), registration by email code (43, KN signs up with a username and password), username selection (44), password update (45), kid age gate (47) and parental consent (48), kid consent status (49). KN never issues a state of these types, so no challenge id of them exists. Row 72, GET /skins/{id}, stays NOT_FOUND: the consumer reads a Skin Manager record and KN has none.
 
 ## No-source cases (the brief's examples)
 
