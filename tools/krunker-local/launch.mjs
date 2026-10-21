@@ -213,16 +213,35 @@ const CLICK_PLAY_JS = `(() => {
 })()`;
 // A visible disconnect dialog (its label alone): the menu also carries the same words hidden.
 const LOST_JS = `[...document.querySelectorAll("div, span, h1, h2, h3, p")].some((e) => /^\\s*(Lost Connection|DISCONNECTED)\\s*$/.test(e.innerText || "") && e.getBoundingClientRect().height > 0)`;
+// The element behind the visible disconnect text (the one LOST_JS matches): its id, class, outer HTML head, rect, and the
+// ancestors with their computed visibility, so the element that shows the overlay can be named.
+const LOST_DETAIL_JS = `(() => {
+  const e = [...document.querySelectorAll("div, span, h1, h2, h3, p")].find((x) => /^\\s*(Lost Connection|DISCONNECTED)\\s*$/.test(x.innerText || "") && x.getBoundingClientRect().height > 0);
+  if (!e) return null;
+  const chain = [];
+  for (let n = e; n && n !== document.documentElement; n = n.parentElement) {
+    const st = getComputedStyle(n);
+    chain.push(n.tagName + "#" + n.id + "." + String(n.className).slice(0, 80) + " display=" + st.display + " visibility=" + st.visibility + " opacity=" + st.opacity + " z=" + st.zIndex + " pos=" + st.position + " text=" + JSON.stringify((n.innerText || "").slice(0, 60)));
+  }
+  return { id: e.id, class: String(e.className), outer: e.outerHTML.slice(0, 400), rect: JSON.stringify(e.getBoundingClientRect()), chain: chain.slice(0, 12) };
+})()`;
 const STATE_JS = `(() => ({
   game: typeof window.Game, render: typeof window.RENDER,
   canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","),
   text: (document.body && document.body.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 200),
 }))()`;
 
+// The overlay builder's arguments at entry (its own parameter names): the reason text, the code and the error.
+const OVERLAY_ARGS_JS = `(() => { const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 200) : String(x).slice(0, 200);
+  try { return JSON.stringify({ a: s(iíIîïiì), b: s(iìÎïííï), c: s(iíÌîíïi), d: s(iìÍîíií) }); } catch (e) { return "probe " + e.message; } })()`;
 // The disconnect routine's breakpoint (the join owner's probe, tools/krunker-local/krunker-local.mjs): its column in
 // game.js (line 2 of the script as CDP numbers it) and the probe of its three arguments (reason, code, error).
 const DISCONNECT_COLUMN = 10493103;
 const DISCONNECT_FN = "iïiìïîï";
+// The overlay builder (game.js function iìïíïiì(reason, code, error, state)): it sets instructionsUpdate's
+// "Lost Connection" text. Its three call sites are the connected-elsewhere path and the disconnect routine.
+const OVERLAY_COLUMN = 10487158;
+const OVERLAY_FN = "iìïíïiì";
 const DISCONNECT_PROBE_JS = `(() => {
   const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
   try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
@@ -327,14 +346,24 @@ export async function run(opts = {}) {
         case "Debugger.scriptParsed":
           if (/krunker\.io\/js\/app\.js$/.test(p.url || "") && !appScript) {
             appScript = p.scriptId;
-            page.send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: DISCONNECT_COLUMN } })
-              .then((r) => { result.disconnectBreakpoint = r.result ? r.result.actualLocation : r.error; });
+            page.send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: OVERLAY_COLUMN } })
+              .then((r) => { result.overlayBreakpoint = r.result ? r.result.actualLocation : r.error; });
           }
           break;
         case "Debugger.paused": {
           const top = p.callFrames[0];
           if (pauses.length < 10) pauses.push({ reason: p.reason, fn: top.functionName || "?", line: top.location.lineNumber, col: top.location.columnNumber, t: now() - t0 });
-          if (top.functionName === DISCONNECT_FN) {
+          if (top.functionName === OVERLAY_FN) {
+            (async () => {
+              const r = await page.send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: OVERLAY_ARGS_JS, returnByValue: true });
+              disconnects.push({
+                args: r.result && r.result.result ? r.result.result.value : r.error || r,
+                stack: p.callFrames.slice(0, 14).map((f) => `${f.functionName || "?"}@${f.location.lineNumber}:${f.location.columnNumber}`),
+                t: now() - t0,
+              });
+              await page.send("Debugger.resume");
+            })();
+          } else if (top.functionName === DISCONNECT_FN) {
             (async () => {
               const r = await page.send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: DISCONNECT_PROBE_JS, returnByValue: true });
               disconnects.push({
@@ -410,6 +439,7 @@ export async function run(opts = {}) {
       result.hiddenBy = await evalJS(`(() => { const c = [...document.querySelectorAll("span.cardLabel, .actionCard")].find((e) => /quick\\s*match/i.test(e.innerText || "")); const out = []; for (let n = c; n && n !== document.body; n = n.parentElement) { const s = getComputedStyle(n); if (s.display === "none" || s.visibility === "hidden" || s.opacity === "0") out.push(n.tagName + "#" + n.id + "." + String(n.className).slice(0, 50) + " display=" + s.display + " visibility=" + s.visibility + " opacity=" + s.opacity); } return out.slice(0, 6); })()`);
       result.consentOpen = await evalJS(`(() => { const e = document.getElementById("consentBlock"); return !!e && getComputedStyle(e).display !== "none"; })()`);
     }
+    if (result.lost) result.lostElement = await evalJS(LOST_DETAIL_JS);
     result.game = await evalJS("typeof window.Game");
     result.render = await evalJS("typeof window.RENDER");
     result.text = (await evalJS(STATE_JS) || {}).text || result.text;
