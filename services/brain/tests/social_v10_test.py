@@ -237,6 +237,22 @@ async def scenario(names):
     B = await Sock().open()
     await B.login(bn, tokens[1])
 
+    # --- chat ban (feature_bans 'chat', the staff row): the DM and the social chat line are refused
+    before = q("SELECT count(*) FROM chat_messages WHERE sender_id = ?", a_id)[0][0]
+    q("INSERT INTO feature_bans (account_id, feature, reason) VALUES (?, 'chat', 'test ban')", a_id)
+    await A.send(["eb", {"type": "msg:send", "to": b_id, "text": "banned hello"}])
+    e = await A.eb("error")
+    check(e and e["code"] == "EB_MSG_INVALID" and "banned" in e["message"], "chat ban: msg:send is refused with EB_MSG_INVALID")
+    check(await B.eb("msg:recv", timeout=1.0) is None, "chat ban: B gets no msg:recv")
+    await A.send(["ict", b_id, "banned chat line"])
+    f = await A.recv_until(lambda f: f[0] == "chf")
+    check(f is not None and f[1] is False, "chat ban: the social chat line (ict) is refused with chf false")
+    check(q("SELECT count(*) FROM chat_messages WHERE sender_id = ?", a_id)[0][0] == before,
+          "chat ban: no chat_messages row was written for A")
+    q("UPDATE feature_bans SET revoked_at = ? WHERE account_id = ?", "2000-01-01 00:00:00", a_id)
+    await A.send(["eb", {"type": "msg:send", "to": b_id, "text": "unbanned hello"}])
+    check(await A.eb("msg:sent") is not None, "chat ban revoked: msg:send goes through again")
+
     # --- search
     st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % an[:6])
     check(st == 200 and any(x["player_name"] == an for x in r["data"]["results"]), "search finds A")
