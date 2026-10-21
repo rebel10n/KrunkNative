@@ -16,9 +16,10 @@ steps (down ENTER opens it, type, down ENTER sends), started a moment after `pla
      and a system line are; plain text typed into the chat box and sent with Enter is shown (echo) and is
      in the server log (the positive control for the log probe); "/clear" still works from the chat box.
   B. the switch clicked off in the Settings window (from the default): a human line shown before is removed,
-     the bot rows stay; stored "false"; a later human line is not shown, and plain text typed and sent with
-     Enter is neither shown nor sent (no echo, nothing in the server log). The same steps as A's send, so
-     the off checks are not vacuous: A's echo is the positive control.
+     the bot rows stay; stored "false"; a later human line is not shown. Plain text typed and sent with Enter
+     while off is still sent: it is in the server log, and its echo (an incoming human line) is hidden. The
+     switch never gates sending, only what is shown. The same steps as A's send, so the log check is not
+     vacuous: A's log line is the positive control.
   C. the stored "false" survives a restart (no human line shown at once); then the switch is clicked on in
      the Settings window: stored "true", a human line is shown, and plain text typed and sent is shown and
      reaches the server again.
@@ -175,8 +176,8 @@ def main():
     check("B: a human line after the switch is off is not shown", n.get("@b-after") == 0, str(n))
     check("B: a bot line after the switch is off is shown", n.get("@b-bafter", 0) == n.get("@b-bcleared", 0) + 1, str(n))
     check("B: a system line is still shown", n.get("@b-sys", 0) > 0, str(n))
-    check("B: plain text sent while off is not shown (no echo)", n.get("@b-typed") == n.get("@b-after"), str(n))
-    check("B: plain text sent while off never reaches the server", "typed-plain-off" not in log)
+    check("B: plain text sent while off reaches the server (the server log has it)", "typed-plain-off" in log)
+    check("B: its echo, an incoming human line, is hidden while off", n.get("@b-typed") == n.get("@b-after"), str(n))
 
     # C1. the stored false survives a restart: in game, a human line is not shown
     before = stored()

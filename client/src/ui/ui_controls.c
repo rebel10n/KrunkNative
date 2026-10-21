@@ -19,7 +19,6 @@
 #include <prop_hunt_client.h> // Prop Hunt keys
 #include <ui_logic.h>
 #include <player_names.h> // the local echo's own name (Hide player names)
-#include <render_settings.h> // showMessages (ui_controls_chat_text_allowed)
 #include <v10_notify.h> // the chat's emoji panel keys
 #include <html_ui.h>
 #include <spectate.h> // spectator keys (pressButton's window.Bf5 block, client/src/spectate.c)
@@ -1211,17 +1210,12 @@ extern void client_chat_send(Client *, const char *) __attribute__((weak));
 #define UI_CHAT_SEND_AVAILABLE() 1
 #endif
 
-// Settings > Chat "Show Player Messages" off: plain text is not sent, but "/" lines still are (the
-// server's commands answer the sender; /clear and the console's own commands are handled before).
-int ui_controls_chat_text_allowed(const char *text) {
-    return client_render_settings()->show_messages || (text && text[0] == '/');
-}
-
-// fp(msg): Krunker sends "ct" and shows the line when the server broadcasts it back.
+// fp(msg): Krunker sends "ct" and shows the line when the server broadcasts it back. Settings > Chat
+// "Show Player Messages" does not gate sending (v10 has no such gate): it only hides incoming human lines
+// (hud_ui.c, hud_social.c), so a typed line goes out whatever the switch says.
 static void chat_send(Client *client, const char *text) {
     if (!client) client = menu_ui()->client;
     if (ui_console_chat_command(client, text)) return; // the dev console mod's io.send wrapper: /bhop, singleplayer commands
-    if (!ui_controls_chat_text_allowed(text)) return;  // showMessages off: a player line is not sent
 #ifdef UI_CHAT_SEND_AVAILABLE
     if (client && UI_CHAT_SEND_AVAILABLE()) {
         client_chat_send(client, text); // net chat (client/src/net): the server's echo reaches the HUD

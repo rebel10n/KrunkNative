@@ -248,9 +248,9 @@ static void mark_dom(Client *client) { (void) client; g_dom_dirty = 1; }
 static void mark_swap(Client *client) { (void) client; g_swap_dirty = 1; }
 
 // Settings > Chat "Show Player Messages" (showMessages), human players only. Off: the human lines already
-// in #chatList go (hud_ui_clear_player_chat); bot and system lines stay. The receive gate is hud_ui.c's
-// hud_ui_add_player_chat / hud_ui_add_chat_channel, the send gate ui_controls.c's chat_send and
-// hud_social.c's quick chat; all read g_rs.show_messages.
+// in #chatList go (hud_ui_clear_player_chat); bot and system lines stay. The gate is hud_ui.c's
+// hud_ui_add_player_chat / hud_ui_add_chat_channel, reading g_rs.show_messages. It never gates sending:
+// a typed line or quick chat is sent either way (ui_controls.c's chat_send, hud_social.c).
 static void apply_show_messages(Client *client) {
     (void) client;
     if (!g_rs.show_messages) hud_ui_clear_player_chat();

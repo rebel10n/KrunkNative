@@ -125,7 +125,6 @@ void social_on_chat_v7(Client *client, const NetChatV7Packet *packet) {
 int social_quick_chat(Client *client, const char *text) {
     static double last;
     if (!client || !text || !text[0]) return 0;
-    if (!ui_controls_chat_text_allowed(text)) return 0; // showMessages off: quick chat is player chat too
     const double now = glfwGetTime();
     if (last > 0.0 && now - last <= QUICK_CHAT_COOLDOWN) return 0; // Date.now() - lastMsgTime <= 1500
     client_chat_send(client, text);                                    // f1909
