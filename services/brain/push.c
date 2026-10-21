@@ -195,6 +195,144 @@ static void h_unsubscribe_v10(kn_http_req *req, void *ud) {
     start(req, 1, 1);
 }
 
+/* ---- v10 POST /webpush/status and /webpush/subscription-change (v10.js 26408, 26414; v10_account.c routes them):
+ * the caller's own rows of push_subscriptions. The v10 consumers read data.is_subscribed (145259) and
+ * data.success / data.registration_id (145274). */
+
+static const char *arg_or_empty(int n, const char *const *p, int i) { return i < n && p[i] ? p[i] : ""; }
+
+/* (account, old endpoint, new endpoint, p256dh, auth, now_ms) -> {n}: the account's row for the old endpoint takes
+ * the new endpoint and keys (a row that holds the new endpoint, of any account, is dropped first). n 0: the account
+ * holds no row for the old endpoint, so nothing changes. One transaction. */
+static kn_db_result *run_push_change(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const char *account = arg_or_empty(n, p, 0), *old_ep = arg_or_empty(n, p, 1), *new_ep = arg_or_empty(n, p, 2);
+    const char *p256dh = arg_or_empty(n, p, 3), *auth = arg_or_empty(n, p, 4);
+    int64_t moved = 0;
+    if (dbx_int(&x, SQL(.any = "SELECT count(*) FROM push_subscriptions WHERE account_id = $1 AND endpoint = $2"),
+                KN_DB_ARGS(account, old_ep), 0) > 0) {
+        dbx_exec(&x, SQL(.any = "DELETE FROM push_subscriptions WHERE endpoint = $1 AND endpoint <> $2"), KN_DB_ARGS(new_ep, old_ep));
+        moved = dbx_exec(&x,
+                         SQL(.any = "UPDATE push_subscriptions SET endpoint = $3, p256dh = $4, auth = $5"
+                                    " WHERE account_id = $1 AND endpoint = $2"),
+                         KN_DB_ARGS(account, old_ep, new_ep, p256dh, auth));
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "n", (double) (moved > 0 ? moved : 0));
+    return dbx_json(&x, "push_change", o);
+}
+static const kn_proc P_PUSH_CHANGE = {"push_change", NULL, run_push_change};
+
+/* the request's fields until its answer: the endpoint of a status, the old and new subscription of a change */
+typedef struct {
+    kn_http_req *req;
+    int change;
+    char old_ep[PUSH_ENDPOINT_MAX + 1];
+    char endpoint[PUSH_ENDPOINT_MAX + 1];
+    char p256dh[PUSH_P256DH_LEN + 1];
+    char auth[PUSH_AUTH_LEN + 1];
+} V10Push;
+
+static void v10_status_row(kn_db_result *res, void *ud) {
+    V10Push *r = ud;
+    if (!kn_db_ok(res)) {
+        v10_reply_error(r->req, 500, "internal", "Box Office could not read the subscription");
+    } else {
+        cJSON *d = cJSON_CreateObject();
+        cJSON_AddBoolToObject(d, "is_subscribed", kn_db_get_int64(res, 0, 0, 0) > 0);
+        v10_reply_data(r->req, 200, d);
+    }
+    free(r);
+}
+
+static void v10_change_row(kn_db_result *res, void *ud) {
+    V10Push *r = ud;
+    if (!kn_db_ok(res)) {
+        v10_reply_error(r->req, 500, "internal", "Box Office could not change the subscription");
+    } else {
+        const char *t = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : "{}";
+        cJSON *o = kn_json_parse(t, strlen(t));
+        cJSON *d = cJSON_CreateObject();
+        cJSON_AddBoolToObject(d, "success", kn_json_int(o, "n", 0) > 0);
+        cJSON_AddNullToObject(d, "registration_id"); /* KrunkNative keeps no push registration id */
+        cJSON_Delete(o);
+        v10_reply_data(r->req, 200, d);
+    }
+    free(r);
+}
+
+static void v10_account(void *ud, const char *err, const cJSON *acc) {
+    V10Push *r = ud;
+    const int64_t id = acc && !err ? kn_json_int(acc, "id", 0) : 0;
+    if (id <= 0) {
+        v10_reply_error(r->req, 401, "LOGIN_REQUIRED", "You must be logged in.");
+        free(r);
+        return;
+    }
+    char idtxt[24], now[24];
+    snprintf(idtxt, sizeof(idtxt), "%lld", (long long) id);
+    snprintf(now, sizeof(now), "%lld", (long long) kn_wall_ms());
+    static const kn_sql q_status = {.any = "SELECT count(*) FROM push_subscriptions WHERE account_id = $1 AND endpoint = $2"};
+    int rc;
+    if (r->change) rc = kn_db_call(G.b->db, &P_PUSH_CHANGE, KN_DB_ARGS(idtxt, r->old_ep, r->endpoint, r->p256dh, r->auth, now), v10_change_row, r);
+    else rc = kn_db_query_sql(G.b->db, &q_status, KN_DB_ARGS(idtxt, r->endpoint), v10_status_row, r);
+    if (rc != 0) {
+        v10_reply_error(r->req, 503, "PushUnavailable", "Box Office has no database for Web Push");
+        free(r);
+    }
+}
+
+/* the caller's token (the body's, ?token=, or Authorization: Bearer), then the account, then the rows */
+static void v10_start(kn_http_req *req, const int change) {
+    if (!G.b || !G.b->db) {
+        v10_reply_error(req, 503, "PushUnavailable", "Box Office has no database for Web Push");
+        return;
+    }
+    cJSON *body = kn_http_body_json(req);
+    char token[TOKEN_MAX];
+    token_of(req, body, token, sizeof(token));
+    if (!token[0]) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 401, "LOGIN_REQUIRED", "You must be logged in.");
+        return;
+    }
+    /* status: {endpoint}; subscription-change: {old_subscription: {endpoint}, new_subscription: {endpoint, keys}} */
+    const cJSON *sub = change ? cJSON_GetObjectItemCaseSensitive(body, "new_subscription") : body;
+    const char *endpoint = kn_json_str(sub, "endpoint", "");
+    const cJSON *keys = sub ? cJSON_GetObjectItemCaseSensitive(sub, "keys") : NULL;
+    const char *p256dh = kn_json_str(keys, "p256dh", "");
+    const char *auth = kn_json_str(keys, "auth", "");
+    const char *old = kn_json_str(cJSON_GetObjectItemCaseSensitive(body, "old_subscription"), "endpoint", "");
+    const int ok = push_endpoint_ok(endpoint) &&
+                   (!change || (push_endpoint_ok(old) && push_b64url_ok(p256dh, PUSH_P256DH_BYTES) && push_b64url_ok(auth, PUSH_AUTH_BYTES)));
+    if (!ok) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "BadRequest", "BadRequest");
+        return;
+    }
+    V10Push *r = calloc(1, sizeof(*r));
+    if (!r) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 500, "internal", "out of memory");
+        return;
+    }
+    r->req = req;
+    r->change = change;
+    snprintf(r->endpoint, sizeof(r->endpoint), "%s", endpoint);
+    snprintf(r->old_ep, sizeof(r->old_ep), "%s", old);
+    snprintf(r->p256dh, sizeof(r->p256dh), "%s", p256dh);
+    snprintf(r->auth, sizeof(r->auth), "%s", auth);
+    cJSON_Delete(body);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "token", token);
+    accounts_internal_call(G.b, "token", args, v10_account, r); /* on failure it has answered and freed r */
+    cJSON_Delete(args);
+}
+
+void push_v10_status(kn_http_req *req) { v10_start(req, 0); }
+
+void push_v10_subscription_change(kn_http_req *req) { v10_start(req, 1); }
+
 static void h_vapid_key(kn_http_req *req, void *ud) {
     (void) ud;
     if (!G.vapid[0]) {

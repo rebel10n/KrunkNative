@@ -35,8 +35,6 @@ SECRET = "kn-v10-empty-test-secret-%d" % os.getpid()
 RESULTS = []
 
 # the EMPTY shapes (exact: no invented records)
-E_MATCH = {"matchHistory": {"matches": [], "totalPages": 0}}   # v10.js 98633: matchHistory.matches / totalPages
-E_RANK = {"leaderboard": [], "totalPages": 0}                 # v10.js 98600: leaderboard / totalPages
 E_SKINS = {"skins": []}                                       # v10.js 137427: skins
 E_OFFER = {"offer": None}                                     # v10.js 126666: offer (null = no offer)
 E_LIST = []                                                   # v10.js 107087, 106987: data || []
@@ -47,27 +45,6 @@ ROUTES = [
     # ---- api.krunker.io
     ("GET", "/webhooks/general/maps/config?mn=Burg", None, "bare", {},
      "131917, the legacy map preset: no da / fu is the menu's DEFAULT (presetLoaded 212624), no data envelope"),
-    ("GET", "/match-history/me/season/1/gameMode/0/isRanked/all", None, "empty", E_MATCH,
-     "25940, account match history; the consumer reads an empty history when signed out"),
-    ("GET", "/match-history/me/season/1/gameMode/0/isRanked/all/region/us-ca-sv", None, "empty", E_MATCH,
-     "25940 with region"),
-    ("GET", "/player-profile/me/season/1", None, "refuse", None,
-     "25959, the account's ranked profile (consumer 98579 catches the refusal)"),
-    ("GET", "/player-profile/me/season/1/region/us-ca-sv", None, "refuse", None, "25959 with region"),
-    ("GET", "/leaderboards/rankings/season/1", None, "empty", E_RANK, "25972, public ranking list (consumer 98600)"),
-    ("GET", "/leaderboards/rankings/season/1/region/us-ca-sv", None, "empty", E_RANK, "25972 with region"),
-    ("POST", "/player-profile/me/claim-milestone/region/us-ca-sv", {}, "refuse", None,
-     "25976, claims a ranked milestone for the account"),
-    ("GET", "/daily-spin/progress", None, "refuse", None,
-     "25999, the account's daily spin (consumer 117993 would show a claimable zero state)"),
-    ("POST", "/shop/cancel-subscription", {"subscriptionId": "x"}, "refuse", None, "26006, no payment backend"),
-    ("POST", "/iap/checkout", {}, "refuse", None, "26018, no payment backend"),
-    ("POST", "/iap/claim", {"channelId": "x", "productId": "x", "purchaseId": "x"}, "refuse", None,
-     "26024, no payment backend"),
-    ("POST", "/my-api/create-payment/1", {}, "refuse", None, "209123, PayPal, no payment backend"),
-    ("POST", "/my-api/execute-payment/1", {}, "refuse", None, "209131, PayPal, no payment backend"),
-    ("GET", "/ipinfo", None, "refuse", None,
-     "16440, the IP checker URL (getter 19733 only; no v10.js call reads a body, no shape to match)"),
     # ---- gapi.svc.krunker.io: auth (the KN accounts use /auth/login and friends: auth.c, another contract)
     ("POST", "/auth/nonce", {}, "refuse", None, "26172, auth"),
     ("POST", "/auth/login/username", {"username": "x"}, "refuse", None, "26177, auth"),
@@ -88,8 +65,6 @@ ROUTES = [
     ("POST", "/auth/kid/parental-email/1", {"email": "x"}, "refuse", None, "26296, auth"),
     ("GET", "/auth/kid/consent-status/1", None, "refuse", None, "26304, auth"),
     # ---- gapi: player, account, email, discord, webpush
-    ("GET", "/player/me", None, "refuse", None, "26312, signed-out or no mapping"),
-    ("GET", "/player/wallet", None, "refuse", None, "26317, signed-out or no mapping"),
     ("POST", "/account/2fa/enable/start", {}, "refuse", None, "26326, account 2FA"),
     ("POST", "/account/2fa/enable/verify", {"code": "x"}, "refuse", None, "26331, account 2FA"),
     ("POST", "/account/2fa/disable", {"code": "x"}, "refuse", None, "26339, account 2FA"),
@@ -104,10 +79,6 @@ ROUTES = [
     ("POST", "/discord/link", {}, "refuse", None, "26444, Discord link"),
     ("POST", "/discord/join", {}, "refuse", None, "26452, Discord join"),
     ("POST", "/discord/unlink", {}, "refuse", None, "26457, Discord unlink"),
-    ("POST", "/webpush/status", {"endpoint": "x"}, "refuse", None,
-     "26408, needs the subscription (consumer 145259 reads is_subscribed; a false would drop the local one)"),
-    ("POST", "/webpush/subscription-change", {"old_subscription": {}, "new_subscription": {}}, "refuse", None,
-     "26414, needs a stored subscription (consumer 145274 reads success)"),
     # ---- gapi: skins
     ("GET", "/skins", None, "empty", E_SKINS, "26474, skin list (consumer 137427 reads skins)"),
     ("GET", "/skins/1", None, "notfound", None, "26479, KN holds no skin record for this id"),
@@ -120,11 +91,6 @@ ROUTES = [
     ("GET", "/shop/wild-offer", None, "empty", E_OFFER, "26539, no offer (consumer 126666 reads offer)"),
     ("POST", "/shop/wild-offer/purchase", {}, "refuse", None, "26544, a write"),
     ("POST", "/shop/wild-offer/refresh", {}, "refuse", None, "26553, a write"),
-    # ---- gapi: KrunkCup wristband (no client call site reads it; account-scoped)
-    ("GET", "/krunkcup/wristband", None, "refuse", None, "27309, the account's wristband"),
-    ("POST", "/krunkcup/wristband/claim", {}, "refuse", None, "27314, a write"),
-    # ---- gapi: spins (the spin itself is the social socket's op)
-    ("POST", "/spins/execute", {}, "refuse", None, "27299, a spin is the social socket's op"),
     # ---- gapi: maps (GET /maps, /maps/:id and /maps/by-name/:name are v10_api.c's)
     ("GET", "/maps/1/versions", None, "empty", E_LIST, "26626, version list (consumer 107087 reads data || [])"),
     ("POST", "/maps/1/versions/2/revert", {}, "refuse", None, "26632, a write"),

@@ -10,6 +10,7 @@
 
 #include "brain.h"
 #include "cJSON.h"
+#include "knsvc/http.h"
 #include "registry.h"
 
 /* ---- settings (brain.* config, loaded once by mm_settings_load) */
@@ -105,6 +106,12 @@ typedef void (*RankedResultCb)(void *ud, const char *err, const cJSON *reply);
 void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 /* internal WS "ranked-cancel" {matchId}: a lobby that never filled (no rating, no RP, players unqueued) */
 void ranked_cancel(Brain *b, const cJSON *frame);
+/* v10 root reads of the caller's ranked data (ranked.c; v10_account.c routes them): the season and region
+ * come from the route (NULL: the query's), the answers are the v10 envelope */
+void ranked_v10_profile(kn_http_req *req, const char *season, const char *region);
+void ranked_v10_leaderboard(kn_http_req *req, const char *season, const char *region);
+void ranked_v10_history(kn_http_req *req, const char *season, const char *region);
+void ranked_v10_claim_milestone(kn_http_req *req, const char *region);
 
 /* ---- v10 lottery (lottery.c, 0348_lottery; db_lottery.c) */
 int lottery_init(Brain *b);

@@ -606,15 +606,7 @@ static void on_board(kn_db_result *res, void *ud) {
 }
 
 /* placed players only (Unranked has no position), best conservative rating first */
-static void h_leaderboard(kn_http_req *req, void *ud) {
-    (void) ud;
-    if (!db_ready()) return reply_error(req, 503, "RankedUnavailable");
-    ReqCtx *c = req_ctx(req);
-    if (!c) return;
-    if (c->region_index < 0) {
-        free(c);
-        return reply_error(req, 400, "UnknownRegion");
-    }
+static void leaderboard_query(ReqCtx *c) {
     c->out = cJSON_CreateObject();
     cJSON_AddNumberToObject(c->out, "season", c->season);
     cJSON_AddStringToObject(c->out, "region", c->region);
@@ -637,6 +629,19 @@ static void h_leaderboard(kn_http_req *req, void *ud) {
     snprintf(offset, sizeof offset, "%d", c->offset * c->limit); /* v10: offset = page - 1 */
     c->offset *= c->limit;
     kn_db_query_sql(R.b->db, c->global ? &qg : &q, KN_DB_ARGS(season, c->region, limit, offset), on_board, c);
+}
+
+/* GET /mm/ranked/leaderboard */
+static void h_leaderboard(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!db_ready()) return reply_error(req, 503, "RankedUnavailable");
+    ReqCtx *c = req_ctx(req);
+    if (!c) return;
+    if (c->region_index < 0) {
+        free(c);
+        return reply_error(req, 400, "UnknownRegion");
+    }
+    leaderboard_query(c);
 }
 
 static void on_history_count(kn_db_result *res, void *ud) {
@@ -792,7 +797,8 @@ static void on_proc_reply(kn_db_result *res, void *ud) {
         c->out = cJSON_CreateObject();
         cJSON_AddBoolToObject(c->out, "success", 0);
         cJSON_AddStringToObject(c->out, "error", msg ? msg : "internal");
-        return done_ctx(c, msg ? 400 : 500);
+        /* v10's claimMilestone reads data.success / data.error of a 200 (a refusal is an answer, v10.js 98741) */
+        return done_ctx(c, msg ? (c->v10 ? 200 : 400) : 500);
     }
     const char *t = kn_db_rows(res) > 0 ? kn_db_get(res, 0, 0) : "{}";
     c->out = kn_json_parse(t, strlen(t));
@@ -1227,6 +1233,77 @@ void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud) {
 void ranked_cancel(Brain *b, const cJSON *frame) {
     if (!b->db) return;
     kn_db_call(b->db, &P_RK_MATCH_CANCEL, KN_DB_ARGS(kn_json_str(frame, "matchId", "")), on_ignore, "match cancelled");
+}
+
+/* ================================================================ v10 root reads (v10_account.c routes them)
+ * v10.js playerProfile, matchHistory and the leaderboards carry the season and region in the path and
+ * limit / offset in the query (offset = the page index, as /mm/ranked). The answers are the v10 envelope. */
+
+/* the request's context with the season and region of the route (NULL: the query's, as /mm/ranked) */
+static ReqCtx *req_ctx_v10(kn_http_req *req, const char *season, const char *region) {
+    ReqCtx *c = req_ctx(req);
+    if (!c) return NULL;
+    c->v10 = 1;
+    if (season && *season) c->season = atoi(season) < 0 ? 0 : atoi(season);
+    if (region && *region) {
+        c->global = !strcmp(region, "0") || !strcmp(region, "global");
+        c->region_index = c->global ? 0 : ranked_region_index(region);
+        const char *code = c->global ? "global" : c->region_index >= 0 ? ranked_region_code(c->region_index) : "";
+        snprintf(c->region, sizeof c->region, "%s", code ? code : "");
+    }
+    return c;
+}
+
+/* GET /player-profile/me/season/:s[/region/:r] (v10.js 25959): the caller's ranked profile and milestones */
+void ranked_v10_profile(kn_http_req *req, const char *season, const char *region) {
+    if (!db_ready()) return refuse(req, 1, 503, "RankedUnavailable");
+    if (v10_refuse_guest(req)) return;
+    ReqCtx *c = req_ctx_v10(req, season, region);
+    if (!c) return;
+    if (c->region_index < 0) {
+        free(c);
+        return refuse(req, 1, 400, "UnknownRegion");
+    }
+    with_account(req, 1, profile_account, c);
+}
+
+/* GET /leaderboards/rankings/season/:s[/region/:r] (v10.js 25972): the placed players, best rating first */
+void ranked_v10_leaderboard(kn_http_req *req, const char *season, const char *region) {
+    if (!db_ready()) return refuse(req, 1, 503, "RankedUnavailable");
+    ReqCtx *c = req_ctx_v10(req, season, region);
+    if (!c) return;
+    if (c->region_index < 0) {
+        free(c);
+        return refuse(req, 1, 400, "UnknownRegion");
+    }
+    leaderboard_query(c);
+}
+
+/* GET /match-history/me/season/:s/gameMode/:m/isRanked/true[/region/:r] (v10.js 25940): the caller's ranked matches */
+void ranked_v10_history(kn_http_req *req, const char *season, const char *region) {
+    if (!db_ready()) return refuse(req, 1, 503, "RankedUnavailable");
+    if (v10_refuse_guest(req)) return;
+    ReqCtx *c = req_ctx_v10(req, season, region);
+    if (!c) return;
+    if (c->region_index < 0) {
+        free(c);
+        return refuse(req, 1, 400, "UnknownRegion");
+    }
+    with_account(req, 1, history_account, c);
+}
+
+/* POST /player-profile/me/claim-milestone/region/:r (v10.js 25976): the next milestone's RP to the caller */
+void ranked_v10_claim_milestone(kn_http_req *req, const char *region) {
+    if (!db_ready()) return refuse(req, 1, 503, "RankedUnavailable");
+    if (v10_refuse_guest(req)) return;
+    ReqCtx *c = req_ctx_v10(req, NULL, region);
+    if (!c) return;
+    c->season = current_season(); /* milestones of the running season only */
+    if (c->region_index < 0) {
+        free(c);
+        return refuse(req, 1, 400, "UnknownRegion");
+    }
+    with_account(req, 1, claim_account, c);
 }
 
 /* ================================================================ module */
