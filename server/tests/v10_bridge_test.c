@@ -831,6 +831,7 @@ int main(void) {
     // which starts the respawn countdown on the client
     {
         uint8_t sp_wait[150];
+        const int adds_before_dead = client_count("0");
         spawn_buf(sp_wait, 1, 1, 0, 4, 0, 100, 1, 2, 3, 0, 0, "me");
         native_send(&g_native, NET_PACKET_SPAWN, sp_wait, 150);
         WAIT_FOR(client_count("3") == 1);
@@ -844,6 +845,9 @@ int main(void) {
         CHECK(client_get("frs", 0, &frs) && frs.argc == 1 && frs.args[0].type == KRUNKER_BOOL && frs.args[0].u.boolean == 1,
               "frs [true] right after the countdown");
         krunker_frame_free(&frs);
+        // our dead SPAWN adds no player: the client's init (which fetches the map) must not see one before it has run
+        // player before it has run, or init breaks (the join's TypeErrors)
+        CHECK(client_count("0") == adds_before_dead, "our dead SPAWN adds no player (the add is for players in play)");
         CHECK(v10_bridge_untranslated("SPAWN") == 0, "a waiting joiner's spawn does not stop the observer's session");
     }
 

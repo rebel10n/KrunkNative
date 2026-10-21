@@ -220,7 +220,12 @@ void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socke
 /* NET_PACKET_END (16, 330 bytes): result int8 @0, next_round int32 @1, winner int32 @5, board (257 bytes) @9, rewards[16] @266.
  * As v10 "end" [endType, didWin, endData, winnerTeam, endIndex, reward, tmpBPData] (v7 game.js 4699). endData has an
  * empty vo and mts: the client picks the next map from mts when it is not empty, and the join must not depend on it. */
-void v10_map_end(V10Out *o, const uint8_t *p, size_t n);
+/* NET_PACKET_END_MEDALS (243, NetEndMedalsPacket: uint8 count, then {uint8 index, uint16 count} x count, the index
+ * into overlay.medalsList): the player's medals before its END. v10_parse_end_medals checks the size and the indexes (0: malformed). */
+int v10_parse_end_medals(const uint8_t *p, size_t n, NetEndMedalsPacket *out);
+/* END with the player's medals (NULL: none). endData.mdls is a flat [name, count, name, count, ...] in overlay.medalsList
+ * order: the end screen reads it in pairs (v10.js 219, the mdls loop). */
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
 /* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and

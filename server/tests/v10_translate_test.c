@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "krunker_proto.h"
+#include "progression.h" /* PROGRESSION_MEDAL_COUNT: the END_MEDALS indexes */
 #include "v10_translate.h"
 
 
@@ -1272,30 +1273,76 @@ int main(void) {
     }
 
     /* ---- NET_PACKET_END (16, 330 bytes): end [endType, didWin, endData, winner, endIndex, reward, tmpBPData];
-     * endData has an empty vo and mts (the client's map pick takes the fallback when mts is empty) */
+     * endData has an empty vo and mts (the client's map pick takes the fallback when mts is empty) and the player's
+     * medals as the flat mdls [name, count, ...] (NET_PACKET_END_MEDALS, 243, right before the END) */
     {
         uint8_t endp[330];
         memset(endp, 0, sizeof endp);
         endp[0] = 1; /* a victory */
         V10Out o;
         v10_out_init(&o);
-        v10_map_end(&o, endp, 330);
+        v10_map_end(&o, endp, 330, NULL);
         {
-            const KrunkerValue kv[8] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0)};
-            const KrunkerValue end_data = KRUNKER_V_MAP(kv, 4);
+            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
+                                         S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
+            const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
             const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
-            CHECK(msg_is(&o, 0, "end", want, 7), "END -> end [0, true, endData with an empty vo and mts, -1, 0, null, null]");
+            CHECK(msg_is(&o, 0, "end", want, 7), "END -> end [0, true, endData with an empty vo, mts and mdls, -1, 0, null, null]");
         }
         v10_out_free(&o);
         endp[0] = 0xff; /* a draw */
         v10_out_init(&o);
-        v10_map_end(&o, endp, 330);
+        v10_map_end(&o, endp, 330, NULL);
         CHECK(o.count == 1 && o.msgs[0].args[1].type == KRUNKER_NUM && o.msgs[0].args[1].u.num == -1, "END with result -1 is a draw (didWin -1)");
         v10_out_free(&o);
         v10_out_init(&o);
-        v10_map_end(&o, endp, 329);
+        v10_map_end(&o, endp, 329, NULL);
         CHECK(o.stop != NULL, "a short END stops the translation");
         v10_out_free(&o);
+    }
+
+    /* ---- NET_PACKET_END_MEDALS (243, NetEndMedalsPacket): parsed as the struct, refused when the size or an index is wrong,
+     * and the END that follows carries them as endData.mdls in overlay.medalsList order (the names of the indexes) */
+    {
+        NetEndMedalsPacket medals;
+        memset(&medals, 0, sizeof medals);
+        medals.count = 2;
+        medals.medals[0].index = 2; /* First Blood */
+        medals.medals[0].count = 1;
+        medals.medals[1].index = 9; /* Headshot */
+        medals.medals[1].count = 300;
+        uint8_t wire[sizeof medals];
+        memcpy(wire, &medals, sizeof medals);
+        NetEndMedalsPacket got;
+        memset(&got, 0, sizeof got);
+        CHECK(v10_parse_end_medals(wire, sizeof wire, &got) && got.count == 2 && got.medals[1].index == 9 && got.medals[1].count == 300,
+              "END_MEDALS parses (%zu bytes: count, then index and count)", sizeof wire);
+        CHECK(!v10_parse_end_medals(wire, sizeof wire - 1, &got), "a short END_MEDALS is refused");
+        NetEndMedalsPacket bad = medals;
+        bad.count = PLAYER_MEDAL_SLOTS + 1;
+        uint8_t wire_bad[sizeof bad];
+        memcpy(wire_bad, &bad, sizeof bad);
+        CHECK(!v10_parse_end_medals(wire_bad, sizeof wire_bad, &got), "an END_MEDALS count over the medal list is refused");
+        bad = medals;
+        bad.medals[0].index = PROGRESSION_MEDAL_COUNT; /* not a medal */
+        memcpy(wire_bad, &bad, sizeof bad);
+        CHECK(!v10_parse_end_medals(wire_bad, sizeof wire_bad, &got), "an END_MEDALS index outside overlay.medalsList is refused");
+
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        V10Out m;
+        v10_out_init(&m);
+        v10_map_end(&m, endp, 330, &got);
+        {
+            const KrunkerValue mdls[4] = {S("First Blood"), N(1), S("Headshot"), N(300)};
+            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
+                                         S("mdls"), KRUNKER_V_ARRAY(mdls, 4)};
+            const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
+            CHECK(msg_is(&m, 0, "end", want, 7), "END after END_MEDALS: endData.mdls = [name, count, ...] in overlay.medalsList order");
+        }
+        v10_out_free(&m);
     }
 
     printf("v10_translate_test: %d checks, %d failed\n", g_checks, g_failures);

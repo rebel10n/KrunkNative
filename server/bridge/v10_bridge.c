@@ -123,6 +123,8 @@ typedef struct V10Session {
     V10Queued *queue;
     size_t queue_n, queue_cap;
     V10Queued *held;             /* the vote state and END, held until START: the client picks its next map from the vote list */
+    NetEndMedalsPacket end_medals; /* END_MEDALS (243): the player's medals, endData.mdls of the next END */
+    int has_end_medals;
     size_t held_n, held_cap;
     int started;                 /* START went out: our spawn is in */
     int init_sent;
@@ -214,6 +216,7 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_CHAT_V7: return "CHAT_V7";
     case NET_PACKET_STATE: return "STATE";
     case NET_PACKET_AI_SYNC_V7: return "AI_SYNC_V7";
+    case NET_PACKET_END_MEDALS: return "END_MEDALS";
     default: break;
     }
     snprintf(other, sizeof other, "native %d", (int)type);
@@ -879,9 +882,16 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         hold_push(s, type, p, n);
         return;
     }
+    if (s->init_sent && type == NET_PACKET_END_MEDALS) {
+        /* right before the player's END (game_send_end_medals): kept for that END, which may be held */
+        if (!v10_parse_end_medals(p, n, &s->end_medals)) { stop_at(s, "END_MEDALS", "malformed"); return; }
+        s->has_end_medals = 1;
+        return;
+    }
     if (s->init_sent && type == NET_PACKET_END) {
         v10_out_init(&o);
-        v10_map_end(&o, p, n);
+        v10_map_end(&o, p, n, s->has_end_medals ? &s->end_medals : NULL);
+        s->has_end_medals = 0;
         finish_out(s, &o, "END");
         return;
     }
@@ -953,9 +963,14 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         if (!spawn.active && !spawn.is_you) return; /* a player who is dead now: the v10 add is for players in play */
         const int at = skins_index(s, spawn.uid);
         v10_out_init(&o);
-        const KrunkerValue rec = v10_player_add_record(&o, &spawn, at >= 0 ? &s->skins[at].skins : NULL, at >= 0, s->socket_id);
-        const KrunkerValue add_args[2] = {rec, KRUNKER_V_NUM(1)};
-        v10_push(&o, V10_IN_ADD_PLAYERS, add_args, 2);
+        /* the add is for players in play: our own dead SPAWN adds nobody (the other dead players return above). Before the
+         * client's init runs (it fetches the map first) a player in the list breaks that init: startingLoadout of the mode not set
+         * yet, then players.clear -> disposeMesh on a scene that is not there. Our player is added by its active SPAWN. */
+        if (spawn.active) {
+            const KrunkerValue rec = v10_player_add_record(&o, &spawn, at >= 0 ? &s->skins[at].skins : NULL, at >= 0, s->socket_id);
+            const KrunkerValue add_args[2] = {rec, KRUNKER_V_NUM(1)};
+            v10_push(&o, V10_IN_ADD_PLAYERS, add_args, 2);
+        }
         if (!spawn.active) {
             /* our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown */
             v10_map_death_countdown(&o, spawn.uid);

@@ -14,6 +14,7 @@
 #include "v10_translate.h"
 
 #include "krunker_maps.h" /* KRUNKER_OFFICIAL_MAPS: the official list an official map's INIT is numbered by */
+#include "progression.h" /* g_progression_medals: the names of the END_MEDALS medals */
 #include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
 
 #include <ctype.h>
@@ -1746,16 +1747,33 @@ void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socke
 
 /* NET_PACKET_END: see v10_translate.h. didWin is the v7 "didWin": true for a victory, false for a defeat, -1 no winner. */
 #define END_SIZE 330
-void v10_map_end(V10Out *o, const uint8_t *p, size_t n) {
+int v10_parse_end_medals(const uint8_t *p, size_t n, NetEndMedalsPacket *out) {
+    NetEndMedalsPacket m;
+    if (n != sizeof m) return 0;
+    memcpy(&m, p, sizeof m);
+    if (m.count > PLAYER_MEDAL_SLOTS) return 0;
+    for (int i = 0; i < m.count; i++)
+        if (m.medals[i].index >= PROGRESSION_MEDAL_COUNT) return 0;
+    *out = m; /* written only when the packet is valid: a refused one leaves out as it was */
+    return 1;
+}
+
+void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals) {
     if (n != END_SIZE) {
         o->stop = "malformed";
         return;
     }
     const int8_t result = (int8_t)p[0];
     const KrunkerValue did_win = result == 1 ? KRUNKER_V_BOOL(1) : result == 0 ? KRUNKER_V_BOOL(0) : KRUNKER_V_NUM(-1);
-    const char *const keys[4] = {"vo", "mts", "tms", "ed"};
-    const KrunkerValue vals[4] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, v10_arr(o, NULL, 0)};
-    const KrunkerValue end_data = v10_obj(o, keys, vals, 4);
+    KrunkerValue mdls[PLAYER_MEDAL_SLOTS * 2];
+    uint32_t mdls_n = 0;
+    for (int i = 0; medals && i < medals->count; i++) {
+        mdls[mdls_n++] = KRUNKER_V_STR(g_progression_medals[medals->medals[i].index]);
+        mdls[mdls_n++] = KRUNKER_V_NUM(medals->medals[i].count);
+    }
+    const char *const keys[5] = {"vo", "mts", "tms", "ed", "mdls"};
+    const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, v10_arr(o, NULL, 0), v10_arr(o, mdls, mdls_n)};
+    const KrunkerValue end_data = v10_obj(o, keys, vals, 5);
     const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL};
     v10_push(o, "end", args, 7);
 }

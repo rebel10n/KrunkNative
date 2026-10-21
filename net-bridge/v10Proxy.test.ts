@@ -951,6 +951,7 @@ async function main(): Promise<void> {
 
   // our own SPAWN while we wait to join (not active): the add record for us, then v10's death for us (KILL_PLAYER "3"),
   // which starts the respawn countdown on the client
+  const addsForMeBeforeDead = clientMessages.filter((m) => m.label === "0" && (m.args[0] as unknown[])[1] === 1).length;
   native.write(nativeFrame(4, spawnBuffer({ uid: 1, isYou: true, active: false, classIndex: 4, team: 0, health: 100, maxHealth: 100,
     position: [1, 2, 3], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
     face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
@@ -960,6 +961,9 @@ async function main(): Promise<void> {
   const frs = await waitFor(() => clientMessages.find((m) => m.label === "frs"), "frs (the enter game after the countdown)");
   assert.deepStrictEqual(frs.args, [true]);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("SPAWN"), undefined, "a waiting joiner's spawn does not stop the session");
+  // our player is added at "en", not at the dead SPAWN: the client's init (which fetches the map) must not see a player before it ran
+  assert.strictEqual(clientMessages.filter((m) => m.label === "0" && (m.args[0] as unknown[])[1] === 1).length, addsForMeBeforeDead,
+    "our dead SPAWN adds no player (the add is for players in play)");
 
   // LEAVE (20): player 9 disconnects: the observer's "2" [9], and the session stays up (the next packets still go through)
   const leaveFrame = Buffer.alloc(4);
