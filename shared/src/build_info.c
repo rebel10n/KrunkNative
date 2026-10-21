@@ -36,6 +36,8 @@ const char *kn_build_commit_short(void) {
     return s;
 }
 
+const char *kn_build_commit_id(void) { return k_info.commit[0] ? k_info.commit : "unknown"; }
+
 const char *kn_build_protocol(void) {
     static char s[16];
     if (!s[0]) snprintf(s, sizeof(s), "%d.%d", k_info.protocol_major, k_info.protocol_minor);

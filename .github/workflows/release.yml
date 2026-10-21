@@ -104,7 +104,6 @@ jobs:
 
       - name: Package
         env:
-          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
           KN_COMMIT: ${{ needs.meta.outputs.commit }}
           KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
           KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
@@ -140,7 +139,6 @@ jobs:
 
       - name: Package
         env:
-          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
           KN_COMMIT: ${{ needs.meta.outputs.commit }}
           KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
           KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
@@ -212,7 +210,6 @@ jobs:
 
       - name: Package
         env:
-          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
           KN_COMMIT: ${{ needs.meta.outputs.commit }}
           KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
           KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
@@ -270,7 +267,6 @@ jobs:
 
       - name: Package
         env:
-          KN_DESCRIBE: ${{ needs.meta.outputs.describe }}
           KN_COMMIT: ${{ needs.meta.outputs.commit }}
           KN_BUILD_TIME: ${{ needs.meta.outputs.build_time }}
           KN_PROTOCOL: ${{ needs.meta.outputs.protocol }}
@@ -312,7 +308,6 @@ jobs:
       COMMIT12: ${{ needs.meta.outputs.commit12 }}
       COMMIT_TIME: ${{ needs.meta.outputs.commit_time }}
       BUILD_TIME: ${{ needs.meta.outputs.build_time }}
-      DESCRIBE: ${{ needs.meta.outputs.describe }}
       PROTOCOL: ${{ needs.meta.outputs.protocol }}
       KN_BUILD: ${{ needs.meta.outputs.kn_build }}
       BRANCH: ${{ github.ref_name }}
@@ -357,7 +352,6 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Commit | [\`$COMMIT12\`](https://github.com/$GH_REPO/commit/$COMMIT) ($BRANCH) |"
-            echo "| Version | \`$DESCRIBE\` |"
             echo "| Protocol | $PROTOCOL (NET_PROTOCOL_MAJOR.MINOR) |"
             echo "| Built | $BUILD_TIME ([run]($RUN_URL)) |"
             echo

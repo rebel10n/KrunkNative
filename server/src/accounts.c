@@ -248,7 +248,7 @@ static cJSON *acc_lobby_tuple(void) {
     // the product flavor pool (flavor.h): the coordinator keeps Krunker Strike lobbies apart from
     // Box Office ones (registry.c); omitted for base, so base tuples are unchanged
     if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(meta, "flavor", flavor_current()->key);
-    cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
+    cJSON_AddStringToObject(meta, "build", kn_build_commit_id());
     cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);
     cJSON_AddNumberToObject(meta, "commitTime", (double) kn_build_info()->commit_time);
     cJSON_AddBoolToObject(meta, "cs", g_acc.custom);
@@ -319,7 +319,7 @@ static cJSON *acc_hello(void) {
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(hello, "webUrl", g_gs_config.web_url);
     cJSON_AddStringToObject(hello, "version", ACC_VERSION);
     const KnBuildInfo *build = kn_build_info();
-    cJSON_AddStringToObject(hello, "build", build->describe);
+    cJSON_AddStringToObject(hello, "build", kn_build_commit_id());
     cJSON_AddStringToObject(hello, "commit", build->commit);
     cJSON_AddNumberToObject(hello, "commitTime", (double) build->commit_time);
     cJSON_AddStringToObject(hello, "buildTime", build->build_time);

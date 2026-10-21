@@ -9,8 +9,9 @@
 // JSON: {"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
 //        "tags":[...],"community","online_mode","password","region","version","port","nonce",
 //        "commit","commit_time","build_time","protocol","ruleset"}
-// version = the build's git describe; commit (12 hex), commit_time (unix s), build_time (ISO-8601
-// UTC) and protocol ("major.minor") come from shared/include/build_info.h. The finder compares them
+// version = the build's commit (12 hex, "unknown" without one: kn_build_commit_id); commit (12 hex),
+// commit_time (unix s), build_time (ISO-8601 UTC) and protocol ("major.minor") come from
+// shared/include/build_info.h. The finder compares them
 // with the latest server release (services/brain/release_info.c, doc/backend.md "Build version").
 //
 // online_mode = the server refuses guests (server_bin builds before every lobby admitted guests
@@ -41,7 +42,7 @@ typedef struct {
     int online_mode;
     int password;
     char region[32];
-    char version[48];               // git describe of the build
+    char version[48];               // the build's commit (kn_build_commit_id)
     int port;                       // game port clients connect to
     char commit[16];                // 12-hex commit ("" unknown)
     int64_t commit_time;            // its committer date, unix seconds (0 unknown)

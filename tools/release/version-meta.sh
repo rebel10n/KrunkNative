@@ -16,7 +16,8 @@
 # Prints GITHUB_OUTPUT lines:
 #   krunker_version  Krunker's version the players see: the newest "== UPDATE x ==" of ui/windows/kn-versions.txt
 #                at that commit (v10_news_version, client/src/ui/v10_news.c); "unknown" when there is none
-#   describe     git describe (server-v* / vN tags, never v3.1.1-parity), e.g. v1.0.0-51-g6f0cea9: internal
+#   describe     the commit's 12 hex digits (the kn-build key of that name; the binaries' describe): the name a build
+#                goes by, never a git describe or a version number (server-info, lobby meta, release notes)
 #   commit       full sha;  commit12  first 12 hex digits
 #   commit_time  committer date of the commit, unix seconds
 #   build_time   now (or SOURCE_DATE_EPOCH), ISO-8601 UTC
@@ -43,7 +44,8 @@ if [ "$server" = 1 ]; then
     [ -n "$source_commit" ] || { echo "version-meta.sh: no commit touches the server paths (shallow clone? fetch-depth 0)" >&2; exit 1; }
     commit="$source_commit"
 fi
-describe="$(git describe --tags --match 'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always "$commit")"
+# a build is named by its commit (12 hex), never by a git describe: no tags needed, the same value on the wire
+describe="${commit:0:12}"
 # the player-visible version is Krunker's (the changelog's newest update), never describe
 krunker_version=unknown
 kn_versions="$(git show "$commit:ui/windows/kn-versions.txt" 2> /dev/null || true)"

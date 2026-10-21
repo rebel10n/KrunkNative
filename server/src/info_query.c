@@ -80,7 +80,7 @@ void info_query_update(const float now) {
     snprintf(info.region, sizeof(info.region), "%s", cfg->region);
     // build identity (build_info.h): the finder flags servers older than the latest release
     const KnBuildInfo *build = kn_build_info();
-    snprintf(info.version, sizeof(info.version), "%s", build->describe);
+    snprintf(info.version, sizeof(info.version), "%s", kn_build_commit_id());
     snprintf(info.commit, sizeof(info.commit), "%s", build->commit);
     info.commit_time = build->commit_time;
     snprintf(info.build_time, sizeof(info.build_time), "%s", build->build_time);
@@ -169,7 +169,7 @@ static int iq_heartbeat(const int shutdown) {
     cJSON_AddStringToObject(body, "community", accounts_community_name());
     cJSON_AddBoolToObject(body, "online_mode", 0); // "guests refused", never (iq_update)
     const KnBuildInfo *build = kn_build_info(); // informational: the listing uses the verified KNINFO reply
-    cJSON_AddStringToObject(body, "version", build->describe);
+    cJSON_AddStringToObject(body, "version", kn_build_commit_id());
     cJSON_AddStringToObject(body, "commit", build->commit);
     cJSON_AddNumberToObject(body, "commit_time", (double) build->commit_time);
     cJSON_AddStringToObject(body, "build_time", build->build_time);

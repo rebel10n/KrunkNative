@@ -685,7 +685,7 @@ int main(int argc, char **argv) {
         gs_config_lock_flavor();
     }
     if (args.version) {
-        printf(KN_PRODUCT_NAME " server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        printf(KN_PRODUCT_NAME " server_bin, Krunker v%s\n", ruleset_current()->version);
         if (flavor_get() != FLAVOR_BASE) printf("flavor %s (%s)\n", flavor_current()->key, flavor_current()->display_name);
         // build identity (shared/include/build_info.h): what the finder / coordinator compare
         printf("build %s\n", kn_build_string());

@@ -16,7 +16,7 @@
 # Usage: tools/release/package-server.sh <platform> <server binary> <out dir> [--libs <dir>]
 #   <platform>  linux-x64 (the release's dynamic Linux build; any other linux-<arch> is for a local dist),
 #               linux-x64-polyfilled, windows-x64, macos-arm64
-# Env (README text, from tools/release/version-meta.sh): KN_DESCRIBE KN_COMMIT KN_BUILD_TIME KN_PROTOCOL
+# Env (README text, from tools/release/version-meta.sh): KN_COMMIT KN_BUILD_TIME KN_PROTOCOL
 set -euo pipefail
 
 [ $# -ge 3 ] || { sed -n '2,20p' "$0" >&2; exit 2; }
@@ -121,7 +121,6 @@ cat > "$stage/README.txt" << EOF
 Krunker Box Office dedicated server ($platform)
 ===============================================
 
-Version:   ${KN_DESCRIBE:-unknown}
 Commit:    ${KN_COMMIT:-unknown}
 Built:     ${KN_BUILD_TIME:-unknown}
 Protocol:  ${KN_PROTOCOL:-unknown} (clients and coordinators speak NET_PROTOCOL major.minor)

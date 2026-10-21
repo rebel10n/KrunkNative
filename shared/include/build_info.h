@@ -14,7 +14,7 @@
 #define KN_PRODUCT_NAME "Krunker Box Office"
 
 typedef struct {
-    const char *describe;     // git describe: internal only (the kn-build metadata, the updates server); never shown
+    const char *describe;     // git describe (local builds) or the commit (CI): never shown, never on the wire (kn_build_commit_id)
     const char *commit;       // 12 hex digits, "" unknown
     int64_t commit_time;      // committer date of commit, unix seconds (0 unknown)
     int dirty;                // built from a tree with local changes
@@ -31,5 +31,8 @@ const char *kn_build_string(void);
 // The commit the build came from, 7 hex digits (the player-facing identity, e.g. "This client: 6f0cea9"),
 // "unknown" without one.
 const char *kn_build_commit_short(void);
+// The name a server gives its build on the wire (server-info "version", account meta and hello "build",
+// finder body): the 12-hex commit, "unknown" without one. Never a git describe or a version number.
+const char *kn_build_commit_id(void);
 // "1.3"
 const char *kn_build_protocol(void);

@@ -755,7 +755,7 @@ brain draining).
 | `webUrl` | string | optional: ws(s) URL web clients use (net-bridge `/native`) |
 | `timeLeft` | int | seconds left in the round |
 | `draining` | bool | the server is shutting down (not joinable) |
-| `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
+| `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", `build` = the 12-hex commit, `commit` the same, unix s): see 8.12 |
 | `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
 | `mapIndex` | int | Krunker's official mapIndex (the v10.0.2 list, `shared/include/map_catalog.h` `map_catalog_map_index`; a community map sends none): seek-game `dataQuery.dsma` ([v10/matchmaker-token.md](v10/matchmaker-token.md)) |
 | `flavor` | string | product flavor pool (`shared/include/flavor.h` key): `"strike"` from a Krunker Strike `server_bin` (or stamped from its node's hello); absent = the base game. See "Flavor pools" (6.2) |
@@ -2078,7 +2078,7 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
 * reply: `FF FF FF FF "KNinfo" 00 <JSON <= 1200 bytes>`:
   `{"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
   "tags":[...],"community","online_mode","password","region","version","port","nonce",
-  "commit","commit_time","build_time","protocol"}` (`version` = the build's git describe; 8.12).
+  "commit","commit_time","build_time","protocol"}` (`version` = the build's 12-hex commit, `unknown` without one; 8.12).
   Tags: `password`, `ranked`, `custom`, `draining`, `community` (linked to a
   coordinator), then `tags`. `online_mode` is legacy ("guests refused"): always `false`
   now, every server admits guests (older clients hide or label `true` servers). Snapshot refreshed 4x a second by the tick.
@@ -2201,15 +2201,20 @@ Host Game button is shown; the chooser is v10's.
 
 ### 8.12 Build version and outdated servers
 
-Every binary embeds its build identity (`shared/include/build_info.h`, generated
-`kn_version.h` from `cmake/kn_version.cmake` at every build): git describe (`--match
-'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always --dirty`), 12-hex commit, its
-committer date, the build time and the protocol `NET_PROTOCOL_MAJOR.MINOR`. CI builds without
-git pass `-DKRUNKNATIVE_VERSION_{DESCRIBE,COMMIT,COMMIT_TIME,BUILD_TIME}`. Shown by
-`server_bin --version` / `client_bin --version` / `kn_brain --version`, the server's startup log
-and `status`, the KNINFO reply and finder heartbeat (8.8), the coordinator `hello` (5.2) and every
-lobby tuple's meta (`proto`, `build`, `commit`, `commitTime`). The INIT packet is unchanged
-(fixed size; a tail would need a protocol bump).
+A build is named by its commit, never by a version number: KrunkNative has none of its own, and
+players see only Krunker's version (the newest update of `ui/windows/kn-versions.txt`,
+`v10_news_version`). Every binary embeds its build identity (`shared/include/build_info.h`,
+generated `kn_version.h` from `cmake/kn_version.cmake` at every build): 12-hex commit, its
+committer date, the build time and the protocol `NET_PROTOCOL_MAJOR.MINOR`, plus a `describe`
+that is internal (local builds: git describe; CI: the commit, `tools/release/version-meta.sh`).
+The wire and logs carry the commit as `kn_build_commit_id()` (`unknown` without one): the KNINFO
+`version` and finder heartbeat `version` (8.8), the account meta and `hello` `build`, and the
+kn-build `describe` the release notes carry. Shown by `server_bin --version` / `client_bin --version`
+/ `kn_brain --version`, the server's startup log and `status`, the KNINFO reply and finder
+heartbeat (8.8), the coordinator `hello` (5.2) and every lobby tuple's meta (`proto`, `build`,
+`commit`, `commitTime`). The INIT packet is unchanged (fixed size; a tail would need a protocol
+bump). Readers compare builds by commit: an older server that still names its build by a git
+describe is matched by its commit (rule 4 and the commit rules below).
 
 **Latest release** (`services/brain/releases.c`, rule in `release_info.c`, module `releases`,
 every role). kn_brain polls `servers.releases_url` (default
@@ -2227,7 +2232,7 @@ latest server build is the `server-latest` / `server-v*` release (not drafts) wi
    is older than the latest commit by more than `servers.outdated_grace_h` (48 h; dirty builds
    compare by commit time like any other), or
 3. the latest release is known and the server reports no build info (an older server_bin), or
-4. `servers.latest_version` is set and neither the server's describe nor its commit match it.
+4. `servers.latest_version` is set and neither the server's build (`version`/`build`) nor its commit match it.
 
 **Incompatible**: the server announces another protocol MAJOR than the client (`?proto=M.m`;
 clients without it count as the coordinator's major). Minors interoperate.
