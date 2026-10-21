@@ -4,31 +4,20 @@
  * The v10.js line is the client's call; the consumer it is read by is in parentheses.
  *
  * EMPTY (200 {"data": ..., "error": null}: the shape the consumer reads, nothing invented):
- *   GET /match-history/me/season/:s/gameMode/:m/isRanked/:x[/region/:r]  25940 (98633): data.matchHistory
- *       {matches: [], totalPages: 0}. The consumer reads the object under data.matchHistory, not data.
- *   GET /leaderboards/rankings/season/:s[/region/:r]   25972 (98600): data {leaderboard: [], totalPages: 0}
  *
  * REFUSAL (403 {"error": {"code": "NOT_IMPLEMENTED", "message": ...}}; the v10 wrapper throws on 5xx,
  * and the consumers that need a reply catch it):
- *   payments, no payment backend: POST /shop/cancel-subscription 26006, /iap/checkout 26018,
- *       /iap/claim 26024, /my-api/create-payment/:id 209123, /my-api/execute-payment/:id 209131.
- *   account reads KrunkNative cannot map to a v10 account: GET /player-profile/me/season/:s[/region/:r]
- *       25959 (98579), /daily-spin/progress 25999 (a zero state would read as a claimable spin), /player/me
- *       26312, /player/wallet 26317, /account/usernames 26347, /email/preferences 26424 (114573),
- *       /discord/status 26439 (97112 has no catch), /krunkcup/wristband 27309 (no call site),
- *       /webpush/status 26408 (is_subscribed would drop the local subscription).
- *   /ipinfo 16440: the IP checker URL (getter 19733). No v10.js call reads its body, so there is no
- *       shape to match, and an empty object would read as a lookup that found nothing.
+ *   account reads KrunkNative cannot map to a v10 account: /account/usernames 26347,
+ *       /email/preferences 26424 (114573),
+ *       /discord/status 26439 (97112 has no catch).
  *   auth, every /auth route 26172-26304: KrunkNative's accounts use /auth/login and friends (auth.c),
  *       a different contract. Not mapped here.
- *   writes: POST /player-profile/me/claim-milestone/region/:r 25976, POST /spins/execute 27299 (the
- *       spin is the social socket's op), /account/2fa routes 26326-26339, POST /account/usernames/reserve
+ *   writes: /account/2fa routes 26326-26339, POST /account/usernames/reserve
  *       and /swap 26352-26360, POST /email/preferences 26429, /discord/link|join|unlink 26444-26457,
- *       POST /webpush/subscription-change 26414, POST /krunkcup/wristband/claim 27314.
- *   reads of an unmapped account: GET /player/me and /player/wallet (signed-out or no mapping).
  *
  * Not registered here, on purpose: the social tunnel's routes (social_gapi.c, clan_v10.c, studios.c,
  * strike_econ.c), /market, /items, /trades, /moderation, /mods, /kpd and the /players routes (v10_market.c),
+ * the account, ranked, daily spin, spin, wallet, web push and payment routes (v10_account.c),
  * the maps and titles v10_api.c serves (GET /maps, /maps/:id, /maps/by-name/:name, /titles), and the
  * routes other modules answer (the alias routes, /ranked/me/connection, /streams/top, /guest/profile).
  */
@@ -40,26 +29,8 @@
 #define WHY_AUTH "Box Office accounts use /auth/login, not the v10 auth flow"
 #define WHY_ACCOUNT "Box Office has no v10 account mapping for this read"
 #define WHY_WRITE "Box Office does not take this write"
-#define WHY_IPINFO "Box Office has no IP lookup in the v10 shape"
 
 /* ---- EMPTY reads */
-
-static void h_match_history(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *data = cJSON_CreateObject();
-    cJSON *history = cJSON_AddObjectToObject(data, "matchHistory");
-    cJSON_AddItemToObject(history, "matches", cJSON_CreateArray());
-    cJSON_AddNumberToObject(history, "totalPages", 0);
-    v10_reply_data(req, 200, data);
-}
-
-static void h_rankings(kn_http_req *req, void *ud) {
-    (void) ud;
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddItemToObject(data, "leaderboard", cJSON_CreateArray());
-    cJSON_AddNumberToObject(data, "totalPages", 0);
-    v10_reply_data(req, 200, data);
-}
 
 }
 
@@ -81,20 +52,6 @@ typedef struct {
 
 static const EmptyRoute k_routes[] = {
     /* api.krunker.io */
-    {"GET", "/match-history/me/season/:s/gameMode/:m/isRanked/:x", h_match_history, NULL},
-    {"GET", "/match-history/me/season/:s/gameMode/:m/isRanked/:x/region/:r", h_match_history, NULL},
-    {"GET", "/player-profile/me/season/:s", h_refuse, (void *) WHY_ACCOUNT},
-    {"GET", "/player-profile/me/season/:s/region/:r", h_refuse, (void *) WHY_ACCOUNT},
-    {"GET", "/leaderboards/rankings/season/:s", h_rankings, NULL},
-    {"GET", "/leaderboards/rankings/season/:s/region/:r", h_rankings, NULL},
-    {"POST", "/player-profile/me/claim-milestone/region/:r", h_refuse, (void *) WHY_WRITE},
-    {"GET", "/daily-spin/progress", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/shop/cancel-subscription", h_refuse, (void *) WHY_PAYMENT},
-    {"POST", "/iap/checkout", h_refuse, (void *) WHY_PAYMENT},
-    {"POST", "/iap/claim", h_refuse, (void *) WHY_PAYMENT},
-    {"POST", "/my-api/create-payment/:id", h_refuse, (void *) WHY_PAYMENT},
-    {"POST", "/my-api/execute-payment/:id", h_refuse, (void *) WHY_PAYMENT},
-    {"GET", "/ipinfo", h_refuse, (void *) WHY_IPINFO},
 
     /* gapi.svc.krunker.io: auth (every route, 26172-26304) */
     {"POST", "/auth/nonce", h_refuse, (void *) WHY_AUTH},
@@ -116,9 +73,7 @@ static const EmptyRoute k_routes[] = {
     {"POST", "/auth/kid/parental-email/:id", h_refuse, (void *) WHY_AUTH},
     {"GET", "/auth/kid/consent-status/:id", h_refuse, (void *) WHY_AUTH},
 
-    /* gapi: player, account, email, Discord, web push */
-    {"GET", "/player/me", h_refuse, (void *) WHY_ACCOUNT},
-    {"GET", "/player/wallet", h_refuse, (void *) WHY_ACCOUNT},
+    /* gapi: account, email, Discord */
     {"POST", "/account/2fa/enable/start", h_refuse, (void *) WHY_WRITE},
     {"POST", "/account/2fa/enable/verify", h_refuse, (void *) WHY_WRITE},
     {"POST", "/account/2fa/disable", h_refuse, (void *) WHY_WRITE},
@@ -131,13 +86,6 @@ static const EmptyRoute k_routes[] = {
     {"POST", "/discord/link", h_refuse, (void *) WHY_WRITE},
     {"POST", "/discord/join", h_refuse, (void *) WHY_WRITE},
     {"POST", "/discord/unlink", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/webpush/status", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/webpush/subscription-change", h_refuse, (void *) WHY_WRITE},
-
-    /* gapi: KrunkCup wristband, spins */
-    {"GET", "/krunkcup/wristband", h_refuse, (void *) WHY_ACCOUNT},
-    {"POST", "/krunkcup/wristband/claim", h_refuse, (void *) WHY_WRITE},
-    {"POST", "/spins/execute", h_refuse, (void *) WHY_WRITE},
 
 };
 

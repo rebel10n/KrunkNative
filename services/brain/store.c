@@ -5,13 +5,15 @@
  * io_spinResponse), the spin history "spinH" (io_saveSpinHistory), the Free KR wheel "fkr"
  * (store.freeKR, io_skinKR) and the daily reward "clm" (v3.1.1 claimRewardResponse, kept for
  * older clients). v10 spins over gapi POST /spins/execute {index, ticket, multi}; the social
- * socket frame carries the same three values. Skins: assets/skins.json, the store.skins array in
+ * socket frame carries the same three values, and store_spin_v10 answers the HTTP route with the
+ * same pick, checks, rolls and transaction. Skins: assets/skins.json, the store.skins array in
  * index order. Wheels: shared/include/store_spins.h (the compiled-in v10 set), replaced by the
  * store_spin_data row when there is one (0118_store_v10: rotate wheels without a release), served
  * as GET /api/data/spins. Charging and granting are one transaction (db_accounts.c
  * P_SPIN_MULTI, 0106_store.sql kn_daily_kr).
  */
 #include "acct_internal.h"
+#include "v10_api.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -285,6 +287,8 @@ typedef struct SpinCtx {
     int index;
     int has_owned;  /* itemsAreUnique / duplicateProtectedPools: owned = the account's items */
     unsigned char owned[OWNED_BITS / 8];
+    kn_http_req *req;  /* store_spin_v10 (POST /spins/execute): the request answered when the spin is done */
+    int64_t account;   /* store_spin_v10: the spinning account */
 } SpinCtx; /* the extra of social_query / social_call: freed after each callback, chained as a copy */
 
 static SpinCtx *ctx_copy(const SpinCtx *c) {
@@ -354,6 +358,23 @@ static int roll_item(SpinCtx *c, int i) {
     return n > 0 ? items[kn_random_u64() % (uint64_t) n] : -1;
 }
 
+/* the checks of a spin paid in KR or by its ticket (level, funds) and its rolls: NULL, or the error the socket and
+ * v10 answer with. list gets the item ids, comma separated (cap bytes). */
+static const char *spin_rolls(SpinCtx *c, int level, int64_t funds, char *list, size_t cap) {
+    const StoreWheel *w = &c->w;
+    if (level < w->min_lvl) return "Level too low";
+    if (c->ticket < 0 && funds < (int64_t) c->price * c->count) return "Not enough KR";
+    /* the rolls: a slice per pointer (a rarity, or an item pool), then a random item of it */
+    size_t used = 0;
+    list[0] = 0;
+    for (int i = 0; i < c->count; i++) {
+        c->skin[i] = roll_item(c, i);
+        if (c->skin[i] < 0) return "Error generating item";
+        used += (size_t) snprintf(list + used, cap - used, "%s%d", i ? "," : "", c->skin[i]);
+    }
+    return NULL;
+}
+
 static void spin_account(SocialSession *s, kn_db_result *res, void *extra) {
     SpinCtx *c = extra;
     const StoreWheel *w = &c->w;
@@ -382,24 +403,11 @@ static void spin_account(SocialSession *s, kn_db_result *res, void *extra) {
                          free_kr_done, next);
         return;
     }
-    if (level < w->min_lvl) {
-        spin_error(s, "Level too low");
-        return;
-    }
-    if (c->ticket < 0 && funds < (int64_t) c->price * c->count) {
-        spin_error(s, "Not enough KR");
-        return;
-    }
-    /* the rolls: a slice per pointer (a rarity, or an item pool), then a random item of it */
     char list[SPIN_MAX * 12] = "";
-    size_t used = 0;
-    for (int i = 0; i < c->count; i++) {
-        c->skin[i] = roll_item(c, i);
-        if (c->skin[i] < 0) {
-            spin_error(s, "Error generating item");
-            return;
-        }
-        used += (size_t) snprintf(list + used, sizeof list - used, "%s%d", i ? "," : "", c->skin[i]);
+    const char *err = spin_rolls(c, level, funds, list, sizeof list);
+    if (err) {
+        spin_error(s, err);
+        return;
     }
     if (c->ticket >= 0) snprintf(ref, sizeof ref, "t%d:0", c->ticket);
     else snprintf(ref, sizeof ref, "%d:%d", c->wheel, c->price);
@@ -464,6 +472,32 @@ static int ticket_wheel(const SkinInfo *t, StoreWheel *out) {
     return i;
 }
 
+/* the wheel a spin request names (w, and wheel: the store.wheels index, -1 for a ticket's own spinWheel) and its
+ * rolls (count); NULL, or the error the socket and v10 answer with */
+static const char *spin_pick(int64_t ticket, int64_t index, int want_multi, StoreWheel *w, int *wheel, int *count) {
+    const StoreSpins *sp = spins();
+    if (ticket >= 0) {
+        const SkinInfo *t = acct_skin(ticket);
+        if (!t || t->type != 13) return "Invalid spin";
+        if (index >= 0 && index < sp->wheel_count && sp->wheels[index].ticket == ticket) {
+            *wheel = (int) index; /* a store wheel, paid with its ticket */
+            *w = sp->wheels[index];
+        } else if ((*wheel = ticket_wheel(t, w)) == -2) {
+            return "Invalid spin";
+        }
+        if (w->kr || (*wheel >= 0 && !store_wheel_open(w, kn_wall_ms()))) return "Wheel unavailable";
+    } else {
+        if (index < 0 || index >= sp->wheel_count) return "Invalid spin";
+        *wheel = (int) index;
+        *w = sp->wheels[index];
+        /* the Free KR wheel spins through "fkr"; ticketOnly wheels through their ticket */
+        if (w->kr || w->ticket_only || !store_wheel_open(w, kn_wall_ms())) return "Wheel unavailable";
+    }
+    const int many = want_multi && w->multi > 1;
+    *count = many ? (w->multi < SPIN_MAX ? w->multi : SPIN_MAX) : 1;
+    return NULL;
+}
+
 /* ["spin", wheelIndex, ticketSkin, multi] (index.js spinButton.onclick: io.send("spin", i, skin,
  * !!multi); v10 POST /spins/execute {index, ticket, multi}): a store wheel paid in KR (Nx with
  * multi: wheel.multi rolls at price each) or with its ticketIndex ticket (one ticket per roll), or
@@ -478,45 +512,124 @@ void sh_spin(SocialSession *s, const cJSON *f) {
         spin_error(s, "Error generating item");
         return;
     }
-    const StoreSpins *sp = spins();
     const int64_t ticket = fa_int(f, 2, -1);
     const int64_t index = fa_int(f, 1, -1);
     const cJSON *multi = fa(f, 3);
     const int want_multi = cJSON_IsTrue(multi) || (cJSON_IsNumber(multi) && multi->valuedouble > 1);
     StoreWheel w;
-    int wheel;
-    if (ticket >= 0) {
-        const SkinInfo *t = acct_skin(ticket);
-        if (!t || t->type != 13) {
-            spin_error(s, "Invalid spin");
-            return;
-        }
-        if (index >= 0 && index < sp->wheel_count && sp->wheels[index].ticket == ticket) {
-            wheel = (int) index; /* a store wheel, paid with its ticket */
-            w = sp->wheels[index];
-        } else if ((wheel = ticket_wheel(t, &w)) == -2) {
-            spin_error(s, "Invalid spin");
-            return;
-        }
-        if (w.kr || (wheel >= 0 && !store_wheel_open(&w, kn_wall_ms()))) {
-            spin_error(s, "Wheel unavailable");
-            return;
-        }
-    } else {
-        if (index < 0 || index >= sp->wheel_count) {
-            spin_error(s, "Invalid spin");
-            return;
-        }
-        wheel = (int) index;
-        w = sp->wheels[index];
-        /* the Free KR wheel spins through "fkr"; ticketOnly wheels through their ticket */
-        if (w.kr || w.ticket_only || !store_wheel_open(&w, kn_wall_ms())) {
-            spin_error(s, "Wheel unavailable");
-            return;
-        }
+    int wheel = -1, count = 1;
+    const char *err = spin_pick(ticket, index, want_multi, &w, &wheel, &count);
+    if (err) {
+        spin_error(s, err);
+        return;
     }
-    const int many = want_multi && w.multi > 1;
-    start_spin(s, &w, wheel, (int) ticket, many ? (w.multi < SPIN_MAX ? w.multi : SPIN_MAX) : 1);
+    start_spin(s, &w, wheel, (int) ticket, count);
+}
+
+/* ------------------------------------------------------------------ POST /spins/execute (v10, HTTP root)
+ * The socket's "spin" over HTTP, for v10's POST /spins/execute {index, ticket, multi}: the same pick (spin_pick), the
+ * same checks and rolls (spin_rolls) and the same P_SPIN_MULTI transaction, as a chain of plain DB calls. The answer
+ * is the socket's reply as the v10 envelope data: {randNums, itemIDs, funds, redeemedTicket}. */
+
+static void http_spin_fail(SpinCtx *c, int status, const char *code, const char *message) {
+    v10_reply_error(c->req, status, code, message);
+    free(c);
+}
+
+static void http_spin_done(kn_db_result *res, void *ud) {
+    SpinCtx *c = ud;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v) return http_spin_fail(c, 500, "internal", acct_db_error(res, "spin"));
+    cJSON *nums = cJSON_CreateArray(), *items = cJSON_CreateArray();
+    for (int i = 0; i < c->count; i++) {
+        cJSON_AddItemToArray(nums, cJSON_CreateNumber(c->pos[i]));
+        cJSON_AddItemToArray(items, cJSON_CreateNumber(c->skin[i]));
+    }
+    cJSON *d = cJSON_CreateObject();
+    cJSON_AddItemToObject(d, "randNums", nums);
+    cJSON_AddItemToObject(d, "itemIDs", items);
+    cJSON_AddNumberToObject(d, "funds", (double) kn_json_int(v, "funds", 0));
+    if (c->ticket >= 0) cJSON_AddNumberToObject(d, "redeemedTicket", c->ticket);
+    else cJSON_AddNullToObject(d, "redeemedTicket");
+    cJSON_Delete(v);
+    v10_reply_data(c->req, 200, d);
+    free(c);
+}
+
+/* the players row (level, KR): the checks, the rolls, then the spin's transaction */
+static void http_spin_player(kn_db_result *res, void *ud) {
+    SpinCtx *c = ud;
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) return http_spin_fail(c, 500, "internal", acct_db_error(res, "spin"));
+    const int level = acct_level(kn_db_get_int64(res, 0, 0, 0), NULL);
+    const int64_t funds = kn_db_get_int64(res, 0, 1, 0);
+    char list[SPIN_MAX * 12] = "";
+    const char *err = spin_rolls(c, level, funds, list, sizeof list);
+    if (err) return http_spin_fail(c, 400, "SPIN_REFUSED", err);
+    char id[24], a1[24], a2[24], ref[48];
+    if (c->ticket >= 0) snprintf(ref, sizeof ref, "t%d:0", c->ticket);
+    else snprintf(ref, sizeof ref, "%d:%d", c->wheel, c->price);
+    if (kn_db_call(g_acct_brain->db, &P_SPIN_MULTI,
+                   KN_DB_ARGS(acct_itoa(id, c->account), ref, acct_itoa(a1, c->ticket >= 0 ? 0 : c->price), list,
+                              c->ticket >= 0 ? acct_itoa(a2, c->ticket) : NULL),
+                   http_spin_done, c) != 0)
+        http_spin_fail(c, 503, "SpinUnavailable", "Box Office could not spin right now");
+}
+
+static void http_spin_query_player(SpinCtx *c) {
+    static const kn_sql q = {.any = "SELECT player_score, player_funds FROM players WHERE player_id = $1"};
+    char id[24];
+    if (kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(id, c->account)), http_spin_player, c) != 0)
+        http_spin_fail(c, 503, "SpinUnavailable", "Box Office could not spin right now");
+}
+
+/* the owned items of an itemsAreUnique / duplicateProtectedPools wheel, then the player row */
+static void http_spin_owned(kn_db_result *res, void *ud) {
+    SpinCtx *c = ud;
+    if (!kn_db_ok(res)) return http_spin_fail(c, 500, "internal", acct_db_error(res, "spin"));
+    c->has_owned = 1;
+    for (int i = 0; i < kn_db_rows(res); i++) {
+        const int64_t k = kn_db_get_int64(res, i, 0, -1);
+        if (k >= 0 && k < OWNED_BITS) c->owned[k >> 3] |= (unsigned char) (1u << (k & 7));
+    }
+    http_spin_query_player(c);
+}
+
+void store_spin_v10(kn_http_req *req, int64_t account, int64_t index, int64_t ticket, int want_multi) {
+    if (!g_acct_brain || !g_acct_brain->db) {
+        v10_reply_error(req, 503, "SpinUnavailable", "Box Office could not spin right now");
+        return;
+    }
+    if (acct_skin_count() <= 0) {
+        v10_reply_error(req, 400, "SPIN_REFUSED", "Error generating item");
+        return;
+    }
+    StoreWheel w;
+    int wheel = -1, count = 1;
+    const char *err = spin_pick(ticket, index, want_multi, &w, &wheel, &count);
+    if (err) {
+        v10_reply_error(req, 400, "SPIN_REFUSED", err);
+        return;
+    }
+    SpinCtx *c = calloc(1, sizeof *c);
+    if (!c) {
+        v10_reply_error(req, 500, "internal", "out of memory");
+        return;
+    }
+    c->req = req;
+    c->account = account;
+    c->w = w;
+    c->wheel = wheel;
+    c->ticket = (int) ticket;
+    c->count = count;
+    c->price = ticket >= 0 ? 0 : w.price;
+    if (w.items_unique || w.dup_protected) {
+        static const kn_sql q = {.any = "SELECT skin_id FROM inventory WHERE account_id = $1 AND count > 0"};
+        char id[24];
+        if (kn_db_query_sql(g_acct_brain->db, &q, KN_DB_ARGS(acct_itoa(id, account)), http_spin_owned, c) != 0)
+            http_spin_fail(c, 503, "SpinUnavailable", "Box Office could not spin right now");
+        return;
+    }
+    http_spin_query_player(c);
 }
 
 /* ------------------------------------------------------------------ "spinH" (spin history) */

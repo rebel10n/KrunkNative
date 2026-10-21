@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "brain.h"
 #include "knsvc/db.h"
+#include "knsvc/http.h"
 #include "db_procs.h"
 #include "accounts.h"
 #include "social_ws.h"
@@ -308,6 +309,8 @@ void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
 void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account titles) */
 void sh_daily_spin(SocialSession *s, const cJSON *f);  /* "dsp" (v10 Daily Spin progress, daily_spin.c) */
 void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_SPIN_CLAIM) */
+/* GET /daily-spin/progress (v10, HTTP root): the "dsp" state for account, answered with the v10 envelope */
+void daily_spin_progress_v10(kn_http_req *req, int64_t account);
 void sh_redeem_voucher(SocialSession *s, const cJSON *f);   /* "vr" (v10 REDEEM_VOUCHER, redeem.c) */
 void sh_craft_recipes(SocialSession *s, const cJSON *f);    /* "recps" (v10 CRAFT_DATA_REQUEST, craft.c) */
 void sh_craft(SocialSession *s, const cJSON *f);            /* "crft" (v10 CRAFT_REQUEST -> "crftr", craft.c) */
@@ -317,6 +320,8 @@ void sh_wild_offer_refresh(SocialSession *s, const cJSON *f); /* "wor" (refresh)
 int wild_offer_refresh_cost(void);                             /* the refresh price in KR (wild_offer.c) */
 void sh_double_xp_claim(SocialSession *s, const cJSON *f); /* "rqdxp" (v10 2x XP claim, double_xp_social.c) */
 int store_wheel_ticket(const char *name);              /* a store wheel's ticketIndex, -1 none (store.c) */
+/* POST /spins/execute (v10, HTTP root): the socket's "spin" for account (store.c), answered with the v10 envelope */
+void store_spin_v10(kn_http_req *req, int64_t account, int64_t index, int64_t ticket, int want_multi);
 void sh_alias(SocialSession *s, const cJSON *f);       /* "nme" */
 void sh_password(SocialSession *s, const cJSON *f);    /* "upp" */
 void sh_mail_list(SocialSession *s, const cJSON *f);   /* "kml" */

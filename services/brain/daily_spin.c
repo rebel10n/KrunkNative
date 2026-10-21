@@ -15,6 +15,7 @@
  */
 #include "acct_internal.h"
 #include "db_procs.h"
+#include "v10_api.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,6 +101,32 @@ void sh_daily_spin(SocialSession *s, const cJSON *f) {
     acct_itoa(id, s->account_id);
     acct_itoa(since, day_start(kn_wall_ms()));
     social_call(s, &P_DAILY_SPIN_STATE, KN_DB_ARGS(id, since), state_done, NULL);
+}
+
+/* GET /daily-spin/progress (v10.js 25999, the HTTP root): the same state "dsp" sends, for the account of the request */
+static void progress_done(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!v) {
+        v10_reply_error(req, 500, "internal", acct_db_error(res, "daily spin"));
+        return;
+    }
+    const int64_t now = kn_wall_ms();
+    cJSON_AddNumberToObject(v, "maxScore", max_score());
+    cJSON_AddNumberToObject(v, "timeRemaining", (double) (day_start(now) + DAY_MS - now));
+    v10_reply_data(req, 200, v);
+}
+
+void daily_spin_progress_v10(kn_http_req *req, int64_t account) {
+    if (!g_acct_brain || !g_acct_brain->db) {
+        v10_reply_error(req, 503, "DailySpinUnavailable", "Box Office has no database for the daily spin");
+        return;
+    }
+    char id[24], since[24];
+    acct_itoa(id, account);
+    acct_itoa(since, day_start(kn_wall_ms()));
+    if (kn_db_call(g_acct_brain->db, &P_DAILY_SPIN_STATE, KN_DB_ARGS(id, since), progress_done, req) != 0)
+        v10_reply_error(req, 503, "DailySpinUnavailable", "Box Office could not read the daily spin");
 }
 
 static void claim_done(SocialSession *s, kn_db_result *res, void *extra) {

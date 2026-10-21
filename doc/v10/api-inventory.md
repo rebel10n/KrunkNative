@@ -21,19 +21,19 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 
 | # | host | method | path | v10 caller (v10.js line) | before | after | source (KN table / file) |
 |---|---|---|---|---|---|---|---|
-| 1 | api | GET | `/match-history/me/season/{s}/gameMode/{m}/isRanked/{all|bool}[/region/{r}]` | matchHistory.getMatchHistory (25940) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 2 | api | GET | `/player-profile/me/season/{s}[/region/{r}]` | playerProfile.getPlayerProfile (25959) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 3 | api | GET | `/leaderboards/rankings/season/{s}[/region/{r}]` | playerProfile.getLeaderboard (25972) | missing: not_found fallback (public_routes.c:677) | empty | v10_empty.c |
-| 4 | api | POST | `/player-profile/me/claim-milestone/region/{r}` | playerProfile.claimMilestone (25976) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 1 | api | GET | `/match-history/me/season/{s}/gameMode/{m}/isRanked/{all|bool}[/region/{r}]` | matchHistory.getMatchHistory (25940) | missing: not_found fallback (public_routes.c:677) | implemented | ranked.c ranked_v10_history (mm_ranked_matches, mm_ranked_match_players); isRanked other than true: empty {matches: [], totalPages: 0} (v10_account.c h_history) |
+| 2 | api | GET | `/player-profile/me/season/{s}[/region/{r}]` | playerProfile.getPlayerProfile (25959) | missing: not_found fallback (public_routes.c:677) | implemented | ranked.c ranked_v10_profile (ranked_profiles, ranked_points; milestones from the ranked rules) |
+| 3 | api | GET | `/leaderboards/rankings/season/{s}[/region/{r}]` | playerProfile.getLeaderboard (25972) | missing: not_found fallback (public_routes.c:677) | implemented | ranked.c ranked_v10_leaderboard (ranked_profiles, accounts, clan_members, clans) |
+| 4 | api | POST | `/player-profile/me/claim-milestone/region/{r}` | playerProfile.claimMilestone (25976) | missing: not_found fallback (public_routes.c:677) | implemented | ranked.c ranked_v10_claim_milestone (ranked_profiles, ranked_points, ranked_points_tx; a refused claim is data.success false with data.error) |
 | 5 | api | GET | `/ranked/me/connection` | ranked.getMyConnection (25985) | missing: not_found fallback (public_routes.c:677) | alias | ranked.c |
 | 6 | api | GET | `/streams/top` | streams.getTopStreams (25992) | served: streams.c:326 (route2 "/streams/top") | served; EMPTY `{success, data: {streams: []}}` with no Twitch source (was a 503) | streams.c (reply_empty) |
-| 7 | api | GET | `/daily-spin/progress` | dailySpin.getProgress (25999) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 8 | api | POST | `/shop/cancel-subscription` | shop.cancelSubscription (26006) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 9 | api | POST | `/iap/checkout` | iap.checkout (26018) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 10 | api | POST | `/iap/claim` | iap.claim (26024) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 11 | api | POST | `/my-api/create-payment/{id}` | paypal (_69700, v10.js 209123) (209123) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 12 | api | POST | `/my-api/execute-payment/{id}` | paypal (_69700, v10.js 209131) (209131) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 13 | api | GET | `/ipinfo` | IP checker (_7290, v10.js 16440) (16440) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 7 | api | GET | `/daily-spin/progress` | dailySpin.getProgress (25999) | missing: not_found fallback (public_routes.c:677) | implemented | daily_spin.c daily_spin_progress_v10 (match_results score since the UTC day began, skin_transactions claims) |
+| 8 | api | POST | `/shop/cancel-subscription` | shop.cancelSubscription (26006) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no payment backend (no PayPal, Stripe or checkout code in services/brain); refused in v10_account.c |
+| 9 | api | POST | `/iap/checkout` | iap.checkout (26018) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no payment backend (no PayPal, Stripe or checkout code in services/brain); refused in v10_account.c |
+| 10 | api | POST | `/iap/claim` | iap.claim (26024) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no payment backend (no PayPal, Stripe or checkout code in services/brain); refused in v10_account.c |
+| 11 | api | POST | `/my-api/create-payment/{id}` | paypal (_69700, v10.js 209123) (209123) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no payment backend (no PayPal, Stripe or checkout code in services/brain); refused in v10_account.c |
+| 12 | api | POST | `/my-api/execute-payment/{id}` | paypal (_69700, v10.js 209131) (209131) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no payment backend (no PayPal, Stripe or checkout code in services/brain); refused in v10_account.c |
+| 13 | api | GET | `/ipinfo` | IP checker (_7290, v10.js 16440) (16440) | missing: not_found fallback (public_routes.c:677) | implemented | v10_account.c h_ipinfo: no v10.js reader of the body (getter 19733 only), so it answers the peer address {ip: req->remote_addr} in the envelope |
 | 14 | api | GET | `/webhooks/general/maps/list` | legacy apiRequest listMaps (v10.js 131960s) (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 15 | api | GET | `/webhooks/general/maps/search` | legacy apiRequest searchMap (131960) | missing: not_found fallback (public_routes.c:677) | alias | creations.c |
 | 16 | api | GET | `/webhooks/general/maps/config` | legacy apiRequest getMapPreset (131960) | missing: not_found fallback (public_routes.c:677) | implemented (the map's config as `da` JSON, `fu` 0; `{}` for no catalogue map: the menu shows DEFAULT) | creations.c (catalogue map config via game_config_from_map) |
@@ -70,8 +70,8 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 47 | gapi | POST | `/auth/kid/age-challenge/{id}` | auth.respondKidAgeChallenge (26288) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 48 | gapi | POST | `/auth/kid/parental-email/{id}` | auth.submitKidParentalEmail (26296) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 49 | gapi | GET | `/auth/kid/consent-status/{id}` | auth.checkKidConsentStatus (26304) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 50 | gapi | GET | `/player/me` | player.getMe (26312) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 51 | gapi | GET | `/player/wallet` | player.getWallet (26317) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 50 | gapi | GET | `/player/me` | player.getMe (26312) | missing: not_found fallback (public_routes.c:677) | implemented | v10_account.c me_account (accounts token op: the caller's account object, no token); no v10.js caller |
+| 51 | gapi | GET | `/player/wallet` | player.getWallet (26317) | missing: not_found fallback (public_routes.c:677) | implemented | v10_account.c wallet_account (players.player_funds, the KR balance kept with kr_transactions; junk); no v10.js caller |
 | 52 | gapi | POST | `/account/2fa/enable/start` | account.enable2FAStart (26326) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 53 | gapi | POST | `/account/2fa/enable/verify` | account.enable2FAVerify (26331) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 54 | gapi | POST | `/account/2fa/disable` | account.disable2FA (26339) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
@@ -83,8 +83,8 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 60 | gapi | POST | `/ranked/purchase` | ranked.purchaseSkin (26386) | missing: not_found fallback (public_routes.c:677) | alias | ranked.c |
 | 61 | gapi | POST | `/webpush/subscribe` | webpush.subscribe (26396) | missing: not_found fallback (public_routes.c:677) | alias | push.c |
 | 62 | gapi | POST | `/webpush/unsubscribe` | webpush.unsubscribe (26402) | missing: not_found fallback (public_routes.c:677) | alias | push.c |
-| 63 | gapi | POST | `/webpush/status` | webpush.getStatus (26408) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 64 | gapi | POST | `/webpush/subscription-change` | webpush.subscriptionChange (26414) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 63 | gapi | POST | `/webpush/status` | webpush.getStatus (26408) | missing: not_found fallback (public_routes.c:677) | implemented | push.c v10_start and push_v10_status (push_subscriptions, the caller's account and endpoint) |
+| 64 | gapi | POST | `/webpush/subscription-change` | webpush.subscriptionChange (26414) | missing: not_found fallback (public_routes.c:677) | implemented | push.c v10_start and push_v10_subscription_change (push_subscriptions: the account's row takes the new endpoint) |
 | 65 | gapi | GET | `/email/preferences` | email.getPreference (26424) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 66 | gapi | POST | `/email/preferences` | email.setPreference (26429) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
 | 67 | gapi | GET | `/discord/status` | discord.getStatus (26439) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
@@ -207,9 +207,9 @@ After this change: empty 20, refusal 92, alias 44, served 10, missing 0, impleme
 | 184 | gapi | POST | `/social/post/{id}/comment` | social.commentPost (27277) | tunnel: social socket gapi tunnel: social_gapi.c / clan_v10.c / studios.c (route table in doc/v10/social.md) | tunnel only (no HTTP) | social_gapi.c / clan_v10.c / studios.c |
 | 185 | gapi | GET | `/social/news` | social.getNews (27285) | served: community.c:403 | served (EMPTY `{news: []}` until the operator file config/community.json exists) |  |
 | 186 | gapi | GET | `/spins/wheels` | spins.getWheels (27294) | missing: not_found fallback (public_routes.c:677) | alias | public_routes.c |
-| 187 | gapi | POST | `/spins/execute` | spins.execute (27299) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 188 | gapi | GET | `/krunkcup/wristband` | krunkcup.getWristbandStatus (27309) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
-| 189 | gapi | POST | `/krunkcup/wristband/claim` | krunkcup.claimWristband (27314) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_empty.c |
+| 187 | gapi | POST | `/spins/execute` | spins.execute (27299) | missing: not_found fallback (public_routes.c:677) | implemented | store.c store_spin_v10 (store wheels, store_spin_data, players, inventory, skin_transactions): the socket's spin op over HTTP; no v10.js caller |
+| 188 | gapi | GET | `/krunkcup/wristband` | krunkcup.getWristbandStatus (27309) | missing: not_found fallback (public_routes.c:677) | empty | none: Box Office has no wristband (v10_account.c h_wristband answers data null) |
+| 189 | gapi | POST | `/krunkcup/wristband/claim` | krunkcup.claimWristband (27314) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | none: Box Office has no wristband to claim (v10_account.c) |
 | 190 | gapi | GET | `/kpd/demos[?{q}]` | kpd.listDemos (27329) | missing: not_found fallback (public_routes.c:677) | empty | v10_market.c |
 | 191 | gapi | GET | `/kpd/demos/{id}[?{q}]` | kpd.demoInfo (27335) | missing: not_found fallback (public_routes.c:677) | empty | v10_market.c |
 | 192 | gapi | POST | `/kpd/demos/{id}/vote` | kpd.vote (27345) | missing: not_found fallback (public_routes.c:677) | refusal (403 NOT_IMPLEMENTED) | v10_market.c |
