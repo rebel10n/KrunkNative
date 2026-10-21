@@ -45,6 +45,7 @@ export const NATIVE = Object.freeze({
   HELLO: 1,
   INIT: 2,
   ENT: 3,
+  STATE: 6, // NET_PACKET_STATE: the per-tick player record (NetStatePacket)
   CHAT_SEND: EV.NET_EVENT.CHAT_SEND,
   PING: EV.NET_EVENT.PING,
   PONG: EV.NET_EVENT.PONG,
@@ -675,6 +676,16 @@ export function mapBotAdd(p: Buffer): Mapped {
   };
 }
 
+// ---- STATE (6): the per-tick player record. v10's "k" record (v10.js 191557 sender, 220285 handler) is 13 fields per
+// player: sid, x, y, z (round 2), xDire, yDire (degrees, round), stepVal, onGround, crouchVal, loadoutIndex, aimVal,
+// grapple, ping. KN's NetStatePacket has uid, ack_seq, active, loadout_index, position, velocity, direction, health,
+// aim_val and crouch_val. stepVal is field 6, before the rest, and KN has no such value (it is an animation value: a
+// lean and step chase, v10.js 170086-170087, synced from the server). The record is positional, so the translation
+// stops at that field: no record is sent without it.
+export function mapState(_p: Buffer): Mapped {
+  return { messages: [], stop: "the v10 record's field 6 (stepVal, the step animation value) is not in KN's state packet" };
+}
+
 // ---- DOM_UPDATE (142) and AI_SYNC_V7 (161)
 
 // NetDomUpdatePacket (497 bytes): uint8 count, then 16 NetDomZoneState of 31 bytes: int32 uid @0 (the dom_zones
@@ -753,13 +764,26 @@ const CHAT_V7_SIZE = 330;
 export function mapChatV7(p: Buffer, escape: (s: string) => string): Mapped {
   if (p.length !== CHAT_V7_SIZE) return { messages: [], stop: "malformed" };
   const kind = p[9];
-  if (kind > 2) return { messages: [], stop: `chat kind ${kind} has no v10 kind (3 is a trade line in v10)` };
   const str = (at: number, size: number) => {
     const nul = p.indexOf(0, at);
     return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
   };
+  const raw = str(42, 288);
+  // KN kind 3 (NET_CHAT_FOUND_JUNK) is the finder's "You found [x.xx] Junk". v10 builds that line itself:
+  // _69625(-1, null, "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[x.xx]</span> Junk", 1)
+  // (v10.js, the handler of "jnk" 69722). The amount is the one KN wrote, already two decimals.
+  if (kind === 3) {
+    const found = /^You found \[([0-9]+\.[0-9]{2})\] Junk$/.exec(raw);
+    if (!found) return { messages: [], stop: "a found-junk line that is not the v10 form" };
+    const html = `<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[${found[1]}]</span> Junk`;
+    return { messages: [[V10_IN.ADD_CHAT, [-1, null, html, 1]]] };
+  }
+  // KN kind 4 (NET_CHAT_RANKED) is the ranked queue's notice, in the ranked green. v10 sends its own direct line the
+  // same way: _69625(-1, null, text, 2, "#5ce05a") (v10.js, the DM line). A server line (kind 2) takes its colour.
+  if (kind === 4) return { messages: [[V10_IN.ADD_CHAT, [-1, null, escape(raw), 2, "#5ce05a"]]] };
+  if (kind > 2) return { messages: [], stop: `chat kind ${kind} has no v10 kind` };
   const name = kind === 2 ? null : str(10, 32);
-  const text = escape(str(42, 288));
+  const text = escape(raw);
   return {
     messages: [[V10_IN.ADD_CHAT, [p.readInt8(0), name === null ? null : escape(name), text, kind, null, null, p.readInt32LE(1), null]]],
   };

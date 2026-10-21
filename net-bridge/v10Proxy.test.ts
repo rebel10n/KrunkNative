@@ -572,6 +572,19 @@ async function main(): Promise<void> {
   native.write(nativeFrame(240, stats));
   await sleep(50);
   assert.strictEqual(v10Proxy.untranslatedSeen.get("LEADER_STATS"), undefined);
+  // chat kinds 3 (found junk: the v10 line the client builds) and 4 (ranked: the v10 direct line in green)
+  const junk = Buffer.alloc(330);
+  junk[9] = 3;
+  junk.write("You found [1.25] Junk", 42, "utf8");
+  assert.deepStrictEqual(T.mapChatV7(junk, EV.escapeHtml).messages, [["ch", [-1, null, "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[1.25]</span> Junk", 1]]]);
+  junk.write("You found [1.2] Junk x", 42, "utf8");
+  assert.match(T.mapChatV7(junk, EV.escapeHtml).stop || "", /found-junk/);
+  const ranked = Buffer.alloc(330);
+  ranked[9] = 4;
+  ranked.write("Queued for ranked", 42, "utf8");
+  assert.deepStrictEqual(T.mapChatV7(ranked, EV.escapeHtml).messages, [["ch", [-1, null, "Queued for ranked", 2, "#5ce05a"]]]);
+  assert.match(T.mapState(Buffer.alloc(53)).stop || "", /stepVal/);
+
   // the v3 bot add (90) is consumed: no aai, and no stop (the v7 record, 162, is the one for a v7 peer)
   const bot = Buffer.alloc(101);
   bot.writeInt32LE(5, 0);
@@ -631,9 +644,9 @@ async function main(): Promise<void> {
   const ch = await waitFor(() => clientMessages.find((m) => m.label === "ch"), "ch");
   assert.deepStrictEqual(ch.args, [0, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, 7, null]);
 
-  // a packet with no translation yet (KrunkScript, 200) stops the translation
-  native.write(nativeFrame(200, Buffer.alloc(4)));
-  await waitFor(() => v10Proxy.untranslatedSeen.get("native 200"), "stop at 200");
+  // the per-tick player record (STATE, 6) has no v10 record without field 6 (stepVal): the translation stops there
+  native.write(nativeFrame(6, Buffer.alloc(53)));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("STATE"), "stop at STATE");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -664,7 +677,7 @@ async function main(): Promise<void> {
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
   // 8. the stop is final: one init, one stop, and no init after it
-  assert.strictEqual(v10Proxy.untranslatedSeen.get("native 200"), 1);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("STATE"), 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
   assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 
