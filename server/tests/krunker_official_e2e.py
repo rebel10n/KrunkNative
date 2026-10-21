@@ -5184,15 +5184,25 @@ def main():
     elif ONLY == "web":
         print("krunker_official_e2e: the web run needs Chromium and a web build (WEB_DIST_DIR): skipped")
     if not ran or (ONLY == "webview" and webview_skipped):
-        shutil.rmtree(WORK, ignore_errors=True)
         return 77
-    if all(results):
-        shutil.rmtree(WORK, ignore_errors=True)
-    else:
-        print(f"logs kept in {WORK}")
     print(f"{sum(results)}/{len(results)} passed")
     return 0 if results and all(results) else 1
 
 
+def finish_work(rc):
+    """Remove this run's scratch directory (WORK, created by this process) when the run passed or was skipped (77).
+    A failed run keeps it, with its path printed, so its logs can be read; an exception escaping main() is a failure."""
+    if rc in (0, 77):
+        shutil.rmtree(WORK, ignore_errors=True)
+    else:
+        print(f"logs kept in {WORK}", flush=True)
+    return rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = 1
+    try:
+        rc = main()
+    finally:
+        finish_work(rc)
+    sys.exit(rc)
