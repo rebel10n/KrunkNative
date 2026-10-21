@@ -619,6 +619,18 @@ async function main(): Promise<void> {
   const ai = await waitFor(() => clientMessages.find((m) => m.label === "ai"), "ai");
   assert.deepStrictEqual(ai.args, [[5, 1, 2, 3, 0, 0, 88, false, 0]]);
 
+  // a chat line for a v7 peer (245): ch (channel, name, text, kind, _, _, account, _), the text escaped
+  const chatLine = Buffer.alloc(330);
+  chatLine.writeInt8(0, 0); // channel: global
+  chatLine.writeInt32LE(7, 1); // account id
+  chatLine.writeInt32LE(3, 5); // sender uid
+  chatLine[9] = 0; // a player
+  chatLine.write("Ada", 10, "utf8");
+  chatLine.write("hi <b>", 42, "utf8");
+  native.write(nativeFrame(245, chatLine));
+  const ch = await waitFor(() => clientMessages.find((m) => m.label === "ch"), "ch");
+  assert.deepStrictEqual(ch.args, [0, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, 7, null]);
+
   // a packet with no translation yet (KrunkScript, 200) stops the translation
   native.write(nativeFrame(200, Buffer.alloc(4)));
   await waitFor(() => v10Proxy.untranslatedSeen.get("native 200"), "stop at 200");

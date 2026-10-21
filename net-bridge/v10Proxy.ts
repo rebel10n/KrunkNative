@@ -29,6 +29,7 @@ import net from "net";
 import type { IncomingMessage, Server as HttpServer } from "http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import * as UTILS from "./utils";
+import * as EV from "./nativeEvents";
 import * as T from "./v10Translate";
 
 export const WS_PATH = "/ws";
@@ -62,6 +63,7 @@ const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
   [T.NATIVE_MORE.LEADER_STATS]: "LEADER_STATS",
   [T.NATIVE_MORE.AI_ADD_V7]: "AI_ADD_V7",
   [T.NATIVE_MORE.DOM_UPDATE]: "DOM_UPDATE",
+  [T.NATIVE_MORE.CHAT_V7]: "CHAT_V7",
   [T.NATIVE_MORE.AI_SYNC_V7]: "AI_SYNC_V7",
 });
 
@@ -290,6 +292,12 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
   // AI_ADD (90) is the v3 encoding of a bot. A protocol 1.3+ peer gets AI_ADD_V7 (162) as well, with the full
   // record (server/src/ai.c 2124-2131 sends both; game_ai_packet_for_peer keeps one), so the v3 one is consumed:
   // translating both would add every bot twice.
+  if (session.initSent && type === T.NATIVE_MORE.CHAT_V7) {
+    const mapped = T.mapChatV7(payload, EV.escapeHtml);
+    if (mapped.stop) return stopAt(session, "CHAT_V7", mapped.stop);
+    for (const [label, args] of mapped.messages) sendWs(session, label, ...args);
+    return;
+  }
   if (session.initSent && type === T.NATIVE_MORE.DOM_UPDATE) {
     const mapped = T.mapDomUpdate(payload);
     if (mapped.stop) return stopAt(session, "DOM_UPDATE", mapped.stop);

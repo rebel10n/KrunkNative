@@ -74,6 +74,7 @@ export const V10_IN = Object.freeze({
   SET_WEAPON: "wep",
   C_SPAWN: "aai",
   UPDATE_DOM_ZONE: "uct",
+  ADD_CHAT: "ch",
   SYNC_ALL_AI: "ai",
   UPDATE_LEADERS: "7",
   START_GAME: "start",
@@ -221,6 +222,7 @@ export const NATIVE_MORE = Object.freeze({
   GLOBAL_VALUE: 121, // NET_PACKET_GLOBAL_VALUE (TRIGGERS + 1): the join's global values, v10 "gv"
   PLAYER_SOUND: 125, // NET_PACKET_PLAYER_SOUND (TRIGGERS + 5): add ("asnd") or remove ("rsnd") a loop
   TIMER: 15, // NET_PACKET_TIMER: seconds left and the end-screen flag, v10 "t"
+  CHAT_V7: 245, // NET_PACKET_CHAT_V7: a chat line for a v7 peer (NetChatV7Packet: channel, account id, NetChatPacket)
   DOM_UPDATE: 142, // NET_PACKET_DOM_UPDATE: the domination zones' state (NetDomUpdatePacket, protocol 1.4.4)
   SPAWN: 4, // NET_PACKET_SPAWN: a player's state at spawn (NetSpawnPacket, protocol 1.4.3 layout)
   LEADERBOARD: 14, // NET_PACKET_LEADERBOARD: the top 16 rows, NetLeaderboardPacket
@@ -734,6 +736,33 @@ export function parseBotSyncChunk(p: Buffer): { first: boolean; count: number; e
     );
   }
   return { first: p[0] !== 0, count, entries };
+}
+
+// ---- CHAT_V7 (245)
+
+// NetChatV7Packet (330 bytes, packed): int8 channel @0, int32 account_id @1, then the NetChatPacket: int32 uid @5,
+// uint8 kind @9, char name[32] @10 (the name as the server shows it to this peer), char text[288] @42.
+// The v10 chat line is "ch" with (channel, name, text, kind, color, _, accountId, _): the client's handler is
+// _69625 (v10.js), and the server's own senders are at v10.js 162788, 173621, 182075: ('ch', team, name|null, text, kind).
+// Verified against v10.js: the arguments up to kind (team first, name, text, kind 2 for server lines, kind 0 a player,
+// kind 3 a trade, the showMessages gate on kind 0). Inferred: the channel as the team argument (-1 all, 0 global,
+// 1 team, from social_v7.h), the account id as the mute argument (_69483.includes(_73604), its use in the handler),
+// and the color, _, _ as null. The text is HTML-escaped, as the v3 bridge did (the HUD escapes raw text).
+// KN kind 3 (found junk) and 4 (ranked) are not v10 kinds (3 is a trade line), so those lines stop the translation.
+const CHAT_V7_SIZE = 330;
+export function mapChatV7(p: Buffer, escape: (s: string) => string): Mapped {
+  if (p.length !== CHAT_V7_SIZE) return { messages: [], stop: "malformed" };
+  const kind = p[9];
+  if (kind > 2) return { messages: [], stop: `chat kind ${kind} has no v10 kind (3 is a trade line in v10)` };
+  const str = (at: number, size: number) => {
+    const nul = p.indexOf(0, at);
+    return p.subarray(at, nul < 0 || nul > at + size ? at + size : nul).toString("utf8");
+  };
+  const name = kind === 2 ? null : str(10, 32);
+  const text = escape(str(42, 288));
+  return {
+    messages: [[V10_IN.ADD_CHAT, [p.readInt8(0), name === null ? null : escape(name), text, kind, null, null, p.readInt32LE(1), null]]],
+  };
 }
 
 export type NativeInit = { mapIndex: number; modeIndex: number; tickRate: number; clientId: number; ruleset: number };
