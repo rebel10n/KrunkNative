@@ -494,7 +494,61 @@ export async function run(opts = {}) {
   }
 }
 
+// The join owner's harness join (krunker-local.mjs join), run from here: the stack, the harness page server (serve) and
+// the join child are each a pid this process started; the join's JSON report is read from its stdout. The harness
+// sets no window.__kn_game and no state.inGame on origin/main, so the report is what is measured, not a game object.
+async function runHarnessJoin(opts = {}) {
+  const runDir = path.join(os.homedir(), ".cache/kn-krunker-node/run", String(proc.pid) + "-harness");
+  fs.mkdirSync(runDir, { recursive: true });
+  const kids = new Children(runDir);
+  const secret = crypto.randomBytes(24).toString("base64url");
+  fs.writeFileSync(path.join(runDir, "secret"), secret, { mode: 0o600 });
+  let serve = null;
+  let join = null;
+  const stopAll = () => {
+    if (join && join.exitCode === null) join.kill("SIGTERM");
+    if (serve && serve.exitCode === null) serve.kill("SIGTERM");
+    kids.stop();
+  };
+  proc.on("SIGINT", () => { stopAll(); proc.exit(143); });
+  proc.on("SIGTERM", () => { stopAll(); proc.exit(143); });
+  try {
+    const stack = await startStack(kids, runDir, secret);
+    const pagePort = await freePort("tcp");
+    const tlsPort = await freePort("tcp");
+    const { file } = writeHarnessConfig(runDir, null, { pagePort, tlsPort, brainUrl: stack.brainUrl, bridgePort: stack.bridgePort });
+    const env = { ...proc.env, KN_KRUNKER_LOCAL_CONFIG: file };
+    serve = kids.spawn("harness", proc.execPath, [HARNESS, "serve"], { env, log: "harness.log" });
+    await waitFor(() => tcpOpen(pagePort, "127.0.0.1") && tcpOpen(tlsPort, "127.0.0.1"), 20000, "the harness page server");
+    // the join child's stdout is the report (JSON); its stderr goes to a log in the run dir
+    join = spawn(proc.execPath, [HARNESS, "join"], { env, cwd: REPO, stdio: ["ignore", "pipe", fs.openSync(path.join(runDir, "join.err"), "w")] });
+    fs.writeFileSync(path.join(runDir, "pids", "join.pid"), String(join.pid));
+    let out = "";
+    join.stdout.on("data", (c) => { out += c; });
+    const code = await new Promise((res) => join.on("exit", res));
+    fs.rmSync(path.join(runDir, "pids", "join.pid"), { force: true });
+    let report = null;
+    try { report = JSON.parse(out); } catch (e) { report = { parseError: out.slice(0, 300) }; }
+    const sockets = (report && report.sockets) || [];
+    const result = {
+      runDir, exitCode: code, frames: { in: report && report.framesIn, out: report && report.framesOut },
+      seek: report && report.seek, sockets: sockets.length, clicked: report && report.clicked, lost: /Lost Connection/.test((report && report.state && report.state.text) || ""),
+      inGame: !!(report && report.state && report.state.inGame), gameExposed: !!(report && report.game && report.game.exposed),
+      bridgeLog: report && report.bridgeLog, timeline: report && report.timeline && report.timeline.slice(-3),
+    };
+    fs.writeFileSync(path.join(runDir, "result.json"), JSON.stringify(result, null, 2));
+    return result;
+  } finally {
+    stopAll();
+  }
+}
+
 async function main() {
+  if (proc.argv.includes("--harness")) {
+    const r = await runHarnessJoin();
+    console.log(`[krunker-node] harness join: frames in ${r.frames.in} out ${r.frames.out}; sockets ${r.sockets}; inGame ${r.inGame}; window.__kn_game exposed ${r.gameExposed}; run ${r.runDir}`);
+    proc.exit(r.frames.in > 0 && r.frames.out > 0 ? 0 : 1);
+  }
   const smoke = proc.argv.includes("--smoke");
   const url = (await import("node:url")).pathToFileURL(HERE).href;
   if (!smoke) {
