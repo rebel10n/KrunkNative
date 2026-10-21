@@ -9,7 +9,13 @@
 //   inst-id, the three the v10 client needs before it answers. The bridge opens TCP to the native
 //   server and writes the forwarded-address frame first (NET_PACKET_FORWARDED, shared.h).
 //   client sends load (LOAD)                           -> HELLO (1)
-//   native INIT (2)                                    -> not translated yet: the session stops here
+//   native MAP_INFO (25)                               -> MAP_REQUEST (26); MAP_DATA (27) chunks are
+//                                                         reassembled into the map JSON
+//   native GAME_CONFIG (183), NETWORK_DATA (182)       -> init arguments 6 and 12
+//   native INIT (2)                                    -> init (INIT_GAME), held until the map is whole;
+//                                                         packets after it are queued meanwhile
+//   native GLOBAL_VALUE (121), PLAYER_SOUND (125), TIMER (15) -> gv, asnd / rsnd, t
+//   native MODE_STATE (40)                             -> not translated yet: the session stops here
 //   client sends en (ENTER_GAME)                       -> ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
@@ -26,13 +32,25 @@ const INIT_LOAD_ARG = 20000; // the first INIT_LOAD argument, as proxy.ts sends 
 const NET_HEADER_SIZE = 3;
 const SOCKET_ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-// Native packets that stop the translation, with the v10 handler they would feed (the report's table).
-export const UNTRANSLATED_NATIVE: Readonly<Record<number, string>> = Object.freeze({
-  [T.NATIVE.INIT]: "INIT (2) -> init (INIT_GAME): needs the map (REST /maps/<id> or the map object in arg 9) and the 35-argument list",
-});
+// Native packets that stop the translation, by name, counted for this process (the tests read it).
+export const untranslatedSeen = new Map<string, number>();
 
-// Counts of the first stop, per native packet type, for this process (the tests read it).
-export const untranslatedSeen = new Map<number, number>();
+// Native packets sent before the INIT that the v10 init does not take (billboards: a separate v10
+// "bill" packet, not translated, ignored).
+const SKIPPED_BEFORE_INIT: ReadonlySet<number> = new Set([T.NATIVE_MORE.BILLBOARD, T.NATIVE_MORE.BILLBOARD_IMAGE]);
+const NATIVE_NAMES: Readonly<Record<number, string>> = Object.freeze({
+  [T.NATIVE.HELLO]: "HELLO",
+  [T.NATIVE.INIT]: "INIT",
+  [T.NATIVE.ENT]: "ENT",
+  [T.NATIVE_MORE.MAP_INFO]: "MAP_INFO",
+  [T.NATIVE_MORE.MAP_REQUEST]: "MAP_REQUEST",
+  [T.NATIVE_MORE.MAP_DATA]: "MAP_DATA",
+  [T.NATIVE_MORE.NETWORK_DATA]: "NETWORK_DATA",
+  [T.NATIVE_MORE.GAME_CONFIG]: "GAME_CONFIG",
+  [T.NATIVE_MORE.GLOBAL_VALUE]: "GLOBAL_VALUE",
+  [T.NATIVE_MORE.PLAYER_SOUND]: "PLAYER_SOUND",
+  [T.NATIVE_MORE.TIMER]: "TIMER",
+});
 
 type V10Session = {
   id: string;
@@ -43,6 +61,16 @@ type V10Session = {
   pending: Buffer[];
   readBuffer: Buffer;
   helloSent: boolean; // LOAD is answered with one HELLO per session
+  mapInfo: T.NativeMapInfo | null; // the last MAP_INFO
+  mapAssembly: T.ChunkAssembly | null; // MAP_DATA chunks in progress
+  mapText: string | null; // the map JSON, whole
+  configAssembly: T.ChunkAssembly | null; // GAME_CONFIG chunks in progress
+  config: Record<string, unknown>; // init argument 6
+  networkData: Record<string, number>; // init argument 12
+  pendingInit: T.NativeInit | null; // the INIT, held until the map is whole
+  queue: Array<{ type: number; payload: Buffer }>; // packets that arrive while the INIT is held
+  initSent: boolean; // init went to the client: every later native packet not yet translated stops the session
+  globalValuesSent: boolean; // a gv went to the client: a later reset of the set cannot be replayed
   stopped: boolean; // true once a native packet had no translation: nothing more goes to the client
   closed: boolean;
   nativeHost: string;
@@ -127,16 +155,138 @@ function handleNativeData(session: V10Session, chunk: Buffer): void {
   }
 }
 
+function nativeName(type: number, payload: Buffer): string {
+  if (type === T.NATIVE_MORE.EXT && payload.length >= 2) {
+    const sub = payload.readUInt16LE(0);
+    return sub === T.EXT_GAME_STATE ? "EXT 0x0901 GAME_STATE" : `EXT 0x${sub.toString(16).padStart(4, "0")}`;
+  }
+  return NATIVE_NAMES[type] || `native ${type}`;
+}
+
+// The first native packet the translation cannot carry: nothing more goes to the client.
+function stopAt(session: V10Session, name: string, reason: string): void {
+  if (session.stopped) return;
+  session.stopped = true;
+  session.queue = [];
+  untranslatedSeen.set(name, (untranslatedSeen.get(name) || 0) + 1);
+  console.warn(`[v10-proxy] stop: native ${name} has no v10 translation yet (${reason})`);
+}
+
+// init (INIT_GAME): once the map JSON is whole. Then the packets held behind it run in order.
+function emitInit(session: V10Session): void {
+  const init = session.pendingInit;
+  if (!init || session.mapText === null) return;
+  session.pendingInit = null;
+  sendWs(session, T.V10_IN.INIT_GAME, ...T.buildInitArgs(init, session.mapText, session.config, session.networkData));
+  session.initSent = true;
+  for (const held of session.queue.splice(0)) handleNativePacket(session, held.type, held.payload);
+}
+
 function handleNativePacket(session: V10Session, type: number, payload: Buffer): void {
   if (type === T.NATIVE.PING) {
     writeNative(session, T.NATIVE.PONG, payload);
     return;
   }
   if (session.stopped) return;
-  if (UNTRANSLATED_NATIVE[type]) {
-    session.stopped = true;
-    untranslatedSeen.set(type, (untranslatedSeen.get(type) || 0) + 1);
-    console.warn(`[v10-proxy] stop: native packet ${type} has no v10 translation (${UNTRANSLATED_NATIVE[type]})`);
+  if (session.pendingInit && type !== T.NATIVE_MORE.MAP_DATA) {
+    session.queue.push({ type, payload });
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.GLOBAL_VALUE) {
+    const value = T.parseGlobalValue(payload);
+    if (!value) return stopAt(session, "GLOBAL_VALUE", "malformed");
+    // A reset clears the client's set. The client holds nothing from this bridge before its first gv,
+    // so a reset then is a no-op; after a gv, v10 has no message to clear the set: stop.
+    if (value.reset && session.globalValuesSent) return stopAt(session, "GLOBAL_VALUE", "reset after values: v10 gv cannot clear");
+    if (value.key.length === 0) return;
+    session.globalValuesSent = true;
+    sendWs(session, T.V10_IN.UPDATE_GLOBAL_VALUE, value.key, value.value);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.TIMER) {
+    const timer = T.parseTimer(payload);
+    if (!timer) return stopAt(session, "TIMER", "malformed");
+    sendWs(session, T.V10_IN.UPDATE_TIMER, timer.seconds, timer.end ? 1 : 0);
+    return;
+  }
+  if (session.initSent && type === T.NATIVE_MORE.PLAYER_SOUND) {
+    const sound = T.parsePlayerSound(payload);
+    if (!sound) return stopAt(session, "PLAYER_SOUND", "malformed");
+    // asnd: v10 addPlayerSound(sid, name, {loop, vol, rate}); rsnd: removePlayerSound(sid, name, force)
+    // (v10.js 190131, 190145; the server's own broadcasts have these arguments).
+    if (!sound.add) sendWs(session, T.V10_IN.REMOVE_PLAYER_SOUND, sound.uid, sound.name, sound.force);
+    else sendWs(session, T.V10_IN.ADD_PLAYER_SOUND, sound.uid, sound.name, { loop: sound.loop, vol: sound.volume, rate: sound.rate });
+    return;
+  }
+  if (session.initSent) {
+    stopAt(session, nativeName(type, payload), "after the init");
+    return;
+  }
+
+  switch (type) {
+    case T.NATIVE_MORE.MAP_INFO: {
+      const info = T.parseMapInfo(payload);
+      if (!info || info.size === 0) return stopAt(session, "MAP_INFO", "malformed or empty map");
+      session.mapInfo = info;
+      session.mapText = null;
+      session.mapAssembly = new T.ChunkAssembly(info.size);
+      // The bridge never has the map: it asks by hash, as the native client does (client/src/net/game_events.c).
+      writeNative(session, T.NATIVE_MORE.MAP_REQUEST, T.encodeMapRequest(info.hash));
+      return;
+    }
+    case T.NATIVE_MORE.MAP_DATA: {
+      const chunk = T.parseMapData(payload);
+      if (!chunk || !session.mapInfo || !session.mapAssembly || chunk.hash !== session.mapInfo.hash) {
+        return stopAt(session, "MAP_DATA", "not the map asked for");
+      }
+      if (!session.mapAssembly.add(chunk.offset, chunk.data)) return stopAt(session, "MAP_DATA", "out of order");
+      if (!session.mapAssembly.complete) return;
+      const text = session.mapAssembly.text();
+      session.mapAssembly = null;
+      try {
+        JSON.parse(text);
+      } catch (_err) {
+        return stopAt(session, "MAP_DATA", "the map is not JSON");
+      }
+      session.mapText = text;
+      emitInit(session);
+      return;
+    }
+    case T.NATIVE_MORE.GAME_CONFIG: {
+      const chunk = T.parseGameConfigChunk(payload);
+      if (!chunk || chunk.total === 0) return stopAt(session, "GAME_CONFIG", "malformed");
+      if (chunk.offset === 0) session.configAssembly = new T.ChunkAssembly(chunk.total);
+      if (!session.configAssembly || !session.configAssembly.add(chunk.offset, chunk.data)) {
+        return stopAt(session, "GAME_CONFIG", "out of order");
+      }
+      if (!session.configAssembly.complete) return;
+      const text = session.configAssembly.text();
+      session.configAssembly = null;
+      try {
+        session.config = T.buildConfig(text);
+      } catch (_err) {
+        return stopAt(session, "GAME_CONFIG", "the config is not JSON");
+      }
+      return;
+    }
+    case T.NATIVE_MORE.NETWORK_DATA: {
+      const network = T.parseNetworkData(payload);
+      if (!network) return stopAt(session, "NETWORK_DATA", "malformed");
+      session.networkData = network;
+      return;
+    }
+    case T.NATIVE.INIT: {
+      const init = T.parseInit(payload);
+      if (!init) return stopAt(session, "INIT", "malformed");
+      if (!session.mapInfo) return stopAt(session, "INIT", "no MAP_INFO before it");
+      session.pendingInit = init;
+      if (session.mapText !== null) emitInit(session);
+      else if (session.mapAssembly === null) return stopAt(session, "INIT", "the map was not requested");
+      return;
+    }
+    default:
+      if (SKIPPED_BEFORE_INIT.has(type)) return;
+      stopAt(session, nativeName(type, payload), "before the init");
   }
 }
 
@@ -174,6 +324,16 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     pending: [],
     readBuffer: Buffer.alloc(0),
     helloSent: false,
+    mapInfo: null,
+    mapAssembly: null,
+    mapText: null,
+    configAssembly: null,
+    config: {},
+    networkData: {},
+    pendingInit: null,
+    queue: [],
+    initSent: false,
+    globalValuesSent: false,
     stopped: false,
     closed: false,
     nativeHost: options.nativeHost || "127.0.0.1",

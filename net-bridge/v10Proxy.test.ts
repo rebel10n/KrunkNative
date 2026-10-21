@@ -27,6 +27,13 @@ function waitFor<V>(read: () => V | undefined, what: string, ms = 3000): Promise
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function nativeFrame(type: number, payload: Buffer): Buffer {
+  const head = Buffer.alloc(3);
+  head[0] = type;
+  head.writeUInt16BE(payload.length, 1);
+  return Buffer.concat([head, payload]);
+}
+
 // ---- layout of the translated ENT, without a socket
 {
   const en: unknown[] = new Array(T.EN_LENGTH).fill(0);
@@ -157,22 +164,113 @@ async function main(): Promise<void> {
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);
 
-  // 4. the native INIT: the translation stops (no init to the client), and the stop is recorded
-  const initPayload = Buffer.alloc(18);
-  initPayload[0] = 1;
-  initPayload[1] = 4;
-  initPayload[2] = 2;
-  initPayload.writeInt32LE(0, 3); // map index
-  initPayload.writeInt32LE(0, 7); // mode index
-  initPayload.writeUInt16BE(30, 11); // tick rate
-  initPayload.writeInt32LE(1, 13); // client id
-  initPayload[17] = 3; // ruleset
+  // 4. the map, the config and the network data come before the INIT (net_send_init), and the INIT
+  //    comes before the map bytes: the bridge asks for the map (MAP_REQUEST), holds the init until the
+  //    JSON is whole, then sends one init with the map object in argument 9 (no /maps/<id> fetch).
+  const mapJson = JSON.stringify({ name: "Test Map", objects: [], padding: "m".repeat(700) });
+  const mapBytes = Buffer.from(mapJson, "utf8");
+  const mapHash = 0xc0ffee;
+  const mapInfo = Buffer.alloc(44);
+  mapInfo.writeInt32LE(3, 0); // map index
+  mapInfo.writeUInt32LE(mapHash, 4);
+  mapInfo.writeUInt32LE(mapBytes.length, 8);
+  mapInfo.write("Test Map", 12, "utf8");
+  const settings = { hitBoxPad: 1, timeLimit: 5 };
+  const configBytes = Buffer.from(JSON.stringify({ host: 1, settings }), "utf8");
+  const cut = 20;
+  const configChunk = (offset: number, data: Buffer) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32LE(configBytes.length, 0);
+    head.writeUInt32LE(offset, 4);
+    return Buffer.concat([head, data]);
+  };
+  const networkData = Buffer.alloc(10);
+  networkData.writeUInt16LE(10, 0); // send_hz
+  networkData.writeUInt16LE(30, 2); // tick_hz
+  networkData.writeUInt16LE(1, 4); // sync_hz
+  const init = Buffer.alloc(18);
+  init[0] = 1;
+  init[1] = 4;
+  init[2] = 2;
+  init.writeInt32LE(3, 3); // map index
+  init.writeInt32LE(1, 7); // mode index
+  init.writeUInt16LE(30, 11); // tick rate
+  init.writeInt32LE(1, 13); // client id
+  init[17] = 3; // ruleset
   assert.ok(nativeSocket);
-  const header = Buffer.from([T.NATIVE.INIT, 0, 18]);
-  (nativeSocket as net.Socket).write(Buffer.concat([header, initPayload]));
-  await waitFor(() => v10Proxy.untranslatedSeen.get(T.NATIVE.INIT), "INIT stop");
-  await sleep(150);
-  assert.strictEqual(clientMessages.some((m) => m.label === "init"), false);
+  const native = nativeSocket as net.Socket;
+  native.write(nativeFrame(25, mapInfo)); // MAP_INFO
+  native.write(nativeFrame(183, configChunk(0, configBytes.subarray(0, cut)))); // GAME_CONFIG 1
+  native.write(nativeFrame(183, configChunk(cut, configBytes.subarray(cut)))); // GAME_CONFIG 2
+  native.write(nativeFrame(182, networkData)); // NETWORK_DATA
+  native.write(nativeFrame(T.NATIVE.INIT, init)); // INIT, before the map bytes
+  const request = await waitFor(() => nativeFrames.find((f) => f.type === 26), "MAP_REQUEST");
+  assert.strictEqual(request.payload.readUInt32LE(0), mapHash);
+  await sleep(100);
+  assert.strictEqual(clientMessages.some((m) => m.label === "init"), false); // held until the map is whole
+  const half = 496;
+  const mapChunk = (offset: number, data: Buffer) => {
+    const head = Buffer.alloc(10);
+    head.writeUInt32LE(mapHash, 0);
+    head.writeUInt32LE(offset, 4);
+    head.writeUInt16LE(data.length, 8);
+    return nativeFrame(27, Buffer.concat([head, data]));
+  };
+  native.write(mapChunk(0, mapBytes.subarray(0, half)));
+  native.write(mapChunk(half, mapBytes.subarray(half)));
+  const initMsg = await waitFor(() => clientMessages.find((m) => m.label === "init"), "init");
+  assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
+  const args = initMsg.args;
+  assert.strictEqual(args.length, 20); // the v10 server's INIT_GAME list (v10.js 222270)
+  assert.strictEqual(args[0], 3); // mapIndex
+  assert.strictEqual(args[1], 1); // modeIndex
+  assert.deepStrictEqual(args[6], settings); // config: the GAME_CONFIG settings
+  assert.strictEqual(args[9] && (args[9] as { data: unknown }).data, mapJson); // customMapData.data: the map JSON text
+  assert.deepStrictEqual(args[12], { snf: 10, tf: 30, sf: 1 }); // networkData
+  assert.strictEqual(args[13], true);
+
+  // a reset-only global value before any gv clears nothing the client holds: no message, no stop
+  const reset = Buffer.alloc(80);
+  reset[0] = 0x01; // NET_VALUE_RESET, no key
+  native.write(nativeFrame(121, reset));
+  // a global value after the INIT is a gv to the client (flags 0, the key, a double)
+  const globalValue = Buffer.alloc(80);
+  globalValue[0] = 0;
+  globalValue.write("score_limit", 1, "utf8");
+  globalValue.writeDoubleLE(2.5, 72);
+  native.write(nativeFrame(121, globalValue));
+  const gv = await waitFor(() => clientMessages.find((m) => m.label === "gv"), "gv");
+  assert.deepStrictEqual(gv.args, ["score_limit", 2.5]);
+
+  // a player sound (add) after the INIT is an asnd to the client: uid, name, {loop, vol, rate}
+  const sound = Buffer.alloc(39);
+  sound.writeInt32LE(2, 0);
+  sound[4] = 1; // add
+  sound[6] = 1; // loop
+  sound.writeFloatLE(0.5, 7);
+  sound.writeFloatLE(1.25, 11);
+  sound.write("footstep", 15, "utf8");
+  native.write(nativeFrame(125, sound));
+  const asnd = await waitFor(() => clientMessages.find((m) => m.label === "asnd"), "asnd");
+  assert.deepStrictEqual(asnd.args, [2, "footstep", { loop: true, vol: 0.5, rate: 1.25 }]);
+
+  // a player sound (remove) is an rsnd to the client: uid, name, force
+  const removed = Buffer.from(sound);
+  removed[4] = 0; // remove
+  native.write(nativeFrame(125, removed));
+  const rsnd = await waitFor(() => clientMessages.find((m) => m.label === "rsnd"), "rsnd");
+  assert.deepStrictEqual(rsnd.args, [2, "footstep", false]);
+
+  // the round timer is a t [seconds, end] to the client
+  const timer = Buffer.alloc(5);
+  timer.writeInt32LE(300, 0);
+  native.write(nativeFrame(15, timer));
+  const t = await waitFor(() => clientMessages.find((m) => m.label === "t"), "t");
+  assert.deepStrictEqual(t.args, [300, 0]);
+
+  // the game state EXT follows: the translation stops there and nothing more is sent to the client
+  native.write(nativeFrame(254, Buffer.from([0x01, 0x09, 0x01])));
+  await waitFor(() => v10Proxy.untranslatedSeen.get("EXT 0x0901 GAME_STATE"), "stop at GAME_STATE");
 
   // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
@@ -202,16 +300,17 @@ async function main(): Promise<void> {
   const pong = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.PONG), "PONG");
   assert.deepStrictEqual([...pong.payload], [0x78, 0x56, 0x34, 0x12]);
 
-  // 8. the stop is final: the INIT was the only untranslated packet, and no init reached the client
-  assert.strictEqual(v10Proxy.untranslatedSeen.get(T.NATIVE.INIT), 1);
-  assert.strictEqual(clientMessages.some((m) => m.label === "init"), false);
+  // 8. the stop is final: one init, one stop, and no init after it
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("EXT 0x0901 GAME_STATE"), 1);
+  assert.strictEqual(clientMessages.filter((m) => m.label === "init").length, 1);
+  assert.strictEqual(clientMessages.filter((m) => m.label === "gv").length, 1);
 
   ws.close();
   await sleep(50);
   v10Proxy.closeAllSessions(true);
   bridge.close();
   nativeServer.close();
-  console.info("v10Proxy test: ok (connect, LOAD->HELLO, ENTER_GAME->ENT, chat, PING->PONG, INIT stops the translation)");
+  console.info("v10Proxy test: ok (connect, LOAD->HELLO, the chunked map INIT, gv, asnd/rsnd, t, ENTER_GAME->ENT, chat, PING->PONG, then the stop)");
   process.exit(0);
 }
 
