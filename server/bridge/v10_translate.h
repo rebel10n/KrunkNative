@@ -22,17 +22,26 @@
 
 #include "cJSON.h"
 #include "krunker_proto.h"
+#include "shared.h" /* NetInputPacket, NET_INPUT_* (the KN input frame) */
 
 /* ---- v10 labels (v10Translate.ts V10_OUT / V10_IN) */
 #define V10_OUT_LOAD "load"
 #define V10_OUT_ENTER_GAME "en"
 #define V10_OUT_CHAT_MESSAGE "ct"
+#define V10_OUT_INPUT "q"
 
 #define V10_IN_IO_INIT "io-init"
 #define V10_IN_INIT_LOAD "load"
 #define V10_IN_GAME_INSTANCE_ID "inst-id"
 #define V10_IN_INIT_GAME "init"
 #define V10_IN_UPDATE_GLOBAL_VALUE "gv"
+#define V10_IN_PLAYER_INTERACTION "inat"
+#define V10_IN_UPD_MATCH_VOTE "mv"
+#define V10_IN_REMOVE_PLAYER "2" /* v10.js 97927 REMOVE_PLAYER, the handler _73270: one sid */
+#define V10_IN_KILL_PLAYER "3" /* v10.js 97935 KILL_PLAYER, the handler _73275 (220335): the death UI and the respawn countdown */
+#define V10_IN_ENTER_GAME "frs" /* v10.js 97956 ENTER_GAME (the server's label), the handler 222318: enterGame(arg) sends "en" */
+#define V10_IN_SHOW_TRACER "9" /* v10.js 97902 SHOW_TRACER, the handler 220548 (_73392) */
+#define V10_IN_SYNC_PLAYER "l" /* v10.js 220091: the owner's movement state, one argument: the 26-slot array */ /* the pickup half: updatePickup(uid, weapon, null, active, pos) (v10.js 219827) */
 #define V10_IN_ADD_PLAYER_SOUND "asnd"
 #define V10_IN_REMOVE_PLAYER_SOUND "rsnd"
 #define V10_IN_UPDATE_TIMER "t"
@@ -198,6 +207,47 @@ int v10_chunks_complete(const V10Chunks *c);
 
 void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n);
 void v10_map_object_state(V10Out *o, const uint8_t *p, size_t n);
+/* MATCH_VOTE_STATE (NetMatchVoteStatePacket, 170 bytes): the match cards' votes as "mv" [vo, mts]. */
+void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socket_id);
+/* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
+void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
+/* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and
+ * encodeInputBatch in v10Translate.ts (the fields, the deltas, the resync; the NetInputPacket of shared.h). */
+typedef struct V10Input {
+    double *angles;     /* the last window's angles: pitch, yaw of the first frame, then each frame's delta */
+    size_t angle_count, angle_cap;
+    double vals[15];    /* fields 4..14 as the window last set them (index = field) */
+} V10Input;
+void v10_input_init(V10Input *in);
+void v10_input_free(V10Input *in);
+/* The frames of one q (args: resync, firstIsn, dts, dtLen, angles?, changes?, syncTimes?): a malloc'd array of
+ * *count frames (free it), NULL when the q is malformed. */
+NetInputPacket *v10_decode_input(V10Input *in, const KrunkerValue *args, uint32_t argc, size_t *count);
+/* The NET_PACKET_INPUT_BATCH payload of n frames (n <= NET_INPUT_BATCH_MAX): count, then the frames. Returns its length. */
+size_t v10_encode_input_batch(const NetInputPacket *frames, size_t n, uint8_t *out);
+
+/* EXT 0x8120 (NetServerLinePacket, 324 bytes): a join or leave line about a player, formatted as a server line (mapServerLine). */
+void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n);
+/* A player's last position and height: the origin of its shots (mapShot). */
+typedef struct V10Shooter {
+    int32_t uid;
+    double x, y, z, height;
+} V10Shooter;
+
+/* LEAVE (NetLeavePacket, 4 bytes): another player disconnected, the "2" (mapLeave, v10Translate.ts). */
+void v10_map_leave(V10Out *o, const uint8_t *p, size_t n);
+/* A joiner waiting to spawn (our own SPAWN, not active): KILL_PLAYER [uid, 0, 0, [], nil, false], the death that
+ * starts the respawn countdown (see mapDeathCountdown in net-bridge/v10Translate.ts). */
+void v10_map_death_countdown(V10Out *o, int32_t uid);
+/* The server's ENTER_GAME to a joiner waiting to spawn, right after the countdown starts: frs [true] (mapEnterGame). */
+void v10_map_enter_game(V10Out *o);
+/* SHOT (NetShotPacket, 31 bytes): one hitscan ray of another player's shot as the tracer "9" (mapShot, v10Translate.ts).
+ * shooter: that player's last state or spawn, NULL when the bridge has none (the origin is then the hit point at height 0). */
+void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter);
+/* RECON (NetReconPacket, 89 bytes): the owner's movement state as the "l" sync array (mapRecon in v10Translate.ts). */
+void v10_map_recon(V10Out *o, const uint8_t *p, size_t n);
+/* PICKUP (NetPickupPacket, 26 bytes): one pickup's state as the "inat" message (mapPickup in v10Translate.ts). */
+void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n);
 /* CHEAT (NetCheatPacket: uint8 flag, uint8 on): 0 when malformed. */
 int v10_parse_cheat(const uint8_t *p, size_t n, uint8_t *flag, int *on);
 /* The v10 label of a cheat flag (noc, unl, fh, frz), NULL when the flag has none (borders, forcecol, ...). */
@@ -274,7 +324,9 @@ typedef struct V10StateRec {
     int grapple_on;
     double grapple[3];
     double ping;
+    double height; /* the shooter's height: player_height - crouch_val * crouch_distance (the tracer's origin) */
 } V10StateRec;
+
 int v10_map_state(const uint8_t *p, size_t n, V10StateRec *out);
 /* The 13-field "k" record (V10_STATE_FIELDS values, arena). */
 KrunkerValue v10_state_record(V10Out *o, const V10StateRec *r);

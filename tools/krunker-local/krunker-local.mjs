@@ -375,6 +375,47 @@ const ACCEPT_JS = `(() => {
 // consentBlock is position: fixed, so offsetParent is null for it: test the computed box instead
 // Logs every WebSocket.close the page makes, with the call site (the bundle's own names, the source is game.js):
 // the report's "hooks" list says who closed the game socket. It only logs; the call goes on as it was.
+const WS_EVENTS_HOOK = `(() => { const Native = window.WebSocket;
+  window.WebSocket = class extends Native {
+    constructor(...a) { super(...a);
+      this.addEventListener("error", () => console.log("[hook] ws error " + a[0]));
+      this.addEventListener("close", (e) => console.log("[hook] ws close " + e.code + " clean=" + e.wasClean + " reason=" + e.reason + " " + a[0].split("?")[0])); } };
+  Object.setPrototypeOf(window.WebSocket, Native); })();`;
+// Traces for the re-seek: the stack of every seek that carries excludeGame (who asks to leave the game), the time of
+// each client "po" ping (msgpack fixstr "po" in the frame) and of each server label that arrives, from the frame's
+// first msgpack string. Only logs; the calls go on as they were.
+const TRACE_HOOK = `(() => {
+  const t0 = performance.now(); const T = () => (performance.now() - t0).toFixed(0);
+  // timers of two seconds or more: where they are set (the stack) and when they fire. The bundle's setTimeout
+  // alias is bound to window.setTimeout by the loader, so this wrapper is installed before the loader runs.
+  const origTimeout = window.setTimeout;
+  window.setTimeout = function (fn, ms, ...rest) {
+    if (ms >= 2000 && typeof fn === "function") {
+      const stack = String(new Error().stack).split("\\n").slice(2, 6).map((l) => l.trim().slice(0, 90)).join(" | ");
+      console.log("[hook] timer " + ms + "ms set " + T() + "ms at " + stack);
+      return origTimeout.call(this, function (...args) { console.log("[hook] timer " + ms + "ms fired " + T() + "ms"); return fn.apply(this, args); }, ms, ...rest);
+    }
+    return origTimeout.call(this, fn, ms, ...rest);
+  };
+  window.addEventListener("error", (e) => console.log("[hook] error " + T() + "ms " + String(e.message).slice(0, 160) + " at " + String(e.filename).split("/").pop() + ":" + e.lineno + ":" + e.colno));
+  window.addEventListener("unhandledrejection", (e) => console.log("[hook] rejection " + T() + "ms " + String(e.reason && (e.reason.message || e.reason)).slice(0, 160)));
+  const origFetch = window.fetch;
+  window.fetch = function (...a) {
+    try { const u = String(a[0] && a[0].url ? a[0].url : a[0]); if (/excludeGame/.test(u)) console.log("[hook] seek excludeGame " + T() + "ms " + String(new Error().stack).split("\\n").slice(1, 16).join(" | ")); } catch (e) {}
+    return origFetch.apply(this, a); };
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    try { const b = new Uint8Array(data); const s = String.fromCharCode(...b.slice(0, 40)); if (s.indexOf("po") >= 0 && b.length < 40) console.log("[hook] ping po " + T() + "ms n=" + b.length);
+    if (b.length > 2 && b[0] !== undefined && (b.indexOf(0xa2) >= 0 && b[b.indexOf(0xa2) + 1] === 0x65 && b[b.indexOf(0xa2) + 2] === 0x6e) && b.indexOf(0xa2) < 4) console.log("[hook] SEND en " + T() + "ms n=" + b.length + " " + String(new Error().stack).split("\\n").slice(1, 9).map((l) => l.trim().slice(0, 110)).join(" | ")); } catch (e) {}
+    return send.call(this, data); };
+  const Native = Object.getPrototypeOf(WebSocket.prototype).constructor;
+  const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(WebSocket).prototype, "onmessage");
+  Object.defineProperty(WebSocket.prototype, "onmessage", { configurable: true,
+    get() { return this.__om || null; },
+    set(fn) { this.__om = fn; desc.set.call(this, (ev) => {
+      try { const b = new Uint8Array(ev.data); const s = String.fromCharCode(...b.slice(0, 32)); const m = s.match(/(gsc|pir|pi|po|kick|ERR|er|\\bv\\b|sp|ch)/); console.log("[hook] recv " + T() + "ms n=" + b.length + " " + (m ? m[1] : "?")); } catch (e) {}
+      if (fn) fn.call(this, ev); }); } });
+})();`;
 const WS_CLOSE_HOOK = `(() => { const close = WebSocket.prototype.close; WebSocket.prototype.close = function (...a) {
   try { console.log("[hook] ws.close " + JSON.stringify(a) + " " + String(new Error().stack).split("\\n").slice(1, 7).join(" | ")); } catch (e) {}
   return close.apply(this, a); }; })();`;
@@ -396,12 +437,24 @@ const PAUSE_PROBE_JS = `(() => {
 // The exception probe: the frame that threw (the bundle's own names). The lookup that fails is modes[index].
 const EXC_PROBE_JS = `(() => {
   const o = {};
-  try { o.idx = [typeof IÌíiîïì === "undefined" ? "undef" : IÌíiîïì, typeof IIíïiíí === "undefined" ? "undef" : typeof IIíïiíí]; } catch (e) { o.e1 = e.message; }
-  try { o.modes = iìiiìíi.length; } catch (e) { o.e2 = e.message; }
-  try { o.self = this && typeof this === "object" ? [this.modeIndex, this.mapIndex, this.eventIndex] : String(this); } catch (e) { o.e3 = e.message; }
+  const get = (src) => { try { return eval(src); } catch (e) { return "missing"; } };
+  for (const n of ["IÌíiîïì", "IIíïiíí", "IIíìiîi", "IÎìiìíï", "IÏïïîìí", "iìiiìíi"]) {
+    const v = get(n);
+    o[n] = v === null ? "null" : typeof v === "object" && v ? "obj{" + Object.keys(v).slice(0, 8).join(",") + "}" : typeof v === "number" || typeof v === "string" ? typeof v + ":" + String(v).slice(0, 40) : typeof v;
+  }
+  const self = get("this");
+  o.self = self && typeof self === "object" ? [self.modeIndex, self.mapIndex, self.eventIndex, typeof self.map, typeof self.ais] : String(self);
+  const args = get("arguments");
+  o.args = args && args.length !== undefined ? Array.from(args).slice(0, 12).map((a) => a === null ? "null" : typeof a === "object" ? (Array.isArray(a) ? "arr" + a.length : "obj") : typeof a + ":" + String(a).slice(0, 24)) : String(args);
   return JSON.stringify(o);
 })()`;
-const INIT_HANDLER_COLUMN = 10307050; // the disconnect call in the init handler (game.js line 1, 0-based column)
+const INIT_HANDLER_COLUMN = 10307050;
+// the disconnect routine (the window's "Lost Connection"): its entry, and its arguments (reason, code, error)
+const DISCONNECT_COLUMN = 10493103;
+const DISCONNECT_PROBE_JS = `(() => {
+  const s = (x) => x === null ? "null" : x === undefined ? "undefined" : typeof x === "object" ? "obj:" + JSON.stringify(x).slice(0, 160) : String(x).slice(0, 160);
+  try { return JSON.stringify({ reason: s(iïÌïîïî), code: s(iìÌìîiï), err: s(iíÍïíiì) }); } catch (e) { return "probe " + e.message; }
+})()`; // the disconnect call in the init handler (game.js line 1, 0-based column)
 const CONSENT_OPEN_JS =`(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
 const CLICK_PLAY_JS = `(() => {
   const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
@@ -422,7 +475,7 @@ const STATE_JS = `(() => ({
 
 function bridgeLines() {
   if (!cfg.bridge.log || !fs.existsSync(cfg.bridge.log)) return [];
-  return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|net-bridge|\[bridge\]/.test(l)).slice(-40);
+  return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|v10-bridge|net-bridge|\[bridge\]/.test(l)).slice(-40);
 }
 
 async function join() {
@@ -438,7 +491,7 @@ async function join() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], hooks: [], pauses: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
   const reqUrl = new Map();
   let appScript = null;
   const hostsSeen = new Set();
@@ -470,6 +523,12 @@ async function join() {
         case "Network.loadingFailed": report.failed.push(`${redact(reqUrl.get(p.requestId) || p.requestId).slice(0, 120)}: ${p.errorText}`); break;
         case "Network.responseReceived":
           if (/seek-game/.test(p.response.url)) report.seek.push(`${p.response.status} ${redact(p.response.url)}`);
+          if (/seek-game/.test(p.response.url)) {
+            send("Network.getResponseBody", { requestId: p.requestId }).then((b) => {
+              const body = String(b.result && b.result.body || "");
+              report.seekBodies.push(`${p.response.status} ${body.replace(/"(accessToken|clientId|clientKey|bypassToken|validationToken)":"[^"]*"/g, '"$1":"…"').slice(0, 500)}`);
+            });
+          }
           if (p.response.status >= 400) report.httpErrors.push(`${p.response.status} ${redact(p.response.url).slice(0, 120)}`);
           break;
         case "Runtime.exceptionThrown": {
@@ -483,14 +542,27 @@ async function join() {
             appScript = p.scriptId;
             send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: INIT_HANDLER_COLUMN } })
               .then((r) => { report.breakpoint = r.result ? r.result.actualLocation : r; });
+            send("Debugger.setBreakpoint", { location: { scriptId: appScript, lineNumber: 2, columnNumber: DISCONNECT_COLUMN } })
+              .then((r) => { report.disconnectBreakpoint = r.result ? r.result.actualLocation : r; });
           }
           break;
         case "Debugger.paused": {
           const top = p.callFrames[0];
           if (p.reason === "exception") {
             (async () => {
-              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
-              report.pauses.push({ exception: top.functionName, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
+              for (const f of p.callFrames.slice(0, 2)) {
+                const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: f.callFrameId, expression: EXC_PROBE_JS, returnByValue: true });
+                report.pauses.push({ exception: f.functionName, line: f.location && f.location.lineNumber, col: f.location && f.location.columnNumber, probe: r.result && r.result.result ? r.result.result.value : r.error || r });
+              }
+              await send("Debugger.resume");
+            })();
+            break;
+          }
+          if (top.functionName === "iïiìïîï") {
+            (async () => {
+              const r = await send("Debugger.evaluateOnCallFrame", { callFrameId: top.callFrameId, expression: DISCONNECT_PROBE_JS, returnByValue: true });
+              const callers = p.callFrames.slice(1, 5).map((f) => `${f.functionName}@${f.location.columnNumber}`);
+              report.disconnects.push({ args: r.result && r.result.result ? r.result.result.value : r.error || r, callers });
               await send("Debugger.resume");
             })();
             break;
@@ -507,7 +579,7 @@ async function join() {
         case "Runtime.consoleAPICalled": {
           const text = p.args.map((a) => a.value ?? a.description).join(" ");
           if (p.type === "error") report.consoleErrors.push(text.slice(0, 200));
-          if (text.startsWith("[hook] ")) report.hooks.push(text.slice(7, 600));
+          if (text.startsWith("[hook] ")) report.hooks.push(text.slice(7, 1800));
           break;
         }
       }
@@ -523,7 +595,10 @@ async function join() {
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_EVENTS_HOOK });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: TRACE_HOOK });
     await send("Debugger.enable");
+    await send("Debugger.setAsyncCallStackDepth", { maxDepth: 32 });
     await send("Debugger.setPauseOnExceptions", { state: "uncaught" });
     await send("Page.navigate", { url: cfg.localUrl });
     await sleep(cfg.loadWaitMs);

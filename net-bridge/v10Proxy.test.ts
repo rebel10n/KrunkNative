@@ -317,15 +317,17 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   bot[65] = 1; // no_smooth
   const [botLabel, botArgs] = T.mapBotAdd(bot).messages[0];
   assert.strictEqual(botLabel, "aai");
-  assert.deepStrictEqual((botArgs as unknown[]).slice(0, 6), [9, 4, "Bot", 1.5, 2, 3]);
-  assert.deepStrictEqual((botArgs as unknown[])[6], {
+  assert.strictEqual((botArgs as unknown[]).length, 1, "aai is one record argument");
+  const botRec = (botArgs as unknown[][])[0];
+  assert.deepStrictEqual(botRec.slice(0, 6), [9, 4, "Bot", 1.5, 2, 3]);
+  assert.deepStrictEqual(botRec[6], {
     hasAnim: 1, animS: 0.5, soundR: 30, team: 2, health: 100, mSize: 1.5, mYOff: 0.25, mROff: 0.5, hbh: 1,
     asset: "46544e", idl: 7, src: "a/b.glb", noVis: 1, tagScale: 1.25, lvl: 3, side: 1, opacity: 0.5, alphaTest: 0.5,
     texEncode: 2, noSmooth: true, noFog: false, fTrans: true, frames: 4, frameT: 0.25, rAnim: 0.75, rAnimA: 1,
     bobD: 0.125, bobS: 2,
   });
   bot[60] = 0;
-  assert.strictEqual((T.mapBotAdd(bot).messages[0][1] as unknown[])[6], 0);
+  assert.strictEqual(((T.mapBotAdd(bot).messages[0][1] as unknown[][])[0])[6], 0);
 }
 
 // ---- PICKUP (128, packed 26 bytes) as inat with no player, and MATCH_VOTE_STATE (181, 170 bytes) as mv [vo, mts]
@@ -342,8 +344,9 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.deepStrictEqual(T.mapPickup(pickup({ uid: 7, weapon: 12, active: 1 })).messages, [["inat", [-1, null, null, 7, 12, true, true, null]]]);
   assert.deepStrictEqual(T.mapPickup(pickup({ uid: 7, weapon: 12, active: 0, moved: true, pos: [1, 2, 3] })).messages,
     [["inat", [-1, null, null, 7, 12, true, false, [1, 2, 3]]]]);
-  // an empty pickup (weapon -1) goes as weapon 0 and inactive
-  assert.deepStrictEqual(T.mapPickup(pickup({ uid: 9, weapon: -1, active: 1 })).messages, [["inat", [-1, null, null, 9, 0, true, false, null]]]);
+  // an empty pickup (weapon -1) has no weapon: the server sets it to undefined (v10.js 173166), which goes as null; its
+  // active flag is the server's own (v10.js 173186, !!active)
+  assert.deepStrictEqual(T.mapPickup(pickup({ uid: 9, weapon: -1, active: 1 })).messages, [["inat", [-1, null, null, 9, null, true, true, null]]]);
   assert.match(T.mapPickup(Buffer.alloc(25)).stop || "", /malformed/);
 
   const vote = (count: number, voted: number, entries: Array<[number, number, number]>) => {
@@ -367,6 +370,194 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.deepStrictEqual(T.mapMatchVoteState(vote(0, -1, []), "sock").messages, [["mv", [{}, []]]]);
   assert.match(T.mapMatchVoteState(vote(5, -1, []), "sock").stop || "", /malformed/);
   assert.match(T.mapMatchVoteState(Buffer.alloc(169), "sock").stop || "", /malformed/);
+}
+
+// NET 9 (NetChatPacket, 325 bytes): the kinds are the v7 line's (found junk 3, ranked 4, player 0, game 1, server 2)
+{
+  const v3 = (kind: number, uid: number, name: string, text: string) => {
+    const b = Buffer.alloc(325);
+    b.writeInt32LE(uid, 0);
+    b[4] = kind;
+    b.write(name, 5, "utf8");
+    b.write(text, 37, "utf8");
+    return b;
+  };
+  assert.deepStrictEqual(T.mapChat(v3(3, -1, "", "You found [1.25] Junk"), EV.escapeHtml).messages,
+    [["ch", [-1, null, "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[1.25]</span> Junk", 1]]]);
+  assert.match(T.mapChat(v3(3, -1, "", "You found [1.2] Junk x"), EV.escapeHtml).stop || "", /found-junk/);
+  assert.deepStrictEqual(T.mapChat(v3(4, -1, "", "Queued for ranked"), EV.escapeHtml).messages, [["ch", [-1, null, "Queued for ranked", 2, "#5ce05a"]]]);
+  assert.match(T.mapChat(v3(7, -1, "", "x"), EV.escapeHtml).stop || "", /chat kind 7/);
+  assert.match(T.mapChat(Buffer.alloc(324), EV.escapeHtml).stop || "", /malformed/);
+  assert.deepStrictEqual(T.mapChat(v3(2, -1, "", "a <i>"), EV.escapeHtml).messages, [["ch", [-1, null, "a &lt;i&gt;", 2, null, null, null, null]]]);
+}
+
+// ---- q (INPUT, v10.js 221540-221580): the official client's input window -> NET_PACKET_INPUT_BATCH (111)
+// The q is [resync, firstIsn, dts, dtLen, angles?, changes?, syncTimes?] (v10.js 221577); each frame's 15 fields are
+// the v10 frame of the window: sequence, dt (ms), pitch and yaw (milli-radians, the first frame's, then the deltas), then
+// fields 4..14 (move index, shoot, ADS, jump, reload, crouch, scroll, swap, speed, reset, interact) from "j-k" changes.
+// The NetInputPacket: x_dir is the pitch, y_dir the yaw (bots.c: in.x_dir = pitch, in.y_dir = yaw).
+{
+  const st = T.newInputState();
+  // frame 0 (isn 5): 16 ms, pitch 0.1, yaw -0.2, move index 3, shoot; every field sent (the first frame restates them)
+  const allChanges = (j: number, over: Record<string, number>) => {
+    const c: Record<string, number> = {};
+    for (let k = 4; k <= 14; k++) c[`${j}-${k}`] = 0;
+    return { ...c, ...Object.fromEntries(Object.entries(over).map(([k, v]) => [k, v])) };
+  };
+  const first = T.decodeInputBatch(st, [0, 5, "1616", 2, [100, -200, 5, 2], allChanges(0, { "0-4": 3, "0-5": 1 })]);
+  assert.ok(first);
+  assert.strictEqual(first!.length, 2);
+  // seq, move (index 3 -> 2: the movDirs order), delta, pitch (x_dir), yaw (y_dir), flags
+  assert.strictEqual(first![0].seq, 5);
+  assert.strictEqual(first![0].moveDir, 2);
+  assert.ok(Math.abs(first![0].delta - 0.016) < 1e-9);
+  assert.ok(Math.abs(first![0].xDir - 0.1) < 1e-9, "x_dir is the pitch");
+  assert.ok(Math.abs(first![0].yDir + 0.2) < 1e-9, "y_dir is the yaw");
+  assert.strictEqual(first![0].flags, T.NET_INPUT.SHOOT);
+  // frame 1 (isn 6): the angles are deltas (5 and 2 milli-radians), the same fields: no change sent, so they carry
+  assert.strictEqual(first![1].seq, 6);
+  assert.ok(Math.abs(first![1].xDir - 0.105) < 1e-9, "pitch accumulates the delta");
+  assert.ok(Math.abs(first![1].yDir + 0.198) < 1e-9, "yaw accumulates the delta");
+  assert.strictEqual(first![1].moveDir, 2);
+  assert.strictEqual(first![1].flags, T.NET_INPUT.SHOOT);
+
+  // each flag and value, one at a time (a fresh state each: the field is the only change)
+  const one = (over: Record<string, number>) => T.decodeInputBatch(T.newInputState(), [1, 1, "16", 2, [0, 0], allChanges(0, over)])![0];
+  assert.strictEqual(one({ "0-4": -1 }).moveDir, -1, "moveLock: no move direction");
+  assert.strictEqual(one({ "0-4": 0 }).moveDir, 7, "move index 0 is direction 7");
+  assert.strictEqual(one({ "0-4": 8 }).moveDir, -1, "a move index past the eight directions is no direction");
+  assert.strictEqual(one({ "0-6": 1 }).flags, T.NET_INPUT.SCOPE, "ADS (scope) is field 6");
+  assert.strictEqual(one({ "0-7": 1 }).flags, T.NET_INPUT.JUMP, "jump is field 7");
+  assert.strictEqual(one({ "0-8": 1 }).flags, T.NET_INPUT.RELOAD, "reload is field 8");
+  assert.strictEqual(one({ "0-9": 1 }).flags, T.NET_INPUT.CROUCH, "crouch is field 9");
+  assert.strictEqual(one({ "0-10": -1 }).scroll, -1, "scroll is field 10");
+  assert.strictEqual(one({ "0-11": 1 }).swap, 1, "weapon swap is field 11");
+  assert.strictEqual(one({ "0-12": 0.5 }).slowdown, 5, "the slowdown (1 - speedLmt, in tenths) is field 12");
+  assert.strictEqual(one({ "0-13": 1 }).flags, T.NET_INPUT.RESET_START, "reset 1 is reset to start");
+  assert.strictEqual(one({ "0-13": 2 }).flags, T.NET_INPUT.RESET_LAST, "reset 2 is reset to last");
+  assert.strictEqual(one({ "0-14": 1 }).flags, T.NET_INPUT.INTERACT, "interact is field 14");
+
+  // a window with no angles keeps the last ones; a resync (1) restarts the deltas and the fields
+  const st2 = T.newInputState();
+  T.decodeInputBatch(st2, [0, 1, "16", 2, [100, 200], allChanges(0, { "0-5": 1 })]);
+  const kept = T.decodeInputBatch(st2, [0, 2, "16", 2, 0, { "0-4": 2 }])!;
+  assert.ok(Math.abs(kept[0].xDir - 0.1) < 1e-9 && kept[0].flags === T.NET_INPUT.SHOOT, "no angles: the window before's, the shoot carries");
+  const resynced = T.decodeInputBatch(st2, [1, 9, "16", 2, 0, { "0-4": 2 }])!;
+  assert.strictEqual(resynced[0].flags, 0, "a resync restarts the fields: no shoot");
+  assert.strictEqual(T.decodeInputBatch(st2, [0, 1, 0, 0, 0, 0]), null, "a non-number dt list is malformed");
+  assert.deepStrictEqual(T.decodeInputBatch(st2, [0, 1, "", 0, 0, 0]), [], "an empty window has no frames");
+  // the batch encodes the NetInputPacket layout: count, then 24 bytes per frame
+  const packed = T.encodeInputBatch(first!);
+  assert.strictEqual(packed.length, 1 + 24 * 2);
+  assert.strictEqual(packed[0], 2);
+  assert.strictEqual(packed.readInt32LE(1), 5);
+  assert.strictEqual(packed.readInt32LE(1 + 4), 2);
+}
+
+// ---- RECON (110, NetReconPacket, 89 bytes): the owner's authoritative state -> v10 "l" (the sync array, 26 slots;
+// the handler reads them by index, v10.js 220091-220140). The packet's layout (packed, shared.h): ack_seq @0, position
+// @4, velocity @16, yaw @28, aim_val @32, crouch_val @36, loadout @40, slide_timer @44, x_vel_c @48, z_vel_c @52, on_wall
+// @56, flags @57, wall_jump_count @58, can_slide_timer @60 (s), slide_ms @64 (double), grapple_active @72, grapple @73.
+{
+  const recon = Buffer.alloc(89);
+  recon.writeInt32LE(12, 0); // ack_seq
+  [1.5, 2.25, -3].forEach((v, i) => recon.writeFloatLE(v, 4 + 4 * i)); // position
+  [0.5, -1, 2].forEach((v, i) => recon.writeFloatLE(v, 16 + 4 * i)); // velocity: x, y, z
+  recon.writeFloatLE(0.75, 28); // yaw
+  recon.writeFloatLE(0.25, 32); // aim_val (KN: 0 hip, 1 ADS)
+  recon.writeFloatLE(0.5, 36); // crouch_val
+  recon.writeInt32LE(2, 40); // loadout_index
+  recon.writeFloatLE(0.5, 44); // slide_timer (s): not used by the v10 record
+  recon.writeFloatLE(3, 48); // x_vel_cylinder
+  recon.writeFloatLE(4, 52); // z_vel_cylinder
+  recon[56] = 1; // on_wall: side 1
+  recon[57] = 0x01 | 0x10 | 0x20; // on ground, can slide, on terrain
+  recon.writeUInt16LE(3, 58); // wall_jump_count
+  recon.writeFloatLE(0.25, 60); // can_slide_timer (s): canSlideT is ms
+  recon.writeDoubleLE(420, 64); // slide_ms
+  recon[72] = 0; // no grapple
+  const r = T.mapRecon(recon);
+  assert.deepStrictEqual(r.messages, [["l", [[12, 0, 1.5, 2.25, -3, -1, 0.5, 2, 0.75, true, false, false, 3, 1, false, 0.75, 0.5, 2, 420, true, true, 3, 4, null, 250, null]]]]);
+  // the aim is the inverse of the decoder's (aimVal = 1 - aim_val): a grapple reads its point and range
+  recon[57] = 0x02; // did jump
+  recon[72] = 1;
+  [10, 11, 12, 13].forEach((v, i) => recon.writeFloatLE(v, 73 + 4 * i));
+  const g = T.mapRecon(recon).messages[0][1][0] as unknown[];
+  assert.strictEqual(g[9], false, "onGround is the flag");
+  assert.strictEqual(g[10], true, "didJump is the flag");
+  assert.deepStrictEqual(g[23], [10, 11, 12, 13], "the grapple: its point and range");
+  assert.strictEqual(g[24], 250, "canSlideT: 0.25 s is 250 ms");
+  assert.match(T.mapRecon(Buffer.alloc(58)).stop || "", /malformed/, "a short recon is malformed");
+}
+
+// ---- EXT 0x8120 (NetServerLinePacket, 324 bytes: int32 uid, name[32], text[288]): a server line about a player, the
+// template's first "$" is the name (net_format_server_line; client/src/net/game_events.c events_server_line). v10 has no
+// template key for it, so it goes as a server line: ch [-1, null, text, 2, null, null, null, null].
+{
+  const line = (uid: number, name: string, text: string) => {
+    const b = Buffer.alloc(324);
+    b.writeInt32LE(uid, 0);
+    b.write(name, 4, "utf8");
+    b.write(text, 36, "utf8");
+    return b;
+  };
+  assert.deepStrictEqual(T.mapServerLine(line(3, "Ada", "$ joined the game"), EV.escapeHtml).messages,
+    [["ch", [-1, null, "Ada joined the game", 2, null, null, null, null]]]);
+  assert.deepStrictEqual(T.mapServerLine(line(-1, "", "Round starts"), EV.escapeHtml).messages,
+    [["ch", [-1, null, "Round starts", 2, null, null, null, null]]], "a template with no $ shows as it is");
+  assert.deepStrictEqual(T.mapServerLine(line(3, "a<b", "$ left"), EV.escapeHtml).messages,
+    [["ch", [-1, null, "a&lt;b left", 2, null, null, null, null]]], "the name is escaped like the line");
+  assert.match(T.mapServerLine(Buffer.alloc(323), EV.escapeHtml).stop || "", /malformed/);
+}
+
+// ---- SHOT (21, NetShotPacket, 31 bytes): one hitscan ray of another player's shot -> the tracer "9" (v10.js 173392, the
+// handler _73392, and the server's broadcast at 173054-173066: [sid, hit x, y, z, normal yaw, pitch | nil, trail, shooter
+// x, y, height, z, bulletType, impactType], one array argument). The shooter's origin is its last state (the handler uses
+// the player object when it has one). KN has no bullet or impact type table: both 0 (the weapon's default, `|| 0`).
+{
+  const shot = (uid: number, hit: number[], normal: number[] | null, trail: number) => {
+    const b = Buffer.alloc(31);
+    b.writeInt32LE(uid, 0);
+    b.writeInt32LE(3, 4); // weapon index
+    hit.forEach((v, i) => b.writeFloatLE(v, 8 + 4 * i));
+    b[20] = normal ? 1 : 0;
+    if (normal) {
+      b.writeFloatLE(normal[0], 21);
+      b.writeFloatLE(normal[1], 25);
+    }
+    b[29] = trail;
+    return b;
+  };
+  const shooters = new Map([[9, { x: 1.26, y: 2, z: 3, height: 9.2 }]]);
+  assert.deepStrictEqual(T.mapShot(shot(9, [10.44, 2, -5.06], [0.5, 1.2], 1), shooters).messages,
+    [["9", [[9, 10.4, 2, -5.1, 0.5, 1.2, 1, 1.3, 2, 9.2, 3, 0, 0]]]], "a hit on a map object: its normal, the origin rounded to 0.1");
+  assert.deepStrictEqual(T.mapShot(shot(9, [4, 5, 6], null, 0), shooters).messages,
+    [["9", [[9, 4, 5, 6, null, null, 0, 1.3, 2, 9.2, 3, 0, 0]]]], "no normal: nil angles");
+  // a shooter the bridge has no state for: the origin is the hit point, height 0 (the handler draws nothing for it)
+  assert.deepStrictEqual(T.mapShot(shot(4, [1, 2, 3], null, 0), shooters).messages,
+    [["9", [[4, 1, 2, 3, null, null, 0, 1, 2, 0, 3, 0, 0]]]], "an unknown shooter: the hit point is the origin");
+  assert.match(T.mapShot(Buffer.alloc(30), shooters).stop || "", /malformed/);
+}
+
+// ---- LEAVE (20, NetLeavePacket, 4 bytes: int32 uid): another player disconnected -> "2" (REMOVE_PLAYER, v10.js 97927; its
+// handler _73270 takes the one sid: it clears that player's entry). The uid is the sid.
+{
+  const leave = (uid: number) => {
+    const b = Buffer.alloc(4);
+    b.writeInt32LE(uid, 0);
+    return b;
+  };
+  assert.deepStrictEqual(T.mapLeave(leave(9)).messages, [["2", [9]]]);
+  assert.match(T.mapLeave(Buffer.alloc(3)).stop || "", /malformed/);
+
+// ---- Joiner waiting to spawn: v10's KILL_PLAYER "3" (handler _73275, v10.js 220335) starts the death UI and the
+// respawn countdown (forceSpawn + 1 seconds after 2.8 s, v10.js 220379). Its arguments: victim sid, deaths,
+// killer sid (0: none), assists [], weapon (nil), headshot.
+assert.deepStrictEqual(T.mapDeathCountdown(1).messages, [["3", [1, 0, 0, [], null, false]]]);
+
+// ... then "frs" (the server's ENTER_GAME label, v10.js 97956; the client's handler 222318 calls enterGame(true)), which
+// makes the client send "en" (enterGame sends it, v10.js 208129).
+assert.deepStrictEqual(T.mapEnterGame().messages, [["frs", [true]]]);
 }
 
 async function main(): Promise<void> {
@@ -426,10 +617,10 @@ async function main(): Promise<void> {
   assert.strictEqual(forwarded.payload.length, 9); // "127.0.0.1" (loopback peer, no forwarding header)
   assert.strictEqual(nativeFrames.length, 1); // nothing else until the client speaks
 
-  // 3. LOAD -> HELLO: protocol 1.4.2, Krunker v10 ruleset bit
+  // 3. LOAD -> HELLO: protocol 1.4.5 (NET_PROTOCOL_PATCH 5, the NetStatePacket layout), Krunker v10 ruleset bit
   sendV10("load");
   const hello = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.HELLO), "HELLO");
-  assert.deepStrictEqual([...hello.payload], [1, 4, 4, 4]);
+  assert.deepStrictEqual([...hello.payload], [1, 4, 5, 4]);
   sendV10("load"); // a second LOAD sends no second HELLO
   await sleep(100);
   assert.strictEqual(nativeFrames.filter((f) => f.type === T.NATIVE.HELLO).length, 1);
@@ -674,7 +865,7 @@ async function main(): Promise<void> {
   bot7[60] = 0; // no data: dat 0
   native.write(nativeFrame(162, bot7));
   const aai7 = await waitFor(() => clientMessages.find((m) => m.label === "aai"), "aai (v7)");
-  assert.deepStrictEqual(aai7.args, [5, 0, "Bot", 0, 0, 0, 0]);
+  assert.deepStrictEqual(aai7.args, [[5, 0, "Bot", 0, 0, 0, 0]]); // one record argument
 
   // the domination zones (142): one uct list; the zone's map object id is its uid
   const domFrame = Buffer.alloc(497);
@@ -705,6 +896,24 @@ async function main(): Promise<void> {
   const ch = await waitFor(() => clientMessages.find((m) => m.label === "ch"), "ch");
   assert.deepStrictEqual(ch.args, [0, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, 7, null]);
 
+  // a v3 chat line (NET 9, NetChatPacket: uid, kind, name, text): the game, server and trigger lines a v7 peer still gets.
+  // It has no channel and no account: channel -1 (all), account null; a server line (kind 2) has no name
+  const serverLine = Buffer.alloc(325);
+  serverLine.writeInt32LE(-1, 0);
+  serverLine[4] = 2;
+  serverLine.write("Round 2 starts", 37, "utf8");
+  native.write(nativeFrame(9, serverLine));
+  const ch9 = await waitFor(() => clientMessages.filter((m) => m.label === "ch")[1], "ch (v3 server line)");
+  assert.deepStrictEqual(ch9.args, [-1, null, "Round 2 starts", 2, null, null, null, null]);
+  const playerLine = Buffer.alloc(325);
+  playerLine.writeInt32LE(3, 0);
+  playerLine[4] = 0;
+  playerLine.write("Ada", 5, "utf8");
+  playerLine.write("hi <b>", 37, "utf8");
+  native.write(nativeFrame(9, playerLine));
+  const ch9p = await waitFor(() => clientMessages.filter((m) => m.label === "ch")[2], "ch (v3 player line)");
+  assert.deepStrictEqual(ch9p.args, [-1, "Ada", EV.escapeHtml("hi <b>"), 0, null, null, null, null]);
+
   // the per-tick player states (STATE, 6): our own is not sent back; another player's is a k with its 13-field record
   const stateOf = (uid: number, x: number) => {
     const b = Buffer.alloc(79);
@@ -729,6 +938,49 @@ async function main(): Promise<void> {
   assert.strictEqual((kMsg.args[0] as unknown[][]).length, 1);
   assert.deepStrictEqual((kMsg.args[0] as unknown[][])[0], [9, 1.26, 2, 3, 57, 29, 0.25, 1, 1, 2, 1, 0, 42]);
   assert.strictEqual(kMsg.args[1], 10);
+
+  // SHOT (21): player 9 fires one ray: the observer's tracer "9" (its origin is 9's state: 1.26, 2, 3, height 11 - 3 * 0.6)
+  const rayFrame = Buffer.alloc(31);
+  rayFrame.writeInt32LE(9, 0);
+  [4, 5, 6].forEach((v, i) => rayFrame.writeFloatLE(v, 8 + 4 * i));
+  rayFrame[29] = 1; // trail
+  native.write(nativeFrame(21, rayFrame));
+  const tracer = await waitFor(() => clientMessages.find((m) => m.label === "9"), "9 (the tracer)");
+  assert.deepStrictEqual(tracer.args, [[9, 4, 5, 6, null, null, 1, 1.3, 2, 9.2, 3, 0, 0]]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("SHOT"), undefined, "the shot does not stop the session");
+
+  // our own SPAWN while we wait to join (not active): the add record for us, then v10's death for us (KILL_PLAYER "3"),
+  // which starts the respawn countdown on the client
+  native.write(nativeFrame(4, spawnBuffer({ uid: 1, isYou: true, active: false, classIndex: 4, team: 0, health: 100, maxHealth: 100,
+    position: [1, 2, 3], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+    face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 })));
+  const countdown = await waitFor(() => clientMessages.find((m) => m.label === "3"), "3 (the death for the countdown)");
+  assert.deepStrictEqual(countdown.args, [1, 0, 0, [], null, false]);
+  // right after the countdown starts, "frs": the client calls enterGame(true) and then sends "en" (checked in section 5)
+  const frs = await waitFor(() => clientMessages.find((m) => m.label === "frs"), "frs (the enter game after the countdown)");
+  assert.deepStrictEqual(frs.args, [true]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("SPAWN"), undefined, "a waiting joiner's spawn does not stop the session");
+
+  // LEAVE (20): player 9 disconnects: the observer's "2" [9], and the session stays up (the next packets still go through)
+  const leaveFrame = Buffer.alloc(4);
+  leaveFrame.writeInt32LE(9, 0);
+  native.write(nativeFrame(20, leaveFrame));
+  const gone = await waitFor(() => clientMessages.find((m) => m.label === "2"), "2 (the leave)");
+  assert.deepStrictEqual(gone.args, [9]);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("LEAVE"), undefined, "a leave does not stop the session");
+  native.write(nativeFrame(6, stateOf(11, 2.5))); // a player still in the game: its state still comes through
+  await waitFor(() => clientMessages.filter((m) => m.label === "k").length >= 2 ? true : undefined, "k after the leave");
+
+  // 6a. the owner's state (RECON 110) -> l, one argument (the array)
+  const reconFrame = Buffer.alloc(89);
+  reconFrame.writeInt32LE(4, 0);
+  reconFrame.writeFloatLE(7, 4);
+  native.write(nativeFrame(110, reconFrame));
+  const l = await waitFor(() => clientMessages.find((m) => m.label === "l"), "l");
+  assert.strictEqual(l.args.length, 1);
+  assert.strictEqual((l.args[0] as unknown[]).length, 26);
+  assert.strictEqual((l.args[0] as unknown[])[0], 4);
+  assert.strictEqual(v10Proxy.untranslatedSeen.get("RECON"), undefined);
 
   // CHEAT (60): one chat command's flag and on / off is the v10 label's one argument (v10.js 220244-220264)
   for (const [flag, label, on] of [[0, "noc", 1], [1, "unl", 1], [2, "fh", 1], [7, "frz", 1], [1, "unl", 0]] as [number, string, number][]) {
@@ -789,6 +1041,14 @@ async function main(): Promise<void> {
   sendV10("ct", "hello there");
   const chat = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.CHAT_SEND), "CHAT_SEND");
   assert.deepStrictEqual(chat.payload, EV.encodeChatSend("hello there"));
+
+  // 6b. the input window (q): the official client's frames, sent to the native input batch (111): seq 5 and 6, shoot
+  sendV10("q", 0, 5, "1616", 2, [100, -200, 5, 2], { "0-4": 3, "0-5": 1, "0-6": 0, "0-7": 0, "0-8": 0, "0-9": 0, "0-10": 0, "0-11": 0, "0-12": 0, "0-13": 0, "0-14": 0 });
+  const batch = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE_MORE.INPUT_BATCH), "INPUT_BATCH");
+  assert.strictEqual(batch.payload[0], 2);
+  assert.strictEqual(batch.payload.readInt32LE(1), 5);
+  assert.strictEqual(batch.payload.readInt32LE(1 + 24), 6);
+  assert.strictEqual(batch.payload.readUInt8(1 + 20), T.NET_INPUT.SHOOT); // frame 0's flags: 20 bytes into the frame
 
   // 7. native PING -> PONG, echoed
   (nativeSocket as net.Socket).write(Buffer.from([T.NATIVE.PING, 0, 4, 0x78, 0x56, 0x34, 0x12]));

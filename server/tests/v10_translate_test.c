@@ -83,6 +83,13 @@ static int msg_is(const V10Out *o, size_t idx, const char *label, const KrunkerV
     CHECK(msg_is((o), (idx), (label), want_, sizeof want_ / sizeof want_[0]), "message %zu is %s with the TS arguments", (size_t)(idx), (label)); \
 } while (0)
 
+static const KrunkerValue *map_get_v(const KrunkerValue *m, const char *key) {
+    for (uint32_t i = 0; m && m->type == KRUNKER_MAP && i < m->len; i++) {
+        const KrunkerValue *k = &m->u.items[2 * i];
+        if (k->len == strlen(key) && !memcmp(k->u.str, key, k->len)) return &m->u.items[2 * i + 1];
+    }
+    return NULL;
+}
 static int stop_has(const V10Out *o, const char *part) { return o->stop && strstr(o->stop, part) != NULL; }
 
 // ---- the TS buffer builders (v10Proxy.test.ts): little endian, the layouts of shared.h
@@ -131,8 +138,8 @@ typedef struct {
     float pos[3]; float dir[2]; const char *name; int32_t secondary;
     int32_t hat, body, hair, skin_color, dye, waist, face, head, back, shoe, pet, wrist, charm0, charm1, player_card;
     float head_mlt;
-} Spawn;
-static void spawn_buf(uint8_t *b, const Spawn *s) {
+} TSpawn;
+static void spawn_buf(uint8_t *b, const TSpawn *s) {
     memset(b, 0, 150);
     put_i32(b, 0, s->uid);
     b[4] = s->is_you; b[5] = s->active;
@@ -151,8 +158,8 @@ static void spawn_buf(uint8_t *b, const Spawn *s) {
     const int32_t v7[9] = {s->head, s->back, s->shoe, s->pet, s->wrist, s->charm0, s->charm1, s->player_card, -1};
     for (int i = 0; i < 9; i++) put_i32(b, 114 + 4 * (size_t)i, v7[i]);
 }
-static Spawn default_spawn(void) {
-    Spawn s;
+static TSpawn default_spawn(void) {
+    TSpawn s;
     memset(&s, 0, sizeof s);
     s.is_you = 0; s.active = 1; s.health = 100; s.max_health = 100; s.head_mlt = 1;
     s.hat = s.body = s.hair = s.skin_color = s.dye = s.waist = s.face = -1;
@@ -224,6 +231,352 @@ int main(void) {
         CHECK(rd(ent, 92) == 35, "ENT v7 player card");
         CHECK(rd(ent, 96) == -1, "ENT v7 badge");
         CHECK(ent[100] == 0x09, "ENT show badges: verified (bit 0) + custom (bit 3)");
+
+        // PICKUP (128): NetPickupPacket (26 bytes) -> inat [-1, null, null, uid, weapon|null, true, active, pos|null]
+        {
+            uint8_t pk[26];
+            memset(pk, 0, sizeof pk);
+            put_i32(pk, 0, 7); put_i32(pk, 4, 3); pk[8] = 1; pk[9] = 1;
+            put_f32(pk, 10, 1.5f); put_f32(pk, 14, 2); put_f32(pk, 18, -3); put_i32(pk, 22, 12);
+            V10Out po;
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), N(3), B(1), B(1), ARR(N(1.5), N(2), N(-3)));
+            v10_out_free(&po);
+            put_i32(pk, 4, -1); pk[8] = 0; pk[9] = 0;
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            MSG_IS(&po, 0, "inat", N(-1), NIL, NIL, N(7), NIL, B(1), B(0), NIL); /* an empty pickup: null weapon (173166) */
+            v10_out_free(&po);
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 25);
+            CHECK(stop_has(&po, "malformed"), "a short pickup is malformed");
+            v10_out_free(&po);
+            put_i32(pk, 0, -1); /* mapPickup has no uid check: the message goes as it is */
+            v10_out_init(&po);
+            v10_map_pickup(&po, pk, 26);
+            CHECK(!po.stop && po.count == 1, "a pickup with uid -1 is sent as the TS sends it");
+            v10_out_free(&po);
+        }
+
+        // NET 9 (NetChatPacket, 325 bytes): the kinds of the v7 line, channel -1 and account null (mapChat)
+        {
+            uint8_t c9[325];
+            V10Out co;
+            memset(c9, 0, sizeof c9);
+            c9[4] = 2;
+            put_str(c9, 37, "Round 2 starts", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), NIL, S("Round 2 starts"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&co);
+            memset(c9, 0, sizeof c9);
+            put_i32(c9, 0, 3);
+            c9[4] = 0;
+            put_str(c9, 5, "Ada", 32);
+            put_str(c9, 37, "hi <b>", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), S("Ada"), S("hi &lt;b&gt;"), N(0), NIL, NIL, NIL, NIL);
+            v10_out_free(&co);
+            memset(c9, 0, sizeof c9);
+            c9[4] = 3;
+            put_str(c9, 37, "You found [1.25] Junk", 288);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            MSG_IS(&co, 0, "ch", N(-1), NIL, S("<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[1.25]</span> Junk"), N(1));
+            v10_out_free(&co);
+            c9[4] = 7;
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 325);
+            CHECK(stop_has(&co, "chat kind 7"), "an unknown NET 9 kind stops");
+            v10_out_free(&co);
+            v10_out_init(&co);
+            v10_map_chat(&co, c9, 324);
+            CHECK(stop_has(&co, "malformed"), "a short NET 9 chat is malformed");
+            v10_out_free(&co);
+        }
+
+        // MATCH_VOTE_STATE (170 bytes): mv [vo, mts]; ours under the socket id, the others under vote<i> (mapMatchVoteState)
+        {
+            uint8_t mv[170];
+            V10Out mo;
+            memset(mv, 0, sizeof mv);
+            mv[0] = 2; mv[1] = 1;
+            put_i32(mv, 2, 0); put_i32(mv, 6, 5); put_u16(mv, 10, 2);
+            put_i32(mv, 44, 1); put_i32(mv, 48, 9); put_u16(mv, 52, 1);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(!mo.stop && mo.count == 1, "mv translates");
+            if (mo.count == 1) {
+                const KrunkerValue vote0 = ARR(S("0,5"), N(2));
+                const KrunkerValue sock = ARR(S("1,9"), N(1));
+                const KrunkerValue mts_want = ARR(S("0,5"), S("1,9"));
+                const KrunkerValue *vo = &mo.msgs[0].args[0];
+                CHECK(vo->len == 2 && vequal(map_get_v(vo, "vote0"), &vote0) && vequal(map_get_v(vo, "sock"), &sock), "mv: vote0 and sock");
+                CHECK(vequal(&mo.msgs[0].args[1], &mts_want), "mv: the option list mts");
+            }
+            v10_out_free(&mo);
+            memset(mv, 0, sizeof mv);
+            mv[0] = 1; mv[1] = 0;
+            put_i32(mv, 2, 2); put_i32(mv, 6, 3); put_u16(mv, 10, 4);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            if (mo.count == 1) {
+                const KrunkerValue ours = ARR(S("2,3"), N(1));
+                const KrunkerValue rest = ARR(S("2,3"), N(3));
+                const KrunkerValue *vo = &mo.msgs[0].args[0];
+                CHECK(vequal(map_get_v(vo, "sock"), &ours) && vequal(map_get_v(vo, "vote0"), &rest), "mv: ours is 1, the rest of the weight is vote0");
+            }
+            v10_out_free(&mo);
+            memset(mv, 0, sizeof mv);
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(mo.count == 1 && mo.msgs[0].args[0].len == 0 && mo.msgs[0].args[1].len == 0, "no vote clears the cards: {} and []");
+            v10_out_free(&mo);
+            mv[0] = 5;
+            v10_out_init(&mo);
+            v10_map_match_vote(&mo, mv, 170, "sock");
+            CHECK(stop_has(&mo, "malformed"), "more than 4 cards is malformed");
+            v10_out_free(&mo);
+        }
+
+        // LEAVE (20, NetLeavePacket, 4 bytes) -> "2" [uid] (REMOVE_PLAYER, one sid)
+        {
+            uint8_t lv[4];
+            V10Out lo;
+            put_i32(lv, 0, 9);
+            v10_out_init(&lo);
+            v10_map_leave(&lo, lv, 4);
+            MSG_IS(&lo, 0, "2", N(9));
+            v10_out_free(&lo);
+            v10_out_init(&lo);
+            v10_map_leave(&lo, lv, 3);
+            CHECK(stop_has(&lo, "malformed"), "a short leave is malformed");
+            v10_out_free(&lo);
+        }
+
+        // a joiner waiting to spawn: KILL_PLAYER "3" [uid, 0, 0, [], nil, false] (v10.js 220335, the respawn countdown)
+        {
+            V10Out dc;
+            v10_out_init(&dc);
+            v10_map_death_countdown(&dc, 1);
+            MSG_IS(&dc, 0, "3", N(1), N(0), N(0), ARR(), NIL, B(0));
+            v10_out_free(&dc);
+        }
+
+        // then "frs" [true], the server's ENTER_GAME: the client's handler calls enterGame(true), which sends "en"
+        {
+            V10Out eg;
+            v10_out_init(&eg);
+            v10_map_enter_game(&eg);
+            MSG_IS(&eg, 0, "frs", B(1));
+            v10_out_free(&eg);
+        }
+
+        // SHOT (21, NetShotPacket, 31 bytes) -> the tracer "9": [sid, hit (0.1), normal (0.01) | nil, trail, origin (0.1), 0, 0]
+        {
+            uint8_t sh[31];
+            V10Out so;
+            V10Shooter known = {9, 1.26, 2, 3, 9.2};
+            memset(sh, 0, sizeof sh);
+            put_i32(sh, 0, 9);
+            put_f32(sh, 8, 10.44f); put_f32(sh, 12, 2); put_f32(sh, 16, -5.06f);
+            sh[20] = 1;
+            put_f32(sh, 21, 0.5f); put_f32(sh, 25, 1.2f);
+            sh[29] = 1;
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, &known);
+            CHECK(!so.stop && so.count == 1 && !strcmp(so.msgs[0].label, "9") && so.msgs[0].argc == 1, "shot -> the tracer \"9\", one array argument");
+            const KrunkerValue want[13] = {N(9), N(10.4), N(2), N(-5.1), N(0.5), N(1.2), N(1), N(1.3), N(2), N(9.2), N(3), N(0), N(0)};
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY && so.msgs[0].args[0].len == 13) {
+                for (int i = 0; i < 13; i++) CHECK(vequal(&so.msgs[0].args[0].u.items[i], &want[i]), "tracer slot %d", i);
+            } else {
+                CHECK(0, "the tracer has 13 slots");
+            }
+            v10_out_free(&so);
+            memset(sh + 20, 0, 1);
+            sh[20] = 0;
+            put_f32(sh, 8, 4); put_f32(sh, 12, 5); put_f32(sh, 16, 6);
+            sh[29] = 0;
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, &known);
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY) {
+                CHECK(so.msgs[0].args[0].u.items[4].type == KRUNKER_NIL && so.msgs[0].args[0].u.items[5].type == KRUNKER_NIL,
+                      "no normal: nil angles");
+            }
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 31, NULL);
+            if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY) {
+                const KrunkerValue *t = so.msgs[0].args[0].u.items;
+                CHECK(vequal(&t[7], &KRUNKER_V_NUM(4)) && vequal(&t[8], &KRUNKER_V_NUM(5)) && vequal(&t[9], &KRUNKER_V_NUM(0)) && vequal(&t[10], &KRUNKER_V_NUM(6)),
+                      "an unknown shooter: the hit point is the origin, height 0");
+            }
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_shot(&so, sh, 30, &known);
+            CHECK(stop_has(&so, "malformed"), "a short shot is malformed");
+            v10_out_free(&so);
+        }
+
+        // EXT 0x8120 (NetServerLinePacket, 324 bytes): the template's first "$" is the name, a server line (mapServerLine)
+        {
+            uint8_t sl[324];
+            V10Out so;
+            memset(sl, 0, sizeof sl);
+            put_i32(sl, 0, 3);
+            put_str(sl, 4, "Ada", 32);
+            put_str(sl, 36, "$ joined the game", 288);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 324);
+            MSG_IS(&so, 0, "ch", N(-1), NIL, S("Ada joined the game"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&so);
+            memset(sl + 36, 0, 288);
+            put_str(sl, 36, "Round starts", 288);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 324);
+            MSG_IS(&so, 0, "ch", N(-1), NIL, S("Round starts"), N(2), NIL, NIL, NIL, NIL);
+            v10_out_free(&so);
+            v10_out_init(&so);
+            v10_map_server_line(&so, sl, 323);
+            CHECK(stop_has(&so, "malformed"), "a short server line is malformed");
+            v10_out_free(&so);
+        }
+
+        // RECON (110, NetReconPacket, 89 bytes) -> l, one argument: the 26-slot sync array (mapRecon, v10Translate.ts)
+        {
+            uint8_t rc[89];
+            V10Out ro;
+            memset(rc, 0, sizeof rc);
+            put_i32(rc, 0, 12);
+            put_f32(rc, 4, 1.5f); put_f32(rc, 8, 2.25f); put_f32(rc, 12, -3);
+            put_f32(rc, 16, 0.5f); put_f32(rc, 20, -1); put_f32(rc, 24, 2);
+            put_f32(rc, 28, 0.75f);
+            put_f32(rc, 32, 0.25f);
+            put_f32(rc, 36, 0.5f);
+            put_i32(rc, 40, 2);
+            put_f32(rc, 44, 0.5f);
+            put_f32(rc, 48, 3); put_f32(rc, 52, 4);
+            rc[56] = 1;
+            rc[57] = 0x01 | 0x10 | 0x20;
+            put_u16(rc, 58, 3);
+            put_f32(rc, 60, 0.25f);
+            put_f64(rc, 64, 420);
+            rc[72] = 0;
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 89);
+            CHECK(!ro.stop && ro.count == 1 && !strcmp(ro.msgs[0].label, "l") && ro.msgs[0].argc == 1, "recon -> l, one argument");
+            const KrunkerValue want[26] = {N(12), N(0), N(1.5), N(2.25), N(-3), N(-1), N(0.5), N(2), N(0.75), B(1), B(0), B(0),
+                                           N(3), N(1), B(0), N(0.75), N(0.5), N(2), N(420), B(1), B(1), N(3), N(4), NIL, N(250), NIL};
+            if (ro.count == 1 && ro.msgs[0].argc == 1 && ro.msgs[0].args[0].type == KRUNKER_ARRAY && ro.msgs[0].args[0].len == 26) {
+                for (int i = 0; i < 26; i++) CHECK(vequal(&ro.msgs[0].args[0].u.items[i], &want[i]), "l slot %d", i);
+            } else {
+                CHECK(0, "the recon array has 26 slots");
+            }
+            v10_out_free(&ro);
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 58);
+            CHECK(stop_has(&ro, "malformed"), "a short recon is malformed");
+            v10_out_free(&ro);
+            rc[72] = 1;
+            put_f32(rc, 73, 10); put_f32(rc, 77, 11); put_f32(rc, 81, 12); put_f32(rc, 85, 13);
+            v10_out_init(&ro);
+            v10_map_recon(&ro, rc, 89);
+            CHECK(ro.count == 1 && ro.msgs[0].args[0].u.items[23].len == 4 && vequal(&ro.msgs[0].args[0].u.items[23].u.items[3], &KRUNKER_V_NUM(13)),
+                  "a grapple: its point and range");
+            v10_out_free(&ro);
+        }
+
+        // INPUT (q, v10.js 221577): the window's frames field by field (decodeInputBatch in v10Translate.ts)
+        {
+            static const char *const keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+            /* a window of one frame: field `field` set to `value`, the others 0 (move -> the move index, so 0 is direction 7) */
+            NetInputPacket f1;
+            #define INPUT_ONE(field, value) do { \
+                V10Input in_ = {0}; v10_input_init(&in_); \
+                KrunkerValue vals_[11]; for (int i_ = 0; i_ < 11; i_++) vals_[i_] = N(0); \
+                vals_[(field) - 4] = N(value); \
+                KrunkerValue ch_ = kv_map(11, keys, vals_); \
+                KrunkerValue args_[6] = {N(1), N(1), S("16"), N(2), ARR(N(0), N(0)), ch_}; \
+                size_t n_ = 0; NetInputPacket *fr_ = v10_decode_input(&in_, args_, 6, &n_); \
+                CHECK(fr_ && n_ == 1, "one frame for field %d", (field)); \
+                f1 = fr_ ? fr_[0] : f1; free(fr_); v10_input_free(&in_); \
+            } while (0)
+            INPUT_ONE(4, -1);
+            CHECK(f1.move_dir == -1, "move index -1: no move direction (moveLock)");
+            INPUT_ONE(4, 0);
+            CHECK(f1.move_dir == 7, "move index 0 is direction 7 (movDirs order)");
+            INPUT_ONE(4, 3);
+            CHECK(f1.move_dir == 2, "move index 3 is direction 2");
+            INPUT_ONE(4, 8);
+            CHECK(f1.move_dir == -1, "a move index past the eight directions is no direction");
+            INPUT_ONE(5, 1);
+            CHECK(f1.flags == NET_INPUT_SHOOT, "fire (shoot) is field 5");
+            INPUT_ONE(6, 1);
+            CHECK(f1.flags == NET_INPUT_SCOPE, "ADS (scope) is field 6");
+            INPUT_ONE(7, 1);
+            CHECK(f1.flags == NET_INPUT_JUMP, "jump is field 7");
+            INPUT_ONE(8, 1);
+            CHECK(f1.flags == NET_INPUT_RELOAD, "reload is field 8");
+            INPUT_ONE(9, 1);
+            CHECK(f1.flags == NET_INPUT_CROUCH, "crouch is field 9");
+            INPUT_ONE(10, -1);
+            CHECK(f1.scroll == -1, "scroll is field 10");
+            INPUT_ONE(11, 1);
+            CHECK(f1.swap == 1, "weapon swap is field 11");
+            INPUT_ONE(12, 0.5);
+            CHECK(f1.slowdown == 5, "the slowdown (1 - speedLmt, tenths) is field 12");
+            INPUT_ONE(13, 1);
+            CHECK(f1.flags == NET_INPUT_RESET_START, "reset 1 is reset to start");
+            INPUT_ONE(13, 2);
+            CHECK(f1.flags == NET_INPUT_RESET_LAST, "reset 2 is reset to last");
+            INPUT_ONE(14, 1);
+            CHECK(f1.flags == NET_INPUT_INTERACT, "interact is field 14");
+            #undef INPUT_ONE
+        }
+        {
+            /* the official window: seq 5 and 6, dt 16, pitch 0.1 and yaw -0.2 then the deltas 5 and 2, shoot on frame 0 */
+            static const char *const keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+            KrunkerValue vals[11] = {N(3), N(1), N(0), N(0), N(0), N(0), N(0), N(0), N(0), N(0), N(0)};
+            KrunkerValue args[6] = {N(0), N(5), S("1616"), N(2), ARR(N(100), N(-200), N(5), N(2)), kv_map(11, keys, vals)};
+            V10Input in;
+            v10_input_init(&in);
+            size_t n = 0;
+            NetInputPacket *fr = v10_decode_input(&in, args, 6, &n);
+            CHECK(fr && n == 2, "a two-frame window");
+            if (fr && n == 2) {
+                CHECK(fr[0].seq == 5 && fr[1].seq == 6, "sequence 5 and 6 (firstIsn + j)");
+                CHECK(fabs(fr[0].delta - 0.016) < 1e-6 && fabs(fr[1].delta - 0.016) < 1e-6, "dt 16 ms is 0.016 s");
+                CHECK(fabs(fr[0].x_dir - 0.1) < 1e-6 && fabs(fr[1].x_dir - 0.105) < 1e-6, "x_dir is the pitch, accumulated from the deltas");
+                CHECK(fabs(fr[0].y_dir + 0.2) < 1e-6 && fabs(fr[1].y_dir + 0.198) < 1e-6, "y_dir is the yaw, accumulated from the deltas");
+                CHECK(fr[0].flags == NET_INPUT_SHOOT && fr[1].flags == NET_INPUT_SHOOT, "shoot holds across the frames");
+            }
+            free(fr);
+            /* a window with no angles keeps the window before's; a resync restarts the fields */
+            KrunkerValue args2[6] = {N(0), N(7), S("16"), N(2), N(0), kv_map(0, NULL, NULL)};
+            fr = v10_decode_input(&in, args2, 6, &n);
+            CHECK(fr && n == 1 && fabs(fr[0].x_dir - 0.1) < 1e-6 && fr[0].flags == NET_INPUT_SHOOT, "no angles: the last ones, the shoot carries");
+            free(fr);
+            KrunkerValue args3[6] = {N(1), N(9), S("16"), N(2), N(0), kv_map(0, NULL, NULL)};
+            fr = v10_decode_input(&in, args3, 6, &n);
+            CHECK(fr && n == 1 && fr[0].flags == 0 && fr[0].move_dir == -1, "a resync restarts the fields: no shoot, no move");
+            free(fr);
+            KrunkerValue bad[6] = {N(0), N(1), N(0), N(0), N(0), N(0)};
+            CHECK(v10_decode_input(&in, bad, 6, &n) == NULL, "a number for the dt list is malformed");
+            KrunkerValue empty_w[6] = {N(0), N(1), S(""), N(0), N(0), N(0)};
+            fr = v10_decode_input(&in, empty_w, 6, &n);
+            CHECK(fr && n == 0, "an empty window has no frames");
+            free(fr);
+            v10_input_free(&in);
+            /* the payload: count, then 24 bytes per frame (NetInputPacket) */
+            NetInputPacket two[2];
+            memset(two, 0, sizeof two);
+            two[0].seq = 5; two[1].seq = 6; two[0].flags = NET_INPUT_SHOOT;
+            uint8_t payload[1 + 24 * 2];
+            CHECK(v10_encode_input_batch(two, 2, payload) == 1 + 24 * 2 && payload[0] == 2, "the batch: count 2, 1 + 24 bytes per frame");
+            CHECK(rd(payload, 1) == 5 && rd(payload, 1 + 24) == 6 && payload[1 + 20] == NET_INPUT_SHOOT, "the frames' seq and flags");
+        }
 
         // CHEAT (60): [flag, on], the on / off byte 0 or 1; the flags with a v10 label (noc, unl, fh, frz)
         uint8_t cflag = 0;
@@ -376,7 +729,7 @@ int main(void) {
         CHECK(v10_parse_skins(sk, 16, &skins) && skins.uid == 2 && skins.primary == 7 && skins.secondary == 8 && skins.melee == 9,
               "SKINS parse");
 
-        Spawn other_s = default_spawn();
+        TSpawn other_s = default_spawn();
         other_s.uid = 2; other_s.is_you = 0; other_s.class_index = 3; other_s.team = 1; other_s.health = 87.6f; other_s.max_health = 100;
         other_s.pos[0] = 10.4f; other_s.pos[1] = 20.6f; other_s.pos[2] = -5; other_s.dir[0] = 1.5f; other_s.dir[1] = 0.25f;
         other_s.name = "Ada"; other_s.secondary = 4; other_s.hat = 3; other_s.body = 5; other_s.hair = 0x112233; other_s.skin_color = -1;
@@ -405,7 +758,7 @@ int main(void) {
         }
         v10_out_free(&o);
 
-        Spawn mine_s = default_spawn();
+        TSpawn mine_s = default_spawn();
         mine_s.uid = 1; mine_s.is_you = 1; mine_s.class_index = 4; mine_s.team = 0; mine_s.name = "me";
         uint8_t mbuf[150];
         spawn_buf(mbuf, &mine_s);
@@ -546,9 +899,9 @@ int main(void) {
         bot[63] = 0; bot[64] = 1; bot[65] = 1;
         v10_out_init(&o);
         v10_map_bot_add(&o, bot, 237);
-        CHECK(o.count == 1 && !strcmp(o.msgs[0].label, "aai") && o.msgs[0].argc == 7, "bot add -> aai");
+        CHECK(o.count == 1 && !strcmp(o.msgs[0].label, "aai") && o.msgs[0].argc == 1, "bot add -> aai (one record argument)");
         const KrunkerValue head6[6] = {N(9), N(4), S("Bot"), N(1.5), N(2), N(3)};
-        for (int i = 0; i < 6 && o.count; i++) CHECK(vequal(&o.msgs[0].args[i], &head6[i]), "aai head field %d", i);
+        for (int i = 0; i < 6 && o.count; i++) CHECK(vequal(&o.msgs[0].args[0].u.items[i], &head6[i]), "aai head field %d", i);
         const char *dk[28] = {"hasAnim", "animS", "soundR", "team", "health", "mSize", "mYOff", "mROff", "hbh", "asset", "idl", "src",
                               "noVis", "tagScale", "lvl", "side", "opacity", "alphaTest", "texEncode", "noSmooth", "noFog", "fTrans",
                               "frames", "frameT", "rAnim", "rAnimA", "bobD", "bobS"};
@@ -556,11 +909,11 @@ int main(void) {
                                      N(1), N(1.25), N(3), N(1), N(0.5), N(0.5), N(2), B(1), B(0), B(1), N(4), N(0.25), N(0.75), N(1),
                                      N(0.125), N(2)};
         KrunkerValue want_dat = kv_map(28, dk, dv);
-        if (o.count) CHECK(vequal(&o.msgs[0].args[6], &want_dat), "aai dat: the TS object");
+        if (o.count) CHECK(vequal(&o.msgs[0].args[0].u.items[6], &want_dat), "aai dat: the TS object");
         v10_out_free(&o);
         bot[60] = 0;
         v10_out_init(&o); v10_map_bot_add(&o, bot, 237);
-        CHECK(o.count == 1 && vequal(&o.msgs[0].args[6], &KRUNKER_V_NUM(0)), "a bot with no data: dat 0");
+        CHECK(o.count == 1 && vequal(&o.msgs[0].args[0].u.items[6], &KRUNKER_V_NUM(0)), "a bot with no data: dat 0");
         v10_out_free(&o);
     }
 
@@ -716,6 +1069,8 @@ int main(void) {
             CHECK(m->args[12].type == KRUNKER_MAP, "init arg 12: the networking object");
             CHECK(vequal(&m->args[13], &KRUNKER_V_BOOL(1)), "init arg 13 is true");
             CHECK(vequal(&m->args[16], &KRUNKER_V_BOOL(0)), "init arg 16 is isRanked");
+            CHECK(m->args[11].type == KRUNKER_MAP && m->args[11].len == 1 && vequal(&m->args[11].u.items[1], &KRUNKER_V_NUM(1)),
+                  "init arg 11 is the sync data {gor: 1} (the v10 init reads it)");
         }
         v10_out_free(&o2);
     }

@@ -13,6 +13,8 @@
  */
 #include "v10_translate.h"
 
+#include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
+
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -36,6 +38,12 @@ static double rd_f32(const uint8_t *p, size_t at) {
     float f;
     memcpy(&f, &u, sizeof f);
     return (double)f;
+}
+static double rd_f64(const uint8_t *p, size_t at) {
+    const uint64_t u = (uint64_t) rd_u32(p, at) | (uint64_t) rd_u32(p, at + 4) << 32;
+    double d;
+    memcpy(&d, &u, sizeof d);
+    return d;
 }
 static void wr_i32(uint8_t *p, size_t at, int64_t v) {
     const uint32_t u = (uint32_t)v; /* the low 32 bits: Buffer.writeInt32LE for an int32 value */
@@ -373,12 +381,11 @@ static void field_copy(const uint8_t *p, size_t n, size_t at, size_t size, char 
 }
 
 void v10_hello_payload(uint8_t out[V10_HELLO_PAYLOAD_SIZE]) {
-    /* NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH (the TS HELLO: 1.4.4), NET_HELLO_RULESETS
-     * (1 << 2, v10 only) with the flavor nibble 0. */
-    out[0] = 1;
-    out[1] = 4;
-    out[2] = 4;
-    out[3] = 1 << 2;
+    /* NET_PROTOCOL_MAJOR, MINOR, PATCH (1.4.5: the NetStatePacket layout), NET_HELLO_RULESETS (v10 only). */
+    out[0] = NET_PROTOCOL_MAJOR;
+    out[1] = NET_PROTOCOL_MINOR;
+    out[2] = NET_PROTOCOL_PATCH;
+    out[3] = NET_HELLO_RULESETS;
 }
 
 /* ---- client -> bridge */
@@ -651,13 +658,17 @@ int v10_parse_init(const uint8_t *p, size_t n, V10Init *out) {
 void v10_init_game(V10Out *o, const V10Init *init, const uint8_t *map, size_t map_len, KrunkerValue config,
                    KrunkerValue network, int ranked) {
     const KrunkerValue empty = v10_obj(o, NULL, NULL, 0);
+    /* the init's sync data (v7 getSyncData, game.js 3844): gor 1 is a game in progress; the v10 init reads it */
+    const char *const sync_keys[1] = {"gor"};
+    const KrunkerValue sync_vals[1] = {KRUNKER_V_NUM(1)};
+    const KrunkerValue sync = v10_obj(o, sync_keys, sync_vals, 1);
     const char *const map_keys[5] = {"data", "id", "creator", "info", "accType"};
     const KrunkerValue map_vals[5] = {KRUNKER_V_STRN((const char *)map, map_len), KRUNKER_V_NIL, KRUNKER_V_STR(""), empty, KRUNKER_V_NUM(1)};
     const KrunkerValue map_obj = v10_obj(o, map_keys, map_vals, 5);
     const KrunkerValue args[V10_INIT_ARGS] = {
         KRUNKER_V_NUM(init->map_index), KRUNKER_V_NUM(init->mode_index), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
         KRUNKER_V_NIL,                  config,                            KRUNKER_V_NIL, KRUNKER_V_NUM(0), map_obj,
-        KRUNKER_V_NIL,                  empty,                             network,       KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(0),
+        KRUNKER_V_NIL,                  sync,                              network,       KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(0),
         KRUNKER_V_BOOL(0),              KRUNKER_V_BOOL(ranked),            KRUNKER_V_NIL, KRUNKER_V_NIL,     KRUNKER_V_NIL,
     };
     v10_push(o, V10_IN_INIT_GAME, args, V10_INIT_ARGS);
@@ -840,6 +851,253 @@ void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n) {
     if (p[85] != 0) v10_push(o, V10_IN_LOCK_PLAYER, (KrunkerValue[]){KRUNKER_V_BOOL(1)}, 1);
     const size_t message_len = field_len(p, n, MODE_MESSAGE_AT, 96);
     if (message_len) v10_push(o, V10_IN_UPDATE_GAME_MESSAGE, (KrunkerValue[]){v10_text(o, p + MODE_MESSAGE_AT, message_len)}, 1);
+}
+
+/* ---- INPUT (q): see v10_translate.h and decodeInputBatch in v10Translate.ts */
+
+void v10_input_init(V10Input *in) {
+    memset(in, 0, sizeof *in);
+    in->vals[4] = -1; /* the server's reset of the move field (krunker_sync_test.c server_decode_q) */
+}
+
+void v10_input_free(V10Input *in) {
+    free(in->angles);
+    memset(in, 0, sizeof *in);
+}
+
+static int32_t clamp_i32(double v, int32_t lo, int32_t hi) {
+    return v < lo ? lo : v > hi ? hi : (int32_t)v;
+}
+
+NetInputPacket *v10_decode_input(V10Input *in, const KrunkerValue *args, uint32_t argc, size_t *count) {
+    *count = 0;
+    const KrunkerValue *a1 = argc > 1 ? &args[1] : NULL;
+    const KrunkerValue *a2 = argc > 2 ? &args[2] : NULL;
+    const KrunkerValue *a3 = argc > 3 ? &args[3] : NULL;
+    const double first = js_num(a1);
+    if (!isfinite(first) || first != floor(first)) return NULL;
+    const double dt_len = a3 ? js_num(a3) : 0;
+    /* dts: one string of equal-width numbers (dtLen wide), or an array; anything else is malformed */
+    size_t n = 0;
+    double *dts = NULL;
+    if (a2 && a2->type == KRUNKER_STR) {
+        const size_t w = dt_len > 0 && isfinite(dt_len) ? (size_t)dt_len : 0;
+        n = w ? a2->len / w : 0;
+        dts = malloc((n ? n : 1) * sizeof *dts);
+        if (!dts) return NULL;
+        for (size_t i = 0; i < n; i++) {
+            char part[32];
+            const size_t len = w < sizeof part - 1 ? w : sizeof part - 1;
+            memcpy(part, a2->u.str + i * w, len);
+            part[len] = 0;
+            dts[i] = js_str_to_num((const uint8_t *)part, len);
+        }
+    } else if (a2 && a2->type == KRUNKER_ARRAY) {
+        n = a2->len;
+        dts = malloc((n ? n : 1) * sizeof *dts);
+        if (!dts) return NULL;
+        for (size_t i = 0; i < n; i++) dts[i] = js_num(&a2->u.items[i]);
+    } else {
+        return NULL;
+    }
+    const int resync = argc > 0 && js_truthy(&args[0]);
+    if (resync) {
+        for (int k = 0; k < 15; k++) in->vals[k] = 0;
+        in->vals[4] = -1;
+        in->angle_count = 0;
+    }
+    const KrunkerValue *a4 = argc > 4 ? &args[4] : NULL;
+    if (a4 && a4->type == KRUNKER_ARRAY) { /* absent or 0: the window before's */
+        if (a4->len > in->angle_cap) {
+            double *grown = realloc(in->angles, (a4->len ? a4->len : 1) * sizeof *grown);
+            if (!grown) { free(dts); return NULL; }
+            in->angles = grown;
+            in->angle_cap = a4->len;
+        }
+        for (uint32_t i = 0; i < a4->len; i++) in->angles[i] = js_num(&a4->u.items[i]);
+        in->angle_count = a4->len;
+    }
+    const KrunkerValue *changes = argc > 5 && args[5].type == KRUNKER_MAP ? &args[5] : NULL;
+    NetInputPacket *out = malloc((n ? n : 1) * sizeof *out);
+    if (!out) { free(dts); return NULL; }
+    double pitch = 0, yaw = 0;
+    for (size_t j = 0; j < n; j++) {
+        if (j == 0) {
+            pitch = in->angle_count >= 2 ? in->angles[0] : 0;
+            yaw = in->angle_count >= 2 ? in->angles[1] : 0;
+        } else if (in->angle_count > 2 * j + 1) {
+            pitch += in->angles[2 * j];
+            yaw += in->angles[2 * j + 1];
+        }
+        for (int k = 4; k <= 14; k++) {
+            char key[24];
+            snprintf(key, sizeof key, "%zu-%d", j, k);
+            const KrunkerValue *c = changes ? krunker_get(changes, key) : NULL;
+            if (c) in->vals[k] = js_num(c);
+        }
+        const double *v = in->vals;
+        const int reset = v[13] == 2 ? NET_INPUT_RESET_LAST : v[13] == 1 ? NET_INPUT_RESET_START : 0;
+        NetInputPacket *f = &out[j];
+        memset(f, 0, sizeof *f);
+        f->seq = (int32_t) (first + (double) j);
+        f->move_dir = v[4] >= 0 && v[4] <= 7 ? (int32_t) ((int) v[4] + 7) % 8 : -1;
+        f->delta = (float) (dts[j] / 1000.0);
+        f->x_dir = (float) (pitch / 1000.0); /* the pitch (bots.c: in.x_dir = pitch) */
+        f->y_dir = (float) (yaw / 1000.0);   /* the yaw */
+        f->flags = (uint8_t) ((v[5] ? NET_INPUT_SHOOT : 0) | (v[6] ? NET_INPUT_SCOPE : 0) | (v[7] ? NET_INPUT_JUMP : 0) |
+                              (v[8] ? NET_INPUT_RELOAD : 0) | (v[9] ? NET_INPUT_CROUCH : 0) | reset | (v[14] ? NET_INPUT_INTERACT : 0));
+        f->swap = v[11] ? 1 : 0;
+        f->slowdown = (uint8_t) clamp_i32(js_round(v[12] * 10), 0, 10);
+        f->scroll = (int8_t) clamp_i32(trunc(v[10]), -1, 1);
+    }
+    free(dts);
+    *count = n;
+    return out;
+}
+
+size_t v10_encode_input_batch(const NetInputPacket *frames, size_t n, uint8_t *out) {
+    out[0] = (uint8_t) n;
+    if (n) memcpy(out + 1, frames, n * sizeof *frames);
+    return 1 + n * sizeof *frames;
+}
+
+/* EXT 0x8120: NetServerLinePacket (324 bytes: int32 uid @0, name[32] @4, text[288] @36). The template's first "$" is the
+ * name (net_format_server_line); a server line (kind 2, no name) as the server's own lines (mapServerLine). */
+#define SERVER_LINE_SIZE 324
+static void chat_line(V10Out *o, uint8_t kind, const uint8_t *raw, size_t raw_len, const uint8_t *name, size_t name_len,
+                      int32_t channel, int has_account, int32_t account);
+void v10_map_server_line(V10Out *o, const uint8_t *body, size_t n) {
+    if (n != SERVER_LINE_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    const size_t name_len = field_len(body, n, 4, 32);
+    const size_t text_len = field_len(body, n, 36, 288);
+    const uint8_t *name = body + 4;
+    const uint8_t *tpl = body + 36;
+    uint8_t *line = v10_arena(o, name_len + text_len + 1); /* the template with its first $ replaced: at most this */
+    if (!line) return;
+    /* the first "$" of the template is the name; a template with none shows as it is */
+    size_t w = 0, i = 0;
+    int replaced = 0;
+    for (; i < text_len; i++) {
+        if (!replaced && tpl[i] == '$') {
+            memcpy(line + w, name, name_len);
+            w += name_len;
+            replaced = 1;
+        } else {
+            line[w++] = tpl[i];
+        }
+    }
+    chat_line(o, 2, line, w, NULL, 0, -1, 0, 0);
+}
+
+/* LEAVE: NetLeavePacket (4 bytes): int32 uid, the sid v10 knows the player by. */
+void v10_map_leave(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != 4) {
+        o->stop = "malformed";
+        return;
+    }
+    v10_push(o, V10_IN_REMOVE_PLAYER, (KrunkerValue[]){KRUNKER_V_NUM(rd_i32(p, 0))}, 1);
+}
+
+void v10_map_death_countdown(V10Out *o, int32_t uid) {
+    KrunkerValue args[6] = {KRUNKER_V_NUM(uid), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_NIL,
+                            KRUNKER_V_BOOL(0)};
+    v10_push(o, V10_IN_KILL_PLAYER, args, 6);
+}
+
+void v10_map_enter_game(V10Out *o) {
+    v10_push(o, V10_IN_ENTER_GAME, (KrunkerValue[]){KRUNKER_V_BOOL(1)}, 1);
+}
+
+/* SHOT: NetShotPacket (31 bytes, packed): int32 uid @0, int32 weapon @4, float hit[3] @8, has_normal @20, normal_yaw @21,
+ * normal_pitch @25, trail @29, first @30 (mapShot, v10Translate.ts). The tracer "9" is one array argument: [sid, hit x, y, z
+ * (0.1), normal yaw, pitch | nil (0.01), trail, shooter x, y, height, z (0.1), bulletType 0, impactType 0]. */
+#define SHOT_SIZE 31
+void v10_map_shot(V10Out *o, const uint8_t *p, size_t n, const V10Shooter *shooter) {
+    if (n != SHOT_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    const int32_t uid = rd_i32(p, 0);
+    const double hit[3] = {r1(rd_f32(p, 8)), r1(rd_f32(p, 12)), r1(rd_f32(p, 16))};
+    const int has_normal = p[20] != 0;
+    const double normal_yaw = has_normal ? r2(rd_f32(p, 21)) : 0;
+    const double normal_pitch = has_normal ? r2(rd_f32(p, 25)) : 0;
+    double origin[4] = {hit[0], hit[1], 0, hit[2]}; /* no state: the hit point at height 0 */
+    if (shooter) {
+        origin[0] = r1(shooter->x);
+        origin[1] = r1(shooter->y);
+        origin[2] = r1(shooter->height);
+        origin[3] = r1(shooter->z);
+    }
+    const KrunkerValue tracer[13] = {
+        KRUNKER_V_NUM(uid), KRUNKER_V_NUM(hit[0]), KRUNKER_V_NUM(hit[1]), KRUNKER_V_NUM(hit[2]),
+        has_normal ? KRUNKER_V_NUM(normal_yaw) : KRUNKER_V_NIL, has_normal ? KRUNKER_V_NUM(normal_pitch) : KRUNKER_V_NIL,
+        KRUNKER_V_NUM(p[29]), KRUNKER_V_NUM(origin[0]), KRUNKER_V_NUM(origin[1]), KRUNKER_V_NUM(origin[2]), KRUNKER_V_NUM(origin[3]),
+        KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+    };
+    v10_push(o, V10_IN_SHOW_TRACER, (KrunkerValue[]){v10_arr(o, tracer, 13)}, 1);
+}
+
+/* RECON: NetReconPacket (89 bytes, packed) -> the "l" sync array (mapRecon, v10Translate.ts). The inverse of the native
+ * client's on_sync_player (krunker_link.c): the 26 slots, by index. */
+#define RECON_SIZE 89
+void v10_map_recon(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != RECON_SIZE) {
+        o->stop = "malformed (not the v3 NetReconPacket)";
+        return;
+    }
+    const int flags = p[57];
+    KrunkerValue grapple = KRUNKER_V_NIL;
+    if (p[72] != 0) {
+        const KrunkerValue g[4] = {KRUNKER_V_NUM(rd_f32(p, 73)), KRUNKER_V_NUM(rd_f32(p, 77)), KRUNKER_V_NUM(rd_f32(p, 81)), KRUNKER_V_NUM(rd_f32(p, 85))};
+        grapple = v10_arr(o, g, 4);
+    }
+    const KrunkerValue sync[26] = {
+        KRUNKER_V_NUM(rd_i32(p, 0)), /* inputSN (ack_seq) */
+        KRUNKER_V_NUM(0), /* ping: not in the packet */
+        KRUNKER_V_NUM(rd_f32(p, 4)), KRUNKER_V_NUM(rd_f32(p, 8)), KRUNKER_V_NUM(rd_f32(p, 12)), /* x, y, z */
+        KRUNKER_V_NUM(rd_f32(p, 20)), KRUNKER_V_NUM(rd_f32(p, 16)), KRUNKER_V_NUM(rd_f32(p, 24)), /* velY, velX, velZ */
+        KRUNKER_V_NUM(rd_f32(p, 28)), /* xDire: the yaw */
+        KRUNKER_V_BOOL(flags & 0x01), KRUNKER_V_BOOL(flags & 0x02), KRUNKER_V_BOOL(flags & 0x04), /* onGround, didJump, didJumpW */
+        KRUNKER_V_NUM(rd_u16(p, 58)), /* wallJumpC */
+        KRUNKER_V_NUM(p[56]), /* onWall: the side 1..4, 0 none */
+        KRUNKER_V_BOOL(flags & 0x08), /* onLadder */
+        KRUNKER_V_NUM(1 - rd_f32(p, 32)), /* aimVal: the inverse of aim_val */
+        KRUNKER_V_NUM(rd_f32(p, 36)), /* crouchVal */
+        KRUNKER_V_NUM(rd_i32(p, 40)), /* weapon: the loadout index */
+        KRUNKER_V_NUM(rd_f64(p, 64)), /* slideTimer, ms */
+        KRUNKER_V_BOOL(flags & 0x10), KRUNKER_V_BOOL(flags & 0x20), /* canSlide, onTerrain */
+        KRUNKER_V_NUM(rd_f32(p, 48)), KRUNKER_V_NUM(rd_f32(p, 52)), /* xVelC, zVelC */
+        grapple,
+        KRUNKER_V_NUM(rd_f32(p, 60) * 1000), /* canSlideT, ms */
+        KRUNKER_V_NIL, /* protected */
+    };
+    v10_push(o, V10_IN_SYNC_PLAYER, (KrunkerValue[]){v10_arr(o, sync, 26)}, 1);
+}
+
+/* PICKUP: NetPickupPacket (26 bytes, packed): int32 uid @0, int32 weapon @4 (-1 empty), uint8 active @8, uint8 moved @9,
+ * float position[3] @10, int32 ammo @22. The v10 client reads it as the "inat" pickup half (mapPickup, v10Translate.ts). */
+void v10_map_pickup(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != 26) {
+        o->stop = "malformed";
+        return;
+    }
+    /* mapPickup (v10Translate.ts): an empty pickup (weapon -1) has a null weapon (v10.js 173166: void 0 -> nil) and the
+     * server's own active flag (173186); the position only when moved */
+    const int32_t uid = rd_i32(p, 0);
+    const int32_t weapon = rd_i32(p, 4);
+    const int empty = weapon < 0;
+    const int active = p[8] != 0;
+    const int moved = p[9] != 0;
+    const KrunkerValue pos[3] = {KRUNKER_V_NUM(rd_f32(p, 10)), KRUNKER_V_NUM(rd_f32(p, 14)), KRUNKER_V_NUM(rd_f32(p, 18))};
+    const KrunkerValue args[8] = {
+        KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(uid), empty ? KRUNKER_V_NIL : KRUNKER_V_NUM(weapon),
+        KRUNKER_V_BOOL(1), KRUNKER_V_BOOL(active), moved ? v10_arr(o, pos, 3) : KRUNKER_V_NIL,
+    };
+    v10_push(o, V10_IN_PLAYER_INTERACTION, args, 8);
 }
 
 /* NetCheatPacket: uint8 flag (NetCheatFlag, shared/include/shared.h), uint8 on. v10 takes the on / off value as the
@@ -1229,7 +1487,9 @@ void v10_map_bot_add(V10Out *o, const uint8_t *p, size_t n) {
         KRUNKER_V_NUM(r1(rd_f32(p, 56))),
         dat,
     };
-    v10_push(o, V10_IN_C_SPAWN, args, 7);
+    /* one record argument: the client's aai handler takes the AI.getData array (record[6] is dat) */
+    const KrunkerValue rec[1] = {v10_arr(o, args, 7)};
+    v10_push(o, V10_IN_C_SPAWN, rec, 1);
 }
 
 /* NetStatePacket (protocol 1.4.5, 79 bytes): see mapState in v10Translate.ts. */
@@ -1252,6 +1512,7 @@ int v10_map_state(const uint8_t *p, size_t n, V10StateRec *out) {
     out->grapple_on = p[62] != 0;
     for (int k = 0; k < 3; k++) out->grapple[k] = js_round(rd_f32(p, 63 + 4 * (size_t)k));
     out->ping = js_round(rd_f32(p, 75));
+    out->height = 11.0 - 3.0 * rd_f32(p, 53); /* constants_v10.c: player_height 11, crouch_distance 3 */
     return 1;
 }
 
@@ -1337,17 +1598,13 @@ static int junk_amount(const uint8_t *s, size_t n, const uint8_t **amount, size_
     return 1;
 }
 
-void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
-    if (n != CHAT_V7_SIZE) {
-        o->stop = "malformed";
-        return;
-    }
-    const uint8_t kind = p[9];
-    const size_t raw_len = field_len(p, n, 42, V10_CHAT_TEXT_SIZE);
-    /* KN kind 3 (NET_CHAT_FOUND_JUNK) is the finder's "You found [x.xx] Junk": v10 builds that line itself */
+/* chatLine (v10Translate.ts): kinds 3 (found junk) and 4 (ranked) are the lines v10 builds itself; 0 to 2 are the
+ * player, game and server lines, with the channel and the account id the packet carried (a v3 line has neither). */
+static void chat_line(V10Out *o, uint8_t kind, const uint8_t *raw, size_t raw_len, const uint8_t *name, size_t name_len,
+                      int32_t channel, int has_account, int32_t account) {
     if (kind == 3) {
         uint8_t clean[3 * V10_CHAT_TEXT_SIZE];
-        const size_t cn = utf8_sanitize(p + 42, raw_len, clean);
+        const size_t cn = utf8_sanitize(raw, raw_len, clean);
         const uint8_t *amount = NULL;
         size_t alen = 0;
         if (!junk_amount(clean, cn, &amount, &alen)) {
@@ -1365,9 +1622,8 @@ void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
         v10_push(o, V10_IN_ADD_CHAT, (KrunkerValue[]){KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_STRN((const char *)html, total), KRUNKER_V_NUM(1)}, 4);
         return;
     }
-    /* KN kind 4 (NET_CHAT_RANKED): the ranked queue's notice in the ranked green (v10's direct line) */
     if (kind == 4) {
-        const KrunkerValue text = v10_escape_html(o, p + 42, raw_len);
+        const KrunkerValue text = v10_escape_html(o, raw, raw_len);
         const KrunkerValue args[5] = {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, text, KRUNKER_V_NUM(2), KRUNKER_V_STR("#5ce05a")};
         v10_push(o, V10_IN_ADD_CHAT, args, 5);
         return;
@@ -1378,11 +1634,74 @@ void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
         o->stop = why ? why : "chat kind has no v10 kind";
         return;
     }
-    const KrunkerValue name = kind == 2 ? KRUNKER_V_NIL : v10_escape_html(o, p + 10, field_len(p, n, 10, 32));
-    const KrunkerValue text = v10_escape_html(o, p + 42, raw_len);
+    const KrunkerValue nm = kind == 2 ? KRUNKER_V_NIL : v10_escape_html(o, name, name_len);
+    const KrunkerValue text = v10_escape_html(o, raw, raw_len);
     const KrunkerValue args[8] = {
-        KRUNKER_V_NUM((int8_t)p[0]), name, text, KRUNKER_V_NUM(kind), KRUNKER_V_NIL, KRUNKER_V_NIL,
-        KRUNKER_V_NUM(rd_i32(p, 1)), KRUNKER_V_NIL,
+        KRUNKER_V_NUM(channel), nm, text, KRUNKER_V_NUM(kind), KRUNKER_V_NIL, KRUNKER_V_NIL,
+        has_account ? KRUNKER_V_NUM(account) : KRUNKER_V_NIL, KRUNKER_V_NIL,
     };
     v10_push(o, V10_IN_ADD_CHAT, args, 8);
+}
+
+/* CHAT_V7 (330 bytes): see the layout in v10Translate.ts (mapChatV7). */
+void v10_map_chat_v7(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != CHAT_V7_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    chat_line(o, p[9], p + 42, field_len(p, n, 42, V10_CHAT_TEXT_SIZE), p + 10, field_len(p, n, 10, 32), (int8_t)p[0], 1, rd_i32(p, 1));
+}
+
+/* NetChatPacket (325 bytes, the v3 line): int32 uid @0, uint8 kind @4, name[32] @5, text[288] @37. A v7 peer still gets
+ * it for the game, server and trigger lines. No channel and no account: channel -1 (all), account null (mapChat). */
+#define CHAT_V3_SIZE 325
+
+void v10_map_chat(V10Out *o, const uint8_t *p, size_t n) {
+    if (n != CHAT_V3_SIZE) {
+        o->stop = "malformed";
+        return;
+    }
+    chat_line(o, p[4], p + 37, field_len(p, n, 37, V10_CHAT_TEXT_SIZE), p + 5, field_len(p, n, 5, 32), -1, 0, 0);
+}
+
+/* NetMatchVoteStatePacket (170 bytes): count uint8 @0 (0: no vote), voted int8 @1 (ours, -1 none), entries[4] @2, 42 bytes
+ * each: mode_id int32, map_index int32, votes uint16, map_name[32]. v10 "mv" is [vo, mts] (mapMatchVoteState). */
+#define MATCH_VOTE_STATE_SIZE 170
+#define MATCH_VOTE_ENTRY_SIZE 42
+#define NET_MATCH_PICKS 4
+
+void v10_map_match_vote(V10Out *o, const uint8_t *p, size_t n, const char *socket_id) {
+    if (n != MATCH_VOTE_STATE_SIZE || p[0] > NET_MATCH_PICKS) {
+        o->stop = "malformed";
+        return;
+    }
+    const size_t count = p[0];
+    const int voted = (int8_t)p[1];
+    KrunkerValue *mts = count ? v10_arena(o, count * sizeof *mts) : NULL;
+    KrunkerValue *kv = v10_arena(o, 2 * (2 * count + 1) * sizeof *kv);
+    if (!kv || (count && !mts)) return;
+    size_t pairs = 0;
+    for (size_t i = 0; i < count; i++) {
+        const size_t at = 2 + i * MATCH_VOTE_ENTRY_SIZE;
+        char option[32];
+        snprintf(option, sizeof option, "%d,%d", (int)rd_i32(p, at), (int)rd_i32(p, at + 4));
+        const int votes = rd_u16(p, at + 8);
+        const int own = voted == (int)i && votes > 0;
+        const KrunkerValue opt = v10_text(o, (const uint8_t *)option, strlen(option));
+        mts[i] = opt;
+        if (own) {
+            kv[2 * pairs] = v10_text(o, (const uint8_t *)socket_id, strlen(socket_id));
+            kv[2 * pairs + 1] = v10_arr(o, (KrunkerValue[]){opt, KRUNKER_V_NUM(1)}, 2);
+            pairs++;
+        }
+        if (votes - own > 0) {
+            char key[24];
+            snprintf(key, sizeof key, "vote%zu", i);
+            kv[2 * pairs] = v10_text(o, (const uint8_t *)key, strlen(key));
+            kv[2 * pairs + 1] = v10_arr(o, (KrunkerValue[]){opt, KRUNKER_V_NUM(votes - own)}, 2);
+            pairs++;
+        }
+    }
+    const KrunkerValue args[2] = {KRUNKER_V_MAP(kv, (uint32_t)pairs), v10_arr(o, mts, (uint32_t)count)};
+    v10_push(o, V10_IN_UPD_MATCH_VOTE, args, 2);
 }

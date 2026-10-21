@@ -83,6 +83,9 @@ typedef struct V10Session {
     kn_buf in;       /* native bytes not yet framed */
 
     int hello_sent;
+    V10Shooter *shooters; /* each player's last position and height: the origin of its shots */
+    size_t shooter_n, shooter_cap;
+    V10Input input;      /* the input window's deltas, kept across q packets */
     V10MapInfo map_info;
     int have_map_info;
     V10Chunks map_assembly;
@@ -132,6 +135,7 @@ struct V10Bridge {
     char native_host[256];
     int native_port;
     char lobby_id[64];
+    int trace;          /* KRUNK_NATIVE_V10_TRACE=1: every label each way (the TS trace, the same lines) */
     V10Session *head;
 };
 
@@ -190,6 +194,13 @@ static const char *native_name(uint8_t type, const uint8_t *p, size_t n) {
     case NET_PACKET_PLAYER_SOUND: return "PLAYER_SOUND";
     case NET_PACKET_TIMER: return "TIMER";
     case NET_PACKET_CHEAT: return "CHEAT";
+    case NET_PACKET_PICKUP: return "PICKUP";
+    case NET_PACKET_INPUT_BATCH: return "INPUT_BATCH";
+    case NET_PACKET_RECON: return "RECON";
+    case NET_PACKET_SHOT: return "SHOT";
+    case NET_PACKET_LEAVE: return "LEAVE";
+    case NET_PACKET_CHAT: return "CHAT";
+    case NET_PACKET_MATCH_VOTE_STATE: return "MATCH_VOTE_STATE";
     case NET_PACKET_MODE_STATE: return "MODE_STATE";
     case NET_PACKET_OBJECT_STATE: return "OBJECT_STATE";
     case NET_PACKET_MODE_SYNC_V7: return "MODE_SYNC_V7";
@@ -233,6 +244,40 @@ static void session_unlink(V10Session *s) {
     s->prev = s->next = NULL;
 }
 
+/* The shooter table: a player's last state or spawn. */
+static const V10Shooter *shooter_find(const V10Session *s, int32_t uid) {
+    for (size_t i = 0; i < s->shooter_n; i++)
+        if (s->shooters[i].uid == uid) return &s->shooters[i];
+    return NULL;
+}
+
+static void shooter_set(V10Session *s, int32_t uid, double x, double y, double z, double height) {
+    V10Shooter v = {.uid = uid, .x = x, .y = y, .z = z, .height = height};
+    for (size_t i = 0; i < s->shooter_n; i++) {
+        if (s->shooters[i].uid == uid) {
+            s->shooters[i] = v;
+            return;
+        }
+    }
+    if (s->shooter_n == s->shooter_cap) {
+        const size_t cap = s->shooter_cap ? s->shooter_cap * 2 : 16;
+        V10Shooter *grown = realloc(s->shooters, cap * sizeof *grown);
+        if (!grown) return;
+        s->shooters = grown;
+        s->shooter_cap = cap;
+    }
+    s->shooters[s->shooter_n++] = v;
+}
+
+static void shooter_remove(V10Session *s, int32_t uid) {
+    for (size_t i = 0; i < s->shooter_n; i++) {
+        if (s->shooters[i].uid == uid) {
+            s->shooters[i] = s->shooters[--s->shooter_n];
+            return;
+        }
+    }
+}
+
 static void tcp_close(V10Session *s) {
     if (s->fd >= 0) {
         kn_loop_del_fd(s->bridge->loop, s->fd);
@@ -253,8 +298,10 @@ static void session_free(V10Session *s) {
     free(s->config_text);
     cJSON_Delete(s->config_root);
     free(s->kbatch);
+    free(s->shooters);
     free(s->ai_sync);
     free(s->skins);
+    v10_input_free(&s->input);
     for (size_t i = 0; i < s->queue_n; i++) free(s->queue[i].payload);
     free(s->queue);
     free(s);
@@ -278,8 +325,11 @@ static void close_session(V10Session *s, int code, const char *reason, int force
 
 /* ---- the WebSocket side */
 
+#define TRACE(s, ...) do { if ((s)->bridge->trace) { fprintf(stderr, "[v10-proxy] "); fprintf(stderr, __VA_ARGS__); } } while (0)
+
 static void send_ws(V10Session *s, const char *label, const KrunkerValue *args, uint32_t argc) {
     if (s->closed || !s->ws) return;
+    TRACE(s, "%.5s -> %s\n", s->socket_id, label);
     KrunkerBuf buf = {0};
     if (krunker_proto_encode_ah(0, label, args, argc, &buf) == KRUNKER_PROTO_OK) kn_ws_send_binary(s->ws, buf.data, buf.len);
     krunker_buf_free(&buf);
@@ -374,6 +424,7 @@ static void tcp_read(V10Session *s) {
         }
         if (r == 0) {
             free(buf);
+            TRACE(s, "%.5s native socket closed\n", s->socket_id);
             close_session(s, 1011, "native server closed", 0);
             return;
         }
@@ -546,6 +597,19 @@ static void handle_client(V10Session *s, const char *label, const KrunkerValue *
         if (v10_encode_enter(a0, ent)) write_native(s, NET_PACKET_ENT, ent, sizeof ent);
         /* challMode: the join's array item 7 (EN.CHALLENGE), truthy */
         s->chall_mode = a0 && a0->type == KRUNKER_ARRAY && a0->len > 7 && v10_truthy(&a0->u.items[7]) ? 1 : 0;
+    } else if (!strcmp(label, V10_OUT_INPUT)) {
+        /* the input window: every frame to the native server, NET_INPUT_BATCH_MAX to a packet (a malformed q is dropped) */
+        size_t count = 0;
+        NetInputPacket *frames = v10_decode_input(&s->input, args, argc, &count);
+        if (frames) {
+            for (size_t i = 0; i < count; i += NET_INPUT_BATCH_MAX) {
+                const size_t n = count - i < NET_INPUT_BATCH_MAX ? count - i : NET_INPUT_BATCH_MAX;
+                uint8_t payload[1 + NET_INPUT_BATCH_MAX * sizeof(NetInputPacket)];
+                const size_t len = v10_encode_input_batch(&frames[i], n, payload);
+                write_native(s, NET_PACKET_INPUT_BATCH, payload, len);
+            }
+            free(frames);
+        }
     } else if (!strcmp(label, V10_OUT_CHAT_MESSAGE)) {
         uint8_t text[V10_CHAT_TEXT_SIZE];
         const size_t n = v10_encode_chat(a0, text);
@@ -673,6 +737,14 @@ static void emit_init(V10Session *s) {
 
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
     if (s->closed) return;
+    if (s->bridge->trace) {
+        char hex[24] = "";
+        if (n <= 8) {
+            for (size_t i = 0; i < n; i++) snprintf(hex + 1 + 2 * i, sizeof hex - 1 - 2 * i, "%02x", p[i]);
+            hex[0] = n ? ' ' : 0;
+        }
+        TRACE(s, "%.5s native %s (%zu B)%s\n", s->socket_id, native_name(type, p, n), n, hex);
+    }
     if (type == NET_PACKET_PING) {
         write_native(s, NET_PACKET_PONG, p, n);
         return;
@@ -732,6 +804,15 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     }
     if (s->init_sent && type == NET_PACKET_PING_RESULT) return; /* v10's "pir" handler does nothing */
     if (s->init_sent && type == NET_PACKET_SOCIAL_V7) return;   /* a v7 capability notice: chat goes as CHAT_SEND */
+    /* EXT 0x8120: a join or leave line about a player, formatted as a server line (v10_map_server_line) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_SERVER_LINE) {
+        v10_out_init(&o);
+        v10_map_server_line(&o, p + 2, n - 2);
+        finish_out(s, &o, "EXT 0x8120 SERVER_LINE");
+        return;
+    }
+    /* KN's account rights (EXT 0x8001): no v10 message, consumed (as the TS) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_ACCOUNT_RIGHTS) return;
     if (s->init_sent && type == NET_PACKET_LEADERBOARD) {
         v10_out_init(&o);
         size_t rows = 0;
@@ -752,7 +833,22 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_STATE) {
         V10StateRec rec;
         if (!v10_map_state(p, n, &rec)) { stop_at(s, "STATE", "malformed"); return; }
+        shooter_set(s, rec.uid, rec.x, rec.y, rec.z, rec.height); /* the origin of this player's shots */
         if (rec.uid != s->client_id && kbatch_push(s, &rec)) close_session(s, 1011, "out of memory", 0);
+        return;
+    }
+    /* MATCH_VOTE_STATE (181): the match cards' votes as "mv" [vo, mts] (mapMatchVoteState) */
+    if (s->init_sent && type == NET_PACKET_MATCH_VOTE_STATE) {
+        v10_out_init(&o);
+        v10_map_match_vote(&o, p, n, s->socket_id);
+        finish_out(s, &o, "MATCH_VOTE_STATE");
+        return;
+    }
+    /* NET 9: a v3 chat line (game, server and trigger lines; the player lines of a v7 peer take CHAT_V7) */
+    if (s->init_sent && type == NET_PACKET_CHAT) {
+        v10_out_init(&o);
+        v10_map_chat(&o, p, n);
+        finish_out(s, &o, "CHAT");
         return;
     }
     if (s->init_sent && type == NET_PACKET_CHAT_V7) {
@@ -806,13 +902,18 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_SPAWN) {
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
-        if (!spawn.active) return; /* a player who is dead now: the v10 add is for players in play */
+        shooter_set(s, spawn.uid, spawn.position[0], spawn.position[1], spawn.position[2], 11.0); /* standing: player_height */
+        if (!spawn.active && !spawn.is_you) return; /* a player who is dead now: the v10 add is for players in play */
         const int at = skins_index(s, spawn.uid);
         v10_out_init(&o);
         const KrunkerValue rec = v10_player_add_record(&o, &spawn, at >= 0 ? &s->skins[at].skins : NULL, at >= 0, s->socket_id);
         const KrunkerValue add_args[2] = {rec, KRUNKER_V_NUM(1)};
         v10_push(&o, V10_IN_ADD_PLAYERS, add_args, 2);
-        if (spawn.is_you) {
+        if (!spawn.active) {
+            /* our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown */
+            v10_map_death_countdown(&o, spawn.uid);
+            v10_map_enter_game(&o); /* frs [true]: enterGame(true) on the client, which sends "en" */
+        } else if (spawn.is_you) {
             KrunkerValue start[8];
             v10_start_game(&spawn, s->game_timer, s->chall_mode, start);
             v10_push(&o, V10_IN_START_GAME, start, 8);
@@ -846,6 +947,36 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             v10_push(&o, V10_IN_ADD_PLAYER_SOUND, args, 3);
         }
         finish_out(s, &o, "PLAYER_SOUND");
+        return;
+    }
+    /* LEAVE: another player disconnected: the v10 "2" (see v10_map_leave); its position is no longer a shot's origin */
+    if (s->init_sent && type == NET_PACKET_LEAVE) {
+        v10_out_init(&o);
+        v10_map_leave(&o, p, n);
+        if (!o.stop && n == 4) shooter_remove(s, rd_i32(p, 0));
+        finish_out(s, &o, "LEAVE");
+        return;
+    }
+    /* SHOT: one hitscan ray of another player's shot, the tracer "9" (see v10_map_shot) */
+    if (s->init_sent && type == NET_PACKET_SHOT) {
+        const V10Shooter *shooter = n == 31 ? shooter_find(s, rd_i32(p, 0)) : NULL;
+        v10_out_init(&o);
+        v10_map_shot(&o, p, n, shooter);
+        finish_out(s, &o, "SHOT");
+        return;
+    }
+    /* RECON: the owner's movement state, the v10 "l" (one argument: see v10_map_recon) */
+    if (s->init_sent && type == NET_PACKET_RECON) {
+        v10_out_init(&o);
+        v10_map_recon(&o, p, n);
+        finish_out(s, &o, "RECON");
+        return;
+    }
+    /* PICKUP: one pickup's state, the pickup half of v10's "inat" (see v10_map_pickup) */
+    if (s->init_sent && type == NET_PACKET_PICKUP) {
+        v10_out_init(&o);
+        v10_map_pickup(&o, p, n);
+        finish_out(s, &o, "PICKUP");
         return;
     }
     /* CHEAT: one chat command's flag, on or off: the v10 handler for that label takes the value (v10.js 220244-220264) */
@@ -1038,6 +1169,7 @@ static void on_ws_message(kn_ws *ws, const void *data, size_t len, int is_binary
         release(s);
         return;
     }
+    TRACE(s, "%.5s <- %s\n", s->socket_id, frame.name);
     handle_client(s, frame.name, frame.args, frame.argc);
     krunker_frame_free(&frame);
     release(s);
@@ -1048,6 +1180,7 @@ static void on_ws_close(kn_ws *ws, int code, const char *reason, void *ud) {
     (void)code;
     (void)reason;
     V10Session *s = ud;
+    TRACE(s, "%.5s client socket closed %d %.*s\n", s->socket_id, code, (int)strlen(reason ? reason : ""), reason ? reason : "");
     s->ws = NULL;
     close_session(s, 1000, "client closed", 0);
     s->dead = 1;
@@ -1069,6 +1202,7 @@ static void route_ws(kn_http_req *req, void *ud) {
     }
     s->bridge = b;
     s->fd = -1;
+    v10_input_init(&s->input);
     session_link(s);
     kn_ws_options opts;
     memset(&opts, 0, sizeof opts);
@@ -1095,6 +1229,8 @@ V10Bridge *v10_bridge_new(kn_loop *loop, const V10BridgeConfig *cfg) {
     snprintf(b->native_host, sizeof b->native_host, "%s", cfg->native_host ? cfg->native_host : "127.0.0.1");
     b->native_port = cfg->native_port > 0 ? cfg->native_port : V10_DEFAULT_NATIVE_PORT;
     snprintf(b->lobby_id, sizeof b->lobby_id, "%s", cfg->lobby_id ? cfg->lobby_id : V10_DEFAULT_LOBBY);
+    const char *trace = getenv("KRUNK_NATIVE_V10_TRACE");
+    b->trace = trace && !strcmp(trace, "1");
     kn_http_config hc;
     memset(&hc, 0, sizeof hc);
     kn_http_config_defaults(&hc);

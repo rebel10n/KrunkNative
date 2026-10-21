@@ -34,6 +34,10 @@ static kn_loop *g_loop;
 #define T_EN_LEN 35 // the v10 "en" array
 
 // ---- a value equality for the decoded frames (exact doubles, the TS deepStrictEqual)
+static int32_t rd_i32_test(const uint8_t *b, size_t at) {
+    return (int32_t)((uint32_t)b[at] | (uint32_t)b[at + 1] << 8 | (uint32_t)b[at + 2] << 16 | (uint32_t)b[at + 3] << 24);
+}
+
 static int vequal(const KrunkerValue *a, const KrunkerValue *b) {
     if (!a || !b) return a == b;
     if (a->type != b->type) return 0;
@@ -342,8 +346,8 @@ int main(void) {
     client_send("load", NULL, 0);
     WAIT_FOR(native_count(NET_PACKET_HELLO) == 1);
     NFrame *hello = native_nth(NET_PACKET_HELLO, 0);
-    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == 4 && hello->payload[3] == 4,
-          "HELLO is [1, 4, 4, 4]");
+    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == 5 && hello->payload[3] == 4,
+          "HELLO is [1, 4, 5, 4] (NET_PROTOCOL_PATCH 5)");
     client_send("load", NULL, 0); /* a second LOAD sends no second HELLO */
     pump(100);
     CHECK(native_count(NET_PACKET_HELLO) == 1, "a second LOAD sends no second HELLO");
@@ -416,6 +420,7 @@ int main(void) {
               vequal(map_get(&a[12], "sf"), &KRUNKER_V_NUM(1)), "init arg 12: networkData {snf 10, tf 30, sf 1}");
         CHECK(vequal(&a[13], &KRUNKER_V_BOOL(1)), "init arg 13 is true");
         CHECK(vequal(&a[16], &KRUNKER_V_BOOL(0)), "init arg 16 is isRanked");
+        CHECK(a[11].type == KRUNKER_MAP && a[11].len == 1 && vequal(map_get(&a[11], "gor"), &KRUNKER_V_NUM(1)), "init arg 11 is the sync data {gor: 1}");
     } else {
         CHECK(0, "the init has 20 arguments");
     }
@@ -637,8 +642,9 @@ int main(void) {
     native_send(&g_native, NET_PACKET_AI_ADD_V7, bot7, 237);
     WAIT_FOR(client_count("aai") == 1);
     KrunkerFrame aai;
-    CHECK(client_get("aai", 0, &aai) && aai.argc == 7 && vequal(&aai.args[0], &KRUNKER_V_NUM(5)) && is_str(&aai.args[2], "Bot") &&
-          vequal(&aai.args[6], &KRUNKER_V_NUM(0)), "aai [5, 0, Bot, 0, 0, 0, 0]");
+    CHECK(client_get("aai", 0, &aai) && aai.argc == 1 && aai.args[0].type == KRUNKER_ARRAY && aai.args[0].len == 7 &&
+          vequal(&aai.args[0].u.items[0], &KRUNKER_V_NUM(5)) && is_str(&aai.args[0].u.items[2], "Bot") &&
+          vequal(&aai.args[0].u.items[6], &KRUNKER_V_NUM(0)), "aai [[5, 0, Bot, 0, 0, 0, 0]] (one record argument)");
     krunker_frame_free(&aai);
 
     // the domination zones (142): one uct list; the zone's map object id is its uid
@@ -712,6 +718,148 @@ int main(void) {
     }
     krunker_frame_free(&kf);
 
+    // NET 9 (the v3 chat, game and server lines): a server line (kind 2) and a player line (kind 0), channel -1 (all)
+    uint8_t c9[325];
+    memset(c9, 0, sizeof c9);
+    c9[4] = 2;
+    w_str(c9, 37, "Round 2 starts");
+    native_send(&g_native, NET_PACKET_CHAT, c9, 325);
+    WAIT_FOR(client_count("ch") == 2);
+    KrunkerFrame ch9;
+    CHECK(client_get("ch", 1, &ch9) && ch9.argc == 8 && vequal(&ch9.args[0], &KRUNKER_V_NUM(-1)) && ch9.args[1].type == KRUNKER_NIL &&
+          is_str(&ch9.args[2], "Round 2 starts") && vequal(&ch9.args[3], &KRUNKER_V_NUM(2)) && ch9.args[6].type == KRUNKER_NIL,
+          "NET 9 server line: ch [-1, null, text, 2, null, null, null, null]");
+    krunker_frame_free(&ch9);
+    memset(c9, 0, sizeof c9);
+    w_i32(c9, 0, 3);
+    c9[4] = 0;
+    w_str(c9, 5, "Ada");
+    w_str(c9, 37, "hi <b>");
+    native_send(&g_native, NET_PACKET_CHAT, c9, 325);
+    WAIT_FOR(client_count("ch") == 3);
+    KrunkerFrame ch9p;
+    CHECK(client_get("ch", 2, &ch9p) && ch9p.argc == 8 && vequal(&ch9p.args[0], &KRUNKER_V_NUM(-1)) && is_str(&ch9p.args[1], "Ada") &&
+          is_str(&ch9p.args[2], "hi &lt;b&gt;") && ch9p.args[6].type == KRUNKER_NIL, "NET 9 player line: ch [-1, Ada, escaped, 0, ..., null]");
+    krunker_frame_free(&ch9p);
+
+    // MATCH_VOTE_STATE (181): the cards' votes as mv [vo, mts]; ours under our socket id (io-init)
+    uint8_t mvb[170];
+    memset(mvb, 0, sizeof mvb);
+    mvb[0] = 1; mvb[1] = 0;
+    w_i32(mvb, 2, 0); w_i32(mvb, 6, 5); w_u16(mvb, 10, 1);
+    native_send(&g_native, NET_PACKET_MATCH_VOTE_STATE, mvb, 170);
+    WAIT_FOR(client_count("mv") == 1);
+    KrunkerFrame mvf;
+    const int got_mv = client_get("mv", 0, &mvf);
+    const KrunkerValue *mine = got_mv ? map_get(&mvf.args[0], socket_id) : NULL;
+    CHECK(got_mv && mvf.argc == 2 && mine && mine->type == KRUNKER_ARRAY && mine->len == 2 && is_str(&mine->u.items[0], "0,5") &&
+          vequal(&mine->u.items[1], &KRUNKER_V_NUM(1)) && mvf.args[1].type == KRUNKER_ARRAY && mvf.args[1].len == 1,
+          "mv [{socket id: [\"0,5\", 1]}, [\"0,5\"]] (ours under the socket id, weight 1)");
+    krunker_frame_free(&mvf);
+
+    // EXT 0x8001 (KN's account rights): no v10 message, consumed with no stop
+    const uint8_t rights[6] = {0x01, 0x80, 0, 0, 0, 0};
+    native_send(&g_native, NET_PACKET_EXT, rights, 6);
+    pump(50);
+    CHECK(v10_bridge_untranslated("EXT 0x8001") == 0 && client_count("mv") == 1, "account rights are consumed");
+
+    // PICKUP (128): one pickup's state is the pickup half of "inat" (the v10 client's updatePickup): uid, weapon,
+    // true, active, pos when moved; an empty pickup (weapon -1) has a null weapon and a null position
+    uint8_t pk[26];
+    memset(pk, 0, sizeof pk);
+    w_i32(pk, 0, 7); w_i32(pk, 4, 3); pk[8] = 1; pk[9] = 1;
+    w_f32(pk, 10, 1.5f); w_f32(pk, 14, 2); w_f32(pk, 18, -3); w_i32(pk, 22, 12);
+    native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
+    WAIT_FOR(client_count("inat") == 1);
+    KrunkerFrame inat1;
+    CHECK(client_get("inat", 0, &inat1) && inat1.argc == 8 && vequal(&inat1.args[0], &KRUNKER_V_NUM(-1)) && inat1.args[1].type == KRUNKER_NIL &&
+          inat1.args[2].type == KRUNKER_NIL && vequal(&inat1.args[3], &KRUNKER_V_NUM(7)) && vequal(&inat1.args[4], &KRUNKER_V_NUM(3)) &&
+          vequal(&inat1.args[5], &KRUNKER_V_BOOL(1)) && vequal(&inat1.args[6], &KRUNKER_V_BOOL(1)) && inat1.args[7].type == KRUNKER_ARRAY &&
+          inat1.args[7].len == 3 && vequal(&inat1.args[7].u.items[0], &KRUNKER_V_NUM(1.5)) && vequal(&inat1.args[7].u.items[2], &KRUNKER_V_NUM(-3)),
+          "inat [-1, null, null, 7, 3, true, true, [1.5, 2, -3]]");
+    krunker_frame_free(&inat1);
+    pk[4] = 0xff; pk[5] = 0xff; pk[6] = 0xff; pk[7] = 0xff; /* weapon -1 */
+    pk[8] = 0; pk[9] = 0;
+    native_send(&g_native, NET_PACKET_PICKUP, pk, 26);
+    WAIT_FOR(client_count("inat") == 2);
+    KrunkerFrame inat2;
+    CHECK(client_get("inat", 1, &inat2) && inat2.argc == 8 && inat2.args[4].type == KRUNKER_NIL && vequal(&inat2.args[6], &KRUNKER_V_BOOL(0)) &&
+          inat2.args[7].type == KRUNKER_NIL, "an empty pickup: null weapon (173166), inactive, null position (mapPickup)");
+    krunker_frame_free(&inat2);
+
+    // RECON (110): the owner's state after an input goes to the v10 client as one "l" (the 26-slot array)
+    {
+        uint8_t rc[89];
+        memset(rc, 0, sizeof rc);
+        w_i32(rc, 0, 4);
+        w_f32(rc, 4, 7);
+        native_send(&g_native, NET_PACKET_RECON, rc, 89);
+        WAIT_FOR(client_count("l") == 1);
+        KrunkerFrame lf;
+        CHECK(client_get("l", 0, &lf) && lf.argc == 1 && lf.args[0].type == KRUNKER_ARRAY && lf.args[0].len == 26 &&
+              vequal(&lf.args[0].u.items[0], &KRUNKER_V_NUM(4)), "l carries the inputSN as slot 0 (one argument)");
+        CHECK(v10_bridge_untranslated("RECON") == 0, "RECON is translated");
+        krunker_frame_free(&lf);
+    }
+
+    // SHOT (21): player 9 fires one ray: the tracer "9" for the observer, its origin is 9's state (1.26, 2, 3, height 9.2);
+    // the session stays up (no stop), so the chat below still goes through
+    {
+        uint8_t ray[31];
+        memset(ray, 0, sizeof ray);
+        w_i32(ray, 0, 9);
+        w_f32(ray, 8, 4); w_f32(ray, 12, 5); w_f32(ray, 16, 6);
+        ray[29] = 1;
+        native_send(&g_native, NET_PACKET_SHOT, ray, 31);
+        WAIT_FOR(client_count("9") == 1);
+        KrunkerFrame tr;
+        CHECK(client_get("9", 0, &tr) && tr.argc == 1 && tr.args[0].type == KRUNKER_ARRAY && tr.args[0].len == 13 &&
+              vequal(&tr.args[0].u.items[0], &KRUNKER_V_NUM(9)) && vequal(&tr.args[0].u.items[7], &KRUNKER_V_NUM(1.3)) &&
+              vequal(&tr.args[0].u.items[9], &KRUNKER_V_NUM(9.2)) && tr.args[0].u.items[4].type == KRUNKER_NIL,
+              "tracer 9: sid 9, the hit 4, 5, 6, the origin 1.3, 2, 9.2, 3");
+        krunker_frame_free(&tr);
+        CHECK(v10_bridge_untranslated("SHOT") == 0, "a shot does not stop the observer's session");
+    }
+
+    // our own SPAWN while we wait to join (not active): the add for us, then v10's death for us, KILL_PLAYER "3",
+    // which starts the respawn countdown on the client
+    {
+        uint8_t sp_wait[150];
+        spawn_buf(sp_wait, 1, 1, 0, 4, 0, 100, 1, 2, 3, 0, 0, "me");
+        native_send(&g_native, NET_PACKET_SPAWN, sp_wait, 150);
+        WAIT_FOR(client_count("3") == 1);
+        KrunkerFrame dc;
+        CHECK(client_get("3", 0, &dc) && dc.argc == 6 && vequal(&dc.args[0], &KRUNKER_V_NUM(1)) && dc.args[4].type == KRUNKER_NIL,
+              "3 [1, 0, 0, [], nil, false]: the death for the countdown");
+        krunker_frame_free(&dc);
+        /* then "frs" (ENTER_GAME): the client calls enterGame(true), which sends "en" (checked at ENTER_GAME -> ENT below) */
+        WAIT_FOR(client_count("frs") == 1);
+        KrunkerFrame frs;
+        CHECK(client_get("frs", 0, &frs) && frs.argc == 1 && frs.args[0].type == KRUNKER_BOOL && frs.args[0].u.boolean == 1,
+              "frs [true] right after the countdown");
+        krunker_frame_free(&frs);
+        CHECK(v10_bridge_untranslated("SPAWN") == 0, "a waiting joiner's spawn does not stop the observer's session");
+    }
+
+    // LEAVE (20): player 9 disconnects: the observer's "2" [9]; the session stays up (the next state still comes through)
+    {
+        uint8_t lv[4];
+        w_i32(lv, 0, 9);
+        native_send(&g_native, NET_PACKET_LEAVE, lv, 4);
+        WAIT_FOR(client_count("2") == 1);
+        KrunkerFrame gone;
+        CHECK(client_get("2", 0, &gone) && gone.argc == 1 && vequal(&gone.args[0], &KRUNKER_V_NUM(9)), "2 [9]: the player left");
+        krunker_frame_free(&gone);
+        CHECK(v10_bridge_untranslated("LEAVE") == 0, "a leave does not stop the observer's session");
+        uint8_t st11[79];
+        memset(st11, 0, sizeof st11);
+        w_i32(st11, 0, 11);
+        w_f32(st11, 13, 2.5f); w_f32(st11, 17, 2); w_f32(st11, 21, 3);
+        w_f32(st11, 41, 1); w_f32(st11, 57, 0.25f); st11[61] = 1; w_f32(st11, 53, 0.6f); w_i32(st11, 9, 2); w_f32(st11, 49, 1);
+        native_send(&g_native, NET_PACKET_STATE, st11, 79);
+        WAIT_FOR(client_count("k") >= 2);
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},
@@ -756,6 +904,26 @@ int main(void) {
     NFrame *ent = native_nth(NET_PACKET_ENT, 0);
     CHECK(ent != NULL && ent->len == V10_ENT_SIZE && (int32_t)(ent->payload[0] | ent->payload[1] << 8 | ent->payload[2] << 16 | ent->payload[3] << 24) == 4,
           "ENT: 101 bytes, class 4");
+
+    // q (INPUT): the official client's window (seq 5 and 6, shoot) reaches the native input batch (111)
+    {
+        KrunkerValue ch_vals[11] = {KRUNKER_V_NUM(3), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                    KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)};
+        static const char *const ch_keys[11] = {"0-4", "0-5", "0-6", "0-7", "0-8", "0-9", "0-10", "0-11", "0-12", "0-13", "0-14"};
+        KrunkerValue *map_kv = malloc(sizeof(KrunkerValue) * 22);
+        for (int i = 0; i < 11; i++) { map_kv[2 * i] = KRUNKER_V_STR(ch_keys[i]); map_kv[2 * i + 1] = ch_vals[i]; }
+        KrunkerValue *angle_items = malloc(sizeof(KrunkerValue) * 4);
+        angle_items[0] = KRUNKER_V_NUM(100); angle_items[1] = KRUNKER_V_NUM(-200);
+        angle_items[2] = KRUNKER_V_NUM(5); angle_items[3] = KRUNKER_V_NUM(2);
+        KrunkerValue q_args[6] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(5), KRUNKER_V_STR("1616"), KRUNKER_V_NUM(2),
+                                  KRUNKER_V_ARRAY(angle_items, 4), KRUNKER_V_MAP(map_kv, 11)};
+        client_send("q", q_args, 6);
+        WAIT_FOR(native_count(NET_PACKET_INPUT_BATCH) == 1);
+        NFrame *in_batch = native_nth(NET_PACKET_INPUT_BATCH, 0);
+        CHECK(in_batch && in_batch->len == 1 + 24 * 2 && in_batch->payload[0] == 2, "q -> INPUT_BATCH with two frames");
+        CHECK(in_batch && rd_i32_test(in_batch->payload, 1) == 5 && rd_i32_test(in_batch->payload, 25) == 6, "the frames' seq 5 and 6");
+        CHECK(in_batch && in_batch->payload[1 + 20] == NET_INPUT_SHOOT, "frame 0 fires");
+    }
 
     // chat -> CHAT_SEND
     KrunkerValue hi = KRUNKER_V_STR("hello there");
