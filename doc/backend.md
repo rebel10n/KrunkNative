@@ -765,7 +765,7 @@ brain draining).
 | route | v3.1.1 | response |
 | --- | --- | --- |
 | `GET /ping` | publicRoutes `/ping` | `{"success":"true"}` (region latency probe, also `/mm/ping`) |
-| `GET /mm/ping-list[?hostname=]` | `registry.regions()` | `{"<region>": "host[:port]"}` — one ping host per live region (`brain.regions[].ping_host`, else a live node's public host); the client fetches `http(s)://<value>/ping` |
+| `GET /mm/ping-list[?hostname=]` | `registry.regions()` | `{"<v10 region id>": "host[:port]"}` — one ping host per listed v10 region (the id each node's KN code maps to: [v10/regions.md](v10/regions.md)); the host is `brain.regions[].ping_host` (by the v10 id, then the KN code), else the brain's public URL; the client fetches `http(s)://<value>/ping` |
 | `GET /mm/regions` | (Krunker Box Office) | `[{"id","name","players","games","nodes"}]` known + live regions |
 | `GET /mm/game-list[?hostname=]` | `/mm/game-list` | `{"success":true,"totalPlayerCount":N,"games":[tuple,...]}` all live lobbies of every region |
 | `GET /mm/game-info?game=ID` | `/mm/game-info` | the tuple; unknown id -> best quick-join pick (v3.1.1), `InvalidGameId` if none |

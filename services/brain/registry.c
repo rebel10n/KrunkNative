@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "knsvc/http.h"
 #include "knsvc/json.h"
 #include "server_names.h"
 
@@ -794,6 +795,84 @@ MmNode *registry_pick_host_node(Registry *r, const char *region, const char *bra
         if (best) return best;
     }
     return NULL;
+}
+
+/* ---- /mm/ping-list (public_routes.c h_ping_list; the keys: doc/v10/regions.md) */
+
+/* "http://h:p/x" -> "h:p", without the port when it is 443 (registry.ts regions()).
+ * ClientManager.getRegion() then fetches http://<value>/ping when the value ends
+ * with ":6767", https://<value>/ping otherwise. */
+static void url_to_ping_host(const char *url, char *out, size_t cap) {
+    kn_url u;
+    if (kn_url_parse(url, &u) == 0) {
+        if (u.port && u.port != 443) snprintf(out, cap, "%s:%d", u.host, u.port);
+        else snprintf(out, cap, "%s", u.host);
+        return;
+    }
+    snprintf(out, cap, "%s", url);
+}
+
+/* brain.regions[] entry by id (NULL when none) */
+static const cJSON *ping_region_conf(const cJSON *regions, const char *id) {
+    const cJSON *rc;
+    cJSON_ArrayForEach(rc, regions) {
+        if (!strcmp(kn_json_str(rc, "id", ""), id)) return rc;
+    }
+    return NULL;
+}
+
+/* The region ids the v10.0.2 client pings (getRegion: availableRegions; the production list, plus
+ * ["local"] on the dev host). Dedicated-only ids (us-il, ...) are never pinged, so never listed. */
+static const char *k_v10_pinged[] = {"de-fra", "us-ca-sv", "au-syd", "jb-hnd", "sgp", "us-nj",
+                                      "as-mb", "us-tx", "brz", "me-bhn", "sss", "local"};
+
+/* KrunkNative node region codes (inventory kn_gameserver_region) -> the v10 id each is listed under
+ * (doc/v10/regions.md has the reason per node). */
+static const struct {
+    const char *kn, *v10;
+} k_v10_regions[] = {
+    {"SV", "us-ca-sv"}, /* Santa Clara */
+    {"LA", "us-ca-sv"}, /* Los Angeles: us-ca-la is not pinged; Silicon Valley is the nearest */
+    {"CH", "us-nj"},    /* Chicago: us-il is dedicated-only; New York is the nearest pinged */
+    {"VA", "us-nj"},    /* Ashburn, Virginia: New York is the nearest pinged */
+};
+
+const char *registry_v10_region(const char *kn_region) {
+    if (!kn_region || !*kn_region) return NULL;
+    for (size_t i = 0; i < sizeof(k_v10_regions) / sizeof(k_v10_regions[0]); i++) {
+        if (!strcmp(kn_region, k_v10_regions[i].kn)) return k_v10_regions[i].v10;
+    }
+    /* a node already named by a v10 id (de-fra, us-nj, local, ...) is listed under it */
+    for (size_t i = 0; i < sizeof(k_v10_pinged) / sizeof(k_v10_pinged[0]); i++) {
+        if (!strcmp(kn_region, k_v10_pinged[i])) return k_v10_pinged[i];
+    }
+    return NULL;
+}
+
+cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url) {
+    cJSON *o = cJSON_CreateObject();
+    for (size_t i = 0; i < r->node_count; i++) {
+        const MmNode *n = r->nodes[i];
+        const char *id = registry_v10_region(n->region);
+        if (!id || !*id || cJSON_GetObjectItemCaseSensitive(o, id)) continue;
+        if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
+        char host[300] = "";
+        const cJSON *rc = ping_region_conf(regions, id);
+        if (!rc) rc = ping_region_conf(regions, n->region);
+        const char *ping = kn_json_str(rc, "ping_host", NULL);
+        if (ping && *ping) {
+            snprintf(host, sizeof(host), "%s", ping);
+        } else {
+            const char *url = public_url ? public_url : "";
+            for (size_t k = 0; k < r->brain_count; k++) {
+                if (!strcmp(r->brains[k].brain_id, n->brain_id) && r->brains[k].public_url[0])
+                    url = r->brains[k].public_url;
+            }
+            url_to_ping_host(url, host, sizeof(host));
+        }
+        cJSON_AddStringToObject(o, id, host);
+    }
+    return o;
 }
 
 cJSON *registry_lobby_tuple(const Registry *r, const MmLobby *l, int64_t now_ms) {

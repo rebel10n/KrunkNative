@@ -94,7 +94,7 @@ class Stub:
         if route == "/mm/status":
             return 200, {"brain": "e2e", "version": "1.0.0"}
         if route == "/mm/ping-list":
-            return 200, {"VA": "127.0.0.1"}
+            return 200, {"us-nj": "127.0.0.1"}  # the v10 id of VA (doc/v10/regions.md)
         if route == "/mm/seek-game":
             return 200, {"host": self.game_host, "port": self.game_port, "gameId": "E2E1:abcde", "clientId": "e2e-key",
                          "region": "VA"}

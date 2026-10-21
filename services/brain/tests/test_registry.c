@@ -34,7 +34,63 @@ static int outdated_aaaa(const MmLobby *l, void *ud) {
     return c && !strcmp(c, "aaaaaaaaaaaa");
 }
 
+/* /mm/ping-list keys are v10 region ids (doc/v10/regions.md): the official client skips any other key
+ * (v10.js getRegion: availableRegions), and each KrunkNative node appears under the id it maps to. */
+static const char *k_v10_pinged[] = {"de-fra", "us-ca-sv", "au-syd", "jb-hnd", "sgp", "us-nj",
+                                      "as-mb", "us-tx", "brz", "me-bhn", "sss", "local"};
+
+static int v10_pinged(const char *id) {
+    for (size_t i = 0; i < sizeof(k_v10_pinged) / sizeof(k_v10_pinged[0]); i++) {
+        if (!strcmp(id, k_v10_pinged[i])) return 1;
+    }
+    return 0;
+}
+
+static void ping_list_checks(void) {
+    static const struct {
+        const char *kn, *v10;
+    } want[] = {{"SV", "us-ca-sv"}, {"LA", "us-ca-sv"}, {"CH", "us-nj"}, {"VA", "us-nj"}, {"de-fra", "de-fra"}};
+    Registry *p = registry_new();
+    add_node(p, "CLARA1", "SV", 0);
+    add_node(p, "ANGELES1", "LA", 0);
+    add_node(p, "CHITOWN1", "CH", 0);
+    add_node(p, "ASHBURN1", "VA", 0);
+    add_node(p, "FRANK1", "de-fra", 0); /* a v10 id as the region (the federation test's node): listed as itself */
+    add_node(p, "NOWHERE1", "XX", 0);   /* no v10 region stands for it: not listed */
+    cJSON *o = registry_ping_list(p, NULL, NULL, "http://brain.example:6767");
+    CHECK(o != NULL);
+    if (!o) {
+        registry_free(p);
+        return;
+    }
+    CHECK(cJSON_GetArraySize(o) == 3); /* us-ca-sv, us-nj and de-fra, once each */
+    for (const cJSON *k = o->child; k; k = k->next) CHECK(k->string && v10_pinged(k->string));
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        const char *id = registry_v10_region(want[i].kn);
+        CHECK(id && !strcmp(id, want[i].v10));
+        CHECK(cJSON_GetObjectItemCaseSensitive(o, want[i].v10) != NULL); /* the node is listed under its id */
+    }
+    CHECK(!cJSON_GetObjectItemCaseSensitive(o, "SV") && !cJSON_GetObjectItemCaseSensitive(o, "CH"));
+    CHECK(!cJSON_GetObjectItemCaseSensitive(o, "LA") && !cJSON_GetObjectItemCaseSensitive(o, "VA"));
+    CHECK(!cJSON_GetObjectItemCaseSensitive(o, "XX") && registry_v10_region("XX") == NULL);
+    const char *host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "us-nj"));
+    CHECK(host && !strcmp(host, "brain.example:6767")); /* no brain.regions entry: the brain's public URL */
+
+    /* brain.regions[] ping_host: by the v10 id, else by the KrunkNative code */
+    cJSON *regions = cJSON_Parse("[{\"id\":\"us-nj\",\"ping_host\":\"ny.example:6767\"},{\"id\":\"SV\",\"ping_host\":\"sv.example\"}]");
+    cJSON *o2 = registry_ping_list(p, NULL, regions, "http://brain.example:6767");
+    host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o2, "us-nj"));
+    CHECK(host && !strcmp(host, "ny.example:6767"));
+    host = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o2, "us-ca-sv"));
+    CHECK(host && !strcmp(host, "sv.example"));
+    cJSON_Delete(o2);
+    cJSON_Delete(regions);
+    cJSON_Delete(o);
+    registry_free(p);
+}
+
 int main(void) {
+    ping_list_checks();
     Registry *r = registry_new();
     MmPolicy p = {.cross_region = 1, .default_max_players = 8};
     MmPick pick;

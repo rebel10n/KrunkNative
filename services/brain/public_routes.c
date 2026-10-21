@@ -84,19 +84,6 @@ static void route2(Brain *b, const char *method, const char *name, kn_http_handl
     kn_http_route(b->http, method, path, h, b);
 }
 
-/* "http://h:p/x" -> "h:p", without the port when it is 443 (registry.ts regions()).
- * ClientManager.getRegion() then fetches http://<value>/ping when the value ends
- * with ":6767", https://<value>/ping otherwise. */
-static void url_to_ping_host(const char *url, char *out, size_t cap) {
-    kn_url u;
-    if (kn_url_parse(url, &u) == 0) {
-        if (u.port && u.port != 443) snprintf(out, cap, "%s:%d", u.host, u.port);
-        else snprintf(out, cap, "%s", u.host);
-        return;
-    }
-    snprintf(out, cap, "%s", url);
-}
-
 static const cJSON *region_conf(const char *id) {
     const cJSON *regions = mm_settings()->regions, *r;
     cJSON_ArrayForEach(r, regions) {
@@ -115,33 +102,13 @@ static void h_ping(kn_http_req *req, void *ud) {
     cJSON_Delete(o);
 }
 
-/* ---- /mm/ping-list : {region: "host[:port]"} (registry.ts regions()) */
+/* ---- /mm/ping-list : {v10 region id: "host[:port]"} (registry_ping_list; doc/v10/regions.md) */
 
 static void h_ping_list(kn_http_req *req, void *ud) {
     Brain *b = ud;
-    Registry *r = b->registry;
     char flavor[16];
     query_flavor(req, flavor, sizeof(flavor)); /* the regions where the app's own servers run */
-    cJSON *o = cJSON_CreateObject();
-    for (size_t i = 0; i < r->node_count; i++) {
-        const MmNode *n = r->nodes[i];
-        if (!n->region[0] || cJSON_GetObjectItemCaseSensitive(o, n->region)) continue;
-        if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
-        char host[300] = "";
-        const cJSON *rc = region_conf(n->region);
-        const char *ping = kn_json_str(rc, "ping_host", NULL);
-        if (ping && *ping) {
-            snprintf(host, sizeof(host), "%s", ping);
-        } else {
-            const char *url = mm_settings()->public_url;
-            for (size_t k = 0; k < r->brain_count; k++) {
-                if (!strcmp(r->brains[k].brain_id, n->brain_id) && r->brains[k].public_url[0])
-                    url = r->brains[k].public_url;
-            }
-            url_to_ping_host(url, host, sizeof(host));
-        }
-        cJSON_AddStringToObject(o, n->region, host);
-    }
+    cJSON *o = registry_ping_list(b->registry, flavor, mm_settings()->regions, mm_settings()->public_url);
     brain_reply_json(req, 200, o);
     cJSON_Delete(o);
 }

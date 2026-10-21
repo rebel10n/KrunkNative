@@ -39,6 +39,18 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8080;
 const LOBBY_ID = process.env.KRUNK_NATIVE_LOBBY_ID || "KN:local";
 const REGION_ID = process.env.KRUNK_NATIVE_REGION || "local";
+// The v10 region id each KrunkNative region code is listed under in /ping-list (the brain's
+// registry_v10_region, services/brain/registry.c; doc/v10/regions.md). A code not here is not listed.
+// A code that is already a v10 id (de-fra, us-nj, local, ...) is listed as itself.
+const V10_REGION_IDS = new Map<string, string>(
+  [
+    "de-fra", "us-ca-sv", "au-syd", "jb-hnd", "sgp", "us-nj", "as-mb", "us-tx", "brz", "me-bhn", "sss", "local",
+  ].map((id) => [id, id]),
+);
+V10_REGION_IDS.set("SV", "us-ca-sv");
+V10_REGION_IDS.set("LA", "us-ca-sv");
+V10_REGION_IDS.set("CH", "us-nj");
+V10_REGION_IDS.set("VA", "us-nj");
 const MAX_PLAYERS = Number.parseInt(process.env.KRUNK_NATIVE_MAX_PLAYERS || "8", 10) || 8;
 
 function makeId(length: number): string {
@@ -172,7 +184,8 @@ export function handle(
       const value = endpoint.port && endpoint.port !== 443
         ? `${endpoint.host}:${endpoint.port}`
         : endpoint.host;
-      return writeJson(res, 200, { [REGION_ID]: value });
+      const listed = V10_REGION_IDS.get(REGION_ID);
+      return writeJson(res, 200, listed ? { [listed]: value } : {});
     }
 
     case "/api/maps": {
