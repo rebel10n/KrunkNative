@@ -9,13 +9,14 @@ import * as krunkerProxy from "./krunkerProxy";
 import * as krunkerRelay from "./krunkerRelay";
 import * as brainProxy from "./brainProxy";
 import * as browserProxy from "./proxy";
+import * as v10Proxy from "./v10Proxy";
 import * as publicRoutes from "./publicRoutes";
 import * as staticFiles from "./staticFiles";
 import * as webBridge from "./webBridge";
 
-type BridgeMode = "native-to-krunker" | "browser-to-native" | "web" | "bridge-only";
+type BridgeMode = "native-to-krunker" | "browser-to-native" | "v10-to-native" | "web" | "bridge-only";
 
-const BRIDGE_MODES: readonly BridgeMode[] = ["native-to-krunker", "browser-to-native", "web", "bridge-only"];
+const BRIDGE_MODES: readonly BridgeMode[] = ["native-to-krunker", "browser-to-native", "v10-to-native", "web", "bridge-only"];
 
 // `npm run web:build` at the repo root writes the Emscripten client here.
 const DEFAULT_WEB_DIR = path.resolve(__dirname, "..", "dist", "web");
@@ -42,6 +43,8 @@ function usage(): string {
     "Flags:",
     "  --native-to-krunker       Run native TCP -> Krunker v3.1.1 WS mode (default)",
     "  --browser-to-native       Run the old browser WS -> KrunkNative TCP mode",
+    "  --v10-to-native           Run the Krunker v10.0.x client WS (msgpack, v10 labels) -> KrunkNative TCP mode",
+    "                            (partial: connect and join; stops at the native INIT, see v10Proxy.ts)",
     "  --web                     Serve the Emscripten web build over HTTP and bridge",
     "                            ws /native <-> native TCP (raw passthrough)",
     "  --bridge-only             Only the ws /native passthrough (+ GET /healthz): no static files,",
@@ -104,6 +107,10 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--browser-to-native") {
       options.mode = "browser-to-native";
+      continue;
+    }
+    if (arg === "--v10-to-native") {
+      options.mode = "v10-to-native";
       continue;
     }
     if (arg === "--web") {
@@ -396,7 +403,7 @@ function startWeb(options: CliOptions): ReturnType<typeof createServer> {
   return http;
 }
 
-function startBrowserToNative(): ReturnType<typeof createServer> {
+function startBrowserToNative(v10 = false): ReturnType<typeof createServer> {
   const http = createServer(async (req, res) => {
     try {
       // the v3.1.1 JS client plays through this bridge with no brain: its single-lobby matchmaker
@@ -414,12 +421,13 @@ function startBrowserToNative(): ReturnType<typeof createServer> {
     }
   });
 
-  browserProxy.attach(http);
+  if (v10) v10Proxy.attach(http);
+  else browserProxy.attach(http);
 
   http.on("listening", () => {
     const where = describeAddress(http);
     console.info(
-      `net-bridge ${version} browser-to-native listening${where ? ` on ${where}` : ""} (ws ${browserProxy.WS_PATH})`,
+      `net-bridge ${version} ${v10 ? "v10-to-native" : "browser-to-native"} listening${where ? ` on ${where}` : ""} (ws ${v10 ? v10Proxy.WS_PATH : browserProxy.WS_PATH})`,
     );
   });
 
@@ -447,6 +455,8 @@ const server =
       ? startBridgeOnly()
       : options.mode === "browser-to-native"
       ? startBrowserToNative()
+      : options.mode === "v10-to-native"
+      ? startBrowserToNative(true)
       : startNativeToKrunker(options);
 const activeSockets = new Set<Socket>();
 
@@ -468,6 +478,8 @@ function closeBridgeSessions(force = false): void {
     webBridge.closeAllSessions(force);
   } else if (options.mode === "browser-to-native") {
     browserProxy.closeAllSessions(force);
+  } else if (options.mode === "v10-to-native") {
+    v10Proxy.closeAllSessions(force);
   } else {
     krunkerProxy.closeAllSessions(force);
   }
