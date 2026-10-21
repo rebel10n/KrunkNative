@@ -129,8 +129,19 @@ function findChrome() {
 
 // Starts kn_brain, one server_bin and v10_bridge on free loopback ports. Returns their addresses.
 async function startStack(kids, runDir, secret) {
-  const db = JSON.parse(spawnSync("python3", ["-I", path.join(REPO, "services/brain/tests/db_scratch.py"), REPO, "create", "sqlite",
-    "kn_node_" + proc.pid], { encoding: "utf8" }).stdout || "null");
+  // KN_NODE_BRAIN_DB names a database to start from: it is COPIED (with its WAL and shared memory) into this run's
+  // directory, and only the copy is used. Otherwise a fresh scratch database is made.
+  let db;
+  const seed = proc.env.KN_NODE_BRAIN_DB;
+  if (seed) {
+    const copy = path.join(runDir, "brain.db");
+    fs.copyFileSync(seed, copy);
+    for (const ext of ["-wal", "-shm"]) if (fs.existsSync(seed + ext)) fs.copyFileSync(seed + ext, copy + ext);
+    db = { path: copy, driver: "sqlite" };
+  } else {
+    db = JSON.parse(spawnSync("python3", ["-I", path.join(REPO, "services/brain/tests/db_scratch.py"), REPO, "create", "sqlite",
+      "kn_node_" + proc.pid], { encoding: "utf8" }).stdout || "null");
+  }
   if (!db) throw new Error("no scratch database (services/brain/tests/db_scratch.py create sqlite)");
   const env = { ...proc.env, KN_DATABASE_DRIVER: "sqlite", KN_DATABASE_PATH: db.path, KN_BRAIN_INTERNAL_SECRET: secret };
   const brainBin = path.join(BUILD, "services/brain/kn_brain");
