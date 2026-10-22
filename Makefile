@@ -835,6 +835,10 @@ seek-cross-region-e2e: build ## A seek finds its region's node with brain.matchm
 quickplay-retry-e2e: build ## Quick Play retries a full lobby until the player is in one (Find Game, Quick Match, Auto Seek on Launch: full, full, then a lobby with room; a stub brain; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/quickplay_retry_e2e.py $(DEBUG_DIR)
 
+.PHONY: raid-play-e2e
+raid-play-e2e: build ## The end screen's Play Raid seeks a Raid lobby on Tortuga through the Server Type's matchmaker (a stub brain): no Raid lobby or no brain shows v10's "Couldnt find any", never the offline game (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raid_play_e2e.py $(DEBUG_DIR)
+
 .PHONY: seek-servers-migrate-e2e
 seek-servers-migrate-e2e: build ## Server Type reset once per profile (knSeekServersMigrated): a saved krunker.io choice from the old popup becomes Box Office once; a later pick is kept (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/seek_servers_migrate_e2e.py $(DEBUG_DIR)
