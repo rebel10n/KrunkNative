@@ -2560,10 +2560,12 @@ static int send_voice(KrunkerLink *l, const void *payload, const uint16_t length
 }
 
 // The account-scoped frames io.account_frame takes (KrunkerLinkIO), and how many arguments of each it
-// passes on ("a": [error, id, username, data], never arg 4, the account's session token)
+// passes on ("a": [error, id, username, data], never arg 4, the account's session token). "_0" / "_1"
+// are the rpc answers RPC_SUCCESS / RPC_ERROR [rpcId, results...] (v10.0.3 deob 111117-111118, parsed
+// 111438-111452; krunker_net.c names the rpc they answer), "dslr" the Daily Spin claim's ticket (111361).
 static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
     static const char *const names[] = {"a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "ub", "chlR",
-                                        "chgC"}; // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
+                                        "chgC", "_0", "_1", "dslr"}; // (chgC: CHALLENGE_COMPLETED, for account_ui.c's challenge capture)
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strlen(names[i]) != f->name_len || memcmp(names[i], f->name, f->name_len)) continue;
         *argc = i == 0 && f->argc > 4 ? 4 : (uint32_t) f->argc;

@@ -8,13 +8,19 @@
 // gapi /daily-spin/progress (the client never talks to anything but kn_brain).
 // The item sits in #menuItemContainer after the Battle Pass item (.bpItem:not(.guideItem)), with
 // the sidebar divider v10 draws after it.
-// On krunker.io servers the progress is krunker.io's (api.krunker.io, v10.0.3's getProgress) and a
-// locked click does what v10.0.3's handler does: nothing, no message (doc/v10/daily-spin.md). A load
-// failure shows no text either: v10 keeps the store's default (0/5000), so the item does too.
+// On krunker.io servers the progress is krunker.io's (api.krunker.io, v10.0.3's getProgress) and the click
+// is v10.0.3's handler (deob-10.0.3.js 164131-164145, doc/v10/daily-spin.md): claimable and not claiming,
+// it sends rpc(DAILY_SPIN_CLAIM) on the game socket (krunker_net.c: ["_0", rpcId, "dsl"]); RPC_SUCCESS
+// sets isClaimed (the item says CLAIMED), RPC_ERROR is swallowed (catch {}: nothing shown), and the
+// server's push "dslr" {ticketId} adds the ticket and opens its wheel (261748-261756). Locked, it does
+// nothing, no message; with no official game open (the socket is connected in a game only) nothing is
+// sent and nothing is said. A load failure shows no text either: v10 keeps the store's default
+// (0/5000), so the item does too.
 #include <ui_logic.h>
 #include <client.h> // glfwGetTime
 #include <html_ui.h> // html_ui_is_menu_open
 #include <backend_ui.h>
+#include <backend.h> // backend_social_send_text: the krunker.io claim goes to the game socket (kio_held_send)
 #include <i18n.h>
 #include <krunker_account.h> // KRUNKER_SVC_DATA: the krunker.io account's progress read (official servers)
 #include <cJSON.h>
@@ -154,9 +160,12 @@ void v10_daily_spin_tick(void) {
         sync_item();
         return;
     }
-    if (g_ds.claiming && t - g_ds.claim_at > DS_CLAIM_TIMEOUT_MS) { // no "dslr" came: say so, stop CLAIMING...
+    if (g_ds.claiming && t - g_ds.claim_at > DS_CLAIM_TIMEOUT_MS) { // no answer came: stop CLAIMING...
         g_ds.claiming = 0;
-        account_popup(0, I18N("kn.dailySpin.noAnswer", "No answer from Box Office. Try again."), NULL);
+        // Box Office says so; krunker.io's rpc has no text of its own for this (v10's await would just go on), so
+        // the item only returns to FREE SPIN
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) printf("[daily-spin] no answer to the claim rpc from the krunker.io game server\n");
+        else account_popup(0, I18N("kn.dailySpin.noAnswer", "No answer from Box Office. Try again."), NULL);
         sync_item();
     }
     if (id && html_ui_is_menu_open() && t - g_ds.asked_at > DS_REFRESH_MS) ask();
@@ -178,7 +187,15 @@ void v10_daily_spin_frame(const char *label, const cJSON *frame) {
         sync_item();
         return;
     }
-    // ["dslr", {ticketId}] | ["dslr", null, err]: the ticket is the account's; its wheel opens
+    if (!strcmp(label, "_0") || !strcmp(label, "_1")) { // krunker.io: the claim rpc's answer, ["_0" | "_1", "dsl", ...] (krunker_net.h)
+        g_ds.claiming = 0; // finally { claiming = false } (deob-10.0.3.js 164142)
+        if (!strcmp(label, "_0")) g_ds.claimed = 1; // RPC_SUCCESS: store.update(isClaimed: true) (164137-164140); "dslr" brings the ticket
+        else printf("[daily-spin] the krunker.io game server refused the claim (RPC_ERROR)\n"); // catch {} (164141): nothing shown
+        sync_item();
+        return;
+    }
+    // ["dslr", {ticketId}] (krunker.io: DAILY_SPIN_CLAIM_RESPONSE, 261748-261756; Box Office: the claim's answer) |
+    // ["dslr", null, err] (Box Office's refusal): the ticket is the account's; its wheel opens
     g_ds.claiming = 0;
     const cJSON *d = cJSON_GetArrayItem(frame, 1);
     const cJSON *ticket = cJSON_IsObject(d) ? cJSON_GetObjectItem(d, "ticketId") : NULL;
@@ -200,9 +217,18 @@ int v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
     if (!name) return -1;
     if (!strcmp(name, "knDailySpin")) { // the item's click: claim it (Box Office answers the claim, "dslr": a ticket or why not)
         if (g_ds.claiming) return 1;
-        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the claim is a game-socket rpc the krunker.io account does not send
-            // locked: v10.0.3's handler does nothing (no claim, no message), so neither do we (doc/v10/daily-spin.md)
-            if (claimable()) account_popup(0, I18N("kn.dailySpin.officialClaim", "The Daily Spin can't be claimed on krunker.io servers yet. Claim it on a Box Office server."), NULL);
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+            // v10.0.3's handler (deob-10.0.3.js 164133-164136): `if (claimable && !claiming)` rpc(DAILY_SPIN_CLAIM) on the
+            // game socket; locked, nothing (no claim, no message). The socket is connected in a game only: with no
+            // official game open the claim is not sent (krunker_net_send_account_frame: 0) and nothing is said
+            if (!claimable()) return 1;
+            if (!backend_social_send_text("[\"dsl\"]")) { // kio_held_send -> krunker_net_send_account_frame
+                printf("[daily-spin] no official game open: the claim rpc is not sent\n");
+                return 1;
+            }
+            g_ds.claiming = 1;
+            g_ds.claim_at = now_ms();
+            sync_item();
             return 1;
         }
         g_ds.claiming = 1;

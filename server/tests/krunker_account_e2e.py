@@ -229,6 +229,51 @@ def frame_name(data):  # the packet name of a client frame (fixstr / str8 first 
     return "?"
 
 
+def frame_args(data):
+    """A client frame decoded: [name, args...] (the frames' msgpack subset; the trailing ah bytes dropped).
+    An rpc (v10 deob-10.0.3.js 111529-111540) is ["_0", rpcId, name, args...]."""
+    body, pos = data[:-2], [0]
+
+    def take(n):
+        s = body[pos[0]:pos[0] + n]
+        if len(s) != n:
+            raise ValueError("truncated frame")
+        pos[0] += n
+        return s
+
+    def val():
+        t = take(1)[0]
+        if t < 0x80:
+            return t
+        if t >= 0xe0:
+            return t - 0x100
+        if 0x80 <= t <= 0x8f:
+            return {str(val()): val() for _ in range(t & 15)}
+        if 0x90 <= t <= 0x9f:
+            return [val() for _ in range(t & 15)]
+        if 0xa0 <= t <= 0xbf:
+            return take(t & 31).decode(errors="replace")
+        simple = {0xc0: None, 0xc2: False, 0xc3: True}
+        if t in simple:
+            return simple[t]
+        fmts = {0xca: ">f", 0xcb: ">d", 0xcc: ">B", 0xcd: ">H", 0xce: ">I", 0xcf: ">Q", 0xd0: ">b", 0xd1: ">h", 0xd2: ">i", 0xd3: ">q"}
+        if t in fmts:
+            return struct.unpack(fmts[t], take(struct.calcsize(fmts[t])))[0]
+        if t in (0xd9, 0xda, 0xdb):
+            n = struct.unpack({0xd9: ">B", 0xda: ">H", 0xdb: ">I"}[t], take({0xd9: 1, 0xda: 2, 0xdb: 4}[t]))[0]
+            return take(n).decode(errors="replace")
+        if t in (0xdc, 0xdd):
+            n = struct.unpack(">H" if t == 0xdc else ">I", take(2 if t == 0xdc else 4))[0]
+            return [val() for _ in range(n)]
+        if t in (0xde, 0xdf):
+            n = struct.unpack(">H" if t == 0xde else ">I", take(2 if t == 0xde else 4))[0]
+            return {str(val()): val() for _ in range(n)}
+        raise ValueError("msgpack type 0x%02x" % t)
+
+    v = val()
+    return v if isinstance(v, list) else [v]
+
+
 # ---------------------------------------------------------------- the stubs
 
 # The krunker.io page the challenge webview loads (kn_webview.c, KRUNKNATIVE_KRUNKER_CAPTCHA_URL = this

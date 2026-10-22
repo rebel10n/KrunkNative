@@ -8,8 +8,16 @@ A real kn_brain (scratch database) and the krunker.io stubs of krunker_account_e
 to krunker.io and joins an official game as that account (account_unify_e2e's steps 1-3), then, in the menu:
   spin    the pass is krunker.io's (the game socket's "bpdl"); the Daily Spin's progress comes from
           api.krunker.io's GET /daily-spin/progress with the account's token, the score at its maximum: the
-          item says FREE SPIN; a click says the claim is not sent from krunker.io servers, and sends no "dsl"
-          (before: nothing was asked, the item stayed 0/5000 and a click did nothing)
+          item says FREE SPIN (before: nothing was asked, the item stayed 0/5000)
+  claim   a click on FREE SPIN claims it the way v10.0.3 does (deob-10.0.3.js 164131-164145): the rpc
+          ["_0", rpcId, "dsl"] on the game socket (rpc 111529-111540; RPC "_0" 111096, DAILY_SPIN_CLAIM "dsl"
+          111109). The stub answers RPC_SUCCESS ["_0", rpcId] (111117, parsed 111438-111448: the promise
+          resolves, store isClaimed = true, 164137-164140) and DAILY_SPIN_CLAIM_RESPONSE ["dslr", {ticketId}]
+          ("dslr" 111361; handler 261748-261756: account.addSkin(ticketId), window.prizeWheel(0, ticketId)):
+          the item says CLAIMED, the ticket's wheel (#spinUI, Starter) is open, no popup (before: a popup said
+          the claim can't be made on krunker.io servers yet, and no "dsl" left the client)
+  claimerr the stub refuses the rpc with RPC_ERROR ["_1", rpcId, text] (111118, 111449): v10's catch {} shows
+          nothing (164141), claiming ends (164142): no popup, the item is FREE SPIN again, no wheel
   nopass  the game server's "bpdl" has no pass (null): the window says No Battle Pass Found (before: Loading
           Battle Pass for ever); the progress is refused (404): the item stays 0/5000 (before: Unavailable)
   silent  the game server never answers "bpdl": the window keeps saying Loading Battle Pass (v10's text) and asks
@@ -32,12 +40,15 @@ import tempfile
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import account_unify_e2e as au  # noqa: E402  (its stubs, sign-in steps and client runner)
 
-MODES = os.environ.get("KIO_MODES", "spin,nopass,silent,locked").split(",")  # KIO_MODES=locked runs one mode
+MODES = os.environ.get("KIO_MODES", "spin,claim,claimerr,nopass,silent,locked").split(",")  # KIO_MODES=locked runs one mode
 AU_SCRIPT = au.script  # account_unify's steps 1-3 (run_client takes its script from au.script, replaced per mode)
 SPIN_DATA = {"score": 5000, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}  # FREE SPIN
 ZERO_DATA = {"score": 0, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}     # 0/5000
 PLAY_MORE = "Play more"  # the Box Office brain's refusal text; v10 has no such text, so the official item never shows it
+NOT_YET = "can't be claimed"  # Box Office's old krunker.io text ("... on krunker.io servers yet"): gone with the claim
+STARTER_TICKET = 8067  # stage 0's ticket: (stage + 1) % 7 / % 3 else Starter 8067 (deob-10.0.3.js 164104-164125)
 JOIN_END = 38600  # account_unify's script from here on opens its own windows: this test writes its own
+CLICK_MODES = ("claim", "claimerr", "locked")  # the modes that click the item (and read the popup / wheel after it)
 
 
 async def answer_null_pass(send, msg):  # "bpdl" with no pass (the season has none)
@@ -46,6 +57,27 @@ async def answer_null_pass(send, msg):  # "bpdl" with no pass (the season has no
 
 async def never_answers(send, msg):  # the game server does not answer "bpdl"
     return
+
+
+def rpc_answer(stub, ok):
+    """The game server's answer to the claim rpc ["_0", rpcId, "dsl"] (deob-10.0.3.js 111529-111540, the client's
+    send of RPC "_0" (111096) + rpcCounter + DAILY_SPIN_CLAIM "dsl" (111109)). The socket's parser (111438-111452)
+    takes ["_0"|"_1", rpcId, results...]: RPC_SUCCESS "_0" (111117) resolves the rpc's promise with the results,
+    RPC_ERROR "_1" (111118) rejects it with them. A success is followed by the push ["dslr", {ticketId}]
+    (DAILY_SPIN_CLAIM_RESPONSE 111361), whose handler (261748-261756) reads ticketId, account.addSkin(ticketId)
+    and window.prizeWheel(0, ticketId). The handler ignores the results, so the stub sends none; the error's
+    text is the stub's own (v10's catch {} at 164141 never shows it)."""
+    async def answer(send, msg):
+        args = au.kae.frame_args(msg)  # ["_0", rpcId, name, ...]
+        if len(args) < 3 or args[2] != "dsl":
+            return
+        stub.claims.append(args[1])
+        if ok:
+            await send("_0", args[1])
+            await send("dslr", {"ticketId": STARTER_TICKET})
+        else:
+            await send("_1", args[1], "stub: the daily spin was refused")
+    return answer
 
 
 def script(mode, shots):
@@ -60,20 +92,19 @@ def script(mode, shots):
     if mode == "silent":  # the window's timeout is 15 s of wall time: read it again after 16 s
         lines += ["55500 text @kbp [id=menuWindow]", "55550 shot " + shots["bp"], "55600 quit"]
         return "\n".join(lines) + "\n"
-    if mode == "locked":  # v10's click on a locked item does nothing: read the popup and the item around it
+    if mode in CLICK_MODES:  # the click: the popup, the item and the wheel around it (locked: v10 does nothing)
         lines += ["40300 call closWind",
                   "40350 vis @prepop popupHolder",
                   "40400 clickid dailySpinDiv",
-                  "40900 vis @postpop popupHolder",
+                  "40900 vis @postpop popupHolder spinUI",
                   "40910 text @popup [id=popupContent]",
+                  "40920 text @spinhead [id=spinHeader]",
+                  "40930 text @spininfo [id=spinInfo]",
                   "40950 text @dsafter [id=dailySpinDiv]",
                   "41000 shot " + shots["click"],
                   "41200 quit"]
         return "\n".join(lines) + "\n"
-    lines += ["40300 call closWind",
-              "40400 clickid dailySpinDiv",  # the item's click: claim it (krunker.io: a message, no "dsl")
-              "41000 shot " + shots["click"],
-              "41200 quit"]
+    lines += ["40300 quit"]
     return "\n".join(lines) + "\n"
 
 
@@ -82,9 +113,13 @@ def run_mode(port, mode):
     stub = au.kae.Stub(http_port, ws_port)
     stub.players = au.OTHERS
     stub.account_data = [dict(au.KIO_DATA)]
-    stub.daily_spin = {"spin": SPIN_DATA, "nopass": None, "silent": ZERO_DATA, "locked": ZERO_DATA}[mode]
-    stub.frame_handlers = {"bpdl": {"spin": au.answer_bpdl, "nopass": answer_null_pass, "silent": never_answers,
-                                    "locked": au.answer_bpdl}[mode]}
+    stub.claims = []  # the rpc ids of the "dsl" claims the game socket received
+    stub.daily_spin = {"spin": SPIN_DATA, "claim": SPIN_DATA, "claimerr": SPIN_DATA, "nopass": None, "silent": ZERO_DATA,
+                       "locked": ZERO_DATA}[mode]
+    stub.frame_handlers = {"bpdl": {"spin": au.answer_bpdl, "claim": au.answer_bpdl, "claimerr": au.answer_bpdl,
+                                    "nopass": answer_null_pass, "silent": never_answers, "locked": au.answer_bpdl}[mode]}
+    if mode in ("claim", "claimerr"):  # the rpc frame is "_0" (RPC), the claim its third item
+        stub.frame_handlers["_0"] = rpc_answer(stub, mode == "claim")
     au.WORK = tempfile.mkdtemp(prefix="kn-kiospin-%s-" % mode, dir=au.CACHE if os.path.isdir(au.CACHE) else None)
     shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("bp", "item", "click")}
     au.script = lambda: script(mode, shots)
@@ -106,7 +141,26 @@ def checks(mode, text, stub, shots):
                  bool(gets) and gets[0][3].get("authorization", "").startswith("Bearer "), [r[:2] for r in stub.requests][-12:])
         au.check("spin: the item says FREE SPIN (the score is at its maximum)", "FREE SPIN" in item, item)
         au.check("spin: the Battle Pass shows krunker.io's pass, not Loading", "KioPass" in bp and "Loading" not in bp, bp[:200])
-        au.check("spin: a click sends no claim (\"dsl\") to the game socket", "dsl" not in stub.ws_frames, stub.ws_frames[-20:])
+    elif mode in ("claim", "claimerr"):
+        pop = au.vis(text, "prepop"), au.vis(text, "postpop")
+        popup = au.text_of(text, "popup")
+        after = au.text_of(text, "dsafter")
+        head, info = au.text_of(text, "spinhead"), au.text_of(text, "spininfo")
+        print("  [%s] claims: %r | popup: %r | item after: %r | wheel: %r / %r" % (mode, stub.claims, popup[:80], after[:80], head, info[:60]))
+        au.check("%s: the click sends v10's claim rpc [\"_0\", rpcId, \"dsl\"] on the game socket, once, and no bare \"dsl\"" % mode,
+                 len(stub.claims) == 1 and "dsl" not in stub.ws_frames, (stub.claims, stub.ws_frames[-20:]))
+        au.check("%s: no popup, and no \"can't be claimed on krunker.io servers\" text" % mode,
+                 pop[0].get("popupHolder") == "0" and pop[1].get("popupHolder") == "0" and NOT_YET not in popup and NOT_YET not in after,
+                 (pop, popup[:120]))
+        if mode == "claim":
+            au.check("claim: RPC_SUCCESS marks the item CLAIMED (store isClaimed = true), not CLAIMING...",
+                     "CLAIMED" in after and "CLAIMING" not in after and "FREE SPIN" not in after, after)
+            au.check("claim: \"dslr\" {ticketId} opens the ticket's wheel: #spinUI shows, prizeWheel(0, 8067) = the Starter wheel",
+                     pop[1].get("spinUI") == "1" and head.strip() == "SPIN" and "STARTER" in info.upper(), (pop[1], head, info[:120]))
+        else:
+            au.check("claimerr: RPC_ERROR shows nothing (v10's catch {}) and claiming ends: the item is FREE SPIN again",
+                     "FREE SPIN" in after and "CLAIMING" not in after and "CLAIMED" not in after, after)
+            au.check("claimerr: no wheel opens", pop[1].get("spinUI") in ("0", None), pop[1])
     elif mode == "nopass":
         au.check("nopass: the Battle Pass says No Battle Pass Found (a pass-less answer finishes)",
                  "No Battle Pass Found" in bp and "Loading" not in bp, bp[:200])
@@ -130,7 +184,7 @@ def checks(mode, text, stub, shots):
     else:
         au.check("silent: the Battle Pass keeps saying Loading Battle Pass after its timeout, never that it could not load",
                  "Loading Battle Pass" in bp and "Could not load" not in bp, bp[:200])
-    shot_ok = [os.path.exists(p) for k, p in shots.items() if (mode != "silent" or k != "click")]
+    shot_ok = [os.path.exists(p) for k, p in shots.items() if (mode in CLICK_MODES or k != "click")]
     au.check("%s: the window screenshots were taken" % mode, all(shot_ok), shots)
 
 

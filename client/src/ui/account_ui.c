@@ -528,6 +528,11 @@ static void kio_frame(const char *label, const cJSON *frame) {
         battlepass_ui_frame(label, frame);
     } else if (!strcmp(label, "cln")) {
         clan_ui_frame(frame);
+    } else if (!strcmp(label, "dslr")) { // DAILY_SPIN_CLAIM_RESPONSE [{ticketId}] (v10_daily_spin.c)
+        v10_daily_spin_frame(label, frame);
+    } else if (!strcmp(label, "_0") || !strcmp(label, "_1")) { // an rpc's answer, named (krunker_net.h): the claim's
+        const char *rpc = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1));
+        if (rpc && !strcmp(rpc, "dsl")) v10_daily_spin_frame(label, frame);
     } else if ((!strcmp(label, "chg") || !strcmp(label, "uchp")) && g_kio.obj) {
         // UPDATE_CHALLENGES [PT, CI, PV]... / UPDATE_CHALLENGES_PROGRESS [CI, PV]... (v10:218110 / 218121)
         cJSON *list = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges");
@@ -671,7 +676,38 @@ void account_set_funds(const double funds) {
 }
 
 int account_add_skin(const int skin_index) {
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return 0; // (kn_brain's answers: the krunk.io account's, never the krunker.io one)
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        // the krunker.io account's own (the game socket's "dslr"): v10's account.addSkin(ind) (deob-10.0.3.js
+        // 129095-129120): an owned, unlisted entry's cnt += 1, else push {ind, cnt: 1, st: 1}
+        if (!g_kio.obj || !krunker_account_signed_in()) return 0;
+        cJSON *skins = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins");
+        if (!cJSON_IsArray(skins)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(g_kio.obj, "skins");
+            skins = cJSON_AddArrayToObject(g_kio.obj, "skins");
+            if (!skins) return 0;
+        }
+        int n = 0;
+        cJSON *entry;
+        cJSON_ArrayForEach(entry, skins) {
+            const cJSON *ind = cJSON_GetObjectItemCaseSensitive(entry, "ind");
+            if (!cJSON_IsNumber(ind) || ind->valueint != skin_index || cJSON_GetObjectItemCaseSensitive(entry, "id")) continue;
+            const cJSON *cnt = cJSON_GetObjectItemCaseSensitive(entry, "cnt");
+            n = (cJSON_IsNumber(cnt) ? cnt->valueint : 0) + 1;
+            cJSON_DeleteItemFromObjectCaseSensitive(entry, "cnt");
+            cJSON_AddNumberToObject(entry, "cnt", n);
+            break;
+        }
+        if (!n) {
+            entry = cJSON_CreateObject();
+            cJSON_AddNumberToObject(entry, "ind", skin_index);
+            cJSON_AddNumberToObject(entry, "cnt", 1);
+            cJSON_AddNumberToObject(entry, "st", 1);
+            cJSON_AddItemToArray(skins, entry);
+            n = 1;
+        }
+        g_kio.gen++;
+        return n;
+    }
     if (!g_logged_in || !g_acc.data) return 0;
     cJSON *skins = cJSON_GetArrayItem(g_acc.data, 10);
     if (!cJSON_IsArray(skins)) {

@@ -126,6 +126,10 @@ static struct {
     volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
     volatile int points_event;  // the socket thread saw "ua" UPDATE_ACCOUNT's rankedPoints (the same, for the balance)
     unsigned rpc_counter;        // the socket's rpcCounter (v10:98211)
+    // the rpcs sent for the windows (krunker_net_send_account_frame) waiting for their "_0" / "_1" answer:
+    // v10's rpcHandlers[id] (deob-10.0.3.js 111537). Main thread only (sent and answered there).
+    struct { unsigned id; char name[8]; } rpc_pending[4];
+    int rpc_pending_n;
     // the account-scoped frames (KrunkerLinkIO.account_frame), socket thread -> krunker_net_tick (K.lock)
     char *acct_q[32];
     int acct_n;
@@ -580,6 +584,22 @@ static void account_frames_drop(void) {
     pthread_mutex_unlock(&K.lock);
 }
 
+// An rpc's answer ["_0" | "_1", rpcId, results...] (RPC_SUCCESS / RPC_ERROR, deob-10.0.3.js 111438-111452:
+// rpcHandlers[rpcId] resolves / rejects with the results, an unknown id is dropped): the listener gets the
+// rpc's name in the id's place (["_0", "dsl", results...]), so it needs no counter. 1 = pass it on.
+static int rpc_answer(cJSON *frame, const char *label) {
+    if (strcmp(label, "_0") && strcmp(label, "_1")) return 1;
+    const cJSON *id = cJSON_GetArrayItem(frame, 1);
+    if (!cJSON_IsNumber(id)) return 0;
+    for (int i = 0; i < K.rpc_pending_n; i++) {
+        if (K.rpc_pending[i].id != (unsigned) id->valuedouble) continue;
+        cJSON_ReplaceItemInArray(frame, 1, cJSON_CreateString(K.rpc_pending[i].name));
+        K.rpc_pending[i] = K.rpc_pending[--K.rpc_pending_n];
+        return 1;
+    }
+    return 0; // the LOGIN rpc's (its "a" is the answer, on_login_token), or none waiting
+}
+
 static void account_frames_tick(void) {
     char *q[32];
     pthread_mutex_lock(&K.lock);
@@ -590,24 +610,45 @@ static void account_frames_tick(void) {
     for (int i = 0; i < n; i++) {
         cJSON *frame = cJSON_Parse(q[i]);
         const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
-        if (label && g_acct_fn && K.state != KS_OFF) g_acct_fn(label, frame);
+        if (label && g_acct_fn && K.state != KS_OFF && rpc_answer(frame, label)) g_acct_fn(label, frame);
         cJSON_Delete(frame);
         free(q[i]);
     }
 }
 
+// socket.rpc(name) (deob-10.0.3.js 111529-111540): send(RPC "_0", rpcCounter++, name) and remember the id
+// for its "_0" / "_1" answer (rpc_answer). Main thread, K.lock held by the caller.
+static int send_rpc(const char *name) {
+    if (K.rpc_pending_n >= (int) (sizeof(K.rpc_pending) / sizeof(K.rpc_pending[0]))) return 0;
+    const KrunkerValue args[] = {KRUNKER_V_NUM(K.rpc_counter), KRUNKER_V_STR(name)};
+    if (!krunker_link_send(&K.link, krunker_c2s_wire(KRUNKER_C2S_RPC), args, 2)) return 0;
+    K.rpc_pending[K.rpc_pending_n].id = K.rpc_counter++;
+    snprintf(K.rpc_pending[K.rpc_pending_n].name, sizeof(K.rpc_pending[0].name), "%s", name);
+    K.rpc_pending_n++;
+    return 1;
+}
+
 // The windows' requests over the game socket while the krunker.io account is the active one (v10
-// sends them there: _33978.send(...)). Read-only requests only: nothing that spends KR or changes the
-// account is sent from this client.
+// sends them there: _33978.send(...)). Read-only requests, and the one claim v10 makes from the menu
+// (the Daily Spin's: it grants the account its ticket, doc/v10/daily-spin.md); nothing that spends KR.
 //   ["bpdl"]          DATA_LOADED: the battle pass's data (answered "bpdl" / "bppd"; v10:209854, 212301)
 //   ["vcln"]          OPEN_CLAN_TAB (v10:213455)
 //   ["cln", 3, value] the Clans window's sendReq(3): the player's clan page (v10:213459-213462, answered
 //                     "cln" -> clanData, v10:213437); every other "cln" action (create, join, leave,
 //                     kick, roles, funds, discord) is refused
+//   ["dsl"]           the Daily Spin claim, sent as v10's rpc(DAILY_SPIN_CLAIM) = ["_0", rpcId, "dsl"]
+//                     (deob-10.0.3.js 164136, rpc 111529-111540); answered ["_0", "dsl"] / ["_1", "dsl", err]
+//                     (rpc_answer) and, on success, the push ["dslr", {ticketId}] (111361, 261748-261756)
 int krunker_net_send_account_frame(const cJSON *frame) {
     const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     const int n = cJSON_GetArraySize(frame) - 1;
     if (!name || K.state != KS_OPEN) return 0;
+    if (!strcmp(name, "dsl") && n == 0) {
+        pthread_mutex_lock(&K.lock);
+        const int sent = send_rpc("dsl");
+        pthread_mutex_unlock(&K.lock);
+        return sent;
+    }
     int ok = 0;
     if ((!strcmp(name, "bpdl") || !strcmp(name, "vcln")) && n == 0) ok = 1;
     if (!strcmp(name, "cln") && n >= 1 && n <= 2 && cJSON_IsNumber(cJSON_GetArrayItem(frame, 1)) && cJSON_GetArrayItem(frame, 1)->valuedouble == 3) ok = 1;
@@ -1780,6 +1821,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         krunker_session_init(&K.link.codec, krunker_build()->ahkey); // this join's build (krunker_link_reset keeps it)
         krunker_link_reset(&K.link);
         K.rpc_counter = 0;
+        K.rpc_pending_n = 0; // (a new socket: the old rpcs' answers can no longer come)
         K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
         ws_open();
@@ -2137,6 +2179,7 @@ void krunker_net_leave(Client *client, const char *reason) {
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
     wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
     account_frames_drop();
+    K.rpc_pending_n = 0; // (the session is over: no rpc answer can come)
 }
 
 void krunker_net_clear_failure(void) { K.failure[0] = 0; }
