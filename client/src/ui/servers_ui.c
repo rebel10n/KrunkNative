@@ -168,7 +168,14 @@ void servers_ui_gave_up(void) {
 
 // windows[1]
 static cJSON *g_games;           // serverListData (array of tuples, owned)
-static double g_total_players, g_social_players;
+static double g_total_players;
+// The footer's other counts, each read from its own website (v10 loadData's fetches, v10:211170): the brain's
+// /api/player-count (krunk.io's "on Social") and krunker.io's social.krunker.io and editor.krunker.io /player-count.
+// A count not read yet (or refused / failed) stays unknown and its span is blank: the brain has no editor count.
+enum { COUNT_BRAIN_SOCIAL = 0, COUNT_KIO_SOCIAL, COUNT_KIO_EDITOR, COUNT_N };
+static double g_count[COUNT_N];
+static int g_count_known[COUNT_N];
+static double g_kio_counts_ms = -1e18, g_brain_count_ms = -1e18; // when each was last asked (serverBrowserRate)
 static double g_last_load_ms = -1e18;
 static int g_loaded;
 static int g_expanded = -1;      // windows[1].expandedRegion
@@ -1880,12 +1887,19 @@ static int tab_lists(const cJSON *lists[2]) {
 }
 
 // The "In Game" count of one tab's website, read from that website's own total and never the other's:
-// krunk.io = the brain's totalPlayerCount (g_total_players, brain_total_players), 0 while the brain does not answer;
-// krunker.io = its official lobbies' totalPlayerCount (krunker_lobbies.c), 0 until that list is listed.
+// krunk.io = the brain's totalPlayerCount (g_total_players, brain_total_players) once the brain answered;
+// krunker.io = its official lobbies' totalPlayerCount (krunker_lobbies.c) once that list is listed.
+// 0 = not read (the footer then shows no number: a refused or unanswered read is never a 0). 1 = read, *out written.
 // The finder's servers are not summed in: their players were the ~1k (a sum over finder rows on the first render).
-static double tab_players(const int tab) {
-    if (tab == SERVER_TAB_KRUNKER) return krunker_lobbies_list() ? krunker_lobbies_players() : 0;
-    return brain_games() ? g_total_players : 0;
+static int tab_players(const int tab, double *out) {
+    if (tab == SERVER_TAB_KRUNKER) {
+        if (!krunker_lobbies_list()) return 0;
+        *out = krunker_lobbies_players();
+        return 1;
+    }
+    if (!brain_games()) return 0;
+    *out = g_total_players;
+    return 1;
 }
 
 // The default tab is the active backend's (krunker_net_active): it follows the backend when that changes,
@@ -3133,15 +3147,29 @@ static char *gen_list(void) {
     sb_append(&sb, servers);
     sb_append(&sb, "</div>");
     free(servers);
-    char total[32], social[32];
-    // the tab's website only: krunk.io's count or krunker.io's (v10's "In Game" is krunker.io's totalPlayerCount)
-    const double players = tab_players(g_server_tab);
-    comma_number(total, sizeof(total), players);
-    comma_number(social, sizeof(social), g_social_players);
-    char in_game[64], in_editor[64], on_social[64];
-    I18N_F(in_game, "windows.servers.online", "{0} In Game", total);
-    I18N_F(in_editor, "windows.servers.editor", "{0} in Editor", "0");
-    I18N_F(on_social, "windows.servers.social", "{0} on Social", social);
+    // the tab's website only: krunk.io's counts or krunker.io's (v10's "In Game" is krunker.io's totalPlayerCount).
+    // A count not read is blank (no span text), never a 0.
+    const int kio = g_server_tab == SERVER_TAB_KRUNKER;
+    double players = 0;
+    const int in_game_known = tab_players(g_server_tab, &players);
+    const int social = kio ? COUNT_KIO_SOCIAL : COUNT_BRAIN_SOCIAL;
+    const int editor_known = kio && g_count_known[COUNT_KIO_EDITOR];
+    char in_game[64] = "", in_editor[64] = "", on_social[64] = "";
+    if (in_game_known) {
+        char total[32];
+        comma_number(total, sizeof(total), players);
+        I18N_F(in_game, "windows.servers.online", "{0} In Game", total);
+    }
+    if (editor_known) {
+        char editor[32];
+        comma_number(editor, sizeof(editor), g_count[COUNT_KIO_EDITOR]);
+        I18N_F(in_editor, "windows.servers.editor", "{0} in Editor", editor);
+    }
+    if (g_count_known[social]) {
+        char count[32];
+        comma_number(count, sizeof(count), g_count[social]);
+        I18N_F(on_social, "windows.servers.social", "{0} on Social", count);
+    }
     sb_appendf(&sb, "<div class='setBodH' style='padding-bottom:10px;margin-top:30px;padding-top:0px;margin-left:0px;width:calc(100%% - 40px);'><div style='height:10px'></div><b style='font-size:26px;color:rgba(255,255,255,0.8)'><span style='font-size:26px;color:rgba(255,255,255,0.8)' id='playerCnt'>%s</span><span style='float:right;font-size:26px;color:font-size:26px;color:rgba(255,255,255,0.6);position: absolute;left: 50%%;transform: translateX(-50%%);' id='editorCnt'>%s</span><span style='float:right;font-size:26px;color:rgba(255,255,255,0.6)' id='socialCnt'>%s</span></b></div>",
                in_game, in_editor, on_social);
     sb_append(&sb, "</div>");
@@ -3199,16 +3227,43 @@ static void on_row_ping_list(void *user, const int status, const char *body, con
     cJSON_Delete(list);
 }
 
+// {playerCount} of one count's read (user = its COUNT_* index). Only a number is kept: a refused or failed read leaves
+// the count unknown (the footer blank), never a 0.
 static void on_player_count(void *user, const int status, const char *body, const size_t length) {
-    (void) user;
+    const int which = (int) (uintptr_t) user;
     (void) length;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *count = cJSON_GetObjectItem(res, "playerCount");
     if (cJSON_IsNumber(count)) {
-        g_social_players = count->valuedouble;
+        g_count[which] = count->valuedouble;
+        g_count_known[which] = 1;
         if (g_loaded) menu_rerender_if_open(2);
     }
     cJSON_Delete(res);
+}
+
+// v10 loadData's counts (v10:211170), asked when the Servers window is generated, each at most once per serverBrowserRate:
+// krunker.io's social and editor counts (public GETs, like its game list: only while krunker_lobbies_enabled(), so a
+// headless run or a test without its stub never reaches krunker.io; a scenario's fixed lists never either), and the
+// brain's /api/player-count while the brain answers (never while krunker.io is the active backend: the brain gate
+// refuses it).
+static void request_player_counts(void) {
+    const double now = now_ms();
+    if (krunker_lobbies_enabled() && !finder_off() && now - g_kio_counts_ms >= SERVER_BROWSER_RATE_MS) {
+        g_kio_counts_ms = now;
+        char base[256], url[320];
+        krunker_service_url(KRUNKER_SVC_SOCIAL, "", base, sizeof(base));
+        if (krunker_kio_player_count_url(url, sizeof(url), base))
+            backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, (void *) (uintptr_t) COUNT_KIO_SOCIAL);
+        krunker_service_url(KRUNKER_SVC_EDITOR, "", base, sizeof(base));
+        if (krunker_kio_player_count_url(url, sizeof(url), base))
+            backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, (void *) (uintptr_t) COUNT_KIO_EDITOR);
+    }
+    if (backend_brain_gated()) g_count_known[COUNT_BRAIN_SOCIAL] = 0; // an official session: the brain's count is not read
+    if (backend_available() == 1 && !backend_brain_gated() && now - g_brain_count_ms >= SERVER_BROWSER_RATE_MS) {
+        g_brain_count_ms = now;
+        backend_http_get("/api/player-count", on_player_count, (void *) (uintptr_t) COUNT_BRAIN_SOCIAL);
+    }
 }
 
 static char *games_window_gen(void);
@@ -3233,6 +3288,7 @@ char *servers_window_gen(const int id, const char **header) {
     server_tab_follow(); // the default tab: the active backend's (krunker_net_active)
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
     krunker_lobbies_refresh(0); // official lobbies (native, cached; listed whatever the server type)
+    request_player_counts(); // the footer's counts, before any early return below (the official session returns there)
     if (backend_available() != 1 || g_games_override) {
         // no brain: the finder's servers when there is a finder, else the empty list (what
         // v7 shows when client.fetchGameList() has no game)
@@ -3255,13 +3311,6 @@ char *servers_window_gen(const int id, const char **header) {
     }
     g_last_load_ms = now_ms();
     mm_get("/mm/ping-list", on_row_ping_list, NULL); // v10 loadData's getRegionPing: the rows' ping icons
-    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // v10 loadData (v10:211170): social.krunker.io's count
-        char social[256], url[320];
-        krunker_service_url(KRUNKER_SVC_SOCIAL, "", social, sizeof(social));
-        if (krunker_kio_player_count_url(url, sizeof(url), social)) backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_player_count, NULL);
-    } else {
-        backend_http_get("/api/player-count", on_player_count, NULL);
-    }
     return loading_html();
 }
 

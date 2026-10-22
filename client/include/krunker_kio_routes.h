@@ -7,6 +7,8 @@
 //     Games window's maps and mods (webhooks/general) and the streams (v10:131895-131941, v10:25991)
 //   social (social.krunker.io, v10 SOCIAL_URI): krunker_service_url(KRUNKER_SVC_SOCIAL, ...) for the player count
 //     (v10:211170)
+//   editor (editor.krunker.io, v10 EDITOR_URI): krunker_service_url(KRUNKER_SVC_EDITOR, ...) for the editor's player count
+//     (v10:211170, the Servers footer's "in Editor")
 //   gapi (gapi.svc.krunker.io, v10 _10449 = new _10077(_7284)): krunker_host_url(KRUNKER_HOST_GAPI, ...) for the
 //     leaderboards (v10:26987-27036)
 // These builders take the base as the caller got it (no trailing slash needed) and write the path only, so the

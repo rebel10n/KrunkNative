@@ -68,6 +68,12 @@ FINDER = {"servers": [
 ]}
 
 
+# The footer's counts (v10 loadData, v10:211170): social.krunker.io and editor.krunker.io /player-count (the stub's
+# /social and /editor, KRUNKNATIVE_KRUNKER_SOCIAL / _EDITOR), and the brain's /api/player-count (live runs only)
+COUNTS = {"/social/player-count": {"playerCount": 17}, "/editor/player-count": {"playerCount": 4},
+          "/api/player-count": {"playerCount": 14}}
+
+
 class Stub(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         if self.path.startswith("/mm/game-list"):  # the brain's answer of a live run (run_native live=...)
@@ -76,6 +82,8 @@ class Stub(BaseHTTPRequestHandler):
             body = FINDER
         elif self.path.startswith("/game-list"):
             body = KRUNKER
+        elif self.path.split("?")[0] in COUNTS:
+            body = COUNTS[self.path.split("?")[0]]
         else:
             self.send_error(404)
             return
@@ -128,7 +136,9 @@ def run_native(script, stub_port, timeout=240, live=None):
                 "KRUNKNATIVE_FINDER_URL": "off",
                 # no brain here: the Box Office list is the fixed one, and its requests are refused
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:9", "KRUNKNATIVE_SERVER_LIST": server_list,
-                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % stub_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
+                "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % stub_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io",
+                "KRUNKNATIVE_KRUNKER_SOCIAL": "http://127.0.0.1:%d/social" % stub_port,
+                "KRUNKNATIVE_KRUNKER_EDITOR": "http://127.0.0.1:%d/editor" % stub_port})
     if live is not None:
         env.pop("KRUNKNATIVE_SERVER_LIST", None)
         env.update({"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % stub_port,
@@ -182,8 +192,11 @@ def host_steps(t, tab):
 
 # the live brain runs (run_native live=...): a fresh open on the default tab, then the tabs
 LIVE_SCRIPT = ("0 menu\n300 call showWindow 2\n320 text @live_early [id=playerCnt]\n2500 text @live_default [id=playerCnt]\n"
-               "2600 call windows.1.switchTab 1\n2700 text @live_kio [id=playerCnt]\n"
-               "2800 call windows.1.switchTab 0\n2900 text @live_back [id=playerCnt]\n3000 quit\n")
+               "2510 text @live_default_social [id=socialCnt]\n2520 text @live_default_editor [id=editorCnt]\n"
+               "2600 call windows.1.switchTab 1\n2700 text @live_kio [id=playerCnt]\n2710 text @live_kio_social [id=socialCnt]\n"
+               "2720 text @live_kio_editor [id=editorCnt]\n"
+               "2800 call windows.1.switchTab 0\n2900 text @live_back [id=playerCnt]\n2910 text @live_back_social [id=socialCnt]\n"
+               "3000 quit\n")
 FALLBACK_SCRIPT = "0 menu\n300 call showWindow 2\n2500 text @fb_default [id=playerCnt]\n3000 quit\n"
 
 
@@ -199,7 +212,7 @@ def main():
               "2700 nodes @krunk_kio [id=serverHolder] .kioHed\n2710 nodes @krunk_kiorow [id=serverHolder] .kioRow\n"
               "2720 call setExpandedRegion 0\n2728 nodes @krunk_rows [id=serverHolder] .settNameIn\n2730 nodes @krunk_slides .purejscarousel .slide\n"
               "2740 grep @krunk_custom Chicago [id=serverHolder]\n"
-              "2745 text @krunk_cnt [id=playerCnt]\n")
+              "2745 text @krunk_cnt [id=playerCnt]\n2746 text @krunk_social [id=socialCnt]\n2747 text @krunk_editor [id=editorCnt]\n")
     part, t = host_steps(2800, "krunk")  # + Host Game on krunk.io: the Box Office step (no brain here)
     script += part
     # krunker.io's tab (switchTab 1): its own groups, then + Host Game on it
@@ -208,8 +221,8 @@ def main():
                "%d nodes @kio_kio [id=serverHolder] .kioHed\n%d call setExpandedRegion 1\n"
                "%d nodes @kio_kiorow [id=serverHolder] .kioRow\n%d nodes @kio_slides .purejscarousel .slide\n"
                "%d grep @kio_custom Somebody [id=serverHolder]\n%d grep @kio_chi Chicago [id=serverHolder]\n"
-               "%d text @kio_cnt [id=playerCnt]\n"
-               % (t, t + 50, t + 100, t + 120, t + 140, t + 160, t + 170, t + 180, t + 190, t + 195))
+               "%d text @kio_cnt [id=playerCnt]\n%d text @kio_social [id=socialCnt]\n%d text @kio_editor [id=editorCnt]\n"
+               % (t, t + 50, t + 100, t + 120, t + 140, t + 160, t + 170, t + 180, t + 190, t + 195, t + 196, t + 197))
     part, t = host_steps(t + 300, "kio")  # + Host Game on krunker.io: its Start Game needs a krunker.io game first
     script += part
     # back to krunk.io: its own count again (the krunker.io count is not kept on the krunk.io tab)
@@ -247,8 +260,19 @@ def main():
     check(grep(log, "@kio_chi") == 0, "krunker.io: none of our (Chicago) rows")
     _, cnt_o = text(log, "@kio_cnt")
     check(fold(cnt_o) == "21 In Game", f"krunker.io: the In Game count is krunker.io's own 21 ({fold(cnt_o)!r})")
+    # v10's footer: social.krunker.io's and editor.krunker.io's /player-count (the stub's 17 and 4), never a 0 before they answer
+    _, soc_o = text(log, "@kio_social")
+    _, ed_o = text(log, "@kio_editor")
+    check(fold(soc_o) == "17 on Social", f"krunker.io: the on Social count is social.krunker.io's own 17 ({fold(soc_o)!r})")
+    check(fold(ed_o) == "4 in Editor", f"krunker.io: the in Editor count is editor.krunker.io's own 4 ({fold(ed_o)!r})")
     _, cnt_back = text(log, "@krunk_back")
     check(fold(cnt_back) == "14 In Game", f"switching back to krunk.io swaps the count back to 14 ({fold(cnt_back)!r})")
+    # the footer's other counts are the tab's website's: no brain here, so krunk.io's social is blank, and it has no editor
+    # count; blank, never a 0
+    n_ks, soc_k = text(log, "@krunk_social")
+    n_ke, ed_k = text(log, "@krunk_editor")
+    check(n_ks >= 0 and n_ke >= 0 and fold(soc_k) == "" and fold(ed_k) == "",
+          f"krunk.io without a brain: its Social and Editor counts are blank, never a 0 ({fold(soc_k)!r}, {fold(ed_k)!r})")
 
     # + Host Game: the window's backend is the tab's
     _, msg_k = text(log, "@krunk_msg")
@@ -274,6 +298,18 @@ def main():
     check(fold(live_back) == "14 In Game", f"live: switching back to krunk.io shows the brain's 14 again ({fold(live_back)!r})")
     _, fb_default = text(fallback_log, "@fb_default")
     check(fold(fb_default) == "23 In Game", f"live: a brain answer without a total counts its game rows, 23, not the finder's ({fold(fb_default)!r})")
+    # the footer's counts on the brain path: krunk.io's social is the brain's /api/player-count (14), its editor count blank;
+    # krunker.io's are its own, whichever tab is shown
+    _, lsoc = text(live_log, "@live_default_social")
+    _, ledit = text(live_log, "@live_default_editor")
+    check(fold(lsoc) == "14 on Social", f"live: krunk.io's on Social is the brain's own 14 ({fold(lsoc)!r})")
+    check(fold(ledit) == "", f"live: krunk.io has no editor count (the brain has none): blank, not a 0 ({fold(ledit)!r})")
+    _, lsoc_k = text(live_log, "@live_kio_social")
+    _, ledit_k = text(live_log, "@live_kio_editor")
+    check(fold(lsoc_k) == "17 on Social" and fold(ledit_k) == "4 in Editor",
+          f"live: krunker.io's on Social / in Editor are its own 17 / 4 ({fold(lsoc_k)!r}, {fold(ledit_k)!r})")
+    _, lsoc_b = text(live_log, "@live_back_social")
+    check(fold(lsoc_b) == "14 on Social", f"live: switching back to krunk.io swaps on Social back to the brain's 14 ({fold(lsoc_b)!r})")
 
     if failures:
         print(f"server_tabs_e2e: {len(failures)} failed (logs in {WORK})")

@@ -40,6 +40,7 @@ static void env_clear(void) {
     unsetenv("KRUNKNATIVE_KRUNKER_DATA_API");
     unsetenv("KRUNKNATIVE_KRUNKER_GAPI");
     unsetenv("KRUNKNATIVE_KRUNKER_SOCIAL");
+    unsetenv("KRUNKNATIVE_KRUNKER_EDITOR");
 }
 
 // the host of a URL ("https://api.krunker.io/...") -> "api.krunker.io"
@@ -104,6 +105,12 @@ int main(void) {
     krunker_kio_player_count_url(url, sizeof(url), base);
     host_of(url, host, sizeof(host));
     CHECK(!strcmp(url, "https://social.krunker.io/player-count") && !strcmp(host, "social.krunker.io"), "the player count URL is %s", url);
+    // the editor's count (v10 loadData's second fetch, EDITOR_URI): editor.krunker.io/player-count
+    char editor_base[256];
+    krunker_service_url(KRUNKER_SVC_EDITOR, "", editor_base, sizeof(editor_base));
+    krunker_kio_player_count_url(url, sizeof(url), editor_base);
+    host_of(url, host, sizeof(host));
+    CHECK(!strcmp(url, "https://editor.krunker.io/player-count") && !strcmp(host, "editor.krunker.io"), "the editor count URL is %s", url);
 
     // 6. the leaderboards (v10's leaderboards client, _10449 = gapi, v10:26987-27036): the gapi path, then gapi's host
     char gpath[320];

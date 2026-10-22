@@ -353,6 +353,8 @@ def main():
         KIO_ENV.update({"KRUNKNATIVE_KRUNKER_API": "http://127.0.0.1:%d/api" % http_port,
                         "KRUNKNATIVE_KRUNKER_AUTH": "http://127.0.0.1:%d/frvr/v1/auth" % http_port,
                         "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d/mm" % http_port,
+                        # the footer counts (social / editor /player-count) go to a closed port: a test never reaches krunker.io
+                        "KRUNKNATIVE_KRUNKER_SOCIAL": "http://127.0.0.1:9", "KRUNKNATIVE_KRUNKER_EDITOR": "http://127.0.0.1:9",
                         "KRUNKNATIVE_ASSET_FETCH": "off",
                         "KRUNKNATIVE_KRUNKER_CAPTCHA_URL": "http://127.0.0.1:%d%s" % (http_port, kae.CAPTCHA_PATH)})
         for _ in range(100):

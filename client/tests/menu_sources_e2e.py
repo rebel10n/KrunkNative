@@ -187,6 +187,8 @@ def run_native(script, brain_port, kio_port, timeout=240):
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_SERVER_LIST": server_list,
                 # krunker.io's stub: its matchmaker (the lobby list) and its data API (the streams)
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % kio_port,
+                # the footer counts (social / editor /player-count) go to a closed port: a test never reaches krunker.io
+                "KRUNKNATIVE_KRUNKER_SOCIAL": "http://127.0.0.1:9", "KRUNKNATIVE_KRUNKER_EDITOR": "http://127.0.0.1:9",
                 "KRUNKNATIVE_KRUNKER_DATA_API": "http://127.0.0.1:%d" % kio_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io",
                 # the pictures are fetched afresh every run (a cached file would skip the CDN stub)
                 "KRUNKNATIVE_REMOTE_IMAGE_CACHE": os.path.join(WORK, "remote-images")})
