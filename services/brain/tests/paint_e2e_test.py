@@ -16,7 +16,8 @@ route does the rest). Then, over HTTP only:
   3. GET /player/me: the owned list (data[10], the loadout's source) has the painted copy with its id and m, and
      the second unit as an unpainted {ind, cnt} row.
   4. The database agrees: one skin_copies row with the colour, inventory.count still 2, the paint consumed.
-  5. A quick sell of the skin that would take both units is refused: the painted unit is not sold.
+  5. A quick sell "all" of the skin sells the stack's unpainted unit only (the official stack row counts its unpainted
+     units: game.js 147652-147722); the painted copy is not sold.
   6. The paint's last unit is gone: a second paint of the same kind is refused (400).
 
 Exit 0 when every check passes, 1 otherwise, 77 when kn_brain or the sqlite scratch database is unavailable.
@@ -204,11 +205,12 @@ def scenario(port, db):
     check("inventory: the skin still counts both units; the paint is consumed (0 left)",
           count and count[0][0] == 2 and paint_left and paint_left[0][0] == 0, "skin %r paint %r" % (count, paint_left))
 
-    # 5. a sale that would take both units is refused: the painted unit is not sold
+    # 5. a sale "all" takes the stack's unpainted unit only: the painted copy is not sold
     st, reply = http(port, "POST", "/market/quick-sell", {"item_id": SKIN, "action": 2, "amount": 2}, token)
     count = query(db, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (acc_id, SKIN))
-    check("quick sell of both units is refused; the painted copy stays",
-          st != 200 and count and count[0][0] == 2 and len(query(db, "SELECT copy_id FROM skin_copies WHERE copy_id = ?", (copy_id,))) == 1,
+    check("quick sell of all sells the unpainted unit only; the painted copy stays",
+          st == 200 and (reply.get("data") or {}).get("sold") == 1 and count and count[0][0] == 1
+          and len(query(db, "SELECT copy_id FROM skin_copies WHERE copy_id = ?", (copy_id,))) == 1,
           "HTTP %d %s" % (st, json.dumps(reply)[:200]))
 
     # 6. no paint left: another paint of the same kind is refused

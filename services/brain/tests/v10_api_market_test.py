@@ -47,6 +47,8 @@ SELLER = "mkt_seller"
 BUYER = "mkt_buyer"
 PAINTER = "mkt_painter"
 PAINT_OTHER = "mkt_paint_other"
+TRADE_A = "mkt_pt_a"
+TRADE_B = "mkt_pt_b"
 PASSWORD = "marketpass1"
 # any player name: the account-bound routes refuse without looking it up
 PLAYER = "kn_test_player"
@@ -558,9 +560,153 @@ def paint_scenario(port, path):
           "HTTP %d %s" % (st, json.dumps(r)[:200]))
 
 
+def paint_trade_scenario(port, path):
+    """Painted copies in the market, trades and quick sell (doc/v10/paint-copy.md): a copy keeps its paint through a
+    listing (and its unlist, a buy), a trade offer (sent, accepted, cancelled), and a quick sell; a stack sells and
+    lists only its unpainted units. The copy ids are the caller's own (the owned list's id)."""
+    a_tok = register(port, TRADE_A)
+    b_tok = register(port, TRADE_B)
+    if not a_tok or not b_tok:
+        return
+    a_id, b_id = account_id(path, TRADE_A), account_id(path, TRADE_B)
+    seed(path, [
+        ("UPDATE players SET player_score = 200000, player_funds = 1000 WHERE player_id = ?", (a_id,)),
+        ("UPDATE players SET player_score = 200000, player_funds = 1000 WHERE player_id = ?", (b_id,)),
+        # A: three units of ITEM (a red copy, a shader 0 copy, one unpainted) and two unpainted units of ITEM_B
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 3)", (a_id, ITEM)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (a_id, ITEM_B)),
+        ("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (?, ?, '#dc3c3c', NULL)", (a_id, ITEM)),
+        ("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (?, ?, NULL, 0)", (a_id, ITEM)),
+        # B: two units of ITEM (a shader 1 copy and one unpainted), one unpainted unit of ITEM_B
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (b_id, ITEM)),
+        ("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (?, ?, NULL, 1)", (b_id, ITEM)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (b_id, ITEM_B)),
+    ])
+
+    def copies(aid):
+        """the account's painted copies: copy id -> (skin, paint_color, paint_shader)"""
+        return {r[0]: (r[1], r[2], r[3]) for r in query(
+            path, "SELECT copy_id, skin_id, paint_color, paint_shader FROM skin_copies WHERE account_id = ?", (aid,))}
+
+    def count(aid, skin):
+        rows = query(path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (aid, skin))
+        return rows[0][0] if rows else 0
+
+    def copy_of(aid, paint):
+        """the copy id of the account's copy with that paint (a colour, or ("shader", n))"""
+        for cid, (skin, color, shader) in copies(aid).items():
+            if (paint[0] == "color" and color == paint[1]) or (paint[0] == "shader" and shader == paint[1]):
+                return cid
+        return 0
+
+    def listing_of(lid):
+        return query(path, "SELECT skin_id, paint_color, paint_shader, sold_at IS NULL AND cancelled_at IS NULL FROM market_listings WHERE id = ?", (lid,))
+
+    red_a = copy_of(a_id, ("color", "#dc3c3c"))
+    shader0_a = copy_of(a_id, ("shader", 0))
+    seed_ok = bool(red_a and shader0_a)
+    check("paint trade: the seeded copies exist (A: red, shader 0)", seed_ok, "%r %r" % (red_a, shader0_a))
+    if not seed_ok:
+        return
+
+    # 1. a painted copy is listed by its copy id (skin_id): its paint moves to the listing, the copy leaves the owner
+    st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "skin_id": red_a, "price": 300}, a_tok)
+    d = data_of(r) or {}
+    lid_red = d.get("listingId")
+    check("market list: a painted copy (its copy id) is listed (listing id, unpainted units left)",
+          st == 200 and is_int(lid_red) and d.get("cnt") == 1, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    rows = listing_of(lid_red)
+    check("market list: the listing keeps the copy's paint, and the copy is gone from the owner",
+          rows and rows[0][0] == ITEM and rows[0][1] == "#dc3c3c" and rows[0][2] is None and red_a not in copies(a_id),
+          "%r" % (rows,))
+
+    st, r = http(port, "GET", "/market/sales", None, a_tok)
+    mine = next((x for x in (data_of(r) or []) if x.get("marketid") == lid_red), None)
+    check("market sales: the painted listing carries its paint (m), as the official card reads it",
+          st == 200 and mine is not None and mine.get("m") == {"paint": "#dc3c3c"}, "HTTP %d %s" % (st, json.dumps(r)[:240]))
+
+    # 2. the last unpainted unit is listed as a stack (its store index); no unpainted unit is left for another
+    st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "price": 300}, a_tok)
+    check("market list: a stack lists its last unpainted unit", st == 200 and is_int((data_of(r) or {}).get("listingId")),
+          "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "price": 300}, a_tok)
+    check("market list: no unpainted unit left is refused (painted copies are not listed as a stack)",
+          st == 400 and err_of(r).get("code") == "BAD_REQUEST" and count(a_id, ITEM) == 1, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+
+    # 3. the buy: the buyer gets a copy with the paint (the old listing: a buy is refused for the grace period)
+    seed(path, [("UPDATE market_listings SET created_at = ? WHERE id = ?", (OLD, lid_red))])
+    st, r = http(port, "POST", "/market/purchase", {"market_id": lid_red}, b_tok)
+    red_b = copy_of(b_id, ("color", "#dc3c3c"))
+    check("market buy: the buyer receives the copy with its paint (a new copy of the same paint)",
+          st == 200 and red_b != 0 and count(b_id, ITEM) == 3, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+
+    # 4. unlist returns the painted copy to its seller with the paint (the buyer keeps theirs)
+    st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "skin_id": shader0_a, "price": 300}, a_tok)
+    lid_sh = (data_of(r) or {}).get("listingId")
+    st2, r2 = http(port, "POST", "/market/unlist", {"market_id": lid_sh}, a_tok)
+    back_a = copy_of(a_id, ("shader", 0))
+    check("market unlist: a painted copy comes back to its seller with its paint (shader 0)",
+          st == 200 and st2 == 200 and back_a != 0 and count(a_id, ITEM) == 1, "HTTP %d/%d" % (st, st2))
+
+    # 5. a trade offer: A offers its shader 0 copy for B's red copy; the offer lists both copies with their paints
+    st, r = http(port, "POST", "/trades/create", {
+        "target_player_id": b_id, "my_offer": [{"i": ITEM, "c": 1, "iids": [back_a, back_a]}],
+        "their_offer": [{"i": ITEM, "c": 1, "iids": [red_b]}], "message": ""}, a_tok)
+    check("trade offer: a copy offered twice in one side is refused (400), and the copy stays the sender's",
+          st == 400 and err_of(r).get("message") == "Invalid offer" and back_a in copies(a_id), "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, r = http(port, "POST", "/trades/create", {
+        "target_player_id": b_id,
+        "my_offer": [{"i": ITEM, "c": 1, "iids": [back_a]}],
+        "their_offer": [{"i": ITEM, "c": 1, "iids": [red_b]}],
+        "message": "paint"}, a_tok)
+    trid = (data_of(r) or {}).get("trid")
+    check("trade offer: painted copies are offered by their copy ids (iids)",
+          st == 200 and is_int(trid), "HTTP %d %s" % (st, json.dumps(r)[:240]))
+    check("trade offer: the sender's copy is escrowed (gone from the owner until the offer closes)",
+          back_a not in copies(a_id) and count(a_id, ITEM) == 0, "%r" % (copies(a_id),))
+    st, r = http(port, "GET", "/trades/inventory/%d" % b_id, None, a_tok)
+    theirs = (data_of(r) or {}).get("their_inventory") or []
+    row = next((x for x in theirs if x.get("sid") == red_b), None)
+    check("trade inventory: the other player's painted copy is a row by its copy id, with its paint",
+          st == 200 and row is not None and row.get("i") == ITEM and row.get("m") == {"paint": "#dc3c3c"}, json.dumps(theirs)[:300])
+    st, r = http(port, "POST", "/trades/%d/accept" % (trid or 0), None, b_tok)
+    a_now, b_now = copies(a_id), copies(b_id)
+    check("trade accept: the sender's paint arrives on the receiver's copy, and the receiver's on the sender's",
+          st == 200 and any(v == (ITEM, None, 0) for v in b_now.values())
+          and any(v == (ITEM, "#dc3c3c", None) for v in a_now.values()), "HTTP %d %s; A %r B %r" % (st, json.dumps(r)[:160], a_now, b_now))
+    st, r = http(port, "GET", "/trades/history?offset=0&limit=30&includeOpen=true", None, a_tok)
+    done = next((x for x in (data_of(r) or {}).get("completed", []) if x.get("trid") == trid), None)
+    units = (done or {}).get("sksell") or []
+    check("trade history: the accepted offer shows the sender's copy with its paint",
+          done is not None and any(u.get("m") == {"paintShader": 0} for u in units), json.dumps(done)[:300])
+
+    # 6. a cancelled offer returns the copy with its paint
+    red_a2 = copy_of(a_id, ("color", "#dc3c3c"))
+    st, r = http(port, "POST", "/trades/create", {
+        "target_player_id": b_id, "my_offer": [{"i": ITEM, "c": 1, "iids": [red_a2]}], "their_offer": [], "message": ""}, a_tok)
+    trid2 = (data_of(r) or {}).get("trid")
+    st2, r2 = http(port, "POST", "/trades/%d/cancel" % (trid2 or 0), None, a_tok)
+    check("trade cancel: the offered painted copy comes back to its owner with its paint",
+          st == 200 and st2 == 200 and copy_of(a_id, ("color", "#dc3c3c")) != 0, "HTTP %d/%d %s" % (st, st2, json.dumps(r)[:160]))
+
+    # 7. quick sell: a painted copy sells for its KR (one unit, the copy); a stack sells its unpainted units only
+    red_a3 = copy_of(a_id, ("color", "#dc3c3c"))
+    funds_before = query(path, "SELECT player_funds FROM players WHERE player_id = ?", (a_id,))[0][0]
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 0, "amount": 0, "skin_id": red_a3}, a_tok)
+    funds_after = query(path, "SELECT player_funds FROM players WHERE player_id = ?", (a_id,))[0][0]
+    check("quick sell: a painted copy sells for its KR and leaves with its paint",
+          st == 200 and (data_of(r) or {}).get("sold") == 1 and funds_after > funds_before and red_a3 not in copies(a_id),
+          "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 0, "amount": 2}, b_tok)
+    check("quick sell: a stack sells its unpainted units only (the shader 1 copy stays)",
+          st == 200 and (data_of(r) or {}).get("sold") == 1 and count(b_id, ITEM) == 2
+          and any(v == (ITEM, None, 1) for v in copies(b_id).values()), "HTTP %d %s" % (st, json.dumps(r)[:200]))
+
+
 def run_all(port, path):
     market_scenario(port, path)
     paint_scenario(port, path)
+    paint_trade_scenario(port, path)
 
 
 def stop(proc):
@@ -596,7 +742,8 @@ def main():
         if mig.returncode:
             return 1
         brain = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.region=local",
-                                  "--brain.id=v10-market-test-%d" % os.getpid(), "--finder.poll_interval_s=1"],
+                                  "--brain.id=v10-market-test-%d" % os.getpid(), "--finder.poll_interval_s=1",
+                                  "--auth.register_per_hour=100000"],
                                  cwd=ROOT, env=env, stdout=open(log, "w"), stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
         procs.append(brain)

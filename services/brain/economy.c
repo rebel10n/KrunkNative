@@ -14,6 +14,7 @@
  * server key, so they are still rate limited and recorded but not deduplicated.
  */
 #include "acct_internal.h"
+#include "v10_paint.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -331,7 +332,8 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 #define LISTING_ROWS \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
-    " a.username AS p, 1 AS c FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
+    " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader" \
+    " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
  * client's wait ends (social_db frees the query's context on a refusal, so the caller passes a copy) */
@@ -582,12 +584,14 @@ void sh_market_list(SocialSession *s, const cJSON *f) {
     }
     EconHead h;
     econ_head(&h, s, f, "list", "market");
-    char sk[24], pr[24], fee[24], byp[24], mx[24], ml[24], lvl[24];
+    /* the frame's third value is the unit listed: a painted copy's id, or 0 / the store index for a stack */
+    const int64_t copy = fa_int(f, 2, 0) >= V10_COPY_ID_BASE ? fa_int(f, 2, 0) : 0;
+    char sk[24], pr[24], fee[24], byp[24], mx[24], ml[24], lvl[24], cp[24];
     social_call(s, &P_MARKET_LIST,
                 KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, skin), acct_itoa(pr, (int64_t) price_v->valuedouble),
                            acct_itoa(fee, g_acct.market_fee_percent), acct_itoa(byp, g_acct.market_fee_bypass),
                            acct_itoa(mx, g_acct.sale_max), acct_itoa(ml, g_acct.max_listings),
-                           acct_itoa(lvl, g_acct.market_min_level)),
+                           acct_itoa(lvl, g_acct.market_min_level), acct_itoa(cp, copy)),
                 list_done, ctx_new("li", fa_int(f, 3, 0), 0));
 }
 
@@ -725,10 +729,13 @@ void sh_quick_sell(SocialSession *s, const cJSON *f) {
     }
     EconHead h;
     econ_head(&h, s, f, "qsell", "market");
-    char sk[24], md[24], am[24], kr[24];
+    /* the frame's ext carries "copy" when the sold unit is a painted copy (the official skin_id of a single sale) */
+    const cJSON *cv = cJSON_GetObjectItemCaseSensitive(frame_ext(f), "copy");
+    const int64_t copy = cJSON_IsNumber(cv) && cv->valuedouble >= V10_COPY_ID_BASE ? (int64_t) cv->valuedouble : 0;
+    char sk[24], md[24], am[24], kr[24], cp[24];
     social_call(s, &P_QUICK_SELL,
                 KN_DB_ARGS(h.me, h.key, h.rate, h.feature, acct_itoa(sk, id), acct_itoa(md, mode), acct_itoa(am, sel),
-                           acct_itoa(kr, mode == 0 ? each : 0)),
+                           acct_itoa(kr, mode == 0 ? each : 0), acct_itoa(cp, copy)),
                 quick_sell_done, ctx_new("qsi", uid, 0));
 }
 
@@ -835,8 +842,8 @@ static void trade_done(SocialSession *s, kn_db_result *res, void *extra) {
 /* One side of an offer from the client: [{i, c}, ...] (v7.1.4), [id, id, ...] or "id,id," ->
  * [[skin, count], ...] with distinct skins, or NULL with *err set. */
 static cJSON *offer_side(const cJSON *v, int64_t *fee, const char **err) {
-    int64_t skins[128], counts[128];
-    int n = 0;
+    int64_t skins[128], counts[128], copies[128], copy_skins[128];
+    int n = 0, nc = 0;
     const cJSON *it;
     char *str = cJSON_IsString(v) ? strdup(v->valuestring) : NULL;
     cJSON *parsed = NULL;
@@ -852,6 +859,38 @@ static cJSON *offer_side(const cJSON *v, int64_t *fee, const char **err) {
         return NULL;
     }
     cJSON_ArrayForEach(it, v) {
+        /* a painted copy, as the official client offers it (game.js 125069: {i, c: 1, iids: [copy id], sid, m}): one
+         * unit per copy id, its skin from i (doc/v10/paint-copy.md) */
+        const cJSON *iids = cJSON_IsObject(it) ? cJSON_GetObjectItemCaseSensitive(it, "iids") : NULL;
+        if (cJSON_IsArray(iids)) {
+            const cJSON *iv = cJSON_GetObjectItemCaseSensitive(it, "i");
+            const double skd = cJSON_IsNumber(iv) ? iv->valuedouble : -1;
+            const int64_t id = skd >= 0 && skd < 1e7 ? (int64_t) skd : -1;
+            const SkinInfo *k = acct_skin(id);
+            if (id < 0 || (acct_skin_count() > 0 && !k)) {
+                *err = "Invalid offer";
+                cJSON_Delete(parsed);
+                return NULL;
+            }
+            if (k && !skin_tradable(k)) {
+                *err = "Item cant be traded";
+                cJSON_Delete(parsed);
+                return NULL;
+            }
+            const cJSON *cid;
+            cJSON_ArrayForEach(cid, iids) {
+                const double cd = cJSON_IsNumber(cid) ? cid->valuedouble : -1;
+                if (cd < V10_COPY_ID_BASE || cd >= 9e15 || nc >= 128) {
+                    *err = "Invalid offer";
+                    cJSON_Delete(parsed);
+                    return NULL;
+                }
+                copies[nc] = (int64_t) cd;
+                copy_skins[nc++] = id;
+                if (k && k->rarity >= 0 && k->rarity < RARITIES) *fee += k_rarity_trade_fee[k->rarity];
+            }
+            continue;
+        }
         /* range-checked as doubles: (int64_t) of a huge / NaN double is undefined */
         double idd = -1, cntd = 1;
         if (cJSON_IsObject(it)) {
@@ -890,12 +929,20 @@ static cJSON *offer_side(const cJSON *v, int64_t *fee, const char **err) {
         counts[j] += cnt;
     }
     cJSON_Delete(parsed);
+    /* the stacks ([skin, count]) first, then the painted copies ([skin, 1, copy id]) */
     cJSON *out = cJSON_CreateArray();
     for (int j = 0; j < n; j++) {
         cJSON *pair = cJSON_CreateArray();
         cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) skins[j]));
         cJSON_AddItemToArray(pair, cJSON_CreateNumber((double) counts[j]));
         cJSON_AddItemToArray(out, pair);
+    }
+    for (int j = 0; j < nc; j++) {
+        cJSON *triple = cJSON_CreateArray();
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber((double) copy_skins[j]));
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber(1));
+        cJSON_AddItemToArray(triple, cJSON_CreateNumber((double) copies[j]));
+        cJSON_AddItemToArray(out, triple);
     }
     return out;
 }

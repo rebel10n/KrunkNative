@@ -246,6 +246,73 @@ int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *sou
     return dbx_failed(x) ? -1 : 0;
 }
 
+/* ------------------------------------------------------------------ painted copies (doc/v10/paint-copy.md) */
+
+int64_t db_unpainted_units(Dbx *x, int64_t acc, int64_t skin) {
+    return dbx_int(x,
+        SQL(.any = "SELECT i.count - (SELECT count(*) FROM skin_copies c WHERE c.account_id = i.account_id"
+                   " AND c.skin_id = i.skin_id) FROM inventory i WHERE i.account_id = $1 AND i.skin_id = $2"),
+        KN_DB_ARGS(I64S(acc), I64S(skin)), 0);
+}
+
+int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint, const char *source, const char *ref) {
+    kn_db_result *r = dbx_q(x,
+        SQL(.any = "SELECT paint_color, paint_shader FROM skin_copies WHERE copy_id = $1 AND account_id = $2"
+                   " AND skin_id = $3 {for_update}"),
+        KN_DB_ARGS(I64S(copy), I64S(acc), I64S(skin)));
+    if (!r) return -1;
+    if (kn_db_rows(r) < 1) {
+        kn_db_result_free(r);
+        return dbx_refuse(x, "You don't own that copy.");
+    }
+    CopyPaint p;
+    memset(&p, 0, sizeof p);
+    p.shader = -1;
+    if (!kn_db_isnull(r, 0, 0)) snprintf(p.color, sizeof p.color, "%s", kn_db_get(r, 0, 0));
+    if (!kn_db_isnull(r, 0, 1)) p.shader = kn_db_get_int64(r, 0, 1, 0);
+    kn_db_result_free(r);
+    /* the copy row goes first: db_add_skin's guard then sees one painted unit fewer */
+    if (dbx_exec(x, SQL(.any = "DELETE FROM skin_copies WHERE copy_id = $1"), KN_DB_ARGS(I64S(copy))) < 0) return -1;
+    if (db_add_skin(x, acc, skin, -1, source, ref, NULL) < 0) return -1;
+    if (paint) *paint = p;
+    return 0;
+}
+
+int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const char *source, const char *ref, int64_t *copy_id) {
+    if (db_add_skin(x, acc, skin, 1, source, ref, NULL) < 0) return -1;
+    const int colour = paint->color[0] != '\0';
+    char shader_t[24];
+    if (!colour) snprintf(shader_t, sizeof shader_t, "%lld", (long long) paint->shader);
+    const int64_t id = dbx_insert_id(x,
+        SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1::int, $2::int, $3, $4::int)"
+                  " RETURNING copy_id",
+            .sqlite = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"
+                      " RETURNING copy_id",
+            .mysql = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"),
+        KN_DB_ARGS(I64S(acc), I64S(skin), colour ? paint->color : NULL, colour ? NULL : shader_t));
+    if (id < 0) return -1;
+    if (copy_id) *copy_id = id;
+    return 0;
+}
+
+int db_take_units(Dbx *x, int64_t acc, int64_t skin, int64_t want, const char *source, const char *ref) {
+    const int64_t unpainted = db_unpainted_units(x, acc, skin);
+    const int64_t from_stack = want < unpainted ? want : unpainted;
+    if (from_stack > 0 && db_add_skin(x, acc, skin, -from_stack, source, ref, NULL) < 0) return -1;
+    int64_t left = want - from_stack;
+    if (left <= 0) return 0;
+    kn_db_result *r = dbx_q(x, SQL(.any = "SELECT copy_id FROM skin_copies WHERE account_id = $1 AND skin_id = $2 ORDER BY copy_id"),
+                            KN_DB_ARGS(I64S(acc), I64S(skin)));
+    if (!r) return -1;
+    for (int i = 0; i < kn_db_rows(r) && left > 0; i++) {
+        if (copy_take(x, acc, kn_db_get_int64(r, i, 0, 0), skin, NULL, source, ref) < 0) break;
+        left--;
+    }
+    kn_db_result_free(r);
+    if (dbx_failed(x)) return -1;
+    return left > 0 ? dbx_refuse(x, "Item not owned") : 0;
+}
+
 /* ------------------------------------------------------------------ account object */
 
 cJSON *db_player_row(Dbx *x, int64_t id) {

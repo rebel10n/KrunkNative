@@ -73,6 +73,21 @@ int db_active_ban(Dbx *x, int64_t account_id, const char *ip, char *reason, size
 /* kn_add_funds / kn_add_skin; -1 (refusal recorded) when not enough / not owned / no account */
 int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref, int64_t *funds);
 int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *source, const char *ref, int64_t *count);
+/* The paint of a copy (skin_copies, doc/v10/paint-copy.md): color "#rrggbb" (color[0] set) or shader n. */
+typedef struct CopyPaint {
+    char color[24];
+    int64_t shader;
+} CopyPaint;
+/* The painted copies: copy_take removes one owned copy of `skin` (its paint in *paint, its unit out of the
+ * inventory: db_add_skin, so the audit row is written); copy_give adds a unit of `skin` as a copy with `paint`
+ * and returns its new copy id. A copy the account does not own is refused ("You don't own that copy."). Both
+ * return 0 or -1 (the refusal recorded). db_take_units takes `want` units of a skin for a craft: the unpainted
+ * units first, then painted copies (oldest first), the paint going with a copy. */
+int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint, const char *source, const char *ref);
+int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const char *source, const char *ref, int64_t *copy_id);
+int db_take_units(Dbx *x, int64_t acc, int64_t skin, int64_t want, const char *source, const char *ref);
+/* the account's unpainted units of a skin: inventory.count less its painted copies (the stack's count) */
+int64_t db_unpainted_units(Dbx *x, int64_t acc, int64_t skin);
 /* Same, with the counterparty of the movement (gift / market / trade) and the fee charged on
  * top of it: the ledger row then records who moved the KR and what it cost. */
 int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref,

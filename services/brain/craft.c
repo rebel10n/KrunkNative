@@ -188,8 +188,10 @@ static kn_db_result *run_craft(kn_dbconn *c, int n, const char *const *p) {
         snprintf(skin_t, sizeof skin_t, "%lld", (long long) skin);
         const int64_t have = dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
                                      KN_DB_ARGS(acc_t, skin_t), 0);
+        /* a material is any owned unit, a painted copy included (the official client's craft check counts the copy as
+         * an owned unit): the unpainted units go first, then the copies, whose paint is used up with them */
         if (!cnt || want < 1 || have < want) dbx_refuse(&x, "Missing materials");
-        else db_add_skin(&x, acc, skin, -want, "craft", ref, NULL);
+        else db_take_units(&x, acc, skin, want, "craft", ref);
     }
     if (dbx_failed(&x)) return dbx_finish(&x, NULL);
     db_add_skin(&x, acc, sout, 1, "craft", ref, NULL);

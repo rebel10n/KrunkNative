@@ -234,6 +234,25 @@ async def scenario(url, db):
         check(not ok and msg == "Sold out", "crft a sold out recipe: Sold out (%r)" % msg)
         check(owned(db, bid, WOOD) == 1 and owned(db, bid, RESULT) == 0, "sold out: nothing taken, nothing granted")
 
+        # painted copies are materials too (doc/v10/paint-copy.md): recipe 1 takes 2 Wood and 1 Wires; one Wood is a
+        # painted copy and the Wires is a painted copy. The unpainted Wood goes first; the copy's paint goes with it.
+        name_p = "cpaint%d" % (os.getpid() % 1000000)
+        pid = await register(url, name_p)
+        sp = await user(url, name_p)
+        try:
+            give(db, pid, WOOD, 2)
+            give(db, pid, WIRES, 1)
+            db.q("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, '#dc3c3c', NULL)", pid, WOOD)
+            db.q("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, NULL, 0)", pid, WIRES)
+            ok, msg = await craft(sp, 1)
+            check(ok and msg == "Crafted.", "crft with painted copies as materials: crafted (%r)" % msg)
+            check(owned(db, pid, WOOD) == 0 and owned(db, pid, WIRES) == 0 and owned(db, pid, RESULT) == 1,
+                  "painted materials: 2 Wood and 1 Wires taken, the result granted")
+            check(db.one("SELECT COUNT(*) FROM skin_copies WHERE account_id = $1", pid) == 0,
+                  "painted materials: the copies that were taken are gone (the Wood copy with its paint)")
+        finally:
+            await sp.__aexit__()
+
         # a result that is not craftable, an unknown recipe
         ok, msg = await craft(sa, 4)
         check(not ok and msg == "Not craftable.", "crft a non-craftable recipe: Not craftable (%r)" % msg)

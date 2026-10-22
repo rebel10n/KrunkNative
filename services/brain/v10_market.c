@@ -453,7 +453,7 @@ static void route_begin(kn_http_req *req, int required, int write, OpStep first,
 
 /* ---- row mappings: the socket's rows as v10's REST shapes */
 
-/* a listing (LISTING_ROWS: m, i, f, p, ms; listings_of adds sk and kr): {marketid, skinindex, funds, ...} */
+/* a listing (LISTING_ROWS: m, i, f, p, ms, paint_*; listings_of adds sk and kr): {marketid, skinindex, funds, ...} */
 static cJSON *listing_row(const cJSON *r) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "marketid", (double) kn_json_int(r, "m", 0));
@@ -462,6 +462,9 @@ static cJSON *listing_row(const cJSON *r) {
     const cJSON *p = cJSON_GetObjectItemCaseSensitive(r, "p");
     if (cJSON_IsString(p)) cJSON_AddStringToObject(o, "seller_name", p->valuestring);
     cJSON_AddNumberToObject(o, "created_at", (double) kn_json_int(r, "ms", 0));
+    /* a painted copy's listing carries its paint as m (the official card reads the listing's m as its metadata) */
+    cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+    if (m) cJSON_AddItemToObject(o, "m", m);
     return o;
 }
 
@@ -519,6 +522,20 @@ static cJSON *units_of(const char *ids) {
     return a;
 }
 
+/* a side's painted copies (economy's copies_s / copies_r: {sid, i, paint_color, paint_shader}) as units appended to the
+ * side's units: {ind, sid: the copy id, m: its paint} (doc/v10/paint-copy.md) */
+static void add_copy_units(cJSON *units, const cJSON *copies) {
+    const cJSON *r;
+    cJSON_ArrayForEach(r, copies) {
+        cJSON *u = cJSON_CreateObject();
+        cJSON_AddNumberToObject(u, "ind", (double) kn_json_int(r, "i", -1));
+        cJSON_AddNumberToObject(u, "sid", (double) kn_json_int(r, "sid", 0));
+        cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+        if (m) cJSON_AddItemToObject(u, "m", m);
+        cJSON_AddItemToArray(units, u);
+    }
+}
+
 /* a side's KR as the trade card's currency list: [{cid: 1, amt}] (cid 1 = KR); [] for none */
 static cJSON *currency_of(int64_t kr) {
     cJSON *a = cJSON_CreateArray();
@@ -541,8 +558,12 @@ static cJSON *trade_row(const cJSON *t) {
     cJSON_AddItemToObject(o, "status", copy_or_null(t, "status"));
     cJSON_AddNumberToObject(o, "dte", (double) kn_json_int(t, "dte", 0));
     put_if(o, t, "exp");
-    cJSON_AddItemToObject(o, "sksell", units_of(kn_json_str(t, "sksell", NULL)));
-    cJSON_AddItemToObject(o, "skbuy", units_of(kn_json_str(t, "skbuy", NULL)));
+    /* a side's units: its stacks (one per unit), then its painted copies with their paint (m) */
+    cJSON *sell = units_of(kn_json_str(t, "sksell", NULL)), *buy = units_of(kn_json_str(t, "skbuy", NULL));
+    add_copy_units(sell, cJSON_GetObjectItemCaseSensitive(t, "copies_s"));
+    add_copy_units(buy, cJSON_GetObjectItemCaseSensitive(t, "copies_r"));
+    cJSON_AddItemToObject(o, "sksell", sell);
+    cJSON_AddItemToObject(o, "skbuy", buy);
     cJSON_AddItemToObject(o, "csell", currency_of(kn_json_int(t, "krsell", 0)));
     cJSON_AddItemToObject(o, "cbuy", currency_of(kn_json_int(t, "krbuy", 0)));
     return o;
@@ -898,6 +919,23 @@ static void step_trade_inv_lookup(Op *op) {
     if (op_query(op, &q_account, 1, p) != 0) op_fail(op, 500, "INTERNAL", "Server error");
 }
 
+/* a trade picker's side: the stacks as they are ({i, c}); a painted copy as the market has it ({i, sid, m}, one unit:
+ * c 1) (doc/v10/paint-copy.md) */
+static cJSON *trade_inv_side(const cJSON *side) {
+    cJSON *a = cJSON_CreateArray();
+    const cJSON *r;
+    cJSON_ArrayForEach(r, side) {
+        if (kn_json_str(r, "paint_color", "")[0] == '\0' && kn_json_int(r, "paint_shader", -1) < 0) {
+            cJSON_AddItemToArray(a, cJSON_Duplicate(r, 1));
+            continue;
+        }
+        cJSON *u = copy_inventory_row(r);
+        cJSON_AddNumberToObject(u, "c", 1);
+        cJSON_AddItemToArray(a, u);
+    }
+    return a;
+}
+
 /* ["trD", name, id, [mine, theirs]] */
 static void reply_trade_inv(Op *op) {
     if (op_failed(op)) return;
@@ -905,8 +943,8 @@ static void reply_trade_inv(Op *op) {
     cJSON *o = cJSON_CreateObject();
     const cJSON *mine = cJSON_IsArray(sides) ? cJSON_GetArrayItem(sides, 0) : NULL;
     const cJSON *theirs = cJSON_IsArray(sides) ? cJSON_GetArrayItem(sides, 1) : NULL;
-    cJSON_AddItemToObject(o, "my_inventory", mine ? cJSON_Duplicate(mine, 1) : cJSON_CreateArray());
-    cJSON_AddItemToObject(o, "their_inventory", theirs ? cJSON_Duplicate(theirs, 1) : cJSON_CreateArray());
+    cJSON_AddItemToObject(o, "my_inventory", trade_inv_side(mine));
+    cJSON_AddItemToObject(o, "their_inventory", trade_inv_side(theirs));
     v10_reply_data(op->req, 200, o);
 }
 
@@ -1353,7 +1391,11 @@ static void step_quick_sell(Op *op) {
     add_int(f, kn_json_int(op->body, "item_id", -1));
     add_int(f, 0);
     add_int(f, kn_json_int(op->body, "amount", 0));
-    cJSON_AddItemToArray(f, ext_of(op->body));
+    /* a painted copy's sale names the copy (skin_id, the official single sale): the frame's ext carries it */
+    cJSON *ext = ext_of(op->body);
+    const int64_t copy = kn_json_int(op->body, "skin_id", 0);
+    if (copy >= V10_COPY_ID_BASE) cJSON_AddNumberToObject(ext, "copy", (double) copy);
+    cJSON_AddItemToArray(f, ext);
     op_call(op, sh_quick_sell, f);
 }
 

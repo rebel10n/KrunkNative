@@ -75,6 +75,37 @@ copy id: deob:149016, 149066, 124751, 150107) and `m` (a trade row copies it: de
   (deob:27818-27820) gives `m` of an object slot. Where a slot is a plain index, the model uses the player's
   `xMetadata` field instead (deob:194014-194035). This is the same code for every player, ours included.
 
+### 7. Listing, trading, quick selling and crafting a painted copy
+
+The official client keeps a painted copy as its own unit in each of these four paths. It never refuses a painted copy
+(no paint refusal exists in the bundle: the error keys of the market and the trade, deob:117347-117359, and the craft
+messages have none). What it sends:
+
+- **List.** The listing function takes `skin_id` and sends it on `/market/list` (`iîïíiíí`, deob:122583 byte 5136305;
+  the `skin_id` is set at deob:122589 byte 5136499; `listItem`, deob:122591 byte 5136547). The caller passes the
+  selected row's `sid` (deob:151563-151564, byte 7050366 and 7050521), so a painted copy lists as its copy id and a
+  stack lists with no `skin_id` (the stack's row, deob:149123). The refusal the client shows for a unit that cannot be
+  sold is the `noSale` / opensea / free / blackM / itemShop test (deob:122670 byte 5139171), not paint; the message is
+  "This item cannot be sold" (deob:151554 byte 7049972).
+- **Trade.** A stack row is `{i, c}` when `st === 1` (deob:125011-125012, byte 5305369). Any other row is a copy: the
+  offer gets `{i, c: 1, iids: [sid], sid, m}` (deob:125069-125072, byte 5307757). The offer serializer keeps only
+  `{i, c, iids}` (deob:125109-125113, byte 5309491), and the trade body goes out at deob:125149 (byte 5310757). The
+  trade picker shows the copy's paint (`trade-item-paint`, deob:124685, byte 5279363).
+- **Quick sell.** `quickSellItem({item_id, action, amount}, skin_id?)` (deob:147675, byte 6792946). `skin_id` is the
+  unit's `instanceId` only for action 0 (one item): `IÏîîiìì = action === 0 && instanceId` (deob:147673, byte
+  6792725). The dialog offers only "1 Item" when the count is 1 (deob:147652, byte 6791805). After a copy sale the
+  client drops that copy by its id, and a stack sale drops the first stack-count copies (deob:147703 byte 6794196,
+  deob:147715 byte 6794786, deob:147722 byte 6795131). The KR of a unit is the rarity's value, whatever its paint
+  (the value function at deob:122598 byte 5136822 reads the rarity and the skin's flags only).
+- **Craft.** The craft is the socket frame `crft` with the recipe SID (`startCraft`, deob:249930 byte 12514916;
+  `sendCraft`, deob:249935 byte 12515107; `CRAFT_REQUEST` is `"crft"`, deob:110986 byte 4642898). The client checks each
+  material against its owned rows: `find(ind == X && cnt >= n)` (deob:153201 byte 7143790). A copy row has `cnt: 1`, so
+  a copy satisfies a one-unit material, and the check is per row (a two-unit material needs a stack row with two). The
+  server side of the craft is not in the bundle.
+
+So a painted copy is tradable, listable, quick-sellable and a craft material; the paint goes with the copy wherever
+it goes, and is gone when the copy is consumed.
+
 ## What KrunkNative does
 
 KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. The painted units are a second table:
@@ -85,9 +116,13 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   units are `count - painted rows`.
 - Copy ids start at 1000000 (`V10_COPY_ID_BASE`, `services/brain/v10_paint.h`). A stack's `sid` is its store index
   (below 1000000), so a `sid` never means two things.
-- `db_add_skin` (and the postgres `kn_add_skin`) refuse to take away a painted unit: a sale, listing, trade, quick sell
-  or craft takes only unpainted units (`count + delta >= painted`). The refusal says "Only painted copies of that item
-  are left".
+- `db_add_skin` (and the postgres `kn_add_skin`) refuse to take away a painted unit (`count + delta >= painted`). A
+  stack's sale, listing, trade or quick sell takes only its unpainted units; the refusal says "Only painted copies of
+  that item are left". A painted copy goes by its copy id instead (db_common.c): `copy_take` deletes its skin_copies row
+  and takes the unit with `db_add_skin` (so the audit row is written), `copy_give` adds a unit as a new copy with a
+  paint. A craft takes the unpainted units first and then the copies (`db_take_units`), so a copy's paint goes with it
+  when it is used up. The copy's paint is kept on the listing (`market_listings.paint_*`, migration 0353) and on the
+  offer (`trade_copies`, side `s`: the escrowed copy's paint), and each returns with the copy.
 
 ### Routes
 
@@ -103,6 +138,18 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
 - `GET /market/inventory` (`v10_market.c`, `reply_inventory`): stacks as `{i, cnt, sid}` (cnt = the unpainted units,
   sid = the store index), then one `{i, sid, m}` row per painted copy (no `cnt`), with `m` = `{paint}` or `{paintShader}`.
   The rows come from the market page's inventory query (`economy.c`, `market_done`), which also feeds the socket.
+- `POST /market/list` with `skin_id` = a copy id lists that copy (the socket "li" frame's third value; `run_market_list`).
+  `POST /market/quick-sell` with `skin_id` = a copy id sells that copy as one unit (`action` 0, `amount` 0; the socket
+  "qsi" frame's ext `copy`; `run_quick_sell`). The stack's `amount` counts its unpainted units.
+- `POST /trades/create`: an offer's copy is `{i, c: 1, iids: [copy id]}`, the official shape (game.js 125069-125113);
+  a stack is `{i, c}`. `offer_side` (economy.c) turns each copy into its own `[skin, 1, copy id]` entry;
+  `run_trade_create` takes the sender's copies into escrow (their paint kept in `trade_copies`) and checks the
+  receiver's copies exist. Accept moves them (the receiver's paint read from its copy row); cancel, decline and expiry
+  return the sender's with their paint (`trade_unwind`). The trade rows carry the copy units as `{ind, sid, m}` in
+  `sksell` / `skbuy` (`add_copy_units`, v10_market.c).
+- `GET /trades/inventory/{id}`: a painted copy is its own row, `{i, c: 1, sid: copy id, m}`; a stack is `{i, c}`.
+- `POST /market/unlist` and `POST /market/purchase` give a painted listing back (or to the buyer) as a copy with its
+  paint. The copy id is new; the paint is the same.
 - The owned list (account data slot 10, `db_owned_skins` in `db_common.c`, every driver): `{ind, cnt}` per skin with
   unpainted units (cnt = those units), then `{ind, cnt: 1, id, m}` per painted copy. For postgres the list replaces
   the SQL function's slot 10.
@@ -116,9 +163,15 @@ kept on the bridge side.
 
 ## Gaps (on purpose, or not yet)
 
-- Painted copies cannot be listed, offered in a trade, quick sold or crafted in this change: a copy id is not a stack, and
-  the paths that take a stack refuse it (the stack has no unpainted unit left). The official listing sends the copy id
-  as `skin_id`; KrunkNative does not map it to a copy (not tested).
+- A copy that is listed, sold, traded or given back gets a new copy id with the same paint. A loadout slot that named the
+  old copy id (`"<copyId>#<index>"`) no longer matches the copy; the slot falls back to the index.
+- The official craft check is per row (game.js 153201): a copy satisfies a one-unit material, a two-unit material needs
+  a stack row with two. KrunkNative counts every owned unit of a material (copies included) and takes the unpainted ones
+  first. The server side of the official craft is not in the bundle, so the choice of unit is ours.
+- The socket's trade rows (`sksell` / `skbuy` strings in economy.c) list stacks only; the copies are in `copies_s` and
+  `copies_r` for the v10 page. The native client's trade and quick-sell pickers do not show copies yet.
+- The listing rows show a painted copy's paint (`m`); the purchase reply's `m` is still the listing's own value, not the
+  paint.
 - A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge. The paint of a copy is the client's own
   one (its `$account.skins`, section 6), so the local model is painted. Another player's spawn is unpainted: the native
   SKINS packet has no paint field. That needs a `NET_PACKET_EXT` subtype and is not built.
@@ -131,15 +184,28 @@ kept on the bridge side.
   market rows (`sid`, `m`) comes from the bundle reading above. A capture needs a painted copy on a production account,
   which this change does not touch. The local playable check runs a guest round against KrunkNative's own server, so it
   does not capture the paint list (see the report).
-- Postgres and MySQL: not run. The migrations (0352 on both) and the SQL in `db_economy.c` / `db_common.c` / `economy.c`
+- Postgres and MySQL: not run. The migrations (0352 and 0353 on both) and the SQL in `db_economy.c` / `db_common.c` / `economy.c`
   were read against the dialect rules, not executed. A PostgreSQL server answers on 127.0.0.1:5432, but its
   `krunknative` role needs a password that the test run had no access to; no MySQL server listens on 3306. The
   postgres `kn_add_skin` guard was not executed. Its refusal says "Item not owned" where the C path says "Only painted
   copies of that item are left" (a message difference, not a count difference).
 - `services/brain/tests/paint_e2e_test.py` (`brain_paint_e2e`) runs on sqlite only.
+- The official server's answers to a listing, offer, quick sell or craft of a painted copy are not in the bundle, nor a
+  capture of them. Section 7 is the client's side only; the server's choice of unit for a painted craft material is ours.
 
 ## Tests
 
+- `services/brain/tests/v10_api_market_test.py` (`paint_trade_scenario`): a painted copy listed by its copy id (the
+  listing keeps the paint; the stack lists only its unpainted units, and a further stack listing is refused), the
+  listing's `m` on `/market/sales`, the buy (the buyer's copy with the paint), an unlist (the copy back with its paint), a
+  trade offer by copy ids (the sender's copy escrowed, the receiver's copy row on `/trades/inventory`, accept moves both
+  paints, the completed trade shows the copy unit with its paint), a cancel (the copy back), a quick sell of a copy (one
+  unit, KR, the copy gone) and a stack quick sell that sells only its unpainted units. Run against origin/main's brain,
+  the market checks fail (the copy id is ignored: the stack is listed and the paint is lost; the offer is refused as
+  "Only painted copies of that item are left"). A copy offered twice in one side is refused ("Invalid offer").
+- `services/brain/tests/craft_test.py`: recipe 1 with its Wood and Wires as painted copies (one unpainted Wood and one
+  Wood copy): crafted, the copies taken with their paint. Origin/main refuses the craft ("Only painted copies..." from
+  the stack's take).
 - `services/brain/tests/v10_api_market_test.py` (`paint_scenario`): the refusals (non-paint, unknown item, guest, another
   account's copy), an unpainted unit becoming a copy painted red, a second copy painted shader 0, a repaint of the first
   copy (its paint changes, the other copy keeps its own, the stack keeps its count), the last unpainted unit, no unpainted
