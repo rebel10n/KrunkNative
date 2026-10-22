@@ -218,6 +218,65 @@ def scenario(port, db):
     check("a second paint with none left is refused (400)",
           st == 400 and "paint" in str(err_of(reply).get("message", "")), "HTTP %d %s" % (st, json.dumps(reply)[:200]))
 
+SHADER_PAINT = 7795  # Spectrum (paintShader 0; v10_paint.c)
+BUYER = "paint_e2e_buyer"
+
+
+def scenario_shader(port, db):
+    """A shader paint (paintShader 0, no colour): the copy, its listing, the purchase and the buyer's copy keep m."""
+    st, reply = http(port, "POST", "/auth/register", {"username": "paint_e2e_shader", "password": PASSWORD})
+    token = reply.get("token") if isinstance(reply, dict) else None
+    check("shader: the seller registers", st == 200 and bool(token), "HTTP %d" % st)
+    if not token:
+        return
+    acc = query(db, "SELECT id FROM accounts WHERE username = ?", ("paint_e2e_shader",))
+    acc_id = acc[0][0] if acc else 0
+    seed(db, [
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_id, SKIN)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_id, SHADER_PAINT)),
+        ("UPDATE players SET player_score = 200000, player_funds = 1000 WHERE player_id = ?", (acc_id,)),  # level 13 (the market needs 10), a listing fee
+    ])
+    st, reply = http(port, "POST", "/items/%d/paint" % SKIN, {"item_id": SKIN, "paint_item_id": SHADER_PAINT}, token)
+    d = data_of(reply) or {}
+    copy_id = d.get("copy_id")
+    check("shader: POST /items/{id}/paint makes a copy with m = {paintShader: 0}",
+          st == 200 and isinstance(copy_id, int) and copy_id >= COPY_BASE and d.get("m") == {"paintShader": 0},
+          "HTTP %d %s" % (st, json.dumps(reply)[:200]))
+    if not isinstance(copy_id, int):
+        return
+    row = query(db, "SELECT paint_color, paint_shader FROM skin_copies WHERE copy_id = ?", (copy_id,))
+    check("shader: skin_copies keeps the shader (paint_shader 0, colour NULL)", row == [(None, 0)], repr(row))
+    st, owned = owned_list(port, token)
+    mine = [x for x in owned if x.get("id") == copy_id]
+    check("shader: the owned list (data[10]) carries m = {paintShader: 0}",
+          len(mine) == 1 and mine[0].get("m") == {"paintShader": 0}, json.dumps(owned)[:200])
+
+    # list the painted copy (skin_id = its copy id, the quick-sell convention) and buy it with another account
+    st, reply = http(port, "POST", "/market/list", {"item_id": SKIN, "skin_id": copy_id, "price": 10}, token)
+    check("shader: the painted copy lists on the market (HTTP 200)", st == 200, "HTTP %d %s" % (st, json.dumps(reply)[:200]))
+    st, sales = http(port, "GET", "/market/sales", None, token)
+    listing = [x for x in (data_of(sales) or []) if isinstance(x, dict) and x.get("skinindex") == SKIN and "m" in x]
+    check("shader: the listing keeps the copy's m = {paintShader: 0}",
+          st == 200 and len(listing) == 1 and listing[0].get("m") == {"paintShader": 0}, json.dumps(sales)[:300])
+    if not listing:
+        return
+    market_id = listing[0].get("marketid")
+    st, reg = http(port, "POST", "/auth/register", {"username": BUYER, "password": PASSWORD})
+    btoken = reg.get("token") if isinstance(reg, dict) else None
+    bacc = query(db, "SELECT id FROM accounts WHERE username = ?", (BUYER,))
+    if bacc:
+        seed(db, [("UPDATE players SET player_funds = 1000, player_score = 200000 WHERE player_id = ?", (bacc[0][0],))])
+    seed(db, [("UPDATE market_listings SET created_at = 0 WHERE id = ?", (market_id,))])  # a listing is bought once it is not fresh
+    st, reply = http(port, "POST", "/market/purchase", {"market_id": market_id}, btoken)
+    bought = data_of(reply) or {}
+    check("shader: the buyer receives the copy with m = {paintShader: 0}",
+          st == 200 and bought.get("m") == {"paintShader": 0} and bought.get("i") == SKIN, "HTTP %d %s" % (st, json.dumps(reply)[:300]))
+    if bacc:
+        rows = query(db, "SELECT copy_id, paint_shader FROM skin_copies WHERE account_id = ? AND skin_id = ?", (bacc[0][0], SKIN))
+        check("shader: the buyer's skin_copies row keeps paint_shader 0", len(rows) == 1 and rows[0][1] == 0, repr(rows))
+        check("shader: the purchase names the buyer's copy id as sid (not the store index)",
+              len(rows) == 1 and bought.get("sid") == rows[0][0] and bought.get("sid") >= COPY_BASE, "sid %r rows %r" % (bought.get("sid"), rows))
+
 
 def main():
     if not os.access(BRAIN, os.X_OK):
@@ -251,6 +310,7 @@ def main():
             return 1
         try:
             scenario(int(m.group(1)), db["path"])
+            scenario_shader(int(m.group(1)), db["path"])
         except Exception as e:  # noqa: BLE001 - a crashed probe is a failed run, not a crash of the test
             check("the probes complete", False, repr(e)[:200])
     finally:

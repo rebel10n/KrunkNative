@@ -475,8 +475,9 @@ static kn_db_result *run_market_buy(kn_dbconn *c, int n, const char *const *p) {
     snprintf(ref, sizeof ref, "buy:%s", nz(P(4)));
     db_add_funds_ex(&x, buyer, -price, "market-buy", P(4), seller, 0, &funds);
     db_add_funds_ex(&x, seller, price, "market-sale", P(4), buyer, 0, NULL);
+    int64_t copy = 0;
     if (painted) {
-        if (copy_give(&x, buyer, skin, &paint, "market", ref, NULL) < 0) return dbx_finish(&x, NULL);
+        if (copy_give(&x, buyer, skin, &paint, "market", ref, &copy) < 0) return dbx_finish(&x, NULL);
     } else {
         db_add_skin(&x, buyer, skin, 1, "market", ref, NULL);
     }
@@ -484,8 +485,12 @@ static kn_db_result *run_market_buy(kn_dbconn *c, int n, const char *const *p) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "f", (double) funds);
     cJSON_AddNumberToObject(o, "i", (double) skin);
-    cJSON_AddNumberToObject(o, "sid", (double) skin);
-    cJSON_AddNumberToObject(o, "m", (double) PI(4));
+    /* a painted copy's unit is its copy id with its paint (m: {paint} | {paintShader}, the owned list's form); a stack unit is the store index */
+    cJSON_AddNumberToObject(o, "sid", (double) (painted && copy > 0 ? copy : skin));
+    if (painted) {
+        cJSON *m = v10_paint_meta(paint.color, paint.shader);
+        cJSON_AddItemToObject(o, "m", m ? m : cJSON_CreateObject());
+    }
     cJSON_AddNumberToObject(o, "seller", (double) seller);
     cJSON_AddNumberToObject(o, "price", (double) price);
     return econ_done(&x, n, p, "buy", "kn_market_buy", o);
