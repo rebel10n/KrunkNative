@@ -1,6 +1,6 @@
 // client/src/ui/market_trade_list.c (the Create Trade window's inventory side, v10_market.c ct_side): a search
-// over a whole inventory (every store skin, 8069) is one pass, and the window draws only the rows the caller
-// asks for (a page). The old window drew every match, one image card each, on every keystroke.
+// over a whole inventory (every store skin, 8069) is one pass; the window keeps every match and draws the rows
+// near its scroll position (v10_market.c ct_inv_card), and the limit only caps what the helper writes to `out`.
 //   cmake-build-debug/market_trade_list_test
 #include <market_trade_list.h>
 #include <viewer_store.h> // ViewerSkin (the store table entry)

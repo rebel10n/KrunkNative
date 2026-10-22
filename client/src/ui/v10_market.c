@@ -49,7 +49,8 @@
 #include <app_mode.h>
 #include <cJSON.h>
 #include <market_stats.h> // the Stats reply keeps its rows on an error (market_stats_test)
-#include <market_trade_list.h> // the Create Trade inventory rows: one pass, capped (market_trade_list_test)
+#include <market_trade_list.h> // the Create Trade inventory rows: one pass, sorted (market_trade_list_test)
+#include <ui_vgrid.h> // the Create Trade inventory lists: virtual (v10_market_tick)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -67,7 +68,6 @@
 #define UNUSED (void) ev; (void) args; (void) argc
 #define PAGE 60          // the inventory / catalog grids' page (v10: 60, then 60 more per scroll)
 #define LISTING_PAGE 60  // Browse: item groups per page (v10 pages the API by cursor)
-#define CT_PAGE 60       // Create Trade: an inventory side's rows drawn per page (Load More adds one)
 #define NOTE_MS 5000     // market notifications (v10: 5 s)
 #define TNOTE_MS 4000    // trading / black market notifications (v10: 4 s)
 #define SALE_MAX_KR 10000000
@@ -157,7 +157,9 @@ static struct {
     int start_searching;
     // the Create Trade window
     int ct_open, ct_loading, ct_target_id, ct_missing, ct_submitting;
-    int ct_shown[2];       // rows drawn per inventory side (0 = CT_PAGE)
+    TradeListRow *ct_rows[2]; // every row of a side that matches its search, sorted (ct_rows_select)
+    int ct_nrows[2];
+    VGrid ct_grid[2];         // a side's virtual list: only the rows near its scroll position are drawn
     char ct_target[40], ct_err[160], ct_msg[504], ct_search[2][48];
     cJSON *ct_inv;         // [mine, theirs] rows {i, c, nt}
     EconTradeItem ct_sel[2][40];
@@ -1905,24 +1907,63 @@ static void ct_item(StrBuf *sb, const int side, const int index, const int count
     sb_append(sb, "</div>");
 }
 
-static void ct_side(StrBuf *sb, const int side) {
+// Create Trade inventory sides. v10.0.3's trade side lists every row that matches its search in a
+// scrollable box (trade-inv-scroll, no paging, no Load More). Here every matching row is kept
+// (ct_rows_select, sorted as v10 sorts them) and the box is a virtual list (ui_vgrid.h): only the
+// rows near its scroll position are written, so a search over a whole inventory costs the same as a
+// small one, and the v10_market_tick() that follows the scroll keeps the rest of the list in place.
+static const int CT_SIDE_ID[2] = {0, 1}; // the card callback's user data: its side
+
+static void ct_rows_free(void) {
+    for (int side = 0; side < 2; side++) {
+        free(M.ct_rows[side]);
+        M.ct_rows[side] = NULL;
+        M.ct_nrows[side] = 0;
+    }
+}
+
+static void ct_rows_select(const int side) {
     const cJSON *inv = cJSON_GetArrayItem(M.ct_inv, side), *other = cJSON_GetArrayItem(M.ct_inv, !side);
+    free(M.ct_rows[side]);
+    M.ct_rows[side] = NULL;
+    M.ct_nrows[side] = 0;
+    const int cap = cJSON_GetArraySize(inv); // every kept row is one of the side's rows
+    if (cap <= 0) return;
+    TradeListRow *rows = calloc((size_t) cap, sizeof(*rows));
+    if (!rows) return;
+    int total = 0;
+    market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, cap, rows, &total);
+    M.ct_rows[side] = rows;
+    M.ct_nrows[side] = total;
+}
+
+static void ct_inv_card(StrBuf *sb, const int pos, void *user) {
+    const int side = *(const int *) user;
+    if (side < 0 || side > 1 || pos < 0 || pos >= M.ct_nrows[side] || !M.ct_rows[side]) return;
+    const TradeListRow *r = &M.ct_rows[side][pos];
+    ct_item(sb, side, r->skin, r->count, 0, r->locked);
+}
+
+// Per frame (menu_ui.c): the open Create Trade lists follow their scroll positions (ui_vgrid.h).
+void v10_market_tick(void) {
+    if (!M.ct_open) return;
+    vgrid_tick(&M.ct_grid[0]);
+    vgrid_tick(&M.ct_grid[1]);
+}
+
+static void ct_side(StrBuf *sb, const int side) {
     sb_append(sb, "<div class=\"trade-side svelte-1lqen9w\"><div class=\"trade-label inv svelte-1lqen9w\">");
     if (side == 0) sb_append(sb, "Your Inventory");
     else {
         sb_append_esc(sb, M.ct_target);
         sb_append(sb, "'s Inventory");
     }
-    sb_append(sb, "</div> <div class=\"trade-inv-scroll svelte-1lqen9w\">");
-    // the rows that match (one pass, sorted), and the first page of them: a search over a whole
-    // inventory draws a page, not every match (each card is an image: thousands froze the window)
-    const int shown = M.ct_shown[side] > 0 ? M.ct_shown[side] : CT_PAGE;
-    TradeListRow *rows = calloc((size_t) shown, sizeof(*rows));
-    int total = 0;
-    const int drawn = rows ? market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, shown, rows, &total) : 0;
-    for (int j = 0; j < drawn; j++) ct_item(sb, side, rows[j].skin, rows[j].count, 0, rows[j].locked);
-    free(rows);
-    if (total > drawn) sb_appendf(sb, "<div class=\"load-more-sentinel svelte-zhgogl\"><button class=\"load-more-btn svelte-zhgogl\" onclick=\"v10mk.ctmore(%d)\">Load More</button></div>", side);
+    char list_id[24];
+    snprintf(list_id, sizeof(list_id), "v10mkCtInv%d", side);
+    sb_appendf(sb, "</div> <div class=\"trade-inv-scroll svelte-1lqen9w\" id=\"%s\">", list_id);
+    ct_rows_select(side);
+    vgrid_begin(&M.ct_grid[side], list_id, M.ct_nrows[side], ct_inv_card, (void *) &CT_SIDE_ID[side]);
+    vgrid_html(&M.ct_grid[side], sb);
     sb_appendf(sb, "</div> <input class=\"trade-search svelte-1lqen9w\" type=\"text\" placeholder=\"Search Item\" id=\"v10mkCtSearch%d\" value=\"", side);
     sb_append_esc(sb, M.ct_search[side]);
     sb_appendf(sb, "\" oninput=\"v10mk.csearch(%d,this.value)\"> <div class=\"trade-label offer svelte-1lqen9w\">Trade List %d/%d</div> <div class=\"trade-offer-scroll svelte-1lqen9w\">",
@@ -2642,6 +2683,7 @@ void v10_market_open(int tab, const int item) {
     M.ttab = 0;
     M.gtab = 0;
     M.ct_open = 0;
+    ct_rows_free();
     M.tnote[0] = M.bm_note[0] = 0;
     M.last_search[0] = 0;
     // the replies that came while the exchange was closed were dropped: their flags are stale, so the tab asks again
@@ -2740,7 +2782,7 @@ static void open_create_trade(const int id, const char *name) {
     M.ct_err[0] = M.ct_msg[0] = M.ct_search[0][0] = M.ct_search[1][0] = 0;
     M.ct_n[0] = M.ct_n[1] = 0;
     M.ct_missing = M.ct_submitting = 0;
-    M.ct_shown[0] = M.ct_shown[1] = 0;
+    ct_rows_free();
     cJSON_Delete(M.ct_inv);
     M.ct_inv = NULL;
     M.pending = ACT_TRADE_INV;
@@ -3165,7 +3207,6 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     } else if (!strcmp(h, "csearch")) {
         const int side = a0 ? 1 : 0;
         snprintf(M.ct_search[side], sizeof(M.ct_search[side]), "%s", arg_s(ev, args, argc, 1));
-        M.ct_shown[side] = 0; // a new search starts at the first page
         render_modal();
         char id[32];
         snprintf(id, sizeof(id), "v10mkCtSearch%d", side);
@@ -3175,12 +3216,8 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
             const int len = (int) strlen(M.ct_search[side]);
             html_dom_text_set_selection(in, len, len);
         }
-    } else if (!strcmp(h, "ctmore")) { // Load More under an inventory side: the next page of its rows
-        M.ct_shown[a0 ? 1 : 0] = (M.ct_shown[a0 ? 1 : 0] > 0 ? M.ct_shown[a0 ? 1 : 0] : CT_PAGE) + CT_PAGE;
-        render_modal();
     } else if (!strcmp(h, "cmiss")) {
         M.ct_missing = !M.ct_missing;
-        M.ct_shown[0] = M.ct_shown[1] = 0;
         render_modal();
     } else if (!strcmp(h, "cmsg")) {
         snprintf(M.ct_msg, sizeof(M.ct_msg), "%s", arg_s(ev, args, argc, 0));

@@ -72,6 +72,27 @@ Limits, stated plainly:
   official capture (`skin-chooser-no-paint.png`), and the badge's own rule by the unit test
   (`client/tests/skin_paint_test.c`).
 
+## Long lists: Load More
+
+Offsets are character offsets in the decoded `~/.cache/kn-v103/deob-10.0.3.js` (the bundle's `game.js`, read only).
+
+- **Create Trade inventory side: no Load More in v10.0.3.** The side's template (`trade-side`,
+  `trade-inv-scroll`, a 225 px scroll box) is at 4508584. Its component draws every row of
+  `filteredInventory` (an `each` over the whole list, no slice) at 4513351; the page passes the full list
+  at 4536748 and 4537666. The Load More markup in the bundle is in other components: md-load-more 4281035,
+  listings 5726534, the market browse grid 5759984 / 5760077, history 5819015, stats 5821424.
+- **Items page: infinite scroll, no button.** Its `IntersectionObserver` loads the next 60 at 5912678.
+- **Skin chooser (Select Skin): every owned card, one list.** `skinList` writes all cards at once
+  (selectSkin cards from 10873363), with no paging and no Load More. The Load More buttons in the legacy
+  windows are windows[3] mods (10703470), windows[9] maps (10840843) and the spin history (11139770),
+  none of them a skin or trade list.
+
+KN (`client/src/ui/v10_market.c` ct_side, ct_inv_card, v10_market_tick): the Create Trade sides keep every
+matching row (`market_trade_list_select` with the side's whole inventory as its limit) and draw the rows
+near their scroll position through a VGrid (`client/include/ui_vgrid.h`), like the skin chooser. The
+"Load More" button and its `ctmore` handler are gone. The market browse grid keeps its Load More (v10.0.3's
+`market-grid` component has one, 5759984).
+
 ## uidiff
 
 No 10.0.3 captures exist (`doc/ref/krunker-v10.0.3/` is absent), so the reference is the 10.0.2 set

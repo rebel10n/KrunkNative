@@ -2072,6 +2072,7 @@ void client_menu_tick(Client *client) {
         v10_news_tick();    // the v10 menu's What's New item (v10_news.c)
         v10_wild_offer_tick(client); // the account's Wild Offer: fetched after sign-in, notified once (v10_wild_offer.c)
         ui_loadout_tick();  // item pickers: only the cards near the scroll position exist (ui_vgrid.h)
+        v10_market_tick();  // Create Trade's inventory lists: the same (v10_market.c)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
         float w, h, dpr;

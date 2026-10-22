@@ -1,6 +1,7 @@
-// The Create Trade window's inventory rows (market_trade_list.h): filtered in one pass, sorted as v10 sorts
-// them, and capped by the caller. The window draws only the first page of them, so a search over a big
-// inventory costs the same as one over a small one (the markup and the image cards are what is expensive).
+// The Create Trade window's inventory rows (market_trade_list.h): filtered in one pass and sorted as v10 sorts
+// them. The window keeps every match and draws the rows near its scroll position (a virtual list, ui_vgrid.h),
+// so a search over a big inventory costs one pass plus a screenful of image cards (the markup and the images
+// are what is expensive). The caller's limit caps the rows written to `out`.
 #include <market_trade_list.h>
 #include "../viewer/viewer_store.h" // ViewerSkin
 

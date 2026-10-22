@@ -146,6 +146,7 @@ void v10_market_wallet_item(int index);       // the Wallet's item page (the Cat
 void v10_market_wallet_release(void);         // the Wallet closed: its market views go with it
 int  v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void v10_market_menu_setup(void);           // the v10 page's #menuBtnMarket item + the social listener
+void v10_market_tick(void);                 // per frame: the open Create Trade lists follow their scroll (v10_market.c)
 void v10_market_scenario(const cJSON *state); // --render-scenario: state.market
 int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers this reply (account_ui.c skips it)
 void clan_ui_reset(void);                   // account changed: drop clanData
