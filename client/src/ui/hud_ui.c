@@ -65,6 +65,7 @@ void hud_ui_hit(Client*, int kill);
 #include <net_ext.h>     // NET_RIGHTS_*
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
 #include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
+#include <audio.h>       // switchChat's playSelect(0.1)
 #include <i18n.h>        // hud_ui_add_official_name_line: the official line's template
 #include <console.h>     // ui_console_on_server_line: the official line in the developer console
 #include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
@@ -2511,6 +2512,7 @@ void hud_ui_add_chat_channel(const char *name, const char *msg, const char *colo
 // (switchChat(chatSwitch) without its chat line). The comp lobby's team channel: hud_reset_page.
 static void hud_chat_channel_check(const Client *client) {
     if (g_chat_channel != CHAT_CHANNEL_TEAM || hud_chat_teams(client)) return;
+    audio_play("select_0", 0.1f, 0, 1.0f); // v10's switchChat call here plays playSelect(0.1) too
     g_chat_channel = CHAT_CHANNEL_GLOBAL;
     const HtmlElem sw = html_dom_by_id("chatSwitch");
     if (sw) html_dom_set_attr(sw, "data-tab", "public");
@@ -2523,9 +2525,11 @@ static void hud_chat_channel_check(const Client *client) {
     }
 }
 
-// window.switchChat(#chatSwitch): toggles the text & voice channel (team modes only; forced
-// to global elsewhere), shows the rows of that channel and says so in the chat.
+// window.switchChat(#chatSwitch) (v10.0.3 deob-10.0.3.js:259568, doc/v10/chat-globe.md): toggles the
+// text & voice channel (team modes only; forced to global elsewhere), shows the rows of that channel
+// and says so in the chat. A click always plays select_0 at 0.1 (playSelect(0.1)), even when it changes nothing.
 static void hud_switch_chat(void) {
+    audio_play("select_0", 0.1f, 0, 1.0f);
     const Client *client = menu_ui()->client;
     const HtmlElem sw = html_dom_by_id("chatSwitch");
     if (!sw) return;
