@@ -1033,6 +1033,14 @@ void account_ui_set_junk(const char *text) {
     rerender_windows();
 }
 
+// junk_shop_ui.c: an Eterno KR purchase's reply balance (kr), as the account's own refresh would set it
+void account_ui_set_funds(const double kr) {
+    if (!g_logged_in) return;
+    g_acc.funds = kr;
+    mark_header();
+    rerender_windows();
+}
+
 // WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
 // creatorBadge (~~creator_badge, v10:112770) comes with it
 static void set_badges(const cJSON *info) {

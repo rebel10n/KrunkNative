@@ -14,5 +14,7 @@ void junk_shop_buy(int product_id);
 // the store home's bundle grid (store_ui.c v10_store_home): the brain's GET /api/shop/bundles rows as v10's bundle
 // cards (svelte-lri212, deob-10.0.3.js 144642); nothing is drawn while they load or when none are published
 void junk_shop_bundles_render(StrBuf *sb);
+// knKioShopBundleBuy(id) on Box Office: the bundle's purchase (POST /api/shop/bundles/purchase); v10's loginOrRegister for a guest
+void junk_shop_bundle_buy(int bundle_id);
 
 #endif

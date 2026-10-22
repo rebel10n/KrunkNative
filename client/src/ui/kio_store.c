@@ -755,6 +755,10 @@ int kio_store_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         html_ui_stop_propagation();
         if (kio_store_active()) kio_store_read_only("shop/purchase");
         else junk_shop_buy((int) arg_num(ev, args, argc, 1)); // Box Office: the brain's Junk-priced product (knKioShopBuy(display, product))
+    } else if (!strcmp(h, "BundleBuy")) { // the store home's bundle card (junk_shop_ui.c): a Box Office bundle purchase
+        html_ui_stop_propagation();
+        if (kio_store_active()) kio_store_read_only("shop/bundles/purchase");
+        else junk_shop_bundle_buy((int) arg_num(ev, args, argc, 0));
     } else if (!strcmp(h, "Gift")) { // _39563: shop/purchase {gift_to} or giftProduct: never sent
         html_ui_stop_propagation();
         kio_store_read_only("shop/purchase (gift)");

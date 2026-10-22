@@ -122,6 +122,7 @@ void menu_close_window(void);                    // closeWindow
 void menu_rerender_if_open(int id);              // rerenderIfOpen
 // a Junk-priced purchase's new balance ("12.34", the brain's reply): set as the "uj" push sets it (account_ui.c)
 void account_ui_set_junk(const char *text);
+void account_ui_set_funds(double kr); // an Eterno KR purchase's reply balance (junk_shop_ui.c)
 int  menu_window_is_open(void);                  // #windowHolder display == block
 int  menu_error_screen_shown(void);              // the Lost Connection screen (#instructionsUpdate) is up
 void menu_scale_base(void);                      // scaleBase

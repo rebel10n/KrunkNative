@@ -40,7 +40,8 @@ static int db_ready(void) { return S.b && S.b->db && S.enabled; }
 typedef struct Pending {
     kn_http_req *req;
     int purchase;            /* 0 display, 1 purchase */
-    int bundles;             /* 1: P_SHOP_BUNDLES (no account, no tag) */
+    int bundles;             /* 1: P_SHOP_BUNDLES (the account's owned flags; no tag) */
+    int bundle_buy;          /* 1: P_SHOP_BUNDLE_BUY (product = the bundle id); purchase is 1 too */
     int64_t account;
     int64_t product;
     int64_t quantity;
@@ -70,7 +71,11 @@ static void run_db(Pending *q) {
     char acc[24], prod[24], qty[24];
     snprintf(acc, sizeof acc, "%lld", (long long) q->account);
     if (q->bundles) {
-        kn_db_call(S.b->db, &P_SHOP_BUNDLES, KN_DB_ARGS("1"), on_db, q);
+        kn_db_call(S.b->db, &P_SHOP_BUNDLES, KN_DB_ARGS(acc), on_db, q);
+    } else if (q->bundle_buy) {
+        char bundle[24];
+        snprintf(bundle, sizeof bundle, "%lld", (long long) q->product);
+        kn_db_call(S.b->db, &P_SHOP_BUNDLE_BUY, KN_DB_ARGS(acc, bundle), on_db, q);
     } else if (q->purchase) {
         snprintf(prod, sizeof prod, "%lld", (long long) q->product);
         snprintf(qty, sizeof qty, "%lld", (long long) q->quantity);
@@ -179,7 +184,46 @@ static void h_bundles(kn_http_req *req, void *ud) {
     }
     q->req = req;
     q->bundles = 1;
-    run_db(q);
+    char token[512];
+    if (!token_of(req, token, sizeof token)) {
+        run_db(q);
+        return;
+    }
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "token", token);
+    accounts_internal_call(S.b, "token", args, on_account, q);
+    cJSON_Delete(args);
+}
+
+/* POST /api/shop/bundles/purchase {bundle_id}: a bundle is USD (see P_SHOP_BUNDLE_BUY); a token is required */
+static void h_bundle_purchase(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!db_ready()) {
+        reply_error(req, 503, "ShopUnavailable");
+        return;
+    }
+    Pending *q = calloc(1, sizeof *q);
+    if (!q) {
+        reply_error(req, 500, "internal");
+        return;
+    }
+    q->req = req;
+    q->purchase = 1;
+    q->bundle_buy = 1;
+    cJSON *body = kn_http_body_json(req);
+    const cJSON *bid = cJSON_GetObjectItemCaseSensitive(body, "bundle_id");
+    q->product = cJSON_IsNumber(bid) ? (int64_t) bid->valuedouble : 0;
+    cJSON_Delete(body);
+    char token[512];
+    if (!token_of(req, token, sizeof token)) {
+        reply_error(req, 401, "LoginRequired");
+        free(q);
+        return;
+    }
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "token", token);
+    accounts_internal_call(S.b, "token", args, on_account, q);
+    cJSON_Delete(args);
 }
 
 int shop_init(Brain *b) {
@@ -188,6 +232,7 @@ int shop_init(Brain *b) {
     kn_http_route(b->http, "GET", "/api/shop/displays", h_display, b);
     kn_http_route(b->http, "POST", "/api/shop/purchase", h_purchase, b);
     kn_http_route(b->http, "GET", "/api/shop/bundles", h_bundles, b);
+    kn_http_route(b->http, "POST", "/api/shop/bundles/purchase", h_bundle_purchase, b);
     /* the v10 root paths (v10.js 26520-26535) */
     kn_http_route(b->http, "GET", "/shop/displays/:tag", h_display, b);
     kn_http_route(b->http, "GET", "/shop/displays", h_display, b);

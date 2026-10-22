@@ -27,6 +27,8 @@ static void purchase_done(void *user, const int status, const cJSON *json) {
     if (status == 200 && cJSON_IsObject(data)) {
         const cJSON *junk = cJSON_GetObjectItem(data, "junk");
         if (cJSON_IsString(junk)) account_ui_set_junk(junk->valuestring);
+        const cJSON *kr = cJSON_GetObjectItem(data, "kr");
+        if (cJSON_IsNumber(kr)) account_ui_set_funds(kr->valuedouble);
         printf("[junkshop] bought product %d: junk %s\n", product, cJSON_IsString(junk) ? junk->valuestring : "?");
         fflush(stdout);
     } else {
@@ -92,7 +94,9 @@ void junk_shop_bundles_render(StrBuf *sb) {
         const double disc = bundle_num(b, "DISCOUNT_PCT");
         const double orig = bundle_num(b, "ORIGINAL_PRICE");
         const int discounted = disc > 0;
-        sb_appendf(sb, "<div class=\"bundle-card svelte-lri212\" style=\"background-image: url(%s); background-repeat: no-repeat; background-size: cover;\">", art);
+        const int owned = cJSON_IsTrue(cJSON_GetObjectItem(b, "OWNED")); // v10: an owned bundle draws grayscale
+        sb_appendf(sb, "<div class=\"bundle-card svelte-lri212\" style=\"background-image: url(%s); background-repeat: no-repeat; background-size: cover;%s\">",
+                   art, owned ? " filter: grayscale(1);" : "");
         if (discounted) sb_appendf(sb, "<div class=\"bundle-discount-label svelte-lri212\">-%d%%</div>", (int) (disc + 0.5));
         sb_append(sb, "<div class=\"bundle-icon svelte-lri212\" role=\"button\" tabindex=\"0\"><div class=\"bundle-item-name svelte-lri212\">");
         esc_into(sb, bundle_text(b, "NAME"));
@@ -118,10 +122,43 @@ void junk_shop_bundles_render(StrBuf *sb) {
         if (total > shown) sb_appendf(sb, "<div class=\"bundle-item-more svelte-lri212\">+%d</div>", total - shown);
         sb_append(sb, "</div>");
         if (discounted && orig > 0) sb_appendf(sb, "<div class=\"bundle-original-price svelte-lri212\">$%.2f</div>", orig);
-        // BUY is v10's button; Box Office sells no bundle yet, so the button draws and sends nothing
-        sb_appendf(sb, "<div class=\"bundle-buy-btn%s svelte-lri212\" role=\"button\" tabindex=\"0\"><div class=\"bundle-buy-btn-text svelte-lri212\">BUY $%.2f</div></div></div>",
-                   discounted ? " bundle-buy-btn-discount" : "", price);
+        // BUY posts the bundle to the brain (junk_shop_bundle_buy); an owned bundle reads "Already Purchased" (v10's text)
+        if (owned)
+            sb_append(sb, "<div class=\"bundle-buy-btn svelte-lri212\"><div class=\"bundle-buy-btn-text svelte-lri212\">Already Purchased</div></div></div>");
+        else
+            sb_appendf(sb, "<div class=\"bundle-buy-btn%s svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"knKioShopBundleBuy(%d)\"><div class=\"bundle-buy-btn-text svelte-lri212\">BUY $%.2f</div></div></div>",
+                       discounted ? " bundle-buy-btn-discount" : "", (int) id->valuedouble, price);
     }
+}
+
+// a bundle's BUY (knKioShopBundleBuy(id)): the brain's refusal (a bundle is USD, Box Office takes no payment) is shown
+// as the purchase's refusal; an accepted one reloads the grid
+static void bundle_purchase_done(void *user, const int status, const cJSON *json) {
+    const int bundle = (int) (intptr_t) user;
+    v10_expire("/api/shop/bundles");
+    if (status == 200) {
+        printf("[junkshop] bought bundle %d\n", bundle);
+        fflush(stdout);
+    } else {
+        printf("[junkshop] purchase of bundle %d refused (status %d)\n", bundle, status);
+        fflush(stdout);
+        const cJSON *message = json ? cJSON_GetObjectItem(json, "message") : NULL;
+        const char *text = cJSON_IsString(message) && message->valuestring[0] ? message->valuestring : "Purchase failed";
+        v10_view_push(v10_io_error(I18N("kn.junkshop.failedTitle", "Purchase failed"), text), NULL, NULL, NULL);
+    }
+    menu_rerender_if_open(STORE_WINDOW);
+}
+
+void junk_shop_bundle_buy(const int bundle_id) {
+    if (!active_account()) {
+        v10_menu_handle("loginOrRegister", NULL, NULL, 0);
+        return;
+    }
+    char t[256], path[320], body[64];
+    v10_url_token(t, sizeof t);
+    snprintf(path, sizeof path, "/api/shop/bundles/purchase?token=%s", t);
+    snprintf(body, sizeof body, "{\"bundle_id\":%d}", bundle_id);
+    v10_send("POST", path, body, bundle_purchase_done, (void *) (intptr_t) bundle_id);
 }
 
 void junk_shop_buy(const int product_id) {

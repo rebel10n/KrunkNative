@@ -17,8 +17,11 @@
  * The "limited" display also carries the official products of krunker.io's display (0354_store_catalog,
  * shop_official_products), verbatim, first; their ids are krunker.io's and Box Office's Junk products' display
  * ids are shop_products.id + SHOP_JUNK_BASE, so the two never share a key. A purchase below the offset is an
- * official product and is refused "Not sold on Box Office" (Box Office sells no money or KR product yet).
- * P_SHOP_BUNDLES () -> the store's bundle rows (store_bundles, 0354), as v10's ALL_BUNDLE_DATA keys (GET /api/shop/bundles).
+ * official product: official_purchase sells its KR prices (the KR ledger, db_add_funds), grants its skins and Junk,
+ * and refuses USD products and badges ("Payment is not available on Box Office", "Not sold on Box Office").
+ * P_SHOP_BUNDLES (account) -> the store's bundle rows (store_bundles, 0354/0355), as v10's ALL_BUNDLE_DATA keys with
+ * DATE and the account's OWNED, in v10's order (GET /api/shop/bundles). P_SHOP_BUNDLE_BUY (account, bundle): every
+ * bundle is USD, so a bundle that is not owned is refused "Payment is not available on Box Office".
  */
 #include "db_procs.h"
 
@@ -295,6 +298,121 @@ const kn_proc P_SHOP_DISPLAY = {"shop_display", NULL, run_display};
 
 /* ------------------------------------------------------------------ purchase */
 
+/* A Box Office purchase of an official "limited" product (0354_store_catalog, verbatim from krunker.io's display).
+ * Only KR products are sold: a virtual price in currency 1 (KR). Its price is debited through db_add_funds (the KR
+ * ledger, kr_transactions, reason "shop"); its skins are granted through db_add_skin and its Junk (currency 2,
+ * hundredths) through junk_credit; the row goes to shop_official_purchases. A product that is money (USD) or grants
+ * a badge is refused before anything moves: Box Office has no payment and no badge grant. The limits (per_user or
+ * global) count the purchase rows. Returns the reply JSON, or NULL with the refusal recorded. */
+static cJSON *official_purchase(Dbx *x, const int64_t account, const int64_t product, const int64_t quantity) {
+    cJSON *row = dbx_row(x, SQL(.any = "SELECT price_type, price_amount AS amount__i, price_currency_id AS cur__i,"
+                                       " purchase_limit AS limit__i, purchase_limit_scope, active AS active__i"
+                                       " FROM shop_official_products WHERE id = $1"),
+                         KN_DB_ARGS(I64S(product)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(row);
+        return NULL;
+    }
+    if (!row || jint(row, "active") != 1) {
+        cJSON_Delete(row);
+        dbx_refuse(x, "Product not found");
+        return NULL;
+    }
+    const char *ptype = jtext(row, "price_type");
+    if (strcmp(ptype, "virtual") != 0 || jint(row, "cur") != 1) {
+        cJSON_Delete(row);
+        dbx_refuse(x, "Payment is not available on Box Office");
+        return NULL;
+    }
+    const int64_t price = jint(row, "amount"), limit = jint(row, "limit");
+    const int per_user = strcmp(jtext(row, "purchase_limit_scope"), "global") != 0;
+    cJSON_Delete(row);
+
+    cJSON *contents = dbx_rows(x, SQL(.any = "SELECT content_type, ref, quantity AS quantity__i FROM shop_official_contents"
+                                             " WHERE product_id = $1 ORDER BY ord"),
+                               KN_DB_ARGS(I64S(product)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(contents);
+        return NULL;
+    }
+    for (int i = 0; contents && i < cJSON_GetArraySize(contents); i++) {
+        const cJSON *c0 = cJSON_GetArrayItem(contents, i);
+        const char *type = jtext(c0, "content_type"), *ref = jtext(c0, "ref");
+        const int junk = !strcmp(type, "currency") && !strcmp(ref, "2");
+        if (strcmp(type, "skin") != 0 && !junk) {
+            cJSON_Delete(contents);
+            dbx_refuse(x, "Not sold on Box Office");
+            return NULL;
+        }
+    }
+
+    if (limit > 0) {
+        const int64_t bought = per_user
+            ? dbx_int(x, SQL(.any = "SELECT COALESCE(SUM(quantity), 0) FROM shop_official_purchases WHERE account_id = $1 AND product_id = $2"),
+                      KN_DB_ARGS(I64S(account), I64S(product)), 0)
+            : dbx_int(x, SQL(.any = "SELECT COALESCE(SUM(quantity), 0) FROM shop_official_purchases WHERE product_id = $1"),
+                      KN_DB_ARGS(I64S(product)), 0);
+        if (dbx_failed(x)) {
+            cJSON_Delete(contents);
+            return NULL;
+        }
+        if (bought + quantity > limit) {
+            cJSON_Delete(contents);
+            dbx_refuse(x, "Purchase limit reached");
+            return NULL;
+        }
+    }
+
+    const int64_t cost = price * quantity;
+    char ref[48];
+    snprintf(ref, sizeof ref, "shop:%lld", (long long) product);
+    int64_t funds = 0;
+    if (db_add_funds(x, account, -cost, "shop", ref, &funds) < 0) { // refused "Not enough KR" (recorded) or no account
+        cJSON_Delete(contents);
+        return NULL;
+    }
+
+    cJSON *rewards = cJSON_CreateArray();
+    for (int i = 0; contents && i < cJSON_GetArraySize(contents) && !dbx_failed(x); i++) {
+        const cJSON *c0 = cJSON_GetArrayItem(contents, i);
+        const char *type = jtext(c0, "content_type"), *ref_text = jtext(c0, "ref");
+        const int64_t amount = jint(c0, "quantity") * quantity;
+        cJSON *rw = cJSON_CreateObject();
+        if (!strcmp(type, "skin")) {
+            const int64_t skin = strtoll(ref_text, NULL, 10);
+            if (db_add_skin(x, account, skin, amount, "shop", ref, NULL) < 0) break;
+            cJSON_AddStringToObject(rw, "type", "skin");
+            cJSON_AddNumberToObject(rw, "skin_id", (double) skin);
+            cJSON_AddNumberToObject(rw, "amount", (double) amount);
+        } else {
+            int64_t balance = 0;
+            if (junk_credit(x, account, amount * 100, "shop", &balance) < 0) break;
+            cJSON_AddStringToObject(rw, "type", "currency");
+            cJSON_AddNumberToObject(rw, "currency_id", 2);
+            cJSON_AddNumberToObject(rw, "amount", (double) (amount * 100));
+        }
+        cJSON_AddItemToArray(rewards, rw);
+    }
+    cJSON_Delete(contents);
+    if (dbx_failed(x)) {
+        cJSON_Delete(rewards);
+        return NULL;
+    }
+    if (dbx_exec(x, SQL(.any = "INSERT INTO shop_official_purchases (account_id, product_id, quantity, price_paid) VALUES ($1, $2, $3, $4)"),
+                 KN_DB_ARGS(I64S(account), I64S(product), I64S(quantity), I64S(cost))) < 0) {
+        cJSON_Delete(rewards);
+        return NULL;
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddTrueToObject(o, "success");
+    cJSON_AddStringToObject(o, "message", "Purchase successful");
+    cJSON_AddItemToObject(o, "rewards", rewards);
+    cJSON_AddNumberToObject(o, "currency_id", 1);
+    cJSON_AddNumberToObject(o, "price_paid", (double) cost);
+    cJSON_AddNumberToObject(o, "kr", (double) funds);
+    return o;
+}
+
 static kn_db_result *run_purchase(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t account = PI(0), quantity = PI(2);
@@ -304,12 +422,10 @@ static kn_db_result *run_purchase(kn_dbconn *c, int n, const char *const *p) {
         return dbx_finish(&x, NULL);
     }
     if (product < SHOP_JUNK_BASE) {
-        // below the offset: krunker.io's official products (0354_store_catalog), which Box Office does not sell yet
-        const int64_t official = dbx_int(&x, SQL(.any = "SELECT COUNT(*) FROM shop_official_products WHERE id = $1"),
-                                         KN_DB_ARGS(I64S(product)), 0);
-        if (dbx_failed(&x)) return dbx_finish(&x, NULL);
-        dbx_refuse(&x, official > 0 ? "Not sold on Box Office" : "Product not found");
-        return dbx_finish(&x, NULL);
+        // below the offset: krunker.io's official product (0354_store_catalog), bought with KR (official_purchase)
+        cJSON *o = official_purchase(&x, account, product, quantity);
+        if (!o) return dbx_finish(&x, NULL);
+        return dbx_json(&x, "shop_purchase", o);
     }
     product -= SHOP_JUNK_BASE;
     // the product row lock: two purchases of the last unit queue here
@@ -388,19 +504,47 @@ const kn_proc P_SHOP_PURCHASE = {"shop_purchase", NULL, run_purchase};
 /* P_SHOP_BUNDLES () -> the rows v10 receives as ALL_BUNDLE_DATA (deob-10.0.3.js 111331 "abd", handler 242852),
  * as an array of its keys: ID, NAME, PRICE, ORIGINAL_PRICE, DISCOUNT_PCT, SKINS, EXPIRY, INFO, FUNDS, JUNK,
  * PREMIUM, EVENT_NAME, EVENT_ENDS_AT. The table (0354_store_catalog) is staff-published; none ships. */
+/* v10's bundle order (deob-10.0.3.js 144815-144830): its three stable sorts give owned bundles last, then the price
+ * low first, then DATE newest first. The level rule (no price sort above level 10) is not kept: Box Office has
+ * no account level in this path. */
+static int bundle_order(const void *pa, const void *pb) {
+    const cJSON *a = *(cJSON *const *) pa, *b = *(cJSON *const *) pb;
+    const int oa = cJSON_IsTrue(cJSON_GetObjectItem(a, "OWNED")), ob = cJSON_IsTrue(cJSON_GetObjectItem(b, "OWNED"));
+    if (oa != ob) return oa - ob;
+    const double qa = jnum(a, "PRICE"), qb = jnum(b, "PRICE");
+    if (qa != qb) return qa < qb ? -1 : 1;
+    const int d = strcmp(jtext(b, "DATE"), jtext(a, "DATE"));
+    if (d) return d;
+    return jint(a, "ID") < jint(b, "ID") ? -1 : jint(a, "ID") > jint(b, "ID");
+}
+
 static kn_db_result *run_bundles(kn_dbconn *c, int n, const char *const *p) {
-    (void) n;
-    (void) p;
     Dbx x = {c, NULL};
+    const int64_t account = PI(0);
     cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT id AS id__i, name, price AS price__f, original_price AS original__f,"
                                           " discount_pct AS discount__f, skins, expiry, info, funds AS funds__i,"
-                                          " junk AS junk__f, premium AS premium__i, event_name, event_ends_at"
+                                          " junk AS junk__f, premium AS premium__i, event_name, event_ends_at, bundle_date"
                                           " FROM store_bundles WHERE active = $1 ORDER BY sort_order, id"),
                            KN_DB_ARGS("1"));
     if (dbx_failed(&x)) {
         cJSON_Delete(rows);
         return dbx_finish(&x, NULL);
     }
+    // the bundles this account owns (OWNED: its bundle ids; a guest owns none)
+    cJSON *owned_rows = dbx_rows(&x, SQL(.any = "SELECT bundle_id AS id__i FROM store_bundle_purchases WHERE account_id = $1"),
+                                 KN_DB_ARGS(I64S(account)));
+    if (dbx_failed(&x)) {
+        cJSON_Delete(owned_rows);
+        cJSON_Delete(rows);
+        return dbx_finish(&x, NULL);
+    }
+    cJSON *owned = cJSON_CreateObject();
+    for (int i = 0; owned_rows && i < cJSON_GetArraySize(owned_rows); i++) {
+        char key[24];
+        snprintf(key, sizeof key, "%lld", (long long) jint(cJSON_GetArrayItem(owned_rows, i), "id"));
+        cJSON_AddTrueToObject(owned, key);
+    }
+    cJSON_Delete(owned_rows);
     cJSON *out = cJSON_CreateArray();
     for (int i = 0; rows && i < cJSON_GetArraySize(rows); i++) {
         const cJSON *row = cJSON_GetArrayItem(rows, i);
@@ -428,9 +572,53 @@ static kn_db_result *run_bundles(kn_dbconn *c, int n, const char *const *p) {
         else cJSON_AddNullToObject(b, "EVENT_NAME");
         if (cJSON_IsString(evend)) cJSON_AddStringToObject(b, "EVENT_ENDS_AT", evend->valuestring);
         else cJSON_AddNullToObject(b, "EVENT_ENDS_AT");
+        char key[24];
+        snprintf(key, sizeof key, "%lld", (long long) jint(row, "id"));
+        cJSON_AddBoolToObject(b, "OWNED", cJSON_HasObjectItem(owned, key));
+        cJSON_AddStringToObject(b, "DATE", jtext(row, "bundle_date"));
         cJSON_AddItemToArray(out, b);
     }
     cJSON_Delete(rows);
-    return dbx_json(&x, "shop_bundles", out);
+    cJSON_Delete(owned);
+    const int count = cJSON_GetArraySize(out);
+    cJSON **items = calloc(count > 0 ? (size_t) count : 1, sizeof *items);
+    if (!items) {
+        cJSON_Delete(out);
+        dbx_refuse(&x, "internal");
+        return dbx_finish(&x, NULL);
+    }
+    for (int i = 0; i < count; i++) items[i] = cJSON_DetachItemFromArray(out, 0);
+    cJSON_Delete(out);
+    qsort(items, (size_t) count, sizeof *items, bundle_order);
+    cJSON *sorted = cJSON_CreateArray();
+    for (int i = 0; i < count; i++) cJSON_AddItemToArray(sorted, items[i]);
+    free(items);
+    return dbx_json(&x, "shop_bundles", sorted);
 }
 const kn_proc P_SHOP_BUNDLES = {"shop_bundles", NULL, run_bundles};
+
+/* P_SHOP_BUNDLE_BUY (account, bundle) -> the purchase's reply. Every bundle is priced in USD (v10 "BUY $PRICE"; its
+ * purchase is the payment provider's, deob-10.0.3.js 242624): Box Office has no payment, so a bundle that is
+ * not owned is refused "Payment is not available on Box Office", after the checks that come first: "Bundle not
+ * found" (no active bundle with the id), "Already purchased" (an owned bundle). Nothing is written. */
+static kn_db_result *run_bundle_buy(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t account = PI(0), bundle = PI(1);
+    cJSON *row = dbx_row(&x, SQL(.any = "SELECT id AS id__i FROM store_bundles WHERE id = $1 AND active = $2"),
+                         KN_DB_ARGS(I64S(bundle), "1"));
+    if (dbx_failed(&x)) {
+        cJSON_Delete(row);
+        return dbx_finish(&x, NULL);
+    }
+    if (!row) {
+        dbx_refuse(&x, "Bundle not found");
+        return dbx_finish(&x, NULL);
+    }
+    cJSON_Delete(row);
+    const int64_t owned = dbx_int(&x, SQL(.any = "SELECT COUNT(*) FROM store_bundle_purchases WHERE account_id = $1 AND bundle_id = $2"),
+                                  KN_DB_ARGS(I64S(account), I64S(bundle)), 0);
+    if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+    dbx_refuse(&x, owned > 0 ? "Already purchased" : "Payment is not available on Box Office");
+    return dbx_finish(&x, NULL);
+}
+const kn_proc P_SHOP_BUNDLE_BUY = {"shop_bundle_buy", NULL, run_bundle_buy};

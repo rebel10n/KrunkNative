@@ -305,8 +305,9 @@ async def scenario(port):
         check(dyn and dyn[0].get("type") == "dynamic" and dyn[0]["data"]["dynamic"]["steps"][0] == {"min_quantity": 500, "price_usd": 0.22}
               and official.get("33", {}).get("display_ids") == [],
               "the dynamic node keeps its quantity steps; a product with no display id carries none: %s" % dyn)
+        query("UPDATE players SET player_funds = 0 WHERE player_id = %d" % a_id)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
-        check(status == 400 and err_of(body) == "Not sold on Box Office", "an official product is not sold on Box Office: %s %s" % (status, body))
+        check(status == 400 and err_of(body) == "Not enough KR", "an official KR product with no KR is refused: %s %s" % (status, body))
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 999, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Product not found", "an unknown low id is refused: %s" % body)
         check(one("SELECT COUNT(*) FROM shop_official_purchases WHERE account_id = %d" % a_id) == 0,
@@ -324,9 +325,81 @@ async def scenario(port):
         status, body = http(port, "GET", "/api/shop/bundles")
         want = [{"ID": 900001, "NAME": "Shop Test Bundle", "PRICE": 4.99, "ORIGINAL_PRICE": 9.99, "DISCOUNT_PCT": 50,
                  "SKINS": "7438,7439", "EXPIRY": None, "INFO": "Test info", "FUNDS": 0, "JUNK": 0, "PREMIUM": 0,
-                 "EVENT_NAME": None, "EVENT_ENDS_AT": None}]
+                 "EVENT_NAME": None, "EVENT_ENDS_AT": None, "DATE": "", "OWNED": False}]
         check(status == 200 and body.get("data") == want,
               "a published bundle is listed in v10's ALL_BUNDLE_DATA keys and an inactive one is not: %s" % body)
+
+        # Eterno KR purchases: the KR ledger debits the price, the skin is granted, the limit counts the purchase rows
+        query("UPDATE players SET player_funds = 250 WHERE player_id = %d" % a_id)
+        query("INSERT INTO kr_transactions (account_id, amount, source, ref) VALUES (%d, 250, 'trigger', 'test')" % a_id)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
+        d = body.get("data", {}) if isinstance(body, dict) else {}
+        check(status == 200 and d.get("success") is True and d.get("price_paid") == 100 and d.get("kr") == 150
+              and d.get("rewards") == [{"type": "skin", "skin_id": 7994, "amount": 1}],
+              "Hovi costs 100 KR and grants its skin: %s %s" % (status, body))
+        check(one("SELECT player_funds FROM players WHERE player_id = %d" % a_id) == 150, "the KR balance is 150")
+        check(one("SELECT COUNT(*) FROM kr_transactions WHERE account_id = %d AND source = 'shop' AND amount = -100" % a_id) == 1,
+              "one KR ledger row of -100 with reason 'shop'")
+        check(one("SELECT COALESCE(SUM(delta), 0) FROM skin_transactions WHERE account_id = %d AND skin_id = 7994" % a_id) == 1,
+              "one skin of 7994 is in the account (skin ledger)")
+        check(one("SELECT COUNT(*) FROM shop_official_purchases WHERE account_id = %d AND product_id = 35" % a_id) == 1,
+              "the purchase row is written")
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Purchase limit reached", "Hovi's per-user limit of 1 refuses a second: %s" % body)
+        status, body = http(port, "GET", "/api/shop/displays?tag=limited", token=a_tok)
+        check(status == 200 and body["data"]["products"]["35"]["purchase_count"] == 1, "the display counts the one Hovi")
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 26, "quantity": 1}, a_tok)
+        check(status == 400 and err_of(body) == "Payment is not available on Box Office",
+              "a USD product (Sandstorm OTs-14 Groza, 2.99) is refused, nothing written: %s %s" % (status, body))
+
+        # the Junk product of krunker.io's display: 2000 KR for 100 Junk (currency 2, hundredths), limit 1000 globally
+        query("UPDATE players SET player_funds = 4000 WHERE player_id = %d" % a_id)
+        jbefore = one("SELECT player_junk FROM players WHERE player_id = %d" % a_id)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 15, "quantity": 2}, a_tok)
+        d = body.get("data", {}) if isinstance(body, dict) else {}
+        check(status == 200 and d.get("price_paid") == 4000 and d.get("rewards") == [{"type": "currency", "currency_id": 2, "amount": 20000}],
+              "two Junk products cost 4000 KR and grant 200 Junk (20000 hundredths): %s %s" % (status, body))
+        check(one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == jbefore + 20000
+              and one("SELECT player_funds FROM players WHERE player_id = %d" % a_id) == 0,
+              "the Junk is credited and the KR spent")
+
+        # bundles: v10's order (owned last, price low first, DATE newest first) and OWNED per account
+        query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
+              " event_name, event_ends_at, active, sort_order, bundle_date)"
+              " VALUES (900003, 'Shop Test Bundle C', 3.0, NULL, NULL, '', NULL, '', 0, 0, 0, NULL, NULL, 1, 3, '2026-02-01T00:00:00Z')")
+        query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
+              " event_name, event_ends_at, active, sort_order, bundle_date)"
+              " VALUES (900004, 'Shop Test Bundle D', 9.0, NULL, NULL, '', NULL, '', 0, 0, 0, NULL, NULL, 1, 4, '2026-01-01T00:00:00Z')")
+        query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
+              " event_name, event_ends_at, active, sort_order, bundle_date)"
+              " VALUES (900005, 'Shop Test Bundle E', 3.0, NULL, NULL, '', NULL, '', 0, 0, 0, NULL, NULL, 1, 5, '2026-03-01T00:00:00Z')")
+        status, body = http(port, "GET", "/api/shop/bundles", token=a_tok)
+        rows = body.get("data", []) if isinstance(body, dict) else []
+        check(status == 200 and [r["ID"] for r in rows] == [900005, 900003, 900001, 900004]
+              and all(r["OWNED"] is False for r in rows),
+              "the bundles are in v10's order (price low first, then DATE newest first): %s"
+              % [r["ID"] for r in rows])
+        query("INSERT INTO store_bundle_purchases (account_id, bundle_id) VALUES (%d, 900003)" % a_id)
+        status, body = http(port, "GET", "/api/shop/bundles", token=a_tok)
+        rows = body.get("data", []) if isinstance(body, dict) else []
+        owned = {r["ID"]: r["OWNED"] for r in rows}
+        check(status == 200 and [r["ID"] for r in rows] == [900005, 900001, 900004, 900003] and owned[900003] is True
+              and owned[900005] is False, "an owned bundle is last, the others keep their order: %s" % owned)
+        status, body = http(port, "GET", "/api/shop/bundles", token=b_tok)
+        rows = body.get("data", []) if isinstance(body, dict) else []
+        check(status == 200 and all(r["OWNED"] is False for r in rows), "another account owns none of them")
+
+        # a bundle is USD: its purchase is refused (no payment), an owned one and an unknown one with their own reasons
+        status, body = http(port, "POST", "/api/shop/bundles/purchase", {"bundle_id": 900001})
+        check(status == 401 and err_of(body) == "LoginRequired", "a bundle purchase needs a token: %s %s" % (status, body))
+        status, body = http(port, "POST", "/api/shop/bundles/purchase", {"bundle_id": 900001}, a_tok)
+        check(status == 400 and err_of(body) == "Payment is not available on Box Office", "a USD bundle is refused: %s %s" % (status, body))
+        status, body = http(port, "POST", "/api/shop/bundles/purchase", {"bundle_id": 900003}, a_tok)
+        check(status == 400 and err_of(body) == "Already purchased", "an owned bundle is already purchased: %s" % body)
+        status, body = http(port, "POST", "/api/shop/bundles/purchase", {"bundle_id": 900002}, a_tok)
+        check(status == 400 and err_of(body) == "Bundle not found", "an inactive bundle is not found: %s" % body)
+        check(one("SELECT COUNT(*) FROM store_bundle_purchases WHERE account_id = %d" % a_id) == 1,
+              "the refused bundle purchases wrote nothing")
 
 
 def start_brain(env, log_path, extra):
