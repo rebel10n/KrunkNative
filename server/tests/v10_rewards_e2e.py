@@ -182,7 +182,8 @@ def run():
     subprocess.run([f"{BUILD}/services/common/kn_migrate", "--set", f"database.name={DB}"], check=True,
                    stdout=open(os.path.join(WORK, "migrate.log"), "w"), stderr=subprocess.STDOUT)
     procs.append(subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--set", f"database.name={DB}", "--set", f"brain.port={BRAIN_PORT}",
-                                   "--set", "brain.region=local", "--set", "accounts.login_throttle_s=0"],
+                                   "--set", "brain.region=local", "--set", "accounts.login_throttle_s=0",
+                                   "--set", "accounts.current_season=7"],  # the Season 7 pass's cards (bp_id 2); the default season is 10
                                   stdout=open(os.path.join(WORK, "brain.log"), "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
     up = bool(wait_for(lambda: http("/mm/status")[0] == 200)) and procs[-1].poll() is None
     check("coordinator up", up, "" if up else log("brain.log")[-300:])

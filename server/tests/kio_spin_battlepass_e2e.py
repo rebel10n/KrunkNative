@@ -22,6 +22,11 @@ to krunker.io and joins an official game as that account (account_unify_e2e's st
           Battle Pass for ever); the progress is refused (404): the item stays 0/5000 (before: Unavailable)
   silent  the game server never answers "bpdl": the window keeps saying Loading Battle Pass (v10's text) and asks
           again after its 15 s; it never says it could not load (before: "Could not load the Battle Pass")
+  menu    in the official game the window shows krunker.io's pass; after leaving it (con disconnect) the active
+          backend is krunk.io's DEV account again and the window shows the Box Office pass: kn_brain's Season 10
+          (migration 0354_season_10, SEASON_CURRENT 10: "Season 10 Battle Pass", 80 levels), never "No Battle
+          Pass Found" or "Loading Battle Pass" (before: the brain seeded Season 7 only, so a brain on v10.0.3's
+          season 10 answered null and the window said No Battle Pass Found)
   locked  krunker.io's progress is 0/5000 (not unlocked): a click does what v10.0.3 does, nothing. No popup,
           no "Play more" text, no "dsl", and the item is still 0/5000 (before: the popup said Play more to
           unlock the daily spin)
@@ -40,7 +45,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import account_unify_e2e as au  # noqa: E402  (its stubs, sign-in steps and client runner)
 
-MODES = os.environ.get("KIO_MODES", "spin,claim,claimerr,nopass,silent,locked").split(",")  # KIO_MODES=locked runs one mode
+MODES = os.environ.get("KIO_MODES", "spin,claim,claimerr,nopass,silent,locked,menu").split(",")  # KIO_MODES=locked runs one mode
 AU_SCRIPT = au.script  # account_unify's steps 1-3 (run_client takes its script from au.script, replaced per mode)
 SPIN_DATA = {"score": 5000, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}  # FREE SPIN
 ZERO_DATA = {"score": 0, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}     # 0/5000
@@ -92,6 +97,18 @@ def script(mode, shots):
     if mode == "silent":  # the window's timeout is 15 s of wall time: read it again after 16 s
         lines += ["55500 text @kbp [id=menuWindow]", "55550 shot " + shots["bp"], "55600 quit"]
         return "\n".join(lines) + "\n"
+    if mode == "menu":  # leave the official game: the Battle Pass window on the krunk.io backend (kn_brain's pass)
+        lines += ["40300 call closWind",
+                  "40400 con disconnect",  # the active backend is krunk.io's DEV account again (account_backend)
+                  "40700 down ESC", "40750 up ESC",
+                  "41000 call showWindow 6",
+                  "42000 text @kbpmenu [id=menuWindow]",
+                  "42050 shot " + shots["menu"],
+                  "42500 text @kbpmenu2 [id=menuWindow]",
+                  "42600 shot " + shots["menu"],
+                  "42700 text @kbpbot .bpBotH",  # the window's button bar: Purchase / Gift / Skip (battlepass_ui.c)
+                  "43000 quit"]
+        return "\n".join(lines) + "\n"
     if mode in CLICK_MODES:  # the click: the popup, the item and the wheel around it (locked: v10 does nothing)
         lines += ["40300 call closWind",
                   "40350 vis @prepop popupHolder",
@@ -115,13 +132,13 @@ def run_mode(port, mode):
     stub.account_data = [dict(au.KIO_DATA)]
     stub.claims = []  # the rpc ids of the "dsl" claims the game socket received
     stub.daily_spin = {"spin": SPIN_DATA, "claim": SPIN_DATA, "claimerr": SPIN_DATA, "nopass": None, "silent": ZERO_DATA,
-                       "locked": ZERO_DATA}[mode]
+                       "locked": ZERO_DATA, "menu": ZERO_DATA}[mode]
     stub.frame_handlers = {"bpdl": {"spin": au.answer_bpdl, "claim": au.answer_bpdl, "claimerr": au.answer_bpdl,
-                                    "nopass": answer_null_pass, "silent": never_answers, "locked": au.answer_bpdl}[mode]}
+                                    "nopass": answer_null_pass, "silent": never_answers, "locked": au.answer_bpdl, "menu": au.answer_bpdl}[mode]}
     if mode in ("claim", "claimerr"):  # the rpc frame is "_0" (RPC), the claim its third item
         stub.frame_handlers["_0"] = rpc_answer(stub, mode == "claim")
     au.WORK = tempfile.mkdtemp(prefix="kn-kiospin-%s-" % mode, dir=au.CACHE if os.path.isdir(au.CACHE) else None)
-    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("bp", "item", "click")}
+    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("bp", "item", "click", "menu")}
     au.script = lambda: script(mode, shots)
     stub.start()
     try:
@@ -181,10 +198,23 @@ def checks(mode, text, stub, shots):
                  not claim_sent and not posts, (stub.ws_frames[-20:], posts))
         au.check("locked: the item is still 0/5000, not claimed", "0/5000" in after and "CLAIMED" not in after
                  and "FREE SPIN" not in after, after)
+    elif mode == "menu":
+        menu, menu2 = au.text_of(text, "kbpmenu"), au.text_of(text, "kbpmenu2")
+        print("  [menu] after leaving: %r" % menu[:120])
+        au.check("menu: in the official game the window shows krunker.io's pass", "KioPass" in bp and "Loading" not in bp, bp[:200])
+        au.check("menu: outside the game the window shows the Box Office Season 10 pass (kn_brain, 0354_season_10)",
+                 "Season 10 Battle Pass" in menu and "Level 1/80" in menu and "KioPass" not in menu, menu[:200])
+        au.check("menu: never No Battle Pass Found or Loading Battle Pass outside the game",
+                 all("No Battle Pass Found" not in t and "Loading" not in t for t in (menu, menu2)), (menu[:120], menu2[:120]))
+        bot = au.text_of(text, "kbpbot")
+        au.check("menu: the Box Office pass has v10's buttons (the VIP tier, Gift, Skip levels) and countdown",
+                 "Season ends in" in menu and "Gift VIP Tier" in bot and "Skip levels" in bot
+                 and ("Purchase VIP Tier" in bot or "VIP Tier Purchased" in bot), (menu[:120], bot))
     else:
         au.check("silent: the Battle Pass keeps saying Loading Battle Pass after its timeout, never that it could not load",
                  "Loading Battle Pass" in bp and "Could not load" not in bp, bp[:200])
-    shot_ok = [os.path.exists(p) for k, p in shots.items() if (mode in CLICK_MODES or k != "click")]
+    taken = {"silent": ("bp", "item"), "menu": ("bp", "item", "menu")}.get(mode, ("bp", "item", "click") if mode in CLICK_MODES else ("bp", "item"))
+    shot_ok = [os.path.exists(p) for k, p in shots.items() if k in taken]
     au.check("%s: the window screenshots were taken" % mode, all(shot_ok), shots)
 
 

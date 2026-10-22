@@ -24,7 +24,7 @@
  *                             timePlayed, bpp, tier, level, levels} | null]  (KrunkNative: the
  *                             profile's season block)
  *
- * accounts.current_season (config.currentSeason, default 7) is the season; kn_brain records it
+ * accounts.current_season (config.currentSeason, default SEASON_CURRENT 10) is the season; kn_brain records it
  * in `seasons` at start (P_SEASON_ENSURE: insert only, a rollover closes the older open ones).
  */
 #include "acct_internal.h"

@@ -397,26 +397,28 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
-        proc, port = start_brain(env, log_path, [])
+        # the scenario is the Season 7 pass (its cards, Founder / Master badges, map reward skin): the brain's
+        # default season is 10 (0354_season_10, SEASON_CURRENT), so it is pinned to 7 here
+        proc, port = start_brain(env, log_path, ["--accounts.current_season=7"])
         name = asyncio.run(scenario(port))
         proc.terminate()
         proc.wait(5)
         print("== restart: the season row is kept (insert only)")
-        proc, port = start_brain(env, log_path, [])
+        proc, port = start_brain(env, log_path, ["--accounts.current_season=7"])
         seasons = query("SELECT season FROM seasons ORDER BY season")
-        check(seasons == ["7"], "one season row after two starts: %s" % seasons)
+        check(seasons == ["7", "10"], "the migrations' season rows (7, 10) and no second row 7 after two starts: %s" % seasons)
         proc.terminate()
         proc.wait(5)
         print("== rollover: accounts.current_season 8")
         proc, port = start_brain(env, log_path, ["--accounts.current_season=8"])
         for _ in range(50):
             seasons = query("SELECT season FROM seasons ORDER BY season")
-            if seasons == ["7", "8"]:
+            if seasons == ["7", "8", "10"]:
                 break
             time.sleep(0.1)
-        check(seasons == ["7", "8"], "season 8 recorded: %s" % seasons)
+        check(seasons == ["7", "8", "10"], "season 8 recorded: %s" % seasons)
         ended = query("SELECT season FROM seasons WHERE ends_at IS NOT NULL")
-        check(ended == ["7"], "season 7 closed by the rollover: %s" % ended)
+        check(ended == ["7"], "season 7 closed by the rollover (10 is newer: still open): %s" % ended)
         asyncio.run(rollover(port, name))
     finally:
         if proc:

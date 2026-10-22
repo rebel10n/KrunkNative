@@ -388,7 +388,7 @@ void sh_bp_claim_all(SocialSession *s, const cJSON *f);  /* v10 "bpclmAll" */
 void sh_bp_buy(SocialSession *s, const cJSON *f);        /* "xstbp" (KR) */
 void sh_bp_skip(SocialSession *s, const cJSON *f);       /* "xstbpl" (KR) */
 void sh_season_stats(SocialSession *s, const cJSON *f);  /* "sst" */
-/* config accounts.current_season (config.currentSeason, default 7) */
+/* config accounts.current_season (config.currentSeason, default SEASON_CURRENT 10) */
 int acct_current_season(void);
 /* records the current season in `seasons` (kn_brain start) */
 void season_init(void);
