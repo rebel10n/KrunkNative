@@ -281,6 +281,10 @@ set_tests_properties(brain_skin_thumb PROPERTIES LABELS "knsvc;brain")
 # skips with 77 when the database or python websockets is unavailable).
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND)
+    # the capture tool's migration (tools/brain/challenges_from_capture.py): shape, upserts, escaping, refusals
+    add_test(NAME brain_challenges_capture
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/challenges_capture_test.py ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_challenges_capture PROPERTIES TIMEOUT 120 LABELS "knsvc;brain;db")
     add_test(NAME brain_social_ws
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ws_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})

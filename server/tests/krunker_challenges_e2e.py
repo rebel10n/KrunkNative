@@ -14,6 +14,9 @@
       no "Loading" / error text.
   T4  Box Office, signed in but kn_brain gone before the window's first request: the full layout and no
       "Loading" / error text.
+  T5  the stub's activeChallenges as a capture, converted by tools/brain/challenges_from_capture.py into a
+      migration; a kn_brain on it lists the same map and weapon rows (names, types, DAT, REW, icon) and the
+      window shows the stub's no-map, nightmare and ranked rows. Doc: doc/v10/challenges.md 4c.
 
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, no DISPLAY, private XDG dirs) driven through KRUNKNATIVE_UI_CMDS
 (ui / clickid / text / rect / textof / shot). The official runs go through xvfb-run when it is there (the
@@ -117,15 +120,17 @@ async def register(port, name):
 class Brain:
     """kn_brain on a scratch database: start, stop, start again on the same port."""
 
-    def __init__(self, port):
+    def __init__(self, port, db=DB, migrations=os.path.join(ROOT, "services", "db", "migrations")):
         self.port = port
+        self.db = db
+        self.migrations = migrations
         self.log = os.path.join(WORK, "brain.log")
         self.proc = None
 
     def start(self):
-        cfg = os.path.join(WORK, "brain.json")
+        cfg = os.path.join(WORK, "brain-%d.json" % self.port)
         with open(cfg, "w") as f:
-            json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
+            json.dump({"database": {"driver": "sqlite", "path": self.db, "migrations_dir": self.migrations},
                        "brain": {"host": "127.0.0.1", "port": self.port, "federation": False,
                                  "internal_secret": "challenges-e2e-%d" % os.getpid()},
                        "accounts": {"signup_rewards": {"enabled": False}, "sale_grace_s": 0, "free_premium": False, "starting_kr": 0,
@@ -386,6 +391,49 @@ def official_challenges():
     return {"activeChallenges": rows}
 
 
+def capture_run(port):
+    """T5: the captured official list on Box Office. The stub's activeChallenges is written as a capture
+    (the client's KRUNKNATIVE_CHALLENGE_CAPTURE shape), tools/brain/challenges_from_capture.py turns it into the
+    migration in a copy of the migrations tree, and a kn_brain on that tree must list the same map and weapon
+    rows (and the same no-map, nightmare and ranked rows the official window shows in T2)."""
+    cap = os.path.join(WORK, "official-capture.json")
+    with open(cap, "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "source": "krunker.io", "game": "10.0.3", "captured_at": "2026-10-22T00:00:00Z",
+                   "activeChallenges": official_challenges()["activeChallenges"]}, f)
+    mig = os.path.join(WORK, "migrations")
+    shutil.copytree(os.path.join(ROOT, "services", "db", "migrations"), mig)
+    tool = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "tools", "brain", "challenges_from_capture.py"), cap, "--out", mig],
+                          capture_output=True, text=True)
+    check("T5: the capture tool writes the migration", tool.returncode == 0, tool.stderr)
+    if tool.returncode != 0:
+        return
+    db = os.path.join(WORK, "capture-brain.db")
+    brain = Brain(port, db=db, migrations=mig)
+    try:
+        assert brain.start(), "kn_brain (capture migration) did not come up"
+        aid, token = asyncio.run(register(port, ACCOUNT + "c"))
+        c = Client("bo3", {}, port, ACCOUNT + "c", token)
+        try:
+            wait(lambda: "[account] logged in as" in c.text(), 40)
+            c.ui("windows[32].openHome()")
+            text = c.wait_window("Map Challenges", 40)
+            for marker in ("STUB complete all", "STUB nightmare", "STUB ranked"):
+                check(f"T5: Box Office shows the captured row '{marker}'", marker in text, text[:160])
+        finally:
+            c.close()
+    finally:
+        brain.stop()
+    # the rows the brain lists (active) against the stub's list: the map and weapon rows, names and fields
+    con = sqlite3.connect(db)
+    got = sorted((r[0], r[1], json.loads(r[2]), json.loads(r[3]), r[4]) for r in con.execute(
+        "SELECT name, ctype, dat, rew, icon FROM challenges WHERE active = 1 AND ctype IN ('map', 'weapon')"))
+    con.close()
+    want = sorted((r["N"], r["T"], r["DAT"], r["REW"], r["IC"]) for r in official_challenges()["activeChallenges"]
+                  if r["T"] in ("map", "weapon"))
+    check("T5: Box Office's active map and weapon rows are the stub's (names, types, DAT, REW, icon)", got == want,
+          "%d brain rows, %d stub rows" % (len(got), len(want)))
+
+
 def main():
     if websockets is None or kae.websockets is None:
         print("SKIP: python websockets is not installed")
@@ -422,6 +470,7 @@ def main():
         finally:
             c3.close()
             stub3.stop()
+        capture_run(kn_proto.free_ports(1)[0])
     except AssertionError as e:
         check("run: " + str(e), False, str(e))
     finally:

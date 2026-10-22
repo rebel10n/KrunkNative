@@ -39,6 +39,9 @@
 #include <time.h>
 #ifdef _WIN32
 #define timegm _mkgmtime // MinGW has no timegm (same as editor_net.c)
+#include <direct.h>      // _mkdir: the challenge capture's directory
+#else
+#include <sys/stat.h>    // mkdir: the challenge capture's directory
 #endif
 #include "account_flags.h"
 #include <progression.h> // WP-E part 2c: v7 level progress, challenge names
@@ -368,8 +371,117 @@ static void kio_set_data(const cJSON *d) {
     }
 }
 
+// KRUNKNATIVE_CHALLENGE_CAPTURE: the krunker.io account's challenge catalogue, as it arrives, to a JSON file
+// (doc/v10/challenges.md 4c). The catalogue is only ever delivered to a signed-in client (activeChallenges,
+// account slot 38, with "a" / "ua"), so this is how Box Office gets the official set:
+// tools/brain/challenges_from_capture.py turns the file into a brain migration. "1" writes
+// $XDG_CACHE_HOME/krunknative/official-challenges-<date>.json (else ~/.cache/...), any other value is the
+// file's path; unset / "" / "0" = off (the default; nothing is written). Shape: {"format": 1, "source",
+// "game", "captured_at", "activeChallenges": [the latest full list], "frames": [{"at", "label", "args"}]}
+// with every later "chg" / "uchp" / "chgC" / "chlR" frame (UPDATE_CHALLENGES[_PROGRESS], CHALLENGE_COMPLETED,
+// UPDATE_CHALLENGE_REWARDS) appended. Rewritten whole at each event; no account id, name or token.
+static cJSON *g_chal_capture; // the document (owned), NULL until the first captured frame
+static const char *chal_capture_path(void) {
+    static char path[1024];
+    static int done;
+    if (done) return path;
+    done = 1;
+    path[0] = 0;
+    const char *knob = getenv("KRUNKNATIVE_CHALLENGE_CAPTURE");
+    if (!knob || !*knob || !strcmp(knob, "0")) return path;
+    if (strcmp(knob, "1") != 0) {
+        snprintf(path, sizeof(path), "%s", knob);
+        return path;
+    }
+#ifndef __EMSCRIPTEN__
+    char dir[768];
+    const char *xdg = getenv("XDG_CACHE_HOME");
+    int n;
+    if (xdg && *xdg) n = snprintf(dir, sizeof(dir), "%s/krunknative", xdg);
+    else {
+#ifdef _WIN32
+        const char *base = getenv("LOCALAPPDATA");
+        n = base && *base ? snprintf(dir, sizeof(dir), "%s\\krunknative", base) : 0;
+#else
+        const char *home = getenv("HOME");
+        n = home && *home ? snprintf(dir, sizeof(dir), "%s/.cache/krunknative", home) : 0;
+#endif
+    }
+    if (n <= 0 || (size_t) n >= sizeof(dir)) return path;
+#ifdef _WIN32
+    _mkdir(dir);
+#else
+    mkdir(dir, 0755);
+#endif
+    char day[16];
+    const time_t now = time(NULL);
+    struct tm tmv;
+#ifdef _WIN32
+    gmtime_s(&tmv, &now);
+#else
+    gmtime_r(&now, &tmv);
+#endif
+    strftime(day, sizeof(day), "%Y-%m-%d", &tmv);
+    snprintf(path, sizeof(path), "%s/official-challenges-%s.json", dir, day);
+#endif
+    return path;
+}
+
+static void chal_capture(const char *label, const cJSON *frame) {
+    const char *path = chal_capture_path();
+    if (!path[0]) return;
+    const int account = !strcmp(label, "a") || !strcmp(label, "ua");
+    const int challenge = !strcmp(label, "chg") || !strcmp(label, "uchp") || !strcmp(label, "chgC") || !strcmp(label, "chlR");
+    if (!account && !challenge) return;
+    char stamp[32];
+    const time_t now = time(NULL);
+    struct tm tmv;
+#ifdef _WIN32
+    gmtime_s(&tmv, &now);
+#else
+    gmtime_r(&now, &tmv);
+#endif
+    strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%SZ", &tmv);
+    if (!g_chal_capture) {
+        g_chal_capture = cJSON_CreateObject();
+        cJSON_AddNumberToObject(g_chal_capture, "format", 1);
+        cJSON_AddStringToObject(g_chal_capture, "source", "krunker.io");
+        cJSON_AddStringToObject(g_chal_capture, "game", ruleset_current()->version);
+        cJSON_AddStringToObject(g_chal_capture, "captured_at", stamp);
+        cJSON_AddItemToObject(g_chal_capture, "activeChallenges", cJSON_CreateArray());
+        cJSON_AddItemToObject(g_chal_capture, "frames", cJSON_CreateArray());
+    }
+    if (account) { // the list as the account carries it now (kio_set_data ran first)
+        const cJSON *list = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges");
+        if (!cJSON_IsArray(list)) return; // (an account row without the list: nothing new)
+        cJSON_ReplaceItemInObjectCaseSensitive(g_chal_capture, "activeChallenges", cJSON_Duplicate(list, 1));
+    } else {
+        cJSON *f = cJSON_CreateObject();
+        cJSON_AddStringToObject(f, "at", stamp);
+        cJSON_AddStringToObject(f, "label", label);
+        cJSON *args = cJSON_CreateArray();
+        for (int i = 1; i < cJSON_GetArraySize(frame); i++) cJSON_AddItemToArray(args, cJSON_Duplicate(cJSON_GetArrayItem(frame, i), 1));
+        cJSON_AddItemToObject(f, "args", args);
+        cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(g_chal_capture, "frames"), f);
+    }
+    char *text = cJSON_Print(g_chal_capture);
+    if (!text) return;
+    char tmp[1100];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *fp = fopen(tmp, "wb");
+    const int ok = fp && fwrite(text, 1, strlen(text), fp) == strlen(text) && fputc('\n', fp) != EOF && fclose(fp) == 0;
+    if (fp && !ok) fclose(fp);
+    if (ok && rename(tmp, path) == 0)
+        printf("[account] challenge capture: %s (%d challenges, %d frames)\n", path,
+               cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_chal_capture, "activeChallenges")),
+               cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_chal_capture, "frames")));
+    else printf("[account] challenge capture: cannot write %s\n", path);
+    free(text);
+}
+
 // The official game socket's account frames (krunker_net_account_listen), main thread
 static void kio_frame(const char *label, const cJSON *frame) {
+    if (strcmp(label, "a") && strcmp(label, "ua")) chal_capture(label, frame); // ("a" / "ua": after the account is set)
     if (!strcmp(label, "a")) {
         const cJSON *err = cJSON_GetArrayItem(frame, 1), *data = cJSON_GetArrayItem(frame, 4);
         const char *name = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 3));
@@ -385,6 +497,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
         g_kio.id = cJSON_IsNumber(id) ? id->valueint : 0;
         copy_str(g_kio.name, sizeof(g_kio.name), name);
         g_kio.gen++;
+        chal_capture("a", frame);
         menu_rerender_if_open(33); // the open Challenges window: its list is account.activeChallenges (v10_rewards.c)
         if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_account_answered(); // io_accountResponse: windows[5].data || send("bpdl")
         else printf("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
@@ -393,6 +506,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "ua")) {
         kio_set_data(cJSON_GetArrayItem(frame, 1));
         g_kio.gen++;
+        chal_capture("ua", frame);
         menu_rerender_if_open(33); // the open Challenges window (activeChallenges arrives in "ua" slot 38)
     } else if (!strcmp(label, "uf")) { // [kr, junk]
         const cJSON *kr = cJSON_GetArrayItem(frame, 1), *jnk = cJSON_GetArrayItem(frame, 2);

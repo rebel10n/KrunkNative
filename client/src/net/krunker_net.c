@@ -558,7 +558,7 @@ static void kmap_tick(Client *client) {
     pthread_mutex_unlock(&K.lock);
 }
 
-// The account-scoped frames ("a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln") for the main thread
+// The account-scoped frames ("a", "ua", "uf", "bpdl", "bppd", "chg", "uchp", "cln", "ub", "chlR", "chgC") for the main thread
 // (krunker_net_account_listen). Called under K.lock (the link runs under it).
 static void link_account_frame(void *user, const char *json, const size_t len) {
     (void) user;

@@ -80,8 +80,7 @@ every map (with `0/0` for the 43 maps the seed has no challenge for) but not the
 
 Making the Box Office set identical to the official one needs krunker.io's challenge definitions (ids, `DAT`,
 `REW`, names, icons, the map / weapon / ranked / complete-all rows). They are server data, not in the client
-bundle, and this change does not invent them. The data step is a new brain migration from that definition
-set (all three dialects) and is not part of this change.
+bundle, and nothing here invents them. The data step is the capture path in 4c.
 
 ### 4a. Searched for the official definitions (2026-10-22)
 
@@ -103,8 +102,60 @@ none is a challenge list; challenges reach the client only in the signed-in acco
 So the definitions are only in a signed-in account's `activeChallenges`. No migration is added: writing one would
 invent the rows. Box Office keeps the brain's seed until the definitions can be read from a real account.
 
+### 4b. No generator in the v10.0.3 bundle (checked 2026-10-22)
+
+The official map, weapon and ranked rows cannot be generated from the bundle, so Box Office does not generate
+them. What the bundle does carry (deob = `~/.cache/kn-v103/deob-10.0.3.js`):
+
+- Row shape and the check: `checkChallenge` 202974-203022 (`DAT.ky` string or array, `DAT.val`, `DAT.mp`,
+  `DAT.wep`, `DAT.cls`, `DAT.uniq`, `DAT.sm`; `PT` 1 = complete; `PV` progress, `SV` start value).
+- The "chall" meta key: `finalize` 203074-203135 counts the account's completed rows of the same `T` and filters,
+  and fires the `chall` rows (`DAT.uniq`, `DAT.nem`).
+- Names: `updateNames` 203295 (`t("chall.name." + DAT.ky, DAT.val, ...)`), with the English templates in the
+  translation string (deob line 229241) for `hs ns ls tmk fb mk fk qs wb airk lns tk drk kstk w d score dmg bzk
+  cc rk`, and `nwindows.chall.*` headers and notes. There is no `k` (kills) template and no "Complete all"
+  string, so no template shows a per-map or per-weapon kill count, and nothing gives a goal, KR or icon per map.
+- Reward shape: the `REW` keys `kr`, `jnk`, `bpp`, `rp`, `sk`, `title` (`genChallengeCard` 250686-250726).
+- Layout: the headers, order and grids (section 1). Nothing in the bundle lists the maps or weapons a
+  challenge is made for; the map list is `GET /maps` and the weapons come from the weapon table.
+
+So "v10 generates per-map challenges from templates" is not true of the client, and a generator in Box Office
+would invent names, goals and rewards. Box Office's list is the one the captured account carries (4c).
+
+### 4c. Capture path (the official list, from a real account)
+
+A signed-in krunker.io account receives its list in `activeChallenges` (slot 38). The native client writes it
+when `KRUNKNATIVE_CHALLENGE_CAPTURE` is set (`account_ui.c`, `chal_capture`; unset, empty or `0` = off, nothing is
+written):
+
+    KRUNKNATIVE_CHALLENGE_CAPTURE=1 client_bin         # ~/.cache/krunknative/official-challenges-<UTC date>.json
+    KRUNKNATIVE_CHALLENGE_CAPTURE=/path/cap.json client_bin   # any other value is the file's path
+
+The file (`"format": 1`) holds `source`, `game`, `captured_at`, `activeChallenges` (the latest full list from
+`a` / `ua`) and `frames`: every later `chg`, `uchp`, `chgC` and `chlR` frame (UPDATE_CHALLENGES[_PROGRESS],
+CHALLENGE_COMPLETED, UPDATE_CHALLENGE_REWARDS; deob 111175, 111248-111258). No account id, name or token.
+Sign-in is yours: the capture runs with your own account.
+
+Convert it into a brain migration (all three dialects, the next number, same in each directory):
+
+    python3 -I tools/brain/challenges_from_capture.py ~/.cache/krunknative/official-challenges-<date>.json
+    python3 -I tools/brain/challenges_from_capture.py cap.json --stdout    # the SQLite text only, writes nothing
+
+The migration retires (`active = 0`) every row of the Challenges window's types (map, weapon, nightmare, ranked,
+event; daily / weekly only when the capture carries them), then upserts the captured rows as `active = 1` with
+`challenge_id = 100000 + CI`, `ctype = T`, `dat = DAT`, `rew = REW`, `icon = IC`, `name = N`, `sort` = list order.
+Per-account fields (`PV`, `PT`, `SV`, `TR`, `PER`) are dropped. Progress stays in `player_challenges`. A
+re-capture is a new migration; a row it drops is retired. Test: `services/brain/tests/challenges_capture_test.py`.
+
 ## 5. Tests
 
+- `services/brain/tests/challenges_capture_test.py` (run by ctest with the brain tests): the tool on a fixture
+  capture (invented rows, not official data) into a scratch migrations tree; the SQLite file applied to a
+  `challenges` table; the re-capture, the PostgreSQL / MySQL upserts, the escaping and the refusals.
+- `server/tests/krunker_challenges_e2e.py` (`make krunker-challenges-e2e`): T5 converts the stub's activeChallenges
+  with the tool into a migration (a copy of the migrations tree), runs kn_brain on it, and checks that Box Office's
+  active map and weapon rows equal the stub's (names, types, DAT, REW, icon) and the window shows the stub's
+  no-map, nightmare and ranked rows. The stub is a stand-in for an official capture, so T5 checks the pipeline.
 - `server/tests/krunker_challenges_e2e.py` (`make krunker-challenges-e2e`): the krunker.io stub with an account
   that carries `activeChallenges` (one challenge per map, Complete all, weapons, nightmare, ranked) and the
   Box Office brain. Checks: every map name on Box Office; the official list rows and maps, and no brain row
