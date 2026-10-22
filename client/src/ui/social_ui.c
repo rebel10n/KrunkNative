@@ -4058,10 +4058,15 @@ static int login_modal_message(const char *msg) {
     return 1;
 }
 
-// loginPopup(): the LoginModal when no account
+// loginPopup(): the LoginModal when no account. On an official krunker.io server the sign-in is krunker.io's: the login
+// card of the krunker.io account (v10_login.c, loginOrRegister), never Box Office's modal (backend_ui.h account_backend).
 H(h_login_popup) {
     UNUSED;
     if (g_hub.logged_in) return 1;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        html_ui_dispatch("loginOrRegister", NULL, NULL, 0);
+        return 1;
+    }
     char saved[128] = "";
     if (!account_saved_name(saved, sizeof(saved))) saved[0] = 0;
     clear_pops();
@@ -4098,6 +4103,10 @@ H(h_login_overlay) {
 
 H(h_login_acc) {
     UNUSED;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // this modal is Box Office's: nothing is sent for krunker.io
+        login_modal_close();
+        return 1;
+    }
     char name[256] = "", pass[128] = "";
     login_modal_values(name, sizeof(name), pass, sizeof(pass));
     if (!name[0] || !pass[0]) {

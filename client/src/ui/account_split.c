@@ -54,3 +54,8 @@ int account_split_row_usable(const int krunker_row) {
 int account_split_krunker_identity(void) {
     return account_backend() == ACCOUNT_BACKEND_KRUNKER && krunker_account_signed_in();
 }
+
+int account_split_signed_in(void) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return krunker_account_signed_in();
+    return active_account() != NULL && account_session_token()[0] != 0;
+}

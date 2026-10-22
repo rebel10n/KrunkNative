@@ -159,6 +159,9 @@ int backend_available(void) {
 }
 
 int backend_social_allowed(void) {
+    // the social socket is the brain's: it does not open while krunker.io is the backend (backend.h brain gate), so the
+    // saved session's restore (account_ui.c, on "__open") never signs a Box Office account in from an official game
+    if (backend_brain_refuses_path()) return 0;
     if (backend_available() == 1) return 1;
     g_social_wanted = 1;
     if (!g_probing && g_avail != 0) backend_probe_start();
@@ -239,6 +242,7 @@ void backend_social_set_held_sender(const BackendHeldSender fn) { g_held_sender 
 
 int backend_social_send_text(const char *json) {
     if (g_social_hold) return json && g_held_sender ? g_held_sender(json) : 0;
+    if (backend_brain_refuses_path()) return 0; // no frame to the brain's socket while krunker.io is the backend
     return backend_social_send_raw(json);
 }
 
@@ -250,6 +254,7 @@ static int send_frame(const cJSON *frame, const int session) {
         free(text);
         return ok;
     }
+    if (backend_brain_refuses_path()) return 0; // (the session frames too: a restore is the brain's sign-in)
     if (!backend_enabled()) return 0;
     char *text = cJSON_PrintUnformatted(frame);
     if (!text) return 0;

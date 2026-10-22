@@ -13,6 +13,7 @@
 // never sent to kn_brain), an explicit mode with a warning; the same stream parser serves both.
 #include "editor_ai.h"
 #include <ai_proto.h>
+#include <account_split.h>
 #include <app_mode.h>
 #include <backend.h>
 #include <ctype.h>
@@ -44,7 +45,7 @@ static struct {
     char health[16];         // "healthy" / "degraded" / "down" / ...
     char health_reason[256];
     double models_at;        // g_ed.now of the last load
-    int signed_in_seen;      // account id the panel was drawn for (-1 never)
+    int gate_seen;           // gate_state() the panel's sign-in line was drawn for (-1 never)
     // conversation
     cJSON *conv;             // chat-shape messages (no system prompt); assistant "meta" for the UI
     // the turn in flight
@@ -165,9 +166,19 @@ static void fmt_cost(char *out, const size_t n, const double usd) {
     else snprintf(out, n, "$%.2f", usd);
 }
 
-static int signed_in(void) { return active_account() != NULL && account_session_token()[0]; }
+// The sign-in gate is the connected server's (account_split.h): the krunker.io account in an official game, the Box Office
+// session on a Box Office server. The AI is kn_brain's service: an official krunker.io server has no brain to ask, so
+// the panel sends nothing there (no krunker.io token goes to it); only the player's own endpoint works there.
+static int signed_in(void) { return account_split_signed_in(); }
+
+static int ai_here(void) { return A.custom || account_backend() == ACCOUNT_BACKEND_KRUNKIO; }
 
 static int brain_ready(void) { return backend_enabled(); }
+
+static int can_chat(void) { return signed_in() && ai_here() && (A.custom || brain_ready()); }
+
+// What the sign-in line was drawn for: the connected backend, and whether it has a signed-in account
+static int gate_state(void) { return (account_backend() == ACCOUNT_BACKEND_KRUNKER ? 2 : 0) + (signed_in() ? 1 : 0); }
 
 static char *brain_url(const char *path) {
     const char *base = backend_url();
@@ -316,7 +327,7 @@ static void build(void) {
     A.stop = html_dom_by_id("knAiStop");
     A.pop_el = html_dom_by_id("knAiPop");
     A.built = A.root != 0;
-    A.signed_in_seen = -1;
+    A.gate_seen = -1;
     A.edit_idx = A.confirm_idx = -1;
     if (!A.sid[0]) snprintf(A.sid, sizeof(A.sid), "s%lx%04x", (unsigned long) time(NULL), (unsigned) (rand() ^ (int) (clock() & 0xffff)) & 0xffff);
     if (!A.conv) A.conv = cJSON_CreateArray();
@@ -366,11 +377,19 @@ static void health_banner(void) {
     }
 }
 
+// The panel's sign-in line for the connected server. On an official krunker.io server the AI is not offered (the line
+// names krunker.io); a Box Office guest gets the sign-in line; a Box Office session with no brain gets the offline line.
+static void gate_banner(void) {
+    if (!ai_here()) set_banner(1, "AI in the editor is not available on krunker.io.");
+    else if (!signed_in()) set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
+    else if (!A.custom && !brain_ready()) set_banner(3, "AI needs the account service: this editor runs offline.");
+    else if (A.banner_kind == 4 || A.banner_kind == 1) set_banner(0, NULL);
+}
+
 // No account indicator in the panel (the hub shows who is signed in); the sign-in gating stays:
-// a guest gets the sign-in card. This only remembers whom the panel was drawn for.
+// a guest gets the sign-in card. This only remembers the gate state the panel was drawn for.
 static void update_account(void) {
-    const AccountInfo *acc = active_account();
-    A.signed_in_seen = acc ? acc->id : 0;
+    A.gate_seen = gate_state();
 }
 
 static void update_usage(void) {
@@ -402,7 +421,7 @@ static int web_available(void) { return !A.custom && cJSON_GetArraySize(A.server
 
 static void update_controls(void) {
     if (!A.built) return;
-    const int can = signed_in() && (A.custom || brain_ready());
+    const int can = can_chat();
     const int busy = A.streaming || A.tool_step; // Stop also ends a run of tool calls
     html_dom_set_display(A.send, busy ? "none" : "");
     html_dom_set_display(A.stop, busy ? "" : "none");
@@ -1386,8 +1405,8 @@ static cJSON *mode_tools_defs(void) {
 
 static void send_turn(void) {
     if (A.streaming) return;
-    if (!signed_in()) {
-        set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
+    if (!can_chat()) {
+        gate_banner();
         update_controls();
         return;
     }
@@ -1499,8 +1518,8 @@ static void skip_pending_tools(const char *why);
 static void submit_text(const char *text) {
     if (!text || !text[0] || A.streaming || A.tool_step) return;
     skip_pending_tools("Error: not run: the user sent a new message instead"); // e.g. an approval left open
-    if (!signed_in()) {
-        set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
+    if (!can_chat()) {
+        gate_banner();
         update_controls();
         return;
     }
@@ -2146,13 +2165,16 @@ static void render_pop(void) {
     } else {
         edb_add(&b, "<div class='knAiPopTitle'>AI settings</div>");
         edb_addf(&b, "<div class='knAiField'><label>Provider</label><select id='knAiSrc' onchange='KE.kn.aiSrc(this.value)'>"
-                     "<option value='0'%s>Krunker Box Office AI (free, signed-in accounts)</option>"
+                     "<option value='0'%s>%s</option>"
                      "<option value='1'%s>Your own OpenAI-compatible endpoint</option></select></div>",
-                 A.custom ? "" : " selected", A.custom ? " selected" : "");
+                 A.custom ? "" : " selected",
+                 account_backend() == ACCOUNT_BACKEND_KRUNKIO ? "Krunker Box Office AI (free, signed-in accounts)" : "Built-in AI (not on krunker.io)",
+                 A.custom ? " selected" : "");
         if (A.custom) {
-            edb_add(&b, "<div class='knAiNote knAiWarnNote'>Your own endpoint: the URL and key are stored on this computer only and the key is "
-                        "sent to that URL only, never to Krunker Box Office. The chat and the map data the tools read go to that provider, "
-                        "which bills your key. In the browser the endpoint must allow cross-origin requests (CORS).</div>");
+            edb_addf(&b, "<div class='knAiNote knAiWarnNote'>Your own endpoint: the URL and key are stored on this computer only and the key is "
+                         "sent to that URL only, never to %s. The chat and the map data the tools read go to that provider, ",
+                     account_backend() == ACCOUNT_BACKEND_KRUNKER ? "krunker.io" : "Krunker Box Office");
+            edb_add(&b, "which bills your key. In the browser the endpoint must allow cross-origin requests (CORS).</div>");
             edb_add(&b, "<div class='knAiField'><label>Base URL (.../v1)</label><input id='knAiEpUrl' type='text' spellcheck='false' value='");
             ai_html_escape(&b, A.ep_url);
             edb_add(&b, "' placeholder='https://api.example.com/v1'></div><div class='knAiField'><label>API key</label><input id='knAiEpKey' type='password' value='");
@@ -2217,9 +2239,7 @@ void ed_ai_toggle(void) {
     }
     if (A.models_state != 1 && (A.models_state != 2 || g_ed.now - A.models_at > 300)) models_load();
     fill_models();
-    if (!signed_in()) set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
-    else if (!A.custom && !brain_ready()) set_banner(3, "AI needs the account service: this editor runs offline.");
-    else if (A.banner_kind == 4) set_banner(0, NULL);
+    gate_banner();
     health_banner();
     render_all();
     update_controls();
@@ -2229,10 +2249,9 @@ void ed_ai_toggle(void) {
 void ed_ai_tick(void) {
     http_stream_poll();
     if (!A.built) return;
-    const AccountInfo *acc = active_account();
-    if ((acc ? acc->id : 0) != A.signed_in_seen) {
-        if (acc && A.banner_kind == 4) set_banner(0, NULL);
-        if (!acc && A.open) set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
+    if (gate_state() != A.gate_seen) { // the backend or the sign-in changed: the panel's line follows it
+        update_account();
+        if (A.open) gate_banner();
         if (A.open) health_banner();
         update_controls();
     }
@@ -2291,11 +2310,11 @@ H(h_send) {
     while (*s == ' ' || *s == '\n' || *s == '\r' || *s == '\t') s++;
     size_t l = strlen(s);
     while (l && (s[l - 1] == ' ' || s[l - 1] == '\n' || s[l - 1] == '\r' || s[l - 1] == '\t')) s[--l] = 0;
-    if (s[0] && !A.streaming && !A.tool_step && signed_in()) {
+    if (s[0] && !A.streaming && !A.tool_step && can_chat()) {
         html_dom_set_value(A.input, "");
         submit_text(s);
-    } else if (!signed_in()) {
-        set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
+    } else if (!can_chat()) {
+        gate_banner();
     }
     free(text);
     return 1;
@@ -2728,6 +2747,10 @@ static void dump_state(const char *path) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "open", A.open);
     cJSON_AddBoolToObject(o, "signed_in", signed_in());
+    const AccountInfo *dump_acc = active_account();
+    cJSON_AddStringToObject(o, "account", dump_acc ? dump_acc->name : "");
+    cJSON_AddNumberToObject(o, "backend", (double) account_backend());
+    cJSON_AddStringToObject(o, "banner", A.banner_text);
     cJSON_AddBoolToObject(o, "streaming", A.streaming);
     cJSON_AddBoolToObject(o, "tool_step", A.tool_step);
     cJSON_AddStringToObject(o, "model", A.custom ? A.ep_model : A.model);

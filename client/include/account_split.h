@@ -27,3 +27,8 @@ int account_split_row_usable(int krunker_row);
 // (Live Streams), its ranked route, its event bus. On a Box Office server a signed-in krunker.io account supplies
 // nothing and is shown as nobody's.
 int account_split_krunker_identity(void);
+
+// 1 while the connected server's backend has a signed-in account this client acts as: the krunker.io account in an
+// official krunker.io game, the Box Office session on a Box Office server (its session token). The one sign-in test for
+// a window's gate (the editor's AI panel, the hub's login popup). A Box Office session is no sign-in on krunker.io.
+int account_split_signed_in(void);
