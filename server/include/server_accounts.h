@@ -98,6 +98,10 @@ int accounts_can_use_skin(const Player*, int skin);
 int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerCosmeticsV7*); // unowned slots -> -1 (+ the premium hat/head, body/back rule)
 // Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).
 int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
+// The account's owned list (data slot 10, cJSON) -> the skin bitset and the painted copies (their paint).
+void accounts_load_skins(ClientConnection*, const cJSON *account);
+// The paint of each worn skin, from the owner's painted copies (NULL owner: none). Sent with SKINS V2.
+void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)

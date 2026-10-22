@@ -282,6 +282,15 @@ dom_zones index the client mirrors. The same rules apply: the packet has no vers
 server must come from one build. The bridge (`net-bridge/v10Translate.ts`) sends `uct` with each zone's object id as
 v10's uid (`updateDomZone` matches the zone by uid, `v10.js` 188544).
 
+Protocol 1.4.6 (NET_PROTOCOL_PATCH 6): `NetSkinsPacketV2` (NET_PACKET_SKINS, 35, 40 bytes) carries the paint of each worn
+skin after the uid and the three store indices: `PlayerSkinPaints` (primary, secondary, melee), each a `SkinPaint` {int32 color
+0xRRGGBB or -1, int32 shader number or -1}. The server sends it only to a peer that announced patch 6
+(`net_peer_has_skin_paint`, shared/src/net.c); a peer on an older patch gets the 16-byte `NetSkinsPacket` (V1) it reads today,
+and every reader takes both sizes (`net_packet_read_skins`), so bots (which send V1 to everyone) and pre-patch servers still
+work. The paint is the owner's first painted copy of each index (doc/v10/paint-copy.md). The native client applies it to the
+player's weapon and melee skin meshes (`skin_fx_apply_paint`). The bridge's C side (server/bridge) announces patch 6 and
+accepts both sizes; the TypeScript v10 bridge still announces 1.4.5 patch 5 and gets V1.
+
 Protocol 1.4.5 (NET_PROTOCOL_PATCH 5): `NetStatePacket` (NET_PACKET_STATE, 6, the per-tick player state) carries the
 values the v10 "k" record needs and the state did not have: `float step_val` (player.step_val, v10 stepVal), `uint8
 on_ground`, `uint8 grapple_active` with `float grapple[3]` (player.grapple.point), and `float ping`. The server fills

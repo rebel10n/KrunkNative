@@ -554,10 +554,15 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             printf("{\"type\":\"taunt\",\"id\":%u,\"index\":%u}", (unsigned int) type, (unsigned int) packet.index);
             break;
         }
-        case NET_PACKET_SKINS: {
-            LOG_READ(NetSkinsPacket, "skins");
-            printf("{\"type\":\"skins\",\"id\":%u,\"uid\":%d,\"skins\":[%d,%d],\"melee\":%d}",
-                   (unsigned int) type, packet.uid, packet.skins.primary, packet.skins.secondary, packet.skins.melee);
+        case NET_PACKET_SKINS: { // V1 (16 bytes) or V2 (40: + the paint of each skin, patch 6)
+            NetSkinsPacketV2 skins;
+            if (!net_packet_read_skins(&skins, payload, length)) {
+                client_net_log_bad_payload("skins", type, payload, length);
+                break;
+            }
+            printf("{\"type\":\"skins\",\"id\":%u,\"uid\":%d,\"skins\":[%d,%d],\"melee\":%d,\"paint\":[%d,%d,%d]}",
+                   (unsigned int) type, skins.uid, skins.skins.primary, skins.skins.secondary, skins.skins.melee,
+                   skins.paints.primary.color, skins.paints.secondary.color, skins.paints.melee.color);
             break;
         }
         case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (shared/include/object_manager.h)

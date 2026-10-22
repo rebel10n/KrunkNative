@@ -926,6 +926,12 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(social_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # skin_paint_wire_test (Krunker v10.0.3 paint, NET_PROTOCOL_PATCH 6): a painted owner's skins reach a joiner with their paint
+    add_executable(skin_paint_wire_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/skin_paint_wire_test.c)
+    target_link_libraries(skin_paint_wire_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(skin_paint_wire_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
     add_executable(votekick_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/votekick_test.c)
     target_link_libraries(votekick_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

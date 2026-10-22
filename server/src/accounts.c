@@ -1994,11 +1994,40 @@ int accounts_filter_skins(const ClientConnection *client, PlayerSkins *s) {
     return stripped;
 }
 
-// account.data[10] (Account.getData skins): [{ind, cnt}, ...] -> bitset
-static void acc_load_skins(ClientConnection *client, const cJSON *account) {
+// The paint of an owned copy's metadata m (the object, or its JSON string: the client's normaliser):
+// paint "#rrggbb" (color 0xRRGGBB) and paintShader a number. Returns 0 when the copy has neither.
+static int acc_copy_paint(const cJSON *entry, WornSkinPaint *out) {
+    *out = WORN_SKIN_PAINT_NONE;
+    const cJSON *m = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "m") : NULL;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+    if (parsed) m = parsed;
+    const cJSON *paint = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "paint") : NULL;
+    const cJSON *shader = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "paintShader") : NULL;
+    if (cJSON_IsString(paint) && paint->valuestring && strlen(paint->valuestring) == 7 && paint->valuestring[0] == '#') {
+        char *end = NULL;
+        const long rgb = strtol(paint->valuestring + 1, &end, 16);
+        if (end && *end == 0) out->color = (int32_t) rgb;
+    }
+    if (cJSON_IsNumber(shader)) out->shader = shader->valueint;
+    cJSON_Delete(parsed);
+    return out->color >= 0 || out->shader >= 0;
+}
+
+// whether the account already has a paint for store index skin (its first painted copy)
+static int acc_has_paint(const ServerAccount *acct, const int skin) {
+    for (uint16_t i = 0; i < acct->skin_paint_count; i++) {
+        if (acct->skin_paints[i].skin == skin) return 1;
+    }
+    return 0;
+}
+
+// account.data[10] (Account.getData skins): [{ind, cnt}, ...] -> bitset; a painted copy ({ind, cnt: 1, id, m}) also
+// records its paint (the first copy of each store index keeps it).
+void accounts_load_skins(ClientConnection *client, const cJSON *account) {
     memset(client->acct.skins_owned, 0, sizeof(client->acct.skins_owned));
-    const cJSON *data = cJSON_GetObjectItem(account, "data");
-    const cJSON *skins = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 10) : cJSON_GetObjectItem(account, "skins");
+    client->acct.skin_paint_count = 0;
+    const cJSON *data = cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "data") : NULL;
+    const cJSON *skins = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 10) : cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "skins") : NULL;
     client->acct.skins_known = cJSON_IsArray(skins);
     int count = 0;
     const cJSON *e;
@@ -2010,8 +2039,30 @@ static void acc_load_skins(ClientConnection *client, const cJSON *account) {
         if (skin < 0 || skin >= ACC_SKIN_MAX) continue;
         client->acct.skins_owned[skin >> 3] |= (uint8_t) (1u << (skin & 7));
         count++;
+        WornSkinPaint paint;
+        if (acc_copy_paint(e, &paint) && !acc_has_paint(&client->acct, skin) && client->acct.skin_paint_count < SERVER_SKIN_PAINT_MAX) {
+            client->acct.skin_paints[client->acct.skin_paint_count++] = (ServerSkinPaint) {skin, paint};
+        }
     }
     if (client->acct.skins_known) server_log("%s owns %d skin(s) on this network", client->name, count);
+}
+
+// The paint each worn skin of a player shows (SKINS V2): the owner's painted copy of that store index, the way the
+// official client reads a plain index (deob-10.0.3.js:252090-252095). owner NULL (a bot, a guest): none.
+void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out) {
+    *out = PLAYER_SKIN_PAINTS_NONE;
+    if (!owner || !skins) return;
+    const int32_t worn[3] = {skins->primary, skins->secondary, skins->melee};
+    WornSkinPaint *slots[3] = {&out->primary, &out->secondary, &out->melee};
+    for (int k = 0; k < 3; k++) {
+        if (worn[k] < 0) continue;
+        for (uint16_t i = 0; i < owner->acct.skin_paint_count; i++) {
+            if (owner->acct.skin_paints[i].skin == worn[k]) {
+                *slots[k] = owner->acct.skin_paints[i].paint;
+                break;
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------ connection lifecycle
@@ -2564,7 +2615,7 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
         cJSON_ArrayForEach(b, owned) found |= cJSON_IsNumber(b) && b->valueint == client->acct.badge;
         if (!found) client->acct.badge = -1;
     }
-    acc_load_skins(client, account);
+    accounts_load_skins(client, account);
     // WP-E: the death screen's account values (class levels, config.playerCardStats)
     client->acct.has_stats = 1;
     for (int i = 0; i < SERVER_CLASS_STATS_MAX; i++) {
@@ -2778,6 +2829,7 @@ static void acc_live_leave_account(ClientConnection *client) {
     a->funds = 0;
     a->badge = -1;
     a->skins_known = 0;
+    a->skin_paint_count = 0;
     memset(a->skins_owned, 0, sizeof(a->skins_owned));
     a->has_stats = 0;
     memset(a->class_stats, 0, sizeof(a->class_stats));

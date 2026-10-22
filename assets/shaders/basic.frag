@@ -106,6 +106,12 @@ uniform sampler2D env_map;
 uniform float env_map_intensity;
 uniform bool projection_uv;
 
+// SKINS paint (skin_fx_apply_paint, basic.c): a painted skin's colour mixes the albedo before the lighting, as the
+// official colorNode = mix(albedo, paintColor, paintIntensity). The alpha stays.
+uniform bool paint_enabled;
+uniform vec3 paint_color;
+uniform float paint_intensity;
+
 // glTF PBR maps (gltf.c, BasicMaterial.metal_rough_texture / normal_texture): metallicRoughness (texture
 // unit 5: G = roughness, B = metalness, times the factors) and the tangent-space normal map (unit 6,
 // normalScale). A material with the metal-roughness map is shaded as three.js MeshStandardMaterial (pbr_*
@@ -433,6 +439,7 @@ void main() {
     if (tex_srgb) texel.rgb = srgb_to_linear(texel.rgb);
     vec4 base_color = texel * object_color;
     if (base_color.a < alpha_test) discard;
+    if (paint_enabled) base_color.rgb = mix(base_color.rgb, paint_color, clamp(paint_intensity, 0.0, 1.0));
 
     emissive_radiance = emissive.rgb * emissive.a;
     if (use_emissive_map) emissive_radiance *= texture(emissive_map, t_tex_coord.xy).rgb;

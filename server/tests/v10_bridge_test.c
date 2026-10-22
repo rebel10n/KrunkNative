@@ -475,8 +475,8 @@ int main(void) {
     client_send("load", NULL, 0);
     WAIT_FOR(native_count(NET_PACKET_HELLO) == 1);
     NFrame *hello = native_nth(NET_PACKET_HELLO, 0);
-    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == 5 && hello->payload[3] == 4,
-          "HELLO is [1, 4, 5, 4] (NET_PROTOCOL_PATCH 5)");
+    CHECK(hello && hello->len == 4 && hello->payload[0] == 1 && hello->payload[1] == 4 && hello->payload[2] == NET_PROTOCOL_PATCH && hello->payload[3] == 4,
+          "HELLO is [1, 4, NET_PROTOCOL_PATCH, 4] (patch 6: the SKINS paint)");
     client_send("load", NULL, 0); /* a second LOAD sends no second HELLO */
     pump(100);
     CHECK(native_count(NET_PACKET_HELLO) == 1, "a second LOAD sends no second HELLO");

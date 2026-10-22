@@ -531,6 +531,12 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
     return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
 }
 
+// The SKINS paint of the store skin player_slot_skin returns for this slot (the melee's on a melee weapon).
+static WornSkinPaint player_slot_paint(const Player *player, const int slot, const Weapon *weapon) {
+    if (weapon->melee) return player->skin_paints.melee;
+    return slot == 0 ? player->skin_paints.primary : player->skin_paints.secondary;
+}
+
 // KrunkNative Piss: the centre of the trigger hand (the arm generate_arms gives the right hold:
 // arms->right, arms->left when left-handed), i.e. of its lower arm's last (skin) segment, in the
 // arms anchor's frame. Static there (the per-arm pivots only move for melee and the Drank's
@@ -1356,6 +1362,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                             // melee loadMesh: glowText = glow || sameGlow, emissive (glow || sameGlow), seeThrough transparent
                             const int glow = (skin->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
                             skin_fx_apply(melee, skin, texture, model, glow, glow);
+                            skin_fx_apply_paint(melee, player_slot_paint(player, i, weapon));
                         }
                         melee->transform.parent = &arms->anchor;
 
@@ -1433,6 +1440,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                                                             (float) (weapon->tint & 255) / 255.0f, 1.0f};
                             }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
+                            if (skin) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon));
                         }
                         arms->weapon_models[j] = weapon_model;
 

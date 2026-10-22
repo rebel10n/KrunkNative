@@ -1205,8 +1205,10 @@ void v10_map_game_announcement(V10Out *o, const uint8_t *body, size_t n) {
 
 /* ---- SKINS, SPAWN, the add record, START, LEADERBOARD, LEADER_STATS */
 
+/* NetSkinsPacket (16 bytes) or NetSkinsPacketV2 (40: + the paint of each skin, patch 6). The paint is not
+ * sent on the v10 add record yet (doc/v10/paint-copy.md, gaps): only the indices are taken. */
 int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out) {
-    if (n != 16) return 0;
+    if (n != 16 && n != 40) return 0;
     out->uid = rd_i32(p, 0);
     out->primary = rd_i32(p, 4);
     out->secondary = rd_i32(p, 8);

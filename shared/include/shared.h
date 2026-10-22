@@ -1014,6 +1014,25 @@ typedef struct {
 
 #define PLAYER_SKINS_NONE ((PlayerSkins) {-1, -1, -1})
 
+// The paint of each worn skin (Krunker v10.0.3 owned copy m: paint "#rrggbb" / paintShader n). A copy's
+// paint belongs to that copy (doc/v10/paint-copy.md): the server takes it from the owner's painted copy of
+// the same store index and sends it with the skins (NetSkinsPacketV2, patch 6). color = 0xRRGGBB, -1 none;
+// shader = the paint shader number, -1 none. Shaders are carried, not drawn (the colour paint is).
+typedef struct {
+    int32_t color;
+    int32_t shader;
+} WornSkinPaint;
+
+// WornSkinPaint for each PlayerSkins slot (primary, secondary, melee), in the same order.
+typedef struct {
+    WornSkinPaint primary;
+    WornSkinPaint secondary;
+    WornSkinPaint melee;
+} PlayerSkinPaints;
+
+#define WORN_SKIN_PAINT_NONE ((WornSkinPaint) {-1, -1})
+#define PLAYER_SKIN_PAINTS_NONE ((PlayerSkinPaints) {WORN_SKIN_PAINT_NONE, WORN_SKIN_PAINT_NONE, WORN_SKIN_PAINT_NONE})
+
 // First-person feel tweens (Krunker v3.1.1 TWEEN.Tween on landBobY / jumpBobY / jumpRot,
 // started by players.js jump/resetStep/wall jump). Client-only animation state: only the
 // local, non-recon player starts them, and they advance in real (unclamped) frame time
@@ -1406,6 +1425,7 @@ typedef struct Player_t {
     const Weapon *weapon;
 
     PlayerSkins skins;            // weapon / melee store skins (ENT -> SKINS), PLAYER_SKINS_NONE by default
+    PlayerSkinPaints skin_paints; // the paint of each worn skin (SKINS V2), PLAYER_SKIN_PAINTS_NONE by default
     void *mesh;
 
     ModePlayerState mode;         // game mode stats (lives, caps, tier, ...), shared/src/modes
@@ -2607,7 +2627,13 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // A missing patch byte (2-byte HELLO) reads as 0.
 // Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
 // any non-zero fists as a fists kill.
-#define NET_PROTOCOL_PATCH 5
+#define NET_PROTOCOL_PATCH 6
+// Patch 6: NET_PACKET_SKINS carries each worn skin's paint (NetSkinsPacketV2, 40 bytes). A server sends the
+// 16-byte V1 to a peer that announced an older patch (net_peer_has_skin_paint): an older client's exact-size
+// check accepts only V1, so it never receives V2. Readers of this patch take both sizes (V1 is what bots and
+// pre-patch servers send).
+#define NET_PROTOCOL_PATCH_SKIN_PAINT 6
+int net_peer_has_skin_paint(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes the V2 SKINS
 // Patch 5: NetStatePacket carries the v10 "k" record's step value, on-ground flag, grapple and ping (see the struct).
 // The STATE grew from 57 to 79 bytes: readers take both (net_packet_read_state) and a server sends the 57-byte
 // form to a peer that announced an older patch (net_peer_has_state_v2), like SPAWN / RECON for WP-C.
@@ -3038,10 +3064,23 @@ typedef struct {
 
 // The validated (owned) weapon skins of a player, sent before its SPAWN: a separate packet so older
 // clients, which only accept the fixed SPAWN sizes, keep working (they ignore unknown types).
+// V1 (16 bytes): the skins alone, sent to a peer that announced patch < NET_PROTOCOL_PATCH_SKIN_PAINT.
 typedef struct {
     int32_t uid;
     PlayerSkins skins;
 } NetSkinsPacket;
+
+// V2 (40 bytes, patch 6): the same, then the paint of each skin (PlayerSkinPaints). A server sends it to a
+// peer that announced patch 6 (net_peer_has_skin_paint); readers take both sizes (net_packet_read_skins).
+typedef struct {
+    int32_t uid;
+    PlayerSkins skins;
+    PlayerSkinPaints paints;
+} NetSkinsPacketV2;
+#define NET_SKINS_PACKET_V1_SIZE ((uint16_t) sizeof(NetSkinsPacket))
+#define NET_SKINS_PACKET_V2_SIZE ((uint16_t) sizeof(NetSkinsPacketV2))
+// The skins of a SKINS payload, V1 or V2 (paints none for V1). Returns 0 for any other length.
+int net_packet_read_skins(NetSkinsPacketV2 *out, const void *payload, uint16_t length);
 
 // NET_PACKET_JOIN (C->S right after HELLO, before the first ENT). Every field is a
 // NUL-terminated string, "" = not given. game_id + client_key: what the brain's

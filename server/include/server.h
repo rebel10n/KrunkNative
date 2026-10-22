@@ -45,6 +45,13 @@ typedef enum {
 
 #define SERVER_CLASS_STATS_MAX 32 // account.stats c0..c31 (v7.1.4 has 16 classes)
 #define SERVER_TALLY_MAX 128      // challenge tallies of one round (key x weapon x streak x item)
+#define SERVER_SKIN_PAINT_MAX 256 // painted store indices of one account (one paint per index; more are not sent)
+
+// one painted copy of the account, by store index (a shader paint has color -1, a colour paint shader -1)
+typedef struct {
+    int32_t skin;
+    WornSkinPaint paint;
+} ServerSkinPaint;
 
 // WP-E part 2c: one challenges.update tally (shared/include/progression.h)
 typedef struct {
@@ -86,7 +93,11 @@ typedef struct {
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
     uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v10.0.2 has 8069), enforced on ENT
-    int badge;                         // badgeIndex (v7 account stats.bdg, badges.js), -1 none
+    // the paint of the account's painted copies, one per store index (the first copy of that index in the owned
+    // list: the official plain-index rule, doc/v10/paint-copy.md section 6). Sent with the owner's SKINS (V2).
+    uint16_t skin_paint_count;
+    ServerSkinPaint skin_paints[SERVER_SKIN_PAINT_MAX];
+    int badge;                        // badgeIndex (v7 account stats.bdg, badges.js), -1 none
     // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
     // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value
     unsigned char has_stats:1;

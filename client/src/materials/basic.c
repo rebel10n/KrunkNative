@@ -144,6 +144,13 @@ U(u_env_map_intensity, "env_map_intensity");
 U(u_projection_uv, "projection_uv");
 #undef U
 
+// SKINS paint (skin_fx_apply_paint): the colour paint mixes the albedo before the lighting
+#define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
+U(u_paint_enabled, "paint_enabled");
+U(u_paint_color, "paint_color");
+U(u_paint_intensity, "paint_intensity");
+#undef U
+
 // glTF PBR maps (gltf.c): metallicRoughness (texture unit 5) and normal (unit 6) textures
 #define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
 U(u_use_metal_rough_map, "use_metal_rough_map");
@@ -395,6 +402,13 @@ void basic_material_update_uniforms(Material *base) {
         glActiveTexture(GL_TEXTURE0);
     }
     gl_uniform_1i(&u_projection_uv, program, material->projection_uv);
+
+    // SKINS paint: a painted skin's colour (basic.frag)
+    gl_uniform_1i(&u_paint_enabled, program, material->paint_enabled);
+    if (material->paint_enabled) {
+        gl_uniform_3f(&u_paint_color, program, material->paint_color.x, material->paint_color.y, material->paint_color.z);
+        gl_uniform_1f(&u_paint_intensity, program, material->paint_intensity);
+    }
 
     // glTF PBR maps: a material without them is lit by the lighting setting, as before
     gl_uniform_1i(&u_use_metal_rough_map, program, material->metal_rough_texture != 0);

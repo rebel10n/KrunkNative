@@ -289,6 +289,12 @@ typedef struct {
     float metalness_factor;   // metallicFactor (1 by glTF default)
     float roughness_factor;   // roughnessFactor (1 by glTF default)
     float normal_scale;       // normalTexture.scale (1 by glTF default)
+
+    // SKINS paint of a worn store skin (skin_fx_apply_paint): the colour paint mixes the albedo before the lighting,
+    // as the official colorNode = mix(albedo, paintColor, paintIntensity). 0 = unpainted.
+    int paint_enabled;
+    vec3 paint_color;         // rgb 0..1
+    float paint_intensity;    // paintIntensity (1)
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;

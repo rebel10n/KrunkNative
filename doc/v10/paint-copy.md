@@ -158,8 +158,9 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
 
 The v10 bridge (`net-bridge/v10Translate.ts`, `v10Proxy.ts`) keeps the paint of our own loadout's `{i, m}` slots
 (`loadoutPaintOf`, `EV.loadoutPaint`) and puts it on our own spawn's add record (`buildPlayerAdd`, weapon slots [12] and
-[19]): `{i, m}` instead of the plain index. The native ENT and SKINS packets carry only indices, so the paint has to be
-kept on the bridge side.
+[19]): `{i, m}` instead of the plain index. The native ENT carries only indices (the loadout's paint stays on the bridge).
+The native SKINS packet carries each worn skin's paint from patch 6 (below): the server fills it from the owner's painted
+copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a native client shows another player's paint.
 
 ## Gaps (on purpose, or not yet)
 
@@ -173,8 +174,13 @@ kept on the bridge side.
 - The listing rows show a painted copy's paint (`m`); the purchase reply's `m` is still the listing's own value, not the
   paint.
 - A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge. The paint of a copy is the client's own
-  one (its `$account.skins`, section 6), so the local model is painted. Another player's spawn is unpainted: the native
-  SKINS packet has no paint field. That needs a `NET_PACKET_EXT` subtype and is not built.
+  one (its `$account.skins`, section 6), so the local model is painted. A native client paints another player's worn
+  skins from SKINS V2 (patch 6). The paint is the owner's first painted copy of that store index, the plain-index rule
+  (deob-10.0.3.js:252090-252095): a loadout that names a second painted copy of the same index with a different paint
+  shows the first one to other players. The native ENT carries no copy id, so this is the one case not matched.
+  Not drawn: a shader paint (`paintShader`; the packet carries its number, `client/src/skin_fx.c` draws only colour
+  paints, `basic.frag` mixes the albedo as the official colorNode does). The official client does not yet get native
+  players' paint: the C bridge (`server/bridge/v10_translate.c`) accepts V2 and takes only the indices.
 - `paintTargets` (which items accept a paint) is not checked by the brain; the client offers only paintable items.
 - The style route (`POST /items/{id}/style`) is still a refusal.
 

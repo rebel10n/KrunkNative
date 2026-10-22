@@ -863,10 +863,22 @@ static void net_shown_name(const ClientConnection *to, const ClientConnection *s
     else snprintf(out, size, "%s", real ? real : "");
 }
 
+// SKINS of `player` to `client`: the worn skins, and their paint (V2) to a peer that announced patch 6. The paint is
+// the owner's (its painted copies, accounts_skin_paints); a bot or a guest wears none.
+static void net_send_skins(ClientConnection *client, const Player *player) {
+    if (!net_peer_has_skin_paint(client->peer_minor, client->peer_patch)) {
+        const NetSkinsPacket skins = {.uid = player->uid, .skins = player->skins};
+        net_send_packet(client->fd, NET_PACKET_SKINS, &skins, NET_SKINS_PACKET_V1_SIZE);
+        return;
+    }
+    NetSkinsPacketV2 skins = {.uid = player->uid, .skins = player->skins};
+    accounts_skin_paints(net_client_of_player(player), &player->skins, &skins.paints);
+    net_send_packet(client->fd, NET_PACKET_SKINS, &skins, NET_SKINS_PACKET_V2_SIZE);
+}
+
 static void net_send_spawn(ClientConnection *client, const Player *player, const int is_you) {
     // The weapon / melee skins first: the client builds the player's meshes on SPAWN.
-    const NetSkinsPacket skins = {.uid = player->uid, .skins = player->skins};
-    net_send_packet(client->fd, NET_PACKET_SKINS, &skins, sizeof(skins));
+    net_send_skins(client, player);
 
     NetSpawnPacket packet = {
         .uid = player->uid,

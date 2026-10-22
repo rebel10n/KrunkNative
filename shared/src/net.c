@@ -13,6 +13,7 @@ _Static_assert(offsetof(NetSpawnPacket, cosmetics) == NET_SPAWN_PACKET_V1_SIZE, 
 _Static_assert(NET_ENT_PACKET_V4_SIZE == NET_ENT_PACKET_V3_SIZE + 2 && NET_ENT_PACKET_V5_SIZE == NET_ENT_PACKET_V4_SIZE + 4, "ENT spectate, slid_cont then spray_index must follow the cosmetics");
 _Static_assert(NET_ENT_PACKET_V6_SIZE == NET_ENT_PACKET_V5_SIZE + sizeof(PlayerSkins) && sizeof(PlayerSkins) == 12, "ENT weapon skins must follow spray_index");
 _Static_assert(NET_ENT_PACKET_V7_SIZE == NET_ENT_PACKET_V6_SIZE + sizeof(float) && NET_ENT_PACKET_V7_SIZE == 58, "ENT lag_comp must follow the skins");
+_Static_assert(NET_SKINS_PACKET_V1_SIZE == 16 && NET_SKINS_PACKET_V2_SIZE == 40, "SKINS V1 is 16 bytes, V2 (paints) 40");
 _Static_assert(NET_ENT_PACKET_V8_SIZE == NET_ENT_PACKET_V7_SIZE + 6, "ENT attach_index, chall_mode, anon_mode must be the last bytes (WP-C)");
 _Static_assert(NET_SPAWN_PACKET_V3_SIZE == NET_SPAWN_PACKET_V2_SIZE + 8, "SPAWN attach_index, head_mlt must be the last bytes (WP-C)");
 _Static_assert(sizeof(PlayerCosmeticsV7) == 36, "PlayerCosmeticsV7 is nine int32 (wire)");
@@ -237,6 +238,18 @@ void net_packet_apply_player(Player *player, const NetStatePacket *packet) {
 
 int net_peer_has_state_v2(const int minor, const int patch) {
     return minor > NET_PROTOCOL_MINOR_EXT || (minor == NET_PROTOCOL_MINOR_EXT && patch >= NET_PROTOCOL_PATCH_STATE_V2);
+}
+
+int net_peer_has_skin_paint(const int minor, const int patch) {
+    return minor > NET_PROTOCOL_MINOR_EXT || (minor == NET_PROTOCOL_MINOR_EXT && patch >= NET_PROTOCOL_PATCH_SKIN_PAINT);
+}
+
+int net_packet_read_skins(NetSkinsPacketV2 *out, const void *payload, const uint16_t length) {
+    if (length != NET_SKINS_PACKET_V1_SIZE && length != NET_SKINS_PACKET_V2_SIZE) return 0;
+    memset(out, 0, sizeof(*out));
+    memcpy(out, payload, length);
+    if (length == NET_SKINS_PACKET_V1_SIZE) out->paints = PLAYER_SKIN_PAINTS_NONE; // V1 carries no paint
+    return 1;
 }
 
 int net_packet_read_state(NetStatePacket *state, const void *payload, const uint16_t length) {

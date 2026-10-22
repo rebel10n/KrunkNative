@@ -37,6 +37,9 @@ void skin_fx_apply_gltf(struct GltfInstance *model, const struct ViewerSkin *ski
 // colour, opacity, glow and rgb (registered like an item; no frames / pulse).
 void skin_fx_apply_dye(Mesh *mesh, const struct ViewerSkin *dye);
 
+// The SKINS paint of a worn skin on its mesh (a BasicMaterial): the colour paint mixes the albedo; -1 colour = none.
+void skin_fx_apply_paint(Mesh *mesh, WornSkinPaint paint);
+
 // Drop a mesh's / model's registrations: call before freeing it (mesh_fini / gltf_instance_fini).
 void skin_fx_forget(const Mesh *mesh);
 void skin_fx_forget_gltf(const struct GltfInstance *model);

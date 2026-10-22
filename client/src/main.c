@@ -1276,7 +1276,7 @@ void client_drop_player_mesh(Client *client, Player *player) {
 // SKINS (sent right before every SPAWN): a player's validated weapon / melee skins, kept by uid
 // for its SPAWN (servers without SKINS: none). A full table recycles slot uid % CLIENT_SKINS_MAX.
 #define CLIENT_SKINS_MAX 256
-static NetSkinsPacket g_client_skins[CLIENT_SKINS_MAX];
+static NetSkinsPacketV2 g_client_skins[CLIENT_SKINS_MAX];
 static int g_client_skins_count;
 
 static PlayerSkins client_skins_of(const int uid) {
@@ -1286,7 +1286,15 @@ static PlayerSkins client_skins_of(const int uid) {
     return PLAYER_SKINS_NONE;
 }
 
-static void client_apply_skins(const NetSkinsPacket *packet) {
+// the paint of each of those skins (SKINS V2, patch 6; a V1 SKINS or none: no paint)
+static PlayerSkinPaints client_skin_paints_of(const int uid) {
+    for (int i = 0; i < g_client_skins_count; i++) {
+        if (g_client_skins[i].uid == uid) return g_client_skins[i].paints;
+    }
+    return PLAYER_SKIN_PAINTS_NONE;
+}
+
+static void client_apply_skins(const NetSkinsPacketV2 *packet) {
     int slot = 0;
     while (slot < g_client_skins_count && g_client_skins[slot].uid != packet->uid) slot++;
     if (slot == g_client_skins_count) {
@@ -1319,6 +1327,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     }
 
     const PlayerSkins skins = client_skins_of(packet->uid);
+    const PlayerSkinPaints paints = client_skin_paints_of(packet->uid);
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;
@@ -1329,12 +1338,13 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->cosmetics = packet->cosmetics;
         player->cosmetics_v7 = packet->cosmetics_v7;
         player->skins = skins;
+        player->skin_paints = paints;
         game_players_add(&client->game, player);
         player_spawn(player);
     } else if (!player->active || !player->loadout_size || player->class_index != packet->class_index || player->secondary_index != packet->secondary_index ||
                memcmp(&player->cosmetics, &packet->cosmetics, sizeof(packet->cosmetics)) != 0 ||
                memcmp(&player->cosmetics_v7, &packet->cosmetics_v7, sizeof(packet->cosmetics_v7)) != 0 ||
-               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || player->attach_index != packet->attach_index ||
+               memcmp(&player->skins, &skins, sizeof(skins)) != 0 || memcmp(&player->skin_paints, &paints, sizeof(paints)) != 0 || player->attach_index != packet->attach_index ||
                player->head_mlt != packet->head_mlt) {
         client_drop_player_mesh(client, player); // respawn: fresh loadout, timers and meshes
         player->class_index = packet->class_index;
@@ -1342,6 +1352,7 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->cosmetics = packet->cosmetics;
         player->cosmetics_v7 = packet->cosmetics_v7; // WP-F: SPAWN V4 (shorter: none)
         player->skins = skins;
+        player->skin_paints = paints;
         player_spawn(player);
     } else {
         // players.add runs player.init on every spawn: a player alive already with the same look keeps
@@ -1539,11 +1550,9 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             menu_rerender_if_open(23);                   // a new player's row in the Player List
             break;
         }
-        case NET_PACKET_SKINS: {
-            if (packet->length != sizeof(NetSkinsPacket)) break;
-
-            NetSkinsPacket skins;
-            memcpy(&skins, packet->payload, sizeof(skins));
+        case NET_PACKET_SKINS: { // V1 (16 bytes) or V2 (40, patch 6): both are read
+            NetSkinsPacketV2 skins;
+            if (!net_packet_read_skins(&skins, packet->payload, packet->length)) break;
             client_apply_skins(&skins);
             break;
         }

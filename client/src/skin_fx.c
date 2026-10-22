@@ -434,6 +434,18 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     }
 }
 
+// SKINS paint of a worn store skin (playerMesh.js: the skin's paintColor / paintShader on its material): the colour
+// paint mixes the albedo (basic.frag paint_*). A shader paint (paintShader, a procedural graph) is carried in the
+// packet but not drawn; paint.color -1 (none or a shader only) leaves the mesh as it is.
+void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable || paint.color < 0) return;
+    BasicMaterial *material = (BasicMaterial *) mesh->material;
+    const vec4 rgb = fx_color(paint.color, 1.0f);
+    material->paint_enabled = 1;
+    material->paint_color = (vec3) {rgb.x, rgb.y, rgb.z};
+    material->paint_intensity = 1.0f;
+}
+
 void skin_fx_forget(const Mesh *mesh) {
     if (!mesh) return;
     for (int i = g_fx.count - 1; i >= 0; i--) {

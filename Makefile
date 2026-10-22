@@ -230,6 +230,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/krunker_kio_routes_test
 	./$(DEBUG_DIR)/menu_sources_test
 	./$(DEBUG_DIR)/skin_paint_test
+	./$(DEBUG_DIR)/skin_paint_wire_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
