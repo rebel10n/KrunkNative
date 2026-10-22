@@ -306,10 +306,13 @@ static void open_modal(const int reg) {
 }
 
 // The Account Manager's Use (alt_manager_ui.c): the card opens with a listed login's Username and its saved Password
-// in the fields, and that is all: nothing is signed in and no request is sent. The card opens over a signed-in account
-// too, and in an official game. The card is the connected server's: its Login signs in to krunker.io in an official
-// game, else to krunk.io's account service (open_card). alt_manager_ui.c opens it only for a row of that side.
-int v10_login_fill(const char *name, const char *pass) {
+// in the fields, and signs in with them: the card's own Login (submit) runs for the player, so the sign-in is the same
+// as a typed one. The card opens over a signed-in account too, and in an official game. The card is the connected
+// server's: its sign-in is to krunker.io in an official game, else to krunk.io's account service (open_card).
+// alt_manager_ui.c opens it only for a row of that side (its cross-backend refusal).
+static void submit(void);
+
+int v10_login_use(const char *name, const char *pass) {
     if (!v10_menu_page()) return 0;
     i18n_on_change(on_locale, NULL);
     open_card(0);
@@ -319,6 +322,7 @@ int v10_login_fill(const char *name, const char *pass) {
     L.choice = 0;
     L.kio_gen = krunker_account_generation();
     render_with(name, name, pass);
+    submit();
     return 1;
 }
 

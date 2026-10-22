@@ -3,7 +3,7 @@
 The Account Manager window (`ALT_MANAGER_WINDOW`, `client/src/ui/alt_manager_ui.c`) keeps track of the accounts
 the player listed, both backends in one list, so that their logins can be filled in later. Each row is one
 account: its name, a tag (`krunk.io` for a Box Office account, `krunker.io` for an official account), Use and
-Remove. The window never signs anyone in: the player presses Login on the login card.
+Remove. Use signs its row's login in on the login card; nothing else signs anyone in.
 
 ## Decisions
 
@@ -19,12 +19,15 @@ Remove. The window never signs anyone in: the player presses Login on the login 
    (`krunk.io` / `krunker.io`). It stores the login, the password and the kind (`alt_store_list`, no token) and
    lists the row: `Added <name>.` **Nothing is signed in, nothing is switched, and no request leaves the client.**
    A krunker.io login that is already listed (case-blind) keeps its row.
-4. **Use** opens the login card (`v10_login_fill`, `client/src/ui/v10_login.c`) with the row's login in Username
-   and its saved password in Password, and stops. No sign-in request, no session restore, no password prompt.
-   The player presses Login, which signs in to the card's backend: a krunker.io row's card signs in to
-   krunker.io, a krunk.io row's to krunk.io's account service. **Use never refuses**: over a signed-in account
-   (whoever is signed in) and in an official game the card opens with the row's login all the same. Login is the
-   player's press; the window shows no refusal text for Use.
+4. **Use** opens the login card (`v10_login_use`, `client/src/ui/v10_login.c`) with the row's login in Username
+   and its saved password in Password, and signs in with them: the card's own Login runs for the player (`submit`),
+   so the sign-in is the same as a typed one. It signs in to the card's backend: a krunker.io row's card signs in to
+   krunker.io, a krunk.io row's to krunk.io's account service. **The cross-backend refusal is the only refusal Use
+   has of its own**: a row of the other backend (a krunker.io row on a Box Office server, a Box Office row in an
+   official game) opens no card and signs nobody in, because that account is not the connected server's
+   (`account_split_row_usable`). A row of this backend is never refused for its backend. Over a signed-in account the
+   card still opens with the row's login, and its sign-in is refused by the card's own rule for a different account
+   (`Signed in as <name>. Log out to sign in as <login>.`): nothing is switched or signed out.
    **Login on a card over a signed-in account** (either backend) signs in only when the login typed is the signed-in
    account's: a name is compared with the signed-in account's name (case-blind), and an address, typed in either field,
    with the address on file (the brain pushes it after every login, `emailS`). Until that address is known the Login
@@ -61,7 +64,7 @@ Remove (84 px). The active row shows its Use dimmed and an inset outline, which 
 - `client/src/alt/alt_store.c`: `alt_store_list` (Add), `alt_store_password`, `alt_store_kn_listed`,
   `alt_store_kn_forget`; `alt_store_kn_session` returns nothing for a row without a session.
 - `client/src/ui/alt_manager_ui.c`: the rows (both kinds), Add / Use / Remove, the krunker.io events.
-- `client/src/ui/v10_login.c`: the login card; `v10_login_fill` (Use's fill); `kio_form` picks the card's backend.
+- `client/src/ui/v10_login.c`: the login card; `v10_login_use` (Use: fill and sign in); `kio_form` picks the card's backend.
 - `client/src/ui/account_ui.c`: `persist_session`, `load_session`, `try_restore`, `account_response`,
   `account_ui_sign_out_of` (Remove), `account_saved_name`.
 - `client/src/net/krunker_account.c`: `krunker_account_sign_in`, `krunker_account_sign_out`,
@@ -73,7 +76,7 @@ Remove (84 px). The active row shows its Use dimmed and an inset outline, which 
   prune (an entry with neither a session nor a password goes).
 - `client/tests/account_manager_e2e.py` (`make account-manager-test`): register two krunk.io accounts through the
   popup; Add both with a --brain nothing listens on (listed, nothing signed in, no sign-in request); Use fills the
-  card's login and password with no sign-in request; Use then Login signs in and stores the session; a restart
+  card's login and password and signs in (no press), storing the session; a restart
   resumes it with no prompt; Logout, then Use fills the card again with no sign-in; a refused stored session
   signs nobody in and Use still fills; Remove; Use while signed in opens the card with the row's login and shows no
   refusal; an official krunker.io game (a guest joined through the stub's matchmaker): Add a krunk.io login, Use

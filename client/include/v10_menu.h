@@ -19,9 +19,9 @@ int  v10_menu_login_open(void);          // the login / register modal is up (En
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up
 int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal instead (1 = taken over)
 // The Account Manager's Use: the login card opens with a listed account's Username and its saved Password filled
-// in. The card signs in to the connected server's backend (account_split.h). Nothing is signed in. 1 shown, 0 not
-// here (an account is signed in, or the menu page is not up).
-int  v10_login_fill(const char *name, const char *pass);
+// in, and signs in with them (the card's Login, for the player). The card signs in to the connected server's backend
+// (account_split.h). 1 shown, 0 not here (the menu page is not up, or the card did not open).
+int  v10_login_use(const char *name, const char *pass);
 void v10_menu_tick(void);                // per frame: the menu's idle state (Popular Now, #activeBuffs, the Store item's badges)
 // v10's INIT (g:219154-219156): the Invite button greyed (buttonD) in a ranked match; the Host card greyed for an
 // official game only (v10's second toggle of menuBtnHost overrides the ranked one, so ranked does not grey it).

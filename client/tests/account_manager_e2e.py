@@ -6,10 +6,10 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   the login card asks for the password) -> Add with a typed login and password lists the account and stores
   the password sealed: nothing is signed in, nothing is switched, no request reaches the account server (the
   Add runs against a --brain nothing listens on) -> Use fills the login card's Username and Password with the
-  saved ones and stops there: no sign-in request, no password prompt -> the player presses Login: signed in,
-  the session is stored -> a restart resumes that account from its stored session -> Logout, then Use fills
-  the card again with no sign-in -> the player signs in again, the brain then refuses the stored session: it
-  is forgotten and nobody is signed in (no silent password sign-in); Use still fills the card -> Remove ->
+  saved ones and signs in with them (the card's Login, run for the player): signed in, the session is stored ->
+  a restart resumes that account from its stored session -> Logout, then Use signs in again -> the brain then
+  refuses the stored session: it is forgotten and nobody is signed in at start (no silent password sign-in); Use
+  fills the card and signs in -> Remove ->
   Use while signed in fills the card and refuses nothing -> an official krunker.io game (a guest joined through the
   stub's matchmaker): Add a krunk.io login, Use fills the card, Remove -> krunker.io: Add stores its login with no
   request to krunker.io, Use fills the card with it, its Login signs in to krunker.io (the Security Challenge
@@ -242,60 +242,46 @@ def add_accounts(db, game_port):
 
 
 def use_fills(brain_url, game_port, db):
-    """Use on a listed account opens the login card with its Username and its saved Password in the fields, and
-    stops: no sign-in request, no password prompt, nobody signed in."""
+    """Use on a listed account opens the login card with its Username and its saved Password in the fields, and the
+    card signs in with them (its Login, run for the player): the account is signed in and its session is stored."""
     sessions_before = sessions(db)
     log = run_client("use", f"""0 menu
 3000 call showWindow {WINDOW}
 3400 clicksel [onclick*="knAltUse"]
-4000 nodes @modal [id="knV10Login"]
-4100 nodes @user [id="accName"][value="{NAME2}"]
-4200 nodes @pass [id="accPass"][value="{PASS}"]
-4500 quit
-""", brain_url, game_port)
-    check("Use opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
-    check("Use fills the Username with the saved name", match_of(log, "user") == 1, str(match_of(log, "user")))
-    check("Use fills the Password with the saved password", match_of(log, "pass") == 1, str(match_of(log, "pass")))
-    check("Use sends no sign-in request and signs nobody in", "[account] logged in as" not in log and sessions(db) == sessions_before,
-          f"sessions {sessions_before} -> {sessions(db)}")
-
-
-def sign_in_from_card(brain_url, game_port):
-    """Use fills the card; the player presses Login (the card's own sign-in): the account is signed in and its
-    session is stored under the listed account."""
-    log = run_client("signin", f"""0 menu
-3000 call showWindow {WINDOW}
-3400 clicksel [onclick*="knAltUse"]
-4000 clickid knV10LoginSubmit
+3450 nodes @modal [id="knV10Login"]
 6500 quit
 """, brain_url, game_port)
-    check("Login from the filled card signs the account in (the player's press)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
-    return log
+    # the card closes when its sign-in completes (a few hundred ms), so it is sampled right after the click; the
+    # card's fields are replaced once its sign-in starts, so the saved login is checked by the sign-in it made
+    check("Use opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
+    check("Use signs the listed account in with the saved login (no press)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    check("and stores its session under the listed account", sessions(db) > sessions_before, f"sessions {sessions_before} -> {sessions(db)}")
 
 
 REFUSALS = ("Log out to sign in", "Leave the official game", "already signed in")
 
 
 def use_while_signed_in(brain_url, game_port):
-    """Signed in as NAME2 (its session restored at start), Use on the other listed row (NAME) still opens the login
-    card with NAME's login and its saved password: the card is not refused over a signed-in account, and Login stays
-    the player's press. (The active row's Use is dimmed and has no click, so clicksel reaches NAME's Use, listed first.)"""
+    """Signed in as NAME2 (its session restored at start), Use on the other listed row (NAME) opens the login card with
+    NAME's login and its saved password; the card's sign-in is then refused as any login over a signed-in account is:
+    the card says whose session it is, nothing is switched. (The active row's Use is dimmed and has no click, so
+    clicksel reaches NAME's Use, listed first.)"""
     log = run_client("signed_use", f"""0 menu
 3000 call showWindow {WINDOW}
 3400 clicksel [onclick*="knAltUse"]
 4000 nodes @modal [id="knV10Login"]
 4100 nodes @user [id="accName"][value="{NAME}"]
 4200 nodes @pass [id="accPass"][value="{PASS}"]
-4300 text @msg [id="knAltMsg"]
-4500 quit
+6000 text @cardmsg [id="accResp"]
+6500 quit
 """, brain_url, game_port)
     check("the account is signed in at start (the precondition)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
     check("Use while signed in opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
-    check("and fills the other row's Username and Password (no refusal)", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
+    check("and fills the other row's Username and Password", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
           f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
-    # a refusal keeps the window open with its text in knAltMsg; the card replaces the window, so the line is empty
-    refused = [r for r in REFUSALS if r in text_of(log, "msg")]
-    check("Use while signed in shows no refusal text", not refused, repr(text_of(log, "msg")[-120:]))
+    check("its sign-in says whose session it is (no other account is signed in)", f"Signed in as {NAME2}" in text_of(log, "cardmsg"),
+          repr(text_of(log, "cardmsg")[-120:]))
+    check("and signs nobody else in", logins_as(log, NAME) == 0, f"logins as {NAME}: {logins_as(log, NAME)}")
 
 
 def official_use(brain_url, game_port, stub):
@@ -337,7 +323,8 @@ def kio_login(brain_url, game_port, stub):
         f"9000 call showWindow {WINDOW}",
         '9500 clicksel [onclick*="knAltUse"]',
         '10500 nodes @kmodal [id="knV10Login"]',
-        '10600 clickid knV10LoginSubmit',
+        f'10550 nodes @kuser [id="accName"][value="{kae.LOGIN}"]',
+        f'10560 nodes @kpass [id="accPass"][value="{kae.PASSWORD}"]',
         '14400 vis @code knV10Code knV10Code0 knV10CodeSubmit',
     ] + [line for i, d in enumerate(kae.CODE) for line in (f"{14600 + i * 150} clickid knV10Code{i}",
                                                            f"{14660 + i * 150} type {d}")] + [
@@ -345,7 +332,10 @@ def kio_login(brain_url, game_port, stub):
         "20000 quit",
     ]) + "\n"
     log = run_client("kio_login", script, brain_url, game_port)
-    check("krunker.io Login posts the login once", len(stub.find("POST", "/api/auth/login/username")) - posts == 1,
+    check("in an official game, Use fills the krunker.io card with its login", match_of(log, "kmodal") == 1
+          and match_of(log, "kuser") == 1 and match_of(log, "kpass") == 1,
+          f"card {match_of(log, 'kmodal')} user {match_of(log, 'kuser')} pass {match_of(log, 'kpass')}")
+    check("and Use posts the krunker.io login once (no press)", len(stub.find("POST", "/api/auth/login/username")) - posts == 1,
           f"posts {posts} -> {len(stub.find('POST', '/api/auth/login/username'))}")
     check("krunker.io Login signs the row's account in to krunker.io", f"signed in to krunker.io as {kae.LOGIN}" in log)
     check("the card closes after the krunker.io sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
@@ -373,9 +363,6 @@ def same_account_login(brain_url, game_port, db):
 5400 clicksel [onclick*="knAltAdd"]
 5900 text @aadd [id="knAltMsg"]
 6200 clicksel [onclick*="knAltUse"]
-7200 nodes @amodal [id="knV10Login"]
-7300 nodes @auser [id="accName"][value="{ADDR2}"]
-7400 clickid knV10LoginSubmit
 9400 nodes @aclosed [id="knV10Login"]
 9800 call showWindow {WINDOW}
 10300 clicksel [onclick*="knAltRemove"]
@@ -386,9 +373,7 @@ def same_account_login(brain_url, game_port, db):
     check("Login typed as the signed-in account's name signs in as before (the card closes)",
           match_of(log, "umodal") == 1 and match_of(log, "uok") == 1 and match_of(log, "uclosed") == 0,
           f"card {match_of(log, 'umodal')} typed {match_of(log, 'uok')} closed-count {match_of(log, 'uclosed')}")
-    check("Login typed as the signed-in account's address opens the card with it", match_of(log, "amodal") == 1
-          and match_of(log, "auser") == 1, f"card {match_of(log, 'amodal')} user {match_of(log, 'auser')}")
-    check("Login typed as the signed-in account's address signs in as before (the card closes)",
+    check("Use on the address's row signs the signed-in account in as before (the card closes, no switch)",
           match_of(log, "aclosed") == 0, str(match_of(log, "aclosed")))
     check("both Logins reached the brain (a session each)", sessions(db) >= before + 2, f"sessions {before} -> {sessions(db)}")
     check("the signed-in account stays the active row", NAME2 in text_of(log, "act"), text_of(log, "act")[-120:])
@@ -424,16 +409,14 @@ def restart_and_logout(brain_url, game_port):
 3000 call knV10LoginClose
 3500 call showWindow {WINDOW}
 4000 clicksel [onclick*="knAltUse"]
-4500 nodes @user [id="accName"][value="{NAME2}"]
-4600 nodes @pass [id="accPass"][value="{PASS}"]
 5000 quit
 """, brain_url, game_port)
-    check("a restart resumes the account from its stored session", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    # the restore's sign-in, then Use's (after the Logout): two sign-ins in this run
+    check("a restart resumes the account from its stored session", logins_as(log, NAME2) >= 1, f"logins {logins_as(log, NAME2)}")
     check("and asks for no password", "no longer valid" not in log and "Enter the password" not in log)
     check("Logout signs the account out", "[account] logged out" in log)
-    check("after Logout, Use fills the card with the saved login (no password prompt)", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
-          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
-    check("and that Use signs nobody in", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
+    check("after Logout, Use signs the account in again (no press, no password prompt)", logins_as(log, NAME2) == 2,
+          f"logins {logins_as(log, NAME2)}")
 
 
 def refused_token(brain_url, game_port, db):
@@ -443,13 +426,9 @@ def refused_token(brain_url, game_port, db):
     log = run_client("refused", f"""0 menu
 7000 call showWindow {WINDOW}
 7500 clicksel [onclick*="knAltUse"]
-8000 nodes @user [id="accName"][value="{NAME2}"]
-8100 nodes @pass [id="accPass"][value="{PASS}"]
 8500 quit
 """, brain_url, game_port)
-    check("a refused stored session signs nobody in (no silent password sign-in)", logins_as(log, NAME2) == 0, f"logins {logins_as(log, NAME2)}")
-    check("the listed account keeps its login: Use fills the card", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
-          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
+    check("a refused stored session signs nobody in at start: the only sign-in is Use's", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
 
 
 def remove_accounts(brain_url, game_port):
@@ -543,22 +522,6 @@ def krunker_row(brain_url, game_port, stub):
     check("Use on a krunker.io row is refused on a Box Office server (no card)", "krunker.io accounts are used in an official krunker.io game."
           in text_of(log, "kref") and match_of(log, "kmodal") == 0, f"{text_of(log, 'kref')[-120:]} card {match_of(log, 'kmodal')}")
     check("the refused Use signs nobody in and sends no request to krunker.io",
-          "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
-
-    before = auth_requests(stub)
-    log = run_client("kio_use", f"""0 menu
-1500 call krunkerJoin "{kae.GAME_PICK}"
-9000 call showWindow {WINDOW}
-9500 clicksel [onclick*="knAltUse"]
-10500 nodes @kmodal [id="knV10Login"]
-10600 nodes @kuser [id="accName"][value="{kae.LOGIN}"]
-10700 nodes @kpass [id="accPass"][value="{kae.PASSWORD}"]
-11000 quit
-""", brain_url, game_port)
-    check("in an official game, Use on the krunker.io row fills the card with its login", match_of(log, "kmodal") == 1
-          and match_of(log, "kuser") == 1 and match_of(log, "kpass") == 1,
-          f"card {match_of(log, 'kmodal')} user {match_of(log, 'kuser')} pass {match_of(log, 'kpass')}")
-    check("Use on the krunker.io row sends no request to krunker.io and signs nobody in",
           "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
     kio_login(brain_url, game_port, stub)
@@ -700,12 +663,10 @@ def main():
         plain_restart(brain_url, game_port)
         add_accounts(db, game_port)
         use_fills(brain_url, game_port, db)
-        sign_in_from_card(brain_url, game_port)
         use_while_signed_in(brain_url, game_port)
         login_while_signed_in(brain_url, game_port, db)
         same_account_login(brain_url, game_port, db)
         restart_and_logout(brain_url, game_port)
-        sign_in_from_card(brain_url, game_port)
         refused_token(brain_url, game_port, db)
         remove_accounts(brain_url, game_port)
         official_use(brain_url, game_port, stub)

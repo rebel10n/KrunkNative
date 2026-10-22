@@ -92,7 +92,7 @@ client's refusals are what the e2e shows failing before (see the test notes in t
 ## Changes (this commit)
 
 - `client/include/account_split.h`, `client/src/ui/account_split.c`: the predicate.
-- `client/src/ui/v10_login.c`: `v10_login_fill(name, pass)` (the card's side is the server's, not the row's);
+- `client/src/ui/v10_login.c`: `v10_login_use(name, pass)` (fills the card and signs in; the card's side is the server's, not the row's);
   krunker.io `kio_submit` refuses a Box Office login (`:470`); the email-code handler is the krunker.io card's only (`:589`).
 - `client/src/ui/account_ui.c:1989-2017`: the Box Office card refuses a known krunker.io name or email
   before the brain send (login and register).

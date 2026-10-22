@@ -808,7 +808,7 @@ static void send_restore(const char *name, const char *token) {
 }
 
 // The session (g_session_user + g_token) is restored at start and on a new socket. With no session left nothing is
-// signed in: a listed account's login is filled in on the Account Manager's request, and the player presses Login.
+// signed in: a listed account's login is filled in and signed in on the Account Manager's Use (the card's own sign-in).
 static void try_restore(void) {
     if (g_restore_sent || !backend_enabled()) return;
     char name[sizeof(g_session_user)], token[sizeof(g_token)];

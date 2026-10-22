@@ -3,12 +3,12 @@
 // an official account), and Use / Remove. A row keeps its login (the name and the password, sealed in the alt
 // vault) and, once the player has signed it in, its session. Add stores the typed login and password under the
 // chosen backend and lists the account: nothing is signed in, nothing is switched, no request is sent. Use fills
-// the login card's Username and Password with the row's saved ones and stops there: the player presses Login
-// (the card's own sign-in, v10_login.c).
+// the login card's Username and Password with the row's saved ones and signs in with them (the card's own sign-in,
+// v10_login.c, run for the player).
 //
 // Use opens the card for a row of the connected server's backend only (account_split.h): a krunker.io row in an official
 // game, a Box Office row on a Box Office server. Over a signed-in account the card still opens. Any other row says so
-// and opens nothing. Login is the player's press, and the card signs in as it does for any login (v10_login.c).
+// and opens nothing; that cross-backend refusal is the only one for Use.
 #include <alt_manager_ui.h>
 
 #include <account_split.h>
@@ -196,11 +196,11 @@ void alt_manager_ui_init(void) {
 
 // ---------------------------------------------------------------- actions
 
-// Use: the login card opens over the window with the row's Username and its saved Password in the fields, and
-// nothing else happens: no sign-in, no session, no request. Over a signed-in account the card opens too. A row of the
-// other backend (a krunker.io row on a Box Office server, a Box Office row in an official game) opens no card and
-// signs nobody in: the card would sign in to the connected server's backend, so the row says where it belongs.
-// The player presses Login (v10_login.c).
+// Use: the login card opens over the window with the row's Username and its saved Password in the fields, and the
+// card signs in with them (v10_login_use: its Login runs, as a typed one would). Over a signed-in account the card
+// opens too. The cross-backend refusal is only for a row of the other backend (a krunker.io row on a Box Office
+// server, a Box Office row in an official game): that account is not the connected server's, so no card opens and
+// nobody is signed in; the row says where it belongs.
 static void use_row(const char *id) {
     const AltProfile *p = NULL;
     if (!find_profile(id, &p)) {
@@ -215,7 +215,7 @@ static void use_row(const char *id) {
     char name[ALT_LABEL_MAX], pass[ALT_SECRET_MAX];
     snprintf(name, sizeof(name), "%s", p->label);
     snprintf(pass, sizeof(pass), "%s", p->pass);
-    const int shown = v10_login_fill(name, pass);
+    const int shown = v10_login_use(name, pass);
     alt_wipe(pass, sizeof(pass));
     if (!shown) set_msg(I18N("kn.alt.noCard", "The login card is not open here."));
 }
