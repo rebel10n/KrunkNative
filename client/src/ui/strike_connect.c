@@ -13,7 +13,9 @@
 // Reconnect runs menu_retry_connect (the same server again, or a fresh seek on the brain), where
 // FRVR reloads the page (backToOrigin).
 #include <strike_ui.h>
+#include <html_dom.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <shared.h>
 #include <stdio.h>
@@ -33,7 +35,13 @@ static struct {
     char code[16];
     int close_code;
     char close_reason[32];
+    int reconnect_timer;        // the deadline of the reconnect under way (html_timer id, 0 none)
 } C;
+
+// A reconnect that is still going after RECONNECT_WAIT_MS is a lost connection: the curtain opens on the popup
+// with its error, rather than "Reconnecting..." for good
+#define RECONNECT_WAIT_MS 15000
+static void reconnect_expired(void *user);
 
 static void set_popup(const int popup) {
     if (C.popup != popup) C.dirty = 1;
@@ -81,6 +89,8 @@ void strike_connection_state(const StrikeConnState state, const char *error, con
             C.reconnecting = 1;
             strike_loading_show("Reconnecting...", 0);
         }
+        html_timer_cancel(C.reconnect_timer);
+        C.reconnect_timer = html_timer_add(RECONNECT_WAIT_MS, reconnect_expired, NULL);
         return;
     }
     if (state == STRIKE_CONN_LOST) {
@@ -96,12 +106,21 @@ void strike_connection_state(const StrikeConnState state, const char *error, con
         C.close_code = close_code;
     }
     if (state == STRIKE_CONN_CONNECTED || state == STRIKE_CONN_UPDATING || state == STRIKE_CONN_LOST) {
+        html_timer_cancel(C.reconnect_timer);
+        C.reconnect_timer = 0;
         if (C.reconnecting) { // the reconnect is over: the curtains open (RA)
             C.reconnecting = 0;
             strike_loading_complete();
         }
     }
     set_popup(state == STRIKE_CONN_LOST ? POPUP_LOST : state == STRIKE_CONN_UPDATING ? POPUP_UPDATING : POPUP_NONE);
+}
+
+static void reconnect_expired(void *user) {
+    (void) user;
+    C.reconnect_timer = 0;
+    if (!C.reconnecting) return;
+    strike_connection_state(STRIKE_CONN_LOST, I18N("kn.strike.reconnectFailed", "Couldn't reconnect to the server."), NULL, 0, "");
 }
 
 void strike_connect_tick(void) {
