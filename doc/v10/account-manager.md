@@ -56,6 +56,10 @@ Remove. Use signs its row's login in on the login card; nothing else signs anyon
    | official krunker.io game | another krunker.io account | krunker.io | signs it out (Logout path), signs the row in |
    | official krunker.io game (this window's) | any | krunk.io | leaves the game (gives way to Box Office), logs another krunk.io account out, signs the row in; the window says `Box Office accounts are used on a Box Office server.` |
    | official session of another window | any | krunk.io | refused: `Box Office accounts are used on a Box Office server.` |
+
+   Before this change (Use refused a signed-in account of the same backend and only opened the card): a same-backend row
+   opened the card and its Login was refused while another account was signed in (`Signed in as <name>. Log out to sign
+   in as <login>.`); the cross-backend rows matched the table's refusals, the official-game Box Office row included.
 5. **Logout** ends the session as before (the krunk.io server revokes it, the row keeps its login). **Startup**
    resumes the listed active account from its stored session when the server accepts it. A refused session is
    forgotten and nothing is signed in: there is no silent sign-in with the stored password. The row stays, and

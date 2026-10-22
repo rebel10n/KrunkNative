@@ -355,7 +355,7 @@ async def scenario(port):
 def start_brain(env, log_path, extra):
     with open(log_path, "a") as log:
         log.write("== start %s\n" % extra)
-        # the pass checks are the Season 7 pass's (its cards, bp_id 2): the brain's default season is 10 (0354_season_10)
+        # the pass checks are the Season 7 pass's (its cards, bp_id 2): the brain's default season is 10 (0355_season_10)
         proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=krw-%d" % os.getpid(),
                                  "--accounts.signup_rewards.sweep_s=1", "--accounts.login_throttle_s=0", "--accounts.current_season=7"] + extra,
                                 cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)

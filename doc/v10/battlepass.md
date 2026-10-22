@@ -23,7 +23,7 @@ official game:
 **Box Office.** kn_brain's social socket: `bpdl` -> `sh_bp_data` (services/brain/season.c) reads the active
 `battlepasses` row of `accounts.current_season` (services/brain/db_season.c:64; `SEASON_CURRENT` 10,
 shared/include/season.h:25, v10.0.3's `currentSeason` L19368; the seeded rows are season 7
-(services/db/migrations/*/0108_seasons.sql) and season 10 (0354_season_10.sql, "The Season 10 row" below).
+(services/db/migrations/*/0108_seasons.sql) and season 10 (0355_season_10.sql, "The Season 10 row" below).
 
 Outside an official game the active backend is krunk.io's (client/src/ui/account_ui.c `account_backend`: the
 official backend only while an official game socket is open), so a signed-in krunk.io account sees the Box
@@ -74,7 +74,7 @@ krunker.io server sends, what Box Office sends, and what KN shows on the officia
 | 19 | End-of-game pass section (`#endBPLayout`: "Battle Pass", "Level n", "+gained", "xp/need", "Check All Rewards" -> `showWindow(6)`, "Next Level Reward" / "VIP Tier Complete" / "Free Tier Complete" with the next card's image and the VIP lock) | L236511-236561 (`tabs.performance.gen`, shown when `account && !isCustom && bpData`); the level is the level table L236516-236529 | `bpData` = the player's `tmpBPData` (`bpp`, `gn`, `cbp`, `mx`, `ml`, `lv`, `re`; built L221713-221789) | the `end` packet's [6] (`END_GAME` L221896; `tabs.performance.bpData` L236689) | the `end` packet's [6] | `bpEnd` (brain, after the stats commit) | shown: krunker_link.c `on_end_game` forwards [6] as the same `bpEnd` frame (`kio_frame` -> `battlepass_ui_frame`), `battlepass_ui_end_html` renders v10.0.3's markup |
 | 20 | Sidebar item ("Battlepass", level) | L162042-164095 (`$battlepassData`) | `account.BP` | `bpdl` / `bppd` | same | same | out of this window's scope (v10_rewards.c `bp_item_update`) |
 
-## The Season 10 row (migration 0354_season_10)
+## The Season 10 row (migration 0355_season_10)
 
 v10.0.3 plays season 10 (`currentSeason` L19368) and the pass reaches its client only over the game socket
 (`bpdl`): no static file or public API carries it (the bundle's api.krunker.io paths have no pass route; the

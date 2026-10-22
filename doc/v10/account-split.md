@@ -15,7 +15,9 @@ The one predicate (every path asks it; nothing compares backends by hand):
     client to that side: only a Box Office row while this window's own official krunker.io game is
     the session (the game gives way to Box Office, `krunker_net_leave`, as Find New Game leaves it).
     A krunker.io row on a Box Office server never (no official game to join for it), nor a Box
-    Office row while another window holds the official session: those stay refused.
+    Office row while another window holds the official session: those stay refused. Use of a row
+    of the connected server's own backend does not come here: it switches accounts (logout of the
+    other signed-in account of that backend first, `account_ui_logout`), see account-manager.md.
   - `account_split_krunker_identity()`: 1 while a krunker.io account is signed in AND an official
     krunker.io game is the session. This is the only krunker.io identity a request may carry.
   - `account_split_side_of(login)`: the side a name is known to belong to (-1 unknown); a helper.
@@ -53,7 +55,7 @@ login, token or identity act on the other side's request or screen.
 | 8 | Box Office recover card (email) -> kn_brain reset | `v10_login.c:565-575` | no | no | not a sign-in; the brain mails only a Box Office account's address |
 | 9 | krunker.io recover card | `v10_login.c:560-563` | no | no | `kio()` only |
 | 10 | Account Manager Use of a krunker.io row on a Box Office server | `alt_manager_ui.c:204-219` (`account_split_row_usable`) | yes (card opened with the krunker.io sign-in) | no | refused: "krunker.io accounts are used in an official krunker.io game." |
-| 11 | Account Manager Use of a Box Office row in an official game | `alt_manager_ui.c:204-219` | no (the card opened as a Box Office card on an official server; its Login was dropped silently by the brain gate, `account_ui.c:1971`) | no | now refused with a message: "Box Office accounts are used on a Box Office server." |
+| 11 | Account Manager Use of a Box Office row in an official game | `alt_manager_ui.c:use_row` | no (the card opened as a Box Office card on an official server; its Login was dropped silently by the brain gate, `account_ui.c:1971`) | no | the window leaves its own official game and signs the row in on Box Office (Use switches); refused with "Box Office accounts are used on a Box Office server." only while another window holds the official session |
 | 12 | Account Manager row "active" marks | `alt_manager_ui.c:122-123` | yes (a krunker.io sign-in shown as the active account on Box Office; a Box Office session shown active in an official game) | no | each side's row is active only on its own server |
 | 13 | Account Manager Add / Remove | `alt_manager_ui.c:256-280`, `:225-252` | no (local vault; Remove signs out only the local session) | no | no request; Remove of a krunker.io row in an official game still refuses (`kn.alt.inGame`) |
 | 14 | Live Streams: source choice | `v10_menu.c:611-612` | yes (a signed-in krunker.io account chose api.krunker.io on a Box Office server) | no | now `account_split_krunker_identity()` |
@@ -101,7 +103,10 @@ client's refusals are what the e2e shows failing before (see the test notes in t
   krunker.io `kio_submit` refuses a Box Office login (`:470`); the email-code handler is the krunker.io card's only (`:589`).
 - `client/src/ui/account_ui.c:1989-2017`: the Box Office card refuses a known krunker.io name or email
   before the brain send (login and register).
-- `client/src/ui/alt_manager_ui.c:122-123` (row active), `:204-219` (Use refuses the other side).
+- `client/src/ui/alt_manager_ui.c:122-123` (row active), `use_row` (Use: the other side's row switches
+  when `account_split_row_switchable`, else refuses; the same backend's row switches accounts).
+- `client/src/ui/account_split.c`: `account_split_row_switchable`; `account_ui.c`: `account_ui_other_signed_in`;
+  `backend.h`: the social hold follows the switch at once.
 - `client/src/ui/v10_menu.c:609-617`: the Live Streams source and Bearer use `account_split_krunker_identity()`.
 - `client/src/ui/ranked_ui.c:243-246` (`kio_request`), `:280`, `:737` (queue), `:765`, `:998`, `:1270`.
 - `client/src/ui/strike_ftue.c:34`: the local storage key follows the predicate.

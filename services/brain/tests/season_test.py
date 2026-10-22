@@ -398,7 +398,7 @@ def main():
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
         # the scenario is the Season 7 pass (its cards, Founder / Master badges, map reward skin): the brain's
-        # default season is 10 (0354_season_10, SEASON_CURRENT), so it is pinned to 7 here
+        # default season is 10 (0355_season_10, SEASON_CURRENT), so it is pinned to 7 here
         proc, port = start_brain(env, log_path, ["--accounts.current_season=7"])
         name = asyncio.run(scenario(port))
         proc.terminate()

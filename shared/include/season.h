@@ -17,7 +17,7 @@
 //   the battlepasses row (tier1_price_kr, skip_price_kr).
 // - v7's battle pass rows (itemdata, dates, prices) lived in its database; KrunkNative seeds its
 //   own Season 7 pass (migration 0108_seasons) from the store's season-7 "battlepass" skins and
-//   the Season 10 pass (0354_season_10) from what the v10.0.3 bundle defines (80 levels, the
+//   the Season 10 pass (0355_season_10) from what the v10.0.3 bundle defines (80 levels, the
 //   badges' BPP sums; its rewards come only over krunker.io's socket, so they are empty).
 // - The "Founder" badges need the VIP tier bought within the first week of the pass
 //   (startdate + 7 days) instead of v7's fixed 2022 / 2023 dates.
@@ -25,7 +25,7 @@
 #include <stdint.h>
 
 #define SEASON_CURRENT 10     // config.currentSeason (v10.0.3 deob L19368: 10; the brain's accounts.current_season default)
-#define BATTLEPASS_CURRENT 3  // the Season 10 pass's bp_id (migration 0354_season_10; v7's config.currentBattlepass was 2)
+#define BATTLEPASS_CURRENT 3  // the Season 10 pass's bp_id (migration 0355_season_10; v7's config.currentBattlepass was 2)
 #define BP_CAP_DAY 500        // v10.0.2 windows[5].gen 500 * days (v7.1.4 config.bppCapDay 300): the daily BPP cap
 #define BP_MATCH_SCORE_MAX 20 // endGame: min(20, floor(score * rewardMlt * 0.01))
 #define BP_MATCH_PLAY_MAX 30  // endGame: 30 x min(1, floor(playTime / elapsed * 10) / 10), the play term

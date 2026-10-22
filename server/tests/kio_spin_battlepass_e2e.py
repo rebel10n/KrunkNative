@@ -24,7 +24,7 @@ to krunker.io and joins an official game as that account (account_unify_e2e's st
           again after its 15 s; it never says it could not load (before: "Could not load the Battle Pass")
   menu    in the official game the window shows krunker.io's pass; after leaving it (con disconnect) the active
           backend is krunk.io's DEV account again and the window shows the Box Office pass: kn_brain's Season 10
-          (migration 0354_season_10, SEASON_CURRENT 10: "Season 10 Battle Pass", 80 levels), never "No Battle
+          (migration 0355_season_10, SEASON_CURRENT 10: "Season 10 Battle Pass", 80 levels), never "No Battle
           Pass Found" or "Loading Battle Pass" (before: the brain seeded Season 7 only, so a brain on v10.0.3's
           season 10 answered null and the window said No Battle Pass Found)
   locked  krunker.io's progress is 0/5000 (not unlocked): a click does what v10.0.3 does, nothing. No popup,
@@ -202,7 +202,7 @@ def checks(mode, text, stub, shots):
         menu, menu2 = au.text_of(text, "kbpmenu"), au.text_of(text, "kbpmenu2")
         print("  [menu] after leaving: %r" % menu[:120])
         au.check("menu: in the official game the window shows krunker.io's pass", "KioPass" in bp and "Loading" not in bp, bp[:200])
-        au.check("menu: outside the game the window shows the Box Office Season 10 pass (kn_brain, 0354_season_10)",
+        au.check("menu: outside the game the window shows the Box Office Season 10 pass (kn_brain, 0355_season_10)",
                  "Season 10 Battle Pass" in menu and "Level 1/80" in menu and "KioPass" not in menu, menu[:200])
         au.check("menu: never No Battle Pass Found or Loading Battle Pass outside the game",
                  all("No Battle Pass Found" not in t and "Loading" not in t for t in (menu, menu2)), (menu[:120], menu2[:120]))

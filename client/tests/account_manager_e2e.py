@@ -302,7 +302,7 @@ def use_switches(brain_url, game_port, db, run, signed, other):
     check(f"{run}: it logs the signed-in account out first (the Logout path)", 0 <= out < inn, f"logged out at {out}, in at {inn}")
     check(f"{run}: and signs the row's account in with its saved login (no press)", logins_as(log, other) == 1, f"logins {logins_as(log, other)}")
     check(f"{run}: the brain revoked the old account's session (its socket presence left) and holds the new one",
-          sessions_of(db, signed) < before_old and sessions_of(db, other) >= 1,
+          sessions_of(db, signed) == before_old - 1 and sessions_of(db, other) >= 1,
           f"sessions {signed} {before_old} -> {sessions_of(db, signed)}, {other} {sessions_of(db, other)}")
     check(f"{run}: the card closes on the sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
     act = row_text(log, "act")
@@ -480,12 +480,12 @@ def kio_other_login(brain_url, game_port, stub):
 11000 text @oadd [id="knAltMsg"]
 11500 clicksel [onclick*="knAltUse"]
 11550 nodes @omodal [id="knV10Login"]
-14000 text @omsg [id="accResp"]
-14500 call knV10LoginClose
-15000 call showWindow {WINDOW}
-15500 clicksel [onclick*="knAltRemove"]
-16000 text @oremoved [id="knAltMsg"]
-16500 quit
+30000 text @omsg [id="accResp"]
+30500 call knV10LoginClose
+31000 call showWindow {WINDOW}
+31500 clicksel [onclick*="knAltRemove"]
+32000 text @oremoved [id="knAltMsg"]
+32500 quit
 """, brain_url, game_port)
     check("krunker.io: the other row's Use opens the login card", match_of(log, "omodal") == 1, str(match_of(log, "omodal")))
     out, post = log.find("[account] signed out of krunker.io"), log.find("auth/login/username")
