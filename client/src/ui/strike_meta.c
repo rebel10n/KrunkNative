@@ -534,8 +534,13 @@ static void bp_tab(const HtmlElem root, const int tab) {
         html = strdup(I18N("kn.strike.noBattlePass", "No Battle Pass Found"));
     } else if (econ_on() && T.econ_missions_failed) { // refused / no answer: the tab says so (a tap on it asks again)
         html = strdup(I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry."));
+    } else if (!econ_on() && !active_account()) {
+        // signed out: nothing will load for either tab, so the tab says so (the sign-in copy of the Krunker
+        // market, the FRVR page has none for this state); never "Loading" for good
+        const StrikeVar v[] = {{"message", I18N("social.market.login", "You must be logged in.")}};
+        html = strike_template_part("MISSION_TAB_SCREEN", "signedout", v, 1);
     } else {
-        // I2: "Loading Rewards" / "Loading Missions" (no bpData, or no account: FRVR shows the same)
+        // I2: "Loading Rewards" / "Loading Missions" (no bpData, signed in and the answer is on its way)
         const StrikeVar v[] = {{"screen", tab == 1 ? "Missions" : "Rewards"}};
         html = strike_template_part("MISSION_TAB_SCREEN", "loading", v, 1);
     }
