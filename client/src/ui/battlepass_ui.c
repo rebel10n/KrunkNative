@@ -16,6 +16,14 @@
 //   v7 shows "UNLOCALIZED STRING"; KrunkNative uses en.js "battlepass.header" ("Battle Pass").
 // - The end screen's tmpBPData arrives from kn_brain after the stats commit (["bpEnd", data])
 //   instead of with the "end" packet: KrunkNative's game server does not hold the pass.
+// Official krunker.io account (ACCOUNT_BACKEND_KRUNKER, v10.0.3; doc/v10/battlepass.md has the table):
+// - the pass is krunker.io's: "bpdl" / "bppd" over the official game socket (v10.0.3 DATA_LOADED /
+//   SYNC_BP_PROG, index.js:111084-111346). The socket is open only in an official game, so the window
+//   asks when it opens (battlepass_ui_account_answered) and says "Loading Battle Pass" until then.
+// - prices are USD, as v10.0.3 shows them: "$" + tier1price, and "$0.99" a skipped level (levelSkipPrice).
+// - a purchase (xstbp, xstbpl, the gift) and a claim (bpclm, bpclmAll) are never sent to krunker.io from
+//   this client: they are refused at once with v10's purchase error ("Purchase Error") or a message.
+// Nothing here shows a load failure: a pass that has not answered says "Loading Battle Pass" (v10's text).
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -32,9 +40,12 @@
 
 static cJSON *g_bp_json;      // windows[5].data (the "bpdl" payload), NULL none
 static BattlePass *g_bp;      // its parse (bp_parse_items)
-static int g_bp_status;       // windows[5].dataStatus: 0 not asked, 1 loading, 2 answered, 3 failed (no answer / not sent)
+static int g_bp_status;       // windows[5].dataStatus: 0 not asked (or not sent yet), 1 in flight, 2 answered
 static int64_t g_bp_asked_s;  // when the "bpdl" in flight was sent (BP_LOAD_TIMEOUT_S ends it)
-#define BP_LOAD_TIMEOUT_S 15  // a "bpdl" with no answer by then is a failure the window shows, not a spinner
+static int64_t g_bp_retry_s;  // a "bpdl" the socket refused waits until this (unix s); the account's answer ends the wait
+#define BP_LOAD_TIMEOUT_S 15  // a "bpdl" with no answer by then is asked again: the window keeps saying "Loading Battle Pass"
+#define BP_RETRY_S 2          // a refused "bpdl" is tried again after this (the per-frame callers do not spam the socket)
+static double g_price_usd;    // tier1price of the official pass (USD; v10.0.3 "$" + tier1price)
 static int g_has_progress;    // account.BP set (bppd)
 static int64_t g_bpp;         // account.BP.bpp
 static int g_tier;            // account.BP.tier
@@ -79,6 +90,8 @@ void battlepass_ui_reset(void) {
     free(g_bp);
     g_bp = NULL;
     g_bp_status = 0;
+    g_bp_retry_s = 0;
+    g_price_usd = 0;
     g_has_progress = 0;
     g_bpp = 0;
     g_tier = 0;
@@ -104,7 +117,8 @@ static void set_data(const cJSON *bp) {
     snprintf(g_bp->name, sizeof g_bp->name, "%s", jstr(g_bp_json, "name"));
     g_bp->bpp_per_level = (int) jnum(g_bp_json, "bpp_perlevel");
     g_bp->item_count = (int) jnum(g_bp_json, "itemcount");
-    g_bp->tier1_price_kr = (int) jnum(g_bp_json, "tier1price");
+    g_bp->tier1_price_kr = (int) jnum(g_bp_json, "tier1price");  // Box Office: KR
+    g_price_usd = jnum(g_bp_json, "tier1price");                  // official: USD (the same field)
     g_bp->skip_price_kr = (int) jnum(g_bp_json, "skipprice");
     snprintf(g_bp->tier1_name, sizeof g_bp->tier1_name, "%s", jstr(g_bp_json, "tier1name")[0] ? jstr(g_bp_json, "tier1name") : "VIP");
     g_bp->start_s = iso_seconds(jstr(g_bp_json, "startdate"));
@@ -129,11 +143,16 @@ int64_t battlepass_ui_bpp(void) { return g_has_progress ? g_bpp : 0; }
 
 static void request_data(void) {
     if (g_bp_status == 1 || g_bp_status == 2) return; // in flight, or answered (an answer with no pass is an answer)
+    if ((int64_t) time(NULL) < g_bp_retry_s) return;  // a refused ask waits (BP_RETRY_S)
     g_bp_status = 1;
     g_bp_asked_s = (int64_t) time(NULL);
-    // io.send("bpdl"); not sent (no socket yet, or the active account's server refused it): a failure the
-    // window shows; the next render asks again
-    if (!backend_social_send_text("[\"bpdl\"]")) g_bp_status = 3;
+    // io.send("bpdl"). v10 queues the send until its socket opens; here a frame that cannot go now (no socket yet,
+    // or krunker.io's game socket is not open) is not a failure: it is asked again by the account's answer
+    // (battlepass_ui_account_answered), else after BP_RETRY_S
+    if (!backend_social_send_text("[\"bpdl\"]")) {
+        g_bp_status = 0;
+        g_bp_retry_s = (int64_t) time(NULL) + BP_RETRY_S;
+    }
 }
 
 // v10.0.2 io_accountResponse: windows[5].data || io.send("bpdl") at the login (the sidebar item)
@@ -149,15 +168,17 @@ int battlepass_ui_status(void) { return g_bp_status; }
 void battlepass_ui_account_answered(void) {
     if (!active_account()) return;
     if (g_bp_status == 1) g_bp_status = 0;
+    g_bp_retry_s = 0; // the socket is open now: ask at once
     request_data();
 }
 
-// Once per frame (account_ui_tick): a "bpdl" with no answer by BP_LOAD_TIMEOUT_S is a failure, and the open window says so
+// Once per frame (account_ui_tick): a "bpdl" with no answer by BP_LOAD_TIMEOUT_S is asked again (no failure shown)
 void battlepass_ui_tick(void) {
     if (g_bp_status != 1 || (int64_t) time(NULL) - g_bp_asked_s < BP_LOAD_TIMEOUT_S) return;
-    fprintf(stderr, "[battlepass] no answer to bpdl in %d s: the window says it could not load\n", BP_LOAD_TIMEOUT_S);
-    g_bp_status = 3;
-    // redraw only when the pass's own status text is on screen (the window may be another one, or closed)
+    fprintf(stderr, "[battlepass] no answer to bpdl in %d s: asking again\n", BP_LOAD_TIMEOUT_S);
+    g_bp_status = 0;
+    g_bp_retry_s = 0;
+    // redraw (and so ask again) only when the pass's own status text is on screen (the window may be another one, or closed)
     if (html_dom_query(html_dom_by_id("menuWindow"), ".bpStatusText")) menu_show_window(BP_WINDOW, 1);
 }
 
@@ -458,10 +479,9 @@ static char *gen_window(void) {
     // no pass: the answer said so ("No Battle Pass Found"), a failed ask says so; only an ask in flight is "Loading".
     // A pass without its progress row (bppd not sent) still shows the pass, at 0 BPP.
     if (!g_bp) {
-        if (g_bp_status != 2) request_data(); // (a failed or never-sent ask goes out again on this render)
-        const char *text = g_bp_status == 2 ? "No Battle Pass Found"
-                           : g_bp_status == 3 ? I18N("kn.battlepass.loadFailed", "Could not load the Battle Pass. Close it and open it again.")
-                                              : "Loading Battle Pass";
+        if (g_bp_status != 2) request_data(); // (a never-sent ask goes out again on this render, after BP_RETRY_S)
+        // v10.0.3 index.js:248039: "No Battle Pass Found" only for an answer with no pass; anything else is "Loading Battle Pass"
+        const char *text = g_bp_status == 2 ? "No Battle Pass Found" : "Loading Battle Pass";
         sb_appendf(&sb, "<div class=\"bpStatusText\" style=\"font-size: 40px;text-align: center;display: inline-block;position: relative;width: 100%%;\">\n\t\t\t\t%s\n\t\t\t</div>",
                    text);
     } else if (g_tab == 0) {
@@ -521,7 +541,21 @@ static void generic_popup(const char *html, const char *cls) {
     html_dom_set_display(pop, "block");
 }
 
-static void price_text(char *out, const size_t n, const int64_t kr) { snprintf(out, n, "%lld KR", (long long) kr); }
+static int official(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// The price the window shows, by server type. The official pass is USD as v10.0.3 shows it: "$" + tier1price
+// (index.js:248325-248336), a skipped level is levelSkipPrice "0.99" (index.js:19421) and the total is
+// (0.99 * levels).toFixed(2) (index.js:248129-248132). Box Office sells the pass for KR (kn_brain's prices).
+#define BP_SKIP_USD 0.99
+static void tier_price_text(char *out, const size_t n) {
+    if (official()) snprintf(out, n, "$%.15g", g_price_usd);
+    else snprintf(out, n, "%lld KR", (long long) g_bp->tier1_price_kr);
+}
+
+static void skip_price_text(char *out, const size_t n, const int levels) {
+    if (official()) snprintf(out, n, "$%.2f", BP_SKIP_USD * levels);
+    else snprintf(out, n, "%lld KR", (long long) g_bp->skip_price_kr * levels);
+}
 
 // windows[5].purchasePop()
 static void purchase_pop(void) {
@@ -532,12 +566,15 @@ static void purchase_pop(void) {
     }
     char code[128] = "", price[32];
     html_storage_get("krk_ccKN", code, sizeof code); // the Store's saved creator code
-    price_text(price, sizeof price, g_bp->tier1_price_kr);
+    tier_price_text(price, sizeof price);
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"bp-generic-img-holder\">\n\t\t\t<div class=\"bp-generic-img-back\"></div>\n\t\t\t<div class=\"bp-generic-img\"></div>\n\t\t</div>\n\t\t<div class=\"bp-generic-text\">\n\t\t\t<div class=\"bp-generic-header\" style=\"margin-bottom: 25px;\">Purchase ");
     for (const char *p = g_bp->tier1_name; *p; p++) sb_appendf(&sb, "%c", (*p >= 'a' && *p <= 'z') ? *p - 32 : *p);
     sb_append(&sb, " Battle Pass</div>\n\t\t\t<div class=\"bp-generic-info\">Unlock ");
     for (const char *p = g_bp->tier1_name; *p; p++) sb_appendf(&sb, "%c", (*p >= 'A' && *p <= 'Z') ? *p + 32 : *p);
+    if (official()) { // v10.0.3's popup has no creator code (Box Office keeps the Store's)
+        sb_append(&sb, " rewards\n\t\t\t</div>\n\t\t</div>");
+    } else {
     sb_append(&sb, " rewards\n\t\t\t\t<div class='battlepassCreatorH'><div class='battlepassCreatorText'>Support your favorite Content Creator by using a Creator Code</div><div><input type='text' id='battlepassCreatorCode' class='smlInput' ");
     if (code[0]) {
         sb_append(&sb, "value='");
@@ -548,6 +585,7 @@ static void purchase_pop(void) {
     }
     sb_appendf(&sb, " %s/><div id='battlepassCreatorCodeBtn' style='background-color:%s' onclick='creatorCodeAction(%d, 3)'>%s</div></div></div>\n\t\t\t</div>\n\t\t</div>",
                code[0] ? "disabled" : "", code[0] ? "#eb5656" : "#41c300", code[0] ? 0 : 1, code[0] ? "Remove" : "Save");
+    }
     sb_appendf(&sb, "\n\t\t<div class=\"bp-generic-btn-holder\">\n\t\t\t<div class='button bp-generic-btn' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);selectBPTier(this, 1);'>%s</div>\n\t\t</div>", price);
     char *html = sb_finish(&sb);
     generic_popup(html, "bp-purchase-pop");
@@ -557,7 +595,7 @@ static void purchase_pop(void) {
 static void skip_level_pop(void) {
     if (!g_bp) return;
     char price[32];
-    price_text(price, sizeof price, g_bp->skip_price_kr);
+    skip_price_text(price, sizeof price, 1);
     char html[2048];
     snprintf(html, sizeof html,
              "<div class=\"bp-generic-img-holder\">\n\t\t\t<div class=\"bp-generic-img-back\"></div>\n\t\t\t<div class=\"bp-generic-img bp-generic-img-skip\"></div>\n\t\t</div>\n\t\t<div class=\"bp-generic-text\">\n\t\t\t<div class=\"bp-generic-header\">Skip levels</div>\n\t\t\t<div class=\"bp-generic-info\">\n\t\t\t\tSkip Battle Pass level\n\t\t\t\t<div style=\"color: var(--yellow);font-size: 12px;\">*BPP limit will not increase*</div>\n\t\t\t</div>\n\t\t</div>\n\t\t<div class=\"bp-generic-btn-holder\">\n\t\t\t<div class='button bp-generic-btn-small' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);windows[5].increaseSkip(-1)'>-</div>\n\t\t\t<div id='bp-skip-num'>1</div>\n\t\t\t<div class='button bp-generic-btn-small' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);windows[5].increaseSkip(1)'>+</div>\n\t\t\t<div id=\"bp-skip-levels\" class='button bp-generic-btn' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);skipLevels(this)'>%s</div>\n\t\t</div>",
@@ -598,7 +636,7 @@ static void increase_skip(const int delta) {
     html_dom_set_text(el, text);
     const HtmlElem price = html_dom_by_id("bp-skip-levels");
     if (price) {
-        price_text(text, sizeof text, (int64_t) g_bp->skip_price_kr * n);
+        skip_price_text(text, sizeof text, n);
         html_dom_set_text(price, text);
     }
 }
@@ -613,6 +651,17 @@ static void purchase_error(const cJSON *err) {
     if (h) html_dom_set_html(h, html);
     const HtmlElem r = html_dom_by_id("purchaseResponse");
     if (r) html_dom_set_display(r, "block");
+}
+
+// The official krunker.io account's purchases (xstbp, xstbpl, the gift) are refused here, never sent: v10 sends them to
+// Xsolla / Steam for real money, and this client cannot complete one. The refusal is v10's own purchase error
+// (purchaseError with no text: "Purchase Error", index.js:243651), so the window never waits for an answer.
+static void purchase_refused(void) { purchase_error(NULL); }
+
+// The official account's claims (bpclm, bpclmAll) are refused the same way: a claim changes the krunker.io account
+static int claim_refused(void) {
+    account_popup(0, NULL, "Claiming a reward is not sent to krunker.io from Krunker Box Office.");
+    return 1;
 }
 
 static void loading_popup(const char *text) { account_popup(2, NULL, text); } // io_loadingPopup
@@ -651,6 +700,7 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         if (b) html_dom_set_display(b, !strcmp(name, "windows.5.showBalloon") ? "block" : "none");
     } else if (!strcmp(name, "windows.5.claimItem") || !strcmp(name, "windows.5.freeclaimItem")) {
         if (!active_account()) return 1;
+        if (official()) return claim_refused();
         char frame[48];
         loading_popup("Claiming...");
         snprintf(frame, sizeof frame, "[\"bpclm\",%d]", arg_num(args, argc, 0, -1));
@@ -669,6 +719,11 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         const HtmlElem in = html_dom_by_id("giftPlayerName");
         if (in) html_dom_get_value(in, who, sizeof who);
         if (!who[0] || !active_account()) return 1;
+        if (official()) { // refused (see purchase_refused): the form closes with v10's purchase error
+            ui_loadout_clear_pops();
+            account_popup(0, NULL, "Purchase Error");
+            return 1;
+        }
         StrBuf sb = {0};
         sb_append(&sb, "[\"xstbp\",1,\"en\",null,null,null,\"");
         for (const char *p = who; *p; p++) if (*p != '"' && *p != '\\' && (unsigned char) *p >= 0x20) sb_appendf(&sb, "%c", *p);
@@ -681,6 +736,7 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         backend_social_send_text(frame);
     } else if (!strcmp(name, "windows.5.claimAllItems")) { // v10 BP_CLAIM_ALL (no button on v10.0.2's page)
         if (!active_account()) return 1;
+        if (official()) return claim_refused();
         loading_popup("Claiming...");
         backend_social_send_text("[\"bpclmAll\"]");
     } else if (!strcmp(name, "windows.5.skipLevelPop")) {
@@ -690,11 +746,17 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     } else if (!strcmp(name, "selectBPTier") || !strcmp(name, "windows.5.selectBPTier")) {
         char frame[64];
         snprintf(frame, sizeof frame, "[\"xstbp\",%d,null]", arg_num(args, argc, 1, 1)); // io.send("xstbp", tier, creatorCode)
-        if (active_account()) backend_social_send_text(frame);
+        if (active_account()) {
+            if (official()) purchase_refused();
+            else backend_social_send_text(frame);
+        }
     } else if (!strcmp(name, "skipLevels") || !strcmp(name, "windows.5.skipLevels")) {
         char frame[48];
         snprintf(frame, sizeof frame, "[\"xstbpl\",%d]", skip_count()); // io.send("xstbpl", levels)
-        if (active_account() && html_dom_by_id("bp-skip-num")) backend_social_send_text(frame);
+        if (active_account() && html_dom_by_id("bp-skip-num")) {
+            if (official()) purchase_refused();
+            else backend_social_send_text(frame);
+        }
     } else if (!strcmp(name, "creatorCodeAction") && arg_num(args, argc, 1, 0) == 3) { // the purchase popup's creator code
         char code[128] = "";
         const HtmlElem in = html_dom_by_id("battlepassCreatorCode");

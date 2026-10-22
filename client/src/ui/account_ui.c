@@ -1692,7 +1692,7 @@ static void active_changed(void) {
 }
 
 static void active_tick(void) {
-    battlepass_ui_tick(); // a "bpdl" unanswered for too long is a failure, not a spinner
+    battlepass_ui_tick(); // a "bpdl" unanswered for too long is asked again (no failure text: battlepass_ui.c)
     const int backend = (int) account_backend();
     const int kio = krunker_account_signed_in();
     const unsigned kio_gen = krunker_account_generation();

@@ -12,8 +12,8 @@ to krunker.io and joins an official game as that account (account_unify_e2e's st
           (before: nothing was asked, the item stayed 0/5000 and a click did nothing)
   nopass  the game server's "bpdl" has no pass (null): the window says No Battle Pass Found (before: Loading
           Battle Pass for ever); the progress is refused (404): the item stays 0/5000 (before: Unavailable)
-  silent  the game server never answers "bpdl": after the window's 15 s the window says it could not load
-          (before: Loading Battle Pass for ever)
+  silent  the game server never answers "bpdl": the window keeps saying Loading Battle Pass (v10's text) and asks
+          again after its 15 s; it never says it could not load (before: "Could not load the Battle Pass")
   locked  krunker.io's progress is 0/5000 (not unlocked): a click does what v10.0.3 does, nothing. No popup,
           no "Play more" text, no "dsl", and the item is still 0/5000 (before: the popup said Play more to
           unlock the daily spin)
@@ -128,8 +128,8 @@ def checks(mode, text, stub, shots):
         au.check("locked: the item is still 0/5000, not claimed", "0/5000" in after and "CLAIMED" not in after
                  and "FREE SPIN" not in after, after)
     else:
-        au.check("silent: the Battle Pass says it could not load after its timeout, not Loading",
-                 "Could not load the Battle Pass" in bp and "Loading" not in bp, bp[:200])
+        au.check("silent: the Battle Pass keeps saying Loading Battle Pass after its timeout, never that it could not load",
+                 "Loading Battle Pass" in bp and "Could not load" not in bp, bp[:200])
     shot_ok = [os.path.exists(p) for k, p in shots.items() if (mode != "silent" or k != "click")]
     au.check("%s: the window screenshots were taken" % mode, all(shot_ok), shots)
 

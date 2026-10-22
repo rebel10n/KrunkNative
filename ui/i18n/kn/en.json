@@ -55,7 +55,6 @@
  "kn.alt.useKrunkerIo": "krunker.io accounts are used in an official krunker.io game.",
  "kn.auth.liveRefused": "This server could not verify your account: you play on as before ({0})",
  "kn.auth.refused": "refused",
- "kn.battlepass.loadFailed": "Could not load the Battle Pass. Close it and open it again.",
  "kn.bhop.alwaysJump": "Always Jump (while moving)",
  "kn.bhop.disabled": "Disabled",
  "kn.bhop.holdJump": "Hold Jump",

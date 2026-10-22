@@ -754,6 +754,10 @@ account-unify-e2e: build ## One account UI, two backends (backend_ui.h active_ac
 kio-spin-battlepass-e2e: build ## The Daily Spin and the Battle Pass on an official krunker.io game (v10_daily_spin.c, battlepass_ui.c): the krunker.io progress, a pass-less and an unanswered pass finish or say so
 	timeout 900 $(PYTHON) -I server/tests/kio_spin_battlepass_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-battlepass-e2e
+kio-battlepass-e2e: build ## The Battle Pass on an official krunker.io game (battlepass_ui.c, doc/v10/battlepass.md): krunker.io's season, end, BP XP, level and tiers in USD; purchases and claims refused with v10's purchase error; an unanswered pass says Loading, never a failure (kn_brain on sqlite, headless)
+	timeout 900 $(PYTHON) -I client/tests/kio_battlepass_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)
