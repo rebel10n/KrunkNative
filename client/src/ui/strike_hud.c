@@ -89,6 +89,8 @@ static struct {
     int end_shown, end_result;  // the round end is up this round (and its result: strike_hud_end)
     int rendered_spec;          // spectate_active() when the HUD was drawn (the panel replaces the health and reload)
     int banner_timer;           // the victory banner (endAnim) until it opens LEAN_END_SCREEN, 0 none
+    int banner_only;            // that banner is a dead player's round end (strike_hud_end_title): no LEAN_END_SCREEN after it
+    int banner_kill_card;       // the kill card the banner hid, back once a dead player's banner is done
     NetStrikeRoundPacket round; // the commit's XP of this round (NET_EXT_KN_STRIKE_ROUND)
     int round_valid;
     int claim_timer, claim_shown; // the track claim button: 2 s after a level-up; claim_shown once it is up
@@ -1277,6 +1279,7 @@ static void banner_remove(void) {
 static void banner_cancel(void) {
     if (H.banner_timer) html_timer_cancel(H.banner_timer);
     H.banner_timer = 0;
+    H.banner_only = 0;
     banner_remove();
 }
 
@@ -1284,6 +1287,11 @@ static void banner_done(void *user) {
     (void) user;
     H.banner_timer = 0;
     banner_remove();
+    if (H.banner_only) { // a dead player's round end: the banner was all of it (its kill card comes back)
+        H.banner_only = 0;
+        H.kill_card = H.banner_kill_card;
+        return;
+    }
     lean_show(H.client, H.end_result);
 }
 
@@ -1335,6 +1343,17 @@ static void banner_show(Client *client, const int result) {
     H.banner_timer = html_timer_add(END_ANIM_MS, banner_done, NULL);
 }
 
+// A round end for a dead player (events_end): the victory banner and its endAnim, and nothing after it.
+// The lean end screen is the player's own round end (strike_hud_end); the banner's kill card comes back.
+void strike_hud_end_title(Client *client, const int result) {
+    if (!strike_ui_active() || H.end_shown || H.banner_timer || !holder()) return;
+    H.client = client;
+    H.end_result = result;
+    H.banner_only = 1;
+    H.banner_kill_card = H.kill_card;
+    banner_show(client, result);
+}
+
 void strike_hud_end(Client *client, const int result) {
     if (!strike_ui_active()) return;
     H.client = client;
@@ -1347,6 +1366,7 @@ void strike_hud_end(Client *client, const int result) {
         if (strike_screen_shown(STRIKE_SCREEN_LEAN_END)) end_fill(client, result);
         return;
     }
+    if (H.banner_timer && H.banner_only) banner_cancel(); // the player is in the game now: its round end replaces the dead player's banner
     if (H.banner_timer) return; // the endAnim runs: its end opens the lean screen
     // --render-scenario: the lean screen at once unless the fixture asks for the banner (endBanner)
     if (H.scenario && !H.scn_banner) {

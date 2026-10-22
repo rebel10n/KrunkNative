@@ -2288,12 +2288,13 @@ def run_native_hud():
 def run_native_death(alive):
     """official-death: a round defeat on the official page (Stub.death_phases). dead: the bot kills us, then the round
     ends while we are dead: v10 gives a dead player no end screen from that END, so #endUI never shows (the death
-    menu takes over the death card). alive: the same END while we are alive (the round's end): the defeat title and
-    #endUI show at once."""
+    menu takes over the death card; its title still plays: the canvas title #knVicTitle_def, no results). alive: the
+    same END while we are alive (the round's end): the defeat title and #endUI show at once."""
     label = "native-death-alive" if alive else "native-death"
     probes = ""
     for t in range(3000, 24000, 500):
-        probes += "%d vis @end endUI\n%d vis @death deathUIHolder\n%d attr @vic src [id=victorySub]\n" % (t, t + 100, t + 200)
+        probes += "%d vis @end endUI\n%d vis @death deathUIHolder\n%d attr @vic src [id=victorySub]\n%d vis @ttl knVicTitle knVicTitle_def\n" % (
+            t, t + 100, t + 200, t + 300)
     # a frame of the screen at the round end's probe time (the PNG lands in the run's work dir)
     shot = os.path.join(WORK, label + "-round-end.png")
     script = "0 boot\n3800 play\n%s12000 shot %s\n24500 quit\n" % (probes, shot)
@@ -2319,8 +2320,12 @@ def run_native_death(alive):
         check(f"{label}: the death card comes up (we are dead)", bool(death_shown), str(deaths[-3:]))
         check(f"{label}: a dead player gets no end screen from the round end: #endUI never shows (v10.js:219683)", not shown,
               f"endUI shown at {shown[:3]}, death card at {death_shown[:1]}")
-        check(f"{label}: no defeat title while dead (#victorySub never def.png)", not any(v == "./img/def.png" for _, v in vics),
-              str(sorted(set(v for _, v in vics))))
+        # the round end's title plays for a dead player too (always animate): the canvas title (#knVicTitle_def)
+        # shows at the END, while the results (#victorySub def.png) stay gated
+        title = [t for t, v in re.findall(r"\[input_script\] vis t=(\d+) @ttl knVicTitle=1 knVicTitle_def=(\d)", text) if v == "1"]
+        check(f"{label}: the defeat title plays while dead (#knVicTitle_def shows)", bool(title), str(title[:3]))
+        check(f"{label}: no defeat results while dead (#victorySub never def.png: the results stay gated)",
+              not any(v == "./img/def.png" for _, v in vics), str(sorted(set(v for _, v in vics))))
 
 
 def run_native_rounds():

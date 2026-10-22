@@ -231,6 +231,7 @@ typedef struct {
     int dead;                // death card up (UI.toggleGameUI(false) applied, hud_ui_show_death)
     int round_switch;        // official "rds" Switching Sides until our respawn: the popups still show (v10's textPopup)
     int ended;               // end screen up (UI.showEndScreen, hud_ui_show_end_screen)
+    int end_title_only;      // a dead player's round end: the result title alone (hud_ui_show_end_title), no end screen
     int board_shown;         // #newLeaderDisplay last written shown state (-1 unknown)
     int old_board;           // last applied oldScoreboard (-1 unknown): .topRightCounters width
     int rack_can_throw;      // canThrow the #weapDisplay melee icon shows (lastThrow)
@@ -3349,9 +3350,13 @@ static void hud_end_title_frame(const int show, const double dt_ms) {
     const char *type_name = vic_title_type(g_end_result < 0 ? -1 : g_end_result); // io_gameEnd: vicTitle.type
     int type = 0;
     while (type < 2 && strcmp(END_TITLE_TYPES[type], type_name)) type++;
+    // over an open menu (a dead player's death menu covers the page at its round end) the title goes above
+    // #menuHolder (z-index 10): the animation shows there too. Otherwise it stays under the HUD as v10's canvas
+    const int over_menu = html_ui_is_menu_open();
     char key[64], text[48];
-    snprintf(key, sizeof(key), "%.3f|%.3f|%.4f|%d", opacity, scale, c7, type);
+    snprintf(key, sizeof(key), "%.3f|%.3f|%.4f|%d|%d", opacity, scale, c7, type, over_menu);
     if (!strcmp(key, ui->end_title_key)) return;
+    html_dom_set_style(title, "z-index", over_menu ? "11" : "1");
     snprintf(ui->end_title_key, sizeof(ui->end_title_key), "%s", key);
 
     for (int i = 0; i < 3; i++) {
@@ -3704,7 +3709,9 @@ static void hud_end_results(const Client *client) {
 // the frame time clamped to config.dltMx and NOT scaled by the round-end slow motion: v10's
 // game loop hands overlay.render the copy it takes before the endAnim scale (v10:219855
 // `_69430 = _69429` ahead of `_69429 *= endAnimationTimer / endAnim`), unlike v7.
-// toggleMenu(true) hides #endUI, so an open menu takes the reset branch.
+// The title always plays its animation: an open menu does not reset it (KrunkNative: v10's
+// toggleMenu(true) hid #endUI and with it the title; a dead player's death menu is open at its
+// round end, and its title must still play: hud_end_title_frame lifts it above the menu).
 static void hud_end_step(const Client *client, const double now_ms) {
     HudUi *ui = &g_hud_ui;
     double dt = ui->tick_last_ms >= 0.0 ? now_ms - ui->tick_last_ms : 0.0;
@@ -3721,9 +3728,10 @@ static void hud_end_step(const Client *client, const double now_ms) {
         ui->end_phase = 2;
         hud_end_results(client); // hides the title
     }
+    if (ui->end_title_only && now_ms - ui->end_start_ms >= END_ANIM_MS - 1e-3) ui->end_title_only = 0; // the title alone is done
     // Krunker Strike's round end draws its own title (strike_hud.c: the victory banner, then the lean screen),
     // so v10's canvas title stays off there: one result message on screen at a time
-    const int show = ui->ended && ui->end_phase == 1 && !html_ui_is_menu_open() && !strike_ui_active();
+    const int show = (ui->ended && ui->end_phase == 1 || ui->end_title_only) && !strike_ui_active();
     if (g_hud_clock_s >= 0.0 && show) {
         // --render-scenario: the pinned clock jumps to the capture time; replay the jump as the
         // 60 Hz frames it stands for, so a capture `after_ms` past the END shows that frame.
@@ -3734,11 +3742,24 @@ static void hud_end_step(const Client *client, const double now_ms) {
     hud_end_title_frame(show, dt);
 }
 
+// A round end for a player who is dead or out of the game (game_events.c events_end, not a type 1 end):
+// the result title and its animation alone. The end screen (#endUI, the results, the pointer) stays
+// as it is, so the death card / death menu carry on; the title runs for END_ANIM_MS (hud_end_step).
+void hud_ui_show_end_title(Client *client, const int result) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    HudUi *ui = &g_hud_ui;
+    if (ui->ended) return; // the end screen runs its own title
+    g_end_result = result;
+    ui->end_title_only = 1;
+    ui->end_start_ms = hud_now_ms(client);
+}
+
 void hud_ui_show_end_screen(Client *client, const int result, const char *next_round) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     HudUi *ui = &g_hud_ui;
     g_end_result = result;
     snprintf(g_end_timer, sizeof(g_end_timer), "%s", next_round ? next_round : "");
+    ui->end_title_only = 0; // the full end screen runs the title (hud_end_step)
     if (!ui->ended) {
         // the END: showEndScreen + vicTitle.show; later calls only refresh the countdown.
         // hideUI(false) -> toggleMenu(false): a menu open at the END goes (UI.toggleWindow(false)
@@ -3804,6 +3825,10 @@ int hud_ui_toggle_end_screen(Client *client) {
 // current state on the next tick.
 void hud_ui_hide_end_screen(Client *client) {
     HudUi *ui = &g_hud_ui;
+    if (ui->end_title_only) { // a title alone (hud_ui_show_end_title) ends with the round too
+        ui->end_title_only = 0;
+        hud_end_title_hide();
+    }
     if (!ui->ended) return;
     ui->ended = 0;
     ui->end_phase = 0;

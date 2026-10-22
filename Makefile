@@ -900,6 +900,10 @@ console-strike-test: build ## Dev console on Krunker Strike's page: opens styled
 hitmarker-test: build ## The hit marker never stays on the death screen: hit -> die, a hit while dead, respawn (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/hitmarker_death_e2e.py $(DEBUG_DIR)
 
+.PHONY: end-title-test
+end-title-test: build ## The round-end result title plays its animation for a dead player too (defeat, dead vs alive, frames at 0 / 100 / 300 ms; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/end_title_always_e2e.py $(DEBUG_DIR)
+
 .PHONY: ui-transitions-test
 ui-transitions-test: build ## UI state across ESC / death / end screen / spectate / windows / map change / disconnect / offline<->online, Object Manager scroll (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/ui_transitions_e2e.py $(DEBUG_DIR)

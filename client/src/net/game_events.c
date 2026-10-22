@@ -403,15 +403,21 @@ static void events_end(Client *client, const NetEndPacket *packet) {
         }
     }
     const int playing = (client->me && client->me->active) || spectate_active();
-    // v10's end handler (v10.js:219715): a playing or spectating player gets the title, then the
-    // results; one who is not in the game gets them only from an "end" of type 1 (an official
-    // lobby's to a player who joins it while its round is over), at once and without the title
-    if (!playing && !show_now) return;
+    // The result title always plays its animation (KrunkNative; v10.js:219683 gives a dead player no
+    // title, and its type-1 end the results at once with none). A playing or spectating player gets
+    // the end screen: the title, then the results. A dead player (or one out of the game) gets the title
+    // alone: no end screen, no results, the death card / death menu stay (its result is not kept, so the
+    // round's timer packets do not open the end screen either). A type-1 end (an official lobby's, to a
+    // player who joins it while its round is over) is the full end screen, as for a playing player.
+    if (!playing && !show_now) {
+        hud_ui_show_end_title(client, packet->result);
+        strike_hud_end_title(client, packet->result);
+        return;
+    }
 
     client->net_end_result = packet->result;
     client->net_death_menu_pending = 0;
     events_show_end(client);
-    if (!playing) hud_ui_end_results_now(client); // showEndScreen + the results, no vicTitle
 }
 
 static void events_timer(Client *client, const NetTimerPacket *packet) {

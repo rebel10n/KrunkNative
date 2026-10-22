@@ -1309,9 +1309,9 @@ def sc_join_end():
         lines = run_client("join-end", ["--connect", f"127.0.0.1:{port}"], f"""
             0 play
             500 check @joined endUI=1 menuHolder=0 inGameUI=0 instructionHolder=0
-            6500 check @results {RESULTS} endTimer=1 :cursor=1
-            6500 text @results [id=endTimer]
-            7000 quit
+            12000 check @results {RESULTS} endTimer=1 :cursor=1
+            12000 text @results [id=endTimer]
+            12500 quit
         """, timeout=90)
         text = probes(lines, "text").get("results", {}).get("text", "")
         record("join-end", "results", "#endTimer", "Next Round in", text, "Next Round" in text)

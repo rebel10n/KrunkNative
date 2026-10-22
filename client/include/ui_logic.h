@@ -278,6 +278,7 @@ void hud_ui_hide_death(Client*);                 // respawn: UI.toggleGameUI(tru
 void hud_ui_round_switch(Client*);               // official "rds": death card hidden, onDeathScrn, game UI off (until the respawn)
 // UI.showEndScreen(false) + fq()/fD(): result 1 victory, 0 defeat, -1 draw; next_round "MM:SS".
 void hud_ui_show_end_screen(Client*, int result, const char *next_round);
+void hud_ui_show_end_title(Client*, int result); // a dead player's round end: the result title alone (no end screen)
 // An official lobby's clock state ("t" arg 1): 2 "MATCH OVER", 3 "MATCH ABANDONED" in #endTimer instead of the
 // "Next Round in" countdown; 0 / 1 the countdown again (krunker_link.c NET_EXT_KN_OFFICIAL_CLOCK_STATE)
 void hud_ui_set_end_clock_state(int state);
