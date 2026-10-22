@@ -1832,6 +1832,21 @@ static void net_handle_teleport(ClientConnection *client, const NetPacket *packe
     server_log("[gameserver] tp %d -> %g %g %g", client->id, ack.x, ack.y, ack.z);
 }
 
+// Test only: KRUNKNATIVE_SERVER_POS_LOG=<file> appends one line per accepted input frame, the
+// authoritative feet after it: "seq delta x y z on_ground" (compare with the client's input CSV).
+static void net_pos_log_frame(const Player *player, const Input *input) {
+    static FILE *log;
+    static int opened;
+    if (!opened) {
+        opened = 1;
+        const char *path = getenv("KRUNKNATIVE_SERVER_POS_LOG");
+        if (path && path[0]) log = fopen(path, "w");
+    }
+    if (!log || !player) return;
+    fprintf(log, "%d %.5f %.5f %.5f %.5f %d\n", input->seq, input->delta, player->position.x, player->position.y, player->position.z, player->on_ground);
+    fflush(log);
+}
+
 // One INPUT frame (single or batched): v3.1.1 inputDecode.ts checks in player_accept_input
 // (non-finite fields dropped, delta clamped, seq floor, 240-frame cap). Physics only ever runs
 // from these inputs: the server never takes a position from the client, so a client-side
@@ -1845,6 +1860,7 @@ static void net_handle_input_frame(ClientConnection *client, const NetInputPacke
     input.arrival = arrival;
     input.received = received; // the packet's arrival: exact lag compensation's input clock (LagCompClock)
     if (player_accept_input(client->player, &input)) net_note_input_activity(client, &input); // replays do not count
+    net_pos_log_frame(client->player, &input);
 
     LagCompClock *clock = &client->player->lag_clock;
     if (clock->anomaly_new) {

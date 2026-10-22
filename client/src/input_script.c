@@ -20,6 +20,8 @@
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
+//   100 recon feet_y [lag]       test only: a forced server correction (NET_PACKET_RECON snap) to our x/z at feet_y,
+//                                acked `lag` input frames back (30): those after it are replayed
 //   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER DELETE, any
 //                                A-Z / 0-9, F1-F12, GRAVE (the dev console's `); CTRL+ / SHIFT+ / ALT+ prefixes
 //                                set the modifier bits (down CTRL+C: copy the page selection). A down of a
@@ -617,6 +619,24 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const NetTeleportPacket tp = {e->v[0], e->v[1] + client->me->height, e->v[2]};
         client_net_send(client, NET_PACKET_TELEPORT, &tp, sizeof(tp));
         client->me->direction = (vec2) {e->v[4], e->v[3]};
+    } else if (!strcmp(e->cmd, "recon") && client->me) {
+        // recon feet_y: test-only forced server correction. A NET_PACKET_RECON-shaped snap of our own
+        // player to (x, feet_y, z) with zero velocity, acked at our last input frame, through the
+        // client's real reconciliation (client_recon_apply: snap, then replay of the pending inputs).
+        // The e2e harness uses it to see what a server correction does at a given height.
+        NetReconPacket pkt = {0};
+        // acked `lag` input frames back (default 30): the frames after it are replayed on top of the snap
+        const int lag = e->v[1] > 0 ? (int) e->v[1] : 30;
+        pkt.ack_seq = client->me->input_seq - lag;
+        pkt.position[0] = client->me->position.x;
+        pkt.position[1] = e->v[0];
+        pkt.position[2] = client->me->position.z;
+        pkt.yaw = client->me->direction.y;
+        pkt.flags = NET_RECON_ON_GROUND;
+        pkt.crouch_val = client->me->crouch_val;
+        pkt.aim_val = client->me->aim_val;
+        fprintf(stderr, "[input_script] recon t=%.0f feet y %.3f ack %d\n", g_script.time, e->v[0], pkt.ack_seq);
+        client_recon_apply(client, &pkt);
     } else if (!strcmp(e->cmd, "respawn")) {
         // dead (death card / menu back): Play again, like `play`. The ENT waits for
         // config.deathDelay, so the request stays pending (retried every frame in
@@ -1669,7 +1689,7 @@ void input_script_page_tick(Client *client) {
         const int probe = script_probe(e->cmd) || !strcmp(e->cmd, "state");
         if (ran && probe && !script_probe(g_script.events[g_script.next - 1].cmd) && strcmp(g_script.events[g_script.next - 1].cmd, "state")) break;
         g_script.next++;
-        static const char *const GAME_ONLY[] = {"play", "pose", "tp", "look", "respawn"};
+        static const char *const GAME_ONLY[] = {"play", "pose", "tp", "look", "respawn", "recon"};
         int skip = 0;
         for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
         if (!skip) script_run(client, e);
