@@ -611,8 +611,8 @@ GltfModel *gltf_model_load(const char *path) {
             return NULL;
         }
     }
-    // Six GLTF remodels of the v7.1.4 reference (weapon_2_12, 4_9, 15_5, 16_3, 17_5, melee_63) carry
-    // corrupt base64 buffers (length % 4 == 1, the stream shifted mid-way). v7's GLTFLoader rejects
+    // Five GLTF remodels of the v7.1.4 reference (weapon_2_12, 4_9, 15_5, 16_3, 17_5) carry
+    // corrupt base64 buffers (melee_63's v7.1.4 copy did too; v10.0.3 serves a valid one, now installed) (length % 4 == 1, the stream shifted mid-way). v7's GLTFLoader rejects
     // them ("Failed to load buffer") and draws nothing; cgltf would decode garbage. Refuse them, so
     // the callers fall back (plain weapon / default knife) instead of drawing broken geometry.
     for (size_t i = 0; i < data->buffers_count; i++) {

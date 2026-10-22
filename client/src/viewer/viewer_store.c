@@ -112,6 +112,14 @@ int viewer_skin_tex_truthy(const ViewerSkin *skin) {
     return skin->tex && skin->tex[0] && !((skin->flags & VS_TEX_NUM) && !strcmp(skin->tex, "0"));
 }
 
+void viewer_melee_keys(const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
+    const int id = skin && skin->id > 0 ? skin->id : 0;
+    snprintf(model, model_n, "melee/melee_%d", id);
+    if (skin && (skin->flags & VS_PAT) && skin->tex) snprintf(texture, texture_n, "%s", skin->tex);
+    else if (skin && viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "melee/melee_%d_%s", id, skin->tex);
+    else snprintf(texture, texture_n, "%s", model);
+}
+
 // v10 getPreview(skin, store.types) (v10.js:24328) without assetsUrl(): the asset-relative path
 //   textures/<types[type]><id>.<ext>                                     sprays (4), player cards (16), emoji (17), paints (18)
 //   textures/previews/cosmetics/<assetType || type>_<id>[_c<pat> | _<tex>].<ext>   other cosmetics

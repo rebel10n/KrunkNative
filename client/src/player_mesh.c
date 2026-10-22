@@ -807,13 +807,10 @@ static void player_weapon_models_update(const PlayerMesh *player_mesh, const int
     }
 }
 
-// The melee loadMesh: src "melee/melee_<id || 0>", texSrc pat ? tex : tex ? "melee/melee_<id>_<tex>" : the model's.
-static void melee_skin_keys(const ViewerSkin *skin, char *model, const size_t model_n, char *texture, const size_t texture_n) {
-    const int id = skin && skin->id > 0 ? skin->id : 0;
-    snprintf(model, model_n, "melee/melee_%d", id);
-    if (skin && (skin->flags & VS_PAT) && skin->tex) snprintf(texture, texture_n, "%s", skin->tex);
-    else if (skin && viewer_skin_tex_truthy(skin)) snprintf(texture, texture_n, "melee/melee_%d_%s", id, skin->tex);
-    else snprintf(texture, texture_n, "%s", model);
+// A melee texture the official assets lack (the Redux, Galaxys, Mysterious Orb and Neon Redux textures 404 on
+// the official host) gets the checker, which is what load_texture gives any missing texture, without its log.
+static unsigned int skin_texture_or_checker(const char *key) {
+    return skin_texture_exists(key) ? skin_texture(key) : texture_checker();
 }
 
 // ---------------------------------------------------------------- cosmetics (v7.1.4 players.js generateMeshes)
@@ -1333,16 +1330,18 @@ void player_generate_meshes(Player *player, const int render_you) {
                 if (weapon->melee) {
                     const ViewerSkin *skin = player_slot_skin(player, i, weapon);
                     char model[64], texture[192];
-                    melee_skin_keys(skin, model, sizeof(model), texture, sizeof(texture));
+                    viewer_melee_keys(skin, model, sizeof(model), texture, sizeof(texture));
 
                     GltfInstance *melee_model = NULL;
                     Mesh *melee_carrier = gltf_skin_carrier(skin, model, &melee_model); // hasAnim: GLTF remodel
-                    Geometry *melee_geo = melee_carrier ? NULL : skin_model(model);
-                    unsigned int melee_texture = melee_carrier ? 0 : skin_texture(texture);
-                    if (!melee_carrier && !melee_texture && strcmp(texture, model) != 0) melee_texture = skin_texture(model);
+                    // Official hasAnim melee skins ship only their GLTF, so no OBJ / PNG is tried for them: a GLTF that
+                    // does not load goes to the default knife below without a missing-file log.
+                    const int obj_model = !(skin && (skin->flags & VS_HAS_ANIM));
+                    Geometry *melee_geo = melee_carrier || !obj_model ? NULL : skin_model(model);
+                    unsigned int melee_texture = melee_carrier || !obj_model ? 0 : skin_texture_or_checker(texture);
                     if (!melee_carrier && !melee_geo && skin) { // a skin model this build lacks: the default knife
                         skin = NULL;
-                        melee_skin_keys(NULL, model, sizeof(model), texture, sizeof(texture));
+                        viewer_melee_keys(NULL, model, sizeof(model), texture, sizeof(texture));
                         melee_geo = skin_model(model);
                         melee_texture = skin_texture(texture);
                     }

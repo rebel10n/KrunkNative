@@ -1273,6 +1273,14 @@ else ()
     target_link_libraries(skin_paint_test PRIVATE cJSON m)
     add_test(NAME skin_paint_test COMMAND skin_paint_test ${CMAKE_SOURCE_DIR})
 
+    # melee_assets_test: every melee skin of the store table loads its model, texture and loadout icon from
+    # assets/ (the melee_63 GLTF was a corrupt v7.1.4 copy; four official textures do not exist, see the test)
+    add_executable(melee_assets_test client/tests/melee_assets_test.c client/src/viewer/viewer_store.c
+        client/src/viewer/viewer_store_table.c)
+    target_include_directories(melee_assets_test PRIVATE client/include client/lib)
+    target_link_libraries(melee_assets_test PRIVATE m)
+    add_test(NAME melee_assets_test COMMAND melee_assets_test ${CMAKE_SOURCE_DIR})
+
     # seek_choice_test (client/src/ui/seek_choice.c): the region a seek is made in (a saved Default Region
     # is never swapped for another region) and a seek answer whose lobby is full (never joined)
     add_executable(seek_choice_test client/tests/seek_choice_test.c client/src/ui/seek_choice.c)

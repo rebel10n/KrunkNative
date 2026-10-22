@@ -197,3 +197,6 @@ int viewer_skin_tex_truthy(const ViewerSkin *skin);
 // A store item's model src and texSrc as RENDER.loadMesh gets them (viewer_scene.c: the showcase,
 // cosmetic pages and the spin wheel's item, spin_wheel.c); texture "" = the model's own.
 void viewer_item_keys(const ViewerSkin *n, char *model, size_t model_n, char *texture, size_t texture_n);
+// The melee loadMesh keys of a melee skin (NULL = the default knife): src "melee/melee_<id || 0>", texSrc
+// pat ? tex : tex ? "melee/melee_<id>_<tex>" : the model's own. A hasAnim skin's model is "<src>.<file_ext || gltf>".
+void viewer_melee_keys(const ViewerSkin *skin, char *model, size_t model_n, char *texture, size_t texture_n);
