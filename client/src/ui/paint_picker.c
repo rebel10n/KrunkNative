@@ -270,19 +270,17 @@ static void finish_apply(const cJSON *data, const char *message) {
         return;
     }
     const int item = S.ind, paint = S.pending_paint;
-    const char *paint_name = "";
-    int n = 0;
-    PaintRow *rows = owned_paints(&n);
-    const PaintRow *row = find_row(rows, n, paint);
-    if (row) paint_name = row->name;
+    // v10.0.3 (deob-10.0.3.js:149074-149075): "Painted " + item.name + (paintName ? " with " + paintName : ""), where
+    // paintName is the store paint's own name (no "Paint" fallback: that is only the Paint button's label, :122033)
+    const char *paint_name = json_str(store_json(paint), "name");
     char text[256];
-    I18N_F(text, "kn.paint.applied", "Painted {0} with {1}", item_name(item), paint_name);
+    if (paint_name && paint_name[0]) I18N_F(text, "kn.paint.applied", "Painted {0} with {1}", item_name(item), paint_name);
+    else snprintf(text, sizeof(text), "Painted %s", item_name(item));
     StrBuf sb = {0};
     sb_append_esc(&sb, text);
     char *toast = sb_finish(&sb);
     ui_notify(toast);
     free(toast);
-    free(rows);
     account_paint_applied(item, paint, copy->valueint, S.sid < COPY_ID_BASE, cJSON_GetObjectItemCaseSensitive(data, "m"));
     ui_loadout_owned_changed();
     if (S.open) v10_view_pop(1); // accepted: v10's push resolves with the result and the popup closes (deob:122174-122178)
