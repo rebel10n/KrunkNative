@@ -40,6 +40,7 @@ from the report that `krunker-local.mjs playable` writes:
 | f | the round ends: `#endUI` (the end screen) is shown |
 | g | the next round starts: a new `init` on the socket, the local player active, the end screen gone |
 | h | page exceptions at or under `KN_PLAYABLE_MAX_EXC` (default 0); the first is listed with its location |
+| i | the local shot's tracer has the official trail value: the page's `physObj` for the local shooter gets `weapon.trail ? 1 : 0`, or 2 for `weapon.trailChrg` on a full charge (the Krunker v10 `shoot()` rule) |
 
 With `KN_PLAYABLE_PLAYERS=2` (the default) a second official client joins the same round, in its own headless
 Chromium (its own profile, so its own anonymous account) and its own bridge session (its own WebSocket and TCP
@@ -61,7 +62,8 @@ It exits 0 only when every assertion passes. `playable-check.mjs <report.json> [
 assertions again on a saved report. Env: `KN_PLAYABLE_ROUND_S` (round length, default 90),
 `KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`, `KN_PLAYABLE_PLAYERS`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;
 screenshots are in `shots/playable-*.png`. The local shot is counted from the page's `physObj` call with the local player as
-the shooter (a trail is drawn only for weapons with one, so the trail itself is not asserted). A round needs
+the shooter, and its trail argument is assertion (i): the Krunker v10 rule on the page's weapon (1 for `weapon.trail`, 2 for
+`weapon.trailChrg` on a full charge, else 0). A round needs
 the game server's round length, so the run takes about 5 minutes.
 
 The report's `bridgeCounts` are what the bridge sent (its trace's `-> label` lines, this run's file). They are

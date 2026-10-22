@@ -201,6 +201,8 @@ typedef struct {
     unsigned char phys_pull:1;       // physPull (Compressor): the physPow ray fired with the aim input pulls (sign -1)
     unsigned char non_obj_impulse:1; // nonObjImpulse (weapon-level, v7 had it on modes only): self push, no object push
     unsigned char r_shoot:1;         // rShoot (Compressor): the aim input fires too (procInputs lMouse || rShoot && rMouse)
+    unsigned char trail:1;           // trail (Sniper Rifle, AWP Blaster): a bullet trail on every shot, see weapon_shot_trail
+    unsigned char trail_charge:1;    // trailChrg (Charge Rifle): the charged trail on a full-charge shot, see weapon_shot_trail
     float gravity_mlt;               // gravMlt, 0 = 1 (Boulder 1.7): player gravity x while held
     int tint;                        // KrunkNative: viewmodel / pickup colour multiplier 0xRRGGBB, 0 = none
     int effect_on_hit;          // effectOnHit + 1 (0 = none): EffectId given on hit, floor(charge * 10) stacks
@@ -272,6 +274,10 @@ typedef struct {
 float weapon_attachment_y_offset(const WeaponAttachment*, int weapon_id);
 // The ADS zoom of `weapon` with `attachment` (v7 players.js: weapon.zoom * zoomMlt).
 float weapon_aim_zoom(const Weapon*, const WeaponAttachment*);
+// The trail argument of a hitscan ray's NetShotPacket.trail, and the "9" tracer's slot 6 (Krunker v10 shoot(), the
+// same value for every ray of the shot): 0 none, 1 weapon.trail, 2 weapon.trailChrg on a full-charge shot (the
+// charged trail). full_charge is the shot's fullCharge flag.
+unsigned char weapon_shot_trail(const Weapon*, int full_charge);
 
 // v7.1.4 scope overlays (src/data/aimRecticles.js): the saved scopeIndex picks an entry, whose
 // `id` names textures/scopes/scope_<id>.png; -1 no overlay, -2 the saved custom image.

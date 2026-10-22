@@ -67,6 +67,7 @@ const Weapon g_charge_rifle = {
     .shoot_charge = 1,
     .rate_charge = 1,
     .full_charge_shot = 1,
+    .trail_charge = 1, // v10 trailChrg: the charged trail on a full-charge shot
     .bypass_charge = 1,
     .can_upgrade = 1,
     .projectile_config = {.speed = 2.5f, .gravity = 0.0001f, .range = 7000.0f, .damage = 100.0f},

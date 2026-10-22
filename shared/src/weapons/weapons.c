@@ -43,3 +43,14 @@ float weapon_aim_zoom(const Weapon *weapon, const WeaponAttachment *attachment) 
     const float mlt = attachment && attachment->zoom_mlt > 0.0f ? attachment->zoom_mlt : 1.0f;
     return weapon->zoom * mlt;
 }
+
+// Krunker v10.0.3 shoot() (game.js, minified; the readable 10.0.2 copy of the same rule is v10.js:173057-173058):
+//   trail = weapon.trail ? 1 : 0; if (fullCharge && weapon.trailChrg) trail = 2;
+// The "9" tracer (SHOW_TRACER) gets it as slot 6, and the client's physObj/addTrail picks the trail by it:
+// 1 the bullet trail, 2 the charged trail (tType 2: the "trails/0" mesh). Sniper Rifle and AWP Blaster are 1;
+// Charge Rifle is 0 on a normal shot and 2 on a full-charge one.
+unsigned char weapon_shot_trail(const Weapon *weapon, const int full_charge) {
+    if (!weapon) return 0;
+    if (full_charge && weapon->trail_charge) return 2;
+    return weapon->trail ? 1 : 0;
+}

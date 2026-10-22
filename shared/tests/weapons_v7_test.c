@@ -156,6 +156,7 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     // v10.0.2 weaponConfig keys (no v7 weapon has them, so these are no-ops under v7)
     CHECK(!!w->no_dmg == flag(js, "noDmg") && !!w->phys_pull == flag(js, "physPull") && !!w->non_obj_impulse == flag(js, "nonObjImpulse") &&
           !!w->r_shoot == flag(js, "rShoot"), "%s noDmg / physPull / nonObjImpulse / rShoot", w->name);
+    CHECK(!!w->trail == flag(js, "trail") && !!w->trail_charge == flag(js, "trailChrg"), "%s trail / trailChrg", w->name);
     CHECK(near(w->gravity_mlt, num(js, "gravMlt", 0)), "%s gravMlt %g", w->name, (double) w->gravity_mlt);
     CHECK(w->has_attach == (cJSON_GetObjectItemCaseSensitive(js, "attach") != NULL && !cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(js, "attach"))), "%s attach", w->name);
 

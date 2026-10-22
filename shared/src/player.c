@@ -3164,6 +3164,8 @@ static void combat_send_shot(Player *player, const int ray, const float pitch, c
             player->position.z + end * cosf(yaw + (float) M_PI) * cosf(pitch),
         },
         .first = (uint8_t) (ray == 0 ? (player->shot_blast ? 2 : 1) : 0), // 2: playSound(weapon.sound + "_blast")
+        // the "9" trail of this shot (every ray carries it): 2 for a full-charge Charge Rifle, 1 for the Sniper Rifle, else 0
+        .trail = weapon_shot_trail(player->weapon, player->shot_blast),
     };
 
     if (last && last->object) {

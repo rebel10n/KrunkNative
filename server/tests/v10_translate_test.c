@@ -12,6 +12,7 @@
 #include "krunker_proto.h"
 #include "progression.h" /* PROGRESSION_MEDAL_COUNT: the END_MEDALS indexes */
 #include "v10_translate.h"
+#include "weapons.h" /* weapon_shot_trail: the server's NetShotPacket.trail rule (the SHOT trail classes below) */
 
 
 static int g_checks, g_failures;
@@ -419,6 +420,44 @@ int main(void) {
             v10_map_shot(&so, sh, 30, &known);
             CHECK(stop_has(&so, "malformed"), "a short shot is malformed");
             v10_out_free(&so);
+        }
+
+        // SHOT trail per weapon class: the value the server writes into NetShotPacket.trail (weapon_shot_trail, the Krunker v10
+        // shoot() rule) is the tracer's slot 6 as the bridge maps it. The trail classes are the Sniper Rifle (weapon.trail: 1 on
+        // every shot; the AWP Blaster upgrade copies it), the Charge Rifle (weapon.trailChrg: 2 on a full-charge shot, 0 on a
+        // normal one) and a weapon with no trail (0). The flags are the shared/src/weapons data (checked by weapons_v7_test).
+        // Before the server wrote the trail byte every shot sent 0, so the two trail classes fail on that tree.
+        {
+            static const struct { const char *cls; int trail, trail_charge, full, want; } shot_trail[] = {
+                {"Sniper Rifle, normal shot", 1, 0, 0, 1},
+                {"Sniper Rifle, full-charge flag", 1, 0, 1, 1},
+                {"Charge Rifle, normal shot", 0, 1, 0, 0},
+                {"Charge Rifle, full-charge shot", 0, 1, 1, 2},
+                {"no trail (Assault Rifle), full-charge flag", 0, 0, 1, 0},
+            };
+            for (size_t c = 0; c < sizeof shot_trail / sizeof shot_trail[0]; c++) {
+                Weapon w;
+                memset(&w, 0, sizeof w);
+                w.trail = (unsigned char) shot_trail[c].trail;
+                w.trail_charge = (unsigned char) shot_trail[c].trail_charge;
+                uint8_t sh[31];
+                V10Out so;
+                memset(sh, 0, sizeof sh);
+                put_i32(sh, 0, 9);
+                put_f32(sh, 8, 3); put_f32(sh, 12, 1); put_f32(sh, 16, -2);
+                sh[29] = weapon_shot_trail(&w, shot_trail[c].full);
+                v10_out_init(&so);
+                v10_map_shot(&so, sh, 31, NULL);
+                if (so.count == 1 && so.msgs[0].args[0].type == KRUNKER_ARRAY && so.msgs[0].args[0].len == 13) {
+                    const KrunkerValue *slot = &so.msgs[0].args[0].u.items[6];
+                    CHECK(slot->type == KRUNKER_NUM && slot->u.num == shot_trail[c].want,
+                          "%s: the tracer's trail is %g, the official value %d", shot_trail[c].cls,
+                          slot->type == KRUNKER_NUM ? slot->u.num : -1.0, shot_trail[c].want);
+                } else {
+                    CHECK(0, "%s: the shot maps to one tracer with 13 slots", shot_trail[c].cls);
+                }
+                v10_out_free(&so);
+            }
         }
 
         // EXT 0x8120 (NetServerLinePacket, 324 bytes): the template's first "$" is the name, a server line (mapServerLine)

@@ -795,13 +795,17 @@ const CLICK_TO_PLAY_RECT_JS = `(() => { const hits = [...document.querySelectorA
 // out), the canvas, the frame counter, and the game object (window.__kn_game, loader.js): the local player (the sid that
 // players.currentSid names) and its state. inRound: the local player is active in a game instance past its init.
 // shots counts the local player's own shots: the game's physObj call (the particles manager) with the local player as the
-// shooter (its ninth argument). A shell casing is one too, with no shooter; the wrapper only counts, the call goes on.
+// shooter (its ninth argument). A shell casing's call also has the local player there, so shots counts it too; hits counts
+// only the hitscan calls (a numeric seventh argument, the trail), and shotLog keeps those (playable-check assertion i).
+// The wrapper only counts, the call goes on.
+// shotLog: the last local shots, each with the trail argument the page's physObj call got (its seventh), the shot's
+// full-charge flag (the players' shoot call) and the weapon's trail / trailChrg flags (playable-check assertion i).
 const PLAY_SNAP_JS = `(() => {
   const r1 = (v) => typeof v === "number" ? Math.round(v * 10) / 10 : null;
   const r3 = (v) => typeof v === "number" ? Math.round(v * 1000) / 1000 : null;
   const vis = (e) => { if (!e) return false; const s = getComputedStyle(e); const b = e.getBoundingClientRect(); return s.display !== "none" && s.visibility !== "hidden" && b.width > 0 && b.height > 0; };
   const byId = (x) => document.getElementById(x);
-  const out = { frames: window.__kn_frames || 0, shots: window.__kn_shots || 0, physCalls: window.__kn_phys || 0,
+  const out = { frames: window.__kn_frames || 0, shots: window.__kn_shots || 0, hits: window.__kn_hits || 0, physCalls: window.__kn_phys || 0,
     canvasVisible: [...document.querySelectorAll("canvas")].some((c) => vis(c) && c.width > 0 && c.height > 0),
     hud: { health: vis(byId("bottomLeftHealth")), ammo: vis(byId("ammoVal")) },
     endUI: vis(byId("endUI")),
@@ -813,11 +817,28 @@ const PLAY_SNAP_JS = `(() => {
     const list = Array.isArray(pl.list) ? pl.list : [];
     const p = list.find((x) => x && x.sid === pl.currentSid) || null;
     const fx = g.particles;
+    // shoot(player, ..., fullCharge, ...) (the players module): its sixth argument is the full-charge flag of the shot the
+    // physObj call that follows (with the local player as the shooter) draws; the trail that call carries is logged with it
+    if (pl && typeof pl.shoot === "function" && !pl.__knShootHooked) {
+      const origShoot = pl.shoot;
+      pl.shoot = function (...a) { window.__kn_full = a[5] === true; return origShoot.apply(this, a); };
+      pl.__knShootHooked = true;
+    }
     if (fx && typeof fx.physObj === "function" && !fx.__knHooked) {
       const orig = fx.physObj;
       fx.physObj = function (...a) {
         window.__kn_phys = (window.__kn_phys || 0) + 1;
         if (a[8] && a[8].isYou === true) window.__kn_shots = (window.__kn_shots || 0) + 1;
+        // a hitscan shot's call carries its trail as a number (0, 1 or 2); a shell casing's call has the same shooter in its
+        // ninth argument but false in the seventh, so only the numeric ones are logged as hitscan shots (assertion i)
+        if (a[8] && a[8].isYou === true && typeof a[6] === "number") {
+          window.__kn_hits = (window.__kn_hits || 0) + 1;
+          const w = a[8].weapon || {};
+          const log = window.__kn_shotLog = window.__kn_shotLog || [];
+          log.push({ trail: a[6], full: window.__kn_full === true, weapon: w.name || null, id: typeof w.id === "number" ? w.id : null,
+            flags: { trail: !!w.trail, trailChrg: !!w.trailChrg } });
+          if (log.length > 24) log.shift();
+        }
         return orig.apply(this, a);
       };
       fx.__knHooked = true;
@@ -833,7 +854,9 @@ const PLAY_SNAP_JS = `(() => {
       local: p ? { x: r1(p.x), y: r1(p.y), z: r1(p.z), yaw: r3(p.xDire), pitch: r3(p.yDire), loadoutIndex: p.loadoutIndex,
         ammo: Array.isArray(p.ammos) ? p.ammos[p.loadoutIndex] : null } : null };
     out.inRound = out.game.localActive && !out.game.menuUp && !out.game.onMenu && !out.endUI && !out.game.initInProgress && !out.game.gameClosed && !out.game.isDestroyed;
+    out.shotHooks = { physObj: !!(fx && fx.__knHooked), shoot: !!(pl && pl.__knShootHooked) };
   }
+  out.shotLog = (window.__kn_shotLog || []).slice(-24);
   return JSON.stringify(out); })()`;
 
 // The other players in the page, as the first page holds them (its players list, the local player left out): their sids (a

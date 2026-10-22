@@ -1845,7 +1845,8 @@ else ()
         target_compile_options(v10_bridge PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
         # the translation's unit tests: the TS fixtures (net-bridge/v10Proxy.test.ts) and the TS codec's bytes
-        add_executable(v10_translate_test server/tests/v10_translate_test.c server/bridge/v10_translate.c ${V10_CODEC_SOURCES})
+        add_executable(v10_translate_test server/tests/v10_translate_test.c server/bridge/v10_translate.c ${V10_CODEC_SOURCES}
+                       shared/src/weapons/weapons.c)
         target_include_directories(v10_translate_test PRIVATE server/bridge shared/include)
         target_link_libraries(v10_translate_test PRIVATE cJSON m)
         target_compile_definitions(v10_translate_test PRIVATE _GNU_SOURCE)
