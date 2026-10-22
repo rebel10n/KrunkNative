@@ -7,22 +7,25 @@ menu UI, against a local kn_brain (sqlite, temp dir) and services/common/tests/f
   the password sealed: nothing is signed in, nothing is switched, no request reaches the account server (the
   Add runs against a --brain nothing listens on) -> Use fills the login card's Username and Password with the
   saved ones and signs in with them (the card's Login, run for the player): signed in, the session is stored ->
+  Use while ANOTHER account is signed in on the same backend switches: the signed-in account is logged out first (the
+  Logout button's path: its session revoked by the brain, so its socket presence leaves) and the row's account is signed
+  in; back again -> Use on a row of the signed-in account itself (listed under its address) logs nobody out ->
   a restart resumes that account from its stored session -> Logout, then Use signs in again -> the brain then
   refuses the stored session: it is forgotten and nobody is signed in at start (no silent password sign-in); Use
   fills the card and signs in -> Remove ->
-  Use while signed in fills the card and refuses nothing -> an official krunker.io game (a guest joined through the
-  stub's matchmaker): Add a krunk.io login, Use fills the card, Remove -> krunker.io: Add stores its login with no
-  request to krunker.io, Use fills the card with it, its Login signs in to krunker.io (the Security Challenge
-  passes by itself, the stub's 2FA code is typed) and the card closes, Remove. Signed in as one account, the card of
-  another listed login does not switch the session: its Login sends nothing (krunk.io and krunker.io), the signed-in
-  account stays the active one, and the card says whose session it is.
+  an official krunker.io game (a guest joined through the stub's matchmaker): Add a krunk.io login, Use leaves the
+  official game (the krunker.io game gives way to Box Office, as Find New Game does) and signs the Box Office account
+  in, Remove -> krunker.io: Add stores its login with no request to krunker.io, Use fills the card with it, its Login
+  signs in to krunker.io (the Security Challenge passes by itself, the stub's 2FA code is typed) and the card closes;
+  signed in as that account, Use on another krunker.io row signs it out first and posts the other login once (the stub
+  refuses it: nobody is signed in), Remove.
 
   The account split (client/src/ui/account_split.c, doc/v10/account-split.md): on a Box Office server a krunker.io row's
-  Use opens no card and sends nothing, and a krunker.io login typed into the Box Office card (a fresh client home) is
-  refused with no sign-in request. In an official krunker.io game a krunker.io row's Use fills the card, its Login signs
-  in to krunker.io and another login's card sends nothing, a Box Office row's Use is refused, and a Box Office login typed
-  into the krunker.io card is refused with no sign-in request to krunker.io. A krunker.io sign-in kept from an official
-  game supplies no Bearer to krunker.io while Box Office is the server (the menu's Live Streams read).
+  Use opens no card and sends nothing (no official game to switch to), and a krunker.io login typed into the Box Office
+  card (a fresh client home) is refused with no sign-in request. In an official krunker.io game a krunker.io row's Use
+  fills the card, its Login signs in to krunker.io, and a Box Office login typed into the krunker.io card is refused with
+  no sign-in request to krunker.io. A krunker.io sign-in kept from an official game supplies no Bearer to krunker.io
+  while Box Office is the server (the menu's Live Streams read).
 
   The web build's Accounts window has no krunker.io chip or row (client/src/ui/alt_manager_ui.c,
   __EMSCRIPTEN__). That web absence is checked on the web build's own page, not here.
@@ -152,6 +155,16 @@ def sessions(db):
         con.close()
 
 
+def sessions_of(db, name):
+    """The brain's session rows of one account: a logout revokes them (the socket's presence left with them)."""
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("SELECT COUNT(*) FROM sessions WHERE account_id = (SELECT id FROM accounts WHERE username = ?)",
+                           (name,)).fetchone()[0]
+    finally:
+        con.close()
+
+
 def forget_brain_sessions(db, name):
     con = sqlite3.connect(db)
     with con:
@@ -261,33 +274,77 @@ def use_fills(brain_url, game_port, db):
 REFUSALS = ("Log out to sign in", "Leave the official game", "already signed in")
 
 
-def use_while_signed_in(brain_url, game_port):
-    """Signed in as NAME2 (its session restored at start), Use on the other listed row (NAME) opens the login card with
-    NAME's login and its saved password; the card's sign-in is then refused as any login over a signed-in account is:
-    the card says whose session it is, nothing is switched. (The active row's Use is dimmed and has no click, so
-    clicksel reaches NAME's Use, listed first.)"""
-    log = run_client("signed_use", f"""0 menu
+def row_text(log, label):
+    """The text of the `text @label` line's match (after `text=`), "" when it logged nothing."""
+    line = text_of(log, label)
+    return line.rsplit("text=", 1)[1] if "text=" in line else ""
+
+
+def use_switches(brain_url, game_port, db, run, signed, other):
+    """Signed in as `signed` (its session restored at start), Use on the other listed row (`other`) switches accounts on
+    this backend: the signed-in account is logged out first, the Logout button's way (the brain revokes its session: its
+    rows go, its socket presence leaves), and the row's account is signed in with its saved login (no press). The card
+    closes on the sign-in; the row's account is the active row. (The active row's Use is dimmed and has no click, so
+    clicksel reaches the other row's Use.)"""
+    before_old = sessions_of(db, signed)
+    log = run_client(run, f"""0 menu
 3000 call showWindow {WINDOW}
 3400 clicksel [onclick*="knAltUse"]
-4000 nodes @modal [id="knV10Login"]
-4100 nodes @user [id="accName"][value="{NAME}"]
-4200 nodes @pass [id="accPass"][value="{PASS}"]
-6000 text @cardmsg [id="accResp"]
-6500 quit
+3450 nodes @modal [id="knV10Login"]
+6000 nodes @modalgone [id="knV10Login"]
+6100 call showWindow {WINDOW}
+6600 text @act .knAltActive
+7000 quit
 """, brain_url, game_port)
-    check("the account is signed in at start (the precondition)", logins_as(log, NAME2) == 1, f"logins {logins_as(log, NAME2)}")
-    check("Use while signed in opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
-    check("and fills the other row's Username and Password", match_of(log, "user") == 1 and match_of(log, "pass") == 1,
-          f"user {match_of(log, 'user')} pass {match_of(log, 'pass')}")
-    check("its sign-in says whose session it is (no other account is signed in)", f"Signed in as {NAME2}" in text_of(log, "cardmsg"),
-          repr(text_of(log, "cardmsg")[-120:]))
-    check("and signs nobody else in", logins_as(log, NAME) == 0, f"logins as {NAME}: {logins_as(log, NAME)}")
+    check(f"{run}: the account is signed in at start (the precondition)", logins_as(log, signed) == 1, f"logins {logins_as(log, signed)}")
+    check(f"{run}: Use while another account is signed in opens the login card", match_of(log, "modal") == 1, str(match_of(log, "modal")))
+    out, inn = log.find("[account] logged out"), log.find(f"[account] logged in as {other} ")
+    check(f"{run}: it logs the signed-in account out first (the Logout path)", 0 <= out < inn, f"logged out at {out}, in at {inn}")
+    check(f"{run}: and signs the row's account in with its saved login (no press)", logins_as(log, other) == 1, f"logins {logins_as(log, other)}")
+    check(f"{run}: the brain revoked the old account's session (its socket presence left) and holds the new one",
+          sessions_of(db, signed) < before_old and sessions_of(db, other) >= 1,
+          f"sessions {signed} {before_old} -> {sessions_of(db, signed)}, {other} {sessions_of(db, other)}")
+    check(f"{run}: the card closes on the sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
+    act = row_text(log, "act")
+    check(f"{run}: the row's account is the active row", act.startswith(other + " ") or act.startswith(other + "krunk"), repr(act[:80]))
 
 
-def official_use(brain_url, game_port, stub):
+def use_same_account(brain_url, game_port, db):
+    """Signed in as NAME2: Use on a row of that same account, listed under its address (the brain pushed the address on
+    file), logs nobody out: the card signs in as before and closes, no switch. The address's row is removed again."""
+    before = sessions(db)
+    log = run_client("same_login", f"""0 menu
+4500 call showWindow {WINDOW}
+5000 clickid knAltUser
+5100 type {ADDR2}
+5200 clickid knAltPass
+5300 type {PASS}
+5400 clicksel [onclick*="knAltAdd"]
+5900 text @aadd [id="knAltMsg"]
+6200 clicksel [onclick*="knAltUse"]
+9400 nodes @aclosed [id="knV10Login"]
+9800 call showWindow {WINDOW}
+10300 clicksel [onclick*="knAltRemove"]
+10800 text @arem [id="knAltMsg"]
+11200 text @act .knAltActive
+11500 quit
+""", brain_url, game_port)
+    check("the address's row is listed", f"Added {ADDR2}." in text_of(log, "aadd"), text_of(log, "aadd")[-120:])
+    check("Use on the signed-in account's own row (its address) logs nobody out", "[account] logged out" not in log)
+    check("and signs it in as before (the card closes, no switch)", logins_as(log, NAME2) == 1 and match_of(log, "aclosed") == 0,
+          f"logins {logins_as(log, NAME2)} card {match_of(log, 'aclosed')}")
+    check("the Login reached the brain (a session more)", sessions(db) >= before + 1, f"sessions {before} -> {sessions(db)}")
+    check("the signed-in account stays the active row", NAME2 in row_text(log, "act"), row_text(log, "act")[:80])
+    check("and the address's row is removed again", f"Removed {ADDR2}." in text_of(log, "arem"), text_of(log, "arem")[-120:])
+
+
+def official_use(brain_url, game_port, stub, db):
     """An official krunker.io game (a guest joined through the stub's matchmaker): the Account Manager lists a krunk.io
-    login, and Use fills the card with it. Nothing is refused for the official game; the card's Login is the player's."""
+    login. Its Use switches the client to that row's backend: the official game gives way to Box Office (left, as Find
+    New Game leaves it), the window says why, and the Box Office account is signed in with its saved login (the card
+    opens and closes on the sign-in). Remove signs it out again and forgets the row."""
     joins = len(stub.ws_paths)
+    before = sessions(db)
     log = run_client("official_use", f"""0 menu
 1500 call krunkerJoin "{kae.GAME_PICK}"
 9000 call showWindow {WINDOW}
@@ -298,18 +355,28 @@ def official_use(brain_url, game_port, stub):
 9900 clicksel [onclick*="knAltAdd"]
 10500 text @oadd [id="knAltMsg"]
 11000 clicksel [onclick*="knAltUse"]
-12000 text @omsg [id="knAltMsg"]
-12100 nodes @omodal [id="knV10Login"]
-12500 clicksel [onclick*="knAltRemove"]
-13000 text @oremoved [id="knAltMsg"]
-13500 quit
+11050 nodes @omodal [id="knV10Login"]
+13500 nodes @ogone [id="knV10Login"]
+13600 call showWindow {WINDOW}
+14100 text @omsg [id="knAltMsg"]
+14200 text @oact .knAltActive
+14500 clicksel [onclick*="knAltRemove"]
+15000 text @oremoved [id="knAltMsg"]
+15500 quit
 """, brain_url, game_port)
     check("the client joined an official krunker.io game (the stub's game socket)", len(stub.ws_paths) > joins, str(len(stub.ws_paths) - joins))
     check("in the official game, Add lists the krunk.io login", f"Added {NAME}." in text_of(log, "oadd"), text_of(log, "oadd")[-120:])
-    check("in the official game, Use of a Box Office row is refused (no card: the krunker.io card would sign in to krunker.io)",
-          "Box Office accounts are used on a Box Office server." in text_of(log, "omsg") and match_of(log, "omodal") == 0,
-          f"{text_of(log, 'omsg')[-120:]} card {match_of(log, 'omodal')}")
-    check("and the row is removed again", f"Removed {NAME}." in text_of(log, "oremoved"), text_of(log, "oremoved")[-120:])
+    left, inn = log.find("[krunker] leaving the official game"), log.find(f"[account] logged in as {NAME} ")
+    check("in the official game, Use of a Box Office row leaves the official game first (it gives way to Box Office)",
+          0 <= left < inn, f"left at {left}, signed in at {inn}")
+    check("and signs the Box Office account in with its saved login (the card opens, then closes)",
+          logins_as(log, NAME) == 1 and match_of(log, "omodal") == 1 and match_of(log, "ogone") == 0 and sessions_of(db, NAME) >= 1,
+          f"logins {logins_as(log, NAME)} card {match_of(log, 'omodal')} -> {match_of(log, 'ogone')} sessions of {NAME} {sessions_of(db, NAME)}")
+    check("the window says why the game was left", "Box Office accounts are used on a Box Office server." in text_of(log, "omsg"),
+          text_of(log, "omsg")[-120:])
+    check("the Box Office account is the active row", NAME in row_text(log, "oact"), row_text(log, "oact")[:80])
+    check("and the row is removed again (signed out)", f"Removed {NAME}." in text_of(log, "oremoved") and "[account] logged out" in log,
+          text_of(log, "oremoved")[-120:])
 
 
 def kio_login(brain_url, game_port, stub):
@@ -339,66 +406,6 @@ def kio_login(brain_url, game_port, stub):
           f"posts {posts} -> {len(stub.find('POST', '/api/auth/login/username'))}")
     check("krunker.io Login signs the row's account in to krunker.io", f"signed in to krunker.io as {kae.LOGIN}" in log)
     check("the card closes after the krunker.io sign-in", match_of(log, "modalgone") == 0, str(match_of(log, "modalgone")))
-
-
-def same_account_login(brain_url, game_port, db):
-    """Signed in as NAME2: a Login for that same account signs in as before and the card closes. Typed in the Username
-    field (NAME, with a "b" typed on: NAME2), and typed as its address (a row listed under the address, whose Use fills
-    the Username field with it). The Username row is removed again at the end."""
-    before = sessions(db)
-    log = run_client("same_login", f"""0 menu
-500 call showWindow {WINDOW}
-1000 clicksel [onclick*="knAltUse"]
-2000 nodes @umodal [id="knV10Login"]
-2100 clickid accName
-2200 type b
-2300 nodes @uok [id="accName"][value="{NAME2}"]
-2400 clickid knV10LoginSubmit
-4000 nodes @uclosed [id="knV10Login"]
-4500 call showWindow {WINDOW}
-5000 clickid knAltUser
-5100 type {ADDR2}
-5200 clickid knAltPass
-5300 type {PASS}
-5400 clicksel [onclick*="knAltAdd"]
-5900 text @aadd [id="knAltMsg"]
-6200 clicksel [onclick*="knAltUse"]
-9400 nodes @aclosed [id="knV10Login"]
-9800 call showWindow {WINDOW}
-10300 clicksel [onclick*="knAltRemove"]
-10800 text @arem [id="knAltMsg"]
-11200 text @act .knAltActive
-11500 quit
-""", brain_url, game_port)
-    check("Login typed as the signed-in account's name signs in as before (the card closes)",
-          match_of(log, "umodal") == 1 and match_of(log, "uok") == 1 and match_of(log, "uclosed") == 0,
-          f"card {match_of(log, 'umodal')} typed {match_of(log, 'uok')} closed-count {match_of(log, 'uclosed')}")
-    check("Use on the address's row signs the signed-in account in as before (the card closes, no switch)",
-          match_of(log, "aclosed") == 0, str(match_of(log, "aclosed")))
-    check("both Logins reached the brain (a session each)", sessions(db) >= before + 2, f"sessions {before} -> {sessions(db)}")
-    check("the signed-in account stays the active row", NAME2 in text_of(log, "act"), text_of(log, "act")[-120:])
-    check("and the address's row is removed again", f"Removed {ADDR2}." in text_of(log, "arem"), text_of(log, "arem")[-120:])
-
-
-def login_while_signed_in(brain_url, game_port, db):
-    """Signed in as NAME2: Use fills the card with the other listed login (NAME), and its Login sends no sign-in. The
-    signed-in account stays the active row and nobody is signed out; the card says whose session it is."""
-    before = sessions(db)
-    log = run_client("switch_try", f"""0 menu
-3000 call showWindow {WINDOW}
-3400 clicksel [onclick*="knAltUse"]
-4000 nodes @modal [id="knV10Login"]
-4100 clickid knV10LoginSubmit
-6000 text @cardmsg [id="accResp"]
-6500 call knV10LoginClose
-7000 call showWindow {WINDOW}
-7500 text @act .knAltActive
-8000 quit
-""", brain_url, game_port)
-    check("the other login's card opens", match_of(log, "modal") == 1, str(match_of(log, "modal")))
-    check("its Login says whose session it is, and sends no sign-in", f"Signed in as {NAME2}" in text_of(log, "cardmsg")
-          and sessions(db) == before, f"sessions {before} -> {sessions(db)}; {text_of(log, 'cardmsg')[-120:]}")
-    check("the signed-in account stays the active row (no switch)", NAME2 in text_of(log, "act"), text_of(log, "act")[-120:])
 
 
 def restart_and_logout(brain_url, game_port):
@@ -457,8 +464,9 @@ OTHER = "kioother"  # a second krunker.io login (the stub accepts only kae.LOGIN
 
 
 def kio_other_login(brain_url, game_port, stub):
-    """krunker.io signed in as the row's account: the card of another krunker.io login (OTHER, listed here) and its
-    Login send nothing to krunker.io, and the card says whose session it is. OTHER is removed again."""
+    """krunker.io signed in as the row's account, in an official game: Use on another krunker.io row (OTHER, listed here)
+    switches: the signed-in account is signed out first (the Logout button's path) and OTHER's login is posted once to
+    krunker.io (no press). The stub refuses it, so nobody is signed in and the card says so. OTHER is removed again."""
     posts = len(stub.find("POST", "/api/auth/login/username"))
     log = run_client("kio_other", f"""0 menu
 1500 call krunkerJoin "{kae.GAME_PICK}"
@@ -471,8 +479,7 @@ def kio_other_login(brain_url, game_port, stub):
 10200 clicksel [onclick*="knAltAdd"]
 11000 text @oadd [id="knAltMsg"]
 11500 clicksel [onclick*="knAltUse"]
-12500 nodes @omodal [id="knV10Login"]
-12600 clickid knV10LoginSubmit
+11550 nodes @omodal [id="knV10Login"]
 14000 text @omsg [id="accResp"]
 14500 call knV10LoginClose
 15000 call showWindow {WINDOW}
@@ -480,11 +487,15 @@ def kio_other_login(brain_url, game_port, stub):
 16000 text @oremoved [id="knAltMsg"]
 16500 quit
 """, brain_url, game_port)
-    check("krunker.io: the other login's card opens", match_of(log, "omodal") == 1, str(match_of(log, "omodal")))
-    check("krunker.io: its Login sends no sign-in to krunker.io", len(stub.find("POST", "/api/auth/login/username")) == posts,
+    check("krunker.io: the other row's Use opens the login card", match_of(log, "omodal") == 1, str(match_of(log, "omodal")))
+    out, post = log.find("[account] signed out of krunker.io"), log.find("auth/login/username")
+    check("krunker.io: Use signs the signed-in account out first (the Logout path)", 0 <= out < post or (out >= 0 and post < 0),
+          f"signed out at {out}, post at {post}")
+    check("krunker.io: and posts the other login once (no press)", len(stub.find("POST", "/api/auth/login/username")) - posts == 1,
           f"posts {posts} -> {len(stub.find('POST', '/api/auth/login/username'))}")
-    check("krunker.io: the card says whose session it is", kae.LOGIN.lower() in text_of(log, "omsg").lower()
-          and "signed in as" in text_of(log, "omsg").lower(), text_of(log, "omsg")[-120:])
+    check("krunker.io: the refused login signs nobody in, and the card says why", "[kio-account] signed in to krunker.io as" not in log
+          and "signed in as" not in text_of(log, "omsg").lower() and "invalid username or password" in text_of(log, "omsg").lower(),
+          text_of(log, "omsg")[-120:])
     check("and the other login is removed again", f"Removed {OTHER}." in text_of(log, "oremoved"), text_of(log, "oremoved")[-120:])
 
 
@@ -525,8 +536,8 @@ def krunker_row(brain_url, game_port, stub):
           "signed in to krunker.io" not in log and auth_requests(stub) == before, f"auth requests {before} -> {auth_requests(stub)}")
 
     kio_login(brain_url, game_port, stub)
-    kio_other_login(brain_url, game_port, stub)
     kio_idle(brain_url, game_port, stub)
+    kio_other_login(brain_url, game_port, stub)  # (signs the krunker.io account out: after kio_idle, which needs it signed in)
     log = run_client("kio_remove", f"""0 menu
 500 call showWindow {WINDOW}
 1000 clicksel [onclick*="knAltRemove"]
@@ -663,13 +674,13 @@ def main():
         plain_restart(brain_url, game_port)
         add_accounts(db, game_port)
         use_fills(brain_url, game_port, db)
-        use_while_signed_in(brain_url, game_port)
-        login_while_signed_in(brain_url, game_port, db)
-        same_account_login(brain_url, game_port, db)
+        use_switches(brain_url, game_port, db, "switch", NAME2, NAME)
+        use_switches(brain_url, game_port, db, "switch_back", NAME, NAME2)
+        use_same_account(brain_url, game_port, db)
         restart_and_logout(brain_url, game_port)
         refused_token(brain_url, game_port, db)
         remove_accounts(brain_url, game_port)
-        official_use(brain_url, game_port, stub)
+        official_use(brain_url, game_port, stub, db)
         krunker_row(brain_url, game_port, stub)
         split_box_office(brain_url, game_port, stub)
         split_official(brain_url, game_port, stub)

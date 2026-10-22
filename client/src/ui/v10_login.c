@@ -307,9 +307,11 @@ static void open_modal(const int reg) {
 
 // The Account Manager's Use (alt_manager_ui.c): the card opens with a listed login's Username and its saved Password
 // in the fields, and signs in with them: the card's own Login (submit) runs for the player, so the sign-in is the same
-// as a typed one. The card opens over a signed-in account too, and in an official game. The card is the connected
-// server's: its sign-in is to krunker.io in an official game, else to krunk.io's account service (open_card).
-// alt_manager_ui.c opens it only for a row of that side (its cross-backend refusal).
+// as a typed one. The card is the connected server's: its sign-in is to krunker.io in an official game, else to
+// krunk.io's account service (open_card); alt_manager_ui.c gets the client onto the row's side first (its own official
+// game left for a Box Office row), or refuses. Use switches accounts: a different signed-in account of that side is
+// logged out by alt_manager_ui.c before this call, so the card's sign-in is a guest's. The card's rule for a Login over
+// a signed-in account (names_other_kio, account_ui.c's names_other_account) stays for a card up while a sign-in lands.
 static void submit(void);
 
 int v10_login_use(const char *name, const char *pass) {

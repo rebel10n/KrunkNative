@@ -2,7 +2,9 @@
 // row or stream may carry lives here; callers ask these functions and do not compare backends themselves.
 #include <account_split.h>
 #include <alt_store.h>
+#include <app_backend.h>
 #include <krunker_account.h>
+#include <krunker_net.h>
 
 #include <ctype.h>
 #include <stddef.h>
@@ -49,6 +51,11 @@ int account_split_refuses(const char *login) {
 
 int account_split_row_usable(const int krunker_row) {
     return (krunker_row != 0) == (account_backend() == ACCOUNT_BACKEND_KRUNKER);
+}
+
+int account_split_row_switchable(const int krunker_row) {
+    if (krunker_row || account_split_row_usable(krunker_row)) return 0;
+    return krunker_net_active() && !app_backend_official_session(); // this window's own official game, and only it
 }
 
 int account_split_krunker_identity(void) {

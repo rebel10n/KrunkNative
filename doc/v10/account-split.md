@@ -11,6 +11,11 @@ The one predicate (every path asks it; nothing compares backends by hand):
     and not to this one (case-blind; a name known on both sides is left to the connected server, by
     the password).
   - `account_split_row_usable(krunker_row)`: an Account Manager row is used only on its own side.
+  - `account_split_row_switchable(krunker_row)`: Use of a row of the other side may first move the
+    client to that side: only a Box Office row while this window's own official krunker.io game is
+    the session (the game gives way to Box Office, `krunker_net_leave`, as Find New Game leaves it).
+    A krunker.io row on a Box Office server never (no official game to join for it), nor a Box
+    Office row while another window holds the official session: those stay refused.
   - `account_split_krunker_identity()`: 1 while a krunker.io account is signed in AND an official
     krunker.io game is the session. This is the only krunker.io identity a request may carry.
   - `account_split_side_of(login)`: the side a name is known to belong to (-1 unknown); a helper.

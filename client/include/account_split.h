@@ -19,8 +19,15 @@ int account_split_side_of(const char *login);
 int account_split_refuses(const char *login);
 
 // 1 when an Account Manager row may be used on the connected server: its kind (krunker_row: 1 = krunker.io, 0 = Box
-// Office) is the connected server's backend. Use of any other row opens no card and signs nobody in.
+// Office) is the connected server's backend. Use of any other row first asks account_split_row_switchable.
 int account_split_row_usable(int krunker_row);
+
+// 1 when this window can make a row's backend the connected server's, so that Use of a row account_split_row_usable
+// refuses can switch to it: only a Box Office row while this window's own official krunker.io game is the session
+// (the game gives way to Box Office, as Find New Game leaves it: krunker_net_leave). 0 for a krunker.io row on a Box
+// Office server (there is no official game to join for it) and when the official session is another window's
+// (app_backend_official_session): that Use is refused.
+int account_split_row_switchable(int krunker_row);
 
 // 1 while a krunker.io account is signed in AND an official krunker.io game is the session (the connected server's
 // backend). This is the only krunker.io identity a request may carry: its Bearer token, its krunker.io source choice

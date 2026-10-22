@@ -66,6 +66,10 @@ int  account_ui_logout(void);               // logoutAcc (menu Logout, console `
 // The Account Manager's Remove (alt_manager_ui.c, Box Office accounts): signs out when the removed account is the
 // one signed in (1 signed out, 0 nothing to do).
 int  account_ui_sign_out_of(const char *username);
+// The Account Manager's Use (alt_manager_ui.c, Box Office rows): 1 when a Box Office account other than `login`'s
+// (a name, or an address against the one on file: the login card's own comparison) is signed in, so Use logs it out
+// (account_ui_logout) before the row's sign-in. 0 as a guest, or when the login is the signed-in account's.
+int  account_ui_other_signed_in(const char *login);
 int  account_saved_name(char *out, size_t n);
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
 void account_send_frame(const char *label);  // one no-argument social frame ("ttl": the account's titles)

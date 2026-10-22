@@ -2234,6 +2234,12 @@ static int names_other_account(const char *user, const char *mail) {
     return !(g_email.addr[0] && same_login_text(ident, g_email.addr));
 }
 
+// The Account Manager's Use (alt_manager_ui.c): a Box Office account other than `login`'s is signed in, by the
+// card's own comparison, so the row's sign-in logs it out first (account_ui_logout).
+int account_ui_other_signed_in(const char *login) {
+    return login && names_other_account(login, "");
+}
+
 // The card's message (accResp): the signed-in account stays, and the login typed is not signed in. Nothing is sent.
 static void show_other_signed_in(const char *typed) {
     char text[300];

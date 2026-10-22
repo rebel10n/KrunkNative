@@ -2,20 +2,27 @@
 // backends in one list. Each row is one account: its name, a tag (krunk.io: a Box Office account; krunker.io:
 // an official account), and Use / Remove. A row keeps its login (the name and the password, sealed in the alt
 // vault) and, once the player has signed it in, its session. Add stores the typed login and password under the
-// chosen backend and lists the account: nothing is signed in, nothing is switched, no request is sent. Use fills
-// the login card's Username and Password with the row's saved ones and signs in with them (the card's own sign-in,
-// v10_login.c, run for the player).
+// chosen backend and lists the account: nothing is signed in, nothing is switched, no request is sent. Use makes the
+// row's account the one the client plays as: it fills the login card's Username and Password with the row's saved ones
+// and signs in with them (the card's own sign-in, v10_login.c, run for the player).
 //
-// Use opens the card for a row of the connected server's backend only (account_split.h): a krunker.io row in an official
-// game, a Box Office row on a Box Office server. Over a signed-in account the card still opens. Any other row says so
-// and opens nothing; that cross-backend refusal is the only one for Use.
+// Use switches accounts. A different account of the row's backend signed in is logged out first, the Logout button's
+// way (account_ui_logout: the Box Office session revoked and its state cleared, or krunker.io's tokens dropped), and
+// the row's account is signed in. A row of the other backend (account_split.h) switches the backend when this window
+// can: a Box Office row in this window's own official krunker.io game leaves that game (it gives way to Box Office, as
+// Find New Game does) and signs the account in on Box Office, and the window says why. Use refuses only when the
+// client cannot get to the row's backend: a krunker.io row on a Box Office server (no official game to join for it),
+// or a Box Office row while another window of this client holds the official session. Remove of the signed-in
+// krunker.io row in an official game is refused too ("Leave the official game first.").
 #include <alt_manager_ui.h>
 
 #include <account_split.h>
 #include <alt_crypto.h>
 #include <alt_store.h>
+#include <backend.h>
 #include <backend_ui.h>
 #include <krunker_account.h>
+#include <krunker_net.h> // krunker_net_leave: a Box Office row's Use in this window's official game
 #include <ui_logic.h>
 #include <v10_menu.h>
 
@@ -196,22 +203,47 @@ void alt_manager_ui_init(void) {
 
 // ---------------------------------------------------------------- actions
 
-// Use: the login card opens over the window with the row's Username and its saved Password in the fields, and the
-// card signs in with them (v10_login_use: its Login runs, as a typed one would). Over a signed-in account the card
-// opens too. The cross-backend refusal is only for a row of the other backend (a krunker.io row on a Box Office
-// server, a Box Office row in an official game): that account is not the connected server's, so no card opens and
-// nobody is signed in; the row says where it belongs.
+// An account of the row's backend other than the row's is signed in: Use logs it out before the row's sign-in. A Box
+// Office row names the account by its name or its address (the card's own comparison, account_ui_other_signed_in); a
+// krunker.io row by its name (case-blind).
+static int other_signed_in(const AltProfile *p) {
+    if (p->kind == ALT_KIND_KRUNKER) return krunker_account_signed_in() && !kio_signed_as(p->label);
+    return account_ui_other_signed_in(p->label);
+}
+
+// Use: the row's account becomes the one the client plays as. The login card opens over the window with the row's
+// Username and its saved Password in the fields, and signs in with them (v10_login_use: its Login runs, as a typed
+// one would). Another account of that backend signed in is logged out first, the Logout button's way
+// (account_ui_logout), so the card's sign-in is a guest's: the switch is Use's, not the card's.
+//   A row of the other backend (account_split_row_usable): the window switches to that backend when it can
+// (account_split_row_switchable): a Box Office row in this window's own official krunker.io game leaves that game
+// (krunker_net_leave: the game gives way to Box Office, as Find New Game does) and the account signs in on Box Office;
+// the window says why the game was left (kn.alt.useBoxOffice). Otherwise Use refuses and says where the account
+// belongs: a krunker.io row on a Box Office server (no official game to join for it), a Box Office row while another
+// window holds the official session.
 static void use_row(const char *id) {
     const AltProfile *p = NULL;
     if (!find_profile(id, &p)) {
         set_msg(I18N("kn.alt.gone", "That account is no longer saved."));
         return;
     }
-    if (!account_split_row_usable(p->kind == ALT_KIND_KRUNKER)) {
-        set_msg(p->kind == ALT_KIND_KRUNKER ? I18N("kn.alt.useKrunkerIo", "krunker.io accounts are used in an official krunker.io game.")
-                                            : I18N("kn.alt.useBoxOffice", "Box Office accounts are used on a Box Office server."));
-        return;
+    const int krunker_row = p->kind == ALT_KIND_KRUNKER;
+    if (!account_split_row_usable(krunker_row)) {
+        if (!account_split_row_switchable(krunker_row)) {
+            set_msg(krunker_row ? I18N("kn.alt.useKrunkerIo", "krunker.io accounts are used in an official krunker.io game.")
+                                : I18N("kn.alt.useBoxOffice", "Box Office accounts are used on a Box Office server."));
+            return;
+        }
+        printf("[alt] Use of the Box Office account %s: the krunker.io game gives way to Box Office\n", p->label);
+        krunker_net_leave(menu_ui()->client, NULL); // this window's own official game, left on purpose (no error screen)
+        set_msg(I18N("kn.alt.useBoxOffice", "Box Office accounts are used on a Box Office server.")); // why it was left
+    } else {
+        set_msg("");
     }
+    // the social hold (backend.h) follows the backend once per frame (active_tick): the switch's logout and sign-in go
+    // out now, so the hold follows it here too (a frame held for the krunker.io game would take them)
+    backend_social_hold(account_backend() == ACCOUNT_BACKEND_KRUNKER);
+    if (other_signed_in(p)) account_ui_logout(); // logoutAcc: the signed-in account of this backend ends first
     char name[ALT_LABEL_MAX], pass[ALT_SECRET_MAX];
     snprintf(name, sizeof(name), "%s", p->label);
     snprintf(pass, sizeof(pass), "%s", p->pass);
