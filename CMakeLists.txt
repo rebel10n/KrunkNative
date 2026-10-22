@@ -1054,6 +1054,13 @@ else ()
         target_link_libraries(ramp_fix_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # atomic_sign_test: Atomic's object 833 (an invisible sign) is walk-through, and a player at its spot falls
+    add_executable(atomic_sign_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/atomic_sign_test.c)
+    target_link_libraries(atomic_sign_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(atomic_sign_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # ks_game_v1003_test (v10.0.3 KrunkScript): getMatch().started during the countdown, AI.spawn alwaysSync
     add_executable(ks_game_v1003_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/ks_game_v1003_test.c)
     target_link_libraries(ks_game_v1003_test PRIVATE m)

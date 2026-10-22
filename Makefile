@@ -237,6 +237,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/social_hub_test
 	./$(DEBUG_DIR)/world_v7_test
 	./$(DEBUG_DIR)/ramp_fix_test
+	./$(DEBUG_DIR)/atomic_sign_test
 	./$(DEBUG_DIR)/app_url_test
 	./$(DEBUG_DIR)/vfx_debris_test
 	./$(DEBUG_DIR)/market_stats_test
