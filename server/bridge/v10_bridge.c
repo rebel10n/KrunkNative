@@ -831,7 +831,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
     if (s->stopped) return;
     if (s->init_sent && type == NET_PACKET_MAP_INFO) round_restart(s);
-    const int ranked =type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
+    const int ranked = type == NET_PACKET_EXT && n >= 3 && rd_u16(p, 0) == V10_EXT_RANKED;
     const int init_part = type == NET_PACKET_MAP_DATA || type == NET_PACKET_GAME_CONFIG || type == NET_PACKET_NETWORK_DATA || ranked;
     if (s->have_pending_init && !init_part) {
         queue_push(s, type, p, n);
@@ -1026,6 +1026,9 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_SPAWN) {
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
+        /* another player's add waits for our START: the client's init (it fetches the map) runs after INIT, and a player in its
+         * list before that breaks the init (the join's TypeErrors). flush_held sends it after our start, in order. */
+        if (!s->started && spawn.active && !spawn.is_you) { hold_push(s, type, p, n); return; }
         shooter_set(s, spawn.uid, spawn.position[0], spawn.position[1], spawn.position[2], 11.0); /* standing: player_height */
         remember_name(s, spawn.uid, spawn.name);
         if (!spawn.active && !spawn.is_you) return; /* a player who is dead now: the v10 add is for players in play */

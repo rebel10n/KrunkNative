@@ -547,27 +547,10 @@ int main(void) {
     uint8_t sp[150];
     spawn_buf(sp, 2, 0, 1, 3, 1, 90, 1, 2, 3, 0, 0, "other");
     native_send(&g_native, NET_PACKET_SPAWN, sp, 150);
-    native_send(&g_native, NET_PACKET_SPAWN, sp, 150);
-    WAIT_FOR(client_count("0") >= 1);
-    KrunkerFrame addo;
-    int found_other = 0;
-    for (int k = 0; k < client_count("0") && !found_other; k++) {
-        KrunkerFrame f;
-        if (client_get("0", k, &f) && f.argc == 2 && f.args[0].type == KRUNKER_ARRAY && f.args[0].len == 53 && vequal(&f.args[0].u.items[1], &KRUNKER_V_NUM(2))) {
-            addo = f;
-            found_other = 1;
-        } else {
-            krunker_frame_free(&f);
-        }
-    }
-    CHECK(found_other, "ADD_PLAYERS for the other player");
-    if (found_other) {
-        const KrunkerValue *rec = &addo.args[0];
-        CHECK(rec->len == 53 && rec->u.items[12].type == KRUNKER_ARRAY && vequal(&rec->u.items[12].u.items[0], &KRUNKER_V_NUM(7)) &&
-              vequal(&rec->u.items[12].u.items[1], &KRUNKER_V_NUM(8)), "the add record has the SKINS of uid 2 at field 12");
-        CHECK(addo.args[1].type == KRUNKER_NUM && addo.args[1].u.num == 1, "ADD_PLAYERS takes 1");
-        krunker_frame_free(&addo);
-    }
+    // another player's add waits for our start: the client's init (it fetches the map) runs before it, and a player in its
+    // list before that breaks the init (the join's TypeErrors). It goes out after our START, below.
+    pump(100);
+    CHECK(client_count("0") == 0, "another player's add is held until our start");
     uint8_t sp_me[150];
     spawn_buf(sp_me, 1, 1, 1, 4, 0, 100, 1, 2, 3, 0, 0, "me");
     native_send(&g_native, NET_PACKET_SPAWN, sp_me, 150);
@@ -588,6 +571,28 @@ int main(void) {
     CHECK(client_get("start", 0, &st) && st.argc == 8 && vequal(&st.args[0], &KRUNKER_V_NUM(300)) && vequal(&st.args[7], &KRUNKER_V_NUM(4)) &&
           st.args[6].type == KRUNKER_NIL && vequal(&st.args[5], &KRUNKER_V_NUM(1)), "start is [300, 0, 0, 0, 0, 1, null, 4]");
     krunker_frame_free(&st);
+    // the held add goes out after our start: the record of uid 2 with its SKINS (field 12), ADD_PLAYERS takes 1
+    WAIT_FOR(client_count("0") >= 2);
+    KrunkerFrame addo;
+    int found_other = 0;
+    for (int k = 0; k < client_count("0") && !found_other; k++) {
+        KrunkerFrame f;
+        if (client_get("0", k, &f) && f.argc == 2 && f.args[0].type == KRUNKER_ARRAY && f.args[0].len == 53 && vequal(&f.args[0].u.items[1], &KRUNKER_V_NUM(2))) {
+            addo = f;
+            found_other = 1;
+        } else {
+            krunker_frame_free(&f);
+        }
+    }
+    CHECK(found_other, "ADD_PLAYERS for the other player, after our start");
+    if (found_other) {
+        const KrunkerValue *rec = &addo.args[0];
+        CHECK(rec->len == 53 && rec->u.items[12].type == KRUNKER_ARRAY && vequal(&rec->u.items[12].u.items[0], &KRUNKER_V_NUM(7)) &&
+              vequal(&rec->u.items[12].u.items[1], &KRUNKER_V_NUM(8)), "the add record has the SKINS of uid 2 at field 12");
+        CHECK(addo.args[1].type == KRUNKER_NUM && addo.args[1].u.num == 1, "ADD_PLAYERS takes 1");
+        krunker_frame_free(&addo);
+    }
+
     // the leaderboard (14, free for all) and its LEADER_STATS repeat (consumed)
     uint8_t board[257];
     memset(board, 0, sizeof board);
