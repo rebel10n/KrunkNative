@@ -632,6 +632,10 @@ static const SettingPreset PRESETS[] = {
     {"bulletTracers", NULL, "false"}, {"scopeBorders", "true", NULL}, {"useDamageOverlay", "false", "false"},
     // v10.0.2's new settings with a pro / perf value
     {"webgpu", "false", "false"}, {"noPaintAnim", NULL, "true"}, {"showFindings", "false", NULL}, {"killFx", "false", "true"},
+    // v10.0.3's Disable Video Skins: perf true (game.js settings list, 'noVideoSkins'). KrunkNative renders no video
+    // skins (player_mesh.c has no video path), so the stored value changes nothing here; it is kept so the Performance
+    // preset and the saved file match v10.0.3.
+    {"noVideoSkins", NULL, "true"},
 };
 
 // KrunkNative addition: the "Beautiful" preset (index 4: a fifth .setSugBox2 "Highest graphics
@@ -1303,6 +1307,7 @@ static const char *const ADVANCED_ONLY[] = {
     "weapReloadY", "adsFovMlt", "aimAnim", "hideADS", "showHands", "showWeapon", "showWeaponSec", "showWeaponMel",
     "leftHand", "roundArms", "wallLeanMlt", "wallLean",
     "webgpu", "noPaintAnim", // v10.0.2
+    "noVideoSkins",          // v10.0.3
 };
 
 static int advanced_only(const char *row, const char *row_end) {

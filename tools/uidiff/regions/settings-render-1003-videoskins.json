@@ -1,0 +1,39 @@
+{
+  "scenario": "settings-render-1003-videoskins",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "video-skins-row",
+      "rect": [
+        300,
+        436,
+        675,
+        30
+      ],
+      "kind": "text",
+      "note": "Disable Video Skins row: label, restart mark and switch (KN at y 450, official at y 355 in the same scroll state)",
+      "ref_offset": [
+        0,
+        -95
+      ]
+    },
+    {
+      "name": "animated-paints-row",
+      "rect": [
+        300,
+        404,
+        675,
+        30
+      ],
+      "kind": "text",
+      "note": "the row above it (Disable Animated Paints, unchanged by this change)",
+      "ref_offset": [
+        0,
+        -95
+      ]
+    }
+  ]
+}

@@ -23,6 +23,7 @@
 #include <online_mode.h> // offline mode: every skin unlocked
 #include <app_mode.h> // app_route_url_target (openSales)
 #include <render_settings.h>
+#include <skin_paint.h> // the owned card's paint badge (Krunker v10.0.3's skinPaintBadge)
 #include "../viewer/viewer_store.h"
 #include <sprays.h> // SPRAYS_BASE_COUNT, social_v7.h (store spray indices)
 #include <ctype.h>
@@ -453,7 +454,8 @@ static const char *skin_creator(const int index) {
     return c && c[0] ? c : "Krunker.io";
 }
 
-typedef struct { int ind, cnt, pos; } OwnedSkin;
+// meta: the account entry's m (metadata: paint colour / paint shader, client/src/ui/skin_paint.c); NULL when none
+typedef struct { int ind, cnt, pos; const cJSON *meta; } OwnedSkin;
 static int g_owned_by_rarity_only; // the spray window sorts by rarity alone (stable)
 
 static int owned_rarity(const OwnedSkin *o) { const ViewerSkin *s = store_skin(o->ind); return s ? s->rarity : 0; }
@@ -504,7 +506,7 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     cJSON_ArrayForEach(e, skins) {
         const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
         if (!cJSON_IsNumber(ind)) continue;
-        out[*count] = (OwnedSkin) {ind->valueint, cJSON_IsNumber(cnt) ? cnt->valueint : 1, *count};
+        out[*count] = (OwnedSkin) {ind->valueint, cJSON_IsNumber(cnt) ? cnt->valueint : 1, *count, cJSON_GetObjectItemCaseSensitive(e, "m")};
         (*count)++;
     }
     g_owned_by_rarity_only = by_rarity_only;
@@ -1085,7 +1087,7 @@ char *ui_loadout_gen(void) {
 // (ui_vgrid.h) over g_pick.view, the searched entries: the same cards in the same places, only
 // the rows near the scroll position exist in the DOM.
 typedef enum { PICK_OWNED, PICK_NONE, PICK_RANDOM, PICK_FREE_SPRAY } PickEntryKind;
-typedef struct { PickEntryKind kind; int ind, cnt; } PickEntry; // ind: store index (owned) / free spray
+typedef struct { PickEntryKind kind; int ind, cnt; const cJSON *meta; } PickEntry; // ind: store index (owned) / free spray; meta: OwnedSkin.meta
 typedef enum { PICKER_ITEMS, PICKER_SKIN, PICKER_SPRAY } PickerKind;
 static struct {
     PickerKind kind;
@@ -1104,6 +1106,13 @@ static void pick_add(const PickEntryKind kind, const int ind, const int cnt) {
     if (!grown) return;
     g_pick.all = grown;
     g_pick.all[g_pick.n_all++] = (PickEntry) {kind, ind, cnt};
+}
+
+// An owned entry with its metadata (owned_paint_badge reads it).
+static void pick_add_owned(const OwnedSkin *o) {
+    const int before = g_pick.n_all;
+    pick_add(PICK_OWNED, o->ind, o->cnt);
+    if (g_pick.n_all > before) g_pick.all[before].meta = o->meta;
 }
 
 static void pick_card(StrBuf *out, int pos, void *user);
@@ -1135,6 +1144,29 @@ static void pick_list(StrBuf *out) {
     vgrid_html(&g_pick.grid, out);
 }
 
+// The paint badge of an owned card (Krunker v10.0.3's skinPaintBadge, client/src/ui/skin_paint.c): the store
+// paint of the item's colour (type 18, same colour) gives its name and thumbnail. A shader paint has no store
+// colour here, so it shows as "Shader #n" with the format_paint icon.
+static void owned_paint_badge(StrBuf *out, const OwnedSkin *o) {
+    if (!skin_paint_shows(o->meta)) return;
+    const char *colour = skin_paint_color(o->meta);
+    char name[128], thumb[256], html[1024];
+    SkinPaint store = {NULL, NULL};
+    for (int i = 0; colour && i < g_viewer_skin_count; i++) {
+        const ViewerSkin *p = store_skin(i);
+        if (!p || p->type != 18 || !skin_paint_same_color(p->paint_color, colour)) continue;
+        if (p->name) {
+            snprintf(name, sizeof(name), "%s", p->name);
+            store.name = name;
+        }
+        skin_thumb(i, thumb, sizeof(thumb));
+        store.thumb = thumb[0] ? thumb : NULL;
+        break;
+    }
+    skin_paint_badge(html, sizeof(html), o->meta, &store);
+    sb_append(out, html);
+}
+
 // One owned item card of f1828 / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
 static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
     const char *col = rarity_color(s);
@@ -1149,8 +1181,11 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     sb_append_esc(out, skin_creator(o->ind));
     sb_append(out, "</div>");
     if (with_season) sb_appendf(out, "<div class='itemSea'>Season %d</div>", s->seas ? s->seas : 1);
-    sb_appendf(out, "<img loading='lazy' %sclass='%s%s' src='%s' /><div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
-               weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img, o->ind, o->ind);
+    sb_appendf(out, "<img loading='lazy' %sclass='%s%s' src='%s' />",
+               weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img);
+    owned_paint_badge(out, o); // v10.0.3: after the image, before the info button
+    sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
+               o->ind, o->ind);
 }
 
 // One store spray card of Select Spray (v10:10518334: a free one has a light grey border, no
@@ -1204,7 +1239,7 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
             sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-2,%d)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div><div class='itemSea' style='opacity:0;'>All Seasons</div><img draggable='false' class='skinImg skinSil' onmouseenter='playTick()' src='%s'><div class='skinRandom blackShad' style='top:68px'>?</div></div>", g_skin_weapon, img);
         else {
             const ViewerSkin *s = store_skin(e->ind);
-            const OwnedSkin o = {e->ind, e->cnt, 0};
+            const OwnedSkin o = {e->ind, e->cnt, 0, e->meta};
             if (s) owned_card(out, &o, s, "selectSkin", "skinImg", 1, s->weapon - 1);
         }
         return;
@@ -1217,7 +1252,7 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
                    fn, type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>All Seasons</div>", img_class, img);
     else {
         const ViewerSkin *s = store_skin(e->ind);
-        const OwnedSkin o = {e->ind, e->cnt, 0};
+        const OwnedSkin o = {e->ind, e->cnt, 0, e->meta};
         if (s) owned_card(out, &o, s, fn, img_class, type != 5, -1);
     }
 }
@@ -1233,7 +1268,7 @@ static char *gen_items_list(const char *fn, const int type) {
     OwnedSkin *owned = owned_skins(&n, 0);
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
-        if (s && s->type == type) pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
+        if (s && s->type == type) pick_add_owned(&owned[i]);
     }
     free(owned);
     StrBuf out = {0};
@@ -1254,7 +1289,7 @@ static char *gen_skins(void) {
     OwnedSkin *owned = owned_skins(&n, 0);
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
-        if (s && !s->type && s->weapon == g_skin_weapon + 1) pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
+        if (s && !s->type && s->weapon == g_skin_weapon + 1) pick_add_owned(&owned[i]);
     }
     free(owned);
     StrBuf out = {0};

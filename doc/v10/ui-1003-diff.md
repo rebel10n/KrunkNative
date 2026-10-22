@@ -38,7 +38,7 @@ against the v10.0.2 page that `ui/` was imported from, and what was done about e
 | `client/src/ui/v10_misc_popups.c:1044` (the C call of `account.usernames.buy.confirm`) | 10.0.3 passes `name, "$9.99", days, "$4.99"`. | KN passed three arguments and used `{1}` (`$9.99`) for the renewal price too. The renewal sentence said $9.99, against the $4.99 renewal in the official 10.0.2 text. | **Updated:** the English string matches the 10.0.3 table, and the fourth argument is `"$4.99"`. |
 | `ui/windows/versions.txt` (Krunker's `docs/versions.txt`) | The 10.0.3 file adds an `== UPDATE 10.0.3 ==` section (28 lines) above 10.0.2. | The 10.0.2 copy. The client reads `kn-versions.txt` first and uses this file only as a fallback. | **Updated** to the official 10.0.3 file. |
 | `ui/windows/kn-versions.txt` (KN's What's New) | Not a Krunker file. | Already leads with `UPDATE 10.0.3`. | None |
-| Window templates `ui/windows/*.html` (from the live capture `krunker-windows-v10.json.gz`) | Not diffable: the 10.0.3 tree has no window templates. Known 10.0.3 window changes: Settings > Quality gains "Disable Video Skins" (`settings.quality.noVideoSkins`), and skin lists gain a "Painted: {0}" badge (`windows.skins.painted`). | Captured from 10.0.2 | Not regenerated: that needs `capture_v10_live.js` on the 10.0.3 client, and it was not re-run. The Video Skins toggle would do nothing in KN, because KN has no video skins (`doc/v10/changelog-10.0.3.md`, "Not ported"). The paint badge is a "Decision" there too. |
+| Window templates `ui/windows/*.html` (from the live capture `krunker-windows-v10.json.gz`) | Not diffable: the 10.0.3 tree has no window templates. Known 10.0.3 window changes: Settings > Quality gains "Disable Video Skins" (`settings.quality.noVideoSkins`), and skin lists gain a "Painted: {0}" badge (`windows.skins.painted`). | Captured from 10.0.2 | Not regenerated (that needs `capture_v10_live.js` on the 10.0.3 client). **Added by hand:** the Render tab's "Disable Video Skins" row (`ui/windows/settings-advanced-3.html`, after Disable Animated Paints; `setSetting("noVideoSkins")`, off by default, a restart mark). KN renders no video skins (player_mesh.c has no video path), so the stored value changes nothing in KN; it is kept in the settings store and the Performance preset, as v10.0.3 has it (`client/src/ui/ui_settings.c`). Reference: `doc/ref/krunker-v10.0.3/video-skins-on.png`. The paint badge: see "Paint badge" below. |
 | `social.html`, `editor.html`, `viewer.html` | Not in the 10.0.3 tree. The mirror has them (10.0.2). The editor's Solid Ramp Sides checkbox is the 10.0.3 editor change; KN ported it in `client/src/editor/editor_gameconfig.c`. | Mirror copies | Not diffable here; none changed |
 | Other-language tables (`ui/i18n/<code>.json`) | Not in the 10.0.3 reference (the bundle holds only the English table). | From `krunker.io/i18n/<code>.js?v=i41Nu` | Not changed |
 | Official 10.0.3 changes with a UI surface | Clan recruitment (applies to every join request; `doc/v10/changelog-10.0.3.md`, ported in the brain). Solid Ramp Sides (ported). Video skins (not ported). | - | See the changelog's classification |
@@ -49,6 +49,27 @@ The menu the page builds is the same in 10.0.3 as in 10.0.2: the shell, the Svel
 component CSS (same rules), the stylesheets and the images. The 10.0.3 change the menu shows is the
 English table. The buy-confirm renewal sentence now shows the $4.99 renewal, and the six new keys are
 in the table for the page to use.
+
+Two 10.0.3 UI additions are now in KrunkNative: the Render tab's Disable Video Skins switch (the stored
+setting; no effect in KN, see the window-templates row) and the owned skin card's paint badge (below).
+
+## Paint badge
+
+Krunker's skin and item choosers mark an owned card whose metadata paints it (`skinPaintBadge`). The rule
+and markup come from the decoded bundle (`game.js`, the helper near offset 10870002, called once per owned
+row, after the card's image): no badge unless the owned entry's `m` has a paint colour or a paint shader;
+title `Painted: <name>` (`windows.skins.painted`); body the store paint's thumbnail, else a colour swatch,
+else the `format_paint` icon. KN: `client/src/ui/skin_paint.c` (the markup and rule), `client/src/ui/ui_loadout.c`
+(`owned_paint_badge`: the store paint of the same colour, type 18), `client/include/skin_paint.h`. The CSS
+(`.skinPaintBadge`) was already in `ui/css/main.css`.
+
+Limits, stated plainly:
+- KN's account data stores owned skins as `{ind, cnt}`. Nothing in KN gives an owned skin paint metadata yet,
+  so the badge shows once the account data carries `m` (the v10.0.3 shape); until then no KN card is painted.
+- No official 10.0.3 paint-badge capture exists: the harness has no logged-in account owning a painted skin
+  (`doc/ref/krunker-v10.0.3/captures.json`, `notSaved`). Checked instead: the unpainted chooser against the
+  official capture (`skin-chooser-no-paint.png`), and the badge's own rule by the unit test
+  (`client/tests/skin_paint_test.c`).
 
 ## uidiff
 
@@ -415,7 +436,8 @@ Per scenario (regions PASS / FAIL before and after):
 
 ## Not done, and why
 
-- Window templates were not regenerated (no 10.0.3 capture was run). The Video Skins toggle and the
-  paint badge are not in `ui/windows/`.
+- Window templates were not regenerated (no 10.0.3 capture of the whole menu was run). The Video Skins
+  row is added by hand in `ui/windows/settings-advanced-3.html`. The paint badge is code (`skin_paint.c`),
+  not template markup, and has no official paint-state capture (see "Paint badge").
 - The component CSS order was not changed (see above).
 - The official 10.0.3 changelog's gameplay items are in `doc/v10/changelog-10.0.3.md`, not here.

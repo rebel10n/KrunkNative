@@ -1235,6 +1235,13 @@ else ()
     target_include_directories(join_errors_test PRIVATE client/include shared/include)
     add_test(NAME join_errors_test COMMAND join_errors_test)
 
+    # skin_paint_test (client/src/ui/skin_paint.c): the owned card's paint badge (Krunker v10.0.3's skinPaintBadge)
+    # and the Render tab's Disable Video Skins row (ui/windows/settings-advanced-3.html, ui/i18n/en.json)
+    add_executable(skin_paint_test client/tests/skin_paint_test.c client/src/ui/skin_paint.c)
+    target_include_directories(skin_paint_test PRIVATE client/include shared/include)
+    target_link_libraries(skin_paint_test PRIVATE cJSON m)
+    add_test(NAME skin_paint_test COMMAND skin_paint_test ${CMAKE_SOURCE_DIR})
+
     # seek_choice_test (client/src/ui/seek_choice.c): the region a seek is made in (a saved Default Region
     # is never swapped for another region) and a seek answer whose lobby is full (never joined)
     add_executable(seek_choice_test client/tests/seek_choice_test.c client/src/ui/seek_choice.c)

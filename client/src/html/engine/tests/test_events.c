@@ -417,7 +417,8 @@ static void test_parser_corpus(const char *repo)
         closedir(d);
     }
     printf("corpus: %d inline handlers, %d parse failures, %d distinct callees\n", total, failed, g_callee_n);
-    CHECK(total == 2306);
+    // 2307: + the Render tab's Disable Video Skins switch (v10.0.3, ui/windows/settings-advanced-3.html)
+    CHECK(total == 2307);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);

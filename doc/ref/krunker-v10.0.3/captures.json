@@ -1,0 +1,30 @@
+{
+  "reference": "Krunker v10.0.3 official client, served by the local harness (tools/krunker-local), headless Chromium, 1280x720, deviceScaleFactor 1",
+  "source": "/home/user/jails/kru/src/Krunker_v10.0.3 (read only), copied to ~/.cache/kn-krunker-local/www by the harness prepare step",
+  "captures": [
+    {
+      "file": "video-skins-off.png",
+      "state": "Settings window, Render tab (advanced mode), row 'Disable Video Skins' unchecked (the default)",
+      "steps": "click the menu's Settings button (showWindow(1)); click the advanced slider (windows[0].toggleType); click the Render tab; scroll the setting row (div.settName) into view; screenshot",
+      "setting": "settings.quality.noVideoSkins, key noVideoSkins, default false",
+      "harness": "env -u DISPLAY -u WAYLAND_DISPLAY XDG_CONFIG_HOME=/tmp/vp-cfg CAP_PROFILE=<fresh profile> node ~/.cache/kn-krunker-local/video-paint-ui/cap.mjs tools/krunker-local/config.json doc/ref/krunker-v10.0.3 run ~/.cache/kn-krunker-local/video-paint-ui/steps-settings.mjs (serve: KN_FETCH_PROXY='' node tools/krunker-local/krunker-local.mjs serve on ports 8095/8446)"
+    },
+    {
+      "file": "video-skins-on.png",
+      "state": "Same as video-skins-off.png after one click on the row's checkbox (the page's own onclick: window.setSetting(\"noVideoSkins\", this.checked))",
+      "steps": "as above, then click input[type=checkbox] in the row",
+      "setting": "noVideoSkins = true",
+      "harness": "same run as video-skins-off.png"
+    },
+    {
+      "file": "skin-chooser-no-paint.png",
+      "state": "Customize > Loadout > skin chooser (Select Skin, primary weapon) as a guest: free items only (None, Random); no skinPaintBadge (0 badges, 2 cards)",
+      "steps": "click customizeButton; click the LOADOUT tab; click the primary weapon's skinSelector(1) opener",
+      "harness": "env -u DISPLAY -u WAYLAND_DISPLAY XDG_CONFIG_HOME=/tmp/vp-cfg CAP_PROFILE=<fresh profile> node ~/.cache/kn-krunker-local/video-paint-ui/cap.mjs tools/krunker-local/config.json doc/ref/krunker-v10.0.3 run ~/.cache/kn-krunker-local/video-paint-ui/steps-skins.mjs"
+    }
+  ],
+  "notSaved": [
+    "Paint badge shown (skinPaintBadge): not captured. The skin chooser (#skinList) lists owned items from the logged-in player object (iïìíìîi, created at login); the harness only makes anonymous sessions and no account in this environment owns a painted skin, so no row carries item metadata with paint or paintShader. Capture it on a logged-in account with a painted skin owned (or a loopback fixture), then add skin-chooser-paint-badge.png here."
+  ],
+  "paintBadgeRule": "Badge helper (decoded bundle ~offset 10870002): returns '' unless the owned item's metadata m has paint (truthy) or paintShader (not null). Markup: div.skinPaintBadge title='Painted: <name>' (windows.skins.painted); body: the store skin's thumbnail <img>, else span.skinPaintSwatch for a paint colour, else i.material-icons 'format_paint'. Called once per owned row in the skin chooser (skinCard rows)."
+}
