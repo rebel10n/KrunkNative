@@ -197,6 +197,11 @@ int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
     return ok;
 }
 
+// The web build has one brain lane (fetch): the probe is an ordinary GET.
+int backend_http_get_probe(const char *path, const BackendHttpFn fn, void *user) {
+    return backend_http_get(path, fn, user);
+}
+
 // ------------------------------------------------------------------ social socket
 
 static void ws_event(const char *event) {

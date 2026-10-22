@@ -858,6 +858,10 @@ mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join tic
 server-tabs-e2e: build ## The Servers window's krunk.io / krunker.io tabs (each its own list, v10's layout) and the tab's + Host Game: the backend it hosts on, the session's kept (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/server_tabs_e2e.py $(DEBUG_DIR)
 
+.PHONY: default-probe-e2e
+default-probe-e2e: build ## The Servers window opened while the default brain probe is in flight fills its footer once the probe answers (stub brain via KRUNKNATIVE_TEST_DEFAULT_BRAIN; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/server_default_probe_e2e.py $(DEBUG_DIR)
+
 .PHONY: menu-sources-e2e
 menu-sources-e2e: build ## The menu's Popular Now is Box Office's only (hidden on krunker.io and Both) and its Live Streams come from the brain or api.krunker.io (brain / krunker.io stubs; headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/menu_sources_e2e.py $(DEBUG_DIR)

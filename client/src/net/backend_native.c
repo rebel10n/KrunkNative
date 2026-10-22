@@ -137,6 +137,15 @@ void backend_init(const char *cli_url) {
     char saved[256] = "";
     if ((!url || !url[0]) && html_storage_get("knBrainUrl", saved, sizeof(saved)) > 0) url = saved; // client setting
     char local[256] = "";
+    // test seam (client/tests/server_default_probe_e2e.py): a headless run may point the default account service at a
+    // loopback stub, so the default-probe path runs for real. Only a 127.0.0.1 / localhost URL is taken.
+    const char *test_default = getenv("KRUNKNATIVE_TEST_DEFAULT_BRAIN");
+    if ((!url || !url[0]) && headless_enabled() && test_default && (!strncmp(test_default, "http://127.0.0.1", 16) || !strncmp(test_default, "http://localhost", 16))) {
+        g_url_default = 1;
+        backend_store_url(test_default);
+        printf("[backend] brain %s (test default)\n", backend_url());
+        return;
+    }
     if ((!url || !url[0]) && headless_enabled()) {
         // headless runs (tests, captures, smoke) never reach the production coordinator unless
         // a URL is given explicitly (--brain / KRUNKNATIVE_BRAIN_URL)
@@ -339,8 +348,8 @@ static void *http_thread(void *arg) {
     return NULL;
 }
 
-static int http_queue_lane(const int lane, const int timeout_ms, const char *method, const char *url, const char *body,
-                           const BackendHttpFn fn, void *user) {
+static int http_queue_lane_at(const int lane, const int front, const int timeout_ms, const char *method, const char *url,
+                              const char *body, const BackendHttpFn fn, void *user) {
     if (!url || !url[0]) return 0;
     HttpJob *job = calloc(1, sizeof(*job));
     if (!job) return 0;
@@ -364,11 +373,21 @@ static int http_queue_lane(const int lane, const int timeout_ms, const char *met
             g_http_thread_up[lane] = 1;
         }
     }
-    QUEUE_PUSH(g_http_pending[lane], job);
+    if (front) { // the probe: ahead of the lane's queued requests, so a busy lane never fails it
+        job->next = g_http_pending[lane];
+        g_http_pending[lane] = job;
+    } else {
+        QUEUE_PUSH(g_http_pending[lane], job);
+    }
     pthread_cond_signal(&g_http_cond[lane]);
     const int up = g_http_thread_up[lane];
     pthread_mutex_unlock(&g_lock);
     return up;
+}
+
+static int http_queue_lane(const int lane, const int timeout_ms, const char *method, const char *url, const char *body,
+                           const BackendHttpFn fn, void *user) {
+    return http_queue_lane_at(lane, 0, timeout_ms, method, url, body, fn, user);
 }
 
 static int http_queue(const char *method, const char *url, const char *body, const BackendHttpFn fn, void *user) {
@@ -432,6 +451,17 @@ int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {
         return ok;
     }
     return http_queue("GET", url, NULL, fn, user);
+}
+
+// backend_probe_start's GET /mm/status: the brain lane's head, so the probe waits only for the request in flight
+int backend_http_get_probe(const char *path, const BackendHttpFn fn, void *user) {
+    if (!backend_enabled() || !path || backend_brain_refuses_path()) return 0;
+    char url[2048];
+    pthread_mutex_lock(&g_lock);
+    const int n = snprintf(url, sizeof(url), "%s%s", backend_url(), path);
+    pthread_mutex_unlock(&g_lock);
+    if (n <= 0 || (size_t) n >= sizeof(url)) return 0;
+    return http_queue_lane_at(HTTP_LANE_BRAIN, 1, BACKEND_HTTP_TIMEOUT_MS, "GET", url, NULL, fn, user);
 }
 
 int backend_http_request(const char *method, const char *url, const char *json_body, const BackendHttpFn fn, void *user) {

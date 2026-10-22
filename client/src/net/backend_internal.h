@@ -2,6 +2,7 @@
 // Private glue between backend_common.c and the transports (backend_native.c,
 // backend_web.c). Main thread only.
 #include <stddef.h>
+#include <backend.h>
 
 // A brain request (backend_http_get, backend_http_request) with no answer by then has failed: status 0, the reason as
 // its body (backend.h). Native: the socket's connect and receive timeout. Web: fetch() is aborted (backend_web.c).
@@ -17,3 +18,5 @@ void backend_probe_tick(void);                       // per frame: a probe with 
 // URL of the request (backend_brain_refuses_url) or the path on the brain (backend_brain_refuses_path).
 int backend_brain_refuses_url(const char *url);
 int backend_brain_refuses_path(void);
+// GET on the brain, queued ahead of the brain lane's other requests (the probe). Web: backend_http_get.
+int backend_http_get_probe(const char *path, BackendHttpFn fn, void *user);

@@ -3251,6 +3251,10 @@ static char *loading_html(void) {
     return strdup(loading);
 }
 
+// backend_available() when the Servers window was last generated: the probe may answer after that (a window opened
+// while the probe runs, or during its retry wait, has no brain list or counts), and then the window is generated again.
+static int g_gen_avail = 1;
+
 char *servers_window_gen(const int id, const char **header) {
     (void) header;
     if (id == 10) return games_window_gen();
@@ -3260,6 +3264,7 @@ char *servers_window_gen(const int id, const char **header) {
     }
     if (id == MENU_WINDOW_HOST) return host_flow_window_gen(); // the Host Game window (host_flow_ui.c)
     if (id != 2) return NULL;
+    g_gen_avail = backend_available();
     server_tab_follow(); // the default tab: the active backend's (krunker_net_active)
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
     krunker_lobbies_refresh(0); // official lobbies (native, cached; listed whatever the server type)
@@ -4757,6 +4762,10 @@ static void direct_account_tick(Client *client, const int direct) {
 
 void servers_ui_tick(Client *client) {
     link_tick(client);
+    if (g_gen_avail != 1 && backend_available() == 1) { // the brain answered the probe after this window was generated
+        g_gen_avail = 1;
+        menu_rerender_if_open(2); // the list and the counts come without reopening the window
+    }
     quick_play_retry_tick(); // a Quick Play search's full lobby is tried again when its backoff is due
     rejoin_tick(client); // after a server restart / a refused join key: a fresh ticket
     servers_timer_tick(); // windows[1] "Ends in" countdown
