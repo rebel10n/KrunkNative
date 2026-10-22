@@ -8,6 +8,7 @@
 #include <bots.h>
 #include <chat_commands.h>
 #include <object_manager.h>
+#include <ruleset.h>
 #include <target_select.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,18 +146,28 @@ static ChatPeer g_peers[PEERS]; // the humans (uid 1..3); peer 0 is the dev
 static int g_peer_count = PEERS;
 static PlayerKeep g_keeps[8];   // the connections' keeps, by uid (test_menu_keep)
 
+// every reply line since line_reset() (the timer test reads a list of them; g_reply keeps the last one)
+#define LINES_MAX 64
+static char g_lines[LINES_MAX][NET_CHAT_TEXT_SIZE];
+static int g_line_count;
+static void line_reset(void) { g_line_count = 0; }
+static void line_add(const char *text) {
+    snprintf(g_reply, sizeof(g_reply), "%s", text);
+    if (g_line_count < LINES_MAX) snprintf(g_lines[g_line_count++], sizeof(g_lines[0]), "%s", text);
+}
+
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game; (void) uid; (void) length;
     if (type == NET_PACKET_CHAT) {
         const NetChatPacket *chat = payload;
-        snprintf(g_reply, sizeof(g_reply), "%s", chat->text);
+        line_add(chat->text);
     }
     if (type == NET_PACKET_NOTIFY) snprintf(g_notify, sizeof(g_notify), "%s", ((const NetNotifyPacket *) payload)->text);
 }
 
 static void host_log(void *user, const char *text) {
     (void) user;
-    snprintf(g_reply, sizeof(g_reply), "%s", text);
+    line_add(text);
 }
 
 static int peer_count(void *user) {
@@ -469,9 +480,108 @@ static void test_menu_keep(void) {
     cJSON_Delete(arena);
 }
 
+// ---------------------------------------------------------------- the timer and list commands (v7.1.4 parity)
+
+#define NEAR(a, b) ((a) - (b) < 0.01f && (b) - (a) < 0.01f)
+
+// /time, /endtime, /endvote (DEV: v7 setGameTimer / setEndTimer / endTimer = 1), /classes (no gate: v7 classes),
+// /serverinfo and /status (aliases of /server), /maps and /modes (read-only lists, no gate in v7).
+static void test_timer_commands(void) {
+    printf("Running timer and list command test...\n");
+    cJSON *arena = cJSON_Parse(k_arena);
+    static const cJSON *maps[1];
+    maps[0] = arena;
+    static int modes[1];
+    modes[0] = MODE_ID_FFA;
+    static Game game;
+    g_game = &game;
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game.round_length = 100000.0f;
+    game_init(&game, 0, 0, 1);
+    CHECK(game.ready, "timer test: game ready");
+    if (!game.ready) return;
+
+    add_human(&game, 1, "Joel");
+    add_human(&game, 2, "JoelTwo");
+    add_human(&game, 3, "Sam");
+    g_peers[0] = (ChatPeer) {.id = 1, .name = "Joel", .address = "127.0.0.1", .ping_ms = 0, .dev = 1};
+    g_peers[1] = (ChatPeer) {.id = 2, .name = "JoelTwo", .address = "203.0.113.2", .ping_ms = 0};
+    g_peers[2] = (ChatPeer) {.id = 3, .name = "Sam", .address = "203.0.113.3", .ping_ms = 0};
+    g_host.game = &game;
+    g_host.user = NULL;
+    g_host.peer_count = peer_count;
+    g_host.peer_at = peer_at;
+    g_host.log = host_log;
+    g_host.disconnect = host_disconnect;
+    g_host.perms = 1;
+    g_host.cheats_open = 0;
+
+    // /time: the round clock, MM:SS or seconds; DEV only; refused while an end screen runs
+    CHECK(!strcmp(say(1, "/time 1:30"), "Game time set to 1:30."), "/time 1:30 (%s)", g_reply);
+    CHECK(NEAR(game.round_timer, 90.0f), "/time 1:30 sets the round clock to 90 s (%.2f)", game.round_timer);
+    CHECK(!strcmp(say(1, "/time 45"), "Game time set to 0:45.") && NEAR(game.round_timer, 45.0f), "/time 45: seconds (%s)", g_reply);
+    CHECK(!strcmp(say(1, "/time"), "Usage: time <MM:SS>"), "/time with no time: usage (%s)", g_reply);
+    CHECK(!strcmp(say(1, "/time 1:75"), "Usage: time <MM:SS>") && !strcmp(say(1, "/time soon"), "Usage: time <MM:SS>"),
+          "/time: seconds of 60 or more, or a word, is usage");
+    g_notify[0] = 0;
+    say(2, "/time 1:00");
+    CHECK(strstr(g_notify, "DEV only") != NULL && NEAR(game.round_timer, 45.0f), "a guest's /time is refused, the clock unchanged (notify '%s')", g_notify);
+
+    // /classes: anyone; one line per class, the spawned player's starred (v7 classes: "Classes (n):", then the lines)
+    line_reset();
+    say(2, "/classes");
+    const ClassConfig *classes = game.classes ? game.classes : rules_classes();
+    const int class_n = (int) (game.class_count ? game.class_count : rules_class_count());
+    char head[32];
+    snprintf(head, sizeof(head), "Classes (%d):", class_n);
+    CHECK(g_line_count == class_n + 1 && !strcmp(g_lines[0], head), "/classes from a guest: the header and %d lines (%d lines, '%s')", class_n,
+          g_line_count, g_line_count ? g_lines[0] : "");
+    line_reset();
+    say(1, "/classes");
+    int starred = 0;
+    for (int i = 1; i < g_line_count; i++) starred += strstr(g_lines[i], " *") != NULL;
+    const Weapon *primary = classes[0].loadout ? rules_weapon(classes[0].loadout[0]) : NULL;
+    CHECK(starred == 1 && g_line_count > 1 && !strncmp(g_lines[1], "  0: ", 5) && strstr(g_lines[1], " *") != NULL,
+          "/classes: class 0 (the dev's) is starred (%s)", g_line_count > 1 ? g_lines[1] : "");
+    CHECK(primary && primary->name && g_line_count > 1 && strstr(g_lines[1], primary->name) != NULL, "/classes: class 0 names its primary weapon");
+
+    // /serverinfo and /status are /server
+    char server_line[NET_CHAT_TEXT_SIZE];
+    snprintf(server_line, sizeof(server_line), "%s", say(1, "/server"));
+    CHECK(server_line[0] != 0, "/server replies (%s)", server_line);
+    CHECK(!strcmp(say(1, "/serverinfo"), server_line), "/serverinfo replies as /server (%s)", g_reply);
+    CHECK(!strcmp(say(1, "/status"), server_line), "/status replies as /server (%s)", g_reply);
+
+    // /maps and /modes: read-only, so a guest can read them (no DEV-only notice)
+    g_notify[0] = 0;
+    say(2, "/modes");
+    CHECK(g_reply[0] != 0 && strstr(g_notify, "DEV only") == NULL, "/modes: a guest reads the list (%s)", g_reply);
+    g_notify[0] = 0;
+    say(2, "/maps");
+    CHECK(strstr(g_notify, "DEV only") == NULL, "/maps: a guest is not refused (notify '%s')", g_notify);
+
+    // /endtime <MM:SS>: the end screen now, that long, and the round clock stops; /endvote: the end screen ends at once
+    CHECK(!strcmp(say(1, "/endtime 0:20"), "End timer set to 0:20.") && NEAR(game.end_timer, 20.0f) && game.round_timer == 0.0f,
+          "/endtime 0:20: the end screen is 20 s and the round clock stops (%f)", game.end_timer);
+    CHECK(!strcmp(say(1, "/endtime 0"), "Usage: endtime <MM:SS>") && NEAR(game.end_timer, 20.0f), "/endtime 0 is usage, the end screen kept");
+    g_notify[0] = 0;
+    say(2, "/endtime 0:05");
+    CHECK(strstr(g_notify, "DEV only") != NULL && NEAR(game.end_timer, 20.0f), "a guest's /endtime is refused (notify '%s')", g_notify);
+    CHECK(!strcmp(say(1, "/time 1:00"), "The round is over: its end screen is running (endtime sets that)."),
+          "/time while the end screen runs is refused (%s)", g_reply);
+    CHECK(!strcmp(say(1, "/endvote"), "End vote timer forced.") && game.end_timer > 0.0f && game.end_timer < 0.01f,
+          "/endvote: the end screen ends at once (%f)", game.end_timer);
+    g_notify[0] = 0;
+    say(2, "/endvote");
+    CHECK(strstr(g_notify, "DEV only") != NULL, "a guest's /endvote is refused");
+    CHECK(game.end_timer > 0.0f && game.end_timer < 0.01f, "the refused /endvote changed nothing (%f)", game.end_timer);
+}
+
 int main(void) {
     test_resolver();
     test_commands();
+    test_timer_commands();
     test_menu_keep();
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

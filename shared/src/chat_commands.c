@@ -892,6 +892,94 @@ static void cmd_endless(ChatCtx *c) {
     reply(c, was ? "Match timer resumed." : "Match timer set to endless.");
 }
 
+// v7.1.4 parseTimerMs (server/index.ts): "M:SS" with SS under 60, or a plain number of seconds. 0 = not a time.
+static int parse_timer_seconds(const char *raw, float *out) {
+    if (!raw || !raw[0]) return 0;
+    char *end = NULL;
+    const char *colon = strchr(raw, ':');
+    if (colon) {
+        const long minutes = strtol(raw, &end, 10);
+        if (end != colon || minutes < 0) return 0;
+        char *tail = NULL;
+        const long seconds = strtol(colon + 1, &tail, 10);
+        if (tail == colon + 1 || *tail || seconds < 0 || seconds >= 60) return 0;
+        *out = (float) (minutes * 60 + seconds);
+        return 1;
+    }
+    const float value = strtof(raw, &end);
+    if (end == raw || *end || !(value >= 0.0f)) return 0;
+    *out = value;
+    return 1;
+}
+
+static void timer_label(const float seconds, char *out, const size_t n) {
+    const int whole = (int) seconds;
+    snprintf(out, n, "%d:%02d", whole / 60, whole % 60);
+}
+
+// /time <MM:SS> (v7 setGameTimer): the round clock from now. Not while an end screen runs (the round is over).
+static void cmd_time(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    float seconds = 0.0f;
+    if (!c->argc || !parse_timer_seconds(c->argv[0], &seconds)) {
+        reply(c, "Usage: time <MM:SS>");
+        return;
+    }
+    Game *game = c->host->game;
+    if (!game->ready) return;
+    if (game->end_timer > 0.0f) {
+        reply(c, "The round is over: its end screen is running (endtime sets that).");
+        return;
+    }
+    game_set_round_time(game, seconds);
+    char label[16];
+    timer_label(seconds, label, sizeof(label));
+    reply(c, "Game time set to %s.", label);
+}
+
+// /endtime <MM:SS> (v7 setEndTimer): the end screen, that long, now.
+static void cmd_endtime(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    float seconds = 0.0f;
+    if (!c->argc || !parse_timer_seconds(c->argv[0], &seconds) || seconds <= 0.0f) {
+        reply(c, "Usage: endtime <MM:SS>");
+        return;
+    }
+    Game *game = c->host->game;
+    if (!game->ready) return;
+    game_set_end_timer(game, seconds);
+    char label[16];
+    timer_label(seconds, label, sizeof(label));
+    reply(c, "End timer set to %s.", label);
+}
+
+// /endvote (v7 endTimer = 1, the end-vote timer forced): the end screen ends at once and the map vote comes next.
+static void cmd_endvote(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    Game *game = c->host->game;
+    if (!game->ready) return;
+    game_set_end_timer(game, 0.001f);
+    reply(c, "End vote timer forced.");
+}
+
+// /classes (v7 classes, no gate): every class's index, name and primary weapon; the spawned player's class is starred.
+static void cmd_classes(ChatCtx *c) {
+    const Game *game = c->host->game;
+    const size_t count = game->class_count ? game->class_count : rules_class_count();
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
+    if (!count || !classes) {
+        reply(c, "No classes available.");
+        return;
+    }
+    const int current = c->player ? c->player->class_index : -1;
+    reply(c, "Classes (%d):", (int) count);
+    for (size_t i = 0; i < count; i++) {
+        const Weapon *primary = classes[i].loadout ? rules_weapon(classes[i].loadout[0]) : NULL;
+        reply(c, "  %d: %s - %s%s", (int) i, classes[i].name ? classes[i].name : "?", primary && primary->name ? primary->name : "?",
+              (int) i == current ? " *" : "");
+    }
+}
+
 static int map_has_objects(const Game *game) {
     return game->ready && game->map && game->map->object_count > 0;
 }
@@ -1002,7 +1090,7 @@ static void cmd_server(ChatCtx *c) {
 }
 
 static void cmd_modes(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!allowed(c, CHAT_PERM_ANY)) return; // v7 modes: a read-only list, no gate (doc/v7/command-auth.md)
     int count = 0;
     const GameModeConfig *modes = mode_list(&count);
     char list[CHAT_TEXT_MAX] = "";
@@ -1088,7 +1176,7 @@ static void cmd_map(ChatCtx *c) {
 }
 
 static void cmd_maps(ChatCtx *c) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!allowed(c, CHAT_PERM_ANY)) return; // v7 maps: a read-only list, no gate (doc/v7/command-auth.md)
     char maps[CHAT_TEXT_MAX] = "", custom[CHAT_TEXT_MAX] = "";
     size_t ml = 0, cl = 0;
     for (size_t i = 0; i < map_catalog_count(); i++) {
@@ -2613,13 +2701,18 @@ static const ChatCommand COMMANDS[] = {
     {{"ping", NULL, "[name|id]", "show your ping (devs can target players)", CHAT_PERM_ANY}, cmd_ping},
     {{"end", NULL, "", "set match timer to 3 seconds", CHAT_PERM_DEV}, cmd_end},
     {{"endless", NULL, "", "toggle endless match timer", CHAT_PERM_DEV}, cmd_endless},
+    {{"time", NULL, "<MM:SS>", "set the match (round) timer", CHAT_PERM_DEV}, cmd_time},
+    {{"endtime", NULL, "<MM:SS>", "set the end-screen timer: the end screen now, that long", CHAT_PERM_DEV}, cmd_endtime},
+    {{"endvote", NULL, "", "force the end vote now (the end screen ends at once)", CHAT_PERM_DEV}, cmd_endvote},
     {{"borders", NULL, "[on|off]", "toggle invisible barriers", CHAT_PERM_DEV}, cmd_borders},
     {{"forcecol", NULL, "[on|off]", "toggle force collide", CHAT_PERM_DEV}, cmd_forcecol},
     {{"server", NULL, "", "show current map/mode/player/tick info", CHAT_PERM_ANY}, cmd_server},
+    {{"serverinfo", "server", "", "alias for /server", CHAT_PERM_ANY}, cmd_server},
+    {{"status", "server", "", "alias for /server", CHAT_PERM_ANY}, cmd_server},
     {{"mode", NULL, "[alias]", "switch game mode", CHAT_PERM_DEV}, cmd_mode},
-    {{"modes", NULL, "", "list game modes", CHAT_PERM_DEV}, cmd_modes},
+    {{"modes", NULL, "", "list game modes", CHAT_PERM_ANY}, cmd_modes},
     {{"map", NULL, "[name]", "switch map (no arg = show current)", CHAT_PERM_DEV}, cmd_map},
-    {{"maps", NULL, "", "list available maps", CHAT_PERM_DEV}, cmd_maps},
+    {{"maps", NULL, "", "list available maps", CHAT_PERM_ANY}, cmd_maps},
     {{"cycle", NULL, "", "cycle to the next map", CHAT_PERM_DEV}, cmd_cycle},
     {{"game", NULL, "<text>", "send a game command", CHAT_PERM_DEV}, cmd_game},
     {{"god", NULL, "[target] [on|off]", "toggle god mode (self, target or selector: * @bots @team Joel*)", CHAT_PERM_CHEAT}, cmd_god},
@@ -2664,6 +2757,7 @@ static const ChatCommand COMMANDS[] = {
     {{"spawn", NULL, "<object|entity|npc>", "spawn an Object Manager object, entity or NPC at your crosshair (devs: from the menu too)", CHAT_PERM_ANY}, cmd_spawn},
     // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
     {{"class", NULL, "<name|id> [secondary]", "switch your class now (dev, offline sandbox): its loadout and health, and the secondary weapon", CHAT_PERM_DEV}, cmd_class},
+    {{"classes", NULL, "", "list classes and primary weapons (the spawned player's is starred)", CHAT_PERM_ANY}, cmd_classes},
     {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
     {{"ff", NULL, "", "vote to forfeit the match with your team (ranked; one start per game)", CHAT_PERM_ANY}, cmd_ff},
     {{"forfeit", NULL, "", "alias for /ff (vote to forfeit with your team)", CHAT_PERM_ANY}, cmd_ff},

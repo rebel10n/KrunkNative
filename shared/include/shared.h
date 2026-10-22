@@ -2278,6 +2278,7 @@ void game_sync_leaders(Game*, int uid);  // LEADERBOARD to `uid` (or NET_TARGET_
 void game_start_round(Game*);            // fresh round timer + stats (after game_init)
 void game_end_round(Game*);              // Krunker endGame(3): END packets, players cleared
 void game_set_round_time(Game*, float seconds); // debug: seconds left in the running round (TIMER goes out next tick)
+void game_set_end_timer(Game*, float seconds);  // /endtime, /endvote: the end screen now, `seconds` long (v7 setEndTimer)
 // Interaction (shared/src/interact.c): v7.1.4 players.interact ("int" type, uid / "intSec"),
 // confirmInteract ("cnfm"), dropWeapon ("drpw") and Player's changeInteract prompts. Terminals
 // are gone in v7 (TERMINAL builds nothing); weapon pickups (WEAPON_PICKUP) are interact type 6.

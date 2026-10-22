@@ -451,6 +451,7 @@ static const ConArg A_BUILD_FILL[] = {{"count", ARG_NUMBER, 1}, {"kind", ARG_NUM
 static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_STRING, 1}};
 // KrunkNative class (dev): the class, and the loadout's secondary weapon (the class's other weapons are its own)
 static const ConArg A_CLASS[] = {{"name|id", ARG_STRING, 0}, {"secondary", ARG_STRING, 1}};
+static const ConArg A_TIME[] = {{"MM:SS", ARG_STRING, 0}};
 static const ConArg A_STRIKE_REWARD[] = {{"kind", ARG_STRING, 0}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
@@ -1391,6 +1392,16 @@ static void cmd_console_reset(const int argc, char **argv, const char *rest) {
     append("Console position and size reset.", COL_INFO);
 }
 
+// resetbinds / reset_binds (v7 resetAllKeyBinds): every console bind goes (the session's `bind`s, not the
+// Controls' keys). The count says how many were reset.
+static void cmd_resetbinds(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    const int count = g_con.bind_count;
+    g_con.bind_count = 0;
+    if (count == 1) append("reset 1 bind", COL_INFO);
+    else appendf(count ? COL_INFO : COL_HINT, "reset %d binds", count);
+}
+
 // reload (KrunkNative): F5's full reload (game_reload.h, doc/console.md "F5: full reload")
 static void cmd_reload(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
@@ -1594,6 +1605,10 @@ static void register_commands(void) {
     register_local("rotation", NO_ARGS, "alias for rot", cmd_rot);
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
     register_local("thirdperson", NO_ARGS, "over-the-shoulder camera (offline, devs, custom games that allow it)", cmd_thirdperson);
+    register_local("third", NO_ARGS, "alias for thirdperson", cmd_thirdperson); // v7 devConsole: third, tpmesh
+    register_local("tpmesh", NO_ARGS, "alias for thirdperson", cmd_thirdperson);
+    register_local("resetbinds", NO_ARGS, "reset all key binds", cmd_resetbinds);
+    register_local("reset_binds", NO_ARGS, "alias for resetbinds", cmd_resetbinds);
     register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
     register_dev("strike_reward", ARGS(A_STRIKE_REWARD), "a sample Krunker Strike reward screen (battlepass: Awesome! opens the Battle Pass)", cmd_strike_reward);
     register_dev("class", ARGS(A_CLASS), "switch your class now (offline sandbox): its loadout and health, and the secondary weapon", cmd_class);
@@ -1615,6 +1630,11 @@ static void register_commands(void) {
                     "kill yourself or a target (examples: /kill, /kill Guest_1, /kill \"Wandering Ghost\", /kill wanderingghost)");
     register_server("end", NO_ARGS, "set match timer to 3 seconds");
     register_server("endless", NO_ARGS, "toggle endless match timer");
+    // v7.1.4 timers and the class list (shared/src/chat_commands.c cmd_time, cmd_endtime, cmd_endvote, cmd_classes)
+    register_server("time", ARGS(A_TIME), "set the match (round) timer");
+    register_server("endtime", ARGS(A_TIME), "set the end-screen timer: the end screen now, that long");
+    register_server("endvote", NO_ARGS, "force the end vote now (the end screen ends at once)");
+    register_server("classes", NO_ARGS, "list classes and primary weapons (the spawned player's is starred)");
     register_server("borders", ARGS(A_ON_OFF), "toggle invisible barriers");
     register_server("forcecol", ARGS(A_ON_OFF), "toggle force collide");
     register_server("server", NO_ARGS, "show current map/mode/player/tick info");

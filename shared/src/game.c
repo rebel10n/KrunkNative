@@ -661,6 +661,19 @@ void game_set_round_time(Game *game, const float seconds) {
     game->round_seconds_sent = -1;
 }
 
+// /endtime and /endvote (v7.1.4 setEndTimer / endTimer = ms, server/index.ts): the end screen of the round, `seconds`
+// long, from now: POST_MATCH, the end clock ("t" with the end flag) to everyone. As in v7 it does not score the
+// round (game_end_round does), and the end screen's countdown then rotates the map as usual (game_tick_round).
+void game_set_end_timer(Game *game, const float seconds) {
+    if (!game->ready || seconds <= 0.0f) return;
+
+    game->end_timer = seconds;
+    game->round_timer = 0.0f;
+    game->round_seconds_sent = -1;
+    game_set_state(game, GAME_STATE_POST_MATCH);
+    game_send_timer(game, NET_TARGET_ALL, (int) seconds, 1);
+}
+
 // /endless (v3.1.1 dev cmd_endless, endTimer = "inf"). Intentional difference: the
 // reference zeroes gameTimer (every client gets "t" 00:00) and turning it off restores a
 // full gameTime round; KrunkNative pauses the clock instead. On: round_timer is kept and
