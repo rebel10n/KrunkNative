@@ -20,9 +20,9 @@ const sec = (ms) => `${(ms / 1000).toFixed(1)}s`;
 const rows = [];
 const add = (id, name, ok, detail) => rows.push({ id, name, ok: !!ok, detail });
 
-// (a) init completes: a sample where the game is past its init, with a game instance and a mode set
-const aS = S.find((s) => s.game && !s.game.initInProgress && s.game.hasInstance && s.game.modeSet && s.game.modeIndex !== null);
-add("a", "init completes (initInProgress false, mode set)", aS,
+// (a) init completes: a sample where the game is past its init, with its map loaded and a mode set
+const aS = S.find((s) => s.game && !s.game.initInProgress && s.game.mapLoaded && s.game.modeSet && s.game.modeIndex !== null);
+add("a", "init completes (initInProgress false, map loaded, mode set)", aS,
   aS ? `at ${sec(aS.t)}, mode ${aS.game.modeIndex}` : `no sample past init (joined: ${r.joined === true})`);
 
 // (b) the HUD renders in the round: the health and ammo boxes are laid out, and a game canvas is visible
@@ -36,7 +36,8 @@ add("c", "window.__kn_game readable during the round", cS,
   cS ? `at ${sec(cS.t)}, ${cS.game.players} players listed` : "no in-round sample with the game object");
 
 // (d) the local player's input reaches the server and produces state: W moves the player, the mouse turns it, a click fires
-// (the bridge's "<- q" input frames, the server's "-> l" position samples, and the local player's own bullet trail)
+// (the local shot: the game's physObj call with us as the shooter; a trail is drawn only for weapons with one, so it is not asserted)
+// (the bridge's "<- q" input frames and the server's "-> l" position samples)
 let dOk = false;
 let dDetail = "no in-round input window (the join did not reach a round)";
 if (r.input && r.input.before && r.input.after) {
@@ -48,11 +49,11 @@ if (r.input && r.input.before && r.input.after) {
   const la = a.game && a.game.local;
   const move = lb && la ? Math.hypot(la.x - lb.x, la.z - lb.z) : 0;
   const look = lb && la && typeof lb.yaw === "number" && typeof la.yaw === "number" ? Math.abs(la.yaw - lb.yaw) : 0;
-  const tracers = (a.tracers || 0) - (b.tracers || 0);
+  const shots = (a.shots || 0) - (b.shots || 0);
   const ammo = lb && la ? lb.ammo - la.ammo : 0;
-  dOk = q > 0 && l > 0 && move > 0.5 && look > 0.001 && tracers > 0;
+  dOk = q > 0 && l > 0 && move > 0.5 && look > 0.001 && shots > 0;
   dDetail = `input frames +${q}, position samples +${l}, move ${move.toFixed(2)}, look ${look.toFixed(3)}, ` +
-    `own tracers +${tracers}, ammo ${ammo >= 0 ? "-" : "+"}${Math.abs(ammo)} (physCalls +${(a.physCalls || 0) - (b.physCalls || 0)})`;
+    `own shots +${shots}, ammo ${ammo >= 0 ? "-" : "+"}${Math.abs(ammo)} (physCalls +${(a.physCalls || 0) - (b.physCalls || 0)})`;
 }
 add("d", "input reaches the server and makes state (move, look, fire)", dOk, dDetail);
 
@@ -77,7 +78,8 @@ add("e", "frame counter keeps advancing for 60 s", eOk, eDetail);
 // (f) the round ends and the end screen is shown
 // (f) must follow a round the local player was in: an end screen while still on the menu is not a round's end
 const firstIn = S.findIndex((s) => s.inRound);
-const fS = firstIn < 0 ? null : S.find((s, i) => i > firstIn && s.phase === "round" && s.endUI);
+// (the end screen can come up in the frame window, after the round started: any phase counts)
+const fS = firstIn < 0 ? null : S.find((s, i) => i > firstIn && s.endUI);
 add("f", "round ends and the end screen is shown", fS,
   fS ? `end screen at ${sec(fS.t)}, bridge end labels ${fS.bridge.end}`
     : (firstIn < 0 ? "not reached (no in-round sample, so no round to end)" : "no end screen in the round window"));

@@ -35,7 +35,7 @@ from the report that `krunker-local.mjs playable` writes:
 | a | init completes: `initInProgress` false, the mode set |
 | b | the HUD renders in the round (DOM: `#bottomLeftHealth`, `#ammoVal` laid out, a canvas visible) |
 | c | `window.__kn_game` readable during the round |
-| d | input reaches the server and makes state: W held (the player moves), the mouse moved (the player turns), a click (a bullet trail of the local shot is drawn); the bridge's `<- q` frames and `-> l` samples advance |
+| d | input reaches the server and makes state: W held (the player moves), the mouse moved (the player turns), a click fires (the game's own shot for the local player); the bridge's `<- q` frames and `-> l` samples advance |
 | e | the frame counter (the page's animation frames) advances in every 5 s of a 60 s window |
 | f | the round ends: `#endUI` (the end screen) is shown |
 | g | the next round starts: a new `init` on the socket, the local player active, the end screen gone |
@@ -44,8 +44,8 @@ from the report that `krunker-local.mjs playable` writes:
 It exits 0 only when every assertion passes. `playable-check.mjs <report.json> [max]` runs the
 assertions again on a saved report. Env: `KN_PLAYABLE_ROUND_S` (round length, default 90),
 `KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;
-screenshots are in `shots/playable-*.png`. The bullet trail is counted from the page's `physObj` call that
-has a trail argument and the local player as shooter (a shell casing passes `false` there). A round needs
+screenshots are in `shots/playable-*.png`. The local shot is counted from the page's `physObj` call with the local player as
+the shooter (a trail is drawn only for weapons with one, so the trail itself is not asserted). A round needs
 the game server's round length, so the run takes about 5 minutes.
 
 The report's `bridgeCounts` are what the bridge sent (its trace's `-> label` lines, this run's file). They are
@@ -99,8 +99,9 @@ Works: the page, CSS, libs, loader and all ten `core.dat` splits load; the conse
 dialog renders and accepts; `generate-token` and `game-list` reach the brain through the
 official hostnames (`seek-game` answers too, with `angeles-8.krunk.io:21022`).
 
-Does not work yet: the client stays on its loading spinner after the token, even after 120 s.
-It never calls game-list from the menu, so Quick Play cannot be reached from the harness.
+The round works end to end (`make playable-check`): the page joins its lobby by itself at startup (no Quick Play click),
+the harness presses CLICK TO PLAY for real, and the round, the next round and the input are checked from the report.
+The bridge answers an ENT from a living player with that player's spawn and START (the client's loading waits for it).
 Static files: no 404s since the static route (`routes.mjs`) fetches them through the proxy (the
 page's `img/*`, `manifest.json`, `css/fonts/*`, and the `assets` and `user-assets` CDN files). Blocked by design:
 `analytics.google.com`, the other third-party hosts, and the FRVR and Cloudflare hosts.

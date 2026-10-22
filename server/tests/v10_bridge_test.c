@@ -907,6 +907,26 @@ int main(void) {
         CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0, "END and MODE_END are translated, the session goes on");
     }
 
+    // ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet (the bytes of encodeEnter)
+    KrunkerValue en_items[T_EN_LEN];
+    for (int i = 0; i < T_EN_LEN; i++) en_items[i] = KRUNKER_V_NUM(-1);
+    en_items[0] = KRUNKER_V_NUM(4);
+    en_items[5] = KRUNKER_V_NUM(-1);
+    en_items[1] = KRUNKER_V_NUM(-1);
+    KrunkerValue skins_pair[2] = {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1)};
+    KrunkerValue charms_pair[2] = {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1)};
+    en_items[2] = KRUNKER_V_ARRAY(skins_pair, 2);
+    en_items[9] = KRUNKER_V_NUM(-1);
+    en_items[11] = KRUNKER_V_NUM(1);
+    en_items[12] = KRUNKER_V_NUM(-1);
+    en_items[6] = KRUNKER_V_NUM(0);
+    en_items[7] = KRUNKER_V_NUM(0);
+    en_items[19] = KRUNKER_V_NUM(0);
+    en_items[29] = KRUNKER_V_ARRAY(charms_pair, 2);
+    KrunkerValue join_args[10] = {
+        KRUNKER_V_ARRAY(en_items, T_EN_LEN), KRUNKER_V_NUM(16), KRUNKER_V_NUM(18), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0),
+        KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0), KRUNKER_V_STR(""), KRUNKER_V_BOOL(0),
+    };
     // the next round: the round change is the game state ENDED (gsc 5), then the next map's MAP_INFO (its MAP_REQUEST), the
     // config, the networking, INIT for that map (the same v10 "init" again: the client runs its init for the new round),
     // RANKED after it (net_send_init), and the map's MAP_DATA. Our respawn then starts the round (START again).
@@ -962,6 +982,20 @@ int main(void) {
         KrunkerFrame st2;
         CHECK(client_get("start", 1, &st2) && st2.argc == 8, "start again in the next round");
         krunker_frame_free(&st2);
+
+        // the enter while we are alive (the next round's spawn is active): the client's enterGame sets loading and waits for a
+        // START, which the native server does not send again for a living player, so the bridge answers the ENT with our spawn's
+        // add and START (the official server answers every ENT with the spawn and START)
+        const int starts_before_ent = client_count("start");
+        const int adds_before_ent = client_count("0");
+        client_send("en", join_args, 10);
+        WAIT_FOR(native_count(NET_PACKET_ENT) == 1);
+        NFrame *ent = native_nth(NET_PACKET_ENT, 0);
+        CHECK(ent != NULL && ent->len == V10_ENT_SIZE && (int32_t)(ent->payload[0] | ent->payload[1] << 8 | ent->payload[2] << 16 | ent->payload[3] << 24) == 4,
+              "ENT: 101 bytes, class 4");
+        WAIT_FOR(client_count("start") == starts_before_ent + 1);
+        CHECK(client_count("start") == starts_before_ent + 1, "an ENT while alive: START again for our spawn");
+        CHECK(client_count("0") == adds_before_ent + 1, "an ENT while alive: our add again (the round's init may have cleared it)");
     }
 
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
@@ -982,32 +1016,6 @@ int main(void) {
     const uint8_t borders[2] = {3, 1};
     native_send(&g_native, NET_PACKET_CHEAT, borders, 2);
     WAIT_FOR(v10_bridge_untranslated("CHEAT") == 1);
-
-    // ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet (the bytes of encodeEnter)
-    KrunkerValue en_items[T_EN_LEN];
-    for (int i = 0; i < T_EN_LEN; i++) en_items[i] = KRUNKER_V_NUM(-1);
-    en_items[0] = KRUNKER_V_NUM(4);
-    en_items[5] = KRUNKER_V_NUM(-1);
-    en_items[1] = KRUNKER_V_NUM(-1);
-    KrunkerValue skins_pair[2] = {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1)};
-    KrunkerValue charms_pair[2] = {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1)};
-    en_items[2] = KRUNKER_V_ARRAY(skins_pair, 2);
-    en_items[9] = KRUNKER_V_NUM(-1);
-    en_items[11] = KRUNKER_V_NUM(1);
-    en_items[12] = KRUNKER_V_NUM(-1);
-    en_items[6] = KRUNKER_V_NUM(0);
-    en_items[7] = KRUNKER_V_NUM(0);
-    en_items[19] = KRUNKER_V_NUM(0);
-    en_items[29] = KRUNKER_V_ARRAY(charms_pair, 2);
-    KrunkerValue join_args[10] = {
-        KRUNKER_V_ARRAY(en_items, T_EN_LEN), KRUNKER_V_NUM(16), KRUNKER_V_NUM(18), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0),
-        KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0), KRUNKER_V_STR(""), KRUNKER_V_BOOL(0),
-    };
-    client_send("en", join_args, 10);
-    WAIT_FOR(native_count(NET_PACKET_ENT) == 1);
-    NFrame *ent = native_nth(NET_PACKET_ENT, 0);
-    CHECK(ent != NULL && ent->len == V10_ENT_SIZE && (int32_t)(ent->payload[0] | ent->payload[1] << 8 | ent->payload[2] << 16 | ent->payload[3] << 24) == 4,
-          "ENT: 101 bytes, class 4");
 
     // q (INPUT): the official client's window (seq 5 and 6, shoot) reaches the native input batch (111)
     {

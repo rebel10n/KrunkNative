@@ -510,12 +510,14 @@ const CLICK_PLAY_JS = `(() => {
   }
   return "none: " + els.slice(0, 60).map((e) => e.innerText.trim()).join(" | ").slice(0, 400);
 })()`;
-// inGame, read from the game object (window.__kn_game, the harness-only hook in loader.js): a game instance is open
-// (not closed, destroyed or initialising) and the local player's entry (players.list, matched by sid to
-// players.currentSid) is active. The menu's list is empty, so this is false there. Not checked against a live join yet.
+// inGame, the same round test as the playable check (PLAY_SNAP_JS): the local player's entry (players.list, matched by sid to
+// players.currentSid) is active, the menu is down and the end screen is not shown, and the game is not initialising or closed.
+// v10 never sets game.gameInstance, so it is not used.
 const IN_GAME_JS = `(() => { const g = window.__kn_game; if (!g || typeof g !== "object" || !g.players) return false;
   const p = (g.players.list || []).find((x) => x && x.sid === g.players.currentSid);
-  return !!(p && p.active && g.gameInstance && !g.gameClosed && !g.isDestroyed && !g.initInProgress); })()`;
+  const m = document.getElementById("menuHolder"), ui = document.getElementById("uiBase"), end = document.getElementById("endUI");
+  const menuUp = !!m && getComputedStyle(m).display !== "none", endUp = !!end && getComputedStyle(end).display !== "none";
+  return !!(p && p.active && !menuUp && !(ui && ui.classList.contains("onMenu")) && !endUp && !g.gameClosed && !g.isDestroyed && !g.initInProgress); })()`;
 const STATE_JS = `(() => ({
   game: typeof window.Game, render: typeof window.RENDER,
   canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","),
@@ -779,20 +781,26 @@ const PLAY = { joinMs: 150000, frameMs: 60000, roundMs: 300000, nextMs: 300000, 
 // the frame counter: every animation frame the page runs (a wrapper, installed before the page's own scripts)
 const RAF_HOOK = `(() => { window.__kn_frames = 0; const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = function (cb) { return raf(function (t) { window.__kn_frames++; return cb(t); }); }; })();`;
-const CLICK_TO_PLAY_JS = `(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || ""));
+// The "CLICK TO PLAY" prompt's box (the element holding that text), in viewport pixels, or null when it is not shown. The
+// prompt is clicked with a real mouse press there (Input.dispatchMouseEvent), not with element.click(): the game listens for
+// mousedown on its canvas (controls: toggle(true) -> pointer lock, or locklessChange), so a synthetic click does not start it.
+const CLICK_TO_PLAY_RECT_JS = `(() => { const hits = [...document.querySelectorAll("div,span,button,a")].filter((e) => /click to play/i.test(e.innerText || "") && e.offsetParent);
   const e = hits.find((x) => ![...x.children].some((c) => /click to play/i.test(c.innerText || ""))) || hits[0];
-  if (!e) return null; e.click(); return e.tagName + "." + String(e.className).slice(0, 40); })()`;
+  if (!e) return null; const b = e.getBoundingClientRect(); if (b.width <= 0 || b.height <= 0) return null;
+  const x = Math.round(b.left + b.width / 2), y = Math.round(b.top + b.height / 2);
+  const top = document.elementFromPoint(x, y);
+  return { x, y, tag: e.tagName, top: top ? top.tagName + "#" + top.id + "." + String(top.className).slice(0, 30) : null }; })()`;
 // The page's state as one JSON string: the HUD and the end screen by their ids in the official index.html (visible when laid
 // out), the canvas, the frame counter, and the game object (window.__kn_game, loader.js): the local player (the sid that
 // players.currentSid names) and its state. inRound: the local player is active in a game instance past its init.
-// tracers counts the local player's own bullet trails: the game's physObj call (the particles manager) with a number as its
-// trail argument and the local player as the shooter (a casing passes false there). The wrapper only counts; the call goes on.
+// shots counts the local player's own shots: the game's physObj call (the particles manager) with the local player as the
+// shooter (its ninth argument). A shell casing is one too, with no shooter; the wrapper only counts, the call goes on.
 const PLAY_SNAP_JS = `(() => {
   const r1 = (v) => typeof v === "number" ? Math.round(v * 10) / 10 : null;
   const r3 = (v) => typeof v === "number" ? Math.round(v * 1000) / 1000 : null;
   const vis = (e) => { if (!e) return false; const s = getComputedStyle(e); const b = e.getBoundingClientRect(); return s.display !== "none" && s.visibility !== "hidden" && b.width > 0 && b.height > 0; };
   const byId = (x) => document.getElementById(x);
-  const out = { frames: window.__kn_frames || 0, tracers: window.__kn_tracers || 0, physCalls: window.__kn_phys || 0,
+  const out = { frames: window.__kn_frames || 0, shots: window.__kn_shots || 0, physCalls: window.__kn_phys || 0,
     canvasVisible: [...document.querySelectorAll("canvas")].some((c) => vis(c) && c.width > 0 && c.height > 0),
     hud: { health: vis(byId("bottomLeftHealth")), ammo: vis(byId("ammoVal")) },
     endUI: vis(byId("endUI")),
@@ -808,17 +816,22 @@ const PLAY_SNAP_JS = `(() => {
       const orig = fx.physObj;
       fx.physObj = function (...a) {
         window.__kn_phys = (window.__kn_phys || 0) + 1;
-        if (typeof a[6] === "number" && a[8] && a[8].isYou === true) window.__kn_tracers = (window.__kn_tracers || 0) + 1;
+        if (a[8] && a[8].isYou === true) window.__kn_shots = (window.__kn_shots || 0) + 1;
         return orig.apply(this, a);
       };
       fx.__knHooked = true;
     }
+    // v10 never sets game.gameInstance (it stays null: the only assignment in the bundle is the constructor's), so the round
+    // is read from the page: the local player is active, the menu is down (the HUD shows) and the game is not initialising.
+    const menuUp = !!byId("menuHolder") && getComputedStyle(byId("menuHolder")).display !== "none";
+    const ui = byId("uiBase");
     out.game = { initInProgress: g.initInProgress === true, gameClosed: g.gameClosed === true, isDestroyed: g.isDestroyed === true,
-      modeIndex: g.modeIndex == null ? null : g.modeIndex, modeSet: !!g.mode, hasInstance: !!g.gameInstance,
+      modeIndex: g.modeIndex == null ? null : g.modeIndex, modeSet: !!g.mode, mapLoaded: !!g.map,
       players: list.length, localActive: !!(p && p.active === true),
+      controls: !!(g.controls && g.controls.enabled === true), menuUp, onMenu: !!ui && ui.classList.contains("onMenu"),
       local: p ? { x: r1(p.x), y: r1(p.y), z: r1(p.z), yaw: r3(p.xDire), pitch: r3(p.yDire), loadoutIndex: p.loadoutIndex,
         ammo: Array.isArray(p.ammos) ? p.ammos[p.loadoutIndex] : null } : null };
-    out.inRound = out.game.localActive && out.game.hasInstance && !out.game.initInProgress && !out.game.gameClosed && !out.game.isDestroyed;
+    out.inRound = out.game.localActive && !out.game.menuUp && !out.game.onMenu && !out.endUI && !out.game.initInProgress && !out.game.gameClosed && !out.game.isDestroyed;
   }
   return JSON.stringify(out); })()`;
 
@@ -837,7 +850,7 @@ async function playable() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { check: "playable", build: "v10.0.3", url: cfg.localUrl, startedAt: new Date(t0).toISOString(),
     roundSeconds: Number(process.env.KN_ROUND_SECONDS) || null, phase: "start", joined: false, clicked: null, consent: false,
-    spawnClicks: 0, seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
+    spawnClicks: 0, spawnClickAt: [], seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
     exceptionCount: 0, exceptions: [], consoleErrors: [], failed: [], httpErrors: [], shots: [] };
   let phase = "start";
   const labels = bridgeLabelCounter(cfg.bridge.log); // "-> label": what the server and bridge sent the client
@@ -907,7 +920,20 @@ async function playable() {
       return s;
     };
     const tick = async () => { const s = await snap(); await sleep(1000); return s; };
-    const clickSpawn = async () => { const c = await evalJS(CLICK_TO_PLAY_JS); if (c) report.spawnClicks++; return c; };
+    // The spawn control: a real press and release on the "CLICK TO PLAY" box, as a player makes it. Pressed only while the menu
+    // (which carries that prompt) is up: the prompt text stays on the HUD during a round, and a press there would fire.
+    const clickSpawn = async () => {
+      const at = await evalJS(CLICK_TO_PLAY_RECT_JS);
+      if (!at) return null;
+      report.spawnClicks++;
+      if (report.spawnClickAt.length < 5) report.spawnClickAt.push(at);
+      await mouse("mouseMoved", at.x, at.y);
+      await mouse("mousePressed", at.x, at.y);
+      await sleep(80);
+      await mouse("mouseReleased", at.x, at.y);
+      return at;
+    };
+    const promptUp = (s) => !!s.clickToPlay && (!s.game || s.game.menuUp);
 
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     // the page keeps its anonymous session and preferences in localStorage (profileSeed); a fresh profile has none
@@ -921,8 +947,12 @@ async function playable() {
       await sleep(2000);
     }
     await sleep(cfg.afterAcceptMs);
-    // The page seeks a lobby on its own after the accept. Quick Match from inside a lobby is "Find New Game" and the one-lobby
-    // server answers NoOtherLobby, so Quick Match is pressed only when the page has not sought yet (as the join does).
+    // Quick Play is skipped on purpose, and the page's own join is what a player gets: at startup the official client seeks and
+    // connects to a lobby by itself (the page's startup branch that ends in the seek and the socket, when no custom map is asked
+    // for; v10.0.2 reference and the 10.0.3 bundle alike). Pressing QUICK MATCH then would be "Find New Game" from inside that
+    // lobby, which this one-lobby server answers with NoOtherLobby. What the player still does is the spawn: the CLICK TO PLAY
+    // press in the join loop, driven for real (clickSpawn), because the controls only turn on with that press (pointer lock,
+    // then enterGame) and the page stays on its menu without them.
     report.clicked = report.seeks ? `skipped: the page sought on its own (${report.seeks} seek before the click)` : await evalJS(CLICK_PLAY_JS);
     log(`quick play: ${report.clicked}`);
 
@@ -933,8 +963,9 @@ async function playable() {
     while (Date.now() < joinDeadline) {
       const s = await tick();
       if (s.inRound) { report.joined = true; break; }
-      if (s.clickToPlay && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+      if (promptUp(s) && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
     }
+    await shot("join-end");
     log(report.joined ? "in the round" : "not in the round");
 
     // input: W held for two seconds, the mouse moved right for look, one left click for fire; state read before and after
@@ -957,13 +988,18 @@ async function playable() {
     phase = "frames";
     const f0 = Date.now();
     report.framesWindow = { startMs: f0 - t0 };
-    while (Date.now() - f0 < PLAY.frameMs) await tick();
+    // A round of ROUND_S seconds can end inside this window (the end screen then stays ~25 s): the first end screen seen here
+    // is the round's end too, so the round phase below does not miss it.
+    while (Date.now() - f0 < PLAY.frameMs) {
+      const s = await tick();
+      if (s.endUI && !report.end) report.end = { t: s.t, bridgeEnd: s.bridge.end, bridgeInit: s.bridge.init, seenIn: "frames" };
+    }
     report.framesWindow.endMs = Date.now() - t0;
 
     // the round's end: the end screen (#endUI) is shown
     phase = "round";
     const roundDeadline = Date.now() + (report.joined ? PLAY.roundMs : PLAY.failedMs);
-    while (Date.now() < roundDeadline) {
+    while (!report.end && Date.now() < roundDeadline) {
       const s = await tick();
       if (s.endUI) { report.end = { t: s.t, bridgeEnd: s.bridge.end, bridgeInit: s.bridge.init }; break; }
     }
@@ -976,7 +1012,7 @@ async function playable() {
       const nextDeadline = Date.now() + (report.joined ? PLAY.nextMs : PLAY.failedMs);
       while (Date.now() < nextDeadline) {
         const s = await tick();
-        if (s.clickToPlay && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+        if (promptUp(s) && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
         if (s.inRound && !s.endUI && s.bridge.init > report.end.bridgeInit) { report.nextRound = { t: s.t, bridgeInit: s.bridge.init }; break; }
       }
     }

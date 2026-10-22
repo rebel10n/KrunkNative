@@ -131,6 +131,9 @@ typedef struct V10Session {
     size_t pending_end_n;
     size_t held_n, held_cap;
     int started;                 /* START went out: our spawn is in */
+    uint8_t *own_spawn;          /* our last active SPAWN (150 B): answered again when the client enters while we are alive */
+    size_t own_spawn_n, own_spawn_cap;
+    int own_alive;               /* our last SPAWN was active */
     int init_sent;
     int global_values_sent;
     int stopped;
@@ -317,6 +320,7 @@ static void session_free(V10Session *s) {
     for (size_t i = 0; i < s->held_n; i++) free(s->held[i].payload);
     free(s->held);
     free(s->pending_end);
+    free(s->own_spawn);
     free(s);
 }
 
@@ -610,6 +614,18 @@ static void handle_client(V10Session *s, const char *label, const KrunkerValue *
         if (v10_encode_enter(a0, ent)) write_native(s, NET_PACKET_ENT, ent, sizeof ent);
         /* challMode: the join's array item 7 (EN.CHALLENGE), truthy */
         s->chall_mode = a0 && a0->type == KRUNKER_ARRAY && a0->len > 7 && v10_truthy(&a0->u.items[7]) ? 1 : 0;
+        /* The official server answers every ENT with our spawn and START, and the client's loading waits for that START (its
+         * enterGame sets loading, and only START clears it). The native server does not spawn a player who is alive, so when
+         * we are alive it answers neither: our last spawn goes out again here, as its SPAWN would (the add and START). */
+        if (s->own_alive && s->own_spawn_n) {
+            const size_t n = s->own_spawn_n;
+            uint8_t *again = malloc(n);
+            if (again) {
+                memcpy(again, s->own_spawn, n);
+                handle_native(s, NET_PACKET_SPAWN, again, n);
+                free(again);
+            }
+        }
     } else if (!strcmp(label, V10_OUT_INPUT)) {
         /* the input window: every frame to the native server, NET_INPUT_BATCH_MAX to a packet (a malformed q is dropped) */
         size_t count = 0;
@@ -820,9 +836,25 @@ static void flush_pending_end(V10Session *s) {
 static void round_restart(V10Session *s) {
     s->init_sent = 0;
     s->started = 0;
+    s->own_alive = 0;
     s->have_config_text = 0;
     s->network_received = 0;
     s->ranked_received = 0;
+}
+
+/* our own SPAWN, kept while we are alive: an ENT from the client is answered with it (see the ENTER_GAME case). A dead or
+ * waiting SPAWN only sets own_alive to 0. */
+static void remember_own_spawn(V10Session *s, const uint8_t *p, size_t n, int active) {
+    s->own_alive = active ? 1 : 0;
+    if (!active) return;
+    if (n > s->own_spawn_cap) {
+        uint8_t *grown = realloc(s->own_spawn, n);
+        if (!grown) { s->own_spawn_n = 0; return; }
+        s->own_spawn = grown;
+        s->own_spawn_cap = n;
+    }
+    memcpy(s->own_spawn, p, n);
+    s->own_spawn_n = n;
 }
 
 static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t n) {
@@ -1039,6 +1071,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     if (s->init_sent && type == NET_PACKET_SPAWN) {
         V10Spawn spawn;
         if (!v10_parse_spawn(p, n, &spawn)) { stop_at(s, "SPAWN", "malformed"); return; }
+        if (spawn.is_you) remember_own_spawn(s, p, n, spawn.active);
         /* another player's add waits for our START: the client's init (it fetches the map) runs after INIT, and a player in its
          * list before that breaks the init (the join's TypeErrors). flush_held sends it after our start, in order. */
         if (!s->started && spawn.active && !spawn.is_you) { hold_push(s, type, p, n); return; }
