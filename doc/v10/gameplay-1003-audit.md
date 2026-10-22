@@ -2,7 +2,7 @@
 
 Audit of KrunkNative's gameplay values against the official Krunker v10.0.3 client (2026-10-22). Target: doc/v10/target.md.
 
-Status key: **match** (equal after the unit conversion shown); **mismatch (fixed)** (changed here, with a test that failed before); **mismatch (not fixed: ...)** (a rule or feature rather than a value, left for its own change); **unverified** (no 10.0.3 evidence found in this pass, left as is); **covered** (fixed by another owner, not re-audited).
+Status key: **match** (equal after the unit conversion shown); **mismatch (fixed)** (changed here, with a test that failed before); **mismatch (not fixed: ...)** (a rule or feature rather than a value, left for its own change); **not found** (no 10.0.3 key or reader; the value is dead and left as is) and **placeholder** (a session value, not a constant); the ten former unverified rows are settled in `doc/v10/constants-1003.md`; **covered** (fixed by another owner, not re-audited).
 
 ## Reference and method
 
@@ -16,11 +16,12 @@ Status key: **match** (equal after the unit conversion shown); **mismatch (fixed
 
 | Status | Rows |
 |---|---|
-| match | 280 |
+| match | 285 |
 | mismatch (fixed) | 1 |
 | mismatch (not fixed: round rule) | 1 |
 | mismatch (not fixed: economy) | 1 |
-| unverified | 10 |
+| not found (dead in 10.0.3 and v7) | 4 |
+| placeholder (not a constant) | 1 |
 | covered | 1 |
 | **total** | **294** |
 
@@ -297,12 +298,12 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 | Air speed constant (air_speed 0.047) | 0.047 (shared/src/rules/v10/constants_v10.c:36); read by bots only | derived from arA 0.0047 / 100 per ms x 1000 (row above) | match |
 | Hit-box broad-phase padding (5) | 5 (shared/src/hitboxes.c:331, 333) | deob byte 828857 (line 22618) hitBoxPad: 5 | match |
 | Speed cap on movement | none (shared/src/player.c has no speed clamp) | deob byte 831987 (line 22733) is the speedrun score-zone display limit (custUI), not a movement cap | match |
-| Slipping speed (slipping_speed 0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:35) | no 10.0.3 config key or literal found; dead in v10 (doc/v10/gameplay.md section 1) | unverified |
-| Terrain slide threshold (1.9) | 1.9 (shared/src/rules/v10/constants_v10.c:40) | no 10.0.3 config key found | unverified |
-| Terrain slip decel (0.99) | 0.99 (shared/src/rules/v10/constants_v10.c:41) | no 10.0.3 config key found | unverified |
-| Slipping jump cooldown (0.5 s) | 0.5 (shared/src/rules/v10/constants_v10.c:39) | no 10.0.3 config key found | unverified |
-| Crouch slow (0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:38) | no 10.0.3 config key found | unverified |
-| Collision padding (1.1) | 1.1 (shared/src/rules/v10/constants_v10.c:75) | no 10.0.3 config key found | unverified |
+| Slipping speed (slipping_speed 0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:35) | no 10.0.3 key (no slippingSpeed; the only "slipp" text is a tip); v7 config.js:2117 has 0.0003 per ms and no v7 code reads it | not found (dead in 10.0.3 and v7; doc/v10/constants-1003.md 1) |
+| Terrain slide threshold (1.9) | 1.9 (shared/src/rules/v10/constants_v10.c:40) | no 10.0.3 key; the terrain test is y <= height (deob 192234), no slope threshold | not found (dead; constants-1003.md 2) |
+| Terrain slip decel (0.99) | 0.99 (shared/src/rules/v10/constants_v10.c:41) | no 10.0.3 key; the terrain decel that is read is 0.99 (deob 191631) = terrain_decel (constants_v10.c:43) | not found (dead; constants-1003.md 3) |
+| Slipping jump cooldown (0.5 s) | 0.5 (shared/src/rules/v10/constants_v10.c:39) | no 10.0.3 key; the jump sets jumpCooldown = jpC * 0 (deob 195251) = 0, as shared/src/world.c:415 | not found (dead; the behaviour matches; constants-1003.md 4) |
+| Crouch slow (0.3) | 0.3 (shared/src/rules/v10/constants_v10.c:38) | 10.0.3 setting "Crouch Speed" crchSpd, def 0.3 (deob 20462), read at deob 191627 | match (constants-1003.md 5) |
+| Collision padding (1.1) | 1.1 (shared/src/rules/v10/constants_v10.c:75) | deob 21171 var = 1.1, read as the config key collPad (deob 22480) | match (constants-1003.md 6) |
 | Jump velocity formula: 0.072 x jumpMlt x attributes.jump x mode.jumpMlt (x mode.jumpVel) | shared/src/player.c:1286 | deob byte 9415374 (line 195256); mode.jumpVel: no 10.0.3 mode sets it (no `jumpVel:` in the mode table), so the factor is 1 | match |
 | Real-movement jump factor 0.92 | shared/src/player.c:1287 | deob byte 9415660 (line 195258) | match |
 | Jump push 0.1 with the same multipliers | shared/src/player.c:1289 | deob byte 9415816 (line 195261) | match |
@@ -311,7 +312,7 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 | Ranked end-game KR multiplier x2 | shared/src/rules/ruleset.c:37 (.kr_mlt = 2.0f) | deob byte 10695300 (line 221760) reward x 2 (not in a challenge) | match |
 | Ranked needAll timer 60 s | shared/src/rules/ruleset.c:37 (.need_all_ms = 60000) | deob byte 10614043 (line 219964) | match |
 | Ranked shutdown 120 s | shared/src/rules/ruleset.c:37 (.shutdown_ms = 120000) | deob byte 10698357 (line 221815) | match |
-| Ranked: no kill streaks, no class XP | shared/src/rules/ruleset.c:37; rules_ranked_no_streaks / no_class_xp (ruleset.c:77-78) | not located in the 10.0.3 bundle in this pass (10.0.2 cites v10:174076 / 173631) | unverified |
+| Ranked: no kill streaks, no class XP | shared/src/rules/ruleset.c:37; rules_ranked_no_streaks / no_class_xp (ruleset.c:78-79) | deob 198604 (!isRanked on the killer's streak); deob 197794 (saveClassScores: !isRanked) | match (constants-1003.md 7) |
 | Trigger action limit 8 | shared/include/triggers.h:187; shared/src/rules/ruleset.c:38 | deob byte 838025 (line 22957) triggerActionLimit: 8 | match |
 | Entity limit 64 | shared/src/rules/ruleset.c:39 | deob byte 826706 (line 22543) entityLimit: 64 | match |
 | Archetype limit 32 | shared/src/rules/ruleset.c:40 | deob byte 822759 (line 22397) archetypeLimit: 32 | match |
@@ -327,10 +328,10 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 | Team round wins counted outside best-of (teamRoundWins[getWinTeam(true)]++) | shared/src/modes/mode_round.c:351-361 (counted only under mode->best_of) | deob byte 10688117 (line 221603) (else branch of bestOf) | mismatch (not fixed: round rule) |
 | Battle Pass points per public match: 30 x min(1, floor(playTime / gameTime x 10) / 10) | not ported: no BPP computed in KN (the native client sends no bpp; services/brain/db_season.c:251 reads the payload only) | deob byte 10695987 (line 221770) (not raid; x 30) | mismatch (not fixed: economy) |
 | Mode index default 0 = Free for All | net-bridge/krunkerProxy.ts:902; v10Proxy.ts:633; v10Translate.ts:815 (MODE_ID_FFA = 0) | deob byte 4925147 (line 119361) (first entry of the mode table) | match |
-| Map index default 0 (Burg) | net-bridge/krunkerProxy.ts:901; shared/include/krunker_maps.h:23 (X(0, "Burg")) | deob byte 748472 (line 19382) (index 2 agrees: krunker_maps.h:25; index 0 not seen) | unverified |
+| Map index default 0 (Burg) | net-bridge/krunkerProxy.ts:901; shared/include/krunker_maps.h:23 (X(0, "Burg")) | deob 160271 (filter value 0 = Burg); deob 188614 and 257421 (index 0 is Burg) | match (constants-1003.md 8) |
 | Tick rate default 30 Hz | net-bridge/krunkerProxy.ts:16 (DEFAULT_TICK_RATE = 30); proxy.ts:15 | deob byte 10397678 (line 215719) | match |
-| INIT_GAME arguments: eventIndex 0, isOfficial true, isComp false, accType 1, sync gor 1 | net-bridge/v10Translate.ts:1220-1248 (buildInitArgs) | argument positions taken from v10.js; not traced in the 10.0.3 init handler (gor check at deob byte 12900797 (line 256833)) | unverified |
-| Session placeholders gameTimer 0, challMode 0 | net-bridge/v10Proxy.ts:644-645 | set by the server TIMER / ENTER_GAME; no fixed 10.0.3 value | unverified |
+| INIT_GAME arguments: eventIndex 0, isOfficial false, isComp false, accType 1, sync gor 1 (init 4th argument true) | net-bridge/v10Translate.ts:1227-1250 (buildInitArgs) | positions read by the 10.0.3 handler (deob 256748-256856) and the create-game broadcast (deob 261893); isOfficial false is right for Box Office (not a krunker.io official game); the audit's old "isOfficial true" misread index 13 | match (constants-1003.md 9) |
+| Session placeholders gameTimer 0, challMode 0 | net-bridge/v10Proxy.ts:644-645 | not a 10.0.3 constant: TIMER (v10Proxy.ts:461) and ENTER (593) overwrite them; the START_GAME order matches (deob 242075) | placeholder (constants-1003.md 10) |
 | Native protocol ahNum key (KRUNKER_AHKEY 0x3) | shared/include/krunker_build.h:19; net-bridge/krunkerProxy.ts:352 | deob byte 4658927 (line 111514) (10.0.2: 1597, v10.js:98200) | match |
 | Weapon trail (bullet trail setting and tracer) | covered upstream: commit 60217454 ("Bullet trail: the server sends the official shot trail"; Sniper Rifle .trail, Charge Rifle .trail_charge, checked by weapons_v7_test) and 2d7113ac (the trail setting) | not re-audited here (another owner) | covered |
 | Class leap (all 16 classes) | no leap set in shared/src/rules/v10/classes_v10.c (default false) | all 16 are leap: false in the 10.0.3 class table | match |
@@ -338,4 +339,4 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 ## Not audited here
 
 - Render-side and UI values (lean, bob, view-model offsets, HUD, skins) and the scene offset noted above.
-- The ranked no-streak / no-class-XP rules and the INIT_GAME argument positions are unverified (rows above). The bridge's live INIT is exercised by `make playable-check`, which this audit did not run.
+- The ten former unverified rows are settled in `doc/v10/constants-1003.md`. The bridge's live INIT is exercised by `make playable-check`, which this audit did not run.

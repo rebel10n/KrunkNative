@@ -718,7 +718,9 @@ async function main(): Promise<void> {
   assert.deepStrictEqual(args[6], settings); // config: the GAME_CONFIG settings
   assert.strictEqual(args[9] && (args[9] as { data: unknown }).data, mapJson); // customMapData.data: the map JSON text
   assert.deepStrictEqual(args[12], { snf: 10, tf: 30, sf: 1 }); // networkData
-  assert.strictEqual(args[13], true);
+  assert.strictEqual(args[13], true); // the create-game path's init 4th argument (doc/v10/constants-1003.md 9)
+  assert.strictEqual(args[14], false); // isOfficial: a Box Office game is not a krunker.io official game
+  assert.strictEqual(args[15], false); // isComp
   assert.strictEqual(args[16], false); // isRanked
 
   // a reset-only global value before any gv clears nothing the client holds: no message, no stop
