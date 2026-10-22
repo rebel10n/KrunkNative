@@ -1193,7 +1193,7 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     // the protocol this client speaks: the brain never matches it to a node of another major
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
-    // the Krunker version (v10.0.2, the only one): quick join never picks a lobby announcing another
+    // the Krunker version (v10.0.3, the only one): quick join never picks a lobby announcing another
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&ruleset=%s", ruleset_current()->key);
     // the round trips this client measured to the listed regions' ping hosts ({v10 id: ms}, the server browser's
     // row pings; < 0 = failed): a region the brain has no node in is routed to the lowest-ping one it has
