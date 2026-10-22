@@ -26,6 +26,10 @@
 #include "dom.h"
 #include "image.h"
 #include "layout.h"
+#include "paint.h"
+#include <gl.h>
+#include <GLFW/glfw3.h>
+#include <headless.h>
 #include "text.h"
 #include "ua_css.h"
 
@@ -84,6 +88,12 @@ static int png_size(void *user, const char *url, const char *base, float *w, flo
     *h = (float)((hdr[20] << 24) | (hdr[21] << 16) | (hdr[22] << 8) | hdr[23]);
     return 1;
 }
+
+/* paint.c's image hooks (the layout test paints without a GL context: no images are decoded) */
+const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) { (void)cache; (void)url; (void)base_url; return NULL; }
+unsigned image_texture(const ImageEntry *entry, int nearest) { (void)entry; (void)nearest; return 0; }
+unsigned image_cache_loads(const ImageCache *cache) { (void)cache; return 0; }
+int image_entry_lazy(const ImageEntry *entry) { (void)entry; return 0; }
 
 /* Stands in for image.c's resolver (layout_build.c's content: url() on <img>;
  * image.c needs GL and the asset tree): the URL as-is, query/fragment cut. */
@@ -1155,6 +1165,153 @@ static void t_hit_clip_path(void)
     CHECK(b && strcmp(box_id(b), "sct") == 0, "hit: a clip-path's upper half is the top's, not the later box below (%s)", box_id(b));
     b = layout_hit_test(fx->tree, 100, 150, 1);
     CHECK(b && strcmp(box_id(b), "scb") == 0, "hit: the lower half is the bottom's (%s)", box_id(b));
+    fx_free(fx);
+}
+
+/* ------------------------------------------------------------------------- */
+/* paint: an incremental recording equals a from-scratch one                 */
+/* ------------------------------------------------------------------------- */
+
+/* The layout box of an element (NULL when it has none: display none, or detached). */
+static Box *elem_box(Fx *fx, HtmlElem e)
+{
+    ElemData *ed = dom_elem_data(fx->dom, e);
+    return ed ? (Box *) ed->box : NULL;
+}
+
+/* The display list as numbers (glyph and rect items; pointers differ between recordings). */
+static int dl_sig(const DisplayList *dl, float *out, int cap)
+{
+    int n = 0;
+    for (int i = 0; i < dl->n && n + 8 < cap; i++) {
+        const DlItem *it = &dl->items[i];
+        out[n++] = (float) it->op;
+        if (it->op == DL_RECT) {
+            out[n++] = it->u.rect.rect.x; out[n++] = it->u.rect.rect.y;
+            out[n++] = it->u.rect.rect.w; out[n++] = it->u.rect.rect.h;
+            out[n++] = it->u.rect.color.r;
+        } else if (it->op == DL_GLYPHS) {
+            out[n++] = (float) it->u.glyphs.n;
+            for (int q = 0; q < it->u.glyphs.n && n + 8 < cap; q++) {
+                const DlGlyphQuad *g = &it->u.glyphs.quads[q];
+                out[n++] = g->x; out[n++] = g->y; out[n++] = g->w; out[n++] = g->h;
+                out[n++] = g->uv[0]; out[n++] = g->uv[1];
+            }
+        }
+    }
+    return n;
+}
+
+static int dl_rects_of(const DisplayList *dl, float color_r)
+{
+    int n = 0;
+    for (int i = 0; i < dl->n; i++)
+        if (dl->items[i].op == DL_RECT && dl->items[i].u.rect.color.r == color_r) n++;
+    return n;
+}
+
+/* Does `b` (or one of its ancestors up to the root) equal `want`? */
+static int box_under(const Box *b, const Box *want)
+{
+    for (; b; b = b->parent) if (b == want) return 1;
+    return 0;
+}
+
+/* The console's situation: a fixed top-layer box (host) that is detached and reattached by the
+ * page's keep-on-top moves, hidden and shown by display toggles, while its text, the page's own
+ * siblings, the scroll offset and the viewport change. After every step the incremental recording
+ * (one PaintCtx kept across steps, as the engine keeps it) must equal a from-scratch recording,
+ * the top list must hold the host exactly when it is shown, and the host must be hit-testable
+ * exactly when it is shown. */
+static void t_repaint_matches_fresh(void)
+{
+    Fx *fx = fx_html("<div id=page>page</div><div id=p2 style='position:fixed;left:0;top:0;width:50px;height:20px;background:#00ff00'>q</div>"
+                     "<div id=host style='position:fixed;left:10px;top:10px;width:200px;height:60px;background:#330000'>"
+                     "<div id=log style='height:60px'>AAAA</div></div>", NULL);
+    Dom *d = fx->dom;
+    HtmlElem host = dom_by_id(d, "host"), log = dom_by_id(d, "log"), body = dom_parent(d, dom_by_id(d, "page"));
+    PaintCtx ctx;
+    paint_ctx_init(&ctx);
+    ctx.text = g_ts;
+    ctx.device_scale = 1;
+    DisplayList page = {0}, top = {0};
+    ctx.top_out = &top;
+    static float inc[1 << 15], fresh[1 << 15];
+    srand(12345);
+    int hidden = 0, fly = 0, mismatches = 0, routing = 0, hits = 0;
+    for (int step = 0; step < 300; step++) {
+        const int op = rand() % 8;
+        if (op == 0 && !fly) {          /* an element appended after the host (the end screen's overlays) */
+            dom_insert_html(d, body, DOM_INSERT_BEFORE_END,
+                            "<div id=fly style='position:fixed;z-index:9999;left:0;top:0;width:10px;height:10px;background:#0000ff'>f</div>", 0);
+            fly = 1;
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_children_changed(fx->tree, dom_elem_node(d, body));
+        } else if (op == 1 && fly) {
+            dom_remove(d, dom_by_id(d, "fly"));
+            fly = 0;
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_children_changed(fx->tree, dom_elem_node(d, body));
+        } else if (op == 2 && !hidden) { /* the engine's keep_on_top move (engine_before_move) */
+            layout_nodes_removed(fx->tree, dom_elem_node(d, host), 1);
+            dom_elem_data(d, host)->box = NULL;
+            dom_append(d, body, host);
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_children_changed(fx->tree, dom_elem_node(d, body));
+        } else if (op == 3) {           /* display toggle of the host */
+            ElemData *hd = dom_elem_data(d, host);
+            CssComputed old = *hd->computed;
+            dom_set_style(d, host, "display", hidden ? "" : "none");
+            hidden = !hidden;
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_restyled(fx->tree, dom_elem_node(d, host), &old);
+        } else if (op == 4) {           /* the text changes (same length, so the geometry stays) */
+            char t[8];
+            for (int i = 0; i < 4; i++) t[i] = (char) ('A' + rand() % 26);
+            dom_set_html(d, log, t, 4);
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_children_changed(fx->tree, dom_elem_node(d, log));
+        } else if (op == 5) {           /* scroll of the log */
+            Box *lb = elem_box(fx, log);
+            if (lb) layout_set_scroll(fx->tree, lb, 0, (float) (rand() % 3));
+        } else if (op == 6) {           /* viewport change */
+            fx->vw = 800.0f + (float) (rand() % 3) * 200.0f;
+            cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+            layout_children_changed(fx->tree, dom_elem_node(d, body));
+        }
+        layout_run(fx->tree, fx->vw, fx->vh);
+        Box *hb = elem_box(fx, host);
+        ctx.top_layer = hidden ? NULL : hb;    /* the engine refreshes this before every paint */
+        paint_build(&ctx, layout_tree_root(fx->tree), &page);
+
+        PaintCtx fc;
+        paint_ctx_init(&fc);
+        fc.text = g_ts;
+        fc.device_scale = 1;
+        DisplayList fpage = {0}, ftop = {0};
+        fc.top_out = &ftop;
+        fc.top_layer = ctx.top_layer;
+        paint_build(&fc, layout_tree_root(fx->tree), &fpage);
+        const int np = dl_sig(&page, inc, (1 << 15) / 2), nf = dl_sig(&fpage, fresh, (1 << 15) / 2);
+        const int nt = dl_sig(&top, inc + np, (1 << 15) / 2), ntf = dl_sig(&ftop, fresh + nf, (1 << 15) / 2);
+        if (np != nf || nt != ntf || memcmp(inc, fresh, sizeof(float) * (size_t) (np + nt)) != 0) mismatches++;
+
+        const int shown_in_top = dl_rects_of(&top, 0x33) > 0;
+        if (shown_in_top != !hidden) routing++;
+        if (!hidden && dl_rects_of(&page, 0x33) > 0) routing++;   /* drawn once, in the top layer */
+        Box *hit = layout_hit_test(fx->tree, 100.0f, 40.0f, 0);
+        const int hit_host = hit && box_under(hit, hb);
+        if (hidden ? hit_host : !hit_host) hits++;
+        dl_free(&fpage);
+        dl_free(&ftop);
+        paint_ctx_free(&fc);
+    }
+    CHECK(mismatches == 0, "incremental paint differs from a from-scratch paint in %d of 300 steps", mismatches);
+    CHECK(routing == 0, "the host is in the top layer exactly when it is shown (%d steps wrong)", routing);
+    CHECK(hits == 0, "the host is hit-testable exactly when it is shown (%d steps wrong)", hits);
+    dl_free(&page);
+    dl_free(&top);
+    paint_ctx_free(&ctx);
     fx_free(fx);
 }
 
@@ -2339,6 +2496,19 @@ static void t_memo_auto_margin(void)
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
+    /* the glyph atlas (text_glyph_quad, the paint tests) needs a GL context: the headless one
+     * the GL-labelled ctest entry asks for (KRUNKNATIVE_HEADLESS=1); layout alone does not */
+    headless_parse_args(&argc, argv);
+    if (headless_enabled() && headless_glfw_init()) {
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        headless_window_hints();
+        GLFWwindow *win = glfwCreateWindow(64, 64, "layout test", NULL, NULL);
+        if (win) headless_make_context_current(win);
+        if (win && !kn_gl_load(headless_get_proc_address)) fprintf(stderr, "glad failed\n");
+    }
     char ui[1024];
     snprintf(ui, sizeof(ui), "%s/ui", g_root);
     g_ts = text_create(ui);
@@ -2381,6 +2551,7 @@ int main(int argc, char **argv)
     t_sticky_scroll();
     t_text();
     t_hit_test();
+    t_repaint_matches_fresh();
     t_hit_clip_path();
     t_html_table();
     t_end_table();

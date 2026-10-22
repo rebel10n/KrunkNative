@@ -1671,6 +1671,7 @@ else ()
             SOURCES ${KN_ENGINE_DIR}/tests/test_layout.c ${KN_ENGINE_LAYOUT_SOURCES}
                     ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/css_sheet.c ${KN_ENGINE_DIR}/css_cascade.c
                     ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/text.c ${KN_ENGINE_DIR}/util.c
+                    ${KN_ENGINE_DIR}/paint.c
             LIBS lexbor freetype ARGS ${CMAKE_SOURCE_DIR})
         krunknative_html_engine_test(html_gl_backend_test GL
             SOURCES ${KN_ENGINE_DIR}/tests/test_gl_backend.c ${KN_ENGINE_DIR}/gl_backend.c client/src/shader.c

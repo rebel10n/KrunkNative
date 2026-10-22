@@ -880,6 +880,10 @@ console-autofill-nondev-test: build ## Dev console ping hints in a non-dev sessi
 console-visible-test: build ## Dev console never hidden while on: menu, windows, view stack, item view GL, game, death, end, F5, resizes, editor page; close + ` and restart (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_visible_e2e.py $(DEBUG_DIR)
 
+.PHONY: console-end-paint-test
+console-end-paint-test: build ## Dev console keeps drawing through the match end: open in the game, `con end`, a frame every 600 ms after it (log area grey and unchanged, probe open/shown/topmost; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_end_paint_e2e.py $(DEBUG_DIR)
+
 .PHONY: download-screen-test
 download-screen-test: build ## The native client offers Download our client on a fresh profile, desktop and phone layout: the More Krunker tile opens the Download window, the hub's Android badge shows, and no window is open at startup (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/download_screen_e2e.py $(DEBUG_DIR)
