@@ -1210,9 +1210,7 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         paint_badge(sb, meta, 10, 24);
         cJSON_Delete(meta);
         if (r && sid > 0 && paint_picker_can_open(i)) {
-            sb_append(sb, " <button type=\"button\" class=\"paint-icon svelte-18k2d4k\" aria-label=\"Paint ");
-            sb_append_esc(sb, s && s->name ? s->name : "");
-            sb_appendf(sb, "\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">format_paint</i></button> ", sid, i, sid);
+            sb_appendf(sb, " <button type=\"button\" class=\"paint-icon svelte-18k2d4k\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">format_paint</i></button> ", sid, i, sid);
         }
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
         if (cnt > 0 && (qs > 0 || destroy)) {

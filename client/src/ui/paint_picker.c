@@ -190,7 +190,7 @@ static char *paint_html(void) {
                    "<div class=\"paint-header svelte-10qrqvt\"><div class=\"item-name svelte-10qrqvt\">");
     sb_append_esc(&sb, item);
     sb_append(&sb, "</div><div class=\"item-sub svelte-10qrqvt\">");
-    sb_append_esc(&sb, I18N("kn.paint.sub", "Pick a paint, then press Paint to apply it."));
+    sb_append_esc(&sb, I18N("kn.paint.sub", "Pick a paint to preview, then press Paint to apply."));
     sb_append(&sb, "</div></div><div class=\"paint-controls svelte-10qrqvt\">");
     if (n == 0) {
         sb_append(&sb, "<div class=\"paint-empty svelte-10qrqvt\">");
@@ -318,7 +318,7 @@ static void apply(void) {
     const PaintRow *row = find_row(rows, n, S.selected);
     if (!row || row->count <= 0) {
         free(rows);
-        snprintf(S.error, sizeof(S.error), "%s", I18N("kn.paint.none", "You don’t have any of that paint left."));
+        snprintf(S.error, sizeof(S.error), "%s", I18N("kn.paint.none", "You don't have any of that paint left."));
         paint_render();
         return;
     }
