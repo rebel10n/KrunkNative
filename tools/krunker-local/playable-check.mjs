@@ -7,6 +7,7 @@
 //   node tools/krunker-local/playable-check.mjs <report.json> [max-exceptions]
 import fs from "node:fs";
 import { pageRounds } from "./bridge_counts.mjs";
+import { peerRows } from "./peer_frames.mjs";
 
 const [file, maxArg] = process.argv.slice(2);
 if (!file) {
@@ -99,10 +100,18 @@ add("h", `exceptions at or under ${max}`, exCount <= max,
   `${exCount} exceptions` + (first ? `; first (${first.phase}, ${sec(first.t)}): ${first.text} at ${first.where}` +
     (first.frames && first.frames.length ? ` [${first.frames.join(" < ")}]` : "") : ""));
 
+// (2a)-(2d): the second player, when the run had one (peer_frames.mjs peerRows; no rows for a single-player run)
+for (const x of peerRows(r, max)) rows.push(x);
 for (const x of rows) console.log(`${x.ok ? "PASS" : "FAIL"} (${x.id}) ${x.name}: ${x.detail}`);
 // the bridge's counts beside the page's: messages sent, and for each INIT / END the samples in which the page used it
 const sent = r.bridgeCounts || {};
 console.log(`bridge sent (its trace, this run): init ${sent.init || 0}, start ${sent.start || 0}, end ${sent.end || 0}`);
+if (r.peer && r.peer.enabled) {
+  const pr = r.peer;
+  console.log(`second player: socket ${pr.socketId || "-"}, uid ${pr.uid ?? "-"}, joined ${pr.joined ? "yes" : "no"}, ` +
+    `fired ${pr.shots ?? 0}, labels on its socket ${JSON.stringify(pr.labels || {})}, scenario: ${pr.scenario || "-"}` +
+    (pr.error ? `, error: ${pr.error}` : ""));
+}
 const rounds = pageRounds(S);
 for (const x of rounds.inits) {
   console.log(`  INIT ${x.init}: page player active in ${x.active}/${x.samples} samples, in round ${x.inRound}, HUD ${x.hud}`);

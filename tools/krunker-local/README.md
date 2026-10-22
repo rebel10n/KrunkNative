@@ -41,9 +41,25 @@ from the report that `krunker-local.mjs playable` writes:
 | g | the next round starts: a new `init` on the socket, the local player active, the end screen gone |
 | h | page exceptions at or under `KN_PLAYABLE_MAX_EXC` (default 0); the first is listed with its location |
 
+With `KN_PLAYABLE_PLAYERS=2` (the default) a second official client joins the same round, in its own headless
+Chromium (its own profile, so its own anonymous account) and its own bridge session (its own WebSocket and TCP
+connection to the server). It presses CLICK TO PLAY like the first player. In the first player's frame window it
+holds W, turns, shoots twice and leaves (navigates away; its Chromium is stopped). The rows read the first page's
+socket (decoded in `peer_frames.mjs`) and the first page itself:
+
+| | second player assertion (PASS or FAIL) |
+|---|---|
+| 2a | its add arrives (label `0`, sid = its uid as a string), the first page lists two players in the round, and its positions reach the first page (label `k`, keyed by its uid; they moved) |
+| 2b | its shot reaches the first page as tracer `9` with its uid as the shooter (its own page counts the shots) |
+| 2c | its leave reaches the first page as label `2` with its uid, and the first page has no exception in that window |
+| 2d | its join gives no exception on either page (threshold `KN_PLAYABLE_MAX_EXC`) |
+
+Other players' positions come as `k` (UPDATE_PLAYERS): `l` is the local player's own state (RECON) and `aai` is the
+bot add, so neither carries another player's position. `KN_PLAYABLE_PLAYERS=1` runs the single-player check alone.
+
 It exits 0 only when every assertion passes. `playable-check.mjs <report.json> [max]` runs the
 assertions again on a saved report. Env: `KN_PLAYABLE_ROUND_S` (round length, default 90),
-`KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;
+`KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`, `KN_PLAYABLE_PLAYERS`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;
 screenshots are in `shots/playable-*.png`. The local shot is counted from the page's `physObj` call with the local player as
 the shooter (a trail is drawn only for weapons with one, so the trail itself is not asserted). A round needs
 the game server's round length, so the run takes about 5 minutes.

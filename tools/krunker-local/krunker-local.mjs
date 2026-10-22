@@ -22,6 +22,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { MIME, createStaticFiles, hostRules as routeHostRules, routeRequest } from "./routes.mjs";
 import { bridgeLabelCounter, pageRounds } from "./bridge_counts.mjs";
+import { decodeV10Frame, peerRecord } from "./peer_frames.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -835,6 +836,149 @@ const PLAY_SNAP_JS = `(() => {
   }
   return JSON.stringify(out); })()`;
 
+// The other players in the page, as the first page holds them (its players list, the local player left out): their sids (a
+// player's uid as a string) and positions. The second player's section samples it while the second player moves.
+const PEER_PAGE_JS = `(() => { const g = window.__kn_game; if (!g || !g.players) return null;
+  const r2 = (v) => typeof v === "number" ? Math.round(v * 100) / 100 : null;
+  const pl = g.players; const list = Array.isArray(pl.list) ? pl.list : [];
+  return JSON.stringify({ n: list.length, others: list.filter((x) => x && x.sid !== pl.currentSid)
+    .map((x) => ({ sid: String(x.sid), x: r2(x.x), z: r2(x.z), active: x.active === true })) }); })()`;
+
+// The second player (KN_PLAYABLE_PLAYERS, default 2): the official client in its own headless Chromium, with its own profile (so
+// its own anonymous account), on the same page. It seeks and joins the same game by itself, through the bridge (its own
+// WebSocket, so its own bridge session), and presses CLICK TO PLAY as the first player does. When the first player's frame
+// window opens (phase "frames") and it is in a round, it holds W for 1.5 s, turns, shoots twice, then leaves: it navigates away
+// (its WebSocket closes) and its Chromium is stopped. What the first page receives from it is read by playable() from the first
+// page's socket (frameIn, peer_frames.mjs); this function reads only its own page. Everything it records goes into `p`.
+async function runPeer(ctx) {
+  const { cfg, t0, p, log } = ctx;
+  const now = () => Date.now() - t0;
+  const cdpPort = await freePort();
+  const child = spawn(findChrome(), [
+    "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
+    "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,720",
+    `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
+    `--user-data-dir=${path.join(cfg.runDir, `playable-peer-${t0}`)}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
+  ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
+  ctx.setChild(child);
+  let ws = null;
+  try {
+    let targets = [];
+    for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
+      try { targets = await getJSON(`http://127.0.0.1:${cdpPort}/json/list`); } catch (e) { /* not up yet */ }
+      await sleep(250);
+    }
+    const page = targets.find((t) => t.type === "page");
+    if (!page) throw new Error("no page target for the second player");
+    ws = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    let id = 0;
+    const pending = new Map();
+    const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
+    const evalP = async (expression) => {
+      const r = await send("Runtime.evaluate", { expression, returnByValue: true });
+      return r.result && r.result.result ? r.result.result.value : null;
+    };
+    const snap = async () => JSON.parse((await evalP(PLAY_SNAP_JS)) || "{}");
+    const mouse = (type, x, y) => send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: type === "mouseMoved" ? 0 : 1 });
+    const key = (type, k, code, vk) => send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, text: type === "keyDown" ? k : undefined });
+    // the second player's own socket: its socket id (io-init) and its uid (its own add record, the socket id in field 0)
+    const peerFrame = (b64) => {
+      const f = decodeV10Frame(Buffer.from(b64, "base64"));
+      if (!f) { p.undecoded++; return; }
+      p.labels[f.label] = (p.labels[f.label] || 0) + 1;
+      const a0 = f.args[0];
+      if (f.label === "io-init" && typeof a0 === "string") p.socketId = a0;
+      if (f.label === "0" && p.uid == null && p.socketId && Array.isArray(a0) && a0[0] === p.socketId && typeof a0[1] === "number") p.uid = a0[1];
+    };
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); return; }
+      const d = msg.params || {};
+      if (msg.method === "Network.webSocketFrameReceived" && d.response && d.response.opcode === 2) peerFrame(d.response.payloadData);
+      else if (msg.method === "Runtime.exceptionThrown") {
+        const ex = d.exceptionDetails || {};
+        p.exceptionCount++;
+        p.excAt.push(now());
+        if (p.exceptions.length < 20) p.exceptions.push({ t: now(), text: ((ex.exception || {}).description || ex.text || "").split("\n")[0].slice(0, 200) });
+      }
+    };
+    await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
+    p.joinStart = now();
+    await send("Page.navigate", { url: cfg.localUrl });
+    log("second player: page loading");
+    await sleep(cfg.loadWaitMs);
+    for (let i = 0; i < 10 && (await evalP(CONSENT_OPEN_JS)); i++) {
+      p.consent = !!(await evalP(ACCEPT_JS)) || p.consent;
+      await sleep(2000);
+    }
+    await sleep(cfg.afterAcceptMs);
+
+    // the join: CLICK TO PLAY pressed for real, as the first player's join does, until the local player is in a round
+    const promptUp = (s) => !!s.clickToPlay && (!s.game || s.game.menuUp);
+    const clickSpawn = async () => {
+      const at = await evalP(CLICK_TO_PLAY_RECT_JS);
+      if (!at) return;
+      p.spawnClicks++;
+      await mouse("mouseMoved", at.x, at.y);
+      await mouse("mousePressed", at.x, at.y);
+      await sleep(80);
+      await mouse("mouseReleased", at.x, at.y);
+    };
+    let lastClick = 0;
+    const joinDeadline = Date.now() + PLAY.joinMs;
+    while (Date.now() < joinDeadline) {
+      const s = await snap();
+      if (s.inRound) { p.joined = true; p.joinedAt = now(); break; }
+      if (promptUp(s) && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+      await sleep(1000);
+    }
+    log(p.joined ? "second player: in the round" : "second player: not in the round");
+    if (!p.joined) { p.scenario = "not run: the second player did not join a round"; return; }
+
+    // the scene, in the first player's frame window (its input is done by then) and with this player in the round
+    const waitDeadline = Date.now() + 600000;
+    while (ctx.phaseOf() !== "frames" && ctx.phaseOf() !== "done" && Date.now() < waitDeadline) await sleep(500);
+    if (ctx.phaseOf() !== "frames") { p.scenario = `not run: the first page's frame window did not open (phase ${ctx.phaseOf()})`; return; }
+    const s0 = await snap();
+    p.scenario = "W held 1.5 s with a turn, two shots, then the leave (navigate away, Chromium stopped)";
+    await key("keyDown", "w", "KeyW", 87);
+    await sleep(500);
+    for (let i = 0; i < 8; i++) { await mouse("mouseMoved", 640 + i * 12, 360); await sleep(60); }
+    for (let k = 0; k < 2; k++) {
+      p.shotsAt.push(now());
+      await mouse("mousePressed", 640, 360);
+      await sleep(150);
+      await mouse("mouseReleased", 640, 360);
+      await sleep(400);
+    }
+    await sleep(1000);
+    await key("keyUp", "w", "KeyW", 87);
+    await sleep(800);
+    const s1 = await snap();
+    p.shots = (s1.shots || 0) - (s0.shots || 0);
+    const local = (s) => (s.game && s.game.local ? { x: s.game.local.x, z: s.game.local.z } : null);
+    p.position = { before: local(s0), after: local(s1) };
+    p.inRoundAfter = !!s1.inRound;
+    // what the first page holds of this player during the scene
+    for (let k = 0; k < 3; k++) {
+      const pg = JSON.parse((await ctx.evalFirst(PEER_PAGE_JS)) || "null");
+      if (pg) p.page1.push({ t: now(), ...pg });
+      await sleep(1000);
+    }
+    // the leave: navigate away, so the page's WebSocket closes; then this Chromium is stopped
+    await sleep(1500);
+    p.leftAt = now();
+    await send("Page.navigate", { url: "about:blank" });
+    p.left = true;
+    await sleep(3000);
+  } finally {
+    if (ws) { try { ws.close(); } catch (e) { /* already closed */ } }
+    try { child.kill("SIGTERM"); } catch (e) { /* already gone */ }
+  }
+}
+
 async function playable() {
   if (!cfg.bridge) throw new Error('playable needs the "bridge" config');
   const shots = path.join(cfg.runDir, "shots");
@@ -853,6 +997,28 @@ async function playable() {
     spawnClicks: 0, spawnClickAt: [], seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
     exceptionCount: 0, exceptions: [], consoleErrors: [], failed: [], httpErrors: [], shots: [] };
   let phase = "start";
+  // the second player (KN_PLAYABLE_PLAYERS, default 2; 1 runs the single-player check alone): runPeer fills report.peer. The
+  // first page's socket frames are decoded here (frameIn): what it received, by label, with the add, leave, tracer and position
+  // records the second player's rows read (peer_frames.mjs).
+  const PEERS = Number(process.env.KN_PLAYABLE_PLAYERS || 2) >= 2;
+  const peer = PEERS
+    ? { enabled: true, joined: false, uid: null, socketId: null, joinStart: null, joinedAt: null, leftAt: null, left: false,
+      consent: false, spawnClicks: 0, shotsAt: [], shots: 0, position: null, inRoundAfter: null, page1: [], scenario: null,
+      labels: {}, undecoded: 0, excAt: [], exceptionCount: 0, exceptions: [], error: null }
+    : { enabled: false };
+  report.peer = peer;
+  const frames1 = { zero: [], two: [], nine: [], k: [] };
+  const labels1 = {};
+  const excAt1 = []; // the first page's exception times (ms since the run's start), for the rows' windows
+  let undecoded1 = 0;
+  let peerTask = null;
+  let peerChild = null;
+  const frameIn = (b64) => {
+    const f = decodeV10Frame(Buffer.from(b64, "base64"));
+    if (!f) { undecoded1++; return; }
+    labels1[f.label] = (labels1[f.label] || 0) + 1;
+    peerRecord(frames1, f.label, f.args, Date.now() - t0);
+  };
   const labels = bridgeLabelCounter(cfg.bridge.log); // "-> label": what the server and bridge sent the client
   const frames = bridgeLabelCounter(cfg.bridge.log, "<-"); // "<- label": what the client sent (q = its input frames)
   try {
@@ -888,11 +1054,15 @@ async function playable() {
           const top = cf[0] || {};
           // every exception is counted; the first 50 are kept with their location (a flood would otherwise fill the report)
           report.exceptionCount++;
+          excAt1.push(Date.now() - t0);
           if (report.exceptions.length < 50) report.exceptions.push({ phase, t: Date.now() - t0, text: ((d.exception || {}).description || d.text || "").split("\n")[0].slice(0, 200),
             where: `${top.url || d.url || "?"}:${top.lineNumber ?? d.lineNumber}:${top.columnNumber ?? d.columnNumber} ${top.functionName || ""}`.trim(),
             frames: cf.slice(0, 3).map((f) => `${f.functionName || "?"}@${f.lineNumber}:${f.columnNumber}`) });
           break;
         }
+        case "Network.webSocketFrameReceived":
+          if (p.response && p.response.opcode === 2) frameIn(p.response.payloadData);
+          break;
         case "Runtime.consoleAPICalled":
           if (p.type === "error" && report.consoleErrors.length < 20) report.consoleErrors.push(p.args.map((a) => a.value ?? a.description).join(" ").slice(0, 200));
           break;
@@ -941,6 +1111,10 @@ async function playable() {
     await send("Page.addScriptToEvaluateOnNewDocument", { source: RAF_HOOK });
     await send("Page.navigate", { url: cfg.localUrl });
     log("page loading");
+    if (PEERS) {
+      peerTask = runPeer({ cfg, t0, p: peer, log, evalFirst: evalJS, phaseOf: () => phase, setChild: (c) => { peerChild = c; } })
+        .catch((e) => { peer.error = String(e.message || e).slice(0, 200); log(`second player failed: ${peer.error}`); });
+    }
     await sleep(cfg.loadWaitMs);
     for (let i = 0; i < 10 && (await evalJS(CONSENT_OPEN_JS)); i++) {
       report.consent = !!(await evalJS(ACCEPT_JS)) || report.consent;
@@ -1020,16 +1194,19 @@ async function playable() {
     if (report.nextRound) await shot("next");
     await shot("final");
     phase = "done";
+    if (peerTask) await peerTask;
     // what the bridge sent the client (its trace's "-> label" lines, this run's file only), not rounds: report.rounds says
     // what the page did with each INIT and END the bridge sent
     report.bridgeCounts = Object.fromEntries(labels());
     report.bridgeArrows = Object.fromEntries(frames());
     report.rounds = pageRounds(report.samples);
+    if (PEERS) Object.assign(peer, { frames1, labels1, excAt1, undecoded1 }); // the first page's socket, as the second player's rows read it
     report.bridgeClosed = fs.existsSync(cfg.bridge.log)
       ? fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /socket closed/.test(l)).slice(-10) : [];
     ws.close();
   } finally {
     try { child.kill("SIGTERM"); } catch (e) { /* already gone */ }
+    if (peerChild) { try { peerChild.kill("SIGTERM"); } catch (e) { /* already gone */ } }
   }
   report.phase = phase;
   report.finishedAt = new Date().toISOString();

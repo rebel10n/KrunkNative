@@ -6,6 +6,7 @@
 # round, then asserts (a)-(h) from the report (playable-check.mjs). Exit 0 only when every assertion passes.
 # Env: KN_PLAYABLE_HOME (absolute; default ~/.cache/kn-playable-check: run dir, brain database, logs, pid files, Chromium
 # profile), KN_PLAYABLE_ROUND_S (round length, default 90), KN_PLAYABLE_MAX_EXC (exception threshold, default 0),
+# KN_PLAYABLE_PLAYERS (2: a second official client joins the same round, rows (2a)-(2d); 1: the single-player check alone),
 # KN_BUILD (the CMake debug build dir, default <repo>/cmake-build-debug). Loopback only; nothing leaves the machine.
 # Only the processes this script started are stopped: each has a pid file ($RUN/<name>.pid, "pid command-name"), and a pid
 # is signalled only while /proc/<pid>/cmdline still names that command. Other stacks on this host are not touched.
@@ -17,6 +18,7 @@ RUN="$HOME_DIR/run"
 BUILD="${KN_BUILD:-$REPO/cmake-build-debug}"
 ROUND_S="${KN_PLAYABLE_ROUND_S:-90}"
 MAX_EXC="${KN_PLAYABLE_MAX_EXC:-0}"
+PLAYERS="${KN_PLAYABLE_PLAYERS:-2}"
 cd "$REPO" || exit 1
 mkdir -p "$RUN" && umask 077
 
@@ -105,7 +107,7 @@ start harness krunker-local.mjs "$HTTP" node tools/krunker-local/krunker-local.m
 
 # the join, the round and the report: one JSON document on stdout, progress on stderr
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=12288}"
-KN_ROUND_SECONDS="$ROUND_S" \
+KN_ROUND_SECONDS="$ROUND_S" KN_PLAYABLE_PLAYERS="$PLAYERS" \
   timeout 1500 node tools/krunker-local/krunker-local.mjs playable > "$RUN/playable-report.json" 2> "$RUN/playable.log"
 rc=$?
 if [ $rc -ne 0 ]; then

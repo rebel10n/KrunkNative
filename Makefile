@@ -279,6 +279,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/sandbox_config_test
 	./$(DEBUG_DIR)/object_manager_test
 	node --test tools/krunker-local/bridge_counts.test.mjs
+	node --test tools/krunker-local/peer_frames.test.mjs
 	./$(DEBUG_DIR)/weapons_audit_test
 	./$(DEBUG_DIR)/ks_storage_test
 	./$(DEBUG_DIR)/navgen_test

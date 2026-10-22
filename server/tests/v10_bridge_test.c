@@ -77,17 +77,21 @@ typedef struct {
     uint8_t type;
     uint8_t *payload;
     size_t len;
+    int conn;    /* 0: the first bridge session's connection, 1: the second's */
 } NFrame;
 typedef struct {
-    int lfd, cfd;
-    kn_buf in;
+    int lfd;
+    int cfd, cfd2;      /* the connections: the first and the second bridge session (-1 when none) */
+    int accepted;       /* connections accepted so far (at most two) */
+    int closed1, closed2;
+    kn_buf in, in2;     /* the bytes not yet framed, per connection */
     NFrame *frames;
     size_t n, cap;
     int port;
 } Native;
 static Native g_native;
 
-static void native_store(Native *nt, uint8_t type, const uint8_t *p, size_t len) {
+static void native_store(Native *nt, int conn, uint8_t type, const uint8_t *p, size_t len) {
     if (nt->n == nt->cap) {
         nt->cap = nt->cap ? nt->cap * 2 : 32;
         nt->frames = realloc(nt->frames, nt->cap * sizeof *nt->frames);
@@ -95,6 +99,7 @@ static void native_store(Native *nt, uint8_t type, const uint8_t *p, size_t len)
     NFrame *f = &nt->frames[nt->n++];
     f->type = type;
     f->len = len;
+    f->conn = conn;
     f->payload = malloc(len ? len : 1);
     if (len) memcpy(f->payload, p, len);
 }
@@ -103,21 +108,29 @@ static void native_on_conn(kn_loop *loop, int fd, unsigned events, void *ud) {
     (void)loop;
     (void)events;
     Native *nt = ud;
+    const int conn = fd == nt->cfd2 ? 1 : 0;
+    kn_buf *in = conn ? &nt->in2 : &nt->in;
     uint8_t buf[65536];
     const ssize_t r = recv(fd, buf, sizeof buf, 0);
     if (r <= 0) {
         if (r < 0 && (errno == EAGAIN || errno == EINTR)) return;
         kn_loop_del_fd(g_loop, fd);
         close(fd);
-        nt->cfd = -1;
+        if (conn) {
+            nt->cfd2 = -1;
+            nt->closed2 = 1;
+        } else {
+            nt->cfd = -1;
+            nt->closed1 = 1;
+        }
         return;
     }
-    kn_buf_append(&nt->in, buf, (size_t)r);
-    while (nt->in.len >= 3) {
-        const size_t size = ((uint8_t)nt->in.data[1] << 8) | (uint8_t)nt->in.data[2];
-        if (nt->in.len < 3 + size) break;
-        native_store(nt, (uint8_t)nt->in.data[0], (const uint8_t *)nt->in.data + 3, size);
-        kn_buf_consume(&nt->in, 3 + size);
+    kn_buf_append(in, buf, (size_t)r);
+    while (in->len >= 3) {
+        const size_t size = ((uint8_t)in->data[1] << 8) | (uint8_t)in->data[2];
+        if (in->len < 3 + size) break;
+        native_store(nt, conn, (uint8_t)in->data[0], (const uint8_t *)in->data + 3, size);
+        kn_buf_consume(in, 3 + size);
     }
 }
 
@@ -126,7 +139,13 @@ static void native_on_listen(kn_loop *loop, int fd, unsigned events, void *ud) {
     Native *nt = ud;
     const int c = accept(fd, NULL, NULL);
     if (c < 0) return;
-    nt->cfd = c; /* blocking writes: the test sends small frames only */
+    if (nt->accepted == 0) nt->cfd = c; /* blocking writes: the test sends small frames only */
+    else if (nt->accepted == 1) nt->cfd2 = c;
+    else {
+        close(c); /* the test opens two sessions at most */
+        return;
+    }
+    nt->accepted++;
     kn_loop_add_fd(loop, c, KN_EV_READ, native_on_conn, nt);
 }
 
@@ -144,24 +163,28 @@ static int native_start(Native *nt) {
     getsockname(nt->lfd, (struct sockaddr *)&a, &al);
     nt->port = ntohs(a.sin_port);
     nt->cfd = -1;
+    nt->cfd2 = -1;
     kn_set_nonblock(nt->lfd);
     return kn_loop_add_fd(g_loop, nt->lfd, KN_EV_READ, native_on_listen, nt);
 }
 
-static void native_send(Native *nt, uint8_t type, const uint8_t *p, size_t len) {
+// a frame to the bridge session on this connection (0: the first session, 1: the second)
+static void native_send_conn(Native *nt, int conn, uint8_t type, const uint8_t *p, size_t len) {
+    const int fd = conn ? nt->cfd2 : nt->cfd;
     uint8_t head[3] = {type, (uint8_t)(len >> 8), (uint8_t)len};
     size_t sent = 0;
     uint8_t *all = malloc(3 + len);
     memcpy(all, head, 3);
     if (len) memcpy(all + 3, p, len);
     while (sent < 3 + len) {
-        const ssize_t w = send(nt->cfd, all + sent, 3 + len - sent, MSG_NOSIGNAL);
+        const ssize_t w = send(fd, all + sent, 3 + len - sent, MSG_NOSIGNAL);
         if (w > 0) sent += (size_t)w;
         else if (w < 0 && errno == EINTR) continue;
         else break;
     }
     free(all);
 }
+static void native_send(Native *nt, uint8_t type, const uint8_t *p, size_t len) { native_send_conn(nt, 0, type, p, len); }
 
 static int native_count(uint8_t type) {
     int c = 0;
@@ -173,6 +196,12 @@ static NFrame *native_nth(uint8_t type, int nth) {
     for (size_t i = 0; i < g_native.n; i++)
         if (g_native.frames[i].type == type && k++ == nth) return &g_native.frames[i];
     return NULL;
+}
+// the frames of one connection only (the two sessions' frames share one list)
+static int native_count_conn(int conn, uint8_t type) {
+    int c = 0;
+    for (size_t i = 0; i < g_native.n; i++) c += g_native.frames[i].type == type && g_native.frames[i].conn == conn;
+    return c;
 }
 
 // ---- the fake v10 client (knsvc ws client): every message the bridge sent, as bytes
@@ -190,16 +219,19 @@ static void client_on_open(kn_ws *ws, void *ud) {
     (void)ud;
     g_client_open = 1;
 }
+static void blob_store(Blob *blobs, size_t *n, const void *data, size_t len) {
+    if (*n < 256) {
+        blobs[*n].data = malloc(len ? len : 1);
+        memcpy(blobs[*n].data, data, len);
+        blobs[*n].len = len;
+        (*n)++;
+    }
+}
 static void client_on_message(kn_ws *ws, const void *data, size_t len, int is_binary, void *ud) {
     (void)ws;
     (void)is_binary;
     (void)ud;
-    if (g_nblobs < 256) {
-        g_blobs[g_nblobs].data = malloc(len ? len : 1);
-        memcpy(g_blobs[g_nblobs].data, data, len);
-        g_blobs[g_nblobs].len = len;
-        g_nblobs++;
-    }
+    blob_store(g_blobs, &g_nblobs, data, len);
 }
 static void client_on_close(kn_ws *ws, int code, const char *reason, void *ud) {
     (void)ws;
@@ -211,14 +243,14 @@ static void client_on_close(kn_ws *ws, int code, const char *reason, void *ud) {
 }
 static const kn_ws_callbacks CLIENT_CB = {.on_open = client_on_open, .on_message = client_on_message, .on_close = client_on_close};
 
-// the nth message with this label, decoded (the frame owns its memory: krunker_frame_free)
-static int client_get(const char *label, int nth, KrunkerFrame *out) {
+// the nth message with this label in a client's messages, decoded (the frame owns its memory: krunker_frame_free)
+static int store_get(const Blob *blobs, size_t nb, const char *label, int nth, KrunkerFrame *out) {
     int k = 0;
     memset(out, 0, sizeof *out);
-    for (size_t i = 0; i < g_nblobs; i++) {
+    for (size_t i = 0; i < nb; i++) {
         KrunkerFrame fr;
         memset(&fr, 0, sizeof fr);
-        if (krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &fr) != KRUNKER_PROTO_OK) continue;
+        if (krunker_proto_decode(blobs[i].data, blobs[i].len, 0, &fr) != KRUNKER_PROTO_OK) continue;
         if (!strcmp(fr.name, label) && k++ == nth) {
             *out = fr;
             return 1;
@@ -227,20 +259,106 @@ static int client_get(const char *label, int nth, KrunkerFrame *out) {
     }
     return 0;
 }
-static int client_count(const char *label) {
+static int store_count(const Blob *blobs, size_t nb, const char *label) {
     int c = 0;
-    for (size_t i = 0; i < g_nblobs; i++) {
+    for (size_t i = 0; i < nb; i++) {
         KrunkerFrame fr;
         memset(&fr, 0, sizeof fr);
-        if (krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &fr) == KRUNKER_PROTO_OK && !strcmp(fr.name, label)) c++;
+        if (krunker_proto_decode(blobs[i].data, blobs[i].len, 0, &fr) == KRUNKER_PROTO_OK && !strcmp(fr.name, label)) c++;
         krunker_frame_free(&fr);
     }
     return c;
 }
-static void client_send(const char *label, const KrunkerValue *args, uint32_t argc) {
+static int client_get(const char *label, int nth, KrunkerFrame *out) { return store_get(g_blobs, g_nblobs, label, nth, out); }
+static int client_count(const char *label) { return store_count(g_blobs, g_nblobs, label); }
+static void send_on(kn_ws *ws, const char *label, const KrunkerValue *args, uint32_t argc) {
     KrunkerBuf buf = {0};
-    if (krunker_proto_encode_ah(0x2a, label, args, argc, &buf) == KRUNKER_PROTO_OK && g_client) kn_ws_send_binary(g_client, buf.data, buf.len);
+    if (krunker_proto_encode_ah(0x2a, label, args, argc, &buf) == KRUNKER_PROTO_OK && ws) kn_ws_send_binary(ws, buf.data, buf.len);
     krunker_buf_free(&buf);
+}
+static void client_send(const char *label, const KrunkerValue *args, uint32_t argc) { send_on(g_client, label, args, argc); }
+
+// ---- the second player's client (a second bridge session, the two-session test at the end of main)
+static Blob g_blobs2[256];
+static size_t g_nblobs2;
+static kn_ws *g_client2;
+static int g_client2_open, g_client2_closed;
+static void client2_on_open(kn_ws *ws, void *ud) {
+    (void)ws;
+    (void)ud;
+    g_client2_open = 1;
+}
+static void client2_on_message(kn_ws *ws, const void *data, size_t len, int is_binary, void *ud) {
+    (void)ws;
+    (void)is_binary;
+    (void)ud;
+    blob_store(g_blobs2, &g_nblobs2, data, len);
+}
+static void client2_on_close(kn_ws *ws, int code, const char *reason, void *ud) {
+    (void)ws;
+    (void)code;
+    (void)reason;
+    (void)ud;
+    g_client2 = NULL;
+    g_client2_closed = 1;
+}
+static const kn_ws_callbacks CLIENT2_CB = {.on_open = client2_on_open, .on_message = client2_on_message, .on_close = client2_on_close};
+static int client2_get(const char *label, int nth, KrunkerFrame *out) { return store_get(g_blobs2, g_nblobs2, label, nth, out); }
+static int client2_count(const char *label) { return store_count(g_blobs2, g_nblobs2, label); }
+static void client2_send(const char *label, const KrunkerValue *args, uint32_t argc) { send_on(g_client2, label, args, argc); }
+
+// the second player's messages as seen by the first session (its blobs): an add record for uid, a position of uid, a tracer
+// from uid as the shooter, a leave of uid. Each reads its frames and frees them.
+static int has_add(int32_t uid) {
+    for (size_t i = 0; i < g_nblobs; i++) {
+        KrunkerFrame f;
+        memset(&f, 0, sizeof f);
+        int hit = krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &f) == KRUNKER_PROTO_OK && !strcmp(f.name, "0") && f.argc == 2 &&
+                  f.args[0].type == KRUNKER_ARRAY && f.args[0].len == 53 && vequal(&f.args[0].u.items[1], &KRUNKER_V_NUM(uid));
+        krunker_frame_free(&f);
+        if (hit) return 1;
+    }
+    return 0;
+}
+static int has_position(int32_t uid, double x) {
+    for (size_t i = 0; i < g_nblobs; i++) {
+        KrunkerFrame f;
+        memset(&f, 0, sizeof f);
+        int hit = 0;
+        if (krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &f) == KRUNKER_PROTO_OK && !strcmp(f.name, "k") && f.argc >= 1 &&
+            f.args[0].type == KRUNKER_ARRAY)
+            for (uint32_t r = 0; !hit && r < f.args[0].len; r++) {
+                const KrunkerValue *rec = &f.args[0].u.items[r];
+                hit = rec->type == KRUNKER_ARRAY && rec->len >= 4 && vequal(&rec->u.items[0], &KRUNKER_V_NUM(uid)) &&
+                      vequal(&rec->u.items[1], &KRUNKER_V_NUM(x));
+            }
+        krunker_frame_free(&f);
+        if (hit) return 1;
+    }
+    return 0;
+}
+static int has_tracer(int32_t shooter, double origin_x) {
+    for (size_t i = 0; i < g_nblobs; i++) {
+        KrunkerFrame f;
+        memset(&f, 0, sizeof f);
+        int hit = krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &f) == KRUNKER_PROTO_OK && !strcmp(f.name, "9") && f.argc == 1 &&
+                  f.args[0].type == KRUNKER_ARRAY && f.args[0].len == 13 && vequal(&f.args[0].u.items[0], &KRUNKER_V_NUM(shooter)) &&
+                  vequal(&f.args[0].u.items[7], &KRUNKER_V_NUM(origin_x));
+        krunker_frame_free(&f);
+        if (hit) return 1;
+    }
+    return 0;
+}
+static int has_leave(int32_t uid) {
+    for (size_t i = 0; i < g_nblobs; i++) {
+        KrunkerFrame f;
+        memset(&f, 0, sizeof f);
+        int hit = krunker_proto_decode(g_blobs[i].data, g_blobs[i].len, 0, &f) == KRUNKER_PROTO_OK && !strcmp(f.name, "2") && f.argc == 1 &&
+                  vequal(&f.args[0], &KRUNKER_V_NUM(uid));
+        krunker_frame_free(&f);
+        if (hit) return 1;
+    }
+    return 0;
 }
 
 // run the loop until cond holds (or 5 s): the TS waitFor
@@ -998,6 +1116,116 @@ int main(void) {
         CHECK(client_count("0") == adds_before_ent + 1, "an ENT while alive: our add again (the round's init may have cleared it)");
     }
 
+    // two sessions in one game: a second player joins through its own bridge session (its own WebSocket, its own TCP connection
+    // to the native server: conn 1). The native server tells the first session about the second player on conn 0, as it sends
+    // another player's SPAWN, STATE, SHOT and LEAVE to every client of the game. Then the second player leaves.
+    {
+        const int32_t uid2 = 12;
+        char url2[128];
+        snprintf(url2, sizeof url2, "ws://127.0.0.1:%d/ws?gameId=test", bport);
+        g_client2 = kn_ws_connect(g_loop, url2, &CLIENT2_CB, &copts, NULL);
+        CHECK(g_client2 != NULL, "the second client starts connecting");
+        WAIT_FOR(g_client2_open);
+        WAIT_FOR(client2_count("io-init") == 1);
+        KrunkerFrame io2;
+        char socket2[13] = "";
+        CHECK(client2_get("io-init", 0, &io2) && io2.argc == 1 && io2.args[0].type == KRUNKER_STR && io2.args[0].len == 12,
+              "the second session's io-init carries a 12-char socket id");
+        if (io2.argc) memcpy(socket2, io2.args[0].u.str, io2.args[0].len);
+        krunker_frame_free(&io2);
+        CHECK(strlen(socket2) == 12 && strcmp(socket2, socket_id) != 0, "the second session has a socket id of its own");
+
+        // its own TCP connection, opened with its own forwarded-address frame
+        WAIT_FOR(native_count_conn(1, NET_PACKET_FORWARDED) == 1);
+        CHECK(g_native.cfd >= 0 && g_native.cfd2 >= 0 && g_native.accepted == 2, "two native connections, one per session");
+
+        // LOAD -> HELLO, the map, the config and the networking, then the INIT: the second session's own join
+        client2_send("load", NULL, 0);
+        WAIT_FOR(native_count_conn(1, NET_PACKET_HELLO) == 1);
+        native_send_conn(&g_native, 1, NET_PACKET_MAP_INFO, map_info, 44);
+        WAIT_FOR(native_count_conn(1, NET_PACKET_MAP_REQUEST) == 1);
+        native_send_conn(&g_native, 1, NET_PACKET_GAME_CONFIG, chunk1, 8 + cut);
+        native_send_conn(&g_native, 1, NET_PACKET_GAME_CONFIG, chunk2, 8 + config_len - cut);
+        native_send_conn(&g_native, 1, NET_PACKET_NETWORK_DATA, network, 10);
+        native_send_conn(&g_native, 1, NET_PACKET_EXT, ranked_off, 3);
+        native_send_conn(&g_native, 1, NET_PACKET_MAP_DATA, mc1, 10 + half);
+        native_send_conn(&g_native, 1, NET_PACKET_MAP_DATA, mc2, 10 + rest);
+        native_send_conn(&g_native, 1, NET_PACKET_INIT, init, sizeof init);
+        WAIT_FOR(client2_count("init") == 1);
+        CHECK(client2_count("init") == 1, "the second session gets its own init");
+
+        // its own SPAWN (active, it is the player): its add record carries its socket id and uid, and its START
+        uint8_t sp2_self[150];
+        spawn_buf(sp2_self, uid2, 1, 1, 4, 0, 100, 1, 2, 3, 0, 0, "peer");
+        native_send_conn(&g_native, 1, NET_PACKET_SPAWN, sp2_self, 150);
+        WAIT_FOR(client2_count("start") == 1);
+        int own2 = 0;
+        for (int k = 0; k < client2_count("0") && !own2; k++) {
+            KrunkerFrame f;
+            if (client2_get("0", k, &f) && f.argc == 2 && f.args[0].type == KRUNKER_ARRAY && f.args[0].len == 53 &&
+                is_str(&f.args[0].u.items[0], socket2) && vequal(&f.args[0].u.items[1], &KRUNKER_V_NUM(uid2)))
+                own2 = 1;
+            krunker_frame_free(&f);
+        }
+        CHECK(own2, "the second session's own add: its socket id and uid 12");
+
+        // the second player's add reaches the first session: the native server's SPAWN of another player (not ours) on conn 0.
+        // Its sid is its uid as a string ("12"), as the add record of any other player carries it.
+        uint8_t sp2[150];
+        spawn_buf(sp2, uid2, 0, 1, 4, 0, 100, 10, 20, 3, 0, 0, "peer");
+        native_send(&g_native, NET_PACKET_SPAWN, sp2, 150);
+        WAIT_FOR(has_add(uid2));
+        CHECK(has_add(uid2), "the second player's add reaches the first session (ADD_PLAYERS \"0\", uid 12)");
+        CHECK(v10_bridge_untranslated("SPAWN") == 0, "the second player's add does not stop the first session");
+
+        // the second player's positions reach the first session as "k" records keyed by its uid (two states, moved)
+        uint8_t stp[79];
+        memset(stp, 0, sizeof stp);
+        w_i32(stp, 0, uid2); w_f32(stp, 13, 10); w_f32(stp, 17, 2); w_f32(stp, 21, 20); w_f32(stp, 41, 1); w_f32(stp, 57, 0.25f);
+        stp[61] = 1; w_f32(stp, 53, 0.6f); w_i32(stp, 9, 2); w_f32(stp, 49, 1); stp[62] = 0; w_f32(stp, 75, 42.4f);
+        native_send(&g_native, NET_PACKET_STATE, stp, 79);
+        WAIT_FOR(has_position(uid2, 10));
+        CHECK(has_position(uid2, 10), "the first session gets the second player's position (k, uid 12, x 10)");
+        w_f32(stp, 13, 11.5f);
+        native_send(&g_native, NET_PACKET_STATE, stp, 79);
+        WAIT_FOR(has_position(uid2, 11.5));
+        CHECK(has_position(uid2, 11.5), "the second player's moved position (k, x 11.5) reaches the first session");
+
+        // the second player shoots: the first session gets the tracer "9" with the shooter's uid, from its state (origin x 11.5)
+        uint8_t ray2[31];
+        memset(ray2, 0, sizeof ray2);
+        w_i32(ray2, 0, uid2);
+        w_f32(ray2, 8, 4); w_f32(ray2, 12, 5); w_f32(ray2, 16, 6);
+        ray2[29] = 1;
+        native_send(&g_native, NET_PACKET_SHOT, ray2, 31);
+        WAIT_FOR(has_tracer(uid2, 11.5));
+        CHECK(has_tracer(uid2, 11.5), "the second player's shot reaches the first session as tracer 9 with shooter 12");
+
+        // the second player leaves: its WebSocket closes, the bridge closes its TCP connection (conn 1) and the first session
+        // is untouched; the native server's LEAVE for uid 12 (conn 0) reaches the first session as "2" [12]
+        if (g_client2) kn_ws_close(g_client2, 1000, "second player left");
+        WAIT_FOR(g_client2_closed);
+        WAIT_FOR(g_native.closed2);
+        CHECK(g_native.closed2 && !g_native.closed1, "the bridge closed the second session's connection and only that one");
+        uint8_t lv2[4];
+        w_i32(lv2, 0, uid2);
+        native_send(&g_native, NET_PACKET_LEAVE, lv2, 4);
+        WAIT_FOR(has_leave(uid2));
+        CHECK(has_leave(uid2), "the second player's leave reaches the first session as \"2\" [12]");
+        CHECK(g_client && g_client_open && !g_client_closed, "the first session stays up after the second player left");
+        CHECK(v10_bridge_untranslated("LEAVE") == 0, "a leave does not stop the first session");
+        // the first session still translates the game's states after the leave
+        const int k_before = client_count("k");
+        uint8_t st11[79];
+        memset(st11, 0, sizeof st11);
+        w_i32(st11, 0, 11);
+        w_f32(st11, 13, 3); w_f32(st11, 17, 2); w_f32(st11, 21, 3); w_f32(st11, 41, 1); w_f32(st11, 57, 0.25f); st11[61] = 1;
+        w_f32(st11, 53, 0.6f); w_i32(st11, 9, 2); w_f32(st11, 49, 1); st11[62] = 0; w_f32(st11, 75, 42.4f);
+        native_send(&g_native, NET_PACKET_STATE, st11, 79);
+        WAIT_FOR(client_count("k") > k_before);
+        CHECK(client_count("k") > k_before, "the first session keeps translating the game's states after the second left");
+    }
+
     // CHEAT (60): one chat command's flag, and on / off, is the v10 label's one argument (noc, unl, fh, frz)
     static const struct { uint8_t flag, on; const char *label; } cheats[] = {
         {0, 1, "noc"}, {1, 1, "unl"}, {2, 1, "fh"}, {7, 1, "frz"}, {1, 0, "unl"},
@@ -1077,6 +1305,7 @@ int main(void) {
     pump(50);
     v10_bridge_free(bridge);
     if (g_native.cfd >= 0) close(g_native.cfd);
+    if (g_native.cfd2 >= 0) close(g_native.cfd2);
     close(g_native.lfd);
     kn_loop_free(g_loop);
     printf("v10_bridge_test: %d checks, %d failed\n", g_checks, g_failures);
