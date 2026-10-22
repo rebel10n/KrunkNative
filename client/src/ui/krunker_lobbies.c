@@ -15,6 +15,7 @@
 #include <krunker_build.h> // KRUNKER_REGIONS / KRUNKER_DEDICATED_ONLY_REGIONS: v10's availableRegions / dedicatedOnlyRegions
 #include <region_ping.h>
 #include <region_names.h> // region_v10_name: the v10 names of the regions
+#include <krunker_regions.h> // krunker_region: v10's availableRegions / dedicatedOnlyRegions flags
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -383,8 +384,7 @@ static int meta_on(const cJSON *meta, const char *key) {
 
 // ---------------------------------------------------------------- the seek's region (v10 getRegion)
 
-static const char *const k_available[] = {KRUNKER_REGIONS};
-static const char *const k_dedicated_only[] = {KRUNKER_DEDICATED_ONLY_REGIONS};
+static const char *const k_available[] = {KRUNKER_REGIONS}; // v10 availableRegions (krunker_regions.h has the table)
 #define KRUNKER_PING_CACHE_KEY "knKrunkerPingRegion" // v10's PING_REGION_CACHE_KEY ("pingRegion7") for krunker.io's
                                                      // regions: KrunkNative's pingRegion7 holds the brain's (servers_ui.c)
 #define KRUNKER_PING_RETRY_MS 60000.0                // after every ping failed: the fallback region until then
@@ -400,11 +400,11 @@ static struct {
     int waiter_count;
 } R = {.failed_ms = -1e18};
 
+// v10 getRegion: a listed key is pinged when availableRegions (production) has it and dedicatedOnlyRegions does
+// not (krunker_regions.h: the table of both lists; "local" and "sss" are other hosts' lists, never krunker.io's)
 static int available_region(const char *region) {
-    int ok = 0;
-    for (size_t i = 0; region && i < sizeof(k_available) / sizeof(k_available[0]); i++) ok |= !strcmp(region, k_available[i]);
-    for (size_t i = 0; ok && i < sizeof(k_dedicated_only) / sizeof(k_dedicated_only[0]); i++) ok &= strcmp(region, k_dedicated_only[i]) != 0;
-    return ok;
+    const KrunkerRegion *r = krunker_region(region);
+    return r && (r->flags & KR_AVAILABLE) && !(r->flags & KR_DEDICATED_ONLY);
 }
 
 const char *krunker_seek_region_auto(void) {

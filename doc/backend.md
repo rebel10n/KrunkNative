@@ -829,7 +829,10 @@ FORCE_ENTER, HEAD/POST/OPTIONS on the list routes, player counts, the 404
 * Errors use the client's names (`NoAvailableServers`, not `no_lobbies`; the client
   shows `matchmaker.none` for them, and the reference name falls to "Unhandled").
 * `seek-game` keeps quick join in the requested region (falling back across regions
-  per `cross_region`). The reference ignores `region`.
+  per `cross_region`). A requested region no node serves (a Krunker id krunk.io has no edge
+  in) is first routed to the nearest hosted region, whatever `cross_region` says: by the
+  client's `?pings=` ({v10 id: ms}), else by great circle (doc/v10/regions.md "Routing"); the
+  answer adds `requestedRegion`. The reference ignores `region`.
 * `autoChangeGame=false` with a full or unknown `game` returns 409 `GameFull` /
   404 `InvalidGameId` (the client's `matchmaker.full2` / `.invalid`). The reference
   overflows into another lobby. With nothing that has room, kn_brain returns 503

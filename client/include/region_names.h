@@ -28,8 +28,18 @@ const RegionEdge *region_edge(const char *kn);
 // (a v10 id, an unknown code) is itself. "" for NULL.
 const char *region_id_of(const char *region);
 
-// The v10 name of a region id ("New York", "Silicon Valley"); NULL when the table does not know the id.
+// The v10 name of a region id ("New York", "Silicon Valley"); NULL when the table does not know the id
+// (shared/include/krunker_regions.h has the table).
 const char *region_v10_name(const char *id);
+
+// 1 when a KrunkNative edge is listed under that v10 id (us-ca-sv, us-nj, local): the brain has a node there.
+int region_hosted(const char *id);
+
+// The <option> values of the region pickers (Settings > Default Region; the same list whatever the Server
+// Type): every id of v10's Default Region dropdown (availableRegions, krunker_regions.h) in v10's order, then
+// the ids of KrunkNative's edges it lacks (local), then any other id the matchmaker's ping list names
+// (`listed`, listed_n ids), each once. Writes at most `max` ids to out; returns the count.
+size_t region_picker_ids(const char *const *listed, size_t listed_n, const char **out, size_t max);
 
 // The picker label of a v10 id: its v10 name, then the edge places it holds in brackets, the edge names that
 // differ from it: "Silicon Valley (Santa Clara, Los Angeles)", "New York (Chicago, Ashburn, Virginia)", "Dallas".

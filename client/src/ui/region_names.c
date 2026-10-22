@@ -1,7 +1,10 @@
 // The region names and ids of the native client's server browser and pickers (region_names.h). The brain's
 // lobby rows carry KrunkNative's edge codes; the pickers and seeks use the v10 region id each edge is listed
-// under (doc/v10/regions.md).
+// under (doc/v10/regions.md). The v10 regions themselves (ids, names, the dropdown's order) are the shared
+// table, shared/src/krunker_regions.c.
 #include <region_names.h>
+
+#include <krunker_regions.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -13,19 +16,6 @@ static const RegionEdge k_edges[] = {
     {"CH", "CH", "Chicago", "Chicago", "us-nj"},
     {"VA", "VA", "Ashburn, Virginia", "Ashburn", "us-nj"},
     {"local", "LO", "Local", "Local", "local"},
-};
-
-// v10 _7517 (v10.js:18672-18701): the region names of Krunker's server browser, and "local" (the dev host)
-static const struct {
-    const char *id, *name;
-} k_v10_names[] = {
-    {"us-nj", "New York"}, {"us-il", "Chicago"}, {"us-tx", "Dallas"}, {"us-wa", "Seattle"},
-    {"us-ca-la", "Los Angeles"}, {"us-ga", "Atlanta"}, {"nl-ams", "Amsterdam"}, {"gb-lon", "London"},
-    {"de-fra", "Frankfurt"}, {"us-ca-sv", "Silicon Valley"}, {"au-syd", "Sydney"}, {"fr-par", "Paris"},
-    {"jb-hnd", "Tokyo"}, {"us-fl", "Miami"}, {"sgp", "Singapore"}, {"blr", "India"}, {"as-mb", "Mumbai"},
-    {"brz", "Brazil"}, {"me-bhn", "Middle East"}, {"af-ct", "South Africa"}, {"as-seoul", "South Korea"},
-    {"mx-cmx", "Mexico"}, {"eu-stm", "Sweden"}, {"tor", "Toronto"}, {"pol", "Poland"}, {"us-hi", "Hawaii"},
-    {"sss", "EU Super Secret Servers"}, {"iow", "Iowa"}, {"local", "Local"},
 };
 
 size_t region_edge_count(void) { return sizeof(k_edges) / sizeof(k_edges[0]); }
@@ -46,12 +36,36 @@ const char *region_id_of(const char *region) {
     return e ? e->v10 : region;
 }
 
-const char *region_v10_name(const char *id) {
-    if (!id) return NULL;
-    for (size_t i = 0; i < sizeof(k_v10_names) / sizeof(k_v10_names[0]); i++) {
-        if (!strcmp(id, k_v10_names[i].id)) return k_v10_names[i].name;
+const char *region_v10_name(const char *id) { return krunker_region_v10_name(id); }
+
+int region_hosted(const char *id) {
+    if (!id || !id[0]) return 0;
+    for (size_t i = 0; i < region_edge_count(); i++) {
+        if (!strcmp(k_edges[i].v10, id)) return 1;
     }
-    return NULL;
+    return 0;
+}
+
+static void add_id(const char **out, size_t *count, const size_t max, const char *id) {
+    if (!id || !id[0]) return;
+    for (size_t i = 0; i < *count; i++) {
+        if (!strcmp(out[i], id)) return;
+    }
+    if (*count < max) out[(*count)++] = id;
+}
+
+size_t region_picker_ids(const char *const *listed, const size_t listed_n, const char **out, const size_t max) {
+    size_t count = 0;
+    // 1. v10's Default Region dropdown: availableRegions in its order (the whole Krunker list, whatever the
+    //    Server Type: krunker.io's regions and ours are the same places)
+    const char *dropdown[32];
+    const size_t n = krunker_region_dropdown(dropdown, sizeof(dropdown) / sizeof(dropdown[0]));
+    for (size_t i = 0; i < n && i < sizeof(dropdown) / sizeof(dropdown[0]); i++) add_id(out, &count, max, dropdown[i]);
+    // 2. the ids of KrunkNative's edges not in it (local: the dev host's list)
+    for (size_t i = 0; i < region_edge_count(); i++) add_id(out, &count, max, k_edges[i].v10);
+    // 3. anything else the matchmaker lists (a node in a region v10 does not list in its dropdown)
+    for (size_t i = 0; listed && i < listed_n; i++) add_id(out, &count, max, listed[i]);
+    return count;
 }
 
 void region_picker_label(const char *id, char *out, const size_t n) {

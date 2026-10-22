@@ -3,6 +3,8 @@
 //   cmake-build-debug/region_names_test
 #include <region_names.h>
 
+#include <krunker_build.h> // KRUNKER_REGIONS: v10's dropdown, the order the picker must keep
+
 #include <stdio.h>
 #include <string.h>
 
@@ -32,6 +34,47 @@ static void test_names(void) {
     CHECK(!strcmp(region_v10_name("de-fra"), "Frankfurt"), "de-fra is Frankfurt");
     CHECK(!strcmp(region_v10_name("us-tx"), "Dallas"), "us-tx is Dallas");
     CHECK(region_v10_name("zz-unknown") == NULL, "an unknown id has no v10 name");
+    CHECK(region_hosted("us-ca-sv") && region_hosted("us-nj") && region_hosted("local"), "the edges' ids are hosted");
+    CHECK(!region_hosted("de-fra") && !region_hosted("SV") && !region_hosted("") && !region_hosted(NULL), "other ids are not");
+}
+
+// The Default Region picker's values: the whole Krunker v10 dropdown (availableRegions, KRUNKER_REGIONS in its
+// order), then local, then anything else the brain lists; the same list whatever the Server Type (the brain's
+// list on Box Office, no list on krunker.io or offline). Before: only the ids the brain listed (Silicon Valley,
+// New York, Local).
+static void picker(const char *const *listed, const size_t listed_n, const char *what) {
+    static const char *const want[] = {KRUNKER_REGIONS};
+    const char *ids[64];
+    const size_t n = region_picker_ids(listed, listed_n, ids, 64);
+    CHECK(n >= KRUNKER_REGION_COUNT + 1, "%s: %zu ids, want the %d v10 regions and local at least", what, n, KRUNKER_REGION_COUNT);
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]) && i < n; i++) {
+        CHECK(!strcmp(ids[i], want[i]), "%s: ids[%zu] = %s, want %s (v10's order)", what, i, ids[i], want[i]);
+    }
+    CHECK(n > KRUNKER_REGION_COUNT && !strcmp(ids[KRUNKER_REGION_COUNT], "local"), "%s: local follows the v10 list", what);
+    for (size_t i = 0; i < listed_n; i++) {
+        int found = 0;
+        for (size_t k = 0; k < n; k++) found |= !strcmp(ids[k], listed[i]);
+        CHECK(found, "%s: the listed %s is offered", what, listed[i]);
+    }
+    for (size_t i = 0; i < n; i++) {
+        for (size_t k = i + 1; k < n; k++) CHECK(strcmp(ids[i], ids[k]), "%s: %s is offered once", what, ids[i]);
+    }
+    // every v10 dropdown id has a label a v10 player knows
+    for (size_t i = 0; i < n; i++) CHECK(region_v10_name(ids[i]) != NULL || i >= KRUNKER_REGION_COUNT + 1, "%s: %s has a v10 name", what, ids[i]);
+}
+
+static void test_picker(void) {
+    static const char *const brain_list[] = {"us-ca-sv", "us-nj", "local"}; // the production brain's /mm/ping-list
+    picker(brain_list, 3, "Box Office");
+    picker(NULL, 0, "krunker.io (no brain list)");
+    static const char *const odd_list[] = {"us-nj", "iow"}; // a node in a region v10's dropdown lacks: offered after
+    picker(odd_list, 2, "a brain listing Iowa");
+    const char *ids[64];
+    const size_t n = region_picker_ids(odd_list, 2, ids, 64);
+    CHECK(n == KRUNKER_REGION_COUNT + 2 && !strcmp(ids[n - 1], "iow"), "Iowa is offered last: got %zu ids, last %s", n, n ? ids[n - 1] : "");
+    // a small out is never overrun
+    const char *two[2];
+    CHECK(region_picker_ids(brain_list, 3, two, 2) == 2 && !strcmp(two[0], "de-fra") && !strcmp(two[1], "us-ca-sv"), "max caps the ids");
 }
 
 static void label(const char *id, const char *want) {
@@ -57,6 +100,7 @@ static void test_labels(void) {
 int main(void) {
     test_ids();
     test_names();
+    test_picker();
     test_labels();
     printf("region_names_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

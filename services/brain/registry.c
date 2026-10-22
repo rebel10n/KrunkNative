@@ -13,6 +13,7 @@
 
 #include "knsvc/http.h"
 #include "knsvc/json.h"
+#include "krunker_regions.h" /* the v10.0.3 region table: which ids are pinged, the nearest hosted region */
 #include "server_names.h"
 
 static void copy_str(char *dst, size_t cap, const char *src) {
@@ -612,6 +613,49 @@ static int region_eq(const MmNode *n, const char *region) {
     return v10 && !strcmp(v10, region);
 }
 
+int registry_region_hosted(const Registry *r, const char *region, const char *flavor) {
+    if (!region || !*region) return 1;
+    for (size_t i = 0; i < r->node_count; i++) {
+        const MmNode *n = r->nodes[i];
+        if (region_eq(n, region) && registry_flavor_match(registry_node_flavor(n), flavor)) return 1;
+    }
+    return 0;
+}
+
+#define ROUTE_MAX 32 /* distinct hosted region ids considered */
+
+int registry_route_region(const Registry *r, const char *region, const char *flavor, const cJSON *pings, char *out, size_t cap) {
+    snprintf(out, cap, "%s", region ? region : "");
+    if (registry_region_hosted(r, region, flavor)) return 0;
+    /* the hosted regions of the pool, by v10 id (a node's KN code is listed under one; a node whose code
+     * is no v10 id keeps its code: it is still a node to route to), each once, in registry order */
+    const char *hosted[ROUTE_MAX];
+    double ms[ROUTE_MAX];
+    size_t n = 0;
+    int measured = 0;
+    for (size_t i = 0; i < r->node_count && n < ROUTE_MAX; i++) {
+        const MmNode *node = r->nodes[i];
+        if (!registry_flavor_match(registry_node_flavor(node), flavor)) continue;
+        const char *id = registry_v10_region(node->region);
+        if (!id) id = node->region;
+        if (!*id) continue;
+        size_t k = 0;
+        while (k < n && strcmp(hosted[k], id)) k++;
+        if (k < n) continue;
+        hosted[n] = id;
+        const cJSON *p = cJSON_IsObject(pings) ? cJSON_GetObjectItemCaseSensitive(pings, id) : NULL;
+        if (!p && cJSON_IsObject(pings)) p = cJSON_GetObjectItemCaseSensitive(pings, node->region);
+        ms[n] = cJSON_IsNumber(p) ? p->valuedouble : -1;
+        if (ms[n] >= 0) measured = 1;
+        n++;
+    }
+    if (n == 0) return 0; /* no node at all: nothing to route to (the pick reports NoAvailableServers) */
+    const int best = krunker_region_nearest(region, hosted, n, measured ? ms : NULL);
+    if (best < 0) return 0;
+    snprintf(out, cap, "%s", hosted[best]);
+    return 1;
+}
+
 /* Taken seats over every lobby of a node (players + live reservations). */
 static int node_taken(const Registry *r, const MmNode *n, int64_t now_ms) {
     int t = 0;
@@ -713,7 +757,12 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     /* 2./3. the best public lobby with room (registry.h): region first, then all; with
      * excludeGame (v10 Quick Match) / excludeRecent every other lobby first, then the recent ones.
      * The excludeGame lobby itself is never answered (KrunkNative: the player leaves it, so a seek
-     * that excludes it reports MM_PICK_NO_OTHER_LOBBY instead of sending them back). */
+     * that excludes it reports MM_PICK_NO_OTHER_LOBBY instead of sending them back).
+     * A region no node of the pool serves is routed to the nearest hosted one first (registry.h): a player
+     * who picked Frankfurt is never refused for it, cross_region or not. */
+    const int routed = registry_route_region(r, q->region, q->flavor, q->pings, out->region, sizeof(out->region));
+    const char *region = out->region;
+    out->routed = routed;
     int soft = p->soft_cap > 0;
     const char *exclude = q->exclude_game && *q->exclude_game ? q->exclude_game : NULL;
     const char *recent = q->exclude_recent && *q->exclude_recent ? q->exclude_recent : NULL;
@@ -721,8 +770,8 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         const char *skip = ex <= 1 ? exclude : NULL, *skip_recent = ex == 0 ? recent : NULL;
         for (int pass = soft ? 0 : 1; pass < 2; pass++) {
             int use_soft = pass == 0;
-            if (pick_public(r, p, q, q->region, use_soft, skip, skip_recent, out)) return MM_PICK_OK;
-            if (p->cross_region && q->region && *q->region && pick_public(r, p, q, NULL, use_soft, skip, skip_recent, out))
+            if (pick_public(r, p, q, region, use_soft, skip, skip_recent, out)) return MM_PICK_OK;
+            if (p->cross_region && region[0] && pick_public(r, p, q, NULL, use_soft, skip, skip_recent, out))
                 return MM_PICK_OK;
         }
     }
@@ -781,6 +830,9 @@ static int node_load(const MmNode *n) {
 
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
                                 int authed, int64_t now_ms, const char *flavor) {
+    /* a region no node of the pool serves: the nearest hosted one (by great circle: a host has no pings) */
+    char routed[MM_ID_MAX];
+    if (registry_route_region(r, region, flavor, NULL, routed, sizeof(routed))) region = routed;
     for (int pass = 0; pass < 2; pass++) {
         const char *reg = pass == 0 ? region : NULL;
         if (pass == 1 && (!cross_region || !region || !*region)) break;
@@ -826,10 +878,9 @@ static const cJSON *ping_region_conf(const cJSON *regions, const char *id) {
     return NULL;
 }
 
-/* The region ids the v10.0.2 client pings (getRegion: availableRegions; the production list, plus
- * ["local"] on the dev host). Dedicated-only ids (us-il, ...) are never pinged, so never listed. */
-static const char *k_v10_pinged[] = {"de-fra", "us-ca-sv", "au-syd", "jb-hnd", "sgp", "us-nj",
-                                      "as-mb", "us-tx", "brz", "me-bhn", "sss", "local"};
+/* The region ids the v10 client pings (getRegion: availableRegions; the production list, plus ["local"] on
+ * the dev host): krunker_region_pinged (shared/src/krunker_regions.c, the v10.0.3 table). Dedicated-only ids
+ * (us-il, ...) are never pinged, so never listed. */
 
 /* KrunkNative node region codes (inventory kn_gameserver_region) -> the v10 id each is listed under
  * (doc/v10/regions.md has the reason per node). */
@@ -848,10 +899,7 @@ const char *registry_v10_region(const char *kn_region) {
         if (!strcmp(kn_region, k_v10_regions[i].kn)) return k_v10_regions[i].v10;
     }
     /* a node already named by a v10 id (de-fra, us-nj, local, ...) is listed under it */
-    for (size_t i = 0; i < sizeof(k_v10_pinged) / sizeof(k_v10_pinged[0]); i++) {
-        if (!strcmp(kn_region, k_v10_pinged[i])) return k_v10_pinged[i];
-    }
-    return NULL;
+    return krunker_region_pinged(kn_region) ? krunker_region(kn_region)->id : NULL;
 }
 
 cJSON *registry_ping_list(const Registry *r, const char *flavor, const cJSON *regions, const char *public_url) {

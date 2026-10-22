@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "registry.h"
+#include "krunker_regions.h" /* the v10.0.3 region table: every id must resolve */
 
 static int g_fail;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #c); g_fail = 1; } } while (0)
@@ -89,42 +90,117 @@ static void ping_list_checks(void) {
     registry_free(p);
 }
 
+/* The four KrunkNative edges, each custom-capable with a lobby with room and spare lobby capacity (a host target;
+ * doc/v10/regions.md). */
+static Registry *edges_registry(void) {
+    Registry *s = registry_new();
+    MmNode *clara = add_node(s, "CLARA1", "SV", 1), *angeles = add_node(s, "ANGELES1", "LA", 1);
+    MmNode *chi = add_node(s, "CHITOWN1", "CH", 1), *ash = add_node(s, "ASHBURN1", "VA", 1);
+    clara->max_lobbies = angeles->max_lobbies = chi->max_lobbies = ash->max_lobbies = 4;
+    add_lobby(s, clara, "aaaaa", 3, 8, 0, "1.0");
+    add_lobby(s, angeles, "bbbbb", 3, 8, 0, "1.0");
+    add_lobby(s, chi, "ccccc", 3, 8, 0, "1.0");
+    add_lobby(s, ash, "ddddd", 3, 8, 0, "1.0");
+    return s;
+}
+
+static int node_is(const MmNode *n, const char *a, const char *b) {
+    return n && (!strcmp(n->node_id, a) || (b && b[0] && !strcmp(n->node_id, b)));
+}
+
 /* A seek or a host names a region by either id: the KrunkNative code the node announces (SV) or the v10 id
  * the client was given in /mm/ping-list (us-ca-sv). Both sides: the official client (v10 ids) and the native
- * client (its list's ids, or a saved KN code). cross_region is OFF: the node must be found in its own region. */
+ * client (its list's ids, or a saved KN code). cross_region is OFF: a hosted region's node is found in its own
+ * region, and a region no node serves (de-fra: krunk.io has fewer regions than Krunker) is routed to the
+ * nearest hosted one (registry_route_region), never refused. */
 static void seek_region_checks(void) {
     static const struct {
         const char *region; /* what the seek asks for */
-        const char *node_a, *node_b; /* the nodes that may answer ("" = none) */
+        const char *node_a, *node_b; /* the nodes that may answer */
+        int routed;
     } seeks[] = {
-        {"SV", "CLARA1", ""},          {"us-ca-sv", "CLARA1", "ANGELES1"},
-        {"LA", "ANGELES1", ""},        {"CH", "CHITOWN1", ""},
-        {"us-nj", "CHITOWN1", "ASHBURN1"}, {"VA", "ASHBURN1", ""},
-        {"de-fra", "", ""},
+        {"SV", "CLARA1", "", 0},          {"us-ca-sv", "CLARA1", "ANGELES1", 0},
+        {"LA", "ANGELES1", "", 0},        {"CH", "CHITOWN1", "", 0},
+        {"us-nj", "CHITOWN1", "ASHBURN1", 0}, {"VA", "ASHBURN1", "", 0},
+        /* unhosted v10 ids, by great circle: Europe / Middle East / Africa / Brazil -> New York (CH or VA),
+         * Asia-Pacific / Hawaii / the US west -> Silicon Valley (SV or LA) */
+        {"de-fra", "CHITOWN1", "ASHBURN1", 1}, {"gb-lon", "CHITOWN1", "ASHBURN1", 1}, {"me-bhn", "CHITOWN1", "ASHBURN1", 1},
+        {"brz", "CHITOWN1", "ASHBURN1", 1},    {"us-il", "CHITOWN1", "ASHBURN1", 1},  {"af-ct", "CHITOWN1", "ASHBURN1", 1},
+        {"au-syd", "CLARA1", "ANGELES1", 1},   {"jb-hnd", "CLARA1", "ANGELES1", 1},   {"sgp", "CLARA1", "ANGELES1", 1},
+        {"us-wa", "CLARA1", "ANGELES1", 1},    {"us-ca-la", "CLARA1", "ANGELES1", 1}, {"us-hi", "CLARA1", "ANGELES1", 1},
+        /* no place to measure from: the first hosted region (registry order: SV's us-ca-sv) */
+        {"local", "CLARA1", "ANGELES1", 1}, {"XX", "CLARA1", "ANGELES1", 1},
     };
     MmPolicy p = {.cross_region = 0, .default_max_players = 8};
     for (size_t i = 0; i < sizeof(seeks) / sizeof(seeks[0]); i++) {
-        Registry *s = registry_new();
-        MmNode *clara = add_node(s, "CLARA1", "SV", 0), *angeles = add_node(s, "ANGELES1", "LA", 0);
-        MmNode *chi = add_node(s, "CHITOWN1", "CH", 0), *ash = add_node(s, "ASHBURN1", "VA", 0);
-        add_lobby(s, clara, "aaaaa", 3, 8, 0, "1.0");
-        add_lobby(s, angeles, "bbbbb", 3, 8, 0, "1.0");
-        add_lobby(s, chi, "ccccc", 3, 8, 0, "1.0");
-        add_lobby(s, ash, "ddddd", 3, 8, 0, "1.0");
+        Registry *s = edges_registry();
         MmPick pick;
         MmPickQuery q = {.region = seeks[i].region, .auto_change = 1, .now_ms = 2000, .proto_major = 1};
         const MmPickError e = registry_pick(s, &p, &q, &pick);
-        const char *want_a = seeks[i].node_a, *want_b = seeks[i].node_b;
-        if (!want_a[0]) {
-            CHECK(e != MM_PICK_OK); /* no node of that region: nothing (cross_region off) */
-        } else {
-            CHECK(e == MM_PICK_OK && pick.node != NULL);
-            if (e == MM_PICK_OK && pick.node) {
-                const int ok = !strcmp(pick.node->node_id, want_a) || (want_b[0] && !strcmp(pick.node->node_id, want_b));
-                CHECK(ok);
-                if (!ok) fprintf(stderr, "  seek %s found %s\n", seeks[i].region, pick.node->node_id);
-            }
+        CHECK(e == MM_PICK_OK && pick.node != NULL);
+        if (e == MM_PICK_OK && pick.node) {
+            const int ok = node_is(pick.node, seeks[i].node_a, seeks[i].node_b);
+            CHECK(ok);
+            if (!ok) fprintf(stderr, "  seek %s found %s\n", seeks[i].region, pick.node->node_id);
+            CHECK(pick.routed == seeks[i].routed);
+            if (!seeks[i].routed) CHECK(!strcmp(pick.region, seeks[i].region));
+            else CHECK(!strcmp(pick.region, registry_v10_region(pick.node->region)));
         }
+        /* the host of a custom game is routed the same way */
+        MmNode *host = registry_pick_host_node(s, seeks[i].region, "brainA", 0, 1, 2000, NULL);
+        CHECK(node_is(host, seeks[i].node_a, seeks[i].node_b));
+        if (!node_is(host, seeks[i].node_a, seeks[i].node_b)) fprintf(stderr, "  host %s found %s\n", seeks[i].region, host ? host->node_id : "(none)");
+        registry_free(s);
+    }
+
+    /* every region of the v10.0.3 table resolves with cross_region off (the client's picker offers them all) */
+    for (size_t i = 0; i < krunker_region_count(); i++) {
+        Registry *s = edges_registry();
+        MmPick pick;
+        MmPickQuery q = {.region = krunker_region_at(i)->id, .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && pick.node != NULL);
+        registry_free(s);
+    }
+
+    /* the client's measured pings beat geography: a Frankfurt seek whose Silicon Valley ping is the lowest goes
+     * there; an unmeasured (-1) region is skipped; a hosted region is itself whatever the pings say */
+    {
+        Registry *s = edges_registry();
+        cJSON *west = cJSON_Parse("{\"us-ca-sv\":41,\"us-nj\":130}"), *east = cJSON_Parse("{\"us-ca-sv\":-1,\"us-nj\":95}");
+        MmPick pick;
+        MmPickQuery q = {.region = "de-fra", .pings = west, .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && node_is(pick.node, "CLARA1", "ANGELES1") && pick.routed &&
+              !strcmp(pick.region, "us-ca-sv"));
+        q.pings = east;
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && node_is(pick.node, "CHITOWN1", "ASHBURN1") && !strcmp(pick.region, "us-nj"));
+        q.region = "us-ca-sv";
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && node_is(pick.node, "CLARA1", "ANGELES1") && !pick.routed);
+        /* a KN code in the pings (an older client's keys) counts for its node's id */
+        cJSON *codes = cJSON_Parse("{\"SV\":20,\"CH\":200}");
+        q.region = "de-fra";
+        q.pings = codes;
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_OK && node_is(pick.node, "CLARA1", "ANGELES1"));
+        char out[MM_ID_MAX];
+        CHECK(registry_route_region(s, "de-fra", NULL, NULL, out, sizeof(out)) == 1 && !strcmp(out, "us-nj"));
+        CHECK(registry_route_region(s, "us-nj", NULL, NULL, out, sizeof(out)) == 0 && !strcmp(out, "us-nj"));
+        CHECK(registry_route_region(s, "", NULL, NULL, out, sizeof(out)) == 0 && !out[0]);
+        CHECK(registry_route_region(s, NULL, NULL, NULL, out, sizeof(out)) == 0 && !out[0]);
+        CHECK(registry_region_hosted(s, "SV", NULL) && registry_region_hosted(s, "us-nj", NULL) && !registry_region_hosted(s, "de-fra", NULL));
+        /* another flavor's node does not host a region for this pool */
+        CHECK(!registry_region_hosted(s, "us-nj", "strike"));
+        cJSON_Delete(west);
+        cJSON_Delete(east);
+        cJSON_Delete(codes);
+        registry_free(s);
+    }
+    /* no node at all: nothing to route to, the pick says so (not a crash, not a bogus region) */
+    {
+        Registry *s = registry_new();
+        char out[MM_ID_MAX];
+        CHECK(registry_route_region(s, "de-fra", NULL, NULL, out, sizeof(out)) == 0 && !strcmp(out, "de-fra"));
+        MmPick pick;
+        MmPickQuery q = {.region = "de-fra", .auto_change = 1, .now_ms = 2000, .proto_major = 1};
+        CHECK(registry_pick(s, &p, &q, &pick) == MM_PICK_NONE);
         registry_free(s);
     }
 }

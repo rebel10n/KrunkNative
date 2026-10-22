@@ -193,7 +193,11 @@ typedef enum MmPickError {
 } MmPickError;
 
 typedef struct MmPickQuery {
-    const char *region;            /* NULL/"" = any */
+    const char *region;            /* NULL/"" = any. A v10 id no node of the pool serves is routed to the nearest
+                                    * hosted region first (registry_route_region; MmPick.region says which) */
+    const cJSON *pings;            /* seek ?pings= ({v10 id: ms} the client measured to the listed regions' ping
+                                    * hosts, < 0 = failed; borrowed, NULL = none): the routing's "nearest" is the
+                                    * lowest measured ping, else great circle */
     const char *game_id;           /* requested ?game= (NULL) */
     int auto_change;               /* autoChangeGame (default 1) */
     int force;                     /* FORCE_ENTER */
@@ -234,11 +238,17 @@ typedef struct MmPick {
     MmNode *node;
     MmLobby *lobby;
     int changed;                   /* requested game replaced (changeReason game_changed) */
+    char region[MM_ID_MAX];        /* the region the public pick looked in: the request's, or the hosted region it
+                                    * was routed to (registry_route_region); "" = any */
+    int routed;                    /* 1 when the requested region had no node and `region` is the nearest hosted one */
 } MmPick;
 
 /* Quick join (doc/backend.md 6.2): a requested ?game= with room, else the public pool (not
  * custom, private, password protected, v7 sk:false, draining, wrong version / protocol, or
- * a legacy onlineMode node for a guest), in the requested region first, then (cross_region) anywhere:
+ * a legacy onlineMode node for a guest), in the requested region first, then (cross_region) anywhere.
+ * A requested region no node of the pool serves (a v10 id krunk.io has no edge in: de-fra, au-syd, ...)
+ * is first routed to the nearest hosted region (registry_route_region), whatever cross_region says:
+ * cross_region only widens a hosted region whose lobbies have no room. Then:
  *   1. up-to-date before outdated (releases.c)
  *   2. the most taken seats (players + live reservations): populated lobbies fill up before an
  *      empty one is used (v3.1.1 pickBestLobby, v7.1.4 ServerManager.seek "fuller-but-not-full")
@@ -293,9 +303,17 @@ cJSON *registry_game_list(const Registry *r, int64_t now_ms, int *total_players)
 cJSON *registry_game_list_pool(const Registry *r, int64_t now_ms, const char *flavor, int *total_players);
 cJSON *registry_lobby_tuple(const Registry *r, const MmLobby *l, int64_t now_ms);  /* copy with live count */
 
-/* ---- /mm/ping-list (doc/v10/regions.md) */
+/* ---- regions (doc/v10/regions.md) */
 /* The v10 region id a node's region code (MmNode.region, a KrunkNative code) is listed under; NULL = none. */
 const char *registry_v10_region(const char *kn_region);
+/* 1 when some node of the flavor pool serves `region` (region_eq: its KN code or its v10 id). */
+int registry_region_hosted(const Registry *r, const char *region, const char *flavor);
+/* The region a seek or host in `region` is made in (written to out, cap bytes): `region` itself when a node of
+ * the pool serves it (or it is NULL / ""), else the nearest hosted v10 id (krunker_regions.h
+ * krunker_region_nearest: the lowest of the client's `pings` ({v10 id: ms}, NULL = none) over the hosted ids,
+ * else the nearest city by great circle; a region without a place takes the first hosted one). Returns 1 when
+ * it routed, 0 when out is the request (also when no node is registered at all: nothing to route to). */
+int registry_route_region(const Registry *r, const char *region, const char *flavor, const cJSON *pings, char *out, size_t cap);
 /* The /mm/ping-list object (caller frees): {v10 region id: "host[:port]"}, one ping host per listed
  * region of the flavor pool (registry_flavor_match). A host is brain.regions[] ping_host (looked up by
  * the v10 id, then by the KrunkNative code), else the owning brain's public URL (public_url when that

@@ -2,6 +2,7 @@
 // v10.js:147469-147507 (pingFetch :147455-147467).
 #include <region_ping.h>
 #include <backend.h>
+#include <krunker_regions.h> // krunker_region_ping_url: v10's ping URL rule
 #include <GLFW/glfw3.h> // glfwGetTime: the measured round trips
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,24 +20,8 @@ typedef struct {
     char region[64];
 } Ping;
 
-static int starts_with(const char *s, const char *prefix) { return !strncmp(s, prefix, strlen(prefix)); }
-
-static int ends_with(const char *s, const char *suffix) {
-    const size_t n = strlen(s), m = strlen(suffix);
-    return n >= m && !strcmp(s + n - m, suffix);
-}
-
-void region_ping_url(const char *value, char *out, const size_t n) {
-    if (!out || !n) return;
-    const char *v = value ? value : "";
-    // v10: proto = endsWith(":443") ? "https:" : "http:"; anything but ip_ / localhost / 127.0.0.1
-    // is https: with the port dropped. KrunkNative: a brain's "host:6767" stays plain HTTP.
-    if (starts_with(v, "ip_") || starts_with(v, "localhost") || starts_with(v, "127.0.0.1") || ends_with(v, ":6767")) {
-        snprintf(out, n, "%s//%s/ping", ends_with(v, ":443") ? "https:" : "http:", v);
-    } else {
-        snprintf(out, n, "https://%.*s/ping", (int) strcspn(v, ":"), v);
-    }
-}
+// v10's rule lives with the region table (shared/src/krunker_regions.c, pinned by krunker_regions_test)
+void region_ping_url(const char *value, char *out, const size_t n) { krunker_region_ping_url(value, out, n); }
 
 static void finish(Race *r, const char *region) {
     if (r->done) return;

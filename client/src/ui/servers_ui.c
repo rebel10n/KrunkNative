@@ -284,30 +284,28 @@ static void server_display_name(const char *id, const char *region, char *out, c
     }
 }
 
-// <option>s of the region pickers (Settings > Default Region, the ranked queue): every known
-// region plus the ones the matchmaker lists, `selected` marked.
+// <option>s of the region pickers (Settings > Default Region, the ranked queue): every v10 region plus
+// the ones the matchmaker lists, `selected` marked.
 static cJSON *g_ping_regions;    // the last /mm/ping-list answer (owned)
 static cJSON *g_row_pings;       // {region: ms} measured with the last list load (v10 pingData; -1 failed; owned)
-static void region_add_id(const char **seen, int *count, const char *id) {
-    if (!id || !id[0] || *count >= 64) return;
-    for (int i = 0; i < *count; i++) {
-        if (!strcmp(seen[i], id)) return;
-    }
-    seen[(*count)++] = id;
-}
 
-// <option>s of the region pickers (Settings > Default Region, the ranked queue): the v10 id of every
-// KrunkNative edge, then the ids the matchmaker lists, each once. The value is the v10 id (what the seek
-// sends); the label is its v10 name with the edge places it holds (region_picker_label).
+// <option>s of the region pickers (Settings > Default Region, the ranked queue): the whole Krunker v10 list
+// (region_picker_ids: v10's Default Region dropdown in its order, whatever the Server Type), then the ids the
+// matchmaker lists that it lacks, each once. The value is the v10 id (what the seek sends); the label is its v10
+// name with the edge places it holds (region_picker_label). A region we have no node in is still offered: the
+// seek in it lands on the nearest Box Office node (the ping race here, the brain's routing for the rest;
+// doc/v10/regions.md "Routing"), never a refusal.
 char *servers_ui_region_options(const char *selected) {
     StrBuf sb = {0};
-    const char *seen[64];
-    int count = 0;
-    for (size_t i = 0; i < region_edge_count(); i++) region_add_id(seen, &count, region_edge_at(i)->v10);
+    const char *listed[64], *seen[96];
+    size_t listed_n = 0;
     const cJSON *r;
-    cJSON_ArrayForEach(r, g_ping_regions) region_add_id(seen, &count, r->string);
+    cJSON_ArrayForEach(r, g_ping_regions) {
+        if (r->string && r->string[0] && listed_n < sizeof(listed) / sizeof(listed[0])) listed[listed_n++] = r->string;
+    }
+    const size_t count = region_picker_ids(listed, listed_n, seen, sizeof(seen) / sizeof(seen[0]));
     const char *sel = region_id_of(selected);
-    for (int i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         char label[160];
         region_picker_label(seen[i], label, sizeof(label));
         sb_append(&sb, "<option value='");
@@ -1197,6 +1195,17 @@ static void seek(const char *game_id, const int auto_change_in, void *quiet) {
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
     // the Krunker version (v10.0.2, the only one): quick join never picks a lobby announcing another
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&ruleset=%s", ruleset_current()->key);
+    // the round trips this client measured to the listed regions' ping hosts ({v10 id: ms}, the server browser's
+    // row pings; < 0 = failed): a region the brain has no node in is routed to the lowest-ping one it has
+    // (doc/v10/regions.md "Routing"), by great circle when nothing was measured
+    if (!play && cJSON_IsObject(g_row_pings) && g_row_pings->child) {
+        char *pings = cJSON_PrintUnformatted(g_row_pings);
+        if (pings && strlen(pings) < 1000) {
+            backend_url_encode(enc, sizeof(enc), pings);
+            n += snprintf(path + n, sizeof(path) - (size_t) n, "&pings=%s", enc);
+        }
+        free(pings);
+    }
     // the app's flavor pool: a Strike client is only ever matched into a Strike lobby
     n += snprintf(path + n, sizeof(path) - (size_t) n, "%s", mm_flavor_param(path));
     if (play) g_exclude_game[0] = 0;

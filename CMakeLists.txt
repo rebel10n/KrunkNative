@@ -755,7 +755,9 @@ else ()
     # strike_rules_test: Krunker Strike's rules (strike_rules.h) against tools/strike/strike_data.json
     # strike_economy_test: Krunker Strike's economy (strike_economy.h): catalogue, wheel odds, XP curve
     # flavor_storage_test: each flavor's native storage directory (Box Office unchanged, Strike its own)
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test)
+    # krunker_regions_test: the Krunker v10.0.3 region table (shared/src/krunker_regions.c): the dropdown's order,
+    #   dedicated-only ids, names, the nearest-region rule (lowest ping, then great circle) and getRegion's ping URL
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test flavor_storage_test krunker_regions_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -1250,9 +1252,11 @@ else ()
     add_test(NAME seek_choice_test COMMAND seek_choice_test)
 
     # region_names_test (client/src/ui/region_names.c): the v10 id of each KrunkNative edge (the seek and the saved
-    # Default Region are that id) and the picker labels (the v10 name, the edges' places in brackets)
-    add_executable(region_names_test client/tests/region_names_test.c client/src/ui/region_names.c)
-    target_include_directories(region_names_test PRIVATE client/include)
+    # Default Region are that id), the picker's ids (the whole v10 dropdown, both Server Types) and labels (the v10
+    # name, the edges' places in brackets)
+    add_executable(region_names_test client/tests/region_names_test.c client/src/ui/region_names.c shared/src/krunker_regions.c)
+    target_include_directories(region_names_test PRIVATE client/include shared/include)
+    target_link_libraries(region_names_test PRIVATE m)
     add_test(NAME region_names_test COMMAND region_names_test)
     # seek_claim_test (client/src/ui/seek_claim.c): which matchmaking answer may put the player in a lobby. A
     # community map's host (or a join by hand) overtakes a seek still in flight: its late answer is dropped

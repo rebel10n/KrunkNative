@@ -307,8 +307,11 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         return;
     }
     char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "",
-         exclude[MM_GAME_ID_MAX] = "", recent[MM_GAME_ID_MAX * 4] = "", flavor[16] = "";
+         exclude[MM_GAME_ID_MAX] = "", recent[MM_GAME_ID_MAX * 4] = "", flavor[16] = "", pings_q[1024] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
+    /* KrunkNative ?pings= ({v10 id: ms} the client measured to the listed regions' ping hosts): a region we have
+     * no node in is routed to the lowest-ping hosted one (registry_route_region; doc/v10/regions.md "Routing") */
+    cJSON *pings = kn_http_query_get(req, "pings", pings_q, sizeof(pings_q)) > 0 ? kn_json_parse(pings_q, strlen(pings_q)) : NULL;
     query_flavor(req, flavor, sizeof(flavor)); /* the app's flavor pool: "" = Box Office, "strike" */
     kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v10 */
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
@@ -326,6 +329,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     }
     MmPickQuery q = {
         .region = region,
+        .pings = pings,
         .game_id = game[0] ? game : NULL,
         .auto_change = query_bool(req, "autoChangeGame", 1),
         .force = has_force_enter(req) || query_bool(req, "force", 0),
@@ -347,6 +351,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
+    cJSON_Delete(pings);
     if (e != MM_PICK_OK) {
         static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers",
                                       "AccountRequired", "IncompatibleVersion", "NoMatchingServers", "NoOtherLobby"};
@@ -361,8 +366,12 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     /* the lobby's seats (the count the pick used): a client never joins a lobby the answer says is full */
     cJSON_AddNumberToObject(reply, "players", pick.lobby->players);
     cJSON_AddNumberToObject(reply, "maxPlayers", registry_lobby_cap(pick.lobby, &mm_settings()->policy));
-    KN_DEBUG("routes", "seek region=%s game=%s flavor=%s %s -> %s (%s:%d%s)", region, game, flavor[0] ? flavor : "base",
-             account_id > 0 ? "account" : "guest", pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
+    /* the reply's "region" is the node's (brain_seek_reply): the client shows where it landed. A routed seek
+     * also says what it asked for */
+    if (pick.routed) cJSON_AddStringToObject(reply, "requestedRegion", region);
+    KN_DEBUG("routes", "seek region=%s%s%s game=%s flavor=%s %s -> %s (%s:%d%s)", region, pick.routed ? " routed to " : "",
+             pick.routed ? pick.region : "", game, flavor[0] ? flavor : "base", account_id > 0 ? "account" : "guest",
+             pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
              registry_lobby_needs_account(pick.node, pick.lobby) ? ", online_mode" : "");
     brain_reply_json(req, 200, reply);
     cJSON_Delete(reply);

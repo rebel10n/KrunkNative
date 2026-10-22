@@ -219,9 +219,10 @@ add_test(NAME brain_double_xp COMMAND kn_brain_double_xp_test)
 set_tests_properties(brain_double_xp PROPERTIES LABELS "knsvc;brain;economy")
 
 # Registry unit test (pure, no DB).
-add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
+add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c
+               ${CMAKE_SOURCE_DIR}/shared/src/krunker_regions.c)
 target_include_directories(kn_brain_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/shared/include)
-target_link_libraries(kn_brain_registry_test PRIVATE knsvc)
+target_link_libraries(kn_brain_registry_test PRIVATE knsvc m)
 add_test(NAME brain_registry COMMAND kn_brain_registry_test)
 # mm-token: seek-game validation tokens (pure, no DB)
 add_executable(kn_brain_mm_token_test tests/test_mm_token.c mm_token.c)

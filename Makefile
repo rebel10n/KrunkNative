@@ -255,6 +255,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/nettspend_test
 	./$(DEBUG_DIR)/bot_chat_test
 	./$(DEBUG_DIR)/ruleset_test
+	./$(DEBUG_DIR)/krunker_regions_test
 	./$(DEBUG_DIR)/hitboxes_test
 	./$(DEBUG_DIR)/v10_gameplay_test
 	./$(DEBUG_DIR)/desktop_notify_test
