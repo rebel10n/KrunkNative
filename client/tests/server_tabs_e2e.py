@@ -56,12 +56,30 @@ KRUNKER = {"success": True, "totalPlayerCount": 21, "games": [
 ]}
 
 
+# The brain's /mm/game-list answer of a live run: its games, and its totalPlayerCount when the run sets one.
+LIVE_BRAIN = {}
+# The finder's servers (KRUNKNATIVE_FINDER_URL in a live run): 980 players on servers the brain does not list. Before the
+# fix their sum was added to the brain's total on the krunk.io tab (14 + 980 = 994 on the first render).
+FINDER = {"servers": [
+    {"host": "fa.example", "port": 7777, "name": "Box Office FA #1", "map": "Burg", "region": "CH", "players": 490, "max": 8,
+     "version": "1", "protocol": "1"},
+    {"host": "fb.example", "port": 7777, "name": "Box Office FB #1", "map": "Burg", "region": "CH", "players": 490, "max": 8,
+     "version": "1", "protocol": "1"},
+]}
+
+
 class Stub(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
-        if not self.path.startswith("/game-list"):
+        if self.path.startswith("/mm/game-list"):  # the brain's answer of a live run (run_native live=...)
+            body = LIVE_BRAIN
+        elif self.path.startswith("/finder"):  # the server finder: two dedicated servers the brain does not list
+            body = FINDER
+        elif self.path.startswith("/game-list"):
+            body = KRUNKER
+        else:
             self.send_error(404)
             return
-        body = json.dumps(KRUNKER).encode()
+        body = json.dumps(body).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -89,10 +107,14 @@ def production_sends(log):
             if re.search(r"^\[(http|finder|krunker)\].*https?://(?!127\.0\.0\.1|localhost)", l)]
 
 
-def run_native(script, stub_port, timeout=240):
+def run_native(script, stub_port, timeout=240, live=None):
+    """live: a run on the brain path, no fixed list: the brain answers live (its game-list {live}) and the finder is the stub's."""
     server_list = os.path.join(WORK, "servers.json")
     with open(server_list, "w") as f:
         json.dump(OURS, f)
+    if live is not None:
+        LIVE_BRAIN.clear()
+        LIVE_BRAIN.update(live)
     path = os.path.join(WORK, "native.script")
     with open(path, "w") as f:
         f.write(script.strip() + "\n")
@@ -107,6 +129,10 @@ def run_native(script, stub_port, timeout=240):
                 # no brain here: the Box Office list is the fixed one, and its requests are refused
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:9", "KRUNKNATIVE_SERVER_LIST": server_list,
                 "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % stub_port, "KRUNKNATIVE_KRUNKER_URL": "https://krunker.io"})
+    if live is not None:
+        env.pop("KRUNKNATIVE_SERVER_LIST", None)
+        env.update({"KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % stub_port,
+                    "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/finder" % stub_port})
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "--map", "kanji"], stdout=out, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -154,6 +180,13 @@ def host_steps(t, tab):
     return script, t + 1000
 
 
+# the live brain runs (run_native live=...): a fresh open on the default tab, then the tabs
+LIVE_SCRIPT = ("0 menu\n300 call showWindow 2\n320 text @live_early [id=playerCnt]\n2500 text @live_default [id=playerCnt]\n"
+               "2600 call windows.1.switchTab 1\n2700 text @live_kio [id=playerCnt]\n"
+               "2800 call windows.1.switchTab 0\n2900 text @live_back [id=playerCnt]\n3000 quit\n")
+FALLBACK_SCRIPT = "0 menu\n300 call showWindow 2\n2500 text @fb_default [id=playerCnt]\n3000 quit\n"
+
+
 def main():
     stub = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
     threading.Thread(target=stub.serve_forever, daemon=True).start()
@@ -183,6 +216,11 @@ def main():
     script += "%d call windows.1.switchTab 0\n%d text @krunk_back [id=playerCnt]\n" % (t + 100, t + 150)
     script += "%d quit\n" % (t + 200)
     log = run_native(script, port)
+    # the brain path (no fixed list): a fresh open reads the default tab's count from the brain's totalPlayerCount, the
+    # finder's 980 players not added; then the tabs swap it
+    live_log = run_native(LIVE_SCRIPT, port, live={"success": True, "totalPlayerCount": 14, "games": OURS["games"]})
+    # a brain answer without a total: the documented fallback, the sum of its game rows (23), the finder still not added
+    fallback_log = run_native(FALLBACK_SCRIPT, port, live={"success": True, "games": OURS["games"]})
     stub.shutdown()
 
     # tabs: the default is krunk.io (the active backend is Box Office's)
@@ -223,6 +261,19 @@ def main():
           f"krunker.io's Start Game says it needs a krunker.io game first, not a silent failure ({fold(msg_o)!r})")
     check("custom game: request sent" not in log, "no krunker.io custom game was sent")
     check("joining official game" not in log, "the session backend did not change (no krunker.io game joined)")
+
+    # live brain path: the default read is the brain's 14, not 14 + the finder's 980. The 320 ms read may still be the
+    # LOADING text (no count yet): it must never show another number
+    _, live_early = text(live_log, "@live_early")
+    _, live_default = text(live_log, "@live_default")
+    check(fold(live_early) in ("", "14 In Game"), f"live: the first render never shows another count than the brain's 14 ({fold(live_early)!r})")
+    check(fold(live_default) == "14 In Game", f"live: the default tab's count is the brain's own 14 ({fold(live_default)!r})")
+    _, live_kio = text(live_log, "@live_kio")
+    _, live_back = text(live_log, "@live_back")
+    check(fold(live_kio) == "21 In Game", f"live: switching to krunker.io shows its own 21 ({fold(live_kio)!r})")
+    check(fold(live_back) == "14 In Game", f"live: switching back to krunk.io shows the brain's 14 again ({fold(live_back)!r})")
+    _, fb_default = text(fallback_log, "@fb_default")
+    check(fold(fb_default) == "23 In Game", f"live: a brain answer without a total counts its game rows, 23, not the finder's ({fold(fb_default)!r})")
 
     if failures:
         print(f"server_tabs_e2e: {len(failures)} failed (logs in {WORK})")

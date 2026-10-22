@@ -1733,7 +1733,6 @@ static void on_game_info(void *user, const int status, const char *body, const s
 // Their row joins the host directly (finderJoin): no lobby, no ticket.
 static cJSON *g_finder_servers;   // GET <finder> "servers" (owned)
 static cJSON *g_finder_rows;      // the finder-only entries as tuples (owned, rebuilt by build_groups)
-static double g_finder_players;   // players on finder-only servers (the "In Game" total)
 static int g_finder_loading;
 static double g_finder_loaded_ms = -1e18;
 static char g_finder_error[256];  // the last finder request's failure ("" = ok), shown in the browser
@@ -1876,12 +1875,13 @@ static int tab_lists(const cJSON *lists[2]) {
     return 2;
 }
 
-// The "In Game" count of one tab's website, read from that website's own source and never the other's:
-// krunk.io = Box Office's brain total + its finder-only servers (g_total_players, g_finder_players);
+// The "In Game" count of one tab's website, read from that website's own total and never the other's:
+// krunk.io = the brain's totalPlayerCount (g_total_players, brain_total_players), 0 while the brain does not answer;
 // krunker.io = its official lobbies' totalPlayerCount (krunker_lobbies.c), 0 until that list is listed.
+// The finder's servers are not summed in: their players were the ~1k (a sum over finder rows on the first render).
 static double tab_players(const int tab) {
     if (tab == SERVER_TAB_KRUNKER) return krunker_lobbies_list() ? krunker_lobbies_players() : 0;
-    return (brain_games() ? g_total_players : 0) + g_finder_players;
+    return brain_games() ? g_total_players : 0;
 }
 
 // The default tab is the active backend's (krunker_net_active): it follows the backend when that changes,
@@ -1911,6 +1911,17 @@ static int g_games_override;
 // The brain lobbies the list shows (only while the brain answers).
 static const cJSON *brain_games(void) { return backend_available() == 1 || g_games_override ? g_games : NULL; }
 
+// The brain's In Game total of a game-list answer (res: {totalPlayerCount, games}): its totalPlayerCount, the
+// number the brain counts. Only an answer without one takes the documented fallback, the sum of its game rows.
+static double brain_total_players(const cJSON *res, const cJSON *games) {
+    const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
+    if (cJSON_IsNumber(total)) return total->valuedouble;
+    double sum = 0;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, games) sum += tuple_int(t, 2);
+    return sum;
+}
+
 void servers_ui_set_games(const cJSON *list) {
     cJSON_Delete(g_games);
     g_games = NULL;
@@ -1918,12 +1929,7 @@ void servers_ui_set_games(const cJSON *list) {
     if (!list) return;
     const cJSON *games = cJSON_IsArray(list) ? list : cJSON_GetObjectItem(list, "games");
     g_games = cJSON_Duplicate(games, 1);
-    const cJSON *total = cJSON_GetObjectItem(list, "totalPlayerCount");
-    g_total_players = cJSON_IsNumber(total) ? total->valuedouble : 0;
-    if (!cJSON_IsNumber(total)) {
-        const cJSON *t;
-        cJSON_ArrayForEach(t, g_games) g_total_players += tuple_int(t, 2);
-    }
+    g_total_players = brain_total_players(list, g_games);
     g_list_start_ms = now_ms();
     g_loaded = 1;
 }
@@ -1946,7 +1952,6 @@ static int finder_off(void); // a scenario render lists only its own servers (de
 static void rebuild_finder_rows(void) {
     cJSON_Delete(g_finder_rows);
     g_finder_rows = cJSON_CreateArray();
-    g_finder_players = 0;
     const cJSON *e, *servers = finder_off() ? NULL : g_finder_servers;
     cJSON_ArrayForEach(e, servers) {
         const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
@@ -1984,7 +1989,6 @@ static void rebuild_finder_rows(void) {
         if (protocol) cJSON_AddStringToObject(meta, "protocol", protocol);
         cJSON_AddItemToArray(t, meta);
         cJSON_AddItemToArray(g_finder_rows, t);
-        g_finder_players += players > 0 ? players : 0;
     }
 }
 
@@ -3154,8 +3158,7 @@ static void on_game_list(void *user, const int status, const char *body, const s
         servers_ui_note_list_response(res); // download_url / downloads (build versions)
         cJSON_Delete(g_games);
         g_games = cJSON_Duplicate(games, 1);
-        const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
-        g_total_players = cJSON_IsNumber(total) ? total->valuedouble : 0;
+        g_total_players = brain_total_players(res, games);
         g_list_start_ms = now_ms(); // windows[1].startTime
         // the lobbies the Servers window lists (the Krunker Strike page has no such window; its
         // list data is still this one, from the app's flavor pool: mm_flavor_param)
