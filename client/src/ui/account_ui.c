@@ -21,7 +21,9 @@
 #include <alt_manager_ui.h> // the Account Manager's answers to its Add / switch requests
 #include <account_split.h>   // the account split: a krunker.io login is never sent to kn_brain (and the reverse)
 #include <app_mode.h>
+#include <html_dom.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <v10_wild_offer.h>
 #include <ctype.h>
@@ -85,6 +87,8 @@ static int g_mail_tab;           // the kml request / answer: 0 unread, 1 archiv
 static int g_mail_view;          // windows[29].tabIndex (v7: Followers, Clan, Hub, Inbox, Archive)
 static cJSON *g_mail_rows;       // mailData.d (owned), NULL = not loaded
 static int g_mail_loaded;        // mailData != null
+static int g_mail_failed;        // the kml answer was refused, or none came by the deadline: the list says so
+static int g_mail_timer;         // the deadline of the kml request in flight (html_timer id, 0 none)
 // v7.1.4 2FA (authenticator app): v10808, the label sub2FA sends the code with ("2fa" = the
 // login step, "a2FAc" / "d2FAc" = confirm enabling / disabling)
 #define TWOFA_KEY_LEN 6 // config.twoFAKeyLen
@@ -1008,7 +1012,23 @@ static int reset_frame(const char *label, const cJSON *frame);
 
 // v10 REDEEM_VOUCHER_RESPONSE(funds, msg) ("vr", brain redeem.c): msg is the line under the code box;
 // funds (set on success) is the account's KR, the header. The granted items come with the "ua" push.
+// A vr whose answer never comes (the socket dropped with it) shows an error after its deadline, not "Loading..."
+#define VOUCHER_WAIT_MS 15000
+static int g_vouch_timer;
+static int g_vouch_pending;
+static void vouch_expired(void *user) {
+    (void) user;
+    g_vouch_timer = 0;
+    if (!g_vouch_pending) return;
+    g_vouch_pending = 0;
+    HtmlElem res = html_dom_by_id("vouchRes");
+    if (res) html_dom_set_text(res, I18N("kn.vouch.noAnswer", "Couldn't reach the server. Try the code again."));
+}
+
 static void redeem_voucher_frame(const cJSON *frame) {
+    html_timer_cancel(g_vouch_timer);
+    g_vouch_timer = 0;
+    g_vouch_pending = 0;
     HtmlElem res = html_dom_by_id("vouchRes");
     if (res) {
         const char *msg = str_at(frame, 2);
@@ -1073,11 +1093,14 @@ static void on_social(void *user, const cJSON *frame) {
     } else if (!strcmp(label, "gmc")) { // updateMailCount(count)
         mail_count((int) num_at(frame, 1));
     } else if (!strcmp(label, "kml")) { // mailListResponse(tab, rows)
+        html_timer_cancel(g_mail_timer);
+        g_mail_timer = 0;
         g_mail_tab = (int) num_at(frame, 1);
         cJSON_Delete(g_mail_rows);
         const cJSON *rows = cJSON_GetArrayItem(frame, 2);
         g_mail_rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
         g_mail_loaded = g_mail_rows != NULL;
+        g_mail_failed = !g_mail_loaded;
         menu_rerender_if_open(30);
     } else if (!strcmp(label, "rml")) { // readMailResponse(rows)
         mail_read_data(cJSON_GetArrayItem(frame, 1));
@@ -1242,15 +1265,30 @@ static void mail_follower_row(StrBuf *sb, const int id, const char *ago, const c
     sb_append(sb, "</a> has followed you!</div></div>");
 }
 
+// A kml whose answer never comes (the socket dropped with it) is failed by its deadline: the list says so, and
+// switching the tab asks again.
+#define MAIL_WAIT_MS 15000
+static void mail_expired(void *user) {
+    (void) user;
+    g_mail_timer = 0;
+    if (g_mail_loaded) return;
+    g_mail_failed = 1;
+    menu_rerender_if_open(30);
+}
+
 static char *gen_mail(void) {
     static const char *const tabs[5] = {"Followers", "Clan", "Hub", "Inbox", "Archive"}; // config.mailTabs
     StrBuf sb = {0};
     sb_append(&sb, "<div>Your Notifications<div class='button buttonR readAll' onclick='windows[29].readAll()'>Read All</div></div><div style='height:30px;'></div><div class='bigMenTabs' style='table-layout: fixed;'>");
     for (int i = 0; i < 5; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='windows[29].switchTab(%d)' style='height:30px;'>%s</div>", g_mail_view == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div><div id='mailList'>");
-    if (!g_mail_loaded) {
+    if (!g_mail_loaded && g_mail_failed) {
+        sb_appendf(&sb, "<span>%s</span>", I18N("kn.mail.loadFailed", "Couldn't load your notifications. Switch tabs to try again."));
+    } else if (!g_mail_loaded) {
         char frame[32];
         snprintf(frame, sizeof(frame), "[\"kml\",%d]", g_mail_view == 4 ? 1 : 0);
+        html_timer_cancel(g_mail_timer);
+        g_mail_timer = html_timer_add(MAIL_WAIT_MS, mail_expired, NULL);
         backend_social_send_text(frame);
         sb_append(&sb, "Loading...");
     } else if (!g_mail_rows) {
@@ -2073,6 +2111,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             cJSON_Delete(g_mail_rows);
             g_mail_rows = NULL;
             g_mail_loaded = 0;
+            g_mail_failed = 0;
             menu_show_window(30, 1);
         }
         return 1;
@@ -2100,6 +2139,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         cJSON_Delete(g_mail_rows);
         g_mail_rows = NULL;
         g_mail_loaded = 0;
+        g_mail_failed = 0;
         mail_count(0);
         menu_show_window(30, 1);
         return 1;
@@ -2172,7 +2212,15 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         cJSON *frame = cJSON_CreateArray();
         cJSON_AddItemToArray(frame, cJSON_CreateString("vr"));
         cJSON_AddItemToArray(frame, cJSON_CreateString(code));
-        backend_social_send(frame);
+        html_timer_cancel(g_vouch_timer);
+        g_vouch_timer = html_timer_add(VOUCHER_WAIT_MS, vouch_expired, NULL);
+        g_vouch_pending = 1;
+        if (!backend_social_send(frame)) { // no socket: no answer can come
+            html_timer_cancel(g_vouch_timer);
+            g_vouch_timer = 0;
+            g_vouch_pending = 0;
+            if (res) html_dom_set_text(res, I18N("kn.vouch.noAnswer", "Couldn't reach the server. Try the code again."));
+        }
         cJSON_Delete(frame);
         return 1;
     }

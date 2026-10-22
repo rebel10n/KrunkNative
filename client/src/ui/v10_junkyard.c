@@ -12,6 +12,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <cJSON.h>
 
@@ -50,6 +51,8 @@ static struct {
     int inited, listening;
     cJSON *rows;                // the recps rows (NULL until answered, or failed)
     int loading, failed;
+    int timer;                  // the deadline of the recps request in flight (html_timer id, 0 none)
+    int timed_out;              // failed because no answer came by the deadline (not a logged-out null)
     double junk;                // the account's junk balance (recps)
     char search[SEARCH_MAX];
     int sort;
@@ -345,7 +348,11 @@ void v10_junkyard_render(StrBuf *sb) {
         sb_append(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px; cursor: pointer;\" role=\"button\" tabindex=\"0\" onclick=\"showWindow(5)\">"
                       "<span style=\"color: #31caec\">Register</span> to craft!</div>");
     } else if (!J.rows) {
-        sb_appendf(sb, "<div style=\"color: #fff; text-align: center; margin-top: 20px;\">%s</div>", J.failed ? "No Recipes Found" : "Loading Recipes...");
+        // a request that got no answer (the socket dropped, the brain is down) is failed after its deadline:
+        // the screen says so rather than "Loading Recipes..." for good
+        const char *text = J.timed_out ? I18N("kn.jy.loadFailed", "Couldn't load the recipes. Open the Junkyard again to retry.")
+                         : J.failed ? "No Recipes Found" : "Loading Recipes...";
+        sb_appendf(sb, "<div id=\"v10jyStatus\" style=\"color: #fff; text-align: center; margin-top: 20px;\">%s</div>", text);
     } else {
         sb_append(sb, "<div class=\"jy-filter-bar svelte-1vqzycn\"><input type=\"search\" id=\"v10jySearch\" placeholder=\"Search items...\" class=\"jy-search-input svelte-1vqzycn\" value=\"");
         sb_append_esc(sb, J.search);
@@ -363,16 +370,38 @@ void v10_junkyard_render(StrBuf *sb) {
 
 // ------------------------------------------------------------------ the protocol
 
-static void send_frame(cJSON *f) {
-    backend_social_send(f);
+static int send_frame(cJSON *f) {
+    const int sent = backend_social_send(f);
     cJSON_Delete(f);
+    return sent;
+}
+
+// The recipes' deadline: a recps frame whose answer never comes (the socket dropped with it in the queue,
+// the brain went away) fails the request, so the tab shows its error and entering the tab asks again.
+#define RECPS_WAIT_MS 15000
+static void recps_expired(void *user) {
+    (void) user;
+    J.timer = 0;
+    if (!J.loading) return;
+    J.loading = 0;
+    J.failed = 1;
+    J.timed_out = 1;
+    v10_market_junkyard_refresh();
 }
 
 static void request_recipes(void) {
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("recps"));
+    html_timer_cancel(J.timer);
+    J.timer = html_timer_add(RECPS_WAIT_MS, recps_expired, NULL);
     J.loading = 1;
-    send_frame(f);
+    J.timed_out = 0;
+    if (!send_frame(f)) { // no socket at all: no answer can come
+        html_timer_cancel(J.timer);
+        J.timer = 0;
+        J.loading = 0;
+        J.failed = 1;
+    }
 }
 
 static void send_craft(const int sid) {
@@ -399,6 +428,8 @@ static void on_social(void *user, const cJSON *frame) {
     if (!label) return;
     if (!strcmp(label, "recps")) {
         const cJSON *rows = frame_at(frame, 1), *junk = frame_at(frame, 2);
+        html_timer_cancel(J.timer);
+        J.timer = 0;
         J.loading = 0;
         cJSON_Delete(J.rows);
         J.rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : NULL;
@@ -435,6 +466,27 @@ void v10_junkyard_enter(void) {
     J.rows = NULL;
     J.failed = 0;
     if (acc()) request_recipes();
+}
+
+// The account changed (a login, a logout, the session restored after the tab opened): the recipes are the
+// account's (counts, junk), so they are asked for again by the next render of a logged-in tab.
+void v10_junkyard_account_changed(void) {
+    jy_init();
+    html_timer_cancel(J.timer);
+    J.timer = 0;
+    J.loading = 0;
+    J.failed = 0;
+    J.timed_out = 0;
+    cJSON_Delete(J.rows);
+    J.rows = NULL;
+    J.junk = 0;
+}
+
+// The tab's render asks for the recipes when they are missing: a logged-in tab whose recipes were never asked
+// for (it was opened as a guest, or the session came after it) has nothing else that would ask
+void v10_junkyard_ensure(void) {
+    jy_init();
+    if (acc() && !J.rows && !J.loading && !J.failed) request_recipes();
 }
 
 static const char *arg_text(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i) {

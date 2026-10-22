@@ -10,6 +10,10 @@
 
 // the tab opened: the recipes are requested again when logged in (and the listener starts)
 void v10_junkyard_enter(void);
+// the account changed: the recipes are dropped (the next v10_junkyard_ensure asks again)
+void v10_junkyard_account_changed(void);
+// the tab's render: a logged-in tab with no recipes asked for yet (or failed and not retried) asks now
+void v10_junkyard_ensure(void);
 // the tab's markup (inside v10_market's content)
 void v10_junkyard_render(StrBuf *sb);
 // the v10jy.* named handlers (search, sort, craft, cgo, cclose, rok, errok, item, stop); 1 = handled

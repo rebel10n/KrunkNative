@@ -409,6 +409,10 @@ preview-hole-test-web: ## The same for the web build in headless Chromium at sev
 v10-market-e2e: build ## v10 Market & Trading from the v10 page: list, buy, quick sell, trade offer, accept (local kn_brain on sqlite, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/v10_market_e2e.py $(DEBUG_DIR) $(CURDIR)
 
+.PHONY: loading-screens-e2e
+loading-screens-e2e: build ## Stuck "Loading" screens: the Junkyard's recipes and the exchange's Trading (opened before the session, and the brain gone) and the Inbox's list get an answer or an error within a deadline (local kn_brain on sqlite, headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/loading_screens_e2e.py $(DEBUG_DIR) $(CURDIR)
+
 native-auth-test: build ## Native client accounts e2e: register with email, verify, login, forgot password -> mailed code -> reset (local kn_brain + fake SMTP, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/native_auth_e2e.py $(DEBUG_DIR)
 

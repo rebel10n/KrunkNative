@@ -327,6 +327,7 @@ int v10_menu_official_session(void) { return account_backend() == ACCOUNT_BACKEN
 
 void v10_menu_account_changed(void) {
     if (!v10_menu_page()) return;
+    v10_market_account_changed(); // the open exchange's tab follows the account (a no-op when the account is the same)
     const AccountInfo *acc = active_account(); // krunker.io's in an official game, krunk.io's elsewhere
     if (acc && V.signed_in != 1) g_rejoin_check = 1;
     header_update(acc);

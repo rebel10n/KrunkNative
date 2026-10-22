@@ -32,6 +32,8 @@
 #include <junk.h>          // the Junk wallet's amounts (doc/v10/junk.md)
 #include <v10_wild_offer.h>
 #include <kio_store.h>     // krunker.io's catalogue while krunker.io is the active backend
+#include <html_dom.h>
+#include <i18n.h>
 #include <time.h>
 
 // data/store.js wheels / a TICKET item's spinWheel (skins.json)
@@ -804,10 +806,23 @@ static void history_request(void) {
     backend_social_send_text(frame);
 }
 
+// A spinH whose answer never comes (the socket dropped with it) is given up after its deadline: the popup says
+// so, and the next Spin History click asks again.
+#define SPIN_HIST_WAIT_MS 15000
+static int g_hist_timer;       // the deadline of the spinH request in flight (html_timer id, 0 none)
+static void history_expired(void *user) {
+    (void) user;
+    g_hist_timer = 0;
+    if (g_hist_loaded) return;
+    account_popup(0, I18N("kn.spin.historyFailed", "Couldn't load the spin history. Try again."), NULL);
+}
+
 static void history_popup(const int more) {
     if (!pointers_done()) return;
     if (!g_hist_loaded) {
         account_popup(2, NULL, "Fetching Spin History..."); // io_loadingPopup
+        html_timer_cancel(g_hist_timer);
+        g_hist_timer = html_timer_add(SPIN_HIST_WAIT_MS, history_expired, NULL);
         history_request();
         return;
     }
@@ -851,6 +866,8 @@ static void history_popup(const int more) {
 
 // io_saveSpinHistory(rows)
 static void history_response(const cJSON *frame) {
+    html_timer_cancel(g_hist_timer);
+    g_hist_timer = 0;
     const cJSON *rows = cJSON_GetArrayItem(frame, 1);
     if (!g_hist) g_hist = cJSON_CreateArray();
     const cJSON *r;

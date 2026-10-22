@@ -333,23 +333,29 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
     " a.username AS p, 1 AS c FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
+/* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
+ * client's wait ends (social_db frees the query's context on a refusal, so the caller passes a copy) */
+static void market_refused(SocialSession *s, const MarketCtx *c) {
+    if (c->kind == 1) social_send_n(s, "fr", 2, cJSON_CreateNumber((double) c->token), cJSON_CreateNull());
+    else if (c->kind == 2) social_send_n(s, "str", 2, cJSON_CreateNumber((double) c->token), cJSON_CreateNull());
+    else social_send_n(s, "0", 3, cJSON_CreateString(c->page), cJSON_CreateString(c->sub), cJSON_CreateNull());
+}
+
 static void market_query(SocialSession *s, MarketCtx *c) {
     char me[24];
     me_str(s, me);
+    const MarketCtx copy = *c; /* social_db frees c when the submit is refused */
+    int rc = 0;
     if (!strcmp(c->page, "itemsales")) {
         char item[24];
-        social_call(s, &P_MARKET_ITEM, KN_DB_ARGS(acct_itoa(item, c->item >= 0 ? c->item : 0)), market_done, c);
-        return;
-    }
-    if (!strcmp(c->page, "listing")) {
+        rc = social_call(s, &P_MARKET_ITEM, KN_DB_ARGS(acct_itoa(item, c->item >= 0 ? c->item : 0)), market_done, c);
+    } else if (!strcmp(c->page, "listing")) {
         char id[24];
-        social_call(s, &P_LISTING, KN_DB_ARGS(acct_itoa(id, c->item)), market_done, c);
-        return;
-    }
-    if (!strcmp(c->sub, "inventory")) {
+        rc = social_call(s, &P_LISTING, KN_DB_ARGS(acct_itoa(id, c->item)), market_done, c);
+    } else if (!strcmp(c->sub, "inventory")) {
         /* the stacks (their unpainted units; sid = the store index) and the painted copies (one unit each, sid =
          * the copy id, paint_color / paint_shader set: doc/v10/paint-copy.md). A stack row has no paint. */
-        social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
+        rc = social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
                                    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"
                                    " NULL AS paint_color, NULL AS paint_shader FROM inventory i"
                                    " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
@@ -359,11 +365,11 @@ static void market_query(SocialSession *s, MarketCtx *c) {
                                    " ORDER BY i, sid"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "sales")) {
-        social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
-                     KN_DB_ARGS(me), market_done, c);
+        rc = social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
+                          KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "stats")) {
         /* + the v10 Market Stats cards' On Sale / Low / High (onS, low, high: open listings) */
-        social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\","
+        rc = social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\","
                                   " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS \"onS\","
                                   " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low,"
                                   " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high"
@@ -379,7 +385,7 @@ static void market_query(SocialSession *s, MarketCtx *c) {
          * estimate from this economy's own completed market sales, the rounded mean price (v10's comes
          * from Krunker's market; an item never sold here has none: the client falls back to its bundled
          * snapshot, then v10's "Unknown") */
-        social_query(s, SQL(.pg = "SELECT skin_id AS ski, round(avg(price))::bigint AS est FROM market_listings"
+        rc = social_query(s, SQL(.pg = "SELECT skin_id AS ski, round(avg(price))::bigint AS est FROM market_listings"
                                   " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
                             .sqlite = "SELECT skin_id AS ski, CAST(round(avg(price)) AS INTEGER) AS est FROM market_listings"
                                       " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
@@ -389,7 +395,7 @@ static void market_query(SocialSession *s, MarketCtx *c) {
     } else if (!strcmp(c->sub, "history")) {
         /* KrunkNative (the v10 Market History tab): the account's closed market trades, newest first:
          * {type buy|sell, date, skinindex, amount, who, status completed|cancelled} */
-        social_query(s, SQL(.any = "SELECT CASE WHEN l.buyer_id = $1 THEN 'buy' ELSE 'sell' END AS type,"
+        rc = social_query(s, SQL(.any = "SELECT CASE WHEN l.buyer_id = $1 THEN 'buy' ELSE 'sell' END AS type,"
                                    " {epoch_ms:coalesce(l.sold_at, l.cancelled_at)} AS date, l.skin_id AS skinindex, l.price AS amount,"
                                    " (SELECT username FROM accounts WHERE id = CASE WHEN l.buyer_id = $1 THEN l.seller_id ELSE l.buyer_id END) AS who,"
                                    " CASE WHEN l.sold_at IS NOT NULL THEN 'completed' ELSE 'cancelled' END AS status"
@@ -397,12 +403,15 @@ static void market_query(SocialSession *s, MarketCtx *c) {
                                    " ORDER BY coalesce(l.sold_at, l.cancelled_at) DESC, l.id DESC LIMIT 500"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "trades")) {
-        social_call(s, &P_TRADE_PAGE, KN_DB_ARGS(me), market_done, c);
+        rc = social_call(s, &P_TRADE_PAGE, KN_DB_ARGS(me), market_done, c);
     } else { /* market: cheapest open listing first */
-        social_query(s, SQL(.any = LISTING_ROWS "WHERE l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.price ASC, l.id LIMIT 1000"),
-                     0, NULL, market_done, c);
+        rc = social_query(s, SQL(.any = LISTING_ROWS "WHERE l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.price ASC, l.id LIMIT 1000"),
+                          0, NULL, market_done, c);
     }
+    if (rc < 0) market_refused(s, &copy);
 }
+
+
 
 /* ["r", "market" | "itemsales" | "listing", sub, id, name, s, region, item, captcha] */
 void market_page(SocialSession *s, const char *page, const cJSON *f) {

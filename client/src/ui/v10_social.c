@@ -25,7 +25,9 @@
 // nothing; v10_gapi.c does not send their requests for that account either.
 #include <backend.h>
 #include <backend_ui.h>
+#include <html_dom.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <v10_social.h>
 #include <v10_ui.h>
@@ -489,8 +491,33 @@ const cJSON *v10_social_friends(void) { return S.friends; }
 
 // the profile window's Friends tab (windows[4] tab 1): v10's #friendList rows, Join for a friend in
 // a game (openURL('/?game=<id>', 1)), Remove Friend (deleteFollower: unfollow)
+// The friends list that never came (the friends bus is down, or it never connected): after the deadline the tab
+// says so instead of "Loading Friends..." for good. The list coming later clears it.
+#define FRIENDS_WAIT_MS 15000
+static int s_friends_timer, s_friends_failed;
+static void friends_expired(void *user) {
+    (void) user;
+    s_friends_timer = 0;
+    if (S.friends) return;
+    s_friends_failed = 1;
+    menu_rerender_if_open(5); // window 5's Friends tab
+}
+
 char *v10_social_window_friends_html(void) {
-    if (!S.friends) return NULL;
+    if (!S.friends) {
+        if (s_friends_failed) {
+            StrBuf sb = {0};
+            sb_append(&sb, "<div id='friendList'><span style='color:#9a9a9a'>");
+            sb_append_esc(&sb, I18N("kn.friends.loadFailed", "Couldn't load your friends right now. Reopen this tab to try again."));
+            sb_append(&sb, "</span></div>");
+            return sb_finish(&sb);
+        }
+        if (!s_friends_timer) s_friends_timer = html_timer_add(FRIENDS_WAIT_MS, friends_expired, NULL);
+        return NULL;
+    }
+    html_timer_cancel(s_friends_timer);
+    s_friends_timer = 0;
+    s_friends_failed = 0;
     StrBuf sb = {0};
     sb_append(&sb, "<div id='friendList'>");
     if (cJSON_GetArraySize(S.friends) == 0) sb_append(&sb, "<span style='color:#9a9a9a'>You don't have any friends yet.</span>");

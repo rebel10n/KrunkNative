@@ -36,6 +36,7 @@
 // /webhooks/general/items/prices are ["r","market","prices"]: this economy's own mean sale prices,
 // then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
+#include <i18n.h>
 #include <backend_ui.h>
 #include <economy_client.h>
 #include <html_dom.h>
@@ -131,6 +132,8 @@ static struct {
     int data_item, dgd_range;         // whose listings / sales / owners are loaded; dgd: a range index (else days)
     cJSON *dlist, *dgd, *dview, *downers;
     int dlist_loading, dgd_loading, dview_loading;
+    // the reads that got no answer by their deadline (LOST_*: the screen says so, not "Loading" for good)
+    int lost, wait_timer, account_id;
     // modals
     int modal, busy, pending;
     int sel_skin, sel_listing, sel_price, sel_count;
@@ -348,11 +351,24 @@ static void svg_data_url(StrBuf *sb, const char *svg) {
 
 // ------------------------------------------------------------------ transport
 
+// The reads in flight (their loading flags). A reply can be lost for good (the socket dropped with the request
+// in it, a brain that refused the query), and the flag would then stay set: every sent frame arms one
+// deadline, and when it expires the flags still set are cleared and the screen shows its error (M.lost). A
+// reply that arrives after a reopen is still applied.
+#define MARKET_WAIT_MS 15000
+enum { LOST_TRADES = 1, LOST_DLIST = 2, LOST_DGD = 4, LOST_DVIEW = 8 };
+
+static void reads_expired(void *user);
+
 // 1 when the frame went out (0: no socket, so no reply will come)
 static int send_frame(cJSON *f) {
     int sent = 0;
     if (f) sent = backend_social_send(f);
     cJSON_Delete(f);
+    if (sent) {
+        html_timer_cancel(M.wait_timer);
+        M.wait_timer = html_timer_add(MARKET_WAIT_MS, reads_expired, NULL);
+    }
     return sent;
 }
 
@@ -708,7 +724,7 @@ static void browse_load(void) {
     cJSON_AddItemToArray(f, cJSON_CreateString(!t[0] && !strcmp(M.bsort, "price_desc") ? "0" : "1"));
     M.bloading = 1;
     M.bsearching = t[0] != 0;
-    send_frame(f);
+    if (!send_frame(f)) M.bloading = M.bsearching = 0; // no socket: no reply will come
 }
 
 static int cmp_listing_time(const void *pa, const void *pb) {
@@ -740,17 +756,17 @@ static void browse_loaded(const cJSON *rows) {
 static void inventory_load(void) {
     if (!logged_in() || M.inv_loading) return;
     M.inv_loading = 1;
-    request_page("market", "inventory", -1);
+    if (!request_page("market", "inventory", -1)) M.inv_loading = 0;
 }
 static void sales_load(void) {
     if (!logged_in() || M.sales_loading) return;
     M.sales_loading = 1;
-    request_page("market", "sales", -1);
+    if (!request_page("market", "sales", -1)) M.sales_loading = 0;
 }
 static void history_load(void) {
     if (!logged_in() || M.hist_loading) return;
     M.hist_loading = 1;
-    request_page("market", "history", -1);
+    if (!request_page("market", "history", -1)) M.hist_loading = 0;
 }
 static void stats_load(void) {
     if (!logged_in() || M.stats_loading) return;
@@ -774,12 +790,17 @@ static const cJSON *inv_row(const int index) {
 static void detail_listings_load(void) {
     if (M.data_item < 0) return;
     M.dlist_loading = 1;
-    request_page("market", "market", M.data_item);
+    M.lost &= ~LOST_DLIST;
+    if (!request_page("market", "market", M.data_item)) {
+        M.dlist_loading = 0;
+        M.lost |= LOST_DLIST;
+    }
 }
 // the sales statistics: ["st", item, days] -> ["gd", [{d, f, t}]]
 static void detail_stats_load(const int days_or_range) {
     if (M.data_item < 0) return;
     M.dgd_loading = 1;
+    M.lost &= ~LOST_DGD;
     M.dgd_range = days_or_range < 7;
     cJSON_Delete(M.dgd);
     M.dgd = NULL;
@@ -787,13 +808,20 @@ static void detail_stats_load(const int days_or_range) {
     cJSON_AddItemToArray(f, cJSON_CreateString("st"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(M.data_item));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(days_or_range));
-    send_frame(f);
+    if (!send_frame(f)) {
+        M.dgd_loading = 0;
+        M.lost |= LOST_DGD;
+    }
 }
 // owners + market stats: ["r","itemsales",..,item] -> ["0","itemsales",sub,{ind,onS,inC,high,low},owners]
 static void detail_view_load(void) {
     if (M.data_item < 0) return;
     M.dview_loading = 1;
-    request_page("itemsales", NULL, M.data_item);
+    M.lost &= ~LOST_DVIEW;
+    if (!request_page("itemsales", NULL, M.data_item)) {
+        M.dview_loading = 0;
+        M.lost |= LOST_DVIEW;
+    }
 }
 
 // ------------------------------------------------------------------ notifications (_45504)
@@ -1294,6 +1322,10 @@ static void detail_stats(StrBuf *sb) {
                    "<select id=\"days-back-select\" class=\"days-back-select svelte-olnzsm\"%s onchange=\"v10mk.days(this.value)\">", M.dgd_loading ? " disabled" : "");
     for (int i = 0; i < 5; i++) sb_appendf(sb, "<option value=\"%d\"%s>%d days</option>", days[i], M.days == days[i] ? " selected" : "", days[i]);
     sb_append(sb, "</select></div> ");
+    if (M.lost & LOST_DGD) {
+        sb_appendf(sb, "<div class=\"stats-loading svelte-olnzsm\"><span>%s</span></div></div>", I18N("kn.mk.statsFailed", "Couldn't load statistics. Open the item again to retry."));
+        return;
+    }
     if (M.dgd_loading || !M.dgd) {
         sb_append(sb, "<div class=\"stats-loading svelte-olnzsm\"><div class=\"loading-spinner svelte-olnzsm\"></div> <span>Loading statistics...</span></div></div>");
         return;
@@ -1338,6 +1370,10 @@ static void detail_stats(StrBuf *sb) {
 
 static void owners_list(StrBuf *sb, const int catalog) {
     const char *h = catalog ? "items-detail-owner" : "owner";
+    if (M.lost & LOST_DVIEW) {
+        sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.ownersFailed", "Couldn't load the owners."));
+        return;
+    }
     if (M.dview_loading || !M.downers) {
         if (catalog) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         else sb_append(sb, "<div class=\"stats-loading svelte-olnzsm\"><div class=\"loading-spinner svelte-olnzsm\"></div> <span>Loading owners...</span></div>");
@@ -1762,7 +1798,11 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
 static void trades_load(void) {
     if (!logged_in() || M.trades_loading) return;
     M.trades_loading = 1;
-    request_page("market", "trades", -1);
+    M.lost &= ~LOST_TRADES;
+    if (!request_page("market", "trades", -1)) {
+        M.trades_loading = 0;
+        M.lost |= LOST_TRADES;
+    }
 }
 
 static void view_trading(StrBuf *sb) {
@@ -1779,8 +1819,10 @@ static void view_trading(StrBuf *sb) {
         sb_append(sb, "</div></div> <div class=\"trading-content svelte-1r9fijr\">");
         const cJSON *open = cJSON_GetArrayItem(M.trades, 0), *hist = cJSON_GetArrayItem(M.trades, 1), *t;
         const AccountInfo *a = acc();
-        if (M.trades_loading || !M.trades_loaded) {
-            sb_append(sb, "<div class=\"trading-status svelte-1r9fijr\">Loading trades...</div>");
+        if (M.lost & LOST_TRADES) {
+            sb_appendf(sb, "<div class=\"trading-status svelte-1r9fijr\" id=\"v10mkTradeStatus\">%s</div>", I18N("kn.mk.tradesFailed", "Couldn't load trades. Open Trading again to retry."));
+        } else if (M.trades_loading || !M.trades_loaded) {
+            sb_append(sb, "<div class=\"trading-status svelte-1r9fijr\" id=\"v10mkTradeStatus\">Loading trades...</div>");
         } else if (M.ttab == 0) {
             int nin = 0, nout = 0;
             cJSON_ArrayForEach(t, open) {
@@ -2098,7 +2140,11 @@ static void bm_modal(StrBuf *sb) {
 // ------------------------------------------------------------------ Junkyard (svelte-1vqzycn)
 
 // The crafting page (v10_junkyard.c): the recipes, the craft confirmation and its result
-static void view_junkyard(StrBuf *sb) { v10_junkyard_render(sb); }
+static int g_scenario;
+static void view_junkyard(StrBuf *sb) {
+    if (!g_scenario) v10_junkyard_ensure(); // a logged-in tab with no recipes asked for yet asks now
+    v10_junkyard_render(sb);
+}
 
 // ------------------------------------------------------------------ Catalog (_46722 svelte-19zccg6, _45008 svelte-dmu4q2)
 
@@ -2195,7 +2241,9 @@ static void catalog_detail(StrBuf *sb) {
         sb_append(sb, " <div class=\"items-detail-description svelte-dmu4q2\">");
         sb_append_esc(sb, type_label(s));
         sb_append(sb, "</div>     <div class=\"items-detail-stats-section svelte-dmu4q2\"><div class=\"items-detail-stats-header svelte-dmu4q2\">Market</div> ");
-        if (M.dview_loading || !M.dview) {
+        if (M.lost & LOST_DVIEW) {
+            sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.statsDetailFailed", "Couldn't load the market stats."));
+        } else if (M.dview_loading || !M.dview) {
             sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         } else {
             char a[32], b[32], c[32], d[32];
@@ -2214,7 +2262,8 @@ static void catalog_detail(StrBuf *sb) {
         sb_append(sb, " </div> </div>");
     } else if (M.ctab == 1) {
         sb_append(sb, "<div class=\"items-detail-listings-panel svelte-dmu4q2\">");
-        if (M.dlist_loading || !M.dlist) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
+        if (M.lost & LOST_DLIST) sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.listingsFailed", "Couldn't load the listings."));
+        else if (M.dlist_loading || !M.dlist) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         else if (!rows_count(M.dlist)) sb_append(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">No active listings.</div>");
         else {
             sb_append(sb, "<ol class=\"items-detail-listings-list svelte-dmu4q2\">");
@@ -2248,7 +2297,8 @@ static void catalog_detail(StrBuf *sb) {
         for (int r = 0; r < 7; r++)
             sb_appendf(sb, "<button class=\"items-detail-range-btn svelte-dmu4q2%s\" type=\"button\" onclick=\"v10mk.crange(%d)\">%s</button>", M.crange == r ? " active" : "", r, ranges[r]);
         sb_append(sb, "</div> <div class=\"items-detail-graph-canvas svelte-dmu4q2\">");
-        if (M.dgd_loading || !M.dgd) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
+        if (M.lost & LOST_DGD) sb_appendf(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">%s</div>", I18N("kn.mk.salesFailed", "Couldn't load the sales."));
+        else if (M.dgd_loading || !M.dgd) sb_append(sb, "<div class=\"items-detail-loading svelte-dmu4q2\"><i class=\"material-icons spin svelte-dmu4q2\">hourglass_empty</i></div>");
         else if (!rows_count(M.dgd)) sb_append(sb, "<div class=\"items-detail-empty svelte-dmu4q2\">No sales in this window.</div>");
         else {
             Series *se = calloc(1, sizeof(Series));
@@ -2337,8 +2387,6 @@ static void view_guide(StrBuf *sb) {
 }
 
 // ------------------------------------------------------------------ rendering
-
-static int g_scenario;
 
 static int is_open(void) {
     if (!M.open) return 0;
@@ -2621,6 +2669,12 @@ void v10_market_open(int tab, const int item) {
     M.ct_open = 0;
     M.tnote[0] = M.bm_note[0] = 0;
     M.last_search[0] = 0;
+    // the replies that came while the exchange was closed were dropped: their flags are stale, so the tab asks again
+    M.bloading = M.bsearching = M.inv_loading = M.sales_loading = M.hist_loading = M.stats_loading = 0;
+    M.trades_loading = M.dlist_loading = M.dgd_loading = M.dview_loading = M.ct_loading = 0;
+    M.lost = 0;
+    html_timer_cancel(M.wait_timer);
+    M.wait_timer = 0;
     if (!g_scenario) send_frame(econ_rules_request());
     if (!g_scenario) request_page("market", "prices", -1); // v10: getPrices on the exchange's mount (_36377)
     M.tab = -1;
@@ -2718,7 +2772,10 @@ static void open_create_trade(const int id, const char *name) {
     cJSON_AddItemToArray(f, cJSON_CreateString("ri"));
     cJSON_AddItemToArray(f, cJSON_CreateString(name));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(id));
-    send_frame(f);
+    if (!send_frame(f)) { // no socket: no inventories will come
+        M.ct_loading = 0;
+        snprintf(M.ct_err, sizeof(M.ct_err), "%s", I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again."));
+    }
     render_modal();
 }
 
@@ -3232,6 +3289,47 @@ void v10_market_junkyard_refresh(void) {
     if (is_open() && M.tab == TAB_JUNKYARD) render_content();
 }
 
+// The deadline of the reads in flight (send_frame): a read whose reply never came is failed here, so its screen
+// shows its error (or the empty state) instead of "Loading" for good. The flags are the ones the replies clear.
+static void reads_expired(void *user) {
+    (void) user;
+    M.wait_timer = 0;
+    int any = 0;
+    if (M.bloading) { M.bloading = M.bsearching = 0; any = 1; }
+    if (M.inv_loading) { M.inv_loading = 0; any = 1; }
+    if (M.sales_loading) { M.sales_loading = 0; any = 1; }
+    if (M.hist_loading) { M.hist_loading = 0; any = 1; }
+    if (M.stats_loading) { M.stats_loading = 0; any = 1; }
+    if (M.trades_loading) { M.trades_loading = 0; M.lost |= LOST_TRADES; any = 1; }
+    if (M.dlist_loading) { M.dlist_loading = 0; M.lost |= LOST_DLIST; any = 1; }
+    if (M.dgd_loading) { M.dgd_loading = 0; M.lost |= LOST_DGD; any = 1; }
+    if (M.dview_loading) { M.dview_loading = 0; M.lost |= LOST_DVIEW; any = 1; }
+    if (M.ct_loading) {
+        M.ct_loading = 0;
+        snprintf(M.ct_err, sizeof(M.ct_err), "%s", I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again."));
+        any = 1;
+    }
+    if (any && is_open()) render_both();
+}
+
+// The active account changed (a login, a logout, the session restored after the exchange opened): what the open
+// tab shows is the account's, and a tab opened as a guest (or before the session came) asks now.
+void v10_market_account_changed(void) {
+    const AccountInfo *a = active_account();
+    const int id = a ? a->id : 0;
+    if (id == M.account_id) return;
+    M.account_id = id;
+    v10_junkyard_account_changed();
+    if (!is_open() || g_scenario) return;
+    M.lost = 0;
+    if (M.tab == TAB_TRADING) trades_load();
+    else if (M.tab == TAB_MARKET) {
+        market_reload_after();
+        if (M.mtab == MT_STATS) stats_load();
+    } else if (M.tab == TAB_BLACKM) inventory_load();
+    render();
+}
+
 // ------------------------------------------------------------------ social frames
 
 static void apply_funds(const double f) {
@@ -3262,6 +3360,7 @@ static void on_social(void *user, const cJSON *frame) {
         if (!page) return;
         if (!strcmp(page, "itemsales")) {
             M.dview_loading = 0;
+            M.lost &= ~LOST_DVIEW;
             cJSON_Delete(M.dview);
             M.dview = cJSON_IsObject(a3) ? cJSON_Duplicate(a3, 1) : cJSON_CreateObject();
             set_json(&M.downers, cJSON_GetArrayItem(frame, 4));
@@ -3274,9 +3373,10 @@ static void on_social(void *user, const cJSON *frame) {
             else if (!strcmp(sub, "trades")) {
                 M.trades_loading = 0;
                 M.trades_loaded = 1;
+                M.lost &= ~LOST_TRADES;
                 cJSON_Delete(M.trades);
                 M.trades = cJSON_IsArray(a3) ? cJSON_Duplicate(a3, 1) : cJSON_CreateArray();
-            } else if (!strcmp(sub, "market")) { M.dlist_loading = 0; set_json(&M.dlist, a3); }
+            } else if (!strcmp(sub, "market")) { M.dlist_loading = 0; M.lost &= ~LOST_DLIST; set_json(&M.dlist, a3); }
             else return;
         } else {
             return;
@@ -3284,6 +3384,7 @@ static void on_social(void *user, const cJSON *frame) {
         render_both();
     } else if (!strcmp(label, "gd")) {
         M.dgd_loading = 0;
+        M.lost &= ~LOST_DGD;
         set_json(&M.dgd, a1);
         render_both();
     } else if (!strcmp(label, "br")) { // purchase
