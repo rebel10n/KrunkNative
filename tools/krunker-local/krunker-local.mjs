@@ -1002,7 +1002,9 @@ async function runPeer(ctx) {
   }
 }
 
-async function playable() {
+// playable(opts) runs the check and returns its report. opts.onChild(child) is told each Chromium it starts (the first page
+// and the second player's), so a caller that owns the run (playable-node.mjs) can stop them by pid.
+export async function playable(opts = {}) {
   if (!cfg.bridge) throw new Error('playable needs the "bridge" config');
   const shots = path.join(cfg.runDir, "shots");
   fs.mkdirSync(shots, { recursive: true });
@@ -1015,6 +1017,7 @@ async function playable() {
     `--host-resolver-rules=${hostRules().join(", ")}`, "--ignore-certificate-errors",
     `--user-data-dir=${path.join(cfg.runDir, `playable-${t0}`)}`, `--remote-debugging-port=${cdpPort}`, "about:blank",
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
+  if (opts.onChild) opts.onChild(child);
   const report = { check: "playable", build: "v10.0.3", url: cfg.localUrl, startedAt: new Date(t0).toISOString(),
     roundSeconds: Number(process.env.KN_ROUND_SECONDS) || null, phase: "start", joined: false, clicked: null, consent: false,
     spawnClicks: 0, spawnClickAt: [], seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
@@ -1135,7 +1138,7 @@ async function playable() {
     await send("Page.navigate", { url: cfg.localUrl });
     log("page loading");
     if (PEERS) {
-      peerTask = runPeer({ cfg, t0, p: peer, log, evalFirst: evalJS, phaseOf: () => phase, setChild: (c) => { peerChild = c; } })
+      peerTask = runPeer({ cfg, t0, p: peer, log, evalFirst: evalJS, phaseOf: () => phase, setChild: (c) => { peerChild = c; if (opts.onChild) opts.onChild(c); } })
         .catch((e) => { peer.error = String(e.message || e).slice(0, 200); log(`second player failed: ${peer.error}`); });
     }
     await sleep(cfg.loadWaitMs);
@@ -1240,13 +1243,18 @@ async function playable() {
   }
   report.phase = phase;
   report.finishedAt = new Date().toISOString();
-  console.log(JSON.stringify(report, null, 2));
+  return report;
 }
 
 function help() {
   console.log(`usage: krunker-local.mjs prepare|serve|check|join|playable   (config: ${cfg._file})`);
 }
 
-const cmds = { prepare, serve, check, join, playable, help };
-if (!cmds[cmd]) { help(); process.exit(2); }
-Promise.resolve(cmds[cmd]()).catch((e) => { console.error("krunker-local:", e.message); process.exit(1); });
+// the CLI's playable prints the report as JSON on stdout (playable.sh redirects it to the report file)
+const cmds = { prepare, serve, check, join, help, playable: async () => console.log(JSON.stringify(await playable(), null, 2)) };
+// run a command only when this file is the entry point: playable-node.mjs imports playable() and starts nothing
+const isMain = !!process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  if (!cmds[cmd]) { help(); process.exit(2); }
+  Promise.resolve(cmds[cmd]()).catch((e) => { console.error("krunker-local:", e.message); process.exit(1); });
+}

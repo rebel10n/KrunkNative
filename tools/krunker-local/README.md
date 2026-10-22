@@ -58,6 +58,12 @@ socket (decoded in `peer_frames.mjs`) and the first page itself:
 Other players' positions come as `k` (UPDATE_PLAYERS): `l` is the local player's own state (RECON) and `aai` is the
 bot add, so neither carries another player's position. `KN_PLAYABLE_PLAYERS=1` runs the single-player check alone.
 
+`make playable-node` (or `node tools/krunker-local/playable-node.mjs`) runs the same check from Node. It starts the
+brain, server, bridge and harness as its own children, each with a pid file in `$KN_PLAYABLE_HOME/run` (default
+`~/.cache/kn-playable-node`, so it never stops a `playable.sh` stack), runs `playable()` from `krunker-local.mjs`
+(the same CDP driving of the official client), writes the report, and runs `playable-check.mjs` on it unchanged.
+Its exit status is the check's.
+
 It exits 0 only when every assertion passes. `playable-check.mjs <report.json> [max]` runs the
 assertions again on a saved report. Env: `KN_PLAYABLE_ROUND_S` (round length, default 90),
 `KN_PLAYABLE_MAX_EXC`, `KN_PLAYABLE_HOME`, `KN_PLAYABLE_PLAYERS`. The report is `$KN_PLAYABLE_HOME/run/playable-report.json`;

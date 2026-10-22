@@ -663,6 +663,13 @@ playable-check-stable: build ## Playability check three times in a row (single p
 	if [ $$fail -ne 0 ]; then echo "playable-check-stable: $$fail of 3 runs FAILED" >&2; exit 1; fi; \
 	echo "playable-check-stable: 3 of 3 runs PASS"
 
+# The same check from Node (tools/krunker-local/playable-node.mjs): the stack is started and stopped by pid from Node, the driver
+# is krunker-local.mjs's playable(), and playable-check.mjs asserts the report unchanged. Env as playable-check (KN_PLAYABLE_HOME
+# defaults to ~/.cache/kn-playable-node, its own run dir). Exit 1 on any FAIL.
+.PHONY: playable-node
+playable-node: build ## Playability check from Node (the same assertions as playable-check; headless; exit 1 on a FAIL)
+	node tools/krunker-local/playable-node.mjs
+
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
 	cd $(BRIDGE_DIR) && npm run typecheck && npm test
 	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
