@@ -1240,6 +1240,48 @@ static void test_modifiers(Game *game) {
     CHECK(!knife && !a->can_throw && mode_no_sliding(game) && mode_no_wall_jump(game) && game->mode->config.real_movement, "clas: no melee, no slide / wall jump");
 }
 
+// endGame outside best of (v10.0.3 deob 221603-221605): the round's winner (getWinTeam(true) over the
+// round's team scores) gets a round win in teamRoundWins too. The match's winner is getWinTeam() over
+// those round wins, not over the scores that carry on from round to round (no reset outside best of).
+static void test_round_wins_outside_best_of(Game *game) {
+    printf("Running round wins outside best of test...\n");
+    start_mode(game, MODE_ID_TDM);
+    GameMode *mode = game->mode;
+    game->config.intermission_time = 10.0f;
+    mode->game_rounds = 2;
+    mode->round_count = 1;
+    mode->best_of = 0;
+    mode->need_winner = 1;
+    add_player(game, 1, 0); // team 2
+    add_player(game, 2, 0); // team 1
+
+    // round 1: team 2 wins it (10 to 0): a round win is counted, round 2 is the last round
+    mode->team_scores[2] = 10;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(!ended(game) && mode->round_count == 0 && mode->has_round_wins && mode->team_round_wins[2] == 1 && mode->team_round_wins[1] == 0,
+          "round 1 outside best of: team 2 has a round win (wins %d / %d, left %d, has %d)", mode->team_round_wins[1], mode->team_round_wins[2],
+          mode->round_count, mode->has_round_wins);
+    const SentPacket *sent = last_sent(NET_PACKET_ROUNDS, NET_TARGET_ALL);
+    CHECK(sent != NULL, "rds after round 1");
+    if (sent) {
+        NetRoundsPacket rounds;
+        memcpy(&rounds, sent->payload, sizeof(rounds));
+        CHECK(rounds.has_round_wins && rounds.win_team == 2 && rounds.team_round_wins[2] == 1, "rds carries the round win");
+    }
+    tick(game, 10.5f, 0.5f); // intermission over
+
+    // round 2: team 1 wins it on the carried-over scores (30 against 10). One round win each is a tie
+    // with noDraws: 60 s of overtime, not a team 1 match win by the scores.
+    mode->team_scores[1] = 30;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(mode->team_round_wins[1] == 1 && mode->team_round_wins[2] == 1, "round 2 outside best of: 1-1 in round wins (%d / %d)",
+          mode->team_round_wins[1], mode->team_round_wins[2]);
+    CHECK(!ended(game) && game->round_timer > 59.0f && last_sent(NET_PACKET_TEXT_POPUP, NET_TARGET_ALL) != NULL,
+          "1-1 with noDraws: overtime, no match winner yet");
+}
+
 // endGame rounds: best of, intermission (flipped spawns, locked movement), overtime
 static void test_rounds(Game *game) {
     printf("Running rounds / best of / overtime test...\n");
@@ -1726,6 +1768,7 @@ int main(void) {
     test_sdm(&game);
     test_modifiers(&game);
     test_rounds(&game);
+    test_round_wins_outside_best_of(&game);
     test_spawn_v7(&game);
     test_zombies_raid(&game);
     test_net_v7(&game);

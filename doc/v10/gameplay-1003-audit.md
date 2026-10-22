@@ -17,9 +17,7 @@ Status key: **match** (equal after the unit conversion shown); **mismatch (fixed
 | Status | Rows |
 |---|---|
 | match | 285 |
-| mismatch (fixed) | 1 |
-| mismatch (not fixed: round rule) | 1 |
-| mismatch (not fixed: economy) | 1 |
+| mismatch (fixed) | 3 |
 | not found (dead in 10.0.3 and v7) | 4 |
 | placeholder (not a constant) | 1 |
 | covered | 1 |
@@ -31,10 +29,12 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 
 1. **Comp warmup spawn spread: 40 to 10.** 10.0.3's `getSpawnPoint` spreads a comp spawn with `getPointSpread(x, z, y, 10, dir)` (deob line 217148). `getPointSpread` offsets by `spread - 10`, so the point is the comp spawn itself, rounded to whole units. KN used 40 (up to 30 units off, at random). Fix: `comp_spawn_spread` in the ruleset (`shared/include/ruleset.h`, `shared/src/rules/ruleset.c:42`), read by `game_get_spawn_point` (`shared/src/modes/mode_round.c:653`). Test: `shared/tests/spawn_test.c` (six comp respawns per team, bound 0.7072), now run by `make test`. Before: 1440 of 7620 checks failed (respawns 12 to 30 units off). After: 7620 OK. `shared/tests/ruleset_test.c` checks the field.
 
+2. **Team round wins outside best-of.** 10.0.3's endGame else branch counts the round's winner in `teamRoundWins` when bestOf is off too (deob 221597-221605); the match is then won by `getWinTeam()` over those round wins. Fix: `shared/src/modes/mode_round.c:373-382`. Test: `shared/tests/modes_test.c` `test_round_wins_outside_best_of` (4 checks failed before, all pass after). Details and the scoreboard: `doc/v10/rules-1003.md` section 1.
+3. **Battle Pass points per public match.** The audit's formula left out the gate: 10.0.3 adds the play term only when `!isEmptyLobby` (deob 221768), and `isEmptyLobby` is set true at init and never cleared, so the term never applies (v7.1.4 has the same dead branch). KN sent `min(20, ...) + 30 if half played` for every counted final commit, the +30 included. Fix: `bp_match_points` (`shared/src/season.c`) takes the 10.0.3 inputs and returns 0 unless the match is public; `server/src/accounts.c:1158-1167` sends `bpp` only for public matches, with the play term off. Test: `shared/tests/season_test.c` `test_match_points` (a public 60%-played match: 15, was 45). Details: `doc/v10/rules-1003.md` section 2.
+
 ## Mismatches not fixed
 
-- **Team round wins outside best-of.** 10.0.3 adds a team's win to `teamRoundWins` when a round ends outside best-of too (deob lines 221601-221605). KN counts it only under best-of (`shared/src/modes/mode_round.c:351-361`). This changes which team wins a match through `getWinTeam`: a round rule rather than a value. Left for its own change.
-- **Battle Pass points per public match.** 10.0.3 adds `30 x min(1, floor(playTime / gameTime x 10) / 10)` for public, non-raid matches (deob line 221770). KN computes no match BPP: the native client sends no `bpp`, and `services/brain/db_season.c:251` only reads the payload. An economy feature, not a gameplay value. Left as is.
+- **Winner override in public matches.** 10.0.3 sets `this.winner = -1` for every public, non-raid, non-sandbox match with players (deob 221681-221682), because `isEmptyLobby` is always true. KN gives public matches a winner. Porting it changes who wins and who gets "w" credit: a decision, see `doc/v10/rules-1003.md` open item 1.
 
 
 ## Audit table
@@ -325,8 +325,8 @@ Weapons (31 x damage, damage drop, fire rate, reload, clip size) and classes (16
 | Stalker HP = floor(200 + 50 x (active - 1)) | shared/src/modes/mode_rules.c:659 | deob byte 10506695 (line 217943) (pickStalker) | match |
 | Comp warmup spawn spread (getPointSpread(.., 10, ..): the spawn itself, rounded) | FIXED: shared/src/rules/ruleset.c:42 (.comp_spawn_spread = 10.0f), used at shared/src/modes/mode_round.c:653 (was SPAWN_SPREAD_RADIUS 40, mode_round.c:564) | deob byte 10471759 (line 217148) (spread 10 less 10 = no offset) | mismatch (fixed) |
 | Non-comp spawn spread (spread + 7) | shared/src/modes/mode_round.c:719 (best->spread + 7.0f) | deob byte 10471910 (line 217150) | match |
-| Team round wins counted outside best-of (teamRoundWins[getWinTeam(true)]++) | shared/src/modes/mode_round.c:351-361 (counted only under mode->best_of) | deob byte 10688117 (line 221603) (else branch of bestOf) | mismatch (not fixed: round rule) |
-| Battle Pass points per public match: 30 x min(1, floor(playTime / gameTime x 10) / 10) | not ported: no BPP computed in KN (the native client sends no bpp; services/brain/db_season.c:251 reads the payload only) | deob byte 10695987 (line 221770) (not raid; x 30) | mismatch (not fixed: economy) |
+| Team round wins counted outside best-of (teamRoundWins[getWinTeam(true)]++) | shared/src/modes/mode_round.c:373-382 (FIXED: the else branch of mode_end_game; was counted only under best_of, mode_round.c:353-368) | deob byte 10688117 (line 221603) (else branch of bestOf) | mismatch (fixed) |
+| Battle Pass points per public match: base min(20, floor(score x rewardMlt x 0.01)) for a public match; play term 30 x min(1, floor(playTime / (gameTime - max(0, gameTimerP)) x 10) / 10) only when !isEmptyLobby and not raid (never, as isEmptyLobby is never false) | FIXED: bp_match_points (shared/src/season.c), sent for public matches only by server/src/accounts.c:1158-1167; was base + binary +30 for every counted commit | deob byte 10696099 (line 221771) (x 30, gated by !isEmptyLobby at byte 10695730, line 221768) | mismatch (fixed) |
 | Mode index default 0 = Free for All | net-bridge/krunkerProxy.ts:902; v10Proxy.ts:633; v10Translate.ts:815 (MODE_ID_FFA = 0) | deob byte 4925147 (line 119361) (first entry of the mode table) | match |
 | Map index default 0 (Burg) | net-bridge/krunkerProxy.ts:901; shared/include/krunker_maps.h:23 (X(0, "Burg")) | deob 160271 (filter value 0 = Burg); deob 188614 and 257421 (index 0 is Burg) | match (constants-1003.md 8) |
 | Tick rate default 30 Hz | net-bridge/krunkerProxy.ts:16 (DEFAULT_TICK_RATE = 30); proxy.ts:15 | deob byte 10397678 (line 215719) | match |

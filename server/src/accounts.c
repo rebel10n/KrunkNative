@@ -1146,8 +1146,8 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
             cJSON_AddItemToArray(row, cJSON_CreateNumber(-1));
             cJSON_AddItemToArray(prog, row);
         }
-        // endGame's tmpBPData before the cap (unbpp): min(20, floor(score * rewardMlt * 0.01)),
-        // +30 for playing at least half of the match (playTime >= (gameTime - gameTimerP) / 2).
+        // endGame's tmpBPData before the cap (unbpp, bp_match_points): public matches only (isPubType), the
+        // score part, and the play term, which 10.0.3 keeps off (isEmptyLobby is true for every match there).
         // kn_brain applies the daily cap and the pass (db_season.c).
         const Game *g = &g_server->game;
         const GameModeConfig *mode = mode_config(game_mode_id(g));
@@ -1155,8 +1155,16 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
         const float total = g->round_length > 0.0f ? g->round_length : minutes > 0.0f ? minutes * 60.0f : 240.0f;
         const float elapsed = total - (g->round_timer > 0.0f ? g->round_timer : 0.0f);
         const float played = client->acct.match_since > 0.0f ? g_server->now - client->acct.match_since : 0.0f;
-        const double mlt = mode && mode->reward_mlt ? mode->reward_mlt : 1.0;
-        cJSON_AddNumberToObject(p, "bpp", bp_match_points(player ? player->score : 0, mlt, played >= elapsed / 2.0f));
+        const BpMatchInput bp = {
+            .score = player ? player->score : 0,
+            .reward_mlt = mode && mode->reward_mlt ? mode->reward_mlt : 1.0,
+            .pub_type = game_is_pub_type(g),
+            .raid = game_mode_id(g) == MODE_ID_RAID,
+            .empty_lobby = 1,
+            .play_ms = played * 1000.0,
+            .elapsed_ms = elapsed * 1000.0,
+        };
+        if (bp.pub_type) cJSON_AddNumberToObject(p, "bpp", (double) bp_match_points(&bp));
         // endGame: a 1 in 100 chance of the official map's current-season reward skin
         const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
                                   ? map_catalog_map_index_of_json(g->maps[g->current_map_index]) : -1;

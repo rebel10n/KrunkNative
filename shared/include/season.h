@@ -26,7 +26,7 @@
 #define BATTLEPASS_CURRENT 2  // config.currentBattlepass
 #define BP_CAP_DAY 500        // v10.0.2 windows[5].gen 500 * days (v7.1.4 config.bppCapDay 300): the daily BPP cap
 #define BP_MATCH_SCORE_MAX 20 // endGame: min(20, floor(score * rewardMlt * 0.01))
-#define BP_MATCH_PLAY_BONUS 30 // endGame: +30 for playing at least half of the match
+#define BP_MATCH_PLAY_MAX 30  // endGame: 30 x min(1, floor(playTime / elapsed * 10) / 10), the play term
 #define BP_TRACKS 2           // windows[5].gen: row 0 "Free", row 1 "VIP" (tier >= 1)
 #define BP_ITEMS_MAX 512
 #define BP_LEVELS_MAX 256     // v10 leveldata: levels with their own BPP cost
@@ -86,9 +86,20 @@ int64_t bp_cap_total(const BattlePass *bp, int64_t now_s);
 // "Available BPP": max(cap - bpp, 0).
 int64_t bp_available(const BattlePass *bp, int64_t bpp, int64_t now_s);
 
-// endGame's per-match BPP before the cap (tmpBPData.unbpp): min(20, floor(score * rewardMlt *
-// 0.01)) + 30 when the player played at least half of the match.
-int bp_match_points(double score, double reward_mlt, int played_half);
+// endGame's per-match BPP inputs (src/data/game.js endGame; v10.0.3 deob 221757-221776, doc/v10/rules-1003.md).
+typedef struct {
+    double score;        // player.score
+    double reward_mlt;   // mode.rewardMlt (<= 0: 1)
+    int pub_type;        // game.isPubType(): the block runs for public matches only (no host, or mimicPubs)
+    int raid;            // mode.id === "raid": no play term
+    int empty_lobby;     // game.isEmptyLobby: true from init (10.0.3 never clears it), so the play term is off
+    double play_ms;      // player.playTime (ms)
+    double elapsed_ms;   // mode clock run so far: gameTime - max(0, gameTimerP) (ms)
+} BpMatchInput;
+// The BPP a public match asks for before the daily cap (tmpBPData.unbpp): Math.round(min(20,
+// floor(score * (rewardMlt || 1) * 0.01)) + play), play = 30 x min(1, floor(playTime / elapsed *
+// 10) / 10) when !emptyLobby and not raid, else 0. 0 when not a public match.
+int64_t bp_match_points(const BpMatchInput *in);
 
 // battlePass.validateProgress(currentBpp, amount): {award, newAvailable} under the daily cap
 // and the pass total.

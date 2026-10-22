@@ -157,12 +157,20 @@ int64_t bp_available(const BattlePass *bp, const int64_t bpp, const int64_t now_
     return left > 0 ? left : 0;
 }
 
-int bp_match_points(const double score, const double reward_mlt, const int played_half) {
-    const double scaled = score * (reward_mlt > 0.0 ? reward_mlt : 1.0); // score * (mode.rewardMlt || 1)
-    double base = floor(scaled * 0.01);
-    if (base > BP_MATCH_SCORE_MAX) base = BP_MATCH_SCORE_MAX;
-    if (base < 0.0) base = 0.0;
-    return (int) base + (played_half ? BP_MATCH_PLAY_BONUS : 0);
+int64_t bp_match_points(const BpMatchInput *in) {
+    // endGame's block: if (this.isPubType() && this.endIndex == null), and the award needs an account
+    if (!in || !in->pub_type) return 0;
+    const double mlt = in->reward_mlt > 0.0 ? in->reward_mlt : 1.0; // mode.rewardMlt || 1
+    double base = floor(in->score * mlt * 0.01);                    // Math.floor(score * mlt * 0.01)
+    if (base > BP_MATCH_SCORE_MAX) base = BP_MATCH_SCORE_MAX;       // Math.min(20, ...)
+    double play = 0.0;
+    if (!in->empty_lobby && !in->raid) {
+        double frac = floor(in->play_ms / in->elapsed_ms * 10.0) / 10.0; // Math.floor(playTime / elapsed * 10) / 10
+        if (frac > 1.0) frac = 1.0;                                     // Math.min(1, ...)
+        // JS: 0 over a 0 clock is NaN, which would corrupt the balance; KN counts that term as 0
+        if (!isnan(frac)) play = frac * BP_MATCH_PLAY_MAX;
+    }
+    return (int64_t) floor(base + play + 0.5); // Math.round
 }
 
 BpAward bp_validate_progress(const BattlePass *bp, const int64_t bpp, const int64_t requested, const int64_t now_s) {

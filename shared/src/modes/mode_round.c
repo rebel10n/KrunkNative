@@ -337,6 +337,8 @@ static void mode_intermission_end(Game *game, const float overflow) {
 
 // endGame() without an endIndex. bestOf: the round winner by team score gets a round win (a
 // noDraws tie plays 60 s of overtime instead); the match is won at gamRounds / 2 round wins.
+// Outside bestOf the round winner gets a round win as well (v10.0.3 endGame's else branch), and
+// the match's winner is then the team with the most round wins (mode_win_team(game, 0)).
 // Rounds left (and not won): everyone is taken out, "rds", spawns flip, objective modes start
 // over, and an intermission of intermTmr seconds (movement locked) leads into the next round.
 // Then (no winner + noDraws) overtime. Returns 1 when the match continues.
@@ -367,6 +369,15 @@ int mode_end_game(Game *game) {
             game->round_timer = MODE_OVERTIME;
             mode->skip = 0;
             return 1;
+        }
+    } else {
+        // v10.0.3 endGame's else branch (deob 221603-221605): outside best of the round's winner
+        // (getWinTeam(true) over the round's team scores) also gets a round win. Nothing is reset:
+        // the scores carry on, and the match winner is getWinTeam() over these round wins.
+        const int round_winner = mode_win_team(game, 1);
+        if (round_winner) {
+            mode->has_round_wins = 1;
+            mode->team_round_wins[round_winner]++;
         }
     }
 

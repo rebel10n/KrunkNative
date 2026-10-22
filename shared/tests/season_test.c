@@ -70,6 +70,43 @@ static void test_v10_levels(void) {
           "a KR card and a junk card are claimable without a skin");
 }
 
+// endGame's per-match BPP (v10.0.3 deob 221757-221776): public matches only; min(20, floor(score *
+// (rewardMlt || 1) * 0.01)) and the play term, which is off because isEmptyLobby is never false.
+static void test_match_points(void) {
+    const double clock = 240000.0; // a 4 minute clock (gameTime, ms)
+    BpMatchInput in = {.score = 1500, .reward_mlt = 1, .pub_type = 1, .empty_lobby = 1, .play_ms = clock, .elapsed_ms = clock};
+    CHECK(bp_match_points(&in) == 15, "public, all of the clock played: the score part only (15), got %lld", (long long) bp_match_points(&in));
+    in.play_ms = 0.6 * clock;
+    CHECK(bp_match_points(&in) == 15, "public, 60%% played: still 15 (the play term is off), got %lld", (long long) bp_match_points(&in));
+    in.score = 9000;
+    CHECK(bp_match_points(&in) == 20, "min(20, ..): 20");
+    in.score = 900;
+    in.reward_mlt = 2;
+    CHECK(bp_match_points(&in) == 18, "rewardMlt 2: floor(900 * 2 * 0.01) = 18");
+    in.reward_mlt = 0;
+    CHECK(bp_match_points(&in) == 9, "rewardMlt 0 counts as 1: 9");
+
+    // ranked and custom (hosted) matches are not public: no BPP at all
+    BpMatchInput hosted = {.score = 9000, .reward_mlt = 1, .pub_type = 0, .empty_lobby = 1, .play_ms = clock, .elapsed_ms = clock};
+    CHECK(bp_match_points(&hosted) == 0, "ranked / custom: no match BPP");
+    hosted.empty_lobby = 0;
+    CHECK(bp_match_points(&hosted) == 0, "ranked / custom with the play term on: still none");
+
+    // the play term, as the formula reads (empty_lobby 0 is not what 10.0.3 does; it documents the term)
+    BpMatchInput term = {.score = 1500, .reward_mlt = 1, .pub_type = 1, .empty_lobby = 0, .play_ms = 0.6 * clock, .elapsed_ms = clock};
+    CHECK(bp_match_points(&term) == 15 + 18, "60%%: floor(0.6 * 10) / 10 = 0.6 x 30 = 18, got %lld", (long long) bp_match_points(&term));
+    term.play_ms = 0.25 * clock;
+    CHECK(bp_match_points(&term) == 15 + 6, "25%%: floor(2.5) / 10 = 0.2 x 30 = 6, got %lld", (long long) bp_match_points(&term));
+    term.play_ms = 1.5 * clock;
+    CHECK(bp_match_points(&term) == 15 + 30, "over the clock: capped at 30");
+    term.raid = 1;
+    CHECK(bp_match_points(&term) == 15, "raid: no play term");
+    term.raid = 0;
+    term.play_ms = 0;
+    term.elapsed_ms = 0;
+    CHECK(bp_match_points(&term) == 15, "0 over a 0 clock: the NaN term counts as 0");
+}
+
 static void test_cap(void) {
     const int64_t day0 = g_bp.start_s + 3600, day2 = g_bp.start_s + 2 * 86400 + 5;
     CHECK(BP_CAP_DAY == 500 && bp_cap_total(&g_bp, day0) == BP_CAP_DAY, "day 1: 500 (v10.0.2)");
@@ -82,8 +119,7 @@ static void test_cap(void) {
     CHECK(a.award == 50 && a.remaining == 1350, "validateProgress on day 3 (award %lld rem %lld)", (long long) a.award, (long long) a.remaining);
     a = bp_validate_progress(&g_bp, 14990, 50, g_bp.start_s + 100 * 86400);
     CHECK(a.award == 10 && a.remaining == 0, "the pass total caps too");
-    CHECK(bp_match_points(1500, 1, 0) == 15 && bp_match_points(1500, 1, 1) == 45, "endGame: floor(score * 0.01) + 30");
-    CHECK(bp_match_points(9000, 1, 1) == 50 && bp_match_points(900, 2, 0) == 18 && bp_match_points(-5, 1, 0) == 0, "min(20, ..), rewardMlt");
+    test_match_points();
 }
 
 static void test_rewards_and_claims(void) {
