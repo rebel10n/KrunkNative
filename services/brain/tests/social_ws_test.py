@@ -681,6 +681,11 @@ async def redeem_scenario(base):
         ua = await s.recv("ua")
         inv = {e["ind"]: e["cnt"] for e in ((ua[1] or [None] * 11)[10] or [])}
         check(inv.get(8067) == 2, "the code's two tickets are in the inventory: %r" % inv)
+        # a stack entry is {ind, cnt, st: 1} (v10.0.3's addSkin: deob-10.0.3.js:129116-129120; st 1 is a stack)
+        slot = (ua[1] or [None] * 11)[10] or []
+        check(any(8067 == e.get("ind") and "id" not in e for e in slot)
+              and all(e.get("st") == 1 for e in slot if "id" not in e),
+              "an owned stack carries st 1 in the account's owned list: %r" % slot)
         r = await s.call("spin", "spin", None, 8067, False)
         check(r[1] is None and r[5] == 8067, "a redeemed ticket spins its own wheel, one ticket goes: %r" % r)
         r = await s.call("vr", "vr", "KRTICKET2")

@@ -545,6 +545,15 @@ def paint_scenario(port, path):
           stack_row(rows) is None and len([x for x in rows if x.get("i") == ITEM and "sid" in x and "m" in x]) == 3,
           json.dumps(rows)[:400])
 
+    # 4b. the stack / copy flag: v10.0.3 reads st === 1 for a stack and st: 0 on a painted copy (official addSkin /
+    # setSkin write st: 1 and st: 0, deob-10.0.3.js:129099-129153; the trade and item-card code tests it,
+    # deob-10.0.3.js:124726, 125012). The market rows and the owned list (account data slot 10) carry it.
+    st, rows = owned_rows()
+    stack_rows = [x for x in rows if "m" not in x]
+    check("market inventory: a stack row has st 1 and a painted copy has st 0",
+          stack_rows and all(x.get("st") == 1 for x in stack_rows)
+          and copy_row(rows, copy_a) is not None and copy_row(rows, copy_a).get("st") == 0, json.dumps(rows)[:400])
+
     # 5. a copy is the caller's: another account's paint of it is refused, and the copy keeps its paint
     st, r = http(port, "POST", "/items/%d/paint" % copy_b, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, o_tok)
     check("paint: another account cannot paint the caller's copy (400)",

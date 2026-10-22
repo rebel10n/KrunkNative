@@ -374,11 +374,14 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         cJSON_Delete(copies);
         return NULL;
     }
+    cJSON *stack;
+    cJSON_ArrayForEach(stack, rows) cJSON_AddNumberToObject(stack, "st", 1); /* official addSkin: a stack is st 1 */
     cJSON *row;
     cJSON_ArrayForEach(row, copies) {
         cJSON *c = cJSON_CreateObject();
         cJSON_AddNumberToObject(c, "ind", (double) kn_json_int(row, "ind", 0));
         cJSON_AddNumberToObject(c, "cnt", 1);
+        cJSON_AddNumberToObject(c, "st", 0); /* a copy is st 0 (addSkin / setSkin, deob-10.0.3.js:129099-129105) */
         cJSON_AddNumberToObject(c, "id", (double) kn_json_int(row, "id", 0));
         cJSON *m = v10_paint_meta(kn_json_str(row, "paint_color", ""), (int) kn_json_int(row, "paint_shader", -1));
         if (m) cJSON_AddItemToObject(c, "m", m);

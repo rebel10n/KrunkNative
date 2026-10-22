@@ -271,6 +271,20 @@ static int item_matches(const MarketCtx *c, int64_t skin_id) {
 
 static int64_t quick_sell_each(const SkinInfo *k);
 
+/* the socket's inventory rows (the market page): a stack keeps {i, s, c} (its sid and the NULL paint columns go); a
+ * painted copy keeps its sid and gets its m (doc/v10/paint-copy.md, the same rows as GET /market/inventory) */
+static void shape_inventory(cJSON *rows) {
+    cJSON *it;
+    cJSON_ArrayForEach(it, rows) {
+        const int copy = kn_json_str(it, "paint_color", "")[0] != '\0' || kn_json_int(it, "paint_shader", -1) >= 0;
+        cJSON *m = copy ? v10_paint_meta(kn_json_str(it, "paint_color", ""), (int) kn_json_int(it, "paint_shader", -1)) : NULL;
+        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_color");
+        cJSON_DeleteItemFromObjectCaseSensitive(it, "paint_shader");
+        if (!copy) cJSON_DeleteItemFromObjectCaseSensitive(it, "sid");
+        if (m) cJSON_AddItemToObject(it, "m", m);
+    }
+}
+
 /* KrunkNative (the v10 inventory cards, v10_market.c): what the client's store table does not say
  * about an owned item, from the server's own skins file: nt = cannot be listed / traded, qs = KR
  * per quick-sold unit (0: none), nqs = noQuickSell (destroy only). */
@@ -302,7 +316,10 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
                 cJSON_AddItemToArray(data, cJSON_Duplicate(it, 1));
         }
         cJSON_Delete(rows);
-        if (!strcmp(c->sub, "inventory")) decorate_inventory(data);
+        if (!strcmp(c->sub, "inventory")) {
+            shape_inventory(data);
+            decorate_inventory(data);
+        }
     }
     if (c->kind == 1) { /* io_fr(Ne, list|null) */
         if (data && !cJSON_GetArraySize(data)) {

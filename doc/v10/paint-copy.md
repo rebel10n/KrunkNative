@@ -19,10 +19,15 @@ and what is not verified.
 
 `$account.skins` holds one entry per owned unit or stack:
 
-- a stack: `{ind, cnt, st}` (`addSkin` / `setSkin`, deob-10.0.3.js:129116-129120, 129149-129153);
-- a copy: `{ind, cnt: 1, id, m, st: 0}`, `id` the copy's id, `m` its metadata (deob:129099-129105, 129133-129139).
+- a stack: `{ind, cnt, st: 1}` (`addSkin` / `setSkin`, stack branches at deob-10.0.3.js:129116-129120, 129149-129153);
+- a copy: `{ind, cnt: 1, id, m, st: 0}`, `id` the copy's id, `m` its metadata (copy branches at deob:129099-129105,
+  129133-129139).
+- `st` is the stack flag: `st === 1` is a stack, any other value a copy. The trade chooser and the item card test it
+  (deob:124726 `iIííiíì`, 125012 `iÎiiiïî`, card at 124760-124771): a copy is keyed by its `sid` and `iids`, a stack by
+  its `cnt`.
 
-`m` is read through a normaliser that takes an object or a JSON string (deob:128883-128894, and on load deob:129081-129083).
+`m` is read through the normaliser `iìiíïîï` (deob:128883-128894: an object is kept, a string is parsed), on load
+at deob:129081-129083. The server rows map `{i, c, id, m, st}` to `{ind, cnt, id, m, st}` (deob:28690-28700).
 Account data is set at deob:128914 and deob:128977 (`this.skins = data[10]`).
 
 The paint lives in `m`: `m.paint` is the colour `"#rrggbb"` and `m.paintShader` is a shader number. `m.seed` is optional;
@@ -59,7 +64,8 @@ item it counts `cnt ?? 1` per `ind` (deob:122014-122019); a paint qualifies when
 ### 5. The market inventory rows
 
 `GET /market/inventory` (deob:30863-30864, 122564-122571) is read as the chooser's list, keeping rows with
-`cnt === undefined || cnt > 0` (deob:149209, 149970): a copy has no `cnt`, a stack does. A copy row carries `sid` (its
+`cnt === undefined || cnt > 0` (deob:149209, 149970): a copy has no `cnt`, a stack does. Each row carries `st` (1 a stack,
+0 a copy; deob:124726). A copy row carries `sid` (its
 copy id: deob:149016, 149066, 124751, 150107) and `m` (a trade row copies it: deob:125069-125075, `{i, c: 1, sid, m}`).
 
 ### 6. Loadout and spawn
@@ -106,6 +112,38 @@ messages have none). What it sends:
 So a painted copy is tradable, listable, quick-sellable and a craft material; the paint goes with the copy wherever
 it goes, and is gone when the copy is consumed.
 
+## Pinned lines (byte offsets)
+
+Byte offsets are the start of the line in `~/.cache/kn-v103/deob-10.0.3.js` (`head -n LINE-1 | wc -c`).
+
+| line | byte | what it is |
+|---|---|---|
+| 128883 | 5580350 | `m` normaliser `iìiíïîï`: an object as is, a string parsed |
+| 128914 | 5581541 | `this.skins = iÍííìíí.skins` (account load) |
+| 128977 | 5584975 | `this.skins = data[10]` (account load) |
+| 129070 | 5588914 | account skins setter: the `{i, c, id, m, st}` rows |
+| 129095 | 5589760 | `addSkin` (key) |
+| 129099 | 5589938 | `addSkin` copy: `{ind, cnt: 1, id, m, st: 0}` |
+| 129116 | 5590530 | `addSkin` stack: `{ind, cnt, st: 1}` |
+| 129124 | 5590685 | `setSkin` (key) |
+| 129133 | 5591056 | `setSkin` copy: `{ind, cnt: 1, id, m, st: 0}` |
+| 129149 | 5591598 | `setSkin` stack: `{ind, cnt, st: 1}` |
+| 122013 | 5102715 | picker: the owned count map from `$account.skins` (`cnt ?? 1`, line 122019) |
+| 122029 | 5103479 | picker: a paint has `paintColor` or a numeric `paintShader` |
+| 122041 | 5103983 | picker: sort, owned first, then by index |
+| 122132 | 5107674 | apply: refused without `skinId` |
+| 122139 | 5108046 | apply: `items.setPaint(skinId, {item_id, paint_item_id})` |
+| 122152 | 5108656 | apply: one unit taken from the local paint stack |
+| 122564 | 5135633 | `iiíïïiï()`: `market.getInventory()` (the reload) |
+| 124567 | 5273391 | item metadata: painted when `paint` / `paintShader` is set |
+| 124726 | 5285099 | `st === 1` (stack test) |
+| 125012 | 5305369 | `st === 1` (trade chooser stack test) |
+| 149066 | 6901818 | the picker's `skinId: sid` (an inventory row) |
+| 149073 | 6902208 | "Painted <item> with <paint>" toast on success |
+| 149209 | 6908785 | the chooser's `cnt === undefined \|\| cnt > 0` filter |
+| 30863 | 1177086 | `market.getInventory` route |
+| 30996 | 1182913 | `items.setPaint` route: `POST /items/{id}/paint`, body JSON |
+
 ## What KrunkNative does
 
 KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. The painted units are a second table:
@@ -135,8 +173,9 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   - the reply is `{copy_id, item_id, paint_item_id, m, count}` (`count`: the paints left).
   - The work is one transaction: `sh_item_paint` (`economy.c`) → `P_ITEM_PAINT` / `run_item_paint` (`db_economy.c`).
     The paint unit is consumed through `db_add_skin` (its audit row, source `paint`).
-- `GET /market/inventory` (`v10_market.c`, `reply_inventory`): stacks as `{i, cnt, sid}` (cnt = the unpainted units,
-  sid = the store index), then one `{i, sid, m}` row per painted copy (no `cnt`), with `m` = `{paint}` or `{paintShader}`.
+- `GET /market/inventory` (`v10_market.c`, `reply_inventory`): stacks as `{i, cnt, sid, st: 1}` (cnt = the unpainted
+  units, sid = the store index), then one `{i, sid, m, st: 0}` row per painted copy (no `cnt`), with `m` = `{paint}` or
+  `{paintShader}`.
   The rows come from the market page's inventory query (`economy.c`, `market_done`), which also feeds the socket.
 - `POST /market/list` with `skin_id` = a copy id lists that copy (the socket "li" frame's third value; `run_market_list`).
   `POST /market/quick-sell` with `skin_id` = a copy id sells that copy as one unit (`action` 0, `amount` 0; the socket
@@ -150,9 +189,11 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
 - `GET /trades/inventory/{id}`: a painted copy is its own row, `{i, c: 1, sid: copy id, m}`; a stack is `{i, c}`.
 - `POST /market/unlist` and `POST /market/purchase` give a painted listing back (or to the buyer) as a copy with its
   paint. The copy id is new; the paint is the same.
-- The owned list (account data slot 10, `db_owned_skins` in `db_common.c`, every driver): `{ind, cnt}` per skin with
-  unpainted units (cnt = those units), then `{ind, cnt: 1, id, m}` per painted copy. For postgres the list replaces
-  the SQL function's slot 10.
+- The owned list (account data slot 10, `db_owned_skins` in `db_common.c`, every driver): `{ind, cnt, st: 1}` per skin
+  with unpainted units (cnt = those units), then `{ind, cnt: 1, id, m, st: 0}` per painted copy. For postgres the
+  list replaces the SQL function's slot 10.
+- The socket's `market` inventory page (`market_done` / `shape_inventory` in `economy.c`) returns the same rows without
+  the SQL's paint columns: a stack `{i, s, c, qs}`, a painted copy `{i, s, c: 1, sid, m, qs}`.
 
 ### The bridge
 
@@ -173,6 +214,11 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   `copies_r` for the v10 page. The native client's trade and quick-sell pickers do not show copies yet.
 - The listing rows show a painted copy's paint (`m`); the purchase reply's `m` is still the listing's own value, not the
   paint.
+- No native paint picker. The official picker (a popup over the item viewer, deob:122013-122180, opened from an
+  inventory row at deob:149066) has no counterpart on origin/main: nothing calls `POST /items/{id}/paint` from the
+  client, and no window lists the owned paints. The only paint apply in the native client is the clan banner
+  (`clan_ui.c`, `POST /clans/{id}/banner-color`), which is a clan route. The owned card's badge (`skin_paint.c`,
+  `ui_loadout.c` `owned_paint_badge`) reads the owned entries' `m`, so a painted copy shows its badge once the list has it.
 - A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge. The paint of a copy is the client's own
   one (its `$account.skins`, section 6), so the local model is painted. A native client paints another player's worn
   skins from SKINS V2 (patch 6). The paint is the owner's first painted copy of that store index, the plain-index rule
@@ -212,6 +258,12 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
 - `services/brain/tests/craft_test.py`: recipe 1 with its Wood and Wires as painted copies (one unpainted Wood and one
   Wood copy): crafted, the copies taken with their paint. Origin/main refuses the craft ("Only painted copies..." from
   the stack's take).
+- `services/brain/tests/social_ws_test.py` (the `vr` redemption): a stack entry of the owned list is `{ind, cnt, st: 1}`
+  (`ua` frame, `data[10]`). On origin/main before this change it fails (`an owned stack carries st 1`). The same test's
+  two socket inventory checks (`{i, s, c, qs}` exactly) also failed there: the paint commit had leaked the SQL's `sid`
+  and NULL paint columns into the socket rows. `shape_inventory` fixes both.
+- `services/brain/tests/v10_api_market_test.py` (`paint_scenario`) also checks `st` on the market rows: the paint stack has
+  `st: 1`, a painted copy `st: 0`. It fails on origin/main (`market inventory: a stack row has st 1 ...`).
 - `services/brain/tests/v10_api_market_test.py` (`paint_scenario`): the refusals (non-paint, unknown item, guest, another
   account's copy), an unpainted unit becoming a copy painted red, a second copy painted shader 0, a repaint of the first
   copy (its paint changes, the other copy keeps its own, the stack keeps its count), the last unpainted unit, no unpainted

@@ -473,6 +473,7 @@ static cJSON *inventory_row(const cJSON *r) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "i", (double) kn_json_int(r, "i", -1));
     cJSON_AddNumberToObject(o, "cnt", (double) kn_json_int(r, "c", 0));
+    cJSON_AddNumberToObject(o, "st", 1); /* a stack (deob-10.0.3.js:124726: st === 1 is a stack, else a copy) */
     put_if(o, r, "nt");
     put_if(o, r, "qs");
     put_if(o, r, "nqs");
@@ -484,8 +485,12 @@ static cJSON *copy_inventory_row(const cJSON *r) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "i", (double) kn_json_int(r, "i", -1));
     cJSON_AddNumberToObject(o, "sid", (double) kn_json_int(r, "sid", 0));
-    cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
-    if (m) cJSON_AddItemToObject(o, "m", m);
+    cJSON_AddNumberToObject(o, "st", 0);
+    /* the row's m (the market page, shaped by economy.c shape_inventory), else its paint columns (the trade rows) */
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(r, "m");
+    cJSON *paint = m ? cJSON_Duplicate(m, 1)
+                     : v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+    if (paint) cJSON_AddItemToObject(o, "m", paint);
     put_if(o, r, "nt");
     put_if(o, r, "qs");
     put_if(o, r, "nqs");
@@ -711,9 +716,11 @@ static void step_sales(Op *op) { step_page(op, "sales"); }
 static void step_history(Op *op) { step_page(op, "history"); }
 static void step_trades_page(Op *op) { step_page(op, "trades"); }
 
-/* a painted copy's row carries its paint (the market page's rows: economy.c market_done); a stack's has none */
+/* a painted copy's row carries its m (the market page's rows, shaped by economy.c shape_inventory) or its paint
+ * columns (the raw rows); a stack's has neither */
 static int is_copy_row(const cJSON *r) {
-    return kn_json_str(r, "paint_color", "")[0] != '\0' || kn_json_int(r, "paint_shader", -1) >= 0;
+    return cJSON_GetObjectItemCaseSensitive(r, "m") != NULL || kn_json_str(r, "paint_color", "")[0] != '\0'
+           || kn_json_int(r, "paint_shader", -1) >= 0;
 }
 
 /* the stacks (their unpainted units; sid = the store index, the Paint action's skinId) and the painted copies
