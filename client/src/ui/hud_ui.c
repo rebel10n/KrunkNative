@@ -877,11 +877,11 @@ static void hud_plist_suspect_row(StrBuf *sb, const Client *client, const PlistR
     hud_plist_name_link(sb, r, "red");
     sb_append_esc(sb, r->name);
     hud_plist_clan(sb, r->clan);
-    sb_append(sb, "</a></td></td><td class='pListActions'><div class='pListBtns'>"); // v10's own markup (the stray </td> included)
+    sb_append(sb, "</a></td></td><td class='pListActions'>"); // v10's own markup (the stray </td> included)
     if (kick || host)
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
                        "<span class='takeAction material-icons'>construction</span></span>", r->uid);
-    sb_append(sb, "</div></td></tr>");
+    sb_append(sb, "</td></tr>");
 }
 
 static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, const int scenario) {
@@ -896,7 +896,7 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     hud_plist_clan(sb, r->clan);
     sb_append(sb, "</a>");
     if (r->speaking) sb_append(sb, "<span class='pListVoice material-icons'>volume_up</span>");
-    sb_append(sb, "</td><td class='pListActions'><div class='pListBtns'>");
+    sb_append(sb, "</td><td class='pListActions'>");
     if (r->account_id > 0 || r->level >= 1) { // level >= 1: the buttons show mutedChat / VoiceAccountIds
         const int chat_muted = scenario ? r->chat_muted : social_chat_muted(r->account_id);
         const int voice_muted = scenario ? r->voice_muted : social_voice_muted(r->account_id);
@@ -920,7 +920,7 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     if (kick || host) // isHost || account.canGlobalKick / canSilentKick / canGlobalBan / canGlobalFlag
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
                        "<span class='takeAction material-icons'>construction</span></span>", r->uid);
-    sb_append(sb, "</div></td></tr>");
+    sb_append(sb, "</td></tr>");
 }
 
 static void hud_plist_row_json(PlistRow *r, const cJSON *o) {
@@ -1002,11 +1002,11 @@ static char *hud_plist_rows(void) {
         char own[PLAYER_NAME_SIZE];
         sb_append_esc(&sb, acc ? player_names_account(acc->name) : me ? hud_player_name(client, me, own, sizeof(own)) : client ? player_names_account(client->menu_name) : "");
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
-        sb_append(&sb, "</td><td class='pListActions'><div class='pListBtns'>");
+        sb_append(&sb, "</td><td class='pListActions'>");
         if (spectate_active()) sb_append(&sb, "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>");
         if (dev && me) sb_appendf(&sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", me->uid);
         if (dev) sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton tpall' onclick='punishPlayer(null, 9)'>TPAll</span>");
-        sb_append(&sb, "</div></td></tr>");
+        sb_append(&sb, "</td></tr>");
     }
     if (scenario) {
         const cJSON *o;

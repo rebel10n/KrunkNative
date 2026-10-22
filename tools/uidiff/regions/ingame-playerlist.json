@@ -36,8 +36,8 @@
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 6.0,
-      "note": "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player. Same 26 px centring offset as the header; the row pitch matches v10 (see kn-v10-menu.css, Player List). max_pct 6.0, not v10's 3.0, is deliberate: the action buttons are centred on their row (kn-v10-menu.css .pListActions / .pListBtns) where v10's own CSS lifts them ~4.5 px, so they differ from v10's capture by design (measured 5.8%); the margin still fails other drift."
+      "max_pct": 3.0,
+      "note": "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player, all on the name's line as v10's own CSS lays them out (the floated .pListActions and the buttons' negative margins). Same 26 px centring offset as the header; the row pitch matches v10 (see kn-v10-menu.css, Player List)."
     },
     {
       "name": "player-list-sandbox-tools",

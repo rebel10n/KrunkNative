@@ -375,6 +375,30 @@ scenario('ingame-playerlist', async (c) => {
   await c.eval(flatPage('#000000'));
   await settle(c, 800);
 });
+// the same Player List while spectating (window.spectating, the spectate bind): v10's genList puts a
+// Focus Player button (punishButton, visibility) before each row's ping and a Clear Focus button in the
+// local row's actions
+scenario('ingame-playerlist-spectate', async (c) => {
+  await enterGame(c);
+  for (let i = 0; i < 3; i++) { await c.eval(SPAWN_BOT); await sleep(700); }
+  await sleep(1200);
+  const r = await c.eval(`(() => { try {
+    const s = window.__knScope(), cg = s.cg;
+    const rows = [['Kanzaki', 'VIP', 34, 12], ['Rook', '', 87, 7], ['Sable', 'CMD', 162, 3]];
+    const others = cg.players.list.filter(p => !p.isYou);
+    others.forEach((p, i) => { const d = rows[i % rows.length]; p.alias = p.name = d[0]; p.clan = d[1]; p.ping = d[2];
+      p.level = d[3]; p.accid = 9100 + i; p.isBot = false; p.isHacker = i == 2; });
+    cg.isCustom = false; cg.isRanked = false;
+    s.setAcc({ level: 30, isDev: false, canTeleport: false, name: 'Local User', stats: {}, skins: [], badges: [], getSkinCount: () => 0 });
+    window.spectating = true;
+    document.exitPointerLock();
+    window.showWindow(23);
+    return others.length; } catch (e) { return String(e.stack); } })()`);
+  if (typeof r !== 'number') console.error('[capture-v10] playerlist-spectate: ' + r);
+  await sleep(300);
+  await c.eval(flatPage('#000000'));
+  await settle(c, 800);
+});
 // a sandbox bot: v10's spawnBot bind (pressButton(107), as in v7) adds one through the
 // sandbox server's bots; kills go through the sandbox server's players.kill(victim, killer, info)
 const SPAWN_BOT = `(() => { window.pressButton(107); return 1; })()`;

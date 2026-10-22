@@ -219,17 +219,28 @@ def main():
                           {"uid": 3, "name": "Rook", "ping": 87, "account": 9101, "level": 7},
                           {"uid": 4, "name": "Sable", "clan": "CMD", "ping": 162, "account": 9102, "level": 3, "hacker": True}])
     mw = rc["menuWindow"]
-    regs = [R("player-list-header", pad(rc["playerSearchH"], 2), "text", "#playerSearchH: Player List [4] and the search box"),
-            # max_pct 6.0, not v10's 3.0: a deliberate parity break. The action buttons are centred on their row
-            # (kn-v10-menu.css .pListActions / .pListBtns); v10's own CSS lifts them ~4.5 px above the row's middle,
-            # so they differ from v10's capture by design (measured 5.8%). The margin lets other drift fail.
-            R("player-list-rows", pad(rc["playerListH"], 2), "text",
-              "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player; "
-              "the buttons are centred on the row by design, not v10's lift (see max_pct)", max_pct=6.0),
-            R("player-list-sandbox-tools", [mw[0], rc["playerListH"][1] + rc["playerListH"][3], mw[2],
-                                            mw[1] + mw[3] - rc["playerListH"][1] - rc["playerListH"][3]], "text",
-              "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list", skip=True)]
-    add("ingame-playerlist", st, regs, "The Player List of a lobby with three account players, signed in at level 30.")
+
+    def plist_regions(rc, rows_note):
+        # every element of a row (the ping, the name, the buttons) sits where v10's own CSS puts it: the
+        # name's line, a few px above the row's geometric middle (the float and the buttons' negative margins)
+        return [R("player-list-header", pad(rc["playerSearchH"], 2), "text", "#playerSearchH: Player List [4] and the search box"),
+                R("player-list-rows", pad(rc["playerListH"], 2), "text", "#playerListH: " + rows_note),
+                R("player-list-sandbox-tools", [mw[0], rc["playerListH"][1] + rc["playerListH"][3], mw[2],
+                                                mw[1] + mw[3] - rc["playerListH"][1] - rc["playerListH"][3]], "text",
+                  "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list", skip=True)]
+    add("ingame-playerlist", st, plist_regions(rc, "the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / "
+                                                   "Votekick per player, all on the name's line as v10's CSS lays them out"),
+        "The Player List of a lobby with three account players, signed in at level 30.")
+
+    # the same list while spectating (capture-v10.js ingame-playerlist-spectate: window.spectating): v10's
+    # genList puts a Focus Player button (punishButton, the visibility icon) before each row's ping and a
+    # Clear Focus button in the local row's actions (hud_ui.c hud_plist_focus / hud_plist_rows)
+    rc = rects("ingame-playerlist-spectate")
+    st = dict(st, spectate=True)
+    add("ingame-playerlist-spectate", st,
+        plist_regions(rc, "while spectating: Clear Focus in the local row, then the Focus Player eye / ping / name [clan] / "
+                          "chat mute / voice mute / K.P.D / Votekick per player, all on the name's line as v10's CSS lays them out"),
+        "The Player List of the same lobby while spectating: the Focus Player and Clear Focus buttons.")
 
     for name in sorted(scen):
         with open(os.path.join(HERE, "scenarios", name + ".json"), "w") as fh:

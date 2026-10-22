@@ -34,27 +34,6 @@
 	padding-bottom: 12.9px;
 }
 
-/* The action buttons (.pListActions, hud_ui.c) sit on the row's middle: the band above its separator, which
-   the cells' padding is symmetric around. Two things of v10's CSS kept them above it: the cell floats right
-   (main.css .pListActions), so it is only as tall as its own content and sits at the row's top, not in the
-   row; and the buttons' negative margins (.muteUserBtn -12px, .punishButton -6px, main.css) lift them.
-   The cell is a table cell again, right-aligned (the row stretches it and vertical-align centres it), the
-   margins are cancelled and the .pListBtns wrapper (hud_ui.c) centres the buttons. A deliberate difference
-   from v10: its reference capture (doc/ref/krunker-v10/ingame/ingame-playerlist.png) has the same lift. */
-.pListActions {
-	float: none;
-	text-align: right;
-}
-.pListActions .muteUserBtn,
-.pListActions .punishButton {
-	margin-top: 0 !important;
-}
-.pListBtns {
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-}
-
 /* KrunkNative: v10's text emoji that Chrome draws in colour (Noto Color Emoji: the ranked texts, the
  * Turf Wars icons, the KrunkCup card) are images here (v10_emoji in client/src/ui/v10_competitive.c,
  * ui/img/kn/emoji/, ui/README.md). The image holds the glyph's ink centred on a 256 px square drawn

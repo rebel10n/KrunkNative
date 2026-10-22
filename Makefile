@@ -754,7 +754,7 @@ playerlist-ui-e2e: build ## The in-game Player List's controls on a headless cli
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 400 $(PYTHON) -I client/tests/playerlist_e2e.py $(DEBUG_DIR)
 
 .PHONY: row-centre-e2e
-row-centre-e2e: build ## The action buttons of the Player List and Account Manager rows sit within 1 px of their row's middle (headless --render-scenario, the box dump)
+row-centre-e2e: build ## The Player List's rows: every element's ink (focus eye, ping, name, mutes, buttons) is where Krunker v10's capture has it; the Account Manager's buttons sit on their row's middle (headless --render-scenario, the box dump)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/row_centre_e2e.py $(DEBUG_DIR)
 
 .PHONY: billboard-e2e
