@@ -624,9 +624,22 @@ static void handle_client(V10Session *s, const char *label, const KrunkerValue *
             free(frames);
         }
     } else if (!strcmp(label, V10_OUT_CHAT_MESSAGE)) {
+        /* CHAT_MESSAGE is ["ct", channel, text] in the official client (game.deob 10.0.2): the text is the second
+           argument, and channel 1 is the team chat (getChatTeam). A bare ["ct", text] is still read as global. A
+           channel that is not a number is not a channel: the text is then the first argument, as before. */
+        const int channelled = argc >= 2 && args[0].type == KRUNKER_NUM;
+        const KrunkerValue *line = channelled ? &args[1] : a0;
+        const int team = channelled && args[0].u.num == 1;
         uint8_t text[V10_CHAT_TEXT_SIZE];
-        const size_t n = v10_encode_chat(a0, text);
-        if (n) write_native(s, NET_PACKET_CHAT_SEND, text, n);
+        const size_t n = v10_encode_chat(line, text);
+        if (n && team) {
+            uint8_t v7[1 + V10_CHAT_TEXT_SIZE];
+            v7[0] = 1; /* NetChatV7SendPacket.channel: CHAT_CHANNEL_TEAM */
+            memcpy(v7 + 1, text, n);
+            write_native(s, NET_PACKET_CHAT_V7, v7, n + 1);
+        } else if (n) {
+            write_native(s, NET_PACKET_CHAT_SEND, text, n);
+        }
     }
     /* anything else (movement input, pings, the rest of the v10 labels) is not translated yet: dropped */
 }

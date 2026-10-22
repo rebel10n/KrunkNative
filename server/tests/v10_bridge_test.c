@@ -1036,6 +1036,21 @@ int main(void) {
     NFrame *chat_out = native_nth(NET_PACKET_CHAT_SEND, 0);
     CHECK(chat_out && chat_out->len == 12 && !memcmp(chat_out->payload, "hello there\0", 12), "CHAT_SEND is the text, NUL-terminated");
 
+    // the official CHAT_MESSAGE is ["ct", channel, text] (game.deob 10.0.2: iíîíiìî sends CHAT_MESSAGE, channel, text):
+    // a / command typed in the official client must reach the server's chat_commands.c as CHAT_SEND text,
+    // and channel 1 is the team chat (NET_PACKET_CHAT_V7: channel byte, then the text)
+    KrunkerValue cmd_args[2] = {KRUNKER_V_NUM(0), KRUNKER_V_STR("/kick Bob")};
+    client_send("ct", cmd_args, 2);
+    WAIT_FOR(native_count(NET_PACKET_CHAT_SEND) == 2);
+    NFrame *cmd_out = native_nth(NET_PACKET_CHAT_SEND, 1);
+    CHECK(cmd_out && cmd_out->len == 10 && !memcmp(cmd_out->payload, "/kick Bob\0", 10), "ct [0, \"/kick Bob\"]: the / command is CHAT_SEND text");
+    KrunkerValue team_args[2] = {KRUNKER_V_NUM(1), KRUNKER_V_STR("hi team")};
+    client_send("ct", team_args, 2);
+    WAIT_FOR(native_count(NET_PACKET_CHAT_V7) == 1);
+    NFrame *team_out = native_nth(NET_PACKET_CHAT_V7, 0);
+    CHECK(team_out && team_out->len == 1 + 8 && team_out->payload[0] == 1 && !memcmp(team_out->payload + 1, "hi team\0", 8),
+          "ct [1, \"hi team\"]: team chat, NET_PACKET_CHAT_V7 channel 1");
+
     // native PING -> PONG, echoed
     const uint8_t ping[4] = {0x78, 0x56, 0x34, 0x12};
     native_send(&g_native, NET_PACKET_PING, ping, 4);
