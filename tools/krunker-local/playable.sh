@@ -73,9 +73,16 @@ pick $((SERVER + 1)); BRIDGE=$PICK
 pick $((BRIDGE + 1)); HTTP=$PICK
 pick $((HTTP + 1)); TLS=$PICK
 
-# a fresh run: a new brain database and an empty server config; the brain secret is generated once, never printed
+# a fresh run: a new brain database and a server config; the brain secret is generated once, never printed
 rm -f "$RUN/brain.db" "$RUN/brain.db-"* "$RUN/brain.db-journal"
-echo '{}' > "$RUN/empty.json"
+# The map rotation is pinned to Burg, so every round is the same map. An unpinned rotation draws a random map per round, and
+# round 2 on catalogue map 7 stalled the page's init for ~114 s (its only 404 in those runs: user-assets 63270/model.glb, not
+# served by the local static proxy). The next round then came 141 s after the end screen (check (g) at ~231 s against its
+# 300 s wait) in runs 3, 4 and 5 of the 2026-10-21 baseline (a2e30feb, KN_PLAYABLE_PLAYERS=1). The pin is the server's
+# gameserver.maps list (config.c reads it from the "gameserver" section; "burg_new" is Burg's catalogue key, mapIndex 0).
+# A positional map.json overrides that list (accounts.c accounts_configure_public: the map plus the default rotation), so
+# the server below is started without one. The thresholds are unchanged.
+echo '{"gameserver": {"maps": ["burg_new"]}}' > "$RUN/rotation.json"
 [ -s "$RUN/brain.secret" ] || openssl rand -hex 16 > "$RUN/brain.secret"
 SECRET="$(cat "$RUN/brain.secret")"
 
@@ -96,10 +103,10 @@ start brain kn_brain "$BRAIN" "$BUILD/services/brain/kn_brain" --brain.host=127.
   --brain.public_url=https://matchmaker.beta.krunker.io \
   --accounts.signup_rewards.enabled=false --finder.poll_interval_s=1 || exit 1
 start server server_bin "$SERVER" env KN_GAMESERVER_BRAIN_SECRET="$SECRET" "$BUILD/server_bin" --cfg none \
-  --config "$RUN/empty.json" --headless --no-cli --port "$SERVER" --mode ffa --round-seconds "$ROUND_S" \
+  --config "$RUN/rotation.json" --headless --no-cli --port "$SERVER" --mode ffa --round-seconds "$ROUND_S" \
   --region us-nj --node-id PLAYABLE --name "Krunker Box Office playable" \
   --public-host 127.0.0.1 --public-port "$SERVER" \
-  --brain "ws://127.0.0.1:$BRAIN/mm/internal/ws" --log "$RUN/server.log" "$REPO/assets/maps/official/00_burg.json" || exit 1
+  --brain "ws://127.0.0.1:$BRAIN/mm/internal/ws" --log "$RUN/server.log" || exit 1
 start bridge v10_bridge "$BRIDGE" env KRUNK_NATIVE_V10_TRACE=1 "$BUILD/v10_bridge" --v10-listen="$BRIDGE" \
   --bind=127.0.0.1 --native="127.0.0.1:$SERVER" || exit 1
 node tools/krunker-local/krunker-local.mjs prepare > "$RUN/prepare.log" 2>&1 || { echo "playable: prepare failed ($RUN/prepare.log)" >&2; exit 1; }

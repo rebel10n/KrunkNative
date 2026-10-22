@@ -648,6 +648,19 @@ v10-bridge: build ## Run the v10 client bridge (C): ws://V10_BIND:V10_LISTEN/ws 
 playable-check: build ## Playability check: the official client joins a local round, plays through its end and the next round (headless; exit 1 on a FAIL)
 	tools/krunker-local/playable.sh
 
+# The stability target: the single-player check three times in a row, each in a fresh run dir under ~/.cache/kn-playable-stable.
+# KN_PLAYABLE_PLAYERS=1 is set here because the stability bar covers the single-player check; the second player (default 2 in
+# playable.sh) is another path with its own rows. Runs all three, then fails if any run failed.
+.PHONY: playable-check-stable
+playable-check-stable: build ## Playability check three times in a row (single player, fresh run dirs; exit 1 if any run fails)
+	@fail=0; for i in 1 2 3; do \
+	  home="$$HOME/.cache/kn-playable-stable/$$(date +%s)-$$i"; \
+	  echo "playable-check-stable: run $$i of 3 in $$home"; \
+	  KN_PLAYABLE_HOME="$$home" KN_PLAYABLE_PLAYERS=1 tools/krunker-local/playable.sh || fail=$$((fail + 1)); \
+	done; \
+	if [ $$fail -ne 0 ]; then echo "playable-check-stable: $$fail of 3 runs FAILED" >&2; exit 1; fi; \
+	echo "playable-check-stable: 3 of 3 runs PASS"
+
 bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
 	cd $(BRIDGE_DIR) && npm run typecheck && npm test
 	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
