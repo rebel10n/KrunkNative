@@ -39,6 +39,7 @@ static const Ruleset k_v10 = {
     .entity_limit = 64,           // config.entityLimit
     .archetype_limit = 32,        // config.archetypeLimit
     .light_unit_factor = (float) M_PI, // config.lightIntensityScaling
+    .comp_spawn_spread = 10.0f,        // getPointSpread(.., 10, ..) for comp spawns (v10.0.3 deob line 217148)
 };
 
 const Ruleset *ruleset_v10(void) {

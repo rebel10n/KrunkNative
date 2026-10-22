@@ -61,6 +61,10 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     int entity_limit;           // config.entityLimit (64)
     int archetype_limit;        // config.archetypeLimit (32)
     float light_unit_factor;    // config.lightIntensityScaling: map light intensity x PI
+    // getPointSpread's spread for a comp spawn (warmup, the intermission; game.js getSpawnPoint useCompSpawns):
+    // the point is the spawn itself, rounded to whole units (spread 10 less 10 = 0). v10.0.3: 10 (deob line
+    // 217148); v7.1.4: 40 (players up to 30 units off)
+    float comp_spawn_spread;
 } Ruleset;
 
 // The ruleset: Krunker v10.0.3. Never NULL. Under a flavor with rules (Krunker Strike, flavor.h)

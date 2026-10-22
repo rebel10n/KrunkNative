@@ -4,7 +4,7 @@
 // ones (FFA, and teammates in TDM, which v3.1.1 never spreads), and each pick follows the
 // v3.1.1 rules (fewest counted players with sight of it, then the largest summed distance to
 // them and in flag modes to the other team's flags; counted = active, not you, enemies when
-// teamed; your team's or teamless spawns; comp spawns only in a comp waitTimer, spread 40).
+// teamed; your team's or teamless spawns; comp spawns only in a comp waitTimer, at the comp spawn itself: spread 10).
 // Run from the repository root: ./<build>/spawn_test
 #include <shared.h>
 #include <ai.h>
@@ -222,8 +222,10 @@ static void run_map(Game *game, const char *name, const cJSON *json) {
         snprintf(label, sizeof(label), "%s %s CTF rule (%d flags)", name, side, game->mode ? game->mode->flag_count : 0);
         if (server) check_rule(game, label, 2, 1);
 
-        // useCompSpawns (waitTimers[0].comp, e.g. warmup) in a team mode: your team's comp
-        // spawn, spread up to 30 units by getPointSpread(.., 40) (v7 rounds x / z: + sqrt(0.5))
+        // useCompSpawns (waitTimers[0].comp, e.g. warmup) in a team mode: your team's comp spawn, put by
+        // getPointSpread(.., 10) (Krunker v10.0.3 deob line 217148). Its offset is 10 - 10 = 0, so the point
+        // is the comp spawn itself, rounded to whole units (0.7072 at most). v7.1.4's spread 40 put players
+        // up to 30 units off at random, so every sample here would fail with it.
         start(game, json, MODE_ID_TDM, server);
         GameMode *mode = game->mode;
         mode->wait_timers[0] = (ModeWaitTimer) {.time = 10.0f, .msg = "warmup ends ", .comp = 1};
@@ -233,12 +235,14 @@ static void run_map(Game *game, const char *name, const cJSON *json) {
             for (size_t s = 0; s < game->map->spawn_count && !comp; s++) {
                 if (game->map->spawns[s]->comp && game->map->spawns[s]->team == team) comp = game->map->spawns[s];
             }
-            Player *player = add_player(game, 180 + team, team);
-            player_spawn(player);
-            if (!comp) continue;
-            const float dx = player->position.x - comp->position.x, dz = player->position.z - comp->position.z;
-            CHECK(sqrtf(dx * dx + dz * dz) <= 30.0f + 0.7072f && fabsf(player->position.y - comp->position.y) < 1e-3f,
-                  "%s %s comp: team %d spawned %.1f from its comp spawn", name, side, team, sqrtf(dx * dx + dz * dz));
+            for (int k = 0; k < 6; k++) { // six respawns: each draws its own direction
+                Player *player = add_player(game, 300 + team * 10 + k, team);
+                player_spawn(player);
+                if (!comp) continue;
+                const float dx = player->position.x - comp->position.x, dz = player->position.z - comp->position.z;
+                CHECK(sqrtf(dx * dx + dz * dz) <= 0.7072f && fabsf(player->position.y - comp->position.y) < 1e-3f,
+                      "%s %s comp: team %d respawn %d spawned %.2f from its comp spawn", name, side, team, k, sqrtf(dx * dx + dz * dz));
+            }
         }
     }
 }

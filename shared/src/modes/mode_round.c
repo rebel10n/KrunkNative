@@ -561,8 +561,6 @@ void mode_player_left(Game *game, Player *player) {
 
 // ------------------------------------------------------------------ getSpawnPoint
 
-#define SPAWN_SPREAD_RADIUS 40.0f // getPointSpread(x, z, y, 40, dir): the comp spawn spread
-
 // game.js getPointSpread(x, z, y, spread, dir): a random direction, cut short by the first
 // object the `spread`-unit ray (1 above the feet) enters, then 10 units back from it, rounded
 // to whole units. Objects the ray starts inside do not count (line_in_rect only reports
@@ -625,7 +623,8 @@ static float spawn_distance(const Spawn *spawn, const vec3 to) {
 // respawn, the server's addPlayer, the Respawn triggers):
 // - flippedSpawns (a round swap) trades teams 1 and 2 for the spawn's team tests;
 // - useCompSpawns (waitTimers[0].comp: warmup, Defuse's "match starting in", the intermission):
-//   your team's comp spawn (any comp spawn in FFA), spread by getPointSpread(.., 40);
+//   your team's comp spawn (any comp spawn in FFA), at the spawn itself: getPointSpread(.., 10) (v10.0.3
+//   deob line 217148: spread 10 less 10 is no offset; ruleset comp_spawn_spread);
 // - otherwise the spawns seen by the fewest counted players (canSee to y + playerHeight),
 //   then of those the one with the largest summed distance to them, plus (flag modes) to the
 //   flags not of your team and not neutral, plus (Domination) to the zones captured by another
@@ -651,7 +650,7 @@ int game_get_spawn_point(Game *game, const Player *player, vec3 *position, int *
             const Spawn *spawn = map->spawns[s];
             if (!spawn->comp || (mode->config.teams && spawn->team != spawn_team)) continue;
             if (spawn->team_only && spawn->team != spawn_team) continue;
-            *position = spawn_point_spread(game, spawn, SPAWN_SPREAD_RADIUS);
+            *position = spawn_point_spread(game, spawn, game_ruleset(game)->comp_spawn_spread);
             *direction = spawn->direction;
             return 1;
         }

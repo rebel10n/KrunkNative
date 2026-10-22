@@ -22,6 +22,7 @@ static void test_lookup(void) {
     CHECK(&game_constants == v10->constants, "game_constants is the ruleset's");
     CHECK(v10->trigger_action_limit == 8 && v10->entity_limit == 64 && v10->archetype_limit == 32, "trigger action / entity / archetype limits");
     CHECK(fabsf(v10->light_unit_factor - (float) M_PI) < 1e-6f, "light unit factor");
+    CHECK(v10->comp_spawn_spread == 10.0f, "comp spawn spread 10 (getPointSpread(.., 10), v10.0.3 deob line 217148)");
     CHECK(rules_weapons() == v10->weapons && rules_classes() == v10->classes && v10->modes == g_mode_configs, "the shortcuts");
     CHECK(game_ruleset(NULL) == v10, "no game: the ruleset");
     Game game;

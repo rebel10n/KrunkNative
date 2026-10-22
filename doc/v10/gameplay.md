@@ -347,7 +347,7 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 
 | item | v7 | v10 | evidence |
 |---|---|---|---|
-| getSpawnPoint comp warmup spread | getPointSpread(..., 40, ...) | 10 | v10:188049 vs game.js:1024 |
+| getSpawnPoint comp warmup spread | getPointSpread(..., 40, ...) | 10: the comp spawn itself, rounded (ported: `Ruleset.comp_spawn_spread`; v10.0.3 deob line 217148, doc/v10/gameplay-1003-audit.md) | v10:188049 vs game.js:1024 |
 | getSpawnPoint otherwise | — | identical algorithm (visibility count, then max summed distance, flag/domzone terms, `spread + 7`) | v10:188000-188050 |
 | game state machine | implicit | explicit enum INITIALIZING 0, IDLE 1, WARMUP 2, IN_PROGRESS 3, POST_MATCH 4, ENDED 5 (`setGameState`) | v10:186518-186525, 191761 |
 | needAll timer | afkTimeout or 300000 | 60000 when ranked; if lobby players with a chosen class (`lobbyPlayers[*].c`) < minPlayers: everyone is kicked with "Ranked Game: ..." and the match ends (endIndex 3); players who never picked a class get `onRankedPlayerFailedToJoin` | v10:189820, 191376-191410 |
@@ -370,8 +370,7 @@ game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are
 | ranked: x2 KR, no kill streaks, no class XP, needAll 60 s, shutdown 120 s | `Ruleset.ranked`, `Game.is_ranked` (`server/src/accounts.c`), `game_is_ranked`, `rules_reward_mlt` | ruleset_test, v10_gameplay_test |
 | a v10 match on server_bin | `server_bin` (no version choice) | `server/tests/v10_match_e2e.py` |
 
-Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), the comp-warmup spawn spread 10,
-the proportional battle-pass points and team round wins outside best-of (section 7), raid challenges /
+Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), the proportional battle-pass points and team round wins outside best-of (section 7), raid challenges /
 `noProfileStats`, the Stalker's render-side changes (model opacity 0.1, hidden after 300 ms still), its HUD
 (leap timer, STALKER_PICKED popup, taunts), event kill pools, `poseData.bodyY`, `markPosition`, and the match-flow
 items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md).
