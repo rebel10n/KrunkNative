@@ -1,7 +1,7 @@
 # Event bus inventory: Krunker v10.0.3 client vs KrunkNative
 
 The friends and presence socket the v10 client opens with `ws?at=<token>` on the event-bus host
-(`/home/user/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted and webcrack-deobfuscated for reading).
+(`~/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted and webcrack-deobfuscated for reading).
 The client's `onopen` / `onmessage` / `onclose` and its send helper are the only uses of that socket
 in the bundle: the five outbound labels below are the only callers of the send helper, and the
 inbound switch is the one `switch (msg.type)` in `onmessage`. The 10.0.2 bundle (`~/.cache/kn-v10/v10.js`)

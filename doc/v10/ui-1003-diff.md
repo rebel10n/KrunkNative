@@ -5,7 +5,7 @@ against the v10.0.2 page that `ui/` was imported from, and what was done about e
 
 ## Sources
 
-- **10.0.3 page**: `/home/user/jails/kru/src/Krunker_v10.0.3/` (`index.html`, `css/`, `img/`,
+- **10.0.3 page**: `~/jails/kru/src/Krunker_v10.0.3/` (`index.html`, `css/`, `img/`,
   `static/index-ynaUXNyU.js` loader, and the client bundle `game.js`, 13 138 023 bytes, sha256
   `66887d66…`). `index.html` sha256 `8c2d75a7…`. The tree has no social, editor or viewer pages and
   no window templates.

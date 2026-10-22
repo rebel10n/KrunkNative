@@ -242,7 +242,7 @@ After this change (the v10 API completion, branch api-full-http): implemented 83
 
 ## Socket tunnel replies (the 45 tunnel rows)
 
-The rows marked `tunnel` are the gapi calls the client sends on the social socket (`["gapi", rid, method, path, body]`, doc/v10/social.md); the HTTP path stays a 404. Each row's source and reply shape are in the table above. Checked against the v10.0.3 consumer (`/home/user/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted, its string-array obfuscation decoded for the read): the gapi path literals (153) and every snake_case field name the consumer regions read are identical to v10.0.2 (`~/.cache/kn-v10/v10.js`), so the v10.0.2 reads hold for 10.0.3. Test: `services/brain/tests/gapi_tunnel_test.py` (`brain_gapi_tunnel`), one check per route.
+The rows marked `tunnel` are the gapi calls the client sends on the social socket (`["gapi", rid, method, path, body]`, doc/v10/social.md); the HTTP path stays a 404. Each row's source and reply shape are in the table above. Checked against the v10.0.3 consumer (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decrypted, its string-array obfuscation decoded for the read): the gapi path literals (153) and every snake_case field name the consumer regions read are identical to v10.0.2 (`~/.cache/kn-v10/v10.js`), so the v10.0.2 reads hold for 10.0.3. Test: `services/brain/tests/gapi_tunnel_test.py` (`brain_gapi_tunnel`), one check per route.
 
 Counts: **real data 40** (clans 7, players and social 13, studios 20), **empty by design 1** (212 skins: KrunkNative has no custom skins), **error 4** (110 logo upload: no moderation source, 503 ModerationUnavailable; 213, 214, 215 skins: no custom skins, 404 STUDIO_SKIN_NOT_FOUND).
 

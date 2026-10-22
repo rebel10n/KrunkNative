@@ -6,7 +6,7 @@ account's challenges by type. KrunkNative draws it in `client/src/ui/v10_rewards
 `ui_window_generate` asks `v10_rewards_window_gen(33)` first).
 
 Offsets: `deob` is `~/.cache/kn-v103/deob-10.0.3.js` (line numbers, the decoded bundle the repo cites);
-`game.js` is `/home/user/jails/kru/src/Krunker_v10.0.3/game.js` (byte offsets of a greppable token, `grep -b -F`).
+`game.js` is `~/jails/kru/src/Krunker_v10.0.3/game.js` (byte offsets of a greppable token, `grep -b -F`).
 Read-only references; nothing was copied from them.
 
 ## 1. v10.0.3 structure

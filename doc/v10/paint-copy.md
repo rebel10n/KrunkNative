@@ -8,7 +8,7 @@ and what is not verified.
 
 - Readable copy: `~/.cache/kn-v103/deob-10.0.3.js` (the bundle with its string table decoded; the identifiers are still
   minified). `file:LINE (byte OFFSET)` below is that file: LINE is the line, OFFSET the byte offset of the line's start.
-- Minified original: `/home/user/jails/kru/src/Krunker_v10.0.3/game.js`. Its strings are hex-indexed lookups, so the
+- Minified original: `~/jails/kru/src/Krunker_v10.0.3/game.js`. Its strings are hex-indexed lookups, so the
   readable anchors are the decoded lines. Byte offset of the paint API definition there: `game.js@2560926`
   (`'setPaint':function(…){…'/items/'…'/paint'…'POST'…}`).
 - The bundle is read-only. Nothing here comes from a live capture (see "Not verified").

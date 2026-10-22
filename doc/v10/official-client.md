@@ -3,7 +3,7 @@
 ## Where the official files live
 
 - The official browser client is a read-only reference folder outside the repo:
-  `/home/user/jails/kru/src/Krunker_v10.0.3/`. Its README.md and AGENTS.md say what is in it.
+  `~/jails/kru/src/Krunker_v10.0.3/`. Its README.md and AGENTS.md say what is in it.
 - Nothing from it is committed to KrunkNative. The harness (`tools/krunker-local/`) copies it into
   `~/.cache/kn-krunker-local/www` and never writes to the source. Config: `krunkerSrc` in
   `tools/krunker-local/config.example.json`.

@@ -6,7 +6,7 @@ can set globals the page reads. It is for trying things on the local stack, not 
 
 ## Paths
 
-- The official folder `/home/user/jails/kru/src/Krunker_v10.0.3/` is read-only. Never put a script in it. The
+- The official folder `~/jails/kru/src/Krunker_v10.0.3/` is read-only. Never put a script in it. The
   harness copies the client into `~/.cache/kn-krunker-local/www` and injects scripts at runtime only.
 - Keep your scripts anywhere outside the repo and the official folder, for example `~/scripts/`. Pass absolute paths.
 - Samples: `tools/krunker-local/examples/user_a.js` and `user_b.js`.

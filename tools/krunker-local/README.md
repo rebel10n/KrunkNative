@@ -3,7 +3,7 @@
 Runs the official Krunker v10.0.3 client from a local copy and sends its matchmaker
 hosts to our brain (`coordinator.krunk.io`). Nothing from Krunker is committed: the
 copy lives in `~/.cache/kn-krunker-local/www` and is made from the read-only tree
-`/home/user/jails/kru/src/Krunker_v10.0.3`. The client is not patched. Chromium maps the
+`~/jails/kru/src/Krunker_v10.0.3`. The client is not patched. Chromium maps the
 official hostnames to a local HTTPS listener, and that listener forwards `/mm/*` to the brain.
 
 ## Run

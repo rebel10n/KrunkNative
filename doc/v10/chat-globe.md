@@ -1,6 +1,6 @@
 # The chat's globe icon (#chatSwitch)
 
-Reference: Krunker v10.0.3 bundle `/home/user/jails/kru/src/Krunker_v10.0.3/game.js` (minified) and its
+Reference: Krunker v10.0.3 bundle `~/jails/kru/src/Krunker_v10.0.3/game.js` (minified) and its
 decoded copy `~/.cache/kn-v103/deob-10.0.3.js` (line numbers and character offsets below are into the
 decoded copy, `line:offset`; the minified `game.js` offsets are given where they are the only handle).
 

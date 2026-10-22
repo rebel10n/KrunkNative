@@ -19,7 +19,7 @@ and ping race (`client/src/ui/region_names.c`, `servers_ui.c`, `krunker_lobbies.
 `client/src/net/region_ping.c`), the brain's `/mm/ping-list` keys and seek routing
 (`services/brain/registry.c`). `shared/tests/krunker_regions_test.c` pins it against the bundle.
 
-Source: the 10.0.3 bundle (`/home/user/jails/kru/src/Krunker_v10.0.3/game.js`, decoded copy
+Source: the 10.0.3 bundle (`~/jails/kru/src/Krunker_v10.0.3/game.js`, decoded copy
 `~/.cache/kn-v103/deob-10.0.3.js`; read only). v10.0.2 (`~/.cache/kn-v10/v10.js`) has the same
 values.
 

@@ -1,5 +1,5 @@
 {
-  "krunkerSrc": "/home/user/jails/kru/src/Krunker_v10.0.3",
+  "krunkerSrc": "~/jails/kru/src/Krunker_v10.0.3",
   "knRepo": "/home/user/src/KrunkNative",
   "fillRoots": [
     "assets",

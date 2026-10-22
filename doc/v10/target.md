@@ -5,7 +5,7 @@ client, the server, the ruleset identity and the UI work (set by the user, 2026-
 
 ## Reference bundles
 
-- **Target: v10.0.3.** `/home/user/jails/kru/src/Krunker_v10.0.3/game.js` (13.1 MB). It is the
+- **Target: v10.0.3.** `~/jails/kru/src/Krunker_v10.0.3/game.js` (13.1 MB). It is the
   bundle decrypted from the WASM loader pipeline, and it is still minified: one long line,
   mangled identifiers, a string array. Read it through the static webcrack pass that
   `changelog-10.0.3.md` describes. Its version literal is `'10.0.3'`.

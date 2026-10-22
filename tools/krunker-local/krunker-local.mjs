@@ -31,7 +31,7 @@ function loadConfig() {
   const local = path.join(HERE, "config.json");
   const file = fs.existsSync(local) ? local : path.join(HERE, "config.example.json");
   const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-  const home = (p) => path.resolve(p.replace(/^~/, os.homedir()));
+  const home = (p) => path.resolve(p.replace(/^~(?=\/|$)/, os.homedir()));
   cfg._file = file;
   cfg.krunkerSrc = home(cfg.krunkerSrc);
   cfg.knRepo = home(cfg.knRepo);
@@ -61,7 +61,9 @@ const SKIP = new Set(["server.mjs", "serve-v10.mjs", "local.html"]);
 // prepare: copy the official tree (never written to), fill missing paths with symlinks into
 // KrunkNative (first root with the file wins), and make the self-signed cert for the HTTPS side.
 function prepare() {
-  if (!fs.existsSync(cfg.krunkerSrc)) throw new Error(`krunkerSrc missing: ${cfg.krunkerSrc}`);
+  if (!fs.existsSync(cfg.krunkerSrc)) {
+    throw new Error(`krunkerSrc folder not found: ${cfg.krunkerSrc} (set "krunkerSrc" in ${cfg._file}; a leading ~/ is your home folder)`);
+  }
   fs.mkdirSync(cfg.wwwDir, { recursive: true });
   fs.mkdirSync(cfg.runDir, { recursive: true });
   for (const ent of fs.readdirSync(cfg.krunkerSrc)) {

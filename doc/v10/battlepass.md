@@ -3,7 +3,7 @@
 Krunker Box Office's Battle Pass window (windows[5], menu window 6; `client/src/ui/battlepass_ui.c`) on the
 two server types. The official krunker.io server shows krunker.io's pass; the Box Office server shows kn_brain's.
 Every line below cites the decoded v10.0.3 bundle `~/.cache/kn-v103/deob-10.0.3.js` (`L` = its line; the bundle
-is `/home/user/jails/kru/src/Krunker_v10.0.3/game.js` with names decoded) and, where a literal exists once in the
+is `~/jails/kru/src/Krunker_v10.0.3/game.js` with names decoded) and, where a literal exists once in the
 minified file, its byte offset in `game.js` (`B`). v10.0.2 has the same structure at other lines (only offsets
 moved), which the port was written against.
 

@@ -1,6 +1,6 @@
 {
   "reference": "Krunker v10.0.3 official client, served by the local harness (tools/krunker-local), headless Chromium, 1280x720, deviceScaleFactor 1",
-  "source": "/home/user/jails/kru/src/Krunker_v10.0.3 (read only), copied to ~/.cache/kn-krunker-local/www by the harness prepare step",
+  "source": "~/jails/kru/src/Krunker_v10.0.3 (read only), copied to ~/.cache/kn-krunker-local/www by the harness prepare step",
   "captures": [
     {
       "file": "video-skins-off.png",
