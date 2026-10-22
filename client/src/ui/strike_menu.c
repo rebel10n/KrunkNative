@@ -556,9 +556,25 @@ static void on_shop(void *user, const int status, const cJSON *data, const cJSON
 }
 
 // $r's answer: ws goes (Tn() == ws && kt()), then Vw: Pt(Es, {rewards: products, origin: store})
+// The purchase's answer has a deadline: a buy with no answer (the socket dropped with it) clears the blocker, so the
+// store is not held behind "Purchasing..." for good (a late answer still shows what was bought)
+#define PURCHASE_WAIT_MS 15000
+static int g_purchase_timer;
+
+static void purchase_expired(void *user) {
+    (void) user;
+    g_purchase_timer = 0;
+    if (!M.buying[0]) return;
+    printf("[strike] purchase %s: no answer in %d s\n", M.buying, PURCHASE_WAIT_MS / 1000);
+    M.buying[0] = 0;
+    strike_reward_blocker_hide();
+}
+
 static void on_bought(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) user;
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+    html_timer_cancel(g_purchase_timer);
+    g_purchase_timer = 0;
     strike_reward_blocker_hide();
     if (status == 200) printf("[strike] bought %s\n", M.buying);
     else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
@@ -579,6 +595,8 @@ static void purchase(const int index) {
         return;
     }
     strike_reward_blocker("Purchasing...");
+    html_timer_cancel(g_purchase_timer);
+    g_purchase_timer = html_timer_add(PURCHASE_WAIT_MS, purchase_expired, NULL);
 }
 
 // a product block's click: sU opens the product popup U2 for a paid item (Pt(In, {builder: U2})), a free

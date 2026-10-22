@@ -10,6 +10,15 @@ against a local kn_brain (sqlite, temp dir) and headless client_bin on the v10 p
   trading-lost    the brain goes away while Trading waits for its trades: "Couldn't load trades."
   inbox-lost      the brain goes away while the Inbox (window 30) waits for its mail list: the list says
                   it could not load the notifications
+  mail-lost       the brain goes away while a message's text is on its way: the message says so
+  mail-refused    the brain answers a message as gone (its row was deleted): "Loading..." is replaced
+  clan-lost       the brain is gone when the Clan window opens (no clan yet): the window says so, with Retry
+  clan-settings-lost     the clan is loaded, the brain goes away, Settings is opened: the message of the day,
+                  the loot config and the recruitment post each say they could not load, with Retry
+  clan-settings-refused  the clan is loaded, the clan is deleted (the brain answers its routes 404), Settings
+                  is opened: the loot config says it could not load
+  lottery-lost    the brain is gone when the lottery window opens: the window says so, with Retry
+  lottery-refused the brain answers the lottery as not found: the window says so, with Retry
 
   python3 -I client/tests/loading_screens_e2e.py BUILD_DIR REPO_ROOT [scenario ...]
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs) driven through
@@ -46,6 +55,8 @@ FAILS = []
 WORK = tempfile.mkdtemp(prefix="kn-loading.", dir=os.path.expanduser("~/.cache"))
 DB = os.path.join(WORK, "coordinator.db")
 TAB_TRADING, TAB_JUNKYARD = 1, 3  # v10_market.c's TAB_* (the sidebar's v10mkSide<n>)
+MAILS = {}        # the seeded messages' ids: "lost" (the brain goes away) and "refused" (its row is deleted)
+ACCOUNT_ID = 0    # alice's account id
 WOOD, WIRES, KRYSTALLIZER, PLASMA = 1, 3, 3283, 3921
 RECIPES = [
     {"SID": 1, "SOUT": KRYSTALLIZER, "SIN": "%d,2,%d,1" % (WOOD, WIRES), "JUNK": 0, "DUR": 0, "CNT": -1, "DAT": 1700000000000},
@@ -99,7 +110,7 @@ async def register(port, name):
 class Client:
     """One headless client_bin on the v10 page, logged in as `name`."""
 
-    def __init__(self, port, name, token, tag):
+    def __init__(self, port, name, token, tag, extra_env=None):
         self.cmds = os.path.join(WORK, tag + ".cmds")
         self.log = os.path.join(WORK, tag + ".log")
         self.tag = tag
@@ -115,6 +126,11 @@ class Client:
                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_UI_CMDS": self.cmds,
                     "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                     "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port})
+        # no production: krunker.io, its matchmaker and finder point at a closed local port (connection refused)
+        for k in ("KRUNKNATIVE_KRUNKER_URL", "KRUNKNATIVE_KRUNKER_MATCHMAKER", "KRUNKNATIVE_FINDER_URL", "KRUNKNATIVE_KRUNKER_API",
+                  "KRUNKNATIVE_KRUNKER_AUTH", "KRUNKNATIVE_KRUNKER_SOCIAL", "KRUNKNATIVE_KRUNKER_EVENT_BUS", "KRUNKNATIVE_KRUNKER_DATA_API"):
+            env[k] = "http://127.0.0.1:9"
+        env.update(extra_env or {})
         self.out = open(self.log, "w")
         self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--offline"], stdout=self.out, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)
@@ -325,7 +341,25 @@ def new_account(brain, name):
     q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 5)", aid, WOOD)
     q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", aid, WIRES)
     q("UPDATE players SET player_score = 2000000, player_premium = 0, player_funds = 5000 WHERE player_id = ?", aid)
+    for key, subject in (("lost", "Lost mail"), ("refused", "Refused mail")):
+        q("INSERT INTO mail (account_id, sender, subject, body, kr) VALUES (?, 'Krunker', ?, 'Read me', 0)", aid, subject)
+        MAILS[key] = one("SELECT id FROM mail WHERE account_id = ? AND subject = ?", aid, subject)
+    global ACCOUNT_ID
+    ACCOUNT_ID = aid
     return aid, token
+
+
+def make_clan(aid):
+    """alice leads a clan of her own (the Clan window and its Settings are hers)"""
+    q("INSERT INTO clans (clan_name, clan_playerid, clan_funds) VALUES ('LoadClan', ?, 50000)", aid)
+    cid = one("SELECT clan_id FROM clans WHERE clan_name = 'LoadClan'")
+    q("INSERT INTO clan_members (account_id, clan_id, rank) VALUES (?, ?, 0)", aid, cid)
+    return cid
+
+
+def drop_clan(aid):
+    q("DELETE FROM clan_members WHERE account_id = ?", aid)
+    q("DELETE FROM clans WHERE clan_name = 'LoadClan'")
 
 
 def scenario_junkyard_race(brain, name, token):
@@ -418,12 +452,156 @@ def scenario_inbox_lost(brain, name, token):
         c.close()
 
 
+def open_inbox(c):
+    c.ui("showWindow(30)")
+    c.ui("windows[29].switchTab(3, 1)")  # the Inbox tab, forced: its list is asked for
+    return wait_text(c, "mailList", lambda t: "Lost mail" in t and "Refused mail" in t)
+
+
+def scenario_mail_lost(brain, name, token):
+    print("mail-lost: the brain goes away while a message's text is on its way", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    c = Client(brain.port, name, token, "mail-lost")
+    try:
+        check(logged_in(c), "alice is logged in")
+        ok, text = open_inbox(c)
+        check(ok, "the Inbox lists the messages while the brain is up: %r" % text[:80])
+        brain.stop()
+        el = "mail_%d" % MAILS["lost"]
+        check(c.click(el), "the message is opened while the brain is gone")
+        ok, text = wait_text(c, "#%s .mailText" % el, lambda t: "Couldn't load this message" in t, WAIT_S)
+        check(ok, "no answer: the message says it could not load (not Loading... for good): %r" % text[:80])
+        c.shot("mail-lost")
+    finally:
+        c.close()
+
+
+def scenario_mail_refused(brain, name, token):
+    print("mail-refused: the brain answers a message as gone (its row was deleted)", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    c = Client(brain.port, name, token, "mail-refused")
+    try:
+        check(logged_in(c), "alice is logged in")
+        ok, text = open_inbox(c)
+        check(ok, "the Inbox lists the messages while the brain is up: %r" % text[:80])
+        q("DELETE FROM mail WHERE id = ?", MAILS["refused"])
+        el = "mail_%d" % MAILS["refused"]
+        check(c.click(el), "the message is opened (the brain answers it with no row)")
+        ok, text = wait_text(c, "#%s .mailText" % el, lambda t: "Couldn't load this message" in t, WAIT_S)
+        check(ok, "a refused read says it could not load (not Loading... for good): %r" % text[:80])
+        c.shot("mail-refused")
+    finally:
+        c.close()
+
+
+def clan_loaded(c):
+    """the Clan window shows the clan (its tab content is out of the loading state)"""
+    ok, text = wait_text(c, "#clanErr", lambda t: "LOADING" not in t and t.strip() != "")
+    return ok, text
+
+
+def scenario_clan_lost(brain, name, token):
+    print("clan-lost: the brain is gone when the Clan window opens", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    make_clan(ACCOUNT_ID)
+    c = Client(brain.port, name, token, "clan-lost")
+    try:
+        check(logged_in(c), "alice is logged in (a clan member)")
+        brain.stop()
+        c.ui("showWindow(13)")  # the Clan window (windows[12] is its handler namespace)
+        ok, text = wait_text(c, "#clanErr", lambda t: "Couldn't load the clan" in t, WAIT_S)
+        check(ok, "no answer: the Clan window says it could not load (not LOADING... for good): %r" % text[:80])
+        c.shot("clan-lost")
+    finally:
+        c.close()
+        drop_clan(ACCOUNT_ID)
+
+
+def scenario_clan_settings_lost(brain, name, token):
+    print("clan-settings-lost: the clan is loaded, the brain goes away, Settings is opened", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    make_clan(ACCOUNT_ID)
+    c = Client(brain.port, name, token, "clan-settings-lost")
+    try:
+        check(logged_in(c), "alice is logged in (a clan leader)")
+        c.ui("showWindow(13)")  # the Clan window (windows[12] is its handler namespace)
+        ok, text = clan_loaded(c)
+        check(ok, "the clan loads while the brain is up: %r" % text[:80])
+        brain.stop()
+        c.ui("windows[12].switchTab(4)")  # Settings: its sections are asked for now
+        want = ("Couldn't load the message of the day", "Couldn't load the loot config", "Couldn't load the recruitment post")
+        ok, text = wait_text(c, "#clanErr", lambda t: all(w in t for w in want), WAIT_S)
+        check(ok, "no answer: each Settings section says it could not load, not Loading... for good: %r" % text[:160])
+        c.shot("clan-settings-lost")
+    finally:
+        c.close()
+        drop_clan(ACCOUNT_ID)
+
+
+def scenario_clan_settings_refused(brain, name, token):
+    print("clan-settings-refused: the account leaves the clan, the brain refuses its clan routes", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    make_clan(ACCOUNT_ID)
+    c = Client(brain.port, name, token, "clan-settings-refused")
+    try:
+        check(logged_in(c), "alice is logged in (a clan leader)")
+        c.ui("showWindow(13)")  # the Clan window (windows[12] is its handler namespace)
+        ok, text = clan_loaded(c)
+        check(ok, "the clan loads while the brain is up: %r" % text[:80])
+        q("DELETE FROM clan_members WHERE account_id = ?", ACCOUNT_ID)
+        q("DELETE FROM clans WHERE clan_name = 'LoadClan'")  # the brain answers the clan's routes 404 (Clan not found)
+        c.ui("windows[12].switchTab(4)")
+        ok, text = wait_text(c, "#clanErr", lambda t: "Couldn't load the loot config" in t, WAIT_S)
+        check(ok, "a refused loot config says it could not load (not the silent Clan Bank form): %r" % text[:160])
+        c.shot("clan-settings-refused")
+    finally:
+        c.close()
+        drop_clan(ACCOUNT_ID)
+
+
+def scenario_lottery_lost(brain, name, token):
+    print("lottery-lost: the brain is gone when the lottery window opens", flush=True)
+    brain.stop()
+    c = Client(brain.port, name, token, "lottery-lost")
+    try:
+        c.ui("openLottery(3)")
+        ok = c.has("knLotRetry", WAIT_S)
+        ok2, text = wait_text(c, "#genericPop", lambda t: "Couldn't load the lottery" in t, 5.0)
+        check(ok and ok2, "no answer: the lottery says it could not load, with Retry (not Loading...): %r" % text[:120])
+        c.shot("lottery-lost")
+    finally:
+        c.close()
+
+
+def scenario_lottery_refused(brain, name, token):
+    print("lottery-refused: the brain answers the lottery as not found", flush=True)
+    assert brain.start(), "kn_brain did not come up"
+    q("DELETE FROM lotteries WHERE lottery_id = 3")
+    c = Client(brain.port, name, token, "lottery-refused")
+    try:
+        c.ui("openLottery(3)")
+        ok = c.has("knLotRetry", WAIT_S)
+        ok2, text = wait_text(c, "#genericPop", lambda t: "Couldn't load the lottery" in t, 5.0)
+        check(ok and ok2, "a refused lottery says it could not load, with Retry: %r" % text[:120])
+        c.shot("lottery-refused")
+    finally:
+        c.close()
+        q("INSERT INTO lotteries (lottery_id, title, theme, frequency_h, offset_s, active) VALUES (3, 'Anniversary', 'neutral', 12, 3600, 0)")
+
+
 SCENARIOS = {
     "junkyard-race": scenario_junkyard_race,
     "junkyard-lost": scenario_junkyard_lost,
     "trading-race": scenario_trading_race,
     "trading-lost": scenario_trading_lost,
     "inbox-lost": scenario_inbox_lost,
+    "mail-lost": scenario_mail_lost,
+    "mail-refused": scenario_mail_refused,
+    "clan-lost": scenario_clan_lost,
+    "clan-settings-lost": scenario_clan_settings_lost,
+    "clan-settings-refused": scenario_clan_settings_refused,
+    "lottery-lost": scenario_lottery_lost,
+    "lottery-refused": scenario_lottery_refused,
 }
 
 

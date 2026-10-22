@@ -1333,10 +1333,48 @@ static char *gen_mail(void) {
     return sb_finish(&sb);
 }
 
+// readMail's ["rml", id] has a deadline: a read whose answer never comes (the socket dropped, the brain is gone),
+// or that the brain answers with no message (it was deleted), puts the failure text on its row, and clicking the
+// row asks again. The answer for the row in flight clears the deadline.
+#define MAIL_READ_WAIT_MS 15000
+static int g_read_id;    // the message whose rml is in flight (0 none)
+static int g_read_timer; // its deadline (html_timer id, 0 none)
+
+static const char *read_failed_text(void) {
+    return I18N("kn.mail.readFailed", "Couldn't load this message. Click it again to retry.");
+}
+
+static void read_failed(const int id) {
+    char el_id[32];
+    snprintf(el_id, sizeof(el_id), "mail_%d", id);
+    const HtmlElem el = id > 0 ? html_dom_by_id(el_id) : 0;
+    const HtmlElem text = el ? html_dom_query(el, ".mailText") : 0;
+    if (text) html_dom_set_text(text, read_failed_text());
+}
+
+static void read_pending_clear(void) {
+    html_timer_cancel(g_read_timer);
+    g_read_timer = 0;
+    g_read_id = 0;
+}
+
+static void read_expired(void *user) {
+    (void) user;
+    g_read_timer = 0;
+    const int id = g_read_id;
+    g_read_id = 0;
+    read_failed(id);
+}
+
 // onReadData([row]): the message text into the opened row
 static void mail_read_data(const cJSON *rows) {
     const cJSON *row = cJSON_GetArrayItem(rows, 0);
-    if (!row) return;
+    if (!row) { // no such message (its row is gone): the row says so instead of "Loading..." for good
+        read_failed(g_read_id);
+        read_pending_clear();
+        return;
+    }
+    if ((int) cJSON_GetNumberValue(cJSON_GetObjectItem(row, "km_id")) == g_read_id) read_pending_clear();
     char id[32];
     snprintf(id, sizeof(id), "mail_%d", (int) cJSON_GetNumberValue(cJSON_GetObjectItem(row, "km_id")));
     HtmlElem el = html_dom_by_id(id);
@@ -2120,15 +2158,23 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         HtmlElem obj = ev ? ev->target : 0;
         const HtmlElem text = obj ? html_dom_query(obj, ".mailText") : 0;
         if (!text) return 1;
-        char cur[16] = "";
+        char cur[256] = "";
         html_dom_get_text(text, cur, sizeof(cur));
-        if (cur[0]) {
+        if (cur[0] && strcmp(cur, read_failed_text())) {
             html_dom_set_html(text, "");
-        } else {
+        } else { // closed, or the failed read asked again
+            const int id = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0;
+            if (g_read_id && g_read_id != id) read_failed(g_read_id); // another read is still in flight: its row says so
+            read_pending_clear();
             html_dom_set_html(text, "Loading...");
             char frame[48];
-            snprintf(frame, sizeof(frame), "[\"rml\",%d]", argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : 0);
-            backend_social_send_text(frame);
+            snprintf(frame, sizeof(frame), "[\"rml\",%d]", id);
+            g_read_id = id;
+            g_read_timer = html_timer_add(MAIL_READ_WAIT_MS, read_expired, NULL);
+            if (!backend_social_send_text(frame)) { // no socket: no answer can come
+                read_pending_clear();
+                read_failed(id);
+            }
         }
         return 1;
     }

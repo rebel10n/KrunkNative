@@ -35,6 +35,7 @@
 #include <strike_ui.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <i18n.h>
 #include <backend_ui.h>
 #include <hud_modes.h>
 #include <spectate.h>
@@ -62,6 +63,7 @@ static struct {
     cJSON *econ_missions;       // the answer
     cJSON *econ_cards;          // its daily missions in the challenge shape mission_card() reads
     int econ_missions_asked;    // a request is out / answered for the current state
+    int econ_missions_failed;   // the last answer was a refusal (or none): the tab says so instead of "Loading", and a tab tap asks again
     unsigned econ_seq;          // bumped on every answer (the Missions tab re-fills)
     int track_asked;            // the game config (accountProgression) was asked
     int tap_missions;           // TAP_TO_PLAY's showMissions (the Missions logo's toggle)
@@ -262,8 +264,10 @@ static void on_missions(void *user, const int status, const cJSON *data, const c
     (void) error;
     if (status != 200 || !cJSON_IsObject(data)) {
         printf("[strike] missions refused (%d)\n", status);
+        T.econ_missions_failed = 1; // the answer is in: the tab says so (a tap on it asks again)
         return;
     }
+    T.econ_missions_failed = 0;
     cJSON_Delete(T.econ_missions);
     T.econ_missions = cJSON_Duplicate(data, 1);
     econ_cards_build();
@@ -501,7 +505,7 @@ static void bp_tab(const HtmlElem root, const int tab) {
     const HtmlElem content = html_dom_query(root, ".tabsContent");
     if (!content) return;
     char *html = NULL;
-    if (tab == 1 && !T.econ_missions_asked) econ_missions_ask(); // a Strike account: GET /strike/v1/missions/me
+    if ((tab == 1 || T.econ_missions_failed) && !T.econ_missions_asked) econ_missions_ask(); // a Strike account: GET /strike/v1/missions/me
     if (tab == 0 && bp_has_data()) {
         html = rewards_html();
     } else if (tab == 1 && bp_has_data()) {
@@ -519,6 +523,8 @@ static void bp_tab(const HtmlElem root, const int tab) {
         html = strike_template("MISSION_TAB_SCREEN", v, 1);
         free(body);
         printf("[strike] MISSION_TAB_SCREEN %d daily missions\n", count);
+    } else if (econ_on() && T.econ_missions_failed) { // refused / no answer: the tab says so (a tap on it asks again)
+        html = strdup(I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry."));
     } else {
         // I2: "Loading Rewards" / "Loading Missions" (no bpData, or no account: FRVR shows the same)
         const StrikeVar v[] = {{"screen", tab == 1 ? "Missions" : "Rewards"}};
@@ -1141,7 +1147,7 @@ int strike_meta_action(const char *a) {
     if (!strncmp(a, "bp-tab:", 7)) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
-        if (t == 1) T.econ_missions_asked = 0; // the Missions tab asks for the account's missions on every visit
+        if (t == 1 || T.econ_missions_failed) T.econ_missions_asked = 0; // the Missions tab asks for the account's missions on every visit; a failed load is asked again on any tab
         if (root && (t == 0 || t == 1)) bp_tab(root, t);
         return 1;
     }

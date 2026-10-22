@@ -105,7 +105,13 @@ static const char *const k_langs[][2] = {
 static cJSON *g_clan;   // windows[12].clanData (owned), NULL = not loaded
 static int g_clan_tab;  // windows[12].tabIndex
 static int g_req_sent;  // sendReq(3) in flight (the window asks once per load)
+static int g_clan_timer; // the clan's own load (sendReq(3)) has a deadline (html_timer id, 0 none)
+static int g_clan_failed; // that load got no answer (or was not sent): the window says so, with Retry
 static int g_scenario;  // --render-scenario: no network
+
+// Every load here has a deadline (CLAN_WAIT_MS): a request whose answer never comes, or that could not be sent
+// (no socket, the brain is gone), fails and the section says so with Retry, instead of "Loading..." for good.
+#define CLAN_WAIT_MS 15000
 
 // settings tab / tab 0 state (the Svelte components' state)
 static struct {
@@ -115,15 +121,19 @@ static struct {
     char motd_text[1024], motd_err[96];
     int motd_saved;       // "Saved!" for 3 s
     int64_t motd_for;     // clan id the MOTD belongs to
+    int motd_timer;       // the load's deadline (html_timer id, 0 none)
+    int motd_load_failed; // the load got no answer / a refusal: the section says so, with Retry
     // loot config (svelte-1ydnong) + the tab 0 display
     cJSON *loot;          // flat config (owned), NULL = not loaded
-    int loot_loading, loot_saving, loot_saved, loot_failed;
+    int loot_loading, loot_saving, loot_saved, loot_failed; // loot_failed: the load failed (Retry)
+    int loot_timer;
     char loot_err[96];
     char loot_mode[24];
     int loot_clan_pct, loot_top_count, loot_top_pct, loot_rem, loot_min_games;
     // recruitment (svelte-1o06kdk)
     cJSON *recruit;       // the clan's post (owned) or NULL
     int recruit_loaded, recruit_loading, recruit_saving;
+    int recruit_timer, recruit_failed; // the load's deadline; the load failed (not "no post"): Retry
     char recruit_err[96], recruit_ok[96];
     char r_desc[2048], r_looking[512], r_level[16], r_kd[16], r_region[8], r_lang[8];
     // banner colour
@@ -185,17 +195,22 @@ static int my_role(void) {
 static int is_mgr(void) { return i_am_leader() || my_role() == 2; }
 static int is_mgr2(void) { return i_am_leader() || my_role() >= 2; }
 
-static void send_cln(const int action, cJSON *value, cJSON *extra) {
+// 1 = sent; 0 = not sent (no socket, the brain is gone): no answer can come
+static int send_cln(const int action, cJSON *value, cJSON *extra) {
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("cln"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(action));
     cJSON_AddItemToArray(f, value ? value : cJSON_CreateNumber(1));
     if (extra) cJSON_AddItemToArray(f, extra);
-    backend_social_send(f);
+    const int sent = backend_social_send(f);
     cJSON_Delete(f);
+    return sent;
 }
 
 static void settings_reset(void) {
+    html_timer_cancel(S.motd_timer);
+    html_timer_cancel(S.loot_timer);
+    html_timer_cancel(S.recruit_timer);
     cJSON_Delete(S.motd);
     cJSON_Delete(S.loot);
     cJSON_Delete(S.recruit);
@@ -204,6 +219,9 @@ static void settings_reset(void) {
 }
 
 void clan_ui_reset(void) {
+    html_timer_cancel(g_clan_timer);
+    g_clan_timer = 0;
+    g_clan_failed = 0;
     cJSON_Delete(g_clan);
     g_clan = NULL;
     g_clan_tab = 0;
@@ -265,8 +283,39 @@ static int clan_rerender(void) {
     return 1;
 }
 
+// the clan's own load (sendReq(3)) got no answer by the deadline: the window says so, and Retry asks again
+static void clan_expired(void *user) {
+    (void) user;
+    g_clan_timer = 0;
+    if (g_clan || !g_req_sent) return;
+    g_req_sent = 0;
+    g_clan_failed = 1;
+    clan_rerender();
+}
+
+// the MOTD's load failed (a refusal, no answer, not sent): the section says so and Retry asks again
+static void motd_load_fail(void) {
+    html_timer_cancel(S.motd_timer);
+    S.motd_timer = 0;
+    S.motd_loading = 0;
+    if (!S.motd) S.motd = cJSON_CreateObject();
+    S.motd_load_failed = 1;
+}
+
+static void motd_expired(void *user) {
+    (void) user;
+    S.motd_timer = 0;
+    if (!S.motd_loading) return;
+    motd_load_fail();
+    clan_rerender();
+}
+
 static void on_motd(void *user, const int status, const cJSON *data, const cJSON *error) {
     const int kind = (int) (intptr_t) user; // 0 load, 1 save, 2 remove
+    if (kind == 0) {
+        html_timer_cancel(S.motd_timer);
+        S.motd_timer = 0;
+    }
     S.motd_loading = 0;
     S.motd_busy = 0;
     if (status == 200 && !error) {
@@ -274,7 +323,10 @@ static void on_motd(void *user, const int status, const cJSON *data, const cJSON
         S.motd = data ? cJSON_Duplicate(data, 1) : cJSON_CreateObject();
         snprintf(S.motd_text, sizeof(S.motd_text), "%s", jstr(S.motd, "message"));
         S.motd_err[0] = 0;
+        S.motd_load_failed = 0;
         if (kind == 1) S.motd_saved = 1;
+    } else if (kind == 0) {
+        motd_load_fail();
     } else {
         static const char *const fails[] = {"Failed to load MOTD", "Failed to save MOTD", "Failed to delete MOTD"};
         snprintf(S.motd_err, sizeof(S.motd_err), "%s", error ? v10_gapi_error_text(error, fails[kind]) : fails[kind]);
@@ -288,7 +340,21 @@ static void fetch_motd(void) {
     char path[64];
     snprintf(path, sizeof(path), "/clans/%d/motd", clan_id());
     S.motd_for = clan_id();
-    S.motd_loading = v10_gapi("GET", path, NULL, on_motd, (void *) 0);
+    S.motd_load_failed = 0;
+    S.motd_loading = v10_gapi("GET", path, NULL, on_motd, (void *) 0) != 0;
+    if (S.motd_loading) {
+        html_timer_cancel(S.motd_timer);
+        S.motd_timer = html_timer_add(CLAN_WAIT_MS, motd_expired, NULL);
+    } else {
+        motd_load_fail(); // not sent: no answer can come (no re-render here: this runs while the window renders)
+    }
+}
+
+// the section's failure: its text (the caller's I18N) and a Retry that asks again (the handler clears the section's state)
+static void load_failed(StrBuf *sb, const char *text, const char *retry) {
+    sb_append(sb, "<div class=\"io-message error-message svelte-1w0uz1r\">");
+    sb_append_esc(sb, text);
+    sb_appendf(sb, "</div> <button class=\"io-button\" onclick=\"%s\">%s</button>", retry, I18N("kn.retry", "Retry"));
 }
 
 static void loot_from(const cJSON *cfg) {
@@ -313,6 +379,10 @@ static void on_loot(void *user, const int status, const char *body, const size_t
     const int saving = (int) (intptr_t) user;
     S.loot_loading = 0;
     S.loot_saving = 0;
+    if (!saving) {
+        html_timer_cancel(S.loot_timer);
+        S.loot_timer = 0;
+    }
     cJSON *res = body ? cJSON_Parse(body) : NULL;
     const cJSON *data = cJSON_GetObjectItem(res, "data");
     if (status == 200 && cJSON_IsObject(data)) {
@@ -330,6 +400,7 @@ static void on_loot(void *user, const int status, const char *body, const size_t
         } else {
             cJSON_Delete(S.loot);
             S.loot = cJSON_Duplicate(row, 1);
+            S.loot_failed = 0;
             if (!jstr(S.loot, "updated_by_name")[0] && jstr(S.loot, "updated_by")[0])
                 cJSON_AddStringToObject(S.loot, "updated_by_name", jstr(S.loot, "updated_by"));
             loot_from(S.loot);
@@ -368,18 +439,46 @@ static void kio_settings_read(void *user, const int status, const cJSON *data, c
     cJSON_Delete(res);
 }
 
+// the loot config's load failed (a refusal, no answer, not sent): the section says so and Retry asks again
+static void loot_load_fail(void) {
+    html_timer_cancel(S.loot_timer);
+    S.loot_timer = 0;
+    S.loot_loading = 0;
+    S.loot_failed = 1;
+    if (!S.loot) {
+        S.loot = cJSON_CreateObject();
+        loot_from(S.loot);
+    }
+}
+
+static void loot_expired(void *user) {
+    (void) user;
+    S.loot_timer = 0;
+    if (!S.loot_loading) return;
+    loot_load_fail();
+    clan_rerender();
+}
+
 static void fetch_loot(void) {
     if (g_scenario || S.loot || S.loot_loading || !g_clan) return;
+    int sent = 0;
+    S.loot_failed = 0;
     if (kio_clan()) {
         char path[64];
         snprintf(path, sizeof(path), "/clans/%d/loot-config", clan_id());
-        S.loot_loading = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 0) != 0;
+        sent = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 0) != 0;
+    } else if (backend_available() == 1) {
+        char path[96];
+        snprintf(path, sizeof(path), "/api/clans/%d/loot-config", clan_id());
+        sent = backend_http_get(path, on_loot, (void *) 0) != 0;
+    }
+    if (!sent) { // not sent (the brain is not up): no answer can come
+        loot_load_fail();
         return;
     }
-    if (backend_available() != 1) return;
-    char path[96];
-    snprintf(path, sizeof(path), "/api/clans/%d/loot-config", clan_id());
-    S.loot_loading = backend_http_get(path, on_loot, (void *) 0) != 0;
+    S.loot_loading = 1;
+    html_timer_cancel(S.loot_timer);
+    S.loot_timer = html_timer_add(CLAN_WAIT_MS, loot_expired, NULL);
 }
 
 static void on_recruit(void *user, const int status, const char *body, const size_t length) {
@@ -391,7 +490,11 @@ static void on_recruit(void *user, const int status, const char *body, const siz
     const cJSON *data = cJSON_GetObjectItem(res, "data");
     const int ok = status >= 200 && status < 300 && !cJSON_IsObject(cJSON_GetObjectItem(res, "error")) && !cJSON_IsString(cJSON_GetObjectItem(res, "error"));
     if (kind == 0) {
-        S.recruit_loaded = 1; // errors are swallowed: "no post"
+        html_timer_cancel(S.recruit_timer);
+        S.recruit_timer = 0;
+        S.recruit_loaded = 1;
+        // a clan with no post answers 404 (or no data): "no post". Any other reply that is not a post is a failed load
+        S.recruit_failed = !ok && status != 404;
         cJSON_Delete(S.recruit);
         S.recruit = ok && cJSON_IsObject(data) ? cJSON_Duplicate(data, 1) : NULL;
         if (S.recruit) {
@@ -433,18 +536,43 @@ static void recruit_url(char *out, const size_t n) {
     snprintf(out, n, "%s/api/clans/%d/recruitment?token=%s", backend_url(), clan_id(), token);
 }
 
+// the recruitment load failed (no answer, not sent): the section says so and Retry asks again
+static void recruit_load_fail(void) {
+    html_timer_cancel(S.recruit_timer);
+    S.recruit_timer = 0;
+    S.recruit_loading = 0;
+    S.recruit_loaded = 1;
+    S.recruit_failed = 1;
+}
+
+static void recruit_expired(void *user) {
+    (void) user;
+    S.recruit_timer = 0;
+    if (!S.recruit_loading) return;
+    recruit_load_fail();
+    clan_rerender();
+}
+
 static void fetch_recruit(void) {
     if (g_scenario || S.recruit_loaded || S.recruit_loading || !g_clan) return;
+    int sent = 0;
+    S.recruit_failed = 0;
     if (kio_clan()) {
         char path[64];
         snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
-        S.recruit_loading = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 1) != 0;
+        sent = v10_gapi("GET", path, NULL, kio_settings_read, (void *) 1) != 0;
+    } else if (backend_available() == 1) {
+        char url[600];
+        recruit_url(url, sizeof(url));
+        sent = backend_http_request("GET", url, NULL, on_recruit, (void *) 0) != 0;
+    }
+    if (!sent) { // not sent (the brain is not up): no answer can come
+        recruit_load_fail();
         return;
     }
-    if (backend_available() != 1) return;
-    char url[600];
-    recruit_url(url, sizeof(url));
-    S.recruit_loading = backend_http_request("GET", url, NULL, on_recruit, (void *) 0) != 0;
+    S.recruit_loading = 1;
+    html_timer_cancel(S.recruit_timer);
+    S.recruit_timer = html_timer_add(CLAN_WAIT_MS, recruit_expired, NULL);
 }
 
 // ------------------------------------------------------------------ tab 0 (home)
@@ -677,6 +805,11 @@ static void gen_motd(StrBuf *sb) {
         sb_append(sb, "<div class=\"motd-loading svelte-15d5v89\">Loading...</div></div>");
         return;
     }
+    if (S.motd_load_failed && !g_scenario) {
+        load_failed(sb, I18N("kn.clan.motdFailed", "Couldn't load the message of the day."), "windows[12].motdRetry()");
+        sb_append(sb, "</div>");
+        return;
+    }
     if (S.motd_err[0]) {
         sb_append(sb, "<div class=\"motd-error svelte-15d5v89\">");
         sb_append_esc(sb, S.motd_err);
@@ -802,6 +935,11 @@ static void gen_loot(StrBuf *sb) {
         sb_append(sb, "<div class=\"loot-loading svelte-1ydnong\">Loading loot config...</div></div></div></div>");
         return;
     }
+    if (S.loot_failed && !g_scenario) { // the load failed: the section says so (not the default form), and Retry asks again
+        load_failed(sb, I18N("kn.clan.lootFailed", "Couldn't load the loot config."), "windows[12].lootRetry()");
+        sb_append(sb, "</div></div></div></div>");
+        return;
+    }
     if (!S.loot_mode[0]) loot_from(S.loot);
     const char *by = jstr(S.loot, "updated_by_name");
     if (by[0]) {
@@ -872,6 +1010,12 @@ static void gen_recruit(StrBuf *sb) {
     sb_append(sb, "<div class=\"setHed\" style=\"margin-top:20px\">Recruitment Board</div> ");
     if (!S.recruit_loaded && !g_scenario) {
         sb_append(sb, "<div class=\"loading svelte-1o06kdk\">Loading recruitment post...</div>");
+        return;
+    }
+    if (S.recruit_failed && !g_scenario) { // the load failed (not "no post"): the section says so, and Retry asks again
+        sb_append(sb, "<div class=\"recruitment-manage svelte-1o06kdk\"><div class=\"io-card\"><div class=\"io-input-container svelte-1o06kdk\">");
+        load_failed(sb, I18N("kn.clan.recruitFailed", "Couldn't load the recruitment post."), "windows[12].recruitRetry()");
+        sb_append(sb, "</div></div></div>");
         return;
     }
     char funds[32];
@@ -976,11 +1120,22 @@ char *clan_window_gen(void) {
     }
     sb_append(&sb, "</div><div id='clanErr' style='margin-top:0px;color:rgba(0,0,0,0.5)'>");
     if (!g_clan) {
-        sb_appendf(&sb, "%s</div>", I18N("generic.loading", "LOADING..."));
-        if (!g_req_sent && !g_scenario) {
+        if (!g_req_sent && !g_clan_failed && !g_scenario) {
             g_req_sent = 1;
-            send_cln(3, NULL, NULL); // this.sendReq(3)
+            if (send_cln(3, NULL, NULL)) { // this.sendReq(3): its answer has a deadline
+                html_timer_cancel(g_clan_timer);
+                g_clan_timer = html_timer_add(CLAN_WAIT_MS, clan_expired, NULL);
+            } else { // not sent (no socket, the brain is gone): no answer can come
+                g_req_sent = 0;
+                g_clan_failed = 1;
+            }
         }
+        if (g_clan_failed && !g_scenario) { // no answer by the deadline, or not sent: the window says so, with Retry
+            load_failed(&sb, I18N("kn.clan.loadFailed", "Couldn't load the clan. Try again."), "windows[12].clanRetry()");
+            sb_append(&sb, "</div>");
+            return sb_finish(&sb);
+        }
+        sb_appendf(&sb, "%s</div>", I18N("generic.loading", "LOADING..."));
         return sb_finish(&sb);
     }
     switch (g_clan_tab) {
@@ -1569,6 +1724,25 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         motd_send(0);
     } else if (!strcmp(m, "motdRemove")) {
         motd_send(1);
+    } else if (!strcmp(m, "motdRetry")) { // the failed load is asked again by the next render (gen_motd)
+        cJSON_Delete(S.motd);
+        S.motd = NULL;
+        S.motd_for = 0;
+        S.motd_load_failed = 0;
+        clan_rerender();
+    } else if (!strcmp(m, "lootRetry")) {
+        cJSON_Delete(S.loot);
+        S.loot = NULL;
+        S.loot_failed = 0;
+        clan_rerender();
+    } else if (!strcmp(m, "recruitRetry")) {
+        S.recruit_loaded = 0;
+        S.recruit_failed = 0;
+        clan_rerender();
+    } else if (!strcmp(m, "clanRetry")) { // the clan's own load: sendReq(3) again on the render
+        g_clan_failed = 0;
+        g_req_sent = 0;
+        clan_rerender();
     } else if (!strcmp(m, "bannerPick")) {
         const int i = arg_num(args, argc, 0, -1);
         if (i >= 0 && i < PAINTS && paint_count(k_paints[i].index) > 0) S.banner_sel = i;
@@ -1664,6 +1838,9 @@ void clan_ui_frame(const cJSON *frame) {
     }
     if (action == 3) {
         g_req_sent = 0;
+        html_timer_cancel(g_clan_timer);
+        g_clan_timer = 0;
+        g_clan_failed = 0;
         if (!has_data && !(msg && msg[0])) { // not in a clan any more (kicked, deleted): the create/join form
             account_set_clan(NULL);
             menu_rerender_if_open(13);

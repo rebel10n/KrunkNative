@@ -436,7 +436,12 @@ static struct {
     char error[200];
     int frozen;               // --render-scenario: the draw's time left stands still (popups.lotterySecondsLeft)
     double frozen_left;
+    int timer;                // the view's deadline (html_timer id, 0 none): no answer by then fails the window
+    int timed_out;
 } LT;
+
+// the lottery view has a deadline: no answer by then (the brain is gone, or it stalls) shows the failure with Retry
+#define LOT_WAIT_MS 15000
 
 // the lottery's brain route, with the account's session token in the URL (v10's ?token=, as its API client sends it;
 // a guest's is empty and the brain answers the guest's view)
@@ -533,14 +538,23 @@ static char *lot_html(void) {
     const cJSON *lottery = lot_data(&req);
     StrBuf sb = {0};
     if (!lottery) {
-        // v10's loading box (the window's !lottery branch): "Loading..." or the error v10's request stored
-        const char *error = LT.error[0] ? LT.error : req && req->status != 0 && req->status != 200 ? "Failed to load lottery" : "";
+        // v10's loading box (the window's !lottery branch): "Loading..." while the view is asked for, else the failure
+        // with Retry: the brain refused it (an error status, or an answer with no lottery in it), it could not be
+        // reached, or no answer came by LOT_WAIT_MS (LT.timed_out)
+        const int failed = LT.timed_out || LT.error[0] || (req && req->status != 0);
         sb_append(&sb, "<div class=\"lottery-window-loading svelte-1rj22es\"><div class=\"window-container svelte-623zut\"><div>");
-        if (error[0]) sb_append_esc(&sb, error);
-        else sb_append(&sb, "Loading...");
+        if (failed) {
+            sb_append(&sb, "<div>");
+            sb_append_esc(&sb, LT.error[0] ? LT.error : I18N("kn.lottery.loadFailed", "Couldn't load the lottery."));
+            sb_appendf(&sb, "</div> <button id=\"knLotRetry\" class=\"enter-lottery-button svelte-1rj22es\" onmouseenter=\"playTick(0.1)\" onclick=\"knMiscLotRetry()\">%s</button>",
+                       I18N("kn.retry", "Retry"));
+        } else {
+            sb_append(&sb, "Loading...");
+        }
         sb_append(&sb, "</div></div></div>");
         return sb_finish(&sb);
     }
+    LT.timed_out = 0;
     const cJSON *info = cJSON_GetObjectItem(lottery, "lottery"), *draw = cJSON_GetObjectItem(lottery, "current_draw");
     const cJSON *costs = cJSON_GetObjectItem(lottery, "costs"), *prev = cJSON_GetObjectItem(lottery, "previous_draws");
     if (!info) info = lottery; // answers shaped {id, title, theme, current_draw, costs, ...}
@@ -696,11 +710,27 @@ static void lot_render(void) {
     free(html);
 }
 
+// no answer for the view by LOT_WAIT_MS: the window fails with Retry (a late answer still shows the lottery)
+static void lot_expired(void *user) {
+    (void) user;
+    LT.timer = 0;
+    if (lot_data(NULL)) return;
+    LT.timed_out = 1;
+    if (v10_popup_open("defaultModal lotteryModal")) lot_render();
+}
+
+static void lot_arm_deadline(void) {
+    html_timer_cancel(LT.timer);
+    LT.timer = G.scenario ? 0 : html_timer_add(LOT_WAIT_MS, lot_expired, NULL);
+    LT.timed_out = 0;
+}
+
 static void lot_open(const int id) {
     LT.id = id > 0 ? id : 3; // openLottery(): lotteryId = arguments[0] ?? 3
     memset(LT.qty, 0, sizeof(LT.qty));
     LT.submitting = 0;
     if (!G.scenario) LT.error[0] = 0; // a scenario's error (its answer) is the state it stands in for
+    lot_arm_deadline();
     char *html = lot_html();
     v10_popup_show("defaultModal lotteryModal", html, lot_render);
     free(html);
@@ -1190,6 +1220,14 @@ int v10_misc_popups_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         const int max = lot_available(cost) / step * step;
         if (!strcmp(name, "knMiscLotAll")) LT.qty[i] = max;
         else LT.qty[i] = (int) fmax(0, fmin(max, LT.qty[i] + arg_int(args, argc, 1, 0) * step));
+        lot_render();
+        return 1;
+    }
+    if (!strcmp(name, "knMiscLotRetry")) { // the failed view is asked for again (a fresh request, a fresh deadline)
+        char path[512];
+        v10_forget(lot_path(path, sizeof(path), ""));
+        LT.error[0] = 0;
+        lot_arm_deadline();
         lot_render();
         return 1;
     }

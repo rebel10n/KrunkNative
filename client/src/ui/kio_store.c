@@ -42,6 +42,7 @@
 #define SLOTS 6
 #define RANKED_TTL_MS 60000.0
 #define ERROR_RETRY_MS 5000.0 // an error is fetched again when the tab renders this much later (v10: on its next mount)
+#define KIO_WAIT_MS 15000     // a request with no answer by then is abandoned: the tab says so, with Retry (its late answer is dropped)
 #define DISPLAY_LIMITED "shop/displays?tag=limited"
 #define RANKED_SHOP "ranked/shop"
 #define CARD 300 // _39555 size (and the front grid's column)
@@ -148,6 +149,25 @@ static void on_answer(void *user, const int status, const cJSON *res) {
     v10_refresh();             // the Ranked popup, an open item view
 }
 
+// A request with no answer by KIO_WAIT_MS is abandoned: its slot stops waiting (its late answer finds no request in
+// flight and is dropped), and the tab says krunker.io did not answer, with Retry, instead of "Loading" for good
+static void kio_expired(void *user) {
+    const unsigned id = (unsigned) (uintptr_t) user;
+    for (int i = 0; i < SLOTS; i++) {
+        Slot *s = &g_slot[i];
+        if (!s->used || !s->inflight || s->id != id) continue;
+        s->inflight = 0;
+        s->id = 0;
+        s->at_ms = now_ms();
+        s->req.status = -1;
+        snprintf(s->error, sizeof(s->error), "%s", I18N("kn.kio.store.noAnswer", "krunker.io did not answer. Try again."));
+        printf("[kio-store] %s: no answer in %d s\n", s->path, KIO_WAIT_MS / 1000);
+        menu_rerender_if_open(14);
+        v10_refresh();
+        return;
+    }
+}
+
 // GET path on krunker.io's API: the cached answer, fetched when there is none, it is older than
 // ttl_ms (0 = kept), or it was an error ERROR_RETRY_MS ago
 static Slot *kio_get(const char *path, const double ttl_ms) {
@@ -178,6 +198,8 @@ static Slot *kio_get(const char *path, const double ttl_ms) {
         s->at_ms = now;
         s->req.status = -1;
         snprintf(s->error, sizeof(s->error), "Failed to fetch");
+    } else {
+        html_timer_add(KIO_WAIT_MS, kio_expired, (void *) (uintptr_t) s->id);
     }
     return s;
 }
