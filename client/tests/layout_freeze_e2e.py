@@ -231,6 +231,33 @@ def rects(log, label):
     return int(m.group(1)) if m else -1
 
 
+RECT_CARD = re.compile(r"(\S+)@(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)")
+
+
+def visible(log, label):
+    """The cards of a `rects @label .skinCard` line that are on screen: their box meets the list's box (the
+    `rects @list [id=skinList]` line; the window when that is missing). The VGrid renders a window of rows around the
+    viewport (ui_vgrid.c VGRID_BUFFER_ROWS), so the DOM count is not the count on screen."""
+    m = re.search(r"\[input_script\] rects t=\d+ @%s n=\d+((?: \S+@[^ ]+)*)" % re.escape(label), log)
+    if not m:
+        return -1
+    top, bottom = 0.0, 720.0
+    lb = re.search(r"\[input_script\] rects t=\d+ @list n=1 -@(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)", log)
+    if lb:
+        top, bottom = float(lb.group(2)), float(lb.group(2)) + float(lb.group(4))
+    n = 0
+    for tok in m.group(1).split():
+        c = RECT_CARD.fullmatch(tok)
+        if c and float(c.group(3)) + float(c.group(5)) > top and float(c.group(3)) < bottom:
+            n += 1
+    return n
+
+
+def typed_value(log, label):
+    m = re.search(r"\[input_script\] text t=\d+ @%s n=\d+ checked=\d+ value=(\S*)" % re.escape(label), log)
+    return m.group(1).replace("_", " ") if m else None
+
+
 def shot_taken(path):
     dest_dir = os.environ.get("LAYOUT_FREEZE_SHOTS")
     if os.path.exists(path) and dest_dir:
@@ -299,7 +326,7 @@ def scenario_skins(brain_url, token, name):
     h, t = hover_lines(t, "skinList", 10)
     lines += h
     lines += ["%d clickid itemSearch" % t, "%d type a" % (t + 300), "%d type k" % (t + 600), "%d type 4" % (t + 900),
-              "%d up BACKSPACE" % (t + 1200),   # the keyup runs searchItems (onkeyup): type only fires the char
+              "%d up 4" % (t + 1100), "%d text @typed [id=itemSearch]" % (t + 1200),  # keyup on the focused input runs searchItems
               "%d rects @searched .skinCard" % (t + 1600)]
     t += 1800
     h, t = hover_lines(t, "skinList", 8)
@@ -312,15 +339,20 @@ def scenario_skins(brain_url, token, name):
     h, t = hover_lines(t, "skinList", 8)
     lines += h
     lines.append("%d rects @final .skinCard" % t)
+    lines.append("%d rects @list [id=skinList]" % t)  # the list's box (window px, as the cards): the cards on screen are inside it
     lines.append("%d quit" % (t + 500))
     proc, log, cmds = run_client("skins", "\n".join(lines) + "\n", brain_url, token, name)
     png = os.path.join(WORK, "skins.png")
     if wait_log(proc, log, "@scrolled n="):
         ui_cmd(cmds, "shot " + png)
     log = finish(proc, log, "skins")
-    check("the Select Skin picker lists the owned cards (VGrid first chunk)", rects(log, "cards") >= 40, "n=%d" % rects(log, "cards"))
-    check("the list scrolled (cards still rendered)", rects(log, "scrolled") >= 40, "n=%d" % rects(log, "scrolled"))
-    check("the search narrowed the list", 0 <= rects(log, "searched") < rects(log, "cards"), "n=%d" % rects(log, "searched"))
+    check("the Select Skin picker shows the owned cards on screen (VGrid window)", visible(log, "cards") >= 20,
+          "visible=%d of n=%d" % (visible(log, "cards"), rects(log, "cards")))
+    check("the list scrolled (cards still on screen)", visible(log, "scrolled") >= 20, "visible=%d" % visible(log, "scrolled"))
+    check("the search typed into the input (its value reads ak4)", typed_value(log, "typed") == "ak4", "value=%r" % typed_value(log, "typed"))
+    check("the search handler ran on keyup (searchItems)", "[ui] handler searchItems(" in log)
+    check("the search narrowed the list", 0 < visible(log, "searched") < visible(log, "cards"),
+          "visible %d -> %d" % (visible(log, "cards"), visible(log, "searched")))
     check("screenshot of the scrolled picker", shot_taken(png))
     layout_report("skins", log)
 
@@ -372,7 +404,8 @@ def main():
         print("FAILED: " + "; ".join(FAILS) + "  (work dir %s)" % WORK)
         sys.exit(1)
     print("layout freeze e2e: all passed (work dir %s)" % WORK)
-    shutil.rmtree(WORK, ignore_errors=True)
+    if not os.environ.get("LAYOUT_FREEZE_KEEP"):  # LAYOUT_FREEZE_KEEP=1: keep the logs and perf data of a passing run
+        shutil.rmtree(WORK, ignore_errors=True)
 
 
 if __name__ == "__main__":
