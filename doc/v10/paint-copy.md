@@ -131,8 +131,12 @@ kept on the bridge side.
   market rows (`sid`, `m`) comes from the bundle reading above. A capture needs a painted copy on a production account,
   which this change does not touch. The local playable check runs a guest round against KrunkNative's own server, so it
   does not capture the paint list (see the report).
-- Postgres and MySQL migrations are written to the same shape as sqlite, but only sqlite ran in the brain test here.
-  The postgres `kn_add_skin` guard was not executed.
+- Postgres and MySQL: not run. The migrations (0352 on both) and the SQL in `db_economy.c` / `db_common.c` / `economy.c`
+  were read against the dialect rules, not executed. A PostgreSQL server answers on 127.0.0.1:5432, but its
+  `krunknative` role needs a password that the test run had no access to; no MySQL server listens on 3306. The
+  postgres `kn_add_skin` guard was not executed. Its refusal says "Item not owned" where the C path says "Only painted
+  copies of that item are left" (a message difference, not a count difference).
+- `services/brain/tests/paint_e2e_test.py` (`brain_paint_e2e`) runs on sqlite only.
 
 ## Tests
 
