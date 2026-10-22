@@ -313,7 +313,9 @@ static void prof_report(Engine *g, double now)
             g->dl.n, image_cache_count(g->images), resident, (double) bytes / 1048576.0, decodes);
     prof_print("decode/frame", &g->st_decode);
     const GlbStats gs = glb_stats(g->glb);
-    fprintf(stderr, ")  last frame %d draws %d culled\n", gs.draw_calls, gs.culled);
+    uint32_t hcap = 0, hlive = 0, htombs = 0;
+    events_handler_stats(&g->events, &hcap, &hlive, &htombs);
+    fprintf(stderr, ")  last frame %d draws %d culled  handlers %u/%u (%u tombs)\n", gs.draw_calls, gs.culled, hlive, hcap, htombs);
     memset(&g->st_decode, 0, sizeof(ProfStat));
     memset(&g->st_restyle, 0, sizeof(ProfStat));
     memset(&g->st_cascade, 0, sizeof(ProfStat));

@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "events.h"
 #include "util.h"
@@ -33,7 +34,7 @@ static int g_fail;
 /* calls.  Box == the element itself (the host hooks hit-test rects).        */
 /* ========================================================================= */
 
-#define MAX_ELEMS 256
+#define MAX_ELEMS 8192 /* test_handler_churn renders thousands of card elements */
 #define MAX_ATTRS 16
 
 struct Box {
@@ -1093,6 +1094,57 @@ static void test_removal_and_cache(void)
     CHECK(g_es.handler_count <= 16);
 }
 
+/* The handler cache under a long session's churn: the Select Skin grid re-renders its cards on
+ * every scroll (ui_vgrid.c), the market its rows on every tab, the chat its lines; each removed
+ * element leaves a tombstone per cached handler attribute.  Before 2026-10-22 only the live
+ * entries counted toward the table's load, so the tombstones took every slot and the first
+ * dispatch on a fresh element probed for an empty one forever (the user's two main-thread
+ * freezes, handler_lookup from set_hover_target and do_click).  The table must keep an empty
+ * slot at all times (live + tombstones under 3/4 of its capacity), the churn must stay linear
+ * (bounded time), and the table must not grow with the tombstones (a rehash sizes it from the
+ * live entries). */
+static void test_handler_churn(void)
+{
+    enum { PER_ROUND = 48 };   /* a VGrid chunk: 48 cards, three handler elements each */
+    uint32_t cap = 0, live = 0, tombs = 0, worst_load = 0, max_cap = 0;
+    int rounds = 0, dispatches = 0;
+    const clock_t t0 = clock();
+    while (g_dom.count + PER_ROUND * 3 < MAX_ELEMS - 1) {
+        HtmlElem cards[PER_ROUND];
+        for (int i = 0; i < PER_ROUND; i++) {
+            HtmlElem card = mk(menu_, "div", NULL);
+            dom_set_attr(&g_dom, card, "onclick", "showWindow(1)");
+            dom_set_attr(&g_dom, card, "onmouseenter", "playTick()");
+            HtmlElem info = mk(card, "div", NULL);
+            dom_set_attr(&g_dom, info, "onclick", "playTick()");
+            HtmlElem fav = mk(card, "div", NULL);
+            dom_set_attr(&g_dom, fav, "onclick", "playTick()");
+            cards[i] = card;
+            events_click(&g_es, card);   /* every click dispatch caches the chain's handlers */
+            events_click(&g_es, info);
+            events_click(&g_es, fav);
+            dispatches += 3;
+            events_handler_stats(&g_es, &cap, &live, &tombs);
+            const uint32_t load = cap ? (live + tombs) * 100 / cap : 0;
+            if (load > worst_load) worst_load = load;
+            if (cap > max_cap) max_cap = cap;
+        }
+        for (int i = 0; i < PER_ROUND; i++) { events_elem_removed(&g_es, cards[i]); kill_subtree(cards[i]); }
+        rounds++;
+    }
+    const double ms = (double) (clock() - t0) * 1000.0 / CLOCKS_PER_SEC;
+    events_handler_stats(&g_es, &cap, &live, &tombs);
+    fprintf(stderr, "handler churn: %d rounds, %d dispatches, worst load %u%%, max cap %u, now cap %u live %u tombs %u, %.1f ms\n",
+            rounds, dispatches, worst_load, max_cap, cap, live, tombs, ms);
+    CHECK(rounds >= 50);
+    CHECK(worst_load <= 75);                   /* an empty slot always ends a probe */
+    CHECK((live + tombs) * 4 <= cap * 3);
+    CHECK(max_cap <= 1024);                    /* sized by the live entries, not the tombstones */
+    CHECK(live <= 16);
+    CHECK(ms < 2000.0);                        /* linear in the dispatches (a hang is a timeout) */
+    log_clear();
+}
+
 int main(int argc, char **argv)
 {
     const char *repo = argc > 1 ? argv[1] : "/home/user/src/KrunkNative";
@@ -1117,6 +1169,7 @@ int main(int argc, char **argv)
     test_scrollbar();
     test_resize_observer();
     test_removal_and_cache();
+    test_handler_churn();
 
     events_fini(&g_es);
     for (HtmlElem e = 1; e <= g_dom.count; e++) {

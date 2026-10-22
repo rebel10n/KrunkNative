@@ -407,7 +407,14 @@ static void handler_table_free(EventSystem *es)
     for (uint32_t i = 0; i < es->handler_cap; i++) free(es->handlers[i].text);
     free(es->handlers);
     es->handlers = NULL;
-    es->handler_cap = es->handler_count = 0;
+    es->handler_cap = es->handler_count = es->handler_tombs = 0;
+}
+
+void events_handler_stats(const EventSystem *es, uint32_t *cap, uint32_t *live, uint32_t *tombs)
+{
+    if (cap) *cap = es->handler_cap;
+    if (live) *live = es->handler_count;
+    if (tombs) *tombs = es->handler_tombs;
 }
 
 static EvHandlerEntry *handler_insert_raw(EvHandlerEntry *tab, uint32_t cap, HtmlElem e, const char *type)
@@ -420,10 +427,19 @@ static EvHandlerEntry *handler_insert_raw(EvHandlerEntry *tab, uint32_t cap, Htm
     }
 }
 
+/* Rehash into a table sized for the live entries (at most half full afterwards): a table that
+ * filled up with tombstones shrinks back, one that filled with live entries doubles. */
 static void handler_table_grow(EventSystem *es)
 {
-    uint32_t ncap = es->handler_cap ? es->handler_cap * 2 : 64;
+    uint32_t live_now = 0;
+    for (uint32_t i = 0; i < es->handler_cap; i++) {
+        const EvHandlerEntry *ent = &es->handlers[i];
+        if (ent->elem && dom_elem_data(es->dom, ent->elem)) live_now++;
+    }
+    uint32_t ncap = 64;
+    while (ncap < (live_now + 1) * 2) ncap *= 2;
     EvHandlerEntry *ntab = calloc(ncap, sizeof(*ntab));
+    if (!ntab) return;
     uint32_t live = 0;
     for (uint32_t i = 0; i < es->handler_cap; i++) {
         EvHandlerEntry *ent = &es->handlers[i];
@@ -437,16 +453,28 @@ static void handler_table_grow(EventSystem *es)
     es->handlers = ntab;
     es->handler_cap = ncap;
     es->handler_count = live;
+    es->handler_tombs = 0;
 }
 
+/* The slot of (e, type): the cached entry, or a slot for it (a tombstone on its probe path,
+ * else the empty slot that ended the probe).
+ *
+ * Open addressing with tombstones: a probe for a key that is not in the table ends only at an
+ * EMPTY slot, so the load factor must count the tombstones too. Counting the live entries alone
+ * (before 2026-10-22) let the tombstones of removed elements (every re-rendered skin card, market
+ * row or chat line leaves one per handler attribute) fill the table until no empty slot was left,
+ * and the first hover or click on a fresh element then probed forever: the main thread froze in
+ * this loop (crash/freeze-20261022-143134 and -154205, handler_lookup from set_hover_target and
+ * do_click). */
 static EvHandlerEntry *handler_lookup(EventSystem *es, HtmlElem e, const char *type, const char *text)
 {
-    if (es->handler_cap == 0 || (es->handler_count + 1) * 4 > es->handler_cap * 3) handler_table_grow(es);
+    if (es->handler_cap == 0 || (es->handler_count + es->handler_tombs + 1) * 4 > es->handler_cap * 3)
+        handler_table_grow(es);
     uint32_t mask = es->handler_cap - 1;
     uint32_t i = handler_hash(e, type) & mask;
     EvHandlerEntry *tomb = NULL;
-    EvHandlerEntry *ent;
-    for (;;) {
+    EvHandlerEntry *ent = NULL;
+    for (uint32_t n = 0; n <= mask; n++) {
         ent = &es->handlers[i];
         if (ent->elem == e && ent->type == type) {
             if (strcmp(ent->text, text) == 0) return ent;
@@ -459,7 +487,16 @@ static EvHandlerEntry *handler_lookup(EventSystem *es, HtmlElem e, const char *t
         }
         i = (i + 1) & mask;
     }
-    if (tomb) ent = tomb;
+    if (tomb) { ent = tomb; es->handler_tombs--; }
+    else if (ent->elem != 0) {
+        /* no empty slot on a full wrap (the load factor above makes this impossible): rehash,
+         * then take the empty slot the fresh table has */
+        handler_table_grow(es);
+        mask = es->handler_cap - 1;
+        i = handler_hash(e, type) & mask;
+        while (es->handlers[i].elem != 0) i = (i + 1) & mask;
+        ent = &es->handlers[i];
+    }
     es->handler_count++;
 parse:
     ent->elem = e;
@@ -1395,6 +1432,7 @@ void events_elem_removed(EventSystem *es, HtmlElem root)
             ent->text = NULL;
             ent->elem = 0; /* tombstone: type stays non-NULL */
             es->handler_count--;
+            es->handler_tombs++;
         }
     }
 }

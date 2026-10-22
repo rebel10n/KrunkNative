@@ -267,6 +267,7 @@ typedef struct EventSystem {
 
     EvHandlerEntry *handlers;      /* parsed inline handler cache (hash table)   */
     uint32_t handler_cap, handler_count;
+    uint32_t handler_tombs;        /* tombstones: slots of removed elements, dead until a rehash */
 
     char value_buf[512];           /* this.value scratch for <select>            */
     uint8_t in_after_layout;
@@ -335,6 +336,10 @@ void events_elem_removed(EventSystem *es, HtmlElem e);
 /* Drops cached parsed handlers whose attribute text changed is automatic
  * (the cache compares the live attribute text); this forces a full drop. */
 void events_invalidate_handlers(EventSystem *es);
+/* The handler cache's table: slots, live entries, tombstones (entries of removed elements).
+ * live + tombs stays under 3/4 of cap: a probe always ends at an empty slot (the freeze of
+ * 2026-10-22; test_events.c handler_churn, the engine's profile line). */
+void events_handler_stats(const EventSystem *es, uint32_t *cap, uint32_t *live, uint32_t *tombs);
 
 /* ---- resize observers + post-layout ----------------------------------------- */
 
