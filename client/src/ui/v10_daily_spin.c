@@ -8,6 +8,9 @@
 // gapi /daily-spin/progress (the client never talks to anything but kn_brain).
 // The item sits in #menuItemContainer after the Battle Pass item (.bpItem:not(.guideItem)), with
 // the sidebar divider v10 draws after it.
+// On krunker.io servers the progress is krunker.io's (api.krunker.io, v10.0.3's getProgress) and a
+// locked click does what v10.0.3's handler does: nothing, no message (doc/v10/daily-spin.md). A load
+// failure shows no text either: v10 keeps the store's default (0/5000), so the item does too.
 #include <ui_logic.h>
 #include <client.h> // glfwGetTime
 #include <html_ui.h> // html_ui_is_menu_open
@@ -25,7 +28,6 @@
 
 static struct {
     int known;               // a "dsp" reply arrived for this account
-    int failed;              // the last progress ask was refused or had no answer: the item says Unavailable
     int score, max_score, stage, claimed, claiming;
     double time_remaining;   // ms to the daily reset
     int account_id;          // whose state this is
@@ -64,9 +66,7 @@ static void render_item(HtmlElem item) {
         sb_appendf(&sb, "<span class=\"dsClaim svelte-159x57l\">%s</span>", g_ds.claiming ? "CLAIMING..." : "FREE SPIN");
     } else if (done) {
         sb_append(&sb, "<span class=\"dsDone svelte-159x57l\">CLAIMED</span>");
-    } else if (g_ds.failed && !g_ds.known) {
-        sb_appendf(&sb, "<span style=\"color:#fff;\" class=\"svelte-159x57l\">%s</span>", I18N("kn.dailySpin.unavailable", "Unavailable"));
-    } else {
+    } else { // not known yet (or a load failed): the store's default 0/5000, as v10 shows it
         const double pct = g_ds.max_score > 0 ? (g_ds.score >= g_ds.max_score ? 100.0 : 100.0 * g_ds.score / g_ds.max_score) : 0.0;
         sb_appendf(&sb, "<span style=\"color:#fff;\" class=\"svelte-159x57l\">%d/%d</span> <div class=\"dsBar svelte-159x57l\"><div class=\"dsBarFill svelte-159x57l\" style=\"width:%g%%\"></div></div>",
                    g_ds.score, g_ds.max_score, pct);
@@ -104,7 +104,7 @@ static void sync_item(void) {
         HtmlElem items[8], bp = 0;
         const int n = html_dom_query_all(box, ".bpItem", items, 8); // the Battle Pass item, not the guests' Guide
         for (int i = 0; i < n && !bp; i++) if (!html_dom_has_class(items[i], "guideItem")) bp = items[i];
-        static const char MARKUP[] = "<div class=\"menuItem dsItem svelte-159x57l\" id=\"dailySpinDiv\" onclick=\"knDailySpin()\" onmouseenter=\"playTick();knDailySpinTip(1)\" onmouseleave=\"knDailySpinTip(0)\"></div> <div class=\"sidebarDivider svelte-159x57l\" id=\"knDailySpinDivider\"></div>";
+        static const char MARKUP[] = "<div class=\"menuItem dsItem svelte-159x57l\" id=\"dailySpinDiv\" onclick=\"playSelect();knDailySpin()\" onmouseenter=\"playTick();knDailySpinTip(1)\" onmouseleave=\"knDailySpinTip(0)\"></div> <div class=\"sidebarDivider svelte-159x57l\" id=\"knDailySpinDivider\"></div>";
         html_dom_insert_html(bp ? bp : box, bp ? HTML_INSERT_AFTER_END : HTML_INSERT_AFTER_BEGIN, MARKUP);
         item = html_dom_by_id("dailySpinDiv");
         if (!item) return;
@@ -121,11 +121,7 @@ static void kio_progress_done(void *user, const int status, const cJSON *res) {
     const AccountInfo *acc = active_account();
     if (!acc || acc->id != (int) (uintptr_t) user) return; // another account's answer
     const cJSON *data = cJSON_IsObject(res) ? cJSON_GetObjectItem(res, "data") : NULL;
-    if (status != 200 || !cJSON_IsObject(data)) { // refused, unreachable or no answer: Unavailable, asked again later
-        g_ds.failed = 1;
-        sync_item();
-        return;
-    }
+    if (status != 200 || !cJSON_IsObject(data)) return; // refused, unreachable or no answer: v10's getProgress catch {}, nothing shown; asked again in a minute
     cJSON *frame = cJSON_CreateArray();
     if (!frame) return;
     cJSON_AddItemToArray(frame, cJSON_CreateString("dsp"));
@@ -138,11 +134,9 @@ static void ask(void) {
     g_ds.asked_at = now_ms();
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         const AccountInfo *acc = active_account();
-        if (!acc || !krunker_account_api("GET", KRUNKER_SVC_DATA, "/daily-spin/progress", NULL, kio_progress_done,
-                                         (void *) (uintptr_t) acc->id)) {
-            g_ds.failed = 1; // refused at once (every request slot busy): the item says so
-            sync_item();
-        }
+        if (acc) // refused at once (every request slot busy): nothing shown, asked again in a minute
+            krunker_account_api("GET", KRUNKER_SVC_DATA, "/daily-spin/progress", NULL, kio_progress_done,
+                                (void *) (uintptr_t) acc->id);
         return;
     }
     account_send_frame("dsp");
@@ -172,13 +166,8 @@ void v10_daily_spin_tick(void) {
 void v10_daily_spin_frame(const char *label, const cJSON *frame) {
     if (!strcmp(label, "dsp")) { // ["dsp", {score, maxScore, timeRemaining, claimed, stage}] | ["dsp", null, err]
         const cJSON *d = cJSON_GetArrayItem(frame, 1);
-        if (!cJSON_IsObject(d)) { // Box Office could not answer: Unavailable
-            g_ds.failed = 1;
-            sync_item();
-            return;
-        }
+        if (!cJSON_IsObject(d)) return; // Box Office could not answer: nothing shown (v10 keeps the store's default)
         g_ds.known = 1;
-        g_ds.failed = 0;
         g_ds.score = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(d, "score"));
         const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(d, "maxScore"));
         g_ds.max_score = max > 0 ? max : 5000;
@@ -212,8 +201,8 @@ int v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
     if (!strcmp(name, "knDailySpin")) { // the item's click: claim it (Box Office answers the claim, "dslr": a ticket or why not)
         if (g_ds.claiming) return 1;
         if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the claim is a game-socket rpc the krunker.io account does not send
-            account_popup(0, claimable() ? I18N("kn.dailySpin.officialClaim", "The Daily Spin can't be claimed on krunker.io servers yet. Claim it on a Box Office server.")
-                                         : I18N("kn.dailySpin.playMore", "Play more to unlock the daily spin"), NULL);
+            // locked: v10.0.3's handler does nothing (no claim, no message), so neither do we (doc/v10/daily-spin.md)
+            if (claimable()) account_popup(0, I18N("kn.dailySpin.officialClaim", "The Daily Spin can't be claimed on krunker.io servers yet. Claim it on a Box Office server."), NULL);
             return 1;
         }
         g_ds.claiming = 1;
