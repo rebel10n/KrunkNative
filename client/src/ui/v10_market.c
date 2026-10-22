@@ -49,6 +49,7 @@
 #include <app_mode.h>
 #include <cJSON.h>
 #include <market_stats.h> // the Stats reply keeps its rows on an error (market_stats_test)
+#include <market_trade_list.h> // the Create Trade inventory rows: one pass, capped (market_trade_list_test)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -66,6 +67,7 @@
 #define UNUSED (void) ev; (void) args; (void) argc
 #define PAGE 60          // the inventory / catalog grids' page (v10: 60, then 60 more per scroll)
 #define LISTING_PAGE 60  // Browse: item groups per page (v10 pages the API by cursor)
+#define CT_PAGE 60       // Create Trade: an inventory side's rows drawn per page (Load More adds one)
 #define NOTE_MS 5000     // market notifications (v10: 5 s)
 #define TNOTE_MS 4000    // trading / black market notifications (v10: 4 s)
 #define SALE_MAX_KR 10000000
@@ -155,6 +157,7 @@ static struct {
     int start_searching;
     // the Create Trade window
     int ct_open, ct_loading, ct_target_id, ct_missing, ct_submitting;
+    int ct_shown[2];       // rows drawn per inventory side (0 = CT_PAGE)
     char ct_target[40], ct_err[160], ct_msg[504], ct_search[2][48];
     cJSON *ct_inv;         // [mine, theirs] rows {i, c, nt}
     EconTradeItem ct_sel[2][40];
@@ -248,17 +251,7 @@ static const char *arg_s(const HtmlEvent *ev, const HtmlArg *args, const int arg
     return args[i].str ? args[i].str : "";
 }
 
-static int ci_contains(const char *hay, const char *needle) {
-    if (!needle || !needle[0]) return 1;
-    if (!hay) return 0;
-    const size_t n = strlen(needle);
-    for (const char *p = hay; *p; p++) {
-        size_t i = 0;
-        while (i < n && p[i] && tolower((unsigned char) p[i]) == tolower((unsigned char) needle[i])) i++;
-        if (i == n) return 1;
-    }
-    return 0;
-}
+static int ci_contains(const char *hay, const char *needle) { return market_text_contains(hay, needle); }
 
 static void trim_lower(char *out, const size_t n, const char *in) {
     while (*in && isspace((unsigned char) *in)) in++;
@@ -1890,14 +1883,6 @@ static int ct_fee(void) {
     return fee;
 }
 
-static int cmp_trade_inv(const void *pa, const void *pb) { // _9415: rarity, season, index, all descending
-    const int a = jint(*(cJSON *const *) pa, "i", 0), b = jint(*(cJSON *const *) pb, "i", 0);
-    const ViewerSkin *sa = skin(a), *sb = skin(b);
-    if (sa && sb && sa->rarity != sb->rarity) return sb->rarity - sa->rarity;
-    if (sa && sb && (sa->seas ? sa->seas : 1) != (sb->seas ? sb->seas : 1)) return (sb->seas ? sb->seas : 1) - (sa->seas ? sa->seas : 1);
-    return b - a;
-}
-
 static void ct_item(StrBuf *sb, const int side, const int index, const int count, const int offer, const int locked) {
     const ViewerSkin *s = skin(index);
     if (!s) return;
@@ -1921,7 +1906,7 @@ static void ct_item(StrBuf *sb, const int side, const int index, const int count
 }
 
 static void ct_side(StrBuf *sb, const int side) {
-    const cJSON *inv = cJSON_GetArrayItem(M.ct_inv, side), *other = cJSON_GetArrayItem(M.ct_inv, !side), *r;
+    const cJSON *inv = cJSON_GetArrayItem(M.ct_inv, side), *other = cJSON_GetArrayItem(M.ct_inv, !side);
     sb_append(sb, "<div class=\"trade-side svelte-1lqen9w\"><div class=\"trade-label inv svelte-1lqen9w\">");
     if (side == 0) sb_append(sb, "Your Inventory");
     else {
@@ -1929,25 +1914,15 @@ static void ct_side(StrBuf *sb, const int side) {
         sb_append(sb, "'s Inventory");
     }
     sb_append(sb, "</div> <div class=\"trade-inv-scroll svelte-1lqen9w\">");
-    const int n = rows_count(inv);
-    cJSON **rows = calloc((size_t) (n ? n : 1), sizeof(*rows));
-    int k = 0;
-    cJSON_ArrayForEach(r, inv) if (rows) rows[k++] = (cJSON *) r;
-    if (rows && k) qsort(rows, (size_t) k, sizeof(*rows), cmp_trade_inv);
-    for (int j = 0; rows && j < k; j++) {
-        const int i = jint(rows[j], "i", -1), cnt = jint(rows[j], "c", 1);
-        const ViewerSkin *s = skin(i);
-        if (!s || cnt <= 0) continue;
-        if (M.ct_missing) { // only what the other player does not own
-            int has = 0;
-            const cJSON *o;
-            cJSON_ArrayForEach(o, other) if (jint(o, "i", -1) == i) has = 1;
-            if (has) continue;
-        }
-        if (M.ct_search[side][0] && !ci_contains(s->name, M.ct_search[side]) && !(s->name && ci_contains(M.ct_search[side], s->name))) continue;
-        ct_item(sb, side, i, cnt, 0, jint(rows[j], "nt", 0));
-    }
+    // the rows that match (one pass, sorted), and the first page of them: a search over a whole
+    // inventory draws a page, not every match (each card is an image: thousands froze the window)
+    const int shown = M.ct_shown[side] > 0 ? M.ct_shown[side] : CT_PAGE;
+    TradeListRow *rows = calloc((size_t) shown, sizeof(*rows));
+    int total = 0;
+    const int drawn = rows ? market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, shown, rows, &total) : 0;
+    for (int j = 0; j < drawn; j++) ct_item(sb, side, rows[j].skin, rows[j].count, 0, rows[j].locked);
     free(rows);
+    if (total > drawn) sb_appendf(sb, "<div class=\"load-more-sentinel svelte-zhgogl\"><button class=\"load-more-btn svelte-zhgogl\" onclick=\"v10mk.ctmore(%d)\">Load More</button></div>", side);
     sb_appendf(sb, "</div> <input class=\"trade-search svelte-1lqen9w\" type=\"text\" placeholder=\"Search Item\" id=\"v10mkCtSearch%d\" value=\"", side);
     sb_append_esc(sb, M.ct_search[side]);
     sb_appendf(sb, "\" oninput=\"v10mk.csearch(%d,this.value)\"> <div class=\"trade-label offer svelte-1lqen9w\">Trade List %d/%d</div> <div class=\"trade-offer-scroll svelte-1lqen9w\">",
@@ -2765,6 +2740,7 @@ static void open_create_trade(const int id, const char *name) {
     M.ct_err[0] = M.ct_msg[0] = M.ct_search[0][0] = M.ct_search[1][0] = 0;
     M.ct_n[0] = M.ct_n[1] = 0;
     M.ct_missing = M.ct_submitting = 0;
+    M.ct_shown[0] = M.ct_shown[1] = 0;
     cJSON_Delete(M.ct_inv);
     M.ct_inv = NULL;
     M.pending = ACT_TRADE_INV;
@@ -3189,6 +3165,7 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     } else if (!strcmp(h, "csearch")) {
         const int side = a0 ? 1 : 0;
         snprintf(M.ct_search[side], sizeof(M.ct_search[side]), "%s", arg_s(ev, args, argc, 1));
+        M.ct_shown[side] = 0; // a new search starts at the first page
         render_modal();
         char id[32];
         snprintf(id, sizeof(id), "v10mkCtSearch%d", side);
@@ -3198,8 +3175,12 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
             const int len = (int) strlen(M.ct_search[side]);
             html_dom_text_set_selection(in, len, len);
         }
+    } else if (!strcmp(h, "ctmore")) { // Load More under an inventory side: the next page of its rows
+        M.ct_shown[a0 ? 1 : 0] = (M.ct_shown[a0 ? 1 : 0] > 0 ? M.ct_shown[a0 ? 1 : 0] : CT_PAGE) + CT_PAGE;
+        render_modal();
     } else if (!strcmp(h, "cmiss")) {
         M.ct_missing = !M.ct_missing;
+        M.ct_shown[0] = M.ct_shown[1] = 0;
         render_modal();
     } else if (!strcmp(h, "cmsg")) {
         snprintf(M.ct_msg, sizeof(M.ct_msg), "%s", arg_s(ev, args, argc, 0));

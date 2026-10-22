@@ -1175,6 +1175,13 @@ else ()
     target_link_libraries(market_stats_test PRIVATE cJSON m)
     add_test(NAME market_stats_test COMMAND market_stats_test)
 
+    # market_trade_list_test (client/src/ui/market_trade_list.c): the Create Trade window's inventory side is one
+    # pass over a whole inventory and draws a page of its matches, not every one (v10_market.c ct_side)
+    add_executable(market_trade_list_test client/tests/market_trade_list_test.c client/src/ui/market_trade_list.c)
+    target_include_directories(market_trade_list_test PRIVATE client/include client/src/viewer shared/include)
+    target_link_libraries(market_trade_list_test PRIVATE cJSON m)
+    add_test(NAME market_trade_list_test COMMAND market_trade_list_test)
+
     # follower_counts_test (client/include/follower_counts.h): a follow moves the author's count on
     # their posts and profile (v10_social.c followers_moved)
     add_executable(follower_counts_test client/tests/follower_counts_test.c)
