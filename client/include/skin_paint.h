@@ -9,8 +9,9 @@
 // An owned entry's metadata (acc.skins[i].m: paint, a "#rrggbb" colour, and paintShader, a number)
 // paints the item; the badge says so. Rules, from game.js's helper that the skin lists call:
 //   - no badge unless the metadata has a paint colour or a paint shader;
-//   - the title is "Painted: <name>", the store paint's name (the store's paint of that colour);
-//     with no store name, "Painted: Shader #<n>" for a shader and "Painted: <colour>" for a colour;
+//   - the title is "Painted: <name>", the store paint's name (the store's paint of that colour, or for a
+//     shader the store paint of that shader: "Spectrum Paint" for 0, deob-10.0.3.js:124589-124594);
+//     with neither, "Painted: Shader #<n>" for a shader and "Painted: <colour>" for a colour;
 //   - the body is the store paint's thumbnail when it has one, else a swatch of the colour, else
 //     the format_paint icon.
 
@@ -19,6 +20,10 @@ typedef struct {
     const char *name;  // the store paint's name ("Red Paint"), NULL when none
     const char *thumb; // its thumbnail URL, NULL when none
 } SkinPaint;
+
+// The store paint's name of a paint shader (0 Spectrum .. 5 Codefall: "Spectrum Paint"), NULL when the
+// number is no shader of v10.0.3 (deob-10.0.3.js:108888 shader list, 105835 Spectrum..Codefall).
+const char *skin_paint_shader_name(int shader);
 
 // 1 when the metadata paints the item (a paint colour or a paint shader); meta may be NULL.
 int skin_paint_shows(const cJSON *meta);

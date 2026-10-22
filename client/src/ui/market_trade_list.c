@@ -3,7 +3,7 @@
 // so a search over a big inventory costs one pass plus a screenful of image cards (the markup and the images
 // are what is expensive). The caller's limit caps the rows written to `out`.
 #include <market_trade_list.h>
-#include "../viewer/viewer_store.h" // ViewerSkin
+#include "../viewer/viewer_store.h" // ViewerSkin, VS2_PAINTABLE
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -34,6 +34,10 @@ static int cmp_kept(const void *pa, const void *pb) {
     if (a->season != b->season) return b->season - a->season;
     if (a->row.skin != b->row.skin) return b->row.skin - a->row.skin;
     return a->row.sid - b->row.sid; // one skin's rows: its stack (sid 0) first, then its copies by copy id
+}
+
+int market_paintable_match(const struct ViewerSkin *s, int only_paintable) {
+    return !only_paintable || (s && (s->flags2 & VS2_PAINTABLE));
 }
 
 int market_text_contains(const char *hay, const char *needle) {

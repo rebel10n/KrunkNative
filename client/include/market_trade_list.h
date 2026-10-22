@@ -11,6 +11,10 @@ typedef struct {
     const cJSON *row;        // the inventory row itself (its paint: "m", or paint_color / paint_shader)
 } TradeListRow;
 
+// The market filter "Show Only Paintable" (v10.0.3 showOnlyPaintable, deob-10.0.3.js:146840: the skins whose
+// paintTargets are set, VS2_PAINTABLE in the store table). Off: every skin matches.
+int market_paintable_match(const struct ViewerSkin *s, int only_paintable);
+
 // Case-insensitive "hay contains needle" (an empty needle matches, a null hay does not): v10's text search.
 int market_text_contains(const char *hay, const char *needle);
 

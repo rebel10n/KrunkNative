@@ -19,6 +19,15 @@ static const cJSON *paint_shader(const cJSON *meta) {
     return s && !cJSON_IsNull(s) ? s : NULL;
 }
 
+// v10.0.3's store paints of the six paint shaders (their paintShader in the store table; clan_ui.c k_paints)
+static const char *const k_shader_paint_names[] = {"Spectrum Paint", "Synth Paint", "Gold Paint", "Silver Paint",
+                                                   "Prism Paint", "Codefall Paint"};
+
+const char *skin_paint_shader_name(int shader) {
+    if (shader < 0 || shader >= (int) (sizeof(k_shader_paint_names) / sizeof(k_shader_paint_names[0]))) return NULL;
+    return k_shader_paint_names[shader];
+}
+
 int skin_paint_shows(const cJSON *meta) {
     return paint_text(meta) != NULL || paint_shader(meta) != NULL;
 }
@@ -93,8 +102,10 @@ static size_t badge(char *out, size_t n, const cJSON *meta, const SkinPaint *sto
         lower[k] = '\0';
     }
 
-    // the title's name: the store paint's name, else the shader number, else the colour
+    // the title's name: the store paint's name, else the shader's store paint (deob:124589-124594), else the
+    // shader number, else the colour
     char shader_name[64];
+    if (!name && shader && cJSON_IsNumber(shader)) name = skin_paint_shader_name((int) shader->valuedouble);
     if (!name && shader) {
         if (cJSON_IsNumber(shader)) snprintf(shader_name, sizeof(shader_name), "Shader #%.15g", shader->valuedouble);
         else snprintf(shader_name, sizeof(shader_name), "Shader #%s", cJSON_IsString(shader) && shader->valuestring ? shader->valuestring : "");

@@ -96,8 +96,10 @@ static void test_badge_markup(void) {
           "no store paint: the title is the lowercase colour: %s", out);
 
     badge(out, sizeof(out), "{\"paintShader\":3}", NULL);
-    CHECK(!strcmp(out, "<div class='skinPaintBadge' title='Painted: Shader #3'><i class='material-icons'>format_paint</i></div>"),
-          "a shader with no store name: the title is Shader #3 and the format_paint icon: %s", out);
+    CHECK(!strcmp(out, "<div class='skinPaintBadge' title='Painted: Silver Paint'><i class='material-icons'>format_paint</i></div>"),
+          "a shader with no store paint passed: the title is its store paint, Silver Paint, and the format_paint icon: %s", out);
+    badge(out, sizeof(out), "{\"paintShader\":9}", NULL);
+    CHECK(strstr(out, "title='Painted: Shader #9'") != NULL, "a number that is no shader keeps Shader #9: %s", out);
 
     SkinPaint odd = {"Gold \"Ore\" & <x>", NULL};
     badge(out, sizeof(out), "{\"paintShader\":1,\"paint\":\"#ffd700\"}", &odd);

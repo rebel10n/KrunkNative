@@ -433,7 +433,7 @@ static int filter_match_skin(const Filter *f, const ViewerSkin *s) {
     if (f->search[0] && !ci_contains(s->name, f->search)) return 0;
     if (f->season && (s->seas ? s->seas : 1) != f->season) return 0;
     if (f->hide_non_trade && skin_bound(s)) return 0;
-    if (f->only_paintable) return 0; // paintTargets is not in the store table (viewer_store.h)
+    if (!market_paintable_match(s, f->only_paintable)) return 0; // Show Only Paintable: paintTargets (VS2_PAINTABLE)
     if (s->rarity >= 0 && s->rarity < 8 && set_count(f->rar, 0, 8) && !f->rar[s->rarity]) return 0;
     if (s->weapon >= 1) {
         if (s->weapon - 1 < 64 && !weapons_none(f) && !f->wep[s->weapon - 1]) return 0;
@@ -903,8 +903,8 @@ static cJSON *row_meta(const cJSON *r) {
 
 // The paint badge of a painted unit (Krunker v10.0.3's PaintedBadge, client/src/ui/skin_paint.c), placed as the
 // caller's grid places it (offset / size, skin_paint.h). The store paint of the metadata's colour (type 18, the
-// same colour: deob:124594) gives its name and thumbnail; the store table has no paintShader, so a shader paint
-// shows as "Shader #n" with the format_paint icon (deob:124605-124607 with no store paint).
+// same colour: deob:124594) gives its name and thumbnail; a shader paint takes its store paint's name
+// (skin_paint.c: "Spectrum Paint" ...) with the format_paint icon (deob:124589-124594).
 static void paint_badge(StrBuf *sb, const cJSON *meta, const int offset, const int size) {
     if (!skin_paint_shows(meta)) return;
     const char *colour = skin_paint_color(meta);

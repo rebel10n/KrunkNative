@@ -130,6 +130,15 @@ int main(void) {
 
     cJSON_Delete(inv);
     cJSON_Delete(other);
+    // Show Only Paintable (v10.0.3 showOnlyPaintable, deob-10.0.3.js:146840): VS2_PAINTABLE skins only, every skin when off
+    {
+        ViewerSkin paintable = {0}, plain = {0};
+        paintable.flags2 = VS2_PAINTABLE;
+        CHECK(market_paintable_match(&paintable, 1), "a paintTargets skin matches Show Only Paintable");
+        CHECK(!market_paintable_match(&plain, 1), "a skin without paintTargets is left out by Show Only Paintable");
+        CHECK(market_paintable_match(&plain, 0) && market_paintable_match(&paintable, 0), "the filter off keeps every skin");
+        CHECK(!market_paintable_match(NULL, 1), "no skin does not match Show Only Paintable");
+    }
     printf("market_trade_list_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -1211,7 +1211,7 @@ static void pick_list(StrBuf *out) {
 
 // The paint badge of an owned card (Krunker v10.0.3's skinPaintBadge, client/src/ui/skin_paint.c): the store
 // paint of the item's colour (type 18, same colour) gives its name and thumbnail. A shader paint has no store
-// colour here, so it shows as "Shader #n" with the format_paint icon.
+// colour here, so it takes its shader's store paint name (skin_paint.c) with the format_paint icon.
 static void owned_paint_badge(StrBuf *out, const OwnedSkin *o) {
     if (!skin_paint_shows(o->meta)) return;
     const char *colour = skin_paint_color(o->meta);
