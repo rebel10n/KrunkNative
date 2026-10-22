@@ -65,10 +65,10 @@ int main(void) {
         CHECK(!has(deep, "video") && !has(deep, "projection"));
         CHECK(!has(orb, "video") && !has(orb, "projection"));
         CHECK(!has(glitch, "video"));
-        /* the still: the store's own preview path (the official thumbnail, without its host) */
-        CHECK(str_is(deep, "thumbnail", "/textures/previews/cosmetics/5_21.png"));
-        CHECK(str_is(orb, "thumbnail", "/textures/previews/melee/melee_20_3.png"));
-        CHECK(str_is(glitch, "thumbnail", "/textures/previews/cosmetics/5_43.png"));
+        /* the thumbnail is not this pass's: it keeps what the row has, and every skin's comes from
+         * v10_skin_thumb (its test) */
+        CHECK(str_is(deep, "thumbnail", "https://assets.krunker.io/textures/previews/cosmetics/5_21.png"));
+        CHECK(!has(orb, "thumbnail") && !has(glitch, "thumbnail"));
         /* the skin's own texture stays: the still a video skin falls back to */
         const cJSON *tex = cJSON_GetObjectItemCaseSensitive(orb, "tex");
         CHECK(cJSON_IsNumber(tex) && tex->valueint == 3);

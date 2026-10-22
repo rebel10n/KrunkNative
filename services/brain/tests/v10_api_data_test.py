@@ -143,37 +143,75 @@ def v10_unpack(text):
     return read()
 
 
+FOLDERS = ["weapons/weapon_", "hats/hat_", "body/body_", "melee/melee_", "sprays/", "dyes/", "waist/waist_",
+           "faces/face_", "shoes/shoe_", "pets/pet_", "collectibles/collect_", "wrist/wrist_", "charms/charm_",
+           "tickets/ticket_", "back/back_", "head/head_", "playercards/card_", "emoji/emoji_", "paints/paint_"]
+
+
+def truthy(v):
+    """a JSON value JavaScript reads as true (None is both a missing key and null here)"""
+    if v is None or v is False:
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v != ""
+    return True
+
+
+def js(v):
+    """the text JavaScript's + gives a value (a missing key is "undefined")"""
+    if v is None:
+        return "undefined"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def thumb_path(r):
+    """The thumbnail the v10.0.3 client gives a skin (deob-10.0.3.js: path builder 1051172, store loop 4804884;
+    doc/v10/skin-thumbnails.md). The store loop sets it on every record, so it is the path of each row."""
+    t, i, w = r.get("type"), r.get("id"), r.get("weapon")
+    tex, pat, mid, midT, at = r.get("tex"), r.get("pat"), r.get("mid"), r.get("midT"), r.get("assetType")
+    if not truthy(t) or t not in (4, 16, 17, 18):
+        if truthy(t) and t != 3:
+            tail = "cosmetics/" + js(at if truthy(at) else t) + "_" + js(i)
+            tail += ("_c" + js(pat)) if pat is not None else ("_" + js(tex) if truthy(tex) else "")
+        else:
+            idx = at if truthy(at) else (t if truthy(t) else 0)
+            folder = FOLDERS[idx] if isinstance(idx, int) and 0 <= idx < len(FOLDERS) else "undefined"
+            if truthy(t) and t == 3:
+                tail = folder + js(i) + (("_c" + js(pat)) if pat is not None else (("_" + js(tex)) if tex is not None else ""))
+            else:
+                if mid is not None:
+                    last = "m" + js(mid) + (("_" + js(midT)) if midT is not None else "")
+                elif pat is not None:
+                    last = "c" + js(pat)
+                else:
+                    last = js(tex) if truthy(tex) else js(i)
+                tail = folder + js(w if truthy(w) else 0) + "_" + last
+        p = "previews/" + tail
+    else:
+        p = FOLDERS[t] + js(i)
+    ext = r.get("prevExt") if truthy(r.get("prevExt")) else ("webp" if t in (16, 17) else r.get("texExt"))
+    return "/textures/" + p + "." + (ext if truthy(ext) else "png")
+
+
 def skins_as_sent(rows):
-    """The rows GET /data/skins sends for assets/skins.json: each video skin (`video` set, no truthy `asset`)
-    without `video`, `projection` and `texSrc`, with the still's `thumbnail` (services/brain/v10_skin_still.c,
-    the same rule). Every other row is the file's row."""
-    def truthy(v):
-        if v is None or v is False:
-            return False
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return v != 0
-        if isinstance(v, str):
-            return v != ""
-        return True
-
-    def still(r):
-        if r.get("type") == 3 and r.get("tex") is not None:
-            return "/textures/previews/melee/melee_%d_%d.png" % (r["id"], r["tex"])
-        if r.get("type") == 5 and r.get("tex") is None:
-            return "/textures/previews/cosmetics/5_%d.png" % r["id"]
-        return None
-
+    """The rows GET /data/skins sends for assets/skins.json (services/brain/v10_api.c h_data_skins): each video
+    skin (`video` set, no truthy `asset`) without `video`, `projection` and `texSrc` (v10_skin_still.c), and
+    every row with its `thumbnail` = thumb_path(row) (v10_skin_thumb.c). Nothing else changes."""
     out = []
     for r in rows:
         r = dict(r)
         if r.get("video") is not None and not truthy(r.get("asset")):
             for k in ("video", "projection", "texSrc"):
                 r.pop(k, None)
-            path = still(r)
-            if path:
-                r["thumbnail"] = path
+        r["thumbnail"] = thumb_path(r)
         out.append(r)
     return out
 
@@ -268,7 +306,17 @@ def main():
             detail = "decoded %d rows, expected %d" % (len(decoded), len(skins_file)) if not ok else ""
         except Exception as e:  # noqa: BLE001 - a broken pack is a failed check
             ok, detail = False, repr(e)[:200]
-        check("GET /data/skins decodes (v10 unpack) to every row of assets/skins.json (video skins as stills), in order", ok, detail)
+        check("GET /data/skins decodes (v10 unpack) to every row of assets/skins.json (video skins as stills, thumbnails), in order", ok, detail)
+        # every record carries its thumbnail: the rule's path for its type, and the count of records with one
+        try:
+            rows = v10_unpack(raw.decode("utf-8"))
+            with_thumb = sum(1 for r in rows if isinstance(r.get("thumbnail"), str) and r["thumbnail"].startswith("/textures/"))
+            equal = sum(1 for r, s in zip(rows, skins_file) if r.get("thumbnail") == thumb_path(s))
+            ok = with_thumb == len(skins_file) == equal
+            detail = "%d of %d rows with a thumbnail, %d equal to the rule" % (with_thumb, len(skins_file), equal)
+        except Exception as e:  # noqa: BLE001
+            ok, detail = False, repr(e)[:200]
+        check("GET /data/skins: every skin record has a thumbnail equal to the rule's path for its type (the count is in the detail)", ok, detail)
 
         # /data/spins: the wheels table, packed; equal to the JSON /api/data/spins serves (102764)
         status, ctype, raw = http(port, "/data/spins")
