@@ -381,7 +381,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
         g_kio.id = cJSON_IsNumber(id) ? id->valueint : 0;
         copy_str(g_kio.name, sizeof(g_kio.name), name);
         g_kio.gen++;
-        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_request(); // io_accountResponse: windows[5].data || send("bpdl")
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_account_answered(); // io_accountResponse: windows[5].data || send("bpdl")
         else printf("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
         printf("[account] the krunker.io account's data from the game server: %s, %.0f KR, %d skins\n", name, obj_num("player_funds"),
                cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins")));
@@ -1562,6 +1562,7 @@ static void active_changed(void) {
 }
 
 static void active_tick(void) {
+    battlepass_ui_tick(); // a "bpdl" unanswered for too long is a failure, not a spinner
     const int backend = (int) account_backend();
     const int kio = krunker_account_signed_in();
     const unsigned kio_gen = krunker_account_generation();

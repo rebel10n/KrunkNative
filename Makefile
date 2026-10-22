@@ -724,6 +724,10 @@ krunker-account-e2e: build ## The krunker.io account backend (krunker_account.h)
 account-unify-e2e: build ## One account UI, two backends (backend_ui.h active_account()): krunk.io DEV + official guest, official signed in, switching back (header, player list, dev actions, alt manager, login modal), kn_brain + krunker.io stubs
 	timeout 400 $(PYTHON) -I server/tests/account_unify_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-spin-battlepass-e2e
+kio-spin-battlepass-e2e: build ## The Daily Spin and the Battle Pass on an official krunker.io game (v10_daily_spin.c, battlepass_ui.c): the krunker.io progress, a pass-less and an unanswered pass finish or say so
+	timeout 900 $(PYTHON) -I server/tests/kio_spin_battlepass_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)

@@ -18,7 +18,9 @@
 //   instead of with the "end" packet: KrunkNative's game server does not hold the pass.
 #include <backend.h>
 #include <backend_ui.h>
+#include <html_dom.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 #include <season.h>
 #include <math.h>
@@ -30,7 +32,9 @@
 
 static cJSON *g_bp_json;      // windows[5].data (the "bpdl" payload), NULL none
 static BattlePass *g_bp;      // its parse (bp_parse_items)
-static int g_bp_status;       // windows[5].dataStatus: 0 not asked, 1 loading, 2 answered
+static int g_bp_status;       // windows[5].dataStatus: 0 not asked, 1 loading, 2 answered, 3 failed (no answer / not sent)
+static int64_t g_bp_asked_s;  // when the "bpdl" in flight was sent (BP_LOAD_TIMEOUT_S ends it)
+#define BP_LOAD_TIMEOUT_S 15  // a "bpdl" with no answer by then is a failure the window shows, not a spinner
 static int g_has_progress;    // account.BP set (bppd)
 static int64_t g_bpp;         // account.BP.bpp
 static int g_tier;            // account.BP.tier
@@ -124,16 +128,34 @@ const BattlePass *battlepass_ui_pass(void) { return g_bp; }
 int64_t battlepass_ui_bpp(void) { return g_has_progress ? g_bpp : 0; }
 
 static void request_data(void) {
-    if (g_bp_status) return;
+    if (g_bp_status == 1 || g_bp_status == 2) return; // in flight, or answered (an answer with no pass is an answer)
     g_bp_status = 1;
-    // io.send("bpdl"); not sent (no socket yet, or the active account's server refused it): asked
-    // again by the next window render / sign-in instead of waiting forever
-    if (!backend_social_send_text("[\"bpdl\"]")) g_bp_status = 0;
+    g_bp_asked_s = (int64_t) time(NULL);
+    // io.send("bpdl"); not sent (no socket yet, or the active account's server refused it): a failure the
+    // window shows; the next render asks again
+    if (!backend_social_send_text("[\"bpdl\"]")) g_bp_status = 3;
 }
 
 // v10.0.2 io_accountResponse: windows[5].data || io.send("bpdl") at the login (the sidebar item)
 void battlepass_ui_request(void) {
     if (active_account()) request_data();
+}
+
+// The account's own answer ("a" on the game socket): a request still in flight may have gone out before it
+// (the socket's login), so it is asked again. Not the per-frame callers' (bp_item_update): their asks wait out the timeout.
+void battlepass_ui_account_answered(void) {
+    if (!active_account()) return;
+    if (g_bp_status == 1) g_bp_status = 0;
+    request_data();
+}
+
+// Once per frame (account_ui_tick): a "bpdl" with no answer by BP_LOAD_TIMEOUT_S is a failure, and the open window says so
+void battlepass_ui_tick(void) {
+    if (g_bp_status != 1 || (int64_t) time(NULL) - g_bp_asked_s < BP_LOAD_TIMEOUT_S) return;
+    fprintf(stderr, "[battlepass] no answer to bpdl in %d s: the window says it could not load\n", BP_LOAD_TIMEOUT_S);
+    g_bp_status = 3;
+    // redraw only when the pass's own status text is on screen (the window may be another one, or closed)
+    if (html_dom_query(html_dom_by_id("menuWindow"), ".bpStatusText")) menu_show_window(BP_WINDOW, 1);
 }
 
 // ------------------------------------------------------------------ windows[5].gen
@@ -430,10 +452,15 @@ static void gen_challenges(StrBuf *sb) {
 static char *gen_window(void) {
     StrBuf sb = {0};
     gen_tabs(&sb);
-    if (!g_bp || !g_has_progress) {
-        request_data();
-        sb_appendf(&sb, "<div style=\"font-size: 40px;text-align: center;display: inline-block;position: relative;width: 100%%;\">\n\t\t\t\t%s\n\t\t\t</div>",
-                   g_bp_status == 2 && g_has_progress ? "No Battle Pass Found" : "Loading Battle Pass");
+    // no pass: the answer said so ("No Battle Pass Found"), a failed ask says so; only an ask in flight is "Loading".
+    // A pass without its progress row (bppd not sent) still shows the pass, at 0 BPP.
+    if (!g_bp) {
+        if (g_bp_status != 2) request_data(); // (a failed or never-sent ask goes out again on this render)
+        const char *text = g_bp_status == 2 ? "No Battle Pass Found"
+                           : g_bp_status == 3 ? I18N("kn.battlepass.loadFailed", "Could not load the Battle Pass. Close it and open it again.")
+                                              : "Loading Battle Pass";
+        sb_appendf(&sb, "<div class=\"bpStatusText\" style=\"font-size: 40px;text-align: center;display: inline-block;position: relative;width: 100%%;\">\n\t\t\t\t%s\n\t\t\t</div>",
+                   text);
     } else if (g_tab == 0) {
         gen_home_v10(&sb);
     } else {

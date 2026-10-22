@@ -423,6 +423,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/rewards_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_rewards PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10's Daily Spin on the social socket: every "dsp" / "dsl" answered, the claim's ticket (daily_spin.c)
+    add_test(NAME brain_daily_spin
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/daily_spin_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_daily_spin PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # Krunker Strike's economy: catalogue seeded (0320), spin odds / costs / grants, store, loadout,
     # missions, track, Strike commits and auth, Strike vs Box Office separation, leaderboards
     add_test(NAME brain_strike_economy

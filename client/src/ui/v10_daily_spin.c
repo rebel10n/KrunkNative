@@ -12,19 +12,25 @@
 #include <client.h> // glfwGetTime
 #include <html_ui.h> // html_ui_is_menu_open
 #include <backend_ui.h>
+#include <i18n.h>
+#include <krunker_account.h> // KRUNKER_SVC_DATA: the krunker.io account's progress read (official servers)
 #include <cJSON.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define DS_REFRESH_MS 60000.0 // the progress is asked again at most once a minute (and on login)
+#define DS_CLAIM_TIMEOUT_MS 15000.0 // a claim with no answer by then is over: the item says so, it does not spin on
 
 static struct {
     int known;               // a "dsp" reply arrived for this account
+    int failed;              // the last progress ask was refused or had no answer: the item says Unavailable
     int score, max_score, stage, claimed, claiming;
     double time_remaining;   // ms to the daily reset
     int account_id;          // whose state this is
     double asked_at;         // html timer clock of the last "dsp"
+    double claim_at;         // html timer clock of the last "dsl" (its answer clears claiming)
     int tip;                 // hover: the tooltip shows
 } g_ds = {.max_score = 5000};
 
@@ -58,6 +64,8 @@ static void render_item(HtmlElem item) {
         sb_appendf(&sb, "<span class=\"dsClaim svelte-159x57l\">%s</span>", g_ds.claiming ? "CLAIMING..." : "FREE SPIN");
     } else if (done) {
         sb_append(&sb, "<span class=\"dsDone svelte-159x57l\">CLAIMED</span>");
+    } else if (g_ds.failed && !g_ds.known) {
+        sb_appendf(&sb, "<span style=\"color:#fff;\" class=\"svelte-159x57l\">%s</span>", I18N("kn.dailySpin.unavailable", "Unavailable"));
     } else {
         const double pct = g_ds.max_score > 0 ? (g_ds.score >= g_ds.max_score ? 100.0 : 100.0 * g_ds.score / g_ds.max_score) : 0.0;
         sb_appendf(&sb, "<span style=\"color:#fff;\" class=\"svelte-159x57l\">%d/%d</span> <div class=\"dsBar svelte-159x57l\"><div class=\"dsBarFill svelte-159x57l\" style=\"width:%g%%\"></div></div>",
@@ -105,8 +113,38 @@ static void sync_item(void) {
     render_item(item);
 }
 
+// The krunker.io account's progress (official servers): v10's dailySpin.getProgress, GET api.krunker.io
+// /daily-spin/progress with the account's token, answered {data: {score, maxScore, timeRemaining, claimed,
+// stage}}. The claim is v10's game-socket rpc, which the krunker.io account does not send (krunker_net.h),
+// so the item says so instead of sending nothing.
+static void kio_progress_done(void *user, const int status, const cJSON *res) {
+    const AccountInfo *acc = active_account();
+    if (!acc || acc->id != (int) (uintptr_t) user) return; // another account's answer
+    const cJSON *data = cJSON_IsObject(res) ? cJSON_GetObjectItem(res, "data") : NULL;
+    if (status != 200 || !cJSON_IsObject(data)) { // refused, unreachable or no answer: Unavailable, asked again later
+        g_ds.failed = 1;
+        sync_item();
+        return;
+    }
+    cJSON *frame = cJSON_CreateArray();
+    if (!frame) return;
+    cJSON_AddItemToArray(frame, cJSON_CreateString("dsp"));
+    cJSON_AddItemToArray(frame, cJSON_Duplicate(data, 1));
+    v10_daily_spin_frame("dsp", frame);
+    cJSON_Delete(frame);
+}
+
 static void ask(void) {
     g_ds.asked_at = now_ms();
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        const AccountInfo *acc = active_account();
+        if (!acc || !krunker_account_api("GET", KRUNKER_SVC_DATA, "/daily-spin/progress", NULL, kio_progress_done,
+                                         (void *) (uintptr_t) acc->id)) {
+            g_ds.failed = 1; // refused at once (every request slot busy): the item says so
+            sync_item();
+        }
+        return;
+    }
     account_send_frame("dsp");
 }
 
@@ -122,15 +160,25 @@ void v10_daily_spin_tick(void) {
         sync_item();
         return;
     }
+    if (g_ds.claiming && t - g_ds.claim_at > DS_CLAIM_TIMEOUT_MS) { // no "dslr" came: say so, stop CLAIMING...
+        g_ds.claiming = 0;
+        account_popup(0, I18N("kn.dailySpin.noAnswer", "No answer from Box Office. Try again."), NULL);
+        sync_item();
+    }
     if (id && html_ui_is_menu_open() && t - g_ds.asked_at > DS_REFRESH_MS) ask();
     if ((id != 0) != (html_dom_by_id("dailySpinDiv") != 0)) sync_item(); // the page was rebuilt
 }
 
 void v10_daily_spin_frame(const char *label, const cJSON *frame) {
-    if (!strcmp(label, "dsp")) { // ["dsp", {score, maxScore, timeRemaining, claimed, stage}]
+    if (!strcmp(label, "dsp")) { // ["dsp", {score, maxScore, timeRemaining, claimed, stage}] | ["dsp", null, err]
         const cJSON *d = cJSON_GetArrayItem(frame, 1);
-        if (!cJSON_IsObject(d)) return;
+        if (!cJSON_IsObject(d)) { // Box Office could not answer: Unavailable
+            g_ds.failed = 1;
+            sync_item();
+            return;
+        }
         g_ds.known = 1;
+        g_ds.failed = 0;
         g_ds.score = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(d, "score"));
         const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(d, "maxScore"));
         g_ds.max_score = max > 0 ? max : 5000;
@@ -161,12 +209,17 @@ void v10_daily_spin_frame(const char *label, const cJSON *frame) {
 int v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
     if (!name) return -1;
-    if (!strcmp(name, "knDailySpin")) { // the item's click: claim once claimable
-        if (claimable() && !g_ds.claiming) {
-            g_ds.claiming = 1;
-            account_send_frame("dsl");
-            sync_item();
+    if (!strcmp(name, "knDailySpin")) { // the item's click: claim it (Box Office answers the claim, "dslr": a ticket or why not)
+        if (g_ds.claiming) return 1;
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the claim is a game-socket rpc the krunker.io account does not send
+            account_popup(0, claimable() ? I18N("kn.dailySpin.officialClaim", "The Daily Spin can't be claimed on krunker.io servers yet. Claim it on a Box Office server.")
+                                         : I18N("kn.dailySpin.playMore", "Play more to unlock the daily spin"), NULL);
+            return 1;
         }
+        g_ds.claiming = 1;
+        g_ds.claim_at = now_ms();
+        account_send_frame("dsl");
+        sync_item();
         return 1;
     }
     if (!strcmp(name, "knDailySpinTip")) {

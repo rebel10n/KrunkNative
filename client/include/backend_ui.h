@@ -113,6 +113,8 @@ int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 
 const struct BattlePass *battlepass_ui_pass(void); // windows[5].data parsed (NULL none)
 int64_t battlepass_ui_bpp(void);            // account.BP.bpp (0 without)
 void battlepass_ui_request(void);           // v10: "bpdl" once an account is signed in (no-op when asked)
+void battlepass_ui_account_answered(void);  // the account's "a": an ask still in flight goes out again
+void battlepass_ui_tick(void);              // once per frame: a "bpdl" unanswered for BP_LOAD_TIMEOUT_S fails (the window says so)
 const char *battlepass_ui_claimed(void);     // account.BP.items_claimed ("id,id,...", "" none)
 int64_t battlepass_ui_now(void);            // the Battle Pass clock (unix s; a scenario's "now")
 void battlepass_ui_claim(int id);           // bpclm: claim one card (Strike's Rewards tab)

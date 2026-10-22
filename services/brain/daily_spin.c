@@ -80,11 +80,18 @@ static kn_db_result *run_claim(kn_dbconn *c, int n, const char *const *p) {
 }
 static const kn_proc P_DAILY_SPIN_CLAIM = {"daily_spin_claim", NULL, run_claim};
 
+/* ["dsp", null, err]: every "dsp" is answered, a refusal or a failure too (the client's item says Unavailable) */
+static void progress_refused(SocialSession *s, const char *err) {
+    social_send_n(s, "dsp", 2, cJSON_CreateNull(), cJSON_CreateString(err));
+}
+
 static void state_done(SocialSession *s, kn_db_result *res, void *extra) {
     (void) extra;
     cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
     if (!v) {
-        KN_WARN(MOD, "progress: %s", acct_db_error(res, "daily spin"));
+        const char *err = acct_db_error(res, "daily spin");
+        KN_WARN(MOD, "progress: %s", err);
+        progress_refused(s, "Box Office could not read the daily spin");
         return;
     }
     const int64_t now = kn_wall_ms();
@@ -96,11 +103,19 @@ static void state_done(SocialSession *s, kn_db_result *res, void *extra) {
 /* ["dsp"] */
 void sh_daily_spin(SocialSession *s, const cJSON *f) {
     (void) f;
-    if (s->account_id <= 0) return;
+    if (s->account_id <= 0) {
+        progress_refused(s, "Must be logged in");
+        return;
+    }
+    if (!g_acct_brain || !g_acct_brain->db) {
+        progress_refused(s, "Box Office has no database for the daily spin");
+        return;
+    }
     char id[24], since[24];
     acct_itoa(id, s->account_id);
     acct_itoa(since, day_start(kn_wall_ms()));
-    social_call(s, &P_DAILY_SPIN_STATE, KN_DB_ARGS(id, since), state_done, NULL);
+    if (social_call(s, &P_DAILY_SPIN_STATE, KN_DB_ARGS(id, since), state_done, NULL) != 0)
+        progress_refused(s, "Box Office could not read the daily spin");
 }
 
 /* GET /daily-spin/progress (v10.js 25999, the HTTP root): the same state "dsp" sends, for the account of the request */
@@ -139,10 +154,21 @@ static void claim_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "dslr", 1, v);
 }
 
-/* ["dsl"]: DAILY_SPIN_CLAIM */
+/* ["dsl"]: DAILY_SPIN_CLAIM. Every refusal is answered "dslr" (the client clears its claim on that answer, not on "po") */
+static void claim_refused(SocialSession *s, const char *err) {
+    social_send_n(s, "dslr", 2, cJSON_CreateNull(), cJSON_CreateString(err));
+}
+
 void sh_daily_spin_claim(SocialSession *s, const cJSON *f) {
     (void) f;
-    if (!social_require_auth(s)) return;
+    if (s->account_id <= 0) {
+        claim_refused(s, "Must be logged in");
+        return;
+    }
+    if (!g_acct_brain || !g_acct_brain->db) {
+        claim_refused(s, "Box Office has no database for the daily spin");
+        return;
+    }
     char id[24], since[24], max[24], t0[24], t1[24], t2[24];
     acct_itoa(id, s->account_id);
     acct_itoa(since, day_start(kn_wall_ms()));
@@ -150,5 +176,6 @@ void sh_daily_spin_claim(SocialSession *s, const cJSON *f) {
     acct_itoa(t0, store_wheel_ticket("Starter"));
     acct_itoa(t1, store_wheel_ticket("Elite"));
     acct_itoa(t2, store_wheel_ticket("Heroic"));
-    social_call(s, &P_DAILY_SPIN_CLAIM, KN_DB_ARGS(id, since, max, t0, t1, t2), claim_done, NULL);
+    if (social_call(s, &P_DAILY_SPIN_CLAIM, KN_DB_ARGS(id, since, max, t0, t1, t2), claim_done, NULL) != 0)
+        claim_refused(s, "Box Office could not claim the daily spin");
 }

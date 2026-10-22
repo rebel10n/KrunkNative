@@ -255,6 +255,7 @@ class Stub:
         self.players = None
         self.our_name = "Guest_%d" % MY_SID
         self.account_data = []
+        self.daily_spin = None  # the data client's /daily-spin/progress data ({score, maxScore, ...}); None = 404
         self.a_sent = []  # the "a" data rows sent, in order
         self.frame_handlers = {}  # extra answers to client frames: {name: async fn(send, raw frame bytes)}
         self.requests = []      # (method, path, query dict, headers dict, body dict | None)
@@ -333,6 +334,14 @@ class Stub:
                     auth = self.headers.get("Authorization", "")
                     if auth == "Bearer " + stub.access1 or auth == "Bearer " + stub.access2:
                         self.reply(200, {"data": {"username": ACCOUNT_NAME, "id": ACCOUNT_ID}, "error": None})
+                    else:
+                        self.reply(401, {"data": None, "error": "Unauthorized"})
+                elif path == "/api/daily-spin/progress":  # dailySpin.getProgress (the data client, v10:25999): stub.daily_spin
+                    auth = self.headers.get("Authorization", "")
+                    if stub.daily_spin is None:
+                        self.reply(404, {"error": "not found"})
+                    elif auth == "Bearer " + stub.access1 or auth == "Bearer " + stub.access2:
+                        self.reply(200, {"data": stub.daily_spin, "error": None})
                     else:
                         self.reply(401, {"data": None, "error": "Unauthorized"})
                 else:

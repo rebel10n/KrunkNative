@@ -159,11 +159,20 @@ static void api_url(char *out, const size_t n, const char *path) {
     snprintf(out, n, "%s%s", base, path);
 }
 
+// The data client's base (krunker_host_url's KRUNKER_HOST_API): KRUNKNATIVE_KRUNKER_DATA_API, else the API mirror
+// (KRUNKNATIVE_KRUNKER_API) when one is set, else api.krunker.io.
+static void data_client_base(char *base, const size_t n) {
+    char api[256];
+    endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_DATA_API, api, sizeof(api));
+    endpoint("KRUNKNATIVE_KRUNKER_DATA_API", "krunkerDataApi", api, base, n);
+}
+
 void krunker_service_url(const KrunkerService svc, const char *path, char *out, const size_t n) {
     char base[256];
     switch (svc) {
         case KRUNKER_SVC_SOCIAL: endpoint("KRUNKNATIVE_KRUNKER_SOCIAL", "krunkerSocial", KRUNKER_ACCOUNT_DEFAULT_SOCIAL, base, sizeof(base)); break;
         case KRUNKER_SVC_EVENT_BUS: endpoint("KRUNKNATIVE_KRUNKER_EVENT_BUS", "krunkerEventBus", KRUNKER_ACCOUNT_DEFAULT_EVENT_BUS, base, sizeof(base)); break;
+        case KRUNKER_SVC_DATA: data_client_base(base, sizeof(base)); break;
         default: endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_API, base, sizeof(base)); break;
     }
     // the API client joins base and path with one '/' (v10:27526)
@@ -184,12 +193,7 @@ void krunker_host_url(const KrunkerHost host, const char *path, char *out, const
         case KRUNKER_HOST_GAMEFRONTEND:
             endpoint("KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND, base, sizeof(base));
             break;
-        default: { // the data client (v10 API_URI, not gapi): a mirror that sets only KRUNKNATIVE_KRUNKER_API serves it there too
-            char api[256];
-            endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", KRUNKER_ACCOUNT_DEFAULT_DATA_API, api, sizeof(api));
-            endpoint("KRUNKNATIVE_KRUNKER_DATA_API", "krunkerDataApi", api, base, sizeof(base));
-            break;
-        }
+        default: data_client_base(base, sizeof(base)); break; // the data client (v10 API_URI, not gapi)
     }
     snprintf(out, n, "%s%s", base, path);
 }

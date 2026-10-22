@@ -143,6 +143,7 @@ typedef enum {
     KRUNKER_SVC_API = 0,   // gapi.svc.krunker.io (v10 GAPI_URI): auth, player, shop, ranked, maps ({data, error} answers)
     KRUNKER_SVC_SOCIAL,    // social.krunker.io: profiles, clans, feeds
     KRUNKER_SVC_EVENT_BUS, // event-bus.svc.krunker.io: the friends socket (/ws?at=<token>)
+    KRUNKER_SVC_DATA,      // api.krunker.io (v10 API_URI, the data client): /daily-spin/progress ({data, error} answers)
 } KrunkerService;
 void krunker_service_url(KrunkerService svc, const char *path, char *out, size_t n);
 // The answer on the main thread: status 0 = unreachable / timed out; res = the parsed JSON body
