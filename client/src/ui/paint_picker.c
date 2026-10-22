@@ -285,7 +285,7 @@ static void finish_apply(const cJSON *data, const char *message) {
     free(rows);
     account_paint_applied(item, paint, copy->valueint, S.sid < COPY_ID_BASE, cJSON_GetObjectItemCaseSensitive(data, "m"));
     ui_loadout_owned_changed();
-    if (S.open) v10_view_pop(1); // accepted: v10's push resolves with the result and the popup closes (deob:122190)
+    if (S.open) v10_view_pop(1); // accepted: v10's push resolves with the result and the popup closes (deob:122174-122178)
 }
 
 // The social socket: the answers to the paint in flight ("ipr" with its uid, "po" for a refusal of the socket's
@@ -357,7 +357,7 @@ int paint_picker_can_open(const int ind) {
     return t && !cJSON_IsNull(t) && !cJSON_IsFalse(t);
 }
 
-// The copy's paint, else the first owned paint (v10's initialShader / initialPaint, then the first, deob:122054-122064).
+// The copy's paint, else the first owned paint (v10's initialShader / initialPaint, then the first: deob:122050-122065).
 static int initial_paint(void) {
     int n = 0;
     PaintRow *rows = owned_paints(&n);
