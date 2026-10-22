@@ -75,7 +75,13 @@ static cJSON *side_json(const EconTradeItem *items, const int n) {
     for (int k = 0; k < n; k++) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "i", items[k].i);
-        cJSON_AddNumberToObject(o, "c", items[k].c);
+        if (items[k].sid > 0) { // a painted copy: one unit, its copy id in iids (deob:125069-125072, 125109-125113)
+            cJSON_AddNumberToObject(o, "c", 1);
+            cJSON *iids = cJSON_AddArrayToObject(o, "iids");
+            cJSON_AddItemToArray(iids, cJSON_CreateNumber(items[k].sid));
+        } else {
+            cJSON_AddNumberToObject(o, "c", items[k].c);
+        }
         cJSON_AddItemToArray(a, o);
     }
     return a;

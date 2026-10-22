@@ -33,4 +33,11 @@ int skin_paint_same_color(const char *a, const char *b);
 // NULL (no store paint). Returns the length written.
 size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint *store);
 
+// The same badge placed as v10's PaintedBadge component places it (deob-10.0.3.js:124565-124566, the
+// `offset` and `size` props; applied as the top / left and the badge size at deob:124661-124663):
+// the store inventory grid passes offset 10 (deob:150276), the trade pickers offset 0 size 14
+// (deob:124806-124807) and the completed trade's grid offset 0 size 18 (deob:148220-148221); the
+// wallet keeps the defaults (6, 24). The badge gets an inline style with those pixels.
+size_t skin_paint_badge_at(char *out, size_t n, const cJSON *meta, const SkinPaint *store, int offset, int size);
+
 #endif

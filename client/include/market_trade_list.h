@@ -3,9 +3,12 @@
 
 struct ViewerSkin; // the store table entry (viewer_store.h)
 
-// One row of a Create Trade window's inventory side (v10_market.c ct_side): a store skin and its copies.
+// One row of a Create Trade window's inventory side (v10_market.c ct_side): a store skin and its units. A
+// painted copy is its own row (sid its copy id, count 1; doc/v10/paint-copy.md section 5); a stack has sid 0.
 typedef struct {
     int skin, count, locked; // locked: the row's "nt" (not tradable)
+    int sid;                 // the copy id of a painted copy row (its "sid"), 0 for a stack
+    const cJSON *row;        // the inventory row itself (its paint: "m", or paint_color / paint_shader)
 } TradeListRow;
 
 // Case-insensitive "hay contains needle" (an empty needle matches, a null hay does not): v10's text search.

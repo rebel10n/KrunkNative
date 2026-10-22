@@ -32,8 +32,10 @@ double econ_gift_fee(double amount);
 void econ_new_op(char *out, size_t n, const char *tag);
 // [label, v[0..n-1], {op: key}]: li, uli, pi, qsi, pbm, trA, trC, trCA
 cJSON *econ_frame(const char *label, int n, const double *v, const char *key);
-// One side of an offer: {i: skin, c: count}
-typedef struct { int i, c; } EconTradeItem;
+// One unit of an offer: a stack {i: skin, c: count} (sid 0), or a painted copy, sid its copy id, sent
+// as {i, c: 1, iids: [sid]} (Krunker v10.0.3's offer serializer keeps {i, c, iids}: deob-10.0.3.js:125109-125113;
+// the copy row's offer entry is built at deob:125069-125072; doc/v10/paint-copy.md section 7)
+typedef struct { int i, c, sid; } EconTradeItem;
 // ["ctr", receiver, mine, theirs, message, {op, skr?, rkr?}]
 cJSON *econ_offer_frame(int receiver_id, const EconTradeItem *mine, int n_mine, const EconTradeItem *theirs, int n_theirs,
                         const char *message, double my_kr, double their_kr, const char *key);

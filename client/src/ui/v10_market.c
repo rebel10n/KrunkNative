@@ -52,6 +52,8 @@
 #include <market_stats.h> // the Stats reply keeps its rows on an error (market_stats_test)
 #include <market_trade_list.h> // the Create Trade inventory rows: one pass, sorted (market_trade_list_test)
 #include <ui_vgrid.h> // the Create Trade inventory lists: virtual (v10_market_tick)
+#include <skin_paint.h>   // a painted copy's badge (v10.0.3's PaintedBadge after the card: deob-10.0.3.js:150273-150277)
+#include <paint_picker.h> // the inventory tile's Paint button (deob:147316, gated at deob:150226-150228)
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -73,6 +75,7 @@
 #define TNOTE_MS 4000    // trading / black market notifications (v10: 4 s)
 #define SALE_MAX_KR 10000000
 #define SEASONS 10
+#define COPY_ID_BASE 1000000 // a painted copy's id (kn_brain's V10_COPY_ID_BASE); a stack's sid is its store index
 
 enum { TAB_MARKET, TAB_TRADING, TAB_BLACKM, TAB_JUNKYARD, TAB_CATALOG, TAB_GUIDE, TAB_COUNT };
 enum { MT_BROWSE, MT_INVENTORY, MT_SALES, MT_HISTORY, MT_STATS, MT_COUNT };
@@ -140,6 +143,7 @@ static struct {
     // modals
     int modal, busy, pending;
     int sel_skin, sel_listing, sel_price, sel_count;
+    int sel_sid;           // the unit of the List / Quick Sell modal: a painted copy's id, else the store index (a stack)
     char price_in[16];
     char op[48];
     int err_open;
@@ -162,8 +166,8 @@ static struct {
     int ct_nrows[2];
     VGrid ct_grid[2];         // a side's virtual list: only the rows near its scroll position are drawn
     char ct_target[40], ct_err[160], ct_msg[504], ct_search[2][48];
-    cJSON *ct_inv;         // [mine, theirs] rows {i, c, nt}
-    EconTradeItem ct_sel[2][40];
+    cJSON *ct_inv;         // [mine, theirs] rows {i, c, nt}; a painted copy {i, c: 1, sid, paint_color / paint_shader (or m), nt}
+    EconTradeItem ct_sel[2][40]; // the offer's units: a stack {i, c}, a painted copy {i, 1, sid}
     int ct_n[2];
     // Black Market
     char bm_note[160];
@@ -422,13 +426,14 @@ static int filter_active(const Filter *f, const char *default_sort, const int we
     return category && strcmp(f->category, "all") != 0;
 }
 
-// the client-side filters of the inventory / sales / stats / catalog headers
-static int filter_match(const Filter *f, const ViewerSkin *s) {
+// the client-side filters of the inventory / sales / stats / catalog headers: the store skin's part (the
+// inventory's rows add the "Painted only" test, inventory_list: a painted copy row is the painted item)
+static int filter_match_skin(const Filter *f, const ViewerSkin *s) {
     if (!s) return 0;
     if (f->search[0] && !ci_contains(s->name, f->search)) return 0;
     if (f->season && (s->seas ? s->seas : 1) != f->season) return 0;
     if (f->hide_non_trade && skin_bound(s)) return 0;
-    if (f->only_paintable || f->only_painted) return 0; // no paintable / painted items in this store
+    if (f->only_paintable) return 0; // paintTargets is not in the store table (viewer_store.h)
     if (s->rarity >= 0 && s->rarity < 8 && set_count(f->rar, 0, 8) && !f->rar[s->rarity]) return 0;
     if (s->weapon >= 1) {
         if (s->weapon - 1 < 64 && !weapons_none(f) && !f->wep[s->weapon - 1]) return 0;
@@ -443,6 +448,10 @@ static int filter_match(const Filter *f, const ViewerSkin *s) {
         return 0; // drop / ranked / challenge / tag:X: no such fields in the store table
     }
     return 1;
+}
+// the same for the views without owned rows (sales, stats, catalog, Browse): nothing there is painted
+static int filter_match(const Filter *f, const ViewerSkin *s) {
+    return !f->only_painted && filter_match_skin(f, s);
 }
 
 static const char *g_sort_key = "rarity";
@@ -621,6 +630,7 @@ typedef struct {
     double listed_ms;         // My Sales: listing age
     int list;                 // inventory: List
     int locked;               // inventory: Not sellable
+    int sid;                  // inventory: the unit List acts on (a painted copy's id, else the store index)
 } CardOpts;
 
 // _45592: the market card (svelte-hk8nq9): the item card + its overlay
@@ -659,9 +669,11 @@ static void market_card(StrBuf *sb, const int index, const CardOpts *o) {
                        "<button class=\"icon-btn buy svelte-hk8nq9\" id=\"v10mkBuy%d\" aria-label=\"Buy\"%s onclick=\"v10mk.buy(%d,%d,%d)\"><i class=\"material-icons svelte-hk8nq9\">shopping_cart</i></button></div>",
                    n, o->listing_id, M.busy ? " disabled" : "", o->listing_id, index, o->price);
     } else if (o->list && !o->locked) {
-        sb_appendf(sb, "<div class=\"inline-action svelte-hk8nq9\"><button class=\"icon-btn list with-label svelte-hk8nq9\" id=\"v10mkList%d\" aria-label=\"List for sale\"%s onclick=\"v10mk.list(%d)\">"
+        // the unit listed is the row's (a painted copy lists by its copy id: deob:151563-151564, the row's sid)
+        const int sid = o->sid > 0 ? o->sid : index;
+        sb_appendf(sb, "<div class=\"inline-action svelte-hk8nq9\"><button class=\"icon-btn list with-label svelte-hk8nq9\" id=\"v10mkList%d\" aria-label=\"List for sale\"%s onclick=\"v10mk.list(%d,%d)\">"
                        "<i class=\"material-icons svelte-hk8nq9\">sell</i> <span class=\"btn-label svelte-hk8nq9\">List</span></button></div>",
-                   index, M.busy ? " disabled" : "", index);
+                   sid, M.busy ? " disabled" : "", index, sid);
     } else if (o->sale_id > 0) {
         fmt(n, sizeof(n), o->price);
         sb_appendf(sb, "<div class=\"inline-action svelte-hk8nq9\"><span class=\"inline-price svelte-hk8nq9\">%s <span class=\"kr-text svelte-hk8nq9\">KR</span></span> "
@@ -683,9 +695,9 @@ static void set_json(cJSON **slot, const cJSON *v) {
 }
 
 static int filter_none_left(const Filter *f) {
-    // a set the user emptied keeps v10's meaning ("send nothing" = all); only Wear and Painted can
-    // rule out every item here (all items are "No Wear", none painted)
-    return (set_count(f->wear, 0, 5) && !f->wear[4]) || f->only_painted;
+    // a set the user emptied keeps v10's meaning ("send nothing" = all); only Wear can rule out every
+    // item here (all items are "No Wear"); "Painted only" keeps the inventory's painted copies
+    return set_count(f->wear, 0, 5) && !f->wear[4];
 }
 
 // ---- krunker.io's listings (the official account: v10's market.getListings, gapi GET /market/listings, v10:26857)
@@ -847,14 +859,96 @@ static void stats_load(void) {
     if (!request_page("market", "stats", -1)) M.stats_loading = 0;
 }
 
+// The inventory rows (kn_brain's market inventory page, economy.c shape_inventory / market_done, the rows of
+// GET /market/inventory: doc/v10/paint-copy.md section 5 and Routes): a stack {i, s, c, qs} holds the item's
+// unpainted units, a painted copy {i, s, c: 1, sid, m, qs} is its own row (sid its copy id, >= COPY_ID_BASE;
+// m = {paint: "#rrggbb"} or {paintShader: n}). v10.0.3 keys every tile on the row (deob:150215-150330) and
+// gates the Paint button on row.sid (deob:150226-150228): a stack's sid is its store index (the HTTP route's
+// stack row, kn_brain reply_inventory; the socket's stack row drops it, so it is read as the index here).
+
+// 1 when the row is a painted copy (st 0, else a copy id as sid: deob:124726 reads st === 1 as a stack)
+static int row_is_copy(const cJSON *r) {
+    const cJSON *st = r ? cJSON_GetObjectItemCaseSensitive(r, "st") : NULL;
+    if (cJSON_IsNumber(st)) return st->valueint != 1;
+    return jint(r, "sid", 0) >= COPY_ID_BASE;
+}
+// the unit a row's buttons act on: a copy's id, a stack's store index
+static int row_sid(const cJSON *r) {
+    return row_is_copy(r) ? jint(r, "sid", 0) : jint(r, "i", -1);
+}
+// The row's paint metadata as v10 normalises it (deob:128883-128894: an object kept, a string parsed), or
+// built from the brain's raw paint columns (the trade inventories' copy rows: paint_color / paint_shader).
+// NULL when the row is unpainted; the caller frees it.
+static cJSON *row_meta(const cJSON *r) {
+    const cJSON *m = r ? cJSON_GetObjectItemCaseSensitive(r, "m") : NULL;
+    if (cJSON_IsObject(m)) return cJSON_Duplicate(m, 1);
+    if (cJSON_IsString(m) && m->valuestring[0]) {
+        cJSON *parsed = cJSON_Parse(m->valuestring);
+        if (cJSON_IsObject(parsed)) return parsed;
+        cJSON_Delete(parsed);
+        return NULL;
+    }
+    const cJSON *colour = r ? cJSON_GetObjectItemCaseSensitive(r, "paint_color") : NULL;
+    const cJSON *shader = r ? cJSON_GetObjectItemCaseSensitive(r, "paint_shader") : NULL;
+    cJSON *o = NULL;
+    if (cJSON_IsString(colour) && colour->valuestring[0]) {
+        o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "paint", colour->valuestring);
+    } else if (cJSON_IsNumber(shader) && shader->valueint >= 0) {
+        o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "paintShader", shader->valueint);
+    }
+    return o;
+}
+
+// The paint badge of a painted unit (Krunker v10.0.3's PaintedBadge, client/src/ui/skin_paint.c), placed as the
+// caller's grid places it (offset / size, skin_paint.h). The store paint of the metadata's colour (type 18, the
+// same colour: deob:124594) gives its name and thumbnail; the store table has no paintShader, so a shader paint
+// shows as "Shader #n" with the format_paint icon (deob:124605-124607 with no store paint).
+static void paint_badge(StrBuf *sb, const cJSON *meta, const int offset, const int size) {
+    if (!skin_paint_shows(meta)) return;
+    const char *colour = skin_paint_color(meta);
+    char name[128], url[512], html[1024];
+    SkinPaint store = {NULL, NULL};
+    for (int i = 0; colour && i < g_viewer_skin_count; i++) {
+        const ViewerSkin *p = skin(i);
+        if (!p || p->type != 18 || !skin_paint_same_color(p->paint_color, colour)) continue;
+        if (p->name) {
+            snprintf(name, sizeof(name), "%s", p->name);
+            store.name = name;
+        }
+        thumb(url, sizeof(url), p);
+        store.thumb = url[0] ? url : NULL;
+        break;
+    }
+    skin_paint_badge_at(html, sizeof(html), meta, &store, offset, size);
+    sb_append(sb, html);
+}
+
+// the owned units of an item: its stack's unpainted units plus one per painted copy row
 static int inv_count(const int index) {
     const cJSON *r;
-    cJSON_ArrayForEach(r, M.inv) if (jint(r, "i", -1) == index) return jint(r, "c", 1);
+    int n = 0, any = 0;
+    cJSON_ArrayForEach(r, M.inv) if (jint(r, "i", -1) == index) {
+        n += jint(r, "c", 1);
+        any = 1;
+    }
+    if (any) return n;
     return M.inv ? 0 : account_owned(index);
 }
+// the item's first row (its stack when it has unpainted units: the brain orders a stack before its copies)
 static const cJSON *inv_row(const int index) {
     const cJSON *r;
     cJSON_ArrayForEach(r, M.inv) if (jint(r, "i", -1) == index) return r;
+    return NULL;
+}
+// the row of one unit: the copy row of a copy id, the stack row of a store index
+static const cJSON *inv_unit(const int index, const int sid) {
+    const cJSON *r;
+    cJSON_ArrayForEach(r, M.inv) {
+        if (jint(r, "i", -1) != index) continue;
+        if (sid >= COPY_ID_BASE ? jint(r, "sid", 0) == sid : !row_is_copy(r)) return r;
+    }
     return NULL;
 }
 
@@ -1033,14 +1127,44 @@ static void list_push(IndexList *l, const int v, int *cap) {
     l->idx[l->n++] = v;
 }
 
-static IndexList inventory_list(void) {
-    IndexList l = {0};
+// The inventory's tiles: one per inventory row (v10.0.3's grid keys each tile on its row, deob:150215-150330:
+// a stack and each painted copy of the same item are their own tiles), or, with "Missing only", one per store
+// item not owned (row NULL). Sorted by the header's sort (cmp_skins' keys), a stack before the copies of its
+// item (the brain's order, by sid).
+typedef struct {
+    const cJSON *row; // the inventory row, NULL for a missing item
+    int index;        // the store index
+} InvTile;
+typedef struct {
+    InvTile *t;
+    int n;
+} TileList;
+
+static void tiles_push(TileList *l, const InvTile v, int *cap) {
+    if (l->n == *cap) {
+        *cap = *cap ? *cap * 2 : 64;
+        InvTile *g = realloc(l->t, sizeof(InvTile) * (size_t) *cap);
+        if (!g) return;
+        l->t = g;
+    }
+    l->t[l->n++] = v;
+}
+
+static int cmp_tiles(const void *pa, const void *pb) {
+    const InvTile *a = pa, *b = pb;
+    const int d = cmp_skins(&a->index, &b->index);
+    if (d) return d;
+    return row_sid(a->row) - row_sid(b->row); // one item's rows: the stack (sid = index) first, then its copies
+}
+
+static TileList inventory_list(void) {
+    TileList l = {0};
     int cap = 0;
     if (M.f.only_missing) {
-        for (int i = 0; i < g_viewer_skin_count; i++) {
+        for (int i = 0; i < g_viewer_skin_count && !M.f.only_painted; i++) { // a missing item is not painted
             const ViewerSkin *s = skin(i);
-            if (!s || (s->flags & VS_BLOCKED) || inv_count(i) > 0 || !filter_match(&M.f, s)) continue;
-            list_push(&l, i, &cap);
+            if (!s || (s->flags & VS_BLOCKED) || inv_count(i) > 0 || !filter_match_skin(&M.f, s)) continue;
+            tiles_push(&l, (InvTile) {NULL, i}, &cap);
         }
     } else {
         const cJSON *r;
@@ -1049,32 +1173,52 @@ static IndexList inventory_list(void) {
             const ViewerSkin *s = skin(i);
             if (!s || jint(r, "c", 1) <= 0) continue;
             if (M.f.hide_non_trade && jint(r, "nt", 0)) continue;
-            if (!filter_match(&M.f, s)) continue;
-            list_push(&l, i, &cap);
+            if (!filter_match_skin(&M.f, s)) continue;
+            if (M.f.only_painted) { // "Painted only": the rows whose metadata paints them (deob:124584)
+                cJSON *m = row_meta(r);
+                const int painted = skin_paint_shows(m);
+                cJSON_Delete(m);
+                if (!painted) continue;
+            }
+            tiles_push(&l, (InvTile) {r, i}, &cap);
         }
     }
     g_sort_key = M.f.sort;
-    if (l.n) qsort(l.idx, (size_t) l.n, sizeof(int), cmp_skins);
+    if (l.n) qsort(l.t, (size_t) l.n, sizeof(InvTile), cmp_tiles);
     return l;
 }
 
-static void inventory_grid(StrBuf *sb, const IndexList *l) {
+// One tile of the inventory grid (v10.0.3 deob:150215-150330): the market card, then the paint badge of a
+// painted copy (the PaintedBadge with the row's m, offset 10: deob:150273-150277), the Paint button (the
+// paint-icon template deob:147316, shown when the item has paintTargets and the row a sid: deob:150226-150228;
+// aria-label "Paint <name>"), and the Quick sell button ("Quick sell <name>"). List and Quick sell act on the
+// row's unit: a painted copy by its copy id, a stack by its store index.
+static void inventory_grid(StrBuf *sb, const TileList *l) {
     sb_append(sb, "<div class=\"market-grid svelte-18k2d4k\" id=\"v10mkGrid\">");
     for (int k = 0; k < l->n && k < M.gshown; k++) {
-        const int i = l->idx[k];
-        const cJSON *r = inv_row(i);
+        const int i = l->t[k].index;
+        const cJSON *r = l->t[k].row;
         const int cnt = r ? jint(r, "c", 1) : 0;
+        const int sid = r ? row_sid(r) : 0;
         const int sellable = cnt > 0 && r && !jint(r, "nt", 0);
+        const ViewerSkin *s = skin(i);
         sb_appendf(sb, "<div class=\"item-wrapper svelte-18k2d4k%s\">", M.detail == i ? " selected" : "");
-        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable};
+        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid};
         market_card(sb, i, &o);
         sb_append(sb, " ");
+        cJSON *meta = row_meta(r);
+        paint_badge(sb, meta, 10, 24);
+        cJSON_Delete(meta);
+        if (r && sid > 0 && paint_picker_can_open(i)) {
+            sb_append(sb, " <button type=\"button\" class=\"paint-icon svelte-18k2d4k\" aria-label=\"Paint ");
+            sb_append_esc(sb, s && s->name ? s->name : "");
+            sb_appendf(sb, "\" id=\"v10mkPaint%d\" onclick=\"v10mk.paint(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">format_paint</i></button> ", sid, i, sid);
+        }
         const int qs = r ? jint(r, "qs", 0) : 0, destroy = r && (jint(r, "nqs", 0) || qs <= 0);
         if (cnt > 0 && (qs > 0 || destroy)) {
-            const ViewerSkin *s = skin(i);
             sb_append(sb, " <button type=\"button\" class=\"quick-sell-icon svelte-18k2d4k\" aria-label=\"Quick sell ");
             sb_append_esc(sb, s && s->name ? s->name : "");
-            sb_appendf(sb, "\" id=\"v10mkQS%d\" onclick=\"v10mk.qs(%d)\"><i class=\"material-icons svelte-18k2d4k\">sell</i></button> ", i, i);
+            sb_appendf(sb, "\" id=\"v10mkQS%d\" onclick=\"v10mk.qs(%d,%d)\"><i class=\"material-icons svelte-18k2d4k\">sell</i></button> ", sid, i, sid);
         }
         sb_append(sb, "</div>");
     }
@@ -1088,14 +1232,14 @@ static void view_inventory(StrBuf *sb) {
         sb_append(sb, "<div class=\"empty-message svelte-htwh29\">Please log in to view your inventory</div>");
         return;
     }
-    IndexList l = inventory_list();
+    TileList l = inventory_list();
     const FilterView v = {.title = "Inventory", .count = l.n, .default_sort = "rarity", .search_in_header = 0, .season = 1, .sort_select = 1,
                           .wear = 1, .checkboxes = 31};
     filter_header(sb, &M.f, &v);
     sb_append(sb, " <div id=\"v10mkGridHolder\">");
     inventory_grid(sb, &l);
     sb_append(sb, "</div>");
-    free(l.idx);
+    free(l.t);
 }
 
 static void sales_grid(StrBuf *sb, int *count_out) {
@@ -1772,22 +1916,58 @@ static int parse_skins(const char *s, int *out, const int max) {
     return n;
 }
 
-// _46462: the trade item grid (svelte-z9tzua), compact
-static void trade_grid(StrBuf *sb, const int *items, const int n, const double kr, const int fill) {
+// One unit of a trade's side: a stack unit (meta NULL) or a painted copy with its paint.
+typedef struct {
+    int index;
+    cJSON *meta; // the copy's paint metadata (row_meta), NULL for a stack unit; the side frees it
+} TradeUnit;
+
+// A trade row's side (offer_html): the stack units of its "sksell" / "skbuy" string ("1,1,5,"), then the painted
+// copies of "copies_s" / "copies_r" (kn_brain db_economy.c: {sid, i, paint_color, paint_shader} per copy, the
+// paint kept through escrow: doc/v10/paint-copy.md Routes). Returns the units written (at most max).
+static int trade_side_units(const cJSON *t, const char *skins_key, const char *copies_key, TradeUnit *out, const int max) {
+    int n = 0;
+    const char *s = jstr(t, skins_key);
+    while (s && *s && n < max) {
+        char *end;
+        const long v = strtol(s, &end, 10);
+        if (end == s) break;
+        out[n++] = (TradeUnit) {(int) v, NULL};
+        s = *end == ',' ? end + 1 : end;
+    }
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(t, copies_key)) {
+        if (n >= max) break;
+        const int i = jint(c, "i", -1);
+        if (i < 0) continue;
+        out[n++] = (TradeUnit) {i, row_meta(c)};
+    }
+    return n;
+}
+
+static void trade_units_free(TradeUnit *u, const int n) {
+    for (int k = 0; k < n; k++) cJSON_Delete(u[k].meta);
+}
+
+// _46462: the trade item grid (svelte-z9tzua), compact. A painted copy's unit carries the PaintedBadge in its
+// trade-item-paint (v10.0.3 deob:148092 markup; the badge with offset 0, size 18 at deob:148216-148221).
+static void trade_grid(StrBuf *sb, const TradeUnit *items, const int n, const double kr, const int fill) {
     sb_append(sb, "<div class=\"trade-item-grid svelte-z9tzua compact\">");
     for (int k = 0; k < n; k++) {
-        const ViewerSkin *s = skin(items[k]);
+        const ViewerSkin *s = skin(items[k].index);
         if (!s) continue;
         char url[512];
         thumb(url, sizeof(url), s);
-        sb_appendf(sb, "<div class=\"trade-item svelte-z9tzua\" role=\"button\" tabindex=\"0\" style=\"border-color: %s;\" data-index=\"%d\" onclick=\"v10mk.citem(%d)\">", rarity_color(s), items[k], items[k]);
+        sb_appendf(sb, "<div class=\"trade-item svelte-z9tzua\" role=\"button\" tabindex=\"0\" style=\"border-color: %s;\" data-index=\"%d\" onclick=\"v10mk.citem(%d)\">", rarity_color(s), items[k].index, items[k].index);
         if (s->type == 4) sb_appendf(sb, "<div class=\"trade-spray svelte-z9tzua\" style=\"background-image: url('%s'); \"></div>", url);
         else {
             sb_appendf(sb, "<img class=\"trade-item-img svelte-z9tzua%s\" draggable=\"false\" src=\"%s\" alt=\"", (s->flags & VS_RGB) ? " rgbHue" : "", url);
             sb_append_esc(sb, s->name ? s->name : "");
             sb_append(sb, "\">");
         }
-        sb_append(sb, "   <div class=\"trade-item-paint svelte-z9tzua\"></div></div>");
+        sb_append(sb, "   <div class=\"trade-item-paint svelte-z9tzua\">");
+        paint_badge(sb, items[k].meta, 0, 18);
+        sb_append(sb, "</div></div>");
     }
     const int empty = fill > 0 ? (fill - n > 0 ? fill - n : 0) : (n == 0 ? 5 : (n % 5 ? 5 - n % 5 : 0));
     sb_append(sb, " ");
@@ -1805,8 +1985,9 @@ static void trade_grid(StrBuf *sb, const int *items, const int n, const double k
 static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
     const AccountInfo *a = acc();
     const int mine = a && jint(t, "pl", 0) == a->id, trid = jint(t, "trid", 0);
-    int yours[256], theirs[256];
-    const int ny = parse_skins(jstr(t, mine ? "sksell" : "skbuy"), yours, 256), nt = parse_skins(jstr(t, mine ? "skbuy" : "sksell"), theirs, 256);
+    TradeUnit yours[256], theirs[256];
+    const int ny = trade_side_units(t, mine ? "sksell" : "skbuy", mine ? "copies_s" : "copies_r", yours, 256);
+    const int nt = trade_side_units(t, mine ? "skbuy" : "sksell", mine ? "copies_r" : "copies_s", theirs, 256);
     const double ykr = jnum(t, mine ? "krsell" : "krbuy"), tkr = jnum(t, mine ? "krbuy" : "krsell");
     const char *name = jstr(t, mine ? "buyer" : "player");
     const int scam_give = section == 0 && (ny > 0 || ykr > 0) && nt == 0 && tkr <= 0, scam_get = section == 0 && ny == 0 && nt > 0;
@@ -1845,8 +2026,8 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
         sb_append(sb, "</div>");
     }
     double yv = 0, tv = 0;
-    for (int k = 0; k < ny; k++) yv += social_estimate_value(yours[k]);
-    for (int k = 0; k < nt; k++) tv += social_estimate_value(theirs[k]);
+    for (int k = 0; k < ny; k++) yv += social_estimate_value(yours[k].index);
+    for (int k = 0; k < nt; k++) tv += social_estimate_value(theirs[k].index);
     const int most = ny > nt ? ny : nt, fill = most == 0 ? 5 : 5 * ((most + 4) / 5);
     char v1[32], v2[32];
     fmt(v1, sizeof(v1), yv);
@@ -1865,6 +2046,8 @@ static void offer_html(StrBuf *sb, const cJSON *t, const int section) {
         sb_append(sb, "\"</div>");
     }
     sb_append(sb, "</div>");
+    trade_units_free(yours, ny);
+    trade_units_free(theirs, nt);
 }
 
 static void trades_load(void) {
@@ -1946,8 +2129,12 @@ static int ct_offer_count(const int side) {
     for (int k = 0; k < M.ct_n[side]; k++) n += M.ct_sel[side][k].c;
     return n;
 }
-static int ct_offered(const int side, const int skin_index) {
-    for (int k = 0; k < M.ct_n[side]; k++) if (M.ct_sel[side][k].i == skin_index) return M.ct_sel[side][k].c;
+// the units of one row already in the side's offer: a stack's count (its {i, c} entry), 1 when a painted copy
+// (sid) is offered (v10.0.3 deob:124759-124769: a copy row is depleted once its sid is in an iids, a stack row
+// counts its cnt minus the stack entry's c)
+static int ct_offered(const int side, const int skin_index, const int sid) {
+    for (int k = 0; k < M.ct_n[side]; k++)
+        if (M.ct_sel[side][k].i == skin_index && M.ct_sel[side][k].sid == sid) return M.ct_sel[side][k].c;
     return 0;
 }
 static int ct_fee(void) {
@@ -1962,26 +2149,47 @@ static int ct_fee(void) {
     return fee;
 }
 
-static void ct_item(StrBuf *sb, const int side, const int index, const int count, const int offer, const int locked) {
+// One trade-inv-item (v10.0.3 deob:124685 markup, the rows at 124716-124830): a stack row (count units, sid 0)
+// or a painted copy row (sid its copy id, meta its paint). The copy's paint is the PaintedBadge in
+// trade-item-paint (offset 0, size 14: deob:124802-124808) and the name gets `has-paint` (deob:124798-124799); a
+// stack shows its count, a copy none (deob:124810-124830: the count element is a stack's; a copy's serial / wear
+// elements have nothing here). The id keeps the stack's form (v10mkCtI0_4) and adds the copy id for a copy.
+static void ct_item(StrBuf *sb, const int side, const int index, const int count, const int offer, const int locked, const int sid, const cJSON *meta) {
     const ViewerSkin *s = skin(index);
     if (!s) return;
-    char url[512];
+    char url[512], id[48];
     thumb(url, sizeof(url), s);
-    const int remaining = offer ? count : count - ct_offered(side, index);
-    sb_appendf(sb, "<div class=\"%s svelte-1lqen9w%s%s\" id=\"v10mkCt%c%d_%d\" role=\"button\" tabindex=\"0\" style=\"border-color: %s;\" data-index=\"%d\" onclick=\"v10mk.%s(%d,%d)\" onmouseenter=\"playTick(0.05)\">",
-               "trade-inv-item", locked ? " locked" : "", !offer && remaining <= 0 && !locked ? " depleted" : "", offer ? 'O' : 'I', side, index,
-               rarity_color(s), index, offer ? "crem" : "cadd", side, index);
+    const int remaining = offer ? count : count - ct_offered(side, index, sid);
+    if (sid > 0) snprintf(id, sizeof(id), "v10mkCt%c%d_%d_%d", offer ? 'O' : 'I', side, index, sid);
+    else snprintf(id, sizeof(id), "v10mkCt%c%d_%d", offer ? 'O' : 'I', side, index);
+    sb_appendf(sb, "<div class=\"%s svelte-1lqen9w%s%s\" id=\"%s\" role=\"button\" tabindex=\"0\" style=\"border-color: %s;\" data-index=\"%d\" onclick=\"v10mk.%s(%d,%d,%d)\" onmouseenter=\"playTick(0.05)\">",
+               "trade-inv-item", locked ? " locked" : "", !offer && remaining <= 0 && !locked ? " depleted" : "", id,
+               rarity_color(s), index, offer ? "crem" : "cadd", side, index, sid);
     if (s->type == 4) sb_appendf(sb, "<div class=\"trade-spray-img svelte-1lqen9w\" style=\"background-image: url('%s'); \"></div>", url);
     else {
         sb_appendf(sb, "<img class=\"trade-item-img svelte-1lqen9w%s\" draggable=\"false\" src=\"%s\" alt=\"", (s->flags & VS_RGB) ? " rgbHue" : "", url);
         sb_append_esc(sb, s->name ? s->name : "");
         sb_append(sb, "\">");
     }
-    sb_append(sb, " <div class=\"trade-item-name svelte-1lqen9w\">");
+    const int painted = skin_paint_shows(meta);
+    sb_appendf(sb, " <div class=\"trade-item-name svelte-1lqen9w%s\">", painted ? " has-paint" : "");
     sb_append_esc(sb, s->name ? s->name : "");
-    sb_appendf(sb, "</div> <div class=\"trade-item-paint svelte-1lqen9w\"></div> <div class=\"trade-item-count svelte-1lqen9w\">x%d</div> ", remaining);
+    sb_append(sb, "</div> <div class=\"trade-item-paint svelte-1lqen9w\">");
+    paint_badge(sb, meta, 0, 14);
+    sb_append(sb, "</div> ");
+    if (sid <= 0) sb_appendf(sb, "<div class=\"trade-item-count svelte-1lqen9w\">x%d</div> ", remaining);
     if (locked) sb_append(sb, "<div class=\"trade-item-locked svelte-1lqen9w\"><span class=\"material-icons\" style=\"font-size: 30px; color: #fff;\">lock</span></div>");
     sb_append(sb, "</div>");
+}
+
+// the Create Trade inventory row of a unit: the copy row of sid, else the stack row of the index
+static const cJSON *ct_row(const int side, const int index, const int sid) {
+    const cJSON *r;
+    cJSON_ArrayForEach(r, cJSON_GetArrayItem(M.ct_inv, side)) {
+        if (jint(r, "i", -1) != index) continue;
+        if (sid > 0 ? jint(r, "sid", 0) == sid : jint(r, "sid", 0) == 0) return r;
+    }
+    return NULL;
 }
 
 // Create Trade inventory sides. v10.0.3's trade side lists every row that matches its search in a
@@ -2018,7 +2226,9 @@ static void ct_inv_card(StrBuf *sb, const int pos, void *user) {
     const int side = *(const int *) user;
     if (side < 0 || side > 1 || pos < 0 || pos >= M.ct_nrows[side] || !M.ct_rows[side]) return;
     const TradeListRow *r = &M.ct_rows[side][pos];
-    ct_item(sb, side, r->skin, r->count, 0, r->locked);
+    cJSON *meta = r->sid > 0 ? row_meta(r->row) : NULL; // a stack's row has no paint (deob:124771: a stack's metadata is null)
+    ct_item(sb, side, r->skin, r->count, 0, r->locked, r->sid, meta);
+    cJSON_Delete(meta);
 }
 
 // Per frame (menu_ui.c): the open Create Trade lists follow their scroll positions (ui_vgrid.h).
@@ -2047,8 +2257,11 @@ static void ct_side(StrBuf *sb, const int side) {
                side, ct_offer_count(side), ct_max_items());
     double value = 0;
     for (int j = 0; j < M.ct_n[side]; j++) {
-        ct_item(sb, side, M.ct_sel[side][j].i, M.ct_sel[side][j].c, 1, 0);
-        value += (double) social_estimate_value(M.ct_sel[side][j].i) * M.ct_sel[side][j].c;
+        const EconTradeItem *u = &M.ct_sel[side][j];
+        cJSON *meta = u->sid > 0 ? row_meta(ct_row(side, u->i, u->sid)) : NULL; // the offered copy keeps its paint (deob:125069-125072: m)
+        ct_item(sb, side, u->i, u->c, 1, 0, u->sid, meta);
+        cJSON_Delete(meta);
+        value += (double) social_estimate_value(u->i) * u->c;
     }
     char v[32];
     fmt(v, sizeof(v), value);
@@ -2634,10 +2847,10 @@ static void render_grid(void) {
         browse_grid(&sb);
         snprintf(title, sizeof(title), "Listings (%d items)", browse_groups());
     } else if (M.mtab == MT_INVENTORY) {
-        IndexList l = inventory_list();
+        TileList l = inventory_list();
         inventory_grid(&sb, &l);
         snprintf(title, sizeof(title), "Inventory (%d items)", l.n);
-        free(l.idx);
+        free(l.t);
     } else {
         render_content();
         return;
@@ -2943,7 +3156,9 @@ static void confirm_modal(void) {
             M.busy = 1;
             M.pending = ACT_LIST;
             M.sel_price = (int) p;
-            const double v[4] = {M.sel_skin, -1, 0, (double) p}; // li(skin, skinid, uid, price)
+            // li(skin, skinid, uid, price): skinid is the painted copy's id (v10 lists the row's sid as skin_id,
+            // deob:151563-151564, 122589; economy.c sh_list: a value >= V10_COPY_ID_BASE is the copy listed), -1 for a stack
+            const double v[4] = {M.sel_skin, M.sel_sid >= COPY_ID_BASE ? M.sel_sid : -1, 0, (double) p};
             send_econ("li", 4, v, M.op);
             render_both();
             break;
@@ -3143,9 +3358,10 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.sel_price = a2;
         M.modal = MODAL_PURCHASE;
         render_modal();
-    } else if (!strcmp(h, "list")) {
+    } else if (!strcmp(h, "list")) { // list(index, sid): the row's unit (a painted copy by its id)
         html_ui_stop_propagation();
         M.sel_skin = a0;
+        M.sel_sid = argc > 1 ? a1 : a0;
         M.price_in[0] = 0;
         econ_new_op(M.op, sizeof(M.op), "li");
         M.modal = MODAL_LIST;
@@ -3184,10 +3400,15 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         html_ui_stop_propagation();
         M.err_open = 0;
         render_modal();
-    } else if (!strcmp(h, "qs")) {
+    } else if (!strcmp(h, "paint")) { // paint(index, sid): the tile's Paint button (deob:149062-149069: the popup with skinId = row.sid)
+        html_ui_stop_propagation();
+        if (a1 > 0) paint_picker_open(a0, a1);
+    } else if (!strcmp(h, "qs")) { // qs(index, sid): the row's unit; a painted copy is one item (deob:147652: "1 Item" only)
         html_ui_stop_propagation();
         M.sel_skin = a0;
-        M.sel_count = inv_count(a0);
+        M.sel_sid = argc > 1 ? a1 : a0;
+        const cJSON *unit = inv_unit(a0, M.sel_sid);
+        M.sel_count = unit ? jint(unit, "c", 1) : inv_count(a0);
         M.qs_mode = 0;
         M.qs_err[0] = 0;
         econ_new_op(M.op, sizeof(M.op), "qs");
@@ -3202,7 +3423,11 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         M.qs_err[0] = 0;
         M.pending = ACT_QS;
         const double v[4] = {a0 == 2 ? 2 : 0, M.sel_skin, 0, M.sel_count > 1 ? M.qs_mode : 0}; // qsi(mode, skin, uid, amount)
-        send_econ("qsi", 4, v, M.op);
+        cJSON *f = econ_frame("qsi", 4, v, M.op);
+        // a painted copy: the sale's skin_id (v10's quickSellItem(.., skin_id) with the unit's instanceId, deob:147673-147675)
+        // is the frame's ext "copy" (economy.c sh_quick_sell: ext.copy >= V10_COPY_ID_BASE is the copy sold)
+        if (M.sel_sid >= COPY_ID_BASE) cJSON_AddNumberToObject(cJSON_GetArrayItem(f, cJSON_GetArraySize(f) - 1), "copy", M.sel_sid);
+        send_frame(f);
         render_modal();
     } else if (!strcmp(h, "hsort")) {
         const char *col = arg_s(ev, args, argc, 0);
@@ -3255,23 +3480,25 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         char t[64];
         trim_lower(t, sizeof(t), M.start_name);
         if (t[0] && !M.start_searching) start_search(M.start_name);
-    } else if (!strcmp(h, "cadd") || !strcmp(h, "crem")) {
-        const int side = a0 ? 1 : 0, index = a1;
+    } else if (!strcmp(h, "cadd") || !strcmp(h, "crem")) { // cadd / crem(side, index, sid): sid = a painted copy's id, 0 a stack unit
+        const int side = a0 ? 1 : 0, index = a1, sid = a2 > 0 ? a2 : 0;
         if (h[1] == 'a') {
-            const cJSON *row = NULL, *r;
-            cJSON_ArrayForEach(r, cJSON_GetArrayItem(M.ct_inv, side)) if (jint(r, "i", -1) == index) row = r;
-            if (!row || jint(row, "nt", 0) || ct_offer_count(side) >= ct_max_items() || jint(row, "c", 1) - ct_offered(side, index) <= 0) return 1;
+            // v10.0.3 deob:125045-125075: a stack row adds one unit to its {i, c} entry (deob:125048-125066); a copy
+            // row is offered once (deob:125037), as {i, c: 1, iids: [sid]} (deob:125069-125072; the serializer keeps
+            // {i, c, iids}: deob:125109-125113)
+            const cJSON *row = ct_row(side, index, sid);
+            if (!row || jint(row, "nt", 0) || ct_offer_count(side) >= ct_max_items() || jint(row, "c", 1) - ct_offered(side, index, sid) <= 0) return 1;
             int k = 0;
-            while (k < M.ct_n[side] && M.ct_sel[side][k].i != index) k++;
+            while (k < M.ct_n[side] && !(M.ct_sel[side][k].i == index && M.ct_sel[side][k].sid == sid)) k++;
             if (k == M.ct_n[side]) {
                 if (k >= 40) return 1;
-                M.ct_sel[side][k] = (EconTradeItem) {index, 0};
+                M.ct_sel[side][k] = (EconTradeItem) {index, 0, sid};
                 M.ct_n[side]++;
             }
             M.ct_sel[side][k].c++;
         } else {
             for (int k = 0; k < M.ct_n[side]; k++) {
-                if (M.ct_sel[side][k].i != index) continue;
+                if (M.ct_sel[side][k].i != index || M.ct_sel[side][k].sid != sid) continue;
                 if (--M.ct_sel[side][k].c <= 0) {
                     memmove(&M.ct_sel[side][k], &M.ct_sel[side][k + 1], sizeof(EconTradeItem) * (size_t) (M.ct_n[side] - k - 1));
                     M.ct_n[side]--;
@@ -3330,18 +3557,29 @@ static int handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
 
 // The wallet's Quick Sell (v10's _46234 pushed over the wallet): the market's own view, with the
 // exchange closed. Its values are the market inventory's (loaded here when it is not yet).
-void v10_market_wallet_sell(const int index) {
+void v10_market_wallet_sell(const int index, const int sid) {
     if (!skin(index)) return;
     if (!logged_in()) return;
     g_standalone = 1;
     inventory_load();
     M.sel_skin = index;
-    M.sel_count = inv_count(index);
+    M.sel_sid = sid >= COPY_ID_BASE ? sid : index; // a painted copy's tile sells that copy (one item)
+    const cJSON *unit = inv_unit(index, M.sel_sid);
+    M.sel_count = M.sel_sid >= COPY_ID_BASE ? 1 : unit ? jint(unit, "c", 1) : inv_count(index);
     M.qs_mode = 0;
     M.qs_err[0] = 0;
     econ_new_op(M.op, sizeof(M.op), "qs");
     M.modal = MODAL_QS;
     render_modal();
+}
+
+// A paint was applied (paint_picker.c): v10.0.3 reloads the inventory from the server after a paint
+// (deob:149054-149060, market.getInventory at deob:122564-122571), so the painted copy's row and badge are
+// the server's. The open exchange, or the wallet's market views, ask for the page again; the reply redraws.
+void v10_market_owned_changed(void) {
+    if (!is_open() && !g_standalone) return;
+    M.inv_loading = 0; // a page in flight is asked again: the copy's row must be the one after the paint
+    inventory_load();
 }
 
 // The wallet's item tap: the item detail page (the Catalog's, catalog_detail), pushed over the wallet.
@@ -3755,7 +3993,7 @@ void v10_market_scenario(const cJSON *state) {
         M.ct_inv = cJSON_IsArray(inv) ? cJSON_Duplicate(inv, 1) : NULL;
         for (int side = 0; side < 2; side++) {
             const cJSON *picks = cJSON_GetObjectItem(ct, side ? "theirs" : "mine"), *p;
-            cJSON_ArrayForEach(p, picks) if (M.ct_n[side] < 40) M.ct_sel[side][M.ct_n[side]++] = (EconTradeItem) {jint(p, "i", 0), jint(p, "c", 1)};
+            cJSON_ArrayForEach(p, picks) if (M.ct_n[side] < 40) M.ct_sel[side][M.ct_n[side]++] = (EconTradeItem) {jint(p, "i", 0), jint(p, "c", 1), jint(p, "sid", 0)};
         }
     }
     const cJSON *notes = cJSON_GetObjectItem(state, "notes"), *n;

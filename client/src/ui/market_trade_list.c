@@ -32,7 +32,8 @@ static int cmp_kept(const void *pa, const void *pb) {
     const KeptRow *a = pa, *b = pb;
     if (a->rarity != b->rarity) return b->rarity - a->rarity;
     if (a->season != b->season) return b->season - a->season;
-    return b->row.skin - a->row.skin;
+    if (a->row.skin != b->row.skin) return b->row.skin - a->row.skin;
+    return a->row.sid - b->row.sid; // one skin's rows: its stack (sid 0) first, then its copies by copy id
 }
 
 int market_text_contains(const char *hay, const char *needle) {
@@ -72,7 +73,8 @@ int market_trade_list_select(const struct ViewerSkin *(*skin)(int index), const 
         if (!s || count <= 0) continue;
         if (missing && owned && bsearch(&i, owned, (size_t) nowned, sizeof(*owned), cmp_int)) continue;
         if (search && search[0] && !market_text_contains(s->name, search) && !(s->name && market_text_contains(search, s->name))) continue;
-        kept[nkept++] = (KeptRow) {{i, count, row_int(r, "nt", 0)}, s->rarity, s->seas ? s->seas : 1};
+        // a painted copy row carries its copy id as sid (a stack none); the row goes with it for its paint
+        kept[nkept++] = (KeptRow) {{i, count, row_int(r, "nt", 0), row_int(r, "sid", 0), r}, s->rarity, s->seas ? s->seas : 1};
     }
     free(owned);
 

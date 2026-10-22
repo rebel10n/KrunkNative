@@ -293,7 +293,10 @@ int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "knV10WalletSell")) {
-        v10_market_wallet_sell(arg_int(args, argc, 0));
+        {
+            const int skin = arg_int(args, argc, 0); // a stack tile sells its item (sid = index); a copy passes its own id
+            v10_market_wallet_sell(skin, argc > 1 ? arg_int(args, argc, 1) : skin);
+        }
         return 1;
     }
     if (!strcmp(name, "knV10WalletRedeem")) { // window.prizeWheel(0, skin) (v10_daily_spin.c's call)

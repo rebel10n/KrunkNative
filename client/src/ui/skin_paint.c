@@ -74,7 +74,8 @@ static size_t put_swatch_colour(char *out, size_t n, size_t at, const char *colo
     return at;
 }
 
-size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint *store) {
+// The badge; place (NULL for the stylesheet's position) is the inline style of the v10 offset / size props.
+static size_t badge(char *out, size_t n, const cJSON *meta, const SkinPaint *store, const char *place) {
     if (!out || n == 0) return 0;
     out[0] = '\0';
     if (!skin_paint_shows(meta)) return 0;
@@ -107,6 +108,10 @@ size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint 
     size_t at = 0;
     at = put(out, n, at, "<div class='skinPaintBadge' title='");
     at = put_esc(out, n, at, title);
+    if (place) {
+        at = put(out, n, at, "' style='");
+        at = put(out, n, at, place);
+    }
     at = put(out, n, at, "'>");
     const char *thumb = store ? store->thumb : NULL;
     if (thumb && thumb[0]) {
@@ -121,4 +126,16 @@ size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint 
         at = put(out, n, at, "<i class='material-icons'>format_paint</i>");
     }
     return put(out, n, at, "</div>");
+}
+
+size_t skin_paint_badge(char *out, size_t n, const cJSON *meta, const SkinPaint *store) {
+    return badge(out, n, meta, store, NULL);
+}
+
+size_t skin_paint_badge_at(char *out, size_t n, const cJSON *meta, const SkinPaint *store, const int offset, const int size) {
+    // v10 sets top and left to the offset and --badge-size to the size (deob:124661-124663); the size is
+    // written as the width and height here (the stylesheet's .skinPaintBadge sizes the inner parts in %)
+    char place[96];
+    snprintf(place, sizeof(place), "top:%dpx;left:%dpx;width:%dpx;height:%dpx", offset, offset, size, size);
+    return badge(out, n, meta, store, place);
 }
