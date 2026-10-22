@@ -19,7 +19,9 @@
  * ids are shop_products.id + SHOP_JUNK_BASE, so the two never share a key. A purchase below the offset is an
  * official product: official_purchase sells its KR prices (the KR ledger, db_add_funds), grants its skins and Junk,
  * and refuses USD products and badges ("Payment is not available on Box Office", "Not sold on Box Office").
- * P_SHOP_BUNDLES (account) -> the store's bundle rows (store_bundles, 0354/0355), as v10's ALL_BUNDLE_DATA keys with
+ * The display lists only the official products official_purchase can sell (official_products' filter), so nothing
+ * listed is unbuyable: the USD products and the badge stay in the table but are not shown on Box Office.
+ * P_SHOP_BUNDLES (account) -> the store's bundle rows (store_bundles, 0354/0356), as v10's ALL_BUNDLE_DATA keys with
  * DATE and the account's OWNED, in v10's order (GET /api/shop/bundles). P_SHOP_BUNDLE_BUY (account, bundle): every
  * bundle is USD, so a bundle that is not owned is refused "Payment is not available on Box Office".
  */
@@ -74,7 +76,10 @@ static int64_t official_products(Dbx *x, const char *tag, const int64_t account,
                                          " price_type, price_usd AS usd__f, price_amount AS amount__i,"
                                          " price_currency_id AS currency_id__i, price_currency, purchase_limit AS limit__i,"
                                          " purchase_limit_scope, display_id AS display__i FROM shop_official_products"
-                                         " WHERE display_tag = $1 AND active = 1 ORDER BY node_order, id"),
+                                         " WHERE display_tag = $1 AND active = 1 AND price_type = 'virtual' AND price_currency_id = 1"
+                                         " AND NOT EXISTS (SELECT 1 FROM shop_official_contents c WHERE c.product_id = shop_official_products.id"
+                                         " AND NOT (c.content_type = 'skin' OR (c.content_type = 'currency' AND c.ref = '2')))"
+                                         " ORDER BY node_order, id"),
                            KN_DB_ARGS(tag));
     if (dbx_failed(x)) {
         cJSON_Delete(rows);

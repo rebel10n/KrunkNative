@@ -1,4 +1,4 @@
--- 0355_store_bundle_ownership (MySQL): the bundle grid's DATE and the account's bundle ownership (v10's
+-- 0356_store_bundle_ownership (MySQL): the bundle grid's DATE and the account's bundle ownership (v10's
 -- ALL_BUNDLE_DATA DATE and OWNED; db_shop.c). Additive only. Owner: services/brain/db_shop.c, shop.c.
 ALTER TABLE store_bundles ADD COLUMN bundle_date VARCHAR(40) NULL;  -- DATE (ISO 8601), NULL: none (sorts last)
 

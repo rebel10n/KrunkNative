@@ -217,8 +217,8 @@ async def scenario(port):
         products = data.get("products", {})
         junk = {k: v for k, v in products.items() if int(k) >= JUNK_BASE}
         official = {k: v for k, v in products.items() if int(k) < JUNK_BASE}
-        check(status == 200 and set(junk) == {str(ja), str(jb)} and len(official) == 26,
-              "the display lists the two active Junk products (not the retired one) and the 26 official ones: %s %s"
+        check(status == 200 and set(junk) == {str(ja), str(jb)} and len(official) == 17,
+              "the display lists the two active Junk products (not the retired one) and the 17 official KR ones: %s %s"
               % (status, sorted(products)))
         pa = products.get(str(ja), {})
         pb = products.get(str(jb), {})
@@ -298,13 +298,13 @@ async def scenario(port):
               and hovi.get("purchase_limit") == 1 and hovi.get("purchase_limit_scope") == "per_user"
               and hovi.get("display_ids") == [37] and hovi.get("purchase_count") == 0,
               "Hovi (35) is krunker.io's product as the display has it: %s" % hovi)
-        groza = official.get("26", {})
-        check((groza.get("prices") or [{}])[0].get("real") == {"price_usd": 2.99},
-              "a money product carries its USD price: %s" % groza.get("prices"))
+        # nothing listed is unbuyable: the USD products (Groza 26, Paint Ticket 33, Hanami 38...) and the badge (46) are not shown
+        check("26" not in official and "33" not in official and "38" not in official and "46" not in official,
+              "the USD products and the badge are not listed (Box Office cannot sell them): %s" % sorted(official))
+        check(all((p.get("prices") or [{}])[0].get("virtual", {}).get("currency_id") == 1 for p in official.values()),
+              "every listed official product is priced in KR, so each one can be bought")
         dyn = [ch for ch in data.get("children", []) if ch.get("id") == 33]
-        check(dyn and dyn[0].get("type") == "dynamic" and dyn[0]["data"]["dynamic"]["steps"][0] == {"min_quantity": 500, "price_usd": 0.22}
-              and official.get("33", {}).get("display_ids") == [],
-              "the dynamic node keeps its quantity steps; a product with no display id carries none: %s" % dyn)
+        check(not dyn, "the dynamic USD node (Paint Ticket) is not listed: %s" % dyn)
         query("UPDATE players SET player_funds = 0 WHERE player_id = %d" % a_id)
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 35, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Not enough KR", "an official KR product with no KR is refused: %s %s" % (status, body))
@@ -350,7 +350,7 @@ async def scenario(port):
         check(status == 200 and body["data"]["products"]["35"]["purchase_count"] == 1, "the display counts the one Hovi")
         status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 26, "quantity": 1}, a_tok)
         check(status == 400 and err_of(body) == "Payment is not available on Box Office",
-              "a USD product (Sandstorm OTs-14 Groza, 2.99) is refused, nothing written: %s %s" % (status, body))
+              "a USD product (Sandstorm OTs-14 Groza, 2.99, not listed) is refused, nothing written: %s %s" % (status, body))
 
         # the Junk product of krunker.io's display: 2000 KR for 100 Junk (currency 2, hundredths), limit 1000 globally
         query("UPDATE players SET player_funds = 4000 WHERE player_id = %d" % a_id)
@@ -362,6 +362,15 @@ async def scenario(port):
         check(one("SELECT player_junk FROM players WHERE player_id = %d" % a_id) == jbefore + 20000
               and one("SELECT player_funds FROM players WHERE player_id = %d" % a_id) == 0,
               "the Junk is credited and the KR spent")
+
+        # Eterno (45): 200000 KR and skin 8003, the same grant path as Hovi
+        query("UPDATE players SET player_funds = 200000 WHERE player_id = %d" % a_id)
+        status, body = http(port, "POST", "/api/shop/purchase", {"product_id": 45, "quantity": 1}, a_tok)
+        d = body.get("data", {}) if isinstance(body, dict) else {}
+        check(status == 200 and d.get("price_paid") == 200000 and d.get("rewards") == [{"type": "skin", "skin_id": 8003, "amount": 1}]
+              and one("SELECT player_funds FROM players WHERE player_id = %d" % a_id) == 0
+              and one("SELECT COALESCE(SUM(delta), 0) FROM skin_transactions WHERE account_id = %d AND skin_id = 8003" % a_id) == 1,
+              "Eterno costs 200000 KR, grants skin 8003 and the KR is spent: %s %s" % (status, body))
 
         # bundles: v10's order (owned last, price low first, DATE newest first) and OWNED per account
         query("INSERT INTO store_bundles (id, name, price, original_price, discount_pct, skins, expiry, info, funds, junk, premium,"
