@@ -105,6 +105,7 @@ void strike_connection_state(const StrikeConnState state, const char *error, con
         memcpy(C.close_reason, reason, sizeof(reason));
         C.close_code = close_code;
     }
+    if (state == STRIKE_CONN_LOST) menu_play_cancel(); // a PLAY that was waiting for the connection is over (the popup is the next step)
     if (state == STRIKE_CONN_CONNECTED || state == STRIKE_CONN_UPDATING || state == STRIKE_CONN_LOST) {
         html_timer_cancel(C.reconnect_timer);
         C.reconnect_timer = 0;
@@ -148,6 +149,9 @@ int strike_connect_action(const char *name) {
     // FRVR reloads the page (backToOrigin) under "Reconnecting..."; here the same server is tried again
     strike_connection_state(STRIKE_CONN_RECONNECTING, NULL, NULL, 0, NULL);
     menu_retry_connect();
+    // already connected (a stale popup): menu_retry_connect has nothing to do and no connect event follows,
+    // so the loader is completed here (it would stay up for good otherwise)
+    if (menu_connected()) strike_connection_state(STRIKE_CONN_CONNECTED, NULL, NULL, 0, NULL);
     return 1;
 }
 

@@ -917,6 +917,10 @@ console-end-paint-test: build ## Dev console keeps drawing through the match end
 download-screen-test: build ## The native client offers Download our client on a fresh profile, desktop and phone layout: the More Krunker tile opens the Download window, the hub's Android badge shows, and no window is open at startup (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/download_screen_e2e.py $(DEBUG_DIR)
 
+.PHONY: strike-play-test
+strike-play-test: build ## Krunker Strike's PLAY with no connection: the press is answered (Reconnecting...), and the reconnect ends on the page (Lost Connection with Reconnect), never a loader for good (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/strike_play_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-strike-test
 console-strike-test: build ## Dev console on Krunker Strike's page: opens styled, runs a typed command and reads its output (also the default page) (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I client/tests/console_strike_e2e.py $(DEBUG_DIR)

@@ -485,7 +485,9 @@ static char *rewards_html(void) {
 
 static unsigned long rewards_signature(void) {
     const BattlePass *bp = battlepass_ui_pass();
-    unsigned long sig = (unsigned long) (uintptr_t) bp * 31u + (unsigned long) bp_has_data() + (unsigned long) battlepass_ui_bpp() * 7u;
+    // the load's status too: a failed "bpdl" (battlepass_ui_tick, 15 s) changes no data, and the tab must say so
+    unsigned long sig = (unsigned long) (uintptr_t) bp * 31u + (unsigned long) bp_has_data() + (unsigned long) battlepass_ui_bpp() * 7u
+                        + (unsigned long) battlepass_ui_status() * 1009u;
     for (const char *p = battlepass_ui_claimed(); p && *p; p++) sig = sig * 131u + (unsigned char) *p;
     return sig;
 }
@@ -523,6 +525,13 @@ static void bp_tab(const HtmlElem root, const int tab) {
         html = strike_template("MISSION_TAB_SCREEN", v, 1);
         free(body);
         printf("[strike] MISSION_TAB_SCREEN %d daily missions\n", count);
+    } else if (tab == 0 && battlepass_ui_status() == 3) {
+        // the "bpdl" was not sent or had no answer: the tab says so, with a Retry that asks again (bp-tab:0)
+        const StrikeVar v[] = {{"message", I18N("kn.strike.rewardsFailed", "Couldn't load the Battle Pass.")}, {"action", "bp-tab:0"},
+                               {"retry", I18N("kn.retry", "Retry")}};
+        html = strike_template_part("MISSION_TAB_SCREEN", "failed", v, 3);
+    } else if (tab == 0 && battlepass_ui_status() == 2) { // answered with no pass: the window's own text
+        html = strdup(I18N("kn.strike.noBattlePass", "No Battle Pass Found"));
     } else if (econ_on() && T.econ_missions_failed) { // refused / no answer: the tab says so (a tap on it asks again)
         html = strdup(I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry."));
     } else {
@@ -1148,6 +1157,7 @@ int strike_meta_action(const char *a) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
         if (t == 1 || T.econ_missions_failed) T.econ_missions_asked = 0; // the Missions tab asks for the account's missions on every visit; a failed load is asked again on any tab
+        if (t == 0) battlepass_ui_request(); // a "bpdl" that failed (status 3) goes out again; one in flight or answered is not re-sent
         if (root && (t == 0 || t == 1)) bp_tab(root, t);
         return 1;
     }

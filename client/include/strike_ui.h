@@ -174,6 +174,8 @@ int  strike_menu_class_id(void);                        // the selected class's 
 int  strike_profile_render(StrikeScreen s, HtmlElem root);
 int  strike_profile_action(const char *a);
 void strike_popup_expect(const char *success);
+// A failed action's error popup (p0): text, then Retry runs retry() (the popup closes first) or Close
+void strike_popup_retry(const char *text, void (*retry)(void));
 
 // strike_social.c: FRVR's friends UI on kn_brain's social socket (friends event bus, presence filtered
 // to Strike games, game invites, reports): the menu friends strip / Friends List (S5) on MAIN_MENU and

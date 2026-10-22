@@ -141,6 +141,9 @@ void battlepass_ui_request(void) {
     if (active_account()) request_data();
 }
 
+// windows[5].dataStatus for the Strike Rewards tab: 0 not asked, 1 loading, 2 answered, 3 failed (no answer / not sent)
+int battlepass_ui_status(void) { return g_bp_status; }
+
 // The account's own answer ("a" on the game socket): a request still in flight may have gone out before it
 // (the socket's login), so it is asked again. Not the per-frame callers' (bp_item_update): their asks wait out the timeout.
 void battlepass_ui_account_answered(void) {

@@ -128,6 +128,10 @@ void menu_scale_base(void);                      // scaleBase
 void menu_send_preview_rect(void);               // sendPreviewRect -> client_class_preview_set_rect
 void menu_schedule_rect(void);                   // scheduleRect
 void menu_play(void);                            // play
+int  menu_connected(void);                       // the transport is up (game server or sandbox)
+int  menu_can_play(void);                        // connected and the map is in: menu_play enters now
+void menu_play_when_ready(void);                 // play once the map is in (reconnects first when down)
+void menu_play_cancel(void);                     // a play waiting for its connection is dropped (Lost Connection)
 void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
 void menu_show_connecting(void);                 // the loading spinner for a reconnect / retry (the page's map)

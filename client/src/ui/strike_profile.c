@@ -17,6 +17,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
+#include <i18n.h>
 #include <ui_logic.h>
 
 #include <cJSON.h>
@@ -36,6 +37,7 @@ typedef enum {
     PEND_NONE,   // the buttons only close the popup
     PEND_NAME,   // Pretty sure: send the name (nme)
     PEND_LOGOUT, // Logout: sign out and go back to the menu
+    PEND_RETRY,  // Retry: the failed action runs again (strike_popup_retry); Close only closes
 } MsgPending;
 
 static struct {
@@ -50,6 +52,7 @@ static struct {
     char primary[32], secondary[32];
     int inverse;        // inverseCtaOrder: the secondary button first
     MsgPending pending;
+    void (*retry)(void); // PEND_RETRY: the action Retry runs
     char name[64];       // the name the confirm asks for
 } P;
 
@@ -271,7 +274,12 @@ int strike_profile_action(const char *a) {
         const int primary = !strcmp(a, "msg-primary");
         const MsgPending pending = P.pending;
         P.pending = PEND_NONE;
-        if (pending == PEND_LOGOUT && !primary) logout();
+        if (pending == PEND_RETRY) {
+            void (*retry)(void) = P.retry;
+            P.retry = NULL;
+            if (strike_screen_top() == STRIKE_SCREEN_POPUP_MESSAGE) strike_screen_pop();
+            if (primary && retry) retry();
+        } else if (pending == PEND_LOGOUT && !primary) logout();
         else if (pending == PEND_NAME && primary) {
             strike_screen_pop(); // the confirm closes (kt), then the name goes
             name_send();
@@ -288,6 +296,17 @@ void strike_popup_expect(const char *success) {
     P.expect = 1;
     P.expect_name = 0;
     snprintf(P.expect_text, sizeof P.expect_text, "%s", success ? success : "");
+}
+
+// A failed action's error (p0): its text, Retry (runs retry again) and Close. The text is plain (escaped here).
+void strike_popup_retry(const char *text, void (*retry)(void)) {
+    char *esc = escaped(text ? text : "");
+    char html[640];
+    snprintf(html, sizeof html, "<div><span>%s</span></div>", esc ? esc : "");
+    free(esc);
+    message_set(MSG_ERROR, html, I18N("kn.retry", "Retry"), I18N("generic.close", "Close"), 0, PEND_RETRY);
+    P.retry = retry;
+    message_show();
 }
 
 // account_ui's popup_response: 1 when the Strike page shows the answer (the v10 popup is not on this page)

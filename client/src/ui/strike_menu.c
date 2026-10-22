@@ -561,6 +561,17 @@ static void on_shop(void *user, const int status, const cJSON *data, const cJSON
 #define PURCHASE_WAIT_MS 15000
 static int g_purchase_timer;
 
+// A purchase that did not go through (no answer in time, or refused) says so with Retry, which buys it again
+static int g_buy_index = -1; // the product of the purchase on its way (purchase_retry runs it again)
+static void purchase(int index);
+static void purchase_retry(void) {
+    if (g_buy_index >= 0) purchase(g_buy_index);
+}
+
+static void purchase_failed(void) {
+    strike_popup_retry(I18N("kn.strike.purchaseFailed", "Couldn't complete the purchase. Try again."), purchase_retry);
+}
+
 static void purchase_expired(void *user) {
     (void) user;
     g_purchase_timer = 0;
@@ -568,6 +579,7 @@ static void purchase_expired(void *user) {
     printf("[strike] purchase %s: no answer in %d s\n", M.buying, PURCHASE_WAIT_MS / 1000);
     M.buying[0] = 0;
     strike_reward_blocker_hide();
+    purchase_failed();
 }
 
 static void on_bought(void *user, const int status, const cJSON *data, const cJSON *error) {
@@ -576,11 +588,14 @@ static void on_bought(void *user, const int status, const cJSON *data, const cJS
     html_timer_cancel(g_purchase_timer);
     g_purchase_timer = 0;
     strike_reward_blocker_hide();
+    // a late answer after purchase_expired (M.buying cleared) is logged, not shown again
+    const int waiting = M.buying[0] != 0;
     if (status == 200) printf("[strike] bought %s\n", M.buying);
     else printf("[strike] purchase refused (%d): %s\n", status, msg ? msg : "no answer");
     M.buying[0] = 0;
     strike_econ_get_shop(on_shop, NULL); // purchaseCount moved
     if (status == 200) strike_reward_show(cJSON_GetObjectItemCaseSensitive(data, "rewards"), "store", 0, NULL, NULL);
+    else if (waiting) purchase_failed();
 }
 
 // $r(product, price, 1): Pt(ws, {loadingText: windows.store.purchasing}) while the shop answers
@@ -589,9 +604,11 @@ static void purchase(const int index) {
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "_id"));
     if (!id || M.buying[0]) return;
     snprintf(M.buying, sizeof(M.buying), "%s", id);
+    g_buy_index = index;
     if (!strike_econ_buy(id, 1, on_bought, NULL)) {
         printf("[strike] purchase %s: no Strike account (sign in)\n", id); // $r: Pt(Zu) (no Strike login screen here)
         M.buying[0] = 0;
+        purchase_failed(); // not sent: the error says so, Retry sends it again
         return;
     }
     strike_reward_blocker("Purchasing...");
@@ -2138,10 +2155,42 @@ static void feedback_submit(void) {
 
 // ---------------------------------------------------------------- actions
 
+// PLAY with no connection: the reconnect runs behind "Reconnecting..." (strike_connect.c: its deadline ends it in the
+// Lost Connection popup, with Reconnect) and the game is entered once the reconnect lands. Connected, the map not in
+// yet: the loader waits for it, and a game that does not start within PLAY_WAIT_MS is an error with Retry (never the
+// loader for good). Entering the game takes the menu and its loader down, so a late timer does nothing.
+#define PLAY_WAIT_MS 30000
+static int g_play_timer;
+
+static void play(void);
+static void play_retry(void) { play(); }
+
+static void play_expired(void *user) {
+    (void) user;
+    g_play_timer = 0;
+    if (!strike_loading_shown() || !html_ui_is_menu_open()) return;
+    printf("[strike] play: no game in %d s\n", PLAY_WAIT_MS / 1000);
+    strike_loading_complete();
+    strike_popup_retry(I18N("kn.strike.playFailed", "Couldn't join the game. Try again."), play_retry);
+}
+
 static void play(void) {
+    if (!menu_connected()) {
+        printf("[strike] play: not connected, reconnecting\n");
+        strike_connection_state(STRIKE_CONN_RECONNECTING, NULL, NULL, 0, NULL); // "Reconnecting..." (strike_connect.c)
+        menu_play_when_ready();
+        return;
+    }
     // quickConnect: Fm(Al, {info: "Loading <game> ..."}), then the game (RA when it starts)
     strike_loading_show("Loading  ...", 0);
-    menu_play();
+    if (menu_can_play()) {
+        menu_play();
+        return;
+    }
+    // connected, the map not in yet (INIT still to come): entered once it is
+    html_timer_cancel(g_play_timer);
+    g_play_timer = html_timer_add(PLAY_WAIT_MS, play_expired, NULL);
+    menu_play_when_ready();
 }
 
 // ---------------------------------------------------------------- Switch Teams (FRVR switchTeamsBtn)

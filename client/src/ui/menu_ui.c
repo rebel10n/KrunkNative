@@ -1570,6 +1570,36 @@ void menu_play(void) {
     menu_request_open(0);
 }
 
+// The transport is up (a game server or the sandbox): the Strike PLAY decides between entering and reconnecting
+int menu_connected(void) {
+    return g_ui.client && client_is_connected(g_ui.client);
+}
+
+// Connected and the map is in: menu_play enters now
+int menu_can_play(void) {
+    return can_play();
+}
+
+// A PLAY waiting for its connection or map is dropped (the connection was lost for good: the Lost Connection popup is
+// the next step, so a later join does not enter a game it never asked for)
+void menu_play_cancel(void) {
+    if (g_ui.client) g_ui.client->menu_play_pending = 0;
+}
+
+// Krunker Strike's PLAY while the map is not in yet (or the connection is down): the game is entered once it can
+// be (menu_try_play, each frame). Not connected: the reconnect runs (menu_retry_connect) and the play waits for it;
+// a reconnect that fails is the Lost Connection popup (strike_connect.c), never a silent stop.
+void menu_play_when_ready(void) {
+    Client *client = g_ui.client;
+    if (!client) return;
+    client->menu_play_pending = 1;
+    if (!client_is_connected(client)) {
+        menu_retry_connect();
+        return;
+    }
+    menu_try_play(client);
+}
+
 // Host Game -> "Start Server": play on the embedded local server (no network server
 // needed). C starts it when nothing is connected and spawns once the map is ready;
 // the page shows CONNECTING... in between.
