@@ -118,6 +118,7 @@ set(KN_BRAIN_SOURCES
     v10_pack.c                      # v10's packed JSON (unpack in v10.js 27744-27985)
     v10_skin_still.c                # a video skin in /data/skins: sent as its still (no video store)
     v10_skin_thumb.c                # every skin's thumbnail in /data/skins: the v10.0.3 store loop's rule (doc/v10/skin-thumbnails.md)
+    v10_paint.c                     # the v10 paints (store type 18) and an owned copy's paint metadata (skin_copies, 0352)
     v10_market.c                    # v10 REST market, items, trades, moderation, mods and KPD: the empty shapes and refusals
     v10_account.c                   # v10 REST account and player routes: player/me, wallet, profile, ranked boards, match history, daily spin
     v10_auth.c                      # v10 REST /auth/* routes mapped onto auth.c's accounts

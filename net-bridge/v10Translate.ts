@@ -737,9 +737,24 @@ export function parseSpawn(p: Buffer): NativeSpawn | null {
 // Fields KN does not send are 0 (level, clan, featured, upgrades and so on), and the ones the server reads
 // from the account are -1 (badge, title, prop, pc stat).
 export const ADD_RECORD_FIELDS = 53;
-export function buildPlayerAdd(spawn: NativeSpawn, skins: NativeSkins | undefined, socketId: string): unknown[] {
+// The paints of our loadout's weapon slots: the m of each {i, m} slot (EV.loadoutPaint); a slot without one has none.
+export type LoadoutPaint = { primary?: Record<string, unknown>; secondary?: Record<string, unknown>; melee?: Record<string, unknown> };
+export function loadoutPaintOf(en: unknown[]): LoadoutPaint {
+  const pair = Array.isArray(en[EN.SKINS]) ? (en[EN.SKINS] as unknown[]) : [];
+  return { primary: EV.loadoutPaint(pair[0]), secondary: EV.loadoutPaint(pair[1]), melee: EV.loadoutPaint(en[EN.MELEE]) };
+}
+
+// A weapon slot in the add record: the index, or {i, m} when the slot carries its copy's paint (the client draws
+// the painted skin from m; v10.0.3's loadout slot shape, nativeEvents.loadoutPaint).
+function skinSlot(index: number, paint: Record<string, unknown> | undefined): number | { i: number; m: Record<string, unknown> } {
+  return paint ? { i: index, m: paint } : index;
+}
+
+// `paint` is our own loadout's paint (loadoutPaintOf); another player's spawn carries none (the native SKINS
+// packet has no paint field).
+export function buildPlayerAdd(spawn: NativeSpawn, skins: NativeSkins | undefined, socketId: string, paint?: LoadoutPaint): unknown[] {
   const r = (n: number) => Math.round(n);
-  const pair = skins ? [skins.primary, skins.secondary] : [-1, -1];
+  const pair = skins ? [skinSlot(skins.primary, paint?.primary), skinSlot(skins.secondary, paint?.secondary)] : [-1, -1];
   const skinColor = spawn.cosmetics.skinColor;
   return [
     spawn.isYou ? socketId : String(spawn.uid), // 0 id
@@ -761,7 +776,7 @@ export function buildPlayerAdd(spawn: NativeSpawn, skins: NativeSkins | undefine
     0, // 16 hack
     null, // 17 customLoadout
     spawn.direction[1], // 18 xDire (the yaw; proxy.ts reads direction[1] the same way)
-    skins ? skins.melee : -1, // 19 meleeIndex
+    skins ? skinSlot(skins.melee, paint?.melee) : -1, // 19 meleeIndex
     skinColor < 0 ? -1 : EV.skinIndexFromColor(skinColor), // 20 skinColIndex
     -1, // 21 propID
     spawn.attachIndex, // 22 attachIndex

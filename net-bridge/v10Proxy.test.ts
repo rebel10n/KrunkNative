@@ -101,8 +101,8 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
 
 // ---- loadout slots in the ENTER_GAME array (v10.0.3 selectSkin / getMyLoadout): an owned copy is the
 // string "<copyId>#<skinIndex>" (the copy's paint lives on that copy), and a metadata slot is {i, m}
-// (m.paint is the copy's paint). Both keep their store index in the ENT: KrunkNative keeps no
-// per-copy paint, so the paint itself has nothing to carry, but the skin it paints must not be lost.
+// (m.paint is the copy's paint). Both keep their store index in the ENT (the native ENT has no paint field);
+// a {i, m} slot's paint is carried to our own spawn's add record instead (the check after the SPAWN tests).
 {
   const en: unknown[] = new Array(T.EN_LENGTH).fill(0);
   en[T.EN.CLASS] = 2;
@@ -262,6 +262,28 @@ function objectStateBuffer(uid: number, kind: number, value: number): Buffer {
   assert.strictEqual(T.buildPlayerAdd(mine!, undefined, "SOCKET")[0], "SOCKET"); // our id is the socket id
   assert.deepStrictEqual(T.buildStartGame(mine!, 300, 1), [300, 0, 0, 1, 0, 1, null, 4]);
   assert.strictEqual(T.parseSpawn(Buffer.alloc(78)), null);
+  // a painted loadout slot keeps its paint in our spawn: the {i, m} weapon slot of our add record ([12] primary,
+  // [19] melee) carries the copy's m; a copy-id slot ("812#4211") has no paint in the bridge and stays a plain index
+  {
+    const en: unknown[] = new Array(T.EN_LENGTH).fill(0);
+    en[T.EN.SKINS] = ["812#4211", { i: 12, m: { paint: "#dc3c3c" } }];
+    en[T.EN.MELEE] = { i: 7446, m: { paintShader: 3 } };
+    const paint = T.loadoutPaintOf(en);
+    const spawn = T.parseSpawn(spawnBuffer({ uid: 1, isYou: true, active: true, classIndex: 4, team: 0, health: 100, maxHealth: 100,
+      position: [0, 0, 0], direction: [0, 0], name: "me", secondary: -1, hat: -1, body: -1, hair: -1, skinColor: -1, dye: -1, waist: -1,
+      face: -1, head: -1, back: -1, shoe: -1, pet: -1, wrist: -1, charms: [-1, -1], playerCard: -1, headMlt: 1 }));
+    assert.ok(spawn);
+    const rec = T.buildPlayerAdd(spawn!, { uid: 1, primary: 4211, secondary: 12, melee: 7446 }, "SOCKET", paint);
+    assert.deepStrictEqual(rec[12], [4211, { i: 12, m: { paint: "#dc3c3c" } }], "secondary keeps its paint");
+    assert.deepStrictEqual(rec[19], { i: 7446, m: { paintShader: 3 } }, "melee keeps its paint shader");
+    // no paint: the add record is the plain indices (another player's spawn, or a loadout without {i, m})
+    assert.deepStrictEqual(T.buildPlayerAdd(spawn!, { uid: 1, primary: 4211, secondary: 12, melee: 7446 }, "SOCKET")[12], [4211, 12]);
+    const plain: unknown[] = new Array(T.EN_LENGTH).fill(0);
+    plain[T.EN.SKINS] = ["812#4211", 5];
+    plain[T.EN.MELEE] = 7446;
+    assert.deepStrictEqual(T.loadoutPaintOf(plain), { primary: undefined, secondary: undefined, melee: undefined },
+      "a copy id, a plain index and a plain melee carry no paint");
+  }
   // LEADERBOARD: the free-for-all rows, and a stop for another mode
   const board = Buffer.alloc(257);
   board[0] = 2;

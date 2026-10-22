@@ -347,7 +347,16 @@ static void market_query(SocialSession *s, MarketCtx *c) {
         return;
     }
     if (!strcmp(c->sub, "inventory")) {
-        social_query(s, SQL(.any = "SELECT skin_id AS i, skin_id AS s, count AS c FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY skin_id"),
+        /* the stacks (their unpainted units; sid = the store index) and the painted copies (one unit each, sid =
+         * the copy id, paint_color / paint_shader set: doc/v10/paint-copy.md). A stack row has no paint. */
+        social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
+                                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"
+                                   " NULL AS paint_color, NULL AS paint_shader FROM inventory i"
+                                   " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
+                                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id)"
+                                   " UNION ALL SELECT k.skin_id AS i, k.skin_id AS s, 1 AS c, k.copy_id AS sid,"
+                                   " k.paint_color, k.paint_shader FROM skin_copies k WHERE k.account_id = $1"
+                                   " ORDER BY i, sid"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "sales")) {
         social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
@@ -571,6 +580,30 @@ void sh_market_list(SocialSession *s, const cJSON *f) {
                            acct_itoa(mx, g_acct.sale_max), acct_itoa(ml, g_acct.max_listings),
                            acct_itoa(lvl, g_acct.market_min_level)),
                 list_done, ctx_new("li", fa_int(f, 3, 0), 0));
+}
+
+/* ["ip", copy, item, paint, colour, shader, uid] -> ["ipr", {copy_id, item_id, paint_item_id, m, count} | null, uid]
+ * (v10.0.3's setPaint; run_item_paint in db_economy.c). The owned list changed: the account is pushed (ua). */
+static void paint_done(SocialSession *s, kn_db_result *res, void *extra) {
+    Ctx *c = extra;
+    if (!kn_db_ok(res)) {
+        social_error(s, acct_db_error(res, "ip"));
+        return;
+    }
+    cJSON *v = acct_db_json(res);
+    social_send_n(s, "ipr", 2, v ? v : cJSON_CreateNull(), cJSON_CreateNumber((double) c->a));
+    push_funds(s->account_id);
+}
+
+void sh_item_paint(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    char me[24], copy[24], item[24], paint[24], shader[24];
+    me_str(s, me);
+    const char *colour = fa_str(f, 4);
+    social_call(s, &P_ITEM_PAINT,
+                KN_DB_ARGS(me, acct_itoa(copy, fa_int(f, 1, -1)), acct_itoa(item, fa_int(f, 2, -1)),
+                           acct_itoa(paint, fa_int(f, 3, -1)), colour ? colour : "", acct_itoa(shader, fa_int(f, 5, -1))),
+                paint_done, ctx_new("ipr", fa_int(f, 6, 0), 0));
 }
 
 static void unlist_done(SocialSession *s, kn_db_result *res, void *extra) {

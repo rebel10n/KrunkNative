@@ -79,6 +79,8 @@ int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, cons
                     int64_t counterparty, int64_t fee, int64_t *funds);
 /* kn_account_json (NULL when the account does not exist) */
 cJSON *db_account_json(Dbx *x, int64_t id);
+/* the owned list (data[10]): unpainted units per skin, then one row per painted copy (doc/v10/paint-copy.md) */
+cJSON *db_owned_skins(Dbx *x, int64_t id);
 /* kn_account_id(name): 0 when unknown */
 int64_t db_account_id(Dbx *x, const char *name);
 /* Player row of player_rows as JSON (NULL when unknown) */
@@ -105,7 +107,7 @@ extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
-    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY;
+    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT;
 
 /* ---- the Junk wallet (db_junk.c, 0347_junk_wallet; doc/v10/junk.md). Amounts are hundredths. The C
  * API runs inside the caller's transaction: junk_credit / junk_spend write their ledger row with it. */

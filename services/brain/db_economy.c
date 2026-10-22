@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include "knsvc/json.h"
+#include "v10_paint.h"
 
 #define P(i) (n > (i) ? p[i] : NULL)
 #define PI(i) pint(P(i))
@@ -302,6 +303,63 @@ static kn_db_result *run_market_list(kn_dbconn *c, int n, const char *const *p) 
 }
 const kn_proc P_MARKET_LIST = {"market_list", NULL, run_market_list};
 
+/* (actor, copy id or the stack's store index, item store index, paint store index, paint colour ("" for a
+ * shader), paint shader (-1 for a colour)) -> {copy_id, item_id, paint_item_id, m, count}: v10.0.3's setPaint
+ * (doc/v10/paint-copy.md). A copy id (>= V10_COPY_ID_BASE) names an owned painted copy of the item and its paint
+ * is replaced; a store index names the stack, and one unpainted unit of the item becomes a new copy with the
+ * paint. One paint is consumed (db_add_skin: the audit row, the paint's own guard). */
+static kn_db_result *run_item_paint(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t actor = PI(0), copy = PI(1), item = PI(2), paint = PI(3), shader = PI(5);
+    const char *colour = P(4) && P(4)[0] ? P(4) : NULL;
+    const char *shader_text = shader >= 0 ? P(5) : NULL;
+    if (item < 0 || paint <= 0) return dbx_finish(&x, kn_db_result_user_error("Item not found"));
+    if (dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
+                KN_DB_ARGS(I64S(actor), I64S(paint)), 0) <= 0)
+        return dbx_finish(&x, kn_db_result_user_error("You don't have any of that paint left."));
+    if (copy >= V10_COPY_ID_BASE) {
+        const int64_t skin = dbx_int(&x, SQL(.any = "SELECT skin_id FROM skin_copies WHERE copy_id = $1 AND account_id = $2"),
+                                     KN_DB_ARGS(I64S(copy), I64S(actor)), -1);
+        if (skin < 0) return dbx_finish(&x, kn_db_result_user_error("You don't own that copy."));
+        if (skin != item) return dbx_finish(&x, kn_db_result_user_error("That copy is not that item."));
+    } else {
+        if (copy != item) return dbx_finish(&x, kn_db_result_user_error("Item not found"));
+        const int64_t owned = dbx_int(&x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
+                                      KN_DB_ARGS(I64S(actor), I64S(item)), 0);
+        const int64_t painted = dbx_int(&x, SQL(.any = "SELECT count(*) FROM skin_copies WHERE account_id = $1 AND skin_id = $2"),
+                                        KN_DB_ARGS(I64S(actor), I64S(item)), 0);
+        if (owned - painted <= 0) return dbx_finish(&x, kn_db_result_user_error("You don't have that item left unpainted."));
+    }
+    char ref[32];
+    snprintf(ref, sizeof ref, "item:%lld", (long long) item);
+    int64_t left = 0;
+    if (db_add_skin(&x, actor, paint, -1, "paint", ref, &left) < 0) return dbx_finish(&x, NULL);
+    int64_t copy_id = copy;
+    if (copy >= V10_COPY_ID_BASE) {
+        if (dbx_exec(&x, SQL(.any = "UPDATE skin_copies SET paint_color = $2, paint_shader = $3 WHERE copy_id = $1"),
+                     KN_DB_ARGS(I64S(copy), colour, shader_text)) < 0)
+            return dbx_finish(&x, NULL);
+    } else {
+        copy_id = dbx_insert_id(&x,
+            SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1::int, $2::int, $3, $4::int)"
+                      " RETURNING copy_id",
+                .sqlite = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"
+                          " RETURNING copy_id",
+                .mysql = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, $3, $4)"),
+            KN_DB_ARGS(I64S(actor), I64S(item), colour, shader_text));
+        if (copy_id < 0) return dbx_finish(&x, NULL);
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "copy_id", (double) copy_id);
+    cJSON_AddNumberToObject(o, "item_id", (double) item);
+    cJSON_AddNumberToObject(o, "paint_item_id", (double) paint);
+    cJSON *m = v10_paint_meta(colour, (int) shader);
+    cJSON_AddItemToObject(o, "m", m ? m : cJSON_CreateObject());
+    cJSON_AddNumberToObject(o, "count", (double) left);
+    return dbx_json(&x, "paint", o);
+}
+const kn_proc P_ITEM_PAINT = {"item_paint", NULL, run_item_paint};
+
 /* $4 listing -> {r: "SUCCESS" | "SOLD", i: skin} */
 static kn_db_result *run_market_unlist(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -554,8 +612,12 @@ static kn_db_result *run_trade_page(kn_dbconn *c, int n, const char *const *p) {
 const kn_proc P_TRADE_PAGE = {"trade_page", NULL, run_trade_page};
 
 static cJSON *inventory_items(Dbx *x, const char *id) {
-    cJSON *a = dbx_rows(x, SQL(.any = "SELECT skin_id AS i, count AS c FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY skin_id"),
-                        KN_DB_ARGS(id));
+    /* the unpainted units only: a painted copy is not a trade unit (doc/v10/paint-copy.md) */
+    cJSON *a = dbx_rows(x,
+        SQL(.any = "SELECT i.skin_id AS i, i.count - (SELECT count(*) FROM skin_copies c WHERE c.account_id = i.account_id"
+                   " AND c.skin_id = i.skin_id) AS c FROM inventory i WHERE i.account_id = $1 AND i.count > (SELECT count(*)"
+                   " FROM skin_copies c WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) ORDER BY i.skin_id"),
+        KN_DB_ARGS(id));
     return a ? a : cJSON_CreateArray();
 }
 

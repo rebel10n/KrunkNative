@@ -491,6 +491,15 @@ export function loadoutIndex(value: unknown): number {
   return storeIndexOf(value);
 }
 
+// The paint of a loadout slot: the m of a metadata slot {i, m} ({paint: "#rrggbb"} or {paintShader: n}, the
+// copy's own data, as the client reads it). A plain index or a copy id string has none: its paint is in the
+// client's owned list ($account.skins, the copy's m), which the bridge does not hold. undefined for none.
+export function loadoutPaint(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const m = (value as { m?: unknown }).m;
+  return m !== null && typeof m === "object" && !Array.isArray(m) ? (m as Record<string, unknown>) : undefined;
+}
+
 function storeIndexOf(value: unknown): number {
   if (typeof value === "string" && value.trim() === "") return -1;
   const n = Number(value);

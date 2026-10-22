@@ -38,7 +38,8 @@
  *     GET  /items/:id/view             {stats, owners, sales, listings, stackable, wearable} (128558)
  *     GET  /items/:id/sales?range=     daily [{d, f, t}] (economy "st", range index) (129914)
  *     GET  /items/:id/instances?sort=  [] : KrunkNative keeps no per-copy instances (128573)
- *     POST /items/:id/paint            REFUSAL: no per-copy paint state (128724)
+ *     POST /items/:id/paint            {item_id, paint_item_id}: paints an owned copy (or an unpainted unit of the item,
+ *                                      which becomes a copy); 400 for a non-paint (128724; doc/v10/paint-copy.md)
  *     POST /items/:id/style            REFUSAL: no per-copy style state (128924)
  *
  *   trades (27047-27078)
@@ -70,9 +71,9 @@
 #include "acct_internal.h"
 #include "knsvc/json.h"
 #include "v10_api.h"
+#include "v10_paint.h"
 
 /* the refusals' reasons (the handler's ud) */
-#define WHY_ITEM_PAINT "Item paint is not served over HTTP: KrunkNative keeps no per-copy paint state"
 #define WHY_ITEM_STYLE "Item style is not served over HTTP: KrunkNative keeps no per-copy style state"
 #define WHY_JUNK "Junk quick sell is not built yet (doc/v10/junk.md): quick sell mode 1 is refused"
 
@@ -81,10 +82,6 @@ static const int k_day_ranges[] = {7, 14, 21, 30, 60, 90, 120};
 #define DAY_RANGES ((int) (sizeof k_day_ranges / sizeof k_day_ranges[0]))
 
 static Brain *s_brain;
-
-static void h_refuse(kn_http_req *req, void *ud) {
-    v10_reply_error(req, 403, "NOT_IMPLEMENTED", (const char *) ud);
-}
 
 /* the {id} of an item route is an index of assets/skins.json; anything else is a 404 */
 static int item_known(kn_http_req *req) {
@@ -468,11 +465,24 @@ static cJSON *listing_row(const cJSON *r) {
     return o;
 }
 
-/* an inventory row: {i, cnt} (cnt the owned count), with the cards' nt / qs / nqs when set */
+/* an inventory row: {i, cnt} (cnt the owned count: the unpainted units), with the cards' nt / qs / nqs when set */
 static cJSON *inventory_row(const cJSON *r) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "i", (double) kn_json_int(r, "i", -1));
     cJSON_AddNumberToObject(o, "cnt", (double) kn_json_int(r, "c", 0));
+    put_if(o, r, "nt");
+    put_if(o, r, "qs");
+    put_if(o, r, "nqs");
+    return o;
+}
+
+/* a painted copy's row (skin_copies): {i, sid: its copy id, m: {paint} | {paintShader}}, no cnt (one unit) */
+static cJSON *copy_inventory_row(const cJSON *r) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "i", (double) kn_json_int(r, "i", -1));
+    cJSON_AddNumberToObject(o, "sid", (double) kn_json_int(r, "sid", 0));
+    cJSON *m = v10_paint_meta(kn_json_str(r, "paint_color", ""), (int) kn_json_int(r, "paint_shader", -1));
+    if (m) cJSON_AddItemToObject(o, "m", m);
     put_if(o, r, "nt");
     put_if(o, r, "qs");
     put_if(o, r, "nqs");
@@ -680,12 +690,27 @@ static void step_sales(Op *op) { step_page(op, "sales"); }
 static void step_history(Op *op) { step_page(op, "history"); }
 static void step_trades_page(Op *op) { step_page(op, "trades"); }
 
+/* a painted copy's row carries its paint (the market page's rows: economy.c market_done); a stack's has none */
+static int is_copy_row(const cJSON *r) {
+    return kn_json_str(r, "paint_color", "")[0] != '\0' || kn_json_int(r, "paint_shader", -1) >= 0;
+}
+
+/* the stacks (their unpainted units; sid = the store index, the Paint action's skinId) and the painted copies
+ * (sid = the copy id), in the market page's order */
 static void reply_inventory(Op *op) {
     if (op_failed(op)) return;
     const cJSON *rows = op_arg(op, "0", 3);
     cJSON *o = cJSON_CreateArray();
     cJSON *r;
-    cJSON_ArrayForEach(r, rows) cJSON_AddItemToArray(o, inventory_row(r));
+    cJSON_ArrayForEach(r, rows) {
+        if (is_copy_row(r)) {
+            cJSON_AddItemToArray(o, copy_inventory_row(r));
+            continue;
+        }
+        cJSON *row = inventory_row(r);
+        cJSON_AddNumberToObject(row, "sid", (double) kn_json_int(r, "i", -1));
+        cJSON_AddItemToArray(o, row);
+    }
     v10_reply_data(op->req, 200, o);
 }
 
@@ -1065,10 +1090,55 @@ static void h_item_instances(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, cJSON_CreateArray()); /* KrunkNative keeps no per-copy instances: none */
 }
 
+/* ---- POST /items/:id/paint (v10.0.3's items.setPaint, body {item_id, paint_item_id}): the {id} is the owned copy's
+ * id (the sid of the market rows) or the stack's store index, whose unpainted unit becomes a new painted copy.
+ * The work is sh_item_paint (economy.c) and run_item_paint (db_economy.c); doc/v10/paint-copy.md. */
+static void step_item_paint(Op *op) {
+    cJSON *f = social_frame("ip");
+    const int64_t paint = kn_json_int(op->body, "paint_item_id", -1);
+    const char *color = NULL;
+    int shader = -1;
+    v10_paint_of(paint, &color, &shader);
+    add_int(f, op->a.id);
+    add_int(f, kn_json_int(op->body, "item_id", -1));
+    add_int(f, paint);
+    add_str(f, color ? color : "");
+    add_int(f, shader);
+    op_call(op, sh_item_paint, f);
+}
+
+static void reply_item_paint(Op *op) {
+    if (op_failed(op)) return;
+    const cJSON *v = op_arg(op, "ipr", 1);
+    v10_reply_data(op->req, 200, cJSON_IsObject(v) ? cJSON_Duplicate(v, 1) : cJSON_CreateObject());
+}
+
 static void h_item_paint(kn_http_req *req, void *ud) {
     (void) ud;
-    if (!item_known(req)) return;
-    v10_reply_error(req, 403, "NOT_IMPLEMENTED", WHY_ITEM_PAINT);
+    Args a;
+    memset(&a, 0, sizeof a);
+    a.id = (int64_t) strtoll(kn_http_param(req, "id"), NULL, 10);
+    cJSON *body = body_of(req);
+    const int64_t item = kn_json_int(body, "item_id", -1);
+    const int64_t paint = kn_json_int(body, "paint_item_id", -1);
+    const char *color = NULL;
+    int shader = -1;
+    if (!acct_skin(item)) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 404, "NOT_FOUND", "Item not found");
+        return;
+    }
+    if (!v10_paint_of(paint, &color, &shader)) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "ITEM_PAINT_INVALID", "That item is not a paint.");
+        return;
+    }
+    if (a.id != item && a.id < V10_COPY_ID_BASE) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "ITEM_PAINT_INVALID", "Paint the copy of that item, or an unpainted one of it.");
+        return;
+    }
+    route_begin(req, 1, 1, step_item_paint, reply_item_paint, &a, body);
 }
 
 static void h_item_style(kn_http_req *req, void *ud) {

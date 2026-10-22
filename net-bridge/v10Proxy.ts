@@ -104,6 +104,7 @@ type V10Session = {
   leaderRows: number[] | null; // the rows of the last LEADERBOARD as sent ("7"), for the LEADER_STATS that repeats them
   socketId: string; // io-init's id: our own player's id in the add record
   skinsByUid: Map<number, T.NativeSkins>; // SKINS, kept for the SPAWN that follows
+  loadoutPaint: T.LoadoutPaint; // our ENTER_GAME loadout's paints ({i, m} slots), for our own SPAWN's add record
   gameTimer: number; // the last TIMER seconds (the start message's gameTimer)
   challMode: number; // the join's challenge mode (ENTER_GAME argument 7)
   rankedReceived: boolean; // the ranked-match flag arrived for the init (sent after the INIT, like the config)
@@ -445,7 +446,7 @@ function handleNativePacket(session: V10Session, type: number, payload: Buffer):
     if (!spawn.active && !spawn.isYou) return; // a player who is dead now: the v10 add is for players in play
     if (spawn.active) session.shooters.set(spawn.uid, { x: spawn.position[0], y: spawn.position[1], z: spawn.position[2], height: 11 }); // standing: player_height
     // the add is for players in play: our own dead SPAWN adds nobody (a player in the list before the client's init breaks it)
-    if (spawn.active) sendWs(session, T.V10_IN.ADD_PLAYERS, T.buildPlayerAdd(spawn, session.skinsByUid.get(spawn.uid), session.socketId), 1);
+    if (spawn.active) sendWs(session, T.V10_IN.ADD_PLAYERS, T.buildPlayerAdd(spawn, session.skinsByUid.get(spawn.uid), session.socketId, spawn.isYou ? session.loadoutPaint : undefined), 1);
     if (!spawn.active) {
       // our own spawn while we wait to join: v10's death for us starts the death UI and the respawn countdown
       for (const [label, args] of T.mapDeathCountdown(spawn.uid).messages) sendWs(session, label, ...args);
@@ -591,6 +592,7 @@ function handleClientPacket(session: V10Session, label: string, args: unknown[])
       if (ent) writeNative(session, T.NATIVE.ENT, ent);
       const join = args[0];
       session.challMode = Array.isArray(join) && join[T.EN.CHALLENGE] ? 1 : 0;
+      session.loadoutPaint = Array.isArray(join) ? T.loadoutPaintOf(join) : {};
       break;
     }
     case T.V10_OUT.INPUT: {
@@ -641,6 +643,7 @@ function createSession(ws: WebSocket, request: IncomingMessage, options: AttachO
     startedAt: Date.now(),
     socketId: makeSocketId(12),
     skinsByUid: new Map(),
+    loadoutPaint: {},
     gameTimer: 0,
     challMode: 0,
     rankedReceived: false,

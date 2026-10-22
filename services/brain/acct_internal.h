@@ -341,6 +341,7 @@ void sh_mail_list(SocialSession *s, const cJSON *f);   /* "kml" */
 void sh_mail_read(SocialSession *s, const cJSON *f);   /* "rml" */
 void sh_market_list(SocialSession *s, const cJSON *f); /* "li" */
 void sh_market_unlist(SocialSession *s, const cJSON *f); /* "uli" */
+void sh_item_paint(SocialSession *s, const cJSON *f);   /* "ip": paint an owned copy (or an unpainted unit: a new copy) */
 void sh_market_buy(SocialSession *s, const cJSON *f);  /* "pi" */
 void sh_market_filter(SocialSession *s, const cJSON *f); /* "fil" */
 void sh_inventory_sort(SocialSession *s, const cJSON *f); /* "srt" */

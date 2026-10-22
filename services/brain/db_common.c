@@ -13,6 +13,7 @@
 
 #include "junk.h"
 #include "knsvc/loop.h"
+#include "v10_paint.h"
 
 /* ------------------------------------------------------------------ Dbx */
 
@@ -220,12 +221,19 @@ int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *sou
                 KN_DB_ARGS(I64S(id), I64S(skin), I64S(delta))) < 0)
             return -1;
     } else {
+        /* a painted unit (skin_copies, 0352) is not sold, listed, traded or crafted: only count - painted copies go */
         int64_t n = dbx_exec(x,
             SQL(.any = "UPDATE inventory SET count = count + {int:$3}"
-                       " WHERE account_id = $1 AND skin_id = $2 AND count + {int:$3} >= 0"),
+                       " WHERE account_id = $1 AND skin_id = $2 AND count + {int:$3} >= 0"
+                       " AND count + {int:$3} >= (SELECT count(*) FROM skin_copies c"
+                       " WHERE c.account_id = inventory.account_id AND c.skin_id = inventory.skin_id)"),
             KN_DB_ARGS(I64S(id), I64S(skin), I64S(delta)));
         if (n < 0) return -1;
-        if (n == 0) return dbx_refuse(x, "Item not owned");
+        if (n == 0) {
+            const int64_t have = dbx_int(x, SQL(.any = "SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2"),
+                                         KN_DB_ARGS(I64S(id), I64S(skin)), 0);
+            return dbx_refuse(x, have + delta >= 0 ? "Only painted copies of that item are left" : "Item not owned");
+        }
     }
     if (delta != 0 &&
         dbx_exec(x,
@@ -276,11 +284,53 @@ static cJSON *display_name(const cJSON *r) {
     return dup_item(r, "player_name");
 }
 
+/* The owned list (v10.0.3's $account.skins, the account's data[10]), with the paints of the copies
+ * (doc/v10/paint-copy.md): one {ind, cnt} row per skin with unpainted units (cnt = those units), then one
+ * {ind, cnt: 1, id, m} row per painted copy (id = its copy id, m = {paint} or {paintShader}). NULL on a DB error. */
+cJSON *db_owned_skins(Dbx *x, int64_t id) {
+    cJSON *rows = dbx_rows(x,
+        SQL(.any = "SELECT i.skin_id AS ind, i.count - (SELECT count(*) FROM skin_copies c"
+                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS cnt"
+                   " FROM inventory i WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
+                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) ORDER BY i.skin_id"),
+        KN_DB_ARGS(I64S(id)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(rows);
+        return NULL;
+    }
+    cJSON *copies = dbx_rows(x,
+        SQL(.any = "SELECT copy_id AS id, skin_id AS ind, paint_color, paint_shader FROM skin_copies"
+                   " WHERE account_id = $1 ORDER BY copy_id"),
+        KN_DB_ARGS(I64S(id)));
+    if (dbx_failed(x)) {
+        cJSON_Delete(rows);
+        cJSON_Delete(copies);
+        return NULL;
+    }
+    cJSON *row;
+    cJSON_ArrayForEach(row, copies) {
+        cJSON *c = cJSON_CreateObject();
+        cJSON_AddNumberToObject(c, "ind", (double) kn_json_int(row, "ind", 0));
+        cJSON_AddNumberToObject(c, "cnt", 1);
+        cJSON_AddNumberToObject(c, "id", (double) kn_json_int(row, "id", 0));
+        cJSON *m = v10_paint_meta(kn_json_str(row, "paint_color", ""), (int) kn_json_int(row, "paint_shader", -1));
+        if (m) cJSON_AddItemToObject(c, "m", m);
+        cJSON_AddItemToArray(rows, c);
+    }
+    cJSON_Delete(copies);
+    return rows;
+}
+
 cJSON *db_account_json(Dbx *x, int64_t id) {
     if (dbx_is_pg(x)) {
         char *s = dbx_text(x, SQL(.pg = "SELECT kn_account_json($1::int)::text"), KN_DB_ARGS(I64S(id)));
         cJSON *v = s ? cJSON_Parse(s) : NULL;
         free(s);
+        /* the SQL's data[10] counts every unit: the owned list (painted copies apart) is built here, for every driver */
+        cJSON *data = v ? cJSON_GetObjectItemCaseSensitive(v, "data") : NULL;
+        cJSON *owned = data && cJSON_GetArraySize(data) > 10 ? db_owned_skins(x, id) : NULL;
+        if (owned) cJSON_ReplaceItemInArray(data, 10, owned);
+        else cJSON_Delete(owned);
         return v;
     }
     cJSON *r = db_player_row(x, id);
@@ -288,12 +338,9 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     char reason[256];
     int64_t expires = 0;
     int banned = db_active_ban(x, id, NULL, reason, sizeof reason, &expires);
-    cJSON *inv = dbx_rows(x,
-        SQL(.any = "SELECT skin_id AS ind, count AS cnt FROM inventory WHERE account_id = $1 AND count > 0 ORDER BY skin_id"),
-        KN_DB_ARGS(I64S(id)));
-    if (dbx_failed(x)) {
+    cJSON *inv = db_owned_skins(x, id);
+    if (!inv) {
         cJSON_Delete(r);
-        cJSON_Delete(inv);
         return NULL;
     }
     cJSON *o = cJSON_CreateObject();

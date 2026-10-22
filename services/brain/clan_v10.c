@@ -23,6 +23,7 @@
  * Loot config (/api/clans/<id>/loot-config, turf.c) and the recruitment board are other modules'.
  */
 #include "acct_internal.h"
+#include "v10_paint.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,18 +33,6 @@
 #include "hot.h"
 #include "knsvc/json.h"
 #include "knsvc/loop.h"
-
-/* v10.0.2 paints (store skins of type 18: index, paintColor or paintShader) */
-static const struct {
-    int index;
-    const char *color; /* NULL: shader */
-    int shader;
-} k_paints[] = {
-    {7776, "#dc3c3c", -1}, {7777, "#50c864", -1}, {7778, "#0457d1", -1}, {7779, "#1a1a1a", -1}, {7780, "#f0f0f0", -1},
-    {7781, "#f0d23c", -1}, {7795, NULL, 0},       {7796, NULL, 1},       {7831, "#A884E1", -1}, {7832, "#84E18C", -1},
-    {7833, "#84D9E1", -1}, {7834, "#FF1FB8", -1}, {7835, "#c08552", -1}, {7836, "#ff9913", -1}, {7837, "#bf00ff", -1},
-    {7904, NULL, 2},       {7905, NULL, 3},       {7906, NULL, 4},       {7907, NULL, 5},
-};
 
 static int64_t pint(const char *s) { return s ? strtoll(s, NULL, 10) : 0; }
 #define P(i) (n > (i) ? p[i] : NULL)
@@ -273,10 +262,11 @@ int clan_v10_gapi(SocialSession *s, const GapiReq *r) {
     } else if (gapi_is(r, "POST", "/clans/:id/banner-color")) {
         const int64_t item = kn_json_int(r->body, "paint_item_id", -1);
         char value[16] = "", skin[24];
-        for (size_t i = 0; i < sizeof k_paints / sizeof k_paints[0]; i++) {
-            if (k_paints[i].index != item) continue;
-            if (k_paints[i].color) snprintf(value, sizeof value, "%s", k_paints[i].color);
-            else snprintf(value, sizeof value, "s%d", k_paints[i].shader);
+        const char *color = NULL;
+        int shader = -1;
+        if (v10_paint_of(item, &color, &shader)) {
+            if (color) snprintf(value, sizeof value, "%s", color);
+            else snprintf(value, sizeof value, "s%d", shader);
         }
         if (!value[0]) {
             gapi_error(s, r->rid, 400, "CLAN_PAINT_INVALID", "That item is not a paint.");

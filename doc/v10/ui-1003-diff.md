@@ -64,8 +64,8 @@ else the `format_paint` icon. KN: `client/src/ui/skin_paint.c` (the markup and r
 (`.skinPaintBadge`) was already in `ui/css/main.css`.
 
 Limits, stated plainly:
-- KN's account data stores owned skins as `{ind, cnt}`. Nothing in KN gives an owned skin paint metadata yet,
-  so the badge shows once the account data carries `m` (the v10.0.3 shape); until then no KN card is painted.
+- KN's account data carries an owned skin's paint as `m` on its copy (`{ind, cnt: 1, id, m}`, doc/v10/paint-copy.md),
+  so the badge shows on a painted copy. KN paints a copy with `POST /items/{id}/paint` (the v10.0.3 shape).
 - No official 10.0.3 paint-badge capture exists: the harness has no logged-in account owning a painted skin
   (`doc/ref/krunker-v10.0.3/captures.json`, `notSaved`). Checked instead: the unpainted chooser against the
   official capture (`skin-chooser-no-paint.png`), and the badge's own rule by the unit test

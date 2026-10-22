@@ -45,6 +45,8 @@ BM_BUY = 1642
 BM_OWNED = 1483
 SELLER = "mkt_seller"
 BUYER = "mkt_buyer"
+PAINTER = "mkt_painter"
+PAINT_OTHER = "mkt_paint_other"
 PASSWORD = "marketpass1"
 # any player name: the account-bound routes refuse without looking it up
 PLAYER = "kn_test_player"
@@ -435,7 +437,7 @@ def market_scenario(port, path):
     expect_data("142 GET /items/{id}/instances?sort=mint (no per-copy instances)", st, r, lambda d: d == [],
                 "[] (v10.0.3 5160; v10.js 128573)")
     st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": 2}, s_tok)
-    expect_refusal("143 POST /items/{id}/paint", st, r)
+    expect_error("143 POST /items/{id}/paint (not a paint)", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
     st, r = http(port, "POST", "/items/%d/style" % ITEM, {"item_id": ITEM, "style": 1}, s_tok)
     expect_refusal("144 POST /items/{id}/style", st, r)
 
@@ -451,8 +453,114 @@ def market_scenario(port, path):
                 lambda d: isinstance(d, dict) and d.get("count") == 0, "{count: 0}")
 
 
+PAINT_RED = 7776         # a colour paint, #dc3c3c
+PAINT_SHADER = 7795      # a shader paint, shader 0
+PAINT_SHADER_B = 7796    # a shader paint, shader 1
+
+
+def paint_scenario(port, path):
+    """POST /items/{id}/paint (v10.0.3's setPaint) and the painted copies on GET /market/inventory
+    (doc/v10/paint-copy.md): a paint is set on the copy it names, and on no other copy of the skin."""
+    p_tok = register(port, PAINTER)
+    o_tok = register(port, PAINT_OTHER)
+    if not p_tok or not o_tok:
+        return
+    p_id, o_id = account_id(path, PAINTER), account_id(path, PAINT_OTHER)
+    seed(path, [
+        ("UPDATE players SET player_funds = 1000 WHERE player_id = ?", (p_id,)),
+        # three units of skin 0, and the paints: two red, two shader 0, one shader 1 (the caller)
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 3)", (p_id, ITEM)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (p_id, PAINT_RED)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (p_id, PAINT_SHADER)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (p_id, PAINT_SHADER_B)),
+        # the other account owns one unit of skin 0 and one shader 0 (its own copy is never the caller's)
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (o_id, ITEM)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (o_id, PAINT_SHADER)),
+    ])
+
+    def owned_rows():
+        st, r = http(port, "GET", "/market/inventory", None, p_tok)
+        return st, data_of(r) or []
+
+    def copy_row(rows, copy_id):
+        return next((x for x in rows if x.get("sid") == copy_id), None)
+
+    def stack_row(rows):
+        return next((x for x in rows if x.get("i") == ITEM and "m" not in x and x.get("sid") == ITEM), None)
+
+    # the refusals first: a non-paint, an unknown item, a guest, and a paint the caller does not own
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": ITEM_B}, p_tok)
+    expect_error("paint: a non-paint is refused", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
+    st, r = http(port, "POST", "/items/%d/paint" % NO_ITEM, {"item_id": NO_ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    expect_not_found("paint: an unknown item", st, r)
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED})
+    check("paint: a guest is refused (401)", st == 401, "HTTP %d" % st)
+
+    # 1. an unpainted unit becomes a copy, painted red: the reply names the copy and its m
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    d = data_of(r) or {}
+    copy_a = d.get("copy_id")
+    check("paint: an unpainted unit becomes a copy painted red (copy id, m, paints left)",
+          st == 200 and is_int(copy_a) and copy_a >= 1000000 and d.get("m") == {"paint": "#dc3c3c"}
+          and d.get("count") == 1 and d.get("item_id") == ITEM, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, rows = owned_rows()
+    row = copy_row(rows, copy_a)
+    stack = stack_row(rows)
+    check("market inventory: the painted copy is its own row, painted red, with no count",
+          row is not None and row.get("i") == ITEM and row.get("m") == {"paint": "#dc3c3c"} and "cnt" not in row,
+          json.dumps(rows)[:300])
+    check("market inventory: the other copies of the skin keep no paint (the stack has 2)",
+          stack is not None and stack.get("cnt") == 2 and "m" not in stack, json.dumps(rows)[:300])
+
+    # 2. another unit becomes a second copy, painted shader 0
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
+    copy_b = (data_of(r) or {}).get("copy_id")
+    check("paint: a second unit becomes a copy painted with shader 0",
+          st == 200 and is_int(copy_b) and copy_b != copy_a and data_of(r).get("m") == {"paintShader": 0},
+          "HTTP %d %s" % (st, json.dumps(r)[:200]))
+
+    # 3. repaint the first copy (a shader 1): only that copy changes
+    st, r = http(port, "POST", "/items/%d/paint" % copy_a, {"item_id": ITEM, "paint_item_id": PAINT_SHADER_B}, p_tok)
+    check("paint: a copy is repainted in place (same copy id)",
+          st == 200 and data_of(r).get("copy_id") == copy_a and data_of(r).get("m") == {"paintShader": 1},
+          "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, rows = owned_rows()
+    row_a, row_b = copy_row(rows, copy_a), copy_row(rows, copy_b)
+    check("a paint set on one copy is returned for that copy and not for another copy of the same skin",
+          row_a is not None and row_a.get("m") == {"paintShader": 1}
+          and row_b is not None and row_b.get("m") == {"paintShader": 0}
+          and stack_row(rows) is not None and stack_row(rows).get("cnt") == 1,
+          json.dumps(rows)[:400])
+
+    # 4. the last unpainted unit is painted; no unpainted unit is left for another paint
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
+    check("paint: the last unpainted unit is painted", st == 200 and is_int((data_of(r) or {}).get("copy_id")), "HTTP %d" % st)
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    check("paint: no unpainted unit left is refused (400)",
+          st == 400 and "unpainted" in str(err_of(r).get("message", "")), "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, rows = owned_rows()
+    check("the three painted copies are the caller's three units (no stack row left)",
+          stack_row(rows) is None and len([x for x in rows if x.get("i") == ITEM and "sid" in x and "m" in x]) == 3,
+          json.dumps(rows)[:400])
+
+    # 5. a copy is the caller's: another account's paint of it is refused, and the copy keeps its paint
+    st, r = http(port, "POST", "/items/%d/paint" % copy_b, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, o_tok)
+    check("paint: another account cannot paint the caller's copy (400)",
+          st == 400 and err_of(r).get("message") == "You don't own that copy.", "HTTP %d %s" % (st, json.dumps(r)[:200]))
+    st, rows = owned_rows()
+    check("the copy keeps its paint after the refusal", copy_row(rows, copy_b) is not None
+          and copy_row(rows, copy_b).get("m") == {"paintShader": 0}, json.dumps(rows)[:300])
+
+    # 6. painted units are not sold through the stack: the destroy-all of the skin takes none
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 2, "amount": 3}, p_tok)
+    left = query(path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (p_id, ITEM))
+    check("quick sell takes no painted unit (the three units stay)", st != 200 and left and left[0][0] == 3,
+          "HTTP %d %s" % (st, json.dumps(r)[:200]))
+
+
 def run_all(port, path):
     market_scenario(port, path)
+    paint_scenario(port, path)
 
 
 def stop(proc):
