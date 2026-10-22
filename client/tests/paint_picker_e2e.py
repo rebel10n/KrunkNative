@@ -319,8 +319,42 @@ def scenario_refused(brain, name, token, brain_url):
     check("the popup says why (the error text is not empty)", hits(text, "errtext") >= 1, "hits=%d" % hits(text, "errtext"))
 
 
+def scenario_store(brain, name, token, brain_url):
+    """The store's inventory grid (v10's Market > My Inventory, deob:150226-150228): the Bullseye Halo's tile has the
+    Paint button (v10mkPaint<index>); it opens the same popup; Paint applies Red Paint to the owned hat."""
+    print("scenario store: the Market's My Inventory tile of the hat has the Paint button, which applies the paint", flush=True)
+    script = """0 boot
+6000 call openExchange 0
+7000 clickid v10mkTab1
+9000 rects @tile [id="v10mkPaint%d"]
+9100 attr @tilebtn onclick [id="v10mkPaint%d"]
+9200 clickid v10mkPaint%d
+10000 rects @popup .paint-container
+10050 rects @swatch .swatch
+10100 attr @picked aria-checked .swatch
+10150 grep @label Red .btn-apply
+10200 clicksel .selctPaintBtn
+10700 clicksel .btn-apply
+11700 rects @popupgone .paint-container
+11800 grep @toast Painted body
+13000 quit
+""" % (HAT, HAT, HAT)
+    proc, log, _ = run_client("store", script, brain_url, token, name)
+    log = finish(proc, log, "store")
+    check("store grid: the hat's tile has its Paint button (v10mkPaint%d)" % HAT, rects(log, "tile") == 1,
+          "n=%d" % rects(log, "tile"))
+    check("store grid: the Paint button calls paint_picker_open for the tile (v10mk.paint)", "v10mk.paint(" in attr(log, "tilebtn"),
+          "onclick=%s" % attr(log, "tilebtn"))
+    check("store grid: the popup opens from the tile", rects(log, "popup") == 1, "n=%d" % rects(log, "popup"))
+    check("store grid: Paint applies (popup closes, toast Painted Bullseye Halo with Red Paint)",
+          rects(log, "popupgone") == 0 and hits(log, "toast") >= 1, "popup=%d toast=%d" % (rects(log, "popupgone"), hits(log, "toast")))
+    copies = q("SELECT copy_id, paint_color FROM skin_copies WHERE account_id = (SELECT id FROM accounts WHERE username = ?) AND skin_id = ?",
+               name, HAT)
+    check("store grid: the brain made the painted copy (#dc3c3c)", len(copies) == 1 and copies[0][1] == "#dc3c3c", "rows=%r" % copies)
+
+
 def main():
-    names = sys.argv[3:] or ["apply", "empty", "refused"]
+    names = sys.argv[3:] or ["apply", "empty", "refused", "store"]
     (port,) = free_ports(1)
     brain = Brain(port)
     brain_url = "http://127.0.0.1:%d" % port
@@ -337,6 +371,8 @@ def main():
                 scenario_empty(brain, account, token, brain_url)
             elif n == "refused":
                 scenario_refused(brain, account, token, brain_url)
+            elif n == "store":
+                scenario_store(brain, account, token, brain_url)
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
