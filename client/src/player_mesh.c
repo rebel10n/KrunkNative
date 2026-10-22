@@ -1293,7 +1293,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // player_height - camera_height above the feet, so the pelvis is pelvis_height - (player_height -
                     // camera_height) in the upper body's frame, and the hand's arm-frame y (the arm solver's hold.y) is that less
                     // weapon->offset.y. The hold is the shoulder's own x, its y NETTSPEND_OFF_HAND_RISE above the pelvis and its z
-                    // NETTSPEND_OFF_HAND_FWD from the shoulder's depth (0: level with the shoulder, beside the hip, not in front of
+                    // NETTSPEND_OFF_HAND_FWD from the shoulder's depth (negative: forward, toward the front; 0: level with the shoulder, beside the hip, not in front of
                     // the body). generate_arms gives first person's shoulders hold_width (0.4 by default) of the third person's
                     // x, so the hold's x follows them.
                     const float pelvis_height = weapon->stream ? weapon->stream->pelvis_height : game_constants.leg_height;

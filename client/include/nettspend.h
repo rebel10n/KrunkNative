@@ -71,11 +71,14 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 // player_generate_meshes) raised NETTSPEND_OFF_HAND_RISE, and NETTSPEND_OFF_HAND_FWD from the shoulder's depth (0: beside
 // the hip, not in front of the body). The rest is the pose itself, so the arm's bend is generated for its real length;
 // first person's refill starts and ends there too (its hidden arm comes up from the same hold).
-// At this rest the wrist is about 5.4 above the feet and level with the shoulder's depth, and the elbow sits about 1.95
-// below the shoulder (the test's limit is 2.0): a bent arm's elbow lies about half the wrist's drop below the shoulder
-// (the bend's side, the pole in player_arm_reach, decides the rest of it).
+// At this rest the wrist is about 5.5 above the feet, and the elbow sits about 2.2 below the shoulder (the bend's side, the
+// pole in player_arm_reach, decides which way it bends; its size does not matter, the chord lies in the y-z plane).
+// FWD is measured, not derived: negative is toward the front (-z). At 0 the third-person wrist sat 0.06 behind the hip line
+// (z -27.94; the feet's z is -28 at the test pose); -0.35 moves it 0.32 forward (z -28.26, 0.26 in front of the hip line,
+// the user's 2026-10-22 "forward a bit"). Moving the hand forward tilts the forearm, so the elbow sinks from 1.95 to 2.18
+// below the shoulder (the test's limit is 2.25): the response is not 1:1, the arm solver's reach decides it.
 #define NETTSPEND_OFF_HAND_RISE 1.0f
-#define NETTSPEND_OFF_HAND_FWD 0.0f
+#define NETTSPEND_OFF_HAND_FWD (-0.35f)
 // Third person: the shoulders sit this far higher than the generated arms (player_generate_meshes lowers the Drank's
 // offset.y by it); the hands stay where their holds put them, so the arms rise instead of hanging from the shoulder.
 #define NETTSPEND_TP_SHOULDER_RISE 0.5f

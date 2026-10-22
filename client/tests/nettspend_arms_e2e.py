@@ -15,17 +15,19 @@ Third person (the body's view):
   3. the off hand rests beside the hip, not in front of the body: its wrist is not ahead of the torso's front
      face (z not less than the feet's z minus the torso's half depth, 0.65: chest_scale 1.3 in constants_v10.c;
      -z is forward at yaw 0; the user's 2026-10-21 screenshot showed it swung across the front of the hip);
+     3b. the off wrist is at or just in front of the hip line: 0.1 to 0.5 in front of the feet's z (-28 at the pose;
+     the user's 2026-10-22 "the left arm should be pushed forward a bit, it's back too far": the rest was 0.06 behind it);
   4. the trigger hand keeps its forward reach (the cup arm, af38340d): its wrist is over 3 units in front.
   5. the off hand is not below the hip (its wrist at least 0.25 under the pelvis height, 4.55 above the feet);
   6. the off hand is at hip height or a little above: its wrist at least 5.3 above the feet;
-  7. the off elbow is no more than 2.0 below the off shoulder: the hand hangs beside the hip at hip height, and
+  7. the off elbow is no more than 2.25 below the off shoulder: the hand hangs beside the hip at hip height, and
      a bent arm of this length puts its elbow about half the wrist's drop below the shoulder (the user's
-     "arms too low" / "sag", 2026-10-21).
+     "arms too low" / "sag", 2026-10-21). The forward hand (3b) tilts the forearm: the rest's elbow is 2.18 below.
 First person (the viewmodel, the arms the local player sees; the off arm is hidden except in the refill):
   8. the refill runs: the pour-up reaches full strength (the off hand has the bottle over the cup);
   9. the off hand at rest is beside the hip, as in third person: its wrist is within 0.3 of the third-person
-     rest's height above the feet, not ahead of the torso's front face, and its elbow is no more than 2.0 below
-     the shoulder (the first person's rest was 4.5 above the feet and 1.4 in front of the body, the forward swing);
+     rest's height above the feet, within 0.4 of its depth (z), not ahead of the torso's front face, and its elbow
+     is no more than 2.25 below the shoulder (the first person's rest was 4.5 above the feet and 1.4 in front of the body, the forward swing);
   10. the off elbow bends down and back at rest (the same pole as third person);
   11. the refill ends where it started: the off wrist after the pour is within 0.1 of its rest on every axis, and
      beside the hip by the same checks as 9 (the refill's end pose is the rest, not a forward swing).
@@ -50,7 +52,10 @@ FEET = (-343.0, -143.0, -28.0)  # the pose: feet x / y / z (yaw 0 faces -z)
 TORSO_HALF_DEPTH = 0.65         # the body cube's half depth (chest_scale 1.3, constants_v10.c; the cube is centred on the body)
 HIP_HEIGHT = 4.55               # the Drank's stream pelvis_height (kn_drank.c): the hip, above the feet
 OFF_WRIST_MIN = 5.3             # the off hand's rest: at hip height or a little above (above the feet)
-OFF_ELBOW_MAX_DROP = 2.0        # the off elbow: no more than this below the off shoulder
+OFF_ELBOW_MAX_DROP = 2.25       # the off elbow: no more than this below the off shoulder (the new rest sits 2.18 below: the forward hand tilts the forearm)
+HIP_LINE_NEAR = 0.1             # the off wrist at the hip line or just in front of it: at least this far in front of the feet's z ...
+HIP_LINE_FAR = 0.5              # ... and no more than this (2026-10-22: the wrist was 0.06 behind the hip line, z -27.94)
+FP_DEPTH_TOL = 0.4              # the first-person rest's wrist depth against the third person's (the viewmodel's perspective)
 REST_HEIGHT_TOL = 0.3           # the first-person rest's wrist height above the feet, against the third person's
 REFILL_TOL = 0.1                # the refill's end pose against its rest, per axis
 FP_REST_MS = 1400               # first person: the arms at rest (before the sip)
@@ -141,12 +146,14 @@ def fmt(p):
     return tuple(round(v, 2) for v in p)
 
 
-def beside_hip(name, off, tp_height):
+def beside_hip(name, off, tp_height, tp_depth):
     """The off hand at rest or at a refill's end: beside the hip, as in third person (checks 3, 6, 7 and the first-person 9)."""
     shoulder, elbow, wrist = off
     front = FEET[2] - TORSO_HALF_DEPTH
     check(f"{name}: the off hand is not ahead of the torso's front face", wrist[2] >= front,
           f"wrist z {wrist[2]:.2f}, torso front z {front:.2f}")
+    check(f"{name}: the off hand's depth is level with the third-person rest ({tp_depth:.2f}, +-{FP_DEPTH_TOL})",
+          abs(wrist[2] - tp_depth) <= FP_DEPTH_TOL, f"wrist z {wrist[2]:.2f}")
     height = wrist[1] - FEET[1]
     check(f"{name}: the off hand is at hip height, level with the third-person rest ({tp_height:.2f} above the feet, +-{REST_HEIGHT_TOL})",
           abs(height - tp_height) <= REST_HEIGHT_TOL and height >= OFF_WRIST_MIN,
@@ -176,6 +183,9 @@ def main():
         front = FEET[2] - TORSO_HALF_DEPTH
         check("the off hand rests beside the hip, not ahead of the torso's front face", off_wrist[2] >= front,
               f"wrist z {off_wrist[2]:.2f}, torso front z {front:.2f}")
+        hip_gap = FEET[2] - off_wrist[2]  # > 0: in front of the hip line (-z is forward at yaw 0)
+        check(f"the off hand is at or just in front of the hip line ({HIP_LINE_NEAR} to {HIP_LINE_FAR} in front of the feet's z)",
+              HIP_LINE_NEAR <= hip_gap <= HIP_LINE_FAR, f"wrist z {off_wrist[2]:.2f}, {hip_gap:+.2f} in front of the hip line")
         hand_height = off_wrist[1] - FEET[1]
         check("the off hand is not below the hip (about the pelvis height, 4.55 above the feet)", hand_height >= HIP_HEIGHT - 0.25,
               f"wrist {hand_height:.2f} above the feet, pelvis {HIP_HEIGHT:.2f}")
@@ -183,12 +193,13 @@ def main():
               f"wrist {hand_height:.2f} above the feet")
         off_shoulder, off_elbow, _ = tp["off"]
         elbow_drop = off_shoulder[1] - off_elbow[1]
-        check("the off elbow is no more than 2.0 below its shoulder (the hand hangs beside the hip, elbow bent)",
+        check(f"the off elbow is no more than {OFF_ELBOW_MAX_DROP} below its shoulder (the hand hangs beside the hip, elbow bent)",
               elbow_drop <= OFF_ELBOW_MAX_DROP, f"elbow {elbow_drop:.2f} below the shoulder")
         trig_wrist = tp["trigger"][2]
         check("the cup hand keeps its forward reach (over 3 units in front)", FEET[2] - trig_wrist[2] > 3.0,
               f"reach {FEET[2] - trig_wrist[2]:.2f}")
     tp_height = (tp["off"][2][1] - FEET[1]) if "off" in tp else 0.0
+    tp_depth = tp["off"][2][2] if "off" in tp else FEET[2]
 
     # first person: the rest, the refill (a sip, then R: the pour-up), and the arms after it
     fp_text = run_client("fp", ["0 play", "300 om add 67", pose, f"{FP_REST_MS} arms",
@@ -206,8 +217,8 @@ def main():
         side = dot(bend(s, e, w), POLE)
         check("first person: the off elbow bends down and back at rest", side > 0.0,
               f"elbow {fmt(e)}, wrist {fmt(w)}, bend side {side:+.2f}")
-        beside_hip("first person at rest", fp["off"], tp_height)
-        beside_hip("first person after the refill", fp_end["off"], tp_height)
+        beside_hip("first person at rest", fp["off"], tp_height, tp_depth)
+        beside_hip("first person after the refill", fp_end["off"], tp_height, tp_depth)
         spread = max(abs(a - b) for a, b in zip(fp["off"][2], fp_end["off"][2]))
         check(f"the refill ends where it started (the off wrist within {REFILL_TOL} of its rest on every axis)", spread <= REFILL_TOL,
               f"rest {fmt(fp['off'][2])}, after {fmt(fp_end['off'][2])}, largest step {spread:.3f}")
