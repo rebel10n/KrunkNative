@@ -434,16 +434,65 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     }
 }
 
-// SKINS paint of a worn store skin (playerMesh.js: the skin's paintColor / paintShader on its material): the colour
-// paint mixes the albedo (basic.frag paint_*). A shader paint (paintShader, a procedural graph) is carried in the
-// packet but not drawn; paint.color -1 (none or a shader only) leaves the mesh as it is.
-void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint) {
-    if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable || paint.color < 0) return;
-    BasicMaterial *material = (BasicMaterial *) mesh->material;
-    const vec4 rgb = fx_color(paint.color, 1.0f);
+// The per-copy paint of a worn store skin: v10.0.3 loadMesh / loadAnimMesh's paint branch (deob-10.0.3.js:232196-232210,
+// 233822-233850): the material gets paintColor (the colour, #ffffff for a shader), paintIntensity 1 (0 when there is
+// neither a colour nor a known shader), the paintMaskMap of the skin's paintMask, and the shader graph (basic.frag
+// paint_apply). The metal shaders sample melee_190_env.png (deob:105842), loaded once.
+static unsigned int g_paint_env_texture;
+static int g_paint_env_tried;
+
+static void fx_paint_material(BasicMaterial *material, const WornSkinPaint paint, const ViewerSkin *skin) {
+    const int known_shader = paint.shader >= 0 && paint.shader <= 5;
+    const vec4 rgb = fx_color(paint.color >= 0 ? paint.color : 0xFFFFFF, 1.0f);
     material->paint_enabled = 1;
     material->paint_color = (vec3) {rgb.x, rgb.y, rgb.z};
-    material->paint_intensity = 1.0f;
+    material->paint_intensity = paint.color >= 0 || known_shader ? 1.0f : 0.0f;
+    material->paint_shader = paint.color >= 0 ? -1 : known_shader ? paint.shader : 99; // 99: an unknown shader, unpainted
+    material->paint_mask_texture = 0;
+    material->paint_env_texture = 0;
+    if (skin && skin->paint_mask) {
+        char key[256];
+        snprintf(key, sizeof(key), "%s", skin->paint_mask);
+        if (skin->paint_mask_ext && strcmp(skin->paint_mask_ext, "png") != 0) {
+            // fx_texture appends ".png": another extension goes through its own path
+            char rel[300];
+            snprintf(rel, sizeof(rel), "textures/%s.%s", skin->paint_mask, skin->paint_mask_ext);
+            char *path = concat(assets_path(), rel);
+            if (path) {
+                ensure_asset_file(path);
+                FILE *file = fopen(path, "rb");
+                if (file) {
+                    fclose(file);
+                    material->paint_mask_texture = load_texture(path);
+                }
+                free(path);
+            }
+        } else {
+            material->paint_mask_texture = fx_texture(key);
+        }
+    }
+    if (material->paint_shader >= 2 && material->paint_shader <= 4) {
+        if (!g_paint_env_tried) {
+            g_paint_env_tried = 1;
+            g_paint_env_texture = fx_texture("melee/melee_190_env");
+        }
+        material->paint_env_texture = g_paint_env_texture;
+    }
+}
+
+void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint, const ViewerSkin *skin) {
+    if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
+    if (paint.color < 0 && paint.shader < 0) return;
+    fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
+}
+
+void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, const ViewerSkin *skin) {
+    if (!model || (paint.color < 0 && paint.shader < 0)) return;
+    for (size_t i = 0; i < model->mesh_count; i++) {
+        Mesh *mesh = model->meshes[i];
+        if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) continue;
+        fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
+    }
 }
 
 void skin_fx_forget(const Mesh *mesh) {

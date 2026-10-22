@@ -682,6 +682,16 @@ static void state_from_params(void) {
     g_viewer.showcase = js_parse_int(viewer_param_get("showcase"), &ok);
     g_viewer.showcase_set = ok;
     if (!ok) g_viewer.showcase = -1;
+    // the shown copy's paint (v10.0.3 deob:123160-123173: "&paint=" + colour without its "#", "&paintShader=" + n)
+    g_viewer.paint = WORN_SKIN_PAINT_NONE;
+    const char *paint = viewer_param_get("paint");
+    if (paint && *paint) {
+        char *end;
+        const long rgb = strtol(paint[0] == '#' ? paint + 1 : paint, &end, 16);
+        if (*end == '\0' && rgb >= 0 && rgb <= 0xFFFFFF) g_viewer.paint.color = (int) rgb;
+    }
+    const int shader = js_parse_int(viewer_param_get("paintShader"), &ok);
+    if (ok && g_viewer.paint.color < 0) g_viewer.paint.shader = shader;
     const char *dev = viewer_param_get("dev");
     g_viewer.dev = dev != NULL;
     g_viewer.hi_quality = g_viewer.cosmetic_set || (dev && *dev); // isNumber(C) || params.get("dev")

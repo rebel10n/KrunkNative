@@ -1327,7 +1327,10 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
     }
 
     const PlayerSkins skins = client_skins_of(packet->uid);
-    const PlayerSkinPaints paints = client_skin_paints_of(packet->uid);
+    PlayerSkinPaints paints = client_skin_paints_of(packet->uid);
+    // Our own model wears our account's own painted copies (v10.0.3: the local match reads $account.skins,
+    // deob-10.0.3.js:252090-252095), whatever the server's SKINS said (offline the sandbox has no account).
+    if (packet->is_you) ui_loadout_skin_paints(&skins, &paints);
     if (!player) {
         player = player_init(&client->game);
         if (!player) return;

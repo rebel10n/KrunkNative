@@ -2,6 +2,7 @@
 #include <client.h>
 #include <render_settings.h>
 #include <ruleset.h> // light_unit_factor: v10 PI (THREE r186 light units)
+#include <gltf.h>    // gltf_clock: the paint shaders' time
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <string.h>
@@ -144,11 +145,16 @@ U(u_env_map_intensity, "env_map_intensity");
 U(u_projection_uv, "projection_uv");
 #undef U
 
-// SKINS paint (skin_fx_apply_paint): the colour paint mixes the albedo before the lighting
+// Per-copy paint (skin_fx_apply_paint): v10.0.3's paint node (basic.frag paint_apply)
 #define U(var, name) static GlUniform var = GL_UNIFORM_INIT(name)
 U(u_paint_enabled, "paint_enabled");
 U(u_paint_color, "paint_color");
 U(u_paint_intensity, "paint_intensity");
+U(u_paint_shader, "paint_shader");
+U(u_paint_time, "paint_time");
+U(u_paint_mask_enabled, "paint_mask_enabled");
+U(u_paint_mask, "paint_mask");
+U(u_paint_env_map, "paint_env_map");
 #undef U
 
 // glTF PBR maps (gltf.c): metallicRoughness (texture unit 5) and normal (unit 6) textures
@@ -403,11 +409,27 @@ void basic_material_update_uniforms(Material *base) {
     }
     gl_uniform_1i(&u_projection_uv, program, material->projection_uv);
 
-    // SKINS paint: a painted skin's colour (basic.frag)
+    // Per-copy paint: the colour or shader paint of a worn skin (basic.frag paint_apply)
     gl_uniform_1i(&u_paint_enabled, program, material->paint_enabled);
     if (material->paint_enabled) {
         gl_uniform_3f(&u_paint_color, program, material->paint_color.x, material->paint_color.y, material->paint_color.z);
         gl_uniform_1f(&u_paint_intensity, program, material->paint_intensity);
+        gl_uniform_1i(&u_paint_shader, program, material->paint_shader);
+        // the TSL `time` node: seconds on gltf_clock(), so --render-scenario captures pin the shader paints
+        gl_uniform_1f(&u_paint_time, program, (float) gltf_clock());
+        gl_uniform_1i(&u_paint_mask_enabled, program, material->paint_mask_texture != 0);
+        gl_uniform_1i(&u_paint_mask, program, BASIC_PAINT_MASK_TEXTURE_UNIT);
+        gl_uniform_1i(&u_paint_env_map, program, BASIC_PAINT_ENV_TEXTURE_UNIT);
+        if (material->paint_mask_texture) {
+            glActiveTexture(GL_TEXTURE0 + BASIC_PAINT_MASK_TEXTURE_UNIT);
+            glBindTexture(GL_TEXTURE_2D, material->paint_mask_texture);
+            glActiveTexture(GL_TEXTURE0);
+        }
+        if (material->paint_env_texture) {
+            glActiveTexture(GL_TEXTURE0 + BASIC_PAINT_ENV_TEXTURE_UNIT);
+            glBindTexture(GL_TEXTURE_2D, material->paint_env_texture);
+            glActiveTexture(GL_TEXTURE0);
+        }
     }
 
     // glTF PBR maps: a material without them is lit by the lighting setting, as before

@@ -81,7 +81,7 @@ extern unsigned int g_active_shader;
 // unit-0 cache), so no sampler of the pass can read its own target. WebGL and ANGLE reject
 // such a draw as a feedback loop even when the shader never samples that unit on its path
 // (gl_feedback_check.h asserts it in debug builds). Keeps the active texture unit.
-#define GL_RENDER_TEXTURE_UNITS 8
+#define GL_RENDER_TEXTURE_UNITS 9
 void gl_release_texture(unsigned int texture);
 
 typedef struct {
@@ -290,11 +290,14 @@ typedef struct {
     float roughness_factor;   // roughnessFactor (1 by glTF default)
     float normal_scale;       // normalTexture.scale (1 by glTF default)
 
-    // SKINS paint of a worn store skin (skin_fx_apply_paint): the colour paint mixes the albedo before the lighting,
-    // as the official colorNode = mix(albedo, paintColor, paintIntensity). 0 = unpainted.
+    // Per-copy paint of a worn store skin (skin_fx_apply_paint): v10.0.3's paint node in basic.frag (paint_apply):
+    // the colour paint overlays the albedo, a shader paint draws its graph over it. 0 = unpainted.
     int paint_enabled;
-    vec3 paint_color;         // rgb 0..1
+    vec3 paint_color;         // rgb 0..1 (paintColor; #ffffff for a shader paint)
     float paint_intensity;    // paintIntensity (1)
+    int paint_shader;         // paintShader: 0 Spectrum, 1 Synth, 2 Gold, 3 Silver, 4 Prism, 5 Codefall; -1 the colour paint
+    unsigned int paint_mask_texture; // the skin's paintMask (paintMaskMap, unit 7): its red scales the intensity, 0 = none
+    unsigned int paint_env_texture;  // the metal shaders' melee_190_env.png (unit 8), 0 = none
 } BasicMaterial;
 
 extern const MaterialVTable basic_material_vtable;
@@ -306,6 +309,8 @@ BasicMaterial *basic_material_init();
 #define BASIC_ENV_MAP_TEXTURE_UNIT 4   // BasicMaterial.env_map (WP-F skin env)
 #define BASIC_METAL_ROUGHNESS_TEXTURE_UNIT 5 // BasicMaterial.metal_rough_texture (glTF metallicRoughnessTexture)
 #define BASIC_NORMAL_TEXTURE_UNIT 6          // BasicMaterial.normal_texture (glTF normalTexture)
+#define BASIC_PAINT_MASK_TEXTURE_UNIT 7      // BasicMaterial.paint_mask_texture (v10 paintMaskMap)
+#define BASIC_PAINT_ENV_TEXTURE_UNIT 8       // BasicMaterial.paint_env_texture (the metal paints' env map)
 #define BASIC_MAX_POINT_LIGHTS 16 // basic.frag MAX_POINT_LIGHTS
 
 // v3.1.1 POINT_LIGHT objects (94.js addPointLight -> THREE.PointLight), lit only with the

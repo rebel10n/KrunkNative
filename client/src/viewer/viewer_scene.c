@@ -586,6 +586,7 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
             instance->root.scale = (vec3) {scale, scale, scale};
             instance->root.parent = holder;
             skin_fx_apply_gltf(instance, n, model);
+            if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint_gltf(instance, g_viewer.paint, n); // the page's paint params
             vs.models[vs.model_count++] = instance;
             scene_add_gltf(vs.scene, instance);
             return;
@@ -608,6 +609,7 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
     mesh->transform.scale = (vec3) {scale, scale, scale};
     mesh->transform.parent = holder;
     skin_fx_apply(mesh, n, texture[0] ? texture : NULL, model, glow_text, emissive);
+    if (n->flags2 & VS2_PAINTABLE) skin_fx_apply_paint(mesh, g_viewer.paint, n); // the page's paint params (paintTargets items only)
     item_add(mesh);
 }
 

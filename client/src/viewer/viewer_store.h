@@ -81,6 +81,9 @@ typedef struct ViewerSkin {
     const char *id_name; // a non-numeric id (paints: "red"), NULL = id
     const char *desc;    // desc (paints, consumables)
     const char *paint_color; // paints: paintColor "#rrggbb", NULL none
+    const char *paint_mask;  // paintable items (VS2_PAINTABLE): paintMask.src (a textures/ key), NULL none
+    const char *paint_mask_ext; // paintMask.data.texExt, NULL = "png"
+    const char *paint_targets;  // paintTargets as a list: its mesh names joined by ",", NULL = true (every mesh)
     int title;           // the title id the item grants (0 none)
     const char *set;     // item set ("vcore"), NULL none
     int set_min;         // setMin: items of the set to own for its bonus

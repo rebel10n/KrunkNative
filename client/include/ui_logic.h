@@ -687,10 +687,18 @@ typedef struct {
     PlayerCosmetics cosmetics;     // skin colour + hat / body / waist / face / dye
     PlayerCosmeticsV7 cosmetics_v7; // head / back / shoe / pet / wrist / charms / card (badge: the server's)
     PlayerSkins skins;             // primary / secondary weapon skins, melee
+    PlayerSkinPaints skin_paints;  // the paint of each of those (the account's own painted copy: ui_loadout_skin_paints)
     int secondary_index;           // setClass's selectedSecondaryIndex (ui_loadout_secondary)
     int attach_index;              // the sight: 0 Reflex, 1 Acog, -1 none
 } LoadoutLook;
 void ui_loadout_look(int class_index, int for_ent, LoadoutLook *out);
+// The paint the account's own copy of store index `index` wears (v10.0.3's plain-index rule, deob-10.0.3.js:252090-252095:
+// the first owned copy of that index with metadata; its m.paint / m.paintShader). 1 and *out when painted, else 0 and
+// WORN_SKIN_PAINT_NONE. The local player's and the preview's model read it (the official reads its own $account.skins).
+int ui_loadout_skin_paint(int index, WornSkinPaint *out);
+void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out);
+// The item view's viewer URL tail for that paint ("&paint=rrggbb" / "&paintShader=n", v10 deob:123160-123173), "" none.
+void ui_loadout_paint_query(int index, char *out, size_t n);
 // The class's level req for this client (ui_loadout.c): 1 open, 0 locked. Only an official krunker.io game
 // (Game.is_official) locks by level; the Change Loadout cards and the join's class (client_enter_game) use it.
 int  ui_loadout_class_open(const Client *client, int class_index);

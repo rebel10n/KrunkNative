@@ -37,8 +37,13 @@ void skin_fx_apply_gltf(struct GltfInstance *model, const struct ViewerSkin *ski
 // colour, opacity, glow and rgb (registered like an item; no frames / pulse).
 void skin_fx_apply_dye(Mesh *mesh, const struct ViewerSkin *dye);
 
-// The SKINS paint of a worn skin on its mesh (a BasicMaterial): the colour paint mixes the albedo; -1 colour = none.
-void skin_fx_apply_paint(Mesh *mesh, WornSkinPaint paint);
+// The per-copy paint of a worn skin on its mesh (a BasicMaterial): v10.0.3's paint node (basic.frag paint_apply): the
+// colour paint overlays the albedo, a shader paint (paintShader 0-5) draws its graph. `skin` gives the paintMask
+// (its texture scales the intensity); NULL = none. A paint of colour -1 and shader -1 leaves the mesh as it is.
+void skin_fx_apply_paint(Mesh *mesh, WornSkinPaint paint, const struct ViewerSkin *skin);
+// The same on every mesh of a hasAnim (GLTF) item: v10 paints the meshes paintTargets names, or all of them when it
+// is true (deob-10.0.3.js:233833-233837). The GLTF meshes carry no names here, so every mesh is painted.
+void skin_fx_apply_paint_gltf(struct GltfInstance *model, WornSkinPaint paint, const struct ViewerSkin *skin);
 
 // Drop a mesh's / model's registrations: call before freeing it (mesh_fini / gltf_instance_fini).
 void skin_fx_forget(const Mesh *mesh);

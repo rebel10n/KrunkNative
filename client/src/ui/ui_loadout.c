@@ -341,6 +341,7 @@ void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out)
     look_cosmetics_v7(class_index, &out->cosmetics_v7, for_ent);
     cosmetics_route(&out->cosmetics, &out->cosmetics_v7); // v3.1.1 placements to their v7 slots
     look_skins(class_index, &out->skins, for_ent);
+    ui_loadout_skin_paints(&out->skins, &out->skin_paints); // the account's own painted copies of those skins
     out->secondary_index = ui_loadout_secondary(class_index);
     // forceAttach ? 0 : parseInt(attachIndex): the primary weapon's (also weapon_attachment()'s) or its skin's
     const int primary = class_at(class_index).primary;
@@ -350,6 +351,65 @@ void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out)
         cosmetics_route(&out->cosmetics, &out->cosmetics_v7);
     const Weapon *pw = rules_weapon(primary);
     out->attach_index = pw && pw->force_attach ? 0 : cosmetics_attach_index(out->skins.primary, sel(SEL_ATTACH));
+}
+
+// ---------------------------------------------------------------- the account's own paint
+
+// v10.0.3's plain-index rule (deob-10.0.3.js:252090-252095): a loadout slot that is a plain store index wears the
+// first owned copy of that index with metadata; its m (an object, or a JSON string: the normaliser deob:128883-128894)
+// has `paint` "#rrggbb" or `paintShader` n. The owned list is account data slot 10 ({ind, cnt: 1, id, m, st: 0} copies).
+int ui_loadout_skin_paint(const int index, WornSkinPaint *out) {
+    *out = WORN_SKIN_PAINT_NONE;
+    const AccountInfo *acc = active_account();
+    const cJSON *owned = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
+    if (index < 0 || !owned) return 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, owned) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(ind) || ind->valueint != index) continue;
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "m");
+        cJSON *parsed = NULL;
+        if (cJSON_IsString(m) && m->valuestring) m = parsed = cJSON_Parse(m->valuestring);
+        if (!cJSON_IsObject(m)) {
+            cJSON_Delete(parsed);
+            continue;
+        }
+        const cJSON *paint = cJSON_GetObjectItemCaseSensitive(m, "paint");
+        const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
+        int found = 0;
+        if (cJSON_IsString(paint) && paint->valuestring && paint->valuestring[0] == '#' && strlen(paint->valuestring) == 7) {
+            char *end;
+            const long rgb = strtol(paint->valuestring + 1, &end, 16);
+            if (*end == '\0') {
+                out->color = (int) rgb;
+                found = 1;
+            }
+        } else if (cJSON_IsNumber(shader)) {
+            out->shader = shader->valueint;
+            found = 1;
+        }
+        cJSON_Delete(parsed);
+        if (found) return 1;
+    }
+    return 0;
+}
+
+void ui_loadout_skin_paints(const PlayerSkins *skins, PlayerSkinPaints *out) {
+    *out = PLAYER_SKIN_PAINTS_NONE;
+    if (!skins) return;
+    ui_loadout_skin_paint(skins->primary, &out->primary);
+    ui_loadout_skin_paint(skins->secondary, &out->secondary);
+    ui_loadout_skin_paint(skins->melee, &out->melee);
+}
+
+// The item view's viewer URL tail for an index the account has a painted copy of (v10.0.3's instance → viewer URL,
+// deob-10.0.3.js:123160-123173: "&paint=<rrggbb>" or "&paintShader=<n>"); "" otherwise.
+void ui_loadout_paint_query(const int index, char *out, const size_t n) {
+    WornSkinPaint paint;
+    out[0] = '\0';
+    if (!ui_loadout_skin_paint(index, &paint)) return;
+    if (paint.color >= 0) snprintf(out, n, "&paint=%06x", paint.color & 0xFFFFFF);
+    else if (paint.shader >= 0) snprintf(out, n, "&paintShader=%d", paint.shader);
 }
 
 int ui_loadout_weapon_skin_shown(const int weapon) {
@@ -2239,7 +2299,9 @@ static void view_item(const int index, const int mode) {
         html_dom_asset_url(path, url, sizeof(url));
         sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url);
     } else {
-        sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
+        char paint[32]; // the owned copy's paint on the showcase (v10's instance → viewer URL, deob:123160-123173)
+        ui_loadout_paint_query(index, paint, sizeof(paint));
+        sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
     }
     sb_appendf(&sb, "<div class='itemViewCnt'>x%d <span style='color:#ffffff8f;'>Owned</span></div><div id='itemInfoBtn' onclick='openSales(%d)'>More Information</div>", count, index);
     char *html = sb_finish(&sb);

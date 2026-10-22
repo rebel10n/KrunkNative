@@ -5553,7 +5553,11 @@ H(h_view_item) {
     if ((sk->seas ? sk->seas : 1) != g_viewer_current_season) sb_append(&sb, "<div class='itemViewSea'>Vaulted</div>");
     else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
     if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
-    else sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
+    else {
+        char paint[32]; // the account's own painted copy on the showcase (v10's instance → viewer URL, deob:123160-123173)
+        ui_loadout_paint_query(index, paint, sizeof(paint));
+        sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d%s'></iframe>", index, paint);
+    }
     if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>%s</div>", index, I18N("item.view.open", "Open Model Viewer"));
     else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>%s</div>", index, I18N("item.view.more", "More Information"));
     char *html = sb_finish(&sb);

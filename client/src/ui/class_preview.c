@@ -172,6 +172,7 @@ static void preview_look_apply(Player *player, const LoadoutLook *look, const fl
     player->cosmetics = look->cosmetics;
     player->cosmetics_v7 = look->cosmetics_v7;
     player->skins = look->skins;
+    player->skin_paints = look->skin_paints; // the account's own painted copies (v10: the local model's $account.skins)
     player->secondary_index = look->secondary_index;
     player->attach_index = look->attach_index;
     player->head_mlt = head_mlt;
@@ -180,6 +181,7 @@ static void preview_look_apply(Player *player, const LoadoutLook *look, const fl
 static int preview_cosmetics_changed(const Client *client, const Player *player) {
     const LoadoutLook want = preview_look(player->class_index);
     return memcmp(&player->cosmetics, &want.cosmetics, sizeof(want.cosmetics)) != 0 || memcmp(&player->skins, &want.skins, sizeof(want.skins)) != 0 ||
+           memcmp(&player->skin_paints, &want.skin_paints, sizeof(want.skin_paints)) != 0 ||
            memcmp(&player->cosmetics_v7, &want.cosmetics_v7, sizeof(want.cosmetics_v7)) != 0 || player->secondary_index != want.secondary_index ||
            player->attach_index != want.attach_index || player->head_mlt != preview_head_mlt(client);
 }

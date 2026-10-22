@@ -106,6 +106,13 @@ const rows = store.skins.map((s, i) => {
   if (s.spraySnd != null) fields.push(`.spray_snd = ${num(s.spraySnd, 0)}`);
   if (s.desc) fields.push(`.desc = ${cstr(s.desc)}`);
   if (s.paintColor) fields.push(`.paint_color = ${cstr(s.paintColor)}`);
+  // v10.0.3 paintable items: the paintMask texture (loadMesh's paintMaskMap) and a paintTargets mesh list
+  if (s.paintMask && s.paintMask.src) {
+    fields.push(`.paint_mask = ${cstr(s.paintMask.src)}`);
+    const ext = s.paintMask.data && s.paintMask.data.texExt;
+    if (ext && ext !== 'png') fields.push(`.paint_mask_ext = ${cstr(ext)}`);
+  }
+  if (Array.isArray(s.paintTargets)) fields.push(`.paint_targets = ${cstr(s.paintTargets.map(String).join(','))}`);
   if (s.title != null) fields.push(`.title = ${num(s.title, 0)}`);
   if (s.set) fields.push(`.set = ${cstr(s.set)}`, `.set_min = ${num(s.setMin, 0)}`);
   opt('legLen', 'leg_len', 0); opt('sitOffX', 'sit_off_x', 0); opt('syRot', 'sy_rot', 0); opt('szRot', 'sz_rot', 0);

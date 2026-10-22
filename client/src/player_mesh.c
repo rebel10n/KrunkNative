@@ -1362,7 +1362,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                             // melee loadMesh: glowText = glow || sameGlow, emissive (glow || sameGlow), seeThrough transparent
                             const int glow = (skin->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
                             skin_fx_apply(melee, skin, texture, model, glow, glow);
-                            skin_fx_apply_paint(melee, player_slot_paint(player, i, weapon));
+                            skin_fx_apply_paint(melee, player_slot_paint(player, i, weapon), skin);
+                        } else if (skin && melee_model) {
+                            skin_fx_apply_paint_gltf(melee_model, player_slot_paint(player, i, weapon), skin); // loadAnimMesh's paint
                         }
                         melee->transform.parent = &arms->anchor;
 
@@ -1431,6 +1433,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                         if (weapon_geo == gltf_empty_geometry()) {
                             weapon_mesh = gltf_skin_carrier(skin, model, &weapon_model);
                             if (!weapon_mesh) continue;
+                            if (skin && weapon_model) skin_fx_apply_paint_gltf(weapon_model, player_slot_paint(player, i, weapon), skin); // loadAnimMesh's paint
                         } else {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
@@ -1440,7 +1443,7 @@ void player_generate_meshes(Player *player, const int render_you) {
                                                             (float) (weapon->tint & 255) / 255.0f, 1.0f};
                             }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
-                            if (skin) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon));
+                            if (skin) skin_fx_apply_paint(weapon_mesh, player_slot_paint(player, i, weapon), skin);
                         }
                         arms->weapon_models[j] = weapon_model;
 

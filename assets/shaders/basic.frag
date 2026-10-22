@@ -106,11 +106,27 @@ uniform sampler2D env_map;
 uniform float env_map_intensity;
 uniform bool projection_uv;
 
-// SKINS paint (skin_fx_apply_paint, basic.c): a painted skin's colour mixes the albedo before the lighting, as the
-// official colorNode = mix(albedo, paintColor, paintIntensity). The alpha stays.
+// Per-copy paint (skin_fx_apply_paint, basic.c): Krunker v10.0.3's paint material node (deob-10.0.3.js:108706-108758,
+// `iïïìììï(material, {color, intensity, maskTex, shader})`). The paint is applied to the albedo before the lighting:
+//   colorNode = vec4(mix(base, paintOut, clamp(paintIntensity, 0, 1) * maskTex.r), base.a)
+//   paintOut  = overlay(base, paintColor)                       colour paint (no shader)
+//             = overlay(base, shader(uv, time, base))           shader 0 Spectrum, 1 Synth (deob:105898-105953)
+//             = shader(uv, time, base).diffuse                  "raw" shaders 2 Gold, 3 Silver, 4 Prism, 5 Codefall
+//               (deob:105954-105995; their .glow is added to the emissive, times the intensity, deob:108752-108755)
+//   overlay(base, paint) (deob:108672-108679): lum = pow(dot(base, luma), 0.55); hi = min(paint * 3 + 0.02, 1);
+//             lum < 0.5 ? paint * lum * 2 : mix(paint, hi, lum * 2 - 1)
+// A shader number the list does not know is no paint (v10: the shader is null and intensity 0, deob:233828-233833).
+// paint_shader -1 = the colour paint. paint_time is the TSL `time` node (seconds). The mask (paintMask, unit 7) scales
+// the intensity by its red; the metal shaders read melee_190_env.png (deob:105842, unit 8) along the reflection.
 uniform bool paint_enabled;
 uniform vec3 paint_color;
 uniform float paint_intensity;
+uniform int paint_shader;
+uniform float paint_time;
+uniform bool paint_mask_enabled;
+uniform sampler2D paint_mask;
+uniform sampler2D paint_env_map;
+vec3 paint_glow; // the raw shaders' emissive (deob:108752), added to emissive_radiance in main
 
 // glTF PBR maps (gltf.c, BasicMaterial.metal_rough_texture / normal_texture): metallicRoughness (texture
 // unit 5: G = roughness, B = metalness, times the factors) and the tangent-space normal map (unit 6,
@@ -416,6 +432,147 @@ float krunker_ramp_strip(float across) {
     return RAMP_SHADE_ALPHA[clamp(int(u * 32.0), 0, 31)] / 255.0;
 }
 
+// ---- the paint (the uniforms above): v10.0.3's paint node, ported from its TSL graphs
+const vec3 PAINT_LUMA = vec3(0.299, 0.587, 0.114);
+
+// deob:108672-108679: the paint over the albedo (every non-raw paint)
+vec3 paint_overlay(vec3 base, vec3 paint) {
+    float lum = pow(dot(base, PAINT_LUMA), 0.55);
+    vec3 hi = min(paint * 3.0 + 0.02, vec3(1.0));
+    return lum < 0.5 ? paint * (lum * 2.0) : mix(paint, hi, lum * 2.0 - 1.0);
+}
+
+// deob:105898-105914 Spectrum (its GLSL twin at deob:108892)
+vec3 paint_spectrum(float t) {
+    const float TAU = 6.28318530718;
+    const float PHI = 1.61803398875;
+    float hue = fract(t / 4.0);
+    float sat = 0.55 + 0.45 * (0.5 + 0.5 * sin(TAU * t / (4.0 * PHI)));
+    float val = 0.65 + 0.35 * (0.5 + 0.5 * sin(TAU * t / (4.0 * PHI * PHI)));
+    vec3 p = abs(fract(hue + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+    vec3 rgb = clamp(p - 1.0, 0.0, 1.0);
+    return ((rgb - 1.0) * sat + 1.0) * val;
+}
+
+// deob:105915-105953 Synth (its GLSL twin at deob:108897)
+vec3 paint_neon_palette(float t) {
+    return vec3(0.5) + vec3(0.5) * cos(6.28318 * (vec3(0.85, 1.05, 1.25) * t + vec3(0.15, 0.45, 0.82)));
+}
+vec3 paint_synth(vec2 uv, float t) {
+    vec2 uv0 = (uv - 0.5) * 2.0;
+    float r0 = length(uv0);
+    float atten = 1.0 / (1.0 + r0 * r0 * 1.4);
+    const float CA = 0.9004;
+    const float SA = 0.4350;
+    mat2 R = mat2(CA, -SA, SA, CA);
+    vec2 p = uv0;
+    vec3 col = vec3(0.0);
+    for (int k = 0; k < 4; k++) {
+        float i = float(k);
+        p = R * p;
+        float ph = i * 7.0;
+        vec2 drift = vec2(0.25 * sin(t * 0.13 + ph) + 0.12 * sin(t * 0.41 + ph * 1.5),
+                          0.25 * cos(t * 0.17 + ph) + 0.12 * cos(t * 0.37 + ph * 1.5));
+        p = fract(p * 1.7 + drift) - 0.5;
+        float d = length(p) * atten;
+        vec3 layer = paint_neon_palette(r0 * 0.7 + i * 0.55 + t * 0.3);
+        float rings = abs(cos(d * 11.0 - t * 1.3));
+        col += layer * (0.012 / pow(rings + 0.001, 0.9));
+    }
+    return col;
+}
+
+float paint_hash(vec2 v) { // deob:105865 (iìííììî) and the metal's inline hashes
+    return fract(sin(dot(v, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// deob:105835-105864 (iiîîïîí): Gold / Silver / Prism (tint, shadow, rim at deob:105954-105975). N, V in world space:
+// NdotV = max(dot(normalView, positionViewDirection), 0); r = reflectVector; the env map along equirectUV(r).
+void paint_metal(int kind, vec3 base, vec2 uv, float t, vec3 N, vec3 V, out vec3 diffuse, out vec3 glow) {
+    float ndv = max(dot(N, V), 0.0);
+    float base_fac = mix(0.55, 1.0, smoothstep(0.02, 0.55, pow(dot(base, PAINT_LUMA), 0.6)));
+    vec3 r = reflect(-V, N);
+    vec2 env_uv = vec2(atan(r.z, r.x) * 0.15915494309189535 + 0.5, asin(clamp(r.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+    float env_l = dot(srgb_to_linear(texture(paint_env_map, env_uv).rgb), vec3(0.333));
+    vec3 tint, shadow, rim;
+    if (kind == 2) {
+        tint = vec3(1.0, 0.77, 0.3);
+        shadow = vec3(0.24, 0.11, 0.02);
+        rim = vec3(1.0, 0.9, 0.6);
+    } else if (kind == 3) {
+        tint = vec3(0.93, 0.95, 0.98);
+        shadow = vec3(0.07, 0.08, 0.1);
+        rim = vec3(1.0);
+    } else { // prism: the tint turns with the view and the time
+        float h = ndv * 1.3 + r.y * 0.4 + t * 0.04;
+        tint = cos((h + vec3(0.0, 0.33, 0.67)) * 6.2831) * 0.5 + 0.5;
+        shadow = tint * 0.1;
+        rim = vec3(1.0);
+    }
+    vec3 metal = mix(shadow, tint, smoothstep(0.0, 0.45, env_l)) * (env_l * 1.9 + 0.18);
+    float fres = pow(1.0 - ndv, 3.0);
+    vec2 guv = uv * 140.0;
+    vec2 cell = floor(guv);
+    float h1 = paint_hash(cell);
+    float h2 = fract(sin(dot(cell, vec2(269.5, 183.3))) * 43758.5453);
+    vec2 d = fract(guv) - (vec2(h1, h2) * 0.5 + 0.25);
+    float spot = 1.0 - smoothstep(0.0, 0.16, length(d));
+    float twinkle = sin(t * (h2 * 2.0 + 1.2) + h1 * 6.2831) * 0.5 + 0.5;
+    float spark = spot * pow(twinkle, 3.0) * smoothstep(0.45, 0.9, env_l) * step(0.86, h1);
+    glow = (metal * 0.55 + rim * fres * 0.35 + mix(tint, vec3(1.0), 0.7) * spark * 0.9) * base_fac;
+    diffuse = metal * 0.5 * base_fac;
+}
+
+// deob:105868-105897 (iîiîìîî): Codefall
+void paint_codefall(vec3 base, vec2 uv, float t, out vec3 diffuse, out vec3 glow) {
+    float row = floor(uv.y * 14.0);
+    float tick = floor(t * 9.0);
+    float gate = step(0.82, paint_hash(vec2(floor(t * 1.5), 11.0)));
+    float act = step(0.78, paint_hash(vec2(row, tick))) * gate;
+    float shift = (paint_hash(vec2(tick, row + 3.0)) - 0.5) * 0.15 * act;
+    vec2 p = vec2(uv.x + shift, uv.y) * 52.0;
+    vec2 cell = floor(p);
+    float ch = paint_hash(vec2(cell.x, 1.7));
+    float fall = fract(ch * 9.0 + t * (ch * 0.6 + 0.35) + cell.y / 52.0);
+    vec2 f = fract(p);
+    vec2 sub = floor(f * vec2(3.0, 5.0));
+    float tk = floor(t * (ch * 4.0 + 2.0));
+    float glyph = step(0.45, paint_hash(cell * vec2(13.0, 7.0) + sub * vec2(3.1, 1.9) + tk));
+    float border = step(0.12, f.x) * step(f.x, 0.88) * step(0.08, f.y) * step(f.y, 0.92);
+    float mask = glyph * border;
+    vec3 col2 = mix(vec3(1.0, 0.1, 0.55), vec3(0.2, 1.0, 1.0), paint_hash(vec2(row, tick + 5.0)));
+    vec3 code = (mix(vec3(0.05, 1.0, 0.2), col2, act) * (pow(fall, 5.0) + act * 0.5) + vec3(0.75, 1.0, 0.8) * smoothstep(0.93, 1.0, fall)) * mask;
+    float base_fac = mix(0.55, 1.0, smoothstep(0.02, 0.55, pow(dot(base, PAINT_LUMA), 0.6)));
+    vec3 dark = vec3(0.015, 0.035, 0.02) * (base_fac * 1.5);
+    diffuse = dark + code * 0.2;
+    glow = code * 1.2 * base_fac;
+}
+
+// deob:108706-108758: the painted albedo; sets paint_glow
+vec3 paint_apply(vec3 base, vec2 uv, vec2 mask_uv) {
+    vec3 painted = base;
+    paint_glow = vec3(0.0);
+    float t = paint_time;
+    if (paint_shader < 0) {
+        painted = paint_overlay(base, paint_color);
+    } else if (paint_shader == 0) {
+        painted = paint_overlay(base, paint_spectrum(t));
+    } else if (paint_shader == 1) {
+        painted = paint_overlay(base, paint_synth(uv, t));
+    } else if (paint_shader <= 5) {
+        vec3 N = use_flat_normal ? normalize(flat_normal) : normalize(cross(dFdx(world_pos), dFdy(world_pos)));
+        vec3 V = normalize(camera_position - world_pos);
+        if (paint_shader == 5) paint_codefall(base, uv, t, painted, paint_glow);
+        else paint_metal(paint_shader, base, uv, t, N, V, painted, paint_glow);
+    } else {
+        return base; // an unknown shader: unpainted
+    }
+    float k = clamp(paint_intensity, 0.0, 1.0);
+    if (paint_mask_enabled) k *= texture(paint_mask, mask_uv).r;
+    paint_glow *= k;
+    return mix(base, painted, k);
+}
+
 void main() {
     if (clip_enabled && dot(clip_plane.xyz, world_pos) + clip_plane.w < 0.0) discard;
     vec2 scaled_tex_coord;
@@ -439,10 +596,13 @@ void main() {
     if (tex_srgb) texel.rgb = srgb_to_linear(texel.rgb);
     vec4 base_color = texel * object_color;
     if (base_color.a < alpha_test) discard;
-    if (paint_enabled) base_color.rgb = mix(base_color.rgb, paint_color, clamp(paint_intensity, 0.0, 1.0));
+    paint_glow = vec3(0.0);
+    // the shaders and the mask read the geometry uv (TSL uv(), deob:108727 / the paintMaskMap texture node)
+    if (paint_enabled) base_color.rgb = paint_apply(base_color.rgb, scaled_tex_coord, scaled_tex_coord);
 
     emissive_radiance = emissive.rgb * emissive.a;
     if (use_emissive_map) emissive_radiance *= texture(emissive_map, t_tex_coord.xy).rgb;
+    emissive_radiance += paint_glow; // deob:108752-108755: emissiveNode = (emissiveNode || 0) + glow * intensity
 
     vec3 albedo = base_color.rgb;
     bool basic_material = lighting_mode == 0 || (lighting_mode == 1 && unlit) || sprite;
