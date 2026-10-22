@@ -13,8 +13,13 @@ that account (account_unify_e2e's steps 1-3), then, in the menu, opens the Battl
           refusal shows, and the prices read KR.
   silent  the game server never answers "bpdl": the window says "Loading Battle Pass" (v10's text), never
           "Could not load", and the request is sent again after the window's timeout (before: "Could not load" after 15 s)
+  end     the game server ends the round with the account's tmpBPData in its "end" packet ([6], v10.0.3
+          deob L221896): the end screen's Performance tab shows v10's Battle Pass section (#endBPLayout:
+          "Level 4", "+150" gained, "650/1000", the next reward, "Check All Rewards"). Before: the section
+          was not shown on an official server (the packet's [6] was not read)
 Exit 0 when every check passed, 77 when it cannot run.
 """
+import asyncio
 import json
 import os
 import re
@@ -28,7 +33,7 @@ import account_unify_e2e as au  # noqa: E402  (its stubs, sign-in steps and clie
 
 AU_SCRIPT = au.script  # account_unify's steps 1-3 (run_client takes its script from au.script, replaced per mode)
 
-MODES = os.environ.get("KBP_MODES", "pass,silent").split(",")  # KBP_MODES=silent runs one mode
+MODES = os.environ.get("KBP_MODES", "pass,silent,end").split(",")  # KBP_MODES=silent runs one mode
 JOIN_END = 38600  # account_unify's script from here on opens its own windows: this test writes its own
 
 # krunker.io's pass for the account (the game socket's "bpdl"): season 10, 10 levels of 1000 BPP, four rewards
@@ -38,11 +43,28 @@ KBP_PASS = {"id": 9, "season": 10, "name": "Season 10 Battle Pass", "bpp_perleve
             "enddate": "2026-12-31T00:00:00.000Z", "itemdata": "1,0,1,0,2,1,2,0,3,0,3,0,4,1,4,0",
             "leveldata": "", "krdata": "1:50,3:20,4:80", "jnkdata": "2:5"}
 KBP_PROGRESS = {"bpp": 3500, "tier": 0, "items_claimed": ""}  # level 4 (500 of 1000 BP XP), no VIP tier
+# endGame's tmpBPData of the match (v10.0.3 deob L221713-221789): 150 BPP gained (3500 -> 3650: level 4, 650 of
+# 1000), no challenge BPP, 350 left under the day's cap, the next level's reward a VIP KR card (getNextReward)
+KBP_END = {"bpp": 3650, "pbpp": 3500, "gn": 150, "cbp": 0, "bbpp": 0, "unbpp": 150, "rbpp": 350, "mx": 1000, "ml": 10,
+           "id": 9, "re": {"id": 4, "tier": 1, "col": 4, "sk": 0, "kr": 80}}
+END_AFTER_S = 6.0  # the round ends this long after the pass answered (the join's menu steps are over by then)
 
 
 async def answer_pass(send, msg):  # "bpdl" DATA_LOADED then "bppd" SYNC_BP_PROG (v10.0.3 index.js:111344, 111346)
     await send("bpdl", KBP_PASS)
     await send("bppd", KBP_PROGRESS)
+
+
+async def answer_pass_then_end(send, msg):
+    """the pass, then the round's END_GAME with our player's tmpBPData (v10.0.3 deob L221896: [type, didWin, endData,
+    winTeam, endIndex, reward, tmpBPData, items]; the end table row is FFA's endStats + "reward")"""
+    await answer_pass(send, msg)
+
+    async def end_game():
+        await asyncio.sleep(END_AFTER_S)
+        ed = [au.kae.MY_SID, [au.kae.ACCOUNT_NAME, au.kae.ACCOUNT_NAME], 220, 3, 0, "<span style='color:#F8C55C'>+12</span> KR"]
+        await send("end", 0, True, {"ed": ed, "tms": None, "mdls": [], "mts": [], "vo": {}, "modeIndex": 0}, -1, 3, 12, KBP_END, {})
+    asyncio.ensure_future(end_game())
 
 
 async def never_answers(send, msg):  # the game server does not answer "bpdl"
@@ -52,6 +74,15 @@ async def never_answers(send, msg):  # the game server does not answer "bpdl"
 def script(mode, shots):
     """account_unify_e2e's sign-in and official join (steps 1-3), then this mode's menu steps"""
     lines = [ln for ln in AU_SCRIPT().splitlines() if ln.strip() and int(ln.split()[0]) < JOIN_END]
+    if mode == "end":  # the round ends (END_AFTER_S after the pass answered, config.endAnim 5 s later the results): no window
+        lines += ["49000 text @endbp [id=endBPLayout]",  # the Performance tab (GUI.endScreen's default for a player)
+                  "49050 nodes @endbpn [id=endBPLayout]",
+                  "49100 attr @endimg src [id=endBPRewardImg]",
+                  "49200 shot " + shots["end"],
+                  "50500 text @endbp [id=endBPLayout]",
+                  "50600 shot " + shots["end"],
+                  "51000 quit"]
+        return "\n".join(lines) + "\n"
     lines += ["39000 call showWindow 6",  # the Battle Pass (v10's windows[5] = showWindow 6)
               "39700 text @kbp [id=menuWindow]",
               "39720 shot " + shots["window"],
@@ -88,16 +119,33 @@ def run_mode(port, mode):
     stub.players = au.OTHERS
     stub.account_data = [dict(au.KIO_DATA)]
     stub.daily_spin = {"score": 0, "maxScore": 5000, "timeRemaining": 3600000, "claimed": False, "stage": 0}  # 0/5000 (the item is not under test)
-    stub.frame_handlers = {"bpdl": answer_pass if mode == "pass" else never_answers}
+    stub.frame_handlers = {"bpdl": {"pass": answer_pass, "silent": never_answers, "end": answer_pass_then_end}[mode]}
     au.WORK = tempfile.mkdtemp(prefix="kn-kiobp-%s-" % mode, dir=au.CACHE if os.path.isdir(au.CACHE) else None)
-    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("window", "silent", "purchase", "refused", "skip")}
+    shots = {k: os.path.join(au.WORK, "%s-%s.png" % (k, mode)) for k in ("window", "silent", "purchase", "refused", "skip", "end")}
     au.script = lambda: script(mode, shots)
     stub.start()
     try:
         text = au.run_client(port, stub)
     finally:
         stub.stop()
-    (checks_pass if mode == "pass" else checks_silent)(text, stub, shots)
+    {"pass": checks_pass, "silent": checks_silent, "end": checks_end}[mode](text, stub, shots)
+
+
+def checks_end(text, stub, shots):
+    endbp = au.text_of(text, "endbp")
+    n = au.nodes(text, "endbpn")
+    m = re.search(r"\[input_script\] attr t=\d+ @endimg (.*)", text)
+    img = m.group(1) if m else ""
+    print("  [end] Battle Pass section: %r | reward image: %r" % (endbp[:160], img[:80]))
+    au.check("end: the end screen shows v10's Battle Pass section (#endBPLayout) from the \"end\" packet's tmpBPData", n == 1 and "Battle Pass" in endbp, (n, endbp[:200]))
+    au.check("end: the level and the BPP of the match (3650 BPP: Level 4, 650/1000, +150 gained)",
+             "Level 4" in endbp and "+150" in endbp and "650/1000" in endbp, endbp[:200])
+    au.check("end: the next level's reward is a KR card (krunkies.svg) and is locked without the VIP tier",
+             "Next Level Reward" in endbp and "krunkies.svg" in img, (endbp[:200], img[:80]))
+    au.check("end: v10.0.3's \"Check All Rewards\" button (deob L236551), no \"Unlock VIP\"",
+             "Check All Rewards" in endbp and "Unlock VIP" not in endbp, endbp[:200])
+    au.check("end: the end packet reached the client after the pass (bpdl asked, end sent)", "bpdl" in set(stub.ws_frames), sorted(set(stub.ws_frames))[-20:])
+    au.check("end: the end screen screenshot was taken", os.path.exists(shots["end"]), shots["end"])
 
 
 def checks_pass(text, stub, shots):
@@ -126,7 +174,7 @@ def checks_pass(text, stub, shots):
     au.check("pass: no purchase or claim frame reaches krunker.io (xstbp, xstbpl, bpclm, bpclmAll)",
              not sent & {"xstbp", "xstbpl", "bpclm", "bpclmAll"}, sorted(sent)[-20:])
     au.check("pass: the pass was asked of the game socket (bpdl)", "bpdl" in sent, sorted(sent)[-20:])
-    shot_ok = [os.path.exists(p) for k, p in shots.items() if k != "silent"]
+    shot_ok = [os.path.exists(p) for k, p in shots.items() if k not in ("silent", "end")]  # "end" is the end-screen run's
     au.check("pass: the window screenshots were taken", all(shot_ok), shots)
 
 

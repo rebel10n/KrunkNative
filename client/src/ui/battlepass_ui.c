@@ -15,7 +15,8 @@
 // - v7 bug fixed: the window header is i18n "windows.battlepass.header", a key en.js lacks, so
 //   v7 shows "UNLOCALIZED STRING"; KrunkNative uses en.js "battlepass.header" ("Battle Pass").
 // - The end screen's tmpBPData arrives from kn_brain after the stats commit (["bpEnd", data])
-//   instead of with the "end" packet: KrunkNative's game server does not hold the pass.
+//   instead of with the "end" packet: KrunkNative's game server does not hold the pass. (On the
+//   official server it is the "end" packet's [6], forwarded as the same frame: krunker_link.c.)
 // Official krunker.io account (ACCOUNT_BACKEND_KRUNKER, v10.0.3; doc/v10/battlepass.md has the table):
 // - the pass is krunker.io's: "bpdl" / "bppd" over the official game socket (v10.0.3 DATA_LOADED /
 //   SYNC_BP_PROG, index.js:111084-111346). The socket is open only in an official game, so the window
@@ -23,7 +24,10 @@
 // - prices are USD, as v10.0.3 shows them: "$" + tier1price, and "$0.99" a skipped level (levelSkipPrice).
 // - a purchase (xstbp, xstbpl, the gift) and a claim (bpclm, bpclmAll) are never sent to krunker.io from
 //   this client: they are refused at once with v10's purchase error ("Purchase Error") or a message.
-// Nothing here shows a load failure: a pass that has not answered says "Loading Battle Pass" (v10's text).
+// - outside an official game the active backend is krunk.io (account_backend), so the window shows the Box
+//   Office pass (kn_brain's season, migration 0354_season_10) when a krunk.io account is signed in.
+// Nothing here shows a load failure: a pass that has not answered says "Loading Battle Pass" (v10's text), and
+// a "bpdl" unanswered by BP_LOAD_TIMEOUT_S is asked again while the last answer, if any, stays on screen.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -877,19 +881,28 @@ void battlepass_ui_end_clear(void) {
     g_end = NULL;
 }
 
-// tabs.performance.gen(): #endBPLayout when (account && !isCustom && bpData)
+// tabs.performance.gen() (v10.0.3 deob L236511-236561): #endBPLayout when (account && !isCustom && bpData). bpData is
+// the "end" packet's tmpBPData (official: krunker_link.c on_end_game; Box Office: kn_brain's "bpEnd"): {bpp, gn, cbp, mx,
+// ml, lv, re}. The level is v10's level table (L236516-236520: bpp_perlevel mx, itemcount ml, leveldata lv), the shared
+// bp_level; `level >= ml` is complete (L236525-236529: xp = need, 100%). "Check All Rewards" opens the window (L236551).
 int battlepass_ui_end_html(StrBuf *sb) {
     if (!g_end || !active_account()) return 0;
-    const double mx = jnum(g_end, "mx") > 0 ? jnum(g_end, "mx") : 1, ml = jnum(g_end, "ml");
-    const double bpp = jnum(g_end, "bpp");
-    double points = fmod(bpp, mx);
-    double pct = points / mx * 100.0;
-    double level = floor(bpp / mx) + 1.0;
-    const int complete = level >= ml;
+    BattlePass *bp = calloc(1, sizeof *bp);
+    if (!bp) return 0;
+    bp->bpp_per_level = (int) jnum(g_end, "mx");
+    bp->item_count = (int) jnum(g_end, "ml");
+    bp_parse_levels(bp, jstr(g_end, "lv"));
+    int64_t xp = 0;
+    int maxed = 0;
+    int level = bp_level(bp, (int64_t) jnum(g_end, "bpp"), &xp, &maxed);
+    int64_t need = bp_level_need(bp, level);
+    free(bp);
+    const int ml = (int) jnum(g_end, "ml");
+    const int complete = ml > 0 && level >= ml;
+    double pct = need > 0 ? (double) xp / (double) need * 100.0 : 100.0;
     if (complete) {
-        points = mx;
+        xp = need;
         pct = 100.0;
-        level = ml;
     }
     const int vip = battlepass_ui_tier() > 0;
     const char *next_text = complete ? (vip ? "VIP Tier Complete" : "Free Tier Complete") : "Next Level Reward";
@@ -902,11 +915,10 @@ int battlepass_ui_end_html(StrBuf *sb) {
         else img[0] = 0;
     }
     if (complete) snprintf(img, sizeof img, "./img/battlepass/logo_0.png");
-    sb_append(sb, "<div id='endBPLayout'>\n\t\t\t\t\t\t\t\t<div class=\"endSection\" style=\"margin-bottom:10px\">\n\t\t\t\t\t\t\t\t\t<div class='endTitle'>\n\t\t\t\t\t\t\t\t\t\tBattle Pass\n\t\t\t\t\t\t\t\t\t\t<img class=\"endBpInfo\"  onmouseenter=\"playTick()\" onclick=\"playSelect();showWindow(6)\" src=\"./img/frvr-ui/info-icon.svg\">\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t");
-    sb_appendf(sb, "<div id='endBPLvl'>Level %.15g</div>\n\t\t\t\t\t\t\t\t\t<div class=\"blackShad\" id='endBPGained'>+%.15g</div>\n\t\t\t\t\t\t\t\t\t<div class=\"blackShad\" id='endBPProgText'>%.15g/%.15g</div>\n\t\t\t\t\t\t\t\t\t<div class='xpEndBar' style='margin-top: 19px;margin-bottom: 0px;'>\n\t\t\t\t\t\t\t\t\t\t<div class='xpEndBPBarB' style='width: %.15g%%;'></div>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t",
-               level, jnum(g_end, "gn") + jnum(g_end, "cbp"), points, jnum(g_end, "mx"), pct);
-    sb_appendf(sb, "<div id=\"endBPUnlock\" onmouseenter=\"playTick(0.1);\" style=\"display:%s\" onclick=\"playSelect(0.1);windows[5].purchasePop();\">Unlock VIP</div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t",
-               vip ? "none" : "block");
+    sb_append(sb, "<div id='endBPLayout'>\n\t\t\t\t\t\t\t\t<div class=\"endSection\" style=\"margin-bottom:10px\">\n\t\t\t\t\t\t\t\t\t<div class='endTitle'>\n\t\t\t\t\t\t\t\t\t\tBattle Pass\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t");
+    sb_appendf(sb, "<div id='endBPLvl'>Level %d</div>\n\t\t\t\t\t\t\t\t\t<div class=\"blackShad\" id='endBPGained'>+%.15g</div>\n\t\t\t\t\t\t\t\t\t<div class=\"blackShad\" id='endBPProgText'>%lld/%lld</div>\n\t\t\t\t\t\t\t\t\t<div class='xpEndBar' style='margin-top: 19px;margin-bottom: 0px;'>\n\t\t\t\t\t\t\t\t\t\t<div class='xpEndBPBarB' style='width: %.15g%%;'></div>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t",
+               level, jnum(g_end, "gn") + jnum(g_end, "cbp"), (long long) xp, (long long) need, pct);
+    sb_append(sb, "<div id=\"endBPUnlock\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);showWindow(6);\">Check All Rewards</div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t");
     sb_appendf(sb, "<div class=\"endBPNext\">\n\t\t\t\t\t\t\t\t\t<div id='endBPNextText'>%s</div>\n\t\t\t\t\t\t\t\t\t<img id=\"endBPLogo\" src=\"./img/battlepass/logo_white.svg\"%s>\n\t\t\t\t\t\t\t\t\t",
                next_text, complete ? " style=\"visibility:hidden\"" : "");
     sb_appendf(sb, "<div id=\"endBPReward\" style=\"display: %s;\">\n\t\t\t\t\t\t\t\t\t\t<img id=\"endBPRewardImg\" src=\"%s\">\n\t\t\t\t\t\t\t\t\t\t<img id=\"endBPRewardLock\" src=\"./img/battlepass/lock.png\" style=\"display:%s;\">\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>",

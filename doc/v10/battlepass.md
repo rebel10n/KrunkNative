@@ -21,8 +21,15 @@ official game:
   socket; the answers (`bpdl`, `bppd`) reach `kio_frame` -> `battlepass_ui_frame` (client/src/ui/account_ui.c).
 
 **Box Office.** kn_brain's social socket: `bpdl` -> `sh_bp_data` (services/brain/season.c) reads the active
-`battlepasses` row of `accounts.current_season` (services/brain/db_season.c:64; `SEASON_CURRENT` 7,
-shared/include/season.h:25; the only seeded row is season 7, services/db/migrations/*/0108_seasons.sql).
+`battlepasses` row of `accounts.current_season` (services/brain/db_season.c:64; `SEASON_CURRENT` 10,
+shared/include/season.h:25, v10.0.3's `currentSeason` L19368; the seeded rows are season 7
+(services/db/migrations/*/0108_seasons.sql) and season 10 (0354_season_10.sql, "The Season 10 row" below).
+
+Outside an official game the active backend is krunk.io's (client/src/ui/account_ui.c `account_backend`: the
+official backend only while an official game socket is open), so a signed-in krunk.io account sees the Box
+Office pass there; inside an official game, krunker.io's. v10 itself has no such state: it auto-joins a lobby
+and its one socket queues `bpdl` until it opens (L244465-244466: `windows[5].data || io.send("bpdl")` at the
+login).
 
 ## Frames (v10.0.3 socket labels and their handlers)
 
@@ -62,22 +69,36 @@ krunker.io server sends, what Box Office sends, and what KN shows on the officia
 | 14 | Reward card CLAIM (`.bpClaimB`, `claimItem`) | L248109-248117 (`bpclm`), L248119-248121 (`bpclmAll`), answer L248052 (`claimItemRes`) | card `id` | `bpclm` [id] / `bpclmAll` | a claim changes the krunker.io account: not sent; the message "Claiming a reward is not sent to krunker.io from Krunker Box Office." | `bpclm` / `bpclmAll` -> the brain | REFUSED (message popup; the card stays claimable) |
 | 15 | Claimed mark (`.bpClaimed`) and `items_claimed` | L247992; L248103 | `BP.items_claimed` | `bppd` | `bppd` `items_claimed` | progress row | shown |
 | 16 | "No Battle Pass Found" | L248039 (`dataStatus == 2 && BP`) | `bpdl` null | `bpdl` | `bpdl` null (the season has no pass) | no active `battlepasses` row for the season | shown only for an answer with no pass |
-| 17 | "Loading Battle Pass" | L248039 (`dataStatus` 0 or 1) | none | `bpdl` sent | not yet answered: no game session open | not yet answered | shown; never a failure text (KN removed "Could not load the Battle Pass") |
+| 17 | "Loading Battle Pass" | L248039 (`dataStatus` 0 or 1) | none | `bpdl` sent | not yet answered: no game session open | not yet answered | shown; never a failure text (KN removed "Could not load the Battle Pass"); a `bpdl` unanswered for `BP_LOAD_TIMEOUT_S` (15 s) is asked again and the last answer, if any, stays on screen (`battlepass_ui_tick`) |
 | 18 | Challenges tab (daily and weekly cards, `.chalCard`) | L248029 (text), L247825 (`genDailyCard`) | `account.activeChallenges` (`a` slot 38); `chg` / `uchp` | `a`, `chg`, `uchp` | the account's list | the brain's list | the account's list (`account_challenges`) |
-| 19 | End-of-game pass section (`#endBPLayout`, "Unlock VIP") | L236530-236558 (`tmpBPData`) | `tmpBPData` (`bpp`, `cbp`, `re`) | the game server's end data in v10 | `bpEnd` (brain) | not held by the KN official game server: shows nothing (a gap) |
+| 19 | End-of-game pass section (`#endBPLayout`: "Battle Pass", "Level n", "+gained", "xp/need", "Check All Rewards" -> `showWindow(6)`, "Next Level Reward" / "VIP Tier Complete" / "Free Tier Complete" with the next card's image and the VIP lock) | L236511-236561 (`tabs.performance.gen`, shown when `account && !isCustom && bpData`); the level is the level table L236516-236529 | `bpData` = the player's `tmpBPData` (`bpp`, `gn`, `cbp`, `mx`, `ml`, `lv`, `re`; built L221713-221789) | the `end` packet's [6] (`END_GAME` L221896; `tabs.performance.bpData` L236689) | the `end` packet's [6] | `bpEnd` (brain, after the stats commit) | shown: krunker_link.c `on_end_game` forwards [6] as the same `bpEnd` frame (`kio_frame` -> `battlepass_ui_frame`), `battlepass_ui_end_html` renders v10.0.3's markup |
 | 20 | Sidebar item ("Battlepass", level) | L162042-164095 (`$battlepassData`) | `account.BP` | `bpdl` / `bppd` | same | same | out of this window's scope (v10_rewards.c `bp_item_update`) |
+
+## The Season 10 row (migration 0354_season_10)
+
+v10.0.3 plays season 10 (`currentSeason` L19368) and the pass reaches its client only over the game socket
+(`bpdl`): no static file or public API carries it (the bundle's api.krunker.io paths have no pass route; the
+store data gapi `/data/skins` only flags the items). The row holds what is defined publicly and leaves the rest
+empty; nothing in it is invented:
+
+| Field | Value | Source |
+|---|---|---|
+| season, name | 10, "Season 10 Battle Pass" | L19368; the badges' wording "Season 10 Battle Pass" (ids 28-30, L116167-116185) |
+| itemcount | 80 | the official 10.0.3 changelog ("Season 10 Battlepass with 80 levels and 30 new items", doc/v10/changelog-10.0.3.md), badge 30 "Complete the Season 10 Battle Pass" |
+| level costs | levels 61-70: 1400, 71-80: 1600; 1-60 sum to 25000 (400 a level, 500 for 51-60) | the badges' BPP sums at level boundaries: level 60 at 25000 (badge 28), level 70 at 39000 (badge 29), complete at 55000 (badge 30); the split within 1-60 is not published (KN's choice) |
+| the 30 items | store indexes 7963-7992 (`seas` 10, `limT` "Battle Pass", `battlepass`) | assets/skins.json (gapi `/data/skins`); listed in the migration |
+| itemdata, krdata, jnkdata | empty | which level and track each item sits on, and the KR / junk cards, come only with `bpdl`: unsourced, so the cards render empty (as v10 renders a card with no reward) |
+| prices | 1200 KR the VIP tier, 200 KR a level | KN's KR prices (0108); v10's are USD (tier1price from `bpdl`; levelSkipPrice "0.99" L19421) |
+| startdate, enddate | the migration's run time, + 180 days | not published; the Season 7 row's convention |
 
 ## Gaps and open points
 
-- **Official pass outside a game.** The menu has no krunker.io socket in v10.0.3 (L261682 is the only
-  `connect`), so the pass shows `Loading Battle Pass` until an official game session opens. Once it is open, the
-  account's answer triggers `bpdl` and the pass appears (tested: `client/tests/kio_battlepass_e2e.py`). A live
-  check of the menu-time behaviour on krunker.io was not made (no production requests).
+- **Official pass outside a game.** v10.0.3 has no menu without a socket (L261682 is the only `connect`; the
+  queued `bpdl` goes out when it opens), so the state has no v10 text. KN shows the Box Office pass there (the
+  active backend is krunk.io's) and krunker.io's inside the game (tested: `client/tests/kio_battlepass_e2e.py`,
+  `server/tests/kio_spin_battlepass_e2e.py` mode `menu`).
 - **Official purchases and claims are not sent.** They spend real money (Xsolla / Steam) or change the krunker.io
   account. The window refuses them with v10's own purchase error or a message, at once.
-- **Box Office "Battle Pass not found".** kn_brain answers `bpdl` with the season's row. The seeded row (migration
-  0108) is season 7 and `SEASON_CURRENT` is 7, but v10.0.3 is season 10 (doc/v10/changelog-10.0.3.md: "Season 10
-  Battlepass with 80 levels"). So a Box Office server with no season-10 row answers `null`, and the window says
-  "No Battle Pass Found". Seeding a season-10 row is a content decision and is not done here.
-- **End screen.** The official server's end-of-game pass section (row 19) has no source in KN's official client.
+- **Season 10 rewards.** The cards of the Box Office Season 10 pass are empty until a content decision places the
+  30 known items (table above); the official pass shows krunker.io's own cards.
 - The v10.0.3 window's `bpCountdownTimer` / `bpEndsIn` timers (L248359) match the port's countdown.

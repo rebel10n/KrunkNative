@@ -281,6 +281,7 @@ static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_NETWORK_DATA, &rates, sizeof(rates));
 }
 static void on_account(KrunkerLink *l, const KrunkerFrame *f);
+static void account_emit(KrunkerLink *l, const char *name, const KrunkerValue *args, uint32_t argc); // below (account_frame)
 static void on_update_account(KrunkerLink *l, const KrunkerFrame *f);
 static void on_balances(KrunkerLink *l, const KrunkerFrame *f);
 static void on_challenge_rewards(KrunkerLink *l, const KrunkerFrame *f);
@@ -1516,6 +1517,12 @@ static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
     const uint8_t end_type = (uint8_t) (type == 1);
     emit_ext(l, NET_EXT_KN_END_TYPE, &end_type, sizeof(end_type));
     emit(l, NET_PACKET_END, &end, sizeof(end));
+    // [6] the account's tmpBPData (v10.0.3 deob L221896: per player, L221713-221789: {bpp, pbpp, gn, cbp, bbpp, unbpp,
+    // rbpp, mx, ml, lv, id, re}): the end screen's Battle Pass section (endScreen.tabs.performance.bpData, L236689),
+    // handed to the main thread as kn_brain hands its own ("bpEnd", battlepass_ui_frame). A player with no account
+    // gets null / {} (type 2 and the broadcast's null, L221935): nothing to show
+    const KrunkerValue *bp = arg(f, 6);
+    if (krunker_is(bp, KRUNKER_MAP) && bp->len) account_emit(l, "bpEnd", bp, 1);
 
     me.mode_id = l->mode;
     me.winner_team = win_team > 0 ? win_team : -1;
@@ -2574,24 +2581,32 @@ static int account_scoped(const KrunkerFrame *f, uint32_t *argc) {
     return 0;
 }
 
-static void account_frame(KrunkerLink *l, const KrunkerFrame *f) {
-    uint32_t argc = 0;
-    if (!l->io.account_frame || !account_scoped(f, &argc)) return;
-    KrunkerBuf args = {0};
-    const KrunkerValue arr = KRUNKER_V_ARRAY(f->args, argc);
-    if (krunker_value_to_json(&arr, &args) == KRUNKER_PROTO_OK && args.len >= 2) {
-        // ["name", args...]: the name, then the args array without its brackets
-        const size_t n = f->name_len + args.len + 8;
+// ["name", args...] to io.account_frame: the name, then the args array without its brackets
+static void account_emit(KrunkerLink *l, const char *name, const KrunkerValue *args, const uint32_t argc) {
+    if (!l->io.account_frame) return;
+    KrunkerBuf buf = {0};
+    const KrunkerValue arr = KRUNKER_V_ARRAY((KrunkerValue *) args, argc);
+    if (krunker_value_to_json(&arr, &buf) == KRUNKER_PROTO_OK && buf.len >= 2) {
+        const size_t name_len = strlen(name), n = name_len + buf.len + 8;
         char *json = malloc(n);
         if (json) {
-            const int inner = (int) args.len - 2;
-            const int w = snprintf(json, n, "[\"%.*s\"%s%.*s]", (int) f->name_len, f->name, inner > 0 ? "," : "", inner > 0 ? inner : 0,
-                                   (const char *) args.data + 1);
+            const int inner = (int) buf.len - 2;
+            const int w = snprintf(json, n, "[\"%s\"%s%.*s]", name, inner > 0 ? "," : "", inner > 0 ? inner : 0, (const char *) buf.data + 1);
             if (w > 0) l->io.account_frame(l->io.user, json, (size_t) w);
             free(json);
         }
     }
-    krunker_buf_free(&args);
+    krunker_buf_free(&buf);
+}
+
+static void account_frame(KrunkerLink *l, const KrunkerFrame *f) {
+    uint32_t argc = 0;
+    if (!l->io.account_frame || !account_scoped(f, &argc)) return;
+    char name[32];
+    if (f->name_len >= sizeof(name)) return;
+    memcpy(name, f->name, f->name_len);
+    name[f->name_len] = 0;
+    account_emit(l, name, f->args, argc);
 }
 
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {

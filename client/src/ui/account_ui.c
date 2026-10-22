@@ -524,7 +524,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
         g_kio.gen++;
     } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
         return; // (the battle pass / clan / challenge answers belong to the krunker.io account's windows)
-    } else if (!strcmp(label, "bpdl") || !strcmp(label, "bppd")) {
+    } else if (!strcmp(label, "bpdl") || !strcmp(label, "bppd") || !strcmp(label, "bpEnd")) { // the pass, its progress, the end's tmpBPData ("end" [6], krunker_link.c)
         battlepass_ui_frame(label, frame);
     } else if (!strcmp(label, "cln")) {
         clan_ui_frame(frame);
