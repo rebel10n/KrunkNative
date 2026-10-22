@@ -4473,9 +4473,14 @@ static void hud_round_page(Client *client) {
     comp_ui_round(client); // f1904(Game.isComp): the comp lobby's menu or the default one
     hud_ui_match_gate(client); // v10 INIT isRanked: the Invite button, the spectate button, the comp box's title
     if (!client->game.config.comp) ranked_ui_left_match(); // a round outside a comp lobby: no ranked match any more
-    // io_startGame: `if (chatChannel != 1 && Game.isComp) switchChat(chatSwitch)`: a comp lobby
-    // (ranked) starts on the team channel
-    if (client->game.config.comp && g_chat_channel != CHAT_CHANNEL_TEAM && client->game.mode && client->game.mode->config.teams) hud_switch_chat();
+    // v10.0.3 INIT (deob-10.0.3.js:257141): `if (chatChannel == 1 && !mode.teams) switchChat(chatSwitch)`: the Team
+    // channel is forced back to Global at the INIT itself (spawned or not: the end screen, the menu), not only on
+    // the next HUD pass of a living player (client_hud_html_tick keeps its check for a mode changed under a live page)
+    hud_chat_channel_check(client);
+    // v10.0.3 INIT (deob-10.0.3.js:257144): `if (chatChannel != 1 && Game.isComp) switchChat(chatSwitch)`: a comp
+    // lobby (ranked) starts on the team channel. No team test here: switchChat itself keeps Global outside a team
+    // mode (and still plays its select sound), so a comp game in a non-team mode calls it like v10 does.
+    if (client->game.config.comp && g_chat_channel != CHAT_CHANNEL_TEAM) hud_switch_chat();
 }
 
 void hud_ui_on_init(Client *client) {

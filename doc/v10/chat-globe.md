@@ -47,6 +47,22 @@ lifetime.
 - Receiving: a line on another channel is hidden (its row's `display`), not dropped; the rows keep
   their `data-tab`.
 - In a non-team mode every line is channel -1 (shown on every channel).
+- The server's side (the v10.0.3 bundle holds no chat handler: its embedded sandbox server has none for
+  "ct", and the official server is closed), from Krunker v7.1.4's server, `server/index.ts:2065`
+  `sendPlayerChat(io, room, game, sender, requestedTeamChannel, message)`, called by its "ct" handler
+  (`:4306`, `getChatTeam(args)`: 1 is the team channel, anything else Global):
+  - `teamChannel = requested === 1 && !!game.mode?.teams`; the line goes out as
+    `"ch", channel, name, escapeHtml(msg), 0, null, chatNameColor, accountId`.
+  - Global: `game.broadcast("ch", ...)` to the room.
+  - Team: `io.send` to each room member whose player has the sender's team (`target.team === sender.team`),
+    the sender included; a member without a player (a spectator) gets nothing.
+  - A socket without a player sends nothing at all (`if (!player) return;` before the call).
+  So the enemy team never receives a team line; the client-side `data-tab` filter only picks what the
+  viewer looks at among the lines it did receive.
+
+Nothing else hangs on the channel: no placeholder change on `#chatInput` ("Enter Message" stays), no
+tooltip, no prefix or colour on a team line (the row is `name: msg` on either channel), no key binding
+(`switchChat(` is called from the onclick and the two INIT lines only), no clan or party channel.
 
 ## Our port (before this change)
 
@@ -71,10 +87,52 @@ lifetime.
 - In a non-team mode (Free for All and most maps) a click keeps Global and shows nothing, in v10 as well.
   Only the team modes show a change.
 
-## Change in this pass
+## Change in the first pass (commit 6f169309)
 
 - `hud_switch_chat` and `hud_chat_channel_check` play `select_0` at 0.1 (`audio_play`), as v10's
   `switchChat` does on every call.
 - No other behaviour changed: the toggle, the row filter, the system line, the channel sent, and the
   lack of persistence already match v10.0.3.
 - Test: `client/tests/chat_globe_e2e.py` (target `chat-globe-test`).
+
+## Second pass: the channel end to end (both server types, the official client)
+
+What was already there and verified against the references above:
+
+- Server (`server/src/net.c` `net_handle_chat`): the team channel only in team modes, a team line to the
+  sender's team only (`net_teammates`: both have a player, same team); the sandbox server
+  (`client/src/net/offline.c`) runs the same core. v7 peers get `NET_PACKET_CHAT_V7` ("ch" with the
+  channel, `shared/include/social_v7.h`), older peers the v3 line.
+- Client receive (`client/src/net/game_events.c` `NET_PACKET_CHAT_V7` -> `client/src/ui/hud_social.c`
+  `social_on_chat_v7` -> `hud_ui_add_chat_channel`): the row's `data-tab` is the packet's channel (-1
+  outside team modes), hidden while the viewer's channel differs, as v10's row builder.
+- Voice: `client/src/voice.c` sends `chatChannel`; the server relays a team clip to the team only
+  (`net.c` `team_only`), the client plays a clip whose channel is -1 or its own (v10 deob :243845).
+- The official client on a Box Office server (`server/bridge/v10_bridge.c:642-657`): `["ct", 1, text]`
+  becomes `NET_PACKET_CHAT_V7` channel 1, a bare `["ct", text]` Global; outgoing lines keep their channel
+  (`server/bridge/v10_translate.c` `v10_map_chat_v7`, the v3 line as -1).
+- Box Office on an official server (`client/src/net/krunker_link.c:695-720`, `:3094-3110`): "ch"'s tab
+  reaches the HUD as the row's channel; our line goes out as `["ct", channel, text]`.
+
+What differed from v10.0.3 and changed:
+
+- The forced Global of an INIT outside a team mode (deob :257141) ran only on the next HUD pass of a
+  living player (`client_hud_html_tick`), so a round that rotated to Free for All while the player sat on
+  the end screen or the menu kept the globe on Team. `hud_round_page` (the INIT) now calls
+  `hud_chat_channel_check` first, then the comp check, in v10's order.
+- The comp start (deob :257144) tested `mode.teams` before calling `hud_switch_chat`; v10 calls
+  `switchChat` whenever `chatChannel != 1 && Game.isComp` and lets switchChat keep Global outside a
+  team mode (with its sound). The test is gone.
+- Server: a team-channel line from a connection without a player (a spectator, or one still in the menu
+  before its first spawn) was sent as a Global line to everyone, the enemy team included. It now stays on
+  the team channel and reaches the sender alone (no teammates). The v7.1.4 reference drops every chat line
+  of such a socket; Box Office keeps letting spectators talk on Global, so only the team line differs, and
+  the sender sees it echoed instead of lost (documented at `net_handle_chat`).
+
+Test (`make chat-globe-test`, `client/tests/chat_globe_e2e.py`): the offline A-C runs, then D / E on a
+`server_bin --mode tdm` with two protocol peers on the two teams, a spectator peer and the headless
+client: the client's team line reaches its teammate (channel 1) and never the enemy or the spectator,
+the enemy's team line never reaches the client's page, the spectator's team line reaches nobody else,
+the enemy's Global line reaches everyone (a hidden tab-0 row under Team), the globe's glyph is its
+`data-tab`, the placeholder never changes, and the server console's `mode ffa` forces the globe back to
+Global at the INIT with the select sound and no channel line.

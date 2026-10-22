@@ -459,8 +459,8 @@ crash-capture-test: build ## Crash capture: a forced NULL dereference writes a r
 raw-mouse-test: build ## Raw mouse motion has one switch (Controls > Raw Mouse Input): on by default, off and on by click, stored Raw Input migrates once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/raw_mouse_e2e.py $(DEBUG_DIR)
 
-chat-globe-test: build ## The chat's globe icon (#chatSwitch, v10.0.3 switchChat): a click toggles Global / Team only in a team mode, plays select_0, shows the team line, sends on the chosen channel, stores nothing (headless; EGL_DEVICE=)
-	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/chat_globe_e2e.py $(DEBUG_DIR)
+chat-globe-test: build ## The chat's globe icon (#chatSwitch, v10.0.3 switchChat): a click toggles Global / Team only in a team mode, plays select_0, shows the team line, sends on the chosen channel, stores nothing; on a server_bin TDM lobby a team line reaches the teammate only, a spectator's nobody else, an FFA round's INIT forces Global (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/chat_globe_e2e.py $(DEBUG_DIR)
 
 bhop-setting-test: build ## The bhop mode is one setting (Settings > Game > Gameplay > Bhop Mode): the row shows five modes, the movement follows it, the bhop key moves the row, it survives a restart, the v3.1.1 "bhop" key migrates (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1200 $(PYTHON) -I client/tests/bhop_setting_e2e.py $(DEBUG_DIR)

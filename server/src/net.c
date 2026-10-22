@@ -1631,9 +1631,14 @@ static void net_send_player_chat(ClientConnection *to, const ClientConnection *f
 }
 
 // io_ct: burst limit (closing the socket like the v3.1.1 server, code 4008),
-// 70 characters, blank lines dropped, then "ch" to everyone. v7.1.4 sendPlayerChat: the team
-// channel only exists in team modes, and its lines go to the sender's team only (the sender
-// included); v3 "ct" is the global channel.
+// 70 characters, blank lines dropped, then "ch" to everyone. v7.1.4 sendPlayerChat (server/index.ts:2065,
+// the reference for v10's "ct" [channel, msg], deob-10.0.3.js:257277): the team channel only exists in team
+// modes, and its lines go to the sender's team only (the sender included, teammates = the room members whose
+// player has the sender's team: no spectator); v3 "ct" is the global channel.
+// A connection without a player (a spectator, or one still in the menu before its first spawn) has no team: its
+// team-channel line stays on the team channel and reaches the sender alone, never the other team. (The reference
+// drops every chat line of such a socket; KrunkNative lets spectators talk on Global, so only the team line
+// differs, and the sender sees it echoed instead of lost.)
 static int net_handle_chat(ClientConnection *client, const char *payload, const size_t length, const int requested_channel) {
     if (!net_chat_allow(&client->chat_limiter, (float) net_time())) {
         server_log("Kicking %s: chat rate limit exceeded", client->name);
@@ -1650,12 +1655,13 @@ static int net_handle_chat(ClientConnection *client, const char *payload, const 
         return 1;
     }
 
-    const int channel = requested_channel == CHAT_CHANNEL_TEAM && net_team_mode() && client->player ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL;
-    server_log("[chat%s] %s: %s", channel == CHAT_CHANNEL_TEAM ? " team" : "", client->name, text);
+    const int channel = requested_channel == CHAT_CHANNEL_TEAM && net_team_mode() ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL;
+    server_log("[chat%s] %s: %s", channel == CHAT_CHANNEL_TEAM ? (client->player ? " team" : " team, no team: sender only") : "",
+               client->name, text);
     ks_server_on_chat(client, text); // KrunkScript onChatMessage (not for "/" commands)
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *to = &g_server->clients[i];
-        if (channel == CHAT_CHANNEL_TEAM && !net_teammates(client, to)) continue;
+        if (channel == CHAT_CHANNEL_TEAM && to != client && !net_teammates(client, to)) continue;
         net_send_player_chat(to, client, channel, text);
     }
     return 1;
