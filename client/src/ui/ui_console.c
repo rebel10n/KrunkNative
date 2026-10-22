@@ -588,7 +588,7 @@ static void print_official_details(const Client *client, const int humans, const
 
 // printServerDetails
 static void print_server_details(void) {
-    const Client *client = con_client();
+    Client *client = con_client();
     if (!client) return;
     const Game *game = &client->game;
     int humans = 0, active = 0;
@@ -600,13 +600,19 @@ static void print_server_details(void) {
     }
 #ifdef __EMSCRIPTEN__
     const int has_socket = !client->offline;
+    const int live = client->net_connected; // the web build's descriptor is a fake fd while the WebSocket is open (net_web.c)
 #else
     const int has_socket = !client->offline && client->net_thread_running;
+    // OPEN needs the transport's socket: net_socket is -1 once the session ended, whatever the connect state says
+    pthread_mutex_lock(&client->net_lock);
+    const int transport_socket = client->net_socket;
+    pthread_mutex_unlock(&client->net_lock);
+    const int live = client->net_connected && transport_socket >= 0;
 #endif
-    const char *status = client->offline ? "offline" : client->net_connected ? "connected" : has_socket ? "disconnected" : "no-socket";
-    const char *state = client->offline || !has_socket ? "NO_SOCKET" : client->net_connected ? "OPEN" : "CONNECTING";
+    const char *status = client->offline ? "offline" : live ? "connected" : has_socket ? "disconnected" : "no-socket";
+    const char *state = client->offline || !has_socket ? "NO_SOCKET" : live ? "OPEN" : "CONNECTING";
     char socket_id[24] = "-1"; // io.socketId (-1 until the server assigns one; singleplayer too)
-    if (client->net_connected && !client->offline && client->me) snprintf(socket_id, sizeof(socket_id), "%d", client->me->uid);
+    if (live && !client->offline && client->me) snprintf(socket_id, sizeof(socket_id), "%d", client->me->uid);
     appendf(COL_INFO, "Connection: %s | socket %s | state %s", status, socket_id, state);
     if (!client->offline && krunker_net_session_game()[0]) {
         print_official_details(client, humans, active);

@@ -2601,14 +2601,13 @@ static int connection_dropped(char *error, const size_t error_size) {
         return 0;
     }
     if (!g_brain_mode || g_pin == PIN_DIRECT || backend_available() != 1) {
-        // the transport reconnects on its own, with its backoff (a dead server is not hammered);
-        // only a held one (it had a ticket) is asked to
-        printf("[mm] connection lost (%s): reconnecting\n", error);
-        if (g_rejoin != REJOIN_DIRECT || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
-        g_rejoin = REJOIN_DIRECT;
-        g_rejoin_at = g_client->net_hold_retry ? now + REJOIN_DROP_DELAY : 0.0;
+        // A direct server (or no matchmaker): the lost session is the Lost Connection screen, with its Retry
+        // (the transport holds it, events.c). No timed reconnect here: a dead server would keep the loading
+        // spinner for the whole REJOIN_WINDOW, the limbo this screen replaces.
+        printf("[mm] connection lost (%s): not reconnecting on its own\n", error);
+        rejoin_cancel();
         menu_update_instructions();
-        return 1;
+        return 0;
     }
     if (g_rejoin != REJOIN_DROP || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
     g_rejoin = REJOIN_DROP;

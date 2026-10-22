@@ -664,6 +664,14 @@ typedef enum {
 // Until then every failure is NET_STATUS_FAILED but not final: the page keeps its loading spinner.
 #define NET_RETRY_BUDGET 5
 
+// Dead-session deadlines of the native transports (net.c TCP, net_udp.c knet). The server pings every
+// NET_PING_INTERVAL (5 s), so a session silent for NET_SESSION_IDLE_SECONDS is gone: a TCP edge that
+// accepts the connection after its game server died never closes it, and nothing else would end it. A
+// session whose join (the server's INIT) does not come within NET_JOIN_TIMEOUT_SECONDS is a dead lobby.
+// Both end the session as a lost connection ("Lost connection to the server"), never a loading screen.
+#define NET_SESSION_IDLE_SECONDS 15
+#define NET_JOIN_TIMEOUT_SECONDS 20
+
 typedef struct {
     GLFWwindow *window;
     Camera camera;

@@ -105,11 +105,12 @@ void on_client_socket_disconnect(Client *client) {
     // A matchmade session (a join ticket) is rejoined with a fresh ticket by servers_ui.c
     // (servers_ui_connection_lost): the transport holds so the old ticket is not resent meanwhile.
     char message[sizeof(client->net_status_error)];
-    snprintf(message, sizeof(message), "Disconnected: %s", drop[0] ? drop : "the connection was closed");
-    pthread_mutex_lock(&client->net_lock);
-    const int ticket = client->net_join.client_key[0] != 0;
-    pthread_mutex_unlock(&client->net_lock);
-    if (ticket && !client->offline && !client->net_should_quit) client->net_hold_retry = 1;
+    if (drop[0] && !strncmp(drop, "Lost connection", 15)) snprintf(message, sizeof(message), "%s", drop); // a deadline / timeout's own text
+    else snprintf(message, sizeof(message), "Lost connection to the server: %s", drop[0] ? drop : "the connection was closed");
+    // A lost session is a dead connection: held, so the transport does not retry behind the loading spinner. The
+    // page shows the Lost Connection screen with its Retry (menu_poll_connection); a matchmade session's rejoin
+    // (servers_ui.c) still takes a fresh ticket.
+    if (!client->offline && !client->net_should_quit) client->net_hold_retry = 1;
     net_set_status_code(client, NET_STATUS_FAILED, message, "000001");
     pthread_mutex_lock(&client->net_lock);
     client->net_status_dropped = 1;

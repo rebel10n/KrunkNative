@@ -40,6 +40,7 @@ static struct {
     KnetConn conn;
     KnetSim sim;
     Client *client;
+    int joined; // the server's INIT came on this session (cu_deliver): the join deadline (client.h)
 } g_cu = {.lock = PTHREAD_MUTEX_INITIALIZER, .fd = -1};
 
 static double cu_now(void) {
@@ -111,6 +112,7 @@ static void cu_deliver(void *user, const uint8_t type, const uint8_t *payload, c
     packet.length = length;
     if (length) memcpy(packet.payload, payload, length);
     client_net_log_packet("<=", packet.type, packet.payload, packet.length);
+    if (packet.type == NET_PACKET_INIT) g_cu.joined = 1;
     // "pi" -> "po" from the receive path, like net_poll() (Krunker answers in onmessage)
     if (packet.type == NET_PACKET_PING && packet.length == sizeof(NetPingPacket)) {
         client_net_log_packet("=>", NET_PACKET_PONG, packet.payload, packet.length);
@@ -234,10 +236,12 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
         return handshake;
     }
 
+    const double session_started = cu_now();
     pthread_mutex_lock(&g_cu.lock);
-    knet_conn_init(&g_cu.conn, token, cu_now());
+    knet_conn_init(&g_cu.conn, token, session_started);
     knet_sim_from_env(&g_cu.sim, ((uint64_t) token << 32) | cu_random32());
     g_cu.active = 1;
+    g_cu.joined = 0;
     pthread_mutex_unlock(&g_cu.lock);
     net_set_virtual_send(net_udp_client_send);
     if (knet_sim_active(&g_cu.sim)) {
@@ -273,7 +277,11 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
         } else if (knet_conn_timed_out(&g_cu.conn, now)) {
             closed = 1;
             why = "timed out";
-            client_net_set_drop(client, "timeout", 0, "no data from the server for %.0f s", KNET_TIMEOUT);
+            client_net_set_drop(client, "timeout", 0, "Lost connection to the server (no data for %.0f s)", KNET_TIMEOUT);
+        } else if (!g_cu.joined && now - session_started >= NET_JOIN_TIMEOUT_SECONDS) {
+            closed = 1;
+            why = "no join answer";
+            client_net_set_drop(client, "join", 0, "Lost connection to the server (no answer to the join within %d s)", NET_JOIN_TIMEOUT_SECONDS);
         } else if (g_cu.conn.failed) {
             closed = 1;
             why = "transport overflow";

@@ -88,7 +88,14 @@ static void net_drop_from_errno(Client *client, const int error) {
     else client_net_set_drop(client, "error", 0, "connection error (%s)", text);
 }
 
-int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
+// What a TCP session has seen, for its dead-session deadlines (client.h NET_SESSION_IDLE_SECONDS,
+// NET_JOIN_TIMEOUT_SECONDS): the last bytes from the server (its pings included) and whether its INIT came.
+typedef struct {
+    time_t last_data;
+    int joined;
+} NetSessionWatch;
+
+int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer, NetSessionWatch *watch) {
     char buffer[NET_BUFFER_SIZE];
     int read;
 
@@ -103,6 +110,8 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
         return 0;
     }
 
+    watch->last_data = time(NULL);
+
     // recv() never returns more than the buffer has room for, so a large read cannot overflow it.
     if (!net_buffer_push(read_buffer, buffer, (size_t) read)) {
         client_net_set_drop(client, "protocol", 0, "receive buffer overflow");
@@ -114,6 +123,7 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
 
     while ((result = net_buffer_next(read_buffer, &packet)) > 0) {
         client_net_log_packet("<=", packet.type, packet.payload, packet.length);
+        if (packet.type == NET_PACKET_INIT) watch->joined = 1;
         // "pi" -> "po" right here: Krunker answers from the socket's onmessage, not the render
         // loop. Through the per-frame queue the RTT included the wait for the next frame and,
         // on connect, the whole map load (the first sample read ~4 s and the EWMA took a
@@ -355,9 +365,21 @@ void *net_main(void *user_data) {
 
         NetPacketBuffer read_buffer = {};
         const time_t session_started = time(NULL);
+        NetSessionWatch watch = {.last_data = session_started, .joined = 0};
 
         while (!client->net_should_quit) {
-            if (!net_poll(client, client_socket, &read_buffer)) break;
+            if (!net_poll(client, client_socket, &read_buffer, &watch)) break;
+            // A dead session ends here, not on a loading screen: no INIT in time (a lobby that never
+            // answers the join), or nothing from the server for a while (its pings stopped).
+            const time_t now = time(NULL);
+            if (!watch.joined && now - session_started >= NET_JOIN_TIMEOUT_SECONDS) {
+                client_net_set_drop(client, "join", 0, "Lost connection to the server (no answer to the join within %d s)", NET_JOIN_TIMEOUT_SECONDS);
+                break;
+            }
+            if (now - watch.last_data >= NET_SESSION_IDLE_SECONDS) {
+                client_net_set_drop(client, "timeout", 0, "Lost connection to the server (no data for %d s)", NET_SESSION_IDLE_SECONDS);
+                break;
+            }
             net_wait_readable(client_socket, 50); // 50 ms: net_should_quit / switch is still honoured promptly
         }
 
