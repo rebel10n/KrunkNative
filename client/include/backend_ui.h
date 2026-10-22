@@ -113,7 +113,9 @@ int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 
 const struct BattlePass *battlepass_ui_pass(void); // windows[5].data parsed (NULL none)
 int64_t battlepass_ui_bpp(void);            // account.BP.bpp (0 without)
 void battlepass_ui_request(void);           // v10: "bpdl" once an account is signed in (no-op when asked, unless it failed: asked again)
-int  battlepass_ui_status(void);            // windows[5].dataStatus: 0 not asked, 1 loading, 2 answered, 3 failed
+int  battlepass_ui_status(void);            // Strike's view: 0 not asked, 1 loading, 2 answered, 3 failed (no answer in
+                                            // BATTLEPASS_LOAD_TIMEOUT_S, or refused): the Rewards and Missions tabs say so, with Retry
+#define BATTLEPASS_LOAD_TIMEOUT_S 15         // a load with no answer by then has failed (Strike's tabs; the window asks again)
 void battlepass_ui_account_answered(void);  // the account's "a": an ask still in flight goes out again
 void battlepass_ui_tick(void);              // once per frame: a "bpdl" unanswered for BP_LOAD_TIMEOUT_S fails (the window says so)
 const char *battlepass_ui_claimed(void);     // account.BP.items_claimed ("id,id,...", "" none)

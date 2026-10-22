@@ -37,6 +37,7 @@
 #include <ui_logic.h>
 #include <i18n.h>
 #include <backend_ui.h>
+#include <time.h>
 #include <hud_modes.h>
 #include <spectate.h>
 #include <modes.h>
@@ -63,6 +64,7 @@ static struct {
     cJSON *econ_missions;       // the answer
     cJSON *econ_cards;          // its daily missions in the challenge shape mission_card() reads
     int econ_missions_asked;    // a request is out / answered for the current state
+    int64_t econ_missions_asked_s; // when that request was sent: BATTLEPASS_LOAD_TIMEOUT_S ends it
     int econ_missions_failed;   // the last answer was a refusal (or none): the tab says so instead of "Loading", and a tab tap asks again
     unsigned econ_seq;          // bumped on every answer (the Missions tab re-fills)
     int track_asked;            // the game config (accountProgression) was asked
@@ -279,6 +281,9 @@ static void on_missions(void *user, const int status, const cJSON *data, const c
 static void econ_missions_ask(void) {
     if (T.econ_missions_asked || !econ_on()) return;
     T.econ_missions_asked = strike_econ_get_missions(on_missions, NULL);
+    T.econ_missions_asked_s = (int64_t) time(NULL);
+    // sent: the tab is loading again (a Retry's re-ask clears the failed text); not sent (no brain socket): the tab says so now, with Retry
+    T.econ_missions_failed = !T.econ_missions_asked;
 }
 
 // Se.bpData && account.BP; a Strike account: its missions answer, unlocked
@@ -310,7 +315,8 @@ static int daily_missions(const cJSON **out, const int max) {
 
 static unsigned long missions_signature(void) {
     const cJSON *list = missions_list(), *c;
-    unsigned long sig = (unsigned long) (uintptr_t) list * 31u + (unsigned long) bp_has_data() + T.econ_seq * 977u;
+    unsigned long sig = (unsigned long) (uintptr_t) list * 31u + (unsigned long) bp_has_data() + T.econ_seq * 977u
+                        + (unsigned long) T.econ_missions_failed * 7919u;
     cJSON_ArrayForEach(c, list) sig = sig * 131u + (unsigned long) (jnum(c, "PV") * 7 + jnum(c, "PT") * 3 + jnum(c, "TR") / 60000.0);
     return sig;
 }
@@ -530,10 +536,16 @@ static void bp_tab(const HtmlElem root, const int tab) {
         const StrikeVar v[] = {{"message", I18N("kn.strike.rewardsFailed", "Couldn't load the Battle Pass.")}, {"action", "bp-tab:0"},
                                {"retry", I18N("kn.retry", "Retry")}};
         html = strike_template_part("MISSION_TAB_SCREEN", "failed", v, 3);
-    } else if (tab == 0 && battlepass_ui_status() == 2) { // answered with no pass: the window's own text
+    } else if (tab == 1 && econ_on() && T.econ_missions_failed) { // refused / no answer in time: the tab says so, with Retry (bp-tab:1 asks again)
+        const StrikeVar v[] = {{"message", I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry.")}, {"action", "bp-tab:1"},
+                               {"retry", I18N("kn.retry", "Retry")}};
+        html = strike_template_part("MISSION_TAB_SCREEN", "failed", v, 3);
+    } else if (tab == 1 && !econ_on() && battlepass_ui_status() == 3) { // a Krunker account's missions come with its pass: the same failure
+        const StrikeVar v[] = {{"message", I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry.")}, {"action", "bp-tab:1"},
+                               {"retry", I18N("kn.retry", "Retry")}};
+        html = strike_template_part("MISSION_TAB_SCREEN", "failed", v, 3);
+    } else if ((tab == 0 || !econ_on()) && battlepass_ui_status() == 2) { // answered with no pass: the window's own text (a Strike account's Missions tab follows its own request)
         html = strdup(I18N("kn.strike.noBattlePass", "No Battle Pass Found"));
-    } else if (econ_on() && T.econ_missions_failed) { // refused / no answer: the tab says so (a tap on it asks again)
-        html = strdup(I18N("kn.strike.missionsFailed", "Couldn't load your missions. Open this tab again to retry."));
     } else if (!econ_on() && !active_account()) {
         // signed out: nothing will load for either tab, so the tab says so (the sign-in copy of the Krunker
         // market, the FRVR page has none for this state); never "Loading" for good
@@ -1162,7 +1174,7 @@ int strike_meta_action(const char *a) {
         const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);
         const int t = atoi(a + 7);
         if (t == 1 || T.econ_missions_failed) T.econ_missions_asked = 0; // the Missions tab asks for the account's missions on every visit; a failed load is asked again on any tab
-        if (t == 0) battlepass_ui_request(); // a "bpdl" that failed (status 3) goes out again; one in flight or answered is not re-sent
+        if (t == 0 || (t == 1 && !econ_on())) battlepass_ui_request(); // a "bpdl" that failed (status 3) goes out again; one in flight or answered is not re-sent
         if (root && (t == 0 || t == 1)) bp_tab(root, t);
         return 1;
     }
@@ -1234,6 +1246,11 @@ void strike_meta_econ_changed(void) {
 
 void strike_meta_tick(Client *client) {
     T.client = client;
+    // a Strike account's missions request with no answer by the Battle Pass's deadline has failed: the tab says so, with Retry
+    if (T.econ_missions_asked && !T.econ_missions && !T.econ_missions_failed && (int64_t) time(NULL) - T.econ_missions_asked_s >= BATTLEPASS_LOAD_TIMEOUT_S) {
+        printf("[strike] missions: no answer in %d s\n", BATTLEPASS_LOAD_TIMEOUT_S);
+        T.econ_missions_failed = 1;
+    }
     // the Rewards tab follows the Battle Pass data (bpdl / bppd / bpclmr), the Missions tab
     // account.activeMissions (Mithril redraws on every change)
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_BATTLEPASS);

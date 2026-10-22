@@ -929,6 +929,10 @@ strike-play-test: build ## Krunker Strike's PLAY with no connection: the press i
 strike-signedout-test: build ## Krunker Strike's Battle Pass for a signed-out guest: the Rewards and Missions tabs say so, never Loading Rewards / Loading Missions (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/strike_signedout_e2e.py $(DEBUG_DIR)
 
+.PHONY: strike-missions-timeout-test
+strike-missions-timeout-test: build ## Krunker Strike's Missions for a signed-in account whose answer never comes: after the Battle Pass's 15 s deadline the tab says it failed, with Retry (local kn_brain behind a proxy that holds the request; headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/strike_missions_timeout_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-strike-test
 console-strike-test: build ## Dev console on Krunker Strike's page: opens styled, runs a typed command and reads its output (also the default page) (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I client/tests/console_strike_e2e.py $(DEBUG_DIR)

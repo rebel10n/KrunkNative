@@ -43,7 +43,8 @@ static BattlePass *g_bp;      // its parse (bp_parse_items)
 static int g_bp_status;       // windows[5].dataStatus: 0 not asked (or not sent yet), 1 in flight, 2 answered
 static int64_t g_bp_asked_s;  // when the "bpdl" in flight was sent (BP_LOAD_TIMEOUT_S ends it)
 static int64_t g_bp_retry_s;  // a "bpdl" the socket refused waits until this (unix s); the account's answer ends the wait
-#define BP_LOAD_TIMEOUT_S 15  // a "bpdl" with no answer by then is asked again: the window keeps saying "Loading Battle Pass"
+static int g_bp_failed;      // Strike's view: the last ask had no answer by BP_LOAD_TIMEOUT_S, or was refused (the next ask clears it)
+#define BP_LOAD_TIMEOUT_S BATTLEPASS_LOAD_TIMEOUT_S // a "bpdl" with no answer by then is asked again: the window keeps saying "Loading Battle Pass"
 #define BP_RETRY_S 2          // a refused "bpdl" is tried again after this (the per-frame callers do not spam the socket)
 static double g_price_usd;    // tier1price of the official pass (USD; v10.0.3 "$" + tier1price)
 static int g_has_progress;    // account.BP set (bppd)
@@ -90,6 +91,7 @@ void battlepass_ui_reset(void) {
     free(g_bp);
     g_bp = NULL;
     g_bp_status = 0;
+    g_bp_failed = 0;
     g_bp_retry_s = 0;
     g_price_usd = 0;
     g_has_progress = 0;
@@ -145,12 +147,14 @@ static void request_data(void) {
     if (g_bp_status == 1 || g_bp_status == 2) return; // in flight, or answered (an answer with no pass is an answer)
     if ((int64_t) time(NULL) < g_bp_retry_s) return;  // a refused ask waits (BP_RETRY_S)
     g_bp_status = 1;
+    g_bp_failed = 0;
     g_bp_asked_s = (int64_t) time(NULL);
     // io.send("bpdl"). v10 queues the send until its socket opens; here a frame that cannot go now (no socket yet,
     // or krunker.io's game socket is not open) is not a failure: it is asked again by the account's answer
     // (battlepass_ui_account_answered), else after BP_RETRY_S
     if (!backend_social_send_text("[\"bpdl\"]")) {
         g_bp_status = 0;
+        g_bp_failed = 1;
         g_bp_retry_s = (int64_t) time(NULL) + BP_RETRY_S;
     }
 }
@@ -161,7 +165,10 @@ void battlepass_ui_request(void) {
 }
 
 // windows[5].dataStatus for the Strike Rewards tab: 0 not asked, 1 loading, 2 answered, 3 failed (no answer / not sent)
-int battlepass_ui_status(void) { return g_bp_status; }
+int battlepass_ui_status(void) {
+    if (g_bp_status == 2) return 2;
+    return g_bp_failed ? 3 : g_bp_status;
+}
 
 // The account's own answer ("a" on the game socket): a request still in flight may have gone out before it
 // (the socket's login), so it is asked again. Not the per-frame callers' (bp_item_update): their asks wait out the timeout.
@@ -177,6 +184,7 @@ void battlepass_ui_tick(void) {
     if (g_bp_status != 1 || (int64_t) time(NULL) - g_bp_asked_s < BP_LOAD_TIMEOUT_S) return;
     fprintf(stderr, "[battlepass] no answer to bpdl in %d s: asking again\n", BP_LOAD_TIMEOUT_S);
     g_bp_status = 0;
+    g_bp_failed = 1; // Strike's tabs say it failed (a window that asks again clears it)
     g_bp_retry_s = 0;
     // redraw (and so ask again) only when the pass's own status text is on screen (the window may be another one, or closed)
     if (html_dom_query(html_dom_by_id("menuWindow"), ".bpStatusText")) menu_show_window(BP_WINDOW, 1);
