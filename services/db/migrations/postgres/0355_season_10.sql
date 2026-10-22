@@ -1,4 +1,4 @@
--- 0354_season_10: Krunker v10.0.3's Season 10 and its Battle Pass (doc/v10/battlepass.md "Season 10").
+-- 0355_season_10: Krunker v10.0.3's Season 10 and its Battle Pass (doc/v10/battlepass.md "Season 10").
 -- Owner: season-system. Read by kn_brain's db_season.c (P_BP_DATA: the active battlepasses row of
 -- accounts.current_season; config.example.json sets 10, shared/include/season.h SEASON_CURRENT 10).
 --

@@ -1,4 +1,4 @@
--- 0354_season_10 (MySQL/MariaDB): same rows as postgres/0354_season_10 (see there for the sources).
+-- 0355_season_10 (MySQL/MariaDB): same rows as postgres/0355_season_10 (see there for the sources).
 INSERT IGNORE INTO seasons (season, name) VALUES (10, 'Season 10');
 
 INSERT IGNORE INTO battlepasses (bp_id, season, name, descr, bpp_perlevel, itemcount, tier1_name, tier1_price_kr, skip_price_kr, itemdata, leveldata, krdata, jnkdata, startdate, enddate)

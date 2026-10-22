@@ -25,7 +25,7 @@
 // - a purchase (xstbp, xstbpl, the gift) and a claim (bpclm, bpclmAll) are never sent to krunker.io from
 //   this client: they are refused at once with v10's purchase error ("Purchase Error") or a message.
 // - outside an official game the active backend is krunk.io (account_backend), so the window shows the Box
-//   Office pass (kn_brain's season, migration 0354_season_10) when a krunk.io account is signed in.
+//   Office pass (kn_brain's season, migration 0355_season_10) when a krunk.io account is signed in.
 // Nothing here shows a load failure: a pass that has not answered says "Loading Battle Pass" (v10's text), and
 // a "bpdl" unanswered by BP_LOAD_TIMEOUT_S is asked again while the last answer, if any, stays on screen.
 #include <backend.h>
