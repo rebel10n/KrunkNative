@@ -558,6 +558,9 @@ int main(int argc, char **argv) {
     glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // a MAX blend equation left by a client draw (canvas2d's `lighten`): the backend draws with
+    // FUNC_ADD and gives the equation back, or the console would be lighter than its colour
+    glBlendEquation(GL_MAX);
 
     GlBackend *b = glb_create();
     if (!b) {
@@ -609,7 +612,9 @@ int main(int argc, char **argv) {
     glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
-    const int state_ok = blend_src == GL_SRC_ALPHA && blend_dst == GL_ONE_MINUS_SRC_ALPHA && vao == 0 && fb == (GLint) fbo &&
+    GLint blend_eq = 0;
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &blend_eq);
+    const int state_ok = blend_src == GL_SRC_ALPHA && blend_dst == GL_ONE_MINUS_SRC_ALPHA && blend_eq == GL_MAX && vao == 0 && fb == (GLint) fbo &&
                          !glIsEnabled(GL_SCISSOR_TEST) && !glIsEnabled(GL_STENCIL_TEST) && glIsEnabled(GL_CULL_FACE) && !glIsEnabled(GL_DEPTH_TEST);
     printf("%s  GL state after glb_end (blend %x/%x vao %d fbo %d)\n", state_ok ? "PASS" : "FAIL", blend_src, blend_dst, vao, fb);
     if (!state_ok) g_failures++;

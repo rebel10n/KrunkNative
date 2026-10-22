@@ -179,6 +179,7 @@ struct GlBackend {
     float scale;
     GLint window_fbo;
     int cull_was_on;
+    GLint blend_eq_rgb, blend_eq_a; /* the client's blend equation, given back at glb_end */
     Target target;
 
     Mat2D xform;
@@ -2266,6 +2267,8 @@ void glb_begin(GlBackend *b, int fb_w, int fb_h, float device_scale) {
 
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &b->window_fbo);
     b->cull_was_on = glIsEnabled(GL_CULL_FACE);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &b->blend_eq_rgb);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &b->blend_eq_a);
 
     glUseProgram(b->program);
     g_active_shader = b->program;
@@ -2290,6 +2293,7 @@ void glb_begin(GlBackend *b, int fb_w, int fb_h, float device_scale) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD); // a client's MIN / MAX (canvas `lighten`) would change every blend
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
@@ -2480,6 +2484,7 @@ void glb_end(GlBackend *b) {
     glColorMask(1, 1, 1, 1);
     if (b->cull_was_on) glEnable(GL_CULL_FACE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendEquationSeparate((GLenum) b->blend_eq_rgb, (GLenum) b->blend_eq_a);
     glBindVertexArray(0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
