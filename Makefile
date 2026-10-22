@@ -733,6 +733,11 @@ krunker-official-e2e: build ## Official krunker.io mode (krunker_net.h) against 
 krunker-account-e2e: build ## The krunker.io account backend (krunker_account.h) through v10's one account UI: in-game sign-in (Turnstile, 2FA form), krunker.io Quick Join, refresh, accessToken / at=, sign out, against local stubs
 	timeout 400 $(PYTHON) -I server/tests/krunker_account_e2e.py $(DEBUG_DIR)
 
+krunker-challenges-e2e: build ## The Challenges window on both backends (v10_rewards.c): Box Office's brain lists every official map, an official krunker.io account's activeChallenges are its list, no Loading or error text on either (krunker.io stub, kn_brain on sqlite, headless)
+	timeout 900 $(PYTHON) -I server/tests/krunker_challenges_e2e.py $(DEBUG_DIR)
+
+.PHONY: krunker-challenges-e2e
+
 .PHONY: account-unify-e2e
 account-unify-e2e: build ## One account UI, two backends (backend_ui.h active_account()): krunk.io DEV + official guest, official signed in, switching back (header, player list, dev actions, alt manager, login modal), kn_brain + krunker.io stubs
 	timeout 400 $(PYTHON) -I server/tests/account_unify_e2e.py $(DEBUG_DIR)

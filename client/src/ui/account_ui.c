@@ -385,6 +385,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
         g_kio.id = cJSON_IsNumber(id) ? id->valueint : 0;
         copy_str(g_kio.name, sizeof(g_kio.name), name);
         g_kio.gen++;
+        menu_rerender_if_open(33); // the open Challenges window: its list is account.activeChallenges (v10_rewards.c)
         if (account_backend() == ACCOUNT_BACKEND_KRUNKER) battlepass_ui_account_answered(); // io_accountResponse: windows[5].data || send("bpdl")
         else printf("[account] (the krunker.io account's data arrived while %s is the active backend)\n", "krunk.io");
         printf("[account] the krunker.io account's data from the game server: %s, %.0f KR, %d skins\n", name, obj_num("player_funds"),
@@ -392,6 +393,7 @@ static void kio_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "ua")) {
         kio_set_data(cJSON_GetArrayItem(frame, 1));
         g_kio.gen++;
+        menu_rerender_if_open(33); // the open Challenges window (activeChallenges arrives in "ua" slot 38)
     } else if (!strcmp(label, "uf")) { // [kr, junk]
         const cJSON *kr = cJSON_GetArrayItem(frame, 1), *jnk = cJSON_GetArrayItem(frame, 2);
         if (cJSON_IsNumber(kr)) obj_set("player_funds", kr);

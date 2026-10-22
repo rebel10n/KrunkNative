@@ -607,12 +607,12 @@ static void cards(StrBuf *sb, const char *type, const char *field, const int val
 // section never shows (as in v10 between events).
 static char *gen_challenges(const AccountInfo *acc) {
     if (acc->level < MIN_CHAL_LEVEL) return NULL; // the "for Challenges" requirement card (account_ui.c)
+    // The account's own list: krunker.io's account.activeChallenges on the official type, kn_brain's
+    // "chgL" on Box Office. Until it arrives, or when it cannot come, the page is the layout of an empty
+    // list (every catalogue map, no Loading and no error text); the answer re-renders the window.
     const cJSON *list = account_challenges();
-    if (!list) {
-        account_challenges_request();
-        return strdup(I18N("generic.loading.simple", "Loading"));
-    }
-    if (cJSON_GetArraySize(list) == 0) return strdup("<span style=\"color: #fff;\">No active challenges.</span>");
+    if (!list) account_challenges_request();
+    else if (cJSON_GetArraySize(list) == 0) return strdup("<span style=\"color: #fff;\">No active challenges.</span>");
     StrBuf sb = {0};
     int done, total;
     char title[128];
@@ -646,19 +646,22 @@ static char *gen_challenges(const AccountInfo *acc) {
     }
     // home: Map Challenges
     count("map", NULL, 0, &done, &total);
-    header(&sb, NULL, "hed_1", 0, "Map Challenges", done, total, 0, done >= total, NULL);
+    header(&sb, NULL, "hed_1", 0, "Map Challenges", done, total, 0, list && done >= total, NULL);
     sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
+    // Every map of the catalogue, in mapIndex order, on both server types. v10 draws the cards of the maps
+    // that have challenges; krunker.io's list has challenges for every map (v10.0.3 "Complete all"), so
+    // on the official type this is v10's grid, and no map can go missing on Box Office either.
     for (int i = 0; i < MAP_CATALOG_OFFICIAL_COUNT; i++) { // i: Krunker's mapIndex (the challenge's id)
         const int catalog = map_catalog_official_index(i);
         const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
         int d, t;
         count("map", "mp", i, &d, &t);
-        if (!m || !t) continue;
+        if (!m) continue;
         char path[64], url[256];
         ui_img_url(map_catalog_thumb(m, path, sizeof(path)), url, sizeof(url));
         sb_appendf(&sb, "<div class=\"challMapCrd%s\" style=\"background-image:url(%s)\" onmouseenter=\"playTick()\" "
                         "onclick=\"windows[32].openChallengeCat('map',%d);\"><div class=\"challMapCvr\"></div><div class=\"challMapName blackShad\">",
-                   d >= t ? " chalCardH" : "", url, i);
+                   t && d >= t ? " chalCardH" : "", url, i);
         cap_first(&sb, m->name);
         sb_appendf(&sb, "</div><div class=\"challMapPrg\">%d<span style=\"color:#fff;\">/%d</span></div></div>", d, t);
     }
@@ -672,7 +675,7 @@ static char *gen_challenges(const AccountInfo *acc) {
         sb_append(&sb, "</div>");
     }
     count("weapon", NULL, 0, &done, &total);
-    header(&sb, NULL, "hed_2", 30, "Weapon Challenges", done, total, 0, done >= total, NULL);
+    header(&sb, NULL, "hed_2", 30, "Weapon Challenges", done, total, 0, list && done >= total, NULL);
     sb_append(&sb, "<div style=\"margin-top:10px;text-align:center;\">");
     for (int i = 0; i < WEAPON_COUNT; i++) {
         const Weapon *w = rules_weapon(i);
