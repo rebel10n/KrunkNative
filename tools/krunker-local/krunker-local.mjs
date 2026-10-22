@@ -499,6 +499,17 @@ function profileSeed() {
   return `(() => { try { for (const [k, v] of Object.entries(${JSON.stringify(keys)})) if (localStorage.getItem(k) === null) localStorage.setItem(k, v); } catch (e) {} })();`;
 }
 
+// The class the playable check plays. The official page keeps the class last picked in localStorage "classindex": the class
+// control's handler (selectClass(i), the card's onclick) writes it, and the page restores it at start. Hunter is class 1
+// (shared/src/rules/v10/classes_v10.c: Triggerman 0, Hunter 1; primary loadout Sniper Rifle, weapon 0). A guest cannot click its
+// card: the official client shows it locked ("Register to unlock", no onclick). So the check sets the saved pick before the page
+// starts, as an earlier pick of a player would be: the page restores it (the menu shows Hunter), its first enter carries class 1,
+// and the server spawns the Hunter's loadout. Only when the key is absent, so a page that holds a pick keeps it.
+const HUNTER_CLASS = 1;
+function classSeed(index) {
+  return `(() => { try { if (localStorage.getItem("classindex") === null) localStorage.setItem("classindex", "${index}"); } catch (e) {} })();`;
+}
+
 const CONSENT_OPEN_JS =`(() => { const e = document.getElementById("consentBlock"); if (!e) return false; const s = getComputedStyle(e); return s.display !== "none" && s.visibility !== "hidden" && e.getBoundingClientRect().height > 0; })()`;
 const CLICK_PLAY_JS = `(() => {
   const els = [...document.querySelectorAll("button, [role=button], .button, a, div")]
@@ -852,7 +863,7 @@ const PLAY_SNAP_JS = `(() => {
       players: list.length, localActive: !!(p && p.active === true),
       controls: !!(g.controls && g.controls.enabled === true), menuUp, onMenu: !!ui && ui.classList.contains("onMenu"),
       local: p ? { x: r1(p.x), y: r1(p.y), z: r1(p.z), yaw: r3(p.xDire), pitch: r3(p.yDire), loadoutIndex: p.loadoutIndex,
-        ammo: Array.isArray(p.ammos) ? p.ammos[p.loadoutIndex] : null } : null };
+        ammo: Array.isArray(p.ammos) ? p.ammos[p.loadoutIndex] : null, cls: p.classIndex, weapon: p.weapon ? p.weapon.name : null } : null };
     out.inRound = out.game.localActive && !out.game.menuUp && !out.game.onMenu && !out.endUI && !out.game.initInProgress && !out.game.gameClosed && !out.game.isDestroyed;
     out.shotHooks = { physObj: !!(fx && fx.__knHooked), shoot: !!(pl && pl.__knShootHooked) };
   }
@@ -1026,7 +1037,7 @@ export async function playable(opts = {}) {
   const report = { check: "playable", build: "v10.0.3", url: cfg.localUrl, startedAt: new Date(t0).toISOString(),
     roundSeconds: Number(process.env.KN_ROUND_SECONDS) || null, phase: "start", joined: false, clicked: null, consent: false,
     spawnClicks: 0, spawnClickAt: [], seeks: 0, samples: [], input: null, framesWindow: null, end: null, nextRound: null,
-    exceptionCount: 0, exceptions: [], consoleErrors: [], failed: [], httpErrors: [], shots: [] };
+    exceptionCount: 0, exceptions: [], consoleErrors: [], failed: [], httpErrors: [], shots: [], classPick: null };
   let phase = "start";
   // the second player (KN_PLAYABLE_PLAYERS, default 2; 1 runs the single-player check alone): runPeer fills report.peer. The
   // first page's socket frames are decoded here (frameIn): what it received, by label, with the add, leave, tracer and position
@@ -1140,6 +1151,7 @@ export async function playable(opts = {}) {
     // the page keeps its anonymous session and preferences in localStorage (profileSeed); a fresh profile has none
     await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: RAF_HOOK });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: classSeed(HUNTER_CLASS) });
     await send("Page.navigate", { url: cfg.localUrl });
     log("page loading");
     if (PEERS) {
@@ -1160,6 +1172,11 @@ export async function playable(opts = {}) {
     // then enterGame) and the page stays on its menu without them.
     report.clicked = report.seeks ? `skipped: the page sought on its own (${report.seeks} seek before the click)` : await evalJS(CLICK_PLAY_JS);
     log(`quick play: ${report.clicked}`);
+    // the class the join plays (classSeed): the saved pick the page restored, and the menu's label for it (the Hunter's name)
+    report.classPick = { index: HUNTER_CLASS,
+      saved: await evalJS(`(() => { try { return localStorage.getItem("classindex"); } catch (e) { return null; } })()`),
+      menu: await evalJS(`(document.getElementById("menuClassName") || {}).innerText || null`) };
+    log(`class: saved ${report.classPick.saved}, menu ${report.classPick.menu}`);
 
     // join: the spawn prompt ("CLICK TO PLAY") is clicked as a user would; the round is in when the local player is active
     phase = "join";
@@ -1177,6 +1194,20 @@ export async function playable(opts = {}) {
     if (report.joined) {
       phase = "input";
       const before = await snap();
+      // The page draws a shot's tracer (the call with the trail argument, which playable-check.mjs assertion i reads) only when the
+      // shot's first ray hits something at least 20 units away (the official shoot(): the hit distance >= 20 gates the tracer).
+      // A spawn can face a wall closer than that, so the Sniper fires from the spawn point, turning the view between shots (about
+      // 1.2 rad per step), until one shot is logged with trail 1 (at most six shots, two and a half seconds apart; the Sniper
+      // reloads after three). Every logged shot is still checked against the rule (playable-check.mjs assertion i).
+      let mx = 640;
+      for (let k = 0; k < 6; k++) {
+        const s = await snap();
+        if ((s.shotLog || []).some((e) => e.weapon === "Sniper Rifle" && e.trail === 1)) break;
+        await mouse("mousePressed", 640, 360); await sleep(120); await mouse("mouseReleased", 640, 360);
+        await sleep(2500);
+        for (let i = 0; i < 10; i++) { mx += 56; await mouse("mouseMoved", mx, 360); await sleep(40); }
+        if (mx > 1200) { mx = 640; await mouse("mouseMoved", mx, 360); await sleep(40); }
+      }
       await key("keyDown", "w", "KeyW", 87);
       await sleep(500);
       for (let i = 0; i < 8; i++) { await mouse("mouseMoved", 640 + i * 12, 360); await sleep(60); }
@@ -1222,9 +1253,18 @@ export async function playable(opts = {}) {
     phase = "next";
     if (report.end) {
       const nextDeadline = Date.now() + (report.joined ? PLAY.nextMs : PLAY.failedMs);
+      let canvasPresses = 0, lastCanvas = 0;
       while (Date.now() < nextDeadline) {
         const s = await tick();
         if (promptUp(s) && Date.now() - lastClick > 3000) { lastClick = Date.now(); await clickSpawn(); }
+        // The spawn press started the round's loading, but the menu closed without the local player active (the page waits for
+        // a press on the game, as the first press does: pointer lock, then the enter). A press on the canvas, up to three times,
+        // four seconds apart, six seconds or more after the spawn press.
+        if (lastClick && Date.now() - lastClick > 6000 && !s.inRound && !s.menuUp && !s.endUI && !s.clickToPlay && canvasPresses < 3 && Date.now() - lastCanvas > 4000) {
+          lastCanvas = Date.now(); canvasPresses++;
+          await mouse("mouseMoved", 640, 360); await mouse("mousePressed", 640, 360); await sleep(80); await mouse("mouseReleased", 640, 360);
+          log(`next round: local player not active after the spawn press; press on the canvas ${canvasPresses}`);
+        }
         if (s.inRound && !s.endUI && s.bridge.init > report.end.bridgeInit) { report.nextRound = { t: s.t, bridgeInit: s.bridge.init }; break; }
       }
     }

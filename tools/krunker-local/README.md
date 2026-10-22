@@ -40,7 +40,7 @@ from the report that `krunker-local.mjs playable` writes:
 | f | the round ends: `#endUI` (the end screen) is shown |
 | g | the next round starts: a new `init` on the socket, the local player active, the end screen gone |
 | h | page exceptions at or under `KN_PLAYABLE_MAX_EXC` (default 0); the first is listed with its location |
-| i | the local shot's tracer has the official trail value: the page's `physObj` for the local shooter gets `weapon.trail ? 1 : 0`, or 2 for `weapon.trailChrg` on a full charge (the Krunker v10 `shoot()` rule) |
+| i | the tracer trail: the local Sniper Rifle shot's `physObj` gets trail 1 (the page's `physObj` for the local shooter; every local shot gets the rule's value, `weapon.trail ? 1 : 0`, 2 for `weapon.trailChrg` on a full charge), and the second player's assault-rifle tracers reach the first page with trail 0 (its socket's tracer `9`, index 6) |
 
 With `KN_PLAYABLE_PLAYERS=2` (the default) a second official client joins the same round, in its own headless
 Chromium (its own profile, so its own anonymous account) and its own bridge session (its own WebSocket and TCP
@@ -71,6 +71,16 @@ screenshots are in `shots/playable-*.png`. The local shot is counted from the pa
 the shooter, and its trail argument is assertion (i): the Krunker v10 rule on the page's weapon (1 for `weapon.trail`, 2 for
 `weapon.trailChrg` on a full charge, else 0). A round needs
 the game server's round length, so the run takes about 5 minutes.
+
+The run plays the Hunter (class 1, Sniper Rifle primary). A guest cannot pick it: the official client locks the Hunter's card
+("Register to unlock", no onclick). The class control writes the pick to localStorage `classindex` (`selectClass(i)`), and the
+page restores it at start, so `krunker-local.mjs` (`classSeed`) sets that pick before the page starts. The report's
+`classPick` gives the saved value and the menu's label; the first enter carries class 1, and the server spawns the Hunter's
+loadout. A living player is not respawned by a later enter, so the pick has to be in place before the first spawn.
+
+The page draws a shot's tracer (the physObj call that carries the trail) only when the shot's first ray hits something at least
+20 units away. The input window therefore fires the Sniper from the spawn, turning the view between shots, until one shot is
+logged with trail 1.
 
 The report's `bridgeCounts` are what the bridge sent (its trace's `-> label` lines, this run's file). They are
 not rounds: `rounds` (bridge_counts.mjs `pageRounds`) gives, per INIT and END the bridge sent, the samples in

@@ -101,7 +101,8 @@ export function peerRecord(f, label, args, t) {
   } else if (label === "2" && typeof a0 === "number") {
     push("two", { t, uid: a0 });
   } else if (label === "9" && Array.isArray(a0) && typeof a0[0] === "number") {
-    push("nine", { t, shooter: a0[0], origin: { x: a0[7], y: a0[8], height: a0[9], z: a0[10] } });
+    // the tracer's trail (index 6: the server's official trail of the shot, shot.trail in v10Translate.c) and its origin
+    push("nine", { t, shooter: a0[0], trail: a0[6], origin: { x: a0[7], y: a0[8], height: a0[9], z: a0[10] } });
   } else if (label === "k" && Array.isArray(a0)) {
     for (const r of a0) if (Array.isArray(r) && typeof r[0] === "number") push("k", { t, uid: r[0], x: r[1], y: r[2], z: r[3] });
   }

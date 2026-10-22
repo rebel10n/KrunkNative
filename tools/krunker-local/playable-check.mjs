@@ -100,11 +100,14 @@ add("h", `exceptions at or under ${max}`, exCount <= max,
   `${exCount} exceptions` + (first ? `; first (${first.phase}, ${sec(first.t)}): ${first.text} at ${first.where}` +
     (first.frames && first.frames.length ? ` [${first.frames.join(" < ")}]` : "") : ""));
 
-// (i) the local shot's tracer carries the official trail value: the page's physObj call for the local shooter gets the
-// trail argument of the Krunker v10 shoot() rule (game.js: trail = weapon.trail ? 1 : 0, then 2 when the shot is a full
-// charge and the weapon has trailChrg). The expected value is that rule on the page's own weapon flags and full-charge
-// flag, so a shot's trail is checked against the weapon the page holds (the Sniper Rifle draws 1, a full-charge Charge
-// Rifle 2, a weapon with no trail 0). The page draws its own shot: the trail it carries is the page's, not the wire's.
+// (i) the shot tracers carry the official trail value (the Krunker v10 shoot() rule: game.js trail = weapon.trail ? 1 : 0, then 2
+// for a full charge on a weapon with trailChrg). Three parts, each read from the page:
+//  - the local Sniper shot (the Hunter's primary, classindex 1: the run's class, see krunker-local.mjs classSeed): the page's
+//    physObj call for the local shooter gets trail 1, and every local shot gets the rule's value for the weapon the page holds;
+//  - the assault rifle 0: the second player (Triggerman, its assault rifle) shoots twice in the first player's frames window,
+//    and the first page's socket gets those shots as tracers "9" whose trail (index 6) is 0 (the server's trail on the wire);
+//    not run with no second player (KN_PLAYABLE_PLAYERS=1), and then only the local part decides (i).
+// The page draws its own shot: the trail its physObj call carries is the page's, not the wire's.
 const trailWant = (e) => (e.flags && e.flags.trailChrg && e.full ? 2 : e.flags && e.flags.trail ? 1 : 0);
 let iOk = false;
 let iDetail = "no local shot in the input window (the join did not reach a round, or no shot was logged)";
@@ -115,11 +118,19 @@ if (r.input && r.input.before && r.input.after) {
   const log = n > 0 ? (a.shotLog || []).slice(-n) : [];
   const hooked = !!(a.shotHooks && a.shotHooks.physObj);
   const bad = log.filter((e) => e.trail !== trailWant(e));
-  iOk = n > 0 && log.length === n && bad.length === 0 && hooked;
-  iDetail = `${n} local shot(s), trail ${log.map((e) => `${e.trail} (${e.weapon}${e.flags && e.flags.trailChrg ? `, ${e.full ? "full charge" : "normal"}` : ""}, expected ${trailWant(e)})`).join("; ") || "none"}` +
-    (hooked ? "" : "; the page's physObj hook is not installed");
+  const sniper = log.filter((e) => e.weapon === "Sniper Rifle" && e.trail === 1);
+  const localOk = n > 0 && log.length === n && bad.length === 0 && hooked && sniper.length > 0;
+  const localDetail = `${n} local shot(s), ${log.map((e) => `${e.weapon} trail ${e.trail}${e.flags && e.flags.trailChrg ? ` (${e.full ? "full charge" : "normal"})` : ""}, expected ${trailWant(e)}`).join("; ") || "none"}` +
+    (sniper.length ? "" : "; no local Sniper Rifle shot with trail 1") + (hooked ? "" : "; the page's physObj hook is not installed");
+  const peer = r.peer && r.peer.enabled ? r.peer : null;
+  const ar = peer && peer.uid != null && peer.frames1 ? (peer.frames1.nine || []).filter((x) => x.shooter === peer.uid) : null;
+  const arOk = ar === null || (ar.length > 0 && ar.every((x) => x.trail === 0));
+  const arDetail = ar === null ? "assault rifle 0 not run (no second player)"
+    : `assault rifle 0: second player's tracers on the first page, trails ${ar.map((x) => x.trail).join(", ") || "none"}`;
+  iOk = localOk && arOk;
+  iDetail = `${localDetail}; ${arDetail}`;
 }
-add("i", "the local shot's tracer has the official trail value", iOk, iDetail);
+add("i", "the Sniper's tracer has trail 1 and the assault rifle's has 0", iOk, iDetail);
 
 // (2a)-(2d): the second player, when the run had one (peer_frames.mjs peerRows; no rows for a single-player run)
 for (const x of peerRows(r, max)) rows.push(x);

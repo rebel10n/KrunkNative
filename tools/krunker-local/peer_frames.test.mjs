@@ -41,7 +41,7 @@ test("the records the rows read: add, leave, tracer and positions", () => {
   peerRecord(f, "k", [[[12, 10, 2, 20], [7, 1, 2, 3]], 10, 0], 400);
   assert.deepEqual(f.zero, [{ t: 100, sid: "12", uid: 12 }]);
   assert.deepEqual(f.two, [{ t: 200, uid: 12 }]);
-  assert.deepEqual(f.nine, [{ t: 300, shooter: 12, origin: { x: 11.5, y: 2, height: 11, z: 20 } }]);
+  assert.deepEqual(f.nine, [{ t: 300, shooter: 12, trail: 1, origin: { x: 11.5, y: 2, height: 11, z: 20 } }]);
   assert.deepEqual(f.k, [{ t: 400, uid: 12, x: 10, y: 2, z: 20 }, { t: 400, uid: 7, x: 1, y: 2, z: 3 }]);
 });
 
