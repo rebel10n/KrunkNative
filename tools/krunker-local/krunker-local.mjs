@@ -20,6 +20,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { MIME, createStaticFiles, hostRules as routeHostRules, routeRequest } from "./routes.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +35,9 @@ function loadConfig() {
   cfg.wwwDir = home(cfg.wwwDir);
   cfg.runDir = home(cfg.runDir);
   if (cfg.bridge && cfg.bridge.log) cfg.bridge.log = home(cfg.bridge.log);
+  if (cfg.staticCache) cfg.staticCache = home(cfg.staticCache);
+  // the static proxy (routes.mjs, static assets only): KN_FETCH_PROXY overrides the config; "" turns it off
+  if (process.env.KN_FETCH_PROXY !== undefined) cfg.staticProxy = process.env.KN_FETCH_PROXY;
   // Nothing leaves the machine for a production host: the brain the matchmaker and API hosts forward to is local.
   const brainHost = new URL(cfg.brainUrl).hostname;
   if (!["127.0.0.1", "localhost"].includes(brainHost)) {
@@ -45,18 +49,11 @@ function loadConfig() {
 
 const cfg = loadConfig();
 const cmd = process.argv[2] || "help";
+// the static files of the route table (routes.mjs): the CDN and the page's own site, through the proxy, cached
+const files = createStaticFiles(cfg, (m) => console.log(m));
 
 // Files of the official tree that are our dev servers, not client content.
 const SKIP = new Set(["server.mjs", "serve-v10.mjs", "local.html"]);
-
-const MIME = {
-  ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".mjs": "application/javascript",
-  ".css": "text/css", ".json": "application/json", ".wasm": "application/wasm", ".png": "image/png",
-  ".jpg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".ttf": "font/ttf",
-  ".woff": "font/woff", ".woff2": "font/woff2", ".mp3": "audio/mpeg", ".ogg": "audio/ogg",
-  ".webm": "video/webm", ".mp4": "video/mp4", ".jspck": "application/octet-stream", ".txt": "text/plain",
-  ".dat": "application/octet-stream",
-};
 
 // prepare: copy the official tree (never written to), fill missing paths with symlinks into
 // KrunkNative (first root with the file wins), and make the self-signed cert for the HTTPS side.
@@ -166,36 +163,48 @@ function sketchPage(res) {
   }
 }
 
-// isMatchmakerHost is the official host name a request came in on, or "" for the page itself.
-function handle(req, res, isMatchmakerHost) {
-  const url = new URL(req.url, "http://x");
-  sendCors(res);
-  if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
-  if (isMatchmakerHost) {
-    // hostRoutes[host] is the brain path prefix for that official host ("/mm" for matchmaker,
-    // "" for the account/data API, which the brain answers at its root).
-    const prefix = cfg.hostRoutes[isMatchmakerHost];
-    const p = url.pathname.startsWith(prefix + "/") ? url.pathname : prefix + url.pathname;
-    return proxy(req, res, p, cfg.bridge && p.endsWith("/seek-game") ? rewriteSeek : null);
-  }
-  if (url.pathname.startsWith("/mm/")) return proxy(req, res, url.pathname);
-  let rel = decodeURIComponent(url.pathname);
-  // "/" is the official page with the sketch loader (loader.js) in place of its WASM loader module.
-  // cfg.loader "wasm" serves the official index.html unchanged.
-  if (rel === "/" && cfg.loader !== "wasm") return sketchPage(res);
-  if (rel === "/") rel = "/index.html";
-  const file = path.join(cfg.wwwDir, rel);
-  if (!file.startsWith(cfg.wwwDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    console.log(`[404] ${req.method} ${url.pathname}`);
-    res.writeHead(404, { "content-type": "text/plain" });
-    return res.end("404 " + url.pathname);
-  }
+function sendFile(res, file) {
   res.writeHead(200, { "content-type": MIME[path.extname(file)] || "application/octet-stream", "cache-control": "no-cache" });
   fs.createReadStream(file).pipe(res);
 }
 
+// host: the official host name the request came in on; "" for the local origin (the page itself); "-" for a TLS host
+// nothing routes. The route table (routes.mjs) says where the request goes; this carries it out.
+function handle(req, res, host) {
+  const url = new URL(req.url, "http://x");
+  sendCors(res);
+  if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+  const route = routeRequest(cfg, host, url.pathname, url.search);
+  if (route.kind === "brain") {
+    // route.prefix is the brain path prefix for that official host ("/mm" for matchmaker, "" for the
+    // account/data API, which the brain answers at its root)
+    const p = url.pathname.startsWith(route.prefix + "/") ? url.pathname : route.prefix + url.pathname;
+    return proxy(req, res, p, host && cfg.bridge && p.endsWith("/seek-game") ? rewriteSeek : null);
+  }
+  if (!host) {
+    let rel = decodeURIComponent(url.pathname);
+    // "/" is the official page with the sketch loader (loader.js) in place of its WASM loader module.
+    // cfg.loader "wasm" serves the official index.html unchanged.
+    if (rel === "/" && cfg.loader !== "wasm") return sketchPage(res);
+    if (rel === "/") rel = "/index.html";
+    const file = path.join(cfg.wwwDir, rel);
+    if (file.startsWith(cfg.wwwDir + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) return sendFile(res, file);
+  }
+  if (route.kind === "static") {
+    // not in the local tree: a static asset, from the cache or fetched once through the proxy (routes.mjs)
+    return files.serve(route).then((r) => {
+      if (r.status === 200) return sendFile(res, r.file);
+      res.writeHead(r.status, { "content-type": "text/plain" });
+      res.end(`${r.status} ${url.pathname}`);
+    });
+  }
+  console.log(`[404] ${req.method} ${host ? host + " " : ""}${url.pathname}`);
+  res.writeHead(404, { "content-type": "text/plain" });
+  return res.end("404 " + url.pathname);
+}
+
 function serve() {
-  const http1 = http.createServer((req, res) => handle(req, res, false));
+  const http1 = http.createServer((req, res) => handle(req, res, ""));
   http1.listen(cfg.port, "127.0.0.1", () => {
     console.log(`krunker-local: http://127.0.0.1:${cfg.port}/  (Host ${cfg.localHost})  www=${cfg.wwwDir}`);
   });
@@ -203,8 +212,8 @@ function serve() {
     key: fs.readFileSync(path.join(cfg.runDir, "tls-key.pem")),
     cert: fs.readFileSync(path.join(cfg.runDir, "tls-cert.pem")),
   }, (req, res) => {
-    const host = (req.headers.host || "").split(":")[0];
-    handle(req, res, Object.hasOwn(cfg.hostRoutes, host) ? host : "");
+    const host = (req.headers.host || "").split(":")[0] || "-";
+    handle(req, res, host);
   });
   // The bridge's host: a WebSocket upgrade is handed to net-bridge as a raw byte stream (its /ws).
   tls.on("upgrade", (req, socket, head) => {
@@ -263,16 +272,9 @@ function freePort() {
   });
 }
 
-// Chromium host rules: the page's .test name, the official matchmaker/API hosts and the bridge's host
-// all resolve to the local listeners (the port in a MAP rule is the listener's).
-function hostRules() {
-  return [`MAP ${cfg.localHost} 127.0.0.1:${cfg.port}`,
-    ...Object.keys(cfg.hostRoutes).map((h) => `MAP ${h} 127.0.0.1:${cfg.tlsPort}`),
-    ...(cfg.bridge ? [`MAP ${cfg.bridge.host} 127.0.0.1:${cfg.tlsPort}`] : []),
-    // every other host (the official CDNs, analytics, consent vendors, the real krunker.io hosts) does not resolve:
-    // the page cannot reach production, and a request for one fails in the report's "failed" list
-    "MAP * ~NOTFOUND"];
-}
+// Chromium host rules (routes.mjs): the page's .test name, the official matchmaker/API hosts, the static CDN host and the
+// bridge's host resolve to the local listeners; every other host does not (see routes.mjs hostRules).
+const hostRules = () => routeHostRules(cfg);
 
 // Query values that carry tokens or ids are not printed.
 function redact(u) {
@@ -774,7 +776,7 @@ async function join() {
     report.gameState = await evalJS(`(() => { const g = window.__kn_game; if (!g) return null; const q = g.initQueue; return { initInProgress: g.initInProgress, initQueue: Array.isArray(q) ? q.length : String(q), gameClosed: g.gameClosed, sid: g.sid, map: g.map ? Object.keys(g.map).slice(0, 12) : null }; })()`);
     report.bridgeLog = bridgeLines();
     // every host the page asked for: the local ones only (the rest fail with NOTFOUND, see hostRules)
-    const local = new Set([cfg.localHost, "localhost", "127.0.0.1", cfg.bridge.host, ...Object.keys(cfg.hostRoutes)]);
+    const local = new Set([cfg.localHost, "localhost", "127.0.0.1", cfg.bridge.host, ...Object.keys(cfg.hostRoutes), ...Object.keys(cfg.staticHosts || {})]);
     report.hosts = [...hostsSeen].sort();
     report.nonLocalHosts = report.hosts.filter((h) => !local.has(h));
     ws.close();

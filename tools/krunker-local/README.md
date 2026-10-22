@@ -76,6 +76,13 @@ first native packet it cannot translate stops that session and is named in its l
   client loads by mapIndex), `/titles`, `/data/skins` and `/data/spins`.
 - Missing files are symlinks into KrunkNative `assets/` or `ui/` (first hit wins). Files no
   root has stay 404 and are listed in the report.
+- Static assets (textures, models, images, sounds, fonts, `manifest.json`) are not in any local root.
+  `routes.mjs` (the route table; `routes_test.mjs` pins it, `make test`) fetches each one once through the local
+  HTTP proxy (`staticProxy`, default `http://127.0.0.1:8888`; `KN_FETCH_PROXY` overrides it), from `assets.krunker.io`
+  and `user-assets.krunker.io` (`staticHosts`) or, for page-relative files, from the page's site (`staticPageOrigin`). It caches them under
+  `staticCache` (outside git) and serves them from the local origin. A file the proxy reports missing stays a 404.
+  **The proxy is for static assets only**: account, matchmaking, API, script and data requests never go to it.
+  Third-party hosts (analytics, consent, captcha, web3 CDN) are not static and do not resolve.
 - The game object is reachable from the page (harness-only, not in the bundle file or the shipped client).
   The bundle keeps its Game in its closure; `loader.js` (`captureGame`) adds `window.__kn_game` and
   `window.RENDER` to the bundle's text in memory, right after the bundle stores its Game (`<state>['Game']=<game>`).
@@ -89,8 +96,9 @@ official hostnames (`seek-game` answers too, with `angeles-8.krunk.io:21022`).
 
 Does not work yet: the client stays on its loading spinner after the token, even after 120 s.
 It never calls game-list from the menu, so Quick Play cannot be reached from the harness.
-Known 404s: `manifest.json`, `img/pwa/icon32x32.png` (not in KrunkNative). Blocked by design:
-`analytics.google.com`.
+Static files: no 404s since the static route (`routes.mjs`) fetches them through the proxy (the
+page's `img/*`, `manifest.json`, `css/fonts/*`, and the `assets` and `user-assets` CDN files). Blocked by design:
+`analytics.google.com`, the other third-party hosts, and the FRVR and Cloudflare hosts.
 
 A join works against a local game (checked 2026-10-21, `join`: init completes, the map loads
 through `GET gapi.../maps/<index>`, the client reaches "CLICK TO PLAY"). Two settings are needed,

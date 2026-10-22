@@ -20,6 +20,13 @@
     "api.krunker.io": ""
   },
   "brainUrl": "http://127.0.0.1:5150",
+  "staticProxy": "http://127.0.0.1:8888",
+  "staticCache": "~/.cache/kn-krunker-local/static",
+  "staticPageOrigin": "https://krunker.io",
+  "staticHosts": {
+    "assets.krunker.io": "https://assets.krunker.io",
+    "user-assets.krunker.io": "https://user-assets.krunker.io"
+  },
   "loader": "sketch",
   "bridge": {
     "host": "kn-bridge.krunker-local.test",
