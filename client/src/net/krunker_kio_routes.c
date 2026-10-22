@@ -105,3 +105,41 @@ size_t krunker_kio_gapi_leaderboard_path(char *out, const size_t n, const char *
     if (m <= 0 || (size_t) m >= sizeof(path)) return 0;
     return kio_put(out, n, path);
 }
+
+size_t krunker_kio_gapi_path(char *out, const size_t n, const char *kn_path) {
+    if (out && n) out[0] = 0;
+    if (!kn_path || strstr(kn_path, "token=")) return 0;
+    static const struct {
+        const char *kn, *gapi;
+    } groups[] = {{"/api/leaderboards/", "/leaderboards/"}, {"/api/territorial-wars/", "/territorial-wars/"}, {"/api/clans/by-name/", "/clans/by-name/"}};
+    for (size_t i = 0; i < sizeof(groups) / sizeof(groups[0]); i++) {
+        const size_t kl = strlen(groups[i].kn);
+        if (strncmp(kn_path, groups[i].kn, kl) != 0) continue;
+        if (!kn_path[kl]) return 0; // a group with no name after it
+        char path[320];
+        const int m = snprintf(path, sizeof(path), "%s%s", groups[i].gapi, kn_path + kl);
+        if (m <= 0 || (size_t) m >= sizeof(path)) return 0;
+        return kio_put(out, n, path);
+    }
+    static const char recruit_kn[] = "/api/clans/recruitment", recruit_gapi[] = "/clans/recruitment";
+    const size_t rkl = sizeof(recruit_kn) - 1;
+    if (strncmp(kn_path, recruit_kn, rkl) == 0 && (kn_path[rkl] == 0 || kn_path[rkl] == '?')) {
+        char path[320];
+        const int m = snprintf(path, sizeof(path), "%s%s", recruit_gapi, kn_path + rkl);
+        if (m <= 0 || (size_t) m >= sizeof(path)) return 0;
+        return kio_put(out, n, path);
+    }
+    static const char clans_kn[] = "/api/clans/";
+    const size_t ckl = sizeof(clans_kn) - 1;
+    if (strncmp(kn_path, clans_kn, ckl) == 0 && kn_path[ckl] >= '0' && kn_path[ckl] <= '9') {
+        const char *tail = kn_path + ckl;
+        while (*tail >= '0' && *tail <= '9') tail++;
+        if (strncmp(tail, "/recruitment", 12) == 0 && (tail[12] == 0 || tail[12] == '?')) {
+            char path[320];
+            const int m = snprintf(path, sizeof(path), "/clans/%.*s%s", (int) (tail - (kn_path + ckl)), kn_path + ckl, tail);
+            if (m <= 0 || (size_t) m >= sizeof(path)) return 0;
+            return kio_put(out, n, path);
+        }
+    }
+    return 0;
+}

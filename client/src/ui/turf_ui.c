@@ -846,10 +846,9 @@ static void clan_stats(StrBuf *sb, const char *clan_id, const int mine) {
     sb_append(sb, "</div></div></div>");
 }
 
-static void gen_my_clan(StrBuf *sb) {
-    const AccountInfo *a = active_account();
-    if (!a || !a->clan[0]) {
-        sb_append(sb, "<div class=\"my-clan-tab svelte-51j5cz\"><div class=\"no-clan-container svelte-51j5cz\"><div class=\"no-clan-content svelte-51j5cz\"><h2 class=\"no-clan-title svelte-51j5cz\">"
+// v10's "no clan" page (the account has no clan, or krunker.io has none for it)
+static void turf_no_clan(StrBuf *sb) {
+    sb_append(sb, "<div class=\"my-clan-tab svelte-51j5cz\"><div class=\"no-clan-container svelte-51j5cz\"><div class=\"no-clan-content svelte-51j5cz\"><h2 class=\"no-clan-title svelte-51j5cz\">"
                       "Join the Turf Wars!</h2> <p class=\"no-clan-description svelte-51j5cz\">Create or join a clan to participate in Turf Wars and compete for control of maps!</p> "
                       "<div class=\"clan-actions svelte-51j5cz\"><div class=\"action-section svelte-51j5cz\"><h3 class=\"action-title svelte-51j5cz\">Create Clan</h3> "
                       "<p class=\"action-description svelte-51j5cz\">Start your own clan and lead the charge!</p> "
@@ -859,9 +858,43 @@ static void gen_my_clan(StrBuf *sb) {
                       "</div></div> <div class=\"clan-benefits svelte-51j5cz\"><h3 class=\"svelte-51j5cz\">Benefits of Joining a Clan:</h3> <ul class=\"svelte-51j5cz\"><li class=\"svelte-51j5cz\">"
                       "Compete in Turf Wars for map control</li> <li class=\"svelte-51j5cz\">Earn rewards for your clan's victories</li> <li class=\"svelte-51j5cz\">Track your clan's "
                       "performance and rankings</li> <li class=\"svelte-51j5cz\">Work together to dominate the battlefield</li></ul></div></div></div></div>");
-        return;
+}
+
+// The account's clan as the clan routes' key. Box Office's brain takes the clan's tag; krunker.io's Turf Wars routes take
+// the clan id (v10's clanId), which its by-name read gives for the tag. "" while that read is pending or krunker.io has no
+// such clan for the account (the caller's no-clan state). `out` holds the id.
+static const char *my_clan_key(const AccountInfo *a, char *out, const size_t n) {
+    out[0] = 0;
+    if (!a || !a->clan[0]) return "";
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) return a->clan;
+    char tag[128], path[192];
+    enc(tag, sizeof(tag), a->clan);
+    snprintf(path, sizeof(path), "/api/clans/by-name/%s", tag);
+    const cJSON *clan = data_of(v10_get(path, TTL_MS));
+    if (!cJSON_IsObject(clan) || !cJSON_IsNumber(cJSON_GetObjectItem(clan, "clan_id"))) return "";
+    snprintf(out, n, "%.0f", v10_num(clan, "clan_id", 0));
+    return out;
+}
+
+static void gen_my_clan(StrBuf *sb) {
+    const AccountInfo *a = active_account();
+    if (!a || !a->clan[0]) return turf_no_clan(sb);
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        char tag[128], path[192];
+        enc(tag, sizeof(tag), a->clan);
+        snprintf(path, sizeof(path), "/api/clans/by-name/%s", tag);
+        const V10Req *br = v10_get(path, TTL_MS);
+        if (br->status == 0 && !data_of(br)) {
+            sb_append(sb, "<div class=\"my-clan-tab svelte-51j5cz\">");
+            loading(sb, "51j5cz", "Loading clan data...");
+            sb_append(sb, "</div>");
+            return;
+        }
     }
-    clan_stats(sb, a->clan, 1);
+    char id[32];
+    const char *key = my_clan_key(a, id, sizeof(id));
+    if (!key[0]) return turf_no_clan(sb);
+    clan_stats(sb, key, 1);
 }
 
 // ------------------------------------------------------------------ Leaderboards (svelte-raovk7)
@@ -1546,6 +1579,7 @@ static void day_step(ClanFilters *f, const int step, const int current) {
 }
 
 static int clan_current_day(const char *clan) {
+    if (!clan[0]) return day_now();
     const cJSON *c = data_of(get_clan(clan));
     return (int) v10_num(c, "current_day", day_now());
 }
@@ -1560,7 +1594,8 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     const int a0 = arg_int(args, argc, 0, 0);
     char s[64];
     const AccountInfo *a = active_account();
-    const char *mine = a ? a->clan : "";
+    char mine_id[32];
+    const char *mine = my_clan_key(a, mine_id, sizeof(mine_id));
     if (!strcmp(name, "knTwTab")) {
         if (a0 >= 0 && a0 < TW_TABS) T.tab = a0;
         T.view = VIEW_TABS;

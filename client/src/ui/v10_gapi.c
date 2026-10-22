@@ -77,7 +77,7 @@ static unsigned g_kio_ids;
 static int kio_readable(const char *method, const char *path) {
     // the reads v10's own pages make of gapi (v10 getNews, getUpcomingEvents, the leaderboards: v10 _10449); nothing that
     // changes an account. The streams are not here: v10's getTopStreams is the data client's (api.krunker.io, krunker_kio_routes.h)
-    static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/", "/creators/", "/leaderboards/"};
+    static const char *const groups[] = {"/players/", "/social/", "/clans/", "/territorial-wars/", "/creators/", "/leaderboards/", "/market/"};
     if (!method || strcmp(method, "GET") != 0) return 0;
     for (size_t i = 0; i < sizeof(groups) / sizeof(groups[0]); i++)
         if (!strncmp(path, groups[i], strlen(groups[i]))) return 1;

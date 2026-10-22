@@ -576,14 +576,16 @@ static void on_done(void *user, const int status, const char *error) {
             else on_auth_answer(http, res);
             break;
         case REQ_API: {
+            // the slot stays in use while the handler runs: a request it starts (a chained read, e.g. Turf Wars' clan
+            // id then its stats) takes another slot, not this one, whose request state is cleared below
             ApiReq *q = (ApiReq *) r;
             const KrunkerApiFn fn = q->fn;
             void *u = q->user;
             free(q->body);
             q->body = NULL;
-            q->used = 0;
             q->fn = NULL;
             if (fn) fn(u, http, res);
+            q->used = 0;
             break;
         }
         case REQ_PROFILE: on_profile(http, res); break;
@@ -780,8 +782,9 @@ static void api_with_token(void *user, const char *token) {
         void *u = q->user;
         free(q->body);
         q->body = NULL;
+        q->fn = NULL;
+        if (fn) fn(u, 0, NULL); // (the slot is freed after it: see the answer's REQ_API case)
         q->used = 0;
-        if (fn) fn(u, 0, NULL);
     }
 }
 
@@ -929,8 +932,9 @@ void krunker_account_tick(void) {
         void *u = q->user;
         free(q->body);
         q->body = NULL;
+        q->fn = NULL;
+        if (fn) fn(u, 0, NULL); // (the slot is freed after it: see the answer's REQ_API case)
         q->used = 0;
-        if (fn) fn(u, 0, NULL);
     }
 }
 

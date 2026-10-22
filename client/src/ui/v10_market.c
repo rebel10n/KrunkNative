@@ -46,6 +46,7 @@
 #include <weapons.h>
 #include <v10_ui.h>
 #include <kio_store.h> // krunker.io active: the market's writes are read-only
+#include <v10_social.h> // krunker.io active: the listings are v10's gapi reads (kio_browse_load)
 #include <app_mode.h>
 #include <cJSON.h>
 #include <market_stats.h> // the Stats reply keeps its rows on an error (market_stats_test)
@@ -687,6 +688,64 @@ static int filter_none_left(const Filter *f) {
     return (set_count(f->wear, 0, 5) && !f->wear[4]) || f->only_painted;
 }
 
+// ---- krunker.io's listings (the official account: v10's market.getListings, gapi GET /market/listings, v10:26857)
+// The official rows carry marketid, skinindex, price and seller_name; they become KN's listing rows (m, i, f, p) and go
+// through browse_loaded like the economy's. The filters are the store table's (filter_match), the same ones the
+// inventory uses, so an item the page would hide stays hidden; the sort is the Browse select's, by price.
+static void browse_loaded(const cJSON *rows);
+static void render_both(void);
+static int kio_price_desc;
+static int cmp_kio_price(const void *pa, const void *pb) {
+    const double a = jnum(*(cJSON *const *) pa, "f"), b = jnum(*(cJSON *const *) pb, "f");
+    if (a == b) return 0;
+    return (a < b) != (kio_price_desc != 0) ? -1 : 1;
+}
+
+static void kio_browse_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) error;
+    if ((int) (intptr_t) user != M.fil_token) return; // a later filter asked again
+    M.bloading = M.bsearching = 0;
+    const cJSON *list = status == 200 ? cJSON_GetObjectItem(data, "listings") : NULL;
+    cJSON *rows = cJSON_CreateArray();
+    const cJSON *l;
+    if (cJSON_IsArray(list)) cJSON_ArrayForEach(l, list) {
+        const int skin_index = jint(l, "skinindex", -1);
+        if (!filter_match(&M.f, skin(skin_index))) continue;
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddNumberToObject(r, "i", skin_index);
+        cJSON_AddNumberToObject(r, "m", jnum(l, "marketid"));
+        cJSON_AddNumberToObject(r, "f", jnum(l, "price"));
+        cJSON_AddStringToObject(r, "p", jstr(l, "seller_name"));
+        cJSON_AddItemToArray(rows, r);
+    }
+    const int n = rows_count(rows);
+    const cJSON **v = calloc((size_t) (n ? n : 1), sizeof(*v));
+    if (v) {
+        int k = 0;
+        cJSON_ArrayForEach(l, rows) v[k++] = l;
+        kio_price_desc = !strcmp(M.bsort, "price_desc");
+        qsort(v, (size_t) n, sizeof(*v), cmp_kio_price);
+        cJSON *sorted = cJSON_CreateArray();
+        for (int i = 0; i < n; i++) cJSON_AddItemToArray(sorted, cJSON_Duplicate(v[i], 1));
+        free(v);
+        cJSON_Delete(rows);
+        rows = sorted;
+    }
+    browse_loaded(rows);
+    cJSON_Delete(rows);
+    render_both();
+}
+
+static void kio_browse_load(const char *text) {
+    char path[320], enc[160] = "";
+    if (text[0]) backend_url_encode(enc, sizeof(enc), text);
+    snprintf(path, sizeof(path), "/market/listings?limit=100%s%s", text[0] ? "&searchTerm=" : "", enc);
+    M.bloading = 1;
+    M.bsearching = text[0] != 0;
+    const int token = ++M.fil_token;
+    if (!v10_gapi("GET", path, NULL, kio_browse_done, (void *) (intptr_t) token)) M.bloading = M.bsearching = 0;
+}
+
 // Browse: ["fil", n, text, rarities, weapons, types, season, order] -> ["fr", n, rows | null]
 static void browse_load(void) {
     if (!logged_in()) return;
@@ -695,6 +754,10 @@ static void browse_load(void) {
     if (!t[0] && filter_none_left(&M.f)) {
         set_json(&M.listings, NULL);
         M.bloading = 0;
+        return;
+    }
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // krunker.io's listings (kio_browse_load)
+        kio_browse_load(t);
         return;
     }
     cJSON *f = cJSON_CreateArray(), *rar = cJSON_CreateObject(), *wep = cJSON_CreateObject(), *typ = cJSON_CreateObject();
@@ -763,9 +826,23 @@ static void history_load(void) {
     M.hist_loading = 1;
     if (!request_page("market", "history", -1)) M.hist_loading = 0;
 }
+// krunker.io's Stats (v10's market.getStats, gapi GET /market/stats, v10:26882): the first page of {stats: rows} in
+// v10's own row keys (ski, inC, onS, low, high), which the Stats table reads as they are. An error keeps the rows.
+static void kio_stats_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user;
+    (void) error;
+    M.stats_loading = 0;
+    if (status == 200 && cJSON_IsObject(data)) market_stats_apply(&M.stats, cJSON_GetObjectItem(data, "stats"));
+    render_both();
+}
+
 static void stats_load(void) {
     if (!logged_in() || M.stats_loading) return;
     M.stats_loading = 1;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        if (!v10_gapi("GET", "/market/stats", NULL, kio_stats_done, NULL)) M.stats_loading = 0;
+        return;
+    }
     // no socket: no reply will clear the flag, so the next open of the tab asks again
     if (!request_page("market", "stats", -1)) M.stats_loading = 0;
 }

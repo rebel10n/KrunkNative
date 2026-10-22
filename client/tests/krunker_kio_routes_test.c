@@ -127,6 +127,34 @@ int main(void) {
     CHECK(krunker_kio_gapi_leaderboard_path(gpath, sizeof(gpath), "/mm/ranked/leaderboard?season=1") == 0 && gpath[0] == 0,
           "a ranked board of KN's brain has no gapi route (nothing is sent)");
 
+    // 6b. Turf Wars and the clan reads: the brain's JSON paths map to v10's gapi paths (v10:26670-26806), the rest has none
+    const struct {
+        const char *kn, *gapi;
+    } gapi_cases[] = {
+        {"/api/territorial-wars/status", "/territorial-wars/status"},
+        {"/api/territorial-wars/clan/42/players?day=3&map_id=2", "/territorial-wars/clan/42/players?day=3&map_id=2"},
+        {"/api/territorial-wars/leaderboards/top-grossing-clans?clan_name=dev", "/territorial-wars/leaderboards/top-grossing-clans?clan_name=dev"},
+        {"/api/territorial-wars/player/Some%20One/contributions?day=2", "/territorial-wars/player/Some%20One/contributions?day=2"},
+        {"/api/clans/recruitment?page=1&limit=20&region=EU", "/clans/recruitment?page=1&limit=20&region=EU"},
+        {"/api/clans/by-name/dev", "/clans/by-name/dev"},
+        {"/api/clans/77/recruitment", "/clans/77/recruitment"},
+        {"/api/leaderboards/krunkcup/teams/4/contributors", "/leaderboards/krunkcup/teams/4/contributors"},
+    };
+    for (size_t i = 0; i < sizeof(gapi_cases) / sizeof(gapi_cases[0]); i++) {
+        CHECK(krunker_kio_gapi_path(gpath, sizeof(gpath), gapi_cases[i].kn) != 0 && !strcmp(gpath, gapi_cases[i].gapi),
+              "%s maps to %s (got '%s')", gapi_cases[i].kn, gapi_cases[i].gapi, gpath);
+    }
+    // no route: the caller sends nothing. Box Office's my-applications and token reads, the clan writes, the clan's
+    // non-recruitment reads with no gapi counterpart here, and anything with a token
+    const char *no_route[] = {"/api/clans/my-applications?token=abc", "/api/clans/by-name/", "/api/clans/12/apply?token=x",
+                              "/api/clans/recruitment2", "/api/clans/x/recruitment", "/api/territorial-wars/status?token=x",
+                              "/api/shop/displays?tag=limited", "/mm/ranked/leaderboard?season=1", "/api/lottery/3", NULL};
+    for (size_t i = 0; no_route[i]; i++) {
+        const int got = krunker_kio_gapi_path(gpath, sizeof(gpath), no_route[i]);
+        CHECK(got == 0 && gpath[0] == 0, "%s has no gapi route (got '%s')", no_route[i], gpath);
+    }
+    CHECK(krunker_kio_gapi_path(gpath, sizeof(gpath), NULL) == 0, "a NULL path has no gapi route");
+
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();
     setenv("KRUNKNATIVE_KRUNKER_DATA_API", "http://127.0.0.1:9101/api/", 1);

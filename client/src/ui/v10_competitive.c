@@ -173,9 +173,9 @@ const V10Req *v10_get(const char *path, const int ttl_ms) {
     char *key = strdup(path);
     s->inflight = 1;
     int sent;
-    if (kio) {
+    if (kio) { // the gapi route of the path (krunker_kio_routes.c); a path with none is never sent (status -1: no source)
         char gpath[320];
-        sent = key && krunker_kio_gapi_leaderboard_path(gpath, sizeof(gpath), path) != 0 && v10_gapi_http(gpath, on_req, key);
+        sent = key && krunker_kio_gapi_path(gpath, sizeof(gpath), path) != 0 && v10_gapi_http(gpath, on_req, key);
     } else {
         sent = key && backend_http_get(path, on_req, key);
     }

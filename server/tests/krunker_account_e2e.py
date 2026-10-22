@@ -87,6 +87,27 @@ REFRESH1, REFRESH2 = "rt-first-" + "r" * 40, "rt-second-" + "s" * 40
 GAME_PICK = "TEST:kanji"
 CLIENT_ID = "cid-acc"
 KANJI = 10  # map catalogue index (shared/src/map_catalog.c OFFICIAL("kanji", "Kanji", 10, ...))
+# krunker.io's gapi reads of Turf Wars (v10 territorialWars / clans, v10:26670-26806) and the Market (v10 market,
+# v10:26839-26960; the stub's /api base is the gapi base). One clan, KPD (id 9001), holds Burg; the by-name read gives
+# its id (v10's clanId). The market lists one krunker.io listing (seller KioSeller) and one stats row.
+TURF_CLAN_ID, TURF_CLAN = 9001, "KPD"
+MARKET_SELLER = "KioSeller"
+GAPI_READS = {
+    "/api/market/listings": {"listings": [{"marketid": 555, "skinindex": 1, "price": 1234, "seller_name": MARKET_SELLER, "seller_id": 9}],
+                             "has_more": False, "next_cursor_id": None},
+    "/api/market/stats": {"stats": [{"ski": 1, "inC": 42, "onS": 3, "low": 100, "high": 900}], "has_more": False, "next_cursor": None},
+    "/api/territorial-wars/status": [{"map_id": 0, "map_name": "Burg", "clan_id": TURF_CLAN_ID, "clan_name": TURF_CLAN,
+                                      "current_day": 5, "reward_pool": 1200}],
+    "/api/territorial-wars/leaderboards/top-performing-clans": [{"position": 1, "clan_name": TURF_CLAN, "clan_id": TURF_CLAN_ID,
+                                                               "kills": 310, "deaths": 120, "kd": 2.58, "games": 14}],
+    "/api/territorial-wars/clan/%d" % TURF_CLAN_ID: {"clan_id": TURF_CLAN_ID, "clan_name": TURF_CLAN, "current_day": 5,
+                                                   "today": {"kills": 310, "deaths": 120, "kd": 2.58, "games": 14}, "maps": []},
+    "/api/territorial-wars/clan/%d/players" % TURF_CLAN_ID: [],
+    "/api/territorial-wars/clan/%d/earnings" % TURF_CLAN_ID: [],
+    "/api/territorial-wars/clan/%d/payouts" % TURF_CLAN_ID: [],
+    "/api/clans/by-name/%s" % TURF_CLAN: {"clan_id": TURF_CLAN_ID, "clan_name": TURF_CLAN},
+}
+
 LOBBIES = [  # [id, region, players, max, data, timeLeft]: one mode (0), so one KRUNKER.IO group
     ["TEST:full", "de-fra", 8, 8, {"i": "Kanji", "g": 0}, 200],   # full
     ["TEST:burg", "de-fra", 7, 8, {"i": "Burg", "g": 0}, 200],    # fuller, but not the seek map
@@ -336,6 +357,8 @@ class Stub:
                         self.reply(200, {"data": {"username": ACCOUNT_NAME, "id": ACCOUNT_ID}, "error": None})
                     else:
                         self.reply(401, {"data": None, "error": "Unauthorized"})
+                elif path in GAPI_READS:  # the gapi reads of GAPI_READS above: the same answer for any query
+                    self.reply(200, {"data": GAPI_READS[path], "error": None})
                 elif path == "/api/daily-spin/progress":  # dailySpin.getProgress (the data client, v10:25999): stub.daily_spin
                     auth = self.headers.get("Authorization", "")
                     if stub.daily_spin is None:

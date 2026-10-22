@@ -41,3 +41,13 @@ size_t krunker_kio_player_count_url(char *out, size_t n, const char *social_base
 // (v10's leaderboards client, v10:26987-27036). Returns the length; 0 when the path is not a leaderboard, so the
 // caller sends nothing for it.
 size_t krunker_kio_gapi_leaderboard_path(char *out, size_t n, const char *kn_path);
+
+// The gapi path of any read a krunker.io account makes through the brain's JSON routes (v10's _10449 gapi client):
+//   "/api/leaderboards/<x>"          -> "/leaderboards/<x>"            (v10:26987-27036)
+//   "/api/territorial-wars/<x>"      -> "/territorial-wars/<x>"        (v10:26670-26749, Turf Wars)
+//   "/api/clans/recruitment[?<q>]"   -> "/clans/recruitment[?<q>]"     (v10:26796, listRecruitment)
+//   "/api/clans/by-name/<name>"      -> "/clans/by-name/<name>"        (v10:26756, getClanProfileByName)
+//   "/api/clans/<id>/recruitment"    -> "/clans/<id>/recruitment"      (v10:26805, getRecruitment)
+// Any other path returns 0 (no gapi route: the caller sends nothing and shows the empty state), and so does one
+// that carries a token= (a Box Office session token is never sent to krunker.io). Returns the length.
+size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);

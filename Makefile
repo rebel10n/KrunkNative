@@ -754,6 +754,14 @@ kio-spin-battlepass-e2e: build ## The Daily Spin and the Battle Pass on an offic
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-turf-e2e
+kio-turf-e2e: build ## Turf Wars on an official krunker.io game (turf_ui.c): the Overview, the leaderboards and My Clan read krunker.io's gapi (territorial-wars, by-name for the clan id), never the brain (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I server/tests/kio_turf_e2e.py $(DEBUG_DIR)
+
+.PHONY: kio-market-e2e
+kio-market-e2e: build ## The Market on an official krunker.io game (v10_market.c): the Browse grid lists krunker.io's listings and the Stats tab its stats (gapi /market, signed in; krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I server/tests/kio_market_e2e.py $(DEBUG_DIR)
+
 .PHONY: ranked-krunker-e2e
 ranked-krunker-e2e: build ## Ranked on a krunker.io account (krunker_ranked.h): v10's paths with Bearer, the queue socket (QUEUED, MATCHED, COOLDOWN), KrunkNative's brain untouched, krunker.io wins when both are signed in (fake krunker.io, scratch kn_brain, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/ranked_krunker_e2e.py $(DEBUG_DIR)
