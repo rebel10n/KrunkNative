@@ -1315,6 +1315,99 @@ static void t_repaint_matches_fresh(void)
     fx_free(fx);
 }
 
+/* The console's host sits in the top layer under any state its ancestors take: a page script can
+ * give <body> (or a wrapper) a transform, opacity, filter, will-change, clip-path, a blend mode or a
+ * backdrop filter, and the end screen's class changes restyle the page around it. Each such
+ * ancestor makes a stacking context that catches the fixed host, so the host must still be routed
+ * to the top list (paint_build's root children only, before the fix) and stay out of the page list. */
+/* The host rectangle (colour 0x33) of a list: its first match's geometry, 0 when there is none. */
+static int first_host_rect(const DisplayList *dl, float *x, float *y, float *w, float *h)
+{
+    for (int i = 0; i < dl->n; i++) {
+        if (dl->items[i].op == DL_RECT && dl->items[i].u.rect.color.r == 0x33) {
+            *x = dl->items[i].u.rect.rect.x; *y = dl->items[i].u.rect.rect.y;
+            *w = dl->items[i].u.rect.rect.w; *h = dl->items[i].u.rect.rect.h;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Records the host's top-layer list under one ancestor state: its rectangle, what is in the top
+ * list and in the page list, and whether the host is hit-testable at (100, 40). */
+static void host_under_state(const char *target, const char *prop, const char *value, int *in_top, int *in_page,
+                             int *hit_host, float *x, float *y, float *w, float *h)
+{
+    Fx *fx = fx_html("<div id=wrap><div id=page>page</div><div id=host style='position:fixed;left:10px;top:10px;width:200px;height:60px;background:#330000'>"
+                     "<div id=log style='height:60px'>AAAA</div></div></div>", NULL);
+    Dom *d = fx->dom;
+    HtmlElem host = dom_by_id(d, "host");
+    HtmlElem anc = !strcmp(target, "body") ? dom_parent(d, dom_by_id(d, "wrap")) : dom_by_id(d, "wrap");
+    if (prop) dom_set_style(d, anc, prop, value);
+    cascade_restyle(d, g_ua, fx->sheets, fx->ns);
+    layout_children_changed(fx->tree, dom_elem_node(d, dom_parent(d, dom_by_id(d, "wrap"))));
+    layout_run(fx->tree, fx->vw, fx->vh);
+
+    PaintCtx ctx;
+    paint_ctx_init(&ctx);
+    ctx.text = g_ts;
+    ctx.device_scale = 1;
+    DisplayList page = {0}, top = {0};
+    ctx.top_out = &top;
+    ctx.top_layer = elem_box(fx, host);
+    paint_build(&ctx, layout_tree_root(fx->tree), &page);
+    *in_top = dl_rects_of(&top, 0x33);
+    *in_page = dl_rects_of(&page, 0x33);
+    *x = *y = *w = *h = 0;
+    first_host_rect(&top, x, y, w, h);
+    Box *hit = layout_hit_test(fx->tree, 100.0f, 40.0f, 0);
+    *hit_host = hit && box_under(hit, elem_box(fx, host));
+    dl_free(&page);
+    dl_free(&top);
+    paint_ctx_free(&ctx);
+    fx_free(fx);
+}
+
+/* The top-layer host is painted in the top list (and hit-testable) under any state its ancestors
+ * take, at the place it has without them. A page script can give <body> (or a wrapper) a
+ * transform, opacity, filter, will-change, clip-path, a blend mode or a backdrop filter. Each
+ * makes a stacking context; the ones that catch a fixed child (transform, will-change) used to
+ * move the host into that context's page list, below the page's own later layers (the console
+ * drawn under the end screen's cards). The routing now follows the host down the nested contexts. */
+static void t_top_layer_under_ancestor_states(void)
+{
+    static const char *const states[][2] = {
+        {"transform", "translateZ(0)"}, {"transform", "scale(1)"}, {"opacity", "0.99"}, {"filter", "blur(0px)"},
+        {"will-change", "transform"}, {"clip-path", "inset(0px)"}, {"mix-blend-mode", "multiply"},
+        {"backdrop-filter", "blur(1px)"},
+    };
+    static const char *const targets[] = {"body", "wrap"};
+    float bx, by, bw, bh;
+    int base_top, base_page, base_hit;
+    host_under_state("body", NULL, NULL, &base_top, &base_page, &base_hit, &bx, &by, &bw, &bh);
+    CHECK(base_top == 1 && base_page == 0 && base_hit, "the host without ancestor states is in the top list and hit (top %d, page %d)", base_top, base_page);
+    int wrong = 0, moved = 0, cases = 0;
+    for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+        for (size_t s = 0; s < sizeof(states) / sizeof(states[0]); s++) {
+            cases++;
+            int in_top, in_page, hit;
+            float x, y, w, h;
+            host_under_state(targets[t], states[s][0], states[s][1], &in_top, &in_page, &hit, &x, &y, &w, &h);
+            if (in_top != 1 || in_page != 0 || !hit) {
+                wrong++;
+                printf("  ancestor %s { %s: %s } -> top %d, page %d, hit %d\n", targets[t], states[s][0], states[s][1], in_top, in_page, hit);
+            }
+            if (fabsf(x - bx) > 0.01f || fabsf(y - by) > 0.01f || fabsf(w - bw) > 0.01f || fabsf(h - bh) > 0.01f) {
+                moved++;
+                printf("  ancestor %s { %s: %s } -> rect %.2f,%.2f %.2fx%.2f, expected %.2f,%.2f %.2fx%.2f\n", targets[t], states[s][0], states[s][1],
+                       x, y, w, h, bx, by, bw, bh);
+            }
+        }
+    }
+    CHECK(wrong == 0, "the top-layer host is painted in the top list (and hit) under %d of %d ancestor states", wrong, cases);
+    CHECK(moved == 0, "the top-layer host keeps its rectangle under %d of %d ancestor states", moved, cases);
+}
+
 static void t_hit_test(void)
 {
     Fx *fx = fx_html(
@@ -2552,6 +2645,7 @@ int main(int argc, char **argv)
     t_text();
     t_hit_test();
     t_repaint_matches_fresh();
+    t_top_layer_under_ancestor_states();
     t_hit_clip_path();
     t_html_table();
     t_end_table();

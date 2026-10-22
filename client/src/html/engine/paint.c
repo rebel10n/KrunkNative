@@ -2913,8 +2913,10 @@ static int push_pop_transform(DisplayList *out)
     return dl_push(out, &it);
 }
 
-/* top: the list the root's top-layer child context goes to (paint_build_once, the root only:
- * deeper contexts carry their ancestors' transforms and clips); NULL = none */
+/* top: the list the top-layer box goes to (paint_build_once). It is found at any depth: an ancestor
+ * that catches fixed children (transform, will-change) makes the box a child of its own context, and
+ * the box must still be routed out of the page list (the console stays above the page's later layers
+ * and the GL drawn over it). The box keeps the device transform its ancestors give it; NULL = none */
 static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, float snap_oy, DisplayList *out,
                            DisplayList *top)
 {
@@ -2951,7 +2953,7 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
                 cox = (own ? 0 : c->snap_ox) + ref->dx - ref->layer_snap_x - ref->scroll_x;
                 coy = (own ? 0 : c->snap_oy) + ref->dy - ref->layer_snap_y - ref->scroll_y;
             }
-            if (flatten_context(ctx, ref->box, child_dev, cox, coy, out, NULL) != 0) return -1;
+            if (flatten_context(ctx, ref->box, child_dev, cox, coy, out, top) != 0) return -1;
             if (tr && push_pop_transform(out) != 0) return -1;
             out = page;
         }

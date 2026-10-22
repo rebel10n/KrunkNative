@@ -7,8 +7,9 @@ the HTML engine's paint cache and top layer: client/src/html/engine/paint.c, eng
 The report: after the victory / defeat end screen appears while the console is open, the console
 stops drawing (invisible) but still absorbs the pointer and changes the cursor. This test runs a
 headless offline client (Kanji, 1280x720): a match starts, the console is opened in the game, the
-match ends (`con end`, the server's match timer), and for about eight seconds after the end a frame
-is captured every 600 ms. Every frame must show the console painted: its log area's empty lower part
+match ends (`con end`, the server's match timer; the player is respawned first, so the END shows the end
+screen), the script waits for the results (html.kn-end-open), and a frame is captured every 600 ms for
+POST_FRAMES frames after that. Every frame must show the console painted: its log area's empty lower part
 (no text in it) is the console's grey, and it looks the same as in the frame taken just before the end
 (the translucent console lets the scene through a little, so the check is on a mean difference).
 The console probe (input_script `console`) must say open, shown and topmost after the end too.
@@ -32,7 +33,7 @@ BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-console-end-paint-", dir=CACHE if os.path.isdir(CACHE) else None)
 CFG = os.path.join(WORK, "cfg")
-POST_FRAMES = 14           # a frame every 600 ms after the end: the victory title, the results, the next round
+POST_FRAMES = 14           # a frame every 600 ms after the results show (the title, the results, the next round)
 results = []
 
 
@@ -44,11 +45,16 @@ def check(name, ok, detail=""):
 
 
 def script():
+    # respawn: the player is alive in the match, so the END shows the end screen (events_end: a player
+    # who is not in the game gets none). waitfor html.kn-end-open: the clock holds until the results
+    # show (the match timer runs in game time and the headless frame rate varies), then the frames.
     lines = ["0 menu", "1000 console @menu",
-             "1300 play", "2800 down GRAVE", "2840 up GRAVE", "3200 console @open",
+             "1300 play", "1800 respawn",
+             "2800 down GRAVE", "2840 up GRAVE", "3200 console @open",
              f"3300 rects @logs .modal[data-kn-pointer] .logs", f"3350 frames {WORK}/pre 1",
-             "3500 con end"]
-    t = 3600
+             "3500 con end",
+             "3600 waitfor html.kn-end-open", "3650 attr @results class html"]
+    t = 3700
     for k in range(POST_FRAMES):
         lines += [f"{t} console @post{k}", f"{t + 30} rects @logs{k} .modal[data-kn-pointer] .logs",
                   f"{t + 50} frames {WORK}/post{k:02d} 1"]
@@ -132,6 +138,9 @@ def main():
     check("the console is open in the game before the end", opened.get("open") == "1" and opened.get("top") == "5",
           " ".join(f"{k}={v}" for k, v in opened.items()))
     check("the match ended (the end probe ran)", "post0" in p, "no post-end probe")
+    results_cls = re.search(r"attr t=\d+ @results n=\d+ class=(.*)$", text, re.M)
+    check("the end screen is up (html.kn-end-open, the results)", bool(results_cls) and "kn-end-open" in results_cls.group(1),
+          results_cls.group(1) if results_cls else "no results probe")
     logs = rect_of(text, "logs")
     pre = sorted(glob.glob(f"{WORK}/pre_*.png"))
     if not logs or not pre:
