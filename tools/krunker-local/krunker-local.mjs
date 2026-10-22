@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { MIME, createStaticFiles, hostRules as routeHostRules, routeRequest } from "./routes.mjs";
 import { bridgeLabelCounter, pageRounds } from "./bridge_counts.mjs";
 import { decodeV10Frame, peerRecord } from "./peer_frames.mjs";
+import { describeUserScripts, loadUserScripts, userScriptPaths, wrapUserScript } from "./user_scripts.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -543,6 +544,9 @@ function bridgeLines() {
 }
 
 async function join() {
+  // the user scripts are checked before anything starts (a missing file fails here, not in Chromium)
+  const userScripts = loadUserScripts(userScriptPaths());
+  if (userScripts.length) console.error(describeUserScripts(userScripts));
   if (!cfg.bridge) throw new Error('join needs the "bridge" config');
   const shots = path.join(cfg.runDir, "shots");
   fs.mkdirSync(shots, { recursive: true });
@@ -686,6 +690,8 @@ async function join() {
     // the page keeps its anonymous FRVR session and a few preferences in localStorage; a fresh profile has none of them
     // (and the FRVR host is blocked here). profileSeed writes placeholders for the keys that are missing; nothing real.
     await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
+    // the user scripts (user_scripts.mjs): after the profile seed, before the page's own scripts, in the order given
+    for (const s of userScripts) await send("Page.addScriptToEvaluateOnNewDocument", { source: wrapUserScript(s) });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_CLOSE_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: WS_EVENTS_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: TRACE_HOOK });
@@ -705,6 +711,12 @@ async function join() {
       return { exists: !!e, display: s && s.display, visibility: s && s.visibility, z: s && s.zIndex, rect: e && JSON.stringify(e.getBoundingClientRect()),
         html: e && e.outerHTML.slice(0, 160), iframes: document.querySelectorAll("iframe").length, dialogs: document.querySelectorAll("dialog").length }; })()`);
     await sleep(cfg.afterAcceptMs);
+    // what the user scripts left on the page: KRUNKER_LOCAL_USER_PROBE is a JS expression read on the page (e.g.
+    // ({a: window.__userA})), and its value goes in the report
+    if (userScripts.length) {
+      report.userScripts = { loaded: userScripts.map((s) => ({ name: s.name, bytes: s.bytes })),
+        probe: process.env.KRUNKER_LOCAL_USER_PROBE ? await evalJS(`(${process.env.KRUNKER_LOCAL_USER_PROBE})`) : null };
+    }
     await shot("1-menu");
     // The page seeks a lobby on its own after load. Quick Match from inside a lobby is "Find New Game": it reloads with
     // excludeGame = that lobby, and on this one-lobby server the seek answers NoOtherLobby (the box that the join showed).
@@ -944,6 +956,7 @@ async function runPeer(ctx) {
     };
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
+    for (const s of ctx.userScripts || []) await send("Page.addScriptToEvaluateOnNewDocument", { source: wrapUserScript(s) });
     p.joinStart = now();
     await send("Page.navigate", { url: cfg.localUrl });
     log("second player: page loading");
@@ -1026,6 +1039,8 @@ export async function playable(opts = {}) {
   fs.mkdirSync(shots, { recursive: true });
   const t0 = Date.now();
   const log = (m) => console.error(`[playable +${Math.round((Date.now() - t0) / 1000)}s] ${m}`);
+  const userScripts = loadUserScripts(userScriptPaths());
+  if (userScripts.length) log(describeUserScripts(userScripts));
   const cdpPort = await freePort();
   const child = spawn(findChrome(), [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle",
@@ -1150,12 +1165,13 @@ export async function playable(opts = {}) {
     await send("Page.enable"); await send("Network.enable"); await send("Runtime.enable");
     // the page keeps its anonymous session and preferences in localStorage (profileSeed); a fresh profile has none
     await send("Page.addScriptToEvaluateOnNewDocument", { source: profileSeed() });
+    for (const s of userScripts) await send("Page.addScriptToEvaluateOnNewDocument", { source: wrapUserScript(s) });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: RAF_HOOK });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: classSeed(HUNTER_CLASS) });
     await send("Page.navigate", { url: cfg.localUrl });
     log("page loading");
     if (PEERS) {
-      peerTask = runPeer({ cfg, t0, p: peer, log, evalFirst: evalJS, phaseOf: () => phase, setChild: (c) => { peerChild = c; if (opts.onChild) opts.onChild(c); } })
+      peerTask = runPeer({ cfg, t0, p: peer, log, userScripts, evalFirst: evalJS, phaseOf: () => phase, setChild: (c) => { peerChild = c; if (opts.onChild) opts.onChild(c); } })
         .catch((e) => { peer.error = String(e.message || e).slice(0, 200); log(`second player failed: ${peer.error}`); });
     }
     await sleep(cfg.loadWaitMs);
@@ -1292,7 +1308,7 @@ export async function playable(opts = {}) {
 }
 
 function help() {
-  console.log(`usage: krunker-local.mjs prepare|serve|check|join|playable   (config: ${cfg._file})`);
+  console.log(`usage: krunker-local.mjs prepare|serve|check|join|playable [--user-script FILE]...   (config: ${cfg._file})`);
 }
 
 // the CLI's playable prints the report as JSON on stdout (playable.sh redirects it to the report file)

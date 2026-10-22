@@ -7,6 +7,7 @@
 # Env: KN_PLAYABLE_HOME (absolute; default ~/.cache/kn-playable-check: run dir, brain database, logs, pid files, Chromium
 # profile), KN_PLAYABLE_ROUND_S (round length, default 90), KN_PLAYABLE_MAX_EXC (exception threshold, default 0),
 # KN_PLAYABLE_PLAYERS (2: a second official client joins the same round, rows (2a)-(2d); 1: the single-player check alone),
+# KRUNKER_LOCAL_USER_SCRIPTS (colon-separated files run in the page before its scripts; doc/v10/userscripts.md),
 # KN_BUILD (the CMake debug build dir, default <repo>/cmake-build-debug). Loopback only; nothing leaves the machine.
 # Only the processes this script started are stopped: each has a pid file ($RUN/<name>.pid, "pid command-name"), and a pid
 # is signalled only while /proc/<pid>/cmdline still names that command. Other stacks on this host are not touched.

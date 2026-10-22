@@ -37,6 +37,9 @@ To check the whole path (init, HUD, input, 60 s of frames, the round end, the ne
 
     make playable-check                   # exit 1 on any failed assertion
 
+To run your own scripts in the page (before its scripts, read-only paths), see `doc/v10/userscripts.md`:
+`KRUNKER_LOCAL_USER_SCRIPTS=/abs/a.js:/abs/b.js tools/krunker-local/join.sh`.
+
 Start pieces by hand, if you need them:
 
     cmake-build-debug/v10_bridge --v10-listen=8097 --native=127.0.0.1:21115   # the bridge, or: make v10-bridge

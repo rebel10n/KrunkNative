@@ -10,6 +10,7 @@
 # Everything per-machine lives under $KN_JOIN_HOME (default ~/.cache/kn-v10-join): the brain database, the brain secret
 # (a random value, mode 600, never printed or committed), the logs, the pid files, the krunker-local run and www dirs, and
 # the Chromium profile. The generated tools/krunker-local/config.json is git-ignored.
+# User scripts: KRUNKER_LOCAL_USER_SCRIPTS=/abs/a.js:/abs/b.js tools/krunker-local/join.sh (doc/v10/userscripts.md).
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 HOME_DIR="${KN_JOIN_HOME:-$HOME/.cache/kn-v10-join}"
@@ -22,6 +23,19 @@ SERVER_PORT="${KN_JOIN_SERVER_PORT:-21115}"
 BRIDGE_PORT="${KN_JOIN_BRIDGE_PORT:-8097}"
 HARNESS_PORT="${KN_JOIN_HARNESS_PORT:-8194}"
 HARNESS_TLS_PORT="${KN_JOIN_HARNESS_TLS_PORT:-8543}"
+# user scripts (doc/v10/userscripts.md): KRUNKER_LOCAL_USER_SCRIPTS is a colon-separated list of files, run in the page in
+# the order given. Each must exist and be readable; this is checked before any service starts, and the paths are made
+# absolute here because the node steps run from the repo.
+if [ -n "${KRUNKER_LOCAL_USER_SCRIPTS:-}" ]; then
+  USER_SCRIPTS=""
+  IFS=: read -ra UPATHS <<< "$KRUNKER_LOCAL_USER_SCRIPTS"
+  for f in "${UPATHS[@]}"; do
+    [ -n "$f" ] || continue
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then echo "join.sh: user script not found or not readable: $f" >&2; exit 1; fi
+    USER_SCRIPTS="${USER_SCRIPTS:+$USER_SCRIPTS:}$(cd "$(dirname "$f")" && pwd -P)/$(basename "$f")"
+  done
+  export KRUNKER_LOCAL_USER_SCRIPTS="$USER_SCRIPTS"
+fi
 mkdir -p "$HOME_DIR/run" && umask 077
 
 # the secret for the brain and the server (generated once)
@@ -72,4 +86,5 @@ const r = require(process.argv[1]);
 console.log("framesIn " + r.framesIn + " framesOut " + r.framesOut + " seek " + JSON.stringify(r.seek.map((x) => x.slice(0, 4))) + " sockets " + r.sockets.length + " exceptions " + r.exceptions.length);
 console.log("game " + JSON.stringify(r.game && r.game.exposed) + " text " + JSON.stringify(r.state && r.state.text).slice(0, 120));
 console.log("round end " + r.roundEnd + " seek before/after " + r.seekBeforeEnd + "/" + r.seekAfterEnd + " next " + JSON.stringify(r.nextRoundText).slice(0, 90));
-console.log("screenshots " + (r.shots || []).join(" "));' "$HOME_DIR/run/join-$PROFILE.json"
+console.log("screenshots " + (r.shots || []).join(" "));
+if (r.userScripts) console.log("user scripts " + JSON.stringify(r.userScripts));' "$HOME_DIR/run/join-$PROFILE.json"

@@ -304,6 +304,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/mod_pack_test .
 	./$(DEBUG_DIR)/nettspend_audio_test $(CURDIR)
 	node --test tools/krunker-local/routes_test.mjs
+	node --test tools/krunker-local/user_scripts_test.mjs
 	$(MAKE) --no-print-directory html-engine-test-run
 
 # --------------------------------------------------------------------------- html-engine
