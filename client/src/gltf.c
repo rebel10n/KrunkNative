@@ -876,8 +876,9 @@ GltfInstance *gltf_instance_create(GltfModel *model, const float time_scale) {
     instance->last_now = -1.0;
     instance->nodes = calloc(data->nodes_count ? data->nodes_count : 1, sizeof(GltfInstanceNode));
     instance->meshes = calloc(model->primitive_count ? model->primitive_count : 1, sizeof(Mesh *));
+    instance->mesh_names = calloc(model->primitive_count ? model->primitive_count : 1, sizeof(const char *));
     instance->dynamic = calloc(model->primitive_count ? model->primitive_count : 1, sizeof(GltfDynamicPrimitive));
-    if (!instance->nodes || !instance->meshes || !instance->dynamic) {
+    if (!instance->nodes || !instance->meshes || !instance->mesh_names || !instance->dynamic) {
         gltf_instance_fini(instance);
         return NULL;
     }
@@ -952,9 +953,14 @@ GltfInstance *gltf_instance_create(GltfModel *model, const float time_scale) {
             instance->dynamic_count++;
             dynamic_upload(instance, d);
         }
+        instance->mesh_names[instance->mesh_count] = prim->node >= 0 && data->nodes[prim->node].name ? data->nodes[prim->node].name : "";
         instance->meshes[instance->mesh_count++] = mesh;
     }
     return instance;
+}
+
+const char *gltf_instance_mesh_name(const GltfInstance *instance, const size_t i) {
+    return instance && instance->mesh_names && i < instance->mesh_count ? instance->mesh_names[i] : "";
 }
 
 // ---------------------------------------------------------------- animation
@@ -1249,6 +1255,7 @@ void gltf_instance_fini(GltfInstance *instance) {
         for (size_t n = 0; n < instance->model->data->nodes_count; n++) free(instance->nodes[n].weights);
     free(instance->nodes);
     free(instance->meshes);
+    free(instance->mesh_names);
     free(instance->dynamic);
     free(instance);
 }

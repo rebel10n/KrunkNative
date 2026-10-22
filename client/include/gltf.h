@@ -38,6 +38,7 @@ typedef struct GltfInstance {
 
     size_t mesh_count;
     Mesh **meshes; // owned: one per primitive (materials owned by the meshes)
+    const char **mesh_names; // per mesh: its glTF node's name ("" none): v10's paintTargets match the mesh name
 
     // private
     GltfModel *model;
@@ -83,6 +84,8 @@ void gltf_set_clock_override(double seconds); // < 0: back to glfwGetTime()
 // getBone: the transform of the first skin joint named `name` (SkeletonUtils.getBoneByName),
 // NULL when none. Writes to it last until the next sampled clip moves that node; skins follow it.
 MeshTransform *gltf_instance_bone(GltfInstance*, const char *name);
+// The name of mesh `i` (instance->meshes[i]): its glTF node's name, "" when the node has none.
+const char *gltf_instance_mesh_name(const GltfInstance*, size_t i);
 // Every node's current transform (bones included), in the file's node order: tools/gltf_test.
 size_t gltf_instance_node_count(const GltfInstance*);
 const MeshTransform *gltf_instance_node(const GltfInstance*, size_t index);

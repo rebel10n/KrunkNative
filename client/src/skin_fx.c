@@ -486,11 +486,28 @@ void skin_fx_apply_paint(Mesh *mesh, const WornSkinPaint paint, const ViewerSkin
     fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
 }
 
+// v10.0.3 deob-10.0.3.js:233833-233837: paintTargets true paints every mesh; a list paints the meshes whose name is in it.
+// paint_targets is that list joined by "," (NULL = every mesh).
+static int fx_paint_target(const char *targets, const char *name) {
+    if (!targets || !*targets) return 1;
+    if (!name || !*name) return 0;
+    const size_t n = strlen(name);
+    for (const char *p = targets; *p;) {
+        const char *end = strchr(p, ',');
+        const size_t len = end ? (size_t) (end - p) : strlen(p);
+        if (len == n && !strncmp(p, name, n)) return 1;
+        if (!end) break;
+        p = end + 1;
+    }
+    return 0;
+}
+
 void skin_fx_apply_paint_gltf(GltfInstance *model, const WornSkinPaint paint, const ViewerSkin *skin) {
     if (!model || (paint.color < 0 && paint.shader < 0)) return;
     for (size_t i = 0; i < model->mesh_count; i++) {
         Mesh *mesh = model->meshes[i];
         if (!mesh || !mesh->material || mesh->material->vtable != &basic_material_vtable) continue;
+        if (!fx_paint_target(skin ? skin->paint_targets : NULL, gltf_instance_mesh_name(model, i))) continue;
         fx_paint_material((BasicMaterial *) mesh->material, paint, skin);
     }
 }
