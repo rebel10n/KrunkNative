@@ -240,12 +240,16 @@ int ed_map_restore(void) {
         html_storage_set("mapToEdit", NULL);
         const int ok = ed_map_import(text);
         free(text);
-        if (ok) return 1;
+        if (ok) {
+            fprintf(stderr, "[editor] opened the staged map: %s\n", ed_json_str(g_ed.proj->map_config, "name", "map"));
+            return 1;
+        }
     }
     text = storage_read(STORAGE_KEY);
     if (!text) return 0;
     const int ok = ed_map_import(text);
     free(text);
+    if (ok) fprintf(stderr, "[editor] restored the last session: %s\n", ed_json_str(g_ed.proj->map_config, "name", "map"));
     return ok;
 }
 

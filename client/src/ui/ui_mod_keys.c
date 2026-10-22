@@ -2,7 +2,8 @@
 // (/home/user/jails/kru/src/Krunker_v3.1.1/mod/mods.ts), ported 1:1:
 //   - the document keydown switch: F1 io.send("clearLog") + console.clear(), F4
 //     location.href = "/" (KrunkNative: Find New Game, a seek without a reload: Krunker's own
-//     client's F4; servers_ui_find_new_game), F6 window.open("editor.html"),
+//     client's F4; servers_ui_find_new_game), F6 window.open("editor.html") after staging
+//     the loaded map as localStorage "mapToEdit" (v10: the editor opens the map being played),
 //     T toggles Ctrl TP (localStorage "ctrlTp", the bhop toast "Ctrl TP - Enabled/Disabled");
 //     F1/F4/T are ignored while an INPUT/TEXTAREA has focus, F6 never is. Its F5
 //     location.reload() is the Reconnect bind now (ui_controls.c reconnect_key: rebindable,
@@ -28,6 +29,7 @@
 
 #define CTRL_TP_KEY "ctrlTp"
 #define CTRL_TP_FAR 6000.0f // tpRaycaster.far
+#define MAP_TO_EDIT_KEY "mapToEdit" // the editor's checkEdit reads it first (editor_io.c ed_map_restore)
 
 static struct {
     int loaded;
@@ -56,6 +58,21 @@ static void toggle_ctrl_tp(void) {
     printf("%s\n", msg);
 }
 
+// F6 stages the map being played as "mapToEdit" (v10: the JSON of the loaded map, which the
+// editor imports on open), so the editor opens that map and not its own last session. Returns
+// the staged map's name, or NULL when no map is loaded (the menu): nothing is staged then.
+static const char *stage_loaded_map(const Client *client) {
+    const Map *map = client && client->game.ready ? client->game.map : NULL;
+    char *text = map && map->raw_data ? cJSON_PrintUnformatted(map->raw_data) : NULL;
+    if (!text) {
+        html_storage_set(MAP_TO_EDIT_KEY, NULL); // a stale stage must not open in its place
+        return NULL;
+    }
+    html_storage_set(MAP_TO_EDIT_KEY, text);
+    cJSON_free(text);
+    return map->name;
+}
+
 int ui_mod_keys_keydown(Client *client, const int key, const int input) {
     keys_load();
     switch (key) {
@@ -68,10 +85,14 @@ int ui_mod_keys_keydown(Client *client, const int key, const int input) {
             printf("[controls] F4: find new game\n");
             if (!servers_ui_find_new_game()) ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
             return 0;
-        case GLFW_KEY_F6:
+        case GLFW_KEY_F6: {
+            // never waits for a text field (see the header)
+            const char *name = stage_loaded_map(client);
+            printf("[controls] F6: the editor opens %s\n", name ? name : "its last session (no map loaded)");
             printf("Creating editor window\n");
             app_route_url_target("editor.html", 1); // window.open("editor.html")
             return 0;
+        }
         case GLFW_KEY_T:
             if (input) return 0;
             toggle_ctrl_tp();
