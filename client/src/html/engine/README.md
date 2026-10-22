@@ -34,7 +34,8 @@ Tools: `client/src/html/ui_test.c` (`make ui-test ARGS=help`): render-page (offs
 lexbor-probe. Whole-client renders and pixel diffs: `make uidiff` (`client_bin
 --render-scenario`, tools/uidiff). Per-module standalone tests live in `tests/`. Debug env
 knobs: KRUNKNATIVE_HTML_PROFILE, KRUNKNATIVE_HTML_VERBOSE, KRUNKNATIVE_HTML_DISPLAY_HZ,
-KRUNKNATIVE_HTML_DUMP_DL (engine.c), KRUNKNATIVE_HTML_IMAGE_LOG (image.c) plus the text.h knobs (KRUNKNATIVE_HTML_HINTING,
+KRUNKNATIVE_HTML_DUMP_DL (engine.c), KRUNKNATIVE_HTML_IMAGE_LOG (image.c), KN_HTML_LAYOUT_TRACE (layout_block.c:
+one `[layout trace]` line per layout pass: boxes, laid, time, memo hit/miss, floats iterations, relayouts) plus the text.h knobs (KRUNKNATIVE_HTML_HINTING,
 KRUNKNATIVE_HTML_TEXT_GAMMA, KRUNKNATIVE_HTML_OBLIQUE_SKEW, KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE,
 KRUNKNATIVE_HTML_FALLBACK_FONT); all listed in doc/html-ui-engine.md.
 

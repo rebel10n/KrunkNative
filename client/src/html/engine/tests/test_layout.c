@@ -2535,6 +2535,28 @@ static void t_memo_equivalence(void)
     fx_free(full);
 }
 
+/* Nested overflow:auto scrollers that each gain a scrollbar: a scroller's pass loop lays its subtree out
+ * again with the bar, and so does every scroller inside it, so the work was 3 ^ depth (a 12-deep chain
+ * laid out 885,736 boxes, 853 ms, on the 2026-10-22 freeze reports' code; 555 with the bar state reuse
+ * of layout_box, Box.bar_key). The bound is an operation count, not a time. */
+static void t_nested_scroll_passes(void)
+{
+    enum { DEPTH = 12 };
+    char body[8192];
+    size_t n = 0;
+    for (int i = 0; i < DEPTH; i++)
+        n += (size_t) snprintf(body + n, sizeof body - n, "<div id='s%d' style='overflow-y:auto;height:%dpx;width:%dpx'><div style='height:2000px'>",
+                               i, 400 + 10 * i, 790 - i);
+    n += (size_t) snprintf(body + n, sizeof body - n, "leaf");
+    for (int i = 0; i < DEPTH; i++) n += (size_t) snprintf(body + n, sizeof body - n, "</div></div>");
+    Fx *fx = fx_html(body, NULL);
+    const LayoutRunStats *s = layout_tree_stats(fx->tree);
+    CHECK(s && s->laid <= 1000, "nested scrollers: %u layout calls for %d levels (bound 1000)", s ? s->laid : 0, DEPTH);
+    Box *outer = bx(fx, "s0");
+    CHECK(outer && (outer->flags & BOXF_VBAR) && outer->scrollbar_w > 0, "nested scrollers: the outer scroller keeps its bar");
+    fx_free(fx);
+}
+
 /* Block formatting context roots contain their floats (auto height) and keep clear of the
  * floats around them. Values from Chrome 152: a 50x30 float inside each box; overflow: clip
  * and contain: style do not establish a BFC (CSS Overflow 3, CSS Containment 2). */
@@ -2678,6 +2700,7 @@ int main(int argc, char **argv)
     t_flex_pct_height_images();
     t_video_intrinsic();
     t_bfc_roots();
+    t_nested_scroll_passes();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

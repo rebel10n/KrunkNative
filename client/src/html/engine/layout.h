@@ -219,6 +219,8 @@ struct LineBox {
     int item_count;
 };
 
+#define BOX_BAR_SLOTS 8
+
 struct Box {
     uint8_t type;          /* BoxType                                          */
     uint8_t pseudo;        /* 0 element/text, 1 ::before, 2 ::after            */
@@ -306,6 +308,13 @@ struct Box {
     BoxMemo memo;
     BoxMemo measure;
     uint8_t sub_oof;
+    /* layout-private: the scroll bars this scroll container's last layout settled on (layout_box's pass
+     * loop) for the input bar_key in layout run bar_run.  The same input in the same run starts from them:
+     * a nested scroller is laid out once per distinct width, not once per pass of each ancestor (3^depth). */
+    BoxMemoKey bar_key[BOX_BAR_SLOTS];
+    uint32_t bar_run[BOX_BAR_SLOTS];
+    uint32_t bar_flags[BOX_BAR_SLOTS];   /* BOXF_VBAR / BOXF_HBAR bits */
+    uint8_t bar_next;      /* the slot the next store replaces (round robin) */
 };
 
 static inline int box_is_replaced(const Box *b) {
@@ -328,6 +337,24 @@ LayoutCtx  *layout_tree_ctx(LayoutTree *tree);
  * change).  Returns the number of boundary relayouts performed (0 = nothing
  * was dirty). */
 int  layout_run(LayoutTree *tree, float viewport_w, float viewport_h);
+
+/* What the last layout_run() did (KN_HTML_LAYOUT_TRACE=1 prints it per run as
+ * "[layout trace] ..."): the complexity guards of test_layout.c read it. */
+typedef struct LayoutRunStats {
+    uint32_t boxes;          /* boxes in the tree                                   */
+    uint32_t laid;           /* layout_box calls that laid the box out (not served) */
+    uint32_t memo_hit;       /* layout_box calls served from the memo               */
+    uint32_t memo_miss;      /* storable calls the memo could not serve              */
+    uint32_t floats_iter;    /* floats_place band iterations                        */
+    uint32_t floats_scan;    /* FloatEntry visits of floats_avail / clear / next     */
+    uint32_t boundaries;     /* boundaries relaid (full_layout counts 1)            */
+    uint32_t relayouts;      /* block children laid out again for a margin estimate */
+    uint32_t intrinsic;      /* intrinsic width measures that were not cached       */
+    uint32_t overflow_walks; /* compute_overflow calls                              */
+    int full;                /* 1: a full layout (memo off)                         */
+    double ms;               /* wall time of the run                                */
+} LayoutRunStats;
+const LayoutRunStats *layout_tree_stats(const LayoutTree *tree);
 
 /* Invalidation.  Marks the box; the next layout_run() relayouts from the
  * nearest enclosing layout boundary (absolutely positioned box with a

@@ -28,6 +28,7 @@ struct LayoutTree {
     Dom *dom;
     float viewport_w, viewport_h;
     uint32_t generation;        /* bumped per layout_run, invalidates intrinsic caches */
+    uint32_t run_seq;           /* bumped per layout_run: Box.bar_run names the run a bar state belongs to */
     int laid_out_once;
     CssComputed anon_style;     /* fallback style for anonymous boxes without a parent */
     Box *free_list;             /* released boxes (incremental rebuilds), linked via next */
@@ -36,6 +37,11 @@ struct LayoutTree {
        a percentage max-width resolves against (a grid's auto-repeat count, layout_grid_intrinsic) */
     int intrinsic_cb_set;
     float intrinsic_cb_w;
+    /* KN_HTML_LAYOUT_TRACE=1: one stderr line per layout_run with the counters of LayoutRunStats
+       (layout_block.c trace_end).  trace: 0 = env not read yet, 1 = off, 2 = on.  The counters are
+       kept either way: the layout tests read them (layout_tree_stats). */
+    int trace;
+    LayoutRunStats stats;
 };
 
 /* Floats of one block formatting context, margin boxes in BFC-root border-box coords. */

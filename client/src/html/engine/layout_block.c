@@ -5,6 +5,8 @@
  */
 #include "layout_internal.h"
 
+#include <time.h>
+
 /* ------------------------------------------------------------------------- */
 /* lengths                                                                    */
 /* ------------------------------------------------------------------------- */
@@ -209,6 +211,8 @@ void floats_place(LayoutTree *t, FloatCtx *f, Box *fb, float y_min, float cb_lef
     for (size_t i = 0; i < f->len; i++) if (f->data[i].y > y) y = f->data[i].y;
     for (int guard = 0; guard < 1000; guard++) {
         float l, r;
+        t->stats.floats_iter++;
+        t->stats.floats_scan += (uint32_t) f->len;
         floats_avail(f, y, kn_maxf(mh, 0.01f), cb_left, cb_right, &l, &r);
         if (r - l >= mw - 0.001f || (l <= cb_left + 0.001f && r >= cb_right - 0.001f)) {
             float x = (fb->style->float_ == CSS_FLOAT_LEFT) ? l : r - mw;
@@ -459,6 +463,7 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
     if (b->intrinsic_gen == t->generation && b->min_content_w >= 0 && b->max_content_w >= 0)
         return max_content ? b->max_content_w : b->min_content_w;
 
+    t->stats.intrinsic++;
     layout_resolve_edges(t, b, 0.0f);   /* percentages -> 0 in intrinsic sizing */
     /* a restyled box resolves its font in layout_box(), which for a shrink-to-fit
      * ancestor runs after this measure: measuring with the stale font made the
@@ -875,7 +880,7 @@ static void memo_store(const LayoutTree *t, Box *b, const BoxMemoKey *key, const
 void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out)
 {
     LayoutInput in = *in_;
-    BoxMemoKey key;
+    BoxMemoKey key = { 0 };
     const int storable = in.floats == NULL || (b->flags & BOXF_BFC_ROOT);
     if (!storable) {
         b->memo.valid = 0;
@@ -885,6 +890,7 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         if (!t->memo_off && b->dirty == 0 && !b->sub_oof) {
             const BoxMemo *m = in.measure_only ? &b->measure : &b->memo;
             if (m->valid && m->epoch == t->ctx->memo_epoch && memo_key_eq(&m->key, &key)) {
+                t->stats.memo_hit++;
                 layout_resolve_edges(t, b, in.cb_w); /* padding / border (intrinsic sizing resets them) */
                 /* the margins the parent reads are the ones that layout left: resolve_edges turns auto
                  * ones into 0, so a served `margin: auto` block (an <img class=custIcon>) lost its centring */
@@ -897,6 +903,8 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
             }
         }
     }
+    if (storable) t->stats.memo_miss++;
+    t->stats.laid++;
     const CssComputed *s = b->style;
     LayoutOutput o;
     memset(&o, 0, sizeof(o));
@@ -941,6 +949,17 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         ratio_h = 1;
     }
 
+    /* the bars this input settled on earlier in this run: the passes start from them, and the one pass
+     * that runs is the last pass the bar loop below would have run (same bars, same input: same result) */
+    int bar_slot = -1;
+    if (storable && (b->flags & BOXF_SCROLL_CONTAINER))
+        for (int i = 0; i < BOX_BAR_SLOTS && bar_slot < 0; i++)
+            if (b->bar_run[i] == t->run_seq && memo_key_eq(&b->bar_key[i], &key)) bar_slot = i;
+    const int bars_known = bar_slot >= 0;
+    if (bars_known) {
+        b->flags |= (uint32_t) b->bar_flags[bar_slot] & (BOXF_VBAR | BOXF_HBAR);
+        layout_set_bars(b);
+    }
     for (int pass = 0; pass < 3; pass++) {
         float content_h = 0;
         LayoutInput cin = in;
@@ -971,7 +990,8 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         b->h = bh;
 
         compute_overflow(b, 0);
-        if (!(b->flags & BOXF_SCROLL_CONTAINER) || pass == 2) break;
+        t->stats.overflow_walks++;
+        if (!(b->flags & BOXF_SCROLL_CONTAINER) || pass == 2 || bars_known) break;
         int need_relayout = 0;
         if (s->overflow_y == CSS_OVERFLOW_AUTO && !(b->flags & BOXF_VBAR) && b->scroll_h > box_client_h(b) + 0.01f) {
             b->flags |= BOXF_VBAR; need_relayout = 1;
@@ -984,6 +1004,14 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         /* the bar reduces the content box; auto widths stay (bars live inside the border box) */
         layout_free_lines(b);
         b->frag_count = 0;
+    }
+
+    if (storable && (b->flags & BOXF_SCROLL_CONTAINER)) {
+        const int slot = b->bar_next % BOX_BAR_SLOTS;
+        b->bar_next = (uint8_t) ((slot + 1) % BOX_BAR_SLOTS);
+        b->bar_key[slot] = key;
+        b->bar_run[slot] = t->run_seq;
+        b->bar_flags[slot] = b->flags & (BOXF_VBAR | BOXF_HBAR);
     }
 
     /* own margins into the output */
@@ -1125,6 +1153,7 @@ void layout_block_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *
             y_border = top_open ? y : y + ms_value(&top);
             if (co.collapses_through) { y_border = top_open ? y : y + ms_value(&top); break; }
             if (fabsf(y_border - est_y) < 0.01f || relayouts++ >= 2) break;
+            t->stats.relayouts++;
             est_y = y_border;
         }
         /* horizontal position */
@@ -1625,32 +1654,80 @@ static void relayout_boundary(LayoutTree *t, Box *b)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* trace (KN_HTML_LAYOUT_TRACE=1)                                             */
+/* ------------------------------------------------------------------------- */
+
+static uint32_t count_boxes(const Box *b)
+{
+    uint32_t n = 1;
+    for (const Box *c = b->first_child; c; c = c->next) n += count_boxes(c);
+    return n;
+}
+
+static double trace_now_ms(void)   /* CPU time (clock(): portable C11, MinGW included) */
+{
+    return (double) clock() * 1000.0 / CLOCKS_PER_SEC;
+}
+
+static void trace_begin(LayoutTree *t)
+{
+    if (t->trace == 0) t->trace = getenv("KN_HTML_LAYOUT_TRACE") ? 2 : 1;
+    memset(&t->stats, 0, sizeof(t->stats));
+    t->stats.ms = trace_now_ms();
+}
+
+static void trace_end(LayoutTree *t, int full, uint32_t boundaries)
+{
+    t->stats.ms = trace_now_ms() - t->stats.ms;
+    t->stats.full = full;
+    t->stats.boundaries = boundaries;
+    if (t->trace < 2) return;
+    t->stats.boxes = count_boxes(t->root);
+    const LayoutRunStats *s = &t->stats;
+    fprintf(stderr, "[layout trace] %s boxes=%u laid=%u time=%.2fms memo hit=%u miss=%u floats_iter=%u "
+                    "boundaries=%u relayouts=%u intrinsic=%u overflow=%u floats_scan=%u\n",
+            full ? "full" : "partial", s->boxes, s->laid, s->ms, s->memo_hit, s->memo_miss, s->floats_iter,
+            s->boundaries, s->relayouts, s->intrinsic, s->overflow_walks, s->floats_scan);
+}
+
+const LayoutRunStats *layout_tree_stats(const LayoutTree *t)
+{
+    return t ? &t->stats : NULL;
+}
+
 int layout_run(LayoutTree *t, float viewport_w, float viewport_h)
 {
     if (!t || !t->root) return 0;
+    t->run_seq++;
     t->generation++;
     int full = !t->laid_out_once || viewport_w != t->viewport_w || viewport_h != t->viewport_h;
     t->viewport_w = viewport_w; t->viewport_h = viewport_h;
     if (full || (t->root->dirty & BOX_DIRTY_SELF)) {
+        trace_begin(t);
         full_layout(t);
         t->laid_out_once = 1;
+        trace_end(t, 1, 1);
         return 1;
     }
     if (!(t->root->dirty & BOX_DIRTY_CHILD)) return 0;
+    trace_begin(t);
     BoxVec v = { 0 };
     collect_boundaries(t->root, t->root, &v);
     int n = 0;
+    full = 0;
     /* drop boundaries nested inside another collected one */
     for (size_t i = 0; i < v.len; i++) {
         Box *b = v.data[i];
         int nested = 0;
         for (size_t j = 0; j < v.len; j++) if (j != i && is_ancestor(v.data[j], b)) { nested = 1; break; }
         if (nested) continue;
-        if (b == t->root) { full_layout(t); n++; break; }
+        if (b == t->root) { full_layout(t); n++; full = 1; break; }
         relayout_boundary(t, b);
         n++;
     }
     KN_VEC_FREE(&v);
     clear_dirty(t->root);
+    trace_end(t, full, (uint32_t) n);
     return n;
 }
