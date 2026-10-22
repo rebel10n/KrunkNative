@@ -612,7 +612,7 @@ int main(void) {
         v10_out_init(&o);
         v10_map_mode_state(&o, b, 387);
         CHECK(!o.stop, "mode state translates");
-        CHECK(o.count == 5, "FFA mode state: 5 messages");
+        CHECK(o.count == 5, "mode state: 5 messages");
         MSG_IS(&o, 0, "ts", N(1), N(5));
         MSG_IS(&o, 1, "ts", N(2), N(7));
         MSG_IS(&o, 2, "lv", N(3));
@@ -620,16 +620,32 @@ int main(void) {
         MSG_IS(&o, 4, "gmsg", S("wt"));
         v10_out_free(&o);
 
+        // a free-for-all's team scores are zero: no "ts" (the client has no team score table there, so one is a TypeError)
+        mode_state(b, 0, 0, 3, 1, "wt", -1, 0, -1);
+        v10_out_init(&o);
+        v10_map_mode_state(&o, b, 387);
+        CHECK(o.count == 3, "zero team scores: no ts, 3 messages");
+        MSG_IS(&o, 0, "lv", N(3));
+        MSG_IS(&o, 1, "lock", B(1));
+        MSG_IS(&o, 2, "gmsg", S("wt"));
+        v10_out_free(&o);
+
+        // a team that scored: its ts only (the other team is zero)
+        mode_state(b, 0, 4, -1, 0, "", -1, 0, -1);
+        v10_out_init(&o);
+        v10_map_mode_state(&o, b, 387);
+        CHECK(o.count == 1, "one scored team: one ts");
+        MSG_IS(&o, 0, "ts", N(2), N(4));
+        v10_out_free(&o);
+
         mode_state(b, 0, 0, -1, 0, "", -1, 0, -1);
         v10_out_init(&o);
         v10_map_mode_state(&o, b, 387);
-        CHECK(o.count == 2, "quiet mode state: no lives, not locked, no message");
-        MSG_IS(&o, 0, "ts", N(1), N(0));
-        MSG_IS(&o, 1, "ts", N(2), N(0));
+        CHECK(o.count == 0, "quiet mode state: no lives, not locked, no message, no team scores");
         v10_out_free(&o);
 
         // flags in play: ufl(uid, x, y, z, carrier || 0) after the team lines; a flag not in play is skipped
-        mode_state(b, 0, 0, -1, 0, "", -1, 0, -1);
+        mode_state(b, 1, 1, -1, 0, "", -1, 0, -1);
         const Flag fl[2] = {{1, 2, 3, -1, 1, 7, 1}, {4, 5, 6, 42, 2, 9, 0}};
         mode_state_flags(b, fl, 2);
         v10_out_init(&o);
@@ -640,7 +656,7 @@ int main(void) {
         MSG_IS(&o, 4, "ufl", N(7), N(1), N(2), N(3), N(0));
         v10_out_free(&o);
 
-        mode_state(b, 0, 0, -1, 0, "", -1, 0, -1);
+        mode_state(b, 1, 1, -1, 0, "", -1, 0, -1);
         const Flag carried[1] = {{0.5f, 2, 3, 42, 2, 9, 1}};
         mode_state_flags(b, carried, 1);
         v10_out_init(&o);
@@ -648,7 +664,7 @@ int main(void) {
         MSG_IS(&o, 4, "ufl", N(9), N(0.5), N(2), N(3), N(42));
         v10_out_free(&o);
 
-        mode_state(b, 0, 0, 0, 0, "", -1, 0, -1);
+        mode_state(b, 1, 1, 0, 0,"", -1, 0, -1);
         const Flag nameless[1] = {{0, 0, 0, -1, 1, -1, 1}};
         mode_state_flags(b, nameless, 1);
         v10_out_init(&o);
@@ -657,7 +673,7 @@ int main(void) {
         v10_out_free(&o);
 
         // an active objective is sent by MODE_SYNC_V7 (with its time): MODE_STATE sends none of it
-        mode_state(b, 0, 0, 0, 0, "", 2, 0, -1);
+        mode_state(b, 1, 1, 0, 0,"", 2, 0, -1);
         v10_out_init(&o);
         v10_map_mode_state(&o, b, 387);
         CHECK(!o.stop && o.count == 3, "objective: no obj in the mode state");
@@ -665,14 +681,14 @@ int main(void) {
         v10_out_free(&o);
 
         // a weapon objective is a wep (the objective weapon's uid)
-        mode_state(b, 0, 0, -1, 0, "", 2, 0, 2);
+        mode_state(b, 1, 1, -1, 0, "", 2, 0, 2);
         v10_out_init(&o);
         v10_map_mode_state(&o, b, 387);
         CHECK(o.count == 3, "weapon objective: wep");
         MSG_IS(&o, 2, "wep", N(2));
         v10_out_free(&o);
 
-        mode_state(b, 0, 0, 0, 0, "", -1, 1, -1);
+        mode_state(b, 1, 1, 0, 0,"", -1, 1, -1);
         v10_out_init(&o);
         v10_map_mode_state(&o, b, 387);
         CHECK(stop_has(&o, "lock"), "a move lock stops (lm needs a position)");
@@ -807,6 +823,13 @@ int main(void) {
         CHECK(o.count == 2, "mode sync: the scored teams");
         MSG_IS(&o, 0, "ts", N(1), N(4));
         MSG_IS(&o, 1, "ts", N(3), N(9));
+        v10_out_free(&o);
+
+        // a free-for-all's zero team scores send no "ts"
+        memset(sync, 0, 65);
+        put_i32(sync, 53, 0); put_i32(sync, 57, -1); put_i32(sync, 61, 0);
+        v10_out_init(&o); v10_map_mode_sync(&o, sync, 65, 0);
+        CHECK(o.count == 0 && !o.stop, "zero team scores in a mode sync: no ts");
         v10_out_free(&o);
 
         memset(sync, 0, 65);

@@ -877,8 +877,13 @@ void v10_map_mode_state(V10Out *o, const uint8_t *p, size_t n) {
         nflags++;
     }
 
-    v10_push(o, V10_IN_TEAM_SCORE, (KrunkerValue[]){KRUNKER_V_NUM(1), KRUNKER_V_NUM(rd_i32(p, 4))}, 2);
-    v10_push(o, V10_IN_TEAM_SCORE, (KrunkerValue[]){KRUNKER_V_NUM(2), KRUNKER_V_NUM(rd_i32(p, 8))}, 2);
+    /* the team scores: "ts" for the teams with a score, as the mode sync and the official server send them (a team's score
+     * changes only in a team mode). A free-for-all's zero "ts" is a TypeError in the client: its team score table is made
+     * only for team modes. */
+    for (int t = 1; t <= 2; t++) {
+        const int32_t score = rd_i32(p, (size_t)t * 4);
+        if (score != 0) v10_push(o, V10_IN_TEAM_SCORE, (KrunkerValue[]){KRUNKER_V_NUM(t), KRUNKER_V_NUM(score)}, 2);
+    }
     if (rd_i32(p, 80) >= 0) v10_push(o, V10_IN_SET_WEAPON, (KrunkerValue[]){KRUNKER_V_NUM(rd_i32(p, 80))}, 1);
     if (nflags) {
         v10_push(o, V10_IN_UPDATE_FLAG_INFO, (KrunkerValue[]){KRUNKER_V_NUM(1), field_text(o, p, n, 12, 32)}, 2);

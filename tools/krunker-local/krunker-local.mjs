@@ -485,7 +485,10 @@ function profileSeed() {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const id = crypto.randomUUID();
-  const jwt = (sub) => `${b64({ alg: "none", typ: "JWT" })}.${b64({ exp: now + 365 * 86400, iat: now, iss: "FRVR", sub, extra: { identifier: id.replace(/-/g, "").slice(0, 24), platform: "anonymous", verified: true } })}.`;
+  // exp: one day. The page's FRVR SDK schedules its token refresh at 40% of the lifetime; a 365-day token gives a timer
+  // past setTimeout's 2^31-1 ms limit, which fires at once. The FRVR host is blocked here, so each failed refresh then
+  // rejects at once and the loop runs (177k "Network Error" rejections in a join). One day keeps the timer in range.
+  const jwt = (sub) => `${b64({ alg: "none", typ: "JWT" })}.${b64({ exp: now + 86400, iat: now, iss: "FRVR", sub, extra: { identifier: id.replace(/-/g, "").slice(0, 24), platform: "anonymous", verified: true } })}.`;
   const keys = { __FRVR_auth_access_token: jwt(id), __FRVR_auth_refresh_token: jwt(id), __frvr_rfc_uuidv4: id,
     canStore: "true", krk_lang: "en", krk_hideFull: "false", "krunker-display-mode": "none", pingRegion7: "us-nj",
     krk_regionPriority: "us-nj", registerNotificationLastShown: String(Date.now()) };
@@ -563,7 +566,7 @@ async function join() {
   ], { stdio: "ignore", env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } });
   const report = { url: cfg.localUrl, bridge: `${cfg.bridge.host} -> 127.0.0.1:${cfg.bridge.port}`, consentAccepted: false,
     clicked: null, seek: [], sockets: [], framesIn: 0, framesOut: 0, bytesIn: 0, consoleErrors: [], exceptions: [],
-    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekCalls: [], seekBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [] };
+    failed: [], httpErrors: [], hooks: [], pauses: [], disconnects: [], disconnectBreakpoint: null, seekCalls: [], seekBreakpoint: null, seekBodies: [], breakpoint: null, timeline: [], state: null, shots: [], bridgeLog: [], excProbes: [] };
   const reqUrl = new Map();
   let appScript = null;
   const hostsSeen = new Set();
@@ -606,7 +609,20 @@ async function join() {
         case "Runtime.exceptionThrown": {
           const d = p.exceptionDetails;
           const frames = ((d.stackTrace && d.stackTrace.callFrames) || []).slice(0, 3).map((f) => `${f.functionName || "?"}@${f.lineNumber}:${f.columnNumber}`);
-          report.exceptions.push(`${((d.exception || {}).description || d.text || "").split("\n")[0].slice(0, 160)} [${frames.join(" < ")}]`);
+          const ex = d.exception || {};
+          report.exceptions.push(`${(ex.description || d.text || "").split("\n")[0].slice(0, 160)} [${frames.join(" < ")}]`);
+          // the first few: where it was thrown, and for a value that is not an Error, its constructor and own properties
+          if (report.excProbes.length < 4) {
+            const probe = { at: `${d.scriptId}:${d.lineNumber}:${d.columnNumber}`, className: ex.className, subtype: ex.subtype, type: ex.type, text: d.text };
+            report.excProbes.push(probe);
+            if (ex.objectId) {
+              send("Runtime.callFunctionOn", { objectId: ex.objectId, returnByValue: true, functionDeclaration: `function () { try {
+                const proto = Object.getPrototypeOf(this);
+                return JSON.stringify({ isError: this instanceof Error, ctor: proto && proto.constructor && proto.constructor.name, isArray: Array.isArray(this),
+                  own: Object.getOwnPropertyNames(this).slice(0, 16), json: JSON.stringify(this).slice(0, 200) }); } catch (e) { return "probe " + e.message; } }` })
+                .then((r) => { probe.value = r.result && r.result.result ? r.result.result.value : r.error || r.result; });
+            }
+          }
           break;
         }
         case "Debugger.scriptParsed":
@@ -701,7 +717,10 @@ async function join() {
         html: e && e.outerHTML.slice(0, 160), iframes: document.querySelectorAll("iframe").length, dialogs: document.querySelectorAll("dialog").length }; })()`);
     await sleep(cfg.afterAcceptMs);
     await shot("1-menu");
-    report.clicked = await evalJS(CLICK_PLAY_JS);
+    // The page seeks a lobby on its own after load. Quick Match from inside a lobby is "Find New Game": it reloads with
+    // excludeGame = that lobby, and on this one-lobby server the seek answers NoOtherLobby (the box that the join showed).
+    // So the join presses Quick Match only when the page has not sought yet.
+    report.clicked = report.seek.length ? `skipped: the page sought on its own (${report.seek.length} seek before the click)` : await evalJS(CLICK_PLAY_JS);
     await sleep(3000);
     await shot("2-clicked");
     // a timeline of the join: the page's text, the seeks and sockets so far, and the frames received
