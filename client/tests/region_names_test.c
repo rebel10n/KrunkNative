@@ -84,9 +84,12 @@ static void label(const char *id, const char *want) {
 }
 
 static void test_labels(void) {
-    // the v10 name first (what a v10 player knows), the KrunkNative places it holds in brackets
-    label("us-ca-sv", "Silicon Valley (Santa Clara, Los Angeles)");
-    label("us-nj", "New York (Chicago, Ashburn, Virginia)");
+    // the v10 name alone, never the edge places in brackets (the user: the labels got too long)
+    label("us-ca-sv", "Silicon Valley");
+    label("us-nj", "New York");
+    char out[160];
+    region_picker_label("us-ca-sv", out, sizeof(out));
+    CHECK(!strchr(out, '('), "no parenthesis in a region label");
     label("local", "Local");
     label("us-tx", "Dallas");
     label("de-fra", "Frankfurt");

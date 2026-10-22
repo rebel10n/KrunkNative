@@ -41,9 +41,9 @@ int region_hosted(const char *id);
 // (`listed`, listed_n ids), each once. Writes at most `max` ids to out; returns the count.
 size_t region_picker_ids(const char *const *listed, size_t listed_n, const char **out, size_t max);
 
-// The picker label of a v10 id: its v10 name, then the edge places it holds in brackets, the edge names that
-// differ from it: "Silicon Valley (Santa Clara, Los Angeles)", "New York (Chicago, Ashburn, Virginia)", "Dallas".
-// An id the table does not know is its own label. out is NUL-terminated.
+// The picker label of a v10 id: its v10 name alone ("Silicon Valley", "New York", "Dallas"); never the edge
+// places in brackets (the user, 2026-10-22: the labels got too long). An id the table does not know is its own
+// label. out is NUL-terminated.
 void region_picker_label(const char *id, char *out, size_t n);
 
 #endif

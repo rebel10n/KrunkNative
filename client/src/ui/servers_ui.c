@@ -292,7 +292,7 @@ static cJSON *g_row_pings;       // {region: ms} measured with the last list loa
 // <option>s of the region pickers (Settings > Default Region, the ranked queue): the whole Krunker v10 list
 // (region_picker_ids: v10's Default Region dropdown in its order, whatever the Server Type), then the ids the
 // matchmaker lists that it lacks, each once. The value is the v10 id (what the seek sends); the label is its v10
-// name with the edge places it holds (region_picker_label). A region we have no node in is still offered: the
+// name alone (region_picker_label, no edge places in brackets). A region we have no node in is still offered: the
 // seek in it lands on the nearest Box Office node (the ping race here, the brain's routing for the rest;
 // doc/v10/regions.md "Routing"), never a refusal.
 char *servers_ui_region_options(const char *selected) {

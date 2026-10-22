@@ -68,28 +68,12 @@ size_t region_picker_ids(const char *const *listed, const size_t listed_n, const
     return count;
 }
 
+// The label is v10's name alone (user, 2026-10-22: never anything in parentheses after a region name; the
+// edge places made the labels too long). The edges a region holds stay in k_edges for the lobby rows.
 void region_picker_label(const char *id, char *out, const size_t n) {
     if (!n) return;
     out[0] = 0;
     if (!id) return;
     const char *name = region_v10_name(id);
-    if (!name) {
-        snprintf(out, n, "%s", id);
-        return;
-    }
-    snprintf(out, n, "%s", name);
-    size_t used = strlen(out);
-    int opened = 0;
-    for (size_t i = 0; i < region_edge_count(); i++) {
-        const RegionEdge *e = &k_edges[i];
-        if (strcmp(e->v10, id) || !strcmp(e->name, name)) continue;
-        int n_written = snprintf(out + used, n - used, "%s%s", opened ? ", " : " (", e->name);
-        if (n_written < 0 || (size_t) n_written >= n - used) break;
-        used += (size_t) n_written;
-        opened = 1;
-    }
-    if (opened && used + 1 < n) {
-        out[used] = ')';
-        out[used + 1] = 0;
-    }
+    snprintf(out, n, "%s", name ? name : id);
 }

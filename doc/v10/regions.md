@@ -92,9 +92,9 @@ Server Type:
 - Settings > Quickplay > **krunker.io Region** (official seeks): `KRUNKER_REGIONS`
   (`client/src/ui/seek_prefs.c`), the same ten.
 
-A label is the v10 name with the KrunkNative places the id holds in brackets
-(`region_picker_label`): `Silicon Valley (Santa Clara, Los Angeles)`, `New York (Chicago,
-Ashburn, Virginia)`, `Frankfurt`. Picking a region we do not host is fine: see 3.
+A label is the v10 name alone (`region_picker_label`): `Silicon Valley`, `New York`,
+`Frankfurt`. The KrunkNative places a region holds are never appended in brackets (user,
+2026-10-22: the labels got too long). Picking a region we do not host is fine: see 3.
 
 Test: `client/tests/region_names_test.c` (`test_picker`: with the production brain's list, with
 no list, with a list naming an unlisted region).
