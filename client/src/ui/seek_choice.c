@@ -48,6 +48,13 @@ SeekRegionChoice seek_region_choose(const cJSON *list, const char *saved, const 
     return cached[0] ? SEEK_REGION_CACHED : SEEK_REGION_NONE;
 }
 
+const char *seek_region_shown(const char *saved, const char *confirmed, const char *seeking) {
+    if (saved && saved[0]) return saved;
+    if (confirmed && confirmed[0]) return confirmed;
+    if (seeking && seeking[0]) return seeking;
+    return "local";
+}
+
 int seek_answer_full(const cJSON *answer) {
     const cJSON *players = cJSON_GetObjectItem(answer, "players");
     const cJSON *max = cJSON_GetObjectItem(answer, "maxPlayers");

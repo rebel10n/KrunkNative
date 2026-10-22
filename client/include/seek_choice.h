@@ -25,6 +25,12 @@ typedef enum {
 // available one (the first listed; SEEK_REGION_UNLISTED): no error is shown, the seek goes on.
 SeekRegionChoice seek_region_choose(const cJSON *list, const char *saved, const char *cached, char *out, size_t n);
 
+// The region Settings > Default Region shows while the player has saved none: the saved choice, else the ping race's
+// confirmed region (`confirmed`), else the region the client is seeking in (`seeking`: the list's first when every
+// ping failed), else "local". The row and the seek agree (a live run showed "local" while the seek joined Silicon
+// Valley). Never NULL.
+const char *seek_region_shown(const char *saved, const char *confirmed, const char *seeking);
+
 // 1 when the seek answer's lobby is full: its "players" have reached its "maxPlayers" (both numbers,
 // maxPlayers above 0). An answer without the counts (an older brain) is not full.
 int seek_answer_full(const cJSON *answer);

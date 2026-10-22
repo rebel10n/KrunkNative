@@ -86,9 +86,21 @@ static void test_full(void) {
     CHECK(!full("null"), "no answer must not be full");
 }
 
+// The region Settings > Default Region shows while none is saved: the region the seek is made in. Every ping
+// failing seeks in the list's first region (v10: "All pings failed" then the first), which the row must show too,
+// never a fixed "local" (a live run: the seek joined Silicon Valley while the row read Local).
+static void test_shown(void) {
+    CHECK(!strcmp(seek_region_shown("VA", "us-nj", "us-ca-sv"), "VA"), "saved VA wins over the cache and the seek");
+    CHECK(!strcmp(seek_region_shown("", "us-nj", "us-ca-sv"), "us-nj"), "no saved: the confirmed race region is shown");
+    CHECK(!strcmp(seek_region_shown("", "", "us-ca-sv"), "us-ca-sv"), "no saved, every ping failed: the region sought (us-ca-sv) is shown");
+    CHECK(!strcmp(seek_region_shown("", "", ""), "local"), "nothing known: local");
+    CHECK(!strcmp(seek_region_shown(NULL, NULL, NULL), "local"), "NULL inputs: local");
+}
+
 int main(void) {
     test_regions();
     test_full();
+    test_shown();
     printf("seek_choice_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

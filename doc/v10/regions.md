@@ -115,6 +115,11 @@ winner, the nearest hosted region by ping, logged `default region de-fra is not 
 list: seeking in us-nj instead` (`seek_choice.c`; `server/tests/seek_unlisted_region_e2e.py`).
 `server/tests/seek_region_e2e.py` B1-B4 run the race against stub ping hosts with set delays.
 
+The Default Region row shows the region the seek is made in while nothing is saved
+(`seek_region_shown`, `client/src/ui/seek_choice.c`): the confirmed race result, else the region in
+use (`servers_ui_seek_region`), which is the list's first when every ping failed. Before this, a failed
+race showed `Local` (a live run: the seek joined Silicon Valley, the row read Local).
+
 ## 3. Routing: a region with no node goes to the nearest hosted one
 
 The official client may seek with any id of its own cache (a `pingRegion7` from krunker.io), an

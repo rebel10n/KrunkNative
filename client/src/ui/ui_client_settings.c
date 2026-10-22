@@ -29,6 +29,7 @@
 #include <v10_menu.h>       // the menu account name after Hide player names changes
 #include <krunker_lobbies.h> // krunker_lobbies_network_changed (a proxy change)
 #include <backend_ui.h> // servers_ui_region_options (Default Region)
+#include <seek_choice.h> // seek_region_shown: the Default Region row's region
 #include <discord_rpc.h>
 #include <render_settings.h>
 #include <html_ui.h>
@@ -1415,11 +1416,11 @@ static char *ui_client_settings_extend_tab_rest(const char *tab) {
     const char *close = open ? strstr(open, "</select>") : NULL;
     if (close) {
         const cJSON *saved = ui_setting_saved("defaultRegion");
-        // the player's choice, else the ping race's region (v10: the row's val is the ping cache)
+        // the player's choice, else the ping race's confirmed region (v10: the row's val is the ping cache), else the
+        // region the client seeks in (every ping failed: the list's first; seek_region_shown)
         const char *auto_region = servers_ui_auto_region();
-        char *options = servers_ui_region_options(cJSON_IsString(saved) && saved->valuestring[0] ? saved->valuestring
-                                                  : auto_region[0]                                ? auto_region
-                                                                                                  : "local");
+        char *options = servers_ui_region_options(seek_region_shown(cJSON_IsString(saved) ? saved->valuestring : "", auto_region,
+                                                                    servers_ui_seek_region()));
         StrBuf sb = {0};
         sb_append_n(&sb, tab, (size_t) (open + 1 - tab));
         if (options) sb_append(&sb, options);

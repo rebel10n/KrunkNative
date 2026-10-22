@@ -1378,6 +1378,10 @@ const char *servers_ui_auto_region(void) {
     return cached;
 }
 
+// The region the client is seeking in now (g_region: the last seek's, the ping race's winner or the list's first when
+// every ping failed; "" before any). Settings > Default Region shows it when nothing is saved and no race is confirmed.
+const char *servers_ui_seek_region(void) { return g_region; }
+
 static void seek_in_region(const char *requested_game) {
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", "local");
     if (g_pin != PIN_NONE) {

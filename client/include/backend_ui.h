@@ -231,6 +231,8 @@ char *servers_ui_region_options(const char *selected); // region <option>s (2-le
 // The region the ping race picked for our own seeks (pingRegion7, confirmed by a race), "" = none yet:
 // Settings > Default Region shows it while the player chose none (v10's row reads the same cache).
 const char *servers_ui_auto_region(void);
+// The region the client is seeking in now (servers_ui.c g_region), "" before any seek: the Default Region row's fallback.
+const char *servers_ui_seek_region(void);
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
 void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
