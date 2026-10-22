@@ -1,4 +1,4 @@
-// Krunker v10.0.2 main menu shell on the v10 page (ui/, doc/v10/ui.md 2).
+// Krunker v10.0.3 main menu shell on the v10 page (ui/, doc/v10/ui.md 2; the shell is the same in 10.0.2, doc/v10/ui-1003-diff.md).
 //
 // v10 mounts its menu as Svelte components (_52533 into #mainMenuUIMount, v10:222882): the page
 // (ui/index.html) keeps the markup those components render for a guest, without their

@@ -1,7 +1,10 @@
-# ui/ — the Krunker v10.0.2 menu as HTML/CSS
+# ui/ — the Krunker v10.0.3 menu as HTML/CSS
 
-This is Krunker v10.0.2's menu page (krunker.io, mirrored 2026-10-13), the only page Krunker Box
-Office has. The target is Krunker v10.0.3 (doc/v10/target.md); this page is the 10.0.2 import until `make ui-import` runs on the 10.0.3 bundle. It is rendered by the in-house
+This is Krunker v10.0.3's menu page, the only page Krunker Box Office has (doc/v10/target.md). It was
+imported from the v10.0.2 mirror (krunker.io, 2026-10-13); the 10.0.3 page has the same shell, Svelte
+mounts, stylesheets and images, so only the English table, the buy popup and `windows/versions.txt`
+changed (doc/v10/ui-1003-diff.md). A full `make ui-import` on the 10.0.3 bundle needs its deobfuscation
+pass first (doc/v10/ui-1003-diff.md, "What differs"). It is rendered by the in-house
 HTML/CSS engine in the native client and by the browser in the web build (see
 `doc/html-ui-engine.md`). Its behaviour is C (`client/src/ui/`: `v10_*.c`, `hud_v10.c` and the
 older modules), not JavaScript. Until 2026-10-14 it was the separate tree `ui/v10/` next to the

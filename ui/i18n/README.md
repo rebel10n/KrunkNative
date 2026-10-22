@@ -1,13 +1,13 @@
 # ui/i18n — the string tables
 
-Krunker v10.0.2's translations, one JSON object per language (`key -> value`, in the source file's
+Krunker v10's translations (the English table is v10.0.3's), one JSON object per language (`key -> value`, in the source file's
 key order), read by `client/src/ui/i18n.c` (`client/include/i18n.h`) on both platforms.
 
 ## Provenance
 
 | File | Source |
 |---|---|
-| `en.json` | The live v10.0.2r1 bundle's inline `translations.en` (`game.deob.js:197742`, `this.translations.en = this.parseText("\nmenu.btn.ranked Ranked\n...")`), 2170 keys, extracted by `tools/ui-import/v10_bundle.js` (it was `ui/i18n-en.json` until 2026-10-14). v10 never fetches English: the live `i18n/en.js` (6 newer keys: `purchase.opening`, `purchase.confirming`, ...) is not used, as in v10. |
+| `en.json` | The Krunker v10.0.3 client bundle's inline `translations.en` (`this.translations.en = this.parseText(...)`), extracted by `tools/ui-import/v10_bundle.js` from the bundle after a deobfuscation-only webcrack pass (doc/v10/ui-1003-diff.md). 2174 keys: the bundle's 2176 less `matchmaker.CaptchaRequired` and `matchmaker.RecaptchaFailed` (removed in 9234f121). The six keys 10.0.3 added (`purchase.*`, `settings.quality.noVideoSkins`, `windows.skins.painted`) are in the table; no C code shows the purchase or paint strings yet. |
 | `es de nl kr pr jp fr fi zh zhtr pl hi ru it tg tr .json` | `https://krunker.io/i18n/<code>.js?v=i41Nu` (v10's `getTranslations(code)` URL), fetched 2026-10-14 through the proxy (GET, no login), converted by `tools/i18n-import/i18n_import.py convert` (`export default \`...\`;` modules in v10's "key value" line format: first space ends the key, a repeated key keeps its last value). 1008 to 1217 keys each; every other key falls back to English, as in v10. |
 | `kn/en.json` | Strings Krunker Box Office added (`kn.*` keys), generated from the C (`I18N("kn....", "English")`) by `tools/i18n-import/i18n_lint.py --write-kn`. |
 | `kn/<code>.json` | Translations of the `kn.*` strings. **None ship yet**: every `kn.*` string shows in English in every language. |

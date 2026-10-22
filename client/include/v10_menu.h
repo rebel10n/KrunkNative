@@ -1,5 +1,5 @@
 #pragma once
-// Krunker v10.0.2 main menu shell on the v10 page (ui/; client/src/ui/v10_menu.c, doc/v10/ui.md 2):
+// Krunker v10.0.3 main menu shell on the v10 page (ui/; client/src/ui/v10_menu.c, doc/v10/ui.md 2):
 // the action cards (Quick Match / Host Game / Find Game / Custom Games), the side nav (order,
 // visibility, actions), the header bar (guest / signed in, level, KR, Settings, More Krunker), the
 // match-info bar under the class preview and the login / register modal (loginOrRegister).

@@ -1041,7 +1041,8 @@ static char *un_html(void) {
     if (UN.confirm_buy) {
         char name[32];
         snprintf(name, sizeof(name), "%s", UN.buy);
-        I18N_F(buf, "account.usernames.buy.confirm", "Buy {0} for {1}? It's valid for {2} days; renew it for {1} to keep it longer.", name, "$9.99", a1);
+        // {3} is the renewal price (v10.0.3: usernameRenewPriceUSD, 4.99; 10.0.2 put $9.99 in {1} here)
+        I18N_F(buf, "account.usernames.buy.confirm", "Buy {0} for {1}? It's valid for {2} days; renew it for {3} to keep it longer.", name, "$9.99", a1, "$4.99");
         sb_append(&sb, "<div class=\"inline-confirm svelte-27udiy\"><span>");
         sb_append_esc(&sb, buf);
         sb_appendf(&sb, "</span> <!----> <div class=\"confirm-buttons svelte-27udiy\"><button type=\"button\" class=\"io-button io-button--slim\" onclick=\"knMiscUnBuyCancel()\">%s</button> "

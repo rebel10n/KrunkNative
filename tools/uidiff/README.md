@@ -1,6 +1,6 @@
 # tools/uidiff
 
-Per-region pixel diff of the native HTML/CSS UI (the Krunker v10.0.2 page, `ui/`) against the
+Per-region pixel diff of the native HTML/CSS UI (the Krunker v10.0.3 page, `ui/`) against the
 Krunker v10.0.2 reference captures in `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/`
 (captured from the offline v10 sandbox: `capture-v10.js`, `capture-v10-static.js`,
 `capture-v10-rewards.js`, `capture-v10-nowplaying.js`, `capture-v10-classbox.js` (the skinned class box), `gen_v10_ingame.py`, `v10_social_ref.py`). The v7.1.4 page and its
