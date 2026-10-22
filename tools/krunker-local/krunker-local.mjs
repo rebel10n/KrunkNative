@@ -522,6 +522,34 @@ function bridgeLines() {
   return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|v10-bridge|net-bridge|\[bridge\]/.test(l)).slice(-40);
 }
 
+// The labels the bridge has sent, counted from its trace lines ("[v10-proxy] <sid> -> <label>"). Each call reads only what
+// was added since the last one, so a long trace costs nothing per poll.
+function bridgeLabelCounter(file) {
+  let pos = 0;
+  let partial = "";
+  const counts = new Map();
+  return () => {
+    if (!file || !fs.existsSync(file)) return counts;
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size < pos) { pos = 0; partial = ""; counts.clear(); } // the file was started again
+      const buf = Buffer.alloc(size - pos);
+      fs.readSync(fd, buf, 0, buf.length, pos);
+      pos = size;
+      const lines = (partial + buf.toString("utf8")).split("\n");
+      partial = lines.pop();
+      for (const line of lines) {
+        const m = / -> (\S+)$/.exec(line);
+        if (m) counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+    return counts;
+  };
+}
+
 async function join() {
   if (!cfg.bridge) throw new Error('join needs the "bridge" config');
   const shots = path.join(cfg.runDir, "shots");
@@ -699,6 +727,31 @@ async function join() {
     report.afterPlay = await evalJS(`(() => ({ canvases: [...document.querySelectorAll("canvas")].map((c) => c.width + "x" + c.height).join(","), text: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 160), gameExposed: !!window.__kn_game }))()`);
     await shot("5-after-play");
     await shot("3-final");
+    // The round's end: the bridge logs each label it sends ("-> end" is the round's END with its end table). The page is then
+    // held on its end screen for cfg.endHoldMs (shots 6-round-end, 7-end-hold-N), so it can be read. The next round follows on
+    // the same socket: a seek after the end (seekAfterEnd > seekBeforeEnd) means the socket was lost, and the page says so.
+    const pageText = async () => { const s = await evalJS(STATE_JS); return s ? s.text.slice(0, 160) : null; };
+    const labels = bridgeLabelCounter(cfg.bridge.log);
+    const endBase = labels().get("end") || 0;
+    report.seekBeforeEnd = report.seek.length;
+    const endDeadline = Date.now() + (cfg.roundEndWaitMs || 120000);
+    while (Date.now() < endDeadline && (labels().get("end") || 0) === endBase) await sleep(1000);
+    report.roundEnd = (labels().get("end") || 0) > endBase;
+    report.endHold = [];
+    if (report.roundEnd) {
+      await shot("6-round-end");
+      report.endHold.push([0, await pageText()]);
+      const holdDeadline = Date.now() + (cfg.endHoldMs || 15000);
+      for (let k = 1; Date.now() < holdDeadline; k++) {
+        await sleep(2500);
+        report.endHold.push([k, await pageText(), report.seek.length, report.framesIn]);
+        if (k <= 3) await shot("7-end-hold-" + k);
+      }
+    }
+    report.seekAfterEnd = report.seek.length;
+    report.nextRoundText = await pageText();
+    await shot("8-after-end");
+    report.labels = Object.fromEntries(labels());
     report.gameState = await evalJS(`(() => { const g = window.__kn_game; if (!g) return null; const q = g.initQueue; return { initInProgress: g.initInProgress, initQueue: Array.isArray(q) ? q.length : String(q), gameClosed: g.gameClosed, sid: g.sid, map: g.map ? Object.keys(g.map).slice(0, 12) : null }; })()`);
     report.bridgeLog = bridgeLines();
     // every host the page asked for: the local ones only (the rest fail with NOTFOUND, see hostRules)
