@@ -48,6 +48,11 @@ screenshots are in `shots/playable-*.png`. The bullet trail is counted from the 
 has a trail argument and the local player as shooter (a shell casing passes `false` there). A round needs
 the game server's round length, so the run takes about 5 minutes.
 
+The report's `bridgeCounts` are what the bridge sent (its trace's `-> label` lines, this run's file). They are
+not rounds: `rounds` (bridge_counts.mjs `pageRounds`) gives, per INIT and END the bridge sent, the samples in
+which the page had the local player active, was in the round, showed the HUD, or showed the end screen.
+`playable-check.mjs` prints both under the assertions; the counting rule is tested by `bridge_counts.test.mjs`.
+
 ## The v10 bridge (the join path)
 
 The official client's WebSocket (msgpack, v10 labels) reaches a KrunkerBox game server through the

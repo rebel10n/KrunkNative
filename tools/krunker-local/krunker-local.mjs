@@ -21,6 +21,7 @@ import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { MIME, createStaticFiles, hostRules as routeHostRules, routeRequest } from "./routes.mjs";
+import { bridgeLabelCounter, pageRounds } from "./bridge_counts.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -527,34 +528,6 @@ function bridgeLines() {
   return fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /v10-proxy|v10-bridge|net-bridge|\[bridge\]/.test(l)).slice(-40);
 }
 
-// The labels the bridge has sent, counted from its trace lines ("[v10-proxy] <sid> -> <label>"). Each call reads only what
-// was added since the last one, so a long trace costs nothing per poll.
-function bridgeLabelCounter(file, arrow = "->") {
-  let pos = 0;
-  let partial = "";
-  const counts = new Map();
-  return () => {
-    if (!file || !fs.existsSync(file)) return counts;
-    const fd = fs.openSync(file, "r");
-    try {
-      const size = fs.fstatSync(fd).size;
-      if (size < pos) { pos = 0; partial = ""; counts.clear(); } // the file was started again
-      const buf = Buffer.alloc(size - pos);
-      fs.readSync(fd, buf, 0, buf.length, pos);
-      pos = size;
-      const lines = (partial + buf.toString("utf8")).split("\n");
-      partial = lines.pop();
-      for (const line of lines) {
-        const m = (arrow === "->" ? / -> (\S+)$/ : / <- (\S+)$/).exec(line);
-        if (m) counts.set(m[1], (counts.get(m[1]) || 0) + 1);
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-    return counts;
-  };
-}
-
 async function join() {
   if (!cfg.bridge) throw new Error('join needs the "bridge" config');
   const shots = path.join(cfg.runDir, "shots");
@@ -999,8 +972,11 @@ async function playable() {
     if (report.nextRound) await shot("next");
     await shot("final");
     phase = "done";
+    // what the bridge sent the client (its trace's "-> label" lines, this run's file only), not rounds: report.rounds says
+    // what the page did with each INIT and END the bridge sent
     report.bridgeCounts = Object.fromEntries(labels());
     report.bridgeArrows = Object.fromEntries(frames());
+    report.rounds = pageRounds(report.samples);
     report.bridgeClosed = fs.existsSync(cfg.bridge.log)
       ? fs.readFileSync(cfg.bridge.log, "utf8").split("\n").filter((l) => /socket closed/.test(l)).slice(-10) : [];
     ws.close();

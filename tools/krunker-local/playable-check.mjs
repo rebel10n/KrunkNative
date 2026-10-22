@@ -2,8 +2,11 @@
 // The playability assertions (a)-(h) over one report of `krunker-local.mjs playable`. Each assertion reads only the report
 // (its samples, input window, frame window, end and next-round marks, and exceptions), never the page or the bridge.
 // Prints one PASS or FAIL line per assertion, then the report path; exit status 0 only when every assertion passes.
+// Under the PASS/FAIL lines it prints the bridge's counts beside the page's (pageRounds, bridge_counts.mjs): what the bridge
+// sent and, per INIT and END, what the page did with it. Those lines are information, not an assertion.
 //   node tools/krunker-local/playable-check.mjs <report.json> [max-exceptions]
 import fs from "node:fs";
+import { pageRounds } from "./bridge_counts.mjs";
 
 const [file, maxArg] = process.argv.slice(2);
 if (!file) {
@@ -95,6 +98,16 @@ add("h", `exceptions at or under ${max}`, exCount <= max,
     (first.frames && first.frames.length ? ` [${first.frames.join(" < ")}]` : "") : ""));
 
 for (const x of rows) console.log(`${x.ok ? "PASS" : "FAIL"} (${x.id}) ${x.name}: ${x.detail}`);
+// the bridge's counts beside the page's: messages sent, and for each INIT / END the samples in which the page used it
+const sent = r.bridgeCounts || {};
+console.log(`bridge sent (its trace, this run): init ${sent.init || 0}, start ${sent.start || 0}, end ${sent.end || 0}`);
+const rounds = pageRounds(S);
+for (const x of rounds.inits) {
+  console.log(`  INIT ${x.init}: page player active in ${x.active}/${x.samples} samples, in round ${x.inRound}, HUD ${x.hud}`);
+}
+for (const x of rounds.ends) console.log(`  END ${x.end}: page end screen in ${x.endUI}/${x.samples} samples`);
+const pageIn = rounds.inits.filter((x) => x.inRound > 0).length;
+console.log(`rounds: the bridge sent ${sent.init || 0} INIT(s); the page was in a round for ${pageIn} of them`);
 console.log(`report: ${file}`);
 console.log(rows.every((x) => x.ok) ? "playable: PASS" : `playable: FAIL (${rows.filter((x) => !x.ok).map((x) => x.id).join(", ")})`);
 process.exit(rows.every((x) => x.ok) ? 0 : 1);
